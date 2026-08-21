@@ -6,7 +6,19 @@
 
 ✅ **Code livré 2026-08-21** — `ai/benchmark_bots.py` + 17 tests verts.
 §3.1 assignation réclamante, §3.2 tenue, §3.3 anti-empilement, §3.4 géométrie par aire.
-**Reste : mesure §3.6** (`bot_ranking` 6 ép., cible [0,40 ; 0,60]) + re-pose `benchmark_floor`.
+
+✅ **Mesure §3.6 faite 2026-08-21** (6 ép., seed 42, board/44x60x1, holdout, 432 ép./bot) :
+balanced **0,248** (avant 0,172), denial **0,269** (avant 0,151), reactive **0,264** (avant 0,120).
+Gain réel de +0,08 à +0,14 par bot, mais **critère [0,40 ; 0,60] NON franchi** — les trois
+restent sous 0,40. Pas de dérive des doctrine : classement à somme constante, le gain
+reference_* (+0,316) est exactement le transfert des sept autres (−0,336).
+
+⛔ **`benchmark_floor` NON reposé** : la re-pose est conditionnelle au franchissement de la
+fourchette. Il reste à **0,90** ; le gate est donc toujours désaligné, comme avant la réparation.
+
+**Reste : §3.5** — balayage des constantes d'intention (`_VP_LEAD`, ×12 de `_elect_intent`,
+`_VALUE_LOSS_THRESHOLD`), un paramètre par run, 20 ép., son verrou « interdit avant 3.1-3.4 »
+étant levé. Puis re-mesure §3.6, puis re-pose du gate.
 
 → `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §3
 

@@ -130,9 +130,21 @@ sur le papier, une en pratique.
   board/44x60x1) : balanced **0,156**, denial **0,169**, reactive **0,140** ; panel doctrine
   attrition 0,724 / scorer 0,708 / racer 0,694 / decapitation 0,692 / alpha 0,653 /
   endgame 0,545, tactical 0,479.
+- **Mesure APRÈS §3.1-§3.4 — 2026-08-21**, conditions exactes ci-dessus (6 ép., seed 42,
+  board/44x60x1, pool holdout, 432 ép./bot, `--training-config x1`) :
+  balanced **0,248** (avant 0,172), denial **0,269** (avant 0,151),
+  reactive **0,264** (avant 0,120) ; panel doctrine attrition 0,699 / scorer 0,674 /
+  racer 0,669 / decapitation 0,648 / alpha 0,590 / endgame 0,495, tactical 0,384.
+  **Gain réel (+0,08 à +0,14 par bot), critère de sortie NON franchi** : les trois restent sous
+  0,40. Contrôle de dérive : le classement est à somme constante (4,94 après contre 4,96 avant)
+  et le gain reference_* (+0,316 cumulé) est exactement compensé par la perte des sept autres
+  (−0,336) — la baisse des doctrine est le transfert de victoires, pas une dérive propre. Le
+  contrôle strict exigerait la mesure AVANT des doctrine à 6 ép., qui n'a pas été conservée.
+  **→ §3.5 s'ouvre** (le verrou « interdit avant 3.1-3.4 » est levé).
 - **SORTIE** : moyenne bot-contre-bot de CHAQUE reference_* dans **[0,40 ; 0,60]** ; les six
-  doctrine sans dérive (contrôle).
-- Puis re-poser `model_gating_min_benchmark_floor` depuis une mesure AGENT (`--test-only`,
+  doctrine sans dérive (contrôle). ⛔ Non atteint au 2026-08-21 — voir la mesure ci-dessus.
+- Puis SEULEMENT une fois la fourchette atteinte, re-poser
+  `model_gating_min_benchmark_floor` depuis une mesure AGENT (`--test-only`,
   100 ép./bot) : plancher mesuré − marge documentée, **sémantique win-rate agent** (le 0,049 de
   J1 venait d'un score bot-contre-bot — mélange de sémantiques ; le 0,90 actuel, remis le
   2026-08-20, date d'avant la réparation). Config touchée ENTRE deux runs (relue à chaud).
