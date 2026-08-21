@@ -28,10 +28,15 @@ def module():
 
 def test_aucune_recopie_dans_scripts():
     """Un seul fichier de `scripts/` porte les chiffres : le module de référence."""
+    from scripts.bot_panel_reference import PANEL_REFERENCE_FIGURES
+    import re
+    m = re.search(r"combined=(\S+)", PANEL_REFERENCE_FIGURES)
+    assert m, f"PANEL_REFERENCE_FIGURES ne contient pas 'combined=...' : {PANEL_REFERENCE_FIGURES!r}"
+    valeur = f"combined={m.group(1)}"
     porteurs = sorted(
         chemin.name
         for chemin in SCRIPTS.rglob("*.py")
-        if "combined=0.7433" in chemin.read_text(encoding="utf-8")
+        if valeur in chemin.read_text(encoding="utf-8")
     )
     assert porteurs == ["bot_panel_reference.py"], (
         "La référence chiffrée est recopiée hors de bot_panel_reference.py : "
@@ -41,9 +46,14 @@ def test_aucune_recopie_dans_scripts():
 
 @pytest.mark.parametrize("nom", APPELANTS)
 def test_les_appelants_passent_par_le_helper(nom):
+    from scripts.bot_panel_reference import PANEL_REFERENCE_FIGURES
+    import re
+    m = re.search(r"combined=(\S+)", PANEL_REFERENCE_FIGURES)
+    assert m, f"PANEL_REFERENCE_FIGURES ne contient pas 'combined=...' : {PANEL_REFERENCE_FIGURES!r}"
+    valeur = f"combined={m.group(1)}"
     source = (SCRIPTS / nom).read_text(encoding="utf-8")
     assert "print_panel_reference()" in source
-    assert "combined=0.7433" not in source
+    assert valeur not in source
 
 
 def test_l_etiquette_est_celle_de_la_mesure_la_plus_recente(module):
