@@ -633,10 +633,11 @@ def _fight_model_start_engagements(
     Les figurines qui ne partent engagées avec personne sont ABSENTES du dictionnaire : elles n'ont
     rien à conserver, et les interroger par ancre coûterait sans rien décider.
     """
-    from engine.spatial_relations import unit_entries_within_engagement_zone, get_engagement_zone
+    from engine.spatial_relations import unit_entries_within_engagement_zone, get_engagement_zone, engagement_distance_metric
     from .shared_utils import _synth_model_entry
 
     ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     units_cache = require_key(game_state, "units_cache")
@@ -656,7 +657,7 @@ def _fight_model_start_engagements(
         # champ `id`, et un engagement à conserver doit rester NOMMABLE (messages, journaux).
         held = [
             (str(eid), ce) for eid, ce in enemies
-            if unit_entries_within_engagement_zone(synth, ce, ez)
+            if unit_entries_within_engagement_zone(synth, ce, ez, metric=metric)
         ]
         if held:
             out[str(mid)] = held
@@ -675,9 +676,10 @@ def _fight_models_keep_start_engagements(
     Miroir exact du contrôle du flux par-figurine (``_fight_pile_in_preview_plan``), appliqué ici à
     une configuration d'ancre (translation rigide du bloc).
     """
-    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
     from .shared_utils import _synth_model_entry
 
+    metric = engagement_distance_metric(game_state)
     models_cache = require_key(game_state, "models_cache")
     for mid, held in start_engagements.items():
         placement = placements.get(str(mid))
@@ -689,7 +691,7 @@ def _fight_models_keep_start_engagements(
             continue
         synth = _synth_model_entry(game_state, squad_id, m, int(c), int(r), level=int(lv))
         for _eid, ce in held:
-            if not unit_entries_within_engagement_zone(synth, ce, engagement_zone):
+            if not unit_entries_within_engagement_zone(synth, ce, engagement_zone, metric=metric):
                 return False
     return True
 
@@ -705,14 +707,15 @@ def _fight_entries_in_engagement_with_any_enemy(
     appelants qui les réutilisent ensuite (pools d'ancres) passent par ici pour ne les payer
     qu'une fois.
     """
-    from engine.spatial_relations import unit_entries_within_engagement_zone, get_engagement_zone
+    from engine.spatial_relations import unit_entries_within_engagement_zone, get_engagement_zone, engagement_distance_metric
 
     ez = get_engagement_zone(game_state)
+    metric = engagement_distance_metric(game_state)
     mover_id = str(require_key(unit, "id"))
     mover_player = int(require_key(unit, "player"))
     units_cache = require_key(game_state, "units_cache")
     for _eid, ce in enemy_entries_on_battlefield(units_cache, mover_player, exclude_id=mover_id):
-        if any(unit_entries_within_engagement_zone(s, ce, ez) for s in synths):
+        if any(unit_entries_within_engagement_zone(s, ce, ez, metric=metric) for s in synths):
             return True
     return False
 
@@ -1414,9 +1417,11 @@ def _fight_units_engaged_with(game_state: Dict[str, Any], unit: Dict[str, Any]) 
     from engine.spatial_relations import (
         get_engagement_zone,
         unit_entries_within_engagement_zone,
+        engagement_distance_metric,
     )
 
     ez = get_engagement_zone(game_state)
+    metric = engagement_distance_metric(game_state)
     units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(require_key(unit, "id"))
     entry = units_cache.get(unit_id_str)
@@ -1428,7 +1433,7 @@ def _fight_units_engaged_with(game_state: Dict[str, Any], unit: Dict[str, Any]) 
     if not entry_is_on_battlefield(entry):
         return engaged
     for eid, ce in enemy_entries_on_battlefield(units_cache, unit_player, exclude_id=unit_id_str):
-        if unit_entries_within_engagement_zone(entry, ce, ez):
+        if unit_entries_within_engagement_zone(entry, ce, ez, metric=metric):
             engaged.append(str(eid))
     return engaged
 
@@ -2265,7 +2270,7 @@ def _fight_pile_in_build_model_pool(
     """
     from collections import deque
     from engine.hex_utils import min_distance_between_sets
-    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
     from .shared_utils import get_engagement_zone
     from .charge_handlers import (
         _candidate_footprint_charge,
@@ -2284,6 +2289,7 @@ def _fight_pile_in_build_model_pool(
         return empty
 
     ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
     budget = 3 * int(require_key(game_state, "inches_to_subhex"))
     board_cols = int(require_key(game_state, "board_cols"))
     board_rows = int(require_key(game_state, "board_rows"))
@@ -2473,7 +2479,7 @@ def _fight_pile_in_build_model_pool(
             game_state, squad_id, model, cc, rr, level=dest_eff
         )
         if any(
-            unit_entries_within_engagement_zone(synth, te, ez)
+            unit_entries_within_engagement_zone(synth, te, ez, metric=metric)
             for te in target_entries
         ):
             engaged.append([cc, rr])
@@ -2620,7 +2626,7 @@ def _fight_pile_in_preview_plan(
     Retour : {per_model, coherency_ok, unit_engaged, kept_engagements, can_validate}.
     """
     from engine.hex_utils import min_distance_between_sets
-    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
     from .shared_utils import (
         get_engagement_zone,
         coherency_violation_flags,
@@ -2689,10 +2695,11 @@ def _fight_pile_in_preview_plan(
         model_placements={mid: (c, r, lv) for mid, c, r, lv in norm},
     )
     ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
     units_cache = require_key(game_state, "units_cache")
     player = int(require_key(unit, "player"))
     unit_engaged = any(
-        unit_entries_within_engagement_zone(su, ce, ez)
+        unit_entries_within_engagement_zone(su, ce, ez, metric=metric)
         for _eid, ce in enemy_entries_on_battlefield(units_cache, player, exclude_id=squad_id)
         for su in synth_units
     )
@@ -2715,8 +2722,8 @@ def _fight_pile_in_preview_plan(
         )
         for _eid, ce in enemy_entries:
             if unit_entries_within_engagement_zone(
-                synth_start, ce, ez) and not unit_entries_within_engagement_zone(
-                synth_end, ce, ez):
+                synth_start, ce, ez, metric=metric) and not unit_entries_within_engagement_zone(
+                synth_end, ce, ez, metric=metric):
                 kept_engagements = False
                 break
         if not kept_engagements:
@@ -2750,7 +2757,7 @@ def _fight_pile_in_model_plan_state(
     destination des figs posées suivent ce niveau (miroir move par-figurine).
     """
     from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
-    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
     from .shared_utils import get_engagement_zone
     from .charge_handlers import (
         _candidate_footprint_charge,
@@ -2810,6 +2817,7 @@ def _fight_pile_in_model_plan_state(
     # Figs (posées ou à l'origine) dont l'empreinte finit à ≤ EZ d'une cible pile-in → voile vert UI
     # (en mesure de frapper). Cibles exposées au front pour le cercle violet + hit-test du Focus.
     ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
     target_entries = [units_cache[t] for t in targets if t in units_cache]
     engaged_models: List[str] = []
     for m, c, r, _lv in full_plan:
@@ -2818,7 +2826,7 @@ def _fight_pile_in_model_plan_state(
             game_state, squad_id, _m_fp, int(c), int(r), level=int(_lv)
         )
         if any(
-            unit_entries_within_engagement_zone(synth, te, ez)
+            unit_entries_within_engagement_zone(synth, te, ez, metric=metric)
             for te in target_entries
         ):
             engaged_models.append(m)
@@ -2914,7 +2922,7 @@ def pile_in_autoplace_plan(
     from scipy.optimize import milp, LinearConstraint, Bounds
     from scipy.sparse import coo_matrix
     from engine.hex_utils import min_distance_between_sets, footprints_overlap, Socle
-    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
     from engine.terrain_utils import low_clearance_ground_hexes
     from .shared_utils import build_enemy_occupied_positions_set, get_engagement_zone
     from .charge_handlers import (
@@ -2943,6 +2951,7 @@ def pile_in_autoplace_plan(
         raise ValueError(f"pile_in_autoplace_plan: palier le plus proche introuvable pour {squad_id}")
 
     ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
     budget = 3 * int(require_key(game_state, "inches_to_subhex"))
     board_cols = int(require_key(game_state, "board_cols"))
     board_rows = int(require_key(game_state, "board_rows"))
@@ -3093,7 +3102,7 @@ def pile_in_autoplace_plan(
             ),
         )
         return unit_entries_within_engagement_zone(
-            synth, focus_entry, ez)
+            synth, focus_entry, ez, metric=metric)
 
     def _fp_min_to_tier(fp: Set[Tuple[int, int]]) -> int:
         return min(min_distance_between_sets(fp, t) for t in tier_fps) if tier_fps else 1 << 30
@@ -3268,7 +3277,7 @@ def pile_in_autoplace_plan(
         )
         out: List[Dict[str, Any]] = []
         for _eid, ce in enemy_entries_on_battlefield(units_cache, player, exclude_id=squad_id):
-            if unit_entries_within_engagement_zone(synth, ce, ez):
+            if unit_entries_within_engagement_zone(synth, ce, ez, metric=metric):
                 out.append(ce)
         return out
 
@@ -3297,7 +3306,7 @@ def pile_in_autoplace_plan(
                 )
                 if not all(
                     unit_entries_within_engagement_zone(
-                        synth_slot, ce, ez)
+                        synth_slot, ce, ez, metric=metric)
                     for ce in start_eng
                 ):
                     continue  # AFTER : un engagement de départ serait perdu
@@ -3654,7 +3663,7 @@ def _fight_consolidation_build_model_pool(
     """
     from collections import deque
     from engine.hex_utils import min_distance_between_sets
-    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
     from .shared_utils import get_engagement_zone
     from .charge_handlers import (
         _candidate_footprint_charge,
@@ -3679,6 +3688,7 @@ def _fight_consolidation_build_model_pool(
         return empty
 
     ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
     budget = 3 * int(require_key(game_state, "inches_to_subhex"))
     board_cols = int(require_key(game_state, "board_cols"))
     board_rows = int(require_key(game_state, "board_rows"))
@@ -3866,7 +3876,7 @@ def _fight_consolidation_build_model_pool(
                 game_state, squad_id, model, cc, rr, level=dest_eff
             )
             if any(
-                unit_entries_within_engagement_zone(synth, te, ez)
+                unit_entries_within_engagement_zone(synth, te, ez, metric=metric)
                 for te in target_entries
             ):
                 engaged.append([cc, rr])
@@ -3905,7 +3915,7 @@ def _fight_consolidation_preview_plan(
     « closer if not » du WHILE ne valide pas le move (move optionnel → on ne bouge pas). Lecture pure.
     """
     from engine.hex_utils import min_distance_between_sets
-    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
     from .shared_utils import (
         get_engagement_zone,
         coherency_violation_flags,
@@ -3992,11 +4002,12 @@ def _fight_consolidation_preview_plan(
         model_placements={mid: (c, r, lv) for mid, c, r, lv in norm},
     )
     ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
     units_cache = require_key(game_state, "units_cache")
     player = int(require_key(unit, "player"))
 
     unit_engaged = any(
-        unit_entries_within_engagement_zone(su, ce, ez)
+        unit_entries_within_engagement_zone(su, ce, ez, metric=metric)
         for _eid, ce in enemy_entries_on_battlefield(units_cache, player, exclude_id=squad_id)
         for su in synth_units
     )
@@ -4026,8 +4037,8 @@ def _fight_consolidation_preview_plan(
             )
             for _eid, ce in enemy_entries:
                 if unit_entries_within_engagement_zone(
-                    synth_start, ce, ez) and not unit_entries_within_engagement_zone(
-                    synth_end, ce, ez):
+                    synth_start, ce, ez, metric=metric) and not unit_entries_within_engagement_zone(
+                    synth_end, ce, ez, metric=metric):
                     kept_engagements = False
                     break
             if not kept_engagements:
@@ -4046,7 +4057,7 @@ def _fight_consolidation_preview_plan(
                 str(eid), game_state, "_fight_consolidation_preview_plan"
             )
             if not any(
-                unit_entries_within_engagement_zone(su, ce, ez) for su in synth_units
+                unit_entries_within_engagement_zone(su, ce, ez, metric=metric) for su in synth_units
             ):
                 engaged_with_all_selected = False
                 break
@@ -4084,7 +4095,7 @@ def _fight_consolidation_model_plan_state(
     ``awaiting_*_selection`` exposant les candidats cliquables (le move reste bloqué).
     """
     from engine.hex_union_boundary_polygon import compute_move_preview_mask_loops_world
-    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
     from .shared_utils import get_engagement_zone
     from .charge_handlers import (
         _candidate_footprint_charge,
@@ -4188,6 +4199,7 @@ def _fight_consolidation_model_plan_state(
 
     # Voile vert UI : figs « en position » (≤ EZ d'un ennemi du palier, ou dans la zone objectif).
     ez = int(get_engagement_zone(game_state))
+    metric = engagement_distance_metric(game_state)
     engaged_models: List[str] = []
     if tier_kind == "enemy":
         target_entries = [units_cache[t] for t in closest_tier if t in units_cache]
@@ -4197,7 +4209,7 @@ def _fight_consolidation_model_plan_state(
                 game_state, squad_id, _m_fp, int(c), int(r), level=int(_lv)
             )
             if any(
-                unit_entries_within_engagement_zone(synth, te, ez)
+                unit_entries_within_engagement_zone(synth, te, ez, metric=metric)
                 for te in target_entries
             ):
                 engaged_models.append(m)
