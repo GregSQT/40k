@@ -1949,6 +1949,18 @@ def discover_checkpoint_archives(
     return compatible
 
 
+def _resolve_seat_seed(training_cfg: dict) -> int:
+    """Résout la seed siège depuis la config : agent_seat_seed en priorité, puis seed globale.
+
+    Utilise is None explicitement pour que agent_seat_seed=0 soit respecté (0 est falsy).
+    """
+    seat_val = training_cfg.get("agent_seat_seed")
+    seed_raw = require_key(training_cfg, "seed") if seat_val is None else seat_val
+    if not isinstance(seed_raw, int) or isinstance(seed_raw, bool):
+        raise TypeError("Seat seed doit etre un entier quand agent_seat_mode='random'")
+    return int(seed_raw)
+
+
 class _NormalizedFrozenModel:
     """Modèle figé + son propre VecNormalize — interface predict() identique à MaskablePPO.
 
@@ -2018,10 +2030,7 @@ def evaluate_against_checkpoints(
         )
     agent_seat_seed: Optional[int] = None
     if agent_seat_mode == "random":
-        seed_raw = training_cfg.get("agent_seat_seed") or require_key(training_cfg, "seed")
-        if not isinstance(seed_raw, int) or isinstance(seed_raw, bool):
-            raise TypeError("Seat seed doit etre un entier quand agent_seat_mode='random'")
-        agent_seat_seed = int(seed_raw)
+        agent_seat_seed = _resolve_seat_seed(training_cfg)
 
     vec_norm_cfg = require_key(training_cfg, "vec_normalize")
     vec_normalize_enabled = bool(require_key(vec_norm_cfg, "enabled"))
