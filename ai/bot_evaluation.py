@@ -1377,21 +1377,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         )
     agent_seat_seed = None
     if agent_seat_mode == "random":
-        if "agent_seat_seed" in training_cfg:
-            agent_seat_seed_raw = require_key(training_cfg, "agent_seat_seed")
-        elif "seed" in training_cfg:
-            agent_seat_seed_raw = require_key(training_cfg, "seed")
-        else:
-            raise KeyError(
-                "agent_seat_mode='random' requires a seed key in training config. "
-                "Provide 'agent_seat_seed' (preferred) or existing 'seed'."
-            )
-        if not isinstance(agent_seat_seed_raw, int) or isinstance(agent_seat_seed_raw, bool):
-            raise TypeError(
-                "Seat seed must be an integer when agent_seat_mode='random' "
-                "(from 'agent_seat_seed' or 'seed')."
-            )
-        agent_seat_seed = int(agent_seat_seed_raw)
+        agent_seat_seed = _resolve_seat_seed(training_cfg)
     vec_norm_cfg = require_key(training_cfg, "vec_normalize")
     if not isinstance(vec_norm_cfg, dict):
         raise TypeError(f"vec_normalize must be a dict (got {type(vec_norm_cfg).__name__})")
@@ -1952,10 +1938,12 @@ def discover_checkpoint_archives(
 def _resolve_seat_seed(training_cfg: dict) -> int:
     """Résout la seed siège depuis la config : agent_seat_seed en priorité, puis seed globale.
 
-    Utilise is None explicitement pour que agent_seat_seed=0 soit respecté (0 est falsy).
+    Utilise `in` pour distinguer clé absente de valeur null explicite.
     """
-    seat_val = training_cfg.get("agent_seat_seed")
-    seed_raw = require_key(training_cfg, "seed") if seat_val is None else seat_val
+    if "agent_seat_seed" in training_cfg:
+        seed_raw = require_key(training_cfg, "agent_seat_seed")
+    else:
+        seed_raw = require_key(training_cfg, "seed")
     if not isinstance(seed_raw, int) or isinstance(seed_raw, bool):
         raise TypeError("Seat seed doit etre un entier quand agent_seat_mode='random'")
     return int(seed_raw)
