@@ -1799,7 +1799,7 @@ class ObservationBuilder:
             if fsid == active_squad_id:
                 active_relevant_enemies = relevant
             for e_entry in relevant:
-                if unit_entries_within_engagement_zone(f_entry, e_entry, ez_zone):
+                if unit_entries_within_engagement_zone(f_entry, e_entry, ez_zone, game_state=game_state):
                     engaged_squads.add(fsid)
                     esid_of_entry = sid_by_entry_id.get(id(e_entry))
                     if esid_of_entry is None:
@@ -1848,7 +1848,7 @@ class ObservationBuilder:
             )
             synth_by_mid[mid] = synth
             in_enemy_ez[mid] = any(
-                unit_entries_within_engagement_zone(synth, ee, ez_zone)
+                unit_entries_within_engagement_zone(synth, ee, ez_zone, game_state=game_state)
                 for ee in active_relevant_enemies
             )
         # `relayed_by_mid` (clause « buddy ») a vécu ici, jumeau du `get_fighting_models` du

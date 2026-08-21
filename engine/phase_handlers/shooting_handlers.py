@@ -471,7 +471,7 @@ def _build_weapon_availability_enemy_precheck(
             continue
 
         enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
-            _ue, cache_entry, melee_range
+            _ue, cache_entry, melee_range, game_state=game_state
         )
         friendly_blocks = _friendly_engagement_blocks_ranged_shot(
             game_state,
@@ -2073,7 +2073,7 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
         distance = min_distance_between_sets(shooter_fp, enemy_fp, max_distance=max_range)
         if distance > max_range:
             continue
-        enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(shooter_entry, enemy_entry, melee_range)
+        enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(shooter_entry, enemy_entry, melee_range, game_state=game_state)
         if is_adjacent and not enemy_adjacent_to_shooter:
             # Arme CLOSE_QUARTERS : ne peut cibler que l'ennemi avec lequel l'unité est engagée.
             continue
@@ -2197,7 +2197,7 @@ def _friendly_engagement_blocks_ranged_shot(
     for friendly_id, cache_entry in entries_on_battlefield(units_cache, exclude_id=shooter_id_str):
         friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
         if friendly_player == shooter_player_int:
-            if unit_entries_within_engagement_zone(target_entry, cache_entry, melee_range):
+            if unit_entries_within_engagement_zone(target_entry, cache_entry, melee_range, game_state=game_state):
                 if game_state.get("debug_mode", False):
                     from engine.game_utils import add_debug_file_log
                     episode = game_state.get("episode_number", "?")
@@ -2254,7 +2254,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
 
     melee_range = get_engagement_zone(game_state)
     enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
-        shooter_entry, target_entry, melee_range
+        shooter_entry, target_entry, melee_range, game_state=game_state
     )
     selected_weapon = get_selected_ranged_weapon(shooter)
     weapon_is_close_quarters = bool(selected_weapon and weapon_has_rule(selected_weapon, "CLOSE_QUARTERS"))
@@ -2837,7 +2837,7 @@ def valid_target_pool_build(
                 _shooter_socle_pool, socle_from_cache_entry(enemy_entry), _ranged_metric_pool, max_distance=_md_cap
             )
             enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
-                unit_entry, enemy_entry, melee_range
+                unit_entry, enemy_entry, melee_range, game_state=game_state
             )
 
         shooter_is_engaged = adjacent_status == 1
@@ -2895,7 +2895,7 @@ def valid_target_pool_build(
             ):
                 friendly_player = int(cache_entry["player"]) if cache_entry.get("player") is not None else None
                 if friendly_player == current_player_int:
-                    if unit_entries_within_engagement_zone(enemy_entry, cache_entry, melee_range):
+                    if unit_entries_within_engagement_zone(enemy_entry, cache_entry, melee_range, game_state=game_state):
                         enemy_adjacent_to_friendly = True
                         engaged_friendly_id = friendly_id
                         break

@@ -6079,7 +6079,7 @@ def _hex_legal_for_charge(
         # `memoise=False` : `synth` porte une CELLULE CANDIDATE du BFS de charge, pas une
         # position occupée. Une clé neuve par cellule testée, jamais redemandée — cf. le
         # commentaire de `move_anchor_violates_engagement_clearance`.
-        if unit_entries_within_engagement_zone(synth, enemy_entry, ez, memoise=False):
+        if unit_entries_within_engagement_zone(synth, enemy_entry, ez, game_state=game_state, memoise=False):
             return False
     return True
 
@@ -6135,11 +6135,11 @@ def charge_target_within_max_distance(
     d'engagement. Le vertical, pour la charge, se paie sur le TRAJET (13.06, cf. le budget de
     `charge_build_valid_plan`), il ne rétrécit pas la portee de declaration.
 
-    Metrique resolue par `engagement_distance_metric()` SANS `game_state`, comme les ~60 autres
-    call-sites de production : les controles d'engagement qui encadrent cette borne (l'ER de
-    `charge_build_valid_plan`, celui de `charge_build_valid_targets`) la resolvent ainsi, et deux
-    mesures de la meme charge dans deux metriques differentes est precisement la divergence que
-    le selecteur unique existe pour empecher.
+    Metrique resolue par `engagement_distance_metric()` SANS `game_state` : cette fonction
+    n'a pas `game_state` en parametre — c'est une mesure de PORTEE (11.04), pas d'ENGAGEMENT
+    (03.04), elle utilise `ranged_in_range` et non `unit_entries_within_engagement_zone`.
+    Les call-sites EZ (charge_build_valid_plan, charge_build_valid_targets) resolvent via
+    `game_state=` depuis le chantier fix-engagement-zone-metric-game-state.
 
     HORS TABLE = pas une cible (11.02 « on the battlefield ») : reserves 20.01 ou unite pas encore
     posee ne sont a AUCUNE distance, et leurs figurines portent la sentinelle (-1,-1) — les
@@ -6440,7 +6440,7 @@ def charge_build_valid_plan(
             synth = _synth_model_entry(game_state, str(squad_id), m, nc, nr)
             # `memoise=False` : même cellule candidate de BFS que ci-dessus.
             if not any(
-                unit_entries_within_engagement_zone(synth, te, ez, memoise=False)
+                unit_entries_within_engagement_zone(synth, te, ez, game_state=game_state, memoise=False)
                 for te in target_entries
             ):
                 continue
@@ -6518,7 +6518,7 @@ def charge_build_valid_plan(
         for tid, te in target_entries_by_id:
             if tid in engaged_targets:
                 continue
-            if unit_entries_within_engagement_zone(synth, te, ez):
+            if unit_entries_within_engagement_zone(synth, te, ez, game_state=game_state):
                 engaged_targets.add(tid)
     if len(engaged_targets) != len(target_entries_by_id):
         return None
@@ -6910,7 +6910,7 @@ def _shoot_engagement_blocks_target(
 
     ez = get_engagement_zone(game_state)
     enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
-        shooter_entry, target_entry, ez
+        shooter_entry, target_entry, ez, game_state=game_state
     )
     shooter_unit = get_unit_by_id(game_state, sid)
     if shooter_unit is None:
@@ -7918,7 +7918,7 @@ def _squads_are_engaged(
     # silence le malus 10.06 [CLOSE-QUARTERS] — donc rendait le tir PLUS facile.
     a = require_unit_from_cache(str(squad_id), game_state, "_squads_are_engaged/a")
     b = require_unit_from_cache(str(other_squad_id), game_state, "_squads_are_engaged/b")
-    return unit_entries_within_engagement_zone(a, b, get_engagement_zone(game_state))
+    return unit_entries_within_engagement_zone(a, b, get_engagement_zone(game_state), game_state=game_state)
 
 
 #: Cle d etat du TYPE DE TIR CHOISI par activation (10.02, etape 2 : « Select one shooting type
@@ -11509,7 +11509,7 @@ def fight_pile_in_plan(
     for mid, c, r, _lv in plan:
         synth = _synth_model_entry(game_state, str(squad_id), models_cache[mid], c, r, level=_lv)
         if any(
-            unit_entries_within_engagement_zone(synth, ee, ez)
+            unit_entries_within_engagement_zone(synth, ee, ez, game_state=game_state)
             for ee in enemy_entries
         ):
             in_er = True
@@ -11576,7 +11576,7 @@ def _fight_overrun_pile_in_plan(
         any(
             unit_entries_within_engagement_zone(
                 _synth_model_entry(game_state, str(squad_id), models_cache[mid], c, r, level=lv),
-                ee, ez,
+                ee, ez, game_state=game_state,
             )
             for ee in within_entries
         )
@@ -11668,7 +11668,7 @@ def get_fighting_models(
             game_state, str(squad_id), m, int(m["col"]), int(m["row"]),
             level=int(require_key(m, "level")),
         )
-        if any(unit_entries_within_engagement_zone(synth, ee, ez) for ee in enemy_entries):
+        if any(unit_entries_within_engagement_zone(synth, ee, ez, game_state=game_state) for ee in enemy_entries):
             out.append(mid)
     return out
 
@@ -12015,7 +12015,7 @@ def squad_consolidate_plan(
                 _synth_model_entry(
                     game_state, str(squad_id), models_cache[mid], c, r, level=lv
                 ),
-                ee, ez,
+                ee, ez, game_state=game_state,
             )
             for ee in enemy_entries
         )
@@ -12844,6 +12844,7 @@ def _target_locked_by_ally(
     squad_id: str,
     our_player: int,
     ez: int,
+    game_state: Dict[str, Any],
 ) -> bool:
     """True si l ennemi est en zone d engagement d au moins un allie du tireur (10.09).
 
@@ -12852,7 +12853,7 @@ def _target_locked_by_ally(
     for _sid, e in entries_on_battlefield(units_cache, exclude_id=squad_id):
         if int(e["player"]) != our_player:
             continue
-        if unit_entries_within_engagement_zone(enemy_entry, e, ez):
+        if unit_entries_within_engagement_zone(enemy_entry, e, ez, game_state=game_state):
             return True
     return False
 
@@ -12984,7 +12985,7 @@ def build_squad_action_mask(
                 # le slot reste dans l'observation, le masque le ferme.
                 if not entry_is_on_battlefield(enemy_entry):
                     continue
-                if _target_locked_by_ally(units_cache, enemy_entry, squad_id, our_player, ez):
+                if _target_locked_by_ally(units_cache, enemy_entry, squad_id, our_player, ez, game_state):
                     continue
                 models_cache = game_state.get("models_cache", {})  # get allowed
                 can_any_hit = False
@@ -13017,7 +13018,7 @@ def build_squad_action_mask(
                 enemy_entry = units_cache[esid]
                 if not entry_is_on_battlefield(enemy_entry):
                     continue
-                if _target_locked_by_ally(units_cache, enemy_entry, squad_id, our_player, ez):
+                if _target_locked_by_ally(units_cache, enemy_entry, squad_id, our_player, ez, game_state):
                     continue
                 if _squad_can_shoot_target_under_type(
                     game_state, squad_id, esid, SHOOTING_TYPE_INDIRECT
