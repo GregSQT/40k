@@ -2176,7 +2176,7 @@ class W40KMetricsTracker:
         if not ckpt_results:
             return
         x = step if step is not None else self.episode_count
-        _counter_suffixes = ("_wins", "_losses", "_draws")
+        _counter_suffixes = ("_wins", "_losses", "_draws", "_timeouts")
         for key, value in ckpt_results.items():
             self.writer.add_scalar(f'bot_eval/vs_ckpt_{key}', float(value), x)
         scores = [

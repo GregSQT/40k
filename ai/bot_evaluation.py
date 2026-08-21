@@ -2137,5 +2137,6 @@ def evaluate_against_checkpoints(
         results[f"{score_label}_wins"] = wins
         results[f"{score_label}_losses"] = losses
         results[f"{score_label}_draws"] = draws
+        results[f"{score_label}_timeouts"] = total - wins - losses - draws
 
     return results

@@ -191,13 +191,14 @@ def _scalars_dict(tracker: W40KMetricsTracker) -> Dict[str, float]:
 
 
 def test_log_checkpoint_publishes_wld_counters():
-    """Les compteurs _wins/_losses/_draws sont publiés sous bot_eval/vs_ckpt_*."""
+    """Les compteurs _wins/_losses/_draws/_timeouts sont publiés sous bot_eval/vs_ckpt_*."""
     t = _ckpt_tracker_stub()
     ckpt_results = {
         "0.50": 0.6,
         "0.50_wins": 30,
         "0.50_losses": 15,
         "0.50_draws": 5,
+        "0.50_timeouts": 0,
     }
     t.log_checkpoint_evaluations(ckpt_results, step=100)
 
@@ -206,6 +207,7 @@ def test_log_checkpoint_publishes_wld_counters():
     assert scalars["bot_eval/vs_ckpt_0.50_wins"] == 30
     assert scalars["bot_eval/vs_ckpt_0.50_losses"] == 15
     assert scalars["bot_eval/vs_ckpt_0.50_draws"] == 5
+    assert scalars["bot_eval/vs_ckpt_0.50_timeouts"] == 0
 
 
 def test_log_checkpoint_min_mean_exclude_wld_counters():
@@ -216,16 +218,35 @@ def test_log_checkpoint_min_mean_exclude_wld_counters():
         "0.40_wins": 20,
         "0.40_losses": 25,
         "0.40_draws": 5,
+        "0.40_timeouts": 0,
         "0.70": 0.7,
         "0.70_wins": 35,
         "0.70_losses": 10,
         "0.70_draws": 5,
+        "0.70_timeouts": 0,
     }
     t.log_checkpoint_evaluations(ckpt_results, step=200)
 
     scalars = _scalars_dict(t)
     assert scalars["00_critical/ckpt_min"] == pytest.approx(0.4)
     assert scalars["00_critical/ckpt_mean"] == pytest.approx((0.4 + 0.7) / 2)
+
+
+def test_log_checkpoint_timeouts_excluded_from_min_mean():
+    """Un timeout élevé (>1) ne doit pas contaminer ckpt_min/ckpt_mean."""
+    t = _ckpt_tracker_stub()
+    ckpt_results = {
+        "0.50": 0.5,
+        "0.50_wins": 25,
+        "0.50_losses": 20,
+        "0.50_draws": 5,
+        "0.50_timeouts": 50,  # valeur intentionnellement > 1 pour détecter une inclusion
+    }
+    t.log_checkpoint_evaluations(ckpt_results, step=300)
+
+    scalars = _scalars_dict(t)
+    assert scalars["00_critical/ckpt_min"] == pytest.approx(0.5)
+    assert scalars["00_critical/ckpt_mean"] == pytest.approx(0.5)
 
 
 def test_log_checkpoint_empty_does_nothing():

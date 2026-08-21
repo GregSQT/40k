@@ -5056,7 +5056,7 @@ def main():
                 print("\n" + "="*80)
                 print("📊 vs CHECKPOINTS FIGÉS (R0b — indicateur, hors gate)")
                 print("="*80)
-                _sfx = ("_wins", "_losses", "_draws")
+                _sfx = ("_wins", "_losses", "_draws", "_timeouts")
                 ratio_items = sorted(
                     [(k, v) for k, v in ckpt_results.items() if not k.endswith(_sfx)],
                     key=lambda t: float(t[0]),
@@ -5065,23 +5065,25 @@ def main():
                     w = ckpt_results.get(f"{score_label}_wins", "?")
                     l = ckpt_results.get(f"{score_label}_losses", "?")
                     d = ckpt_results.get(f"{score_label}_draws", "?")
-                    print(f"  vs ckpt_{score_label}: {win_rate:.3f}  (W:{w} L:{l} D:{d})")
+                    t = ckpt_results.get(f"{score_label}_timeouts", "?")
+                    print(f"  vs ckpt_{score_label}: {win_rate:.3f}  (W:{w} L:{l} D:{d} T:{t})")
                 if ratio_items:
                     vals = [v for _, v in ratio_items]
                     print(f"  min={min(vals):.3f}  mean={sum(vals)/len(vals):.3f}")
                 print("="*80 + "\n")
                 if model.tensorboard_log:
                     from torch.utils.tensorboard.writer import SummaryWriter as _SW
-                    _sfx = ("_wins", "_losses", "_draws")
                     _ckpt_sw = _SW(agent_log_dir(model.tensorboard_log, effective_agent_key))
                     _ckpt_step = int(model.num_timesteps)
-                    for _k, _v in ckpt_results.items():
-                        _ckpt_sw.add_scalar(f'bot_eval/vs_ckpt_{_k}', float(_v), _ckpt_step)
-                    _ckpt_scores = [float(v) for k, v in ckpt_results.items() if not k.endswith(_sfx)]
-                    _ckpt_sw.add_scalar('00_critical/ckpt_min', float(min(_ckpt_scores)), _ckpt_step)
-                    _ckpt_sw.add_scalar('00_critical/ckpt_mean', float(sum(_ckpt_scores) / len(_ckpt_scores)), _ckpt_step)
-                    _ckpt_sw.flush()
-                    _ckpt_sw.close()
+                    try:
+                        for _k, _v in ckpt_results.items():
+                            _ckpt_sw.add_scalar(f'bot_eval/vs_ckpt_{_k}', float(_v), _ckpt_step)
+                        _ckpt_scores = [float(v) for k, v in ckpt_results.items() if not k.endswith(_sfx)]
+                        _ckpt_sw.add_scalar('00_critical/ckpt_min', float(min(_ckpt_scores)), _ckpt_step)
+                        _ckpt_sw.add_scalar('00_critical/ckpt_mean', float(sum(_ckpt_scores) / len(_ckpt_scores)), _ckpt_step)
+                        _ckpt_sw.flush()
+                    finally:
+                        _ckpt_sw.close()
             else:
                 print("ℹ️  Aucun checkpoint figé compatible trouvé (R0b).")
 
