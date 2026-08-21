@@ -258,5 +258,6 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | training | ✅ Note `bot_eval_freq_normal` réécrite (2026-08-18) — d_bot_eval_seconds=98s, 5h54 pour 50k épisodes | — | |
 | bot | ✅ `bot_evaluation` simplifié : `_strip_phase_suffix` extrait + `_resolve_seat_seed` migré (2026-08-21) | — | |
 | training | ✅ R0b : compteurs W/L/D ajoutés aux checkpoints figés, publiés en TensorBoard (2026-08-21) | — | |
+| bot | ✅ R0b : critère de compatibilité corrigé — sonde de chargement (§12.15) ; 5 archives pré-`charge_pair_net` skippées → 1 barreau réel (2026-08-22) | — | |
 | bot | ✅ Fix seat-seed null explicite + migration `evaluate_against_bots` (2026-08-21) | — | |
 | engine | ✅ Constante `DRAW_WINNER = -1` introduite dans `engine/constants.py`, tous les littéraux remplacés (2026-08-21) | — | |
