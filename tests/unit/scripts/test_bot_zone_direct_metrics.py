@@ -281,11 +281,12 @@ def _bot(focus: str | None, marker: Any = (1, 1)) -> Any:
     return SimpleNamespace(_focus_target=focus, _focus_turn=marker)
 
 
-def test_avg_focus_target_distance_leve_si_focus_target_allie():
-    # "allied" a player=1, même équipe que le bot, et le marqueur est À JOUR → RuntimeError
+def test_avg_focus_target_distance_none_si_focus_target_allie(capsys):
+    # "allied" a player=1, même équipe que le bot, et le marqueur est À JOUR → None + WARN stderr
     gs = _gs([_unit("allied", 1)], {"allied": _entry(0, 4)})
-    with pytest.raises(RuntimeError, match="bot-player"):
-        _SCRIPT._avg_focus_target_distance(gs, _bot("allied"), 1)
+    result = _SCRIPT._avg_focus_target_distance(gs, _bot("allied"), 1)
+    assert result is None
+    assert "bot-player" in capsys.readouterr().err
 
 
 def test_avg_focus_target_distance_none_si_cible_perimee_du_tour_precedent():
@@ -316,11 +317,12 @@ def test_avg_focus_target_distance_none_si_meme_episode_mais_tour_precedent():
     assert _SCRIPT._avg_focus_target_distance(gs, _bot("en", marker=(1, 1)), 1) is None
 
 
-def test_avg_focus_target_distance_leve_si_focus_target_introuvable():
-    # "phantom" n'existe pas dans gs['units']
+def test_avg_focus_target_distance_none_si_focus_target_introuvable(capsys):
+    # "phantom" n'existe pas dans gs['units'] → None + WARN stderr
     gs = _gs([_unit("bot", 1)], {"bot": _entry(0, 0)})
-    with pytest.raises(RuntimeError, match="introuvable"):
-        _SCRIPT._avg_focus_target_distance(gs, _bot("phantom"), 1)
+    result = _SCRIPT._avg_focus_target_distance(gs, _bot("phantom"), 1)
+    assert result is None
+    assert "introuvable" in capsys.readouterr().err
 
 
 def test_avg_focus_target_distance_none_sans_attribut():
