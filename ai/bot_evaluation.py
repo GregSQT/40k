@@ -1900,6 +1900,18 @@ _CHECKPOINT_INCOMPATIBLE_COMMIT = "d5ddffb5"  # rupture charge_pair_net (§12.15
 CKPT_COUNTER_SUFFIXES: tuple[str, ...] = ("_wins", "_losses", "_draws", "_timeouts")
 
 
+def ckpt_ratio_items(ckpt_results: Dict[str, Any]) -> List[Tuple[str, float]]:
+    return [(k, v) for k, v in ckpt_results.items() if not k.endswith(CKPT_COUNTER_SUFFIXES)]
+
+
+def write_ckpt_scalars(writer: Any, ckpt_results: Dict[str, Any], step: int) -> None:
+    for k, v in ckpt_results.items():
+        writer.add_scalar(f"bot_eval/vs_ckpt_{k}", float(v), step)
+    scores = [float(v) for _, v in ckpt_ratio_items(ckpt_results)]
+    writer.add_scalar("00_critical/ckpt_min", float(min(scores)), step)
+    writer.add_scalar("00_critical/ckpt_mean", float(sum(scores) / len(scores)), step)
+
+
 def discover_checkpoint_archives(
     models_dir: str,
     agent_key: str,

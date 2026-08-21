@@ -5039,9 +5039,10 @@ def main():
 
             # R0b — évaluation contre les checkpoints figés (hors sélection et hors gate).
             from ai.bot_evaluation import (
-                CKPT_COUNTER_SUFFIXES,
+                ckpt_ratio_items,
                 discover_checkpoint_archives,
                 evaluate_against_checkpoints,
+                write_ckpt_scalars,
             )
             ckpt_archives = discover_checkpoint_archives(models_root, args.agent)
             if ckpt_archives:
@@ -5060,10 +5061,7 @@ def main():
                 print("\n" + "="*80)
                 print("📊 vs CHECKPOINTS FIGÉS (R0b — indicateur, hors gate)")
                 print("="*80)
-                ratio_items = sorted(
-                    [(k, v) for k, v in ckpt_results.items() if not k.endswith(CKPT_COUNTER_SUFFIXES)],
-                    key=lambda t: float(t[0]),
-                )
+                ratio_items = sorted(ckpt_ratio_items(ckpt_results), key=lambda t: float(t[0]))
                 vals = [v for _, v in ratio_items]
                 for score_label, win_rate in ratio_items:
                     w = ckpt_results.get(f"{score_label}_wins", "?")
@@ -5079,10 +5077,7 @@ def main():
                     _ckpt_sw = _SW(agent_log_dir(model.tensorboard_log, effective_agent_key))
                     _ckpt_step = int(model.num_timesteps)
                     try:
-                        for _k, _v in ckpt_results.items():
-                            _ckpt_sw.add_scalar(f'bot_eval/vs_ckpt_{_k}', float(_v), _ckpt_step)
-                        _ckpt_sw.add_scalar('00_critical/ckpt_min', min(vals), _ckpt_step)
-                        _ckpt_sw.add_scalar('00_critical/ckpt_mean', sum(vals) / len(vals), _ckpt_step)
+                        write_ckpt_scalars(_ckpt_sw, ckpt_results, _ckpt_step)
                         _ckpt_sw.flush()
                     finally:
                         _ckpt_sw.close()
