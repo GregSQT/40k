@@ -21,9 +21,7 @@ DOC_PANEL = PROJECT_ROOT / "Documentation/Implémentation/A_faire/bots_refonte_p
 #: Les scripts du panel qui affichent la référence. Ils l'IMPRIMENT, ils ne l'écrivent pas.
 APPELANTS = ("bot_zone_check.py", "bot_zone_direct.py")
 
-_m_combined = re.search(r"combined=(\S+)", PANEL_REFERENCE_FIGURES)
-assert _m_combined, f"PANEL_REFERENCE_FIGURES ne contient pas 'combined=...' : {PANEL_REFERENCE_FIGURES!r}"
-_VALEUR_COMBINED = f"combined={_m_combined.group(1)}"
+_VALEUR_COMBINED = PANEL_REFERENCE_FIGURES.split()[0]
 
 
 @pytest.fixture(scope="module")
