@@ -161,7 +161,8 @@ But : l'étalon de force non saturable — win-rate du modèle courant contre se
   self-play (`env_wrappers`, `self_play_snapshot_*`) côté `bot_evaluation`.
 - Archive d'architecture incompatible (pré-`charge_pair_net`, commit `d5ddffb5`) → ignorée
   avec message explicite nommant la rupture (§12.15) ; jamais un crash ni un silence.
-  6/28 archives chargeables au 2026-08-21 ; l'échelle se peuple à chaque run.
+  1/28 archives chargeables au 2026-08-22 (5 pré-`charge_pair_net` lèvent `RuntimeError Missing
+  key(s)` au chargement et sont skippées §12.15) ; l'échelle se peuple à chaque run.
 - Publication : `bot_eval/vs_ckpt_<score>` par barreau + agrégat `00_critical/` (min, moyenne).
 - **Hors sélection et hors gate au départ** : nouvelle famille dans `bot_registry`
   (`CHECKPOINT_OPPONENT_KEYS` ou équivalent), exclue de `SELECTION_BOT_KEYS` et de

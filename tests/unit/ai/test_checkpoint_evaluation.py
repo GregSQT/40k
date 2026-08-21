@@ -44,8 +44,10 @@ def _ckpt_tracker_stub() -> W40KMetricsTracker:
 # ── discover_checkpoint_archives ──────────────────────────────────────────
 
 
-def test_discover_finds_compatible_archives(tmp_path):
+def test_discover_finds_compatible_archives(tmp_path, monkeypatch):
     """Archives avec .zip + .pkl compagnon sont retournées, triées par score croissant."""
+    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda path, **kw: object())
+
     agent_dir = tmp_path / "MyAgent"
     agent_dir.mkdir()
 
@@ -64,8 +66,44 @@ def test_discover_finds_compatible_archives(tmp_path):
         assert zip_path.endswith(f"_robust_{label}.zip")
 
 
-def test_discover_skips_incompatible_no_pkl(tmp_path, caplog):
+def test_discover_skips_incompatible_missing_key(tmp_path, caplog, monkeypatch):
+    """Archive avec pkl mais architecture incompatible (RuntimeError Missing key) → skippée §12.15."""
+    import ai.bot_evaluation as _mod
+
+    agent_dir = tmp_path / "MyAgent"
+    agent_dir.mkdir()
+
+    (agent_dir / "MyAgent_12345_robust_0.7185.zip").write_bytes(b"dummy")
+    (agent_dir / "MyAgent_12345_robust_0.7185_vec_normalize.pkl").write_bytes(b"dummy")
+    # Compatible : sera chargée sans erreur
+    (agent_dir / "MyAgent_12345_robust_0.9999.zip").write_bytes(b"dummy")
+    (agent_dir / "MyAgent_12345_robust_0.9999_vec_normalize.pkl").write_bytes(b"dummy")
+
+    call_count = [0]
+
+    def fake_load(path, **_kwargs):
+        call_count[0] += 1
+        if "0.7185" in path:
+            raise RuntimeError("Missing key(s) in state_dict: charge_pair_net")
+        return object()
+
+    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", fake_load)
+
+    with caplog.at_level(logging.INFO):
+        result = _mod.discover_checkpoint_archives(str(tmp_path), "MyAgent")
+
+    assert len(result) == 1
+    assert result[0][1] == "0.9999"
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("§12.15" in m for m in messages)
+    assert any("0.7185" in m for m in messages)
+    assert any("d5ddffb5" in m for m in messages)
+
+
+def test_discover_skips_incompatible_no_pkl(tmp_path, caplog, monkeypatch):
     """Archive sans .pkl → skippée avec message INFO nommant le commit de rupture."""
+    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda path, **kw: object())
+
     agent_dir = tmp_path / "MyAgent"
     agent_dir.mkdir()
 
@@ -86,8 +124,10 @@ def test_discover_skips_incompatible_no_pkl(tmp_path, caplog):
     assert any("MyAgent_12345_robust_0.7000.zip" in m for m in messages)
 
 
-def test_discover_skips_non_matching_filenames(tmp_path):
+def test_discover_skips_non_matching_filenames(tmp_path, monkeypatch):
     """Fichiers avec OLD_BOTS/NEW_BOTS ou autres labels extra ne matchent pas le pattern."""
+    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda path, **kw: object())
+
     agent_dir = tmp_path / "MyAgent"
     agent_dir.mkdir()
 

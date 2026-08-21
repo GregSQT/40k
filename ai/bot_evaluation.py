@@ -1929,6 +1929,8 @@ def discover_checkpoint_archives(
         return []
 
     pattern = re.compile(r'^' + re.escape(agent_key) + r'_\d+_robust_(\d+\.\d+)\.zip$')
+    from sb3_contrib import MaskablePPO
+
     compatible: List[Tuple[str, str]] = []
     for fname in os.listdir(agent_dir):
         m = pattern.match(fname)
@@ -1944,6 +1946,16 @@ def discover_checkpoint_archives(
                 fname, _CHECKPOINT_INCOMPATIBLE_COMMIT,
             )
             continue
+        try:
+            MaskablePPO.load(zip_path, device="cpu")
+        except RuntimeError as exc:
+            if "Missing key" in str(exc):
+                logging.info(
+                    "CHECKPOINT_SKIP %s : architecture incompatible (§12.15, rupture %s) — %s",
+                    fname, _CHECKPOINT_INCOMPATIBLE_COMMIT, exc,
+                )
+                continue
+            raise
         compatible.append((zip_path, score_label))
 
     compatible.sort(key=lambda t: float(t[1]))
