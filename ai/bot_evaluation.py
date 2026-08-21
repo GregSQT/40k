@@ -36,7 +36,12 @@ from ai.scenario_scratch import make_scenario_scratch_dir
 # Avant tout `MaskablePPO.load` de ce module : torch >= 2.6 charge en `weights_only=True`.
 register_torch_safe_globals()
 
-__all__ = ['evaluate_against_bots', 'validate_bot_eval_worker_params']
+__all__ = [
+    'evaluate_against_bots',
+    'validate_bot_eval_worker_params',
+    'discover_checkpoint_archives',
+    'evaluate_against_checkpoints',
+]
 
 # Worker globals (scope processus)
 _worker_model = None
@@ -1897,5 +1902,240 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             for line in ranking_lines:
                 print(line)
             print()
+
+    return results
+
+
+# ── R0b — CHECKPOINT ÉTALONS ───────────────────────────────────────────────
+
+_ROBUST_ARCHIVE_RE = re.compile(r'^(?P<key>[A-Za-z0-9]+)_\d+_robust_(?P<score>\d+\.\d+)\.zip$')
+_CHECKPOINT_INCOMPATIBLE_COMMIT = "d5ddffb5"  # rupture charge_pair_net (§12.15)
+
+
+def discover_checkpoint_archives(
+    models_dir: str,
+    agent_key: str,
+) -> List[Tuple[str, str]]:
+    """(zip_path, score_label) pour chaque archive *_robust_*.zip compatible.
+
+    Compatible = possède le _vec_normalize.pkl compagnon (post-charge_pair_net).
+    Incompatible (pas de pkl) → log INFO nommant le commit de rupture §12.15, jamais un crash.
+    Retourne les archives triées par score croissant (plus faible → plus fort).
+    """
+    from ai.vec_normalize_utils import get_vec_normalize_path
+
+    agent_dir = os.path.join(models_dir, agent_key)
+    if not os.path.isdir(agent_dir):
+        return []
+
+    pattern = re.compile(r'^' + re.escape(agent_key) + r'_\d+_robust_(\d+\.\d+)\.zip$')
+    compatible: List[Tuple[str, str]] = []
+    for fname in sorted(os.listdir(agent_dir)):
+        m = pattern.match(fname)
+        if m is None:
+            continue
+        score_label = m.group(1)
+        zip_path = os.path.join(agent_dir, fname)
+        pkl_path = get_vec_normalize_path(zip_path)
+        if not os.path.exists(pkl_path):
+            logging.info(
+                "CHECKPOINT_SKIP %s : pas de _vec_normalize.pkl "
+                "(archive pre-charge_pair_net, rupture %s) — ignoree.",
+                fname, _CHECKPOINT_INCOMPATIBLE_COMMIT,
+            )
+            continue
+        compatible.append((zip_path, score_label))
+
+    compatible.sort(key=lambda t: float(t[1]))
+    return compatible
+
+
+class _NormalizedFrozenModel:
+    """Modèle figé + son propre VecNormalize — interface predict() identique à MaskablePPO.
+
+    Intercept predict() pour appliquer la normalisation du CHECKPOINT (jamais celle du
+    modèle courant — spec R0b). Substitut drop-in dans BotControlledEnv._frozen_model :
+    BotControlledEnv._get_self_play_opponent_action() appelle self._frozen_model.predict(),
+    ce wrapper l'intercepte avant d'appeler le vrai modèle.
+    """
+
+    def __init__(self, model: Any, normalizer: Optional[Any]) -> None:
+        self._model = model
+        self._normalizer = normalizer
+
+    def predict(self, obs: Any, **kwargs: Any) -> Any:
+        if self._normalizer is not None:
+            obs = self._normalizer(obs)
+        return self._model.predict(obs, **kwargs)
+
+
+def evaluate_against_checkpoints(
+    model_path: str,
+    checkpoint_archives: List[Tuple[str, str]],
+    training_config_name: str,
+    rewards_config_name: str,
+    n_episodes: int,
+    controlled_agent: str,
+    scenario_pool: str = "holdout",
+    scenario_list_override: Optional[List[str]] = None,
+    device: str = "cpu",
+) -> Dict[str, float]:
+    """Win-rate du modèle courant contre chaque archive checkpoint figée.
+
+    Hors sélection et hors gate (R0b) : indicateur de force relative sur la durée.
+    L'adversaire checkpoint reçoit ses observations via SON propre _vec_normalize.pkl,
+    jamais celui du modèle courant (spec R0b).
+
+    Réutilise BotControlledEnv + le chemin self-play (ratio=1.0) : l'adversaire checkpoint
+    est injecté dans _frozen_model via _NormalizedFrozenModel avant le premier épisode.
+
+    Retourne {} si checkpoint_archives est vide.
+    """
+    if not checkpoint_archives:
+        return {}
+
+    import random as _random
+    from sb3_contrib import MaskablePPO
+    from config_loader import get_config_loader, get_max_turns
+    from ai.training_utils import setup_imports, get_scenario_list_for_phase
+    from ai.env_wrappers import BotControlledEnv
+    from ai.unit_registry import UnitRegistry
+    from ai.evaluation_bots import RandomBot
+    from sb3_contrib.common.wrappers import ActionMasker
+    from sb3_contrib.common.maskable.utils import get_action_masks
+
+    config = get_config_loader()
+    base_agent_key = controlled_agent
+    for suffix in ('_phase1', '_phase2', '_phase3', '_phase4'):
+        if controlled_agent.endswith(suffix):
+            base_agent_key = controlled_agent[:-len(suffix)]
+            break
+
+    training_cfg = config.load_agent_training_config(base_agent_key, training_config_name)
+    agent_seat_mode = require_key(training_cfg, "agent_seat_mode")
+    if agent_seat_mode not in {"p1", "p2", "random"}:
+        raise ValueError(
+            f"training_config.agent_seat_mode doit valoir p1/p2/random (got {agent_seat_mode!r})"
+        )
+    agent_seat_seed: Optional[int] = None
+    if agent_seat_mode == "random":
+        seed_raw = training_cfg.get("agent_seat_seed") or require_key(training_cfg, "seed")
+        if not isinstance(seed_raw, int) or isinstance(seed_raw, bool):
+            raise TypeError("Seat seed doit etre un entier quand agent_seat_mode='random'")
+        agent_seat_seed = int(seed_raw)
+
+    vec_norm_cfg = require_key(training_cfg, "vec_normalize")
+    vec_normalize_enabled = bool(require_key(vec_norm_cfg, "enabled"))
+    vec_norm_eval_cfg = require_key(training_cfg, "vec_normalize_eval")
+    vec_eval_enabled = bool(require_key(vec_norm_eval_cfg, "enabled"))
+
+    if scenario_list_override is not None:
+        scenario_list = [str(p) for p in scenario_list_override]
+        for p in scenario_list:
+            if not os.path.isfile(p):
+                raise FileNotFoundError(f"scenario_list_override contient un fichier absent : {p}")
+    else:
+        scenario_list = get_scenario_list_for_phase(
+            config, base_agent_key, training_config_name, scenario_type=scenario_pool
+        )
+        if not scenario_list:
+            return {}
+
+    n_scenarios = len(scenario_list)
+    eps_per_scenario = max(1, n_episodes // n_scenarios)
+    max_steps = int(get_max_turns()) * 400
+
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Modèle principal absent : {model_path}")
+    main_model = MaskablePPO.load(model_path, device=device)
+    main_normalizer = _build_eval_obs_normalizer_for_worker(
+        main_model, model_path, vec_normalize_enabled, vec_eval_enabled
+    )
+
+    W40KEngine, _ = setup_imports()
+    results: Dict[str, float] = {}
+
+    for zip_path, score_label in checkpoint_archives:
+        ckpt_model = MaskablePPO.load(zip_path, device=device)
+        ckpt_normalizer = _build_eval_obs_normalizer_for_worker(
+            ckpt_model, zip_path, vec_normalize_enabled, vec_eval_enabled
+        )
+        normalized_ckpt = _NormalizedFrozenModel(ckpt_model, ckpt_normalizer)
+        ckpt_mtime = float(os.path.getmtime(zip_path))
+
+        wins, total = 0, 0
+        for sc_idx, sc_file in enumerate(scenario_list):
+            unit_registry = UnitRegistry()
+            base_env = W40KEngine(
+                rewards_config=rewards_config_name,
+                training_config_name=training_config_name,
+                controlled_agent=controlled_agent,
+                active_agents=None,
+                scenario_file=sc_file,
+                unit_registry=unit_registry,
+                quiet=True,
+                gym_training_mode=True,
+                training_n_envs=1,
+            )
+            masked_env = ActionMasker(base_env, lambda env: env.get_action_mask())
+            env = BotControlledEnv(
+                masked_env,
+                bot=RandomBot(),
+                unit_registry=unit_registry,
+                agent_seat_mode=agent_seat_mode,
+                global_seed=agent_seat_seed,
+                env_rank=0,
+                self_play_opponent_enabled=True,
+                self_play_ratio_start=1.0,
+                self_play_ratio_end=1.0,
+                self_play_total_episodes=eps_per_scenario,
+                self_play_warmup_episodes=0,
+                self_play_n_envs=1,
+                self_play_snapshot_path=zip_path,
+                self_play_snapshot_refresh_episodes=eps_per_scenario + 1,
+                self_play_snapshot_device=device,
+                self_play_deterministic=True,
+            )
+            # Injection du modèle checkpoint normalisé avant le premier épisode.
+            # _reload_self_play_snapshot_if_needed ne rechargera pas depuis le fichier tant que
+            # _frozen_model_mtime correspond au mtime du fichier et le compteur d'épisodes
+            # reste sous refresh_episodes.
+            env._frozen_model = normalized_ckpt
+            env._frozen_model_mtime = ckpt_mtime
+
+            for ep_idx in range(eps_per_scenario):
+                ep_seed = _episode_seed(42, score_label, sc_idx, ep_idx)
+                _random.seed(ep_seed)
+                np.random.seed(ep_seed)
+                obs, info = env.reset(seed=ep_seed)
+                done = False
+                step_count = 0
+                while not done and step_count < max_steps:
+                    model_obs = main_normalizer(obs) if main_normalizer else obs
+                    masks = np.asarray(get_action_masks(env), dtype=bool)
+                    if masks.ndim == 1:
+                        masks = masks.reshape(1, -1)
+                    if isinstance(model_obs, dict):
+                        inp = model_obs
+                    else:
+                        inp = np.asarray(model_obs, dtype=np.float32)
+                        if inp.ndim == 1:
+                            inp = inp.reshape(1, -1)
+                    action, _ = main_model.predict(inp, action_masks=masks, deterministic=True)
+                    obs, _, terminated, truncated, info = env.step(int(np.asarray(action).flat[0]))
+                    done = bool(terminated or truncated)
+                    step_count += 1
+
+                total += 1
+                if not done:
+                    continue
+                winner = require_key(info, "winner")
+                controlled_player = require_key(info, "controlled_player")
+                if winner == controlled_player:
+                    wins += 1
+
+            env.close()
+
+        results[score_label] = wins / max(1, total)
 
     return results
