@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.bot_panel_reference import PANEL_REFERENCE_FIGURES
 from tests._chargeur_script import charger_script
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -20,6 +21,10 @@ DOC_PANEL = PROJECT_ROOT / "Documentation/Implémentation/A_faire/bots_refonte_p
 #: Les scripts du panel qui affichent la référence. Ils l'IMPRIMENT, ils ne l'écrivent pas.
 APPELANTS = ("bot_zone_check.py", "bot_zone_direct.py")
 
+_m_combined = re.search(r"combined=(\S+)", PANEL_REFERENCE_FIGURES)
+assert _m_combined, f"PANEL_REFERENCE_FIGURES ne contient pas 'combined=...' : {PANEL_REFERENCE_FIGURES!r}"
+_VALEUR_COMBINED = f"combined={_m_combined.group(1)}"
+
 
 @pytest.fixture(scope="module")
 def module():
@@ -28,15 +33,10 @@ def module():
 
 def test_aucune_recopie_dans_scripts():
     """Un seul fichier de `scripts/` porte les chiffres : le module de référence."""
-    from scripts.bot_panel_reference import PANEL_REFERENCE_FIGURES
-    import re
-    m = re.search(r"combined=(\S+)", PANEL_REFERENCE_FIGURES)
-    assert m, f"PANEL_REFERENCE_FIGURES ne contient pas 'combined=...' : {PANEL_REFERENCE_FIGURES!r}"
-    valeur = f"combined={m.group(1)}"
     porteurs = sorted(
         chemin.name
         for chemin in SCRIPTS.rglob("*.py")
-        if valeur in chemin.read_text(encoding="utf-8")
+        if _VALEUR_COMBINED in chemin.read_text(encoding="utf-8")
     )
     assert porteurs == ["bot_panel_reference.py"], (
         "La référence chiffrée est recopiée hors de bot_panel_reference.py : "
@@ -46,14 +46,9 @@ def test_aucune_recopie_dans_scripts():
 
 @pytest.mark.parametrize("nom", APPELANTS)
 def test_les_appelants_passent_par_le_helper(nom):
-    from scripts.bot_panel_reference import PANEL_REFERENCE_FIGURES
-    import re
-    m = re.search(r"combined=(\S+)", PANEL_REFERENCE_FIGURES)
-    assert m, f"PANEL_REFERENCE_FIGURES ne contient pas 'combined=...' : {PANEL_REFERENCE_FIGURES!r}"
-    valeur = f"combined={m.group(1)}"
     source = (SCRIPTS / nom).read_text(encoding="utf-8")
     assert "print_panel_reference()" in source
-    assert valeur not in source
+    assert _VALEUR_COMBINED not in source
 
 
 def test_l_etiquette_est_celle_de_la_mesure_la_plus_recente(module):
