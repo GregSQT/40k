@@ -4,6 +4,7 @@ reward_calculator.py - Reward calculation system
 """
 
 from typing import Dict, List, Any, Optional
+from engine.constants import DRAW_WINNER
 from engine.macro_intents import (
     INTENT_DEFEND,
     INTENT_INVADE,
@@ -827,7 +828,7 @@ class RewardCalculator:
                 unit_rewards = self.rewards_config[agent_key]
                 modifiers = require_key(unit_rewards, "situational_modifiers")
                 return float(require_key(modifiers, "lose"))
-            elif winner == -1:
+            elif winner == DRAW_WINNER:
                 agent_key = require_key(self.config, "controlled_agent")
                 unit_rewards = self.rewards_config[agent_key]
                 modifiers = require_key(unit_rewards, "situational_modifiers")
@@ -847,7 +848,7 @@ class RewardCalculator:
                 base_reward = float(require_key(modifiers, "win"))
             elif winner == opponent_player:
                 base_reward = float(require_key(modifiers, "lose"))
-            elif winner == -1:
+            elif winner == DRAW_WINNER:
                 base_reward = float(require_key(modifiers, "draw"))
             else:
                 raise ValueError(

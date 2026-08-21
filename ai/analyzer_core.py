@@ -7,6 +7,7 @@ import re
 from functools import lru_cache
 from typing import Dict, Optional, cast
 
+from engine.constants import DRAW_WINNER
 from shared.data_validation import require_key, require_present
 from ai.analyzer_rules import note_rule_usage
 
@@ -930,7 +931,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         stats['wins_by_scenario'][state.current_scenario]['p1'] += 1
                     elif winner == PLAYER_TWO_ID:
                         stats['wins_by_scenario'][state.current_scenario]['p2'] += 1
-                    elif winner == -1:
+                    elif winner == DRAW_WINNER:
                         stats['wins_by_scenario'][state.current_scenario]['draws'] += 1
 
                     if winner in (PLAYER_ONE_ID, PLAYER_TWO_ID):
@@ -942,8 +943,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     if win_method:
                         if winner in stats['win_methods'] and win_method in stats['win_methods'][winner]:
                             stats['win_methods'][winner][win_method] += 1
-                        elif winner == -1:
-                            stats['win_methods'][-1]['draw'] += 1
+                        elif winner == DRAW_WINNER:
+                            stats['win_methods'][DRAW_WINNER]['draw'] += 1
                     else:
                         stats['episodes_without_method'].append({
                             'winner': winner,

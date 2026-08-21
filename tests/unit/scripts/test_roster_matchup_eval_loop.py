@@ -15,6 +15,7 @@ import random
 import numpy as np
 import pytest
 
+from engine.constants import DRAW_WINNER
 from shared.data_validation import ConfigurationError
 from tests._chargeur_script import charger_script
 
@@ -233,7 +234,7 @@ def test_winner_is_read_from_engine_info(script):
     env = FakeEnv(steps_before_done=1, final_info={"winner": 1, "controlled_player": 2})
     assert _run(script, env, FakeModel()) == "loss"
 
-    env = FakeEnv(steps_before_done=1, final_info={"winner": -1, "controlled_player": 2})
+    env = FakeEnv(steps_before_done=1, final_info={"winner": DRAW_WINNER, "controlled_player": 2})
     assert _run(script, env, FakeModel()) == "draw"
 
 

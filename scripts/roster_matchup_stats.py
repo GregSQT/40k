@@ -81,6 +81,7 @@ os.chdir(PROJECT_ROOT)
 # SOURCE UNIQUE des noms de bots (cf. l'en-tete de `ai/bot_registry.py`). Import de module et non
 # differe : les `choices` d'argparse sont evaluees au montage du parseur. Le registre ne declare que
 # des chaines, il ne tire ni le moteur ni torch — c'est ce qui le rend importable ici.
+from engine.constants import DRAW_WINNER
 from ai.bot_registry import ALL_BOT_KEYS  # noqa: E402
 from shared.json_atomic import write_json_atomic  # noqa: E402
 
@@ -491,7 +492,7 @@ def _run_single_episode(
     controlled_player = require_key(info, "controlled_player")
     if winner == controlled_player:
         return "win"
-    if winner == -1:
+    if winner == DRAW_WINNER:
         return "draw"
     return "loss"
 
