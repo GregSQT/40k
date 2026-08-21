@@ -1908,7 +1908,6 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
 # ── R0b — CHECKPOINT ÉTALONS ───────────────────────────────────────────────
 
-_ROBUST_ARCHIVE_RE = re.compile(r'^(?P<key>[A-Za-z0-9]+)_\d+_robust_(?P<score>\d+\.\d+)\.zip$')
 _CHECKPOINT_INCOMPATIBLE_COMMIT = "d5ddffb5"  # rupture charge_pair_net (§12.15)
 
 
