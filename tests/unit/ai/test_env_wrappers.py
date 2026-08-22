@@ -277,6 +277,44 @@ def test_self_play_requires_snapshot_label() -> None:
         )
 
 
+def test_self_play_requires_snapshot_label_none() -> None:
+    """None (valeur par défaut du paramètre) doit lever la même erreur que la chaîne vide."""
+    with pytest.raises(KeyError, match="self_play_snapshot_label is required"):
+        BotControlledEnv(
+            _DummyEngine(),
+            bot=_DummyBot(),
+            self_play_opponent_enabled=True,
+            self_play_ratio_start=0.0,
+            self_play_ratio_end=1.0,
+            self_play_total_episodes=40,
+            self_play_warmup_episodes=0,
+            self_play_n_envs=4,
+            self_play_snapshot_path="snapshot.zip",
+            self_play_snapshot_label=None,
+            self_play_snapshot_refresh_episodes=1,
+            self_play_snapshot_device="cpu",
+        )
+
+
+def test_self_play_snapshot_label_stripped() -> None:
+    """Un label avec espaces superflus est stocké sans ces espaces."""
+    env = BotControlledEnv(
+        _DummyEngine(),
+        bot=_DummyBot(),
+        self_play_opponent_enabled=True,
+        self_play_ratio_start=0.0,
+        self_play_ratio_end=1.0,
+        self_play_total_episodes=40,
+        self_play_warmup_episodes=0,
+        self_play_n_envs=4,
+        self_play_snapshot_path="snapshot.zip",
+        self_play_snapshot_label="  snap_v1  ",
+        self_play_snapshot_refresh_episodes=1,
+        self_play_snapshot_device="cpu",
+    )
+    assert env._self_play_snapshot_label == "snap_v1"
+
+
 def test_get_bot_action_returns_wait_when_no_eligible_units() -> None:
     decoder = _DummyActionDecoder(mask=[False] * 12, eligible=[])
     engine = _DummyEngine(decoder=decoder)
