@@ -630,8 +630,6 @@ def test_reactive_bot_no_kill_when_enemies_out_of_reach() -> None:
     Scénario : grosse perte adverse (loss_opp=10 > threshold), mais ennemi survivant
     à distance 50 — hors att_reach=6. Sans le guard, le plan passerait à KILL.
     """
-    from ai.benchmark_bots import _VALUE_LOSS_THRESHOLD
-
     bot = ReferenceReactiveBot(randomness=0.0)
 
     def _gs(turn: int, u2_alive: bool) -> Dict[str, Any]:
@@ -650,9 +648,9 @@ def test_reactive_bot_no_kill_when_enemies_out_of_reach() -> None:
     bot._plan = "SCORE"  # état initial connu
     bot._update_plan(_gs(2, False), player=1)  # u2 mort → loss_opp=10, mais plus d'ennemi
 
-    # Ennemi survivant inexistant → _has_reachable_enemies=False → pas de KILL
-    assert bot._plan != "KILL", (
-        f"Aucun ennemi atteignable : KILL ne doit pas s'activer, obtenu {bot._plan!r}"
+    # Ennemi survivant inexistant → _has_reachable_enemies=False → plan reste SCORE
+    assert bot._plan == "SCORE", (
+        f"Aucun ennemi atteignable : plan doit rester SCORE, obtenu {bot._plan!r}"
     )
 
 
@@ -663,8 +661,6 @@ def test_reactive_bot_no_kill_when_no_enemies_in_units() -> None:
     entièrement disparu de la liste units — _has_reachable_enemies retourne False
     immédiatement (alive_enemies=[]), sans même évaluer les distances.
     """
-    from ai.benchmark_bots import _VALUE_LOSS_THRESHOLD
-
     bot = ReferenceReactiveBot(randomness=0.0)
 
     def _gs_with_enemies(turn: int) -> Dict[str, Any]:
@@ -692,8 +688,8 @@ def test_reactive_bot_no_kill_when_no_enemies_in_units() -> None:
     bot._plan = "SCORE"
     bot._update_plan(_gs_no_enemies(2), player=1)  # loss_opp=10 > threshold, alive_enemies=[]
 
-    assert bot._plan != "KILL", (
-        f"Aucun ennemi dans units : KILL ne doit pas s'activer, obtenu {bot._plan!r}"
+    assert bot._plan == "SCORE", (
+        f"Aucun ennemi dans units : plan doit rester SCORE, obtenu {bot._plan!r}"
     )
 
 
@@ -702,8 +698,6 @@ def test_reactive_bot_kill_when_enemy_in_reach_after_losses() -> None:
 
     Même scénario mais un ennemi u3 survit à distance 4 ≤ att_reach=6.
     """
-    from ai.benchmark_bots import _VALUE_LOSS_THRESHOLD
-
     bot = ReferenceReactiveBot(randomness=0.0)
 
     def _gs(turn: int, u2_alive: bool) -> Dict[str, Any]:
