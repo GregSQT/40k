@@ -2628,7 +2628,6 @@ class ExploiterProbeCallback(BaseCallback):
         self.budget: Optional[int] = None
         self.censored: bool = False
         self._next_probe_episode: int = probe_every_episodes
-        self._awaiting_confirm: bool = False
 
     def _current_episode(self) -> int:
         if self.metrics_tracker is not None:
@@ -2660,11 +2659,14 @@ class ExploiterProbeCallback(BaseCallback):
                 device="cpu",
             )
         finally:
-            # Nettoyer le snapshot temporaire et son compagnon VecNormalize.
-            for p in (tmp_path, tmp_path.replace(".zip", "_vec_normalize.pkl")):
-                if os.path.exists(p):
-                    os.remove(p)
-        win_rate = float(results.get("target", 0.0))
+            remove_model_with_companions(tmp_path)
+        if not results:
+            raise RuntimeError(
+                "ExploiterProbeCallback._probe : evaluate_against_checkpoints a rendu un dict "
+                "vide — aucun scenario holdout trouve pour cet agent. "
+                "Verifier la configuration du scenario_pool."
+            )
+        win_rate = float(results["target"])
         self.log_fn(
             f"🔬 Sonde exploiteur {label} @ep{self._current_episode()} "
             f"(n={n_episodes}) : win-rate={win_rate:.3f}"
@@ -2674,44 +2676,40 @@ class ExploiterProbeCallback(BaseCallback):
     def _on_step(self) -> bool:
         current = self._current_episode()
 
-        # Plafond atteint sans franchissement : censure et arret.
-        if current >= self.budget_cap and self.budget is None and not self.censored:
+        if current >= self._next_probe_episode:
+            # Sonde bon marche — executee avant le test de plafond pour ne pas sauter la derniere
+            # sonde quand budget_cap est multiple exact de probe_every_episodes.
+            self._next_probe_episode += self.probe_every_episodes
+            wr = self._probe(self.probe_cheap_n, "bon-marche")
+            self.win_rate_curve.append((current, wr))
+
+            if wr >= self.win_rate_target:
+                self.log_fn(
+                    f"🔬 Sonde bon-marche a franchi {self.win_rate_target:.0%} "
+                    f"— sonde de confirmation ({self.probe_confirm_n} episodes)..."
+                )
+                wr_confirm = self._probe(self.probe_confirm_n, "confirmation")
+                self.win_rate_curve.append((current, wr_confirm))
+                if wr_confirm >= self.win_rate_target:
+                    self.budget = current
+                    self.log_fn(
+                        f"✅ Exploiteur : seuil {self.win_rate_target:.0%} CONFIRME "
+                        f"a {current} episodes (budget={current})"
+                    )
+                    return False
+                # Seuil non confirme : la sonde de confirmation porte son propre point de courbe,
+                # on continue a sonder depuis le prochain checkpoint.
+                self.log_fn(
+                    f"🔬 Confirmation non atteinte ({wr_confirm:.3f} < "
+                    f"{self.win_rate_target:.0%}) — sondage continue."
+                )
+
+        if current >= self.budget_cap:
             self.censored = True
             self.log_fn(
                 f"🔬 Exploiteur : plafond {self.budget_cap} episodes atteint sans franchir "
                 f"{self.win_rate_target:.0%} — budget censure '>{self.budget_cap}'"
             )
             return False
-
-        if current < self._next_probe_episode:
-            return True
-
-        # Sonde bon marche
-        self._next_probe_episode += self.probe_every_episodes
-        wr = self._probe(self.probe_cheap_n, "bon-marche")
-        self.win_rate_curve.append((current, wr))
-
-        if wr >= self.win_rate_target and not self._awaiting_confirm:
-            self._awaiting_confirm = True
-            self.log_fn(
-                f"🔬 Sonde bon-marche a franchi {self.win_rate_target:.0%} "
-                f"— sonde de confirmation ({self.probe_confirm_n} episodes)..."
-            )
-            wr_confirm = self._probe(self.probe_confirm_n, "confirmation")
-            self.win_rate_curve.append((current, wr_confirm))
-            if wr_confirm >= self.win_rate_target:
-                self.budget = current
-                self.log_fn(
-                    f"✅ Exploiteur : seuil {self.win_rate_target:.0%} CONFIRME "
-                    f"a {current} episodes (budget={current})"
-                )
-                return False
-            # Seuil non confirme : la sonde de confirmation porte son propre point de courbe,
-            # on continue a sonder depuis le prochain checkpoint.
-            self._awaiting_confirm = False
-            self.log_fn(
-                f"🔬 Confirmation non atteinte ({wr_confirm:.3f} < "
-                f"{self.win_rate_target:.0%}) — sondage continue."
-            )
 
         return True
