@@ -7358,24 +7358,27 @@ class W40KEngine(gym.Env):
             # 0 attaque ; le gym en fait autant, via le MEME moteur (0 intent declare ->
             # summary vide, done=True). Aucun dict fabrique a la main.
             if _did_overrun:
-                # Post-overrun : utiliser la meme geometrie per-figurine que le masque.
+                # Post-overrun : meme ensemble d ennemis que le masque (slots mappe uniquement).
                 # `_fight_build_valid_target_pool` applique le socle de l ESCOUADE ; un
                 # personnage attache a un socle propre plus grand -> delta jusqu a 4
                 # subhexes a x5 -> pool masque non vide, pool commit vide -> crash.
+                # `enemy_entries_on_battlefield` retournerait TOUS les ennemis (y compris hors
+                # slots) : si un ennemi en EZ post-overrun n a pas de slot, le masque ne peut
+                # pas ouvrir de slot pour lui, mais le commit le trouvait -> rupture parite.
                 from engine.phase_handlers.fight_handlers import _model_can_fight_target
-                from engine.spatial_relations import enemy_entries_on_battlefield
                 _mc = self.game_state["models_cache"]
-                _uc = self.game_state["units_cache"]
                 _uid_str = str(squad_id)
                 _unit_player = int(require_key(unit, "player"))
                 _alive_mids = [
                     m for m in self.game_state["squad_models"].get(_uid_str, [])
                     if m in _mc
                 ]
+                _overrun_slots = get_enemy_slot_mapping(self.game_state, _unit_player)
                 targets = [
-                    _tid
-                    for _tid, _ in enemy_entries_on_battlefield(_uc, _unit_player, exclude_id=_uid_str)
-                    if any(_model_can_fight_target(self.game_state, _mc[m], _uid_str, _tid) for m in _alive_mids)
+                    _eid
+                    for _eid in _overrun_slots
+                    if _eid is not None
+                    and any(_model_can_fight_target(self.game_state, _mc[m], _uid_str, _eid) for m in _alive_mids)
                 ]
             else:
                 targets = [str(t) for t in _fight_build_valid_target_pool(self.game_state, unit)]
