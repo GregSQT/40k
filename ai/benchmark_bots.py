@@ -96,6 +96,23 @@ _BENCH_HOLD_BONUS = 3.0
 #: tenue d'une zone deja gagnee large. En dessous de 1.5 le terme est inerte.
 _W_CROWD_BENCH = 2.0
 
+#: Seuil d'echange de charge (R0a-bis Fix 1, 2026-08-22).
+#: Le benchmark ne charge que si les degats melee esperes atteignent au moins cette fraction
+#: du tir espere. Meme valeur qu'AlphaStrikeBot.MELEE_TRADE_FLOOR — un echange en dessous de
+#: ce seuil coute plus en degats tir perdus qu'il ne rapporte en pression melee.
+_MELEE_TRADE_FLOOR = 0.5
+
+#: Rabais de distance, EN HEXES, applique a un objectif selon qui le tient (R0a-bis Fix 3,
+#: 2026-08-22). Meme schema que _CONTEST_PULL de bot_doctrines.py :
+#:   - ennemi : 2.0 (lui prendre la zone fait passer de « il marque » a « je marque »)
+#:   - neutre : 1.0 (l'objectif libre vaut une demi-attraction)
+#:   - mien   : 0.0 (y envoyer une deuxieme escouade ne rapporte rien)
+#: Le terme -w_contest * distance_pleine est retire ; le rabais constant est incorpore dans
+#: la carte d'objectifs avant le min-reduce, ce qui ne modifie pas l'ordonnancement des
+#: candidates pour la reclamante (constante) mais corrige l'attraction pour les non-reclamantes.
+_CONTEST_PULL_ENEMY = 2.0
+_CONTEST_PULL_NEUTRAL = 1.0
+
 #: Poids par slot de deploiement — commun aux trois benchmarks.
 _BENCHMARK_PLACEMENT_WEIGHTS: Dict[int, float] = {
     DEPLOYMENT_ACTIONS[0]: 0.20,
@@ -124,11 +141,11 @@ _BENCHMARK_PLACEMENT_WEIGHTS: Dict[int, float] = {
 # Rejouer avec scripts/bot_ranking.py --bots reference_balanced,...
 # apres chaque ajustement — NE PAS toucher bot_movement_weights.json.
 
-_W_BALANCED_SCORE:    Tuple[float, ...] = (1.0, 0.1, 0.5, 0.15, 2.5)
+_W_BALANCED_SCORE:    Tuple[float, ...] = (1.0, 0.1, 0.5, 0.15, 3.5)
 _W_BALANCED_KILL:     Tuple[float, ...] = (0.5, 1.1, 1.0, 0.0, 1.2)
 _W_BALANCED_PRESERVE: Tuple[float, ...] = (0.8, -0.5, 0.2, 0.5, 1.2)
 
-_W_DENIAL: Tuple[float, ...] = (0.9, 0.6, 1.0, 0.1, 3.0)
+_W_DENIAL: Tuple[float, ...] = (1.4, 0.6, 1.0, 0.1, 3.0)
 
 _W_REACTIVE_KILL:    Tuple[float, ...] = (0.4, 1.1, 1.0, 0.0, 1.0)
 _W_REACTIVE_SCORE:   Tuple[float, ...] = (1.1, 0.1, 0.5, 0.15, 2.5)
@@ -329,13 +346,13 @@ def _score_destinations_weighted(
     maps = objective_distance_maps(game_state)
     zones = objective_hex_sets(game_state)
     obj_map = None
-    contest_map = None
     if maps:
         holders = _objective_holders(game_state)
         if assigned_zone is not None:
             obj_map = maps[assigned_zone]
-            if holders[assigned_zone] == 3 - player:
-                contest_map = maps[assigned_zone]
+            # Pas de contest_map pour la reclamante : un rabais constant (_CONTEST_PULL) ne
+            # modifie pas l'ordonnancement des candidates (decalage uniforme). Le terme
+            # -w_contest * distance_pleine est retire (R0a-bis Fix 3, 2026-08-22).
         else:
             # La penalite porte sur le SURPLUS d'OC allie (ce que mes allies tiennent DEJA sans
             # moi), pas sur l'occupation : une zone disputee n'est pas penalisee, donc les
@@ -346,23 +363,33 @@ def _score_destinations_weighted(
             )
             free = [i for i, holder in enumerate(holders) if holder != player]
             targets = free if free else list(range(len(maps)))
-            obj_map = np.minimum.reduce([
-                maps[i] + _W_CROWD_BENCH * surplus[i] if surplus[i] else maps[i] for i in targets
-            ])
-            contested = [maps[i] for i, holder in enumerate(holders) if holder == 3 - player]
-            if contested:
-                contest_map = np.minimum.reduce(contested)
+            # Fix R0a-bis §3 (2026-08-22) : -w_contest * distance_pleine remplace par le rabais
+            # _CONTEST_PULL incorpore dans la carte avant min-reduce (motif _objective_terms de
+            # bot_doctrines). Un objectif ennemi semble _CONTEST_PULL_ENEMY * w_contest hexes plus
+            # proche, un neutre _CONTEST_PULL_NEUTRAL * w_contest hexes plus proche. La carte
+            # est promue en float64 des qu'un rabais ou une penalite s'applique.
+            target_maps = []
+            for i in targets:
+                m: Any = maps[i]
+                if surplus[i]:
+                    m = m + _W_CROWD_BENCH * surplus[i]
+                pull = w_contest * (
+                    _CONTEST_PULL_ENEMY if holders[i] == 3 - player else _CONTEST_PULL_NEUTRAL
+                )
+                if pull:
+                    m = m.astype(np.float64, copy=False) - pull
+                target_maps.append(m)
+            obj_map = np.minimum.reduce(target_maps)
 
     def _geo(dest: Tuple[int, int], inside: bool) -> float:
         score = 0.0
         if obj_map is not None:
             # `float` et NON `int` : la carte n'est plus la distance entiere du moteur, la
-            # penalite d'encombrement y est FRACTIONNAIRE — tronquer annulerait tout poids < 1.
+            # penalite d'encombrement ou le rabais _CONTEST_PULL y est FRACTIONNAIRE —
+            # tronquer annulerait tout poids < 1.
             score -= w_obj * float(obj_map[dest[0], dest[1]])
             if inside:
                 score += w_obj * _BENCH_HOLD_BONUS
-        if contest_map is not None:
-            score -= w_contest * float(contest_map[dest[0], dest[1]])
         if enemy_anchors:
             score -= w_enn * float(
                 min(calculate_hex_distance(dest[0], dest[1], c, r) for c, r in enemy_anchors)
@@ -522,7 +549,28 @@ class _BenchmarkBase:
         )
         return action if action is not None else WAIT_ACTION
 
+    def _should_charge(self, attacker: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
+        """Vrai si les degats melee esperes valent au moins _MELEE_TRADE_FLOOR * les degats tir.
+
+        Fix R0a-bis §1 (2026-08-22) : meme critere qu'AlphaStrikeBot.wants_charge. Charger avec
+        une unite dont la melee vaut moins de la moitie du tir est un echange perdant en degats
+        bruts ; en dessous de ce seuil la pression melee ne compense pas les tirs perdus.
+        """
+        att_id = str(require_key(attacker, "id"))
+        enemies = _living_enemies(attacker, game_state)
+        if not enemies:
+            return False
+        best_melee = max(
+            squad_expected_damage(game_state, att_id, str(e["id"]), False) for e in enemies
+        )
+        best_ranged = max(
+            squad_expected_damage(game_state, att_id, str(e["id"]), True) for e in enemies
+        )
+        return best_melee >= best_ranged * _MELEE_TRADE_FLOOR
+
     def _charge(self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]) -> int:
+        if not self._should_charge(active_unit, game_state):
+            return self._wait_or_first(valid_actions)
         att_id = str(require_key(active_unit, "id"))
         action = _best_slot_action(
             valid_actions, mi.CHARGE_SLOTS, mi.CHARGE_SLOT_BASE,
@@ -579,7 +627,14 @@ class ReferenceBalancedBot(_BenchmarkBase):
         game_state: Dict[str, Any],
         enemies: Optional[List[Dict[str, Any]]] = None,
     ) -> str:
-        """Retourne 'SCORE' | 'KILL' | 'PRESERVE'."""
+        """Retourne 'SCORE' | 'KILL' | 'PRESERVE'.
+
+        Fix R0a-bis §2 (2026-08-22) : s_kill et s_survive ne comptent que les ennemis
+        atteignables ce tour (distance ancre-ancre <= portee_max + MOVE), motif _firepower_from.
+        Avant ce correctif, le bot comptait TOUS les ennemis, y compris ceux a l'autre bout de
+        la table : s_kill devenait toujours dominant, l'intention KILL ecrasait SCORE meme quand
+        aucun ennemi n'etait a portee.
+        """
         player = int(require_key(unit, "player"))
         att_id = str(require_key(unit, "id"))
         if enemies is None:
@@ -589,22 +644,46 @@ class ReferenceBalancedBot(_BenchmarkBase):
         zones_mine = _count_zones(game_state, player)
         s_score_scaled = float(max(0, len(objectives) - zones_mine)) * _ELECT_INTENT_SCALE
 
+        # Portee de l'attaquant ce tour : max_ranged_range + MOVE (motif _firepower_from).
+        att_range = get_max_ranged_range(unit) if unit.get("RNG_WEAPONS") else 0
+        att_reach = att_range + int(require_key(unit, "MOVE"))
+
         s_kill = 0.0
+        s_survive = 0.0
+        att_col: Optional[int] = None
+        att_row: Optional[int] = None
+
         for e in enemies:
             eid = str(e["id"])
+            e_entry = require_unit_from_cache(eid, game_state, "_elect_intent")
+            e_col, e_row = int(e_entry["col"]), int(e_entry["row"])
+
+            # Position de l'attaquant chargee une seule fois (lazy).
+            if att_col is None:
+                att_e = require_unit_from_cache(att_id, game_state, "_elect_intent")
+                att_col, att_row = int(att_e["col"]), int(att_e["row"])
+
+            dist = calculate_hex_distance(att_col, att_row, e_col, e_row)
+
+            # Integrite des donnees — toujours verifier, independamment de la portee (T1).
             dmg = squad_expected_damage(game_state, att_id, eid, True)
             hp = get_hp_from_cache(eid, game_state)
             if hp is None:
                 raise ValueError(f"_elect_intent: {eid} absent du cache (ennemi vivant attendu)")
             if hp <= 0:
                 raise ValueError(f"_elect_intent: {eid} HP={hp} dans le cache (attendu >0)")
-            p_kill = min(1.0, dmg / float(hp))
-            value = float(e.get("VALUE", 0.0))
-            s_kill = max(s_kill, p_kill * value + dmg)
 
-        s_survive = sum(
-            squad_expected_damage(game_state, str(e["id"]), att_id, True) for e in enemies
-        )
+            # s_kill : seulement les ennemis atteignables par NOS tirs ce tour.
+            if dist <= att_reach:
+                p_kill = min(1.0, dmg / float(hp))
+                value = float(e.get("VALUE", 0.0))
+                s_kill = max(s_kill, p_kill * value + dmg)
+
+            # s_survive : seulement les ennemis qui peuvent nous atteindre ce tour.
+            e_range = get_max_ranged_range(e) if e.get("RNG_WEAPONS") else 0
+            e_reach = e_range + int(require_key(e, "MOVE"))
+            if dist <= e_reach:
+                s_survive += squad_expected_damage(game_state, eid, att_id, True)
 
         vp = require_key(game_state, "victory_points")
         my_vp = float(vp[player])
@@ -803,6 +882,46 @@ class ReferenceReactiveBot(_BenchmarkBase):
     def _current_turn_marker(self, game_state: Dict[str, Any]) -> Tuple[Any, int]:
         return (game_state.get("episode_number"), int(require_key(game_state, "turn")))
 
+    def _has_reachable_enemies(self, game_state: Dict[str, Any], player: int) -> bool:
+        """Vrai si au moins une escouade de `player` a un ennemi atteignable ce tour.
+
+        Fix R0a-bis §2 (2026-08-22) : la transition KILL de _update_plan ne s'active que s'il
+        existe reellement des cibles atteignables. Meme critere de portee qu'_elect_intent :
+        distance ancre-ancre <= portee_max + MOVE.
+        """
+        alive_enemies = [
+            u for u in require_key(game_state, "units")
+            if u.get("player") != player
+            and is_unit_alive(str(u["id"]), game_state)
+            and entry_is_on_battlefield(
+                require_unit_from_cache(str(u["id"]), game_state, "_has_reachable_enemies")
+            )
+        ]
+        if not alive_enemies:
+            return False
+        for unit in require_key(game_state, "units"):
+            if unit.get("player") != player:
+                continue
+            uid = str(unit["id"])
+            if not is_unit_alive(uid, game_state):
+                continue
+            entry = require_unit_from_cache(uid, game_state, "_has_reachable_enemies")
+            if not entry_is_on_battlefield(entry):
+                continue
+            att_col, att_row = int(entry["col"]), int(entry["row"])
+            att_range = get_max_ranged_range(unit) if unit.get("RNG_WEAPONS") else 0
+            att_reach = att_range + int(require_key(unit, "MOVE"))
+            for e in alive_enemies:
+                e_entry = require_unit_from_cache(
+                    str(e["id"]), game_state, "_has_reachable_enemies"
+                )
+                dist = calculate_hex_distance(
+                    att_col, att_row, int(e_entry["col"]), int(e_entry["row"])
+                )
+                if dist <= att_reach:
+                    return True
+        return False
+
     def _update_plan(self, game_state: Dict[str, Any], player: int) -> None:
         """Met a jour le plan pour ce TOUR (idempotent si deja appele ce tour)."""
         episode_marker = require_key(game_state, "episode_number")
@@ -830,7 +949,8 @@ class ReferenceReactiveBot(_BenchmarkBase):
 
         if loss_me > loss_opp + _VALUE_LOSS_THRESHOLD:
             self._plan = "CONTEST"
-        elif loss_opp > loss_me + _VALUE_LOSS_THRESHOLD:
+        elif loss_opp > loss_me + _VALUE_LOSS_THRESHOLD and self._has_reachable_enemies(game_state, player):
+            # Fix R0a-bis §2 : KILL seulement si des cibles sont atteignables ce tour.
             self._plan = "KILL"
         elif vp_me < vp_opp - _VP_LEAD:
             self._plan = "SCORE"

@@ -159,6 +159,49 @@ Justifications datées inscrites dans `ai/benchmark_bots.py` lignes 64-82.
 - Tests : assignation (une réclamante par objectif libre, marqueur de tour, rupture sur mort),
   prime de tenue et anti-empilement en rouge/vert par mutation, aire vs ancre.
 
+### 3.6-bis R0a-bis — Défauts 1er ordre + calibration (2026-08-22, livré)
+
+**Diagnostic acté** : les constantes d'intention (§3.5) sont inertes ; le problème est dans la
+stratégie de ciblage/mouvement. Trois défauts de premier ordre identifiés dans `ai/benchmark_bots.py`.
+
+**Phase 0 — distribution d'intentions APRÈS fix 2** (6 ép., seed 42, board/44x60x1, holdout) :
+balanced SCORE 64 % / KILL 16 % / PRESERVE 5 % ;
+reactive SCORE 82 % / CONTEST 13 % / KILL 5 %.
+Hypothèse « KILL dominait par aveuglement à la portée » confirmée : fix 2 ramène SCORE dominant.
+
+**Phase 1 — fixes** :
+- Fix 1 : `_MELEE_TRADE_FLOOR = 0,5` — no charge si melee < ranged × 0,5 (patron AlphaStrikeBot).
+- Fix 2 : filtre portée dans `_elect_intent` et transition KILL de `_update_plan` — seuls les
+  ennemis à distance ≤ portée_max + MOVE comptent (patron `_firepower_from`).
+- Fix 3 : remplacement du terme `-w_contest × distance_pleine` par le rabais `_CONTEST_PULL`
+  (`enemy=2,0` / `neutral=1,0`) incorporé dans la carte avant min-reduce (patron `_objective_terms`).
+- 15 tests rouge/vert par mutation ajoutés à `tests/unit/ai/test_benchmark_bots.py`.
+
+**Mesure intermédiaire Phase 1** (6 ép., seed 42) :
+balanced 0,317 (+0,069) / denial 0,280 (+0,011) / reactive 0,238 (−0,026).
+
+**Phase 2 — calibration poids** (un terme par run) :
+
+| Run | Terme | avant | après | balanced | denial | reactive | Retenu |
+|---|---|---|---|---|---|---|---|
+| 1 | `_W_BALANCED_SCORE[4]` w_contest | 2,5 | 3,5 | 0,329 | 0,275 | 0,234 | oui (marginal) |
+| 2 | `_W_DENIAL[0]` w_obj | 0,9 | 1,4 | 0,315 | 0,312 | 0,243 | oui (+0,037 denial) |
+| 3 | `_W_REACTIVE_SCORE[4]` w_contest | 2,5 | 3,5 | 0,312 | 0,315 | 0,248 | revert (bruit) |
+| 4 | `_W_REACTIVE_CONTEST[1]` w_enn | −0,1 | +0,1 | 0,312 | 0,315 | 0,243 | revert (nul) |
+
+**Mesure finale 20 ép.** (seed 42, board/44x60x1, holdout, 1 440 ép./bot) :
+balanced **0,306** (avant : 0,245) / denial **0,297** (avant : 0,258) / reactive **0,280** (avant : 0,262).
+Gains R0a-bis : balanced +0,061 / denial +0,039 / reactive +0,018.
+Doctrine : attrition 0,678 / scorer 0,665 / decapitation 0,655 / racer 0,635 /
+alpha 0,590 / endgame 0,453 / tactical 0,386 (dérive nulle à ±0,05 de bruit attendu).
+
+**Critère [0,40 ; 0,60] NON franchi.** Plateau atteint : les leviers de poids sont épuisés
+sans effet sur reactive ; la régression reactive (−0,026 après fix 2) reflète le comportement
+voulu (KILL désormais subordonné à la portée) et non un défaut. La fourchette exige une refonte
+de ciblage ou de la logique d'intention — hors périmètre R0a-bis.
+
+**`benchmark_floor` non reposé** : conditionnel au franchissement de [0,40 ; 0,60].
+
 ## 4. R0b — Échelle de checkpoints figés (éval)
 
 But : l'étalon de force non saturable — win-rate du modèle courant contre ses archives

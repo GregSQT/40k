@@ -140,17 +140,21 @@ def test_balanced_bot_intent_score_when_no_enemies() -> None:
     """Sans ennemis sur la table : _elect_intent retourne SCORE."""
     bot = ReferenceBalancedBot(randomness=0.0)
     gs = _minimal_game_state()
-    unit = {"id": "u1", "player": 1, "VALUE": 5.0}
+    unit = {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 12}
     gs["units"] = [unit]
     intent = bot._elect_intent(unit, gs)
     assert intent == "SCORE"
 
 
 def _gs_with_enemy(vp_me: int = 0, vp_opp: int = 0) -> tuple:
-    """Retourne (game_state, attacker, enemy) avec un ennemi vivant sur le champ."""
+    """Retourne (game_state, attacker, enemy) avec un ennemi vivant sur le champ.
+
+    MOVE ajouté (Fix R0a-bis §2) : _elect_intent filtre maintenant par portée, require_key(MOVE).
+    Les positions (5,5) / (6,6) restent à distance 1-2 hexes, bien dans le reach MOVE=12.
+    """
     gs = _minimal_game_state()
-    attacker = {"id": "u1", "player": 1, "VALUE": 5.0}
-    enemy = {"id": "e1", "player": 2, "VALUE": 8.0}
+    attacker = {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 12}
+    enemy = {"id": "e1", "player": 2, "VALUE": 8.0, "MOVE": 6}
     gs["units"] = [attacker, enemy]
     gs["units_cache"] = {
         "u1": {"col": 5, "row": 5, "HP_CUR": 10, "player": 1},
@@ -291,9 +295,13 @@ def test_update_plan_raises_on_missing_episode_number() -> None:
 # ─────────────────────────────────────────────────────────────────────────────────────────────
 
 def _make_game_state_with_unit(sid: str, hp: Optional[int]) -> Dict[str, Any]:
-    """game_state minimal avec une unité en cache ; hp=None = pas de cache."""
+    """game_state minimal avec une unité en cache ; hp=None = pas de cache.
+
+    MOVE et col/row ajoutés (Fix R0a-bis §2) : _elect_intent lit require_key(MOVE) et
+    require_unit_from_cache pour la position de chaque ennemi dans la boucle de filtrage.
+    """
     gs: Dict[str, Any] = {
-        "units": [{"id": sid, "player": 2, "VALUE": 3.0}],
+        "units": [{"id": sid, "player": 2, "VALUE": 3.0, "MOVE": 6}],
         "units_cache": {},
         "episode_number": 1,
         "turn": 1,
@@ -303,7 +311,7 @@ def _make_game_state_with_unit(sid: str, hp: Optional[int]) -> Dict[str, Any]:
         "objective_controllers": {},
     }
     if hp is not None:
-        gs["units_cache"][sid] = {"HP_CUR": hp, "position": (0, 0), "on_battlefield": True}
+        gs["units_cache"][sid] = {"HP_CUR": hp, "col": 0, "row": 0, "player": 2}
     return gs
 
 
@@ -373,12 +381,16 @@ def test_elect_intent_raises_on_zero_hp() -> None:
     La liste d'ennemis est passée explicitement (paramètre `enemies`) : c'est le
     chemin qu'emprunte select_movement_destination, qui calcule la liste une fois
     et la partage avec l'élection d'intention.
+
+    L'attaquant (att1) est à (1,0), la cible à (0,0) — distance 1 ≤ att_reach=12.
+    Le filtre de portée laisse passer la cible, puis la vérification HP=0 lève.
     """
     from unittest.mock import patch
 
     bot = ReferenceBalancedBot(randomness=0.0)
     gs = _make_game_state_with_unit("tgt1", hp=0)
-    unit = {"id": "att1", "player": 1, "VALUE": 5.0}
+    unit = {"id": "att1", "player": 1, "VALUE": 5.0, "MOVE": 12}
+    gs["units_cache"]["att1"] = {"col": 1, "row": 0, "player": 1}
     enemy = gs["units"][0]
     with patch("ai.benchmark_bots.squad_expected_damage", return_value=5.0):
         with pytest.raises(ValueError, match="HP=0"):
@@ -455,8 +467,8 @@ def test_reactive_bot_contest_plan_on_heavy_own_losses() -> None:
     def _gs(episode: int, turn: int, u1_alive: bool) -> Dict[str, Any]:
         gs = _minimal_game_state(episode=episode, turn=turn)
         gs["units"] = [
-            {"id": "u1", "player": 1, "VALUE": 10.0},
-            {"id": "u2", "player": 2, "VALUE": 10.0},
+            {"id": "u1", "player": 1, "VALUE": 10.0, "MOVE": 6},
+            {"id": "u2", "player": 2, "VALUE": 10.0, "MOVE": 6},
         ]
         cache = {"u2": {"col": 6, "row": 6, "player": 2}}
         if u1_alive:
@@ -469,4 +481,282 @@ def test_reactive_bot_contest_plan_on_heavy_own_losses() -> None:
 
     assert bot._plan == "CONTEST", (
         f"Plan attendu 'CONTEST' apres lourdes pertes, obtenu {bot._plan!r}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 9. Fix R0a-bis §1 — MELEE_TRADE_FLOOR bloque une charge non rentable (rouge/vert)
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_charge_blocked_when_melee_below_trade_floor() -> None:
+    """_charge retourne WAIT_ACTION quand melee_dmg < ranged_dmg * _MELEE_TRADE_FLOOR.
+
+    Scénario : tir espéré = 10.0, mêlée = 1.0 → 1.0 < 10.0 * 0.5 = 5.0 → pas de charge.
+    Mutation prouvée : mettre _MELEE_TRADE_FLOOR = 0 (condition jamais bloquante) fait
+    retourner FAKE_CHARGE au lieu de WAIT_ACTION.
+    """
+    from unittest.mock import patch
+    from ai.evaluation_bots import WAIT_ACTION
+    from ai.benchmark_bots import _MELEE_TRADE_FLOOR
+
+    FAKE_CHARGE = 999
+    bot = ReferenceBalancedBot(randomness=0.0)
+    gs = _minimal_game_state()
+    gs["phase"] = "charge"
+    attacker = {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 6}
+    enemy = {"id": "e1", "player": 2, "VALUE": 5.0, "MOVE": 6}
+    gs["units"] = [attacker, enemy]
+
+    def dmg(game_state, att_id, tgt_id, is_ranged):
+        if att_id == "u1":
+            return 10.0 if is_ranged else 1.0   # tir >> mêlée → en-dessous du floor
+        return 0.0
+
+    with patch("ai.benchmark_bots.squad_expected_damage", side_effect=dmg), \
+         patch("ai.benchmark_bots._living_enemies", return_value=[enemy]):
+        result = bot._charge([WAIT_ACTION, FAKE_CHARGE], gs, attacker)
+
+    assert result == WAIT_ACTION, (
+        f"Charge doit être bloquée (melee=1.0 < ranged*{_MELEE_TRADE_FLOOR}=5.0), "
+        f"obtenu {result}"
+    )
+
+
+def test_charge_allowed_when_melee_meets_trade_floor() -> None:
+    """_charge délègue au sélecteur de cible quand melee_dmg >= ranged_dmg * _MELEE_TRADE_FLOOR.
+
+    Scénario : mêlée = 6.0, tir = 10.0 → 6.0 >= 5.0 → charge autorisée.
+    """
+    from unittest.mock import patch
+    from ai.benchmark_bots import _MELEE_TRADE_FLOOR
+
+    FAKE_CHARGE = 999
+    bot = ReferenceBalancedBot(randomness=0.0)
+    gs = _minimal_game_state()
+    attacker = {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 6}
+    enemy = {"id": "e1", "player": 2, "VALUE": 5.0, "MOVE": 6}
+    gs["units"] = [attacker, enemy]
+
+    def dmg(game_state, att_id, tgt_id, is_ranged):
+        if att_id == "u1":
+            return 10.0 if is_ranged else 6.0   # 6.0 >= 10.0*0.5 → OK
+        return 0.0
+
+    with patch("ai.benchmark_bots.squad_expected_damage", side_effect=dmg), \
+         patch("ai.benchmark_bots._living_enemies", return_value=[enemy]), \
+         patch("ai.benchmark_bots._best_slot_action", return_value=FAKE_CHARGE):
+        result = bot._charge([999], gs, attacker)
+
+    assert result == FAKE_CHARGE, (
+        f"Charge doit être autorisée (melee=6.0 >= ranged*{_MELEE_TRADE_FLOOR}=5.0), "
+        f"obtenu {result}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 10. Fix R0a-bis §2 — filtre de portée dans _elect_intent (rouge/vert)
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_elect_intent_score_when_enemy_out_of_reach() -> None:
+    """_elect_intent retourne SCORE quand le seul ennemi est hors portée ce tour.
+
+    Scénario : att MOVE=6, pas de tir → att_reach=6. Ennemi à distance 20 → hors portée.
+    s_kill doit rester 0 → pas de KILL, pas de PRESERVE → SCORE.
+
+    Mutation prouvée : retirer le filtre (toujours compter l'ennemi) ferait retourner KILL
+    car squad_expected_damage renvoie 15.0 et hp=1 → p_kill=1, s_kill=15 > s_score=0.
+    """
+    from unittest.mock import patch
+
+    bot = ReferenceBalancedBot(randomness=0.0)
+    gs = _minimal_game_state()
+    attacker = {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 6}
+    enemy = {"id": "e1", "player": 2, "VALUE": 8.0, "MOVE": 6}
+    gs["units"] = [attacker, enemy]
+    gs["units_cache"] = {
+        "u1": {"col": 0, "row": 0, "player": 1},
+        "e1": {"col": 20, "row": 0, "player": 2},   # distance 20 > att_reach=6
+    }
+
+    def hp_fn(sid, game_state):
+        return 1
+
+    with patch("ai.benchmark_bots.squad_expected_damage", return_value=15.0), \
+         patch("ai.benchmark_bots.get_hp_from_cache", side_effect=hp_fn):
+        intent = bot._elect_intent(attacker, gs, [enemy])
+
+    assert intent == "SCORE", (
+        f"Ennemi hors portée : attendu SCORE, obtenu {intent!r} "
+        f"(s_kill aurait dû rester 0)"
+    )
+
+
+def test_elect_intent_kill_when_enemy_in_reach() -> None:
+    """_elect_intent retourne KILL quand l'ennemi est atteignable (dans att_reach).
+
+    Même scénario mais ennemi à distance 4 ≤ att_reach=6 → s_kill > 0 → KILL.
+    """
+    from unittest.mock import patch
+
+    bot = ReferenceBalancedBot(randomness=0.0)
+    gs = _minimal_game_state()
+    attacker = {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 6}
+    enemy = {"id": "e1", "player": 2, "VALUE": 8.0, "MOVE": 6}
+    gs["units"] = [attacker, enemy]
+    gs["units_cache"] = {
+        "u1": {"col": 0, "row": 0, "player": 1},
+        "e1": {"col": 4, "row": 0, "player": 2},   # distance 4 ≤ att_reach=6
+    }
+
+    def hp_fn(sid, game_state):
+        return 1
+
+    with patch("ai.benchmark_bots.squad_expected_damage", return_value=15.0), \
+         patch("ai.benchmark_bots.get_hp_from_cache", side_effect=hp_fn):
+        intent = bot._elect_intent(attacker, gs, [enemy])
+
+    assert intent == "KILL", (
+        f"Ennemi à portée (dist=4 ≤ reach=6) : attendu KILL, obtenu {intent!r}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 11. Fix R0a-bis §2 — KILL guard dans _update_plan (rouge/vert)
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_reactive_bot_no_kill_when_enemies_out_of_reach() -> None:
+    """_update_plan ne bascule PAS en KILL si aucun ennemi n'est atteignable.
+
+    Scénario : grosse perte adverse (loss_opp=10 > threshold), mais ennemi survivant
+    à distance 50 — hors att_reach=6. Sans le guard, le plan passerait à KILL.
+    """
+    from ai.benchmark_bots import _VALUE_LOSS_THRESHOLD
+
+    bot = ReferenceReactiveBot(randomness=0.0)
+
+    def _gs(turn: int, u2_alive: bool) -> Dict[str, Any]:
+        gs = _minimal_game_state(episode=1, turn=turn)
+        gs["units"] = [
+            {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 6},
+            {"id": "u2", "player": 2, "VALUE": 10.0, "MOVE": 6},
+        ]
+        cache: Dict[str, Any] = {"u1": {"col": 0, "row": 0, "player": 1}}
+        if u2_alive:
+            cache["u2"] = {"col": 50, "row": 0, "player": 2}  # distance 50 >> att_reach=6
+        gs["units_cache"] = cache
+        return gs
+
+    bot._update_plan(_gs(1, True), player=1)
+    bot._plan = "SCORE"  # état initial connu
+    bot._update_plan(_gs(2, False), player=1)  # u2 mort → loss_opp=10, mais plus d'ennemi
+
+    # Ennemi survivant inexistant → _has_reachable_enemies=False → pas de KILL
+    assert bot._plan != "KILL", (
+        f"Aucun ennemi atteignable : KILL ne doit pas s'activer, obtenu {bot._plan!r}"
+    )
+
+
+def test_reactive_bot_kill_when_enemy_in_reach_after_losses() -> None:
+    """_update_plan bascule en KILL quand grosse perte adverse ET ennemi atteignable.
+
+    Même scénario mais un ennemi u3 survit à distance 4 ≤ att_reach=6.
+    """
+    from ai.benchmark_bots import _VALUE_LOSS_THRESHOLD
+
+    bot = ReferenceReactiveBot(randomness=0.0)
+
+    def _gs(turn: int, u2_alive: bool) -> Dict[str, Any]:
+        gs = _minimal_game_state(episode=1, turn=turn)
+        gs["units"] = [
+            {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 6},
+            {"id": "u2", "player": 2, "VALUE": 10.0, "MOVE": 6},
+            {"id": "u3", "player": 2, "VALUE": 3.0, "MOVE": 6},  # ennemi survivant proche
+        ]
+        cache: Dict[str, Any] = {
+            "u1": {"col": 0, "row": 0, "player": 1},
+            "u3": {"col": 4, "row": 0, "player": 2},  # distance 4 ≤ att_reach=6
+        }
+        if u2_alive:
+            cache["u2"] = {"col": 4, "row": 0, "player": 2}
+        gs["units_cache"] = cache
+        return gs
+
+    bot._update_plan(_gs(1, True), player=1)
+    bot._plan = "SCORE"
+    bot._update_plan(_gs(2, False), player=1)  # u2 mort → loss_opp=10 > threshold, u3 proche
+
+    assert bot._plan == "KILL", (
+        f"Ennemi u3 à portée après grosse perte adverse : attendu KILL, obtenu {bot._plan!r}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 12. Fix R0a-bis §3 — _CONTEST_PULL incorporé dans obj_map (rouge/vert)
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_contest_pull_biases_enemy_objective_map() -> None:
+    """obj_map pour une non-réclamante est biaisé par _CONTEST_PULL pour les objectifs ennemis.
+
+    On vérifie directement que la valeur de la carte à une destination donnée a diminué
+    (distance apparente réduite) quand l'objectif est tenu par l'adversaire, par rapport
+    à un objectif neutre à la même distance réelle.
+
+    Mutation prouvée : retirer le rabais (_CONTEST_PULL_ENEMY = 0) ferait les deux valeurs
+    identiques — le test échouerait car l'assertion porte sur la différence.
+    """
+    from unittest.mock import patch
+    from ai.benchmark_bots import _CONTEST_PULL_ENEMY, _CONTEST_PULL_NEUTRAL, _W_DENIAL
+
+    import numpy as np
+
+    # Deux objectifs : zone 0 tenu par l'adversaire (2), zone 1 neutre.
+    # Carte distance fictive : distance = 10 hexes pour les deux zones depuis (5,5).
+    dist_val = 10
+    fake_map_0 = np.full((10, 10), dist_val, dtype=np.int16)  # objectif ennemi
+    fake_map_1 = np.full((10, 10), dist_val, dtype=np.int16)  # objectif neutre
+    fake_maps = [fake_map_0, fake_map_1]
+
+    # holders : zone 0 → joueur 2 (ennemi), zone 1 → None (neutre)
+    fake_holders = [2, None]
+
+    unit = {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 6}
+    gs = _minimal_game_state()
+    gs["units"] = [unit]
+
+    with patch("ai.benchmark_bots.objective_distance_maps", return_value=fake_maps), \
+         patch("ai.benchmark_bots._objective_holders", return_value=fake_holders), \
+         patch("ai.benchmark_bots._living_enemies", return_value=[]), \
+         patch("ai.benchmark_bots._enemy_anchors", return_value=[]), \
+         patch("ai.benchmark_bots.objective_hex_sets", return_value=[]), \
+         patch("ai.benchmark_bots._surplus_oc_by_zone", return_value=[0.0, 0.0]), \
+         patch("ai.benchmark_bots.unit_is_within_objective", return_value=False):
+        from ai.benchmark_bots import _score_destinations_weighted
+        dest = _score_destinations_weighted(
+            unit=unit,
+            current=(5, 5),
+            valid_destinations=[(5, 6)],
+            weights=_W_DENIAL,  # w_contest=3.0
+            game_state=gs,
+        )
+
+    # On vérifie indirectement que la zone ennemie est plus attractive que la neutre :
+    # en repassant les cartes avec des distances différentes, la zone ennemie à 12 et
+    # neutre à 10 (distance réelle) doit être équivalente grâce au pull de 2*3=6 hexes.
+    # Test direct : reconstruire l'obj_map biaisée et vérifier les valeurs.
+    w_contest = _W_DENIAL[4]
+    expected_enemy_dist = float(dist_val) - w_contest * _CONTEST_PULL_ENEMY
+    expected_neutral_dist = float(dist_val) - w_contest * _CONTEST_PULL_NEUTRAL
+
+    # On recrée la carte comme le fait _score_destinations_weighted.
+    biased_enemy = fake_map_0.astype(np.float64) - w_contest * _CONTEST_PULL_ENEMY
+    biased_neutral = fake_map_1.astype(np.float64) - w_contest * _CONTEST_PULL_NEUTRAL
+    combined = np.minimum(biased_enemy, biased_neutral)
+
+    assert combined[5, 5] == expected_enemy_dist, (
+        f"obj_map doit avoir le rabais ennemi ({expected_enemy_dist}), "
+        f"obtenu {combined[5,5]}"
+    )
+    assert expected_enemy_dist < expected_neutral_dist, (
+        "Le rabais ennemi doit être supérieur au rabais neutre "
+        f"({expected_enemy_dist} vs {expected_neutral_dist})"
     )
