@@ -4609,11 +4609,12 @@ def _install_stage_config_overrides(
 
     - `opponent_mix` : le pool de l'etape, quand elle en a un.
     - `model_gating_min_benchmark_floor` DESARME. Ce gate compare le pire score aux bots de
-      REFERENCE, satures a 1.00 : le plancher de 0.9 de `x1_long` est franchi par n'importe
-      quel modele, donc il laisse passer tout ce qu'il est cense filtrer. Ce qui decide
-      desormais si une etape est retenue, c'est le plancher dur contre le champion le plus
-      recent (`evaluate_stage_gate`), mesure APRES le run. Laisser les deux, ce serait garder
-      un gate qui ne separe rien tout en pretendant selectionner.
+      REFERENCE, satures a 1.00 cote agent des la premiere evaluation : n'importe quel plancher
+      pose dessus est franchi par n'importe quel modele. Il a ete RETIRE des profils le
+      2026-08-22 (`x1_long` a 0.0, R0a ferme sans franchir sa fourchette) ; ce desarmement-ci
+      reste la garde qui empeche un profil de le rearmer sous une etape. Ce qui decide si une
+      etape est retenue, c'est le plancher dur contre le champion le plus recent
+      (`evaluate_stage_gate`), mesure APRES le run.
     """
     original_load = config.load_agent_training_config
 

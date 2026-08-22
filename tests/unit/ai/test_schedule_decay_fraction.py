@@ -349,8 +349,17 @@ LONG_PROFILE_MODEL_GATING_ENABLED: dict[str, bool] = {"x1_long": True, "x5_long"
 
 #: `model_gating_min_benchmark_floor` ATTENDU quand le gate est actif. Absent des profils où
 #: model_gating_enabled=false (x5_long) : la clé n'y a aucun effet et n'est pas requise.
-#: x1_long=0.90, MESURÉ le 2026-08-02 (vs_control 0.71, seuil franchi).
-LONG_PROFILE_MODEL_GATING_BENCHMARK_FLOOR: dict[str, float] = {"x1_long": 0.90}
+#: x1_long=0.0 depuis le 2026-08-22 : gate RETIRÉ. Il compare le pire score aux bots de
+#: RÉFÉRENCE, saturés à 1,00 côté agent depuis la toute première évaluation — le plancher de
+#: 0,90 était franchi par n'importe quel modèle, donc il ne séparait rien. R0a a tenté de
+#: rendre ces bots discriminants et s'est fermé sans franchir sa fourchette ([0,40 ; 0,60]
+#: bot-contre-bot, mesure finale 0,306 / 0,297 / 0,280) : les reference_* sont abandonnés comme
+#: étalons de force. Ce qui sélectionne désormais, c'est le plancher dur de 0,55 contre le
+#: champion le plus récent d'une étape de curriculum (`ai/curriculum.evaluate_stage_gate`).
+#: 0.0 est la valeur d'arrêt prévue par le mécanisme (`training_callbacks`, le contrôle est
+#: sauté quand le plancher vaut 0.0), pas une clé absente.
+#: Valeur précédente : 0.90, mesurée le 2026-08-02 (vs_control 0.71, seuil franchi).
+LONG_PROFILE_MODEL_GATING_BENCHMARK_FLOOR: dict[str, float] = {"x1_long": 0.0}
 
 
 @pytest.mark.parametrize(

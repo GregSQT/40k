@@ -153,9 +153,12 @@ Justifications datées inscrites dans `ai/benchmark_bots.py` lignes 64-82.
   doctrine sans dérive (contrôle). ⛔ Non atteint au 2026-08-21 — voir la mesure ci-dessus.
 - ⚠️ **Depuis le 2026-08-22, `--etape` DÉSARME `model_gating_min_benchmark_floor`** (le pose à
   0,0 pour la durée du run) : la sélection d'une étape du curriculum appartient au plancher dur
-  contre le champion le plus récent. La re-pose ci-dessous ne concerne donc que les runs LANCÉS
-  SANS `--etape`. Voir [bot.md#league](../../Roadmap/bot.md#league).
-- Puis SEULEMENT une fois la fourchette atteinte, re-poser
+  contre le champion le plus récent. Voir [bot.md#league](../../Roadmap/bot.md#league).
+- ⛔ **La re-pose décrite ci-dessous N'AURA PAS LIEU** (décision du 2026-08-22,
+  [bot.md#r0a-references](../../Roadmap/bot.md#r0a-references)) : les `reference_*` sont
+  abandonnés comme étalons et `x1_long` est passé à 0,0. Le paragraphe est conservé comme trace
+  du protocole envisagé.
+- ~~Puis SEULEMENT une fois la fourchette atteinte, re-poser~~
   `model_gating_min_benchmark_floor` depuis une mesure AGENT (`--test-only`,
   100 ép./bot) : plancher mesuré − marge documentée, **sémantique win-rate agent** (le 0,049 de
   J1 venait d'un score bot-contre-bot — mélange de sémantiques ; le 0,90 actuel, remis le
@@ -204,7 +207,12 @@ sans effet sur reactive ; la régression reactive (−0,026 après fix 2) reflè
 voulu (KILL désormais subordonné à la portée) et non un défaut. La fourchette exige une refonte
 de ciblage ou de la logique d'intention — hors périmètre R0a-bis.
 
-**`benchmark_floor` non reposé** : conditionnel au franchissement de [0,40 ; 0,60].
+**`benchmark_floor` RETIRÉ (2026-08-22)** : la fourchette [0,40 ; 0,60] n'a pas été franchie et
+ne sera pas poursuivie. Les `reference_*` sont abandonnés comme étalons de force, `x1_long`
+passe à 0,0, et la sélection revient au plancher dur de 0,55 contre le champion le plus récent
+([bot.md#r0a-references](../../Roadmap/bot.md#r0a-references)). Les mesures bot-contre-bot de
+R0a-bis ci-dessus restent valides : la réparation a produit ses gains, c'est la cible qui était
+trop basse pour un instrument scripté.
 
 ## 4. R0b — Échelle de checkpoints figés (éval)
 
