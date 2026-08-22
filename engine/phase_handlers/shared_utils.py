@@ -13286,7 +13286,9 @@ def _refresh_enemy_slot_mapping(game_state: Dict[str, Any], our_player: int) -> 
     unmapped = [
         str(sid)
         for sid, e in units_cache.items()
-        if int(e["player"]) != int(our_player) and str(sid) not in mapped
+        if int(e["player"]) != int(our_player)
+        and str(sid) not in mapped
+        and entry_is_on_battlefield(e)
     ]
     if not unmapped:
         return
