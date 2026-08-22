@@ -113,6 +113,10 @@ _MELEE_TRADE_FLOOR = 0.5
 _CONTEST_PULL_ENEMY = 2.0
 _CONTEST_PULL_NEUTRAL = 1.0
 
+#: Seuil de degats attendus encaisses ce tour au-dela duquel la PRESERVE s'active (balanced).
+#: Independant de _VP_LEAD : l'un mesure l'avance en VP, l'autre la pression adverse en HP.
+_SURVIVE_THRESHOLD = 8.0
+
 #: Poids par slot de deploiement — commun aux trois benchmarks.
 _BENCHMARK_PLACEMENT_WEIGHTS: Dict[int, float] = {
     DEPLOYMENT_ACTIONS[0]: 0.20,
@@ -374,7 +378,9 @@ def _score_destinations_weighted(
                 if surplus[i]:
                     m = m + _W_CROWD_BENCH * surplus[i]
                 pull = w_contest * (
-                    _CONTEST_PULL_ENEMY if holders[i] == 3 - player else _CONTEST_PULL_NEUTRAL
+                    _CONTEST_PULL_ENEMY if holders[i] == 3 - player
+                    else 0.0 if holders[i] == player
+                    else _CONTEST_PULL_NEUTRAL
                 )
                 if pull:
                     m = m.astype(np.float64, copy=False) - pull
@@ -549,7 +555,12 @@ class _BenchmarkBase:
         )
         return action if action is not None else WAIT_ACTION
 
-    def _should_charge(self, attacker: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
+    def _should_charge(
+        self,
+        attacker: Dict[str, Any],
+        game_state: Dict[str, Any],
+        enemies: Optional[List[Dict[str, Any]]] = None,
+    ) -> bool:
         """Vrai si les degats melee esperes valent au moins _MELEE_TRADE_FLOOR * les degats tir.
 
         Fix R0a-bis §1 (2026-08-22) : meme critere qu'AlphaStrikeBot.wants_charge. Charger avec
@@ -557,7 +568,8 @@ class _BenchmarkBase:
         bruts ; en dessous de ce seuil la pression melee ne compense pas les tirs perdus.
         """
         att_id = str(require_key(attacker, "id"))
-        enemies = _living_enemies(attacker, game_state)
+        if enemies is None:
+            enemies = _living_enemies(attacker, game_state)
         if not enemies:
             return False
         best_melee = max(
@@ -568,8 +580,14 @@ class _BenchmarkBase:
         )
         return best_melee >= best_ranged * _MELEE_TRADE_FLOOR
 
-    def _charge(self, valid_actions: List[int], game_state: Dict[str, Any], active_unit: Dict[str, Any]) -> int:
-        if not self._should_charge(active_unit, game_state):
+    def _charge(
+        self,
+        valid_actions: List[int],
+        game_state: Dict[str, Any],
+        active_unit: Dict[str, Any],
+        enemies: Optional[List[Dict[str, Any]]] = None,
+    ) -> int:
+        if not self._should_charge(active_unit, game_state, enemies=enemies):
             return self._wait_or_first(valid_actions)
         att_id = str(require_key(active_unit, "id"))
         action = _best_slot_action(
@@ -688,7 +706,7 @@ class ReferenceBalancedBot(_BenchmarkBase):
         vp = require_key(game_state, "victory_points")
         my_vp = float(vp[player])
         opp_vp = float(vp[3 - player])
-        if s_survive >= 8.0 and my_vp >= opp_vp + _VP_LEAD:
+        if s_survive >= _SURVIVE_THRESHOLD and my_vp >= opp_vp + _VP_LEAD:
             return "PRESERVE"
         if s_kill >= s_score_scaled and s_kill > 0.0:
             return "KILL"
@@ -732,7 +750,7 @@ class ReferenceBalancedBot(_BenchmarkBase):
                 return self._wait_or_first(valid_actions)
             enemies = _living_enemies(active_unit, game_state)
             if self._elect_intent(active_unit, game_state, enemies) == "KILL":
-                return self._charge(valid_actions, game_state, active_unit)
+                return self._charge(valid_actions, game_state, active_unit, enemies=enemies)
             return self._wait_or_first(valid_actions)
         if phase == "fight":
             return self._fight(valid_actions, game_state, active_unit)
@@ -814,11 +832,12 @@ class ReferenceDenialBot(_BenchmarkBase):
                 return self._wait_or_first(valid_actions)
             # Ne charger que si un ennemi est sur un objectif — la faute punie est le push aveugle.
             zones = objective_hex_sets(game_state)
+            enemies = _living_enemies(active_unit, game_state)
             if zones and any(
                 unit_is_within_objective(game_state, str(e["id"]), zones)
-                for e in _living_enemies(active_unit, game_state)
+                for e in enemies
             ):
-                return self._charge(valid_actions, game_state, active_unit)
+                return self._charge(valid_actions, game_state, active_unit, enemies=enemies)
             return self._wait_or_first(valid_actions)
         if phase == "fight":
             if not any(a in valid_actions for a in mi.FIGHT_SLOTS):
