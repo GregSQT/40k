@@ -28,12 +28,8 @@ def _make_args(etape: str = "P4") -> SimpleNamespace:
     )
 
 
-def _make_config(models_root: str):
-    class _Cfg:
-        def get_models_root(self):
-            return models_root
-
-    return _Cfg()
+def _make_config(models_root: str) -> SimpleNamespace:
+    return SimpleNamespace(get_models_root=lambda: models_root)
 
 
 def _make_curriculum() -> dict:
@@ -75,36 +71,40 @@ def _make_canonical_model(tmp_path) -> str:
     return str(model)
 
 
-# ── Tests ───────────────────────────────────────────────────────────────────────────────────
-
-
-def _patch_common(monkeypatch, canonical: str, score: float):
-    """Mocks communs aux deux tests : score + chemin canonique. TB est mockee par chaque test."""
-    monkeypatch.setattr(train_mod, "build_agent_model_path", lambda _root, _key: canonical)
-    monkeypatch.setattr(train_mod, "_score_stage_against_pool", lambda *_a, **_kw: {"P3": score})
-
-
-def test_gate_refus_renvoie_exit_1_et_nescrit_aucun_zip(tmp_path, monkeypatch):
-    """Score sous le plancher → exit 1, aucun _P4.zip cree, copy_tensorboard_run non appele, journal ecrit quand meme."""
+def _make_context(tmp_path):
     canonical = _make_canonical_model(tmp_path)
     args = _make_args()
     config = _make_config(str(tmp_path))
     curriculum = _make_curriculum()
     stage = curriculum["stages"]["P4"]
     run_info = _make_run_info(tmp_path)
+    return canonical, args, config, curriculum, stage, run_info
 
-    _patch_common(monkeypatch, canonical, score=0.40)
+
+# ── Tests ───────────────────────────────────────────────────────────────────────────────────
+
+
+def _patch_common(monkeypatch, tmp_path, canonical: str, score: float):
+    """Mocks communs aux deux tests : score + chemin canonique + journal. TB est mockee par chaque test."""
+    monkeypatch.setattr(train_mod, "build_agent_model_path", lambda _root, _key: canonical)
+    monkeypatch.setattr(train_mod, "_score_stage_against_pool", lambda *_a, **_kw: {"P3": score})
+    log_path = tmp_path / "curriculum.log"
+    monkeypatch.setattr(
+        train_mod, "append_curriculum_log",
+        lambda entry, path=None: curriculum_mod.append_curriculum_log(entry, str(log_path)),
+    )
+    return log_path
+
+
+def test_gate_refus_renvoie_exit_1_et_nescrit_aucun_zip(tmp_path, monkeypatch):
+    """Score sous le plancher → exit 1, aucun _P4.zip cree, copy_tensorboard_run non appele, journal ecrit quand meme."""
+    canonical, args, config, curriculum, stage, run_info = _make_context(tmp_path)
+    log_path = _patch_common(monkeypatch, tmp_path, canonical, score=0.40)
 
     tb_copied = []
     monkeypatch.setattr(
         train_mod, "copy_tensorboard_run",
         lambda run_dir, etape: tb_copied.append((run_dir, etape)) or "/fake/tb",
-    )
-
-    log_path = tmp_path / "curriculum.log"
-    monkeypatch.setattr(
-        train_mod, "append_curriculum_log",
-        lambda entry, path=None: curriculum_mod.append_curriculum_log(entry, str(log_path)),
     )
 
     exit_code = train_mod._close_curriculum_stage(args, config, curriculum, stage, run_info)
@@ -125,26 +125,14 @@ def test_gate_refus_renvoie_exit_1_et_nescrit_aucun_zip(tmp_path, monkeypatch):
 
 def test_gate_accepte_renvoie_exit_0_et_ecrit_zip_et_journal(tmp_path, monkeypatch):
     """Score au-dessus de la cible → exit 0, _P4.zip cree, TB copie, journal marque accepted."""
-    canonical = _make_canonical_model(tmp_path)
-    args = _make_args()
-    config = _make_config(str(tmp_path))
-    curriculum = _make_curriculum()
-    stage = curriculum["stages"]["P4"]
-    run_info = _make_run_info(tmp_path)
-
-    _patch_common(monkeypatch, canonical, score=0.65)
+    canonical, args, config, curriculum, stage, run_info = _make_context(tmp_path)
+    log_path = _patch_common(monkeypatch, tmp_path, canonical, score=0.65)
 
     tb_copied = []
     monkeypatch.setattr(
         train_mod,
         "copy_tensorboard_run",
-        lambda run_dir, etape: tb_copied.append((run_dir, etape)) or "/fake/tb/P4",
-    )
-
-    log_path = tmp_path / "curriculum.log"
-    monkeypatch.setattr(
-        train_mod, "append_curriculum_log",
-        lambda entry, path=None: curriculum_mod.append_curriculum_log(entry, str(log_path)),
+        lambda run_dir, etape: tb_copied.append((run_dir, etape)) or "/fake/tb",
     )
 
     exit_code = train_mod._close_curriculum_stage(args, config, curriculum, stage, run_info)
