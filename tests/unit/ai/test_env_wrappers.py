@@ -203,6 +203,7 @@ def test_compute_pool_ratio_for_episode_progression() -> None:
         self_play_warmup_episodes=2,
         self_play_n_envs=1,  # budgets deja exprimes par environnement dans ce test
         self_play_snapshot_path="snapshot.zip",
+        self_play_snapshot_label="stub_v0",
         self_play_snapshot_refresh_episodes=1,
         self_play_snapshot_device="cpu",
     )
@@ -228,6 +229,7 @@ def test_self_play_ramp_is_expressed_per_environment() -> None:
         self_play_warmup_episodes=0,
         self_play_n_envs=4,           # → 10 épisodes par env
         self_play_snapshot_path="snapshot.zip",
+        self_play_snapshot_label="stub_v0",
         self_play_snapshot_refresh_episodes=1,
         self_play_snapshot_device="cpu",
     )
@@ -464,6 +466,7 @@ def _frozen_pool_wrapper(**overrides):
         self_play_warmup_episodes=0,
         self_play_n_envs=1,
         self_play_snapshot_path="/introuvable/model_agent_P0.zip",
+        self_play_snapshot_label="stub_v0",
         self_play_snapshot_device="cpu",
     )
     kwargs.update(overrides)
@@ -516,6 +519,7 @@ def test_compute_pool_ratio_interpolates_between_start_and_end() -> None:
         self_play_warmup_episodes=2,
         self_play_n_envs=1,  # budgets deja exprimes par environnement dans ce test
         self_play_snapshot_path="snapshot.zip",
+        self_play_snapshot_label="stub_v0",
         self_play_snapshot_refresh_episodes=1,
         self_play_snapshot_device="cpu",
     )
