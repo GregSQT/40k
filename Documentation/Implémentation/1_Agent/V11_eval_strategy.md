@@ -119,13 +119,15 @@ point de vue de l'apprentissage.
   (`_build_training_bots_from_config`, train.py ~L91 ; 5 classes supportées, toutes pondérées
   dans la config actuelle depuis la refonte du panel du 2026-07-30 — `aggressive_smart` et
   `defensive_smart` ont été supprimés). Configuré dans les 5 phases.
-- `training_config.opponent_mix` — self-play progressif : `self_play_ratio_start` →
-  `self_play_ratio_end`, `warmup_episodes`, snapshot publié par
-  `_publish_self_play_snapshot` (train.py ~L2854) et rechargé par mtime dans
-  `BotControlledEnv` (env_wrappers ~L515). Chaîne complète vérifiée : parse → publication →
-  rechargement. Le « progressivement » est donc de la config.
-  ⚠️ `opponent_mix` n'est PARSÉ que dans `train_with_scenario_rotation` (~L2362) —
-  `create_multi_agent_model` l'ignore totalement.
+- `training_config.opponent_mix` — part rampée d'adversaires FIGÉS : `self_play_ratio_start` →
+  `self_play_ratio_end`, `warmup_episodes`, et `pool`, une liste pondérée d'archives
+  d'étapes antérieures. La rampe pilote la frontière bots/pool ; la composition interne du pool
+  est réalisée par la répartition des ENVIRONNEMENTS (`ai/curriculum.assign_pool_members_to_envs`),
+  chaque worker chargeant UN membre une fois pour toutes.
+  ⚠️ **Réécrit le 2026-08-22** ([bot.md#league](../../Roadmap/bot.md#league)). Avant :
+  `snapshot_model_path`, un instantané du modèle courant republié pendant le run par
+  `_publish_self_play_snapshot` et rechargé par mtime. La republication a été retirée, et avec
+  elle le refus d'`opponent_mix` hors du chemin de rotation de scénarios.
 
 <a id="s10.4"></a>
 ### 10.4 ⚠️ Écart CODE vs PLAN à corriger avant le premier run

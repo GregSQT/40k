@@ -168,10 +168,27 @@ Distinct du MCTS adversaire d'entraînement ([infra.md#mcts](infra.md#mcts)).
 
 ## Tranches 2-3 benchmark — PFSP, league, exploiters {#league}
 
-**Différées** (E→H). Code et tests seulement ; les runs coûtent : ~200 h pour P1→P10, ~60 h pour trois exploiters.
+**Schedule P0→P10 + exploiters : CODE ET TESTS LIVRÉS le 2026-08-22.** Les runs restent à
+jouer (~200 h pour P1→P10, ~60 h pour trois exploiters), un par commande `--etape`.
 
-Prérequis d'exécution : `x1_selfplay`, livré mais jamais exécuté.
+Livré : `config/agents/ArmageddonAgent/curriculum.json` (14 étapes P0..P10 + E1..E3),
+`ai/curriculum.py`, `--etape` dans `ai/train.py`, `opponent_mix.pool` (liste pondérée
+d'adversaires figés) à la place de `snapshot_model_path`.
 
-Contenu : league historique, PFSP, exploiters, schedule P0→P10 (disposition disque, schéma policy.yml, câblage sur `_select_opponent_mode_for_episode`, cache LRU, sampler PFSP, protocole d'exploiter, quatre gates de promotion).
+Trois écarts assumés par rapport au contenu prévu :
+
+- **Pas de sampler PFSP ni de cache LRU.** Le pool est réalisé par la répartition des
+  ENVIRONNEMENTS : chaque worker reçoit un membre et le charge une fois. Un tirage par épisode
+  aurait imposé de garder les treize membres du plus gros pool vivants dans chacun des
+  quarante-huit processus ; la répartition par-env donne les mêmes proportions pour l'empreinte
+  mémoire d'aujourd'hui (un `_frozen_model` par processus).
+- **Pas de `policy.yml`.** Le schéma vit dans `curriculum.json`, à côté des autres configs
+  d'agent.
+- **Un seul gate de promotion**, pas quatre : plancher dur de 0,55 sur le score contre le
+  champion le plus récent (cible affichée 0,60, mesure sur 300 épisodes, erreur-type 2,9
+  points). `benchmark_floor` est désarmé pendant une étape — il compare le pire score aux bots
+  de référence, saturés à 1,00, donc il ne sépare rien. La monotonie du pool est journalisée en
+  DIAGNOSTIC et non en gate : les learners démarrent `--new`, donc deux étapes voisines sont
+  des runs indépendants et peuvent se départager dans le désordre sans anomalie.
 
 → `Documentation/Implémentation/Bot_refactor.md` §0bis (décisions datées) et §7

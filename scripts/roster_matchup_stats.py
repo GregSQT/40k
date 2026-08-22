@@ -584,7 +584,9 @@ def _build_eval_env(
             # ci-dessus est deja per-env (cf. V11 §0.57).
             self_play_n_envs=1,
             self_play_snapshot_path=model_path,
-            self_play_snapshot_refresh_episodes=1,
+            # Le modele ne bouge pas pendant le script : le charger une fois suffisait, et le
+            # refresh_episodes=1 d'avant le rechargeait a CHAQUE episode.
+            self_play_snapshot_frozen=True,
             self_play_snapshot_device="cpu",
             self_play_deterministic=True,
         )

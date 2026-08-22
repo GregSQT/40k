@@ -192,7 +192,7 @@ def test_resolve_controlled_player_respects_fixed_modes() -> None:
     assert wrapper_p2._resolve_controlled_player_for_episode() == 2
 
 
-def test_compute_self_play_ratio_for_episode_progression() -> None:
+def test_compute_pool_ratio_for_episode_progression() -> None:
     wrapper = BotControlledEnv(
         _DummyEngine(),
         bot=_DummyBot(),
@@ -207,9 +207,9 @@ def test_compute_self_play_ratio_for_episode_progression() -> None:
         self_play_snapshot_device="cpu",
     )
     wrapper._episode_index = 1
-    assert wrapper._compute_self_play_ratio_for_episode() == pytest.approx(0.1)
+    assert wrapper._compute_pool_ratio_for_episode() == pytest.approx(0.1)
     wrapper._episode_index = 10
-    assert wrapper._compute_self_play_ratio_for_episode() == pytest.approx(0.5)
+    assert wrapper._compute_pool_ratio_for_episode() == pytest.approx(0.5)
 
 
 def test_self_play_ramp_is_expressed_per_environment() -> None:
@@ -232,9 +232,9 @@ def test_self_play_ramp_is_expressed_per_environment() -> None:
         self_play_snapshot_device="cpu",
     )
     wrapper._episode_index = 0
-    assert wrapper._compute_self_play_ratio_for_episode() == pytest.approx(0.0)
+    assert wrapper._compute_pool_ratio_for_episode() == pytest.approx(0.0)
     wrapper._episode_index = 10  # dernier épisode de CE worker
-    assert wrapper._compute_self_play_ratio_for_episode() == pytest.approx(1.0), (
+    assert wrapper._compute_pool_ratio_for_episode() == pytest.approx(1.0), (
         "la rampe self-play doit être parcourue en entier par chaque environnement"
     )
 
@@ -436,12 +436,57 @@ def test_get_decision_owner_from_mask_detects_mixed_owners() -> None:
         wrapper._get_decision_owner_from_mask()
 
 
-def test_compute_self_play_ratio_returns_zero_when_disabled() -> None:
+def _frozen_pool_wrapper(**overrides):
+    kwargs = dict(
+        self_play_opponent_enabled=True,
+        self_play_ratio_start=1.0,
+        self_play_ratio_end=1.0,
+        self_play_total_episodes=10,
+        self_play_warmup_episodes=0,
+        self_play_n_envs=1,
+        self_play_snapshot_path="/introuvable/model_agent_P0.zip",
+        self_play_snapshot_device="cpu",
+    )
+    kwargs.update(overrides)
+    return BotControlledEnv(_DummyEngine(), bot=_DummyBot(), **kwargs)
+
+
+def test_a_frozen_pool_opponent_is_loaded_once_and_never_reread() -> None:
+    """Un membre du pool est une archive : le relire, c'est payer 48 chargements pour rien.
+
+    La preuve tient au chemin INTROUVABLE : toute relecture leverait `FileNotFoundError`.
+    Le compteur d'episodes est pousse tres au-dela de n'importe quel `refresh` pour montrer
+    que ce n'est pas lui qui retient le rechargement.
+    """
+    wrapper = _frozen_pool_wrapper(self_play_snapshot_frozen=True)
+    wrapper._frozen_model = object()
+    wrapper._episodes_since_snapshot_refresh = 10 ** 6
+    wrapper._reload_self_play_snapshot_if_needed()
+
+
+def test_a_non_frozen_snapshot_is_still_reread_when_the_counter_expires() -> None:
+    """Jumeau du test precedent : sans `frozen`, la relecture a bien lieu."""
+    wrapper = _frozen_pool_wrapper(self_play_snapshot_refresh_episodes=1)
+    wrapper._frozen_model = object()
+    wrapper._episodes_since_snapshot_refresh = 10 ** 6
+    with pytest.raises(FileNotFoundError):
+        wrapper._reload_self_play_snapshot_if_needed()
+
+
+def test_a_frozen_snapshot_refuses_a_refresh_period() -> None:
+    """Les deux ensemble n'ont pas de sens : le nombre serait ignore en silence."""
+    with pytest.raises(ValueError, match="snapshot_frozen"):
+        _frozen_pool_wrapper(
+            self_play_snapshot_frozen=True, self_play_snapshot_refresh_episodes=10
+        )
+
+
+def test_compute_pool_ratio_returns_zero_when_disabled() -> None:
     wrapper = BotControlledEnv(_DummyEngine(), bot=_DummyBot(), self_play_opponent_enabled=False)
-    assert wrapper._compute_self_play_ratio_for_episode() == 0.0
+    assert wrapper._compute_pool_ratio_for_episode() == 0.0
 
 
-def test_compute_self_play_ratio_interpolates_between_start_and_end() -> None:
+def test_compute_pool_ratio_interpolates_between_start_and_end() -> None:
     wrapper = BotControlledEnv(
         _DummyEngine(),
         bot=_DummyBot(),
@@ -456,7 +501,7 @@ def test_compute_self_play_ratio_interpolates_between_start_and_end() -> None:
         self_play_snapshot_device="cpu",
     )
     wrapper._episode_index = 6  # midpoint-ish after warmup
-    ratio = wrapper._compute_self_play_ratio_for_episode()
+    ratio = wrapper._compute_pool_ratio_for_episode()
     assert 0.2 < ratio < 0.6
 
 

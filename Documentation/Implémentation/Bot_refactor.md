@@ -811,6 +811,14 @@ c'est ce mécanisme-là avec N membres au lieu d'un.**
 **Ce qui manque, exactement** : `opponent_mix` ne connaît qu'**un** chemin de snapshot, republié en
 place — donc l'adversaire précédent est détruit à chaque republication.
 
+> ✅ **COMBLÉ le 2026-08-22** ([bot.md#league](../Roadmap/bot.md#league)). `opponent_mix` porte
+> `pool`, une liste pondérée d'adversaires FIGÉS, et la republication a été retirée (plus rien
+> ne l'écoutait). Deux écarts avec le plan ci-dessous : le pool est réalisé par la répartition
+> des ENVIRONNEMENTS et non par un tirage par épisode (un membre par worker, chargé une fois —
+> l'empreinte mémoire reste celle d'un seul modèle figé par processus), et il n'y a ni PFSP ni
+> cache LRU. `_compute_self_play_ratio_for_episode` s'appelle désormais
+> `_compute_pool_ratio_for_episode` et délègue à `ai/curriculum.ramped_ratio`.
+
 #### E.1 Disposition sur disque
 
 ```

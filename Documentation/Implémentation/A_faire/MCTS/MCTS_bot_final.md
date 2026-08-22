@@ -160,7 +160,9 @@ En **entraînement**, les transitions utilisent typiquement le **VecEnv**, les w
 
 ### 4.1 État actuel (référence)
 
-`config/agents/<Agent>/<Agent>_training_config.json` peut définir `opponent_mix` avec notamment : `enabled`, `self_play_ratio_start`, `self_play_ratio_end`, `warmup_episodes`, `snapshot_model_path`, `snapshot_update_freq_episodes`, `self_play_snapshot_device`, `self_play_deterministic`. Chargement décrit dans `Documentation/AI_TRAINING.md` et `ai/train.py`.
+`config/agents/<Agent>/<Agent>_training_config.json` peut définir `opponent_mix` avec notamment : `enabled`, `self_play_ratio_start`, `self_play_ratio_end`, `warmup_episodes`, `pool`, `self_play_snapshot_device`, `self_play_deterministic`. Chargement décrit dans `ai/train.py::build_training_opponents`.
+
+⚠️ **Schéma changé le 2026-08-22** ([bot.md#league](../../../Roadmap/bot.md#league)) : `snapshot_model_path` et `snapshot_update_freq_episodes` ont été remplacés par `pool`, une LISTE PONDÉRÉE d'adversaires figés (`{"label", "path", "weight"}`) répartie par ENVIRONNEMENT — chaque worker en charge un seul, une fois. La rampe pilote la frontière bots/pool, plus le couple bots/self-play. Les exemples de ce document qui portent encore les anciennes clés sont périmés sur ce point.
 
 ### 4.2 Troisième mode : comparaison
 

@@ -23,6 +23,7 @@ from typing import Optional, List, Tuple
 from stable_baselines3.common.monitor import Monitor
 from sb3_contrib.common.wrappers import ActionMasker
 from ai.env_wrappers import SelfPlayWrapper, BotControlledEnv
+from shared.data_validation import require_key, require_positive_int
 
 __all__ = [
     'check_gpu_availability',
@@ -149,30 +150,52 @@ _SELF_PLAY_ARGS = (
     ("self_play_total_episodes", "total_episodes", int),
     ("self_play_warmup_episodes", "warmup_episodes", int),
     ("self_play_n_envs", "n_envs", int),
-    ("self_play_snapshot_path", "snapshot_model_path", str),
-    ("self_play_snapshot_refresh_episodes", "snapshot_refresh_episodes", int),
     ("self_play_snapshot_device", "snapshot_device", str),
     ("self_play_deterministic", "deterministic", bool),
 )
 
 
 def self_play_is_enabled(opponent_mix_config) -> bool:
-    """`opponent_mix` demande-t-il un adversaire de self-play ? Absent = non, sans erreur."""
+    """`opponent_mix` demande-t-il un adversaire fige ? Absent = non, sans erreur."""
     return opponent_mix_config is not None and opponent_mix_config.get("enabled") is True
 
 
-def build_self_play_kwargs(opponent_mix_config) -> dict:
+def build_self_play_kwargs(opponent_mix_config, env_rank: int = 0) -> dict:
     """Arguments `self_play_*` de `BotControlledEnv`, derives d'`opponent_mix`. SOURCE UNIQUE.
 
     Ce cablage etait recopie a la main sur chaque site de construction : les branches mono-env
     l'OMETTAIENT purement et simplement, donc un `opponent_mix.enabled: true` y etait ignore EN
     SILENCE (aucun self-play, aucun message), et la branche qui le portait a rate l'ajout de
     `self_play_n_envs` (V11 §0.57). Un seul point de verite supprime les deux defauts.
+
+    `env_rank` : `opponent_mix.pool` est une LISTE PONDEREE d'adversaires figes, et la
+    composition du pool est realisee par la repartition des ENVIRONNEMENTS, pas par un tirage
+    par episode. Cet environnement-ci recoit donc UN membre, resolu ici, qu'il chargera une
+    fois pour toutes (`self_play_snapshot_frozen`). Tirer par episode aurait impose de garder
+    les treize membres du plus gros pool vivants dans CHACUN des quarante-huit processus.
     """
     enabled = self_play_is_enabled(opponent_mix_config)
     kwargs: dict = {"self_play_opponent_enabled": enabled}
     for arg, key, cast in _SELF_PLAY_ARGS:
         kwargs[arg] = cast(opponent_mix_config[key]) if enabled else (False if cast is bool else None)
+    # Les adversaires d'`opponent_mix` sont TOUJOURS figes depuis le curriculum : plus aucun
+    # instantane du modele courant n'est republie pendant le run, donc rien a rafraichir.
+    kwargs["self_play_snapshot_frozen"] = enabled
+    kwargs["self_play_snapshot_refresh_episodes"] = None
+    if not enabled:
+        kwargs["self_play_snapshot_path"] = None
+        return kwargs
+
+    from ai.curriculum import assign_pool_members_to_envs
+
+    pool = require_key(opponent_mix_config, "pool")
+    n_envs = require_positive_int(opponent_mix_config.get("n_envs"), "opponent_mix.n_envs")
+    if not isinstance(env_rank, int) or isinstance(env_rank, bool) or not (0 <= env_rank < n_envs):
+        raise ValueError(
+            f"build_self_play_kwargs: env_rank doit etre dans [0,{n_envs}[ (got {env_rank!r})"
+        )
+    member = assign_pool_members_to_envs(pool, n_envs)[env_rank]
+    kwargs["self_play_snapshot_path"] = str(require_key(member, "path"))
     return kwargs
 
 
@@ -278,7 +301,7 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             agent_seat_mode=agent_seat_mode,
             global_seed=global_seed,
             env_rank=rank,
-            **build_self_play_kwargs(opponent_mix_config),
+            **build_self_play_kwargs(opponent_mix_config, env_rank=rank),
         )
 
         # Wrap with Monitor for episode statistics
