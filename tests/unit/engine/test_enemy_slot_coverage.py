@@ -195,6 +195,66 @@ def test_no_overflow_log_when_everyone_fits():
     assert not [m for m in captured if "sans slot" in m]
 
 
+def test_enemy_in_strategic_reserves_gets_no_slot():
+    """Une escouade ennemie hors table (col=-1) ne reçoit pas de slot (§20 réserves stratégiques).
+
+    Bug corrigé : la garde entry_is_on_battlefield manquait côté ennemi dans
+    _refresh_enemy_slot_mapping, donc col=-1 était encodé comme feature spatiale.
+    """
+    eng = _make_engine([_unit_cfg(1, 1, [(20, 20)])] + _enemies(2))
+    gs = eng.game_state
+    # On force l'une des deux escouades ennemies en réserves stratégiques (sentinelle col=-1).
+    gs.pop("enemy_slot_mapping_p1", None)
+    enemy_sids = [str(sid) for sid, e in gs["units_cache"].items()
+                  if int(e["player"]) == 2]
+    reserve_sid = enemy_sids[0]
+    gs["units_cache"][reserve_sid]["col"] = -1
+    for mid in gs["squad_models"].get(reserve_sid, []):
+        gs["models_cache"][mid]["col"] = -1
+
+    mapping = get_enemy_slot_mapping(gs, 1)
+    assert reserve_sid not in mapping, (
+        f"Escouade {reserve_sid} (col=-1, réserves) obtient un slot : "
+        "entry_is_on_battlefield absent côté ennemi"
+    )
+    on_table = [s for s in mapping if s is not None]
+    assert len(on_table) == 1
+
+
+def test_enemy_threat_order_oc_fallback_when_oc_total_is_zero():
+    """La branche OC fallback de _enemy_threat_order lit les models quand OC_TOTAL == 0.
+
+    Sans fallback, oc_total=0 → threat=0 → l'escouade serait reléguée en dernier slot.
+    Avec fallback, l'OC est recalculé depuis models_cache.
+    """
+    eng = _make_engine([_unit_cfg(1, 1, [(20, 20)])] + _enemies(2))
+    gs = eng.game_state
+    gs.pop("enemy_slot_mapping_p1", None)
+    enemy_sids = sorted(
+        [str(sid) for sid, e in gs["units_cache"].items() if int(e["player"]) == 2],
+        key=str,
+    )
+    # Escouade A : OC_TOTAL mis à zéro ; ses models ont OC individuel ≥ 1 (via _unit_cfg oc=).
+    # Elle doit remonter en slot 0 si son fallback-OC × HP > escouade B.
+    sid_a, sid_b = enemy_sids[0], enemy_sids[1]
+    # Donner à A beaucoup plus de HP pour que le fallback lui donne une menace supérieure à B.
+    gs["units_cache"][sid_a]["HP_CUR"] = 10
+    gs["units_cache"][sid_a]["OC_TOTAL"] = 0
+    # B : HP=1, OC_TOTAL=100 → threat=100. A devra avoir oc_fallback × 10 > 100 → oc_fallback>10.
+    gs["units_cache"][sid_b]["HP_CUR"] = 1
+    gs["units_cache"][sid_b]["OC_TOTAL"] = 100
+    # On injecte OC=20 dans chaque model de A pour que le fallback donne oc=20, threat=200 > 100.
+    for mid in gs["squad_models"].get(sid_a, []):
+        gs["models_cache"][mid]["OC"] = 20
+
+    mapping = get_enemy_slot_mapping(gs, 1)
+    filled = [s for s in mapping if s is not None]
+    assert filled[0] == sid_a, (
+        f"Slot 0 attendu = {sid_a} (fallback OC×HP=200) mais obtenu {filled[0]}. "
+        "La branche OC_TOTAL==0 ne bascule pas sur models_cache."
+    )
+
+
 def test_dead_squad_leaves_an_empty_slot_in_the_observation():
     """Un slot dont l'escouade est morte est vide dans l'obs (mask=0), pas rempli de zeros muets."""
     eng = _make_engine([_unit_cfg(1, 1, [(20, 20)])] + _enemies(2))
