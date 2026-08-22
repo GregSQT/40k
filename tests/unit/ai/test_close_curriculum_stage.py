@@ -12,8 +12,6 @@ Tout le reste s'execute reellement.
 import json
 from types import SimpleNamespace
 
-import pytest
-
 import ai.train as train_mod
 import ai.curriculum as curriculum_mod
 
@@ -21,7 +19,7 @@ import ai.curriculum as curriculum_mod
 # ── Fixtures ────────────────────────────────────────────────────────────────────────────────
 
 
-def _make_args(agent_dir: str, etape: str = "P4") -> SimpleNamespace:
+def _make_args(etape: str = "P4") -> SimpleNamespace:
     return SimpleNamespace(
         etape=etape,
         training_config="x1",
@@ -47,8 +45,9 @@ def _make_curriculum() -> dict:
             "eval_episodes": 10,
         },
         "stages": {
-            "P3": {"pool": [], "init": None, "ratio_start": 0.0, "ratio_end": 0.0, "warmup_episodes": 0},
+            "P3": {"role": "learner", "pool": [], "init": None, "ratio_start": 0.0, "ratio_end": 0.0, "warmup_episodes": 0},
             "P4": {
+                "role": "learner",
                 "pool": [{"kind": "champion", "members": ["P3"], "weight": 1.0}],
                 "init": "P3",
                 "ratio_start": 0.20,
@@ -79,28 +78,28 @@ def _make_canonical_model(tmp_path) -> str:
 # ── Tests ───────────────────────────────────────────────────────────────────────────────────
 
 
-def _canonical_path(tmp_path) -> str:
-    return str(tmp_path / "model_Stub.zip")
-
-
-def _patch_common(monkeypatch, tmp_path, score: float):
-    """Mocks communs aux deux tests : score + chemin canonique + TB."""
-    canonical = _canonical_path(tmp_path)
+def _patch_common(monkeypatch, canonical: str, score: float):
+    """Mocks communs aux deux tests : score + chemin canonique. TB est mockee par chaque test."""
     monkeypatch.setattr(train_mod, "build_agent_model_path", lambda _root, _key: canonical)
     monkeypatch.setattr(train_mod, "_score_stage_against_pool", lambda *_a, **_kw: {"P3": score})
-    monkeypatch.setattr(train_mod, "copy_tensorboard_run", lambda *_a, **_kw: "/fake/tb")
 
 
 def test_gate_refus_renvoie_exit_1_et_nescrit_aucun_zip(tmp_path, monkeypatch):
-    """Score sous le plancher → exit 1, aucun _P4.zip cree, journal ecrit quand meme."""
-    _make_canonical_model(tmp_path)
-    args = _make_args(str(tmp_path))
+    """Score sous le plancher → exit 1, aucun _P4.zip cree, copy_tensorboard_run non appele, journal ecrit quand meme."""
+    canonical = _make_canonical_model(tmp_path)
+    args = _make_args()
     config = _make_config(str(tmp_path))
     curriculum = _make_curriculum()
     stage = curriculum["stages"]["P4"]
     run_info = _make_run_info(tmp_path)
 
-    _patch_common(monkeypatch, tmp_path, score=0.40)
+    _patch_common(monkeypatch, canonical, score=0.40)
+
+    tb_copied = []
+    monkeypatch.setattr(
+        train_mod, "copy_tensorboard_run",
+        lambda run_dir, etape: tb_copied.append((run_dir, etape)) or "/fake/tb",
+    )
 
     log_path = tmp_path / "curriculum.log"
     monkeypatch.setattr(
@@ -115,6 +114,8 @@ def test_gate_refus_renvoie_exit_1_et_nescrit_aucun_zip(tmp_path, monkeypatch):
     promoted = tmp_path / "model_Stub_P4.zip"
     assert not promoted.exists(), "aucun zip promeu attendu sur refus"
 
+    assert not tb_copied, "copy_tensorboard_run ne doit pas etre appele sur refus"
+
     entries = [json.loads(line) for line in log_path.read_text().splitlines()]
     assert entries, "le journal doit etre ecrit meme sur refus"
     assert entries[-1]["gate_accepted"] is False
@@ -124,16 +125,16 @@ def test_gate_refus_renvoie_exit_1_et_nescrit_aucun_zip(tmp_path, monkeypatch):
 
 def test_gate_accepte_renvoie_exit_0_et_ecrit_zip_et_journal(tmp_path, monkeypatch):
     """Score au-dessus de la cible → exit 0, _P4.zip cree, TB copie, journal marque accepted."""
-    _make_canonical_model(tmp_path)
-    args = _make_args(str(tmp_path))
+    canonical = _make_canonical_model(tmp_path)
+    args = _make_args()
     config = _make_config(str(tmp_path))
     curriculum = _make_curriculum()
     stage = curriculum["stages"]["P4"]
     run_info = _make_run_info(tmp_path)
 
+    _patch_common(monkeypatch, canonical, score=0.65)
+
     tb_copied = []
-    monkeypatch.setattr(train_mod, "build_agent_model_path", lambda _root, _key: _canonical_path(tmp_path))
-    monkeypatch.setattr(train_mod, "_score_stage_against_pool", lambda *_a, **_kw: {"P3": 0.65})
     monkeypatch.setattr(
         train_mod,
         "copy_tensorboard_run",
