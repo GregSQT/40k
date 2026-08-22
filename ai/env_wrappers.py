@@ -390,6 +390,10 @@ class BotControlledEnv(gym.Wrapper):
                 raise KeyError(
                     "self_play_snapshot_path is required when self_play_opponent_enabled=true"
                 )
+            if not str(self_play_snapshot_label or "").strip():
+                raise KeyError(
+                    "self_play_snapshot_label is required when self_play_opponent_enabled=true"
+                )
             if self._self_play_snapshot_frozen:
                 if self_play_snapshot_refresh_episodes is not None:
                     raise ValueError(
@@ -413,7 +417,7 @@ class BotControlledEnv(gym.Wrapper):
             self._self_play_total_episodes = int(self_play_total_episodes)
             self._self_play_warmup_episodes = int(self_play_warmup_episodes)
             self._self_play_snapshot_path = str(self_play_snapshot_path)
-            self._self_play_snapshot_label = str(self_play_snapshot_label) if self_play_snapshot_label else ""
+            self._self_play_snapshot_label = str(self_play_snapshot_label)
             self._self_play_snapshot_refresh_episodes = resolved_refresh_episodes
             self._self_play_snapshot_device = str(self_play_snapshot_device).strip().lower()
             if not (0.0 <= self._self_play_ratio_start <= 1.0):

@@ -2026,15 +2026,7 @@ class W40KMetricsTracker:
         h.append(float(agent_won))
         if len(h) > self.PERF_WINDOW:
             h.pop(0)
-        rate = self._window_mean(h, self.PERF_WINDOW)
-        if rate is not None:
-            self.writer.add_scalar(f"03_selfplay/{label}", rate, self.episode_count)
-        if self.PERF_WINDOW_FAST < self.PERF_WINDOW:
-            fast = self._window_mean(h, min(self.PERF_WINDOW_FAST, len(h)))
-            if fast is not None and len(h) >= self.PERF_WINDOW_FAST:
-                self.writer.add_scalar(
-                    f"03_selfplay/{label}_{self.PERF_WINDOW_FAST}ep", fast, self.episode_count
-                )
+        self._emit_windowed(f"03_selfplay/{label}", h)
 
     def log_faction_bot_win_rates(
         self,

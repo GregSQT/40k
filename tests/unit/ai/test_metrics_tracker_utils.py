@@ -697,3 +697,15 @@ def test_log_selfplay_win_valeur_correcte() -> None:
 
     scalars = {k: v for k, v, _ in _dw(t).scalars}
     assert scalars["03_selfplay/E1"] == pytest.approx(0.0), "la valeur doit etre la moyenne de la fenetre"
+
+
+def test_log_selfplay_win_emet_fenetre_fast() -> None:
+    """La fenetre reactive (PERF_WINDOW_FAST ep) est emise quand PERF_WINDOW_FAST < PERF_WINDOW."""
+    t = _tracker_stub()
+    t.PERF_WINDOW = 5
+    t.PERF_WINDOW_FAST = 3
+    for _ in range(3):
+        t.log_selfplay_win("F1", 1.0)
+
+    keys = [k for k, _, _ in _dw(t).scalars]
+    assert "03_selfplay/F1_3ep" in keys, "tag reactif absent apres remplissage de la fenetre fast"

@@ -256,6 +256,25 @@ def test_self_play_requires_n_envs() -> None:
         )
 
 
+def test_self_play_requires_snapshot_label() -> None:
+    """Sans `snapshot_label`, les scalars 03_selfplay/* seraient silencieusement absents : erreur explicite."""
+    with pytest.raises(KeyError, match="self_play_snapshot_label is required"):
+        BotControlledEnv(
+            _DummyEngine(),
+            bot=_DummyBot(),
+            self_play_opponent_enabled=True,
+            self_play_ratio_start=0.0,
+            self_play_ratio_end=1.0,
+            self_play_total_episodes=40,
+            self_play_warmup_episodes=0,
+            self_play_n_envs=4,
+            self_play_snapshot_path="snapshot.zip",
+            self_play_snapshot_label="",
+            self_play_snapshot_refresh_episodes=1,
+            self_play_snapshot_device="cpu",
+        )
+
+
 def test_get_bot_action_returns_wait_when_no_eligible_units() -> None:
     decoder = _DummyActionDecoder(mask=[False] * 12, eligible=[])
     engine = _DummyEngine(decoder=decoder)
