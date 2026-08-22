@@ -339,6 +339,11 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
                 raise ValueError(
                     f"{source}: stages[{name}].{label} doit etre dans [0,1] (got {value})"
                 )
+        if ratio_start > ratio_end:
+            raise ValueError(
+                f"{source}: stages[{name}].ratio_start ({ratio_start}) > ratio_end ({ratio_end}) "
+                "— la rampe serait decroissante (pool moins joue vers la fin de l'etape)."
+            )
         if warmup_episodes < 0:
             raise ValueError(
                 f"{source}: stages[{name}].warmup_episodes doit etre >= 0 (got {warmup_episodes})"

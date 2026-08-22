@@ -4848,12 +4848,13 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
         if isinstance(last_bot_eval, dict) else {}
     )
 
+    stage_members = stage_pool_members(stage)
     champion_label = stage_champion_label(stage)
     accepted, gate_reason = evaluate_stage_gate(
         args.etape, champion_label, scores_vs_pool, floor, target
     )
 
-    pool_labels = [member["label"] for member in stage_pool_members(stage)]
+    pool_labels = [member["label"] for member in stage_members]
     monotonicity = pool_monotonicity_diagnostic(
         scores_vs_pool, [label for label in stage_order(curriculum) if label in pool_labels]
     )
@@ -4869,7 +4870,7 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
         "ratio_start": float(require_key(stage, "ratio_start")),
         "ratio_end": float(require_key(stage, "ratio_end")),
         "warmup_episodes": int(require_key(stage, "warmup_episodes")),
-        "pool_weights": {member["label"]: member["weight"] for member in stage_pool_members(stage)},
+        "pool_weights": {member["label"]: member["weight"] for member in stage_members},
         "gate_eval_episodes": eval_episodes,
         "scores_vs_pool": scores_vs_pool,
         "scores_vs_bots": scores_vs_bots,

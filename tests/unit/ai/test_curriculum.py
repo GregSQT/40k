@@ -199,6 +199,16 @@ def test_a_pool_without_champion_is_refused() -> None:
         validate_curriculum(broken)
 
 
+def test_decreasing_ramp_is_refused() -> None:
+    broken = _minimal_curriculum()
+    broken["stages"]["P1"]["ratio_start"] = 0.6
+    broken["stages"]["P1"]["ratio_end"] = 0.1
+    # Ajuster les poids pour que la somme vale ratio_end=0.1
+    broken["stages"]["P1"]["pool"][0]["weight"] = 0.1
+    with pytest.raises(ValueError, match="decroissante"):
+        validate_curriculum(broken)
+
+
 # ── 2. REPARTITION PAR ENVIRONNEMENT ───────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("stage_name", sorted(EXPECTED_STAGES))
