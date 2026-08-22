@@ -33,6 +33,50 @@ sont inertes : le problème est dans la stratégie de ciblage/mouvement des refe
 `benchmark_floor` reste à **0,90** (inerte). La suite est une refonte du ciblage (voir §3.5
 archivé dans curriculum_adversaires_etalons.md).
 
+✅ **R0a-bis livré 2026-08-22** — 3 défauts de 1er ordre corrigés + calibration poids.
+
+**Phase 0 — distribution d'intentions** (6 ép., seed 42, board/44x60x1, holdout, APRÈS fix 2) :
+balanced SCORE 64 % / KILL 16 % / PRESERVE 5 % ; reactive SCORE 82 % / CONTEST 13 % / KILL 5 %.
+Hypothèse « KILL dominait par aveuglement à la portée » : CONFIRMÉE — le correctif fix 2
+ramène SCORE dominant (82 %) contre une domination KILL antérieure.
+
+**Phase 1 — 3 fixes dans `ai/benchmark_bots.py`** (+ 15 tests rouges/verts) :
+
+- **Fix 1** — seuil d'échange de charge : `_MELEE_TRADE_FLOOR = 0,5` (motif `AlphaStrikeBot`) ;
+  aucune charge si dégâts mêlée < dégâts tir × 0,5.
+- **Fix 2** — élection d'intention bornée par portée : `s_kill`/`s_survive` dans `_elect_intent`
+  et transition KILL de `_update_plan` ne comptent que les ennemis à distance ≤ portée + MOVE.
+- **Fix 3** — contestation avec rabais d'hexes : le terme `-w_contest × distance_pleine` est
+  remplacé par le rabais `_CONTEST_PULL_ENEMY = 2,0` / `_CONTEST_PULL_NEUTRAL = 1,0` incorporé
+  dans la carte avant `np.minimum.reduce` (motif `_objective_terms` de `bot_doctrines`).
+
+**Mesure intermédiaire Phase 1** (6 ép., seed 42, holdout) :
+balanced **0,317** (avant 0,248), denial **0,280** (avant 0,269), reactive **0,238** (avant 0,264).
+Balanced +0,069 ; denial +0,011 ; reactive −0,026 (fix 2 rend KILL plus strict, régression dans
+le bruit de 6 ép.).
+
+**Phase 2 — calibration poids** (un terme par run, doctrine en contrôle) :
+
+| Run | Terme modifié | balanced | denial | reactive | Retenu |
+|---|---|---|---|---|---|
+| Run 1 | `_W_BALANCED_SCORE[4]` 2,5→3,5 | 0,329 | 0,275 | 0,234 | oui (marginal, non nuisible) |
+| Run 2 | `_W_DENIAL[0]` 0,9→1,4 | 0,315 | 0,312 | 0,243 | oui (+0,037 denial) |
+| Run 3 | `_W_REACTIVE_SCORE[4]` 2,5→3,5 | 0,312 | 0,315 | 0,248 | revert (bruit) |
+| Run 4 | `_W_REACTIVE_CONTEST[1]` −0,1→+0,1 | 0,312 | 0,315 | 0,243 | revert (nul) |
+
+Valeurs retenues : `_W_BALANCED_SCORE[4]` = 3,5 (date 2026-08-22, run 1 +0,012) ;
+`_W_DENIAL[0]` = 1,4 (date 2026-08-22, run 2 +0,037).
+
+**Mesure finale 20 ép.** (seed 42, board/44x60x1, holdout, 1 440 ép./bot, 2026-08-22) :
+balanced **0,306** (avant R0a-bis : 0,245), denial **0,297** (avant : 0,258),
+reactive **0,280** (avant : 0,262).
+Gains cumulés R0a-bis : balanced +0,061 / denial +0,039 / reactive +0,018.
+**Critère [0,40 ; 0,60] NON franchi.** Dérive doctrine 20 ép. : attrition 0,678 / scorer 0,665 /
+decapitation 0,655 / racer 0,635 / alpha 0,590 / endgame 0,453 / tactical 0,386.
+
+⛔ **`benchmark_floor` NON reposé** — la re-pose reste conditionnelle au franchissement de
+la fourchette. Il reste à **0,90** (inerte).
+
 → `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §3
 
 ---
