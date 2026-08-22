@@ -7341,6 +7341,7 @@ class W40KEngine(gym.Env):
             # appelle fight_v11_enter_fight_step, qui le pose TOUJOURS avant cette branche).
             from engine.phase_handlers.fight_handlers import _fight_v11_engaged_now
             from engine.phase_handlers.shared_utils import _fight_overrun_pile_in_plan
+            _did_overrun = False
             if not _fight_v11_engaged_now(self.game_state, unit):
                 _ov_plan = _fight_overrun_pile_in_plan(self.game_state, squad_id)
                 if _ov_plan is not None:
@@ -7348,6 +7349,7 @@ class W40KEngine(gym.Env):
                     unit = get_unit_by_id(self.game_state, squad_id)
                     if unit is None:
                         raise KeyError(f"Squad {squad_id} introuvable apres overrun pile-in")
+                    _did_overrun = True
 
             # Prédicat de cible = celui du flux PvP (_fight_v11_resolve_attacks) : pool
             # d ennemis en zone d engagement (12.05), pas le mapping de slots gele du tir.
@@ -7355,7 +7357,28 @@ class W40KEngine(gym.Env):
             # meme si sa cible est morte -> overrun 12.06 sans cible). Le PvP le resout en
             # 0 attaque ; le gym en fait autant, via le MEME moteur (0 intent declare ->
             # summary vide, done=True). Aucun dict fabrique a la main.
-            targets = [str(t) for t in _fight_build_valid_target_pool(self.game_state, unit)]
+            if _did_overrun:
+                # Post-overrun : utiliser la meme geometrie per-figurine que le masque.
+                # `_fight_build_valid_target_pool` applique le socle de l ESCOUADE ; un
+                # personnage attache a un socle propre plus grand -> delta jusqu a 4
+                # subhexes a x5 -> pool masque non vide, pool commit vide -> crash.
+                from engine.phase_handlers.fight_handlers import _model_can_fight_target
+                from engine.spatial_relations import enemy_entries_on_battlefield
+                _mc = self.game_state["models_cache"]
+                _uc = self.game_state["units_cache"]
+                _uid_str = str(squad_id)
+                _unit_player = int(require_key(unit, "player"))
+                _alive_mids = [
+                    m for m in self.game_state["squad_models"].get(_uid_str, [])
+                    if m in _mc
+                ]
+                targets = [
+                    _tid
+                    for _tid, _ in enemy_entries_on_battlefield(_uc, _unit_player, exclude_id=_uid_str)
+                    if any(_model_can_fight_target(self.game_state, _mc[m], _uid_str, _tid) for m in _alive_mids)
+                ]
+            else:
+                targets = [str(t) for t in _fight_build_valid_target_pool(self.game_state, unit)]
 
             # V11 §9 P3-1 : la cible est CHOISIE PAR L AGENT, via le slot ennemi porte par
             # l action. `_ai_select_fight_target` ne tranche plus rien ici — elle reste vive pour
@@ -7364,11 +7387,6 @@ class W40KEngine(gym.Env):
             # est dans le pool 12.05, et n ouvre `FIGHT_NO_TARGET` que si le pool est vide. Toute
             # divergence est une rupture, pas un cas a absorber par un repli sur une heuristique.
             if "target_slot" in semantic:
-                if not targets:
-                    raise ValueError(
-                        f"squad_fight: slot de cible recu pour squad {squad_id} alors que le pool "
-                        f"12.05 est VIDE (rupture masque/commit)"
-                    )
                 target_slot = int(semantic["target_slot"])
                 enemy_slot_ids = get_enemy_slot_mapping(
                     self.game_state, int(require_key(cache_entry, "player"))

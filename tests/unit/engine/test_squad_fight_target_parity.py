@@ -536,3 +536,65 @@ def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
     assert mask[SQUAD_ACTION_FIGHT_SLOT_BASE + off_table_slot] == 0, (
         "l'ennemi hors table ne doit jamais ouvrir un slot fight"
     )
+
+
+def test_overrun_post_pilin_uses_per_model_base_size_x5():
+    """Bug 12.06 : post-overrun, le pool de cibles doit utiliser le socle PAR FIGURINE.
+
+    Rupture masque/commit quand un personnage attaché a un socle plus grand que son escouade :
+    le masque utilise _synth_model_entry (socle modèle), l'ancien commit utilisait
+    _fight_build_valid_target_pool (socle escouade). Delta de 2 subhexes → zone de crash de
+    4 subhexes à x5 (euclidien).
+
+    Setup géométrique à x5 :
+    - Personnage à (17,10) BASE_SIZE=10, escouade BASE_SIZE=6.
+    - Ennemi à (0,10) BASE_SIZE=6.
+    - center_dist ≈ 25.5 (hex_center units) ; EZ seuil = 10 × 1.5 = 15.0.
+    - Socle escouade (base=6) : edge ≈ 25.5 - 4.5 - 4.5 = 16.5 > 15.0 → hors EZ (bug).
+    - Socle personnage (base=10) : edge ≈ 25.5 - 7.5 - 4.5 = 13.5 ≤ 15.0 → dans EZ (fix).
+
+    RED (avant fix) : _fight_build_valid_target_pool retourne [] → pool vide.
+    GREEN (après fix) : _model_can_fight_target pour le personnage retourne True.
+    """
+    from engine.phase_handlers.fight_handlers import (
+        _fight_build_valid_target_pool,
+        _model_can_fight_target,
+    )
+    from engine.game_utils import get_unit_by_id
+    from shared.data_validation import require_present
+    from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
+
+    # Escouade P1 : un modèle (personnage) BASE_SIZE=10 ; escouade de BASE_SIZE=6.
+    atk = synthetic_unit("atk", 1, [{"col": 17, "row": 10, "BASE_SIZE": 10}], BASE_SIZE=6)
+    enemy = synthetic_unit("enemy", 2, [{"col": 0, "row": 10}], BASE_SIZE=6)
+
+    gs = synthetic_state(
+        [atk, enemy],
+        phase="fight",
+        game_rules={"engagement_zone": 10},   # 2" × 5 subhex/inch = 10 subhexes
+        inches_to_subhex=5,
+        fight_subphase="fight",
+        current_player=1,
+        fight_step="fights_first",
+        fight_selector=1,
+        engaged_at_fight_step_start={},
+        units_charged={"atk"},
+        units_selected_to_fight=set(),
+        units_fought=set(),
+        pile_in_done=set(),
+        consolidation_done=set(),
+    )
+
+    unit = require_present(get_unit_by_id(gs, "atk"), "unit atk")
+
+    # RED : ancienne branche commit (socle escouade=6) → pool vide — racine du crash bot.
+    assert _fight_build_valid_target_pool(gs, unit) == [], (
+        "socle escouade=6 hors EZ à x5 (edge≈16.5>15.0) : pool doit être vide — racine du bug"
+    )
+
+    # GREEN : nouvelle branche post-overrun (socle par-figurine) → cible trouvée via personnage.
+    mc = gs["models_cache"]
+    alive_mids = [m for m in gs["squad_models"].get("atk", []) if m in mc]
+    assert any(_model_can_fight_target(gs, mc[m], "atk", "enemy") for m in alive_mids), (
+        "personnage socle=10 dans EZ à x5 (edge≈13.5≤15.0) : pool doit être non vide après fix"
+    )
