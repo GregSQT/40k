@@ -1175,6 +1175,11 @@ class MetricsCollectionCallback(BaseCallback):
                 if win_method is None:
                     raise ValueError("win_method is required when winner is not None")
 
+                if info.get("opponent_mode") == "self_play":
+                    self.metrics_tracker.log_selfplay_win(
+                        info.get("self_play_snapshot_label", ""), agent_won
+                    )
+
                 # SEAT-AWARE metrics for TensorBoard (global + per controlled side)
                 if controlled_player == 1:
                     self.seat_aware_counts['episodes_agent_p1'] += 1

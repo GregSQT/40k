@@ -308,6 +308,7 @@ class BotControlledEnv(gym.Wrapper):
         self_play_snapshot_device: Optional[str] = None,
         self_play_deterministic: bool = False,
         self_play_snapshot_frozen: bool = False,
+        self_play_snapshot_label: Optional[str] = None,
     ):
         super().__init__(base_env)
         # Support: bots=[...] for random selection, or bot=X for single opponent
@@ -412,6 +413,7 @@ class BotControlledEnv(gym.Wrapper):
             self._self_play_total_episodes = int(self_play_total_episodes)
             self._self_play_warmup_episodes = int(self_play_warmup_episodes)
             self._self_play_snapshot_path = str(self_play_snapshot_path)
+            self._self_play_snapshot_label = str(self_play_snapshot_label) if self_play_snapshot_label else ""
             self._self_play_snapshot_refresh_episodes = resolved_refresh_episodes
             self._self_play_snapshot_device = str(self_play_snapshot_device).strip().lower()
             if not (0.0 <= self._self_play_ratio_start <= 1.0):
@@ -468,6 +470,7 @@ class BotControlledEnv(gym.Wrapper):
             self._self_play_total_episodes = 1
             self._self_play_warmup_episodes = 0
             self._self_play_snapshot_path = ""
+            self._self_play_snapshot_label = ""
             self._self_play_snapshot_refresh_episodes = 1
             self._self_play_snapshot_device = "auto"
 
@@ -1277,6 +1280,7 @@ class BotControlledEnv(gym.Wrapper):
             info["opponent_mode"] = (
                 "self_play" if self._episode_uses_self_play_opponent else "bot"
             )
+            info["self_play_snapshot_label"] = self._self_play_snapshot_label if self._episode_uses_self_play_opponent else ""
             info["self_play_ratio_current"] = self._self_play_ratio_current
             # PPO appelle `action_masks()` juste apres ce retour : on lui sert la decision etablie
             # par la boucle. `_play_bot_until_control_returns` l'a remise a None s'il a construit
@@ -1480,6 +1484,7 @@ class BotControlledEnv(gym.Wrapper):
         info["opponent_mode"] = (
             "self_play" if self._episode_uses_self_play_opponent else "bot"
         )
+        info["self_play_snapshot_label"] = self._self_play_snapshot_label if self._episode_uses_self_play_opponent else ""
         info["self_play_ratio_current"] = self._self_play_ratio_current
         return obs, float(cumulative_reward), terminated, truncated, info, ready_decision
 

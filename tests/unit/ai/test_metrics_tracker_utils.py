@@ -194,6 +194,7 @@ def _tracker_stub() -> W40KMetricsTracker:
     # stub la reprend (result_bonuses.kill_target) : aucun test ne l'observe aujourd'hui, mais
     # celui qui l'observera un jour doit lire un facteur plausible, pas un nombre invente.
     t.reward_kill_target = 2.0
+    t._selfplay_wins: Dict[str, List[float]] = {}
     t._game_history = {k: [] for k in W40KMetricsTracker.GAME_HISTORY_KEYS}
     # Ventilation par mode de deploiement : etat construit depuis les constantes de CLASSE, pas
     # recopie, pour que l'ajout d'une serie ne fasse pas tomber ces tests sur un detail sans
@@ -667,3 +668,32 @@ def test_log_training_step_records_optional_fields() -> None:
     assert "training_detailed/loss" in keys
     assert "training_diagnostic/learning_rate" in keys
     assert t.step_count == 1
+
+
+def test_log_selfplay_win_emet_par_label() -> None:
+    """log_selfplay_win emet 03_selfplay/{label} une fois la fenetre pleine (PERF_WINDOW=1)."""
+    t = _tracker_stub()  # PERF_WINDOW=1 : la fenetre est pleine des le 1er appel
+    t.log_selfplay_win("P1", 1.0)
+    t.log_selfplay_win("P2", 0.0)
+    t.log_selfplay_win("P1", 0.0)
+
+    keys = [k for k, _, _ in _dw(t).scalars]
+    assert "03_selfplay/P1" in keys, "win rate de P1 absent"
+    assert "03_selfplay/P2" in keys, "win rate de P2 absent"
+
+
+def test_log_selfplay_win_label_vide_est_ignore() -> None:
+    """Un label vide (episode bot) ne doit rien emettre."""
+    t = _tracker_stub()
+    t.log_selfplay_win("", 1.0)
+    assert not _dw(t).scalars, "aucun scalar attendu pour un label vide"
+
+
+def test_log_selfplay_win_valeur_correcte() -> None:
+    """Avec PERF_WINDOW=1, le dernier appel donne le win rate exact (0.0 ou 1.0)."""
+    t = _tracker_stub()
+    t.log_selfplay_win("E1", 1.0)
+    t.log_selfplay_win("E1", 0.0)  # ecrase la fenetre de taille 1
+
+    scalars = {k: v for k, v, _ in _dw(t).scalars}
+    assert scalars["03_selfplay/E1"] == pytest.approx(0.0), "la valeur doit etre la moyenne de la fenetre"

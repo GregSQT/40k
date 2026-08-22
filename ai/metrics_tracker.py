@@ -283,6 +283,9 @@ class W40KMetricsTracker:
         self.all_episode_wins = []       # Complete win/loss history
         self.all_episode_lengths = []    # Complete episode length history
         
+        # Per-snapshot self-play win rate tracking (label -> history list)
+        self._selfplay_wins: Dict[str, List[float]] = {}
+
         # Episode tracking
         self.episode_count = initial_episode_count
         self.step_count = initial_step_count
@@ -2010,6 +2013,28 @@ class W40KMetricsTracker:
         un seul endroit, plutot que recopiee par chaque famille de tags.
         """
         return str(faction).lower()
+
+    def log_selfplay_win(self, label: str, agent_won: float) -> None:
+        """Emet `03_selfplay/{label}` — win rate glissant contre chaque snapshot du pool.
+
+        La fenetre est PERF_WINDOW episodes DE CE LABEL, pas tous episodes confondus : un label
+        rare ne dilue pas les autres et n'emetra un premier point qu'une fois sa fenetre pleine.
+        """
+        if not label:
+            return
+        h = self._selfplay_wins.setdefault(label, [])
+        h.append(float(agent_won))
+        if len(h) > self.PERF_WINDOW:
+            h.pop(0)
+        rate = self._window_mean(h, self.PERF_WINDOW)
+        if rate is not None:
+            self.writer.add_scalar(f"03_selfplay/{label}", rate, self.episode_count)
+        if self.PERF_WINDOW_FAST < self.PERF_WINDOW:
+            fast = self._window_mean(h, min(self.PERF_WINDOW_FAST, len(h)))
+            if fast is not None and len(h) >= self.PERF_WINDOW_FAST:
+                self.writer.add_scalar(
+                    f"03_selfplay/{label}_{self.PERF_WINDOW_FAST}ep", fast, self.episode_count
+                )
 
     def log_faction_bot_win_rates(
         self,

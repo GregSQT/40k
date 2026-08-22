@@ -253,3 +253,26 @@ def test_get_agent_scenario_file_raises_when_no_file_found(tmp_path: Path) -> No
         training_utils.get_agent_scenario_file(config, "AgentX", "phase9")
 
 
+def test_build_self_play_kwargs_inclut_le_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    """build_self_play_kwargs transmet le label du membre de pool a BotControlledEnv."""
+    import ai.training_utils as tu
+
+    def fake_assign(pool, n_envs):
+        return [{"label": "P2", "path": "/tmp/snap.zip"}]
+
+    monkeypatch.setattr("ai.curriculum.assign_pool_members_to_envs", fake_assign, raising=True)
+
+    config = {
+        "enabled": True,
+        "self_play_ratio_start": 0.0,
+        "self_play_ratio_end": 1.0,
+        "total_episodes": 1000,
+        "warmup_episodes": 0,
+        "n_envs": 1,
+        "snapshot_device": "cpu",
+        "deterministic": False,
+        "pool": [{"kind": "champion", "members": ["P2"], "weight": 1.0}],
+    }
+    kwargs = tu.build_self_play_kwargs(config, env_rank=0)
+    assert kwargs["self_play_snapshot_label"] == "P2"
+    assert kwargs["self_play_snapshot_path"] == "/tmp/snap.zip"

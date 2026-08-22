@@ -196,6 +196,7 @@ def build_self_play_kwargs(opponent_mix_config, env_rank: int = 0) -> dict:
         )
     member = assign_pool_members_to_envs(pool, n_envs)[env_rank]
     kwargs["self_play_snapshot_path"] = str(require_key(member, "path"))
+    kwargs["self_play_snapshot_label"] = str(require_key(member, "label"))
     return kwargs
 
 
