@@ -4,6 +4,16 @@
   "_doc_ordre": "L'ordre ci-dessous est celui d'execution, et c'est lui qui definit 'etape anterieure' : ni 'init' ni 'pool' ne peuvent nommer une etape qui n'a pas encore tourne.",
   "order": ["P0", "P1", "P2", "P3", "E1", "P4", "P5", "E2", "P6", "P7", "P8", "E3", "P9", "P10"],
 
+  "exploiter_config": {
+    "_doc": "Parametres geles partages par toutes les etapes exploiteurs (E1..E3). training_config_required : le --training-config exact a utiliser pour les trois runs — diverger = run refuse avant demarrage (meme seed, memes hyperparametres, comparabilite des budgets garantie). probe_every_episodes/probe_cheap_n : sonde bon marche. probe_confirm_n : sonde de confirmation declenchee des que la sonde bon marche passe le seuil. win_rate_target : seuil de franchissement (0.70). budget_cap : plafond en episodes ; journalise '>budget_cap' si non atteint.",
+    "training_config_required": "x1",
+    "probe_every_episodes": 2000,
+    "probe_cheap_n": 100,
+    "probe_confirm_n": 500,
+    "win_rate_target": 0.70,
+    "budget_cap": 50000
+  },
+
   "opponent": {
     "_doc": "Comment chaque environnement joue SON adversaire fige. snapshot_device='cpu' : quarante-huit processus chargent chacun un modele, les mettre sur le GPU disputerait la memoire a l'entrainement lui-meme. deterministic=false : un adversaire fige joue deja toujours la meme politique, le rendre deterministe rendrait en plus identiques tous les episodes joues contre lui depuis un meme etat.",
     "snapshot_device": "cpu",
