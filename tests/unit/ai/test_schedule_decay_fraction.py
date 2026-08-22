@@ -259,7 +259,7 @@ def _resolved_cb(callback_params: dict, key: str):
 # modèle est mécaniquement le dernier point évalué (`x1` depuis le 2026-08-11 : 5 points pour une
 # fenêtre de 5). Dans les deux cas la promesse était vide ; c'est le sens du `false`.
 PROMISES_BEST_MODEL = {
-    "x1": False, "x1_long": True, "x1_debug": False,
+    "x1": False, "x1_long": True, "x1_selfplay": True, "x1_debug": False,
     "x5_new": False, "x5_long": True, "x5_debug": False,
 }
 
