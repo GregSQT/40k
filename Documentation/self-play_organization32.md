@@ -1,6 +1,11 @@
 # Self-Play PPO V3: version definitive (progressive, stable, mesurable)
 
-> **⚠️ MàJ 2026-07 (vérifié code)** : implémenté partiellement dans `ai/training_utils.py` + `ai/env_wrappers.py` (`SelfPlayWrapper`) — ratio progressif (`self_play_ratio_start/end`), snapshot unique + refresh (`snapshot_model_path`, `snapshot_refresh_episodes`), bot floor via ratio. Le **pool multi-snapshots** et les **stages/gating go-no-go** complets de cette spec V3 ne sont pas tous en place.
+> **⚠️ MàJ 2026-08-22 (vérifié code)** : le **pool multi-snapshots** et les **stages** existent
+> désormais — `opponent_mix.pool` (liste pondérée d'archives figées, répartie par
+> environnement) et `config/agents/<agent>/curriculum.json` + `--etape`
+> ([bot.md#league](Roadmap/bot.md#league)). Le snapshot unique republié
+> (`snapshot_model_path`, `snapshot_refresh_episodes`) a été RETIRÉ. Un seul gate go-no-go est
+> en place, le plancher dur contre le champion le plus récent ; il n'y a ni PFSP ni cache LRU.
 
 ## Objectif
 

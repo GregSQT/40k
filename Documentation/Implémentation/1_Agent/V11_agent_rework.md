@@ -1251,11 +1251,13 @@ les branches mono-env l'**omettaient**, donc un `opponent_mix.enabled: true` y �
 silence**.
 
 **Ce qui reste ouvert** :
-- ⚠️ **Aucun run de phase 2 n'a jamais tourné.** Le `snapshot_model_path`
-  (`ai/models/ArmageddonAgent/selfplay_snapshot.zip`) n'existe pas encore.
-- `opponent_mix.enabled: true` **lève** hors du chemin de rotation de scénarios (`train.py`, ~l.1970)
-  — seul ce chemin republie un snapshot pendant le run. Une phase 2 doit donc être lancée avec une
-  rotation de scénarios, jamais en mono-scénario.
+- ⚠️ **Aucun run de phase 2 n'a jamais tourné.**
+- ⚠️ **PÉRIMÉ depuis le 2026-08-22** (curriculum par étapes, [bot.md#league](../../Roadmap/bot.md#league)) :
+  `snapshot_model_path` et `snapshot_update_freq_episodes` n'existent plus. `opponent_mix` porte
+  désormais `pool`, une LISTE PONDÉRÉE d'adversaires FIGÉS (archives d'étapes antérieures),
+  répartie par ENVIRONNEMENT. Plus rien n'est republié pendant le run, donc le refus
+  d'`opponent_mix` hors chemin de rotation — qui ne tenait qu'à cette republication — est tombé
+  avec elle : les deux chemins lisent les archives de la même façon.
 - L'interaction avec [§0.58](#s0.58) est **explicitement tranchée dans la config** et mérite d'être
   relue avant tout lancement : les rampes de **régime** (`learning_rate`, `ent_coef`,
   `opponent_mix`) comptent depuis CE run, tandis que le **compteur d'épisodes** et la **rampe de
@@ -1413,6 +1415,10 @@ découvert en le branchant : `create_model` et `create_multi_agent_model` ne rep
 snapshot de self-play (seul `train_with_scenario_rotation` le fait), donc `opponent_mix` y lève
 maintenant une erreur explicite au lieu de lire un fichier absent — ou un snapshot figé d'un run
 précédent, adversaire immobile pour tout l'entraînement.
+⚠️ **Ce dernier point est PÉRIMÉ depuis le 2026-08-22** : la republication de snapshot a été
+retirée avec `snapshot_model_path`, donc ce refus est tombé avec sa raison d'être. La méthode
+s'appelle désormais `_compute_pool_ratio_for_episode` et la rampe vit dans
+`ai/curriculum.ramped_ratio`, partagée avec les étapes du curriculum.
 
 **Résultat complet du grep** (tout site divisant un compteur d'épisodes par un total) : 6 sites, 3
 étaient faux (les 3 ci-dessus, corrigés), 3 étaient déjà justes —

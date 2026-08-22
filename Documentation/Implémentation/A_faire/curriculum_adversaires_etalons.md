@@ -151,6 +151,10 @@ Justifications datées inscrites dans `ai/benchmark_bots.py` lignes 64-82.
   **→ §3.5 s'ouvre** (le verrou « interdit avant 3.1-3.4 » est levé).
 - **SORTIE** : moyenne bot-contre-bot de CHAQUE reference_* dans **[0,40 ; 0,60]** ; les six
   doctrine sans dérive (contrôle). ⛔ Non atteint au 2026-08-21 — voir la mesure ci-dessus.
+- ⚠️ **Depuis le 2026-08-22, `--etape` DÉSARME `model_gating_min_benchmark_floor`** (le pose à
+  0,0 pour la durée du run) : la sélection d'une étape du curriculum appartient au plancher dur
+  contre le champion le plus récent. La re-pose ci-dessous ne concerne donc que les runs LANCÉS
+  SANS `--etape`. Voir [bot.md#league](../../Roadmap/bot.md#league).
 - Puis SEULEMENT une fois la fourchette atteinte, re-poser
   `model_gating_min_benchmark_floor` depuis une mesure AGENT (`--test-only`,
   100 ép./bot) : plancher mesuré − marge documentée, **sémantique win-rate agent** (le 0,049 de
@@ -232,8 +236,12 @@ curriculum (panel + references réparées + `vs_ckpt`) et un nouveau barreau d'�
 ## 6. R2 — Mix self-play (un levier)
 
 = exécution de la ligne 7 du chemin critique (§0.59, livré jamais exécuté — câblage vérifié vif
-dans `train.py`/`env_wrappers.py` le 2026-08-21). Profil dérivé de `x1_long` ; les clés
-`self_play_*` de l'ancien `x1_selfplay` (purgé par `18dc8599`) se récupèrent au git.
+dans `train.py`/`env_wrappers.py` le 2026-08-21). Profil dérivé de `x1_long`.
+⚠️ **Les clés `self_play_*` de l'ancien `x1_selfplay` (purgé par `18dc8599`) ne se récupèrent
+PLUS au git telles quelles** : depuis le 2026-08-22, `snapshot_model_path` et
+`snapshot_update_freq_episodes` n'existent plus, `opponent_mix` porte `pool`. Le plus simple
+est de passer par `--etape` (`config/agents/<agent>/curriculum.json`), qui écrit
+`opponent_mix` lui-même.
 Parts PROPOSÉES NON MESURÉES : ~55-60 % doctrine / 25-30 % self-play / 15 % random — à trancher
 au chantier. Justification du mix : la part self-play casse la stationnarité (source de
 l'exploitation apprise), la majorité doctrine garde les ancres de style (polyvalence).
@@ -247,7 +255,10 @@ même run que R2**.
 
 ## 8. Hors périmètre
 
-- League PFSP/exploiters : post-démo ([bot.md#league](../../Roadmap/bot.md#league)).
+- ~~League PFSP/exploiters : post-démo.~~ **Le schedule P0→P10 et les exploiters E1→E3 ont été
+  livrés le 2026-08-22** (code et tests ; les quatorze runs restent à jouer, `--etape` par
+  étape) — [bot.md#league](../../Roadmap/bot.md#league). PFSP et cache LRU restent hors
+  périmètre : le pool est réparti par environnement, pas tiré par épisode.
 - tactical : témoin gelé, aucun changement (§2 pt 2) ; le prompt « témoin resaturé » lancé le
   2026-08-21 tranche son affichage, pas son profil.
 - Prompt C.4 (complémentarité, lancé le 2026-08-21) : indépendant ; sa conclusion se consigne

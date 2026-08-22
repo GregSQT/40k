@@ -2114,14 +2114,16 @@ def evaluate_against_checkpoints(
                 self_play_warmup_episodes=0,
                 self_play_n_envs=1,
                 self_play_snapshot_path=zip_path,
-                self_play_snapshot_refresh_episodes=sc_eps + 1,
+                self_play_snapshot_frozen=True,
                 self_play_snapshot_device=device,
                 self_play_deterministic=True,
             )
             # Injection du modèle checkpoint normalisé avant le premier épisode.
-            # _reload_self_play_snapshot_if_needed ne rechargera pas depuis le fichier tant que
-            # _frozen_model_mtime correspond au mtime du fichier et le compteur d'épisodes
-            # reste sous refresh_episodes.
+            # `self_play_snapshot_frozen=True` : _reload_self_play_snapshot_if_needed ne
+            # rechargera JAMAIS depuis le fichier — ce qui écraserait le wrapper de
+            # normalisation posé ici par un MaskablePPO nu, donc l'adversaire recevrait les
+            # observations normalisées du modèle courant (spec R0b). C'était auparavant obtenu
+            # par un refresh_episodes plus grand que le run, qui ne tenait qu'au comptage.
             env._frozen_model = normalized_ckpt
             env._frozen_model_mtime = ckpt_mtime
 

@@ -237,7 +237,7 @@ def test_regime_ramps_start_from_this_run_not_from_the_model_lifetime() -> None:
         self_play_snapshot_refresh_episodes=1, self_play_snapshot_device="cpu",
     )
     assert wrapper._episode_index == 0
-    assert wrapper._compute_self_play_ratio_for_episode() == pytest.approx(0.0), (
+    assert wrapper._compute_pool_ratio_for_episode() == pytest.approx(0.0), (
         "le warmup doit être devant, pas déjà consommé par un run précédent"
     )
 

@@ -1655,7 +1655,6 @@ from ai.training_callbacks import (
 # Training utilities (extracted to ai/training_utils.py)
 from ai.training_utils import (
     build_self_play_kwargs,
-    self_play_is_enabled,
     check_gpu_availability,
     benchmark_device_speed,
     setup_imports,
@@ -1671,6 +1670,20 @@ from ai.vec_normalize_utils import (
 )
 
 from engine.episode_schedule import episodes_per_env
+from ai.curriculum import (
+    append_curriculum_log,
+    copy_tensorboard_run,
+    evaluate_stage_gate,
+    load_curriculum,
+    pool_monotonicity_diagnostic,
+    promote_stage_model,
+    require_stage,
+    stage_champion_label,
+    stage_init_source,
+    stage_model_path,
+    stage_order,
+    stage_pool_members,
+)
 from ai.model_artifacts import model_companion_paths, remove_model_with_companions
 from ai.run_state import get_run_state_path, load_run_state, save_run_state
 from ai.truncation_log import TruncationLog, agent_log_dir
@@ -2534,18 +2547,11 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
         print,
     )
 
-    # `opponent_mix` exige qu'un snapshot du modele soit REPUBLIE pendant le run : seul
-    # `train_with_scenario_rotation` le fait (`_publish_self_play_snapshot`). Ici, le premier
-    # tirage de self-play lirait un fichier absent — ou pire, un snapshot fige d'un run precedent,
-    # adversaire immobile pour tout l'entrainement. Erreur explicite plutot que les deux.
-    # Valide AVANT `prepare_run_artifacts` : ce refus est une erreur de configuration, il ne
-    # doit pas laisser derriere lui un `--new` qui a deja mis le modele precedent de cote.
-    if self_play_is_enabled(opponents["opponent_mix_config"]):
-        raise ValueError(
-            "opponent_mix.enabled=True n'est supporte que par le chemin de rotation de scenarios "
-            "(seul `train_with_scenario_rotation` republie le snapshot de self-play). Lancer "
-            "l'entrainement par ce chemin, ou desactiver opponent_mix."
-        )
+    # Le refus d'`opponent_mix` sur ce chemin est tombe avec la republication d'instantane :
+    # il ne tenait qu'a elle (seul `train_with_scenario_rotation` republiait). Les adversaires
+    # sont maintenant des archives figees, que les deux chemins lisent de la meme facon — et un
+    # pool plus large que le nombre d'environnements est refuse nommement par
+    # `assign_pool_members_to_envs`, pas en silence.
 
     model_path, _episode_offset, episode_start_index = prepare_run_artifacts(
         config.get_models_root(), agent_key, new_model, append_training, n_envs
@@ -2897,9 +2903,6 @@ def build_training_opponents(
         "agent_seat_mode": None,
         "agent_seat_seed": None,
         "opponent_mix_config": None,
-        "self_play_snapshot_path": None,
-        "self_play_snapshot_update_freq": None,
-        "self_play_snapshot_enabled": False,
     }
     if not use_bots:
         return opponents
@@ -2946,10 +2949,9 @@ def build_training_opponents(
     self_play_ratio_start = float(require_key(mix_cfg, "self_play_ratio_start"))
     self_play_ratio_end = float(require_key(mix_cfg, "self_play_ratio_end"))
     warmup_episodes = int(require_key(mix_cfg, "warmup_episodes"))
-    snapshot_path = str(require_key(mix_cfg, "snapshot_model_path"))
-    snapshot_refresh_episodes = int(require_key(mix_cfg, "snapshot_update_freq_episodes"))
     snapshot_device = str(require_key(mix_cfg, "self_play_snapshot_device")).strip().lower()
     self_play_deterministic = bool(require_key(mix_cfg, "self_play_deterministic"))
+    pool = require_key(mix_cfg, "pool")
 
     if not (0.0 <= self_play_ratio_start <= 1.0):
         raise ValueError(
@@ -2965,28 +2967,39 @@ def build_training_opponents(
         raise ValueError(
             f"opponent_mix.warmup_episodes must be >= 0 (got {warmup_episodes})"
         )
-    if not snapshot_path.strip():
-        raise ValueError("opponent_mix.snapshot_model_path must be a non-empty string.")
-    if snapshot_refresh_episodes <= 0:
-        raise ValueError(
-            "opponent_mix.snapshot_update_freq_episodes must be > 0 "
-            f"(got {snapshot_refresh_episodes})"
+    # POOL PONDERE D'ADVERSAIRES FIGES, a la place de l'instantane unique republie en cours de
+    # run. Chaque environnement en recoit UN (`build_self_play_kwargs`) et le charge une fois :
+    # l'empreinte memoire reste celle d'avant, un `_frozen_model` par processus.
+    if not isinstance(pool, list) or not pool:
+        raise TypeError(
+            "opponent_mix.pool doit etre une liste non vide d'adversaires figes "
+            "[{'label', 'path', 'weight'}, ...]."
         )
+    for position, member in enumerate(pool):
+        if not isinstance(member, dict):
+            raise TypeError(f"opponent_mix.pool[{position}] doit etre un objet.")
+        member_path = str(require_key(member, "path"))
+        require_key(member, "label")
+        member_weight = float(require_key(member, "weight"))
+        if member_weight <= 0.0:
+            raise ValueError(
+                f"opponent_mix.pool[{position}].weight doit etre > 0 (got {member_weight})"
+            )
+        if not os.path.exists(member_path):
+            raise FileNotFoundError(
+                f"opponent_mix.pool[{position}] ({member['label']}) : adversaire fige absent — "
+                f"{member_path}. Un membre du pool doit avoir ete produit par une etape "
+                "anterieure avant d'etre joue."
+            )
     if snapshot_device not in {"cpu", "auto"}:
         raise ValueError(
             "opponent_mix.self_play_snapshot_device must be either 'cpu' or 'auto' "
             f"(got {snapshot_device!r})"
         )
-    snapshot_dir = os.path.dirname(snapshot_path)
-    if not snapshot_dir:
-        raise ValueError(
-            f"opponent_mix.snapshot_model_path must include a directory (got {snapshot_path!r})"
-        )
-    os.makedirs(snapshot_dir, exist_ok=True)
     if total_episodes is None:
         raise ValueError(
             "opponent_mix.enabled=True requires a known total_episodes to schedule the "
-            "self-play ratio."
+            "bots/pool ratio."
         )
 
     opponents["opponent_mix_config"] = {
@@ -2997,18 +3010,22 @@ def build_training_opponents(
         "total_episodes": int(total_episodes),
         # Budgets GLOBAUX ci-dessus ; le wrapper les ramene au budget d'UN environnement.
         "n_envs": require_positive_int(training_config.get("n_envs"), "training_config.n_envs"),
-        "snapshot_model_path": snapshot_path,
-        "snapshot_refresh_episodes": snapshot_refresh_episodes,
+        "pool": [
+            {
+                "label": str(member["label"]),
+                "path": str(member["path"]),
+                "weight": float(member["weight"]),
+            }
+            for member in pool
+        ],
         "snapshot_device": snapshot_device,
         "deterministic": self_play_deterministic,
     }
-    opponents["self_play_snapshot_enabled"] = True
-    opponents["self_play_snapshot_path"] = snapshot_path
-    opponents["self_play_snapshot_update_freq"] = snapshot_refresh_episodes
     log(
         "🤝 Opponent mix enabled: "
-        f"self-play ratio {self_play_ratio_start:.2f}->{self_play_ratio_end:.2f} "
-        f"(warmup={warmup_episodes} ep, snapshot every {snapshot_refresh_episodes} ep)"
+        f"part du pool {self_play_ratio_start:.2f}->{self_play_ratio_end:.2f} "
+        f"(warmup={warmup_episodes} ep), {len(pool)} adversaire(s) fige(s) : "
+        + ", ".join(f"{m['label']} {float(m['weight']):.3f}" for m in pool)
     )
     return opponents
 
@@ -3197,9 +3214,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     agent_seat_mode = _opponents["agent_seat_mode"]
     agent_seat_seed = _opponents["agent_seat_seed"]
     opponent_mix_config = _opponents["opponent_mix_config"]
-    self_play_snapshot_path = _opponents["self_play_snapshot_path"]
-    self_play_snapshot_update_freq = _opponents["self_play_snapshot_update_freq"]
-    self_play_snapshot_enabled = _opponents["self_play_snapshot_enabled"]
 
     # Branch: n_envs > 1 uses SubprocVecEnv for parallel training
     if n_envs > 1:
@@ -3530,40 +3544,15 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # - repeatedly call learn() with a small, fixed chunk of timesteps
     # - after each chunk, check how many episodes actually completed (via metrics_tracker)
     # - stop when we reach the exact desired episode count (total_episodes)
-    def _publish_self_play_snapshot() -> None:
-        if not self_play_snapshot_enabled:
-            return
-        if self_play_snapshot_path is None:
-            raise RuntimeError("self_play_snapshot_enabled=True but snapshot path is missing.")
-        snapshot_dir = os.path.dirname(self_play_snapshot_path)
-        if not snapshot_dir:
-            raise RuntimeError(
-                "self_play_snapshot_enabled=True but snapshot path has no parent directory."
-            )
-        os.makedirs(snapshot_dir, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="wb",
-            suffix=".zip",
-            dir=snapshot_dir,
-            delete=False,
-        ) as tmp_file:
-            tmp_snapshot_path = tmp_file.name
-        try:
-            model.save(tmp_snapshot_path)
-            os.replace(tmp_snapshot_path, self_play_snapshot_path)
-        finally:
-            if os.path.exists(tmp_snapshot_path):
-                os.remove(tmp_snapshot_path)
+    # La republication periodique d'un instantane du modele courant a ete retiree avec
+    # `opponent_mix.snapshot_model_path` : les adversaires d'`opponent_mix` sont desormais des
+    # archives FIGEES d'etapes anterieures (`opponent_mix.pool`), que rien ne republie. Le
+    # publieur n'avait plus aucun lecteur.
 
     # reset_num_timesteps semantics:
     # - --append: keep monotonic timesteps (never reset) for true continuation.
     # - --new: fresh run directory allows reset from zero without overwriting prior runs.
     target_episode_count = episode_offset + total_episodes
-    last_snapshot_episode_count = metrics_tracker.episode_count
-    if self_play_snapshot_enabled:
-        _debug_train_marker("before initial self-play snapshot publish")
-        _publish_self_play_snapshot()
-        _debug_train_marker("after initial self-play snapshot publish")
     _debug_train_marker(
         "before learn loop: episode_count=%s target_episode_count=%s "
         "chunk_timesteps=%s model_num_timesteps=%s",
@@ -3595,15 +3584,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 metrics_tracker.episode_count, target_episode_count, chunk_timesteps,
                 model.num_timesteps,
             )
-            if self_play_snapshot_enabled:
-                if self_play_snapshot_update_freq is None:
-                    raise RuntimeError(
-                        "self_play_snapshot_enabled=True but snapshot update frequency is missing."
-                    )
-                episodes_since_snapshot = metrics_tracker.episode_count - last_snapshot_episode_count
-                if episodes_since_snapshot >= self_play_snapshot_update_freq:
-                    _publish_self_play_snapshot()
-                    last_snapshot_episode_count = metrics_tracker.episode_count
 
         # Final episode count
         episodes_trained = metrics_tracker.episode_count - episode_offset
@@ -3784,13 +3764,17 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     )
                 print(f"{'='*80}\n")
 
-        run_info: Dict[str, Any] = {}
+        # `tensorboard_run_dir` est rendu inconditionnellement : c'est le repertoire du run
+        # qu'une etape de curriculum recopie en `tensorboard_<etape>`, et `model.tensorboard_log`
+        # a ete remis a la RACINE plus haut — il ne designe plus ce run.
+        run_info: Dict[str, Any] = {"tensorboard_run_dir": specific_log_dir}
         bot_eval_callback = next(
             (cb for cb in training_callbacks if isinstance(cb, BotEvaluationCallback)),
             None
         )
         if bot_eval_callback is not None:
             run_info = {
+                **run_info,
                 "episodes_trained": int(episodes_trained),
                 "last_bot_eval": bot_eval_callback.last_eval_results,
                 "last_bot_eval_marker": bot_eval_callback.last_eval_marker,
@@ -4565,6 +4549,260 @@ def _non_empty_key(flag: str):
 _non_empty_agent = _non_empty_key("--agent")
 
 
+# ── CURRICULUM : PILOTAGE D'UNE ETAPE ──────────────────────────────────────────────────────
+#
+# `--etape <nom>` COEXISTE avec `--training-config` : la config d'entrainement continue de
+# fournir les episodes et les hyperparametres, l'etape ne decrit que l'adversite (comment le
+# modele demarre, et contre qui il joue). Trois effets, et rien d'autre :
+#
+#   AVANT le run  : `init` choisit `--new` ou la promotion `--resume-from` du champion source ;
+#                   `pool` + les ratios sont injectes en `opponent_mix` dans la config chargee.
+#   PENDANT       : rien de specifique — le run est un run ordinaire.
+#   APRES         : mesure contre chaque membre du pool, gate sur le champion le plus recent,
+#                   journal, puis promotion par COPIE en `model_<agent>_<etape>.zip`.
+
+def _stage_opponent_mix(
+    curriculum: Dict[str, Any],
+    stage: Dict[str, Any],
+    canonical_model_path: str,
+) -> Optional[Dict[str, Any]]:
+    """Le bloc `opponent_mix` que cette etape impose a la config d'entrainement.
+
+    None quand l'etape n'a pas de pool (P0) : elle s'entraine contre les bots seuls, et
+    `_build_opponents` doit alors trouver la config SANS `opponent_mix`, pas avec un
+    `opponent_mix` desarme — un bloc present mais inerte est exactement le genre de
+    configuration qu'on relit six mois plus tard sans savoir si elle a servi.
+    """
+    members = stage_pool_members(stage)
+    if not members:
+        return None
+    opponent = require_key(curriculum, "opponent")
+    return {
+        "enabled": True,
+        "self_play_ratio_start": float(require_key(stage, "ratio_start")),
+        "self_play_ratio_end": float(require_key(stage, "ratio_end")),
+        "warmup_episodes": int(require_key(stage, "warmup_episodes")),
+        "self_play_snapshot_device": str(require_key(opponent, "snapshot_device")),
+        "self_play_deterministic": bool(require_key(opponent, "deterministic")),
+        "pool": [
+            {
+                "label": member["label"],
+                "path": stage_model_path(canonical_model_path, member["label"]),
+                "weight": member["weight"],
+            }
+            for member in members
+        ],
+    }
+
+
+def _install_stage_config_overrides(
+    config, agent_key: str, opponent_mix: Optional[Dict[str, Any]]
+) -> None:
+    """Ce que l'etape impose a TOUTE lecture ulterieure de la config de cet agent.
+
+    Meme mecanisme que `--param` : la config d'entrainement est rechargee a plusieurs endroits
+    (prologue, `build_training_opponents`, callbacks), et poser une cle sur un seul exemplaire
+    laisserait les autres sans, en silence. Le decorateur s'installe PAR-DESSUS celui de
+    `--param` quand les deux sont demandes : ils ne touchent pas les memes cles.
+
+    Deux effets :
+
+    - `opponent_mix` : le pool de l'etape, quand elle en a un.
+    - `model_gating_min_benchmark_floor` DESARME. Ce gate compare le pire score aux bots de
+      REFERENCE, satures a 1.00 : le plancher de 0.9 de `x1_long` est franchi par n'importe
+      quel modele, donc il laisse passer tout ce qu'il est cense filtrer. Ce qui decide
+      desormais si une etape est retenue, c'est le plancher dur contre le champion le plus
+      recent (`evaluate_stage_gate`), mesure APRES le run. Laisser les deux, ce serait garder
+      un gate qui ne separe rien tout en pretendant selectionner.
+    """
+    original_load = config.load_agent_training_config
+
+    def _load_with_stage(loaded_agent_key: str, phase: Optional[str] = None) -> Dict[str, Any]:
+        cfg = original_load(loaded_agent_key, phase)
+        if isinstance(cfg, dict) and loaded_agent_key == agent_key:
+            if opponent_mix is not None:
+                cfg["opponent_mix"] = opponent_mix
+            callback_params = cfg.get("callback_params")
+            if isinstance(callback_params, dict):
+                callback_params["model_gating_min_benchmark_floor"] = 0.0
+        return cfg
+
+    config.load_agent_training_config = _load_with_stage
+
+
+def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Applique l'etape aux arguments et a la config. Rend (curriculum, etape).
+
+    Appelee AVANT `check_model_lifecycle` : c'est elle qui pose `--new` ou `--resume-from`, donc
+    le controle du cycle de vie doit voir l'etat qu'elle a decide, pas celui de la ligne de
+    commande.
+    """
+    curriculum = load_curriculum(args.agent)
+    stage = require_stage(curriculum, args.etape)
+
+    models_root = config.get_models_root()
+    canonical_model_path = build_agent_model_path(models_root, args.agent)
+
+    source_stage = stage_init_source(stage)
+    if source_stage is None:
+        args.new = True
+        print(f"🎓 Etape {args.etape} — init 'new' : modele neuf (le precedent est ecarte).")
+    else:
+        # La promotion d'un champion REUTILISE `--resume-from` : le zip de l'etape source est
+        # installe au chemin canonique (l'ancien ecarte, pas ecrase) et `--append` est active.
+        # Aucun second mecanisme de reprise n'est introduit.
+        source_model = stage_model_path(canonical_model_path, source_stage)
+        if not os.path.exists(source_model):
+            raise FileNotFoundError(
+                f"Etape {args.etape} : init 'from:{source_stage}' mais le modele de l'etape "
+                f"source est absent — {source_model}. Jouer {source_stage} d'abord."
+            )
+        args.resume_from = source_model
+        args.append = True
+        print(f"🎓 Etape {args.etape} — init 'from:{source_stage}' : reprise de {source_model}")
+
+    opponent_mix = _stage_opponent_mix(curriculum, stage, canonical_model_path)
+    _install_stage_config_overrides(config, args.agent, opponent_mix)
+    print(
+        "🎓 Gate benchmark_floor desarme : la selection de l'etape se fait sur le score contre "
+        "le champion le plus recent, pas sur des bots de reference satures."
+    )
+    if opponent_mix is None:
+        print(f"🎓 Etape {args.etape} — aucun pool : entrainement contre les bots seuls.")
+    else:
+        print(
+            f"🎓 Etape {args.etape} — pool de {len(opponent_mix['pool'])} adversaire(s) fige(s), "
+            f"part {opponent_mix['self_play_ratio_start']:.2f}->"
+            f"{opponent_mix['self_play_ratio_end']:.2f} "
+            f"(warmup {opponent_mix['warmup_episodes']} ep)"
+        )
+    return curriculum, stage
+
+
+def _score_stage_against_pool(
+    args,
+    stage: Dict[str, Any],
+    canonical_model_path: str,
+    eval_episodes: int,
+) -> Dict[str, float]:
+    """Win-rate du modele du run contre CHAQUE membre du pool, label par label.
+
+    Reutilise `evaluate_against_checkpoints` (R0b) : c'est deja la mesure « modele courant
+    contre une archive figee », avec la normalisation propre de l'archive. Un second harnais
+    aurait mesure la meme chose autrement.
+    """
+    from ai.bot_evaluation import evaluate_against_checkpoints
+
+    members = stage_pool_members(stage)
+    if not members:
+        return {}
+    archives = [
+        (stage_model_path(canonical_model_path, member["label"]), member["label"])
+        for member in members
+    ]
+    results = evaluate_against_checkpoints(
+        model_path=canonical_model_path,
+        checkpoint_archives=archives,
+        training_config_name=args.training_config,
+        rewards_config_name=args.rewards_config,
+        n_episodes=eval_episodes,
+        controlled_agent=args.rewards_config,
+        scenario_pool="holdout",
+        device="cpu",
+    )
+    scores = {
+        member["label"]: float(results[member["label"]])
+        for member in members
+        if member["label"] in results
+    }
+    missing = [member["label"] for member in members if member["label"] not in scores]
+    if missing:
+        raise RuntimeError(
+            f"Etape {args.etape} : aucun score mesure contre {missing}. "
+            "evaluate_against_checkpoints a ecarte ces archives (architecture incompatible ?) — "
+            "le gate et le journal seraient incomplets."
+        )
+    return scores
+
+
+def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
+    """Mesure, gate, journal, promotion, TensorBoard. Rend le code de sortie du processus.
+
+    ORDRE VOLONTAIRE : le journal est ecrit AVANT la promotion, et il l'est meme quand le gate
+    refuse. Une etape recalee est precisement celle dont on veut relire les chiffres.
+    """
+    models_root = config.get_models_root()
+    canonical_model_path = build_agent_model_path(models_root, args.agent)
+    gate_cfg = require_key(curriculum, "gate")
+    floor = float(require_key(gate_cfg, "min_score_vs_champion"))
+    target = float(require_key(gate_cfg, "target_score_vs_champion"))
+    eval_episodes = int(require_key(gate_cfg, "eval_episodes"))
+
+    print("\n" + "=" * 80)
+    print(f"🎓 CLOTURE DE L'ETAPE {args.etape}")
+    print("=" * 80)
+
+    scores_vs_pool = _score_stage_against_pool(args, stage, canonical_model_path, eval_episodes)
+    for label, score in scores_vs_pool.items():
+        print(f"  vs {label:6s}: {score:.3f}  ({eval_episodes} episodes)")
+
+    # Scores vs bots : ceux de la DERNIERE evaluation du run, pas une mesure de plus. Le journal
+    # doit dire ou en etait l'agent face aux bots a la fin de l'etape, et le run vient de le
+    # mesurer.
+    last_bot_eval = run_info.get("last_bot_eval")
+    scores_vs_bots = (
+        {k: float(v) for k, v in last_bot_eval.items() if isinstance(v, (int, float))}
+        if isinstance(last_bot_eval, dict) else {}
+    )
+
+    champion_label = stage_champion_label(stage)
+    accepted, gate_reason = evaluate_stage_gate(
+        args.etape, champion_label, scores_vs_pool, floor, target
+    )
+
+    pool_labels = [member["label"] for member in stage_pool_members(stage)]
+    monotonicity = pool_monotonicity_diagnostic(
+        scores_vs_pool, [label for label in stage_order(curriculum) if label in pool_labels]
+    )
+    for line in monotonicity:
+        print(line)
+    print(("✅ " if accepted else "🔴 ") + gate_reason)
+
+    log_path = append_curriculum_log({
+        "etape": args.etape,
+        "training_config": args.training_config,
+        "init": require_key(stage, "init"),
+        "episodes_trained": run_info.get("episodes_trained"),
+        "ratio_start": float(require_key(stage, "ratio_start")),
+        "ratio_end": float(require_key(stage, "ratio_end")),
+        "warmup_episodes": int(require_key(stage, "warmup_episodes")),
+        "pool_weights": {member["label"]: member["weight"] for member in stage_pool_members(stage)},
+        "gate_eval_episodes": eval_episodes,
+        "scores_vs_pool": scores_vs_pool,
+        "scores_vs_bots": scores_vs_bots,
+        "champion": champion_label,
+        "gate_floor": floor,
+        "gate_target": target,
+        "gate_accepted": accepted,
+        "gate_reason": gate_reason,
+        "monotonicity_diagnostic": monotonicity,
+    })
+    print(f"📝 curriculum.log : {log_path}")
+
+    if not accepted:
+        print(
+            f"🔴 Etape {args.etape} REFUSEE : aucun model_*_{args.etape}.zip n'est ecrit, le pool "
+            "des etapes suivantes reste inchange."
+        )
+        return 1
+
+    for written in promote_stage_model(canonical_model_path, args.etape):
+        print(f"📦 {written}")
+    tensorboard_run_dir = require_key(run_info, "tensorboard_run_dir")
+    print(f"📊 {copy_tensorboard_run(tensorboard_run_dir, args.etape)}")
+    return 0
+
+
 def main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
     parser = argparse.ArgumentParser(description="Train W40K AI (see Documentation/AI_TURN.md and AI_IMPLEMENTATION.md)")
@@ -4624,6 +4862,12 @@ def main():
                             "scenario ne se convertissent que vers une resolution PLUS GROSSIERE : "
                             "10 (44x60x10 = 360x312) exige un scenario dont board_ref est deja en "
                             "x10, sinon erreur explicite. Overrides W40K_BOARD_PATH env var.")
+    parser.add_argument("--etape", type=str, default=None, metavar="ETAPE",
+                       help="Etape du curriculum a jouer (config/agents/<agent>/curriculum.json ; "
+                            "ex: P0, P4, E1). COEXISTE avec --training-config, qui continue de "
+                            "fournir les episodes et les hyperparametres : l'etape ne decrit que "
+                            "l'adversite. Elle pose elle-meme --new ou --resume-from selon son "
+                            "'init', donc elle est exclusive de ces drapeaux.")
 
     args = parser.parse_args()
 
@@ -4639,6 +4883,44 @@ def main():
             "--new et --append sont exclusifs : --new cree un modele neuf (et ecarte le "
             "precedent), --append continue le modele existant."
         )
+
+    # AVANT le traitement de `--resume-from` et avant `check_model_lifecycle` : c'est l'etape
+    # qui DECIDE de `--new` ou de `--resume-from`, donc les controles en aval doivent voir son
+    # choix et pas la ligne de commande nue.
+    curriculum_stage: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+    if args.etape is not None:
+        conflicting = [
+            name for name, active in (
+                ("--new", args.new),
+                ("--append", args.append),
+                ("--resume-from", bool(args.resume_from)),
+            ) if active
+        ]
+        if conflicting:
+            raise ValueError(
+                f"--etape et {', '.join(conflicting)} sont exclusifs : l'etape pose elle-meme "
+                "--new ou --resume-from d'apres son 'init'. Les combiner, c'est demander deux "
+                "regimes de demarrage a la fois."
+            )
+        non_training_modes = [
+            name for name, active in (
+                ("--test-only", args.test_only),
+                ("--replay", bool(args.replay)),
+                ("--convert-steplog", bool(args.convert_steplog)),
+                ("--rule-checker", bool(args.rule_checker)),
+            ) if active
+        ]
+        if non_training_modes:
+            raise ValueError(
+                f"--etape joue un ENTRAINEMENT complet : il n'a pas de sens avec "
+                f"{', '.join(non_training_modes)}."
+            )
+        if args.scenario != "bot":
+            raise ValueError(
+                f"--etape exige --scenario bot (got {args.scenario!r}) : le curriculum melange "
+                "bots d'entrainement et pool d'adversaires figes, ce que seul ce chemin monte."
+            )
+        curriculum_stage = _prepare_curriculum_stage(args, get_config_loader())
 
     if args.resume_from:
         if args.new:
@@ -5183,7 +5465,7 @@ def main():
                 # Always use scenario rotation path for self/bot/all modes,
                 # even when a single scenario is available.
                 # This keeps random wall/objective ref materialization consistent.
-                success, model, env = train_with_scenario_rotation(
+                success, model, env, run_info = train_with_scenario_rotation(
                     config=config,
                     agent_key=args.agent,
                     training_config_name=args.training_config,
@@ -5194,14 +5476,23 @@ def main():
                     append_training=args.append,
                     debug_mode=args.debug,
                     use_bots=(args.scenario == "bot"),
-                    device_mode=args.mode
+                    device_mode=args.mode,
+                    return_run_info=True,
                 )
 
                 if success and args.test_episodes > 0:
                     test_trained_model(model, args.test_episodes, args.training_config, args.rewards_config, require_present(final_eval_scenarios, "final_eval_scenarios"), debug_mode=args.debug)
 
                 close_training_env(env, "fin de run")
-                return 0 if success else 1
+                if not success:
+                    return 1
+                # La cloture d'etape charge des modeles et joue des episodes : elle vient APRES
+                # la fermeture de l'environnement d'entrainement, pas a cote de lui.
+                if curriculum_stage is not None:
+                    return _close_curriculum_stage(
+                        args, config, curriculum_stage[0], curriculum_stage[1], run_info
+                    )
+                return 0
             
             # Standard single-scenario training (no rotation)
             model, env, training_config, model_path, _resume_offset = create_multi_agent_model(

@@ -17,6 +17,7 @@ import time
 import hashlib
 import numpy as np
 from shared.data_validation import require_key, require_positive_int, require_present
+from ai.curriculum import ramped_ratio
 from shared.torch_safe_globals import register_torch_safe_globals
 from engine.action_decoder import ActionValidationError
 from engine.debug_trace import CH_BOT_LOOP, channel_enabled, trace
@@ -306,6 +307,7 @@ class BotControlledEnv(gym.Wrapper):
         self_play_snapshot_refresh_episodes: Optional[int] = None,
         self_play_snapshot_device: Optional[str] = None,
         self_play_deterministic: bool = False,
+        self_play_snapshot_frozen: bool = False,
     ):
         super().__init__(base_env)
         # Support: bots=[...] for random selection, or bot=X for single opponent
@@ -353,6 +355,12 @@ class BotControlledEnv(gym.Wrapper):
         self._frozen_model_mtime: Optional[float] = None
         self._episodes_since_snapshot_refresh = 0
         self._self_play_deterministic = bool(self_play_deterministic)
+        # FIGE : l'adversaire de cet environnement est une archive qui ne bougera pas du run
+        # (membre du pool d'une etape de curriculum, checkpoint etalon R0b). Il est charge UNE
+        # fois et jamais relu. Sans ce drapeau, le seul moyen de ne pas le recharger etait de
+        # poser un `refresh_episodes` plus grand que le nombre d'episodes du run — un nombre qui
+        # ne veut rien dire, et que les appelants recopiaient chacun a leur facon.
+        self._self_play_snapshot_frozen = bool(self_play_snapshot_frozen)
         if self._self_play_opponent_enabled:
             if self_play_ratio_start is None:
                 raise KeyError(
@@ -381,10 +389,20 @@ class BotControlledEnv(gym.Wrapper):
                 raise KeyError(
                     "self_play_snapshot_path is required when self_play_opponent_enabled=true"
                 )
-            if self_play_snapshot_refresh_episodes is None:
+            if self._self_play_snapshot_frozen:
+                if self_play_snapshot_refresh_episodes is not None:
+                    raise ValueError(
+                        "self_play_snapshot_refresh_episodes n'a pas de sens avec "
+                        "self_play_snapshot_frozen=true : l'archive ne change pas, elle est "
+                        "chargee une fois."
+                    )
+                resolved_refresh_episodes = 0
+            elif self_play_snapshot_refresh_episodes is None:
                 raise KeyError(
                     "self_play_snapshot_refresh_episodes is required when self_play_opponent_enabled=true"
                 )
+            else:
+                resolved_refresh_episodes = int(self_play_snapshot_refresh_episodes)
             if self_play_snapshot_device is None or not str(self_play_snapshot_device).strip():
                 raise KeyError(
                     "self_play_snapshot_device is required when self_play_opponent_enabled=true"
@@ -394,7 +412,7 @@ class BotControlledEnv(gym.Wrapper):
             self._self_play_total_episodes = int(self_play_total_episodes)
             self._self_play_warmup_episodes = int(self_play_warmup_episodes)
             self._self_play_snapshot_path = str(self_play_snapshot_path)
-            self._self_play_snapshot_refresh_episodes = int(self_play_snapshot_refresh_episodes)
+            self._self_play_snapshot_refresh_episodes = resolved_refresh_episodes
             self._self_play_snapshot_device = str(self_play_snapshot_device).strip().lower()
             if not (0.0 <= self._self_play_ratio_start <= 1.0):
                 raise ValueError(
@@ -422,7 +440,10 @@ class BotControlledEnv(gym.Wrapper):
                     f"(got {self._self_play_warmup_episodes} > "
                     f"{self._self_play_total_episodes})"
                 )
-            if self._self_play_snapshot_refresh_episodes <= 0:
+            if (
+                not self._self_play_snapshot_frozen
+                and self._self_play_snapshot_refresh_episodes <= 0
+            ):
                 raise ValueError(
                     "self_play_snapshot_refresh_episodes must be > 0 "
                     f"(got {self._self_play_snapshot_refresh_episodes})"
@@ -909,25 +930,38 @@ class BotControlledEnv(gym.Wrapper):
         self.engine.config["opponent_player"] = self.bot_player
         self.engine.config["agent_seat_mode"] = self.agent_seat_mode
 
-    def _compute_self_play_ratio_for_episode(self) -> float:
-        """Compute scheduled self-play ratio for current episode index."""
+    def _compute_pool_ratio_for_episode(self) -> float:
+        """Part du POOL d'adversaires figes a l'episode courant. Le reste va aux bots.
+
+        La rampe ne pilote plus le couple bots/self-play mais la FRONTIERE bots/pool : cet
+        environnement s'est vu attribuer UN adversaire fige a la construction
+        (`self_play_snapshot_path`, resolu par `ai/curriculum.assign_pool_members_to_envs`), et
+        la composition interne du pool est realisee par la repartition des ENVIRONNEMENTS, en
+        proportions fixes. Ce qui varie avec le temps, ici, c'est uniquement la probabilite de
+        jouer contre cet adversaire plutot que contre un bot.
+
+        Le calcul lui-meme vit dans `ai/curriculum.ramped_ratio` : c'est la meme rampe que celle
+        que le curriculum declare etape par etape, et un warmup interprete differemment des deux
+        cotes ne se verrait dans aucune courbe.
+        """
         if not self._self_play_opponent_enabled:
             return 0.0
-        current_idx = self._episode_index
-        if current_idx <= self._self_play_warmup_episodes:
-            return self._self_play_ratio_start
-        effective_idx = current_idx - self._self_play_warmup_episodes
-        effective_total = self._self_play_total_episodes - self._self_play_warmup_episodes
-        if effective_total <= 0:
-            return self._self_play_ratio_end
-        progress = min(1.0, max(0.0, float(effective_idx) / float(effective_total)))
-        return self._self_play_ratio_start + (
-            (self._self_play_ratio_end - self._self_play_ratio_start) * progress
+        return ramped_ratio(
+            episode_index=self._episode_index,
+            warmup_episodes=self._self_play_warmup_episodes,
+            total_episodes=self._self_play_total_episodes,
+            ratio_start=self._self_play_ratio_start,
+            ratio_end=self._self_play_ratio_end,
         )
 
     def _reload_self_play_snapshot_if_needed(self, force: bool = False) -> None:
         """Load/reload frozen model snapshot used as self-play opponent."""
         if not self._self_play_opponent_enabled:
+            return
+        # Adversaire FIGE : une archive d'etape ou un checkpoint etalon. Il est charge au premier
+        # episode qui en a besoin, puis plus jamais relu — c'est ce qui garde l'empreinte memoire
+        # a UN modele par processus quand le pool en compte treize.
+        if self._self_play_snapshot_frozen and self._frozen_model is not None and not force:
             return
         snapshot_path = self._self_play_snapshot_path
         if not os.path.exists(snapshot_path):
@@ -959,7 +993,7 @@ class BotControlledEnv(gym.Wrapper):
         if not self._self_play_opponent_enabled:
             self._bot_episodes += 1
             return
-        ratio = self._compute_self_play_ratio_for_episode()
+        ratio = self._compute_pool_ratio_for_episode()
         self._self_play_ratio_current = ratio
         seed_material = f"{self._global_seed}:{self._env_rank}:{self._episode_index}:self_play"
         draw_hash = hashlib.sha256(seed_material.encode("utf-8")).hexdigest()
