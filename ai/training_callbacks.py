@@ -1177,7 +1177,7 @@ class MetricsCollectionCallback(BaseCallback):
 
                 if info.get("opponent_mode") == "self_play":
                     self.metrics_tracker.log_selfplay_win(
-                        info.get("self_play_snapshot_label", ""), agent_won
+                        info["self_play_snapshot_label"], agent_won
                     )
 
                 # SEAT-AWARE metrics for TensorBoard (global + per controlled side)

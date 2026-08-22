@@ -655,13 +655,17 @@ class W40KMetricsTracker:
         # Flush metrics to disk
         self.writer.flush()
     
-    def _game_push(self, key: str, value: float) -> List[float]:
-        """Ajoute une valeur a l'historique de `key` et retourne l'historique tronque."""
-        h = self._game_history[key]
+    @staticmethod
+    def _push_window(h: List[float], value: float, window: int) -> List[float]:
+        """Ajoute `value` dans `h` et tronque a `window` elements ; retourne `h`."""
         h.append(value)
-        if len(h) > self.PERF_WINDOW:
+        if len(h) > window:
             h.pop(0)
         return h
+
+    def _game_push(self, key: str, value: float) -> List[float]:
+        """Ajoute une valeur a l'historique de `key` et retourne l'historique tronque."""
+        return self._push_window(self._game_history[key], value, self.PERF_WINDOW)
 
     @staticmethod
     def _window_mean(values: Sequence[float], window: int) -> Optional[float]:
@@ -708,10 +712,10 @@ class W40KMetricsTracker:
                 f"deployment_mode must be one of {self.DEPLOY_MODES} or None (got {mode!r})"
             )
         history = self._deploy_history[series][mode]
-        history.append(float(value))
-        if len(history) > self.PERF_WINDOW:
-            history.pop(0)
-        self._emit_windowed(f"{self.DEPLOY_SPLIT_SERIES[series]}_{mode}", history)
+        self._emit_windowed(
+            f"{self.DEPLOY_SPLIT_SERIES[series]}_{mode}",
+            self._push_window(history, float(value), self.PERF_WINDOW),
+        )
 
     def _emit_game(self, tag: str, key: str, value: float) -> None:
         """Accumule `value` dans l'historique de `key` puis emet les deux courbes de `tag`."""
@@ -2022,11 +2026,10 @@ class W40KMetricsTracker:
         """
         if not label:
             return
-        h = self._selfplay_wins.setdefault(label, [])
-        h.append(float(agent_won))
-        if len(h) > self.PERF_WINDOW:
-            h.pop(0)
-        self._emit_windowed(f"03_selfplay/{label}", h)
+        self._emit_windowed(
+            f"03_selfplay/{label}",
+            self._push_window(self._selfplay_wins.setdefault(label, []), float(agent_won), self.PERF_WINDOW),
+        )
 
     def log_faction_bot_win_rates(
         self,
