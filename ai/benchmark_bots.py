@@ -219,13 +219,12 @@ def _objective_holders(game_state: Dict[str, Any]) -> List[Optional[int]]:
 
 
 def _zone_contest_pull(holder: Optional[int], player: int, w_contest: float) -> float:
-    """Pull de distance (en hexes) pour un objectif selon qui le tient.
-
-    Facteur de pull = w_contest * rabais semantique (voir _CONTEST_PULL_*).
-    Extrait pour être testable independamment de _score_destinations_weighted.
-    """
-    _PULL = {3 - player: _CONTEST_PULL_ENEMY, player: _CONTEST_PULL_MINE}
-    return w_contest * _PULL.get(holder, _CONTEST_PULL_NEUTRAL)
+    """Pull de distance (en hexes) pour un objectif selon qui le tient."""
+    if holder == 3 - player:
+        return w_contest * _CONTEST_PULL_ENEMY
+    if holder == player:
+        return _CONTEST_PULL_MINE
+    return w_contest * _CONTEST_PULL_NEUTRAL
 
 
 def _enemy_anchors(
@@ -808,7 +807,7 @@ class ReferenceDenialBot(_BenchmarkBase):
                 raise ValueError(f"_denial_score_fn: {sid} absent du cache (unité ciblée non vivante)")
             if hp <= 0:
                 raise ValueError(f"_denial_score_fn: {sid} HP={hp} dans le cache (attendu >0)")
-            base = (1000.0 if damage >= float(hp) else 0.0) + damage
+            base = (_KILL_SENTINEL if damage >= float(hp) else 0.0) + damage
             if zones and unit_is_within_objective(gs, entry, zones):
                 base += 10.0
             return base

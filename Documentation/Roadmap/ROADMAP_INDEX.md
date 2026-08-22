@@ -70,7 +70,7 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 
 | # | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|---|
-| 1 | bot | 🟡 **R0a** §3.1-§3.4 livrés 2026-08-21 ; §3.5 balayage 2026-08-22 (abandon) ; **R0a-bis livré 2026-08-22** : 3 défauts 1er ordre fixés + calibration (balanced 0,306 / denial 0,297 / reactive 0,280 à 20 ép.) — fourchette [0,40 ; 0,60] non franchie, `benchmark_floor` reste à 0,90 ; reste re-pose gate (décision utilisateur) | [bot.md#r0a-references](bot.md#r0a-references) | ⚡ (la re-pose du gate touche la config : entre deux runs) |
+| 1 | bot | 🟡 **R0a** §3.1-§3.4 livrés 2026-08-21 ; §3.5 balayage 2026-08-22 (abandon) ; **R0a-bis livré 2026-08-22** : 3 défauts 1er ordre fixés + calibration (balanced 0,306 / denial 0,297 / reactive 0,280 à 20 ép.) — fourchette [0,40 ; 0,60] non franchie, `benchmark_floor` reste à 0,90 ; reste re-pose gate (décision utilisateur) ; **corrections /code-review + /simplify 2026-08-22** : 4 findings review appliqués (`_KILL_SENTINEL`, `_zone_contest_pull`, double-scan reactive, docstring) + 4 cleanups simplify (sentinel denial, if/else pull, dedup test gs, docstring) | [bot.md#r0a-references](bot.md#r0a-references) | ⚡ (la re-pose du gate touche la config : entre deux runs) |
 | 2 | bot+training | ✅ **R0b** Échelle de checkpoints figés en éval (`vs_ckpt_*`) — livré 2026-08-21 | [bot.md#r0b-echelle](bot.md#r0b-echelle) | ⚡ |
 | 3 | training | **R1→R3** Séquence des runs du curriculum (un levier par run) | [training.md#curriculum](training.md#curriculum) | 🚫 |
 
