@@ -899,14 +899,11 @@ def test_swing_score_fn_kill_sentinel_exceeds_large_squad_damage() -> None:
     def _mock_dmg(game_state, att_id, tgt_id, is_ranged):
         return 5.0 if tgt_id == "A" else 1500.0
 
-    gs: Dict[str, Any] = {
-        "units_cache": {
-            "A": {"HP_CUR": 5, "col": 0, "row": 0, "player": 2},
-            "B": {"HP_CUR": 2000, "col": 1, "row": 0, "player": 2},
-        },
-        "episode_number": 1, "turn": 1, "phase": "shoot",
-        "units": [], "objectives": [], "objective_controllers": {},
-        "victory_points": {1: 0, 2: 0},
+    gs = _minimal_game_state()
+    gs["phase"] = "shoot"
+    gs["units_cache"] = {
+        "A": {"HP_CUR": 5, "col": 0, "row": 0, "player": 2},
+        "B": {"HP_CUR": 2000, "col": 1, "row": 0, "player": 2},
     }
 
     from unittest.mock import patch
