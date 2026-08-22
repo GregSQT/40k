@@ -35,6 +35,8 @@ archivé dans curriculum_adversaires_etalons.md).
 
 ✅ **R0a-bis livré 2026-08-22** — 3 défauts de 1er ordre corrigés + calibration poids.
 
+✅ **Correctif B livré 2026-08-22** — `_swing_score_fn` et `_denial_score_fn` migrent vers le pattern `_score_kill_now` (bonus 1000 pour kill confirmé). L'ancien critère P(kill)×VALUE+damage préférait les cibles haute-VALUE non-tuables aux cibles tuables — les bots n'éliminaient personne. 2 tests rouge/vert. Mesure d'impact à faire (scripts/bot_ranking.py --bots reference_balanced,reference_denial,reference_reactive).
+
 **Phase 0 — distribution d'intentions** (6 ép., seed 42, board/44x60x1, holdout, APRÈS fix 2) :
 balanced SCORE 64 % / KILL 16 % / PRESERVE 5 % ; reactive SCORE 82 % / CONTEST 13 % / KILL 5 %.
 Hypothèse « KILL dominait par aveuglement à la portée » : CONFIRMÉE — le correctif fix 2
