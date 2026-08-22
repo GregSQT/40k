@@ -730,29 +730,29 @@ def test_reactive_bot_kill_when_enemy_in_reach_after_losses() -> None:
 # ─────────────────────────────────────────────────────────────────────────────────────────────
 
 def test_contest_pull_biases_enemy_objective_map() -> None:
-    """obj_map pour une non-réclamante est biaisé par _CONTEST_PULL pour les objectifs ennemis.
+    """_score_destinations_weighted préfère la destination proche d'un objectif ennemi
+    grâce au pull _CONTEST_PULL_ENEMY, contre une destination proche d'un objectif neutre.
 
-    On vérifie directement que la valeur de la carte à une destination donnée a diminué
-    (distance apparente réduite) quand l'objectif est tenu par l'adversaire, par rapport
-    à un objectif neutre à la même distance réelle.
-
-    Mutation prouvée : retirer le rabais (_CONTEST_PULL_ENEMY = 0) ferait les deux valeurs
-    identiques — le test échouerait car l'assertion porte sur la différence.
+    Géométrie choisie pour que le pull soit décisif :
+      zone 0 (ennemi) : current=(5,5) loin (12), valid_dest=(5,6) proche (10).
+      zone 1 (neutre) : current=(5,5) proche (10), valid_dest=(5,6) loin (12).
+      Sans pull : min(12,10)=10 aux deux → égalité → current renvoyé (premier dans scored).
+      Avec pull ennemi=2 w=3 (6 hex) / neutre=1 w=3 (3 hex) :
+        (5,5) : min(12-6, 10-3) = min(6, 7) = 6
+        (5,6) : min(10-6, 12-3) = min(4, 9) = 4  → (5,6) préféré.
+    Mutation ciblée : supprimer le rabais dans _score_destinations_weighted → égalité
+    → current (5,5) renvoyé → assertion échoue.
     """
     from unittest.mock import patch
-    from ai.benchmark_bots import _CONTEST_PULL_ENEMY, _CONTEST_PULL_NEUTRAL, _W_DENIAL
-
+    from ai.benchmark_bots import _W_DENIAL
     import numpy as np
 
-    # Deux objectifs : zone 0 tenu par l'adversaire (2), zone 1 neutre.
-    # Carte distance fictive : distance = 10 hexes pour les deux zones depuis (5,5).
-    dist_val = 10
-    fake_map_0 = np.full((10, 10), dist_val, dtype=np.int16)  # objectif ennemi
-    fake_map_1 = np.full((10, 10), dist_val, dtype=np.int16)  # objectif neutre
+    fake_map_0 = np.full((10, 10), 12, dtype=np.int16)
+    fake_map_0[5, 6] = 10  # valid_dest est proche de la zone ennemie
+    fake_map_1 = np.full((10, 10), 12, dtype=np.int16)
+    fake_map_1[5, 5] = 10  # current est proche de la zone neutre
     fake_maps = [fake_map_0, fake_map_1]
-
-    # holders : zone 0 → joueur 2 (ennemi), zone 1 → None (neutre)
-    fake_holders = [2, None]
+    fake_holders = [2, None]  # zone 0 → ennemi (player 2), zone 1 → neutre
 
     unit = {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 6}
     gs = _minimal_game_state()
@@ -774,26 +774,58 @@ def test_contest_pull_biases_enemy_objective_map() -> None:
             game_state=gs,
         )
 
-    # On vérifie indirectement que la zone ennemie est plus attractive que la neutre :
-    # en repassant les cartes avec des distances différentes, la zone ennemie à 12 et
-    # neutre à 10 (distance réelle) doit être équivalente grâce au pull de 2*3=6 hexes.
-    # Test direct : reconstruire l'obj_map biaisée et vérifier les valeurs.
-    w_contest = _W_DENIAL[4]
-    expected_enemy_dist = float(dist_val) - w_contest * _CONTEST_PULL_ENEMY
-    expected_neutral_dist = float(dist_val) - w_contest * _CONTEST_PULL_NEUTRAL
-
-    # On recrée la carte comme le fait _score_destinations_weighted.
-    biased_enemy = fake_map_0.astype(np.float64) - w_contest * _CONTEST_PULL_ENEMY
-    biased_neutral = fake_map_1.astype(np.float64) - w_contest * _CONTEST_PULL_NEUTRAL
-    combined = np.minimum(biased_enemy, biased_neutral)
-
-    assert combined[5, 5] == expected_enemy_dist, (
-        f"obj_map doit avoir le rabais ennemi ({expected_enemy_dist}), "
-        f"obtenu {combined[5,5]}"
+    assert dest == (5, 6), (
+        f"Le pull ennemi doit faire préférer (5,6) proche de la zone ennemie, obtenu {dest!r}. "
+        "Vérifier que le rabais _CONTEST_PULL_ENEMY est soustrait dans _score_destinations_weighted."
     )
-    assert expected_enemy_dist < expected_neutral_dist, (
-        "Le rabais ennemi doit être supérieur au rabais neutre "
-        f"({expected_enemy_dist} vs {expected_neutral_dist})"
+
+
+def test_own_zone_gets_no_pull_when_all_zones_held() -> None:
+    """Quand le joueur tient tous les objectifs (free=[]), les zones propres ne génèrent
+    aucun pull (pull=0.0) — spec 'mien: 0.0, y envoyer une deuxième escouade ne rapporte rien'.
+
+    Note COUVERTURE : avec toutes les zones propres, le pull constant s'applique
+    identiquement à toutes les destinations (décalage uniforme), donc le choix de
+    destination est invariant à la mutation pull=0 → pull=_CONTEST_PULL_NEUTRAL.
+    Ce test valide le code path free=[] et que la destination la plus proche selon les
+    distances brutes est bien retournée sans biais supplémentaire.
+    """
+    from unittest.mock import patch
+    import numpy as np
+    from ai.benchmark_bots import _W_BALANCED_SCORE
+
+    # Deux zones propres (player 1 tient tout) → free=[], targets=[0, 1].
+    # Zone 0 : current=(5,5) à distance 3 (proche), valid_dest=(5,6) à 10.
+    # Zone 1 : uniforme à 10.
+    # min sans pull : (5,5)=3, (5,6)=10 → current préféré.
+    fake_map_0 = np.full((10, 10), 10, dtype=np.int16)
+    fake_map_0[5, 5] = 3
+    fake_map_1 = np.full((10, 10), 10, dtype=np.int16)
+    fake_maps = [fake_map_0, fake_map_1]
+    fake_holders = [1, 1]  # joueur 1 tient tout → free=[]
+
+    unit = {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 6}
+    gs = _minimal_game_state()
+    gs["units"] = [unit]
+
+    with patch("ai.benchmark_bots.objective_distance_maps", return_value=fake_maps), \
+         patch("ai.benchmark_bots._objective_holders", return_value=fake_holders), \
+         patch("ai.benchmark_bots._living_enemies", return_value=[]), \
+         patch("ai.benchmark_bots._enemy_anchors", return_value=[]), \
+         patch("ai.benchmark_bots.objective_hex_sets", return_value=[]), \
+         patch("ai.benchmark_bots._surplus_oc_by_zone", return_value=[0.0, 0.0]), \
+         patch("ai.benchmark_bots.unit_is_within_objective", return_value=False):
+        from ai.benchmark_bots import _score_destinations_weighted
+        dest = _score_destinations_weighted(
+            unit=unit,
+            current=(5, 5),
+            valid_destinations=[(5, 6)],
+            weights=_W_BALANCED_SCORE,
+            game_state=gs,
+        )
+
+    assert dest == (5, 5), (
+        f"current (plus proche de la zone propre) doit être préféré, obtenu {dest!r}"
     )
 
 
