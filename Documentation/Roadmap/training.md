@@ -38,6 +38,23 @@ courbes**, un run séparé n'a plus d'objet sauf si celui-ci échoue.
 
 ---
 
+## Mode exploiteur E1/E2/E3 {#exploiteur}
+
+**Livré 2026-08-22.** `--etape E1/E2/E3` mesure l'exploitabilité de sa cible (P3, P5, P8) :
+budget = épisodes pour passer de 50 % à 70 % de win-rate contre la cible figée.
+
+- `ExploiterProbeCallback` : sonde synchrone tous les 2000 épisodes (100 ép. bon marché →
+  une seule confirmation de 500 ép.), sans Future ni ThreadPoolExecutor.
+- `validate_exploiter_protocol` : refuse le run si `training_config`, `ratio`, `warmup`
+  ou `profile_total_episodes < budget_cap` divergent du protocole gelé (`exploiter_config`).
+- `curriculum.log` : budget entier ou `'>50000'` (censuré) + courbe win_rate complète.
+- 28 tests verrou (4 verrous : refus protocole, budget_cap atteignable, pas de sonde abandonnée, valeur censurée).
+- `training_config_required` : `x1_long` (50 000 épisodes = `budget_cap`).
+
+Lancer : `python3 ai/train.py --agent ArmageddonAgent --training-config x1_long --scenario bot --etape E1`
+
+---
+
 ## É9 — Second siège + second scénario {#e9}
 
 **Suspendu** — après entraînement bot satisfaisant (jalon J4). Second scénario écrit par l'utilisateur (décision 2026-08-02).
