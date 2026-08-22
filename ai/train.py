@@ -3788,28 +3788,26 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             (cb for cb in training_callbacks if isinstance(cb, BotEvaluationCallback)),
             None
         )
-        if bot_eval_callback is not None:
-            run_info = {
-                **run_info,
-                "episodes_trained": int(episodes_trained),
-                "last_bot_eval": bot_eval_callback.last_eval_results,
-                "last_bot_eval_marker": bot_eval_callback.last_eval_marker,
-                "best_robust_score": bot_eval_callback.best_robust_score,
-                "best_robust_combined": bot_eval_callback.best_robust_combined,
-                "best_robust_eval_marker": bot_eval_callback.best_robust_eval_marker
-            }
         exploiter_probe_callback = next(
             (cb for cb in training_callbacks if isinstance(cb, ExploiterProbeCallback)),
             None
         )
+        if bot_eval_callback is not None or exploiter_probe_callback is not None:
+            run_info["episodes_trained"] = int(episodes_trained)
+        if bot_eval_callback is not None:
+            run_info.update({
+                "last_bot_eval": bot_eval_callback.last_eval_results,
+                "last_bot_eval_marker": bot_eval_callback.last_eval_marker,
+                "best_robust_score": bot_eval_callback.best_robust_score,
+                "best_robust_combined": bot_eval_callback.best_robust_combined,
+                "best_robust_eval_marker": bot_eval_callback.best_robust_eval_marker,
+            })
         if exploiter_probe_callback is not None:
-            run_info = {
-                **run_info,
-                "episodes_trained": int(episodes_trained),
+            run_info.update({
                 "exploiter_win_rate_curve": exploiter_probe_callback.win_rate_curve,
                 "exploiter_budget": exploiter_probe_callback.budget,
                 "exploiter_censored": exploiter_probe_callback.censored,
-            }
+            })
 
         if return_run_info:
             return True, model, env, run_info
@@ -4849,7 +4847,7 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
     )
 
     stage_members = stage_pool_members(stage)
-    champion_label = stage_champion_label(stage)
+    champion_label = next((m["label"] for m in stage_members if m["kind"] == "champion"), None)
     accepted, gate_reason = evaluate_stage_gate(
         args.etape, champion_label, scores_vs_pool, floor, target
     )
@@ -5561,8 +5559,7 @@ def main():
                 _exploiter_async_eval_enabled: bool = True
                 _exploiter_freeze_pool: bool = False
                 if curriculum_stage is not None and is_exploiter_stage(curriculum_stage[1]):
-                    _curr = curriculum_stage[0]
-                    _stg = curriculum_stage[1]
+                    _curr, _stg = curriculum_stage
                     _exploit_cfg = load_exploiter_config(_curr)
                     _models_root = get_config_loader().get_models_root()
                     _canonical = build_agent_model_path(_models_root, args.agent)
