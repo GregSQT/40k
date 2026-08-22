@@ -795,3 +795,95 @@ def test_contest_pull_biases_enemy_objective_map() -> None:
         "Le rabais ennemi doit être supérieur au rabais neutre "
         f"({expected_enemy_dist} vs {expected_neutral_dist})"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 13. Correctif B — _swing_score_fn concentre les kills (rouge/vert)
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_swing_score_fn_prefers_killable_target_over_high_value() -> None:
+    """_swing_score_fn doit préférer une cible TUABLE à une cible haute-VALUE non-tuable.
+
+    Scénario :
+      - Cible A : HP=3, damage=3 (tuable), VALUE=0  → doit être élue
+      - Cible B : HP=10, damage=9 (non-tuable), VALUE=50 → doit être écartée
+
+    Avec l'ancien critère (p_kill * VALUE + damage) :
+      A = 1.0*0 + 3 = 3.0   B = 0.9*50 + 9 = 54.0 → B élu (ROUGE)
+    Avec le pattern kill_now (1000 si tuable + damage) :
+      A = 1000 + 3 = 1003    B = 0 + 9 = 9          → A élu (VERT)
+
+    Mutation prouvée : réintroduire p_kill*VALUE + damage comme score de A ferait choisir B.
+    """
+    from ai.benchmark_bots import _swing_score_fn
+
+    def _mock_dmg(game_state, att_id, tgt_id, is_ranged):
+        return 3.0 if tgt_id == "A" else 9.0
+
+    gs: Dict[str, Any] = {
+        "units_cache": {
+            "A": {"HP_CUR": 3, "col": 0, "row": 0, "player": 2},
+            "B": {"HP_CUR": 10, "col": 1, "row": 0, "player": 2},
+        },
+        "episode_number": 1, "turn": 1, "phase": "shoot",
+        "units": [], "objectives": [], "objective_controllers": {},
+        "victory_points": {1: 0, 2: 0},
+    }
+    entry_a = {"VALUE": 0.0}
+    entry_b = {"VALUE": 50.0}
+
+    from unittest.mock import patch
+    with patch("ai.benchmark_bots.squad_expected_damage", side_effect=_mock_dmg):
+        fn = _swing_score_fn("att1", is_ranged=True)
+        score_a = fn("A", entry_a, gs)
+        score_b = fn("B", entry_b, gs)
+
+    assert score_a > score_b, (
+        f"Cible tuable A (score={score_a:.1f}) doit dépasser B non-tuable haute-VALUE "
+        f"(score={score_b:.1f}) — le bonus kill 1000 doit dominer"
+    )
+
+
+def test_denial_score_fn_prefers_killable_target_on_objective() -> None:
+    """_denial_score_fn préfère la cible tuable sur objectif à la cible non-tuable hors objectif.
+
+    Scénario :
+      - Cible A (sur objectif) : HP=5, damage=5 (tuable) → attendu : élu
+      - Cible B (hors objectif) : HP=10, damage=9 (non-tuable), VALUE=50 → écarté
+
+    Le bonus objectif (+10) ne doit pas éclipser le bonus kill (1000).
+    """
+    from unittest.mock import patch
+
+    bot = ReferenceDenialBot(randomness=0.0)
+    attacker = {"id": "att1", "player": 1}
+
+    def _mock_dmg(game_state, att_id, tgt_id, is_ranged):
+        return 5.0 if tgt_id == "A" else 9.0
+
+    gs: Dict[str, Any] = {
+        "units_cache": {
+            "A": {"HP_CUR": 5, "col": 0, "row": 0, "player": 2},
+            "B": {"HP_CUR": 10, "col": 5, "row": 5, "player": 2},
+        },
+        "episode_number": 1, "turn": 1, "phase": "shoot",
+        "units": [], "objectives": [{"id": "obj1"}], "objective_controllers": {},
+        "victory_points": {1: 0, 2: 0},
+    }
+    entry_a = {"col": 0, "row": 0, "VALUE": 0.0}  # sur objectif
+    entry_b = {"col": 5, "row": 5, "VALUE": 50.0}  # hors objectif
+
+    def _on_obj(game_state, entry, zones):
+        return entry.get("col") == 0  # seule A est sur objectif
+
+    with patch("ai.benchmark_bots.squad_expected_damage", side_effect=_mock_dmg), \
+         patch("ai.benchmark_bots.objective_hex_sets", return_value=[(0, 0)]), \
+         patch("ai.benchmark_bots.unit_is_within_objective", side_effect=_on_obj):
+        fn = bot._denial_score_fn(attacker, is_ranged=True, game_state=gs)
+        score_a = fn("A", entry_a, gs)
+        score_b = fn("B", entry_b, gs)
+
+    assert score_a > score_b, (
+        f"Cible tuable sur objectif A (score={score_a:.1f}) doit dépasser "
+        f"B non-tuable hors objectif (score={score_b:.1f})"
+    )

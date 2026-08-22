@@ -173,7 +173,14 @@ def _living_enemies(unit: Dict[str, Any], game_state: Dict[str, Any]) -> List[Di
 
 
 def _swing_score_fn(attacker_id: str, is_ranged: bool):
-    """Critere de cible : P(kill) x VALUE + degats esperes."""
+    """Critere de cible : bonus 1000 si la cible est tuable ce tour, + degats esperes.
+
+    Motif _score_kill_now (bot_doctrines.py) : retirer une escouade entiere retire son OC
+    et ses tirs immediatement — un demi-kill ne rapporte rien. Le bonus discret 1000 fait
+    passer une cible tuable devant n'importe quelle cible non-tuable, quelle que soit sa
+    VALUE. L'ancien critere (P(kill) x VALUE + damage) laissait une cible a haute VALUE
+    non-tuable dominer une cible tuable a VALUE nulle — le bot n'eliminait personne.
+    """
     def _score(sid: str, entry: Dict[str, Any], game_state: Dict[str, Any]) -> float:
         damage = squad_expected_damage(game_state, attacker_id, sid, is_ranged)
         hp = get_hp_from_cache(sid, game_state)
@@ -181,9 +188,7 @@ def _swing_score_fn(attacker_id: str, is_ranged: bool):
             raise ValueError(f"_swing_score_fn: {sid} absent du cache (unité ciblée non vivante)")
         if hp <= 0:
             raise ValueError(f"_swing_score_fn: {sid} HP={hp} dans le cache (attendu >0)")
-        p_kill = min(1.0, damage / float(hp))
-        value = float(entry.get("VALUE", 0.0))
-        return p_kill * value + damage
+        return (1000.0 if damage >= float(hp) else 0.0) + damage
     return _score
 
 
@@ -770,9 +775,7 @@ class ReferenceDenialBot(_BenchmarkBase):
                 raise ValueError(f"_denial_score_fn: {sid} absent du cache (unité ciblée non vivante)")
             if hp <= 0:
                 raise ValueError(f"_denial_score_fn: {sid} HP={hp} dans le cache (attendu >0)")
-            p_kill = min(1.0, damage / float(hp))
-            value = float(entry.get("VALUE", 0.0))
-            base = p_kill * value + damage
+            base = (1000.0 if damage >= float(hp) else 0.0) + damage
             if zones and unit_is_within_objective(gs, entry, zones):
                 base += 10.0
             return base
