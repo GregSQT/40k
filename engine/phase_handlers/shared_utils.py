@@ -12107,7 +12107,7 @@ SQUAD_ACTION_FIGHT_SLOT_BASE = (
 )  # 1255
 SQUAD_ACTION_FIGHT_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1065-1084
 # Combat « a vide » (12.04/12.06) : selectionne pour combattre sans cible eligible. Etat legal.
-SQUAD_ACTION_FIGHT_NO_TARGET = SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT  # 1085
+SQUAD_ACTION_FIGHT_NO_TARGET = SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT  # 1275
 # 10.02 / 10.07 : le TYPE DE TIR est un choix du joueur (« Select one shooting type that unit is
 # eligible to make »), et le tir indirect est le premier type qui n exclut pas le tir normal —
 # une meme escouade peut jouer l un ou l autre dans le MEME etat. Il lui faut donc sa propre
@@ -13167,10 +13167,21 @@ def build_squad_action_mask(
                                 mask[SQUAD_ACTION_FIGHT_SLOT_BASE + slot_i] = 1
                                 opened += 1
                 if opened == 0:
-                    # Aucune cible meme apres pile-in overrun : combat a vide (12.04/12.06).
-                    # L'escouade DOIT pouvoir se declarer, sans quoi elle resterait eligible
-                    # sans action et la sous-phase ne se draine jamais.
-                    mask[SQUAD_ACTION_FIGHT_NO_TARGET] = 1
+                    if fight_targets:
+                        # Slots tous occupes par des ennemis hors EZ : meme infra que le elif
+                        # ci-dessous (cibles legales mais infrappables faute de slot). Ne pas
+                        # ouvrir FIGHT_NO_TARGET — le commit trouverait des cibles et crasherait.
+                        from engine.game_utils import add_debug_file_log
+                        add_debug_file_log(
+                            game_state,
+                            f"[SLOTS] escouade {squad_id} : {len(fight_targets)} cibles de melee "
+                            f"12.05 mais 0 slot ennemi mappe — cible(s) infrappable(s).",
+                        )
+                    else:
+                        # Aucune cible meme apres pile-in overrun : combat a vide (12.04/12.06).
+                        # L'escouade DOIT pouvoir se declarer, sans quoi elle resterait eligible
+                        # sans action et la sous-phase ne se draine jamais.
+                        mask[SQUAD_ACTION_FIGHT_NO_TARGET] = 1
             elif opened < len(fight_targets):
                 # Une cible legale sans slot serait INFRAPPABLE : troncature silencieuse interdite.
                 from engine.game_utils import add_debug_file_log

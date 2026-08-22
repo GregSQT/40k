@@ -598,3 +598,52 @@ def test_overrun_post_pilin_uses_per_model_base_size_x5():
     assert any(_model_can_fight_target(gs, mc[m], "atk", "enemy") for m in alive_mids), (
         "personnage socle=10 dans EZ à x5 (edge≈13.5≤15.0) : pool doit être non vide après fix"
     )
+
+
+def test_fight_no_target_not_opened_when_all_slots_exhausted_by_out_of_ez(melee_scenario_file):
+    """Débordement de slots : fight_targets non-vide mais AUCUN slot ne désigne une cible EZ.
+
+    Scénario : K=20 slots mappés sur des ennemis HORS EZ, mais _fight_build_valid_target_pool
+    retourne un ennemi EN EZ qui n'a pas de slot (>K escouades ennemies). Avant le fix, le masque
+    ouvrait FIGHT_NO_TARGET (aucun slot ouvert → inner guard sans filtre fight_targets). Le commit
+    (_process_squad_action) trouvait ces cibles et levait 'combat a vide' → rupture masque/commit.
+
+    Fix : FIGHT_NO_TARGET n'est ouvert que si fight_targets est vide (pool vraiment vide).
+    """
+    from unittest.mock import patch
+    from engine.phase_handlers.shared_utils import (
+        build_squad_action_mask,
+        SQUAD_ACTION_FIGHT_SLOT_BASE,
+        SQUAD_ACTION_FIGHT_SLOT_COUNT,
+    )
+
+    eng = _engine(melee_scenario_file, seed=1)
+    gs = eng.game_state
+    squad_id = next(iter(gs["units_cache"]))
+    our_player = int(gs["units_cache"][squad_id]["player"])
+
+    gs["phase"] = "fight"
+    gs["fight_subphase"] = "fight"
+    gs["current_player"] = our_player
+    gs["fight_step"] = "fights_first"
+    gs["fight_selector"] = our_player
+    gs["engaged_at_fight_step_start"] = {}
+    gs["units_charged"] = {squad_id}
+    gs["units_selected_to_fight"] = set()
+    gs["units_fought"] = set()
+
+    # K slots occupés par des ennemis hors EZ ; "ez-only" est en EZ mais n'a pas de slot.
+    out_of_ez_slots: List[Optional[str]] = [f"out-of-ez-{i}" for i in range(SQUAD_ACTION_FIGHT_SLOT_COUNT)]
+
+    with patch(
+        "engine.phase_handlers.fight_handlers._fight_build_valid_target_pool",
+        return_value=["ez-only"],
+    ):
+        mask = build_squad_action_mask(gs, squad_id, enemy_slot_ids=out_of_ez_slots)
+
+    assert mask[ACTION_FIGHT_NO_TARGET] == 0, (
+        "fight_targets non-vide : FIGHT_NO_TARGET ne doit PAS s'ouvrir — "
+        "le commit trouverait des cibles et lèverait 'combat a vide'"
+    )
+    fight_range = mask[SQUAD_ACTION_FIGHT_SLOT_BASE: SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT]
+    assert not any(fight_range), "Aucun slot ne doit s'ouvrir : 'ez-only' absent du mapping de slots"
