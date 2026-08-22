@@ -112,6 +112,7 @@ _MELEE_TRADE_FLOOR = 0.5
 #: candidates pour la reclamante (constante) mais corrige l'attraction pour les non-reclamantes.
 _CONTEST_PULL_ENEMY = 2.0
 _CONTEST_PULL_NEUTRAL = 1.0
+_CONTEST_PULL_MINE = 0.0
 
 #: Seuil de degats attendus encaisses ce tour au-dela duquel la PRESERVE s'active (balanced).
 #: Independant de _VP_LEAD : l'un mesure l'avance en VP, l'autre la pression adverse en HP.
@@ -377,16 +378,13 @@ def _score_destinations_weighted(
             # bot_doctrines). Un objectif ennemi semble _CONTEST_PULL_ENEMY * w_contest hexes plus
             # proche, un neutre _CONTEST_PULL_NEUTRAL * w_contest hexes plus proche. La carte
             # est promue en float64 des qu'un rabais ou une penalite s'applique.
+            _pull_by_holder = {3 - player: _CONTEST_PULL_ENEMY, player: _CONTEST_PULL_MINE}
             target_maps = []
             for i in targets:
                 m: Any = maps[i]
                 if surplus[i]:
                     m = m + _W_CROWD_BENCH * surplus[i]
-                pull = w_contest * (
-                    _CONTEST_PULL_ENEMY if holders[i] == 3 - player
-                    else 0.0 if holders[i] == player
-                    else _CONTEST_PULL_NEUTRAL
-                )
+                pull = w_contest * _pull_by_holder.get(holders[i], _CONTEST_PULL_NEUTRAL)
                 if pull:
                     m = m.astype(np.float64, copy=False) - pull
                 target_maps.append(m)
@@ -577,12 +575,15 @@ class _BenchmarkBase:
             enemies = _living_enemies(attacker, game_state)
         if not enemies:
             return False
-        best_melee = max(
-            squad_expected_damage(game_state, att_id, str(e["id"]), False) for e in enemies
-        )
-        best_ranged = max(
-            squad_expected_damage(game_state, att_id, str(e["id"]), True) for e in enemies
-        )
+        best_melee = best_ranged = 0.0
+        for e in enemies:
+            eid = str(e["id"])
+            m = squad_expected_damage(game_state, att_id, eid, False)
+            r = squad_expected_damage(game_state, att_id, eid, True)
+            if m > best_melee:
+                best_melee = m
+            if r > best_ranged:
+                best_ranged = r
         return best_melee >= best_ranged * _MELEE_TRADE_FLOOR
 
     def _charge(
