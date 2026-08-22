@@ -20,7 +20,7 @@ CE QUI LES SEPARE DES SIX STYLES D'ENTRAINEMENT (Bot_refactor.md §4.C)
        evaluation, les references n'avaient jamais rien mesure cote agent.
 
     2. Ciblage par swing espere, une seule formule pour les trois :
-       P(kill) x VALUE + base_damage, au lieu des quatre criteres du panel d'entrainement.
+       bonus fixe _KILL_SENTINEL si la cible est tuable + degats esperes, au lieu des quatre criteres du panel d'entrainement.
 
     3. Aucun de leurs parametres ne vient de config/bot_movement_weights.json. Un benchmark
        regle sur le meme fichier que les bots d'entrainement serait regle en meme temps qu'eux.
@@ -118,6 +118,11 @@ _CONTEST_PULL_MINE = 0.0
 #: Independant de _VP_LEAD : l'un mesure l'avance en VP, l'autre la pression adverse en HP.
 _SURVIVE_THRESHOLD = 8.0
 
+#: Bonus discret applique a la cible tuable pour garantir qu'elle prime toute cible non-tuable,
+#: quel que soit le niveau de degats. Doit exceder le maximum possible de squad_expected_damage
+#: pour n'importe quelle paire (attaquant, cible) en 40K — 1e6 est bien au-dessus du plafond reel.
+_KILL_SENTINEL = 1_000_000.0
+
 #: Poids par slot de deploiement — commun aux trois benchmarks.
 _BENCHMARK_PLACEMENT_WEIGHTS: Dict[int, float] = {
     DEPLOYMENT_ACTIONS[0]: 0.20,
@@ -178,7 +183,7 @@ def _living_enemies(unit: Dict[str, Any], game_state: Dict[str, Any]) -> List[Di
 
 
 def _swing_score_fn(attacker_id: str, is_ranged: bool):
-    """Critere de cible : bonus 1000 si la cible est tuable ce tour, + degats esperes.
+    """Critere de cible : bonus _KILL_SENTINEL si la cible est tuable ce tour, + degats esperes.
 
     Motif _score_kill_now (bot_doctrines.py) : retirer une escouade entiere retire son OC
     et ses tirs immediatement — un demi-kill ne rapporte rien. Le bonus discret 1000 fait
@@ -193,7 +198,7 @@ def _swing_score_fn(attacker_id: str, is_ranged: bool):
             raise ValueError(f"_swing_score_fn: {sid} absent du cache (unité ciblée non vivante)")
         if hp <= 0:
             raise ValueError(f"_swing_score_fn: {sid} HP={hp} dans le cache (attendu >0)")
-        return (1000.0 if damage >= float(hp) else 0.0) + damage
+        return (_KILL_SENTINEL if damage >= float(hp) else 0.0) + damage
     return _score
 
 
@@ -211,6 +216,16 @@ def _objective_holders(game_state: Dict[str, Any]) -> List[Optional[int]]:
     """
     controllers: Dict[str, Optional[int]] = game_state.get("objective_controllers") or {}
     return [controllers.get(str(obj_id)) for obj_id, _zone in objective_hex_zones(game_state)]
+
+
+def _zone_contest_pull(holder: Optional[int], player: int, w_contest: float) -> float:
+    """Pull de distance (en hexes) pour un objectif selon qui le tient.
+
+    Facteur de pull = w_contest * rabais semantique (voir _CONTEST_PULL_*).
+    Extrait pour être testable independamment de _score_destinations_weighted.
+    """
+    _PULL = {3 - player: _CONTEST_PULL_ENEMY, player: _CONTEST_PULL_MINE}
+    return w_contest * _PULL.get(holder, _CONTEST_PULL_NEUTRAL)
 
 
 def _enemy_anchors(
@@ -378,13 +393,12 @@ def _score_destinations_weighted(
             # bot_doctrines). Un objectif ennemi semble _CONTEST_PULL_ENEMY * w_contest hexes plus
             # proche, un neutre _CONTEST_PULL_NEUTRAL * w_contest hexes plus proche. La carte
             # est promue en float64 des qu'un rabais ou une penalite s'applique.
-            _pull_by_holder = {3 - player: _CONTEST_PULL_ENEMY, player: _CONTEST_PULL_MINE}
             target_maps = []
             for i in targets:
                 m: Any = maps[i]
                 if surplus[i]:
                     m = m + _W_CROWD_BENCH * surplus[i]
-                pull = w_contest * _pull_by_holder.get(holders[i], _CONTEST_PULL_NEUTRAL)
+                pull = _zone_contest_pull(holders[i], player, w_contest)
                 if pull:
                     m = m.astype(np.float64, copy=False) - pull
                 target_maps.append(m)
@@ -1013,7 +1027,8 @@ class ReferenceReactiveBot(_BenchmarkBase):
             return self._shoot(valid_actions, game_state, active_unit)
         if phase == "charge":
             if self._plan == "KILL" and not self._is_claimant(game_state, active_unit):
-                return self._charge(valid_actions, game_state, active_unit)
+                enemies = _living_enemies(active_unit, game_state)
+                return self._charge(valid_actions, game_state, active_unit, enemies=enemies)
             return self._wait_or_first(valid_actions)
         if phase == "fight":
             return self._fight(valid_actions, game_state, active_unit)
