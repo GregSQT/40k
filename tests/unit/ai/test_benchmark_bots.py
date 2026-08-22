@@ -780,21 +780,32 @@ def test_contest_pull_biases_enemy_objective_map() -> None:
     )
 
 
-def test_own_zone_gets_no_pull_when_all_zones_held() -> None:
-    """Quand le joueur tient tous les objectifs (free=[]), les zones propres ne génèrent
-    aucun pull (pull=0.0) — spec 'mien: 0.0, y envoyer une deuxième escouade ne rapporte rien'.
+def test_zone_contest_pull_values() -> None:
+    """_zone_contest_pull retourne 0 pour une zone propre, et les rabais attendus pour ennemi/neutre.
 
-    Note COUVERTURE : avec toutes les zones propres, le pull constant s'applique
-    identiquement à toutes les destinations (décalage uniforme), donc le choix de
-    destination est invariant à la mutation pull=0 → pull=_CONTEST_PULL_NEUTRAL.
-    Ce test valide le code path free=[] et que la destination la plus proche selon les
-    distances brutes est bien retournée sans biais supplémentaire.
+    Ce test détecte la mutation pull_mine=0 → pull_mine=_CONTEST_PULL_NEUTRAL directement
+    sur la formule extraite, là où le comportement de _score_destinations_weighted est invariant
+    à cette mutation (décalage uniforme sur toutes les destinations quand free=[]).
     """
+    from ai.benchmark_bots import _zone_contest_pull, _CONTEST_PULL_ENEMY, _CONTEST_PULL_NEUTRAL
+
+    w = 3.5
+    player = 1
+    enemy = 2  # 3 - player
+
+    assert _zone_contest_pull(player, player, w) == 0.0, "zone propre → pull nul"
+    assert _zone_contest_pull(enemy, player, w) == w * _CONTEST_PULL_ENEMY, "zone ennemie → pull ennemi"
+    assert _zone_contest_pull(None, player, w) == w * _CONTEST_PULL_NEUTRAL, "zone neutre → pull neutre"
+
+
+def test_own_zone_free_path_returns_closest_destination() -> None:
+    """Quand le joueur tient tous les objectifs (free=[]), la destination la plus proche
+    des zones propres est retournée — validation du code path, pas de la valeur de pull."""
     from unittest.mock import patch
     import numpy as np
     from ai.benchmark_bots import _W_BALANCED_SCORE
 
-    # Deux zones propres (player 1 tient tout) → free=[], targets=[0, 1].
+    # Deux zones propres → free=[], targets=[0, 1].
     # Zone 0 : current=(5,5) à distance 3 (proche), valid_dest=(5,6) à 10.
     # Zone 1 : uniforme à 10.
     # min sans pull : (5,5)=3, (5,6)=10 → current préféré.
@@ -802,7 +813,7 @@ def test_own_zone_gets_no_pull_when_all_zones_held() -> None:
     fake_map_0[5, 5] = 3
     fake_map_1 = np.full((10, 10), 10, dtype=np.int16)
     fake_maps = [fake_map_0, fake_map_1]
-    fake_holders = [1, 1]  # joueur 1 tient tout → free=[]
+    fake_holders = [1, 1]
 
     unit = {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 6}
     gs = _minimal_game_state()
@@ -873,6 +884,40 @@ def test_swing_score_fn_prefers_killable_target_over_high_value() -> None:
     assert score_a > score_b, (
         f"Cible tuable A (score={score_a:.1f}) doit dépasser B non-tuable haute-VALUE "
         f"(score={score_b:.1f}) — le bonus kill 1000 doit dominer"
+    )
+
+
+def test_swing_score_fn_kill_sentinel_exceeds_large_squad_damage() -> None:
+    """_KILL_SENTINEL doit dépasser squad_expected_damage d'une grosse escouade non-tuable.
+
+    Scénario : grosse escouade B avec damage=1500 (non-tuable, HP=2000).
+    Avec l'ancien sentinel 1000 : score_B = 1500 > score_A = 1000+5 → B élu (ROUGE).
+    Avec _KILL_SENTINEL = 1_000_000 : score_A = 1_000_005 >> 1500 → A élu (VERT).
+    """
+    from ai.benchmark_bots import _swing_score_fn
+
+    def _mock_dmg(game_state, att_id, tgt_id, is_ranged):
+        return 5.0 if tgt_id == "A" else 1500.0
+
+    gs: Dict[str, Any] = {
+        "units_cache": {
+            "A": {"HP_CUR": 5, "col": 0, "row": 0, "player": 2},
+            "B": {"HP_CUR": 2000, "col": 1, "row": 0, "player": 2},
+        },
+        "episode_number": 1, "turn": 1, "phase": "shoot",
+        "units": [], "objectives": [], "objective_controllers": {},
+        "victory_points": {1: 0, 2: 0},
+    }
+
+    from unittest.mock import patch
+    with patch("ai.benchmark_bots.squad_expected_damage", side_effect=_mock_dmg):
+        fn = _swing_score_fn("att1", is_ranged=True)
+        score_a = fn("A", {}, gs)
+        score_b = fn("B", {}, gs)
+
+    assert score_a > score_b, (
+        f"Cible tuable A (score={score_a:.0f}) doit dominer B non-tuable à hauts dégâts "
+        f"(score={score_b:.0f}) — _KILL_SENTINEL={score_a - 5.0:.0f} doit excéder 1500"
     )
 
 
