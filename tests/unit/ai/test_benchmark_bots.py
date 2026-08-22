@@ -656,6 +656,47 @@ def test_reactive_bot_no_kill_when_enemies_out_of_reach() -> None:
     )
 
 
+def test_reactive_bot_no_kill_when_no_enemies_in_units() -> None:
+    """_update_plan ne bascule PAS en KILL si units ne contient aucune unité ennemie.
+
+    Scénario : grosse perte adverse (loss_opp=10 > threshold) car les ennemis ont
+    entièrement disparu de la liste units — _has_reachable_enemies retourne False
+    immédiatement (alive_enemies=[]), sans même évaluer les distances.
+    """
+    from ai.benchmark_bots import _VALUE_LOSS_THRESHOLD
+
+    bot = ReferenceReactiveBot(randomness=0.0)
+
+    def _gs_with_enemies(turn: int) -> Dict[str, Any]:
+        gs = _minimal_game_state(episode=1, turn=turn)
+        gs["units"] = [
+            {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 6},
+            {"id": "u2", "player": 2, "VALUE": 10.0, "MOVE": 6},
+        ]
+        gs["units_cache"] = {
+            "u1": {"col": 0, "row": 0, "player": 1},
+            "u2": {"col": 3, "row": 0, "player": 2},
+        }
+        return gs
+
+    def _gs_no_enemies(turn: int) -> Dict[str, Any]:
+        gs = _minimal_game_state(episode=1, turn=turn)
+        gs["units"] = [
+            {"id": "u1", "player": 1, "VALUE": 5.0, "MOVE": 6},
+            # aucune unité ennemie — alive_enemies=[] dans _has_reachable_enemies
+        ]
+        gs["units_cache"] = {"u1": {"col": 0, "row": 0, "player": 1}}
+        return gs
+
+    bot._update_plan(_gs_with_enemies(1), player=1)  # snapshot: val_opp=10
+    bot._plan = "SCORE"
+    bot._update_plan(_gs_no_enemies(2), player=1)  # loss_opp=10 > threshold, alive_enemies=[]
+
+    assert bot._plan != "KILL", (
+        f"Aucun ennemi dans units : KILL ne doit pas s'activer, obtenu {bot._plan!r}"
+    )
+
+
 def test_reactive_bot_kill_when_enemy_in_reach_after_losses() -> None:
     """_update_plan bascule en KILL quand grosse perte adverse ET ennemi atteignable.
 
