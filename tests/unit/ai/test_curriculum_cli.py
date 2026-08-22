@@ -25,6 +25,14 @@ CURRICULUM = {
         "target_score_vs_champion": 0.60,
         "eval_episodes": 300,
     },
+    "exploiter_config": {
+        "training_config_required": "x1",
+        "probe_every_episodes": 2000,
+        "probe_cheap_n": 100,
+        "probe_confirm_n": 500,
+        "win_rate_target": 0.70,
+        "budget_cap": 50000,
+    },
     "stages": {
         "P0": {
             "role": "learner", "init": "new", "warmup_episodes": 0,

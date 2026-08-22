@@ -1649,6 +1649,7 @@ from ai.training_callbacks import (
     EpisodeTerminationCallback,
     MetricsCollectionCallback,
     BotEvaluationCallback,
+    ExploiterProbeCallback,
     selection_worst_bot,
 )
 
@@ -1674,7 +1675,9 @@ from ai.curriculum import (
     append_curriculum_log,
     copy_tensorboard_run,
     evaluate_stage_gate,
+    is_exploiter_stage,
     load_curriculum,
+    load_exploiter_config,
     pool_monotonicity_diagnostic,
     promote_stage_model,
     require_stage,
@@ -1683,6 +1686,7 @@ from ai.curriculum import (
     stage_model_path,
     stage_order,
     stage_pool_members,
+    validate_exploiter_protocol,
 )
 from ai.model_artifacts import model_companion_paths, remove_model_with_companions
 from ai.run_state import get_run_state_path, load_run_state, save_run_state
@@ -3060,7 +3064,11 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                                  device_mode: Optional[str] = None,
                                  training_config_override: Optional[Dict[str, Any]] = None,
                                  silent_chunk: bool = False,
-                                 return_run_info: bool = False) -> Union[TrainRunResult, TrainRunResultWithInfo]:
+                                 return_run_info: bool = False,
+                                 freeze_opponent_pool: bool = False,
+                                 async_eval_enabled: bool = True,
+                                 extra_callbacks: Optional[List[BaseCallback]] = None,
+                                 ) -> Union[TrainRunResult, TrainRunResultWithInfo]:
     """Train model with random scenario selection per episode.
     
     Args:
@@ -3505,8 +3513,16 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         scenario_info=scenario_display,
         global_episode_offset=episode_offset,
         global_start_time=global_start_time,
-        silent_logs=silent_chunk
+        silent_logs=silent_chunk,
+        async_eval_enabled=async_eval_enabled,
     )
+    if extra_callbacks:
+        # Lier metrics_tracker aux callbacks exploiteur avant de les injecter, comme on le
+        # fait pour BotEvaluationCallback (cf. boucle de liaison plus bas).
+        for cb in extra_callbacks:
+            if isinstance(cb, ExploiterProbeCallback):
+                cb.metrics_tracker = metrics_tracker
+        training_callbacks = list(extra_callbacks) + training_callbacks
     callback_names = [callback.__class__.__name__ for callback in training_callbacks]
     _debug_train_marker(
         "after setup_callbacks(): count=%s callbacks=%s", len(training_callbacks), callback_names
@@ -3782,6 +3798,18 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 "best_robust_combined": bot_eval_callback.best_robust_combined,
                 "best_robust_eval_marker": bot_eval_callback.best_robust_eval_marker
             }
+        exploiter_probe_callback = next(
+            (cb for cb in training_callbacks if isinstance(cb, ExploiterProbeCallback)),
+            None
+        )
+        if exploiter_probe_callback is not None:
+            run_info = {
+                **run_info,
+                "episodes_trained": int(episodes_trained),
+                "exploiter_win_rate_curve": exploiter_probe_callback.win_rate_curve,
+                "exploiter_budget": exploiter_probe_callback.budget,
+                "exploiter_censored": exploiter_probe_callback.censored,
+            }
 
         if return_run_info:
             return True, model, env, run_info
@@ -3843,7 +3871,8 @@ def _validate_vs_control_callback_params(callback_params: dict) -> float:
 def setup_callbacks(config, model_path, training_config, training_config_name="default", metrics_tracker=None,
                    total_episodes_override=None, max_episodes_override=None, scenario_info=None, global_episode_offset=0,
                    global_start_time=None, agent=None, rewards_config_name=None,
-                   silent_logs: bool = False):
+                   silent_logs: bool = False,
+                   async_eval_enabled: bool = True):
     W40KEngine, _ = setup_imports()
     # En tete : c'est le premier pas joue qui rend une promotion `--resume-from` definitive, et
     # rien d'autre. Sans lui dans la liste, la transaction resterait armee pendant tout le run et
@@ -4213,6 +4242,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             intermediate_n_workers=bot_eval_n_workers_intermediate,
             model_gating_min_benchmark_floor=model_gating_min_benchmark_floor,
             stop_on_no_generalization=stop_on_no_generalization,
+            async_eval_enabled=async_eval_enabled,
         )
         callbacks.append(bot_eval_callback)
 
@@ -4661,12 +4691,22 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
         args.append = True
         print(f"🎓 Etape {args.etape} — init 'from:{source_stage}' : reprise de {source_model}")
 
+    if is_exploiter_stage(stage):
+        # Verification du protocole gele AVANT tout effet de bord : si la config diverge,
+        # le run est refuse ici et le modele n'est pas touche.
+        validate_exploiter_protocol(curriculum, stage, args.etape, args.training_config)
+        print(
+            f"🔬 Etape exploiteur {args.etape} — adversaire fige a 100%, "
+            "aucun bot, aucune rampe. async_eval force a False (sondes synchrones)."
+        )
+
     opponent_mix = _stage_opponent_mix(curriculum, stage, canonical_model_path)
     _install_stage_config_overrides(config, args.agent, opponent_mix)
-    print(
-        "🎓 Gate benchmark_floor desarme : la selection de l'etape se fait sur le score contre "
-        "le champion le plus recent, pas sur des bots de reference satures."
-    )
+    if not is_exploiter_stage(stage):
+        print(
+            "🎓 Gate benchmark_floor desarme : la selection de l'etape se fait sur le score contre "
+            "le champion le plus recent, pas sur des bots de reference satures."
+        )
     if opponent_mix is None:
         print(f"🎓 Etape {args.etape} — aucun pool : entrainement contre les bots seuls.")
     else:
@@ -4725,12 +4765,62 @@ def _score_stage_against_pool(
     return scores
 
 
+def _close_exploiter_stage(args, curriculum, stage, run_info) -> int:
+    """Journal de l'exploitabilite (budget + courbe win-rate). Pas de gate, pas de promotion.
+
+    L'exploiteur mesure l'exploitabilite de sa cible : son propre modele n'entre jamais dans
+    le pool des etapes suivantes, c'est la cible qu'il revele. Pas de `promote_stage_model`,
+    pas de copie TensorBoard : uniquement le journal.
+    """
+    print("\n" + "=" * 80)
+    print(f"🔬 CLOTURE EXPLOITEUR {args.etape}")
+    print("=" * 80)
+
+    budget = run_info.get("exploiter_budget")
+    censored = run_info.get("exploiter_censored", False)
+    win_rate_curve = run_info.get("exploiter_win_rate_curve", [])
+    cfg = load_exploiter_config(curriculum)
+    budget_cap = int(require_key(cfg, "budget_cap"))
+    win_rate_target = float(require_key(cfg, "win_rate_target"))
+
+    if censored:
+        budget_log = f">{budget_cap}"
+        print(f"🔬 Budget censure : seuil {win_rate_target:.0%} non atteint en {budget_cap} episodes")
+    elif budget is not None:
+        budget_log = int(budget)
+        print(f"✅ Budget : {budget} episodes pour atteindre {win_rate_target:.0%}")
+    else:
+        # Run interrompu avant plafond et sans confirmation — ne devrait pas arriver en pratique.
+        budget_log = None
+        print("⚠️  Run exploiteur termine sans budget ni censure (interruption ?)")
+
+    log_path = append_curriculum_log({
+        "etape": args.etape,
+        "role": "exploiter",
+        "training_config": args.training_config,
+        "init": require_key(stage, "init"),
+        "episodes_trained": run_info.get("episodes_trained"),
+        "target_stage": stage_champion_label(stage),
+        "win_rate_target": win_rate_target,
+        "budget_cap": budget_cap,
+        "budget": budget_log,
+        "censored": censored,
+        "win_rate_curve": win_rate_curve,
+    })
+    print(f"📝 curriculum.log : {log_path}")
+    # L'exploiteur ne retourne jamais 1 : l'absence de seuil est une mesure, pas un echec.
+    return 0
+
+
 def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
     """Mesure, gate, journal, promotion, TensorBoard. Rend le code de sortie du processus.
 
     ORDRE VOLONTAIRE : le journal est ecrit AVANT la promotion, et il l'est meme quand le gate
     refuse. Une etape recalee est precisement celle dont on veut relire les chiffres.
     """
+    if is_exploiter_stage(stage):
+        return _close_exploiter_stage(args, curriculum, stage, run_info)
+
     models_root = config.get_models_root()
     canonical_model_path = build_agent_model_path(models_root, args.agent)
     gate_cfg = require_key(curriculum, "gate")
@@ -5462,6 +5552,42 @@ def main():
                 else:
                     total_episodes = training_config["total_episodes"]
 
+                # Parametres supplementaires pour les etapes exploiteur.
+                _exploiter_extra_callbacks: Optional[List[BaseCallback]] = None
+                _exploiter_async_eval_enabled: bool = True
+                _exploiter_freeze_pool: bool = False
+                if curriculum_stage is not None and is_exploiter_stage(curriculum_stage[1]):
+                    _curr = curriculum_stage[0]
+                    _stg = curriculum_stage[1]
+                    _exploit_cfg = load_exploiter_config(_curr)
+                    _models_root = get_config_loader().get_models_root()
+                    _canonical = build_agent_model_path(_models_root, args.agent)
+                    _champion = stage_champion_label(_stg)
+                    if _champion is None:
+                        raise ValueError(
+                            f"Etape exploiteur {args.etape} : aucun champion dans le pool "
+                            "(stage_champion_label retourne None). Verifier curriculum.json."
+                        )
+                    _target_path = stage_model_path(_canonical, _champion)
+                    _exploiter_probe = ExploiterProbeCallback(
+                        target_archive_path=_target_path,
+                        training_config_name=args.training_config,
+                        rewards_config_name=args.rewards_config or args.agent,
+                        metrics_tracker=None,  # lie dans train_with_scenario_rotation
+                        probe_every_episodes=int(require_key(_exploit_cfg, "probe_every_episodes")),
+                        probe_cheap_n=int(require_key(_exploit_cfg, "probe_cheap_n")),
+                        probe_confirm_n=int(require_key(_exploit_cfg, "probe_confirm_n")),
+                        win_rate_target=float(require_key(_exploit_cfg, "win_rate_target")),
+                        budget_cap=int(require_key(_exploit_cfg, "budget_cap")),
+                    )
+                    _exploiter_extra_callbacks = [_exploiter_probe]
+                    _exploiter_async_eval_enabled = False
+                    _exploiter_freeze_pool = True
+                    # L'adversaire du pool est une archive figee (BotControlledEnv charge
+                    # depuis disque une fois au demarrage, aucun mecanisme ne la recharge).
+                    # freeze_opponent_pool=True est le verrou documentaire qui empecherait
+                    # toute future re-introduction d'un mecanisme de republication.
+
                 # Always use scenario rotation path for self/bot/all modes,
                 # even when a single scenario is available.
                 # This keeps random wall/objective ref materialization consistent.
@@ -5478,6 +5604,9 @@ def main():
                     use_bots=(args.scenario == "bot"),
                     device_mode=args.mode,
                     return_run_info=True,
+                    freeze_opponent_pool=_exploiter_freeze_pool,
+                    async_eval_enabled=_exploiter_async_eval_enabled,
+                    extra_callbacks=_exploiter_extra_callbacks,
                 )
 
                 if success and args.test_episodes > 0:

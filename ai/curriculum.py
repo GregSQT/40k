@@ -51,6 +51,16 @@ CURRICULUM_FILENAME = "curriculum.json"
 #: Nom du journal d'etapes, en APPEND a la racine du projet. Jumeau de `step.log`.
 CURRICULUM_LOG_FILENAME = "curriculum.log"
 
+#: Cles obligatoires du bloc `exploiter_config` dans `curriculum.json`.
+_EXPLOITER_CONFIG_REQUIRED_KEYS = (
+    "training_config_required",
+    "probe_every_episodes",
+    "probe_cheap_n",
+    "probe_confirm_n",
+    "win_rate_target",
+    "budget_cap",
+)
+
 
 def _project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -170,6 +180,71 @@ def stage_champion_label(stage: Dict[str, Any]) -> Optional[str]:
     return champions[0]
 
 
+# ── EXPLOITEURS ────────────────────────────────────────────────────────────────────────────
+
+
+def is_exploiter_stage(stage: Dict[str, Any]) -> bool:
+    """Vrai quand l'etape a le role 'exploiter' (lignee E)."""
+    return str(require_key(stage, "role")) == "exploiter"
+
+
+def load_exploiter_config(curriculum: Dict[str, Any]) -> Dict[str, Any]:
+    """Le bloc `exploiter_config` du curriculum. Absent = erreur explicite."""
+    cfg = require_key(curriculum, "exploiter_config")
+    if not isinstance(cfg, dict):
+        raise TypeError("curriculum.exploiter_config doit etre un objet JSON.")
+    return cfg
+
+
+def validate_exploiter_protocol(
+    curriculum: Dict[str, Any],
+    stage: Dict[str, Any],
+    stage_name: str,
+    training_config_name: str,
+) -> None:
+    """Refuse le run si la configuration de l'etape exploiteur diverge du protocole gele.
+
+    Trois verrous :
+    1. Role exploiter, ratio_start==1.0, ratio_end==1.0, warmup_episodes==0.
+    2. Un seul membre de pool a weight==1.0 (adversaire unique fige a 100%).
+    3. --training-config correspond a exploiter_config.training_config_required
+       (meme seed, memes hyperparametres, budgets comparables entre E1/E2/E3).
+
+    Appele dans `_prepare_curriculum_stage` AVANT le demarrage du run.
+    """
+    if not is_exploiter_stage(stage):
+        raise ValueError(
+            f"validate_exploiter_protocol : {stage_name} n'est pas une etape exploiteur "
+            f"(role={stage.get('role')!r}). Appel incorrect."
+        )
+    ratio_start = float(require_key(stage, "ratio_start"))
+    ratio_end = float(require_key(stage, "ratio_end"))
+    warmup = int(require_key(stage, "warmup_episodes"))
+    if ratio_start != 1.0 or ratio_end != 1.0 or warmup != 0:
+        raise ValueError(
+            f"Etape exploiteur {stage_name} : protocole gele exige ratio_start=1.0, "
+            f"ratio_end=1.0, warmup_episodes=0 "
+            f"(got ratio_start={ratio_start}, ratio_end={ratio_end}, warmup={warmup}). "
+            "Corriger l'etape dans curriculum.json ou choisir une autre etape."
+        )
+    members = stage_pool_members(stage)
+    if len(members) != 1 or abs(members[0]["weight"] - 1.0) > RATIO_SUM_TOLERANCE:
+        raise ValueError(
+            f"Etape exploiteur {stage_name} : protocole gele exige un seul membre de pool "
+            f"a weight=1.0 (got {[(m['label'], m['weight']) for m in members]!r})."
+        )
+    cfg = load_exploiter_config(curriculum)
+    required_tc = str(require_key(cfg, "training_config_required"))
+    if training_config_name != required_tc:
+        raise ValueError(
+            f"Etape exploiteur {stage_name} : protocole gele exige "
+            f"--training-config {required_tc!r} (got {training_config_name!r}). "
+            "Tous les runs E1/E2/E3 doivent utiliser la meme config pour que les budgets "
+            "soient comparables. Mettre a jour exploiter_config.training_config_required "
+            "dans curriculum.json si la config de reference a change."
+        )
+
+
 def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>") -> None:
     """Verrous structurels du curriculum. Tout manquement leve, aucun n'est rattrape.
 
@@ -283,6 +358,49 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
                 f"{source}: stages[{name}] n'a pas de pool mais un ratio_end de {ratio_end!r} : "
                 "la rampe conduirait a des episodes sans adversaire."
             )
+
+    # Validation du bloc exploiter_config si present (obligatoire des qu'il existe au moins
+    # une etape exploiteur dans le curriculum).
+    has_exploiter = any(
+        str(require_key(require_stage(curriculum, name), "role")) == "exploiter"
+        for name in order
+    )
+    if "exploiter_config" in curriculum:
+        cfg = curriculum["exploiter_config"]
+        if not isinstance(cfg, dict):
+            raise TypeError(f"{source}: curriculum.exploiter_config doit etre un objet JSON.")
+        for key in _EXPLOITER_CONFIG_REQUIRED_KEYS:
+            if key not in cfg:
+                raise KeyError(
+                    f"{source}: curriculum.exploiter_config manque la cle '{key}'. "
+                    f"Cles requises : {_EXPLOITER_CONFIG_REQUIRED_KEYS}"
+                )
+        probe_every = int(cfg["probe_every_episodes"])
+        probe_cheap = int(cfg["probe_cheap_n"])
+        probe_confirm = int(cfg["probe_confirm_n"])
+        win_rate_target = float(cfg["win_rate_target"])
+        budget_cap = int(cfg["budget_cap"])
+        if probe_every <= 0:
+            raise ValueError(f"{source}: exploiter_config.probe_every_episodes doit etre > 0")
+        if probe_cheap <= 0:
+            raise ValueError(f"{source}: exploiter_config.probe_cheap_n doit etre > 0")
+        if probe_confirm <= probe_cheap:
+            raise ValueError(
+                f"{source}: exploiter_config.probe_confirm_n ({probe_confirm}) doit etre "
+                f"> probe_cheap_n ({probe_cheap})"
+            )
+        if not (0.0 < win_rate_target <= 1.0):
+            raise ValueError(
+                f"{source}: exploiter_config.win_rate_target doit etre dans ]0,1] "
+                f"(got {win_rate_target})"
+            )
+        if budget_cap <= 0:
+            raise ValueError(f"{source}: exploiter_config.budget_cap doit etre > 0")
+    elif has_exploiter:
+        raise KeyError(
+            f"{source}: le curriculum a des etapes exploiteur mais pas de bloc "
+            "'exploiter_config'. Ajouter ce bloc dans curriculum.json."
+        )
 
 
 # ── RAMPE ──────────────────────────────────────────────────────────────────────────────────

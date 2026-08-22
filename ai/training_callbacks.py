@@ -2567,3 +2567,151 @@ class BotEvaluationCallback(BaseCallback):
         if self.metrics_tracker is not None:
             self.metrics_tracker.log_eval_truncations(require_key(results, "truncations"))
         return results
+
+
+class ExploiterProbeCallback(BaseCallback):
+    """Sonde synchrone du win-rate de l'exploiteur contre sa cible figee.
+
+    Protocole en deux temps :
+    - Sonde bon marche (`probe_cheap_n` episodes) tous les `probe_every_episodes`.
+    - Quand la sonde depasse `win_rate_target` : UNE sonde de confirmation (`probe_confirm_n`).
+    - Budget = episodes pour franchir le seuil ; '>budget_cap' si non atteint dans le plafond.
+
+    `async_eval_enabled` DOIT etre False sur ce run : une sonde bon marche en vol serait
+    silencieusement abandonnee (async_eval_skipped_count). Ce callback est purement synchrone —
+    pas de ThreadPoolExecutor, pas de future.
+    """
+
+    def __init__(
+        self,
+        target_archive_path: str,
+        training_config_name: str,
+        rewards_config_name: str,
+        metrics_tracker: Any,
+        probe_every_episodes: int,
+        probe_cheap_n: int,
+        probe_confirm_n: int,
+        win_rate_target: float,
+        budget_cap: int,
+        log_fn=print,
+        verbose: int = 1,
+    ) -> None:
+        super().__init__(verbose)
+        if not isinstance(probe_every_episodes, int) or probe_every_episodes <= 0:
+            raise ValueError(
+                f"probe_every_episodes doit etre un entier > 0 (got {probe_every_episodes!r})"
+            )
+        if not isinstance(probe_cheap_n, int) or probe_cheap_n <= 0:
+            raise ValueError(f"probe_cheap_n doit etre un entier > 0 (got {probe_cheap_n!r})")
+        if not isinstance(probe_confirm_n, int) or probe_confirm_n <= probe_cheap_n:
+            raise ValueError(
+                f"probe_confirm_n ({probe_confirm_n}) doit etre > probe_cheap_n ({probe_cheap_n})"
+            )
+        if not (0.0 < win_rate_target <= 1.0):
+            raise ValueError(
+                f"win_rate_target doit etre dans ]0,1] (got {win_rate_target!r})"
+            )
+        if not isinstance(budget_cap, int) or budget_cap <= 0:
+            raise ValueError(f"budget_cap doit etre un entier > 0 (got {budget_cap!r})")
+        self.target_archive_path = target_archive_path
+        self.training_config_name = training_config_name
+        self.rewards_config_name = rewards_config_name
+        self.metrics_tracker = metrics_tracker
+        self.probe_every_episodes = probe_every_episodes
+        self.probe_cheap_n = probe_cheap_n
+        self.probe_confirm_n = probe_confirm_n
+        self.win_rate_target = win_rate_target
+        self.budget_cap = budget_cap
+        self.log_fn = log_fn
+
+        self.win_rate_curve: List[Tuple[int, float]] = []
+        self.budget: Optional[int] = None
+        self.censored: bool = False
+        self._next_probe_episode: int = probe_every_episodes
+        self._awaiting_confirm: bool = False
+
+    def _current_episode(self) -> int:
+        if self.metrics_tracker is not None:
+            return int(self.metrics_tracker.episode_count)
+        return 0
+
+    def _probe(self, n_episodes: int, label: str) -> float:
+        """Sauvegarde le modele courant dans un fichier temporaire et evalue contre la cible.
+
+        Synchrone : bloque le thread d'entrainement le temps de l'evaluation. Aucun Future,
+        aucune sonde ne peut etre abandonnee en silence.
+        """
+        from ai.bot_evaluation import evaluate_against_checkpoints
+        from ai.vec_normalize_utils import save_vec_normalize
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        try:
+            self.model.save(tmp_path)
+            save_vec_normalize(self.model.get_env(), tmp_path)
+            results = evaluate_against_checkpoints(
+                model_path=tmp_path,
+                checkpoint_archives=[(self.target_archive_path, "target")],
+                training_config_name=self.training_config_name,
+                rewards_config_name=self.rewards_config_name,
+                n_episodes=n_episodes,
+                controlled_agent=self.rewards_config_name,
+                scenario_pool="holdout",
+                device="cpu",
+            )
+        finally:
+            # Nettoyer le snapshot temporaire et son compagnon VecNormalize.
+            for p in (tmp_path, tmp_path.replace(".zip", "_vec_normalize.pkl")):
+                if os.path.exists(p):
+                    os.remove(p)
+        win_rate = float(results.get("target", 0.0))
+        self.log_fn(
+            f"🔬 Sonde exploiteur {label} @ep{self._current_episode()} "
+            f"(n={n_episodes}) : win-rate={win_rate:.3f}"
+        )
+        return win_rate
+
+    def _on_step(self) -> bool:
+        current = self._current_episode()
+
+        # Plafond atteint sans franchissement : censure et arret.
+        if current >= self.budget_cap and self.budget is None and not self.censored:
+            self.censored = True
+            self.log_fn(
+                f"🔬 Exploiteur : plafond {self.budget_cap} episodes atteint sans franchir "
+                f"{self.win_rate_target:.0%} — budget censure '>{self.budget_cap}'"
+            )
+            return False
+
+        if current < self._next_probe_episode:
+            return True
+
+        # Sonde bon marche
+        self._next_probe_episode += self.probe_every_episodes
+        wr = self._probe(self.probe_cheap_n, "bon-marche")
+        self.win_rate_curve.append((current, wr))
+
+        if wr >= self.win_rate_target and not self._awaiting_confirm:
+            self._awaiting_confirm = True
+            self.log_fn(
+                f"🔬 Sonde bon-marche a franchi {self.win_rate_target:.0%} "
+                f"— sonde de confirmation ({self.probe_confirm_n} episodes)..."
+            )
+            wr_confirm = self._probe(self.probe_confirm_n, "confirmation")
+            self.win_rate_curve.append((current, wr_confirm))
+            if wr_confirm >= self.win_rate_target:
+                self.budget = current
+                self.log_fn(
+                    f"✅ Exploiteur : seuil {self.win_rate_target:.0%} CONFIRME "
+                    f"a {current} episodes (budget={current})"
+                )
+                return False
+            # Seuil non confirme : la sonde de confirmation porte son propre point de courbe,
+            # on continue a sonder depuis le prochain checkpoint.
+            self._awaiting_confirm = False
+            self.log_fn(
+                f"🔬 Confirmation non atteinte ({wr_confirm:.3f} < "
+                f"{self.win_rate_target:.0%}) — sondage continue."
+            )
+
+        return True
