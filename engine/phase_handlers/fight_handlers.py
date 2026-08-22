@@ -1093,6 +1093,8 @@ def _model_can_fight_target(
     )
     if not attacker_squad_id:
         return False
+    if not entry_is_on_battlefield(target_entry):
+        return False
     ez = get_engagement_zone(game_state)
     synth = _synth_model_entry(
         game_state, str(attacker_squad_id), attacker_model,

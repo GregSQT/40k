@@ -141,3 +141,28 @@ def test_fall_back_flag(engine):
     obs_yes = engine.obs_builder.build_squad_observation(gs, "1")
     assert obs_yes["allies_bin"][0][_BIN_FALL_BACK] == 1.0
     # La valeur ne depend plus des PV (0->1 a PV constants) : les deux assertions le prouvent.
+
+
+def test_model_can_fight_target_returns_false_for_offbattlefield(engine):
+    """_model_can_fight_target retourne False sans crasher pour une cible hors table.
+
+    Regression : une escouade en reserves strategiques (col=-1) apparait dans le slot mapping
+    ennemi (intentionnel, bit deploy_not_on_board). Lors du check fight eligibility post-overrun,
+    _model_can_fight_target la recevait et appelait entries_in_engagement_zone avec la sentinelle
+    (-1,-1), provoquant un ValueError.
+    """
+    from engine.phase_handlers.fight_handlers import _model_can_fight_target
+
+    gs = engine.game_state
+    # Mettre l'escouade "2" hors table (sentinelle = reserves strategiques)
+    gs["units_cache"]["2"]["col"] = -1
+    gs["units_cache"]["2"]["row"] = -1
+
+    # Attaquant : premier modele de l'escouade "1"
+    mc = gs["models_cache"]
+    attacker_mid = gs["squad_models"]["1"][0]
+    attacker_model = mc[attacker_mid]
+
+    # Avant le fix : crash ValueError dans entries_in_engagement_zone
+    result = _model_can_fight_target(gs, attacker_model, "1", "2")
+    assert result is False, "une cible hors table ne peut pas etre engagee en melee"
