@@ -159,9 +159,8 @@ def test_model_can_fight_target_returns_false_for_offbattlefield(engine):
     gs["units_cache"]["2"]["row"] = -1
 
     # Attaquant : premier modele de l'escouade "1"
-    mc = gs["models_cache"]
     attacker_mid = gs["squad_models"]["1"][0]
-    attacker_model = mc[attacker_mid]
+    attacker_model = gs["models_cache"][attacker_mid]
 
     # Avant le fix : crash ValueError dans entries_in_engagement_zone
     result = _model_can_fight_target(gs, attacker_model, "1", "2")

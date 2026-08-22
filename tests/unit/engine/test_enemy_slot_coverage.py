@@ -205,9 +205,8 @@ def test_enemy_in_strategic_reserves_gets_no_slot():
     gs = eng.game_state
     # On force l'une des deux escouades ennemies en réserves stratégiques (sentinelle col=-1).
     gs.pop("enemy_slot_mapping_p1", None)
-    enemy_sids = [str(sid) for sid, e in gs["units_cache"].items()
-                  if int(e["player"]) == 2]
-    reserve_sid = enemy_sids[0]
+    reserve_sid = next(str(sid) for sid, e in gs["units_cache"].items()
+                       if int(e["player"]) == 2)
     gs["units_cache"][reserve_sid]["col"] = -1
     for mid in gs["squad_models"].get(reserve_sid, []):
         gs["models_cache"][mid]["col"] = -1
@@ -217,8 +216,7 @@ def test_enemy_in_strategic_reserves_gets_no_slot():
         f"Escouade {reserve_sid} (col=-1, réserves) obtient un slot : "
         "entry_is_on_battlefield absent côté ennemi"
     )
-    on_table = [s for s in mapping if s is not None]
-    assert len(on_table) == 1
+    assert sum(s is not None for s in mapping) == 1
 
 
 def test_enemy_threat_order_oc_fallback_when_oc_total_is_zero():
@@ -231,8 +229,7 @@ def test_enemy_threat_order_oc_fallback_when_oc_total_is_zero():
     gs = eng.game_state
     gs.pop("enemy_slot_mapping_p1", None)
     enemy_sids = sorted(
-        [str(sid) for sid, e in gs["units_cache"].items() if int(e["player"]) == 2],
-        key=str,
+        str(sid) for sid, e in gs["units_cache"].items() if int(e["player"]) == 2
     )
     # Escouade A : OC_TOTAL mis à zéro ; ses models ont OC individuel ≥ 1 (via _unit_cfg oc=).
     # Elle doit remonter en slot 0 si son fallback-OC × HP > escouade B.
@@ -248,9 +245,9 @@ def test_enemy_threat_order_oc_fallback_when_oc_total_is_zero():
         gs["models_cache"][mid]["OC"] = 20
 
     mapping = get_enemy_slot_mapping(gs, 1)
-    filled = [s for s in mapping if s is not None]
-    assert filled[0] == sid_a, (
-        f"Slot 0 attendu = {sid_a} (fallback OC×HP=200) mais obtenu {filled[0]}. "
+    first_slot = next(s for s in mapping if s is not None)
+    assert first_slot == sid_a, (
+        f"Slot 0 attendu = {sid_a} (fallback OC×HP supérieur) mais obtenu {first_slot}. "
         "La branche OC_TOTAL==0 ne bascule pas sur models_cache."
     )
 
