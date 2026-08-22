@@ -90,6 +90,8 @@ Seuil posé après mesure sur le modèle courant : `model_gating_min_benchmark_f
 
 Le gate rougit si le modèle progresse sur les 7 bots de sélection mais tombe sous 0,90 sur l'un des 3 bots de référence — signal de surapprentissage sur la distribution de sélection.
 
+⚠️ **RETIRÉ le 2026-08-22** : `model_gating_min_benchmark_floor` est passé à **0,0** sur x1_long. Les scores mesurés ci-dessus le disent déjà — 0,99 / 1,00 / 1,00 dès la première évaluation : le gate n'a jamais eu de marge pour mordre. R0a a tenté de désaturer les `reference_*` et s'est fermé sans y parvenir ; ils sont abandonnés comme étalons. La sélection appartient désormais au plancher dur de 0,55 contre le champion le plus récent d'une étape de curriculum — [bot.md#r0a-references](bot.md#r0a-references) et [bot.md#league](bot.md#league).
+
 ---
 
 ## Self-play §0.59 {#selfplay}

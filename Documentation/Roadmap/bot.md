@@ -2,7 +2,29 @@
 
 ---
 
-## 🟡 R0a — Réparation reference_* (couche déplacement/intention) {#r0a-references}
+## ✅ R0a — Réparation reference_* (couche déplacement/intention) {#r0a-references} — FERMÉ SANS FRANCHISSEMENT le 2026-08-22
+
+> **DÉCISION 2026-08-22 — les `reference_*` sont ABANDONNÉS comme étalons de force.**
+>
+> R0a et R0a-bis ont bien réparé ces bots : gains réels et mesurés, de +0,08 à +0,14 par bot en
+> R0a puis +0,061 / +0,039 / +0,018 en R0a-bis. **Les mesures bot-contre-bot ci-dessous restent
+> valides** — ce n'est pas la réparation qui a échoué, c'est la cible qui était trop basse. Trois
+> bots scriptés à 0,30 bot-contre-bot restent des adversaires que l'agent bat à 1,00 : il aurait
+> fallu la fourchette [0,40 ; 0,60], et deux vagues de correctifs ont montré que les leviers de
+> poids et d'intention sont épuisés bien avant. Continuer, c'était une refonte du ciblage pour un
+> instrument qui resature de toute façon — deux précédents mesurés dans ce dépôt (« tactical joue
+> pour gagner », désaturation de tactical re-mangée en deux semaines).
+>
+> **`benchmark_floor` est RETIRÉ**, pas « en attente de re-pose » : `x1_long`
+> `callback_params.model_gating_min_benchmark_floor` passe de 0,90 à **0,0** (valeur d'arrêt du
+> mécanisme, cf. `training_callbacks`), et `--etape` le désarme de toute façon pour la durée d'un
+> run de curriculum. Ce qui sélectionne désormais est le **plancher dur de 0,55 contre le champion
+> le plus récent** (cible affichée 0,60, mesure sur 300 épisodes, erreur-type 2,9 points) —
+> [bot.md#league](#league). L'étalon de force non saturable reste l'échelle de checkpoints figés
+> ([#r0b-echelle](#r0b-echelle)).
+>
+> Les `reference_*` gardent leur rôle de **couverture par style et de détection de régression**
+> dans le panel ; ils ne portent plus aucun gate. Aucune action n'est en attente sur ce chantier.
 
 ✅ **Code livré 2026-08-21** — `ai/benchmark_bots.py` + 17 tests verts.
 §3.1 assignation réclamante, §3.2 tenue, §3.3 anti-empilement, §3.4 géométrie par aire.
@@ -15,6 +37,7 @@ reference_* (+0,316) est exactement le transfert des sept autres (−0,336).
 
 ⛔ **`benchmark_floor` NON reposé** : la re-pose est conditionnelle au franchissement de la
 fourchette. Il reste à **0,90** ; le gate est donc toujours désaligné, comme avant la réparation.
+*(État au 2026-08-21. Périmé : le gate a été RETIRÉ le 2026-08-22, cf. l'encadré de tête.)*
 
 ✅ **§3.5 livré 2026-08-22** — balayage des 3 constantes d'intention (10 ép., seed 42,
 board/44x60x1, holdout). Baseline AVANT COMPLÈTE (20 ép.) : balanced **0,245** / denial **0,258**
@@ -29,9 +52,9 @@ board/44x60x1, holdout). Baseline AVANT COMPLÈTE (20 ép.) : balanced **0,245**
 **3 runs, max atteint 0,271 < 0,35 → condition d'abandon remplie.** Les constantes d'intention
 sont inertes : le problème est dans la stratégie de ciblage/mouvement des reference bots.
 
-⛔ **R0a fermé sans franchir [0,40 ; 0,60].** La fourchette n'est pas atteinte ;
-`benchmark_floor` reste à **0,90** (inerte). La suite est une refonte du ciblage (voir §3.5
-archivé dans curriculum_adversaires_etalons.md).
+⛔ **R0a fermé sans franchir [0,40 ; 0,60].** La fourchette n'est pas atteinte. La refonte du
+ciblage qui aurait pu l'atteindre n'est PAS ouverte : les `reference_*` sont abandonnés comme
+étalons et `benchmark_floor` est retiré (encadré de tête, 2026-08-22).
 
 ✅ **R0a-bis livré 2026-08-22** — 3 défauts de 1er ordre corrigés + calibration poids.
 
@@ -78,6 +101,8 @@ decapitation 0,655 / racer 0,635 / alpha 0,590 / endgame 0,453 / tactical 0,386.
 
 ⛔ **`benchmark_floor` NON reposé** — la re-pose reste conditionnelle au franchissement de
 la fourchette. Il reste à **0,90** (inerte).
+*(État au 2026-08-22 avant décision. Le gate a été RETIRÉ le même jour — `x1_long` à 0,0 —
+et remplacé par le plancher de 0,55 contre le champion le plus récent : encadré de tête.)*
 
 → `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §3
 
@@ -120,7 +145,7 @@ calcul `ckpt_min/ckpt_mean`. Publication TensorBoard câblée via SummaryWriter 
 - `reference_balanced` : **0,168**
 - `reference_denial` : **0,155**
 - `reference_reactive` : **0,139** ← min
-- `benchmark_floor` posé à **0,049** (`min − 0,09`) dans `x1_long/callback_params/model_gating_min_benchmark_floor` — ⚠️ remis à **0,90** le 2026-08-20 (commit `e504d46b`) : le 0,049 venait d'un score bot-contre-bot alors que le gate lit le win-rate AGENT ; re-pose mesurée prévue en R0a ([#r0a-references](#r0a-references))
+- `benchmark_floor` posé à **0,049** (`min − 0,09`) dans `x1_long/callback_params/model_gating_min_benchmark_floor` — remis à **0,90** le 2026-08-20 (commit `e504d46b`) : le 0,049 venait d'un score bot-contre-bot alors que le gate lit le win-rate AGENT. ⚠️ **Fin de l'histoire, 2026-08-22 : le gate est RETIRÉ (0,0), la re-pose n'aura pas lieu** — les `reference_*` sont abandonnés comme étalons ([#r0a-references](#r0a-references))
 
 ✅ Ligne de base agent rejouée sur `robust_0.8463` (2026-08-21, 100 ép./bot, panel 10 bots) :
 `combined = 0,8567`, pire bot `attrition = 0,810`, pire scénario `= 0,7800`, zones T2/T5 = 1,81/1,76.
