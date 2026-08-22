@@ -201,14 +201,18 @@ def validate_exploiter_protocol(
     stage: Dict[str, Any],
     stage_name: str,
     training_config_name: str,
+    profile_total_episodes: Optional[int] = None,
 ) -> None:
     """Refuse le run si la configuration de l'etape exploiteur diverge du protocole gele.
 
-    Trois verrous :
+    Quatre verrous :
     1. Role exploiter, ratio_start==1.0, ratio_end==1.0, warmup_episodes==0.
     2. Un seul membre de pool a weight==1.0 (adversaire unique fige a 100%).
     3. --training-config correspond a exploiter_config.training_config_required
        (meme seed, memes hyperparametres, budgets comparables entre E1/E2/E3).
+    4. total_episodes du profil >= budget_cap : un run plus court que le plafond rend la
+       branche de censure inatteignable et le marqueur '>budget_cap' jamais emis.
+       Fournir `profile_total_episodes` depuis le profil charge pour activer ce verrou.
 
     Appele dans `_prepare_curriculum_stage` AVANT le demarrage du run.
     """
@@ -243,6 +247,16 @@ def validate_exploiter_protocol(
             "soient comparables. Mettre a jour exploiter_config.training_config_required "
             "dans curriculum.json si la config de reference a change."
         )
+    if profile_total_episodes is not None:
+        budget_cap = int(require_key(cfg, "budget_cap"))
+        if profile_total_episodes < budget_cap:
+            raise ValueError(
+                f"Etape exploiteur {stage_name} : le profil '{training_config_name}' a "
+                f"total_episodes={profile_total_episodes} < budget_cap={budget_cap}. "
+                "La branche de censure '>budget_cap' est inatteignable — le run s'arreterait "
+                "avant d'atteindre le plafond. Choisir un profil dont total_episodes >= budget_cap "
+                "ou abaisser budget_cap dans exploiter_config."
+            )
 
 
 def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>") -> None:
