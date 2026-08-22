@@ -6,7 +6,7 @@
 
   "exploiter_config": {
     "_doc": "Parametres geles partages par toutes les etapes exploiteurs (E1..E3). training_config_required : le --training-config exact a utiliser pour les trois runs — diverger = run refuse avant demarrage (meme seed, memes hyperparametres, comparabilite des budgets garantie). probe_every_episodes/probe_cheap_n : sonde bon marche. probe_confirm_n : sonde de confirmation declenchee des que la sonde bon marche passe le seuil. win_rate_target : seuil de franchissement (0.70). budget_cap : plafond en episodes ; journalise '>budget_cap' si non atteint.",
-    "training_config_required": "x1",
+    "training_config_required": "x1_long",
     "probe_every_episodes": 2000,
     "probe_cheap_n": 100,
     "probe_confirm_n": 500,

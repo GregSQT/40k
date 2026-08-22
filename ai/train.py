@@ -4695,7 +4695,9 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
     if is_exploiter_stage(stage):
         # Verification du protocole gele AVANT tout effet de bord : si la config diverge,
         # le run est refuse ici et le modele n'est pas touche.
-        validate_exploiter_protocol(curriculum, stage, args.etape, args.training_config)
+        _exploiter_tc = config.load_agent_training_config(args.agent, args.training_config)
+        _exploiter_total_ep = int(_exploiter_tc["total_episodes"]) if "total_episodes" in _exploiter_tc else None
+        validate_exploiter_protocol(curriculum, stage, args.etape, args.training_config, _exploiter_total_ep)
         print(
             f"🔬 Etape exploiteur {args.etape} — adversaire fige a 100%, "
             "aucun bot, aucune rampe. async_eval force a False (sondes synchrones)."
