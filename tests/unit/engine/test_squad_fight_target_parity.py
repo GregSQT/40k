@@ -64,6 +64,33 @@ def _enter_fight_phase(eng):
     return eng._fight_v11_gym_after_phase_start(res)
 
 
+def _setup_fight_phase_charged(
+    gs: dict,
+    squad_id: str,
+    our_player: int,
+    *,
+    with_settle_keys: bool = False,
+) -> None:
+    """Pose l'état minimal pour l'étape FIGHT d'une escouade ayant chargé ce tour.
+
+    Usage : tests qui patchent des helpers internes et ne peuvent pas emprunter
+    `_enter_fight_phase` (chemin réel). `with_settle_keys=True` ajoute `pile_in_done`
+    et `consolidation_done` requis par `_fight_v11_gym_settle` post-fight.
+    """
+    gs["phase"] = "fight"
+    gs["fight_subphase"] = "fight"
+    gs["current_player"] = our_player
+    gs["fight_step"] = "fights_first"
+    gs["fight_selector"] = our_player
+    gs["engaged_at_fight_step_start"] = {}
+    gs["units_charged"] = {squad_id}
+    gs["units_selected_to_fight"] = set()
+    gs["units_fought"] = set()
+    if with_settle_keys:
+        gs["pile_in_done"] = set()
+        gs["consolidation_done"] = set()
+
+
 @pytest.fixture()
 def melee_scenario_file():
     with tempfile.TemporaryDirectory() as td:
@@ -106,15 +133,7 @@ def test_charged_squad_without_target_fights_empty(melee_scenario_file):
         for mid in list(gs["squad_models"].get(sid, [])):
             gs["models_cache"].pop(mid, None)
         gs["units_cache"].pop(sid, None)
-    gs["phase"] = "fight"
-    gs["fight_subphase"] = "fight"
-    gs["current_player"] = our_player
-    gs["fight_step"] = "fights_first"
-    gs["fight_selector"] = our_player
-    gs["engaged_at_fight_step_start"] = {}  # charge -> éligible sans engagement au snapshot
-    gs["units_charged"] = {squad_id}
-    gs["units_selected_to_fight"] = set()
-    gs["units_fought"] = set()
+    _setup_fight_phase_charged(gs, squad_id, our_player)
 
     empty_slots: List[Optional[str]] = [None] * 5
     mask = build_squad_action_mask(gs, squad_id, enemy_slot_ids=empty_slots)
@@ -341,17 +360,7 @@ def test_overrun_pile_in_called_when_unengaged(melee_scenario_file):
             gs["models_cache"].pop(mid, None)
         gs["units_cache"].pop(sid, None)
 
-    gs["phase"] = "fight"
-    gs["fight_subphase"] = "fight"
-    gs["current_player"] = our_player
-    gs["fight_step"] = "fights_first"
-    gs["fight_selector"] = our_player
-    gs["engaged_at_fight_step_start"] = {}
-    gs["units_charged"] = {squad_id}
-    gs["units_selected_to_fight"] = set()
-    gs["units_fought"] = set()
-    gs["pile_in_done"] = set()
-    gs["consolidation_done"] = set()
+    _setup_fight_phase_charged(gs, squad_id, our_player, with_settle_keys=True)
 
     calls: List[str] = []
     orig = su_module._fight_overrun_pile_in_plan
@@ -622,15 +631,7 @@ def test_fight_no_target_not_opened_when_all_slots_exhausted_by_out_of_ez(melee_
     squad_id = next(iter(gs["units_cache"]))
     our_player = int(gs["units_cache"][squad_id]["player"])
 
-    gs["phase"] = "fight"
-    gs["fight_subphase"] = "fight"
-    gs["current_player"] = our_player
-    gs["fight_step"] = "fights_first"
-    gs["fight_selector"] = our_player
-    gs["engaged_at_fight_step_start"] = {}
-    gs["units_charged"] = {squad_id}
-    gs["units_selected_to_fight"] = set()
-    gs["units_fought"] = set()
+    _setup_fight_phase_charged(gs, squad_id, our_player)
 
     # K slots occupés par des ennemis hors EZ ; "ez-only" est en EZ mais n'a pas de slot.
     out_of_ez_slots: List[Optional[str]] = [f"out-of-ez-{i}" for i in range(SQUAD_ACTION_FIGHT_SLOT_COUNT)]

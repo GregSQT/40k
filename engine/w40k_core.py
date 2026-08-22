@@ -7351,6 +7351,12 @@ class W40KEngine(gym.Env):
                         raise KeyError(f"Squad {squad_id} introuvable apres overrun pile-in")
                     _did_overrun = True
 
+            # Slot mapping calcule une seule fois : reutilise dans la boucle overrun ET dans la
+            # validation target_slot ci-dessous (evite un double parcours de units_cache).
+            _commit_enemy_slots = get_enemy_slot_mapping(
+                self.game_state, int(require_key(cache_entry, "player"))
+            )
+
             # Prédicat de cible = celui du flux PvP (_fight_v11_resolve_attacks) : pool
             # d ennemis en zone d engagement (12.05), pas le mapping de slots gele du tir.
             # Pool vide = fight « a vide » (12.04 : une unite qui a charge reste eligible
@@ -7368,15 +7374,13 @@ class W40KEngine(gym.Env):
                 from engine.phase_handlers.fight_handlers import _model_can_fight_target
                 _mc = self.game_state["models_cache"]
                 _uid_str = str(squad_id)
-                _unit_player = int(require_key(unit, "player"))
                 _alive_mids = [
                     m for m in self.game_state["squad_models"].get(_uid_str, [])
                     if m in _mc
                 ]
-                _overrun_slots = get_enemy_slot_mapping(self.game_state, _unit_player)
                 targets = [
                     _eid
-                    for _eid in _overrun_slots
+                    for _eid in _commit_enemy_slots
                     if _eid is not None
                     and any(_model_can_fight_target(self.game_state, _mc[m], _uid_str, _eid) for m in _alive_mids)
                 ]
@@ -7391,9 +7395,7 @@ class W40KEngine(gym.Env):
             # divergence est une rupture, pas un cas a absorber par un repli sur une heuristique.
             if "target_slot" in semantic:
                 target_slot = int(semantic["target_slot"])
-                enemy_slot_ids = get_enemy_slot_mapping(
-                    self.game_state, int(require_key(cache_entry, "player"))
-                )
+                enemy_slot_ids = _commit_enemy_slots
                 if not (0 <= target_slot < len(enemy_slot_ids)):
                     raise ValueError(
                         f"squad_fight: target_slot {target_slot} hors du mapping de slots ennemis "
