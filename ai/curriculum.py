@@ -367,7 +367,7 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
                 f"bots {bots_weight!r} + pool {pool_weight!r}. La somme des poids de groupes doit "
                 f"valoir ratio_end ({ratio_end!r})."
             )
-        if members and stage_champion_label(stage) is None:
+        if members and not any(m["kind"] == "champion" for m in members):
             raise ValueError(
                 f"{source}: stages[{name}] a un pool sans membre 'champion' : le gate de fin "
                 "d'etape n'aurait rien a mesurer."
@@ -381,8 +381,7 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
     # Validation du bloc exploiter_config si present (obligatoire des qu'il existe au moins
     # une etape exploiteur dans le curriculum).
     has_exploiter = any(
-        str(require_key(require_stage(curriculum, name), "role")) == "exploiter"
-        for name in order
+        is_exploiter_stage(require_stage(curriculum, name)) for name in order
     )
     if "exploiter_config" in curriculum:
         cfg = curriculum["exploiter_config"]
