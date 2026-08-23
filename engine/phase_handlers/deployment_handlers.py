@@ -989,7 +989,7 @@ def deployment_build_squad_destinations_pool(
     # Le bloc entier translaté doit rester dans pool_free : érosion 03.02, même code que
     # pour l'empreinte d'une figurine.
     kept = erode_pool_by_block_offsets(pool_free, offsets)
-    return {"destinations": [(int(c), int(r)) for (c, r) in pool_set if (int(c), int(r)) in kept]}
+    return {"destinations": [(int(c), int(r)) for (c, r) in kept]}
 
 
 def _normalize_plan_entry(e: Tuple[Any, ...]) -> Tuple[str, int, int, int]:
