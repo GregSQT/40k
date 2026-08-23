@@ -61,6 +61,7 @@ from engine.observation_entities import (
     GLOBAL_CONT_SIZE,
     K_ALLY_SLOTS as _ENTITY_K_ALLY_SLOTS,
     K_WEAPONS_MELEE as _ENTITY_K_WEAPONS_MELEE,
+    SQUAD_TOP_K as _ENTITY_SQUAD_TOP_K,
     MODEL_TYPE_BIN_SIZE,
     MODEL_TYPE_CONT_SIZE,
     OBS_PHASE_IDS,
@@ -397,14 +398,12 @@ class ObservationBuilder:
     #: Types de figurines par unité (profil défensif + rôle + effectif du type), des DEUX côtés.
     #: Mesuré : jusqu'à 5 types défensifs distincts par escouade.
     K_MODEL_TYPES = 6
-    #: Figurines individuelles de l'unité active (positions + engagement). Ce bloc est AGRÉGÉ
-    #: par l'extracteur (aucune action ne désigne une figurine) : son plafond ne coûte donc plus
-    #: aucun paramètre, et l'état par-figurine est de toute façon DÉJÀ calculé pour l'escouade
-    #: entière (les tests d'EZ bouclent sur toutes les figurines vivantes). Le laisser à 6
-    #: n'économisait que des scalaires, au prix de la moitié d'une escouade de 12 — mesuré :
-    #: jusqu'à 12 figurines vivantes par escouade sur les rosters d'entraînement. Tout
-    #: dépassement est LOGUÉ.
-    SQUAD_TOP_K = 20
+    #: Figurines individuelles de l'unité active (positions + engagement). Source unique :
+    #: `observation_entities.SQUAD_TOP_K`. Le slot i de la tranche COHERENCY (P3-0) désigne la
+    #: ligne i de `_squad_models_for_observation(alive_mids)` — invariant D1 côté figurines.
+    #: ⚠️ L'ordre de ce bloc est donc OPPOSABLE : réordonner les figurines change quelle action
+    #: désigne quelle figurine. Le tri de `_squad_models_for_observation` est la source unique.
+    SQUAD_TOP_K = _ENTITY_SQUAD_TOP_K
     SQUAD_N_OBJECTIVE_SLOTS = 5
 
     #: Rôles d'allocation (règle 19), ordre FIGÉ du one-hot. `None` (figurine de base) = tous
@@ -571,9 +570,9 @@ class ObservationBuilder:
         special_weapon > base), puis profil defensif derogatoire, puis index de creation. Il est
         DETERMINISTE a composition donnee (pas de dependance a la position ni aux PV, qui
         feraient permuter les slots d un step a l autre et brouilleraient l apprentissage).
-        Aucune action ne cible une figurine par son slot (le move passe par la grille, le fight
-        est oui/non), donc reordonner ce bloc n a pas d effet de bord sur le masque — a la
-        difference des slots ennemis, qui restent alignes sur `get_enemy_slot_mapping`.
+        ⚠️ Depuis P3-0 (coherency removal), COHERENCY_SLOT_BASE + i designe la figurine a la
+        ligne i de ce bloc : l ordre est OPPOSABLE, comme les slots ennemis alignes sur
+        `get_enemy_slot_mapping`. Ne jamais reordonner sans mettre a jour le masque et le decodeur.
         """
         from engine.phase_handlers.shared_utils import ROLE_TIER
 

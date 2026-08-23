@@ -78,6 +78,8 @@ from engine.macro_intents import (
     MOVE_CELL_COUNT,
     ACTIVATE_SLOT_BASE,
     ACTIVATE_SLOT_COUNT,
+    COHERENCY_SLOT_BASE,
+    COHERENCY_SLOT_COUNT,
     FIGHT_WEAPON_SLOT_BASE,
     FIGHT_WEAPON_SLOT_COUNT,
     OATH_SLOT_BASE,
@@ -109,6 +111,7 @@ DENSE_LOGIT_COUNT = (
     - OATH_SLOT_COUNT
     - ACTIVATE_SLOT_COUNT
     - FIGHT_WEAPON_SLOT_COUNT  # §0.69 : arme CC — tête dense séparée (charge_pair_net pattern)
+    - COHERENCY_SLOT_COUNT     # P3-0 : retrait cohérence — tête pointeur sur figurines actives
 )
 
 
@@ -135,6 +138,8 @@ class PolicyFeatures(NamedTuple):
     allies: torch.Tensor
     #: (B,) — bit `phase_deployment` : 1.0 si les ids 4-11 sont des slots de pose.
     is_deploy: torch.Tensor
+    #: (B, N_sm, d) — figurines de l'unité active par slot : quelle retirer hors cohérence (P3-0).
+    self_models: torch.Tensor
 
 
 class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
@@ -204,12 +209,13 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             or OATH_SLOT_BASE != CHOICE_BASE + CHOICE_COUNT
             or ACTIVATE_SLOT_BASE != OATH_SLOT_BASE + OATH_SLOT_COUNT
             or FIGHT_WEAPON_SLOT_BASE != ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT
-            or FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT != TOTAL_ACTION_SIZE
+            or COHERENCY_SLOT_BASE != FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT
+            or COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT != TOTAL_ACTION_SIZE
         ):
             raise ValueError(
                 "Disposition de l'action space inattendue : l'assemblage des logits suppose "
                 f"[cellules | wait | tir | charge | charge-paire | melee | dense | "
-                f"CHOICE | Oath | ACTIVATE | FIGHT_WEAPON en fin]. "
+                f"CHOICE | Oath | ACTIVATE | FIGHT_WEAPON | COHERENCY en fin]. "
                 f"Recu MOVE_CELL_BASE={MOVE_CELL_BASE}, "
                 f"SHOOT_SLOT_BASE={SHOOT_SLOT_BASE}, CHARGE_SLOT_BASE={CHARGE_SLOT_BASE}, "
                 f"CHARGE_PAIR_SLOT_BASE={CHARGE_PAIR_SLOT_BASE}, "
@@ -267,11 +273,13 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             )
         self.n_deploy_slots = extractor.n_deploy_slots
         self.n_ally_slots = extractor.n_ally_slots
+        self.n_self_models = extractor.n_self_models
         self.enemy_slice = extractor.enemy_embeddings_slice()
         self.move_map_slice = extractor.move_map_slice()
         self.decision_slice = extractor.decision_embeddings_slice()
         self.deploy_slice = extractor.deploy_embeddings_slice()
         self.ally_slice = extractor.ally_embeddings_slice()
+        self.self_model_slice = extractor.self_model_embeddings_slice()
         self.deploy_phase_index = extractor.deployment_phase_flag_index()
         self.mlp_extractor = MlpExtractor(
             self.trunk_dim,
@@ -335,6 +343,12 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # réseau non livrée de `L2` : une colonne par slot ne partage aucun poids, donc n'apprend
         # rien de transférable d'une escouade à l'autre.
         self.activate_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
+        # Requête DISTINCTE pour le retrait hors cohérence (P3-0) : quelle figurine de l'escouade
+        # active retirer. Elle lit les embeddings par slot de `self_models_*` (invariant D1 : slot i
+        # = ligne i de `_squad_models_for_observation`). « Quelle figurine sacrifier » n'est ni
+        # « quel ennemi tirer » ni « quelle escouade activer » — la figurine à retirer est la moins
+        # exposée, la moins armée, ou la plus éloignée de l'ennemi, critère propre à ce contexte.
+        self.coherency_query_net = nn.Linear(self.mlp_extractor.latent_dim_pi, self.entity_dim)
 
         # --- Tête de move : conv 1x1 sur [colonne de la cellule | latent diffusé] -------------
         # `move_cell_net` et `move_ctx_net` sont les DEUX MOITIÉS d'une seule et même conv 1x1
@@ -418,6 +432,9 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         ally_emb = features[:, self.ally_slice].reshape(
             batch, self.n_ally_slots, self.entity_dim
         )
+        self_model_emb = features[:, self.self_model_slice].reshape(
+            batch, self.n_self_models, self.entity_dim
+        )
         # Bit `phase_deployment` du one-hot de phase, recopié tel quel par l'extracteur. Il ne
         # peut valoir QUE 0 ou 1 : sa clé (`global_bin`) est hors `norm_obs_keys`, précisément
         # pour que les valeurs discrètes gardent leur sémantique. S'il cessait de l'être — une
@@ -449,7 +466,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 "deploiement et la conv de move ne repose plus sur rien."
             )
         return PolicyFeatures(
-            trunk, embeddings, move_map, decision_emb, deploy_emb, ally_emb, is_deploy
+            trunk, embeddings, move_map, decision_emb, deploy_emb, ally_emb, is_deploy,
+            self_model_emb,
         )
 
     def _move_logits(self, latent_pi: torch.Tensor, move_map: torch.Tensor) -> torch.Tensor:
@@ -545,6 +563,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 self._point(self.activate_query_net, latent_pi, feats.allies),
                 # Arme CC : tête dense (V11 §0.69), slot j = obs melee slot j.
                 self.fight_weapon_net(latent_pi),
+                # Retrait cohérence : figurines de l'unité active par slot (P3-0).
+                self._point(self.coherency_query_net, latent_pi, feats.self_models),
             ],
             dim=1,
         )

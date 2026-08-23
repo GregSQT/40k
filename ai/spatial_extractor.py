@@ -404,6 +404,8 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 + self.n_deploy_slots * entity_dim
                 # Escouades ALLIÉES par slot (V11 §0.48 `L2`) : lues par `activate_query_net`.
                 + self.n_ally_slots * entity_dim
+                # Figurines DE L'UNITÉ ACTIVE par slot (P3-0) : lues par `coherency_query_net`.
+                + self.n_self_models * entity_dim
             ),
         )
         self.trunk_dim = trunk_dim
@@ -602,6 +604,16 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         start = self.deploy_embeddings_slice().stop
         return slice(start, start + self.n_ally_slots * self.entity_dim)
 
+    def self_model_embeddings_slice(self) -> slice:
+        """Tranche des embeddings de figurines DE L'UNITE ACTIVE, PAR SLOT (P3-0).
+
+        Placée en DERNIER, derrière les escouades alliées, pour la même raison qu'elles : les
+        tranches existantes gardent leurs bornes. C'est la tranche que lit `coherency_query_net`.
+        Slot i = ligne i de `_squad_models_for_observation(alive_mids)` — invariant D1.
+        """
+        start = self.ally_embeddings_slice().stop
+        return slice(start, start + self.n_self_models * self.entity_dim)
+
     def deployment_phase_flag_index(self) -> int:
         """Index du bit `phase_deployment` dans le vecteur de features (§0.44, élément L1).
 
@@ -690,7 +702,9 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # serait comptée absente (V11 §0.32 T-H).
         sm_mask = sm_bin[..., _SELF_MODEL_PRESENT_IDX]
         sm_in = torch.cat([self.self_model_norm(sm_cont, sm_mask), sm_bin], dim=-1)
-        sm_agg = _masked_mean_max(self.self_model_encoder(sm_in), sm_mask)
+        # sm_emb conservé par slot (P3-0 : `coherency_query_net`) ; sm_agg = contexte pour le tronc.
+        sm_emb = self.self_model_encoder(sm_in)
+        sm_agg = _masked_mean_max(sm_emb, sm_mask)
 
         # Candidats de décision : masque LU sur le bit `present` (dernier champ du registre),
         # jamais déduit de la ligne — un candidat sans effet observé aurait une ligne nulle.
@@ -742,6 +756,9 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 # toujours ouvert). Le tronc, lui, garde `e_own` + `allies_agg` : l'agrégation y
                 # reste le CONTEXTE, exactement comme pour les ennemis et les candidats de pose.
                 ally_emb.reshape(ally_emb.shape[0], -1),
+                # Figurines de l'unité active par slot (P3-0) : `coherency_query_net` les score
+                # pour choisir quelle figurine retirer. Slot i = ligne i de l'obs.
+                sm_emb.reshape(sm_emb.shape[0], -1),
             ],
             dim=1,
         )

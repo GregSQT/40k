@@ -56,6 +56,8 @@ from engine.macro_intents import (
     ACTIVATE_SLOTS,
     BASE_ZONE_INTENT,
     CHOICE_BASE,
+    COHERENCY_SLOT_BASE,
+    COHERENCY_SLOTS,
     DEPLOY_SLOT_BASE,
     DEPLOY_SLOTS,
     DEPLOY_STRATEGY_COUNT,
@@ -497,6 +499,21 @@ class ActionDecoder:
         # ⚠️ Déplacer ces sorties les unes par rapport aux autres est un défaut de RÈGLE, pas de
         # lisibilité. Les deux ordres qui comptent sont verrouillés par
         # `test_activation_choice_contract.py`.
+
+        # ─── 1b. RETRAIT POUR COHERENCE (P3-0, 03.03) ───
+        # Exclusif de toutes les autres tranches : le moteur est arrêté entre la fin de la phase
+        # fight et la progression joueur. Slot i = ligne i de _squad_models_for_observation —
+        # invariant D1 côté figurines. Les figurines absentes (slots au-delà des vivantes) restent
+        # fermées. Recalculé dynamiquement à chaque appel (les alive_mids raccourcissent).
+        pending_cr = game_state.get("pending_coherency_removal")
+        if pending_cr is not None:
+            from engine.phase_handlers.shared_utils import _coherency_alive
+            alive = _coherency_alive(game_state, str(pending_cr["squad_id"]))
+            from engine.observation_builder import ObservationBuilder
+            top_k = ObservationBuilder.SQUAD_TOP_K
+            for slot_i, _mid in enumerate(alive[:top_k]):
+                mask[COHERENCY_SLOT_BASE + slot_i] = True
+            return mask, []
 
         # ─── 1b. SÉLECTION D'ARME CC (V11 §0.69) ───
         # Même exclusivité que les branches ci-dessus : entre FIGHT_SLOT (cible) et la résolution,
@@ -1105,6 +1122,31 @@ class ActionDecoder:
                 "action": "select_oath_target",
                 "player": int(require_key(game_state, "pending_oath_selection")),
                 "unitId": oath_target,
+            }
+
+        # Désignation de retrait pour cohérence (P3-0, 03.03) : même exclusivité que les autres
+        # pending. Le slot i désigne la ligne i de _squad_models_for_observation — invariant D1.
+        if action_int in COHERENCY_SLOTS:
+            pending_cr = game_state.get("pending_coherency_removal")
+            if pending_cr is None:
+                raise ValueError(
+                    f"convert_squad_action: COHERENCY_SLOT {action_int} joué alors qu'aucun "
+                    "retrait de cohérence n'est en attente (pending_coherency_removal absent)"
+                )
+            from engine.phase_handlers.shared_utils import _coherency_alive
+            slot_i = action_int - COHERENCY_SLOT_BASE
+            alive = _coherency_alive(game_state, str(pending_cr["squad_id"]))
+            from engine.observation_builder import ObservationBuilder
+            if slot_i >= min(len(alive), ObservationBuilder.SQUAD_TOP_K):
+                raise ValueError(
+                    f"convert_squad_action: COHERENCY_SLOT slot {slot_i} hors plage "
+                    f"(alive={len(alive)}, top_k={ObservationBuilder.SQUAD_TOP_K}) — "
+                    "rupture masque/commit"
+                )
+            return {
+                "action": "select_coherency_removal",
+                "squad_id": str(pending_cr["squad_id"]),
+                "model_id": alive[slot_i],
             }
 
         # Choix de l'arme CC (V11 §0.69) : prime sur la phase, comme Oath et Activate — le moteur

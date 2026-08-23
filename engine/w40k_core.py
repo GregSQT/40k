@@ -4373,6 +4373,79 @@ class W40KEngine(gym.Env):
             "success": True,
         }
 
+    def _handle_select_coherency_removal(
+        self, action: Dict[str, Any]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Résout une désignation de retrait pour cohérence (P3-0, 03.03).
+
+        Chemin COMMUN au gym (COHERENCY_SLOT décodé) et au PvP (endpoint).
+        Détruit la figurine désignée, journalise, re-vérifie la cohérence de l'escouade,
+        arme le pending suivant ou lance la progression joueur si la queue est drainée.
+        """
+        from engine.phase_handlers.shared_utils import (
+            arm_next_coherency_pending,
+            _coherency_alive,
+            destroy_model,
+            validate_squad_coherency,
+        )
+        from engine.phase_handlers.fight_handlers import (
+            _log_end_of_turn_coherency_removals,
+            _fight_end_progression_v10,
+            _fight_v11_end_progression,
+        )
+        pending_cr = self.game_state.get("pending_coherency_removal")
+        if pending_cr is None:
+            return False, {"error": "no_pending_coherency_removal"}
+        squad_id = str(pending_cr["squad_id"])
+        model_id = str(require_key(action, "model_id"))
+
+        # Vérification : la figurine désignée est bien dans la liste vivante (rupture masque/commit)
+        alive = _coherency_alive(self.game_state, squad_id)
+        if model_id not in alive:
+            return False, {
+                "error": "coherency_removal_model_not_alive",
+                "model_id": model_id,
+                "alive": alive,
+            }
+
+        # Retrait + journalisation
+        destroy_model(self.game_state, model_id, reason="coherency_removal")
+        _log_end_of_turn_coherency_removals(self.game_state, {squad_id: [model_id]})
+
+        # Re-vérifier l'escouade : si toujours incoherente et > 1 fig, réarmer le même squad_id
+        alive_after = _coherency_alive(self.game_state, squad_id)
+        if len(alive_after) > 1 and not validate_squad_coherency(self.game_state, squad_id):
+            self.game_state["pending_coherency_removal"] = {"squad_id": squad_id}
+            return True, {
+                "action": "select_coherency_removal",
+                "squad_id": squad_id,
+                "model_id": model_id,
+                "awaiting_coherency_removal": True,
+            }
+
+        # Escouade résolue : passer à la suivante dans la queue
+        has_next = arm_next_coherency_pending(self.game_state)
+        if has_next:
+            return True, {
+                "action": "select_coherency_removal",
+                "squad_id": squad_id,
+                "model_id": model_id,
+                "awaiting_coherency_removal": True,
+            }
+
+        # Queue vide : progression joueur/tour (Partie B)
+        v11 = bool(self.game_state.pop("pending_coherency_removal_v11", False))
+        progression_result = (
+            _fight_v11_end_progression(self.game_state)
+            if v11
+            else _fight_end_progression_v10(self.game_state)
+        )
+        return True, {
+            **progression_result,
+            "coherency_removal_complete": True,
+            "model_id": model_id,
+        }
+
     def _handle_select_oath_target_action(
         self, action: Dict[str, Any]
     ) -> Tuple[bool, Dict[str, Any]]:
@@ -4701,6 +4774,10 @@ class W40KEngine(gym.Env):
         # choix de joueur qui précède l'activation, aucune action de phase n'a de sens avant.
         if action.get("action") == "select_activation":
             return self._handle_select_activation_action(action)
+        # Désignation de retrait pour cohérence (P3-0, 03.03) : MÊME rang — le moteur est
+        # arrêté entre la fin de fight et la progression joueur.
+        if action.get("action") == "select_coherency_removal":
+            return self._handle_select_coherency_removal(action)
 
         blocked = self._reject_action_while_faction_decision_pending(action)
         if blocked is not None:
@@ -6574,6 +6651,10 @@ class W40KEngine(gym.Env):
         # Choix de l'escouade à activer (V11 §0.48 L2) : même rang que les trois ci-dessus.
         if semantic.get("action") == "select_activation":
             return self._handle_select_activation_action(semantic)
+
+        # Désignation de retrait pour cohérence (P3-0, 03.03) : même rang.
+        if semantic.get("action") == "select_coherency_removal":
+            return self._handle_select_coherency_removal(semantic)
 
         blocked = self._reject_action_while_faction_decision_pending(semantic)
         if blocked is not None:
@@ -8449,6 +8530,14 @@ class W40KEngine(gym.Env):
             obs = self.obs_builder.build_squad_observation(self.game_state, squad_id)
             obs["grid"] = self.obs_builder.build_squad_grid(self.game_state, squad_id)
             return obs
+
+        # Retrait pour cohérence (P3-0, 03.03) : l'observateur est l'escouade concernée par le
+        # pending. Ses self_models_cont/bin décrivent les figurines parmi lesquelles choisir.
+        # Placé AVANT pending_agent_decision : les deux ne coexistent jamais (exclusion mutuelle
+        # garantie par le masque), mais on lève explicitement si jamais c'était le cas.
+        pending_cr = self.game_state.get("pending_coherency_removal")
+        if pending_cr is not None:
+            return _build_for_squad(str(pending_cr["squad_id"])), None
 
         # Décision agent en attente (V11 §9.3 P2) : l'observateur est l'unité SUR LAQUELLE porte
         # la décision — c'est elle que les candidats concernent. La prendre ailleurs décrirait un

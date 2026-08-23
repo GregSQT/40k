@@ -918,6 +918,63 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
     return best_target
 
 
+def _fight_end_progression_v10(game_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Progression joueur / tour après la phase FIGHT V10 (Partie B).
+
+    Appelée depuis `_fight_phase_complete` (queue coherency vide) ET depuis le résolveur
+    de désignation coherency (queue drainée, pending_coherency_removal_v11=False).
+    Ne doit PAS être appelée plus d'une fois par phase.
+    """
+    if game_state["current_player"] == 1:
+        game_state["current_player"] = 2
+        return {
+            "phase_complete": True,
+            "phase_transition": True,
+            "next_phase": "command",
+            "current_player": 2,
+            "units_processed": len(require_key(game_state, "units_fought")),
+            "clear_blinking_gentle": True,
+            "reset_mode": "select",
+            "clear_selected_unit": True,
+            "clear_attack_preview": True
+        }
+    elif game_state["current_player"] == 2:
+        from engine.game_utils import get_effective_turn_limit
+        max_turns = get_effective_turn_limit(game_state)
+        if max_turns is not None and (game_state["turn"] + 1) > max_turns:
+            state_manager = GameStateManager(require_key(game_state, "config"))
+            state_manager.apply_primary_objective_scoring(game_state, "fight")
+            game_state["turn_limit_reached"] = True
+            game_state["game_over"] = True
+            return {
+                "phase_complete": True,
+                "game_over": True,
+                "turn_limit_reached": True,
+                "units_processed": len(require_key(game_state, "units_fought")),
+                "clear_blinking_gentle": True,
+                "reset_mode": "select",
+                "clear_selected_unit": True,
+                "clear_attack_preview": True
+            }
+        else:
+            game_state["turn"] += 1
+            game_state["current_player"] = 1
+            return {
+                "phase_complete": True,
+                "phase_transition": True,
+                "next_phase": "command",
+                "current_player": 1,
+                "new_turn": game_state["turn"],
+                "units_processed": len(require_key(game_state, "units_fought")),
+                "clear_blinking_gentle": True,
+                "reset_mode": "select",
+                "clear_selected_unit": True,
+                "clear_attack_preview": True
+            }
+    else:
+        raise ValueError(f"Unreachable: current_player={game_state['current_player']}")
+
+
 def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Complete fight phase with player progression and turn management.
@@ -925,6 +982,10 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     CRITICAL: Fight is the LAST phase. After fight:
     - P0 ->    P1 movement phase
     - P1 ->       increment turn, P0 movement phase
+
+    Partie A (une seule fois) : nettoyage + armement queue coherency.
+    Partie B (`_fight_end_progression_v10`) : progression joueur/tour, déclenchée immédiatement
+    si la queue est vide, sinon différée jusqu'à résolution de tous les pendings.
     """
     # Clear alternation tracking state
     if "fight_alternating_turn" in game_state:
@@ -946,79 +1007,16 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"Invalid current_player value: {current_player_int}")
     game_state["current_player"] = current_player_int
 
-    # Etape End of Turn — REGAINING COHERENCY (03.03). Meme point que le chemin V11
-    # (`_fight_v11_phase_complete`) : Fight est la derniere phase du tour, et l'etape precede le
-    # test de limite de tour. Helper partage -> les deux chemins ne peuvent pas diverger.
-    _log_end_of_turn_coherency_removals(
-        game_state, end_of_turn_regain_coherency_all_squads(game_state)
-    )
+    # Etape End of Turn — REGAINING COHERENCY (03.03). Les sièges muets sont résolus
+    # immédiatement ; les autres arment une queue → la Partie B est différée.
+    auto_removed = end_of_turn_regain_coherency_all_squads(game_state)
+    if auto_removed:
+        _log_end_of_turn_coherency_removals(game_state, auto_removed)
+    if game_state.get("pending_coherency_removal"):
+        game_state["pending_coherency_removal_v11"] = False
+        return {"phase_complete": False, "awaiting_coherency_removal": True}
 
-    # Player progression logic
-    if game_state["current_player"] == 1:
-        # Player 1 complete ->    Player 2 command phase
-        game_state["current_player"] = 2
-
-        # CRITICAL: Do NOT call command_phase_start() directly - cascade loop handles it
-        # The cascade loop in w40k_core.py will call command_phase_start() automatically
-        # when it sees next_phase="command"
-
-        return {
-            "phase_complete": True,
-            "phase_transition": True,
-            "next_phase": "command",
-            "current_player": 2,
-            "units_processed": len(require_key(game_state, "units_fought")),
-            "clear_blinking_gentle": True,
-            "reset_mode": "select",
-            "clear_selected_unit": True,
-            "clear_attack_preview": True
-        }
-    elif game_state["current_player"] == 2:
-        # Player 2 complete -> Check if incrementing turn would exceed limit
-        # Duree de bataille : game_rules.max_turns (source unique, cf. game_utils).
-        # None = Endless Duty (illimite), qui ne doit jamais finir sur la limite de tours.
-        from engine.game_utils import get_effective_turn_limit
-        max_turns = get_effective_turn_limit(game_state)
-        if max_turns is not None and (game_state["turn"] + 1) > max_turns:
-            # Primary objective scoring for P2 on round 5 (fight phase)
-            state_manager = GameStateManager(require_key(game_state, "config"))
-            state_manager.apply_primary_objective_scoring(game_state, "fight")
-            # Incrementing would exceed turn limit - end game without incrementing
-            game_state["turn_limit_reached"] = True
-            game_state["game_over"] = True
-            return {
-                "phase_complete": True,
-                "game_over": True,
-                "turn_limit_reached": True,
-                "units_processed": len(require_key(game_state, "units_fought")),
-                "clear_blinking_gentle": True,
-                "reset_mode": "select",
-                "clear_selected_unit": True,
-                "clear_attack_preview": True
-            }
-        else:
-            # Safe to increment turn and continue to P1's command phase
-            game_state["turn"] += 1
-            game_state["current_player"] = 1
-
-            # CRITICAL: Do NOT call command_phase_start() directly - cascade loop handles it
-            # The cascade loop in w40k_core.py will call command_phase_start() automatically
-            # when it sees next_phase="command"
-
-            return {
-                "phase_complete": True,
-                "phase_transition": True,
-                "next_phase": "command",
-                "current_player": 1,
-                "new_turn": game_state["turn"],
-                "units_processed": len(require_key(game_state, "units_fought")),
-                "clear_blinking_gentle": True,
-                "reset_mode": "select",
-                "clear_selected_unit": True,
-                "clear_attack_preview": True
-            }
-    else:
-        raise ValueError(f"Unreachable: current_player={game_state['current_player']}")
+    return _fight_end_progression_v10(game_state)
 
 def fight_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """Fight phase end - redirects to complete function"""
@@ -1982,62 +1980,27 @@ def fight_v11_current_pool(game_state: Dict[str, Any]) -> List[str]:
     return []
 
 
-def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Fin de phase FIGHT V11 (12.09) → progression joueur / tour (Fight = dernière phase).
-    Sémantique identique à ``_fight_phase_complete`` mais SANS les pools V10.
-    """
-    game_state["fight_subphase"] = None
-    game_state["fight_step"] = None
-    game_state["fight_selector"] = None
-    game_state["fight_eligible_units"] = []
-    game_state["active_fight_unit"] = None
-    # Purge de securite, jumelle de celle du tir : une declaration d attaque ne survit
-    # jamais a sa phase. Laisser une activation en plan est un geste NORMAL du joueur
-    # (il declare, puis change d avis et sort de la sous-phase) ; on ne leve donc pas,
-    # mais le pending doit mourir ici, sinon il empoisonne la melee du tour suivant.
-    if "pending_squad_fight_intents" in game_state:
-        game_state["pending_squad_fight_intents"] = {}
-    add_console_log(game_state, "FIGHT PHASE COMPLETE (V11)")
+def _fight_v11_end_progression(game_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Progression joueur / tour après la phase FIGHT V11 (Partie B).
 
-    # Etape End of Turn — REGAINING COHERENCY (03.03). Fight est la DERNIERE phase du tour :
-    # c'est ici que le tour s'acheve. Avant le test de limite de tour, pour que l'etat final de
-    # la partie respecte lui aussi la regle.
-    _log_end_of_turn_coherency_removals(
-        game_state, end_of_turn_regain_coherency_all_squads(game_state)
-    )
-
+    Appelée depuis `_fight_v11_phase_complete` (queue vide) ET depuis le résolveur de
+    désignation coherency (queue drainée, pending_coherency_removal_v11=True).
+    Inclut 20.04 (réserves stratégiques). Ne doit pas être appelée plus d'une fois.
+    """
     current_player = int(require_key(game_state, "current_player"))
     if current_player not in (1, 2):
         raise ValueError(f"Invalid current_player value: {current_player}")
     units_processed = len(game_state.get("units_selected_to_fight", set()))
 
-    # 20.04 — « At the end of the third battle round … destroyed ». Le ROUND de bataille
-    # s'achève quand le joueur 2 termine sa phase de combat (dernière phase de son tour) ;
-    # `game_state["turn"]` porte le numéro de round et n'est incrémenté qu'après. Avant le test
-    # de limite de tour ET avant le scoring : une unité détruite par cette règle ne doit pas
-    # peser dans le départage aux points de la fin de partie.
     from engine.phase_handlers.movement_handlers import STRATEGIC_RESERVES_LAST_ROUND
-
     if current_player == 2 and int(require_key(game_state, "turn")) == STRATEGIC_RESERVES_LAST_ROUND:
         from engine.w40k_core import destroy_unarrived_strategic_reserves
-
         destroyed_units = destroy_unarrived_strategic_reserves(game_state)
         if destroyed_units:
-            # LES DEUX CAMPS. Ce site filtrait sur le joueur contrôlé alors que la doc annonçait
-            # « tous joueurs » : la perte de réserves du bot n'était mesurée nulle part, et la
-            # promesse « le bot arrive dès qu'un slot s'ouvre » restait invérifiable.
             destroyed_by_player = require_key(game_state, "_reserves_destroyed_turn3")
             for unit in destroyed_units:
                 destroyed_by_player[int(require_key(unit, "player"))] += 1
-
-            # PÉNALITÉ : seulement pour ce qui était une DÉCISION. Une escouade détruite ici
-            # après s'être vu offrir au moins une arrivée a choisi de rester (20.03 dit « can »,
-            # jamais « must ») ; une escouade qui n'a jamais eu de destination légale n'a rien
-            # choisi, et la facturer punirait un choix qui n'a pas existé. Un COMPTE est posé —
-            # le barème est lu ailleurs, par le seul objet qui l'a (`RewardCalculator`).
             from engine.game_utils import get_controlled_player
-
             controlled = get_controlled_player(game_state)
             offered = require_key(game_state, "_ingress_offered")
             declined_ids = {squad_id for player, squad_id, _turn in offered if player == controlled}
@@ -2060,7 +2023,6 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "clear_selected_unit": True, "clear_attack_preview": True,
         }
     # current_player == 2
-    # Duree de bataille : game_rules.max_turns (source unique, cf. game_utils).
     from engine.game_utils import get_effective_turn_limit
     max_turns = get_effective_turn_limit(game_state)
     if max_turns is not None and (game_state["turn"] + 1) > max_turns:
@@ -2081,6 +2043,35 @@ def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
         "clear_blinking_gentle": True, "reset_mode": "select",
         "clear_selected_unit": True, "clear_attack_preview": True,
     }
+
+
+def _fight_v11_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Fin de phase FIGHT V11 (12.09) → progression joueur / tour (Fight = dernière phase).
+    Sémantique identique à ``_fight_phase_complete`` mais SANS les pools V10.
+
+    Partie A (une seule fois) : nettoyage + armement queue coherency.
+    Partie B (`_fight_v11_end_progression`) : 20.04 + progression joueur/tour.
+    """
+    game_state["fight_subphase"] = None
+    game_state["fight_step"] = None
+    game_state["fight_selector"] = None
+    game_state["fight_eligible_units"] = []
+    game_state["active_fight_unit"] = None
+    if "pending_squad_fight_intents" in game_state:
+        game_state["pending_squad_fight_intents"] = {}
+    add_console_log(game_state, "FIGHT PHASE COMPLETE (V11)")
+
+    # Etape End of Turn — REGAINING COHERENCY (03.03). Les sièges muets sont résolus
+    # immédiatement ; les autres arment une queue → la Partie B est différée.
+    auto_removed = end_of_turn_regain_coherency_all_squads(game_state)
+    if auto_removed:
+        _log_end_of_turn_coherency_removals(game_state, auto_removed)
+    if game_state.get("pending_coherency_removal"):
+        game_state["pending_coherency_removal_v11"] = True
+        return {"phase_complete": False, "awaiting_coherency_removal": True}
+
+    return _fight_v11_end_progression(game_state)
 
 
 def _fight_v11_resolve_attacks(
