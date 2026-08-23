@@ -972,8 +972,8 @@ l'évaluation intermédiaire — ~2 h 10 au lieu de ~1 h 05, 13 min l'unité cf.
 sur un run **mesuré à 5 h 54** (50 000 épisodes, 2026-08-18, cf. `Documentation/Roadmap/v11_chemin_critique.md`).
 
 > ⚠️ **Aucun taux d'épisodes par heure n'est publiable, et c'est un résultat, pas une lacune.**
-> Le dépôt tient deux mesures DIRECTES qui ne se ramènent pas l'une à l'autre : le run `x1` de
-> référence a pris **4 h 01 pour 10 000 épisodes** (évaluations non comprises), et le run
+> Le dépôt tient deux mesures DIRECTES qui ne se ramènent pas l'une à l'autre : le run `x1` du
+> 2026-08-10 a pris **4 h 01 pour 10 000 épisodes** (11 h 17 → 15 h 18, évaluations non comprises), et le run
 > `x1_long` du 2026-08-18 **5 h 54 pour 50 000**. Extrapoler la première × 5 donnait « ~20 h »
 > pour le second — faux d'un facteur 3,4. La pente n'est pas linéaire (la durée d'un épisode
 > dépend de ce que la politique a appris) et les deux runs ne portent pas sur le même état du
