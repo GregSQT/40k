@@ -118,6 +118,9 @@ def _check_fall_back_move(state, line, action_desc, player, move_unit_id,
     )
     from ai.analyzer_perfig import surviving_start_models
 
+    if state.unit_hp.get(move_unit_id, 0) <= 0:
+        return
+
     stats = state.stats
     # Recale le cache sur la position de DÉPART du journal avant toute mesure — jumeau exact de
     # `_handle_move` (`state.unit_positions` sert de base à l'instantané ci-dessous, et le mobile
