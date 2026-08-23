@@ -1026,19 +1026,6 @@ lisent les `callback_params` **résolus** comme le fait le run (`_resolve_callba
 `train.py:3444-3459`) : une clé absente ou nulle hérite de `_training_common.json`, qui définit
 `save_best_robust: true` — la lire brute mesurerait autre chose que ce qui sera appliqué.
 
-**Le profil `x5_append`** ferme la chaîne : `x5_new` → `x5_long` → `x5_append`. Il ne démarre pas
-un apprentissage, il **prolonge** le modèle de `x5_long` de 30 000 épisodes sur la même tâche. Ses
-deux rampes sont donc **plates, aux planchers atteints par `x5_long`** (`lr` 0.0002, `ent_coef`
-0.01) : les rouvrir défairait le recuit que `x5_long` a mis la moitié de son run à obtenir, dans
-le régime exact où l'oubli catastrophique se déclenche. Même réseau (512×512), même `target_kl`,
-et surtout `vec_normalize.reset_on_curriculum: false` — l'échelle du plateau ne change plus entre
-les deux runs, jeter les stats VecNormalize servirait à la politique chargée des observations
-normalisées autrement que celles sur lesquelles elle a appris. `bot_eval_intermediate` y vaut 10
-et non 100 : à 100, les 15 évaluations coûteraient 3 h 15, sans commune mesure avec les 30 000
-épisodes qu'elles observent — la durée de ces épisodes, elle, n'est pas mesurée (cf. bandeau
-plus haut, le « ~50 min » qui figurait ici sortait du régime `0.1 s/ep` périmé).
-Verrou : `test_x5_append_resumes_x5_long_where_it_stopped`.
-
 `checkpoint_save_freq` reste **aligné sur `x1`**, délibérément : SB3 sauvegarde tous les
 `save_freq` **appels du callback** (`callbacks.py:300`), soit un par pas du VecEnv — jamais des
 épisodes. Le régler depuis une durée exprimée en épisodes n'a pas de sens ; pour couvrir plus
