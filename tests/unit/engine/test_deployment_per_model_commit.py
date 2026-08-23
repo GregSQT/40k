@@ -507,3 +507,79 @@ def test_memoized_pool_is_immutable():
     assert isinstance(zone, frozenset), (
         f"la zone mémoïsée doit être un frozenset, pas {type(zone).__name__}"
     )
+
+
+# ---------------------------------------------------------------------------------------------
+# Verrou d'équivalence : margin_blocked incrémental (commit 83ae7f76)
+#
+# Le commit a remplacé la boucle O(N×fp×6) (anneau bloquant reconstitué socle par socle) par
+# un set cumulatif mis à jour O(fp) à chaque placement. Ces deux formulations sont
+# mathématiquement équivalentes, mais l'ancien test (`test_memoized_pool_yields_the_same_
+# formation_plan`) compare la fonction à ELLE-MÊME (first == second) : il détecte la
+# non-déterminisme, pas une divergence d'algorithme.
+#
+# Ce test vérifie l'invariant de la marge : pour chaque paire de socles posés, aucune cellule
+# de l'empreinte l'un ne doit appartenir à l'empreinte de l'autre ni à son anneau de voisins.
+# Si margin_blocked ne propage pas les voisins (seule l'empreinte est bloquée), les socles
+# peuvent se toucher et l'invariant est violé.
+#
+# Cycle rouge : dans deployment_handlers.py, supprimer les DEUX blocs
+#     for _nb in get_neighbors(_mc, _mr):
+#         margin_blocked.add(_nb)
+# (le premier dans la passe BFS, le second dans la passe overflow). Les socles s'approchent
+# d'un hex et l'invariant est violé → RED. Rétablir les deux blocs → GREEN.
+# ---------------------------------------------------------------------------------------------
+
+
+def test_margin_blocked_enforces_one_hex_gap():
+    """margin_blocked impose la marge de 1 hex entre toutes les paires de socles du plan.
+
+    Vérifie l'invariant directement sur le plan rendu : fp_i ∩ (fp_j ∪ voisins(fp_j)) = ∅
+    pour toute paire (i, j). Échantillon : board x5, escouade de 6 figurines, 8 ancres réparties
+    dans la zone.
+    """
+    from engine.phase_handlers.deployment_handlers import (
+        _model_footprint, generate_compact_formation,
+    )
+    from engine.hex_utils import get_neighbors
+
+    eng = _load(seed=0)
+    gs = eng.game_state
+    squad_id = str(gs["deployment_state"]["deployable_units"][1][0])
+    pool = [(int(c), int(r)) for c, r in gs["deployment_pools"][1]]
+    assert pool, "fixture invalide : zone de déploiement vide"
+
+    models_cache = gs["models_cache"]
+    from engine.phase_handlers.deployment_handlers import _alive_model_ids
+    alive = _alive_model_ids(gs, squad_id)
+    assert len(alive) >= 2, f"fixture invalide : escouade {squad_id} a {len(alive)} figurine(s) — besoin d'≥2"
+
+    sample = [pool[i] for i in range(0, len(pool), max(1, len(pool) // 8))][:8]
+    assert len(sample) >= 4, "fixture invalide : échantillon d'ancres trop petit"
+
+    total_pairs = 0
+    for col, row in sample:
+        plan = generate_compact_formation(gs, squad_id, col, row)
+        if plan is None or len(plan) < 2:
+            continue
+
+        fps = [
+            frozenset(_model_footprint(gs, models_cache[mid], c, r))
+            for mid, c, r in plan
+        ]
+
+        for i in range(len(fps)):
+            for j in range(i + 1, len(fps)):
+                # Anneau bloquant du socle j : empreinte + ses voisins immédiats
+                ring_j = fps[j] | {nb for cc, rr in fps[j] for nb in get_neighbors(cc, rr)}
+                overlap = fps[i] & ring_j
+                assert not overlap, (
+                    f"marge 1 hex violée entre socles {i} et {j} à l'ancre ({col},{row}) : "
+                    f"cellules communes {sorted(overlap)} — margin_blocked n'a pas propagé "
+                    f"l'anneau voisin du socle posé"
+                )
+                total_pairs += 1
+
+    assert total_pairs > 0, (
+        f"aucune paire de socles vérifiée sur {len(sample)} ancres — invariant non exercé"
+    )
