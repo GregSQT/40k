@@ -1158,3 +1158,41 @@ def test_bot_env_self_play_opponent_est_interroge_pendant_une_designation_d_oath
 
     assert model.received_masks, "le modèle n'a pas été interrogé : un WAIT hors masque a été rendu"
     assert action == mi.OATH_SLOT_BASE
+
+
+def test_reload_snapshot_wraps_model_in_normalized_frozen_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """_reload_self_play_snapshot_if_needed doit produire un _NormalizedFrozenModel, pas un MaskablePPO nu.
+
+    Sans ce wrapper, P1 self-play recoit des observations brutes alors que le modele
+    a ete entraine avec VecNormalize — le signal self-play est fausse.
+    """
+    from ai.vec_normalize_utils import _NormalizedFrozenModel
+
+    snapshot = tmp_path / "model_stub.zip"
+    snapshot.write_bytes(b"stub")
+
+    class _FakeRawModel:
+        pass
+
+    dummy_normalizer = lambda obs: obs  # noqa: E731
+
+    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda path, device: _FakeRawModel())
+    monkeypatch.setattr(
+        "ai.vec_normalize_utils.build_snapshot_normalizer",
+        lambda path, vn_enabled, eval_enabled: dummy_normalizer,
+    )
+
+    wrapper = _frozen_pool_wrapper(
+        self_play_snapshot_path=str(snapshot),
+        self_play_snapshot_frozen=True,
+        self_play_vec_normalize_enabled=True,
+        self_play_vec_normalize_eval_enabled=True,
+    )
+    wrapper._reload_self_play_snapshot_if_needed(force=True)
+
+    assert isinstance(wrapper._frozen_model, _NormalizedFrozenModel), (
+        "Le modele charge doit etre un _NormalizedFrozenModel, pas un MaskablePPO nu"
+    )
+    assert wrapper._frozen_model._normalizer is dummy_normalizer

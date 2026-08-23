@@ -204,7 +204,8 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
                      controlled_agent_key, unit_registry, step_logger_enabled=False,
                      scenario_files=None, debug_mode=False, use_bots=False, training_bots=None,
                      agent_seat_mode=None, global_seed=None, opponent_mix_config=None,
-                     n_envs=None, episode_start_index=0):
+                     n_envs=None, episode_start_index=0,
+                     vec_normalize_enabled=False, vec_normalize_eval_enabled=False):
     """
     Factory function to create a single W40KEngine instance for vectorization.
 
@@ -302,6 +303,8 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             agent_seat_mode=agent_seat_mode,
             global_seed=global_seed,
             env_rank=rank,
+            self_play_vec_normalize_enabled=vec_normalize_enabled,
+            self_play_vec_normalize_eval_enabled=vec_normalize_eval_enabled,
             **build_self_play_kwargs(opponent_mix_config, env_rank=rank),
         )
 

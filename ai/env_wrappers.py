@@ -309,6 +309,8 @@ class BotControlledEnv(gym.Wrapper):
         self_play_deterministic: bool = False,
         self_play_snapshot_frozen: bool = False,
         self_play_snapshot_label: Optional[str] = None,
+        self_play_vec_normalize_enabled: bool = False,
+        self_play_vec_normalize_eval_enabled: bool = False,
     ):
         super().__init__(base_env)
         # Support: bots=[...] for random selection, or bot=X for single opponent
@@ -362,6 +364,8 @@ class BotControlledEnv(gym.Wrapper):
         # poser un `refresh_episodes` plus grand que le nombre d'episodes du run — un nombre qui
         # ne veut rien dire, et que les appelants recopiaient chacun a leur facon.
         self._self_play_snapshot_frozen = bool(self_play_snapshot_frozen)
+        self._self_play_vec_normalize_enabled = bool(self_play_vec_normalize_enabled)
+        self._self_play_vec_normalize_eval_enabled = bool(self_play_vec_normalize_eval_enabled)
         if self._self_play_opponent_enabled:
             if self_play_ratio_start is None:
                 raise KeyError(
@@ -986,10 +990,17 @@ class BotControlledEnv(gym.Wrapper):
         ):
             return
         from sb3_contrib import MaskablePPO
-        self._frozen_model = MaskablePPO.load(
+        from ai.vec_normalize_utils import _NormalizedFrozenModel, build_snapshot_normalizer
+        raw_model = MaskablePPO.load(
             snapshot_path,
             device=self._self_play_snapshot_device,
         )
+        normalizer = build_snapshot_normalizer(
+            snapshot_path,
+            self._self_play_vec_normalize_enabled,
+            self._self_play_vec_normalize_eval_enabled,
+        )
+        self._frozen_model = _NormalizedFrozenModel(raw_model, normalizer)
         self._frozen_model_mtime = current_mtime
         self._episodes_since_snapshot_refresh = 0
 

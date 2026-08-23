@@ -11,7 +11,7 @@ Provides utilities for:
 import os
 import numpy as np
 from ai.companion_paths import companion_path
-from typing import Optional, Any
+from typing import Callable, Optional, Any
 
 VEC_NORMALIZE_SUFFIX = "_vec_normalize.pkl"
 
@@ -75,6 +75,67 @@ def load_vec_normalize(venv: Any, model_path: str) -> Optional[Any]:
     vec_normalize.training = False  # Don't update stats during eval
     vec_normalize.norm_reward = False  # Don't normalize rewards during eval
     return vec_normalize
+
+
+class _NormalizedFrozenModel:
+    """Modele fige + son propre VecNormalize — interface predict() identique a MaskablePPO.
+
+    Intercept predict() pour appliquer la normalisation du snapshot (jamais celle du
+    modele courant). Substitut drop-in dans BotControlledEnv._frozen_model.
+    """
+
+    def __init__(self, model: Any, normalizer: Optional[Callable[[Any], Any]]) -> None:
+        self._model = model
+        self._normalizer = normalizer
+
+    def predict(self, obs: Any, **kwargs: Any) -> Any:
+        if self._normalizer is not None:
+            obs = self._normalizer(obs)
+        return self._model.predict(obs, **kwargs)
+
+
+def build_snapshot_normalizer(
+    snapshot_path: str,
+    vec_normalize_enabled: bool,
+    vec_normalize_eval_enabled: bool,
+) -> Optional[Callable[[Any], Any]]:
+    """Construit un callable de normalisation pour un snapshot de self-play.
+
+    Renvoie None si vec_normalize ou vec_normalize_eval est desactive.
+    Erreur explicite si le .pkl est absent alors que la normalisation est activee (V11 §0.35).
+    La closure charge le pkl une seule fois (lazy) et est independante par instance — aucun
+    partage entre envs workers (chaque BotControlledEnv possede sa propre instance).
+    """
+    if not vec_normalize_enabled or not vec_normalize_eval_enabled:
+        return None
+
+    pkl_path = get_vec_normalize_path(snapshot_path)
+    if not os.path.exists(pkl_path):
+        raise FileNotFoundError(
+            f"VecNormalize: stats absentes pour le snapshot de self-play : {pkl_path}. "
+            "Le snapshot doit etre publie avec ses stats (V11 §0.35)."
+        )
+
+    _cache: dict = {"obj": None}
+
+    def _normalize(obs: Any) -> Any:
+        if _cache["obj"] is None:
+            import pickle
+            with open(pkl_path, "rb") as f:
+                vn = pickle.load(f)
+            vn.training = False
+            vn.norm_reward = False
+            _cache["obj"] = vn
+        vn = _cache["obj"]
+        if isinstance(obs, dict):
+            return vn.normalize_obs(obs)
+        obs_arr = np.asarray(obs, dtype=np.float32)
+        if obs_arr.ndim == 1:
+            obs_arr = obs_arr.reshape(1, -1)
+        normalized = normalize_observation_for_inference(obs_arr, snapshot_path)
+        return np.asarray(normalized, dtype=np.float32).squeeze()
+
+    return _normalize
 
 
 def normalize_observation_for_inference(obs: np.ndarray, model_path: str) -> np.ndarray:

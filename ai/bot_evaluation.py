@@ -33,6 +33,7 @@ from shared.torch_safe_globals import register_torch_safe_globals
 from shared.json_atomic import write_json_atomic
 from shared.progress_writer import ProgressWriter
 from ai.scenario_scratch import make_scenario_scratch_dir
+from ai.vec_normalize_utils import _NormalizedFrozenModel
 
 # Avant tout `MaskablePPO.load` de ce module : torch >= 2.6 charge en `weights_only=True`.
 register_torch_safe_globals()
@@ -1962,25 +1963,6 @@ def _resolve_seat_seed(training_cfg: dict) -> int:
     if not isinstance(seed_raw, int) or isinstance(seed_raw, bool):
         raise TypeError("Seat seed doit etre un entier quand agent_seat_mode='random'")
     return seed_raw
-
-
-class _NormalizedFrozenModel:
-    """Modèle figé + son propre VecNormalize — interface predict() identique à MaskablePPO.
-
-    Intercept predict() pour appliquer la normalisation du CHECKPOINT (jamais celle du
-    modèle courant — spec R0b). Substitut drop-in dans BotControlledEnv._frozen_model :
-    BotControlledEnv._get_self_play_opponent_action() appelle self._frozen_model.predict(),
-    ce wrapper l'intercepte avant d'appeler le vrai modèle.
-    """
-
-    def __init__(self, model: Any, normalizer: Optional[Any]) -> None:
-        self._model = model
-        self._normalizer = normalizer
-
-    def predict(self, obs: Any, **kwargs: Any) -> Any:
-        if self._normalizer is not None:
-            obs = self._normalizer(obs)
-        return self._model.predict(obs, **kwargs)
 
 
 def evaluate_against_checkpoints(
