@@ -600,6 +600,12 @@ def decision_option_cont_index(field: str) -> int:
 #: (511 par ligne) et du forward. Tout dépassement reste LOGUÉ, jamais silencieux.
 K_ALLY_SLOTS = 12
 
+#: Nombre de lignes du bloc figurines de l'escouade active (P3-0 — source unique partagée par
+#: `observation_builder.ObservationBuilder.SQUAD_TOP_K`, `macro_intents.COHERENCY_SLOT_COUNT`
+#: et `ai/spatial_extractor.py`). Le slot i de la tranche COHERENCY désigne la ligne i de
+#: `_squad_models_for_observation(alive_mids)` — invariant D1 côté figurines.
+SQUAD_TOP_K = 20
+
 #: Nombre de slots de profils d'armes de MÊLÉE par entité (§0.69 — source unique pour que
 #: `macro_intents.FIGHT_WEAPON_SLOT_COUNT` et `observation_builder.K_WEAPONS_MELEE` restent
 #: synchronisés). Doit égaler `SquadObservationBuilder.K_WEAPONS_MELEE`.

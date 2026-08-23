@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """engine/macro_intents.py - Zone intent system Phase 2."""
 
-from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE
+from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE, SQUAD_TOP_K
 from shared.data_validation import require_key
 
 INTENT_INVADE = 0
@@ -142,7 +142,13 @@ ACTIVATE_SLOT_COUNT = K_ALLY_SLOTS                             # 12 -> 1337-1348
 # ⚠️ Ces ids ne sont PAS dans `SQUAD_ACTION_SIZE` (comme Oath et Activate).
 FIGHT_WEAPON_SLOT_BASE = ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT  # 1349
 FIGHT_WEAPON_SLOT_COUNT = K_WEAPONS_MELEE                          # 10 -> 1349-1358
-TOTAL_ACTION_SIZE = FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT  # 1359
+# P3-0 — CHOIX DE RETRAIT POUR COHERENCE (03.03). Le slot i designe la LIGNE i du bloc
+# figurines de l'observation (`_squad_models_for_observation`) — invariant D1 cote figurines.
+# Tete pointeur : logit_i = (q · sm_emb_i)/√d — meme derivation que les slots ennemis.
+# ⚠️ Cette tranche est hors `SQUAD_ACTION_SIZE` (comme Oath, Activate, FIGHT_WEAPON).
+COHERENCY_SLOT_BASE = FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT  # 1359
+COHERENCY_SLOT_COUNT = SQUAD_TOP_K                                       # 20 -> 1359-1378
+TOTAL_ACTION_SIZE = COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT           # 1379
 
 MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)                # 0-1023
 SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1044
@@ -164,6 +170,9 @@ ACTIVATE_SLOTS = range(ACTIVATE_SLOT_BASE, ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_CO
 FIGHT_WEAPON_SLOTS = range(
     FIGHT_WEAPON_SLOT_BASE, FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT
 )  # 1349-1358
+COHERENCY_SLOTS = range(
+    COHERENCY_SLOT_BASE, COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT
+)  # 1359-1378
 
 
 def is_zone_intent_action(action: int) -> bool:

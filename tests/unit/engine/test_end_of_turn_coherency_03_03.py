@@ -57,6 +57,10 @@ def _gs(positions, squad_id="1", player=1):
         # `destroy_model` invalide la LoS de l'escouade amputee : compteur present dans tout
         # game_state reel (w40k_core), donc requis ici aussi.
         "_unit_move_version": 0,
+        # PvE bot : les DEUX sieges sont muets (retrait auto, critere geometrique).
+        # Gym (gym_training_mode=True) rend les sieges non-muets (l'agent repond par masque) ;
+        # human PvP aussi. Ici on simule le cas PvE ou les deux joueurs sont des IA.
+        "player_types": {"1": "ai", "2": "ai"},
         # Valeurs de config/game_config.json, deja converties en subhex par w40k_core a l'init.
         "config": {"game_rules": {
             "unit_model_cohesion_range": 2,
@@ -181,7 +185,7 @@ def test_removal_does_not_increment_combat_kill_counters():
 # --- (d) LES DEUX chemins de fin de Fight appellent l'etape ------------------------------------
 
 def _fight_end_gs():
-    """game_state minimal accepte par les deux chemins de fin de phase Fight."""
+    """game_state minimal accepte par les deux chemins de fin de phase Fight (mode gym)."""
     gs = _gs([(10, 10), (11, 10), (30, 40)])
     gs.update({
         "current_player": 2,
