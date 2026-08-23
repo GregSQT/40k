@@ -322,14 +322,13 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
             if hp_value > 0:
                 colliding_units.append(uid)
 
+        mover_player = state.unit_player.get(move_unit_id)
         real_colliding_units = []
         for uid in colliding_units:
             uid_player = state.unit_player.get(uid)
-            mover_player = state.unit_player.get(move_unit_id)
             if uid_player is not None and mover_player is not None and uid_player != mover_player:
                 continue
-            if uid in state.unit_positions and state.unit_positions[uid] == (dest_col, dest_row):
-                real_colliding_units.append(uid)
+            real_colliding_units.append(uid)
         if real_colliding_units:
             stats['unit_position_collisions'].append({
                 'episode': state.current_episode_num,
@@ -648,12 +647,12 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         if require_key(state.unit_hp, move_unit_id) > 0:
             _position_cache_set(state.unit_positions, move_unit_id, dest_col, dest_row)
 
+        # Enemy units sharing an anchor hex is expected when both are in engagement range —
+        # the anchor is the squad centroid, not a per-model footprint.
+        mover_player = state.unit_player.get(move_unit_id)
         real_colliding_units = []
         for uid, pos_before in colliding_units_before.items():
-            # Enemy units sharing an anchor hex is expected when both are in engagement range —
-            # the anchor is the squad centroid, not a per-model footprint.
             uid_player = state.unit_player.get(uid)
-            mover_player = state.unit_player.get(move_unit_id)
             if uid_player is not None and mover_player is not None and uid_player != mover_player:
                 continue
             if (uid in state.unit_positions and

@@ -315,13 +315,13 @@ def handle_charge(
             if require_key(state.unit_hp, charge_unit_id) > 0:
                 _position_cache_set(state.unit_positions, charge_unit_id, dest_col, dest_row)
 
+            # A charge lands in engagement with the target — the charger sharing the target's
+            # anchor hex is the expected outcome, not a collision. Only ally-ally same-hex
+            # occupation is a genuine positioning error.
+            charger_player = state.unit_player.get(charge_unit_id)
             real_colliding_units = []
             for uid, pos_before in colliding_units_before.items():
-                # A charge lands in engagement with the target — the charger sharing the target's
-                # anchor hex is the expected outcome, not a collision. Only ally-ally same-hex
-                # occupation is a genuine positioning error.
                 uid_player = state.unit_player.get(uid)
-                charger_player = state.unit_player.get(charge_unit_id)
                 if uid_player is not None and charger_player is not None and uid_player != charger_player:
                     continue
                 if (uid in state.unit_positions and
