@@ -535,20 +535,23 @@ def test_margin_blocked_enforces_one_hex_gap():
     """margin_blocked impose la marge de 1 hex entre toutes les paires de socles du plan.
 
     Vérifie l'invariant directement sur le plan rendu : fp_i ∩ (fp_j ∪ voisins(fp_j)) = ∅
-    pour toute paire (i, j). Échantillon : board x5, escouade de 6 figurines, 8 ancres réparties
+    pour toute paire (i, j). Échantillon : board x5, escouade de 3 figurines, 8 ancres réparties
     dans la zone.
     """
     from engine.phase_handlers.deployment_handlers import (
-        _model_footprint, generate_compact_formation,
+        _footprint_offsets_for, _model_footprint, generate_compact_formation,
     )
+    from engine.phase_handlers.shared_utils import get_engagement_zone
     from engine.hex_utils import get_neighbors
 
     eng = _load(seed=0)
     gs = eng.game_state
     squad_id = str(gs["deployment_state"]["deployable_units"][1][0])
     pool = [(int(c), int(r)) for c, r in gs["deployment_pools"][1]]
+    pool_set = frozenset(pool)
     assert pool, "fixture invalide : zone de déploiement vide"
 
+    ez = get_engagement_zone(gs)
     models_cache = gs["models_cache"]
     from engine.phase_handlers.deployment_handlers import _alive_model_ids
     alive = _alive_model_ids(gs, squad_id)
@@ -563,16 +566,41 @@ def test_margin_blocked_enforces_one_hex_gap():
         if plan is None or len(plan) < 2:
             continue
 
+        # Vérifie l'équivalence _model_footprint == _model_fp (offsets) pour chaque modèle du
+        # plan et à ses positions exactes — prérequis de l'invariant (generate_compact_formation
+        # utilise _model_fp pour margin_blocked, pas _model_footprint).
+        for mid, c, r in plan:
+            m = models_cache[mid]
+            offsets = _footprint_offsets_for(
+                m["BASE_SHAPE"], m["BASE_SIZE"], int(m.get("orientation", 0)), ez
+            )
+            if offsets is None:
+                expected = frozenset({(int(c), int(r))})
+            else:
+                off = offsets[0] if int(c) % 2 == 0 else offsets[1]
+                expected = frozenset({(int(c) + dc, int(r) + dr) for dc, dr in off})
+            canonical = frozenset(_model_footprint(gs, m, int(c), int(r)))
+            assert canonical == expected, (
+                f"_model_footprint ≠ _model_fp pour {mid} en ({c},{r}) — "
+                f"l'invariant ne teste pas ce que margin_blocked a réellement bloqué"
+            )
+
         fps = [
             frozenset(_model_footprint(gs, models_cache[mid], c, r))
             for mid, c, r in plan
         ]
 
-        for i in range(len(fps)):
-            for j in range(i + 1, len(fps)):
+        # Exclut les modèles overflow-placés (empreinte hors pool) : ceux-là ne respectent pas
+        # la marge par construction et feraient échouer le test à tort.
+        bfs_fps = [fp for fp in fps if fp.issubset(pool_set)]
+        if len(bfs_fps) < 2:
+            continue
+
+        for i in range(len(bfs_fps)):
+            for j in range(i + 1, len(bfs_fps)):
                 # Anneau bloquant du socle j : empreinte + ses voisins immédiats
-                ring_j = fps[j] | {nb for cc, rr in fps[j] for nb in get_neighbors(cc, rr)}
-                overlap = fps[i] & ring_j
+                ring_j = bfs_fps[j] | {nb for cc, rr in bfs_fps[j] for nb in get_neighbors(cc, rr)}
+                overlap = bfs_fps[i] & ring_j
                 assert not overlap, (
                     f"marge 1 hex violée entre socles {i} et {j} à l'ancre ({col},{row}) : "
                     f"cellules communes {sorted(overlap)} — margin_blocked n'a pas propagé "
