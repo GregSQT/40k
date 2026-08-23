@@ -101,8 +101,10 @@ def _obs_ally_rows(gs, active_squad_id: str, active_player: int, k_ally_slots: i
     attribué à l'unité 1 (hors table), portait en fait la position de l'unité 2 (posée, col=215),
     d'où un `col_rel = 90.0` attribué à une unité sans position.
 
-    Une entité hors table N'A PAS de ligne alliée : l'information qu'elle existe passe par les
-    slots ENNEMIS (eux non filtrés) et par le bit `deploy_not_on_board`.
+    Une entité hors table N'A PAS de ligne alliée : l'information qu'elle existe passe par le
+    bit `deploy_not_on_board`. Les slots ennemis sont eux aussi filtrés par
+    `entry_is_on_battlefield` (`_refresh_enemy_slot_mapping`, commit 3682d4b7) : les unités non
+    posées n'y figurent pas davantage.
     """
     others = sorted(
         (
@@ -441,7 +443,9 @@ def test_relative_positions_are_measured_from_the_zone_and_null_for_unplaced_uni
             checked_placed += 1
 
     assert checked_placed >= 3, f"trop peu d'entités posées vérifiées ({checked_placed})"
-    assert checked_unplaced >= 3, f"trop peu d'entités non posées vérifiées ({checked_unplaced})"
+    # 1 seule unité non posée visible : l'unité active (slot 0). Les ennemis non déployés sont
+    # exclus du slot mapping par entry_is_on_battlefield (_refresh_enemy_slot_mapping, 3682d4b7).
+    assert checked_unplaced >= 1, f"trop peu d'entités non posées vérifiées ({checked_unplaced})"
 
 
 def test_self_models_have_no_position_before_placement():
@@ -564,7 +568,10 @@ def test_unplaced_units_assert_no_geometric_relation():
         eng.step(_first_deploy_action(mask))
         steps += 1
 
-    assert checked >= 10, f"trop peu d'entités non posées vérifiées ({checked})"
+    # Seule l'unité active (slot ally 0) est non posée à chaque step ; les ennemis non déployés
+    # sont exclus du slot mapping par entry_is_on_battlefield (3682d4b7). Avec 9 steps de
+    # déploiement (seed=0, mc1 et mc2), checked == 9.
+    assert checked >= 8, f"trop peu d'entités non posées vérifiées ({checked})"
 
 
 def test_unplaced_unit_is_not_engaged_by_an_enemy_standing_near_the_sentinel():
