@@ -392,6 +392,7 @@ def test_relative_positions_are_measured_from_the_zone_and_null_for_unplaced_uni
     """
     import engine.observation_entities as oe
     from engine.hex_utils import _hex_center
+    from engine.spatial_relations import entry_is_on_battlefield
 
     eng = _load()
     gs = eng.game_state
@@ -401,7 +402,7 @@ def test_relative_positions_are_measured_from_the_zone_and_null_for_unplaced_uni
     # Avance jusqu'à avoir assez d'entités posées pour satisfaire checked_placed >= 3.
     steps = 0
     while gs.get("phase") == "deployment" and steps < 1000:
-        total_placed = sum(1 for e in gs["units_cache"].values() if int(e["col"]) >= 0)
+        total_placed = sum(1 for e in gs["units_cache"].values() if entry_is_on_battlefield(e))
         if total_placed >= 3:
             break
         mask, _ = dec.get_squad_action_mask_and_eligible_units(gs)
