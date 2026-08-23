@@ -102,12 +102,16 @@ test avec cycle rouge/vert dans `test_deployment_per_model_commit.py`.
 Jumeau traité au passage : `execute_deployment_action` recopiait les trois lignes de
 `_deploy_pool_set` et contournait donc la mémoïsation sur le chemin de commit PvP.
 
-## Comment valider un fix
+## Ce qui est verrouillé
 
-Le verrou d'équivalence existe déjà :
-`tests/unit/engine/test_deployment_per_model_commit.py::test_precomputed_footprint_matches_the_canonical_one`
-(empreinte translatée == `compute_candidate_footprint`, aux deux parités de colonne).
-
-Y ajouter un test « même plan avant/après » : `generate_compact_formation` est déterministe, donc
-un refactor de perf doit rendre le plan **identique** sur un échantillon d'ancres de la zone —
-c'est le critère d'acceptation, pas seulement « ça va plus vite ».
+- `::test_precomputed_footprint_matches_the_canonical_one` — empreinte translatée ==
+  `compute_candidate_footprint`, aux deux parités de colonne (préexistant, T6-f).
+- `::test_memoized_pool_yields_the_same_formation_plan` — la zone mémoïsée est comparée à la zone
+  reconstruite à la main, celle que l'ancien code rebâtissait ; c'est l'équivalence qui compte
+  pour la piste 2, puisque `pool_set` n'est lu qu'en appartenance dans la spirale.
+- Les trois chemins d'invalidation du cache (reset, `_reload_scenario`, scénario sans zones),
+  chacun avec cycle rouge/vert.
+- `::test_margin_blocked_enforces_one_hex_gap` — invariant de marge entre socles :
+  `fp_i ∩ (fp_j ∪ voisins(fp_j)) = ∅` pour toute paire. Cycle rouge : supprimer les deux blocs
+  `for _nb in get_neighbors(...)` dans `generate_compact_formation`. Vérifié sur 8 ancres
+  réparties dans la zone (board x5, escouade de ≥2 figurines).

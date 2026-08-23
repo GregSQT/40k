@@ -1043,12 +1043,12 @@ de T4/de code latent) :
      déjà utilisé par `_get_valid_deployment_hexes`. **50 ms → 17,4 ms par formation (×2,9).**
      Équivalence stricte vérifiée par test aux deux parités — code partagé avec le déploiement
      PvP par escouade, une divergence déplacerait des socles à l'écran.
-  **Reste optimisable (non fait)** : la spirale teste encore chaque case par balayage de son
-  empreinte (~77 % du résiduel) et `_deploy_pool_set` est reconstruit à chaque appel (~13 %).
-  Pistes, mesures et pièges : [`A_faire/perf_generate_compact_formation.md`](../A_faire/perf_generate_compact_formation.md).
-  ⚠️ Le gain d'une érosion n'est PAS acquis dans le cas nominal (spirale qui s'arrête en
-  quelques cases) — à mesurer avant d'implémenter. Non bloquant : le vrai frein du training est
-  T6-g/T6-h, pas cette perf.
+  **Perf soldée le 2026-08-23** : `_deploy_pool_set` est mémoïsé par joueur dans `game_state`
+  (−26 % par formation, 10,79 → 7,94 ms) et l'anneau bloquant est devenu incrémental. L'érosion
+  morphologique de la spirale a été MESURÉE non rentable (−6 % net dans les deux régimes) :
+  l'hypothèse « la spirale s'arrête en quelques cases » était fausse, et le vrai goulot est la
+  marge inter-figurines, qui est dynamique et non érodable. Mesures et pièges :
+  [`Implémenté/perf_generate_compact_formation.md`](../Implémenté/perf_generate_compact_formation.md).
   **Tests (+10)** : `tests/unit/engine/test_deployment_per_model_commit.py` — placement de toutes
   les figurines, ancre = figurine d'index minimal (l'invariant dont `build_rigid_plan` dépend),
   légalité du plan committé, déterminisme + lecture pure du helper, invalidation de la mémo sur

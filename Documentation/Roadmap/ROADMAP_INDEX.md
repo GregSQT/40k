@@ -220,9 +220,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | training | ✅ fix-enemy-slot-reserves-oc-fallback — exclure réserves stratégiques ennemies du slot mapping + tests OC fallback (2026-08-23) | — | ⚡ |
 | training | ✅ simplify-ai-curriculum-train — dédup et simplifications curriculum/train/test_exploiter (2026-08-23) | — | ⚡ |
 | training | ✅ fix-snapshot-label-evaluate-checkpoints — `self_play_snapshot_label` manquant dans `evaluate_against_checkpoints` → crash clôture P1 (2026-08-23) ; verrou rouge/vert | — | ⚡ |
-| infra | ✅ mémoïsation `_deploy_pool_set` (2026-08-23) — calcul de pool mis en cache pour la session de formation | — | ⚡ |
+| infra | ✅ mémoïsation `_deploy_pool_set` (2026-08-23) — zone mise en cache par joueur dans `game_state`, purgée aux deux chemins de re-publication ; −26 % par formation (10,79 → 7,94 ms) ; 5 verrous rouge/vert. Chantier CLOS, doc dans `Documentation/Implémentation/Implémenté/perf_generate_compact_formation.md` | — | ⚡ |
 | infra | ✅ bench piste 1 érosion mesurée (2026-08-23) — non rentable ; goulot confirmé = marge inter-fig | — | ⚡ |
-| infra | ✅ Perf `generate_compact_formation` margin_blocked incrémental (2026-08-23) — O(N×fp×6) → O(fp) par cellule BFS ; 45 tests verts | [infra.md#perf-formation](infra.md#perf-formation) | ⚡ |
+| infra | ✅ Perf `generate_compact_formation` margin_blocked incrémental (2026-08-23) — O(N×fp×6) → O(fp) par cellule BFS ; suite verte, aucun verrou d'équivalence de plan (cf. SUITE du doc) | — | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 
 ### Bloqués par une décision utilisateur
