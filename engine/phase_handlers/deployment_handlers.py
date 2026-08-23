@@ -362,6 +362,10 @@ def generate_compact_formation(
 
     placed: List[Tuple[str, int, int]] = []
     placed_socles: List["Socle"] = []
+    # Anneau bloquant cumulatif : empreinte + voisins de CHAQUE socle posé.
+    # Mis à jour O(fp) à chaque placement ; la vérification dans _legal_socle
+    # passe de O(N×fp×6) à O(fp) par cellule BFS.
+    margin_blocked: Set[Tuple[int, int]] = set()
 
     # Empreinte par TRANSLATION d'offsets pré-calculés, au lieu de la recalculer à chaque case
     # de la spirale. Mesuré (cProfile, board x5, escouade de 6) : `_legal_socle` = 92 % du coût
@@ -423,15 +427,10 @@ def generate_compact_formation(
             col=int(c), row=int(r), fp=fp,
         )
         # Marge de 1 hex : la candidate ne doit ni chevaucher ni TOUCHER une fig déjà posée.
-        # On bloque l'empreinte de chaque socle posé + son anneau de voisins.
-        for s in placed_socles:
-            s_fp = s.fp or set()
-            blocked: Set[Tuple[int, int]] = set(s_fp)
-            for cc, rr in s_fp:
-                for nb in get_neighbors(cc, rr):
-                    blocked.add(nb)
-            if any(cell in blocked for cell in fp):
-                return None
+        # margin_blocked est tenu à jour incrémentalement (O(fp) par placement) ;
+        # la vérification ici est donc O(fp) au lieu de O(N×fp×6).
+        if any(cell in margin_blocked for cell in fp):
+            return None
         return cand
 
     # Ordre spirale BORNÉ au plateau (termination garantie : chaque case in-bounds visitée une
@@ -448,6 +447,10 @@ def generate_compact_formation(
         if socle is not None:
             placed.append((model_ids[idx], c, r))
             placed_socles.append(socle)
+            for _mc, _mr in socle.fp or set():
+                margin_blocked.add((_mc, _mr))
+                for _nb in get_neighbors(_mc, _mr):
+                    margin_blocked.add(_nb)
             idx += 1
         for nc, nr in get_neighbors(c, r):
             if 0 <= nc < board_cols and 0 <= nr < board_rows and (nc, nr) not in seen:
@@ -477,6 +480,10 @@ def generate_compact_formation(
             )
         placed.append((model_ids[j], chosen[0], chosen[1]))
         placed_socles.append(chosen[2])
+        for _mc, _mr in chosen[2].fp or set():
+            margin_blocked.add((_mc, _mr))
+            for _nb in get_neighbors(_mc, _mr):
+                margin_blocked.add(_nb)
     return placed
 
 
