@@ -61,6 +61,13 @@ def _move(unit_id: int, frm: tuple, to: tuple, models_tag: str = "") -> str:
     )
 
 
+def _advance(unit_id: int, player: int, frm: tuple, to: tuple) -> str:
+    return (
+        f"[10:00:02] E1 T1 P{player} SHOOT : Unit {unit_id}({to[0]},{to[1]}) ADVANCED from ({frm[0]},{frm[1]}) to ({to[0]},{to[1]})"
+        f" [R:+0.0] [MODELS: {unit_id}#0@({to[0]},{to[1]})] [SUCCESS]\n"
+    )
+
+
 def _charge(unit_id: int, frm: tuple, to: tuple, target_id: int, target_pos: tuple, roll: int = 15) -> str:
     return (
         f"[10:00:03] E1 T1 P1 CHARGE : Unit {unit_id}({frm[0]},{frm[1]}) CHARGED Unit {target_id}({target_pos[0]},{target_pos[1]})"
@@ -126,4 +133,50 @@ def test_ally_au_meme_hex_est_toujours_une_collision(tmp_path):
     stats = an.parse_step_log(str(log))
     assert len(stats["unit_position_collisions"]) == 1, (
         f"Deux alliés au même hex doivent déclencher une collision : {stats['unit_position_collisions']}"
+    )
+
+
+def test_ally_move_move_au_meme_hex_est_une_collision(tmp_path):
+    """Deux unités alliées qui MOVE toutes les deux au même hex = collision réelle."""
+    # P1 (1) bouge à SHARED. P1 (2) bouge aussi à SHARED — même ancre, même camp.
+    body = (
+        _move(1, P1_START, SHARED, models_tag=f"1#0@({SHARED[0]},{SHARED[1]})")
+        + _move(2, P1_ALLY_START, SHARED, models_tag=f"2#0@({SHARED[0]},{SHARED[1]})")
+    )
+    log = tmp_path / "ally_move_move.log"
+    log.write_text(_log(body))
+    stats = an.parse_step_log(str(log))
+    assert len(stats["unit_position_collisions"]) == 1, (
+        f"Deux alliés MOVE au même hex doivent déclencher une collision : {stats['unit_position_collisions']}"
+    )
+
+
+def test_advance_ennemi_au_meme_hex_ne_compte_pas_comme_collision(tmp_path):
+    """Un ADVANCE qui finit à l'ancre d'un ennemi engagé n'est pas une collision."""
+    # P2 (101) bouge à SHARED. P1 (1) advance à SHARED — ennemi engagé, faux positif.
+    body = (
+        f"[10:00:02] E1 T1 P2 MOVE : Unit 101({SHARED[0]},{SHARED[1]}) MOVED from ({P2_START[0]},{P2_START[1]}) to ({SHARED[0]},{SHARED[1]})"
+        f" [R:+0.0] [MODELS: 101#0@({SHARED[0]},{SHARED[1]})] [SUCCESS]\n"
+        + _advance(1, 1, P1_START, SHARED)
+    )
+    log = tmp_path / "advance_enemy.log"
+    log.write_text(_log(body))
+    stats = an.parse_step_log(str(log))
+    assert stats["unit_position_collisions"] == [], (
+        f"Advance sur ennemi engagé ne doit pas être une collision : {stats['unit_position_collisions']}"
+    )
+
+
+def test_ally_advance_au_meme_hex_est_une_collision(tmp_path):
+    """Un ADVANCE vers l'ancre d'un allié déjà present = collision réelle."""
+    # P1 (1) bouge à SHARED. P1 (2) advance à SHARED — allié, vraie erreur.
+    body = (
+        _move(1, P1_START, SHARED, models_tag=f"1#0@({SHARED[0]},{SHARED[1]})")
+        + _advance(2, 1, P1_ALLY_START, SHARED)
+    )
+    log = tmp_path / "ally_advance.log"
+    log.write_text(_log(body))
+    stats = an.parse_step_log(str(log))
+    assert len(stats["unit_position_collisions"]) == 1, (
+        f"Advance allié au même hex doit déclencher une collision : {stats['unit_position_collisions']}"
     )
