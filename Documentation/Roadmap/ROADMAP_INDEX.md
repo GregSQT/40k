@@ -255,12 +255,12 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
-| doc | `obs_size` justification à mettre à jour | [doc.md#obs-size](doc.md#obs-size) | ⚡ |
-| doc | Notes vitesse entraînement périmées | [doc.md#vitesse](doc.md#vitesse) | ⚡ |
 | doc | Ancres de ligne périmées docs V11 | [doc.md#ancres](doc.md#ancres) | ⚡ |
 | doc | Dette d'ancres G1/G2/G4 de V11_tranches §1bis | [doc.md#dette-tranches](doc.md#dette-tranches) | ⚡ |
 | doc | Bandeaux périmés V11_agent_rework §0bis (assumés depuis 2026-07-20) | [doc.md#bandeaux-0bis](doc.md#bandeaux-0bis) | ⚡ |
 | doc | §0.19 : les ✅ T2→T5 revérifiés par lecture seule | [doc.md#reverif-t2-t5](doc.md#reverif-t2-t5) | ⚡ |
+| doc | ✅ `obs_size` justification réécrite (2026-08-23) — 16703 sur les 7 profils, lignée 20xxx retirée, appendice P4 dépollué de 5 champs étrangers ; verrou `obs_size` déplacé sur `Documentation/AI_TRAINING.md` | — | |
+| doc | ✅ Notes vitesse entraînement (2026-08-23) — aucun taux ép./h publié : mesures directes seules (x1 4 h 01, x1_long 5 h 54), `36k ep / hour` retiré de 4 configs | — | |
 | training | ✅ Note `bot_eval_freq_normal` réécrite (2026-08-18) — d_bot_eval_seconds=98s, 5h54 pour 50k épisodes | — | |
 | bot | ✅ `bot_evaluation` simplifié : `_strip_phase_suffix` extrait + `_resolve_seat_seed` migré (2026-08-21) | — | |
 | training | ✅ R0b : compteurs W/L/D ajoutés aux checkpoints figés, publiés en TensorBoard (2026-08-21) | — | |

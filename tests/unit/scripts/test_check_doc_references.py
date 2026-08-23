@@ -1279,6 +1279,45 @@ def test_reference_documents_are_clean() -> None:
         assert not broken, f"{rel} : " + " | ".join(broken)
 
 
+def test_obs_size_is_read_through_its_thousands_separator() -> None:
+    """`**16 703**` est une valeur annoncée autant que `**16703**`.
+
+    Motif : borné à `\\d{4,}`, l'extracteur ne voyait pas la graphie à séparateur — et c'est
+    exactement celle qu'employait `AI_TRAINING.md`. Sa valeur y est restée à 16 659 face à une
+    source calculée à 16703, sous un contrôle qui se déclarait vert parce qu'il regardait
+    ailleurs. Les trois séparateurs du corpus sont couverts.
+    """
+    for separator in (" ", " ", "\xa0"):
+        text = f"| `obs_size` | **16{separator}703** (…) | source |"
+        assert cdr.claim_obs_size(text) == [
+            (f"`obs_size` | **16{separator}703**", 16703)
+        ], f"séparateur {separator!r} non lu"
+
+
+def test_a_short_bold_number_is_not_an_obs_size() -> None:
+    """`**8** → **12**` sur la ligne d'`obs_size` désigne des slots, jamais une taille."""
+    assert cdr.claim_obs_size("| `obs_size` | **8** slots | source |") == []
+
+
+def test_value_only_documents_are_clean_and_stay_out_of_the_entry_corpus() -> None:
+    """Les documents à valeurs seules EXISTENT, passent la passe 3, et n'entrent pas ailleurs.
+
+    Ils portent des valeurs recopiées d'une source mécanique, donc la passe 3 les regarde ; ils
+    citent en revanche des dizaines de `fichier.py:ligne`, donc les inscrire dans `DEFAULT_DOCS`
+    les rendrait rouges en permanence par la convention d'ancres — et un contrôle durablement
+    rouge finit ignoré. Cette exclusion est le contrat, pas un oubli.
+    """
+    assert cdr.VALUE_ONLY_DOCS, "l'énumération est vide : la passe ne regarde plus rien"
+    for rel in cdr.VALUE_ONLY_DOCS:
+        assert rel not in cdr.DEFAULT_DOCS, f"{rel} est aussi un document d'entrée"
+        path = ROOT / rel
+        assert path.exists(), f"VALUE_ONLY_DOCS pointe un fichier absent : {rel}"
+        verified, broken = cdr.check_values(path)
+        assert not broken, f"{rel} : " + " | ".join(broken)
+        # VERT VACANT : « 0 valeur périmée » ne vaut rien si aucune valeur n'a été confrontée.
+        assert verified, f"{rel} : aucune valeur confrontée"
+
+
 def test_the_corpus_really_confronts_its_fragments() -> None:
     """VERT VACANT : « 0 ancre introuvable » ne vaut rien si aucun fragment n'a été confronté.
 

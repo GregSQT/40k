@@ -440,18 +440,23 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     # la durée d'un task (150 épisodes au lieu de 25 sur les 4 scénarios du holdout). Laisser
     # 3600 s ne laisserait que 24 s/épisode contre les 17 s/ép. mesurées sur parties dégénérées
     # (V11 §0.14) — et un seul task qui déborde force-termine tout le pool, donc perd la mesure
-    # publiée après ~5 h 30 de run. Le détail est dans `bot_eval_task_timeout_seconds_normal`.
+    # publiée après un run mesuré à 5 h 54 (x1_long, 50 000 épisodes, 2026-08-18 ; le « ~5 h 30 »
+    # qui figurait ici sortait du régime `0.1 s/ep` périmé). Le détail est dans
+    # `bot_eval_task_timeout_seconds_normal`.
     assert long_cb["bot_eval_task_timeout_seconds"] == 7200
     assert ref_cb["bot_eval_task_timeout_seconds"] == 3600
     # `bot_eval_intermediate` est un nombre d'épisodes PAR BOT payé à CHAQUE éval intermédiaire :
     # son coût se rapporte à la durée du run, donc il en dépend au même titre que `bot_eval_freq`.
     # x1_long : 5 évals × 30 ép./bot (réduit de 100 à 30 par commit e07bdfd1, 4 workers), plus
-    # l'éval FINALE à 300 ép./bot (≈ 1 h 23, payée une fois). ⚠️ La durée d'entraînement vient de cette MESURE et
-    # non du « 0.1 s/ep → 36k ép./h » que répètent les notes `total_episodes_normal` de la config :
-    # les deux diffèrent d'un facteur ~14, l'écart est antérieur à cette livraison et n'est traité
-    # nulle part (la refonte d'observation V11 a rendu le pas bien plus cher).  x1 : 10 000
-    # épisodes, soit ~17 min d'entraînement pour 5 évals ; à 100 ép./bot elles coûteraient
-    # ~65 min, QUATRE FOIS le run qu'elles observent. À 10, ~7 min.
+    # l'éval FINALE à 300 ép./bot (≈ 1 h 23, payée une fois). Les durées d'ÉVALUATION ci-dessus se
+    # comptent en épisodes de bot et ne dépendent pas du régime d'entraînement ; la durée du RUN,
+    # elle, est mesurée et jamais dérivée d'un taux (x1 : 4 h 01 pour ses 10 000 épisodes ;
+    # x1_long : 5 h 54 pour 50 000, 2026-08-18 — la pente n'est pas linéaire). Le « 0.1 s/ep →
+    # 36k ép./h » que répétaient les notes `total_episodes_normal` de la config datait du régime
+    # d'avant la refonte d'observation V11 ; il en a été retiré le 2026-08-23, et le « ~17 min
+    # d'entraînement » qui figurait ici en sortait. Sur le run x1 réellement mesuré, 5 évals à
+    # 100 ép./bot coûteraient ~65 min, soit ~27 % de la durée du run — assez pour les réduire,
+    # pas les « QUATRE FOIS » qu'annonçait le régime périmé. À 10 ép./bot, ~7 min.
     # Ces évals alimentent aussi `save_best_robust` (train.py:3623), mais plus sur x1 : ses 5
     # points de mesure ne laissaient qu'UNE position de fenêtre, donc rien à départager, et le
     # profil est passé à `save_best_robust: false` le 2026-08-11 — sa sortie est son modèle

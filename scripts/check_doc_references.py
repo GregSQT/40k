@@ -104,6 +104,16 @@ DEFAULT_DOCS = [
     "Documentation/Implémentation/Implémenté/Security.md",
 ]
 
+#: Documents soumis à la SEULE passe 3 (valeurs). Ce ne sont pas des documents d'entrée : ils ne
+#: disent pas par quoi commencer, on ne leur demande donc ni la convention d'ancres ni la
+#: vérification de leurs renvois — `AI_TRAINING.md` cite des dizaines de `fichier.py:ligne` et
+#: passerait au rouge le jour où on l'ajouterait à DEFAULT_DOCS, ce qui rendrait le contrôle
+#: entier ignorable. Mais il PORTE des valeurs recopiées d'une source mécanique, et une valeur
+#: recopiée rouille où qu'elle vive : `obs_size` y est resté à 16 659 face à une source à 16703.
+VALUE_ONLY_DOCS = [
+    "Documentation/AI_TRAINING.md",
+]
+
 #: Documents tenus à la convention « le symbole, jamais la ligne » : exactement les documents
 #: d'entrée, par basename. Dérivée de DEFAULT_DOCS pour qu'un fichier sujet ajouté à la roadmap
 #: entre dans la convention sans second geste. L'imposer à tout `.md` du dépôt rendrait rouges
@@ -768,9 +778,27 @@ def claim_n_envs(text: str) -> list[tuple[str, int]]:
     return [(m.group(0).strip(), int(m.group(1))) for m in re.finditer(r"(\d+)\s+envs\b", text)]
 
 
+#: Les séparateurs de milliers employés par ce corpus, en ESCAPES. Écrits en clair dans le
+#: motif, trois d'entre eux sont des caractères invisibles indistinguables à la relecture — et
+#: c'est ainsi que la fine insécable a été oubliée à la première rédaction de ce contrôle.
+_THOUSANDS_SEPARATORS = "\u0020\u202f\u2009\u00a0"
+
+#: Un entier en gras, séparateur de milliers compris : `**16703**` comme `**16 659**`. Le motif
+#: refuse toujours un nombre court (`**8**`, `**12**`), qui sur ces lignes désigne un nombre de
+#: slots et jamais une taille d'observation.
+_BOLD_INTEGER = rf"(\d{{4,}}|\d{{1,3}}(?:[{_THOUSANDS_SEPARATORS}]\d{{3}})+)"
+
+
 def claim_obs_size(text: str) -> list[tuple[str, int]]:
-    found = [(m.group(0).strip(), int(m.group(1)))
-             for m in re.finditer(r"`obs_size`[^\n]*?\*\*(\d{4,})\*\*", text)]
+    """Les valeurs d'`obs_size` annoncées par un document.
+
+    Le séparateur de milliers n'est pas un ornement : borné à `\\d{4,}`, ce motif ne voyait pas
+    `**16 659**`, et c'est précisément la graphie qu'employait `AI_TRAINING.md`. Sa valeur y est
+    restée à 16 659 pendant que la source calculée disait 16703 — le document le plus lu du
+    dépôt sur ce sujet, faux, sous un contrôle vert qui regardait ailleurs.
+    """
+    found = [(m.group(0).strip(), integers_in(m.group(1))[0])
+             for m in re.finditer(rf"`obs_size`[^\n]*?\*\*{_BOLD_INTEGER}\*\*", text)]
     found += [(m.group(0).strip(), int(m.group(1)))
               for m in re.finditer(r'`"obs_size":\s*(\d+)`', text)]
     return found
@@ -895,8 +923,10 @@ TABLE_LABEL = "tableau des profils"
 
 #: Chaque affirmation chiffrée est contrôlée dans le document qui la PORTE depuis la partition de
 #: la roadmap (2026-08-18) : le plafond de la porte vit dans la préface de l'index, le tableau des
-#: profils dans le chemin critique (§P5), le décompte du `step.log` dans le sujet analyzer, la
-#: valeur d'`obs_size` dans le sujet hygiène documentaire.
+#: profils dans le chemin critique (§P5), le décompte du `step.log` dans le sujet analyzer.
+#: `obs_size` était surveillé sur `doc.md`, qui n'en portait la valeur que le temps d'un chantier
+#: d'hygiène : le contrôle serait devenu ORPHELIN à sa clôture, et il ne voyait de toute façon pas
+#: le document qui publie vraiment cette valeur. Il est passé sur `AI_TRAINING.md` le 2026-08-23.
 VALUE_CHECKS: dict[str, dict[str, ValueCheck[Any]]] = {
     "ROADMAP_INDEX.md": {
         "plafond de la porte de fusion": (claim_gate_ceiling, expected_gate_ceiling),
@@ -909,7 +939,7 @@ VALUE_CHECKS: dict[str, dict[str, ValueCheck[Any]]] = {
     "analyzer.md": {
         "entrées manquantes du step.log": (claim_step_log, expected_step_log),
     },
-    "doc.md": {
+    "AI_TRAINING.md": {
         "obs_size": (claim_obs_size, lambda _claim: expected_obs_size()),
     },
 }
@@ -1362,8 +1392,19 @@ def report_reachability() -> tuple[bool, list[str]]:
     return bool(orphans), lines
 
 
+def report_values_only(doc: str, path: pathlib.Path) -> tuple[bool, list[str]]:
+    """Passe 3 seule, pour un document qui porte des valeurs sans être un document d'entrée."""
+    verified, broken = check_values(path)
+    lines = [
+        f"{'❌' if broken else '✅'} {doc}  (valeurs seules)",
+        f"   valeurs  : {verified} confirmées, {len(broken)} périmées ou orphelines",
+    ]
+    lines += [f"   {entry}" for entry in broken]
+    return bool(broken), lines
+
+
 def main(argv: list[str]) -> int:
-    docs: Iterable[str] = argv[1:] or DEFAULT_DOCS
+    docs: Iterable[str] = argv[1:] or [*DEFAULT_DOCS, *VALUE_ONLY_DOCS]
     failed = False
     for doc in docs:
         path = pathlib.Path(doc) if pathlib.Path(doc).is_absolute() else ROOT / doc
@@ -1372,7 +1413,10 @@ def main(argv: list[str]) -> int:
             failed = True
             continue
         try:
-            has_broken, lines = report(doc, path)
+            if doc in VALUE_ONLY_DOCS:
+                has_broken, lines = report_values_only(doc, path)
+            else:
+                has_broken, lines = report(doc, path)
         except (SourceUnavailable, OSError) as error:
             # Les SOURCES du contrôle peuvent disparaître ou cesser de se lire : le §7
             # d'`analyzer_couverture.md` renommé, `MAX_UNDECLARED` supprimé, la porte de fusion

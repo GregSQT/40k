@@ -13,7 +13,7 @@
 >
 > | | Valeur en vigueur | Source de vérité (à relire, jamais à recopier) |
 > |---|---|---|
-> | `obs_size` | **16 659** (2026-08-07 — V11 §0.48 `L2` : `K_ALLY_SLOTS` 8 → 12, une ligne alliée par action d'activation, +2 044 scalaires et **0 paramètre** ; 14 615 avant, `L1` : drapeau `declines` du registre de candidat de décision, +6 ; 14 609 avant lui, chantier 01 : les 13 bits `rule_<effet>` remplacés par 8 slots d'ids de capacité + 4 d'ids de statut, puis les 17 drapeaux de règles de CHAQUE profil d'arme par 6 slots d'ids, lus par trois `EmbeddingBag`) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params` |
+> | `obs_size` | **16703** (2026-08-19 — V11 §9.5 P4 : `effective_range`, la portée max de tir de l'unité active en subhexes, entre dans `UNIT_CONT_FIELDS`, soit +32 = 1 scalaire × 32 entités ; 16671 avant, V11 §9.4 P3-4 : `decision_options_cont`, 6 candidats × 2 scalaires ; 16659 avant lui, V11 §0.48 `L2` : `K_ALLY_SLOTS` 8 → 12, une ligne alliée par action d'activation, +2 044 scalaires et **0 paramètre**) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params`. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
 > | espace d'action | **1 139** (1 086 micro + 15 macro + 6 `CHOICE_i` + 20 slots d'Oath of Moment, chantier 01 + **12 slots d'ACTIVATION**, V11 §0.48 `L2` : quelle escouade activer) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`), miroir de `shared_utils.SQUAD_ACTION_*` |
 >
 > - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque
@@ -880,12 +880,12 @@ Règles:
     },
 
     "observation_params": {
-      // SEULE clé de la section : recopie de ObservationBuilder.SQUAD_OBS_SIZE_TARGET (16659 au
-      // 2026-08-07 — VALEUR À RELIRE dans le code, jamais à recopier d'ici). Un écart lève à
+      // SEULE clé de la section : recopie de ObservationBuilder.SQUAD_OBS_SIZE_TARGET (16703 au
+      // 2026-08-19 — VALEUR À RELIRE dans le code, jamais à recopier d'ici). Un écart lève à
       // l'init du moteur. perception_radius / max_nearby_units / max_valid_targets ont été
       // SUPPRIMÉS le 2026-07-28 avec le pipeline mono-figurine : l'étendue perçue est celle de
       // la grille égocentrique (engine/spatial_grid.py).
-      "obs_size": 16659
+      "obs_size": 16703
     },
     
     "model_params": {
@@ -969,16 +969,17 @@ depuis le 2026-08-11 : le déclencheur reportait le dépassement du seuil d'une 
 suivante, n'en produisait que 4, et la garde de démarrage en comptait pourtant 5 (verrou :
 `tests/unit/ai/test_bot_eval_trigger_no_drift.py`). Descendre à 5000 doublerait le coût de
 l'évaluation intermédiaire — ~2 h 10 au lieu de ~1 h 05, 13 min l'unité cf. commit `42326ed0` —
-sur un run **mesuré à ~20 h** (4 h 01 pour 10 000 épisodes, cf. ROADMAP §1 pt 6, run du
-2026-08-10).
+sur un run **mesuré à 5 h 54** (50 000 épisodes, 2026-08-18, cf. `Documentation/Roadmap/v11_chemin_critique.md`).
 
-> ⚠️ **Deux régimes de durée cohabitent dans le dépôt et diffèrent d'un facteur ~14.** Les notes
-> `total_episodes_normal` de la config annoncent `0.1 s/ep → 36k ép./h` ; le seul run réellement
-> chronométré donne 4 h 01 pour 10 000 épisodes, soit ~2 500 ép./h. La refonte d'observation V11
-> (`obs_size` 16659) a rendu le pas bien plus cher, et le premier chiffre n'a pas suivi. **Toutes
-> les durées d'entraînement de cette page qui portent sur 200 000 épisodes (~5 h 30) viennent du
-> régime ANCIEN et sont donc à prendre pour ce qu'elles sont.** L'écart est antérieur au
-> 2026-08-11 et n'est traité nulle part.
+> ⚠️ **Aucun taux d'épisodes par heure n'est publiable, et c'est un résultat, pas une lacune.**
+> Le dépôt tient deux mesures DIRECTES qui ne se ramènent pas l'une à l'autre : le run `x1` de
+> référence a pris **4 h 01 pour 10 000 épisodes** (évaluations non comprises), et le run
+> `x1_long` du 2026-08-18 **5 h 54 pour 50 000**. Extrapoler la première × 5 donnait « ~20 h »
+> pour le second — faux d'un facteur 3,4. La pente n'est pas linéaire (la durée d'un épisode
+> dépend de ce que la politique a appris) et les deux runs ne portent pas sur le même état du
+> code. **Donc : chaque profil n'annonce que SA propre mesure directe, ou aucune durée.**
+> Le `0.1 s/ep → 36k ép./h` que répétaient les notes `total_episodes_normal` de la config datait
+> du régime d'avant la refonte d'observation V11 ; il en a été retiré le 2026-08-23.
 
 `robust_window` vaut **3** et non 5, conséquence directe de ces 5 points : la fenêtre du score
 robuste GLISSE sur les points de mesure, donc une fenêtre de 5 n'aurait qu'**une** position — la
@@ -1033,7 +1034,9 @@ le régime exact où l'oubli catastrophique se déclenche. Même réseau (512×5
 et surtout `vec_normalize.reset_on_curriculum: false` — l'échelle du plateau ne change plus entre
 les deux runs, jeter les stats VecNormalize servirait à la politique chargée des observations
 normalisées autrement que celles sur lesquelles elle a appris. `bot_eval_intermediate` y vaut 10
-et non 100 : à 100, les 15 évaluations coûteraient 3 h 15 pour ~50 min d'entraînement.
+et non 100 : à 100, les 15 évaluations coûteraient 3 h 15, sans commune mesure avec les 30 000
+épisodes qu'elles observent — la durée de ces épisodes, elle, n'est pas mesurée (cf. bandeau
+plus haut, le « ~50 min » qui figurait ici sortait du régime `0.1 s/ep` périmé).
 Verrou : `test_x5_append_resumes_x5_long_where_it_stopped`.
 
 `checkpoint_save_freq` reste **aligné sur `x1`**, délibérément : SB3 sauvegarde tous les
