@@ -39,6 +39,7 @@ from typing import Any, Dict
 import numpy as np
 import pytest
 
+from engine.observation_entities import K_ALLY_SLOTS
 from tests.unit.engine._config_helpers import both_terrains, assert_deployment_phase, pin_active_deployment
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -88,7 +89,7 @@ def _is_on_battlefield(gs, sid: str) -> bool:
     return unit["deployed_on_turn"] is not None
 
 
-def _obs_ally_rows(gs, active_squad_id: str, active_player: int, k_ally_slots: int = 8):
+def _obs_ally_rows(gs, active_squad_id: str, active_player: int, k_ally_slots: int = K_ALLY_SLOTS):
     """Les lignes ALLIÉES de l'obs, DANS L'ORDRE QUE L'OBS ÉCRIT.
 
     POURQUOI CE HELPER EXISTE. Trois tests de ce fichier reconstruisaient ces lignes depuis
@@ -397,11 +398,16 @@ def test_relative_positions_are_measured_from_the_zone_and_null_for_unplaced_uni
     dec = eng.action_decoder
     i_col, i_row = oe.unit_cont_index("col_rel"), oe.unit_cont_index("row_rel")
 
-    # Avance jusqu'à ce que les DEUX camps aient des unités posées et d'autres non.
-    for _ in range(6):
+    # Avance jusqu'à avoir assez d'entités posées pour satisfaire checked_placed >= 3.
+    steps = 0
+    while gs.get("phase") == "deployment" and steps < 1000:
+        total_placed = sum(1 for e in gs["units_cache"].values() if int(e["col"]) >= 0)
+        if total_placed >= 3:
+            break
         mask, _ = dec.get_squad_action_mask_and_eligible_units(gs)
         eng.step(_first_deploy_action(mask))
-    assert gs.get("phase") == "deployment", "déploiement terminé trop tôt pour ce test"
+        steps += 1
+    assert gs.get("phase") == "deployment", "déploiement terminé avant que 3 unités soient posées"
 
     uid = str(dec.get_deployment_active_unit(gs)["id"])
     anchor = eng.obs_builder.squad_grid_anchor(gs, uid)
