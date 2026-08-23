@@ -276,12 +276,13 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
         })
         return True  # equivalent to continue
 
-    _check_fall_back_move(state, line, action_desc, player, move_unit_id,
-                          start_col, start_row, dest_col, dest_row, _position_cache_set)
-
     unit_hp_value = require_key(state.unit_hp, move_unit_id)
     _debug_log(f"[FLED DEBUG] BEFORE update: unit_hp[{move_unit_id}] = {unit_hp_value}")
     if unit_hp_value > 0:
+        # Guard mort par state_resync : is_within_engine_engagement_zone retourne False pour
+        # subject_hp<=0, donc engaged_before=False → flee_from_unengaged faux positif sans guard.
+        _check_fall_back_move(state, line, action_desc, player, move_unit_id,
+                              start_col, start_row, dest_col, dest_row, _position_cache_set)
         old_position = state.unit_positions.get(move_unit_id)
         _position_cache_set(state.unit_positions, move_unit_id, dest_col, dest_row)
         _debug_log(f"[FLED DEBUG] AFTER update: unit_positions[{move_unit_id}] = {state.unit_positions[move_unit_id]} (was {old_position})")
@@ -375,11 +376,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
     start_row = int(move_match.group(5))
     dest_col = int(move_match.group(6))
     dest_row = int(move_match.group(7))
-    is_move_after_shooting = re.search(
-        r'MOVED(?:\s+AFTER\s+SHOOTING)?\s+\[([^\]]+)\]\s+from',
-        action_desc,
-        re.IGNORECASE
-    ) is not None and (
+    is_move_after_shooting = (
         "MOVED AFTER SHOOTING" in action_desc.upper()
         or re.search(
             r'MOVED\s+\[MOVE_AFTER_SHOOTING(?::\d+)?\]\s+from',
@@ -443,7 +440,9 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
                     unit_died_before_move = True
                     break
                 if death_turn == turn:
-                    death_phase_order = require_key(phase_order, death_phase)
+                    death_phase_order = phase_order.get(death_phase)
+                    if death_phase_order is None:
+                        continue
                     if death_phase_order < current_phase_order:
                         unit_died_before_move = True
                         break
@@ -485,7 +484,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             )
             if hp_value is None:
                 continue
-            if (int(require_key(state.unit_player, uid)) if require_key(state.unit_player, uid) is not None else None) == enemy_player_int and hp_value > 0:
+            if int(require_key(state.unit_player, uid)) == enemy_player_int and hp_value > 0:
                 enemy_positions_in_snapshot[uid] = pos
         enemy_positions_current = {}
         for uid, pos in state.unit_positions.items():
@@ -500,7 +499,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             )
             if hp_value is None:
                 continue
-            if (int(require_key(state.unit_player, uid)) if require_key(state.unit_player, uid) is not None else None) == enemy_player_int and hp_value > 0:
+            if int(require_key(state.unit_player, uid)) == enemy_player_int and hp_value > 0:
                 enemy_positions_current[uid] = pos
         # Socles de DÉPART, morts exclus (cf. surviving_start_models).
         start_models = surviving_start_models(
