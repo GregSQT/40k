@@ -12,14 +12,14 @@ engagée, ou battre en retraite sans jamais avoir été engagée — le rapport 
     EFFECT: Your unit moves as described in Moving (03).
     AFTER MOVING: ▪ Your unit must be unengaged.
 
-Les quatre tests ci-dessous construisent chacun LA situation qu'ils observent — aucun ne dépend
+Les tests ci-dessous construisent chacun LA situation qu'ils observent — aucun ne dépend
 d'une graine, d'un ordre d'exécution ou d'une config absente. Le premier est la PRÉMISSE
 géométrique : sans lui, « 0 erreur » ne prouverait que la mort du contrôle.
 
-Le volet « WHILE MOVING ▪ Desperate Escape » n'est PAS testé, et c'est délibéré : le mode de
-fall-back n'est pas journalisé (§7 L11), donc l'analyzer laisse les figurines ennemies
-traversables. Le jour où `[MOVE_TYPE:fall_back]` portera son mode, ce fichier devra gagner un
-cinquième test — et `force_thru_enemy` disparaître.
+Le volet « WHILE MOVING ▪ Desperate Escape » (figurines ennemies traversables) reste hors de
+portée : le BFS autorise intentionnellement le passage à travers les ennemis pour les fall-backs
+(`force_thru_enemy`). Ce fichier couvre en revanche le cas où [DESPERATE ESCAPE] prouve
+l'engagement quand la reconstruction géométrique échoue.
 """
 from __future__ import annotations
 
@@ -211,3 +211,34 @@ def test_the_violations_reach_the_MOVE_error_total_of_the_summary(tmp_path):
     # La ligne peut porter un suffixe ⚠️ (règles jamais exercées) — on extrait le chiffre.
     m = re.search(r": (\d+)", summary[0])
     assert m and int(m.group(1)) == 2, summary[0]
+
+
+def test_desperate_escape_tag_proves_engagement(tmp_path):
+    """Faux positif 09.07 : [DESPERATE ESCAPE] prouve l'engagement quand la géométrie échoue.
+
+    Scénario : l'ennemi engageant n'est pas visible dans la reconstruction de l'analyzer
+    (position périmée + toutes les figurines survivantes hors EZ + ancre aussi hors EZ).
+    Sans le tag, flee_from_unengaged serait incrémenté à tort.
+    Avec [DESPERATE ESCAPE] dans la ligne, le moteur prouve l'engagement — 0 erreur attendu.
+    """
+    import ai.analyzer as an
+
+    # Unité 1 seule figurine au départ, très loin de l'ennemi selon l'ancre ET le socle.
+    # La géométrie seule ne peut pas retrouver l'engagement.
+    # On insère directement [DESPERATE ESCAPE] dans la ligne FLED pour simuler le cas réel.
+    body = (
+        f"[10:00:02] E1 T2 P1 MOVE : Unit 1{_xy(LONE_START)} FLED from {_xy(LONE_START)} to {_xy(LONE_DEST)}"
+        " [MOVE_TYPE:fall_back] [DESPERATE ESCAPE] Hazard:1,2 [R:+0.0] [SUCCESS]\n"
+    )
+    log = tmp_path / "step.log"
+    log.write_text(entete_step_log(
+        _SETUP + body,
+        units=_UNITS,
+        rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
+        objectives=OBJECTIVES,
+        ez_vertical_inches=None,
+    ))
+    stats = an.parse_step_log(str(log))
+    assert stats["flee_from_unengaged"][1] == 0, (
+        "[DESPERATE ESCAPE] doit prouver l'engagement même si la géométrie ne trouve pas l'ennemi"
+    )

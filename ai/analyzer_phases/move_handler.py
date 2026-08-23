@@ -100,9 +100,11 @@ def _check_fall_back_move(state, line, action_desc, player, move_unit_id,
     contrôles avant leur mutualisation dans `_per_model_move_violation`).
 
     Ce qui n'est PAS contrôlé ici, et pourquoi :
-    - le MODE (ordered retreat / desperate escape) n'est pas journalisé, donc le volet
-      « WHILE MOVING » est hors de portée : cf. `force_thru_enemy` dans
-      `analyzer._build_move_bfs_blockers`.
+    - le volet « WHILE MOVING ▸ Desperate Escape » (figurines ennemies traversables) reste hors
+      de portée : le MODE est journalisé depuis L11 ([DESPERATE ESCAPE]/[ORDERED RETREAT]), mais
+      le BFS laisse intentionnellement les ennemis traversables (cf. `force_thru_enemy` dans
+      `analyzer._build_move_bfs_blockers`). Le [DESPERATE ESCAPE] est en revanche utilisé comme
+      preuve d'engagement dans le volet ELIGIBLE IF (voir ci-dessous).
     - « AFTER MOVING: not eligible to shoot / declare a charge » est déjà porté par #14
       (`shoot_after_flee`) et #24 (`charge_invalid.fled`) ; le volet « start an action » exige
       les lignes d'action (16.01), absentes du journal.
@@ -166,6 +168,12 @@ def _check_fall_back_move(state, line, action_desc, player, move_unit_id,
             **state.engagement_3d_kwargs(),
             subject_models=None,
         )
+    if not engaged_before and '[DESPERATE ESCAPE]' in line:
+        # The engine only emits [DESPERATE ESCAPE] when it enforces desperate-escape rolls
+        # (09.07 + 06.03), which are themselves gated on the unit being engaged. If the
+        # geometric reconstruction misses the engaging enemy (stale position, height
+        # mismatch, enemy moved within the same turn), the tag is the authoritative proof.
+        engaged_before = True
     if not engaged_before:
         stats['flee_from_unengaged'][player] += 1
         if stats['first_error_lines']['flee_from_unengaged'][player] is None:
