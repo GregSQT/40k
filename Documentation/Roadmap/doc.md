@@ -2,25 +2,6 @@
 
 ---
 
-## `obs_size` justification {#obs-size}
-
-La valeur vraie de `obs_size` à HEAD est **16703** (les 6 profils de la config ArmageddonAgent la portent ; 16671 → 16703 à la livraison de P4 le 2026-08-19).
-La `justification` du champ raconte encore la lignée 20780 → 20727 (un appendice P3-4 a été ajouté à la fin sans réconcilier le total) — à réécrire.
-
-**Le gel est levé** (run terminé) : plus rien n'interdit d'y toucher.
-
----
-
-## Notes vitesse entraînement périmées {#vitesse}
-
-Deux profils de la config ArmageddonAgent annoncent encore `0.1 s/ep -> 36k ep / hour`. Le run réel du 2026-08-11 donne **4 h 01 pour 10 000 épisodes** (≈ 2 500 ép./h) — facteur ~14 d'écart.
-
-**À faire** : re-dériver chaque note de coût d'évaluation des 6 profils depuis la mesure réelle. Aussi : `36_000` codé en dur dans `test_schedule_decay_fraction.py` (seuil conservé car plus sévère des deux).
-
-Aussi : `Documentation/AI_TRAINING.md` annonce « ~5 h 30 pour 200 000 épisodes » — faux d'un ordre de grandeur.
-
----
-
 ## Ancres de ligne périmées docs V11 {#ancres}
 
 **Traitement au fil de l'eau** (décision 2026-08-10) — tout doc modifié voit ses ancres de ligne corrigées dans la même livraison.

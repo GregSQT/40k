@@ -4,7 +4,7 @@
   "bot_eval_scenario_pool": "holdout",
   "bot_eval_show_progress": true,
   "bot_eval_use_subprocess": false,
-  "total_episodes_normal": "4000 - 100 ep / minute -> 6k ep / hour",
+  "total_episodes_normal": "30000 : c'est la valeur de total_episodes ; la note annoncait 4000 en tete, perime. AUCUNE duree annoncee : le '100 ep / minute -> 6k ep / hour' que portait cette note datait du regime d'avant la refonte d'observation V11 et n'a jamais ete rattache a une mesure, et ce fichier ne decrit AUCUN run en propre -- il ne fournit que les defauts herites par les cles laissees a null dans les configs d'agent (config_loader._resolve_training_common_references). Les durees mesurees vivent dans la note total_episodes_normal du profil concerne. Retire le 2026-08-23, en meme temps que les notes d'ArmageddonAgent.",
   "n_envs": 48,
   "bot_eval_freq": 1000,
   "bot_eval_freq_normal": 1000,
