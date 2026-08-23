@@ -53,10 +53,10 @@ def _log(body: str) -> str:
     )
 
 
-def _move(unit_id: int, frm: tuple, to: tuple, models_tag: str = "") -> str:
+def _move(unit_id: int, frm: tuple, to: tuple, models_tag: str = "", player: int = 1) -> str:
     models = f" [MODELS: {models_tag}]" if models_tag else ""
     return (
-        f"[10:00:02] E1 T1 P1 MOVE : Unit {unit_id}({to[0]},{to[1]}) MOVED from ({frm[0]},{frm[1]}) to ({to[0]},{to[1]})"
+        f"[10:00:02] E1 T1 P{player} MOVE : Unit {unit_id}({to[0]},{to[1]}) MOVED from ({frm[0]},{frm[1]}) to ({to[0]},{to[1]})"
         f" [R:+0.0]{models} [SUCCESS]\n"
     )
 
@@ -85,8 +85,7 @@ def test_charge_ennemi_au_meme_hex_ne_compte_pas_comme_collision(tmp_path):
     # P2 (101) bouge à SHARED en T1.
     # P1 (1) charge vers SHARED en T1 — même ancre que 101 après la charge.
     body = (
-        f"[10:00:02] E1 T1 P2 MOVE : Unit 101({SHARED[0]},{SHARED[1]}) MOVED from ({P2_START[0]},{P2_START[1]}) to ({SHARED[0]},{SHARED[1]})"
-        f" [R:+0.0] [MODELS: 101#0@({SHARED[0]},{SHARED[1]})] [SUCCESS]\n"
+        _move(101, P2_START, SHARED, player=2, models_tag=f"101#0@({SHARED[0]},{SHARED[1]})")
         + _charge(1, P1_START, SHARED, 101, SHARED)
     )
     log = tmp_path / "charge_enemy.log"
@@ -105,8 +104,7 @@ def test_move_ennemi_au_meme_hex_ne_compte_pas_comme_collision(tmp_path):
     """
     # P2 (101) bouge à SHARED. P1 (1) bouge aussi à SHARED.
     body = (
-        f"[10:00:02] E1 T1 P2 MOVE : Unit 101({SHARED[0]},{SHARED[1]}) MOVED from ({P2_START[0]},{P2_START[1]}) to ({SHARED[0]},{SHARED[1]})"
-        f" [R:+0.0] [MODELS: 101#0@({SHARED[0]},{SHARED[1]})] [SUCCESS]\n"
+        _move(101, P2_START, SHARED, player=2, models_tag=f"101#0@({SHARED[0]},{SHARED[1]})")
         + _move(1, P1_START, SHARED, models_tag=f"1#0@({SHARED[0]},{SHARED[1]})")
     )
     log = tmp_path / "move_enemy.log"
@@ -155,8 +153,7 @@ def test_advance_ennemi_au_meme_hex_ne_compte_pas_comme_collision(tmp_path):
     """Un ADVANCE qui finit à l'ancre d'un ennemi engagé n'est pas une collision."""
     # P2 (101) bouge à SHARED. P1 (1) advance à SHARED — ennemi engagé, faux positif.
     body = (
-        f"[10:00:02] E1 T1 P2 MOVE : Unit 101({SHARED[0]},{SHARED[1]}) MOVED from ({P2_START[0]},{P2_START[1]}) to ({SHARED[0]},{SHARED[1]})"
-        f" [R:+0.0] [MODELS: 101#0@({SHARED[0]},{SHARED[1]})] [SUCCESS]\n"
+        _move(101, P2_START, SHARED, player=2, models_tag=f"101#0@({SHARED[0]},{SHARED[1]})")
         + _advance(1, 1, P1_START, SHARED)
     )
     log = tmp_path / "advance_enemy.log"

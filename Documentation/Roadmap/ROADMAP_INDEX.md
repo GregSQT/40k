@@ -229,6 +229,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | tests | ✅ verrou combat à vide sans pending_fight_weapon_select (2026-08-23) — test_combat_a_vide_ne_pose_pas_pending_fight_weapon_select : squad pool 12.04, cibles mortes → résolution directe sans §0.69 ; rouge/vert prouvés | — | ⚡ |
 | analyzer | ✅ Faux positifs flee-unengaged + collisions inter-camps (2026-08-23) — fallback ancre si surviving_start_models retourne position périmée (frontale tuée avant fall-back) ; skip paires ennemies dans move_normal/move_fled/charge ; bypass [DESPERATE ESCAPE] quand géométrie inaccessible ; 53 FP éliminés, 8+3 tests verts | — | ⚡ |
 | analyzer | ✅ Filtre joueur manquant boucle ADVANCE (2026-08-23) — shoot_handler ADVANCE ne filtrait pas les ennemis dans real_colliding_units contrairement à MOVE/FLED/CHARGE ; 3 tests rouge/vert (MOVE+MOVE alliés, ADVANCE+ennemi, ADVANCE+allié) | — | ⚡ |
+| moteur | ✅ Retrait figurine hors cohérence 03.03 (2026-08-23) — p3-0 : choix de retrait par joueur hors zone de cohérence End of Turn | — | ⚡ |
+| infra | ✅ 13 exemptions check_ai_rules (2026-08-23) — fix-fallback-anti-error-exemptions : exemptions déclarées pour check_ai_rules, sans workaround anti-erreur | — | ⚡ |
+| analyzer | ✅ Simplify collision filter (2026-08-23) — hoist mover_player hors boucle (4 sites) ; suppression garde always-True FLED ; _move(player=) dans les tests | — | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 
 ### Bloqués par une décision utilisateur
