@@ -2582,8 +2582,8 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
                 opponent_mix_config=opponents["opponent_mix_config"],
                 n_envs=n_envs,
                 episode_start_index=episode_start_index,
-                vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),
-                vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),
+                vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),  # get allowed: optional config
+                vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),  # get allowed: optional config
             )
             for i in range(n_envs)
         ]))
@@ -2628,8 +2628,8 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
                 unit_registry=unit_registry,
                 agent_seat_mode=require_present(opponents["agent_seat_mode"], "agent_seat_mode"),
                 global_seed=opponents["agent_seat_seed"],
-                self_play_vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),
-                self_play_vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),
+                self_play_vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),  # get allowed: optional config
+                self_play_vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),  # get allowed: optional config
                 **build_self_play_kwargs(opponents["opponent_mix_config"]),
             )
             env = Monitor(bot_env)
@@ -3248,8 +3248,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 opponent_mix_config=opponent_mix_config,
                 n_envs=n_envs,
                 episode_start_index=episode_start_index,
-                vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),
-                vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),
+                vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),  # get allowed: optional config
+                vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),  # get allowed: optional config
             )
             for i in range(n_envs)
         ]))
@@ -3285,8 +3285,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 unit_registry=unit_registry,
                 agent_seat_mode=require_present(agent_seat_mode, "agent_seat_mode"),
                 global_seed=agent_seat_seed,
-                self_play_vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),
-                self_play_vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),
+                self_play_vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),  # get allowed: optional config
+                self_play_vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),  # get allowed: optional config
                 **build_self_play_kwargs(opponent_mix_config),
             )
             env = Monitor(bot_env)
@@ -3458,8 +3458,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 unit_registry=unit_registry,
                 agent_seat_mode=require_present(agent_seat_mode, "agent_seat_mode"),
                 global_seed=agent_seat_seed,
-                self_play_vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),
-                self_play_vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),
+                self_play_vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),  # get allowed: optional config
+                self_play_vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),  # get allowed: optional config
                 **build_self_play_kwargs(opponent_mix_config),
             )
             env = Monitor(bot_env)
@@ -4789,7 +4789,7 @@ def _close_exploiter_stage(args, curriculum, stage, run_info) -> int:
 
     budget = run_info.get("exploiter_budget")
     censored = run_info.get("exploiter_censored", False)
-    win_rate_curve = run_info.get("exploiter_win_rate_curve", [])
+    win_rate_curve = run_info.get("exploiter_win_rate_curve", [])  # get allowed: absent si exploiter non lancé
     cfg = load_exploiter_config(curriculum)
     budget_cap = int(require_key(cfg, "budget_cap"))
     win_rate_target = float(require_key(cfg, "win_rate_target"))

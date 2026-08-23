@@ -1293,7 +1293,7 @@ def fight_weapon_eligible_slots(
     squad_models = require_key(game_state, "squad_models")
     alive_models = [
         models_cache[mid]
-        for mid in squad_models.get(squad_id, [])
+        for mid in squad_models.get(squad_id, [])  # fallback allowed: squad détruite → liste vide
         if mid in models_cache
     ]
     profiles = collect_weapon_profiles(alive_models, "CC_WEAPONS")
