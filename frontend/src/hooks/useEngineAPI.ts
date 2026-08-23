@@ -2,7 +2,7 @@
 import type { MutableRefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SaveMeta } from "../components/SnapshotRewind";
-import { ORIENTATION_STEP_COUNT, wrapOrientationStep } from "../constants/gameConfig";
+import { validateOrientationStepValue, wrapOrientationStep } from "../constants/gameConfig";
 import { API_BASE, apiFetch } from "../services/apiFetch";
 import type { GameMode, PlayerId, Unit } from "../types";
 import type {
@@ -50,7 +50,7 @@ const getMaxTurnsFromConfig = async (): Promise<number> => {
       throw new Error(`Config fetch failed: ${response.status}`);
     }
     const config = await response.json();
-    if (!config.game_rules?.max_turns) {
+    if (config.game_rules?.max_turns == null) {
       throw new Error(`Missing required max_turns in game config`);
     }
     return config.game_rules.max_turns;
@@ -80,20 +80,6 @@ function modelsFromPlanArray(
 function dispatchGameLogHydrate(history: unknown): void {
   const entries = Array.isArray(history) ? history : [];
   window.dispatchEvent(new CustomEvent("gameLogHydrate", { detail: { entries } }));
-}
-
-function validateOrientationStepValue(rawOrientation: unknown, context: string): number {
-  if (
-    typeof rawOrientation !== "number" ||
-    !Number.isInteger(rawOrientation) ||
-    rawOrientation < 0 ||
-    rawOrientation >= ORIENTATION_STEP_COUNT
-  ) {
-    throw new Error(
-      `${context}: orientation must be an integer in 0..${ORIENTATION_STEP_COUNT - 1}, got ${String(rawOrientation)}`
-    );
-  }
-  return rawOrientation;
 }
 
 /** fetch échoué (API arrêtée, mauvaise origine sans proxy Vite, etc.). */
@@ -8645,9 +8631,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
       aiTurnInProgress = true;
 
-      // Check if AI has eligible units in current phase FIRST
-      const phaseCheck = gameState.phase;
-
       if (!gameState) {
         aiTurnInProgress = false;
         return;
@@ -8984,10 +8967,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
           if (!aiResponse.ok) {
             const errorData = await aiResponse.json().catch(() => ({}));
-            const errorInfo = errorData.error || errorData;
 
             // Handle expected errors gracefully (AI not eligible or turn already advanced)
-            if (errorInfo.error === "not_ai_player_turn") {
+            if (errorData.error === "not_ai_player_turn") {
               // No more eligible AI units - fetch current game state and exit gracefully
               try {
                 const stateResponse = await apiFetch(`${API_BASE}/game/state`);

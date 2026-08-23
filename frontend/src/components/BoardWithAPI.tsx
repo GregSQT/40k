@@ -3472,7 +3472,7 @@ export const BoardWithAPI: React.FC = () => {
                       advanceState,
                       orange,
                       () => {
-                        if (canAdvance) apiProps.onSetAdvanceMode?.(advUnitId);
+                        if (canAdvance) void apiProps.onSetAdvanceMode?.(advUnitId);
                       }
                     )}
                     {modeBtn("Fall-back", fallbackState, yellow)}

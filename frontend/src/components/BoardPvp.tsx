@@ -4,8 +4,8 @@ import * as PIXI from "pixi.js-legacy";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  ORIENTATION_STEP_COUNT,
   orientationStepToRadians,
+  validateOrientationStepValue,
   wrapOrientationStep,
 } from "../constants/gameConfig";
 import {
@@ -189,13 +189,9 @@ function parseBackendMoveLosPreviewPayload(
   if (!Array.isArray(blinkingUnits)) {
     throw new Error("preview_shoot_from_position blinking_units must be an array");
   }
-  const blinkIds = blinkingUnits.map((id, index) => {
-    const parsed = typeof id === "number" ? id : typeof id === "string" ? parseInt(id, 10) : NaN;
-    if (Number.isNaN(parsed)) {
-      throw new Error(`preview_shoot_from_position blinking_units[${index}] is invalid`);
-    }
-    return parsed;
-  });
+  const blinkIds = blinkingUnits.map((id, index) =>
+    parseRequiredUnitId(id, `preview_shoot_from_position blinking_units[${index}]`)
+  );
   const coverRaw = result.cover_by_unit_id;
   if (!coverRaw || typeof coverRaw !== "object" || Array.isArray(coverRaw)) {
     throw new Error("preview_shoot_from_position cover_by_unit_id must be an object");
@@ -503,30 +499,16 @@ function pickMoveDestinationAnchorsFromGameState(
   return undefined;
 }
 
-function validateBoardOrientationStep(rawOrientation: unknown, context: string): number {
-  if (
-    typeof rawOrientation !== "number" ||
-    !Number.isInteger(rawOrientation) ||
-    rawOrientation < 0 ||
-    rawOrientation >= ORIENTATION_STEP_COUNT
-  ) {
-    throw new Error(
-      `${context}: orientation must be an integer in 0..${ORIENTATION_STEP_COUNT - 1}, got ${String(rawOrientation)}`
-    );
-  }
-  return rawOrientation;
-}
-
 function orientationStepForBoard(
   unit: Unit,
   unitsCache: GameState["units_cache"] | undefined
 ): number | undefined {
   const cacheOrientation = unitsCache?.[String(unit.id)]?.orientation;
   if (cacheOrientation !== undefined) {
-    return validateBoardOrientationStep(cacheOrientation, `Unit ${unit.id} units_cache`);
+    return validateOrientationStepValue(cacheOrientation, `Unit ${unit.id} units_cache`);
   }
   if (unit.orientation !== undefined) {
-    return validateBoardOrientationStep(unit.orientation, `Unit ${unit.id}`);
+    return validateOrientationStepValue(unit.orientation, `Unit ${unit.id}`);
   }
   return undefined;
 }
@@ -916,7 +898,7 @@ type BoardProps = {
   onCancelTargetPreview?: () => void;
   gameState: GameState; // Add gameState prop
   chargeRollPopup?: { unitId: number; roll: number; tooLow: boolean; timestamp: number } | null;
-  getChargeDestinations: (unitId: number) => { col: number; row: number }[];
+  getChargeDestinations: () => { col: number; row: number }[];
   /** Union empreintes valides (API) — pastilles violettes autour de la zone d’engagement cible. */
   chargePreviewOverlayHexes?: Array<{ col: number; row: number }>;
   /** Hex de référence portée (API ``charge_reference_hex``) — ne pas recalculer côté client. */
@@ -9171,7 +9153,7 @@ export default function Board({
       const isActiveCharger = activeChargeRaw != null && String(activeChargeRaw) === String(sid);
       // Pool moteur déjà dans le state React (result.valid_destinations) : afficher même si
       // game_state n’a pas active_charge_unit / charge_activation_pool (sync API partielle).
-      const destPreview = getChargeDestinations(selectedUnit.id);
+      const destPreview = getChargeDestinations();
       const hasPendingChargePreview =
         mode === "chargePreview" &&
         destPreview.length > 0 &&

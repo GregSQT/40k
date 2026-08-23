@@ -209,3 +209,18 @@ export const orientationStepToRadians = (step: number): number =>
 /** Incrémente un pas d'orientation avec wrap dans [0, ORIENTATION_STEP_COUNT). */
 export const wrapOrientationStep = (step: number, delta: number): number =>
   (((step + delta) % ORIENTATION_STEP_COUNT) + ORIENTATION_STEP_COUNT) % ORIENTATION_STEP_COUNT;
+
+/** Valide qu'une valeur est un pas d'orientation entier dans [0, ORIENTATION_STEP_COUNT). */
+export function validateOrientationStepValue(rawOrientation: unknown, context: string): number {
+  if (
+    typeof rawOrientation !== "number" ||
+    !Number.isInteger(rawOrientation) ||
+    rawOrientation < 0 ||
+    rawOrientation >= ORIENTATION_STEP_COUNT
+  ) {
+    throw new Error(
+      `${context}: orientation must be an integer in 0..${ORIENTATION_STEP_COUNT - 1}, got ${String(rawOrientation)}`
+    );
+  }
+  return rawOrientation;
+}
