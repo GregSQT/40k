@@ -45,16 +45,32 @@ d'équivalence stricte avec le calcul direct (« `acc[p] = ET sur les offsets de
 est exactement `np.all(in_pool & no_obstacle)` pour l'ancre p ») et le gain mesuré là-bas
 (×31 à ×62).
 
-**Gain ici : non mesuré.** Il porterait sur les ~77 % de `_legal_socle`, mais l'érosion a un
-coût fixe (construction + érosion de la grille) qui n'est amorti que si la spirale visite
-beaucoup de cases. À MESURER avant d'implémenter : sur une escouade de 6 figurines dont la
-1re case est légale, la spirale s'arrête presque tout de suite et l'érosion serait **plus
-lente**. C'est le cas nominal du déploiement gym — donc le gain n'est pas acquis.
+**Gain ici : mesuré le 2026-08-23 — non rentable, ne pas implémenter.**
+
+Mesure (board x5, escouade de 6 figurines, 40 runs, médiane) :
+
+| cas | visites BFS | temps actuel | coût érosion | gain net |
+|---|---|---|---|---|
+| gym (ancre dans zone, `(2, 299)`) | 600 | 13,3 ms | 2,0 ms | −6 % |
+| PvP (ancre centre, `(110, 150)`) | 15 145 | 160 ms | 2,0 ms | −6 % |
+
+L'hypothèse « la spirale s'arrête à la 1re case » était fausse : une escouade de 6 figurines
+avec marge de 1 hex visite ~600 cases même avec l'ancre dans la zone, et ~15 000 depuis le
+centre. Le breakeven calculé (88 visites) semblait bon, mais le proxy utilisé (appels à
+`_footprint_offsets_for`) était trompeur : cette fonction est cachée au niveau module et quasi
+gratuite — elle ne représente pas le coût de la boucle statique.
+
+**Vraie cause du faible gain :** la zone de déploiement de board x5 (`scenario_training_armageddon1`)
+couvre les rangées 151–299 (colonnes 2–219, soit 16 104 hexes). Depuis l'ancre gym (bord supérieur
+de la zone) ou depuis le centre (1 rangée sous la frontière), presque toutes les cases BFS sont
+**dans la zone** et passent les vérifications statiques. Le vrai goulot est la **marge
+inter-figurines** — dynamique, O(sœurs × cellules) — qui représente la majorité des rejets.
+L'érosion éliminerait ~43 lookups/case × ~4 ns = 0,17 µs/case pour les rares cases hors zone ;
+pour les cases en zone (les ~99 % visitées), elle serait sans effet sur les rejets.
 
 ⚠️ **Ne PAS éroder la marge inter-figurines.** `_legal_socle` impose en plus « 1 hex de marge
 des figurines déjà posées » (empreinte + anneau de voisins), qui dépend des sœurs placées
-pendant la boucle : c'est un état **dynamique**, non érodable en amont. Il faut le garder en
-test direct après la lecture du masque.
+pendant la boucle : c'est un état **dynamique**, non érodable en amont.
 
 ## Piste 2 — `_deploy_pool_set` reconstruit à chaque appel — ✅ FAIT (2026-08-23)
 
