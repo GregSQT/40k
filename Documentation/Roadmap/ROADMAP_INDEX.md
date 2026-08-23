@@ -216,6 +216,10 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | tests+moteur | ✅ Fix conformité 03.01/09.05 isolation (2026-08-20) — verrous contre-épreuve renforcés et exclusion isolation corrigée | — | ⚡ |
 | moteur | ✅ Fix §11.04 target_subhex cible primaire (2026-08-20) — boucle pair remplacée par appel unique sur target_squad_ids[0], miroir PvP charge_target_selection_handler ; test mis à jour + cas absent charge_fail ajouté | — | ⚡ |
 | moteur+tests | ✅ fix-fight-mask-commit-parity overrun 12.06 socle par-figurine (2026-08-22) — pool post-overrun utilise `_model_can_fight_target` (socle modèle) au lieu de `_fight_build_valid_target_pool` (socle escouade) ; personnage attaché à plus grand socle ne crash plus bot_ranking ; diagnostic retiré ; verrou rouge/vert `test_overrun_post_pilin_uses_per_model_base_size_x5` x5 euclidien | — | ⚡ |
+| training | ✅ fix-selfplay-metrics-validation — validation snapshot_label + déduplique log_selfplay_win (2026-08-23) | — | ⚡ |
+| training | ✅ fix-enemy-slot-reserves-oc-fallback — exclure réserves stratégiques ennemies du slot mapping + tests OC fallback (2026-08-23) | — | ⚡ |
+| training | ✅ simplify-ai-curriculum-train — dédup et simplifications curriculum/train/test_exploiter (2026-08-23) | — | ⚡ |
+| training | ✅ fix-snapshot-label-evaluate-checkpoints — `self_play_snapshot_label` manquant dans `evaluate_against_checkpoints` → crash clôture P1 (2026-08-23) ; verrou rouge/vert | — | ⚡ |
 | infra | Perf `generate_compact_formation` | [infra.md#perf-formation](infra.md#perf-formation) | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 
