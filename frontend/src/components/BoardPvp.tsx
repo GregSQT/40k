@@ -634,6 +634,12 @@ type BoardProps = {
     targetUnitIds: number[];
     onPickTarget: (unitId: number) => void;
   } | null;
+  /** Retrait de cohérence en attente (03.03) : figurines éligibles de l'escouade concernée. */
+  coherencyRemovalSelection?: {
+    unitId: string;
+    modelIds: string[];
+    onPickModel: (modelId: string) => void;
+  } | null;
   /**
    * Waaagh! (08.04) — vrai tant que la capacité est EN VIGUEUR pour un joueur, c'est-à-dire
    * jusqu'au début de sa prochaine phase de commandement : le tour adverse est donc COMPRIS,
@@ -1273,6 +1279,7 @@ export default function Board({
   isBlinkingActive,
   blinkVersion,
   oathTargetSelection = null,
+  coherencyRemovalSelection = null,
   waaaghActive = false,
   onSelectUnit,
   onSkipUnit,
@@ -5263,6 +5270,77 @@ export default function Board({
     };
   }, [oathSelectionArmed, measureMode.kind, boardConfig]);
 
+  // Retrait de cohérence (03.03) : clic sur une figurine de l'escouade concernée → model_id.
+  // Même mécanique que oath_target (pointerdown/up avec tolérance drag) mais résout au level
+  // figurine : l'hex cliqué est comparé à occupied_hexes_by_model de l'escouade cible.
+  const coherencyRemovalSelectionRef = useRef(coherencyRemovalSelection);
+  coherencyRemovalSelectionRef.current = coherencyRemovalSelection;
+  const coherencyRemovalArmed = coherencyRemovalSelection !== null;
+  useEffect(() => {
+    if (!coherencyRemovalArmed) return;
+    if (measureMode.kind !== "off") return;
+    if (!boardConfig) return;
+    const canvas = canvasContainerRef.current?.querySelector("canvas");
+    if (!canvas) return;
+    const app = appRef.current;
+    if (!app) return;
+
+    const CLICK_DRAG_TOLERANCE_PX = 4;
+    let downAt: { pointerId: number; clientX: number; clientY: number } | null = null;
+
+    const onCRPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      downAt = { pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY };
+    };
+
+    const onCRPointerUp = (e: PointerEvent) => {
+      const start = downAt;
+      downAt = null;
+      if (!start || start.pointerId !== e.pointerId || e.button !== 0) return;
+      if (
+        Math.hypot(e.clientX - start.clientX, e.clientY - start.clientY) > CLICK_DRAG_TOLERANCE_PX
+      )
+        return;
+      const selection = coherencyRemovalSelectionRef.current;
+      if (!selection) return;
+      const rect = canvas.getBoundingClientRect();
+      const px =
+        (e.clientX - rect.left) * (app.renderer.width / app.renderer.resolution / rect.width);
+      const py =
+        (e.clientY - rect.top) * (app.renderer.height / app.renderer.resolution / rect.height);
+      const { col, row } = pixelToHex(
+        px,
+        py,
+        boardConfig.hex_radius,
+        boardConfig.margin,
+        boardConfig.cols,
+        boardConfig.rows
+      );
+      // Cherche le model_id dont occupied_hexes_by_model correspond au hex cliqué.
+      const byModel =
+        (
+          gameState as {
+            units_cache?: Record<
+              string,
+              { occupied_hexes_by_model?: Record<string, [number, number]> }
+            >;
+          } | null
+        )?.units_cache?.[selection.unitId]?.occupied_hexes_by_model ?? {};
+      const hit = Object.entries(byModel).find(
+        ([mid, pos]) => selection.modelIds.includes(mid) && pos[0] === col && pos[1] === row
+      );
+      if (!hit) return;
+      selection.onPickModel(hit[0]);
+    };
+
+    canvas.addEventListener("pointerdown", onCRPointerDown);
+    canvas.addEventListener("pointerup", onCRPointerUp);
+    return () => {
+      canvas.removeEventListener("pointerdown", onCRPointerDown);
+      canvas.removeEventListener("pointerup", onCRPointerUp);
+    };
+  }, [coherencyRemovalArmed, measureMode.kind, boardConfig, gameState]);
+
   // squad.md brique 3 : en mode plan par-figurine, un clic gauche sur une fig de l'escouade
   // la selectionne (resout model_id depuis les positions provisoires du plan) → onSelectModelForMove.
   // Phase bubble : si le clic a deja servi a POSER la fig active (hex dans son pool, capture-phase
@@ -6264,6 +6342,73 @@ export default function Board({
         o.destroy();
       }
       oathTargetOverlayRef.current = null;
+    },
+    []
+  );
+
+  // Overlay retrait de cohérence (03.03) : anneau rouge sur chaque figurine éligible de l'escouade.
+  const coherencyRemovalOverlayRef = useRef<PIXI.Graphics | null>(null);
+  useEffect(() => {
+    const app = appRef.current;
+    if (!app) return;
+    let overlay = coherencyRemovalOverlayRef.current;
+    if (!overlay || overlay.destroyed) {
+      overlay = new PIXI.Graphics();
+      overlay.zIndex = 2703; // juste sous l'Oath (2704) et au-dessus des anneaux (2700)
+      overlay.eventMode = "none";
+      app.stage.addChild(overlay);
+      coherencyRemovalOverlayRef.current = overlay;
+    }
+    overlay.visible = !hideIndicators;
+    overlay.clear();
+    const sel = coherencyRemovalSelection;
+    if (sel && boardConfig) {
+      const HEX_RADIUS_H = boardConfig.hex_radius;
+      const HEX_WIDTH_H = 1.5 * HEX_RADIUS_H;
+      const HEX_HEIGHT_H = Math.sqrt(3) * HEX_RADIUS_H;
+      const MARGIN_H = boardConfig.margin;
+      const unit = units.find((u) => String(u.id) === sel.unitId);
+      const modelR =
+        unit && resolveBaseSizeForUnitDisplay(unit) > 1
+          ? (resolveBaseSizeForUnitDisplay(unit) * 1.5 * HEX_RADIUS_H) / 2
+          : HEX_RADIUS_H * 0.7;
+      const lineW = Math.max(3, HEX_RADIUS_H * 0.38);
+      const byModel =
+        (
+          gameState as {
+            units_cache?: Record<
+              string,
+              { occupied_hexes_by_model?: Record<string, [number, number]> }
+            >;
+          } | null
+        )?.units_cache?.[sel.unitId]?.occupied_hexes_by_model ?? {};
+      for (const mid of sel.modelIds) {
+        const pos = byModel[mid];
+        if (!pos) continue;
+        const cx = pos[0] * HEX_WIDTH_H + HEX_WIDTH_H / 2 + MARGIN_H;
+        const cy =
+          pos[1] * HEX_HEIGHT_H + ((pos[0] % 2) * HEX_HEIGHT_H) / 2 + HEX_HEIGHT_H / 2 + MARGIN_H;
+        overlay.lineStyle(lineW, 0xff3030, 1);
+        overlay.beginFill(0xff3030, 0.18);
+        overlay.drawCircle(cx, cy, modelR + 4);
+        overlay.endFill();
+      }
+    }
+    try {
+      app.render();
+    } catch {
+      /* contexte non prêt */
+    }
+  }, [coherencyRemovalSelection, gameState, units, boardConfig, hideIndicators]);
+
+  useEffect(
+    () => () => {
+      const o = coherencyRemovalOverlayRef.current;
+      if (o && !o.destroyed) {
+        o.clear();
+        o.destroy();
+      }
+      coherencyRemovalOverlayRef.current = null;
     },
     []
   );
@@ -9940,6 +10085,7 @@ export default function Board({
       const savedBlinkRingOverlay = blinkTargetRingOverlayRef.current;
       const savedShootOverlay = shootSubgroupOverlayRef.current;
       const savedOathOverlay = oathTargetOverlayRef.current;
+      const savedCoherencyRemovalOverlay = coherencyRemovalOverlayRef.current;
       const savedRangeRingsOverlay = rangeRingsOverlayRef.current;
       const savedWaaaghFangsOverlay = waaaghFangsOverlayRef.current;
       if (savedStatic?.parent) app.stage.removeChild(savedStatic);
@@ -9958,6 +10104,7 @@ export default function Board({
       if (savedBlinkRingOverlay?.parent) app.stage.removeChild(savedBlinkRingOverlay);
       if (savedShootOverlay?.parent) app.stage.removeChild(savedShootOverlay);
       if (savedOathOverlay?.parent) app.stage.removeChild(savedOathOverlay);
+      if (savedCoherencyRemovalOverlay?.parent) app.stage.removeChild(savedCoherencyRemovalOverlay);
       if (savedRangeRingsOverlay?.parent) app.stage.removeChild(savedRangeRingsOverlay);
       if (savedWaaaghFangsOverlay?.parent) app.stage.removeChild(savedWaaaghFangsOverlay);
       // `keepHighlightLayers` implique déjà « vivant ET attaché au stage » (conjoints de
@@ -10076,6 +10223,10 @@ export default function Board({
       if (savedOathOverlay && !savedOathOverlay.destroyed) {
         savedOathOverlay.zIndex = 2704;
         app.stage.addChild(savedOathOverlay);
+      }
+      if (savedCoherencyRemovalOverlay && !savedCoherencyRemovalOverlay.destroyed) {
+        savedCoherencyRemovalOverlay.zIndex = 2703;
+        app.stage.addChild(savedCoherencyRemovalOverlay);
       }
       if (savedRangeRingsOverlay && !savedRangeRingsOverlay.destroyed) {
         savedRangeRingsOverlay.zIndex = 2640;
