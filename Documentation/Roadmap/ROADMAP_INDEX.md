@@ -235,6 +235,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | moteur | ✅ simplify-move-handler-altitude (2026-08-24) — guard HP<=0 dans `_check_fall_back_move` | — | ⚡ |
 | moteur+analyzer | ✅ analyzer-move-handler-fixes (2026-08-24) — 4 corrections code-review move_handler | — | ⚡ |
 | front | ✅ T7 overlay retrait cohérence PvP (2026-08-24) — endpoint select_coherency_removal câblé, overlay rouge par-figurine, click handler hex→model_id | — | ⚡ |
+| moteur+tests | ✅ simplify-coherency (2026-08-24) — COHERENCY_SLOT_COUNT + dicts fusionnés + tests mis à jour | — | ⚡ |
+| moteur+tests | ✅ coherency-fixes (2026-08-24) — double-pop v11 + T1 player_types + queue inter-joueurs | — | ⚡ |
+| tests | ✅ fix-fight-weapon-slot-tests (2026-08-24) — 30 tests rouges corrigés : reward_calculator waiting_for_weapon_select, PENDING_FIGHT_WEAPON_KEY purgé à fin phase fight, x1_selfplay retiré du config, damage_received toujours émis, self_play_snapshot_label, mock build_snapshot_normalizer, fight_weapon_slot/shoot_indirect_slot dans ACTION_FAMILIES, TOTAL_ACTION_SIZE chaîne complète, _weapon code, _stub_rewards patch build_squad_grid, _ranged_episode exige damage_received > 0 | — | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 
 ### Bloqués par une décision utilisateur

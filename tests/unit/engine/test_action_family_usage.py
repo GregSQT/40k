@@ -56,6 +56,8 @@ def test_chaque_famille_est_atteinte_par_au_moins_un_id():
         # EXCLUSIF quand le choix d'activation est pose, l'id se classe donc seul.
         action_family(mi.ACTIVATE_SLOT_BASE, "move"),
         action_family(mi.DEPLOY_SLOT_BASE, "deployment"),
+        action_family(mi.SHOOT_INDIRECT_SLOT_BASE, "shoot"),
+        action_family(mi.FIGHT_WEAPON_SLOT_BASE, "fight"),
     }
     assert reached == set(ACTION_FAMILIES)
 

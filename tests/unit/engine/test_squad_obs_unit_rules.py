@@ -262,6 +262,7 @@ def test_real_training_roster_writes_the_expected_id():
     pas couvert ici (cf. le commentaire ci-dessous) — il l'est par les tests de ce fichier qui
     construisent leur propre scenario, ou l'escouade active est posee sur le plateau.
     """
+    import random as _random
     eng = W40KEngine(
         rewards_config="ArmageddonAgent", training_config_name="x1",
         controlled_agent="ArmageddonAgent", scenario_file=ORK_VS_ORK,
@@ -271,7 +272,24 @@ def test_real_training_roster_writes_the_expected_id():
     obs_ids = unit_ability_obs_ids()
     obs, _ = eng.reset()
 
-    # Le bloc ENNEMI, et lui seul. Au reset la phase est `deployment` : les unites amies ne sont
+    # Au reset, la phase est `deployment` : aucune unite n'est encore posee sur le plateau
+    # (col=-1 = sentinelle "non deploye"), donc get_enemy_slot_mapping renvoie tout None et
+    # `enemies_ability_ids` est nul. On joue jusqu'a la sortie de la phase de deploiement pour
+    # que les ennemis soient visibles dans l'observation.
+    rng = _random.Random(0)
+    for _ in range(400):
+        ennemis = obs["enemies_ability_ids"]
+        if (eng.game_state.get("phase") != "deployment"
+                and int((ennemis != 0).sum()) > 0):
+            break
+        mask = eng.get_action_mask()
+        valid = list(np.flatnonzero(mask))
+        action = rng.choice(valid) if valid else 0
+        obs, _, terminated, truncated, _ = eng.step(action)
+        if terminated or truncated:
+            obs, _ = eng.reset()
+
+    # Le bloc ENNEMI, et lui seul. En phase de deploiement les unites amies ne sont
     # pas encore posees, donc `allies_ability_ids` est INTEGRALEMENT nul (mesure : 0 valeur non
     # nulle sur 12x8). Sommer les deux blocs laissait croire a une couverture des deux cotes
     # alors que le seul hit venait des ennemis — et rendait la contre-epreuve ci-dessous

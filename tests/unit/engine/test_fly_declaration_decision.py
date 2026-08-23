@@ -26,6 +26,10 @@ from engine.macro_intents import (
     ACTIVATE_SLOT_COUNT,
     CHOICE_BASE,
     CHOICE_COUNT,
+    COHERENCY_SLOT_BASE,
+    COHERENCY_SLOT_COUNT,
+    FIGHT_WEAPON_SLOT_BASE,
+    FIGHT_WEAPON_SLOT_COUNT,
     MOVE_CELLS,
     TOTAL_ACTION_SIZE,
 )
@@ -141,7 +145,7 @@ def test_opening_the_type_consumes_a_reserve_and_leaves_obs_size_untouched():
     # Ce que `L6` doit prouver est qu'il n'y contribue PAS : ses deux candidats sont des
     # non-entités, donc des `CHOICE_0/1` déjà déclarés — aucun id nouveau. C'est ce qu'affirme la
     # ligne ci-dessous, sans dépendre de ce que les chantiers voisins ajoutent en queue.
-    assert TOTAL_ACTION_SIZE == ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT
+    assert TOTAL_ACTION_SIZE == COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT
     assert CHOICE_COUNT == MAX_DECISION_OPTIONS
 
 

@@ -142,8 +142,10 @@ def test_build_eval_obs_normalizer_for_worker_normalizes_and_squeezes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "ai.vec_normalize_utils.normalize_observation_for_inference",
-        lambda obs, path: np.asarray(obs, dtype=np.float32) * 2.0,
+        "ai.vec_normalize_utils.build_snapshot_normalizer",
+        lambda snapshot_path, vec_normalize_enabled, vec_normalize_eval_enabled: (
+            lambda obs: np.asarray(obs, dtype=np.float32) * 2.0
+        ),
     )
     normalizer = be._build_eval_obs_normalizer_for_worker(
         model=None,

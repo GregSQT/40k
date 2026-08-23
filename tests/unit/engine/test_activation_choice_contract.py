@@ -30,6 +30,10 @@ from tests.unit.engine._config_helpers import pin_active_deployment
 from engine.macro_intents import (
     ACTIVATE_SLOT_BASE,
     ACTIVATE_SLOT_COUNT,
+    COHERENCY_SLOT_BASE,
+    COHERENCY_SLOT_COUNT,
+    FIGHT_WEAPON_SLOT_BASE,
+    FIGHT_WEAPON_SLOT_COUNT,
     TOTAL_ACTION_SIZE,
     action_family,
 )
@@ -120,7 +124,9 @@ def test_activate_slot_count_equals_the_ally_tensor_rows():
 
     assert ACTIVATE_SLOT_COUNT == K_ALLY_SLOTS
     assert ObservationBuilder.squad_obs_shapes()["allies_cont"][0] == ACTIVATE_SLOT_COUNT
-    assert ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT == TOTAL_ACTION_SIZE
+    assert ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT == FIGHT_WEAPON_SLOT_BASE
+    assert FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT == COHERENCY_SLOT_BASE
+    assert COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT == TOTAL_ACTION_SIZE
 
 
 def test_choice_phases_mirror_the_decoder(choice_point):
