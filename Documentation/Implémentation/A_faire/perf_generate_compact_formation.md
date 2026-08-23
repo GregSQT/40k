@@ -56,16 +56,35 @@ des figurines déjà posées » (empreinte + anneau de voisins), qui dépend des
 pendant la boucle : c'est un état **dynamique**, non érodable en amont. Il faut le garder en
 test direct après la lecture du masque.
 
-## Piste 2 — `_deploy_pool_set` reconstruit à chaque appel
+## Piste 2 — `_deploy_pool_set` reconstruit à chaque appel — ✅ FAIT (2026-08-23)
 
-`_deploy_pool_set` ([deployment_handlers.py:124](../../../engine/phase_handlers/deployment_handlers.py#L124))
-matérialise le `set` de la zone de déploiement (~16 000 hexes sur board x5) à chaque appel de
-`generate_compact_formation`, soit 2,2 ms × 1 par déploiement. Mémoïsable par (joueur, version
-de la zone) — la zone ne change pas pendant une phase de déploiement.
+`_deploy_pool_set` matérialisait le `set` de la zone (~16 000 hexes sur board x5) à CHAQUE appel.
+Il est désormais mémoïsé par joueur dans `game_state["_deploy_pool_set_cache"]`.
 
-Gain plafond ~13 % du résiduel. Piège : la clé de cache doit invalider si la zone est
-re-résolue (terrain rechargé, scénario différent) — un cache mal tamponné rendrait une zone
-d'un autre scénario, exactement le genre d'erreur silencieuse que le projet proscrit.
+**Mesuré** (board x5, escouade de 6 figurines, zone de 16 104 hexes, minimum sur 60 formations —
+la moyenne est inexploitable, la machine bruite de 8 à 24 ms pour un code identique) :
+
+| poste | avant | après |
+|---|---|---|
+| `_deploy_pool_set` | 2,6–3,0 ms | 0,0003 ms |
+| `generate_compact_formation` | 10,79 ms | 7,94 ms |
+
+**Gain réel : −2,85 ms par formation, soit −26 %** — deux fois l'estimation de ~13 % faite ici.
+
+Le motif suivi est celui de `_los_blocking_grids_cache`, triplet obligatoire :
+1. cache dans `game_state`, jamais au niveau module (`id()` se recycle d'un engine à l'autre) ;
+2. clé déclarée dans `_GS_STATIC_KEYS` (`services/game_snapshots.py`), sinon deepcopy à chaque
+   capture de phase PvP — l'inverse du gain recherché ;
+3. purge aux DEUX chemins de re-publication des zones : `W40KEngine.reset` (site de publication)
+   et `_reload_scenario` (appelé aussi directement, hors reset).
+
+Le piège annoncé était réel et plus large que prévu : au-delà de la zone d'un autre scénario, un
+cache consulté avant `require_key` masquait la branche « scénario sans zones » du reset, qui
+RETIRE la clé précisément pour que les lecteurs lèvent. Les trois failles sont verrouillées par
+test avec cycle rouge/vert dans `test_deployment_per_model_commit.py`.
+
+Jumeau traité au passage : `execute_deployment_action` recopiait les trois lignes de
+`_deploy_pool_set` et contournait donc la mémoïsation sur le chemin de commit PvP.
 
 ## Pourquoi ce n'est pas fait
 

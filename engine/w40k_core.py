@@ -1890,6 +1890,12 @@ class W40KEngine(gym.Env):
         # RESET : les deux levaient « Required key 'deployment_state' », et le reset entier avec.
         # La ZONE ne depend pas du mode de mise en place ; seule la PHASE en depend.
         scenario_deployment_pools = self.config.get("deployment_pools")
+        # Le `set` materialise de ces zones est memoise dans `game_state` (`_deploy_pool_set`).
+        # Purge ICI, au site meme de leur (re)publication : `game_state` SURVIT d'un episode a
+        # l'autre, donc un cache non purge rendrait la zone du scenario precedent. Il annulerait
+        # aussi la garantie de la branche `is None` juste en dessous, qui RETIRE la cle pour que
+        # les lecteurs levent au lieu de lire une zone perimee.
+        self.game_state.pop("_deploy_pool_set_cache", None)
         if scenario_deployment_pools is None:
             # Scenario sans zones declarees : on RETIRE la cle plutot que d'en laisser une perimee
             # d'un episode precedent. Les lecteurs levent alors explicitement (require_key).
@@ -8684,6 +8690,9 @@ class W40KEngine(gym.Env):
         self.game_state.pop("_dense_wall_set_cache", None)
         self.game_state.pop("_socle_wall_blocked_cache", None)
         self.game_state.pop("_hex_los_state_cache", None)
+        # Zones de deploiement : la rotation change de scenario, donc de zones (l.8622 ci-dessus).
+        # Defense en profondeur — le `reset` qui suit purge deja au site de publication.
+        self.game_state.pop("_deploy_pool_set_cache", None)
         objectives = require_key(self.game_state, "objectives")
         self.game_state["macro_target_objective_index"] = 0 if objectives else None
         self.game_state["macro_target_objective_id"] = str(require_key(objectives[0], "id")) if objectives else None

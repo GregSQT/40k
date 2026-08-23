@@ -143,9 +143,35 @@ def _deploy_pool_set(
         if isinstance(pool_override, frozenset):
             return pool_override
         return {(int(c), int(r)) for c, r in pool_override}
+    # `require_key` AVANT toute lecture du cache : sans zones déclarées, les lecteurs doivent lever
+    # au lieu de se voir servir une zone périmée (verrouillé par test).
     deployment_pools = require_key(game_state, "deployment_pools")
-    pool = _get_deployment_pool(deployment_pools, int(player))
-    return {(int(c), int(r)) for c, r in pool}
+    # Mémoïsé par joueur : la zone est une donnée de SCÉNARIO (aucun écrivain hors du reset et de
+    # la rotation), alors que ce `set` de ~16 000 hexes était rematérialisé à chaque appel — 2,5 ms
+    # sur les 12,6 ms d'une formation, soit 20 %, pour recopier une donnée immuable.
+    #
+    # JUMEAU de `_los_blocking_grids_cache` (shooting_handlers), même triplet obligatoire :
+    #   1. stocké dans `game_state` — jamais au niveau module, où `id()` se recycle d'un engine à
+    #      l'autre (c'est la raison d'être de `_cache_instance_id`, cf. shooting_handlers.py) ;
+    #   2. déclaré dans `_GS_STATIC_KEYS` (game_snapshots) — sinon deepcopy à CHAQUE capture de
+    #      phase PvP, soit l'inverse du gain recherché ;
+    #   3. PURGÉ partout où les zones sont (re)publiées — `reset` et `_reload_scenario`.
+    # Sans (3) le cache survivrait à un changement de scénario et rendrait la zone du précédent ;
+    # pire, il masquerait la branche « scénario sans zones » du reset, qui RETIRE la clé
+    # précisément pour que les lecteurs lèvent (require_key) au lieu de lire une zone périmée.
+    cache = game_state.get("_deploy_pool_set_cache")  # get allowed (cache absent = 1er appel)
+    if cache is None:
+        cache = {}
+        game_state["_deploy_pool_set_cache"] = cache
+    key = int(player)
+    cached = cache.get(key)  # get allowed
+    if cached is None:
+        pool = _get_deployment_pool(deployment_pools, key)
+        # `frozenset` : le résultat est partagé entre tous les appelants, donc il doit être
+        # immuable — un appelant qui muterait le set corromprait la zone de tous les autres.
+        cached = frozenset((int(c), int(r)) for c, r in pool)
+        cache[key] = cached
+    return cached
 
 
 def placement_pool_for_squad(
@@ -1641,9 +1667,12 @@ def execute_deployment_action(game_state: Dict[str, Any], action: Dict[str, Any]
     if int(unit_player) != int(current_deployer):
         return False, {"error": "unit_not_current_deployer", "unitId": unit_id, "current_deployer": current_deployer}
 
-    deployment_pools = require_key(game_state, "deployment_pools")
-    pool = _get_deployment_pool(deployment_pools, int(current_deployer))
-    pool_set = {(int(col), int(row)) for col, row in pool}
+    # `_deploy_pool_set` et non une matérialisation locale : ces trois lignes en étaient la copie
+    # exacte (require_key + `_get_deployment_pool` + normalisation), ce qui reconstruisait les
+    # ~16 000 hexes à chaque commit ET contournait la mémoïsation. C'est aussi ce que promet la
+    # docstring de `placement_pool_for_squad` — `_deploy_pool_set` est le SEUL propriétaire de la
+    # lecture des zones, pour n'avoir qu'un site à repointer le jour où leur stockage change.
+    pool_set = _deploy_pool_set(game_state, int(current_deployer))
 
     candidate_fp = compute_candidate_footprint(int(dest_col), int(dest_row), unit, game_state)
 
