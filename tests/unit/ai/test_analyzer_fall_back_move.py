@@ -242,3 +242,49 @@ def test_desperate_escape_tag_proves_engagement(tmp_path):
     assert stats["flee_from_unengaged"][1] == 0, (
         "[DESPERATE ESCAPE] doit prouver l'engagement même si la géométrie ne trouve pas l'ennemi"
     )
+
+
+def test_unit_dead_via_state_resync_does_not_trigger_flee_from_unengaged(tmp_path):
+    """Faux positif flee_from_unengaged quand HP=0 via state_resync.
+
+    Scénario : le moteur journalise un FLED pour une unité dont l'analyzer a perdu la mort
+    (mort ratée, state_resync corrige à unit_hp[1]=0). Avant le fix, _check_fall_back_move
+    était appelé AVANT le guard `unit_hp_value > 0` : is_within_engine_engagement_zone retourne
+    immédiatement pour subject_hp<=0, donc engaged_before=False → flee_from_unengaged=1 (faux
+    positif). Après le fix, _check_fall_back_move n'est appelé que si HP > 0 → 0 erreur.
+
+    La reconstruction se fait en 4 étapes :
+    1. Déploiement (unit 1 à START, unit 101 à ENEMY)
+    2. MOVE no-op avec [MODELS:] pour populer positions_by_model[1]
+    3. STATE snapshot omettant unit 1 → state_resync détecte unité "morte" → unit_hp[1]=0
+    4. FLED de unit 1 sans [DESPERATE ESCAPE] (fall-back normal, pas de blessures mortelles)
+    """
+    import ai.analyzer as an
+
+    # MODELS segment populate positions_by_model, requis pour que state_resync détecte l'unité.
+    move_with_models = (
+        f"[10:00:02] E1 T1 P1 MOVE : Unit 1{_xy(START)} MOVED from {_xy(START)} to {_xy(START)}"
+        f" [R:+0.0] [MODELS: 1#0@({START[0]},{START[1]})] [SUCCESS]\n"
+    )
+    # STATE n'incluant que l'ennemi : unit 1 n'est pas vue → state_resync → unit_hp[1]=0.
+    state_resync_line = f"[10:00:03] T1 STATE: 101[101#0@({ENEMY[0]},{ENEMY[1]}):2]\n"
+    # FLED sans [DESPERATE ESCAPE] : is_within_engine_engagement_zone retourne False (HP=0)
+    # avant le fix → engaged_before=False → flee_from_unengaged=1.
+    fled_line = (
+        f"[10:00:04] E1 T2 P1 MOVE : Unit 1{_xy(START)} FLED from {_xy(START)} to {_xy(LEGAL_DEST)}"
+        " [R:+0.0] [SUCCESS]\n"
+    )
+
+    log = tmp_path / "step.log"
+    log.write_text(entete_step_log(
+        _SETUP + move_with_models + state_resync_line + fled_line,
+        units=_UNITS,
+        rosters="scale=5 AGENT_PLAYER=1 AGENT=sm (ref) OPPONENT=sm (ref)",
+        objectives=OBJECTIVES,
+        ez_vertical_inches=None,
+    ))
+    stats = an.parse_step_log(str(log))
+    assert stats["flee_from_unengaged"][1] == 0, (
+        "Une unité à HP=0 (morte par state_resync) ne doit pas déclencher flee_from_unengaged"
+    )
+    assert stats["flee_still_engaged"][1] == 0
