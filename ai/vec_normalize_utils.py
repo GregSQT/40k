@@ -132,7 +132,7 @@ def build_snapshot_normalizer(
         obs_arr = np.asarray(obs, dtype=np.float32)
         if obs_arr.ndim == 1:
             obs_arr = obs_arr.reshape(1, -1)
-        normalized = normalize_observation_for_inference(obs_arr, snapshot_path)
+        normalized = vn.normalize_obs(obs_arr)
         return np.asarray(normalized, dtype=np.float32).squeeze()
 
     return _normalize
