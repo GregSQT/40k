@@ -693,40 +693,8 @@ def _build_eval_obs_normalizer_for_worker(
         return None
     if not model_path:
         raise RuntimeError("VecNormalize enabled but model_path not provided for worker")
-    from ai.vec_normalize_utils import get_vec_normalize_path
-
-    # Obs Dict (pipeline squad spatial, tenseurs d'entites V11 §0.30) : VecNormalize a ete
-    # entrainee avec norm_obs_keys=["global_cont"] — les tenseurs d'entites sont normalises
-    # DANS l'extracteur (statistique partagee entre slots), la grille et les drapeaux restent
-    # bruts. normalize_obs ne touche donc que "global_cont". On charge l'objet une fois au lieu de
-    # recharger le pkl a chaque step. Le chemin legacy (obs Box a plat) reste byte-identique.
-    _dict_vecnorm = {"obj": None}
-
-    def _dict_normalizer():
-        if _dict_vecnorm["obj"] is None:
-            import pickle
-            pkl_path = get_vec_normalize_path(model_path)
-            if not os.path.exists(pkl_path):
-                raise RuntimeError(
-                    f"VecNormalize enabled but stats not found for Dict obs: {pkl_path}"
-                )
-            with open(pkl_path, "rb") as f:
-                vn = pickle.load(f)
-            vn.training = False
-            vn.norm_reward = False
-            _dict_vecnorm["obj"] = vn
-        return _dict_vecnorm["obj"]
-
-    def _normalize(obs):
-        if isinstance(obs, dict):
-            return _dict_normalizer().normalize_obs(obs)
-        obs_arr = np.asarray(obs, dtype=np.float32)
-        if obs_arr.ndim == 1:
-            obs_arr = obs_arr.reshape(1, -1)
-        normalized = _dict_normalizer().normalize_obs(obs_arr)
-        return np.asarray(normalized, dtype=np.float32).squeeze()
-
-    return _normalize
+    from ai.vec_normalize_utils import build_snapshot_normalizer
+    return build_snapshot_normalizer(model_path, vec_normalize_enabled=True, vec_normalize_eval_enabled=True)
 
 
 def _accumulate_behavior(

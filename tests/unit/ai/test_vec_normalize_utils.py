@@ -198,13 +198,11 @@ def test_worker_normalizer_derives_its_stats_from_the_evaluated_model(tmp_path) 
     out = normalizer(np.array([2.0, 6.0], dtype=np.float32))
     assert np.allclose(out, np.array([1.0, 2.0], dtype=np.float32), atol=1e-5)
 
-    # (3) Chemin Dict : pkl absent = erreur explicite nommant le fichier DU modèle évalué.
-    missing = bot_evaluation._build_eval_obs_normalizer_for_worker(
-        None, str(tmp_path / "other_model.zip"), True, True
-    )
-    assert missing is not None
-    with pytest.raises(RuntimeError, match=r"other_model_vec_normalize\.pkl"):
-        missing({"global_cont": np.zeros(3, dtype=np.float32)})
+    # (3) Pkl absent = erreur explicite à la construction nommant le fichier DU modèle évalué.
+    with pytest.raises(FileNotFoundError, match=r"other_model_vec_normalize\.pkl"):
+        bot_evaluation._build_eval_obs_normalizer_for_worker(
+            None, str(tmp_path / "other_model.zip"), True, True
+        )
 
 
 def test_build_snapshot_normalizer_uses_cached_vn_for_array_obs(tmp_path) -> None:

@@ -129,11 +129,8 @@ def build_snapshot_normalizer(
         vn = _cache["obj"]
         if isinstance(obs, dict):
             return vn.normalize_obs(obs)
-        obs_arr = np.asarray(obs, dtype=np.float32)
-        if obs_arr.ndim == 1:
-            obs_arr = obs_arr.reshape(1, -1)
-        normalized = vn.normalize_obs(obs_arr)
-        return np.asarray(normalized, dtype=np.float32).squeeze()
+        obs_arr = np.atleast_2d(np.asarray(obs, dtype=np.float32))
+        return vn.normalize_obs(obs_arr).squeeze()
 
     return _normalize
 
