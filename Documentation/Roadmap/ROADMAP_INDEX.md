@@ -223,6 +223,10 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | infra | ✅ mémoïsation `_deploy_pool_set` (2026-08-23) — zone mise en cache par joueur dans `game_state`, purgée aux deux chemins de re-publication ; −26 % par formation (10,79 → 7,94 ms) ; 5 verrous rouge/vert. Chantier CLOS, doc dans `Documentation/Implémentation/Implémenté/perf_generate_compact_formation.md` | — | ⚡ |
 | infra | ✅ bench piste 1 érosion mesurée (2026-08-23) — non rentable ; goulot confirmé = marge inter-fig | — | ⚡ |
 | infra | ✅ Perf `generate_compact_formation` margin_blocked incrémental (2026-08-23) — O(N×fp×6) → O(fp) par cellule BFS ; suite verte, aucun verrou d'équivalence de plan (cf. SUITE du doc) | — | ⚡ |
+| training | ✅ simplify vec-normalize factory (2026-08-23) — consolider, atleast_2d, drop asarray | — | ⚡ |
+| training | ✅ fix vec-normalize non-dict cache bypass (2026-08-23) — VecNormalize chemin non-dict utilisait le cache brut au lieu de vn.normalize_obs() | — | ⚡ |
+| moteur+training | ✅ §0.69 choix d'arme CC par l'agent (2026-08-23) — FIGHT_WEAPON_SLOT + pending_fight_weapon_select ; agent sélectionne l'arme de mêlée via masque dédié | — | 🚫 |
+| tests | ✅ verrou combat à vide sans pending_fight_weapon_select (2026-08-23) — test_combat_a_vide_ne_pose_pas_pending_fight_weapon_select : squad pool 12.04, cibles mortes → résolution directe sans §0.69 ; rouge/vert prouvés | — | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 
 ### Bloqués par une décision utilisateur

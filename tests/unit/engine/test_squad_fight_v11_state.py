@@ -275,3 +275,72 @@ def test_commit_rupture_pool_vide_apres_masque(melee_scenario_file):
     # Le commit doit détecter la rupture et lever, jamais absorber silencieusement.
     with pytest.raises(ValueError, match="rupture masque/commit"):
         eng._process_squad_action(action)
+
+
+def test_combat_a_vide_ne_pose_pas_pending_fight_weapon_select(melee_scenario_file):
+    """Invariant §0.69 : un combat à vide (cibles toutes mortes, 12.04/12.06) ne pose jamais
+    `pending_fight_weapon_select` dans game_state — la sélection d'arme n'existe que quand
+    une cible est résolue.
+
+    Le scénario : une escouade est dans le pool 12.04 (snapshot engaged_at_fight_step_start=True),
+    mais toutes les cibles adjacentes sont retirées AVANT le commit. Le moteur doit résoudre
+    le combat sans armer l'état intermédiaire §0.69.
+    """
+    from engine.action_decoder import PENDING_FIGHT_WEAPON_KEY
+    from engine.game_utils import get_unit_by_id
+    from engine.phase_handlers.fight_handlers import (
+        _fight_build_valid_target_pool,
+        fight_v11_current_pool,
+    )
+    from engine.phase_handlers.shared_utils import remove_from_units_cache
+
+    eng = _engine_in_fight_phase(melee_scenario_file)
+    gs = eng.game_state
+
+    pool = fight_v11_current_pool(gs)
+    assert pool, "précondition : pool 12.04 non vide"
+
+    # Trouver une escouade qui a au moins une cible adjacente.
+    squad_id = None
+    targets_to_remove = []
+    for sid in pool:
+        unit = get_unit_by_id(gs, str(sid))
+        if unit is None:
+            continue
+        tgts = list(_fight_build_valid_target_pool(gs, unit))
+        if tgts:
+            squad_id = str(sid)
+            targets_to_remove = tgts
+            break
+
+    assert squad_id is not None, "précondition : au moins une escouade avec cible"
+    assert targets_to_remove, "précondition : cibles adjacentes présentes"
+
+    # Retirer toutes les cibles adjacentes → pool 12.05 vide pour squad_id.
+    for tid in targets_to_remove:
+        remove_from_units_cache(gs, str(tid))
+
+    # L'escouade doit rester dans le pool 12.04 grâce au snapshot engaged_at_fight_step_start.
+    assert squad_id in [str(x) for x in fight_v11_current_pool(gs)], (
+        f"squad {squad_id!r} a quitté le pool après suppression des cibles — "
+        "le snapshot engaged_at_fight_step_start n'a pas maintenu l'éligibilité 12.04"
+    )
+
+    # Vérifier que _fight_build_valid_target_pool est bien vide (pool 12.05 vide).
+    unit = get_unit_by_id(gs, squad_id)
+    assert unit is not None
+    assert not _fight_build_valid_target_pool(gs, unit), (
+        "précondition : le pool 12.05 doit être vide après retrait des cibles"
+    )
+
+    action = {"action": "squad_fight", "squad_id": squad_id}  # pas de target_slot
+
+    ok, result = eng._process_squad_action(action)
+
+    assert ok is True
+    assert PENDING_FIGHT_WEAPON_KEY not in gs, (
+        f"combat à vide : pending_fight_weapon_select ne doit pas être posé (résultat={result!r})"
+    )
+    assert result.get("waiting_for_weapon_select") is not True, (
+        "combat à vide : waiting_for_weapon_select ne doit pas être True"
+    )
