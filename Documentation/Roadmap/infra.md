@@ -4,7 +4,10 @@
 
 ## Perf `generate_compact_formation` {#perf-formation}
 
-½-1 j. **MESURER avant d'implémenter** — gain non acquis.
+Piste 2 (mémoïsation de `_deploy_pool_set`) ✅ faite le 2026-08-23 : −26 % par formation
+(10,79 → 7,94 ms), mesuré. **Reste la piste 1** (érosion morphologique, ~77 % du résiduel) —
+gain TOUJOURS non acquis : sur le cas nominal gym, la spirale s'arrête à la 1re case et l'érosion
+serait plus lente. MESURER avant d'implémenter.
 
 → `Documentation/Implémentation/A_faire/perf_generate_compact_formation.md`
 

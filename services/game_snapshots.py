@@ -41,6 +41,10 @@ _GS_STATIC_KEYS = frozenset({
     #    parties persistées d'avant le changement, sans code de migration.
     # 2. COÛT — ~33 000 tuples immuables, deepcopy à CHAQUE capture de phase sinon.
     "deployment_pools",
+    # Le `set` matérialisé de ces mêmes zones (`_deploy_pool_set`) : dérivé de `deployment_pools`
+    # ci-dessus, donc statique pour la même raison, et purgé aux mêmes deux sites que les caches
+    # de LoS. Non listé, il se ferait deepcopy à chaque capture — ~16 000 tuples par joueur.
+    "_deploy_pool_set_cache",
     "rewards_configs", "reward_configs", "hex_los_cache",
     # Grilles de blocage de la LoS vectorisée (murs + areas obscurantes) : dérivées du seul
     # terrain, donc invariantes pendant une partie et sûres à garder vivantes au restore. Non

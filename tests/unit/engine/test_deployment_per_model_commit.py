@@ -337,3 +337,173 @@ def test_anchor_is_a_suggestion_not_a_constraint():
         assert (col, row) in pool, (
             f"figurine placée hors zone ({col},{row}) — le preview aurait dû rejeter ce plan"
         )
+
+
+# ---------------------------------------------------------------------------------------------
+# Mémoïsation de `_deploy_pool_set` (perf) — le plan doit rester IDENTIQUE, et le cache doit
+# s'invalider quand les zones sont re-publiées.
+#
+# `_deploy_pool_set` matérialisait le `set` de la zone (~16 000 hexes) à CHAQUE appel : 2,5 ms
+# sur les 12,6 ms d'une formation. Il est désormais mémoïsé dans `game_state`. Le risque n'est
+# pas la lenteur mais le SILENCE : un cache non purgé rend la zone du scénario précédent, sans
+# rien lever. Ces tests verrouillent les deux faces (équivalence + invalidation).
+# ---------------------------------------------------------------------------------------------
+
+_POOL_CACHE_KEY = "_deploy_pool_set_cache"
+
+
+def test_memoized_pool_yields_the_same_formation_plan():
+    """Critère d'acceptation du refactor de perf : MÊME plan, sur un échantillon d'ancres.
+
+    `generate_compact_formation` est déterministe. La zone mémoïsée est comparée à la zone
+    reconstruite à la main — celle que l'ancien code rebâtissait à chaque appel.
+    """
+    from engine.phase_handlers.deployment_handlers import (
+        _deploy_pool_set, generate_compact_formation,
+    )
+
+    eng = _load(seed=0)
+    gs = eng.game_state
+    squad_id = str(gs["deployment_state"]["deployable_units"][1][0])
+    raw_pool = [(int(c), int(r)) for c, r in gs["deployment_pools"][1]]
+
+    expected_zone = {(int(c), int(r)) for c, r in raw_pool}
+    assert _deploy_pool_set(gs, 1, None) == expected_zone, (
+        "la zone mémoïsée diffère de la zone reconstruite directement"
+    )
+
+    # Échantillon réparti sur toute la zone (pas seulement la première ancre).
+    sample = [raw_pool[i] for i in range(0, len(raw_pool), max(1, len(raw_pool) // 8))][:8]
+    assert len(sample) >= 4, "fixture invalide : échantillon d'ancres trop petit"
+
+    for col, row in sample:
+        first = generate_compact_formation(gs, squad_id, col, row)
+        second = generate_compact_formation(gs, squad_id, col, row)
+        assert first == second, (
+            f"formation non déterministe à l'ancre ({col},{row}) : {first} != {second}"
+        )
+        assert all((c, r) in expected_zone for _m, c, r in first), (
+            f"formation hors zone à l'ancre ({col},{row}) — cache incohérent avec deployment_pools"
+        )
+
+
+def _zone_of(gs, player: int):
+    return {(int(c), int(r)) for c, r in gs["deployment_pools"][player]}
+
+
+def _poison_cache(gs):
+    """Empoisonne le cache du joueur 1 avec la zone du joueur 2, et rend cette zone fausse.
+
+    Le poison joue le rôle de la zone héritée de l'épisode précédent : si un chemin de
+    re-publication ne purge pas le cache, c'est ELLE qui ressortira. Empoisonner le cache plutôt
+    qu'injecter des zones dans `config` est le seul montage fiable — `reset` recharge le scénario
+    et réécrirait l'injection, alors que le poison n'appartient qu'au cache.
+
+    Le poison est une VRAIE zone (celle d'en face) et non des cases arbitraires : la suite du
+    reset consomme cette valeur pour bâtir le masque de déploiement, et une zone illégale y fait
+    boucler la recherche de case au lieu de produire un échec lisible.
+    """
+    from engine.phase_handlers.deployment_handlers import _deploy_pool_set
+
+    _deploy_pool_set(gs, 1, None)  # amorce le cache
+    assert gs.get(_POOL_CACHE_KEY), "le cache doit être amorcé après un premier appel"
+
+    wrong = frozenset(_zone_of(gs, 2))
+    assert wrong and not (wrong & _zone_of(gs, 1)), (
+        "fixture invalide : les zones des deux joueurs doivent être disjointes et non vides"
+    )
+    gs[_POOL_CACHE_KEY][1] = wrong
+    return wrong
+
+
+def _assert_zone_is_fresh(gs, wrong, context: str):
+    from engine.phase_handlers.deployment_handlers import _deploy_pool_set
+
+    refreshed = _deploy_pool_set(gs, 1, None)
+    assert refreshed != wrong, f"zone empoisonnée ressortie {context}"
+    assert refreshed == _zone_of(gs, 1), f"zone périmée rendue {context}"
+
+
+def test_pool_cache_is_invalidated_by_reset_without_scenario_reload():
+    """VERROU T1 — chemin gym nominal : `reset` SANS rechargement de scénario.
+
+    `game_state` survit d'un épisode à l'autre (le reset le mute en place), donc un cache non
+    purgé au site de publication rendrait la zone de l'épisode précédent, silencieusement.
+
+    Le rechargement est explicitement désarmé : sinon `_reload_scenario` purge lui aussi et
+    MASQUE l'absence de purge dans `reset` — le test resterait vert sans rien verrouiller.
+    Cycle rouge : retirer le `pop("_deploy_pool_set_cache")` de `W40KEngine.reset`.
+    """
+    eng = _load(seed=0)
+    # Les déclencheurs de `should_reload_scenario` (cf. `reset`) : roster d'agent tiré au sort,
+    # rotation de scénario, changement de joueur contrôlé. Le scheduler est déjà désarmé par
+    # `_load`.
+    eng._scenario_has_random_agent_roster = False
+    assert not (eng._random_scenario_mode and len(eng._scenario_files) > 1), (
+        "fixture invalide : la rotation de scénario forcerait un rechargement"
+    )
+
+    wrong = _poison_cache(eng.game_state)
+
+    eng.reset(seed=0)
+    # La clé peut très bien être REPRÉSENTE : la suite du reset re-consulte les zones et ré-amorce
+    # le cache légitimement. Ce qui est verrouillé n'est donc pas l'absence de la clé, mais
+    # l'absence du POISON — que la valeur d'avant n'ait pas survécu.
+    _assert_zone_is_fresh(eng.game_state, wrong, "après un reset sans rechargement de scénario")
+
+
+def test_pool_cache_is_invalidated_by_a_direct_scenario_reload():
+    """VERROU T1 — chemin de rotation : `_reload_scenario` appelé DIRECTEMENT, sans reset.
+
+    Ce chemin existe vraiment (cf. `test_board_boundary_walls_survive_reload.py`, qui appelle
+    `_reload_scenario` seul) : la purge du `reset` ne le couvre donc pas. Une rotation change de
+    terrain, donc de zones — un cache survivant rendrait celles du scénario précédent.
+    Cycle rouge : retirer le `pop("_deploy_pool_set_cache")` de `_reload_scenario`.
+    """
+    eng = _load(seed=0)
+    wrong = _poison_cache(eng.game_state)
+
+    eng._reload_scenario(str(SCENARIO))
+
+    _assert_zone_is_fresh(eng.game_state, wrong, "après un appel direct à `_reload_scenario`")
+
+
+def test_pool_cache_does_not_mask_a_scenario_without_zones():
+    """VERROU T1 : sans zones déclarées, les lecteurs doivent LEVER, pas lire un cache périmé.
+
+    Le reset RETIRE `deployment_pools` quand le scénario n'en déclare pas, plutôt que d'en laisser
+    une périmée, précisément pour que `require_key` lève (cf. le commentaire du reset). Un cache
+    consulté AVANT cette vérification annulerait la garantie — le trou le plus discret de la
+    mémoïsation, puisqu'il change une erreur explicite en zone silencieusement fausse.
+
+    Ce que ça verrouille dans le code : `require_key("deployment_pools")` est évalué AVANT la
+    lecture du cache. Cycle rouge : déplacer le `return cached` au-dessus du `require_key`.
+    """
+    from engine.phase_handlers.deployment_handlers import _deploy_pool_set
+
+    eng = _load(seed=0)
+    gs = eng.game_state
+    _deploy_pool_set(gs, 1, None)  # amorce le cache
+    assert gs.get(_POOL_CACHE_KEY), "le cache doit être amorcé après un premier appel"
+
+    # Scénario sans zones : l'état exact que produit la branche `is None` du reset.
+    from shared.data_validation import ConfigurationError
+
+    del gs["deployment_pools"]
+    with pytest.raises(ConfigurationError):
+        _deploy_pool_set(gs, 1, None)
+
+
+def test_memoized_pool_is_immutable():
+    """Le `set` est partagé entre tous les appelants, donc il doit être immuable.
+
+    Sans ça, un appelant qui muterait le résultat corromprait la zone de tous les autres pour
+    tout le reste de la partie.
+    """
+    from engine.phase_handlers.deployment_handlers import _deploy_pool_set
+
+    eng = _load(seed=0)
+    zone = _deploy_pool_set(eng.game_state, 1, None)
+    assert isinstance(zone, frozenset), (
+        f"la zone mémoïsée doit être un frozenset, pas {type(zone).__name__}"
+    )
