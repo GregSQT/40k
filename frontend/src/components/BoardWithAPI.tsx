@@ -2068,6 +2068,28 @@ export const BoardWithAPI: React.FC = () => {
         }
       : null;
 
+  /** Retrait de cohérence en attente (03.03) : figurines éligibles de l'escouade concernée. */
+  const coherencyRemovalState = (() => {
+    const pending = apiProps.gameState?.pending_coherency_removal;
+    if (!pending) return null;
+    const squadId = String(pending.squad_id);
+    const byModel =
+      (
+        apiProps.gameState?.units_cache as
+          | Record<string, { occupied_hexes_by_model?: Record<string, [number, number]> }>
+          | undefined
+      )?.[squadId]?.occupied_hexes_by_model ?? {};
+    const modelIds = Object.keys(byModel);
+    if (modelIds.length === 0) return null;
+    return {
+      unitId: squadId,
+      modelIds,
+      onPickModel: (modelId: string) => {
+        void apiProps.onSelectCoherencyRemoval(modelId);
+      },
+    };
+  })();
+
   /** Sélection depuis les tables de statut. Pendant une désignation d'Oath, la table suit la même
    *  règle que le plateau : seules les unités ennemies légales répondent, rien d'autre. */
   const handleStatusTableSelectUnit = (unitId: UnitId) => {
@@ -4371,6 +4393,7 @@ export const BoardWithAPI: React.FC = () => {
                 : apiProps.onSelectUnit
             }
             oathTargetSelection={oathBoardSelection}
+            coherencyRemovalSelection={coherencyRemovalState}
             waaaghActive={waaaghActive}
             battleShockTestMode={settings.battleShockTestEnabled && apiProps.battleShockTestMode}
             onForceBattleShock={apiProps.onForceBattleShock}

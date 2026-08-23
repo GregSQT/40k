@@ -329,6 +329,8 @@ export interface APIGameState {
    */
   pending_agent_decision?: PendingAgentDecision | null;
   pending_oath_selection?: number | null;
+  /** Retrait de cohérence en attente (03.03) — squad_id de l'escouade dont une figurine doit être retirée. */
+  pending_coherency_removal?: { squad_id: string } | null;
   oath_target?: Record<string, string | null>;
   waaagh_active?: Record<string, boolean>;
   waaagh_called?: Record<string, boolean>;
@@ -6183,6 +6185,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction]
   );
 
+  const handleSelectCoherencyRemoval = useCallback(
+    async (modelId: string) => {
+      await executeAction({ action: "select_coherency_removal", model_id: modelId });
+    },
+    [executeAction]
+  );
+
   const confirmMoveInFlightRef = useRef(false);
   const handleConfirmMove = useCallback(async () => {
     if (confirmMoveInFlightRef.current) {
@@ -8163,6 +8172,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onSelectRuleChoice: async (_prompt: RuleChoicePrompt, _selectedDisplayRuleId: string) => {},
       onCallWaaagh: async (_optionIndex: number) => {},
       onSelectOathTarget: async (_targetUnitId: string | number) => {},
+      onSelectCoherencyRemoval: async (_modelId: string) => {},
       // blinkState removed - blinking is handled locally in UnitRenderer
       fightSubPhase: null,
       executeAITurn: async () => {},
@@ -8603,6 +8613,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // l'API), les deux actions partent d'ici.
     onCallWaaagh: handleCallWaaagh,
     onSelectOathTarget: handleSelectOathTarget,
+    onSelectCoherencyRemoval: handleSelectCoherencyRemoval,
     // blinkState removed - blinking is handled locally in UnitRenderer
     // Export charge roll info for failed charge display
     chargingUnitId: failedChargeRoll
