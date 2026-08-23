@@ -600,6 +600,11 @@ def decision_option_cont_index(field: str) -> int:
 #: (511 par ligne) et du forward. Tout dépassement reste LOGUÉ, jamais silencieux.
 K_ALLY_SLOTS = 12
 
+#: Nombre de slots de profils d'armes de MÊLÉE par entité (§0.69 — source unique pour que
+#: `macro_intents.FIGHT_WEAPON_SLOT_COUNT` et `observation_builder.K_WEAPONS_MELEE` restent
+#: synchronisés). Doit égaler `SquadObservationBuilder.K_WEAPONS_MELEE`.
+K_WEAPONS_MELEE = 10
+
 
 # ---------------------------------------------------------------------------
 # Décision de DÉPLOIEMENT (V11 §0.40 point 3)

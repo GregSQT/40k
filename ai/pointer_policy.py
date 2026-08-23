@@ -78,6 +78,8 @@ from engine.macro_intents import (
     MOVE_CELL_COUNT,
     ACTIVATE_SLOT_BASE,
     ACTIVATE_SLOT_COUNT,
+    FIGHT_WEAPON_SLOT_BASE,
+    FIGHT_WEAPON_SLOT_COUNT,
     OATH_SLOT_BASE,
     OATH_SLOT_COUNT,
     SHOOT_SLOT_BASE,
@@ -106,6 +108,7 @@ DENSE_LOGIT_COUNT = (
     - CHOICE_COUNT
     - OATH_SLOT_COUNT
     - ACTIVATE_SLOT_COUNT
+    - FIGHT_WEAPON_SLOT_COUNT  # §0.69 : arme CC — tête dense séparée (charge_pair_net pattern)
 )
 
 
@@ -190,7 +193,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # HYPOTHÈSE D'ASSEMBLAGE de `_action_logits` — vérifiée ici, où l'erreur est explicite,
         # plutôt que subie sous forme de logits décalés : cellules en tête, `wait`, puis les
         # slots de tir, de charge et de mêlée CONTIGUS, puis le reste dense, puis les CHOICE, les
-        # slots d'Oath, et enfin les slots d'ACTIVATION (V11 §0.48 `L2`), qui ferment l'espace.
+        # slots d'Oath, les slots d'ACTIVATION (V11 §0.48 `L2`), et enfin les slots d'ARME CC
+        # (V11 §0.69), qui ferment l'espace.
         if (
             MOVE_CELL_BASE != 0
             or SHOOT_SLOT_BASE != MOVE_CELL_COUNT + 1
@@ -199,16 +203,19 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             or FIGHT_SLOT_BASE != CHARGE_PAIR_SLOT_BASE + CHARGE_PAIR_SLOT_COUNT
             or OATH_SLOT_BASE != CHOICE_BASE + CHOICE_COUNT
             or ACTIVATE_SLOT_BASE != OATH_SLOT_BASE + OATH_SLOT_COUNT
-            or ACTIVATE_SLOT_BASE != TOTAL_ACTION_SIZE - ACTIVATE_SLOT_COUNT
+            or FIGHT_WEAPON_SLOT_BASE != ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT
+            or FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT != TOTAL_ACTION_SIZE
         ):
             raise ValueError(
                 "Disposition de l'action space inattendue : l'assemblage des logits suppose "
                 f"[cellules | wait | tir | charge | charge-paire | melee | dense | "
-                f"CHOICE | Oath | ACTIVATE en fin]. Recu MOVE_CELL_BASE={MOVE_CELL_BASE}, "
+                f"CHOICE | Oath | ACTIVATE | FIGHT_WEAPON en fin]. "
+                f"Recu MOVE_CELL_BASE={MOVE_CELL_BASE}, "
                 f"SHOOT_SLOT_BASE={SHOOT_SLOT_BASE}, CHARGE_SLOT_BASE={CHARGE_SLOT_BASE}, "
                 f"CHARGE_PAIR_SLOT_BASE={CHARGE_PAIR_SLOT_BASE}, "
                 f"FIGHT_SLOT_BASE={FIGHT_SLOT_BASE}, CHOICE_BASE={CHOICE_BASE}, "
                 f"OATH_SLOT_BASE={OATH_SLOT_BASE}, ACTIVATE_SLOT_BASE={ACTIVATE_SLOT_BASE}, "
+                f"FIGHT_WEAPON_SLOT_BASE={FIGHT_WEAPON_SLOT_BASE}, "
                 f"TOTAL_ACTION_SIZE={TOTAL_ACTION_SIZE}."
             )
         self.trunk_dim = extractor.trunk_dim
@@ -289,6 +296,11 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # Une paire encode DEUX lignes du tenseur ennemi — impossible pour un produit scalaire
         # unique. La tête dense reçoit le même latent que les autres.
         self.charge_pair_net = nn.Linear(self.mlp_extractor.latent_dim_pi, CHARGE_PAIR_SLOT_COUNT)
+        # Tête DENSE pour l'arme CC (V11 §0.69) : K_WEAPONS_MELEE = 10 logits.
+        # L'arme n'est pas une entité-ligne du tenseur ennemi — un produit scalaire serait mal
+        # fondé. Même patron que charge_pair_net : dense sur le latent commun. Slot j correspond
+        # à l'obs melee slot j (collect_weapon_profiles order, invariant D1 armes).
+        self.fight_weapon_net = nn.Linear(self.mlp_extractor.latent_dim_pi, FIGHT_WEAPON_SLOT_COUNT)
         # Requête DISTINCTE pour les candidats de décision (§9.3 P2) : « quel ennemi frapper » et
         # « quelle option choisir » sont deux questions différentes posées au même latent, et
         # elles ne lisent même pas les mêmes embeddings (ennemis vs candidats).
@@ -531,6 +543,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 self._point(self.oath_query_net, latent_pi, enemies),      # Oath
                 # Activation : MES escouades par slot (V11 §0.48 `L2`).
                 self._point(self.activate_query_net, latent_pi, feats.allies),
+                # Arme CC : tête dense (V11 §0.69), slot j = obs melee slot j.
+                self.fight_weapon_net(latent_pi),
             ],
             dim=1,
         )

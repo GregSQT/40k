@@ -202,6 +202,8 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     )
     # L9 (2026-08-20) : tête dense pour les paires de charge, entre charge unique et mêlée.
     charge_pair_dense = policy.charge_pair_net(latent_pi)
+    # §0.69 : tête dense pour l'arme CC, en fin d'espace.
+    fight_weapon_dense = policy.fight_weapon_net(latent_pi)
     expected = torch.cat(
         [
             move,
@@ -214,7 +216,7 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
             choice,
             oath_pointer,
             activate_pointer,   # V11 §0.48 `L2`
-
+            fight_weapon_dense, # §0.69 : arme CC (dense)
         ],
         dim=1,
     )

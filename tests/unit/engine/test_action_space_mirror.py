@@ -144,15 +144,17 @@ def test_total_action_size():
     assert mi.CHOICE_BASE == su.SQUAD_ACTION_SIZE + mi.MAX_OBJECTIVES * 3
     assert mi.OATH_SLOT_BASE == mi.CHOICE_BASE + mi.CHOICE_COUNT
     assert mi.ACTIVATE_SLOT_BASE == mi.OATH_SLOT_BASE + mi.OATH_SLOT_COUNT
-    assert mi.TOTAL_ACTION_SIZE == mi.ACTIVATE_SLOT_BASE + mi.ACTIVATE_SLOT_COUNT
-    assert mi.TOTAL_ACTION_SIZE == 1349
+    assert mi.FIGHT_WEAPON_SLOT_BASE == mi.ACTIVATE_SLOT_BASE + mi.ACTIVATE_SLOT_COUNT
+    assert mi.TOTAL_ACTION_SIZE == mi.FIGHT_WEAPON_SLOT_BASE + mi.FIGHT_WEAPON_SLOT_COUNT
+    assert mi.TOTAL_ACTION_SIZE == 1359
 
 
 def test_choice_then_oath_then_activate_slots_close_the_action_space():
     """CHOICE, Oath puis activation ferment l'espace, sans trou ni recouvrement."""
     assert list(mi.CHOICE_SLOTS) == list(range(mi.CHOICE_BASE, mi.OATH_SLOT_BASE))
     assert list(mi.OATH_SLOTS) == list(range(mi.OATH_SLOT_BASE, mi.ACTIVATE_SLOT_BASE))
-    assert list(mi.ACTIVATE_SLOTS) == list(range(mi.ACTIVATE_SLOT_BASE, mi.TOTAL_ACTION_SIZE))
+    assert list(mi.ACTIVATE_SLOTS) == list(range(mi.ACTIVATE_SLOT_BASE, mi.FIGHT_WEAPON_SLOT_BASE))
+    assert list(mi.FIGHT_WEAPON_SLOTS) == list(range(mi.FIGHT_WEAPON_SLOT_BASE, mi.TOTAL_ACTION_SIZE))
     assert not mi.is_zone_intent_action(mi.CHOICE_BASE)
     assert not mi.is_zone_intent_action(mi.OATH_SLOT_BASE)
     assert not mi.is_zone_intent_action(mi.ACTIVATE_SLOT_BASE)

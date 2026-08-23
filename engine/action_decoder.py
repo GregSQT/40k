@@ -59,6 +59,8 @@ from engine.macro_intents import (
     DEPLOY_SLOT_BASE,
     DEPLOY_SLOTS,
     DEPLOY_STRATEGY_COUNT,
+    FIGHT_WEAPON_SLOT_BASE,
+    FIGHT_WEAPON_SLOTS,
     TOTAL_ACTION_SIZE,
     MAX_OBJECTIVES,
     OATH_SLOT_BASE,
@@ -83,6 +85,11 @@ GAME_PHASES = ["deployment", "command", "move", "shoot", "charge", "fight"]
 #: Purgée au reset d'épisode (`w40k_core`) — son tampon est l'état de déploiement, qui
 #: recommence identique (aucune unité posée) d'un épisode à l'autre.
 DEPLOY_SLOT_CANDIDATES_CACHE_KEY = "_deployment_slot_candidates"
+
+#: Clé du `game_state` portant l'état intermédiaire entre FIGHT_SLOT (cible) et
+#: FIGHT_WEAPON_SLOT (arme). Valeur : `{"squad_id": str, "target_id": str,
+#: "slot_to_code": Dict[int, str]}`. Absente tant qu'aucune sélection d'arme n'est attendue.
+PENDING_FIGHT_WEAPON_KEY = "pending_fight_weapon_select"
 #: Jumeau du précédent pour l'ingress move (20.04) — clé DISTINCTE : les deux mises en place
 #: coexistent dans un même épisode (déploiement au tour 0, ingress à partir du round 2) et
 #: décrivent des aires légales différentes.
@@ -490,6 +497,17 @@ class ActionDecoder:
         # ⚠️ Déplacer ces sorties les unes par rapport aux autres est un défaut de RÈGLE, pas de
         # lisibilité. Les deux ordres qui comptent sont verrouillés par
         # `test_activation_choice_contract.py`.
+
+        # ─── 1b. SÉLECTION D'ARME CC (V11 §0.69) ───
+        # Même exclusivité que les branches ci-dessus : entre FIGHT_SLOT (cible) et la résolution,
+        # le moteur est arrêté sur le choix d'arme. Pool vide : l'activation en cours ne reprend
+        # qu'après la décision. Au moins un slot est toujours ouvert (fight_weapon_eligible_slots
+        # ne produit cet état que si ≥1 arme est éligible, sinon squad_fight lève en amont).
+        pending_fw = game_state.get(PENDING_FIGHT_WEAPON_KEY)
+        if pending_fw is not None:
+            for slot_j in pending_fw["slot_to_code"]:
+                mask[FIGHT_WEAPON_SLOT_BASE + slot_j] = True
+            return mask, []
 
         # ─── 1. CHOIX DE L'ESCOUADE À ACTIVER (V11 §0.48 élément `L2` / §9 P3-3) ───
         # Même exclusivité que les branches `pending_agent_decision` et Oath plus haut, et pour la
@@ -1087,6 +1105,29 @@ class ActionDecoder:
                 "action": "select_oath_target",
                 "player": int(require_key(game_state, "pending_oath_selection")),
                 "unitId": oath_target,
+            }
+
+        # Choix de l'arme CC (V11 §0.69) : prime sur la phase, comme Oath et Activate — le moteur
+        # est arrêté entre FIGHT_SLOT et la résolution. La source unique de vérité est le pending
+        # state posé par squad_fight, relue ici pour garantir que le slot joué est celui ouvert.
+        if action_int in FIGHT_WEAPON_SLOTS:
+            pending_fw = game_state.get(PENDING_FIGHT_WEAPON_KEY)
+            if pending_fw is None:
+                raise ValueError(
+                    f"convert_squad_action: FIGHT_WEAPON_SLOT {action_int} joué alors qu'aucune "
+                    "sélection d'arme n'est en attente (pending_fight_weapon_select absent)"
+                )
+            weapon_slot = action_int - FIGHT_WEAPON_SLOT_BASE
+            slot_to_code = pending_fw["slot_to_code"]
+            if weapon_slot not in slot_to_code:
+                raise ValueError(
+                    f"convert_squad_action: FIGHT_WEAPON_SLOT slot {weapon_slot} non éligible "
+                    f"(éligibles : {sorted(slot_to_code.keys())}) — rupture masque/commit"
+                )
+            return {
+                "action": "squad_fight_weapon",
+                "squad_id": str(pending_fw["squad_id"]),
+                "weapon_slot": weapon_slot,
             }
 
         # Choix de l'escouade à activer : prime sur la phase pour la MÊME raison que les CHOICE

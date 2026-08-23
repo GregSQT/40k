@@ -60,6 +60,7 @@ from engine.observation_entities import (
     GLOBAL_BIN_SIZE,
     GLOBAL_CONT_SIZE,
     K_ALLY_SLOTS as _ENTITY_K_ALLY_SLOTS,
+    K_WEAPONS_MELEE as _ENTITY_K_WEAPONS_MELEE,
     MODEL_TYPE_BIN_SIZE,
     MODEL_TYPE_CONT_SIZE,
     OBS_PHASE_IDS,
@@ -391,7 +392,7 @@ class ObservationBuilder:
     #: un encodeur PARTAGÉ (le coût est en compute, pas en poids — §3.4). Tout dépassement reste
     #: LOGUÉ : le jour où un roster dépasse K, on le sait au lieu de le subir.
     K_WEAPONS_RANGED = 10
-    K_WEAPONS_MELEE = 10
+    K_WEAPONS_MELEE = _ENTITY_K_WEAPONS_MELEE  # source unique : observation_entities.K_WEAPONS_MELEE
     K_WEAPONS = K_WEAPONS_RANGED + K_WEAPONS_MELEE
     #: Types de figurines par unité (profil défensif + rôle + effectif du type), des DEUX côtés.
     #: Mesuré : jusqu'à 5 types défensifs distincts par escouade.
