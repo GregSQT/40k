@@ -317,6 +317,13 @@ def handle_charge(
 
             real_colliding_units = []
             for uid, pos_before in colliding_units_before.items():
+                # A charge lands in engagement with the target — the charger sharing the target's
+                # anchor hex is the expected outcome, not a collision. Only ally-ally same-hex
+                # occupation is a genuine positioning error.
+                uid_player = state.unit_player.get(uid)
+                charger_player = state.unit_player.get(charge_unit_id)
+                if uid_player is not None and charger_player is not None and uid_player != charger_player:
+                    continue
                 if (uid in state.unit_positions and
                         state.unit_positions[uid] == (dest_col, dest_row) and
                         state.unit_positions[uid] == pos_before and

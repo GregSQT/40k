@@ -153,6 +153,19 @@ def _check_fall_back_move(state, line, action_desc, player, move_unit_id,
         **state.engagement_3d_kwargs(),
         subject_models=start_models,
     )
+    if not engaged_before and start_models:
+        # Per-model positions may be stale: the surviving model was at the squad's rear when
+        # frontline models were killed by enemy fire. Their last logged position is no longer
+        # representative of the squad's engagement state. Retry on the anchor — if the anchor
+        # says engaged, trust it over the stale per-model data.
+        engaged_before = is_within_engine_engagement_zone(
+            move_unit_id, state.unit_player, positions_before, unit_hp_at_movement,
+            engagement_zone=_get_engagement_zone_for_analyzer(),
+            position_override=(start_col, start_row),
+            positions_by_model=state.positions_by_model, unit_base=state.unit_base,
+            **state.engagement_3d_kwargs(),
+            subject_models=None,
+        )
     if not engaged_before:
         stats['flee_from_unengaged'][player] += 1
         if stats['first_error_lines']['flee_from_unengaged'][player] is None:
@@ -303,6 +316,10 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
 
         real_colliding_units = []
         for uid in colliding_units:
+            uid_player = state.unit_player.get(uid)
+            mover_player = state.unit_player.get(move_unit_id)
+            if uid_player is not None and mover_player is not None and uid_player != mover_player:
+                continue
             if uid in state.unit_positions and state.unit_positions[uid] == (dest_col, dest_row):
                 real_colliding_units.append(uid)
         if real_colliding_units:
@@ -625,6 +642,12 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
 
         real_colliding_units = []
         for uid, pos_before in colliding_units_before.items():
+            # Enemy units sharing an anchor hex is expected when both are in engagement range —
+            # the anchor is the squad centroid, not a per-model footprint.
+            uid_player = state.unit_player.get(uid)
+            mover_player = state.unit_player.get(move_unit_id)
+            if uid_player is not None and mover_player is not None and uid_player != mover_player:
+                continue
             if (uid in state.unit_positions and
                     state.unit_positions[uid] == (dest_col, dest_row) and
                     state.unit_positions[uid] == pos_before and

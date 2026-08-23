@@ -141,6 +141,41 @@ def test_fall_back_that_stays_engaged_is_counted(tmp_path):
     assert stats["move_distance_over_limit"]["flee"][1] == 0
 
 
+def test_stale_permodel_positions_do_not_trigger_false_positive(tmp_path):
+    """Faux positif 09.07 : la position périmée du modèle survivant masque l'engagement.
+
+    Scénario réaliste : une escouade de 2 figurines dont la frontale (#1) est au contact de
+    l'ennemi et l'arrière (#0) en est à 11 subhex (hors EZ). L'ennemi tue #1. L'escouade bat
+    en retraite depuis son ancre (START = (50,50), à 8 subhex de l'ennemi = dans l'EZ).
+    surviving_start_models({'0': REAR, '1': NEAR}, {'0': dest}) = {'0': REAR}.
+    Le check per-figurine mesure REAR (11 > 10) → « pas engagée » → faux positif.
+    Le fallback sur l'ancre (8 ≤ 10) doit corriger.
+    """
+    # REAR : hors EZ de l'ennemi (11 subhex), dans le budget fled depuis LEGAL_DEST (11 subhex).
+    REAR = (50, 69)  # distance ENEMY=11>10, distance LEGAL_DEST=11<=30
+
+    # Première action : logue les deux figurines (REAR + START = frontale).
+    prev_models_line = (
+        f"[10:00:02] E1 T1 P1 MOVE : Unit 1{_xy(START)} MOVED from {_xy(START)} to {_xy(START)}"
+        f" [R:+0.0] [MODELS: 1#0@({REAR[0]},{REAR[1]}) 1#1@({START[0]},{START[1]})] [SUCCESS]\n"
+    )
+    # Fall-back : seul #0 survit (#1 tué par tirs adverses). Ancre reste START.
+    # La destination de #0 est à 11 subhex de REAR → dans le budget.
+    fled_line = (
+        f"[10:00:03] E1 T2 P1 MOVE : Unit 1{_xy(START)} FLED from {_xy(START)} to {_xy(LEGAL_DEST)}"
+        f" [R:+0.0] [MODELS: 1#0@({LEGAL_DEST[0]},{LEGAL_DEST[1]})] [SUCCESS]\n"
+    )
+    stats = _stats(tmp_path, prev_models_line + fled_line)
+    # surviving_start_models({'0': REAR, '1': START}, {'0': LEGAL_DEST}) = {'0': REAR}
+    # Per-model : REAR à 11 > 10 de ENEMY → sans fix : flee_from_unengaged = 1
+    # Avec fix (fallback ancre START à 8 ≤ 10 de ENEMY) : flee_from_unengaged = 0
+    assert stats["flee_from_unengaged"][1] == 0, (
+        "L'ancre START est dans la zone d'engagement — le fallback doit supprimer le faux positif"
+    )
+    assert stats["flee_still_engaged"][1] == 0
+    assert stats["move_distance_over_limit"]["flee"][1] == 0
+
+
 def test_the_violations_reach_the_MOVE_error_total_of_the_summary(tmp_path):
     """Un compteur qui n'entre dans aucun total est un compteur que personne ne lira.
 
