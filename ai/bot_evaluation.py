@@ -693,7 +693,7 @@ def _build_eval_obs_normalizer_for_worker(
         return None
     if not model_path:
         raise RuntimeError("VecNormalize enabled but model_path not provided for worker")
-    from ai.vec_normalize_utils import normalize_observation_for_inference, get_vec_normalize_path
+    from ai.vec_normalize_utils import get_vec_normalize_path
 
     # Obs Dict (pipeline squad spatial, tenseurs d'entites V11 §0.30) : VecNormalize a ete
     # entrainee avec norm_obs_keys=["global_cont"] — les tenseurs d'entites sont normalises
@@ -723,7 +723,7 @@ def _build_eval_obs_normalizer_for_worker(
         obs_arr = np.asarray(obs, dtype=np.float32)
         if obs_arr.ndim == 1:
             obs_arr = obs_arr.reshape(1, -1)
-        normalized = normalize_observation_for_inference(obs_arr, model_path)
+        normalized = _dict_normalizer().normalize_obs(obs_arr)
         return np.asarray(normalized, dtype=np.float32).squeeze()
 
     return _normalize

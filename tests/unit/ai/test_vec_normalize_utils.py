@@ -6,6 +6,23 @@ import numpy as np
 from ai import vec_normalize_utils
 
 
+class _FakeVN:
+    """VecNormalize stub picklable pour tests non-dict normalizer."""
+
+    def __init__(self, mean, var, epsilon=1e-8, clip_obs=10.0):
+        self.mean = mean
+        self.var = var
+        self.epsilon = epsilon
+        self.clip_obs = clip_obs
+
+    def normalize_obs(self, obs):
+        return np.clip(
+            (obs - self.mean) / np.sqrt(self.var + self.epsilon),
+            -self.clip_obs,
+            self.clip_obs,
+        )
+
+
 def test_get_vec_normalize_path_uses_model_directory() -> None:
     model_path = "/tmp/models/agent/model.zip"
     result = vec_normalize_utils.get_vec_normalize_path(model_path)
@@ -171,14 +188,9 @@ def test_worker_normalizer_derives_its_stats_from_the_evaluated_model(tmp_path) 
 
     # (2) Chemin Box : le pkl lu est celui dérivé du ZIP du modèle évalué.
     model_path = str(tmp_path / "eval_snapshot.zip")
-    vec_obj = SimpleNamespace(
-        obs_rms=SimpleNamespace(mean=np.array([1.0, 2.0]), var=np.array([1.0, 4.0])),
-        epsilon=1e-8,
-        clip_obs=10.0,
-        norm_obs=True,
-    )
+
     with open(tmp_path / "eval_snapshot_vec_normalize.pkl", "wb") as f:
-        pickle.dump(vec_obj, f)
+        pickle.dump(_FakeVN(np.array([1.0, 2.0]), np.array([1.0, 4.0])), f)
     normalizer = bot_evaluation._build_eval_obs_normalizer_for_worker(
         None, model_path, True, True
     )
@@ -193,3 +205,38 @@ def test_worker_normalizer_derives_its_stats_from_the_evaluated_model(tmp_path) 
     assert missing is not None
     with pytest.raises(RuntimeError, match=r"other_model_vec_normalize\.pkl"):
         missing({"global_cont": np.zeros(3, dtype=np.float32)})
+
+
+def test_build_snapshot_normalizer_uses_cached_vn_for_array_obs(tmp_path) -> None:
+    """build_snapshot_normalizer ne recharge pas le pkl à chaque appel (non-dict path).
+
+    Avant le fix, la branche non-dict appelait normalize_observation_for_inference qui
+    ouvre et dépickle le pkl à chaque inférence, ignorant le vn mis en cache.
+    Après le fix, les deux chemins passent par vn.normalize_obs() sur l'objet déjà chargé.
+    """
+    load_count = [0]
+    real_load = pickle.load
+
+    def counting_load(f):
+        load_count[0] += 1
+        return real_load(f)
+
+    snapshot_path = str(tmp_path / "snapshot.zip")
+    pkl_path = tmp_path / "snapshot_vec_normalize.pkl"
+    with open(pkl_path, "wb") as f:
+        pickle.dump(_FakeVN(np.array([1.0, 2.0]), np.array([1.0, 4.0])), f)
+
+    import unittest.mock as mock
+
+    with mock.patch("pickle.load", side_effect=counting_load):
+        normalizer = vec_normalize_utils.build_snapshot_normalizer(
+            snapshot_path, vec_normalize_enabled=True, vec_normalize_eval_enabled=True
+        )
+        assert normalizer is not None
+        obs = np.array([2.0, 6.0], dtype=np.float32)
+        out1 = normalizer(obs)
+        out2 = normalizer(obs)
+
+    assert load_count[0] == 1, f"pkl chargé {load_count[0]} fois au lieu de 1"
+    assert np.allclose(out1, np.array([1.0, 2.0], dtype=np.float32), atol=1e-5)
+    assert np.array_equal(out1, out2)
