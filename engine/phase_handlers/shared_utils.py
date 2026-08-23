@@ -13407,7 +13407,7 @@ def _coherency_seat_is_muet(game_state: Dict[str, Any], player: int) -> bool:
     """
     if bool(game_state.get("gym_training_mode", False)):
         return False
-    player_types = game_state.get("player_types") or {}
+    player_types = require_key(game_state, "player_types")
     return player_types.get(str(player)) == "ai"
 
 
@@ -13435,7 +13435,6 @@ def arm_next_coherency_pending(game_state: Dict[str, Any]) -> bool:
                 return True
     game_state.pop("pending_coherency_removal_queue", None)
     game_state.pop("pending_coherency_removal", None)
-    game_state.pop("pending_coherency_removal_v11", None)
     return False
 
 
@@ -13473,14 +13472,17 @@ def end_of_turn_regain_coherency_all_squads(
 
     Sièges muets (bot PvE, cf. `_coherency_seat_is_muet`) : tranchés par le critère géométrique
     existant (figurine la plus éloignée du centroïde). Retrait immédiat, sans attente.
-    Sièges actifs (agent gym, joueur humain PvP) : l'escouade est ajoutée à la queue
-    `pending_coherency_removal_queue`. `arm_next_coherency_pending` arme le premier pending.
-    Les retraits muets sont retournés pour journalisation immédiate (fight_handlers) ; les
+    Sièges actifs du joueur COURANT (agent gym, joueur humain PvP) : l'escouade est ajoutée à
+    la queue `pending_coherency_removal_queue`. `arm_next_coherency_pending` arme le premier
+    pending. Sièges actifs de l'ADVERSAIRE : résolus géométriquement, car le flux courant
+    n'a pas de mécanisme pour céder la main à l'adversaire en milieu de progression de phase.
+    Les retraits auto sont retournés pour journalisation immédiate (fight_handlers) ; les
     retraits manuels sont journalisés un par un lors de la résolution.
 
-    Retourne {squad_id: [model_ids retires]} pour les escouades MUETTES ayant perdu une figurine.
+    Retourne {squad_id: [model_ids retires]} pour les escouades résolues AUTOMATIQUEMENT.
     """
     squad_models = require_key(game_state, "squad_models")
+    current_player = int(require_key(game_state, "current_player"))
     removed_by_squad: Dict[str, List[str]] = {}
     queue: List[str] = []
     # Snapshot trie : `destroy_model` mute `squad_models`/`models_cache` sous l'iteration, et
@@ -13495,7 +13497,7 @@ def end_of_turn_regain_coherency_all_squads(
             owner = _squad_owner_player(game_state, squad_id)
         except KeyError:
             continue  # escouade hors table (réserves) — pas encore sur le champ
-        if _coherency_seat_is_muet(game_state, owner):
+        if _coherency_seat_is_muet(game_state, owner) or owner != current_player:
             removed = end_of_turn_coherency_removal(game_state, squad_id)
             if removed:
                 removed_by_squad[squad_id] = removed

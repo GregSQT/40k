@@ -20,10 +20,13 @@ import pytest
 
 from engine.phase_handlers import fight_handlers
 from engine.phase_handlers.shared_utils import (
+    _coherency_seat_is_muet,
+    arm_next_coherency_pending,
     end_of_turn_coherency_removal,
     end_of_turn_regain_coherency_all_squads,
     validate_squad_coherency,
 )
+from shared.data_validation import ConfigurationError
 
 
 def _gs(positions, squad_id="1", player=1):
@@ -36,8 +39,9 @@ def _gs(positions, squad_id="1", player=1):
     models_cache = {
         mid: {
             "col": int(col), "row": int(row), "level": 0, "player": player,
-            "squad_id": squad_id, "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1,
-            "orientation": 0,
+            "squad_id": squad_id, "HP_CUR": 1, "HP_MAX": 2,
+            "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
+            "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
         }
         for mid, (col, row) in zip(mids, positions)
     }
@@ -61,6 +65,8 @@ def _gs(positions, squad_id="1", player=1):
         # Gym (gym_training_mode=True) rend les sieges non-muets (l'agent repond par masque) ;
         # human PvP aussi. Ici on simule le cas PvE ou les deux joueurs sont des IA.
         "player_types": {"1": "ai", "2": "ai"},
+        # current_player requis par end_of_turn_regain_coherency_all_squads pour filtrer la queue.
+        "current_player": player,
         # Valeurs de config/game_config.json, deja converties en subhex par w40k_core a l'init.
         "config": {"game_rules": {
             "unit_model_cohesion_range": 2,
@@ -103,12 +109,18 @@ def test_coherent_squad_is_untouched():
 
 
 def test_both_players_are_processed():
-    """La regle vise « units on the battlefield » : les escouades des DEUX joueurs sont traitees."""
+    """La regle vise « units on the battlefield » : les escouades des DEUX joueurs sont traitees.
+
+    Ici les deux sieges sont muets (AI) → retrait geometrique immediat pour les deux.
+    current_player=1 : l'escouade de player 2 est aussi resolue automatiquement.
+    """
     gs = _gs([(10, 10), (11, 10), (30, 40)], squad_id="1", player=1)
     gs2 = _gs([(20, 20), (21, 20), (5, 50)], squad_id="2", player=2)
     gs["models_cache"].update(gs2["models_cache"])
     gs["squad_models"].update(gs2["squad_models"])
     gs["units_cache"].update(gs2["units_cache"])
+    # current_player=1 : les deux escouades sont muetes → les deux resolues geometriquement.
+    gs["current_player"] = 1
 
     removed = end_of_turn_regain_coherency_all_squads(gs)
 
@@ -323,3 +335,74 @@ def test_logged_anchor_is_the_post_removal_one():
         gs["units_cache"]["1"]["col"], gs["units_cache"]["1"]["row"]
     ), "l'ancre journalisee doit etre celle que le cache porte APRES le retrait"
     assert (entry["col"], entry["row"]) != (30, 40)
+
+
+# --- (f) FIXES code-review : double-pop v11, T1 player_types, queue inter-joueurs ---------------
+
+
+def test_arm_next_coherency_pending_preserves_v11_flag():
+    """VERROU fix #1 : arm_next_coherency_pending ne doit pas consommer pending_coherency_removal_v11.
+
+    Le flag est lu par _handle_select_coherency_removal APRES arm_next_coherency_pending :
+    le pop premature causait toujours _fight_end_progression_v10 meme en pipeline V11.
+    """
+    gs = {
+        "pending_coherency_removal_queue": [],
+        "pending_coherency_removal_v11": True,
+    }
+    result = arm_next_coherency_pending(gs)
+    assert result is False
+    assert "pending_coherency_removal_v11" in gs, (
+        "arm_next_coherency_pending ne doit pas pop pending_coherency_removal_v11"
+    )
+
+
+def test_coherency_seat_is_muet_raises_without_player_types():
+    """VERROU fix #2 (T1) : player_types absent en mode non-gym → ConfigurationError explicite.
+
+    Sans ce fix, .get('player_types') or {} retournait {} et le siege n'etait jamais considere
+    muet, laissant la queue manuelle non drainee et le tour en suspens indefiniment.
+    """
+    gs = {"gym_training_mode": False}
+    with pytest.raises(ConfigurationError):
+        _coherency_seat_is_muet(gs, 1)
+
+
+def test_opponent_non_mute_squads_resolved_geometrically():
+    """VERROU fix #3 : en PvP, l'escouade adversaire incoherente est resolue geometriquement.
+
+    Avant le fix, les deux escouades (joueurs 1 et 2, sièges human donc non muets) allaient dans
+    la meme queue et le joueur courant desginait pour l'adversaire.
+    Apres le fix : seulement l'escouade du current_player va en queue ; l'adversaire est auto-traite.
+    """
+    gs = _gs([(10, 10), (11, 10), (30, 40)], squad_id="1", player=1)
+    gs["player_types"] = {"1": "human", "2": "human"}
+    gs["current_player"] = 1
+
+    # Escouade adversaire (player 2) incoherente, non muette
+    sq2_positions = [(20, 20), (21, 20), (5, 50)]
+    mids2 = [f"2#{i}" for i in range(3)]
+    for mid, (col, row) in zip(mids2, sq2_positions):
+        gs["models_cache"][mid] = {
+            "col": col, "row": row, "level": 0, "player": 2,
+            "squad_id": "2", "HP_CUR": 1, "HP_MAX": 2,
+            "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
+            "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+        }
+    gs["squad_models"]["2"] = list(mids2)
+    gs["units_cache"]["2"] = {
+        "col": sq2_positions[0][0], "row": sq2_positions[0][1], "player": 2,
+        "HP_CUR": 3, "BASE_SHAPE": "round", "BASE_SIZE": 1,
+        "orientation": 0, "occupied_hexes": set(), "occupied_hexes_by_model": {},
+    }
+
+    auto_removed = end_of_turn_regain_coherency_all_squads(gs)
+
+    # Escouade adversaire resolue automatiquement
+    assert "2" in auto_removed, "l'escouade adversaire non muette doit etre resolue geometriquement"
+    assert validate_squad_coherency(gs, "2")
+    # Escouade du joueur courant en queue manuelle (non resolue automatiquement)
+    assert "1" not in auto_removed, "l'escouade du joueur courant ne doit pas etre auto-resolue"
+    assert gs.get("pending_coherency_removal") is not None, (
+        "l'escouade du joueur courant doit etre en attente de designation manuelle"
+    )
