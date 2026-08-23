@@ -227,7 +227,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | training | ✅ fix vec-normalize non-dict cache bypass (2026-08-23) — VecNormalize chemin non-dict utilisait le cache brut au lieu de vn.normalize_obs() | — | ⚡ |
 | moteur+training | ✅ §0.69 choix d'arme CC par l'agent (2026-08-23) — FIGHT_WEAPON_SLOT + pending_fight_weapon_select ; agent sélectionne l'arme de mêlée via masque dédié | — | 🚫 |
 | tests | ✅ verrou combat à vide sans pending_fight_weapon_select (2026-08-23) — test_combat_a_vide_ne_pose_pas_pending_fight_weapon_select : squad pool 12.04, cibles mortes → résolution directe sans §0.69 ; rouge/vert prouvés | — | ⚡ |
-| analyzer | ✅ Faux positifs flee-unengaged + collisions inter-camps (2026-08-23) — fallback ancre si surviving_start_models retourne position périmée (frontale tuée avant fall-back) ; skip paires ennemies dans move_normal/move_fled/charge ; 52 FP éliminés, 29 tests verts | — | ⚡ |
+| analyzer | ✅ Faux positifs flee-unengaged + collisions inter-camps (2026-08-23) — fallback ancre si surviving_start_models retourne position périmée (frontale tuée avant fall-back) ; skip paires ennemies dans move_normal/move_fled/charge ; bypass [DESPERATE ESCAPE] quand géométrie inaccessible ; 53 FP éliminés, 8+3 tests verts | — | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
 
 ### Bloqués par une décision utilisateur
