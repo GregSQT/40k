@@ -1683,10 +1683,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
             if os.path.exists(_temp_vec_path):
                 os.remove(_temp_vec_path)
         if _temp_model_path and os.path.exists(_temp_model_path):
-            try:
-                os.remove(_temp_model_path)
-            except OSError:
-                pass
+            os.remove(_temp_model_path)
 
     # Agrégation (section 2.9) — passe unique sur results_list.
     results: Dict[str, Any] = {}
@@ -1931,7 +1928,6 @@ def discover_checkpoint_archives(
         return []
 
     pattern = re.compile(r'^' + re.escape(agent_key) + r'_\d+_robust_(\d+\.\d+)\.zip$')
-    from sb3_contrib import MaskablePPO
 
     compatible: List[Tuple[str, str]] = []
     for fname in os.listdir(agent_dir):
@@ -2086,7 +2082,9 @@ def evaluate_against_checkpoints(
 
         wins, losses, draws, total = 0, 0, 0, 0
         for sc_idx, sc_file in enumerate(scenario_list):
-            sc_eps = max(1, _base_eps + (1 if sc_idx < _extra_eps else 0))
+            sc_eps = _base_eps + (1 if sc_idx < _extra_eps else 0)
+            if sc_eps == 0:
+                continue
             unit_registry = UnitRegistry()
             base_env = W40KEngine(
                 rewards_config=rewards_config_name,

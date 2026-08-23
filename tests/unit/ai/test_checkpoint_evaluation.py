@@ -64,14 +64,12 @@ def test_discover_finds_compatible_archives(tmp_path):
         assert zip_path.endswith(f"_robust_{label}.zip")
 
 
-def test_discover_includes_all_pkl_paired_archives(tmp_path, monkeypatch):
+def test_discover_includes_all_pkl_paired_archives(tmp_path):
     """discover retourne toutes les archives ayant un .pkl, quelle que soit leur architecture.
 
     La vérification §12.15 (RuntimeError Missing key) a été déplacée dans
     evaluate_against_checkpoints pour éviter un double chargement du modèle.
     """
-    monkeypatch.setattr("sb3_contrib.MaskablePPO.load", lambda path, **kw: object())
-
     agent_dir = tmp_path / "MyAgent"
     agent_dir.mkdir()
 
@@ -380,3 +378,83 @@ def test_evaluate_against_checkpoints_passes_snapshot_label(tmp_path, monkeypatc
         )
 
     assert captured_kwargs.get("self_play_snapshot_label") == score_label
+
+
+# ── evaluate_against_checkpoints — sc_eps budget ─────────────────────────────
+
+
+def test_evaluate_against_checkpoints_respects_n_episodes_budget(tmp_path):
+    """Avec n_episodes=2 et 3 scénarios, exactement 2 épisodes doivent être joués.
+
+    Avant le fix, max(1, 0)=1 forçait le troisième scénario à tourner même avec
+    sc_eps=0, gonflant silencieusement le budget demandé.
+    """
+    from unittest.mock import MagicMock, patch
+
+    from ai.bot_evaluation import evaluate_against_checkpoints
+
+    zip_path = str(tmp_path / "ArmageddonAgent_12345_robust_0.8741.zip")
+    open(zip_path, "w").close()
+
+    # 3 scénarios distincts
+    for i in range(3):
+        open(str(tmp_path / f"scenario_{i}.json"), "w").close()
+    scenario_files = [str(tmp_path / f"scenario_{i}.json") for i in range(3)]
+
+    reset_calls = []
+
+    class _CountingEnv:
+        def __init__(self, env, **kwargs):
+            pass
+
+        def reset(self, seed=None):
+            reset_calls.append(seed)
+            return (np.zeros(4, dtype=np.float32), {})
+
+        def step(self, action):
+            return (np.zeros(4, dtype=np.float32), 0.0, True, False, {"winner": "p1", "controlled_player": "p1"})
+
+        def get_wrapper_attr(self, name):
+            return lambda: np.ones(10, dtype=bool)
+
+        def close(self):
+            pass
+
+    fake_model = MagicMock()
+    fake_model.predict.return_value = (np.array(0), None)
+
+    training_cfg = {
+        "agent_seat_mode": "p1",
+        "vec_normalize": {"enabled": False},
+        "vec_normalize_eval": {"enabled": False},
+    }
+    fake_config = MagicMock()
+    fake_config.load_agent_training_config.return_value = training_cfg
+
+    with (
+        patch("config_loader.get_config_loader", return_value=fake_config),
+        patch("config_loader.get_max_turns", return_value=10),
+        patch("ai.training_utils.setup_imports", return_value=(MagicMock(), None)),
+        patch(
+            "ai.training_utils.get_scenario_list_for_phase",
+            return_value=scenario_files,
+        ),
+        patch("sb3_contrib.MaskablePPO.load", return_value=fake_model),
+        patch("ai.bot_evaluation._build_eval_obs_normalizer_for_worker", return_value=None),
+        patch("ai.bot_evaluation._NormalizedFrozenModel", side_effect=lambda m, n: m),
+        patch("ai.env_wrappers.BotControlledEnv", _CountingEnv),
+        patch("sb3_contrib.common.wrappers.ActionMasker", side_effect=lambda env, fn: env),
+        patch("ai.unit_registry.UnitRegistry", return_value=MagicMock()),
+    ):
+        evaluate_against_checkpoints(
+            model_path=zip_path,
+            checkpoint_archives=[(zip_path, "0.8741")],
+            training_config_name="x1_long",
+            rewards_config_name="ArmageddonAgent",
+            n_episodes=2,
+            controlled_agent="ArmageddonAgent",
+        )
+
+    assert len(reset_calls) == 2, (
+        f"Attendu 2 épisodes (n_episodes=2 sur 3 scénarios), obtenu {len(reset_calls)}"
+    )
