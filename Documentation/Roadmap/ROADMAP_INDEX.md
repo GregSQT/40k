@@ -104,7 +104,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 
 | Sujets | Chantier | Fichier | Jalon | ⚡/🚫 |
 |---|---|---|---|---|
-| moteur | **P3-0** Cohérence 03.03 — choix joueur/agent | [moteur.md#p3-0](moteur.md#p3-0) | Prochain dégel `TOTAL_ACTION_SIZE` (attendu en J2 ; celui du 2026-08-17 est passé sans lui) | 🚫 |
+| moteur | ✅ **P3-0** Cohérence 03.03 — choix joueur/agent — livré 2026-08-23 | [moteur.md#p3-0](moteur.md#p3-0) | — | ✅ |
 | moteur | **T7** Unification validation déploiement | [moteur.md#t7](moteur.md#t7) | Fix faux — re-analyser avant | 🚫 |
 | moteur | **Phase B** Observation des niveaux | [moteur.md#phase-b](moteur.md#phase-b) | Phase A' validée + LoS 3D complet | 🚫 |
 | training+bot | **É9** Second siège + second scénario | [training.md#e9](training.md#e9) | J4 — entraînement bot satisfaisant | 🚫 |
