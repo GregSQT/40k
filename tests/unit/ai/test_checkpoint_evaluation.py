@@ -306,3 +306,77 @@ def test_log_checkpoint_empty_does_nothing():
     writer = t.writer
     assert isinstance(writer, _DummyWriter)
     assert writer.scalars == []
+
+
+# ── evaluate_against_checkpoints — self_play_snapshot_label ──────────────────
+
+
+def test_evaluate_against_checkpoints_passes_snapshot_label(tmp_path, monkeypatch):
+    """BotControlledEnv doit recevoir self_play_snapshot_label=score_label (correctif P1)."""
+    from unittest.mock import MagicMock, patch
+
+    from ai.bot_evaluation import evaluate_against_checkpoints
+
+    score_label = "P0"
+    zip_path = str(tmp_path / "ArmageddonAgent_12345_robust_0.8741.zip")
+    open(zip_path, "w").close()
+    open(str(tmp_path / "scenario.json"), "w").close()
+
+    captured_kwargs: dict = {}
+
+    class _FakeBotControlledEnv:
+        def __init__(self, env, **kwargs):
+            captured_kwargs.update(kwargs)
+
+        def reset(self, seed=None):
+            return (np.zeros(4, dtype=np.float32), {})
+
+        def step(self, action):
+            return (np.zeros(4, dtype=np.float32), 0.0, True, False, {"winner": "p1", "controlled_player": "p1"})
+
+        def get_wrapper_attr(self, name):
+            return lambda: np.ones(10, dtype=bool)
+
+        def close(self):
+            pass
+
+    fake_model = MagicMock()
+    fake_model.predict.return_value = (np.array(0), None)
+
+    training_cfg = {
+        "agent_seat_mode": "p1",
+        "vec_normalize": {"enabled": False},
+        "vec_normalize_eval": {"enabled": False},
+    }
+    fake_config = MagicMock()
+    fake_config.load_agent_training_config.return_value = training_cfg
+
+    fake_base_env = MagicMock()
+    fake_base_env.get_action_mask.return_value = np.ones(10, dtype=bool)
+    fake_engine = MagicMock(return_value=fake_base_env)
+
+    with (
+        patch("config_loader.get_config_loader", return_value=fake_config),
+        patch("config_loader.get_max_turns", return_value=10),
+        patch("ai.training_utils.setup_imports", return_value=(fake_engine, None)),
+        patch(
+            "ai.training_utils.get_scenario_list_for_phase",
+            return_value=[str(tmp_path / "scenario.json")],
+        ),
+        patch("sb3_contrib.MaskablePPO.load", return_value=fake_model),
+        patch("ai.bot_evaluation._build_eval_obs_normalizer_for_worker", return_value=None),
+        patch("ai.bot_evaluation._NormalizedFrozenModel", side_effect=lambda m, n: m),
+        patch("ai.env_wrappers.BotControlledEnv", _FakeBotControlledEnv),
+        patch("sb3_contrib.common.wrappers.ActionMasker", side_effect=lambda env, fn: env),
+        patch("ai.unit_registry.UnitRegistry", return_value=MagicMock()),
+    ):
+        evaluate_against_checkpoints(
+            model_path=zip_path,
+            checkpoint_archives=[(zip_path, score_label)],
+            training_config_name="x1_long",
+            rewards_config_name="ArmageddonAgent",
+            n_episodes=1,
+            controlled_agent="ArmageddonAgent",
+        )
+
+    assert captured_kwargs.get("self_play_snapshot_label") == score_label

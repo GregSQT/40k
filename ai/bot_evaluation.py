@@ -2114,6 +2114,8 @@ def evaluate_against_checkpoints(
                 self_play_warmup_episodes=0,
                 self_play_n_envs=1,
                 self_play_snapshot_path=zip_path,
+
+                self_play_snapshot_label=score_label,
                 self_play_snapshot_frozen=True,
                 self_play_snapshot_device=device,
                 self_play_deterministic=True,
