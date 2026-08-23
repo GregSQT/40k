@@ -235,6 +235,7 @@ def test_regime_ramps_start_from_this_run_not_from_the_model_lifetime() -> None:
         self_play_total_episodes=100_000, self_play_warmup_episodes=5_000,
         self_play_n_envs=1, self_play_snapshot_path="snapshot.zip",
         self_play_snapshot_refresh_episodes=1, self_play_snapshot_device="cpu",
+        self_play_snapshot_label="test-snapshot",
     )
     assert wrapper._episode_index == 0
     assert wrapper._compute_pool_ratio_for_episode() == pytest.approx(0.0), (

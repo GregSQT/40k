@@ -801,8 +801,7 @@ class W40KMetricsTracker:
         
         # GAME DETAILED: Damage received - Defensive capability
         damage_received = require_key(tactical_data, 'damage_received')
-        if damage_received > 0:
-            self.writer.add_scalar('game_detailed/damage_received', damage_received, self.episode_count)
+        self.writer.add_scalar('game_detailed/damage_received', damage_received, self.episode_count)
         
         # GAME TACTICAL: Damage efficiency - Trade effectiveness
         if damage_received > 0 and damage_dealt > 0:

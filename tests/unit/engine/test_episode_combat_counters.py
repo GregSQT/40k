@@ -55,7 +55,7 @@ DEVASTATING = ["DEVASTATING_WOUNDS"]
 
 def _weapon(rng: int, name: str, rules: List[str]) -> Dict[str, Any]:
     return {"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "NB": 2, "RNG": rng,
-            "WEAPON_RULES": list(rules), "display_name": name}
+            "WEAPON_RULES": list(rules), "display_name": name, "code": name}
 
 
 def _unit(uid: int, player: int, col: int, row: int,
@@ -103,11 +103,19 @@ def _config(units: List[Dict[str, Any]], controlled_player: int,
 
 @pytest.fixture(autouse=True)
 def _stub_rewards(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Les recompenses exigent une config d'agent ; elles ne pesent pas sur les compteurs."""
+    """Les recompenses exigent une config d'agent ; elles ne pesent pas sur les compteurs.
+
+    build_squad_grid exige que la carte de cellules du BFS ait ete construite via
+    get_squad_action_mask_and_eligible_units. Dans ce harnais, l'observation n'est pas
+    l'objet du test et la grille peut etre nulle — le step s'appuie sur
+    _build_observation_and_mask directement (pas sur _build_observation), donc ce patch
+    cible build_squad_grid plutot que _build_observation.
+    """
+    from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
     monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
     monkeypatch.setattr(
-        W40KEngine, "_build_observation",
-        lambda self, *_a, **_k: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET),
+        ObservationBuilder, "build_squad_grid",
+        lambda self, *_a, **_k: np.zeros((GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32),
     )
 
 
@@ -288,9 +296,10 @@ def _ranged_episode(monkeypatch: pytest.MonkeyPatch,
     """
     return _play_until(
         monkeypatch, _ranged_units(), controlled_player,
-        require=lambda eng, _td: (_damage_of(eng, "shoot", controlled_player) > 0
-                                  and _attacks_of(eng, "combat", controlled_player) == 0),
-        what="un tir pur avec des degats",
+        require=lambda eng, td: (_damage_of(eng, "shoot", controlled_player) > 0
+                                 and _attacks_of(eng, "combat", controlled_player) == 0
+                                 and td.get("damage_received", 0) > 0),
+        what="un tir pur avec des degats des deux camps",
         charge_max_distance=1,
     )
 

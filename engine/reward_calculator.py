@@ -115,6 +115,13 @@ class RewardCalculator:
             game_state['last_reward_breakdown'] = reward_breakdown
             return 0.0
 
+        # Intermediate step of the two-step fight flow (squad_fight selected a target,
+        # waiting for FIGHT_WEAPON_SLOT). No acting unit yet — reward is 0 and deferred.
+        if isinstance(result, dict) and result.get("waiting_for_weapon_select"):
+            reward_breakdown['total'] = 0.0
+            game_state['last_reward_breakdown'] = reward_breakdown
+            return 0.0
+
         # Handle system responses (no unit-specific rewards)
         # BUT: If result contains action data (action, fromCol/toCol), it's an action that triggered
         # a phase transition, NOT a pure system response. Process it as an action.

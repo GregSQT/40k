@@ -318,6 +318,7 @@ def test_env_wrapper_ramp_is_the_curriculum_ramp() -> None:
         self_play_snapshot_path="snapshot.zip",
         self_play_snapshot_frozen=True,
         self_play_snapshot_device="cpu",
+        self_play_snapshot_label="test-snapshot",
     )
     for episode in (0, 20, 21, 60, 100, 500):
         wrapper._episode_index = episode
