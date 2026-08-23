@@ -57,6 +57,7 @@ from engine.macro_intents import (
     BASE_ZONE_INTENT,
     CHOICE_BASE,
     COHERENCY_SLOT_BASE,
+    COHERENCY_SLOT_COUNT,
     COHERENCY_SLOTS,
     DEPLOY_SLOT_BASE,
     DEPLOY_SLOTS,
@@ -509,9 +510,7 @@ class ActionDecoder:
         if pending_cr is not None:
             from engine.phase_handlers.shared_utils import _coherency_alive
             alive = _coherency_alive(game_state, str(pending_cr["squad_id"]))
-            from engine.observation_builder import ObservationBuilder
-            top_k = ObservationBuilder.SQUAD_TOP_K
-            for slot_i, _mid in enumerate(alive[:top_k]):
+            for slot_i, _mid in enumerate(alive[:COHERENCY_SLOT_COUNT]):
                 mask[COHERENCY_SLOT_BASE + slot_i] = True
             return mask, []
 
@@ -1136,11 +1135,10 @@ class ActionDecoder:
             from engine.phase_handlers.shared_utils import _coherency_alive
             slot_i = action_int - COHERENCY_SLOT_BASE
             alive = _coherency_alive(game_state, str(pending_cr["squad_id"]))
-            from engine.observation_builder import ObservationBuilder
-            if slot_i >= min(len(alive), ObservationBuilder.SQUAD_TOP_K):
+            if slot_i >= min(len(alive), COHERENCY_SLOT_COUNT):
                 raise ValueError(
                     f"convert_squad_action: COHERENCY_SLOT slot {slot_i} hors plage "
-                    f"(alive={len(alive)}, top_k={ObservationBuilder.SQUAD_TOP_K}) — "
+                    f"(alive={len(alive)}, top_k={COHERENCY_SLOT_COUNT}) — "
                     "rupture masque/commit"
                 )
             return {
