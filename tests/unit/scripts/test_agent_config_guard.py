@@ -34,10 +34,10 @@ def _strip_doc_keys(obj: Any) -> Any:
 
 
 def _changed_agent_configs(root: Path = PROJECT_ROOT) -> list[Path]:
-    """Fichiers .json sous config/agents/ modifiés dans le working tree vs HEAD."""
+    """Fichiers .json sous config/agents/ stagés (index) mais différents de HEAD."""
     result = subprocess.run(
         [
-            "git", "diff", "HEAD", "--name-only",
+            "git", "diff", "--cached", "HEAD", "--name-only",
             "--diff-filter=M", "--", "config/agents/",
         ],
         cwd=root,
@@ -65,7 +65,10 @@ def _head_json(path: Path, root: Path = PROJECT_ROOT) -> Any | None:
     )
     if result.returncode != 0:
         return None
-    return json.loads(result.stdout)
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"JSON invalide en HEAD pour {rel.as_posix()} : {exc}") from exc
 
 
 def _check_training_fields(root: Path = PROJECT_ROOT) -> list[str]:
@@ -75,7 +78,11 @@ def _check_training_fields(root: Path = PROJECT_ROOT) -> list[str]:
         head_obj = _head_json(path, root)
         if head_obj is None:
             continue
-        if _strip_doc_keys(head_obj) != _strip_doc_keys(json.loads(path.read_text(encoding="utf-8"))):
+        try:
+            wt_obj = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"JSON invalide dans le working tree pour {path.relative_to(root)} : {exc}") from exc
+        if _strip_doc_keys(head_obj) != _strip_doc_keys(wt_obj):
             failures.append(str(path.relative_to(root)))
     return failures
 
@@ -92,7 +99,7 @@ def agent_config_repo(tmp_path: Path) -> Path:
     """Dépôt git minimal avec une config d'agent commitée."""
     repo = tmp_path / "repo"
     repo.mkdir()
-    _git("init", "-q", "-b", "main", cwd=repo)
+    _git("init", "-q", cwd=repo)
     _git("config", "user.email", "t@t.t", cwd=repo)
     _git("config", "user.name", "t", cwd=repo)
 
@@ -155,6 +162,7 @@ def test_guard_passes_when_only_doc_key_changed(agent_config_repo: Path) -> None
     data["total_episodes_normal"] = "note documentaire mise à jour"
     data["nested"]["justification"] = "nouvelle raison"
     cfg.write_text(json.dumps(data), encoding="utf-8")
+    _git("add", "config/agents/agent_training_config.json", cwd=agent_config_repo)
 
     assert _check_training_fields(agent_config_repo) == []
 
@@ -166,6 +174,7 @@ def test_guard_fails_when_training_field_changed(agent_config_repo: Path) -> Non
     data["seed"] = 99999  # champ d'entraînement
     data["total_episodes_normal"] = "note mise à jour en même temps"  # doc-key
     cfg.write_text(json.dumps(data), encoding="utf-8")
+    _git("add", "config/agents/agent_training_config.json", cwd=agent_config_repo)
 
     failures = _check_training_fields(agent_config_repo)
     assert failures == ["config/agents/agent_training_config.json"]
@@ -177,6 +186,7 @@ def test_guard_fails_when_nested_training_field_changed(agent_config_repo: Path)
     data = json.loads(cfg.read_text(encoding="utf-8"))
     data["nested"]["learning_rate"] = 0.001
     cfg.write_text(json.dumps(data), encoding="utf-8")
+    _git("add", "config/agents/agent_training_config.json", cwd=agent_config_repo)
 
     failures = _check_training_fields(agent_config_repo)
     assert failures == ["config/agents/agent_training_config.json"]
