@@ -376,7 +376,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
     dest_col = int(move_match.group(6))
     dest_row = int(move_match.group(7))
     is_move_after_shooting = (
-        "MOVED AFTER SHOOTING" in action_desc.upper()
+        re.search(r'MOVED AFTER SHOOTING', action_desc, re.IGNORECASE) is not None
         or re.search(
             r'MOVED\s+\[MOVE_AFTER_SHOOTING(?::\d+)?\]\s+from',
             action_desc,
