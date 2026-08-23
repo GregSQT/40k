@@ -1,7 +1,7 @@
 # Perf — `generate_compact_formation` : test de case O(|empreinte|) au lieu de O(1)
 
 Constaté le 2026-07-19 en marge du fix V11 **T6-f** (commit de déploiement par-figurine).
-**Non corrigé — helper PvP partagé, gain non nécessaire au déblocage du training.**
+Livré le 2026-08-23 (piste 2) ; piste 1 mesurée non rentable — décision de ne pas implémenter.
 
 Une première passe d'optimisation A ÉTÉ faite dans T6-f (empreinte par translation d'offsets
 pré-calculés : 50 ms → 17,4 ms par formation, ×2,9). Ce document couvre ce qui RESTE.
@@ -10,7 +10,7 @@ pré-calculés : 50 ms → 17,4 ms par formation, ×2,9). Ce document couvre ce 
 
 ## Où va le temps aujourd'hui
 
-`generate_compact_formation` ([deployment_handlers.py:190](../../../engine/phase_handlers/deployment_handlers.py#L190))
+`generate_compact_formation` ([deployment_handlers.py](../../../engine/phase_handlers/deployment_handlers.py) — `def generate_compact_formation`)
 place les figurines d'une escouade par une spirale BFS depuis l'ancre : chaque case candidate
 est testée par `_legal_socle`, qui balaie l'empreinte du socle et vérifie, cellule par cellule,
 les bornes du plateau, l'appartenance à la zone de déploiement, les murs, la clairance verticale
@@ -101,16 +101,6 @@ test avec cycle rouge/vert dans `test_deployment_per_model_commit.py`.
 
 Jumeau traité au passage : `execute_deployment_action` recopiait les trois lignes de
 `_deploy_pool_set` et contournait donc la mémoïsation sur le chemin de commit PvP.
-
-## Pourquoi ce n'est pas fait
-
-- **Helper PvP partagé** : `generate_compact_formation` sert le déploiement par escouade du
-  front (`deploy_generate_formation`), pas seulement le gym. Une divergence de forme déplace
-  des socles à l'écran. Même raison que le revert de
-  [`pile_in_overrun_par_figurine.md`](pile_in_overrun_par_figurine.md) §6.
-- **Pas sur le chemin critique du training** : après T6-f, le déploiement coûte 1,37 s par
-  épisode (contre 1,03 s pour l'ancien code, qui ne plaçait aucune figurine). Le vrai bloqueur
-  du training est **T6-g / T6-h**, pas cette perf.
 
 ## Comment valider un fix
 

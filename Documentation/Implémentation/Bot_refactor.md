@@ -56,7 +56,7 @@ machine :
    l'entraînement** (§4.D.3), ce qui rend le témoin scellé indispensable et non plus seulement
    élégant.
 4. **FAIRE TOURNER la league jusqu'à P10 + 3 exploiters coûte ~11 jours de machine en continu**,
-   mesuré sur le régime réel du dépôt (4 h 01 pour 10 000 épisodes), évaluations non comprises.
+   mesuré sur le régime réel du dépôt (4 h 01 pour 10 000 épisodes, cf. AI_TRAINING.md §run 2026-08-10), évaluations non comprises.
    L'ÉCRIRE, en revanche, ne coûte rien de plus qu'une étape ordinaire (§4.E, §4.F) — la distinction
    commande tout l'ordre du §5. Et elle se bâtit sur un mécanisme de self-play **livré mais jamais
    exécuté une seule fois**.
@@ -121,7 +121,7 @@ explicitement si on l'active ailleurs. Profil `x1_selfplay` : **livré, JAMAIS e
 | `combined` panel refondu | **0,7433** | chantier `bots_refonte_panel.md` §12.14, 100 ép./bot, `robust_0.8721` |
 | Pire bot | **`racer` = 0,630** | idem |
 | Pire scénario | **0,6867** | idem |
-| Régime machine | **10 000 épisodes = 4 h 01** | ROADMAP §1 pt 6 |
+| Régime machine | **10 000 épisodes = 4 h 01** | AI_TRAINING.md §run 2026-08-10 |
 | Victoires par élimination | **0 sur 600 parties** | §12.1 du chantier |
 
 ⚠️ Chaque poids de `bot_movement_weights.json` porte un `_justification` avec son protocole
@@ -260,7 +260,7 @@ P3-5 → P3-6 → P4 → P5 (profil de validation) → **mesure de référence `
 self-play → refonte du panel de bots. La league proposée arrive donc **après** la mesure de
 référence, et la phase 2 self-play — sur laquelle elle se bâtit — n'a jamais tourné.
 
-Budget, au régime mesuré (10 000 ép. = 4 h 01, soit ~0,69 ép./s) :
+Budget, au régime mesuré (10 000 ép. = 4 h 01, soit ~0,69 ép./s, cf. AI_TRAINING.md §run 2026-08-10) :
 
 | Poste | Épisodes | Heures |
 |---|---|---|
@@ -726,7 +726,7 @@ suffisent :
    ont servi — c'est ce que les `_justification` de `bot_movement_weights.json` tiennent déjà pour
    les poids, et pour la même raison.
 
-⚠️ **Coût de la boucle** : un tour est dominé par le run (4 h 01 pour 10 000 épisodes). Ce n'est pas
+⚠️ **Coût de la boucle** : un tour est dominé par le run (4 h 01 pour 10 000 épisodes, cf. AI_TRAINING.md §run 2026-08-10). Ce n'est pas
 une boucle qu'on itère à la journée — d'où l'importance de (c) : détecter tôt qu'un run ne
 généralisera pas vaut plus cher que le détecter finement.
 

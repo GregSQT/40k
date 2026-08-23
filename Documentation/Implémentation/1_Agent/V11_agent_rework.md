@@ -190,7 +190,7 @@ livrable, donc sa précision. Le verrou est
 
 | Clé | `x1` (décision ci-dessus) | `x1_long` / `x1_selfplay` (HEAD) | Pourquoi l'écart |
 |---|---|---|---|
-| `bot_eval_freq` | **2000** (ancienne décision §0.14 : ~~4000~~) | **10000** | 20 évals sur 200 000 ép. ; à 5 000, les 40 évals coûteraient ~8 h 30 contre ~5 h 30 d'entraînement. |
+| `bot_eval_freq` | **2000** (ancienne décision §0.14 : ~~4000~~) | **10000** | 20 évals sur 200 000 ép. ; à 5 000, les 40 évals coûteraient ~8 h 30 contre ~23 h d'entraînement. |
 | `bot_eval_final` | 100 | **600** | Erreur-type d'un win-rate ~0,5 : **5,0 points** à 100 ép./bot (IC95 ±9,8), **2,0** à 600 (IC95 ±4,0). Coût borné, payé une fois (~1 h 20). |
 | `bot_eval_task_timeout_seconds` | 3600 | **7200** | Le timeout porte sur UN task ; à 600 ép./bot un task joue 150 épisodes au lieu de 25. 3600 s ne laisserait que 24 s/épisode contre 17 s **mesurées** sur parties dégénérées (§0.14). |
 | `bot_eval_intermediate` | 100 | 100 | Les évals intermédiaires sont du **monitoring** répété 20 fois, pas la mesure. |
