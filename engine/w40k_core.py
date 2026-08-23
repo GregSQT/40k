@@ -126,6 +126,7 @@ from engine.observation_builder import ObservationBuilder
 from engine.action_decoder import (
     DEPLOY_SLOT_CANDIDATES_CACHE_KEY,
     INGRESS_SLOT_CANDIDATES_CACHE_KEY,
+    PENDING_FIGHT_WEAPON_KEY,
     ActionDecoder,
 )
 from engine.debug_trace import CH_STEP, trace
@@ -7424,7 +7425,30 @@ class W40KEngine(gym.Env):
 
             squad_fight_restart_activation(self.game_state, squad_id)
             if best_target_id is not None:
-                squad_declare_fight(self.game_state, squad_id, best_target_id)
+                # V11 §0.69 : l'agent choisit l'arme — armer l'état intermédiaire au lieu de
+                # l'auto-sélection. Le masque du prochain step ouvrira exclusivement les slots
+                # FIGHT_WEAPON_* éligibles. La résolution intervient dans `squad_fight_weapon`.
+                from engine.phase_handlers.fight_handlers import fight_weapon_eligible_slots
+                slot_to_code = fight_weapon_eligible_slots(
+                    self.game_state, squad_id, best_target_id
+                )
+                if not slot_to_code:
+                    raise RuntimeError(
+                        f"squad_fight: aucune arme CC éligible pour {squad_id!r} vs "
+                        f"{best_target_id!r} — le masque n'aurait pas dû ouvrir ce combat"
+                    )
+                self.game_state[PENDING_FIGHT_WEAPON_KEY] = {
+                    "squad_id": squad_id,
+                    "target_id": best_target_id,
+                    "slot_to_code": slot_to_code,
+                }
+                return True, {
+                    "action": "squad_fight",
+                    "squad_id": squad_id,
+                    "target_squad_id": best_target_id,
+                    "waiting_for_weapon_select": True,
+                }
+            # Combat à vide (12.04/12.06) : aucune arme à choisir, résolution directe.
             _fight_alloc = build_manual_fight_allocation(self.game_state, squad_id)
             if _fight_alloc.get("waiting_for_player"):
                 return True, _fight_alloc
@@ -7437,23 +7461,72 @@ class W40KEngine(gym.Env):
 
             unit = get_unit_by_id(self.game_state, squad_id)
             if unit is None:
-                raise KeyError(f"Squad {squad_id} introuvable après combat")
+                raise KeyError(f"Squad {squad_id} introuvable après combat à vide")
             end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
-            # `end_activation` derive son `phase_complete` des pools V10 (charging/alternating)
-            # que `fight_phase_start` V11 ne construit plus : toujours vides -> toujours True.
-            # Signal mort d un sous-systeme retire. Il etait deja inerte avant ce fix (aucun
-            # `next_phase` ne l accompagne, donc aucune cascade) ; on l ecarte pour ne pas le
-            # laisser mentir sur l etat de la phase, dont l autorite est la machine V11.
             end_result.pop("phase_complete", None)
             result = {
                 **end_result,
                 "action": "squad_fight",
                 "squad_id": squad_id,
-                "target_squad_id": best_target_id,
+                "target_squad_id": None,
                 "fight_result": fight_result,
             }
-            # Draine l etape FIGHT si plus personne n est selectionnable, puis la CONSOLIDATION
-            # groupee (12.07) : le prochain masque reflete l etat reel de la machine.
+            self._fight_v11_gym_settle()
+
+        elif action_name == "squad_fight_weapon":
+            # V11 §0.69 : résolution du combat après sélection d'arme par l'agent.
+            # `pending_fight_weapon_select` a été posé par la branche `squad_fight` ci-dessus.
+            pending_fw = self.game_state.pop(PENDING_FIGHT_WEAPON_KEY, None)
+            if pending_fw is None:
+                raise RuntimeError(
+                    "squad_fight_weapon: aucun état pending_fight_weapon_select — "
+                    "le masque n'aurait pas dû ouvrir un FIGHT_WEAPON_SLOT"
+                )
+            fw_squad_id = str(pending_fw["squad_id"])
+            fw_target_id = str(pending_fw["target_id"])
+            weapon_slot = int(semantic["weapon_slot"])
+            slot_to_code = pending_fw["slot_to_code"]
+            if weapon_slot not in slot_to_code:
+                raise ValueError(
+                    f"squad_fight_weapon: slot {weapon_slot} non éligible "
+                    f"(éligibles : {sorted(slot_to_code.keys())}) — rupture masque/commit"
+                )
+            weapon_code = slot_to_code[weapon_slot]
+
+            from engine.phase_handlers.fight_handlers import (
+                build_manual_fight_allocation,
+                squad_declare_fight_weapon_qty,
+                squad_fight_weapon_qty_max,
+            )
+            max_qty = squad_fight_weapon_qty_max(
+                self.game_state, fw_squad_id, weapon_code, fw_target_id
+            )
+            squad_declare_fight_weapon_qty(
+                self.game_state, fw_squad_id, weapon_code, max_qty, fw_target_id
+            )
+
+            _fight_alloc = build_manual_fight_allocation(self.game_state, fw_squad_id)
+            if _fight_alloc.get("waiting_for_player"):
+                return True, _fight_alloc
+            if not _fight_alloc.get("done"):
+                raise RuntimeError(
+                    f"squad_fight_weapon: allocation combat non terminee en auto pour squad "
+                    f"{fw_squad_id!r} (defenseur non-IA ?) — action={_fight_alloc.get('action')}"
+                )
+            fight_result = _fight_alloc["shoot_result"]
+
+            unit = get_unit_by_id(self.game_state, fw_squad_id)
+            if unit is None:
+                raise KeyError(f"Squad {fw_squad_id!r} introuvable après combat (weapon select)")
+            end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
+            end_result.pop("phase_complete", None)
+            result = {
+                **end_result,
+                "action": "squad_fight",
+                "squad_id": fw_squad_id,
+                "target_squad_id": fw_target_id,
+                "fight_result": fight_result,
+            }
             self._fight_v11_gym_settle()
 
         else:

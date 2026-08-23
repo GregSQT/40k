@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """engine/macro_intents.py - Zone intent system Phase 2."""
 
-from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS
+from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE
 from shared.data_validation import require_key
 
 INTENT_INVADE = 0
@@ -132,8 +132,17 @@ OATH_SLOT_COUNT = SHOOT_SLOT_COUNT                             # 20 -> 1127-1146
 # `SHOOT_SLOT_COUNT` : le slot `i` designe la ligne `i`. Les desolidariser ferait pointer l'action
 # et l'observation sur deux escouades differentes sans que rien ne leve (invariant D1, cote allie).
 ACTIVATE_SLOT_BASE = OATH_SLOT_BASE + OATH_SLOT_COUNT          # 1337
-ACTIVATE_SLOT_COUNT = K_ALLY_SLOTS                             # 12 -> 1147-1158
-TOTAL_ACTION_SIZE = ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT   # 1349
+ACTIVATE_SLOT_COUNT = K_ALLY_SLOTS                             # 12 -> 1337-1348
+# V11 §0.69 — CHOIX DE L'ARME CC. L'agent choisissait la CIBLE de mêlée (FIGHT_SLOT) mais
+# l'arme était auto-sélectionnée par expected damage. Ce slot désigne l'arme slot j de la
+# liste collect_weapon_profiles("CC_WEAPONS") — même ordonnancement que l'obs melee j
+# (invariant D1 côté armes) — ouverte seulement si ≥1 figurine en engagement peut l'utiliser.
+# Flux gym : FIGHT_SLOT → arm pending_fight_weapon_select → FIGHT_WEAPON_SLOT → résolution.
+# Dense comme charge_pair_net (pas de pointeur D1 : les armes ne sont pas des entités-lignes).
+# ⚠️ Ces ids ne sont PAS dans `SQUAD_ACTION_SIZE` (comme Oath et Activate).
+FIGHT_WEAPON_SLOT_BASE = ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT  # 1349
+FIGHT_WEAPON_SLOT_COUNT = K_WEAPONS_MELEE                          # 10 -> 1349-1358
+TOTAL_ACTION_SIZE = FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT  # 1359
 
 MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)                # 0-1023
 SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1044
@@ -152,6 +161,9 @@ DEPLOY_STRATEGY_SLOTS = range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_STRATE
 CHOICE_SLOTS = range(CHOICE_BASE, CHOICE_BASE + CHOICE_COUNT)                       # 1311-1316
 OATH_SLOTS = range(OATH_SLOT_BASE, OATH_SLOT_BASE + OATH_SLOT_COUNT)                # 1317-1336
 ACTIVATE_SLOTS = range(ACTIVATE_SLOT_BASE, ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT)  # 1337-1348
+FIGHT_WEAPON_SLOTS = range(
+    FIGHT_WEAPON_SLOT_BASE, FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT
+)  # 1349-1358
 
 
 def is_zone_intent_action(action: int) -> bool:
@@ -249,8 +261,8 @@ def get_objective_control(zone_idx: int, game_state: dict) -> float:
 #: au premier slot ajoute.
 ACTION_FAMILIES = (
     "deploy_slot", "move_cell", "wait", "shoot_slot", "charge_slot", "charge_pair_slot",
-    "fight_slot", "fight_no_target", "zone_intent", "choice", "oath_slot",
-    "activate_slot",
+    "fight_slot", "fight_no_target", "shoot_indirect_slot", "zone_intent", "choice",
+    "oath_slot", "activate_slot", "fight_weapon_slot",
 )
 
 
@@ -305,6 +317,8 @@ def action_family(action_int: int, phase: str, *, setting_up: bool = False) -> s
     # qui est un fourre-tout, et seraient comptes comme des intentions de zone sans que rien ne leve.
     if a in ACTIVATE_SLOTS:
         return "activate_slot"
+    if a in FIGHT_WEAPON_SLOTS:
+        return "fight_weapon_slot"
     if phase == "deployment":
         if a in DEPLOY_SLOTS:
             return "deploy_slot"

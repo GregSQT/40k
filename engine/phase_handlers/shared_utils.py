@@ -43,7 +43,7 @@ from engine.action_log_utils import append_action_log, models_segment_for_unit
 from engine.spatial_grid import GRID_CELL_COUNT
 # `observation_entities` est une FEUILLE (aucun import moteur) : l'importer au niveau module ne
 # cree pas de cycle. `K_ALLY_SLOTS` y vit parce que l'espace d'action en derive (V11 §0.48 L2).
-from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS
+from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE
 from engine.agent_decision import set_pending_agent_decision
 # Primitives « hors table » : définies dans la couche BASSE (`spatial_relations` ne dépend que de
 # `hex_utils`) parce que les primitives de MESURE en dépendent elles-mêmes. Ré-exportées ici, où
@@ -12148,6 +12148,11 @@ SQUAD_ACTION_OATH_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20
 # precede l'activation, il n'est donc pas une micro-action d'activation et `build_squad_action_mask`
 # ne le produit jamais. Miroir verrouille par `tests/unit/engine/test_action_space_mirror.py`.
 SQUAD_ACTION_ACTIVATE_SLOT_COUNT = K_ALLY_SLOTS  # 12
+# V11 §0.69 — arme CC par slot d'obs melee. Même réserve que Oath et Activate : hors
+# SQUAD_ACTION_SIZE, il ne s'agit pas d'une micro-action d'activation d'escouade.
+# Source unique : observation_entities.K_WEAPONS_MELEE. Miroir verrouillé par
+# tests/unit/engine/test_action_space_mirror.py.
+SQUAD_ACTION_FIGHT_WEAPON_SLOT_COUNT = K_WEAPONS_MELEE  # 10 — armes CC
 
 
 def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:

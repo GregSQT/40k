@@ -1271,6 +1271,40 @@ def squad_fight_models_weapons(
     return models_weapons_for_squad(game_state, FIGHT_DECLARE_CTX, attacker_squad_id)
 
 
+def fight_weapon_eligible_slots(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    target_id: str,
+) -> Dict[int, str]:
+    """Slots d'armes CC éligibles pour le masque de sélection d'arme (V11 §0.69).
+
+    Retourne `{slot_j: weapon_code}` pour chaque slot de mêlée j dans
+    [0, K_WEAPONS_MELEE) où ≥1 figurine en engagement peut déclarer cette arme sur
+    `target_id`. L'ordre des slots est celui de `collect_weapon_profiles("CC_WEAPONS")`
+    (porteurs décroissants) — même ordonnancement que l'obs melee j (invariant D1 armes).
+
+    ⚠️ `squad_fight_restart_activation` DOIT avoir été appelé avant cette fonction :
+    `weapon_qty_max` retourne 0 si l'activation n'est pas démarrée.
+    """
+    from engine.observation_weapon_profiles import collect_weapon_profiles
+    from engine.observation_entities import K_WEAPONS_MELEE as _K
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive_models = [
+        models_cache[mid]
+        for mid in squad_models.get(squad_id, [])
+        if mid in models_cache
+    ]
+    profiles = collect_weapon_profiles(alive_models, "CC_WEAPONS")
+    result: Dict[int, str] = {}
+    for slot_j, (weapon, _) in enumerate(profiles[:_K]):
+        code = require_key(weapon, "code")
+        if weapon_qty_max(game_state, FIGHT_DECLARE_CTX, squad_id, code, target_id) > 0:
+            result[slot_j] = code
+    return result
+
+
 def squad_union_cc_weapons(
     game_state: Dict[str, Any], squad_id: str
 ) -> List[Dict[str, Any]]:
