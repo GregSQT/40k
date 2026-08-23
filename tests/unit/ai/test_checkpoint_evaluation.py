@@ -394,12 +394,13 @@ def test_evaluate_against_checkpoints_respects_n_episodes_budget(tmp_path):
     from ai.bot_evaluation import evaluate_against_checkpoints
 
     zip_path = str(tmp_path / "ArmageddonAgent_12345_robust_0.8741.zip")
-    open(zip_path, "w").close()
+    (tmp_path / "ArmageddonAgent_12345_robust_0.8741.zip").touch()
 
-    # 3 scénarios distincts
+    scenario_files = []
     for i in range(3):
-        open(str(tmp_path / f"scenario_{i}.json"), "w").close()
-    scenario_files = [str(tmp_path / f"scenario_{i}.json") for i in range(3)]
+        p = tmp_path / f"scenario_{i}.json"
+        p.touch()
+        scenario_files.append(str(p))
 
     reset_calls = []
 
