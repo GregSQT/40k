@@ -480,10 +480,6 @@ def generate_compact_formation(
             )
         placed.append((model_ids[j], chosen[0], chosen[1]))
         placed_socles.append(chosen[2])
-        for _mc, _mr in chosen[2].fp or set():
-            margin_blocked.add((_mc, _mr))
-            for _nb in get_neighbors(_mc, _mr):
-                margin_blocked.add(_nb)
     return placed
 
 
@@ -974,7 +970,9 @@ def deployment_build_squad_destinations_pool(
     for mid, c, r in plan:
         m = models_cache.get(str(mid))  # get allowed
         if m is None:
-            continue
+            raise KeyError(
+                f"deployment_build_squad_destinations_pool: model {mid} not in models_cache"
+            )
         combined.update(_model_footprint(game_state, m, int(c), int(r)))
 
     # Offsets cube relatifs à l'ancre-réf : invariants par translation rigide du bloc.
@@ -984,9 +982,13 @@ def deployment_build_squad_destinations_pool(
         x, y, z = offset_to_cube(int(cc), int(rr))
         offsets.append((x - rx, y - ry, z - rz))
 
-    # Le bloc entier translaté doit rester dans le pool : c'est l'érosion 03.02, la MÊME que
-    # pour l'empreinte d'une figurine, donc le même code.
-    kept = erode_pool_by_block_offsets(pool_set, offsets)
+    # Murs : mêmes critères que pour le pool par-figurine (ligne ~810).
+    # L'ancre de référence définit la géométrie du bloc ; wall_blocked_anchors filtre les
+    # positions où le socle de ref_model chevauche un mur.
+    pool_free = pool_set - wall_blocked_anchors(game_state, ref_model)
+    # Le bloc entier translaté doit rester dans pool_free : érosion 03.02, même code que
+    # pour l'empreinte d'une figurine.
+    kept = erode_pool_by_block_offsets(pool_free, offsets)
     return {"destinations": [(int(c), int(r)) for (c, r) in pool_set if (int(c), int(r)) in kept]}
 
 

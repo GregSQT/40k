@@ -1563,7 +1563,9 @@ def test_squad_destinations_erosion_matches_the_naive_definition():
     )
 
     def naive(gs, pool_set, plan):
+        from engine.phase_handlers.shared_utils import wall_blocked_anchors
         models_cache = gs["models_cache"]
+        ref_model = models_cache[str(plan[0][0])]
         combined = set()
         for mid, c, r in plan:
             m = models_cache.get(str(mid))
@@ -1574,11 +1576,13 @@ def test_squad_destinations_erosion_matches_the_naive_definition():
             tuple(a - b for a, b in zip(offset_to_cube(int(cc), int(rr)), (rx, ry, rz)))
             for cc, rr in combined
         ]
-        pool_cube = {offset_to_cube(int(c), int(r)) for c, r in pool_set}
+        # Murs exclus comme dans la fonction : ancres où le socle de ref_model chevauche un mur.
+        pool_free = pool_set - wall_blocked_anchors(gs, ref_model)
+        pool_free_cube = {offset_to_cube(int(c), int(r)) for c, r in pool_free}
         out = set()
-        for cc, rr in pool_set:
+        for cc, rr in pool_free:
             bx, by, bz = offset_to_cube(int(cc), int(rr))
-            if all((bx + ox, by + oy, bz + oz) in pool_cube for ox, oy, oz in offsets):
+            if all((bx + ox, by + oy, bz + oz) in pool_free_cube for ox, oy, oz in offsets):
                 out.add((int(cc), int(rr)))
         return out
 
