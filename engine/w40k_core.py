@@ -4412,19 +4412,14 @@ class W40KEngine(gym.Env):
         destroy_model(self.game_state, model_id, reason="coherency_removal")
         _log_end_of_turn_coherency_removals(self.game_state, {squad_id: [model_id]})
 
-        # Re-vérifier l'escouade : si toujours incoherente et > 1 fig, réarmer le même squad_id
+        # Re-vérifier l'escouade : si toujours incoherente et > 1 fig, réarmer le même squad_id.
+        # Sinon, armer la suivante dans la queue.
         alive_after = _coherency_alive(self.game_state, squad_id)
         if len(alive_after) > 1 and not validate_squad_coherency(self.game_state, squad_id):
             self.game_state["pending_coherency_removal"] = {"squad_id": squad_id}
-            return True, {
-                "action": "select_coherency_removal",
-                "squad_id": squad_id,
-                "model_id": model_id,
-                "awaiting_coherency_removal": True,
-            }
-
-        # Escouade résolue : passer à la suivante dans la queue
-        has_next = arm_next_coherency_pending(self.game_state)
+            has_next = True
+        else:
+            has_next = arm_next_coherency_pending(self.game_state)
         if has_next:
             return True, {
                 "action": "select_coherency_removal",

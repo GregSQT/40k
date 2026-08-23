@@ -29,6 +29,7 @@ from engine.phase_handlers.shared_utils import (
     end_of_turn_regain_coherency_all_squads,
     validate_squad_coherency,
 )
+from shared.data_validation import ConfigurationError
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -129,16 +130,18 @@ def test_pve_bot_is_muet():
     assert _coherency_seat_is_muet(gs, player=2)
 
 
-def test_no_player_types_no_gym_is_muet_false():
-    """Sans player_types ni gym_training_mode, aucun siège n'est muet (no-op → queue)."""
+def test_no_player_types_no_gym_raises():
+    """Sans player_types ni gym_training_mode → ConfigurationError (T1 : donnée obligatoire absente)."""
     gs = {}
-    assert not _coherency_seat_is_muet(gs, player=1)
+    with pytest.raises(ConfigurationError):
+        _coherency_seat_is_muet(gs, player=1)
 
 
 def test_non_muet_squad_goes_to_queue():
     """Un siège non-muet (gym) ajoute l'escouade incoherente à la queue, sans la retirer."""
     gs = _gs([(10, 10), (11, 10), (30, 40)])
     gs["gym_training_mode"] = True
+    gs["current_player"] = 1  # requis depuis fix #3 (filtre queue par joueur courant)
     assert not validate_squad_coherency(gs, "1")
 
     removed = end_of_turn_regain_coherency_all_squads(gs)
@@ -151,6 +154,7 @@ def test_muet_squad_is_auto_removed():
     """Un siège muet (bot PvE) résout le retrait immédiatement, sans armer la queue."""
     gs = _gs([(10, 10), (11, 10), (30, 40)])
     gs["player_types"] = {"1": "ai"}
+    gs["current_player"] = 1  # requis depuis fix #3
 
     removed = end_of_turn_regain_coherency_all_squads(gs)
 
@@ -280,7 +284,12 @@ def test_decoder_raises_on_out_of_range_slot():
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_queue_multi_squad_arms_first():
-    """Deux escouades incoherentes non-muetes → la queue contient les deux, le pending arme la 1ère."""
+    """En gym, current_player=1 : seule l'escouade du joueur courant va en queue.
+
+    L'escouade de l'adversaire (player=2) est résolue géométriquement car owner != current_player.
+    C'est la sémantique correcte : on ne peut pas céder la main à l'adversaire en milieu de
+    progression de phase.
+    """
     gs = _gs([(10, 10), (11, 10), (30, 40)], squad_id="1", player=1)
     gs2_pos = [(20, 20), (21, 20), (5, 50)]
     mids2 = ["2#0", "2#1", "2#2"]
@@ -293,16 +302,20 @@ def test_queue_multi_squad_arms_first():
         "occupied_hexes": set(), "occupied_hexes_by_model": {},
     }
     gs["gym_training_mode"] = True  # sièges non-muets
+    gs["current_player"] = 1
 
-    end_of_turn_regain_coherency_all_squads(gs)
+    auto_removed = end_of_turn_regain_coherency_all_squads(gs)
 
-    # Les deux escouades incoherentes sont en queue ou armées
+    # Escouade du joueur courant → queue manuelle
     pending = gs.get("pending_coherency_removal")
-    queue = gs.get("pending_coherency_removal_queue", [])
-    all_pending = ([pending["squad_id"]] if pending else []) + list(queue)
-    assert "1" in all_pending and "2" in all_pending, (
-        f"les deux escouades doivent être en queue, got pending={pending}, queue={queue}"
+    assert pending is not None and pending["squad_id"] == "1", (
+        "l'escouade du joueur courant doit être armée en pending"
     )
+    # Escouade adversaire → résolue géométriquement
+    assert "2" in auto_removed, (
+        "l'escouade adversaire doit être résolue immédiatement (owner != current_player)"
+    )
+    assert validate_squad_coherency(gs, "2")
 
 
 def test_arm_next_skips_already_coherent():
