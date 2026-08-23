@@ -538,6 +538,7 @@ def test_margin_blocked_enforces_one_hex_gap():
     pour toute paire (i, j). Échantillon : board x5, escouade de 3 figurines, 8 ancres réparties
     dans la zone.
     """
+    from itertools import combinations
     from engine.phase_handlers.deployment_handlers import (
         _footprint_offsets_for, _model_footprint, generate_compact_formation,
     )
@@ -568,7 +569,9 @@ def test_margin_blocked_enforces_one_hex_gap():
 
         # Vérifie l'équivalence _model_footprint == _model_fp (offsets) pour chaque modèle du
         # plan et à ses positions exactes — prérequis de l'invariant (generate_compact_formation
-        # utilise _model_fp pour margin_blocked, pas _model_footprint).
+        # utilise _model_fp pour margin_blocked, pas _model_footprint). Construit fps au passage
+        # pour éviter un second tour d'appels à _model_footprint.
+        fps = []
         for mid, c, r in plan:
             m = models_cache[mid]
             offsets = _footprint_offsets_for(
@@ -584,29 +587,32 @@ def test_margin_blocked_enforces_one_hex_gap():
                 f"_model_footprint ≠ _model_fp pour {mid} en ({c},{r}) — "
                 f"l'invariant ne teste pas ce que margin_blocked a réellement bloqué"
             )
-
-        fps = [
-            frozenset(_model_footprint(gs, models_cache[mid], c, r))
-            for mid, c, r in plan
-        ]
+            fps.append(canonical)
 
         # Exclut les modèles overflow-placés (empreinte hors pool) : ceux-là ne respectent pas
-        # la marge par construction et feraient échouer le test à tort.
+        # la marge par construction et feraient échouer le test à tort. Overflow ne doit pas
+        # survenir sur cette fixture (pool large, escouade petite).
         bfs_fps = [fp for fp in fps if fp.issubset(pool_set)]
+        assert len(bfs_fps) == len(fps), (
+            f"{len(fps) - len(bfs_fps)} modèle(s) overflow à ({col},{row}) — "
+            f"fixture invalide : pool trop petit ou escouade trop grande"
+        )
         if len(bfs_fps) < 2:
             continue
 
-        for i in range(len(bfs_fps)):
-            for j in range(i + 1, len(bfs_fps)):
-                # Anneau bloquant du socle j : empreinte + ses voisins immédiats
-                ring_j = bfs_fps[j] | {nb for cc, rr in bfs_fps[j] for nb in get_neighbors(cc, rr)}
-                overlap = bfs_fps[i] & ring_j
-                assert not overlap, (
-                    f"marge 1 hex violée entre socles {i} et {j} à l'ancre ({col},{row}) : "
-                    f"cellules communes {sorted(overlap)} — margin_blocked n'a pas propagé "
-                    f"l'anneau voisin du socle posé"
-                )
-                total_pairs += 1
+        # Pré-calcule les anneaux en O(N) ; la double boucle les consulte en O(1).
+        rings = [
+            fp | {nb for cc, rr in fp for nb in get_neighbors(cc, rr)}
+            for fp in bfs_fps
+        ]
+        for i, j in combinations(range(len(bfs_fps)), 2):
+            overlap = bfs_fps[i] & rings[j]
+            assert not overlap, (
+                f"marge 1 hex violée entre socles {i} et {j} à l'ancre ({col},{row}) : "
+                f"cellules communes {sorted(overlap)} — margin_blocked n'a pas propagé "
+                f"l'anneau voisin du socle posé"
+            )
+            total_pairs += 1
 
     assert total_pairs > 0, (
         f"aucune paire de socles vérifiée sur {len(sample)} ancres — invariant non exercé"
