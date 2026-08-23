@@ -1603,6 +1603,10 @@ def handle_advance(
 
     real_colliding_units = []
     for uid, pos_before in colliding_units_before.items():
+        uid_player = state.unit_player.get(uid)
+        advance_player = state.unit_player.get(advance_unit_id)
+        if uid_player is not None and advance_player is not None and uid_player != advance_player:
+            continue
         if (uid in state.unit_positions and
                 state.unit_positions[uid] == (dest_col, dest_row) and
                 state.unit_positions[uid] == pos_before and
