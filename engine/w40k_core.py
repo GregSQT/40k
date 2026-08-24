@@ -8543,7 +8543,7 @@ class W40KEngine(gym.Env):
         # Sélection d'arme CC (V11 §0.69) : même doctrine que pending_cr ci-dessus. Quand
         # PENDING_FIGHT_WEAPON_KEY est armé, le masque retourne (fw_slots, []) — le pool est vide
         # (squad_fight l'a retiré avant de poser la clé). Sans ce early-return, eligible_units=[]
-        # et armed_decision=None feraient tomber dans le else-fallback ligne ~8610 qui prend la
+        # et armed_decision=None feraient tomber dans le else-branch ligne ~8610 qui prend la
         # première escouade du cache : l'agent décrirait A et choisirait l'arme de B.
         pending_fw = self.game_state.get(PENDING_FIGHT_WEAPON_KEY)
         if pending_fw is not None:

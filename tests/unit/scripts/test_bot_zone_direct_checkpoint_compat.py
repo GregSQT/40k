@@ -43,7 +43,7 @@ _SCRIPT = PROJECT_ROOT / "scripts" / "bot_zone_direct.py"
 class _ToyEnv(gym.Env):
     """Env jouet avec l'espace d'observation réel, pour construire la politique sans moteur."""
 
-    observation_space = squad_obs_space()
+    observation_space: gym.spaces.Dict = squad_obs_space()
     action_space = gym.spaces.Discrete(TOTAL_ACTION_SIZE)
 
     def reset(self, *, seed=None, options=None):
@@ -89,7 +89,7 @@ def _checkpoint_data(reference_zip):
         try:
             data = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=False)
         except pickle.UnpicklingError:
-            data = json_to_data(raw)
+            data = json_to_data(raw.decode())
         if not isinstance(data, dict):
             raise ValueError(f"Entrée 'data' de format inattendu : {type(data)}")
         policy_kwargs = data.get("policy_kwargs", {})
