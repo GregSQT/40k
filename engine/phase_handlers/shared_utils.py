@@ -8422,7 +8422,7 @@ def shoot_weapon_eligible_target_slots(
         if mid in models_cache
     ]
     profiles = collect_weapon_profiles(alive_models, "RNG_WEAPONS")
-    if weapon_slot >= min(len(profiles), _K):
+    if weapon_slot < 0 or weapon_slot >= min(len(profiles), _K):
         raise ValueError(
             f"shoot_weapon_eligible_target_slots: slot {weapon_slot} hors des profils "
             f"({len(profiles)} profils, K={_K}) pour {squad_id!r}"
