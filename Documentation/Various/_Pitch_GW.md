@@ -24,7 +24,7 @@ The application guides the player through every phase of the game, handling the 
 
 **Datasheets at a click.** Every unit's full profile, weapons, and abilities are one click away. No rulebook, no card shuffling.
 
-**Movement preview.** When a unit is selected, the application shows exactly where it can go — all reachable squares at a glance, already accounting for terrain, models in the way, units that can fly, and enemy engagement ranges. Normal moves, Advances, Fall Backs, desperate escaptes each show their own legal area, with the consequences (no shooting after a Fall Back, etc.) applied automatically.
+**Movement preview.** When a unit is selected, the application shows exactly where it can go — all reachable squares at a glance, already accounting for terrain, models in the way, units that can fly, and enemy engagement ranges. Normal moves, Advances, Fall Backs, desperate escapes each show their own legal area, with the consequences (no shooting after a Fall Back, etc.) applied automatically.
 
 **Line-of-sight preview.** Before committing a move, the player sees which enemies a given position can actually see and shoot, updated live as the unit moves. Cover is shown the same way, so the player knows the real odds before deciding.
 
@@ -34,7 +34,7 @@ The application guides the player through every phase of the game, handling the 
 
 **Charge and combat.** Charges, pile-in, and the fight itself follow the official sequence — the player declares the charge and makes the choices, the application handles the distances and the rolls.
 
-**Faithful to the rules.** Around 100 unit datasheets across several factions, some 50 weapons, terrain, cover, and objectives are all modelled on the current edition. Distances on screen map directly to tabletop inches.
+**Faithful to the rules.** 100+ unit datasheets and their load-out profiles, 200+ weapon stat profiles across six factions, terrain, cover, and objectives are all modelled on the current edition. Distances on screen map directly to tabletop inches. Rule accuracy is backed by 6,000+ automated regression tests, ensuring that every rules update or interaction cannot silently break existing behaviour.
 
 The design principle is consistent: **the application does the arithmetic; the player makes every decision.**
 
@@ -48,7 +48,7 @@ The design principle is consistent: **the application does the arithmetic; the p
 
 **Reduced game length.** A full game runs in roughly **one hour** versus **three to four** physically, because measurement, range-checking, and dice handling are automated. More games played means more rules learned and more reasons to stay engaged.
 
-**New-player acquisition.** The engine enforces the rules, so newcomers learn correctly by playing, no by reading the rules or asking someone else. This lowers the single largest barrier to entry and creating a funnel toward the physical product.
+**New-player acquisition.** The engine enforces the rules, so newcomers learn correctly by playing, not by reading the rules or asking someone else. This lowers the single largest barrier to entry and creates a funnel toward the physical product.
 
 The net effect: more games played per player, faster rules mastery, and de-risked miniature purchases — supporting physical sales rather than cannibalising them.
 
@@ -60,10 +60,10 @@ The net effect: more games played per player, faster rules mastery, and de-riske
 - **Replay and analytics.** Action-by-action replay and training-metrics tooling are in place.
 - **Alpha — privately tested.** The current build has been tested in a closed setting.
 
-Some rules remain in progress — notably the full current-edition Fight-phase refinements (Fights First / Remaining ordering, grouped pile-in and consolidation) — and stratagems are not yet in the engine.
+Stratagems are not yet in the engine.
 
 ## 5. Proposal
 
-The project is fully functional and actively expanding — additional game modes, deeper faction coverage, and campaign content are already in progress. An official collaboration would be mutually beneficial: Games Workshop gains a controlled, rules-accurate digital tool that drives new comers engagement and miniature sales; the project gains official sanction, access to authoritative rules data, and legitimacy with the player base.
+The project is fully functional and actively expanding — additional game modes, deeper faction coverage, and campaign content are already in progress. An official collaboration would be mutually beneficial: Games Workshop gains a controlled, rules-accurate digital tool that drives newcomer engagement and miniature sales; the project gains official sanction, access to authoritative rules data, and legitimacy with the player base.
 
 We are open to discussing a licensing arrangement covering use of the Warhammer 40,000 intellectual property and rules content, and would welcome an initial conversation to explore terms.
