@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """engine/macro_intents.py - Zone intent system Phase 2."""
 
-from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE, SQUAD_TOP_K
+from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE, K_WEAPONS_RANGED, SQUAD_TOP_K
 from shared.data_validation import require_key
 
 INTENT_INVADE = 0
@@ -148,7 +148,15 @@ FIGHT_WEAPON_SLOT_COUNT = K_WEAPONS_MELEE                          # 10 -> 1349-
 # ⚠️ Cette tranche est hors `SQUAD_ACTION_SIZE` (comme Oath, Activate, FIGHT_WEAPON).
 COHERENCY_SLOT_BASE = FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT  # 1359
 COHERENCY_SLOT_COUNT = SQUAD_TOP_K                                       # 20 -> 1359-1378
-TOTAL_ACTION_SIZE = COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT           # 1379
+# P3-8 — SÉLECTION DE GROUPE D'ARME (split-fire gym). Miroir de FIGHT_WEAPON_SLOT mais côté TIR :
+# slot j désigne le profil d'arme j de `collect_weapon_profiles("RNG_WEAPONS")` (même ordonnancement
+# que l'obs slot j de tir, invariant D1 côté armes). Tête dense (pas pointeur : les armes ne sont
+# pas des entités-lignes du tenseur ennemi). Flux gym : SHOOT_WEAPON_SEL_SLOT j → arme j pending
+# → SHOOT_SLOT i (cible ennemie i) → assignation enregistrée ; répète par groupe → résolution.
+# ⚠️ Ces ids ne sont PAS dans `SQUAD_ACTION_SIZE` (comme FIGHT_WEAPON, Oath, Activate, COHERENCY).
+SHOOT_WEAPON_SEL_SLOT_BASE = COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT  # 1379
+SHOOT_WEAPON_SEL_SLOT_COUNT = K_WEAPONS_RANGED                           # 10 -> 1379-1388
+TOTAL_ACTION_SIZE = SHOOT_WEAPON_SEL_SLOT_BASE + SHOOT_WEAPON_SEL_SLOT_COUNT  # 1389
 
 MOVE_CELLS = range(MOVE_CELL_BASE, MOVE_CELL_BASE + MOVE_CELL_COUNT)                # 0-1023
 SHOOT_SLOTS = range(SHOOT_SLOT_BASE, SHOOT_SLOT_BASE + SHOOT_SLOT_COUNT)            # 1025-1044
@@ -173,6 +181,9 @@ FIGHT_WEAPON_SLOTS = range(
 COHERENCY_SLOTS = range(
     COHERENCY_SLOT_BASE, COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT
 )  # 1359-1378
+SHOOT_WEAPON_SEL_SLOTS = range(
+    SHOOT_WEAPON_SEL_SLOT_BASE, SHOOT_WEAPON_SEL_SLOT_BASE + SHOOT_WEAPON_SEL_SLOT_COUNT
+)  # 1379-1388
 
 
 def is_zone_intent_action(action: int) -> bool:

@@ -149,8 +149,10 @@ def test_total_action_size():
     assert mi.ACTIVATE_SLOT_BASE == mi.OATH_SLOT_BASE + mi.OATH_SLOT_COUNT
     assert mi.FIGHT_WEAPON_SLOT_BASE == mi.ACTIVATE_SLOT_BASE + mi.ACTIVATE_SLOT_COUNT
     assert mi.COHERENCY_SLOT_BASE == mi.FIGHT_WEAPON_SLOT_BASE + mi.FIGHT_WEAPON_SLOT_COUNT
-    assert mi.TOTAL_ACTION_SIZE == mi.COHERENCY_SLOT_BASE + mi.COHERENCY_SLOT_COUNT
-    assert mi.TOTAL_ACTION_SIZE == 1379
+    # P3-8 : 10 slots SHOOT_WEAPON_SEL après COHERENCY (split-fire gym)
+    assert mi.SHOOT_WEAPON_SEL_SLOT_BASE == mi.COHERENCY_SLOT_BASE + mi.COHERENCY_SLOT_COUNT
+    assert mi.TOTAL_ACTION_SIZE == mi.SHOOT_WEAPON_SEL_SLOT_BASE + mi.SHOOT_WEAPON_SEL_SLOT_COUNT
+    assert mi.TOTAL_ACTION_SIZE == 1389
 
 
 def test_choice_then_oath_then_activate_slots_close_the_action_space():
@@ -159,7 +161,9 @@ def test_choice_then_oath_then_activate_slots_close_the_action_space():
     assert list(mi.OATH_SLOTS) == list(range(mi.OATH_SLOT_BASE, mi.ACTIVATE_SLOT_BASE))
     assert list(mi.ACTIVATE_SLOTS) == list(range(mi.ACTIVATE_SLOT_BASE, mi.FIGHT_WEAPON_SLOT_BASE))
     assert list(mi.FIGHT_WEAPON_SLOTS) == list(range(mi.FIGHT_WEAPON_SLOT_BASE, mi.COHERENCY_SLOT_BASE))
-    assert list(mi.COHERENCY_SLOTS) == list(range(mi.COHERENCY_SLOT_BASE, mi.TOTAL_ACTION_SIZE))
+    assert list(mi.COHERENCY_SLOTS) == list(range(mi.COHERENCY_SLOT_BASE, mi.SHOOT_WEAPON_SEL_SLOT_BASE))
+    # P3-8 : SHOOT_WEAPON_SEL ferme l'espace après COHERENCY
+    assert list(mi.SHOOT_WEAPON_SEL_SLOTS) == list(range(mi.SHOOT_WEAPON_SEL_SLOT_BASE, mi.TOTAL_ACTION_SIZE))
     assert not mi.is_zone_intent_action(mi.CHOICE_BASE)
     assert not mi.is_zone_intent_action(mi.OATH_SLOT_BASE)
     assert not mi.is_zone_intent_action(mi.ACTIVATE_SLOT_BASE)

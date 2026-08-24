@@ -60,6 +60,18 @@ def _read_pending_fight_weapon_select(game_state: Dict[str, Any]) -> Any:
     return game_state.get("pending_fight_weapon_select")  # get allowed : None = aucune
 
 
+def _read_pending_shoot_weapon_sel(game_state: Dict[str, Any]) -> Any:
+    """Lecteur du split-fire tir (P3-8) — SHOOT_WEAPON_SEL : arme à sélectionner (pending_weapon None)."""
+    sw = game_state.get("pending_shoot_weapon_split")  # get allowed : None = aucun split-fire
+    return sw if sw is not None and sw.get("pending_weapon") is None else None  # get allowed
+
+
+def _read_pending_shoot_split_target(game_state: Dict[str, Any]) -> Any:
+    """Lecteur du split-fire tir (P3-8) — SHOOT_SLOT : cible à sélectionner (pending_weapon armé)."""
+    sw = game_state.get("pending_shoot_weapon_split")  # get allowed : None = aucun split-fire
+    return sw if sw is not None and sw.get("pending_weapon") is not None else None  # get allowed
+
+
 #: LES POINTS DE CHOIX JOUEUR sur lesquels le moteur s'ARRÊTE, chacun avec la famille de slots qui
 #: y répond et le libellé de son message d'erreur. UNE table, DEUX consommateurs — le prédicat
 #: `engine_is_paused_on_player_choice` (sites à modèle) et le tirage
@@ -80,6 +92,8 @@ _PLAYER_CHOICE_MECHANISMS: Tuple[
     (_read_pending_oath_selection, mi.OATH_SLOTS, "designation d'Oath"),
     (_read_pending_coherency_removal, mi.COHERENCY_SLOTS, "retrait coherence"),
     (_read_pending_fight_weapon_select, mi.FIGHT_WEAPON_SLOTS, "arme CC"),
+    (_read_pending_shoot_weapon_sel, mi.SHOOT_WEAPON_SEL_SLOTS, "split-fire arme TIR"),
+    (_read_pending_shoot_split_target, mi.SHOOT_SLOTS, "split-fire cible TIR"),
 )
 
 

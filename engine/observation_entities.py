@@ -611,6 +611,11 @@ SQUAD_TOP_K = 20
 #: synchronisés). Doit égaler `SquadObservationBuilder.K_WEAPONS_MELEE`.
 K_WEAPONS_MELEE = 10
 
+#: Nombre de slots de profils d'armes de TIR par entité (P3-8 — source unique pour que
+#: `macro_intents.SHOOT_WEAPON_SEL_SLOT_COUNT` et `observation_builder.K_WEAPONS_RANGED` restent
+#: synchronisés). Doit égaler `SquadObservationBuilder.K_WEAPONS_RANGED`.
+K_WEAPONS_RANGED = 10
+
 
 # ---------------------------------------------------------------------------
 # Décision de DÉPLOIEMENT (V11 §0.40 point 3)
