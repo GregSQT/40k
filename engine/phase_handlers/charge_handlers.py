@@ -21,6 +21,7 @@ from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 from engine.action_log_utils import append_action_log
 from engine.game_state import (
     WAAAGH_ABILITY_DISPLAY_NAME,
+    objective_hex_zones,
     unit_can_charge_after_advance,
     waaagh_applies_to_unit,
 )
@@ -6450,9 +6451,6 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
 #: Clé de stockage du contexte de placement en attente dans game_state.
 CHARGE_PLACEMENT_PENDING_KEY = "_charge_placement_pending"
 
-#: Nombre d'intentions de placement exposées à l'agent.
-CHARGE_PLACEMENT_INTENT_COUNT = 5
-
 _CHARGE_INTENT_LABELS: List[str] = [
     "Serré (compact)",
     "Objectif (proche objectif)",
@@ -6460,6 +6458,9 @@ _CHARGE_INTENT_LABELS: List[str] = [
     "Pénétration (avance maximale)",
     "Étalé (formation dispersée)",
 ]
+
+#: Nombre d'intentions de placement exposées à l'agent — toujours égal à len(_CHARGE_INTENT_LABELS).
+CHARGE_PLACEMENT_INTENT_COUNT = len(_CHARGE_INTENT_LABELS)
 
 
 def _charge_plan_centroid(plan: List[Tuple[str, int, int, int]]) -> Tuple[int, int]:
@@ -6499,33 +6500,20 @@ def arm_charge_placement_decision(
         plans.append(_p if _p is not None else plan_0)
 
     # Positions des objectifs pour la métrique obj_dist_norm.
-    _obj_positions: List[Tuple[int, int]] = []
-    for _obj in game_state.get("objectives", []):  # get allowed
-        for _hex in _obj.get("hexes", []):  # get allowed
-            if isinstance(_hex, (list, tuple)):
-                _obj_positions.append((int(_hex[0]), int(_hex[1])))
-            else:
-                _obj_positions.append((int(_hex["col"]), int(_hex["row"])))
+    _obj_positions: List[Tuple[int, int]] = [h for _, zone in objective_hex_zones(game_state) for h in zone]
 
     # Positions des modèles ennemis non-déclarés pour la métrique nontgt_dist_norm.
     _declared = {str(t) for t in target_squad_ids}
     _charger_entry = require_unit_from_cache(str(squad_id), game_state, "arm_charge_placement_decision")
     _charger_player = int(require_key(_charger_entry, "player"))
-    _models_cache = require_key(game_state, "models_cache")
-    _squad_models = require_key(game_state, "squad_models")
     _nontgt_positions: List[Tuple[int, int]] = []
     for _esid, _e in require_key(game_state, "units_cache").items():
         if int(_e.get("player", -1)) == _charger_player:
             continue
         if _esid in _declared:
             continue
-        _squad_mids = _squad_models.get(_esid)  # get allowed
-        if _squad_mids:
-            for _mid in _squad_mids:
-                _m = _models_cache.get(_mid)  # get allowed
-                if _m is None:
-                    continue
-                _nontgt_positions.append((int(_m["col"]), int(_m["row"])))
+        for _hc, _hr in _e.get("occupied_hexes", []):  # get allowed
+            _nontgt_positions.append((int(_hc), int(_hr)))
 
     _board_diag = max(
         int(require_key(game_state, "board_cols")) + int(require_key(game_state, "board_rows")),
