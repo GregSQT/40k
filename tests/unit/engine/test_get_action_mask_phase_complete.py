@@ -46,19 +46,25 @@ def test_get_action_mask_breaks_when_phase_not_complete():
 
 
 def test_get_action_mask_continues_when_phase_complete():
-    """fight_phase_end retourne phase_complete=True → la boucle recalcule le masque."""
+    """fight_phase_end retourne phase_complete=True → la boucle met à jour game_state["phase"].
+
+    La vraie fight_phase_end ne set jamais game_state["phase"] directement — c'est get_action_mask
+    qui le fait via next_phase du dict retourné. Ce test vérifie ce chemin réel.
+    """
     eng = _make_engine_in_fight_phase(mask_value=False)
 
     call_count = 0
-    # Après un appel réussi, le masque devient non-vide → la boucle s'arrête naturellement
+
     def fake_fight_phase_end(gs):
         nonlocal call_count
         call_count += 1
-        gs["phase"] = "command"  # avancement de phase
+        # La vraie fonction ne touche PAS gs["phase"] — get_action_mask le fait via next_phase
         return {"phase_complete": True, "phase_transition": True, "next_phase": "command"}
 
     with patch("engine.phase_handlers.fight_handlers.fight_phase_end", side_effect=fake_fight_phase_end):
         result = eng.get_action_mask()
 
-    # La boucle appelle fight_phase_end, puis break car phase != "fight"
-    assert call_count == 1
+    # fight_phase_end appelé exactement une fois ; sans la mise à jour de phase dans get_action_mask
+    # la boucle le rappellerait une seconde fois (double-incrément de tour).
+    assert call_count == 1, f"fight_phase_end appelé {call_count} fois, attendu 1"
+    assert eng.game_state["phase"] == "command", "get_action_mask doit écrire next_phase dans game_state"
