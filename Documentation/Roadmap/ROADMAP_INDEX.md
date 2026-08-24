@@ -45,8 +45,8 @@ Tout chantier sert un jalon ci-dessous, ou attend. Les jalons sont séquentiels 
 | Jalon | Contenu | Critère de sortie |
 |---|---|---|
 | **J1 — Pipeline prouvé, ligne de base** ✅ | Run `x1_long --new` terminé le 2026-08-20 ; ligne de base REJOUÉE le 2026-08-21 sur `robust_0.8463` (post-rupture §12.15) : combined agent `0,8567`, pire bot `attrition = 0,810` ; reference bots mesurés bot-contre-bot (balanced `0,168`, denial `0,155`, reactive `0,139`) ; `benchmark_floor` remis à `0,90` le 2026-08-20 (le `0,049` mélangeait les sémantiques) — gate RETIRÉ depuis, le 2026-08-22 | Critères de [training.md#run-verif](training.md#run-verif) verts ; ligne de base panel rejouée ✅ |
-| **J2 — Le gym décide tout** | Chemin critique lignes 1–4 (P3-5, P3-6, P3-8, P4) ; le dégel de `TOTAL_ACTION_SIZE` qu'elles ouvrent embarque P3-0 | Plus aucune décision de jeu jouée par une heuristique à la place de l'agent, hors optionnels statués par mesure de regret |
-| **J3 — Mesure de référence** | Chemin critique lignes 5–6 : profil de validation P5, puis `x1_long` (~20 h) | LE chiffre officiel du projet — solde §0.14, §0.67 et le critère T6 (via §10.6) |
+| **J2 — Le gym décide tout** ✅ | P3-5, P3-6, P3-8, P4, P5 livrés ; `TOTAL_ACTION_SIZE` 1159→1389, `obs_size` 16671→16703 ; ré-entraînement `--new` nécessaire | Plus aucune décision de jeu jouée par une heuristique à la place de l'agent, hors optionnels statués par mesure de regret ✅ |
+| **J3 — Mesure de référence** | Curriculum R1→R3 (URGENCE), puis `x1_long` (~6 h) | LE chiffre officiel du projet — solde §0.14, §0.67 et le critère T6 (via §10.6) |
 | **J4 — Dépasser la mesure** | Self-play §0.59 (ligne 7), capacités 06, É9 second scénario — priorisés selon ce que la mesure révèle | Win-rate au-dessus de la mesure de référence, reproductible |
 | **J5 — Démo** | Validation qualitative §10.6 volet 2 (joueur externe), validations navigateur front soldées | Un externe joue contre l'agent et le trouve crédible ; le front tient la partie de bout en bout |
 
@@ -76,27 +76,33 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 
 ---
 
-## J2–J4 — Chemin critique vers la mesure de référence
+## J2 ✅ Terminé — 2026-08-24
 
-Ordre imposé — ne pas réorganiser sans décision explicite.
-
-| # | Sujets | Chantier | Fichier | Bloqueur | ⚡/🚫 |
-|---|---|---|---|---|---|
-| 1 | moteur+training | **P3-5** Pile-in / consolidation | [v11_chemin_critique.md#p3-5](v11_chemin_critique.md#p3-5) | P5 à trancher ([v11_chemin_critique.md#p5](v11_chemin_critique.md#p5)) | 🚫 |
-| 2 | training+moteur | **P3-6** Move-after-shooting + reactive move | [v11_chemin_critique.md#p3-6](v11_chemin_critique.md#p3-6) | — | 🚫 |
-| 3 | training | **P3-8** Optionnels à statuer | [v11_chemin_critique.md#p3-8](v11_chemin_critique.md#p3-8) | — | 🚫 |
-| 4 | training+moteur | **P4** Observation de support | [v11_chemin_critique.md#p4](v11_chemin_critique.md#p4) | — | 🚫 |
-| 5 | training | **P5** Validation par tranche (profil manquant) | [v11_chemin_critique.md#p5](v11_chemin_critique.md#p5) | — | 🚫 |
-| 6 | training | Mesure de référence `x1_long` | [v11_chemin_critique.md#mesure](v11_chemin_critique.md#mesure) | — | 🚫 |
-| 7 | training+bot | Self-play §0.59 (livré, jamais exécuté) | [v11_chemin_critique.md#selfplay](v11_chemin_critique.md#selfplay) | — | 🚫 |
+| # | Sujets | Chantier | Fichier |
+|---|---|---|---|
+| ✅ | moteur+training | **P3-5** Pile-in / consolidation — livré 2026-08-18 | [v11_chemin_critique.md#p3-5](v11_chemin_critique.md#p3-5) |
+| ✅ | training+moteur | **P3-6** Move-after-shooting + reactive move — constaté implémenté 2026-08-19 | [v11_chemin_critique.md#p3-6](v11_chemin_critique.md#p3-6) |
+| ✅ | training | **P3-8** Optionnels — déploiement (08-19), charge multi-cibles (08-20), placement charge (08-24), split-fire (08-24) ; `TOTAL_ACTION_SIZE` 1159→1389 ; ré-entraînement `--new` nécessaire | [v11_chemin_critique.md#p3-8](v11_chemin_critique.md#p3-8) |
+| ✅ | training+moteur | **P4** Observation de support — livré 2026-08-19 ; `obs_size` 16671→16703 | [v11_chemin_critique.md#p4](v11_chemin_critique.md#p4) |
+| ✅ | training | **P5** Validation par tranche — tranché 2026-08-18 | [v11_chemin_critique.md#p5](v11_chemin_critique.md#p5) |
 
 ---
 
-## J4 — Capacités
+## J3 — Mesure de référence
 
-| Sujets | Chantier | Fichier | ⚡/🚫 |
-|---|---|---|---|
-| moteur+training | **06** Armageddon abilities — 0/6 passes | [capacites.md#armageddon-06](capacites.md#armageddon-06) | 🚫 |
+| # | Sujets | Chantier | Fichier | ⚡/🚫 |
+|---|---|---|---|---|
+| 6 | training | Curriculum R1→R3 (un levier par run) — débloque la mesure | [training.md#curriculum](training.md#curriculum) | 🚫 |
+| 7 | training | Mesure de référence `x1_long` (~6 h) | [v11_chemin_critique.md#mesure](v11_chemin_critique.md#mesure) | 🚫 |
+
+---
+
+## J4 — Self-play + Capacités
+
+| # | Sujets | Chantier | Fichier | ⚡/🚫 |
+|---|---|---|---|---|
+| 8 | training+bot | Self-play §0.59 (livré, jamais exécuté) | [v11_chemin_critique.md#selfplay](v11_chemin_critique.md#selfplay) | 🚫 |
+| 9 | moteur+training | **06** Armageddon abilities — 0/6 passes | [capacites.md#armageddon-06](capacites.md#armageddon-06) | 🚫 |
 
 ---
 
@@ -119,6 +125,7 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
+| moteur | **Plunging Fire (22.05)** — +1 touche depuis terrain ≥3" (dernier trou règles rosters Armageddon) | [moteur.md#plunging-fire](moteur.md#plunging-fire) | ⚡ |
 | analyzer | ✅ PROJ.1.4 double_pile_in corrigé (2026-08-18) — overrun 12.06 loggué \"OVERRUN PILED IN\", faux positifs éliminés | — | ⚡ |
 | analyzer | ✅ models_segment capturé après commit_move (2026-08-18) — faux positifs pile-in éliminés (fight_handler + w40k_core) | — | ⚡ |
 | analyzer | ✅ Réserves PvP 04b tests code-review corrigés (2026-08-18) — symétrie garde, formule sentinelle, commentaire xdist | — | ⚡ |

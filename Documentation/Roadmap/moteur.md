@@ -10,6 +10,16 @@
 
 ---
 
+## Plunging Fire (22.05) {#plunging-fire}
+
+Règle : +1 au hit roll pour les attaques à distance ciblant une unité visible dont des figurines sont au sol, si l'attaquant est sur un terrain feature ≥3" de hauteur (ou TOWERING et cible à ≤12"). Sans effet sur les AIRCRAFT.
+
+Dernier trou de fidélité aux règles pour les rosters Armageddon (démo).
+
+Périmètre estimé : `shooting_handlers.py` (calcul modificateur BS) + `attack_sequence.py` (token) + test rouge/vert.
+
+---
+
 ## T7 — Unification validation de déploiement {#t7}
 
 **Suspendu.** Déclencheur : « le training tourne ».
