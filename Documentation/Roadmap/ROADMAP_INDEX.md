@@ -156,6 +156,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | front | Validations navigateur en attente | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
 | training+bot | ✅ Benchmark floor gate §4.D livré (2026-08-18) — 3 bots de référence (balanced/denial/reactive) sur 4 scénarios holdout_regular ; seuil 0.90 après mesure ; `model_gating_enabled` sur x1_long | [v11_chemin_critique.md#benchmark-gate](v11_chemin_critique.md#benchmark-gate) | |
 | training+bot | ✅ scenario_bench-01..04 dupliqués supprimés (2026-08-18) — fichiers byte-for-byte identiques aux scenario_bot-01..04, glob fallback ramassait 8 scénarios au lieu de 4, épisodes/scénario divisés par 2 sans contrepartie | — | |
+| training | ✅ fix combat reward V11 (2026-08-24) — correctif récompense combat gym V11 (worktree-fix-combat-reward-v11) | — | ⚡ |
+| infra | ✅ fix type-errors tsc/pyright/check_ai_rules (2026-08-24) — 17 fichiers, 0 erreur après correction | — | ⚡ |
+| training | ✅ fix self_model_encoder dim (2026-08-24) — sortie entity_dim (64) au lieu de model_dim (16) + trunk_dim aligné ; crash reshape [B,20,64] éliminé | — | ⚡ |
 | analyzer | ✅ Alternance EPISODE END (2026-08-19) — vérification paire (T_{N-1}, T_N) manquante à EPISODE END ; finding /code-review valide ; finding 2 écarté (last_phase=None reset dans turn-change) | — | ⚡ |
 | analyzer | ✅ Tests weapon-rules lot2 mêlée/tir (2026-08-20) — verrous rouge/vert pour les règles d'armes lot2 (fight weapon rules) | — | ⚡ |
 | analyzer | ✅ phase_seq par joueur — faux négatifs phase_order (2026-08-20) — gate phase_seq indexé par joueur ; élimine 64 faux positifs cross-player phase_order | — | ⚡ |

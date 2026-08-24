@@ -367,14 +367,13 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
 
         weapon_agg = 2 * weapon_dim
         type_agg = 2 * type_dim
-        model_agg = 2 * model_dim
         trunk_dim = (
             cnn_features
             + global_dim
             + entity_dim              # e_own (unité active)
             + 2 * entity_dim          # agrégation de mes autres escouades
             + 2 * entity_dim          # agrégation des ennemies (contexte)
-            + model_agg
+            + 2 * entity_dim          # sm_agg : mean+max des figurines de l'unité active
             # Contexte de décision : quel type de choix est demandé, et un résumé de ce que les
             # candidats offrent. Le tronc en a besoin pour la VALEUR de l'état et pour scorer
             # les candidats en connaissance du reste de la partie (leurs embeddings par slot, eux,
@@ -478,7 +477,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         )
         self.type_encoder = _mlp([self.type_cont_dim + self.type_bin_dim, type_dim])
         self.self_model_encoder = _mlp(
-            [self.self_model_cont_dim + self.self_model_bin_dim, model_dim]
+            [self.self_model_cont_dim + self.self_model_bin_dim, entity_dim]
         )
         # --- Capacités et statuts : DEUX `EmbeddingBag` distinctes (chantier 01) --------------
         # `mode="sum"` : invariant par permutation — {A, B} écrit (slot0, slot1) ou (slot1, slot0)
