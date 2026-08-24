@@ -195,12 +195,16 @@ export const BoardReplay: React.FC = () => {
 
   // Settings preferences (from localStorage)
   const [settings, setSettings] = useState(() => {
-    const showDebugStr = localStorage.getItem("showDebug");
-    const showDebugLoSStr = localStorage.getItem("showDebugLoS");
-    return {
-      showDebug: showDebugStr ? JSON.parse(showDebugStr) : false,
-      showDebugLoS: showDebugLoSStr ? JSON.parse(showDebugLoSStr) : false,
-    };
+    try {
+      const showDebugStr = localStorage.getItem("showDebug");
+      const showDebugLoSStr = localStorage.getItem("showDebugLoS");
+      return {
+        showDebug: showDebugStr ? (JSON.parse(showDebugStr) as boolean) : false,
+        showDebugLoS: showDebugLoSStr ? (JSON.parse(showDebugLoSStr) as boolean) : false,
+      };
+    } catch {
+      return { showDebug: false, showDebugLoS: false };
+    }
   });
 
   const handleToggleDebug = (value: boolean) => {
@@ -604,9 +608,7 @@ export const BoardReplay: React.FC = () => {
     const map: Record<string, number | null> = {};
     for (const objective of objectives) {
       if (!(objective.name in currentObjectiveControl.controllers)) {
-        throw new Error(
-          `Objective "${objective.name}" absent de l'instantané OBJECTIVE CONTROL du step.log`
-        );
+        continue;
       }
       const controller = currentObjectiveControl.controllers[objective.name];
       for (const hex of objective.hexes) {
@@ -1616,7 +1618,7 @@ export const BoardReplay: React.FC = () => {
     currentAction?.type === "charge" ||
     currentAction?.type === "charge_wait" ||
     currentAction?.type === "charge_fail"
-      ? currentAction?.charge_success !== false && currentAction?.type !== "charge_fail" // charge_fail is always false
+      ? currentAction?.charge_success === true
       : false;
 
   // Get advance roll info for badge display

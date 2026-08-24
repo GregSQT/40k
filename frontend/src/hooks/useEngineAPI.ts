@@ -8631,92 +8631,55 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       aiTurnInProgress = true;
-
-      if (!gameState) {
-        aiTurnInProgress = false;
-        return;
-      }
-      const playerTypes = gameState.player_types;
-      if (!playerTypes) {
-        throw new Error("Missing player_types in gameState");
-      }
-      const getPlayerType = (playerId: number): "human" | "ai" => {
-        const playerType = playerTypes[String(playerId)];
-        if (!playerType) {
-          throw new Error(`Missing player type for player ${playerId}`);
-        }
-        return playerType;
-      };
-      const isAiUnitInState = (state: APIGameState, unitId: string | number): boolean => {
-        const statePlayerTypes = state.player_types;
-        if (!statePlayerTypes) {
-          throw new Error("Missing player_types in state while evaluating AI unit");
-        }
-        const unit = state.units.find((u) => String(u.id) === String(unitId));
-        if (!unit) {
-          throw new Error(`Missing unit ${String(unitId)} in state while evaluating AI unit`);
-        }
-        const unitPlayerType = statePlayerTypes[String(unit.player)];
-        if (!unitPlayerType) {
-          throw new Error(`Missing player type for player ${unit.player}`);
-        }
-        return unitPlayerType === "ai";
-      };
-      const isAiUnitId = (unitId: string | number): boolean => {
-        return isAiUnitInState(gameState, unitId);
-      };
-
-      // CRITICAL: In fight phase, current_player can be 1 but AI can still act in alternating phase
-      // Only check current_player for non-fight phases
-      if (gameState.phase !== "fight" && getPlayerType(gameState.current_player) !== "ai") {
-        aiTurnInProgress = false;
-        return;
-      }
-      let eligibleAICount = 0;
-
-      if (gameState.phase === "deployment") {
-        const deploymentState = gameState.deployment_state;
-        if (!deploymentState) {
+      try {
+        if (!gameState) {
           aiTurnInProgress = false;
           return;
         }
-        const deployer = deploymentState.current_deployer;
-        const pool = deploymentState.deployable_units?.[String(deployer)];
-        if (!pool) {
-          throw new Error(`deployment: deployable_units missing for deployer ${String(deployer)}`);
+        const playerTypes = gameState.player_types;
+        if (!playerTypes) {
+          throw new Error("Missing player_types in gameState");
         }
-        eligibleAICount = getPlayerType(deployer) === "ai" ? pool.length : 0;
-      } else if (gameState.phase === "shoot" && gameState.shoot_activation_pool) {
-        const shootPool = gameState.shoot_activation_pool || [];
-        eligibleAICount = shootPool.filter((unitId) => isAiUnitId(unitId)).length;
-      } else if (gameState.phase === "move" && gameState.move_activation_pool) {
-        eligibleAICount = gameState.move_activation_pool.filter((unitId) =>
-          isAiUnitId(unitId)
-        ).length;
-      } else if (gameState.phase === "charge" && gameState.charge_activation_pool) {
-        eligibleAICount = gameState.charge_activation_pool.filter((unitId) =>
-          isAiUnitId(unitId)
-        ).length;
-      } else if (gameState.phase === "fight") {
-        // V11 : pool actionnable unique exposé par le moteur (pile_in/fight/consolidate).
-        const fightPool: string[] = (gameState.fight_eligible_units ?? []).map((id) => String(id));
-        eligibleAICount = fightPool.filter((unitId) => isAiUnitId(unitId)).length;
-      }
+        const getPlayerType = (playerId: number): "human" | "ai" => {
+          const playerType = playerTypes[String(playerId)];
+          if (!playerType) {
+            throw new Error(`Missing player type for player ${playerId}`);
+          }
+          return playerType;
+        };
+        const isAiUnitInState = (state: APIGameState, unitId: string | number): boolean => {
+          const statePlayerTypes = state.player_types;
+          if (!statePlayerTypes) {
+            throw new Error("Missing player_types in state while evaluating AI unit");
+          }
+          const unit = state.units.find((u) => String(u.id) === String(unitId));
+          if (!unit) {
+            throw new Error(`Missing unit ${String(unitId)} in state while evaluating AI unit`);
+          }
+          const unitPlayerType = statePlayerTypes[String(unit.player)];
+          if (!unitPlayerType) {
+            throw new Error(`Missing player type for player ${unit.player}`);
+          }
+          return unitPlayerType === "ai";
+        };
+        const isAiUnitId = (unitId: string | number): boolean => {
+          return isAiUnitInState(gameState, unitId);
+        };
 
-      if (eligibleAICount === 0) {
-        aiTurnInProgress = false;
-        return;
-      }
+        // CRITICAL: In fight phase, current_player can be 1 but AI can still act in alternating phase
+        // Only check current_player for non-fight phases
+        if (gameState.phase !== "fight" && getPlayerType(gameState.current_player) !== "ai") {
+          aiTurnInProgress = false;
+          return;
+        }
+        let eligibleAICount = 0;
 
-      // Check if AI has eligible units in current phase (already checked above, but keeping for clarity)
-      const currentPhase = gameState.phase;
-      let aiEligibleUnits = 0;
-
-      if (currentPhase === "deployment") {
-        const deploymentState = gameState.deployment_state;
-        if (!deploymentState) {
-          aiEligibleUnits = 0;
-        } else {
+        if (gameState.phase === "deployment") {
+          const deploymentState = gameState.deployment_state;
+          if (!deploymentState) {
+            aiTurnInProgress = false;
+            return;
+          }
           const deployer = deploymentState.current_deployer;
           const pool = deploymentState.deployable_units?.[String(deployer)];
           if (!pool) {
@@ -8724,206 +8687,249 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               `deployment: deployable_units missing for deployer ${String(deployer)}`
             );
           }
-          aiEligibleUnits = getPlayerType(deployer) === "ai" ? pool.length : 0;
-        }
-      } else if (currentPhase === "move" && gameState.move_activation_pool) {
-        aiEligibleUnits = gameState.move_activation_pool.filter((unitId) =>
-          isAiUnitId(unitId)
-        ).length;
-      } else if (currentPhase === "shoot" && gameState.shoot_activation_pool) {
-        const shootPool = gameState.shoot_activation_pool || [];
-        aiEligibleUnits = shootPool.filter((unitId) => isAiUnitId(unitId)).length;
-      } else if (currentPhase === "charge" && gameState.charge_activation_pool) {
-        aiEligibleUnits = gameState.charge_activation_pool.filter((unitId) =>
-          isAiUnitId(unitId)
-        ).length;
-      } else if (currentPhase === "fight") {
-        // V11 : pool actionnable unique exposé par le moteur (pile_in/fight/consolidate).
-        const fightPool: string[] = (gameState.fight_eligible_units ?? []).map((id) => String(id));
-        aiEligibleUnits = fightPool.filter((unitId) => isAiUnitId(unitId)).length;
-      }
-
-      if (aiEligibleUnits === 0) {
-        aiTurnInProgress = false;
-        return;
-      }
-
-      // Helper function to make AI movement decision
-      const makeMovementDecision = (
-        validDestinations: number[][],
-        unitId: string,
-        currentGameState: APIGameState
-      ) => {
-        if (!validDestinations || validDestinations.length === 0) {
-          return { action: "skip", unitId };
+          eligibleAICount = getPlayerType(deployer) === "ai" ? pool.length : 0;
+        } else if (gameState.phase === "shoot" && gameState.shoot_activation_pool) {
+          const shootPool = gameState.shoot_activation_pool || [];
+          eligibleAICount = shootPool.filter((unitId) => isAiUnitId(unitId)).length;
+        } else if (gameState.phase === "move" && gameState.move_activation_pool) {
+          eligibleAICount = gameState.move_activation_pool.filter((unitId) =>
+            isAiUnitId(unitId)
+          ).length;
+        } else if (gameState.phase === "charge" && gameState.charge_activation_pool) {
+          eligibleAICount = gameState.charge_activation_pool.filter((unitId) =>
+            isAiUnitId(unitId)
+          ).length;
+        } else if (gameState.phase === "fight") {
+          // V11 : pool actionnable unique exposé par le moteur (pile_in/fight/consolidate).
+          const fightPool: string[] = (gameState.fight_eligible_units ?? []).map((id) =>
+            String(id)
+          );
+          eligibleAICount = fightPool.filter((unitId) => isAiUnitId(unitId)).length;
         }
 
-        // Find nearest enemy using fresh unit positions
-        const currentUnit = currentGameState?.units.find((u) => u.id.toString() === unitId);
-        if (!currentUnit) {
-          const dest = validDestinations[0];
+        if (eligibleAICount === 0) {
+          aiTurnInProgress = false;
+          return;
+        }
+
+        // Check if AI has eligible units in current phase (already checked above, but keeping for clarity)
+        const currentPhase = gameState.phase;
+        let aiEligibleUnits = 0;
+
+        if (currentPhase === "deployment") {
+          const deploymentState = gameState.deployment_state;
+          if (!deploymentState) {
+            aiEligibleUnits = 0;
+          } else {
+            const deployer = deploymentState.current_deployer;
+            const pool = deploymentState.deployable_units?.[String(deployer)];
+            if (!pool) {
+              throw new Error(
+                `deployment: deployable_units missing for deployer ${String(deployer)}`
+              );
+            }
+            aiEligibleUnits = getPlayerType(deployer) === "ai" ? pool.length : 0;
+          }
+        } else if (currentPhase === "move" && gameState.move_activation_pool) {
+          aiEligibleUnits = gameState.move_activation_pool.filter((unitId) =>
+            isAiUnitId(unitId)
+          ).length;
+        } else if (currentPhase === "shoot" && gameState.shoot_activation_pool) {
+          const shootPool = gameState.shoot_activation_pool || [];
+          aiEligibleUnits = shootPool.filter((unitId) => isAiUnitId(unitId)).length;
+        } else if (currentPhase === "charge" && gameState.charge_activation_pool) {
+          aiEligibleUnits = gameState.charge_activation_pool.filter((unitId) =>
+            isAiUnitId(unitId)
+          ).length;
+        } else if (currentPhase === "fight") {
+          // V11 : pool actionnable unique exposé par le moteur (pile_in/fight/consolidate).
+          const fightPool: string[] = (gameState.fight_eligible_units ?? []).map((id) =>
+            String(id)
+          );
+          aiEligibleUnits = fightPool.filter((unitId) => isAiUnitId(unitId)).length;
+        }
+
+        if (aiEligibleUnits === 0) {
+          aiTurnInProgress = false;
+          return;
+        }
+
+        // Helper function to make AI movement decision
+        const makeMovementDecision = (
+          validDestinations: number[][],
+          unitId: string,
+          currentGameState: APIGameState
+        ) => {
+          if (!validDestinations || validDestinations.length === 0) {
+            return { action: "skip", unitId };
+          }
+
+          // Find nearest enemy using fresh unit positions
+          const currentUnit = currentGameState?.units.find((u) => u.id.toString() === unitId);
+          if (!currentUnit) {
+            const dest = validDestinations[0];
+            return {
+              action: "move",
+              unitId,
+              destCol: dest[0],
+              destRow: dest[1],
+            };
+          }
+          // Strategy: Move toward nearest enemy using FRESH game state
+          const enemies = currentGameState.units.filter(
+            (u) => u.player !== currentUnit.player && u.HP_CUR > 0
+          );
+          if (enemies.length === 0) {
+            const dest = validDestinations[0];
+            return {
+              action: "move",
+              unitId,
+              destCol: dest[0],
+              destRow: dest[1],
+            };
+          }
+
+          // CRITICAL FIX: Use proper hex distance calculation (cubeDistance from gameHelpers)
+          const nearestEnemy = enemies.reduce((nearest, enemy) => {
+            const distToCurrent = cubeDistance(
+              offsetToCube(currentUnit.col, currentUnit.row),
+              offsetToCube(enemy.col, enemy.row)
+            );
+            const distToNearest = cubeDistance(
+              offsetToCube(currentUnit.col, currentUnit.row),
+              offsetToCube(nearest.col, nearest.row)
+            );
+            return distToCurrent < distToNearest ? enemy : nearest;
+          });
+
+          // Pick destination closest to nearest enemy FROM VALID DESTINATIONS ONLY
+          const bestDestination = validDestinations.reduce((best, dest) => {
+            const distToEnemy = cubeDistance(
+              offsetToCube(dest[0], dest[1]),
+              offsetToCube(nearestEnemy.col, nearestEnemy.row)
+            );
+            const bestDistToEnemy = cubeDistance(
+              offsetToCube(best[0], best[1]),
+              offsetToCube(nearestEnemy.col, nearestEnemy.row)
+            );
+            return distToEnemy < bestDistToEnemy ? dest : best;
+          });
+
           return {
             action: "move",
             unitId,
-            destCol: dest[0],
-            destRow: dest[1],
+            destCol: bestDestination[0],
+            destRow: bestDestination[1],
           };
-        }
-        // Strategy: Move toward nearest enemy using FRESH game state
-        const enemies = currentGameState.units.filter(
-          (u) => u.player !== currentUnit.player && u.HP_CUR > 0
-        );
-        if (enemies.length === 0) {
-          const dest = validDestinations[0];
-          return {
-            action: "move",
-            unitId,
-            destCol: dest[0],
-            destRow: dest[1],
-          };
-        }
-
-        // CRITICAL FIX: Use proper hex distance calculation (cubeDistance from gameHelpers)
-        const nearestEnemy = enemies.reduce((nearest, enemy) => {
-          const distToCurrent = cubeDistance(
-            offsetToCube(currentUnit.col, currentUnit.row),
-            offsetToCube(enemy.col, enemy.row)
-          );
-          const distToNearest = cubeDistance(
-            offsetToCube(currentUnit.col, currentUnit.row),
-            offsetToCube(nearest.col, nearest.row)
-          );
-          return distToCurrent < distToNearest ? enemy : nearest;
-        });
-
-        // Pick destination closest to nearest enemy FROM VALID DESTINATIONS ONLY
-        const bestDestination = validDestinations.reduce((best, dest) => {
-          const distToEnemy = cubeDistance(
-            offsetToCube(dest[0], dest[1]),
-            offsetToCube(nearestEnemy.col, nearestEnemy.row)
-          );
-          const bestDistToEnemy = cubeDistance(
-            offsetToCube(best[0], best[1]),
-            offsetToCube(nearestEnemy.col, nearestEnemy.row)
-          );
-          return distToEnemy < bestDistToEnemy ? dest : best;
-        });
-
-        return {
-          action: "move",
-          unitId,
-          destCol: bestDestination[0],
-          destRow: bestDestination[1],
         };
-      };
 
-      // Helper function to make AI shooting decision
-      const makeShootingDecision = (
-        validTargets: string[],
-        unitId: string,
-        currentGameState: APIGameState
-      ) => {
-        if (!validTargets || validTargets.length === 0) {
-          return { action: "skip", unitId };
-        }
+        // Helper function to make AI shooting decision
+        const makeShootingDecision = (
+          validTargets: string[],
+          unitId: string,
+          currentGameState: APIGameState
+        ) => {
+          if (!validTargets || validTargets.length === 0) {
+            return { action: "skip", unitId };
+          }
 
-        // Strategy: Shoot nearest/most threatening target using fresh game state
-        const shooter = currentGameState?.units.find((u) => u.id.toString() === unitId);
-        if (!shooter) {
+          // Strategy: Shoot nearest/most threatening target using fresh game state
+          const shooter = currentGameState?.units.find((u) => u.id.toString() === unitId);
+          if (!shooter) {
+            return {
+              action: "shoot",
+              unitId,
+              targetId: validTargets[0],
+            };
+          }
+
+          // Find nearest target
+          const nearestTarget = validTargets.reduce((nearest, targetId) => {
+            const target = currentGameState?.units.find((u) => u.id.toString() === targetId);
+            const nearestTargetUnit = currentGameState?.units.find(
+              (u) => u.id.toString() === nearest
+            );
+
+            if (!target || !nearestTargetUnit) return nearest;
+
+            const distToCurrent = cubeDistance(
+              offsetToCube(target.col, target.row),
+              offsetToCube(shooter.col, shooter.row)
+            );
+            const distToNearest = cubeDistance(
+              offsetToCube(nearestTargetUnit.col, nearestTargetUnit.row),
+              offsetToCube(shooter.col, shooter.row)
+            );
+
+            return distToCurrent < distToNearest ? targetId : nearest;
+          });
+
           return {
             action: "shoot",
             unitId,
-            targetId: validTargets[0],
+            targetId: nearestTarget,
           };
-        }
-
-        // Find nearest target
-        const nearestTarget = validTargets.reduce((nearest, targetId) => {
-          const target = currentGameState?.units.find((u) => u.id.toString() === targetId);
-          const nearestTargetUnit = currentGameState?.units.find(
-            (u) => u.id.toString() === nearest
-          );
-
-          if (!target || !nearestTargetUnit) return nearest;
-
-          const distToCurrent = cubeDistance(
-            offsetToCube(target.col, target.row),
-            offsetToCube(shooter.col, shooter.row)
-          );
-          const distToNearest = cubeDistance(
-            offsetToCube(nearestTargetUnit.col, nearestTargetUnit.row),
-            offsetToCube(shooter.col, shooter.row)
-          );
-
-          return distToCurrent < distToNearest ? targetId : nearest;
-        });
-
-        return {
-          action: "shoot",
-          unitId,
-          targetId: nearestTarget,
         };
-      };
 
-      // Helper function to make AI fight decision
-      const makeFightDecision = (
-        validTargets: Array<{ id: string | number }> | string[],
-        unitId: string,
-        currentGameState: APIGameState
-      ) => {
-        if (!validTargets || validTargets.length === 0) {
-          return { action: "skip", unitId };
-        }
+        // Helper function to make AI fight decision
+        const makeFightDecision = (
+          validTargets: Array<{ id: string | number }> | string[],
+          unitId: string,
+          currentGameState: APIGameState
+        ) => {
+          if (!validTargets || validTargets.length === 0) {
+            return { action: "skip", unitId };
+          }
 
-        // Strategy: Attack nearest/most threatening target using fresh game state
-        const attacker = currentGameState?.units.find((u) => u.id.toString() === unitId);
-        if (!attacker) {
-          // Extract target ID from first target (could be object or string)
-          const firstTarget = validTargets[0];
-          const targetId = typeof firstTarget === "object" ? firstTarget.id : firstTarget;
+          // Strategy: Attack nearest/most threatening target using fresh game state
+          const attacker = currentGameState?.units.find((u) => u.id.toString() === unitId);
+          if (!attacker) {
+            // Extract target ID from first target (could be object or string)
+            const firstTarget = validTargets[0];
+            const targetId = typeof firstTarget === "object" ? firstTarget.id : firstTarget;
+            return {
+              action: "fight",
+              unitId,
+              targetId: targetId.toString(),
+            };
+          }
+
+          // Find nearest target
+          const nearestTarget = validTargets.reduce((nearest, target) => {
+            const targetId = typeof target === "object" ? target.id : target;
+            const targetUnit = currentGameState?.units.find(
+              (u) => u.id.toString() === targetId.toString()
+            );
+            const nearestTargetId = typeof nearest === "object" ? nearest.id : nearest;
+            const nearestTargetUnit = currentGameState?.units.find(
+              (u) => u.id.toString() === nearestTargetId.toString()
+            );
+
+            if (!targetUnit || !nearestTargetUnit) return nearest;
+
+            const distToCurrent = cubeDistance(
+              offsetToCube(targetUnit.col, targetUnit.row),
+              offsetToCube(attacker.col, attacker.row)
+            );
+            const distToNearest = cubeDistance(
+              offsetToCube(nearestTargetUnit.col, nearestTargetUnit.row),
+              offsetToCube(attacker.col, attacker.row)
+            );
+
+            return distToCurrent < distToNearest ? target : nearest;
+          });
+
+          const finalTargetId =
+            typeof nearestTarget === "object" ? nearestTarget.id : nearestTarget;
           return {
             action: "fight",
             unitId,
-            targetId: targetId.toString(),
+            targetId: finalTargetId.toString(),
           };
-        }
-
-        // Find nearest target
-        const nearestTarget = validTargets.reduce((nearest, target) => {
-          const targetId = typeof target === "object" ? target.id : target;
-          const targetUnit = currentGameState?.units.find(
-            (u) => u.id.toString() === targetId.toString()
-          );
-          const nearestTargetId = typeof nearest === "object" ? nearest.id : nearest;
-          const nearestTargetUnit = currentGameState?.units.find(
-            (u) => u.id.toString() === nearestTargetId.toString()
-          );
-
-          if (!targetUnit || !nearestTargetUnit) return nearest;
-
-          const distToCurrent = cubeDistance(
-            offsetToCube(targetUnit.col, targetUnit.row),
-            offsetToCube(attacker.col, attacker.row)
-          );
-          const distToNearest = cubeDistance(
-            offsetToCube(nearestTargetUnit.col, nearestTargetUnit.row),
-            offsetToCube(attacker.col, attacker.row)
-          );
-
-          return distToCurrent < distToNearest ? target : nearest;
-        });
-
-        const finalTargetId = typeof nearestTarget === "object" ? nearestTarget.id : nearestTarget;
-        return {
-          action: "fight",
-          unitId,
-          targetId: finalTargetId.toString(),
         };
-      };
 
-      let totalUnitsProcessed = 0;
-      let iteration = 0;
-      try {
+        let totalUnitsProcessed = 0;
+        let iteration = 0;
         const maxIterations = 25; // Allow larger armies (e.g. 12+ units in move phase)
         let lastPoolSize = -1;
         let samePoolSizeCount = 0;
