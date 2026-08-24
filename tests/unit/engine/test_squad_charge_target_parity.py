@@ -82,11 +82,11 @@ def _charger(gs) -> Tuple[str, List[Optional[str]], List[int]]:
     déjà son critère `carnifex_charge`) : au moins une déclaration est donc possible. Aucune
     trouvée = la fixture ne teste plus rien, donc une ERREUR, pas un `None` à propager.
     """
+    our_player = int(gs["current_player"])
+    slot_map = get_enemy_slot_mapping(gs, our_player)
     for squad_id in gs["units_cache"]:
-        our_player = int(gs["units_cache"][squad_id]["player"])
-        if our_player != int(gs["current_player"]):
+        if int(gs["units_cache"][squad_id]["player"]) != our_player:
             continue
-        slot_map = get_enemy_slot_mapping(gs, our_player)
         declarable = [
             i for i, esid in enumerate(slot_map)
             if esid is not None and charge_check_eligibility(gs, str(squad_id), [str(esid)])
@@ -139,7 +139,11 @@ def test_mask_opens_exactly_the_targets_the_roll_can_reach(melee_scenario_file):
     mask = build_squad_action_mask(gs, squad_id, enemy_slot_ids=slot_map)
     opened = [i for i in range(len(slot_map)) if mask[CHARGE_SLOT_BASE + i] == 1]
 
-    roll = int(require_key(gs, "charge_roll_values")[squad_id])
+    charge_roll_values = require_key(gs, "charge_roll_values")
+    assert squad_id in charge_roll_values, (
+        "build_squad_action_mask doit peupler charge_roll_values pour l'escouade active"
+    )
+    roll = int(charge_roll_values[squad_id])
     reachable = [
         i for i, esid in enumerate(slot_map)
         if esid is not None
@@ -156,16 +160,23 @@ def test_mask_opens_exactly_the_targets_the_roll_can_reach(melee_scenario_file):
     # non vide passerait le test ci-dessus dès que toutes les cibles mappées sont à portée — ce
     # qui est le cas du scénario au reset. On éloigne une cible au-delà des 12" (11.02) : son
     # slot DOIT se fermer, les autres rester ouverts.
-    closed_slot = declarable[0]
+    #
+    # closed_slot doit venir de `opened` (slots réellement ouverts par le jet), pas de `declarable`
+    # (déclarables ≠ atteignables avec ce jet) : un slot déclarable mais non ouvert serait déjà à
+    # 0 avant le push — la preuve serait vacante.
+    assert opened, "le scénario doit ouvrir au moins un slot pour la contre-épreuve"
+    closed_slot = opened[0]
     target_id = str(slot_map[closed_slot])
     _push_far_away(gs, target_id)
     mask_after = build_squad_action_mask(gs, squad_id, enemy_slot_ids=slot_map)
     assert mask_after[CHARGE_SLOT_BASE + closed_slot] == 0, (
         "cible hors des 12\" : son slot de charge doit se fermer (11.02)"
     )
+    # Le jet est caché (setdefault dans charge_roll_for_activation) : les slots restants ouverts
+    # sont opened − {closed_slot}, pas declarable − {closed_slot}.
     assert [
         i for i in range(len(slot_map)) if mask_after[CHARGE_SLOT_BASE + i] == 1
-    ] == [i for i in declarable if i != closed_slot]
+    ] == [i for i in opened if i != closed_slot]
 
 
 def test_commit_charges_the_target_of_the_slot_played(melee_scenario_file):
@@ -276,8 +287,11 @@ def test_no_charge_slot_without_a_declarable_target(melee_scenario_file):
     eng = _engine(melee_scenario_file, seed=1)
     gs = eng.game_state
     gs["phase"] = "charge"
-    squad_id = next(iter(gs["units_cache"]))
-    our_player = int(gs["units_cache"][squad_id]["player"])
+    our_player = int(gs["current_player"])
+    squad_id = next(
+        sid for sid in gs["units_cache"]
+        if int(gs["units_cache"][sid]["player"]) == our_player
+    )
     # Tous les ennemis disparaissent : plus aucune cible mappée.
     for sid in [s for s, e in list(gs["units_cache"].items()) if int(e["player"]) != our_player]:
         for mid in list(gs["squad_models"].get(sid, [])):

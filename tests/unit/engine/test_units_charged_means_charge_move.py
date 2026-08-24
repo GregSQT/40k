@@ -23,6 +23,7 @@ import pytest
 
 from engine.observation_builder import ObservationBuilder
 from engine.phase_handlers.fight_handlers import is_fights_first
+from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
 from engine.w40k_core import W40KEngine
 from tests.unit.engine._config_helpers import build_engine_config
 
@@ -87,11 +88,13 @@ def _charged(eng: W40KEngine) -> List[str]:
 def test_failed_charge_does_not_grant_fights_first(engine: W40KEngine) -> None:
     """Jet insuffisant -> aucun charge move -> ni `units_charged`, ni Fights First (11.04)."""
     gs = engine.game_state
+    slot_map = get_enemy_slot_mapping(gs, int(gs["current_player"]))
+    target_slot = next(i for i, sid in enumerate(slot_map) if sid is not None)
     # 11 encart FAILED CHARGES : « a result of 2 (a double 1) is never sufficient ». Le jet est
     # IMPOSE, pas espere d'une graine : le test doit CONSTRUIRE la situation qu'il observe.
     with patch("engine.phase_handlers.shared_utils.roll_charge_distance", return_value=2):
         ok, result = engine._process_squad_action(
-            {"action": "squad_charge", "squad_id": "1", "target_slot": 0}
+            {"action": "squad_charge", "squad_id": "1", "target_slot": target_slot}
         )
     assert ok is True
     # `{**result, **phase_init_result}` dans la cascade préserve `charge_succeeded: False` de la
@@ -122,9 +125,11 @@ def test_wait_in_charge_phase_does_not_grant_fights_first(engine: W40KEngine) ->
 def test_successful_charge_still_grants_fights_first(engine: W40KEngine) -> None:
     """Contrôle anti-vert-vacant : le marquage EXISTE toujours quand la charge aboutit."""
     gs = engine.game_state
+    slot_map = get_enemy_slot_mapping(gs, int(gs["current_player"]))
+    target_slot = next(i for i, sid in enumerate(slot_map) if sid is not None)
     with patch("engine.phase_handlers.shared_utils.roll_charge_distance", return_value=12):
         ok, result = engine._process_squad_action(
-            {"action": "squad_charge", "squad_id": "1", "target_slot": 0}
+            {"action": "squad_charge", "squad_id": "1", "target_slot": target_slot}
         )
     assert ok is True
     assert result["charge_succeeded"] is True, result
