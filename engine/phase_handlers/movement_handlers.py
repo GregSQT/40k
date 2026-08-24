@@ -1831,19 +1831,6 @@ def _ez_offset_kernels(
     dy_2d = drow_f[np.newaxis, :] * sqrt3 + parity_cor[:, np.newaxis]  # (W, H)
     center_dist = np.hypot(dx_1d[:, np.newaxis], dy_2d)                 # (W, H)
 
-    # ── CHEMIN RAPIDE round↔round ─────────────────────────────────────────────────────────
-    # gap exact = centre-à-centre − r_mover − r_ennemi (identique à
-    # euclidean_edge_clearance_round_round) → aucune boucle Python.
-    if mover_shape == "round" and enemy_shape == "round":
-        from engine.hex_utils import round_base_radius_norm
-        r_m = round_base_radius_norm(cast(float, mover_size))
-        r_e = round_base_radius_norm(cast(float, enemy_size))
-        gap = center_dist - r_m - r_e
-        np.maximum(gap, 0.0, out=gap)
-        sure = gap <= ez_norm - EPS
-        tie  = (gap > ez_norm - EPS) & (gap <= ez_norm + EPS)
-        return sure, tie, dcol_max, drow_max
-
     # ── CHEMIN NON ROND : élagage par disques circonscrits ───────────────────────────────
     # Minorant sur le gap : lower = center_dist − r_mover_bound − r_ennemi_bound.
     # Les cases du COIN du noyau rectangulaire (≈ 22 %) vérifient lower > ez_norm + EPS et
