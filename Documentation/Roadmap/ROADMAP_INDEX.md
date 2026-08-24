@@ -261,6 +261,11 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | moteur+training | ✅ once_claim après _get_controlled_player_unit + test objective reward idempotent (2026-08-24) — once_claim posé après _get_controlled_player_unit dans coherency + test idempotence objective reward | — | ⚡ |
 | tests | ✅ simplify once_claim test helpers + invariant comment (2026-08-24) — helpers de test once_claim simplifiés, commentaire invariant ajouté | — | ⚡ |
 | training | ✅ expected_damage contextuelle reward_mapper (2026-08-24) — nouveau module expected_damage.py : NB×P(hit)×P(wound)×P(fail_sv)×DMG ; can_kill_in_one_phase remplace proxy NB×DMG brut ; 8 tests rouge/vert | [bot.md#recompense](bot.md#recompense) | ⚡ |
+| moteur+tests | ✅ fix(P3-8) COMBI_WEAPON masque/commit divergence split-fire gym (2026-08-24) — shared_utils + w40k_core corrigés ; 59 tests rouge/vert | — | ⚡ |
+| tests+ai | ✅ simplify reward_mapper (2026-08-24) — simplify + cleanup : 86 lignes retirées, signature clarifiée, tests mis à jour | — | ⚡ |
+| tests | ✅ fix(types) pyright test_expected_damage (2026-08-24) — 12 erreurs pyright corrigées ; signature expected_damage à 2 args | — | ⚡ |
+| tests | ✅ fix(tests) clé 'code' armes synthétiques (2026-08-24) — champ code: ajouté dans _weapon() pour aligner les fixtures sur le schéma attendu | — | ⚡ |
+| tests | ✅ fix(tests) 4 findings code-review test_expected_damage (2026-08-24) — chemin mêlée, branche hp≤0, frontière entière, nb chaîne couverts ; 11 tests verts | — | ⚡ |
 
 ### Bloqués par une décision utilisateur
 
