@@ -480,9 +480,16 @@ class ActionDecoder:
         if pending_cr is not None:
             from engine.phase_handlers.shared_utils import _coherency_alive
             alive = _coherency_alive(game_state, str(pending_cr["squad_id"]))
-            for slot_i, _mid in enumerate(alive[:COHERENCY_SLOT_COUNT]):
-                mask[COHERENCY_SLOT_BASE + slot_i] = True
-            return mask, []
+            if not alive:
+                # L'escouade a été entièrement détruite après l'armement du pending (consolidation
+                # adverse ou dernière perte fight). Aucune figurine à retirer : on purge la clé et
+                # on laisse le masque poursuivre normalement — sans quoi step_with_mask reçoit un
+                # masque tout-faux + eligible_units=[] et déclenche advance_phase en silence.
+                game_state.pop("pending_coherency_removal", None)
+            else:
+                for slot_i, _mid in enumerate(alive[:COHERENCY_SLOT_COUNT]):
+                    mask[COHERENCY_SLOT_BASE + slot_i] = True
+                return mask, []
 
         # ─── 1b. SÉLECTION D'ARME CC (V11 §0.69) ───
         # Même exclusivité que les branches ci-dessus : entre FIGHT_SLOT (cible) et la résolution,

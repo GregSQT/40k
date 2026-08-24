@@ -200,6 +200,35 @@ def test_squad_fight_weapon_ineligible_slot_raises(melee_scenario_file):
         })
 
 
+def test_pending_fight_weapon_obs_uses_pending_squad(melee_scenario_file):
+    """pending_fight_weapon_select armé → _build_observation_and_mask retourne (obs, None).
+
+    Sans le early-return (§0.69), eligible_units=[] + armed_decision=None font tomber le code
+    dans le fallback qui prend la première escouade du cache (A) au lieu de pending_fw['squad_id']
+    (B) : l'agent décrit A et choisit l'arme de B, empoisonnant le signal d'entraînement.
+    """
+    from engine.action_decoder import PENDING_FIGHT_WEAPON_KEY
+
+    eng = _engine_in_fight_phase(melee_scenario_file)
+    gs = eng.game_state
+    action = _first_fight_action_with_target(gs)
+    pending_squad_id = action["squad_id"]
+    eng._process_squad_action(action)  # arme PENDING_FIGHT_WEAPON_KEY
+
+    assert PENDING_FIGHT_WEAPON_KEY in gs, "précondition : pending non armé"
+    assert gs[PENDING_FIGHT_WEAPON_KEY]["squad_id"] == pending_squad_id
+
+    obs, mask_and_eligible = eng._build_observation_and_mask()
+
+    # Le early-return est pris : second élément = None (aucun masque construit).
+    # Si mask_and_eligible est un tuple, le fallback a été pris et l'obs décrit la mauvaise escouade.
+    assert mask_and_eligible is None, (
+        "pending_fight_weapon_select doit déclencher un early-return (mask_and_eligible=None) "
+        f"— reçu {mask_and_eligible!r} : le fallback escouade-par-défaut a été pris"
+    )
+    assert obs is not None
+
+
 def test_squad_fight_weapon_without_pending_raises(melee_scenario_file):
     """squad_fight_weapon sans pending pose → RuntimeError.
 

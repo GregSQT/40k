@@ -206,6 +206,32 @@ def test_mask_opens_only_coherency_slots(monkeypatch):
     assert not any(mask[i] for i in non_coherency), "aucun slot hors COHERENCY ne doit être ouvert"
 
 
+def test_mask_clears_pending_cr_when_squad_fully_dead(monkeypatch):
+    """pending_coherency_removal armé sur escouade entièrement détruite → clé purgée.
+
+    Scénario : consolidation adverse tue toutes les figurines de l'escouade APRÈS l'armement.
+    Sans le fix, _coherency_alive retourne [] → boucle no-op → masque tout-faux + eligible=[]
+    → step_with_mask déclenche advance_phase et ignore silencieusement le pending.
+    Avec le fix, la clé est purgée et le masque poursuit le calcul normal.
+    """
+    gs = _gs_with_pending_cr([(10, 10), (11, 10), (30, 40)])
+    # Destruction totale de l'escouade après armement du pending
+    gs["models_cache"] = {}
+    decoder = ActionDecoder(config={})
+    monkeypatch.setattr(decoder, "_get_eligible_units_for_current_phase", lambda gs: [])
+
+    mask, eligible = decoder.get_squad_action_mask_and_eligible_units(gs)
+
+    # La clé doit être purgée : le pending stale n'est plus bloquant
+    assert "pending_coherency_removal" not in gs, (
+        "pending_coherency_removal doit être purgé quand l'escouade est entièrement détruite"
+    )
+    # Aucun slot COHERENCY n'est ouvert (fallthrough, pas de retour anticipé du bloc pending_cr)
+    assert not any(mask[COHERENCY_SLOT_BASE + i] for i in range(COHERENCY_SLOT_COUNT)), (
+        "aucun slot COHERENCY ne doit être ouvert après purge de la clé (fallthrough normal)"
+    )
+
+
 def test_mask_shrinks_after_removal(monkeypatch):
     """Après un retrait, alive_count diminue et le slot suivant se ferme."""
     gs = _gs_with_pending_cr([(10, 10), (11, 10), (30, 40)])

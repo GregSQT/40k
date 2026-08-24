@@ -2219,12 +2219,14 @@ class W40KEngine(gym.Env):
             return observation, reward, terminated, truncated, info, out_mask
         if out_mask is None:
             # Masque de sortie non construit : on ne draine pas, et on ne le RECONSTRUIT pas. Les
-            # trois seuls etats concernes (`_build_observation_and_mask`) sont une decision d'agent
-            # en attente — masque reduit aux `CHOICE_i` —, la phase de deploiement — au moins un
-            # slot de pose ouvert, `wait` n'y etant jamais seul —, et `game_over`. Aucun ne peut
-            # produire un masque reduit a `wait` : la reponse du test est connue d'avance, la payer
-            # serait un build de masque complet par step de deploiement, et ce serait en prime une
-            # seconde route vers l'etat de sortie, a cote de la source unique observation+masque.
+            # cinq etats concernes (`_build_observation_and_mask`) sont : retrait de coherence en
+            # attente (pending_coherency_removal), selection d'arme CC (PENDING_FIGHT_WEAPON_KEY),
+            # decision d'agent en attente — masque reduit aux `CHOICE_i` —, la phase de deploiement
+            # — au moins un slot de pose ouvert, `wait` n'y etant jamais seul —, et `game_over`.
+            # Aucun ne peut produire un masque reduit a `wait` : la reponse du test est connue
+            # d'avance, la payer serait un build de masque complet par step de deploiement, et ce
+            # serait en prime une seconde route vers l'etat de sortie, a cote de la source unique
+            # observation+masque.
             return observation, reward, terminated, truncated, info, out_mask
         if not _mask_only_opens_wait(out_mask[0]):
             return observation, reward, terminated, truncated, info, out_mask
@@ -8537,6 +8539,15 @@ class W40KEngine(gym.Env):
         pending_cr = self.game_state.get("pending_coherency_removal")
         if pending_cr is not None:
             return _build_for_squad(str(pending_cr["squad_id"])), None
+
+        # Sélection d'arme CC (V11 §0.69) : même doctrine que pending_cr ci-dessus. Quand
+        # PENDING_FIGHT_WEAPON_KEY est armé, le masque retourne (fw_slots, []) — le pool est vide
+        # (squad_fight l'a retiré avant de poser la clé). Sans ce early-return, eligible_units=[]
+        # et armed_decision=None feraient tomber dans le else-fallback ligne ~8610 qui prend la
+        # première escouade du cache : l'agent décrirait A et choisirait l'arme de B.
+        pending_fw = self.game_state.get(PENDING_FIGHT_WEAPON_KEY)
+        if pending_fw is not None:
+            return _build_for_squad(str(pending_fw["squad_id"])), None
 
         # Décision agent en attente (V11 §9.3 P2) : l'observateur est l'unité SUR LAQUELLE porte
         # la décision — c'est elle que les candidats concernent. La prendre ailleurs décrirait un
