@@ -25,7 +25,7 @@ from __future__ import annotations
 import sys
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import pytest
 
@@ -77,7 +77,12 @@ def _off_table_sids(gs: Dict[str, Any]) -> List[str]:
     ]
 
 
-def _play_episode(eng, max_steps: int = 4000, seed: int = 0) -> Dict[str, Any]:
+def _play_episode(
+    eng,
+    max_steps: int = 4000,
+    seed: int = 0,
+    stop_when_phases_seen: Optional[Set[str]] = None,
+) -> Dict[str, Any]:
     """Joue jusqu'a la fin. Rend un constat de COUVERTURE, pas seulement « ca n'a pas leve ».
 
     L'action est TIREE parmi les legales, pas prise en `legal[0]`. Avec `legal[0]`, une graine =
@@ -85,6 +90,11 @@ def _play_episode(eng, max_steps: int = 4000, seed: int = 0) -> Dict[str, Any]:
     fait avant les sous-phases de combat, et le fichier certifiait un critere de sortie qu'il
     n'exercait pas. Les phases reellement traversees sont donc rendues a l'appelant, qui les
     EXIGE — sans quoi « aucune levee » ne veut rien dire.
+
+    ``stop_when_phases_seen`` — ensemble de phases suffisant pour que cet episode n'ait plus rien
+    a apporter. Quand toutes ces phases sont dans ``phases_seen``, la boucle s'arrete avant
+    game_over : le constat de couverture est complet, continuer ne ferait que payer des steps
+    inutiles. None = comportement par defaut (joue jusqu'a la fin).
     """
     import random
 
@@ -99,6 +109,8 @@ def _play_episode(eng, max_steps: int = 4000, seed: int = 0) -> Dict[str, Any]:
         if not legal:
             break
         phases_seen.add(str(gs.get("phase")))
+        if stop_when_phases_seen and stop_when_phases_seen <= phases_seen:
+            break
         _obs, _r, terminated, truncated, _info = eng.step(int(rng.choice(legal)))
         steps += 1
         max_off = max(max_off, len(_off_table_sids(gs)))
@@ -156,10 +168,15 @@ def test_the_seed_sample_really_exercises_the_measuring_phases() -> None:
     assertion tombe, ce n'est pas un bug moteur : c'est que l'echantillon de graines a cesse de
     couvrir le critere de sortie du chantier, et le reste du fichier ne prouve plus grand-chose.
     """
+    target = {"move", "shoot", "charge", "fight"}
     seen: set = set()
     for seed in SEEDS:
-        seen |= _play_episode(_engine(seed), seed=seed)["phases"]
-    missing = {"move", "shoot", "charge", "fight"} - seen
+        seen |= _play_episode(
+            _engine(seed), seed=seed, stop_when_phases_seen=target - seen
+        )["phases"]
+        if target <= seen:
+            break
+    missing = target - seen
     assert not missing, (
         f"phases jamais atteintes sur les graines {SEEDS} : {sorted(missing)} — le critere de "
         f"sortie n'est pas exerce (vues : {sorted(seen)})"

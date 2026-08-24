@@ -284,3 +284,138 @@ def test_total_action_size_updated():
     assert TOTAL_ACTION_SIZE == 1389, (
         f"TOTAL_ACTION_SIZE attendu 1389, reçu {TOTAL_ACTION_SIZE}"
     )
+
+
+# ─── Régression : build_squad_action_mask ne lève plus IndexError (P3-8) ─────
+
+def test_build_squad_action_mask_no_index_error_in_shoot_phase():
+    """build_squad_action_mask en phase shoot ne lève pas IndexError sur les slots P3-8.
+
+    Régression : le bloc P3-8 écrivait mask[SHOOT_WEAPON_SEL_SLOT_BASE+j] (≥1379) sur un
+    buffer de taille SQUAD_ACTION_SIZE (<1379) → IndexError.
+    """
+    from engine.phase_handlers.shared_utils import build_squad_action_mask, SQUAD_ACTION_SIZE
+    from engine.macro_intents import SHOOT_WEAPON_SEL_SLOT_BASE
+
+    units = [
+        _unit(1, 1, 5, 5, [_m(5, 5, [STORM])]),
+        _unit(2, 2, 5, 15, [_m(5, 15, [STORM])]),
+    ]
+    for u in units:
+        u["RNG_WEAPONS"] = [STORM]
+    gs = _make_gs(units)
+    gs["shoot_activation_pool"] = ["1"]
+    gs["units_shot"] = set()
+
+    assert SQUAD_ACTION_SIZE < SHOOT_WEAPON_SEL_SLOT_BASE, (
+        "pré-condition : SQUAD_ACTION_SIZE doit être < SHOOT_WEAPON_SEL_SLOT_BASE"
+    )
+    mask = build_squad_action_mask(gs, "1")
+    assert len(mask) == SQUAD_ACTION_SIZE, (
+        f"mask doit avoir SQUAD_ACTION_SIZE={SQUAD_ACTION_SIZE} éléments, reçu {len(mask)}"
+    )
+
+
+def test_shoot_weapon_sel_open_slots_returns_valid_indices():
+    """shoot_weapon_sel_open_slots retourne des indices dans [SHOOT_WEAPON_SEL_SLOT_BASE, TOTAL_ACTION_SIZE)."""
+    from engine.phase_handlers.shared_utils import (
+        shoot_weapon_sel_open_slots,
+        get_enemy_slot_mapping,
+    )
+    from engine.macro_intents import SHOOT_WEAPON_SEL_SLOT_BASE, TOTAL_ACTION_SIZE
+
+    units = [
+        _unit(1, 1, 5, 5, [_m(5, 5, [STORM])]),
+        _unit(2, 2, 5, 10, [_m(5, 10, [STORM])]),
+    ]
+    for u in units:
+        u["RNG_WEAPONS"] = [STORM]
+    gs = _make_gs(units)
+    gs["shoot_activation_pool"] = ["1"]
+    gs["units_shot"] = set()
+    gs["squad_shooting_type_choice"] = {"1": SHOOTING_TYPE_NORMAL}
+
+    enemy_slot_ids = get_enemy_slot_mapping(gs, 1)
+    slots = shoot_weapon_sel_open_slots(gs, "1", enemy_slot_ids)
+
+    for idx in slots:
+        assert SHOOT_WEAPON_SEL_SLOT_BASE <= idx < TOTAL_ACTION_SIZE, (
+            f"indice {idx} hors de [SHOOT_WEAPON_SEL_SLOT_BASE={SHOOT_WEAPON_SEL_SLOT_BASE}, "
+            f"TOTAL_ACTION_SIZE={TOTAL_ACTION_SIZE})"
+        )
+
+
+class TestSplitFireDecodeEmptyPool:
+    """convert_squad_action avec pool vide (eligible_units=[]) en split-fire."""
+
+    def _decoder(self) -> "ActionDecoder":
+        from engine.action_decoder import ActionDecoder
+        import json
+        from pathlib import Path
+        rules = json.loads(
+            (Path(__file__).parents[3] / "config" / "game_config.json").read_text()
+        )["game_rules"]
+        return ActionDecoder({"game_rules": rules})
+
+    def _base_gs(self) -> Dict[str, Any]:
+        units = [
+            _unit(1, 1, 5, 5, [_m(5, 5, [STORM])]),
+            _unit(2, 2, 5, 15, [_m(5, 15, [STORM])]),
+        ]
+        for u in units:
+            u["RNG_WEAPONS"] = [STORM]
+        gs = _make_gs(units)
+        gs["shoot_activation_pool"] = ["1"]
+        gs["units_shot"] = set()
+        return gs
+
+    def test_shoot_weapon_sel_slot_with_empty_pool_and_pending_weapon_none(self):
+        """SHOOT_WEAPON_SEL_SLOT + pool vide + pending_weapon=None → squad_shoot_weapon_sel."""
+        from engine.action_decoder import PENDING_SHOOT_WEAPON_SEL_KEY
+        from engine.macro_intents import SHOOT_WEAPON_SEL_SLOT_BASE
+        from engine.phase_handlers.shared_utils import SQUAD_ACTION_SHOOT_WEAPON_SEL_SLOT_COUNT
+
+        gs = self._base_gs()
+        gs[PENDING_SHOOT_WEAPON_SEL_KEY] = {
+            "squad_id": "1",
+            "shooting_type": SHOOTING_TYPE_NORMAL,
+            "pending_weapon": None,
+            "assignments": {},
+            "remaining_weapon_slots": {0: "storm_bolter"},
+            "eligible_target_slots": [],
+        }
+
+        result = self._decoder().convert_squad_action(
+            SHOOT_WEAPON_SEL_SLOT_BASE,
+            gs,
+            eligible_units=[],
+        )
+
+        assert result["action"] == "squad_shoot_weapon_sel"
+        assert result["squad_id"] == "1"
+        assert result["weapon_slot"] == 0
+
+    def test_shoot_slot_with_empty_pool_and_pending_weapon_set(self):
+        """SHOOT_SLOT + pool vide + pending_weapon armé → squad_shoot_split_target."""
+        from engine.action_decoder import PENDING_SHOOT_WEAPON_SEL_KEY
+        from engine.phase_handlers.shared_utils import SQUAD_ACTION_SHOOT_SLOT_BASE
+
+        gs = self._base_gs()
+        gs[PENDING_SHOOT_WEAPON_SEL_KEY] = {
+            "squad_id": "1",
+            "shooting_type": SHOOTING_TYPE_NORMAL,
+            "pending_weapon": "storm_bolter",
+            "assignments": {},
+            "remaining_weapon_slots": {},
+            "eligible_target_slots": [0],
+        }
+
+        result = self._decoder().convert_squad_action(
+            SQUAD_ACTION_SHOOT_SLOT_BASE,
+            gs,
+            eligible_units=[],
+        )
+
+        assert result["action"] == "squad_shoot_split_target"
+        assert result["squad_id"] == "1"
+        assert result["target_slot"] == 0

@@ -21,6 +21,7 @@ from engine.phase_handlers.shared_utils import (
     is_unit_alive,
     compute_candidate_footprint,
     build_squad_action_mask,
+    shoot_weapon_sel_open_slots,
     get_enemy_slot_mapping,
     get_ally_slot_mapping,
     require_unit_from_cache,
@@ -651,6 +652,12 @@ class ActionDecoder:
         for i, v in enumerate(squad_mask):
             if v:
                 mask[i] = True
+
+        # P3-8 — SHOOT_WEAPON_SEL slots (split-fire gym) : hors SQUAD_ACTION_SIZE, ouverts
+        # directement dans le masque complet. Voir shoot_weapon_sel_open_slots pour la logique.
+        if current_phase == "shoot":
+            for slot_idx in shoot_weapon_sel_open_slots(game_state, squad_id, enemy_slot_ids):
+                mask[slot_idx] = True
 
         return mask, eligible_units
 
@@ -1286,6 +1293,30 @@ class ActionDecoder:
         if eligible_units is None:
             eligible_units = self._get_eligible_units_for_current_phase(game_state)
         if not eligible_units:
+            # P3-8 split-fire : le masque retourne pool vide (1c). Squad_id vient de
+            # PENDING_SHOOT_WEAPON_SEL_KEY — même source unique que le masque pour ces transitions.
+            _pending_sw_conv = game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)
+            if _pending_sw_conv is not None:
+                _sw_squad = str(_pending_sw_conv["squad_id"])
+                # Étape target-select (pending_weapon armé) : SHOOT_SLOT désigne la cible.
+                if (
+                    _pending_sw_conv.get("pending_weapon") is not None  # get allowed
+                    and SQUAD_ACTION_SHOOT_SLOT_BASE <= action_int < (
+                        SQUAD_ACTION_SHOOT_SLOT_BASE + SQUAD_ACTION_SHOOT_SLOT_COUNT
+                    )
+                ):
+                    return {
+                        "action": "squad_shoot_split_target",
+                        "squad_id": _sw_squad,
+                        "target_slot": action_int - SQUAD_ACTION_SHOOT_SLOT_BASE,
+                    }
+                # Étape weapon-sel (pending_weapon None) : SHOOT_WEAPON_SEL_SLOT choisit l'arme.
+                if action_int in SHOOT_WEAPON_SEL_SLOTS:
+                    return {
+                        "action": "squad_shoot_weapon_sel",
+                        "squad_id": _sw_squad,
+                        "weapon_slot": action_int - SHOOT_WEAPON_SEL_SLOT_BASE,
+                    }
             raise ValueError(
                 f"convert_squad_action: aucune unité eligible en phase '{current_phase}' "
                 f"pour action {action_int}"

@@ -116,8 +116,14 @@ class RewardCalculator:
             return 0.0
 
         # Intermediate step of the two-step fight flow (squad_fight selected a target,
-        # waiting for FIGHT_WEAPON_SLOT). No acting unit yet — reward is 0 and deferred.
-        if isinstance(result, dict) and result.get("waiting_for_weapon_select"):
+        # waiting for FIGHT_WEAPON_SLOT), or P3-8 shoot split-fire flow (weapon-group selected →
+        # waiting for target, or target selected → waiting for next weapon group).
+        # No acting unit yet — reward is 0 and deferred.
+        if isinstance(result, dict) and (
+            result.get("waiting_for_weapon_select")
+            or result.get("waiting_for_target_select")
+            or result.get("waiting_for_next_weapon_sel")
+        ):
             reward_breakdown['total'] = 0.0
             game_state['last_reward_breakdown'] = reward_breakdown
             return 0.0
@@ -139,7 +145,7 @@ class RewardCalculator:
         is_action_result = result.get("action") in [
             "move", "shoot", "wait", "flee", "charge", "charge_fail", "fight", "combat",
             "squad_normal_move", "squad_advance", "squad_fall_back", "squad_wait",
-            "squad_shoot", "squad_charge", "squad_fight",
+            "squad_shoot", "squad_shoot_split_target", "squad_charge", "squad_fight",
         ]
         has_position_data = any(ind in result for ind in ["fromCol", "toCol", "fromRow", "toRow"])
 
@@ -222,8 +228,8 @@ class RewardCalculator:
             # assignment correct). Miroir exact du path offensif squad.
             defensive_penalty = 0.0
             opp_action = result.get("action")
-            if opp_action in ("squad_shoot", "squad_fight"):
-                res_key = "shoot_result" if opp_action == "squad_shoot" else "fight_result"
+            if opp_action in ("squad_shoot", "squad_shoot_split_target", "squad_fight"):
+                res_key = "shoot_result" if opp_action != "squad_fight" else "fight_result"
                 combat = require_key(result, res_key)
                 shaping = require_key(self._get_unit_reward_config(acting_unit), "squad_shaping")
                 defensive_penalty = -self._squad_combat_shaping(
@@ -518,13 +524,12 @@ class RewardCalculator:
             game_state['last_reward_breakdown'] = reward_breakdown
             return fight_reward
 
-        elif action_type in ("squad_shoot", "squad_fight"):
+        elif action_type in ("squad_shoot", "squad_shoot_split_target", "squad_fight"):
             # Reward shaping proportionnel aux points (spec squad.md).
-            # Cote offensif uniquement : les events ciblent toujours des ennemis.
-            # La symetrie alliee (pertes propres) ne passe pas par ce path car les
-            # actions adverses ne generent pas de reward (cf. early-return ligne ~144).
+            # `squad_shoot_split_target` (P3-8) : récompense identique à `squad_shoot`
+            # — le shoot_result a la même structure, l'effet mesuré est le même.
             shaping = require_key(self._get_unit_reward_config(acting_unit), "squad_shaping")
-            res_key = "shoot_result" if action_type == "squad_shoot" else "fight_result"
+            res_key = "shoot_result" if action_type != "squad_fight" else "fight_result"
             combat = require_key(result, res_key)
             acting_player = require_key(acting_unit, "player")
             # Cote offensif : degats infliges aux ennemis (tout joueur != acting).

@@ -418,3 +418,34 @@ class TestCoherencyPenaltyNoActingUnit:
         penalty2 = rc._calculate_coherency_penalty_per_turn(gs, result)
         assert penalty2 == 0.0
         assert call_count == 0  # once_claim court-circuite avant _get_controlled_player_unit
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# P3-8 split-fire — reward_calculator doit gérer tous les états intermédiaires
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSplitFireRewardPaths:
+    """calculate_reward gère les 3 étapes du flux split-fire sans ValueError."""
+
+    @pytest.mark.parametrize("result", [
+        {
+            "action": "squad_shoot_weapon_sel",
+            "squad_id": "1",
+            "weapon_slot": 0,
+            "weapon_code": "storm_bolter",
+            "waiting_for_target_select": True,
+        },
+        {
+            "action": "squad_shoot_split_target",
+            "squad_id": "1",
+            "weapon_code": "storm_bolter",
+            "target_squad_id": "2",
+            "waiting_for_next_weapon_sel": True,
+        },
+    ], ids=["waiting_for_target_select", "waiting_for_next_weapon_sel"])
+    def test_intermediate_steps_return_zero(self, result: dict) -> None:
+        """split_fire_intermediate_zero : étapes intermédiaires → reward 0, pas de ValueError."""
+        rc = _rc_desp()
+        gs = dict(_MINIMAL_GS)
+        reward = rc.calculate_reward(True, result, gs)
+        assert reward == 0.0
