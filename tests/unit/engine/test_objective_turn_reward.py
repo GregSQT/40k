@@ -477,6 +477,38 @@ def test_the_fight_path_does_not_count_the_on_objective_bonus_twice() -> None:
     assert breakdown["base_actions"] + breakdown["objective"] == pytest.approx(total)
 
 
+def test_combat_action_v11_reaches_fight_branch_not_system_response() -> None:
+    """action="combat" (V11 auto) doit atteindre la branche fight, pas etre absorbe en system_response.
+
+    VERROU. En retirant "combat" de is_action_result dans reward_calculator.py, le payload
+    V11 porte "waiting_for_player" (indicator systeme) et est absorbe comme reponse systeme :
+    calculate_reward retourne 0.0 au lieu du base_reward melee (0.3). Chaque step de combat
+    en training V11 payait alors 0.0 de reward offensif. Ce test passe au ROUGE si "combat"
+    disparait de is_action_result OU si targetId est absent du payload moteur (_fight_v11_auto_step).
+    """
+    calc = _calculator(controlled_player=1)
+    state = _move_state()
+
+    base_melee = float(_rewards_config()["ArmageddonAgent"]["base_actions"]["melee_attack"])
+    assert base_melee > 0.0, "melee_attack nul en config : le test ne discrimine pas les deux chemins"
+
+    reward = calc.calculate_reward(
+        True,
+        {
+            "action": "combat",
+            "unitId": "1",
+            "targetId": "2",
+            "all_attack_results": [],
+            "waiting_for_player": False,
+        },
+        state,
+    )
+
+    assert reward == pytest.approx(base_melee), (
+        '"combat" absorbe en system_response (reward=0.0) au lieu de la branche fight'
+    )
+
+
 @pytest.mark.parametrize(
     "extra",
     [

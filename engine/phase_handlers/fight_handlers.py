@@ -2233,6 +2233,7 @@ def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> 
             results = _fight_v11_resolve_attacks(game_state, u, config)
             return True, {"action": "combat", "phase": "fight", "unitId": uid,
                           "fight_subphase": "fight", "all_attack_results": results,
+                          "targetId": results[0]["targetId"] if results else None,
                           "fight_type": "overrun" if overrun else "normal",
                           "waiting_for_player": False}
         if sub == "consolidate":
