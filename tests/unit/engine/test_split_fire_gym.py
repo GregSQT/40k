@@ -479,22 +479,12 @@ def test_purge_combi_siblings_raises_on_out_of_range_slot():
     COMBI dans remaining et permettant la sélection des deux profils d'une même arme physique.
     """
     from engine.phase_handlers.shared_utils import purge_combi_siblings_from_remaining
-    from engine.weapons import get_weapons
 
-    smite_w = get_weapons("SpaceMarine", ["smite_witchfire"])[0]
-    smite_f = get_weapons("SpaceMarine", ["smite_focused_witchfire"])[0]
-    bolt = get_weapons("SpaceMarine", ["bolt_rifle"])[0]
-    m = _m(5, 5, [bolt, smite_w, smite_f])
-    atk = _unit(1, 1, 5, 5, [m])
-    atk["RNG_WEAPONS"] = [bolt, smite_w, smite_f]
-    enemy = _unit(2, 2, 5, 10, [_m(5, 10, [STORM])])
-    enemy["RNG_WEAPONS"] = [STORM]
-    gs = _make_gs([atk, enemy])
+    atk = _unit(1, 1, 5, 5, [_m(5, 5, [STORM])])
+    gs = _make_gs([atk])
 
-    remaining = {0: "bolt_rifle", 1: "smite_witchfire"}
-    import pytest
     with pytest.raises(IndexError, match="selected_slot=99 hors range"):
-        purge_combi_siblings_from_remaining(gs, "1", 99, remaining)
+        purge_combi_siblings_from_remaining(gs, "1", 99, {})
 
 
 # ─── Invariants COMBI_WEAPON : masque open_slots et remaining ─────────────────

@@ -197,16 +197,15 @@ class RewardMapper:
             result_bonuses = require_key(unit_rewards, "result_bonuses")
             base_kill = require_key(result_bonuses, "kill_target")
             suf = "r" if phase == "shoot" else "m"
+            base_ref = require_key(unit_rewards, f"enemy_killed_{suf}")
 
             # No overkill bonus
             if target_hp == damage_dealt:
-                base_kill += (require_key(unit_rewards, f"enemy_killed_no_overkill_{suf}")
-                              - require_key(unit_rewards, f"enemy_killed_{suf}"))
+                base_kill += require_key(unit_rewards, f"enemy_killed_no_overkill_{suf}") - base_ref
 
             # Lowest HP target bonus
             if self._was_lowest_hp_target(target, all_targets, target_hp, game_state):
-                base_kill += (require_key(unit_rewards, f"enemy_killed_lowests_hp_{suf}")
-                              - require_key(unit_rewards, f"enemy_killed_{suf}"))
+                base_kill += require_key(unit_rewards, f"enemy_killed_lowests_hp_{suf}") - base_ref
 
             return base_kill
         
