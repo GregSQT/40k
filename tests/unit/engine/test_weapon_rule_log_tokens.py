@@ -503,13 +503,14 @@ def test_melee_cleave_separe_les_figurines_qui_y_ont_droit(monkeypatch):
     JUMEAU du X applique de [RAPID FIRE], deja dans `gkey` pour exactement la meme raison
     (24.30, « within half range »). C est la symetrie que ce test verrouille : les deux seules
     regles additives dont l application depend de la FIGURINE separent les lots."""
-    _seq(monkeypatch, [4, 5, 1] * 4)
+    seq = _seq(monkeypatch, [4, 5, 1] * 4)
     gs = _game_state(
         ["CLEAVE:1"], melee=True, declared_target_size=5, carriers=2,
         split_first_carrier=True,
     )
 
     build_manual_fight_allocation(gs, "1")
+    assert not seq, f"jets RNG non consommés : {seq}"
 
     logs = [e for e in gs["action_logs"] if "shootDetails" in e and e["targetId"] == "2"]
     assert len(logs) == 2, [e["message"] for e in gs["action_logs"]]

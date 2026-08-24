@@ -322,22 +322,16 @@ class TestPostActionIntegration:
         assert engine.game_state["action_logs"] == []
 
     def test_game_state_no_set_leaks_after_action(self, semi_real_engine_with_pool):
-        """api_int_no_set_leak : aucun set Python ne fuite dans game_state réponse."""
+        """api_int_no_set_leak : aucun set Python ne fuite dans game_state réponse.
+
+        Un set dans game_state ferait échouer la sérialisation Flask avec TypeError,
+        produisant une réponse 500. Le vrai verrou est assert status_code == 200.
+        """
         with app.test_client() as client:
             resp = client.post(
                 "/api/game/action",
                 json={"action": "skip", "unitId": "1"},
             )
+        assert resp.status_code == 200, resp.data
         gs = resp.get_json()["game_state"]
-
-        def _check_no_sets(obj, path=""):
-            if isinstance(obj, dict):
-                for k, v in obj.items():
-                    _check_no_sets(v, f"{path}.{k}")
-            elif isinstance(obj, list):
-                for i, v in enumerate(obj):
-                    _check_no_sets(v, f"{path}[{i}]")
-            elif isinstance(obj, set):
-                raise AssertionError(f"Set trouvé dans la réponse JSON à {path}: {obj!r}")
-
-        _check_no_sets(gs)
+        assert gs is not None

@@ -235,7 +235,7 @@ def both_terrains(module, attr: str = "SCENARIO"):
             "dérivées — nommer le scénario '<nom>1.json' / '<nom>2.json' ou ne pas paramétrer "
             "ce module."
         )
-    variants = [base_str, base_str.replace("1.json", "2.json")]
+    variants = [base_str, "2.json".join(base_str.rsplit("1.json", 1))]
     for variant in variants:
         # La variante DOIT exister : sans ce contrôle, un module se paramétrerait sur un fichier
         # absent et l'erreur ne sortirait qu'au reset, très loin d'ici.

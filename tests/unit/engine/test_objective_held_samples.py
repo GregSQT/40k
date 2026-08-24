@@ -259,8 +259,9 @@ def test_samples_follow_the_controlled_seat(controlled_player: int) -> None:
     """Le siege compte : les echantillons suivent l'agent controle, pas un camp fixe."""
     engine, tactical = _episode(controlled_player, seed=5)
 
+    mine = tactical["controlled_objective_samples"]
+    theirs = tactical["opponent_objective_samples"]
+    assert len(mine) == len(theirs), f"longueurs différentes : {len(mine)} vs {len(theirs)}"
+
     awarded = float(engine.game_state["victory_points"][controlled_player])
-    assert _points_from_samples(
-        tactical["controlled_objective_samples"],
-        tactical["opponent_objective_samples"],
-    ) == pytest.approx(awarded)
+    assert _points_from_samples(mine, theirs) == pytest.approx(awarded)

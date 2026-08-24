@@ -121,3 +121,4 @@ def test_registry_singleton_reset() -> None:
     rules.reset_weapon_rules_registry()
     fresh = rules.get_weapon_rules_registry()
     assert fresh is not None
+    assert fresh is not original
