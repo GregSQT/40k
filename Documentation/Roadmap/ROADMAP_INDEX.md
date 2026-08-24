@@ -258,6 +258,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | moteur+training | ✅ fix P3-8 IndexError + split-fire reward + test timeout (2026-08-24) — IndexError split-fire gym, reward et timeout corrigés | — | ⚡ |
 | moteur | ✅ simplify charge placement (2026-08-24) — objective_hex_zones + occupied_hexes dans charge placement ; chemin mort round×round purge _ez_offset_kernels | — | ⚡ |
 | tests+moteur | ✅ fix pyright test files + once_claim avant acting_unit (2026-08-24) — 5 erreurs pyright tests corrigées ; once_claim posé avant check acting_unit dans _calculate_coherency_penalty_per_turn et _calculate_objective_reward_per_turn | — | ⚡ |
+| moteur+training | ✅ once_claim après _get_controlled_player_unit + test objective reward idempotent (2026-08-24) — once_claim posé après _get_controlled_player_unit dans coherency + test idempotence objective reward | — | ⚡ |
+| tests | ✅ simplify once_claim test helpers + invariant comment (2026-08-24) — helpers de test once_claim simplifiés, commentaire invariant ajouté | — | ⚡ |
+| training | ✅ expected_damage contextuelle reward_mapper (2026-08-24) — nouveau module expected_damage.py : NB×P(hit)×P(wound)×P(fail_sv)×DMG ; can_kill_in_one_phase remplace proxy NB×DMG brut ; 8 tests rouge/vert | [bot.md#recompense](bot.md#recompense) | ⚡ |
 
 ### Bloqués par une décision utilisateur
 
