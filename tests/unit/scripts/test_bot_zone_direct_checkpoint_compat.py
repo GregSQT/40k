@@ -128,6 +128,7 @@ def fresh_policy_keys(checkpoint_policy_kwargs):
 
 # Modules ajoutés à PointerMaskablePolicy après le dernier checkpoint épinglé.
 # Le test se met en SKIP (pas FAIL) tant que REFERENCE_MODEL n'est pas régénéré avec ces modules.
+# À vider manuellement une fois le checkpoint régénéré (aucun signal automatique).
 _MODULES_EN_ATTENTE = frozenset({"coherency_query_net", "fight_weapon_net"})
 
 
@@ -145,7 +146,7 @@ def test_checkpoint_ne_manque_aucune_cle_de_la_politique_courante(checkpoint_key
     aléatoires), et bot_zone_direct.py tourne en mesurant un modèle différent de celui épinglé.
     """
     manquantes = fresh_policy_keys - checkpoint_keys
-    if not manquantes:
+    if not manquantes:  # early return obligatoire : set() <= tout = True éviterait à tort le skip ci-dessous
         return
 
     modules_manquants = _modules_de(manquantes)
@@ -153,13 +154,14 @@ def test_checkpoint_ne_manque_aucune_cle_de_la_politique_courante(checkpoint_key
         pytest.skip(
             f"Checkpoint {reference_zip.name!r} antérieur à l'ajout de "
             f"{', '.join(sorted(modules_manquants))} — "
-            "bloquer jusqu'à ce que REFERENCE_MODEL soit régénéré avec la politique courante."
+            "mettre à jour REFERENCE_MODEL ou vider _MODULES_EN_ATTENTE selon l'état du checkpoint."
         )
 
-    assert not manquantes, (
+    manquantes_inattendues = {k for k in manquantes if k.split(".")[0] not in _MODULES_EN_ATTENTE}
+    assert not manquantes_inattendues, (
         f"Le checkpoint {reference_zip.name!r} ne contient pas les clés suivantes, "
         f"présentes dans PointerMaskablePolicy :\n"
-        + "\n".join(f"  - {k}" for k in sorted(manquantes))
+        + "\n".join(f"  - {k}" for k in sorted(manquantes_inattendues))
         + "\nMise à jour nécessaire : régénérer le checkpoint avec la politique courante "
         "et mettre à jour REFERENCE_MODEL + REFERENCE_MD5 dans bot_zone_direct.py."
     )
