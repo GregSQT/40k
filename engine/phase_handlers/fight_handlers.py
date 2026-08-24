@@ -2083,7 +2083,7 @@ def _fight_v11_resolve_attacks(
     config: Dict[str, Any],
     *,
     preferred_target_id: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
     """
     Résout les attaques de mêlée d'une unité « selected to fight » via le moteur
     d'allocation par-figurine (groupes 05.03/05.04, T bodyguard 19.02, save par figurine
@@ -2092,23 +2092,23 @@ def _fight_v11_resolve_attacks(
 
     Sélection de cible auto (ou ``preferred_target_id``), puis déclaration per-figurine
     (``squad_declare_fight`` : arme CC auto par figurine — 04.01) et allocation headless
-    (défenseur non-humain garanti en mode auto → ``auto_decider``). Retourne la liste des
-    ``attack_result`` (1 par blessure infligée), adaptée depuis le summary du moteur
-    groupes (``target_died``/``damage``/ids consommés par le reward_calculator et
-    l'inférence ``unitId`` de w40k_core). Liste vide = fight « à vide ».
+    (défenseur non-humain garanti en mode auto → ``auto_decider``). Retourne ``(events,
+    tid)`` : la liste des attack_result (1 par blessure infligée) ET l'unité cible
+    sélectionnée (None si aucune cible valide). La liste peut être vide quand toutes les
+    attaques ratent (fight « à vide ») — tid reste non-None dans ce cas.
     """
     unit_id = str(require_key(unit, "id"))
     if not (melee_weapons(unit) or []):
-        return []
+        return [], None
 
     targets = _fight_build_valid_target_pool(game_state, unit)
     if not targets:
-        return []
+        return [], None
     tid = preferred_target_id if (preferred_target_id in targets) else _ai_select_fight_target(
         game_state, unit_id, targets
     )
     if get_unit_by_id(game_state, tid) is None:
-        return []
+        return [], None
 
     # Déclaration per-figurine + allocation via le moteur groupes (jumeau du chemin
     # training w40k_core). Le hook FIGHT_CTX.on_unit_destroyed retire la cible morte des
@@ -2131,7 +2131,7 @@ def _fight_v11_resolve_attacks(
             "damage": int(ev["damage"]),
         }
         for ev in require_key(summary, "events")
-    ]
+    ], tid
 
 
 def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F811 (V11 override of V10)
@@ -2230,10 +2230,10 @@ def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> 
                 _ov_plan = _fight_overrun_pile_in_plan(game_state, uid)
                 if _ov_plan is not None:
                     commit_move(_ov_plan, game_state, "pile_in")
-            results = _fight_v11_resolve_attacks(game_state, u, config)
+            results, primary_tid = _fight_v11_resolve_attacks(game_state, u, config)
             return True, {"action": "combat", "phase": "fight", "unitId": uid,
                           "fight_subphase": "fight", "all_attack_results": results,
-                          "targetId": results[0]["targetId"] if results else None,
+                          "targetId": primary_tid,
                           "fight_type": "overrun" if overrun else "normal",
                           "waiting_for_player": False}
         if sub == "consolidate":
