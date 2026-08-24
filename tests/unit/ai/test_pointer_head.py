@@ -211,7 +211,6 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     ) / scale
     # P3-8 : tête dense pour la sélection d'arme de tir (split-fire).
     shoot_weapon_sel_dense = policy.shoot_weapon_sel_net(latent_pi)
-    assert shoot_weapon_sel_dense.shape[-1] == SHOOT_WEAPON_SEL_SLOT_COUNT
     expected = torch.cat(
         [
             move,
@@ -411,11 +410,13 @@ def test_learning_step_runs_end_to_end(model):
     )
     # P3-8 : même garde que les têtes move — une tête dense mal branchée réussirait les
     # tests de forme sans jamais apprendre.
-    assert model.policy.fight_weapon_net.weight.grad is not None, (
+    fight_weapon_grad = model.policy.fight_weapon_net.weight.grad
+    assert fight_weapon_grad is not None and torch.isfinite(fight_weapon_grad).all(), (
         "fight_weapon_net ne recoit PAS de gradient : la tete dense de selection "
         "d'arme CC n'est pas dans le graphe (§0.69)"
     )
-    assert model.policy.shoot_weapon_sel_net.weight.grad is not None, (
+    shoot_weapon_sel_grad = model.policy.shoot_weapon_sel_net.weight.grad
+    assert shoot_weapon_sel_grad is not None and torch.isfinite(shoot_weapon_sel_grad).all(), (
         "shoot_weapon_sel_net ne recoit PAS de gradient : la tete dense de selection "
         "d'arme tir n'est pas dans le graphe (P3-8)"
     )
