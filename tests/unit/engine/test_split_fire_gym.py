@@ -321,7 +321,11 @@ def test_split_target_waiting_for_player_preserves_shooting_type():
     with (
         patch(
             "engine.phase_handlers.shared_utils.squad_shoot_weapon_qty_max",
-            return_value=0,
+            return_value=1,
+        ),
+        patch(
+            "engine.phase_handlers.shared_utils.squad_declare_shoot_weapon_qty",
+            return_value=None,
         ),
         patch(
             "engine.phase_handlers.shared_utils.squad_lock_shoot",

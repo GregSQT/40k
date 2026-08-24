@@ -44,6 +44,7 @@ from engine.spatial_grid import GRID_CELL_COUNT
 # `observation_entities` est une FEUILLE (aucun import moteur) : l'importer au niveau module ne
 # cree pas de cycle. `K_ALLY_SLOTS` y vit parce que l'espace d'action en derive (V11 §0.48 L2).
 from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE, K_WEAPONS_RANGED
+from engine.observation_weapon_profiles import collect_weapon_profiles, profile_identity
 from engine.agent_decision import set_pending_agent_decision
 # Primitives « hors table » : définies dans la couche BASSE (`spatial_relations` ne dépend que de
 # `hex_utils`) parce que les primitives de MESURE en dépendent elles-mêmes. Ré-exportées ici, où
@@ -8398,6 +8399,24 @@ def squad_undeclare_shoot_weapon_qty(
     return undeclare_attack_weapon_qty(game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_code, target_squad_id, only_model_id)
 
 
+def _squad_rng_profiles(
+    game_state: Dict[str, Any], squad_id: str
+) -> Tuple[List[Dict[str, Any]], List]:
+    """Alive models + collect_weapon_profiles("RNG_WEAPONS") pour squad_id.
+
+    Helper partagé par shoot_weapon_eligible_target_slots, shoot_weapon_remaining_eligible_slots
+    et build_squad_action_mask (P3-8) pour éviter de recalculer les trois fois.
+    """
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive_models = [
+        models_cache[mid]
+        for mid in squad_models.get(squad_id, [])  # get allowed
+        if mid in models_cache
+    ]
+    return alive_models, collect_weapon_profiles(alive_models, "RNG_WEAPONS")
+
+
 def shoot_weapon_eligible_target_slots(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -8411,21 +8430,11 @@ def shoot_weapon_eligible_target_slots(
 
     Retourne `(weapon_code, [slot_i pour toute cible éligible])`.
     """
-    from engine.observation_weapon_profiles import collect_weapon_profiles
-    from engine.observation_entities import K_WEAPONS_RANGED as _K
-
-    models_cache = require_key(game_state, "models_cache")
-    squad_models = require_key(game_state, "squad_models")
-    alive_models = [
-        models_cache[mid]
-        for mid in squad_models.get(squad_id, [])  # get allowed
-        if mid in models_cache
-    ]
-    profiles = collect_weapon_profiles(alive_models, "RNG_WEAPONS")
-    if weapon_slot < 0 or weapon_slot >= min(len(profiles), _K):
+    _, profiles = _squad_rng_profiles(game_state, squad_id)
+    if weapon_slot < 0 or weapon_slot >= min(len(profiles), K_WEAPONS_RANGED):
         raise ValueError(
             f"shoot_weapon_eligible_target_slots: slot {weapon_slot} hors des profils "
-            f"({len(profiles)} profils, K={_K}) pour {squad_id!r}"
+            f"({len(profiles)} profils, K={K_WEAPONS_RANGED}) pour {squad_id!r}"
         )
     weapon_code = require_key(profiles[weapon_slot][0], "code")
     elig: List[int] = [
@@ -8448,19 +8457,9 @@ def shoot_weapon_remaining_eligible_slots(
     Retourne `{slot_j: weapon_code}` pour chaque slot j ≠ `except_slot` dont ≥1 ennemi
     est atteignable. Miroir de `fight_weapon_eligible_slots` pour les autres groupes d'arme.
     """
-    from engine.observation_weapon_profiles import collect_weapon_profiles
-    from engine.observation_entities import K_WEAPONS_RANGED as _K
-
-    models_cache = require_key(game_state, "models_cache")
-    squad_models = require_key(game_state, "squad_models")
-    alive_models = [
-        models_cache[mid]
-        for mid in squad_models.get(squad_id, [])  # get allowed
-        if mid in models_cache
-    ]
-    profiles = collect_weapon_profiles(alive_models, "RNG_WEAPONS")
+    _, profiles = _squad_rng_profiles(game_state, squad_id)
     result: Dict[int, str] = {}
-    for slot_j, (weapon, _) in enumerate(profiles[:_K]):
+    for slot_j, (weapon, _) in enumerate(profiles[:K_WEAPONS_RANGED]):
         if slot_j == except_slot:
             continue
         code = require_key(weapon, "code")
@@ -13174,17 +13173,7 @@ def build_squad_action_mask(
         # squad_shoot_weapon_qty_max qui retourne 0 hors activation).
         if shooting_type is not None:
             from engine.macro_intents import SHOOT_WEAPON_SEL_SLOT_BASE as _SW_BASE
-            from engine.observation_weapon_profiles import (
-                collect_weapon_profiles as _cwp,
-                profile_identity as _pid,
-            )
-            _mc = game_state.get("models_cache", {})  # get allowed
-            _alive = [
-                _mc[mid]
-                for mid in game_state.get("squad_models", {}).get(squad_id, [])  # get allowed
-                if mid in _mc
-            ]
-            _profiles = _cwp(_alive, "RNG_WEAPONS")
+            _alive, _profiles = _squad_rng_profiles(game_state, squad_id)
             _elig_targets = [
                 _esid for _esid in enemy_slot_ids
                 if _esid is not None
@@ -13194,13 +13183,18 @@ def build_squad_action_mask(
                     units_cache, units_cache[_esid], squad_id, our_player, ez, game_state
                 )
             ]
+            # pkey_to_carriers : calculé une fois pour tous les slots j.
+            # Sans ce dict, l'any() rebalayait alive × weapons pour chaque slot_j.
+            _pkey_to_carriers: Dict[tuple, List[Tuple[Dict, int]]] = {}
+            for _m in _alive:
+                for _widx, _w in enumerate(ranged_weapons(_m)):
+                    _pk = profile_identity(_w)
+                    _pkey_to_carriers.setdefault(_pk, []).append((_m, _widx))
             for _slot_j, (_wpn, _) in enumerate(_profiles[:SQUAD_ACTION_SHOOT_WEAPON_SEL_SLOT_COUNT]):
-                _pkey = _pid(_wpn)
+                _carriers = _pkey_to_carriers.get(profile_identity(_wpn), [])
                 if any(
                     _model_can_shoot_target_with_weapon(game_state, _m, _esid, _widx)
-                    for _m in _alive
-                    for _widx, _w in enumerate(ranged_weapons(_m))
-                    if _pid(_w) == _pkey
+                    for _m, _widx in _carriers
                     for _esid in _elig_targets
                 ):
                     mask[_SW_BASE + _slot_j] = 1
