@@ -377,10 +377,11 @@ decision_ctx_bin[1]      = decision_type_rule_choice         # 0.0 / 1.0 — one
 decision_ctx_bin[2]      = decision_type_waaagh_call         # 0.0 / 1.0 — appel du Waaagh! (chantier 03)
 decision_ctx_bin[3]      = decision_type_fly_declaration     # 0.0 / 1.0 — « take to the skies » 21.03 (L6)
 decision_ctx_bin[4]      = decision_type_allocation_model    # 0.0 / 1.0 — choix figurine réceptrice 05.04 (P3-4)
-decision_ctx_bin[5]      = decision_type_reserved_0          # colonnes RÉSERVÉES : le one-hot fait
-decision_ctx_bin[6]      = decision_type_reserved_1          # AGENT_DECISION_TYPE_SLOTS = 8 colonnes,
-decision_ctx_bin[7]      = decision_type_reserved_2          # pré-dimensionnées. Ouvrir un type de
-decision_ctx_bin[8]      = decision_type_reserved_3          # décision (pile-in, move réactif, choix d'arme…)
+decision_ctx_bin[5]      = decision_type_charge_placement    # 0.0 / 1.0 — placement charge par figurine (chantier 04)
+decision_ctx_bin[6]      = decision_type_reserved_0          # colonnes RÉSERVÉES : le one-hot fait
+decision_ctx_bin[7]      = decision_type_reserved_1          # AGENT_DECISION_TYPE_SLOTS = 8 colonnes,
+decision_ctx_bin[8]      = decision_type_reserved_2          # pré-dimensionnées. Ouvrir un type de
+                                                             # décision consomme une réserve : les bits NE BOUGENT PAS.
                                                              # consomme une réserve : les bits bin NE BOUGENT PAS.
 
 decision_options_cont[c][0] = role_tier_norm                 # [0, 1] — ROLE_TIER / 4 (base=0, leader=1)
