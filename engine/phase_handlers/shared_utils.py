@@ -13447,12 +13447,14 @@ def _coherency_alive(game_state: Dict[str, Any], squad_id: str) -> List[str]:
     if not alive:
         return []
     # Ordre IDENTIQUE a l'observation pour que COHERENCY_SLOT_BASE + i designe la ligne i.
-    sq_cache = game_state.get("squad_cache", {}).get(squad_id, {})  # get allowed
+    unit = get_unit_by_id(game_state, squad_id)
+    if unit is None:
+        raise KeyError(f"_coherency_alive: {squad_id!r} absent de unit_by_id")
     squad_defence: tuple = (
-        int(sq_cache["HP_MAX"]),
-        int(sq_cache["T"]),
-        int(sq_cache.get("ARMOR_SAVE", 7)),  # get allowed
-        int(sq_cache.get("INVUL_SAVE", 7)),  # get allowed
+        int(require_key(unit, "HP_MAX")),
+        int(require_key(unit, "T")),
+        int(unit.get("ARMOR_SAVE", 7)),  # get allowed
+        int(unit.get("INVUL_SAVE", 7)),  # get allowed
     )
     return ObservationBuilder._squad_models_for_observation(alive, models_cache, squad_defence)
 
