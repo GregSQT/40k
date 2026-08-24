@@ -235,12 +235,7 @@ _MINIMAL_GS: Dict[str, Any] = {
 
 
 def _rc_desp() -> RewardCalculator:
-    rc = RewardCalculator(
-        config={"quiet": True, "controlled_player": 1},
-        rewards_config={},
-        unit_registry=None,
-        state_manager=None,
-    )
+    rc = _make_minimal_rc()
     rc._get_system_penalties = lambda: _SYSTEM_PENALTIES
     return rc
 
@@ -306,12 +301,7 @@ class TestSelectCoherencyRemovalGymPath:
 
 def _fight_calculator() -> RewardCalculator:
     """RewardCalculator minimal câblé pour atteindre la ligne require_key('all_attack_results')."""
-    rc = RewardCalculator(
-        config={"quiet": True, "controlled_player": 1},
-        rewards_config={},
-        unit_registry=None,
-        state_manager=None,
-    )
+    rc = _make_minimal_rc()
 
     class _FakeMapper:
         def get_combat_priority_reward(self, *a: Any, **kw: Any) -> float:
