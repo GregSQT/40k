@@ -8132,7 +8132,9 @@ class W40KEngine(gym.Env):
             current_phase = self.game_state.get("phase")
             if current_phase == "fight":
                 from engine.phase_handlers import fight_handlers
-                fight_handlers.fight_phase_end(self.game_state)
+                result = fight_handlers.fight_phase_end(self.game_state)
+                if not result.get("phase_complete", True):
+                    break
             else:
                 break
             self.game_state["game_over"] = self._check_game_over()
