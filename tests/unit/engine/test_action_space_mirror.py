@@ -126,7 +126,7 @@ def test_activate_slots_mirror_the_ally_slot_mapping():
 
 
 def test_total_action_size():
-    """L'action space se termine par les slots d'ACTIVATION (V11 §0.48 element L2).
+    """L'action space se termine par les slots de COHERENCE (P3-0 : retrait pour 03.03).
 
     ⚠️ `TOTAL_ACTION_SIZE` etait GELE a 1127 depuis le chantier 01 (les chantiers 02 a 06
     n'utilisent que des dimensions deja declarees). `L2` est le SEUL chantier du lot autorise a le
@@ -140,13 +140,17 @@ def test_total_action_size():
     l'ecriture (option A). Les 20 slots s'inserent dans le bloc MICRO, donc tout le macro se
     decale de 20 ; ce test est celui qui a pris la collision quand ils avaient d'abord ete poses
     apres `ACTION_FIGHT_NO_TARGET`, la ou commencaient les intentions de zone.
+
+    ⚠️ 1359 -> 1379 (P3-0) : les 20 slots de coherence (retrait figurine hors coherence 03.03)
+    s'ajoutent apres FIGHT_WEAPON_SLOTS. Meme derivation D1 cote figurines alliees.
     """
     assert mi.CHOICE_BASE == su.SQUAD_ACTION_SIZE + mi.MAX_OBJECTIVES * 3
     assert mi.OATH_SLOT_BASE == mi.CHOICE_BASE + mi.CHOICE_COUNT
     assert mi.ACTIVATE_SLOT_BASE == mi.OATH_SLOT_BASE + mi.OATH_SLOT_COUNT
     assert mi.FIGHT_WEAPON_SLOT_BASE == mi.ACTIVATE_SLOT_BASE + mi.ACTIVATE_SLOT_COUNT
-    assert mi.TOTAL_ACTION_SIZE == mi.FIGHT_WEAPON_SLOT_BASE + mi.FIGHT_WEAPON_SLOT_COUNT
-    assert mi.TOTAL_ACTION_SIZE == 1359
+    assert mi.COHERENCY_SLOT_BASE == mi.FIGHT_WEAPON_SLOT_BASE + mi.FIGHT_WEAPON_SLOT_COUNT
+    assert mi.TOTAL_ACTION_SIZE == mi.COHERENCY_SLOT_BASE + mi.COHERENCY_SLOT_COUNT
+    assert mi.TOTAL_ACTION_SIZE == 1379
 
 
 def test_choice_then_oath_then_activate_slots_close_the_action_space():
@@ -154,7 +158,8 @@ def test_choice_then_oath_then_activate_slots_close_the_action_space():
     assert list(mi.CHOICE_SLOTS) == list(range(mi.CHOICE_BASE, mi.OATH_SLOT_BASE))
     assert list(mi.OATH_SLOTS) == list(range(mi.OATH_SLOT_BASE, mi.ACTIVATE_SLOT_BASE))
     assert list(mi.ACTIVATE_SLOTS) == list(range(mi.ACTIVATE_SLOT_BASE, mi.FIGHT_WEAPON_SLOT_BASE))
-    assert list(mi.FIGHT_WEAPON_SLOTS) == list(range(mi.FIGHT_WEAPON_SLOT_BASE, mi.TOTAL_ACTION_SIZE))
+    assert list(mi.FIGHT_WEAPON_SLOTS) == list(range(mi.FIGHT_WEAPON_SLOT_BASE, mi.COHERENCY_SLOT_BASE))
+    assert list(mi.COHERENCY_SLOTS) == list(range(mi.COHERENCY_SLOT_BASE, mi.TOTAL_ACTION_SIZE))
     assert not mi.is_zone_intent_action(mi.CHOICE_BASE)
     assert not mi.is_zone_intent_action(mi.OATH_SLOT_BASE)
     assert not mi.is_zone_intent_action(mi.ACTIVATE_SLOT_BASE)
