@@ -7908,6 +7908,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Lus pour l'affichage : quelle unité est sous Oath, quel camp a un Waaagh! actif.
       oath_target: gameState.oath_target,
       waaagh_active: gameState.waaagh_active,
+      pending_coherency_removal: gameState.pending_coherency_removal,
     };
   }, [
     gameState,

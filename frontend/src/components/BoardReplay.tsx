@@ -1793,11 +1793,7 @@ export const BoardReplay: React.FC = () => {
         getChargeDestinations={() => {
           // Calculate ALL valid charge destinations for replay mode using BFS
           const unitId = currentAction?.unit_id;
-          if (
-            currentAction?.type === "charge" &&
-            currentAction?.from &&
-            unitId != null
-          ) {
+          if (currentAction?.type === "charge" && currentAction?.from && unitId != null) {
             const chargeFrom = currentAction.from;
             // Use the charge_roll from the action, not the actual distance traveled
             const chargeRoll = currentAction.charge_roll;
