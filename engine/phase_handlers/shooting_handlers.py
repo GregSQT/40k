@@ -3922,6 +3922,24 @@ def _shooter_lateral_vantage_hexes(
     return out
 
 
+def _build_shooter_proj_cache(
+    anchor: Tuple[int, int],
+    footprint: List[Tuple[int, int]],
+) -> Tuple[Optional[Tuple[float, float]], Optional[List[Tuple[float, float]]]]:
+    """Anchor projection + footprint projection list for _los_hex_visible cache params.
+
+    Returns (None, None) for single-hex footprints: _shooter_lateral_vantage_hexes
+    returns early for those, so computing projections would be wasted work.
+    """
+    if len(footprint) <= 1:
+        return None, None
+    from engine.hex_utils import _hex_projected as _hp
+    return (
+        _hp(int(anchor[0]), int(anchor[1])),
+        [_hp(int(hc), int(hr)) for hc, hr in footprint],
+    )
+
+
 def _los_line_segment_clear(
     src_col: int, src_row: int, tgt_col: int, tgt_row: int,
     wall_set: Set[Tuple[int, int]],
@@ -4100,12 +4118,7 @@ def _compute_visibility_with_obscuring(
     # Precompute shooter hex projections once for the whole target loop.
     # At x5, shooter_hexes can be 129+ hexes, and without caching each call to
     # _shooter_lateral_vantage_hexes would reproject them once per target hex → O(n×m).
-    from engine.hex_utils import _hex_projected as _hp
-    _shooter_anchor_proj: Optional[Tuple[float, float]] = _hp(anchor[0], anchor[1])
-    _shooter_proj_cache: Optional[List[Tuple[float, float]]] = (
-        [_hp(int(hc), int(hr)) for hc, hr in shooter_hexes]
-        if len(shooter_hexes) > 1 else None
-    )
+    _shooter_anchor_proj, _shooter_proj_cache = _build_shooter_proj_cache(anchor, shooter_hexes)
 
     visible = 0
     visible_hex_set: Set[Tuple[int, int]] = set()
@@ -4384,19 +4397,14 @@ def _target_model_visible_cells(
     # ``floor_occ`` (dalles occultantes) + proj_cache (projections du socle tireur) évitent de
     # recalculer ces valeurs pour chaque case cible × figurine tireuse → O(N×M) au lieu de O(N×M×footprint).
     # Chaque entrée : (anchor, footprint, wall_eff, z_s, floor_occ, proj_cache, anchor_proj).
-    from engine.hex_utils import _hex_projected as _hp
-    prepared: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any, Optional[List[Tuple[float, float]]], Tuple[float, float]]] = []
+    prepared: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any, Optional[List[Tuple[float, float]]], Optional[Tuple[float, float]]]] = []
     for s_anchor, s_footprint, s_wall, z_s, occ_s in shooter_models:
         if (z_s is not None) and (z_target is not None):
             occs = [o for o in (occ_s, occ_target) if o is not None]
             floor_occ = occs or None
         else:
             floor_occ = None
-        s_anchor_proj = _hp(int(s_anchor[0]), int(s_anchor[1]))
-        s_proj_cache: Optional[List[Tuple[float, float]]] = (
-            [_hp(int(hc), int(hr)) for hc, hr in s_footprint]
-            if len(s_footprint) > 1 else None
-        )
+        s_anchor_proj, s_proj_cache = _build_shooter_proj_cache(s_anchor, s_footprint)
         prepared.append((s_anchor, s_footprint, s_wall, z_s, floor_occ, s_proj_cache, s_anchor_proj))
     vset: Set[Tuple[int, int]] = set()
     for tc, tr in target_model_hexes:
@@ -4757,18 +4765,14 @@ def _update_unit_los_preview_data(
             terrain_hex_set.add((int(_h[0]), int(_h[1])))
 
     sc, sr = int(shooter_col), int(shooter_row)
-    from engine.hex_utils import Socle, is_phantom_bottom_hex, _hex_projected as _hp
+    from engine.hex_utils import Socle, is_phantom_bottom_hex
     from engine.combat_utils import ranged_edge_distance_to_cell
     _preview_metric = _ranged_distance_metric(game_state)
     _preview_socle = Socle(
         unit["BASE_SHAPE"], unit["BASE_SIZE"], sc, sr,
         {(int(c), int(r)) for c, r in _shooter_hexes},
     )
-    _preview_anchor_proj: Optional[Tuple[float, float]] = _hp(sc, sr)
-    _preview_proj_cache: Optional[List[Tuple[float, float]]] = (
-        [_hp(int(hc), int(hr)) for hc, hr in _shooter_hexes]
-        if len(_shooter_hexes) > 1 else None
-    )
+    _preview_anchor_proj, _preview_proj_cache = _build_shooter_proj_cache((sc, sr), _shooter_hexes)
     attack_cells: List[Dict[str, int]] = []
     cover_cells: List[Dict[str, int]] = []
     ratio_by_hex: Dict[str, float] = {}
