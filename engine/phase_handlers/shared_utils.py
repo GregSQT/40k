@@ -6404,20 +6404,6 @@ def charge_build_valid_plan(
             for _fc, _fr in _nte.get("occupied_hexes", []):  # get allowed
                 _intent_nontgt_positions.append((int(_fc), int(_fr)))
 
-    # Champs de distance pré-calculés : BFS multi-source sans obstacle = distance cube exacte.
-    # Remplace le min(calculate_hex_distance(...) for oc, or_ in sources) appelé par
-    # _engaged_sort_key pour CHAQUE cellule candidate — O(board) au lieu de O(sources×cands).
-    _board_cols: int = int(require_key(game_state, "board_cols"))
-    _board_rows: int = int(require_key(game_state, "board_rows"))
-    _obj_dist_field: Dict[Tuple[int, int], int] = (
-        _build_multi_source_dist_field(_intent_obj_positions, _board_cols, _board_rows)
-        if intent == 1 and _intent_obj_positions else {}
-    )
-    _nontgt_dist_field: Dict[Tuple[int, int], int] = (
-        _build_multi_source_dist_field(_intent_nontgt_positions, _board_cols, _board_rows)
-        if intent == 2 and _intent_nontgt_positions else {}
-    )
-
     # Portee d'engagement en distance CENTRE-A-CENTRE : borne superieure par inegalite
     # triangulaire hexagonale (ez borde-a-bord + les deux demi-socles). Surensemble : chaque
     # cellule retenue est ensuite validee par `unit_entries_within_engagement_zone`.
@@ -6454,6 +6440,21 @@ def charge_build_valid_plan(
     )
     if closest_gap - engage_reach > budget:
         return None
+
+    # Champs de distance pré-calculés : BFS multi-source sans obstacle = distance cube exacte.
+    # Remplace le min(calculate_hex_distance(...) for oc, or_ in sources) appelé par
+    # _engaged_sort_key pour CHAQUE cellule candidate — O(board) au lieu de O(sources×cands).
+    # Placé APRÈS la sortie O(1) : inutile de parcourir le plateau si la cible est hors d'atteinte.
+    _board_cols: int = int(require_key(game_state, "board_cols"))
+    _board_rows: int = int(require_key(game_state, "board_rows"))
+    _obj_dist_field: Dict[Tuple[int, int], int] = (
+        _build_multi_source_dist_field(_intent_obj_positions, _board_cols, _board_rows)
+        if intent == 1 and _intent_obj_positions else {}
+    )
+    _nontgt_dist_field: Dict[Tuple[int, int], int] = (
+        _build_multi_source_dist_field(_intent_nontgt_positions, _board_cols, _board_rows)
+        if intent == 2 and _intent_nontgt_positions else {}
+    )
 
     # Cellules d'ou l'engagement est GEOMETRIQUEMENT possible (surensemble, cf. ci-dessus).
     # Construit une fois pour l'escouade : il ne depend pas de la figurine traitee.
