@@ -48,12 +48,12 @@ class RewardMapper:
             weapon = get_selected_ranged_weapon(unit)
             if not weapon:
                 return False
-            max_damage = expected_damage(unit, weapon, target)
+            max_damage = expected_damage(weapon, target)
         else:
             weapon = get_selected_melee_weapon(unit)
             if not weapon:
                 return False
-            max_damage = expected_damage(unit, weapon, target)
+            max_damage = expected_damage(weapon, target)
         
         return target_hp <= max_damage
     
@@ -82,7 +82,6 @@ class RewardMapper:
         base_reward = base_actions["ranged_attack"]
         
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate target threat using weapon arrays
-        target_threat = self._get_unit_threat(target)
         can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state=game_state)
         
         # Priority 1: High threat target that melee can charge but won't kill in 1 melee phase
@@ -100,12 +99,6 @@ class RewardMapper:
             if "shoot_priority_2" not in unit_rewards:
                 raise ValueError("shoot_priority_2 reward not found in unit rewards config")
             return base_reward + unit_rewards["shoot_priority_2"]
-        
-        # Priority 3: High threat, lowest HP target that can be killed in 1 phase
-        if can_kill_1_phase and self._is_lowest_hp_high_threat(target, all_targets, game_state):
-            if "shoot_priority_3" not in unit_rewards:
-                raise ValueError("shoot_priority_3 reward not found in unit rewards config")
-            return base_reward + unit_rewards["shoot_priority_3"]
         
         # Standard shooting reward
         return base_reward
@@ -129,7 +122,6 @@ class RewardMapper:
         base_reward = base_actions["charge_success"]
 
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate target threat using weapon arrays
-        target_threat = self._get_unit_threat(target)
         can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False, game_state=game_state)
         
         if "is_melee" not in unit:
@@ -196,13 +188,12 @@ class RewardMapper:
 
         return base_reward
     
-    def get_kill_bonus_reward(self, unit, target, damage_dealt, game_state: Dict[str, Any]):
+    def get_kill_bonus_reward(self, unit, target, all_targets, damage_dealt, phase: str, game_state: Dict[str, Any]):
         """Calculate kill bonus rewards using existing parameter unitTypes. Phase 2: HP from _get_target_hp."""
         unit_rewards = self._get_unit_rewards(unit)
         target_hp = self._get_target_hp(target, game_state)
-        
+
         if target_hp - damage_dealt <= 0:  # Target will be killed
-            phase = self._get_current_phase()
             
             result_bonuses = require_key(unit_rewards, "result_bonuses")
             if phase == "shoot":
@@ -230,7 +221,7 @@ class RewardMapper:
                     base_kill += unit_rewards["enemy_killed_no_overkill_m"] - unit_rewards["enemy_killed_m"]
             
             # Lowest HP target bonus
-            if self._was_lowest_hp_target(target, game_state):
+            if self._was_lowest_hp_target(target, all_targets, game_state):
                 if phase == "shoot":
                     if "enemy_killed_lowests_hp_r" not in unit_rewards:
                         raise ValueError("enemy_killed_lowests_hp_r reward not found in unit rewards config")
@@ -500,12 +491,11 @@ class RewardMapper:
         # Throw error instead of using default
         raise NotImplementedError("_get_max_melee_damage_vs_target requires access to friendly units list")
     
-    def _get_current_phase(self):
-        """Get current game phase."""
-        # This would need access to game state
-        raise NotImplementedError("_get_current_phase requires access to game state")
-    
-    def _was_lowest_hp_target(self, target, game_state: Dict[str, Any]):
-        """Check if this was the lowest HP target when action was taken. Phase 2: HP from get_hp_from_cache."""
-        # get_kill_bonus_reward does not receive all_targets; cannot compare. No bonus to avoid over-reward.
-        return False
+    def _was_lowest_hp_target(self, target, all_targets: List[Dict[str, Any]], game_state: Dict[str, Any]) -> bool:
+        """Check if this target had the lowest HP among all_targets when the kill action was taken."""
+        target_hp = self._get_target_hp(target, game_state)
+        for other in all_targets:
+            if other is not target:
+                if self._get_target_hp(other, game_state) < target_hp:
+                    return False
+        return True

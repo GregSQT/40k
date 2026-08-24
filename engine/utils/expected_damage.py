@@ -17,7 +17,6 @@ from engine.phase_handlers.shared_utils import wound_threshold, save_threshold
 
 
 def expected_damage(
-    attacker_unit: Dict[str, Any],
     weapon: Dict[str, Any],
     target_unit: Dict[str, Any],
 ) -> float:
