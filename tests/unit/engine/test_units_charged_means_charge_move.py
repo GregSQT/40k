@@ -128,6 +128,12 @@ def test_successful_charge_still_grants_fights_first(engine: W40KEngine) -> None
         )
     assert ok is True
     assert result["charge_succeeded"] is True, result
+    # Charge réussie → placement demandé ; commit_move (et units_charged) est différé après CHOICE_k.
+    assert result["action"] == "waiting_for_agent_decision"
+    assert result.get("decision_type") == "charge_placement"
+
+    ok2, _ = engine._process_squad_action({"action": "agent_decision", "option_index": 0})
+    assert ok2 is True
 
     assert _charged(engine) == ["1"]
     assert is_fights_first(gs["unit_by_id"]["1"], gs) is True
