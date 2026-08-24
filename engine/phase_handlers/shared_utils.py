@@ -6232,6 +6232,7 @@ def charge_build_valid_plan(
     squad_id: str,
     target_squad_ids: List[str],
     charge_roll: int,
+    intent: int = 0,
 ) -> Optional[List[Tuple[str, int, int, int]]]:
     """Plan de charge multi-figurines (transaction atomique, aucune ecriture cache).
 
@@ -6363,6 +6364,21 @@ def charge_build_valid_plan(
         if esid not in _declared_targets
     ]
 
+    # Positions pré-calculées pour le tri par intention (L10 placement de charge).
+    _intent_obj_positions: List[Tuple[int, int]] = []
+    if intent == 1:
+        for _obj in game_state.get("objectives", []):  # get allowed
+            for _hex in _obj.get("hexes", []):  # get allowed
+                if isinstance(_hex, (list, tuple)):
+                    _intent_obj_positions.append((int(_hex[0]), int(_hex[1])))
+                else:
+                    _intent_obj_positions.append((int(_hex["col"]), int(_hex["row"])))
+    _intent_nontgt_positions: List[Tuple[int, int]] = []
+    if intent == 2:
+        for _nte in _non_target_enemies:
+            for _fc, _fr in _nte.get("occupied_hexes", []):  # get allowed
+                _intent_nontgt_positions.append((int(_fc), int(_fr)))
+
     # Portee d'engagement en distance CENTRE-A-CENTRE : borne superieure par inegalite
     # triangulaire hexagonale (ez borde-a-bord + les deux demi-socles). Surensemble : chaque
     # cellule retenue est ensuite validee par `unit_entries_within_engagement_zone`.
@@ -6425,6 +6441,26 @@ def charge_build_valid_plan(
         _prev_mid, prev_col, prev_row, _prev_lvl = plan[-1]
         return calculate_hex_distance(prev_col, prev_row, col, row)
 
+    def _engaged_sort_key(nc: int, nr: int, d_orig: int, gap: int) -> tuple:
+        """Clé de tri pour les candidats d'engagement, paramétrée par l'intention L10."""
+        if intent == 1:  # Objectif : priorité à la cellule la plus proche d'un objectif
+            obj_d = (
+                min(calculate_hex_distance(nc, nr, oc, or_) for oc, or_ in _intent_obj_positions)
+                if _intent_obj_positions else 0
+            )
+            return (obj_d, d_orig, gap, nc, nr)
+        if intent == 2:  # Isolation : priorité aux cellules les plus loin des ennemis non-ciblés
+            nt_d = (
+                min(calculate_hex_distance(nc, nr, ec, er) for ec, er in _intent_nontgt_positions)
+                if _intent_nontgt_positions else 0
+            )
+            return (-nt_d, gap, nc, nr)
+        if intent == 3:  # Pénétration : figurine avance au maximum du budget
+            return (-d_orig, gap, nc, nr)
+        if intent == 4:  # Étalé : formation la plus dispersée
+            return (-gap, d_orig, nc, nr)
+        return (d_orig, gap, nc, nr)  # intent == 0 (Serré, comportement actuel)
+
     for mid in mids:
         m = models_cache[mid]
         orig_col, orig_row = int(m["col"]), int(m["row"])
@@ -6444,8 +6480,8 @@ def charge_build_valid_plan(
         # (a) Tentative d'ENGAGEMENT (03.04 : ER = 2", bord-a-bord — pas la cellule voisine
         #     du centre ennemi). 11.04 impose de finir plus pres d'une cible, donc une
         #     destination engageante mais qui eloigne n'est pas retenue.
-        # (dist_from_orig, ecart a la fig precedente, col, row)
-        engaged_candidates: List[Tuple[int, int, int, int]] = []
+        # Chaque entrée : (clé de tri selon l'intention L10, nc, nr)
+        engaged_candidates: List[Tuple[tuple, int, int]] = []
         for nc, nr in engage_zone_cells:
             if (nc, nr) in occupied_after:
                 continue
@@ -6465,11 +6501,13 @@ def charge_build_valid_plan(
                 for te in target_entries
             ):
                 continue
-            engaged_candidates.append((d_orig, _formation_gap(nc, nr), nc, nr))
+            engaged_candidates.append(
+                (_engaged_sort_key(nc, nr, d_orig, _formation_gap(nc, nr)), nc, nr)
+            )
         picked: Optional[Tuple[int, int]] = None
         if engaged_candidates:
-            engaged_candidates.sort()  # plus proche d origine d abord, puis formation serree
-            _, _gap, pc, pr = engaged_candidates[0]
+            engaged_candidates.sort()
+            _, pc, pr = engaged_candidates[0]
             picked = (pc, pr)
         else:
             # (b) Engagement hors d'atteinte : avancer vers la cible la plus proche

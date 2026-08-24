@@ -4089,6 +4089,27 @@ class W40KEngine(gym.Env):
                 "seuls SHOOT_CTX et FIGHT_CTX peuvent armer une décision gym"
             )
 
+        if decision_type == "charge_placement":
+            # L10 — placement final de charge (V11 §9 P3-8d) : CHOICE_k = intention 0..4.
+            # `apply_charge_placement_decision` consomme la décision et retourne le plan
+            # sélectionné ainsi que le contexte stocké dans `_charge_placement_pending`.
+            payload = require_key(selected_option, "payload")
+            plan_index = int(require_key(payload, "plan_index"))
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            decision_player = int(require_key(decision, "player"))
+            chosen_plan, ctx = charge_handlers.apply_charge_placement_decision(
+                self.game_state,
+                squad_id=decision_squad_id,
+                plan_index=plan_index,
+            )
+            return self._finish_charge_after_placement(
+                squad_id=decision_squad_id,
+                plan=chosen_plan,
+                ctx=ctx,
+                option_index=option_index,
+                decision_player=decision_player,
+            )
+
         if decision_type != "rule_choice":
             raise NotImplementedError(
                 f"agent_decision: type '{decision_type}' declare mais sans application moteur. "
@@ -5633,6 +5654,93 @@ class W40KEngine(gym.Env):
         self._fight_v11_gym_settle()
         return True, result
 
+
+    def _finish_charge_after_placement(
+        self,
+        squad_id: str,
+        plan: List[Tuple[str, int, int, int]],
+        ctx: Dict[str, Any],
+        option_index: int,
+        decision_player: int,
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Commit + end_activation différé après décision CHOICE_k de placement de charge (L10).
+
+        Miroir exact de l'ancien bloc `else` dans `squad_charge`, découpé pour passer par
+        `_handle_agent_decision_action` après la sélection d'intention par l'agent.
+        """
+        from engine.phase_handlers.generic_handlers import end_activation
+        from engine.phase_handlers.shared_utils import commit_move
+        from engine.phase_handlers.charge_handlers import charge_record_outcome
+
+        unit = get_unit_by_id(self.game_state, squad_id)
+        if unit is None:
+            raise KeyError(f"Squad {squad_id} introuvable pour _finish_charge_after_placement")
+
+        target_squad_id: str = ctx["target_squad_id"]
+        target_squad_ids: List[str] = ctx["target_squad_ids"]
+        _charge_from: Optional[Tuple[int, int]] = ctx.get("charge_from")
+        _charge_target: Optional[Tuple[int, int]] = ctx.get("charge_target")
+        _charge_is_pair: bool = bool(ctx.get("charge_is_pair", False))
+        _charge_is_fly: bool = bool(ctx.get("charge_is_fly", False))
+        _charge_ability: Optional[str] = ctx.get("charge_ability")
+        _charge_rule_marker: str = ctx.get("charge_rule_marker", "")
+        charge_roll: int = int(ctx["charge_roll"])
+        _charge_roll_initial = ctx.get("charge_roll_initial")
+
+        commit_move(plan, self.game_state, "charge")
+        # Capturer le segment [MODELS:] IMMÉDIATEMENT après commit_move (même motif que
+        # `_gym_commit_fight_move` : positions post-commit, pré-pile-in).
+        _charge_models_seg = self._models_segment_for_unit(squad_id)
+        end_result = end_activation(self.game_state, unit, ACTION, 1, CHARGE, CHARGE, 0)
+        _dest_uc = self.game_state.get("units_cache", {}).get(squad_id, {})  # get allowed
+        _charge_dist = charge_record_outcome(self.game_state, squad_id)
+        append_action_log(
+            self.game_state,
+            {
+                "type": "charge",
+                "message": (
+                    f"Unit {squad_id} CHARGED{_charge_rule_marker} "
+                    f"Unit {target_squad_id} - Roll:{charge_roll}"
+                ),
+                "turn": require_key(self.game_state, "turn"),
+                "phase": "charge",
+                "unitId": squad_id,
+                "player": decision_player,
+                "targetId": target_squad_id,
+                "charge_roll": charge_roll,
+                "charge_roll_initial": _charge_roll_initial,
+                "fromCol": _charge_from[0] if _charge_from else None,
+                "fromRow": _charge_from[1] if _charge_from else None,
+                "toCol": int(_dest_uc["col"]) if "col" in _dest_uc else None,
+                "toRow": int(_dest_uc["row"]) if "row" in _dest_uc else None,
+                "targetCol": _charge_target[0] if _charge_target else None,
+                "targetRow": _charge_target[1] if _charge_target else None,
+                "is_pair": _charge_is_pair,
+                "is_fly_move": _charge_is_fly,
+                "ability_display_name": _charge_ability,
+                "timestamp": "server_time",
+                "reward": 0.0,
+                "models_segment": _charge_models_seg,
+                "allTargetIds": [str(t) for t in target_squad_ids],
+                "allTargetCoords": [
+                    list(map(int, pos)) if (pos := get_unit_position(t, self.game_state)) is not None else None
+                    for t in target_squad_ids
+                ],
+                **_charge_dist,
+            },
+        )
+        result = {
+            **end_result,
+            "action": "squad_charge",
+            "squad_id": squad_id,
+            "target_squad_id": target_squad_id,
+            "charge_roll": charge_roll,
+            "charge_succeeded": True,
+            "decision_type": "charge_placement",
+            "option_index": option_index,
+            "player": decision_player,
+        }
+        return True, result
 
     # ============================================================================
     # SQUAD PIPELINE DISPATCH
@@ -7297,73 +7405,48 @@ class W40KEngine(gym.Env):
                     "charge_succeeded": False,
                 }
             else:
-                # 21.03 — JUMEAU du drapeau pose sur le move squad, capture AVANT le commit pour
-                # la meme raison. Le moteur retranche deja 2" au jet (`_charge_budget_subhex`) et
-                # autorise la traversee ; sans ce drapeau, la ligne `CHARGED` de step.log ne porte
-                # pas `[FLY]` et l'analyzer juge la charge avec un budget 2" trop large ET des
-                # murs qui ne s'appliquent pas. Le formateur du StepLogger le lit deja.
+                # L10 — placement de charge (V11 §9 P3-8d) : le plan de charge réussi est
+                # soumis à l'agent comme décision de PLACEMENT (5 intentions scorées). Le commit
+                # `commit_move` et `end_activation` sont différés dans `_finish_charge_after_placement`
+                # après la réponse CHOICE_k de l'agent.
+                #
+                # Les lectures capturées ICI (AVANT arm) ont toutes la même raison que dans
+                # l'ancien bloc : elles doivent précéder `commit_move` qui mute `units_cache`.
+                # 21.03 — lecture du drapeau FLY AVANT commit.
                 _charge_is_fly = _fta(self.game_state, unit, str(squad_id))
-                # JUMEAU du commit PvP : le nom de la capacité qui a autorisé la charge (repli,
-                # Assault, Waaagh!) est lu AVANT le commit — `commit_move` ne touche pas
-                # `units_advanced`, mais l'ordre reste celui du chemin PvP pour que les deux
-                # lisent le même état.
+                # Capacité ayant autorisé la charge — AVANT commit.
                 _charge_ability, _charge_rule_marker, _ = _charge_enabling_ability(self.game_state, unit)
-                commit_move(plan, self.game_state, "charge")
-                # Capturer le segment [MODELS:] IMMÉDIATEMENT après commit_move. Sans cette
-                # capture, _build_step_log_details appelle _models_segment_for_unit au flush
-                # (après _fight_v11_gym_settle complet) : si pile-in s'enchaîne sans sélection
-                # FIGHT intermédiaire, le flush lit des positions post-pile-in et l'analyzer
-                # mesure charge + pile-in contre le seul budget de charge → faux positif PROJ.1.3.
-                # Jumeau exact du motif déjà présent dans _gym_commit_fight_move (pile-in).
-                _charge_models_seg = self._models_segment_for_unit(str(squad_id))
-                end_result = end_activation(self.game_state, unit, ACTION, 1, CHARGE, CHARGE, 0)
-                _dest_uc = self.game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
-                _charge_dist = charge_record_outcome(self.game_state, squad_id)
-                append_action_log(
+                # L28 — jet initial consommé ICI pour être stocké dans le contexte ; il ne
+                # sera plus disponible après le step CHOICE_k (le dict `_charge_initial_rolls`
+                # est nettoyé à la fin de phase).
+                _charge_roll_initial = self.game_state["_charge_initial_rolls"].pop(str(squad_id), None)
+                charge_handlers.arm_charge_placement_decision(
                     self.game_state,
-                    {
-                        "type": "charge",
-                        "message": (
-                            f"Unit {squad_id} CHARGED{_charge_rule_marker} "
-                            f"Unit {target_squad_id} - Roll:{charge_roll}"
-                        ),
-                        "turn": require_key(self.game_state, "turn"),
-                        "phase": "charge",
-                        "unitId": squad_id,
-                        "player": require_key(unit, "player"),
-                        "targetId": target_squad_id,
+                    squad_id=str(squad_id),
+                    target_squad_ids=target_squad_ids,
+                    charge_roll=charge_roll,
+                    plan_0=plan,
+                    context={
+                        "target_squad_id": target_squad_id,
+                        "target_squad_ids": target_squad_ids,
+                        "charge_from": _charge_from,
+                        "charge_target": _charge_target,
+                        "charge_is_pair": _charge_is_pair,
+                        "charge_is_fly": _charge_is_fly,
+                        "charge_ability": _charge_ability,
+                        "charge_rule_marker": _charge_rule_marker,
                         "charge_roll": charge_roll,
-                        # L28 — jet AVANT relance, None si aucune relance : symétrie exacte avec
-                        # le chemin PvP (charge_handlers ~L2940/4473/5929/6059/6206).
-                        "charge_roll_initial": self.game_state["_charge_initial_rolls"].pop(str(squad_id), None),
-                        "fromCol": _charge_from[0] if _charge_from else None,
-                        "fromRow": _charge_from[1] if _charge_from else None,
-                        "toCol": int(_dest_uc["col"]) if "col" in _dest_uc else None,
-                        "toRow": int(_dest_uc["row"]) if "row" in _dest_uc else None,
-                        "targetCol": _charge_target[0] if _charge_target else None,
-                        "targetRow": _charge_target[1] if _charge_target else None,
-                        "is_pair": _charge_is_pair,
-                        "is_fly_move": _charge_is_fly,
-                        # JUMEAU de `is_fly_move` : `step_logger` réécrit la ligne de charge et
-                        # n'y pose le token de capacité que depuis ce champ. Sans lui, une charge
-                        # après Advance permise par le Waaagh! n'était nommée nulle part côté IA.
-                        "ability_display_name": _charge_ability,
-                        "timestamp": "server_time",
-                        "reward": 0.0,
-                        "models_segment": _charge_models_seg,
-                        # L16 — cibles de charge multiples (11.04) : miroir des 2 sites PvP.
-                        "allTargetIds": [str(t) for t in target_squad_ids],
-                        "allTargetCoords": [
-                            list(map(int, pos)) if (pos := get_unit_position(t, self.game_state)) is not None else None
-                            for t in target_squad_ids
-                        ],
-                        **_charge_dist,
+                        "charge_roll_initial": _charge_roll_initial,
+                        "unit_player": int(require_key(unit, "player")),
                     },
                 )
                 result = {
-                    **end_result,
-                    "action": "squad_charge",
-                    "squad_id": squad_id,
+                    "action": "waiting_for_agent_decision",
+                    "waiting_for_player": True,
+                    "decision_type": "charge_placement",
+                    "unitId": str(squad_id),
+                    "player": int(require_key(unit, "player")),
+                    "squad_id": str(squad_id),
                     "target_squad_id": target_squad_id,
                     "charge_roll": charge_roll,
                     "charge_succeeded": True,
