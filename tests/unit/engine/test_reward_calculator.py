@@ -421,6 +421,65 @@ class TestCoherencyPenaltyNoActingUnit:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# _calculate_objective_reward_per_turn — idempotence quand aucune unité active
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestObjectiveRewardPerTurnNoActingUnit:
+    """Sans unité contrôlée vivante, le reward est 0.0 et ne se recalcule pas au 2e appel."""
+
+    def _make_rc(self) -> RewardCalculator:
+        rc = RewardCalculator(
+            config={"quiet": True, "controlled_player": 1},
+            rewards_config={},
+            unit_registry=None,
+            state_manager=None,
+        )
+        return rc
+
+    def _gs(self) -> Dict[str, Any]:
+        # units_cache vide → _get_controlled_player_unit retourne None (pas d'unité contrôlée)
+        return {
+            **_MINIMAL_GS,
+            "units_cache": {},
+            "turn": 1,
+            "current_player": 1,
+            "primary_objective": {"scoring": {"start_turn": 1}},
+        }
+
+    def _result(self) -> Dict[str, Any]:
+        return {"phase_transition": True, "next_phase": "move"}
+
+    def test_returns_zero_when_no_unit(self) -> None:
+        """objective_reward_no_unit_zero : 0.0 quand aucune unité contrôlée vivante."""
+        rc = self._make_rc()
+        gs = self._gs()
+        reward = rc._calculate_objective_reward_per_turn(gs, self._result())
+        assert reward == 0.0
+
+    def test_idempotent_on_second_call(self) -> None:
+        """objective_reward_no_unit_idempotent : once_claim posé au 1er appel → court-circuit au 2e."""
+        rc = self._make_rc()
+        gs = self._gs()
+        result = self._result()
+        rc._calculate_objective_reward_per_turn(gs, result)
+
+        # Après le 1er appel, once_claim doit avoir été posé même si acting_unit est None.
+        # On instrument _get_controlled_player_unit pour vérifier qu'il n'est PAS rappelé.
+        call_count = 0
+        original_get_unit = rc._get_controlled_player_unit
+
+        def counting_get_unit(game_state: Any) -> Dict[str, Any] | None:
+            nonlocal call_count
+            call_count += 1
+            return original_get_unit(game_state)
+
+        rc._get_controlled_player_unit = counting_get_unit  # type: ignore[method-assign]
+        reward2 = rc._calculate_objective_reward_per_turn(gs, result)
+        assert reward2 == 0.0
+        assert call_count == 0  # once_claim court-circuite avant _get_controlled_player_unit
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # P3-8 split-fire — reward_calculator doit gérer tous les états intermédiaires
 # ─────────────────────────────────────────────────────────────────────────────
 

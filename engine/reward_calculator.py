@@ -935,8 +935,8 @@ class RewardCalculator:
         key = (current_turn, controlled_player)
         if once_claimed(game_state, "coherency_penalized_turns", key):
             return 0.0
-        once_claim(game_state, "coherency_penalized_turns", key)
         acting_unit = self._get_controlled_player_unit(game_state)
+        once_claim(game_state, "coherency_penalized_turns", key)
         if not acting_unit:
             return 0.0
         shaping = require_key(self._get_unit_reward_config(acting_unit), "squad_shaping")
@@ -1002,9 +1002,9 @@ class RewardCalculator:
         reward_key = (current_turn, controlled_player)
         if once_claimed(game_state, "objective_rewarded_turns", reward_key):
             return 0.0
-        once_claim(game_state, "objective_rewarded_turns", reward_key)
 
         acting_unit = self._get_controlled_player_unit(game_state)
+        once_claim(game_state, "objective_rewarded_turns", reward_key)
         if not acting_unit:
             return 0.0
 
