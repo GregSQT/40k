@@ -109,7 +109,7 @@ class RewardCalculator:
         # normal, pas par l'ancre accidentelle `waiting_for_player` dans is_system_response.
         if isinstance(result, dict) and result.get("action") in (
             "agent_decision", "waiting_for_agent_decision", "select_activation",
-            "desperate_escape_died",
+            "desperate_escape_died", "select_coherency_removal",
         ):
             reward_breakdown['total'] = 0.0
             game_state['last_reward_breakdown'] = reward_breakdown
