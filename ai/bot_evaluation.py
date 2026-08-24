@@ -1399,7 +1399,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                         "VecNormalize : impossible de sauver les stats du snapshot d'evaluation. "
                         "Evaluer sans stats normaliserait avec celles d'un AUTRE modele (V11 §0.35)."
                     )
-        except:
+        except Exception:
             os.remove(effective_model_path)
             raise
         _temp_model_path = effective_model_path
