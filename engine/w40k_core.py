@@ -7832,14 +7832,18 @@ class W40KEngine(gym.Env):
                 squad_lock_shoot(self.game_state, sw2_squad_id)
                 _alloc2 = build_manual_shoot_allocation(self.game_state, sw2_squad_id)
                 if _alloc2.get("waiting_for_player"):  # get allowed
+                    # Allocation pas encore terminée : ne pas effacer le shooting type.
                     return True, _alloc2
                 if not _alloc2.get("done"):  # get allowed
                     raise RuntimeError(
                         f"squad_shoot_split_target: allocation non terminée pour {sw2_squad_id!r}"
                     )
                 shoot_result2 = _alloc2["shoot_result"]
-            finally:
+            except Exception:
+                # Effacement garanti sur erreur (même cycle que squad_shoot ligne 7260).
                 squad_shooting_type_clear(self.game_state, sw2_squad_id)
+                raise
+            squad_shooting_type_clear(self.game_state, sw2_squad_id)
 
             _unit2 = get_unit_by_id(self.game_state, sw2_squad_id)
             if _unit2 is None:

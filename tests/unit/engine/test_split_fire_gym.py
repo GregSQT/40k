@@ -268,6 +268,85 @@ class TestSplitFireDecode:
         )
 
 
+# ─── Invariant : shooting_type préservé quand waiting_for_player=True ────────
+
+
+def test_split_target_waiting_for_player_preserves_shooting_type():
+    """squad_shoot_split_target ne doit PAS effacer le shooting_type quand
+    build_manual_shoot_allocation retourne waiting_for_player=True.
+
+    Régression : le finally précédent appelait squad_shooting_type_clear avant
+    que le return n'atteigne l'appelant, corrompant l'état pour la suite de
+    l'allocation manuelle.
+    """
+    from unittest.mock import patch
+
+    from engine.w40k_core import W40KEngine
+    from engine.action_decoder import PENDING_SHOOT_WEAPON_SEL_KEY
+    from engine.phase_handlers.shared_utils import SQUAD_SHOOTING_TYPE_CHOICE_KEY
+
+    engine = object.__new__(W40KEngine)
+    gs: dict = {
+        "phase": "shoot",
+        "current_player": 1,
+        "current_turn": 1,
+        "max_turns": 5,
+        "game_over": False,
+        "console_logs": [],
+        "debug_logs": [],
+        "units": [],
+        "wall_hexes": set(),
+        "terrain_areas": [],
+        "board_cols": 20,
+        "board_rows": 20,
+        "inches_to_subhex": 1,
+        "units_advanced": set(),
+        "units_cache": {
+            "1": {"player": 1, "id": "1", "HP_CUR": 3, "col": 5, "row": 5},
+            "2": {"player": 2, "id": "2", "HP_CUR": 3, "col": 5, "row": 10},
+        },
+        # slot 0 → escouade ennemie "2"
+        "enemy_slot_mapping_p1": ["2"],
+        SQUAD_SHOOTING_TYPE_CHOICE_KEY: {"1": SHOOTING_TYPE_NORMAL},
+        PENDING_SHOOT_WEAPON_SEL_KEY: {
+            "squad_id": "1",
+            "pending_weapon": "storm_bolter",
+            "assignments": {},
+            "remaining_weapon_slots": {},
+            "eligible_target_slots": [0],
+        },
+    }
+    engine.game_state = gs
+
+    with (
+        patch(
+            "engine.phase_handlers.shared_utils.squad_shoot_weapon_qty_max",
+            return_value=0,
+        ),
+        patch(
+            "engine.phase_handlers.shared_utils.squad_lock_shoot",
+            return_value=None,
+        ),
+        patch(
+            "engine.phase_handlers.shared_utils.build_manual_shoot_allocation",
+            return_value={"waiting_for_player": True, "action": "alloc_wound"},
+        ),
+    ):
+        ok, result = engine._process_squad_action(
+            {"action": "squad_shoot_split_target", "target_slot": 0}
+        )
+
+    assert ok is True, f"attend True, reçu {ok!r}"
+    assert result.get("waiting_for_player") is True, (
+        f"attend waiting_for_player=True, reçu {result!r}"
+    )
+    assert gs[SQUAD_SHOOTING_TYPE_CHOICE_KEY].get("1") == SHOOTING_TYPE_NORMAL, (
+        "squad_shoot_split_target ne doit pas effacer le shooting_type quand "
+        "waiting_for_player=True — le finally appelait squad_shooting_type_clear "
+        "avant le return"
+    )
+
+
 # ─── Test total_action_size (mise à jour 1379→1389) ──────────────────────────
 
 def test_total_action_size_updated():
