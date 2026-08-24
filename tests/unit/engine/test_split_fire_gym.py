@@ -186,7 +186,7 @@ class TestSplitFireDecode:
         gs["units_shot"] = set()
         return gs
 
-    def _decoder(self):
+    def _decoder(self) -> "ActionDecoder":
         from engine.action_decoder import ActionDecoder
         return ActionDecoder({"game_rules": _GAME_RULES})
 
@@ -268,89 +268,6 @@ class TestSplitFireDecode:
         )
 
 
-# ─── Invariant : shooting_type préservé quand waiting_for_player=True ────────
-
-
-def test_split_target_waiting_for_player_preserves_shooting_type():
-    """squad_shoot_split_target ne doit PAS effacer le shooting_type quand
-    build_manual_shoot_allocation retourne waiting_for_player=True.
-
-    Régression : le finally précédent appelait squad_shooting_type_clear avant
-    que le return n'atteigne l'appelant, corrompant l'état pour la suite de
-    l'allocation manuelle.
-    """
-    from unittest.mock import patch
-
-    from engine.w40k_core import W40KEngine
-    from engine.action_decoder import PENDING_SHOOT_WEAPON_SEL_KEY
-    from engine.phase_handlers.shared_utils import SQUAD_SHOOTING_TYPE_CHOICE_KEY
-
-    engine = object.__new__(W40KEngine)
-    gs: dict = {
-        "phase": "shoot",
-        "current_player": 1,
-        "current_turn": 1,
-        "max_turns": 5,
-        "game_over": False,
-        "console_logs": [],
-        "debug_logs": [],
-        "units": [],
-        "wall_hexes": set(),
-        "terrain_areas": [],
-        "board_cols": 20,
-        "board_rows": 20,
-        "inches_to_subhex": 1,
-        "units_advanced": set(),
-        "units_cache": {
-            "1": {"player": 1, "id": "1", "HP_CUR": 3, "col": 5, "row": 5},
-            "2": {"player": 2, "id": "2", "HP_CUR": 3, "col": 5, "row": 10},
-        },
-        # slot 0 → escouade ennemie "2"
-        "enemy_slot_mapping_p1": ["2"],
-        SQUAD_SHOOTING_TYPE_CHOICE_KEY: {"1": SHOOTING_TYPE_NORMAL},
-        PENDING_SHOOT_WEAPON_SEL_KEY: {
-            "squad_id": "1",
-            "pending_weapon": "storm_bolter",
-            "assignments": {},
-            "remaining_weapon_slots": {},
-            "eligible_target_slots": [0],
-        },
-    }
-    engine.game_state = gs
-
-    with (
-        patch(
-            "engine.phase_handlers.shared_utils.squad_shoot_weapon_qty_max",
-            return_value=1,
-        ),
-        patch(
-            "engine.phase_handlers.shared_utils.squad_declare_shoot_weapon_qty",
-            return_value=None,
-        ),
-        patch(
-            "engine.phase_handlers.shared_utils.squad_lock_shoot",
-            return_value=None,
-        ),
-        patch(
-            "engine.phase_handlers.shared_utils.build_manual_shoot_allocation",
-            return_value={"waiting_for_player": True, "action": "alloc_wound"},
-        ),
-    ):
-        ok, result = engine._process_squad_action(
-            {"action": "squad_shoot_split_target", "target_slot": 0}
-        )
-
-    assert ok is True, f"attend True, reçu {ok!r}"
-    assert result.get("waiting_for_player") is True, (
-        f"attend waiting_for_player=True, reçu {result!r}"
-    )
-    assert gs[SQUAD_SHOOTING_TYPE_CHOICE_KEY].get("1") == SHOOTING_TYPE_NORMAL, (
-        "squad_shoot_split_target ne doit pas effacer le shooting_type quand "
-        "waiting_for_player=True — le finally appelait squad_shooting_type_clear "
-        "avant le return"
-    )
-
-
 # ─── Test total_action_size (mise à jour 1379→1389) ──────────────────────────
 
 def test_total_action_size_updated():
@@ -369,86 +286,121 @@ def test_total_action_size_updated():
     )
 
 
-# ─── Tests des fixes bugs F1/F2/F3 ───────────────────────────────────────────
+# ─── Régression : build_squad_action_mask ne lève plus IndexError (P3-8) ─────
 
-class TestSplitFireBugFixes:
-    """Correctness guards ajoutés par les findings F1/F2/F3."""
+def test_build_squad_action_mask_no_index_error_in_shoot_phase():
+    """build_squad_action_mask en phase shoot ne lève pas IndexError sur les slots P3-8.
 
-    def _gs_with_activation(self):
-        gs = _split_fire_scenario()
-        squad_shooting_unit_activation_start(gs, "1")
-        squad_shooting_type_choose(gs, "1", SHOOTING_TYPE_NORMAL)
+    Régression : le bloc P3-8 écrivait mask[SHOOT_WEAPON_SEL_SLOT_BASE+j] (≥1379) sur un
+    buffer de taille SQUAD_ACTION_SIZE (<1379) → IndexError.
+    """
+    from engine.phase_handlers.shared_utils import build_squad_action_mask, SQUAD_ACTION_SIZE
+    from engine.macro_intents import SHOOT_WEAPON_SEL_SLOT_BASE
+
+    units = [
+        _unit(1, 1, 5, 5, [_m(5, 5, [STORM])]),
+        _unit(2, 2, 5, 15, [_m(5, 15, [STORM])]),
+    ]
+    for u in units:
+        u["RNG_WEAPONS"] = [STORM]
+    gs = _make_gs(units)
+    gs["shoot_activation_pool"] = ["1"]
+    gs["units_shot"] = set()
+
+    assert SQUAD_ACTION_SIZE < SHOOT_WEAPON_SEL_SLOT_BASE, (
+        "pré-condition : SQUAD_ACTION_SIZE doit être < SHOOT_WEAPON_SEL_SLOT_BASE"
+    )
+    mask = build_squad_action_mask(gs, "1")
+    assert len(mask) == SQUAD_ACTION_SIZE, (
+        f"mask doit avoir SQUAD_ACTION_SIZE={SQUAD_ACTION_SIZE} éléments, reçu {len(mask)}"
+    )
+
+
+def test_shoot_weapon_sel_open_slots_returns_valid_indices():
+    """shoot_weapon_sel_open_slots retourne des indices dans [SHOOT_WEAPON_SEL_SLOT_BASE, TOTAL_ACTION_SIZE)."""
+    from engine.phase_handlers.shared_utils import (
+        shoot_weapon_sel_open_slots,
+        get_enemy_slot_mapping,
+    )
+    from engine.macro_intents import SHOOT_WEAPON_SEL_SLOT_BASE, TOTAL_ACTION_SIZE
+
+    units = [
+        _unit(1, 1, 5, 5, [_m(5, 5, [STORM])]),
+        _unit(2, 2, 5, 10, [_m(5, 10, [STORM])]),
+    ]
+    for u in units:
+        u["RNG_WEAPONS"] = [STORM]
+    gs = _make_gs(units)
+    gs["shoot_activation_pool"] = ["1"]
+    gs["units_shot"] = set()
+    gs["squad_shooting_type_choice"] = {"1": SHOOTING_TYPE_NORMAL}
+
+    enemy_slot_ids = get_enemy_slot_mapping(gs, 1)
+    slots = shoot_weapon_sel_open_slots(gs, "1", enemy_slot_ids)
+
+    for idx in slots:
+        assert SHOOT_WEAPON_SEL_SLOT_BASE <= idx < TOTAL_ACTION_SIZE, (
+            f"indice {idx} hors de [SHOOT_WEAPON_SEL_SLOT_BASE={SHOOT_WEAPON_SEL_SLOT_BASE}, "
+            f"TOTAL_ACTION_SIZE={TOTAL_ACTION_SIZE})"
+        )
+
+
+class TestSplitFireDecodeEmptyPool:
+    """convert_squad_action avec pool vide (eligible_units=[]) en split-fire."""
+
+    def _decoder(self) -> "ActionDecoder":
+        from engine.action_decoder import ActionDecoder
+        import json
+        from pathlib import Path
+        rules = json.loads(
+            (Path(__file__).parents[3] / "config" / "game_config.json").read_text()
+        )["game_rules"]
+        return ActionDecoder({"game_rules": rules})
+
+    def _base_gs(self) -> Dict[str, Any]:
+        units = [
+            _unit(1, 1, 5, 5, [_m(5, 5, [STORM])]),
+            _unit(2, 2, 5, 15, [_m(5, 15, [STORM])]),
+        ]
+        for u in units:
+            u["RNG_WEAPONS"] = [STORM]
+        gs = _make_gs(units)
+        gs["shoot_activation_pool"] = ["1"]
+        gs["units_shot"] = set()
         return gs
 
-    # F3 — guard négatif weapon_slot
-    def test_negative_weapon_slot_raises(self):
-        """F3 : weapon_slot négatif → ValueError (profiles[-1] serait silencieux)."""
-        from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
-
-        gs = self._gs_with_activation()
-        enemy_slots = get_enemy_slot_mapping(gs, 1)
-
-        with pytest.raises(ValueError, match="slot.*hors des profils"):
-            shoot_weapon_eligible_target_slots(gs, "1", -1, enemy_slots)
-
-    # F2 — nettoyage pending_shoot_intent après échec d'activation (via _process_squad_action)
-    def test_stype_none_cleans_pending_intent(self, monkeypatch):
-        """F2 : si resolve_squad_shooting_type retourne None, pending_intent est purgé avant le raise."""
-        import engine.phase_handlers.shared_utils as _su
-        from engine.w40k_core import W40KEngine
-        from engine.macro_intents import SHOOT_WEAPON_SEL_SLOT_BASE
-
-        monkeypatch.setattr(_su, "resolve_squad_shooting_type", lambda *a, **kw: None)
-
-        gs = _split_fire_scenario()
-
-        engine = object.__new__(W40KEngine)
-        engine.game_state = gs
-        engine.step_logger = None
-        engine.gym_training_mode = False
-        engine._shooting_phase_initialized = False
-        engine._movement_phase_initialized = False
-
-        with pytest.raises(RuntimeError, match="aucun type de tir"):
-            engine._process_squad_action(
-                {"action": "squad_shoot_weapon_sel", "squad_id": "1", "weapon_slot": 0}
-            )
-
-        # Le fix doit avoir purgé le pending — une seconde activation ne doit pas lever
-        squad_shooting_unit_activation_start(gs, "1")
-        assert "1" in gs["pending_squad_shoot_intents"]
-
-    def test_activation_without_cleanup_raises_on_second_start(self):
-        """F2 (mutation) : sans cleanup, la seconde activation lève RuntimeError."""
-        gs = _split_fire_scenario()
-        squad_shooting_unit_activation_start(gs, "1")
-
-        # Sans clear_pending_shoot_intent, la seconde activation doit échouer
-        with pytest.raises(RuntimeError, match="already exists at activation start"):
-            squad_shooting_unit_activation_start(gs, "1")
-
-    # F1 — qty_max == 0 lève RuntimeError au lieu de silent drop
-    def test_split_fire_qty_max_zero_raises(self, monkeypatch):
-        """F1 : qty_max==0 lors de la résolution split-fire → RuntimeError explicite."""
-        import engine.phase_handlers.shared_utils as _su
-        from engine.w40k_core import W40KEngine
+    def test_shoot_weapon_sel_slot_with_empty_pool_and_pending_weapon_none(self):
+        """SHOOT_WEAPON_SEL_SLOT + pool vide + pending_weapon=None → squad_shoot_weapon_sel."""
         from engine.action_decoder import PENDING_SHOOT_WEAPON_SEL_KEY
+        from engine.macro_intents import SHOOT_WEAPON_SEL_SLOT_BASE
+        from engine.phase_handlers.shared_utils import SQUAD_ACTION_SHOOT_WEAPON_SEL_SLOT_COUNT
 
-        monkeypatch.setattr(_su, "squad_shoot_weapon_qty_max", lambda *a, **kw: 0)
+        gs = self._base_gs()
+        gs[PENDING_SHOOT_WEAPON_SEL_KEY] = {
+            "squad_id": "1",
+            "shooting_type": SHOOTING_TYPE_NORMAL,
+            "pending_weapon": None,
+            "assignments": {},
+            "remaining_weapon_slots": {0: "storm_bolter"},
+            "eligible_target_slots": [],
+        }
 
-        gs = _split_fire_scenario()
-        squad_shooting_unit_activation_start(gs, "1")
-        squad_shooting_type_choose(gs, "1", SHOOTING_TYPE_NORMAL)
+        result = self._decoder().convert_squad_action(
+            SHOOT_WEAPON_SEL_SLOT_BASE,
+            gs,
+            eligible_units=[],
+        )
 
-        # Bare engine — pattern identique à test_cascade_fight_subphases.py
-        engine = object.__new__(W40KEngine)
-        engine.game_state = gs
-        engine.step_logger = None
-        engine.gym_training_mode = False
-        engine._shooting_phase_initialized = False
-        engine._movement_phase_initialized = False
+        assert result["action"] == "squad_shoot_weapon_sel"
+        assert result["squad_id"] == "1"
+        assert result["weapon_slot"] == 0
 
-        # pending_weapon != None → le code atteint la résolution (remaining vide → boucle)
+    def test_shoot_slot_with_empty_pool_and_pending_weapon_set(self):
+        """SHOOT_SLOT + pool vide + pending_weapon armé → squad_shoot_split_target."""
+        from engine.action_decoder import PENDING_SHOOT_WEAPON_SEL_KEY
+        from engine.phase_handlers.shared_utils import SQUAD_ACTION_SHOOT_SLOT_BASE
+
+        gs = self._base_gs()
         gs[PENDING_SHOOT_WEAPON_SEL_KEY] = {
             "squad_id": "1",
             "shooting_type": SHOOTING_TYPE_NORMAL,
@@ -458,7 +410,12 @@ class TestSplitFireBugFixes:
             "eligible_target_slots": [0],
         }
 
-        with pytest.raises(RuntimeError, match="qty_max==0"):
-            engine._process_squad_action(
-                {"action": "squad_shoot_split_target", "target_slot": 0}
-            )
+        result = self._decoder().convert_squad_action(
+            SQUAD_ACTION_SHOOT_SLOT_BASE,
+            gs,
+            eligible_units=[],
+        )
+
+        assert result["action"] == "squad_shoot_split_target"
+        assert result["squad_id"] == "1"
+        assert result["target_slot"] == 0

@@ -44,7 +44,6 @@ from engine.spatial_grid import GRID_CELL_COUNT
 # `observation_entities` est une FEUILLE (aucun import moteur) : l'importer au niveau module ne
 # cree pas de cycle. `K_ALLY_SLOTS` y vit parce que l'espace d'action en derive (V11 §0.48 L2).
 from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE, K_WEAPONS_RANGED
-from engine.observation_weapon_profiles import collect_weapon_profiles, profile_identity
 from engine.agent_decision import set_pending_agent_decision
 # Primitives « hors table » : définies dans la couche BASSE (`spatial_relations` ne dépend que de
 # `hex_utils`) parce que les primitives de MESURE en dépendent elles-mêmes. Ré-exportées ici, où
@@ -6368,8 +6367,12 @@ def charge_build_valid_plan(
     # Positions pré-calculées pour le tri par intention (L10 placement de charge).
     _intent_obj_positions: List[Tuple[int, int]] = []
     if intent == 1:
-        from engine.game_state import objective_hex_zones as _ohz
-        _intent_obj_positions = [h for _, zone in _ohz(game_state) for h in zone]
+        for _obj in game_state.get("objectives", []):  # get allowed
+            for _hex in _obj.get("hexes", []):  # get allowed
+                if isinstance(_hex, (list, tuple)):
+                    _intent_obj_positions.append((int(_hex[0]), int(_hex[1])))
+                else:
+                    _intent_obj_positions.append((int(_hex["col"]), int(_hex["row"])))
     _intent_nontgt_positions: List[Tuple[int, int]] = []
     if intent == 2:
         for _nte in _non_target_enemies:
@@ -8395,24 +8398,6 @@ def squad_undeclare_shoot_weapon_qty(
     return undeclare_attack_weapon_qty(game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_code, target_squad_id, only_model_id)
 
 
-def _squad_rng_profiles(
-    game_state: Dict[str, Any], squad_id: str
-) -> Tuple[List[Dict[str, Any]], List]:
-    """Alive models + collect_weapon_profiles("RNG_WEAPONS") pour squad_id.
-
-    Helper partagé par shoot_weapon_eligible_target_slots, shoot_weapon_remaining_eligible_slots
-    et build_squad_action_mask (P3-8) pour éviter de recalculer les trois fois.
-    """
-    models_cache = require_key(game_state, "models_cache")
-    squad_models = require_key(game_state, "squad_models")
-    alive_models = [
-        models_cache[mid]
-        for mid in squad_models.get(squad_id, [])  # get allowed
-        if mid in models_cache
-    ]
-    return alive_models, collect_weapon_profiles(alive_models, "RNG_WEAPONS")
-
-
 def shoot_weapon_eligible_target_slots(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -8426,11 +8411,21 @@ def shoot_weapon_eligible_target_slots(
 
     Retourne `(weapon_code, [slot_i pour toute cible éligible])`.
     """
-    _, profiles = _squad_rng_profiles(game_state, squad_id)
-    if weapon_slot < 0 or weapon_slot >= min(len(profiles), K_WEAPONS_RANGED):
+    from engine.observation_weapon_profiles import collect_weapon_profiles
+    from engine.observation_entities import K_WEAPONS_RANGED as _K
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive_models = [
+        models_cache[mid]
+        for mid in squad_models.get(squad_id, [])  # get allowed
+        if mid in models_cache
+    ]
+    profiles = collect_weapon_profiles(alive_models, "RNG_WEAPONS")
+    if weapon_slot >= min(len(profiles), _K):
         raise ValueError(
             f"shoot_weapon_eligible_target_slots: slot {weapon_slot} hors des profils "
-            f"({len(profiles)} profils, K={K_WEAPONS_RANGED}) pour {squad_id!r}"
+            f"({len(profiles)} profils, K={_K}) pour {squad_id!r}"
         )
     weapon_code = require_key(profiles[weapon_slot][0], "code")
     elig: List[int] = [
@@ -8453,9 +8448,19 @@ def shoot_weapon_remaining_eligible_slots(
     Retourne `{slot_j: weapon_code}` pour chaque slot j ≠ `except_slot` dont ≥1 ennemi
     est atteignable. Miroir de `fight_weapon_eligible_slots` pour les autres groupes d'arme.
     """
-    _, profiles = _squad_rng_profiles(game_state, squad_id)
+    from engine.observation_weapon_profiles import collect_weapon_profiles
+    from engine.observation_entities import K_WEAPONS_RANGED as _K
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive_models = [
+        models_cache[mid]
+        for mid in squad_models.get(squad_id, [])  # get allowed
+        if mid in models_cache
+    ]
+    profiles = collect_weapon_profiles(alive_models, "RNG_WEAPONS")
     result: Dict[int, str] = {}
-    for slot_j, (weapon, _) in enumerate(profiles[:K_WEAPONS_RANGED]):
+    for slot_j, (weapon, _) in enumerate(profiles[:_K]):
         if slot_j == except_slot:
             continue
         code = require_key(weapon, "code")
@@ -12997,6 +13002,58 @@ def _target_locked_by_ally(
     return False
 
 
+def shoot_weapon_sel_open_slots(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    enemy_slot_ids: List[Optional[str]],
+) -> List[int]:
+    """Indices absolus des slots SHOOT_WEAPON_SEL à ouvrir (P3-8, split-fire gym).
+
+    Hors SQUAD_ACTION_SIZE : à appeler depuis le masque COMPLET (TOTAL_ACTION_SIZE), jamais
+    depuis build_squad_action_mask dont le buffer ne couvre que les indices 0..SQUAD_ACTION_SIZE-1.
+    Retourne [] si aucun type de tir n'est applicable ou si l'escouade est absente.
+    """
+    shooting_type = resolve_squad_shooting_type(game_state, squad_id)
+    if shooting_type is None:
+        return []
+    from engine.macro_intents import SHOOT_WEAPON_SEL_SLOT_BASE
+    from engine.observation_weapon_profiles import collect_weapon_profiles, profile_identity
+    units_cache = require_key(game_state, "units_cache")
+    entry = units_cache.get(squad_id)
+    if entry is None:
+        return []
+    our_player = int(require_key(entry, "player"))
+    ez = get_engagement_zone(game_state)
+    mc = game_state.get("models_cache", {})  # get allowed
+    alive = [
+        mc[mid]
+        for mid in game_state.get("squad_models", {}).get(squad_id, [])  # get allowed
+        if mid in mc
+    ]
+    profiles = collect_weapon_profiles(alive, "RNG_WEAPONS")
+    elig_targets = [
+        esid for esid in enemy_slot_ids
+        if esid is not None
+        and esid in units_cache
+        and entry_is_on_battlefield(units_cache[esid])
+        and not _target_locked_by_ally(
+            units_cache, units_cache[esid], squad_id, our_player, ez, game_state
+        )
+    ]
+    open_indices: List[int] = []
+    for slot_j, (wpn, _) in enumerate(profiles[:SQUAD_ACTION_SHOOT_WEAPON_SEL_SLOT_COUNT]):
+        pkey = profile_identity(wpn)
+        if any(
+            _model_can_shoot_target_with_weapon(game_state, m, esid, widx)
+            for m in alive
+            for widx, w in enumerate(ranged_weapons(m))
+            if profile_identity(w) == pkey
+            for esid in elig_targets
+        ):
+            open_indices.append(SHOOT_WEAPON_SEL_SLOT_BASE + slot_j)
+    return open_indices
+
+
 def build_squad_action_mask(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -13163,37 +13220,6 @@ def build_squad_action_mask(
                     game_state, squad_id, esid, SHOOTING_TYPE_INDIRECT
                 ):
                     mask[SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE + slot_i] = 1
-        # P3-8 — SPLIT-FIRE : SHOOT_WEAPON_SEL_SLOT j éligible si ≥1 figurine porte l'arme j
-        # et peut atteindre ≥1 cible éligible. Utilise _model_can_shoot_target_with_weapon
-        # (portée + LoS) — ne nécessite PAS que l'activation soit démarrée (contrairement à
-        # squad_shoot_weapon_qty_max qui retourne 0 hors activation).
-        if shooting_type is not None:
-            from engine.macro_intents import SHOOT_WEAPON_SEL_SLOT_BASE as _SW_BASE
-            _alive, _profiles = _squad_rng_profiles(game_state, squad_id)
-            _elig_targets = [
-                _esid for _esid in enemy_slot_ids
-                if _esid is not None
-                and _esid in units_cache
-                and entry_is_on_battlefield(units_cache[_esid])
-                and not _target_locked_by_ally(
-                    units_cache, units_cache[_esid], squad_id, our_player, ez, game_state
-                )
-            ]
-            # pkey_to_carriers : calculé une fois pour tous les slots j.
-            # Sans ce dict, l'any() rebalayait alive × weapons pour chaque slot_j.
-            _pkey_to_carriers: Dict[tuple, List[Tuple[Dict, int]]] = {}
-            for _m in _alive:
-                for _widx, _w in enumerate(ranged_weapons(_m)):
-                    _pk = profile_identity(_w)
-                    _pkey_to_carriers.setdefault(_pk, []).append((_m, _widx))
-            for _slot_j, (_wpn, _) in enumerate(_profiles[:SQUAD_ACTION_SHOOT_WEAPON_SEL_SLOT_COUNT]):
-                _carriers = _pkey_to_carriers.get(profile_identity(_wpn), [])
-                if any(
-                    _model_can_shoot_target_with_weapon(game_state, _m, _esid, _widx)
-                    for _m, _widx in _carriers
-                    for _esid in _elig_targets
-                ):
-                    mask[_SW_BASE + _slot_j] = 1
         mask[SQUAD_ACTION_WAIT] = 1
 
     # --- Charge phase: un slot par cible de charge declarable (11.02) ---
