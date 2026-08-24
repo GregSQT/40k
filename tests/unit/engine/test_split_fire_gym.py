@@ -95,6 +95,17 @@ def _make_gs(units: List[Dict[str, Any]]) -> Dict[str, Any]:
     return gs
 
 
+def _arm_pool(gs: Dict[str, Any]) -> Dict[str, Any]:
+    gs["shoot_activation_pool"] = ["1"]
+    gs["units_shot"] = set()
+    return gs
+
+
+def _make_decoder():
+    from engine.action_decoder import ActionDecoder
+    return ActionDecoder({"game_rules": _GAME_RULES})
+
+
 # ─── Scénario : 1 attaquant (Storm + Lascannon), 2 ennemis en portée ──────────
 
 def _split_fire_scenario():
@@ -181,14 +192,10 @@ class TestSplitFireDecode:
         gs = _make_gs(units)
         gs["enemy_slot_mapping"] = {1: ["2", None, None, None, None, None, None, None, None, None,
                                          None, None, None, None, None, None, None, None, None, None]}
-        # Activer le pool de tir
-        gs["shoot_activation_pool"] = ["1"]
-        gs["units_shot"] = set()
-        return gs
+        return _arm_pool(gs)
 
     def _decoder(self):
-        from engine.action_decoder import ActionDecoder
-        return ActionDecoder({"game_rules": _GAME_RULES})
+        return _make_decoder()
 
     def test_shoot_weapon_sel_slot_decodes_to_squad_shoot_weapon_sel(self):
         """SHOOT_WEAPON_SEL_SLOT j → action 'squad_shoot_weapon_sel' avec weapon_slot j."""
@@ -303,9 +310,7 @@ def test_build_squad_action_mask_no_index_error_in_shoot_phase():
     ]
     for u in units:
         u["RNG_WEAPONS"] = [STORM]
-    gs = _make_gs(units)
-    gs["shoot_activation_pool"] = ["1"]
-    gs["units_shot"] = set()
+    gs = _arm_pool(_make_gs(units))
 
     assert SQUAD_ACTION_SIZE < SHOOT_WEAPON_SEL_SLOT_BASE, (
         "pré-condition : SQUAD_ACTION_SIZE doit être < SHOOT_WEAPON_SEL_SLOT_BASE"
@@ -330,9 +335,7 @@ def test_shoot_weapon_sel_open_slots_returns_valid_indices():
     ]
     for u in units:
         u["RNG_WEAPONS"] = [STORM]
-    gs = _make_gs(units)
-    gs["shoot_activation_pool"] = ["1"]
-    gs["units_shot"] = set()
+    gs = _arm_pool(_make_gs(units))
     gs["squad_shooting_type_choice"] = {"1": SHOOTING_TYPE_NORMAL}
 
     enemy_slot_ids = get_enemy_slot_mapping(gs, 1)
@@ -349,8 +352,7 @@ class TestSplitFireDecodeEmptyPool:
     """convert_squad_action avec pool vide (eligible_units=[]) en split-fire."""
 
     def _decoder(self):
-        from engine.action_decoder import ActionDecoder
-        return ActionDecoder({"game_rules": _GAME_RULES})
+        return _make_decoder()
 
     def _base_gs(self) -> Dict[str, Any]:
         units = [
@@ -359,10 +361,7 @@ class TestSplitFireDecodeEmptyPool:
         ]
         for u in units:
             u["RNG_WEAPONS"] = [STORM]
-        gs = _make_gs(units)
-        gs["shoot_activation_pool"] = ["1"]
-        gs["units_shot"] = set()
-        return gs
+        return _arm_pool(_make_gs(units))
 
     def test_shoot_weapon_sel_slot_with_empty_pool_and_pending_weapon_none(self):
         """SHOOT_WEAPON_SEL_SLOT + pool vide + pending_weapon=None → squad_shoot_weapon_sel."""
@@ -448,9 +447,7 @@ def test_purge_combi_siblings_removes_sister_from_remaining():
     atk["RNG_WEAPONS"] = [bolt, smite_w, smite_f]
     enemy = _unit(2, 2, 5, 10, [_m(5, 10, [STORM])])
     enemy["RNG_WEAPONS"] = [STORM]
-    gs = _make_gs([atk, enemy])
-    gs["shoot_activation_pool"] = ["1"]
-    gs["units_shot"] = set()
+    gs = _arm_pool(_make_gs([atk, enemy]))
     squad_shooting_unit_activation_start(gs, "1")
     squad_shooting_type_choose(gs, "1", SHOOTING_TYPE_NORMAL)
 
@@ -479,9 +476,8 @@ def test_purge_combi_siblings_removes_sister_from_remaining():
 
 def _combi_scenario():
     """Unité avec frag+krak (COMBI ballistus_missile_launcher), ennemi en portée."""
-    from engine.weapons import get_weapons as gw
-    frag = gw("SpaceMarine", ["ballistus_missile_launcher_frag"])[0]
-    krak = gw("SpaceMarine", ["ballistus_missile_launcher_krak"])[0]
+    frag = get_weapons("SpaceMarine", ["ballistus_missile_launcher_frag"])[0]
+    krak = get_weapons("SpaceMarine", ["ballistus_missile_launcher_krak"])[0]
     assert frag.get("COMBI_WEAPON") == krak.get("COMBI_WEAPON"), "pré-condition : même COMBI_WEAPON"
 
     m_combi = _m(5, 5, [frag, krak])
@@ -507,9 +503,7 @@ def test_combi_weapon_open_slots_at_most_one_per_group():
         SHOOTING_TYPE_NORMAL,
     )
 
-    gs = _combi_scenario()
-    gs["shoot_activation_pool"] = ["1"]
-    gs["units_shot"] = set()
+    gs = _arm_pool(_combi_scenario())
     squad_shooting_unit_activation_start(gs, "1")
     squad_shooting_type_choose(gs, "1", SHOOTING_TYPE_NORMAL)
 
@@ -535,9 +529,7 @@ def test_combi_weapon_remaining_excludes_siblings():
         SHOOTING_TYPE_NORMAL,
     )
 
-    gs = _combi_scenario()
-    gs["shoot_activation_pool"] = ["1"]
-    gs["units_shot"] = set()
+    gs = _arm_pool(_combi_scenario())
     squad_shooting_unit_activation_start(gs, "1")
     squad_shooting_type_choose(gs, "1", SHOOTING_TYPE_NORMAL)
 
@@ -545,7 +537,7 @@ def test_combi_weapon_remaining_excludes_siblings():
     # slot 0 = frag sélectionné ; krak (slot 1, sœur COMBI) doit être absent de remaining
     remaining = shoot_weapon_remaining_eligible_slots(gs, "1", enemy_slots, except_slot=0)
 
-    # krak (slot 1) partage le COMBI_WEAPON de frag → ne doit pas apparaître dans remaining
-    assert 1 not in remaining, (
-        f"krak (slot 1, sœur COMBI) encore dans remaining : {remaining}"
+    # après sélection du frag (slot 0), aucun slot ne doit rester (krak écarté comme sœur COMBI)
+    assert remaining == {}, (
+        f"remaining doit être vide après sélection du frag et exclusion de krak (sœur COMBI) : {remaining}"
     )
