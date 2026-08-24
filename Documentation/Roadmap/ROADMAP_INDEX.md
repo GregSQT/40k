@@ -245,6 +245,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | moteur+analyzer | ✅ move_handler 6 guards/corrections post code-review (2026-08-24) — 6 findings code-review appliqués sur move_handler | — | ⚡ |
 | infra | ✅ fix pyright + terme interdit (2026-08-24) — erreurs pyright + terme interdit corrigés | — | ⚡ |
 | moteur | ✅ perf LoS cache projections tireur x5 (2026-08-24) — `_shooter_lateral_vantage_hexes` : projections précalculées une fois par `_compute_visibility_with_obscuring` au lieu de O(n×m) ; test_reserves[mc2] timeout éliminé | — | ⚡ |
+| tests+infra | ✅ fix-pytest-errors (2026-08-24) — hex_utils + reward_calculator + test_reward_calculator corrigés | — | ⚡ |
+| moteur+training | ✅ L10 placement de charge décision agent (2026-08-24) — CHARGE_PAIR_SLOTS C(20,2)=190 + tête dense séparée dans pointer_policy, 20 tests verts | — | ⚡ |
+| moteur+training | ✅ P3-8 split-fire ranged weapons gym (2026-08-24) — 10 SHOOT_WEAPON_SEL_SLOTS (1379–1388), TOTAL_ACTION_SIZE 1379→1389, shoot_weapon_sel_net, 2-step flow miroir §0.69, 7 tests rouge/vert | [v11_chemin_critique.md#p3-8](v11_chemin_critique.md#p3-8) | ⚡ |
 
 ### Bloqués par une décision utilisateur
 

@@ -86,6 +86,8 @@ from engine.macro_intents import (
     OATH_SLOT_COUNT,
     SHOOT_SLOT_BASE,
     SHOOT_SLOT_COUNT,
+    SHOOT_WEAPON_SEL_SLOT_BASE,
+    SHOOT_WEAPON_SEL_SLOT_COUNT,
     TOTAL_ACTION_SIZE,
 )
 from engine.spatial_grid import GRID_CELL_COUNT, GRID_SIZE
@@ -110,8 +112,9 @@ DENSE_LOGIT_COUNT = (
     - CHOICE_COUNT
     - OATH_SLOT_COUNT
     - ACTIVATE_SLOT_COUNT
-    - FIGHT_WEAPON_SLOT_COUNT  # §0.69 : arme CC — tête dense séparée (charge_pair_net pattern)
-    - COHERENCY_SLOT_COUNT     # P3-0 : retrait cohérence — tête pointeur sur figurines actives
+    - FIGHT_WEAPON_SLOT_COUNT        # §0.69 : arme CC — tête dense séparée (charge_pair_net pattern)
+    - COHERENCY_SLOT_COUNT           # P3-0 : retrait cohérence — tête pointeur sur figurines actives
+    - SHOOT_WEAPON_SEL_SLOT_COUNT    # P3-8 : split-fire tir — tête dense, slot j = obs tir slot j
 )
 
 
@@ -210,18 +213,20 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             or ACTIVATE_SLOT_BASE != OATH_SLOT_BASE + OATH_SLOT_COUNT
             or FIGHT_WEAPON_SLOT_BASE != ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT
             or COHERENCY_SLOT_BASE != FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT
-            or COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT != TOTAL_ACTION_SIZE
+            or SHOOT_WEAPON_SEL_SLOT_BASE != COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT
+            or SHOOT_WEAPON_SEL_SLOT_BASE + SHOOT_WEAPON_SEL_SLOT_COUNT != TOTAL_ACTION_SIZE
         ):
             raise ValueError(
                 "Disposition de l'action space inattendue : l'assemblage des logits suppose "
                 f"[cellules | wait | tir | charge | charge-paire | melee | dense | "
-                f"CHOICE | Oath | ACTIVATE | FIGHT_WEAPON | COHERENCY en fin]. "
+                f"CHOICE | Oath | ACTIVATE | FIGHT_WEAPON | COHERENCY | SHOOT_WEAPON_SEL en fin]. "
                 f"Recu MOVE_CELL_BASE={MOVE_CELL_BASE}, "
                 f"SHOOT_SLOT_BASE={SHOOT_SLOT_BASE}, CHARGE_SLOT_BASE={CHARGE_SLOT_BASE}, "
                 f"CHARGE_PAIR_SLOT_BASE={CHARGE_PAIR_SLOT_BASE}, "
                 f"FIGHT_SLOT_BASE={FIGHT_SLOT_BASE}, CHOICE_BASE={CHOICE_BASE}, "
                 f"OATH_SLOT_BASE={OATH_SLOT_BASE}, ACTIVATE_SLOT_BASE={ACTIVATE_SLOT_BASE}, "
                 f"FIGHT_WEAPON_SLOT_BASE={FIGHT_WEAPON_SLOT_BASE}, "
+                f"SHOOT_WEAPON_SEL_SLOT_BASE={SHOOT_WEAPON_SEL_SLOT_BASE}, "
                 f"TOTAL_ACTION_SIZE={TOTAL_ACTION_SIZE}."
             )
         self.trunk_dim = extractor.trunk_dim
@@ -309,6 +314,12 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # fondé. Même patron que charge_pair_net : dense sur le latent commun. Slot j correspond
         # à l'obs melee slot j (collect_weapon_profiles order, invariant D1 armes).
         self.fight_weapon_net = nn.Linear(self.mlp_extractor.latent_dim_pi, FIGHT_WEAPON_SLOT_COUNT)
+        # Tête DENSE pour le split-fire tir (P3-8) : K_WEAPONS_RANGED = 10 logits.
+        # Même patron que fight_weapon_net : les groupes d'armes RNG ne sont pas des entités-lignes
+        # du tenseur ennemi. Slot j = obs tir slot j (collect_weapon_profiles order, invariant D1).
+        self.shoot_weapon_sel_net = nn.Linear(
+            self.mlp_extractor.latent_dim_pi, SHOOT_WEAPON_SEL_SLOT_COUNT
+        )
         # Requête DISTINCTE pour les candidats de décision (§9.3 P2) : « quel ennemi frapper » et
         # « quelle option choisir » sont deux questions différentes posées au même latent, et
         # elles ne lisent même pas les mêmes embeddings (ennemis vs candidats).
@@ -565,6 +576,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 self.fight_weapon_net(latent_pi),
                 # Retrait cohérence : figurines de l'unité active par slot (P3-0).
                 self._point(self.coherency_query_net, latent_pi, feats.self_models),
+                # Split-fire tir : tête dense (P3-8), slot j = obs tir slot j.
+                self.shoot_weapon_sel_net(latent_pi),
             ],
             dim=1,
         )

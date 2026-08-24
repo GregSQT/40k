@@ -64,6 +64,8 @@ from engine.macro_intents import (
     DEPLOY_STRATEGY_COUNT,
     FIGHT_WEAPON_SLOT_BASE,
     FIGHT_WEAPON_SLOTS,
+    SHOOT_WEAPON_SEL_SLOT_BASE,
+    SHOOT_WEAPON_SEL_SLOTS,
     TOTAL_ACTION_SIZE,
     MAX_OBJECTIVES,
     OATH_SLOT_BASE,
@@ -93,6 +95,13 @@ DEPLOY_SLOT_CANDIDATES_CACHE_KEY = "_deployment_slot_candidates"
 #: FIGHT_WEAPON_SLOT (arme). Valeur : `{"squad_id": str, "target_id": str,
 #: "slot_to_code": Dict[int, str]}`. Absente tant qu'aucune sélection d'arme n'est attendue.
 PENDING_FIGHT_WEAPON_KEY = "pending_fight_weapon_select"
+#: Clé du `game_state` portant l'état de split-fire en cours (P3-8). Valeur :
+#: `{"squad_id": str, "shooting_type": str, "pending_weapon": Optional[str],
+#:  "assignments": Dict[str, str],      # weapon_code -> target_id
+#:  "remaining_weapon_slots": Dict[int, str],  # slot_j -> weapon_code (non encore assignés)
+#:  "eligible_target_slots": List[int]}` # slots SHOOT ennemis éligibles pour pending_weapon.
+#: Absente tant qu'aucun split-fire n'est en cours.
+PENDING_SHOOT_WEAPON_SEL_KEY = "pending_shoot_weapon_split"
 #: Jumeau du précédent pour l'ingress move (20.04) — clé DISTINCTE : les deux mises en place
 #: coexistent dans un même épisode (déploiement au tour 0, ingress à partir du round 2) et
 #: décrivent des aires légales différentes.
@@ -503,6 +512,20 @@ class ActionDecoder:
         if pending_fw is not None:
             for slot_j in pending_fw["slot_to_code"]:
                 mask[FIGHT_WEAPON_SLOT_BASE + slot_j] = True
+            return mask, []
+
+        # ─── 1c. SPLIT-FIRE (P3-8) ───
+        # Deux sous-états : pending_weapon armé = attente de la cible (SHOOT_SLOTS filtrés) ;
+        # pending_weapon None = attente du prochain groupe d'arme (SHOOT_WEAPON_SEL_SLOTS restants).
+        # Même doctrine que 1b : early-return pool vide, exclusivité des slots ouverts.
+        pending_sw = game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)
+        if pending_sw is not None:
+            if pending_sw["pending_weapon"] is not None:
+                for slot_i in pending_sw["eligible_target_slots"]:
+                    mask[SQUAD_ACTION_SHOOT_SLOT_BASE + slot_i] = True
+            else:
+                for slot_j in pending_sw["remaining_weapon_slots"]:
+                    mask[SHOOT_WEAPON_SEL_SLOT_BASE + slot_j] = True
             return mask, []
 
         if not eligible_units:
@@ -1345,6 +1368,15 @@ class ActionDecoder:
         if SQUAD_ACTION_SHOOT_SLOT_BASE <= action_int < (
             SQUAD_ACTION_SHOOT_SLOT_BASE + SQUAD_ACTION_SHOOT_SLOT_COUNT
         ):
+            # P3-8 : si un split-fire est en cours (pending_weapon armé), ce SHOOT_SLOT désigne
+            # la cible pour l'arme en attente → squad_shoot_split_target. Sinon, tir mono-cible.
+            _pending_sw = game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)
+            if _pending_sw is not None and _pending_sw.get("pending_weapon") is not None:  # get allowed
+                return {
+                    "action": "squad_shoot_split_target",
+                    "squad_id": squad_id,
+                    "target_slot": action_int - SQUAD_ACTION_SHOOT_SLOT_BASE,
+                }
             # 10.02 : le type de tir vient de l'ETAT, pas d'un litteral — c'est resolve_squad_
             # shooting_type qui a determine le type quand le masque a ouvert ce slot, et c'est
             # elle qui doit le relire ici. Coder SHOOTING_TYPE_NORMAL en dur cassait le cas ou
@@ -1421,6 +1453,16 @@ class ActionDecoder:
             # Combat a vide (12.04/12.06) : aucune cible eligible. `target_slot` absent — le
             # moteur exige alors un pool 12.05 VIDE (parite masque/commit).
             return {"action": "squad_fight", "squad_id": squad_id}
+
+        # P3-8 — SPLIT-FIRE : sélection du groupe d'arme j (SHOOT_WEAPON_SEL_SLOT). Arme le
+        # pending_shoot_weapon_split. Le moteur (`squad_shoot_weapon_sel`) initialise l'activation
+        # tir au premier appel, pose pending_weapon, puis le SHOOT_SLOT suivant désigne la cible.
+        if action_int in SHOOT_WEAPON_SEL_SLOTS:
+            return {
+                "action": "squad_shoot_weapon_sel",
+                "squad_id": squad_id,
+                "weapon_slot": action_int - SHOOT_WEAPON_SEL_SLOT_BASE,
+            }
 
         raise ValueError(
             f"convert_squad_action: action {action_int} non gérée en phase '{current_phase}'"

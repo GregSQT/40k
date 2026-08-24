@@ -127,6 +127,7 @@ from engine.action_decoder import (
     DEPLOY_SLOT_CANDIDATES_CACHE_KEY,
     INGRESS_SLOT_CANDIDATES_CACHE_KEY,
     PENDING_FIGHT_WEAPON_KEY,
+    PENDING_SHOOT_WEAPON_SEL_KEY,
     ActionDecoder,
 )
 from engine.debug_trace import CH_STEP, trace
@@ -7689,6 +7690,168 @@ class W40KEngine(gym.Env):
                 "fight_result": fight_result,
             }
             self._fight_v11_gym_settle()
+
+        # ── split-fire (P3-8) ─────────────────────────────────────────────────
+        elif action_name == "squad_shoot_weapon_sel":
+            # Étape 1 : l'agent sélectionne le groupe d'arme j. Premier appel → initialise
+            # l'activation et crée pending_sw. Appels suivants → met à jour pending_weapon.
+            from engine.phase_handlers.shared_utils import (
+                squad_shooting_unit_activation_start,
+                squad_shooting_type_choose,
+                resolve_squad_shooting_type,
+                get_enemy_slot_mapping,
+                shoot_weapon_eligible_target_slots,
+                shoot_weapon_remaining_eligible_slots,
+            )
+
+            sw_squad_id = str(semantic["squad_id"])
+            weapon_slot = int(semantic["weapon_slot"])
+
+            _units_cache = require_key(self.game_state, "units_cache")
+            _ce = require_key(_units_cache, sw_squad_id)
+            _our_player = int(require_key(_ce, "player"))
+            _enemy_slots_sw = get_enemy_slot_mapping(self.game_state, _our_player)
+
+            _pending_sw = self.game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)
+
+            if _pending_sw is None:
+                # Premier appel : démarrer activation et choisir type de tir.
+                squad_shooting_unit_activation_start(self.game_state, sw_squad_id)
+                _stype = resolve_squad_shooting_type(self.game_state, sw_squad_id)
+                if _stype is None:
+                    raise RuntimeError(
+                        f"squad_shoot_weapon_sel: aucun type de tir pour {sw_squad_id!r}"
+                    )
+                squad_shooting_type_choose(self.game_state, sw_squad_id, _stype)
+                # remaining = tous les slots éligibles sauf le slot joué maintenant.
+                _remaining = shoot_weapon_remaining_eligible_slots(
+                    self.game_state, sw_squad_id, _enemy_slots_sw, weapon_slot
+                )
+                _pending_sw = {
+                    "squad_id": sw_squad_id,
+                    "shooting_type": _stype,
+                    "pending_weapon": None,
+                    "assignments": {},
+                    "remaining_weapon_slots": _remaining,
+                    "eligible_target_slots": [],
+                }
+            else:
+                # Appel suivant : retirer le slot joué du remaining.
+                if weapon_slot not in _pending_sw["remaining_weapon_slots"]:
+                    raise ValueError(
+                        f"squad_shoot_weapon_sel: slot {weapon_slot} absent du remaining "
+                        f"{sorted(_pending_sw['remaining_weapon_slots'])} — rupture masque/commit"
+                    )
+                del _pending_sw["remaining_weapon_slots"][weapon_slot]
+
+            _sel_code, _elig_ts = shoot_weapon_eligible_target_slots(
+                self.game_state, sw_squad_id, weapon_slot, _enemy_slots_sw
+            )
+            if not _elig_ts:
+                raise RuntimeError(
+                    f"squad_shoot_weapon_sel: arme {_sel_code!r} slot {weapon_slot} "
+                    f"sans cible éligible — rupture masque/commit ({sw_squad_id!r})"
+                )
+
+            _pending_sw["pending_weapon"] = _sel_code
+            _pending_sw["eligible_target_slots"] = _elig_ts
+            self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY] = _pending_sw
+
+            return True, {
+                "action": "squad_shoot_weapon_sel",
+                "squad_id": sw_squad_id,
+                "weapon_slot": weapon_slot,
+                "weapon_code": _sel_code,
+                "waiting_for_target_select": True,
+            }
+
+        elif action_name == "squad_shoot_split_target":
+            # Étape 2 : l'agent choisit la cible pour pending_weapon.
+            # Quand toutes les armes sont assignées → résolution complète.
+            from engine.phase_handlers.shared_utils import (
+                squad_declare_shoot_weapon_qty,
+                squad_shoot_weapon_qty_max,
+                squad_lock_shoot,
+                squad_shooting_type_clear,
+                get_enemy_slot_mapping,
+                build_manual_shoot_allocation,
+            )
+
+            _pending_sw2 = self.game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)
+            if _pending_sw2 is None or _pending_sw2.get("pending_weapon") is None:  # get allowed
+                raise RuntimeError(
+                    "squad_shoot_split_target: aucun pending_shoot_weapon_split avec "
+                    "pending_weapon — rupture masque/commit"
+                )
+
+            sw2_squad_id = str(_pending_sw2["squad_id"])
+            sw2_weapon_code = str(_pending_sw2["pending_weapon"])
+            target_slot2 = int(semantic["target_slot"])
+
+            _uc2 = require_key(self.game_state, "units_cache")
+            _ce2 = require_key(_uc2, sw2_squad_id)
+            _p2 = int(require_key(_ce2, "player"))
+            _enemy_slots2 = get_enemy_slot_mapping(self.game_state, _p2)
+
+            if not (0 <= target_slot2 < len(_enemy_slots2)):
+                raise ValueError(
+                    f"squad_shoot_split_target: target_slot {target_slot2} hors du mapping"
+                )
+            _tsid2 = _enemy_slots2[target_slot2]
+            if _tsid2 is None:
+                raise ValueError(
+                    f"squad_shoot_split_target: target_slot {target_slot2} est None"
+                )
+            _tsid2 = str(_tsid2)
+
+            _pending_sw2["assignments"][sw2_weapon_code] = _tsid2
+            _pending_sw2["pending_weapon"] = None
+
+            if _pending_sw2["remaining_weapon_slots"]:
+                # D'autres groupes d'armes restent à assigner.
+                self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY] = _pending_sw2
+                return True, {
+                    "action": "squad_shoot_split_target",
+                    "squad_id": sw2_squad_id,
+                    "weapon_code": sw2_weapon_code,
+                    "target_squad_id": _tsid2,
+                    "waiting_for_next_weapon_sel": True,
+                }
+
+            # Toutes les armes assignées → résolution.
+            del self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY]
+            try:
+                for _wcode2, _tgt2 in _pending_sw2["assignments"].items():
+                    _maxq = squad_shoot_weapon_qty_max(
+                        self.game_state, sw2_squad_id, _wcode2, _tgt2
+                    )
+                    if _maxq > 0:
+                        squad_declare_shoot_weapon_qty(
+                            self.game_state, sw2_squad_id, _wcode2, _maxq, _tgt2
+                        )
+                squad_lock_shoot(self.game_state, sw2_squad_id)
+                _alloc2 = build_manual_shoot_allocation(self.game_state, sw2_squad_id)
+                if _alloc2.get("waiting_for_player"):  # get allowed
+                    return True, _alloc2
+                if not _alloc2.get("done"):  # get allowed
+                    raise RuntimeError(
+                        f"squad_shoot_split_target: allocation non terminée pour {sw2_squad_id!r}"
+                    )
+                shoot_result2 = _alloc2["shoot_result"]
+            finally:
+                squad_shooting_type_clear(self.game_state, sw2_squad_id)
+
+            _unit2 = get_unit_by_id(self.game_state, sw2_squad_id)
+            if _unit2 is None:
+                raise KeyError(f"Squad {sw2_squad_id!r} introuvable après split-fire")
+            _end2 = end_activation(self.game_state, _unit2, ACTION, 1, SHOOTING, SHOOTING, 0)
+            result = {
+                **_end2,
+                "action": "squad_shoot_split_target",
+                "squad_id": sw2_squad_id,
+                "assignments": _pending_sw2["assignments"],
+                "shoot_result": shoot_result2,
+            }
 
         else:
             return False, {"error": "unknown_squad_action", "action": action_name}
