@@ -1077,22 +1077,34 @@ def _oath_mask() -> list:
     return mask
 
 
-def test_le_predicat_de_pause_couvre_les_deux_mecanismes_de_choix() -> None:
-    """`engine_is_paused_on_player_choice` : décision agent OU désignation d'Oath.
+def test_le_predicat_de_pause_couvre_les_quatre_mecanismes_de_choix() -> None:
+    """`engine_is_paused_on_player_choice` : les quatre mécanismes de `_PLAYER_CHOICE_MECHANISMS`.
 
-    Un seul point de lecture pour les quatre replis. Le vérifier ici évite qu'un troisième
+    Un seul point de lecture pour les quatre replis. Le vérifier ici évite qu'un nouveau
     mécanisme n'ait à être ajouté quatre fois — c'est exactement ainsi que l'Oath a été oublié.
+    Ce test est le garde-fou contre un typo dans la clé d'un `_read_pending_*`.
     """
     from ai.env_wrappers import engine_is_paused_on_player_choice
 
+    base: dict = {
+        "pending_agent_decision": None,
+        "pending_oath_selection": None,
+        "pending_coherency_removal": None,
+        "pending_fight_weapon_select": None,
+    }
+    assert engine_is_paused_on_player_choice(base) is False
+
     assert engine_is_paused_on_player_choice(
-        {"pending_agent_decision": None, "pending_oath_selection": None}
-    ) is False
-    assert engine_is_paused_on_player_choice(
-        {"pending_agent_decision": _decision_state(player=1), "pending_oath_selection": None}
+        {**base, "pending_agent_decision": _decision_state(player=1)}
     ) is True
     assert engine_is_paused_on_player_choice(
-        {"pending_agent_decision": None, "pending_oath_selection": 2}
+        {**base, "pending_oath_selection": 2}
+    ) is True
+    assert engine_is_paused_on_player_choice(
+        {**base, "pending_coherency_removal": {"unit_id": "u1", "candidates": []}}
+    ) is True
+    assert engine_is_paused_on_player_choice(
+        {**base, "pending_fight_weapon_select": {"unit_id": "u2", "weapons": []}}
     ) is True
 
 
