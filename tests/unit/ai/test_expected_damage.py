@@ -9,14 +9,13 @@ Hypothèses de calcul (attaque sans règle d'arme) :
   P(fail_save) = P(f == 1 ou f < save_threshold, sur D6)
 """
 
-import math
 import pytest
 
 from shared.data_validation import ConfigurationError
 from engine.utils.expected_damage import expected_damage
 
 
-def _weapon(atk: int, strength: int, ap: int, nb: int = 1, dmg: int | str = 1) -> dict:
+def _weapon(atk: int, strength: int, ap: int, nb: int | str = 1, dmg: int | str = 1) -> dict:
     """Arme minimale sans règle d'arme."""
     return {
         "ATK": atk, "STR": strength, "AP": ap,
@@ -129,17 +128,17 @@ def test_better_bs_deals_more_damage():
 # via la vraie probabilité et non NB×DMG brut
 # ---------------------------------------------------------------------------
 def test_can_kill_uses_probabilistic_damage(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Un fuseur (EdmExpected ≈ 1.94) ne peut pas tuer un marine 2 PV au premier tour
-    alors que le proxy NB×DMG=3.5 le dirait capable.
-    expected_damage corrige ce surestimé.
+    """expected_damage (≈ 35/18 ≈ 1.94) remplace le proxy NB×DMG=3.5.
+
+    Trois cas sur le même fuseur :
+    - target_hp=2 > 1.94 → False (ne peut pas tuer)
+    - target_hp=1 ≤ 1.94 → True  (peut tuer)
+    - target_hp=35/18 = expected_damage → True (frontière exacte, prouve ≤ pas <)
     """
     import ai.reward_mapper as rmod
     from ai.reward_mapper import RewardMapper
 
     mapper = RewardMapper({})
-    # HP cible = 2 (ne peut pas être tué par 1.94 de dégâts attendus)
-    target_hp = 2
-    monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: target_hp)
 
     weapon = _weapon(atk=3, strength=8, ap=-4, nb=1, dmg="D6")
     target = _target(t=4, sv=3)
@@ -151,8 +150,17 @@ def test_can_kill_uses_probabilistic_damage(monkeypatch: pytest.MonkeyPatch) -> 
         "CC_WEAPONS": [],
         "selectedCcWeaponIndex": 0,
     }
-    monkeypatch.setattr(rmod, "get_selected_ranged_weapon", lambda u: weapon)
+
+    hp_store = [2]
+    monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: hp_store[0])
 
     result = mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={})
-    # expected_damage ≈ 35/18 ≈ 1.94 < 2 PV → cannot kill
-    assert result is False
+    assert result is False  # expected_damage ≈ 1.94 < 2
+
+    hp_store[0] = 1
+    result = mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={})
+    assert result is True  # 1 ≤ 1.94
+
+    hp_store[0] = expected_damage(weapon, target)  # frontière exacte (virgule flottante réelle)
+    result = mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={})
+    assert result is True  # max_damage ≤ max_damage (sémantique ≤, pas <)
