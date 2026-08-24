@@ -10,6 +10,7 @@ hyperparametres. Ce qu'elle decide, et que ces tests verrouillent :
 import json
 import os
 from types import SimpleNamespace
+from typing import Any, Dict, cast
 
 import pytest
 
@@ -63,7 +64,7 @@ def curriculum_agent(tmp_path, monkeypatch):
     config = _FakeConfigLoader(str(models_root))
     # `_FakeConfigLoader` n'expose que ce dont `--resume-from` a besoin ; l'etape, elle, decore
     # le chargement de la config d'entrainement.
-    config.load_agent_training_config = lambda agent_key, phase=None: {"n_envs": 4}
+    config.load_agent_training_config = lambda agent_key, phase=None: cast(Dict[str, Any], {"n_envs": 4})
     monkeypatch.setattr("ai.train.get_config_loader", lambda: config)
     return SimpleNamespace(config=config, models_root=models_root)
 
@@ -117,7 +118,7 @@ def test_the_stage_pool_reaches_every_later_read_of_the_config(curriculum_agent)
     """
     _write_stage_model(curriculum_agent.models_root, "P0")
     config = curriculum_agent.config
-    config.load_agent_training_config = lambda agent_key, phase=None: {"n_envs": 4}
+    config.load_agent_training_config = lambda agent_key, phase=None: cast(Dict[str, Any], {"n_envs": 4})
 
     _prepare_curriculum_stage(_args("P1"), config)
 
@@ -138,7 +139,7 @@ def test_the_stage_pool_reaches_every_later_read_of_the_config(curriculum_agent)
 def test_a_stage_without_pool_leaves_the_config_untouched(curriculum_agent) -> None:
     """P0 s'entraine contre les bots seuls : `opponent_mix` doit etre ABSENT, pas desarme."""
     config = curriculum_agent.config
-    config.load_agent_training_config = lambda agent_key, phase=None: {"n_envs": 4}
+    config.load_agent_training_config = lambda agent_key, phase=None: cast(Dict[str, Any], {"n_envs": 4})
 
     _prepare_curriculum_stage(_args("P0"), config)
 

@@ -699,6 +699,7 @@ class ReferenceBalancedBot(_BenchmarkBase):
             if att_col is None:
                 att_e = require_unit_from_cache(att_id, game_state, "_elect_intent")
                 att_col, att_row = int(att_e["col"]), int(att_e["row"])
+            assert att_col is not None and att_row is not None
 
             dist = calculate_hex_distance(att_col, att_row, e_col, e_row)
 

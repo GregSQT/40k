@@ -2047,7 +2047,7 @@ def evaluate_against_checkpoints(
                 gym_training_mode=True,
                 training_n_envs=1,
             )
-            masked_env = ActionMasker(base_env, lambda env: env.get_action_mask())
+            masked_env = ActionMasker(base_env, lambda env: base_env.get_action_mask())
             env = BotControlledEnv(
                 masked_env,
                 bot=RandomBot(),

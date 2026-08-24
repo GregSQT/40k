@@ -194,7 +194,7 @@ def _tracker_stub() -> W40KMetricsTracker:
     # stub la reprend (result_bonuses.kill_target) : aucun test ne l'observe aujourd'hui, mais
     # celui qui l'observera un jour doit lire un facteur plausible, pas un nombre invente.
     t.reward_kill_target = 2.0
-    t._selfplay_wins: Dict[str, List[float]] = {}
+    t._selfplay_wins = {}
     t._game_history = {k: [] for k in W40KMetricsTracker.GAME_HISTORY_KEYS}
     # Ventilation par mode de deploiement : etat construit depuis les constantes de CLASSE, pas
     # recopie, pour que l'ajout d'une serie ne fasse pas tomber ces tests sur un detail sans

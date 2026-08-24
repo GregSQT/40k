@@ -13425,7 +13425,7 @@ def arm_next_coherency_pending(game_state: Dict[str, Any]) -> bool:
     Verifie que l'escouade suivante est encore incoherente avant d'armer (une escouade
     coherente sans retrait est ignoree). Retourne True si un pending a ete arme.
     """
-    queue: List[str] = game_state.get("pending_coherency_removal_queue", [])
+    queue: List[str] = game_state.get("pending_coherency_removal_queue", [])  # get allowed
     while queue:
         squad_id = queue.pop(0)
         if not validate_squad_coherency(game_state, squad_id):
@@ -13449,10 +13449,10 @@ def _coherency_alive(game_state: Dict[str, Any], squad_id: str) -> List[str]:
     # Ordre IDENTIQUE a l'observation pour que COHERENCY_SLOT_BASE + i designe la ligne i.
     sq_cache = game_state.get("squad_cache", {}).get(squad_id, {})  # get allowed
     squad_defence: tuple = (
-        int(sq_cache.get("HP_MAX", 0)),
-        int(sq_cache.get("T", 0)),
-        int(sq_cache.get("ARMOR_SAVE", 7)),
-        int(sq_cache.get("INVUL_SAVE", 7)),
+        int(sq_cache["HP_MAX"]),
+        int(sq_cache["T"]),
+        int(sq_cache.get("ARMOR_SAVE", 7)),  # get allowed
+        int(sq_cache.get("INVUL_SAVE", 7)),  # get allowed
     )
     return ObservationBuilder._squad_models_for_observation(alive, models_cache, squad_defence)
 

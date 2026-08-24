@@ -3049,7 +3049,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                                  device_mode: Optional[str] = ...,
                                  training_config_override: Optional[Dict[str, Any]] = ...,
                                  silent_chunk: bool = ...,
-                                 return_run_info: Literal[False] = ...) -> TrainRunResult: ...
+                                 return_run_info: Literal[False] = ...,
+                                 freeze_opponent_pool: bool = ...,
+                                 async_eval_enabled: bool = ...,
+                                 extra_callbacks: Optional[List[BaseCallback]] = ...) -> TrainRunResult: ...
 
 
 @overload
@@ -3059,7 +3062,11 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                                  device_mode: Optional[str] = ...,
                                  training_config_override: Optional[Dict[str, Any]] = ...,
                                  silent_chunk: bool = ...,
-                                 *, return_run_info: Literal[True]) -> TrainRunResultWithInfo: ...
+                                 *,
+                                 return_run_info: Literal[True],
+                                 freeze_opponent_pool: bool = ...,
+                                 async_eval_enabled: bool = ...,
+                                 extra_callbacks: Optional[List[BaseCallback]] = ...) -> TrainRunResultWithInfo: ...
 
 
 def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,

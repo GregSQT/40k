@@ -1790,12 +1790,13 @@ export const BoardReplay: React.FC = () => {
         gameState={gameStateForBoard}
         replayActionIndex={currentActionIndex}
         objectiveControlOverride={replayObjectiveControlMap}
-        getChargeDestinations={(unitId: number) => {
+        getChargeDestinations={() => {
           // Calculate ALL valid charge destinations for replay mode using BFS
+          const unitId = currentAction?.unit_id;
           if (
             currentAction?.type === "charge" &&
             currentAction?.from &&
-            currentAction.unit_id === unitId
+            unitId != null
           ) {
             const chargeFrom = currentAction.from;
             // Use the charge_roll from the action, not the actual distance traveled
