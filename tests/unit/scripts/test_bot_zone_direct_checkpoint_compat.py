@@ -22,39 +22,17 @@ import zipfile
 from pathlib import Path
 
 import gymnasium as gym
-import numpy as np
-from typing import cast
 import pytest
 import torch
-from sb3_contrib import MaskablePPO
 from stable_baselines3.common.save_util import json_to_data
 
 from ai.pointer_policy import PointerMaskablePolicy
-from ai.spatial_extractor import SpatialCombinedExtractor
 from engine.macro_intents import TOTAL_ACTION_SIZE
 from tests._chargeur_script import charger_script
 from tests.unit.ai._fabriques import squad_obs_space
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _SCRIPT = PROJECT_ROOT / "scripts" / "bot_zone_direct.py"
-
-
-class _ToyEnv(gym.Env):
-    """Env jouet avec l'espace d'observation réel, pour construire la politique sans moteur."""
-
-    def __init__(self):
-        self.observation_space = squad_obs_space()
-        self.action_space = gym.spaces.Discrete(TOTAL_ACTION_SIZE)
-
-    def reset(self, *, seed=None, options=None):
-        return {k: np.zeros(cast(tuple[int, ...], v.shape), dtype=np.float32) for k, v in self.observation_space.spaces.items()}, {}
-
-    def step(self, action):
-        obs = {k: np.zeros(cast(tuple[int, ...], v.shape), dtype=np.float32) for k, v in self.observation_space.spaces.items()}
-        return obs, 0.0, False, False, {}
-
-    def action_masks(self):
-        return np.ones(TOTAL_ACTION_SIZE, dtype=bool)
 
 
 @pytest.fixture(scope="module")
@@ -88,7 +66,7 @@ def _checkpoint_data(reference_zip):
             raw = f.read()
         try:
             data = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=False)
-        except pickle.UnpicklingError:
+        except (pickle.UnpicklingError, RuntimeError):
             try:
                 data = json_to_data(raw.decode())
             except (UnicodeDecodeError, ValueError) as exc:
@@ -116,15 +94,13 @@ def fresh_policy_keys(checkpoint_policy_kwargs):
     Utiliser les kwargs réels (net_arch inclus) garantit que seul un changement de code
     (module ajouté/supprimé) crée une divergence, pas une différence d'architecture.
     """
-    torch.manual_seed(0)
-    model = MaskablePPO(
-        PointerMaskablePolicy,
-        _ToyEnv(),
-        device="cpu",
-        verbose=0,
-        policy_kwargs=checkpoint_policy_kwargs,
+    policy = PointerMaskablePolicy(
+        squad_obs_space(),
+        gym.spaces.Discrete(TOTAL_ACTION_SIZE),
+        lr_schedule=lambda _: 1e-3,
+        **checkpoint_policy_kwargs,
     )
-    return set(model.policy.state_dict().keys())
+    return set(policy.state_dict().keys())
 
 
 # Modules ajoutés à PointerMaskablePolicy après le dernier checkpoint épinglé.
