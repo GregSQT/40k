@@ -6443,6 +6443,170 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
     return True, result
 
 
+# ---------------------------------------------------------------------------
+# L10 — Placement final de charge (V11 §9 P3-8d)
+# ---------------------------------------------------------------------------
+
+#: Clé de stockage du contexte de placement en attente dans game_state.
+CHARGE_PLACEMENT_PENDING_KEY = "_charge_placement_pending"
+
+#: Nombre d'intentions de placement exposées à l'agent.
+CHARGE_PLACEMENT_INTENT_COUNT = 5
+
+_CHARGE_INTENT_LABELS: List[str] = [
+    "Serré (compact)",
+    "Objectif (proche objectif)",
+    "Isolation (loin ennemis non-ciblés)",
+    "Pénétration (avance maximale)",
+    "Étalé (formation dispersée)",
+]
+
+
+def _charge_plan_centroid(plan: List[Tuple[str, int, int, int]]) -> Tuple[int, int]:
+    """Centroïde (col, row) en entiers d'un plan de charge."""
+    n = len(plan)
+    if n == 0:
+        return (0, 0)
+    return (sum(c for _, c, _, _ in plan) // n, sum(r for _, _, r, _ in plan) // n)
+
+
+def arm_charge_placement_decision(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    target_squad_ids: List[str],
+    charge_roll: int,
+    plan_0: List[Tuple[str, int, int, int]],
+    context: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Pose le point de choix charge_placement (L10) pour l'escouade qui vient de charger.
+
+    Calcule les 5 plans d'intention depuis `charge_build_valid_plan` (intent 0 déjà fourni
+    par l'appelant), encode les métriques par plan dans `options_cont` pour l'observation, et
+    stocke le contexte d'activation en `CHARGE_PLACEMENT_PENDING_KEY` pour que
+    `apply_charge_placement_decision` puisse le récupérer sans re-lire les variables locales
+    du handler `squad_charge`.
+
+    `plan_0` est passé car il est déjà calculé par l'appelant (validation de la charge).
+    Les intents 1–4 sont calculés ici ; si l'un d'eux produit `None` (espace contraint),
+    il replie sur `plan_0` pour que les 5 slots soient toujours remplis.
+    """
+    from engine.phase_handlers.shared_utils import charge_build_valid_plan
+    from engine.agent_decision import set_pending_agent_decision
+
+    plans: List[List[Tuple[str, int, int, int]]] = [plan_0]
+    for _k in range(1, CHARGE_PLACEMENT_INTENT_COUNT):
+        _p = charge_build_valid_plan(game_state, squad_id, target_squad_ids, charge_roll, intent=_k)
+        plans.append(_p if _p is not None else plan_0)
+
+    # Positions des objectifs pour la métrique obj_dist_norm.
+    _obj_positions: List[Tuple[int, int]] = []
+    for _obj in game_state.get("objectives", []):  # get allowed
+        for _hex in _obj.get("hexes", []):  # get allowed
+            if isinstance(_hex, (list, tuple)):
+                _obj_positions.append((int(_hex[0]), int(_hex[1])))
+            else:
+                _obj_positions.append((int(_hex["col"]), int(_hex["row"])))
+
+    # Positions des modèles ennemis non-déclarés pour la métrique nontgt_dist_norm.
+    _declared = {str(t) for t in target_squad_ids}
+    _charger_entry = require_unit_from_cache(str(squad_id), game_state, "arm_charge_placement_decision")
+    _charger_player = int(require_key(_charger_entry, "player"))
+    _models_cache = require_key(game_state, "models_cache")
+    _squad_models = require_key(game_state, "squad_models")
+    _nontgt_positions: List[Tuple[int, int]] = []
+    for _esid, _e in require_key(game_state, "units_cache").items():
+        if int(_e.get("player", -1)) == _charger_player:
+            continue
+        if _esid in _declared:
+            continue
+        for _mid in _squad_models.get(_esid, []):
+            _m = _models_cache.get(_mid)  # get allowed
+            if _m is None:
+                continue
+            _nontgt_positions.append((int(_m["col"]), int(_m["row"])))
+
+    _board_diag = max(
+        int(require_key(game_state, "board_cols")) + int(require_key(game_state, "board_rows")),
+        1,
+    )
+
+    options_cont: List[List[float]] = []
+    for _p in plans:
+        _cc, _cr = _charge_plan_centroid(_p)
+        _obj_d = (
+            min(_calculate_hex_distance(_cc, _cr, _oc, _or) for _oc, _or in _obj_positions)
+            if _obj_positions else _board_diag
+        )
+        _nt_d = (
+            min(_calculate_hex_distance(_cc, _cr, _ec, _er) for _ec, _er in _nontgt_positions)
+            if _nontgt_positions else _board_diag
+        )
+        options_cont.append([
+            min(_obj_d / _board_diag, 1.0),
+            min(_nt_d / _board_diag, 1.0),
+        ])
+
+    game_state[CHARGE_PLACEMENT_PENDING_KEY] = {
+        "squad_id": str(squad_id),
+        "plans": plans,
+        **context,
+    }
+
+    _options = [
+        {
+            "label": _CHARGE_INTENT_LABELS[_k],
+            "effect_ids": (),
+            "declines": False,
+            "payload": {"plan_index": _k},
+        }
+        for _k in range(CHARGE_PLACEMENT_INTENT_COUNT)
+    ]
+
+    return set_pending_agent_decision(
+        game_state,
+        decision_type="charge_placement",
+        player=_charger_player,
+        unit_id=str(squad_id),
+        options=_options,
+        options_cont=options_cont,
+    )
+
+
+def apply_charge_placement_decision(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    plan_index: int,
+) -> Tuple[List[Tuple[str, int, int, int]], Dict[str, Any]]:
+    """Consomme la décision charge_placement. Retourne (plan_choisi, contexte).
+
+    Le contexte contient tous les champs stockés par `arm_charge_placement_decision`
+    (hors `squad_id` et `plans`) pour que `_finish_charge_after_placement` reconstitue
+    le action_log sans re-lire les variables locales du handler `squad_charge`.
+    """
+    from engine.agent_decision import consume_pending_agent_decision
+
+    _pending = game_state.pop(CHARGE_PLACEMENT_PENDING_KEY, None)
+    if _pending is None:
+        raise RuntimeError(
+            f"apply_charge_placement_decision: {CHARGE_PLACEMENT_PENDING_KEY} absent "
+            "— décision déjà consommée ou jamais posée"
+        )
+    consume_pending_agent_decision(
+        game_state,
+        decision_type="charge_placement",
+        player=int(require_key(game_state, "current_player")),
+        unit_id=str(squad_id),
+    )
+    _plans = require_key(_pending, "plans")
+    if plan_index < 0 or plan_index >= len(_plans):
+        raise ValueError(
+            f"apply_charge_placement_decision: plan_index={plan_index} hors des "
+            f"{len(_plans)} plans disponibles"
+        )
+    _ctx = {k: v for k, v in _pending.items() if k not in ("squad_id", "plans")}
+    return _plans[plan_index], _ctx
+
+
 def charge_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """Clean up and end charge phase"""
     charge_clear_preview(game_state)
