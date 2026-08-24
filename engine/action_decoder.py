@@ -469,6 +469,36 @@ class ActionDecoder:
                             mask[action_idx] = True
             return mask, eligible_units
 
+        # ─── 1b. RETRAIT POUR COHERENCE (P3-0, 03.03) ───
+        # Exclusif de toutes les autres tranches : le moteur est arrêté entre la fin de la phase
+        # fight et la progression joueur. Slot i = ligne i de _squad_models_for_observation —
+        # invariant D1 côté figurines. Les figurines absentes (slots au-delà des vivantes) restent
+        # fermées. Recalculé dynamiquement à chaque appel (les alive_mids raccourcissent).
+        # PRÉCÈDE `if not eligible_units` : la pool fight peut être vide en même temps qu'un retrait
+        # de cohérence est en attente (escouade détruite partiel après la dernière activation).
+        pending_cr = game_state.get("pending_coherency_removal")
+        if pending_cr is not None:
+            from engine.phase_handlers.shared_utils import _coherency_alive
+            alive = _coherency_alive(game_state, str(pending_cr["squad_id"]))
+            for slot_i, _mid in enumerate(alive[:COHERENCY_SLOT_COUNT]):
+                mask[COHERENCY_SLOT_BASE + slot_i] = True
+            return mask, []
+
+        # ─── 1b. SÉLECTION D'ARME CC (V11 §0.69) ───
+        # Même exclusivité que les branches ci-dessus : entre FIGHT_SLOT (cible) et la résolution,
+        # le moteur est arrêté sur le choix d'arme. Pool vide : l'activation en cours ne reprend
+        # qu'après la décision. Au moins un slot est toujours ouvert (fight_weapon_eligible_slots
+        # ne produit cet état que si ≥1 arme est éligible, sinon squad_fight lève en amont).
+        # PRÉCÈDE `if not eligible_units` : squad_fight enregistre l'escouade dans la pool AVANT
+        # de poser PENDING_FIGHT_WEAPON_KEY ; la pool est donc vide quand le masque est recalculé,
+        # ce qui ferait retourner un masque vide et déclencher fight_phase_end — abandonnant le
+        # choix d'arme et supprimant toutes les attaques de l'escouade.
+        pending_fw = game_state.get(PENDING_FIGHT_WEAPON_KEY)
+        if pending_fw is not None:
+            for slot_j in pending_fw["slot_to_code"]:
+                mask[FIGHT_WEAPON_SLOT_BASE + slot_j] = True
+            return mask, []
+
         if not eligible_units:
             return mask, eligible_units
 
@@ -500,30 +530,6 @@ class ActionDecoder:
         # ⚠️ Déplacer ces sorties les unes par rapport aux autres est un défaut de RÈGLE, pas de
         # lisibilité. Les deux ordres qui comptent sont verrouillés par
         # `test_activation_choice_contract.py`.
-
-        # ─── 1b. RETRAIT POUR COHERENCE (P3-0, 03.03) ───
-        # Exclusif de toutes les autres tranches : le moteur est arrêté entre la fin de la phase
-        # fight et la progression joueur. Slot i = ligne i de _squad_models_for_observation —
-        # invariant D1 côté figurines. Les figurines absentes (slots au-delà des vivantes) restent
-        # fermées. Recalculé dynamiquement à chaque appel (les alive_mids raccourcissent).
-        pending_cr = game_state.get("pending_coherency_removal")
-        if pending_cr is not None:
-            from engine.phase_handlers.shared_utils import _coherency_alive
-            alive = _coherency_alive(game_state, str(pending_cr["squad_id"]))
-            for slot_i, _mid in enumerate(alive[:COHERENCY_SLOT_COUNT]):
-                mask[COHERENCY_SLOT_BASE + slot_i] = True
-            return mask, []
-
-        # ─── 1b. SÉLECTION D'ARME CC (V11 §0.69) ───
-        # Même exclusivité que les branches ci-dessus : entre FIGHT_SLOT (cible) et la résolution,
-        # le moteur est arrêté sur le choix d'arme. Pool vide : l'activation en cours ne reprend
-        # qu'après la décision. Au moins un slot est toujours ouvert (fight_weapon_eligible_slots
-        # ne produit cet état que si ≥1 arme est éligible, sinon squad_fight lève en amont).
-        pending_fw = game_state.get(PENDING_FIGHT_WEAPON_KEY)
-        if pending_fw is not None:
-            for slot_j in pending_fw["slot_to_code"]:
-                mask[FIGHT_WEAPON_SLOT_BASE + slot_j] = True
-            return mask, []
 
         # ─── 1. CHOIX DE L'ESCOUADE À ACTIVER (V11 §0.48 élément `L2` / §9 P3-3) ───
         # Même exclusivité que les branches `pending_agent_decision` et Oath plus haut, et pour la
