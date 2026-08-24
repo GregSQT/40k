@@ -478,3 +478,92 @@ def test_purge_combi_siblings_removes_sister_from_remaining():
     assert remaining_smite == [], (
         f"smite_focused_witchfire doit avoir été purgée de remaining, reste {remaining}"
     )
+
+
+# ─── Invariants COMBI_WEAPON : masque open_slots et remaining ─────────────────
+
+def _combi_scenario():
+    """Unité avec frag+krak (COMBI ballistus_missile_launcher), ennemi en portée."""
+    from engine.weapons import get_weapons as gw
+    frag = gw("SpaceMarine", ["ballistus_missile_launcher_frag"])[0]
+    krak = gw("SpaceMarine", ["ballistus_missile_launcher_krak"])[0]
+    assert frag.get("COMBI_WEAPON") == krak.get("COMBI_WEAPON"), "pré-condition : même COMBI_WEAPON"
+
+    m_combi = _m(5, 5, [frag, krak])
+    atk = _unit(1, 1, 5, 5, [m_combi])
+    atk["RNG_WEAPONS"] = [frag, krak]
+    enemy = _unit(2, 2, 5, 10, [_m(5, 10, [STORM])])
+    enemy["RNG_WEAPONS"] = [STORM]
+    return _make_gs([atk, enemy])
+
+
+def test_combi_weapon_open_slots_at_most_one_per_group():
+    """shoot_weapon_sel_open_slots n'ouvre qu'un seul slot par groupe COMBI_WEAPON.
+
+    Régression : frag et krak (COMBI_WEAPON="ballistus_missile_launcher") ouvraient
+    deux slots distincts, permettant de les sélectionner tous les deux en split-fire.
+    Le commit du second échouait avec qty_max==0 car le premier avait consommé le groupe.
+    """
+    from engine.phase_handlers.shared_utils import (
+        shoot_weapon_sel_open_slots,
+        squad_shooting_unit_activation_start,
+        squad_shooting_type_choose,
+        get_enemy_slot_mapping,
+        SHOOTING_TYPE_NORMAL,
+    )
+
+    gs = _combi_scenario()
+    gs["shoot_activation_pool"] = ["1"]
+    gs["units_shot"] = set()
+    squad_shooting_unit_activation_start(gs, "1")
+    squad_shooting_type_choose(gs, "1", SHOOTING_TYPE_NORMAL)
+
+    enemy_slots = get_enemy_slot_mapping(gs, 1)
+    slots = shoot_weapon_sel_open_slots(gs, "1", enemy_slots)
+
+    assert len(slots) <= 1, (
+        f"{len(slots)} slots ouverts pour un groupe COMBI_WEAPON (attendu ≤ 1) : {slots}"
+    )
+
+
+def test_combi_weapon_remaining_excludes_siblings():
+    """shoot_weapon_remaining_eligible_slots exclut les sœurs COMBI de l'arme sélectionnée.
+
+    Régression : après sélection de frag (slot 0), krak (slot 1, même COMBI_WEAPON)
+    restait dans remaining. Le commit final échouait sur krak avec qty_max==0.
+    """
+    from engine.phase_handlers.shared_utils import (
+        shoot_weapon_remaining_eligible_slots,
+        squad_shooting_unit_activation_start,
+        squad_shooting_type_choose,
+        get_enemy_slot_mapping,
+        SHOOTING_TYPE_NORMAL,
+    )
+
+    gs = _combi_scenario()
+    gs["shoot_activation_pool"] = ["1"]
+    gs["units_shot"] = set()
+    squad_shooting_unit_activation_start(gs, "1")
+    squad_shooting_type_choose(gs, "1", SHOOTING_TYPE_NORMAL)
+
+    enemy_slots = get_enemy_slot_mapping(gs, 1)
+    # slot 0 = frag sélectionné ; krak (slot 1, sœur COMBI) doit être absent de remaining
+    remaining = shoot_weapon_remaining_eligible_slots(gs, "1", enemy_slots, except_slot=0)
+
+    combi_slots = [j for j in remaining if j != 0]
+    # krak partage le COMBI_WEAPON de frag → ne doit pas apparaître dans remaining
+    from engine.observation_weapon_profiles import collect_weapon_profiles
+    from engine.phase_handlers.shared_utils import require_key
+    models_cache = require_key(gs, "models_cache")
+    squad_models = require_key(gs, "squad_models")
+    alive = [models_cache[mid] for mid in squad_models.get("1", []) if mid in models_cache]
+    profiles = collect_weapon_profiles(alive, "RNG_WEAPONS")
+    frag_combi = profiles[0][0].get("COMBI_WEAPON") if profiles else None
+
+    sibling_in_remaining = [
+        j for j in combi_slots
+        if j < len(profiles) and profiles[j][0].get("COMBI_WEAPON") == frag_combi
+    ]
+    assert sibling_in_remaining == [], (
+        f"sœurs COMBI encore dans remaining : slots {sibling_in_remaining}, remaining={remaining}"
+    )
