@@ -34,9 +34,9 @@ from engine.phase_handlers.shared_utils import (
 from tests._state_invariants import turn_state_invariants
 
 INDIRECT = {"display_name": "Impaler Cannon", "RNG": 180, "NB": 4, "ATK": 4, "STR": 5,
-            "AP": -1, "DMG": 1, "WEAPON_RULES": ["HEAVY", "INDIRECT_FIRE"]}
+            "AP": -1, "DMG": 1, "WEAPON_RULES": ["HEAVY", "INDIRECT_FIRE"], "code": "test_indirect_weapon"}
 DIRECT = {"display_name": "Bolt Rifle", "RNG": 120, "NB": 2, "ATK": 3, "STR": 4,
-          "AP": -1, "DMG": 1, "WEAPON_RULES": []}
+          "AP": -1, "DMG": 1, "WEAPON_RULES": [], "code": "test_direct_weapon"}
 
 
 def _gs(weapons, *, advanced=False, engaged_enemy=False):

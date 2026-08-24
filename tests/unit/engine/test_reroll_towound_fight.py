@@ -39,7 +39,7 @@ def _seq(monkeypatch, rolls):
 def _fight_state(unit_rules, *, target_col=9, target_row=9):
     """Un attaquant ('1') au contact d'une cible ('2') ; objectif en (5,5)."""
     weapon = {"ATK": 1, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
-              "WEAPON_RULES": [], "display_name": "Choppa"}
+              "WEAPON_RULES": [], "code": "test_choppa", "display_name": "Choppa"}
     attacker = {"id": "A1", "squad_id": "1", "player": 1, "T": 4, "CC_WEAPONS": [weapon]}
     target_model = {
         "id": "T1", "squad_id": "2", "player": 2, "T": 4, "HP_CUR": 2, "HP_MAX": 2,

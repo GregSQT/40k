@@ -43,7 +43,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 2) -> Dict[str, A
         # supprime le 2026-07-29. Le parseur d'armurerie exige deja la cle sur les donnees reelles
         # (« use [] if none »), donc une arme sans cle n'existe pas en production.
         "RNG_WEAPONS": [{"RNG": 24, "SHOTS": "1", "STRENGTH": 4, "AP": 0, "DAMAGE": 1,
-                         "WEAPON_RULES": []}],
+                         "WEAPON_RULES": [], "code": "test_weapon"}],
         "CC_WEAPONS": [],
     }
 

@@ -26,7 +26,7 @@ def _seq(monkeypatch, rolls):
 
 def _game_state(weapon_rules, *, target_keywords=()):
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
-              "WEAPON_RULES": list(weapon_rules), "display_name": "Axe"}
+              "WEAPON_RULES": list(weapon_rules), "code": "test_axe", "display_name": "Axe"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "CC_WEAPONS": [weapon]}
     target_model = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 2, "HP_MAX": 2,
                     "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt"}

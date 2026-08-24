@@ -57,7 +57,7 @@ def _game_state(target_unit_rules, *, dmg=1, hp=3, sv=2):
     """Tireur '1' (arme S4, AP0, DMGdmg) vs cible '2' (Sv sv+, T4, HPmax=hp). gym -> auto."""
     weapon = {
         "ATK": 3, "STR": 4, "AP": 0, "DMG": dmg, "NB": 1,
-        "WEAPON_RULES": [], "display_name": "Gun",
+        "WEAPON_RULES": [], "code": "test_gun", "display_name": "Gun",
     }
     attacker = {
         "id": "A1", "squad_id": "1", "player": 0, "T": 4,

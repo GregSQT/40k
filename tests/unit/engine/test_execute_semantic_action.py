@@ -287,7 +287,7 @@ class TestExecuteSemanticActionAdvancePhase:
         # Un tireur P1 + ennemi P2 pour que le pool tir soit non vide (cascade stoppe)
         shooter = _unit("1", 1, 5, 10)
         shooter["RNG_WEAPONS"] = [
-            {"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "RNG": 24, "NB": 1, "WEAPON_RULES": []}
+            {"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "RNG": 24, "NB": 1, "WEAPON_RULES": [], "code": "test_weapon"}
         ]
         enemy = _unit("2", 2, 20, 10)
         units = [shooter, enemy]

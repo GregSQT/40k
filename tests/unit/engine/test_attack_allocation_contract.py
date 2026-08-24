@@ -82,7 +82,7 @@ def _game_state(phase, n_target_models, n_attacks):
     """
     melee = phase == "fight"
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": n_attacks, "RNG": 24,
-              "WEAPON_RULES": [], "display_name": "Gun"}
+              "WEAPON_RULES": [], "code": "test_gun", "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4,
                 "SHOOT_LEFT": 1, "ATTACK_LEFT": n_attacks, "col": 0, "row": 0,
                 "RNG_WEAPONS": [] if melee else [weapon],

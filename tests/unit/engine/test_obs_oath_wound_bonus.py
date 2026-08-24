@@ -29,7 +29,7 @@ MY_SELECTED = global_bin_index("my_oath_target_selected")
 
 def _weapon() -> Dict[str, Any]:
     return {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-            "WEAPON_RULES": [], "display_name": "Test Bolter"}
+            "WEAPON_RULES": [], "code": "test_weapon", "display_name": "Test Bolter"}
 
 
 def _unit(uid: int, player: int, pos: Tuple[int, int], faction_keywords: List[Any]) -> Dict[str, Any]:

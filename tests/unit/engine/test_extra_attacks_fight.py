@@ -20,7 +20,7 @@ from engine.phase_handlers.shared_utils import (
 
 
 def _w(name, rules, *, dmg=1, nb=2):
-    return {"display_name": name, "WEAPON_RULES": list(rules), "ATK": 3, "STR": 4,
+    return {"display_name": name, "code": name, "WEAPON_RULES": list(rules), "ATK": 3, "STR": 4,
             "AP": 0, "DMG": dmg, "NB": nb}
 
 

@@ -45,7 +45,7 @@ CONT_INVUL = unit_cont_index("invul_save")
 def _weapon_cfg() -> Dict[str, Any]:
     return {
         "ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-        "WEAPON_RULES": [], "display_name": "Test Bolter",
+        "WEAPON_RULES": [], "code": "test_weapon", "display_name": "Test Bolter",
     }
 
 
@@ -169,7 +169,7 @@ def test_enemy_block_has_no_computed_features(engine):
 
     for mid in gs["squad_models"]["1"]:
         gs["models_cache"][mid]["RNG_WEAPONS"] = [
-            {"ATK": 2, "STR": 12, "AP": 3, "DMG": 6, "NB": 5, "RNG": 48, "WEAPON_RULES": []}
+            {"ATK": 2, "STR": 12, "AP": 3, "DMG": 6, "NB": 5, "RNG": 48, "WEAPON_RULES": [], "code": "test_heavy_weapon"}
         ]
         gs["models_cache"][mid]["selectedRngWeaponIndex"] = 0
     after = engine.obs_builder.build_squad_observation(gs, "1")["enemies_cont"].tolist()

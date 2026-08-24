@@ -37,7 +37,7 @@ def _seq(monkeypatch, rolls):
 def _game_state(weapon_rules, *, target_row):
     """Tireur '1' en (0,0), arme RNG 24 (demi-portee 12) DMG 1. Cible '2' HP 5, Sv 7 (aucune)."""
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-              "WEAPON_RULES": weapon_rules, "display_name": "Melta"}
+              "WEAPON_RULES": weapon_rules, "code": "test_melta", "display_name": "Melta"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
                 "col": 0, "row": 0, "RNG_WEAPONS": [weapon]}
     target = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 5, "HP_MAX": 5,

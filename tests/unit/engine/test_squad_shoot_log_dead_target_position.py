@@ -98,7 +98,7 @@ def _weapon_group() -> Dict[str, Any]:
         # Arme + profil de règles, gardés par référence par le vrai regroupement : l'émission en
         # tire les tokens de règles. Le Bolt Rifle du stub n'en déclare aucune, donc aucun token
         # — état parfaitement produit par le moteur. Les omettre ferait lever l'émission.
-        "weapon": {"display_name": "Bolt Rifle", "WEAPON_RULES": []},
+        "weapon": {"display_name": "Bolt Rifle", "WEAPON_RULES": [], "code": "test_bolt_rifle"},
         "attack_profile": WeaponAttackProfile(),
         "additive_rules_applied": {},
         "point_blank_malus": False,
@@ -172,7 +172,7 @@ def _live_shoot_state() -> Dict[str, Any]:
     """Tir résolu par le moteur (mode gym auto), pour vérifier ce que le journal reçoit
     RÉELLEMENT — le stub ci-dessus ne prouve que l'émission, pas la capture."""
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-              "WEAPON_RULES": [], "display_name": "Bolter"}
+              "WEAPON_RULES": [], "code": "test_bolter", "display_name": "Bolter"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
                 "col": ATK_ANCHOR[0], "row": ATK_ANCHOR[1], "RNG_WEAPONS": [weapon]}
     target = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 20, "HP_MAX": 20,

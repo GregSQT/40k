@@ -66,7 +66,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
         "SHOOT_LEFT": 1,
         "ATTACK_LEFT": 1,
         "RNG_WEAPONS": [
-            {"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "RNG": 24, "NB": 1, "WEAPON_RULES": []}
+            {"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "RNG": 24, "NB": 1, "WEAPON_RULES": [], "code": "test_weapon"}
         ],
         "CC_WEAPONS": [],
     }

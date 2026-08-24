@@ -41,7 +41,7 @@ def _base_config() -> Dict[str, Any]:
 
 def _unit(uid: int, player: int, col: int, row: int, has_ranged: bool = False) -> Dict[str, Any]:
     weapons = [{"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "RNG": 24, "NB": 1,
-                "WEAPON_RULES": [], "display_name": "Bolter"}] if has_ranged else []
+                "WEAPON_RULES": [], "code": "test_bolter", "display_name": "Bolter"}] if has_ranged else []
     return {**unit_invariants(),
         "id": uid,
         "player": player,

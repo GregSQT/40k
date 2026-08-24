@@ -56,7 +56,7 @@ def _kw(*names):
 def _game_state(weapon_rules, *, bs=4, dmg=1, moved_inches=0.0, shooter_hp=3, target_hp=9):
     """1 tireur (escouade '1', BS4, S4, arme sans portee courte) vs 1 cible T4 Sv2+."""
     weapon = {"ATK": bs, "STR": 4, "AP": 0, "DMG": dmg, "NB": 1, "RNG": 24,
-              "WEAPON_RULES": list(weapon_rules), "display_name": "Plasma"}
+              "WEAPON_RULES": list(weapon_rules), "code": "test_plasma", "display_name": "Plasma"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
                 "HP_CUR": shooter_hp, "HP_MAX": shooter_hp, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
                 "role": None, "unitType": "Shooter", "points_per_hp": 5.0, "VALUE": 10.0,

@@ -338,7 +338,7 @@ class TestConvertSquadActionShootingType:
             "S": 4,
             "AP": 0,
             "D": 1,
-            "WEAPON_RULES": ["ASSAULT"],
+            "WEAPON_RULES": ["ASSAULT"], "code": "test_bolt_pistol",
             "NAME": "Bolt Pistol",
         }
         attacker = {

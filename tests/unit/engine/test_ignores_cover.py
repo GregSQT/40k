@@ -20,7 +20,7 @@ def _minimal_shoot_game_state(weapon_rules):
     """game_state minimal pour exercer _manual_roll_intent end-to-end (1 tireur, 1 cible)."""
     weapon = {
         "ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
-        "WEAPON_RULES": weapon_rules, "display_name": "Test Gun",
+        "WEAPON_RULES": weapon_rules, "code": "test_gun", "display_name": "Test Gun",
     }
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "RNG_WEAPONS": [weapon]}
     target = {
@@ -60,7 +60,7 @@ def test_ignores_cover_bypasses_cover(monkeypatch):
     et le calcul de LoS n'est jamais atteint (court-circuit en tete)."""
     calls = []
     _force_cover_true(monkeypatch, calls)
-    weapon = {"WEAPON_RULES": ["IGNORES_COVER"], "display_name": "Ignore Gun"}
+    weapon = {"WEAPON_RULES": ["IGNORES_COVER"], "code": "test_ignore_gun", "display_name": "Ignore Gun"}
 
     bs, cover = _cover_worsened_bs({}, {"squad_id": "1"}, "2", 3, weapon)
 

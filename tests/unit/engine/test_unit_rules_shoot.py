@@ -46,7 +46,7 @@ def _seq(monkeypatch, rolls):
 def _game_state(unit_rules, weapon_rules=(), *, target_col=9, target_row=9, armor_save=3):
     """1 tireur BS4 / S4 (blessure 4+ vs T4) + 1 cible ; objectif en (5,5)."""
     weapon = {"ATK": 4, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
-              "WEAPON_RULES": list(weapon_rules), "display_name": "Gun"}
+              "WEAPON_RULES": list(weapon_rules), "code": "test_gun", "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "RNG_WEAPONS": [weapon]}
     # 14.02 : la presence sur objectif se juge PAR FIGURINE (models_cache + empreinte de socle),
     # pas sur l ancre d escouade. La figurine est posee sur l ancre : un seul jeu de coordonnees

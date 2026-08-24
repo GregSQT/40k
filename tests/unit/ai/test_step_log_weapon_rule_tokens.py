@@ -77,7 +77,7 @@ def _game_state(weapon_rules, *, moved_inches=0.0, target=TARGET, n_attacks=1,
     couvert — le motif d'échec n°1 du dépôt.
     """
     weapon = {"ATK": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 2, "RNG": WEAPON_RANGE,
-              "WEAPON_RULES": list(weapon_rules), "display_name": weapon_name}
+              "WEAPON_RULES": list(weapon_rules), "code": weapon_name, "display_name": weapon_name}
     attacker = {"id": "1#0", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
                 "ATTACK_LEFT": n_attacks,
                 "col": SHOOTER[0], "row": SHOOTER[1],
@@ -1273,7 +1273,7 @@ def test_anti_ecrit_le_seuil_declare_par_l_arme(monkeypatch, tmp_path):
     """
     from engine.phase_handlers.attack_sequence import build_weapon_attack_profile
 
-    weapon = {"WEAPON_RULES": ["ANTI_INFANTRY:7"], "display_name": WEAPON_NAME}
+    weapon = {"WEAPON_RULES": ["ANTI_INFANTRY:7"], "code": WEAPON_NAME, "display_name": WEAPON_NAME}
     profile = build_weapon_attack_profile(weapon, {"unit_keywords": ["INFANTRY"]})
     assert (profile.anti_threshold, profile.crit_wound_on) == (7, 6), (
         "prémisse : les deux seuils doivent DIVERGER, sinon le test ne discrimine rien"
@@ -1318,7 +1318,7 @@ def test_un_seuil_anti_sous_2_leve_a_l_entree_du_moteur():
     from engine.observation_weapon_profiles import anti_rule_of
     from engine.phase_handlers.attack_sequence import build_weapon_attack_profile
 
-    weapon = {"WEAPON_RULES": ["ANTI_INFANTRY:1"], "display_name": WEAPON_NAME}
+    weapon = {"WEAPON_RULES": ["ANTI_INFANTRY:1"], "code": WEAPON_NAME, "display_name": WEAPON_NAME}
 
     with pytest.raises(ValueError, match="minimum 2"):
         build_weapon_attack_profile(weapon, {"unit_keywords": ["INFANTRY"]})

@@ -83,7 +83,7 @@ class TestDevastatingWoundsSortOrder:
         SHOOTER = (50, 50)
         TARGET = (80, 50)
         weapon = {"ATK": 3, "STR": 4, "AP": -1, "DMG": 1, "NB": 2, "RNG": 120,
-                  "WEAPON_RULES": ["DEVASTATING_WOUNDS"], "display_name": "DW Gun"}
+                  "WEAPON_RULES": ["DEVASTATING_WOUNDS"], "code": "test_dw_gun", "display_name": "DW Gun"}
         attacker = {"id": "1#0", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
                     "col": SHOOTER[0], "row": SHOOTER[1], "RNG_WEAPONS": [weapon]}
         target_m = {"id": "101#0", "squad_id": "101", "player": 1, "T": 4,
@@ -173,7 +173,7 @@ class TestAdvanceBlocksWeaponKeyMissing:
         from engine.phase_handlers.shared_utils import _advance_blocks_weapon
 
         gs = self._gs_without_units_advanced()
-        weapon: Dict[str, Any] = {"WEAPON_RULES": [], "display_name": "Gun"}
+        weapon: Dict[str, Any] = {"WEAPON_RULES": [], "code": "test_gun", "display_name": "Gun"}
         result = _advance_blocks_weapon(gs, "1", weapon)
         assert result is False
 

@@ -33,7 +33,7 @@ def _neutralise(monkeypatch):
 
 def _shoot_state(weapon_rules, *, target_size):
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-              "WEAPON_RULES": list(weapon_rules), "display_name": "Launcher"}
+              "WEAPON_RULES": list(weapon_rules), "code": "test_launcher", "display_name": "Launcher"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "player": 0, "RNG_WEAPONS": [weapon]}
     gs = {
         # Etat de depart des capacites de faction, par le constructeur canonique du moteur
@@ -87,7 +87,7 @@ def test_sans_blast_pas_de_de_additionnel(monkeypatch):
 
 def _fight_state(weapon_rules, *, target_size, extra_intents=()):
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
-              "WEAPON_RULES": list(weapon_rules), "display_name": "Choppa"}
+              "WEAPON_RULES": list(weapon_rules), "code": "test_choppa", "display_name": "Choppa"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "CC_WEAPONS": [weapon]}
     target_model = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 2, "HP_MAX": 2,
                     "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt"}

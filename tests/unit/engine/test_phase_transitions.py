@@ -65,7 +65,7 @@ def _unit(uid: int, player: int, col: int, row: int, hp: int = 3) -> Dict[str, A
 
 def _rng_weapon(atk=3, str_=4, ap=0, dmg=1, rng=24) -> Dict[str, Any]:
     return {"ATK": atk, "STR": str_, "AP": ap, "DMG": dmg, "RNG": rng, "display_name": "Test Gun",
-            "NB": 1, "WEAPON_RULES": []}
+            "NB": 1, "WEAPON_RULES": [], "code": "test_rng_weapon"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

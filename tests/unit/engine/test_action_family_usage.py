@@ -98,7 +98,7 @@ def test_les_bornes_de_chaque_plage_sont_dans_la_bonne_famille():
 
 def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
     weapon = {"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "NB": 2, "RNG": 24,
-              "WEAPON_RULES": [], "display_name": "Test"}
+              "WEAPON_RULES": [], "code": "test_weapon", "display_name": "Test"}
     return {
         "id": uid, "player": player, "col": col, "row": row,
         "unitType": "TestUnit", "DISPLAY_NAME": f"Unit {uid}",

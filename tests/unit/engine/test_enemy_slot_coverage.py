@@ -40,7 +40,7 @@ from tests.unit.engine._config_helpers import build_engine_config
 
 def _weapon() -> Dict[str, Any]:
     return {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 60,
-            "WEAPON_RULES": [], "display_name": "Test Rifle"}
+            "WEAPON_RULES": [], "code": "test_rifle", "display_name": "Test Rifle"}
 
 
 def _unit_cfg(uid: int, player: int, positions: List[Tuple[int, int]], *, oc: int = 2) -> Dict[str, Any]:

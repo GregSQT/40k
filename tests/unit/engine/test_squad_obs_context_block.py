@@ -45,7 +45,7 @@ BIN_OBJ_PRESENCE = global_bin_index("objective_present_0")
 def _weapon_cfg() -> Dict[str, Any]:
     return {
         "ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-        "WEAPON_RULES": [], "display_name": "Test Bolter",
+        "WEAPON_RULES": [], "code": "test_weapon", "display_name": "Test Bolter",
     }
 
 

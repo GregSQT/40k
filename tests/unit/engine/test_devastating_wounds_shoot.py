@@ -37,7 +37,7 @@ def _seq(monkeypatch, rolls):
 
 def _game_state(weapon_rules, *, dmg=1, hp=2):
     """Tireur '1' (arme S4 DMG1) vs cible '2' (Sv 2+, T4, HP2). gym_training_mode -> auto."""
-    weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": dmg, "NB": 1, "WEAPON_RULES": weapon_rules, "display_name": "Gun"}
+    weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": dmg, "NB": 1, "WEAPON_RULES": weapon_rules, "code": "test_gun", "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
                 "col": 0, "row": 0, "RNG_WEAPONS": [weapon]}
     target = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": hp, "HP_MAX": hp, "ARMOR_SAVE": 2,

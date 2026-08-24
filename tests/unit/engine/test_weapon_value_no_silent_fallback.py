@@ -85,7 +85,7 @@ def _game_state(weapon):
 
 def _weapon(**overrides):
     w = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-         "WEAPON_RULES": [], "display_name": "Bolter"}
+         "WEAPON_RULES": [], "code": "test_bolter", "display_name": "Bolter"}
     w.update(overrides)
     return w
 
@@ -177,7 +177,7 @@ def test_resolve_intent_nb_resout_les_valeurs_valides(monkeypatch):
 
 
 def _ccw(name, nb, rules):
-    return {"display_name": name, "WEAPON_RULES": list(rules), "ATK": 3,
+    return {"display_name": name, "code": name, "WEAPON_RULES": list(rules), "ATK": 3,
             "STR": 4, "AP": 0, "DMG": 1, "NB": nb}
 
 

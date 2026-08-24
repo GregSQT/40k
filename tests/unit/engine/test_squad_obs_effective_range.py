@@ -29,14 +29,14 @@ CONT_EDGE_DIST = unit_cont_index("edge_distance")
 def _weapon(rng: int) -> Dict[str, Any]:
     return {
         "ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": rng,
-        "WEAPON_RULES": [], "display_name": f"Weapon RNG{rng}",
+        "WEAPON_RULES": [], "code": f"test_weapon_{rng}in", "display_name": f"Weapon RNG{rng}",
     }
 
 
 def _melee_weapon() -> Dict[str, Any]:
     return {
         "ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
-        "WEAPON_RULES": [], "display_name": "Melee",
+        "WEAPON_RULES": [], "code": "test_melee_weapon", "display_name": "Melee",
     }
 
 

@@ -30,7 +30,7 @@ def _weapon_cfg() -> Dict[str, Any]:
         "DMG": 1,
         "NB": 1,
         "RNG": 24,
-        "WEAPON_RULES": [],
+        "WEAPON_RULES": [], "code": "test_weapon",
         "display_name": "Test Bolter",
     }
 

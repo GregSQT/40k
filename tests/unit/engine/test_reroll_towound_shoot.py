@@ -50,7 +50,7 @@ def _game_state(unit_rules, target_col=9, target_row=9, model_col=None, model_ro
       - `model_col/row` + `base_size` : la FIGURINE (models_cache), qui decide.
     Par defaut la figurine est posee sur l ancre (cas courant, escouade a une figurine).
     """
-    weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "WEAPON_RULES": [], "display_name": "Gun"}
+    weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "WEAPON_RULES": [], "code": "test_gun", "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "RNG_WEAPONS": [weapon]}
     attacker_unit = {"id": "1", "UNIT_RULES": unit_rules}
     target_model = {

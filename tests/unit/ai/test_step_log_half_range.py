@@ -35,7 +35,7 @@ WEAPON_RNG = 120          # 24" × inches_to_subhex=5
 
 def _game_state(weapon_rules: list, *, target: tuple) -> Dict:
     weapon = {"ATK": 1, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": WEAPON_RNG,
-              "WEAPON_RULES": list(weapon_rules), "display_name": "Test Bolt Rifle"}
+              "WEAPON_RULES": list(weapon_rules), "code": "test_weapon", "display_name": "Test Bolt Rifle"}
     attacker = {"id": "1#0", "squad_id": "1", "player": 0, "T": 4, "SHOOT_LEFT": 1,
                 "ATTACK_LEFT": 1, "col": SHOOTER[0], "row": SHOOTER[1],
                 "RNG_WEAPONS": [weapon], "CC_WEAPONS": []}
