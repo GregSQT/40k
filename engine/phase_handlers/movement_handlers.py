@@ -1676,6 +1676,7 @@ def finalize_flee_marking(game_state: Dict[str, Any], squad_id: str, was_engaged
 _HEX_ROW_STEP = math.sqrt(3.0)
 
 
+@lru_cache(maxsize=8)
 def _hex_center_grids(board_cols: int, board_rows: int) -> Tuple["np.ndarray", "np.ndarray"]:
     """Centres euclidiens (repère ``_hex_center``) de toutes les cases.
 
@@ -1686,11 +1687,16 @@ def _hex_center_grids(board_cols: int, board_rows: int) -> Tuple["np.ndarray", "
     même tranche ``[c0:c1, r0:r1]``.
 
     Source UNIQUE du plongement case -> monde de ce module, qui en portait trois copies.
+    Mémoïsé : les deux tableaux pèsent 528 Ko pour 220×300 et ne dépendent que des dimensions
+    du plateau, qui ne changent jamais en cours de run. Les appelants lisent uniquement
+    (tranches en lecture seule) — aucune mutation possible.
     """
     cols = np.arange(board_cols, dtype=np.float64)[:, None]
     rows = np.arange(board_rows, dtype=np.float64)[None, :]
     grid_x = cols * 1.5 + 1.5 / 2.0
     grid_y = rows * _HEX_ROW_STEP + ((cols.astype(np.int64) & 1) * _HEX_ROW_STEP) / 2.0 + _HEX_ROW_STEP / 2.0
+    grid_x.flags.writeable = False
+    grid_y.flags.writeable = False
     return grid_x, grid_y
 
 
@@ -1800,27 +1806,68 @@ def _ez_offset_kernels(
         shape=mover_shape, base_size=mover_size, col=0, row=0, fp=None,
         orientation=mover_orient,
     ).bounding_radius()
-    reach = ez_norm + mover_radius + enemy_socle.bounding_radius()
+    enemy_radius = enemy_socle.bounding_radius()
+    reach = ez_norm + mover_radius + enemy_radius
     dcol_max = int(reach / 1.5) + 1
     drow_max = int(reach / _HEX_ROW_STEP) + 1
-    sure = np.zeros((2 * dcol_max + 1, 2 * drow_max + 1), dtype=bool)
-    tie = np.zeros_like(sure)
-    # `max_distance` desserré d'une unité : le contrat de `euclidean_edge_distance` ne promet
-    # l'exactitude que SOUS le seuil passé, et il faut ici lire la distance des deux côtés de
-    # `ez_norm` pour classer l'ambiguïté.
+
+    EPS = EZ_KERNEL_TIE_EPS_NORM
+    W = 2 * dcol_max + 1
+    H = 2 * drow_max + 1
+
+    # ── Distances centre-à-centre vectorisées ─────────────────────────────────────────────
+    # dx = dcol × 1,5  (abscisse hex, indépendant de la parité)
+    # dy = drow × √3  ±  (dcol & 1) × √3/2  selon parité de la colonne ennemie (cf. _hex_center).
+    #   colonne ennemie PAIRE  : ey = row×√3 + (mover_col & 1)×√3/2 + √3/2 − (0 + √3/2) → +
+    #   colonne ennemie IMPAIRE: ...−(1 × √3/2) → −
+    # Dérivé de _hex_center ; vérifié numériquement sur 6 paires corner/mid pour les deux parités.
+    sqrt3 = _HEX_ROW_STEP
+    dcol_int = np.arange(-dcol_max, dcol_max + 1, dtype=np.int64)   # (W,)
+    drow_f   = np.arange(-drow_max, drow_max + 1, dtype=np.float64) # (H,)
+    dx_1d = dcol_int.astype(np.float64) * 1.5                                   # (W,)
+    parity_sign = 1.0 if enemy_col_is_even else -1.0
+    parity_cor  = (dcol_int & 1).astype(np.float64) * parity_sign * (sqrt3 / 2.0)  # (W,)
+    # center_dist[i, j] = ‖(dx_1d[i], drow_f[j]×√3 + parity_cor[i])‖
+    dy_2d = drow_f[np.newaxis, :] * sqrt3 + parity_cor[:, np.newaxis]  # (W, H)
+    center_dist = np.hypot(dx_1d[:, np.newaxis], dy_2d)                 # (W, H)
+
+    # ── CHEMIN RAPIDE round↔round ─────────────────────────────────────────────────────────
+    # gap exact = centre-à-centre − r_mover − r_ennemi (identique à
+    # euclidean_edge_clearance_round_round) → aucune boucle Python.
+    if mover_shape == "round" and enemy_shape == "round":
+        from engine.hex_utils import round_base_radius_norm
+        r_m = round_base_radius_norm(mover_size)
+        r_e = round_base_radius_norm(enemy_size)
+        gap = center_dist - r_m - r_e
+        np.maximum(gap, 0.0, out=gap)
+        sure = gap <= ez_norm - EPS
+        tie  = (gap > ez_norm - EPS) & (gap <= ez_norm + EPS)
+        return sure, tie, dcol_max, drow_max
+
+    # ── CHEMIN NON ROND : élagage par disques circonscrits ───────────────────────────────
+    # Minorant sur le gap : lower = center_dist − r_mover_bound − r_ennemi_bound.
+    # Les cases du COIN du noyau rectangulaire (≈ 22 %) vérifient lower > ez_norm + EPS et
+    # peuvent être écartées sans appeler euclidean_edge_distance.
+    # `max_distance` desserré d'une unité : on doit lire le gap des deux côtés de ez_norm.
+    lower         = center_dist - mover_radius - enemy_radius  # (W, H)
+    candidate_mask = lower <= ez_norm + EPS                    # (W, H)
     exact_cap = ez_norm + 1.0
-    for i, dcol in enumerate(range(-dcol_max, dcol_max + 1)):
-        for j, drow in enumerate(range(-drow_max, drow_max + 1)):
-            mover_socle = Socle(
-                shape=mover_shape, base_size=mover_size,
-                col=origin_col + dcol, row=origin_row + drow, fp=None,
-                orientation=mover_orient,
-            )
-            gap = euclidean_edge_distance(mover_socle, enemy_socle, max_distance=exact_cap)
-            if gap <= ez_norm - EZ_KERNEL_TIE_EPS_NORM:
-                sure[i, j] = True
-            elif gap <= ez_norm + EZ_KERNEL_TIE_EPS_NORM:
-                tie[i, j] = True
+
+    sure = np.zeros((W, H), dtype=bool)
+    tie  = np.zeros((W, H), dtype=bool)
+    nz_i, nz_j = np.nonzero(candidate_mask)
+    for k in range(len(nz_i)):
+        i, j = int(nz_i[k]), int(nz_j[k])
+        mover_socle = Socle(
+            shape=mover_shape, base_size=mover_size,
+            col=origin_col + int(dcol_int[i]), row=origin_row + j - drow_max,
+            fp=None, orientation=mover_orient,
+        )
+        gap = euclidean_edge_distance(mover_socle, enemy_socle, max_distance=exact_cap)
+        if gap <= ez_norm - EPS:
+            sure[i, j] = True
+        elif gap <= ez_norm + EPS:
+            tie[i, j] = True
     return sure, tie, dcol_max, drow_max
 
 
