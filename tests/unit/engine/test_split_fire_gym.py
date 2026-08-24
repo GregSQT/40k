@@ -350,12 +350,7 @@ class TestSplitFireDecodeEmptyPool:
 
     def _decoder(self):
         from engine.action_decoder import ActionDecoder
-        import json
-        from pathlib import Path
-        rules = json.loads(
-            (Path(__file__).parents[3] / "config" / "game_config.json").read_text()
-        )["game_rules"]
-        return ActionDecoder({"game_rules": rules})
+        return ActionDecoder({"game_rules": _GAME_RULES})
 
     def _base_gs(self) -> Dict[str, Any]:
         units = [
@@ -521,8 +516,8 @@ def test_combi_weapon_open_slots_at_most_one_per_group():
     enemy_slots = get_enemy_slot_mapping(gs, 1)
     slots = shoot_weapon_sel_open_slots(gs, "1", enemy_slots)
 
-    assert len(slots) <= 1, (
-        f"{len(slots)} slots ouverts pour un groupe COMBI_WEAPON (attendu ≤ 1) : {slots}"
+    assert len(slots) == 1, (
+        f"{len(slots)} slots ouverts pour un groupe COMBI_WEAPON (attendu == 1) : {slots}"
     )
 
 
@@ -550,20 +545,7 @@ def test_combi_weapon_remaining_excludes_siblings():
     # slot 0 = frag sélectionné ; krak (slot 1, sœur COMBI) doit être absent de remaining
     remaining = shoot_weapon_remaining_eligible_slots(gs, "1", enemy_slots, except_slot=0)
 
-    combi_slots = [j for j in remaining if j != 0]
-    # krak partage le COMBI_WEAPON de frag → ne doit pas apparaître dans remaining
-    from engine.observation_weapon_profiles import collect_weapon_profiles
-    from engine.phase_handlers.shared_utils import require_key
-    models_cache = require_key(gs, "models_cache")
-    squad_models = require_key(gs, "squad_models")
-    alive = [models_cache[mid] for mid in squad_models.get("1", []) if mid in models_cache]
-    profiles = collect_weapon_profiles(alive, "RNG_WEAPONS")
-    frag_combi = profiles[0][0].get("COMBI_WEAPON") if profiles else None
-
-    sibling_in_remaining = [
-        j for j in combi_slots
-        if j < len(profiles) and profiles[j][0].get("COMBI_WEAPON") == frag_combi
-    ]
-    assert sibling_in_remaining == [], (
-        f"sœurs COMBI encore dans remaining : slots {sibling_in_remaining}, remaining={remaining}"
+    # krak (slot 1) partage le COMBI_WEAPON de frag → ne doit pas apparaître dans remaining
+    assert 1 not in remaining, (
+        f"krak (slot 1, sœur COMBI) encore dans remaining : {remaining}"
     )
