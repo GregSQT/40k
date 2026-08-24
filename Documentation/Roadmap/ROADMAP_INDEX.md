@@ -268,6 +268,13 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) | 🚫 |
 | bot | Tranches 2-3 benchmark — schedule P0→P10 + exploiters : code et tests livrés 2026-08-22 (`--etape`, `curriculum.json`, pool figé par-env, `ExploiterProbeCallback` sondage synchrone + `validate_exploiter_protocol` + `exploiter_config`, 24 tests verrou) ; restent les 14 runs (~260 h) | [bot.md#league](bot.md#league) | 🚫 |
 | training | ✅ fix-exploiter-probe-trous (2026-08-22) — 4 trous + 2 simplifications `ExploiterProbeCallback` dans `ai/training_callbacks.py` | — | 🚫 |
+| moteur+ai | ✅ fix fight weapon mask ordering (2026-08-24) — pending_cr/pending_fw vérifiés avant eligible_units dans get_squad_action_mask | — | ⚡ |
+| ai | ✅ fix _coherency_alive unit_by_id + fixture HP_MAX (2026-08-24) — _coherency_alive lit unit_by_id au lieu de squad_cache ; fixture HP_MAX alignée | — | ⚡ |
+| ai | ✅ fix spatial extractor sm_emb (2026-08-24) — zero absent sm_emb slots + purge model_dim mort dans ai/models | — | ⚡ |
+| infra | ✅ fix pyright/biome/tsc — 6 erreurs corrigées (2026-08-24) — 6 erreurs de types corrigées après migration | — | ⚡ |
+| training | ✅ fix profils count 7→6 (2026-08-24) — x1_selfplay supprimé, références 7 profils → 6 mises à jour | — | ⚡ |
+| front | ✅ fix code-review findings front (2026-08-24) — 4 findings : deadlock IA, replay crash, localStorage, chargeSuccess | — | ⚡ |
+| analyzer | ✅ collision ingress-ennemi détectée dans _handle_move (2026-08-24) — unité arrivée des réserves (action=ingress) au même hex qu'une unité en déplacement le même tour désormais reportée dans unit_position_collisions | — | ⚡ |
 
 ---
 
