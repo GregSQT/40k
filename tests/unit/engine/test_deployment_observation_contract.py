@@ -795,6 +795,10 @@ def test_squad_obs_size_target_matches_the_schema():
     en subhexes) ajouté à ``UNIT_CONT_FIELDS``. Contribution : 1 scalaire × 32 entités = +32.
     Impose un retrain `--new`.
 
+    `2026-08-24` — 16703 -> 16735. ``charged`` ajouté à ``UNIT_BIN_FIELDS`` (slot réservé
+    pour les stratagèmes réactifs §15.08/§15.11). Contribution : 1 bit × 32 entités = +32.
+    Impose un retrain `--new`.
+
     Ce verrou valait 20768 tant que le point 3 restait ouvert : les quatre autres points ne
     touchent QUE le contenu de l'observation de déploiement, jamais sa taille — donc aucun modèle
     n'était invalidé par eux. Le point 3 ajoute le bloc « candidats de déploiement »
@@ -805,7 +809,7 @@ def test_squad_obs_size_target_matches_the_schema():
         DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
     )
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 16703
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 16735
     assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 96, (
         "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
         "7 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"
