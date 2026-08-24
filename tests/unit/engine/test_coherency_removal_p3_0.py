@@ -61,6 +61,9 @@ def _gs(positions: List[tuple], squad_id: str = "1", player: int = 1) -> Dict[st
                 "orientation": 0, "occupied_hexes": set(), "occupied_hexes_by_model": {},
             }
         },
+        "unit_by_id": {
+            squad_id: {"id": squad_id, "HP_MAX": 1, "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7},
+        },
         "board_cols": 44,
         "board_rows": 60,
         "wall_hexes": set(),
@@ -327,6 +330,7 @@ def test_queue_multi_squad_arms_first():
         "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
         "occupied_hexes": set(), "occupied_hexes_by_model": {},
     }
+    gs["unit_by_id"]["2"] = {"id": "2", "HP_MAX": 1, "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7}
     gs["gym_training_mode"] = True  # sièges non-muets
     gs["current_player"] = 1
 
@@ -357,6 +361,7 @@ def test_arm_next_skips_already_coherent():
         "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
         "occupied_hexes": set(), "occupied_hexes_by_model": {},
     }
+    gs["unit_by_id"]["2"] = {"id": "2", "HP_MAX": 1, "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7}
     gs["gym_training_mode"] = True
 
     # Simule une queue avec "2" devant "1"
