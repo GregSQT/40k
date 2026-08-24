@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import pytest
+import types
+import unittest.mock
 from typing import Any, Dict, List, Optional, Tuple
 
 from engine.reward_calculator import RewardCalculator
@@ -313,12 +315,9 @@ def _fight_calculator() -> RewardCalculator:
         state_manager=None,
     )
 
-    class _FakeMapper:
-        def get_combat_priority_reward(self, *a: Any, **kw: Any) -> float:
-            return 0.0
-
+    _fake_mapper = types.SimpleNamespace(get_combat_priority_reward=lambda *a, **kw: 0.0)
     rc._get_system_penalties = lambda: _SYSTEM_PENALTIES  # type: ignore[method-assign]
-    rc._get_reward_mapper = lambda: _FakeMapper()  # type: ignore[method-assign]
+    rc._get_reward_mapper = lambda: _fake_mapper  # type: ignore[method-assign]
     rc._enrich_unit_for_reward_mapper = lambda u: u  # type: ignore[method-assign]
     rc._get_all_valid_targets = lambda u, gs: []  # type: ignore[method-assign]
     rc._calculate_objective_reward_per_turn = lambda gs, r: 0.0  # type: ignore[method-assign]
@@ -368,13 +367,7 @@ class TestCoherencyPenaltyNoActingUnit:
     """Sans unité contrôlée vivante, la pénalité est 0.0 et ne se recalcule pas au 2e appel."""
 
     def _make_rc(self) -> RewardCalculator:
-        rc = RewardCalculator(
-            config={"quiet": True, "controlled_player": 1},
-            rewards_config={},
-            unit_registry=None,
-            state_manager=None,
-        )
-        return rc
+        return _rc_desp()
 
     def _gs(self) -> Dict[str, Any]:
         # units_cache vide → _get_controlled_player_unit retourne None (pas d'unité contrôlée)
@@ -406,15 +399,8 @@ class TestCoherencyPenaltyNoActingUnit:
 
         # Après le 1er appel, once_claim doit avoir été posé même si acting_unit est None.
         # On instrument _get_controlled_player_unit pour vérifier qu'il n'est PAS rappelé.
-        call_count = 0
-        original_get_unit = rc._get_controlled_player_unit
-
-        def counting_get_unit(game_state: Any) -> None:
-            nonlocal call_count
-            call_count += 1
-            return original_get_unit(game_state)
-
-        rc._get_controlled_player_unit = counting_get_unit  # type: ignore[method-assign]
+        mock_get_unit = unittest.mock.MagicMock(side_effect=rc._get_controlled_player_unit)
+        rc._get_controlled_player_unit = mock_get_unit  # type: ignore[method-assign]
         penalty2 = rc._calculate_coherency_penalty_per_turn(gs, result)
         assert penalty2 == 0.0
-        assert call_count == 0  # once_claim court-circuite avant _get_controlled_player_unit
+        mock_get_unit.assert_not_called()  # once_claim court-circuite avant _get_controlled_player_unit
