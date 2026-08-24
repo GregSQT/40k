@@ -1388,16 +1388,20 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         import tempfile
         _fd, effective_model_path = tempfile.mkstemp(suffix=".zip")
         os.close(_fd)
-        model.save(effective_model_path)
-        if vec_normalize_enabled:
-            from ai.vec_normalize_utils import save_vec_normalize
+        try:
+            model.save(effective_model_path)
+            if vec_normalize_enabled:
+                from ai.vec_normalize_utils import save_vec_normalize
 
-            if not save_vec_normalize(model.get_env(), effective_model_path):
-                raise RuntimeError(
-                    "VecNormalize est active mais l'env du modele n'est pas enveloppe par "
-                    "VecNormalize : impossible de sauver les stats du snapshot d'evaluation. "
-                    "Evaluer sans stats normaliserait avec celles d'un AUTRE modele (V11 §0.35)."
-                )
+                if not save_vec_normalize(model.get_env(), effective_model_path):
+                    raise RuntimeError(
+                        "VecNormalize est active mais l'env du modele n'est pas enveloppe par "
+                        "VecNormalize : impossible de sauver les stats du snapshot d'evaluation. "
+                        "Evaluer sans stats normaliserait avec celles d'un AUTRE modele (V11 §0.35)."
+                    )
+        except:
+            os.remove(effective_model_path)
+            raise
         _temp_model_path = effective_model_path
 
     # ⚠️ V11 §0.35 — les stats de normalisation sont celles du modele EVALUE, jamais celles du
