@@ -253,6 +253,11 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | moteur | ✅ fix 3 bugs split-fire silencieux (2026-08-24) — F1/F2/F3 corrigés | — | ⚡ |
 | infra | ✅ fix pyright ai rules (2026-08-24) — corrections pyright + règles IA | — | ⚡ |
 | moteur | ✅ simplify split-fire shared_utils (2026-08-24) — _squad_rng_profiles + collect_weapon_profiles module-level + pkey_to_carriers dans build_squad_action_mask | — | ⚡ |
+| moteur | ✅ simplify objective_hex_zones + once_claim (2026-08-24) — objective_hex_zones dans charge_build_valid_plan ; once_claim retiré du branch mort | — | ⚡ |
+| moteur+training | ✅ simplify objective_hex_sets + _combat_result_key (2026-08-24) — objective_hex_sets + _combat_result_key dans reward_calculator | — | ⚡ |
+| moteur+training | ✅ fix P3-8 IndexError + split-fire reward + test timeout (2026-08-24) — IndexError split-fire gym, reward et timeout corrigés | — | ⚡ |
+| moteur | ✅ simplify charge placement (2026-08-24) — objective_hex_zones + occupied_hexes dans charge placement ; chemin mort round×round purge _ez_offset_kernels | — | ⚡ |
+| tests+moteur | ✅ fix pyright test files + once_claim avant acting_unit (2026-08-24) — 5 erreurs pyright tests corrigées ; once_claim posé avant check acting_unit dans _calculate_coherency_penalty_per_turn et _calculate_objective_reward_per_turn | — | ⚡ |
 
 ### Bloqués par une décision utilisateur
 

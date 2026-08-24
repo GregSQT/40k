@@ -935,6 +935,7 @@ class RewardCalculator:
         key = (current_turn, controlled_player)
         if once_claimed(game_state, "coherency_penalized_turns", key):
             return 0.0
+        once_claim(game_state, "coherency_penalized_turns", key)
         acting_unit = self._get_controlled_player_unit(game_state)
         if not acting_unit:
             return 0.0
@@ -949,7 +950,6 @@ class RewardCalculator:
             sc = require_key(squad_cache, str(sid))
             if not bool(require_key(sc, "is_coherent")):
                 incoherent_count += 1
-        once_claim(game_state, "coherency_penalized_turns", key)
         return -incoherent_w * incoherent_count
 
     def _calculate_objective_reward_per_turn(self, game_state: Dict[str, Any], result: Dict[str, Any]) -> float:
@@ -1002,6 +1002,7 @@ class RewardCalculator:
         reward_key = (current_turn, controlled_player)
         if once_claimed(game_state, "objective_rewarded_turns", reward_key):
             return 0.0
+        once_claim(game_state, "objective_rewarded_turns", reward_key)
 
         acting_unit = self._get_controlled_player_unit(game_state)
         if not acting_unit:
@@ -1044,8 +1045,6 @@ class RewardCalculator:
         total_reward = objective_reward_factor * primary_objective_points(
             scoring_cfg, controlled_objectives, opponent_objectives
         )
-
-        once_claim(game_state, "objective_rewarded_turns", reward_key)
 
         return total_reward
 

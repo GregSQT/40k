@@ -186,7 +186,7 @@ class TestSplitFireDecode:
         gs["units_shot"] = set()
         return gs
 
-    def _decoder(self) -> "ActionDecoder":
+    def _decoder(self):
         from engine.action_decoder import ActionDecoder
         return ActionDecoder({"game_rules": _GAME_RULES})
 
@@ -348,7 +348,7 @@ def test_shoot_weapon_sel_open_slots_returns_valid_indices():
 class TestSplitFireDecodeEmptyPool:
     """convert_squad_action avec pool vide (eligible_units=[]) en split-fire."""
 
-    def _decoder(self) -> "ActionDecoder":
+    def _decoder(self):
         from engine.action_decoder import ActionDecoder
         import json
         from pathlib import Path

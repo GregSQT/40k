@@ -409,7 +409,7 @@ class TestCoherencyPenaltyNoActingUnit:
         call_count = 0
         original_get_unit = rc._get_controlled_player_unit
 
-        def counting_get_unit(game_state: Any) -> None:
+        def counting_get_unit(game_state: Any) -> Dict[str, Any] | None:
             nonlocal call_count
             call_count += 1
             return original_get_unit(game_state)

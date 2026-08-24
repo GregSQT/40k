@@ -42,7 +42,7 @@ _SCRIPT = PROJECT_ROOT / "scripts" / "bot_zone_direct.py"
 class _ToyEnv(gym.Env):
     """Env jouet avec l'espace d'observation réel, pour construire la politique sans moteur."""
 
-    observation_space = squad_obs_space()
+    observation_space: gym.spaces.Dict = squad_obs_space()
     action_space = gym.spaces.Discrete(TOTAL_ACTION_SIZE)
 
     def reset(self, *, seed=None, options=None):
