@@ -189,7 +189,8 @@ def test_commit_charges_the_target_of_the_slot_played(melee_scenario_file):
     assert result["target_squad_id"] == expected_target
     # Le jet 2D6 (11.02 étape 2) est fait par le moteur, pas par l'agent : la charge peut
     # échouer. C'est un résultat légal — ce que le test verrouille est la CIBLE, pas l'issue.
-    assert result["action"] == "squad_charge"
+    # Charge réussie → waiting_for_agent_decision/charge_placement ; échouée → squad_charge.
+    assert result["action"] in ("squad_charge", "waiting_for_agent_decision")
     assert "charge_succeeded" in result
 
 
