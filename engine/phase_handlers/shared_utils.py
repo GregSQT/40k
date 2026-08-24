@@ -8500,7 +8500,10 @@ def purge_combi_siblings_from_remaining(
     ]
     profiles = collect_weapon_profiles(alive_models, "RNG_WEAPONS")
     if not (0 <= selected_slot < len(profiles)):
-        return
+        raise IndexError(
+            f"purge_combi_siblings_from_remaining: selected_slot={selected_slot} hors range"
+            f" (profiles len={len(profiles)}) pour squad {squad_id!r}"
+        )
     sel_wp = profiles[selected_slot][0]
     sel_combi = sel_wp.get("COMBI_WEAPON") if isinstance(sel_wp, dict) else None
     if sel_combi is None:
