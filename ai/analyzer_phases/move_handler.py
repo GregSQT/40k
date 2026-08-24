@@ -649,30 +649,47 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         if require_key(state.unit_hp, move_unit_id) > 0:
             _position_cache_set(state.unit_positions, move_unit_id, dest_col, dest_row)
 
-        # Enemy units sharing an anchor hex is expected when both are in engagement range —
-        # the anchor is the squad centroid, not a per-model footprint.
+        # Deux ennemis qui se déplacent vers le même hexe par un move ordinaire = chevauchement
+        # d'ancre attendu en engagement (les socles réels sont distincts). En revanche, un ennemi
+        # qui ARRIVE des réserves (ingress, action='ingress') sur un hexe qu'une autre unité vient
+        # occuper la même activation est une vraie collision : l'arrivée depuis (-1,-1) ne crée
+        # aucune zone d'engagement préalable. Le test `action == 'ingress'` dans `has_ingress_to_dest`
+        # distingue les deux cas sans supprimer le filtre ennemi global.
         mover_player = state.unit_player.get(move_unit_id)
         real_colliding_units = []
         for uid, pos_before in colliding_units_before.items():
             uid_player = state.unit_player.get(uid)
-            if uid_player is not None and mover_player is not None and uid_player != mover_player:
-                continue
+            is_enemy = (uid_player is not None and mover_player is not None
+                        and uid_player != mover_player)
             if (uid in state.unit_positions and
                     state.unit_positions[uid] == (dest_col, dest_row) and
                     state.unit_positions[uid] == pos_before and
                     uid in state.unit_hp and
                     require_key(state.unit_hp, uid) > 0):
                 if uid in state.unit_movement_history:
-                    has_moved_to_dest = any(
-                        move['position'] == (dest_col, dest_row)
-                        and move.get('turn') == turn
-                        and move.get('episode') is not None
-                        and move.get('episode') == state.current_episode_num
-                        and state.current_episode_num > 0
-                        for move in state.unit_movement_history[uid]
-                    )
-                    if has_moved_to_dest:
-                        real_colliding_units.append(uid)
+                    if is_enemy:
+                        has_ingress_to_dest = any(
+                            move['position'] == (dest_col, dest_row)
+                            and move.get('turn') == turn
+                            and move.get('episode') is not None
+                            and move.get('episode') == state.current_episode_num
+                            and state.current_episode_num > 0
+                            and move.get('action') == 'ingress'
+                            for move in state.unit_movement_history[uid]
+                        )
+                        if has_ingress_to_dest:
+                            real_colliding_units.append(uid)
+                    else:
+                        has_moved_to_dest = any(
+                            move['position'] == (dest_col, dest_row)
+                            and move.get('turn') == turn
+                            and move.get('episode') is not None
+                            and move.get('episode') == state.current_episode_num
+                            and state.current_episode_num > 0
+                            for move in state.unit_movement_history[uid]
+                        )
+                        if has_moved_to_dest:
+                            real_colliding_units.append(uid)
         if real_colliding_units:
             stats['unit_position_collisions'].append({
                 'episode': state.current_episode_num,
