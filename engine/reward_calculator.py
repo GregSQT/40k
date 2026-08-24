@@ -935,6 +935,8 @@ class RewardCalculator:
         key = (current_turn, controlled_player)
         if once_claimed(game_state, "coherency_penalized_turns", key):
             return 0.0
+        # _get_controlled_player_unit précède once_claim : si elle lève, la claim
+        # n'est pas posée et le reward ne sera pas étouffé silencieusement au prochain appel.
         acting_unit = self._get_controlled_player_unit(game_state)
         once_claim(game_state, "coherency_penalized_turns", key)
         if not acting_unit:
@@ -1003,6 +1005,7 @@ class RewardCalculator:
         if once_claimed(game_state, "objective_rewarded_turns", reward_key):
             return 0.0
 
+        # Même invariant : _get_controlled_player_unit avant once_claim.
         acting_unit = self._get_controlled_player_unit(game_state)
         once_claim(game_state, "objective_rewarded_turns", reward_key)
         if not acting_unit:
