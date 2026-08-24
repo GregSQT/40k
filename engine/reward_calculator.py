@@ -933,7 +933,6 @@ class RewardCalculator:
             return 0.0
         acting_unit = self._get_controlled_player_unit(game_state)
         if not acting_unit:
-            once_claim(game_state, "coherency_penalized_turns", key)
             return 0.0
         shaping = require_key(self._get_unit_reward_config(acting_unit), "squad_shaping")
         incoherent_w = float(require_key(shaping, "incoherent_weight"))
