@@ -46,11 +46,7 @@ def test_get_action_mask_breaks_when_phase_not_complete():
 
 
 def test_get_action_mask_continues_when_phase_complete():
-    """fight_phase_end retourne phase_complete=True → la boucle met à jour game_state["phase"].
-
-    La vraie fight_phase_end ne set jamais game_state["phase"] directement — c'est get_action_mask
-    qui le fait via next_phase du dict retourné. Ce test vérifie ce chemin réel.
-    """
+    """fight_phase_end retourne phase_complete=True → get_action_mask écrit next_phase dans game_state["phase"]."""
     eng = _make_engine_in_fight_phase(mask_value=False)
 
     call_count = 0
