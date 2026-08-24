@@ -78,6 +78,15 @@ def _gs(positions, squad_id="1", player=1):
         # destroy_model émet un event "dead" via append_action_log → action_log_seq requis.
         "action_logs": [],
         "action_log_seq": 0,
+        # _coherency_alive lit HP_MAX/T/ARMOR_SAVE/INVUL_SAVE via get_unit_by_id (unit_by_id).
+        # HP_MAX=2 correspond à celui des modèles dans models_cache : squad_defence=(2,4,3,7)
+        # fait passer les figurines de base par le branch `1` de _squad_models_for_observation.
+        "unit_by_id": {
+            squad_id: {
+                "id": squad_id, "player": player,
+                "HP_MAX": 2, "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
+            }
+        },
     }
 
 
