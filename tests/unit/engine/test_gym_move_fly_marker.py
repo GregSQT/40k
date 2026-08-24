@@ -157,9 +157,6 @@ def _charge_engine(keywords: List[Dict[str, str]]) -> W40KEngine:
     # que 21.03 fait payer au vol.
     eng.game_state["unit_by_id"]["2"]["col"] = 26
     eng.game_state["unit_by_id"]["2"]["row"] = 20
-    for m in eng.game_state["models_cache"].values():
-        if str(m["squad_id"]) == "2":
-            m["col"], m["row"] = 26, 20
     from engine.phase_handlers.shared_utils import build_units_cache
     build_units_cache(eng.game_state)
     eng.game_state["phase"] = "charge"
@@ -189,3 +186,39 @@ def test_gym_charge_carries_the_fly_flag(keywords: List[Dict[str, str]], expecte
     charges = [e for e in eng.game_state["action_logs"][before:] if e.get("type") == "charge"]
     assert len(charges) == 1, charges
     assert charges[0]["is_fly_move"] is expected, charges[0]
+
+
+def test_gym_charge_log_reaches_the_step_log_formatter_with_the_marker() -> None:
+    """Chaine complete pour la CHARGE : action_log -> `_build_step_log_details` -> `[FLY]` dans la ligne.
+
+    Jumeau de `test_gym_move_log_reaches_the_step_log_formatter_with_the_marker`. Verrouille que
+    `_build_step_log_details` propage `is_fly_move` pour le type 'charge' ET que la branche
+    charge du formateur l'inclut dans la sortie. Sans ce test, une regression sur l'un ou l'autre
+    maillon laisserait passer `test_gym_charge_carries_the_fly_flag` (qui ne couvre que
+    l'action_log) tout en supprimant `[FLY]` de step.log.
+    """
+    from ai.step_logger import StepLogger
+
+    eng = _charge_engine([{"keywordId": "FLY"}])
+    _declare_flight(eng)
+    before = len(eng.game_state.get("action_logs", []))
+    with patch("engine.phase_handlers.shared_utils.roll_charge_distance", return_value=12):
+        ok1, result1 = eng._process_squad_action(
+            {"action": "squad_charge", "squad_id": "1", "target_slot": 0}
+        )
+    assert ok1 and result1.get("decision_type") == "charge_placement", result1
+    ok2, result2 = eng._process_squad_action({"action": "agent_decision", "option_index": 0})
+    assert ok2 and result2["charge_succeeded"] is True, result2
+
+    charges = [e for e in eng.game_state["action_logs"][before:] if e.get("type") == "charge"]
+    assert len(charges) == 1, charges
+    entry = charges[0]
+    assert entry["is_fly_move"] is True
+
+    details = eng._build_step_log_details(entry, entry["turn"])
+    assert details["is_fly_move"] is True
+
+    formatter = StepLogger.__new__(StepLogger)
+    formatter.debug_mode = False
+    message = formatter._format_replay_style_message(entry["unitId"], "charge", details)
+    assert "CHARGED [FLY]" in message, message
