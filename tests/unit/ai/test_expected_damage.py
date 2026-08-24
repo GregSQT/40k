@@ -151,16 +151,14 @@ def test_can_kill_uses_probabilistic_damage(monkeypatch: pytest.MonkeyPatch) -> 
         "selectedCcWeaponIndex": 0,
     }
 
-    hp_store = [2]
-    monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: hp_store[0])
+    def can_kill() -> bool:
+        return mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={})
 
-    result = mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={})
-    assert result is False  # expected_damage ≈ 1.94 < 2
+    hp = 2
+    monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: hp)
 
-    hp_store[0] = 1
-    result = mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={})
-    assert result is True  # 1 ≤ 1.94
-
-    hp_store[0] = expected_damage(weapon, target)  # frontière exacte (virgule flottante réelle)
-    result = mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={})
-    assert result is True  # max_damage ≤ max_damage (sémantique ≤, pas <)
+    assert can_kill() is False  # expected_damage ≈ 1.94 < 2
+    hp = 1
+    assert can_kill() is True   # 1 ≤ 1.94
+    hp = expected_damage(weapon, target)  # frontière exacte (virgule flottante réelle)
+    assert can_kill() is True   # max_damage ≤ max_damage (sémantique ≤, pas <)
