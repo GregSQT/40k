@@ -100,6 +100,13 @@ def test_explicit_scenario_played_as_is():
             f"({saved_obs_space} != {masked_env.observation_space}) — retrain V11 en attente"
         )
 
+    saved_action_space = saved_data["action_space"]
+    if saved_action_space != masked_env.action_space:
+        pytest.skip(
+            f"politique sur disque incompatible avec l'action_space courant "
+            f"({saved_action_space} != {masked_env.action_space}) — retrain en attente"
+        )
+
     model = MaskablePPO.load(model_path, env=masked_env)
 
     results = evaluate_against_bots(
