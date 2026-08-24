@@ -8455,10 +8455,19 @@ def shoot_weapon_remaining_eligible_slots(
         if mid in models_cache
     ]
     profiles = collect_weapon_profiles(alive_models, "RNG_WEAPONS")
+    # COMBI_WEAPON du slot exclu : ses armes-sœurs partagent l'arme physique → exclues aussi.
+    _except_combi: Optional[str] = None
+    if 0 <= except_slot < len(profiles):
+        _ewp = profiles[except_slot][0]
+        _except_combi = (_ewp.get("COMBI_WEAPON") if isinstance(_ewp, dict) else None)
     result: Dict[int, str] = {}
     for slot_j, (weapon, _) in enumerate(profiles[:_K]):
         if slot_j == except_slot:
             continue
+        if _except_combi is not None:
+            _combi_j = weapon.get("COMBI_WEAPON") if isinstance(weapon, dict) else None
+            if _combi_j == _except_combi:
+                continue
         code = require_key(weapon, "code")
         if any(
             squad_shoot_weapon_qty_max(game_state, squad_id, code, str(tsid)) > 0
@@ -8467,6 +8476,42 @@ def shoot_weapon_remaining_eligible_slots(
         ):
             result[slot_j] = code
     return result
+
+
+def purge_combi_siblings_from_remaining(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    selected_slot: int,
+    remaining: Dict[int, str],
+) -> None:
+    """Retire de `remaining` tous les slots partageant le COMBI_WEAPON du slot sélectionné.
+
+    Appelé chaque fois qu'un slot est retiré de remaining_weapon_slots (appels 2+ à
+    squad_shoot_weapon_sel), pour garantir qu'un seul profil par arme physique est déclarable.
+    Mute `remaining` en place.
+    """
+    from engine.observation_weapon_profiles import collect_weapon_profiles
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive_models = [
+        models_cache[mid]
+        for mid in squad_models.get(squad_id, [])  # get allowed
+        if mid in models_cache
+    ]
+    profiles = collect_weapon_profiles(alive_models, "RNG_WEAPONS")
+    if not (0 <= selected_slot < len(profiles)):
+        return
+    sel_wp = profiles[selected_slot][0]
+    sel_combi = sel_wp.get("COMBI_WEAPON") if isinstance(sel_wp, dict) else None
+    if sel_combi is None:
+        return
+    to_purge = [
+        slot_j for slot_j, (wpn, _) in enumerate(profiles)
+        if slot_j in remaining
+        and (wpn.get("COMBI_WEAPON") if isinstance(wpn, dict) else None) == sel_combi
+    ]
+    for slot_j in to_purge:
+        del remaining[slot_j]
 
 
 def squad_shoot_weapons_for_target(
@@ -13036,8 +13081,12 @@ def shoot_weapon_sel_open_slots(
             units_cache, units_cache[esid], squad_id, our_player, ez, game_state
         )
     ]
+    opened_combi: set = set()
     open_indices: List[int] = []
     for slot_j, (wpn, _) in enumerate(profiles[:SQUAD_ACTION_SHOOT_WEAPON_SEL_SLOT_COUNT]):
+        combi = wpn.get("COMBI_WEAPON") if isinstance(wpn, dict) else None
+        if combi is not None and combi in opened_combi:
+            continue
         pkey = profile_identity(wpn)
         if any(
             _model_can_shoot_target_with_weapon(game_state, m, esid, widx)
@@ -13047,6 +13096,8 @@ def shoot_weapon_sel_open_slots(
             for esid in elig_targets
         ):
             open_indices.append(SHOOT_WEAPON_SEL_SLOT_BASE + slot_j)
+            if combi is not None:
+                opened_combi.add(combi)
     return open_indices
 
 

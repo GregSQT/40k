@@ -419,3 +419,62 @@ class TestSplitFireDecodeEmptyPool:
         assert result["action"] == "squad_shoot_split_target"
         assert result["squad_id"] == "1"
         assert result["target_slot"] == 0
+
+
+# ─── Régression COMBI_WEAPON : purge des armes-sœurs du remaining ─────────────
+
+def test_purge_combi_siblings_removes_sister_from_remaining():
+    """purge_combi_siblings_from_remaining retire smite_focused du remaining si smite est sélectionné.
+
+    Régression : lorsque bolt_rifle était sélectionné en premier (aucun COMBI_WEAPON),
+    smite_witchfire et smite_focused_witchfire se retrouvaient tous deux dans remaining.
+    Sélectionner ensuite smite_witchfire ne retirait pas smite_focused_witchfire (sa sœur
+    COMBI_WEAPON="smite"), menant à une rupture masque/commit dans le commit final.
+    """
+    from engine.phase_handlers.shared_utils import (
+        purge_combi_siblings_from_remaining,
+        shoot_weapon_remaining_eligible_slots,
+        squad_shooting_unit_activation_start,
+        squad_shooting_type_choose,
+        get_enemy_slot_mapping,
+        SHOOTING_TYPE_NORMAL,
+    )
+    from engine.weapons import get_weapons
+
+    smite_w = get_weapons("SpaceMarine", ["smite_witchfire"])[0]
+    smite_f = get_weapons("SpaceMarine", ["smite_focused_witchfire"])[0]
+    assert smite_w.get("COMBI_WEAPON") == "smite", "pré-condition : smite_witchfire doit avoir COMBI_WEAPON='smite'"
+    assert smite_f.get("COMBI_WEAPON") == "smite", "pré-condition : smite_focused_witchfire doit avoir COMBI_WEAPON='smite'"
+
+    # Unité avec bolt_rifle (slot 0) + smite_witchfire (slot 1) + smite_focused (slot 2)
+    bolt = get_weapons("SpaceMarine", ["bolt_rifle"])[0]
+    m = _m(5, 5, [bolt, smite_w, smite_f])
+    atk = _unit(1, 1, 5, 5, [m])
+    atk["RNG_WEAPONS"] = [bolt, smite_w, smite_f]
+    enemy = _unit(2, 2, 5, 10, [_m(5, 10, [STORM])])
+    enemy["RNG_WEAPONS"] = [STORM]
+    gs = _make_gs([atk, enemy])
+    gs["shoot_activation_pool"] = ["1"]
+    gs["units_shot"] = set()
+    squad_shooting_unit_activation_start(gs, "1")
+    squad_shooting_type_choose(gs, "1", SHOOTING_TYPE_NORMAL)
+
+    enemy_slots = get_enemy_slot_mapping(gs, 1)
+    # remaining initial avec bolt_rifle exclu (slot 0, no COMBI_WEAPON)
+    remaining = shoot_weapon_remaining_eligible_slots(gs, "1", enemy_slots, except_slot=0)
+    # Les deux smite doivent être présents (bolt_rifle a no COMBI → pas de filtrage par _except_combi)
+    smite_slots = [j for j, code in remaining.items() if "smite" in code]
+    assert len(smite_slots) == 2, (
+        f"pré-condition : les deux smite slots doivent être dans remaining, reçu {remaining}"
+    )
+
+    # Simuler la sélection de smite_witchfire (le plus petit slot smite)
+    smite_witchfire_slot = min(smite_slots)
+    del remaining[smite_witchfire_slot]
+    purge_combi_siblings_from_remaining(gs, "1", smite_witchfire_slot, remaining)
+
+    # smite_focused_witchfire (sœur COMBI) doit avoir été purgée
+    remaining_smite = [j for j, code in remaining.items() if "smite" in code]
+    assert remaining_smite == [], (
+        f"smite_focused_witchfire doit avoir été purgée de remaining, reste {remaining}"
+    )

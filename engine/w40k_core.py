@@ -7702,6 +7702,7 @@ class W40KEngine(gym.Env):
                 get_enemy_slot_mapping,
                 shoot_weapon_eligible_target_slots,
                 shoot_weapon_remaining_eligible_slots,
+                purge_combi_siblings_from_remaining,
                 clear_pending_shoot_intent,
             )
 
@@ -7738,13 +7739,17 @@ class W40KEngine(gym.Env):
                     "eligible_target_slots": [],
                 }
             else:
-                # Appel suivant : retirer le slot joué du remaining.
+                # Appel suivant : retirer le slot joué du remaining ainsi que ses sœurs COMBI.
                 if weapon_slot not in _pending_sw["remaining_weapon_slots"]:
                     raise ValueError(
                         f"squad_shoot_weapon_sel: slot {weapon_slot} absent du remaining "
                         f"{sorted(_pending_sw['remaining_weapon_slots'])} — rupture masque/commit"
                     )
                 del _pending_sw["remaining_weapon_slots"][weapon_slot]
+                purge_combi_siblings_from_remaining(
+                    self.game_state, sw_squad_id,
+                    weapon_slot, _pending_sw["remaining_weapon_slots"]
+                )
 
             _sel_code, _elig_ts = shoot_weapon_eligible_target_slots(
                 self.game_state, sw_squad_id, weapon_slot, _enemy_slots_sw
@@ -7823,6 +7828,10 @@ class W40KEngine(gym.Env):
             # Toutes les armes assignées → résolution.
             del self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY]
             try:
+                # Pré-valider toutes les armes sur l'état initial (avant toute déclaration)
+                # pour éviter qu'une déclaration précédente consomme le groupe d'arme
+                # d'une arme suivante (ex. bolt_pistol consomme le slot du même modèle).
+                _precheck: List[Tuple[str, str, int]] = []
                 for _wcode2, _tgt2 in _pending_sw2["assignments"].items():
                     _maxq = squad_shoot_weapon_qty_max(
                         self.game_state, sw2_squad_id, _wcode2, _tgt2
@@ -7832,6 +7841,8 @@ class W40KEngine(gym.Env):
                             f"squad_shoot_split_target: qty_max==0 pour arme {_wcode2!r}"
                             f" → cible {_tgt2!r} — rupture masque/commit ({sw2_squad_id!r})"
                         )
+                    _precheck.append((_wcode2, _tgt2, _maxq))
+                for _wcode2, _tgt2, _maxq in _precheck:
                     squad_declare_shoot_weapon_qty(
                         self.game_state, sw2_squad_id, _wcode2, _maxq, _tgt2
                     )
