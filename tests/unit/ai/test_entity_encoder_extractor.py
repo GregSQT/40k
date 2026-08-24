@@ -403,6 +403,41 @@ def test_self_model_mask_is_the_present_bit_not_the_row(extractor):
     )
 
 
+def test_absent_self_model_slots_are_zero_in_features(extractor):
+    """Les slots sm absents doivent sortir zéro dans le vecteur de features (P3-0).
+
+    `_encode_masked` multiplie par le masque APRÈS encodage. Sans cette multiplication,
+    `encoder(zeros) = ReLU(bias) ≠ 0` : les slots absents portent un biais constant non
+    nul, indistinguable d'une vraie figurine pour `coherency_query_net`.
+    """
+    from engine.observation_entities import self_model_bin_index
+
+    present_idx = self_model_bin_index("present")
+    space = _space()
+    extractor.eval()
+
+    obs = _zero_batch(space, batch=1)
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
+    # Une seule figurine présente ; tous les autres slots sm restent absents (present=0).
+    obs["self_models_bin"][:, 0, present_idx] = 1.0
+
+    with torch.no_grad():
+        feats = extractor(obs)
+
+    sm_slice = extractor.self_model_embeddings_slice()
+    entity_dim = extractor.entity_dim
+    n_sm = extractor.n_self_models
+
+    sm_feats = feats[:, sm_slice].reshape(1, n_sm, entity_dim)
+    # Slot 0 est présent → peut être non nul.
+    # Slots 1..n_sm-1 sont absents → doivent être exactement zéro.
+    absent = sm_feats[:, 1:, :]
+    assert torch.all(absent == 0.0), (
+        "des slots sm absents ont une embedding non nulle : `encoder(zeros)` n'est pas "
+        "multiplié par le masque — les biais de l'encodeur fuient dans `coherency_query_net`"
+    )
+
+
 def test_running_norm_statistics_are_shared_across_slots():
     """Une seule statistique par feature, estimée sur TOUS les slots — pas une par slot."""
     norm = EntityRunningNorm(2)

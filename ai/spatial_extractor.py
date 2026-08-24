@@ -279,8 +279,8 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
 
     `cnn_features` : dimension de la sortie CNN. OBLIGATOIRE, sans défaut — la valeur vient de
     la config JSON de l'agent (`model_params.policy_kwargs.features_extractor_kwargs`).
-    `entity_dim` / `weapon_dim` / `type_dim` / `model_dim` / `map_channels` : largeurs des
-    encodeurs partagés et de la branche carte.
+    `entity_dim` / `weapon_dim` / `type_dim` / `map_channels` : largeurs des encodeurs partagés
+    et de la branche carte.
     """
 
     # Cf. `EntityRunningNorm` : un buffer se déclare aussi côté types, sinon il est vu comme
@@ -294,7 +294,6 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         entity_dim: int = 64,
         weapon_dim: int = 32,
         type_dim: int = 16,
-        model_dim: int = 16,
         map_channels: int = 16,
         cnn_stem_channels: int = 32,
         cnn_inner_channels: int = 64,
@@ -702,7 +701,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         sm_mask = sm_bin[..., _SELF_MODEL_PRESENT_IDX]
         sm_in = torch.cat([self.self_model_norm(sm_cont, sm_mask), sm_bin], dim=-1)
         # sm_emb conservé par slot (P3-0 : `coherency_query_net`) ; sm_agg = contexte pour le tronc.
-        sm_emb = self.self_model_encoder(sm_in)
+        sm_emb = _encode_masked(self.self_model_encoder, sm_mask, sm_in)
         sm_agg = _masked_mean_max(sm_emb, sm_mask)
 
         # Candidats de décision : masque LU sur le bit `present` (dernier champ du registre),
