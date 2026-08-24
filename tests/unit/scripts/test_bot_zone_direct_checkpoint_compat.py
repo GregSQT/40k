@@ -17,7 +17,6 @@ absence est un problème pour `bot_zone_direct.py` lui-même, pas pour ce test.
 from __future__ import annotations
 
 import io
-import json
 import pickle
 import zipfile
 from pathlib import Path
@@ -89,7 +88,10 @@ def _checkpoint_data(reference_zip):
         try:
             data = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=False)
         except pickle.UnpicklingError:
-            data = json_to_data(raw.decode())
+            try:
+                data = json_to_data(raw.decode())
+            except (UnicodeDecodeError, ValueError) as exc:
+                raise ValueError(f"Entrée 'data' de format inattendu : {exc}") from exc
         if not isinstance(data, dict):
             raise ValueError(f"Entrée 'data' de format inattendu : {type(data)}")
         policy_kwargs = data.get("policy_kwargs", {})
