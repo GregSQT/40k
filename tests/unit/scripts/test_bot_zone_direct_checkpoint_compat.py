@@ -22,6 +22,7 @@ from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
+from typing import cast
 import pytest
 import torch
 from sb3_contrib import MaskablePPO
@@ -39,14 +40,14 @@ _SCRIPT = PROJECT_ROOT / "scripts" / "bot_zone_direct.py"
 class _ToyEnv(gym.Env):
     """Env jouet avec l'espace d'observation réel, pour construire la politique sans moteur."""
 
-    observation_space: gym.spaces.Dict = squad_obs_space()
+    observation_space = squad_obs_space()
     action_space = gym.spaces.Discrete(TOTAL_ACTION_SIZE)
 
     def reset(self, *, seed=None, options=None):
-        return {k: np.zeros(v.shape, dtype=np.float32) for k, v in self.observation_space.spaces.items()}, {}
+        return {k: np.zeros(cast(tuple[int, ...], v.shape), dtype=np.float32) for k, v in self.observation_space.spaces.items()}, {}
 
     def step(self, action):
-        obs = {k: np.zeros(v.shape, dtype=np.float32) for k, v in self.observation_space.spaces.items()}
+        obs = {k: np.zeros(cast(tuple[int, ...], v.shape), dtype=np.float32) for k, v in self.observation_space.spaces.items()}
         return obs, 0.0, False, False, {}
 
     def action_masks(self):
