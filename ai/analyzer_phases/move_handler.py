@@ -247,8 +247,6 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
     dest_col = int(fled_match.group(6))
     dest_row = int(fled_match.group(7))
 
-    state.units_moved.add(move_unit_id)
-    state.units_fled.add(move_unit_id)
     _track_action_phase_accuracy(stats, "fled", phase, state.current_episode_num, line)
     if stats['first_error_lines']['fled_action'][player] is None:
         stats['first_error_lines']['fled_action'][player] = {
@@ -279,6 +277,11 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
         })
         return True  # equivalent to continue
 
+    # Mutation différée après le guard : une unité absente de unit_hp ne doit pas être
+    # enregistrée comme déplacée (sa position stale resterait dans units_moved et
+    # contaminerait positions_at_movement comme bloqueur BFS fantôme).
+    state.units_moved.add(move_unit_id)
+    state.units_fled.add(move_unit_id)
     unit_hp_value = require_key(state.unit_hp, move_unit_id)
     _debug_log(f"[FLED DEBUG] BEFORE update: unit_hp[{move_unit_id}] = {unit_hp_value}")
     if unit_hp_value > 0:
@@ -289,70 +292,71 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
         old_position = state.unit_positions.get(move_unit_id)
         _position_cache_set(state.unit_positions, move_unit_id, dest_col, dest_row)
         _debug_log(f"[FLED DEBUG] AFTER update: unit_positions[{move_unit_id}] = {state.unit_positions[move_unit_id]} (was {old_position})")
-    else:
-        _debug_log(f"[FLED DEBUG] SKIPPED update: unit_hp[{move_unit_id}] = {unit_hp_value} (<= 0)")
 
-    if move_unit_id not in state.unit_movement_history:
-        state.unit_movement_history[move_unit_id] = []
-    timestamp_match = re.search(r'\[(\d+:\d+:\d+)\]', line)
-    timestamp = timestamp_match.group(1) if timestamp_match else None
-    state.unit_movement_history[move_unit_id].append({
-        'position': (dest_col, dest_row),
-        'timestamp': timestamp,
-        'action': 'fled',
-        'turn': turn,
-        'episode': state.current_episode_num
-    })
+        # Historique et collision gardés dans le bloc hp>0 : une unité morte n'ayant jamais
+        # atteint dest, enregistrer sa destination provoquerait des faux positifs de collision
+        # (unit_movement_history et unit_position_collisions incluraient move_unit_id à dest).
+        if move_unit_id not in state.unit_movement_history:
+            state.unit_movement_history[move_unit_id] = []
+        timestamp_match = re.search(r'\[(\d+:\d+:\d+)\]', line)
+        timestamp = timestamp_match.group(1) if timestamp_match else None
+        state.unit_movement_history[move_unit_id].append({
+            'position': (dest_col, dest_row),
+            'timestamp': timestamp,
+            'action': 'fled',
+            'turn': turn,
+            'episode': state.current_episode_num
+        })
 
-    if (start_col, start_row) != (dest_col, dest_row):
-        colliding_units = []
-        for uid, current_pos in state.unit_positions.items():
-            if current_pos != (dest_col, dest_row) or uid == move_unit_id:
-                continue
-            if uid not in state.unit_hp:
-                stats['parse_errors'].append({
+        if (start_col, start_row) != (dest_col, dest_row):
+            colliding_units = []
+            for uid, current_pos in state.unit_positions.items():
+                if current_pos != (dest_col, dest_row) or uid == move_unit_id:
+                    continue
+                if uid not in state.unit_hp:
+                    stats['parse_errors'].append({
+                        'episode': state.current_episode_num,
+                        'turn': turn,
+                        'phase': phase,
+                        'line': line.strip(),
+                        'error': f"Collision check missing unit_hp for unit_id: {uid}"
+                    })
+                    continue
+                hp_value = _get_unit_hp_value(
+                    state.unit_hp, uid, stats, state.current_episode_num, turn, phase, line, "Move collision"
+                )
+                if hp_value is None:
+                    continue
+                if hp_value > 0:
+                    colliding_units.append(uid)
+
+            mover_player = state.unit_player.get(move_unit_id)
+            real_colliding_units = []
+            for uid in colliding_units:
+                uid_player = state.unit_player.get(uid)
+                if uid_player is not None and mover_player is not None and uid_player != mover_player:
+                    continue
+                real_colliding_units.append(uid)
+            if real_colliding_units:
+                stats['unit_position_collisions'].append({
                     'episode': state.current_episode_num,
                     'turn': turn,
-                    'phase': phase,
-                    'line': line.strip(),
-                    'error': f"Collision check missing unit_hp for unit_id: {uid}"
+                    'position': (dest_col, dest_row),
+                    'units': real_colliding_units + [move_unit_id],
+                    'action': 'move',
+                    'move_from': (start_col, start_row),
+                    'move_to': (dest_col, dest_row)
                 })
-                continue
-            hp_value = _get_unit_hp_value(
-                state.unit_hp, uid, stats, state.current_episode_num, turn, phase, line, "Move collision"
-            )
-            if hp_value is None:
-                continue
-            if hp_value > 0:
-                colliding_units.append(uid)
-
-        mover_player = state.unit_player.get(move_unit_id)
-        real_colliding_units = []
-        for uid in colliding_units:
-            uid_player = state.unit_player.get(uid)
-            if uid_player is not None and mover_player is not None and uid_player != mover_player:
-                continue
-            real_colliding_units.append(uid)
-        if real_colliding_units:
-            stats['unit_position_collisions'].append({
-                'episode': state.current_episode_num,
-                'turn': turn,
-                'position': (dest_col, dest_row),
-                'units': real_colliding_units + [move_unit_id],
-                'action': 'move',
-                'move_from': (start_col, start_row),
-                'move_to': (dest_col, dest_row)
-            })
-        # 03.01 JUGÉE ici aussi : `wall_collisions` a TROIS sites d'incrément (move normal,
-        # fall-back, advance) et n'en notait qu'un. La règle sortait donc « jamais exercée » sur
-        # un journal de fall-back, alors que son contrôle avait travaillé — une fausse alerte sur
-        # le seul verdict que ce chantier a créé.
-        note_rule_usage(stats, "03.01", player)
-        if (dest_col, dest_row) in state.wall_hexes:
-            stats['wall_collisions'][player] += 1
+            # 03.01 JUGÉE ici aussi : `wall_collisions` a TROIS sites d'incrément (move normal,
+            # fall-back, advance) et n'en notait qu'un. La règle sortait donc « jamais exercée » sur
+            # un journal de fall-back, alors que son contrôle avait travaillé — une fausse alerte sur
+            # le seul verdict que ce chantier a créé.
+            note_rule_usage(stats, "03.01", player)
+            if (dest_col, dest_row) in state.wall_hexes:
+                stats['wall_collisions'][player] += 1
+        # start==dest : _position_cache_set(dest) déjà appelé en tête du bloc hp>0.
     else:
-        if require_key(state.unit_hp, move_unit_id) > 0:
-            _position_cache_set(state.unit_positions, move_unit_id, dest_col, dest_row)
+        _debug_log(f"[FLED DEBUG] SKIPPED update: unit_hp[{move_unit_id}] = {unit_hp_value} (<= 0)")
 
     if not stats['sample_actions']['move']:
         stats['sample_actions']['move'] = line.strip()
@@ -435,8 +439,8 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
     if move_unit_dead:
         unit_died_before_move = False
         phase_order = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
-        current_phase_order = require_key(phase_order, phase)
-        for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
+        current_phase_order = phase_order.get(phase)
+        for death_turn, death_phase, dead_unit_id, death_line_num in (state.unit_deaths if current_phase_order is not None else []):
             if dead_unit_id == move_unit_id:
                 if death_turn < turn:
                     unit_died_before_move = True
@@ -467,72 +471,6 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         for uid, pos in state.unit_positions.items():
             if uid not in state.positions_at_move_phase_start:
                 state.positions_at_move_phase_start[uid] = pos
-
-    # RULE: Detect fled (adjacency at start of MOVE phase)
-    if move_unit_id in state.positions_at_move_phase_start:
-        start_pos = state.positions_at_move_phase_start[move_unit_id]
-        enemy_player = 3 - player
-        enemy_player_int = int(enemy_player) if enemy_player is not None else None
-        enemy_positions_in_snapshot = {}
-        for uid, pos in state.positions_at_move_phase_start.items():
-            if uid not in state.unit_player or uid not in state.unit_hp:
-                _debug_log(
-                    f"[ANALYZER DEBUG] Snapshot adjacency missing unit data for unit_id: {uid} "
-                    f"(episode={state.current_episode_num}, turn={turn}, phase={phase})"
-                )
-                continue
-            hp_value = _get_unit_hp_value(
-                state.unit_hp, uid, stats, state.current_episode_num, turn, phase, line, "Snapshot adjacency"
-            )
-            if hp_value is None:
-                continue
-            if int(require_key(state.unit_player, uid)) == enemy_player_int and hp_value > 0:
-                enemy_positions_in_snapshot[uid] = pos
-        enemy_positions_current = {}
-        for uid, pos in state.unit_positions.items():
-            if uid not in state.unit_player or uid not in state.unit_hp:
-                _debug_log(
-                    f"[ANALYZER DEBUG] Current adjacency missing unit data for unit_id: {uid} "
-                    f"(episode={state.current_episode_num}, turn={turn}, phase={phase})"
-                )
-                continue
-            hp_value = _get_unit_hp_value(
-                state.unit_hp, uid, stats, state.current_episode_num, turn, phase, line, "Current adjacency"
-            )
-            if hp_value is None:
-                continue
-            if int(require_key(state.unit_player, uid)) == enemy_player_int and hp_value > 0:
-                enemy_positions_current[uid] = pos
-        # Socles de DÉPART, morts exclus (cf. surviving_start_models).
-        start_models = surviving_start_models(
-            state.positions_by_model.get(move_unit_id),  # get allowed
-            state.current_line_models.get(move_unit_id),  # get allowed
-        )
-        was_adjacent_in_snapshot = is_within_engine_engagement_zone(
-            move_unit_id, state.unit_player, enemy_positions_in_snapshot, state.unit_hp,
-            engagement_zone=_get_engagement_zone_for_analyzer(), position_override=start_pos,
-            positions_by_model=state.positions_by_model, unit_base=state.unit_base,
-            **state.engagement_3d_kwargs(),
-            subject_models=start_models,
-        )
-        was_adjacent_in_current = is_within_engine_engagement_zone(
-            move_unit_id, state.unit_player, enemy_positions_current, state.unit_hp,
-            engagement_zone=_get_engagement_zone_for_analyzer(), position_override=start_pos,
-            positions_by_model=state.positions_by_model, unit_base=state.unit_base,
-            **state.engagement_3d_kwargs(),
-            subject_models=start_models,
-        )
-        if (was_adjacent_in_snapshot and was_adjacent_in_current and
-                len(state.positions_at_move_phase_start) >= 2 and
-                len(enemy_positions_current) > 0 and
-                len(enemy_positions_in_snapshot) > 0):
-            _debug_log(f"[FLED DEBUG] E{state.current_episode_num} T{turn} P{player}: Unit {move_unit_id} FLED from {start_pos} to ({dest_col},{dest_row}) - explicit FLED only (no inferred flag)")
-        elif was_adjacent_in_snapshot and not was_adjacent_in_current:
-            _debug_log(f"[FLED DEBUG] E{state.current_episode_num} T{turn} P{player}: Unit {move_unit_id} at {start_pos} - snapshot says adjacent but current says not (stale positions in snapshot), NOT marking as fled")
-        elif not was_adjacent_in_snapshot and was_adjacent_in_current:
-            _debug_log(f"[FLED DEBUG] E{state.current_episode_num} T{turn} P{player}: Unit {move_unit_id} at {start_pos} - current says adjacent but snapshot says not (stale positions in unit_positions), NOT marking as fled")
-        elif len(enemy_positions_in_snapshot) == 0:
-            _debug_log(f"[FLED DEBUG] E{state.current_episode_num} T{turn} P{player}: Unit {move_unit_id} at {start_pos} - no enemy data in snapshot, NOT marking as fled")
 
     if (start_col, start_row) != (dest_col, dest_row):
         if move_unit_id not in state.unit_movement_history:
@@ -753,10 +691,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
                     'line': line.strip(),
                 }
 
-        enemy_player = 3 - player
-        enemy_player_int = int(enemy_player) if enemy_player is not None else None
-        enemy_positions_str = ', '.join([f"Unit {uid} at {pos} (HP={require_key(unit_hp_at_movement, uid)})" for uid, pos in positions_for_adjacency_check_filtered.items() if (int(require_key(state.unit_player, uid)) if require_key(state.unit_player, uid) is not None else None) == enemy_player_int])
-        _debug_log(f"[ANALYZER DEBUG] E{state.current_episode_num} T{turn} MOVE: Unit {move_unit_id} checking adjacency at ({dest_col},{dest_row}) against {len(positions_for_adjacency_check_filtered)} enemy positions: {enemy_positions_str}")
+        _debug_log(f"[ANALYZER DEBUG] E{state.current_episode_num} T{turn} MOVE: Unit {move_unit_id} checking adjacency at ({dest_col},{dest_row}) against {len(positions_for_adjacency_check_filtered)} units")
         dest_adjacent = is_within_engine_engagement_zone(
             move_unit_id, state.unit_player, positions_for_adjacency_check_filtered, unit_hp_at_movement,
             engagement_zone=_get_engagement_zone_for_analyzer(), position_override=(dest_col, dest_row),
@@ -816,6 +751,15 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         if (dest_col, dest_row) in state.wall_hexes:
             stats['wall_collisions'][player] += 1
     else:
+        if move_unit_id not in state.unit_hp:
+            stats['parse_errors'].append({
+                'episode': state.current_episode_num,
+                'turn': turn,
+                'phase': phase,
+                'line': line.strip(),
+                'error': f"Move action for unknown unit_id (missing in unit_hp): {move_unit_id}"
+            })
+            return True  # equivalent to continue
         if require_key(state.unit_hp, move_unit_id) > 0:
             _position_cache_set(state.unit_positions, move_unit_id, dest_col, dest_row)
 
