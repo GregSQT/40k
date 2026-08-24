@@ -175,10 +175,16 @@ def test_gym_charge_carries_the_fly_flag(keywords: List[Dict[str, str]], expecte
     eng = _charge_engine(keywords)
     _declare_flight(eng)
     before = len(eng.game_state.get("action_logs", []))
+    # Étape 1 : déclaration de charge — le moteur arme la décision de placement (L10) et revient
+    # en waiting_for_agent_decision ; aucun action_log n'est encore écrit.
     with patch("engine.phase_handlers.shared_utils.roll_charge_distance", return_value=12):
-        ok, result = eng._process_squad_action(
+        ok1, result1 = eng._process_squad_action(
             {"action": "squad_charge", "squad_id": "1", "target_slot": 0}
         )
+    assert ok1 and result1.get("decision_type") == "charge_placement", result1
+    # Étape 2 : résolution du placement (CHOICE_0 = premier plan) — `_finish_charge_after_placement`
+    # commit le move et écrit l'action_log portant `is_fly_move`.
+    ok, result = eng._process_squad_action({"action": "agent_decision", "option_index": 0})
     assert ok and result["charge_succeeded"] is True, result
     charges = [e for e in eng.game_state["action_logs"][before:] if e.get("type") == "charge"]
     assert len(charges) == 1, charges
