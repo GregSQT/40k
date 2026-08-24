@@ -173,6 +173,13 @@ DECISION_GRANTABLE_EFFECT_IDS: Tuple[str, ...] = (
     "shoot_after_flee",
 )
 
+_extra_grantable = set(DECISION_GRANTABLE_EFFECT_IDS) - set(UNIT_RULE_EFFECT_IDS)
+if _extra_grantable:
+    raise ValueError(
+        f"DECISION_GRANTABLE_EFFECT_IDS contient des effets absents de UNIT_RULE_EFFECT_IDS "
+        f"(le moteur ne les appliquerait jamais) : {sorted(_extra_grantable)}"
+    )
+
 #: Drapeaux d'une unité, dans l'ordre d'émission.
 #: CONVENTION (uniforme depuis §0.37) : le masque `present` est le DERNIER champ de CHAQUE
 #: registre (unités, figurines self, armes, types) — il était ici en premier, seule exception,
@@ -434,7 +441,7 @@ def self_model_bin_index(field: str) -> int:
 #: aucune datasheet — c'est le mot-clé FLY qui l'ouvre et 21.03 qui en fixe le prix —, donc ses
 #: deux candidats portent eux aussi un `effect_ids` VIDE. C'est `declines` qui les sépare :
 #: `CHOICE_1` renonce au vol, et le renoncement est précisément « ne rien faire ».
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "fire_overwatch", "heroic_intervention")
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots
