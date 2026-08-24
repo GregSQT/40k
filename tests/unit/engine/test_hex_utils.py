@@ -31,6 +31,7 @@ from engine.hex_utils import (
     precompute_footprint_offsets,
     compute_footprint_placement_mask,
     _FOOTPRINT_OFFSETS_CACHE,
+    _objective_line_hexes,
 )
 
 
@@ -674,3 +675,29 @@ class TestPrecomputeFootprintOffsetsMemoization:
     def test_invalid_shape_still_raises_through_cache(self):
         with pytest.raises(ValueError):
             precompute_footprint_offsets("triangle", 5, 0)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _objective_line_hexes — doit utiliser hex_line (cube-lerp), pas Bresenham offset
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestObjectiveLineHexes:
+    """_objective_line_hexes doit produire les mêmes hexagones que hex_line pour toute diagonale."""
+
+    def test_diagonal_matches_hex_line(self) -> None:
+        """obj_line_diag : diagonale (0,0)→(4,4) → 7 hexes comme hex_line, pas 5 (Bresenham offset)."""
+        result = _objective_line_hexes([0, 0], [4, 4], 10, 10)
+        expected = [list(hx) for hx in hex_line(0, 0, 4, 4)]
+        assert result == expected
+        assert len(result) == 7
+
+    def test_axis_aligned_col_matches_hex_line(self) -> None:
+        """obj_line_col : ligne horizontale (0,0)→(3,0) → identique hex_line."""
+        result = _objective_line_hexes([0, 0], [3, 0], 10, 10)
+        assert result == [list(hx) for hx in hex_line(0, 0, 3, 0)]
+
+    def test_bounds_filter_excludes_out_of_grid(self) -> None:
+        """obj_line_bounds : hexes hors grille (cols=3) exclus du résultat."""
+        result = _objective_line_hexes([0, 0], [4, 4], 3, 3)
+        for hx in result:
+            assert 0 <= hx[0] < 3 and 0 <= hx[1] < 3

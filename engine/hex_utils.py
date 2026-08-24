@@ -858,28 +858,10 @@ def _objective_line_hexes(
     cols: int,
     rows: int,
 ) -> List[List[int]]:
-    c0, r0 = int(p1[0]), int(p1[1])
-    c1, r1 = int(p2[0]), int(p2[1])
-    dc = abs(c1 - c0)
-    dr = abs(r1 - r0)
-    sc = 1 if c1 > c0 else -1
-    sr = 1 if r1 > r0 else -1
-    err = dc - dr
-    c, r = c0, r0
-    out: List[List[int]] = []
-    while True:
-        if 0 <= c < cols and 0 <= r < rows:
-            out.append([c, r])
-        if c == c1 and r == r1:
-            break
-        e2 = 2 * err
-        if e2 > -dr:
-            err -= dr
-            c += sc
-        if e2 < dc:
-            err += dc
-            r += sr
-    return out
+    return [
+        list(hx) for hx in hex_line(int(p1[0]), int(p1[1]), int(p2[0]), int(p2[1]))
+        if 0 <= hx[0] < cols and 0 <= hx[1] < rows
+    ]
 
 
 def expand_objectives_to_hex_list(

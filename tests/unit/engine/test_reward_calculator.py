@@ -6,6 +6,7 @@ import pytest
 from typing import Any, Dict, List, Optional, Tuple
 
 from engine.reward_calculator import RewardCalculator
+from shared.data_validation import ConfigurationError
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -230,7 +231,6 @@ _MINIMAL_GS: Dict[str, Any] = {
     "objectives": [],
     "objective_controllers": {},
     "game_over": False,
-    "objective_rewarded_turns": set(),
 }
 
 
@@ -242,8 +242,6 @@ def _rc_desp() -> RewardCalculator:
         state_manager=None,
     )
     rc._get_system_penalties = lambda: _SYSTEM_PENALTIES
-    rc._calculate_objective_reward_per_turn = lambda game_state, result: 0.0
-    rc._calculate_coherency_penalty_per_turn = lambda game_state, result: 0.0
     return rc
 
 
@@ -300,3 +298,123 @@ class TestSelectCoherencyRemovalGymPath:
         gs = dict(_MINIMAL_GS)
         reward = rc.calculate_reward(True, result, gs)
         assert reward == 0.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# fight path — all_attack_results manquant → ConfigurationError contextualisé
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _fight_calculator() -> RewardCalculator:
+    """RewardCalculator minimal câblé pour atteindre la ligne require_key('all_attack_results')."""
+    rc = RewardCalculator(
+        config={"quiet": True, "controlled_player": 1},
+        rewards_config={},
+        unit_registry=None,
+        state_manager=None,
+    )
+
+    class _FakeMapper:
+        def get_combat_priority_reward(self, *a: Any, **kw: Any) -> float:
+            return 0.0
+
+    rc._get_system_penalties = lambda: _SYSTEM_PENALTIES  # type: ignore[method-assign]
+    rc._get_reward_mapper = lambda: _FakeMapper()  # type: ignore[method-assign]
+    rc._enrich_unit_for_reward_mapper = lambda u: u  # type: ignore[method-assign]
+    rc._get_all_valid_targets = lambda u, gs: []  # type: ignore[method-assign]
+    rc._calculate_objective_reward_per_turn = lambda gs, r: 0.0  # type: ignore[method-assign]
+    rc._calculate_coherency_penalty_per_turn = lambda gs, r: 0.0  # type: ignore[method-assign]
+    return rc
+
+
+def _fight_gs() -> Dict[str, Any]:
+    attacker: Dict[str, Any] = {"id": "u1", "player": 1}
+    target: Dict[str, Any] = {"id": "t1", "player": 2}
+    return {
+        **_MINIMAL_GS,
+        "units": [attacker, target],
+        "unit_by_id": {"u1": attacker, "t1": target},
+        "units_cache": {},
+        "squad_cache": {},
+        "squad_models": {},
+        "models_cache": {},
+    }
+
+
+class TestFightAllAttackResultsRequired:
+    """require_key doit lever ConfigurationError avec le nom du champ si all_attack_results absent."""
+
+    def test_missing_all_attack_results_raises_configuration_error(self) -> None:
+        """fight_missing_aar : absence de all_attack_results → ConfigurationError, pas KeyError."""
+        rc = _fight_calculator()
+        gs = _fight_gs()
+        result = {"action": "fight", "unitId": "u1", "targetId": "t1"}
+        with pytest.raises(ConfigurationError, match="all_attack_results"):
+            rc.calculate_reward(True, result, gs)
+
+    def test_present_all_attack_results_does_not_raise(self) -> None:
+        """fight_present_aar : all_attack_results vide → pas d'erreur, reward float."""
+        rc = _fight_calculator()
+        gs = _fight_gs()
+        result = {"action": "fight", "unitId": "u1", "targetId": "t1", "all_attack_results": []}
+        reward = rc.calculate_reward(True, result, gs)
+        assert isinstance(reward, float)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _calculate_coherency_penalty_per_turn — idempotence quand aucune unité active
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCoherencyPenaltyNoActingUnit:
+    """Sans unité contrôlée vivante, la pénalité est 0.0 et ne se recalcule pas au 2e appel."""
+
+    def _make_rc(self) -> RewardCalculator:
+        rc = RewardCalculator(
+            config={"quiet": True, "controlled_player": 1},
+            rewards_config={},
+            unit_registry=None,
+            state_manager=None,
+        )
+        return rc
+
+    def _gs(self) -> Dict[str, Any]:
+        # units_cache vide → _get_controlled_player_unit retourne None (pas d'unité contrôlée)
+        return {
+            **_MINIMAL_GS,
+            "units_cache": {},
+            "squad_cache": {},
+            "turn": 1,
+            "current_player": 1,
+        }
+
+    def _result(self) -> Dict[str, Any]:
+        # phase_transition + next_phase=move requis pour dépasser la garde ligne 918
+        return {"phase_transition": True, "next_phase": "move"}
+
+    def test_returns_zero_when_no_unit(self) -> None:
+        """coherency_no_unit_zero : 0.0 quand aucune unité contrôlée vivante."""
+        rc = self._make_rc()
+        gs = self._gs()
+        penalty = rc._calculate_coherency_penalty_per_turn(gs, self._result())
+        assert penalty == 0.0
+
+    def test_idempotent_on_second_call(self) -> None:
+        """coherency_no_unit_idempotent : once_claim posé au 1er appel → court-circuit au 2e."""
+        rc = self._make_rc()
+        gs = self._gs()
+        result = self._result()
+        rc._calculate_coherency_penalty_per_turn(gs, result)
+
+        # Après le 1er appel, once_claim doit avoir été posé même si acting_unit est None.
+        # On instrument _get_controlled_player_unit pour vérifier qu'il n'est PAS rappelé.
+        call_count = 0
+        original_get_unit = rc._get_controlled_player_unit
+
+        def counting_get_unit(game_state: Any) -> None:
+            nonlocal call_count
+            call_count += 1
+            return original_get_unit(game_state)
+
+        rc._get_controlled_player_unit = counting_get_unit  # type: ignore[method-assign]
+        penalty2 = rc._calculate_coherency_penalty_per_turn(gs, result)
+        assert penalty2 == 0.0
+        assert call_count == 0  # once_claim court-circuite avant _get_controlled_player_unit
