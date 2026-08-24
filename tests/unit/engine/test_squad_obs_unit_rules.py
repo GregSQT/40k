@@ -277,6 +277,7 @@ def test_real_training_roster_writes_the_expected_id():
     # `enemies_ability_ids` est nul. On joue jusqu'a la sortie de la phase de deploiement pour
     # que les ennemis soient visibles dans l'observation.
     rng = _random.Random(0)
+    assert obs is not None
     for _ in range(400):
         ennemis = obs["enemies_ability_ids"]
         if (eng.game_state.get("phase") != "deployment"
@@ -284,16 +285,18 @@ def test_real_training_roster_writes_the_expected_id():
             break
         mask = eng.get_action_mask()
         valid = list(np.flatnonzero(mask))
-        action = rng.choice(valid) if valid else 0
+        action = int(rng.choice(valid)) if valid else 0
         obs, _, terminated, truncated, _ = eng.step(action)
         if terminated or truncated:
             obs, _ = eng.reset()
+        assert obs is not None
 
     # Le bloc ENNEMI, et lui seul. En phase de deploiement les unites amies ne sont
     # pas encore posees, donc `allies_ability_ids` est INTEGRALEMENT nul (mesure : 0 valeur non
     # nulle sur 12x8). Sommer les deux blocs laissait croire a une couverture des deux cotes
     # alors que le seul hit venait des ennemis — et rendait la contre-epreuve ci-dessous
     # trivialement vraie, puisqu'un bloc nul satisfait n'importe quelle inegalite.
+    assert obs is not None
     ennemis = obs["enemies_ability_ids"]
     assert int((ennemis == obs_ids["cp_gain_on_objective"]).sum()) > 0, (
         "les Gretchin du roster ennemi n'ecrivent pas cp_gain_on_objective"

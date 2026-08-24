@@ -113,7 +113,7 @@ def test_verrou_game_state_observation_builder(monkeypatch: pytest.MonkeyPatch) 
         game_rules=build_game_rules(),
         inches_to_subhex=1,
         # victory_points n'est pas posé par synthetic_state — ajouté via overrides ci-dessous
-        **{"victory_points": {1: 0, 2: 0}},
+        victory_points={1: 0, 2: 0},
     )
     gs["config"]["army_faction"] = {"1": "TYRANIDS", "2": "TYRANIDS"}
     # value_at_start est posé par build_units_cache (appelé dans synthetic_state). ✓

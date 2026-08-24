@@ -45,6 +45,9 @@ class _FakeConfigLoader:
     def _resolve_agent_config_key(self, agent_key: str) -> str:
         return agent_key
 
+    def load_agent_training_config(self, agent_key: str, phase: str | None = None) -> dict:
+        return {}
+
 
 @pytest.fixture(autouse=True)
 def _no_promotion_leak():

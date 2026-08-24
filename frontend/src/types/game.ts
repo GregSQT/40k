@@ -416,6 +416,8 @@ export interface GameState {
   /** Réserves stratégiques (20.01/20.04), par joueur — source unique du ratio affiché et des
    * dépôts proposés. Absent tant qu'aucune partie n'est chargée. */
   strategic_reserves?: StrategicReservesSummary;
+  /** Retrait de cohérence en attente (03.03) : escouade dont il faut retirer une figurine. */
+  pending_coherency_removal?: { squad_id: string } | null;
 }
 
 export interface SemanticAction {

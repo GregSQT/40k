@@ -118,7 +118,7 @@ def _check_fall_back_move(state, line, action_desc, player, move_unit_id,
     )
     from ai.analyzer_perfig import surviving_start_models
 
-    if state.unit_hp.get(move_unit_id, 0) <= 0:
+    if move_unit_id not in state.unit_hp or state.unit_hp[move_unit_id] <= 0:
         return
 
     stats = state.stats

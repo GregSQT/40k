@@ -242,8 +242,8 @@ def _rc_desp() -> RewardCalculator:
         state_manager=None,
     )
     rc._get_system_penalties = lambda: _SYSTEM_PENALTIES
-    rc._calculate_objective_reward_per_turn = lambda gs, r: 0.0
-    rc._calculate_coherency_penalty_per_turn = lambda gs, r: 0.0
+    rc._calculate_objective_reward_per_turn = lambda game_state, result: 0.0
+    rc._calculate_coherency_penalty_per_turn = lambda game_state, result: 0.0
     return rc
 
 

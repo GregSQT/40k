@@ -8667,13 +8667,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
       // CRITICAL: In fight phase, current_player can be 1 but AI can still act in alternating phase
       // Only check current_player for non-fight phases
-      if (phaseCheck !== "fight" && getPlayerType(gameState.current_player) !== "ai") {
+      if (gameState.phase !== "fight" && getPlayerType(gameState.current_player) !== "ai") {
         aiTurnInProgress = false;
         return;
       }
       let eligibleAICount = 0;
 
-      if (phaseCheck === "deployment") {
+      if (gameState.phase === "deployment") {
         const deploymentState = gameState.deployment_state;
         if (!deploymentState) {
           aiTurnInProgress = false;
@@ -8685,18 +8685,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           throw new Error(`deployment: deployable_units missing for deployer ${String(deployer)}`);
         }
         eligibleAICount = getPlayerType(deployer) === "ai" ? pool.length : 0;
-      } else if (phaseCheck === "shoot" && gameState.shoot_activation_pool) {
+      } else if (gameState.phase === "shoot" && gameState.shoot_activation_pool) {
         const shootPool = gameState.shoot_activation_pool || [];
         eligibleAICount = shootPool.filter((unitId) => isAiUnitId(unitId)).length;
-      } else if (phaseCheck === "move" && gameState.move_activation_pool) {
+      } else if (gameState.phase === "move" && gameState.move_activation_pool) {
         eligibleAICount = gameState.move_activation_pool.filter((unitId) =>
           isAiUnitId(unitId)
         ).length;
-      } else if (phaseCheck === "charge" && gameState.charge_activation_pool) {
+      } else if (gameState.phase === "charge" && gameState.charge_activation_pool) {
         eligibleAICount = gameState.charge_activation_pool.filter((unitId) =>
           isAiUnitId(unitId)
         ).length;
-      } else if (phaseCheck === "fight") {
+      } else if (gameState.phase === "fight") {
         // V11 : pool actionnable unique exposé par le moteur (pile_in/fight/consolidate).
         const fightPool: string[] = (gameState.fight_eligible_units ?? []).map((id) => String(id));
         eligibleAICount = fightPool.filter((unitId) => isAiUnitId(unitId)).length;

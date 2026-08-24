@@ -496,7 +496,7 @@ def test_get_decision_owner_from_mask_detects_mixed_owners() -> None:
 
 
 def _frozen_pool_wrapper(**overrides):
-    kwargs = dict(
+    kwargs: Dict[str, Any] = dict(
         self_play_opponent_enabled=True,
         self_play_ratio_start=1.0,
         self_play_ratio_end=1.0,
@@ -519,7 +519,7 @@ def test_a_frozen_pool_opponent_is_loaded_once_and_never_reread() -> None:
     que ce n'est pas lui qui retient le rechargement.
     """
     wrapper = _frozen_pool_wrapper(self_play_snapshot_frozen=True)
-    wrapper._frozen_model = object()
+    wrapper._frozen_model = cast(Any, object())
     wrapper._episodes_since_snapshot_refresh = 10 ** 6
     wrapper._reload_self_play_snapshot_if_needed()
 
@@ -527,7 +527,7 @@ def test_a_frozen_pool_opponent_is_loaded_once_and_never_reread() -> None:
 def test_a_non_frozen_snapshot_is_still_reread_when_the_counter_expires() -> None:
     """Jumeau du test precedent : sans `frozen`, la relecture a bien lieu."""
     wrapper = _frozen_pool_wrapper(self_play_snapshot_refresh_episodes=1)
-    wrapper._frozen_model = object()
+    wrapper._frozen_model = cast(Any, object())
     wrapper._episodes_since_snapshot_refresh = 10 ** 6
     with pytest.raises(FileNotFoundError):
         wrapper._reload_self_play_snapshot_if_needed()
@@ -1010,7 +1010,7 @@ def test_step_returns_a_real_observation_despite_deferral() -> None:
     wrapper, engine = _deferral_wrapper()
     obs, _reward, _term, _trunc, _info = wrapper.step(mi.ACTION_WAIT)
     assert obs is not None
-    assert isinstance(obs, np.ndarray) and obs.shape == (4,)
+    assert isinstance(obs, np.ndarray) and cast(np.ndarray, obs).shape == (4,)
 
 
 def test_step_defers_intermediate_observations_and_builds_exactly_one() -> None:
