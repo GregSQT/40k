@@ -8633,7 +8633,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       aiTurnInProgress = true;
       try {
         if (!gameState) {
-          aiTurnInProgress = false;
           return;
         }
         const playerTypes = gameState.player_types;
@@ -8669,7 +8668,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         // CRITICAL: In fight phase, current_player can be 1 but AI can still act in alternating phase
         // Only check current_player for non-fight phases
         if (gameState.phase !== "fight" && getPlayerType(gameState.current_player) !== "ai") {
-          aiTurnInProgress = false;
           return;
         }
         let eligibleAICount = 0;
@@ -8677,7 +8675,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         if (gameState.phase === "deployment") {
           const deploymentState = gameState.deployment_state;
           if (!deploymentState) {
-            aiTurnInProgress = false;
             return;
           }
           const deployer = deploymentState.current_deployer;
@@ -8708,49 +8705,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
 
         if (eligibleAICount === 0) {
-          aiTurnInProgress = false;
-          return;
-        }
-
-        // Check if AI has eligible units in current phase (already checked above, but keeping for clarity)
-        const currentPhase = gameState.phase;
-        let aiEligibleUnits = 0;
-
-        if (currentPhase === "deployment") {
-          const deploymentState = gameState.deployment_state;
-          if (!deploymentState) {
-            aiEligibleUnits = 0;
-          } else {
-            const deployer = deploymentState.current_deployer;
-            const pool = deploymentState.deployable_units?.[String(deployer)];
-            if (!pool) {
-              throw new Error(
-                `deployment: deployable_units missing for deployer ${String(deployer)}`
-              );
-            }
-            aiEligibleUnits = getPlayerType(deployer) === "ai" ? pool.length : 0;
-          }
-        } else if (currentPhase === "move" && gameState.move_activation_pool) {
-          aiEligibleUnits = gameState.move_activation_pool.filter((unitId) =>
-            isAiUnitId(unitId)
-          ).length;
-        } else if (currentPhase === "shoot" && gameState.shoot_activation_pool) {
-          const shootPool = gameState.shoot_activation_pool || [];
-          aiEligibleUnits = shootPool.filter((unitId) => isAiUnitId(unitId)).length;
-        } else if (currentPhase === "charge" && gameState.charge_activation_pool) {
-          aiEligibleUnits = gameState.charge_activation_pool.filter((unitId) =>
-            isAiUnitId(unitId)
-          ).length;
-        } else if (currentPhase === "fight") {
-          // V11 : pool actionnable unique exposé par le moteur (pile_in/fight/consolidate).
-          const fightPool: string[] = (gameState.fight_eligible_units ?? []).map((id) =>
-            String(id)
-          );
-          aiEligibleUnits = fightPool.filter((unitId) => isAiUnitId(unitId)).length;
-        }
-
-        if (aiEligibleUnits === 0) {
-          aiTurnInProgress = false;
           return;
         }
 
