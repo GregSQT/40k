@@ -8481,8 +8481,8 @@ def shoot_weapon_eligible_target_slots(
     elig: List[int] = [
         slot_i for slot_i, tsid in enumerate(enemy_slot_ids)
         if tsid is not None
-        and str(tsid) in _uc and entry_is_on_battlefield(_uc[str(tsid)])
-        and squad_shoot_weapon_qty_max(game_state, squad_id, weapon_code, str(tsid)) > 0
+        and tsid in _uc and entry_is_on_battlefield(_uc[tsid])
+        and squad_shoot_weapon_qty_max(game_state, squad_id, weapon_code, tsid) > 0
     ]
     return weapon_code, elig
 
@@ -8516,6 +8516,10 @@ def shoot_weapon_remaining_eligible_slots(
         _ewp = profiles[except_slot][0]
         _except_combi = (_ewp.get("COMBI_WEAPON") if isinstance(_ewp, dict) else None)
     _uc = require_key(game_state, "units_cache")
+    on_table = [
+        tsid for tsid in enemy_slot_ids
+        if tsid is not None and tsid in _uc and entry_is_on_battlefield(_uc[tsid])
+    ]
     result: Dict[int, str] = {}
     for slot_j, (weapon, _) in enumerate(profiles[:_K]):
         if slot_j == except_slot:
@@ -8526,10 +8530,8 @@ def shoot_weapon_remaining_eligible_slots(
                 continue
         code = require_key(weapon, "code")
         if any(
-            squad_shoot_weapon_qty_max(game_state, squad_id, code, str(tsid)) > 0
-            for tsid in enemy_slot_ids
-            if tsid is not None
-            and str(tsid) in _uc and entry_is_on_battlefield(_uc[str(tsid)])
+            squad_shoot_weapon_qty_max(game_state, squad_id, code, tsid) > 0
+            for tsid in on_table
         ):
             result[slot_j] = code
     return result
@@ -13560,9 +13562,11 @@ def _refresh_enemy_slot_mapping(game_state: Dict[str, Any], our_player: int) -> 
     cache_key = f"enemy_slot_mapping_p{int(our_player)}"
     mapping: List[Optional[str]] = game_state[cache_key]
     units_cache = game_state.get("units_cache", {})  # get allowed
-    # Une escouade absente de units_cache est morte : son slot redevient libre.
+    # Escouade morte (absente de units_cache) ou hors table (sentinelle -1/-1) : slot libéré.
     for slot_i, sid in enumerate(mapping):
-        if sid is not None and sid not in units_cache:
+        if sid is not None and (
+            sid not in units_cache or not entry_is_on_battlefield(units_cache[sid])
+        ):
             mapping[slot_i] = None
     mapped = {sid for sid in mapping if sid is not None}
     unmapped = [
