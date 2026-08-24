@@ -21,7 +21,7 @@ from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 from engine.action_log_utils import append_action_log
 from engine.game_state import (
     WAAAGH_ABILITY_DISPLAY_NAME,
-    objective_hex_zones,
+    objective_hex_sets,
     unit_can_charge_after_advance,
     waaagh_applies_to_unit,
 )
@@ -6500,7 +6500,7 @@ def arm_charge_placement_decision(
         plans.append(_p if _p is not None else plan_0)
 
     # Positions des objectifs pour la métrique obj_dist_norm.
-    _obj_positions: List[Tuple[int, int]] = [h for _, zone in objective_hex_zones(game_state) for h in zone]
+    _obj_positions: List[Tuple[int, int]] = [h for zone in objective_hex_sets(game_state) for h in zone]
 
     # Positions des modèles ennemis non-déclarés pour la métrique nontgt_dist_norm.
     _declared = {str(t) for t in target_squad_ids}

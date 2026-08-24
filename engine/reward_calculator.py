@@ -24,6 +24,10 @@ from shared.data_validation import require_key
 class RewardCalculator:
     """Calculates rewards for actions."""
     
+    @staticmethod
+    def _combat_result_key(action_type: str) -> str:
+        return "fight_result" if action_type == "squad_fight" else "shoot_result"
+
     def __init__(self, config: Dict[str, Any], rewards_config: Dict[str, Any], unit_registry=None, state_manager=None):
         self.config = config
         self.rewards_config = rewards_config
@@ -229,7 +233,7 @@ class RewardCalculator:
             defensive_penalty = 0.0
             opp_action = result.get("action")
             if opp_action in ("squad_shoot", "squad_shoot_split_target", "squad_fight"):
-                res_key = "shoot_result" if opp_action != "squad_fight" else "fight_result"
+                res_key = self._combat_result_key(opp_action)
                 combat = require_key(result, res_key)
                 shaping = require_key(self._get_unit_reward_config(acting_unit), "squad_shaping")
                 defensive_penalty = -self._squad_combat_shaping(
@@ -529,7 +533,7 @@ class RewardCalculator:
             # `squad_shoot_split_target` (P3-8) : récompense identique à `squad_shoot`
             # — le shoot_result a la même structure, l'effet mesuré est le même.
             shaping = require_key(self._get_unit_reward_config(acting_unit), "squad_shaping")
-            res_key = "shoot_result" if action_type != "squad_fight" else "fight_result"
+            res_key = self._combat_result_key(action_type)
             combat = require_key(result, res_key)
             acting_player = require_key(acting_unit, "player")
             # Cote offensif : degats infliges aux ennemis (tout joueur != acting).
