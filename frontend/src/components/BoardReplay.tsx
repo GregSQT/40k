@@ -608,6 +608,9 @@ export const BoardReplay: React.FC = () => {
     const map: Record<string, number | null> = {};
     for (const objective of objectives) {
       if (!(objective.name in currentObjectiveControl.controllers)) {
+        console.warn(
+          `[BoardReplay] objective "${objective.name}" absent du snapshot OBJECTIVE CONTROL`
+        );
         continue;
       }
       const controller = currentObjectiveControl.controllers[objective.name];
