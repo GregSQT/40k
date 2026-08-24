@@ -17,6 +17,8 @@ absence est un problème pour `bot_zone_direct.py` lui-même, pas pour ce test.
 from __future__ import annotations
 
 import io
+import json
+import pickle
 import zipfile
 from pathlib import Path
 
@@ -25,6 +27,7 @@ import numpy as np
 import pytest
 import torch
 from sb3_contrib import MaskablePPO
+from stable_baselines3.common.save_util import json_to_data
 
 from ai.pointer_policy import PointerMaskablePolicy
 from ai.spatial_extractor import SpatialCombinedExtractor
@@ -81,9 +84,14 @@ def _checkpoint_data(reference_zip):
         with z.open("policy.pth") as f:
             keys = set(torch.load(io.BytesIO(f.read()), map_location="cpu", weights_only=True).keys())
         with z.open("data") as f:
-            policy_kwargs = torch.load(
-                io.BytesIO(f.read()), map_location="cpu", weights_only=False
-            ).get("policy_kwargs", {})
+            raw = f.read()
+        try:
+            data = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=False)
+        except pickle.UnpicklingError:
+            data = json_to_data(raw)
+        if not isinstance(data, dict):
+            raise ValueError(f"Entrée 'data' de format inattendu : {type(data)}")
+        policy_kwargs = data.get("policy_kwargs", {})
     return keys, policy_kwargs
 
 
