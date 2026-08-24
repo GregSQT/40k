@@ -145,6 +145,7 @@ def test_can_kill_uses_probabilistic_damage(monkeypatch: pytest.MonkeyPatch) -> 
     target["id"] = "t1"
 
     unit = {
+        "id": "u1",
         "RNG_WEAPONS": [weapon],
         "selectedRngWeaponIndex": 0,
         "CC_WEAPONS": [],
@@ -162,3 +163,61 @@ def test_can_kill_uses_probabilistic_damage(monkeypatch: pytest.MonkeyPatch) -> 
     assert can_kill() is True   # 1 ≤ 1.94
     hp = expected_damage(weapon, target)  # frontière exacte (virgule flottante réelle)
     assert can_kill() is True   # max_damage ≤ max_damage (sémantique ≤, pas <)
+
+
+# ---------------------------------------------------------------------------
+# Chemin mêlée : is_ranged=False emprunte get_selected_melee_weapon
+# NB=9, BS3+, S4 vs T4, AP0, SV3+ → expected_damage = 9×(4/6)×(3/6)×(2/6)×1 = 1.0
+# Frontière entière : hp=1 ≤ 1.0 → True ; hp=2 > 1.0 → False (distingue ≤ de <)
+# ---------------------------------------------------------------------------
+def test_can_kill_melee_path_uses_expected_damage(monkeypatch: pytest.MonkeyPatch) -> None:
+    import ai.reward_mapper as rmod
+    from ai.reward_mapper import RewardMapper
+
+    mapper = RewardMapper({})
+    cc_weapon = _weapon(atk=3, strength=4, ap=0, nb=9, dmg=1)
+    unit = {
+        "id": "u1",
+        "RNG_WEAPONS": [],
+        "selectedRngWeaponIndex": 0,
+        "CC_WEAPONS": [cc_weapon],
+        "selectedCcWeaponIndex": 0,
+    }
+    target = _target(t=4, sv=3)
+    target["id"] = "t1"
+
+    hp = 2
+    monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: hp)
+    assert mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False, game_state={}) is False
+
+    hp = 1
+    assert mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False, game_state={}) is True
+
+
+def test_can_kill_returns_true_when_target_already_dead(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Branche target_hp <= 0 : retour immédiat True sans calculer les dégâts."""
+    import ai.reward_mapper as rmod
+    from ai.reward_mapper import RewardMapper
+
+    mapper = RewardMapper({})
+    unit = {
+        "id": "u1",
+        "RNG_WEAPONS": [_weapon(atk=3, strength=8, ap=-4, nb=1, dmg="D6")],
+        "selectedRngWeaponIndex": 0,
+        "CC_WEAPONS": [],
+        "selectedCcWeaponIndex": 0,
+    }
+    target = _target(t=4, sv=3)
+    target["id"] = "t1"
+    monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: 0)
+    assert mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={}) is True
+
+
+# ---------------------------------------------------------------------------
+# NB chaîne : 'D3' (espérance 2.0) doit donner le même résultat que nb=2
+# ---------------------------------------------------------------------------
+def test_string_nb_d3_expected_damage() -> None:
+    target = _target(t=4, sv=3)
+    assert expected_damage(_weapon(atk=3, strength=4, ap=0, nb="D3", dmg=1), target) == pytest.approx(
+        expected_damage(_weapon(atk=3, strength=4, ap=0, nb=2, dmg=1), target)
+    )
