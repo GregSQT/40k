@@ -87,7 +87,8 @@ def _gs(positions: List[tuple], squad_id: str = "1", player: int = 1) -> Dict[st
 
 def test_total_action_size_is_1389():
     """VERROU : TOTAL_ACTION_SIZE = 1389 depuis P3-8. Tout retrain avec un ancien modèle est
-    invalide. Ce test DOIT être rouge si P3-8 est annulé (SHOOT_WEAPON_SEL_SLOT_COUNT soustrait)."""
+    invalide. Ce test DOIT être rouge si P3-0 est annulé (COHERENCY_SLOT_COUNT soustrait)
+    OU si P3-8 est annulé (SHOOT_WEAPON_SEL_SLOT_COUNT soustrait)."""
     assert TOTAL_ACTION_SIZE == 1389
 
 
