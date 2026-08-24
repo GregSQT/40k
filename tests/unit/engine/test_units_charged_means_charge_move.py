@@ -85,11 +85,15 @@ def _charged(eng: W40KEngine) -> List[str]:
     return sorted(eng.game_state["units_charged"])
 
 
+def _first_target_slot(gs) -> int:
+    slot_map = get_enemy_slot_mapping(gs, int(gs["current_player"]))
+    return next(i for i, sid in enumerate(slot_map) if sid is not None)
+
+
 def test_failed_charge_does_not_grant_fights_first(engine: W40KEngine) -> None:
     """Jet insuffisant -> aucun charge move -> ni `units_charged`, ni Fights First (11.04)."""
     gs = engine.game_state
-    slot_map = get_enemy_slot_mapping(gs, int(gs["current_player"]))
-    target_slot = next(i for i, sid in enumerate(slot_map) if sid is not None)
+    target_slot = _first_target_slot(gs)
     # 11 encart FAILED CHARGES : « a result of 2 (a double 1) is never sufficient ». Le jet est
     # IMPOSE, pas espere d'une graine : le test doit CONSTRUIRE la situation qu'il observe.
     with patch("engine.phase_handlers.shared_utils.roll_charge_distance", return_value=2):
@@ -125,8 +129,7 @@ def test_wait_in_charge_phase_does_not_grant_fights_first(engine: W40KEngine) ->
 def test_successful_charge_still_grants_fights_first(engine: W40KEngine) -> None:
     """Contrôle anti-vert-vacant : le marquage EXISTE toujours quand la charge aboutit."""
     gs = engine.game_state
-    slot_map = get_enemy_slot_mapping(gs, int(gs["current_player"]))
-    target_slot = next(i for i, sid in enumerate(slot_map) if sid is not None)
+    target_slot = _first_target_slot(gs)
     with patch("engine.phase_handlers.shared_utils.roll_charge_distance", return_value=12):
         ok, result = engine._process_squad_action(
             {"action": "squad_charge", "squad_id": "1", "target_slot": target_slot}
