@@ -189,6 +189,8 @@ def _hold_position_episode(controlled_player: int) -> tuple[W40KEngine, Dict[str
 
 def _points_from_samples(mine: List[float], theirs: List[float]) -> float:
     """Rejoue les trois regles du primaire sur les echantillons, plafond par tour inclus."""
+    if len(mine) != len(theirs):
+        raise ValueError(f"longueurs différentes : {len(mine)} vs {len(theirs)}")
     total = 0.0
     for my_count, their_count in zip(mine, theirs):
         turn_points = 0.0
@@ -261,7 +263,5 @@ def test_samples_follow_the_controlled_seat(controlled_player: int) -> None:
 
     mine = tactical["controlled_objective_samples"]
     theirs = tactical["opponent_objective_samples"]
-    assert len(mine) == len(theirs), f"longueurs différentes : {len(mine)} vs {len(theirs)}"
-
     awarded = float(engine.game_state["victory_points"][controlled_player])
     assert _points_from_samples(mine, theirs) == pytest.approx(awarded)
