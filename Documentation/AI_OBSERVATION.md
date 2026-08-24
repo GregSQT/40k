@@ -41,7 +41,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (16 703 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (16 735 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (13,)                =      13               │
@@ -49,7 +49,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │                                                                        │
 │  MES ESCOUADES — ordre = slots d'activation       K_ALLY_SLOTS = 12    │
 │    allies_cont            (12, 20)             =     240               │
-│    allies_bin             (12, 20)             =     240               │
+│    allies_bin             (12, 21)             =     252               │
 │    allies_ability_ids     (12, 8)              =      96               │
 │    allies_status_ids      (12, 4)              =      48               │
 │    allies_wpn_cont        (12, 20, 13)         =   3 120               │
@@ -60,7 +60,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │                                                                        │
 │  ESCOUADES ENNEMIES — ordre = slots d'action     K_ENEMY_SLOTS = 20    │
 │    enemies_cont           (20, 20)             =     400               │
-│    enemies_bin            (20, 20)             =     400               │
+│    enemies_bin            (20, 21)             =     420               │
 │    enemies_ability_ids    (20, 8)              =     160               │
 │    enemies_status_ids     (20, 4)              =      80               │
 │    enemies_wpn_cont       (20, 20, 13)         =   5 200               │
@@ -82,7 +82,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_cont       (8, 8)               =      64               │
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      16 671              │
+│  TOTAL vectoriel (= obs_size)                      16 735              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -230,21 +230,22 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
 [s][4]     = fought                                 # 0.0 / 1.0
 [s][5]     = advanced                               # 0.0 / 1.0
 [s][6]     = fled                                   # 0.0 / 1.0
-[s][7]     = coherent                               # 0.0 / 1.0 (03.03)
-[s][8]     = engaged                                # 0.0 / 1.0 (03.04)
-[s][9]     = hidden                                 # 0.0 / 1.0 (13.09) [ACTIVE seule]
-[s][10]    = gone_to_ground                         # 0.0 / 1.0 (13.5) [ACTIVE seule]
-[s][11]    = in_cover                               # 0.0 / 1.0 (13.08 branche intrinseque) [ACTIVE seule]
-[s][12]    = deploy_not_on_board                    # 0.0 / 1.0 — one-hot mise en place
-[s][13]    = deploy_pre_battle                      # 0.0 / 1.0
-[s][14]    = deploy_in_battle                       # 0.0 / 1.0
-[s][15]    = deployed_this_turn                     # 0.0 / 1.0 (clause 2 de [HEAVY] 24.16)
-[s][16]    = los_can_see                            # 0.0 / 1.0 (06.01) [ENNEMIS seuls]
-[s][17]    = cover_vs_observer                      # 0.0 / 1.0 (13.08 EXACT, 2 branches) [ENNEMIS seuls]
-[s][18]    = charge_reachable_max_roll              # 0.0 / 1.0 — un plan de charge legal existe au jet
+[s][7]     = charged                                # 0.0 / 1.0 — a fait une charge move ce tour (§15.11 HI)
+[s][8]     = coherent                               # 0.0 / 1.0 (03.03)
+[s][9]     = engaged                                # 0.0 / 1.0 (03.04)
+[s][10]    = hidden                                 # 0.0 / 1.0 (13.09) [ACTIVE seule]
+[s][11]    = gone_to_ground                         # 0.0 / 1.0 (13.5) [ACTIVE seule]
+[s][12]    = in_cover                               # 0.0 / 1.0 (13.08 branche intrinseque) [ACTIVE seule]
+[s][13]    = deploy_not_on_board                    # 0.0 / 1.0 — one-hot mise en place
+[s][14]    = deploy_pre_battle                      # 0.0 / 1.0
+[s][15]    = deploy_in_battle                       # 0.0 / 1.0
+[s][16]    = deployed_this_turn                     # 0.0 / 1.0 (clause 2 de [HEAVY] 24.16)
+[s][17]    = los_can_see                            # 0.0 / 1.0 (06.01) [ENNEMIS seuls]
+[s][18]    = cover_vs_observer                      # 0.0 / 1.0 (13.08 EXACT, 2 branches) [ENNEMIS seuls]
+[s][19]    = charge_reachable_max_roll              # 0.0 / 1.0 — un plan de charge legal existe au jet
                                                     #   MAXIMAL (11.02, 2D6 -> 12) [ENNEMIS seuls, phase
                                                     #   CHARGE seule ; masque = phase_charge]
-[s][19]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
+[s][20]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
 ```
 
 #### `*_ability_ids[s]` / `*_status_ids[s]` — ENSEMBLES D'IDENTIFIANTS  ·  jamais normalise
@@ -378,9 +379,9 @@ decision_ctx_bin[2]      = decision_type_waaagh_call         # 0.0 / 1.0 — app
 decision_ctx_bin[3]      = decision_type_fly_declaration     # 0.0 / 1.0 — « take to the skies » 21.03 (L6)
 decision_ctx_bin[4]      = decision_type_allocation_model    # 0.0 / 1.0 — choix figurine réceptrice 05.04 (P3-4)
 decision_ctx_bin[5]      = decision_type_charge_placement    # 0.0 / 1.0 — placement charge par figurine (chantier 04)
-decision_ctx_bin[6]      = decision_type_reserved_0          # colonnes RÉSERVÉES : le one-hot fait
-decision_ctx_bin[7]      = decision_type_reserved_1          # AGENT_DECISION_TYPE_SLOTS = 8 colonnes,
-decision_ctx_bin[8]      = decision_type_reserved_2          # pré-dimensionnées. Ouvrir un type de
+decision_ctx_bin[6]      = decision_type_fire_overwatch       # 0.0 / 1.0 — slot réservé §15.08 (J4)
+decision_ctx_bin[7]      = decision_type_heroic_intervention  # 0.0 / 1.0 — slot réservé §15.11 (J4)
+decision_ctx_bin[8]      = decision_type_reserved_0          # colonne RÉSERVÉE : le one-hot fait
                                                              # décision consomme une réserve : les bits NE BOUGENT PAS.
                                                              # consomme une réserve : les bits bin NE BOUGENT PAS.
 
@@ -679,6 +680,9 @@ que `DEPLOY_STRATEGY_COUNT` vaut 5.
 `edge_distance` individuelle par figurine ; delta mesure en code)
 → **16703** (`effective_range` : portée maximale de tir de l'observatrice par slot ennemi,
 V11 §9.5 P4 reliquat — 1 scalaire × 32 entités, 2026-08-19).
+→ **16735** (`charged` ajouté à `UNIT_BIN_FIELDS` — slot réservé pour les stratagèmes réactifs
+§15.08 Fire Overwatch / §15.11 Leap to Defend (HI), mécanique non implémentée, J4 — 1 bit ×
+32 entités = +32, 2026-08-24).
 `K_ALLY_SLOTS` passe de 8 à **12** (`+2 044` = 4 lignes × 511). La valeur ne porte plus une marge
 d'observation (« au plus 6 escouades par camp sur les rosters d'entraînement ») mais le **nombre de
 candidats d'activation adressables** : depuis `L2`, l'action `ACTIVATE_SLOT_i` désigne la ligne

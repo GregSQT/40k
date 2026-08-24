@@ -185,6 +185,7 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     "fought",
     "advanced",
     "fled",
+    "charged",           # a fait une charge move ce tour (requis pour HI §15.11 Leap to Defend)
     "coherent",
     "engaged",             # dans la zone d'engagement d'une unité ADVERSE de cette unité
     "hidden",              # ⚠ unité ACTIVE uniquement (13.09)
@@ -433,7 +434,7 @@ def self_model_bin_index(field: str) -> int:
 #: aucune datasheet — c'est le mot-clé FLY qui l'ouvre et 21.03 qui en fixe le prix —, donc ses
 #: deux candidats portent eux aussi un `effect_ids` VIDE. C'est `declines` qui les sépare :
 #: `CHOICE_1` renonce au vol, et le renoncement est précisément « ne rien faire ».
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement")
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "fire_overwatch", "heroic_intervention")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots

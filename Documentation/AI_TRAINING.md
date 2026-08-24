@@ -13,7 +13,7 @@
 >
 > | | Valeur en vigueur | Source de vérité (à relire, jamais à recopier) |
 > |---|---|---|
-> | `obs_size` | **16703** (2026-08-19 — V11 §9.5 P4 : `effective_range`, la portée max de tir de l'unité active en subhexes, entre dans `UNIT_CONT_FIELDS`, soit +32 = 1 scalaire × 32 entités ; 16671 avant, V11 §9.4 P3-4 : `decision_options_cont`, 6 candidats × 2 scalaires ; 16659 avant lui, V11 §0.48 `L2` : `K_ALLY_SLOTS` 8 → 12, une ligne alliée par action d'activation, +2 044 scalaires et **0 paramètre**) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params`. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
+> | `obs_size` | **16735** (2026-08-24 — `charged` ajouté à `UNIT_BIN_FIELDS`, slot réservé §15.08/§15.11, +32 = 1 bit × 32 entités ; 16703 avant, 2026-08-19 — V11 §9.5 P4 : `effective_range`, la portée max de tir de l'unité active en subhexes, entre dans `UNIT_CONT_FIELDS`, soit +32 = 1 scalaire × 32 entités ; 16671 avant, V11 §9.4 P3-4 : `decision_options_cont`, 6 candidats × 2 scalaires ; 16659 avant lui, V11 §0.48 `L2` : `K_ALLY_SLOTS` 8 → 12, une ligne alliée par action d'activation, +2 044 scalaires et **0 paramètre**) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params`. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
 > | espace d'action | **1 139** (1 086 micro + 15 macro + 6 `CHOICE_i` + 20 slots d'Oath of Moment, chantier 01 + **12 slots d'ACTIVATION**, V11 §0.48 `L2` : quelle escouade activer) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`), miroir de `shared_utils.SQUAD_ACTION_*` |
 >
 > - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque
@@ -880,12 +880,12 @@ Règles:
     },
 
     "observation_params": {
-      // SEULE clé de la section : recopie de ObservationBuilder.SQUAD_OBS_SIZE_TARGET (16703 au
-      // 2026-08-19 — VALEUR À RELIRE dans le code, jamais à recopier d'ici). Un écart lève à
+      // SEULE clé de la section : recopie de ObservationBuilder.SQUAD_OBS_SIZE_TARGET (16735 au
+      // 2026-08-24 — VALEUR À RELIRE dans le code, jamais à recopier d'ici). Un écart lève à
       // l'init du moteur. perception_radius / max_nearby_units / max_valid_targets ont été
       // SUPPRIMÉS le 2026-07-28 avec le pipeline mono-figurine : l'étendue perçue est celle de
       // la grille égocentrique (engine/spatial_grid.py).
-      "obs_size": 16703
+      "obs_size": 16735
     },
     
     "model_params": {
