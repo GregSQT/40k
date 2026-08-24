@@ -146,18 +146,16 @@ def test_checkpoint_ne_manque_aucune_cle_de_la_politique_courante(checkpoint_key
     aléatoires), et bot_zone_direct.py tourne en mesurant un modèle différent de celui épinglé.
     """
     manquantes = fresh_policy_keys - checkpoint_keys
-    if not manquantes:  # early return obligatoire : set() <= tout = True éviterait à tort le skip ci-dessous
-        return
-
     modules_manquants = _modules_de(manquantes)
-    if modules_manquants <= _MODULES_EN_ATTENTE:
+    if modules_manquants and modules_manquants <= _MODULES_EN_ATTENTE:
         pytest.skip(
             f"Checkpoint {reference_zip.name!r} antérieur à l'ajout de "
             f"{', '.join(sorted(modules_manquants))} — "
             "mettre à jour REFERENCE_MODEL ou vider _MODULES_EN_ATTENTE selon l'état du checkpoint."
         )
 
-    manquantes_inattendues = {k for k in manquantes if k.split(".")[0] not in _MODULES_EN_ATTENTE}
+    modules_inattendus = modules_manquants - _MODULES_EN_ATTENTE
+    manquantes_inattendues = {k for k in manquantes if k.split(".")[0] in modules_inattendus}
     assert not manquantes_inattendues, (
         f"Le checkpoint {reference_zip.name!r} ne contient pas les clés suivantes, "
         f"présentes dans PointerMaskablePolicy :\n"
