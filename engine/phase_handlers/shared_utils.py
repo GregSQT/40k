@@ -8477,9 +8477,11 @@ def shoot_weapon_eligible_target_slots(
             f"({len(profiles)} profils, K={_K}) pour {squad_id!r}"
         )
     weapon_code = require_key(profiles[weapon_slot][0], "code")
+    _uc = require_key(game_state, "units_cache")
     elig: List[int] = [
         slot_i for slot_i, tsid in enumerate(enemy_slot_ids)
         if tsid is not None
+        and str(tsid) in _uc and entry_is_on_battlefield(_uc[str(tsid)])
         and squad_shoot_weapon_qty_max(game_state, squad_id, weapon_code, str(tsid)) > 0
     ]
     return weapon_code, elig
@@ -8513,6 +8515,7 @@ def shoot_weapon_remaining_eligible_slots(
     if 0 <= except_slot < len(profiles):
         _ewp = profiles[except_slot][0]
         _except_combi = (_ewp.get("COMBI_WEAPON") if isinstance(_ewp, dict) else None)
+    _uc = require_key(game_state, "units_cache")
     result: Dict[int, str] = {}
     for slot_j, (weapon, _) in enumerate(profiles[:_K]):
         if slot_j == except_slot:
@@ -8526,6 +8529,7 @@ def shoot_weapon_remaining_eligible_slots(
             squad_shoot_weapon_qty_max(game_state, squad_id, code, str(tsid)) > 0
             for tsid in enemy_slot_ids
             if tsid is not None
+            and str(tsid) in _uc and entry_is_on_battlefield(_uc[str(tsid)])
         ):
             result[slot_j] = code
     return result

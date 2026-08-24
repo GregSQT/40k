@@ -556,3 +556,54 @@ def test_combi_weapon_remaining_excludes_siblings():
     assert remaining == {}, (
         f"remaining doit être vide après sélection du frag et exclusion de krak (sœur COMBI) : {remaining}"
     )
+
+
+# ─── Régression : escouade hors table dans enemy_slot_ids ────────────────────
+
+def _off_table_scenario():
+    """Attaquant (squad 1), un ennemi sur table (squad 2), un ennemi hors table (squad 4, sentinelle -1/-1)."""
+    m_atk = _m(5, 5, [STORM])
+    atk = _unit(1, 1, 5, 5, [m_atk])
+    atk["RNG_WEAPONS"] = [STORM]
+
+    m_enemy = _m(5, 10, [STORM])
+    enemy_on = _unit(2, 2, 5, 10, [m_enemy])
+    enemy_on["RNG_WEAPONS"] = [STORM]
+
+    # Unité hors table : sentinelle (-1, -1)
+    m_off = _m(-1, -1, [STORM])
+    enemy_off = _unit(4, 2, -1, -1, [m_off])
+    enemy_off["RNG_WEAPONS"] = [STORM]
+
+    gs = _arm_pool(_make_gs([atk, enemy_on, enemy_off]))
+    squad_shooting_unit_activation_start(gs, "1")
+    squad_shooting_type_choose(gs, "1", SHOOTING_TYPE_NORMAL)
+    # Slot list : [squad_off, squad_on, None...] — l'hors-table est en première position
+    enemy_slots = ["4", "2"] + [None] * 18
+    return gs, enemy_slots
+
+
+def test_eligible_target_slots_skips_off_battlefield():
+    """shoot_weapon_eligible_target_slots ne crashe pas sur un tsid hors table.
+
+    Régression : entry_footprint levait ValueError si une escouade en réserves
+    (sentinelle -1/-1) se retrouvait dans enemy_slot_ids sans filtre.
+    L'escouade hors table doit être silencieusement ignorée ; la cible sur table reste éligible.
+    """
+    gs, enemy_slots = _off_table_scenario()
+    code, slots = shoot_weapon_eligible_target_slots(gs, "1", 0, enemy_slots)
+    # slot 0 = squad_off → ignoré ; slot 1 = squad_on → éligible
+    assert 1 in slots, f"squad_on (slot 1) attendu éligible, reçu {slots}"
+    assert 0 not in slots, f"squad_off (slot 0, hors table) ne doit pas être éligible"
+
+
+def test_remaining_eligible_slots_skips_off_battlefield():
+    """shoot_weapon_remaining_eligible_slots ne crashe pas sur un tsid hors table.
+
+    Même régression, chemin shoot_weapon_remaining_eligible_slots → squad_shoot_weapon_qty_max
+    → _declare_qty_candidates → entry_footprint.
+    """
+    gs, enemy_slots = _off_table_scenario()
+    remaining = shoot_weapon_remaining_eligible_slots(gs, "1", enemy_slots, except_slot=99)
+    # L'arme slot 0 doit apparaître dans remaining (la cible sur table la rend éligible)
+    assert 0 in remaining, f"slot 0 (STORM) attendu dans remaining, reçu {remaining}"
