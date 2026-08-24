@@ -204,6 +204,10 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     charge_pair_dense = policy.charge_pair_net(latent_pi)
     # §0.69 : tête dense pour l'arme CC, en fin d'espace.
     fight_weapon_dense = policy.fight_weapon_net(latent_pi)
+    # P3-0 : sixième requête, embeddings SELF_MODELS -> logits de retrait cohérence.
+    coherency_pointer = torch.einsum(
+        "bd,bkd->bk", policy.coherency_query_net(latent_pi), feats.self_models
+    ) / scale
     expected = torch.cat(
         [
             move,
@@ -217,6 +221,7 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
             oath_pointer,
             activate_pointer,   # V11 §0.48 `L2`
             fight_weapon_dense, # §0.69 : arme CC (dense)
+            coherency_pointer,  # P3-0 : retrait cohérence (self_models)
         ],
         dim=1,
     )
