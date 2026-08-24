@@ -6128,6 +6128,7 @@ def _build_multi_source_dist_field(
     sources: List[Tuple[int, int]],
     board_cols: int,
     board_rows: int,
+    target_cells: Optional[Set[Tuple[int, int]]] = None,
 ) -> Dict[Tuple[int, int], int]:
     """Champ de distance multi-source sur grille hex sans obstacle.
 
@@ -6135,6 +6136,9 @@ def _build_multi_source_dist_field(
     pour tout (c, r) du plateau : sur une grille sans obstacle la longueur du plus court
     chemin hex (BFS) est egale a la distance cube en ligne droite.
     Cout : O(board_cols * board_rows) au lieu de O(len(sources) * nb_candidats).
+
+    target_cells : si fourni, le BFS s'arrete des que toutes ces cellules ont ete reglees —
+    les distances restant correctes pour les cellules deja visitees.
     """
     from collections import deque
     dist: Dict[Tuple[int, int], int] = {}
@@ -6143,13 +6147,21 @@ def _build_multi_source_dist_field(
         if pos not in dist:
             dist[pos] = 0
             q.append(pos)
+    remaining: Optional[int] = (
+        sum(1 for c in target_cells if c not in dist)
+        if target_cells is not None else None
+    )
     while q:
+        if remaining == 0:
+            break
         cc, cr = q.popleft()
         nd = dist[(cc, cr)] + 1
         for nc, nr in get_hex_neighbors(cc, cr):
             if 0 <= nc < board_cols and 0 <= nr < board_rows and (nc, nr) not in dist:
                 dist[(nc, nr)] = nd
                 q.append((nc, nr))
+                if remaining is not None and (nc, nr) in target_cells:  # type: ignore[operator]
+                    remaining -= 1
     return dist
 
 
@@ -6441,6 +6453,14 @@ def charge_build_valid_plan(
     if closest_gap - engage_reach > budget:
         return None
 
+    # Cellules d'ou l'engagement est GEOMETRIQUEMENT possible (surensemble, cf. ci-dessus).
+    # Construit avant le BFS : sert de borne d'arret (target_cells) pour limiter le BFS
+    # aux cellules effectivement consultees par _engaged_sort_key (~500-900 hex a x5
+    # au lieu de ~1800 = tout le plateau).
+    engage_zone_cells: Set[Tuple[int, int]] = set()
+    for tc, tr in target_positions:
+        engage_zone_cells.update(_hex_cells_within_radius(tc, tr, engage_reach))
+
     # Champ de distance pré-calculé : BFS multi-source sans obstacle = distance cube exacte.
     # Remplace le min(calculate_hex_distance(...) for oc, or_ in sources) appelé par
     # _engaged_sort_key pour CHAQUE cellule candidate — O(board) au lieu de O(sources×cands).
@@ -6455,13 +6475,9 @@ def charge_build_valid_plan(
     if _intent_positions:
         _board_cols: int = int(require_key(game_state, "board_cols"))
         _board_rows: int = int(require_key(game_state, "board_rows"))
-        _dist_field = _build_multi_source_dist_field(_intent_positions, _board_cols, _board_rows)
-
-    # Cellules d'ou l'engagement est GEOMETRIQUEMENT possible (surensemble, cf. ci-dessus).
-    # Construit une fois pour l'escouade : il ne depend pas de la figurine traitee.
-    engage_zone_cells: Set[Tuple[int, int]] = set()
-    for tc, tr in target_positions:
-        engage_zone_cells.update(_hex_cells_within_radius(tc, tr, engage_reach))
+        _dist_field = _build_multi_source_dist_field(
+            _intent_positions, _board_cols, _board_rows, target_cells=engage_zone_cells
+        )
 
     plan: List[Tuple[str, int, int, int]] = []
     occupied_after: Set[Tuple[int, int]] = set()  # cellules deja reservees par ce plan
