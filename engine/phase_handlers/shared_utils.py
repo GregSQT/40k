@@ -6124,6 +6124,35 @@ def _hex_cells_within_radius(col: int, row: int, radius: int) -> Iterator[Tuple[
                 yield (nc, nr)
 
 
+def _build_multi_source_dist_field(
+    sources: List[Tuple[int, int]],
+    board_cols: int,
+    board_rows: int,
+) -> Dict[Tuple[int, int], int]:
+    """Champ de distance multi-source sur grille hex sans obstacle.
+
+    Equivalent exact de min(calculate_hex_distance(c, r, oc, or_) for oc, or_ in sources)
+    pour tout (c, r) du plateau : sur une grille sans obstacle la longueur du plus court
+    chemin hex (BFS) est egale a la distance cube en ligne droite.
+    Cout : O(board_cols * board_rows) au lieu de O(len(sources) * nb_candidats).
+    """
+    from collections import deque
+    dist: Dict[Tuple[int, int], int] = {}
+    q: deque = deque()
+    for pos in sources:
+        if pos not in dist:
+            dist[pos] = 0
+            q.append(pos)
+    while q:
+        cc, cr = q.popleft()
+        nd = dist[(cc, cr)] + 1
+        for nc, nr in get_hex_neighbors(cc, cr):
+            if 0 <= nc < board_cols and 0 <= nr < board_rows and (nc, nr) not in dist:
+                dist[(nc, nr)] = nd
+                q.append((nc, nr))
+    return dist
+
+
 def _model_footprint_radius(
     game_state: Dict[str, Any], squad_id: str, model_entry: Dict[str, Any], col: int, row: int
 ) -> int:
@@ -6375,6 +6404,20 @@ def charge_build_valid_plan(
             for _fc, _fr in _nte.get("occupied_hexes", []):  # get allowed
                 _intent_nontgt_positions.append((int(_fc), int(_fr)))
 
+    # Champs de distance pré-calculés : BFS multi-source sans obstacle = distance cube exacte.
+    # Remplace le min(calculate_hex_distance(...) for oc, or_ in sources) appelé par
+    # _engaged_sort_key pour CHAQUE cellule candidate — O(board) au lieu de O(sources×cands).
+    _board_cols: int = int(require_key(game_state, "board_cols"))
+    _board_rows: int = int(require_key(game_state, "board_rows"))
+    _obj_dist_field: Dict[Tuple[int, int], int] = (
+        _build_multi_source_dist_field(_intent_obj_positions, _board_cols, _board_rows)
+        if intent == 1 and _intent_obj_positions else {}
+    )
+    _nontgt_dist_field: Dict[Tuple[int, int], int] = (
+        _build_multi_source_dist_field(_intent_nontgt_positions, _board_cols, _board_rows)
+        if intent == 2 and _intent_nontgt_positions else {}
+    )
+
     # Portee d'engagement en distance CENTRE-A-CENTRE : borne superieure par inegalite
     # triangulaire hexagonale (ez borde-a-bord + les deux demi-socles). Surensemble : chaque
     # cellule retenue est ensuite validee par `unit_entries_within_engagement_zone`.
@@ -6440,16 +6483,10 @@ def charge_build_valid_plan(
     def _engaged_sort_key(nc: int, nr: int, d_orig: int, gap: int) -> tuple:
         """Clé de tri pour les candidats d'engagement, paramétrée par l'intention L10."""
         if intent == 1:  # Objectif : priorité à la cellule la plus proche d'un objectif
-            obj_d = (
-                min(calculate_hex_distance(nc, nr, oc, or_) for oc, or_ in _intent_obj_positions)
-                if _intent_obj_positions else 0
-            )
+            obj_d = _obj_dist_field.get((nc, nr), 0)
             return (obj_d, d_orig, gap, nc, nr)
         if intent == 2:  # Isolation : priorité aux cellules les plus loin des ennemis non-ciblés
-            nt_d = (
-                min(calculate_hex_distance(nc, nr, ec, er) for ec, er in _intent_nontgt_positions)
-                if _intent_nontgt_positions else 0
-            )
+            nt_d = _nontgt_dist_field.get((nc, nr), 0)
             return (-nt_d, gap, nc, nr)
         if intent == 3:  # Pénétration : figurine avance au maximum du budget
             return (-d_orig, gap, nc, nr)
