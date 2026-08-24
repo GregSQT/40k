@@ -125,7 +125,8 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
-| moteur | **Plunging Fire (22.05)** — +1 touche depuis terrain ≥3" (dernier trou règles rosters Armageddon) | [moteur.md#plunging-fire](moteur.md#plunging-fire) | ⚡ |
+| moteur | **Plunging Fire (22.05) + Deadly Demise (24.08)** — lot passif ⚡ : +1 BS depuis terrain ≥3" ; explosion D6/6+ sur destruction de figurine | [moteur.md#plunging-fire](moteur.md#plunging-fire) | ⚡ |
+| moteur+training | **Stratagèmes réactifs** — Fire Overwatch §15.08 + Heroic Intervention §15.11 ; **slots obs réservés avant R1** (`"charged"` UNIT_BIN + 2 types AGENT_DECISION), implémentation J4 | [moteur.md#reactive-stratagems](moteur.md#reactive-stratagems) | 🚫 |
 | analyzer | ✅ PROJ.1.4 double_pile_in corrigé (2026-08-18) — overrun 12.06 loggué \"OVERRUN PILED IN\", faux positifs éliminés | — | ⚡ |
 | analyzer | ✅ models_segment capturé après commit_move (2026-08-18) — faux positifs pile-in éliminés (fight_handler + w40k_core) | — | ⚡ |
 | analyzer | ✅ Réserves PvP 04b tests code-review corrigés (2026-08-18) — symétrie garde, formule sentinelle, commentaire xdist | — | ⚡ |

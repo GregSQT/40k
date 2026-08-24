@@ -10,13 +10,35 @@
 
 ---
 
-## Plunging Fire (22.05) {#plunging-fire}
+## Plunging Fire (22.05) + Deadly Demise (24.08) {#plunging-fire}
 
-Règle : +1 au hit roll pour les attaques à distance ciblant une unité visible dont des figurines sont au sol, si l'attaquant est sur un terrain feature ≥3" de hauteur (ou TOWERING et cible à ≤12"). Sans effet sur les AIRCRAFT.
+Lot passif ⚡ — aucun changement d'action space ni d'obs, livrable pendant un run.
 
-Dernier trou de fidélité aux règles pour les rosters Armageddon (démo).
+**Plunging Fire §22.05 :** +1 au hit roll pour les attaques à distance ciblant une unité visible dont des figurines sont au sol, si l'attaquant est sur un terrain feature ≥3" de hauteur (ou TOWERING et cible à ≤12"). Sans effet sur les AIRCRAFT.
 
-Périmètre estimé : `shooting_handlers.py` (calcul modificateur BS) + `attack_sequence.py` (token) + test rouge/vert.
+**Deadly Demise §24.08 :** à chaque destruction d'un modèle portant la capacité, lancer 1D6 ; sur un 6, chaque unité à ≤ 6" subit X blessures mortelles (X indiqué sur la datasheet ; si X est aléatoire, lancer séparément par unité affectée). Résolution APRÈS l'emergency disembark des unités embarquées.
+
+Périmètre estimé :
+- Plunging Fire : `shooting_handlers.py` (modificateur BS) + `attack_sequence.py` (token) + test rouge/vert.
+- Deadly Demise : callback dans `destroy_model` (w40k_core ou combat_utils) + `step_logger` ([DEADLY DEMISE]) + `analyzer_couverture.md` (nouveau contrôle) + test rouge/vert.
+
+---
+
+## Stratagèmes réactifs — Fire Overwatch (15.08) et Heroic Intervention (15.11) {#reactive-stratagems}
+
+**Obs réservée avant R1 (2026-08-24), implémentation à J4.**
+
+Deux stratagèmes core (1 CP chacun) déclenchés pendant le tour adverse :
+- **Fire Overwatch §15.08** : fin de phase de mouvement adverse — unité amie tire en snap shooting (touche sur 6 seulement, une cible visible à ≤ 24").
+- **Heroic Intervention §15.11** : fin de phase de charge adverse — unité amie résout une charge. Mode *Leap to Defend* (gratuit, cibles = unités qui ont chargé) ou *Into the Fray* (+1 CP, toutes cibles à ≤ 6").
+
+Interruptions réactives pendant le tour adverse — cas le plus complexe du gym (le joueur passif décide). Implémentées via le mécanisme `agent_decision` existant.
+
+**Slots obs réservés maintenant (avant R1) :**
+1. `"fire_overwatch"` + `"heroic_intervention"` dans `AGENT_DECISION_TYPE_IDS` — **gratuit** (AGENT_DECISION_TYPE_SLOTS = 8, 5 → 7 utilisés).
+2. `"charged"` dans `UNIT_BIN_FIELDS` — **+1 scalaire/entité**, nécessaire pour le mode *Leap to Defend* (distinguer les ennemis qui ont chargé). À faire en même temps que R1 pour éviter un 2e `--new` post-J3.
+
+→ `Documentation/Implémentation/A_faire/reactive_stratagems_overwatch_hi.md`
 
 ---
 
