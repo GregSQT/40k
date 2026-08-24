@@ -6441,20 +6441,21 @@ def charge_build_valid_plan(
     if closest_gap - engage_reach > budget:
         return None
 
-    # Champs de distance pré-calculés : BFS multi-source sans obstacle = distance cube exacte.
+    # Champ de distance pré-calculé : BFS multi-source sans obstacle = distance cube exacte.
     # Remplace le min(calculate_hex_distance(...) for oc, or_ in sources) appelé par
     # _engaged_sort_key pour CHAQUE cellule candidate — O(board) au lieu de O(sources×cands).
     # Placé APRÈS la sortie O(1) : inutile de parcourir le plateau si la cible est hors d'atteinte.
-    _board_cols: int = int(require_key(game_state, "board_cols"))
-    _board_rows: int = int(require_key(game_state, "board_rows"))
-    _obj_dist_field: Dict[Tuple[int, int], int] = (
-        _build_multi_source_dist_field(_intent_obj_positions, _board_cols, _board_rows)
-        if intent == 1 and _intent_obj_positions else {}
+    # intent==1 et intent==2 sont mutuellement exclusifs : un seul champ est jamais non-vide.
+    _intent_positions: List[Tuple[int, int]] = (
+        _intent_obj_positions if intent == 1 else
+        _intent_nontgt_positions if intent == 2 else
+        []
     )
-    _nontgt_dist_field: Dict[Tuple[int, int], int] = (
-        _build_multi_source_dist_field(_intent_nontgt_positions, _board_cols, _board_rows)
-        if intent == 2 and _intent_nontgt_positions else {}
-    )
+    _dist_field: Dict[Tuple[int, int], int] = {}
+    if _intent_positions:
+        _board_cols: int = int(require_key(game_state, "board_cols"))
+        _board_rows: int = int(require_key(game_state, "board_rows"))
+        _dist_field = _build_multi_source_dist_field(_intent_positions, _board_cols, _board_rows)
 
     # Cellules d'ou l'engagement est GEOMETRIQUEMENT possible (surensemble, cf. ci-dessus).
     # Construit une fois pour l'escouade : il ne depend pas de la figurine traitee.
@@ -6484,11 +6485,9 @@ def charge_build_valid_plan(
     def _engaged_sort_key(nc: int, nr: int, d_orig: int, gap: int) -> tuple:
         """Clé de tri pour les candidats d'engagement, paramétrée par l'intention L10."""
         if intent == 1:  # Objectif : priorité à la cellule la plus proche d'un objectif
-            obj_d = _obj_dist_field.get((nc, nr), 0)
-            return (obj_d, d_orig, gap, nc, nr)
+            return (_dist_field.get((nc, nr), 0), d_orig, gap, nc, nr)
         if intent == 2:  # Isolation : priorité aux cellules les plus loin des ennemis non-ciblés
-            nt_d = _nontgt_dist_field.get((nc, nr), 0)
-            return (-nt_d, gap, nc, nr)
+            return (-_dist_field.get((nc, nr), 0), gap, nc, nr)
         if intent == 3:  # Pénétration : figurine avance au maximum du budget
             return (-d_orig, gap, nc, nr)
         if intent == 4:  # Étalé : formation la plus dispersée
