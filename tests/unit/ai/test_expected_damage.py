@@ -16,7 +16,7 @@ from shared.data_validation import ConfigurationError
 from engine.utils.expected_damage import expected_damage
 
 
-def _weapon(atk: int, strength: int, ap: int, nb=1, dmg=1) -> dict:
+def _weapon(atk: int, strength: int, ap: int, nb: int = 1, dmg: int | str = 1) -> dict:
     """Arme minimale sans règle d'arme."""
     return {
         "ATK": atk, "STR": strength, "AP": ap,
@@ -43,7 +43,7 @@ def _target(t: int, sv: int, invul: int = 7) -> dict:
 def test_bolter_vs_marine():
     weapon = _weapon(atk=3, strength=4, ap=0, nb=2, dmg=1)
     target = _target(t=4, sv=3)
-    result = expected_damage({}, weapon, target)
+    result = expected_damage(weapon, target)
     assert result == pytest.approx(2 / 9, rel=1e-6)
 
 
@@ -60,10 +60,10 @@ def test_bolter_vs_marine():
 def test_fuseur_vs_marine_save_impossible():
     weapon = _weapon(atk=3, strength=8, ap=-4, nb=1, dmg="D6")
     target = _target(t=4, sv=3)
-    result = expected_damage({}, weapon, target)
+    result = expected_damage(weapon, target)
     assert result == pytest.approx(35 / 18, rel=1e-6)
     # Fuseur >> bolter (35/18 ≈ 1.94 vs 2/9 ≈ 0.22)
-    bolter = expected_damage({}, _weapon(atk=3, strength=4, ap=0, nb=2, dmg=1), target)
+    bolter = expected_damage(_weapon(atk=3, strength=4, ap=0, nb=2, dmg=1), target)
     assert result > bolter
 
 
@@ -78,8 +78,8 @@ def test_invul_save_better_than_modified_armor():
     target_no_invul = _target(t=4, sv=3, invul=7)
     target_invul_4 = _target(t=4, sv=3, invul=4)
 
-    ev_no_invul = expected_damage({}, weapon, target_no_invul)
-    ev_with_invul = expected_damage({}, weapon, target_invul_4)
+    ev_no_invul = expected_damage(weapon, target_no_invul)
+    ev_with_invul = expected_damage(weapon, target_invul_4)
 
     # Avec InSv 4+ → moins de dégâts attendus
     assert ev_with_invul < ev_no_invul
@@ -97,21 +97,21 @@ def test_invul_save_better_than_modified_armor():
 def test_missing_atk_raises():
     weapon = {"STR": 4, "AP": 0, "NB": 1, "DMG": 1, "WEAPON_RULES": []}
     with pytest.raises(ConfigurationError):
-        expected_damage({}, weapon, _target(t=4, sv=3))
+        expected_damage(weapon, _target(t=4, sv=3))
 
 
 def test_missing_target_t_raises():
     weapon = _weapon(atk=3, strength=4, ap=0)
     target = {"ARMOR_SAVE": 3, "INVUL_SAVE": 7}
     with pytest.raises(ConfigurationError):
-        expected_damage({}, weapon, target)
+        expected_damage(weapon, target)
 
 
 def test_missing_invul_save_raises():
     weapon = _weapon(atk=3, strength=4, ap=0)
     target = {"T": 4, "ARMOR_SAVE": 3}
     with pytest.raises(ConfigurationError):
-        expected_damage({}, weapon, target)
+        expected_damage(weapon, target)
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +119,8 @@ def test_missing_invul_save_raises():
 # ---------------------------------------------------------------------------
 def test_better_bs_deals_more_damage():
     target = _target(t=4, sv=3)
-    ev_bs3 = expected_damage({}, _weapon(atk=3, strength=4, ap=0, nb=1, dmg=1), target)
-    ev_bs2 = expected_damage({}, _weapon(atk=2, strength=4, ap=0, nb=1, dmg=1), target)
+    ev_bs3 = expected_damage(_weapon(atk=3, strength=4, ap=0, nb=1, dmg=1), target)
+    ev_bs2 = expected_damage(_weapon(atk=2, strength=4, ap=0, nb=1, dmg=1), target)
     assert ev_bs2 > ev_bs3
 
 
