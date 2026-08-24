@@ -3897,29 +3897,21 @@ def _shooter_lateral_vantage_hexes(
         return []
     perp_x, perp_y = -dy, dx  # 90° rotation of the anchor→target axis
 
+    if _proj_cache is None:
+        _proj_cache = [_hex_projected(int(hc), int(hr)) for hc, hr in shooter_hexes]
+
     best_pos: Optional[Tuple[int, int]] = None
     best_neg: Optional[Tuple[int, int]] = None
     max_d = float("-inf")
     min_d = float("inf")
-    if _proj_cache is not None:
-        for (hc, hr), (hx, hy) in zip(shooter_hexes, _proj_cache):
-            d = (hx - ax) * perp_x + (hy - ay) * perp_y
-            if d > max_d:
-                max_d = d
-                best_pos = (int(hc), int(hr))
-            if d < min_d:
-                min_d = d
-                best_neg = (int(hc), int(hr))
-    else:
-        for hc, hr in shooter_hexes:
-            hx, hy = _hex_projected(int(hc), int(hr))
-            d = (hx - ax) * perp_x + (hy - ay) * perp_y
-            if d > max_d:
-                max_d = d
-                best_pos = (int(hc), int(hr))
-            if d < min_d:
-                min_d = d
-                best_neg = (int(hc), int(hr))
+    for (hc, hr), (hx, hy) in zip(shooter_hexes, _proj_cache):
+        d = (hx - ax) * perp_x + (hy - ay) * perp_y
+        if d > max_d:
+            max_d = d
+            best_pos = (int(hc), int(hr))
+        if d < min_d:
+            min_d = d
+            best_neg = (int(hc), int(hr))
 
     anchor = (int(shooter_anchor[0]), int(shooter_anchor[1]))
     out: List[Tuple[int, int]] = []
@@ -4388,24 +4380,31 @@ def _target_model_visible_cells(
     LoS 3D : ``z_target``/``occ_target`` = sommet vertical + dalle occultante de CE modèle cible.
     Combinés PAR figurine tireuse à ses propres ``z_s``/``occ_s`` (portés par le 5-tuple). Sol↔sol
     (z None des deux côtés, aucune dalle) → tracé 2D inchangé."""
-    # ``floor_occ`` (dalles occultantes combinées tireur+cible) ne dépend que de la figurine tireuse
-    # et de la cible — PAS de la case visée. Précalculé une fois par figurine tireuse, hors de la
-    # boucle des cases (sinon reconstruction inutile à chaque case, y compris une liste vide pour les
-    # unités au sol dont z n'est pas None). Chaque entrée : (anchor, footprint, wall_eff, z_s, floor_occ).
-    prepared: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any]] = []
+    # Précalculé une fois par figurine tireuse, hors de la boucle des cases :
+    # ``floor_occ`` (dalles occultantes) + proj_cache (projections du socle tireur) évitent de
+    # recalculer ces valeurs pour chaque case cible × figurine tireuse → O(N×M) au lieu de O(N×M×footprint).
+    # Chaque entrée : (anchor, footprint, wall_eff, z_s, floor_occ, proj_cache, anchor_proj).
+    from engine.hex_utils import _hex_projected as _hp
+    prepared: List[Tuple[Tuple[int, int], List[Tuple[int, int]], Set[Tuple[int, int]], Optional[float], Any, Optional[List[Tuple[float, float]]], Tuple[float, float]]] = []
     for s_anchor, s_footprint, s_wall, z_s, occ_s in shooter_models:
         if (z_s is not None) and (z_target is not None):
             occs = [o for o in (occ_s, occ_target) if o is not None]
             floor_occ = occs or None
         else:
             floor_occ = None
-        prepared.append((s_anchor, s_footprint, s_wall, z_s, floor_occ))
+        s_anchor_proj = _hp(int(s_anchor[0]), int(s_anchor[1]))
+        s_proj_cache: Optional[List[Tuple[float, float]]] = (
+            [_hp(int(hc), int(hr)) for hc, hr in s_footprint]
+            if len(s_footprint) > 1 else None
+        )
+        prepared.append((s_anchor, s_footprint, s_wall, z_s, floor_occ, s_proj_cache, s_anchor_proj))
     vset: Set[Tuple[int, int]] = set()
     for tc, tr in target_model_hexes:
-        for s_anchor, s_footprint, s_wall, z_s, floor_occ in prepared:
+        for s_anchor, s_footprint, s_wall, z_s, floor_occ, s_proj_cache, s_anchor_proj in prepared:
             if _los_hex_visible(
                 s_anchor, s_footprint, tc, tr, s_wall, obscuring_by_hex, excluded_areas,
                 floor_occluders=floor_occ, z_start=z_s, z_end=z_target,
+                _shooter_proj_cache=s_proj_cache, _shooter_anchor_proj=s_anchor_proj,
             ):
                 vset.add((int(tc), int(tr)))
                 break
@@ -4758,12 +4757,17 @@ def _update_unit_los_preview_data(
             terrain_hex_set.add((int(_h[0]), int(_h[1])))
 
     sc, sr = int(shooter_col), int(shooter_row)
-    from engine.hex_utils import Socle, is_phantom_bottom_hex
+    from engine.hex_utils import Socle, is_phantom_bottom_hex, _hex_projected as _hp
     from engine.combat_utils import ranged_edge_distance_to_cell
     _preview_metric = _ranged_distance_metric(game_state)
     _preview_socle = Socle(
         unit["BASE_SHAPE"], unit["BASE_SIZE"], sc, sr,
         {(int(c), int(r)) for c, r in _shooter_hexes},
+    )
+    _preview_anchor_proj: Optional[Tuple[float, float]] = _hp(sc, sr)
+    _preview_proj_cache: Optional[List[Tuple[float, float]]] = (
+        [_hp(int(hc), int(hr)) for hc, hr in _shooter_hexes]
+        if len(_shooter_hexes) > 1 else None
     )
     attack_cells: List[Dict[str, int]] = []
     cover_cells: List[Dict[str, int]] = []
@@ -4780,7 +4784,8 @@ def _update_unit_los_preview_data(
             _excluded_areas = frozenset((hex_area,)) if hex_area is not None else frozenset()
             # Même primitive que le ciblage → ancre + vantages latéraux (peek de coin).
             visible = _los_hex_visible(
-                (sc, sr), _shooter_hexes, col, row, wall_set, obscuring_by_hex, _excluded_areas
+                (sc, sr), _shooter_hexes, col, row, wall_set, obscuring_by_hex, _excluded_areas,
+                _shooter_proj_cache=_preview_proj_cache, _shooter_anchor_proj=_preview_anchor_proj,
             )
             ratio_by_hex[f"{col},{row}"] = 1.0 if visible else 0.0
             if not visible:
