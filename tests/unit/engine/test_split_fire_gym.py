@@ -363,3 +363,98 @@ def test_total_action_size_updated():
     assert TOTAL_ACTION_SIZE == 1389, (
         f"TOTAL_ACTION_SIZE attendu 1389, reçu {TOTAL_ACTION_SIZE}"
     )
+
+
+# ─── Tests des fixes bugs F1/F2/F3 ───────────────────────────────────────────
+
+class TestSplitFireBugFixes:
+    """Correctness guards ajoutés par les findings F1/F2/F3."""
+
+    def _gs_with_activation(self):
+        gs = _split_fire_scenario()
+        squad_shooting_unit_activation_start(gs, "1")
+        squad_shooting_type_choose(gs, "1", SHOOTING_TYPE_NORMAL)
+        return gs
+
+    # F3 — guard négatif weapon_slot
+    def test_negative_weapon_slot_raises(self):
+        """F3 : weapon_slot négatif → ValueError (profiles[-1] serait silencieux)."""
+        from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
+
+        gs = self._gs_with_activation()
+        enemy_slots = get_enemy_slot_mapping(gs, 1)
+
+        with pytest.raises(ValueError, match="slot.*hors des profils"):
+            shoot_weapon_eligible_target_slots(gs, "1", -1, enemy_slots)
+
+    # F2 — nettoyage pending_shoot_intent après échec d'activation (via _process_squad_action)
+    def test_stype_none_cleans_pending_intent(self, monkeypatch):
+        """F2 : si resolve_squad_shooting_type retourne None, pending_intent est purgé avant le raise."""
+        import engine.phase_handlers.shared_utils as _su
+        from engine.w40k_core import W40KEngine
+        from engine.macro_intents import SHOOT_WEAPON_SEL_SLOT_BASE
+
+        monkeypatch.setattr(_su, "resolve_squad_shooting_type", lambda *a, **kw: None)
+
+        gs = _split_fire_scenario()
+
+        engine = object.__new__(W40KEngine)
+        engine.game_state = gs
+        engine.step_logger = None
+        engine.gym_training_mode = False
+        engine._shooting_phase_initialized = False
+        engine._movement_phase_initialized = False
+
+        with pytest.raises(RuntimeError, match="aucun type de tir"):
+            engine._process_squad_action(
+                {"action": "squad_shoot_weapon_sel", "squad_id": "1", "weapon_slot": 0}
+            )
+
+        # Le fix doit avoir purgé le pending — une seconde activation ne doit pas lever
+        squad_shooting_unit_activation_start(gs, "1")
+        assert "1" in gs["pending_squad_shoot_intents"]
+
+    def test_activation_without_cleanup_raises_on_second_start(self):
+        """F2 (mutation) : sans cleanup, la seconde activation lève RuntimeError."""
+        gs = _split_fire_scenario()
+        squad_shooting_unit_activation_start(gs, "1")
+
+        # Sans clear_pending_shoot_intent, la seconde activation doit échouer
+        with pytest.raises(RuntimeError, match="already exists at activation start"):
+            squad_shooting_unit_activation_start(gs, "1")
+
+    # F1 — qty_max == 0 lève RuntimeError au lieu de silent drop
+    def test_split_fire_qty_max_zero_raises(self, monkeypatch):
+        """F1 : qty_max==0 lors de la résolution split-fire → RuntimeError explicite."""
+        import engine.phase_handlers.shared_utils as _su
+        from engine.w40k_core import W40KEngine
+        from engine.action_decoder import PENDING_SHOOT_WEAPON_SEL_KEY
+
+        monkeypatch.setattr(_su, "squad_shoot_weapon_qty_max", lambda *a, **kw: 0)
+
+        gs = _split_fire_scenario()
+        squad_shooting_unit_activation_start(gs, "1")
+        squad_shooting_type_choose(gs, "1", SHOOTING_TYPE_NORMAL)
+
+        # Bare engine — pattern identique à test_cascade_fight_subphases.py
+        engine = object.__new__(W40KEngine)
+        engine.game_state = gs
+        engine.step_logger = None
+        engine.gym_training_mode = False
+        engine._shooting_phase_initialized = False
+        engine._movement_phase_initialized = False
+
+        # pending_weapon != None → le code atteint la résolution (remaining vide → boucle)
+        gs[PENDING_SHOOT_WEAPON_SEL_KEY] = {
+            "squad_id": "1",
+            "shooting_type": SHOOTING_TYPE_NORMAL,
+            "pending_weapon": "storm_bolter",
+            "assignments": {},
+            "remaining_weapon_slots": {},
+            "eligible_target_slots": [0],
+        }
+
+        with pytest.raises(RuntimeError, match="qty_max==0"):
+            engine._process_squad_action(
+                {"action": "squad_shoot_split_target", "target_slot": 0}
+            )

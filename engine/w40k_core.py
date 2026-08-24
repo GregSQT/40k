@@ -7702,6 +7702,7 @@ class W40KEngine(gym.Env):
                 get_enemy_slot_mapping,
                 shoot_weapon_eligible_target_slots,
                 shoot_weapon_remaining_eligible_slots,
+                clear_pending_shoot_intent,
             )
 
             sw_squad_id = str(semantic["squad_id"])
@@ -7719,6 +7720,7 @@ class W40KEngine(gym.Env):
                 squad_shooting_unit_activation_start(self.game_state, sw_squad_id)
                 _stype = resolve_squad_shooting_type(self.game_state, sw_squad_id)
                 if _stype is None:
+                    clear_pending_shoot_intent(self.game_state, sw_squad_id)
                     raise RuntimeError(
                         f"squad_shoot_weapon_sel: aucun type de tir pour {sw_squad_id!r}"
                     )
@@ -7825,10 +7827,14 @@ class W40KEngine(gym.Env):
                     _maxq = squad_shoot_weapon_qty_max(
                         self.game_state, sw2_squad_id, _wcode2, _tgt2
                     )
-                    if _maxq > 0:
-                        squad_declare_shoot_weapon_qty(
-                            self.game_state, sw2_squad_id, _wcode2, _maxq, _tgt2
+                    if _maxq == 0:
+                        raise RuntimeError(
+                            f"squad_shoot_split_target: qty_max==0 pour arme {_wcode2!r}"
+                            f" → cible {_tgt2!r} — rupture masque/commit ({sw2_squad_id!r})"
                         )
+                    squad_declare_shoot_weapon_qty(
+                        self.game_state, sw2_squad_id, _wcode2, _maxq, _tgt2
+                    )
                 squad_lock_shoot(self.game_state, sw2_squad_id)
                 _alloc2 = build_manual_shoot_allocation(self.game_state, sw2_squad_id)
                 if _alloc2.get("waiting_for_player"):  # get allowed
