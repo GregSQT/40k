@@ -137,7 +137,7 @@ class RewardCalculator:
         # If result has 'action' field with move/shoot/etc, it's an action - NOT a system response
         # Position data (fromCol/toCol) confirms it's a completed action, not just a prompt
         is_action_result = result.get("action") in [
-            "move", "shoot", "wait", "flee", "charge", "charge_fail", "fight",
+            "move", "shoot", "wait", "flee", "charge", "charge_fail", "fight", "combat",
             "squad_normal_move", "squad_advance", "squad_fall_back", "squad_wait",
             "squad_shoot", "squad_charge", "squad_fight",
         ]
@@ -1187,9 +1187,10 @@ class RewardCalculator:
     # ============================================================================
     
     def _get_reward_mapper(self):
-        """Get reward mapper instance with current rewards config."""
-        from ai.reward_mapper import RewardMapper
-        return RewardMapper(self.rewards_config)
+        if self._reward_mapper is None:
+            from ai.reward_mapper import RewardMapper
+            self._reward_mapper = RewardMapper(self.rewards_config)
+        return self._reward_mapper
 
     def _determine_winner(self, game_state: Dict[str, Any]) -> Optional[int]:
         """
