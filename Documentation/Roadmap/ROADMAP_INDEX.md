@@ -242,6 +242,9 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | moteur+tests | ✅ coherency-fixes (2026-08-24) — double-pop v11 + T1 player_types + queue inter-joueurs | — | ⚡ |
 | tests | ✅ fix-fight-weapon-slot-tests (2026-08-24) — 30 tests rouges corrigés : reward_calculator waiting_for_weapon_select, PENDING_FIGHT_WEAPON_KEY purgé à fin phase fight, x1_selfplay retiré du config, damage_received toujours émis, self_play_snapshot_label, mock build_snapshot_normalizer, fight_weapon_slot/shoot_indirect_slot dans ACTION_FAMILIES, TOTAL_ACTION_SIZE chaîne complète, _weapon code, _stub_rewards patch build_squad_grid, _ranged_episode exige damage_received > 0 | — | ⚡ |
 | infra | ✅ gzip + Brotli livrés (2026-08-18) — stage `brotli-builder`, `load_module` contexte main, directives server | [archives/infra.md](archives/infra.md) | ⚡ |
+| moteur+analyzer | ✅ move_handler 6 guards/corrections post code-review (2026-08-24) — 6 findings code-review appliqués sur move_handler | — | ⚡ |
+| infra | ✅ fix pyright + terme interdit (2026-08-24) — erreurs pyright + terme interdit corrigés | — | ⚡ |
+| moteur | ✅ perf LoS cache projections tireur x5 (2026-08-24) — `_shooter_lateral_vantage_hexes` : projections précalculées une fois par `_compute_visibility_with_obscuring` au lieu de O(n×m) ; test_reserves[mc2] timeout éliminé | — | ⚡ |
 
 ### Bloqués par une décision utilisateur
 

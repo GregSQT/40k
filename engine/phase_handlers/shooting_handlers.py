@@ -3870,6 +3870,9 @@ def _shooter_lateral_vantage_hexes(
     shooter_anchor: Tuple[int, int],
     shooter_hexes: List[Tuple[int, int]],
     target_anchor: Tuple[int, int],
+    *,
+    _proj_cache: "Optional[List[Tuple[float, float]]]" = None,
+    _anchor_proj: "Optional[Tuple[float, float]]" = None,
 ) -> List[Tuple[int, int]]:
     """Return up to 2 shooter footprint hexes that are the perpendicular extremes relative to
     the anchor→target axis (the lateral "peek" vantage points, rule: LoS from any part of the
@@ -3878,12 +3881,16 @@ def _shooter_lateral_vantage_hexes(
     Geometry is computed in the odd-q projected space (same projection as the renderer and the
     obscuring rasterizer), so "perpendicular" is geometrically faithful, then mapped back to the
     actual footprint hexes (no rounding artefacts — the points are real occupied hexes).
+
+    ``_proj_cache`` / ``_anchor_proj`` — projections pré-calculées par l'appelant (une seule fois
+    pour toute la boucle de cibles dans ``_compute_visibility_with_obscuring``). Si absents,
+    la fonction les calcule elle-même (comportement inchangé).
     """
     if len(shooter_hexes) <= 1:
         return []
     from engine.hex_utils import _hex_projected
 
-    ax, ay = _hex_projected(int(shooter_anchor[0]), int(shooter_anchor[1]))
+    ax, ay = _anchor_proj if _anchor_proj is not None else _hex_projected(int(shooter_anchor[0]), int(shooter_anchor[1]))
     tx, ty = _hex_projected(int(target_anchor[0]), int(target_anchor[1]))
     dx, dy = tx - ax, ty - ay
     if dx == 0.0 and dy == 0.0:
@@ -3894,15 +3901,25 @@ def _shooter_lateral_vantage_hexes(
     best_neg: Optional[Tuple[int, int]] = None
     max_d = float("-inf")
     min_d = float("inf")
-    for hc, hr in shooter_hexes:
-        hx, hy = _hex_projected(int(hc), int(hr))
-        d = (hx - ax) * perp_x + (hy - ay) * perp_y
-        if d > max_d:
-            max_d = d
-            best_pos = (int(hc), int(hr))
-        if d < min_d:
-            min_d = d
-            best_neg = (int(hc), int(hr))
+    if _proj_cache is not None:
+        for (hc, hr), (hx, hy) in zip(shooter_hexes, _proj_cache):
+            d = (hx - ax) * perp_x + (hy - ay) * perp_y
+            if d > max_d:
+                max_d = d
+                best_pos = (int(hc), int(hr))
+            if d < min_d:
+                min_d = d
+                best_neg = (int(hc), int(hr))
+    else:
+        for hc, hr in shooter_hexes:
+            hx, hy = _hex_projected(int(hc), int(hr))
+            d = (hx - ax) * perp_x + (hy - ay) * perp_y
+            if d > max_d:
+                max_d = d
+                best_pos = (int(hc), int(hr))
+            if d < min_d:
+                min_d = d
+                best_neg = (int(hc), int(hr))
 
     anchor = (int(shooter_anchor[0]), int(shooter_anchor[1]))
     out: List[Tuple[int, int]] = []
@@ -3992,6 +4009,8 @@ def _los_hex_visible(
     floor_occluders: "Optional[List[Tuple[Set[Tuple[int, int]], float]]]" = None,
     z_start: Optional[float] = None,
     z_end: Optional[float] = None,
+    _shooter_proj_cache: "Optional[List[Tuple[float, float]]]" = None,
+    _shooter_anchor_proj: "Optional[Tuple[float, float]]" = None,
 ) -> bool:
     """True si la case cible est vue depuis l'ancre OU un vantage latéral du tireur.
 
@@ -4003,12 +4022,19 @@ def _los_hex_visible(
     preview + mirroir WASM : LoS identique par construction.
 
     LoS 3D : ``floor_occluders``/``z_start``/``z_end`` propagés tels quels aux tracés ancre ET
-    latéraux (même ``z_start`` = sommet du tireur pour tous ses vantages, cf. plan)."""
+    latéraux (même ``z_start`` = sommet du tireur pour tous ses vantages, cf. plan).
+
+    ``_shooter_proj_cache`` / ``_shooter_anchor_proj`` — projections pré-calculées par
+    ``_compute_visibility_with_obscuring`` (une seule fois par appel, avant la boucle de cibles),
+    transmises à ``_shooter_lateral_vantage_hexes``."""
     if _los_line_segment_clear(shooter_anchor[0], shooter_anchor[1], tgt_col, tgt_row,
                                wall_set, obscuring_by_hex, excluded_areas,
                                floor_occluders=floor_occluders, z_start=z_start, z_end=z_end):
         return True
-    for sc, sr in _shooter_lateral_vantage_hexes(shooter_anchor, shooter_hexes, (tgt_col, tgt_row)):
+    for sc, sr in _shooter_lateral_vantage_hexes(
+        shooter_anchor, shooter_hexes, (tgt_col, tgt_row),
+        _proj_cache=_shooter_proj_cache, _anchor_proj=_shooter_anchor_proj,
+    ):
         if _los_line_segment_clear(sc, sr, tgt_col, tgt_row, wall_set, obscuring_by_hex, excluded_areas,
                                    floor_occluders=floor_occluders, z_start=z_start, z_end=z_end):
             import os as _os_losdbg2
@@ -4078,12 +4104,25 @@ def _compute_visibility_with_obscuring(
             excluded_areas.add(area)
 
     anchor = (int(shooter_anchor[0]), int(shooter_anchor[1]))
+
+    # Precompute shooter hex projections once for the whole target loop.
+    # At x5, shooter_hexes can be 129+ hexes, and without caching each call to
+    # _shooter_lateral_vantage_hexes would reproject them once per target hex → O(n×m).
+    from engine.hex_utils import _hex_projected as _hp
+    _shooter_anchor_proj: Optional[Tuple[float, float]] = _hp(anchor[0], anchor[1])
+    _shooter_proj_cache: Optional[List[Tuple[float, float]]] = (
+        [_hp(int(hc), int(hr)) for hc, hr in shooter_hexes]
+        if len(shooter_hexes) > 1 else None
+    )
+
     visible = 0
     visible_hex_set: Set[Tuple[int, int]] = set()
     for tc, tr in target_hexes:
         if _los_hex_visible(anchor, shooter_hexes, tc, tr, wall_set, obscuring_by_hex,
                             excluded_areas, floor_occluders=floor_occluders,
-                            z_start=z_start, z_end=z_end):
+                            z_start=z_start, z_end=z_end,
+                            _shooter_proj_cache=_shooter_proj_cache,
+                            _shooter_anchor_proj=_shooter_anchor_proj):
             visible += 1
             visible_hex_set.add((int(tc), int(tr)))
     return visible, len(target_hexes), visible_hex_set
