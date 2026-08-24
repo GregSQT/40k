@@ -274,7 +274,7 @@ class RewardCalculator:
             # CRITICAL: Check if no attacks were executed (waiting_for_player or end activation without firing)
             # In these cases, no logs are added, so return 0.0 reward
             waiting_for_player = result.get("waiting_for_player", False)
-            all_attack_results = result.get("all_attack_results", [])
+            all_attack_results = result.get("all_attack_results")
             # ⚠️ CES SORTIES RENVOYAIENT 0.0 SEC, ecrasant `objective_turn_reward`.
             # Un tir n'est pas toujours un payload de tir « pur » : quand il vide le pool, la
             # cascade (w40k_core, boucle `phase_complete`/`next_phase`) le fait traverser les

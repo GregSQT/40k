@@ -442,21 +442,22 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         unit_died_before_move = False
         phase_order = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
         current_phase_order = phase_order.get(phase)
-        for death_turn, death_phase, dead_unit_id, death_line_num in (state.unit_deaths if current_phase_order is not None else []):
-            if dead_unit_id == move_unit_id:
-                if death_turn < turn:
-                    unit_died_before_move = True
-                    break
-                if death_turn == turn:
-                    death_phase_order = phase_order.get(death_phase)
-                    if death_phase_order is None:
-                        continue
-                    if death_phase_order < current_phase_order:
+        if current_phase_order is not None:
+            for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
+                if dead_unit_id == move_unit_id:
+                    if death_turn < turn:
                         unit_died_before_move = True
                         break
-                    if death_phase_order == current_phase_order and death_line_num < state.line_number:
-                        unit_died_before_move = True
-                        break
+                    if death_turn == turn:
+                        death_phase_order = phase_order.get(death_phase)
+                        if death_phase_order is None:
+                            continue
+                        if death_phase_order < current_phase_order:
+                            unit_died_before_move = True
+                            break
+                        if death_phase_order == current_phase_order and death_line_num < state.line_number:
+                            unit_died_before_move = True
+                            break
         if unit_died_before_move:
             stats['dead_unit_moving'][player] += 1
             if stats['first_error_lines']['dead_unit_moving'][player] is None:
