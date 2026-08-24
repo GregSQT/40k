@@ -248,6 +248,11 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | tests+infra | ✅ fix-pytest-errors (2026-08-24) — hex_utils + reward_calculator + test_reward_calculator corrigés | — | ⚡ |
 | moteur+training | ✅ L10 placement de charge décision agent (2026-08-24) — CHARGE_PAIR_SLOTS C(20,2)=190 + tête dense séparée dans pointer_policy, 20 tests verts | — | ⚡ |
 | moteur+training | ✅ P3-8 split-fire ranged weapons gym (2026-08-24) — 10 SHOOT_WEAPON_SEL_SLOTS (1379–1388), TOTAL_ACTION_SIZE 1379→1389, shoot_weapon_sel_net, 2-step flow miroir §0.69, 7 tests rouge/vert | [v11_chemin_critique.md#p3-8](v11_chemin_critique.md#p3-8) | ⚡ |
+| moteur | ✅ fix review findings reward-hex (2026-08-24) — corrections /code-review appliquées | — | ⚡ |
+| moteur | ✅ fix split-fire finally bug (2026-08-24) — squad_shoot_split_target : try/except au lieu de finally, shooting_type préservé si waiting_for_player=True, test rouge/vert | — | ⚡ |
+| moteur | ✅ fix 3 bugs split-fire silencieux (2026-08-24) — F1/F2/F3 corrigés | — | ⚡ |
+| infra | ✅ fix pyright ai rules (2026-08-24) — corrections pyright + règles IA | — | ⚡ |
+| moteur | ✅ simplify split-fire shared_utils (2026-08-24) — _squad_rng_profiles + collect_weapon_profiles module-level + pkey_to_carriers dans build_squad_action_mask | — | ⚡ |
 
 ### Bloqués par une décision utilisateur
 
