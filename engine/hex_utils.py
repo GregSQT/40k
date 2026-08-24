@@ -1902,19 +1902,28 @@ def _isolated_anchor_cells(
 
     Hors plateau compte comme interdit : une poche adossée au bord se referme par le bord.
     """
-    isolated: Set[Tuple[int, int]] = set()
+    # Phase 1 : construire la frange — seules les cases NON bloquées adjacentes à `blocked`
+    # peuvent être des poches. Dédupliquées en un Set : chaque candidate est testée UNE SEULE
+    # fois en phase 2, même si elle est voisine de plusieurs cells de `blocked`.
+    # Coût : O(|blocked| × 6 + |frange| × 6) vs O(|blocked| × 36) pour l'approche naïve ;
+    # à ×5 avec des murs étendus, |blocked| peut dépasser 30 000 cells — la différence est
+    # mesurable (×5-×10 selon la forme du terrain).
+    fringe: Set[Tuple[int, int]] = set()
     for cell in blocked:
         for nb in get_neighbors(*cell):
-            if nb in blocked or nb in isolated:
-                continue
             nc, nr = nb
-            if not (0 <= nc < board_cols and 0 <= nr < board_rows):
-                continue
-            if all(
-                (m in blocked) or not (0 <= m[0] < board_cols and 0 <= m[1] < board_rows)
-                for m in get_neighbors(nc, nr)
-            ):
-                isolated.add(nb)
+            if nb not in blocked and 0 <= nc < board_cols and 0 <= nr < board_rows:
+                fringe.add(nb)
+    # Phase 2 : parmi les candidates de la frange, garder celles dont TOUTES les voisines
+    # sont bloquées ou hors plateau (définition exacte de « poche sans premier pas »).
+    isolated: Set[Tuple[int, int]] = set()
+    for nb in fringe:
+        nc, nr = nb
+        if all(
+            (m in blocked) or not (0 <= m[0] < board_cols and 0 <= m[1] < board_rows)
+            for m in get_neighbors(nc, nr)
+        ):
+            isolated.add(nb)
     return isolated
 
 

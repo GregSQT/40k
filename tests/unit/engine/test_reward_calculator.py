@@ -270,3 +270,33 @@ class TestDesperateEscapeDiedGymPath:
         gs = dict(_MINIMAL_GS)
         reward = rc.calculate_reward(True, result, gs)
         assert reward == 0.0
+
+
+class TestSelectCoherencyRemovalGymPath:
+    """select_coherency_removal doit retourner 0.0 quelle que soit la forme du payload.
+
+    Avant le correctif, calculate_reward levait ValueError : le résultat ne porte
+    ni `unitId` ni `shooterId` ni `unit_id`, et l'action n'était pas dans la liste
+    d'actions à reward nul. C'est le même raisonnement que select_activation : la
+    décision elle-même n'a pas de récompense propre.
+    """
+
+    @pytest.mark.parametrize("result", [
+        {
+            "action": "select_coherency_removal",
+            "squad_id": "1",
+            "model_id": "1#3",
+            "awaiting_coherency_removal": True,
+        },
+        {
+            "action": "select_coherency_removal",
+            "squad_id": "2",
+            "model_id": "2#0",
+        },
+    ], ids=["with_awaiting_flag", "without_awaiting_flag"])
+    def test_returns_zero(self, result: dict) -> None:
+        """coherency_removal_zero : reward nul, aucune ValueError."""
+        rc = _rc_desp()
+        gs = dict(_MINIMAL_GS)
+        reward = rc.calculate_reward(True, result, gs)
+        assert reward == 0.0
