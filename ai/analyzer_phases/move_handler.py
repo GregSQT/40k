@@ -12,6 +12,8 @@ if TYPE_CHECKING:
     from ai.analyzer_state import AnalyzerState
     from ai.analyzer_config import AnalyzerConfig
 
+_TIMESTAMP_RE = re.compile(r'\[(\d+:\d+:\d+)\]')
+
 
 def handle_move_or_fled(
     state: "AnalyzerState",
@@ -298,7 +300,7 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
         # (unit_movement_history et unit_position_collisions incluraient move_unit_id à dest).
         if move_unit_id not in state.unit_movement_history:
             state.unit_movement_history[move_unit_id] = []
-        timestamp_match = re.search(r'\[(\d+:\d+:\d+)\]', line)
+        timestamp_match = _TIMESTAMP_RE.search(line)
         timestamp = timestamp_match.group(1) if timestamp_match else None
         state.unit_movement_history[move_unit_id].append({
             'position': (dest_col, dest_row),
@@ -460,6 +462,15 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             if stats['first_error_lines']['dead_unit_moving'][player] is None:
                 stats['first_error_lines']['dead_unit_moving'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
+    if move_unit_id not in state.unit_hp:
+        stats['parse_errors'].append({
+            'episode': state.current_episode_num,
+            'turn': turn,
+            'phase': phase,
+            'line': line.strip(),
+            'error': f"Move action for unknown unit_id (missing in unit_hp): {move_unit_id}"
+        })
+        return True  # equivalent to continue
     state.units_moved.add(move_unit_id)
 
     # Sync position cache with log start position
@@ -475,7 +486,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
     if (start_col, start_row) != (dest_col, dest_row):
         if move_unit_id not in state.unit_movement_history:
             state.unit_movement_history[move_unit_id] = []
-        timestamp_match = re.search(r'\[(\d+:\d+:\d+)\]', line)
+        timestamp_match = _TIMESTAMP_RE.search(line)
         timestamp = timestamp_match.group(1) if timestamp_match else None
         state.unit_movement_history[move_unit_id].append({
             'position': (dest_col, dest_row),
@@ -498,8 +509,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         if is_move_after_shooting:
             move_range = require_key(config.unit_move_after_shooting_distance_by_type, move_unit_type)
         else:
-            move_range_raw = require_key(state.unit_move, move_unit_id)
-            move_range = int(move_range_raw)
+            move_range = int(require_key(state.unit_move, move_unit_id))
             if move_is_fly:
                 # 21.03 : le vol DÉCLARÉ retranche 2" à la distance max — même prédicat que la
                 # traversée côté moteur (`get_squad_move_budget` / `took_to_the_skies`), donc
@@ -575,15 +585,6 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             if hp_value > 0:
                 colliding_units_before[uid] = current_pos
 
-        if move_unit_id not in state.unit_hp:
-            stats['parse_errors'].append({
-                'episode': state.current_episode_num,
-                'turn': turn,
-                'phase': phase,
-                'line': line.strip(),
-                'error': f"Move action for unknown unit_id (missing in unit_hp): {move_unit_id}"
-            })
-            return True  # equivalent to continue
         if require_key(state.unit_hp, move_unit_id) > 0:
             _position_cache_set(state.unit_positions, move_unit_id, dest_col, dest_row)
 
@@ -751,15 +752,6 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
         if (dest_col, dest_row) in state.wall_hexes:
             stats['wall_collisions'][player] += 1
     else:
-        if move_unit_id not in state.unit_hp:
-            stats['parse_errors'].append({
-                'episode': state.current_episode_num,
-                'turn': turn,
-                'phase': phase,
-                'line': line.strip(),
-                'error': f"Move action for unknown unit_id (missing in unit_hp): {move_unit_id}"
-            })
-            return True  # equivalent to continue
         if require_key(state.unit_hp, move_unit_id) > 0:
             _position_cache_set(state.unit_positions, move_unit_id, dest_col, dest_row)
 
