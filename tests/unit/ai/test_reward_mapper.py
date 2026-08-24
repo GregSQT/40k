@@ -118,7 +118,7 @@ def test_get_movement_reward_ranged_and_melee_paths() -> None:
 def test_kill_bonus_reward_requires_kill_and_applies_no_overkill(monkeypatch: pytest.MonkeyPatch) -> None:
     mapper = RewardMapper(_base_cfg())
     monkeypatch.setattr(mapper, "_get_target_hp", lambda target, game_state: 5)
-    monkeypatch.setattr(mapper, "_was_lowest_hp_target", lambda target, all_targets, game_state: False)
+    monkeypatch.setattr(mapper, "_was_lowest_hp_target", lambda target, all_targets, target_hp, game_state: False)
     reward = mapper.get_kill_bonus_reward(
         {"unitType": "Intercessor"},
         {"id": "T1"},
@@ -161,14 +161,14 @@ def test_was_lowest_hp_target(monkeypatch: pytest.MonkeyPatch) -> None:
     hp_map = {"A": 3, "B": 5, "C": 8}
     monkeypatch.setattr(mapper, "_get_target_hp", lambda t, gs: hp_map[t["id"]])
     # A has lowest HP → True
-    assert mapper._was_lowest_hp_target(targets[0], targets, {}) is True
+    assert mapper._was_lowest_hp_target(targets[0], targets, 3, {}) is True
     # B is not lowest → False
-    assert mapper._was_lowest_hp_target(targets[1], targets, {}) is False
+    assert mapper._was_lowest_hp_target(targets[1], targets, 5, {}) is False
     # Tie: A and D both at 3 → True for A (no other strictly lower)
     targets_tie = [{"id": "A"}, {"id": "D"}]
     hp_tie = {"A": 3, "D": 3}
     monkeypatch.setattr(mapper, "_get_target_hp", lambda t, gs: hp_tie[t["id"]])
-    assert mapper._was_lowest_hp_target(targets_tie[0], targets_tie, {}) is True
+    assert mapper._was_lowest_hp_target(targets_tie[0], targets_tie, 3, {}) is True
 
 
 def test_can_unit_kill_target_in_one_phase_handles_dead_and_missing_weapon(monkeypatch: pytest.MonkeyPatch) -> None:

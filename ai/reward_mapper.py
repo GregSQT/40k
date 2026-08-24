@@ -194,47 +194,20 @@ class RewardMapper:
         target_hp = self._get_target_hp(target, game_state)
 
         if target_hp - damage_dealt <= 0:  # Target will be killed
-            
             result_bonuses = require_key(unit_rewards, "result_bonuses")
-            if phase == "shoot":
-                if "kill_target" not in result_bonuses:
-                    raise ValueError("kill_target reward not found in unit rewards config")
-                base_kill = result_bonuses["kill_target"]
-            else:  # melee combat
-                if "kill_target" not in result_bonuses:
-                    raise ValueError("kill_target reward not found in unit rewards config")
-                base_kill = result_bonuses["kill_target"]
-            
+            base_kill = require_key(result_bonuses, "kill_target")
+            suf = "r" if phase == "shoot" else "m"
+
             # No overkill bonus
             if target_hp == damage_dealt:
-                if phase == "shoot":
-                    if "enemy_killed_no_overkill_r" not in unit_rewards:
-                        raise ValueError("enemy_killed_no_overkill_r reward not found in unit rewards config")
-                    if "enemy_killed_r" not in unit_rewards:
-                        raise ValueError("enemy_killed_r reward not found in unit rewards config")
-                    base_kill += unit_rewards["enemy_killed_no_overkill_r"] - unit_rewards["enemy_killed_r"]
-                else:
-                    if "enemy_killed_no_overkill_m" not in unit_rewards:
-                        raise ValueError("enemy_killed_no_overkill_m reward not found in unit rewards config")
-                    if "enemy_killed_m" not in unit_rewards:
-                        raise ValueError("enemy_killed_m reward not found in unit rewards config")
-                    base_kill += unit_rewards["enemy_killed_no_overkill_m"] - unit_rewards["enemy_killed_m"]
-            
+                base_kill += (require_key(unit_rewards, f"enemy_killed_no_overkill_{suf}")
+                              - require_key(unit_rewards, f"enemy_killed_{suf}"))
+
             # Lowest HP target bonus
-            if self._was_lowest_hp_target(target, all_targets, game_state):
-                if phase == "shoot":
-                    if "enemy_killed_lowests_hp_r" not in unit_rewards:
-                        raise ValueError("enemy_killed_lowests_hp_r reward not found in unit rewards config")
-                    if "enemy_killed_r" not in unit_rewards:
-                        raise ValueError("enemy_killed_r reward not found in unit rewards config")
-                    base_kill += unit_rewards["enemy_killed_lowests_hp_r"] - unit_rewards["enemy_killed_r"]
-                else:
-                    if "enemy_killed_lowests_hp_m" not in unit_rewards:
-                        raise ValueError("enemy_killed_lowests_hp_m reward not found in unit rewards config")
-                    if "enemy_killed_m" not in unit_rewards:
-                        raise ValueError("enemy_killed_m reward not found in unit rewards config")
-                    base_kill += unit_rewards["enemy_killed_lowests_hp_m"] - unit_rewards["enemy_killed_m"]
-            
+            if self._was_lowest_hp_target(target, all_targets, target_hp, game_state):
+                base_kill += (require_key(unit_rewards, f"enemy_killed_lowests_hp_{suf}")
+                              - require_key(unit_rewards, f"enemy_killed_{suf}"))
+
             return base_kill
         
         raise ValueError("Target was not killed - no kill bonus applicable")
@@ -491,9 +464,8 @@ class RewardMapper:
         # Throw error instead of using default
         raise NotImplementedError("_get_max_melee_damage_vs_target requires access to friendly units list")
     
-    def _was_lowest_hp_target(self, target, all_targets: List[Dict[str, Any]], game_state: Dict[str, Any]) -> bool:
+    def _was_lowest_hp_target(self, target, all_targets: List[Dict[str, Any]], target_hp: int, game_state: Dict[str, Any]) -> bool:
         """Check if this target had the lowest HP among all_targets when the kill action was taken."""
-        target_hp = self._get_target_hp(target, game_state)
         for other in all_targets:
             if other is not target:
                 if self._get_target_hp(other, game_state) < target_hp:
