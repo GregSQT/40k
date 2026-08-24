@@ -110,6 +110,8 @@ from engine.macro_intents import (
     MOVE_CELL_COUNT,
     SHOOT_SLOT_BASE,
     SHOOT_SLOT_COUNT,
+    SHOOT_WEAPON_SEL_SLOT_BASE,
+    SHOOT_WEAPON_SEL_SLOT_COUNT,
     TOTAL_ACTION_SIZE,
 )
 from engine.phase_handlers.shared_utils import (
@@ -564,7 +566,8 @@ def test_choice_slot_count_matches_the_action_space_tail(phase_state):
     assert OATH_SLOT_BASE + OATH_SLOT_COUNT == ACTIVATE_SLOT_BASE
     assert ACTIVATE_SLOT_BASE + ACTIVATE_SLOT_COUNT == FIGHT_WEAPON_SLOT_BASE
     assert FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT == COHERENCY_SLOT_BASE
-    assert COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT == TOTAL_ACTION_SIZE
+    assert COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT == SHOOT_WEAPON_SEL_SLOT_BASE
+    assert SHOOT_WEAPON_SEL_SLOT_BASE + SHOOT_WEAPON_SEL_SLOT_COUNT == TOTAL_ACTION_SIZE
     # Hors d'une désignation d'Oath en attente, le slot LÈVE — le masque ne l'ouvre pas.
     with pytest.raises(ValueError, match="sans designation"):
         decoder.convert_squad_action(

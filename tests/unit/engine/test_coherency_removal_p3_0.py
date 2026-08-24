@@ -1,7 +1,7 @@
 """P3-0 — Choix de retrait figurine hors cohérence (03.03).
 
 Verrous :
-  T1 — layout : TOTAL_ACTION_SIZE=1379, COHERENCY immédiatement après FIGHT_WEAPON.
+  T1 — layout : TOTAL_ACTION_SIZE=1389, COHERENCY immédiatement après FIGHT_WEAPON.
   T2 — muet/non-muet : queue armée pour sièges actifs, auto-retrait pour sièges muets.
   T3 — masque : seuls les slots COHERENCY sont ouverts quand pending_coherency_removal est armé.
   T4 — décodeur : slot i → alive[i] (invariant D1 côté figurines).
@@ -19,6 +19,7 @@ from engine.macro_intents import (
     COHERENCY_SLOT_COUNT,
     FIGHT_WEAPON_SLOT_BASE,
     FIGHT_WEAPON_SLOT_COUNT,
+    SHOOT_WEAPON_SEL_SLOT_BASE,
     TOTAL_ACTION_SIZE,
 )
 from engine.observation_builder import ObservationBuilder
@@ -84,10 +85,10 @@ def _gs(positions: List[tuple], squad_id: str = "1", player: int = 1) -> Dict[st
 # T1 — Layout de l'espace d'action
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_total_action_size_is_1379():
-    """VERROU : TOTAL_ACTION_SIZE = 1379 depuis P3-0. Tout retrain avec un ancien modèle est
-    invalide. Ce test DOIT être rouge si P3-0 est annulé (COHERENCY_SLOT_COUNT soustrait)."""
-    assert TOTAL_ACTION_SIZE == 1379
+def test_total_action_size_is_1389():
+    """VERROU : TOTAL_ACTION_SIZE = 1389 depuis P3-8. Tout retrain avec un ancien modèle est
+    invalide. Ce test DOIT être rouge si P3-8 est annulé (SHOOT_WEAPON_SEL_SLOT_COUNT soustrait)."""
+    assert TOTAL_ACTION_SIZE == 1389
 
 
 def test_coherency_slots_immediately_after_fight_weapon():
@@ -96,10 +97,10 @@ def test_coherency_slots_immediately_after_fight_weapon():
     assert COHERENCY_SLOT_BASE == FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT
 
 
-def test_coherency_slots_close_action_space():
-    """COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT == TOTAL_ACTION_SIZE : les slots COHERENCY
-    ferment l'espace. Un gap ici = des logits never reached dans la tête dense."""
-    assert COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT == TOTAL_ACTION_SIZE
+def test_coherency_slots_immediately_before_shoot_weapon_sel():
+    """COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT == SHOOT_WEAPON_SEL_SLOT_BASE : les slots
+    COHERENCY précèdent immédiatement SHOOT_WEAPON_SEL. Un gap ici = des logits never reached."""
+    assert COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT == SHOOT_WEAPON_SEL_SLOT_BASE
 
 
 def test_squad_top_k_matches_coherency_slot_count():

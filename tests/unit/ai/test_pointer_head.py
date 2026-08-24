@@ -54,6 +54,7 @@ from engine.macro_intents import (
     FIGHT_SLOT_COUNT,
     SHOOT_SLOT_BASE,
     SHOOT_SLOT_COUNT,
+    SHOOT_WEAPON_SEL_SLOT_COUNT,
     TOTAL_ACTION_SIZE,
 )
 from engine.observation_entities import (
@@ -208,20 +209,23 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     coherency_pointer = torch.einsum(
         "bd,bkd->bk", policy.coherency_query_net(latent_pi), feats.self_models
     ) / scale
+    # P3-8 : tête dense pour la sélection d'arme de tir (split-fire).
+    shoot_weapon_sel_dense = policy.shoot_weapon_sel_net(latent_pi)
     expected = torch.cat(
         [
             move,
-            base[:, :1],        # wait
+            base[:, :1],           # wait
             pointer,
             charge_pointer,
-            charge_pair_dense,  # paires de charge (dense)
+            charge_pair_dense,     # paires de charge (dense)
             fight_pointer,
-            base[:, 1:],        # fight-sans-cible, shoot-indirect, intents de zone
+            base[:, 1:],           # fight-sans-cible, shoot-indirect, intents de zone
             choice,
             oath_pointer,
-            activate_pointer,   # V11 §0.48 `L2`
-            fight_weapon_dense, # §0.69 : arme CC (dense)
-            coherency_pointer,  # P3-0 : retrait cohérence (self_models)
+            activate_pointer,      # V11 §0.48 `L2`
+            fight_weapon_dense,    # §0.69 : arme CC (dense)
+            coherency_pointer,     # P3-0 : retrait cohérence (self_models)
+            shoot_weapon_sel_dense, # P3-8 : sélection arme tir (dense)
         ],
         dim=1,
     )
