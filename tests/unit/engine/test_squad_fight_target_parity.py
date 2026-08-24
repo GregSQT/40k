@@ -530,9 +530,15 @@ def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
     }
 
     init_enemy_slot_mapping(gs, 1)
+    # Injecter '3' dans le tableau brut : simule un ennemi affecté à un slot PUIS sorti de la table
+    # (réserve stratégique après déploiement). _refresh ne libère pas ce slot tant que l'unité est
+    # dans units_cache ; la régression survient précisément dans cet état.
+    raw_mapping: list = gs["enemy_slot_mapping_p1"]
+    free_slot = next(i for i, sid in enumerate(raw_mapping) if sid is None)
+    raw_mapping[free_slot] = "3"
     enemy_slots = get_enemy_slot_mapping(gs, 1)
 
-    # Vérifier que l'ennemi hors table a bien obtenu un slot (racine du crash).
+    # Vérifier que l'ennemi hors table a bien un slot (racine du crash).
     assert "3" in enemy_slots, "l'ennemi hors table doit avoir un slot pour déclencher la régression"
 
     # Avant fix : crash ValueError. Après fix : pas de crash.

@@ -50,6 +50,16 @@ def _read_pending_oath_selection(game_state: Dict[str, Any]) -> Any:
     return game_state.get("pending_oath_selection")  # get allowed : None = aucune
 
 
+def _read_pending_coherency_removal(game_state: Dict[str, Any]) -> Any:
+    """Lecteur du mécanisme retrait cohérence (03.03) : ``None`` = aucune suppression en attente."""
+    return game_state.get("pending_coherency_removal")  # get allowed : None = aucun
+
+
+def _read_pending_fight_weapon_select(game_state: Dict[str, Any]) -> Any:
+    """Lecteur du mécanisme sélection arme CC (§0.69) : ``None`` = aucune sélection en attente."""
+    return game_state.get("pending_fight_weapon_select")  # get allowed : None = aucune
+
+
 #: LES POINTS DE CHOIX JOUEUR sur lesquels le moteur s'ARRÊTE, chacun avec la famille de slots qui
 #: y répond et le libellé de son message d'erreur. UNE table, DEUX consommateurs — le prédicat
 #: `engine_is_paused_on_player_choice` (sites à modèle) et le tirage
@@ -68,6 +78,8 @@ _PLAYER_CHOICE_MECHANISMS: Tuple[
     # (lecteur d'état, famille de slots qui répond, libellé du mécanisme)
     (read_pending_agent_decision, mi.CHOICE_SLOTS, "decision agent"),
     (_read_pending_oath_selection, mi.OATH_SLOTS, "designation d'Oath"),
+    (_read_pending_coherency_removal, mi.COHERENCY_SLOTS, "retrait coherence"),
+    (_read_pending_fight_weapon_select, mi.FIGHT_WEAPON_SLOTS, "arme CC"),
 )
 
 
@@ -651,25 +663,16 @@ class BotControlledEnv(gym.Wrapper):
             )
 
         if not eligible_units:
-            if self.engine.game_state.get("phase") == "command" and np.any(
-                np.asarray(action_mask, dtype=bool)
+            game_state = self.engine.game_state
+            # Un mécanisme de choix en attente (cohérence, arme CC, Oath, decision agent déjà
+            # traité ci-dessus) appartient toujours à `current_player`. Consulter la table évite
+            # que l'ajout d'un mécanisme hors phase `command` passe inaperçu — le crash mesuré
+            # (`convert_squad_action ... action 1024`) était la facture d'un tel oubli.
+            if engine_is_paused_on_player_choice(game_state) or (
+                game_state.get("phase") == "command"
+                and np.any(np.asarray(action_mask, dtype=bool))
             ):
-                # Command phase: no eligible units but zone intent actions are valid.
-                # Current player owns the decision.
-                #
-                # ⚠️ CE SITE NE CONSULTE PAS `_PLAYER_CHOICE_MECHANISMS`, et c'est correct
-                # AUJOURD'HUI par deux propriétés qui ne sont écrites nulle part ailleurs — deux
-                # revues successives ont dû les re-dériver, d'où cette note :
-                #   1. une désignation d'Oath n'existe qu'en phase `command` (posée par
-                #      `command_handlers`), donc elle tombe forcément dans cette branche ;
-                #   2. elle est toujours posée SUR `current_player` — le propriétaire rendu ici est
-                #      donc bien le sien, même si le masque n'ouvre alors que les `OATH_SLOTS` et
-                #      aucune action de zone, contrairement à ce que dit le commentaire ci-dessus.
-                # Un TROISIÈME mécanisme de choix qui ne serait pas détenu par `current_player`, ou
-                # qui vivrait hors phase `command`, casserait ce raisonnement en silence :
-                # `decision_owner` vaudrait `None` et l'appelant forcerait un `ACTION_WAIT` hors
-                # masque. Ajouter alors la lecture de la table ici, comme aux quatre autres sites.
-                current_player = int(require_key(self.engine.game_state, "current_player"))
+                current_player = int(require_key(game_state, "current_player"))
                 return MaskDecision(current_player, action_mask, eligible_units)
             return MaskDecision(None, action_mask, eligible_units)
 

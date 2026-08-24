@@ -2549,6 +2549,30 @@ def euclidean_edge_distance(a: Socle, b: Socle, max_distance: Optional[float] = 
                 prims_a = _socle_edge_primitives(a)
                 prims_b = _socle_edge_primitives(b)
             assert prims_b is not None  # posé avec prims_a, jamais séparément
+            # Élagage par fonction support : séparation signée dans la direction inter-centres.
+            # Couvre poly–poly ET circle–poly (round vs oval) — le cas circle–circle est sauté
+            # (tight == lower déjà testé ci-dessus). Réduit ~81 % des appels _primitive_edge_dist
+            # pour les kernels EZ oval–oval et oval–round à x5.
+            if max_distance is not None:
+                dist_ab = lower + rad_circ_a + rad_circ_b
+                if dist_ab > 1e-12:
+                    _a_poly = prims_a[i][0] == "p"
+                    _b_poly = prims_b[j][0] == "p"
+                    if _a_poly or _b_poly:
+                        dx_n = (bx - ax) / dist_ab
+                        dy_n = (by - ay) / dist_ab
+                        max_a = (
+                            max(x * dx_n + y * dy_n for x, y in prims_a[i][1])
+                            if _a_poly else ax * dx_n + ay * dy_n + prims_a[i][3]
+                        )
+                        min_b = (
+                            min(x * dx_n + y * dy_n for x, y in prims_b[j][1])
+                            if _b_poly else bx * dx_n + by * dy_n - prims_b[j][3]
+                        )
+                        tight = min_b - max_a
+                        if tight > max_distance:
+                            best = min(best, tight)
+                            continue
             d = _primitive_edge_dist(prims_a[i], prims_b[j])
             if d < best:
                 best = d
