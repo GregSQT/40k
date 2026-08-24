@@ -33,7 +33,7 @@ def _seq(monkeypatch, rolls):
 def _game_state(weapon_rules):
     """Attaquant '1' vs escouade '2' = 1 grunt + 1 leader (2 groupes d'allocation 05.03)."""
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
-              "WEAPON_RULES": list(weapon_rules), "display_name": "Syringe"}
+              "WEAPON_RULES": list(weapon_rules), "code": "test_syringe", "display_name": "Syringe"}
     attacker = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "ATTACK_LEFT": 1,
                 "col": 0, "row": 0, "CC_WEAPONS": [weapon]}
     grunt = {"id": "T1", "squad_id": "2", "player": 1, "T": 4, "HP_CUR": 2, "HP_MAX": 2,

@@ -19,7 +19,7 @@ def _sous_couvert(monkeypatch, cover=True):
 
 
 def _weapon(rules):
-    return {"WEAPON_RULES": list(rules), "display_name": "W", "RNG": 24, "NB": 1,
+    return {"WEAPON_RULES": list(rules), "code": "test_weapon", "display_name": "W", "RNG": 24, "NB": 1,
             "ATK": 3, "STR": 4, "AP": 0, "DMG": 1}
 
 

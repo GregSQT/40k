@@ -29,12 +29,12 @@ from tests.unit.engine._config_helpers import build_engine_config
 
 def _weapon_cfg() -> Dict[str, Any]:
     return {"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-            "WEAPON_RULES": [], "display_name": "Test Bolter"}
+            "WEAPON_RULES": [], "code": "test_bolter", "display_name": "Test Bolter"}
 
 
 def _cc_weapon_cfg() -> Dict[str, Any]:
     return {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 2,
-            "WEAPON_RULES": [], "display_name": "Test Blade"}
+            "WEAPON_RULES": [], "code": "test_blade", "display_name": "Test Blade"}
 
 
 def _unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:

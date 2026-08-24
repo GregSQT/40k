@@ -97,7 +97,7 @@ def test_validate_weapon_rules_field_enforces_array_and_required_key(tmp_path: P
         {"ASSAULT": {"name": "Assault", "description": "No param", "has_parameter": False}},
     )
     registry = rules.WeaponRulesRegistry(str(rules_file))
-    weapon = {"display_name": "Bolt Rifle", "WEAPON_RULES": ["ASSAULT"]}
+    weapon = {"display_name": "Bolt Rifle", "code": "test_bolt_rifle", "WEAPON_RULES": ["ASSAULT"]}
     parsed = rules.validate_weapon_rules_field(weapon, registry)
     assert len(parsed) == 1
     assert parsed[0].rule == "ASSAULT"

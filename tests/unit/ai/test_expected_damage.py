@@ -20,7 +20,7 @@ def _weapon(atk: int, strength: int, ap: int, nb: int = 1, dmg: int | str = 1) -
     """Arme minimale sans règle d'arme."""
     return {
         "ATK": atk, "STR": strength, "AP": ap,
-        "NB": nb, "DMG": dmg, "WEAPON_RULES": [],
+        "NB": nb, "DMG": dmg, "WEAPON_RULES": [], "code": "test_weapon",
     }
 
 

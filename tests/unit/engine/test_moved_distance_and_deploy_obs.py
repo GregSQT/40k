@@ -38,9 +38,9 @@ BIN_SET_UP_THIS_TURN = unit_bin_index("deployed_this_turn")
 def _unit_cfg(uid: int, player: int, positions: List[Tuple[int, int]], *, move: int = 6) -> Dict[str, Any]:
     specs = [{"col": c, "row": r, "HP_CUR": 1, "HP_MAX": 1, "VALUE": 10} for c, r in positions]
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-              "WEAPON_RULES": [], "display_name": "Gun"}
+              "WEAPON_RULES": [], "code": "test_gun", "display_name": "Gun"}
     melee = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
-             "WEAPON_RULES": [], "display_name": "Blade"}
+             "WEAPON_RULES": [], "code": "test_blade", "display_name": "Blade"}
     return {
         "id": uid, "player": player, "col": positions[0][0], "row": positions[0][1],
         "unitType": "TestUnit", "DISPLAY_NAME": f"Unit {uid}",

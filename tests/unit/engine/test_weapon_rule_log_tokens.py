@@ -75,7 +75,7 @@ def _game_state(
     Elle perd alors la clause « une seule cible » de [CLEAVE] 24.06, la 2e la garde.
     """
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-              "WEAPON_RULES": list(weapon_rules), "display_name": "Test Weapon"}
+              "WEAPON_RULES": list(weapon_rules), "code": "test_weapon", "display_name": "Test Weapon"}
     weapons_key = "CC_WEAPONS" if melee else "RNG_WEAPONS"
     models_cache = {}
     intents = []

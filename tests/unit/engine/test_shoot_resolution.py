@@ -17,7 +17,7 @@ def _weapon(close_quarters: bool = False, rng: int = 24) -> Dict[str, Any]:
         "AP": 0,
         "DAMAGE": 1,
         "shot": 0,
-        "WEAPON_RULES": ["CLOSE_QUARTERS"] if close_quarters else [],
+        "WEAPON_RULES": ["CLOSE_QUARTERS"] if close_quarters else [], "code": "test_cq_weapon" if close_quarters else "test_weapon", "code": "test_cq_weapon" if close_quarters else "test_weapon",
     }
 
 

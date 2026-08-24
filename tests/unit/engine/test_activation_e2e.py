@@ -69,7 +69,7 @@ def _weapon(atk=4, str_=4, ap=0, dmg=3) -> Dict[str, Any]:
         "DMG": dmg,
         "NB": 1,
         "RNG": 24,
-        "WEAPON_RULES": ["IGNORES_COVER"],
+        "WEAPON_RULES": ["IGNORES_COVER"], "code": "test_weapon",
         "display_name": "Test Bolter",
     }
 

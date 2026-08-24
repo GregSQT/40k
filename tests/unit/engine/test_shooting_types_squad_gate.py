@@ -42,7 +42,7 @@ from tests.unit.engine._config_helpers import build_engine_config
 
 def _weapon(name: str, rules: List[str], rng: int = 24, **over: Any) -> Dict[str, Any]:
     w = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": rng,
-         "WEAPON_RULES": list(rules), "display_name": name}
+         "WEAPON_RULES": list(rules), "code": name, "display_name": name}
     w.update(over)
     return w
 
@@ -60,7 +60,7 @@ def _unit_cfg(
         "ARMOR_SAVE": 4, "INVUL_SAVE": 0,
         "RNG_WEAPONS": rng_weapons if rng_weapons is not None else [_weapon("Gun", [])],
         "CC_WEAPONS": [{"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
-                        "WEAPON_RULES": [], "display_name": "Blade"}],
+                        "WEAPON_RULES": [], "code": "test_blade", "display_name": "Blade"}],
         "UNIT_RULES": [],
         "UNIT_KEYWORDS": [{"keywordId": k} for k in (keywords or ["INFANTRY"])],
         "LD": 7, "OC": 2, "VALUE": 10 * len(specs),

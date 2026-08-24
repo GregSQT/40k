@@ -34,7 +34,7 @@ def _neutralise(monkeypatch):
 def _game_state(weapon_rules, *, target_row):
     """Tireur escouade '1' en (0,0), RNG=24 subhex (demi-portee 12). Cible '2' en (0,target_row)."""
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-              "WEAPON_RULES": weapon_rules, "display_name": "Gun"}
+              "WEAPON_RULES": weapon_rules, "code": "test_gun", "display_name": "Gun"}
     attacker = {"id": "A1", "squad_id": "1", "T": 4, "player": 0, "RNG_WEAPONS": [weapon]}
     target_model = {"id": "T1", "T": 4, "HP_CUR": 2, "HP_MAX": 2, "ARMOR_SAVE": 3,
                     "INVUL_SAVE": 7, "role": None, "unitType": "Grunt", "player": 1}

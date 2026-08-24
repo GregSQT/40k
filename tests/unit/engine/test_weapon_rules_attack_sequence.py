@@ -39,7 +39,7 @@ def _dice(values):
 
 
 def _weapon(rules, **extra):
-    w = {"WEAPON_RULES": list(rules), "display_name": "W", "NB": 1, "ATK": 3,
+    w = {"WEAPON_RULES": list(rules), "code": "test_weapon", "display_name": "W", "NB": 1, "ATK": 3,
          "STR": 4, "AP": 0, "DMG": 1}
     w.update(extra)
     return w

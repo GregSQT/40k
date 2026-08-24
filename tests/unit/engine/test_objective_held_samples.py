@@ -59,7 +59,7 @@ PRIMARY_OBJECTIVE: Dict[str, Any] = {
 
 def _weapon(rng: int) -> Dict[str, Any]:
     return {"ATK": 2, "STR": 4, "AP": 0, "DMG": 1, "NB": 2, "RNG": rng,
-            "WEAPON_RULES": [], "display_name": "Test Weapon"}
+            "WEAPON_RULES": [], "code": f"test_weapon_{rng}in", "display_name": "Test Weapon"}
 
 
 def _unit(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:

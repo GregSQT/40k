@@ -41,7 +41,7 @@ from tests.unit.engine._config_helpers import build_engine_config
 
 def _weapon(**over: Any) -> Dict[str, Any]:
     w = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-         "WEAPON_RULES": [], "display_name": "Test Bolter"}
+         "WEAPON_RULES": [], "code": "test_weapon", "display_name": "Test Bolter"}
     w.update(over)
     return w
 

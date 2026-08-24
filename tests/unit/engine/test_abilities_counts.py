@@ -33,7 +33,7 @@ from tests.unit.engine._config_helpers import build_engine_config
 
 def _weapon(rng: int, name: str) -> Dict[str, Any]:
     return {"ATK": 1, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": rng,
-            "WEAPON_RULES": [], "display_name": name}
+            "WEAPON_RULES": [], "code": name, "display_name": name}
 
 
 def _unit(uid: int, player: int, col: int, row: int,

@@ -33,7 +33,7 @@ BIN_IN_ENEMY_EZ = 1
 def _weapon_cfg() -> Dict[str, Any]:
     return {
         "ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-        "WEAPON_RULES": [], "display_name": "Test Bolter",
+        "WEAPON_RULES": [], "code": "test_weapon", "display_name": "Test Bolter",
     }
 
 

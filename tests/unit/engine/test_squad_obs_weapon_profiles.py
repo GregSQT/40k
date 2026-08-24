@@ -60,7 +60,7 @@ def _rule_names(ids_row: Any) -> set:
 def _weapon(**over: Any) -> Dict[str, Any]:
     base = {
         "ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-        "WEAPON_RULES": [], "display_name": "Test Bolter",
+        "WEAPON_RULES": [], "code": "test_bolter", "display_name": "Test Bolter",
     }
     base.update(over)
     return base
@@ -68,7 +68,7 @@ def _weapon(**over: Any) -> Dict[str, Any]:
 
 def _melee(**over: Any) -> Dict[str, Any]:
     base = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 2,
-            "WEAPON_RULES": [], "display_name": "Test Blade"}
+            "WEAPON_RULES": [], "code": "test_blade", "display_name": "Test Blade"}
     base.update(over)
     return base
 

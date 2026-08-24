@@ -145,7 +145,7 @@ def _shoot_state(
     """
     weapon = {
         "ATK": 4, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24,
-        "WEAPON_RULES": list(weapon_rules), "display_name": "Bolt Rifle",
+        "WEAPON_RULES": list(weapon_rules), "code": "test_bolt_rifle", "display_name": "Bolt Rifle",
     }
     attacker_model = {
         "id": "A1", "squad_id": "1", "player": 1, "T": 4, "SHOOT_LEFT": 1,
@@ -230,7 +230,7 @@ def _fight_state(
     donc sans jet — le seul moyen de construire un record de mêlée à `strengthRoll` None.
     """
     weapon = {"ATK": 3, "STR": weapon_str, "AP": 0, "DMG": 1, "NB": weapon_nb,
-              "WEAPON_RULES": list(weapon_rules), "display_name": "Choppa"}
+              "WEAPON_RULES": list(weapon_rules), "code": "test_choppa", "display_name": "Choppa"}
     # `col`/`row` sur les DEUX figurines : l'allocation des pertes mesure la distance à
     # l'ennemi le plus proche (`_precompute_nearest_enemy_dist`), donc la fixture doit poser
     # des positions — le jet seul s'en passait, l'émission du log non.

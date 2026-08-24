@@ -29,7 +29,7 @@ from engine.utils.weapon_helpers import weapon_rule_signature
 
 def _weapon(name: str, rules: List[str]) -> Dict[str, Any]:
     return {"display_name": name, "ATK": 5, "STR": 4, "AP": 0, "DMG": 1, "NB": 2,
-            "RNG": 18, "WEAPON_RULES": list(rules)}
+            "RNG": 18, "WEAPON_RULES": list(rules), "code": name}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

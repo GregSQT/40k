@@ -41,7 +41,7 @@ def _kw(*names):
 def _game_state(weapon_rules, *, attackers=1, attacker_keywords=("INFANTRY",), attacker_hp=3):
     """Escouade '1' (au contact de '2') avec une arme de melee par figurine."""
     weapon = {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
-              "WEAPON_RULES": list(weapon_rules), "display_name": "Eviscerator"}
+              "WEAPON_RULES": list(weapon_rules), "code": "test_eviscerator", "display_name": "Eviscerator"}
     models = {}
     intents = []
     for i in range(attackers):
