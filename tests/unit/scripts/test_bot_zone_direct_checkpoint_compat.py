@@ -129,7 +129,7 @@ def fresh_policy_keys(checkpoint_policy_kwargs):
 # Modules ajoutés à PointerMaskablePolicy après le dernier checkpoint épinglé.
 # Le test se met en SKIP (pas FAIL) tant que REFERENCE_MODEL n'est pas régénéré avec ces modules.
 # À vider manuellement une fois le checkpoint régénéré (aucun signal automatique).
-_MODULES_EN_ATTENTE = frozenset({"coherency_query_net", "fight_weapon_net"})
+_MODULES_EN_ATTENTE = frozenset({"coherency_query_net", "fight_weapon_net", "shoot_weapon_sel_net"})
 
 
 def _modules_de(keys: set[str]) -> set[str]:
