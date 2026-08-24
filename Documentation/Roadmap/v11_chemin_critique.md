@@ -34,9 +34,11 @@ Mesurer le regret avant de trancher (§9.0bis).
 
 🟢 **Décision 2026-08-10** : le regret se mesure sur la BASE DE DÉVELOPPEMENT en cours (§0.70), pas après la mesure de référence — un écart *relatif* (branché vs heuristique auto) supporte l'imprécision d'un run de 10 000 épisodes.
 
-🟢 **Stratégies déploiement livrées le 2026-08-19** : `DEPLOY_STRATEGY_COUNT` 5→7 (`centre_hub` slot 9, `safe_rear` slot 10). Regret à mesurer avec `--new`. Reste ouvert : split-fire, placement final de charge.
+🟢 **Stratégies déploiement livrées le 2026-08-19** : `DEPLOY_STRATEGY_COUNT` 5→7 (`centre_hub` slot 9, `safe_rear` slot 10). Regret à mesurer avec `--new`. Reste ouvert : split-fire.
 
 🟢 **Charge multi-cibles livrée le 2026-08-20** : C(20,2)+20 = 210 slots (slots 1045–1254), tête dense `charge_pair_net` dans `pointer_policy`, logique PvP réutilisée (`charge_build_valid_plan` + `charge_target_selection_handler`), `TOTAL_ACTION_SIZE` 1159→1349. Verrous : `test_action_space_mirror::test_charge_pair_slots_count`, `test_pointer_head`. Ré-entraînement `--new` nécessaire.
+
+🟢 **Placement final de charge livré le 2026-08-24** (L10) : `charge_placement` ajouté à `AGENT_DECISION_TYPE_IDS` (slot réservé — `obs_size` 16703 inchangé, pas de ré-entraînement `--new` requis). `charge_build_valid_plan` étendu avec `intent: int = 0` (5 intentions : Serré 0, Objectif 1, Isolation 2, Pénétration 3, Étalé 4). `arm_charge_placement_decision` + `apply_charge_placement_decision` dans `charge_handlers.py` ; `_finish_charge_after_placement` dans `w40k_core.py` ; CHOICE_0 = Serré = comportement historique pour bots/siège muet. 20 tests (rouge→vert).
 
 → `Documentation/Implémentation/1_Agent/V11_phaseA.md` §9.4 pt 8
 
