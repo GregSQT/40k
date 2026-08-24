@@ -185,7 +185,9 @@ Distinct du MCTS adversaire d'entraînement ([infra.md#mcts](infra.md#mcts)).
 
 ## Chantier récompense distinct {#recompense}
 
-**À cadrer — jamais ouvert.** Relevé du chantier panel (fossile, reliquat de `Bot_refactor.md` §7). Règle actée à respecter au cadrage : **un seul levier par run** — mêler récompense et adversaires rend les effets indémêlables ; le profil comportemental par adversaire (D.4, livré) doit d'abord nommer les fautes que la récompense ne punit pas.
+**À cadrer — jamais ouvert.** Relevé du chantier panel (fossile, reliquat de `Bot_refactor.md` §7). Règle actée à respecter au cadrage : **un seul levier par run** — mêler récompense et adversaires rend les effets indémêlables ; le profil comportemental par adversaire (D.4, livré et câblé dans `BotEvalCallback._run_evaluation`) doit d'abord nommer les fautes que la récompense ne punit pas.
+
+État du code (2026-08-24) : `_can_unit_kill_target_in_one_phase` utilise `expected_damage()` (P(hit)×P(wound)×P(sv)) — le proxy `NB×DMG` y est soldé. `_get_unit_threat` reste `NB×DMG` par design (cible inconnue à ce stade). Aucun autre défaut structurel préidentifié : le levier R3 se tranche sur les courbes D.4 de R1.
 
 → `Documentation/Implémentation/Bot_refactor.md` §7
 
