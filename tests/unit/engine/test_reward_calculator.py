@@ -360,21 +360,25 @@ class TestFightAllAttackResultsRequired:
         assert isinstance(reward, float)
 
 
+def _make_minimal_rc() -> RewardCalculator:
+    """RewardCalculator minimal pour les tests d'idempotence (controlled_player=1, sans registre)."""
+    return RewardCalculator(
+        config={"quiet": True, "controlled_player": 1},
+        rewards_config={},
+        unit_registry=None,
+        state_manager=None,
+    )
+
+
+_PHASE_MOVE_TRANSITION: Dict[str, Any] = {"phase_transition": True, "next_phase": "move"}
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # _calculate_coherency_penalty_per_turn — idempotence quand aucune unité active
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestCoherencyPenaltyNoActingUnit:
     """Sans unité contrôlée vivante, la pénalité est 0.0 et ne se recalcule pas au 2e appel."""
-
-    def _make_rc(self) -> RewardCalculator:
-        rc = RewardCalculator(
-            config={"quiet": True, "controlled_player": 1},
-            rewards_config={},
-            unit_registry=None,
-            state_manager=None,
-        )
-        return rc
 
     def _gs(self) -> Dict[str, Any]:
         # units_cache vide → _get_controlled_player_unit retourne None (pas d'unité contrôlée)
@@ -386,22 +390,18 @@ class TestCoherencyPenaltyNoActingUnit:
             "current_player": 1,
         }
 
-    def _result(self) -> Dict[str, Any]:
-        # phase_transition + next_phase=move requis pour dépasser la garde ligne 918
-        return {"phase_transition": True, "next_phase": "move"}
-
     def test_returns_zero_when_no_unit(self) -> None:
         """coherency_no_unit_zero : 0.0 quand aucune unité contrôlée vivante."""
-        rc = self._make_rc()
+        rc = _make_minimal_rc()
         gs = self._gs()
-        penalty = rc._calculate_coherency_penalty_per_turn(gs, self._result())
+        penalty = rc._calculate_coherency_penalty_per_turn(gs, _PHASE_MOVE_TRANSITION)
         assert penalty == 0.0
 
     def test_idempotent_on_second_call(self) -> None:
         """coherency_no_unit_idempotent : once_claim posé au 1er appel → court-circuit au 2e."""
-        rc = self._make_rc()
+        rc = _make_minimal_rc()
         gs = self._gs()
-        result = self._result()
+        result = dict(_PHASE_MOVE_TRANSITION)
         rc._calculate_coherency_penalty_per_turn(gs, result)
 
         # Après le 1er appel, once_claim doit avoir été posé même si acting_unit est None.
@@ -427,15 +427,6 @@ class TestCoherencyPenaltyNoActingUnit:
 class TestObjectiveRewardPerTurnNoActingUnit:
     """Sans unité contrôlée vivante, le reward est 0.0 et ne se recalcule pas au 2e appel."""
 
-    def _make_rc(self) -> RewardCalculator:
-        rc = RewardCalculator(
-            config={"quiet": True, "controlled_player": 1},
-            rewards_config={},
-            unit_registry=None,
-            state_manager=None,
-        )
-        return rc
-
     def _gs(self) -> Dict[str, Any]:
         # units_cache vide → _get_controlled_player_unit retourne None (pas d'unité contrôlée)
         return {
@@ -446,21 +437,18 @@ class TestObjectiveRewardPerTurnNoActingUnit:
             "primary_objective": {"scoring": {"start_turn": 1}},
         }
 
-    def _result(self) -> Dict[str, Any]:
-        return {"phase_transition": True, "next_phase": "move"}
-
     def test_returns_zero_when_no_unit(self) -> None:
         """objective_reward_no_unit_zero : 0.0 quand aucune unité contrôlée vivante."""
-        rc = self._make_rc()
+        rc = _make_minimal_rc()
         gs = self._gs()
-        reward = rc._calculate_objective_reward_per_turn(gs, self._result())
+        reward = rc._calculate_objective_reward_per_turn(gs, _PHASE_MOVE_TRANSITION)
         assert reward == 0.0
 
     def test_idempotent_on_second_call(self) -> None:
         """objective_reward_no_unit_idempotent : once_claim posé au 1er appel → court-circuit au 2e."""
-        rc = self._make_rc()
+        rc = _make_minimal_rc()
         gs = self._gs()
-        result = self._result()
+        result = dict(_PHASE_MOVE_TRANSITION)
         rc._calculate_objective_reward_per_turn(gs, result)
 
         # Après le 1er appel, once_claim doit avoir été posé même si acting_unit est None.
