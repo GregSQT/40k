@@ -186,7 +186,7 @@ class TestSplitFireDecode:
         gs["units_shot"] = set()
         return gs
 
-    def _decoder(self) -> "ActionDecoder":
+    def _decoder(self):
         from engine.action_decoder import ActionDecoder
         return ActionDecoder({"game_rules": _GAME_RULES})
 

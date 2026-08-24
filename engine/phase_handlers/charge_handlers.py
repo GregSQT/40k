@@ -6519,11 +6519,13 @@ def arm_charge_placement_decision(
             continue
         if _esid in _declared:
             continue
-        for _mid in _squad_models.get(_esid, []):
-            _m = _models_cache.get(_mid)  # get allowed
-            if _m is None:
-                continue
-            _nontgt_positions.append((int(_m["col"]), int(_m["row"])))
+        _squad_mids = _squad_models.get(_esid)  # get allowed
+        if _squad_mids:
+            for _mid in _squad_mids:
+                _m = _models_cache.get(_mid)  # get allowed
+                if _m is None:
+                    continue
+                _nontgt_positions.append((int(_m["col"]), int(_m["row"])))
 
     _board_diag = max(
         int(require_key(game_state, "board_cols")) + int(require_key(game_state, "board_rows")),

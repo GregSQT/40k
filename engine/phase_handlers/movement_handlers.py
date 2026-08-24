@@ -1836,8 +1836,8 @@ def _ez_offset_kernels(
     # euclidean_edge_clearance_round_round) → aucune boucle Python.
     if mover_shape == "round" and enemy_shape == "round":
         from engine.hex_utils import round_base_radius_norm
-        r_m = round_base_radius_norm(mover_size)
-        r_e = round_base_radius_norm(enemy_size)
+        r_m = round_base_radius_norm(cast(float, mover_size))
+        r_e = round_base_radius_norm(cast(float, enemy_size))
         gap = center_dist - r_m - r_e
         np.maximum(gap, 0.0, out=gap)
         sure = gap <= ez_norm - EPS
