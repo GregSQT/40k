@@ -255,7 +255,7 @@ class TestObservationEnemySquadValue:
         ally = _unit(1, value=20, hp_max=2, models=None)
         ally["player"] = 1
         ally["col"], ally["row"] = 10, 10
-        ally["RNG_WEAPONS"] = [{"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24, "WEAPON_RULES": []}]
+        ally["RNG_WEAPONS"] = [{"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 24, "WEAPON_RULES": [], "code": "test_weapon"}]
         ally["selectedRngWeaponIndex"] = 0
 
         enemy = _unit(2, value=75, hp_max=1, models=enemy_models)

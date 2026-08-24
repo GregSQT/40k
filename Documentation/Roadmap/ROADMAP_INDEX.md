@@ -294,6 +294,10 @@ Ordre imposé — ne pas réorganiser sans décision explicite.
 | training | ✅ fix profils count 7→6 (2026-08-24) — x1_selfplay supprimé, références 7 profils → 6 mises à jour | — | ⚡ |
 | front | ✅ fix code-review findings front (2026-08-24) — 4 findings : deadlock IA, replay crash, localStorage, chargeSuccess | — | ⚡ |
 | analyzer | ✅ collision ingress-ennemi détectée dans _handle_move (2026-08-24) — unité arrivée des réserves (action=ingress) au même hex qu'une unité en déplacement le même tour désormais reportée dans unit_position_collisions | — | ⚡ |
+| moteur+training | ✅ fix(P3-8) COMBI_WEAPON masque/commit divergence split-fire gym (2026-08-24) — purge_combi_siblings lève IndexError si slot hors range ; shared_utils + w40k_core + 59 tests split_fire_gym | — | ⚡ |
+| training | ✅ fix+simplify reward_mapper (2026-08-24) — stubs et code mort retirés ; get_kill_bonus_reward + _was_lowest_hp_target factorisés ; verrous rouge/vert | — | ⚡ |
+| infra | ✅ fix pyright test_expected_damage (2026-08-24) — 12 erreurs pyright corrigées dans test_expected_damage ; signature expected_damage alignée | — | ⚡ |
+| tests | ✅ fix clé 'code' manquante dans les armes synthétiques de test (2026-08-24) — 88 fichiers de test : dicts armes construits à la main reçoivent un code stable ; require_key shared_utils:8426 ne lève plus ConfigurationError sur les tests | — | ⚡ |
 
 ---
 

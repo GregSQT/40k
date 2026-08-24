@@ -506,7 +506,7 @@ def play_out_deployment(engine: Any, *, limit: int = 1000) -> int:
 
 def _fall_back_weapon_cfg() -> Dict[str, Any]:
     return {"ATK": 1, "STR": 4, "AP": 0, "DMG": 1, "NB": 1, "RNG": 0,
-            "WEAPON_RULES": [], "display_name": "Test CC"}
+            "WEAPON_RULES": [], "code": "test_fallback_cc", "display_name": "Test CC"}
 
 
 def _fall_back_unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
