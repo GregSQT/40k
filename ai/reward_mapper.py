@@ -6,6 +6,7 @@ using existing parameter unitTypes from rewards_config.json
 
 from typing import Dict, List, Any, Tuple
 from engine.utils.weapon_helpers import get_max_ranged_damage, get_max_melee_damage, get_selected_ranged_weapon, get_selected_melee_weapon
+from engine.utils.expected_damage import expected_damage
 from engine.combat_utils import expected_dice_value
 from engine.phase_handlers.shared_utils import get_hp_from_cache
 from shared.data_validation import require_key
@@ -20,6 +21,9 @@ class RewardMapper:
         """
         Calculate unit threat score (max of ranged and melee damage potential).
         MULTIPLE_WEAPONS_IMPLEMENTATION.md: Replaces old RNG_DMG/CC_DMG fields.
+
+        Proxy NB×DMG : la cible n'est pas connue ici, donc P(toucher)/P(blesser)/P(sv)
+        ne peuvent pas être intégrées. Utiliser expected_damage() quand la cible est disponible.
         """
         rng_dmg = get_max_ranged_damage(unit)
         cc_dmg = get_max_melee_damage(unit)
@@ -44,18 +48,12 @@ class RewardMapper:
             weapon = get_selected_ranged_weapon(unit)
             if not weapon:
                 return False
-            max_damage = (
-                expected_dice_value(require_key(weapon, "NB"), "reward_mapper_rng_nb") *
-                expected_dice_value(require_key(weapon, "DMG"), "reward_mapper_rng_dmg")
-            )
+            max_damage = expected_damage(unit, weapon, target)
         else:
             weapon = get_selected_melee_weapon(unit)
             if not weapon:
                 return False
-            max_damage = (
-                expected_dice_value(require_key(weapon, "NB"), "reward_mapper_cc_nb") *
-                expected_dice_value(require_key(weapon, "DMG"), "reward_mapper_cc_dmg")
-            )
+            max_damage = expected_damage(unit, weapon, target)
         
         return target_hp <= max_damage
     
