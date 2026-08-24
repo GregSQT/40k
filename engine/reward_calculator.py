@@ -274,7 +274,7 @@ class RewardCalculator:
             # CRITICAL: Check if no attacks were executed (waiting_for_player or end activation without firing)
             # In these cases, no logs are added, so return 0.0 reward
             waiting_for_player = result.get("waiting_for_player", False)
-            all_attack_results = result["all_attack_results"] if "all_attack_results" in result else []
+            all_attack_results = require_key(result, "all_attack_results") if "all_attack_results" in result else []
             # ⚠️ CES SORTIES RENVOYAIENT 0.0 SEC, ecrasant `objective_turn_reward`.
             # Un tir n'est pas toujours un payload de tir « pur » : quand il vide le pool, la
             # cascade (w40k_core, boucle `phase_complete`/`next_phase`) le fait traverser les
@@ -495,7 +495,7 @@ class RewardCalculator:
             reward_breakdown['objective'] += on_obj_reward
             reward_breakdown['total'] = fight_reward
 
-            fight_attack_results = result["all_attack_results"]
+            fight_attack_results = require_key(result, "all_attack_results")
             fight_killed = (
                 any(ar.get("target_died") for ar in fight_attack_results)
                 or bool(result.get("target_died", False))
@@ -928,6 +928,7 @@ class RewardCalculator:
             return 0.0
         acting_unit = self._get_controlled_player_unit(game_state)
         if not acting_unit:
+            once_claim(game_state, "coherency_penalized_turns", key)
             return 0.0
         shaping = require_key(self._get_unit_reward_config(acting_unit), "squad_shaping")
         incoherent_w = float(require_key(shaping, "incoherent_weight"))
