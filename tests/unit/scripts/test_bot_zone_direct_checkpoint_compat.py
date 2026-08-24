@@ -17,7 +17,6 @@ absence est un problème pour `bot_zone_direct.py` lui-même, pas pour ce test.
 from __future__ import annotations
 
 import io
-import pickle
 import zipfile
 from pathlib import Path
 
@@ -32,7 +31,6 @@ from tests._chargeur_script import charger_script
 from tests.unit.ai._fabriques import squad_obs_space
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-_SCRIPT = PROJECT_ROOT / "scripts" / "bot_zone_direct.py"
 
 
 @pytest.fixture(scope="module")
@@ -65,11 +63,11 @@ def _checkpoint_data(reference_zip):
         with z.open("data") as f:
             raw = f.read()
         try:
-            data = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=False)
-        except (pickle.UnpicklingError, RuntimeError):
+            data = json_to_data(raw.decode())
+        except (UnicodeDecodeError, ValueError):
             try:
-                data = json_to_data(raw.decode())
-            except (UnicodeDecodeError, ValueError) as exc:
+                data = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=False)
+            except Exception as exc:
                 raise ValueError(f"Entrée 'data' de format inattendu : {exc}") from exc
         if not isinstance(data, dict):
             raise ValueError(f"Entrée 'data' de format inattendu : {type(data)}")
