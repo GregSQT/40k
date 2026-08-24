@@ -6368,12 +6368,8 @@ def charge_build_valid_plan(
     # Positions pré-calculées pour le tri par intention (L10 placement de charge).
     _intent_obj_positions: List[Tuple[int, int]] = []
     if intent == 1:
-        for _obj in game_state.get("objectives", []):  # get allowed
-            for _hex in _obj.get("hexes", []):  # get allowed
-                if isinstance(_hex, (list, tuple)):
-                    _intent_obj_positions.append((int(_hex[0]), int(_hex[1])))
-                else:
-                    _intent_obj_positions.append((int(_hex["col"]), int(_hex["row"])))
+        from engine.game_state import objective_hex_zones as _ohz
+        _intent_obj_positions = [h for _, zone in _ohz(game_state) for h in zone]
     _intent_nontgt_positions: List[Tuple[int, int]] = []
     if intent == 2:
         for _nte in _non_target_enemies:
