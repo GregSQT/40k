@@ -411,6 +411,10 @@ def test_learning_step_runs_end_to_end(model):
     )
     # P3-8 : même garde que les têtes move — une tête dense mal branchée réussirait les
     # tests de forme sans jamais apprendre.
+    assert model.policy.fight_weapon_net.weight.grad is not None, (
+        "fight_weapon_net ne recoit PAS de gradient : la tete dense de selection "
+        "d'arme CC n'est pas dans le graphe (§0.69)"
+    )
     assert model.policy.shoot_weapon_sel_net.weight.grad is not None, (
         "shoot_weapon_sel_net ne recoit PAS de gradient : la tete dense de selection "
         "d'arme tir n'est pas dans le graphe (P3-8)"
