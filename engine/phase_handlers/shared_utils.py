@@ -2516,11 +2516,10 @@ def _get_deadly_demise_value(unit: Dict[str, Any]) -> Optional[Any]:
     Lue depuis UNIT_RULES[i].rule_args.value (24.08). Lève si la règle est présente
     mais mal configurée — aucun repli silencieux.
     """
-    if not _unit_has_rule_effect(unit, "deadly_demise"):
-        return None
     source_rule_id = get_source_unit_rule_id_for_effect(unit, "deadly_demise")
     if source_rule_id is None:
         return None
+    unit_id = require_key(unit, "id")
     unit_rules = require_key(unit, "UNIT_RULES")
     for rule_entry in unit_rules:
         if str(require_key(rule_entry, "ruleId")) != str(source_rule_id):
@@ -2528,24 +2527,24 @@ def _get_deadly_demise_value(unit: Dict[str, Any]) -> Optional[Any]:
         rule_args = rule_entry.get("rule_args")
         if not isinstance(rule_args, dict):
             raise ValueError(
-                f"Rule '{source_rule_id}' on unit {require_key(unit, 'id')} "
+                f"Rule '{source_rule_id}' on unit {unit_id} "
                 f"must define rule_args for deadly_demise"
             )
         raw = rule_args.get("value")
         if raw is None:
             raise ValueError(
                 f"Rule '{source_rule_id}' argument 'value' is missing "
-                f"for unit {require_key(unit, 'id')}"
+                f"for unit {unit_id}"
             )
         if not isinstance(raw, (int, str)):
             raise TypeError(
                 f"Rule '{source_rule_id}' argument 'value' must be int or str, "
-                f"got {type(raw).__name__} for unit {require_key(unit, 'id')}"
+                f"got {type(raw).__name__} for unit {unit_id}"
             )
         return raw
     raise ValueError(
         f"Source rule '{source_rule_id}' not found in UNIT_RULES "
-        f"for unit {require_key(unit, 'id')}"
+        f"for unit {unit_id}"
     )
 
 
@@ -3945,10 +3944,6 @@ def _apply_deadly_demise(
     import random
     import math
     d6_roll = random.randint(1, 6)
-    units_cache = game_state.get("units_cache") or {}
-    ish = int(require_key(game_state, "inches_to_subhex"))
-    radius = 6 * ish
-    _is_hex = geometry_is_hex(game_state)
     turn = game_state.get("turn", 0)
     phase = game_state.get("phase", "")
 
@@ -3966,6 +3961,11 @@ def _apply_deadly_demise(
             "deadlyDemiseDetails": [],
         })
         return
+
+    units_cache = require_key(game_state, "units_cache")
+    ish = int(require_key(game_state, "inches_to_subhex"))
+    radius = 6 * ish
+    _is_hex = geometry_is_hex(game_state)
 
     def _dist(u_col: int, u_row: int) -> float:
         if _is_hex:
