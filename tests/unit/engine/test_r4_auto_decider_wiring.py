@@ -87,7 +87,8 @@ def test_fight_auto_defender_missing_target_raises():
     """Aucun repli silencieux : cible introuvable = bug explicite."""
     gs = _gs(gym=True, owner_type="human")
     gs["unit_by_id"] = {}
-    with pytest.raises(KeyError, match="404"):
+    from shared.data_validation import ConfigurationError
+    with pytest.raises(ConfigurationError, match="Unit '404'"):
         _fight_auto_defender(gs, "404")
 
 

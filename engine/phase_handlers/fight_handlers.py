@@ -22,7 +22,6 @@ from engine.game_utils import add_console_log, safe_print, enter_phase
 from engine.combat_utils import (
     normalize_coordinates,
     calculate_hex_distance,
-    get_unit_by_id,
     require_unit_by_id,
     get_unit_coordinates,
     get_hex_neighbors,
@@ -861,10 +860,8 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
             f"l'appelant doit garder ce cas en amont"
         )
 
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        raise ValueError(f"Unit not found for fight target selection: unit_id={unit_id}")
-    
+    unit = require_unit_by_id(game_state, unit_id)
+
     # Aucun try/except ici : une erreur de config/registry est un BUG, elle doit remonter.
     # L'ancien `except Exception: return valid_targets[0]` avalait les deux require_key et le
     # ValueError de get_model_key, et sa seule trace (add_console_log) est un no-op hors
@@ -895,12 +892,7 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
     # Erreur explicite depuis le 2026-07-20 (V11 §0.19.2).
     resolved: List[Tuple[str, Dict[str, Any]]] = []
     for tid in valid_targets:
-        t = get_unit_by_id(game_state, tid)
-        if t is None:
-            raise ValueError(
-                f"Cible {tid!r} du pool de combat absente de unit_by_id "
-                f"(désynchronisation units_cache/unit_by_id, unit_id={unit_id})"
-            )
+        t = require_unit_by_id(game_state, tid)
         resolved.append((tid, t))
     all_targets = [t for _tid, t in resolved]
 
@@ -2206,9 +2198,7 @@ def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> 
                 fight_v11_enter_fight_step(game_state)
                 continue
             uid = nxt[1][0]
-            u = get_unit_by_id(game_state, uid)
-            if u is None:
-                raise KeyError(f"Unit {uid} missing for pile-in")
+            u = require_unit_by_id(game_state, uid)
             _fight_v11_auto_pile_in(game_state, u, config)
             return True, {"action": "pile_in", "phase": "fight", "unitId": uid,
                           "fight_subphase": "pile_in", "waiting_for_player": False}
@@ -2217,9 +2207,7 @@ def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> 
             if uid is None:
                 fight_v11_enter_consolidate(game_state)
                 continue
-            u = get_unit_by_id(game_state, uid)
-            if u is None:
-                raise KeyError(f"Unit {uid} missing for fight")
+            u = require_unit_by_id(game_state, uid)
             _fight_v11_register_selection(game_state, uid)
             overrun = (
                 fight_v11_is_overrun_eligible(game_state, u)
@@ -2241,9 +2229,7 @@ def _fight_v11_auto_step(game_state: Dict[str, Any], config: Dict[str, Any]) -> 
             if nxt is None:
                 return True, _fight_v11_phase_complete(game_state)
             uid = nxt[1][0]
-            u = get_unit_by_id(game_state, uid)
-            if u is None:
-                raise KeyError(f"Unit {uid} missing for consolidate")
+            u = require_unit_by_id(game_state, uid)
             _fight_v11_auto_consolidate(game_state, u, config)
             return True, {"action": "consolidation", "phase": "fight", "unitId": uid,
                           "fight_subphase": "consolidate", "waiting_for_player": False}
@@ -4393,9 +4379,7 @@ def _fight_v11_consolidation_new_foes_step(
 
     if active is None or active not in remaining:
         return _fight_v11_manual_state(game_state)
-    u = get_unit_by_id(game_state, active)
-    if u is None:
-        raise KeyError(f"New Foe {active} missing from game_state['units']")
+    u = require_unit_by_id(game_state, active)
 
     # Déclarations par-arme/figurine (calque du tir), puis validation.
     if atype in ("squad_fight_assign", "squad_fight_assign_weapon"):
@@ -4838,9 +4822,7 @@ def _fight_auto_defender(game_state: Dict[str, Any], target_sid: str) -> bool:
     """Decideur auto du moteur d allocation combat (05.04) : True si le defenseur de la
     cible est controle par l IA -> le moteur tranche ordre + choix de figurine sans rendre
     la main. Aucun repli silencieux : cible introuvable = bug -> erreur explicite."""
-    target = get_unit_by_id(game_state, str(target_sid))
-    if target is None:
-        raise KeyError(f"_fight_auto_defender: cible {target_sid!r} introuvable")
+    target = require_unit_by_id(game_state, str(target_sid))
     return _is_ai_controlled_fight_unit(game_state, target)
 
 
@@ -5069,9 +5051,7 @@ def _fight_v11_manual_step(
             # Refresh de l'aperçu par-figurine (plan provisoire + figurine sélectionnée).
             if act_uid is None or act_uid not in eligible:
                 return _fight_v11_manual_state(game_state)
-            u = get_unit_by_id(game_state, act_uid)
-            if u is None:
-                raise KeyError(f"Pile-in unit {act_uid} missing from game_state['units']")
+            u = require_unit_by_id(game_state, act_uid)
             sel = action.get("selected_model")
             return True, _fight_pile_in_model_plan_state(
                 game_state, u, _prov_from_action(), str(sel) if sel is not None else None,
@@ -5093,9 +5073,7 @@ def _fight_v11_manual_step(
             # Validation finale : pose toutes les figs (posées + origine) si le plan est légal.
             if act_uid is None or act_uid not in eligible:
                 return _fight_v11_manual_state(game_state)
-            u = get_unit_by_id(game_state, act_uid)
-            if u is None:
-                raise KeyError(f"Pile-in unit {act_uid} missing from game_state['units']")
+            u = require_unit_by_id(game_state, act_uid)
             prov = _prov_from_action()
             models_cache = require_key(game_state, "models_cache")
             squad_models = require_key(game_state, "squad_models")
@@ -5151,9 +5129,7 @@ def _fight_v11_manual_step(
 
         if atype == "activate_unit" and uid in eligible:
             # Sélection d'une unité à piler → présenter son plan par-figurine (mode fin).
-            u = get_unit_by_id(game_state, uid)
-            if u is None:
-                raise KeyError(f"Pile-in unit {uid} missing from game_state['units']")
+            u = require_unit_by_id(game_state, uid)
             game_state["active_fight_unit"] = uid
             done = {str(x) for x in game_state.get("pile_in_done", set())}
             game_state["fight_eligible_units"] = [e for e in eligible if str(e) not in done]
@@ -5187,9 +5163,7 @@ def _fight_v11_manual_step(
             # combattre → skip refusé. Sans cible, elle est « selected to fight » sans attaque
             # (12.04) : elle sort du pool ET devient éligible à la consolidation (12.08).
             if active is not None and active in pool:
-                u = get_unit_by_id(game_state, active)
-                if u is None:
-                    raise KeyError(f"Fight skip unit {active} missing from game_state['units']")
+                u = require_unit_by_id(game_state, active)
                 valid = _fight_build_valid_target_pool(game_state, u)
                 if valid:
                     _fight_v11_log(
@@ -5252,9 +5226,7 @@ def _fight_v11_manual_step(
         # VALIDATION — resout les attaques DECLAREES (allocation manuelle des pertes).
         if active is not None and active in pool and atype == "squad_fight_validate":
             sel = active
-            u = get_unit_by_id(game_state, sel)
-            if u is None:
-                raise KeyError(f"Fight unit {sel} missing from game_state['units']")
+            u = require_unit_by_id(game_state, sel)
             from .shared_utils import init_pending_intents
             init_pending_intents(game_state)
             intents = game_state["pending_squad_fight_intents"].get(sel, [])  # fallback allowed — unité sans déclaration d'intent = liste vide (métier)
@@ -5284,9 +5256,7 @@ def _fight_v11_manual_step(
         # ÉTAPE 2 — unité active + clic sur une cible → résolution + allocation.
         if active is not None and active in pool and atype in ("fight", "left_click"):
             sel = active
-            u = get_unit_by_id(game_state, sel)
-            if u is None:
-                raise KeyError(f"Fight unit {sel} missing from game_state['units']")
+            u = require_unit_by_id(game_state, sel)
             _fight_v11_register_selection(game_state, sel)
             ftype = "normal"
             if action.get("fight_type") == "overrun" and fight_v11_is_overrun_eligible(game_state, u):
@@ -5386,9 +5356,7 @@ def _fight_v11_manual_step(
 
         if atype == "activate_unit" and uid in eligible:
             # Sélection d'une unité à consolider → repart d'une sélection vierge + plan par-figurine.
-            u = get_unit_by_id(game_state, uid)
-            if u is None:
-                raise KeyError(f"Consolidation unit {uid} missing from game_state['units']")
+            u = require_unit_by_id(game_state, uid)
             game_state["active_fight_unit"] = uid
             _fight_v11_clear_consolidation_preview(game_state)
             done = {str(x) for x in game_state.get("consolidation_done", set())}
@@ -5405,9 +5373,7 @@ def _fight_v11_manual_step(
         # Actions portant sur l'unité active.
         if act_uid is None or act_uid not in eligible:
             return _fight_v11_manual_state(game_state)
-        u = get_unit_by_id(game_state, act_uid)
-        if u is None:
-            raise KeyError(f"Consolidation unit {act_uid} missing from game_state['units']")
+        u = require_unit_by_id(game_state, act_uid)
 
         if atype == "consolidation_select_target":
             # Engaging : toggle d'un ennemi candidat (≤3") dans la sélection préalable au move.

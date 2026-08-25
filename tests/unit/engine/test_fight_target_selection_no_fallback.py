@@ -87,7 +87,7 @@ def test_target_missing_from_unit_by_id_raises():
     `unit_by_id` est une désynchronisation d'index. Avant le fix, elle était sautée sans bruit.
     """
     gs = _game_state(reward_configs={_AGENT_KEY: {}})
-    with pytest.raises(ValueError, match="absente de unit_by_id"):
+    with pytest.raises(ConfigurationError, match="Unit '42'"):
         _ai_select_fight_target(gs, "1", ["2", "42"])  # "42" n'est pas dans unit_by_id
 
 
@@ -149,8 +149,8 @@ def test_each_target_is_scored_exactly_once(scripted_mapper):
     assert sorted(scripted_mapper.calls) == ["2", "3"], scripted_mapper.calls
 
 
-def test_unknown_fighter_unit_still_raises_value_error():
-    """Non-régression : l'erreur explicite déjà présente AVANT le try n'est pas touchée."""
+def test_unknown_fighter_unit_raises():
+    """Unité combattante absente de `unit_by_id` → ConfigurationError (require_unit_by_id)."""
     gs = _game_state(reward_configs={_AGENT_KEY: {}})
-    with pytest.raises(ValueError, match="Unit not found for fight target selection"):
+    with pytest.raises(ConfigurationError, match="Unit '99'"):
         _ai_select_fight_target(gs, "99", ["2", "3"])
