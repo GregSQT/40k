@@ -187,11 +187,29 @@ def test_etape_refuses_the_flags_it_decides_itself(monkeypatch, flag: str) -> No
         _run_main(monkeypatch, [*BASE_ARGV, flag])
 
 
-def test_etape_refuses_resume_from(monkeypatch, tmp_path) -> None:
+def test_etape_resume_from_on_new_stage_is_refused(curriculum_agent, tmp_path) -> None:
+    """--etape P0 (init='new') + --resume-from est refuse : un 'new' ne peut pas reprendre."""
     ckpt = tmp_path / "ppo_checkpoint_100_steps.zip"
-    ckpt.write_bytes(b"")
-    with pytest.raises(ValueError, match=r"--etape et --resume-from"):
-        _run_main(monkeypatch, [*BASE_ARGV, "--resume-from", str(ckpt)])
+    ckpt.write_bytes(b"POIDS")
+    args = _args("P0")
+    args.resume_from = str(ckpt)
+    with pytest.raises(ValueError, match="init='new'"):
+        _prepare_curriculum_stage(args, curriculum_agent.config)
+
+
+def test_etape_resume_from_on_from_stage_keeps_user_checkpoint(curriculum_agent, tmp_path) -> None:
+    """--etape E1 (init='from:P1') + --resume-from : le checkpoint utilisateur est conserve,
+    pas remplace par le stage_model_path de P1."""
+    ckpt = tmp_path / "ppo_checkpoint_640000_steps.zip"
+    ckpt.write_bytes(b"POIDS")
+    # Le modele P1 EXISTE aussi, pour s'assurer que stage_init_source n'est pas utilise.
+    _write_stage_model(curriculum_agent.models_root, "P1")
+    args = _args("E1")
+    args.resume_from = str(ckpt)
+    _prepare_curriculum_stage(args, curriculum_agent.config)
+    assert args.resume_from == str(ckpt), "le checkpoint utilisateur ne doit pas etre ecrase"
+    assert args.append is True
+    assert args.new is False
 
 
 def test_etape_refuses_the_modes_that_do_not_train(monkeypatch) -> None:

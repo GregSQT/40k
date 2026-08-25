@@ -4689,23 +4689,40 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
     models_root = config.get_models_root()
     canonical_model_path = build_agent_model_path(models_root, args.agent)
 
-    source_stage = stage_init_source(stage)
-    if source_stage is None:
-        args.new = True
-        print(f"🎓 Etape {args.etape} — init 'new' : modele neuf (le precedent est ecarte).")
-    else:
-        # La promotion d'un champion REUTILISE `--resume-from` : le zip de l'etape source est
-        # installe au chemin canonique (l'ancien ecarte, pas ecrase) et `--append` est active.
-        # Aucun second mecanisme de reprise n'est introduit.
-        source_model = stage_model_path(canonical_model_path, source_stage)
-        if not os.path.exists(source_model):
-            raise FileNotFoundError(
-                f"Etape {args.etape} : init 'from:{source_stage}' mais le modele de l'etape "
-                f"source est absent — {source_model}. Jouer {source_stage} d'abord."
+    # Si l'utilisateur a deja fourni --resume-from, il demande de reprendre un run plante :
+    # court-circuiter stage_init_source (qui repartirait de l'init de l'etape) et utiliser
+    # directement le checkpoint fourni. init='new' est incompatible : un 'new' ne peut pas
+    # reprendre un checkpoint par definition.
+    if args.resume_from:
+        source_stage = stage_init_source(stage)
+        if source_stage is None:
+            raise ValueError(
+                f"Etape {args.etape} a init='new' : impossible de combiner avec --resume-from "
+                f"({args.resume_from}). Un 'new' repart de zero, pas d'un checkpoint."
             )
-        args.resume_from = source_model
         args.append = True
-        print(f"🎓 Etape {args.etape} — init 'from:{source_stage}' : reprise de {source_model}")
+        print(
+            f"🎓 Etape {args.etape} — reprise manuelle depuis {args.resume_from} "
+            "(le stage_init_source est ignore, le checkpoint fourni est utilise tel quel)."
+        )
+    else:
+        source_stage = stage_init_source(stage)
+        if source_stage is None:
+            args.new = True
+            print(f"🎓 Etape {args.etape} — init 'new' : modele neuf (le precedent est ecarte).")
+        else:
+            # La promotion d'un champion REUTILISE `--resume-from` : le zip de l'etape source est
+            # installe au chemin canonique (l'ancien ecarte, pas ecrase) et `--append` est active.
+            # Aucun second mecanisme de reprise n'est introduit.
+            source_model = stage_model_path(canonical_model_path, source_stage)
+            if not os.path.exists(source_model):
+                raise FileNotFoundError(
+                    f"Etape {args.etape} : init 'from:{source_stage}' mais le modele de l'etape "
+                    f"source est absent — {source_model}. Jouer {source_stage} d'abord."
+                )
+            args.resume_from = source_model
+            args.append = True
+            print(f"🎓 Etape {args.etape} — init 'from:{source_stage}' : reprise de {source_model}")
 
     if is_exploiter_stage(stage):
         # Verification du protocole gele AVANT tout effet de bord : si la config diverge,
@@ -4927,7 +4944,9 @@ def main():
                        help="Reprendre l'entrainement depuis un checkpoint (ex: "
                             "ai/models/<agent>/ppo_checkpoint_640000_steps.zip). Le checkpoint et "
                             "ses stats VecNormalize sont installes au chemin canonique du modele "
-                            "(l'ancien est ecarte, pas ecrase) puis --append est active.")
+                            "(l'ancien est ecarte, pas ecrase) puis --append est active. "
+                            "Combinable avec --etape Px (sauf si l'etape a init='new') pour "
+                            "reprendre un run de curriculum plante sans perdre les steps deja faits.")
     parser.add_argument("--test-only", "--eval", action="store_true",
                        help="Only test existing model, don't train")
     parser.add_argument("--test-episodes", type=int, default=0, 
@@ -4976,7 +4995,9 @@ def main():
                             "ex: P0, P4, E1). COEXISTE avec --training-config, qui continue de "
                             "fournir les episodes et les hyperparametres : l'etape ne decrit que "
                             "l'adversite. Elle pose elle-meme --new ou --resume-from selon son "
-                            "'init', donc elle est exclusive de ces drapeaux.")
+                            "'init'. Exception : si --resume-from est fourni explicitement, il "
+                            "remplace le point de depart de l'etape (utile pour reprendre un run "
+                            "plante) — interdit si init='new'.")
 
     args = parser.parse_args()
 
@@ -5002,7 +5023,6 @@ def main():
             name for name, active in (
                 ("--new", args.new),
                 ("--append", args.append),
-                ("--resume-from", bool(args.resume_from)),
             ) if active
         ]
         if conflicting:

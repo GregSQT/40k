@@ -276,6 +276,9 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | tests | ✅ fix(types) pyright test_expected_damage (2026-08-24) — 12 erreurs pyright corrigées ; signature expected_damage à 2 args | — | ⚡ |
 | tests | ✅ fix(tests) clé 'code' armes synthétiques (2026-08-24) — champ code: ajouté dans _weapon() pour aligner les fixtures sur le schéma attendu | — | ⚡ |
 | tests | ✅ fix(tests) 4 findings code-review test_expected_damage (2026-08-24) — chemin mêlée, branche hp≤0, frontière entière, nb chaîne couverts ; 11 tests verts | — | ⚡ |
+| moteur | ✅ fix(unit_registry) dice string rule_args WeirdBoy deadly_demise D3 (2026-08-25) — regex rule_args étendu aux dés supportés par resolve_dice_value | — | ⚡ |
+| moteur | ✅ refactor/simplify _get_unit_rule_arg helper shared_utils (2026-08-25) — délégation _get_required_rule_int_argument + simplification ; unique VALID_DICE_STRINGS + tests paramétrés | — | ⚡ |
+| training | ✅ feat(curriculum) --etape + --resume-from combinables (2026-08-25) — reprendre un run de curriculum planté sans perdre les steps ; erreur explicite si init='new' ; 14 tests verts | — | ⚡ |
 
 ### Bloqués par une décision utilisateur
 
