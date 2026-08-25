@@ -5051,7 +5051,7 @@ def main():
             )
         curriculum_stage = _prepare_curriculum_stage(args, get_config_loader())
 
-    if args.resume_from:
+    if args.resume_from and not args.etape:
         if args.new:
             raise ValueError("--resume-from et --new sont exclusifs (--new repartirait de zero)")
         # `--resume-from` n'existe que pour REPRENDRE un entrainement : la promotion n'est
