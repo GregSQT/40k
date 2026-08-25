@@ -2100,7 +2100,6 @@ def _fight_v11_resolve_attacks(
     tid = preferred_target_id if (preferred_target_id in targets) else _ai_select_fight_target(
         game_state, unit_id, targets
     )
-    require_unit_by_id(game_state, tid)  # désync d'index si absent
 
     # Déclaration per-figurine + allocation via le moteur groupes (jumeau du chemin
     # training w40k_core). Le hook FIGHT_CTX.on_unit_destroyed retire la cible morte des
