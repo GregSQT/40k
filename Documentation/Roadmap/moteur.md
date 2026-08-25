@@ -92,6 +92,6 @@ Move réactif : une escouade hors cohérence ne pouvait pas faire ce mouvement (
 
 **T2 livré le 2026-08-25** — 46 sites Forme B convertis (charge_handlers 11, movement_handlers 11, fight_handlers 4, shared_utils 12, shooting_handlers 7+1 hors AST, reward_calculator 1). `unit_is_on_battlefield` supprimée (code mort, 0 appelant de production). api_server : 5 guards 404 ajoutés (frontières user-input). Grep résidu 0 (6 sites préservés : 2 tests, 3 frontières API, 1 contrat retour None). 13 tests mutation-prouvés (ROUGE→VERT).
 
-Reste : T3 (63 sites Forme D) — ~1-2 sessions.
+**T3 livré le 2026-08-25** — 20 sites Forme D. **T4 livré le 2026-08-25** — 15 sites fight_handlers. **T4-bis livré le 2026-08-25** — 7 gardes résiduelles (shared_utils ×6, action_decoder ×1) + import manquant action_decoder. Re-grep global : 0 garde is-None résiduelle. Chantier clos.
 
-→ `Documentation/Implémentation/A_faire/replis_unit_by_id_2026-08-05.md`
+→ `Documentation/Implémentation/Implémenté/replis_unit_by_id_2026-08-05.md`

@@ -1,6 +1,6 @@
 # Replis silencieux sur `unit_by_id` — le second index — 2026-08-05
 
-**Chantier OUVERT, rien de livré.** Inventaire, pas rapport de travail.
+**Chantier CLOS.** T0→T4-bis livrés (2026-08-25). 0 garde is-None résiduelle sur `get_unit_by_id` dans le moteur (re-grep final T4-bis).
 
 🔴 **CHIFFRES À NOUVEAU PÉRIMÉS — re-mesurés le 2026-08-06 sur `main` (`d7be203e`) :
 186 appels, 79 déjà bruyants, 56 replis, 51 à lire.**
@@ -226,6 +226,7 @@ EOF
 | **T2** ✅ | Forme B, 46 sites. `charge_handlers` (1), `fight_handlers` (2+5), `shared_utils`, `shooting_handlers` — tous convertis + `charge_preview_move_plan` bonus. Grep 0 résidu. Commit bf139af5 (2026-08-25). | 2 sessions |
 | **T3** ✅ | Forme D, 20 sites convertis dans 7 fichiers (action_decoder, charge_handlers, fight_handlers, shared_utils, shooting_handlers, observation_builder, w40k_core). `display_save_threshold_with_waaagh` et `_select_fight_weapon_indices_for_fig` non-Optionnalisées. Mutation ROUGE→VERT confirmée. Clôture : 74 gardes résiduelles = Forme B/C futures ou entrée externe légitime (scripts/_t3_closture_grep.py). Commit 43521169 (2026-08-25). | 1 session |
 | **T4** ✅ | Forme B résiduelle, 15 sites fight_handlers.py non couverts par T2 (flux manuel PvP pile-in/fight/consolidate + _ai_select_fight_target + _fight_auto_defender). Import `get_unit_by_id` retiré. Tests mis à jour (ValueError/KeyError → ConfigurationError sur 2 cas). Mutation ROUGE→VERT confirmée. Commit 29ea9fea (2026-08-25). | ½ session |
+| **T4-bis** ✅ | Gardes résiduelles (fenêtre 4 lignes post-`get_unit_by_id`) dans les 7 fichiers du T3 : 7 sites convertis (shared_utils ×6, action_decoder ×1) + import `require_unit_by_id` manquant dans action_decoder (NameError latent depuis T3). 9 tests, mutation ROUGE→VERT par site. Re-grep global : 0 garde is-None résiduelle sur `get_unit_by_id` dans le moteur. Commit 3645a5c8 (2026-08-25). | ½ session |
 
 Repère de coût mesuré : le lot `units_cache` a traité 47 sites sur 5 fichiers en une session, tests
 et mutations compris — mais avec l'outil déjà livré et un contrat déjà établi par un lot antérieur.
