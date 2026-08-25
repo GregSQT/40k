@@ -6061,6 +6061,11 @@ class W40KEngine(gym.Env):
         elif raw_log.get("pointBlankMalus"):  # get allowed
             details["hit_rule_modifier"] = "POINT-BLANK"
             details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
+        # §22.05 PLUNGING FIRE : +1 BS (seuil amélioré de 1). bsBase = ATK avant bonus.
+        # Absent en mêlée (False par construction via get).
+        elif raw_log.get("plungingFireApplied"):  # get allowed
+            details["hit_rule_modifier"] = "PLUNGING FIRE"
+            details["hit_target_base"] = raw_log.get("bsBase")  # get allowed
         # [RAPID FIRE] 24.30 : la regle grossit le POOL d attaques du groupe, elle n est pas
         # une propriete d un jet — le marqueur est donc porte par toutes les lignes du groupe.
         # C est ce qui leve le plafond de tirs cote analyzer (NB de base -> NB + X).

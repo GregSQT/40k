@@ -1292,7 +1292,22 @@ class StepLogger:
                 return f"Unit {unit_with_coords} SUFFERS 0 Mortal Wounds {tag}{dice_suffix} [NO ALLOC]"
             target_model_id = require_key(details, "target_model_id")
             return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag}{dice_suffix} [ALLOC_MODEL: {target_model_id}]"
-            
+
+        elif action_type == "deadly_demise":
+            # §24.08 DEADLY DEMISE — déclenchée dans destroy_model, après emergency disembark.
+            src_id = require_key(details, "sourceUnitId")
+            tgt_id = require_key(details, "unitId")
+            d6 = require_key(details, "d6Roll")
+            x_wounds = require_key(details, "deadlyDemiseWounds")
+            tgt_col = details.get("col", "?")
+            tgt_row = details.get("row", "?")
+            if int(d6) < 6:
+                return f"Unit {src_id} DEADLY DEMISE Roll:{d6} → no effect [DEADLY DEMISE]"
+            return (
+                f"Unit {src_id} DEADLY DEMISE Roll:{d6} → "
+                f"Unit {tgt_id}({tgt_col},{tgt_row}) SUFFERS {x_wounds} MW [DEADLY DEMISE]"
+            )
+
         elif action_type == "shoot_summary":
             # Summary of multi-shot sequence
             if "target_id" not in details:

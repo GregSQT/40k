@@ -2287,9 +2287,15 @@
       "applicability": {
         "kind": "indecidable"
       },
-      "controls": [],
-      "status": "ABSENT_LOG_MANQUANT",
-      "status_note": "Aucun token ; hit_target_base réservé à HEAVY/COVER."
+      "controls": [
+        {
+          "id": "22.05-PF",
+          "description": "Le token [PLUNGING FIRE] apparaît dans les lignes shoot quand la règle est déclenchée.",
+          "log_field": "hit_rule_modifier == PLUNGING FIRE",
+          "check_type": "presence"
+        }
+      ],
+      "status": "COUVERT"
     },
     {
       "id": "23.01",
@@ -2429,8 +2435,15 @@
       "applicability": {
         "kind": "indecidable"
       },
-      "controls": [],
-      "status": "ABSENT_LOG_MANQUANT"
+      "controls": [
+        {
+          "id": "24.08-DD",
+          "description": "Les entrées de type deadly_demise dans le step.log attestent le déclenchement et l'allocation des BM.",
+          "log_field": "type == deadly_demise",
+          "check_type": "presence"
+        }
+      ],
+      "status": "COUVERT"
     },
     {
       "id": "24.09",

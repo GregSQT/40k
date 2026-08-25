@@ -331,6 +331,9 @@ def handle_shoot(
         from ai.analyzer_hit import check_hit_result, check_indirect_fire_rule
         check_hit_result(state, stats, line, action_desc, player, is_melee=False)
         check_indirect_fire_rule(state, stats, line, action_desc, player)
+        # §22.05 PLUNGING FIRE : présence du token [PLUNGING FIRE] dans le segment Hit.
+        if "[PLUNGING FIRE]" in action_desc:
+            note_rule_usage(stats, "22.05", player)
         # Seuil de blessure 05.02 : la ligne dit le seuil qu'elle a appliqué, on le recalcule
         # depuis F et E. Cf. ai/analyzer_wound.py.
         from ai.analyzer_wound import check_wound_threshold, wound_bonus_applies

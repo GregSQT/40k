@@ -125,8 +125,10 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
-| moteur | **Plunging Fire (22.05) + Deadly Demise (24.08)** — lot passif ⚡ : +1 BS depuis terrain ≥3" ; explosion D6/6+ sur destruction de figurine | [moteur.md#plunging-fire](moteur.md#plunging-fire) | ⚡ |
-| moteur+training | **Stratagèmes réactifs** — Fire Overwatch §15.08 + Heroic Intervention §15.11 ; **slots obs réservés avant R1** (`"charged"` UNIT_BIN + 2 types AGENT_DECISION), implémentation J4 | [moteur.md#reactive-stratagems](moteur.md#reactive-stratagems) | 🚫 |
+| moteur | ✅ **Plunging Fire (22.05) + Deadly Demise (24.08)** livré 2026-08-25 — +1 BS tireur ≥3" ou TOWERING ≤12" (cible au sol) ; explosion D6/6+ sur destroy_model ; step_logger [PLUNGING FIRE]/[DEADLY DEMISE] ; analyzer + corpus câblés ; 14 tests rouge/vert | [moteur.md#plunging-fire](moteur.md#plunging-fire) | ⚡ |
+| moteur+training | **Stratagèmes réactifs** — Fire Overwatch §15.08 + Heroic Intervention §15.11 ; **slots obs réservés avant R1** (`"charged"` UNIT_BIN + 2 types AGENT_DECISION) livrés 2026-08-25, implémentation J4 | [moteur.md#reactive-stratagems](moteur.md#reactive-stratagems) | 🚫 |
+| moteur | ✅ fix(shoot) escouades hors table filtrées (2026-08-25) — `shoot_weapon_eligible`/`remaining_eligible_slots` ignorent les escouades sans figurines sur la table | — | ⚡ |
+| training+moteur | ✅ obs slots réservés stratagèmes réactifs (2026-08-25) — slots `charged` UNIT_BIN + `fire_overwatch`/`heroic_intervention` AGENT_DECISION réservés dans l'obs avant R1 ; `fire_overwatch`/`heroic_intervention` sans handler retirés de GRANTABLE, garde GRANTABLE⊆RULE_EFFECT | — | ⚡ |
 | analyzer | ✅ PROJ.1.4 double_pile_in corrigé (2026-08-18) — overrun 12.06 loggué \"OVERRUN PILED IN\", faux positifs éliminés | — | ⚡ |
 | analyzer | ✅ models_segment capturé après commit_move (2026-08-18) — faux positifs pile-in éliminés (fight_handler + w40k_core) | — | ⚡ |
 | analyzer | ✅ Réserves PvP 04b tests code-review corrigés (2026-08-18) — symétrie garde, formule sentinelle, commentaire xdist | — | ⚡ |

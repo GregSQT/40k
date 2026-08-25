@@ -1870,6 +1870,10 @@ def parse_step_log(filepath: str) -> Dict:
         # Jets Roll:1 lus sur les lignes SHOT (tir seul — FOUGHT ne porte pas ce token).
         # Doit correspondre à `hazardous_mortal_wounds` (hors figurines déjà mortes au jet).
         'hazardous_roll1_count': {1: 0, 2: 0},
+        # §24.08 DEADLY DEMISE — compteur d'EXERCICE (nombre de déclenchements : un par unité dans
+        # le rayon de 6", pas un par figurine détruite). Valeur positive attendue quand une figurine
+        # avec la règle deadly_demise est détruite ET que des unités sont à portée.
+        'deadly_demise_triggers': {1: 0, 2: 0},
         # Occasions JUGÉES par règle du corpus (`config/rules_corpus.json`) — le compte d'exercice
         # qui manquait à 67 des 69 contrôles. Sans lui, « 0 erreur » ne distingue pas un contrôle
         # qui n'a rien trouvé d'un contrôle qui n'a rien regardé. Déclarée d'avance, une clé par
@@ -3504,6 +3508,12 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     _hz_nw_fight = require_key(stats, 'hazardous_no_hazardous_weapon_fight')
     _hz_nw_total = {p: _hz_nw[p] + _hz_nw_fight[p] for p in (1, 2)}
     _hz_roll1 = require_key(stats, 'hazardous_roll1_count')
+    # §24.08 DEADLY DEMISE — compteur d'EXERCICE (une entrée par unité dans le rayon par figurine
+    # détruite avec la règle). Valeur > 0 seulement quand la règle deadly_demise est câblée sur
+    # une datasheet et que la figurine meurt à portée d'autres unités.
+    _dd = require_key(stats, 'deadly_demise_triggers')
+    _table_row("Declenchements DEADLY DEMISE (24.08):", _fmt_count(_dd[1]), _fmt_count(_dd[2]))
+
     _table_row("MW HAZARDOUS auto-infligees (24.15):", _fmt_count(_hz_mw[1]), _fmt_count(_hz_mw[2]))
     _table_row("  ↳ jets Roll:1 (tir) — doit = MW si aucune figurine morte au jet:",
                _fmt_count(_hz_roll1[1]), _fmt_count(_hz_roll1[2]))
