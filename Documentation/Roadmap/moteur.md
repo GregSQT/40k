@@ -12,15 +12,11 @@
 
 ## Plunging Fire (22.05) + Deadly Demise (24.08) {#plunging-fire}
 
-Lot passif ⚡ — aucun changement d'action space ni d'obs, livrable pendant un run.
+✅ **Livré 2026-08-25.** Mécanisme générique (valeur `deadly_demise` sur datasheets câblée par chantier 06). 14 tests rouge/vert. Lot passif ⚡ — aucun changement d'action space ni d'obs.
 
-**Plunging Fire §22.05 :** +1 au hit roll pour les attaques à distance ciblant une unité visible dont des figurines sont au sol, si l'attaquant est sur un terrain feature ≥3" de hauteur (ou TOWERING et cible à ≤12"). Sans effet sur les AIRCRAFT.
+**Plunging Fire §22.05 :** `_manual_roll_intent` dans `shared_utils.py` — +1 BS (seuil amélioré de 1) si plancher ≥3" (chemin a) ou TOWERING ≤12" cible au sol (chemin b) ; `floor_height_by_model` lu dans `units_cache` ; court-circuit 2D (hauteur 0.0 jamais ≥ 3") ; step_logger token `[PLUNGING FIRE]` ; `_build_shot_details` dans `w40k_core.py` émet `hit_rule_modifier`.
 
-**Deadly Demise §24.08 :** à chaque destruction d'un modèle portant la capacité, lancer 1D6 ; sur un 6, chaque unité à ≤ 6" subit X blessures mortelles (X indiqué sur la datasheet ; si X est aléatoire, lancer séparément par unité affectée). Résolution APRÈS l'emergency disembark des unités embarquées.
-
-Périmètre estimé :
-- Plunging Fire : `shooting_handlers.py` (modificateur BS) + `attack_sequence.py` (token) + test rouge/vert.
-- Deadly Demise : callback dans `destroy_model` (w40k_core ou combat_utils) + `step_logger` ([DEADLY DEMISE]) + `analyzer_couverture.md` (nouveau contrôle) + test rouge/vert.
+**Deadly Demise §24.08 :** `_apply_deadly_demise` + `destroy_model` dans `shared_utils.py` — D6 lancé après disembark, sur 6 chaque unité à ≤6" subit X MW via `allocate_mortal_wounds` ; valeur `deadly_demise` lue dans `units_cache[squad_id]` avant suppression du modèle ; step_logger tag `[DEADLY DEMISE]` ; analyzer + corpus §22.05 et §24.08 câblés.
 
 ---
 
