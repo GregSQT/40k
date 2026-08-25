@@ -288,7 +288,8 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
 | moteur | ✅ Replis `unit_by_id` T3 (2026-08-25) — 20 sites Forme D convertis (shared_utils, fight/shoot/charge_handlers, obs_builder, w40k_core, action_decoder) ; display_save_threshold_with_waaagh + _select_fight_weapon_indices_for_fig non-Optionnalisées ; 6 verrous rouge/vert | [moteur.md#unit-by-id](moteur.md#unit-by-id) | ⚡ |
-| moteur | ✅ Replis `unit_by_id` T4-bis (2026-08-25) — 7 gardes résiduelles fenêtre 4 lignes (shared_utils ×6, action_decoder ×1) + import require_unit_by_id manquant action_decoder ; 9 verrous rouge/vert ; re-grep global 0 résidu | [moteur.md#unit-by-id](moteur.md#unit-by-id) | ⚡ |
+| moteur | ✅ Replis `unit_by_id` T4-bis (2026-08-25) — 7 gardes résiduelles fenêtre 4 lignes (shared_utils ×6, action_decoder ×1) + import require_unit_by_id manquant action_decoder ; 9 verrous rouge/vert | [moteur.md#unit-by-id](moteur.md#unit-by-id) | ⚡ |
+| moteur | ✅ Replis `unit_by_id` T4-ter (2026-08-25) — 39 gardes résiduelles fenêtre 4 lignes dans 6 fichiers T3 non couverts par T4-bis (shared_utils, shooting_handlers, observation_builder, w40k_core, charge_handlers, action_decoder) ; 4 légitimes conservées ; 17 verrous rouge/vert | [moteur.md#unit-by-id](moteur.md#unit-by-id) | ⚡ |
 | moteur | ✅ Endless Duty obstacles 1 et 3 soldés (2026-08-19) — board_ref "44x60x5" + terrain-endless-duty.json (objectif fixe centre 110,150), objective_pool/selection supprimés, ED_START_LEADER mis à jour, signet test 2+4 ouverts | [moteur.md#endless-duty](moteur.md#endless-duty) | 🚫 |
 | front | ~~Scission `bcKey` géométrie/contrôle~~ ✅ livré 2026-08-19 | [front.md](front.md) | ⚡ |
 

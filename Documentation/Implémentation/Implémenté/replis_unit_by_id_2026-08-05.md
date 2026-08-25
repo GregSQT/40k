@@ -1,6 +1,8 @@
 # Replis silencieux sur `unit_by_id` — le second index — 2026-08-05
 
-**Chantier CLOS.** T0→T4-bis livrés (2026-08-25). 0 garde is-None résiduelle sur `get_unit_by_id` dans le moteur (re-grep final T4-bis).
+**Chantier CLOS.** T0→T4-ter livrés (2026-08-25). 0 garde is-None résiduelle sur `get_unit_by_id` dans les 7 fichiers T3 (re-grep final T4-ter : 4 hits légitimes conservés).
+
+**T4-ter (2026-08-25)** — 39 conversions supplémentaires dans 6 fichiers (`shared_utils`, `shooting_handlers`, `observation_builder`, `w40k_core`, `charge_handlers`, `action_decoder`). T4-bis n'avait couvert que `shared_utils` + `action_decoder` partiellement ; le re-grep T4-bis ne portait pas sur les 7 fichiers T3. 17 tests ROUGE→VERT dans `test_require_unit_by_id_residuals.py`. 4 gardes conservées : `w40k_core` L5307 (entrée externe API), `charge_handlers` L3638/L3650/L4404 (condition composée sur cibles déclarées par le joueur).
 
 🔴 **CHIFFRES À NOUVEAU PÉRIMÉS — re-mesurés le 2026-08-06 sur `main` (`d7be203e`) :
 186 appels, 79 déjà bruyants, 56 replis, 51 à lire.**
