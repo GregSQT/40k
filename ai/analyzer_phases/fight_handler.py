@@ -142,6 +142,7 @@ def _note_melee_weapon_rule_usage(
         stats['weapon_rule_usage'][("DEVASTATING_WOUNDS", weapon_key)][pl_int] += 1
     # [TORRENT] 24.37, [IGNORES COVER] 24.18, [LETHAL HITS] 24.23, [EXTRA ATTACKS], [ANTI-X] 24.03
     # — JUMEAUX du site de tir. Compteurs + validité (voir shoot_handler pour le détail complet).
+    _stripped = line.strip()
     _torrent_m = re.search(r'\[TORRENT\]', action_desc, re.IGNORECASE)
     if _torrent_m:
         stats['weapon_rule_usage'][("TORRENT", weapon_key)][pl_int] += 1
@@ -149,7 +150,7 @@ def _note_melee_weapon_rule_usage(
         if _HIT_RE.search(action_desc):
             stats['torrent_wrong_hit_fight'][pl_int] += 1
             if stats['first_error_lines']['torrent_wrong_hit_fight'][pl_int] is None:
-                stats['first_error_lines']['torrent_wrong_hit_fight'][pl_int] = {'episode': state.current_episode_num, 'line': line.strip()}
+                stats['first_error_lines']['torrent_wrong_hit_fight'][pl_int] = {'episode': state.current_episode_num, 'line': _stripped}
     if re.search(r'\[IGNORES COVER\]', action_desc, re.IGNORECASE):
         stats['weapon_rule_usage'][("IGNORES_COVER", weapon_key)][pl_int] += 1
     _lethal_m = re.search(r'\[LETHAL HITS\]', action_desc, re.IGNORECASE)
@@ -158,7 +159,7 @@ def _note_melee_weapon_rule_usage(
         if re.search(r'\bWound\s+\d+\(\d+\+\)', action_desc):
             stats['lethal_hits_wrong_wound_fight'][pl_int] += 1
             if stats['first_error_lines']['lethal_hits_wrong_wound_fight'][pl_int] is None:
-                stats['first_error_lines']['lethal_hits_wrong_wound_fight'][pl_int] = {'episode': state.current_episode_num, 'line': line.strip()}
+                stats['first_error_lines']['lethal_hits_wrong_wound_fight'][pl_int] = {'episode': state.current_episode_num, 'line': _stripped}
     if re.search(r'\[EXTRA ATTACKS\]', action_desc, re.IGNORECASE):
         stats['weapon_rule_usage'][("EXTRA_ATTACKS", weapon_key)][pl_int] += 1
     _anti_m = re.search(r'\[ANTI-(\w+):(\d+)\+\]', action_desc, re.IGNORECASE)
