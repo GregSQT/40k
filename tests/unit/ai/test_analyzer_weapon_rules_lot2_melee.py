@@ -103,14 +103,12 @@ def test_lethal_hits_melee_usage_counter_incremented(tmp_path):
 
 def test_lethal_hits_melee_no_validity_error_with_none_wound(tmp_path):
     stats = _stats(tmp_path, _LH_LINE, "WarpSpiderExarchPowerblade")
-    lh_errors = [e for e in stats["parse_errors"] if "LETHAL HITS" in e.get("error", "")]
-    assert lh_errors == [], lh_errors
+    assert stats["lethal_hits_wrong_wound_fight"][1] == 0, stats["lethal_hits_wrong_wound_fight"]
 
 
 def test_lethal_hits_melee_validity_error_with_numeric_wound(tmp_path):
     stats = _stats(tmp_path, _LH_LINE_BAD, "WarpSpiderExarchPowerblade")
-    lh_errors = [e for e in stats["parse_errors"] if "LETHAL HITS" in e.get("error", "")]
-    assert len(lh_errors) == 1, lh_errors
+    assert stats["lethal_hits_wrong_wound_fight"][1] == 1, stats["lethal_hits_wrong_wound_fight"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -173,14 +171,12 @@ def test_torrent_melee_usage_counter_incremented(tmp_path):
 
 def test_torrent_melee_no_validity_error_with_none_hit(tmp_path):
     stats = _stats(tmp_path, _TORRENT_LINE, "ApothecaryBiologis")
-    torrent_errors = [e for e in stats["parse_errors"] if "TORRENT" in e.get("error", "")]
-    assert torrent_errors == [], torrent_errors
+    assert stats["torrent_wrong_hit_fight"][1] == 0, stats["torrent_wrong_hit_fight"]
 
 
 def test_torrent_melee_validity_error_with_numeric_hit(tmp_path):
     stats = _stats(tmp_path, _TORRENT_LINE_BAD, "ApothecaryBiologis")
-    torrent_errors = [e for e in stats["parse_errors"] if "TORRENT" in e.get("error", "")]
-    assert len(torrent_errors) == 1, torrent_errors
+    assert stats["torrent_wrong_hit_fight"][1] == 1, stats["torrent_wrong_hit_fight"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
