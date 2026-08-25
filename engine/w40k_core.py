@@ -5233,24 +5233,21 @@ class W40KEngine(gym.Env):
             geometrique (cible en terrain / partiellement visible), identique au tir mono-fig.
             """
             build_unit_los_cache(self.game_state, squad_id)
-            unit_obj = get_unit_by_id(self.game_state, squad_id)
-            assert unit_obj is not None, f"unit {squad_id} not found in game_state"
+            unit_obj = require_unit_by_id(self.game_state, squad_id)
             return build_cover_by_unit_id_for_valid_targets(self.game_state, unit_obj, valid_targets)
 
         def _squad_hidden_too_far() -> Dict[str, bool]:
             """Ennemis cachés-trop-loin (œil rouge) relativement au squad actif. Même brique LoS
             partagée que ``_squad_cover_by_unit_id`` (build_unit_los_cache idempotent)."""
             build_unit_los_cache(self.game_state, squad_id)
-            unit_obj = get_unit_by_id(self.game_state, squad_id)
-            assert unit_obj is not None, f"unit {squad_id} not found in game_state"
+            unit_obj = require_unit_by_id(self.game_state, squad_id)
             return build_hidden_too_far_by_unit_id(self.game_state, unit_obj)
 
         def _squad_hidden_detection_info() -> Dict[str, Dict[str, Any]]:
             """Detection range effective (15" / 12" GtG) + too_far par ennemi caché, pour le badge
             numérique frontend. Même brique LoS partagée (build_unit_los_cache idempotent)."""
             build_unit_los_cache(self.game_state, squad_id)
-            unit_obj = get_unit_by_id(self.game_state, squad_id)
-            assert unit_obj is not None, f"unit {squad_id} not found in game_state"
+            unit_obj = require_unit_by_id(self.game_state, squad_id)
             return build_hidden_detection_info_by_unit_id(self.game_state, unit_obj)
 
         if name == "squad_shoot_activate":

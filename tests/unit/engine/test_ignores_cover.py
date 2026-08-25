@@ -46,13 +46,17 @@ def _minimal_shoot_game_state(weapon_rules):
 
 def _force_cover_true(monkeypatch, calls):
     """compute_unit_los renvoie cover=True ; enregistre chaque appel pour prouver
-    (ou non) le court-circuit. _get_unit_by_id renvoie une unite factice non-None."""
+    (ou non) le court-circuit."""
     def fake_los(game_state, shooter, target):
         calls.append(("los", shooter, target))
         return {"cover": True}
 
     monkeypatch.setattr(shooting_handlers, "compute_unit_los", fake_los)
-    monkeypatch.setattr(shooting_handlers, "_get_unit_by_id", lambda gs, sid: {"id": sid})
+
+
+def _gs_with_units(shooter_sid: str = "1", target_sid: str = "2") -> dict:
+    """game_state minimal avec unit_by_id pour require_unit_by_id."""
+    return {"unit_by_id": {shooter_sid: {"id": shooter_sid}, target_sid: {"id": target_sid}}}
 
 
 def test_ignores_cover_bypasses_cover(monkeypatch):
@@ -75,7 +79,7 @@ def test_no_ignores_cover_applies_cover(monkeypatch):
     _force_cover_true(monkeypatch, calls)
     weapon = {"WEAPON_RULES": ["HEAVY"], "display_name": "Plain Gun"}
 
-    bs, cover = _cover_worsened_bs({}, {"squad_id": "1"}, "2", 3, weapon)
+    bs, cover = _cover_worsened_bs(_gs_with_units(), {"squad_id": "1"}, "2", 3, weapon)
 
     assert bs == 4, "worsen the BS characteristic by 1 (13.08)"
     assert cover is True
@@ -100,7 +104,7 @@ def test_ignores_cover_bs6_stays_touch_on_6(monkeypatch):
     _force_cover_true(monkeypatch, calls)
     weapon = {"WEAPON_RULES": [], "display_name": "Bad Shot"}
 
-    bs, cover = _cover_worsened_bs({}, {"squad_id": "1"}, "2", 6, weapon)
+    bs, cover = _cover_worsened_bs(_gs_with_units(), {"squad_id": "1"}, "2", 6, weapon)
 
     assert bs == 6 and cover is True
 

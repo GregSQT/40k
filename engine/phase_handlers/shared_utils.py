@@ -7165,11 +7165,8 @@ def _advance_blocks_weapon(
         return False
     from engine.phase_handlers.shooting_handlers import (
         _can_unit_shoot_after_advance_with_weapon,
-        _get_unit_by_id,
     )
-    unit = _get_unit_by_id(game_state, squad_id)
-    if unit is None:
-        raise KeyError(f"10.05: escouade {squad_id!r} absente de game_state['units']")
+    unit = require_unit_by_id(game_state, squad_id)
     return not _can_unit_shoot_after_advance_with_weapon(unit, weapon)
 
 
@@ -9563,14 +9560,10 @@ def _cover_worsened_bs(
     """
     if weapon_has_rule(weapon, "IGNORES_COVER"):
         return bs, False
-    from engine.phase_handlers.shooting_handlers import compute_unit_los, _get_unit_by_id
+    from engine.phase_handlers.shooting_handlers import compute_unit_los
     shooter_sid = str(require_key(attacker, "squad_id"))
-    shooter_unit = _get_unit_by_id(game_state, shooter_sid)
-    target_unit = _get_unit_by_id(game_state, str(target_sid))
-    if shooter_unit is None:
-        raise ValueError(f"Cover: tireur {shooter_sid!r} introuvable (unit_by_id)")
-    if target_unit is None:
-        raise ValueError(f"Cover: cible {target_sid!r} introuvable (unit_by_id)")
+    shooter_unit = require_unit_by_id(game_state, shooter_sid)
+    target_unit = require_unit_by_id(game_state, str(target_sid))
     cover = bool(compute_unit_los(game_state, shooter_unit, target_unit)["cover"])
     if not cover:
         return bs, False

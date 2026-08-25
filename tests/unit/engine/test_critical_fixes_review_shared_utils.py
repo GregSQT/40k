@@ -194,14 +194,11 @@ class TestAdvanceBlocksWeaponKeyMissing:
             shooting_handlers, "_can_unit_shoot_after_advance_with_weapon",
             lambda unit, weapon: False
         )
-        monkeypatch.setattr(
-            shooting_handlers, "_get_unit_by_id",
-            lambda gs, sid: {"id": sid, "UNIT_RULES": []}
-        )
 
         gs: Dict[str, Any] = {
             "config": {"game_rules": {}},
             "units_advanced": {"1"},
+            "unit_by_id": {"1": {"id": "1", "UNIT_RULES": []}},
         }
         weapon: Dict[str, Any] = {"WEAPON_RULES": [], "display_name": "Plain Gun"}
         assert _advance_blocks_weapon(gs, "1", weapon) is True
