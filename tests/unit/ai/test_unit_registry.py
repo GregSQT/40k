@@ -168,6 +168,63 @@ export class WeirdBoy extends SwarmRangeSwarm {
     assert rule["rule_args"] == {"value": "D3"}
 
 
+def test_extract_static_properties_parses_extended_dice_rule_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _make_registry_stub()
+    registry._unit_rules = {"deadly_demise": {}}
+    monkeypatch.setattr("engine.weapons.get_weapons", lambda faction, codes: [])
+    content = """
+export class SomeUnit extends Base {
+  static HP_MAX = 4;
+  static MOVE = 6;
+  static RNG_WEAPON_CODES = [];
+  static CC_WEAPON_CODES = [];
+  static UNIT_RULES = [
+    { ruleId: "deadly_demise", displayName: "Deadly Demise 2D6", rule_args: { value: "2D6" } }
+  ];
+}
+"""
+    props = registry._extract_static_properties(content, "sm")
+    assert props["UNIT_RULES"][0]["rule_args"] == {"value": "2D6"}
+
+
+def test_extract_static_properties_parses_d6_plus_dice_rule_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _make_registry_stub()
+    registry._unit_rules = {"deadly_demise": {}}
+    monkeypatch.setattr("engine.weapons.get_weapons", lambda faction, codes: [])
+    content = """
+export class SomeUnit extends Base {
+  static HP_MAX = 4;
+  static MOVE = 6;
+  static RNG_WEAPON_CODES = [];
+  static CC_WEAPON_CODES = [];
+  static UNIT_RULES = [
+    { ruleId: "deadly_demise", displayName: "Deadly Demise D6+1", rule_args: { value: "D6+1" } }
+  ];
+}
+"""
+    props = registry._extract_static_properties(content, "sm")
+    assert props["UNIT_RULES"][0]["rule_args"] == {"value": "D6+1"}
+
+
+def test_extract_static_properties_rejects_unsupported_dice_rule_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _make_registry_stub()
+    registry._unit_rules = {"deadly_demise": {}}
+    monkeypatch.setattr("engine.weapons.get_weapons", lambda faction, codes: [])
+    content = """
+export class SomeUnit extends Base {
+  static HP_MAX = 4;
+  static MOVE = 6;
+  static RNG_WEAPON_CODES = [];
+  static CC_WEAPON_CODES = [];
+  static UNIT_RULES = [
+    { ruleId: "deadly_demise", displayName: "Deadly Demise D10", rule_args: { value: "D10" } }
+  ];
+}
+"""
+    with pytest.raises(ValueError, match="rule_args"):
+        registry._extract_static_properties(content, "sm")
+
+
 def test_save_registry_cache_writes_json(tmp_path: Path) -> None:
     registry = _make_registry_stub()
     registry.project_root = tmp_path
