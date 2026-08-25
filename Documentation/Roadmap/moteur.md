@@ -12,7 +12,7 @@
 
 ## Plunging Fire (22.05) + Deadly Demise (24.08) {#plunging-fire}
 
-✅ **Livré 2026-08-25.** Mécanisme générique (valeur `deadly_demise` sur datasheets câblée par chantier 06). 14 tests rouge/vert. Lot passif ⚡ — aucun changement d'action space ni d'obs.
+✅ **Livré 2026-08-25.** Mécanisme générique + câblage WeirdBoy (chantier 06). 17 tests rouge/vert. Lot passif ⚡ — aucun changement d'action space ni d'obs.
 
 **Plunging Fire §22.05 :** `_manual_roll_intent` dans `shared_utils.py` — +1 BS (seuil amélioré de 1) si plancher ≥3" (chemin a) ou TOWERING ≤12" cible au sol (chemin b) ; `floor_height_by_model` lu dans `units_cache` ; court-circuit 2D (hauteur 0.0 jamais ≥ 3") ; step_logger token `[PLUNGING FIRE]` ; `_build_shot_details` dans `w40k_core.py` émet `hit_rule_modifier`.
 
