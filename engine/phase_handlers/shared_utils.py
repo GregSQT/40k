@@ -2700,11 +2700,6 @@ def _select_reactive_unit_order(
         if unit_id in eligible_by_id and unit_id not in seen:
             ordered.append(eligible_by_id[unit_id])
             seen.add(unit_id)
-        elif unit_id not in eligible_by_id:
-            raise ValueError(
-                "ValueError[reactive_move.invalid_macro_order]: "
-                f"unit_id={unit_id} not eligible in current reaction window"
-            )
 
     return ordered
 

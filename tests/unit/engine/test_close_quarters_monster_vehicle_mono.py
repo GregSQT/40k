@@ -35,6 +35,7 @@ from engine.observation_builder import ObservationBuilder
 from engine.phase_handlers.shooting_handlers import (
     _has_valid_shooting_targets,
     _is_valid_shooting_target,
+    _unit_has_firable_target,
     weapon_availability_check,
 )
 from engine.phase_handlers.shared_utils import (
@@ -262,3 +263,42 @@ def test_targeting_rule_is_identical_on_both_paths():
                 f"divergence mono/squad : {keywords} arme={rules or 'aucune regle'} "
                 f"cible={target_id} — mono autorise={mono_ok}, squad bloque={squad_blocked}"
             )
+
+
+# --------------------------------------------------------- _unit_has_firable_target (CR-4)
+
+
+def test_engaged_monster_sees_distant_enemy_via_firable_target_check():
+    """CR-4 : un MONSTER engagé doit voir une cible NON-ADJACENTE via _unit_has_firable_target.
+
+    Avant le fix (ligne 2054), ``is_adjacent and not enemy_adjacent_to_shooter`` skippait tous les
+    ennemis non-adjacents, y compris pour MONSTER/VEHICLE (10.06 : n'importe quelle cible valide).
+    Pour isoler le chemin non-adjacent : le seul ennemi est à 30 hexes (hors engagement). Le
+    tireur est is_adjacent=True (état injecté directement), mais aucun ennemi n'est adjacent.
+    Avant fix → False (ennemi distant skipé). Après fix → True (MONSTER dépasse le skip).
+    """
+    # Un seul ennemi à distance 30 — aucune cible adjacente dans le units_cache.
+    eng = _engine([
+        _unit_cfg(1, 1, [(10, 10)], rng_weapons=[_weapon("Bio-Cannon", [], rng=48)], keywords=["MONSTER"]),
+        _unit_cfg(2, 2, [(30, 10)]),
+    ])
+    gs = eng.game_state
+    unit = _unit(eng, "1")
+    result = _unit_has_firable_target(gs, unit, is_adjacent=True, max_range=48)
+    assert result is True, "MONSTER engagé doit voir les cibles distantes (10.06)"
+
+
+def test_engaged_infantry_with_no_adjacent_enemy_cannot_shoot_distant():
+    """Contre-épreuve CR-4 : l'infanterie engagée ne peut cibler que les ennemis adjacents.
+
+    Même setup que le test MONSTER mais avec INFANTRY. Sans ennemi adjacent, la fonction
+    doit renvoyer False (aucune arme [CLOSE-QUARTERS] ne peut viser la cible distante).
+    """
+    eng = _engine([
+        _unit_cfg(1, 1, [(10, 10)], rng_weapons=[_weapon("Bolt Rifle", [], rng=48)], keywords=["INFANTRY"]),
+        _unit_cfg(2, 2, [(30, 10)]),
+    ])
+    gs = eng.game_state
+    unit = _unit(eng, "1")
+    result = _unit_has_firable_target(gs, unit, is_adjacent=True, max_range=48)
+    assert result is False, "infanterie engagée sans cible adjacente ne peut pas tirer"

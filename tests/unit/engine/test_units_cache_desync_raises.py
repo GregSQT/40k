@@ -251,3 +251,59 @@ def test_check_if_melee_can_charge_raises_on_a_desynced_cache(gs: Dict[str, Any]
     gs["units"] = [{"id": "mover", "player": ACTING}, {"id": "ennemi_pose", "player": FOE}]
     with pytest.raises(KeyError, match="check_if_melee_can_charge"):
         check_if_melee_can_charge({"id": "fantome"}, gs)
+
+
+# --- CR-6 : _get_los_visibility_state doit lever si board_cols/board_rows est absent (T1) -------
+
+
+def test_get_los_visibility_state_raises_if_board_cols_missing() -> None:
+    """CR-6 : board_cols absent → KeyError explicite (T1), pas (0.0, False) silencieux.
+
+    Avant le fix, `game_state.get("board_cols")` rendait None, `isinstance(None, int)` = False
+    et la fonction retournait (0.0, False) — désactivant silencieusement toute LoS.
+    """
+    from engine.phase_handlers.shooting_handlers import _get_los_visibility_state
+
+    gs_no_board = {
+        "board_rows": 20,
+        # board_cols intentionnellement absent
+        "_hex_los_state_cache": None,
+        "terrain_areas": [],
+        "wall_hexes": set(),
+    }
+    with pytest.raises(KeyError, match="board_cols"):
+        _get_los_visibility_state(gs_no_board, 0, 0, 5, 5)
+
+
+def test_get_los_visibility_state_raises_if_board_rows_missing() -> None:
+    """CR-6 : board_rows absent → KeyError explicite (T1), pas (0.0, False) silencieux."""
+    from engine.phase_handlers.shooting_handlers import _get_los_visibility_state
+
+    gs_no_board = {
+        "board_cols": 25,
+        # board_rows intentionnellement absent
+        "_hex_los_state_cache": None,
+        "terrain_areas": [],
+        "wall_hexes": set(),
+    }
+    with pytest.raises(KeyError, match="board_rows"):
+        _get_los_visibility_state(gs_no_board, 0, 0, 5, 5)
+
+
+def test_get_los_visibility_state_returns_false_for_out_of_bounds_coords() -> None:
+    """CR-6 (non-régression) : des coordonnées hors plateau avec un board valide → (0.0, False).
+
+    Ce chemin est un comportement métier légitime (pas d'ennemi hors plateau), pas un T1.
+    """
+    from engine.phase_handlers.shooting_handlers import _get_los_visibility_state
+
+    gs_valid_board = {
+        "board_cols": 10,
+        "board_rows": 10,
+        "_hex_los_state_cache": None,
+        "terrain_areas": [],
+        "wall_hexes": set(),
+    }
+    ratio, can_see = _get_los_visibility_state(gs_valid_board, 0, 0, 15, 15)
+    assert ratio == 0.0
+    assert can_see is False

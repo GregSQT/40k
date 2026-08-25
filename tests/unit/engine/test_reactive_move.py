@@ -359,15 +359,23 @@ class TestSelectReactiveUnitOrder:
         with pytest.raises(ValueError, match="macro order cannot be empty"):
             _select_reactive_unit_order(gs, eligible)
 
-    def test_macro_order_with_non_eligible_unit_raises(self):
-        """reactive_order_macro_intrus : un id hors fenêtre est refusé, pas ignoré."""
-        eligible = self._eligible()
+    def test_macro_order_unit_killed_mid_reaction_is_skipped(self):
+        """reactive_order_macro_unite_morte : une unité tuée pendant la réaction est ignorée.
+
+        Elle figure dans reactive_macro_order_current_window (fenêtre ouverte quand elle était
+        vivante) mais plus dans eligible_units (recalculé après sa mort). La correction du
+        CR-1 : silently skip au lieu de raise ValueError.
+        """
+        eligible = self._eligible()  # unités 1, 2, 3
         gs = _make_game_state(eligible)
         gs["reactive_mode"] = "macro"
-        gs["reactive_macro_order_current_window"] = ["3", "99"]
+        gs["reactive_macro_order_current_window"] = ["3", "2", "1"]
 
-        with pytest.raises(ValueError, match="unit_id=99 not eligible"):
-            _select_reactive_unit_order(gs, eligible)
+        # L'unité 2 vient de mourir : on la retire du pool eligible passé
+        eligible_minus_2 = [u for u in eligible if u["id"] != 2]
+        ordered = _select_reactive_unit_order(gs, eligible_minus_2)
+
+        assert [str(u["id"]) for u in ordered] == ["3", "1"]
 
     def test_unknown_mode_raises(self):
         """reactive_order_mode_inconnu : un mode hors {micro, macro} est refusé."""

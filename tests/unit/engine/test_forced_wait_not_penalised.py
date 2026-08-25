@@ -26,6 +26,7 @@ from engine.macro_intents import ACTIVATE_SLOT_BASE
 from engine.observation_builder import ObservationBuilder
 from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT
 from engine.w40k_core import W40KEngine
+import engine.w40k_core as _w40k_core_module
 from tests.unit.engine._config_helpers import (
     build_engine_config,
     build_game_rules,
@@ -300,3 +301,33 @@ def test_episode_ending_inside_the_chain_still_reports_its_summary():
     # ET l'info reste celui de l'action de l'AGENT : le drain FUSIONNE, il ne remplace pas.
     assert info["action"] != "squad_wait"
     assert info["acting_player"] == 1
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CR-3 : la récompense au tour-limite n'est plus codée en dur à 0.0
+#
+# Avant le fix, le guard `turn_limit_reached` retournait directement reward=0.0 sans appeler
+# calculate_reward. Les épisodes terminant par la limite de tours avaient leur récompense
+# terminale (gain/perte) remplacée par 0.0, biaisant l'estimation de valeur PPO.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_turn_limit_termination_calls_calculate_reward_not_zero():
+    """CR-3 : le guard turn_limit doit appeler calculate_reward, pas retourner 0.0 en dur.
+
+    Avant le fix : return observation, 0.0, True, ... — calculate_reward jamais appelé.
+    Après fix : calculate_reward est appelé + terminal_shaping. On vérifie l'appel via mock.
+    """
+    engine = _make_engine(ENEMY_FAR, ally_positions=(ALLY, ALLY_2))
+    _SENTINEL = 7.5
+
+    with patch.object(_w40k_core_module, "turn_limit_reached", return_value=True), \
+         patch.object(engine.reward_calculator, "calculate_reward", return_value=_SENTINEL) as mock_calc:
+        _obs, reward, terminated, _truncated, _info = engine.step(ACTIVATE_SLOT_BASE)
+
+    assert terminated, "l'épisode doit être terminé"
+    assert mock_calc.called, (
+        "CR-3 : calculate_reward doit être appelé quand turn_limit_reached est vrai — "
+        "avant le fix reward=0.0 était retourné sans l'appeler"
+    )
+    assert reward >= _SENTINEL, "le reward doit inclure la valeur de calculate_reward"

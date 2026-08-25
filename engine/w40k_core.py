@@ -2350,7 +2350,12 @@ class W40KEngine(gym.Env):
                 objective_control = self.state_manager.calculate_objective_control(self.game_state)
                 self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
             
-            return observation, 0.0, True, False, info, out_mask
+            turn_limit_result = {"action": "turn_limit_reached", "turn_limit_reached": True}
+            reward = self.reward_calculator.calculate_reward(True, turn_limit_result, self.game_state)
+            reward += self.settle_pending_zone_intent_declaration(
+                int(require_key(self.config, "controlled_player"))
+            )
+            return observation, reward, True, False, info, out_mask
 
         # Check for game termination before action
         self.game_state["game_over"] = self._check_game_over()
