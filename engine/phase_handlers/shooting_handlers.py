@@ -2051,8 +2051,8 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
         if distance > max_range:
             continue
         enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(shooter_entry, enemy_entry, melee_range, game_state=game_state)
-        if is_adjacent and not enemy_adjacent_to_shooter:
-            # Arme CLOSE_QUARTERS : ne peut cibler que l'ennemi avec lequel l'unité est engagée.
+        if is_adjacent and not enemy_adjacent_to_shooter and not _unit_shoots_as_monster_or_vehicle(game_state, unit):
+            # CLOSE_QUARTERS : cibles adjacentes seulement — sauf MONSTER/VEHICLE (10.06, toutes cibles).
             continue
         if _friendly_engagement_blocks_ranged_shot(
             game_state, shooter_id_str, shooter_player_int, enemy_entry, str(enemy_id),
@@ -2405,11 +2405,11 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
         _emit_shoot_activation_perf(game_state, str(unit_id), _t_act0, _t_after_los, None, None, None, None, None, "empty_pool_skip", 0)
         return result
 
-    # weapon_availability_check(weapon_rule, 0, unit_is_adjacent ? 1 : 0) -> Build weapon_available_pool
+    # weapon_availability_check(advance_status, unit_is_adjacent ? 1 : 0) -> Build weapon_available_pool
     if "weapon_rule" not in game_state:
         raise KeyError("game_state missing required 'weapon_rule' field")
     weapon_rule = game_state["weapon_rule"]
-    advance_status = 0  # STEP 2: Unit has NOT advanced yet
+    advance_status = 1 if unit_id_str in game_state.get("units_advanced", set()) else 0
     adjacent_status = 1 if unit_is_adjacent else 0
     _t_ep0 = time.perf_counter() if _perf_act else None
     _activation_enemy_precheck = _build_weapon_availability_enemy_precheck(
@@ -3495,10 +3495,10 @@ def _get_los_visibility_state(
     """
     board_cols = game_state.get("board_cols")
     board_rows = game_state.get("board_rows")
+    if not isinstance(board_cols, int) or not isinstance(board_rows, int):
+        raise KeyError("game_state missing required 'board_cols'/'board_rows' fields")
     if not (
-        isinstance(board_cols, int)
-        and isinstance(board_rows, int)
-        and 0 <= start_col < board_cols
+        0 <= start_col < board_cols
         and 0 <= start_row < board_rows
         and 0 <= end_col < board_cols
         and 0 <= end_row < board_rows

@@ -36,6 +36,7 @@ from engine.phase_handlers.shared_utils import (
     build_squad_action_mask,
     resolve_squad_shooting_type,
 )
+from engine.phase_handlers.shooting_handlers import weapon_availability_check
 from engine.w40k_core import W40KEngine
 from tests.unit.engine._config_helpers import build_engine_config
 
@@ -269,6 +270,37 @@ def test_no_close_quarters_malus_outside_close_quarters_shooting(
     ])
     assert resolve_squad_shooting_type(eng.game_state, "1") == SHOOTING_TYPE_NORMAL
     assert _bs_of_shot(eng, 0, monkeypatch) == 4
+
+
+def test_advance_status_derives_from_units_advanced_not_hardcoded() -> None:
+    """CR-2 : advance_status doit être dérivé de units_advanced, pas codé en dur à 0.
+
+    Avant le fix, weapon_availability_check était appelé avec advance_status=0 même pour une
+    unité ayant avancé. Résultat : les armes non-ASSAULT avaient can_use=True (10.05 violé).
+    Ce test vérifie que advance_status=1 bloque les armes non-ASSAULT — l'invariant qu'assure
+    le fix en dérivant advance_status de units_advanced.
+    """
+    eng = _engine([
+        _unit_cfg(1, 1, [(10, 10)], rng_weapons=[_weapon("Plain Gun", [])]),
+        _unit_cfg(2, 2, [(20, 10)]),
+    ])
+    gs = eng.game_state
+    unit = next(u for u in gs["units"] if str(u["id"]) == "1")
+    # weapon_availability_check exige shot=0 (posé à l'activation) — le poser ici car on appelle
+    # la fonction directement sans passer par shooting_unit_activation_start.
+    for w in unit["RNG_WEAPONS"]:
+        w.setdefault("shot", 0)
+    weapon_rule = gs.get("weapon_rule", 1)
+
+    # advance_status=0 (avant fix) : arme non-ASSAULT marquée can_use=True — état incorrect.
+    pool_zero = weapon_availability_check(gs, unit, weapon_rule, 0, 0)
+    assert pool_zero[0]["can_use"] is True, "prémisse : advance_status=0 laisse passer l'arme"
+
+    # advance_status=1 (après fix) : arme non-ASSAULT marquée can_use=False — état correct.
+    pool_one = weapon_availability_check(gs, unit, weapon_rule, 1, 0)
+    assert pool_one[0]["can_use"] is False, (
+        "10.05 : une unité ayant avancé ne peut tirer qu'avec des armes [ASSAULT]"
+    )
 
 
 def test_the_mask_no_longer_depends_on_the_selected_weapon_index() -> None:
