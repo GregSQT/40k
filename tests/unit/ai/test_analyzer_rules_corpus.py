@@ -205,7 +205,8 @@ def test_the_per_rule_sum_matches_the_section_total(tmp_path):
     stats["flee_from_unengaged"][1] = 1
     stats["reactive_move_checks"]["to_adjacent_enemy"][1] = 1
     stats["reactive_move_checks"]["distance_over_roll"][2] = 1
-    assert an.error_totals(stats)["move"] == 13, "le bucket ne voit pas les 13 compteurs"
+    stats["reserves_too_early"][1] = 1
+    assert an.error_totals(stats)["move"] == 14, "le bucket ne voit pas les 14 compteurs"
     assert coverage_gaps(stats) == [], (
         "un compteur d'erreur de §1.1 n'est porté par aucune règle du corpus, ou l'est par deux"
     )
@@ -295,7 +296,10 @@ def test_section_12_corpus_sum_matches_bucket(tmp_path):
     stats['indirect_fire_mismatch'][1] = 1
     stats['shoot_wound_threshold_mismatch'][1] = 1
     stats['hazardous_no_hazardous_weapon'][1] = 1
-    assert an.error_totals(stats)['shooting'] == 16, "le bucket ne voit pas les 16 compteurs §1.2"
+    stats['torrent_wrong_hit'][1] = 1
+    stats['lethal_hits_wrong_wound'][1] = 1
+    stats['blast_x_mismatch'][1] = 1
+    assert an.error_totals(stats)['shooting'] == 19, "le bucket ne voit pas les 19 compteurs §1.2"
     assert coverage_gaps(stats, "1.2") == []
 
 
@@ -352,7 +356,9 @@ def test_section_14_corpus_sum_matches_bucket(tmp_path):
     stats['fight_alternation_violations'][1] = 1
     stats['fight_double_pile_in'][1] = 1
     stats['hazardous_no_hazardous_weapon_fight'][1] = 1
-    assert an.error_totals(stats)['fight'] == 9, "le bucket ne voit pas les 9 compteurs §1.4"
+    stats['torrent_wrong_hit_fight'][1] = 1
+    stats['lethal_hits_wrong_wound_fight'][1] = 1
+    assert an.error_totals(stats)['fight'] == 11, "le bucket ne voit pas les 11 compteurs §1.4"
     assert coverage_gaps(stats, "1.4") == []
 
 

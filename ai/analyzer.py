@@ -1473,6 +1473,8 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             # la consolidation. Elle est comptée ici, avec les déplacements, plutôt qu'éclatée
             # entre §1.1 et §1.4 — c'est une règle de MOUVEMENT, une seule mesure, un seul total.
             + _pair('squad_coherency_violations')
+            # 20.03 : ingress au round 1 — compté dans le total MOVE (réserves = phase de mouvement).
+            + _pair('reserves_too_early')
         ),
         # §1.2 — l'advance est une action de la phase de Mouvement mais ses fautes sont comptées
         # ici, avec le tir, parce que c'est là que le rapport les affiche.
@@ -1500,6 +1502,10 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('hazardous_no_hazardous_weapon')
             + _pair('oath_target_mismatch')
             + shoot_invalid
+            # 24.37 / 24.23 / 24.05 : compteurs dédiés (remplacent parse_errors).
+            + _pair('torrent_wrong_hit')
+            + _pair('lethal_hits_wrong_wound')
+            + _pair('blast_x_mismatch')
         ),
         'charge': (
             _pair('charge_from_adjacent')
@@ -1527,6 +1533,9 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('fight_double_pile_in')
             # 24.15 HAZARDOUS : déclenchements en mêlée seulement (tir dans le total shooting).
             + _pair('hazardous_no_hazardous_weapon_fight')
+            # 24.37 / 24.23 : miroir mêlée des compteurs de tir ci-dessus.
+            + _pair('torrent_wrong_hit_fight')
+            + _pair('lethal_hits_wrong_wound_fight')
         ),
         'dead_units': (
             _pair('dead_unit_moving')
@@ -1857,9 +1866,21 @@ def parse_step_log(filepath: str) -> Dict:
         # parce qu'il en est la conséquence directe — une escouade qui finit son déplacement hors
         # cohérence perd des figurines à la fin du tour.
         'coherency_removals': {1: 0, 2: 0},
+        # 20.03 — ingress en round 1 : les réserves ne peuvent arriver qu'à partir du round 2.
+        'reserves_too_early': {1: 0, 2: 0},
         # 20.04 — escouades entières détruites faute d'ingress au 3e round. Distinct de
         # coherency_removals (03.03) qui ne retire que des figurines isolées.
         'reserves_timeout_destroyed': {1: 0, 2: 0},
+        # 24.37 [TORRENT] — touche automatique : un jet de touche numérique sur une ligne TORRENT
+        # est une erreur (tir et mêlée comptés séparément).
+        'torrent_wrong_hit': {1: 0, 2: 0},
+        'torrent_wrong_hit_fight': {1: 0, 2: 0},
+        # 24.23 [LETHAL HITS] — blessure automatique sur touche critique : un jet de blessure
+        # numérique sur une ligne LETHAL HITS est une erreur (tir et mêlée comptés séparément).
+        'lethal_hits_wrong_wound': {1: 0, 2: 0},
+        'lethal_hits_wrong_wound_fight': {1: 0, 2: 0},
+        # 24.05 [BLAST] tir — valeur X du marqueur différente de celle déclarée dans l'armurerie.
+        'blast_x_mismatch': {1: 0, 2: 0},
         # 24.15 [HAZARDOUS] — blessures mortelles auto-infligées après tir ou combat.
         # `hazardous_mortal_wounds` est un compteur d'EXERCICE (MW totales) : valeur positive
         # attendue dès qu'une arme HAZARDOUS tire. `hazardous_no_hazardous_weapon` est une
@@ -2075,6 +2096,12 @@ def parse_step_log(filepath: str) -> Dict:
             },
             'hazardous_no_hazardous_weapon': {1: None, 2: None},
             'hazardous_no_hazardous_weapon_fight': {1: None, 2: None},
+            'reserves_too_early': {1: None, 2: None},
+            'torrent_wrong_hit': {1: None, 2: None},
+            'torrent_wrong_hit_fight': {1: None, 2: None},
+            'lethal_hits_wrong_wound': {1: None, 2: None},
+            'lethal_hits_wrong_wound_fight': {1: None, 2: None},
+            'blast_x_mismatch': {1: None, 2: None},
         },
         'unit_position_collisions': [],
         'parse_errors': [],
