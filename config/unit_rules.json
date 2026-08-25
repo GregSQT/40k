@@ -185,5 +185,13 @@
     "has_parameter": true,
     "parameter_name": "threshold",
     "description": "CORE (24.12): each time a model with this ability would lose a wound, roll one D6: on a threshold+, that wound is not lost. Stored as rule_args.threshold (int 2-6)."
+  },
+  "deadly_demise": {
+    "id": "deadly_demise",
+    "obs_id": 17,
+    "name": "Deadly Demise",
+    "has_parameter": true,
+    "parameter_name": "value",
+    "description": "CORE (24.08): when a model with this ability is destroyed, roll one D6: on a 6, each unit within 6\" suffers X mortal wounds (X = rule_args.value, int or dice expression like 'D3'). Roll X separately per unit."
   }
 }

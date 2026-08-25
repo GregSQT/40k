@@ -160,3 +160,88 @@ def test_dd_mutation_verrou(monkeypatch):
     gs_yes = _gs(with_deadly_demise=True, target_col=5, target_row=0)
     destroy_model(gs_yes, "SRC#0", reason="combat")
     assert _dd_logs(gs_yes), "avec la cle, le log doit apparaitre — echoue si le bloc est mute"
+
+
+# ── câblage roster → build_units_cache ───────────────────────────────────────
+
+from typing import Any, Dict
+
+
+def _unit(*, unit_id: str, col: int, row: int, with_dd_rule: bool, dd_value: Any = "D3") -> Dict[str, Any]:
+    """Unité minimale compatible avec build_units_cache."""
+    unit_rules = [{"ruleId": "leader", "displayName": "Leader"}]
+    if with_dd_rule:
+        unit_rules.append({
+            "ruleId": "deadly_demise",
+            "displayName": "Deadly Demise D3",
+            "rule_args": {"value": dd_value},
+        })
+    return {
+        "id": unit_id,
+        "col": col, "row": row, "level": 0,
+        "HP_CUR": 4, "HP_MAX": 4, "VALUE": 65, "OC": 1,
+        "T": 5, "ARMOR_SAVE": 5, "INVUL_SAVE": 7,
+        "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
+        "RNG_WEAPONS": [], "CC_WEAPONS": [],
+        "BASE_SHAPE": "round", "BASE_SIZE": 20,
+        "MODEL_HEIGHT": 2.5, "MOVE": 6,
+        "UNIT_RULES": unit_rules,
+        "player": 1,
+        "orientation": 0,
+    }
+
+
+def _build_gs(*units):
+    from engine.phase_handlers.shared_utils import build_units_cache
+    gs = {
+        "units": list(units),
+        "unit_by_id": {str(u["id"]): u for u in units},
+        "config": {
+            "game_rules": {
+                "engagement_zone": 2,
+                "max_base_size_hex": 12,
+                "unit_model_cohesion_range": 2,
+                "unit_global_cohesion_range": 9,
+                "squad_min_neighbors": 1,
+                "cohesion_distance_mode": "euclidean",
+                "plunging_fire_height": 3,
+            },
+        },
+        "board_cols": 44, "board_rows": 44,
+        "wall_hexes": set(),
+        "terrain_areas": [],
+        "inches_to_subhex": 5,
+        "_unit_move_version": 0,
+    }
+    build_units_cache(gs)
+    return gs
+
+
+def test_build_units_cache_pose_deadly_demise_depuis_unit_rules():
+    """build_units_cache doit écrire units_cache[id]['deadly_demise'] = 'D3' si la règle est déclarée."""
+    gs = _build_gs(_unit(unit_id="W", col=0, row=0, with_dd_rule=True, dd_value="D3"))
+    assert gs["units_cache"]["W"].get("deadly_demise") == "D3", (
+        "La clé 'deadly_demise' doit valoir 'D3' quand UNIT_RULES la déclare"
+    )
+
+
+def test_build_units_cache_pas_de_cle_sans_regle():
+    """Sans deadly_demise dans UNIT_RULES, la clé ne doit pas exister dans units_cache."""
+    gs = _build_gs(_unit(unit_id="U", col=0, row=0, with_dd_rule=False))
+    assert "deadly_demise" not in gs["units_cache"]["U"], (
+        "La clé 'deadly_demise' ne doit PAS être présente si la règle est absente"
+    )
+
+
+def test_build_units_cache_mutation_verrou():
+    """Verrou mutation : retire la règle → clé absente ; la remet → clé présente.
+
+    Prouve que build_units_cache LIT effectivement UNIT_RULES et n'ignore pas la branche.
+    """
+    # Défaut injecté : without rule → clé absente (baseline)
+    gs_no = _build_gs(_unit(unit_id="X", col=0, row=0, with_dd_rule=False))
+    assert "deadly_demise" not in gs_no["units_cache"]["X"], "baseline : sans règle, clé absente"
+
+    # Fix rétabli : with rule → clé présente (échoue si la branche est retirée)
+    gs_yes = _build_gs(_unit(unit_id="X", col=0, row=0, with_dd_rule=True, dd_value=1))
+    assert gs_yes["units_cache"]["X"].get("deadly_demise") == 1, "avec règle, clé doit valoir 1"

@@ -24,10 +24,17 @@ export class WeirdBoy extends SwarmRangeSwarm {
   static CC_WEAPONS = getWeapons(WeirdBoy.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "leader", displayName: "Leader" }];
+  static UNIT_RULES = [
+    { ruleId: "leader", displayName: "Leader" },
+    {
+      ruleId: "deadly_demise",
+      displayName: "Deadly Demise D3",
+      rule_args: { value: "D3" },
+    },
+  ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { leader: 2 };
+  static RULES_STATUS = { leader: 2, deadly_demise: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = ["BOYZ"];

@@ -1197,6 +1197,11 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         # « dégénère » plus en 2D — elle fait lever `_vertical_classes` au premier test d'engagement.
         # L'invariant s'établit donc ici, à l'écriture unique, et pas aux dizaines de lectures.
         units_cache[unit_id]["MODEL_HEIGHT"] = float(require_key(unit, "MODEL_HEIGHT"))
+        # §24.08 DEADLY DEMISE — valeur X (int ou str dé) lue depuis UNIT_RULES.rule_args.value.
+        # Clée présente uniquement si la règle est déclarée ; absente = mécanisme inactif dans destroy_model.
+        _dd_val = _get_deadly_demise_value(unit)
+        if _dd_val is not None:
+            units_cache[unit_id]["deadly_demise"] = _dd_val
         # Per-model visual meta (icône + échelle + forme/taille de base) : exposé
         # au frontend uniquement pour les escouades hétérogènes (au moins une
         # figurine dont le profil visuel diffère de l'unité parente, ex.
@@ -2503,6 +2508,45 @@ def _roll_feel_no_pain(n_wounds: int, threshold: int) -> int:
         if random.randint(1, 6) < threshold:
             remaining += 1
     return remaining
+
+
+def _get_deadly_demise_value(unit: Dict[str, Any]) -> Optional[Any]:
+    """Retourne la valeur X de Deadly Demise (int ou expression dé comme 'D3'), ou None.
+
+    Lue depuis UNIT_RULES[i].rule_args.value (24.08). Lève si la règle est présente
+    mais mal configurée — aucun repli silencieux.
+    """
+    if not _unit_has_rule_effect(unit, "deadly_demise"):
+        return None
+    source_rule_id = get_source_unit_rule_id_for_effect(unit, "deadly_demise")
+    if source_rule_id is None:
+        return None
+    unit_rules = require_key(unit, "UNIT_RULES")
+    for rule_entry in unit_rules:
+        if str(require_key(rule_entry, "ruleId")) != str(source_rule_id):
+            continue
+        rule_args = rule_entry.get("rule_args")
+        if not isinstance(rule_args, dict):
+            raise ValueError(
+                f"Rule '{source_rule_id}' on unit {require_key(unit, 'id')} "
+                f"must define rule_args for deadly_demise"
+            )
+        raw = rule_args.get("value")
+        if raw is None:
+            raise ValueError(
+                f"Rule '{source_rule_id}' argument 'value' is missing "
+                f"for unit {require_key(unit, 'id')}"
+            )
+        if not isinstance(raw, (int, str)):
+            raise TypeError(
+                f"Rule '{source_rule_id}' argument 'value' must be int or str, "
+                f"got {type(raw).__name__} for unit {require_key(unit, 'id')}"
+            )
+        return raw
+    raise ValueError(
+        f"Source rule '{source_rule_id}' not found in UNIT_RULES "
+        f"for unit {require_key(unit, 'id')}"
+    )
 
 
 #: Rayon de declenchement de `reactive_move`, EN POUCES (cf. config/unit_rules.json).
