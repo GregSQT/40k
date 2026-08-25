@@ -12823,7 +12823,7 @@ def erode_move_pool_by_squad_block(
     )
     # Géométrie du trajet — SOURCE UNIQUE partagée avec la validation et la mesure.
     _mode = move_plan_distance_mode(game_state, str(squad_id))
-    _unit_obj = require_unit_by_id(game_state, squad_id)
+    _unit_obj = require_unit_by_id(game_state, str(squad_id))
     # `cube` == métrique hex + FLY déclaré ; en euclidien le mode ne porte pas le FLY (le champ
     # any-angle le traite en interne), on interroge donc le prédicat, qui est la même source.
     _fly_active = _mode == "cube" or _fly_traversal_active(game_state, _unit_obj, str(squad_id))
