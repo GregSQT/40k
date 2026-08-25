@@ -147,22 +147,18 @@ def _note_melee_weapon_rule_usage(
         stats['weapon_rule_usage'][("TORRENT", weapon_key)][pl_int] += 1
         from ai.analyzer_hit import HIT_SEGMENT_RE as _HIT_RE
         if _HIT_RE.search(action_desc):
-            stats['parse_errors'].append({
-                'episode': state.current_episode_num, 'turn': turn, 'phase': phase,
-                'line': line.strip(),
-                'error': "[TORRENT] 24.37 : jet de touche numérique inattendu (mêlée) — attendu Hit None(None+)",
-            })
+            stats['torrent_wrong_hit_fight'][pl_int] += 1
+            if stats['first_error_lines']['torrent_wrong_hit_fight'][pl_int] is None:
+                stats['first_error_lines']['torrent_wrong_hit_fight'][pl_int] = {'episode': state.current_episode_num, 'line': line.strip()}
     if re.search(r'\[IGNORES COVER\]', action_desc, re.IGNORECASE):
         stats['weapon_rule_usage'][("IGNORES_COVER", weapon_key)][pl_int] += 1
     _lethal_m = re.search(r'\[LETHAL HITS\]', action_desc, re.IGNORECASE)
     if _lethal_m:
         stats['weapon_rule_usage'][("LETHAL_HITS", weapon_key)][pl_int] += 1
         if re.search(r'\bWound\s+\d+\(\d+\+\)', action_desc):
-            stats['parse_errors'].append({
-                'episode': state.current_episode_num, 'turn': turn, 'phase': phase,
-                'line': line.strip(),
-                'error': "[LETHAL HITS] 24.23 : blessure auto avec jet numérique (mêlée) — attendu Wound None",
-            })
+            stats['lethal_hits_wrong_wound_fight'][pl_int] += 1
+            if stats['first_error_lines']['lethal_hits_wrong_wound_fight'][pl_int] is None:
+                stats['first_error_lines']['lethal_hits_wrong_wound_fight'][pl_int] = {'episode': state.current_episode_num, 'line': line.strip()}
     if re.search(r'\[EXTRA ATTACKS\]', action_desc, re.IGNORECASE):
         stats['weapon_rule_usage'][("EXTRA_ATTACKS", weapon_key)][pl_int] += 1
     _anti_m = re.search(r'\[ANTI-(\w+):(\d+)\+\]', action_desc, re.IGNORECASE)

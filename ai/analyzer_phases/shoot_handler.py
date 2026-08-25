@@ -615,13 +615,9 @@ def handle_shoot(
                     frozen_target.models_alive,
                 )
                 if blast_error is not None:
-                    stats['parse_errors'].append({
-                        'episode': state.current_episode_num,
-                        'turn': turn,
-                        'phase': phase,
-                        'line': line.strip(),
-                        'error': blast_error,
-                    })
+                    stats['blast_x_mismatch'][shooter_player_for_stats] += 1
+                    if stats['first_error_lines']['blast_x_mismatch'][shooter_player_for_stats] is None:
+                        stats['first_error_lines']['blast_x_mismatch'][shooter_player_for_stats] = {'episode': state.current_episode_num, 'line': line.strip()}
                 max_allowed_shots = rng_nb_squad + blast_dice + (
                     rapid_fire_value_squad if rapid_fire_bonus_for_this_shot > 0 else 0
                 )
@@ -1024,11 +1020,9 @@ def handle_shoot(
             stats['weapon_rule_usage'][("TORRENT", weapon_key)][pl_int] += 1
             from ai.analyzer_hit import HIT_SEGMENT_RE as _HIT_RE
             if _HIT_RE.search(action_desc):
-                stats['parse_errors'].append({
-                    'episode': state.current_episode_num, 'turn': turn, 'phase': phase,
-                    'line': line.strip(),
-                    'error': "[TORRENT] 24.37 : jet de touche numérique inattendu — attendu Hit None(None+)",
-                })
+                stats['torrent_wrong_hit'][pl_int] += 1
+                if stats['first_error_lines']['torrent_wrong_hit'][pl_int] is None:
+                    stats['first_error_lines']['torrent_wrong_hit'][pl_int] = {'episode': state.current_episode_num, 'line': line.strip()}
         # [IGNORES COVER] 24.18 — supprime le +1 de couvert (13.08). Token posé par le moteur.
         if re.search(r'\[IGNORES COVER\]', action_desc, re.IGNORECASE):
             stats['weapon_rule_usage'][("IGNORES_COVER", weapon_key)][pl_int] += 1
@@ -1038,11 +1032,9 @@ def handle_shoot(
         if _lethal_m:
             stats['weapon_rule_usage'][("LETHAL_HITS", weapon_key)][pl_int] += 1
             if re.search(r'\bWound\s+\d+\(\d+\+\)', action_desc):
-                stats['parse_errors'].append({
-                    'episode': state.current_episode_num, 'turn': turn, 'phase': phase,
-                    'line': line.strip(),
-                    'error': "[LETHAL HITS] 24.23 : blessure auto avec jet numérique — attendu Wound None",
-                })
+                stats['lethal_hits_wrong_wound'][pl_int] += 1
+                if stats['first_error_lines']['lethal_hits_wrong_wound'][pl_int] is None:
+                    stats['first_error_lines']['lethal_hits_wrong_wound'][pl_int] = {'episode': state.current_episode_num, 'line': line.strip()}
         # [EXTRA ATTACKS] — attaque du pool supplémentaire. Token sur chaque attaque du pool.
         if re.search(r'\[EXTRA ATTACKS\]', action_desc, re.IGNORECASE):
             stats['weapon_rule_usage'][("EXTRA_ATTACKS", weapon_key)][pl_int] += 1

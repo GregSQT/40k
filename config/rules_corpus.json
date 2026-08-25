@@ -176,6 +176,20 @@
       "status": "COUVERT"
     },
     {
+      "id": "PROJ.1.1.reserves_too_early",
+      "section": "1.1",
+      "label": "Réserves — ingress au round 1 (20.03)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "reserves_too_early"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
       "id": "PROJ.1.2.portee",
       "section": "1.2",
       "label": "Tir hors portée",
@@ -432,6 +446,48 @@
       "status_note": "L'exercice est détecté depuis la sauvegarde effective (eff > base - ap), mais aucun compteur d'erreur : l'AP réduite est lue du journal, pas recomputable indépendamment."
     },
     {
+      "id": "PROJ.1.2.torrent",
+      "section": "1.2",
+      "label": "TORRENT 24.37 tir — jet de touche numérique inattendu",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "torrent_wrong_hit"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.lethal_hits",
+      "section": "1.2",
+      "label": "LETHAL HITS 24.23 tir — blessure auto avec jet numérique",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "lethal_hits_wrong_wound"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.2.blast",
+      "section": "1.2",
+      "label": "BLAST 24.05 tir — valeur X du marqueur incorrecte",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "blast_x_mismatch"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
       "id": "PROJ.1.3.depuis_engage",
       "section": "1.3",
       "label": "Charge depuis zone d'engagement",
@@ -659,6 +715,34 @@
       "controls": [
         [
           "hazardous_no_hazardous_weapon_fight"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.torrent",
+      "section": "1.4",
+      "label": "TORRENT 24.37 mêlée — jet de touche numérique inattendu",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "torrent_wrong_hit_fight"
+        ]
+      ],
+      "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.lethal_hits",
+      "section": "1.4",
+      "label": "LETHAL HITS 24.23 mêlée — blessure auto avec jet numérique",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "lethal_hits_wrong_wound_fight"
         ]
       ],
       "status": "COUVERT"
@@ -2191,8 +2275,10 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Ligne DEPLOYED en phase MOVE porte T<turn> : contrainte 'round ≥ 2' vérifiable mais non contrôlée."
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.1.1.reserves_too_early"
+      ]
     },
     {
       "id": "21.01",
@@ -2396,8 +2482,10 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "PARTIEL",
-      "status_note": "Token [BLAST:X] loggué, dés bonus entrés dans le plafond de tirs. Interdiction sur cible engagée non contrôlée."
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.1.2.blast"
+      ]
     },
     {
       "id": "24.06",
@@ -2624,8 +2712,11 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [LETHAL HITS] sur le segment Wound depuis le 2026-08-12 (par ATTAQUE). Contrôle à écrire."
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.1.2.lethal_hits",
+        "PROJ.1.4.lethal_hits"
+      ]
     },
     {
       "id": "24.24",
@@ -2785,8 +2876,11 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [TORRENT] sur le segment Hit depuis le 2026-08-12. Contrôle à écrire."
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.1.2.torrent",
+        "PROJ.1.4.torrent"
+      ]
     },
     {
       "id": "24.38",
@@ -2881,8 +2975,10 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [BLAST:X] depuis le 2026-08-11. Aucun contrôle de conformité."
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.1.2.blast"
+      ]
     },
     {
       "id": "weapon.CLEAVE",
@@ -2993,8 +3089,11 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [LETHAL HITS] depuis le 2026-08-12. Contrôle à écrire."
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.1.2.lethal_hits",
+        "PROJ.1.4.lethal_hits"
+      ]
     },
     {
       "id": "weapon.MELTA",
@@ -3065,8 +3164,11 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [TORRENT] depuis le 2026-08-12. Contrôle à écrire."
+      "status": "COUVERT",
+      "co_verified_by": [
+        "PROJ.1.2.torrent",
+        "PROJ.1.4.torrent"
+      ]
     },
     {
       "id": "weapon.TWIN_LINKED",
@@ -3206,7 +3308,7 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
+      "status": "COUVERT",
       "co_verified_by": [
         "PROJ.1.3.charge_impact"
       ],

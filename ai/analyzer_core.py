@@ -880,6 +880,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # phase de charge précédente en place quand l'ingress ouvre la phase de move.
                 if deploy_phase == 'DEPLOYMENT':
                     continue
+                # 20.03 — les réserves stratégiques ne peuvent arriver qu'à partir du round 2.
+                if deploy_turn == 1:
+                    stats['reserves_too_early'][player] += 1
+                    if stats['first_error_lines']['reserves_too_early'][player] is None:
+                        stats['first_error_lines']['reserves_too_early'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
             # Episode end
             if 'EPISODE END' in line:
