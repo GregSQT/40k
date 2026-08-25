@@ -3090,19 +3090,20 @@ def shooting_build_valid_target_pool(
         # CRITICAL: Convert to int for consistent comparison (player can be int or string)
         current_player_int = int(current_player) if current_player is not None else None
         for target_id_str in cached_pool:  # Iterate over string IDs
+            if not is_unit_alive(target_id_str, game_state):
+                continue
             target = require_unit_by_id(game_state, target_id_str)
-            if is_unit_alive(target_id_str, game_state):
-                # CRITICAL: First check - target must not be friendly (fast check)
-                # This is the most important check - friendly units should NEVER be in the pool
-                # CRITICAL: Convert to int for consistent comparison (player can be int or string)
-                target_player = int(target["player"]) if target["player"] is not None else None
-                if target_player == current_player_int:
-                    # This is a bug - log it for debugging
-                    from engine.game_utils import add_console_log, add_debug_log
-                    add_console_log(game_state, f"[BUG] Cache contained friendly unit {target_id_str} (player {target['player']}) for shooter {unit_id} (player {current_player})")
-                    continue  # Skip friendly units
-                # AI_TURN.md: No re-validation needed - cache is reliable during activation
-                alive_targets.append(target_id_str)  # Ensure ID is string
+            # CRITICAL: First check - target must not be friendly (fast check)
+            # This is the most important check - friendly units should NEVER be in the pool
+            # CRITICAL: Convert to int for consistent comparison (player can be int or string)
+            target_player = int(target["player"]) if target["player"] is not None else None
+            if target_player == current_player_int:
+                # This is a bug - log it for debugging
+                from engine.game_utils import add_console_log, add_debug_log
+                add_console_log(game_state, f"[BUG] Cache contained friendly unit {target_id_str} (player {target['player']}) for shooter {unit_id} (player {current_player})")
+                continue  # Skip friendly units
+            # AI_TURN.md: No re-validation needed - cache is reliable during activation
+            alive_targets.append(target_id_str)  # Ensure ID is string
 
         # Update unit's target pool
         unit["valid_target_pool"] = alive_targets

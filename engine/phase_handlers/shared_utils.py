@@ -11981,7 +11981,7 @@ def _extra_attacks_weapon_indices(attacker: Dict[str, Any]) -> List[int]:
 
 def _select_fight_weapon_indices_for_fig(
     attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int,
-    target_unit: Dict[str, Any],
+    target_unit: Optional[Dict[str, Any]] = None,
     *,
     melee_bonus: int = 0,
 ) -> List[int]:
