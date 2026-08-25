@@ -101,7 +101,7 @@ moteur groupes quand le défenseur n'est pas humain. À placer au niveau génér
 Produire un ordre **déterministe conforme 05.04**, sans attente :
 1. Groupes non-CHARACTER contenant une figurine blessée (obligatoire en premier).
 2. Groupes non-CHARACTER sains — tie-break heuristique : tier de rôle croissant puis
-   Sv (réutiliser la logique de tri de `_select_allocation_model`, `shared_utils.py:5330-5337`).
+   Sv (réutiliser la logique de tri de `def _select_allocation_model`).
 3. Groupes CHARACTER blessés.
 4. Groupes CHARACTER sains.
 Contraintes dures à respecter (déjà validées côté manuel par `apply_manual_shoot_declare_order`

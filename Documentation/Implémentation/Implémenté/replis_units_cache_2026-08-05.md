@@ -161,8 +161,8 @@ Le refus est explicite mais **muet sur sa cause** : l'appelant ne distingue pas 
 | `shared_utils.py:5788` | `_attacker_model_can_reach_squad` | `if base_unit is None:` |
 | `shared_utils.py:5932` / `:5933` | `_shoot_engagement_blocks_target` | `if shooter_entry is None or target_entry is None:` |
 | `shared_utils.py:6932` / `:6933` | `_squads_are_engaged` | `if a is None or b is None:` |
-| `shared_utils.py:9432` | `fight_pile_in_plan` | `if our_entry is None:` |
-| `shared_utils.py:9771` | `squad_consolidate_plan` | `if our_entry is None:` |
+| `shared_utils.py` | `fight_pile_in_plan` | `if our_entry is None:` |
+| `shared_utils.py` | `squad_consolidate_plan` | `if our_entry is None:` |
 | `shared_utils.py:9903` | `_squad_is_in_enemy_er` | `if entry is None:` |
 | `shared_utils.py:10349` | `build_squad_move_cell_map` | `if entry is None:` |
 | `shooting_handlers.py:1101` | `preview_hidden_models_from_position` | `if entry is None:` |
@@ -194,10 +194,10 @@ Compréhensions filtrantes (`... for x in ... if x is not None`), gardes composi
 | `fight_handlers.py:1533` | `_ai_select_pile_in_destination` | |
 | `fight_handlers.py:4887` | `_fight_consolidation_preview_plan` | garde composite |
 | `movement_handlers.py:3159` | `movement_build_valid_destinations_pool` | repli `occupied_hexes_by_model` → `None` |
-| `shared_utils.py:5408` | `charge_build_valid_plan` | compréhension filtrante |
-| `shared_utils.py:9468` | `fight_pile_in_plan` | compréhension filtrante |
+| `shared_utils.py` | `charge_build_valid_plan` | compréhension filtrante |
+| `shared_utils.py` | `fight_pile_in_plan` | compréhension filtrante |
 | `shared_utils.py:9542` | `get_fighting_models` | compréhension filtrante |
-| `shared_utils.py:9779` | `squad_consolidate_plan` | |
+| `shared_utils.py` | `squad_consolidate_plan` | |
 | `shared_utils.py:10588` | `build_squad_action_mask` | ⚠️ **probablement légitime** — commentaire en place : « Ennemi hors table (réserves 20.01) : intirable, et sans géométrie à mesurer » |
 | `shooting_handlers.py:3493` | `shooting_build_valid_target_pool` | |
 | ~~`shooting_handlers.py:3574`~~ | ~~`_resolve_target_hexes_for_los`~~ | **SUPPRIMÉE** — code mort, cf. §7 |

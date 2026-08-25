@@ -6,17 +6,21 @@
 
 **Traitement au fil de l'eau** (décision 2026-08-10) — tout doc modifié voit ses ancres de ligne corrigées dans la même livraison.
 
-Sept symboles dont les numéros de ligne cités par les docs V11 ont dérivé de plusieurs centaines à plusieurs milliers de lignes :
+**✅ Soldé le 2026-08-25** — sept symboles dont les numéros de ligne avaient dérivé, corrigés dans 4 docs :
 
-- `def _select_allocation_model` (`engine/phase_handlers/shared_utils.py`)
-- `def fight_pile_in_plan` (`engine/phase_handlers/shared_utils.py`)
-- `def squad_consolidate_plan` (`engine/phase_handlers/shared_utils.py`)
-- `def charge_build_valid_plan` (`engine/phase_handlers/shared_utils.py`)
-- `def _auto_select_cc_weapon_for_fig` (`engine/phase_handlers/shared_utils.py`)
-- `def _auto_declared_order` (`engine/phase_handlers/shared_utils.py`)
-- `def compute_candidate_footprint` (`engine/phase_handlers/shared_utils.py`)
+| Symbole | Docs corrigés |
+|---|---|
+| `def _select_allocation_model` | `FIGHT_RESOLVER_CONVERGENCE.md` |
+| `def fight_pile_in_plan` | `V11_agent_rework.md`, `pile_in_overrun_par_figurine_2026-08-18.md`, `replis_units_cache_2026-08-05.md` |
+| `def squad_consolidate_plan` | `V11_agent_rework.md`, `pile_in_overrun_par_figurine_2026-08-18.md`, `replis_units_cache_2026-08-05.md` |
+| `def charge_build_valid_plan` | `replis_units_cache_2026-08-05.md` |
+| `def _auto_select_cc_weapon_for_fig` | aucune ancre directe trouvée |
+| `def _auto_declared_order` | aucune ancre directe trouvée |
+| `def compute_candidate_footprint` | aucune ancre directe trouvée |
 
 **Convention** : citer `def <symbole>` ou un `grep` reproductible, jamais un numéro de ligne. `scripts/check_doc_references.py` la fait respecter sur l'index, les fichiers sujets et les contrats permanents.
+
+**Écart de couverture du script** : `check_doc_references.py` passe 4 (ANCRES) couvre uniquement `Documentation/Roadmap/` et les contrats permanents — pas les docs V11 (`Documentation/Implémentation/`). Le script passe donc au vert même si des ancres stales subsistent dans `V11_agent_rework.md`, `pile_in_overrun_par_figurine_2026-08-18.md`, etc. La vérification réelle est le grep symbole par symbole (fait ici).
 
 ---
 

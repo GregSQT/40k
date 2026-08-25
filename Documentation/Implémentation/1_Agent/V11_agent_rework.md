@@ -7656,31 +7656,31 @@ toute surcharge par agent placée à la racine serait **silencieusement sans eff
 > ⚠️ Entrée conservée ici et **non descendue en §0hist** tant que la session écrit dans ce
 > fichier ; l'énoncé d'origine ci-dessous est celui du diagnostic, conservé intégralement.
 
-**Cause racine — `fight_pile_in_plan` ([shared_utils.py:6989](../../../engine/phase_handlers/shared_utils.py#L6989)).**
+**Cause racine — `def fight_pile_in_plan` (shared_utils).**
 Trois défauts cumulés faisaient qu'une cellule occupée par une camarade était vue comme libre :
 
 | # | Défaut | Site |
 |---|---|---|
-| 1 | `occupied_after` démarrait **vide** — non amorcé avec les origines de l'escouade | [:6989](../../../engine/phase_handlers/shared_utils.py#L6989) |
-| 2 | `_cell_legal` **saute sa propre escouade** quand il teste l'occupation (`if str(sid) == squad_id: continue`) | [:7009-7010](../../../engine/phase_handlers/shared_utils.py#L7009-L7010) |
-| 3 | La branche « déjà B2B → reste sur place » `append` son origine **sans appeler `_cell_legal`** | [:7020-7022](../../../engine/phase_handlers/shared_utils.py#L7020-L7022) |
+| 1 | `occupied_after` démarrait **vide** — non amorcé avec les origines de l'escouade | `def fight_pile_in_plan`, initialisation |
+| 2 | `_cell_legal` **saute sa propre escouade** quand il teste l'occupation (`if str(sid) == squad_id: continue`) | `def fight_pile_in_plan`, `_cell_legal` |
+| 3 | La branche « déjà B2B → reste sur place » `append` son origine **sans appeler `_cell_legal`** | `def fight_pile_in_plan`, branche B2B |
 
 **Scénario.** S#0, traitée en premier, choisit la cellule X : légale, car X appartient à sa
 propre escouade (2) et `occupied_after` est encore vide (1). Mais X est l'origine de S#1, traitée
 plus tard, qui y est déjà B2B et **reste sur place sans contrôle** (3). Les deux finissent sur X.
 Le plan étant un 3-tuple, le niveau est inchangé pour les deux → même `(col, row, niveau)`.
-Ni la « validation finale » ([:7073-7089](../../../engine/phase_handlers/shared_utils.py#L7073-L7089),
+Ni la « validation finale » (dans `def fight_pile_in_plan`,
 qui ne teste que cohérence et zone d'engagement) ni `commit_move` (« ne re-valide pas », par
-contrat, [:4284](../../../engine/phase_handlers/shared_utils.py#L4284)) ne rattrapent.
+contrat) ne rattrapent.
 
 **Pourquoi ça n'explosait qu'au move suivant.** Exactement ce que le diagnostic ci-dessous
 démontrait : la translation cube de `build_rigid_plan` est **injective**, donc la superposition
 d'origine se reporte sur chaque destination et `validate_move_plan` la voit — une phase trop
 tard, sous la forme d'un `collision intra-plan` qui accusait le move.
 
-**Second consommateur : `squad_consolidate_plan`** ([:7316](../../../engine/phase_handlers/shared_utils.py#L7316)).
+**Second consommateur : `def squad_consolidate_plan`** (shared_utils).
 Même défaut, trouvé en corrigeant le premier. Pas de branche B2B ici : la collision naît de la
-branche « rien de mieux → reste sur place » ([:7364-7365](../../../engine/phase_handlers/shared_utils.py#L7364-L7365)),
+branche « rien de mieux → reste sur place » (dans `def squad_consolidate_plan`),
 dont l'origine a pu être prise entre-temps. *Un bug, deux consommateurs* — même famille que T6-h.
 
 **Correctif — l'affectation gloutonne est remplacée par un COUPLAGE MAXIMUM.** Le parcours dans

@@ -87,8 +87,8 @@ Son seul type possible est **l'overrun**. C'est la situation exacte de
 | `_fight_apply_pile_in_move` (commit par-ancre) | `fight_handlers.py:337` | **condamné** |
 | `_fight_bfs_reachable_anchors_consolidation` (pool par-ancre) | `fight_handlers.py:651` | **condamné** |
 | `fight_v11_enter_fight_step` (pose le snapshot) | `fight_handlers.py:1872` | **jamais atteint par le gym** (§4) |
-| Référence par-figurine : `fight_pile_in_plan` | `shared_utils.py:10240` | **modèle à suivre** |
-| Référence par-figurine : `squad_consolidate_plan` | `shared_utils.py:10627` | **modèle à suivre** |
+| Référence par-figurine : `fight_pile_in_plan` | `def fight_pile_in_plan` | **modèle à suivre** |
+| Référence par-figurine : `squad_consolidate_plan` | `def squad_consolidate_plan` | **modèle à suivre** |
 | Pipeline squad gym | `w40k_core._process_squad_action`, branche `squad_fight` | **overrun NON implémenté** |
 
 ### Le prédicat d'éligibilité (réutilisable tel quel)
@@ -183,7 +183,7 @@ unengaged » seulement) est possible sans ça, et couvre déjà le cas du charge
 1. **Écrire `_fight_overrun_pile_in_plan(game_state, squad_id)` en PAR-FIGURINE**, sur le modèle
    de référence PvP — même famille que `pile_in_autoplace_plan` /
    `_fight_pile_in_preview_plan` / `commit_move(plan, gs, "pile_in")`, retour
-   `List[(model_id, col, row)]` comme `fight_pile_in_plan` (`shared_utils.py:10240`).
+   `List[(model_id, col, row)]` comme `def fight_pile_in_plan` (shared_utils).
    - cibles = `pile_in_targets_within_range` (ennemis ≤ `pile_in_target_range` = 5", 12.03
      « Otherwise, select one or more enemy units within 5" of your unit ») ;
    - contraintes 12.03 : chaque fig bouge ≤3", finit plus proche de la cible la plus proche et
