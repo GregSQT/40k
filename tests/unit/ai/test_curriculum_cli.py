@@ -187,14 +187,12 @@ def test_etape_refuses_the_flags_it_decides_itself(monkeypatch, flag: str) -> No
         _run_main(monkeypatch, [*BASE_ARGV, flag])
 
 
-def test_etape_resume_from_on_new_stage_is_refused(curriculum_agent, tmp_path) -> None:
+def test_etape_resume_from_on_new_stage_is_refused(curriculum_agent, tmp_path, monkeypatch) -> None:
     """--etape P0 (init='new') + --resume-from est refuse : un 'new' ne peut pas reprendre."""
     ckpt = tmp_path / "ppo_checkpoint_100_steps.zip"
     ckpt.write_bytes(b"POIDS")
-    args = _args("P0")
-    args.resume_from = str(ckpt)
     with pytest.raises(ValueError, match="init='new'"):
-        _prepare_curriculum_stage(args, curriculum_agent.config)
+        _run_main(monkeypatch, [*BASE_ARGV, "--resume-from", str(ckpt)])
 
 
 def test_etape_resume_from_on_from_stage_keeps_user_checkpoint(curriculum_agent, tmp_path) -> None:
