@@ -64,6 +64,7 @@ from engine.combat_utils import (
     expected_dice_value,
     resolve_dice_value,
     get_unit_by_id,
+    require_unit_by_id,
     set_unit_coordinates,
 )
 # Bascule UNIQUE de la résolution (`inches_to_subhex <= 1` → géométrie hex). Import de MODULE :
@@ -1430,25 +1431,13 @@ def model_is_on_board(model: Dict[str, Any]) -> bool:
     return model.get("col", -1) >= 0
 
 
-def unit_is_on_battlefield(game_state: Dict[str, Any], unit_id: str) -> bool:
-    """Jumeau unité de ``entry_is_on_battlefield``, lu sur ``deployed_on_turn`` (source unique
-    du « posée / pas posée », cf. `create_unit`). Une unité absente de ``units_cache`` est morte,
-    donc pas sur le champ de bataille."""
-    unit = get_unit_by_id(game_state, str(unit_id))
-    if unit is None:
-        return False
-    return require_key(unit, "deployed_on_turn") is not None
-
-
 def unit_is_in_strategic_reserves(game_state: Dict[str, Any], unit_id: str) -> bool:
     """L'unité est-elle EN RÉSERVES (20.01) ? Vraie tant qu'elle n'a pas fait d'ingress move.
 
     `in_strategic_reserves` est remis à False par la mise en place (20.04) : le drapeau décrit
     l'état courant, pas l'origine de l'unité.
     """
-    unit = get_unit_by_id(game_state, str(unit_id))
-    if unit is None:
-        return False
+    unit = require_unit_by_id(game_state, str(unit_id))
     # get allowed : une unité construite hors du chargeur (fixture moteur nu) ne porte pas le
     # champ ; elle n'a par construction jamais été déclarée en réserves. Ce n'est pas un repli
     # anti-erreur — le chargeur, lui, pose TOUJOURS le champ (`_build_enhanced_unit`).
@@ -7138,9 +7127,7 @@ def _shoot_engagement_blocks_target(
     enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(
         shooter_entry, target_entry, ez, game_state=game_state
     )
-    shooter_unit = get_unit_by_id(game_state, sid)
-    if shooter_unit is None:
-        return False
+    shooter_unit = require_unit_by_id(game_state, sid)
     shooter_is_engaged = _is_adjacent_to_enemy_within_cc_range(game_state, shooter_unit)
 
     # 10.06 « WHILE SHOOTING », deux volets selon la figurine :
@@ -8347,9 +8334,7 @@ def _derive_squad_shooting_type(game_state: Dict[str, Any], sid: str) -> Optiona
     eligible au choix lui-meme, et un second appel a `squad_shooting_type_choose` — le
     changement d avis d un joueur PvP — aurait ete refuse par sa propre validation.
     """
-    unit = get_unit_by_id(game_state, sid)
-    if unit is None:
-        return None
+    unit = require_unit_by_id(game_state, sid)
     from engine.phase_handlers.shooting_handlers import (
         _can_unit_shoot_after_advance_with_weapon,
         _unit_has_rule,
@@ -8440,9 +8425,7 @@ def squad_model_shootable_weapon_indices(
     shooting_type: str,
 ) -> List[int]:
     """Index des armes de tir que CETTE figurine peut selectionner sous ce type de tir."""
-    unit = get_unit_by_id(game_state, str(squad_id))
-    if unit is None:
-        return []
+    unit = require_unit_by_id(game_state, str(squad_id))
     out: List[int] = []
     for idx, weapon in enumerate(ranged_weapons(model)):
         # Idem : le filtre porte sur la VALEUR de portee, jamais sur son absence.
@@ -9665,11 +9648,11 @@ def _build_alloc_groups(game_state: Dict[str, Any], target_sid: str) -> List[Dic
     # Waaagh! (chantier 03) : `InSv` affiche au defenseur DOIT etre celui que
     # `_resolve_one_manual_wound` comparera. Les afficher differents ferait choisir une
     # allocation sur une sauvegarde qui n existe pas.
-    _target_unit = get_unit_by_id(game_state, str(target_sid))
+    _target_unit = require_unit_by_id(game_state, str(target_sid))
 
     def _insv(entry: Dict[str, Any]) -> int:
         raw = int(require_key(entry, "INVUL_SAVE"))
-        return raw if _target_unit is None else effective_invul_save(game_state, _target_unit, raw)
+        return effective_invul_save(game_state, _target_unit, raw)
 
     non_char: Dict[tuple, List[str]] = {}
     non_char_order: List[tuple] = []
@@ -9910,12 +9893,8 @@ def _target_visible_to_a_friendly_unit(
     """
     from engine.phase_handlers.shooting_handlers import compute_unit_los
 
-    target_unit = get_unit_by_id(game_state, str(target_sid))
-    if target_unit is None:
-        return False
-    shooter_unit = get_unit_by_id(game_state, str(shooter_squad_id))
-    if shooter_unit is None:
-        return False
+    target_unit = require_unit_by_id(game_state, str(target_sid))
+    shooter_unit = require_unit_by_id(game_state, str(shooter_squad_id))
     shooter_player = shooter_unit.get("player")  # get allowed
     ordered = [shooter_unit] + [
         u for u in require_key(game_state, "units")

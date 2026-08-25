@@ -22,6 +22,7 @@ from engine.combat_utils import (
     normalize_coordinates,
     set_unit_coordinates,
     get_unit_by_id,
+    require_unit_by_id,
     get_hex_neighbors,
 )
 from .shared_utils import (
@@ -572,9 +573,7 @@ def squad_descent_penalty_subhex(game_state: Dict[str, Any], squad_id: str) -> i
     Unité : subhexes (comme le budget MOVE). Coût = hauteur absolue du niveau × inches_to_subhex,
     arrondi au subhex supérieur (conservateur : ne jamais sous-facturer la descente).
     """
-    unit = get_unit_by_id(game_state, squad_id)
-    if unit is None:
-        return 0
+    unit = require_unit_by_id(game_state, squad_id)
     if _fly_traversal_active(game_state, unit, squad_id):
         return 0
     models_cache = require_key(game_state, "models_cache")
@@ -1118,10 +1117,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         return False, {"error": "unit_not_eligible", "unitId": unit_id}
     
     # Get unit object for processing
-    active_unit = get_unit_by_id(game_state, unit_id)
-    if not active_unit:
-        return False, {"error": "unit_not_found", "unitId": unit_id}
-    
+    active_unit = require_unit_by_id(game_state, unit_id)
     # Log action routing
     _log_movement_debug(game_state, "execute_action", str(unit_id), f"action={action_type}")
     
@@ -1220,10 +1216,7 @@ def movement_set_advance_mode_handler(game_state: Dict[str, Any], unit_id: str, 
     cancel/ré-activations jusqu'à la phase de commandement suivante. Le déplacement reste piloté
     par le flow squad par-figurine (bloc + placements fins, commit_move_plan).
     """
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return False, {"error": "unit_not_found", "unit_id": unit_id}
-
+    unit = require_unit_by_id(game_state, unit_id)
     # Advance = engagement irréversible : marque l'escouade ``units_advanced`` (bloque tir/charge)
     # et fige son jet dans ``advance_rolls``. Jet figé : un squad déjà advancé réutilise son jet
     # (pas de re-roll), donc le mode survit aux cancel/ré-activations jusqu'à la fin de la phase.
@@ -1257,9 +1250,7 @@ def movement_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, acti
     -2" sur la distance max du move ET traversée des murs/figurines pendant ce déplacement.
     Déclaration faite avant de bouger l'unité ; réversible tant que le move n'est pas commit.
     """
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return False, {"error": "unit_not_found", "unit_id": unit_id}
+    unit = require_unit_by_id(game_state, unit_id)
     if not _unit_has_keyword(unit, "fly"):
         return False, {"error": "unit_cannot_fly", "unitId": unit["id"]}
 
@@ -1330,10 +1321,7 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
 
     Appelant UNIQUE : `_handle_unit_activation`, donc chemin PvP seul (cf. son garde).
     """
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return False, {"error": "unit_not_found", "unit_id": unit_id}
-    
+    unit = require_unit_by_id(game_state, unit_id)
     # Reuse pool if already built (e.g., from execute_action validation)
     # Only rebuild if pool is empty or doesn't exist
     if not game_state.get("valid_move_destinations_pool"):
@@ -2946,10 +2934,7 @@ def movement_build_valid_destinations_pool(
 
     _m0 = _perf_clock.perf_counter() if _pt else None
 
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return []
-
+    unit = require_unit_by_id(game_state, unit_id)
     if move_budget_override is not None:
         # Chemin gym uniquement (§7 T2) : budget imposé par l'appelant.
         # `0` est ACCEPTÉ : `get_squad_move_budget` renvoie `max(0, MOVE - malus)` (Take to the
@@ -3808,9 +3793,7 @@ def movement_build_model_destinations_pool(
             f"movement_build_model_destinations_pool: model {model_id} not in models_cache"
         )
     squad_id = str(model["squad_id"])
-    unit = get_unit_by_id(game_state, squad_id)
-    if not unit:
-        return {"destinations": [], "footprint_mask_loops": []}
+    unit = require_unit_by_id(game_state, squad_id)
 
     # Orientation du MOVER pour l'empreinte du pool : override (pivot molette EN COURS, non committé,
     # transmis par l'UI) si fourni, sinon l'orientation committée de la figurine. Sans ça le pool
@@ -4530,9 +4513,7 @@ def movement_commit_move_plan_handler(
     # ici : c'est le même invariant, mais tenu par construction au lieu de la discipline de chacun.
     commit_move(plan, game_state, move_type)
 
-    unit = get_unit_by_id(game_state, squad_id)
-    if not unit:
-        return False, {"error": "unit_not_found", "unitId": squad_id}
+    unit = require_unit_by_id(game_state, squad_id)
     # Sync ancre de la liste units sur l'ancre recalculee dans units_cache
     # (commit_move ne touche que models_cache/units_cache).
     entry = game_state.get("units_cache", {}).get(str(squad_id))  # get allowed
@@ -4690,17 +4671,13 @@ def movement_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dic
     elif click_target == "friendly_unit":
         return False, {"error": "unit_switch_not_implemented"}
     elif click_target == "active_unit":
-        unit_click = get_unit_by_id(game_state, unit_id)
-        if not unit_click:
-            return False, {"error": "unit_not_found", "unitId": unit_id}
+        unit_click = require_unit_by_id(game_state, unit_id)
         return _handle_movement_postpone(game_state, unit_click)
     else:
         # Clic ailleurs : report uniquement si une activation move attend une destination
         if game_state.get("active_movement_unit") is None:
             return True, {"action": "continue_selection"}
-        unit_click = get_unit_by_id(game_state, unit_id)
-        if not unit_click:
-            return False, {"error": "unit_not_found", "unitId": unit_id}
+        unit_click = require_unit_by_id(game_state, unit_id)
         return _handle_movement_postpone(game_state, unit_click)
 
 def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -4734,10 +4711,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         _log_movement_debug(game_state, "destination_selection", str(unit_id), f"destination ({dest_col},{dest_row}) NOT_IN_POOL pool_size={len(valid_pool)}")
         return False, {"error": "invalid_destination", "destination": (dest_col, dest_row)}
 
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return False, {"error": "unit_not_found", "unit_id": unit_id}
-
+    unit = require_unit_by_id(game_state, unit_id)
     # Desperate Escape (09.07) : le hazard roll (06.03) est désormais résolu à l'ACTIVATION
     # (action hazard_confirm), AVANT le preview — plus ici au commit. Ce chemin commit un
     # Fall Back déjà autorisé.

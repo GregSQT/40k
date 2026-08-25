@@ -1308,13 +1308,9 @@ def _attach_shoot_visible_cells(serializable_state: Dict[str, Any], game_state: 
     if active_id is None:
         return
     active_id_str = str(active_id)
-    from engine.phase_handlers.shooting_handlers import (
-        build_visible_cells_by_target,
-        _get_unit_by_id,
-    )
-    shooter = _get_unit_by_id(game_state, active_id_str)
-    if shooter is None:
-        return
+    from engine.phase_handlers.shooting_handlers import build_visible_cells_by_target
+    from engine.combat_utils import require_unit_by_id
+    shooter = require_unit_by_id(game_state, active_id_str)
     valid_targets = shooter.get("valid_target_pool")
     if not isinstance(valid_targets, list) or not valid_targets:
         return
@@ -3797,6 +3793,8 @@ def execute_action():
         if unit_id is None:
             return jsonify({"success": False, "error": "ingress_preview requires unitId"}), 400
         from engine.phase_handlers import movement_handlers as _mh_ing
+        if str(unit_id) not in engine.game_state.get("unit_by_id", {}):
+            return jsonify({"success": False, "error": f"unit {unit_id} not found"}), 404
         if not _mh_ing.unit_is_in_strategic_reserves(engine.game_state, str(unit_id)):
             return jsonify({
                 "success": False,
@@ -3859,6 +3857,8 @@ def execute_action():
         _require_preview_destination_on_table(
             engine, unit_id, int(dest_col), int(dest_row), "preview_shoot_from_position"
         )
+        if str(unit_id) not in engine.game_state.get("unit_by_id", {}):
+            return jsonify({"success": False, "error": f"unit {unit_id} not found"}), 404
         from engine.phase_handlers.shooting_handlers import preview_shoot_valid_targets_from_position
         preview_payload = preview_shoot_valid_targets_from_position(
             engine.game_state, str(unit_id), int(dest_col), int(dest_row),
@@ -3903,6 +3903,8 @@ def execute_action():
                     "plan([[model_id, col, row, level, orientation?]])"
                 ),
             }), 400
+        if str(unit_id) not in engine.game_state.get("unit_by_id", {}):
+            return jsonify({"success": False, "error": f"unit {unit_id} not found"}), 404
         from engine.phase_handlers.shooting_handlers import (
             preview_shoot_valid_targets_from_model_positions,
         )
@@ -3940,6 +3942,8 @@ def execute_action():
         _require_preview_destination_on_table(
             engine, unit_id, int(dest_col), int(dest_row), "preview_hidden_from_position"
         )
+        if str(unit_id) not in engine.game_state.get("unit_by_id", {}):
+            return jsonify({"success": False, "error": f"unit {unit_id} not found"}), 404
         from engine.phase_handlers.shooting_handlers import preview_hidden_models_from_position
         hidden_payload = preview_hidden_models_from_position(
             engine.game_state, str(unit_id), int(dest_col), int(dest_row),
@@ -3956,6 +3960,8 @@ def execute_action():
                 "success": False,
                 "error": "preview_hidden_from_model_positions requires unitId, modelPositions(dict)",
             }), 400
+        if str(unit_id) not in engine.game_state.get("unit_by_id", {}):
+            return jsonify({"success": False, "error": f"unit {unit_id} not found"}), 404
         from engine.phase_handlers.shooting_handlers import preview_hidden_models_from_model_positions
         hidden_payload = preview_hidden_models_from_model_positions(
             engine.game_state, str(unit_id), model_positions,

@@ -30,6 +30,7 @@ from engine.game_utils import add_console_log, safe_print, add_debug_file_log, e
 from engine.combat_utils import (
     normalize_coordinates,
     get_unit_by_id,
+    require_unit_by_id,
     get_hex_neighbors,
     expected_dice_value,
     resolve_dice_value,
@@ -330,9 +331,9 @@ def _charge_footprint_union_for_anchors(
     ``valid_destinations`` lists anchor cells only; the UI must show the full end footprint
     (around the declared target / engagement band), not a scatter of anchor dots near the charger.
     """
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit or not anchor_positions:
+    if not anchor_positions:
         return []
+    unit = require_unit_by_id(game_state, unit_id)
     fp_pair = _charge_prepare_footprint_offsets(unit, game_state)
     seen: Set[Tuple[int, int]] = set()
     ordered: List[Tuple[int, int]] = []
@@ -1242,9 +1243,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         return False, {"error": "unit_not_eligible", "unitId": unit_id, "action": action_type}
 
     # Get unit object for processing
-    active_unit = get_unit_by_id(game_state, unit_id)
-    if not active_unit:
-        return False, {"error": "unit_not_found", "unitId": unit_id, "action": action_type}
+    active_unit = require_unit_by_id(game_state, unit_id)
 
     # Flag detection for consistent behavior
     # AI_TURN.md COMPLIANCE: Direct field access with explicit validation
@@ -2535,9 +2534,7 @@ def charge_model_plan_state(
         "satisfied_targets": [],
         "unsatisfied_targets": [],
     }
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return empty
+    unit = require_unit_by_id(game_state, unit_id)
     if "charge_target_selections" not in game_state or unit_id not in game_state["charge_target_selections"]:
         return empty
     if "charge_roll_values" not in game_state or unit_id not in game_state["charge_roll_values"]:
@@ -2726,10 +2723,7 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
     _turn = game_state.get("turn", "?")
     _t_bvt0 = time.perf_counter() if _perf else None
 
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return []
-
+    unit = require_unit_by_id(game_state, unit_id)
     _bvt_cache = game_state.setdefault("_charge_build_valid_targets_cache", {})
     _move_version = game_state["_unit_move_version"]
     _bvt_key = (unit_id, _move_version, max_distance)
@@ -2886,10 +2880,7 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
     _turn = game_state.get("turn", "?")
     _t_el0 = time.perf_counter() if _perf else None
 
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
-
+    unit = require_unit_by_id(game_state, unit_id)
     # V11 RAW (PvP/PvE) : le jet 2D6 a lieu À L'ACTIVATION (11.02 étape 2), AVANT la
     # déclaration des cibles. Les cibles éligibles sont ensuite bornées par la distance
     # jetée (11.04 « within the maximum distance »). En gym (RL), on conserve le jet au
@@ -3623,10 +3614,7 @@ def charge_build_valid_destinations_pool(game_state: Dict[str, Any], unit_id: st
     _ep = game_state.get("episode_number", "?")
     _turn = game_state.get("turn", "?")
 
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return []
-
+    unit = require_unit_by_id(game_state, unit_id)
     # Take to the skies (21.03) : vol actif en charge → traversée murs + figs. En éligibilité
     # (early_exit) toute unité FLY est généreusement traitée comme volante — 21.03 laisse le joueur
     # libre de déclarer à chaque charge, donc la charge doit être PROPOSÉE si une cible est
@@ -4367,10 +4355,7 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
     target_ids = [str(t) for t in _raw_targets]
     target_id = target_ids[0]  # 1ère cible déclarée — sert aux messages/retours d'affichage
 
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
-
+    unit = require_unit_by_id(game_state, unit_id)
     # Re-evaluate adjacency at execution time.
     # Charge pool is built earlier and board state may change before target selection.
     if _charge_unit_within_engagement_zone(game_state, unit):
@@ -5052,10 +5037,7 @@ def charge_autoplace_plan(
     if mode not in ("offensive", "defensive"):
         raise ValueError(f"charge_autoplace_plan: mode invalide {mode!r}")
 
-    unit = get_unit_by_id(game_state, squad_id)
-    if not unit:
-        return {"plan": []}
-
+    unit = require_unit_by_id(game_state, squad_id)
     units_cache = require_key(game_state, "units_cache")
 
     # Cibles déclarées : la légalité autorise le contact avec TOUTES (seules les unités NON déclarées
@@ -5736,9 +5718,7 @@ def charge_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, action
     Refresh état-complet selon l'étape : cibles déjà déclarées → recompute du plan par-figurine ;
     sinon → preview des cibles éligibles (re-bornées par la distance -2").
     """
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return False, {"error": "unit_not_found", "unit_id": unit_id}
+    unit = require_unit_by_id(game_state, unit_id)
     from .movement_handlers import _unit_has_keyword
     if not _unit_has_keyword(unit, "fly"):
         return False, {"error": "unit_cannot_fly", "unitId": unit["id"]}
@@ -5859,9 +5839,7 @@ def charge_commit_move_plan_handler(
     # Le niveau est OBLIGATOIRE (frontière) et propagé jusqu'à ``commit_move`` et au preview.
     plan = parse_model_plan(raw_plan, action_name="commit_charge_plan")
 
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
+    unit = require_unit_by_id(game_state, unit_id)
     if "charge_target_selections" not in game_state or unit_id not in game_state["charge_target_selections"]:
         return False, {"error": "target_not_selected", "unit_id": unit_id, "action": "charge"}
     if "charge_roll_values" not in game_state or unit_id not in game_state["charge_roll_values"]:
@@ -6093,10 +6071,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     except (ValueError, TypeError):
         return False, {"error": "invalid_destination_type", "destCol": dest_col, "destRow": dest_row, "action": "charge"}
 
-    unit = get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return False, {"error": "unit_not_found", "unit_id": unit_id, "action": "charge"}
-
+    unit = require_unit_by_id(game_state, unit_id)
     # Get target_id and charge_roll from previous step
     if "charge_target_selections" not in game_state or unit_id not in game_state["charge_target_selections"]:
         return False, {"error": "target_not_selected", "unit_id": unit_id, "action": "charge"}
