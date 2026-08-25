@@ -290,14 +290,42 @@ SUITE : 🟢 Tout est terminé
 — ou —
 SUITE :
 → Ce prompt : <actions 🟡 restantes>
-→ 🔴 Bug : `"<prompt autonome : observation + fichier:ligne + attendu + périmètre>"`
-→ 🕳 Trou : `"<prompt autonome>"`
-→ 💡 Amélioration : `"<prompt autonome>"`
-→ 📋 Sous-tâche : `"<prompt autonome>"`
+→ 🔴 Bug : `"<prompt complet — voir gabarit Bug>"`
+→ 🕳 Trou : `"<prompt complet — voir gabarit Trou>"`
+→ 💡 Amélioration : `"<prompt complet — voir gabarit Amélioration>"`
+→ 📋 Sous-tâche : `"<prompt complet — voir gabarit Sous-tâche>"`
 
 Catégories : Bug = invariant cassé prouvé hors périmètre ; Trou = cas non couvert par les tests ; Amélioration = code correct mais optimisable ; Sous-tâche = morceau hors livraison.
 Suspicion non prouvée → une ligne dans LU, aucune entrée SUITE. SUITE ne remplace jamais T2.
 Si analyse seule (aucun fichier modifié) : SUITE uniquement, avec une proposition d'action concrète.
+
+GABARITS SUITE — chaque prompt doit être autonome : lisible sans le contexte de la conversation, copiable-collable directement comme prochain prompt. Jamais une phrase vague ; toujours les références exactes.
+
+🔴 Bug — champs obligatoires :
+  Observation : comportement constaté (valeur obtenue, crash, invariant violé) — verbatim si possible.
+  Fichier:ligne : ancre exacte dans le code (ex. engine/combat.py:142).
+  Attendu : comportement correct selon règle ou contrat.
+  Reproduction : état minimal pour déclencher le bug (scénario, appel, fixture).
+  Périmètre T2 prévu : fichiers/tests à toucher pour corriger + vérifier.
+
+🕳 Trou — champs obligatoires :
+  Cas manquant : quel scénario ou branche n'est pas couvert.
+  Fichier:ligne : fonction ou bloc concerné.
+  Test à écrire : ce que le test doit mettre en scène et vérifier (entrée → sortie attendue).
+  Harnais : pytest tests/unit/... ou vitest src/...
+
+💡 Amélioration — champs obligatoires :
+  Comportement actuel : ce que le code fait (correct mais sous-optimal).
+  Proposition : changement concret à apporter.
+  Fichiers concernés : liste des fichiers à modifier.
+  Gain attendu : perf, lisibilité, conformité règle — mesurable si possible.
+  Risque : ce qui pourrait régresser et comment le vérifier.
+
+📋 Sous-tâche — champs obligatoires :
+  Objectif : ce qui doit être livré à la fin.
+  Contexte : pourquoi ce morceau a été séparé (dépendance manquante, décision utilisateur, taille).
+  Périmètre : fichiers/modules concernés.
+  Critère de clôture : condition vérifiable indiquant que c'est terminé (test vert, endpoint fonctionnel, etc.).
 
 ARBITRAGE
 
