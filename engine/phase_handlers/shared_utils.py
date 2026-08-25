@@ -8959,7 +8959,7 @@ def save_threshold(armor_save: int, invul_save: int, ap: int) -> int:
 
 def display_save_threshold_with_waaagh(
     game_state: Dict[str, Any],
-    target_unit: Optional[Dict[str, Any]],
+    target_unit: Dict[str, Any],
     first_alive: Dict[str, Any],
     ap: int,
 ) -> Tuple[int, bool]:
@@ -8980,10 +8980,7 @@ def display_save_threshold_with_waaagh(
 
     armor = int(first_alive["ARMOR_SAVE"])
     base_invul = int(require_key(first_alive, "INVUL_SAVE"))
-    effective_invul = (
-        base_invul if target_unit is None
-        else effective_invul_save(game_state, target_unit, base_invul)
-    )
+    effective_invul = effective_invul_save(game_state, target_unit, base_invul)
     display_save_th = save_threshold(armor, effective_invul, ap)
     return display_save_th, display_save_th < save_threshold(armor, base_invul, ap)
 
@@ -10176,7 +10173,7 @@ def _manual_roll_intent(
                 # (b) TOWERING : lazy import pour eviter le cycle (attack_sequence n importe pas shared_utils)
                 # Keywords dans unit_by_id, pas dans units_cache.
                 from engine.phase_handlers.attack_sequence import unit_keywords_upper as _kw_upper
-                _pf_atk_unit = get_unit_by_id(game_state, _pf_atk_sid)
+                _pf_atk_unit = require_unit_by_id(game_state, _pf_atk_sid)
                 if "TOWERING" in _kw_upper(_pf_atk_unit):
                     _pf_ish = int(require_key(game_state, "inches_to_subhex"))
                     _pf_dist = _ranged_squad_edge_distance(game_state, _pf_atk_sid, str(target_sid))
@@ -10260,14 +10257,14 @@ def _manual_roll_intent(
         return None
     # Attaquant (escouade) resolu ICI : sert closest_target_penetration (ci-dessous) ET les
     # rerolls to-wound (plus bas). Constant pour l intent.
-    attacker_unit = get_unit_by_id(game_state, str(attacker["squad_id"]))
+    attacker_unit = require_unit_by_id(game_state, str(attacker["squad_id"]))
     # closest_target_penetration (regle projet unit_rules.json) : +1 de penetration (AP-1,
     # convention AP negatif cf. save_threshold) quand l unite tire sur la cible ELIGIBLE la
     # plus proche. Seule implementation depuis la suppression du code mort de tir (V11 §0.38).
     # La distance se mesure au niveau ESCOUADE (attacker["squad_id"]) : « closest eligible
     # unit » est une determination d unite (01.04, bord-a-bord via le selecteur `ranged`), pas
     # par figurine — attacker est ici une FIGURINE (models_cache), d ou le squad_id explicite.
-    if attacker_unit is not None and _unit_has_rule_effect(attacker_unit, "closest_target_penetration"):
+    if _unit_has_rule_effect(attacker_unit, "closest_target_penetration"):
         from engine.phase_handlers.shooting_handlers import (
             shooting_build_valid_target_pool,
             _ranged_distance_metric,
@@ -10286,7 +10283,7 @@ def _manual_roll_intent(
                 ap = ap - 1
     # Conforme 19.02 : seuil de blessure vs plus haute T bodyguard (depend de l arme via strength).
     wth = wound_threshold(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
-    target_unit = get_unit_by_id(game_state, str(target_sid))
+    target_unit = require_unit_by_id(game_state, str(target_sid))
     # Oath of Moment (chantier 03) : MEME helper que la melee, plancher compris.
     _is_oath_target, _oath_wound_bonus, wth = resolve_oath_effects(
         game_state, attacker_unit, target_sid, wth
@@ -10302,11 +10299,9 @@ def _manual_roll_intent(
     # Rerolls to-wound au TIR (abilities UNITE, constantes pour l intent) — miroir exact du
     # fight (_manual_roll_fight_intent) : reroll_1_towound = reroll d un dé de blessure = 1 ;
     # reroll_towound_target_on_objective = reroll de tout échec si la cible est sur objectif.
-    reroll_wound1 = attacker_unit is not None and _unit_has_rule_effect(attacker_unit, "reroll_1_towound")
+    reroll_wound1 = _unit_has_rule_effect(attacker_unit, "reroll_1_towound")
     reroll_wound_obj = (
-        attacker_unit is not None
-        and target_unit is not None
-        and _unit_has_rule_effect(attacker_unit, "reroll_towound_target_on_objective")
+        _unit_has_rule_effect(attacker_unit, "reroll_towound_target_on_objective")
         and is_unit_on_objective(target_unit, game_state)
     )
     _weapon_precision = weapon_has_rule(weapon, "PRECISION")
@@ -11994,7 +11989,7 @@ def _extra_attacks_weapon_indices(attacker: Dict[str, Any]) -> List[int]:
 
 def _select_fight_weapon_indices_for_fig(
     attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int,
-    target_unit: Optional[Dict[str, Any]] = None,
+    target_unit: Dict[str, Any],
     *,
     melee_bonus: int = 0,
 ) -> List[int]:
@@ -12123,24 +12118,20 @@ def squad_declare_fight(
     # une figurine moyenne sans sauvegarde — plausible, donc invisible en cas de donnee absente.
     from engine.game_state import effective_invul_save, waaagh_melee_bonus  # cycle : cf. plus haut
 
-    target_unit_for_select = get_unit_by_id(game_state, str(target_squad_id))
+    target_unit_for_select = require_unit_by_id(game_state, str(target_squad_id))
     target_t = int(require_key(t_sample, "T"))
     target_sv = int(require_key(t_sample, "ARMOR_SAVE"))
     # Waaagh! de la CIBLE : elle peut avoir une invulnerable 5+ absente de sa datasheet. Le
     # choix d arme se fait donc contre la sauvegarde REELLE — sinon l heuristique prefererait
     # une arme a forte penetration contre une invulnerable que l AP n entame pas.
     target_invul = int(require_key(t_sample, "INVUL_SAVE"))
-    if target_unit_for_select is not None:
-        target_invul = effective_invul_save(game_state, target_unit_for_select, target_invul)
+    target_invul = effective_invul_save(game_state, target_unit_for_select, target_invul)
     # Waaagh! de l ATTAQUANT : +1 S et +1 A sur TOUTES ses armes de melee. Le bonus entre dans le
     # SCORE, pas seulement dans la resolution : `expected_damage_per_attack` doit modeliser
     # l arme telle qu elle sera jouee, sinon le choix d arme est fait sur des caracteristiques
     # que le moteur n appliquera pas (§9.2.3 : une seule definition de l esperance de degats).
-    attacker_unit_for_select = get_unit_by_id(game_state, str(attacker_squad_id))
-    melee_bonus = (
-        0 if attacker_unit_for_select is None
-        else waaagh_melee_bonus(game_state, attacker_unit_for_select)
-    )
+    attacker_unit_for_select = require_unit_by_id(game_state, str(attacker_squad_id))
+    melee_bonus = waaagh_melee_bonus(game_state, attacker_unit_for_select)
 
     fighting = get_fighting_models(game_state, attacker_squad_id, target_squad_id)
     intents: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"][attacker_squad_id]
@@ -12475,13 +12466,11 @@ def squad_is_battle_shocked_in_enemy_er(game_state: Dict[str, Any], squad_id: st
 
     NE contient PAS la garde de phase : 09.07 ne parle que du fall-back move, mais tous les
     appelants ne sont pas dans la même position pour le savoir. C'est à l'appelant qui borne
-    aussi le pile-in/consolidation (12.03) de la poser. Escouade absente (morte, non déployée)
-    -> ``False``, contrat du masque.
+    aussi le pile-in/consolidation (12.03) de la poser.
     """
-    unit = get_unit_by_id(game_state, str(squad_id))
+    unit = require_unit_by_id(game_state, str(squad_id))
     return (
-        unit is not None
-        and bool(require_key(unit, "battle_shocked"))
+        bool(require_key(unit, "battle_shocked"))
         and _squad_is_in_enemy_er(game_state, str(squad_id))
     )
 
@@ -12834,12 +12823,10 @@ def erode_move_pool_by_squad_block(
     )
     # Géométrie du trajet — SOURCE UNIQUE partagée avec la validation et la mesure.
     _mode = move_plan_distance_mode(game_state, str(squad_id))
-    _unit_obj = get_unit_by_id(game_state, squad_id)
+    _unit_obj = require_unit_by_id(game_state, squad_id)
     # `cube` == métrique hex + FLY déclaré ; en euclidien le mode ne porte pas le FLY (le champ
     # any-angle le traite en interne), on interroge donc le prédicat, qui est la même source.
-    _fly_active = _mode == "cube" or (
-        _unit_obj is not None and _fly_traversal_active(game_state, _unit_obj, str(squad_id))
-    )
+    _fly_active = _mode == "cube" or _fly_traversal_active(game_state, _unit_obj, str(squad_id))
     # Unité de distance des champs : pas centre-à-centre en hex, unités `_hex_center` en euclidien.
     _dist_scale = ENGAGEMENT_NORM_HEX_WIDTH if _mode == "euclidean" else 1.0
     if not _fly_active:

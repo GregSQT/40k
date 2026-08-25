@@ -3570,8 +3570,8 @@ class W40KEngine(gym.Env):
 
             # Check if any unit in the pool is an AI unit (player 2)
             for unit_id in pool_to_check:
-                unit = self._get_unit_by_id(str(unit_id))
-                if unit and unit.get("player") == 2:
+                unit = require_unit_by_id(self.game_state, str(unit_id))
+                if unit.get("player") == 2:
                     has_eligible_ai = True
                     break
             
