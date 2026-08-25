@@ -11,7 +11,7 @@ import time
 from typing import Dict, List, Any, Optional, Set, Tuple
 from shared.data_validation import require_key
 from engine.debug_trace import CH_DEPLOY_CACHE, channel_enabled, trace
-from engine.game_utils import get_unit_by_id
+from engine.game_utils import get_unit_by_id, require_unit_by_id
 from engine.combat_utils import calculate_hex_distance, get_unit_coordinates
 from engine.phase_handlers.shooting_handlers import (
     batch_ground_hex_can_see,
@@ -958,10 +958,9 @@ class ActionDecoder:
             eligible = []
             pool_unit_ids_str = [str(uid) for uid in pool_unit_ids]
             for uid in pool_unit_ids:
-                # CRITICAL: Normalize uid to string for get_unit_by_id (which normalizes both sides)
                 uid_str = str(uid)
-                unit = get_unit_by_id(game_state, uid_str)
-                if unit and is_unit_alive(str(unit["id"]), game_state):
+                unit = require_unit_by_id(game_state, uid_str)
+                if is_unit_alive(str(unit["id"]), game_state):
                     cache_entry = require_key(game_state, "units_cache").get(uid_str)
                     if cache_entry is None:
                         raise KeyError(f"Unit {uid_str} missing from units_cache")

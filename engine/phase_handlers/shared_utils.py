@@ -4834,8 +4834,8 @@ def move_plan_distance_mode(
     # Métrique AVANT l'unité (cf. érosion) : euclidien / non-hex → pas de lecture d'unité.
     if _metric != "hex":
         return "euclidean"
-    _unit_obj = get_unit_by_id(game_state, str(squad_id))
-    if _unit_obj is not None and _fly_traversal_active(game_state, _unit_obj, str(squad_id)):
+    _unit_obj = require_unit_by_id(game_state, str(squad_id))
+    if _fly_traversal_active(game_state, _unit_obj, str(squad_id)):
         return "cube"
     return "geodesic"
 
@@ -5568,12 +5568,11 @@ def allocate_mortal_wounds(
             )
         target = eligibles[0]
         # Feel No Pain (24.12) : jet D6 par blessure mortelle avant application.
-        _fnp_unit = get_unit_by_id(game_state, str(models_cache[target]["squad_id"]))
-        if _fnp_unit is not None:
-            _fnp_th = _get_feel_no_pain_threshold(_fnp_unit)
-            if _fnp_th is not None and _roll_feel_no_pain(1, _fnp_th) == 0:
-                remaining -= 1
-                continue
+        _fnp_unit = require_unit_by_id(game_state, str(models_cache[target]["squad_id"]))
+        _fnp_th = _get_feel_no_pain_threshold(_fnp_unit)
+        if _fnp_th is not None and _roll_feel_no_pain(1, _fnp_th) == 0:
+            remaining -= 1
+            continue
         new_hp = int(models_cache[target]["HP_CUR"]) - 1
         # Jumeau AUTO de `_resolve_one_hazard_wound` : meme record, meme exigence. La position
         # est capturee AVANT destroy (intention metier) mais REQUISE (elle part dans
@@ -7986,13 +7985,9 @@ def squad_shoot_los_overview(
     # avance aurait teste son arme la plus longue, non-[ASSAULT], et n aurait vu AUCUNE cible)
     # et le volet MONSTER/VEHICLE de 10.06 (« you can select any of that model s ranged
     # weapons »), qui privait de cibles un vehicule engage sans arme Close-quarters.
-    shooter_unit = get_unit_by_id(game_state, attacker_squad_id)
-    shooting_type = (
-        resolve_squad_shooting_type(game_state, attacker_squad_id)
-        if shooter_unit is not None
-        else None
-    )
-    if shooter_unit is None or shooting_type is None:
+    shooter_unit = require_unit_by_id(game_state, attacker_squad_id)
+    shooting_type = resolve_squad_shooting_type(game_state, attacker_squad_id)
+    if shooting_type is None:
         return {
             "valid_targets": [],
             "count_by_unit_id": {},
@@ -10509,10 +10504,9 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     # save ». C est ICI que la sauvegarde est reellement comparee — le seuil d affichage calcule
     # au jet ne decide de rien. Le proprietaire de la FIGURINE allouee est l autorite : c est lui
     # dont le Waaagh! peut etre actif, pas l attaquant.
-    _def_unit = get_unit_by_id(game_state, str(require_key(m, "squad_id")))
+    _def_unit = require_unit_by_id(game_state, str(require_key(m, "squad_id")))
     _invul = int(require_key(m, "INVUL_SAVE"))
-    if _def_unit is not None:
-        _invul = effective_invul_save(game_state, _def_unit, _invul)
+    _invul = effective_invul_save(game_state, _def_unit, _invul)
     save_th = save_threshold(int(m["ARMOR_SAVE"]), _invul, ap)
     rec["saveTarget"] = save_th
     # DEVASTATING_WOUNDS (weapon_rules.json) : « No saving throw can be made against a critical
@@ -10557,16 +10551,15 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     hp_before = int(m["HP_CUR"])
     dmg_dealt = min(int(dmg), hp_before)
     # Feel No Pain (24.12) : jet D6 par HP perdu ; sur threshold+, la blessure est ignorée.
-    _def_squad_fnp = get_unit_by_id(game_state, str(batch["target_sid"]))
-    if _def_squad_fnp is not None:
-        _fnp_th = _get_feel_no_pain_threshold(_def_squad_fnp)
-        if _fnp_th is not None:
-            _fnp_attempts = dmg_dealt
-            dmg_dealt = _roll_feel_no_pain(dmg_dealt, _fnp_th)
-            # L12 — jets FNP dans step.log (24.12) : saves/seuil+/tentatives.
-            rec["fnpSaves"] = _fnp_attempts - dmg_dealt
-            rec["fnpAttempts"] = _fnp_attempts
-            rec["fnpThreshold"] = _fnp_th
+    _def_squad_fnp = require_unit_by_id(game_state, str(batch["target_sid"]))
+    _fnp_th = _get_feel_no_pain_threshold(_def_squad_fnp)
+    if _fnp_th is not None:
+        _fnp_attempts = dmg_dealt
+        dmg_dealt = _roll_feel_no_pain(dmg_dealt, _fnp_th)
+        # L12 — jets FNP dans step.log (24.12) : saves/seuil+/tentatives.
+        rec["fnpSaves"] = _fnp_attempts - dmg_dealt
+        rec["fnpAttempts"] = _fnp_attempts
+        rec["fnpThreshold"] = _fnp_th
     if dmg_dealt <= 0:
         rec["damageDealt"] = 0
         rec["targetDied"] = False
@@ -11198,12 +11191,11 @@ def _resolve_one_hazard_wound(
     col = int(require_key(m, "col"))
     row = int(require_key(m, "row"))
     # Feel No Pain (24.12) : MW = blessure sans sauvegarde, mais FNP reste applicable.
-    _fnp_unit = get_unit_by_id(game_state, str(require_key(m, "squad_id")))
-    if _fnp_unit is not None:
-        _fnp_th = _get_feel_no_pain_threshold(_fnp_unit)
-        if _fnp_th is not None and _roll_feel_no_pain(1, _fnp_th) == 0:
-            batch["pool_index"] += 1
-            return
+    _fnp_unit = require_unit_by_id(game_state, str(require_key(m, "squad_id")))
+    _fnp_th = _get_feel_no_pain_threshold(_fnp_unit)
+    if _fnp_th is not None and _roll_feel_no_pain(1, _fnp_th) == 0:
+        batch["pool_index"] += 1
+        return
     hp_before = int(m["HP_CUR"])
     new_hp = hp_before - 1
     destroyed = new_hp <= 0
