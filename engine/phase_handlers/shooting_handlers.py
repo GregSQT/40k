@@ -14,6 +14,7 @@ import numpy as np
 from engine.combat_utils import (
     normalize_coordinates,
     get_unit_by_id,
+    require_unit_by_id,
     resolve_dice_value,
     expected_dice_value,
     set_unit_coordinates,
@@ -655,9 +656,10 @@ def weapon_availability_check(
                                 continue
                             weapon_has_valid_target = True
                             break
-                        _row_enemy = get_unit_by_id(game_state, row["enemy_id_str"])
-                        if _row_enemy is None:
-                            continue
+                        # Preuve statique : `_build_weapon_availability_enemy_precheck` lève
+                        # KeyError si l'unité manque de unit_by_id (ligne 437-438). unit_by_id
+                        # ne rétrécit jamais en cours de partie — require ne peut pas lever ici.
+                        _row_enemy = require_unit_by_id(game_state, row["enemy_id_str"])
                         is_valid = _is_valid_shooting_target(game_state, temp_unit, _row_enemy)
                         if is_valid:
                             weapon_has_valid_target = True
@@ -1002,9 +1004,7 @@ def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
     shot_prev_ids = {str(x) for x in game_state.get("units_shot_previous_turn", set())}
     units_cache = require_key(game_state, "units_cache")
     for unit_id in units_cache.keys():
-        unit = _get_unit_by_id(game_state, str(unit_id))
-        if unit is None:
-            continue
+        unit = require_unit_by_id(game_state, str(unit_id))
         if not is_unit_alive(str(unit_id), game_state) or not bool(unit.get("hideable")):
             unit["hidden"] = False
             unit["hidden_models"] = []
@@ -1205,9 +1205,7 @@ def build_unit_los_cache(
             )
             if _d > _cull_max:
                 continue
-        target_unit = _get_unit_by_id(game_state, str(target_id))
-        if target_unit is None:
-            continue
+        target_unit = require_unit_by_id(game_state, str(target_id))
 
         los = compute_unit_los(game_state, unit, target_unit)
         los_map[str(target_id)] = los["can_see"]
@@ -1655,9 +1653,7 @@ def build_visible_cells_by_target(
     out: Dict[str, List[List[int]]] = {}
     for target_id in valid_targets:
         target_id_str = str(target_id)
-        target_unit = _get_unit_by_id(game_state, target_id_str)
-        if target_unit is None:
-            continue
+        target_unit = require_unit_by_id(game_state, target_id_str)
         los = compute_unit_los(game_state, shooter, target_unit)
         out[target_id_str] = [[int(c), int(r)] for c, r in los["visible_cells"]]
     return out
@@ -1702,8 +1698,10 @@ def build_hidden_too_far_by_unit_id(
         target_id_str = str(target_id)
         if target_id_str == shooter_id:
             continue
-        enemy = _get_unit_by_id(game_state, target_id_str)
-        if enemy is None or not is_unit_alive(target_id_str, game_state):
+        # Preuve statique : target_id vient de los_cache, peuplé par build_unit_los_cache qui
+        # exige unit_by_id (require_unit_by_id). unit_by_id ne rétrécit jamais → require ne lève pas.
+        enemy = require_unit_by_id(game_state, target_id_str)
+        if not is_unit_alive(target_id_str, game_state):
             continue
         if int(require_key(enemy, "player")) == shooter_player:
             continue
@@ -1806,8 +1804,10 @@ def build_hidden_detection_info_by_unit_id(
         target_id_str = str(target_id)
         if target_id_str == shooter_id:
             continue
-        enemy = _get_unit_by_id(game_state, target_id_str)
-        if enemy is None or not is_unit_alive(target_id_str, game_state):
+        # Preuve statique : target_id vient de los_cache, peuplé par build_unit_los_cache qui
+        # exige unit_by_id (require_unit_by_id). unit_by_id ne rétrécit jamais → require ne lève pas.
+        enemy = require_unit_by_id(game_state, target_id_str)
+        if not is_unit_alive(target_id_str, game_state):
             continue
         if int(require_key(enemy, "player")) == shooter_player:
             continue
@@ -2045,9 +2045,7 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     ):
         if not is_unit_alive(str(enemy_id), game_state):
             continue
-        enemy = _get_unit_by_id(game_state, enemy_id)
-        if enemy is None:
-            continue
+        enemy = require_unit_by_id(game_state, str(enemy_id))
         enemy_fp = entry_footprint(enemy_entry)
         distance = min_distance_between_sets(shooter_fp, enemy_fp, max_distance=max_range)
         if distance > max_range:
