@@ -130,8 +130,7 @@ def test_torrent_usage_counter_incremented(tmp_path):
 def test_torrent_no_validity_error_with_none_hit(tmp_path):
     """Hit None(None+) avec TORRENT : aucune erreur de validité."""
     stats = _stats(tmp_path, _TORRENT_LINE, unit_type="LandSpeederHeavyFlamer")
-    torrent_errors = [e for e in stats["parse_errors"] if "TORRENT" in e.get("error", "")]
-    assert torrent_errors == [], torrent_errors
+    assert stats["torrent_wrong_hit"][1] == 0, stats["torrent_wrong_hit"]
 
 
 def test_torrent_validity_error_with_numeric_hit(tmp_path):
@@ -141,8 +140,7 @@ def test_torrent_validity_error_with_numeric_hit(tmp_path):
         "Hit 4(3+) [TORRENT] - Wound 4(4+) - Save 5(4+) - Dmg:1HP",
     )
     stats = _stats(tmp_path, bad_line, unit_type="LandSpeederHeavyFlamer")
-    torrent_errors = [e for e in stats["parse_errors"] if "TORRENT" in e.get("error", "")]
-    assert len(torrent_errors) == 1, torrent_errors
+    assert stats["torrent_wrong_hit"][1] == 1, stats["torrent_wrong_hit"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -165,8 +163,7 @@ def test_lethal_hits_usage_counter_incremented(tmp_path):
 def test_lethal_hits_no_validity_error_with_none_wound(tmp_path):
     """Wound None(3+) avec [LETHAL HITS] : aucune erreur de validité."""
     stats = _stats(tmp_path, _LETHAL_LINE, unit_type="Zoanthrope")
-    lh_errors = [e for e in stats["parse_errors"] if "LETHAL HITS" in e.get("error", "")]
-    assert lh_errors == [], lh_errors
+    assert stats["lethal_hits_wrong_wound"][1] == 0, stats["lethal_hits_wrong_wound"]
 
 
 def test_lethal_hits_validity_error_with_numeric_wound(tmp_path):
@@ -176,8 +173,7 @@ def test_lethal_hits_validity_error_with_numeric_wound(tmp_path):
         "Hit 6(3+) - Wound 5(3+) [LETHAL HITS] - Save 5(4+) - Dmg:1HP",
     )
     stats = _stats(tmp_path, bad_line, unit_type="Zoanthrope")
-    lh_errors = [e for e in stats["parse_errors"] if "LETHAL HITS" in e.get("error", "")]
-    assert len(lh_errors) == 1, lh_errors
+    assert stats["lethal_hits_wrong_wound"][1] == 1, stats["lethal_hits_wrong_wound"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -390,8 +386,7 @@ def test_melee_torrent_validity_error_with_numeric_hit(tmp_path):
         "Hit 4(3+) [TORRENT] - Wound 4(4+) - Save 5(4+) - Dmg:1HP",
     )
     stats = _fight_stats(tmp_path, bad)
-    torrent_errors = [e for e in stats["parse_errors"] if "TORRENT" in e.get("error", "")]
-    assert len(torrent_errors) == 1, torrent_errors
+    assert stats["torrent_wrong_hit_fight"][1] == 1, stats["torrent_wrong_hit_fight"]
 
 
 def test_melee_lethal_hits_validity_error_with_numeric_wound(tmp_path):
@@ -401,5 +396,4 @@ def test_melee_lethal_hits_validity_error_with_numeric_wound(tmp_path):
         "Hit 6(3+) - Wound 5(3+) [LETHAL HITS] - Save 5(4+) - Dmg:1HP",
     )
     stats = _fight_stats(tmp_path, bad)
-    lh_errors = [e for e in stats["parse_errors"] if "LETHAL HITS" in e.get("error", "")]
-    assert len(lh_errors) == 1, lh_errors
+    assert stats["lethal_hits_wrong_wound_fight"][1] == 1, stats["lethal_hits_wrong_wound_fight"]
