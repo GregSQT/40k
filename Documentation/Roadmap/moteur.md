@@ -90,6 +90,8 @@ Move réactif : une escouade hors cohérence ne pouvait pas faire ce mouvement (
 
 **T1 livré le 2026-08-25** — 9 sites Forme C convertis (commit dff4e8f0). `squad_fight_activation_order` supprimée (code mort, 0 appelant depuis fb7e83b6). 7 sites shooting_handlers + `_enqueue_rule_choice_candidates` w40k_core + résidu waaagh T2 → `require_unit_by_id`. Grep 0 résidu. 5 tests mutation-prouvés.
 
-Reste : T2 (46 sites Forme B), T3 (63 sites Forme D) — ~3-4 sessions.
+**T2 livré le 2026-08-25** — 46 sites Forme B convertis (charge_handlers 11, movement_handlers 11, fight_handlers 4, shared_utils 12, shooting_handlers 7+1 hors AST, reward_calculator 1). `unit_is_on_battlefield` supprimée (code mort, 0 appelant de production). api_server : 5 guards 404 ajoutés (frontières user-input). Grep résidu 0 (6 sites préservés : 2 tests, 3 frontières API, 1 contrat retour None). 13 tests mutation-prouvés (ROUGE→VERT).
+
+Reste : T3 (63 sites Forme D) — ~1-2 sessions.
 
 → `Documentation/Implémentation/A_faire/replis_unit_by_id_2026-08-05.md`
