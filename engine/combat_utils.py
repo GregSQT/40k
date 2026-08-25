@@ -17,6 +17,7 @@ from engine.game_utils import require_unit_by_id  # noqa: F401 – re-export for
 # ============================================================================
 
 DiceValue = Union[int, str]
+VALID_DICE_STRINGS: frozenset = frozenset({"D3", "D6", "2D6", "D6+1", "D6+2", "D6+3"})
 EXPECTED_D3 = 2.0
 EXPECTED_D6 = 3.5
 EXPECTED_2D6 = 7.0
@@ -41,7 +42,7 @@ def resolve_dice_value(value: DiceValue, roll_context: str) -> int:
         return value
     if not isinstance(value, str):
         raise TypeError(f"Invalid dice value type for {roll_context}: {type(value).__name__}")
-    if value not in {"D3", "D6", "2D6", "D6+1", "D6+2", "D6+3"}:
+    if value not in VALID_DICE_STRINGS:
         raise ValueError(f"Unsupported dice expression for {roll_context}: {value}")
 
     import random

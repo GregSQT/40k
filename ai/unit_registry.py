@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import sys
 from shared.data_validation import require_key, require_present
 from shared.json_atomic import write_json_atomic
+from engine.combat_utils import VALID_DICE_STRINGS
 
 class UnitRegistry:
     """Dynamic unit discovery and faction-role management system."""
@@ -359,7 +360,7 @@ class UnitRegistry:
                     rule_args_block = rule_args_match.group(1)
                     parsed_rule_args = {}
                     for arg_match in re.finditer(
-                        r'([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:(-?\d+)|"(D3|2D6|D6\+[1-3]|D6)")',
+                        r'([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:(-?\d+)|"(\d*D\d+(?:[+\-]\d+)?)")',
                         rule_args_block,
                     ):
                         arg_key = arg_match.group(1)
@@ -367,6 +368,10 @@ class UnitRegistry:
                             int(arg_match.group(2)) if arg_match.group(2) is not None
                             else arg_match.group(3)
                         )
+                        if isinstance(arg_value, str) and arg_value not in VALID_DICE_STRINGS:
+                            raise ValueError(
+                                f"Invalid rule_args for '{rule_id}': unsupported dice value '{arg_value}'"
+                            )
                         parsed_rule_args[arg_key] = arg_value
                     if not parsed_rule_args:
                         raise ValueError(
