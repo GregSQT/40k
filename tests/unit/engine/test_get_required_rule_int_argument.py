@@ -24,37 +24,21 @@ def _make_unit(rule_args: dict) -> dict:
     }
 
 
-def _make_unit_no_effect() -> dict:
-    return {
-        "id": "unit-no-effect",
-        "UNIT_RULES": [],
-    }
-
-
 class TestGetRequiredRuleIntArgument:
     def test_effect_absent_raises_value_error(self):
-        unit = _make_unit_no_effect()
+        unit = {"id": "unit-no-effect", "UNIT_RULES": []}
         with pytest.raises(ValueError, match="move_after_shooting"):
             _get_required_rule_int_argument(unit, "move_after_shooting", "distance")
 
-    def test_value_zero_raises_value_error(self):
-        unit = _make_unit({"distance": 0})
+    @pytest.mark.parametrize("val", [0, -3])
+    def test_non_positive_raises_value_error(self, val):
+        unit = _make_unit({"distance": val})
         with pytest.raises(ValueError, match="must be > 0"):
             _get_required_rule_int_argument(unit, "move_after_shooting", "distance")
 
-    def test_value_negative_raises_value_error(self):
-        unit = _make_unit({"distance": -3})
-        with pytest.raises(ValueError, match="must be > 0"):
-            _get_required_rule_int_argument(unit, "move_after_shooting", "distance")
-
-    def test_string_value_raises_type_error(self):
-        unit = _make_unit({"distance": "6"})
-        with pytest.raises(TypeError):
-            _get_required_rule_int_argument(unit, "move_after_shooting", "distance")
-
-    def test_float_value_raises_type_error(self):
-        # float passerait le test raw <= 0 silencieusement sans le contrôle isinstance de _get_unit_rule_arg
-        unit = _make_unit({"distance": 6.0})
+    @pytest.mark.parametrize("val", ["6", 6.0])
+    def test_wrong_type_raises_type_error(self, val):
+        unit = _make_unit({"distance": val})
         with pytest.raises(TypeError):
             _get_required_rule_int_argument(unit, "move_after_shooting", "distance")
 
