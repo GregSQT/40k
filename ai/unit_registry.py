@@ -359,15 +359,18 @@ class UnitRegistry:
                     rule_args_block = rule_args_match.group(1)
                     parsed_rule_args = {}
                     for arg_match in re.finditer(
-                        r'([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(-?\d+)',
+                        r'([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:(-?\d+)|"(D\d+)")',
                         rule_args_block,
                     ):
                         arg_key = arg_match.group(1)
-                        arg_value = int(arg_match.group(2))
+                        arg_value: Union[int, str] = (
+                            int(arg_match.group(2)) if arg_match.group(2) is not None
+                            else arg_match.group(3)
+                        )
                         parsed_rule_args[arg_key] = arg_value
                     if not parsed_rule_args:
                         raise ValueError(
-                            f"Invalid rule_args for '{rule_id}': expected at least one numeric key:value pair"
+                            f"Invalid rule_args for '{rule_id}': expected at least one numeric or dice key:value pair"
                         )
                     rule_args_value = parsed_rule_args
 

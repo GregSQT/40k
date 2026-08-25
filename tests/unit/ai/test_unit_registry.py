@@ -147,6 +147,27 @@ export class Intercessor extends SpaceMarineRangeUnit {
         registry._extract_static_properties(content, "spaceMarine")
 
 
+def test_extract_static_properties_parses_dice_string_rule_args(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = _make_registry_stub()
+    registry._unit_rules = {"deadly_demise": {}}
+    monkeypatch.setattr("engine.weapons.get_weapons", lambda faction, codes: [])
+    content = """
+export class WeirdBoy extends SwarmRangeSwarm {
+  static HP_MAX = 4;
+  static MOVE = 6;
+  static RNG_WEAPON_CODES = [];
+  static CC_WEAPON_CODES = [];
+  static UNIT_RULES = [
+    { ruleId: "deadly_demise", displayName: "Deadly Demise D3", rule_args: { value: "D3" } }
+  ];
+}
+"""
+    props = registry._extract_static_properties(content, "ork")
+    rule = props["UNIT_RULES"][0]
+    assert rule["ruleId"] == "deadly_demise"
+    assert rule["rule_args"] == {"value": "D3"}
+
+
 def test_save_registry_cache_writes_json(tmp_path: Path) -> None:
     registry = _make_registry_stub()
     registry.project_root = tmp_path
