@@ -2351,13 +2351,8 @@ class W40KEngine(gym.Env):
                 self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
             
             reward = self.reward_calculator.calculate_reward(True, {"action": "turn_limit_reached"}, self.game_state)
-            shaping = require_key(self.game_state, "_pending_zone_shaping")
-            self.game_state["_pending_zone_shaping"] = 0.0
-            reward += shaping
-            wasted = require_key(self.game_state, "_pending_reserves_wasted")
-            if wasted:
-                self.game_state["_pending_reserves_wasted"] = 0
-                reward += self.reward_calculator.wasted_reserve_penalty(wasted)
+            _shaping, _reserves = self._drain_pending_shaping_and_reserves()
+            reward += _shaping + _reserves
             reward += self.settle_pending_zone_intent_declaration(
                 int(require_key(self.config, "controlled_player"))
             )
@@ -2679,19 +2674,14 @@ class W40KEngine(gym.Env):
             # La cle est posee a l'init ET au reset : sa lecture est stricte, et le versement
             # la remet a 0.0 au lieu de la supprimer — un `pop` avec defaut masquerait une
             # desynchronisation du cycle declaration/solde.
-            shaping = require_key(self.game_state, "_pending_zone_shaping")
-            self.game_state["_pending_zone_shaping"] = 0.0
-            reward += shaping
-            zone_shaping_paid += shaping
             # RESERVES GASPILLEES (20.04) : facture au premier step qui suit la destruction, par
             # le meme chemin que le shaping ci-dessus et pour la meme raison — le handler qui
             # detruit n'a ni le bareme ni la main sur la recompense. Le compte est pose par
             # `fight_handlers` et n'inclut QUE les escouades qui avaient une arrivee possible.
-            wasted = require_key(self.game_state, "_pending_reserves_wasted")
-            if wasted:
-                self.game_state["_pending_reserves_wasted"] = 0
-                reserves_penalty_paid += self.reward_calculator.wasted_reserve_penalty(wasted)
-                reward += reserves_penalty_paid
+            _shaping, _reserves = self._drain_pending_shaping_and_reserves()
+            reward += _shaping + _reserves
+            zone_shaping_paid += _shaping
+            reserves_penalty_paid += _reserves
         _step_t5 = time.perf_counter() if _step_t0 is not None else None
         terminated = self.game_state["game_over"]
         if terminated:
@@ -8167,6 +8157,17 @@ class W40KEngine(gym.Env):
                 for zone_idx in range(len(zone_intents))
             ],
         }
+
+    def _drain_pending_shaping_and_reserves(self) -> Tuple[float, float]:
+        """Vide _pending_zone_shaping et _pending_reserves_wasted, retourne (zone_shaping, reserves_penalty)."""
+        zone_shaping = require_key(self.game_state, "_pending_zone_shaping")
+        self.game_state["_pending_zone_shaping"] = 0.0
+        wasted = require_key(self.game_state, "_pending_reserves_wasted")
+        reserves_penalty = 0.0
+        if wasted:
+            self.game_state["_pending_reserves_wasted"] = 0
+            reserves_penalty = self.reward_calculator.wasted_reserve_penalty(wasted)
+        return zone_shaping, reserves_penalty
 
     def settle_pending_zone_intent_declaration(self, player: int) -> float:
         """Solde la declaration de `player` et rend le shaping du, 0.0 s'il n'y en a pas.

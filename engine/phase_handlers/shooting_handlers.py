@@ -2029,7 +2029,7 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     shooter_fp = entry_footprint(shooter_entry)
     shooter_player_int = require_present(int(unit["player"]) if unit["player"] is not None else None, "unit['player']")
     melee_range = get_engagement_zone(game_state)
-    shoots_as_monster_or_vehicle = _unit_shoots_as_monster_or_vehicle(game_state, unit)
+    shoots_as_monster_or_vehicle = is_adjacent and _unit_shoots_as_monster_or_vehicle(game_state, unit)
 
     for enemy_id, enemy_entry in enemy_entries_on_battlefield(
         units_cache, shooter_player_int, exclude_id=shooter_id_str
