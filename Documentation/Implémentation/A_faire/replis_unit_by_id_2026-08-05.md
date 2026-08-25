@@ -221,8 +221,8 @@ EOF
 
 | Tranche | Contenu | Charge |
 |---|---|---|
-| **T0** | **Unifier les 4 implémentations en une** + écrire le jumeau bruyant `require_unit_by_id`. Décision de signature à l'utilisateur. Rien d'autre. | ½ session |
-| **T1** | Forme C, 10 sites, en commençant par `squad_fight_activation_order` (activation perdue). | 1 session |
+| **T0** ✅ | **Unifier les 4 implémentations en une** + écrire le jumeau bruyant `require_unit_by_id`. Décision de signature à l'utilisateur. Rien d'autre. | ½ session |
+| **T1** ✅ | Forme C, 9 sites traités (10 - 1 déjà Forme B). `squad_fight_activation_order` → supprimé (code mort, 0 appelant depuis fb7e83b6). 7 sites shooting_handlers + `_enqueue_rule_choice_candidates` w40k_core → `require_unit_by_id`. T2 bonus : résidu waaagh w40k_core:4326. Grep 0 résidu. Commit dff4e8f0 (2026-08-25). | 1 session |
 | **T2** | Forme B, 46 sites, en commençant par `unit_is_on_battlefield` / `unit_is_in_strategic_reserves` (deux réponses contradictoires sur le même id). `charge_handlers` (13) et `movement_handlers` (11) dominent : les prendre par fichier. | 2 sessions |
 | **T3** | Forme D, 64 appels. Lecture d'abord, classement ensuite. | 1 session |
 
