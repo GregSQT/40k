@@ -32,6 +32,7 @@ from .shared_utils import (
     unit_has_rule_effect as shared_unit_has_rule_effect,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
+    _get_unit_rule_arg,
     build_occupied_positions_set, compute_candidate_footprint, is_footprint_placement_valid,
     is_placement_valid_with_clearance,
     _compute_unit_occupied_hexes,
@@ -300,40 +301,18 @@ def _get_required_rule_int_argument(
     unit: Dict[str, Any], effect_rule_id: str, argument_key: str
 ) -> int:
     """Read required integer argument from source UNIT_RULES entry for an effect rule."""
-    source_rule_id = _get_source_unit_rule_id_for_effect(unit, effect_rule_id)
-    if source_rule_id is None:
+    raw = _get_unit_rule_arg(unit, effect_rule_id, argument_key, (int,))
+    if raw is None:
         raise ValueError(
             f"Rule effect '{effect_rule_id}' is not present on unit "
             f"{require_key(unit, 'id')}"
         )
-    unit_rules = require_key(unit, "UNIT_RULES")
-    for unit_rule_entry in unit_rules:
-        if str(require_key(unit_rule_entry, "ruleId")) != str(source_rule_id):
-            continue
-        rule_args = unit_rule_entry.get("rule_args")
-        if not isinstance(rule_args, dict):
-            raise ValueError(
-                f"Rule '{source_rule_id}' on unit {require_key(unit, 'id')} must define rule_args"
-            )
-        if argument_key not in rule_args:
-            raise ValueError(
-                f"Rule '{source_rule_id}' on unit {require_key(unit, 'id')} "
-                f"missing required argument '{argument_key}'"
-            )
-        raw_value = rule_args[argument_key]
-        if not isinstance(raw_value, int):
-            raise TypeError(
-                f"Rule '{source_rule_id}' argument '{argument_key}' must be int, "
-                f"got {type(raw_value).__name__}"
-            )
-        if raw_value <= 0:
-            raise ValueError(
-                f"Rule '{source_rule_id}' argument '{argument_key}' must be > 0, got {raw_value}"
-            )
-        return raw_value
-    raise ValueError(
-        f"Source rule '{source_rule_id}' not found in UNIT_RULES for unit {require_key(unit, 'id')}"
-    )
+    if raw <= 0:
+        raise ValueError(
+            f"Rule argument '{argument_key}' must be > 0, got {raw} "
+            f"for unit {require_key(unit, 'id')}"
+        )
+    return raw
 
 
 def _can_unit_shoot_after_advance_with_weapon(unit: Dict[str, Any], weapon: Dict[str, Any]) -> bool:
