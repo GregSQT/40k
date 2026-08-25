@@ -2350,8 +2350,14 @@ class W40KEngine(gym.Env):
                 objective_control = self.state_manager.calculate_objective_control(self.game_state)
                 self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
             
-            turn_limit_result = {"action": "turn_limit_reached", "turn_limit_reached": True}
-            reward = self.reward_calculator.calculate_reward(True, turn_limit_result, self.game_state)
+            reward = self.reward_calculator.calculate_reward(True, {"action": "turn_limit_reached"}, self.game_state)
+            shaping = require_key(self.game_state, "_pending_zone_shaping")
+            self.game_state["_pending_zone_shaping"] = 0.0
+            reward += shaping
+            wasted = require_key(self.game_state, "_pending_reserves_wasted")
+            if wasted:
+                self.game_state["_pending_reserves_wasted"] = 0
+                reward += self.reward_calculator.wasted_reserve_penalty(wasted)
             reward += self.settle_pending_zone_intent_declaration(
                 int(require_key(self.config, "controlled_player"))
             )

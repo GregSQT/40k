@@ -2029,6 +2029,7 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     shooter_fp = entry_footprint(shooter_entry)
     shooter_player_int = require_present(int(unit["player"]) if unit["player"] is not None else None, "unit['player']")
     melee_range = get_engagement_zone(game_state)
+    shoots_as_monster_or_vehicle = _unit_shoots_as_monster_or_vehicle(game_state, unit)
 
     for enemy_id, enemy_entry in enemy_entries_on_battlefield(
         units_cache, shooter_player_int, exclude_id=shooter_id_str
@@ -2041,7 +2042,7 @@ def _unit_has_firable_target(game_state: Dict[str, Any], unit: Dict[str, Any],
         if distance > max_range:
             continue
         enemy_adjacent_to_shooter = unit_entries_within_engagement_zone(shooter_entry, enemy_entry, melee_range, game_state=game_state)
-        if is_adjacent and not enemy_adjacent_to_shooter and not _unit_shoots_as_monster_or_vehicle(game_state, unit):
+        if is_adjacent and not enemy_adjacent_to_shooter and not shoots_as_monster_or_vehicle:
             # CLOSE_QUARTERS : cibles adjacentes seulement — sauf MONSTER/VEHICLE (10.06, toutes cibles).
             continue
         if _friendly_engagement_blocks_ranged_shot(

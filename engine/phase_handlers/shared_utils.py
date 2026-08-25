@@ -2683,13 +2683,7 @@ def _select_reactive_unit_order(
         raise ValueError("ValueError[reactive_move.invalid_macro_order]: macro order cannot be empty")
 
     eligible_by_id = {str(require_key(unit, "id")): unit for unit in eligible_units}
-    ordered: List[Dict[str, Any]] = []
-    seen: Set[str] = set()
-    for unit_id in macro_order:
-        if unit_id in eligible_by_id and unit_id not in seen:
-            ordered.append(eligible_by_id[unit_id])
-            seen.add(unit_id)
-
+    ordered = [eligible_by_id[uid] for uid in dict.fromkeys(macro_order) if uid in eligible_by_id]
     return ordered
 
 
