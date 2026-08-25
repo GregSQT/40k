@@ -119,6 +119,7 @@ from engine.episode_schedule import episodes_per_env
 from engine.game_utils import (
     ONCE_CLAIMS_KEY, add_console_log, enter_phase, get_controlled_player, get_unit_by_id,
     once_claim, once_claimed, turn_limit_reached, get_effective_turn_limit,
+    require_unit_by_id,
 )
 
 # Import NEW extracted modules
@@ -3718,9 +3719,7 @@ class W40KEngine(gym.Env):
                     f"Invalid active_player_scope '{active_player_scope}' in choice_timing"
                 )
 
-            unit = self._get_unit_by_id(unit_id)
-            if unit is None:
-                continue
+            unit = require_unit_by_id(self.game_state, unit_id)
             if not is_unit_alive(unit_id, self.game_state):
                 continue
 
@@ -4324,8 +4323,9 @@ class W40KEngine(gym.Env):
         for squad_id, entry in entries_on_battlefield(units_cache):
             if int(require_key(entry, "player")) != int(player):
                 continue
-            unit = self._get_unit_by_id(squad_id)
-            if unit is None or not unit_has_waaagh_ability(self.game_state, unit):
+            # Preuve statique : squad_id vient d'entries_on_battlefield(units_cache) → unit_by_id.
+            unit = require_unit_by_id(self.game_state, str(squad_id))
+            if not unit_has_waaagh_ability(self.game_state, unit):
                 continue
             socle = socle_from_cache_entry(entry)
             # Socles des DEUX camps précalculés : `_ranged_squad_edge_distance` reconstruisait
