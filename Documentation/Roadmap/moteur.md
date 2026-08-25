@@ -58,7 +58,11 @@ Interruptions réactives pendant le tour adverse — cas le plus complexe du gym
 
 ## LoS 3D : tir à travers un mur depuis un étage {#los-mur-etage}
 
-**À cadrer — jamais ouvert.** Signalé le 2026-08-11 pendant le chantier socle vs mur : « on peut tirer à travers un mur quand on est à l'étage » relève de la LoS, pas du placement. Vraisemblablement le même câblage incomplet que celui qui suspend la Phase B (`combat_utils`/WASM) — à confronter au code avant d'ouvrir.
+**Cadré le 2026-08-25 — même root cause que la Phase B, pas un chantier indépendant.**
+
+Le tir est légitime côté backend : le tireur élevé ignore correctement les murs de sa propre ruine (`_walls_around_occupied_floor`). Mais le cône WASM ne le sait pas — il trace la LoS comme si le tireur était au sol, bloque sur le mur de la ruine, alors que la cible clignote (backend valide). Le joueur voit le cône bloqué, clique quand même, ça tire. Bug d'affichage, pas de règle.
+
+→ Traiter en même temps que la Phase B (`combat_utils`/WASM).
 
 ---
 
