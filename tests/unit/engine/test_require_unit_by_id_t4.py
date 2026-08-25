@@ -175,8 +175,7 @@ def _minimal_manual_wound_state(squad_in_unit_by_id: bool) -> tuple:
         "_unit_move_version": 0,
         "los_cache": {}, "hex_los_cache": {}, "_los_pair_cache": {},
         "gym_training_mode": True,
-        "config": {"waaagh": False},
-        "waaagh_player": None,
+        "waaagh_active": {1: False, 2: False},
     }
     pw = {
         "save_roll": 3, "is_critical": False, "devastating": False,
@@ -184,7 +183,7 @@ def _minimal_manual_wound_state(squad_in_unit_by_id: bool) -> tuple:
         "rec": {},
     }
     weapon_group = {
-        "ap": 0, "dmg_raw": 1, "target_sid": "2",
+        "ap": 0, "dmg_raw": 1, "dmg_bonus": 0, "target_sid": "2",
         "attacker_squad_id": "1",
     }
     alloc = {
@@ -213,11 +212,16 @@ def test_resolve_one_manual_wound_invul_squad_absent_de_unit_by_id():
 # 5. _resolve_one_manual_wound — batch["target_sid"] absent de unit_by_id (FNP)
 # ---------------------------------------------------------------------------
 
-def test_resolve_one_manual_wound_fnp_target_absent_de_unit_by_id(monkeypatch):
-    """batch['target_sid'] absent de unit_by_id → ConfigurationError (was: FNP ignoré)."""
-    # On force le save à échouer pour atteindre la branche FNP
-    gs, alloc, batch = _minimal_manual_wound_state(squad_in_unit_by_id=False)
-    with pytest.raises(ConfigurationError, match="2"):
+def test_resolve_one_manual_wound_fnp_target_absent_de_unit_by_id():
+    """batch['target_sid'] absent de unit_by_id → ConfigurationError au site FNP (10554).
+
+    '2' présent dans unit_by_id : le require invul (10507) passe.
+    save_roll=3 < save_th=4 : save échoue, on atteint la branche FNP.
+    batch['target_sid']='3' absent : le require FNP (10554) lève.
+    """
+    gs, alloc, batch = _minimal_manual_wound_state(squad_in_unit_by_id=True)
+    batch["target_sid"] = "3"  # '2' présent (invul passe), '3' absent (FNP lève)
+    with pytest.raises(ConfigurationError, match="3"):
         _resolve_one_manual_wound(gs, alloc, batch, SHOOT_CTX)
 
 
