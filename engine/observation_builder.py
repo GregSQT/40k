@@ -1247,9 +1247,7 @@ class ObservationBuilder:
         # `units_cache` (`build_squad_cache`) : une entrée absente est une incohérence de cache, pas
         # un cas de jeu. L'ancien `else {}` la transformait en escouade d'OC nul (§0.32 T-J).
         sq = require_key(squad_cache, squad_id)
-        unit = get_unit_by_id(game_state, str(squad_id))
-        if unit is None:
-            raise KeyError(f"Unit {squad_id} missing from game_state['units'] for observation")
+        unit = require_unit_by_id(game_state, str(squad_id))
         alive_mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
         if not alive_mids:
             # Une escouade présente dans units_cache SANS figurine vivante est une incohérence de
@@ -1586,9 +1584,7 @@ class ObservationBuilder:
         active_entry = units_cache[active_squad_id]
         active_sq = squad_cache[active_squad_id]
         active_player = int(active_entry["player"])
-        active_unit = get_unit_by_id(game_state, str(active_squad_id))
-        if active_unit is None:
-            raise KeyError(f"Unit {active_squad_id} missing from game_state['units'] for observation")
+        active_unit = require_unit_by_id(game_state, str(active_squad_id))
 
         from engine.spatial_relations import (
             get_engagement_zone,
@@ -1774,9 +1770,7 @@ class ObservationBuilder:
         # supplémentaire.
         on_battlefield: Dict[str, bool] = {}
         for sid in units_cache:
-            sid_unit = get_unit_by_id(game_state, str(sid))
-            if sid_unit is None:
-                raise KeyError(f"Unit {sid} missing from game_state['units'] for observation")
+            sid_unit = require_unit_by_id(game_state, str(sid))
             on_battlefield[str(sid)] = require_key(sid_unit, "deployed_on_turn") is not None
 
         # MEME predicat que le mapping de slots d'activation (`get_ally_slot_mapping`) : le
@@ -2046,11 +2040,7 @@ class ObservationBuilder:
         units_cache = require_key(game_state, "units_cache")
         active_entry = units_cache[active_squad_id]
 
-        unit = get_unit_by_id(game_state, str(active_squad_id))
-        if unit is None:
-            raise KeyError(
-                f"squad_grid_anchor: escouade {active_squad_id} absente de game_state['units']"
-            )
+        unit = require_unit_by_id(game_state, str(active_squad_id))
         if require_key(unit, "deployed_on_turn") is not None:
             return int(active_entry["col"]), int(active_entry["row"])
 

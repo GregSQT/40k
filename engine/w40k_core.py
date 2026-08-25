@@ -5268,8 +5268,8 @@ class W40KEngine(gym.Env):
                 del self.game_state["active_shooting_unit"]
             squad_shooting_unit_activation_start(self.game_state, squad_id)
             self.game_state["active_shooting_unit"] = squad_id
-            unit = get_unit_by_id(self.game_state, squad_id)
-            available_weapons = _squad_available_weapons(unit) if unit is not None else []
+            unit = require_unit_by_id(self.game_state, squad_id)
+            available_weapons = _squad_available_weapons(unit)
             # 10.02 etape 2 : types de tir JOUABLES par cette escouade. La liste (ordonnee :
             # defaut en tete) permet au front d afficher un selecteur quand plusieurs types
             # sont disponibles — cas standard = [normal] ; avec une arme INDIRECT FIRE et
@@ -5565,9 +5565,7 @@ class W40KEngine(gym.Env):
 
         if name == "squad_shoot_validate":
             squad_lock_shoot(self.game_state, squad_id)
-            unit = get_unit_by_id(self.game_state, squad_id)
-            if unit is None:
-                raise KeyError(f"Squad {squad_id} introuvable pour resolution tir manuel")
+            unit = require_unit_by_id(self.game_state, squad_id)
             attacker_player = int(require_key(unit, "player"))
             defender_player = 2 if attacker_player == 1 else 1
             if self._is_player_human(defender_player):
@@ -5623,9 +5621,7 @@ class W40KEngine(gym.Env):
         """end_activation differe : appele quand l allocation manuelle est terminee (done)."""
         from engine.phase_handlers.generic_handlers import end_activation
         from engine.phase_handlers.shared_utils import squad_shooting_type_clear
-        unit = get_unit_by_id(self.game_state, squad_id)
-        if unit is None:
-            raise KeyError(f"Squad {squad_id} introuvable pour end_activation apres allocation")
+        unit = require_unit_by_id(self.game_state, squad_id)
         squad_shooting_type_clear(self.game_state, squad_id)
         end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
         if self.game_state.get("active_shooting_unit") == squad_id:
@@ -5641,9 +5637,7 @@ class W40KEngine(gym.Env):
         """end_activation combat différé : appelé depuis le handler allocation_model quand
         l'allocation combat est terminée suite à une décision gym (fighting squad = attaquant)."""
         from engine.phase_handlers.generic_handlers import end_activation
-        unit = get_unit_by_id(self.game_state, squad_id)
-        if unit is None:
-            raise KeyError(f"Squad {squad_id} introuvable après combat (allocation_model)")
+        unit = require_unit_by_id(self.game_state, squad_id)
         end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
         end_result.pop("phase_complete", None)
         result = {
@@ -5674,9 +5668,7 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers.shared_utils import commit_move
         from engine.phase_handlers.charge_handlers import charge_record_outcome
 
-        unit = get_unit_by_id(self.game_state, squad_id)
-        if unit is None:
-            raise KeyError(f"Squad {squad_id} introuvable pour _finish_charge_after_placement")
+        unit = require_unit_by_id(self.game_state, squad_id)
 
         target_squad_id: str = ctx["target_squad_id"]
         target_squad_ids: List[str] = ctx["target_squad_ids"]
@@ -6814,9 +6806,7 @@ class W40KEngine(gym.Env):
             if success:
                 _dep_unit_id = semantic.get("unitId")  # get allowed
                 if _dep_unit_id is not None:
-                    _dep_unit = get_unit_by_id(self.game_state, str(_dep_unit_id))
-                    if _dep_unit is None:
-                        raise KeyError(f"Unit {_dep_unit_id} introuvable apres deploy_unit")
+                    _dep_unit = require_unit_by_id(self.game_state, str(_dep_unit_id))
                     _dep_col, _dep_row = require_unit_position(str(_dep_unit_id), self.game_state)
                     append_action_log(
                         self.game_state,
@@ -6855,9 +6845,7 @@ class W40KEngine(gym.Env):
             # plan y est reconstruit par `build_validated_deployment_plan`, déterministe, donc
             # identique à celui que le masque a validé. Deux implémentations — une par siège —
             # ont déjà produit ici un ingress sans fin d'activation côté PvP.
-            _ing_unit = get_unit_by_id(self.game_state, squad_id)
-            if _ing_unit is None:
-                raise KeyError(f"Unit {squad_id} introuvable pour ingress_move")
+            _ing_unit = require_unit_by_id(self.game_state, squad_id)
             success, result = movement_handlers.execute_action(
                 self.game_state, _ing_unit,
                 {
@@ -6903,9 +6891,7 @@ class W40KEngine(gym.Env):
                 "fight": ("FIGHT", "FIGHT"),
             }
             tracking, pool = phase_tracking.get(current_phase, ("MOVE", "MOVE"))
-            unit = get_unit_by_id(self.game_state, squad_id)
-            if unit is None:
-                raise KeyError(f"Squad {squad_id} introuvable pour squad_wait")
+            unit = require_unit_by_id(self.game_state, squad_id)
             if current_phase == "move":
                 self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)  # get allowed
                 # Miroir du pop du jet : la carte de cellules est propre a cette activation.
@@ -7023,9 +7009,7 @@ class W40KEngine(gym.Env):
             # pas transmis, aucun `[FLY]` n'atteignait step.log, et l'analyzer pathfindait au SOL
             # des escouades volantes — 1014 faux « au-delà du budget » mesurés sur un run de 600
             # épisodes. Les deux émetteurs PvP de `movement_handlers` le portaient déjà.
-            _move_unit_pre = get_unit_by_id(self.game_state, squad_id)
-            if _move_unit_pre is None:
-                raise KeyError(f"Squad {squad_id} introuvable avant déplacement")
+            _move_unit_pre = require_unit_by_id(self.game_state, squad_id)
             _move_is_fly = _fta(self.game_state, _move_unit_pre, str(squad_id))
 
             # Desperate Escape (09.07) : unité engagée + battle-shocked → jets hazard AVANT le move.
@@ -7081,12 +7065,7 @@ class W40KEngine(gym.Env):
                         # incoherente ». Miroir exact de `squad_wait` en phase move : Arg3/Arg4 =
                         # MOVE, et surtout PAS FLED — aucun fall back n'a eu lieu, l'unite ne doit
                         # donc pas porter les interdits 09.07 (tir/charge apres retraite).
-                        unit = get_unit_by_id(self.game_state, squad_id)
-                        if unit is None:
-                            raise KeyError(
-                                f"Squad {squad_id} introuvable pour end_activation apres "
-                                f"decalage d'ancre (Desperate Escape)"
-                            )
+                        unit = require_unit_by_id(self.game_state, squad_id)
                         end_result = end_activation(
                             self.game_state, unit, WAIT, 1, "MOVE", MOVE, 0
                         )
@@ -7148,9 +7127,7 @@ class W40KEngine(gym.Env):
                 )
             self.game_state.get("_squad_advance_rolls", {}).pop(squad_id, None)  # get allowed
             clear_squad_move_cell_map(self.game_state, squad_id)
-            unit = get_unit_by_id(self.game_state, squad_id)
-            if unit is None:
-                raise KeyError(f"Squad {squad_id} introuvable après déplacement")
+            unit = require_unit_by_id(self.game_state, squad_id)
             tracking = "FLED" if move_type == "fall_back" else "MOVE"
                 # V11 T6 — contrat de journalisation : `end_activation(..., ACTION, ...)` signifie
                 # « action DEJA journalisee par le handler » (generic_handlers ~L72-74). Or
@@ -7269,9 +7246,7 @@ class W40KEngine(gym.Env):
                 # choisi — meme cycle de vie que `units_shot`. Le finally garantit l effacement
                 # meme si une exception traverse le bare-except de execute_ai_turn (3462).
                 squad_shooting_type_clear(self.game_state, squad_id)
-            unit = get_unit_by_id(self.game_state, squad_id)
-            if unit is None:
-                raise KeyError(f"Squad {squad_id} introuvable pour end_activation après tir")
+            unit = require_unit_by_id(self.game_state, squad_id)
             end_result = end_activation(self.game_state, unit, ACTION, 1, SHOOTING, SHOOTING, 0)
             result = {
                 **end_result,
@@ -7344,9 +7319,7 @@ class W40KEngine(gym.Env):
             # `charge_record_outcome` retournait la distance a la DERNIERE cible, pas la primaire.
             charge_record_target_choice(self.game_state, squad_id, target_squad_id)
             plan = charge_build_valid_plan(self.game_state, squad_id, target_squad_ids, charge_roll)
-            unit = get_unit_by_id(self.game_state, squad_id)
-            if unit is None:
-                raise KeyError(f"Squad {squad_id} introuvable pour squad_charge")
+            unit = require_unit_by_id(self.game_state, squad_id)
             # V11 T6 : coords ancre AVANT commit (le plan deplace les figurines).
             _sq_uc = self.game_state.get("units_cache", {}).get(str(squad_id), {})  # get allowed
             _tgt_uc = self.game_state.get("units_cache", {}).get(str(target_squad_id), {})  # get allowed
@@ -7499,9 +7472,7 @@ class W40KEngine(gym.Env):
                     f"squad_fight: squad {squad_id} hors du pool de selection 12.04 {pool} "
                     f"(rupture masque/commit)"
                 )
-            unit = get_unit_by_id(self.game_state, squad_id)
-            if unit is None:
-                raise KeyError(f"Squad {squad_id} introuvable pour squad_fight")
+            unit = require_unit_by_id(self.game_state, squad_id)
 
             # Ordre du flux PvP (`_fight_v11_auto_step`) : marquer « selected to fight » AVANT de
             # resoudre. C est ce marquage qui interdit a une escouade de combattre deux fois dans
@@ -7521,9 +7492,7 @@ class W40KEngine(gym.Env):
                 _ov_plan = _fight_overrun_pile_in_plan(self.game_state, squad_id)
                 if _ov_plan is not None:
                     self._gym_commit_fight_move(self.game_state, squad_id, _ov_plan, "overrun_pile_in")
-                    unit = get_unit_by_id(self.game_state, squad_id)
-                    if unit is None:
-                        raise KeyError(f"Squad {squad_id} introuvable apres overrun pile-in")
+                    unit = require_unit_by_id(self.game_state, squad_id)
                     _did_overrun = True
 
             # Slot mapping calcule une seule fois : reutilise dans la boucle overrun ET dans la
@@ -7627,9 +7596,7 @@ class W40KEngine(gym.Env):
                 )
             fight_result = _fight_alloc["shoot_result"]
 
-            unit = get_unit_by_id(self.game_state, squad_id)
-            if unit is None:
-                raise KeyError(f"Squad {squad_id} introuvable après combat à vide")
+            unit = require_unit_by_id(self.game_state, squad_id)
             end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
             end_result.pop("phase_complete", None)
             result = {
@@ -7683,9 +7650,7 @@ class W40KEngine(gym.Env):
                 )
             fight_result = _fight_alloc["shoot_result"]
 
-            unit = get_unit_by_id(self.game_state, fw_squad_id)
-            if unit is None:
-                raise KeyError(f"Squad {fw_squad_id!r} introuvable après combat (weapon select)")
+            unit = require_unit_by_id(self.game_state, fw_squad_id)
             end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
             end_result.pop("phase_complete", None)
             result = {

@@ -2948,9 +2948,7 @@ def maybe_resolve_reactive_move(
             f"moved_unit_id={moved_unit_id_str} move_cause={move_cause} reaction_window_active=True"
         )
 
-    moved_unit = get_unit_by_id(game_state, moved_unit_id_str)
-    if moved_unit is None:
-        raise KeyError(f"Moved unit not found for reactive_move: {moved_unit_id_str}")
+    moved_unit = require_unit_by_id(game_state, moved_unit_id_str)
     moved_player = require_key(moved_unit, "player")
 
     units_cache = require_key(game_state, "units_cache")
@@ -2964,9 +2962,7 @@ def maybe_resolve_reactive_move(
 
     eligible_units: List[Dict[str, Any]] = []
     for unit_id in units_cache.keys():
-        unit = get_unit_by_id(game_state, unit_id)
-        if unit is None:
-            raise KeyError(f"Unit {unit_id} present in units_cache but missing from game_state['units']")
+        unit = require_unit_by_id(game_state, unit_id)
 
         unit_id_str = str(require_key(unit, "id"))
         if not is_unit_alive(unit_id_str, game_state):
@@ -5783,9 +5779,7 @@ def desperate_escape_pre_move(
     - ``is_alive`` : False si le hazard a détruit l'unité (le move ne doit alors PAS avoir lieu).
     - ``hazard_wounds`` : total de mortal wounds infligés par le hazard (0 si non-desperate).
     """
-    unit = get_unit_by_id(game_state, str(squad_id))
-    if unit is None:
-        raise KeyError(f"desperate_escape_pre_move: unit {squad_id} not found")
+    unit = require_unit_by_id(game_state, str(squad_id))
     is_desperate = bool(was_engaged) and bool(require_key(unit, "battle_shocked"))
     if not is_desperate:
         return False, True, 0
@@ -5801,9 +5795,7 @@ def desperate_escape_post_move(squad_id: str, game_state: Dict[str, Any]) -> Non
     Si l'unité n'est PAS battle-shocked, elle doit faire un battle-shock roll (01.07). No-op tant
     que le Desperate Escape n'est déclenché que pour des unités déjà battle-shocked (cf. 09.07 :
     Ordered Retreat pour non-shocked, Desperate Escape sinon)."""
-    unit = get_unit_by_id(game_state, str(squad_id))
-    if unit is None:
-        raise KeyError(f"desperate_escape_post_move: unit {squad_id} not found")
+    unit = require_unit_by_id(game_state, str(squad_id))
     if not require_key(unit, "battle_shocked"):
         roll_battle_shock(str(squad_id), game_state)
 
@@ -9779,9 +9771,7 @@ def unit_can_reroll_charge(game_state: Dict[str, Any], unit_id: str) -> bool:
     par `recompute_unit_rules_in_effect`. Un Captain attache confere donc bien son reroll_charge
     a l escouade, et le lui retire en mourant.
     """
-    unit = get_unit_by_id(game_state, str(unit_id))
-    if unit is None:
-        raise KeyError(f"unit_can_reroll_charge: unite {unit_id!r} introuvable")
+    unit = require_unit_by_id(game_state, str(unit_id))
     return _unit_has_rule_effect(unit, "reroll_charge")
 
 
@@ -9813,9 +9803,7 @@ def _unit_was_set_up_this_turn(game_state: Dict[str, Any], squad_id: str) -> boo
     Champ EXIGE (toute unite passe par create_unit / _build_enhanced_unit) : son absence est un
     bug de construction d unite, pas un cas metier -> erreur explicite.
     """
-    unit = get_unit_by_id(game_state, str(squad_id))
-    if unit is None:
-        raise KeyError(f"_unit_was_set_up_this_turn: unite {squad_id!r} introuvable")
+    unit = require_unit_by_id(game_state, str(squad_id))
     deployed_on_turn = require_key(unit, "deployed_on_turn")
     if deployed_on_turn is None:
         return False
@@ -9972,9 +9960,7 @@ def _heavy_unit_is_engaged(game_state: Dict[str, Any], squad_id: str) -> bool:
     seule definition d « engage » dans le moteur. Unite introuvable = bug -> erreur explicite.
     """
     from engine.phase_handlers.shooting_handlers import _is_adjacent_to_enemy_within_cc_range
-    unit = get_unit_by_id(game_state, str(squad_id))
-    if unit is None:
-        raise KeyError(f"_heavy_unit_is_engaged: unite {squad_id!r} introuvable")
+    unit = require_unit_by_id(game_state, str(squad_id))
     return bool(_is_adjacent_to_enemy_within_cc_range(game_state, unit))
 
 
@@ -11832,9 +11818,7 @@ def _fight_overrun_pile_in_plan(
     if not mids:
         return None
 
-    our_unit = get_unit_by_id(game_state, squad_id)
-    if our_unit is None:
-        raise KeyError(f"_fight_overrun_pile_in_plan: squad {squad_id} absent de gs['units']")
+    our_unit = require_unit_by_id(game_state, squad_id)
 
     # Cibles restreintes à ≤ 5" (12.03 BEFORE MOVING, unité non engagée).
     within_ids = pile_in_targets_within_range(game_state, our_unit)
@@ -13023,11 +13007,7 @@ def build_squad_move_cell_map(
         for _mid in _sm_fp.get(str(squad_id), [])  # get allowed
         if (_m := _mc_fp.get(str(_mid))) is not None
     ))
-    _unit_obj_fp = get_unit_by_id(game_state, squad_id)
-    if _unit_obj_fp is None:
-        # Un squad_id introuvable ne peut pas rendre une empreinte de cache VALIDE : retomber sur
-        # « non choque » fabriquerait une cle partagee par deux etats de jeu differents.
-        raise KeyError(f"build_squad_move_cell_map: unit {squad_id} not found")
+    _unit_obj_fp = require_unit_by_id(game_state, squad_id)
     _bshock = bool(require_key(_unit_obj_fp, "battle_shocked"))
     from engine.phase_handlers.movement_handlers import (
         take_to_the_skies_applies_to_phase as _tts_phase_fp,
@@ -13458,9 +13438,7 @@ def build_squad_action_mask(
             # source que le commit (`_process_squad_action` -> squad_fight), qui refuse une cible
             # hors pool. Un slot est ouvert ssi l'escouade qu'il designe y figure : le masque dit
             # donc exactement « qui je peux frapper », la ou il ne disait que « je peux frapper ».
-            unit = get_unit_by_id(game_state, squad_id)
-            if unit is None:
-                raise KeyError(f"Squad {squad_id} eligible au combat mais introuvable dans units")
+            unit = require_unit_by_id(game_state, squad_id)
             fight_targets = set(str(t) for t in _fight_build_valid_target_pool(game_state, unit))
             opened = 0
             for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT]):
@@ -13776,9 +13754,7 @@ def _coherency_alive(game_state: Dict[str, Any], squad_id: str) -> List[str]:
     if not alive:
         return []
     # Ordre IDENTIQUE a l'observation pour que COHERENCY_SLOT_BASE + i designe la ligne i.
-    unit = get_unit_by_id(game_state, squad_id)
-    if unit is None:
-        raise KeyError(f"_coherency_alive: {squad_id!r} absent de unit_by_id")
+    unit = require_unit_by_id(game_state, squad_id)
     squad_defence: tuple = (
         int(require_key(unit, "HP_MAX")),
         int(require_key(unit, "T")),

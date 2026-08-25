@@ -125,9 +125,7 @@ def _charge_budget_subhex(
     non-None par signature, pas par garde runtime.
     """
     if unit is None:
-        unit = get_unit_by_id(game_state, unit_id)
-    if unit is None:
-        raise KeyError(f"_charge_budget_subhex: unité {unit_id!r} introuvable")
+        unit = require_unit_by_id(game_state, unit_id)
     ish = int(game_state["inches_to_subhex"])
     budget = int(charge_roll_inches) * ish
     if _charge_fly_declared(game_state, unit, unit_id):
@@ -1087,9 +1085,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     units_advanced = require_key(game_state, "units_advanced")
 
     for unit_id, cache_entry in units_cache.items():
-        unit = get_unit_by_id(game_state, unit_id)
-        if not unit:
-            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        unit = require_unit_by_id(game_state, unit_id)
         unit_id_str = str(unit_id)
 
         # "unit.player === current_player?"

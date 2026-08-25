@@ -434,9 +434,7 @@ def _build_weapon_availability_enemy_precheck(
     # DANS l'énumérateur — il n'a plus à être recopié ici (c'était l'un des trois correctifs
     # par-site du chantier 04c, désormais couverts par la racine).
     for enemy_id, cache_entry in list(enemy_entries_on_battlefield(units_cache, unit_player)):
-        enemy = get_unit_by_id(game_state, enemy_id)
-        if enemy is None:
-            raise KeyError(f"Unit {enemy_id} missing from game_state['units']")
+        enemy = require_unit_by_id(game_state, enemy_id)
         _enemy_id_str = str(enemy_id)
         if not is_unit_alive(_enemy_id_str, game_state):
             continue
@@ -764,9 +762,7 @@ def shooting_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
     for unit_id, cache_entry in units_cache.items():
         if int(cache_entry["player"]) == int(current_player):
-            unit = get_unit_by_id(game_state, unit_id)
-            if unit is None:
-                raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+            unit = require_unit_by_id(game_state, unit_id)
             # Activation-scoped shooting state must be reset at phase start.
             # Pool/phase transitions are the source of truth (AI_TURN): no carry-over
             # of a previous unit activation context into a new shoot phase.

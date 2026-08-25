@@ -980,9 +980,7 @@ class ActionDecoder:
                     raise ValueError(
                         f"active_shooting_unit {active_unit_id} is not in shoot_activation_pool={pool_unit_ids_str}"
                     )
-                active_unit = get_unit_by_id(game_state, active_unit_id)
-                if active_unit is None:
-                    raise ValueError(f"active_shooting_unit {active_unit_id} not found in game_state units")
+                active_unit = require_unit_by_id(game_state, active_unit_id)
                 if not is_unit_alive(active_unit_id, game_state):
                     raise ValueError(f"active_shooting_unit {active_unit_id} is dead but still active")
                 active_cache_entry = require_key(game_state, "units_cache").get(active_unit_id)
@@ -1671,9 +1669,7 @@ class ActionDecoder:
         `_move_spatial_cache`). Aucun des trois consommateurs ne le fait — ils la mesurent,
         l'itèrent ou la vectorisent.
         """
-        unit = get_unit_by_id(game_state, str(unit_id))
-        if unit is None:
-            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        unit = require_unit_by_id(game_state, str(unit_id))
 
         fingerprint = self._deployment_valid_hexes_fingerprint(
             game_state, current_deployer, str(unit_id), unit
@@ -2566,9 +2562,7 @@ class ActionDecoder:
         même step partagent donc un seul calcul. Le tampon est le `deployed_snapshot_version` du
         cache de scoring — toute pose change l'état ET la liste des hexes valides.
         """
-        unit = get_unit_by_id(game_state, str(unit_id))
-        if unit is None:
-            raise KeyError(f"Unit {unit_id} missing from game_state['units']")
+        unit = require_unit_by_id(game_state, str(unit_id))
 
         snapshot_version = self._build_deployed_snapshot_version(
             self._build_deployed_snapshot(game_state)
