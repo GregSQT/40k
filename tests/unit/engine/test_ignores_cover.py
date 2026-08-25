@@ -14,6 +14,7 @@ import pytest
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import _cover_worsened_bs, _manual_roll_intent
 from engine.game_state import initial_faction_ability_state
+from tests.unit.engine.conftest import gs_with_units
 
 
 def _minimal_shoot_game_state(weapon_rules):
@@ -54,11 +55,6 @@ def _force_cover_true(monkeypatch, calls):
     monkeypatch.setattr(shooting_handlers, "compute_unit_los", fake_los)
 
 
-def _gs_with_units(shooter_sid: str = "1", target_sid: str = "2") -> dict:
-    """game_state minimal avec unit_by_id pour require_unit_by_id."""
-    return {"unit_by_id": {shooter_sid: {"id": shooter_sid}, target_sid: {"id": target_sid}}}
-
-
 def test_ignores_cover_bypasses_cover(monkeypatch):
     """Arme IGNORES_COVER : pas de malus (cover=False) MEME si la LoS donnerait cover=True,
     et le calcul de LoS n'est jamais atteint (court-circuit en tete)."""
@@ -79,7 +75,7 @@ def test_no_ignores_cover_applies_cover(monkeypatch):
     _force_cover_true(monkeypatch, calls)
     weapon = {"WEAPON_RULES": ["HEAVY"], "display_name": "Plain Gun"}
 
-    bs, cover = _cover_worsened_bs(_gs_with_units(), {"squad_id": "1"}, "2", 3, weapon)
+    bs, cover = _cover_worsened_bs(gs_with_units(), {"squad_id": "1"}, "2", 3, weapon)
 
     assert bs == 4, "worsen the BS characteristic by 1 (13.08)"
     assert cover is True
@@ -104,7 +100,7 @@ def test_ignores_cover_bs6_stays_touch_on_6(monkeypatch):
     _force_cover_true(monkeypatch, calls)
     weapon = {"WEAPON_RULES": [], "display_name": "Bad Shot"}
 
-    bs, cover = _cover_worsened_bs(_gs_with_units(), {"squad_id": "1"}, "2", 6, weapon)
+    bs, cover = _cover_worsened_bs(gs_with_units(), {"squad_id": "1"}, "2", 6, weapon)
 
     assert bs == 6 and cover is True
 

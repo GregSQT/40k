@@ -40,6 +40,11 @@ def _fight_v11_force_hex_engagement(request, monkeypatch):
         )
 
 
+def gs_with_units(shooter_sid: str = "1", target_sid: str = "2") -> dict:
+    """game_state minimal avec unit_by_id pour require_unit_by_id (tests de couvert/LoS)."""
+    return {"unit_by_id": {shooter_sid: {"id": shooter_sid}, target_sid: {"id": target_sid}}}
+
+
 @pytest.fixture
 def make_active_deployment_engine():
     """Fabrique un `W40KEngine` déjà `reset` sur un scénario à déploiement actif.

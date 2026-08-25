@@ -11,14 +11,11 @@ Discrimination : meme fixture sous couvert, avec et sans [PSYCHIC].
 """
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import _cover_worsened_bs
+from tests.unit.engine.conftest import gs_with_units
 
 
 def _sous_couvert(monkeypatch, cover=True):
     monkeypatch.setattr(shooting_handlers, "compute_unit_los", lambda gs, s, t: {"cover": cover})
-
-
-def _gs_with_units(shooter_sid: str = "1", target_sid: str = "2") -> dict:
-    return {"unit_by_id": {shooter_sid: {"id": shooter_sid}, target_sid: {"id": target_sid}}}
 
 
 def _weapon(rules):
@@ -29,21 +26,21 @@ def _weapon(rules):
 def test_psychic_ignore_le_malus_de_couvert(monkeypatch):
     """Arme PSYCHIC sous couvert : BS inchange, mais la cible garde le BENEFICE du couvert."""
     _sous_couvert(monkeypatch)
-    bs, cover = _cover_worsened_bs(_gs_with_units(), {"squad_id": "1"}, "2", 3, _weapon(["PSYCHIC"]))
+    bs, cover = _cover_worsened_bs(gs_with_units(), {"squad_id": "1"}, "2", 3, _weapon(["PSYCHIC"]))
     assert (bs, cover) == (3, True)
 
 
 def test_sans_psychic_le_couvert_degrade_le_bs(monkeypatch):
     """Contre-epreuve : la meme arme sans PSYCHIC subit le malus (BS 3 -> 4)."""
     _sous_couvert(monkeypatch)
-    bs, cover = _cover_worsened_bs(_gs_with_units(), {"squad_id": "1"}, "2", 3, _weapon([]))
+    bs, cover = _cover_worsened_bs(gs_with_units(), {"squad_id": "1"}, "2", 3, _weapon([]))
     assert (bs, cover) == (4, True)
 
 
 def test_psychic_hors_couvert_ne_change_rien(monkeypatch):
     """Sans couvert, PSYCHIC n a rien a ignorer."""
     _sous_couvert(monkeypatch, cover=False)
-    bs, cover = _cover_worsened_bs(_gs_with_units(), {"squad_id": "1"}, "2", 3, _weapon(["PSYCHIC"]))
+    bs, cover = _cover_worsened_bs(gs_with_units(), {"squad_id": "1"}, "2", 3, _weapon(["PSYCHIC"]))
     assert (bs, cover) == (3, False)
 
 
@@ -52,4 +49,4 @@ def test_ignores_cover_supprime_le_benefice_psychic_le_conserve(monkeypatch):
     PSYCHIC neutralise seulement le modificateur (cover reste True)."""
     _sous_couvert(monkeypatch)
     assert _cover_worsened_bs({}, {"squad_id": "1"}, "2", 3, _weapon(["IGNORES_COVER"])) == (3, False)
-    assert _cover_worsened_bs(_gs_with_units(), {"squad_id": "1"}, "2", 3, _weapon(["PSYCHIC"])) == (3, True)
+    assert _cover_worsened_bs(gs_with_units(), {"squad_id": "1"}, "2", 3, _weapon(["PSYCHIC"])) == (3, True)
