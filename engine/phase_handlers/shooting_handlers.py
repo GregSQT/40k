@@ -1036,9 +1036,7 @@ def preview_hidden_models_from_position(
     """
     unit_id_str = str(unit_id)
     empty = {"hidden_models": [], "hidden": False}
-    unit = _get_unit_by_id(game_state, unit_id_str)
-    if unit is None:
-        return empty
+    unit = require_unit_by_id(game_state, unit_id_str)
     # Gates niveau-unité, identiques à compute_hidden_statuses.
     if not is_unit_alive(unit_id_str, game_state) or not bool(unit.get("hideable")):
         return empty
@@ -1096,9 +1094,7 @@ def preview_hidden_models_from_model_positions(
     """
     unit_id_str = str(unit_id)
     empty = {"hidden_models": [], "hidden": False}
-    unit = _get_unit_by_id(game_state, unit_id_str)
-    if unit is None:
-        return empty
+    unit = require_unit_by_id(game_state, unit_id_str)
     if not is_unit_alive(unit_id_str, game_state) or not bool(unit.get("hideable")):
         return empty
     shot_ids = {str(x) for x in game_state.get("units_shot", set())}
@@ -1138,9 +1134,7 @@ def build_unit_los_cache(
 
     Returns: void (updates unit["los_cache"])
     """
-    unit = _get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return
+    unit = require_unit_by_id(game_state, unit_id)
 
     # Get unit position from cache (single source of truth)
     unit_pos = get_unit_position(unit, game_state)
@@ -1457,9 +1451,7 @@ def _preview_shoot_valid_targets(
     }
 
     unit_id_str = str(unit_id)
-    unit = _get_unit_by_id(game_state, unit_id_str)
-    if not unit:
-        return empty_preview
+    unit = require_unit_by_id(game_state, unit_id_str)
     if not game_state.get("units_cache"):
         return empty_preview
     if not ranged_weapons(unit):
@@ -1528,9 +1520,7 @@ def _preview_shoot_valid_targets(
     if "weapon_rule" not in gs:
         gs["weapon_rule"] = 1
 
-    u = _get_unit_by_id(gs, unit_id_str)
-    if not u:
-        return empty_preview
+    u = require_unit_by_id(gs, unit_id_str)
 
     u.pop("valid_target_pool", None)
     u.pop("_pool_from_cache", None)
@@ -2303,9 +2293,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     Clear valid_target_pool, clear TOTAL_ACTION_LOG, SHOOT_LEFT = selected weapon NB
     MULTIPLE_WEAPONS_IMPLEMENTATION.md: Use selected weapon NB
     """
-    unit = _get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return {"error": "unit_not_found", "unitId": unit_id}
+    unit = require_unit_by_id(game_state, unit_id)
     if game_state.get("debug_mode", False):
         from engine.game_utils import add_debug_file_log
         episode = game_state.get("episode_number", "?")
@@ -3002,9 +2990,7 @@ def shooting_build_valid_target_pool(
     """
     global _target_pool_cache
 
-    unit = _get_unit_by_id(game_state, unit_id)
-    if not unit:
-        return []
+    unit = require_unit_by_id(game_state, unit_id)
     if "weapon_rule" not in game_state:
         raise KeyError("game_state missing required 'weapon_rule' field")
     weapon_rule = game_state["weapon_rule"]
@@ -3241,10 +3227,7 @@ def shooting_build_valid_target_pool(
     _units_cache_prio = require_key(game_state, "units_cache")
     _shooter_socle_prio = socle_from_cache_entry(_units_cache_prio[unit_id_str])
     for target_id in filtered_targets:
-        target = _get_unit_by_id(game_state, target_id)
-        if not target:
-            target_priorities.append((target_id, (999, 0, 999)))
-            continue
+        target = require_unit_by_id(game_state, target_id)
 
         distance = ranged_edge_distance(
             _shooter_socle_prio,

@@ -13,7 +13,7 @@ from engine.macro_intents import (
 )
 from engine.combat_utils import expected_dice_value
 from engine.phase_handlers.shared_utils import is_unit_alive
-from engine.game_utils import get_unit_by_id, once_claim, once_claimed
+from engine.game_utils import get_unit_by_id, require_unit_by_id, once_claim, once_claimed
 from engine.game_state import (
     objective_hex_sets,
     primary_objective_points,
@@ -1301,8 +1301,11 @@ class RewardCalculator:
     def _calculate_on_objective_reward(self, game_state: Dict[str, Any], result: Dict[str, Any]) -> float:
         """Reward fired when a controlled-player unit lands on an uncontrolled objective hex during move."""
         controlled_player = int(require_key(self.config, "controlled_player"))
-        unit = get_unit_by_id(game_state, str(result.get("unitId", "")))
-        if not unit or int(require_key(unit, "player")) != controlled_player:
+        unit_id_raw = result.get("unitId")
+        if unit_id_raw is None:
+            return 0.0
+        unit = require_unit_by_id(game_state, str(unit_id_raw))
+        if int(require_key(unit, "player")) != controlled_player:
             return 0.0
         # Regle 01.07 : une unite battle-shocked a l OC de toutes ses figurines modifie a '-'
         # (02.02) — elle ne peut PAS prendre l objectif sur lequel elle se pose (14.02, cf.

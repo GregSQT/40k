@@ -23,6 +23,7 @@ from engine.combat_utils import (
     normalize_coordinates,
     calculate_hex_distance,
     get_unit_by_id,
+    require_unit_by_id,
     get_unit_coordinates,
     get_hex_neighbors,
     resolve_dice_value,
@@ -2314,11 +2315,8 @@ def _fight_pile_in_build_model_pool(
     if model is None:
         raise KeyError(f"_fight_pile_in_build_model_pool: model {model_id} not in models_cache")
     squad_id = str(model["squad_id"])
-    unit = get_unit_by_id(game_state, squad_id)
+    unit = require_unit_by_id(game_state, squad_id)
     empty: Dict[str, List[List[int]]] = {"closer": [], "engaged": []}
-    if not unit:
-        return empty
-
     ez = int(get_engagement_zone(game_state))
     metric = engagement_distance_metric(game_state)
     budget = 3 * int(require_key(game_state, "inches_to_subhex"))
@@ -2961,10 +2959,7 @@ def pile_in_autoplace_plan(
         _charge_model_socle,
     )
 
-    unit = get_unit_by_id(game_state, str(squad_id))
-    if not unit:
-        return {"plan": []}
-
+    unit = require_unit_by_id(game_state, str(squad_id))
     units_cache = require_key(game_state, "units_cache")
     focus_entry = units_cache.get(str(focus_target_id))
     if focus_entry is None:
@@ -3532,10 +3527,7 @@ def consolidate_autoplace_plan(
     """
     if mode not in ("offensive", "defensive"):
         raise ValueError(f"consolidate_autoplace_plan: mode invalide {mode!r}")
-    unit = get_unit_by_id(game_state, str(squad_id))
-    if not unit:
-        return {"plan": []}
-
+    unit = require_unit_by_id(game_state, str(squad_id))
     cons_mode, tier = _fight_v11_consolidation_targets(game_state, unit)
     if cons_mode == "ongoing":
         closest = _fight_pile_in_closest_tier_ids(game_state, unit, list(tier))
@@ -3709,11 +3701,8 @@ def _fight_consolidation_build_model_pool(
     if model is None:
         raise KeyError(f"_fight_consolidation_build_model_pool: model {model_id} not in models_cache")
     squad_id = str(model["squad_id"])
-    unit = get_unit_by_id(game_state, squad_id)
+    unit = require_unit_by_id(game_state, squad_id)
     empty: Dict[str, List[List[int]]] = {"closer": [], "engaged": []}
-    if not unit:
-        return empty
-
     # Ongoing : verrou base-contact (12.08 WHILE) — figurine collée à un ennemi = figée.
     if lock_base_contact and _fight_model_in_base_contact(game_state, str(model_id), model):
         return empty

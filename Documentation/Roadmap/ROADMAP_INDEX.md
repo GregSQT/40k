@@ -279,12 +279,15 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | moteur | ✅ fix(unit_registry) dice string rule_args WeirdBoy deadly_demise D3 (2026-08-25) — regex rule_args étendu aux dés supportés par resolve_dice_value | — | ⚡ |
 | moteur | ✅ refactor/simplify _get_unit_rule_arg helper shared_utils (2026-08-25) — délégation _get_required_rule_int_argument + simplification ; unique VALID_DICE_STRINGS + tests paramétrés | — | ⚡ |
 | training | ✅ feat(curriculum) --etape + --resume-from combinables (2026-08-25) — reprendre un run de curriculum planté sans perdre les steps ; erreur explicite si init='new' ; 14 tests verts | — | ⚡ |
+| moteur | ✅ 5 CR findings corrigés (2026-08-25) — reactive-order, advance_status, turn_limit-reward, monster-firable, los-T1 | — | ⚡ |
+| moteur+analyzer | ✅ replis unit_by_id T2 (2026-08-25) — 46 sites Forme B convertis en require_unit_by_id ; unit_is_on_battlefield supprimée (code mort) ; 13 verrous rouge/vert | [moteur.md#unit-by-id](moteur.md#unit-by-id) | ⚡ |
+| analyzer | ✅ corpus lot7 — 5 règles ABSENT_LOGGABLE câblées (TORRENT, LETHAL_HITS, BLAST, 20.03, charge_impact) (2026-08-25) | — | ⚡ |
 
 ### Bloqués par une décision utilisateur
 
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
-| moteur | Replis `unit_by_id` — T2–T3 (46 B + 63 D, T0+T1 livrés 2026-08-25) | [moteur.md#unit-by-id](moteur.md#unit-by-id) | 🚫 |
+| moteur | Replis `unit_by_id` — T3 (63 D restants, T0+T1+T2 livrés 2026-08-25) | [moteur.md#unit-by-id](moteur.md#unit-by-id) | 🚫 |
 | moteur | ✅ Endless Duty obstacles 1 et 3 soldés (2026-08-19) — board_ref "44x60x5" + terrain-endless-duty.json (objectif fixe centre 110,150), objective_pool/selection supprimés, ED_START_LEADER mis à jour, signet test 2+4 ouverts | [moteur.md#endless-duty](moteur.md#endless-duty) | 🚫 |
 | front | ~~Scission `bcKey` géométrie/contrôle~~ ✅ livré 2026-08-19 | [front.md](front.md) | ⚡ |
 
