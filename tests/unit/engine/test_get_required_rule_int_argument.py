@@ -1,9 +1,10 @@
 """Tests unitaires pour _get_required_rule_int_argument (shooting_handlers).
 
-Trois invariants :
-- effet absent → ValueError
-- valeur ≤ 0   → ValueError
-- valeur valide → retour correct
+Quatre invariants :
+- effet absent      → ValueError
+- valeur ≤ 0        → ValueError
+- type incorrect    → TypeError
+- valeur valide     → retour correct
 """
 
 import pytest
@@ -44,6 +45,17 @@ class TestGetRequiredRuleIntArgument:
     def test_value_negative_raises_value_error(self):
         unit = _make_unit({"distance": -3})
         with pytest.raises(ValueError, match="must be > 0"):
+            _get_required_rule_int_argument(unit, "move_after_shooting", "distance")
+
+    def test_string_value_raises_type_error(self):
+        unit = _make_unit({"distance": "6"})
+        with pytest.raises(TypeError):
+            _get_required_rule_int_argument(unit, "move_after_shooting", "distance")
+
+    def test_float_value_raises_type_error(self):
+        # float passerait le test raw <= 0 silencieusement sans le contrôle isinstance de _get_unit_rule_arg
+        unit = _make_unit({"distance": 6.0})
+        with pytest.raises(TypeError):
             _get_required_rule_int_argument(unit, "move_after_shooting", "distance")
 
     def test_valid_value_returns_correctly(self):
