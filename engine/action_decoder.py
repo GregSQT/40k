@@ -957,11 +957,12 @@ class ActionDecoder:
             # CRITICAL: Pool contains string IDs (normalized at creation in shooting_build_activation_pool)
             eligible = []
             pool_unit_ids_str = [str(uid) for uid in pool_unit_ids]
+            units_cache = require_key(game_state, "units_cache")
             for uid in pool_unit_ids:
                 uid_str = str(uid)
                 unit = require_unit_by_id(game_state, uid_str)
-                if is_unit_alive(str(unit["id"]), game_state):
-                    cache_entry = require_key(game_state, "units_cache").get(uid_str)
+                if is_unit_alive(uid_str, game_state):
+                    cache_entry = units_cache.get(uid_str)
                     if cache_entry is None:
                         raise KeyError(f"Unit {uid_str} missing from units_cache")
                     unit_player = require_key(cache_entry, "player")

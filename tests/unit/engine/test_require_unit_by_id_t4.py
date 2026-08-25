@@ -155,7 +155,6 @@ def test_squad_shoot_los_overview_absent_de_unit_by_id():
 
 def _minimal_manual_wound_state(squad_in_unit_by_id: bool) -> tuple:
     """Construit (game_state, alloc, batch) minimaux pour _resolve_one_manual_wound."""
-    from engine.game_state import effective_invul_save  # noqa: F401
     model = {
         "id": "T1", "squad_id": "2", "player": 1,
         "HP_CUR": 3, "HP_MAX": 3, "col": 5, "row": 5,
