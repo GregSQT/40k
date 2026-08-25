@@ -2476,7 +2476,7 @@ def _get_unit_rule_arg(
     unit_id = require_key(unit, "id")
     unit_rules = require_key(unit, "UNIT_RULES")
     for rule_entry in unit_rules:
-        if str(require_key(rule_entry, "ruleId")) != str(source_rule_id):
+        if str(require_key(rule_entry, "ruleId")) != source_rule_id:
             continue
         rule_args = rule_entry.get("rule_args")
         if not isinstance(rule_args, dict):
@@ -2484,12 +2484,12 @@ def _get_unit_rule_arg(
                 f"Rule '{source_rule_id}' on unit {unit_id} "
                 f"must define rule_args for {effect_rule_id}"
             )
-        raw = rule_args.get(arg_key)
-        if raw is None:
+        if arg_key not in rule_args:
             raise ValueError(
                 f"Rule '{source_rule_id}' argument '{arg_key}' is missing "
                 f"for unit {unit_id}"
             )
+        raw = rule_args[arg_key]
         if not isinstance(raw, accepted_types):
             type_names = "/".join(t.__name__ for t in accepted_types)
             raise TypeError(
@@ -2510,7 +2510,7 @@ def _get_feel_no_pain_threshold(unit: Dict[str, Any]) -> Optional[int]:
     Lève si la règle est présente mais mal configurée — pas de repli silencieux.
     """
     raw = _get_unit_rule_arg(unit, "feel_no_pain", "threshold", (int,))
-    if raw is None:
+    if raw is None:  # règle absente
         return None
     if not 2 <= raw <= 6:
         raise ValueError(
