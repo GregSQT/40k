@@ -119,6 +119,85 @@ def test_dd_d6_1_emet_entree_sans_allocation(monkeypatch):
     assert not allocated_calls, "aucune allocation sur d6 < 6"
 
 
+def _gs_multi(*, n_targets: int = 3):
+    """game_state avec n_targets unités cibles à courte portée (5 subhex chacune)."""
+    ish = 5
+    src_model = {
+        "col": 0, "row": 0, "level": 0, "player": 1, "squad_id": "SRC",
+        "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+    }
+    src_uc: dict = {
+        "col": 0, "row": 0, "player": 1, "HP_CUR": 1,
+        "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+        "occupied_hexes": {(0, 0)},
+        "occupied_hexes_by_model": {"SRC#0": (0, 0)},
+        "floor_height_by_model": {"SRC#0": 0.0},
+        "level_by_model": {"SRC#0": 0},
+        "MODEL_HEIGHT": 2.0,
+        "deadly_demise": 1,
+    }
+    units_cache: dict = {"SRC": src_uc}
+    squad_models: dict = {"SRC": ["SRC#0"]}
+    for i in range(n_targets):
+        uid = f"TGT{i}"
+        col = i + 1
+        units_cache[uid] = {
+            "col": col, "row": 0, "player": 2, "HP_CUR": 2,
+            "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0,
+            "occupied_hexes": {(col, 0)},
+            "occupied_hexes_by_model": {f"{uid}#0": (col, 0)},
+            "floor_height_by_model": {f"{uid}#0": 0.0},
+            "level_by_model": {f"{uid}#0": 0},
+            "MODEL_HEIGHT": 2.0,
+        }
+        squad_models[uid] = [f"{uid}#0"]
+    return {
+        "models_cache": {"SRC#0": src_model},
+        "squad_models": squad_models,
+        "units_cache": units_cache,
+        "action_logs": [],
+        "action_log_seq": 0,
+        "board_cols": 44, "board_rows": 44,
+        "wall_hexes": set(),
+        "_unit_move_version": 0,
+        "terrain_areas": [],
+        "inches_to_subhex": ish,
+        "config": {
+            "game_rules": {
+                "engagement_zone": 2,
+                "max_base_size_hex": 12,
+                "unit_model_cohesion_range": 2,
+                "unit_global_cohesion_range": 9,
+                "squad_min_neighbors": 1,
+                "cohesion_distance_mode": "euclidean",
+                "plunging_fire_height": 3,
+            },
+            "move": {
+                "can_move_through_enemy_engagement_zone": True,
+                "can_move_through_enemy_model": False,
+                "can_move_through_friendly_model": True,
+            },
+        },
+        "phase": "fight",
+        "turn": 1,
+    }
+
+
+def test_dd_d6_1_un_seul_log_meme_avec_plusieurs_cibles(monkeypatch):
+    """D6=1 avec 3 unites en portee -> exactement 1 log 'no effect', 0 jet de de par cible."""
+    monkeypatch.setattr(random, "randint", lambda a, b: 1)
+    import engine.phase_handlers.shared_utils as su
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda *a: None)
+    gs = _gs_multi(n_targets=3)
+    destroy_model(gs, "SRC#0", reason="combat")
+    logs = _dd_logs(gs)
+    assert len(logs) == 1, (
+        f"d6<6 doit produire exactement 1 log 'no effect', obtenu {len(logs)}: {logs}"
+    )
+    assert logs[0]["d6Roll"] == 1
+    assert logs[0]["deadlyDemiseWounds"] == 0
+
+
 def test_dd_absent_aucune_entree(monkeypatch):
     """Sans la cle deadly_demise en units_cache, aucune entree deadly_demise emise."""
     monkeypatch.setattr(random, "randint", lambda a, b: 6)

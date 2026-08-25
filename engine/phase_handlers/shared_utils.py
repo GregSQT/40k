@@ -3946,11 +3946,26 @@ def _apply_deadly_demise(
     import math
     d6_roll = random.randint(1, 6)
     units_cache = game_state.get("units_cache") or {}
-    ish = int(game_state.get("inches_to_subhex", 1))
+    ish = int(require_key(game_state, "inches_to_subhex"))
     radius = 6 * ish
     _is_hex = geometry_is_hex(game_state)
     turn = game_state.get("turn", 0)
     phase = game_state.get("phase", "")
+
+    if d6_roll < 6:
+        # Jet raté : un seul log "no effect", aucun jet de dé supplémentaire.
+        append_action_log(game_state, {
+            "type": "deadly_demise",
+            "unitId": str(squad_id),
+            "sourceUnitId": str(squad_id),
+            "d6Roll": d6_roll,
+            "deadlyDemiseWounds": 0,
+            "turn": turn,
+            "phase": phase,
+            "player": -1,
+            "deadlyDemiseDetails": [],
+        })
+        return
 
     def _dist(u_col: int, u_row: int) -> float:
         if _is_hex:
@@ -3973,7 +3988,7 @@ def _apply_deadly_demise(
             "unitId": str(uid),
             "sourceUnitId": str(squad_id),
             "d6Roll": d6_roll,
-            "deadlyDemiseWounds": x_wounds if d6_roll >= 6 else 0,
+            "deadlyDemiseWounds": x_wounds,
             "col": u_col,
             "row": u_row,
             "turn": turn,
@@ -3981,7 +3996,7 @@ def _apply_deadly_demise(
             "player": int(uentry.get("player", -1)),
             "deadlyDemiseDetails": _dd_details,
         })
-        if d6_roll >= 6 and x_wounds > 0:
+        if x_wounds > 0:
             allocate_mortal_wounds(game_state, str(uid), x_wounds, True, _dd_details)
 
 
@@ -10190,7 +10205,7 @@ def _manual_roll_intent(
                 # (a) tireur a une hauteur plancher connue (3D) : court-circuit si 0 (jamais >=
                 # plunging_fire_height qui est toujours > 0). require_key exige la config reelle.
                 _pf_threshold = float(
-                    require_key(require_key(game_state, "config")["game_rules"], "plunging_fire_height")
+                    require_key(require_key(require_key(game_state, "config"), "game_rules"), "plunging_fire_height")
                 )
                 if _pf_atk_h >= _pf_threshold:
                     bs = max(2, bs - 1)

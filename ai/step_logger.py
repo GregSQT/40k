@@ -1299,10 +1299,10 @@ class StepLogger:
             tgt_id = require_key(details, "unitId")
             d6 = require_key(details, "d6Roll")
             x_wounds = require_key(details, "deadlyDemiseWounds")
-            tgt_col = details.get("col", "?")
-            tgt_row = details.get("row", "?")
             if int(d6) < 6:
                 return f"Unit {src_id} DEADLY DEMISE Roll:{d6} → no effect [DEADLY DEMISE]"
+            tgt_col = details.get("col", "?")
+            tgt_row = details.get("row", "?")
             return (
                 f"Unit {src_id} DEADLY DEMISE Roll:{d6} → "
                 f"Unit {tgt_id}({tgt_col},{tgt_row}) SUFFERS {x_wounds} MW [DEADLY DEMISE]"
