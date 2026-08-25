@@ -86,6 +86,10 @@ Move réactif : une escouade hors cohérence ne pouvait pas faire ce mouvement (
 
 ## Replis `unit_by_id` {#unit-by-id}
 
-**T0 livré le 2026-08-19** — `require_unit_by_id(game_state, unit_id)` dans `engine/game_utils.py`, re-exportée depuis `combat_utils`. Signature canonique `(game_state, unit_id)` alignée sur le pattern moteur. Reste : T1 (10 sites Forme C), T2 (46 sites Forme B), T3 (64 sites Forme D) — ~4-5 sessions.
+**T0 livré le 2026-08-19** — `require_unit_by_id(game_state, unit_id)` dans `engine/game_utils.py`, re-exportée depuis `combat_utils`. Signature canonique `(game_state, unit_id)` alignée sur le pattern moteur.
+
+**T1 livré le 2026-08-25** — 9 sites Forme C convertis (commit dff4e8f0). `squad_fight_activation_order` supprimée (code mort, 0 appelant depuis fb7e83b6). 7 sites shooting_handlers + `_enqueue_rule_choice_candidates` w40k_core + résidu waaagh T2 → `require_unit_by_id`. Grep 0 résidu. 5 tests mutation-prouvés.
+
+Reste : T2 (46 sites Forme B), T3 (63 sites Forme D) — ~3-4 sessions.
 
 → `Documentation/Implémentation/A_faire/replis_unit_by_id_2026-08-05.md`
