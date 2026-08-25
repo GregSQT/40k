@@ -1837,8 +1837,8 @@ def update_los_cache_after_target_death(game_state: Dict[str, Any], dead_target_
     # Update active unit's los_cache (only active unit has los_cache)
     active_unit_id = game_state.get("active_shooting_unit")
     if active_unit_id:
-        active_unit = _get_unit_by_id(game_state, active_unit_id)
-        if active_unit and "los_cache" in active_unit:
+        active_unit = require_unit_by_id(game_state, active_unit_id)
+        if "los_cache" in active_unit:
             if dead_target_id_str in active_unit["los_cache"]:
                 del active_unit["los_cache"][dead_target_id_str]
 
@@ -1855,7 +1855,6 @@ def _remove_dead_unit_from_pools(game_state: Dict[str, Any], dead_unit_id: str) 
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
     from engine.game_utils import add_console_log, add_debug_log
-    unit = _get_unit_by_id(game_state, dead_unit_id)
     hp_cur = get_hp_from_cache(unit_id_str, game_state)  # Phase 2: from cache (None if dead)
     add_debug_log(game_state, f"[POOL DEBUG] E{episode} T{turn} _remove_dead_unit_from_pools: Removing dead Unit {unit_id_str} (HP_CUR={hp_cur})")
     
@@ -3091,8 +3090,8 @@ def shooting_build_valid_target_pool(
         # CRITICAL: Convert to int for consistent comparison (player can be int or string)
         current_player_int = int(current_player) if current_player is not None else None
         for target_id_str in cached_pool:  # Iterate over string IDs
-            target = _get_unit_by_id(game_state, target_id_str)
-            if target and is_unit_alive(target_id_str, game_state):
+            target = require_unit_by_id(game_state, target_id_str)
+            if is_unit_alive(target_id_str, game_state):
                 # CRITICAL: First check - target must not be friendly (fast check)
                 # This is the most important check - friendly units should NEVER be in the pool
                 # CRITICAL: Convert to int for consistent comparison (player can be int or string)
@@ -3210,15 +3209,14 @@ def shooting_build_valid_target_pool(
     current_player = unit["player"]
     filtered_targets = []
     for target_id in valid_target_pool:
-        target = _get_unit_by_id(game_state, target_id)
-        if target:
-            # Skip self
-            if str(target["id"]) == unit_id_str:
-                continue
-            # Skip friendly units
-            if target["player"] == current_player:
-                continue
-            filtered_targets.append(target_id)
+        target = require_unit_by_id(game_state, target_id)
+        # Skip self
+        if str(target["id"]) == unit_id_str:
+            continue
+        # Skip friendly units
+        if target["player"] == current_player:
+            continue
+        filtered_targets.append(target_id)
     
     # Use filtered targets for priority calculation
     # Portée tir en euclidien bord-à-bord (sélecteur `ranged`) : la distance de

@@ -9,7 +9,7 @@ import numpy as np
 from typing import Dict, List, Any, Optional, Sequence, Tuple
 from shared.data_validation import require_key
 from engine.combat_utils import calculate_hex_distance
-from engine.game_utils import get_unit_by_id
+from engine.game_utils import get_unit_by_id, require_unit_by_id
 # Projection géométrique des hexes (§0.32 T-I) : UNE seule géométrie dans l'observation — celle
 # de la grille égocentrique et des directions d'objectif. `hex_utils` est une feuille (math/numpy
 # seulement), l'import de module ne crée aucun cycle.
@@ -1204,8 +1204,8 @@ class ObservationBuilder:
         # que de l'unité, et cette boucle tourne jusqu'à `K_MODEL_TYPES` fois — pour 28 entités,
         # à CHAQUE step gym. Seul l'octroi lui-même reste dans la boucle, car il dépend de
         # l'invulnérable propre à chaque type (une 4+ existante est conservée).
-        entity_unit = get_unit_by_id(game_state, str(squad_id))
-        waaagh_invul = entity_unit is not None and waaagh_applies_to_unit(game_state, entity_unit)
+        entity_unit = require_unit_by_id(game_state, str(squad_id))
+        waaagh_invul = waaagh_applies_to_unit(game_state, entity_unit)
         for t_idx in range(min(self.K_MODEL_TYPES, len(types))):
             (role, hp_max, toughness, save, invul), count = types[t_idx]
             if waaagh_invul:

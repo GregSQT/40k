@@ -223,8 +223,8 @@ EOF
 |---|---|---|
 | **T0** ✅ | **Unifier les 4 implémentations en une** + écrire le jumeau bruyant `require_unit_by_id`. Décision de signature à l'utilisateur. Rien d'autre. | ½ session |
 | **T1** ✅ | Forme C, 9 sites traités (10 - 1 déjà Forme B). `squad_fight_activation_order` → supprimé (code mort, 0 appelant depuis fb7e83b6). 7 sites shooting_handlers + `_enqueue_rule_choice_candidates` w40k_core → `require_unit_by_id`. T2 bonus : résidu waaagh w40k_core:4326. Grep 0 résidu. Commit dff4e8f0 (2026-08-25). | 1 session |
-| **T2** | Forme B, 46 sites, en commençant par `unit_is_on_battlefield` / `unit_is_in_strategic_reserves` (deux réponses contradictoires sur le même id). `charge_handlers` (13) et `movement_handlers` (11) dominent : les prendre par fichier. | 2 sessions |
-| **T3** | Forme D, 64 appels. Lecture d'abord, classement ensuite. | 1 session |
+| **T2** ✅ | Forme B, 46 sites. `charge_handlers` (1), `fight_handlers` (2+5), `shared_utils`, `shooting_handlers` — tous convertis + `charge_preview_move_plan` bonus. Grep 0 résidu. Commit bf139af5 (2026-08-25). | 2 sessions |
+| **T3** ✅ | Forme D, 20 sites convertis dans 7 fichiers (action_decoder, charge_handlers, fight_handlers, shared_utils, shooting_handlers, observation_builder, w40k_core). `display_save_threshold_with_waaagh` et `_select_fight_weapon_indices_for_fig` non-Optionnalisées. Mutation ROUGE→VERT confirmée. Clôture : 74 gardes résiduelles = Forme B/C futures ou entrée externe légitime (scripts/_t3_closture_grep.py). Commit 43521169 (2026-08-25). | 1 session |
 
 Repère de coût mesuré : le lot `units_cache` a traité 47 sites sur 5 fichiers en une session, tests
 et mutations compris — mais avec l'outil déjà livré et un contrat déjà établi par un lot antérieur.

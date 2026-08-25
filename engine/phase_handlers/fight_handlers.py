@@ -2108,8 +2108,7 @@ def _fight_v11_resolve_attacks(
     tid = preferred_target_id if (preferred_target_id in targets) else _ai_select_fight_target(
         game_state, unit_id, targets
     )
-    if get_unit_by_id(game_state, tid) is None:
-        return [], None
+    require_unit_by_id(game_state, tid)  # désync d'index si absent
 
     # Déclaration per-figurine + allocation via le moteur groupes (jumeau du chemin
     # training w40k_core). Le hook FIGHT_CTX.on_unit_destroyed retire la cible morte des
@@ -2664,7 +2663,7 @@ def _fight_pile_in_preview_plan(
         _candidate_footprint_charge,
     )
 
-    unit = get_unit_by_id(game_state, str(squad_id))
+    unit = require_unit_by_id(game_state, str(squad_id))
     empty = {
         "per_model": {},
         "coherency_ok": False,
@@ -2672,8 +2671,6 @@ def _fight_pile_in_preview_plan(
         "kept_engagements": False,
         "can_validate": False,
     }
-    if not unit:
-        return empty
     models_cache = require_key(game_state, "models_cache")
 
     # Niveau porté par le plan (frontière de décodage), jamais déduit du models_cache : une fig
@@ -3944,7 +3941,7 @@ def _fight_consolidation_preview_plan(
         _candidate_footprint_charge,
     )
 
-    unit = get_unit_by_id(game_state, str(squad_id))
+    unit = require_unit_by_id(game_state, str(squad_id))
     empty = {
         "per_model": {},
         "coherency_ok": False,
@@ -3954,8 +3951,6 @@ def _fight_consolidation_preview_plan(
         "within_objective_range": False,
         "can_validate": False,
     }
-    if not unit:
-        return empty
     models_cache = require_key(game_state, "models_cache")
 
     # Niveau porté par le plan (frontière de décodage), jamais déduit du models_cache : une fig
@@ -4328,8 +4323,8 @@ def _fight_v11_consolidation_new_foes_state(game_state: Dict[str, Any]) -> Optio
     active = game_state.get("active_fight_unit")
     active = str(active) if active is not None else None
     if active is not None and active in remaining:
-        u = get_unit_by_id(game_state, active)
-        valid = _fight_build_valid_target_pool(game_state, u) if u else []
+        u = require_unit_by_id(game_state, active)
+        valid = _fight_build_valid_target_pool(game_state, u)
         game_state["valid_fight_targets"] = valid
         return {
             "phase": "fight", "fight_subphase": "consolidate",
@@ -4425,8 +4420,8 @@ def _fight_v11_consolidation_new_foes_step(
             _fight_v11_log(game_state, f"NEW FOE validate {active} : aucune declaration -> ignore")
             return _fight_v11_manual_state(game_state)
         target_id = str(intents[0]["target_unit_id"])
-        target_unit = get_unit_by_id(game_state, target_id)
-        defender_human = target_unit is not None and not _is_ai_controlled_fight_unit(game_state, target_unit)
+        target_unit = require_unit_by_id(game_state, target_id)
+        defender_human = not _is_ai_controlled_fight_unit(game_state, target_unit)
         if not defender_human:
             raise RuntimeError(
                 f"NEW FOE validate {active} : flux de declaration manuelle non supporte pour defenseur IA"
@@ -4450,8 +4445,8 @@ def _fight_v11_consolidation_new_foes_step(
         _fight_v11_register_selection(game_state, active)
         pref = str(action["targetId"]) if "targetId" in action else None
         target_id = pref if (pref is not None and pref in valid) else _ai_select_fight_target(game_state, active, valid)
-        target_unit = get_unit_by_id(game_state, target_id)
-        defender_human = target_unit is not None and not _is_ai_controlled_fight_unit(game_state, target_unit)
+        target_unit = require_unit_by_id(game_state, target_id)
+        defender_human = not _is_ai_controlled_fight_unit(game_state, target_unit)
         game_state["active_fight_unit"] = None
         _fight_v11_log(game_state, f"NEW FOE {active} -> cible {target_id} (clic={pref}) defenseur_humain={defender_human}")
         if defender_human:
@@ -4514,8 +4509,8 @@ def _fight_v11_manual_state(game_state: Dict[str, Any]) -> Tuple[bool, Dict[str,
             active = str(active) if active is not None else None
             if active is not None and active in pool:
                 # L'unité a été choisie (activate_unit) → on présente ses cibles à frapper.
-                u = get_unit_by_id(game_state, active)
-                valid_targets = _fight_build_valid_target_pool(game_state, u) if u else []
+                u = require_unit_by_id(game_state, active)
+                valid_targets = _fight_build_valid_target_pool(game_state, u)
                 game_state["valid_fight_targets"] = valid_targets
                 # Declarations offensives en cours (flux manuel par arme/figurine).
                 fight_decls = [
@@ -4632,9 +4627,7 @@ def _manual_roll_fight_intent(
     target_sid = str(intent["target_unit_id"])
     if target_sid not in game_state.get("squad_models", {}):  # get allowed
         return None
-    target = get_unit_by_id(game_state, target_sid)
-    if target is None:
-        return None
+    target = require_unit_by_id(game_state, target_sid)
     if target_sid not in targets_meta:
         _tgt_uc = require_key(game_state, "units_cache")[target_sid]
         _tgt_sc = require_key(game_state, "squad_cache")[target_sid]
@@ -4682,8 +4675,8 @@ def _manual_roll_fight_intent(
     # CARACTERISTIQUES de l arme (« add 1 to the Strength and Attacks characteristics of melee
     # weapons equipped by models from your army with this ability »), donc AVANT le seuil de
     # blessure et avant la taille du pool d attaques — pas au moment des relances.
-    attacker_unit = get_unit_by_id(game_state, str(attacker["squad_id"]))
-    _waaagh_bonus = 0 if attacker_unit is None else waaagh_melee_bonus(game_state, attacker_unit)
+    attacker_unit = require_unit_by_id(game_state, str(attacker["squad_id"]))
+    _waaagh_bonus = waaagh_melee_bonus(game_state, attacker_unit)
     strength += _waaagh_bonus
     n_attacks += _waaagh_bonus
     wth = _calculate_wound_target(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
@@ -4702,15 +4695,14 @@ def _manual_roll_fight_intent(
     weapon_name = weapon.get("display_name", weapon.get("NAME", weapon.get("name", "")))  # get allowed
     # Conditions de reroll (constantes pour cet intent : abilities UNITE, pas figurine).
     # `attacker_unit` est resolu plus haut (les caracteristiques d arme en dependent).
-    reroll_hit1 = attacker_unit is not None and _unit_has_rule(attacker_unit, "reroll_1_tohit_fight")
+    reroll_hit1 = _unit_has_rule(attacker_unit, "reroll_1_tohit_fight")
     # Oath of Moment : « You can re-roll the Hit roll » contre la cible designee. Jumeau EXACT
     # du site de tir (`shared_utils._manual_roll_intent`) — c est la moitie de la capacite qui
     # ne depend ni du detachement ni des sous-factions.
     reroll_hit_any = _is_oath_target
-    reroll_wound1 = attacker_unit is not None and _unit_has_rule(attacker_unit, "reroll_1_towound")
+    reroll_wound1 = _unit_has_rule(attacker_unit, "reroll_1_towound")
     reroll_wound_obj = (
-        attacker_unit is not None
-        and _unit_has_rule(attacker_unit, "reroll_towound_target_on_objective")
+        _unit_has_rule(attacker_unit, "reroll_towound_target_on_objective")
         and _is_unit_on_objective(target, game_state)
     )
     reroll_save1 = _unit_has_rule(target, "reroll_1_save_fight")
@@ -5271,8 +5263,8 @@ def _fight_v11_manual_step(
                 return _fight_v11_manual_state(game_state)
             # Defenseur : en PvP test les cibles appartiennent au joueur adverse (humain).
             target_id = str(intents[0]["target_unit_id"])
-            target_unit = get_unit_by_id(game_state, target_id)
-            defender_human = target_unit is not None and not _is_ai_controlled_fight_unit(game_state, target_unit)
+            target_unit = require_unit_by_id(game_state, target_id)
+            defender_human = not _is_ai_controlled_fight_unit(game_state, target_unit)
             if not defender_human:
                 raise RuntimeError(
                     f"FIGHT validate {sel} : flux de declaration manuelle non supporte "
@@ -5308,8 +5300,8 @@ def _fight_v11_manual_step(
             if valid:
                 pref = str(action["targetId"]) if "targetId" in action else None
                 target_id = pref if (pref is not None and pref in valid) else _ai_select_fight_target(game_state, sel, valid)
-                target_unit = get_unit_by_id(game_state, target_id)
-                defender_human = target_unit is not None and not _is_ai_controlled_fight_unit(game_state, target_unit)
+                target_unit = require_unit_by_id(game_state, target_id)
+                defender_human = not _is_ai_controlled_fight_unit(game_state, target_unit)
                 _fight_v11_log(game_state, f"FIGHT unit {sel} -> cible {target_id} (clic={pref}) defenseur_humain={defender_human}")
                 # L'unité a fini d'attaquer : on libère l'active (la prochaine sera re-choisie).
                 game_state["active_fight_unit"] = None

@@ -287,7 +287,7 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
-| moteur | Replis `unit_by_id` — T3 (63 D restants, T0+T1+T2 livrés 2026-08-25) | [moteur.md#unit-by-id](moteur.md#unit-by-id) | 🚫 |
+| moteur | ✅ Replis `unit_by_id` T3 (2026-08-25) — 20 sites Forme D convertis (shared_utils, fight/shoot/charge_handlers, obs_builder, w40k_core, action_decoder) ; display_save_threshold_with_waaagh + _select_fight_weapon_indices_for_fig non-Optionnalisées ; 6 verrous rouge/vert | [moteur.md#unit-by-id](moteur.md#unit-by-id) | ⚡ |
 | moteur | ✅ Endless Duty obstacles 1 et 3 soldés (2026-08-19) — board_ref "44x60x5" + terrain-endless-duty.json (objectif fixe centre 110,150), objective_pool/selection supprimés, ED_START_LEADER mis à jour, signet test 2+4 ouverts | [moteur.md#endless-duty](moteur.md#endless-duty) | 🚫 |
 | front | ~~Scission `bcKey` géométrie/contrôle~~ ✅ livré 2026-08-19 | [front.md](front.md) | ⚡ |
 

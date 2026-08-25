@@ -4883,7 +4883,7 @@ def charge_preview_move_plan(
         coherency_violation_flags,
     )
 
-    unit = get_unit_by_id(game_state, squad_id)
+    unit = require_unit_by_id(game_state, squad_id)
     empty = {
         "per_model": {},
         "can_validate": False,
@@ -4891,8 +4891,6 @@ def charge_preview_move_plan(
         "engaged_all": False,
         "missing_targets": [],
     }
-    if not unit:
-        return empty
     # 3b : entrée [mid,col,row] (sol) OU [mid,col,row,level]. Le niveau conditionne la reachability
     # (champ climb, coût de montée §13.06) et l'engagement 3D du synth au niveau réel de la destination.
     norm = [(str(e[0]), int(e[1]), int(e[2]), int(e[3])) for e in plan]

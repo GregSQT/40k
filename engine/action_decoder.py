@@ -915,8 +915,8 @@ class ActionDecoder:
                 raise KeyError(f"deployable_units missing player {current_deployer}")
             eligible = []
             for uid in deployable_list:
-                unit = get_unit_by_id(game_state, str(uid))
-                if unit and is_unit_alive(str(unit["id"]), game_state):
+                unit = require_unit_by_id(game_state, str(uid))
+                if is_unit_alive(str(unit["id"]), game_state):
                     eligible.append(unit)
             return eligible
         if current_phase == "command":
@@ -926,11 +926,11 @@ class ActionDecoder:
             if "move_activation_pool" not in game_state:
                 raise KeyError("game_state missing required 'move_activation_pool' field")
             pool_unit_ids = game_state["move_activation_pool"]
-            # CRITICAL: Filter out dead units (units can die between pool build and use)
+            # CRITICAL: Filter out dead units (is_unit_alive checks units_cache)
             eligible = []
             for uid in pool_unit_ids:
-                unit = get_unit_by_id(game_state, uid)
-                if unit and is_unit_alive(str(unit["id"]), game_state):
+                unit = require_unit_by_id(game_state, str(uid))
+                if is_unit_alive(str(unit["id"]), game_state):
                     eligible.append(unit)
             return eligible
         elif current_phase == "shoot":
@@ -1007,22 +1007,22 @@ class ActionDecoder:
             if "charge_activation_pool" not in game_state:
                 return []  # Phase not initialized yet
             pool_unit_ids = game_state["charge_activation_pool"]
-            # CRITICAL: Filter out dead units (units can die between pool build and use)
+            # CRITICAL: Filter out dead units (is_unit_alive checks units_cache)
             eligible = []
             for uid in pool_unit_ids:
-                unit = get_unit_by_id(game_state, uid)
-                if unit and is_unit_alive(str(unit["id"]), game_state):
+                unit = require_unit_by_id(game_state, str(uid))
+                if is_unit_alive(str(unit["id"]), game_state):
                     eligible.append(unit)
             return eligible
         elif current_phase == "fight":
             # V11 : éligibilité dérivée de la machine de sélection (non-mutante).
             from engine.phase_handlers.fight_handlers import fight_v11_current_pool
             pool_unit_ids = fight_v11_current_pool(game_state)
-            # CRITICAL: Filter out dead units (units can die between pool build and use)
+            # CRITICAL: Filter out dead units (is_unit_alive checks units_cache)
             eligible = []
             for uid in pool_unit_ids:
-                unit = get_unit_by_id(game_state, uid)
-                if unit and is_unit_alive(str(unit["id"]), game_state):
+                unit = require_unit_by_id(game_state, str(uid))
+                if is_unit_alive(str(unit["id"]), game_state):
                     eligible.append(unit)
             return eligible
         else:
