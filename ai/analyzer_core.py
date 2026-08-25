@@ -2007,6 +2007,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 'error': "ligne DESPERATE ESCAPE : format inattendu (attendu : "
                                          "'SUFFERS N Mortal Wounds [DESPERATE ESCAPE]')",
                             })
+                elif "[DEADLY DEMISE]" in action_desc:
+                        # §24.08 DEADLY DEMISE — blessures mortelles après destruction d'une figurine.
+                        # Une entrée par unité dans le rayon (d6 partagé) ; la ligne dit si c'est effectif
+                        # (`SUFFERS X MW`) ou nul (`no effect`). Compteur d'EXERCICE seul.
+                        action_type = 'deadly_demise'
+                        stats['deadly_demise_triggers'][player] += 1
+                        note_rule_usage(stats, "24.08", player)
                 elif attack_verb_present(action_desc):
                         action_type = 'fight'
                         handle_fight(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)

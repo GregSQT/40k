@@ -3887,6 +3887,60 @@ def update_model_hp(game_state: Dict[str, Any], model_id: str, new_hp_cur: int) 
         units_entry["HP_CUR"] = squad_total
 
 
+def _apply_deadly_demise(
+    game_state: Dict[str, Any], squad_id: str,
+    dead_col: int, dead_row: int, deadly_demise_value: Any,
+) -> None:
+    """Declenche la regle Deadly Demise §24.08 pour un modele venant d etre detruit.
+
+    Jet D6 UNIQUE par modele detruit. Sur 6 : chaque unite a ≤6" subit X blessures
+    mortelles (X = deadly_demise_value, int ou expression de de comme « D3 »). Si X est
+    aleatoire, jet SEPARE par unite (PDF : « roll separately for each unit within 6" »).
+    Resolution APRES l emergency disembark (PDF §24.08 exemple). Tag [DEADLY DEMISE].
+    """
+    import random
+    import math
+    d6_roll = random.randint(1, 6)
+    units_cache = game_state.get("units_cache") or {}
+    ish = int(game_state.get("inches_to_subhex", 1))
+    radius = 6 * ish
+    _is_hex = geometry_is_hex(game_state)
+    turn = game_state.get("turn", 0)
+    phase = game_state.get("phase", "")
+
+    def _dist(u_col: int, u_row: int) -> float:
+        if _is_hex:
+            return float(calculate_hex_distance(dead_col, dead_row, u_col, u_row))
+        return math.sqrt((dead_col - u_col) ** 2 + (dead_row - u_row) ** 2)
+
+    # Toutes les unites (y compris l unite source si elle a encore des figs) dans les 6".
+    for uid, uentry in list(units_cache.items()):
+        u_col = int(uentry.get("col", -1))
+        u_row = int(uentry.get("row", -1))
+        if u_col < 0 or u_row < 0:
+            continue
+        if _dist(u_col, u_row) > radius:
+            continue
+        # X peut etre aleatoire : resolu SEPAREMENT par unite.
+        x_wounds = int(resolve_dice_value(deadly_demise_value, f"deadly_demise_{squad_id}_{uid}"))
+        _dd_details: List[Dict[str, Any]] = []
+        append_action_log(game_state, {
+            "type": "deadly_demise",
+            "unitId": str(uid),
+            "sourceUnitId": str(squad_id),
+            "d6Roll": d6_roll,
+            "deadlyDemiseWounds": x_wounds if d6_roll >= 6 else 0,
+            "col": u_col,
+            "row": u_row,
+            "turn": turn,
+            "phase": phase,
+            "player": int(uentry.get("player", -1)),
+            "deadlyDemiseDetails": _dd_details,
+        })
+        if d6_roll >= 6 and x_wounds > 0:
+            allocate_mortal_wounds(game_state, str(uid), x_wounds, True, _dd_details)
+
+
 def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> None:
     """Retire une figurine du jeu et cascade les mises a jour.
 
@@ -3922,6 +3976,12 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     squad_id = str(model["squad_id"])
     old_col = int(model["col"])
     old_row = int(model["row"])
+    # §24.08 DEADLY DEMISE : lire la valeur de la capacite AVANT suppression (units_cache peut
+    # disparaitre si c est la derniere figurine). La cle est posee par le chantier 06 sur chaque
+    # unite concernee ; absente sur les unites ordinaires = regle inactive, aucun jet.
+    _deadly_demise_val = (
+        (game_state.get("units_cache") or {}).get(squad_id, {}).get("deadly_demise")
+    )
 
     # 1. Retire du models_cache.
     del game_state["models_cache"][model_id]
@@ -3981,6 +4041,11 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
         "col": old_col,
         "row": old_row,
     })
+
+    # §24.08 DEADLY DEMISE — APRES l emergency disembark (PDF §24.08 exemple), AVANT la cascade
+    # qui retire l escouade. La position (old_col, old_row) est celle du modele juste detruit.
+    if _deadly_demise_val is not None:
+        _apply_deadly_demise(game_state, squad_id, old_col, old_row, _deadly_demise_val)
 
     # 3/4/5. Cascade vers units_cache.
     units_entry = game_state.get("units_cache", {}).get(squad_id)  # get allowed
@@ -9372,6 +9437,8 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         "bs": g["bs"],
         "bsBase": g["bs_base"] if "bs_base" in g else None,
         "heavyApplied": bool(g["heavy_applied"]),
+        # §22.05 PLUNGING FIRE : absent en melee (False par construction via get).
+        "plungingFireApplied": bool(g.get("plunging_fire_applied", False)),
         "cover": bool(g["cover"]) if "cover" in g else False,
         # L26 — 10.06 volet MONSTER/VEHICLE : -1 au jet de touche hors arme CQ engagée.
         # Drapeau toujours présent dans le groupe (False en mêlée par construction).
@@ -10054,6 +10121,47 @@ def _manual_roll_intent(
         ):
             bs = max(2, bs - 1)
             _heavy_applied = True
+    # §22.05 PLUNGING FIRE : +1 BS si la cible contient ≥1 modele au sol ET
+    #   (a) le tireur est sur une section ≥ plunging_fire_height pouces OU
+    #   (b) le tireur a le keyword TOWERING et la cible est a ≤12".
+    # Semantique PAR MODELE ATTAQUANT ("Each time a model makes a ranged attack").
+    # Exception §23.03 AIRCRAFT hors perimetre (aucun AIRCRAFT dans le moteur).
+    _plunging_fire_applied = False
+    # floor_height_by_model vit dans units_cache (pas unit_by_id) ; absent en 2D => tout au sol.
+    _pf_uc = game_state.get("units_cache") or {}
+    _pf_tgt_uc = _pf_uc.get(str(target_sid))
+    if _pf_tgt_uc is not None:
+        _pf_tgt_floors = _pf_tgt_uc.get("floor_height_by_model")  # get allowed : absent en 2D
+        # Cible contient >=1 figurine au sol : floor_height == 0.0 ; en 2D tout modele est au sol.
+        _pf_any_tgt_ground = (
+            any(float(h) == 0.0 for h in _pf_tgt_floors.values())
+            if _pf_tgt_floors else True
+        )
+        if _pf_any_tgt_ground:
+            _pf_atk_sid = str(require_key(attacker, "squad_id"))
+            _pf_atk_uc = _pf_uc.get(_pf_atk_sid)
+            _pf_atk_floors = (_pf_atk_uc or {}).get("floor_height_by_model")  # get allowed
+            _pf_atk_h = float(_pf_atk_floors.get(attacker_mid, 0.0)) if _pf_atk_floors else 0.0
+            if _pf_atk_h > 0.0:
+                # (a) tireur a une hauteur plancher connue (3D) : court-circuit si 0 (jamais >=
+                # plunging_fire_height qui est toujours > 0). require_key exige la config reelle.
+                _pf_threshold = float(
+                    require_key(require_key(game_state, "config")["game_rules"], "plunging_fire_height")
+                )
+                if _pf_atk_h >= _pf_threshold:
+                    bs = max(2, bs - 1)
+                    _plunging_fire_applied = True
+            if not _plunging_fire_applied:
+                # (b) TOWERING : lazy import pour eviter le cycle (attack_sequence n importe pas shared_utils)
+                # Keywords dans unit_by_id, pas dans units_cache.
+                from engine.phase_handlers.attack_sequence import unit_keywords_upper as _kw_upper
+                _pf_atk_unit = get_unit_by_id(game_state, _pf_atk_sid)
+                if "TOWERING" in _kw_upper(_pf_atk_unit):
+                    _pf_ish = int(require_key(game_state, "inches_to_subhex"))
+                    _pf_dist = _ranged_squad_edge_distance(game_state, _pf_atk_sid, str(target_sid))
+                    if _pf_dist <= 12 * _pf_ish:
+                        bs = max(2, bs - 1)
+                        _plunging_fire_applied = True
     # 04.03 IDENTICAL ATTACKS : signature NORMALISEE des regles de l arme. Calculee ICI et non a
     # la construction du dict de retour, parce que les trois blocs 10.05 / 10.06 ci-dessous la
     # lisent : deux accesseurs distincts sur les memes regles peuvent diverger, un seul non.
@@ -10241,6 +10349,8 @@ def _manual_roll_intent(
         # de l arme, avec la meme primitive que le gate de tir. RNG n est exige que si l arme
         # porte la regle (seul cas ou la valeur est lue).
         "heavy_applied": _heavy_applied,
+        # §22.05 PLUNGING FIRE : tireur en hauteur (>=3") ou TOWERING a <=12" — +1 BS applique.
+        "plunging_fire_applied": _plunging_fire_applied,
         # 04.03 IDENTICAL ATTACKS, seconde moitie de la definition : « affected by the same
         # applicable abilities and rules ». Entre dans la cle de groupe.
         "weapon_rules": _weapon_rules,
@@ -10907,6 +11017,9 @@ def _build_manual_allocation(
                 # (constante sur toute l activation), donc jamais ambigue au sein d un groupe ;
                 # `bs` est de toute facon deja dans la cle de groupe.
                 "heavy_applied": bool(r["heavy_applied"]) if "heavy_applied" in r else False,
+                # §22.05 PLUNGING FIRE : modele attaquant en hauteur ou TOWERING — +1 BS applique.
+                # Constant sur le groupe (meme figurine attaquante dans la cle via bs).
+                "plunging_fire_applied": bool(r.get("plunging_fire_applied", False)),
                 # Arme + regles resolues vs la cible, gardees par REFERENCE : le log construit
                 # ses tokens a l emission (`weapon_rule_log_tokens`), une fois par groupe. Les
                 # deux sont constants sur le groupe — la signature de regles et la cible sont
