@@ -958,10 +958,9 @@ class ActionDecoder:
             eligible = []
             pool_unit_ids_str = [str(uid) for uid in pool_unit_ids]
             for uid in pool_unit_ids:
-                # CRITICAL: Normalize uid to string for get_unit_by_id (which normalizes both sides)
                 uid_str = str(uid)
-                unit = get_unit_by_id(game_state, uid_str)
-                if unit and is_unit_alive(str(unit["id"]), game_state):
+                unit = require_unit_by_id(game_state, uid_str)
+                if is_unit_alive(str(unit["id"]), game_state):
                     cache_entry = require_key(game_state, "units_cache").get(uid_str)
                     if cache_entry is None:
                         raise KeyError(f"Unit {uid_str} missing from units_cache")
