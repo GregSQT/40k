@@ -2458,17 +2458,22 @@ def get_source_unit_rule_display_name_for_effect(
     return _get_source_unit_rule_display_name_for_effect(unit, effect_rule_id)
 
 
-def _get_feel_no_pain_threshold(unit: Dict[str, Any]) -> Optional[int]:
-    """Retourne le seuil X du Feel No Pain X+ de l'unité, ou None si absente (24.12).
+def _get_unit_rule_arg(
+    unit: Dict[str, Any],
+    effect_rule_id: str,
+    arg_key: str,
+    accepted_types: tuple,
+) -> Optional[Any]:
+    """Extraire rule_args[arg_key] depuis l'entrée UNIT_RULES portant effect_rule_id.
 
-    Le seuil est stocké dans UNIT_RULES[i].rule_args.threshold (entier 2-6).
-    Lève si la règle est présente mais mal configurée — pas de repli silencieux.
+    Retourne None si l'effet est absent de l'unité.
+    Lève ValueError si rule_args est manquant ou si arg_key est absent.
+    Lève TypeError si le type de la valeur n'est pas dans accepted_types.
     """
-    if not _unit_has_rule_effect(unit, "feel_no_pain"):
-        return None
-    source_rule_id = get_source_unit_rule_id_for_effect(unit, "feel_no_pain")
+    source_rule_id = get_source_unit_rule_id_for_effect(unit, effect_rule_id)
     if source_rule_id is None:
         return None
+    unit_id = require_key(unit, "id")
     unit_rules = require_key(unit, "UNIT_RULES")
     for rule_entry in unit_rules:
         if str(require_key(rule_entry, "ruleId")) != str(source_rule_id):
@@ -2476,25 +2481,43 @@ def _get_feel_no_pain_threshold(unit: Dict[str, Any]) -> Optional[int]:
         rule_args = rule_entry.get("rule_args")
         if not isinstance(rule_args, dict):
             raise ValueError(
-                f"Rule '{source_rule_id}' on unit {require_key(unit, 'id')} "
-                f"must define rule_args for feel_no_pain"
+                f"Rule '{source_rule_id}' on unit {unit_id} "
+                f"must define rule_args for {effect_rule_id}"
             )
-        raw = rule_args.get("threshold")
-        if not isinstance(raw, int):
-            raise TypeError(
-                f"Rule '{source_rule_id}' argument 'threshold' must be int, "
-                f"got {type(raw).__name__} for unit {require_key(unit, 'id')}"
-            )
-        if not 2 <= raw <= 6:
+        raw = rule_args.get(arg_key)
+        if raw is None:
             raise ValueError(
-                f"Feel No Pain threshold must be 2-6, got {raw} "
-                f"for unit {require_key(unit, 'id')}"
+                f"Rule '{source_rule_id}' argument '{arg_key}' is missing "
+                f"for unit {unit_id}"
+            )
+        if not isinstance(raw, accepted_types):
+            type_names = "/".join(t.__name__ for t in accepted_types)
+            raise TypeError(
+                f"Rule '{source_rule_id}' argument '{arg_key}' must be {type_names}, "
+                f"got {type(raw).__name__} for unit {unit_id}"
             )
         return raw
     raise ValueError(
         f"Source rule '{source_rule_id}' not found in UNIT_RULES "
-        f"for unit {require_key(unit, 'id')}"
+        f"for unit {unit_id}"
     )
+
+
+def _get_feel_no_pain_threshold(unit: Dict[str, Any]) -> Optional[int]:
+    """Retourne le seuil X du Feel No Pain X+ de l'unité, ou None si absente (24.12).
+
+    Le seuil est stocké dans UNIT_RULES[i].rule_args.threshold (entier 2-6).
+    Lève si la règle est présente mais mal configurée — pas de repli silencieux.
+    """
+    raw = _get_unit_rule_arg(unit, "feel_no_pain", "threshold", (int,))
+    if raw is None:
+        return None
+    if not 2 <= raw <= 6:
+        raise ValueError(
+            f"Feel No Pain threshold must be 2-6, got {raw} "
+            f"for unit {require_key(unit, 'id')}"
+        )
+    return raw
 
 
 def _roll_feel_no_pain(n_wounds: int, threshold: int) -> int:
@@ -2516,36 +2539,7 @@ def _get_deadly_demise_value(unit: Dict[str, Any]) -> Optional[Any]:
     Lue depuis UNIT_RULES[i].rule_args.value (24.08). Lève si la règle est présente
     mais mal configurée — aucun repli silencieux.
     """
-    source_rule_id = get_source_unit_rule_id_for_effect(unit, "deadly_demise")
-    if source_rule_id is None:
-        return None
-    unit_id = require_key(unit, "id")
-    unit_rules = require_key(unit, "UNIT_RULES")
-    for rule_entry in unit_rules:
-        if str(require_key(rule_entry, "ruleId")) != str(source_rule_id):
-            continue
-        rule_args = rule_entry.get("rule_args")
-        if not isinstance(rule_args, dict):
-            raise ValueError(
-                f"Rule '{source_rule_id}' on unit {unit_id} "
-                f"must define rule_args for deadly_demise"
-            )
-        raw = rule_args.get("value")
-        if raw is None:
-            raise ValueError(
-                f"Rule '{source_rule_id}' argument 'value' is missing "
-                f"for unit {unit_id}"
-            )
-        if not isinstance(raw, (int, str)):
-            raise TypeError(
-                f"Rule '{source_rule_id}' argument 'value' must be int or str, "
-                f"got {type(raw).__name__} for unit {unit_id}"
-            )
-        return raw
-    raise ValueError(
-        f"Source rule '{source_rule_id}' not found in UNIT_RULES "
-        f"for unit {unit_id}"
-    )
+    return _get_unit_rule_arg(unit, "deadly_demise", "value", (int, str))
 
 
 #: Rayon de declenchement de `reactive_move`, EN POUCES (cf. config/unit_rules.json).
