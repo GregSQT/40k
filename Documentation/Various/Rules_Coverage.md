@@ -37,6 +37,7 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Coherency removal at end of turn | 03.03 | ✅ |
 | Engagement zone (2" horiz / 5" vert) | 03.04 | ✅ |
 | FLY keyword: −2", bypass obstacles | 21.03 | ✅ |
+| Move distance validation (commit checks straight-line, not path length) | 03.01 | ⚠️ BFS pool is geodesic so no impact in normal play; only an API call bypassing the pool could exploit this |
 | Hover (no −2" penalty) | 24.17 | ❌ |
 | Surge Move | 21.02 | ❌ |
 | Multi-level terrain movement (keywords) | 13.06 | ✅ |
@@ -73,7 +74,7 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Gone to Ground (−3" detection range) | 13-5 | ✅ |
 | Obscuring terrain (no LoS through) | 13.10 | ✅ |
 | Solid terrain (no LoS through closed spaces ≤3") | 13.11 | ✅ |
-| Plunging Fire (+1 BS from height ≥3") | 22.05 | ❌ |
+| Plunging Fire (+1 BS from height ≥3") | 22.05 | ✅ |
 | Overwatch / Snap Fire (hit on 6+ only) | 15.08–15.09 | ❌ |
 | Indirect Fire activation pool (debug mode bug) | 10.07 | ⚠️ May wrongly exclude INDIRECT-only units |
 | Stealth (attacker always treats target as in cover) | 24.33 | ✅ |
@@ -143,7 +144,7 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Character allocation priority (non-char first) | 05.03 | ✅ |
 | Excess damage on destroyed unit lost | 05.04 | ✅ |
 | Feel No Pain X+ | 24.12 | ✅ |
-| Deadly Demise X (explosion on destruction) | 24.08 | ❌ |
+| Deadly Demise X (explosion on destruction) | 24.08 | ✅ |
 | Revived models (full wounds, back to starting strength) | PDF 25 | ❌ |
 
 ---
@@ -192,7 +193,7 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | Hover | 24.17 | ❌ |
 | Super-Heavy Walker | 24.35 | ❌ |
 | Firing Deck X | 24.14 | ❌ (requires transports) |
-| Deadly Demise X | 24.08 | ❌ |
+| Deadly Demise X | 24.08 | ✅ |
 | ONE SHOT | 24.26 | ❌ |
 
 ---
@@ -262,7 +263,7 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 | MONSTER/VEHICLE engaged: targetable, −1 to hit | 17.03 | ✅ |
 | FRAME measurement (from model, not base) | 17.02 | ❌ |
 | Transports (all rules) | PDF 18 | ❌ |
-| Plunging Fire (+1 BS from elevated position) | 22.05 | ❌ |
+| Plunging Fire (+1 BS from elevated position) | 22.05 | ✅ |
 | Aura Abilities | 22.01 | ⚠️ Waaagh!/Oath only |
 | Psychic Abilities as category | 22.03 | ⚠️ PSYCHIC weapon rule only |
 | Aircraft (all rules) | PDF 23 | ❌ |
@@ -385,7 +386,7 @@ Seules les règles applicables à ces deux rosters sont listées. Statut issu du
 | Stealth | 24.33 | ✅ |
 | COMBI_WEAPON (NobKombi) | — | ✅ |
 | PSYCHIC (Librarian, WeirdBoy) | 24.29 | ✅ |
-| Plunging Fire (+1 BS depuis hauteur ≥3") | 22.05 | ❌ |
+| Plunging Fire (+1 BS depuis hauteur ≥3") | 22.05 | ✅ |
 
 **Charge Phase**
 
