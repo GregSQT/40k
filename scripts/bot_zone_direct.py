@@ -520,7 +520,7 @@ def main() -> None:
     if args.json_out is not None:
         _dest_parent = os.path.dirname(os.path.abspath(args.json_out))
         if not os.path.isdir(_dest_parent):
-            parser.error(f"Le dossier destination n'existe pas : {_dest_parent}")
+            raise FileNotFoundError(f"Le dossier destination n'existe pas : {_dest_parent}")
     model_path = _require_reference_model(args.model)
     _require_board_path()
 
