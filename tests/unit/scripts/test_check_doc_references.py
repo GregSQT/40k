@@ -1029,9 +1029,9 @@ def _impl_enforced_name() -> str:
     Utiliser un nom découvert dynamiquement évite de coder en dur un fichier qui pourrait être
     renommé — ce qui rendrait le test vert mais vacueux (la mutation ne serait jamais atteinte).
     """
-    enforced_impl = cdr.ANCHOR_ENFORCED - cdr.DEFAULT_DOC_NAMES
+    enforced_impl = cdr._get_anchor_enforced() - cdr.DEFAULT_DOC_NAMES
     assert enforced_impl, (
-        "Aucun doc Implémentation/ dans ANCHOR_ENFORCED — _impl_doc_basenames() est silencieux"
+        "Aucun doc Implémentation/ dans _get_anchor_enforced() — _impl_doc_basenames() est silencieux"
     )
     return sorted(enforced_impl)[0]
 
