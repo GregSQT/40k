@@ -317,10 +317,14 @@ LONG_PROFILE_EPISODES = {"x1_long": 50_000, "x5_long": 200_000}
 REFERENCE_BOT_EVAL_FINAL = {"x1": 10, "x5_new": 100}
 
 #: `bot_eval_final` ATTENDU de chaque profil `_long`. Épinglé (pas lu depuis le JSON) pour la
-#: même raison que ci-dessus. x1_long : 300, CHRONOMÉTRÉ le 2026-08-16 (2,76 s/ép. à 12 workers
-#: sur 8 cœurs, 3 répétitions, dispersion < 2 %) → 1 h 23 pour l'éval finale. L'erreur-type
-#: d'un win-rate autour de 0,5 vaut 0,5/√n : 2,9 points à 300. Le détail est dans
+#: même raison que ci-dessus. x1_long : 300 épisodes PAR BOT, chronométré le 2026-08-16
+#: (2,76 s/ép. à 12 workers sur 8 cœurs, 3 répétitions, dispersion < 2 %). L'erreur-type d'un
+#: win-rate autour de 0,5 vaut 0,5/√n : 2,9 points à 300. Le détail est dans
 #: `bot_eval_final_normal` du JSON, seule source.
+#: ⚠️ Le « 1 h 23 » que portait ce commentaire est corrigé le 2026-08-27 : il valait 6 × 300,
+#: alors que 10 bots étaient alors joués (cf. `EXPECTED_BOT_EVAL_COUNT`), soit 3000 épisodes et
+#: ~2 h 18. Depuis la suppression des 4 bots à poids nul, 6 × 300 = 1800 épisodes et le ~1 h 23
+#: redevient exact — mais il DÉPEND du nombre de bots, jamais du seul `bot_eval_final`.
 LONG_PROFILE_BOT_EVAL_FINAL = {"x1_long": 300, "x5_long": 600}
 
 #: `bot_eval_intermediate` ATTENDU de chaque profil `_long`. x1_long : 30 (passé de 100 à 30
@@ -346,6 +350,59 @@ REFERENCE_EVAL_EPISODES: dict[str, int] = {"x1": 50, "x5_new": 10}
 #: gate n'y a pas de sens. x1_long active le gate (save_best_robust=true) ; x5_long ne le fait pas
 #: encore — ce n'est pas un oubli, c'est une décision à date, et cette table en est le verrou.
 LONG_PROFILE_MODEL_GATING_ENABLED: dict[str, bool] = {"x1_long": True, "x5_long": False}
+
+#: Nombre de bots RÉELLEMENT joués à chaque évaluation, par profil. C'est `len(bot_eval_weights)`
+#: et RIEN D'AUTRE : `evaluate_against_bots` construit ses adversaires par
+#: `active_bot_names = tuple(eval_weights.keys())` (`ai/bot_evaluation.py`), donc un bot à poids
+#: `0.0` est joué comme les autres — le poids ne pèse que sur l'agrégat `combined`.
+#:
+#: ÉPINGLÉ parce que l'absence de ce verrou a laissé vivre un écart de 67 % sur le budget
+#: d'évaluation. Jusqu'au 2026-08-26 (commit `8bb4e42e`) le dictionnaire portait 10 clés, dont 4 à
+#: poids nul, pendant que les notes `*_normal` du JSON chiffraient le coût sur 6 bots : l'éval
+#: finale de `x1_long` était annoncée à 6 × 300 = 1800 épisodes et en jouait 10 × 300 = 3000,
+#: soit ~2 h 18 au lieu des ~1 h 23 annoncés. Rien n'était rouge, parce que rien ne confrontait
+#: les deux. Les 4 bots à poids nul ont été supprimés (`tactical` et les trois `reference_*`,
+#: saturés à 1.00 — cf. `evaluate_stage_gate` dans `ai/curriculum.py`).
+#:
+#: TOUCHER À CETTE TABLE OBLIGE À METTRE À JOUR, DANS LA MÊME LIVRAISON, les décompositions
+#: écrites dans les notes `bot_eval_n_workers_normal`, `bot_eval_freq_normal` et
+#: `bot_eval_final_normal` du JSON : elles multiplient toutes ce nombre par un budget par bot.
+EXPECTED_BOT_EVAL_COUNT: dict[str, int] = {
+    "x1": 6,
+    "x1_long": 6,
+    "x1_debug": 6,
+    "x5_new": 6,
+    "x5_long": 6,
+    "x5_debug": 6,
+}
+
+
+@pytest.mark.parametrize("profile_name", sorted(EXPECTED_BOT_EVAL_COUNT))
+def test_bot_eval_bot_count_is_pinned(profile_name: str) -> None:
+    """Le nombre de bots joués par évaluation est épinglé : il FIXE le budget d'évaluation.
+
+    Verrou du budget, pas du panel : ajouter ou retirer une clé de `bot_eval_weights` multiplie
+    ou divise le coût de CHAQUE évaluation — intermédiaire comme finale, puisque les deux passent
+    par `evaluate_against_bots` et n'y diffèrent que par `n_episodes`. Un ajout silencieux
+    rallongerait un run de plusieurs heures sans qu'aucune autre assertion ne bouge.
+    """
+    cb = PROFILES[profile_name]["callback_params"]
+    weights = cb["bot_eval_weights"]
+    assert len(weights) == EXPECTED_BOT_EVAL_COUNT[profile_name], (
+        f"{profile_name} : {len(weights)} bots dans bot_eval_weights "
+        f"({sorted(weights)}), table épinglée à {EXPECTED_BOT_EVAL_COUNT[profile_name]}. "
+        f"Ce nombre MULTIPLIE le budget d'évaluation : mettre à jour la table ET les "
+        f"décompositions chiffrées des notes *_normal du JSON."
+    )
+    # `bot_eval_randomness` alimente le MÊME panel : `evaluate_against_bots` exige une entrée de
+    # randomness pour chaque nom actif et lève sinon. Un décalage entre les deux dictionnaires
+    # casse l'évaluation au démarrage, pas au moment de la lecture des poids.
+    assert sorted(cb["bot_eval_randomness"]) == sorted(weights), (
+        f"{profile_name} : bot_eval_randomness et bot_eval_weights portent des clés "
+        f"différentes — randomness={sorted(cb['bot_eval_randomness'])}, "
+        f"weights={sorted(weights)}."
+    )
+
 
 @pytest.mark.parametrize(
     ("ref_name", "long_name"), [("x1", "x1_long"), ("x5_new", "x5_long")]
