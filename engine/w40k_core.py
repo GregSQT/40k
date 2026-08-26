@@ -8771,10 +8771,7 @@ class W40KEngine(gym.Env):
         def _zero_obs():
             if not tensor:
                 return None
-            self.obs_builder._empty_squad_observation()  # remet _obs_scratch à zéro
-            full = self.obs_builder._ensure_full_obs_scratch()
-            full["grid"].fill(0)
-            return full
+            return self.obs_builder.zero_full_obs_scratch()
 
         def _build_for_squad(squad_id: str):  # get allowed
             if not tensor:

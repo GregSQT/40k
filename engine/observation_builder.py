@@ -1109,16 +1109,27 @@ class ObservationBuilder:
         La clé "grid" est un buffer indépendant qui n'entre JAMAIS dans _obs_scratch — cela
         corrige la pollution introduite quand w40k_core ajoutait obs["grid"] au dict partagé,
         ce qui faisait inclure 9 216 floats dans la boucle fill(0) de _empty_squad_observation.
-        Appeler uniquement APRÈS _empty_squad_observation (initialise _obs_scratch).
+        Prérequis : _empty_squad_observation a été appelé au moins une fois (initialise _obs_scratch).
         """
-        assert self._obs_scratch is not None, "_ensure_full_obs_scratch appelé avant _empty_squad_observation"
         if self._full_obs_scratch is None:
             from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
-            self._full_obs_scratch = dict(self._obs_scratch)
+            self._full_obs_scratch = dict(self._obs_scratch)  # type: ignore[arg-type]
             self._full_obs_scratch["grid"] = np.zeros(
                 (GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32
             )
         return self._full_obs_scratch
+
+    def zero_full_obs_scratch(self) -> Dict[str, np.ndarray]:
+        """Remet à zéro tous les buffers (squad + grid) et retourne le dict complet.
+
+        Point d'entrée unique pour le chemin "observation nulle" (escouade morte/absente) :
+        encapsule le protocole _empty_squad_observation → _ensure_full_obs_scratch → grid.fill(0)
+        sans exposer l'ordre d'appel aux callers.
+        """
+        self._empty_squad_observation()
+        full = self._ensure_full_obs_scratch()
+        full["grid"].fill(0)
+        return full
 
     # ------------------------------------------------------------------
     # Sous-registres d'une entité (armes, types de figurines)
