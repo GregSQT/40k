@@ -97,12 +97,17 @@ OMP/MKL=1 ; TF32 ; torch.compile sur `policy.forward`.
 - `time/fps` SB3 est une **moyenne cumulée** depuis le début du run, pas un débit instantané.
 - L'overhead cProfile est ×2,6 : les **%** du profil font foi, les ms absolues viennent du run
   sans profiler (9,47 ms/step).
-- ⚠️ **`bench_env_step.py` se lance MACHINE AU REPOS, jamais pendant un run.** Mesuré le
-  2026-08-26 sur le même binaire et la même graine : **10,14 ms** de médiane machine au repos
-  contre **32,97 ms** pendant le run P1 (24 workers + learner) — un facteur **×3,25** qui vient
-  entièrement de la contention CPU, pas du code. Une mesure « après » prise au repos comparée à
-  une mesure « avant » prise sous charge fabriquerait un gain de ×3 imaginaire. Les 10,14 ms au
-  repos recoupent les 9,47 ms de la ligne de base d'audit : c'est cette valeur-là qui fait foi.
+- ⚠️ **`bench_env_step.py` se lance MACHINE AU REPOS, jamais pendant un run.** Une mesure
+  « après » prise au repos comparée à une mesure « avant » prise sous charge (24 workers +
+  learner) fabriquerait un gain imaginaire.
+- ⚠️ **Le bench n'est PAS déterministe run-à-run, malgré `seed=42`** (constaté le 2026-08-26 au
+  soir, machine au repos) : sur le même commit, 3 répétitions donnent 70 → 112 s de wall et
+  27,9 → 32,7 ms de médiane. La dispersion vient des tours de bots adverses joués dans l'env
+  (`_run_bot_until_not_bot_turn`, P99 > 1 s) et de la rotation des rosters `training_random`.
+  **Conséquence opérationnelle : une répétition unique ne prouve rien sous ~30 % d'écart.** Toute
+  mesure de clôture (1.10, 2.4, 4.3) se prend en **≥ 3 répétitions**, et se lit sur la **médiane
+  et le P99**, jamais sur un tirage isolé. C'est ce qui a fait entrer un **10,14 ms fantôme** dans
+  le journal §6 le 2026-08-26 : rejoué sur le même commit, il ne se reproduit pas.
   Toute ligne du journal §6 doit donc nommer l'état de la machine.
 
 ---
@@ -173,10 +178,10 @@ C'est la **queue** (pas la moyenne) qui fixe le lockstep : chaque vec-step atten
 | 1.4 | Masque de tir : fusionner les 2 balayages modèles×armes×cibles (partager les résultats de la 1ʳᵉ passe avec `shoot_weapon_sel_open_slots`) | `shared_utils.py` (`_target_locked_by_ally`, `build_squad_move_cell_map`) | ✅ |
 | 1.5 | Obs : mémoïser `charge_build_valid_plan` (masque + obs dans le même état) | `observation_builder.py` (`_encode_unit_entity`) | ✅ |
 | 1.6 | Obs : pair-cache `edge_distance` avec invalidation au mouvement (motif LoS éprouvé) | `observation_builder.py` (`_encode_unit_entity`) | ✅ |
-| 1.7 | Obs : cache du bloc TYPES + réutilisation des buffers numpy (~27 `np.zeros`/build) | `observation_builder.py` (`_empty_squad_observation`, `_encode_entity_model_types`) | ✅ |
+| 1.7 | Obs : cache du bloc TYPES **✅** (`_entity_types_cache`) · réutilisation des buffers numpy (~27 `np.zeros`/build) **non faite** — `_empty_squad_observation` réalloue à chaque build | `observation_builder.py` (`_empty_squad_observation`, `_encode_entity_model_types`) | 🔵 |
 | 1.8 | Pair-cache `entries_in_engagement_zone` (invalidation motif `_touch_unit_los`) | `spatial_relations.py` (`engagement_distance_metric`) | ✅ |
 | 1.9 | Reset : cacher les `json.load` des rosters + supprimer le deepcopy complet du scénario (copies ciblées) | `w40k_core.py` (`_reload_scenario`), `game_state.py` (`load_units_from_scenario`) | ✅ |
-| 1.10 | **Mesure de clôture** : ms/step + fps offline ; consigner §6 | — | ✅ |
+| 1.10 | **Mesure de clôture** : ms/step + fps offline ; consigner §6 | — | ✅ (repos, 3+3 répétitions, 2026-08-26) |
 
 Gain attendu : ms/step −30-50 % et réduction de la queue → fps ×1,5-2.
 Verrou par item : parité bit-à-bit (0.2) + test rouge/vert.
@@ -287,7 +292,10 @@ Verrou : mêmes win-rates qu'en séquentiel à seeds fixes.
 | 2026-08-26 | `bench_env_step.py` 600 steps, x1_long+bot, run P1 vivant (24 workers+learner actifs = contention CPU) | ms/step médiane · P95 · P99 (resets EXCLUS des step_times) | **32,97 ms · 662 ms · 1 882 ms** — médiane ×3,5 vs audit : contention CPU + tours bots longs via BotControlledEnv |
 | 2026-08-26 | `bench_env_step.py` --profile 20 steps, top cProfile | poste dominant | reset initial 4,9 s sur 5,9 s total (exclu du timing réel depuis le fix) ; tours bots (`_run_bot_until_not_bot_turn`) = 3,9 s sur 5 appels = 777 ms/appel |
 | 2026-08-26 | Harnais parité `test_parity_harness.py`, 4 tests | statut · durée | **4 verts · 55 s** — reproductibilité, détection mutation, gate mask_verification armée |
-| 2026-08-26 | `bench_env_step.py` **machine au repos** (run P1 terminé), même binaire et même graine que la ligne au-dessus | ms/step médiane · P95 · P99 | **10,14 ms · 214 ms · 489 ms** — **×3,25 plus rapide qu'avec le run vivant (32,97 ms)**. Recoupe les 9,47 ms de l'audit : c'est la valeur de référence. ⇒ **toute mesure Phase 1+ se prend machine au repos** (cf. §1 Pièges de mesure) |
+| 2026-08-26 | `bench_env_step.py` **machine au repos** (run P1 terminé) | ms/step médiane · P95 · P99 | ~~**10,14 ms · 214 ms · 489 ms**~~ — ⚠️ **CHIFFRE IRREPRODUCTIBLE, NE PAS UTILISER COMME RÉFÉRENCE.** Rejeu du 2026-08-26 (soir) sur le MÊME commit `8ba1db9c`, même binaire, même graine, machine au repos : médiane **27,94 / 31,02 / 32,70 ms** sur 3 répétitions — jamais 10 ms. La conclusion « machine au repos = référence » reste vraie ; la VALEUR était un tirage isolé. Baseline pré-Phase 1 corrigée dans les lignes du bas. |
 | 2026-08-26 | Harnais parité après `/code-review` (5 findings appliqués) | statut · durée | **3 verts · 54 s** — un test dupliqué supprimé par la review ; bench revalidé fonctionnel |
 | 2026-08-26 | **Phase 1 complète (1.1–1.9)**, `bench_env_step.py` 600 steps depuis worktree, run actif | ms/step médiane · P95 · P99 | **28,93 ms · 623 ms · 1163 ms** — −12 % médiane vs baseline run-actif (32,97 ms). Deux bugs d'invalidation corrigés en livraison : (a) `_squad_move_pool_cache`/`_charge_plan_cache`/`_edge_distance_cache` non purgés au reset épisode → stale hits en version 0 ; (b) `_ez_fp` non purgé dans `_recompute_squad_occupied_hexes` (modèle non-ancre). Mesure repos (machine au repos) à refaire hors run pour chiffre définitif. |
 | 2026-08-26 | **/simplify post-livraison** (3 corrections sur les caches Phase 1) | — | (a) `_cbvp_key` n'incluait pas `intent` → `arm_charge_placement_decision` (intent=1–4) retournait systématiquement le plan intent=0, L10 charge placement silencieusement non-fonctionnel ; (b) `_shoot_pass_cache` absent du reset épisode → cache stale inter-épisode sur chemins API directs ; (c) sentinelle `object.__new__(object)` locale → constante module `_CBVP_MISS`. |
+| 2026-08-26 (soir) | **Rejeu de contrôle machine au repos, 600 steps, seed=42, 3 répétitions par côté** — pré-Phase 1 = worktree détaché sur `8ba1db9c` (parent de la livraison Phase 1), post-Phase 1 = `main` | wall total · médiane · P99 | **PRÉ : 112,2 / 70,0 / 83,5 s · 32,70 / 27,94 / 31,02 ms · 1948 / 1849 / 1437 ms**<br>**POST : 64,9 / 68,9 / 46,6 s · 31,38 / 29,44 / 24,36 ms · 1076 / 1062 / 770 ms** |
+| 2026-08-26 (soir) | **Verdict Phase 1** (même données que la ligne ci-dessus) | gain réel | **Le gain porte sur la QUEUE, pas sur la moyenne** — exactement la cible annoncée de la Phase 1. **P99 −44 %** (1745 → 969 ms de moyenne ; aucun chevauchement entre les 3 échantillons pré et les 3 post : min pré 1437 > max post 1076) · **wall −32 %** (88,6 → 60,1 s) · **médiane −7 %** (30,6 → 28,4 ms, du même ordre que le bruit). Aucune régression. |
+| 2026-08-26 (soir) | **Défaut du harnais 0.1 constaté** | reproductibilité | Le bench **n'est PAS déterministe run-à-run** malgré `seed=42` : 70 → 112 s de wall sur le même commit. Une répétition unique ne peut pas trancher un écart < 30 %. ⇒ **toute mesure de clôture (1.10, 2.4, 4.3) exige ≥ 3 répétitions et se lit sur la médiane et le P99, jamais sur un tirage isolé.** |
