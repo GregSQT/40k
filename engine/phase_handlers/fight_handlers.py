@@ -44,8 +44,7 @@ from .shared_utils import (
     # partage. Importee et non reecrite en litteral — c est ce qui lie les deux producteurs
     # (tir et melee) au meme vocabulaire.
     RULE_LABEL_CLEAVE,
-    build_enemy_adjacent_hexes,
-    _get_players_present_from_units_cache,
+    _build_enemy_adjacent_hexes_all_players,
     # Traducteurs de causes de relance et marqueurs de capacite, PARTAGES avec le roller de tir :
     # les inliner est la forme exacte sous laquelle ces deux chemins ont deja diverge.
     resolve_oath_effects,
@@ -2136,8 +2135,7 @@ def fight_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:  # noqa: F8
     """
     if "units_cache" not in game_state:
         raise KeyError("units_cache must exist at fight_phase_start (should be built at reset)")
-    for player in _get_players_present_from_units_cache(game_state):
-        build_enemy_adjacent_hexes(game_state, player)
+    _build_enemy_adjacent_hexes_all_players(game_state)
     fight_v11_start(game_state)
     add_console_log(game_state, "FIGHT PHASE START (V11)")
     # Phase vide : aucune unité engagée ni ayant chargé → rien à résoudre à aucune étape

@@ -17,8 +17,7 @@ from engine.phase_handlers.shared_utils import (
     candidate_overlaps_any_unit, coherency_violation_flags,
     place_model_at_effective_level, resolve_model_effective_level, wall_blocked_anchors,
     _model_height_of,
-    build_enemy_adjacent_hexes,
-    _get_players_present_from_units_cache,
+    _build_enemy_adjacent_hexes_all_players,
 )
 
 
@@ -28,8 +27,7 @@ def deployment_phase_start(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     if "deployment_state" not in game_state:
         raise KeyError("deployment_state is required to start deployment phase")
-    for player in _get_players_present_from_units_cache(game_state):
-        build_enemy_adjacent_hexes(game_state, player)
+    _build_enemy_adjacent_hexes_all_players(game_state)
     enter_phase(game_state, "deployment")
     return {"phase_start": True}
 
