@@ -1675,6 +1675,7 @@ from ai.curriculum import (
     append_curriculum_log,
     copy_tensorboard_run,
     evaluate_stage_gate,
+    get_stage_hp_overrides,
     is_exploiter_stage,
     load_curriculum,
     load_exploiter_config,
@@ -4640,8 +4641,32 @@ def _stage_opponent_mix(
     }
 
 
+def _apply_stage_hp_overrides(cfg: Dict[str, Any], hp_overrides: Dict[str, Any]) -> None:
+    """Applique les surcharges HP de l'etape a la config chargee (mutation en place).
+
+    Seules les cles listees dans `STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS` et
+    `STAGE_HP_OVERRIDES_ALLOWED_MODEL_PARAMS` sont applicables — la validation du curriculum
+    garantit qu'aucune autre cle n'a passe la frontiere de chargement.
+    `model_params` est mis a jour CLE PAR CLE : seules les cles presentes dans l'override
+    remplacent leur equivalent dans la config de base ; les autres restent intactes.
+    """
+    if not hp_overrides:
+        return
+    if "total_episodes" in hp_overrides:
+        cfg["total_episodes"] = hp_overrides["total_episodes"]
+    if "model_params" in hp_overrides:
+        base_mp = cfg.get("model_params")
+        if isinstance(base_mp, dict):
+            base_mp.update(hp_overrides["model_params"])
+    if "callback_params" in hp_overrides:
+        base_cp = cfg.get("callback_params")
+        if isinstance(base_cp, dict):
+            base_cp.update(hp_overrides["callback_params"])
+
+
 def _install_stage_config_overrides(
-    config, agent_key: str, opponent_mix: Optional[Dict[str, Any]]
+    config, agent_key: str, opponent_mix: Optional[Dict[str, Any]],
+    hp_overrides: Dict[str, Any],
 ) -> None:
     """Ce que l'etape impose a TOUTE lecture ulterieure de la config de cet agent.
 
@@ -4650,16 +4675,12 @@ def _install_stage_config_overrides(
     laisserait les autres sans, en silence. Le decorateur s'installe PAR-DESSUS celui de
     `--param` quand les deux sont demandes : ils ne touchent pas les memes cles.
 
-    Deux effets :
+    Trois effets :
 
     - `opponent_mix` : le pool de l'etape, quand elle en a un.
-    - `model_gating_min_benchmark_floor` DESARME. Ce gate compare le pire score aux bots de
-      REFERENCE, satures a 1.00 cote agent des la premiere evaluation : n'importe quel plancher
-      pose dessus est franchi par n'importe quel modele. Il a ete RETIRE des profils le
-      2026-08-22 (`x1_long` a 0.0, R0a ferme sans franchir sa fourchette) ; ce desarmement-ci
-      reste la garde qui empeche un profil de le rearmer sous une etape. Ce qui decide si une
-      etape est retenue, c'est le plancher dur contre le champion le plus recent
-      (`evaluate_stage_gate`), mesure APRES le run.
+    - `model_gating_min_benchmark_floor` DESARME.
+    - `hp_overrides` : surcharges HP declarees dans `training_config_overrides` de l'etape
+      (total_episodes, model_params.*)  — ignorees quand le dict est vide.
     """
     original_load = config.load_agent_training_config
 
@@ -4671,6 +4692,7 @@ def _install_stage_config_overrides(
             callback_params = cfg.get("callback_params")
             if isinstance(callback_params, dict):
                 callback_params["model_gating_min_benchmark_floor"] = 0.0
+            _apply_stage_hp_overrides(cfg, hp_overrides)
         return cfg
 
     config.load_agent_training_config = _load_with_stage
@@ -4736,7 +4758,10 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
         )
 
     opponent_mix = _stage_opponent_mix(curriculum, stage, canonical_model_path)
-    _install_stage_config_overrides(config, args.agent, opponent_mix)
+    hp_overrides = get_stage_hp_overrides(stage)
+    _install_stage_config_overrides(config, args.agent, opponent_mix, hp_overrides)
+    if hp_overrides:
+        print(f"🎓 Etape {args.etape} — HP overrides : {list(hp_overrides)}")
     if not is_exploiter_stage(stage):
         print(
             "🎓 Gate benchmark_floor desarme : la selection de l'etape se fait sur le score contre "
