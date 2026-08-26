@@ -1106,7 +1106,7 @@ quatre gates, évalués sur l'évaluation finale du candidat.
 | 1 — champion précédent | le candidat bat significativement Pn−1 | à poser après mesure (D8) ; ordre de grandeur 0,55–0,60, sur un échantillon qui rende l'écart discernable |
 | 2 — non-régression league | aucun effondrement contre un ancien champion | écart maximal toléré vs `results_at_promotion` du candidat précédent |
 | 3 — non-régression bots | `worst_bot` ne s'effondre pas | réutilise `model_gating_min_worst_bot`, déjà en place |
-| 4 — non-régression benchmarks | `benchmark_floor` ne baisse pas significativement | même mécanisme qu'en §4.D.1, tranché le 2026-08-15 : les benchmarks gatent |
+| 4 — non-régression benchmarks | `ckpt_min` ne baisse pas significativement | remplace `benchmark_floor` (commit 16cf36b1) ; produit par `evaluate_against_checkpoints` dans `ai/bot_evaluation.py` |
 
 ⚠️ **Gate 1 et la taille d'échantillon.** À `bot_eval_final = 600` par adversaire, l'erreur-type
 d'un win-rate vers 0,55 vaut ~2,0 points. Un gate à 0,55 sur 100 parties (±5,0) accepterait un
@@ -1116,20 +1116,29 @@ d'évaluation.
 
 #### H.3 Ce qui est publié à chaque génération
 
-~~`benchmark_floor`, `benchmark_mean`~~, win-rate par membre de league, `historical_mean`,
-`historical_worst`, win-rate par exploiter, `exploiters_worst`, plus `training_bot_floor` et
-~~`vs_tactical` (le témoin scellé)~~. Ces courbes sont l'objet même de la league : sans elles, on
-paierait 260 heures pour un unique chiffre de fin.
+`ckpt_min` et `ckpt_mean` (échelle de checkpoints figés, §R0b — reprennent le rôle de plancher et
+de moyenne de généralisation contre des adversaires non saturables), win-rate par membre de league,
+`historical_mean`, `historical_worst`, win-rate par exploiter, `exploiters_worst`,
+`training_bot_floor`, et score du gate contre Pn−1 (`evaluate_stage_gate` — reprend le rôle de
+référence fixe par génération ; la propriété de témoin scellé de `vs_tactical` n'est pas reprise :
+aucun équivalent non saturable et hors gate n'existe). Ces courbes sont l'objet même de la league :
+sans elles, on paierait 260 heures pour un unique chiffre de fin.
 
-> ⚠️ **TROIS DE CES COURBES N'EXISTENT PLUS (2026-08-26/27).** `benchmark_floor` et
-> `benchmark_mean` ont été supprimées avec leur mécanisme (commit `16cf36b1`, `log_benchmark_scores`
-> retirée de `ai/metrics_tracker.py`) ; `vs_tactical` n'a plus de producteur depuis que `tactical`
-> est sorti de `bot_eval_weights` (commit `8bb4e42e`). Motif commun : saturation — les trois
-> mesuraient des adversaires battus à ~100 %, donc aucune ne séparait plus deux modèles.
-> **Ce que la league devra publier à la place reste à trancher** quand elle sera montée : les
-> candidats sont l'échelle de checkpoints figés ([#r0b-echelle](#r0b-echelle)) et le plancher dur
-> contre le champion le plus récent (`evaluate_stage_gate`), tous deux non saturables par
-> construction puisque leur difficulté suit la force de l'agent. Le reste de la liste est intact.
+> **TRANCHÉ le 2026-08-27.** `benchmark_floor`, `benchmark_mean` (commit `16cf36b1`) et
+> `vs_tactical` (commit `8bb4e42e`) sont supprimés pour saturation — ils mesuraient des adversaires
+> battus à ~100 % et ne séparaient plus aucun modèle. Leurs remplaçants, non saturables par
+> construction :
+>
+> | Ancienne courbe | Propriété reprise | Nouvelle courbe | Producteur |
+> |---|---|---|---|
+> | `benchmark_floor` | plancher contre adversaire jamais vu en entraînement | `ckpt_min` | R0b — `evaluate_against_checkpoints` dans `ai/bot_evaluation.py` |
+> | `benchmark_mean` | moyenne de généralisation | `ckpt_mean` | R0b — idem |
+> | `vs_tactical` | référence fixe par génération | score du gate contre Pn−1 | `evaluate_stage_gate` dans `ai/curriculum.py` |
+>
+> Propriété **non reprise** : `tactical` était hors gate et hors sélection — l'optimisation du
+> learner ne pesait pas dessus. Le score contre Pn−1 est utilisé en gate, donc la pression est
+> directe. C'est la seule perte de signal : aucun équivalent non saturable et non gaté n'existe
+> dans le dispositif actuel.
 
 #### H.4 Coût total, à connaître avant de commencer
 
@@ -1149,7 +1158,7 @@ la league s'ils étaient faits à la légère.
 |---|---|---|
 | partition à trois familles (`bot_registry`, D) | une 4ᵉ famille `LEAGUE_MEMBER` s'y ajoute sans toucher les 5 consommateurs | la league réintroduirait une liste de bots écrite à la main — le défaut déjà vécu par `metrics_tracker` |
 | profil comportemental par adversaire (D.4) | le profil est indexé par **clé d'adversaire**, pas par « bot » : un champion `P3` ou un exploiter `E1` s'y range sans réécriture | la league mesurerait ses matchups en win-rate nu, et le diagnostic de D.3 s'arrêterait à la frontière du self-play — précisément là où il devient le plus utile |
-| `benchmark_floor` dans `_evaluate_model_gate` (D) | les gates de promotion (H.2) réutilisent le même mécanisme de contrôle nommé + seuil | deux systèmes de gates, qui divergeront |
+| `ckpt_min` via `evaluate_against_checkpoints` (R0b, D) | les gates de promotion (H.2) réutilisent le même mécanisme de contrôle nommé + seuil | deux systèmes de gates, qui divergeront |
 | tirage sha256 dans `BotControlledEnv` (B) | un point d'insertion UNIQUE pour « quel adversaire cet épisode » | le jitter, le self-play et la league tireraient chacun de leur côté |
 | écriture de métadonnées (`policy.json`) | le writer atomique existe déjà (`shared/json_atomic.py`) et est utilisé dès A→D pour les relevés | un writer par usage, dont un qui perd un fichier sur run interrompu |
 
@@ -1166,7 +1175,7 @@ sépare est le budget machine, pas un trou de conception.
 | 2 | **B** — jitter | **1** | idem | rien |
 | 3 | **C** — les 3 benchmarks | **1** | +4 800 ép. par run d'entraînement (§4.C.6) | D |
 | 4 | **D.4** — profil comportemental par adversaire | **1** | **0** (lecture d'état sur des épisodes déjà joués) | D.3 |
-| 5 | **D** — `benchmark_floor`, gate, partition à 3 familles, détecteur de non-généralisation | **1** | une évaluation dédiée pour poser le seuil | E, H |
+| 5 | **D** — `ckpt_min` (R0b), gate, partition à 3 familles, détecteur de non-généralisation | **1** | une évaluation dédiée pour poser le seuil | E, H |
 | — | *(ROADMAP §1 : P3-4 → P3-6, P4, P5, mesure de référence `x1_long`)* | — | ~20 h | **oui** — l'ordre du travail est là, pas ici |
 | 6 | premier run `x1_selfplay` | **2** | ~40 h (100 000 ép.) | E |
 | 7 | **E** — league (dossiers, métadonnées, câblage, cache) | **2** | 0 pour le code | F, G |

@@ -20,7 +20,7 @@
 **Débit réel : ~200 steps/s global (SB3 `time/fps`), ~96 ép./min** → P1 ≈ 13 h au rythme courant.
 Mesure de référence antérieure : `x1_long` nu 50 000 ép. = 5 h 54 (2026-08-18).
 
-### Budget d'un cycle PPO (8 184 transitions = 341 vec-steps ≈ 41 s de wall)
+### Budget d'un cycle PPO — mesuré à 8 184 transitions = 341 vec-steps ≈ 41 s de wall (périmé, cf. encadré)
 
 > ⚠️ Ces chiffres datent de `n_steps=8192`. Le 2026-08-26 (commit `7c466b15`) `n_steps` est passé
 > à **8160** sur les 6 profils : le cycle vaut désormais **8 160 transitions = 340 vec-steps/env**,
@@ -230,7 +230,9 @@ Note documentée : divergence sémantique sur `approx_kl` avec plusieurs minibat
 GPU s'attendent mutuellement à chaque step. C'est structurel, pas optimisable localement.
 
 **Décision : Option A** — collecte dans les workers, poids gelés par cycle : chaque worker déroule ses
-341 steps avec une copie CPU de la policy (3,1 M de paramètres) et renvoie sa trajectoire ; le
+**340** steps (341 avant le 2026-08-26 : `n_steps` est passé de 8192 à 8160, commit `7c466b15` —
+la valeur se lit toujours dans `apply_rollout_n_steps`, jamais en dur) avec une copie CPU de la
+policy (3,1 M de paramètres) et renvoie sa trajectoire ; le
 learner ne fait plus que l'update. Gain ×3-6 estimé ; coût 1-2 semaines + validation lourde.
 
 Seule option alignée sur le profil réel de la charge (moteur Python lourd, réseau minuscule), et
@@ -239,7 +241,8 @@ les mêmes poids gelés dans les workers produit le même batch on-policy.
 
 **Équivalences et écarts (analyse du 2026-08-26, confirmée par audit croisé)** :
 - Synchro des poids : triviale (3,1 Mo × 24, une fois par cycle).
-- Épisodes à cheval sur les frontières de collecte : le worker tronque à 341 steps et bootstrappe
+- Épisodes à cheval sur les frontières de collecte : le worker tronque à `effective_n_steps` steps
+  (**340** aujourd'hui, cf. ci-dessus — à lire, jamais à coder en dur) et bootstrappe
   avec `predict_values` sur ses poids gelés — **exactement** la sémantique SB3 actuelle.
 - **Seul vrai écart sémantique** : VecNormalize. Version propre = stats embarquées avec les poids,
   **gelées pendant le cycle**, mises à jour au learner au retour des trajectoires — diffère de SB3
