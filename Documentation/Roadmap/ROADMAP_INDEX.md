@@ -329,7 +329,7 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
-| doc | Ancres de ligne périmées docs V11 | [doc.md#ancres](doc.md#ancres) | ⚡ |
+| doc | ✅ Ancres de ligne périmées docs V11 — passe 4 étendue à `Documentation/Implémentation/` (85 fichiers, 1237 ancres nettoyées, 2026-08-26) | [doc.md#ancres](doc.md#ancres) | |
 | doc | Dette d'ancres G1/G2/G4 de V11_tranches §1bis | [doc.md#dette-tranches](doc.md#dette-tranches) | ⚡ |
 | doc | Bandeaux périmés V11_agent_rework §0bis (assumés depuis 2026-07-20) | [doc.md#bandeaux-0bis](doc.md#bandeaux-0bis) | ⚡ |
 | doc | §0.19 : les ✅ T2→T5 revérifiés par lecture seule | [doc.md#reverif-t2-t5](doc.md#reverif-t2-t5) | ⚡ |
