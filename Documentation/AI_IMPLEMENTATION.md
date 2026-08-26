@@ -1398,13 +1398,19 @@ Do not reintroduce these rejected optimizations without a charge non-regression 
 
 Observation uses relative coordinates centered on active unit. Perception radius R=25 creates fog of war. Enables transfer learning. No performance degradation despite larger observation space.
 
-### CPU Optimization (311 it/s)
+### CPU Optimization (311 it/s) — obsolete, pre-V11
 
-Small neural networks (256×256 MlpPolicy) run faster on CPU than GPU. Better cache locality for small networks. Training achieves 311 iterations/second on CPU vs 282 it/s on GPU.
+⚠️ Historical result only, measured on the pre-V11 stack (355-float Box observation, 256×256
+MlpPolicy): CPU 311 it/s vs GPU 282 it/s. It no longer holds. V11 uses a Dict observation with a
+CNN policy and auto-select goes to CUDA; the measured 2026-08-26 profile is ~200 steps/s global,
+GPU at 20-38 % and 3 Go/8, dominated by the CPU workers (~73 % lockstep wait), not by GPU transfer.
+See `Documentation/Implémentation/A_faire/perf_entrainement.md` §1 and §6, and the "CPU vs GPU"
+section of `Documentation/AI_TRAINING.md`.
 
 ### Combined Impact
 
-Overall 4.7x training speedup (66 → 311 it/s). Debug config (50 episodes) runs in 11 seconds. Default config (2000 episodes) completes in 7 minutes.
+Historical (pre-V11): 4.7x training speedup (66 → 311 it/s). The `debug`/`default` training configs
+quoted alongside it no longer exist either — see `config/agents/<agent>/<agent>_training_config.json`.
 
 ---
 
@@ -1419,10 +1425,10 @@ Overall 4.7x training speedup (66 → 311 it/s). Debug config (50 episodes) runs
 - ✅ Zero wrapper patterns
 
 ### Performance
-- ✅ 4.7x training speedup (66 → 311 it/s)
+- ✅ 4.7x training speedup (66 → 311 it/s) — pre-V11 measurement
 - ✅ LoS cache: 5x faster shooting
 - ✅ Egocentric observation: No performance loss
-- ✅ CPU optimization: 10% faster than GPU
+- ⚠️ CPU optimization: 10% faster than GPU — obsolete, contradicted by the 2026-08-26 measurements
 
 ### Observation System
 - ✅ 150-float egocentric observation

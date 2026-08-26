@@ -261,9 +261,10 @@ Verrou : mêmes win-rates qu'en séquentiel à seeds fixes.
 - Optimisations move pool déjà livrées : `Documentation/Implémentation/Implémenté/V11_move_pool_optimization.md`,
   `V11_move_build_acceleration.md`, `perf_generate_compact_formation.md`.
 - Procédure de profilage : `engine/perf_timing.py` (`W40K_PERF_TIMING=1`) — ne jamais l'armer sur un run vivant.
-- ⚠️ La section « CPU vs GPU » de `Documentation/AI_TRAINING.md` (~l. 2252 : « CPU 10 % plus rapide »,
-  311 it/s) date de l'ère pré-V11 (obs 355 floats, MlpPolicy) — contredite par les mesures du §1,
-  à réécrire (hygiène doc, hors périmètre de ce fichier).
+- ✅ (2026-08-26) La section « CPU vs GPU » de `Documentation/AI_TRAINING.md` a été réécrite sur les
+  mesures du §1/§6 (l'ancienne « CPU 10 % plus rapide », 311 it/s, datait de l'ère pré-V11 : obs
+  355 floats, MlpPolicy). Le jumeau `Documentation/AI_IMPLEMENTATION.md` § « CPU Optimization
+  (311 it/s) » est marqué obsolète.
 
 ## 6. Journal des mesures
 

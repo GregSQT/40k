@@ -2251,15 +2251,34 @@ Les nouveaux tests vérifient que `hex_los_cache` est **intact** après un mouve
 
 ### CPU vs GPU
 
-**Current Benchmark**: Training runs **10% faster on CPU** than GPU
-- CPU: 311 it/s (optimized)
-- GPU: 280 it/s (transfer overhead)
+**Measured 2026-08-26** (i9-13900H 16 threads WSL2, RTX 4060 Laptop 8 Go, torch 2.13 cu130 — run
+`x1_long --etape P1 --resolution 1`). Source: `Documentation/Implémentation/A_faire/perf_entrainement.md` §1 and §6.
 
-**Recommendation**: Use CPU for training unless batch size > 256
+| Metric | Value |
+|---|---|
+| Global throughput (SB3 `time/fps`) | ~200 steps/s (~96 episodes/min) |
+| GPU utilisation | 20-38 %, 3 Go / 8 Go VRAM |
+| PPO update | 142 ms per minibatch of 1020 (7 163 samples/s) |
+| Env step (offline bench, no profiler) | 9,47 ms |
+
+**Where the time goes** in a PPO cycle (8 184 transitions ≈ 41 s of wall):
+lockstep wait on the slowest env + IPC round-trips ≈ **73 %**, GPU update ≈ 15 %, real env compute
+≈ 8 %, rollout inference ≈ 5 %. The bottleneck is the **CPU workers**, not GPU transfer.
+
+**Recommendation**: leave the device on auto-select (do not pass `--mode`). With the V11 Dict
+observation the policy is a CNN and auto-select goes to CUDA when a GPU is present
+(`ai/train.py:2467` `_resolve_device_for_obs`); forcing `--mode CPU` moves the update onto the same
+cores the 24 workers already saturate and slows the run down. Optimisation effort belongs on the
+worker side (action mask 33,2 %, observation 31,9 %, bot turns 30,7 % of an env step).
+
+`--mode CPU` / `--mode GPU` still exist as an argument (`ai/train.py:5031`) and remain valid to
+pin a device deliberately — e.g. reproducing a CPU-only measurement, or working around a driver
+issue. The old MlpPolicy benchmark (`resolve_device_mode`, `ai/train.py:2310`) only applies to a
+Box observation space, which V11 no longer uses.
 
 ```bash
-# Force CPU usage
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --new --mode CPU
+# Pin the device explicitly (normally unnecessary)
+python3 ai/train.py --agent ArmageddonAgent --training-config x1 --scenario bot --resolution 1 --new --mode CPU
 ```
 
 ---
@@ -2339,7 +2358,7 @@ python ai/train.py --agent <agent_key> --training-config default --rewards-confi
 python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --append  # Continue le modèle canonique
 python ai/train.py --agent <agent_key> --scenario bot --resume-from ai/models/<agent_key>/ppo_checkpoint_640000_steps.zip  # Reprend un checkpoint
 python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --new --step    # With step logging
-python ai/train.py --agent <agent_key> --scenario bot --new --mode CPU   # Force CPU
+python ai/train.py --agent <agent_key> --scenario bot --new --mode CPU   # Pin device (auto-select = GPU on V11 Dict obs)
 
 # Evaluation (no training)
 python ai/train.py --agent <agent_key> --test-only --test-episodes 20
