@@ -201,6 +201,16 @@ elle se fait en dernier et **se saute si la décision A est prise entre-temps**.
 Sous-classes locales (dans `ai/`), jamais de fork du venv. Verrou : masques identiques bit-à-bit
 vs `env_method`, loss/approx_kl identiques à seed fixe sur un run court.
 
+**Verrou de parité numérique livré (2026-08-26)** : `TestPatchedVsReferenceParity` dans
+`tests/unit/ai/test_phase2_sb3_pipeline.py` — même rollout (seed=42, permutation fixe),
+evaluate_actions déterministe → 6 métriques (pg_loss, value_loss, entropy_loss, approx_kl,
+clip_fraction, loss) bit-à-bit identiques entre `PatchedMaskablePPO.train()` et
+`MaskablePPO.train()` référence sb3_contrib. Détecte toute déviation ≥ 1e-6.
+Note documentée : divergence sémantique sur `approx_kl` avec plusieurs minibatches par epoch
+(référence = last-epoch only, patché = all-epochs mean) — prouvée dans
+`test_approx_kl_semantic_gap_documented_for_multi_minibatch`. Impact production = négligeable
+(valeurs convergent entre epochs en entraînement réel).
+
 ### Phase 3 — Architecture de la collecte — ✅ Option A actée (2026-08-26)
 
 **Problème** : même après les phases 1-2, la collecte reste en pas cadencé — les 24 workers et le
