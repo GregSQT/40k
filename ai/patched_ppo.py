@@ -18,6 +18,7 @@ Trois overrides, sans changer les maths :
 """
 from __future__ import annotations
 
+import time
 from typing import Any, TypeVar
 
 import numpy as np
@@ -95,6 +96,7 @@ class PatchedMaskablePPO(MaskablePPO):
         approx_kl_divs: list[float] = []
         continue_training = True
 
+        _t0_update = time.perf_counter()
         for epoch in range(self.n_epochs):
             for rollout_data in self.rollout_buffer.get(self.batch_size):
                 actions = rollout_data.actions
@@ -188,6 +190,7 @@ class PatchedMaskablePPO(MaskablePPO):
             self.rollout_buffer.returns.flatten(),
         )
 
+        self.logger.record("train/time_update", time.perf_counter() - _t0_update)
         self.logger.record("train/entropy_loss", entropy_loss_mean)
         self.logger.record("train/policy_gradient_loss", pg_loss_mean)
         self.logger.record("train/value_loss", value_loss_mean)
