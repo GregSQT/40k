@@ -289,6 +289,8 @@ class W40KMetricsTracker:
         # Episode tracking
         self.episode_count = initial_episode_count
         self.step_count = initial_step_count
+        # Phase 2.2 : flush toutes les N épisodes (pas à chaque épisode).
+        self._flush_interval: int = 100
 
         # Troncatures : episodes coupes par le garde anti-runaway du moteur (V11 §0.61).
         # Le COMPTE comme la TRACE appartiennent a ai/truncation_log.py, parce que le mode
@@ -653,7 +655,8 @@ class W40KMetricsTracker:
         self.log_critical_dashboard()
         
         # Flush metrics to disk
-        self.writer.flush()
+        if self.episode_count % self._flush_interval == 0:
+            self.writer.flush()
     
     @staticmethod
     def _push_window(h: List[float], value: float, window: int) -> List[float]:

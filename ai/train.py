@@ -93,6 +93,10 @@ MASKABLE_PPO_AVAILABLE = True
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback, BaseCallback, CallbackList
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize, VecEnv  # VecEnv : resout la forward-ref de GymEnv pour get_type_hints()
+
+# Phase 2 perf_entrainement — sous-classes locales (jamais de fork du venv).
+from ai.patched_ppo import PatchedMaskablePPO
+from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
 from stable_baselines3.common.utils import ConstantSchedule, FloatSchedule  # Convert float hyperparameters to callable schedules
 from stable_baselines3.common.type_aliases import GymEnv
 
@@ -319,7 +323,7 @@ def _load_checkpoint(model_path: str, env, device: str) -> MaskablePPO:
     deux branches le motif qui a produit le bug d'origine — trois exemplaires deja divergents.
     """
     try:
-        return MaskablePPO.load(model_path, env=env, device=device)
+        return PatchedMaskablePPO.load(model_path, env=env, device=device)
     except Exception as exc:
         if isinstance(exc, ValueError) and "spaces do not match" in str(exc):
             raise RuntimeError(
@@ -905,17 +909,16 @@ def recreate_rollout_buffer(model, log=print) -> None:
     `model.n_steps` ensuite ne le redimensionne pas : le modele collecte alors sur l'ancienne
     taille, en contradiction silencieuse avec la config du run.
 
-    La classe depend de l'espace d'observation. `MaskableRolloutBuffer` etait code en dur ici,
-    alors que le pipeline squad expose un espace `Dict` — il lui faut `MaskableDictRolloutBuffer`.
+    La classe depend de l'espace d'observation. Pour les espaces Dict (pipeline squad),
+    on utilise GpuMaskableDictRolloutBuffer (Phase 2.1) qui garde les tenseurs sur GPU
+    pendant toute la phase d'update — elimine les ~4-5 Go de re-transferts H2D par epoch.
     """
     import gymnasium as gym
-    from sb3_contrib.common.maskable.buffers import (
-        MaskableDictRolloutBuffer,
-        MaskableRolloutBuffer,
-    )
+    from sb3_contrib.common.maskable.buffers import MaskableRolloutBuffer
+    from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
 
     buffer_cls = (
-        MaskableDictRolloutBuffer
+        GpuMaskableDictRolloutBuffer
         if isinstance(model.observation_space, gym.spaces.Dict)
         else MaskableRolloutBuffer
     )
@@ -2567,7 +2570,7 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
         # ✓ CHANGE 8: Create vectorized environments for parallel training
         print(f"🚀 Creating {n_envs} parallel environments for accelerated training...")
 
-        vec_envs = register_vec_env(SubprocVecEnv([
+        vec_envs = register_vec_env(MaskableSubprocVecEnv([
             make_training_env(
                 rank=i,
                 scenario_file=scenario_file,
@@ -2702,7 +2705,7 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
         if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
             model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
 
-        model = MaskablePPO(env=env, **model_params_copy)
+        model = PatchedMaskablePPO(env=env, **model_params_copy)
         # Disable rollout logging for multi-agent models (suppress verbose rollout/ metrics)
         if hasattr(model, 'logger') and model.logger:
             _orig_record = model.logger.record
@@ -3239,7 +3242,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # Branch: n_envs > 1 uses SubprocVecEnv for parallel training
     if n_envs > 1:
         chunk_log(f"🚀 Creating {n_envs} parallel environments for accelerated training...")
-        vec_envs = register_vec_env(SubprocVecEnv([
+        vec_envs = register_vec_env(MaskableSubprocVecEnv([
             make_training_env(
                 rank=i,
                 scenario_file=scenario_list[0],
@@ -3366,7 +3369,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             lr_cfg = model_params_copy["learning_rate"]
             model_params_copy["learning_rate"] = _make_constant_lr_schedule(lr_cfg)
             chunk_log(f"✅ Learning rate: constant {lr_cfg['initial']} (decay → {lr_cfg['final']} via LearningRateScheduleCallback)")
-        model = MaskablePPO(env=env, **model_params_copy)
+        model = PatchedMaskablePPO(env=env, **model_params_copy)
     else:
         # Jumeau du site ci-dessus : seul `append_training` sur un modele existant arrive ici,
         # `check_model_lifecycle` ayant refuse les deux autres etats en tete de prologue.

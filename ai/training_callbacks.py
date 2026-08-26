@@ -771,15 +771,16 @@ class MetricsCollectionCallback(BaseCallback):
             if ntv:
                 model_stats: Dict[str, Any] = dict(ntv)
                 if hasattr(_model, 'policy') and hasattr(_model.policy, 'parameters'):
-                    total_norm = 0.0
-                    param_count = 0
-                    for p in cast(Any, _model.policy).parameters():
-                        if p.grad is not None:
-                            param_norm = p.grad.data.norm(2)
-                            total_norm += param_norm.item() ** 2
-                            param_count += 1
-                    if param_count > 0:
-                        model_stats['train/gradient_norm'] = total_norm ** 0.5
+                    # Réduction en une seule op GPU + un seul .item() au lieu de N syncs.
+                    grads = [
+                        p.grad.data.reshape(-1)
+                        for p in cast(Any, _model.policy).parameters()
+                        if p.grad is not None
+                    ]
+                    if grads:
+                        model_stats['train/gradient_norm'] = (
+                            torch.cat(grads).norm(2).item()
+                        )
                 if hasattr(_model, "ent_coef"):
                     ent_coef_value: Any = cast(Any, _model).ent_coef
                     if isinstance(ent_coef_value, torch.Tensor):
