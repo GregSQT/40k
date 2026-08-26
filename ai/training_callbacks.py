@@ -2105,9 +2105,7 @@ class BotEvaluationCallback(BaseCallback):
                 save_path = f"{self.best_model_save_path}/best_model"
                 self._save_model_with_vecnormalize(save_path)
 
-        # Détection anticipée du skip robuste : si ce point ne peut pas entrer dans la
-        # courbe robuste (holdout_hard_mean absent malgré robust_penalty_hard configurée),
-        # on sort ici — avant d'affecter l'early stopping et combined_history.
+        # Skip anticipé : ne pas polluer combined_history ni l'early stopping.
         if (
             self.save_best_robust
             and self.robust_penalty_hard > 0.0

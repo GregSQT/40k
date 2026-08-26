@@ -63,6 +63,8 @@ def _callback_with_robust_scoring(
     cb.best_early_stop_score = 1.0
     cb.best_robust_score = 1.0
     cb.early_stopping_patience = 0
+    cb.evals_without_improvement = 0
+    cb.should_stop_early = False
     cb.save_best_min_episodes = 10**9
     cb.best_model_save_path = None
     cb.save_best_robust_seed = False
@@ -134,8 +136,6 @@ def test_robust_skip_does_not_update_early_stopping_counters(
     cb, _ = _callback_with_robust_scoring(penalty_hard=0.2)
     cb.early_stopping_patience = 1
     cb.best_early_stop_score = 0.99  # > combined 0.4 → incrémenterait sans le fix
-    cb.evals_without_improvement = 0
-    cb.should_stop_early = False
     _gate_always_passes(monkeypatch)
     cb._apply_eval_results(_results(), eval_marker=1000)
     assert cb.evals_without_improvement == 0
