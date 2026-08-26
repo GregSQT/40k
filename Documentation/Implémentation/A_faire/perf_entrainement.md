@@ -409,7 +409,7 @@ la médiane**, machine au repos (règle §1 « Pièges de mesure », établie pa
 | `n_envs` 24 → 32/48 | amortit la latence par step | ⛔ **REFUSÉ (2026-08-26)** : la RAM fait exploser la VM pendant le self-play (~0,64 Go/worker + copie CPU de la policy par worker). Non ré-ouvrable sans plus de RAM. |
 | Bots poids 0,0 exclus de l'éval intermédiaire | −40 % du budget d'éval | ✅ **APPLIQUÉ (2026-08-26)** : `tactical`, `reference_balanced`, `reference_denial`, `reference_reactive` supprimés de `bot_eval_weights` et `bot_eval_randomness` sur x1/x1_long (les 4) et x1_debug/x5_* (`tactical` seul, les 3 `reference_*` n'y figuraient pas). Les 6 bots restants gardent 1/6 chacun, somme = 1.0 (vérifiée sur les 6 profils). Perte assumée : la mesure continue holdout/benchmark de ces 4 bots. |
 | Device/format de l'adversaire self-play (GPU partagé, quantization) | steps self-play plus rapides | le jeu de l'adversaire gelé peut dévier numériquement — ⚠️ **RISQUE DE BIAIS SILENCIEUX, protocole obligatoire en §4.5 ci-dessous** |
-| Sonde exploiteur E1-E3 parallélisée | **Couverte par 4.1/B7** — gain non mesuré (aucun run E* sur cette machine) | La formulation « E1-E3 parallélisées » est FAUSSE : chaque E<sub>i</sub> attaque le champion d'une étape différente, elles sont séquentiellement dépendantes (`ai/curriculum.py:44`, `STAGE_ROLES` / `is_exploiter_stage`). Ce qui est parallélisable est l'**intérieur** de chaque sonde — c'est exactement ce que couvre l'item **4.1/B7** : `ExploiterProbeCallback._probe` appelle `evaluate_against_checkpoints` avec `n_workers_override=intermediate_n_workers` (= **4**, lu dans `ArmageddonAgent_training_config.json`), et après Phase 4 ce chemin est parallélisé. La sonde bon marché (100 ép.) tourne donc sur 4 workers, la sonde de confirmation (500 ép.) également. **Durée réelle d'un run E* : non mesurée — tensorboard ne contient que des runs P1 sur cette machine.** L'extrapolation depuis les 14,5 s/ép du gate est interdite par le §1 (aucun profil n'emprunte la mesure d'un autre). Chiffrer requiert un vrai run E*. **Tentative de mesure (2026-08-26, machine au repos) bloquée : `train.py --etape E1` lève `FileNotFoundError` sur `model_ArmageddonAgent_P3.zip` — P3 absent.** Relancer après P3 disponible. |
+| Sonde exploiteur E1-E3 parallélisée | **Couverte par 4.1/B7** — gain non mesuré (aucun run E* sur cette machine) | La formulation « E1-E3 parallélisées » est FAUSSE : chaque E<sub>i</sub> attaque le champion d'une étape différente, elles sont séquentiellement dépendantes (`ai/curriculum.py`, `STAGE_ROLES` / `is_exploiter_stage`). Ce qui est parallélisable est l'**intérieur** de chaque sonde — c'est exactement ce que couvre l'item **4.1/B7** : `ExploiterProbeCallback._probe` appelle `evaluate_against_checkpoints` avec `n_workers_override=intermediate_n_workers` (= **4**, lu dans `ArmageddonAgent_training_config.json`), et après Phase 4 ce chemin est parallélisé. La sonde bon marché (100 ép.) tourne donc sur 4 workers, la sonde de confirmation (500 ép.) également. **Durée réelle d'un run E* : non mesurée — tensorboard ne contient que des runs P1 sur cette machine.** L'extrapolation depuis les 14,5 s/ép du gate est interdite par le §1 (aucun profil n'emprunte la mesure d'un autre). Chiffrer requiert un vrai run E*. **Tentative de mesure (2026-08-26, machine au repos) bloquée : `train.py --etape E1` lève `FileNotFoundError` sur `model_ArmageddonAgent_P3.zip` — P3 absent.** Relancer après P3 disponible. |
 
 ### 4.5 — Adversaire self-play : protocole obligatoire avant toute quantization
 
@@ -423,10 +423,11 @@ mesure finale, après des dizaines d'heures. **Aucun test de non-régression cla
 **Arbitrage des deux formats.** Le GPU partagé est le mauvais choix ici : 24 workers qui envoient
 chacun une obs de 16 735 scalaires au GPU du learner rétablissent exactement la contention et les
 allers-retours IPC que la Phase 2 vient de supprimer (item 2.3, un seul RPC par step). La
-quantization reste locale au worker et ne touche aucun canal partagé. Ancres : le forward gelé est
-`ai/env_wrappers.py:1078` (`self._frozen_model.predict`), le modèle est enveloppé par
-`_NormalizedFrozenModel` (`ai/env_wrappers.py:1020`), et `self_play_snapshot_device` n'accepte
-aujourd'hui que `"cpu"` ou `"auto"` (`ai/env_wrappers.py:487`).
+quantization reste locale au worker et ne touche aucun canal partagé. Ancres : le forward gelé
+(`self._frozen_model.predict`) est dans `SelfPlayWrapper._get_self_play_opponent_action`, le modèle
+est enveloppé par `_NormalizedFrozenModel` dans `SelfPlayWrapper._reload_self_play_snapshot_if_needed`,
+et `self_play_snapshot_device` n'accepte aujourd'hui que `"cpu"` ou `"auto"` — validation posée dans
+`SelfPlayWrapper.__init__`. Tous dans `ai/env_wrappers.py`.
 
 **Étape 0 — MESURER LE GAIN AVANT D'IMPLÉMENTER. Bloquante.**
 Ne prendre aucun risque métier avant de savoir ce qu'il achète. Chronométrer, sur la machine au
