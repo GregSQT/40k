@@ -129,6 +129,7 @@ def test_charged_squad_without_target_fights_empty(melee_scenario_file):
         for mid in list(gs["squad_models"].get(sid, [])):
             gs["models_cache"].pop(mid, None)
         gs["units_cache"].pop(sid, None)
+        gs["squad_models"].pop(sid, None)
     _setup_fight_phase_charged(gs, squad_id, our_player)
 
     empty_slots: List[Optional[str]] = [None] * 5
@@ -306,6 +307,7 @@ def test_snapshot_engaged_unit_with_dead_enemy_offers_fight_and_breaks_loop(mele
         for mid in list(gs["squad_models"].get(sid, [])):
             gs["models_cache"].pop(mid, None)
         gs["units_cache"].pop(sid, None)
+        gs["squad_models"].pop(sid, None)
 
     # Étape FIGHT réelle avec le snapshot qui la marque engagée AU DÉBUT (mais pas chargée).
     gs["phase"] = "fight"
@@ -355,6 +357,7 @@ def test_overrun_pile_in_called_when_unengaged(melee_scenario_file):
         for mid in list(gs["squad_models"].get(sid, [])):
             gs["models_cache"].pop(mid, None)
         gs["units_cache"].pop(sid, None)
+        gs["squad_models"].pop(sid, None)
 
     _setup_fight_phase_charged(gs, squad_id, our_player, with_settle_keys=True)
 
@@ -473,13 +476,22 @@ def test_overrun_pile_in_plan_returns_none_when_no_enemy_in_range(melee_scenario
 
 
 def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
-    """Régression : ValueError dans build_squad_action_mask quand un ennemi hors table (réserves,
-    sentinelle (-1,-1)) est présent dans les slots ennemis lors du path overrun 12.06.
+    """Guard off-table dans build_squad_action_mask : un ennemi hors table (sentinelle (-1,-1))
+    injecté dans les slots ennemis ne doit jamais ouvrir un slot fight, même dans le path overrun.
 
     Scénario : attaquant P1 non-engagé qui a chargé ; ennemi A P2 sur table à portée pile-in ;
-    ennemi B P2 en réserve stratégique (hors table) dans les slots. Avant le fix, le masque
-    appelait `unit_entries_within_engagement_zone` sur l'ennemi hors table → crash. Après le fix,
-    l'ennemi hors table est sauté silencieusement, le slot de l'ennemi A sur table est ouvert.
+    ennemi B P2 en réserve stratégique (hors table) dans les slots.
+
+    Le guard `entry_is_on_battlefield` dans le path overrun est inatteignable via
+    `get_enemy_slot_mapping` (qui nettoie les slots hors table avant retour). On injecte donc
+    l'ennemi hors table directement dans enemy_slot_ids pour tester le guard.
+
+    Sans le guard, `unit_entries_within_engagement_zone` est appelé sur l'ennemi hors table →
+    `require_entry_on_battlefield` lève ValueError (MESURÉ : la distance depuis (-1,-1) est dans
+    l'EZ=2 pour un attaquant proche de l'origine — verdict inventé, mais l'appel crash). L'ennemi
+    hors table porte `occupied_hexes={(-1,-1)}` pour rendre le crash inévitable si le guard manque
+    (empty occupied_hexes → min_distance = ∞ → False → pas de crash, mais une couverture trop
+    faible; occupied_hexes peuplé → require_entry_on_battlefield déclenche le ValueError réel).
     """
     from engine.phase_handlers.shared_utils import (
         SQUAD_ACTION_FIGHT_SLOT_BASE,
@@ -488,9 +500,11 @@ def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
     )
     from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
 
-    # Attaquant P1 à (10,10), ennemi A P2 à (10,13) sur table (dist=3 > EZ=2, ≤pile-in=5).
-    attacker = synthetic_unit("1", 1, [{"col": 10, "row": 10}])
-    enemy_a = synthetic_unit("2", 2, [{"col": 10, "row": 13}])
+    # Attaquant P1 à (0,0), ennemi A P2 à (0,3) sur table (dist=3 > EZ=2, ≤pile-in=5).
+    # L'attaquant près de l'origine fait que la distance hex vers (-1,-1) = 2 ≤ EZ=2 :
+    # sans le guard, `_uiez` lèverait (require_entry_on_battlefield).
+    attacker = synthetic_unit("1", 1, [{"col": 0, "row": 0}])
+    enemy_a = synthetic_unit("2", 2, [{"col": 0, "row": 3}])
 
     gs = synthetic_state(
         [attacker, enemy_a],
@@ -509,6 +523,7 @@ def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
     )
 
     # Injecter ennemi B hors table dans units_cache (sentinelle (-1,-1) = réserve stratégique).
+    # occupied_hexes peuplé : sans le guard, min_distance ≠ ∞ → require_entry_on_battlefield lève.
     gs["units_cache"]["3"] = {
         "id": "3",
         "col": -1,
@@ -517,18 +532,17 @@ def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
         "BASE_SHAPE": "round",
         "BASE_SIZE": 1,
         "orientation": 0,
-        "occupied_hexes": set(),
+        "occupied_hexes": {(-1, -1)},
         "models": [],
         "HP_CUR": 1,
         "HP_MAX": 1,
     }
 
-    # Construire enemy_slot_ids directement : get_enemy_slot_mapping appelle _refresh qui libère
-    # immédiatement les slots hors table, rendant la régression inatteignable via cette voie.
-    # On injecte "3" directement dans enemy_slot_ids pour tester le guard dans build_squad_action_mask.
+    # get_enemy_slot_mapping nettoie les slots hors table → on injecte directement.
     enemy_slots: list = ["2", "3"] + [None] * (SQUAD_ACTION_FIGHT_SLOT_COUNT - 2)
 
-    # Avant fix : crash ValueError dans le path overrun 12.06. Après fix : pas de crash.
+    # Avec le guard : ennemi hors table sauté → pas de crash, slot fermé.
+    # Sans le guard : require_entry_on_battlefield lève ValueError → test échoue.
     mask = build_squad_action_mask(gs, "1", enemy_slot_ids=enemy_slots)
 
     fight_bits = [mask[SQUAD_ACTION_FIGHT_SLOT_BASE + i] for i in range(SQUAD_ACTION_FIGHT_SLOT_COUNT)]
@@ -536,7 +550,7 @@ def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
     # Le slot de l'ennemi hors table doit rester fermé.
     off_table_slot = enemy_slots.index("3")
     assert mask[SQUAD_ACTION_FIGHT_SLOT_BASE + off_table_slot] == 0, (
-        "l'ennemi hors table ne doit jamais ouvrir un slot fight"
+        "l'ennemi hors table ne doit jamais ouvrir un slot fight (guard entry_is_on_battlefield)"
     )
 
 
