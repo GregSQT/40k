@@ -2541,6 +2541,9 @@ def _get_deadly_demise_value(unit: Dict[str, Any]) -> Optional[Any]:
 #: Rayon de declenchement de `reactive_move`, EN POUCES (cf. config/unit_rules.json).
 _REACTIVE_TRIGGER_RANGE_INCHES = 9
 
+#: Sentinelle pour `_charge_plan_cache` — distingue un cache miss de None (plan invalide).
+_CBVP_MISS: object = object()
+
 
 def _build_reactive_move_destinations_pool(
     game_state: Dict[str, Any],
@@ -6410,15 +6413,17 @@ def charge_build_valid_plan(
     if charge_roll <= 0:
         return None
     # Item 1.5 — per-state cache (masque + obs appellent la même fonction dans le même état).
-    # Clé : (charger, targets, roll, version) — la version garantit l'invalidation à toute
-    # mutation de position/mort via _touch_unit_los. Pas de guard _los_batch : charge_build_valid_plan
-    # n'est jamais appelée pendant un batch d'écriture de positions.
+    # Clé : (charger, targets, roll, intent, version) — la version garantit l'invalidation à
+    # toute mutation de position/mort via _touch_unit_los. `intent` est requis : arm_charge_
+    # placement_decision appelle la fonction avec intent=0..4 dans le même état de jeu, sans
+    # bump de _unit_move_version entre les appels — sans lui toutes les variantes retournent
+    # le plan intent=0 et L10 charge placement est silencieusement non-fonctionnel.
+    # Pas de guard _los_batch : charge_build_valid_plan n'est jamais appelée pendant un batch.
     _cbvp_version = game_state.get("_unit_move_version", 0)
-    _cbvp_key = (str(squad_id), tuple(str(t) for t in target_squad_ids), int(charge_roll), _cbvp_version)
+    _cbvp_key = (str(squad_id), tuple(str(t) for t in target_squad_ids), int(charge_roll), int(intent), _cbvp_version)
     _cbvp_cache = game_state.setdefault("_charge_plan_cache", {})
-    _cbvp_sentinel = object.__new__(object)  # marqueur « absent » distinct de None (plan invalide)
-    _cbvp_hit = _cbvp_cache.get(_cbvp_key, _cbvp_sentinel)
-    if _cbvp_hit is not _cbvp_sentinel:
+    _cbvp_hit = _cbvp_cache.get(_cbvp_key, _CBVP_MISS)
+    if _cbvp_hit is not _CBVP_MISS:
         return _cbvp_hit
     if not charge_check_eligibility(game_state, squad_id, target_squad_ids):
         _cbvp_cache[_cbvp_key] = None
