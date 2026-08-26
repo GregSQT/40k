@@ -114,6 +114,20 @@ VALUE_ONLY_DOCS = [
     "Documentation/AI_TRAINING.md",
 ]
 
+@functools.lru_cache(maxsize=1)
+def _git_raw_listing() -> str:
+    """Sortie brute de `git ls-files -z` — une seule invocation par run."""
+    try:
+        return subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True,
+        ).stdout
+    except subprocess.CalledProcessError as exc:
+        raise SourceUnavailable(
+            f"git ls-files a échoué (code {exc.returncode}) : {exc.stderr.strip()}"
+        ) from exc
+
+
 #: Documents tenus à la convention « le symbole, jamais la ligne » : les documents d'entrée
 #: (DEFAULT_DOCS) et tous les .md de Documentation/Implémentation/, par basename. Les documents
 #: d'historique comme `archives/ROADMAP.md` restent exclus — un contrôle durablement rouge
@@ -127,22 +141,29 @@ def _impl_doc_basenames() -> frozenset[str]:
     git ls-files sans filtre de chemin, puis filtrage Python sur la sortie UTF-8 décodée
     explicitement, contourne les deux pièges quelle que soit la locale.
     """
-    listing = subprocess.run(
-        ["git", "ls-files", "-z"],
-        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True,
-    ).stdout
     impl_prefix = "Documentation/Implémentation/"
-    paths = [f for f in listing.split("\0") if f.startswith(impl_prefix) and f.endswith(".md")]
+    paths = [
+        f for f in _git_raw_listing().split("\0")
+        if f.startswith(impl_prefix) and f.endswith(".md")
+    ]
     if not paths:
         raise SourceUnavailable(
-            f"Répertoire Documentation/Implémentation/ introuvable : {ROOT / 'Documentation' / 'Implémentation'}"
+            f"Aucun fichier .md suivi par git dans Documentation/Implémentation/ "
+            f"({ROOT / 'Documentation' / 'Implémentation'})"
         )
     return frozenset(f.rsplit("/", 1)[-1] for f in paths)
 
 DEFAULT_DOC_NAMES: frozenset[str] = frozenset(
     pathlib.PurePosixPath(doc).name for doc in DEFAULT_DOCS
 )
-ANCHOR_ENFORCED: frozenset[str] = DEFAULT_DOC_NAMES | _impl_doc_basenames()
+
+_ANCHOR_UNSET: object = object()
+
+
+@functools.lru_cache(maxsize=1)
+def _get_anchor_enforced() -> frozenset[str]:
+    """Calcul paresseux de l'ensemble des basenames soumis à la passe 4."""
+    return DEFAULT_DOC_NAMES | _impl_doc_basenames()
 
 AGENT_CONFIG = ROOT / "config" / "agents" / "ArmageddonAgent" / "ArmageddonAgent_training_config.json"
 COUVERTURE = DOCS / "analyzer_couverture.md"
@@ -368,11 +389,9 @@ def tracked_basenames() -> collections.Counter[str]:
     fichiers-là n'aurait jamais été vue. Même piège que `core.quotePath` dans
     `scripts/check_roadmap_declared.py`, qui l'a payé le 2026-08-11.
     """
-    listing = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=ROOT, capture_output=True,
-        text=True, encoding="utf-8", check=True,
-    ).stdout
-    return collections.Counter(f.rsplit("/", 1)[-1] for f in listing.split("\0") if f)
+    return collections.Counter(
+        f.rsplit("/", 1)[-1] for f in _git_raw_listing().split("\0") if f
+    )
 
 
 def is_ambiguous(name: str) -> bool:
@@ -1014,7 +1033,7 @@ def check_values(doc_path: pathlib.Path) -> tuple[int, list[str]]:
 def check_anchors(
     doc_path: pathlib.Path,
     *,
-    enforcement_set: frozenset[str] | None = ANCHOR_ENFORCED,
+    enforcement_set: frozenset[str] | None | object = _ANCHOR_UNSET,
 ) -> list[str]:
     """Passe 4 — aucun renvoi `fichier.py:123`.
 
@@ -1027,6 +1046,8 @@ def check_anchors(
     le FAIT (le nom est-il un fichier du dépôt ?) et non sur une liste de suffixes, qui se serait
     périmée à son tour.
     """
+    if enforcement_set is _ANCHOR_UNSET:
+        enforcement_set = _get_anchor_enforced()
     if enforcement_set is not None and doc_path.name not in enforcement_set:
         return []
     text = doc_path.read_text(encoding="utf-8")
