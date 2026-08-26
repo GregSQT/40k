@@ -18,7 +18,7 @@
 | `def _auto_declared_order` | aucune ancre directe trouvée |
 | `def compute_candidate_footprint` | aucune ancre directe trouvée |
 
-**Convention** : citer `def <symbole>` ou un `grep` reproductible, jamais un numéro de ligne. `scripts/check_doc_references.py` la fait respecter sur l'index, les fichiers sujets et les contrats permanents.
+**Convention** : citer `def <symbole>` ou un `grep` reproductible, jamais un numéro de ligne. La passe 5, `def check_symbol_kinds` (`scripts/check_doc_references.py`), vérifie le genre déclaré ; la passe 2, `def check_links` (`scripts/check_doc_references.py`), contrôle les liens morts.
 
 **Couverture du script** : `check_doc_references.py` passe 4 (ANCRES) couvre `Documentation/Roadmap/`, les contrats permanents, **et désormais `Documentation/Implémentation/`** (85 fichiers). Les 1237 ancres stales ont été nettoyées le 2026-08-26 — le script repasse au vert sur l'ensemble du corpus.
 
