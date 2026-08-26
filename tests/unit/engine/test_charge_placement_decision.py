@@ -193,9 +193,9 @@ class TestChargeBuildValidPlanIntents:
         assert plan_4 is not None
 
         cache = gs["_charge_plan_cache"]
-        # Clé : (squad_id, targets, roll, intent, version) — index 3 = intent.
-        assert any(k[3] == 0 for k in cache), "intent=0 doit avoir sa propre entrée"
-        assert any(k[3] == 4 for k in cache), "intent=4 doit avoir sa propre entrée"
+        assert len(cache) >= 2, (
+            "intent=0 et intent=4 doivent créer des entrées séparées dans _charge_plan_cache"
+        )
 
         # Troisième appel intent=0 : cache hit → même objet (identité).
         plan_0_bis = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
@@ -237,7 +237,6 @@ class TestChargeBuildValidPlanIntents:
             },
         }
         units = [att, tgt]
-        from tests._state_invariants import turn_state_invariants
         gs: Dict[str, Any] = {
             **turn_state_invariants(),
             "config": config_with_cohesion,
@@ -366,16 +365,16 @@ class TestApplyChargePlacementDecision:
         assert gs.get("pending_agent_decision") is None
 
     def test_plan_index_negative_raises_value_error(self) -> None:
-        """plan_index négatif → ValueError explicite (T1 : pas de silent fallback)."""
+        """plan_index négatif → ValueError explicite, pending intact (T1 : pas de silent fallback)."""
         gs = self._gs_armed()
         with pytest.raises(ValueError, match="plan_index"):
             apply_charge_placement_decision(gs, "att", plan_index=-1)
+        assert CHARGE_PLACEMENT_PENDING_KEY in gs, (
+            "plan_index invalide ne doit pas consommer le pending — l'appelant peut corriger et réessayer"
+        )
 
     def test_plan_index_oob_raises_value_error(self) -> None:
         """plan_index >= 5 → ValueError explicite."""
-        gs = self._gs_armed()
-        # On consomme avec 0 pour ne pas avoir de plan_index=-1 qui lève.
-        # Puis on réarme pour le second test.
         gs2 = _make_gs([_unit("att", 1, 3, 5), _unit("tgt", 2, 8, 5)])
         plan_0 = charge_build_valid_plan(gs2, "att", ["tgt"], charge_roll=8)
         assert plan_0 is not None

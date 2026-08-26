@@ -6544,24 +6544,25 @@ def apply_charge_placement_decision(
     """
     from engine.agent_decision import consume_pending_agent_decision
 
-    _pending = game_state.pop(CHARGE_PLACEMENT_PENDING_KEY, None)
+    _pending = game_state.get(CHARGE_PLACEMENT_PENDING_KEY)
     if _pending is None:
         raise RuntimeError(
             f"apply_charge_placement_decision: {CHARGE_PLACEMENT_PENDING_KEY} absent "
             "— décision déjà consommée ou jamais posée"
         )
-    consume_pending_agent_decision(
-        game_state,
-        decision_type="charge_placement",
-        player=int(require_key(game_state, "current_player")),
-        unit_id=str(squad_id),
-    )
     _plans = require_key(_pending, "plans")
     if plan_index < 0 or plan_index >= len(_plans):
         raise ValueError(
             f"apply_charge_placement_decision: plan_index={plan_index} hors des "
             f"{len(_plans)} plans disponibles"
         )
+    game_state.pop(CHARGE_PLACEMENT_PENDING_KEY)
+    consume_pending_agent_decision(
+        game_state,
+        decision_type="charge_placement",
+        player=int(require_key(game_state, "current_player")),
+        unit_id=str(squad_id),
+    )
     _ctx = {k: v for k, v in _pending.items() if k not in ("squad_id", "plans")}
     return _plans[plan_index], _ctx
 
