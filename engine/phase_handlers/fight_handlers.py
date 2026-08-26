@@ -607,6 +607,11 @@ def _fight_synth_cache_entries_at_footprint(
             entry["occupied_hexes"] = set()
             entry["occupied_hexes_by_model"] = {}
             entry["floor_height_by_model"] = {}
+            # `dict(src)` hérite `_ez_fp` de l'entrée source (empreinte de la position COURANTE
+            # de l'escouade). La géométrie synthétique étant différente, cette empreinte est fausse :
+            # `_engagement_entry_fingerprint` la retournerait sans recalculer, et le cache de paire
+            # EZ rendrait le verdict de l'ANCRE au lieu du verdict du plan.
+            entry.pop("_ez_fp", None)
             by_base[key] = entry
         entry["occupied_hexes"] |= compute_occupied_hexes(int(c), int(r), shape, size, orient)
         entry["occupied_hexes_by_model"][str(mid)] = (int(c), int(r))

@@ -197,22 +197,26 @@ def test_ally_and_enemy_share_the_same_reading(engine):
     from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
 
     gs = engine.game_state
+    # `build_squad_observation` retourne une référence au MÊME buffer scratch à chaque appel.
+    # Les valeurs de `obs_mine` doivent donc être extraites AVANT le deuxième appel qui écrase
+    # ce buffer — l'API est documentée ainsi dans `_empty_squad_observation`.
     obs_mine = engine.obs_builder.build_squad_observation(gs, "2")   # l'escouade 2 se voit
-    obs_theirs = engine.obs_builder.build_squad_observation(gs, "1")  # et est vue d'en face
     slot = get_enemy_slot_mapping(gs, 1).index("2")
     seen_by_owner = _row_of(obs_mine, "allies", 0)
+    mine_wpn_cont = obs_mine["allies_wpn_cont"][0].tolist()
+    mine_wpn_bin = obs_mine["allies_wpn_bin"][0].tolist()
+    mine_wpn_rule_ids = obs_mine["allies_wpn_rule_ids"][0].tolist()
+
+    obs_theirs = engine.obs_builder.build_squad_observation(gs, "1")  # et est vue d'en face
     seen_by_enemy = _row_of(obs_theirs, "enemies", slot)
     assert seen_by_owner == pytest.approx(seen_by_enemy)
     # … et les profils d'armes aussi, encodés par le MÊME encodeur avec le MÊME K.
-    assert obs_mine["allies_wpn_cont"][0].tolist() == obs_theirs["enemies_wpn_cont"][slot].tolist()
-    assert obs_mine["allies_wpn_bin"][0].tolist() == obs_theirs["enemies_wpn_bin"][slot].tolist()
+    assert mine_wpn_cont == obs_theirs["enemies_wpn_cont"][slot].tolist()
+    assert mine_wpn_bin == obs_theirs["enemies_wpn_bin"][slot].tolist()
     # … règles d'armes comprises : elles sont un ENSEMBLE d'ids lu par la MÊME table d'embedding
     # des deux côtés. Une asymétrie ici ferait apprendre « mon [ANTI] » et « son [ANTI] » comme
     # deux choses différentes.
-    assert (
-        obs_mine["allies_wpn_rule_ids"][0].tolist()
-        == obs_theirs["enemies_wpn_rule_ids"][slot].tolist()
-    )
+    assert mine_wpn_rule_ids == obs_theirs["enemies_wpn_rule_ids"][slot].tolist()
 
 
 def test_enemy_weapon_profiles_are_no_longer_truncated():
