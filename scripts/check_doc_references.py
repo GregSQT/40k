@@ -119,11 +119,25 @@ VALUE_ONLY_DOCS = [
 #: d'historique comme `archives/ROADMAP.md` restent exclus — un contrôle durablement rouge
 #: finit par être ignoré.
 def _impl_doc_basenames() -> frozenset[str]:
-    """Basenames de tous les .md de Documentation/Implémentation/ — pour la passe 4."""
-    impl = ROOT / "Documentation" / "Implémentation"
-    if not impl.is_dir():
-        raise SourceUnavailable(f"Répertoire Documentation/Implémentation/ introuvable : {impl}")
-    return frozenset(p.name for p in impl.rglob("*.md"))
+    """Basenames de tous les .md de Documentation/Implémentation/ — pour la passe 4.
+
+    Utilise git ls-files plutôt que pathlib.rglob, et sans passer de chemin accentué en
+    argument : sous locale C (PYTHONUTF8=0), le codec filesystem est ASCII. os.fsencode('é')
+    échoue à la fois dans pathlib (is_dir / rglob) et dans subprocess (encodage des argv).
+    git ls-files sans filtre de chemin, puis filtrage Python sur la sortie UTF-8 décodée
+    explicitement, contourne les deux pièges quelle que soit la locale.
+    """
+    listing = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True,
+    ).stdout
+    impl_prefix = "Documentation/Implémentation/"
+    paths = [f for f in listing.split("\0") if f.startswith(impl_prefix) and f.endswith(".md")]
+    if not paths:
+        raise SourceUnavailable(
+            f"Répertoire Documentation/Implémentation/ introuvable : {ROOT / 'Documentation' / 'Implémentation'}"
+        )
+    return frozenset(f.rsplit("/", 1)[-1] for f in paths)
 
 DEFAULT_DOC_NAMES: frozenset[str] = frozenset(
     pathlib.PurePosixPath(doc).name for doc in DEFAULT_DOCS
