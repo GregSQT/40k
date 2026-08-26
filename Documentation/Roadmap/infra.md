@@ -4,15 +4,16 @@
 
 ## Accélération de l'entraînement RL — phases 0→4 {#perf-entrainement}
 
-**Phases 0, 1 et 2 livrées et mesurées (2026-08-26). Phase 4 en cours.** Gains réels : Phase 1 =
-P99 −44 % et wall −32 % (la queue, pas la moyenne) ; Phase 2 = `time/fps` 200 → 226-233 (+13-16 %).
+**Phases 0, 1, 2 et 4.1 livrées et mesurées.** Gains réels : Phase 1 =
+P99 −44 % et wall −32 % (la queue, pas la moyenne) ; Phase 2 = `time/fps` 200 → 226-233 (+13-16 %) ;
+Phase 4.1 = gate parallélisé, parité confirmée (2026-08-27).
 L'estimation initiale de ×2-3 pour 1+2+4 n'est pas atteinte : le lockstep de collecte (~73 % du
 budget d'un cycle) est structurel et ne cède qu'à la Phase 3.
-Phase 4 (évals/curriculum) = gate d'étape parallélisé, **décision B actée** (unification du harnais
-checkpoint dans le harnais bot) ; ne touche pas le `time/fps` d'entraînement, gain = ~15 h de gates
-sur la league. Phase 3 (collecte distribuée, option A) = actée mais non lancée, chantier dédié hors
+Phase 4 (évals/curriculum) : 4.1 ✅ gate parallélisé (B1–B7 livrés, décision B) ; **4.2 🟡** pool
+persistant (jeton de version manquant) ; **4.3 🟡** durée propre TBD.
+Phase 3 (collecte distribuée, option A) = actée mais non lancée, chantier dédié hors
 période de run — c'est elle qui porte le ×3-6.
-Goulots restants : lockstep de collecte (Phase 3), pool d'éval non persistant (4.2).
+Goulots restants : lockstep de collecte (Phase 3), pool d'éval non persistant (4.2), durée gate (4.3).
 
 → `Documentation/Implémentation/A_faire/perf_entrainement.md`
 

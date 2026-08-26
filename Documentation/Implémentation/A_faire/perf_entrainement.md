@@ -20,25 +20,19 @@
 **Débit réel : ~200 steps/s global (SB3 `time/fps`), ~96 ép./min** → P1 ≈ 13 h au rythme courant.
 Mesure de référence antérieure : `x1_long` nu 50 000 ép. = 5 h 54 (2026-08-18).
 
-### Budget d'un cycle PPO — mesuré à 8 184 transitions = 341 vec-steps ≈ 41 s de wall (périmé, cf. encadré)
-
-> ⚠️ Ces chiffres datent de `n_steps=8192`. Le 2026-08-26 (commit `7c466b15`) `n_steps` est passé
-> à **8160** sur les 6 profils : le cycle vaut désormais **8 160 transitions = 340 vec-steps/env**,
-> soit **8 minibatches de 1020 exactement, sans le 9ᵉ minibatch de 24**. Les **parts** du tableau
-> ci-dessous restent valides (−0,4 % de volume) ; le résidu qu'il mentionne n'existe plus.
+### Budget d'un cycle PPO — 8 160 transitions = 340 vec-steps/env ≈ 41 s de wall
 
 | Poste | Mesure | Part |
 |---|---|---|
 | **Attente pure** : lockstep sur l'env le plus lent + 2 allers-retours IPC/step + syncs GPU | ~30 s | **~73 %** |
-| Update GPU : 5 epochs × (8×1020 + 1×24) minibatches × 142 ms, eager, ~4-5 Go de re-transferts H2D | ~6 s | ~15 % |
+| Update GPU : 5 epochs × 8×1020 minibatches × 142 ms, eager, ~4-5 Go de re-transferts H2D | ~6 s | ~15 % |
 | Calcul réel des envs : 9,47 ms/step (mesuré sans profiler), en parallèle sur 24 workers | ~3,2 s | ~8 % |
-| Inférence rollout : 341 forwards batch 24 × 5,84 ms (dont 1,78 ms de conversion H2D, 28 clés d'obs) | ~2 s | ~5 % |
+| Inférence rollout : 340 forwards batch 24 × 5,84 ms (dont 1,78 ms de conversion H2D, 28 clés d'obs) | ~2 s | ~5 % |
 
 **Utilisation** : 24 workers SubprocVecEnv à ~11-13 % CPU chacun, learner ~43 %, machine idle ~72 %,
 GPU 20-38 % (3 Go/8). `n_steps` de la config est un **total** divisé par `n_envs`
 (`ai/train.py`, `apply_rollout_n_steps` : `effective_n_steps = max(1, base_n_steps // n_envs)`).
-Il valait **8192** au moment de cette mesure → 341/env ; il vaut **8160** depuis le 2026-08-26
-(commit `7c466b15`) → **340/env**, cf. l'encadré du budget de cycle ci-dessus.
+Il vaut **8160** → **340/env** (8 minibatches × 1020 pile).
 
 ### Répartition d'un step d'env (cProfile 300 steps, chemin exact du run P1)
 
@@ -230,8 +224,7 @@ Note documentée : divergence sémantique sur `approx_kl` avec plusieurs minibat
 GPU s'attendent mutuellement à chaque step. C'est structurel, pas optimisable localement.
 
 **Décision : Option A** — collecte dans les workers, poids gelés par cycle : chaque worker déroule ses
-**340** steps (341 avant le 2026-08-26 : `n_steps` est passé de 8192 à 8160, commit `7c466b15` —
-la valeur se lit toujours dans `apply_rollout_n_steps`, jamais en dur) avec une copie CPU de la
+**340** steps (valeur lue dans `apply_rollout_n_steps`, jamais en dur) avec une copie CPU de la
 policy (3,1 M de paramètres) et renvoie sa trajectoire ; le
 learner ne fait plus que l'update. Gain ×3-6 estimé ; coût 1-2 semaines + validation lourde.
 
@@ -242,7 +235,7 @@ les mêmes poids gelés dans les workers produit le même batch on-policy.
 **Équivalences et écarts (analyse du 2026-08-26, confirmée par audit croisé)** :
 - Synchro des poids : triviale (3,1 Mo × 24, une fois par cycle).
 - Épisodes à cheval sur les frontières de collecte : le worker tronque à `effective_n_steps` steps
-  (**340** aujourd'hui, cf. ci-dessus — à lire, jamais à coder en dur) et bootstrappe
+  (**340** — à lire dans `apply_rollout_n_steps`, jamais à coder en dur) et bootstrappe
   avec `predict_values` sur ses poids gelés — **exactement** la sémantique SB3 actuelle.
 - **Seul vrai écart sémantique** : VecNormalize. Version propre = stats embarquées avec les poids,
   **gelées pendant le cycle**, mises à jour au learner au retour des trajectoires — diffère de SB3
@@ -416,7 +409,7 @@ la médiane**, machine au repos (règle §1 « Pièges de mesure », établie pa
 | Option | Effet perf | Ce que ça change au métier |
 |---|---|---|
 | AMP/bf16 sur l'update | update plus court | numérique de l'apprentissage (gradients) — 🟡 à tester plus tard (décision 2026-08-26) |
-| ~~`batch_size` 1020 → 1023~~ | ⛔ **SANS OBJET** | Le 9ᵉ minibatch de 24 n'existe plus : `n_steps` est passé de 8192 à 8160 le 2026-08-26 (commit `7c466b15`), APRÈS l'audit qui a produit cette table. À 8160 / 24 envs = 340 steps/env = **8160 transitions**, et 8160 / 1020 = **8 minibatches pile, zéro résidu**. Passer à 1023 CRÉERAIT le résidu (7 pleins + 999). Ligne conservée barrée pour ne pas ré-ouvrir la proposition. |
+| ~~`batch_size` 1020 → 1023~~ | ⛔ **SANS OBJET** | `n_steps` 8160 / 24 envs / 1020 = 8 minibatches pile, zéro résidu — passer à 1023 créerait un résidu. Voir §6 (2026-08-26, `n_steps` 8192→8160, commit `7c466b15`). |
 | `n_envs` 24 → 32/48 | amortit la latence par step | ⛔ **REFUSÉ (2026-08-26)** : la RAM fait exploser la VM pendant le self-play (~0,64 Go/worker + copie CPU de la policy par worker). Non ré-ouvrable sans plus de RAM. |
 | Bots poids 0,0 exclus de l'éval intermédiaire | −40 % du budget d'éval | ✅ **APPLIQUÉ (2026-08-26)** : `tactical`, `reference_balanced`, `reference_denial`, `reference_reactive` supprimés de `bot_eval_weights` et `bot_eval_randomness` sur x1/x1_long (les 4) et x1_debug/x5_* (`tactical` seul, les 3 `reference_*` n'y figuraient pas). Les 6 bots restants gardent 1/6 chacun, somme = 1.0 (vérifiée sur les 6 profils). Perte assumée : la mesure continue holdout/benchmark de ces 4 bots. |
 | Device/format de l'adversaire self-play (GPU partagé, quantization) | steps self-play plus rapides | le jeu de l'adversaire gelé peut dévier numériquement — ⚠️ **RISQUE DE BIAIS SILENCIEUX, protocole obligatoire en §4.5 ci-dessous** |
@@ -498,6 +491,7 @@ Une seule étape non faite = l'option reste ⛔.
 | Date | Contexte | Métrique | Valeur |
 |---|---|---|---|
 | 2026-08-18 | `x1_long --new` 50k ép. (pré-P3-8/P4) | durée totale | 5 h 54 |
+| 2026-08-26 | `n_steps` 8192→8160 (commit `7c466b15`) sur 6 profils x1/x1_long/x1_debug/x5_* | steps/env avant → après · structure minibatch | 341 → 340 vec-steps/env · 9ᵉ minibatch de 24 supprimé → **8 × 1020 pile, zéro résidu** · les parts du profil §1 restent valides (−0,4 % de volume) |
 | 2026-08-26 | run P1 vivant (pré-rampe self-play, 0 éval) | `time/fps` global · débit épisodes | ~200 steps/s · ~96 ép./min |
 | 2026-08-26 | bench offline 1 env, chemin P1 exact, 600 steps | ms/step env (sans profiler) · ms/reset | 9,47 · 107,6 |
 | 2026-08-26 | cProfile 300 steps (overhead ×2,6, % seuls) | masque · obs · tours bots · reward | 33,2 % · 31,9 % · 30,7 % · 0,2 % |
