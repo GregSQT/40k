@@ -485,6 +485,19 @@ garde son signe · identité de style préservée.
 
 ### Étape C — TROIS benchmarks de holdout, à mécanisme de décision différent
 
+> ⛔ **CE DISPOSITIF N'EST PLUS ACTIF (2026-08-26).** Les trois `reference_*` et `tactical` ont été
+> retirés de `bot_eval_weights` sur les six profils (commit `8bb4e42e`). Comme la boucle
+> d'évaluation itère sur les CLÉS de ce dictionnaire — le mécanisme décrit au §1.2.a — ils ne sont
+> **plus joués du tout**, ni en évaluation intermédiaire ni en évaluation finale.
+> **Motif** : ces bots sont saturés à 1.00, constat déjà acté dans `ai/curriculum.py`
+> (`evaluate_stage_gate`) — « un plancher posé dessus est franchi par n'importe quel modèle et ne
+> sépare rien ». Un témoin qui rend toujours la même valeur ne mesure rien, et le coût chiffré au
+> §D.1 ci-dessous (+1 600 épisodes par run de 50 000) l'achetait pour rien.
+> Les trois bots restent **définis et jouables** (`ai/bot_registry.py`, `BENCHMARK_BOT_KEYS`,
+> `scripts/bot_ranking.py`) : c'est leur participation automatique à l'évaluation qui est
+> supprimée, pas les bots. La conception ci-dessous reste la référence si le dispositif est
+> réarmé un jour — auquel cas il faudra d'abord traiter la saturation.
+
 **Ce qui les sépare des six styles d'entraînement, et c'est le cœur de l'étape.** Les six styles
 notent CHAQUE destination par une somme pondérée `Σ(poids × features)` et choisissent leur cible
 par un critère unique fixé par la doctrine. Les trois benchmarks ne font ni l'un ni l'autre :
@@ -601,6 +614,17 @@ exiger**, et seulement si le coût mesuré le justifie.
 ---
 
 ### Étape D — `benchmark_floor` : deux étages, et ce qu'un plancher raté veut dire
+
+> ⛔ **`benchmark_floor` A ÉTÉ SUPPRIMÉ DU CODE (2026-08-26, commit `16cf36b1`).** Le paramètre
+> `model_gating_min_benchmark_floor`, sa logique de gating dans `ai/training_callbacks.py`, ses
+> courbes TensorBoard et ses tests n'existent plus. Deux raisons cumulées : le mécanisme était
+> **saturé** — `ai/curriculum.py` le dit verbatim, « les bots de reference sont satures a 1.00,
+> donc un plancher pose dessus est franchi par n'importe quel modele et ne separe rien » — et il
+> avait déjà été **remplacé** par `evaluate_stage_gate`, un plancher dur posé sur le score contre
+> le champion le plus récent, seul étalon dont la force suit celle de l'agent. Il était par
+> ailleurs configuré à `0.0` partout, donc inactif.
+> Tout le §D ci-dessous décrit donc un dispositif **retiré**. Conservé comme référence de
+> conception et pour le raisonnement sur les deux étages, qui reste valable.
 
 > **TRANCHÉ le 2026-08-15** (§0bis). Deux étages : les trois `reference_*` gatent, `tactical` reste
 > scellé. **Et un plancher raté n'est pas seulement un modèle refusé : c'est un entraînement à
