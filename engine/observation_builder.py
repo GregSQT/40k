@@ -1247,11 +1247,11 @@ class ObservationBuilder:
         # retournerait les types de la composition initiale même si le profil a changé.
         _type_attrs = tuple(
             (
-                models_cache.get(mid, {}).get("role"),
-                int(models_cache.get(mid, {}).get("HP_MAX", 0)),
-                int(models_cache.get(mid, {}).get("T", 0)),
-                int(models_cache.get(mid, {}).get("ARMOR_SAVE", 0)),
-                int(models_cache.get(mid, {}).get("INVUL_SAVE", 0)),
+                (d := models_cache.get(mid, {})).get("role"),
+                int(d.get("HP_MAX", 0)),
+                int(d.get("T", 0)),
+                int(d.get("ARMOR_SAVE", 0)),
+                int(d.get("INVUL_SAVE", 0)),
             )
             for mid in alive_mids
         )

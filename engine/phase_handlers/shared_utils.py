@@ -13001,10 +13001,8 @@ def build_squad_move_cell_map(
     # DEUX niveaux de clé pour séparer le coût sur hit du coût sur miss :
     #
     # 1. CHEAP KEY (O(1)) : (_unit_move_version, advance_roll, phase, bshock, tts_bool).
-    #    Capturée sur le chemin NORMAL. Sur un hit cheap, aucune empreinte géométrique n'est
-    #    calculée. Garde batch : si `_los_batch` est ouvert, les positions sont partiellement
-    #    écrites → le compteur n'est pas encore bumped → la cheap key est ignorée (ce chemin est
-    #    très rare en entraînement ; la guard est conservée pour §0.18).
+    #    Capturée sur le chemin NORMAL. N'est plus un court-circuit de lecture (§0.18) : stockée
+    #    pour mise à jour du slot sur hit fp_key uniquement.
     #
     # 2. FP KEY (O(unités + figs)) : fingerprint géométrique complet. Conservé comme défense en
     #    profondeur : si la cheap key est fausse (batch, mutation directe, bshock/tts non capturé
@@ -13068,7 +13066,7 @@ def build_squad_move_cell_map(
     )
     _fp_s = (time.perf_counter() - _t0) if _t0 is not None else 0.0
 
-    if _slots is not None and not _in_batch:
+    if _slots is not None:
         for _s in _slots:
             if _s[1] == _fp_key:
                 _s[0] = _cheap_key  # met à jour la cheap key pour le prochain appel
