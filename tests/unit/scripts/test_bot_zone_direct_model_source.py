@@ -29,8 +29,7 @@ _SCRIPT = PROJECT_ROOT / "scripts" / "bot_zone_direct.py"
 
 
 def _load_module():
-    """Charge le script comme module. Il n'est pas importable par son chemin : `scripts/` n'est
-    pas un package et son `sys.path.insert` de tete vise la racine du depot, pas lui."""
+    """Charge le script via spec_from_file_location : le script se charge lui-meme ses dependances."""
     spec = importlib.util.spec_from_file_location("bot_zone_direct_under_test", _SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -84,7 +83,6 @@ def test_md5_est_bien_celui_du_fichier(tmp_path):
     # JUMEAU : `roster_matchup_stats` mesure lui aussi sur le chemin canonique volatil et imprime
     # desormais la meme empreinte. Les deux implementations sont distinctes (pas de module commun
     # dans `scripts/`), donc c'est leur ACCORD qui se verifie, pas leur partage.
-    sys.path.insert(0, str(PROJECT_ROOT))
     from scripts.roster_matchup_stats import _model_md5
 
     assert _model_md5(str(fichier)) == attendu

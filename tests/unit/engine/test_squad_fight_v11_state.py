@@ -22,15 +22,11 @@ groupées résolues par `_fight_v11_gym_settle`.
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 from typing import Any, Dict
 from pathlib import Path
 
 import pytest
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from smoke_t5_bare import MELEE_SCENARIO  # noqa: E402
 

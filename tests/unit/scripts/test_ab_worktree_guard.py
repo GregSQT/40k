@@ -19,13 +19,9 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 
 def _git(*args: str, cwd: Path) -> None:

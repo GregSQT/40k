@@ -12,17 +12,12 @@ Verlock : les valeurs numériques (masques, loss, approx_kl) sont bit-à-bit ide
 from __future__ import annotations
 
 import math
-import sys
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
 import torch
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(PROJECT_ROOT))
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────────────────────
