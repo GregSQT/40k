@@ -1116,10 +1116,20 @@ d'évaluation.
 
 #### H.3 Ce qui est publié à chaque génération
 
-`benchmark_floor`, `benchmark_mean`, win-rate par membre de league, `historical_mean`,
+~~`benchmark_floor`, `benchmark_mean`~~, win-rate par membre de league, `historical_mean`,
 `historical_worst`, win-rate par exploiter, `exploiters_worst`, plus `training_bot_floor` et
-`vs_tactical` (le témoin scellé). Ces courbes sont l'objet même de la league : sans elles, on
+~~`vs_tactical` (le témoin scellé)~~. Ces courbes sont l'objet même de la league : sans elles, on
 paierait 260 heures pour un unique chiffre de fin.
+
+> ⚠️ **TROIS DE CES COURBES N'EXISTENT PLUS (2026-08-26/27).** `benchmark_floor` et
+> `benchmark_mean` ont été supprimées avec leur mécanisme (commit `16cf36b1`, `log_benchmark_scores`
+> retirée de `ai/metrics_tracker.py`) ; `vs_tactical` n'a plus de producteur depuis que `tactical`
+> est sorti de `bot_eval_weights` (commit `8bb4e42e`). Motif commun : saturation — les trois
+> mesuraient des adversaires battus à ~100 %, donc aucune ne séparait plus deux modèles.
+> **Ce que la league devra publier à la place reste à trancher** quand elle sera montée : les
+> candidats sont l'échelle de checkpoints figés ([#r0b-echelle](#r0b-echelle)) et le plancher dur
+> contre le champion le plus récent (`evaluate_stage_gate`), tous deux non saturables par
+> construction puisque leur difficulté suit la force de l'agent. Le reste de la liste est intact.
 
 #### H.4 Coût total, à connaître avant de commencer
 

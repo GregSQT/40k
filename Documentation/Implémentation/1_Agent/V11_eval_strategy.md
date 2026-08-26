@@ -224,8 +224,13 @@ training qui les référencent.
 >
 > **Le critère quantitatif est `00_critical/a_bot_eval_combined` + `00_critical/b_worst_bot_score`**
 > (les deux se lisent ensemble, cf. [§10.5](#s10.5)), plus `00_critical/0_gap_sm-ork` pour
-> l'équilibre entre rosters. `vs_tactical` est l'**indicateur de généralisation** : on le cite, il
-> ne décide pas.
+> l'équilibre entre rosters. ~~`vs_tactical` est l'**indicateur de généralisation** : on le cite, il
+> ne décide pas.~~
+> ⚠️ **`vs_tactical` N'A PLUS DE PRODUCTEUR depuis le 2026-08-26** (commit `8bb4e42e`) : `tactical`
+> a été retiré de `bot_eval_weights` sur les 6 profils, donc il n'est plus joué et la courbe n'est
+> plus émise. Motif : l'indicateur était **saturé à 1,00** ([ROADMAP_INDEX.md](../../Roadmap/ROADMAP_INDEX.md)),
+> donc il ne signalait plus aucune perte de généralisation. Les deux critères quantitatifs
+> ci-dessus (`a_bot_eval_combined`, `b_worst_bot_score`) sont inchangés et restent produits.
 >
 > **Pourquoi** — la raison décisive est la troisième :
 > 1. un seul adversaire sur ~100 parties porte ~±5 points d'erreur-type ; `combined` en agrège cinq ;
