@@ -1073,6 +1073,7 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
     from engine.observation_entities import WEAPON_PROFILE_CACHE_KEY
 
     game_state.pop(WEAPON_PROFILE_CACHE_KEY, None)
+    game_state.pop("_entity_types_cache", None)  # item 1.7 — invalidé à la rotation de rosters
 
     units_cache: Dict[str, Dict[str, Any]] = {}
     occupation_map: Dict[Tuple[int, int], str] = {}
@@ -1555,6 +1556,12 @@ def _apply_los_invalidation(
     from engine.phase_handlers.shooting_handlers import _invalidate_los_cache_for_moved_unit
     _invalidate_los_cache_for_moved_unit(game_state, unit_id, old_col=old_col, old_row=old_row)
     _invalidate_pair_cache_for_unit(game_state, unit_id)
+    # Item 1.8 — invalider l'empreinte EZ mémoïsée dans l'entrée de l'unité touchée.
+    uc = game_state.get("units_cache")
+    if uc is not None:
+        _ez_entry = uc.get(str(unit_id))
+        if _ez_entry is not None:
+            _ez_entry.pop("_ez_fp", None)
     game_state["_unit_move_version"] += 1
 
 
@@ -3582,6 +3589,10 @@ def _recompute_squad_occupied_hexes(game_state: Dict[str, Any], squad_id: str) -
     entry["level_by_model"] = new_level_by_model
     entry["floor_height_by_model"] = new_floor_height_by_model
     entry["orientation_by_model"] = new_orientation_by_model
+    # item 1.8 : _ez_fp dépend de occupied_hexes_by_model — purger ici couvre les cas
+    # où un modèle non-ancre bouge (la seule écriture de occupied_hexes_by_model hors
+    # _touch_unit_los).
+    entry.pop("_ez_fp", None)
     # Sync occupation_map (retire cellules disparues, ajoute nouvelles)
     occ_map = game_state.get("occupation_map")
     if occ_map is not None:
@@ -6398,7 +6409,19 @@ def charge_build_valid_plan(
     """
     if charge_roll <= 0:
         return None
+    # Item 1.5 — per-state cache (masque + obs appellent la même fonction dans le même état).
+    # Clé : (charger, targets, roll, version) — la version garantit l'invalidation à toute
+    # mutation de position/mort via _touch_unit_los. Pas de guard _los_batch : charge_build_valid_plan
+    # n'est jamais appelée pendant un batch d'écriture de positions.
+    _cbvp_version = game_state.get("_unit_move_version", 0)
+    _cbvp_key = (str(squad_id), tuple(str(t) for t in target_squad_ids), int(charge_roll), _cbvp_version)
+    _cbvp_cache = game_state.setdefault("_charge_plan_cache", {})
+    _cbvp_sentinel = object.__new__(object)  # marqueur « absent » distinct de None (plan invalide)
+    _cbvp_hit = _cbvp_cache.get(_cbvp_key, _cbvp_sentinel)
+    if _cbvp_hit is not _cbvp_sentinel:
+        return _cbvp_hit
     if not charge_check_eligibility(game_state, squad_id, target_squad_ids):
+        _cbvp_cache[_cbvp_key] = None
         return None
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
@@ -6408,6 +6431,7 @@ def charge_build_valid_plan(
     units_cache = require_key(game_state, "units_cache")
     mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
     if not mids:
+        _cbvp_cache[_cbvp_key] = None
         return None
 
     from engine.phase_handlers.charge_handlers import _charge_budget_subhex
@@ -6424,6 +6448,7 @@ def charge_build_valid_plan(
     max_distance = _charge_budget_subhex(game_state, squad_id, int(charge_roll))
     budget = max(0, max_distance - squad_descent_penalty_subhex(game_state, squad_id))
     if budget <= 0:
+        _cbvp_cache[_cbvp_key] = None
         return None
 
     # Toutes les positions de figurines cibles
@@ -6431,6 +6456,7 @@ def charge_build_valid_plan(
     for tsid in target_squad_ids:
         target_positions.extend(_squad_model_positions(game_state, str(tsid)))
     if not target_positions:
+        _cbvp_cache[_cbvp_key] = None
         return None
 
     from engine.spatial_relations import unit_entries_within_engagement_zone
@@ -6538,6 +6564,7 @@ def charge_build_valid_plan(
         for tc, tr in target_positions
     )
     if closest_gap - engage_reach > budget:
+        _cbvp_cache[_cbvp_key] = None
         return None
 
     # Cellules d'ou l'engagement est GEOMETRIQUEMENT possible (surensemble, cf. ci-dessus).
@@ -6696,6 +6723,7 @@ def charge_build_valid_plan(
                 _cd, _gap, pc, pr = best_cand
                 picked = (pc, pr)
         if picked is None:
+            _cbvp_cache[_cbvp_key] = None
             return None  # cette fig ne peut bouger legalement → charge echouee
         # Niveau d'arrivee SOL, comme le plan rigide de move : le moteur ne monte jamais, et
         # « pas de niveau » signifierait pour commit_move « garder le niveau courant » (etage).
@@ -6716,13 +6744,16 @@ def charge_build_valid_plan(
             if unit_entries_within_engagement_zone(synth, te, ez, game_state=game_state):
                 engaged_targets.add(tid)
     if len(engaged_targets) != len(target_entries_by_id):
+        _cbvp_cache[_cbvp_key] = None
         return None
 
     # Coherency finale
     plan_positions = {mid: (nc, nr) for mid, nc, nr, _lvl in plan}
     if not _validate_plan_coherency(plan_positions, game_state):
+        _cbvp_cache[_cbvp_key] = None
         return None
 
+    _cbvp_cache[_cbvp_key] = plan
     return plan
 
 
@@ -6942,11 +6973,7 @@ def _attacker_model_can_reach_squad(
         str(target_squad_id), game_state, "_attacker_model_can_reach_squad"
     )
     # Rule 13.09: hidden unit only targetable within detection range (15").
-    _units = require_key(game_state, "units")
-    try:
-        _target_unit = next(u for u in _units if str(u.get("id")) == str(target_squad_id))
-    except StopIteration:
-        _target_unit = None
+    _target_unit = get_unit_by_id(game_state, str(target_squad_id))
     target_squad_id_str = str(target_squad_id)
     if target_squad_id_str not in squad_models:
         raise KeyError(f"_attacker_model_can_reach_squad: unit {target_squad_id} not in squad_models")
@@ -12964,27 +12991,59 @@ def build_squad_move_cell_map(
     if entry is None:
         return {}
 
-    # Mémoïsation intra-step. Le masque reconstruit cette carte des milliers de fois par épisode
-    # (pool BFS + érosion géodésique par-figurine au budget Advance = coût dominant) ; sans cache
-    # x5_debug passe de ~6 s/ép à ~100 s/ép. La CLÉ est un FINGERPRINT LU de l'état réel dont
-    # dépend la carte — PAS `_unit_move_version`. Une 1re version clé sur `_unit_move_version` a
-    # causé une régression masque⊆exécutable (§0.18) : un chemin d'écriture de position ne bumpe
-    # pas ce compteur (fenêtre de batch LoS / mutation directe), si bien qu'une carte cachée était
-    # servie alors que l'occupation avait changé → le masque offrait une cellule d'ancre déjà
-    # occupée → `execute_squad_move` levait « incohérence masque/exécution » sur un ADVANCE.
+    # Mémoïsation intra-step (2-slots par escouade, items 1.1+1.2 perf_entrainement).
+    # Structure : _cache[squad_id] = [[cheap_key, fp_key, result], ...]  — max 2 slots.
+    # DEUX niveaux de clé pour séparer le coût sur hit du coût sur miss :
     #
-    # Le fingerprint capture TOUT ce qui change la carte, en le LISANT directement (immunisé au
-    # bypass du compteur) :
-    #   - empreinte spatiale de TOUTES les unités (col/row/occupied_hexes) → occupation des autres
-    #     escouades ET positions ennemies (transit géodésique) ;
-    #   - bloc de CETTE escouade (figs vivantes col/row/level) → forme rigide + coût de descente ;
-    #   - régime de budget : `advance_roll`, déclaration « take to the skies » (malus TTS) lue par
-    #     le MÊME prédicat que le budget — `took_to_the_skies` sous sa garde de phase, jamais le set
-    #     `units_took_to_skies` en direct, qui ferait varier la clé hors des phases où 21.03
-    #     s'applique (cf. la construction de `_fp_key` ci-dessous) ;
-    #     battle-shock de l'escouade (Desperate Escape traverse les ennemis) ; `phase` (le cache
-    #     enemy_adjacent est par-phase, stable intra-phase). Les murs et les toggles sont statiques.
-    # O(unités + figs) par appel — négligeable devant le BFS géodésique qu'il évite sur un hit.
+    # 1. CHEAP KEY (O(1)) : (_unit_move_version, advance_roll, phase, bshock, tts_bool).
+    #    Capturée sur le chemin NORMAL. Sur un hit cheap, aucune empreinte géométrique n'est
+    #    calculée. Garde batch : si `_los_batch` est ouvert, les positions sont partiellement
+    #    écrites → le compteur n'est pas encore bumped → la cheap key est ignorée (ce chemin est
+    #    très rare en entraînement ; la guard est conservée pour §0.18).
+    #
+    # 2. FP KEY (O(unités + figs)) : fingerprint géométrique complet. Conservé comme défense en
+    #    profondeur : si la cheap key est fausse (batch, mutation directe, bshock/tts non capturé
+    #    par le compteur), la clé géométrique détecte quand même le miss. Une version pure sur
+    #    compteur sans fp_key = retour à la régression §0.18.
+    #
+    # 2 SLOTS : couvre l'alternance budget normal (advance_roll=None) / budget advance
+    # (advance_roll=X) sur la même escouade sans double BFS.
+    _unit_obj_fp = require_unit_by_id(game_state, squad_id)
+    _bshock = bool(require_key(_unit_obj_fp, "battle_shocked"))
+    _phase_str = str(game_state.get("phase", ""))  # get allowed
+    from engine.phase_handlers.movement_handlers import (
+        take_to_the_skies_applies_to_phase as _tts_phase_fp,
+        took_to_the_skies as _tts_fp,
+    )
+    _tts_bool = bool(
+        _tts_phase_fp(game_state, charge=False)
+        and _tts_fp(game_state, _unit_obj_fp, str(squad_id), charge=False)
+    )
+    _cheap_key = (
+        game_state.get("_unit_move_version", 0),
+        advance_roll,
+        _phase_str,
+        _bshock,
+        _tts_bool,
+    )
+    _cache = game_state.setdefault("_squad_move_pool_cache", {})
+    _slots = _cache.get(str(squad_id))
+    _in_batch = game_state.get("_los_batch") is not None
+
+    # Niveau 1 — cheap key (O(1), seulement hors batch pour §0.18)
+    if _slots is not None and not _in_batch:
+        for _s in _slots:
+            if _s[0] == _cheap_key:
+                if _perf and _t0 is not None:
+                    append_perf_timing_line(
+                        f"SQUAD_MOVE_CELL_MAP episode={game_state.get('episode_number', '?')} "
+                        f"turn={game_state.get('turn', '?')} squad={squad_id} cache_hit=1 "
+                        f"fp_s=0.000000 pool_s=0.000000 erode_s=0.000000 project_s=0.000000 "
+                        f"total_s={time.perf_counter() - _t0:.6f} cells_n={len(_s[2])}"
+                    )
+                return _s[2]
+
+    # Niveau 2 — fingerprint géométrique complet (défense en profondeur)
     _mc_fp = require_key(game_state, "models_cache")
     _sm_fp = require_key(game_state, "squad_models")
     _units_fp = tuple(sorted(
@@ -13000,38 +13059,28 @@ def build_squad_move_cell_map(
         for _mid in _sm_fp.get(str(squad_id), [])  # get allowed
         if (_m := _mc_fp.get(str(_mid))) is not None
     ))
-    _unit_obj_fp = require_unit_by_id(game_state, squad_id)
-    _bshock = bool(require_key(_unit_obj_fp, "battle_shocked"))
-    from engine.phase_handlers.movement_handlers import (
-        take_to_the_skies_applies_to_phase as _tts_phase_fp,
-        took_to_the_skies as _tts_fp,
-    )
-
     _fp_key = (
         advance_roll,
-        # MÊME expression que le budget (garde de phase incluse) : omettre la garde ferait varier
-        # la clé hors des phases que 21.03 couvre, là où le budget, lui, ne varie pas.
-        bool(
-            _tts_phase_fp(game_state, charge=False)
-            and _tts_fp(game_state, _unit_obj_fp, str(squad_id), charge=False)
-        ),
-        str(game_state.get("phase", "")),  # get allowed
+        _tts_bool,
+        _phase_str,
         _bshock,
         hash(_units_fp),
         hash(_block_fp),
     )
     _fp_s = (time.perf_counter() - _t0) if _t0 is not None else 0.0
-    _cache = game_state.setdefault("_squad_move_pool_cache", {})
-    _hit = _cache.get(str(squad_id))
-    if _hit is not None and _hit[0] == _fp_key:
-        if _perf and _t0 is not None:
-            append_perf_timing_line(
-                f"SQUAD_MOVE_CELL_MAP episode={game_state.get('episode_number', '?')} "
-                f"turn={game_state.get('turn', '?')} squad={squad_id} cache_hit=1 "
-                f"fp_s={_fp_s:.6f} pool_s=0.000000 erode_s=0.000000 project_s=0.000000 "
-                f"total_s={time.perf_counter() - _t0:.6f} cells_n={len(_hit[1])}"
-            )
-        return _hit[1]
+
+    if _slots is not None:
+        for _s in _slots:
+            if _s[1] == _fp_key:
+                _s[0] = _cheap_key  # met à jour la cheap key pour le prochain appel
+                if _perf and _t0 is not None:
+                    append_perf_timing_line(
+                        f"SQUAD_MOVE_CELL_MAP episode={game_state.get('episode_number', '?')} "
+                        f"turn={game_state.get('turn', '?')} squad={squad_id} cache_hit=1 "
+                        f"fp_s={_fp_s:.6f} pool_s=0.000000 erode_s=0.000000 project_s=0.000000 "
+                        f"total_s={time.perf_counter() - _t0:.6f} cells_n={len(_s[2])}"
+                    )
+                return _s[2]
 
     if _squad_is_in_enemy_er(game_state, squad_id):
         budget = get_squad_move_budget(squad_id, game_state, "fall_back")
@@ -13064,7 +13113,8 @@ def build_squad_move_cell_map(
         if (_m := _mc_fp.get(str(_mid))) is not None
     ]
     if not _positions_in_coherency(_alive_fp, game_state):
-        _cache[str(squad_id)] = (_fp_key, {})
+        _new_slot = [_cheap_key, _fp_key, {}]
+        _cache[str(squad_id)] = [_new_slot] + [s for s in (_slots or []) if s[1] != _fp_key][:1]
         return {}
 
     costs: Dict[Tuple[int, int], float] = {}
@@ -13094,7 +13144,8 @@ def build_squad_move_cell_map(
     half_extent = grid_half_extent_subhex(game_state, squad_id)
     result = project_pool_to_grid(costs, anchor_col, anchor_row, half_extent)
     _project_s = (time.perf_counter() - _t_proj) if _t_proj is not None else 0.0
-    _cache[str(squad_id)] = (_fp_key, result)
+    _new_slot = [_cheap_key, _fp_key, result]
+    _cache[str(squad_id)] = [_new_slot] + [s for s in (_slots or []) if s[1] != _fp_key][:1]
     if _perf and _t0 is not None:
         append_perf_timing_line(
             f"SQUAD_MOVE_CELL_MAP episode={game_state.get('episode_number', '?')} "
@@ -13147,23 +13198,29 @@ def shoot_weapon_sel_open_slots(
     if entry is None:
         return []
     our_player = int(require_key(entry, "player"))
-    ez = get_engagement_zone(game_state)
-    mc = game_state.get("models_cache", {})  # get allowed
-    alive = [
-        mc[mid]
-        for mid in game_state.get("squad_models", {}).get(squad_id, [])  # get allowed
-        if mid in mc
-    ]
+    # Item 1.4 : réutiliser alive + elig_targets calculés par build_squad_action_mask quand
+    # les deux sont appelés dans le même état (chemin action_decoder standard).
+    _pass = game_state.get("_shoot_pass_cache")
+    if _pass is not None and _pass[0] == squad_id:
+        alive, elig_targets = _pass[1], _pass[2]
+    else:
+        ez = get_engagement_zone(game_state)
+        mc = game_state.get("models_cache", {})  # get allowed
+        alive = [
+            mc[mid]
+            for mid in game_state.get("squad_models", {}).get(squad_id, [])  # get allowed
+            if mid in mc
+        ]
+        elig_targets = [
+            esid for esid in enemy_slot_ids
+            if esid is not None
+            and esid in units_cache
+            and entry_is_on_battlefield(units_cache[esid])
+            and not _target_locked_by_ally(
+                units_cache, units_cache[esid], squad_id, our_player, ez, game_state
+            )
+        ]
     profiles = collect_weapon_profiles(alive, "RNG_WEAPONS")
-    elig_targets = [
-        esid for esid in enemy_slot_ids
-        if esid is not None
-        and esid in units_cache
-        and entry_is_on_battlefield(units_cache[esid])
-        and not _target_locked_by_ally(
-            units_cache, units_cache[esid], squad_id, our_player, ez, game_state
-        )
-    ]
     opened_combi: set = set()
     open_indices: List[int] = []
     for slot_j, (wpn, _) in enumerate(profiles[:SQUAD_ACTION_SHOOT_WEAPON_SEL_SLOT_COUNT]):
@@ -13298,27 +13355,34 @@ def build_squad_action_mask(
         # supprimait donc deux types de tir entiers pour l agent (cf. resolve_squad_shooting_type).
         shooting_type = resolve_squad_shooting_type(game_state, squad_id)
         ez = get_engagement_zone(game_state)
+        # Item 1.4 : pré-calculer alive + elig une seule fois ; shoot_weapon_sel_open_slots
+        # (appelé juste après dans action_decoder) lit le même résultat via _shoot_pass_cache.
+        _shoot_mc = game_state.get("models_cache", {})  # get allowed
+        _shoot_alive = [
+            m for mid in game_state.get("squad_models", {}).get(squad_id, [])  # get allowed
+            if (m := _shoot_mc.get(mid)) is not None
+        ]
+        # `esid not in units_cache` vient d'être écarté juste au-dessus (slot d'ennemi
+        # mort = contrat du masque) : l'entrée existe, les deux `is not None` qui
+        # suivaient étaient morts — et le second aurait sauté le contrôle « verrouillé
+        # par un allié », donc ouvert un slot de tir interdit.
+        _shoot_elig: List[Tuple[int, str]] = [
+            (slot_i, esid)
+            for slot_i, esid in enumerate(enemy_slot_ids)
+            if esid is not None
+            and esid in units_cache
+            # Ennemi hors table (réserves 20.01) : intirable
+            and entry_is_on_battlefield(units_cache[esid])
+            and not _target_locked_by_ally(
+                units_cache, units_cache[esid], squad_id, our_player, ez, game_state
+            )
+        ]
+        # Stocker pour que shoot_weapon_sel_open_slots évite de recalculer alive + elig.
+        game_state["_shoot_pass_cache"] = (squad_id, _shoot_alive, [esid for _, esid in _shoot_elig])
         if shooting_type is not None:
-            for slot_i, esid in enumerate(enemy_slot_ids):
-                if esid is None or esid not in units_cache:
-                    continue
-                # `esid not in units_cache` vient d'être écarté juste au-dessus (slot d'ennemi
-                # mort = contrat du masque) : l'entrée existe, les deux `is not None` qui
-                # suivaient étaient morts — et le second aurait sauté le contrôle « verrouillé
-                # par un allié », donc ouvert un slot de tir interdit.
-                enemy_entry = units_cache[esid]
-                # Ennemi hors table (réserves 20.01) : intirable, et sans géométrie à mesurer —
-                # le slot reste dans l'observation, le masque le ferme.
-                if not entry_is_on_battlefield(enemy_entry):
-                    continue
-                if _target_locked_by_ally(units_cache, enemy_entry, squad_id, our_player, ez, game_state):
-                    continue
-                models_cache = game_state.get("models_cache", {})  # get allowed
+            for slot_i, esid in _shoot_elig:
                 can_any_hit = False
-                for mid in game_state.get("squad_models", {}).get(squad_id, []):  # get allowed
-                    m = models_cache.get(mid)
-                    if m is None:
-                        continue
+                for m in _shoot_alive:
                     # Toute arme SELECTIONNABLE sous ce type de tir suffit — pas seulement
                     # `selectedRngWeaponIndex`, qui vaut 0 pour toute la partie en gym et
                     # rendait le masque aveugle aux autres armes de la figurine.
@@ -13338,14 +13402,7 @@ def build_squad_action_mask(
         # choix. Le calculer avec `shooting_type` (le defaut) aurait rendu les deux blocs
         # identiques, donc l action indirecte inutile.
         if SHOOTING_TYPE_INDIRECT in eligible_squad_shooting_types(game_state, squad_id):
-            for slot_i, esid in enumerate(enemy_slot_ids):
-                if esid is None or esid not in units_cache:
-                    continue
-                enemy_entry = units_cache[esid]
-                if not entry_is_on_battlefield(enemy_entry):
-                    continue
-                if _target_locked_by_ally(units_cache, enemy_entry, squad_id, our_player, ez, game_state):
-                    continue
+            for slot_i, esid in _shoot_elig:
                 if _squad_can_shoot_target_under_type(
                     game_state, squad_id, esid, SHOOTING_TYPE_INDIRECT
                 ):

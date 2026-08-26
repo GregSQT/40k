@@ -1656,6 +1656,11 @@ class W40KEngine(gym.Env):
             "units_reacted_this_enemy_turn": set(),
             "reaction_window_active": False,
             "_unit_move_version": 0,
+            # Caches dépendant de _unit_move_version : purgés ici car _unit_move_version repart
+            # à 0 et game_state.update() ne recrée pas le dict (les entrées survivraient).
+            "_squad_move_pool_cache": {},
+            "_charge_plan_cache": {},
+            "_edge_distance_cache": {},
             "last_move_event_id": 0,
             "last_move_cause": "normal",
             "reactive_mode": "micro",
@@ -9069,14 +9074,13 @@ class W40KEngine(gym.Env):
             scenario_name = scenario_name.split("\\")[-1].replace(".json", "")
 
         # Update config with new scenario data
-        # CRITICAL: Store ORIGINAL positions in config as a deepcopy (immutable reference)
-        # This prevents position corruption when game_state units are modified during gameplay
-        self.config["units"] = copy.deepcopy(scenario_units)
+        # scenario_units est une liste locale fraîche issue de _load_units_from_scenario — pas
+        # besoin de deepcopy pour config (immutable reference). Le seul deepcopy est pour
+        # game_state["units"] qui sera muté pendant l'épisode.
+        self.config["units"] = scenario_units
         self.config["name"] = scenario_name
         self.config["primary_objective"] = primary_objective_config
 
-        # Reinitialize game_state units with a SEPARATE deepcopy
-        # This ensures game_state["units"] is independent from config["units"]
         self.game_state["units"] = copy.deepcopy(scenario_units)
         for unit in self.game_state["units"]:
             stamp_weapon_keys(unit)

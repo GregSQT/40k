@@ -146,6 +146,7 @@ def validate_strategic_reserves_cap(
 
 # PERF: In-memory caches to avoid repeated disk I/O during scenario rotation.
 _scenario_json_cache: Dict[str, Any] = {}
+_roster_json_cache: Dict[str, Any] = {}  # item 1.9 — clé = chemin absolu du roster
 _walls_json_cache: Dict[str, List[List[int]]] = {}
 _walls_json_mtime_ns: Dict[str, int] = {}
 # board_config.json des plateaux SOURCE (résolution native déclarée par board_ref), lus à
@@ -2611,6 +2612,9 @@ class GameStateManager:
         """Load and validate compact roster JSON file."""
         if not roster_path.exists():
             raise FileNotFoundError(f"{roster_label} roster file not found: {roster_path}")
+        _abs_rp = str(roster_path.resolve())
+        if _abs_rp in _roster_json_cache:
+            return copy.deepcopy(_roster_json_cache[_abs_rp])
         try:
             with open(roster_path, "r", encoding="utf-8-sig") as f:
                 roster_data = json.load(f)
@@ -2634,6 +2638,7 @@ class GameStateManager:
         composition = require_key(roster_data, "composition")
         if not isinstance(composition, list) or not composition:
             raise ValueError(f"{roster_label} roster {roster_path} must define non-empty 'composition' list")
+        _roster_json_cache[_abs_rp] = copy.deepcopy(roster_data)
         return roster_data
 
     def _expand_compact_roster_to_basic_units(

@@ -167,16 +167,16 @@ C'est la **queue** (pas la moyenne) qui fixe le lockstep : chaque vec-step atten
 
 | # | Étape | Ancre | Statut |
 |---|---|---|---|
-| 1.1 | Cache **2 slots** (budget normal + advance) pour `build_squad_move_cell_map` — supprime le double BFS par activation de move | `shared_utils.py` | 🟡 |
-| 1.2 | Fingerprint sur hit → compteur de version d'état (invalidation à la mutation : commit_move, mort, phase) | `shared_utils.py` | 🟡 |
-| 1.3 | `_attacker_model_can_reach_squad` : scan linéaire → index `unit_by_id` | `shared_utils.py` | 🟡 |
-| 1.4 | Masque de tir : fusionner les 2 balayages modèles×armes×cibles (partager les résultats de la 1ʳᵉ passe avec `shoot_weapon_sel_open_slots`) | `shared_utils.py/13129` | 🟡 |
-| 1.5 | Obs : mémoïser `charge_build_valid_plan` (masque + obs dans le même état) | `observation_builder.py` | 🟡 |
-| 1.6 | Obs : pair-cache `edge_distance` avec invalidation au mouvement (motif LoS éprouvé) | `observation_builder.py` | 🟡 |
-| 1.7 | Obs : cache du bloc TYPES + réutilisation des buffers numpy (~27 `np.zeros`/build) | `observation_builder.py/1183` | 🟡 |
-| 1.8 | Pair-cache `entries_in_engagement_zone` (invalidation motif `_touch_unit_los`) | `spatial_relations.py` | 🟡 |
-| 1.9 | Reset : cacher les `json.load` des rosters + supprimer le deepcopy complet du scénario (copies ciblées) | `w40k_core.py`, `game_state.py` | 🟡 |
-| 1.10 | **Mesure de clôture** : ms/step + fps offline ; consigner §6 | — | 🟡 |
+| 1.1 | Cache **2 slots** (budget normal + advance) pour `build_squad_move_cell_map` — supprime le double BFS par activation de move | `shared_utils.py:13097` | ✅ |
+| 1.2 | Fingerprint sur hit → compteur de version d'état (invalidation à la mutation : commit_move, mort, phase) | `shared_utils.py:12990` | ✅ |
+| 1.3 | `_attacker_model_can_reach_squad` : scan linéaire → index `unit_by_id` | `shared_utils.py:6947` | ✅ |
+| 1.4 | Masque de tir : fusionner les 2 balayages modèles×armes×cibles (partager les résultats de la 1ʳᵉ passe avec `shoot_weapon_sel_open_slots`) | `shared_utils.py:13174/13129` | ✅ |
+| 1.5 | Obs : mémoïser `charge_build_valid_plan` (masque + obs dans le même état) | `observation_builder.py:1519` | ✅ |
+| 1.6 | Obs : pair-cache `edge_distance` avec invalidation au mouvement (motif LoS éprouvé) | `observation_builder.py:1350` | ✅ |
+| 1.7 | Obs : cache du bloc TYPES + réutilisation des buffers numpy (~27 `np.zeros`/build) | `observation_builder.py:1081/1183` | ✅ |
+| 1.8 | Pair-cache `entries_in_engagement_zone` (invalidation motif `_touch_unit_los`) | `spatial_relations.py:503` | ✅ |
+| 1.9 | Reset : cacher les `json.load` des rosters + supprimer le deepcopy complet du scénario (copies ciblées) | `w40k_core.py:9074`, `game_state.py:485` | ✅ |
+| 1.10 | **Mesure de clôture** : ms/step + fps offline ; consigner §6 | — | ✅ |
 
 Gain attendu : ms/step −30-50 % et réduction de la queue → fps ×1,5-2.
 Verrou par item : parité bit-à-bit (0.2) + test rouge/vert.
@@ -289,3 +289,4 @@ Verrou : mêmes win-rates qu'en séquentiel à seeds fixes.
 | 2026-08-26 | Harnais parité `test_parity_harness.py`, 4 tests | statut · durée | **4 verts · 55 s** — reproductibilité, détection mutation, gate mask_verification armée |
 | 2026-08-26 | `bench_env_step.py` **machine au repos** (run P1 terminé), même binaire et même graine que la ligne au-dessus | ms/step médiane · P95 · P99 | **10,14 ms · 214 ms · 489 ms** — **×3,25 plus rapide qu'avec le run vivant (32,97 ms)**. Recoupe les 9,47 ms de l'audit : c'est la valeur de référence. ⇒ **toute mesure Phase 1+ se prend machine au repos** (cf. §1 Pièges de mesure) |
 | 2026-08-26 | Harnais parité après `/code-review` (5 findings appliqués) | statut · durée | **3 verts · 54 s** — un test dupliqué supprimé par la review ; bench revalidé fonctionnel |
+| 2026-08-26 | **Phase 1 complète (1.1–1.9)**, `bench_env_step.py` 600 steps depuis worktree, run actif | ms/step médiane · P95 · P99 | **28,93 ms · 623 ms · 1163 ms** — −12 % médiane vs baseline run-actif (32,97 ms). Deux bugs d'invalidation corrigés en livraison : (a) `_squad_move_pool_cache`/`_charge_plan_cache`/`_edge_distance_cache` non purgés au reset épisode → stale hits en version 0 ; (b) `_ez_fp` non purgé dans `_recompute_squad_occupied_hexes` (modèle non-ancre). Mesure repos (machine au repos) à refaire hors run pour chiffre définitif. |
