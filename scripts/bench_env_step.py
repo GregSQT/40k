@@ -43,6 +43,7 @@ import cProfile
 import io
 import os
 import pstats
+import random
 import sys
 import time
 
@@ -51,6 +52,25 @@ from sb3_contrib.common.maskable.utils import get_action_masks
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
+
+
+def _seed_randomness(seed: int) -> None:
+    """Ensemence le module random global pour rendre random.choice reproductible run-à-run.
+
+    Les sources de non-déterminisme du bench sont toutes dans ce module :
+    - engine/w40k_core.py: random.choice(self._scenario_files) à chaque reset
+    - ai/evaluation_bots.py + env_wrappers.py:139 : random.choice(actions) pendant les tours bot
+    Le numpy.random.Generator passé à _run_steps est déjà isolé ; seul le module global compte.
+    """
+    random.seed(seed)
+
+
+def _get_current_scenario(env) -> str:
+    """Retourne le basename du scénario actif depuis le stack de wrappers Monitor→…→W40KEngine."""
+    scenario_file = getattr(env.unwrapped, "_current_scenario_file", None)
+    if scenario_file is None:
+        return "<unknown>"
+    return os.path.basename(scenario_file)
 
 
 def _build_env():
@@ -123,11 +143,17 @@ def _build_env():
     return Monitor(wrapped_env)
 
 
-def _run_steps(env, n_steps: int, rng: np.random.Generator) -> list[float]:
+def _run_steps(
+    env,
+    n_steps: int,
+    rng: np.random.Generator,
+    scenarios: list[str] | None = None,
+) -> list[float]:
     """Exécute n_steps masqués aléatoires, retourne la liste des wall-times par step.
 
     L'env doit être dans un état valide (reset déjà appelé par l'appelant).
     Les resets inter-épisodes sont appelés mais PAS inclus dans les step_times.
+    Si scenarios est fourni, le basename du scénario actif après chaque reset y est ajouté.
     """
     step_times: list[float] = []
 
@@ -141,8 +167,36 @@ def _run_steps(env, n_steps: int, rng: np.random.Generator) -> list[float]:
 
         if terminated or truncated:
             env.reset()
+            if scenarios is not None:
+                scenarios.append(_get_current_scenario(env))
 
     return step_times
+
+
+def _bench_run(seed: int = 42, n_steps: int = 600) -> tuple[list[str], int, float]:
+    """Construit l'env, exécute le bench, retourne (séquence_scénarios, n_resets, médiane_ms).
+
+    Conçu pour les tests de déterminisme : deux appels avec le même seed doivent retourner
+    la même séquence de scénarios, le même n_resets, et une médiane dans les 5%.
+    """
+    _seed_randomness(seed)
+    env = _build_env()
+    rng = np.random.default_rng(seed)
+
+    # Chauffe (warm-up altère l'état de random ; on re-ensemence avant le bench réel)
+    env.reset()
+    _run_steps(env, 5, np.random.default_rng(0))
+
+    _seed_randomness(seed)
+    env.reset()
+
+    scenarios: list[str] = [_get_current_scenario(env)]
+    step_times = _run_steps(env, n_steps, rng, scenarios=scenarios)
+    env.close()
+
+    arr = np.array(step_times) * 1000.0
+    n_resets = len(scenarios) - 1  # scénario initial + 1 entrée par reset
+    return scenarios, n_resets, float(np.median(arr))
 
 
 def main() -> None:
@@ -163,6 +217,10 @@ def main() -> None:
     # Chauffe : reset + 5 steps pour initialiser les caches (JIT, LoS, etc.)
     env.reset()
     _run_steps(env, 5, np.random.default_rng(0))
+    # Re-ensemencer random AVANT le reset qui démarre le bench : le warm-up altère l'état
+    # de random.choice (sélection de scénarios, actions bot), donc sans ce re-seed la séquence
+    # de scénarios varie d'un run à l'autre même à --seed identique.
+    _seed_randomness(args.seed)
     env.reset()  # Remet l'env dans un état frais et répétable pour le bench réel
 
     if args.profile:
