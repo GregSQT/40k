@@ -15,8 +15,43 @@ import pytest
 from ai.training_callbacks import BotEvaluationCallback
 
 
+_CFG_WITH_BENCH_KEYS: Dict[str, Any] = {
+    "callback_params": {
+        "bot_eval_weights": {
+            "reference_balanced": 0.34,
+            "reference_denial": 0.33,
+            "reference_reactive": 0.33,
+        },
+        "bot_eval_final": 100,
+        "eval_deterministic": True,
+    }
+}
+
+_CFG_WITHOUT_BENCH_KEYS: Dict[str, Any] = {
+    "callback_params": {
+        "bot_eval_weights": {
+            "greedy": 0.5,
+            "defensive": 0.5,
+        },
+        "bot_eval_final": 100,
+        "eval_deterministic": True,
+    }
+}
+
+
+def _make_loader_mock(cfg: Dict[str, Any]) -> MagicMock:
+    loader = MagicMock()
+    loader.load_agent_training_config.return_value = cfg
+    return loader
+
+
 def _make_callback(**kwargs) -> BotEvaluationCallback:
-    """Construit un BotEvaluationCallback minimal pour tester le gate."""
+    """Construit un BotEvaluationCallback minimal pour tester le gate.
+
+    Patche get_config_loader pour éviter le chargement de configs réelles ;
+    la config fictive inclut les clés benchmark afin que la validation
+    model_gating_min_benchmark_floor > 0.0 passe à l'initialisation.
+    """
     defaults: Dict[str, Any] = {
         "scenario_pool": "holdout",
         "training_config_name": "x1",
@@ -30,7 +65,9 @@ def _make_callback(**kwargs) -> BotEvaluationCallback:
         "stop_on_no_generalization": 0,
     }
     defaults.update(kwargs)
-    cb = BotEvaluationCallback(**defaults)
+    mock_loader = _make_loader_mock(_CFG_WITH_BENCH_KEYS)
+    with patch("ai.training_callbacks.get_config_loader", return_value=mock_loader):
+        cb = BotEvaluationCallback(**defaults)
     # Câbler un faux model
     fake_model = MagicMock()
     fake_model.logger = None
@@ -216,3 +253,64 @@ def test_non_generalizing_disabled_by_zero() -> None:
         cb._evaluate_model_gate(results, eval_marker=i * 1000)
 
     assert not cb.should_stop_early
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 4. Validation à l'initialisation (§T1 — configuration incohérente)
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+def test_init_raises_when_floor_gt0_and_no_benchmark_keys_in_weights() -> None:
+    """Seuil > 0.0 sans aucune clé benchmark dans bot_eval_weights → ValueError au __init__."""
+    mock_loader = _make_loader_mock(_CFG_WITHOUT_BENCH_KEYS)
+    with patch("ai.training_callbacks.get_config_loader", return_value=mock_loader):
+        with pytest.raises(ValueError, match="model_gating_min_benchmark_floor"):
+            BotEvaluationCallback(
+                scenario_pool="holdout",
+                training_config_name="x1",
+                rewards_config_name="x1",
+                model_gating_enabled=True,
+                model_gating_min_combined=0.5,
+                model_gating_min_worst_bot=0.3,
+                model_gating_min_worst_scenario_combined=0.3,
+                model_gating_min_vs_control=0.0,
+                model_gating_min_benchmark_floor=0.5,
+                stop_on_no_generalization=0,
+            )
+
+
+def test_init_passes_when_floor_zero_and_no_benchmark_keys_in_weights() -> None:
+    """Seuil = 0.0 (plancher désarmé) sans clé benchmark → aucune erreur."""
+    mock_loader = _make_loader_mock(_CFG_WITHOUT_BENCH_KEYS)
+    with patch("ai.training_callbacks.get_config_loader", return_value=mock_loader):
+        cb = BotEvaluationCallback(
+            scenario_pool="holdout",
+            training_config_name="x1",
+            rewards_config_name="x1",
+            model_gating_enabled=True,
+            model_gating_min_combined=0.5,
+            model_gating_min_worst_bot=0.3,
+            model_gating_min_worst_scenario_combined=0.3,
+            model_gating_min_vs_control=0.0,
+            model_gating_min_benchmark_floor=0.0,
+            stop_on_no_generalization=0,
+        )
+    assert cb.model_gating_min_benchmark_floor == 0.0
+
+
+def test_init_passes_when_floor_gt0_and_benchmark_keys_present() -> None:
+    """Seuil > 0.0 avec au moins une clé benchmark dans bot_eval_weights → aucune erreur."""
+    mock_loader = _make_loader_mock(_CFG_WITH_BENCH_KEYS)
+    with patch("ai.training_callbacks.get_config_loader", return_value=mock_loader):
+        cb = BotEvaluationCallback(
+            scenario_pool="holdout",
+            training_config_name="x1",
+            rewards_config_name="x1",
+            model_gating_enabled=True,
+            model_gating_min_combined=0.5,
+            model_gating_min_worst_bot=0.3,
+            model_gating_min_worst_scenario_combined=0.3,
+            model_gating_min_vs_control=0.0,
+            model_gating_min_benchmark_floor=0.5,
+            stop_on_no_generalization=0,
+        )
+    assert cb.model_gating_min_benchmark_floor == 0.5
