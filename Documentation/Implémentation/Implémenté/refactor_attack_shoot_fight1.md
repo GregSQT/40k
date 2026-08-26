@@ -12,10 +12,10 @@ Il existe **deux** systèmes de combat dans `engine/phase_handlers/fight_handler
 
 - **V10 = DÉPRÉCIÉ, non atteint.**
   - `_handle_fight_attack` (la « boucle while auto » de la proposition), `_handle_fight_unit_activation`,
-    dispatcher `_execute_action_v10_unused` (fight_handlers.py:2105, docstring `[DÉPRÉCIÉ V10 — code mort]`).
+    dispatcher `_execute_action_v10_unused` (fight_handlers.py, docstring `[DÉPRÉCIÉ V10 — code mort]`).
   - Vérifié : ces fonctions ne sont appelées QUE depuis le dispatcher `_unused`.
 - **V11 = ACTIF.**
-  - Entrée réelle `execute_action` (fight_handlers.py:6074-6090) → `_fight_v11_auto_step` (4937)
+  - Entrée réelle `execute_action` (fight_handlers.py) → `_fight_v11_auto_step` (4937)
     / `_fight_v11_manual_step` (5922-6071).
   - Vraie boucle auto : `_fight_v11_resolve_attacks` (4835-4848).
 
@@ -24,7 +24,7 @@ Il existe **deux** systèmes de combat dans `engine/phase_handlers/fight_handler
    Le gym passe par `_fight_v11_auto_step`, pas par la boucle while V10.
 2. **Un chemin manuel fight existe DÉJÀ** : `_fight_v11_manual_step` gère le pile-in par-figurine
    et la sélection de cible — mais la **résolution des attaques y est encore auto**
-   (arme auto `select_best_melee_weapon` 4828, recible auto `_ai_select_fight_target` 4840, fight_handlers.py:6057).
+   (arme auto `select_best_melee_weapon` 4828, recible auto `_ai_select_fight_target` 4840, fight_handlers.py).
    C'est exactement et seulement ce manque que le refactor doit combler.
 
 ➡️ **Tout le plan doit être recadré sur V11. Le point d'insertion est `_fight_v11_manual_step`, pas une copie du shoot.**
@@ -36,7 +36,7 @@ Il existe **deux** systèmes de combat dans `engine/phase_handlers/fight_handler
 Le ctx `{weapons_attr, selected_idx_attr, attacks_left_attr, intents_key, alloc_key, labels, can_target}`
 couvre **tout le nominal** du moteur d'allocation manuel shoot (RNG_WEAPONS, SHOOT_LEFT,
 selectedRngWeaponIndex, clés pending, labels — tous renommables ;
-shared_utils.py:4536 / 4923 / 3940 …).
+shared_utils.py / 4923 / 3940 …).
 
 Spécificités tir confirmées :
 - **Éligibilité portée+LoS** (`_model_can_shoot_target` 3803, `_attacker_model_can_reach_squad`,
@@ -44,7 +44,7 @@ Spécificités tir confirmées :
 - **BLAST** (`_has_blast_keyword` 4263, bonus 4552 / 4937) : inerte en combat, pas bloquant.
 - **cover / IGNORES_COVER / rapid fire** : **absents** du fichier — rien à généraliser.
 - **`_emit_squad_shoot_log`** hardcodé `type:"shoot"` / `phase:"shoot"` / verbe `"SHOT"`
-  (shared_utils.py:4411 / 4416 / 4419). **Champ ctx manquant** → ajouter `log_type` / `log_verb` / `phase_label` (cf. I).
+  (shared_utils.py / 4416 / 4419). **Champ ctx manquant** → ajouter `log_type` / `log_verb` / `phase_label` (cf. I).
 
 ⚠️ Le ctx ne réconcilie PAS la divergence de modèle de données : moteur manuel shoot = **par-figurine**
 (`destroy_model`) ; combat = **par-unité** (HP cache). Ce n'est pas un champ, c'est un modèle divergent (cf. D).
@@ -56,7 +56,7 @@ Spécificités tir confirmées :
 Le moteur manuel shoot (`_manual_roll_intent` 4895, `_resolve_one_manual_wound` 5026) ne gère
 **AUCUN reroll ni ability** (la seule occurrence « re-roll » 4543 = re-roll du *nombre d'attaques* NB).
 
-`_execute_fight_attack_sequence` (fight_handlers.py:3565-3946) gère :
+`_execute_fight_attack_sequence` (fight_handlers.py) gère :
 
 | Ability | fight_handlers.py | Étape |
 |---|---|---|
@@ -68,13 +68,13 @@ Le moteur manuel shoot (`_manual_roll_intent` 4895, `_resolve_one_manual_wound` 
 
 ➡️ **Réutiliser le moteur manuel shoot tel quel = perte de ces 4 rerolls en combat. Rédhibitoire.**
 
-- **Pré-tirage des saves** : `save_roll` tiré d'avance (shared_utils.py:4972), comparé à l'allocation
+- **Pré-tirage des saves** : `save_roll` tiré d'avance (shared_utils.py), comparé à l'allocation
   (`_resolve_one_manual_wound` 5047). En combat le save est **unité-level**
-  (`reroll_1_save_fight` testé sur `target` entier, fight_handlers.py:3701/3712) → ne dépend pas
+  (`reroll_1_save_fight` testé sur `target` entier, fight_handlers.py/3712) → ne dépend pas
   de la figurine, conflit pré-tirage moindre que craint, mais re-tirage du save à gérer.
-- **Seuils équivalents (OK)** : `wound_threshold` (shared_utils.py:4229) ≡ `_calculate_wound_target`
-  (fight_handlers.py:3989) ; `save_threshold` (shared_utils.py:4249) ≡ `_calculate_save_target`
-  (fight_handlers.py:3966). **Différence mineure** : le fight clampe `max(2, min(save,6))` (3986),
+- **Seuils équivalents (OK)** : `wound_threshold` (shared_utils.py) ≡ `_calculate_wound_target`
+  (fight_handlers.py) ; `save_threshold` (shared_utils.py) ≡ `_calculate_save_target`
+  (fight_handlers.py). **Différence mineure** : le fight clampe `max(2, min(save,6))` (3986),
   pas le manuel shoot → à aligner.
 - **Abilities ni auto ni manuel** (PDF 24) : Sustained / Lethal / Devastating Hits, Anti-X, Lance,
   Twin-linked, Precision. Hors scope mais dette à documenter — **Precision (§24.28) touche
@@ -85,7 +85,7 @@ Le moteur manuel shoot (`_manual_roll_intent` 4895, `_resolve_one_manual_wound` 
 ## C. Ordre de résolution RNG du tir — à connaître (validation par conformité règle, pas iso-RNG)
 
 Ordre RNG auto (`resolve_squad_shoot` → `_resolve_shoot_intent_pass1` → `_roll_squad_shot_sequence`,
-shared_utils.py:4651 / 4652 / 4464) : NB pré-résolu à la déclaration, puis par attaque strict
+shared_utils.py / 4652 / 4464) : NB pré-résolu à la déclaration, puis par attaque strict
 **hit(4467) → wound(4473) → save(4479) → dmg(4486)** avec court-circuit. Passe 2 (allocation) déterministe.
 
 Risques wrappers : (1) re-résoudre NB à la résolution décale tout (bug déjà corrigé, commentaire 3863) ;
@@ -94,7 +94,7 @@ Risques wrappers : (1) re-résoudre NB à la résolution décale tout (bug déj�
 
 ➡️ **Garantie** : wrappers shoot `ctx=SHOOT_CTX` sans branche dans le corps chaud.
 **Validation par relecture de conformité (PDF 05) + test PvP manuel** — PAS par `--step`/iso-RNG : `--step` n'est qu'un
-log pas-à-pas du training (train.py:4260) et le training est actuellement cassé ; de plus le training (chemin **auto**)
+log pas-à-pas du training (train.py) et le training est actuellement cassé ; de plus le training (chemin **auto**)
 ne passe pas par le module d'allocation **manuel** extrait. **Principe directeur : coller à la règle, pas à l'historique** —
 on ne cherche pas à reproduire le comportement existant, on vérifie qu'il respecte la règle.
 
@@ -104,12 +104,12 @@ on ne cherche pas à reproduire le comportement existant, on vérifie qu'il resp
 
 | | Chemin |
 |---|---|
-| **Manuel shoot** | `_resolve_one_manual_wound` → `destroy_model(reason="combat")` (shared_utils.py:5081) ou `update_model_hp` (5086). **Par-figurine.** |
-| **Combat V11** | `update_units_cache_hp` (fight_handlers.py:3765) + `invalidate_cache_for_target` (3773) + si mort `_remove_dead_unit_from_fight_pools` (3782) + `invalidate_cache_for_unit` (3788). **Par-unité.** |
+| **Manuel shoot** | `_resolve_one_manual_wound` → `destroy_model(reason="combat")` (shared_utils.py) ou `update_model_hp` (5086). **Par-figurine.** |
+| **Combat V11** | `update_units_cache_hp` (fight_handlers.py) + `invalidate_cache_for_target` (3773) + si mort `_remove_dead_unit_from_fight_pools` (3782) + `invalidate_cache_for_unit` (3788). **Par-unité.** |
 
 Pièges vérifiés :
 - `destroy_model` **ne retire l'unité des pools de combat que si c'est la DERNIÈRE figurine**
-  (via `remove_from_units_cache` → `_remove_unit_from_all_activation_pools`, shared_utils.py:2683 / 825).
+  (via `remove_from_units_cache` → `_remove_unit_from_all_activation_pools`, shared_utils.py / 825).
 - `destroy_model` **n'invalide JAMAIS `kill_probability_cache`** (cache dans engine/ai/weapon_selector.py,
   jamais touché par destroy / update_model_hp / update_units_cache_hp).
 
@@ -122,7 +122,7 @@ Pièges vérifiés :
 
 ## E. IA / gym — pas de `resolve_squad_fight` nécessaire ; isoler le gym
 
-`_is_fight_auto_execution_allowed` (fight_handlers.py:82-100) : `False` pour `{pvp,pvp_test}`,
+`_is_fight_auto_execution_allowed` (fight_handlers.py) : `False` pour `{pvp,pvp_test}`,
 `True` pour `{pve,pve_test,endless_duty}`/None. **Seul aiguilleur auto/manuel** (6088).
 Le gym (pve/pve_test) passe par `_fight_v11_auto_step` → `_fight_v11_resolve_attacks` (boucle 4835).
 `gym_training_mode` n'intervient PAS dans cet aiguillage.
@@ -134,7 +134,7 @@ Le gym (pve/pve_test) passe par `_fight_v11_auto_step` → `_fight_v11_resolve_a
 
 ## F. Reward shaping — pas de risque
 
-`_execute_fight_attack_sequence` retourne un dict structuré (fight_handlers.py:3928-3946) agrégé en
+`_execute_fight_attack_sequence` retourne un dict structuré (fight_handlers.py) agrégé en
 `all_attack_results`. **Aucun RewardMapper ne consomme ce retour** : reward RL calculé ailleurs
 (reward_calculator.py) ; `RewardMapper` sert à la *sélection de cible* (`_ai_select_fight_target` 1972).
 `all_attack_results` consommé par w40k_core.py pour **logging/affichage** uniquement.
@@ -144,7 +144,7 @@ Le gym (pve/pve_test) passe par `_fight_v11_auto_step` → `_fight_v11_resolve_a
 
 ## G. Asymétrie attaquant / défenseur — décision produit
 
-Tir : allocation manuelle déclenchée **uniquement** sur `_is_player_human(defender)` (w40k_core.py:4488),
+Tir : allocation manuelle déclenchée **uniquement** sur `_is_player_human(defender)` (w40k_core.py),
 mais atteignable seulement via actions `squad_shoot_*` émises par un attaquant humain. L'IA attaquante
 passe par `squad_shoot` (string, 4709) sans branche défenseur.
 ➡️ En pratique : **allocation manuelle ⟺ attaquant humain ET défenseur humain (PvP)**.
@@ -165,23 +165,23 @@ Quand l'IA tire sur un humain, le défenseur humain **ne choisit pas** ses perte
 
 - **Pas de save/load disque** du game_state (vit en mémoire Flask). Le scénario « sauvegarde au milieu
   d'une allocation » n'existe pas. « Sérialisation » = réponse JSON API (`_game_state_for_json`,
-  api_server.py:532). `pending_*` **pas** dans `_GAME_STATE_EXCLUDE_KEYS` → envoyés au client
+  api_server.py). `pending_*` **pas** dans `_GAME_STATE_EXCLUDE_KEYS` → envoyés au client
   (canal du payload waiting). `pending_fight_allocation` sera auto-inclus ; pour l'exclure → l'ajouter
-  explicitement (api_server.py:310-356).
+  explicitement (api_server.py).
 - **Replay** (training-only) : whitelist `["move","flee","shoot","charge","charge_fail","combat","wait"]`
-  (w40k_core.py:1586). Ni `squad_shoot_*` ni `squad_fight_*` → rien à faire de plus que l'existant.
+  (w40k_core.py). Ni `squad_shoot_*` ni `squad_fight_*` → rien à faire de plus que l'existant.
 - **Reset (RISQUE RÉEL)** : `end_activation` **ne nettoie PAS** les pending (generic_handlers.py).
   Nettoyage via `resolve_squad_*` / `_finalize_manual_allocation` (5117) / `squad_shoot_cancel`.
   Aucun reset au changement de phase/joueur. Garde-fou `assert_no_pending_fight_intent`
-  (shared_utils.py:3640) lève `RuntimeError` si leftover.
+  (shared_utils.py) lève `RuntimeError` si leftover.
   ➡️ **Manque un `squad_fight_cancel`** (équivalent `squad_shoot_cancel` 4473). Condition de mise en route.
 
 ---
 
 ## I. Logs — paramétrer, ne pas dupliquer
 
-`_emit_squad_shoot_log` (shared_utils.py:4386) hardcode `type:"shoot"` / `phase:"shoot"` / `"SHOT"`.
-Le combat émet `type:"combat"` / `phase:"fight"` / `"FOUGHT"` (fight_handlers.py:3841) + `type:"death"`
+`_emit_squad_shoot_log` (shared_utils.py) hardcode `type:"shoot"` / `phase:"shoot"` / `"SHOT"`.
+Le combat émet `type:"combat"` / `phase:"fight"` / `"FOUGHT"` (fight_handlers.py) + `type:"death"`
 séparé (3887) + `roll_info` NB (149). Le frontend attend un `type` distinct (gameLogStructure.ts).
 ➡️ Paramétrer `type/phase/verbe` via le ctx (`labels`) et **prévoir le `type:"death"`** que le manuel shoot n'émet pas.
 
@@ -189,9 +189,9 @@ séparé (3887) + `roll_info` NB (149). Le frontend attend un `type` distinct (g
 
 ## J. Cohérence multi-requêtes — garde-fou à dupliquer
 
-Garde-fou tir : w40k_core.py:2771-2778 — tant que `pending_shoot_allocation` existe, toute action
+Garde-fou tir : w40k_core.py — tant que `pending_shoot_allocation` existe, toute action
 ≠ `squad_shoot_allocate_model` / `squad_shoot_declare_order` est rejetée et re-signale l'attente
-(`manual_allocation_waiting_payload`, shared_utils.py:5354). **Aucun équivalent fight.**
+(`manual_allocation_waiting_payload`, shared_utils.py). **Aucun équivalent fight.**
 ➡️ Créer : test symétrique `pending_fight_allocation` + whitelist `squad_fight_*` + waiting payload fight.
 Valider en **test PvP manuel** qu'aucune action ne s'intercale pendant l'allocation.
 
@@ -202,16 +202,16 @@ Valider en **test PvP manuel** qu'aucune action ne s'intercale pendant l'allocat
 - **Sélection cible par-figurine, multi-cibles** : PDF 04 §04.02 *« Each target must be engaged with
   the model that has that weapon. You cannot select more targets than that weapon's A characteristic. »*
   + encart SPLITTING MELEE ATTACKS. ➡️ `_model_can_fight_target` par-figurine sur engagement est la
-  **bonne granularité** (le pool unité `_fight_build_valid_target_pool` fight_handlers.py:2912 est insuffisant).
+  **bonne granularité** (le pool unité `_fight_build_valid_target_pool` fight_handlers.py est insuffisant).
 - **Condition** = engagement de la **figurine attaquante** avec la cible. La formulation « base contact
   avec un ami lui-même en engagement » de la proposition **n'existe pas** dans les règles → à retirer.
 - **Pas de priorité de cible** en combat (contrairement au tir). ✅ simplifie.
 - **Allocation des pertes IDENTIQUE tir/combat** : PDF 05 §05.03/05.04 invoqué pareil par les deux phases
   → seule partie du manuel shoot vraiment mutualisable (groupes par W/Sv/InSv, blessés d'abord, CHARACTER en dernier).
-- Granularité : `unit_entries_within_engagement_zone` (spatial_relations.py:124) compare empreintes
+- Granularité : `unit_entries_within_engagement_zone` (spatial_relations.py) compare empreintes
   d'unités ; le par-figurine devra descendre au niveau figurine (le pile-in V11 le fait déjà :
   `_fight_pile_in_build_model_pool`, models_cache).
-- Fights First (PDF 12 §12.04) = ordre d'**activation**, pas de cible (`is_fights_first` fight_handlers.py:4048).
+- Fights First (PDF 12 §12.04) = ordre d'**activation**, pas de cible (`is_fights_first` fight_handlers.py).
 
 ---
 
@@ -220,36 +220,36 @@ Valider en **test PvP manuel** qu'aucune action ne s'intercale pendant l'allocat
 Couture « pile-in AVANT / attribution / résolution / consolidation APRÈS » conceptuellement correcte
 (PDF 12 : pile-in = étape 2 avant Fight ; conso = étape 4 après). Mais :
 - Pile-in par-figurine **existe déjà en V11** (`_fight_v11_manual_step` sub `"pile_in"`,
-  fight_handlers.py:5938-6042 : plan_state/autoplace/commit, multi-requêtes). La nouvelle attribution
+  fight_handlers.py : plan_state/autoplace/commit, multi-requêtes). La nouvelle attribution
   s'insère dans la **même** machine, sous-phase `"fight"` (après `fight_v11_enter_fight_step` 4636).
   ➡️ Pas besoin de réinventer la fin d'activation V10 (point 6 obsolète).
 - Frontend : pile-in = mode `pileInModelMove`, attribution = mode `squadModelFight`. Modes mutuellement
-  exclusifs → pas de conflit de clic si chaque pointerdown est gardé par son `mode` (cf. `squadModelShoot` BoardPvp.tsx:3846).
+  exclusifs → pas de conflit de clic si chaque pointerdown est gardé par son `mode` (cf. `squadModelShoot` BoardPvp.tsx).
 
 ---
 
 ## M. Frontend — duplication ciblée, conflits faibles
 
-- **Double-clic en phase fight : inexistant** (gardé `phase==="move"`, boardClickHandler.ts:238,
-  BoardPvp.tsx:3188) → conflit faible. **Mais** le clic fight actuel (`attackPreview`,
-  boardClickHandler.ts:189-203) résout une attaque immédiatement → le mode `squadModelFight` doit **remplacer** ce routage.
+- **Double-clic en phase fight : inexistant** (gardé `phase==="move"`, boardClickHandler.ts,
+  BoardPvp.tsx) → conflit faible. **Mais** le clic fight actuel (`attackPreview`,
+  boardClickHandler.ts) résout une attaque immédiatement → le mode `squadModelFight` doit **remplacer** ce routage.
 - **À dupliquer** (useEngineAPI.ts) : `squadFightPlan` (state/ref/session/guard, miroir 620-638),
   `deriveFightTargets` (←444), 8 handlers `*Fight*` (← selectShootModelForUnit 4011, handleStartSquadModelShoot 4124,
   handleSelectModelForShoot 4169, handleAssignShootTarget 4179, handleAutoAssignAllModels 4238,
   handleUnassign 4292, handleCommit 4329, handleCancel 4355). Blink réutilisable tel quel.
 - **Réutilisables avec ajout léger** : `handleAllocateModel` (4376, switch sur `alloc.kind` → ajouter `"fight"`
-  au type ligne 393 + branche), `handleDeclareOrder` (4425). Overlay PIXI d'allocation (BoardPvp.tsx:3933-3999)
+  au type ligne 393 + branche), `handleDeclareOrder` (4425). Overlay PIXI d'allocation (BoardPvp.tsx)
   **rendu générique**, mais **armement spécifique shoot** (`squad_shoot_manual_alloc` 1641,
   `squad_shoot_declare_order` 1618) → ajouter branches fight.
 - **Menu d'armes CC : ABSENT** (`selectedCcWeaponIndex` n'existe que comme donnée d'affichage). À créer sur
-  le modèle RNG (`weaponSelectionMenu` BoardPvp.tsx:1278, action `squad_select_weapon` 8359) lisant `CC_WEAPONS`.
-- Pointerdown `squadModelFight` à créer (miroir BoardPvp.tsx:3717-3928) + rendu intents fight (miroir 6992-7010).
+  le modèle RNG (`weaponSelectionMenu` BoardPvp.tsx, action `squad_select_weapon` 8359) lisant `CC_WEAPONS`.
+- Pointerdown `squadModelFight` à créer (miroir BoardPvp.tsx) + rendu intents fight (miroir 6992-7010).
 
 ---
 
 ## N. Perf — surveiller, chemin chaud rapide
 
-`perf_timing` instrumenté dans `_execute_fight_attack_sequence` (chemin kill, fight_handlers.py:3753-3926).
+`perf_timing` instrumenté dans `_execute_fight_attack_sequence` (chemin kill, fight_handlers.py).
 Le multi-requêtes ajoute round-trips + reconstructions de pools/caches — **mais uniquement en PvP humain**
 (basse fréquence). Le gym/IA reste sur la boucle V11 auto rapide (E).
 ➡️ Impact acceptable **si** `_is_fight_auto_execution_allowed` isole le manuel du gym. Pas de régression training.
@@ -342,20 +342,20 @@ Vérifications de code + règles menées après rédaction initiale. Trois déci
 ### Q.1 — Allocation des pertes : ordre de résolution (complète § K / § D / plan #1)
 
 Conformité du module manuel shoot **vérifiée** sur 05.03/05.04 (c'est bien le cœur mutualisable) :
-- Create Groups : `_build_alloc_groups` (shared_utils.py:4800) — 1/CHARACTER, 1/(W,Sv,InSv). ✅
+- Create Groups : `_build_alloc_groups` (shared_utils.py) — 1/CHARACTER, 1/(W,Sv,InSv). ✅
 - Allocation Order : `apply_manual_shoot_declare_order` (5258) valide les 3 contraintes (non-CHAR jamais après CHAR ; non-CHAR blessé d'abord ; CHAR blessé avant CHAR sain). ✅
 - Select Model : fig blessée forcée + groupe courant uniquement (`_current_live_group`). ✅
 - Check Save : `save_threshold(ARMOR_SAVE, INVUL_SAVE, ap)` gère invul + AP. ✅
 
-**Déviation confirmée** : le pool est résolu en **ordre d'attaque**, pas du save le plus bas au plus haut comme l'exige 05.04 (commentaire explicite shared_utils.py:5234). Impact nul sur figs à 1 PV ; divergence possible avec figs multi-PV + weapon_groups d'AP différents sur même cible.
+**Déviation confirmée** : le pool est résolu en **ordre d'attaque**, pas du save le plus bas au plus haut comme l'exige 05.04 (commentaire explicite shared_utils.py). Impact nul sur figs à 1 PV ; divergence possible avec figs multi-PV + weapon_groups d'AP différents sur même cible.
 
-**Décision** : corriger en triant le pool par `save_roll` croissant **directement dans le module d'allocation mutualisé** (conformité 05.04, pas de préservation de l'ordre actuel). Note technique : `resolve_dice_value` (combat_utils.py:26) appelle `random.randint` directement, donc l'ordre de résolution = l'ordre de tirage des dégâts ; le tri modifie donc les valeurs tirées sur armes à dégâts variables (D3/D6/2D6/D6+x) — c'est **attendu et voulu** (on suit la règle), pas une régression. Dette **commune tir+combat**, traitée une seule fois dans le module commun. Validation : conformité règle + test PvP manuel.
+**Décision** : corriger en triant le pool par `save_roll` croissant **directement dans le module d'allocation mutualisé** (conformité 05.04, pas de préservation de l'ordre actuel). Note technique : `resolve_dice_value` (combat_utils.py) appelle `random.randint` directement, donc l'ordre de résolution = l'ordre de tirage des dégâts ; le tri modifie donc les valeurs tirées sur armes à dégâts variables (D3/D6/2D6/D6+x) — c'est **attendu et voulu** (on suit la règle), pas une régression. Dette **commune tir+combat**, traitée une seule fois dans le module commun. Validation : conformité règle + test PvP manuel.
 
 ### Q.2 — Cover (dette TIR, hors scope combat)
 
 Règle 13.08 : Benefit of Cover = **−1 BS**, **ranged only**, **niveau unité tout-ou-rien**. Donc inexistant en combat — la couche allocation/fight n'a rien à gérer.
 
-État code : la **détection** est conforme (`compute_unit_los` shooting_handlers.py:3766 — unité, tout-ou-rien, conditions terrain + non-fully-visible) **mais l'effet −1 BS n'est jamais appliqué** (le `cover` est calculé, mis en cache `los_cover_cache`, envoyé au frontend, jamais consommé au hit roll).
+État code : la **détection** est conforme (`compute_unit_los` shooting_handlers.py — unité, tout-ou-rien, conditions terrain + non-fully-visible) **mais l'effet −1 BS n'est jamais appliqué** (le `cover` est calculé, mis en cache `los_cover_cache`, envoyé au frontend, jamais consommé au hit roll).
 
 **Décision** : implémenter le −1 BS **plus tard**. Sans impact sur le refactor combat.
 
@@ -363,8 +363,8 @@ Règle 13.08 : Benefit of Cover = **−1 BS**, **ranged only**, **niveau unité 
 
 Règle 13.09 : un modèle est *hidden* (INFANTRY/BEASTS/SWARM dans terrain area avec dense + unité n'a pas tiré ce tour ni le précédent) et n'est alors **visible qu'aux modèles ennemis à ≤ détection range (15")**.
 
-État code (`compute_hidden_statuses` shooting_handlers.py:1106, gate ciblage 2760) :
-- « obscuring vs dense » : **prérequis de config (garanti, à préserver)** — toute terrain area marquée `obscuring` contient au moins une *dense feature* (pas de zone obscuring *light-only* dans les scénarios). Sous cet invariant, `hexes_in_obscuring_terrain` (terrain_utils.py:71, teste le flag `obscuring`) est un proxy correct de « dense » pour 13.09. ⚠️ Ajouter une zone obscuring *light-only* déclencherait `hidden` à tort **sans erreur visible** → invariant à ne pas violer.
+État code (`compute_hidden_statuses` shooting_handlers.py, gate ciblage 2760) :
+- « obscuring vs dense » : **prérequis de config (garanti, à préserver)** — toute terrain area marquée `obscuring` contient au moins une *dense feature* (pas de zone obscuring *light-only* dans les scénarios). Sous cet invariant, `hexes_in_obscuring_terrain` (terrain_utils.py, teste le flag `obscuring`) est un proxy correct de « dense » pour 13.09. ⚠️ Ajouter une zone obscuring *light-only* déclencherait `hidden` à tort **sans erreur visible** → invariant à ne pas violer.
 - **Déviation réelle** : l'exclusion se fait au **niveau unité** (`enemy["hidden"]` = tous cachés + distance unité↔unité) ; le `hidden_models` par-figurine est calculé mais **inutilisé**.
 
 **Décision : B2 — visibilité par-modèle, fidélité maximale.** 13.09 est une règle de **visibilité** (06.01), en amont du ciblage **et** du cover **et** du ratio `fully_visible`. Correction : filtrer `visible_hex_set` dans `_compute_visibility_with_obscuring` — les hexes d'un modèle caché ne sont visibles que s'il existe un **modèle attaquant à ≤15" de ce modèle caché** (distance modèle-attaquant ↔ modèle-caché). La **géométrie LoS reste unité→unité** (13.09 = distance, pas ligne de vue), donc pas de rayons par tireur. Le **cache par paire d'unités** `(shooter_id, target_id)` + `_unit_move_version` est **conservé** (le filtre distance se calcule dans le scope de la paire). La correction remonte automatiquement vers ciblage + cover + `fully_visible` → le gate unité-level 2760 devient redondant et est **retiré**.

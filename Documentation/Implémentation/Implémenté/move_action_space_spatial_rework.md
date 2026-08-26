@@ -78,15 +78,15 @@ Vérifié dans le code, pas supposé :
 | Élément | Emplacement | Constat |
 |---|---|---|
 | Board actif | `config/config.json` → `paths.board = board/44x60x5` | `inches_to_subhex: 5`, `cols=220`, `rows=300` |
-| Scaling `MOVE` | `engine/game_state.py:841` | `full_unit_data["MOVE"] * scale` |
-| Scaling portées armes | `engine/game_state.py:788-794` | `RNG` des `RNG_WEAPONS` / `CC_WEAPONS` × scale |
-| Scaling `game_rules` | `engine/w40k_core.py:399-428` | EZ, charge, cohésion, perception × scale |
-| Chemin training | `engine/w40k_core.py:6218-6240` | `_load_units_from_scenario` lit le board réel via `get_config_loader().get_board_config()` |
+| Scaling `MOVE` | `engine/game_state.py` | `full_unit_data["MOVE"] * scale` |
+| Scaling portées armes | `engine/game_state.py` | `RNG` des `RNG_WEAPONS` / `CC_WEAPONS` × scale |
+| Scaling `game_rules` | `engine/w40k_core.py` | EZ, charge, cohésion, perception × scale |
+| Chemin training | `engine/w40k_core.py` | `_load_units_from_scenario` lit le board réel via `get_config_loader().get_board_config()` |
 | Preuve runtime | `step.log:16` | `Board: cols=220 rows=300 inches_to_subhex=5 hex_radius=2.78 margin=1` |
 
 Un `MOVE` de 5" vaut donc bien **25 subhex** en training. `get_squad_move_budget`
-(`engine/phase_handlers/shared_utils.py:3715`) renvoie ces 25 subhex, et `validate_move_plan`
-(`shared_utils.py:3376-3379`) vérifie bien `calculate_hex_distance(origine, dest) <= 25`.
+(`engine/phase_handlers/shared_utils.py`) renvoie ces 25 subhex, et `validate_move_plan`
+(`shared_utils.py`) vérifie bien `calculate_hex_distance(origine, dest) <= 25`.
 
 **Le budget est calculé, validé… et jamais utilisé.**
 
@@ -97,15 +97,15 @@ Un `MOVE` de 5" vaut donc bien **25 subhex** en training. `get_squad_move_budget
 En pipeline squad V11 (gym), une action de mouvement est une **direction 0-5**, et la destination est
 l'**hexagone adjacent** à l'ancre :
 
-- `engine/action_decoder.py:878` :
+- `engine/action_decoder.py` :
   `return {"action": "squad_normal_move", "direction": action_int, "squad_id": squad_id}`
-- `engine/w40k_core.py:5258-5263` :
+- `engine/w40k_core.py` :
   ```python
   neighbors = get_hex_neighbors(anchor_col, anchor_row)
   dest_col, dest_row = neighbors[direction]   # ← toujours à distance 1
   ```
 - Le masque fait le même dry-run à 1 hex : `_squad_direction_move_legal`
-  (`shared_utils.py:7296-7302`) construit un plan rigide vers `neighbors[direction_idx]`.
+  (`shared_utils.py`) construit un plan rigide vers `neighbors[direction_idx]`.
 - Puis `end_activation` ferme l'activation et retire l'escouade du pool.
 
 **Conséquence** : une escouade avance de **1 subhex par phase de move**, soit **0,2"** sur un board ×5,
@@ -125,7 +125,7 @@ en ×5 le déplacement effectif est divisé par 5. D'où le symptôme visible da
 
 ### 4.1 L'observation ne contient AUCUN terrain — **le défaut le plus grave**
 
-`engine/observation_builder.py:1231-1243`, obs squad = **108 floats** :
+`engine/observation_builder.py`, obs squad = **108 floats** :
 
 ```
 [0:16]    Global context (16 floats)
@@ -144,7 +144,7 @@ justifie la refonte (§6) plutôt qu'un simple correctif d'action space.**
 
 ### 4.2 `validate_move_plan` ne valide QUE la destination, jamais le trajet
 
-`shared_utils.py:3292-3385` : bounds, murs, collisions, EZ et budget sont contrôlés **sur la case
+`shared_utils.py` : bounds, murs, collisions, EZ et budget sont contrôlés **sur la case
 d'arrivée uniquement**. Aucun pathfinding. À 1 hex de distance, destination ≈ trajet, donc le trou est
 invisible aujourd'hui.
 
@@ -158,32 +158,32 @@ Deux systèmes parallèles pour la règle 09.06 :
 
 | Système | Clé | Écrit par | Lu par |
 |---|---|---|---|
-| **Moteur / PvP (autoritaire)** | `advance_rolls` + `units_advanced` | `movement_handlers.py:801-809`, `commit_move` (`shared_utils.py:4145`) | `_advance_roll_for` (`movement_handlers.py:1791-1803`) → budget des pools ; `shooting_handlers.py:967` → restriction d'armes (ASSAULT) |
-| **Gym** | `_squad_advance_rolls` | `action_decoder.py:202` | `action_decoder.py:881`, `w40k_core.py:5229/5286` |
+| **Moteur / PvP (autoritaire)** | `advance_rolls` + `units_advanced` | `movement_handlers.py`, `commit_move` (`shared_utils.py`) | `_advance_roll_for` (`movement_handlers.py`) → budget des pools ; `shooting_handlers.py` → restriction d'armes (ASSAULT) |
+| **Gym** | `_squad_advance_rolls` | `action_decoder.py` | `action_decoder.py`, `w40k_core.py/5286` |
 
 `_squad_advance_rolls` n'est lu par personne d'autre que le gym.
 
-**Pas de bug de règle actif** : `commit_move` marque bien `units_advanced` (`shared_utils.py:4145`), donc
+**Pas de bug de règle actif** : `commit_move` marque bien `units_advanced` (`shared_utils.py`), donc
 la **restriction d'armes** après Advance fonctionne (09.06 ne bloque pas le tir en soi : il interdit
 charge et action ; côté tir, seules les armes ASSAULT restent utilisables — c'est ce que fait
-`shooting_handlers.py:967` via `weapon_availability_check`, pas un blocage total). **Mais
+`shooting_handlers.py` via `weapon_availability_check`, pas un blocage total). **Mais
 `advance_rolls` n'est jamais renseigné côté gym** : un pool « advance » construit en gym utiliserait le
 **budget normal**, silencieusement. À traiter avant de brancher le pool sur le chemin gym.
 
 **Divergence de timing assumée à documenter** : le gym **pré-jette** l'advance roll au moment du masque
-(`action_decoder.py:202-205`), donc l'agent connaît son jet AVANT de choisir Advance, alors que 09.06
+(`action_decoder.py`), donc l'agent connaît son jet AVANT de choisir Advance, alors que 09.06
 impose le jet APRÈS le choix du move type (« BEFORE MOVING: Make an advance roll »). Nécessaire pour
 masquer les directions Advance (et demain pour projeter le pool Advance sur la grille, §7 T2), mais
 c'est une entorse au tabletop qui avantage l'agent — décision à entériner, pas un implicite (§10).
 
 ### 4.4 Le pool gym et le pool PvP n'ont pas la même métrique
 
-`config/game_config.json:52-54` :
+`config/game_config.json` :
 ```json
 "move": "euclidean",       // PvP / replay
 "move_gym": "hex",         // training
 ```
-Bascule dans `_move_distance_metric` (`movement_handlers.py:1827-1847`). Divergence **assumée et
+Bascule dans `def _move_distance_metric` (`movement_handlers.py`). Divergence **assumée et
 configurée** (perf). On partage donc le *builder* (une seule implémentation des règles), **pas la
 géométrie**. À ne pas présenter comme un « miroir exact du PvP ».
 
@@ -203,14 +203,14 @@ géométrie**. À ne pas présenter comme un « miroir exact du PvP ».
 > **L'exigence de synchronisation, elle, reste valable et est maintenant VÉRIFIÉE par test**
 > (`tests/unit/engine/test_action_space_mirror.py`) — elle ne l'était par rien.
 
-`engine/macro_intents.py:19-20` : `BASE_ZONE_INTENT = 26`, `TOTAL_ACTION_SIZE = 26 + 5×3 = 41`
+`engine/macro_intents.py` : `BASE_ZONE_INTENT = 26`, `TOTAL_ACTION_SIZE = 26 + 5×3 = 41`
 (26 micro + 15 macro `zone_intent` = 5 objectifs × 3 intents). `macro_intents.py` se déclare *miroir
-exact* de `shared_utils.py` (`SQUAD_ACTION_*`, `shared_utils.py:7237-7250`) : **les deux doivent rester
+exact* de `shared_utils.py` (`SQUAD_ACTION_*`, `shared_utils.py`) : **les deux doivent rester
 synchronisés**.
 
 ### 4.6 `start_pos` est toujours exclu du pool — choix de design cohérent
 
-`movement_handlers.py:2587` (`if _cell == start_pos: continue`) et `:2628` (`if nb != start_pos …`).
+`movement_handlers.py` (`if _cell == start_pos: continue`) et `:2628` (`if nb != start_pos …`).
 **Nuance** : 09.05 ne donne qu'un maximum (M), le PDF n'interdit pas un Normal Move de 0". Mais
 **Remain Stationary (09.04)** existe comme move type distinct (et ne déclenche pas les règles de
 début/fin de move), et l'action WAIT le couvre déjà. Exclure `start_pos` du pool est donc un **choix de
@@ -340,7 +340,7 @@ actuel devient incompatible.
     que l'escouade n'a **pas** déclaré Advance (donc absente de `units_advanced` → le builder
     retombait sur le budget normal).
 - **§4.3 CORRIGÉ** : `execute_squad_move` fige désormais le jet dans `advance_rolls` (système
-  autoritaire, miroir du writer PvP `movement_handlers.py:801-809`). `execute_squad_move` n'a qu'un
+  autoritaire, miroir du writer PvP `movement_handlers.py`). `execute_squad_move` n'a qu'un
   appelant (chemin gym) → zéro impact PvP. Bug prouvé par test : fix retiré → 2 tests rouges.
 - Tests : `tests/unit/engine/test_move_pool_geodesic_costs.py` (8),
   `tests/unit/engine/test_gym_advance_rolls_alignment.py` (4).
@@ -381,7 +381,7 @@ actuel devient incompatible.
 >    supprimant la clé : la taille est dérivée du moteur — cf. §7bis #10.)*
 > 3. `assert 1024 == 18` — tests figeant `WAIT == 18`.
 
-**Reste** : `action_space` de `w40k_core.py:629`, puis T3/T4/T5 pour reverdir.
+**Reste** : `action_space` de `w40k_core.py`, puis T3/T4/T5 pour reverdir.
 
 **Mesure (board ×5, `scenario_training_bot-01`, squad MOVE 18"→90 subhex de budget Advance max)** :
 
@@ -410,7 +410,7 @@ injouables. Le pool reste la seule autorité : `out_costs` est resynchronisé de
 - `engine/phase_handlers/shared_utils.py` : constantes `SQUAD_ACTION_*` ; masque du type d'action ;
   **projection du pool BFS sur la grille** (source du masque spatial).
 - `engine/macro_intents.py` : **miroir exact obligatoire** (cf. §4.5).
-- `engine/w40k_core.py:629` : `action_space` (`Discrete` → structure spatiale).
+- `engine/w40k_core.py` : `action_space` (`Discrete` → structure spatiale).
 - Optimisation du masque : Normal et Fall Back s'excluent (`in_er`) et le pool Advance **contient** le
   pool Normal (budget supérieur) → **1 seul BFS au budget Advance** suffit, en conservant le **coût
   géodésique** de chaque cellule : c'est lui qui sert à l'inférence du type (coût ≤ M → `normal`,
@@ -461,7 +461,7 @@ d'un fait déterminé par le moteur**. La clé est supprimée, la taille est dé
 - `engine/action_decoder.py` : `convert_squad_action` — cellule de grille → destination d'ancre +
   **inférence du type de move** depuis le coût géodésique de la cellule (§6.2), jamais depuis une
   dimension d'action.
-- `engine/w40k_core.py:5234-5300` : exécution via `execute_squad_move` avec la destination issue du pool
+- `engine/w40k_core.py` : exécution via `execute_squad_move` avec la destination issue du pool
   (jamais une destination construite à la main, cf. §4.2).
 - **Corriger §4.3** : aligner le gym sur `advance_rolls` / `units_advanced` (système autoritaire), ou
   passer `move_type` / `advance_roll` explicitement au builder.
@@ -575,7 +575,7 @@ nativement `features_extractor_kwargs` au constructeur. `features_dim` = `cnn_fe
   **aucune nouvelle catégorie imputable au move**.
 - **§9.4 replay** ⏳ contrôle visuel non fait en session headless (MODE NUIT) — à faire au navigateur.
 - **§9.5 non-régression PvP** ✅ Le fix fight ne touche PAS le PvP : `build_squad_action_mask` n'a
-  qu'un appelant (chemin gym `action_decoder.py:242`) ; le PvP conduit la machine V11 directement par
+  qu'un appelant (chemin gym `action_decoder.py`) ; le PvP conduit la machine V11 directement par
   `fight_handlers.fight_v11_*`, non modifiés. `execute_semantic_action` inchangé. Suite PvP verte.
 - **§9.6 retrain** 🟢 **DÉBLOQUÉ (2026-07-18)** — le crash fight-phase est **corrigé** (masque aligné
   sur le pool 12.04, cf. « FIX APPLIQUÉ » ci-dessous). Le run `--new x5_new` passe le point de crash et
@@ -602,14 +602,14 @@ nativement `features_extractor_kwargs` au constructeur. `features_dim` = `cnn_fe
   `current_player=2`, `fight_subphase=fight`, `units_fought` contient déjà `'109'`, pools alternés
   vides, et le bot rejoue **action 1024 = `SQUAD_ACTION_WAIT`** à chaque itération.
 - **Root cause — DIVERGENCE entre deux fonctions d'éligibilité fight** :
-  - `fight_v11_is_eligible_to_fight` (pool, `fight_handlers.py:2856`, lu par
+  - `fight_v11_is_eligible_to_fight` (pool, `fight_handlers.py`, lu par
     `_get_eligible_units_for_current_phase` → `fight_v11_current_pool`) garde 109 éligible via le
     snapshot **`engaged_at_fight_step_start`** (109 était engagé au début de l'étape FIGHT, son ennemi
     est mort depuis).
-  - `_squad_is_in_fight` (masque, `shared_utils.py:6707`, lu par `build_squad_action_mask:7623`) ne
+  - `_squad_is_in_fight` (masque, `shared_utils.py`, lu par `build_squad_action_mask`) ne
     teste que l'engagement **actuel** (ou `units_charged`) → **False** → le masque n'offre que
     `SQUAD_ACTION_WAIT`, jamais `FIGHT`.
-  - `squad_wait` en phase fight (`w40k_core.py:5263`, `end_activation(WAIT, FIGHT)`) **n'ajoute pas**
+  - `squad_wait` en phase fight (`w40k_core.py`, `end_activation(WAIT, FIGHT)`) **n'ajoute pas**
     109 à `units_selected_to_fight` → 109 reste éligible au tour suivant → boucle.
 - **Base règle (12 Fights phase.pdf, relu et vérifié le 2026-07-18)** — une unité **engagée au début
   de l'étape FIGHT mais désengagée maintenant** (ennemi détruit) **RESTE éligible au combat** :
@@ -619,7 +619,7 @@ nativement `features_extractor_kwargs` au constructeur. `features_dim` = `cnn_fe
   - **12.06 Overrun** : « ELIGIBLE IF: Your unit **IS UNENGAGED**, or was unengaged at the start … ».
     La **1ʳᵉ clause suffit** : désengagée maintenant → overrun autorisé. **Exemple officiel page 4** :
     exactement ce cas (cible détruite, l'unité fait un overrun et se ré-engage via pile-in).
-  - **Conclusion** : le pool (`fight_v11_is_eligible_to_fight`, `fight_handlers.py:2856`) est
+  - **Conclusion** : le pool (`fight_v11_is_eligible_to_fight`, `fight_handlers.py`) est
     **CONFORME**. C'est le **MASQUE** qui était trop restrictif (3ᵉ copie divergente de la règle).
   - *(Correction 2026-07-18 : le paragraphe précédent affirmait l'inverse — « le pool est trop
     permissif », « aucun type de fight jouable ». C'était FAUX, contredit par 12.04 clause 2 et 12.06
@@ -641,15 +641,15 @@ nativement `features_extractor_kwargs` au constructeur. `features_dim` = `cnn_fe
   (ce serait reproduire le défaut §7bis #4) : la copie est **supprimée**.
 - **Parité masque/commit garantie** : le bit `ACTION_FIGHT` = `squad_id in fight_v11_current_pool`
   **sous garde `fight_subphase == "fight"`** (le snapshot n'existe que pendant l'étape FIGHT, poppé en
-  fin d'étape `fight_handlers.py:3152`, et le pool le lit via `require_key` — d'où la garde, exactement
-  celle que le commit `squad_fight` impose déjà `w40k_core.py:5510`). C'est le pool que le commit
-  vérifie (`w40k_core.py:5536`) → le masque et le commit ne peuvent plus diverger.
+  fin d'étape `fight_handlers.py`, et le pool le lit via `require_key` — d'où la garde, exactement
+  celle que le commit `squad_fight` impose déjà `w40k_core.py`). C'est le pool que le commit
+  vérifie (`w40k_core.py`) → le masque et le commit ne peuvent plus diverger.
 - **Résolution du crash** : l'unité 109 (engagée au début, ennemi mort) est dans le pool → le masque
   offre `FIGHT` → le bot/agent le joue → `squad_fight` résout **à vide** (0 attaque, machinerie
-  12.04/12.06 déjà en place `w40k_core.py:5552-5572`, aucun overrun pile-in à implémenter) → 109 est
+  12.04/12.06 déjà en place `w40k_core.py`, aucun overrun pile-in à implémenter) → 109 est
   enregistrée `units_selected_to_fight` → sort du pool → **plus de boucle**.
 - **PvP strictement inchangé** : `build_squad_action_mask` n'a qu'un appelant, le chemin gym
-  (`action_decoder.py:242`). Le PvP passe directement par les `fight_v11_*` (`fight_handlers.py`),
+  (`action_decoder.py`). Le PvP passe directement par les `fight_v11_*` (`fight_handlers.py`),
   non touchés.
 - **Périmètre** : `engine/phase_handlers/shared_utils.py` (masque + `squad_fight_activation_order`,
   suppression de `_squad_is_in_fight`) + `tests/unit/engine/test_squad_fight_target_parity.py`
@@ -784,11 +784,11 @@ Brancher la grille = passer l'obs en `Dict`. Cascade complète :
 | Site | Ce qu'il fait aujourd'hui | À faire |
 |---|---|---|
 | `engine/observation_builder.py` — `build_squad_observation` | renvoie `np.ndarray` 108 | renvoyer/exposer `{"vec": 108, "grid": (6,32,32)}` via `build_squad_grid` (déjà écrit et testé) |
-| `engine/w40k_core.py:660` | `observation_space = gym.spaces.Box(shape=(obs_size,))` | `gym.spaces.Dict({"vec": Box(108), "grid": Box(0,1,(6,32,32))})` |
-| `engine/w40k_core.py:6116` | `is_squad_pipeline = obs_size == SQUAD_OBS_SIZE_TARGET` | le gate reste piloté par `obs_size`=108 ; `_zero_obs()` doit renvoyer un `Dict` cohérent |
-| `ai/train.py:1484, 1806, 2501` | `env.observation_space.shape[0]` | un `Dict` n'a pas de `.shape` → lever/adapter |
-| `ai/training_callbacks.py:1114` | `torch.zeros((1, observation_space.shape[0]))` | dummy obs en `Dict` |
-| `ai/train.py:1443, 1780, 2452` | `VecNormalize(...)` | supporte les obs `Dict` ; **ne pas normaliser la grille** (canaux déjà 0/1) → `norm_obs_keys=["vec"]` |
+| `engine/w40k_core.py` | `observation_space = gym.spaces.Box(shape=(obs_size,))` | `gym.spaces.Dict({"vec": Box(108), "grid": Box(0,1,(6,32,32))})` |
+| `engine/w40k_core.py` | `is_squad_pipeline = obs_size == SQUAD_OBS_SIZE_TARGET` | le gate reste piloté par `obs_size`=108 ; `_zero_obs()` doit renvoyer un `Dict` cohérent |
+| `ai/train.py, 1806, 2501` | `env.observation_space.shape[0]` | un `Dict` n'a pas de `.shape` → lever/adapter |
+| `ai/training_callbacks.py` | `torch.zeros((1, observation_space.shape[0]))` | dummy obs en `Dict` |
+| `ai/train.py, 1780, 2452` | `VecNormalize(...)` | supporte les obs `Dict` ; **ne pas normaliser la grille** (canaux déjà 0/1) → `norm_obs_keys=["vec"]` |
 | `config/agents/CoreAgent/CoreAgent_training_config.json` (**5 profils**) | `policy: MlpPolicy`, `n_steps: 16384` | `MultiInputPolicy`, **`n_steps: 8192`** (§8.3 : 9,66 Go de rollout buffer — la RAM est la contrainte dimensionnante, pas le GPU), extracteur CNN pour `grid` |
 
 **Constantes de la grille** : `engine/spatial_grid.py` (`GRID_SIZE=32`, `GRID_CHANNELS=6`, canaux
@@ -1008,7 +1008,7 @@ Pas de tests automatisés de bout en bout sur ce périmètre (cf. `CLAUDE.md`) �
 1. **Suite unitaire verte** (`tests/unit/…`), y compris les tests d'action space / masque / decoder.
 2. **`python3 ai/train.py --agent CoreAgent --scenario bot --step`** — vérifier qu'une escouade parcourt
    une **distance cohérente avec son budget** (≈ `MOVE datasheet (pouces) × inches_to_subhex` ; le
-   `MOVE` moteur est déjà scalé, `game_state.py:841`), et non 1 subhex.
+   `MOVE` moteur est déjà scalé, `game_state.py`), et non 1 subhex.
 3. **`python3 ai/analyzer.py <résultats>`** — pas de nouvelle catégorie d'erreur.
 4. **Replay** : contrôle visuel du symptôme d'origine (les unités doivent traverser le board).
 5. **Non-régression PvP** : le chemin `execute_semantic_action` doit être **inchangé** (aucune

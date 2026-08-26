@@ -1020,6 +1020,59 @@ def test_a_kind_without_a_single_file_is_counted_not_guessed(
     assert (checked, unverifiable, broken) == (0, 1, [])
 
 
+# --------------------------------------------------------------------------- passe 4 étendue à Documentation/Implémentation/
+
+
+def test_impl_doc_line_anchor_is_detected(tmp_path: pathlib.Path) -> None:
+    """ROUGE : une ancre de ligne dans Documentation/Implémentation/ est détectée.
+
+    Avant cette livraison, check_anchors() ne regardait que DEFAULT_DOCS ; un renvoi de ligne
+    dans V11_agent_rework.md passait en vert sans aucune alerte. ANCHOR_ENFORCED inclut
+    désormais tous les .md de Documentation/Implémentation/ via _impl_doc_basenames().
+    """
+    assert "V11_agent_rework.md" in cdr.ANCHOR_ENFORCED, (
+        "V11_agent_rework.md absent d'ANCHOR_ENFORCED — la couverture est régressive"
+    )
+    # ROUGE : numéro de ligne présent → violation
+    doc = write(tmp_path, "V11_agent_rework.md", "voir `engine/w40k_core.py:705`\n")
+    entries = cdr.check_anchors(doc)
+    assert len(entries) == 1, f"attendu 1 violation, obtenu {entries}"
+
+    # VERT après correction : symbole à la place de la ligne
+    doc.write_text("voir `def _get_unit_by_id` dans `engine/w40k_core.py`\n", encoding="utf-8")
+    assert cdr.check_anchors(doc) == []
+
+
+def test_impl_doc_line_anchor_inside_fenced_block_is_ignored(tmp_path: pathlib.Path) -> None:
+    """Un renvoi de ligne dans un bloc fencé n'est PAS une ancre de document.
+
+    `# shooting_handlers.py:1538` dans un extrait de code Python est une attribution de
+    source, pas un renvoi de doc. Le masquage des blocs fencés dans check_anchors() ferme
+    ce faux positif.
+    """
+    assert "V11_agent_rework.md" in cdr.ANCHOR_ENFORCED
+    content = (
+        "Du texte avant.\n"
+        "```python\n"
+        "gs = copy.deepcopy(gs)   # shooting_handlers.py:1538\n"
+        "```\n"
+        "Du texte après.\n"
+    )
+    doc = write(tmp_path, "V11_agent_rework.md", content)
+    assert cdr.check_anchors(doc) == []
+
+
+def test_impl_real_corpus_has_no_line_anchor() -> None:
+    """VERT VACANT fermé : Documentation/Implémentation/ passe entièrement la passe 4.
+
+    Verrou sur le dépôt réel : report_impl_anchors() doit rendre 0 violation. Si ce test
+    rougit, un doc de Documentation/Implémentation/ a reçu un numéro de ligne lors d'une
+    livraison sans que ce tour ne le corrige.
+    """
+    has_broken, lines = cdr.report_impl_anchors()
+    assert not has_broken, "\n".join(lines)
+
+
 # --------------------------------------------------------------------------- corpus réel
 
 

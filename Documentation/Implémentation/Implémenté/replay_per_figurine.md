@@ -34,18 +34,18 @@ chaque **figurine** d'une escouade individuellement, pas un seul socle par escou
 
 ## Tâches (4 fichiers) — FAIT (reste validation runtime navigateur par l'utilisateur)
 Note : tout le dégât tir+combat passe par le SEUL builder `_build_shot_details` (`targetId`
-dispo), donc un seul point pour le segment cible ; L5077 (move/charge/advance) non concerné.
+dispo), donc un seul point pour le segment cible ; 5077 (move/charge/advance) non concerné.
 `format_models_segment` a reçu un param `label` pour produire `[TARGET_MODELS:]`.
 
 ### Backend Python
-- [x] `engine/w40k_core.py` L1439 : segment `[MODELS:]` initial injecté dans `episode_units`.
-- [x] `ai/step_logger.py` L253 : `[MODELS:]` émis sur les lignes `Starting position`.
+- [x] `engine/w40k_core.py` 1439 : segment `[MODELS:]` initial injecté dans `episode_units`.
+- [x] `ai/step_logger.py` 253 : `[MODELS:]` émis sur les lignes `Starting position`.
 - [x] `engine/w40k_core.py` `_build_shot_details` + `_flush_squad_action_logs_to_step_logger` :
       `details["target_models_segment"]` = survivants par-fig de la cible post-pertes, EMIS
       uniquement sur le DERNIER jet visant chaque cible (règle 40K : pertes retirées en bloc APRÈS
       les attaques). Emettre sur chaque jet ferait chuter les socles dès le 1er jet, avant les
       dégâts → non conforme. Déféré : HP descend jet par jet, socles tombent à la fin de la salve.
-- [x] `ai/step_logger.py` L100 : `[TARGET_MODELS:]` émis quand présent.
+- [x] `ai/step_logger.py` 100 : `[TARGET_MODELS:]` émis quand présent.
 
 ### Frontend TS
 - [x] `frontend/src/utils/replayParser.ts` : helpers `extractModelsSegment` + `pushAction`,

@@ -2,7 +2,7 @@
 
 **Chantier CLOS.** T0→T4-ter livrés (2026-08-25). 0 garde is-None résiduelle sur `get_unit_by_id` dans les 7 fichiers T3 (re-grep final T4-ter : 4 hits légitimes conservés).
 
-**T4-ter (2026-08-25)** — 39 conversions supplémentaires dans 6 fichiers (`shared_utils`, `shooting_handlers`, `observation_builder`, `w40k_core`, `charge_handlers`, `action_decoder`). T4-bis n'avait couvert que `shared_utils` + `action_decoder` partiellement ; le re-grep T4-bis ne portait pas sur les 7 fichiers T3. 17 tests ROUGE→VERT dans `test_require_unit_by_id_residuals.py`. 4 gardes conservées : `w40k_core` L5307 (entrée externe API), `charge_handlers` L3638/L3650/L4404 (condition composée sur cibles déclarées par le joueur).
+**T4-ter (2026-08-25)** — 39 conversions supplémentaires dans 6 fichiers (`shared_utils`, `shooting_handlers`, `observation_builder`, `w40k_core`, `charge_handlers`, `action_decoder`). T4-bis n'avait couvert que `shared_utils` + `action_decoder` partiellement ; le re-grep T4-bis ne portait pas sur les 7 fichiers T3. 17 tests ROUGE→VERT dans `test_require_unit_by_id_residuals.py`. 4 gardes conservées : `w40k_core` 5307 (entrée externe API), `charge_handlers` 3638/3650/4404 (condition composée sur cibles déclarées par le joueur).
 
 🔴 **CHIFFRES À NOUVEAU PÉRIMÉS — re-mesurés le 2026-08-06 sur `main` (`d7be203e`) :
 186 appels, 79 déjà bruyants, 56 replis, 51 à lire.**
@@ -38,7 +38,7 @@ sont indicatifs, relevés le 2026-08-05. Re-localiser par `grep` avant d'éditer
 
 | | `units_cache` (lot clos) | `unit_by_id` (ce lot) |
 |---|---|---|
-| Écrivains | `build_units_cache`, `remove_from_units_cache`, `update_units_cache_*` | `_rebuild_unit_by_id` **uniquement** (`w40k_core.py:6609`) |
+| Écrivains | `build_units_cache`, `remove_from_units_cache`, `update_units_cache_*` | `_rebuild_unit_by_id` **uniquement** (`w40k_core.py`) |
 | Quand | à chaque mutation, et **à chaque mort** | au reset / reload / chargement de scénario, **jamais en cours de partie** |
 | Une unité morte y est ? | **NON** — l'absence EST l'encodage de la mort | **OUI** — `game_state["units"]` n'est jamais purgé |
 | Donc `.get()` → `None` signifie | « morte », souvent un cas métier | **id inconnu / index désynchronisé — jamais un cas de jeu** |
@@ -55,7 +55,7 @@ utilisateur ou d'un champ optionnel. C'est exactement la leçon §3.2 de la camp
 s'annule pas parce que le contrat est plus net.
 
 **Précédent DÉJÀ ÉCRIT dans le dépôt**, à réutiliser tel quel comme argument :
-`_ai_select_fight_target` ([`fight_handlers.py:1602`](../../../engine/phase_handlers/fight_handlers.py))
+`_ai_select_fight_target` ([`fight_handlers.py`](../../../engine/phase_handlers/fight_handlers.py))
 porte depuis le 2026-07-20 (V11 §0.19.2) le raisonnement complet et le `raise` correspondant :
 
 > Le pool vient de `units_cache` : une cible qui y figure mais manque de `unit_by_id` est une
@@ -81,10 +81,10 @@ l'ordre des arguments INVERSÉ.**
 
 | Implémentation | Signature | `str()` sur l'id ? |
 |---|---|---|
-| [`engine/combat_utils.py:95`](../../../engine/combat_utils.py) | `get_unit_by_id(game_state, unit_id)` | **non**, et le docstring dit que la coercition serait un défaut |
-| [`engine/game_utils.py:51`](../../../engine/game_utils.py) | `get_unit_by_id(unit_id, game_state)` | oui |
-| [`shooting_handlers.py:6058`](../../../engine/phase_handlers/shooting_handlers.py) | `_get_unit_by_id(game_state, unit_id)` | oui |
-| [`w40k_core.py:6213`](../../../engine/w40k_core.py) | `self._get_unit_by_id(unit_id)` | délègue à `game_utils` |
+| [`engine/combat_utils.py`](../../../engine/combat_utils.py) | `get_unit_by_id(game_state, unit_id)` | **non**, et le docstring dit que la coercition serait un défaut |
+| [`engine/game_utils.py`](../../../engine/game_utils.py) | `get_unit_by_id(unit_id, game_state)` | oui |
+| [`shooting_handlers.py`](../../../engine/phase_handlers/shooting_handlers.py) | `_get_unit_by_id(game_state, unit_id)` | oui |
+| [`w40k_core.py`](../../../engine/w40k_core.py) | `self._get_unit_by_id(unit_id)` | délègue à `game_utils` |
 
 Les trois premières font *exactement* la même chose : `require_key(game_state, "unit_by_id").get(...)`.
 Deux positions de `str()` divergentes, deux ordres d'arguments contradictoires.

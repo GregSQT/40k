@@ -18,7 +18,7 @@
 
 Aujourd'hui, chaque entité d'unité de l'observation porte **un bit par capacité connue du
 moteur** : `UNIT_RULE_EFFECT_IDS`, 13 entrées, émises comme `rule_<id>` dans
-`UNIT_BIN_FIELDS` (`engine/observation_entities.py:103`).
+`UNIT_BIN_FIELDS` (`engine/observation_entities.py`).
 
 Ce schéma grossit linéairement avec le nombre de capacités du jeu. Chaque capacité ajoutée
 change `UNIT_BIN_SIZE`, donc `obs_size`, donc **invalide tout modèle entraîné**
@@ -215,7 +215,7 @@ D'où l'inclusion, ici et pas en 03, des slots d'action d'Oath of Moment (ci-des
 
 ## `OATH_SLOTS` — dimension d'action, pas `CHOICE_k`
 
-Oath of Moment désigne *« one unit from your opponent's army »*. `engine/macro_intents.py:65`
+Oath of Moment désigne *« one unit from your opponent's army »*. `engine/macro_intents.py`
 porte la doctrine applicable :
 
 > ⚠️ Elles [les actions `CHOICE_i`] ne concernent QUE les décisions dont les candidats ne sont

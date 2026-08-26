@@ -104,18 +104,18 @@ Noter : **chaque tour**, pas une fois par partie. Et **non optionnel** — « se
 
 ### `hit_any_fail` n'existe pas
 
-`RerollProfile` (`engine/phase_handlers/attack_sequence.py:53`) porte `hit_1`, `wound_1`,
+`RerollProfile` (`engine/phase_handlers/attack_sequence.py`) porte `hit_1`, `wound_1`,
 `wound_any_fail`, `save_1`. Il n'y a **aucune** relance complète du jet de touche
 (`grep -rn "hit_any_fail" engine/` → 0 hit). C'est une création, pas une réutilisation.
 
 Le motif à suivre est celui de `wound_any_fail`, déjà en place à
-`attack_sequence.py:332` : relance des **échecs** uniquement, un seul dé de relance,
+`attack_sequence.py` : relance des **échecs** uniquement, un seul dé de relance,
 priorité explicite entre les causes, et `hitRerollCause` au record — sans cette trace, le log
 dit que la relance était *possible*, jamais qu'elle a *eu lieu*.
 
 ### Désignation : dimension d'action, pas `CHOICE_k`
 
-`engine/macro_intents.py:65` :
+`engine/macro_intents.py` :
 
 > ⚠️ Elles ne concernent QUE les décisions dont les candidats ne sont PAS des entités déjà
 > observées : une décision « quelle escouade ennemie » se paramètre en dimension d'action +
@@ -170,7 +170,7 @@ n'a pas le droit de changer `obs_size` ni `TOTAL_ACTION_SIZE`.
 - `engine/phase_handlers/command_handlers.py` — les deux décisions de début de phase
 - `engine/phase_handlers/attack_sequence.py` — `hit_any_fail` dans `RerollProfile`
 - `engine/phase_handlers/shared_utils.py`, `fight_handlers.py` — seuils et relances aux sites
-  d'appel (`shared_utils.py:7566`, `:8966`, `fight_handlers.py:5232`)
+  d'appel (`shared_utils.py`, `:8966`, `fight_handlers.py`)
 - `engine/action_decoder.py` — décodage des `OATH_SLOTS`, masque
 - `engine/game_state.py` — état Waaagh! / cible Oath
 - `config/unit_statuses.json` — id `oath_target`

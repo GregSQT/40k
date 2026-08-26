@@ -67,7 +67,7 @@ qui distingue « l'union a changé » de « le bloc a été zéroté ».
 ## Un second défaut, mineur
 
 `RULES_STATUS = { leader: 0 }` (« non implémenté ») est **périmé** : le rattachement
-leader/support est implémenté (règle 19.01/19.04, `engine/game_state.py:846`
+leader/support est implémenté (règle 19.01/19.04, `engine/game_state.py`
 `_fold_attached_characters`). Le statut ment sur l'état réel du moteur.
 
 ## Pourquoi un chantier séparé
@@ -118,7 +118,7 @@ rosters Armageddon, refactorer les fichiers au passage.
 3. Corriger les `RULES_STATUS` périmés : `leader` et `support` sont **implémentés**.
 4. Vérifier qu'aucune unité ne se retrouve avec un `UNIT_RULES` mal formé (liste vide plutôt
    que champ absent, ou l'inverse selon la convention du chargeur — lire
-   `engine/game_state.py:183` avant de trancher).
+   `engine/game_state.py` avant de trancher).
 
 ## Vérification exigée
 

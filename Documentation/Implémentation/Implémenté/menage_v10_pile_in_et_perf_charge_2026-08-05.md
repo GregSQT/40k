@@ -118,7 +118,7 @@ paramètre, et remplacer la boucle par `if cell in occupied`. Strictement équiv
 
 Pourquoi c'est chaud : `_hex_legal_for_charge` est appelée **par cellule** dans les deux BFS (le
 commentaire du fichier chiffre le pire cas à ~14 641 itérations par anneau, pour chaque figurine),
-et `charge_build_valid_plan` est sur le chemin RL — `observation_builder.py:1420`, à chaque step.
+et `charge_build_valid_plan` est sur le chemin RL — `observation_builder.py`, à chaque step.
 
 ### B.3 Résultat de la mesure — et pourquoi le correctif a été gardé QUAND MÊME
 
@@ -209,7 +209,7 @@ tests a été annoncé vert sans avoir tourné : `pytest … | tail` renvoie le 
 Rediriger vers un fichier, puis `echo "CODE = $?"`. `5` = aucun test collecté, pas « tout va bien ».
 
 🔴 **`biome` sort DÉJÀ en 1 sur `main`** (constaté à `4636b7ea`) : 2 erreurs issues du commit WIP
-`3a2a67c1` — `BoardPvp.tsx:4421` (dépendance de hook manquante) et un `setError` Ingress/Deploy à
+`3a2a67c1` — `BoardPvp.tsx` (dépendance de hook manquante) et un `setError` Ingress/Deploy à
 reformater. Ne pas les attribuer à ces lots.
 
 🔴 **Balayage de code mort** : énumérer par parcours disque, **jamais** `git ls-files` (il ignore

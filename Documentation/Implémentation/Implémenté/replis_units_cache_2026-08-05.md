@@ -108,15 +108,15 @@ identique à celui du lot charge. Une empreinte de repli fait mentir la géomét
 
 | Site | Fonction | Lecture |
 |---|---|---|
-| `fight_handlers.py:285` | `_fight_unit_is_hex_adjacent_to_enemy_footprint` | `unit_entry = units_cache.get(unit_id_str)` |
-| `fight_handlers.py:302` | `_fight_pile_in_closest_enemy_snapshot` | `unit_entry = units_cache.get(unit_id_str)` |
-| ~~`fight_handlers.py:745`~~ | ~~`_fight_compute_pile_in_footprint_zone`~~ | **SUPPRIMÉE** — CODE MORT (transitif), cf. §8.3 |
-| ~~`fight_handlers.py:2168`~~ | ~~`_has_los_to_enemies_within_range`~~ | **SITE DISPARU** — fonction supprimée le 2026-08-05 (cf. note ci-dessous) |
-| `movement_handlers.py:1476` | `_is_in_enemy_engagement_zone` | `unit_entry = units_cache.get(unit_id_str)` |
-| `shooting_handlers.py:2120` | `_unit_has_firable_target` | `shooter_entry = units_cache.get(shooter_id_str)` |
-| `shooting_handlers.py:2299` | `_is_valid_shooting_target` | `shooter_entry = units_cache.get(shooter_id_str)` |
-| `shooting_handlers.py:2300` | `_is_valid_shooting_target` | `target_entry = units_cache.get(target_id_str)` |
-| ~~`shooting_handlers.py:6048`~~ | ~~`_has_los_to_enemies_within_range`~~ | **SITE DISPARU** — fonction supprimée le 2026-08-05 (cf. note ci-dessous) |
+| `fight_handlers.py` | `_fight_unit_is_hex_adjacent_to_enemy_footprint` | `unit_entry = units_cache.get(unit_id_str)` |
+| `fight_handlers.py` | `_fight_pile_in_closest_enemy_snapshot` | `unit_entry = units_cache.get(unit_id_str)` |
+| ~~`fight_handlers.py`~~ | ~~`_fight_compute_pile_in_footprint_zone`~~ | **SUPPRIMÉE** — CODE MORT (transitif), cf. §8.3 |
+| ~~`fight_handlers.py`~~ | ~~`_has_los_to_enemies_within_range`~~ | **SITE DISPARU** — fonction supprimée le 2026-08-05 (cf. note ci-dessous) |
+| `movement_handlers.py` | `_is_in_enemy_engagement_zone` | `unit_entry = units_cache.get(unit_id_str)` |
+| `shooting_handlers.py` | `_unit_has_firable_target` | `shooter_entry = units_cache.get(shooter_id_str)` |
+| `shooting_handlers.py` | `_is_valid_shooting_target` | `shooter_entry = units_cache.get(shooter_id_str)` |
+| `shooting_handlers.py` | `_is_valid_shooting_target` | `target_entry = units_cache.get(target_id_str)` |
+| ~~`shooting_handlers.py`~~ | ~~`_has_los_to_enemies_within_range`~~ | **SITE DISPARU** — fonction supprimée le 2026-08-05 (cf. note ci-dessous) |
 
 🔴 **Jumeau évident dans la liste — RÉSOLU le 2026-08-05, et la réponse est « les deux ».**
 `_has_los_to_enemies_within_range` existait en double dans `fight_handlers` ET `shooting_handlers`,
@@ -154,18 +154,18 @@ Le refus est explicite mais **muet sur sa cause** : l'appelant ne distingue pas 
 
 | Site | Fonction | Repli constaté |
 |---|---|---|
-| `fight_handlers.py:1790` | `_model_can_fight_target` | `if target_entry is None:` |
-| `fight_handlers.py:3417` | `_fight_pile_in_closest_tier_ids` | `if entry is None:` |
-| `shared_utils.py:1677` | `check_if_melee_can_charge` | `if target_entry is None or not entry_is_on_battlefield(...)` ⚠️ **probablement légitime** (hors table = 20.01) |
-| `shared_utils.py:3288` | `_recompute_squad_occupied_hexes` | `if entry is None:` |
-| `shared_utils.py:5788` | `_attacker_model_can_reach_squad` | `if base_unit is None:` |
-| `shared_utils.py:5932` / `:5933` | `_shoot_engagement_blocks_target` | `if shooter_entry is None or target_entry is None:` |
-| `shared_utils.py:6932` / `:6933` | `_squads_are_engaged` | `if a is None or b is None:` |
+| `fight_handlers.py` | `_model_can_fight_target` | `if target_entry is None:` |
+| `fight_handlers.py` | `_fight_pile_in_closest_tier_ids` | `if entry is None:` |
+| `shared_utils.py` | `check_if_melee_can_charge` | `if target_entry is None or not entry_is_on_battlefield(...)` ⚠️ **probablement légitime** (hors table = 20.01) |
+| `shared_utils.py` | `_recompute_squad_occupied_hexes` | `if entry is None:` |
+| `shared_utils.py` | `_attacker_model_can_reach_squad` | `if base_unit is None:` |
+| `shared_utils.py` / `:5933` | `_shoot_engagement_blocks_target` | `if shooter_entry is None or target_entry is None:` |
+| `shared_utils.py` / `:6933` | `_squads_are_engaged` | `if a is None or b is None:` |
 | `shared_utils.py` | `fight_pile_in_plan` | `if our_entry is None:` |
 | `shared_utils.py` | `squad_consolidate_plan` | `if our_entry is None:` |
-| `shared_utils.py:9903` | `_squad_is_in_enemy_er` | `if entry is None:` |
-| `shared_utils.py:10349` | `build_squad_move_cell_map` | `if entry is None:` |
-| `shooting_handlers.py:1101` | `preview_hidden_models_from_position` | `if entry is None:` |
+| `shared_utils.py` | `_squad_is_in_enemy_er` | `if entry is None:` |
+| `shared_utils.py` | `build_squad_move_cell_map` | `if entry is None:` |
+| `shooting_handlers.py` | `preview_hidden_models_from_position` | `if entry is None:` |
 
 ### Forme C — `if x is None: continue` — 6 sites — ✅ TRAITÉE
 
@@ -175,12 +175,12 @@ ni insatisfaite* — donc invisible dans l'UI.
 
 | Site | Fonction |
 |---|---|
-| `fight_handlers.py:2377` | `pile_in_move_destinations_12_03` |
-| `fight_handlers.py:3426` | `_fight_pile_in_closest_tier_ids` |
-| `fight_handlers.py:3840` | `pile_in_autoplace_plan` |
-| `shared_utils.py:5296` | `_hex_legal_for_charge` |
-| `shooting_handlers.py:1676` | `build_hidden_too_far_by_unit_id` |
-| `shooting_handlers.py:1779` | `build_hidden_detection_info_by_unit_id` |
+| `fight_handlers.py` | `pile_in_move_destinations_12_03` |
+| `fight_handlers.py` | `_fight_pile_in_closest_tier_ids` |
+| `fight_handlers.py` | `pile_in_autoplace_plan` |
+| `shared_utils.py` | `_hex_legal_for_charge` |
+| `shooting_handlers.py` | `build_hidden_too_far_by_unit_id` |
+| `shooting_handlers.py` | `build_hidden_detection_info_by_unit_id` |
 
 ### Forme D — à lire avant de classer — 13 sites — ✅ TRAITÉE
 
@@ -189,19 +189,19 @@ Compréhensions filtrantes (`... for x in ... if x is not None`), gardes composi
 
 | Site | Fonction | Note |
 |---|---|---|
-| `fight_handlers.py:357` | `_fight_pile_in_new_fp_strictly_closer_to_closest_tier` | |
-| `fight_handlers.py:1265` | `_fight_plan_consolidation_destinations` | |
-| `fight_handlers.py:1533` | `_ai_select_pile_in_destination` | |
-| `fight_handlers.py:4887` | `_fight_consolidation_preview_plan` | garde composite |
-| `movement_handlers.py:3159` | `movement_build_valid_destinations_pool` | repli `occupied_hexes_by_model` → `None` |
+| `fight_handlers.py` | `_fight_pile_in_new_fp_strictly_closer_to_closest_tier` | |
+| `fight_handlers.py` | `_fight_plan_consolidation_destinations` | |
+| `fight_handlers.py` | `_ai_select_pile_in_destination` | |
+| `fight_handlers.py` | `_fight_consolidation_preview_plan` | garde composite |
+| `movement_handlers.py` | `movement_build_valid_destinations_pool` | repli `occupied_hexes_by_model` → `None` |
 | `shared_utils.py` | `charge_build_valid_plan` | compréhension filtrante |
 | `shared_utils.py` | `fight_pile_in_plan` | compréhension filtrante |
-| `shared_utils.py:9542` | `get_fighting_models` | compréhension filtrante |
+| `shared_utils.py` | `get_fighting_models` | compréhension filtrante |
 | `shared_utils.py` | `squad_consolidate_plan` | |
-| `shared_utils.py:10588` | `build_squad_action_mask` | ⚠️ **probablement légitime** — commentaire en place : « Ennemi hors table (réserves 20.01) : intirable, et sans géométrie à mesurer » |
-| `shooting_handlers.py:3493` | `shooting_build_valid_target_pool` | |
-| ~~`shooting_handlers.py:3574`~~ | ~~`_resolve_target_hexes_for_los`~~ | **SUPPRIMÉE** — code mort, cf. §7 |
-| `shooting_handlers.py:4288` | `_resolve_unit_anchor_and_footprint` | repli `occupied_hexes` |
+| `shared_utils.py` | `build_squad_action_mask` | ⚠️ **probablement légitime** — commentaire en place : « Ennemi hors table (réserves 20.01) : intirable, et sans géométrie à mesurer » |
+| `shooting_handlers.py` | `shooting_build_valid_target_pool` | |
+| ~~`shooting_handlers.py`~~ | ~~`_resolve_target_hexes_for_los`~~ | **SUPPRIMÉE** — code mort, cf. §7 |
+| `shooting_handlers.py` | `_resolve_unit_anchor_and_footprint` | repli `occupied_hexes` |
 
 ---
 
@@ -440,7 +440,7 @@ d'une sortie de test VIDE autant que d'une sortie rouge.
 `_fight_footprint_has_enemy_hex_contact` (pointait vers un jumeau par-ancre supprimé), celui de
 `_move_preview_footprint_span` (« alignée sur `charge_handlers._charge_base_diameter` », lui aussi
 mort), et le libellé `FIGHT_CONSOLIDATION_PLAN` de `perf_timing.py`. Le commentaire de
-`w40k_core.py:5368` est CONSERVÉ : il explique pourquoi un contrôle a été retiré sciemment, ce que
+`w40k_core.py` est CONSERVÉ : il explique pourquoi un contrôle a été retiré sciemment, ce que
 CLAUDE.md demande de garder.
 
 **Leçon, à ajouter à la méthode pour le prochain lot** : l'étape « code mort » doit être faite

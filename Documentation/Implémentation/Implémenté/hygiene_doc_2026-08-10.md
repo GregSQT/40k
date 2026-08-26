@@ -65,4 +65,4 @@ futurs.
 - **`DB_migration_prompt.md`** recâblé vers `DB_migration.md` (le `DB_migration33.md` qu'il citait
   n'existe pas).
 - 20 références recâblées dans 11 fichiers (docs V11, `Documentation_audit.md`,
-  `engine/w40k_core.py:6478`).
+  `engine/w40k_core.py`).

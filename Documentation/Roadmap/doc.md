@@ -20,7 +20,7 @@
 
 **Convention** : citer `def <symbole>` ou un `grep` reproductible, jamais un numéro de ligne. `scripts/check_doc_references.py` la fait respecter sur l'index, les fichiers sujets et les contrats permanents.
 
-**Écart de couverture du script** : `check_doc_references.py` passe 4 (ANCRES) couvre uniquement `Documentation/Roadmap/` et les contrats permanents — pas les docs V11 (`Documentation/Implémentation/`). Le script passe donc au vert même si des ancres stales subsistent dans `V11_agent_rework.md`, `pile_in_overrun_par_figurine_2026-08-18.md`, etc. La vérification réelle est le grep symbole par symbole (fait ici).
+**Couverture du script** : `check_doc_references.py` passe 4 (ANCRES) couvre `Documentation/Roadmap/`, les contrats permanents, **et désormais `Documentation/Implémentation/`** (85 fichiers). Les 1237 ancres stales ont été nettoyées le 2026-08-26 — le script repasse au vert sur l'ensemble du corpus.
 
 ---
 

@@ -43,7 +43,7 @@ Heavy Bolter (36") — la portée n'est pas en cause.
 
 ## ROOT CAUSE — plus profonde que « ancre-à-ancre »
 
-`engine/phase_handlers/shared_utils.py:5758-5761` (`_emit_squad_shoot_log`) :
+`engine/phase_handlers/shared_utils.py` (`_emit_squad_shoot_log`) :
 
 ```python
 ac = int(sq_uc.get("col", 0))   # units_cache du SQUAD attaquant
@@ -64,7 +64,7 @@ moteur n'a jamais utilisées. Les 6 `shoot_through_wall` + 6 `shoot_invalid.no_l
 6 tirs) sont des faux positifs.
 
 Deux violations CLAUDE.md au passage, mêmes lignes : `.get("col", 0)` — valeur par défaut qui
-masque une clé manquante — et `has_line_of_sight` (`ai/analyzer.py:630`) `except Exception:
+masque une clé manquante — et `has_line_of_sight` (`ai/analyzer.py`) `except Exception:
 return False`, qui refuse la LoS silencieusement.
 
 ⚠️ Corollaire : l'affirmation « la journalisation V11 T6 est fidèle et exacte » (plus bas) est
@@ -197,4 +197,4 @@ ne vaut que pour les jets. C'est la dette n°1 de « RESTE À FAIRE ».
 ## Lien
 
 `Documentation/Implémentation/V11_agent_rework.md` — section T6-c (résultat sur le vrai run) et
-rupture R8 (chantier LoS 3D, `spatial_relations.py:186-189` « câblage incomplet »).
+rupture R8 (chantier LoS 3D, `spatial_relations.py` « câblage incomplet »).

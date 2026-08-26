@@ -92,7 +92,7 @@ le seuil le plus bas. Un Warboss (`LD 6+`) rattaché à des Boyz (`LD 7+`) fait 
 à 6+.
 
 C'est une conséquence directe de la règle 19.04 déjà implémentée
-(`engine/game_state.py:846` `_fold_attached_characters`) : ne pas recoder une sélection de Ld
+(`engine/game_state.py` `_fold_attached_characters`) : ne pas recoder une sélection de Ld
 à côté, lire l'unité effective.
 
 ### 01.07 — Jet de battle-shock
@@ -112,7 +112,7 @@ Trois effets, dont **un seul est applicable aujourd'hui** :
 
 | Effet | Applicable ? |
 |---|---|
-| OC → '-' | **oui** — `engine/game_state.py:2564` `_sum_objective_control_oc` |
+| OC → '-' | **oui** — `engine/game_state.py` `_sum_objective_control_oc` |
 | Pas ciblable par un stratagème | sans objet — pas de stratagèmes |
 | Inéligible aux actions | sans objet — pas de système d'actions (16) |
 

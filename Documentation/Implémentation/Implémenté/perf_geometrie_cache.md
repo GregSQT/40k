@@ -36,7 +36,7 @@ Poste transverse, réparti sur les trois blocs ci-dessus et donc invisible comme
 - `_vertical_classes` / `_class_footprint` — 193 252 appels chacun, 7,7 s ensemble.
 
 Appelants de `unit_within_engagement_zone_footprints` : le masque d'actions (8 788), le générateur
-de `shared_utils.py:10412` (26 603), `_hex_legal_for_charge` (12 589), les pools de charge et de
+de `shared_utils.py` (26 603), `_hex_legal_for_charge` (12 589), les pools de charge et de
 fight, et l'observation. **Aucun cache entre eux** : la même zone est reconstruite pour le masque,
 puis pour le pool, puis pour l'observation, dans le même step, sur le même état de jeu.
 

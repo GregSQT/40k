@@ -630,8 +630,8 @@ holdout de **sélection**. `tactical`, lui, ne bouge pas : il est le témoin, et
 Trois familles au lieu de deux, dans `bot_registry` (source unique) :
 `SELECTION_BOT_KEYS`, `BENCHMARK_BOT_KEYS`, `SEALED_HOLDOUT_KEYS`. **CINQ sites** lisent
 aujourd'hui la partition — `grep -rn "SELECTION_BOT_NAMES\|SELECTION_BOT_KEYS\|HOLDOUT_BOT_KEYS"
---include=*.py ai/ scripts/` hors registre : `training_callbacks.py` L84 (`selection_worst_bot`),
-L1618 (gate), L1933 (pires cas robustes), L2160 (score robuste), et `metrics_tracker.py` L1879
+--include=*.py ai/ scripts/` hors registre : `training_callbacks.py` 84 (`selection_worst_bot`),
+1618 (gate), 1933 (pires cas robustes), 2160 (score robuste), et `metrics_tracker.py` 1879
 (`worst_bot_score` TensorBoard). Les cinq lisent la partition, jamais une liste écrite à la main —
 c'est la leçon de `metrics_tracker`, qui avait exactement cette liste-là écrite à la main et restée
 sur l'ancien panel.
@@ -732,10 +732,10 @@ généralisera pas vaut plus cher que le détecter finement.
 
 #### D.4 Le profil comportemental par adversaire — l'instrument qui manque
 
-**Constat, vérifié dans le code le 2026-08-15.** `_eval_worker_task` (`ai/bot_evaluation.py` L953)
+**Constat, vérifié dans le code le 2026-08-15.** `_eval_worker_task` (`ai/bot_evaluation.py` 953)
 retourne `wins` / `losses` / `draws`, les ventilations par faction / siège / roster, les troncatures,
 et `shoot_stats`. **Aucune donnée de jeu** : ni VP, ni zones tenues, ni pertes subies ou infligées,
-ni charges, aucune courbe par tour. Et `results["{bot}_shoot_stats"]` (L1594) n'a **aucun
+ni charges, aucune courbe par tour. Et `results["{bot}_shoot_stats"]` (1594) n'a **aucun
 consommateur** dans tout le dépôt (`grep -rn "shoot_stats" --include=*.py .` → produit puis jeté).
 
 Les métriques comportementales qui existent (`02_combat/*`, contrôle de zone, VP) viennent de la
@@ -901,7 +901,7 @@ démarrage, message qui nomme le profil fautif.
   `bot_eval_weights`, tous deux déjà gardés ainsi. Un bucket à `0.0` est légal (c'est ainsi que la
   phase 1 s'exprime : `bots 0.60`, `previous_champion 0.40`, le reste à zéro) ; un bucket non nul
   dont la liste de membres est vide **lève**.
-- **Point d'insertion unique** : `_select_opponent_mode_for_episode` (`env_wrappers.py` ~L955), qui
+- **Point d'insertion unique** : `_select_opponent_mode_for_episode` (`env_wrappers.py` ~955), qui
   choisit déjà entre deux modes par tirage sha256. Il passe de « bot ou snapshot » à « bot, ou
   membre M du pool », et `_get_opponent_action` route en conséquence. Le reste du wrapper —
   construction de l'observation, masque, invalidation de la décision après `predict` — ne bouge

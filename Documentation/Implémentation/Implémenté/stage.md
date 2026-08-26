@@ -182,9 +182,9 @@ Conséquences : une charge vers un étage doit couvrir la montée avec le 2D6 et
 
 ### 3.1 Modèle d'état — 2D strict, **aucune** verticalité
 - Position unité = entiers `col`/`row` (odd-q), posés dans `UnitFactory.create_unit`
-  ([game_state.py:124-126](file:///home/greg/40k/engine/game_state.py)) et `_build_enhanced_unit` (`:768-769`).
+  ([game_state.py](file:///home/greg/40k/engine/game_state.py)) et `_build_enhanced_unit` (`:768-769`).
 - Source de vérité runtime = `units_cache`, construit par `build_units_cache`
-  ([shared_utils.py:586](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)).
+  ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)).
   Entrée : `{col, row, HP_CUR, player, VALUE, BASE_SHAPE, BASE_SIZE, orientation,
   occupied_hexes:Set[(col,row)], occupied_hexes_by_model:{model_id:(col,row)}}` (`:654-672`).
 - `models_cache` par figurine (`:557-582`), `occupation_map : {(col,row) → unit_id}` (`:610`).
@@ -194,63 +194,63 @@ Conséquences : une charge vers un étage doit couvrir la montée avec le 2D6 et
 
 ### 3.2 Empreinte (footprint) multi-hex — **déjà développée**
 - `compute_occupied_hexes(center_col, center_row, base_shape, base_size, orientation)`
-  ([hex_utils.py:1064-1099](file:///home/greg/40k/engine/hex_utils.py)) : dispatch round/oval/square,
+  ([hex_utils.py](file:///home/greg/40k/engine/hex_utils.py)) : dispatch round/oval/square,
   rotation par `orientation × 60°`.
-- Champs socle sur l'unité : `BASE_SHAPE`, `BASE_SIZE`, `orientation` ([game_state.py:149-151](file:///home/greg/40k/engine/game_state.py)).
-- Point d'entrée moteur `_compute_unit_occupied_hexes` ([shared_utils.py:263-286](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)) —
+- Champs socle sur l'unité : `BASE_SHAPE`, `BASE_SIZE`, `orientation` ([game_state.py](file:///home/greg/40k/engine/game_state.py)).
+- Point d'entrée moteur `_compute_unit_occupied_hexes` ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)) —
   empreinte multi-hex calculée **seulement** si `engagement_zone > 1` (`:274`, valeur déjà scalée
   ×`inches_to_subhex` au chargement → board ×10 en pratique) **et** `base_size > 1` ; sinon 1 unité = 1 cellule.
 - `occupied_hexes` unité = union des footprints des figs vivantes (`:728-734`) ;
   `occupied_hexes_by_model` = footprint par figurine.
-- Masques de placement / distances bord-à-bord : `spatial_relations.py`, `combat_utils.py:327-386`.
+- Masques de placement / distances bord-à-bord : `spatial_relations.py`, `combat_utils.py`.
 
 ### 3.3 Ligne de vue — per-model, binaire, occlusion 2D
-- Point d'entrée `has_line_of_sight` ([combat_utils.py:512](file:///home/greg/40k/engine/combat_utils.py)) →
-  source unique `compute_unit_los` ([shooting_handlers.py:3895](file:///home/greg/40k/engine/phase_handlers/shooting_handlers.py)),
+- Point d'entrée `has_line_of_sight` ([combat_utils.py](file:///home/greg/40k/engine/combat_utils.py)) →
+  source unique `compute_unit_los` ([shooting_handlers.py](file:///home/greg/40k/engine/phase_handlers/shooting_handlers.py)),
   cœur `_compute_unit_los_uncached` (`:3936`).
 - Découpe cible en empreintes par-figurine ; visible si ≥1 modèle a ≥1 cellule à ligne dégagée (`:3975-4014`).
-- Primitive de tracé `_los_line_segment_clear` (`:3763`) : trace `hex_line` ([hex_utils.py:260](file:///home/greg/40k/engine/hex_utils.py),
+- Primitive de tracé `_los_line_segment_clear` (`:3763`) : trace `hex_line` ([hex_utils.py](file:///home/greg/40k/engine/hex_utils.py),
   cube-lerp) et inspecte chaque cellule intermédiaire.
 - **Bloque** (`:3777-3782`) : un **mur** (`wall_set`, toujours) ; une **area obscuring**
   (sauf si elle appartient au tireur ou à la cible, règle 13.10).
 - "Peek de coin" déjà géré : vantages latéraux du socle (`_shooter_lateral_vantage_hexes`, `:3716`).
 - Miroir WASM frontend `has_los_fast` que la primitive Python doit refléter (commentaire `:3774`).
-  Le miroir est en **Rust** ([lib.rs:84](file:///home/greg/40k/frontend/wasm-los/src/lib.rs)) : toute
+  Le miroir est en **Rust** ([lib.rs](file:///home/greg/40k/frontend/wasm-los/src/lib.rs)) : toute
   évolution LoS impose de modifier le Rust **et de rebuilder le wasm**.
-- Caches 2D sans notion de niveau : `hex_los_cache` ([combat_utils.py:527-538](file:///home/greg/40k/engine/combat_utils.py)),
+- Caches 2D sans notion de niveau : `hex_los_cache` ([combat_utils.py](file:///home/greg/40k/engine/combat_utils.py)),
   clé `((col,row),(col,row))` ; `pathfinding_distance_cache` (`:495-497`) idem.
 - Murs = `game_state["wall_hexes"]` (hexes 2D JSON, consommés par deployment_handlers/combat_utils) ;
   `terrain_areas = {id, obscuring, polygon_vertices, hexes}`
-  ([terrain_utils.py:4-8](file:///home/greg/40k/engine/terrain_utils.py)) — **aucun champ hauteur/étage**.
+  ([terrain_utils.py](file:///home/greg/40k/engine/terrain_utils.py)) — **aucun champ hauteur/étage**.
 
 ### 3.4 Mouvement — champ géodésique any-angle, terrain binaire
-- Budget `get_squad_move_budget` ([shared_utils.py:3404](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)) :
+- Budget `get_squad_move_budget` ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)) :
   normal/fall_back = `MOVE` ; advance = `MOVE + roll×échelle` ; charge = `2D6×échelle` ;
   pile_in/conso = `3×échelle`. Malus "take to the skies" −2" déjà présent (`:3435-3438`).
-- Hexes atteignables = `geodesic_field` ([hex_utils.py:1870](file:///home/greg/40k/engine/hex_utils.py),
-  Lazy Theta*, clearance = rayon socle) via `_euclidean_move_field` ([geodesic_move.py:40](file:///home/greg/40k/engine/phase_handlers/geodesic_move.py)).
+- Hexes atteignables = `geodesic_field` ([hex_utils.py](file:///home/greg/40k/engine/hex_utils.py),
+  Lazy Theta*, clearance = rayon socle) via `_euclidean_move_field` ([geodesic_move.py](file:///home/greg/40k/engine/phase_handlers/geodesic_move.py)).
   Charge réutilise **exactement** ce champ.
 - **Aucun coût de terrain** (pas de difficult terrain) : terrain **binaire** obstacle/libre.
-  Toggles de traversée `_get_move_traversal_rules` ([movement_handlers.py:1725](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)),
-  config `game_config.json:40-42`. Murs bloquent toujours ; FLY = disque euclidien ignorant murs+figs (`:1608-1639`).
-- Échelle `inches_to_subhex` (config board) ; métrique par règle `game_config.json:48` (`hex`/`euclidean`).
+  Toggles de traversée `_get_move_traversal_rules` ([movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)),
+  config `game_config.json`. Murs bloquent toujours ; FLY = disque euclidien ignorant murs+figs (`:1608-1639`).
+- Échelle `inches_to_subhex` (config board) ; métrique par règle `game_config.json` (`hex`/`euclidean`).
 
 ### 3.5 Rendu (PIXI) — briques réutilisables
-- Rendu statique dans `drawBoard` ([BoardDisplay.tsx:1831](file:///home/greg/40k/frontend/src/components/BoardDisplay.tsx)),
+- Rendu statique dans `drawBoard` ([BoardDisplay.tsx](file:///home/greg/40k/frontend/src/components/BoardDisplay.tsx)),
   overlays + UI dans [BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx), figs dans [UnitRenderer.tsx](file:///home/greg/40k/frontend/src/components/UnitRenderer.tsx).
 - **Zone au sol type terrain** (modèle à copier pour l'empreinte d'étage) : bloc terrain
-  [BoardDisplay.tsx:2058-2153](file:///home/greg/40k/frontend/src/components/BoardDisplay.tsx),
+  [BoardDisplay.tsx](file:///home/greg/40k/frontend/src/components/BoardDisplay.tsx),
   tracé polygone `:2124-2137` = `beginFill(zoneColor, fillAlpha)` (0.1, ou 0.18 si obscuring)
-  + `lineStyle(Math.max(1.5, HEX_RADIUS*0.3), color, 0.85)`, ajouté à `baseHexContainer`. Type `ObjectiveZone` ([useGameConfig.ts:43-52](file:///home/greg/40k/frontend/src/hooks/useGameConfig.ts)).
+  + `lineStyle(Math.max(1.5, HEX_RADIUS*0.3), color, 0.85)`, ajouté à `baseHexContainer`. Type `ObjectiveZone` ([useGameConfig.ts](file:///home/greg/40k/frontend/src/hooks/useGameConfig.ts)).
 - **Changement de couleur selon état** (blanc si occupé) : reprendre le motif `objectiveControl` + ternaire
-  (`BoardDisplay.tsx:2080-2094`, `:2278-2293`). Chaque `lineStyle(w,color,alpha)` démarre un tracé de couleur.
+  (`BoardDisplay.tsx`, `:2278-2293`). Chaque `lineStyle(w,color,alpha)` démarre un tracé de couleur.
 - **Mode ghost existant** (chaîne complète dans le renderer) : flag `modelGhost?: boolean[]`
-  ([UnitRenderer.tsx:143-148](file:///home/greg/40k/frontend/src/components/UnitRenderer.tsx)),
+  ([UnitRenderer.tsx](file:///home/greg/40k/frontend/src/components/UnitRenderer.tsx)),
   socle `circleAlpha=0.45` (`:816-822`), sprite `alpha=0.42` (`:1176-1178`), texte `0.65` (`:1255-1258`).
-  ⚠️ Seul producteur actuel : la **fig active en cours de déplacement** (BoardPvp.tsx:8977-8980), avec
+  ⚠️ Seul producteur actuel : la **fig active en cours de déplacement** (BoardPvp.tsx), avec
   tint move-preview → réutilisation directe = **collision sémantique/visuelle** (fig d'un autre étage
   indistinguable d'une fig en transit). Prévoir un 2e flag (ex. `modelLevelGhost`) ou un style paramétrable.
-- **Bouton loupe zoom** : `<button>` [BoardPvp.tsx:10533-10550](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx).
+- **Bouton loupe zoom** : `<button>` [BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx).
   Deux divs imbriquées : parente `:10494-10505` (`position:absolute, top:8, right:8, zIndex:1600`, colonne),
   flex row `:10507-10513` (conteneur direct du bouton). Frère horizontal → row `:10507` ; empilé → colonne `:10494`.
 
@@ -264,13 +264,13 @@ le modèle + LoS 3D est le vrai chantier.
 
 ### 4.1 Modèle de données (fondation)
 - Ajouter un champ `level` (int, défaut 0) sur : dict unité et `models[]`
-  ([game_state.py:117-172](file:///home/greg/40k/engine/game_state.py)),
-  puis le propager dans `units_cache` / `models_cache` ([shared_utils.py:557-582, 654-672](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)),
+  ([game_state.py](file:///home/greg/40k/engine/game_state.py)),
+  puis le propager dans `units_cache` / `models_cache` ([shared_utils.py, 654-672](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)),
   et jusqu'au **frontend** (payload API + types TS Unit) — aujourd'hui aucune notion de niveau côté front.
 - **Impact RL (non bloquant)** : `level` change l'espace d'observation (obs builder, `action_decoder.py`).
   Le RL étant HS et destiné au retrain, aucune rétro-compat à préserver → prévoir simplement le canal
   `level` dans l'obs dès la conception (cf. §5.7).
-- `occupation_map` : clé `(col,row)` → `(col,row,level)` (`shared_utils.py:610`). Deux figs peuvent
+- `occupation_map` : clé `(col,row)` → `(col,row,level)` (`shared_utils.py`). Deux figs peuvent
   occuper le même `(col,row)` à des niveaux différents.
 - **Définition de l'empreinte d'étage — SOURCE = fichier terrain du board**
   (`config/board/<board>/terrain/terrain-*.json`, tableau `terrain[]`), là où sont déjà déclarées les
@@ -284,13 +284,13 @@ le modèle + LoS 3D est le vrai chantier.
   Le lien empreinte-au-sol ↔ étages est conservé (nécessaire pour LoS Solid ≤3", blanchiment/ghost par
   ruine). `height_inches` sert aux seuils règles (3" Solid/Plunging, 5" vertical).
 - Ce format JSON est parsé côté moteur dans `terrain_areas`
-  ([terrain_utils.py:4-8](file:///home/greg/40k/engine/terrain_utils.py)) — à étendre pour porter `floors`
+  ([terrain_utils.py](file:///home/greg/40k/engine/terrain_utils.py)) — à étendre pour porter `floors`
   par étage `{level, height_inches, vertices, hexes}`. **À figer en premier dans le chantier 1.**
 
 ### 4.2 Occupation d'un étage (poser une fig)
 - Règle officielle (§13.06) : empreinte de la fig **entièrement** incluse dans le polygone de l'étage
   (0% de débordement) + mot-clé INFANTRY/BEASTS/SWARM/FLY/MONSTER.
-  Réutiliser `compute_occupied_hexes` ([hex_utils.py:1064](file:///home/greg/40k/engine/hex_utils.py)) et tester
+  Réutiliser `compute_occupied_hexes` ([hex_utils.py](file:///home/greg/40k/engine/hex_utils.py)) et tester
   l'inclusion des hexes du footprint dans les `hexes` de l'étage.
 - **Décision requise** (§2.6) : remplacer par le seuil maison "hex central + ≥50% du footprint dedans" ?
   → À trancher. Recommandé : seuil **paramétrable** (config), défaut = règle officielle (100%), pour ne pas
@@ -310,29 +310,29 @@ le modèle + LoS 3D est le vrai chantier.
 >    optimisation prod = variante **multi-source** (Dijkstra avec `g` initial par entrée), modif locale
 >    de la primitive, pas une refonte.
 
-- `geodesic_field` ([hex_utils.py:1870](file:///home/greg/40k/engine/hex_utils.py)) est **strictement
+- `geodesic_field` ([hex_utils.py](file:///home/greg/40k/engine/hex_utils.py)) est **strictement
   planaire** : le raccourci Lazy Theta* (rattachement à l'ancêtre via segment clear) suppose un plan
   continu — injecter une arête inter-niveaux dans le champ **casse cette hypothèse**. Architecture cible
   (validée par le spike) : **un champ géodésique par niveau**, chaînés aux **hexes de transition**
   (périmètre de l'étage supérieur, approché depuis les hexes de sol adjacents), coût au raccord =
   approche horizontale `+` distance verticale mesurée (`|height(level_a) − height(level_b)|`),
   **cumulée** au budget (§13.06), + contrainte ≤ ½" horiz. du décor pendant l'ascension.
-- Le disque FLY ([movement_handlers.py:1608-1639](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py))
+- Le disque FLY ([movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py))
   est un calcul NumPy planaire séparé — à traiter aussi.
 - Restrictions par mot-clé (§2.2) : INFANTRY/BEASTS/SWARM libres ; MOBILE horizontal ; VEHICLE gravit >2"
-  sans finir en hauteur. À brancher sur `_get_move_traversal_rules` ([movement_handlers.py:1725](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)).
-- FLY "take to the skies" : ignore le coût vertical (le malus −2" existe déjà, `shared_utils.py:3435-3438`).
+  sans finir en hauteur. À brancher sur `_get_move_traversal_rules` ([movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)).
+- FLY "take to the skies" : ignore le coût vertical (le malus −2" existe déjà, `shared_utils.py`).
 
 ### 4.4 Ligne de vue 3D
-- Enrichir la primitive `_los_line_segment_clear` ([shooting_handlers.py:3763](file:///home/greg/40k/engine/phase_handlers/shooting_handlers.py))
+- Enrichir la primitive `_los_line_segment_clear` ([shooting_handlers.py](file:///home/greg/40k/engine/phase_handlers/shooting_handlers.py))
   et `hex_line` pour tenir compte du niveau observateur/cible :
   - Solid (§13.11) : bloquer la LoS traversant une ouverture de ruine **si le segment passe ≤3" du sol** ;
     au-dessus de 3", tracé normal. Nécessite `height_inches` de l'étage traversé.
   - Obscuring (§13.10) : exclusion d'area inchangée, mais une fig posée **sur** l'étage appartient à cette area.
-  - Étendre la clé du `hex_los_cache` ([combat_utils.py:527-538](file:///home/greg/40k/engine/combat_utils.py))
+  - Étendre la clé du `hex_los_cache` ([combat_utils.py](file:///home/greg/40k/engine/combat_utils.py))
     au niveau — aujourd'hui `((col,row),(col,row))`, deux paires à niveaux différents collisionneraient.
   - Répercuter la même logique dans le **miroir WASM** `has_los_fast`
-    ([lib.rs:84](file:///home/greg/40k/frontend/wasm-los/src/lib.rs), commentaire `:3774`) :
+    ([lib.rs](file:///home/greg/40k/frontend/wasm-los/src/lib.rs), commentaire `:3774`) :
     modifier le Rust **et rebuilder le wasm** — sinon front/back divergent.
 - Plunging Fire (§22.05) : +1 BS si cible **visible** avec ≥1 fig au sol ET (tireur sur section ≥3"
   OU tireur TOWERING avec cible ≤12"). À ajouter au calcul BS du tir.
@@ -342,13 +342,13 @@ le modèle + LoS 3D est le vrai chantier.
 > section « 🎯 TIR 3D — Ligne de vue niveau-consciente (chantier 5) » dans le chantier 6 ci-dessous.
 
 ### 4.5 Rendu
-- **Empreinte d'étage** : nouveau bloc dans `drawBoard` (à côté de `BoardDisplay.tsx:2058-2153`), tracé polygone
+- **Empreinte d'étage** : nouveau bloc dans `drawBoard` (à côté de `BoardDisplay.tsx`), tracé polygone
   copié de `:2124-2137`, couleur = `terrainColor` (contour non-occupé) / **blanc** si occupé (motif `objectiveControl` `:2080-2094`).
   Ne dessiner que les empreintes pertinentes au niveau courant.
-- **Bouton "feuilles empilées"** : `<button>` frère inséré dans la div flex [BoardPvp.tsx:10507-10513](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx),
+- **Bouton "feuilles empilées"** : `<button>` frère inséré dans la div flex [BoardPvp.tsx](file:///home/greg/40k/frontend/src/components/BoardPvp.tsx),
   style du bouton loupe `:10538-10547`, badge n° niveau en bas-droite ; état `currentLevel` (nouveau, à côté de `boardZoom` `:1732`).
 - **Vue mono-niveau + ghost** : ne rendre que les figs du niveau courant ; passer en ghost (flag `modelGhost`
-  déjà existant [UnitRenderer.tsx:143-148](file:///home/greg/40k/frontend/src/components/UnitRenderer.tsx)) les figs d'un
+  déjà existant [UnitRenderer.tsx](file:///home/greg/40k/frontend/src/components/UnitRenderer.tsx)) les figs d'un
   autre niveau dont le footprint chevauche l'empreinte de l'étage affiché.
 
 ---
@@ -362,11 +362,11 @@ le modèle + LoS 3D est le vrai chantier.
 3. **Seuil 3" (Solid/Plunging)** et **5" (coherency/engagement)** : nécessitent une hauteur réelle par étage
    (`height_inches`), aujourd'hui inexistante. → Ajouter au modèle de terrain.
 4. **Parité WASM** : toute évolution LoS doit être répliquée dans `has_los_fast`
-   ([lib.rs:84](file:///home/greg/40k/frontend/wasm-los/src/lib.rs)) — code **Rust**, donc modification
+   ([lib.rs](file:///home/greg/40k/frontend/wasm-los/src/lib.rs)) — code **Rust**, donc modification
    + **rebuild du wasm** obligatoires ; risque de divergence back/front.
 5. **Parité 2D du moteur hors move/LoS** : collisions/placement (`build_occupied_positions_set`
-   [shared_utils.py:289](file:///home/greg/40k/engine/phase_handlers/shared_utils.py),
-   `_inflate_obstacles_by_footprint` [geodesic_move.py:14](file:///home/greg/40k/engine/phase_handlers/geodesic_move.py)),
+   [shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py),
+   `_inflate_obstacles_by_footprint` [geodesic_move.py](file:///home/greg/40k/engine/phase_handlers/geodesic_move.py)),
    engagement/cohésion/fight (masques `eng_bad`, adjacence `spatial_relations`, éligibilité fight),
    déploiement, contrôle d'**objectifs** (règle tranchée en §2.9 : appartenance à la terrain area, ou
    cylindre 3"/5" pour un pion — à implémenter par niveau), hidden/cover (`model_within_terrain` 2D) —
@@ -736,13 +736,13 @@ le modèle + LoS 3D est le vrai chantier.
 
    **Constat de code (vérifié, ne rien assumer)** :
    - Primitive `entries_in_engagement_zone(first, second, engagement_zone, metric)`
-     ([spatial_relations.py:115](file:///home/greg/40k/engine/spatial_relations.py#L115)) — deux métriques :
-     - `hex` : `min_distance_between_sets` d'empreintes union ([hex_utils.py:101](file:///home/greg/40k/engine/hex_utils.py#L101)).
+     ([spatial_relations.py](file:///home/greg/40k/engine/spatial_relations.py)) — deux métriques :
+     - `hex` : `min_distance_between_sets` d'empreintes union ([hex_utils.py](file:///home/greg/40k/engine/hex_utils.py)).
        **Épinglée** RL/observations (`metric="hex"`), unités **jamais multi-niveaux** dans ce chemin.
      - `euclidean` : `euclidean_edge_distance(socle_a, socle_b) ≤ engagement_minimum_clearance_norm(ez)`
-       (= ez×1,5, [hex_utils.py:1378](file:///home/greg/40k/engine/hex_utils.py#L1378)). **Métrique GAMEPLAY**
+       (= ez×1,5, [hex_utils.py](file:///home/greg/40k/engine/hex_utils.py)). **Métrique GAMEPLAY**
        (config 7.6) — c'est celle de la charge.
-   - `socle_from_cache_entry` ([combat_utils.py:324](file:///home/greg/40k/engine/combat_utils.py#L324)) construit
+   - `socle_from_cache_entry` ([combat_utils.py](file:///home/greg/40k/engine/combat_utils.py)) construit
      un `Socle` portant **`model_centers` par-figurine** (`occupied_hexes_by_model`) → la granularité par-fig
      existe déjà côté euclidean ; il ne manque que la **hauteur par centre**.
    - Wrappers additifs : `unit_entries_within_engagement_zone` (:145), `unit_within_engagement_zone_footprints`
@@ -764,7 +764,7 @@ le modèle + LoS 3D est le vrai chantier.
       ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)). Backend-only, aucun
       consommateur → no-op. Testé (helper + bout-en-bout sol/étage, non-régression suite `units_cache` verte).
       Détail conception ci-dessous. À côté de `level_by_model`
-      ([shared_utils.py:750](file:///home/greg/40k/engine/phase_handlers/shared_utils.py#L750) + recompute
+      ([shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py) + recompute
       `:2862`), publier la hauteur du **plancher** sous chaque fig : `height_inches` du floor de son `level`
       sous le décor où elle se trouve (sol = 0"). **Résolution par position** (`terrain_areas` + `level_by_model`),
       PAS un mapping global level→hauteur : deux ruines peuvent différer au même `level` (§4.1). La **borne
@@ -772,7 +772,7 @@ le modèle + LoS 3D est le vrai chantier.
       supplémentaire. Aucun consommateur encore → **no-op testable seul**.
 
    2. ✅ **FAIT — Gate vertical DANS la primitive.** Config `engagement_zone_vertical: 5` (POUCES, non scalé —
-      absent de la liste [w40k_core.py:401](file:///home/greg/40k/engine/w40k_core.py#L401)) + getter
+      absent de la liste [w40k_core.py](file:///home/greg/40k/engine/w40k_core.py)) + getter
       `get_engagement_zone_vertical`. `MODEL_HEIGHT` publié dans l'entry `units_cache` (borne haute).
       `entries_in_engagement_zone(..., vertical_zone_inches=None)` + helpers `_vertical_classes` /
       `_entries_in_engagement_zone_3d` (3D par-paire à intervalles, euclidean only, erreur explicite si
@@ -840,9 +840,9 @@ le modèle + LoS 3D est le vrai chantier.
         (le reste = docstrings/imports). **Enseignement clé** : aucun n'est à laisser 2D définitivement (tous
         sont des tests d'engagement réels) ; les préfiltres hex-distance sont **séparés** et restent valides
         en 3D (le gate vertical ne fait que **restreindre**, jamais élargir → pas de faux négatif).
-        **16 « 3D direct »** (synth/vraie entry via primitive) : L413, L477 (anchors), L1742/1745/1747
-        (model pool), L2219/2226 (plan ctx UI), L4485 (preview), L4387, L4635 (non-cibles AFTER MOVING),
-        L873 (eligibility), L2569 (valid targets), L3527/3704 (destinations sol), L2552, L3095 (départ,
+        **16 « 3D direct »** (synth/vraie entry via primitive) : 413, 477 (anchors), 1742/1745/1747
+        (model pool), 2219/2226 (plan ctx UI), 4485 (preview), 4387, 4635 (non-cibles AFTER MOVING),
+        873 (eligibility), 2569 (valid targets), 3527/3704 (destinations sol), 2552, 3095 (départ,
         vraies entries). **2 « 3D COMPLEXE » — ✅ FAITS** : `_eng` (`_compute_plan_context`) — branche
         euclidienne via primitive 3D (`synth_base` reçoit les données verticales à l'ancre à la mutation) +
         branche empreinte-dilatée gardée par un **gate vertical par-ennemi** (`entry_vertically_reachable`
@@ -851,7 +851,7 @@ le modèle + LoS 3D est le vrai chantier.
         `_entry_engage_struct` renvoie toujours `("euclid", entry)` → primitive 3D directe ; la branche
         empreinte `("fp", …)` n'existe qu'en métrique **hex** (RL/obs, mono-niveau) → **reste 2D** (assumé).
         Testé `entry_vertically_reachable` (ennemi 3"→True, 8"→False) ; dégénérescence sol structurelle.
-        **1 différé** L3431 (FLY, §707).
+        **1 différé** 3431 (FLY, §707).
       - ✅ **VALIDATION D'INTÉGRATION 3a (2026-07-07)** — script **pérennisé**
         [tests/unit/engine/test_charge3d_floors_integration.py](file:///home/greg/40k/tests/unit/engine/test_charge3d_floors_integration.py)
         (lancer : `source .venv/bin/activate && python3 -m pytest tests/unit/engine/test_charge3d_floors_integration.py`) sur le VRAI
@@ -868,7 +868,7 @@ le modèle + LoS 3D est le vrai chantier.
           `_charge_vertical_zone` ; **18 call-sites d'engagement câblés** (16 directs + les 2 complexes
           `_eng`/`_fp_engages` avec gate vertical par-ennemi `entry_vertically_reachable`)
           ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)). `synth level=0`
-          partout (chargeur au sol). **Seul L3431 (FLY) reste 2D** (différé §707). Validé bout-en-bout par le
+          partout (chargeur au sol). **Seul 3431 (FLY) reste 2D** (différé §707). Validé bout-en-bout par le
           script d'intégration ci-dessus + non-régression sol/no-floor structurelle.
         - ✅ **3b — le chargeur MONTE (ancres `level ≥ 1`) — FAIT & VALIDÉ (2026-07-08)** :
           - **Helper climb charge** `_charge_model_climb_reachable_floor_cells`
@@ -928,7 +928,7 @@ le modèle + LoS 3D est le vrai chantier.
             engagement = 2" horiz ET 5" vert ; cible à 3" d'étage = <5" au-dessus du sol → engageable au sol).
           - **Limites assumées** : « closer » d'une ancre d'étage mesuré horizontalement (`dist_tgt`, cohérent
             avec le sol) ; traversée BFS sol ne distingue pas un ennemi surélevé (bloque toujours en 2D — nuance
-            « passer sous une fig d'étage » non modélisée). **FLY en hauteur toujours différé** (§707, L3431 reste 2D).
+            « passer sous une fig d'étage » non modélisée). **FLY en hauteur toujours différé** (§707, 3431 reste 2D).
           - **Validé bout-en-bout dans l'app (2026-07-08)** : déclaration de charge sur cible à l'étage, sélection
             de la fig chargeuse, pool d'étage affiché en vue mono-niveau, pose et commit de la fig à l'étage
             (engagée, voile vert). Collision cross-niveau et niveau de rendu corrigés (cf. « Bugs 3b résolus »).
@@ -968,15 +968,15 @@ le modèle + LoS 3D est le vrai chantier.
 
    **Implémentation optimale (miroir 3a/3b, additive → zéro régression 2D)** :
 
-   1. **Pool par-figurine — étage** (`_fight_pile_in_build_model_pool` L3525 + `_fight_consolidation_build_model_pool`
-      L4546, [fight_handlers.py](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py)) : en vue étage
+   1. **Pool par-figurine — étage** (`_fight_pile_in_build_model_pool` 3525 + `_fight_consolidation_build_model_pool`
+      4546, [fight_handlers.py](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py)) : en vue étage
       (`view_level ≥ 1`, euclidean, hors FLY, unité montante), ajouter les cases d'étage via
       `_charge_model_climb_reachable_floor_cells(..., budget_subhex=3×ish, view_level, ground_obs, terrain_areas)`
       (coût de montée §13.06 soustrait des 3") ; classer chaque case par la **primitive 3D directe** (synth
       `_charge_synthetic_charger_cache_entry(..., level=view_level)` + `unit_entries_within_engagement_zone(...,
       vertical_zone_inches=_charge_vertical_zone(game_state))`). **Consolidation Objective (tier "zone")** :
       « within range » = **empreinte ∩ zone d'hexes** de l'objectif (`objective["hexes"]`, `_is_unit_on_objective`
-      L144 / viser la zone terrain L1342) — test **déjà level-agnostic** (une fig à l'étage de la ruine-objectif
+      144 / viser la zone terrain 1342) — test **déjà level-agnostic** (une fig à l'étage de la ruine-objectif
       contrôle, §2.9/§14.02) → **AUCUN gate vertical à ajouter**, seul le **mouvement** vers l'étage a besoin du
       champ climb. (Les objectifs sont des **zones d'hexes** dans le moteur, pas des pions-cylindres : le cylindre
       5" vertical §2.9 ne vaudrait que si un modèle marqueur/cylindre était introduit — hors périmètre.)
@@ -985,16 +985,16 @@ le modèle + LoS 3D est le vrai chantier.
       bloque pas une destination au sol — même correctif que le bug #1 charge). Réutiliser
       `_charge_obstacle_socles(..., level)` ou filtrer sur `entry["level"]` / le niveau du plan des sœurs.
    3. **Base-contact lock (§12.03 / Ongoing §12.08)** : « models in base-contact cannot move ». **Vérifié** :
-      `_fight_model_in_base_contact` ([L3934](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py#L3934))
+      `_fight_model_in_base_contact` ([3934](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py))
       teste le contact en **2D pur** (`euclidean_edge_clearance_round_round` sur col/row, sans niveau) → une fig
       au sol et une fig d'étage aux mêmes (col,row) seraient à tort « en contact ». Le contact est physique : à
       évaluer en **3D** (même intervalle `[plancher, plancher+MODEL_HEIGHT]` que l'engagement) — même niveau =
       contact possible, niveaux différents = jamais. **Seul vrai travail de conception** (le reste est du câblage miroir).
-   4. **Plan state** (`_fight_pile_in_model_plan_state` L3822 + `_fight_consolidation_model_plan_state` L4868) :
+   4. **Plan state** (`_fight_pile_in_model_plan_state` 3822 + `_fight_consolidation_model_plan_state` 4868) :
       param `view_level` (miroir `charge_model_plan_state`), pool `[col,row,level]`, **affichage mono-niveau**
       (`[a for a in pool if a[2]==level]`), `pool_distances`/mask loops dérivés (sol = BFS, étage = climb).
       Mémo (s'il existe) += `view_level`.
-   5. **Preview + commit** (`_fight_pile_in_preview_plan` L3707 + équivalents consolidation + handlers de commit) :
+   5. **Preview + commit** (`_fight_pile_in_preview_plan` 3707 + équivalents consolidation + handlers de commit) :
       `norm` 4-uplet, synth/légalité au niveau réel (reachability **climb** pour une ancre d'étage, pas BFS 2D),
       `provisional_plan` porte le niveau (collision + AFTER-engagement 3D des figs posées à l'étage),
       `commit_move(plan, "pile_in"|"consolidation")` gère déjà le 4-uplet.
@@ -1005,36 +1005,36 @@ le modèle + LoS 3D est le vrai chantier.
       **préserve déjà** le niveau (lit `activeChargeLikePlan.models[mid].level`) → deviendra correct dès que les
       plans pile-in/conso portent `level`. **À ajouter** : étendre l'effet de refetch au changement de niveau
       (BoardPvp, aujourd'hui seulement `move`/`charge`) aux modes pile-in/consolidation actifs.
-   7. **FLY en hauteur : différé** (§707, cohérent avec la charge L3431).
+   7. **FLY en hauteur : différé** (§707, cohérent avec la charge 3431).
    8. **DEUX MOTEURS de pile-in (vérifié 2026-07-08) — cadrer la migration en conséquence.** Le pile-in a **deux
       moteurs de destinations à granularités distinctes** (patron identique au move : pool squad rigide RL/IA vs
       pool par-figurine PvP). Ils ne tournent **jamais en même temps** — le choix dépend du mode (auto vs PvP
       interactif) et du moment (normal vs overrun) :
       - **Moteur B — par-figurine (interactif PvP)** : `_fight_pile_in_build_model_pool`
-        ([L3525](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py#L3525)) → `_fight_pile_in_model_plan_state`
-        (L3758) + commit. **C'est le seul que couvrent les points 1-7 ci-dessus.**
+        ([3525](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py)) → `_fight_pile_in_model_plan_state`
+        (3758) + commit. **C'est le seul que couvrent les points 1-7 ci-dessus.**
       - **Moteur A — unité/rigide (auto/IA/gym)** : `pile_in_move_destinations_12_03`
-        ([L2727](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py#L2727)) → `_ai_select_pile_in_destination`
-        → `_fight_apply_pile_in_move` (L883). Utilisé par : le pile-in **normal auto** (`_fight_v11_auto_pile_in`),
-        la **présentation squad-level** (`_fight_v11_pile_in_present` L4444), et **surtout le pile-in d'OVERRUN**
-        (`_fight_v11_auto_overrun_pile_in` L3450) — lequel est auto-résolu **même en PvP** (dispatch interactif
-        [L5915](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py#L5915), pas seulement auto/gym L3504,
+        ([2727](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py)) → `_ai_select_pile_in_destination`
+        → `_fight_apply_pile_in_move` (883). Utilisé par : le pile-in **normal auto** (`_fight_v11_auto_pile_in`),
+        la **présentation squad-level** (`_fight_v11_pile_in_present` 4444), et **surtout le pile-in d'OVERRUN**
+        (`_fight_v11_auto_overrun_pile_in` 3450) — lequel est auto-résolu **même en PvP** (dispatch interactif
+        [5915](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py), pas seulement auto/gym 3504,
         car il n'y a pas d'UI par-fig pour la pile-in additionnelle §12.06).
       - **Conséquence 3D** : migrer B → couvre le pile-in **PvP interactif normal**. L'**overrun** ET tout le pile-in
         **auto/IA** roulent sur A (voie **RL/hex 2D**) → **différer** comme le pool squad du move, **ou** migrer A
         explicitement (`pile_in_move_destinations_12_03` + apply). Tant que A n'est pas 3D, un **overrun ne peut pas
         finir en hauteur, même en PvP**. **Décision à prendre** (A différé vs migré) — pas un sous-cas gratuit de B.
       - **Consolidation = structure DIFFÉRENTE du pile-in (vérifié)** : (a) son auto **skippe entièrement**
-        (`_fight_v11_auto_consolidate` [L3465](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py#L3465),
+        (`_fight_v11_auto_consolidate` [3465](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py),
         consolidation optionnelle §12) → **aucun moteur A/RL**. (b) Son autoplace Focus `consolidate_autoplace_plan`
-        ([L4368](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py#L4368)) **ne calcule rien** : c'est un
-        **routeur** vers des autoplaces existants dont l'AFTER coïncide avec le mode (docstring L4373) — `ongoing` →
-        `pile_in_autoplace_plan` (L3970, AFTER « chaque fig garde ses engagements »), `engaging` →
+        ([4368](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py)) **ne calcule rien** : c'est un
+        **routeur** vers des autoplaces existants dont l'AFTER coïncide avec le mode (docstring 4373) — `ongoing` →
+        `pile_in_autoplace_plan` (3970, AFTER « chaque fig garde ses engagements »), `engaging` →
         **`charge_autoplace_plan`** (budget 3", couverture dure « toutes les cibles »), `objective` → **non supporté**
-        (L4416). → À migrer pour la conso 3D : **le pool par-fig** `_fight_consolidation_build_model_pool` (points 1-7),
+        (4416). → À migrer pour la conso 3D : **le pool par-fig** `_fight_consolidation_build_model_pool` (points 1-7),
         et le 3D de ses délégués (`pile_in_autoplace_plan`, `charge_autoplace_plan`) est **mutualisé** avec la migration
         pile-in/charge (pas de code autoplace propre à dupliquer).
-      - **`pile_in_autoplace_plan` (L3970)** est un **maximiseur autonome** (ILP, réutilise les primitives charge
+      - **`pile_in_autoplace_plan` (3970)** est un **maximiseur autonome** (ILP, réutilise les primitives charge
         `_charge_model_socle`/`_charge_synthetic_charger_cache_entry`), **distinct** des moteurs A et B → 3ᵉ chemin
         pile-in à migrer si l'on veut un autoplace pile-in qui monte.
       - **POURQUOI cette asymétrie pile-in vs conso (rationale, dicté par les règles)** : **pile-in et charge sont
@@ -1049,7 +1049,7 @@ le modèle + LoS 3D est le vrai chantier.
         le pile-in étant le contrat de **base**, son autoplace est autonome. **Symétrique** : les deux ont un pool
         par-figurine interactif PvP (`_fight_*_build_model_pool`), car les deux ont besoin d'une UI de pose par-fig.
 
-   **Limites assumées (miroir charge 3b)** : « closest tier » (`_fight_pile_in_closest_tier_ids` L3678) et
+   **Limites assumées (miroir charge 3b)** : « closest tier » (`_fight_pile_in_closest_tier_ids` 3678) et
    « closer » mesurés en distance **horizontale** d'empreinte (`min_distance_between_sets`, 2D) — une cible
    directement au-dessus (2D≈0, mais 5"+ vertical) serait vue « très proche » ; cohérent avec le « closer »
    horizontal déjà admis pour la charge. Le **gate d'engagement**, lui, est bien 3D. À ré-évaluer seulement si
@@ -1062,7 +1062,7 @@ le modèle + LoS 3D est le vrai chantier.
    **✅ Décisions figées (2026-07-07)** :
    - **Seuils verticaux = 5" pour les DEUX contrats** : engagement range (§03.04, conforme) ET contact
      `within_1` de la charge. Le `within_1` est un resserrement **horizontal** (1" au lieu de 2",
-     [charge_handlers.py:449](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py#L449)) ; les
+     [charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py)) ; les
      règles ne lui donnent **aucun** vertical propre → on aligne sur les 5" de l'engagement range, **pas de
      règle maison**. → **une seule valeur verticale = 5"**, configurée dans `config/game_config.json`
      (nouvelle clé, pendant vertical de `engagement_zone: 2`).
@@ -1073,11 +1073,11 @@ le modèle + LoS 3D est le vrai chantier.
      (qui surestimait l'écart : fig 2,5" au sol vs base 3" = **0,5"** réel, pas 3"). Approximation résiduelle
      **inévitable** : la fig est traitée comme colonne pleine (silhouette réelle non chiffrée dans les PDF,
      §2.11, même statut que la True LoS).
-   - Le mode 3D est **lié à la métrique `euclidean`** (config active `game_config.json:55`). Une bascule
+   - Le mode 3D est **lié à la métrique `euclidean`** (config active `game_config.json`). Une bascule
      config `engagement:"hex"` rendrait le gate vertical inopérant (hex reste 2D) → re-travail hex requis.
 
    **Débouché charge** (une fois 1→3 en place) : brancher `vertical_zone_inches` dans les tests d'engagement
-   de la charge, **retirer le garde-fou** « PAS de destinations en hauteur » ([charge_handlers.py:690](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py))
+   de la charge, **retirer le garde-fou** « PAS de destinations en hauteur » ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py))
    et brancher `reachable_multilevel_field` ([geodesic_move.py](file:///home/greg/40k/engine/phase_handlers/geodesic_move.py))
    pour produire les ancres d'étage (le champ climb-aware existe déjà, cf. 3a/6e). L'EZ inter-niveaux
    (`enemy_adjacent_hexes`, 2D) suit la même bascule.
@@ -1085,14 +1085,14 @@ le modèle + LoS 3D est le vrai chantier.
    ### 🎯 TIR 3D — Ligne de vue niveau-consciente (chantier 5, ⏳ RESTE À FAIRE)
 
    > **Constat de code vérifié (2026-07-10, ne rien assumer)** : toute la chaîne LoS est **strictement
-   > 2D**. `compute_unit_los` ([shooting_handlers.py:4036](file:///home/greg/40k/engine/phase_handlers/shooting_handlers.py#L4036))
+   > 2D**. `compute_unit_los` ([shooting_handlers.py](file:///home/greg/40k/engine/phase_handlers/shooting_handlers.py))
    > → `_compute_unit_los_uncached` (:4254) → `_compute_visibility_with_obscuring` (:3951) →
    > `_los_hex_visible` (:3918) → **primitive de tracé unique** `_los_line_segment_clear` (:3895) : trace
    > `hex_line` (cube-lerp) et bloque **uniquement** sur `wall_set` (murs, tous niveaux) et les cases
    > obscuring hors areas exclues (§13.10). **Aucune** de ces fonctions ne lit `level`, `floor_height`,
    > `MODEL_HEIGHT` ni les `floors` du terrain (grep `level|floor|height|elevation` sur la géométrie LoS =
    > 0 hit géométrique). Le champ `level` existe (units_cache/models_cache) mais **n'entre jamais** dans le
-   > calcul de visibilité. Miroir Rust `has_los_fast` ([lib.rs:84](file:///home/greg/40k/frontend/wasm-los/src/lib.rs))
+   > calcul de visibilité. Miroir Rust `has_los_fast` ([lib.rs](file:///home/greg/40k/frontend/wasm-los/src/lib.rs))
    > = même primitive 2D.
 
    **Conséquence des deux cas types (unité tireuse 1008 au niveau 1)** :
@@ -1126,12 +1126,12 @@ le modèle + LoS 3D est le vrai chantier.
 
    **Données déjà disponibles (aucune nouvelle donnée terrain/unité à créer, chantier 1 + §6e + engagement 3D)** :
    - Par figurine dans `units_cache` : `level_by_model` (niveau), `floor_height_by_model` (**hauteur du
-     plancher sous la fig, en pouces**, résolue par position — [shared_utils.py:773](file:///home/greg/40k/engine/phase_handlers/shared_utils.py#L773)
+     plancher sous la fig, en pouces**, résolue par position — [shared_utils.py](file:///home/greg/40k/engine/phase_handlers/shared_utils.py)
      + recompute :2917) et `MODEL_HEIGHT` (borne haute, :788). → chaque fig = **intervalle vertical**
      `[floor_height, floor_height + MODEL_HEIGHT]`, **exactement** la convention de l'engagement 3D
      (§01.04 « partie la plus proche », pas plancher-à-plancher).
    - `floors` du terrain rasterisés : `{level, height_inches, polygon_vertices, hexes}` par étage
-     ([game_state.py:1581](file:///home/greg/40k/engine/game_state.py#L1581) `_parse_terrain_floors`) ;
+     ([game_state.py](file:///home/greg/40k/engine/game_state.py) `_parse_terrain_floors`) ;
      helpers `floor_hexes_at_level` / `floor_height_at` / `floor_polys_at_level`
      ([terrain_utils.py](file:///home/greg/40k/engine/terrain_utils.py)) déjà écrits.
 
@@ -1152,9 +1152,9 @@ le modèle + LoS 3D est le vrai chantier.
       **le `hex_los_cache` 2D `((col,row),(col,row))` doit intégrer les niveaux** sous peine de collision entre
       deux paires aux mêmes (col,row) mais niveaux différents (§4.4). ⚠️ **Trois sites à migrer ensemble**
       (vérifié 2026-07-10) : les DEUX writers de la clé — `has_line_of_sight`
-      ([combat_utils.py:538](file:///home/greg/40k/engine/combat_utils.py#L538)) **et**
+      ([combat_utils.py](file:///home/greg/40k/engine/combat_utils.py)) **et**
       `has_line_of_sight_coords` (`:578`) — plus l'**invalidation sélective** qui filtre les clés en supposant
-      leur forme actuelle ([shooting_handlers.py:2017-2028](file:///home/greg/40k/engine/phase_handlers/shooting_handlers.py#L2017-L2028)).
+      leur forme actuelle ([shooting_handlers.py](file:///home/greg/40k/engine/phase_handlers/shooting_handlers.py)).
 
    2. **Plancher-occulteur horizontal (cas « sous un étage » — le vrai trou).** Pour chaque hex du `hex_line`
       **et les deux extrémités**, tester s'il appartient à un `floor` de niveau `L_f` / hauteur `h_f` : la LoS
@@ -1240,7 +1240,7 @@ le modèle + LoS 3D est le vrai chantier.
       **Condition de validité (review 2026-07-10)** : ce raisonnement suppose `floor ⊆ empreinte de l'area
       parente`. La fig ne peut pas déborder du **plancher** (§13.06, enforce partout), mais **rien ne
       valide** au parsing que les `vertices` d'un étage sont inclus dans ceux de l'area
-      (`_parse_terrain_floors`, [game_state.py:1581](file:///home/greg/40k/engine/game_state.py#L1581) —
+      (`_parse_terrain_floors`, [game_state.py](file:///home/greg/40k/engine/game_state.py) —
       vérifié : aucune contrainte d'inclusion ; les données actuelles la respectent, `ruin_center` L1/L2
       dans l'empreinte). Un étage débordant casserait silencieusement l'exclusion (fig sur le surplomb →
       (col,row) hors `obscuring_by_hex` → la ruine bloquerait sa propre occupante) **et**
@@ -1261,7 +1261,7 @@ le modèle + LoS 3D est le vrai chantier.
       AIRCRAFT dans le moteur pour le moment ; à gater sur le keyword si des AIRCRAFT sont ajoutés.
 
    6. **Parité WASM (Rust).** Répercuter (2) et, si retenu, (3b) dans `has_los_fast`
-      ([lib.rs:84](file:///home/greg/40k/frontend/wasm-los/src/lib.rs)) : passer les hauteurs src/tgt + les
+      ([lib.rs](file:///home/greg/40k/frontend/wasm-los/src/lib.rs)) : passer les hauteurs src/tgt + les
       `floor_hexes`/`height_inches` au module, même test d'interpolation de franchissement de plancher, **puis
       rebuild du wasm**. Sinon le cône de preview front (WASM) diverge du ciblage back (Python) → « une cible
       blinke mais n'est pas ciblable » (le doc §3.3 signale déjà ce risque de divergence). Le back reste la
@@ -1428,7 +1428,7 @@ appliquée aux **deux**.
 - **Bug** : « le premier niveau n'était pas reconnu ». L'activation lisait `unit["level"]` (niveau de
   l'ancre, liste `units`) alors que les refresh/commit utilisaient le niveau de **vue** `currentLevel`.
   De plus `unit["level"]` n'était **pas** resynchronisé après une charge (seul le commit move le faisait,
-  [movement_handlers.py:3490](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)).
+  [movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)).
 - **Corrigé** :
   - Backend : l'activation pile-in/consolidation utilise `_view_level` (niveau de vue transmis par le
     front), cohérent avec refresh/commit — [fight_handlers.py](file:///home/greg/40k/engine/phase_handlers/fight_handlers.py)
@@ -1464,7 +1464,7 @@ que le hex central). Base ronde inchangée (collision par disque euclidien, `fp`
   aux obstacles sol (§13.06 / §2.11 : une fig trop haute ne peut finir/passer **sous** un plancher trop
   bas) — auparavant **absente** du pile-in (masquée par `enemy_occupied` tous-niveaux). Appliqué aux deux
   branches (BFS sol + seed sol de la branche étage), miroir exact du move
-  ([movement_handlers.py:2986](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)).
+  ([movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py)).
 - **Effet** : une fig au sol peut piler/consolider vers la projection d'une cible en hauteur, **sans**
   finir sous un plancher trop bas pour elle. — **✓ Validé runtime PvP.**
 
@@ -1507,7 +1507,7 @@ disque↔polygone** pour les bases rondes, aligné pixel-pour-pixel sur le rendu
   alimentent les polygones pour base ronde. **C'est la source unique référencée par §7.2** — move, charge,
   fight et déploiement en héritent, donc aucune divergence.
 - **Câblage boucles chaudes** : polygones précalculés **une fois par niveau** (pas par case) — pool d'étage
-  du move ([movement_handlers.py:2052](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py))
+  du move ([movement_handlers.py](file:///home/greg/40k/engine/phase_handlers/movement_handlers.py))
   et pool de montée de charge
   ([charge_handlers.py](file:///home/greg/40k/engine/phase_handlers/charge_handlers.py),
   `_charge_model_climb_reachable_floor_cells`), ce dernier appelant désormais `footprint_within_floor`
@@ -1581,7 +1581,7 @@ déploiement**. Une fig `MODEL_HEIGHT` > hauteur libre d'un étage pouvait être
 
 La pose **en surface** d'un étage (`lv >= 1`) n'est pas concernée (gérée par `validate_floor_placement`) ;
 la clairance ne borne que le sol. `MODEL_HEIGHT` est `require_key` au chargement des unités
-([game_state.py:189](file:///home/greg/40k/engine/game_state.py)) → toujours présent. Plateau sans étage
+([game_state.py](file:///home/greg/40k/engine/game_state.py)) → toujours présent. Plateau sans étage
 trop bas → `_low_clear` vide → non-régression 2D.
 
 **Décision finale — méthode HEX uniforme (« comme le move niveau 0 »)** : les tests **euclidiens de bord

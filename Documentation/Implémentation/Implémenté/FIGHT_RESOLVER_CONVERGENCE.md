@@ -31,20 +31,20 @@ de base.
   (blessée d'abord si possible).
 
 ### Code — TROIS résolveurs de mêlée (corrigé après investigation 2026-07-05)
-1. `resolve_squad_fight` (`shared_utils.py:7090`) — **résolveur du TRAINING/RL**
-   (w40k_core.py:4982). Consomme les intents per-fig, mais **fige T/save sur `first_alive`**
+1. `resolve_squad_fight` (`shared_utils.py`) — **résolveur du TRAINING/RL**
+   (w40k_core.py). Consomme les intents per-fig, mais **fige T/save sur `first_alive`**
    (lignes 7159-7170) et alloue via `_allocate_damage_to_squad` → `_select_allocation_model`
    (pool, sans groupes). **Même bug que le tir auto.**
-2. `_execute_fight_attack_sequence` (`fight_handlers.py:3700`) — chemin **auto-step PvE/gym
+2. `_execute_fight_attack_sequence` (`fight_handlers.py`) — chemin **auto-step PvE/gym
    granulaire**, via `_fight_v11_resolve_attacks` (`:4949`). Attaquant traité en **agrégat**
    (1 arme, 1 cible, retarget), `target["T"]`, pool. Viole aussi 04.01 (arme par figurine) et
    04.02 (cible engagée par figurine).
-3. `_manual_roll_fight_intent` (`fight_handlers.py:6945`) via le moteur mutualisé
-   `_build_manual_allocation` (`shared_utils.py:6269`) — chemin **PvP humain**, seul **correct**
+3. `_manual_roll_fight_intent` (`fight_handlers.py`) via le moteur mutualisé
+   `_build_manual_allocation` (`shared_utils.py`) — chemin **PvP humain**, seul **correct**
    (groupes `_build_alloc_groups` `:5846`, T bodyguard 19.02, save par-figurine allouée).
 
 Le producteur d'intents auto per-figurine **existe déjà** : `squad_declare_fight`
-(`shared_utils.py:7029`, `get_fighting_models` + `_auto_select_cc_weapon_for_fig`), et le
+(`shared_utils.py`, `get_fighting_models` + `_auto_select_cc_weapon_for_fig`), et le
 training l'appelle déjà avant `resolve_squad_fight`. Jumeau tir : `squad_declare_shoot`
 (`:4097`). Le tir auto présente la même structure/bug via `resolve_squad_shoot`.
 
@@ -53,7 +53,7 @@ Correction règle T (fait §9.2) : `_target_majority_toughness` (T majoritaire, 
 
 ### Corollaire tir
 Le tir présente la **même dualité** : tir auto = chemin pool `resolve_squad_shoot`
-(`shared_utils.py:5654`) → `_allocate_damage_to_squad` (`:5340`) → `_select_allocation_model`
+(`shared_utils.py`) → `_allocate_damage_to_squad` (`:5340`) → `_select_allocation_model`
 (`:5302`), avec la save figée dans `_roll_squad_shot_sequence` (`:5491-5496`) ; tir manuel =
 même moteur groupes que le combat. Le décideur auto conçu ici est **générique** (niveau
 `_build_manual_allocation`) et bénéficie donc aussi au tir → voir phase optionnelle §8.
@@ -62,11 +62,11 @@ même moteur groupes que le combat. Le décideur auto conçu ici est **génériq
 
 `_execute_fight_attack_sequence` est le **seul résolveur de mêlée entièrement automatique**.
 Le moteur par-figurine rend la main au défenseur humain à deux points de décision :
-- déclaration de l'ordre des groupes — `_declare_order_payload` (`shared_utils.py:5908`) ;
-- choix de la figurine du groupe courant — `_manual_waiting_payload` (`shared_utils.py:6045`).
+- déclaration de l'ordre des groupes — `_declare_order_payload` (`shared_utils.py`) ;
+- choix de la figurine du groupe courant — `_manual_waiting_payload` (`shared_utils.py`).
 
 Le mode est choisi partout par `defender_human = not _is_ai_controlled_fight_unit(...)`
-(`fight_handlers.py:6777-6812` et `7476-7528`). Il faut donc d'abord doter le moteur groupes
+(`fight_handlers.py` et `7476-7528`). Il faut donc d'abord doter le moteur groupes
 d'un **décideur auto** (headless) avant de pouvoir supprimer le pool.
 
 ---
@@ -105,7 +105,7 @@ Produire un ordre **déterministe conforme 05.04**, sans attente :
 3. Groupes CHARACTER blessés.
 4. Groupes CHARACTER sains.
 Contraintes dures à respecter (déjà validées côté manuel par `apply_manual_shoot_declare_order`
-et le garde `un CHARACTER blesse doit preceder un CHARACTER sain`, `shared_utils.py:6540-6547`).
+et le garde `un CHARACTER blesse doit preceder un CHARACTER sain`, `shared_utils.py`).
 
 ### 5.2 Choix de la figurine du groupe courant (remplace `_manual_waiting_payload` en auto)
 Variante de `_select_allocation_model` **restreinte au groupe courant** : figurine blessée
@@ -126,7 +126,7 @@ bodyguard** :
 Nécessite de distinguer bodyguard vs leader/support dans `models_cache` (rôle character /
 flag leader). Vérifier le champ disponible (`role`, `_is_character_role`). Aucun fallback
 silencieux : si la donnée manque → erreur explicite (`require_key`).
-Corriger aux deux points d'appel : `_manual_roll_fight_intent` (`fight_handlers.py:6990`) et,
+Corriger aux deux points d'appel : `_manual_roll_fight_intent` (`fight_handlers.py`) et,
 si le décideur générique le partage, le tir.
 
 ## 7. Non-régression training (livrable critique — Voie A)
@@ -180,7 +180,7 @@ Tir auto convergé vers le moteur groupes (même schéma que le combat) :
    que rien ne route l'auto vers le moteur groupes).
 5. **[§9.4b — bascule training, à valider]** Router la résolution auto vers le moteur groupes,
    en réutilisant `squad_declare_fight` (déjà en place, aucun producteur à écrire) :
-   - **Training/RL** : w40k_core.py:4982 — remplacer `resolve_squad_fight(...)` par
+   - **Training/RL** : w40k_core.py — remplacer `resolve_squad_fight(...)` par
      `build_manual_fight_allocation(...)`. Réconcilier le contrat de retour (le moteur groupes
      renvoie `{action, done, shoot_result: summary}` ; le training attend le `summary` fight).
    - **[FAIT §9.4b-2]** Auto-step PvE/gym : corps de `_fight_v11_resolve_attacks` (`:4949`)

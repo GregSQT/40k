@@ -11,7 +11,7 @@
 Pendant la phase de mouvement, quand le joueur promène le ghost d'une escouade, l'UI affiche pour
 chaque hex survolé : les cibles tirables depuis cet hex (blink), et les badges couvert / caché /
 détection des ennemis. Ces données viennent du backend, via l'action
-`preview_shoot_from_position` ([api_server.py:2379](../../../services/api_server.py#L2379)).
+`preview_shoot_from_position` ([api_server.py](../../../services/api_server.py)).
 
 La question posée est simple, et purement géométrique :
 
@@ -22,9 +22,9 @@ cibles, les murs, le terrain. C'est une **fonction pure**.
 
 ## 2. Le problème
 
-`compute_unit_los` ([shooting_handlers.py:4046](../../../engine/phase_handlers/shooting_handlers.py#L4046)),
-`build_unit_los_cache` ([shooting_handlers.py:1254](../../../engine/phase_handlers/shooting_handlers.py#L1254))
-et `weapon_availability_check` ([shooting_handlers.py:528](../../../engine/phase_handlers/shooting_handlers.py#L528))
+`compute_unit_los` ([shooting_handlers.py](../../../engine/phase_handlers/shooting_handlers.py)),
+`build_unit_los_cache` ([shooting_handlers.py](../../../engine/phase_handlers/shooting_handlers.py))
+et `weapon_availability_check` ([shooting_handlers.py](../../../engine/phase_handlers/shooting_handlers.py))
 ne prennent pas une position en paramètre. Elles prennent `game_state` et vont lire la position dans
 `unit["col"] / unit["row"]` et `units_cache`.
 
@@ -41,12 +41,12 @@ build_unit_los_cache(gs, unit_id_str, ...)
 De ce choix découle toute une chaîne de compensations :
 
 1. On copie l'état réel → il faut le **geler** pendant la copie → la requête prend
-   `_ENGINE_STATE_LOCK` ([api_server.py:1167](../../../services/api_server.py#L1167)).
+   `_ENGINE_STATE_LOCK` ([api_server.py](../../../services/api_server.py)).
 2. Le lock est pris par le décorateur `@with_engine_state_lock` pour **toute** la requête
-   ([api_server.py:2090](../../../services/api_server.py#L2090)), pas seulement pour la copie → le
+   ([api_server.py](../../../services/api_server.py)), pas seulement pour la copie → le
    POST suivant (commit du move, `end_phase`) **attend la fin de la preview**.
 3. Le clic attend → on ajoute un débounce côté client
-   ([BoardPvp.tsx:120](../../../frontend/src/components/BoardPvp.tsx#L120)) pour réduire la
+   ([BoardPvp.tsx](../../../frontend/src/components/BoardPvp.tsx)) pour réduire la
    probabilité qu'une preview soit en vol au moment du clic.
 4. Le débounce est un compromis entre fraîcheur des badges et latence du clic. Réglé trop bas
    (120 ms, sous l'intervalle de survol de 160-240 ms), une requête part pour presque chaque hex
@@ -59,7 +59,7 @@ Aucune de ces couches ne corrige la précédente : elles s'empilent.
 
 `compute_unit_los` mémoïse chaque résultat dans `game_state["_unit_los_pair_cache"]`, clé
 `(shooter_id, target_id)`, avec invalidation ciblée par `_touch_unit_los`
-([shared_utils.py:1144](../../../engine/phase_handlers/shared_utils.py#L1144)). Ce cache est correct
+([shared_utils.py](../../../engine/phase_handlers/shared_utils.py)). Ce cache est correct
 et efficace **pour l'état réel**.
 
 Mais la clé ne porte **pas la position**. Elle ne peut donc pas distinguer « LoS depuis la position
@@ -72,13 +72,13 @@ survolé repaie l'intégralité des LoS du tireur, et rien de ce travail ne réc
 la transition qui suit immédiatement.
 
 Un cache dédié existe, `_move_los_preview_cache`, keyé par destination
-([shooting_handlers.py:1505](../../../engine/phase_handlers/shooting_handlers.py#L1505)) — c'est un
+([shooting_handlers.py](../../../engine/phase_handlers/shooting_handlers.py)) — c'est un
 troisième cache, qui absorbe les re-survols mais jamais le premier passage sur un hex.
 
 ### 2.2 Deux chemins de calcul = risque de divergence
 
 Le docstring de `preview_shoot_valid_targets_from_position`
-([shooting_handlers.py:1473](../../../engine/phase_handlers/shooting_handlers.py#L1473)) documente
+([shooting_handlers.py](../../../engine/phase_handlers/shooting_handlers.py)) documente
 qu'une implémentation antérieure de la preview « pouvait marquer des cibles valides alors que le
 pool moteur les exclut ». Ce bug n'existe que parce qu'il y a deux chemins pour répondre à la même
 question. Le `deepcopy` est la rustine qui les fait converger : il fait tourner le vrai code sur un
@@ -102,9 +102,9 @@ Répartition interne de `shooting_phase_start` avec 19 unités *advanced* (cProf
 > **Note** : ces 176 ms sont des *misses légitimes*. Ce sont les paires des unités qui viennent de
 > bouger, invalidées par `_touch_unit_los`. Elles sont ensuite réutilisées à l'activation, car
 > `build_unit_los_cache` passe par `compute_unit_los`
-> ([shooting_handlers.py:1345](../../../engine/phase_handlers/shooting_handlers.py#L1345)). Il n'y a
+> ([shooting_handlers.py](../../../engine/phase_handlers/shooting_handlers.py)). Il n'y a
 > **rien à gagner** en supprimant ce calcul : il n'est pas jeté. Ce qui est vidé à
-> [shooting_handlers.py:1050](../../../engine/phase_handlers/shooting_handlers.py#L1050), c'est
+> [shooting_handlers.py](../../../engine/phase_handlers/shooting_handlers.py), c'est
 > `game_state["los_cache"]` (ancien cache hex-keyé), pas le pair-cache.
 
 Latence perçue à la transition = (preview éventuellement en vol) + move commit + `advance_phase`,
@@ -171,7 +171,7 @@ divergence preview / moteur est une régression déjà survenue).
 ## 6. Mitigation en place (temporaire)
 
 `MOVE_PREVIEW_SHOOT_DEBOUNCE_MS` est ramené de 120 à **180 ms**
-([BoardPvp.tsx:120](../../../frontend/src/components/BoardPvp.tsx#L120)). Au-dessus de l'intervalle
+([BoardPvp.tsx](../../../frontend/src/components/BoardPvp.tsx)). Au-dessus de l'intervalle
 entre deux hex d'un survol normal (160-240 ms mesurés), la requête ne part que quand le curseur se
 pose réellement : il n'y a donc quasiment jamais de preview en vol au moment du clic.
 

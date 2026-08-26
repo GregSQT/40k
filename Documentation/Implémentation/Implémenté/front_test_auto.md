@@ -76,14 +76,14 @@ La couche A est désormais écrite en **tests pytest in-process** (`tests/integr
 et non plus en extension du script HTTP. Raison mesurée dans le code :
 
 - **Déterminisme.** Tous les jets du moteur passent par le `random` global du stdlib
-  (`combat_utils.py:46`, `charge_handlers.py:4269`, `shared_utils.py:4450`, `roll_d6` injecté
+  (`combat_utils.py`, `charge_handlers.py`, `shared_utils.py`, `roll_d6` injecté
   dans `attack_sequence`). Aucun `np.random`, `secrets`, `uuid4` ni `time.time()` dans
   `phase_handlers/`. Le `deterministic_seed` autouse de `tests/conftest.py` seede donc le
   moteur lui-même — impossible depuis un client HTTP, qui vit dans un autre process.
   C'est ce qui permettra à T4/T5/T6 d'asserter des valeurs exactes plutôt que des invariants.
 - **Coût.** Démarrage d'une partie `pvp_test` : **1,0 s** in-process contre 7,6 s en HTTP
   (spawn du serveur compris). Une partie complète jusqu'à `game_over` : 595 actions, 64 s.
-- **Isolation.** Seul `/api/game/start` exige une auth (`api_server.py:2086`) ; `/action` et
+- **Isolation.** Seul `/api/game/start` exige une auth (`api_server.py`) ; `/action` et
   `/state` n'en ont aucune. La fixture injecte l'auth et les permissions : `config/users.db`
   n'est jamais ouverte. Elle coupe aussi la persistance disque — à l'import, `api_server`
   charge `logs/save_config.json`, qui active snapshots et autosave en usage normal.
@@ -103,17 +103,17 @@ Contrats API relevés à cette occasion (à réutiliser) :
   `plan_models_mismatch`) — il n'y a PAS de clé `error` au premier niveau.
 - `max_turns` et `pve_mode` ne sont servis que par `/api/game/start`, jamais par `/state`
   ni `/action` : comparer deux états issus de sources différentes crée de faux diffs.
-- `units_fled` ⊆ `units_moved` (`movement_handlers.py:1292`) : un fall-back reste une
+- `units_fled` ⊆ `units_moved` (`movement_handlers.py`) : un fall-back reste une
   sélection pour bouger (09.02).
 - Un `move` sur une unité non activée **auto-active** l'unité puis traite la destination
-  (`movement_handlers.py:819-841`) : un refus de destination laisse donc un preview posé.
+  (`movement_handlers.py`) : un refus de destination laisse donc un preview posé.
 - Phase fight : chaque sous-phase a son verbe de sortie (`end_pile_in`, `skip_fight`,
   `end_consolidation`). Tout autre verbe y est un **no-op renvoyant `success:true`** —
   piège à boucle infinie pour tout pilote automatique.
 
 Contrats relevés pendant T4/T5/T6 (2026-07-29) :
 - `charge_roll_override` et `shoot_pool_require_los` voyagent au PREMIER niveau du corps de
-  l'action (`api_server.py:2386-2392`), pas dans un sous-objet. L'override de charge est lu
+  l'action (`api_server.py`), pas dans un sous-objet. L'override de charge est lu
   à l'ACTIVATION de l'unité (11.02 : le jet précède la déclaration des cibles) et mémorisé
   dans `charge_roll_values` : une même unité ne peut pas être ré-activée avec un autre jet
   dans la même phase.
@@ -148,7 +148,7 @@ PV (§0.6.5), qui entre dans l'observation, qui impose un ré-entraînement.
    joueur — pas dans la logique de jeu. (Ce pré-traitement ne sert plus la journalisation :
    le bloc step_logger de cette méthode, inatteignable, a été supprimé le 2026-07-29. La
    récupération de l'unité et son refus `unit_not_found` restent, eux, bien vivants.) Le motif `unit_not_found` existait déjà dans une
-   dizaine de handlers (`movement_handlers.py:797`, `shooting_handlers.py:5429`…) : c'était
+   dizaine de handlers (`movement_handlers.py`, `shooting_handlers.py`…) : c'était
    le dispatch central qui était incohérent avec eux.
    Correctif appliqué : id inconnu de `units` ET `units_cache` ET `squad_models` → refus
    métier `unit_not_found`, HTTP 200, motif dans `result.error` ; id connu de `units_cache`
@@ -189,7 +189,7 @@ PV (§0.6.5), qui entre dans l'observation, qui impose un ré-entraînement.
    Ce qui n'a **pas** été fait, à dessein : aucun `pop` défensif dans
    `squad_shooting_unit_activation_start` (la sentinelle reste entière) ; rien ajouté dans
    la résolution, qui purge déjà les intents (`_build_manual_allocation`,
-   `shared_utils.py:8043`, via `ctx.intents_key` — commun au tir et à la mêlée).
+   `shared_utils.py`, via `ctx.intents_key` — commun au tir et à la mêlée).
    Tests : `test_shoot.py::TestShootActivationLifecycle` (3 tests).
 3. **Jumeau en mêlée → HTTP 500** (cherché après le correctif du tir, trouvé). **CORRIGÉ**.
    Forme minimale : sous-phase `fight`, `activate_unit` A → `squad_fight_assign` (le flux
@@ -212,7 +212,7 @@ PV (§0.6.5), qui entre dans l'observation, qui impose un ré-entraînement.
    Root cause : l'éligibilité par arme du flux d'escouade
    (`_model_can_shoot_target_with_weapon`, shared_utils.py) ne teste que portée, LoS et
    engagement (10.06) — elle ignore `units_advanced`. Les deux autres chemins l'appliquent
-   pourtant : `weapon_availability_check` (shooting_handlers.py:560, mono-figurine) et
+   pourtant : `weapon_availability_check` (shooting_handlers.py, mono-figurine) et
    `_unit_can_shoot` (niveau POOL, d'où l'exclusion correcte d'une unité sans [ASSAULT]).
    Correctif appliqué : `_advance_blocks_weapon` (shared_utils.py) — même critère et même
    fonction que le chemin mono-figurine (`_can_unit_shoot_after_advance_with_weapon`), donc
@@ -253,9 +253,9 @@ PV (§0.6.5), qui entre dans l'observation, qui impose un ré-entraînement.
    carottes selon qu'une perte a eu lieu ou non.
    Correctif appliqué : au réveil de l'épisode (`w40k_core`), `HP_CUR` d'unité = somme des
    `HP_MAX` PAR FIGURINE, avec la même convention que le constructeur de `models_cache`
-   (`spec.get("HP_MAX", hp_max)`, shared_utils.py:778) pour les figurines sans override.
+   (`spec.get("HP_MAX", hp_max)`, shared_utils.py) pour les figurines sans override.
    La formule fautive était `HP_MAX * model_count`, où `unit["HP_MAX"]` porte le profil de
-   BASE ; `game_state.py:1240` calculait déjà le bon total, c'est le réveil qui l'écrasait.
+   BASE ; `game_state.py` calculait déjà le bon total, c'est le réveil qui l'écrasait.
    Une seule définition désormais, celle des figurines, identique avant et après la première
    perte. IMPACT GYM : le total d'unité entre dans l'observation et les agrégats de valeur
    (avantage matériel, attrition) → c'est LA correction qui justifie un ré-entraînement.
@@ -283,7 +283,7 @@ plusieurs tours, avec des checks par phase + des invariants transversaux revalid
 - [x] Action refusée → state STRICTEMENT inchangé (diff champ à champ), motif dans
       `result.error`, jamais de 500 (hors anomalie §0.6.1).
       Exception documentée : `move` sans activation préalable auto-active l'unité
-      (`movement_handlers.py:819-841`) — le test vérifie alors qu'elle n'a ni bougé ni
+      (`movement_handlers.py`) — le test vérifie alors qu'elle n'a ni bougé ni
       quitté le pool.
 - [x] `phase` ∈ {deployment, command, move, shoot, charge, fight}, `current_player` ∈ {1,2},
       `turn` ≥ 1. Séquence 07 (alternance + incrément de tour) vérifiée par T7b.
@@ -377,7 +377,7 @@ Actions relevées : `squad_shoot_select_model`, `squad_shoot_assign_weapon_qty`,
       liste des cibles (et le blink qu'elle alimente) qui porte la confidentialité.
 - [ ] `shoot_pool_require_los` true/false : NON couvert. Le drapeau ne change pas le verdict
       légal, il change le COÛT de la transition move→shoot (pool exact au build vs cible
-      résolue à l'activation, `shooting_handlers.py:2196`). Un test d'équivalence des deux
+      résolue à l'activation, `shooting_handlers.py`). Un test d'équivalence des deux
       modes coûte ~1,5 s de transition par phase : à faire dans une passe dédiée.
 - [ ] `move_after_shooting` : INATTEIGNABLE avec ce roster. La règle existe
       (`config/unit_rules.json`) mais AUCUNE unité de `config/unit_definitions.json` ne la
@@ -521,7 +521,7 @@ en build normal) :
 
 ### T11 — Hooks de test front (prérequis)
 - [ ] `window.__W40K_TEST__` exposant l'état RENDU (pas l'état API) : par unité, le fait qu'un
-      cercle vert est dessiné (`renderGreenActivationCircle` effectivement appelé, `UnitRenderer.tsx:1475`),
+      cercle vert est dessiné (`renderGreenActivationCircle` effectivement appelé, `UnitRenderer.tsx`),
       les hexes de preview peints, le mode courant (`squadModelShoot`, …), la sélection, les positions
       écran des figurines (pour cliquer juste sur le canvas).
 - [ ] `data-testid` sur toute l'UI DOM (boutons de phase, menus d'armes, HUD, modales).
@@ -570,7 +570,7 @@ de couverture. État : ✅ testée (T1/T2/T3/T4/T5/T6/T7b faits), sinon tranche 
 déclenche la règle), pas des oublis : cf. le détail dans la tranche correspondante.
 
 NB : `move_squad_unplaced_destinations` (pools de toutes les figs non posées en un appel,
-`api_server.py:2497`) manque à cette liste — à couvrir en T3 également.
+`api_server.py`) manque à cette liste — à couvrir en T3 également.
 
 | Action | Tranche | Action | Tranche |
 |---|---|---|---|
