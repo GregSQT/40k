@@ -1251,7 +1251,7 @@ class ObservationBuilder:
                 int(d["HP_MAX"]),
                 int(d["T"]),
                 int(d["ARMOR_SAVE"]),
-                d.get("INVUL_SAVE"),
+                int(d["INVUL_SAVE"]),
             )
             for mid in alive_mids
         )
@@ -2282,7 +2282,7 @@ class ObservationBuilder:
         # Construit au demarrage de chaque phase (command/move/shoot/charge/fight).
         ez_cache_key = f"enemy_adjacent_hexes_player_{active_player}"
         ez_hexes = game_state[ez_cache_key]
-        _paint(GRID_CH_EZ, list(ez_hexes))
+        _paint(GRID_CH_EZ, ez_hexes)
 
         # --- Canal 4 : objectifs ----------------------------------------------
         # Sur le board x5 les objectifs sont des ZONES (~10 500 hexes), pas des points : c'est
