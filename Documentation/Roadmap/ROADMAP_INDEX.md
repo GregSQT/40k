@@ -196,6 +196,8 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | moteur | ✅ fix type de tir effacé dans 3 chemins PvP (2026-08-21) — type de tir effacé dans les 3 chemins PvP manquants | — | ⚡ |
 | infra | ✅ gate roadmap exclut merges tests-only (2026-08-21) — `merge_only_touches_tests` dans `check_roadmap_declared.py` : un merge ne touchant que `tests/` n'est plus compté dans la dette ; 26 tests verts | — | ⚡ |
 | tests | ✅ consolider _uc AI-side → units_cache_entry dans _fabriques (2026-08-21) — 2 helpers _uc identiques dans tests/unit/ai/ fusionnés en units_cache_entry dans _fabriques.py | — | ⚡ |
+| doc | ✅ fix check_doc_references — 5 findings + ancres perf_entrainement (2026-08-26) — 5 corrections code-review + ancres manquantes perf_entrainement.md | [doc.md](doc.md) | ⚡ |
+| doc | ✅ simplify check_doc_references — 5 cleanups post-review (2026-08-26) — 5 nettoyages /simplify sur check_doc_references.py + tests | [doc.md](doc.md) | ⚡ |
 | bot | ✅ Ligne de base §12.14 rejouée sur robust_0.8463 (2026-08-21) — mesure bot_zone_direct sur l'étalon courant post-rupture charge_pair_net ; test_aucune_recopie_dans_scripts rendu dynamique | — | ⚡ |
 | moteur | ✅ simplify-reactive-coherency (2026-08-21) — simplification cohérence réactive moteur | — | ⚡ |
 | bot | ✅ 4 findings code-review bot_zone_direct (2026-08-21) — bot_units mort retiré, dead defaults _loss_rate, collect×5→×2 par pas, try/except focus_dist | — | ⚡ |

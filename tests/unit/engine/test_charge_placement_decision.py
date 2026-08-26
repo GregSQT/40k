@@ -125,6 +125,11 @@ def _ctx(target: str = "tgt") -> Dict[str, Any]:
     }
 
 
+def _default_gs() -> Dict[str, Any]:
+    # Attaquant en (3,5), cible en (8,5) : distance 5 < roll=10 → charge valide.
+    return _make_gs([_unit("att", 1, 3, 5), _unit("tgt", 2, 8, 5)])
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # charge_build_valid_plan — intent variants
 # ─────────────────────────────────────────────────────────────────────────────
@@ -133,8 +138,7 @@ class TestChargeBuildValidPlanIntents:
     """Toutes les intentions 0–4 produisent des plans valides ou None sans crash."""
 
     def _gs(self) -> Dict[str, Any]:
-        # Attaquant en (3,5), cible en (8,5) : distance 5, budget 8 → charge réussie.
-        return _make_gs([_unit("att", 1, 3, 5), _unit("tgt", 2, 8, 5)])
+        return _default_gs()
 
     def test_intent0_returns_plan(self) -> None:
         """intent=0 (Serré) : plan valide (régression — comportement actuel intact)."""
@@ -267,7 +271,7 @@ class TestChargeBuildValidPlanIntents:
 
 class TestArmChargePlacementDecision:
     def _gs(self) -> Dict[str, Any]:
-        return _make_gs([_unit("att", 1, 3, 5), _unit("tgt", 2, 8, 5)])
+        return _default_gs()
 
     def _plan_0(self, gs: Dict[str, Any]) -> List[Any]:
         plan = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=8)
@@ -407,28 +411,22 @@ class TestChargePlanCacheIntentIsolation:
     """
 
     def _gs(self) -> Dict[str, Any]:
-        # Attaquant en (3,5), cible en (8,5) : distance 5 < roll=10 → charge valide.
-        return _make_gs([_unit("att", 1, 3, 5), _unit("tgt", 2, 8, 5)])
+        return _default_gs()
 
-    def test_intent0_and_intent1_not_same_object(self) -> None:
-        """intent=0 et intent=1 sur le même gs retournent deux objets non-identiques."""
+    def test_intent0_cache_hit_stable(self) -> None:
+        """intent=0 en cache n'est pas pollué par un appel intent=1 intercalé,
+        et deux intents distincts ne partagent pas le même objet.
+        """
         gs = self._gs()
-        r0 = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
+        r0a = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
         r1 = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=1)
-        assert r0 is not None, "intent=0 doit retourner un plan valide"
-        assert r1 is not None, "intent=1 doit retourner un plan valide"
-        assert r0 is not r1, (
+        r0b = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
+        assert r0a is not None
+        assert r0b is not None
+        assert r0a is not r1, (
             "intent=0 et intent=1 partagent le même objet Python — "
             "la clé _charge_plan_cache n'inclut pas intent"
         )
-
-    def test_intent0_cache_hit_stable(self) -> None:
-        """Un troisième appel intent=0 retourne l'entrée cache (même objet que le premier)."""
-        gs = self._gs()
-        r0a = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
-        charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=1)  # pollue si clé mauvaise
-        r0b = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
-        assert r0a is not None and r0b is not None
         assert r0a is r0b, (
             "le troisième appel intent=0 doit retourner l'entrée cache (même objet), "
             "pas un plan recalculé — un appel intent=1 entre les deux ne doit pas invalider l'entrée"
