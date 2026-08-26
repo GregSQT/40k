@@ -278,22 +278,22 @@ Legend: ✅ Implemented · ⚠️ Partial · ❌ Missing
 
 | Status | Count |
 |--------|-------|
-| ✅ Implemented | 87 |
+| ✅ Implemented | 90 |
 | ⚠️ Partial | 5 |
-| ❌ Missing | 34 |
+| ❌ Missing | 31 |
 | **Total** | **126** |
 
-**Coverage: 87 / 126 = 69% fully implemented · 4% partial · 27% missing**
+**Coverage: 90 / 126 = 71% fully implemented · 4% partial · 25% missing**
 
 ### Missing by category
 | Category | Missing |
 |----------|---------|
 | Stratagems | 10 (all 10 core stratagems) |
 | Transports | 5 |
-| Unit keyword abilities | 7 (Scouts, Infiltrators, Lone Operative, Hover, Super-Heavy Walker, Deadly Demise, ONE SHOT) |
+| Unit keyword abilities | 5 (Scouts, Infiltrators, Lone Operative, Hover, Super-Heavy Walker, ONE SHOT) |
 | Weapon rules | 2 (LANCE, ONE SHOT) |
 | Aircraft | 4 |
-| Other mechanics | 6 (Plunging Fire, FRAME, Surge, Revived, Overwatch, Heroic Intervention) |
+| Other mechanics | 5 (FRAME, Surge, Revived, Overwatch, Heroic Intervention) |
 
 ---
 
@@ -418,7 +418,7 @@ Seules les règles applicables à ces deux rosters sont listées. Statut issu du
 | Feel No Pain (PainBoy → Boyz) | 24.12 | ✅ |
 | RAPID FIRE, SUSTAINED HITS, EXTRA ATTACKS | 24.30, 24.36, 24.11 | ✅ |
 | PRECISION | 24.28 | ✅ |
-| Deadly Demise (LandSpeeder, WarTrakk) | 24.08 | ❌ |
+| Deadly Demise (LandSpeeder, WarTrakk) | 24.08 | ✅ |
 
 **Attached Units**
 
@@ -438,10 +438,7 @@ Seules les règles applicables à ces deux rosters sont listées. Statut issu du
 
 ### Manquants bloquants pour la démo
 
-| Règle | Ref | Impact |
-|-------|-----|--------|
-| Plunging Fire | 22.05 | Bonus +1 BS depuis élévation ignoré — Land Speeder et unités en hauteur ne tirent pas correctement |
-| Deadly Demise | 24.08 | Land Speeder et WarTrakk détruits sans explosion — règle silencieusement ignorée |
+Aucun manquant bloquant — Plunging Fire (22.05) et Deadly Demise (24.08) sont implémentés.
 
 ---
 
@@ -451,8 +448,8 @@ Périmètre : 46 règles en scope (11 explicitement hors scope, non comptées).
 
 | Status | Count |
 |--------|-------|
-| ✅ Implémentée | 44 |
-| ❌ Manquante | 2 |
+| ✅ Implémentée | 46 |
+| ❌ Manquante | 0 |
 | **Total en scope** | **46** |
 
-**Couverture démo : 44 / 46 = 96% — 2 règles manquantes : Plunging Fire (22.05) et Deadly Demise (24.08)**
+**Couverture démo : 46 / 46 = 100%**
