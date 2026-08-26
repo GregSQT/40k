@@ -87,6 +87,15 @@ def _setup_fight_phase_charged(
         gs["consolidation_done"] = set()
 
 
+def _remove_all_enemies(gs: dict, our_player: int) -> None:
+    """Purge toutes les escouades ennemies de game_state (models_cache, units_cache, squad_models)."""
+    for sid in [s for s, e in list(gs["units_cache"].items()) if int(e["player"]) != our_player]:
+        for mid in list(gs["squad_models"].get(sid, [])):
+            gs["models_cache"].pop(mid, None)
+        gs["units_cache"].pop(sid, None)
+        gs["squad_models"].pop(sid, None)
+
+
 @pytest.fixture()
 def melee_scenario_file():
     with tempfile.TemporaryDirectory() as td:
@@ -125,11 +134,7 @@ def test_charged_squad_without_target_fights_empty(melee_scenario_file):
     # État forcé : plus AUCUN ennemi vivant, mais l'escouade a chargé ce tour. On pose une étape
     # FIGHT réelle (sous-phase + snapshot + machine de sélection) car le masque dérive désormais
     # du pool 12.04 (`fight_v11_current_pool`), qui n'a de sens que dans la sous-phase "fight".
-    for sid in [s for s, e in list(gs["units_cache"].items()) if int(e["player"]) != our_player]:
-        for mid in list(gs["squad_models"].get(sid, [])):
-            gs["models_cache"].pop(mid, None)
-        gs["units_cache"].pop(sid, None)
-        gs["squad_models"].pop(sid, None)
+    _remove_all_enemies(gs, our_player)
     _setup_fight_phase_charged(gs, squad_id, our_player)
 
     empty_slots: List[Optional[str]] = [None] * 5
@@ -303,24 +308,12 @@ def test_snapshot_engaged_unit_with_dead_enemy_offers_fight_and_breaks_loop(mele
     our_player = int(gs["units_cache"][squad_id]["player"])
 
     # Tous les ennemis meurent (modèles retirés) : l'escouade n'est plus engagée MAINTENANT.
-    for sid in [s for s, e in list(gs["units_cache"].items()) if int(e["player"]) != our_player]:
-        for mid in list(gs["squad_models"].get(sid, [])):
-            gs["models_cache"].pop(mid, None)
-        gs["units_cache"].pop(sid, None)
-        gs["squad_models"].pop(sid, None)
+    _remove_all_enemies(gs, our_player)
 
-    # Étape FIGHT réelle avec le snapshot qui la marque engagée AU DÉBUT (mais pas chargée).
-    gs["phase"] = "fight"
-    gs["fight_subphase"] = "fight"
-    gs["current_player"] = our_player
-    gs["fight_step"] = "fights_first"
-    gs["fight_selector"] = our_player
+    # Étape FIGHT : snapshot marque l'unité engagée AU DÉBUT (pas chargée) — 2 clés diffèrent du helper.
+    _setup_fight_phase_charged(gs, squad_id, our_player, with_settle_keys=True)
     gs["engaged_at_fight_step_start"] = {squad_id: True}
     gs["units_charged"] = set()
-    gs["units_selected_to_fight"] = set()
-    gs["units_fought"] = set()
-    gs["pile_in_done"] = set()          # posés par fight_v11_start ; requis par le settle post-fight
-    gs["consolidation_done"] = set()
 
     # Le pool 12.04 la contient (via le snapshot), le masque DOIT offrir FIGHT — pas seulement WAIT.
     assert squad_id in fight_v11_current_pool(gs)
@@ -353,11 +346,7 @@ def test_overrun_pile_in_called_when_unengaged(melee_scenario_file):
     our_player = int(gs["units_cache"][squad_id]["player"])
 
     # Supprime tous les ennemis (pool vide → fight à vide, unité non engagée).
-    for sid in [s for s, e in list(gs["units_cache"].items()) if int(e["player"]) != our_player]:
-        for mid in list(gs["squad_models"].get(sid, [])):
-            gs["models_cache"].pop(mid, None)
-        gs["units_cache"].pop(sid, None)
-        gs["squad_models"].pop(sid, None)
+    _remove_all_enemies(gs, our_player)
 
     _setup_fight_phase_charged(gs, squad_id, our_player, with_settle_keys=True)
 
@@ -485,14 +474,8 @@ def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
     Le guard `entry_is_on_battlefield` dans le path overrun est inatteignable via
     `get_enemy_slot_mapping` (qui nettoie les slots hors table avant retour). On injecte donc
     l'ennemi hors table directement dans enemy_slot_ids pour tester le guard.
-
-    Sans le guard, `unit_entries_within_engagement_zone` est appelé sur l'ennemi hors table →
-    `require_entry_on_battlefield` lève ValueError (MESURÉ : la distance depuis (-1,-1) est dans
-    l'EZ=2 pour un attaquant proche de l'origine — verdict inventé, mais l'appel crash). L'ennemi
-    hors table porte `occupied_hexes={(-1,-1)}` pour rendre le crash inévitable si le guard manque
-    (empty occupied_hexes → min_distance = ∞ → False → pas de crash, mais une couverture trop
-    faible; occupied_hexes peuplé → require_entry_on_battlefield déclenche le ValueError réel).
     """
+    from engine.hex_utils import hex_distance
     from engine.phase_handlers.shared_utils import (
         SQUAD_ACTION_FIGHT_SLOT_BASE,
         SQUAD_ACTION_FIGHT_SLOT_COUNT,
@@ -500,9 +483,12 @@ def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
     )
     from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
 
+    # Précondition géométrique : la sentinelle (-1,-1) doit être à ≤ EZ=2 de l'origine.
+    # Si ce n'est plus vrai, le guard ne serait plus nécessaire et le test perdrait son sens.
+    assert hex_distance(0, 0, -1, -1) <= 2, "précondition : dist hex (0,0)→(-1,-1) doit être ≤ EZ=2"
+
     # Attaquant P1 à (0,0), ennemi A P2 à (0,3) sur table (dist=3 > EZ=2, ≤pile-in=5).
-    # L'attaquant près de l'origine fait que la distance hex vers (-1,-1) = 2 ≤ EZ=2 :
-    # sans le guard, `_uiez` lèverait (require_entry_on_battlefield).
+    # Sans le guard, `_uiez` appelle `require_entry_on_battlefield` sur (-1,-1) → ValueError.
     attacker = synthetic_unit("1", 1, [{"col": 0, "row": 0}])
     enemy_a = synthetic_unit("2", 2, [{"col": 0, "row": 3}])
 
