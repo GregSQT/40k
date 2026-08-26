@@ -311,6 +311,13 @@ class ObservationBuilder:
                 f"Must be defined in training_config.json. Current obs_params: {obs_params}"
             )
         self.obs_size = obs_params["obs_size"]  # Source unique de vérité
+        # Buffers de travail réutilisés entre appels (item 1.7 perf_entrainement) — ~27 np.zeros
+        # par build supprimés. Initialisés ici (tailles constantes), remis à zéro avant chaque
+        # usage. L'appelant reçoit une RÉFÉRENCE au buffer : il doit le copier (affectation numpy)
+        # avant le prochain appel — invariant documenté aux deux sites d'usage.
+        self._obs_scratch: Optional[Dict[str, np.ndarray]] = None  # init paresseux (squad_obs_shapes dépend des constantes de classe)
+        self._unit_ent_cont = np.zeros(UNIT_CONT_SIZE, dtype=np.float32)
+        self._unit_ent_bin = np.zeros(UNIT_BIN_SIZE, dtype=np.float32)
 
     # ============================================================================
     # ============================================================================
@@ -1076,11 +1083,22 @@ class ObservationBuilder:
         return static
 
     def _empty_squad_observation(self) -> Dict[str, np.ndarray]:
-        """Observation nulle (escouade morte/absente) — mêmes clés et formes que le cas nominal."""
-        return {
-            key: np.zeros(shape, dtype=np.float32)
-            for key, shape in self.squad_obs_shapes().items()
-        }
+        """Observation nulle (escouade morte/absente) — mêmes clés et formes que le cas nominal.
+
+        Réutilise le buffer scratch `_obs_scratch` : premier appel = allocation, appels suivants =
+        remise à zéro par `.fill(0)`. L'appelant reçoit une RÉFÉRENCE au même dict à chaque appel
+        et doit copier les tableaux (affectation numpy `obs[key][row] = ...`) avant le prochain
+        appel. Ne jamais stocker le dict retourné au-delà du step courant.
+        """
+        if self._obs_scratch is None:
+            self._obs_scratch = {
+                key: np.zeros(shape, dtype=np.float32)
+                for key, shape in self.squad_obs_shapes().items()
+            }
+        else:
+            for arr in self._obs_scratch.values():
+                arr.fill(0)
+        return self._obs_scratch
 
     # ------------------------------------------------------------------
     # Sous-registres d'une entité (armes, types de figurines)
@@ -1271,8 +1289,12 @@ class ObservationBuilder:
             )
         models = [models_cache[mid] for mid in alive_mids]
 
-        cont = np.zeros(UNIT_CONT_SIZE, dtype=np.float32)
-        binv = np.zeros(UNIT_BIN_SIZE, dtype=np.float32)
+        # Buffers scratch (item 1.7) — remis à zéro ici ; l'appelant copie immédiatement
+        # le résultat (`obs[key][row] = e_cont`) avant le prochain appel à cette méthode.
+        self._unit_ent_cont.fill(0)
+        self._unit_ent_bin.fill(0)
+        cont = self._unit_ent_cont
+        binv = self._unit_ent_bin
 
         def _c(field: str, value: float) -> None:
             cont[unit_cont_index(field)] = float(value)

@@ -236,3 +236,83 @@ def test_mask_verification_gate_is_not_a_noop(monkeypatch) -> None:
         f"verify_memoised_move_cell_map n'a jamais été appelée sur {len(run)} steps avec "
         "W40K_MASK_VERIFY=1 — le gate n'est pas armé sur ce chemin."
     )
+
+
+# ── Invariant 4 : remise à zéro du buffer scratch d'observation (item 1.7) ───────────────────
+
+def test_obs_scratch_buffer_is_zeroed_before_reuse() -> None:
+    """Le buffer scratch de _empty_squad_observation est remis à zéro avant chaque réutilisation.
+
+    ROUGE si le `.fill(0)` de `_empty_squad_observation` est supprimé : les valeurs empoisonnées
+    survivraient au second appel et corrompraient l'observation d'une escouade absente.
+    VERT avec le fill(0) : le second appel renvoie toujours des zéros.
+
+    Testé directement sur le builder (pas de game_state requis) pour que l'échec soit immédiat
+    et la cause lisible sans trace de stack moteur.
+    """
+    from engine.observation_builder import ObservationBuilder
+
+    builder = ObservationBuilder(
+        {"observation_params": {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET}}
+    )
+
+    # Premier appel : initialise _obs_scratch
+    obs_first = builder._empty_squad_observation()
+
+    # Poison : on écrit 99.0 dans TOUS les tableaux du scratch
+    for arr in obs_first.values():
+        arr.fill(99.0)
+
+    # Deuxième appel : doit remettre à zéro, même si le buffer contient 99.0
+    obs_second = builder._empty_squad_observation()
+
+    # obs_second EST obs_first (même dict) — le test vérifie que fill(0) a bien agi
+    for key, arr in obs_second.items():
+        assert np.all(arr == 0.0), (
+            f"Buffer scratch non remis à zéro pour la clé '{key}' : "
+            f"valeur max = {arr.max()} (attendu 0.0). "
+            "Vérifier que _empty_squad_observation appelle arr.fill(0) sur chaque tableau."
+        )
+
+
+def test_unit_entity_scratch_zeroed_between_entities() -> None:
+    """Les buffers scratch de _encode_unit_entity ne fuient pas d'une entité à la suivante.
+
+    ROUGE si les `.fill(0)` de `_encode_unit_entity` sont supprimés : la valeur 99.0 empoisonnée
+    dans `_unit_ent_cont` avant le premier encode apparaîtrait dans les fields non écrits du
+    résultat (ex. `effective_range`, écrit SEULEMENT pour les entités ennemies non actives),
+    rendant l'observation d'une entité alliée active non nulle sur ces fields.
+    VERT avec les fill(0) : les fields non écrits restent à 0 quel que soit le poison initial.
+
+    Vérifié via le moteur réel (N_STEPS steps) : on empoisonne le buffer AVANT chaque encode
+    via un monkeypatch, et on contrôle la parité bit-à-bit avec un run propre.
+    """
+    clean = _capture_fingerprints(SEED, N_STEPS)
+
+    # Run "empoisonné" : avant chaque appel à _encode_unit_entity, on remplit le buffer scratch
+    # avec 99.0 pour simuler un résidu. Si fill(0) est en place, le résultat doit être identique
+    # au run propre ; sinon, les fields non écrits porteront 99.0 et les hashes divergeront.
+    import engine.observation_builder as obs_mod
+    original_encode = obs_mod.ObservationBuilder._encode_unit_entity
+
+    def _poisoning_encode(self, *args, **kwargs):
+        # Poison avant l'appel : simule un buffer non remis à zéro
+        self._unit_ent_cont.fill(99.0)
+        self._unit_ent_bin.fill(99.0)
+        return original_encode(self, *args, **kwargs)
+
+    obs_mod.ObservationBuilder._encode_unit_entity = _poisoning_encode
+    try:
+        poisoned = _capture_fingerprints(SEED, N_STEPS)
+    finally:
+        obs_mod.ObservationBuilder._encode_unit_entity = original_encode
+
+    assert len(clean) >= 10, f"Seulement {len(clean)} steps — le moteur s'est bloqué."
+    assert len(clean) == len(poisoned), (
+        f"Longueurs différentes : {len(clean)} vs {len(poisoned)}"
+    )
+    first_diff = next((i for i, (a, b) in enumerate(zip(clean, poisoned)) if a != b), None)
+    assert first_diff is None, (
+        f"Divergence au step {first_diff} : le poison 99.0 a survécu dans l'observation — "
+        "le buffer scratch n'est pas remis à zéro avant encode."
+    )
