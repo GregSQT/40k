@@ -1490,6 +1490,22 @@ class BotEvaluationCallback(BaseCallback):
                 f"(got {model_gating_min_benchmark_floor})"
             )
         self.model_gating_min_benchmark_floor = float(model_gating_min_benchmark_floor)
+        if self.model_gating_min_benchmark_floor > 0.0 and training_config_name and rewards_config_name:
+            training_cfg = get_config_loader().load_agent_training_config(
+                rewards_config_name, training_config_name
+            )
+            cb_params = require_key(training_cfg, "callback_params")
+            bot_eval_weights: Dict[str, Any] = require_key(cb_params, "bot_eval_weights")
+            if not any(k in bot_eval_weights for k in BENCHMARK_BOT_KEYS):
+                raise ValueError(
+                    f"model_gating_min_benchmark_floor={self.model_gating_min_benchmark_floor} "
+                    f"est configure (> 0.0) mais aucune cle BENCHMARK_BOT_KEYS "
+                    f"({BENCHMARK_BOT_KEYS}) n'est presente dans "
+                    f"callback_params.bot_eval_weights. Le plancher ne peut jamais etre "
+                    f"mesure et laisserait passer n'importe quel modele. "
+                    f"Ajouter au moins une cle reference_* dans bot_eval_weights, "
+                    f"ou ramener model_gating_min_benchmark_floor a 0.0 pour le desarmer."
+                )
         if not isinstance(stop_on_no_generalization, int) or stop_on_no_generalization < 0:
             raise ValueError(
                 f"stop_on_no_generalization must be a non-negative integer "
