@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from shared.data_validation import require_key
@@ -789,14 +790,59 @@ def curriculum_log_path() -> str:
     return os.path.join(_project_root(), CURRICULUM_LOG_FILENAME)
 
 
+#: Cle estampillee par `append_curriculum_log`, jamais fournie par l'appelant (cf. sa docstring).
+WRITTEN_BY_KEY = "written_by"
+
+
 def append_curriculum_log(entry: Dict[str, Any], log_path: Optional[str] = None) -> str:
     """Ajoute UNE entree d'etape au journal, en APPEND. Rend le chemin ecrit.
 
     APPEND et pas reecriture : le journal est la trace de la progression du curriculum sur
     quatorze runs etales sur des jours. Un mode 'w' perdrait tout l'historique au premier
     relancement d'une etape.
+
+    ESTAMPILLE ``written_by`` — QUEL PROGRAMME a ecrit la ligne, depuis ``sys.argv[0]``.
+
+    POURQUOI. Ce journal est en append public : n'importe quel script qui importe cette fonction
+    peut y ajouter une entree, et rien ne distinguait ensuite la mesure du pipeline de celle d'un
+    script jetable. Ce n'est pas theorique, c'est arrive : le 2026-08-26, `scripts/replay_p1_cloture.py`
+    (script one-shot, jamais commite) a journalise un refus de l'etape P1 mesure sur 30 episodes
+    au lieu des 300 de `curriculum.json`, en ecrivant lui-meme `gate_eval_episodes: 30`. A
+    30 episodes l'erreur-type d'un taux proche de 0,5 vaut ~9 points : le verdict n'etait pas
+    distinguable du bruit, mais rien dans la ligne ne permettait de le savoir en la relisant.
+
+    DERIVE, PAS DECLARE. La valeur vient de ``sys.argv[0]``, pas d'un argument : un appelant ne
+    peut ni l'oublier ni la falsifier en la laissant vide. C'est aussi la bonne semantique — la
+    question est « quel programme a produit cette mesure », et le point d'entree y repond
+    exactement (`ai/train.py` pour le pipeline, `scripts/<nom>.py` pour un script).
+
+    Fournir la cle soi-meme LEVE plutot que d'etre ecrase en silence : une entree qui se declare
+    ecrite par un autre programme que celui qui tourne est precisement ce que ce champ existe
+    pour rendre impossible.
     """
+    if WRITTEN_BY_KEY in entry:
+        raise ValueError(
+            f"append_curriculum_log: {WRITTEN_BY_KEY!r} est estampille par le journal, pas fourni "
+            f"par l'appelant (recu {entry[WRITTEN_BY_KEY]!r}). Retirer la cle de l'entree."
+        )
+    stamped = {**entry, WRITTEN_BY_KEY: _writer_identity()}
     path = log_path if log_path is not None else curriculum_log_path()
     with open(path, "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+        handle.write(json.dumps(stamped, ensure_ascii=False, sort_keys=True) + "\n")
     return path
+
+
+def _writer_identity() -> str:
+    """Point d'entree du processus, relatif a la racine du projet quand il y est contenu.
+
+    Relatif plutot qu'absolu : `ai/train.py` se relit d'un coup d'oeil la ou
+    `/home/<user>/40k/ai/train.py` noie l'information dans un chemin machine. Un point d'entree
+    hors du depot (interpreteur interactif, `pytest` installe dans le venv) reste absolu — il n'y
+    a rien a raccourcir, et c'est justement le cas ou l'on veut voir d'ou ca vient.
+    """
+    entry_point = sys.argv[0] if sys.argv else ""
+    if not entry_point:
+        return "<inconnu>"  # `python -c`, embarque : argv[0] vide. Pas un repli, une valeur juste.
+    resolved = os.path.abspath(entry_point)
+    root = _project_root()
+    return os.path.relpath(resolved, root) if resolved.startswith(root + os.sep) else resolved

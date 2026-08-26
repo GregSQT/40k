@@ -218,4 +218,30 @@ Trois écarts assumés par rapport au contenu prévu :
   DIAGNOSTIC et non en gate : les learners démarrent `--new`, donc deux étapes voisines sont
   des runs indépendants et peuvent se départager dans le désordre sans anomalie.
 
+### ⚠️ `curriculum.log` — le refus de P1 de la 1ʳᵉ série est SANS VALEUR statistique
+
+**À lire avant d'interpréter les entrées `gate_accepted: false` de la première série P0→P1→P2.**
+
+L'entrée `"etape": "P1", "gate_accepted": false, "scores_vs_pool": {"P0": 0.433}` porte
+`"gate_eval_episodes": 30` — **30 épisodes, pas les 300 de `curriculum.json`**. Elle n'a pas été
+écrite par le pipeline mais par un script jetable nommé replay_p1_cloture (jamais commité, supprimé
+le 2026-08-26 — aucun fichier de ce nom n'existe dans le dépôt, d'où l'absence d'extension ici)
+qui rejouait la clôture après le crash
+`self_play_snapshot_label is required` et qui codait `EVAL_EPISODES = 30` en dur — en contredisant
+sa propre docstring, qui annonçait 300.
+
+À 30 épisodes, l'erreur-type d'un taux proche de 0,5 vaut ~9 points. **Un score de 0,433 contre un
+plancher de 0,55 n'y est pas distinguable du bruit** : ce refus ne mesure rien. C'est précisément
+l'écart que le `_doc` du bloc `gate` justifie en imposant 300 épisodes (erreur-type 2,9 points).
+
+Sans conséquence sur le curriculum : la série a été rejouée, et **P1 est accepté à 0,590 sur
+300 épisodes** par le pipeline (au-dessus du plancher 0,55, sous la cible 0,60). Sans récidive
+possible non plus : `ai/train.py` lit `gate.eval_episodes` par `require_key`, sans défaut ni
+override — aucun chemin du pipeline ne peut produire 30.
+
+**Verrou posé le 2026-08-26** : `append_curriculum_log` estampille désormais chaque entrée d'un
+champ `written_by` dérivé de `sys.argv[0]` — `ai/train.py` pour le pipeline, `scripts/<nom>.py`
+pour un script. Les entrées antérieures à cette date n'en ont pas ; leur origine se déduit du
+seul indice disponible, `gate_eval_episodes` (300 = pipeline).
+
 → `Documentation/Implémentation/Bot_refactor.md` §0bis (décisions datées) et §7

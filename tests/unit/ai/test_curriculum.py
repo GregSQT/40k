@@ -12,6 +12,8 @@ Quatre invariants portent tout le reste, et chacun echoue SILENCIEUSEMENT sans t
    ne se voit que des semaines plus tard, dans un win-rate.
 """
 
+import os
+import sys
 from collections import Counter
 
 import pytest
@@ -436,3 +438,56 @@ def test_curriculum_log_appends_instead_of_overwriting(tmp_path) -> None:
     append_curriculum_log({"etape": "P1"}, str(log_path))
     entries = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
     assert [entry["etape"] for entry in entries] == ["P0", "P1"]
+
+
+# ── written_by : quel PROGRAMME a ecrit la ligne ───────────────────────────────────────────
+#
+# Defaut d'origine (2026-08-26) : `scripts/replay_p1_cloture.py`, script one-shot jamais commite,
+# a journalise un refus de l'etape P1 mesure sur 30 episodes au lieu des 300 de `curriculum.json`.
+# Relue plus tard, la ligne etait indistinguable d'une mesure du pipeline.
+
+def test_written_by_names_the_entry_point(tmp_path, monkeypatch) -> None:
+    """Chaque entree porte le point d'entree du processus, relatif a la racine du depot."""
+    import json
+
+    from ai.curriculum import append_curriculum_log, _project_root
+
+    faux_script = os.path.join(_project_root(), "scripts", "un_script_jetable.py")
+    monkeypatch.setattr(sys, "argv", [faux_script])
+
+    log_path = tmp_path / "curriculum.log"
+    append_curriculum_log({"etape": "P1"}, str(log_path))
+
+    entry = json.loads(log_path.read_text(encoding="utf-8").strip())
+    assert entry["written_by"] == os.path.join("scripts", "un_script_jetable.py")
+    assert entry["etape"] == "P1"  # l'estampille n'ecrase pas le contenu
+
+
+def test_written_by_keeps_an_out_of_tree_entry_point_absolute(tmp_path, monkeypatch) -> None:
+    """Un point d'entree hors depot reste absolu : il n'y a rien a raccourcir."""
+    import json
+
+    from ai.curriculum import append_curriculum_log
+
+    monkeypatch.setattr(sys, "argv", ["/usr/lib/python3/dist-packages/pytest"])
+
+    log_path = tmp_path / "curriculum.log"
+    append_curriculum_log({"etape": "P0"}, str(log_path))
+
+    entry = json.loads(log_path.read_text(encoding="utf-8").strip())
+    assert entry["written_by"] == "/usr/lib/python3/dist-packages/pytest"
+
+
+def test_written_by_supplied_by_caller_raises(tmp_path) -> None:
+    """Declarer soi-meme la cle LEVE : une entree ne peut pas se dire ecrite par un autre.
+
+    Sans cette garde, le champ serait declaratif — le script jetable qui a cause le defaut
+    d'origine aurait pu s'annoncer `ai/train.py` et le journal l'aurait cru.
+    """
+    from ai.curriculum import append_curriculum_log
+
+    log_path = tmp_path / "curriculum.log"
+    with pytest.raises(ValueError, match="estampille par le journal"):
+        append_curriculum_log({"etape": "P1", "written_by": "ai/train.py"}, str(log_path))
+
+    assert not log_path.exists()  # rien n'a ete ecrit avant de lever
