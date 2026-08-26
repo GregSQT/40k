@@ -83,11 +83,7 @@
                 "decapitation": 0.16666666666666666,
                 "endgame": 0.16666666666666666,
                 "racer": 0.16666666666666666,
-                "scorer": 0.166666666666667,
-                "tactical": 0.0,
-                "reference_balanced": 0.0,
-                "reference_denial": 0.0,
-                "reference_reactive": 0.0
+                "scorer": 0.166666666666667
             },
             "bot_eval_randomness": {
                 "alpha": 0.05,
@@ -95,11 +91,7 @@
                 "decapitation": 0.05,
                 "endgame": 0.05,
                 "racer": 0.05,
-                "scorer": 0.05,
-                "tactical": 0.05,
-                "reference_balanced": 0.0,
-                "reference_denial": 0.0,
-                "reference_reactive": 0.0
+                "scorer": 0.05
             },
             "bot_eval_n_workers_intermediate": 4
         },
@@ -284,11 +276,7 @@
                 "decapitation": 0.16666666666666666,
                 "endgame": 0.16666666666666666,
                 "racer": 0.16666666666666666,
-                "scorer": 0.166666666666667,
-                "tactical": 0.0,
-                "reference_balanced": 0.0,
-                "reference_denial": 0.0,
-                "reference_reactive": 0.0
+                "scorer": 0.166666666666667
             },
             "bot_eval_randomness": {
                 "alpha": 0.05,
@@ -296,11 +284,7 @@
                 "decapitation": 0.05,
                 "endgame": 0.05,
                 "racer": 0.05,
-                "scorer": 0.05,
-                "tactical": 0.05,
-                "reference_balanced": 0.0,
-                "reference_denial": 0.0,
-                "reference_reactive": 0.0
+                "scorer": 0.05
             },
             "bot_eval_n_workers_intermediate": 4
         },
@@ -478,8 +462,7 @@
                 "decapitation": 0.16666666666666666,
                 "endgame": 0.16666666666666666,
                 "racer": 0.16666666666666666,
-                "scorer": 0.166666666666667,
-                "tactical": 0.0
+                "scorer": 0.166666666666667
             },
             "bot_eval_randomness": {
                 "alpha": 0.05,
@@ -487,8 +470,7 @@
                 "decapitation": 0.05,
                 "endgame": 0.05,
                 "racer": 0.05,
-                "scorer": 0.05,
-                "tactical": 0.05
+                "scorer": 0.05
             }
         },
         "roster_pool_schedule": {
@@ -668,8 +650,7 @@
                 "decapitation": 0.16666666666666666,
                 "endgame": 0.16666666666666666,
                 "racer": 0.16666666666666666,
-                "scorer": 0.16666666666666674,
-                "tactical": 0.0
+                "scorer": 0.16666666666666674
             },
             "bot_eval_randomness": {
                 "alpha": 0.05,
@@ -677,8 +658,7 @@
                 "decapitation": 0.05,
                 "endgame": 0.05,
                 "racer": 0.05,
-                "scorer": 0.05,
-                "tactical": 0.05
+                "scorer": 0.05
             }
         },
         "roster_pool_schedule": {
@@ -859,8 +839,7 @@
                 "decapitation": 0.16666666666666666,
                 "endgame": 0.16666666666666666,
                 "racer": 0.16666666666666666,
-                "scorer": 0.16666666666666674,
-                "tactical": 0.0
+                "scorer": 0.16666666666666674
             },
             "bot_eval_randomness": {
                 "alpha": 0.05,
@@ -868,8 +847,7 @@
                 "decapitation": 0.05,
                 "endgame": 0.05,
                 "racer": 0.05,
-                "scorer": 0.05,
-                "tactical": 0.05
+                "scorer": 0.05
             }
         },
         "roster_pool_schedule": {
@@ -1014,8 +992,7 @@
                 "decapitation": 0.16666666666666666,
                 "endgame": 0.16666666666666666,
                 "racer": 0.16666666666666666,
-                "scorer": 0.16666666666666674,
-                "tactical": 0.0
+                "scorer": 0.16666666666666674
             },
             "bot_eval_randomness": {
                 "alpha": 0.05,
@@ -1023,8 +1000,7 @@
                 "decapitation": 0.05,
                 "endgame": 0.05,
                 "racer": 0.05,
-                "scorer": 0.05,
-                "tactical": 0.05
+                "scorer": 0.05
             }
         },
         "roster_pool_schedule": {

@@ -22,6 +22,11 @@ Mesure de référence antérieure : `x1_long` nu 50 000 ép. = 5 h 54 (2026-08-1
 
 ### Budget d'un cycle PPO (8 184 transitions = 341 vec-steps ≈ 41 s de wall)
 
+> ⚠️ Ces chiffres datent de `n_steps=8192`. Le 2026-08-26 (commit `7c466b15`) `n_steps` est passé
+> à **8160** sur les 6 profils : le cycle vaut désormais **8 160 transitions = 340 vec-steps/env**,
+> soit **8 minibatches de 1020 exactement, sans le 9ᵉ minibatch de 24**. Les **parts** du tableau
+> ci-dessous restent valides (−0,4 % de volume) ; le résidu qu'il mentionne n'existe plus.
+
 | Poste | Mesure | Part |
 |---|---|---|
 | **Attente pure** : lockstep sur l'env le plus lent + 2 allers-retours IPC/step + syncs GPU | ~30 s | **~73 %** |
@@ -262,10 +267,10 @@ Verrou : mêmes win-rates qu'en séquentiel à seeds fixes.
 
 | Option | Effet perf | Ce que ça change au métier |
 |---|---|---|
-| AMP/bf16 sur l'update | update plus court | numérique de l'apprentissage (gradients) |
-| `batch_size` 1020 → 1023 | supprime le 9ᵉ minibatch de 24 (8184 = 8×1023) | hyperparamètre |
-| `n_envs` 24 → 32/48 | amortit la latence par step | corrélation du batch, frontières GAE (341→~170 steps/env), RAM (~0,64 Go/worker) |
-| Bots poids 0,0 exclus de l'éval intermédiaire | −40 % du budget d'éval | perte de la mesure continue holdout/benchmark |
+| AMP/bf16 sur l'update | update plus court | numérique de l'apprentissage (gradients) — 🟡 à tester plus tard (décision 2026-08-26) |
+| ~~`batch_size` 1020 → 1023~~ | ⛔ **SANS OBJET** | Le 9ᵉ minibatch de 24 n'existe plus : `n_steps` est passé de 8192 à 8160 le 2026-08-26 (commit `7c466b15`), APRÈS l'audit qui a produit cette table. À 8160 / 24 envs = 340 steps/env = **8160 transitions**, et 8160 / 1020 = **8 minibatches pile, zéro résidu**. Passer à 1023 CRÉERAIT le résidu (7 pleins + 999). Ligne conservée barrée pour ne pas ré-ouvrir la proposition. |
+| `n_envs` 24 → 32/48 | amortit la latence par step | ⛔ **REFUSÉ (2026-08-26)** : la RAM fait exploser la VM pendant le self-play (~0,64 Go/worker + copie CPU de la policy par worker). Non ré-ouvrable sans plus de RAM. |
+| Bots poids 0,0 exclus de l'éval intermédiaire | −40 % du budget d'éval | ✅ **APPLIQUÉ (2026-08-26)** : `tactical`, `reference_balanced`, `reference_denial`, `reference_reactive` supprimés de `bot_eval_weights` et `bot_eval_randomness` sur x1/x1_long (les 4) et x1_debug/x5_* (`tactical` seul, les 3 `reference_*` n'y figuraient pas). Les 6 bots restants gardent 1/6 chacun, somme = 1.0 (vérifiée sur les 6 profils). Perte assumée : la mesure continue holdout/benchmark de ces 4 bots. |
 | Device/format de l'adversaire self-play (GPU partagé, quantization) | steps self-play plus rapides | le jeu de l'adversaire gelé peut dévier numériquement |
 | Sonde exploiteur E1-E3 parallélisée | jusqu'à ~10 h/run E* | protocole exploiteur gelé (`validate_exploiter_protocol`) à réviser |
 
