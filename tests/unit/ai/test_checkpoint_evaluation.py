@@ -309,85 +309,109 @@ def test_log_checkpoint_empty_does_nothing():
 # ── evaluate_against_checkpoints — self_play_snapshot_label ──────────────────
 
 
-def test_evaluate_against_checkpoints_passes_snapshot_label(tmp_path, monkeypatch):
-    """BotControlledEnv doit recevoir self_play_snapshot_label=score_label (correctif P1)."""
+def test_create_eval_env_passes_snapshot_label():
+    """BotControlledEnv doit recevoir self_play_snapshot_label=score_label (correctif P1).
+
+    RÉANCRAGE Phase 4 : l'assemblage de l'env checkpoint appartenait à la boucle interne de
+    `evaluate_against_checkpoints`, qui ne joue plus d'épisode. Il vit désormais dans
+    `_create_eval_env`, et c'est là que l'invariant se teste — sans dérouler tout le harnais.
+    """
     from unittest.mock import MagicMock, patch
 
-    from ai.bot_evaluation import evaluate_against_checkpoints
-
-    score_label = "P0"
-    zip_path = str(tmp_path / "ArmageddonAgent_12345_robust_0.8741.zip")
-    open(zip_path, "w").close()
-    open(str(tmp_path / "scenario.json"), "w").close()
+    from ai.bot_evaluation import _create_eval_env
 
     captured_kwargs: dict = {}
 
     class _FakeBotControlledEnv:
-        def __init__(self, env, **kwargs):
+        def __init__(self, env, *args, **kwargs):
             captured_kwargs.update(kwargs)
 
-        def reset(self, seed=None):
-            return (np.zeros(4, dtype=np.float32), {})
-
-        def step(self, action):
-            return (np.zeros(4, dtype=np.float32), 0.0, True, False, {"winner": "p1", "controlled_player": "p1"})
-
-        def get_wrapper_attr(self, name):
-            return lambda: np.ones(10, dtype=bool)
-
-        def close(self):
-            pass
-
-    fake_model = MagicMock()
-    fake_model.predict.return_value = (np.array(0), None)
-
-    training_cfg = {
-        "agent_seat_mode": "p1",
-        "vec_normalize": {"enabled": False},
-        "vec_normalize_eval": {"enabled": False},
-    }
-    fake_config = MagicMock()
-    fake_config.load_agent_training_config.return_value = training_cfg
-
     fake_base_env = MagicMock()
-    fake_base_env.get_action_mask.return_value = np.ones(10, dtype=bool)
     fake_engine = MagicMock(return_value=fake_base_env)
 
     with (
-        patch("config_loader.get_config_loader", return_value=fake_config),
-        patch("config_loader.get_max_turns", return_value=10),
         patch("ai.training_utils.setup_imports", return_value=(fake_engine, None)),
-        patch(
-            "ai.training_utils.get_scenario_list_for_phase",
-            return_value=[str(tmp_path / "scenario.json")],
-        ),
-        patch("sb3_contrib.MaskablePPO.load", return_value=fake_model),
-        patch("ai.bot_evaluation._build_eval_obs_normalizer_for_worker", return_value=None),
-        patch("ai.bot_evaluation._NormalizedFrozenModel", side_effect=lambda m, n: m),
         patch("ai.env_wrappers.BotControlledEnv", _FakeBotControlledEnv),
         patch("sb3_contrib.common.wrappers.ActionMasker", side_effect=lambda env, fn: env),
         patch("ai.unit_registry.UnitRegistry", return_value=MagicMock()),
     ):
-        evaluate_against_checkpoints(
-            model_path=zip_path,
-            checkpoint_archives=[(zip_path, score_label)],
+        _create_eval_env(
+            bot_name="P0",
+            bot_type="P0",
+            randomness_config={},
+            scenario_file="scenario.json",
             training_config_name="x1_long",
             rewards_config_name="ArmageddonAgent",
-            n_episodes=1,
             controlled_agent="ArmageddonAgent",
+            base_agent_key="ArmageddonAgent",
+            debug_mode=False,
+            agent_seat_mode="p1",
+            agent_seat_seed=None,
+            checkpoint_zip="/tmp/ckpt.zip",
+            checkpoint_label="P0",
+            checkpoint_scenario_episodes=4,
         )
 
-    assert captured_kwargs.get("self_play_snapshot_label") == score_label
+    assert captured_kwargs.get("self_play_snapshot_label") == "P0"
+    assert captured_kwargs.get("self_play_snapshot_frozen") is True
+    # Dénominateur de rampe = total du SCÉNARIO, pas la taille de la tranche : c'est ce qui rend
+    # la construction de l'env invariante au découpage, donc la parité avec le séquentiel tenable.
+    assert captured_kwargs.get("self_play_total_episodes") == 4
+
+
+def test_create_eval_env_without_checkpoint_builds_bot():
+    """Sans checkpoint_zip, le chemin historique : un bot construit, aucune clé self-play."""
+    from unittest.mock import MagicMock, patch
+
+    from ai.bot_evaluation import _create_eval_env
+
+    captured_kwargs: dict = {}
+    captured_bot: list = []
+
+    class _FakeBotControlledEnv:
+        def __init__(self, env, bot=None, unit_registry=None, **kwargs):
+            captured_bot.append(bot)
+            captured_kwargs.update(kwargs)
+
+    sentinel_bot = object()
+
+    with (
+        patch("ai.training_utils.setup_imports", return_value=(MagicMock(), None)),
+        patch("ai.env_wrappers.BotControlledEnv", _FakeBotControlledEnv),
+        patch("sb3_contrib.common.wrappers.ActionMasker", side_effect=lambda env, fn: env),
+        patch("ai.unit_registry.UnitRegistry", return_value=MagicMock()),
+        patch("ai.bot_registry.build_bot", return_value=sentinel_bot) as build_bot,
+    ):
+        _create_eval_env(
+            bot_name="greedy",
+            bot_type="greedy",
+            randomness_config={},
+            scenario_file="scenario.json",
+            training_config_name="x1_long",
+            rewards_config_name="ArmageddonAgent",
+            controlled_agent="ArmageddonAgent",
+            base_agent_key="ArmageddonAgent",
+            debug_mode=False,
+            agent_seat_mode="p1",
+            agent_seat_seed=None,
+        )
+
+    build_bot.assert_called_once()
+    assert captured_bot == [sentinel_bot]
+    assert "self_play_opponent_enabled" not in captured_kwargs
 
 
 # ── evaluate_against_checkpoints — sc_eps budget ─────────────────────────────
 
 
 def test_evaluate_against_checkpoints_respects_n_episodes_budget(tmp_path):
-    """Avec n_episodes=2 et 3 scénarios, exactement 2 épisodes doivent être joués.
+    """Avec n_episodes=2 et 3 scénarios, exactement 2 épisodes doivent être demandés.
 
-    Avant le fix, max(1, 0)=1 forçait le troisième scénario à tourner même avec
+    Avant le fix d'origine, max(1, 0)=1 forçait le troisième scénario à tourner même avec
     sc_eps=0, gonflant silencieusement le budget demandé.
+
+    RÉANCRAGE Phase 4 : le budget est désormais une propriété du CONSTRUCTEUR DE TÂCHES, pas
+    d'une boucle d'épisodes. On somme donc les `n_episodes` des tâches produites.
     """
     from unittest.mock import MagicMock, patch
 
@@ -402,32 +426,28 @@ def test_evaluate_against_checkpoints_respects_n_episodes_budget(tmp_path):
         p.touch()
         scenario_files.append(str(p))
 
-    reset_calls = []
+    seen_tasks: list = []
 
-    class _CountingEnv:
-        def __init__(self, env, **kwargs):
-            pass
-
-        def reset(self, seed=None):
-            reset_calls.append(seed)
-            return (np.zeros(4, dtype=np.float32), {})
-
-        def step(self, action):
-            return (np.zeros(4, dtype=np.float32), 0.0, True, False, {"winner": "p1", "controlled_player": "p1"})
-
-        def get_wrapper_attr(self, name):
-            return lambda: np.ones(10, dtype=bool)
-
-        def close(self):
-            pass
-
-    fake_model = MagicMock()
-    fake_model.predict.return_value = (np.array(0), None)
+    def _record_task(task, progress_callback=None):
+        seen_tasks.append(task)
+        return {
+            "wins": int(task["n_episodes"]), "losses": 0, "draws": 0,
+            "truncations": [], "failed_episodes": 0,
+            "bot_name": task["bot_name"], "scenario_name": task["scenario_name"],
+            "faction_stats": {}, "seat_stats": {},
+            "roster_stats": {"p1": {}, "p2": {}}, "behavior_stats": {},
+        }
 
     training_cfg = {
         "agent_seat_mode": "p1",
         "vec_normalize": {"enabled": False},
         "vec_normalize_eval": {"enabled": False},
+        "callback_params": {
+            "bot_eval_use_subprocess": False,
+            "bot_eval_task_timeout_seconds": 600,
+            "bot_eval_n_workers": 1,
+            "bot_eval_worker_device": "cpu",
+        },
     }
     fake_config = MagicMock()
     fake_config.load_agent_training_config.return_value = training_cfg
@@ -435,17 +455,13 @@ def test_evaluate_against_checkpoints_respects_n_episodes_budget(tmp_path):
     with (
         patch("config_loader.get_config_loader", return_value=fake_config),
         patch("config_loader.get_max_turns", return_value=10),
-        patch("ai.training_utils.setup_imports", return_value=(MagicMock(), None)),
         patch(
             "ai.training_utils.get_scenario_list_for_phase",
             return_value=scenario_files,
         ),
-        patch("sb3_contrib.MaskablePPO.load", return_value=fake_model),
-        patch("ai.bot_evaluation._build_eval_obs_normalizer_for_worker", return_value=None),
-        patch("ai.bot_evaluation._NormalizedFrozenModel", side_effect=lambda m, n: m),
-        patch("ai.env_wrappers.BotControlledEnv", _CountingEnv),
-        patch("sb3_contrib.common.wrappers.ActionMasker", side_effect=lambda env, fn: env),
-        patch("ai.unit_registry.UnitRegistry", return_value=MagicMock()),
+        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation._eval_worker_init"),
+        patch("ai.bot_evaluation._eval_worker_task", side_effect=_record_task),
     ):
         evaluate_against_checkpoints(
             model_path=zip_path,
@@ -456,6 +472,7 @@ def test_evaluate_against_checkpoints_respects_n_episodes_budget(tmp_path):
             controlled_agent="ArmageddonAgent",
         )
 
-    assert len(reset_calls) == 2, (
-        f"Attendu 2 épisodes (n_episodes=2 sur 3 scénarios), obtenu {len(reset_calls)}"
+    total_requested = sum(int(t["n_episodes"]) for t in seen_tasks)
+    assert total_requested == 2, (
+        f"Attendu 2 épisodes (n_episodes=2 sur 3 scénarios), obtenu {total_requested}"
     )

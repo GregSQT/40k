@@ -2599,6 +2599,7 @@ class ExploiterProbeCallback(BaseCallback):
         probe_confirm_n: int,
         win_rate_target: float,
         budget_cap: int,
+        intermediate_n_workers: Optional[int] = None,
         log_fn=print,
         verbose: int = 1,
     ) -> None:
@@ -2628,6 +2629,14 @@ class ExploiterProbeCallback(BaseCallback):
         self.probe_confirm_n = probe_confirm_n
         self.win_rate_target = win_rate_target
         self.budget_cap = budget_cap
+        # MEME REGLE QUE `BotEvaluationCallback.intermediate_n_workers` : cette sonde tourne
+        # PENDANT l'entrainement, donc son evaluation partage la machine avec les workers de
+        # collecte. Depuis que `evaluate_against_checkpoints` parallelise (Phase 4), la laisser
+        # prendre `bot_eval_n_workers` (16) la ferait concourir avec les 24 workers du run — le
+        # regime que documente `bot_eval_n_workers` : 24 workers = 47 Go de RSS et une evaluation
+        # 42 % PLUS LENTE qu'a 4. `None` laisse la valeur de config s'appliquer, ce qui est le
+        # bon defaut pour un appel hors entrainement.
+        self.intermediate_n_workers = intermediate_n_workers
         self.log_fn = log_fn
 
         self.win_rate_curve: List[Tuple[int, float]] = []
@@ -2663,6 +2672,7 @@ class ExploiterProbeCallback(BaseCallback):
                 controlled_agent=self.rewards_config_name,
                 scenario_pool="holdout",
                 device="cpu",
+                n_workers_override=self.intermediate_n_workers,
             )
         finally:
             remove_model_with_companions(tmp_path)

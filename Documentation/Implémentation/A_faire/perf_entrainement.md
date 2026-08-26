@@ -153,7 +153,7 @@ phase et l'arbitrage A vs C tombe entre la 2 et la 3.
 | 0+1 | Sonnet 5 | **high** | Items localisés et indépendants, le filet est le harnais de parité (0.2) ; high pour les cas limites d'invalidation de cache (1.2/1.6/1.8) — une invalidation manquée = corruption silencieuse |
 | 2 | **Opus 5** | high pour 2.1, standard sinon | Refactor >3 fichiers interdépendants (buffer custom + collect + train.py + callbacks, contrat SB3) ; 2.1 croise device/minibatch/epochs |
 | 3 (option A) | **Opus 5** | **high** | Architecture difficilement réversible + équivalence mathématique de la collecte distribuée |
-| 4 | Sonnet 5 | standard | Parallélisation sur un pool existant + tests seeds fixes |
+| 4 | Sonnet 5 | standard | Unification des deux harnais d'éval dans un seul fichier (`bot_evaluation.py`) + tests à seeds fixes ; le risque est concentré sur deux invariants nommés (injection avant reset, murs de référence), pas sur l'architecture |
 
 Réglage unique « confort » si on ne veut pas moduler : Opus 5 + effort high partout (plus lent et
 plus cher là où Sonnet suffit).
@@ -250,11 +250,148 @@ réversible) ; effort high (équivalence mathématique de la collecte distribué
 
 | # | Étape | Ancre | Statut |
 |---|---|---|---|
-| 4.1 | Gate de fin d'étape parallélisé sur le pool subprocess 16 workers existant (aujourd'hui 300 ép. séquentiels mono-process ≈ 72 min → ~7 min ; ×14 runs ≈ ~15 h récupérées) | `bot_evaluation.py`, `train.py` | 🟡 |
-| 4.2 | Pool d'éval persistant entre évals (init ~46 s payée à chaque éval : process spawn + rechargement modèle CPU) | `bot_evaluation.py` | 🟡 |
-| 4.3 | **Mesure de clôture** : durée gate + durée éval ; consigner §6 | — | 🟡 |
+| 4.1 | Gate de fin d'étape parallélisé — unification du harnais checkpoint dans le harnais bot (décision B, ci-dessous) | `bot_evaluation.py` | 🔵 |
+| 4.2 | Pool d'éval persistant entre évals — **sorti du chantier 4.1**, voir « Pourquoi 4.2 n'est pas gratuite » | `bot_evaluation.py` | 🟡 |
+| 4.3 | **Mesure de clôture** : durée gate ; calibrage du nombre de tranches ; consigner §6 | — | 🟡 |
 
 Verrou : mêmes win-rates qu'en séquentiel à seeds fixes.
+
+#### État mesuré du gate (2026-08-26, lecture de code)
+
+`gate.eval_episodes = 300` **par membre de pool** (`config/agents/ArmageddonAgent/curriculum.json`),
+holdout = **4 scénarios** (`scenarios/holdout_regular`, `holdout_hard` vide). Pools : P1 = 1 membre
+(300 ép.), P2 = 2 (600 ép.), P3 = 3 (900 ép.). Le gate est joué séquentiellement dans le process
+appelant par `evaluate_against_checkpoints` (`bot_evaluation.py`), boucle archive → scénario →
+épisode.
+
+**Conséquence de calibrage** : une granularité de tâche (checkpoint × scénario) ne produit que
+**4 tâches** sur le gate de P1 — 4 workers occupés sur 16, gain plafonné à ×4 et non au ×10
+annoncé initialement. Le découpage doit donc aller jusqu'à la **tranche d'épisodes**.
+
+#### Décision B (2026-08-26) — unifier plutôt que dupliquer
+
+Le corps de `evaluate_against_checkpoints` est un **duplicata dégradé** de `_eval_worker_task` :
+même boucle d'épisode, mais sans journal de troncatures, sans ventilation faction/roster/siège, et
+les épisodes plafonnés y tombent dans un seau `_timeouts` silencieux au lieu du « nul + trace »
+qu'impose V11 §0.61 partout ailleurs.
+
+Options écartées : (A) un second harnais checkpoint parallélisé — deux boucles à maintenir, 4.2 à
+faire deux fois, trou §0.61 conservé ; (C) parallélisation au-dessus dans `_score_stage_against_pool`
+— n'accélère que le gate, laisse l'éval R0b et la sonde exploiteur séquentielles.
+
+**Retenu : B.** L'adversaire checkpoint devient une variante de tâche du harnais bot ;
+`evaluate_against_checkpoints` devient un constructeur de tâches. Bénéfice de forme vérifié :
+les tâches checkpoint passant par `_eval_worker_task`, le `pool.submit(_eval_worker_task, task)`
+codé en dur dans `_collect_parallel_results_with_timeouts` **n'a pas à être touché** — c'était le
+coût principal de l'option A.
+
+Trois appelants de production, tous préservés sans changement de signature (les paramètres de
+parallélisation sont lus dans la fonction via `validate_bot_eval_worker_params`, comme le fait
+déjà `evaluate_against_bots`) : `train.py` (gate), `train.py` (éval R0b de `--test-only`),
+`training_callbacks.py` (`ExploiterProbeCallback._probe`). La sonde tournant **pendant**
+l'entraînement, elle hérite du `bot_eval_n_workers` déjà calibré contre la contention.
+
+#### Étapes d'implémentation
+
+| # | Étape | Ancre |
+|---|---|---|
+| B1 | Adversaire polymorphe : `checkpoint_zip` / `checkpoint_label` / `device` optionnels ; sans eux, comportement inchangé bit-à-bit | `bot_evaluation.py` (`_create_eval_env`) |
+| B2 | Cache checkpoint par worker (`MaskablePPO.load` + normalizer + `_NormalizedFrozenModel` mémoïsés par `zip_path`) — sans lui, un worker recharge le zip à chaque tranche | `bot_evaluation.py` (`_eval_worker_init`, `_eval_worker_task`) |
+| B3 | `ep_offset` dans la boucle d'épisode ; défaut 0 ⇒ chemin bot intact | `bot_evaluation.py` (`_eval_worker_task`) |
+| B4 | Probe-load des archives dans le parent avant construction des tâches (préserve le skip §12.15, qui deviendrait sinon un crash de tâche opaque) | `bot_evaluation.py` (`evaluate_against_checkpoints`) |
+| B5 | Réécriture en constructeur de tâches (archive × scénario × tranche), `bot_name = score_label` | `bot_evaluation.py` (`evaluate_against_checkpoints`) |
+| B6 | Agrégation vers la forme de retour existante ; ventilations droppées ; docstring périmée de `_eval_worker_task` corrigée (annonce un `shoot_stats` qui n'existe pas au retour) | `bot_evaluation.py` |
+| B7 | Sonde exploiteur câblée sur `bot_eval_n_workers_intermediate` : elle évalue **pendant** l'entraînement, et la parallélisation la ferait sinon concourir à 16 workers contre les 24 de collecte (régime documenté : 47 Go de RSS, éval 42 % plus lente qu'à 4) | `training_callbacks.py` (`ExploiterProbeCallback`), `train.py` |
+
+#### Invariants à verrouiller (pièges vérifiés dans le code)
+
+1. **Injection avant le premier `reset()`.** `_reload_self_play_snapshot_if_needed` est *paresseux*
+   et gardé par `self._self_play_snapshot_frozen and self._frozen_model is not None`
+   (`env_wrappers.py`), l'appel partant du reset. Injecter après le premier reset ferait charger à
+   l'env un `MaskablePPO` **nu, sans normalisation** — la violation de spec R0b que documente déjà
+   le commentaire de `evaluate_against_checkpoints`. Ça ne lève pas et ça ne crashe pas : ça rend
+   un score faux. Invariant testé, pas simple convention d'écriture.
+2. **Murs de référence désactivés sur le chemin checkpoint.** Le constructeur de tâches bots
+   matérialise des murs sur le holdout via `_materialize_eval_scenario_refs`, indexés par
+   `(scenario_index + len(bot_name)) % len(eval_wall_refs)`. `evaluate_against_checkpoints` ne l'a
+   jamais fait. Router les tâches checkpoint par ce chemin changerait la valeur des scores du gate
+   **et** ferait dépendre le terrain de la longueur de l'étiquette d'étape (« P0 » vs « P10 »).
+   Dérive métier déguisée en refactor de perf, invisible dans les chiffres : à neutraliser
+   explicitement et à verrouiller par un test.
+3. **`scenario_index` reste l'index global** dans `scenario_list` ; la tranche ne le touche pas,
+   sans quoi les graines de deux tranches d'un même scénario collisionnent.
+4. **`RandomBot()` conservé** pour une tâche checkpoint : il n'est jamais consulté (ratio
+   self-play = 1.0) mais reste obligatoire — `BotControlledEnv.__init__` lève
+   `requires either 'bot' or 'bots'` sur `bot=None`. C'est déjà ce que faisait la boucle
+   historique. (Le plan initial annonçait « ne rien construire » : faux, vérifié au code.)
+5. **`episode_start_index = ep_offset` sur chaque tranche — TROUVÉ PAR LA MESURE, pas par la
+   lecture.** `BotControlledEnv._episode_index` est local au wrapper et sert de matériau de
+   graine à trois tirages : le siège quand `agent_seat_mode='random'` (le cas de `x1_long`), le
+   self-play, et le RNG du bot, tous bâtis sur `f"{global_seed}:{env_rank}:{episode_index}"`.
+   Une tranche construite sans lui repart à 0 et rejoue le siège de l'épisode 0 — alors que ses
+   graines d'épisode, elles, sont correctes. **La divergence est donc invisible côté graines**, et
+   aucun des tests unitaires ne la voyait : ils mockent tous le worker.
+   Mesure du défaut (2026-08-26, vrai chemin, `model_P1` contre archive `P0`, 8 épisodes
+   holdout) : **3 victoires sur 8 en parallèle contre 1 sur 8 en série**. Après câblage de
+   `episode_start_index` : 1 sur 8 des deux côtés. Verrouillé par deux tests + mutation rouge.
+
+**Leçon de méthode** : le seul contrôle qui a attrapé ce défaut est le smoke sur le vrai chemin de
+production. La parité d'un découpage ne se démontre pas en raisonnant sur les graines d'épisode —
+il faut exécuter les deux côtés et comparer les issues.
+
+#### Changement de sémantique assumé
+
+Un épisode atteignant le plafond de steps sans finir est aujourd'hui compté dans `total` mais dans
+aucun seau, et ressort en `_timeouts`. Il devient un **nul + une entrée `eval_loop_cap`** au journal
+de troncatures — le comportement V11 §0.61 qui manquait à ce chemin. **Le win-rate ne bouge pas**
+(`total` et `wins` identiques), seule la ventilation D/T change ; le compteur `_timeouts` est
+conservé en le dérivant des troncatures `eval_loop_cap` pour que l'affichage R0b reste juste.
+
+#### Tests (rouge/vert)
+
+1. Partition des graines : séquence `_episode_seed` sur `[0..300)` identique découpée en tranches —
+   unitaire pur, sans env.
+2. Parallèle ≡ séquentiel : mêmes `wins/losses/draws` par label à graines fixes, **comparaison
+   tranche par tranche des graines** et pas seulement des agrégats (un total juste peut l'être par
+   compensation).
+3. Injection : après construction et premier reset, `env._frozen_model` est l'instance du cache
+   worker, jamais une instance rechargée (invariant 1).
+4. Murs : une tâche checkpoint consomme le fichier de scénario brut (invariant 2).
+5. `episode_start_index` : la tranche le reçoit égal à `ep_offset` (invariant 5).
+6. Archive incompatible → skip journalisé §12.15, pas de crash de tâche ; une `RuntimeError`
+   autre que « Missing key » remonte.
+7. Épisode plafonné → nul + entrée `eval_loop_cap`, ratio inchangé.
+8. Épisodes non joués (timeout de tâche) → lève, jamais un win-rate sur dénominateur tronqué.
+9. Non-régression du chemin bot : `ep_offset` absent ⇒ démarrage à 0.
+10. Sonde exploiteur : passe `bot_eval_n_workers_intermediate`, pas les 16 de l'éval finale.
+
+**Smoke de production obligatoire** : les tests ci-dessus mockent le worker et ne peuvent pas voir
+une divergence d'état d'environnement. La parité parallèle/série se mesure sur le vrai chemin
+(vrai modèle, vrais scénarios holdout, issues comparées), pas seulement sur les graines.
+
+Les deux tests existants de `tests/unit/ai/test_checkpoint_evaluation.py` patchent l'intérieur de la
+fonction et sont réancrés (périmètre T2). `tests/unit/ai/test_exploiter_stage.py` patche la fonction
+entière, donc insensible.
+
+#### Pourquoi 4.2 n'est pas gratuite (correction du 2026-08-26)
+
+Estimation initiale : « pool persistant ≈ gratuit si le pool est injecté plutôt que créé dans la
+fonction ». **Faux.** `_eval_worker_init` charge le **modèle principal** dans le worker, et ce
+modèle change entre deux évals d'un même run. Un pool persistant servirait donc un modèle périmé —
+un faux vert silencieux, la classe de défaut que T1 interdit.
+
+4.2 exige une étape de conception propre : sortir le chargement du modèle de l'initializer et le
+faire par tâche sous jeton de version (mtime ou hash du zip), le worker ne rechargeant que si le
+jeton a changé. Faisable, dans l'esprit de la 4.2, mais ce n'est pas de la plomberie. **4.1 se livre
+et se mesure seule d'abord.**
+
+#### Calibrage des tranches (à mesurer en 4.3, pas à figer)
+
+Chaque tâche paie une construction de `W40KEngine` et un reset complet (107,6 ms mesurés au §1)
+avant d'amortir sur ses épisodes. À 300 épisodes découpés en 16 tranches, l'amortissement ne porte
+que sur 19 épisodes par tâche. Le nombre de tranches est un paramètre de mesure, pas une constante
+égale à `n_workers`. Mesure de clôture : durée du gate avant/après, **≥ 3 répétitions, lecture sur
+la médiane**, machine au repos (règle §1 « Pièges de mesure », établie par la Phase 1).
 
 ### Phase 5 — Options qui touchent au métier — ⛔ chacune = décision utilisateur explicite
 
@@ -309,3 +446,5 @@ Verrou : mêmes win-rates qu'en séquentiel à seeds fixes.
 | 2026-08-26 | **Item 1.7 — buffers numpy réutilisés** (`_obs_scratch`, `_unit_ent_cont`/`_unit_ent_bin`), `bench_env_step.py` 600 steps, machine au repos, 3 répétitions | wall total · médiane · P99 | **91,5 / 75,1 / 66,7 s · 30,0 / 33,3 / 28,3 ms · 1714 / 1355 / 1262 ms** — médiane dans la plage post-Phase 1 (24–31 ms) ; P99 dans la dispersion constatée (770–1948 ms). Gain isolable sur la médiane indistinguable du bruit (allocation ~27 × np.zeros ≪ coût des tours bots) ; la valeur est la suppression de l'allocation et la pression GC sur les runs longs. Parité bit-à-bit verte (5 tests, 56 s). |
 | 2026-08-26 | **Mesure 2.4 — Phase 2 (non-régression env)**, `bench_env_step.py` 600 steps, machine au repos, 3 répétitions | wall total · médiane · P95 · P99 | **77,2 / 75,8 / 72,5 s · 31,2 / 30,3 / 29,2 ms · 703 / 688 / 676 ms · 1551 / 1455 / 1455 ms** — médiane dans la plage Phase 1 (24–31 ms), aucune régression côté env. |
 | 2026-08-26 | **Mesure 2.4 — Phase 2 (gain learner)**, run réel `run_20260826-171446`, `x1 --new`, steps 33k–65k, pre-rampe self-play | `time/fps` (moyenne cumulée SB3) | **226 / 232 / 233 / 226 / 226 fps** sur 5 updates — **baseline pre-Phase 2 : 200 fps → +13–16 %**. Cohérent avec Phase 2 qui améliore l'update (~15 % du budget) d'un facteur ×2 : gain global attendu ≈ +15 %. `train/time_update` absent de SB3 par défaut ; seul `time/fps` disponible. |
+| 2026-08-26 | **Phase 4 / B — parité parallèle vs série, vrai chemin** : `model_ArmageddonAgent_P1` contre archive `P0`, 8 épisodes sur les 4 scénarios holdout, machine au repos | W/L/D et win-rate | **AVANT correction : parallèle 3W/5L (0,375) vs série 1W/7L (0,125)** — divergence causée par `_episode_index` reparti à 0 sur chaque tranche (siège `agent_seat_mode='random'`, self-play, RNG bot). **APRÈS câblage de `episode_start_index=ep_offset` : 1W/7L (0,125) des DEUX côtés.** Aucun test unitaire ne voyait ce défaut — ils mockent tous le worker. |
+| 2026-08-26 | **Phase 4 / B — coût au très petit budget** (même run que ci-dessus, 8 épisodes seulement) | wall parallèle · wall série | **322 s · 208 s — le parallèle est PLUS LENT à cette taille**, et c'est attendu : 8 épisodes sur 8 tâches font 1 épisode par tâche, donc le coût fixe (init du pool ~46 s, construction de `W40KEngine`, reset complet, chargement de l'archive par worker) n'est amorti par rien. Ce chiffre ne dit RIEN du gate réel (300 épisodes) ; il confirme en revanche que **le nombre de tranches doit être calibré en 4.3**, pas figé à `n_workers`. |
