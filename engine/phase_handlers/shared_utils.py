@@ -2133,6 +2133,12 @@ def _get_players_present_from_units_cache(game_state: Dict[str, Any]) -> Set[int
     return players_present
 
 
+def _build_enemy_adjacent_hexes_all_players(game_state: Dict[str, Any]) -> None:
+    """Call build_enemy_adjacent_hexes for every player present in units_cache."""
+    for player in _get_players_present_from_units_cache(game_state):
+        build_enemy_adjacent_hexes(game_state, player)
+
+
 def _build_enemy_adjacent_structures_from_units_cache(
     game_state: Dict[str, Any],
     players_present: Set[int],
@@ -4020,8 +4026,7 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     # §24.08 DEADLY DEMISE : lire la valeur de la capacite AVANT suppression (units_cache peut
     # disparaitre si c est la derniere figurine). La cle est posee par le chantier 06 sur chaque
     # unite concernee ; absente sur les unites ordinaires = regle inactive, aucun jet.
-    _unit_cache_entry = game_state["units_cache"].get(squad_id)
-    _deadly_demise_val = _unit_cache_entry.get("deadly_demise") if _unit_cache_entry is not None else None
+    _deadly_demise_val = (game_state["units_cache"].get(squad_id) or {}).get("deadly_demise")
 
     # 1. Retire du models_cache.
     del game_state["models_cache"][model_id]
