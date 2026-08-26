@@ -1661,6 +1661,7 @@ class W40KEngine(gym.Env):
             "_squad_move_pool_cache": {},
             "_charge_plan_cache": {},
             "_edge_distance_cache": {},
+            "_shoot_pass_cache": None,
             "last_move_event_id": 0,
             "last_move_cause": "normal",
             "reactive_mode": "micro",
