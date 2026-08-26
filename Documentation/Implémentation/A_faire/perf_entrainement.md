@@ -271,8 +271,62 @@ Verrou : mêmes win-rates qu'en séquentiel à seeds fixes.
 | ~~`batch_size` 1020 → 1023~~ | ⛔ **SANS OBJET** | Le 9ᵉ minibatch de 24 n'existe plus : `n_steps` est passé de 8192 à 8160 le 2026-08-26 (commit `7c466b15`), APRÈS l'audit qui a produit cette table. À 8160 / 24 envs = 340 steps/env = **8160 transitions**, et 8160 / 1020 = **8 minibatches pile, zéro résidu**. Passer à 1023 CRÉERAIT le résidu (7 pleins + 999). Ligne conservée barrée pour ne pas ré-ouvrir la proposition. |
 | `n_envs` 24 → 32/48 | amortit la latence par step | ⛔ **REFUSÉ (2026-08-26)** : la RAM fait exploser la VM pendant le self-play (~0,64 Go/worker + copie CPU de la policy par worker). Non ré-ouvrable sans plus de RAM. |
 | Bots poids 0,0 exclus de l'éval intermédiaire | −40 % du budget d'éval | ✅ **APPLIQUÉ (2026-08-26)** : `tactical`, `reference_balanced`, `reference_denial`, `reference_reactive` supprimés de `bot_eval_weights` et `bot_eval_randomness` sur x1/x1_long (les 4) et x1_debug/x5_* (`tactical` seul, les 3 `reference_*` n'y figuraient pas). Les 6 bots restants gardent 1/6 chacun, somme = 1.0 (vérifiée sur les 6 profils). Perte assumée : la mesure continue holdout/benchmark de ces 4 bots. |
-| Device/format de l'adversaire self-play (GPU partagé, quantization) | steps self-play plus rapides | le jeu de l'adversaire gelé peut dévier numériquement |
-| Sonde exploiteur E1-E3 parallélisée | jusqu'à ~10 h/run E* | protocole exploiteur gelé (`validate_exploiter_protocol`) à réviser |
+| Device/format de l'adversaire self-play (GPU partagé, quantization) | steps self-play plus rapides | le jeu de l'adversaire gelé peut dévier numériquement — ⚠️ **RISQUE DE BIAIS SILENCIEUX, protocole obligatoire en §4.5 ci-dessous** |
+| Sonde exploiteur E1-E3 parallélisée | ⚠️ chiffre à refaire | La formulation « E1-E3 parallélisées » est FAUSSE : chaque E<sub>i</sub> attaque le champion produit par une étape différente, elles sont séquentiellement dépendantes (`ai/curriculum.py`, `STAGE_ROLES` / `is_exploiter_stage`). Ce qui est parallélisable est l'**intérieur** de chaque sonde, comme l'item 4.1. Le « ~10 h/run E* » n'est adossé à aucune mesure et est à re-dériver. |
+
+### 4.5 — Adversaire self-play : protocole obligatoire avant toute quantization
+
+**Pourquoi cette section existe.** Le danger de cette option n'est pas le crash — il n'y en aura
+pas. C'est qu'un adversaire dégradé **ne se voit dans aucune métrique d'entraînement** : le
+win-rate contre les bots ne bouge pas (les bots ne sont pas quantisés), la loss ne bouge pas,
+`approx_kl` ne bouge pas. L'agent s'entraîne simplement contre un adversaire plus faible qu'annoncé
+et devient bon contre un sparring-partner qui n'existe pas. Le ratage ne se constate qu'à la
+mesure finale, après des dizaines d'heures. **Aucun test de non-régression classique ne l'attrape.**
+
+**Arbitrage des deux formats.** Le GPU partagé est le mauvais choix ici : 24 workers qui envoient
+chacun une obs de 16 735 scalaires au GPU du learner rétablissent exactement la contention et les
+allers-retours IPC que la Phase 2 vient de supprimer (item 2.3, un seul RPC par step). La
+quantization reste locale au worker et ne touche aucun canal partagé. Ancres : le forward gelé est
+`ai/env_wrappers.py:1078` (`self._frozen_model.predict`), le modèle est enveloppé par
+`_NormalizedFrozenModel` (`ai/env_wrappers.py:1020`), et `self_play_snapshot_device` n'accepte
+aujourd'hui que `"cpu"` ou `"auto"` (`ai/env_wrappers.py:487`).
+
+**Étape 0 — MESURER LE GAIN AVANT D'IMPLÉMENTER. Bloquante.**
+Ne prendre aucun risque métier avant de savoir ce qu'il achète. Chronométrer, sur la machine au
+repos, le coût du seul `predict` gelé : N appels sur des obs réelles capturées, en float32 puis en
+int8/fp16, ≥ 3 répétitions, lecture sur la médiane et le P99 (le bench n'est pas déterministe,
+cf. §1 Pièges de mesure). Puis rapporter ce coût à la part self-play du step. **Si le gain projeté
+sur le fps global est < 10 %, le dossier se ferme ici** et la ligne passe à ⛔ REFUSÉ : le risque
+de biais silencieux ne se prend pas pour du bruit de mesure.
+
+**Étape 1 — Divergence d'action, à obs identique.** Capturer un corpus figé de ≥ 2 000 observations
+adverses réelles, couvrant **toutes les phases** (déploiement, move, tir, charge, fight, command)
+et les points de décision joueur (`decision_ctx_bin` non nul). Passer chacune dans le modèle
+float32 et dans le modèle quantisé, en `deterministic=True`. Mesurer le **taux d'actions
+identiques**, ventilé PAR PHASE — une moyenne globale masquerait une phase entièrement cassée.
+Verrou : un plancher de divergence chiffré et écrit dans le test, pas « ça a l'air proche ».
+
+**Étape 2 — Divergence de partie entière.** Le taux par action ne suffit pas : une divergence rare
+mais placée à un point de décision critique change toute la partie. Jouer N parties complètes à
+graine fixe, adversaire float32 contre adversaire quantisé, mêmes scénarios et mêmes rosters, et
+comparer la **distribution des issues** (win-rate, VP, longueur de partie, unités survivantes).
+Le test doit inclure les rosters des deux factions de `ROSTER_GAP_FACTIONS` (`ai/bot_evaluation.py`)
+— une quantization peut dégrader une faction et pas l'autre.
+
+**Étape 3 — Run de contrôle A/B, non négociable.** Deux runs `x1` complets `--new`, graine
+identique, seul le format de l'adversaire self-play changeant, tous deux poussés **au-delà de
+l'épisode 5000** — avant, la rampe self-play est à ~0 et le test ne mesure rien (cf. §1 Pièges de
+mesure). Comparer les win-rates finaux sur le HOLDOUT, et pas seulement l'agrégat : le
+`worst_bot` et la ventilation par faction. Un écart dans le bruit **ne prouve pas l'innocuité**
+sur un run long — le dire explicitement dans le journal §6 plutôt que de conclure « équivalent ».
+
+**Étape 4 — Instrument permanent.** Si l'option est retenue, le format effectivement chargé doit
+être **journalisé à chaque run** (step.log + TensorBoard) et le taux de divergence de l'étape 1
+re-mesuré à chaque rafraîchissement de snapshot. Une dégradation qui n'a pas d'alarme finira par
+passer inaperçue : c'est le motif « code testé mais jamais appelé » déjà rencontré sur ce dépôt.
+
+**Critère de clôture** : les 4 étapes vertes ET le gain de l'étape 0 confirmé sur un run réel.
+Une seule étape non faite = l'option reste ⛔.
 
 ---
 

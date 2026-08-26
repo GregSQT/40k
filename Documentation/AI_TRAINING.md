@@ -2141,7 +2141,25 @@ git worktree remove /tmp/40k-bench
 
 > **Classement établi sur le wall-clock complet, démarrage du process inclus.** Les bancs mesurent désormais la boucle seule (`moy`), parce qu'un entraînement de production de 150-200k épisodes amortit le coût fixe — imports torch, fork des N workers, chargement du modèle — jusqu'à le rendre négligeable, alors qu'il peut dominer un run de banc de 150 épisodes. Ce coût **croît avec `n_envs`** : le compter pénalise mécaniquement les grandes valeurs. Le verdict « 48 optimal, 64 plus lent de 4,2 % » peut donc être un artefact de fork, et l'optimum réel se situer au-delà de 48. **À refaire avec les bancs actuels avant de s'appuyer dessus.** Les chiffres ci-dessous restent valides comme mesures de *wall complet*, pas comme classement de configuration.
 
-**Conclusion applicable : `n_envs: 48` avec `batch_size: 1020`** (justification des deux plus bas).
+~~**Conclusion applicable : `n_envs: 48` avec `batch_size: 1020`**~~ (justification des deux plus bas).
+
+> ⛔ **CETTE CONCLUSION N'EST PLUS APPLICABLE (2026-08-26).** Deux choses ont changé depuis :
+> - **`n_envs: 48` est REFUSÉ.** La configuration courante est `n_envs: 24` sur les 6 profils. La
+>   RAM fait exploser la VM pendant le self-play — chaque worker porte en plus une copie CPU de la
+>   policy et joue une obs complète par décision adverse, coût que ce banc n'a jamais mesuré
+>   (il tournait évaluation bot désactivée, donc sans self-play). Les 16,3 Go libres relevés à 48
+>   ci-dessous sont un chiffre HORS self-play : il ne dit rien du régime réel.
+> - **`n_steps` vaut 8160, plus 8192** (commit `7c466b15`, 2026-08-26). Toutes les arithmétiques
+>   ci-dessous partent de 8192 et sont à relire avec 8160.
+>
+> **`batch_size: 1020` reste juste**, mais pour une raison différente de celle écrite plus bas :
+> à `n_steps: 8160` / `n_envs: 24` le rollout vaut `(8160 // 24) × 24` = **8160**, soit
+> **8 × 1020 exactement, sans mini-lot tronqué**. Ne pas le passer à 1023 — ce serait *créer* le
+> résidu (7 pleins + 999). Voir la table Phase 5 de
+> `Documentation/Implémentation/A_faire/perf_entrainement.md`.
+>
+> Les mesures de débit ci-dessous restent valides comme mesures ; c'est leur **conclusion de
+> configuration** qui est caduque.
 
 Deux campagnes, machine 8 cœurs / 40 Go, `ArmageddonAgent` phase `x1`, évaluation bot désactivée sur ses deux chemins. Reproduction :
 
@@ -2168,9 +2186,10 @@ Campagne complémentaire `48` contre `64` (3 tours, 192 épisodes, 2026-08-01 ma
 - **`48` est ~43 % plus rapide que `6`**, et les étendues de `48`, `16` et `8` sont disjointes : ces rangs sont tranchés. `8` contre `6` ne l'est pas (étendue 0,997–1,185, elle enjambe l'égalité), bien que 6 tours sur 7 donnent l'avantage à `8`.
 - **Plus d'environnements que de cœurs reste gagnant** : 48 processus sur 8 cœurs battent 6 processus de 43 %. Le goulot n'est donc pas le CPU de collecte.
 - **Le plateau est à 48** : +10 % (6→8), +13 % (8→16), +16 % (16→48), puis **−4,2 % (48→64)**. Mémoire libre au creux : 30,5 Go à `n_envs=6`, 16,3 Go à 48, 10,0 Go à 64 — soit ~6 Go par palier sur 40 Go installés. `96` passerait sous zéro et n'a pas été tenté.
-- **À `n_envs=48`, ajuster `batch_size` à 1020.** Le rollout réel vaut `(8192 // n_envs) × n_envs` = **8160** à 48, que `batch_size: 1024` ne divise pas : chaque mise à jour finit sur un mini-lot tronqué de 992 (SB3 le signale). 8160 = 8 × 1020. `batch_size` n'est PAS ajusté automatiquement, contrairement à `n_steps` ([train.py:2955](../ai/train.py#L2955) le recopie tel quel). Rien d'autre à toucher : `learning_rate` reste valide puisque le total par mise à jour est maintenu constant, et l'horizon effectif de GAE (~17 pas avec `gamma=0.99`, `gae_lambda=0.95`) reste très en dessous des 170 pas par env.
+- **À `n_envs=48`, ajuster `batch_size` à 1020.** Le rollout réel vaut `(8192 // n_envs) × n_envs` = **8160** à 48, que `batch_size: 1024` ne divise pas : chaque mise à jour finit sur un mini-lot tronqué de 992 (SB3 le signale). 8160 = 8 × 1020. `batch_size` n'est PAS ajusté automatiquement, contrairement à `n_steps` ([train.py:231](../ai/train.py#L231) le recopie tel quel avec les autres `model_params`). Rien d'autre à toucher : `learning_rate` reste valide puisque le total par mise à jour est maintenu constant, et l'horizon effectif de GAE (~17 pas avec `gamma=0.99`, `gae_lambda=0.95`) reste très en dessous des 170 pas par env.
+  <br>⚠️ **À `n_envs=24` / `n_steps=8160` (configuration courante), le rollout vaut aussi 8160** — `8160 // 24 = 340`, `340 × 24 = 8160` — donc `batch_size: 1020` y donne également 8 mini-lots pleins. La valeur est bonne aux deux réglages, par des chemins différents. Ancre `train.py:2955` corrigée le 2026-08-26 : elle ne pointait plus sur la recopie de `batch_size`.
 - **Ce banc mesure le débit, pas la qualité d'apprentissage.** Le budget de collecte est fixe (8192 pas par mise à jour) : à 48 envs chacun fournit ~2 parties par mise à jour, contre ~18 à 6 envs. La composition du lot n'est pas la même, et cet effet-là n'est pas mesuré ici.
-- Écart résiduel non corrigé : `effective_n_steps = base_n_steps // n_envs` est une division entière ([train.py:2862](../ai/train.py#L2862)) alors que le message annonce `base_n_steps`. Total réel par mise à jour : 8190 à `n_envs=6`, 8192 à 8 et 16, **8160** à 48 — écart max 0,4 %, sans effet sur le classement.
+- Écart résiduel non corrigé : `effective_n_steps = base_n_steps // n_envs` est une division entière ([train.py:883](../ai/train.py#L883), dans `apply_rollout_n_steps`) alors que le message annonce `base_n_steps`. Total réel par mise à jour **à `base_n_steps=8192`** : 8190 à `n_envs=6`, 8192 à 8 et 16, **8160** à 48 — écart max 0,4 %, sans effet sur le classement. À `base_n_steps=8160` (valeur courante) la division tombe juste à 24 comme à 48 : 8160 dans les deux cas. Ancre `train.py:2862` corrigée le 2026-08-26.
 
 ---
 
