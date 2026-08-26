@@ -5662,6 +5662,13 @@ def main():
                             "(stage_champion_label retourne None). Verifier curriculum.json."
                         )
                     _target_path = stage_model_path(_canonical, _champion)
+                    # La sonde evalue PENDANT l'entrainement : elle prend le meme nombre de
+                    # workers que les evaluations intermediaires (`BotEvaluationCallback`), pas
+                    # les 16 de l'evaluation finale, qui concourraient avec les workers de
+                    # collecte. `setup_callbacks` valide deja cette cle ; ici on la lit seulement.
+                    _probe_n_workers = require_key(
+                        training_config, "callback_params"
+                    ).get("bot_eval_n_workers_intermediate")
                     _exploiter_probe = ExploiterProbeCallback(
                         target_archive_path=_target_path,
                         training_config_name=args.training_config,
@@ -5672,6 +5679,7 @@ def main():
                         probe_confirm_n=int(require_key(_exploit_cfg, "probe_confirm_n")),
                         win_rate_target=float(require_key(_exploit_cfg, "win_rate_target")),
                         budget_cap=int(require_key(_exploit_cfg, "budget_cap")),
+                        intermediate_n_workers=_probe_n_workers,
                     )
                     _exploiter_extra_callbacks = [_exploiter_probe]
                     _exploiter_async_eval_enabled = False

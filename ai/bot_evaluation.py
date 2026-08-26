@@ -48,6 +48,11 @@ __all__ = [
 # Worker globals (scope processus)
 _worker_model = None
 _worker_obs_normalizer = None
+#: Adversaires checkpoint deja charges DANS CE WORKER, par chemin d'archive (Phase 4 / decision B).
+#: Sans ce cache, un worker qui traite plusieurs tranches d'un meme checkpoint rechargerait le zip
+#: a chaque tranche — le decoupage en tranches, qui existe pour saturer les workers, se paierait
+#: alors en `MaskablePPO.load` repetes.
+_worker_ckpt_cache: Dict[str, Any] = {}
 _eval_ref_temp_dir: Optional[str] = None
 
 
@@ -624,25 +629,58 @@ def _create_eval_env(
     debug_mode: bool,
     agent_seat_mode: str,
     agent_seat_seed: Optional[int],
+    checkpoint_zip: Optional[str] = None,
+    checkpoint_label: Optional[str] = None,
+    checkpoint_device: str = "cpu",
+    checkpoint_scenario_episodes: Optional[int] = None,
+    episode_start_index: int = 0,
 ) -> "BotControlledEnv":
     """
     Crée un env d'éval. Utilisé en mode sérial et dans les workers.
 
     Tout ce qui est passé doit être sérialisable (picklable) pour usage en workers.
+
+    ADVERSAIRE POLYMORPHE (Phase 4 / decision B) : sans `checkpoint_zip`, l'adversaire est le bot
+    designe par `bot_type` — chemin historique, inchange bit-a-bit. Avec `checkpoint_zip`,
+    l'adversaire est l'archive checkpoint gelee, jouee par le chemin self-play a ratio 1.0.
+    Les deux variantes partagent ainsi UNE seule boucle d'episode (`_eval_worker_task`) au lieu
+    des deux qui coexistaient, dont celle des checkpoints etait la version degradee (sans journal
+    de troncatures ni ventilations).
+
+    L'APPELANT DOIT INJECTER `_frozen_model` avant le premier `reset()` quand `checkpoint_zip`
+    est fourni — voir `_eval_worker_task`. Cette fonction ne le fait pas elle-meme : le modele
+    normalise vit dans le cache du worker, dont elle n'a pas connaissance.
+
+    `episode_start_index` EST OBLIGATOIRE DES QU'ON DECOUPE un scenario en tranches. Le compteur
+    `BotControlledEnv._episode_index` est LOCAL au wrapper et sert de materiau de graine a trois
+    tirages : le siege joue quand `agent_seat_mode='random'`, le self-play, et le RNG du bot
+    (`env_wrappers.py`, `f"{global_seed}:{env_rank}:{episode_index}"`). Une tranche construite
+    sans lui repart a 0 et rejoue le siege de l'episode 0 — mesure du 2026-08-26 sur le vrai
+    chemin : 3 victoires sur 8 en parallele contre 1 sur 8 en serie, memes graines d'episode.
+    Passer `ep_offset` ici rend le decoupage transparent.
     """
     from ai.training_utils import setup_imports
     from ai.env_wrappers import BotControlledEnv
     from sb3_contrib.common.wrappers import ActionMasker
     from ai.unit_registry import UnitRegistry
-    from ai.bot_registry import build_bot
 
     unit_registry = UnitRegistry()
     W40KEngine, _ = setup_imports()
 
-    # SOURCE UNIQUE de la table cle -> classe : `ai/bot_registry.py`. Elle vivait ici en copie,
-    # avec une jumelle dans `scripts/bot_ranking.py` — brancher un bot dans l'une laissait
-    # l'autre lever « Unknown bot type » (mesure du 2026-08-11, sur `racer`).
-    bot = build_bot(bot_type, randomness_config)
+    if checkpoint_zip is None:
+        from ai.bot_registry import build_bot
+
+        # SOURCE UNIQUE de la table cle -> classe : `ai/bot_registry.py`. Elle vivait ici en copie,
+        # avec une jumelle dans `scripts/bot_ranking.py` — brancher un bot dans l'une laissait
+        # l'autre lever « Unknown bot type » (mesure du 2026-08-11, sur `racer`).
+        bot = build_bot(bot_type, randomness_config)
+    else:
+        from ai.evaluation_bots import RandomBot
+
+        # Le bot n'est JAMAIS consulte (ratio self-play = 1.0), mais il reste OBLIGATOIRE :
+        # `BotControlledEnv.__init__` leve `requires either 'bot' or 'bots'` sur `bot=None`.
+        # C'est deja ce que faisait la boucle checkpoint historique — le garder preserve la parite.
+        bot = RandomBot()
 
     def mask_fn(env):
         return env.get_action_mask()
@@ -661,6 +699,20 @@ def _create_eval_env(
         training_n_envs=1,
     )
     masked_env = ActionMasker(base_env, mask_fn)
+    if checkpoint_zip is None:
+        return BotControlledEnv(
+            masked_env,
+            bot,
+            unit_registry,
+            agent_seat_mode=agent_seat_mode,
+            global_seed=agent_seat_seed,
+            env_rank=0,
+        )
+    if checkpoint_scenario_episodes is None:
+        raise ValueError(
+            "checkpoint_scenario_episodes est requis quand checkpoint_zip est fourni "
+            "(denominateur de rampe self-play)"
+        )
     return BotControlledEnv(
         masked_env,
         bot,
@@ -668,6 +720,24 @@ def _create_eval_env(
         agent_seat_mode=agent_seat_mode,
         global_seed=agent_seat_seed,
         env_rank=0,
+        # INDEX D'EPISODE DE DEPART DE LA TRANCHE : voir docstring. Sans lui, chaque tranche
+        # repart a 0 et rejoue le siege, le self-play et le RNG bot de l'episode 0.
+        episode_start_index=int(episode_start_index),
+        self_play_opponent_enabled=True,
+        self_play_ratio_start=1.0,
+        self_play_ratio_end=1.0,
+        # TOTAL DU SCENARIO, jamais la taille de la tranche : ce denominateur doit etre
+        # invariant au decoupage, sans quoi deux tranches du meme scenario construiraient des
+        # envs differents et la parite avec le sequentiel tomberait. La rampe est de toute facon
+        # constante ici (start == end == 1.0), mais l'invariance est ce qui rend le decoupage sur.
+        self_play_total_episodes=int(checkpoint_scenario_episodes),
+        self_play_warmup_episodes=0,
+        self_play_n_envs=1,
+        self_play_snapshot_path=checkpoint_zip,
+        self_play_snapshot_label=checkpoint_label,
+        self_play_snapshot_frozen=True,
+        self_play_snapshot_device=checkpoint_device,
+        self_play_deterministic=True,
     )
 
 
@@ -822,6 +892,38 @@ def _eval_worker_init(
         _warmup_eval_inference(_worker_model)
 
 
+def _worker_checkpoint_opponent(
+    zip_path: str,
+    vec_normalize_enabled: bool,
+    vec_eval_enabled: bool,
+    device: str,
+) -> Tuple[Any, float]:
+    """Adversaire checkpoint normalise de CE worker, memoise par chemin d'archive.
+
+    Rend `(modele_normalise, mtime)`. Le mtime accompagne le modele parce que l'appelant doit
+    poser les DEUX sur l'env : `_frozen_model` seul laisserait `_frozen_model_mtime` a None, et
+    `_reload_self_play_snapshot_if_needed` reprendrait la main au premier reset.
+
+    L'archive est normalisee avec SES PROPRES stats (spec R0b) — jamais celles du modele courant.
+    """
+    global _worker_ckpt_cache
+    cached = _worker_ckpt_cache.get(zip_path)
+    if cached is not None:
+        return cached
+    from sb3_contrib import MaskablePPO
+
+    ckpt_model = MaskablePPO.load(zip_path, device=device)
+    ckpt_normalizer = _build_eval_obs_normalizer_for_worker(
+        ckpt_model, zip_path, vec_normalize_enabled, vec_eval_enabled
+    )
+    entry = (
+        _NormalizedFrozenModel(ckpt_model, ckpt_normalizer),
+        float(os.path.getmtime(zip_path)),
+    )
+    _worker_ckpt_cache[zip_path] = entry
+    return entry
+
+
 def _eval_worker_task(
     task: Dict[str, Any],
     progress_callback: Optional[Callable[[], None]] = None,
@@ -832,11 +934,14 @@ def _eval_worker_task(
 
     Args:
         task: dict avec bot_name, bot_type, randomness_config, scenario_file, n_episodes,
-              base_seed, scenario_index, config_params
+              base_seed, scenario_index, config_params. Optionnels : `ep_offset` (index du
+              premier episode de la TRANCHE, defaut 0) et `checkpoint_zip`/`checkpoint_label`
+              (adversaire checkpoint gele au lieu d'un bot, Phase 4 / decision B).
 
     Returns:
-        {"wins": int, "losses": int, "draws": int, "shoot_stats": dict, "bot_name": str, "scenario_name": str,
-         "timeout": bool?, "error": str?}
+        {"wins": int, "losses": int, "draws": int, "truncations": list, "failed_episodes": int,
+         "bot_name": str, "scenario_name": str, "faction_stats": dict, "seat_stats": dict,
+         "roster_stats": dict, "behavior_stats": dict, "timeout": bool?, "error": str?}
     """
     from sb3_contrib.common.maskable.utils import get_action_masks
     global _worker_model, _worker_obs_normalizer
@@ -846,16 +951,41 @@ def _eval_worker_task(
     import random
 
     config_params = task["config_params"]
+    checkpoint_zip = task.get("checkpoint_zip")
     env = _create_eval_env(
         bot_name=task["bot_name"],
         bot_type=task["bot_type"],
         randomness_config=task["randomness_config"],
         scenario_file=task["scenario_file"],
+        checkpoint_zip=checkpoint_zip,
+        checkpoint_label=task.get("checkpoint_label"),
+        checkpoint_device=task.get("checkpoint_device", "cpu"),
+        checkpoint_scenario_episodes=task.get("checkpoint_scenario_episodes"),
+        # Le compteur local du wrapper doit demarrer la ou la tranche commence : c'est ce qui
+        # rend le decoupage invisible au siege, au self-play et au RNG du bot.
+        episode_start_index=int(task.get("ep_offset", 0)),
         **{k: config_params[k] for k in [
             "training_config_name", "rewards_config_name", "controlled_agent",
             "base_agent_key", "debug_mode", "agent_seat_mode", "agent_seat_seed"
         ] if k in config_params},
     )
+
+    if checkpoint_zip is not None:
+        # INVARIANT : l'injection precede le premier `reset()`, et elle pose les DEUX attributs.
+        # `_reload_self_play_snapshot_if_needed` est PARESSEUX (appele au reset) et ne rend la
+        # main que sur `self._self_play_snapshot_frozen and self._frozen_model is not None`.
+        # Injecter apres le premier reset, ou n'injecter que `_frozen_model`, laisserait l'env
+        # charger lui-meme l'archive en `MaskablePPO` NU, sans normalisation : l'adversaire
+        # jouerait alors sur des observations normalisees par les stats du modele courant
+        # (violation de la spec R0b). Ca ne leve pas et ca ne crashe pas — ca rend un score faux.
+        frozen_model, frozen_mtime = _worker_checkpoint_opponent(
+            checkpoint_zip,
+            bool(config_params.get("vec_normalize_enabled", False)),
+            bool(config_params.get("vec_eval_enabled", False)),
+            str(task.get("checkpoint_device", "cpu")),
+        )
+        env._frozen_model = frozen_model
+        env._frozen_model_mtime = frozen_mtime
 
     # step_logger : uniquement en mode sérial (non picklable, ne pas ajouter en mode parallèle)
     if config_params.get("step_logger"):
@@ -908,7 +1038,13 @@ def _eval_worker_task(
             bucket["total"] += 1
             bucket["wins"] += int(won)
 
-    for ep_idx in range(task["n_episodes"]):
+    # TRANCHE : `ep_offset` est l'index du premier episode de cette tache DANS SON SCENARIO, et
+    # `scenario_index` reste l'index GLOBAL du scenario dans `scenario_list`. Les deux ensemble
+    # font que `_episode_seed` — fonction pure de (base_seed, bot_name, scenario_index, ep_idx) —
+    # rend exactement les memes graines que la boucle sequentielle, quel que soit le decoupage.
+    # Defaut 0 : le chemin bot, qui ne decoupe pas, est inchange bit-a-bit.
+    ep_offset = int(task.get("ep_offset", 0))
+    for ep_idx in range(ep_offset, ep_offset + int(task["n_episodes"])):
         ep_seed = _episode_seed(task["base_seed"], task["bot_name"], task["scenario_index"], ep_idx)
         random.seed(ep_seed)
         np.random.seed(ep_seed)
@@ -1947,6 +2083,7 @@ def evaluate_against_checkpoints(
     scenario_pool: str = "holdout",
     scenario_list_override: Optional[List[str]] = None,
     device: str = "cpu",
+    n_workers_override: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Win-rate du modèle courant contre chaque archive checkpoint figée.
 
@@ -1954,23 +2091,34 @@ def evaluate_against_checkpoints(
     L'adversaire checkpoint reçoit ses observations via SON propre _vec_normalize.pkl,
     jamais celui du modèle courant (spec R0b).
 
-    Réutilise BotControlledEnv + le chemin self-play (ratio=1.0) : l'adversaire checkpoint
-    est injecté dans _frozen_model via _NormalizedFrozenModel avant le premier épisode.
+    CONSTRUCTEUR DE TÂCHES (Phase 4 / décision B) : cette fonction ne joue plus d'épisode
+    elle-même. Elle construit des tâches `(archive × scénario × tranche)` et les fait exécuter
+    par `_eval_worker_task`, la MÊME boucle d'épisode que l'évaluation contre les bots. Elle
+    portait auparavant une seconde boucle, dupliquée et dégradée : sans journal de troncatures,
+    sans ventilation faction/roster/siège, et les épisodes plafonnés y tombaient dans un seau
+    `_timeouts` silencieux au lieu du « nul + trace » qu'impose V11 §0.61 partout ailleurs.
 
-    Retourne {} si checkpoint_archives est vide.
+    DÉCOUPAGE EN TRANCHES : une granularité (archive × scénario) ne produirait que 4 tâches sur
+    le gate d'une étape à un seul membre de pool (4 scénarios holdout), soit 4 workers occupés
+    sur 16. Les épisodes d'un scénario sont donc répartis en tranches via `ep_offset`.
+    `_episode_seed` étant une fonction pure de `(base_seed, bot_name, scenario_index, ep_idx)`,
+    toute partition rend exactement les mêmes graines que la boucle séquentielle.
+
+    MURS DE RÉFÉRENCE : volontairement NON matérialisés ici, contrairement au constructeur de
+    tâches des bots (`_materialize_eval_scenario_refs`, indexé par
+    `(scenario_index + len(bot_name)) % len(eval_wall_refs)`). Les appliquer changerait la valeur
+    des scores du gate — donc leur comparabilité avec ceux déjà écrits dans `curriculum.log` — et,
+    `bot_name` valant ici l'étiquette d'étape, ferait dépendre le terrain joué de la LONGUEUR de
+    cette étiquette (« P0 » et « P10 » ne joueraient pas le même mur). Verrouillé par test.
+
+    Retourne {} si `checkpoint_archives` est vide ou si aucune archive n'est compatible.
     """
     if not checkpoint_archives:
         return {}
 
-    import random as _random
     from sb3_contrib import MaskablePPO
     from config_loader import get_config_loader, get_max_turns
-    from ai.training_utils import setup_imports, get_scenario_list_for_phase
-    from ai.env_wrappers import BotControlledEnv
-    from ai.unit_registry import UnitRegistry
-    from ai.evaluation_bots import RandomBot
-    from sb3_contrib.common.wrappers import ActionMasker
-    from sb3_contrib.common.maskable.utils import get_action_masks
+    from ai.training_utils import get_scenario_list_for_phase
 
     config = get_config_loader()
     base_agent_key = _strip_phase_suffix(controlled_agent)
@@ -2002,24 +2150,18 @@ def evaluate_against_checkpoints(
         if not scenario_list:
             return {}
 
-    n_scenarios = len(scenario_list)
-    _base_eps = n_episodes // n_scenarios
-    _extra_eps = n_episodes % n_scenarios
-    max_steps = int(get_max_turns()) * 400
-
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Modèle principal absent : {model_path}")
-    main_model = MaskablePPO.load(model_path, device=device)
-    main_normalizer = _build_eval_obs_normalizer_for_worker(
-        main_model, model_path, vec_normalize_enabled, vec_eval_enabled
-    )
 
-    W40KEngine, _ = setup_imports()
-    results: Dict[str, float] = {}
-
+    # SONDE DE COMPATIBILITÉ, dans le PARENT et avant toute construction de tâche. Le chargement
+    # réel a lieu dans le worker (`_worker_checkpoint_opponent`), or une archive d'architecture
+    # incompatible y lèverait au fond d'un process séparé : le skip documenté §12.15 deviendrait
+    # un crash de tâche opaque, puis un `_score_stage_against_pool` en erreur sur label manquant.
+    # Le coût est un `load` jeté par archive, payé une fois — négligeable devant l'évaluation.
+    compatible_archives: List[Tuple[str, str]] = []
     for zip_path, score_label in checkpoint_archives:
         try:
-            ckpt_model = MaskablePPO.load(zip_path, device=device)
+            MaskablePPO.load(zip_path, device=device)
         except RuntimeError as exc:
             if "Missing key" in str(exc):
                 logging.info(
@@ -2028,100 +2170,183 @@ def evaluate_against_checkpoints(
                 )
                 continue
             raise
-        ckpt_normalizer = _build_eval_obs_normalizer_for_worker(
-            ckpt_model, zip_path, vec_normalize_enabled, vec_eval_enabled
+        compatible_archives.append((zip_path, score_label))
+    if not compatible_archives:
+        return {}
+
+    callback_params = require_key(training_cfg, "callback_params")
+    worker_params = validate_bot_eval_worker_params(callback_params)
+    use_subprocess = worker_params["use_subprocess"]
+    task_timeout_seconds = int(worker_params["task_timeout_seconds"])
+    n_workers = worker_params["n_workers"]
+    if n_workers_override is not None:
+        if (
+            isinstance(n_workers_override, bool)
+            or not isinstance(n_workers_override, int)
+            or n_workers_override <= 0
+        ):
+            raise ValueError(
+                f"n_workers_override must be a positive integer (got {n_workers_override!r})"
+            )
+        n_workers = n_workers_override
+    worker_model_device = str(require_key(callback_params, "bot_eval_worker_device")).strip().lower()
+    if worker_model_device not in {"cpu", "auto"}:
+        raise ValueError(
+            "callback_params.bot_eval_worker_device must be either 'cpu' or 'auto' "
+            f"(got {worker_model_device!r})"
         )
-        normalized_ckpt = _NormalizedFrozenModel(ckpt_model, ckpt_normalizer)
-        ckpt_mtime = float(os.path.getmtime(zip_path))
+    torch_compile_cpu = bool(callback_params.get("bot_eval_torch_compile_cpu", False))
 
-        wins, losses, draws, total = 0, 0, 0, 0
-        for sc_idx, sc_file in enumerate(scenario_list):
-            sc_eps = _base_eps + (1 if sc_idx < _extra_eps else 0)
-            if sc_eps == 0:
+    config_params = {
+        "training_config_name": training_config_name,
+        "rewards_config_name": rewards_config_name,
+        "controlled_agent": controlled_agent,
+        "base_agent_key": base_agent_key,
+        "vec_normalize_enabled": vec_normalize_enabled,
+        # Absente du `config_params` des bots : elle n'y sert pas, le normalizer du modèle courant
+        # étant posé par l'initializer. Ici elle est nécessaire — c'est l'ARCHIVE qui doit être
+        # normalisée avec ses propres stats (spec R0b), dans le worker.
+        "vec_eval_enabled": vec_eval_enabled,
+        # Défaut de `W40KEngine.__init__`, que la boucle historique laissait s'appliquer en
+        # ne passant pas l'argument. Explicite ici parce que `_create_eval_env` l'exige.
+        "debug_mode": False,
+        "agent_seat_mode": agent_seat_mode,
+        "agent_seat_seed": agent_seat_seed,
+    }
+
+    n_scenarios = len(scenario_list)
+    base_eps = n_episodes // n_scenarios
+    extra_eps = n_episodes % n_scenarios
+    max_steps_per_episode = int(get_max_turns()) * 400
+    base_seed = 42
+
+    # Nombre de tranches par scénario : de quoi saturer les workers sans descendre sous un
+    # amortissement raisonnable du coût fixe par tâche (construction de W40KEngine + reset
+    # complet + chargement de l'archive). En série, une seule tranche : le découpage n'aurait
+    # aucun effet et multiplierait les constructions d'env.
+    n_units = max(1, len(compatible_archives) * n_scenarios)
+    if use_subprocess and n_workers > 1:
+        chunks_per_scenario = max(1, -(-int(n_workers) // n_units))
+    else:
+        chunks_per_scenario = 1
+
+    tasks: List[Dict[str, Any]] = []
+    for zip_path, score_label in compatible_archives:
+        for scenario_index, scenario_file in enumerate(scenario_list):
+            scenario_episodes = base_eps + (1 if scenario_index < extra_eps else 0)
+            if scenario_episodes <= 0:
                 continue
-            unit_registry = UnitRegistry()
-            base_env = W40KEngine(
-                rewards_config=rewards_config_name,
-                training_config_name=training_config_name,
-                controlled_agent=controlled_agent,
-                active_agents=None,
-                scenario_file=sc_file,
-                unit_registry=unit_registry,
-                quiet=True,
-                gym_training_mode=True,
-                training_n_envs=1,
-            )
-            masked_env = ActionMasker(base_env, lambda env: base_env.get_action_mask())
-            env = BotControlledEnv(
-                masked_env,
-                bot=RandomBot(),
-                unit_registry=unit_registry,
-                agent_seat_mode=agent_seat_mode,
-                global_seed=agent_seat_seed,
-                env_rank=0,
-                self_play_opponent_enabled=True,
-                self_play_ratio_start=1.0,
-                self_play_ratio_end=1.0,
-                self_play_total_episodes=sc_eps,
-                self_play_warmup_episodes=0,
-                self_play_n_envs=1,
-                self_play_snapshot_path=zip_path,
-
-                self_play_snapshot_label=score_label,
-                self_play_snapshot_frozen=True,
-                self_play_snapshot_device=device,
-                self_play_deterministic=True,
-            )
-            # Injection du modèle checkpoint normalisé avant le premier épisode.
-            # `self_play_snapshot_frozen=True` : _reload_self_play_snapshot_if_needed ne
-            # rechargera JAMAIS depuis le fichier — ce qui écraserait le wrapper de
-            # normalisation posé ici par un MaskablePPO nu, donc l'adversaire recevrait les
-            # observations normalisées du modèle courant (spec R0b). C'était auparavant obtenu
-            # par un refresh_episodes plus grand que le run, qui ne tenait qu'au comptage.
-            env._frozen_model = normalized_ckpt
-            env._frozen_model_mtime = ckpt_mtime
-
-            for ep_idx in range(sc_eps):
-                ep_seed = _episode_seed(42, score_label, sc_idx, ep_idx)
-                _random.seed(ep_seed)
-                np.random.seed(ep_seed)
-                obs, info = env.reset(seed=ep_seed)
-                done = False
-                step_count = 0
-                while not done and step_count < max_steps:
-                    model_obs = main_normalizer(obs) if main_normalizer else obs
-                    masks = np.asarray(get_action_masks(env), dtype=bool)
-                    if masks.ndim == 1:
-                        masks = masks.reshape(1, -1)
-                    if isinstance(model_obs, dict):
-                        inp = model_obs
-                    else:
-                        inp = np.asarray(model_obs, dtype=np.float32)
-                        if inp.ndim == 1:
-                            inp = inp.reshape(1, -1)
-                    action, _ = main_model.predict(inp, action_masks=masks, deterministic=True)
-                    obs, _, terminated, truncated, info = env.step(int(action.item()))
-                    done = bool(terminated or truncated)
-                    step_count += 1
-
-                total += 1
-                if not done:
+            scenario_name = _scenario_name_from_file(base_agent_key, scenario_file)
+            n_chunks = min(chunks_per_scenario, scenario_episodes)
+            chunk_base = scenario_episodes // n_chunks
+            chunk_extra = scenario_episodes % n_chunks
+            ep_offset = 0
+            for chunk_index in range(n_chunks):
+                chunk_size = chunk_base + (1 if chunk_index < chunk_extra else 0)
+                if chunk_size <= 0:
                     continue
-                winner = require_key(info, "winner")
-                controlled_player = require_key(info, "controlled_player")
-                if winner == controlled_player:
-                    wins += 1
-                elif winner == DRAW_WINNER:
-                    draws += 1
-                else:
-                    losses += 1
+                tasks.append({
+                    # L'ÉTIQUETTE D'ÉTAPE tient lieu de `bot_name` : c'est la clé d'agrégation, et
+                    # c'est aussi ce que lisent `_failed_task_result` et `_scenario_name_from_task`
+                    # par `require_key` — les laisser inchangés impose de renseigner cette clé.
+                    "bot_name": score_label,
+                    # Jamais consulté : `checkpoint_zip` étant présent, `_create_eval_env`
+                    # n'appelle pas `build_bot`.
+                    "bot_type": score_label,
+                    "randomness_config": {},
+                    # Fichier BRUT : aucun mur de référence matérialisé (cf. docstring).
+                    "scenario_file": scenario_file,
+                    "scenario_name": scenario_name,
+                    "n_episodes": chunk_size,
+                    "ep_offset": ep_offset,
+                    "base_seed": base_seed,
+                    # Index GLOBAL dans `scenario_list`, jamais l'index de tranche : deux tranches
+                    # d'un même scénario doivent porter le même, sans quoi leurs graines divergent
+                    # de la séquence séquentielle.
+                    "scenario_index": scenario_index,
+                    "deterministic": True,
+                    "config_params": config_params,
+                    "max_steps_per_episode": max_steps_per_episode,
+                    "checkpoint_zip": zip_path,
+                    "checkpoint_label": score_label,
+                    "checkpoint_device": device,
+                    "checkpoint_scenario_episodes": scenario_episodes,
+                })
+                ep_offset += chunk_size
 
-            env.close()
+    if not tasks:
+        return {}
 
+    initargs = (
+        model_path,
+        worker_model_device,
+        vec_normalize_enabled,
+        vec_eval_enabled,
+        training_config_name,
+        rewards_config_name,
+        controlled_agent,
+        base_agent_key,
+        torch_compile_cpu,
+    )
+
+    if use_subprocess and n_workers > 1:
+        ctx = mp.get_context("spawn")
+        with ProcessPoolExecutor(
+            max_workers=n_workers,
+            mp_context=ctx,
+            initializer=_eval_worker_init,
+            initargs=initargs,
+        ) as pool:
+            results_list = _collect_parallel_results_with_timeouts(
+                pool=pool,
+                tasks=tasks,
+                task_timeout_seconds=task_timeout_seconds,
+                max_in_flight=n_workers,
+            )
+    else:
+        _eval_worker_init(*initargs)
+        results_list = [_eval_worker_task(task) for task in tasks]
+
+    by_label: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for result in results_list:
+        by_label[require_key(result, "bot_name")].append(result)
+
+    results: Dict[str, Any] = {}
+    failed_by_label: Dict[str, int] = {}
+    for _zip_path, score_label in compatible_archives:
+        label_results = by_label.get(score_label, [])
+        wins = sum(int(require_key(r, "wins")) for r in label_results)
+        losses = sum(int(require_key(r, "losses")) for r in label_results)
+        draws = sum(int(require_key(r, "draws")) for r in label_results)
+        failed = sum(int(require_key(r, "failed_episodes")) for r in label_results)
+        # Épisodes qui ont tourné sans jamais finir. Ils comptent désormais en NUL (et laissent
+        # une trace `eval_loop_cap` au journal, V11 §0.61) au lieu de n'appartenir à aucun seau.
+        # Le win-rate est inchangé : `total` et `wins` valent la même chose qu'avant, seule la
+        # ventilation D/T bouge. Ce compteur est conservé pour que l'affichage R0b reste juste.
+        capped = sum(
+            1
+            for r in label_results
+            for entry in require_key(r, "truncations")
+            if entry.get("reason") == "eval_loop_cap"
+        )
+        total = wins + losses + draws
+        if failed:
+            failed_by_label[score_label] = failed
         results[score_label] = wins / max(1, total)
         results[f"{score_label}_wins"] = wins
         results[f"{score_label}_losses"] = losses
         results[f"{score_label}_draws"] = draws
-        results[f"{score_label}_timeouts"] = total - wins - losses - draws
+        results[f"{score_label}_timeouts"] = capped
+
+    if failed_by_label:
+        # Un dénominateur tronqué rendrait un win-rate d'allure normale calculé sur moins
+        # d'épisodes que demandé — et le gate promeut ou refuse une étape sur ce chiffre. Lever
+        # est la seule issue correcte : c'est aussi ce que fait le chemin bots en aval de
+        # `_collect_parallel_results_with_timeouts`, qui invalide l'évaluation en bloc.
+        detail = ", ".join(f"{label}={count}" for label, count in sorted(failed_by_label.items()))
+        raise RuntimeError(
+            "evaluate_against_checkpoints : épisodes non joués (timeout ou erreur de tâche) — "
+            f"{detail}. Le win-rate serait calculé sur un dénominateur tronqué."
+        )
 
     return results
