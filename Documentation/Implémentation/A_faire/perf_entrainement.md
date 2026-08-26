@@ -150,9 +150,9 @@ plus cher là où Sonnet suffit).
 
 | # | Étape | Statut |
 |---|---|---|
-| 0.1 | Committer `scripts/bench_env_step.py` (repris du profil d'audit : construit UN env sur le chemin exact de `train.py`, 600 steps masqués aléatoires, sort ms/step + top cProfile) | 🟡 |
-| 0.2 | Committer le harnais de parité : N épisodes seed fixe → hash(masque, obs) par step + `step.log`, comparés avant/après ; armer `mask_verification` en test | 🟡 |
-| 0.3 | Consigner la ligne de base dans le journal §6 (9,47 ms/step ; 200 fps ; 142 ms/minibatch 1020) | 🟡 |
+| 0.1 | Committer `scripts/bench_env_step.py` (repris du profil d'audit : construit UN env sur le chemin exact de `train.py`, 600 steps masqués aléatoires, sort ms/step + top cProfile) | ✅ |
+| 0.2 | Committer le harnais de parité : N épisodes seed fixe → hash(masque, obs) par step + `step.log`, comparés avant/après ; armer `mask_verification` en test | ✅ |
+| 0.3 | Consigner la ligne de base dans le journal §6 (9,47 ms/step ; 200 fps ; 142 ms/minibatch 1020) | ✅ |
 
 ### Phase 1 — Queue de distribution d'un step env (workers) — zéro risque métier
 
@@ -275,3 +275,7 @@ Verrou : mêmes win-rates qu'en séquentiel à seeds fixes.
 | 2026-08-26 | cProfile 300 steps (overhead ×2,6, % seuls) | masque · obs · tours bots · reward | 33,2 % · 31,9 % · 30,7 % · 0,2 % |
 | 2026-08-26 | bench GPU (RTX 4060, contention run vivant = bornes inférieures) | forward rollout batch 24 · minibatch update 1020 · update complet (5 epochs) | 5,84 ms · 142,4 ms (7 163 éch/s) · ~5,7-6,0 s |
 | 2026-08-26 | bench GPU minibatch 4080 | débit | 2 769 éch/s (×2,6 pire que 1020 — VRAM 8 Go saturée, 8160 infaisable) |
+| 2026-08-26 | **Ligne de base Phase 0 (audit)** — run P1 vivant au moment de la mesure | ms/step · fps global SB3 · minibatch 1020 | **9,47 ms/step · 200 fps · 142 ms/minibatch** |
+| 2026-08-26 | `bench_env_step.py` 600 steps, x1_long+bot, run P1 vivant (24 workers+learner actifs = contention CPU) | ms/step médiane · P95 · P99 (resets EXCLUS des step_times) | **32,97 ms · 662 ms · 1 882 ms** — médiane ×3,5 vs audit : contention CPU + tours bots longs via BotControlledEnv |
+| 2026-08-26 | `bench_env_step.py` --profile 20 steps, top cProfile | poste dominant | reset initial 4,9 s sur 5,9 s total (exclu du timing réel depuis le fix) ; tours bots (`_run_bot_until_not_bot_turn`) = 3,9 s sur 5 appels = 777 ms/appel |
+| 2026-08-26 | Harnais parité `test_parity_harness.py`, 4 tests | statut · durée | **4 verts · 55 s** — reproductibilité, détection mutation, gate mask_verification armée |
