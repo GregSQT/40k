@@ -117,6 +117,44 @@ def test_configured_hard_penalty_without_measure_skips_the_scoring_point(
     assert "Score robuste ignoré" in capsys.readouterr().out
 
 
+def test_robust_skip_does_not_pollute_combined_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Un point saute ne doit pas entrer dans combined_history."""
+    cb, _ = _callback_with_robust_scoring(penalty_hard=0.2)
+    _gate_always_passes(monkeypatch)
+    cb._apply_eval_results(_results(), eval_marker=1000)
+    assert list(cb.combined_history) == []
+
+
+def test_robust_skip_does_not_update_early_stopping_counters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Un point saute ne doit pas incrémenter evals_without_improvement ni armer should_stop_early."""
+    cb, _ = _callback_with_robust_scoring(penalty_hard=0.2)
+    cb.early_stopping_patience = 1
+    cb.best_early_stop_score = 0.99  # > combined 0.4 → incrémenterait sans le fix
+    cb.evals_without_improvement = 0
+    cb.should_stop_early = False
+    _gate_always_passes(monkeypatch)
+    cb._apply_eval_results(_results(), eval_marker=1000)
+    assert cb.evals_without_improvement == 0
+    assert not cb.should_stop_early
+
+
+def test_empty_robust_bot_keys_raises_value_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Si aucun bot de SELECTION_BOT_NAMES n'est présent dans results, une ValueError diagnostique est levée."""
+    cb, _ = _callback_with_robust_scoring(penalty_hard=0.0)
+    _gate_always_passes(monkeypatch)
+    results = _results()
+    for key in ("random", "greedy", "defensive", "control", "adaptive", "value_trade"):
+        results.pop(key, None)
+    with pytest.raises(ValueError, match=r"SELECTION_BOT_NAMES"):
+        cb._apply_eval_results(results, eval_marker=1000)
+
+
 def test_zero_hard_penalty_scores_without_hard_term(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     A 0.0 la config ne promet rien : le score robuste se calcule, sans terme hard.

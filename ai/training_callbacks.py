@@ -2105,6 +2105,24 @@ class BotEvaluationCallback(BaseCallback):
                 save_path = f"{self.best_model_save_path}/best_model"
                 self._save_model_with_vecnormalize(save_path)
 
+        # Détection anticipée du skip robuste : si ce point ne peut pas entrer dans la
+        # courbe robuste (holdout_hard_mean absent malgré robust_penalty_hard configurée),
+        # on sort ici — avant d'affecter l'early stopping et combined_history.
+        if (
+            self.save_best_robust
+            and self.robust_penalty_hard > 0.0
+            and "holdout_hard_mean" not in results
+        ):
+            print(
+                f"\n⚠️  Score robuste ignoré au marker {eval_marker} : "
+                f"robust_penalty_hard={self.robust_penalty_hard} est configurée mais cette "
+                f"évaluation n'a produit aucun 'holdout_hard_mean' (couverture incomplète "
+                f"des scénarios hard). Le training CONTINUE ; ce point n'entre ni dans la "
+                f"courbe ni dans la sélection du best robust model. Augmenter "
+                f"`bot_eval_intermediate` si le cas se répète."
+            )
+            return
+
         if self.early_stopping_patience > 0:
             if combined_win_rate > self.best_early_stop_score:
                 self.best_early_stop_score = combined_win_rate
@@ -2141,33 +2159,21 @@ class BotEvaluationCallback(BaseCallback):
 
             # V11 §10.5 : le holdout n'entre pas dans le score robuste.
             robust_bot_keys = [k for k in results if k in SELECTION_BOT_NAMES]
+            if not robust_bot_keys:
+                raise ValueError(
+                    f"Le score robuste exige au moins une clé de SELECTION_BOT_NAMES dans les "
+                    f"résultats ; clés reçues : {list(results.keys())}"
+                )
             worst_bot_score = min(float(results[k]) for k in robust_bot_keys)
             penalty_bot = self.robust_penalty_bot * max(0.0, tau_b - worst_bot_score) ** 2
 
+            # Le cas robust_penalty_hard > 0 sans holdout_hard_mean est intercepté plus haut
+            # (return anticipé) — on n'arrive ici que si holdout_hard_mean est présent ou si
+            # robust_penalty_hard == 0.
             penalty_hard = 0.0
             if "holdout_hard_mean" in results:
                 holdout_hard_mean = float(results["holdout_hard_mean"])
                 penalty_hard = self.robust_penalty_hard * max(0.0, tau_h - holdout_hard_mean) ** 2
-            elif self.robust_penalty_hard > 0.0:
-                # FILET, pas la detection principale : le cas statique (penalite configuree
-                # sans split hard declare) est refuse au demarrage par
-                # _validate_hard_penalty_is_measurable. On n'arrive ici que si le split etait
-                # DECLARE mais n'a produit aucun `holdout_hard_mean` — trop peu d'episodes pour
-                # couvrir chaque scenario hard, cas que _compute_holdout_split_metrics tolere
-                # DELIBEREMENT ("Keep evaluation running, but skip split aggregates").
-                # On ne tue donc PAS le run : on saute ce point de mesure, exactement comme le
-                # chemin timeout plus haut. Scorer quand meme reviendrait a comparer un score
-                # a deux termes avec un score a trois selon les evaluations, et a sauvegarder
-                # le best robust model sur cette incoherence.
-                print(
-                    f"\n⚠️  Score robuste ignoré au marker {eval_marker} : "
-                    f"robust_penalty_hard={self.robust_penalty_hard} est configurée mais cette "
-                    f"évaluation n'a produit aucun 'holdout_hard_mean' (couverture incomplète "
-                    f"des scénarios hard). Le training CONTINUE ; ce point n'entre ni dans la "
-                    f"courbe ni dans la sélection du best robust model. Augmenter "
-                    f"`bot_eval_intermediate` si le cas se répète."
-                )
-                return
             robust_score = robust_base - penalty_bot - penalty_hard
 
             if self.metrics_tracker is not None:
@@ -2207,9 +2213,7 @@ class BotEvaluationCallback(BaseCallback):
 
                     canonical_model_path = self._build_canonical_model_path()
                     current_canonical_score = self._read_canonical_robust_score()
-                    if current_canonical_score is not None and current_canonical_score >= robust_score:
-                        pass
-                    else:
+                    if current_canonical_score is None or current_canonical_score < robust_score:
                         self._copy_model_artifacts(self.best_robust_model_path, canonical_model_path)
                         self._write_canonical_robust_meta(robust_score)
                 if self.gate_display_state is not None:
