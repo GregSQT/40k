@@ -47,7 +47,7 @@ import sys
 import time
 
 import numpy as np
-from sb3_contrib.common.masks import get_action_masks
+from sb3_contrib.common.maskable.utils import get_action_masks
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
