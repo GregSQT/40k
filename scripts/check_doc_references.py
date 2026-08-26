@@ -122,7 +122,7 @@ def _impl_doc_basenames() -> frozenset[str]:
     """Basenames de tous les .md de Documentation/Implémentation/ — pour la passe 4."""
     impl = ROOT / "Documentation" / "Implémentation"
     if not impl.is_dir():
-        return frozenset()
+        raise SourceUnavailable(f"Répertoire Documentation/Implémentation/ introuvable : {impl}")
     return frozenset(p.name for p in impl.rglob("*.md"))
 
 ANCHOR_ENFORCED: frozenset[str] = (
@@ -182,9 +182,18 @@ _EXPLICIT_ANCHOR = re.compile(r"\{#([^}]+)\}")
 _MD_HEADING = re.compile(r"^#{1,6} +(.+)$", re.MULTILINE)
 
 #: Bloc code fencé (``` ou ~~~) — son contenu ne doit pas être scanné pour les ancres.
+#: Deux alternatives distinctes : un bloc backtick ne peut être fermé que par des backticks,
+#: un bloc tilde que par des tildes (CommonMark §4.5 — fence characters must match).
 _FENCED_CODE_BLOCK = re.compile(
-    r"^(?:`{3,}|~{3,})[^\n]*\n.*?^(?:`{3,}|~{3,})[^\n]*$\n?", re.MULTILINE | re.DOTALL
+    r"^`{3,}[^\n]*\n.*?^`{3,}[^\n]*$\n?"
+    r"|^~{3,}[^\n]*\n.*?^~{3,}[^\n]*$\n?",
+    re.MULTILINE | re.DOTALL,
 )
+
+#: Remplace chaque caractère d'un bloc fencé par un espace, en préservant les sauts de ligne
+#: pour que la numérotation des lignes reste correcte dans les messages d'erreur.
+def _mask_fenced(m: re.Match) -> str:  # type: ignore[type-arg]
+    return "".join("\n" if c == "\n" else " " for c in m.group(0))
 
 #: Span de code inline — `code` — présent dans les titres comme dans le corps du document.
 _INLINE_CODE = re.compile(r"`[^`\n]*`")
@@ -988,7 +997,7 @@ def check_values(doc_path: pathlib.Path) -> tuple[int, list[str]]:
     return verified, broken
 
 
-def check_anchors(doc_path: pathlib.Path) -> list[str]:
+def check_anchors(doc_path: pathlib.Path, *, enforced: bool = False) -> list[str]:
     """Passe 4 — aucun renvoi `fichier.py:123`.
 
     Convention d'ancres de la roadmap (`Documentation/Roadmap/doc.md`) : un numéro de ligne ne
@@ -1000,15 +1009,10 @@ def check_anchors(doc_path: pathlib.Path) -> list[str]:
     le FAIT (le nom est-il un fichier du dépôt ?) et non sur une liste de suffixes, qui se serait
     périmée à son tour.
     """
-    if doc_path.name not in ANCHOR_ENFORCED:
+    if not enforced and doc_path.name not in ANCHOR_ENFORCED:
         return []
     text = doc_path.read_text(encoding="utf-8")
-    # Le contenu d'un bloc fencé n'est pas une ancre de document : masquer les blocs
-    # en remplaçant leurs caractères par des espaces tout en préservant les sauts de
-    # ligne, afin que la numérotation des lignes reste correcte dans les messages.
-    def _mask(m: re.Match) -> str:
-        return "".join("\n" if c == "\n" else " " for c in m.group(0))
-    text = _FENCED_CODE_BLOCK.sub(_mask, text)
+    text = _FENCED_CODE_BLOCK.sub(_mask_fenced, text)
     found: list[str] = []
     for lineno, line in enumerate(text.split("\n"), 1):
         # Un même renvoi s'écrit couramment DEUX FOIS sur une ligne — `[a.py:629](…/a.py#L629)`
@@ -1438,7 +1442,7 @@ def report_impl_anchors() -> tuple[bool, list[str]]:
         if rel in already:
             continue
         count += 1
-        all_broken.extend(check_anchors(path))
+        all_broken.extend(check_anchors(path, enforced=True))
     lines = [
         f"{'❌' if all_broken else '✅'} Documentation/Implémentation/ (ancres) — "
         f"{count} fichier(s), {len(all_broken)} renvoi(s) de ligne",
