@@ -125,10 +125,10 @@ def _impl_doc_basenames() -> frozenset[str]:
         raise SourceUnavailable(f"Répertoire Documentation/Implémentation/ introuvable : {impl}")
     return frozenset(p.name for p in impl.rglob("*.md"))
 
-ANCHOR_ENFORCED: frozenset[str] = (
-    frozenset(pathlib.PurePosixPath(doc).name for doc in DEFAULT_DOCS)
-    | _impl_doc_basenames()
+DEFAULT_DOC_NAMES: frozenset[str] = frozenset(
+    pathlib.PurePosixPath(doc).name for doc in DEFAULT_DOCS
 )
+ANCHOR_ENFORCED: frozenset[str] = DEFAULT_DOC_NAMES | _impl_doc_basenames()
 
 AGENT_CONFIG = ROOT / "config" / "agents" / "ArmageddonAgent" / "ArmageddonAgent_training_config.json"
 COUVERTURE = DOCS / "analyzer_couverture.md"
@@ -193,7 +193,7 @@ _FENCED_CODE_BLOCK = re.compile(
 #: Remplace chaque caractère d'un bloc fencé par un espace, en préservant les sauts de ligne
 #: pour que la numérotation des lignes reste correcte dans les messages d'erreur.
 def _mask_fenced(m: re.Match) -> str:  # type: ignore[type-arg]
-    return "".join("\n" if c == "\n" else " " for c in m.group(0))
+    return re.sub(r"[^\n]", " ", m.group(0))
 
 #: Span de code inline — `code` — présent dans les titres comme dans le corps du document.
 _INLINE_CODE = re.compile(r"`[^`\n]*`")
@@ -997,7 +997,11 @@ def check_values(doc_path: pathlib.Path) -> tuple[int, list[str]]:
     return verified, broken
 
 
-def check_anchors(doc_path: pathlib.Path, *, enforced: bool = False) -> list[str]:
+def check_anchors(
+    doc_path: pathlib.Path,
+    *,
+    enforcement_set: frozenset[str] | None = ANCHOR_ENFORCED,
+) -> list[str]:
     """Passe 4 — aucun renvoi `fichier.py:123`.
 
     Convention d'ancres de la roadmap (`Documentation/Roadmap/doc.md`) : un numéro de ligne ne
@@ -1009,7 +1013,7 @@ def check_anchors(doc_path: pathlib.Path, *, enforced: bool = False) -> list[str
     le FAIT (le nom est-il un fichier du dépôt ?) et non sur une liste de suffixes, qui se serait
     périmée à son tour.
     """
-    if not enforced and doc_path.name not in ANCHOR_ENFORCED:
+    if enforcement_set is not None and doc_path.name not in enforcement_set:
         return []
     text = doc_path.read_text(encoding="utf-8")
     text = _FENCED_CODE_BLOCK.sub(_mask_fenced, text)
@@ -1442,7 +1446,7 @@ def report_impl_anchors() -> tuple[bool, list[str]]:
         if rel in already:
             continue
         count += 1
-        all_broken.extend(check_anchors(path, enforced=True))
+        all_broken.extend(check_anchors(path, enforcement_set=None))
     lines = [
         f"{'❌' if all_broken else '✅'} Documentation/Implémentation/ (ancres) — "
         f"{count} fichier(s), {len(all_broken)} renvoi(s) de ligne",
