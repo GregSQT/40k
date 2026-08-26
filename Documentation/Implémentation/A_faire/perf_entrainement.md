@@ -97,6 +97,13 @@ OMP/MKL=1 ; TF32 ; torch.compile sur `policy.forward`.
 - `time/fps` SB3 est une **moyenne cumulée** depuis le début du run, pas un débit instantané.
 - L'overhead cProfile est ×2,6 : les **%** du profil font foi, les ms absolues viennent du run
   sans profiler (9,47 ms/step).
+- ⚠️ **`bench_env_step.py` se lance MACHINE AU REPOS, jamais pendant un run.** Mesuré le
+  2026-08-26 sur le même binaire et la même graine : **10,14 ms** de médiane machine au repos
+  contre **32,97 ms** pendant le run P1 (24 workers + learner) — un facteur **×3,25** qui vient
+  entièrement de la contention CPU, pas du code. Une mesure « après » prise au repos comparée à
+  une mesure « avant » prise sous charge fabriquerait un gain de ×3 imaginaire. Les 10,14 ms au
+  repos recoupent les 9,47 ms de la ligne de base d'audit : c'est cette valeur-là qui fait foi.
+  Toute ligne du journal §6 doit donc nommer l'état de la machine.
 
 ---
 
@@ -280,3 +287,5 @@ Verrou : mêmes win-rates qu'en séquentiel à seeds fixes.
 | 2026-08-26 | `bench_env_step.py` 600 steps, x1_long+bot, run P1 vivant (24 workers+learner actifs = contention CPU) | ms/step médiane · P95 · P99 (resets EXCLUS des step_times) | **32,97 ms · 662 ms · 1 882 ms** — médiane ×3,5 vs audit : contention CPU + tours bots longs via BotControlledEnv |
 | 2026-08-26 | `bench_env_step.py` --profile 20 steps, top cProfile | poste dominant | reset initial 4,9 s sur 5,9 s total (exclu du timing réel depuis le fix) ; tours bots (`_run_bot_until_not_bot_turn`) = 3,9 s sur 5 appels = 777 ms/appel |
 | 2026-08-26 | Harnais parité `test_parity_harness.py`, 4 tests | statut · durée | **4 verts · 55 s** — reproductibilité, détection mutation, gate mask_verification armée |
+| 2026-08-26 | `bench_env_step.py` **machine au repos** (run P1 terminé), même binaire et même graine que la ligne au-dessus | ms/step médiane · P95 · P99 | **10,14 ms · 214 ms · 489 ms** — **×3,25 plus rapide qu'avec le run vivant (32,97 ms)**. Recoupe les 9,47 ms de l'audit : c'est la valeur de référence. ⇒ **toute mesure Phase 1+ se prend machine au repos** (cf. §1 Pièges de mesure) |
+| 2026-08-26 | Harnais parité après `/code-review` (5 findings appliqués) | statut · durée | **3 verts · 54 s** — un test dupliqué supprimé par la review ; bench revalidé fonctionnel |
