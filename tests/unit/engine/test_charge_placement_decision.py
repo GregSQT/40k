@@ -304,3 +304,45 @@ class TestApplyChargePlacementDecision:
         plan, ctx = apply_charge_placement_decision(gs, "att", plan_index=4)
         assert isinstance(plan, list)
         assert len(plan) > 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _charge_plan_cache — isolation par intent sur le même game_state
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestChargePlanCacheIntentIsolation:
+    """La clé cache inclut intent : deux appels consécutifs avec intent différents
+    sur le même gs retournent des objets distincts (identité Python).
+
+    Régression documentée ligne 6417 shared_utils.py : sans `intent` dans la clé,
+    arm_charge_placement_decision retournait le plan intent=0 pour toutes les variantes,
+    rendant le placement L10 silencieusement non-fonctionnel.
+    """
+
+    def _gs(self) -> Dict[str, Any]:
+        # Attaquant en (3,5), cible en (8,5) : distance 5 < roll=10 → charge valide.
+        return _make_gs([_unit("att", 1, 3, 5), _unit("tgt", 2, 8, 5)])
+
+    def test_intent0_and_intent1_not_same_object(self) -> None:
+        """intent=0 et intent=1 sur le même gs retournent deux objets non-identiques."""
+        gs = self._gs()
+        r0 = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
+        r1 = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=1)
+        assert r0 is not None, "intent=0 doit retourner un plan valide"
+        assert r1 is not None, "intent=1 doit retourner un plan valide"
+        assert r0 is not r1, (
+            "intent=0 et intent=1 partagent le même objet Python — "
+            "la clé _charge_plan_cache n'inclut pas intent"
+        )
+
+    def test_intent0_cache_hit_stable(self) -> None:
+        """Un troisième appel intent=0 retourne l'entrée cache (même objet que le premier)."""
+        gs = self._gs()
+        r0a = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
+        charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=1)  # pollue si clé mauvaise
+        r0b = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
+        assert r0a is not None and r0b is not None
+        assert r0a is r0b, (
+            "le troisième appel intent=0 doit retourner l'entrée cache (même objet), "
+            "pas un plan recalculé — un appel intent=1 entre les deux ne doit pas invalider l'entrée"
+        )
