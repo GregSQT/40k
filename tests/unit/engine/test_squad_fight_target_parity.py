@@ -485,8 +485,6 @@ def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
         SQUAD_ACTION_FIGHT_SLOT_BASE,
         SQUAD_ACTION_FIGHT_SLOT_COUNT,
         build_squad_action_mask,
-        get_enemy_slot_mapping,
-        init_enemy_slot_mapping,
     )
     from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
 
@@ -525,19 +523,12 @@ def test_overrun_mask_no_crash_with_off_table_enemy_in_slot():
         "HP_MAX": 1,
     }
 
-    init_enemy_slot_mapping(gs, 1)
-    # Injecter '3' dans le tableau brut : simule un ennemi affecté à un slot PUIS sorti de la table
-    # (réserve stratégique après déploiement). _refresh ne libère pas ce slot tant que l'unité est
-    # dans units_cache ; la régression survient précisément dans cet état.
-    raw_mapping: list = gs["enemy_slot_mapping_p1"]
-    free_slot = next(i for i, sid in enumerate(raw_mapping) if sid is None)
-    raw_mapping[free_slot] = "3"
-    enemy_slots = get_enemy_slot_mapping(gs, 1)
+    # Construire enemy_slot_ids directement : get_enemy_slot_mapping appelle _refresh qui libère
+    # immédiatement les slots hors table, rendant la régression inatteignable via cette voie.
+    # On injecte "3" directement dans enemy_slot_ids pour tester le guard dans build_squad_action_mask.
+    enemy_slots: list = ["2", "3"] + [None] * (SQUAD_ACTION_FIGHT_SLOT_COUNT - 2)
 
-    # Vérifier que l'ennemi hors table a bien un slot (racine du crash).
-    assert "3" in enemy_slots, "l'ennemi hors table doit avoir un slot pour déclencher la régression"
-
-    # Avant fix : crash ValueError. Après fix : pas de crash.
+    # Avant fix : crash ValueError dans le path overrun 12.06. Après fix : pas de crash.
     mask = build_squad_action_mask(gs, "1", enemy_slot_ids=enemy_slots)
 
     fight_bits = [mask[SQUAD_ACTION_FIGHT_SLOT_BASE + i] for i in range(SQUAD_ACTION_FIGHT_SLOT_COUNT)]
