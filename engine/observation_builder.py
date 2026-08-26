@@ -316,6 +316,7 @@ class ObservationBuilder:
         # usage. L'appelant reçoit une RÉFÉRENCE au buffer : il doit le copier (affectation numpy)
         # avant le prochain appel — invariant documenté aux deux sites d'usage.
         self._obs_scratch: Optional[Dict[str, np.ndarray]] = None  # init paresseux (squad_obs_shapes dépend des constantes de classe)
+        self._full_obs_scratch: Optional[Dict[str, np.ndarray]] = None  # _obs_scratch + "grid" pré-alloué (jamais muté après init)
         self._unit_ent_cont = np.zeros(UNIT_CONT_SIZE, dtype=np.float32)
         self._unit_ent_bin = np.zeros(UNIT_BIN_SIZE, dtype=np.float32)
 
@@ -1099,6 +1100,25 @@ class ObservationBuilder:
             for arr in self._obs_scratch.values():
                 arr.fill(0)
         return self._obs_scratch
+
+    def _ensure_full_obs_scratch(self) -> Dict[str, np.ndarray]:
+        """Dict pré-alloué combinant _obs_scratch (clés squad) et un buffer grid séparé.
+
+        Construit une seule fois en shallow-copy de _obs_scratch : les arrays squad sont les
+        MÊMES objets, donc tout fill(0) sur _obs_scratch est immédiatement visible ici.
+        La clé "grid" est un buffer indépendant qui n'entre JAMAIS dans _obs_scratch — cela
+        corrige la pollution introduite quand w40k_core ajoutait obs["grid"] au dict partagé,
+        ce qui faisait inclure 9 216 floats dans la boucle fill(0) de _empty_squad_observation.
+        Appeler uniquement APRÈS _empty_squad_observation (initialise _obs_scratch).
+        """
+        assert self._obs_scratch is not None, "_ensure_full_obs_scratch appelé avant _empty_squad_observation"
+        if self._full_obs_scratch is None:
+            from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
+            self._full_obs_scratch = dict(self._obs_scratch)
+            self._full_obs_scratch["grid"] = np.zeros(
+                (GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32
+            )
+        return self._full_obs_scratch
 
     # ------------------------------------------------------------------
     # Sous-registres d'une entité (armes, types de figurines)
@@ -2124,7 +2144,12 @@ class ObservationBuilder:
         anchors[player] = anchor
         return anchor
 
-    def build_squad_grid(self, game_state: Dict[str, Any], active_squad_id: str) -> np.ndarray:
+    def build_squad_grid(
+        self,
+        game_state: Dict[str, Any],
+        active_squad_id: str,
+        out: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
         """Grille egocentrique (GRID_CHANNELS, GRID_SIZE, GRID_SIZE) autour de l'escouade active.
 
         Corrige le defaut le plus grave de l'obs squad vectorielle : elle ne contenait AUCUN terrain
@@ -2161,7 +2186,11 @@ class ObservationBuilder:
             hex_arrays_to_cells,
         )
 
-        grid = np.zeros((GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32)
+        if out is not None:
+            grid = out
+            grid.fill(0)
+        else:
+            grid = np.zeros((GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32)
 
         units_cache = require_key(game_state, "units_cache")
         if active_squad_id not in units_cache:

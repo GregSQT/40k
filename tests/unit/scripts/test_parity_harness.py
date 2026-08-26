@@ -266,6 +266,12 @@ def test_obs_scratch_buffer_is_zeroed_before_reuse() -> None:
     # Deuxième appel : doit remettre à zéro, même si le buffer contient 99.0
     obs_second = builder._empty_squad_observation()
 
+    # Verrou d'identité : le buffer EST réutilisé, pas réalloué
+    assert obs_second is obs_first, (
+        "obs_second is not obs_first — _empty_squad_observation alloue un nouveau dict "
+        "au lieu de réutiliser _obs_scratch. La réutilisation des ~27 buffers est perdue."
+    )
+
     # obs_second EST obs_first (même dict) — le test vérifie que fill(0) a bien agi
     for key, arr in obs_second.items():
         assert np.all(arr == 0.0), (
