@@ -27,7 +27,7 @@ Ce qui est déjà écrit :
 | Brique | Où | État |
 |---|---|---|
 | Moteur du mode | `services/endless_duty_runtime.py` (**1 289 lignes**) | complet en apparence : budget de vague, spawn en bordure, compteur de perte d'objectif, économie inter-vague, évolution de slots |
-| Câblage API | `services/api_server.py` : `initialize_endless_duty_state` (~L2125), garde `inter_wave_pending` dans `execute_ai_turn` (~L3991), actions `endless_duty_status` / `endless_duty_commit` | présent |
+| Câblage API | `services/api_server.py` : `initialize_endless_duty_state` (~2125), garde `inter_wave_pending` dans `execute_ai_turn` (~3991), actions `endless_duty_status` / `endless_duty_commit` | présent |
 | Scénario | `config/scenario_endless_duty.json` | présent, **format périmé** (cf. obstacles 1-4) |
 | Données d'évolution | `config/endless_duty/{leader,melee,range}_evolution.json`, `wave_forced_spawns.json` | présentes |
 | Fiches d'unités | `frontend/src/roster/spaceMarine/units/endlessDuty/` (**18 fiches** + `index.ts`) | présentes, **incomplètes** (obstacle 5) |
@@ -80,7 +80,7 @@ Depuis V11 T3/T4, `GameStateManager._resolve_board_dir` n'accepte que ces deux f
 scénario ED est resté à la racine de `config/` sans `board_ref`. **Ce qu'il faut faire** : le
 déplacer sous `config/board/<board>/scenario/` (aligné sur les autres) ou lui ajouter `board_ref`.
 Le déplacement impose de corriger `ED_SCENARIO_DEFAULT` (`endless_duty_runtime.py` L27) et
-`useGameConfig.ts` L236.
+`useGameConfig.ts` 236.
 
 ### Obstacle 2 — `DONNÉE` · le `wall_ref` pointe un plateau non jouable (½ j)
 
@@ -90,7 +90,7 @@ ValueError: board_ref '44x60x10' (360x312 en x10) ne se réduit pas au plateau a
 ```
 
 `"wall_ref": "walls-11.json"` n'existe que sous `config/board/44x60x10/walls/`, et `44x60x10`
-n'est **pas** dans `BOARD_PATH_MAP` (`api_server.py` L57 : seuls `x1` et `x5_44x60`). Le plateau
+n'est **pas** dans `BOARD_PATH_MAP` (`api_server.py` 57 : seuls `x1` et `x5_44x60`). Le plateau
 x5 ne propose que `walls-33`, `walls-mc1`, `walls-none`. **Ce qu'il faut faire** : choisir (ou
 créer) un jeu de murs pour un plateau jouable — c'est un **choix de level design**, pas une
 substitution mécanique.
@@ -155,8 +155,8 @@ mécanique (les fiches délèguent déjà leurs autres champs à leur unité de 
 KeyError: 'BASE_SHAPE'        (dans build_units_cache, via _replace_units_for_player)
 ```
 
-`_build_unit_from_registry` (`endless_duty_runtime.py` L578) réimplémente à la main
-`GameStateManager._build_enhanced_unit` (`game_state.py` ~L920). Le doublon n'a pas suivi la
+`_build_unit_from_registry` (`endless_duty_runtime.py` 578) réimplémente à la main
+`GameStateManager._build_enhanced_unit` (`game_state.py` ~920). Le doublon n'a pas suivi la
 migration V11. Diff mesuré contre une unité réellement construite par le loader de scénario —
 **14 champs absents de sa sortie** :
 
@@ -194,7 +194,7 @@ Le premier obstacle qui n'est **pas** une panne de plomberie.
   `value_at_start`, référence de la force d'usure observée par l'agent (V11 §9.8), et
   `build_squad_observation` **refuse** une valeur nulle.
 - **Endless Duty** écrase `VALUE` avec le **coût en points de réquisition**
-  (`_apply_slot_picks_to_unit` L1306, depuis `_resolve_slot_pick_override`).
+  (`_apply_slot_picks_to_unit` 1306, depuis `_resolve_slot_pick_override`).
   `config/endless_duty/leader_evolution.json` donne `catalog.Sergeant.base = 0` et un coût `0` à
   chacun des trois picks de départ — conforme à `economy.starting_leader_requisition_cost: 0`.
 
@@ -259,11 +259,11 @@ décision.
   d'objectif de 3 000 hexes est indéterminée.
 - **Les consommables** (`endless_duty.consumables` : 4 items, plafonds d'usage) : **conception
   absente, assumée** — `_compute_wave_credits` le dit noir sur blanc (`endless_duty_runtime.py`
-  L719 : *« V1: no consumables pipeline yet in engine => treat as unused for scoring »*) et aucune
+  719 : *« V1: no consumables pipeline yet in engine => treat as unused for scoring »*) et aucune
   occurrence de `consumable` n'existe dans `engine/`, `ai/` ni `frontend/src`. Le bonus
   `no_consumable_bonus` est donc toujours acquis. À concevoir, pas à réparer.
 - **Les coordonnées de départ** : `ED_START_LEADER_COL/ROW = (12, 10)` (`endless_duty_runtime.py`
-  L29-30) sont des coordonnées **d'avant la migration subhex**. Sur le plateau actif (220 × 300),
+  29-30) sont des coordonnées **d'avant la migration subhex**. Sur le plateau actif (220 × 300),
   c'est un coin, et le leader n'y est sur aucun objectif. Constaté, non traité — dépend de
   l'obstacle 3.
 - **Le combat lui-même** en mode ED (phase `fight`, pertes, morale) : jamais atteint, les unités

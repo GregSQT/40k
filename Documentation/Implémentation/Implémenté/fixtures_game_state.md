@@ -46,17 +46,17 @@ Balayage de `tests/` : tout dict littéral portant `units` + `phase` (ou `units`
 
 ## 3. Deux corrections à la prémisse, trouvées en instruisant
 
-**(a) Le dict d'`__init__` n'est PAS la référence.** `w40k_core.py:435-530` ne pose que **15** des
+**(a) Le dict d'`__init__` n'est PAS la référence.** `w40k_core.py` ne pose que **15** des
 invariants : `units_advanced`, `advance_rolls`, `units_took_to_skies` et
-`units_took_to_skies_charge` n'existent que dans le dict de `reset()` (`w40k_core.py:1139-1183`),
+`units_took_to_skies_charge` n'existent que dans le dict de `reset()` (`w40k_core.py`),
 et `__init__` n'appelle jamais `reset()`. Aucun bug de production — tout chemin réel passe par
-`engine.reset()` (`api_server.py:2213`, `:3382`) — mais **un socle dérivé de l'init aurait été
+`engine.reset()` (`api_server.py`, `:3382`) — mais **un socle dérivé de l'init aurait été
 amputé de `units_advanced`**, la clé même de l'incident 10.05.
 
 **(b) Il y a 20 invariants, pas 19.** Le filet « reset() ne pose rien hors du socle » a fait
-apparaître `units_fought` : posé par `command_phase_start` (`command_handlers.py:51`) et non par
+apparaître `units_fought` : posé par `command_phase_start` (`command_handlers.py`) et non par
 `reset()`, mais présent dans tout `game_state` de production (la cascade command suit le reset) et
-lu en `require_key` par la phase fight (`fight_handlers.py:1557`, `:1580`, `:1601`). Il est dans
+lu en `require_key` par la phase fight (`fight_handlers.py`, `:1580`, `:1601`). Il est dans
 le socle. `units_cache` / `units_cache_prev` sont au contraire des **vues dérivées** des unités,
 explicitement hors socle.
 
@@ -73,7 +73,7 @@ gs = {**turn_state_invariants(), "phase": "shoot", "units_advanced": {"3"}, ...}
 ```
 
 Le constructeur unique a été écarté : les 62 fixtures divergent sur la config, les rosters et les
-caches pré-construits (`test_movement_pool_build.py:80` vs `test_phase_start.py:47`) — un builder
+caches pré-construits (`test_movement_pool_build.py` vs `test_phase_start.py`) — un builder
 les couvrant toutes aurait dû reproduire `_initialize_units` et les caches, soit un second moteur
 à maintenir, pour un problème qui ne portait que sur l'état de tour.
 
@@ -89,9 +89,9 @@ Placement en `tests/` racine : `from tests._state_invariants import …` fonctio
 
 Les 62 fixtures ont été fusionnées avec le socle (51 fichiers). **Aucun test n'a changé de
 verdict**, et ce n'est pas une chance : toutes les lectures silencieuses de production ont un
-défaut **égal** à la valeur du socle — `set()` partout (`observation_builder.py:1122-1126`,
-`shooting_handlers.py:1019-1021`, `shared_utils.py:9697-9700`) ; la seule exception,
-`reactive_macro_order_current_window`, lève explicitement (`shared_utils.py:2298-2300`).
+défaut **égal** à la valeur du socle — `set()` partout (`observation_builder.py`,
+`shooting_handlers.py`, `shared_utils.py`) ; la seule exception,
+`reactive_macro_order_current_window`, lève explicitement (`shared_utils.py`).
 
 > **Conséquence à ne pas gommer : le socle ne répare aucun faux-vert.** Il aligne l'état des tests
 > sur la production et supprime la classe « crash-surprise à la prochaine `require_key` ». Le
@@ -105,7 +105,7 @@ trous nets, tous fermés, chacun prouvé rouge avant d'être rétabli.
 
 | Trou | Mesure | Verrou posé | Mutation qui le rougit |
 |---|---|---|---|
-| **13.09 Hidden, membre « ni au tour précédent »** — `units_shot_previous_turn` absente des 62 fixtures, lue par 3 `.get` de `shooting_handlers` ; seul le drapeau d'observation était couvert (`test_squad_obs_terrain_flags.py:200`), pas le moteur de tir ni le preview | 1 site | `tests/unit/engine/test_hidden_1309_previous_turn.py` (3 tests : statut réel, preview, contre-épreuve) | la fixture omet la clé → `hidden` reste `True` : le demi-13.09 silencieux |
+| **13.09 Hidden, membre « ni au tour précédent »** — `units_shot_previous_turn` absente des 62 fixtures, lue par 3 `.get` de `shooting_handlers` ; seul le drapeau d'observation était couvert (`test_squad_obs_terrain_flags.py`), pas le moteur de tir ni le preview | 1 site | `tests/unit/engine/test_hidden_1309_previous_turn.py` (3 tests : statut réel, preview, contre-épreuve) | la fixture omet la clé → `hidden` reste `True` : le demi-13.09 silencieux |
 | **Les 5 bits d'état de tour de l'observation** (`moved`, `shot`, `fought`, `advanced`, `fled`) : aucun n'était vérifié allumé — une permutation du mapping bit↔clé sortait une obs fausse sans qu'une assertion bouge | `units_fought` (le mapping lisait `units_attacked`, clé sans écrivain — corrigé le 2026-08-08) | `tests/unit/engine/test_squad_obs_turn_state_bits.py` (7 tests, « ce bit et lui seul ») | (a) clé omise → bit éteint ; (b) `fought` recâblé sur `units_shot` dans le moteur → 2 tests rouges |
 | **`reactive_mode="macro"`** : branche entière de `_select_reactive_unit_order` jamais exercée (0 occurrence de `"macro"` dans `tests/`), ordre et erreurs explicites compris | 0 site | `tests/unit/engine/test_reactive_move.py::TestSelectReactiveUnitOrder` (5 tests) | macro retombant sur le tri par id → 3 tests rouges |
 

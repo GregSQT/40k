@@ -51,7 +51,7 @@ Deux points nécessitent attention **avant** un entraînement sérieux :
 
 ### 3.1 Action space
 
-**Fichier :** [engine/w40k_core.py:580](file:///home/greg/40k/engine/w40k_core.py)
+**Fichier :** [engine/w40k_core.py](file:///home/greg/40k/engine/w40k_core.py)
 
 ```python
 self.action_space = gym.spaces.Discrete(13)
@@ -63,7 +63,7 @@ self.action_space = gym.spaces.Discrete(13)
 
 ### 3.2 Espace d'observation
 
-**Fichier :** [engine/w40k_core.py:611](file:///home/greg/40k/engine/w40k_core.py)
+**Fichier :** [engine/w40k_core.py](file:///home/greg/40k/engine/w40k_core.py)
 
 ```python
 self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32)
@@ -75,7 +75,7 @@ self.observation_space = gym.spaces.Box(low=0.0, high=1.0, shape=(obs_size,), dt
 
 ### 3.3 Normalisations
 
-**Fichier :** [engine/observation_builder.py:102](file:///home/greg/40k/engine/observation_builder.py)
+**Fichier :** [engine/observation_builder.py](file:///home/greg/40k/engine/observation_builder.py)
 
 ```python
 self.perception_radius = obs_params["perception_radius"]  # Obligatoire depuis config
@@ -89,7 +89,7 @@ self.perception_radius = obs_params["perception_radius"]  # Obligatoire depuis c
 
 ### 3.4 Conversion inches → sub-hex
 
-**Fichier :** [engine/w40k_core.py:375-403](file:///home/greg/40k/engine/w40k_core.py)
+**Fichier :** [engine/w40k_core.py](file:///home/greg/40k/engine/w40k_core.py)
 
 ```python
 _scale = int(_board_default.get("inches_to_subhex", 1))
@@ -228,13 +228,13 @@ ppo_checkpoint_1920000_steps.zip → pré-migration
 
 ### 5.6 ℹ️ INFO — Action WAIT hardcodée `11` dans `env_wrappers.py`
 
-**Fichier :** [ai/env_wrappers.py:418](file:///home/greg/40k/ai/env_wrappers.py)
+**Fichier :** [ai/env_wrappers.py](file:///home/greg/40k/ai/env_wrappers.py)
 
 ```python
 obs, reward, terminated, truncated, info = self.env.step(11)  # WAIT
 ```
 
-**Impact :** Nul — l'action WAIT est slot fixe 11 par design (stable depuis la spec). Valeur cohérente avec `action_decoder.py:605`.  
+**Impact :** Nul — l'action WAIT est slot fixe 11 par design (stable depuis la spec). Valeur cohérente avec `action_decoder.py`.  
 **Amélioration possible :** Définir une constante nommée `ACTION_WAIT = 11` pour lisibilité.
 
 ### 5.7 ℹ️ INFO — Profiling `env.step` sur Board×10 non fait

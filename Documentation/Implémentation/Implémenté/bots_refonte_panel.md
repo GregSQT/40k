@@ -141,7 +141,7 @@ raison (cf. `config/bot_movement_weights.json`, entrée `tactical`).
 ### 4.1 Pourquoi l'appariement des graines a été retiré
 
 Les deux dérivations de graine du dépôt mettent le nom des bots dans la clé —
-`ai/bot_evaluation.py:706` (le bot évalué) et `scripts/bot_ranking.py:67` (la paire). Deux bots de
+`ai/bot_evaluation.py` (le bot évalué) et `scripts/bot_ranking.py` (la paire). Deux bots de
 noms différents jouent donc des parties différentes. L'étape 2 proposait de retirer cette
 dépendance pour que l'ancien bot et son remplaçant soient comparés sur les mêmes tirages
 (*common random numbers*, réduction de variance de la différence).
@@ -156,7 +156,7 @@ Elle est **sans objet**, pour trois raisons qui se cumulent :
 3. **Le changement invaliderait la référence de §2**, mesurée avec la dérivation actuelle : elle
    cesserait d'être reproductible à l'identique, ce qui est précisément sa fonction.
 
-S'y ajoute que `scripts/bot_ranking.py:67` porte la justification **inverse**, explicite : « sans
+S'y ajoute que `scripts/bot_ranking.py` porte la justification **inverse**, explicite : « sans
 le nom des DEUX bots dans la graine, deux appariements différents rejoueraient la même séquence de
 tirages ». Le désaccord est réel — l'appariement est une technique de réduction de variance, pas
 un biais — mais le gain n'a **pas été mesuré**, et il ne le sera pas ici : il ne servirait aucune
@@ -190,7 +190,7 @@ un autre jeu que la référence de §2.
   Omettre `--scenario`.
 - **Le nom du bot n'est posé qu'en mode sérial** : le `step_logger` n'est pas picklable et n'est
   jamais transmis aux workers. Une passe parallèle donne les win-rates, pas le journal par bot.
-- **`_episode_seed` dérive du nom du bot** (`ai/bot_evaluation.py:706-710`) : deux bots de noms
+- **`_episode_seed` dérive du nom du bot** (`ai/bot_evaluation.py`) : deux bots de noms
   différents jouent des parties différentes. Un bot et son remplaçant ne sont donc pas comparés
   sur les mêmes tirages — c'est l'objet de l'étape 2.
 

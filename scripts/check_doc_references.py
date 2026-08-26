@@ -114,12 +114,21 @@ VALUE_ONLY_DOCS = [
     "Documentation/AI_TRAINING.md",
 ]
 
-#: Documents tenus à la convention « le symbole, jamais la ligne » : exactement les documents
-#: d'entrée, par basename. Dérivée de DEFAULT_DOCS pour qu'un fichier sujet ajouté à la roadmap
-#: entre dans la convention sans second geste. L'imposer à tout `.md` du dépôt rendrait rouges
-#: des documents d'historique que personne ne rouvre (`archives/ROADMAP.md` en tête), et un
-#: contrôle durablement rouge finit par être ignoré.
-ANCHOR_ENFORCED = {pathlib.PurePosixPath(doc).name for doc in DEFAULT_DOCS}
+#: Documents tenus à la convention « le symbole, jamais la ligne » : les documents d'entrée
+#: (DEFAULT_DOCS) et tous les .md de Documentation/Implémentation/, par basename. Les documents
+#: d'historique comme `archives/ROADMAP.md` restent exclus — un contrôle durablement rouge
+#: finit par être ignoré.
+def _impl_doc_basenames() -> frozenset[str]:
+    """Basenames de tous les .md de Documentation/Implémentation/ — pour la passe 4."""
+    impl = ROOT / "Documentation" / "Implémentation"
+    if not impl.is_dir():
+        return frozenset()
+    return frozenset(p.name for p in impl.rglob("*.md"))
+
+ANCHOR_ENFORCED: frozenset[str] = (
+    frozenset(pathlib.PurePosixPath(doc).name for doc in DEFAULT_DOCS)
+    | _impl_doc_basenames()
+)
 
 AGENT_CONFIG = ROOT / "config" / "agents" / "ArmageddonAgent" / "ArmageddonAgent_training_config.json"
 COUVERTURE = DOCS / "analyzer_couverture.md"
@@ -993,8 +1002,15 @@ def check_anchors(doc_path: pathlib.Path) -> list[str]:
     """
     if doc_path.name not in ANCHOR_ENFORCED:
         return []
+    text = doc_path.read_text(encoding="utf-8")
+    # Le contenu d'un bloc fencé n'est pas une ancre de document : masquer les blocs
+    # en remplaçant leurs caractères par des espaces tout en préservant les sauts de
+    # ligne, afin que la numérotation des lignes reste correcte dans les messages.
+    def _mask(m: re.Match) -> str:
+        return "".join("\n" if c == "\n" else " " for c in m.group(0))
+    text = _FENCED_CODE_BLOCK.sub(_mask, text)
     found: list[str] = []
-    for lineno, line in enumerate(doc_path.read_text(encoding="utf-8").split("\n"), 1):
+    for lineno, line in enumerate(text.split("\n"), 1):
         # Un même renvoi s'écrit couramment DEUX FOIS sur une ligne — `[a.py:629](…/a.py#L629)`
         # porte le numéro dans le texte et dans l'URL. Compté deux fois, le rapport annonçait
         # « 2 ancres » là où il y en a une, et le lecteur cherchait la seconde.
@@ -1403,6 +1419,34 @@ def report_values_only(doc: str, path: pathlib.Path) -> tuple[bool, list[str]]:
     return bool(broken), lines
 
 
+def report_impl_anchors() -> tuple[bool, list[str]]:
+    """Passe 4 sur Documentation/Implémentation/ — découverte dynamique.
+
+    Les documents déjà dans DEFAULT_DOCS passent le contrôle complet via report() ; ils sont
+    écartés ici pour ne pas être comptés deux fois. Seule la passe 4 est appliquée : ces docs ne
+    sont pas des documents d'entrée au sens de la roadmap, on ne leur demande ni la vérification
+    de leurs renvois, ni la passe valeurs, ni la passe sortes.
+    """
+    impl_dir = ROOT / "Documentation" / "Implémentation"
+    if not impl_dir.is_dir():
+        raise SourceUnavailable(f"Répertoire Documentation/Implémentation/ introuvable : {impl_dir}")
+    already = set(DEFAULT_DOCS)
+    all_broken: list[str] = []
+    count = 0
+    for path in sorted(impl_dir.rglob("*.md")):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel in already:
+            continue
+        count += 1
+        all_broken.extend(check_anchors(path))
+    lines = [
+        f"{'❌' if all_broken else '✅'} Documentation/Implémentation/ (ancres) — "
+        f"{count} fichier(s), {len(all_broken)} renvoi(s) de ligne",
+    ]
+    lines += [f"   {entry}" for entry in all_broken]
+    return bool(all_broken), lines
+
+
 def main(argv: list[str]) -> int:
     docs: Iterable[str] = argv[1:] or [*DEFAULT_DOCS, *VALUE_ONLY_DOCS]
     failed = False
@@ -1447,6 +1491,14 @@ def main(argv: list[str]) -> int:
         else:
             print("\n".join(lines))
             failed = failed or has_gaps
+        try:
+            has_impl_broken, lines = report_impl_anchors()
+        except (SourceUnavailable, OSError) as error:
+            print(f"❌ Documentation/Implémentation/ (ancres)\n   CONTRÔLE IMPOSSIBLE — {type(error).__name__} : {error}")
+            failed = True
+        else:
+            print("\n".join(lines))
+            failed = failed or has_impl_broken
     print(
         "\nNON VÉRIFIABLE, et assumé : le nombre de « contrôles analyzer vivants ». Le code n'en "
         "porte aucune énumération ; le compter depuis un tableau de document mesurerait autre "

@@ -659,7 +659,7 @@ gate de pas adjacent, plus « de fait »).
 >    que voit le joueur.** Le pool (1) ne dessine RIEN d'interactif.
 
 **Ordre réel (code PvP = règles 11.02, vérifié).** Le jet 2D6 a lieu **à l'activation**
-(`charge` action, `charge_handlers.py:2580`), **AVANT** la désignation des cibles. Les cibles
+(`charge` action, `charge_handlers.py`), **AVANT** la désignation des cibles. Les cibles
 sont ensuite bornées par la **distance jetée** (11.04 « within the maximum distance »), **pas
 par 12"**. Le 12" n'est QUE le pré-gate d'éligibilité à déclarer (11.02.1). En gym (RL) le jet
 est fait à la sélection (MDP inchangé).
@@ -817,18 +817,18 @@ hex** (§10, retrain de toute façon prévu).
 
 **Règle euclidienne unique.** Un socle mover en `(c,r)` est « en EZ » d'un ennemi ⇔
 `euclidean_edge_distance(socle_mover, socle_ennemi) ≤ engagement_zone_subhex × ENGAGEMENT_NORM_HEX_WIDTH`
-(= `engagement_minimum_clearance_norm(ez)`, DÉJÀ euclidien dans hex_utils.py:1378). Les briques
+(= `engagement_minimum_clearance_norm(ez)`, DÉJÀ euclidien dans hex_utils.py). Les briques
 existent : `euclidean_edge_distance` / `euclidean_edge_clearance_round_round` (rond↔rond O(1)),
 `engagement_minimum_clearance_norm`. **Le docstring de `move_anchor_violates_engagement_clearance`
-(spatial_relations.py:165) vise déjà cette sémantique** — l'implémentation réelle est restée hex.
+(spatial_relations.py) vise déjà cette sémantique** — l'implémentation réelle est restée hex.
 
 **Constat de départ (vérifié, ne pas re-supposer).** Aujourd'hui l'EZ est **hex partout** :
-- `ez > 1` (board ×N) : `_compute_mover_ez_forbidden_mask` (movement_handlers.py:1186) fait une
+- `ez > 1` (board ×N) : `_compute_mover_ez_forbidden_mask` (movement_handlers.py) fait une
   **dilatation hex cube-distance de rayon `ez`** des empreintes ennemies puis dilate par l'empreinte
   du mover (ligne 1277 « empreinte hex uniquement, jamais euclidien » — le docstring de la fonction
   est TROMPEUR, il annonce de l'euclidien non implémenté).
 - `ez ≤ 1` (legacy) : cache `enemy_adjacent_hexes` (1-anneau hex, `build_enemy_adjacent_hexes`,
-  shared_utils.py:1307).
+  shared_utils.py).
 
 **Point de bascule unique.** `get_distance_metric("engagement", game_config)` existe déjà
 (`DISTANCE_METRIC_RULES` inclut `"engagement"`, config à `"hex"`). Étape 7 = router tous les
@@ -859,7 +859,7 @@ call-sites EZ via une fonction unifiée (type `in_engagement_zone(a, b, ez, metr
 
 - **7.0** — Point de bascule : fonction unifiée `in_engagement_zone` (+ champ « forbidden EZ »
   euclidien vectorisé pour le move, réutilisant l'approche distance-field/DDA de l'Étape 4 pour la
-  perf). **`build_enemy_adjacent_hexes` & co. (shared_utils.py:1307-1440) câblés ici** — cache
+  perf). **`build_enemy_adjacent_hexes` & co. (shared_utils.py) câblés ici** — cache
   cross-phase, pas spécifique au move. `engagement: "hex"` par défaut → comportement identique.
   Checkpoint : `--step` + PvP inchangés.
 - **7.1 — spatial_relations** (fondation commune) : `enemy_footprint_distances` (41-66),
@@ -962,7 +962,7 @@ pouces  ×  inches_to_subhex (ex. 10)  →  subhexes  ×  ENGAGEMENT_NORM_HEX_WI
   (ex. 10 pour le board 44×60×10). Convertit des pouces en subhexes. **Ne pas remplacer.**
 - **`ENGAGEMENT_NORM_HEX_WIDTH = 1.5`** = pas horizontal entre centres de colonnes dans le
   repère `_hex_center` (`hex_width = 1.5 × hex_radius`), fixé par la géométrie flat-top.
-  Défini dans `hex_utils.py:1344`.
+  Défini dans `hex_utils.py`.
 
 **Pourquoi 1.5 et non √3 ?** La distance euclidienne entre deux centres de cases
 adjacentes est √3 ≈ 1.732 (valeur `hex_height`). Mais le pas horizontal de colonne à
@@ -1046,11 +1046,11 @@ migration. Même logique que le normal move — à ajouter à l'Étape 5 ou 6.
 
 ### 20.11 — LACUNE : Docstring trompeur de `move_anchor_violates_engagement_clearance`
 
-`spatial_relations.py:165` — le docstring annonce de l'euclidien ; l'implémentation
+`spatial_relations.py` — le docstring annonce de l'euclidien ; l'implémentation
 réelle est hex (§4 de l'audit, ligne 537). Risque de maintenance : un développeur peut
 croire la fonction déjà migrée. Corriger le docstring à l'Étape 7.0 (avant le code).
 **Mise à jour (2026-07-04)** : le docstring réel est désormais neutre
-(`"...C/clearance engagement contract"`, `spatial_relations.py:176`) — plus de mention
+(`"...C/clearance engagement contract"`, `spatial_relations.py`) — plus de mention
 euclidienne trompeuse. Implémentation toujours hex. Micro-tâche du 7.0 déjà partiellement
 faite ; reste à aligner l'implémentation sur la sémantique euclidienne à l'Étape 7.1.
 
@@ -1059,10 +1059,10 @@ faite ; reste à aligner l'implémentation sur la sémantique euclidienne à l'�
 Règle 21.03 : une unité FLYING peut déclarer `take to the skies` avant un charge move →
 `−2"` sur la distance max **et** traversée libre (murs + figurines + ignore vertical).
 Vérification exhaustive du code (charge) :
-- **−2"** : `_charge_budget_subhex` (charge_handlers.py:90) = `jet × inches_to_subhex − 2×inches_to_subhex`
+- **−2"** : `_charge_budget_subhex` (charge_handlers.py) = `jet × inches_to_subhex − 2×inches_to_subhex`
   si vol déclaré. **Source unique** des 5 sites de calcul de distance de charge (pool euclidien,
   cibles, BFS) → le malus se propage dans le budget du champ géodésique euclidien. Aucun site oublié.
-- **Traversée** : `_charge_fly_active` (charge_handlers.py:65) = source unique des 4 BFS/champs ;
+- **Traversée** : `_charge_fly_active` (charge_handlers.py) = source unique des 4 BFS/champs ;
   vol actif → obstacles vides (disque droit), sinon obstacles normaux.
 - **Vertical** : N/A (grille hex 2D horizontale, vertical non modélisé).
 - **Optionnel/cohérent** : sans déclaration → 2D6 plein + pas de traversée ; avec → −2" + traversée
@@ -1079,12 +1079,12 @@ exhaustivement » du checkpoint Étape 5, désormais couvert côté code).
 La portée de détection des unités cachées (`detection_range` = 15" dans `game_config.json`) est
 comparée à **deux distances de métriques différentes selon le chemin de code** :
 
-- **Gate autoritaire (pool de cibles réel)** — `shooting_handlers.py:2977` : compare `distance_to_enemy`,
+- **Gate autoritaire (pool de cibles réel)** — `shooting_handlers.py` : compare `distance_to_enemy`,
   calculée par `ranged_edge_distance` avec la métrique `ranged` = **euclidien** (Étape 2). C'est ce qui
   décide réellement si une unité cachée est ciblable. **Correct** : la détection est une portée de tir →
   suit la métrique `ranged`.
 - **Affichage frontend (œil rouge « caché trop loin »)** — `build_hidden_too_far_by_unit_id`
-  (`shooting_handlers.py:1770`) : utilise `min_distance_between_sets` = distance **hex** (cube), pas la
+  (`shooting_handlers.py`) : utilise `min_distance_between_sets` = distance **hex** (cube), pas la
   métrique configurée. **Incohérent** : aux abords des 15", l'indicateur visuel peut diverger du gate
   (cible affichée « trop loin » mais ciblable, ou l'inverse).
 

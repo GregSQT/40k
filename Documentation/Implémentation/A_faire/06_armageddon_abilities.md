@@ -46,18 +46,18 @@ couvrent les 25 capacités.
 ### Point d'intégration
 
 Les seuils sont calculés par l'appelant, puis passés à `resolve_attacks`
-(`engine/phase_handlers/attack_sequence.py:248`). Trois sites, **jumeaux** :
+(`engine/phase_handlers/attack_sequence.py`). Trois sites, **jumeaux** :
 
 | Site | Contexte |
 |---|---|
-| `engine/phase_handlers/shared_utils.py:7566` | tir |
-| `engine/phase_handlers/shared_utils.py:8966` | tir (second chemin) |
-| `engine/phase_handlers/fight_handlers.py:5232` | mêlée |
+| `engine/phase_handlers/shared_utils.py` | tir |
+| `engine/phase_handlers/shared_utils.py` | tir (second chemin) |
+| `engine/phase_handlers/fight_handlers.py` | mêlée |
 
 Le seuil devient `clamp(base − bonus + malus, 2, 6)`. Le **1 non modifié reste un échec**
 (05.01) : le clamp ne doit jamais transformer un 1 en réussite.
 
-`RerollProfile` (`attack_sequence.py:53`) porte `hit_1`, `wound_1`, `wound_any_fail`,
+`RerollProfile` (`attack_sequence.py`) porte `hit_1`, `wound_1`, `wound_any_fail`,
 `save_1`. Le chantier 03 y ajoute `hit_any_fail` ; s'il n'est pas encore livré, cette
 primitive le crée.
 
@@ -81,7 +81,7 @@ primitive le crée.
 
 ### Point d'intégration
 
-`build_weapon_attack_profile(weapon, target_unit)` — `attack_sequence.py:110` — est le point
+`build_weapon_attack_profile(weapon, target_unit)` — `attack_sequence.py` — est le point
 unique où les règles d'arme sont résolues pour un couple (arme, cible). Il gagne le contexte
 attaquant. Les lecteurs de A / S / D suivent le même chemin.
 
@@ -117,7 +117,7 @@ deux entrées.
 
 **Le mécanisme moteur EST livré** — mesuré le 2026-08-10, ce paragraphe annonçait le contraire
 (« 0 hit ») et c'était faux. `_get_feel_no_pain_threshold` / `_roll_feel_no_pain`
-(`engine/phase_handlers/shared_utils.py:2350`) sont lus par trois sites : tir, mêlée et
+(`engine/phase_handlers/shared_utils.py`) sont lus par trois sites : tir, mêlée et
 blessures mortelles. La règle générique `feel_no_pain` existe au registre avec son `obs_id` et
 son paramètre `threshold` (`config/unit_rules.json`).
 
@@ -154,7 +154,7 @@ pouces absolus.
 Deux chemins existent déjà et doivent être **unifiés**, pas dupliqués :
 
 - `[DEVASTATING WOUNDS]` — `attack_sequence.py`, résolu à l'allocation par l'appelant
-- `charge_impact` — `engine/phase_handlers/charge_handlers.py:4401`
+- `charge_impact` — `engine/phase_handlers/charge_handlers.py`
 
 Cette primitive extrait un helper commun « infliger N blessures mortelles à une unité »,
 appelable depuis n'importe quel déclencheur.
@@ -183,7 +183,7 @@ choix de joueur, donc une décision d'agent, pas une heuristique interne.
 
 ### Point d'intégration
 
-`engine/game_state.py:2564` `_sum_objective_control_oc` (règle 14.02) et la logique de
+`engine/game_state.py` `_sum_objective_control_oc` (règle 14.02) et la logique de
 `control_method` à `:2654` (règle 14.03). Le mécanisme « secured » **existe déjà** comme
 propriété d'objectif — il s'agit de permettre à une capacité d'unité de le déclencher.
 
@@ -236,7 +236,7 @@ porteur meurt (règle 19.04 sur l'union des règles en vigueur).
 
 ### `move_after_shooting` : extension, pas création
 
-La règle **existe** (`UNIT_RULE_EFFECT_IDS`, `engine/phase_handlers/shooting_handlers.py:5178`
+La règle **existe** (`UNIT_RULE_EFFECT_IDS`, `engine/phase_handlers/shooting_handlers.py`
 `_build_move_after_shooting_destinations`). Deux manques :
 
 1. La distance est un **entier fixe** en paramètre ; Purgation Run demande **D6"**.

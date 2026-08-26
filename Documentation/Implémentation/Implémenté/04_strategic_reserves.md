@@ -33,9 +33,9 @@ n'existe.
 
 ## Ce qui existe déjà et qu'il faut réutiliser
 
-- `deployed_on_turn` dans l'état d'unité (`engine/game_state.py:269`)
+- `deployed_on_turn` dans l'état d'unité (`engine/game_state.py`)
 - Les bits d'observation `deploy_not_on_board`, `deploy_pre_battle`, `deploy_in_battle`,
-  `deployed_this_turn` (`engine/observation_entities.py:136-139`)
+  `deployed_this_turn` (`engine/observation_entities.py`)
 - `movement_build_valid_destinations_pool` — le pool de destinations de mouvement
 
 **La structure d'état est déjà prête ; c'est la mécanique qui manque.** Ne pas créer un

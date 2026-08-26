@@ -116,7 +116,7 @@ point de vue de l'apprentissage.
 **Déjà implémenté, à paramétrer et non à développer — mais UNIQUEMENT sur le chemin rotation**
 (`--scenario bot`, cf. §10.4) :
 - `training_config.bot_training.ratios` — mélange pondéré de bots
-  (`_build_training_bots_from_config`, train.py ~L91 ; 5 classes supportées, toutes pondérées
+  (`_build_training_bots_from_config`, train.py ~91 ; 5 classes supportées, toutes pondérées
   dans la config actuelle depuis la refonte du panel du 2026-07-30 — `aggressive_smart` et
   `defensive_smart` ont été supprimés). Configuré dans les 5 phases.
 - `training_config.opponent_mix` — part rampée d'adversaires FIGÉS : `self_play_ratio_start` →
@@ -150,16 +150,16 @@ fichier scénario — vérifié branche par branche :
 
 | Chemin | Adversaire d'entraînement RÉEL |
 |---|---|
-| `--scenario bot` (`train_with_scenario_rotation`) | ✅ `bots=training_bots` pondérés (~L2492, ~L2755) + self-play `opponent_mix` |
-| `--scenario <fichier>`, `n_envs > 1` (cas RÉEL : x5_debug = 8) | ❌ `make_training_env` appelé SANS `use_bots`/`training_bots` (~L1782) → `SelfPlayWrapper(frozen_model=None)` → **ACTIONS ALÉATOIRES UNIFORMES, en permanence** (voir ci-dessous) |
-| `--scenario <fichier>`, `n_envs == 1`, nom contenant « bot » | `GreedyBot(randomness=0.15)` EN DUR (~L1855) |
-| `--scenario <fichier>`, `n_envs == 1`, autre nom (dont `scenario_training_benchmark.json`) | ❌ `SelfPlayWrapper` → **aléatoire permanent** aussi (~L1871) |
+| `--scenario bot` (`train_with_scenario_rotation`) | ✅ `bots=training_bots` pondérés (~2492, ~2755) + self-play `opponent_mix` |
+| `--scenario <fichier>`, `n_envs > 1` (cas RÉEL : x5_debug = 8) | ❌ `make_training_env` appelé SANS `use_bots`/`training_bots` (~1782) → `SelfPlayWrapper(frozen_model=None)` → **ACTIONS ALÉATOIRES UNIFORMES, en permanence** (voir ci-dessous) |
+| `--scenario <fichier>`, `n_envs == 1`, nom contenant « bot » | `GreedyBot(randomness=0.15)` EN DUR (~1855) |
+| `--scenario <fichier>`, `n_envs == 1`, autre nom (dont `scenario_training_benchmark.json`) | ❌ `SelfPlayWrapper` → **aléatoire permanent** aussi (~1871) |
 
 **Pourquoi « aléatoire permanent » et pas du self-play** (bug latent distinct, vérifié) :
-`SelfPlayWrapper._get_frozen_model_action` (env_wrappers ~L1237) retombe sur
+`SelfPlayWrapper._get_frozen_model_action` (env_wrappers ~1237) retombe sur
 `random.choice(valid_actions)` tant que `frozen_model is None` — et
 **`update_frozen_model` n'a AUCUN appelant** dans tout `ai/` (grep = 0 ; le compteur
-`frozen_model_update_frequency = 100` de train.py ~L2690 est du code mort). Le « self-play »
+`frozen_model_update_frequency = 100` de train.py ~2690 est du code mort). Le « self-play »
 du chemin single-scenario n'en est pas : P2 joue au hasard du premier au dernier épisode.
 Ne pas confondre avec le VRAI self-play (`opponent_mix` → `BotControlledEnv`, chemin rotation),
 qui recharge un snapshot publié sur disque et fonctionne.
@@ -185,7 +185,7 @@ dans `make_training_env`, qui accepte DÉJÀ ces paramètres : seul l'appel de
 > faire (voir plus bas). Le constat ci-dessous décrit l'état d'AVANT.
 
 **Constat (historique)** : les bots d'évaluation viennent de `callback_params.bot_eval_weights`
-(`_load_bot_eval_params`, bot_evaluation.py ~L168 ; itération sur `eval_weights.keys()` ~L886).
+(`_load_bot_eval_params`, bot_evaluation.py ~168 ; itération sur `eval_weights.keys()` ~886).
 Config actuelle, identique dans les 5 phases : `{control, adaptive, greedy, defensive}` (+
 `tactical` à poids nul, le holdout) — un **sous-ensemble strict des bots d'entraînement**
 (`bot_training.ratios` = les mêmes 4 + `random`). L'agent n'est donc évalué QUE contre des adversaires rencontrés à

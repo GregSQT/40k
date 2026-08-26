@@ -14,7 +14,7 @@ Implémenter la **consolidation** (étape 4 de la Fight phase, règles 12.07/12.
 
 Source de vérité règles : `Documentation/40k_rules/12 Fights pahse.pdf` et `14 Objectives.pdf`. **Lire le PDF avant toute décision de règle** — une réponse règle sans lecture du PDF est invalide.
 
-**Hors scope** : l'overrun fight (12.06) et son pile-in additionnel sont déjà gérés dans l'étape Fight (`_fight_v11_auto_overrun_pile_in`, manuel ~L6442 / auto ~L5083) ; la conso ne les touche pas. Garder à l'esprit que l'overrun **partage le moteur pile-in** — ne pas le casser via la factorisation A (§4).
+**Hors scope** : l'overrun fight (12.06) et son pile-in additionnel sont déjà gérés dans l'étape Fight (`_fight_v11_auto_overrun_pile_in`, manuel ~6442 / auto ~5083) ; la conso ne les touche pas. Garder à l'esprit que l'overrun **partage le moteur pile-in** — ne pas le casser via la factorisation A (§4).
 
 ---
 
@@ -77,35 +77,35 @@ Source de vérité règles : `Documentation/40k_rules/12 Fights pahse.pdf` et `1
 ### Déjà fait — Tranche 0 (pré-requis éligibilité, NE PAS refaire)
 - **Skip fight gardé** dans `_fight_v11_manual_step` (`sub == "fight"`, `if skip:`) : right_click marque l'unité active `units_selected_to_fight` + `units_fought` **uniquement si aucune cible valide**, sinon skip refusé.
 - **Front** : `useEngineAPI.ts` — unité fight active **sans cible** entre quand même en `attackPreview` → clic droit → skip possible.
-- **Conséquence** : `units_selected_to_fight` complet en entrée de consolidate ⇒ **`fight_v11_is_consolidation_eligible` (~L4509) correct, INCHANGÉ** (vivante + `units_selected_to_fight`).
-- **Invariant à asserter (testable)** : en fin d'étape Fight, **{unités vivantes éligibles 12.04} ⊆ `units_selected_to_fight`**. Le proxy « selected » couvre « was eligible to fight » grâce au snapshot `engaged_at_fight_step_start` (~L4553) + le skip fight (Tranche 0). Sans cette assertion, une unité éligible non sélectionnée perdrait **silencieusement** son droit de consolider.
+- **Conséquence** : `units_selected_to_fight` complet en entrée de consolidate ⇒ **`fight_v11_is_consolidation_eligible` (~4509) correct, INCHANGÉ** (vivante + `units_selected_to_fight`).
+- **Invariant à asserter (testable)** : en fin d'étape Fight, **{unités vivantes éligibles 12.04} ⊆ `units_selected_to_fight`**. Le proxy « selected » couvre « was eligible to fight » grâce au snapshot `engaged_at_fight_step_start` (~4553) + le skip fight (Tranche 0). Sans cette assertion, une unité éligible non sélectionnée perdrait **silencieusement** son droit de consolider.
 
 ### Briques existantes réutilisables
-- `fight_v11_consolidation_mode` (~L4684) → cascade 12.08 `"ongoing"|"engaging"|"objective"|None`. **Utiliser tel quel.**
-- `fight_v11_engaging_triggered_unit_ids` (~L4703) → ennemis engagés post-move non sélectionnés (New Foes).
+- `fight_v11_consolidation_mode` (~4684) → cascade 12.08 `"ongoing"|"engaging"|"objective"|None`. **Utiliser tel quel.**
+- `fight_v11_engaging_triggered_unit_ids` (~4703) → ennemis engagés post-move non sélectionnés (New Foes).
 - `objective_hex_zones` (engine/game_state.py, ex-`objective_hex_zones` fusionnee le 2026-08-01) → `(id, set hexes)` par objectif (zone de contrôle runtime). **Source objectif pour la conso** (après Tranche 0bis qui la remplit depuis les terrains).
-- `_fight_v11_objectives_within_range` (~L4663) → objectifs à portée (distance empreinte→zone).
+- `_fight_v11_objectives_within_range` (~4663) → objectifs à portée (distance empreinte→zone).
 - `min_distance_between_sets` (hex_utils) → distance empreinte→zone objectif.
-- `_fight_bfs_reachable_anchors_consolidation` (~L1166) → BFS 3" par unité (agnostique).
-- `_fight_apply_pile_in_move` (~L883, `log_label` paramétré), `_fight_synth_cache_entry_at_footprint` (~L953), `_fight_footprint_in_engagement_with_any_enemy` (~L973).
-- `polygon_to_hex_list` (hex_utils.py:586), `_objective_polygon_hexes` (hex_utils.py:546) → rasterisation polygone→hexes (pour Tranche 0bis).
+- `_fight_bfs_reachable_anchors_consolidation` (~1166) → BFS 3" par unité (agnostique).
+- `_fight_apply_pile_in_move` (~883, `log_label` paramétré), `_fight_synth_cache_entry_at_footprint` (~953), `_fight_footprint_in_engagement_with_any_enemy` (~973).
+- `polygon_to_hex_list` (hex_utils.py), `_objective_polygon_hexes` (hex_utils.py) → rasterisation polygone→hexes (pour Tranche 0bis).
 
 ### ⚠️ Code à NE PAS réutiliser pour la branche objectif
-- `_fight_plan_consolidation_destinations` (~L1255) : consolidation **par-UNITÉ** (pas par-figurine). **Sa branche `objective` est NON CONFORME** : elle vise le **marqueur central** (médiode/centre) via `_fight_resolve_objective_marker_center_hex` + `on_marker`, alors que 14.02 demande d'être **dans la zone**. → À corriger/remplacer, **PAS un modèle de référence pour l'objectif**.
+- `_fight_plan_consolidation_destinations` (~1255) : consolidation **par-UNITÉ** (pas par-figurine). **Sa branche `objective` est NON CONFORME** : elle vise le **marqueur central** (médiode/centre) via `_fight_resolve_objective_marker_center_hex` + `on_marker`, alors que 14.02 demande d'être **dans la zone**. → À corriger/remplacer, **PAS un modèle de référence pour l'objectif**.
   - Sa branche **`enemy`** reste valable comme référence de palier ennemi.
   - **Attention appelants** : utilisée par le flux **IA/auto** (`_ai_select_consolidation_destination`, `_fight_try_begin_consolidation_after_attacks`). Sa branche `objective` est **corrigée en Tranche 6** (viser la zone, comme le PvP) — préserver le flux auto.
-- Helpers **marqueur** — **écartés pour la branche objectif** (ponctuels, non conformes 14.02) : `_fight_resolve_objective_marker_center_hex` (~L1068), `_fight_closest_objective_marker_snapshot` (~L1111), `_fight_new_fp_strictly_closer_to_objective_marker_tier` (~L1133). Pour l'objectif, utiliser **`objective_hex_zones` (zone) + `min_distance_between_sets`** à la place.
+- Helpers **marqueur** — **écartés pour la branche objectif** (ponctuels, non conformes 14.02) : `_fight_resolve_objective_marker_center_hex` (~1068), `_fight_closest_objective_marker_snapshot` (~1111), `_fight_new_fp_strictly_closer_to_objective_marker_tier` (~1133). Pour l'objectif, utiliser **`objective_hex_zones` (zone) + `min_distance_between_sets`** à la place.
 
 ### Points de branchement à modifier (actuellement auto-skip)
-- `_fight_v11_manual_state`, `sub == "consolidate"` (~L6055-6064) → présentation paresseuse.
-- Dispatch `_fight_v11_manual_step`, `sub == "consolidate"` (~L6475-6480) → dispatch des actions.
+- `_fight_v11_manual_state`, `sub == "consolidate"` (~6055-6064) → présentation paresseuse.
+- Dispatch `_fight_v11_manual_step`, `sub == "consolidate"` (~6475-6480) → dispatch des actions.
 
 ### Référence pile-in par-figurine (à CLONER, ne pas modifier)
-- `_fight_pile_in_build_model_pool` (~L5104) — BFS par figurine, palier `closest_tier_ids: List[str]`. Retour `{"closer":[...], "engaged":[...]}`.
-- `_fight_pile_in_closest_tier_ids` (~L5242) — **générique, réutiliser** (palier ennemi).
-- `_fight_pile_in_preview_plan` (~L5271), `_fight_pile_in_model_plan_state` (~L5386), `_fight_pile_in_commit_plan` (~L5486).
-- `_fight_v11_pile_in_targets` (~L5932), `_fight_v11_clear_pile_in_preview` (~L5939).
-- Dispatch actions pile-in (`sub == "pile_in"`) : `pile_in_plan_state` (~L6286), `pile_in_autoplace` (~L6298), `commit_pile_in_plan` (~L6309), `activate_unit` (~L6340). **Miroir exact à reproduire pour consolidate.**
+- `_fight_pile_in_build_model_pool` (~5104) — BFS par figurine, palier `closest_tier_ids: List[str]`. Retour `{"closer":[...], "engaged":[...]}`.
+- `_fight_pile_in_closest_tier_ids` (~5242) — **générique, réutiliser** (palier ennemi).
+- `_fight_pile_in_preview_plan` (~5271), `_fight_pile_in_model_plan_state` (~5386), `_fight_pile_in_commit_plan` (~5486).
+- `_fight_v11_pile_in_targets` (~5932), `_fight_v11_clear_pile_in_preview` (~5939).
+- Dispatch actions pile-in (`sub == "pile_in"`) : `pile_in_plan_state` (~6286), `pile_in_autoplace` (~6298), `commit_pile_in_plan` (~6309), `activate_unit` (~6340). **Miroir exact à reproduire pour consolidate.**
 
 ---
 
@@ -135,10 +135,10 @@ Source de vérité règles : `Documentation/40k_rules/12 Fights pahse.pdf` et `1
 ### Tranche 0bis — Objectifs = terrains (backend, PRÉREQUIS, **validé isolément AVANT le reste**)
 Refonte du système d'objectifs. ⛔ **GATE DUR** : cette tranche est un **lot livré et validé runtime SÉPARÉMENT**, **avant d'écrire la moindre ligne de conso** (elle touche scoring, observation IA et reward → tout le jeu). Ne pas démarrer la Tranche 1 tant que la 0bis n'est pas validée runtime. **Étapes ordonnées** :
 
-1. **Propager le flag `objective`** dans la rasterisation des terrains. Aujourd'hui [`_load_terrain_areas_from_ref` ~L1343-1348](../../../engine/game_state.py#L1343) produit `{id, obscuring, polygon_vertices, hexes}` **sans** le flag, et `objective:true` n'est lu **nulle part** ailleurs → impossible de filtrer. Ajouter `"objective": bool(area.get("objective", False))` au dict rasterisé.
+1. **Propager le flag `objective`** dans la rasterisation des terrains. Aujourd'hui [`_load_terrain_areas_from_ref` ~1343-1348](../../../engine/game_state.py) produit `{id, obscuring, polygon_vertices, hexes}` **sans** le flag, et `objective:true` n'est lu **nulle part** ailleurs → impossible de filtrer. Ajouter `"objective": bool(area.get("objective", False))` au dict rasterisé.
 2. **Construire `game_state["objectives"]`** depuis `terrain_areas` **filtrés sur `objective == True`** : pour chacun → `{"id": area["id"], "hexes": area["hexes"]}` (hexes déjà rasterisés à l'étape 1). `center` **omis** — fallback centroïde **légitime** (le centroïde EST le centre réel d'une zone ; `raise` si ni `center` ni `hexes`), cf. [`get_objective_center`](../../../engine/macro_intents.py#L23) / `_get_objective_centers`.
 3. **Câbler `terrain_ref`** dans les scénarios concernés, **en remplacement de `objectives_ref`**. `terrain_ref` est chargé conditionnellement → un scénario sans lui a `terrain_areas = []` → **zéro objectif**. Vérifier chaque scénario (ex. `scenario_pvp_test.json` a déjà `terrain-mc1.json` ; un scénario qui n'a que `objectives_ref`, ex. `scenario_pvp_test_fight.json`, doit recevoir un `terrain_ref`).
-4. **Supprimer l'ancien système — TOUTES les sources, pas seulement `objectives_ref`.** ⚠️ `game_state["objectives"]` est aussi alimenté par des **cascades de fallback** dans [w40k_core.py](../../../engine/w40k_core.py) (interdites CLAUDE.md), à énumérer et neutraliser : **~L278-286** (`scenario_result["objectives"]` → `board_config["objectives"]`/`["objective_hexes"]`/`default`), **~L568** (`_scenario_objectives` → `board["default"]["objectives"]` → `board["objectives"]` → `[]`), **~L5589-5638** (même cascade au reload scénario). Si une seule survit, l'ancien système se réactive silencieusement. Supprimer aussi : `objectives_ref` (dont `"random"` ~L1353) et fichiers `objectives-*.json`. La source devient **unique** : les terrains `objective:true`.
+4. **Supprimer l'ancien système — TOUTES les sources, pas seulement `objectives_ref`.** ⚠️ `game_state["objectives"]` est aussi alimenté par des **cascades de fallback** dans [w40k_core.py](../../../engine/w40k_core.py) (interdites CLAUDE.md), à énumérer et neutraliser : **~278-286** (`scenario_result["objectives"]` → `board_config["objectives"]`/`["objective_hexes"]`/`default`), **~568** (`_scenario_objectives` → `board["default"]["objectives"]` → `board["objectives"]` → `[]`), **~5589-5638** (même cascade au reload scénario). Si une seule survit, l'ancien système se réactive silencieusement. Supprimer aussi : `objectives_ref` (dont `"random"` ~1353) et fichiers `objectives-*.json`. La source devient **unique** : les terrains `objective:true`.
 5. **Vérification** : confirmer que les 10 consommateurs (`macro_intents`, `action_decoder`, `observation_builder`, `reward_calculator`, `movement_handlers`, `shooting_handlers`, `fight_handlers`, `w40k_core`, `api_server`, `game_state`) ne lisent que `id`/`hexes` (+ `center` via fallback). Champ requis manquant → `raise`, pas de défaut silencieux.
 
 **Critère** : `game_state["objectives"]` reflète les terrains `objective:true` du board chargé ; aucun consommateur ne casse (import + lancement) ; ancien système retiré. ⚠️ Modèles RL à ré-entraîner ensuite (hors scope de cette tranche).
@@ -160,8 +160,8 @@ Exposer aussi : `_fight_v11_consolidation_engaging_candidates(game_state, unit)`
 **Critère** : `model_plan_state` cohérent ; `preview_plan.can_validate` correct dans les 3 modes, **dont `false` quand la cible (zone/ciblés) est inatteignable**.
 
 ### Tranche 3 — Présentation & dispatch (backend)
-- Remplacer auto-skip `manual_state` (~L6055) par présentation paresseuse miroir du bloc pile_in (~L5976-6001).
-- Remplacer auto-skip dispatch (~L6475) par bloc `if sub == "consolidate":` miroir de `sub == "pile_in"` : `activate_unit`, `consolidation_plan_state`, `commit_consolidation_plan`, `skip`, `end_consolidation`.
+- Remplacer auto-skip `manual_state` (~6055) par présentation paresseuse miroir du bloc pile_in (~5976-6001).
+- Remplacer auto-skip dispatch (~6475) par bloc `if sub == "consolidate":` miroir de `sub == "pile_in"` : `activate_unit`, `consolidation_plan_state`, `commit_consolidation_plan`, `skip`, `end_consolidation`.
 - **Mode Engaging** : ajouter l'action `consolidation_select_target` (toggle un ennemi candidat dans `consolidation_engaging_selection` pour l'unité active). Le move par-figurine reste **bloqué tant que la sélection est vide**. Réinitialiser la sélection au changement d'unité active / fin de conso.
 - **Mode Objective** : si **>1** objectif candidat, ajouter l'action `consolidation_select_objective` (single-select dans `consolidation_objective_selection`). Move **bloqué tant qu'aucun objectif choisi**. Si **1 seul** candidat → auto-sélectionné, pas d'étape de choix. Réinitialiser au changement d'unité active / fin de conso.
 - Créer `_fight_v11_clear_consolidation_preview` (purge **les deux** sélections : `consolidation_engaging_selection` ET `consolidation_objective_selection`) — sinon un objectif choisi reste collé au changement d'unité active / fin de conso.

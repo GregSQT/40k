@@ -9,9 +9,9 @@ avec `engine/w40k_core.py` restauré à HEAD).
 Le prompt (conservé tel quel plus bas, pour mémoire) partait de l'hypothèse inverse et demandait
 d'aligner le masque sur le commit ; l'investigation a établi le contraire.
 
-- **Masque** (`_squad_is_in_fight`, shared_utils ~L6696) : « a chargé ce tour OU est en ER ».
+- **Masque** (`_squad_is_in_fight`, shared_utils ~6696) : « a chargé ce tour OU est en ER ».
   **CONFORME** à la règle 12.04 (« It made a charge move this turn ») et au flux PvP V11, dont
-  le prédicat `fight_v11_is_eligible_to_fight` (fight_handlers ~L2856) porte le commentaire
+  le prédicat `fight_v11_is_eligible_to_fight` (fight_handlers ~2856) porte le commentaire
   explicite « **Indépendant de la présence de cibles** (cas overrun : a chargé, cible détruite) ».
 - **Commit** (`_process_squad_action`, branche `squad_fight`) : cherchait sa cible dans le
   **mapping de slots ennemis GELÉ du tir** (`get_enemy_slot_mapping`, top-5 figé à l'init) scoré
@@ -129,7 +129,7 @@ Ne modifie PAS : config/users.db, ai/models/**/*.zip.
   `seed=1` échoue, `seed=2` et `seed=3` passent. **Un smoke vert ne prouve pas son absence.**
 - **Piste à vérifier** (NON confirmée — l'agent doit l'établir lui-même) : le pool
   d'éligibilité fight et le scoring de cible du décodeur
-  (`get_best_enemy_score_for_unit`, boucle de `squad_fight`, w40k_core ~L4999-5011 selon
+  (`get_best_enemy_score_for_unit`, boucle de `squad_fight`, w40k_core ~4999-5011 selon
   V11_agent_rework.md §9.4) peuvent diverger de la sélection de cible du commit — p. ex. une
   cible morte/retirée entre la construction du masque et le commit, ou un désaccord sur
   l'engagement (ER) après une consolidation/pile-in.

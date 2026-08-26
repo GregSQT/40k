@@ -9,8 +9,8 @@
 >
 > **Prérequis de** P3-5 (pile-in/consolidation, = L4) — cf. [`../ROADMAP.md`](../ROADMAP.md) §1.
 >
-> **Ancres de ligne vérifiées le 2026-08-10.** Les anciennes (~L885, ~L1072, ~L3419, ~L3427,
-> ~L6218) étaient périmées de plus de 1000 lignes. Se fier aux **noms de fonctions** en priorité.
+> **Ancres de ligne vérifiées le 2026-08-10.** Les anciennes (~885, ~1072, ~3419, ~3427,
+> ~6218) étaient périmées de plus de 1000 lignes. Se fier aux **noms de fonctions** en priorité.
 
 ---
 
@@ -79,14 +79,14 @@ Son seul type possible est **l'overrun**. C'est la situation exacte de
 
 | Élément | Emplacement | Modèle |
 |---|---|---|
-| `fight_v11_is_overrun_eligible(gs, unit)` | `fight_handlers.py:1605` | prédicat pur, réutilisable |
-| `_fight_v11_auto_overrun_pile_in(gs, unit, config)` | `fight_handlers.py:2201` | **par-ANCRE — condamné** |
-| Appel côté auto V11 | `fight_handlers.py:2255` | overrun ssi non engagée |
-| Appel côté **PvP manuel** | `fight_handlers.py:5198` | fight type **choisi par le joueur** (`action["fight_type"] == "overrun"`) |
-| `_fight_v11_auto_pile_in` | `fight_handlers.py:2180` | par-ancre |
-| `_fight_apply_pile_in_move` (commit par-ancre) | `fight_handlers.py:337` | **condamné** |
-| `_fight_bfs_reachable_anchors_consolidation` (pool par-ancre) | `fight_handlers.py:651` | **condamné** |
-| `fight_v11_enter_fight_step` (pose le snapshot) | `fight_handlers.py:1872` | **jamais atteint par le gym** (§4) |
+| `fight_v11_is_overrun_eligible(gs, unit)` | `fight_handlers.py` | prédicat pur, réutilisable |
+| `_fight_v11_auto_overrun_pile_in(gs, unit, config)` | `fight_handlers.py` | **par-ANCRE — condamné** |
+| Appel côté auto V11 | `fight_handlers.py` | overrun ssi non engagée |
+| Appel côté **PvP manuel** | `fight_handlers.py` | fight type **choisi par le joueur** (`action["fight_type"] == "overrun"`) |
+| `_fight_v11_auto_pile_in` | `fight_handlers.py` | par-ancre |
+| `_fight_apply_pile_in_move` (commit par-ancre) | `fight_handlers.py` | **condamné** |
+| `_fight_bfs_reachable_anchors_consolidation` (pool par-ancre) | `fight_handlers.py` | **condamné** |
+| `fight_v11_enter_fight_step` (pose le snapshot) | `fight_handlers.py` | **jamais atteint par le gym** (§4) |
 | Référence par-figurine : `fight_pile_in_plan` | `def fight_pile_in_plan` | **modèle à suivre** |
 | Référence par-figurine : `squad_consolidate_plan` | `def squad_consolidate_plan` | **modèle à suivre** |
 | Pipeline squad gym | `w40k_core._process_squad_action`, branche `squad_fight` | **overrun NON implémenté** |
@@ -191,9 +191,9 @@ unengaged » seulement) est possible sans ça, et couvre déjà le cas du charge
      l'unité doit être engagée ; chaque fig engagée au départ doit le rester ;
    - transaction atomique (retour `None` si le plan est invalide), comme `fight_pile_in_plan`.
 2. **Le brancher dans les 3 chemins** (dans cet ordre de priorité) :
-   - PvP manuel (`fight_handlers.py:5198`) : remplace l'appel par-ancre ; le joueur choisit
+   - PvP manuel (`fight_handlers.py`) : remplace l'appel par-ancre ; le joueur choisit
      déjà le fight type via `action["fight_type"] == "overrun"` ;
-   - auto V11 (`fight_handlers.py:2255`) : overrun ssi non engagée ;
+   - auto V11 (`fight_handlers.py`) : overrun ssi non engagée ;
    - gym (`_process_squad_action`, branche `squad_fight`, APRÈS le `fight_pile_in_plan` et AVANT
      `_fight_build_valid_target_pool`) — voir le piège d'ordre d'évaluation du §2.
 3. **Ne pas oublier l'encart** : un overrun peut rendre un ennemi éligible au combat (§1.4) →
@@ -253,15 +253,15 @@ Le scénario mêlée 2v2 ne le produit pas naturellement (0 déclenchement mesur
 Deux prédicats de placement divergent — **même famille que la rupture déploiement de V11 T5**
 (`_get_valid_deployment_hexes` par CELLULES vs `deploy_unit` par CLEARANCE euclidienne) :
 
-- **Pool** : `_fight_bfs_reachable_anchors_consolidation` (`fight_handlers.py:651`) filtre les
+- **Pool** : `_fight_bfs_reachable_anchors_consolidation` (`fight_handlers.py`) filtre les
   ancres avec `is_footprint_placement_valid` + `build_occupied_positions_set` → chevauchement
   testé par **CELLULES**.
-- **Commit** : `_fight_apply_pile_in_move` (`fight_handlers.py:337`) valide avec
+- **Commit** : `_fight_apply_pile_in_move` (`fight_handlers.py`) valide avec
   `is_placement_valid_with_clearance` → chevauchement en **CLEARANCE euclidienne CONTINUE**
   (plus stricte, rond↔rond).
 
 Le BFS propose donc des ancres que le commit rejette. Les appelants (`_fight_v11_auto_pile_in`
-`fight_handlers.py:2180`, `_fight_v11_auto_overrun_pile_in` `fight_handlers.py:2201`) avalent la
+`fight_handlers.py`, `_fight_v11_auto_overrun_pile_in` `fight_handlers.py`) avalent la
 `ValueError` par un `except ValueError: pass` commenté « destination devenue invalide entre BFS
 et application » — **ce commentaire est faux** : rien ne modifie l'état entre les deux, c'est un
 mismatch de prédicats. Résultat : **le pile-in est silencieusement annulé**, sans log ni erreur.
@@ -294,7 +294,7 @@ Suite `tests/unit/` verte avec ce fix (1289), smoke `(A) OK | (B) OK`.
   machine d'activation fight V10 (commit `d69dfe0a`), qui a oublié la fonction elle-même.
   Celle-ci a été supprimée le 2026-08-05. **L'impact PvP décrit à l'époque (−19 ancres) serait
   donc à re-mesurer sur le chemin V11 réel** — sans objet si le §5 est fait ;
-- `_fight_v11_auto_overrun_pile_in` (`fight_handlers.py:5198`) → `pile_in_move_destinations_12_03`
+- `_fight_v11_auto_overrun_pile_in` (`fight_handlers.py`) → `pile_in_move_destinations_12_03`
   → le BFS ; et sans le `except ValueError`, ce chemin PvP peut lever.
 
 ⚠️ **Correction d'une analyse erronée** (2026-07-16) : le revert avait d'abord été justifié par
@@ -311,7 +311,7 @@ celui-là. `_fight_v11_pile_in_present` est un candidat à la suppression (hygi�
   navigateur. **Reste vrai tant que le §5 n'est pas fait.**
 - Les fixtures de `tests/unit/engine/test_fight_consolidation_bfs.py` construisent des
   `units_cache` **sans `BASE_SHAPE`/`BASE_SIZE`**, alors que le contrat les exige toujours
-  (`require_key` dans `game_state.py:856`, contrat documenté `shared_utils.py:680`). Tout travail
+  (`require_key` dans `game_state.py`, contrat documenté `shared_utils.py`). Tout travail
   passant par la clearance les fera échouer → les compléter (ce n'est pas « adapter le test »,
   c'est aligner la fixture sur le contrat).
 
@@ -319,14 +319,14 @@ celui-là. `_fight_v11_pile_in_present` est un candidat à la suppression (hygi�
 
 ## 7. Même famille, non mesuré (hors périmètre de ce doc)
 
-- **Charge** : pool par cellules (`charge_handlers` L429, L858, L965, L3288, L4009) vs commit par
-  clearance (L3143). Structure identique. Écart **non chiffré** : le pipeline squad gym n'emprunte
+- **Charge** : pool par cellules (`charge_handlers` 429, 858, 965, 3288, 4009) vs commit par
+  clearance (3143). Structure identique. Écart **non chiffré** : le pipeline squad gym n'emprunte
   pas `valid_charge_destinations_pool` (0 destination observée sur 3 seeds) — c'est un chemin PvP,
   à auditer via une partie PvP.
-- **Move** : éligibilité par cellules (`movement_handlers` L574, L600) vs commit par clearance
-  (L1043). Moins grave (test « existe-t-il au moins un hex »), au pire un move proposé puis refusé.
+- **Move** : éligibilité par cellules (`movement_handlers` 574, 600) vs commit par clearance
+  (1043). Moins grave (test « existe-t-il au moins un hex »), au pire un move proposé puis refusé.
 - **Fallback sans lien**, relevé dans le même fichier : `_ai_select_fight_target`
-  (`fight_handlers.py:792`) — `except Exception: … return valid_targets[0]` masque toute erreur de
+  (`fight_handlers.py`) — `except Exception: … return valid_targets[0]` masque toute erreur de
   config/registry et fausse silencieusement la sélection de cible (CLAUDE.md : jamais de fallback
   couvrant une erreur). Vérifié : **aucune exception n'est levée** sur la suite complète + smoke,
   le fallback ne couvre rien de réel aujourd'hui. Retrait neutre en marche normale, mais fait

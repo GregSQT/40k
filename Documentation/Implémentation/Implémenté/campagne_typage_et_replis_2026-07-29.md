@@ -58,7 +58,7 @@ absorbait la moitié du parc.
 > contre-audit conduit pendant la campagne, dont le rapport n'a pas été commité. Ce qui **est**
 > vérifiable par `git grep` : **87 `cast(` avant la campagne (`bb3a788f~1`) → 33 à `d061f21b`**, et
 > **21 lignes portant `type: ignore` / `pyright: ignore` → 10, dont 1 simple mention en
-> commentaire** (`ai/pointer_policy.py:254`), soit **9 sourdines réelles**.
+> commentaire** (`ai/pointer_policy.py`), soit **9 sourdines réelles**.
 
 ---
 
@@ -89,7 +89,7 @@ Chaque ligne porte le hash **constaté** par `git log` et lu dans son message de
   **+85 ns par lecture**, soit **+13 %** sur `euclidean_edge_distance` et **+24 %** sur
   `footprints_overlap`.
 - `6f0c0c6b` — le type est **scindé** : `RoundSocle` / `SquareSocle` / `OvalSocle`
-  ([`engine/hex_utils.py:1728/1741/1754`](../../../engine/hex_utils.py#L1728)) portent chacun le type
+  ([`engine/hex_utils.py/1741/1754`](../../../engine/hex_utils.py)) portent chacun le type
   exact de `base_size` ; `Socle(...)` devient la **fabrique** qui choisit la classe. **Un socle
   incohérent ne peut plus exister** — l'invariant n'est plus vérifié à la lecture. La classe de
   base ne déclare pas `base_size` : on ne peut pas lire la taille sans savoir de quelle forme il
@@ -117,7 +117,7 @@ ne se bat jamais**. Quatre courbes muettes : `game_tactical/shooting_accuracy`,
 `game_detailed/damage_dealt`, `game_detailed/damage_received`, `game_tactical/damage_efficiency`.
 
 Rebranchés dans le bloc de fin d'épisode de `step()` sur `action_logs`
-([`engine/w40k_core.py:2007`](../../../engine/w40k_core.py#L2007) et suivants) — **pas** sur
+([`engine/w40k_core.py`](../../../engine/w40k_core.py) et suivants) — **pas** sur
 `attack_details`, qui vit sous `if (self.step_logger and self.step_logger.enabled)` et rendrait les
 métriques dépendantes de `--step`. Preuve de cohérence croisée sur vraie partie (14 tests, moteur
 réel, 3 graines) : `damage_dealt` == PV réellement perdus par l'adversaire et `damage_received` ==
@@ -128,7 +128,7 @@ PV perdus par le camp contrôlé, à l'unité près, **dans les deux sens et pou
 ### 2.4 La méthode centrale du moteur
 
 `b376f2ae` — le `# pyright: ignore[reportGeneralTypeIssues]` posé sur la ligne de définition de
-`_process_semantic_action` ([`engine/w40k_core.py:3035`](../../../engine/w40k_core.py#L3035)) était
+`_process_semantic_action` ([`engine/w40k_core.py`](../../../engine/w40k_core.py)) était
 **anonyme**. Retiré, pyright dit ce qu'il taisait : **« Code is too complex to analyze »** — soit
 **1582 lignes / 205 `if`** au moment du commit (mesuré à nouveau après la campagne : **1613 lignes,
 205 `if`**, sur un fichier que l'utilisateur modifiait). Ce n'était pas une erreur de type précise :
@@ -159,7 +159,7 @@ production, ou écrits jamais relus). Le quatrième, `_scenario_file`, était vi
 le bloc de nettoyage ne le remettait pas à zéro, donc une deuxième conversion dans le même
 processus relisait le scénario de la première. Devenu **paramètre explicite** de
 `convert_to_replay_format` / `convert_steplog_to_replay`
-([`ai/replay_converter.py:58`](../../../ai/replay_converter.py#L58)).
+([`ai/replay_converter.py`](../../../ai/replay_converter.py)).
 
 🔴 **Défaut connexe, le plus grave du lot** : le nettoyage appelait **`os.remove` sur le scénario
 bot**. Depuis que la source est `get_scenario_list_for_phase`, ce chemin désigne un **vrai fichier
@@ -205,7 +205,7 @@ vérification, **selon deux règles différentes** : l'un pelait **un** niveau
 **huit sites**. Un niveau de plus et `self.engine` pointait silencieusement sur un wrapper.
 
 Remplacé par `unwrap_engine(env, owner)`
-([`ai/env_wrappers.py:46`](../../../ai/env_wrappers.py#L46)), qui pèle tous les `gym.Wrapper`, vérifie
+([`ai/env_wrappers.py`](../../../ai/env_wrappers.py)), qui pèle tous les `gym.Wrapper`, vérifie
 `ENGINE_CONTRACT_ATTRS` (les 7 membres réellement utilisés) et lève un `TypeError` nommant la pile
 traversée. Coût : O(profondeur), **une fois par `__init__`** — aucun coût sur le chemin chaud.
 
@@ -217,7 +217,7 @@ alors que le dépôt n'a **ni mypy ni config mypy**. Elles ne taisaient rien —
 `# type: ignore` reste actif pour pyright et **aurait avalé une vraie erreur future** sur ces lignes.
 
 État constaté à `d061f21b` : **10 lignes** correspondent au motif, dont **1 est une simple mention
-en commentaire** (`ai/pointer_policy.py:254`) ⇒ **9 sourdines réelles**, toutes motivées sur place.
+en commentaire** (`ai/pointer_policy.py`) ⇒ **9 sourdines réelles**, toutes motivées sur place.
 
 ### 2.10 Divers, sans catégorie
 
@@ -398,16 +398,16 @@ par la factorisation, pas contourné.
 
 - **Preuve en quatre directions (patron §2.6), appliquée** :
   (a) aucun appel ni import — `grep` sur `.py`/`.ts`/`.tsx` ne rendait que sa définition, son propre
-  message d'erreur et le commentaire l.4721 ;
+  message d'erreur et le commentaire  ;
   (b) aucune référence par chaîne ni réflexion — le seul `getattr` dynamique du dépôt
-  (`ai/bot_evaluation.py:608`) porte sur un pool de processus ;
+  (`ai/bot_evaluation.py`) porte sur un pool de processus ;
   (c) **aucune route d'API** — tout le trafic de charge passe par `/api/game/action` → `w40k_core` →
   `charge_handlers.execute_action`, dont le dispatch (chaîne `if/elif` explicite) ne le nomme pas ;
   `api_server.py` n'appelle que les jumeaux **move** et **deployment** du même nom ;
   (d) documentation — `stage.md` le déclarait déjà CODE MORT.
 - **Mesuré** : **0 appel** sous instrumentation de la suite de charge (unitaires + intégration PvP),
   1 % de couverture ligne — contre 62-89 % pour les six autres fonctions de §3.3.
-- **Contradiction du commentaire l.4721 : tranchée.** Le commentaire était **périmé** — le code de
+- **Contradiction du commentaire  : tranchée.** Le commentaire était **périmé** — le code de
   `charge_preview_move_plan` appelle `_charge_model_pos_is_closer`, jamais le pool. Commentaire
   corrigé, puis fonction supprimée (148 lignes) avec une trace à l'emplacement du retrait.
 - **Raison de fond de ne pas la rebrancher** : elle était restée **2D** (plan provisoire en 2-uplet,
@@ -422,7 +422,7 @@ par la factorisation, pas contourné.
   pendant la campagne — le test ne pouvait pas rougir parce que le miss était absorbé.
 - **Cause établie** : l'appelant **unique**, `charge_build_valid_destinations_pool`, valide déjà
   l'unité (`get_unit_by_id`) **et chaque cible déclarée** (`get_unit_by_id` + `is_unit_alive`,
-  l.3411-3414) avant l'appel. Un miss d'`units_cache` ici n'est donc pas un cas de jeu mais une
+  ) avant l'appel. Un miss d'`units_cache` ici n'est donc pas un cas de jeu mais une
   **désynchronisation `units` / `units_cache`** — et y répondre par `rid` rendait une **borne BFS
   fausse** (pool de charge tronqué) sans aucun signal.
 - **Corrigé** : les deux `return rid`/`continue` deviennent des `KeyError` nommant l'id fautif.
@@ -468,7 +468,7 @@ par la factorisation, pas contourné.
   du plateau**, exactement le défaut de §2.7. Fonction supprimée ; le repli `(0,0)` de
   `_charge_closest_charger_hex_to_target` (qui garde un appelant vivant) devient un `ValueError`.
   **Jumeau frontend vérifié SAIN** : `closestChargerHexToTargetFootprint`
-  ([`frontend/src/components/BoardPvp.tsx:985`](../../../frontend/src/components/BoardPvp.tsx#L985))
+  ([`frontend/src/components/BoardPvp.tsx`](../../../frontend/src/components/BoardPvp.tsx))
   retombe sur l'**ancre** reçue en paramètre, jamais sur `(0,0)` — c'est le backend qui divergeait.
 - **Verrous ajoutés** : `TestChargeUnitsCacheDesyncIsLoud` (2 tests sur la surface publique
   atteignable, chacun vérifiant sa prémisse sur l'état sain avant de désynchroniser).
@@ -476,7 +476,7 @@ par la factorisation, pas contourné.
   `charge_preview_move_plan` (retour à `missing.append`).
   ⚠️ **Portée bornée et mesurée** : la mutation du repli `{start_pos}` de
   `charge_build_valid_destinations_pool` reste **VERTE** — la garde amont `require_unit_position`
-  (`shared_utils.py:1348`) mord avant, et son message contient déjà « units_cache », donc le
+  (`shared_utils.py`) mord avant, et son message contient déjà « units_cache », donc le
   `match=` du test est satisfait par elle. Ce site est une **branche morte retirée** (passée à
   `require_key`), pas un comportement verrouillé ; le test correspondant est nommé et documenté
   comme tel (`..._thanks_to_the_upstream_guard`). Les 6 autres sites
@@ -496,7 +496,7 @@ par la factorisation, pas contourné.
 - **Où** : [`Documentation/TESTING.md`](../../TESTING.md), 319 lignes.
 - **Ce qui existe** : l'**avertissement est en place**, ligne 56 —
   *« ⚠️ Chiffre périmé : « 990 tests, ~2.2s » (2 skipped). L'inventaire ci-dessous n'a pas suivi… »*.
-  Deux entrées ont été corrigées ponctuellement (`test_reward_calculator.py`, l.90 ; la largeur de
+  Deux entrées ont été corrigées ponctuellement (`test_reward_calculator.py`,  ; la largeur de
   parité passée de 103 à 166 actions, `bb3a788f`).
 - **Statut** : **aucun relevé complet n'a été fait.** L'avertissement rend le document honnête, il
   ne le rend pas juste. Un relevé exige une collecte réelle (`pytest --collect-only`) qui relève de

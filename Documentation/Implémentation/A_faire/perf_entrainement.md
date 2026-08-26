@@ -31,7 +31,7 @@ Mesure de référence antérieure : `x1_long` nu 50 000 ép. = 5 h 54 (2026-08-1
 
 **Utilisation** : 24 workers SubprocVecEnv à ~11-13 % CPU chacun, learner ~43 %, machine idle ~72 %,
 GPU 20-38 % (3 Go/8). `n_steps=8192` de la config est un **total** divisé par `n_envs`
-(`ai/train.py:879` : `effective_n_steps = max(1, base_n_steps // n_envs)` → 341/env).
+(`ai/train.py` : `effective_n_steps = max(1, base_n_steps // n_envs)` → 341/env).
 
 ### Répartition d'un step d'env (cProfile 300 steps, chemin exact du run P1)
 
@@ -42,7 +42,7 @@ GPU 20-38 % (3 Go/8). `n_steps=8192` de la config est un **total** divisé par `
 | Tours des bots adverses joués dans le worker (`_run_bot_until_not_bot_turn`) | 30,7 % |
 | Reward | 0,2 % |
 
-Fonction la plus chaude : `entries_in_engagement_zone` (`engine/spatial_relations.py:503`) —
+Fonction la plus chaude : `entries_in_engagement_zone` (`engine/spatial_relations.py`) —
 48 811 appels / 300 steps = 18,9 % du wall. Reset : 107,6 ms (rechargement scénario+rosters complet
 à chaque épisode, cause `agent_roster_ref="training_random"` → `should_reload_scenario=True`).
 Hors de cause (mesuré) : reward, callbacks, TensorBoard, évals (0 éval jouée sur les 4 630 premiers
@@ -50,41 +50,41 @@ Hors de cause (mesuré) : reward, callbacks, TensorBoard, évals (0 éval jouée
 
 ### Goulots identifiés (fichier:ligne, vérifiés verbatim)
 
-1. **2ᵉ RPC par step** : `sb3_contrib/common/maskable/utils.py:17`
-   `return np.stack(env.env_method(EXPECTED_METHOD_NAME))` appelé par `ppo_mask.py:228` à chaque
+1. **2ᵉ RPC par step** : `sb3_contrib/common/maskable/utils.py`
+   `return np.stack(env.env_method(EXPECTED_METHOD_NAME))` appelé par `ppo_mask.py` à chaque
    vec-step, en plus de `env.step` — 2 allers-retours pipe synchrones par step (~2,5 Mo picklés).
-2. **Cache mono-slot du pool de move** : `engine/phase_handlers/shared_utils.py:13097`
+2. **Cache mono-slot du pool de move** : `engine/phase_handlers/shared_utils.py`
    `_cache[str(squad_id)] = (_fp_key, result)` — l'alternance budget normal (choix d'activation)
    / budget advance (désignation) sur la même escouade rate systématiquement le cache
-   → **2 BFS + érosions par activation de move** (`engine/action_decoder.py:592`).
-3. **Fingerprint recalculé à chaque appel, hit compris** : `shared_utils.py:12990` — tuples triés
+   → **2 BFS + érosions par activation de move** (`engine/action_decoder.py`).
+3. **Fingerprint recalculé à chaque appel, hit compris** : `shared_utils.py` — tuples triés
    sur toutes les unités + hexes occupés, payé même quand le cache sert.
 4. **Scan linéaire** dans le prédicat le plus appelé du masque de tir :
-   `_attacker_model_can_reach_squad` (`shared_utils.py:6947`) reparcourt `units` alors que
+   `_attacker_model_can_reach_squad` (`shared_utils.py`) reparcourt `units` alors que
    `unit_by_id` existe.
-5. **Double balayage du masque de tir** : `build_squad_action_mask` (`shared_utils.py:13187`) puis
-   `shoot_weapon_sel_open_slots` (`shared_utils.py:13129`) refont chacun modèles × armes × cibles.
+5. **Double balayage du masque de tir** : `build_squad_action_mask` (`shared_utils.py`) puis
+   `shoot_weapon_sel_open_slots` (`shared_utils.py`) refont chacun modèles × armes × cibles.
 6. **Obs sans caches ciblés** : `charge_build_valid_plan` appelé 2× par état (masque jet réel + obs
-   CHARGE_MAX_ROLL, `observation_builder.py:1519`) ; `edge_distance` recalculé par entité par step
-   sans cache (`observation_builder.py:1350`) ; passe d'engagement et bloc TYPES recalculés par step ;
+   CHARGE_MAX_ROLL, `observation_builder.py`) ; `edge_distance` recalculé par entité par step
+   sans cache (`observation_builder.py`) ; passe d'engagement et bloc TYPES recalculés par step ;
    ~27 `np.zeros` par build.
-7. **Reset** : deepcopy du scénario JSON (`engine/game_state.py:485`) + glob/open/json.load des
-   rosters **à chaque épisode** (`engine/w40k_core.py:9074`) + purge de tous les caches LoS/spatiaux.
+7. **Reset** : deepcopy du scénario JSON (`engine/game_state.py`) + glob/open/json.load des
+   rosters **à chaque épisode** (`engine/w40k_core.py`) + purge de tous les caches LoS/spatiaux.
 8. **Update** : rollout **re-transféré intégralement au GPU à chaque epoch**
-   (`sb3_contrib/common/maskable/buffers.py:219`), masques stockés en float32 (×4, `buffers.py:181`),
+   (`sb3_contrib/common/maskable/buffers.py`), masques stockés en float32 (×4, `buffers.py`),
    ~225 `.item()` (syncs) de logging par update, `evaluate_actions` non compilé (torch.compile ne
-   couvre que `policy.forward`, `ai/train.py:2207`).
+   couvre que `policy.forward`, `ai/train.py`).
 9. **À-côtés par épisode** : `writer.flush()` TensorBoard à chaque épisode
-   (`ai/metrics_tracker.py:656`) + boucle norme de gradient sur tous les tenseurs à chaque épisode
-   (`ai/training_callbacks.py:1273`).
+   (`ai/metrics_tracker.py`) + boucle norme de gradient sur tous les tenseurs à chaque épisode
+   (`ai/training_callbacks.py`).
 10. **Gate de fin d'étape curriculum** : 300 épisodes **séquentiels mono-process CPU** (~72 min à
-    14,5 s/ép, `ai/bot_evaluation.py:2084`) alors que le pool 16 workers existe pour l'éval finale.
+    14,5 s/ép, `ai/bot_evaluation.py`) alors que le pool 16 workers existe pour l'éval finale.
 11. **Éval intermédiaire** : les 10 clés de `bot_eval_weights` sont jouées, poids 0,0 compris
-    (`ai/bot_evaluation.py:1428`) — 4 bots / 10 = mesure pure, hors signal de sélection.
+    (`ai/bot_evaluation.py`) — 4 bots / 10 = mesure pure, hors signal de sélection.
 
 **Déjà en place (ne pas re-livrer)** : SubprocVecEnv 24 workers ; masque construit 1×/step nominal
-avec handoff masque→obs (`w40k_core.py:2602`) ; `action_masks()` servi sans recalcul
-(`env_wrappers.py:1356`) ; obs différée (1 build/step gym) ; cache LoS par paire avec invalidation
+avec handoff masque→obs (`w40k_core.py`) ; `action_masks()` servi sans recalcul
+(`env_wrappers.py`) ; obs différée (1 build/step gym) ; cache LoS par paire avec invalidation
 au mouvement ; bloc armes de l'obs mémoïsé ; VecNormalize limité à `global_cont` (13 floats) ;
 OMP/MKL=1 ; TF32 ; torch.compile sur `policy.forward`.
 
@@ -167,15 +167,15 @@ C'est la **queue** (pas la moyenne) qui fixe le lockstep : chaque vec-step atten
 
 | # | Étape | Ancre | Statut |
 |---|---|---|---|
-| 1.1 | Cache **2 slots** (budget normal + advance) pour `build_squad_move_cell_map` — supprime le double BFS par activation de move | `shared_utils.py:13097` | 🟡 |
-| 1.2 | Fingerprint sur hit → compteur de version d'état (invalidation à la mutation : commit_move, mort, phase) | `shared_utils.py:12990` | 🟡 |
-| 1.3 | `_attacker_model_can_reach_squad` : scan linéaire → index `unit_by_id` | `shared_utils.py:6947` | 🟡 |
-| 1.4 | Masque de tir : fusionner les 2 balayages modèles×armes×cibles (partager les résultats de la 1ʳᵉ passe avec `shoot_weapon_sel_open_slots`) | `shared_utils.py:13174/13129` | 🟡 |
-| 1.5 | Obs : mémoïser `charge_build_valid_plan` (masque + obs dans le même état) | `observation_builder.py:1519` | 🟡 |
-| 1.6 | Obs : pair-cache `edge_distance` avec invalidation au mouvement (motif LoS éprouvé) | `observation_builder.py:1350` | 🟡 |
-| 1.7 | Obs : cache du bloc TYPES + réutilisation des buffers numpy (~27 `np.zeros`/build) | `observation_builder.py:1081/1183` | 🟡 |
-| 1.8 | Pair-cache `entries_in_engagement_zone` (invalidation motif `_touch_unit_los`) | `spatial_relations.py:503` | 🟡 |
-| 1.9 | Reset : cacher les `json.load` des rosters + supprimer le deepcopy complet du scénario (copies ciblées) | `w40k_core.py:9074`, `game_state.py:485` | 🟡 |
+| 1.1 | Cache **2 slots** (budget normal + advance) pour `build_squad_move_cell_map` — supprime le double BFS par activation de move | `shared_utils.py` | 🟡 |
+| 1.2 | Fingerprint sur hit → compteur de version d'état (invalidation à la mutation : commit_move, mort, phase) | `shared_utils.py` | 🟡 |
+| 1.3 | `_attacker_model_can_reach_squad` : scan linéaire → index `unit_by_id` | `shared_utils.py` | 🟡 |
+| 1.4 | Masque de tir : fusionner les 2 balayages modèles×armes×cibles (partager les résultats de la 1ʳᵉ passe avec `shoot_weapon_sel_open_slots`) | `shared_utils.py/13129` | 🟡 |
+| 1.5 | Obs : mémoïser `charge_build_valid_plan` (masque + obs dans le même état) | `observation_builder.py` | 🟡 |
+| 1.6 | Obs : pair-cache `edge_distance` avec invalidation au mouvement (motif LoS éprouvé) | `observation_builder.py` | 🟡 |
+| 1.7 | Obs : cache du bloc TYPES + réutilisation des buffers numpy (~27 `np.zeros`/build) | `observation_builder.py/1183` | 🟡 |
+| 1.8 | Pair-cache `entries_in_engagement_zone` (invalidation motif `_touch_unit_los`) | `spatial_relations.py` | 🟡 |
+| 1.9 | Reset : cacher les `json.load` des rosters + supprimer le deepcopy complet du scénario (copies ciblées) | `w40k_core.py`, `game_state.py` | 🟡 |
 | 1.10 | **Mesure de clôture** : ms/step + fps offline ; consigner §6 | — | 🟡 |
 
 Gain attendu : ms/step −30-50 % et réduction de la queue → fps ×1,5-2.
@@ -188,9 +188,9 @@ elle se fait en dernier et **se saute si la décision A est prise entre-temps**.
 
 | # | Étape | Ancre | Statut |
 |---|---|---|---|
-| 2.1 | Rollout **résident GPU** : buffer custom qui garde obs+masques sur le GPU (fin des ~4-5 Go H2D re-transférés à chaque epoch) + masques en bool (float32 ×4 aujourd'hui) | `maskable/buffers.py:219/181` | 🟡 |
-| 2.2 | Logging différé : accumuler les scalaires sur GPU et ne `.item()` qu'en fin d'update (~225 syncs/update) ; `writer.flush()` et norme de gradient tous les N épisodes | `ppo_mask.py:394`, `metrics_tracker.py:656`, `training_callbacks.py:1273` | 🟡 |
-| 2.3 | **Un seul RPC par step** : le masque voyage dans le retour de `step()` (infos) ; VecEnv custom ou surcharge de `collect_rollouts` — sautable si option A actée | `maskable/utils.py:17`, `ppo_mask.py:228` | 🟡 |
+| 2.1 | Rollout **résident GPU** : buffer custom qui garde obs+masques sur le GPU (fin des ~4-5 Go H2D re-transférés à chaque epoch) + masques en bool (float32 ×4 aujourd'hui) | `maskable/buffers.py/181` | 🟡 |
+| 2.2 | Logging différé : accumuler les scalaires sur GPU et ne `.item()` qu'en fin d'update (~225 syncs/update) ; `writer.flush()` et norme de gradient tous les N épisodes | `ppo_mask.py`, `metrics_tracker.py`, `training_callbacks.py` | 🟡 |
+| 2.3 | **Un seul RPC par step** : le masque voyage dans le retour de `step()` (infos) ; VecEnv custom ou surcharge de `collect_rollouts` — sautable si option A actée | `maskable/utils.py`, `ppo_mask.py` | 🟡 |
 | 2.4 | **Mesure de clôture** : fps + durée d'update ; consigner §6 | — | 🟡 |
 
 Sous-classes locales (dans `ai/`), jamais de fork du venv. Verrou : masques identiques bit-à-bit
@@ -238,8 +238,8 @@ réversible) ; effort high (équivalence mathématique de la collecte distribué
 
 | # | Étape | Ancre | Statut |
 |---|---|---|---|
-| 4.1 | Gate de fin d'étape parallélisé sur le pool subprocess 16 workers existant (aujourd'hui 300 ép. séquentiels mono-process ≈ 72 min → ~7 min ; ×14 runs ≈ ~15 h récupérées) | `bot_evaluation.py:2084`, `train.py:4818` | 🟡 |
-| 4.2 | Pool d'éval persistant entre évals (init ~46 s payée à chaque éval : process spawn + rechargement modèle CPU) | `bot_evaluation.py:816` | 🟡 |
+| 4.1 | Gate de fin d'étape parallélisé sur le pool subprocess 16 workers existant (aujourd'hui 300 ép. séquentiels mono-process ≈ 72 min → ~7 min ; ×14 runs ≈ ~15 h récupérées) | `bot_evaluation.py`, `train.py` | 🟡 |
+| 4.2 | Pool d'éval persistant entre évals (init ~46 s payée à chaque éval : process spawn + rechargement modèle CPU) | `bot_evaluation.py` | 🟡 |
 | 4.3 | **Mesure de clôture** : durée gate + durée éval ; consigner §6 | — | 🟡 |
 
 Verrou : mêmes win-rates qu'en séquentiel à seeds fixes.

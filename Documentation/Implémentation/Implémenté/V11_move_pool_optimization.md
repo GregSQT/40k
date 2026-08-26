@@ -9,11 +9,11 @@
 >
 > ✅ **Corrigé en place le 2026-07-28** (le corps ne se contredit plus) : §10 étapes 4-5 et §12
 > disaient « À lancer » / « Non commencé (code) » pour L1 / L_bbox — **les deux sont en production**
-> (L1 = `_FOOTPRINT_OFFSETS_CACHE`, [hex_utils.py:1370](../../../engine/hex_utils.py#L1370) ;
+> (1 = `_FOOTPRINT_OFFSETS_CACHE`, [hex_utils.py](../../../engine/hex_utils.py) ;
 > L_bbox = `_ground_move_bbox_window` + `_bbox_window`,
-> [movement_handlers.py:1523](../../../engine/phase_handlers/movement_handlers.py#L1523), verrouillés
+> [movement_handlers.py](../../../engine/phase_handlers/movement_handlers.py), verrouillés
 > par `test_bbox_window_equals_full_board` et `test_ground_bbox_window_narrows_and_clamps`,
-> [test_movement_pool_build.py:651](../../../tests/unit/engine/test_movement_pool_build.py#L651)).
+> [test_movement_pool_build.py](../../../tests/unit/engine/test_movement_pool_build.py)).
 > §11 (DoD) est atteint. Ces sections portent désormais l'état réel.
 >
 > ⚠️ **Ce qui reste PÉRIMÉ dans les pages qui suivent (relu le 2026-07-28) :**
@@ -24,9 +24,9 @@
 > - **§3 (95,6 %, 17,49 ms/appel) n'est plus une mesure valable** : L1+L_bbox ont changé le build,
 >   et surtout `build_squad_move_cell_map` fait désormais une **érosion géodésique par-figurine**
 >   après le pool (`erode_move_pool_by_squad_block`, T6-g/§0.25,
->   [shared_utils.py:9414](../../../engine/phase_handlers/shared_utils.py#L9414)) et porte un cache
+>   [shared_utils.py](../../../engine/phase_handlers/shared_utils.py)) et porte un cache
 >   `_squad_move_pool_cache` clé par **fingerprint d'état**
->   ([:9364](../../../engine/phase_handlers/shared_utils.py#L9364)). Rien de tout cela n'existait au
+>   ([:9364](../../../engine/phase_handlers/shared_utils.py)). Rien de tout cela n'existait au
 >   cadrage. Nuance §2 : le **pool** reste par-ancre, mais la **carte finale** ne l'est plus.
 > - **§2bis / §8.5 : les scripts `measure_move_pool_reach_obstacles.py` et
 >   `measure_move_pool_occupied.py` ont été SUPPRIMÉS** (2026-07-26). Seul
@@ -68,7 +68,7 @@ une perte de **métier** ne l'est nulle part.
 **Contrainte absolue (garde-fou métier).** Le pool produit après optimisation doit être
 **strictement identique**, hex pour hex (destinations, footprint zone, coûts géodésiques
 `out_costs`), à celui produit aujourd'hui. C'est l'invariant déjà inscrit dans le docstring de
-`_build_multi_hex_vectorized` ([movement_handlers.py:1557](../../../engine/phase_handlers/movement_handlers.py#L1557)) :
+`_build_multi_hex_vectorized` ([movement_handlers.py](../../../engine/phase_handlers/movement_handlers.py)) :
 « équivalence stricte avec le BFS Python hex orig. ». Un cache qui accélère mais change **un seul**
 hex du pool est une **régression métier ET PvP**, pas une optimisation.
 
@@ -90,30 +90,30 @@ pool sans cache) et une **non-régression PvP**.
 
 ## 2. Portée EXACTE de la fonction ciblée (à ne pas se tromper de cible)
 
-`_build_multi_hex_vectorized` ([movement_handlers.py:1523](../../../engine/phase_handlers/movement_handlers.py#L1523))
+`_build_multi_hex_vectorized` ([movement_handlers.py](../../../engine/phase_handlers/movement_handlers.py))
 a **exactement deux sites d'appel**, tous deux internes à `movement_build_valid_destinations_pool`
 (même fichier) :
 
-- **Appel 1 — FLY multi-hex** ([movement_handlers.py:2425](../../../engine/phase_handlers/movement_handlers.py#L2425), `fly=True`),
+- **Appel 1 — FLY multi-hex** ([movement_handlers.py](../../../engine/phase_handlers/movement_handlers.py), `fly=True`),
   gardé par `if not _fly_single_hex` avec `_fly_single_hex = (ez <= 1 or _fly_base_size == 1)`.
-- **Appel 2 — GROUND multi-hex, métrique hex** ([movement_handlers.py:2747](../../../engine/phase_handlers/movement_handlers.py#L2747)),
+- **Appel 2 — GROUND multi-hex, métrique hex** ([movement_handlers.py](../../../engine/phase_handlers/movement_handlers.py)),
   dans le `else` de `if _move_distance_metric == "euclidean"`.
 
 **Conséquence vérifiée : la fonction ne sert QUE les unités multi-hex (`BASE_SIZE > 1`) avec
 `ez > 1`.** Les autres pools passent ailleurs :
 - **single-hex ground** (`base_size == 1` ou `ez <= 1`) → **BFS Python `deque` dédié**
-  ([movement_handlers.py:~2650-2718](../../../engine/phase_handlers/movement_handlers.py#L2650)),
+  ([movement_handlers.py:~2650-2718](../../../engine/phase_handlers/movement_handlers.py)),
   ce n'est PAS cette fonction ;
 - **multi-hex ground euclidean** (preview escouade PvP) → `_euclidean_ground_anchor_multihex`
-  ([movement_handlers.py:2733](../../../engine/phase_handlers/movement_handlers.py#L2733)).
+  ([movement_handlers.py](../../../engine/phase_handlers/movement_handlers.py)).
 
 La fonction **ne sert pas** les phases charge / pile-in / consolidation, qui ont leurs propres BFS
-(`CHARGE_DEST_BFS`, `FIGHT_CONSOLIDATION_BFS`, [perf_timing.py:99-122](../../../engine/perf_timing.py#L99)).
+(`CHARGE_DEST_BFS`, `FIGHT_CONSOLIDATION_BFS`, [perf_timing.py](../../../engine/perf_timing.py)).
 
 > ✅ **ÉTAPE 0 FAITE (2026-07-21) — cible confirmée.** Agrégation des **374 390** lignes
 > `MOVE_POOL_BUILD` de `perf_timing_bench_x5.log` (bench x5 réel sur `44x60x5`) :
 > **100 % des appels sont `fly=False single_hex=False`** = **ground multi-hex** → passent tous par
-> `_build_multi_hex_vectorized` (appel 2, [movement_handlers.py:2747](../../../engine/phase_handlers/movement_handlers.py#L2747)).
+> `_build_multi_hex_vectorized` (appel 2, [movement_handlers.py](../../../engine/phase_handlers/movement_handlers.py)).
 > **Aucun** single-hex, **aucun** fly. La cible est donc unique et certaine.
 > _(Le champ de log s'appelle `single_hex_bfs=` depuis le 2026-08-13 et nomme la ROUTE prise, pas le
 > régime de socle : refaire cette agrégation sur un log récent demande le nouveau nom.)_
@@ -125,18 +125,18 @@ La fonction **ne sert pas** les phases charge / pile-in / consolidation, qui ont
 > dans `perf_timing_bench_x5.log` (`grep -c base=None` → 0) : le socle est loggé partout. Les 17,7 %
 > attribués à `base=None` sont **exactement** les socles **ovales/rectangulaires** `base=[20,14]`
 > (66 164 / 374 390 = 17,7 %) — un `BASE_SIZE` **liste** rendu `[20,14]` par `perf_field`
-> ([perf_timing.py:272](../../../engine/perf_timing.py#L272), suppression des espaces). C'est le script
+> ([perf_timing.py](../../../engine/perf_timing.py), suppression des espaces). C'est le script
 > d'agrégation de `score.json` qui a rendu la liste comme `None`, pas le moteur. **Conséquence pour
 > la clé de cache** : `BASE_SIZE` peut être un **scalaire int** OU une **liste `[major, minor]`**
 > (17,7 % des appels), et l'ovale n'est pas symétrique → la clé socle doit porter
 > `(base_shape, base_size, orientation)` sans supposer un int (cf. §6). Ce n'est pas un socle manquant.
 
 **Chemin chaud** (origine des 374 k appels) : `build_squad_move_cell_map`
-([shared_utils.py:7711](../../../engine/phase_handlers/shared_utils.py#L7711), `read_only=True`,
+([shared_utils.py](../../../engine/phase_handlers/shared_utils.py), `read_only=True`,
 `out_costs`) → appelé par `build_squad_action_mask` et via
-[action_decoder.py:235](../../../engine/action_decoder.py#L235) → **1 appel par escouade éligible à
+[action_decoder.py](../../../engine/action_decoder.py) → **1 appel par escouade éligible à
 chaque construction de masque**, donc à chaque pas gym en phase move. Le pool raisonne sur
-**l'ANCRE d'escouade**, jamais par figurine ([shared_utils.py:7715](../../../engine/phase_handlers/shared_utils.py#L7715)).
+**l'ANCRE d'escouade**, jamais par figurine ([shared_utils.py](../../../engine/phase_handlers/shared_utils.py)).
 
 ---
 
@@ -179,9 +179,9 @@ caché sans risque, et ce qui ne le peut pas.**
 
 | Structure | Lignes | Dépend de | Coût |
 |---|---|---|---|
-| `off_even_arr` / `off_odd_arr` (reshape socle) | [1583-1584](../../../engine/phase_handlers/movement_handlers.py#L1583) | forme+taille+orientation socle | alloc |
-| `col_is_even` / `col_parity_mask` | [1586-1589](../../../engine/phase_handlers/movement_handlers.py#L1586) | `board_cols`, `board_rows` | alloc `cols×rows` bool + copy |
-| `bounds_bad` (via `_bounds_bad_parity` ×2 + `np.where`) | [1661-1682](../../../engine/phase_handlers/movement_handlers.py#L1661) | (socle × dims plateau) | appelé **2-4×/build** (dans `_placement_bad`) |
+| `off_even_arr` / `off_odd_arr` (reshape socle) | [1583-1584](../../../engine/phase_handlers/movement_handlers.py) | forme+taille+orientation socle | alloc |
+| `col_is_even` / `col_parity_mask` | [1586-1589](../../../engine/phase_handlers/movement_handlers.py) | `board_cols`, `board_rows` | alloc `cols×rows` bool + copy |
+| `bounds_bad` (via `_bounds_bad_parity` ×2 + `np.where`) | [1661-1682](../../../engine/phase_handlers/movement_handlers.py) | (socle × dims plateau) | appelé **2-4×/build** (dans `_placement_bad`) |
 
 Ces trois familles ne dépendent **jamais** de l'état mobile (positions, obstacles). Les cacher par
 clé `(board_cols, board_rows, base_shape, base_size, orientation)` est **sûr par construction**.
@@ -190,20 +190,20 @@ clé `(board_cols, board_rows, base_shape, base_size, orientation)` est **sûr p
 
 | Structure | Lignes | Dépend de |
 |---|---|---|
-| `obstacles_dest_mask`, `obstacles_traverse_mask` (`_mask_from_cells`) | [1649-1659](../../../engine/phase_handlers/movement_handlers.py#L1649) | `walls_set`, `occupied_set`, `enemy_occupied_set` |
-| `hit = _dilate_by_kernel(obstacles_mask,…)` dans `_placement_bad` | [1676-1678](../../../engine/phase_handlers/movement_handlers.py#L1676) | obstacles mobiles |
-| `eng_bad` (engagement) | [1689-1700](../../../engine/phase_handlers/movement_handlers.py#L1689) | ennemis (mobiles) |
-| **la boucle BFS `deque`** | [1770-1791](../../../engine/phase_handlers/movement_handlers.py#L1770) | `start_col/row` + `traverse_bad` (mobile) |
-| `valid_mask`, `footprint_zone`, `out_costs` | [1793-1822](../../../engine/phase_handlers/movement_handlers.py#L1793) | tout ce qui précède |
+| `obstacles_dest_mask`, `obstacles_traverse_mask` (`_mask_from_cells`) | [1649-1659](../../../engine/phase_handlers/movement_handlers.py) | `walls_set`, `occupied_set`, `enemy_occupied_set` |
+| `hit = _dilate_by_kernel(obstacles_mask,…)` dans `_placement_bad` | [1676-1678](../../../engine/phase_handlers/movement_handlers.py) | obstacles mobiles |
+| `eng_bad` (engagement) | [1689-1700](../../../engine/phase_handlers/movement_handlers.py) | ennemis (mobiles) |
+| **la boucle BFS `deque`** | [1770-1791](../../../engine/phase_handlers/movement_handlers.py) | `start_col/row` + `traverse_bad` (mobile) |
+| `valid_mask`, `footprint_zone`, `out_costs` | [1793-1822](../../../engine/phase_handlers/movement_handlers.py) | tout ce qui précède |
 
-**Le BFS `deque` Python (l.1770-1791) est le poste le plus lourd du chemin ground et il n'est pas
+**Le BFS `deque` Python () est le poste le plus lourd du chemin ground et il n'est pas
 cachable** par l'approche §0.22 : il dépend de la position de départ et des obstacles, qui changent
 à chaque appel. Le cache des masques de §4.1 **n'y touche pas**.
 
 ### 4.3 Nuance « murs seuls » (compromis métier — cf. §9)
 
 `walls_set` (terrain) est **fixe par scénario**, mais mélangé à `occupied_set` (mobile) dès
-[l.1649](../../../engine/phase_handlers/movement_handlers.py#L1649) (`walls_set | occupied_set`). On
+[](../../../engine/phase_handlers/movement_handlers.py) (`walls_set | occupied_set`). On
 **pourrait** précalculer le masque des murs seuls par plateau et ne redilater que la part mobile —
 gain supplémentaire. **Mais cela suppose que les murs sont immuables pendant une partie** (pas de
 terrain destructible). C'est un **compromis métier à trancher** (§9), pas une évidence de code.
@@ -212,11 +212,11 @@ terrain destructible). C'est un **compromis métier à trancher** (§9), pas une
 
 ## 5. Le second site — code de masques dupliqué
 
-`_compute_mover_ez_forbidden_mask` ([movement_handlers.py:~1380-1520](../../../engine/phase_handlers/movement_handlers.py#L1380)),
+`_compute_mover_ez_forbidden_mask` ([movement_handlers.py:~1380-1520](../../../engine/phase_handlers/movement_handlers.py)),
 appelée depuis `_build_multi_hex_vectorized` en `ez > 1`
-([l.1691](../../../engine/phase_handlers/movement_handlers.py#L1691)), **re-définit localement** le
+([](../../../engine/phase_handlers/movement_handlers.py)), **re-définit localement** le
 même `col_parity_mask`, `off_even_arr/odd_arr`, `_dilate_by_kernel`, `_spread_by_kernel` et les
-kernels de voisinage ([l.1422-1473](../../../engine/phase_handlers/movement_handlers.py#L1422)). Un
+kernels de voisinage ([](../../../engine/phase_handlers/movement_handlers.py)). Un
 cache doit servir **les deux** via une **source unique** (sinon on optimise la moitié du chemin et
 on maintient deux copies). Le reste de cette fonction (dilatation de l'empreinte ennemie) dépend
 des ennemis → mobile, non cachable.
@@ -227,20 +227,20 @@ des ennemis → mobile, non cachable.
 
 - **La clé DOIT inclure les dimensions plateau ET la résolution**, pas seulement le socle.
   `board_cols`/`board_rows`/`inches_to_subhex` sont posés **une fois à l'init** du `game_state`
-  ([w40k_core.py:575](../../../engine/w40k_core.py#L575), [game_state.py:381](../../../engine/game_state.py#L381),
-  [:512](../../../engine/game_state.py#L512)) et **invariants dans un run**, mais **diffèrent entre
+  ([w40k_core.py](../../../engine/w40k_core.py), [game_state.py](../../../engine/game_state.py),
+  [:512](../../../engine/game_state.py)) et **invariants dans un run**, mais **diffèrent entre
   runs** : training `44x60x5` (**220×300**) vs autres boards (`44x60x10`, `44x60x1`) de dims
   différentes. Un cache de niveau processus partagé entre deux
   environnements **sans les dims dans la clé** servirait à l'un le masque de l'autre → **pool faux
   en PvP**. C'est le risque n°1.
 - ✅ **Réserve levée (2026-07-21) — dims immuables prouvées sur tous les chemins.** `board_cols` /
   `board_rows` / `inches_to_subhex` sont posés **une seule fois** dans le dict `game_state`
-  ([w40k_core.py:575](../../../engine/w40k_core.py#L575)) et **jamais réécrits** : `grep` global des
+  ([w40k_core.py](../../../engine/w40k_core.py)) et **jamais réécrits** : `grep` global des
   affectations `game_state["board_cols"/"board_rows"/"inches_to_subhex"] =` → **zéro** hors ce dict
   initial. `reset()` réutilise le **même** objet `game_state` mais son `update(...)`
-  ([w40k_core.py:1002](../../../engine/w40k_core.py#L1002)) ne touche pas aux dims, et `_reload_scenario`
+  ([w40k_core.py](../../../engine/w40k_core.py)) ne touche pas aux dims, et `_reload_scenario`
   (rotation de scénario random) ne fait que **lire** les dims
-  ([w40k_core.py:6220](../../../engine/w40k_core.py#L6220), `.get()`), jamais les écrire. Un env est donc
+  ([w40k_core.py](../../../engine/w40k_core.py), `.get()`), jamais les écrire. Un env est donc
   lié à un seul plateau pour toute sa vie. **Conséquence** : un cache **attaché au `game_state`** (portée
   ci-dessous) est sûr avec une **clé par socle seul** — les dims n'ont pas besoin d'y figurer. Les
   `(board_cols, board_rows, inches_to_subhex)` dans la clé ne restent nécessaires que pour un cache
@@ -256,7 +256,7 @@ des ennemis → mobile, non cachable.
   (vérifié 2026-07-21).** `reset()` garde le **même objet** `game_state` et
   `_reload_scenario` en change les **murs** (le board, lui, ne change pas) ; le code y purge déjà
   explicitement `_grid_static_hex_arrays` et **`_squad_move_cell_maps`**
-  ([w40k_core.py:975-980](../../../engine/w40k_core.py#L975)) avec l'avertissement littéral : « une
+  ([w40k_core.py](../../../engine/w40k_core.py)) avec l'avertissement littéral : « une
   carte calculée sur d'**AUTRES murs** passerait le contrôle ». **Conséquence pour ce chantier :**
   un cache attaché au `game_state` **y survit entre épisodes**. Pour les invariants §4.1 c'est
   **bénin** (dims constantes → même valeur). **Mais tout cache dépendant des murs (§4.3, option B)
@@ -273,29 +273,29 @@ des ennemis → mobile, non cachable.
   legacy_bfs|VECTORIZED_MOVE` → rien). Le docstring parle d'équivalence *de spécification*, pas
   d'une implémentation activable.
 - **Oracle brute-force en test uniquement** : `_oracle_pool`
-  ([test_movement_pool_build.py:288-387](../../../tests/unit/engine/test_movement_pool_build.py#L288)),
+  ([test_movement_pool_build.py](../../../tests/unit/engine/test_movement_pool_build.py)),
   « BFS Python de référence, niveau par niveau ».
 - ⚠️ **L'égalité STRICTE `set(pool) == _oracle_pool` n'est verrouillée que pour `ez=1` multi-hex**
-  ([test_movement_pool_build.py:480](../../../tests/unit/engine/test_movement_pool_build.py#L480)).
+  ([test_movement_pool_build.py](../../../tests/unit/engine/test_movement_pool_build.py)).
   Or la fonction ciblée ne tourne qu'en **`ez > 1`**, où les tests n'imposent que des **invariants**
-  (`_assert_euclidean_pool_invariants`, [:390](../../../tests/unit/engine/test_movement_pool_build.py#L390)),
+  (`_assert_euclidean_pool_invariants`, [:390](../../../tests/unit/engine/test_movement_pool_build.py)),
   pas l'égalité exacte. **Il n'existe donc aujourd'hui aucun test d'égalité stricte sur le pool
   réellement produit en training.**
 - 🔑 **Pour tester le chemin hex (`_build_multi_hex_vectorized`), le game_state doit porter
   `gym_training_mode=True`** (vérifié 2026-07-21) : `_move_distance_metric`
-  ([movement_handlers.py:1878](../../../engine/phase_handlers/movement_handlers.py#L1878)) lit
+  ([movement_handlers.py](../../../engine/phase_handlers/movement_handlers.py)) lit
   `distance_metric["move_gym"]` (=`hex`) en gym, sinon `["move"]` (=`euclidean`, chemin PvP
   `_euclidean_ground_anchor_multihex`). Les `_run_pool(...)` existants **ne posent pas** ce flag →
   ils testent le chemin **euclidean**, pas la cible. C'est pourquoi le trou existe. Un test
   d'égalité stricte de la cible doit donc forcer `gym_training_mode=True`.
 - ⚠️ **Limite de `_oracle_pool` : socles à `BASE_SIZE` SCALAIRE seulement.** Il fait
-  `int(BASE_SIZE)` ([test_movement_pool_build.py:306](../../../tests/unit/engine/test_movement_pool_build.py#L306))
+  `int(BASE_SIZE)` ([test_movement_pool_build.py](../../../tests/unit/engine/test_movement_pool_build.py))
   → **plante sur un socle ovale `[20,14]`** (17,7 % du training, §2). L'égalité stricte à l'oracle
   ne couvre donc PAS les ovales : ils relèvent du **test A/B cache-vs-sans-cache** (§8.1, sans
   oracle absolu) ou d'un **oracle étendu aux socles liste** à écrire si l'on veut leur égalité
   stricte. À prévoir : les ovales sont le 2ᵉ socle le plus fréquent.
 - **Déterminisme** verrouillé : `test_movement_build_valid_destinations_pool_deterministic`
-  ([:495](../../../tests/unit/engine/test_movement_pool_build.py#L495)) — deux appels → mêmes
+  ([:495](../../../tests/unit/engine/test_movement_pool_build.py)) — deux appels → mêmes
   ancres/zone. Utile pour un cache.
 - **Modèle d'équivalence randomisée réutilisable** : `test_deployment_footprint_erosion.py` et
   `test_project_pool_to_grid_equivalence.py` comparent vectorisé vs scalaire sur échantillon
@@ -317,7 +317,7 @@ des ennemis → mobile, non cachable.
    `pool == _oracle_pool` sur au moins un cas `ez>1` multi-hex représentatif du training (le pool
    qui tourne réellement n'a aujourd'hui aucun verrou d'égalité exacte, §7).
 3. **Non-régression PvP** : `scripts/pvp_smoke_test.py` (déjà : pool non vide, dans le board,
-   commit/preview cohérents — [pvp_smoke_test.py:329-380](../../../scripts/pvp_smoke_test.py#L329)).
+   commit/preview cohérents — [pvp_smoke_test.py](../../../scripts/pvp_smoke_test.py)).
    ⚠️ Il ne compare pas le **contenu** du pool à un oracle : il faut le compléter d'une comparaison
    de pool avant/après sur un board de dims **différentes** du training (ex. `44x60x1` ou
    `44x60x10`), pour couvrir explicitement le risque de clé §6.
@@ -348,10 +348,10 @@ invalidé** en cours de partie. La clé de cache murs = les dims plateau + l'emp
 (id de scénario/board suffit si le terrain est figé au déploiement).
 
 **(D3) Dépendance externe — TRANCHÉ : `numba` / `cython` ACCEPTÉS.**
-➜ **Option C ouverte** avec extension native pour le BFS `deque` (l.1770-1791), si le wavefront
+➜ **Option C ouverte** avec extension native pour le BFS `deque` (), si le wavefront
 NumPy pur ne suffit pas ou met en péril l'équivalence de `out_costs`. Contreparties à gérer : build,
 portabilité, CI. ⚠️ Rappel du code : `scipy.ndimage` a causé des **segfaults** ici
-([movement_handlers.py:1594](../../../engine/phase_handlers/movement_handlers.py#L1594)) — valider
+([movement_handlers.py](../../../engine/phase_handlers/movement_handlers.py)) — valider
 `numba`/`cython` sur l'environnement cible **avant** de s'y engager, et garder le chemin NumPy pur
 comme repli testable.
 
@@ -403,8 +403,8 @@ passer à la suivante, avec la non-régression PvP en garde-fou dur.
    distinction par-ancre/bbox détaillés dans
    **[`V11_move_build_acceleration.md`](V11_move_build_acceleration.md)** (§4, §6 — cadrage d'origine condensé le 2026-07-28).
    ✅ **FAIT (2026-07-21)** : L1 (`_FOOTPRINT_OFFSETS_CACHE`,
-   [hex_utils.py:1370](../../../engine/hex_utils.py#L1370)) et L_bbox (`_ground_move_bbox_window` +
-   `_bbox_window`, [movement_handlers.py:1523](../../../engine/phase_handlers/movement_handlers.py#L1523),
+   [hex_utils.py](../../../engine/hex_utils.py)) et L_bbox (`_ground_move_bbox_window` +
+   `_bbox_window`, [movement_handlers.py](../../../engine/phase_handlers/movement_handlers.py),
    FLY exclu) livrés et commités (`ff2293e0`, `6f268d38`). **numba NON retenu** (risque de segfault
    sur un run de 36 h), **BFS wavefront RÉFUTÉ** (plus lent à move 12), **L2b runs NumPy réfuté**
    (1,1× net pour la complexité induite).
