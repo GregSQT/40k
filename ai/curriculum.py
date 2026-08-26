@@ -522,20 +522,15 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
                     f"{source}: stages[{name}].training_config_overrides.model_params.vf_coef "
                     f"doit etre un nombre > 0 (got {v!r})"
                 )
-        if "learning_rate" in mp:
-            v = mp["learning_rate"]
-            if not (isinstance(v, dict) or (isinstance(v, (int, float)) and v > 0)):
-                raise ValueError(
-                    f"{source}: stages[{name}].training_config_overrides.model_params.learning_rate "
-                    f"doit etre un nombre > 0 ou un objet schedule (got {v!r})"
-                )
-        if "ent_coef" in mp:
-            v = mp["ent_coef"]
-            if not (isinstance(v, dict) or (isinstance(v, (int, float)) and v >= 0)):
-                raise ValueError(
-                    f"{source}: stages[{name}].training_config_overrides.model_params.ent_coef "
-                    f"doit etre un nombre >= 0 ou un objet schedule (got {v!r})"
-                )
+        for _key, _allow_zero in (("learning_rate", False), ("ent_coef", True)):
+            if _key in mp:
+                v = mp[_key]
+                _op = ">= 0" if _allow_zero else "> 0"
+                if not (isinstance(v, dict) or (isinstance(v, (int, float)) and (v >= 0 if _allow_zero else v > 0))):
+                    raise ValueError(
+                        f"{source}: stages[{name}].training_config_overrides.model_params.{_key} "
+                        f"doit etre un nombre {_op} ou un objet schedule (got {v!r})"
+                    )
     if "callback_params" in overrides:
         cp = overrides["callback_params"]
         if not isinstance(cp, dict):

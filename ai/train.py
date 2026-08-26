@@ -1672,7 +1672,7 @@ from ai.vec_normalize_utils import (
 
 from engine.episode_schedule import episodes_per_env
 from ai.curriculum import (
-    _check_eval_coherence,
+    _ROBUST_WINDOW_MIN,
     append_curriculum_log,
     copy_tensorboard_run,
     evaluate_stage_gate,
@@ -4671,12 +4671,24 @@ def _apply_stage_hp_overrides(cfg: Dict[str, Any], hp_overrides: Dict[str, Any])
                 f"appliquer les overrides (got {type(base_cp).__name__})"
             )
         base_cp.update(hp_overrides["callback_params"])
-        # Verification de coherence sur valeurs effectives : couvre le cas ou seul
-        # bot_eval_freq est overriddé (total_episodes vient alors de la config de base).
+        # Coherence effective : couvre le cas ou seul bot_eval_freq est overriddé,
+        # total_episodes venant alors de la config de base.
         if "bot_eval_freq" in base_cp:
             total_ep = cfg.get("total_episodes")
-            if isinstance(total_ep, int):
-                _check_eval_coherence("<apply>", "<stage>", total_ep, base_cp["bot_eval_freq"])
+            if total_ep is not None:
+                if not isinstance(total_ep, int):
+                    raise ValueError(
+                        f"_apply_stage_hp_overrides : total_episodes doit etre un entier "
+                        f"(got {type(total_ep).__name__!r})"
+                    )
+                freq = base_cp["bot_eval_freq"]
+                if total_ep < freq * _ROBUST_WINDOW_MIN:
+                    raise ValueError(
+                        f"_apply_stage_hp_overrides : total_episodes effectif ({total_ep}) < "
+                        f"bot_eval_freq ({freq}) * robust_window_min ({_ROBUST_WINDOW_MIN}) = "
+                        f"{freq * _ROBUST_WINDOW_MIN} : "
+                        "le modele robuste ne serait jamais selectionne."
+                    )
 
 
 def _install_stage_config_overrides(
