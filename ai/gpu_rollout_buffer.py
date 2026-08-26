@@ -61,7 +61,10 @@ class GpuMaskableDictRolloutBuffer(MaskableDictRolloutBuffer):
         self, batch_size: int | None = None
     ) -> Generator[MaskableDictRolloutBufferSamples, None, None]:
         assert self.full
-        indices = np.random.permutation(self.buffer_size * self.n_envs)
+        # Conversion GPU immédiate : évite n_batches conversions H→D dans _get_samples_gpu.
+        indices = th.from_numpy(
+            np.random.permutation(self.buffer_size * self.n_envs).astype(np.int64)
+        ).to(device=self.device)
 
         if not self.generator_ready:
             # Reshape (identique au parent).
@@ -96,18 +99,17 @@ class GpuMaskableDictRolloutBuffer(MaskableDictRolloutBuffer):
             start_idx += batch_size
 
     def _get_samples_gpu(
-        self, batch_inds: np.ndarray
+        self, batch_inds: th.Tensor
     ) -> MaskableDictRolloutBufferSamples:
-        idx = th.as_tensor(batch_inds, device=self.device, dtype=th.long)
         assert self._gpu_obs is not None, "get() doit être appelé avant _get_samples_gpu()"
         return MaskableDictRolloutBufferSamples(
-            observations={k: v[idx] for k, v in self._gpu_obs.items()},
-            actions=self._gpu_actions[idx],  # type: ignore[index]
-            old_values=self._gpu_values[idx].flatten(),  # type: ignore[index]
-            old_log_prob=self._gpu_log_probs[idx].flatten(),  # type: ignore[index]
-            advantages=self._gpu_advantages[idx].flatten(),  # type: ignore[index]
-            returns=self._gpu_returns[idx].flatten(),  # type: ignore[index]
-            action_masks=self._gpu_action_masks[idx].reshape(-1, self.mask_dims),  # type: ignore[index]
+            observations={k: v[batch_inds] for k, v in self._gpu_obs.items()},
+            actions=self._gpu_actions[batch_inds],  # type: ignore[index]
+            old_values=self._gpu_values[batch_inds].flatten(),  # type: ignore[index]
+            old_log_prob=self._gpu_log_probs[batch_inds].flatten(),  # type: ignore[index]
+            advantages=self._gpu_advantages[batch_inds].flatten(),  # type: ignore[index]
+            returns=self._gpu_returns[batch_inds].flatten(),  # type: ignore[index]
+            action_masks=self._gpu_action_masks[batch_inds].reshape(-1, self.mask_dims),  # type: ignore[index]
         )
 
     # _get_samples() du parent n'est plus appelé via get() — laissé intact pour

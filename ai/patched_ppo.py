@@ -56,6 +56,10 @@ def _env_has_inline_masks(env: VecEnv) -> bool:
     return isinstance(vec, MaskableSubprocVecEnv)
 
 
+def _mean_item(tensors: list[th.Tensor]) -> float:
+    return th.stack(tensors).mean().item() if tensors else float("nan")
+
+
 class PatchedMaskablePPO(MaskablePPO):
     """MaskablePPO avec optimisations learner Phase 2 (GPU buffer, logging différé, single RPC)."""
 
@@ -95,6 +99,7 @@ class PatchedMaskablePPO(MaskablePPO):
         approx_kl_divs_t: list[th.Tensor] = []
         approx_kl_divs: list[float] = []
         continue_training = True
+        loss: th.Tensor = th.tensor(float("nan"))
 
         _t0_update = time.perf_counter()
         for epoch in range(self.n_epochs):
@@ -114,7 +119,8 @@ class PatchedMaskablePPO(MaskablePPO):
                 if self.normalize_advantage:
                     advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
-                ratio = th.exp(log_prob - rollout_data.old_log_prob)
+                log_ratio = log_prob - rollout_data.old_log_prob
+                ratio = th.exp(log_ratio)
 
                 policy_loss_1 = advantages * ratio
                 policy_loss_2 = advantages * th.clamp(ratio, 1 - clip_range, 1 + clip_range)
@@ -142,7 +148,6 @@ class PatchedMaskablePPO(MaskablePPO):
                 loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
 
                 with th.no_grad():
-                    log_ratio = log_prob - rollout_data.old_log_prob
                     approx_kl_div_t = th.mean((th.exp(log_ratio) - 1) - log_ratio)
 
                 if self.target_kl is not None:
@@ -169,10 +174,6 @@ class PatchedMaskablePPO(MaskablePPO):
                 break
 
         self._n_updates += 1
-        # Un seul .item() par métrique (5 syncs au lieu de ~225).
-        def _mean_item(tensors: list[th.Tensor]) -> float:
-            return th.stack(tensors).mean().item() if tensors else float("nan")
-
         pg_loss_mean = _mean_item(pg_losses_t)
         clip_frac_mean = _mean_item(clip_fractions_t)
         value_loss_mean = _mean_item(value_losses_t)
@@ -196,7 +197,7 @@ class PatchedMaskablePPO(MaskablePPO):
         self.logger.record("train/value_loss", value_loss_mean)
         self.logger.record("train/approx_kl", approx_kl_mean)
         self.logger.record("train/clip_fraction", clip_frac_mean)
-        self.logger.record("train/loss", loss.item())  # noqa: F821 — dernier minibatch
+        self.logger.record("train/loss", loss.item())
         self.logger.record("train/explained_variance", explained_var)
         self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
         self.logger.record("train/clip_range", clip_range)
