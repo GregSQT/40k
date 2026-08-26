@@ -1029,14 +1029,11 @@ def _impl_enforced_name() -> str:
     Utiliser un nom découvert dynamiquement évite de coder en dur un fichier qui pourrait être
     renommé — ce qui rendrait le test vert mais vacueux (la mutation ne serait jamais atteinte).
     """
-    default_names = frozenset(
-        pathlib.PurePosixPath(doc).name for doc in cdr.DEFAULT_DOCS
-    )
-    enforced_impl = cdr.ANCHOR_ENFORCED - default_names
+    enforced_impl = cdr.ANCHOR_ENFORCED - cdr.DEFAULT_DOC_NAMES
     assert enforced_impl, (
         "Aucun doc Implémentation/ dans ANCHOR_ENFORCED — _impl_doc_basenames() est silencieux"
     )
-    return next(iter(sorted(enforced_impl)))
+    return sorted(enforced_impl)[0]
 
 
 def test_impl_doc_line_anchor_is_detected(tmp_path: pathlib.Path) -> None:
@@ -1083,10 +1080,7 @@ def test_impl_real_corpus_has_no_line_anchor() -> None:
     rougit, un doc de Documentation/Implémentation/ a reçu un numéro de ligne lors d'une
     livraison sans que ce tour ne le corrige.
     """
-    try:
-        has_broken, lines = cdr.report_impl_anchors()
-    except cdr.SourceUnavailable as exc:
-        pytest.skip(str(exc))
+    has_broken, lines = cdr.report_impl_anchors()
     assert not has_broken, "\n".join(lines)
 
 
