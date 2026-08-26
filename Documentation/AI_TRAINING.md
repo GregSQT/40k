@@ -2352,16 +2352,16 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x1 --scenario bot 
 ## 📝 QUICK REFERENCE CHEAT SHEET
 
 ```bash
-# Training commands (replace <agent_key> e.g. Infantry_Troop_RangedTroop)
-python ai/train.py --agent <agent_key> --training-config debug --rewards-config <agent_key> --scenario bot --new    # Fast test
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --new  # Standard training (depuis zéro)
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --append  # Continue le modèle canonique
-python ai/train.py --agent <agent_key> --scenario bot --resume-from ai/models/<agent_key>/ppo_checkpoint_640000_steps.zip  # Reprend un checkpoint
-python ai/train.py --agent <agent_key> --training-config default --rewards-config <agent_key> --scenario bot --new --step    # With step logging
-python ai/train.py --agent <agent_key> --scenario bot --new --mode CPU   # Pin device (auto-select = GPU on V11 Dict obs)
+# Training commands — agent ArmageddonAgent, résolution 1 (x1) ou 5 (x5_new)
+python3 ai/train.py --agent ArmageddonAgent --training-config x1_debug --scenario bot --resolution 1 --new   # Test rapide
+python3 ai/train.py --agent ArmageddonAgent --training-config x1       --scenario bot --resolution 1 --new   # Entraînement x1 depuis zéro
+python3 ai/train.py --agent ArmageddonAgent --training-config x1_long  --scenario bot --resolution 1 --new   # Entraînement x1 long depuis zéro
+python3 ai/train.py --agent ArmageddonAgent --training-config x5_new   --scenario bot --resolution 5 --new   # Entraînement x5 depuis zéro
+python3 ai/train.py --agent ArmageddonAgent --training-config x5_long  --scenario bot --resolution 5 --new   # Entraînement x5 long depuis zéro
+python3 ai/train.py --agent ArmageddonAgent --training-config x1       --scenario bot --resolution 1 --new --step  # Avec step logging
 
 # Evaluation (no training)
-python ai/train.py --agent <agent_key> --test-only --test-episodes 20
+python3 ai/train.py --agent ArmageddonAgent --training-config x1 --resolution 1 --test-only --step
 
 # Monitoring
 tensorboard --logdir=./tensorboard/
