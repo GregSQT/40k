@@ -180,6 +180,7 @@ DEFAULT_DOC_NAMES: frozenset[str] = frozenset(
     pathlib.PurePosixPath(doc).name for doc in DEFAULT_DOCS
 )
 
+
 class _Unset:
     pass
 
@@ -1073,7 +1074,7 @@ def check_anchors(
     le FAIT (le nom est-il un fichier du dépôt ?) et non sur une liste de suffixes, qui se serait
     périmée à son tour.
     """
-    if isinstance(enforcement_set, _Unset):
+    if enforcement_set is _ANCHOR_UNSET:
         enforcement_set = _get_anchor_enforced()
     if enforcement_set is not None and doc_path.name not in enforcement_set:
         return []
