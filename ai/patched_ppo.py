@@ -163,10 +163,10 @@ class PatchedMaskablePPO(MaskablePPO):
                 th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 self.policy.optimizer.step()
 
-            self._n_updates += 1
             if not continue_training:
                 break
 
+        self._n_updates += 1
         # Un seul .item() par métrique (5 syncs au lieu de ~225).
         def _mean_item(tensors: list[th.Tensor]) -> float:
             return th.stack(tensors).mean().item() if tensors else float("nan")

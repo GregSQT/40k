@@ -380,6 +380,72 @@ class TestPatchedTrainNumericalParity:
             val = recorded[key]
             assert math.isfinite(val), f"{key!r} = {val} (non fini)"
 
+    def test_n_updates_incremented_once_per_train_call(self):
+        """_n_updates doit augmenter de 1 par appel à train(), peu importe n_epochs."""
+        from ai.patched_ppo import PatchedMaskablePPO
+        from sb3_contrib.common.maskable.buffers import MaskableDictRolloutBuffer
+        from gymnasium import spaces
+        from unittest.mock import patch as _patch
+
+        obs_space = _make_dict_obs_space()
+        act_space = _make_discrete_action_space(8)
+
+        with _patch.object(PatchedMaskablePPO, "_setup_model"):
+            model = PatchedMaskablePPO.__new__(PatchedMaskablePPO)
+
+        from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+        policy_mock = MagicMock(spec=MaskableActorCriticPolicy)
+        policy_mock.parameters.return_value = iter([])
+        n = 8
+
+        def fake_evaluate_actions(obs, actions, action_masks=None):
+            w = torch.ones(1, requires_grad=True)
+            values = (torch.zeros(n) * w).flatten()
+            log_prob = torch.full((n,), -2.0) * w
+            entropy = torch.zeros(n) * w
+            return values, log_prob, entropy
+
+        policy_mock.evaluate_actions.side_effect = fake_evaluate_actions
+        policy_mock.optimizer = MagicMock()
+
+        rng = np.random.default_rng(1)
+        buf = MaskableDictRolloutBuffer(
+            buffer_size=4, observation_space=obs_space, action_space=act_space,
+            device="cpu", gamma=0.99, gae_lambda=0.95, n_envs=2,
+        )
+        for step in range(4):
+            obs_b = {k: rng.standard_normal((2,) + v.shape).astype(np.float32)
+                     for k, v in obs_space.spaces.items()}
+            masks = np.ones((2, 8), dtype=bool)
+            buf.add(obs_b, np.zeros((2, 1), dtype=np.float32), np.ones(2, dtype=np.float32),
+                    np.zeros(2, dtype=bool), torch.zeros(2), torch.full((2,), -2.0),
+                    action_masks=masks)
+        buf.compute_returns_and_advantage(torch.zeros(2), np.zeros(2, dtype=bool))
+
+        model.policy = policy_mock
+        model.rollout_buffer = buf
+        model.n_epochs = 4  # clé du test : > 1
+        model.batch_size = 8
+        model.normalize_advantage = True
+        model.ent_coef = 0.01
+        model.vf_coef = 0.5
+        model.max_grad_norm = 0.5
+        model.target_kl = None
+        model.clip_range_vf = None
+        model._current_progress_remaining = 1.0
+        model._n_updates = 0
+        model.verbose = 0
+        model.action_space = act_space
+        model.clip_range = MagicMock(return_value=0.2)
+        model.lr_schedule = MagicMock(return_value=1e-4)
+        object.__setattr__(model, "_logger", MagicMock())
+
+        model.train()
+
+        assert model._n_updates == 1, (
+            f"_n_updates={model._n_updates} — doit être 1 par appel train(), pas n_epochs={model.n_epochs}"
+        )
+
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 # 2.3 — _env_has_inline_masks + extraction des masques depuis infos
