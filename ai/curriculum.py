@@ -448,6 +448,20 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
         _validate_stage_hp_overrides(name, stage, source)
 
 
+_ROBUST_WINDOW_MIN = 3
+
+
+def _check_eval_coherence(source: str, name: str, total_episodes: int, bot_eval_freq: int) -> None:
+    """Leve ValueError si total_episodes ne permet pas robust_window_min evaluations."""
+    if total_episodes < bot_eval_freq * _ROBUST_WINDOW_MIN:
+        raise ValueError(
+            f"{source}: stages[{name}].training_config_overrides — "
+            f"total_episodes ({total_episodes}) < bot_eval_freq ({bot_eval_freq}) * "
+            f"robust_window_min ({_ROBUST_WINDOW_MIN}) = {bot_eval_freq * _ROBUST_WINDOW_MIN} : "
+            "le modele robuste ne serait jamais selectionne (pas assez de points de mesure)."
+        )
+
+
 def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) -> None:
     """Valide le bloc `training_config_overrides` d'une etape learner si present.
 
@@ -458,15 +472,15 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
     overrides = stage.get("training_config_overrides")
     if overrides is None:
         return
+    if not isinstance(overrides, dict):
+        raise TypeError(
+            f"{source}: stages[{name}].training_config_overrides doit etre un objet JSON."
+        )
     if is_exploiter_stage(stage):
         raise ValueError(
             f"{source}: stages[{name}].training_config_overrides n'est pas autorise sur une "
             "etape exploiteur : le protocole exploiteur exige la config exacte de "
             "exploiter_config.training_config_required."
-        )
-    if not isinstance(overrides, dict):
-        raise TypeError(
-            f"{source}: stages[{name}].training_config_overrides doit etre un objet JSON."
         )
     unknown_top = sorted(set(overrides) - STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS)
     if unknown_top:
@@ -508,6 +522,20 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
                     f"{source}: stages[{name}].training_config_overrides.model_params.vf_coef "
                     f"doit etre un nombre > 0 (got {v!r})"
                 )
+        if "learning_rate" in mp:
+            v = mp["learning_rate"]
+            if not (isinstance(v, dict) or (isinstance(v, (int, float)) and v > 0)):
+                raise ValueError(
+                    f"{source}: stages[{name}].training_config_overrides.model_params.learning_rate "
+                    f"doit etre un nombre > 0 ou un objet schedule (got {v!r})"
+                )
+        if "ent_coef" in mp:
+            v = mp["ent_coef"]
+            if not (isinstance(v, dict) or (isinstance(v, (int, float)) and v >= 0)):
+                raise ValueError(
+                    f"{source}: stages[{name}].training_config_overrides.model_params.ent_coef "
+                    f"doit etre un nombre >= 0 ou un objet schedule (got {v!r})"
+                )
     if "callback_params" in overrides:
         cp = overrides["callback_params"]
         if not isinstance(cp, dict):
@@ -529,21 +557,11 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
                         f"{source}: stages[{name}].training_config_overrides.callback_params.{key} "
                         f"doit etre un entier > 0 (got {val!r})"
                     )
-        # Coherence : si total_episodes ET bot_eval_freq sont tous deux dans les overrides,
-        # verifier que le nombre d'evaluations intermediaires couvre au moins robust_window=3.
-        # (La valeur exacte de robust_window reste dans x1_long ; on utilise 3 comme minimum
-        #  absolu — aucun profil long ne descend en dessous.)
+        # Detection precoce de l'incoherence quand les deux valeurs sont dans les overrides.
+        # La verification sur valeurs EFFECTIVES (override partiel possible) est faite dans
+        # _apply_stage_hp_overrides apres application, ou total_episodes est toujours connu.
         if "bot_eval_freq" in cp and "total_episodes" in overrides:
-            total_ep = overrides["total_episodes"]
-            freq = cp["bot_eval_freq"]
-            min_robust_window = 3
-            if total_ep < freq * min_robust_window:
-                raise ValueError(
-                    f"{source}: stages[{name}].training_config_overrides — "
-                    f"total_episodes ({total_ep}) < bot_eval_freq ({freq}) * robust_window_min "
-                    f"({min_robust_window}) = {freq * min_robust_window} : le modele robuste "
-                    f"ne serait jamais selectionne (pas assez de points de mesure)."
-                )
+            _check_eval_coherence(source, name, overrides["total_episodes"], cp["bot_eval_freq"])
 
 
 def get_stage_hp_overrides(stage: Dict[str, Any]) -> Dict[str, Any]:

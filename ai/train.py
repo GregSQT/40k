@@ -1672,6 +1672,7 @@ from ai.vec_normalize_utils import (
 
 from engine.episode_schedule import episodes_per_env
 from ai.curriculum import (
+    _check_eval_coherence,
     append_curriculum_log,
     copy_tensorboard_run,
     evaluate_stage_gate,
@@ -4656,12 +4657,26 @@ def _apply_stage_hp_overrides(cfg: Dict[str, Any], hp_overrides: Dict[str, Any])
         cfg["total_episodes"] = hp_overrides["total_episodes"]
     if "model_params" in hp_overrides:
         base_mp = cfg.get("model_params")
-        if isinstance(base_mp, dict):
-            base_mp.update(hp_overrides["model_params"])
+        if not isinstance(base_mp, dict):
+            raise ValueError(
+                f"_apply_stage_hp_overrides : cfg['model_params'] doit etre un dict pour "
+                f"appliquer les overrides (got {type(base_mp).__name__})"
+            )
+        base_mp.update(hp_overrides["model_params"])
     if "callback_params" in hp_overrides:
         base_cp = cfg.get("callback_params")
-        if isinstance(base_cp, dict):
-            base_cp.update(hp_overrides["callback_params"])
+        if not isinstance(base_cp, dict):
+            raise ValueError(
+                f"_apply_stage_hp_overrides : cfg['callback_params'] doit etre un dict pour "
+                f"appliquer les overrides (got {type(base_cp).__name__})"
+            )
+        base_cp.update(hp_overrides["callback_params"])
+        # Verification de coherence sur valeurs effectives : couvre le cas ou seul
+        # bot_eval_freq est overriddé (total_episodes vient alors de la config de base).
+        if "bot_eval_freq" in base_cp:
+            total_ep = cfg.get("total_episodes")
+            if isinstance(total_ep, int):
+                _check_eval_coherence("<apply>", "<stage>", total_ep, base_cp["bot_eval_freq"])
 
 
 def _install_stage_config_overrides(

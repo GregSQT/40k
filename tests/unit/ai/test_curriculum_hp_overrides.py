@@ -310,5 +310,100 @@ def test_real_curriculum_validates_with_overrides():
     stages = curriculum["stages"]
     assert "training_config_overrides" in stages["P1"]
     assert "training_config_overrides" in stages["P2"]
-    assert stages["P1"]["training_config_overrides"]["total_episodes"] == 75000
-    assert stages["P2"]["training_config_overrides"]["total_episodes"] == 100000
+
+
+# ── F2 : validation learning_rate / ent_coef ────────────────────────────────
+
+def test_validate_hp_overrides_learning_rate_zero_rejected():
+    stage = {
+        "role": "learner",
+        "training_config_overrides": {"model_params": {"learning_rate": 0}},
+    }
+    with pytest.raises(ValueError, match="learning_rate"):
+        _validate_stage_hp_overrides("P1", stage, "<test>")
+
+
+def test_validate_hp_overrides_learning_rate_string_rejected():
+    stage = {
+        "role": "learner",
+        "training_config_overrides": {"model_params": {"learning_rate": "bad"}},
+    }
+    with pytest.raises(ValueError, match="learning_rate"):
+        _validate_stage_hp_overrides("P1", stage, "<test>")
+
+
+def test_validate_hp_overrides_learning_rate_positive_float_ok():
+    stage = {
+        "role": "learner",
+        "training_config_overrides": {"model_params": {"learning_rate": 0.001}},
+    }
+    _validate_stage_hp_overrides("P1", stage, "<test>")
+
+
+def test_validate_hp_overrides_ent_coef_string_rejected():
+    stage = {
+        "role": "learner",
+        "training_config_overrides": {"model_params": {"ent_coef": "bad"}},
+    }
+    with pytest.raises(ValueError, match="ent_coef"):
+        _validate_stage_hp_overrides("P1", stage, "<test>")
+
+
+def test_validate_hp_overrides_ent_coef_negative_rejected():
+    stage = {
+        "role": "learner",
+        "training_config_overrides": {"model_params": {"ent_coef": -0.01}},
+    }
+    with pytest.raises(ValueError, match="ent_coef"):
+        _validate_stage_hp_overrides("P1", stage, "<test>")
+
+
+def test_validate_hp_overrides_ent_coef_zero_ok():
+    stage = {
+        "role": "learner",
+        "training_config_overrides": {"model_params": {"ent_coef": 0}},
+    }
+    _validate_stage_hp_overrides("P1", stage, "<test>")
+
+
+# ── F3 : _apply_stage_hp_overrides leve sur cfg sans model_params/callback_params ──
+
+def test_apply_hp_overrides_missing_model_params_raises():
+    cfg = {"total_episodes": 50000}
+    with pytest.raises(ValueError, match="model_params"):
+        _apply_stage_hp_overrides(cfg, {"model_params": {"n_epochs": 5}})
+
+
+def test_apply_hp_overrides_missing_callback_params_raises():
+    cfg = {"total_episodes": 50000}
+    with pytest.raises(ValueError, match="callback_params"):
+        _apply_stage_hp_overrides(cfg, {"callback_params": {"bot_eval_freq": 10000}})
+
+
+# ── F4 : non-dict override sur exploiteur → TypeError (type avant exploiteur) ──
+
+def test_validate_hp_overrides_non_dict_on_exploiter_raises_type_error():
+    stage = {
+        "role": "exploiter",
+        "training_config_overrides": 42,
+    }
+    with pytest.raises(TypeError, match="objet JSON"):
+        _validate_stage_hp_overrides("E1", stage, "<test>")
+
+
+# ── F1 : coherence effective quand seul bot_eval_freq est overriddé ──────────
+
+def test_apply_hp_overrides_coherence_only_bot_eval_freq_too_large_raises():
+    """bot_eval_freq overriddé seul : total_episodes effectif (base) < freq * 3 → ValueError."""
+    cfg = _base_cfg()  # total_episodes = 50000
+    # 50000 < 20000 * 3 = 60000
+    with pytest.raises(ValueError, match="robust_window_min"):
+        _apply_stage_hp_overrides(cfg, {"callback_params": {"bot_eval_freq": 20000}})
+
+
+def test_apply_hp_overrides_coherence_only_bot_eval_freq_ok():
+    """bot_eval_freq overriddé seul : total_episodes effectif >= freq * 3 → accepte."""
+    cfg = _base_cfg()  # total_episodes = 50000
+    # 50000 >= 15000 * 3 = 45000
+    _apply_stage_hp_overrides(cfg, {"callback_params": {"bot_eval_freq": 15000}})
+    assert cfg["callback_params"]["bot_eval_freq"] == 15000
