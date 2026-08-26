@@ -180,7 +180,11 @@ DEFAULT_DOC_NAMES: frozenset[str] = frozenset(
     pathlib.PurePosixPath(doc).name for doc in DEFAULT_DOCS
 )
 
-_ANCHOR_UNSET: object = object()
+class _Unset:
+    pass
+
+
+_ANCHOR_UNSET = _Unset()
 
 
 @functools.lru_cache(maxsize=1)
@@ -1056,7 +1060,7 @@ def check_values(doc_path: pathlib.Path) -> tuple[int, list[str]]:
 def check_anchors(
     doc_path: pathlib.Path,
     *,
-    enforcement_set: frozenset[str] | None | object = _ANCHOR_UNSET,
+    enforcement_set: frozenset[str] | None | _Unset = _ANCHOR_UNSET,
 ) -> list[str]:
     """Passe 4 — aucun renvoi `fichier.py:123`.
 
@@ -1069,7 +1073,7 @@ def check_anchors(
     le FAIT (le nom est-il un fichier du dépôt ?) et non sur une liste de suffixes, qui se serait
     périmée à son tour.
     """
-    if enforcement_set is _ANCHOR_UNSET:
+    if isinstance(enforcement_set, _Unset):
         enforcement_set = _get_anchor_enforced()
     if enforcement_set is not None and doc_path.name not in enforcement_set:
         return []
