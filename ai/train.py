@@ -4690,7 +4690,7 @@ def _install_stage_config_overrides(
     laisserait les autres sans, en silence. Le decorateur s'installe PAR-DESSUS celui de
     `--param` quand les deux sont demandes : ils ne touchent pas les memes cles.
 
-    Trois effets :
+    Deux effets :
 
     - `opponent_mix` : le pool de l'etape, quand elle en a un.
     - `hp_overrides` : surcharges HP declarees dans `training_config_overrides` de l'etape
