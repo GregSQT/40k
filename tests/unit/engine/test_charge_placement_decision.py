@@ -173,6 +173,93 @@ class TestChargeBuildValidPlanIntents:
         plan = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=99)
         assert plan is not None
 
+    def test_cache_key_separates_by_intent(self) -> None:
+        """intent est dans _cbvp_key : deux appels avec intents différents créent deux
+        entrées distinctes dans _charge_plan_cache, et le troisième appel retourne
+        l'objet du cache (même référence).
+
+        Régression directe du fix : avant, intent était absent de la clé et
+        arm_charge_placement_decision recevait le plan intent=0 pour toutes les
+        intentions — L10 charge placement silencieusement non-fonctionnel.
+        """
+        gs = self._gs()
+        plan_0 = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
+        plan_4 = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=4)
+        assert plan_0 is not None
+        assert plan_4 is not None
+
+        cache = gs["_charge_plan_cache"]
+        # Clé : (squad_id, targets, roll, intent, version) — index 3 = intent.
+        assert any(k[3] == 0 for k in cache), "intent=0 doit avoir sa propre entrée"
+        assert any(k[3] == 4 for k in cache), "intent=4 doit avoir sa propre entrée"
+
+        # Troisième appel intent=0 : cache hit → même objet (identité).
+        plan_0_bis = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
+        assert plan_0_bis is plan_0, "le second appel intent=0 doit retourner la valeur du cache"
+
+    def test_cache_intent_produces_geometrically_distinct_plans_for_multi_model_squad(self) -> None:
+        """Avec 2 figurines, intent=0 (Serré) et intent=4 (Étalé) produisent des plans
+        différents : la seconde figurine est placée en formation serrée vs dispersée.
+
+        Scénario : att={m0=(3,3), m1=(3,9)}, tgt=(10,6), roll=12.
+        m0 place identique pour les deux intents (plan vide → gap=0 pour tous les candidats).
+        m1 diverge : intent=0 minimise d_orig puis gap → (9,6) ; intent=4 maximise gap → (10,7).
+        """
+        att = {
+            **unit_invariants(),
+            "id": "att", "player": 1, "col": 3, "row": 3,
+            "HP_CUR": 2, "HP_MAX": 2, "VALUE": 200, "OC": 2, "T": 4,
+            "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
+            "RNG_WEAPONS": [], "CC_WEAPONS": [], "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5,
+            "BASE_SHAPE": "round", "MOVE": 6, "UNIT_RULES": [],
+            "models": [
+                {"col": 3, "row": 3, "HP_CUR": 1, "HP_MAX": 1, "VALUE": 100},
+                {"col": 3, "row": 9, "HP_CUR": 1, "HP_MAX": 1, "VALUE": 100},
+            ],
+        }
+        tgt = _unit("tgt", 2, 10, 6)
+        config_with_cohesion = {
+            "game_rules": {
+                "engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35,
+                "unit_model_cohesion_range": 6, "unit_global_cohesion_range": 30,
+                "squad_min_neighbors": 1, "cohesion_distance_mode": "footprint",
+            },
+            "charge": {"charge_max_distance": 15},
+            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+            "move": {
+                "can_move_through_enemy_engagement_zone": True,
+                "can_move_through_enemy_model": False,
+                "can_move_through_friendly_model": True,
+            },
+        }
+        units = [att, tgt]
+        from tests._state_invariants import turn_state_invariants
+        gs: Dict[str, Any] = {
+            **turn_state_invariants(),
+            "config": config_with_cohesion,
+            "board_cols": 30, "board_rows": 25,
+            "current_player": 1, "phase": "charge",
+            "wall_hexes": set(),
+            "units": units,
+            "unit_by_id": {str(u["id"]): u for u in units},
+            "units_charged": set(), "units_cannot_charge": set(),
+            "_unit_move_version": 0,
+            "inches_to_subhex": 1, "_fly_declared_charge": {},
+            "objectives": [], "pending_agent_decision": None,
+        }
+        build_units_cache(gs)
+        build_enemy_adjacent_hexes(gs, 1)
+        build_enemy_adjacent_hexes(gs, 2)
+
+        plan_0 = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=12, intent=0)
+        plan_4 = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=12, intent=4)
+        assert plan_0 is not None, "intent=0 doit produire un plan valide"
+        assert plan_4 is not None, "intent=4 doit produire un plan valide"
+        assert plan_0 != plan_4, (
+            "intent=0 (Serré) et intent=4 (Étalé) doivent placer la 2e figurine différemment ; "
+            f"plan_0={plan_0}, plan_4={plan_4}"
+        )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # arm_charge_placement_decision
