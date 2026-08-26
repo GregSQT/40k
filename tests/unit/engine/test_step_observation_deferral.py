@@ -57,18 +57,36 @@ class _PoolDecoder:
 class _RecordingObsBuilder:
     def __init__(self) -> None:
         self.squad_builds = 0
+        self._obs_scratch: Optional[Dict[str, np.ndarray]] = None
+        self._full_obs_scratch: Optional[Dict[str, np.ndarray]] = None
 
     def build_squad_observation(self, game_state, squad_id):
         _ = (game_state, squad_id)
         self.squad_builds += 1
-        return {"x": np.zeros(2, dtype=np.float32)}
+        self._empty_squad_observation()
+        return self._obs_scratch
 
-    def build_squad_grid(self, game_state, squad_id):
+    def build_squad_grid(self, game_state, squad_id, out=None):
         _ = (game_state, squad_id)
+        if out is not None:
+            out.fill(0)
+            return out
         return np.zeros((1, 1, 1), dtype=np.float32)
 
     def _empty_squad_observation(self):
-        return {"x": np.zeros(2, dtype=np.float32)}
+        if self._obs_scratch is None:
+            self._obs_scratch = {"x": np.zeros(2, dtype=np.float32)}
+        else:
+            for arr in self._obs_scratch.values():
+                arr.fill(0)
+        return self._obs_scratch
+
+    def _ensure_full_obs_scratch(self):
+        assert self._obs_scratch is not None
+        if self._full_obs_scratch is None:
+            self._full_obs_scratch = dict(self._obs_scratch)
+            self._full_obs_scratch["grid"] = np.zeros((1, 1, 1), dtype=np.float32)
+        return self._full_obs_scratch
 
 
 class _EngineStub:

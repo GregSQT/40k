@@ -8771,18 +8771,18 @@ class W40KEngine(gym.Env):
         def _zero_obs():
             if not tensor:
                 return None
-            from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
-
-            obs = self.obs_builder._empty_squad_observation()
-            obs["grid"] = np.zeros((GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32)
-            return obs
+            self.obs_builder._empty_squad_observation()  # remet _obs_scratch à zéro
+            full = self.obs_builder._ensure_full_obs_scratch()
+            full["grid"].fill(0)
+            return full
 
         def _build_for_squad(squad_id: str):  # get allowed
             if not tensor:
                 return None
-            obs = self.obs_builder.build_squad_observation(self.game_state, squad_id)
-            obs["grid"] = self.obs_builder.build_squad_grid(self.game_state, squad_id)
-            return obs
+            self.obs_builder.build_squad_observation(self.game_state, squad_id)  # remplit _obs_scratch
+            full = self.obs_builder._ensure_full_obs_scratch()
+            self.obs_builder.build_squad_grid(self.game_state, squad_id, out=full["grid"])
+            return full
 
         # Retrait pour cohérence (P3-0, 03.03) : l'observateur est l'escouade concernée par le
         # pending. Ses self_models_cont/bin décrivent les figurines parmi lesquelles choisir.
