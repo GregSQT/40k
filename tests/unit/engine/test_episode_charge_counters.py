@@ -23,7 +23,6 @@ est le seul a pouvoir instancier les DEUX sieges.
 from __future__ import annotations
 
 import json
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -32,10 +31,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
-
-from smoke_t5_bare import MELEE_SCENARIO  # noqa: E402
+from smoke_t5_bare import MELEE_SCENARIO
 
 from ai.metrics_tracker import W40KMetricsTracker  # noqa: E402
 from ai.unit_registry import UnitRegistry  # noqa: E402

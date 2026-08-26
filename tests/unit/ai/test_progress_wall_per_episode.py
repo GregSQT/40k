@@ -31,23 +31,13 @@ from __future__ import annotations
 import re
 import sys
 import time
-from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import pytest
 
+from ab_bench import _PROGRESS_RE, read_loop_elapsed, read_steady_rate
 from ai.training_callbacks import EpisodeTerminationCallback
 from tests.unit.shared._stubs import RecordingStdout
-
-# `scripts/` n'est pas un package : les bancs s'importent par le chemin, comme le font deja
-# tests/unit/scripts/test_ab_n_steps_contract.py et test_ab_worktree_guard.py. Une seule fois
-# ici, au niveau module : deux tests de ce fichier ont besoin du parseur des bancs, et deux
-# copies d'un chemin en dur se desynchronisent au premier deplacement de fichier.
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
-if str(_PROJECT_ROOT / "scripts") not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT / "scripts"))
-
-from ab_bench import _PROGRESS_RE, read_loop_elapsed, read_steady_rate  # noqa: E402
 
 
 class _FakeClock:

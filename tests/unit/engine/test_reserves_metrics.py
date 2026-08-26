@@ -44,7 +44,6 @@ STRUCTURE DES TESTS
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any, Dict
 
@@ -55,8 +54,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ARMAGEDDON_SCENARIOS = (
     PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
 )
-
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from ai.metrics_tracker import W40KMetricsTracker  # noqa: E402
 from ai.unit_registry import UnitRegistry  # noqa: E402

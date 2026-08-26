@@ -17,15 +17,9 @@ la meme configuration.
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any, Dict
 
 import pytest
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 
 def _box(n: int):

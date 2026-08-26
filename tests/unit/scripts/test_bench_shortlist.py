@@ -9,15 +9,9 @@ INVARIANTS VÉRIFIÉS
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 import ai.bot_doctrines as doc
 import bench_shortlist as bench
