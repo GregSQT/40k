@@ -292,6 +292,9 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | doc | ✅ fix-sentinel-isinstance check_doc_references (2026-08-26) — restaure le check d'identité `is` sur le sentinel _ANCHOR_UNSET dans check_doc_references.py | — | ⚡ |
 | infra | ✅ item 1.7 buffers numpy observation (2026-08-26) — ~27 np.zeros/build supprimés : buffers pré-alloués réutilisés dans observation_builder | [infra.md#perf-entrainement](infra.md#perf-entrainement) | ⚡ |
 | infra | ✅ Phase 2 pipeline SB3 learner items 2.1–2.3 (2026-08-26) — GpuMaskableDictRolloutBuffer (upload H2D ×1/rollout), accumulation GPU des métriques PPO (~225 syncs éliminés), MaskableSubprocVecEnv+PatchedMaskablePPO (RPC masks inline) ; 11 tests rouge/vert | [infra.md#perf-entrainement](infra.md#perf-entrainement) | ⚡ |
+| tests+infra | ✅ purge erreurs logs check_ai_rules/pytest/pyright (2026-08-26) — 18 fichiers corrigés, 0 erreur après correction | — | ⚡ |
+| tests | ✅ fix 119 tests rouges bugs A–O (2026-08-26) — charge id, unit_by_id fixtures, analyzer, obs, rollout ; suite verte | — | ⚡ |
+| infra+moteur | ✅ /code-review findings + /simplify (2026-08-26) — garde batch obsolète move cache supprimée (shared_utils), walrus models_cache obs (observation_builder), parser.error bot_zone_direct, pop _ez_fp redondant (fight_handlers), re-export gs_with_units (_fabriques) | — | ⚡ |
 
 ### Bloqués par une décision utilisateur
 
