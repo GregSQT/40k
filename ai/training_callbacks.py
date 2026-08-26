@@ -2089,7 +2089,7 @@ class BotEvaluationCallback(BaseCallback):
                     require_key(results, f'{_side}_roster_bot_win_rates'),
                     step=int(eval_marker),
                 )
-            # §4.D.4 : profil comportemental par adversaire (VP, zones, pertes, charges,
+            # Profil comportemental par adversaire (VP, zones, pertes, charges,
             # tirs — ventiles par issue). Zero episode supplementaire : les donnees sont
             # collectees au fil des episodes d'evaluation normaux (bot_evaluation.py).
             if "behavioral_profile" in results:
