@@ -73,7 +73,6 @@ from ai.bot_registry import (  # noqa: E402
 
 # HOLDOUT_BOT_NAMES inclut a la fois BENCHMARK et SEALED_HOLDOUT :
 # ni l'un ni l'autre ne pilote combined/worst_bot/selection (V11 §10.5).
-# Seule difference : les benchmarks CAN gater via benchmark_floor (§4.D).
 HOLDOUT_BOT_NAMES = frozenset(BENCHMARK_BOT_KEYS) | frozenset(SEALED_HOLDOUT_KEYS)
 
 
@@ -1338,8 +1337,6 @@ class BotEvaluationCallback(BaseCallback):
                  async_eval_enabled: bool = True,
                  early_stopping_patience: int = 0,
                  save_best_min_episodes: int = 0,
-                 model_gating_min_benchmark_floor: float = 0.0,
-                 stop_on_no_generalization: int = 0,
                  intermediate_n_workers: Optional[int] = None):
         super().__init__(verbose)
         if not training_config_name or not rewards_config_name:
@@ -1482,37 +1479,6 @@ class BotEvaluationCallback(BaseCallback):
         self.gating_history: List[Dict[str, Any]] = []
         self.best_gating_criteria_mean: Optional[float] = None
         self.thresholds_ever_passed = False
-        # §4.D : plancher benchmark et detecteur de non-generalisation.
-        # 0.0 = plancher desarme ; 0 = detecteur desarme.
-        if not 0.0 <= float(model_gating_min_benchmark_floor) <= 1.0:
-            raise ValueError(
-                f"model_gating_min_benchmark_floor must be between 0.0 and 1.0 "
-                f"(got {model_gating_min_benchmark_floor})"
-            )
-        self.model_gating_min_benchmark_floor = float(model_gating_min_benchmark_floor)
-        if self.model_gating_min_benchmark_floor > 0.0 and training_config_name and rewards_config_name:
-            training_cfg = get_config_loader().load_agent_training_config(
-                rewards_config_name, training_config_name
-            )
-            cb_params = require_key(training_cfg, "callback_params")
-            bot_eval_weights: Dict[str, Any] = require_key(cb_params, "bot_eval_weights")
-            if not any(k in bot_eval_weights for k in BENCHMARK_BOT_KEYS):
-                raise ValueError(
-                    f"model_gating_min_benchmark_floor={self.model_gating_min_benchmark_floor} "
-                    f"est configure (> 0.0) mais aucune cle BENCHMARK_BOT_KEYS "
-                    f"({BENCHMARK_BOT_KEYS}) n'est presente dans "
-                    f"callback_params.bot_eval_weights. Le plancher ne peut jamais etre "
-                    f"mesure et laisserait passer n'importe quel modele. "
-                    f"Ajouter au moins une cle reference_* dans bot_eval_weights, "
-                    f"ou ramener model_gating_min_benchmark_floor a 0.0 pour le desarmer."
-                )
-        if not isinstance(stop_on_no_generalization, int) or stop_on_no_generalization < 0:
-            raise ValueError(
-                f"stop_on_no_generalization must be a non-negative integer "
-                f"(got {stop_on_no_generalization!r})"
-            )
-        self.stop_on_no_generalization = int(stop_on_no_generalization)
-        self.non_generalizing_consecutive = 0
         if intermediate_n_workers is not None and (
             isinstance(intermediate_n_workers, bool)
             or not isinstance(intermediate_n_workers, int)
@@ -1673,36 +1639,6 @@ class BotEvaluationCallback(BaseCallback):
                 float(require_key(results, "control")),
                 vs_control_floor,
             ))
-        # 5e check : plancher benchmark (§4.D). 0.0 = desarme.
-        benchmark_floor_pass = True
-        benchmark_keys_present = [k for k in BENCHMARK_BOT_KEYS if k in results]
-        if self.model_gating_min_benchmark_floor > 0.0 and benchmark_keys_present:
-            benchmark_floor = min(float(results[k]) for k in benchmark_keys_present)
-            benchmark_floor_pass = benchmark_floor >= self.model_gating_min_benchmark_floor
-            checks.append((
-                "benchmark_floor",
-                benchmark_floor,
-                self.model_gating_min_benchmark_floor,
-            ))
-            # Detecteur de non-generalisation persistante (§4.D).
-            # Detecte un modele qui progresse en selection mais reste en dessous du plancher benchmark.
-            if self.stop_on_no_generalization > 0:
-                combined_improving = (
-                    self.best_gating_criteria_mean is None
-                    or combined_score > (self.best_gating_criteria_mean or 0.0)
-                )
-                if not benchmark_floor_pass and combined_improving:
-                    self.non_generalizing_consecutive += 1
-                    if self.non_generalizing_consecutive >= self.stop_on_no_generalization:
-                        print(
-                            f"\n🛑 Non-generalisation detectee : benchmark_floor={benchmark_floor:.3f} "
-                            f"< {self.model_gating_min_benchmark_floor:.3f} pendant "
-                            f"{self.non_generalizing_consecutive} evaluations consecutives "
-                            f"(stop_on_no_generalization={self.stop_on_no_generalization})"
-                        )
-                        self.should_stop_early = True
-                else:
-                    self.non_generalizing_consecutive = 0
         gate_pass = all(actual >= threshold for _, actual, threshold in checks)
 
         criteria_mean = float(np.mean([combined_score, worst_bot_score, worst_scenario_combined]))
@@ -2160,12 +2096,6 @@ class BotEvaluationCallback(BaseCallback):
                 self.metrics_tracker.log_behavioral_profile(
                     results["behavioral_profile"], step=int(eval_marker)
                 )
-            # benchmark_floor dans 00_critical/ (§4.D).
-            bk_present = [k for k in BENCHMARK_BOT_KEYS if k in results]
-            if bk_present:
-                bench_floor = min(float(results[k]) for k in bk_present)
-                bench_mean = float(sum(results[k] for k in bk_present) / len(bk_present))
-                self.metrics_tracker.log_benchmark_scores(bench_floor, bench_mean, step=int(eval_marker))
 
         self._log_scenario_scores(results)
 

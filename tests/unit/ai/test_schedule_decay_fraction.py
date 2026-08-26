@@ -347,21 +347,6 @@ REFERENCE_EVAL_EPISODES: dict[str, int] = {"x1": 50, "x5_new": 10}
 #: encore — ce n'est pas un oubli, c'est une décision à date, et cette table en est le verrou.
 LONG_PROFILE_MODEL_GATING_ENABLED: dict[str, bool] = {"x1_long": True, "x5_long": False}
 
-#: `model_gating_min_benchmark_floor` ATTENDU quand le gate est actif. Absent des profils où
-#: model_gating_enabled=false (x5_long) : la clé n'y a aucun effet et n'est pas requise.
-#: x1_long=0.0 depuis le 2026-08-22 : gate RETIRÉ. Il compare le pire score aux bots de
-#: RÉFÉRENCE, saturés à 1,00 côté agent depuis la toute première évaluation — le plancher de
-#: 0,90 était franchi par n'importe quel modèle, donc il ne séparait rien. R0a a tenté de
-#: rendre ces bots discriminants et s'est fermé sans franchir sa fourchette ([0,40 ; 0,60]
-#: bot-contre-bot, mesure finale 0,306 / 0,297 / 0,280) : les reference_* sont abandonnés comme
-#: étalons de force. Ce qui sélectionne désormais, c'est le plancher dur de 0,55 contre le
-#: champion le plus récent d'une étape de curriculum (`ai/curriculum.evaluate_stage_gate`).
-#: 0.0 est la valeur d'arrêt prévue par le mécanisme (`training_callbacks`, le contrôle est
-#: sauté quand le plancher vaut 0.0), pas une clé absente.
-#: Valeur précédente : 0.90, mesurée le 2026-08-02 (vs_control 0.71, seuil franchi).
-LONG_PROFILE_MODEL_GATING_BENCHMARK_FLOOR: dict[str, float] = {"x1_long": 0.0}
-
-
 @pytest.mark.parametrize(
     ("ref_name", "long_name"), [("x1", "x1_long"), ("x5_new", "x5_long")]
 )
@@ -476,9 +461,9 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     overridden = {
         "bot_eval_freq", "bot_eval_final", "bot_eval_task_timeout_seconds",
         "bot_eval_intermediate", "save_best_robust", "robust_window",
-        # model_gating_enabled et min_benchmark_floor dépendent de save_best_robust :
+        # model_gating_enabled dépend de save_best_robust :
         # x1 (save_best_robust=false) n'active pas le gate, x1_long (true) si.
-        "model_gating_enabled", "model_gating_min_benchmark_floor",
+        "model_gating_enabled",
     }
     assert _comparable(long_cb, overridden) == _comparable(ref_cb, overridden)
     assert _resolved_cb(long_cb, "save_best_robust") is True, (
@@ -489,10 +474,6 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     # pinned sans table, elle est identique pour tous les profils courts.
     assert _resolved_cb(long_cb, "model_gating_enabled") == LONG_PROFILE_MODEL_GATING_ENABLED[long_name]
     assert _resolved_cb(ref_cb, "model_gating_enabled") is False
-    # model_gating_min_benchmark_floor : requis seulement quand le gate est actif ; absent des
-    # profils où model_gating_enabled=false, donc vérification conditionnelle.
-    if _resolved_cb(long_cb, "model_gating_enabled"):
-        assert long_cb.get("model_gating_min_benchmark_floor") == LONG_PROFILE_MODEL_GATING_BENCHMARK_FLOOR[long_name]
     # …et « sélectionne » doit vouloir dire quelque chose. La fenêtre GLISSE sur les points de
     # mesure : à `total // freq` points, elle occupe `points - window + 1` positions. Une seule
     # position, c'est la dernière, donc le best model EST le modèle final — le mécanisme tourne

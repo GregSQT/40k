@@ -4206,19 +4206,6 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
                     "Reduce robust_window, reduce bot_eval_freq, or increase total_episodes."
                 )
 
-    # Plancher benchmark §4.D — 0.0 = désarmé (paramètre optionnel).
-    model_gating_min_benchmark_floor = float(
-        callback_params["model_gating_min_benchmark_floor"]
-        if "model_gating_min_benchmark_floor" in callback_params
-        else 0.0
-    )
-    # Arrêt sur non-généralisation persistante §4.D — 0 = désarmé (paramètre optionnel).
-    stop_on_no_generalization = int(
-        callback_params["stop_on_no_generalization"]
-        if "stop_on_no_generalization" in callback_params
-        else 0
-    )
-
     # Store final eval count for use after training completes
     training_config["_bot_eval_final"] = _resolve_callback_value("bot_eval_final")
 
@@ -4260,8 +4247,6 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             early_stopping_patience=int(callback_params["early_stopping_patience"]),
             save_best_min_episodes=int(callback_params["save_best_min_episodes"]),
             intermediate_n_workers=bot_eval_n_workers_intermediate,
-            model_gating_min_benchmark_floor=model_gating_min_benchmark_floor,
-            stop_on_no_generalization=stop_on_no_generalization,
             async_eval_enabled=async_eval_enabled,
         )
         callbacks.append(bot_eval_callback)
@@ -4708,7 +4693,6 @@ def _install_stage_config_overrides(
     Trois effets :
 
     - `opponent_mix` : le pool de l'etape, quand elle en a un.
-    - `model_gating_min_benchmark_floor` DESARME.
     - `hp_overrides` : surcharges HP declarees dans `training_config_overrides` de l'etape
       (total_episodes, model_params.*)  — ignorees quand le dict est vide.
     """
@@ -4719,9 +4703,6 @@ def _install_stage_config_overrides(
         if isinstance(cfg, dict) and loaded_agent_key == agent_key:
             if opponent_mix is not None:
                 cfg["opponent_mix"] = opponent_mix
-            callback_params = cfg.get("callback_params")
-            if isinstance(callback_params, dict):
-                callback_params["model_gating_min_benchmark_floor"] = 0.0
             _apply_stage_hp_overrides(cfg, hp_overrides)
         return cfg
 
@@ -4792,11 +4773,6 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
     _install_stage_config_overrides(config, args.agent, opponent_mix, hp_overrides)
     if hp_overrides:
         print(f"🎓 Etape {args.etape} — HP overrides : {list(hp_overrides)}")
-    if not is_exploiter_stage(stage):
-        print(
-            "🎓 Gate benchmark_floor desarme : la selection de l'etape se fait sur le score contre "
-            "le champion le plus recent, pas sur des bots de reference satures."
-        )
     if opponent_mix is None:
         print(f"🎓 Etape {args.etape} — aucun pool : entrainement contre les bots seuls.")
     else:
