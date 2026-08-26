@@ -47,6 +47,7 @@ import sys
 import time
 
 import numpy as np
+from sb3_contrib.common.masks import get_action_masks
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -131,11 +132,10 @@ def _run_steps(env, n_steps: int, rng: np.random.Generator) -> list[float]:
     step_times: list[float] = []
 
     for _ in range(n_steps):
-        mask = env.env.action_masks()  # Monitor → BotControlledEnv → ActionMasker
+        t0 = time.perf_counter()
+        mask = get_action_masks(env)
         valid = np.flatnonzero(mask)
         action = int(rng.choice(valid))
-
-        t0 = time.perf_counter()
         obs, _reward, terminated, truncated, _info = env.step(action)
         step_times.append(time.perf_counter() - t0)
 

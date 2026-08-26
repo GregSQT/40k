@@ -36,8 +36,6 @@ import os
 import sys
 from pathlib import Path
 from typing import Callable, Optional
-from unittest.mock import patch
-
 import numpy as np
 import pytest
 
@@ -121,15 +119,22 @@ def _capture_fingerprints(
         mask = eng.get_action_mask()
 
         if mask_transform is not None:
-            mask = mask_transform(mask.copy())
+            mask_hashed = mask_transform(mask.copy())
+            valid = np.flatnonzero(mask_hashed)
+            if valid.size == 0:
+                # la mutation a vidé le masque : on joue une action originale valide
+                # mais on hache le masque muté — la divergence reste capturée
+                valid = np.flatnonzero(mask)
+        else:
+            mask_hashed = mask
+            valid = np.flatnonzero(mask)
 
-        valid = np.flatnonzero(mask)
         if valid.size == 0:
             break
         action = int(rng.choice(valid))
 
         next_obs, _, terminated, truncated, _ = eng.step(action)
-        fingerprints.append(_hash_step(mask, next_obs))
+        fingerprints.append(_hash_step(mask_hashed, next_obs))
 
         if terminated or truncated:
             episode_count += 1
@@ -146,10 +151,18 @@ def test_parity_stable_across_two_runs() -> None:
     Critère : toute la liste de hashes est identique, step par step. Un seul hash différent
     indique que le moteur n'est pas déterministe sur ce chemin — et qu'une optimisation qui
     semble passer vert a pu altérer la sémantique sans qu'on le voit.
+
+    Vérifie aussi : liste non vide (>= 10 steps produits) et hashes non-constants
+    (états distincts au fil du jeu) — deux gardes contre un vert vacant.
     """
     run_a = _capture_fingerprints(SEED, N_STEPS)
     run_b = _capture_fingerprints(SEED, N_STEPS)
 
+    assert len(run_a) >= 10, (
+        f"Seulement {len(run_a)} steps capturés sur {N_STEPS} demandés — "
+        "le moteur s'est probablement bloqué."
+    )
+    assert len(set(run_a)) > 1, "Tous les hashes sont identiques — l'obs est invariante (vert vacant)."
     assert len(run_a) == len(run_b), (
         f"Longueurs différentes : {len(run_a)} vs {len(run_b)} — "
         "le moteur n'a pas produit le même nombre de steps à graine fixe."
@@ -186,26 +199,6 @@ def test_parity_mutation_detected() -> None:
         "Le harnais n'a détecté AUCUNE divergence alors qu'un bit du masque a été flippé "
         "à chaque step — le test ne peut pas servir de verrou de parité."
     )
-
-
-def test_parity_clean_run_produces_no_mutation_signal() -> None:
-    """Sans mutation, les deux runs sont identiques — vrai vert, pas vert vacant.
-
-    VÉRIFICATION VERT VACANT : on confirme que le run a bien produit des steps (liste non vide),
-    et que les hashes ne sont pas tous identiques par construction (des états différents).
-    """
-    run_a = _capture_fingerprints(SEED, N_STEPS)
-    run_b = _capture_fingerprints(SEED, N_STEPS)
-
-    # Vert vacant : liste vide → rien n'a été testé.
-    assert len(run_a) >= 10, (
-        f"Seulement {len(run_a)} steps capturés sur {N_STEPS} demandés — "
-        "le moteur s'est probablement bloqué."
-    )
-    # Les hashes ne sont pas tous identiques (états distincts au fil du jeu).
-    assert len(set(run_a)) > 1, "Tous les hashes sont identiques — l'obs est invariante (vert vacant)."
-    # Parité confirmée.
-    assert run_a == run_b
 
 
 # ── Invariant 3 : gate mask_verification armée ───────────────────────────────────────────────
