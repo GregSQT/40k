@@ -14,7 +14,7 @@ import pytest
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import _cover_worsened_bs, _manual_roll_intent
 from engine.game_state import initial_faction_ability_state
-from tests.unit.engine.conftest import gs_with_units
+from tests.unit.ai._fabriques import gs_with_units
 
 
 def _minimal_shoot_game_state(weapon_rules):

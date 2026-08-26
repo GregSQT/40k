@@ -18,7 +18,7 @@
                 "decay_fraction": 1.0,
                 "justification": "Plancher 0.0005 et non 0.0002 depuis le 2026-08-12, sur les QUATRE profils de la chaine (x1, x1_long, x5_new, x5_long) : test_long_profile_is_its_reference_recalibrated exige que la rampe d'un profil long soit identique a celle de sa reference hors decay_fraction, et total_episodes_normal de x5_long pose x1_long comme son jumeau exact. MESURE qui l'impose, run x1_long de 50 000 episodes (tensorboard/x1_long_ArmageddonAgent/run_20260812-033643) : sur le dernier quart la fraction de clipping PPO tombe a 0.032, soit trois fois SOUS le plancher que le profil se donne lui-meme (thresholds/clip_fraction_min 0.1), et l'approx_kl a 0.007 frole son kl_min de 0.005 -- les mises a jour ne deplacent plus la politique. Effet mesure sur le resultat : le win-rate de l'evaluation bot gagne +8.7 points entre 10 000 et 20 000 episodes, puis +0.9 point entre 40 000 et 50 000, soit 60 % du budget de calcul pour du bruit. Sur les profils COURTS (x1 10 000 ep., x5_new 1 000 ep., decay_fraction 1.0) le plancher n'est atteint qu'au dernier episode : le changement y est sans effet mesurable, il sert la comparabilite de la paire."
             },
-            "n_steps": 8192,
+            "n_steps": 8160,
             "batch_size": 1020,
             "n_epochs": 3,
             "gamma": 0.99,
@@ -215,7 +215,7 @@
                 "decay_fraction": 0.9,
                 "justification": "Plancher 0.0005 et non 0.0002 depuis le 2026-08-12, sur les QUATRE profils de la chaine (x1, x1_long, x5_new, x5_long) : test_long_profile_is_its_reference_recalibrated exige que la rampe d'un profil long soit identique a celle de sa reference hors decay_fraction, et total_episodes_normal de x5_long pose x1_long comme son jumeau exact. MESURE qui l'impose, run x1_long de 50 000 episodes (tensorboard/x1_long_ArmageddonAgent/run_20260812-033643) : sur le dernier quart la fraction de clipping PPO tombe a 0.032, soit trois fois SOUS le plancher que le profil se donne lui-meme (thresholds/clip_fraction_min 0.1), et l'approx_kl a 0.007 frole son kl_min de 0.005 -- les mises a jour ne deplacent plus la politique. Effet mesure sur le resultat : le win-rate de l'evaluation bot gagne +8.7 points entre 10 000 et 20 000 episodes, puis +0.9 point entre 40 000 et 50 000, soit 60 % du budget de calcul pour du bruit. Sur les profils COURTS (x1 10 000 ep., x5_new 1 000 ep., decay_fraction 1.0) le plancher n'est atteint qu'au dernier episode : le changement y est sans effet mesurable, il sert la comparabilite de la paire."
             },
-            "n_steps": 8192,
+            "n_steps": 8160,
             "batch_size": 1020,
             "n_epochs": 3,
             "gamma": 0.99,
@@ -415,7 +415,7 @@
                 "final": 0.0002,
                 "decay_fraction": 1.0
             },
-            "n_steps": 8192,
+            "n_steps": 8160,
             "batch_size": 1020,
             "n_epochs": 3,
             "gamma": 0.99,
@@ -603,7 +603,7 @@
                 "decay_fraction": 1.0,
                 "justification": "Plancher 0.0005 et non 0.0002 depuis le 2026-08-12, sur les QUATRE profils de la chaine (x1, x1_long, x5_new, x5_long) : test_long_profile_is_its_reference_recalibrated exige que la rampe d'un profil long soit identique a celle de sa reference hors decay_fraction, et total_episodes_normal de x5_long pose x1_long comme son jumeau exact. MESURE qui l'impose, run x1_long de 50 000 episodes (tensorboard/x1_long_ArmageddonAgent/run_20260812-033643) : sur le dernier quart la fraction de clipping PPO tombe a 0.032, soit trois fois SOUS le plancher que le profil se donne lui-meme (thresholds/clip_fraction_min 0.1), et l'approx_kl a 0.007 frole son kl_min de 0.005 -- les mises a jour ne deplacent plus la politique. Effet mesure sur le resultat : le win-rate de l'evaluation bot gagne +8.7 points entre 10 000 et 20 000 episodes, puis +0.9 point entre 40 000 et 50 000, soit 60 % du budget de calcul pour du bruit. Sur les profils COURTS (x1 10 000 ep., x5_new 1 000 ep., decay_fraction 1.0) le plancher n'est atteint qu'au dernier episode : le changement y est sans effet mesurable, il sert la comparabilite de la paire."
             },
-            "n_steps": 8192,
+            "n_steps": 8160,
             "batch_size": 1020,
             "n_epochs": 3,
             "gamma": 0.99,
@@ -793,7 +793,7 @@
                 "decay_fraction": 0.9,
                 "justification": "Plancher 0.0005 et non 0.0002 depuis le 2026-08-12, sur les QUATRE profils de la chaine (x1, x1_long, x5_new, x5_long) : test_long_profile_is_its_reference_recalibrated exige que la rampe d'un profil long soit identique a celle de sa reference hors decay_fraction, et total_episodes_normal de x5_long pose x1_long comme son jumeau exact. MESURE qui l'impose, run x1_long de 50 000 episodes (tensorboard/x1_long_ArmageddonAgent/run_20260812-033643) : sur le dernier quart la fraction de clipping PPO tombe a 0.032, soit trois fois SOUS le plancher que le profil se donne lui-meme (thresholds/clip_fraction_min 0.1), et l'approx_kl a 0.007 frole son kl_min de 0.005 -- les mises a jour ne deplacent plus la politique. Effet mesure sur le resultat : le win-rate de l'evaluation bot gagne +8.7 points entre 10 000 et 20 000 episodes, puis +0.9 point entre 40 000 et 50 000, soit 60 % du budget de calcul pour du bruit. Sur les profils COURTS (x1 10 000 ep., x5_new 1 000 ep., decay_fraction 1.0) le plancher n'est atteint qu'au dernier episode : le changement y est sans effet mesurable, il sert la comparabilite de la paire."
             },
-            "n_steps": 8192,
+            "n_steps": 8160,
             "batch_size": 1020,
             "n_epochs": 3,
             "gamma": 0.99,
@@ -1063,7 +1063,7 @@
                 "final": 0.0002,
                 "decay_fraction": 1.0
             },
-            "n_steps": 8192,
+            "n_steps": 8160,
             "batch_size": 1020,
             "n_epochs": 3,
             "gamma": 0.99,

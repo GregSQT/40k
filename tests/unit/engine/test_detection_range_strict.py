@@ -29,6 +29,7 @@ class TestDetectionRangeStrict:
             "squad_models": {"2": ["2_1"]},
             "units_cache": {"2": {"player": 2, "alive": True}},
             "units": [{"id": 2, "player": 2, "hidden": True}],
+            "unit_by_id": {"2": {"id": 2, "player": 2, "hidden": True}},
         }
         attacker_model = {"id": "1_1", "unit_id": 1, "col": 0, "row": 0}
 

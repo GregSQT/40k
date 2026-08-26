@@ -3343,7 +3343,7 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     # un échec BFS est un bug (root cause), pas un « pas de cible » — laisser l'erreur remonter
     # explicitement (pas de fallback anti-erreur ni de valeur par défaut masquante).
     valid_any = charge_build_valid_destinations_pool(
-        game_state, unit["id"], CHARGE_MAX_DISTANCE,
+        game_state, str(unit["id"]), CHARGE_MAX_DISTANCE,
         full_occupied_positions=full_occupied_positions,
         early_exit_if_valid=True,
     )

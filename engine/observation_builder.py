@@ -1239,7 +1239,21 @@ class ObservationBuilder:
         entity_unit = require_unit_by_id(game_state, str(squad_id))
         waaagh_invul = waaagh_applies_to_unit(game_state, entity_unit)
         _types_cache = game_state.setdefault("_entity_types_cache", {})
-        _types_key = (squad_id, tuple(alive_mids), bool(waaagh_invul))
+        # Les attributs définissant le TYPE (role, HP_MAX, T, saves) font partie de la clé :
+        # `alive_mids` seul ne change pas quand une figurine est mutée en cours de test ou
+        # quand un personnage attaché est promu leader après reset(). Sans eux, le cache
+        # retournerait les types de la composition initiale même si le profil a changé.
+        _type_attrs = tuple(
+            (
+                models_cache.get(mid, {}).get("role"),
+                int(models_cache.get(mid, {}).get("HP_MAX", 0)),
+                int(models_cache.get(mid, {}).get("T", 0)),
+                int(models_cache.get(mid, {}).get("ARMOR_SAVE", 0)),
+                int(models_cache.get(mid, {}).get("INVUL_SAVE", 0)),
+            )
+            for mid in alive_mids
+        )
+        _types_key = (squad_id, tuple(alive_mids), bool(waaagh_invul), _type_attrs)
         _types_hit = _types_cache.get(_types_key)
         if _types_hit is not None:
             return _types_hit

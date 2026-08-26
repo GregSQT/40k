@@ -49,19 +49,24 @@ def _train_tree() -> ast.AST:
 
 def test_every_subprocvecenv_path_converts_n_steps() -> None:
     """Chaque fonction qui construit un SubprocVecEnv appelle apply_rollout_n_steps."""
+    # Noms reconnus : SubprocVecEnv (SB3) et son équivalent maskable (sb3-contrib) — le motif
+    # de construction est identique et la division par n_envs est exigée dans les deux cas.
+    _VEC_ENV_BUILDERS = {"SubprocVecEnv", "MaskableSubprocVecEnv"}
     tree = _train_tree()
     builders, converters = set(), set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
             continue
-        if node.func.id == "SubprocVecEnv":
+        if node.func.id in _VEC_ENV_BUILDERS:
             builders.add(_enclosing_function(tree, node.lineno))
         elif node.func.id == "apply_rollout_n_steps":
             converters.add(_enclosing_function(tree, node.lineno))
-    assert builders, "aucun SubprocVecEnv trouve : le test regarderait le vide"
+    assert builders, (
+        f"aucun {' / '.join(sorted(_VEC_ENV_BUILDERS))} trouve : le test regarderait le vide"
+    )
     missing = builders - converters
     assert not missing, (
-        f"ces fonctions construisent un SubprocVecEnv sans convertir n_steps : {sorted(missing)}. "
+        f"ces fonctions construisent un VecEnv sans convertir n_steps : {sorted(missing)}. "
         "n_steps est un TOTAL par update ; sans division le buffer vaut n_steps x n_envs "
         "transitions (8192 x 48 = 44 Go d'observations, mesure)."
     )

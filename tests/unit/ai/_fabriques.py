@@ -331,6 +331,15 @@ EPISODE_TAIL = (
 )
 
 
+def gs_with_units(shooter_sid: str = "1", target_sid: str = "2") -> dict:
+    """game_state minimal avec unit_by_id pour require_unit_by_id (tests de couvert/LoS).
+
+    Dupliquée depuis tests/unit/engine/conftest.py pour éviter l'import direct d'un conftest
+    comme module (double chargement par le harnais).
+    """
+    return {"unit_by_id": {shooter_sid: {"id": shooter_sid}, target_sid: {"id": target_sid}}}
+
+
 def weapon_rule_usage(stats: dict, rule: str) -> dict:
     """Extrait les compteurs d'usage d'une règle d'arme depuis les stats analyzer.
 

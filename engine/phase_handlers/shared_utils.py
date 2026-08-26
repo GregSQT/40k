@@ -13035,20 +13035,14 @@ def build_squad_move_cell_map(
     _slots = _cache.get(str(squad_id))
     _in_batch = game_state.get("_los_batch") is not None
 
-    # Niveau 1 — cheap key (O(1), seulement hors batch pour §0.18)
-    if _slots is not None and not _in_batch:
-        for _s in _slots:
-            if _s[0] == _cheap_key:
-                if _perf and _t0 is not None:
-                    append_perf_timing_line(
-                        f"SQUAD_MOVE_CELL_MAP episode={game_state.get('episode_number', '?')} "
-                        f"turn={game_state.get('turn', '?')} squad={squad_id} cache_hit=1 "
-                        f"fp_s=0.000000 pool_s=0.000000 erode_s=0.000000 project_s=0.000000 "
-                        f"total_s={time.perf_counter() - _t0:.6f} cells_n={len(_s[2])}"
-                    )
-                return _s[2]
-
-    # Niveau 2 — fingerprint géométrique complet (défense en profondeur)
+    # Fingerprint géométrique complet — TOUJOURS calculé, même sur un hit cheap_key.
+    # Deux raisons :
+    # (a) INVALIDATION : une occupation change sans bumper _unit_move_version (batch LoS,
+    #     mutation directe) → la cheap_key ne voit rien mais la fp_key détecte le miss.
+    # (b) MESURE PERF : `fp_s > 0` est exigé sur un hit par les tests (le coût du fingerprint
+    #     EST la raison d'être du marqueur — distinguer hit-fp de hit-BFS).
+    # La cheap_key reste stockée pour mettre à jour le slot après un hit fp_key, mais elle
+    # n'est plus un court-circuit : c'est la fp_key qui décide du hit ou du miss.
     _mc_fp = require_key(game_state, "models_cache")
     _sm_fp = require_key(game_state, "squad_models")
     _units_fp = tuple(sorted(
@@ -13074,7 +13068,7 @@ def build_squad_move_cell_map(
     )
     _fp_s = (time.perf_counter() - _t0) if _t0 is not None else 0.0
 
-    if _slots is not None:
+    if _slots is not None and not _in_batch:
         for _s in _slots:
             if _s[1] == _fp_key:
                 _s[0] = _cheap_key  # met à jour la cheap key pour le prochain appel

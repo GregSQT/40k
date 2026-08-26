@@ -74,7 +74,9 @@ def _make_gs(
         "config": {"game_rules": _real_game_rules(), "move": build_move_rules()},
         # Index {id: unit} que le moteur construit au reset : `move_plan_distance_mode` le lit
         # pour savoir si le vol est déclaré (21.03).
-        "units": [], "unit_by_id": {}, "objectives": [],
+        "units": [{"id": sid, "player": uc["player"]} for sid, uc in units_cache.items()],
+        "unit_by_id": {sid: {"id": sid, "player": uc["player"]} for sid, uc in units_cache.items()},
+        "objectives": [],
     }
 
 

@@ -112,6 +112,7 @@ def _board(distance_subhex):
         "units_cache": {"1": {"player": 1, "alive": True},
                         "101": {"player": 2, "alive": True}},
         "units": [{"id": "1", "player": 1}, {"id": "101", "player": 2}],
+        "unit_by_id": {"1": {"id": "1", "player": 1}, "101": {"id": "101", "player": 2}},
     }
     return gs, attacker
 
