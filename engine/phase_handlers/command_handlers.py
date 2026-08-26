@@ -11,6 +11,7 @@ before the movement phase. In Phase 2, the agent may take zone intent free steps
 from typing import Dict, List, Tuple, Set, Optional, Any
 from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
+from .shared_utils import build_enemy_adjacent_hexes
 from engine.game_state import (
     CORE_CP_GAIN_PER_COMMAND_PHASE, GameStateManager, gain_command_points,
     WAAAGH_FACTION_KEYWORD,
@@ -41,6 +42,11 @@ def command_phase_start(game_state: Dict[str, Any]) -> None:
     - Returns without phase_complete if free steps > 0 (agent will issue zone intent actions)
     """
     from engine.macro_intents import INTENT_INVADE, MAX_OBJECTIVES, get_nearest_objective_zone
+
+    units_cache = require_key(game_state, "units_cache")
+    players_present = {int(require_key(entry, "player")) for entry in units_cache.values()}
+    for _cp in players_present:
+        build_enemy_adjacent_hexes(game_state, _cp)
 
     command_step_start_of_phase(game_state)   # 08.01
     command_step_gain_core_cp(game_state)     # 08.02

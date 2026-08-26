@@ -69,6 +69,8 @@ def _make_cmd_gs() -> Dict[str, Any]:
         "unit_by_id": {str(u["id"]): u for u in units},
         "primary_objective": None,
         "objectives": [{"id": 1, "hexes": [[5, 5]]}],
+        "board_cols": 40,
+        "board_rows": 40,
     }
     build_units_cache(gs)
     return gs

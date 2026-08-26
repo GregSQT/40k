@@ -1247,11 +1247,11 @@ class ObservationBuilder:
         # retournerait les types de la composition initiale même si le profil a changé.
         _type_attrs = tuple(
             (
-                (d := models_cache.get(mid, {})).get("role"),
-                int(d.get("HP_MAX", 0)),
-                int(d.get("T", 0)),
-                int(d.get("ARMOR_SAVE", 0)),
-                int(d.get("INVUL_SAVE", 0)),
+                (d := models_cache[mid]).get("role"),
+                int(d["HP_MAX"]),
+                int(d["T"]),
+                int(d["ARMOR_SAVE"]),
+                d.get("INVUL_SAVE"),
             )
             for mid in alive_mids
         )
@@ -2279,16 +2279,9 @@ class ObservationBuilder:
 
         # --- Canal 3 : EZ ennemie ---------------------------------------------
         # Meme ensemble que celui consomme par le pool BFS (source unique de la regle).
+        # Construit au demarrage de chaque phase (command/move/shoot/charge/fight).
         ez_cache_key = f"enemy_adjacent_hexes_player_{active_player}"
-        if ez_cache_key in game_state:
-            ez_hexes = game_state[ez_cache_key]
-        else:
-            # Cache construit au demarrage des phases move/shoot/charge uniquement. Hors de
-            # ces phases on appelle le MEME constructeur canonique (qui memoise) plutot que
-            # de laisser le canal vide : un canal EZ faussement nul serait une erreur muette.
-            from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes
-
-            ez_hexes = build_enemy_adjacent_hexes(game_state, active_player)
+        ez_hexes = game_state[ez_cache_key]
         _paint(GRID_CH_EZ, list(ez_hexes))
 
         # --- Canal 4 : objectifs ----------------------------------------------
