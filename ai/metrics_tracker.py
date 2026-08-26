@@ -2190,7 +2190,7 @@ class W40KMetricsTracker:
         profile: Dict[str, Dict[str, Dict[str, Any]]],
         step: Optional[int] = None,
     ) -> None:
-        """Profile comportemental par adversaire et par issue (§4.D.4).
+        """Profile comportemental par adversaire et par issue.
 
         Profile structure : {bot_name: {issue_label: {metric: value}}}
         Publie sous `bot_eval/profile/<bot>/<metric>` (issue non visible en TensorBoard —

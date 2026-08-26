@@ -773,7 +773,7 @@ def _accumulate_behavior(
     env: Any,
     controlled_player: Any,
 ) -> None:
-    """Collecte les metriques comportementales d'un episode termine (§4.D.4).
+    """Collecte les metriques comportementales d'un episode termine.
 
     Appelee AVANT le prochain `env.reset()` : les shoot_stats sont reinitialisees au reset,
     donc elles refletent encore L'EPISODE QUI VIENT DE SE TERMINER.
@@ -1005,7 +1005,7 @@ def _eval_worker_task(
     # « 0 troncature » — un feu vert faux, la classe de defaut que V11 §0.61 existe pour fermer.
     # Ces episodes ne sont PAS des episodes d'entrainement : ils ne touchent pas `episode_count`.
     truncations: List[Dict[str, Any]] = []
-    # §4.D.4 : profil comportemental ventile par issue (win/draw/loss).
+    # Profil comportemental ventile par issue (win/draw/loss).
     # Structure : {issue: {metric: total, "count": n}}. Consomme dans l'agregation puis dans
     # metrics_tracker.log_behavioral_profile pour publier sous bot_eval/profile/<bot>/<metric>.
     behavior_stats: Dict[str, Dict[str, Any]] = {}
@@ -1133,7 +1133,7 @@ def _eval_worker_task(
             })
             draws += 1
             _count_episode(episode_faction, episode_roster_ids, episode_seat, won=False)
-            # §4.D.4 : profil comportemental pour cet episode (truncate = draw).
+            # Profil comportemental pour cet episode (truncate = draw).
             ep_controlled = info.get("controlled_player") if info else None
             _accumulate_behavior(behavior_stats, "draw", env, ep_controlled)
             if progress_callback is not None:
@@ -1158,7 +1158,7 @@ def _eval_worker_task(
         else:
             losses += 1
             ep_issue = "loss"
-        # §4.D.4 : profil comportemental pour cet episode.
+        # Profil comportemental pour cet episode.
         _accumulate_behavior(behavior_stats, ep_issue, env, controlled_player)
         if progress_callback is not None:
             progress_callback()
@@ -1213,7 +1213,7 @@ def _failed_task_result(
         # `roster_stats[side]` par require_key, donc les deux cotes doivent exister meme vides,
         # sans quoi le premier timeout tuerait le run.
         "roster_stats": {side: {} for side in ROSTER_SIDES},
-        # Aucun episode joue : aucun profil comportemental a agréger (§4.D.4).
+        # Aucun episode joue : aucun profil comportemental a agreger.
         "behavior_stats": {},
         **cause,
     }
@@ -1811,7 +1811,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
         results[f"{bn}_wins"] = wins
         results[f"{bn}_losses"] = losses
         results[f"{bn}_draws"] = draws
-    # §4.D.4 : profil comportemental agrege par bot, ventile par issue (win/draw/loss).
+    # Profil comportemental agrege par bot, ventile par issue (win/draw/loss).
     # Chaque tache produit un {issue: {metric: total, "count": n}} pour son bot ;
     # on additionne les totaux ici, la moyenne reste calculee en aval (metrics_tracker).
     behavioral_profile: Dict[str, Dict[str, Dict[str, Any]]] = {}
