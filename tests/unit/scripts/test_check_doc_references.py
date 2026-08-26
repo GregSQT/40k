@@ -1023,18 +1023,32 @@ def test_a_kind_without_a_single_file_is_counted_not_guessed(
 # --------------------------------------------------------------------------- passe 4 étendue à Documentation/Implémentation/
 
 
+def _impl_enforced_name() -> str:
+    """Retourne un basename réel de Documentation/Implémentation/ présent dans ANCHOR_ENFORCED.
+
+    Utiliser un nom découvert dynamiquement évite de coder en dur un fichier qui pourrait être
+    renommé — ce qui rendrait le test vert mais vacueux (la mutation ne serait jamais atteinte).
+    """
+    default_names = frozenset(
+        pathlib.PurePosixPath(doc).name for doc in cdr.DEFAULT_DOCS
+    )
+    enforced_impl = cdr.ANCHOR_ENFORCED - default_names
+    assert enforced_impl, (
+        "Aucun doc Implémentation/ dans ANCHOR_ENFORCED — _impl_doc_basenames() est silencieux"
+    )
+    return next(iter(sorted(enforced_impl)))
+
+
 def test_impl_doc_line_anchor_is_detected(tmp_path: pathlib.Path) -> None:
     """ROUGE : une ancre de ligne dans Documentation/Implémentation/ est détectée.
 
     Avant cette livraison, check_anchors() ne regardait que DEFAULT_DOCS ; un renvoi de ligne
-    dans V11_agent_rework.md passait en vert sans aucune alerte. ANCHOR_ENFORCED inclut
+    dans un doc Implémentation/ passait en vert sans aucune alerte. ANCHOR_ENFORCED inclut
     désormais tous les .md de Documentation/Implémentation/ via _impl_doc_basenames().
     """
-    assert "V11_agent_rework.md" in cdr.ANCHOR_ENFORCED, (
-        "V11_agent_rework.md absent d'ANCHOR_ENFORCED — la couverture est régressive"
-    )
+    chosen = _impl_enforced_name()
     # ROUGE : numéro de ligne présent → violation
-    doc = write(tmp_path, "V11_agent_rework.md", "voir `engine/w40k_core.py:705`\n")
+    doc = write(tmp_path, chosen, "voir `engine/w40k_core.py:705`\n")
     entries = cdr.check_anchors(doc)
     assert len(entries) == 1, f"attendu 1 violation, obtenu {entries}"
 
@@ -1050,7 +1064,7 @@ def test_impl_doc_line_anchor_inside_fenced_block_is_ignored(tmp_path: pathlib.P
     source, pas un renvoi de doc. Le masquage des blocs fencés dans check_anchors() ferme
     ce faux positif.
     """
-    assert "V11_agent_rework.md" in cdr.ANCHOR_ENFORCED
+    chosen = _impl_enforced_name()
     content = (
         "Du texte avant.\n"
         "```python\n"
@@ -1058,7 +1072,7 @@ def test_impl_doc_line_anchor_inside_fenced_block_is_ignored(tmp_path: pathlib.P
         "```\n"
         "Du texte après.\n"
     )
-    doc = write(tmp_path, "V11_agent_rework.md", content)
+    doc = write(tmp_path, chosen, content)
     assert cdr.check_anchors(doc) == []
 
 
@@ -1069,7 +1083,10 @@ def test_impl_real_corpus_has_no_line_anchor() -> None:
     rougit, un doc de Documentation/Implémentation/ a reçu un numéro de ligne lors d'une
     livraison sans que ce tour ne le corrige.
     """
-    has_broken, lines = cdr.report_impl_anchors()
+    try:
+        has_broken, lines = cdr.report_impl_anchors()
+    except cdr.SourceUnavailable as exc:
+        pytest.skip(str(exc))
     assert not has_broken, "\n".join(lines)
 
 

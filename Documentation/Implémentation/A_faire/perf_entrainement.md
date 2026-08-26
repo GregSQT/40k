@@ -167,15 +167,15 @@ C'est la **queue** (pas la moyenne) qui fixe le lockstep : chaque vec-step atten
 
 | # | Étape | Ancre | Statut |
 |---|---|---|---|
-| 1.1 | Cache **2 slots** (budget normal + advance) pour `build_squad_move_cell_map` — supprime le double BFS par activation de move | `shared_utils.py:13097` | ✅ |
-| 1.2 | Fingerprint sur hit → compteur de version d'état (invalidation à la mutation : commit_move, mort, phase) | `shared_utils.py:12990` | ✅ |
-| 1.3 | `_attacker_model_can_reach_squad` : scan linéaire → index `unit_by_id` | `shared_utils.py:6947` | ✅ |
-| 1.4 | Masque de tir : fusionner les 2 balayages modèles×armes×cibles (partager les résultats de la 1ʳᵉ passe avec `shoot_weapon_sel_open_slots`) | `shared_utils.py:13174/13129` | ✅ |
-| 1.5 | Obs : mémoïser `charge_build_valid_plan` (masque + obs dans le même état) | `observation_builder.py:1519` | ✅ |
-| 1.6 | Obs : pair-cache `edge_distance` avec invalidation au mouvement (motif LoS éprouvé) | `observation_builder.py:1350` | ✅ |
-| 1.7 | Obs : cache du bloc TYPES + réutilisation des buffers numpy (~27 `np.zeros`/build) | `observation_builder.py:1081/1183` | ✅ |
-| 1.8 | Pair-cache `entries_in_engagement_zone` (invalidation motif `_touch_unit_los`) | `spatial_relations.py:503` | ✅ |
-| 1.9 | Reset : cacher les `json.load` des rosters + supprimer le deepcopy complet du scénario (copies ciblées) | `w40k_core.py:9074`, `game_state.py:485` | ✅ |
+| 1.1 | Cache **2 slots** (budget normal + advance) pour `build_squad_move_cell_map` — supprime le double BFS par activation de move | `shared_utils.py` (`build_squad_move_cell_map`) | ✅ |
+| 1.2 | Fingerprint sur hit → compteur de version d'état (invalidation à la mutation : commit_move, mort, phase) | `shared_utils.py` (`build_squad_move_cell_map`) | ✅ |
+| 1.3 | `_attacker_model_can_reach_squad` : scan linéaire → index `unit_by_id` | `shared_utils.py` (`_attacker_model_can_reach_squad`) | ✅ |
+| 1.4 | Masque de tir : fusionner les 2 balayages modèles×armes×cibles (partager les résultats de la 1ʳᵉ passe avec `shoot_weapon_sel_open_slots`) | `shared_utils.py` (`_target_locked_by_ally`, `build_squad_move_cell_map`) | ✅ |
+| 1.5 | Obs : mémoïser `charge_build_valid_plan` (masque + obs dans le même état) | `observation_builder.py` (`_encode_unit_entity`) | ✅ |
+| 1.6 | Obs : pair-cache `edge_distance` avec invalidation au mouvement (motif LoS éprouvé) | `observation_builder.py` (`_encode_unit_entity`) | ✅ |
+| 1.7 | Obs : cache du bloc TYPES + réutilisation des buffers numpy (~27 `np.zeros`/build) | `observation_builder.py` (`_empty_squad_observation`, `_encode_entity_model_types`) | ✅ |
+| 1.8 | Pair-cache `entries_in_engagement_zone` (invalidation motif `_touch_unit_los`) | `spatial_relations.py` (`engagement_distance_metric`) | ✅ |
+| 1.9 | Reset : cacher les `json.load` des rosters + supprimer le deepcopy complet du scénario (copies ciblées) | `w40k_core.py` (`_reload_scenario`), `game_state.py` (`load_units_from_scenario`) | ✅ |
 | 1.10 | **Mesure de clôture** : ms/step + fps offline ; consigner §6 | — | ✅ |
 
 Gain attendu : ms/step −30-50 % et réduction de la queue → fps ×1,5-2.
