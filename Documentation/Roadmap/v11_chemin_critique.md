@@ -62,7 +62,7 @@ Mesurer le regret avant de trancher (§9.0bis).
 python3 ai/train.py --agent ArmageddonAgent --training-config x1_long --resolution 1 --test-only --step
 ```
 
-`--test-only` utilise `eval_episodes` (pas `bot_eval_final`, qui ne s'applique qu'à la fin d'un run d'entraînement). Les **6** profils de la config sont tous à 48 envs ; seul `x1_long` atteint la précision cible :
+`--test-only` utilise `eval_episodes` (pas `bot_eval_final`, qui ne s'applique qu'à la fin d'un run d'entraînement). Les **6** profils de la config sont tous à 24 envs ; seul `x1_long` atteint la précision cible :
 
 | profil | `total_episodes` | `bot_eval_final` | `eval_episodes` |
 |---|---|---|---|
