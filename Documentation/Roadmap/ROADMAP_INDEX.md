@@ -340,3 +340,4 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | bot | ✅ R0b : critère de compatibilité corrigé — sonde de chargement (§12.15) ; 5 archives pré-`charge_pair_net` skippées → 1 barreau réel (2026-08-22) | — | |
 | bot | ✅ Fix seat-seed null explicite + migration `evaluate_against_bots` (2026-08-21) | — | |
 | engine | ✅ Constante `DRAW_WINNER = -1` introduite dans `engine/constants.py`, tous les littéraux remplacés (2026-08-21) | — | |
+| training | ✅ `training_config_overrides` par étape dans `curriculum.json` (2026-08-26) — surcharge `total_episodes`, `model_params` (lr, ent_coef, n_epochs, vf_coef) et `callback_params` (bot_eval_freq, bot_eval_final) sans créer de profils x1_P* ; P1 75k/n_epochs 5/vf 0.5/ent_coef decay 0.65, P2 100k mêmes HP ; whitelist + cohérence total_episodes/bot_eval_freq×3 ; 30 tests | — | ⚡ |
