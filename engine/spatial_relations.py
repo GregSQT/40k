@@ -223,11 +223,22 @@ def _engagement_entry_fingerprint(entry: Dict[str, Any]) -> Tuple[Any, ...]:
     Un champ oublié ici = deux états de jeu différents qui partagent une entrée de cache, donc un
     verdict d'engagement faux SANS erreur visible. C'est le seul mode d'échec de ce cache, et c'est
     pour ça que le test énumère les champs plutôt que d'échantillonner un scénario.
+
+    MÉMOÏSÉ dans l'entrée elle-même (item 1.8 perf_entrainement) — clé `_ez_fp`, invalidée par
+    `_apply_los_invalidation` via `_touch_unit_los`. Sur un hit, l'empreinte est retournée
+    directement sans relire aucun champ de l'entrée. Correct : les champs de géométrie (col, row,
+    occupied_hexes, …) ne changent jamais sans passer par `_touch_unit_los`, source unique.
+    ⚠️ Pendant une fenêtre de batch LoS (`_los_begin_batch` / `_los_end_batch`), les positions
+    sont écrites mais `_touch_unit_los` est différé : `_ez_fp` peut être stale le temps du batch.
+    En pratique, `entries_in_engagement_zone` n'est jamais appelée pendant un batch de `commit_move`.
     """
+    _cached_fp = entry.get("_ez_fp")  # get allowed — None si jamais calculée ou invalidée
+    if _cached_fp is not None:
+        return _cached_fp
     occ = entry.get("occupied_hexes")  # get allowed (absente sur les entrées synthétiques)
     by_model = entry.get("occupied_hexes_by_model")  # get allowed (idem)
     floors = entry.get("floor_height_by_model")  # get allowed (idem)
-    return (
+    _fp = (
         entry.get("col"),  # get allowed (l'absence est une entrée malformée, signalée en aval)
         entry.get("row"),  # get allowed (idem)
         frozenset(occ) if occ is not None else _EZ_FP_ABSENT,
@@ -244,6 +255,8 @@ def _engagement_entry_fingerprint(entry: Dict[str, Any]) -> Tuple[Any, ...]:
         _hashable(entry.get("BASE_SIZE", _EZ_FP_ABSENT)),  # get allowed (validée en aval)
         int(entry.get("orientation", 0)),  # get allowed — jumeau exact du défaut de `socle_from_cache_entry`
     )
+    entry["_ez_fp"] = _fp
+    return _fp
 
 
 def entry_has_vertical_data(entry: Dict[str, Any]) -> bool:

@@ -1179,7 +1179,22 @@ class ObservationBuilder:
         alors que jusqu'à 5 types défensifs distincts coexistent dans une escouade (§1.6) :
         l'agent ne pouvait pas voir qu'un Nob est plus dur que les Boyz qui l'entourent, ce qui
         décide pourtant de l'allocation des pertes et de la rentabilité d'une cible.
+
+        MÉMOÏSÉ par (escouade, figurines vivantes, waaagh_invul) — item 1.7 perf_entrainement.
+        Invalidé par un changement de composition (alive_mids). Même doctrine que le cache armes.
+        ⚠️ Les tableaux renvoyés sont ceux du cache : l'appelant les écrit dans l'observation par
+        affectation numpy (copie) et ne les mute jamais.
         """
+        from engine.game_state import WAAAGH_INVUL_SAVE, waaagh_applies_to_unit
+
+        entity_unit = require_unit_by_id(game_state, str(squad_id))
+        waaagh_invul = waaagh_applies_to_unit(game_state, entity_unit)
+        _types_cache = game_state.setdefault("_entity_types_cache", {})
+        _types_key = (squad_id, tuple(alive_mids), bool(waaagh_invul))
+        _types_hit = _types_cache.get(_types_key)
+        if _types_hit is not None:
+            return _types_hit
+
         cont = np.zeros((self.K_MODEL_TYPES, MODEL_TYPE_CONT_SIZE), dtype=np.float32)
         binv = np.zeros((self.K_MODEL_TYPES, MODEL_TYPE_BIN_SIZE), dtype=np.float32)
         types = self._squad_model_types(alive_mids, models_cache)
@@ -1198,14 +1213,10 @@ class ObservationBuilder:
         # (aucune feature ne dit « cette entité est orke », et les slots de capacité ne portent
         # pas les effets de faction, par construction). Le facteur est uniforme sur l'unité :
         # il ne change donc ni le regroupement par type ni leur ordre, calculés au-dessus.
-        from engine.game_state import WAAAGH_INVUL_SAVE, waaagh_applies_to_unit
-
         # Le prédicat est évalué UNE fois pour l'entité, pas par type de figurine : il ne dépend
         # que de l'unité, et cette boucle tourne jusqu'à `K_MODEL_TYPES` fois — pour 28 entités,
         # à CHAQUE step gym. Seul l'octroi lui-même reste dans la boucle, car il dépend de
         # l'invulnérable propre à chaque type (une 4+ existante est conservée).
-        entity_unit = require_unit_by_id(game_state, str(squad_id))
-        waaagh_invul = waaagh_applies_to_unit(game_state, entity_unit)
         for t_idx in range(min(self.K_MODEL_TYPES, len(types))):
             (role, hp_max, toughness, save, invul), count = types[t_idx]
             if waaagh_invul:
@@ -1216,6 +1227,7 @@ class ObservationBuilder:
             for r_idx, role_name in enumerate(self.SQUAD_MODEL_ROLES):
                 binv[t_idx, r_idx] = 1.0 if role == role_name else 0.0
             binv[t_idx, len(self.SQUAD_MODEL_ROLES)] = 1.0  # slot occupé
+        _types_cache[_types_key] = (cont, binv)
         return cont, binv
 
     def _encode_unit_entity(
@@ -1342,11 +1354,16 @@ class ObservationBuilder:
         if not is_active and not ctx["active_not_deployed"] and entity_deployed:
             # MÊME mesure que le gate de portée du moteur (socles par-figurine), donc
             # directement comparable aux portées d'armes exposées par les profils.
+            # Item 1.6 — pair-cache invalidé par _unit_move_version (même motif que LoS).
             from engine.phase_handlers.shared_utils import _ranged_squad_edge_distance
 
-            _c(
-                "edge_distance",
-                float(
+            _ed_ver = game_state.get("_unit_move_version", 0)
+            _ed_key = (ctx["active_squad_id"], squad_id, ctx["ranged_metric"], _ed_ver)
+            _ed_cache = game_state.setdefault("_edge_distance_cache", {})
+            if _ed_key in _ed_cache:
+                _ed_val = _ed_cache[_ed_key]
+            else:
+                _ed_val = float(
                     _ranged_squad_edge_distance(
                         game_state,
                         ctx["active_squad_id"],
@@ -1354,8 +1371,9 @@ class ObservationBuilder:
                         metric=ctx["ranged_metric"],
                         attacker_socle=ctx["active_socle"],
                     )
-                ),
-            )
+                )
+                _ed_cache[_ed_key] = _ed_val
+            _c("edge_distance", _ed_val)
         _c("move", require_key(unit, "MOVE"))
         _c("hp_max", require_key(unit, "HP_MAX"))
         _c("toughness", require_key(unit, "T"))

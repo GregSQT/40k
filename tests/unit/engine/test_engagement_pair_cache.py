@@ -170,9 +170,9 @@ def test_cache_ne_sert_pas_de_verdict_perime() -> None:
     """Bout en bout, sur la mutation EN PLACE que le moteur pratique réellement.
 
     Une entrée `units_cache` n'est pas remplacée quand une figurine bouge : ses clés sont
-    réécrites (`_recompute_squad_occupied_hexes`). Un cache mémoïsé sur l'identité de l'entrée, ou
-    sur un compteur de version, servirait donc l'ancien verdict. Ici la clé porte la géométrie :
-    la mutation change la clé, donc le verdict suit.
+    réécrites (`_recompute_squad_occupied_hexes`). En production, `_touch_unit_los` est appelé
+    après chaque écriture et vide `entry["_ez_fp"]` (item 1.8). Le test mute en direct mais
+    efface aussi `_ez_fp` pour simuler le comportement moteur fidèlement.
     """
     sr._EZ_PAIR_CACHE.clear()
     a = _entry(id="1", col=10, row=10)
@@ -184,9 +184,12 @@ def test_cache_ne_sert_pas_de_verdict_perime() -> None:
     assert adjacent is True
 
     # Même OBJET `b`, muté en place et emmené très loin — exactement ce que fait le moteur.
+    # `_touch_unit_los` efface `_ez_fp` après chaque écriture de position (item 1.8) ; on
+    # reproduit ce nettoyage ici pour que le test reste un témoin fidèle du chemin de prod.
     b["col"] = 40
     b["occupied_hexes"] = {(40, 10)}
     b["occupied_hexes_by_model"] = {"m2": (40, 10)}
+    b.pop("_ez_fp", None)
     apres = sr.entries_in_engagement_zone(a, b, engagement_zone=2, metric="hex")
     assert apres is False, "verdict périmé servi depuis le cache après mutation en place"
 
@@ -195,6 +198,7 @@ def test_cache_ne_sert_pas_de_verdict_perime() -> None:
     b["col"] = 11
     b["occupied_hexes"] = {(11, 10)}
     b["occupied_hexes_by_model"] = {"m2": (11, 10)}
+    b.pop("_ez_fp", None)
     assert sr.entries_in_engagement_zone(a, b, engagement_zone=2, metric="hex") is True
 
 
