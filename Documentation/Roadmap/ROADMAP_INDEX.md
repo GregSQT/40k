@@ -315,7 +315,7 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
 | moteur | Preview de tir sans deepcopy | [moteur.md#preview-tir](moteur.md#preview-tir) | 🚫 |
-| infra | **Accélération entraînement RL** — Phase 0 ✅ + Phase 1 ✅ **mesurée machine au repos 2026-08-26** (1.1–1.9 livrés ; **1.7 ✅ buffers numpy livrés (2026-08-26)** ; gain réel sur la QUEUE — P99 −44 %, wall −32 %, médiane −7 % sur 3+3 répétitions) ; bench_env_step ✅ **reproductible (2026-08-26)** ; **Phase 2 ✅ items 2.1–2.3 livrés (2026-08-26)** (GPU buffer, GPU metrics, inline masks) ; mesure 2.4 + phases 3→4 à faire ; arbitrage Phase 3 après mesure 2.4 | [infra.md#perf-entrainement](infra.md#perf-entrainement) | ⚡ |
+| infra | **Accélération entraînement RL** — Phase 0 ✅ + Phase 1 ✅ **mesurée machine au repos 2026-08-26** (1.1–1.9 livrés ; **1.7 ✅ buffers numpy livrés (2026-08-26)** ; gain réel sur la QUEUE — P99 −44 %, wall −32 %, médiane −7 % sur 3+3 répétitions) ; bench_env_step ✅ **reproductible (2026-08-26)** ; **Phase 2 ✅ complète (2.1–2.4, 2026-08-26)** (GPU buffer, GPU metrics, inline masks ; +13–16 % fps mesuré run réel) ; phases 3→4 à faire ; arbitrage Phase 3 sur chiffres réels | [infra.md#perf-entrainement](infra.md#perf-entrainement) | ⚡ |
 | infra | Noyau natif BFS move/empreintes — pool de move = 29 % d'une partie d'évaluation | [infra.md#noyau-natif](infra.md#noyau-natif) | ⚡ |
 | infra | Migration PostgreSQL | [infra.md#postgresql](infra.md#postgresql) | ⚡ |
 | infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) | 🚫 |
