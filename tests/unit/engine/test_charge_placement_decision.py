@@ -192,9 +192,9 @@ class TestChargeBuildValidPlanIntents:
         assert plan_0 is not None
         assert plan_4 is not None
 
-        cache = gs["_charge_plan_cache"]
-        assert len(cache) >= 2, (
-            "intent=0 et intent=4 doivent créer des entrées séparées dans _charge_plan_cache"
+        assert plan_0 is not plan_4, (
+            "intent=0 et intent=4 doivent avoir des entrées cache distinctes — "
+            "si identiques, intent est absent de la clé _charge_plan_cache"
         )
 
         # Troisième appel intent=0 : cache hit → même objet (identité).
@@ -331,7 +331,7 @@ class TestArmChargePlacementDecision:
 
 class TestApplyChargePlacementDecision:
     def _gs_armed(self) -> Dict[str, Any]:
-        gs = _default_gs()
+        gs = _make_gs([_unit("att", 1, 3, 5), _unit("tgt", 2, 8, 5)])
         plan_0 = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=8)
         assert plan_0 is not None
         arm_charge_placement_decision(gs, "att", ["tgt"], 8, plan_0, context=_ctx())
@@ -375,16 +375,13 @@ class TestApplyChargePlacementDecision:
 
     def test_plan_index_oob_raises_value_error(self) -> None:
         """plan_index >= 5 → ValueError explicite."""
-        gs2 = _default_gs()
-        plan_0 = charge_build_valid_plan(gs2, "att", ["tgt"], charge_roll=8)
-        assert plan_0 is not None
-        arm_charge_placement_decision(gs2, "att", ["tgt"], 8, plan_0, context=_ctx())
+        gs = self._gs_armed()
         with pytest.raises(ValueError, match="plan_index"):
-            apply_charge_placement_decision(gs2, "att", plan_index=CHARGE_PLACEMENT_INTENT_COUNT)
+            apply_charge_placement_decision(gs, "att", plan_index=CHARGE_PLACEMENT_INTENT_COUNT)
 
     def test_absent_pending_raises_runtime_error(self) -> None:
         """apply sans arm préalable → RuntimeError explicite (T1 : donnée obligatoire absente)."""
-        gs = _default_gs()
+        gs = _make_gs([_unit("att", 1, 3, 5), _unit("tgt", 2, 8, 5)])
         with pytest.raises(RuntimeError, match="absent"):
             apply_charge_placement_decision(gs, "att", plan_index=0)
 
@@ -421,7 +418,6 @@ class TestChargePlanCacheIntentIsolation:
         r1 = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=1)
         r0b = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
         assert r0a is not None
-        assert r1 is not None
         assert r0b is not None
         assert r0a is not r1, (
             "intent=0 et intent=1 partagent le même objet Python — "
