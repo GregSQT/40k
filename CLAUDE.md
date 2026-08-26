@@ -299,7 +299,7 @@ Catégories : Bug = invariant cassé prouvé hors périmètre ; Trou = cas non c
 Suspicion non prouvée → une ligne dans LU, aucune entrée SUITE. SUITE ne remplace jamais T2.
 Si analyse seule (aucun fichier modifié) : SUITE uniquement, avec une proposition d'action concrète.
 
-GABARITS SUITE — chaque prompt doit être autonome : lisible sans le contexte de la conversation, copiable-collable directement comme prochain prompt. Jamais une phrase vague ; toujours les références exactes.
+GABARITS SUITE — seulement si des entrées SUITE sont présentes : chaque prompt doit être autonome, lisible sans le contexte de la conversation, copiable-collable directement comme prochain prompt. Jamais une phrase vague ; toujours les références exactes.
 
 🔴 Bug — champs obligatoires :
   Observation : comportement constaté (valeur obtenue, crash, invariant violé) — verbatim si possible.

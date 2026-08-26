@@ -236,6 +236,7 @@ def test_shooting_type_cleared_after_manual_pvp_allocation(monkeypatch):
     eng = object.__new__(W40KEngine)
     eng.game_state = {
         SQUAD_SHOOTING_TYPE_CHOICE_KEY: {"1": SHOOTING_TYPE_INDIRECT},
+        "unit_by_id": {"1": {"id": "1", "player": 1}},
     }
 
     eng._finish_manual_shoot_after_allocation("1", {"shoot_result": {}})

@@ -11,7 +11,7 @@ Discrimination : meme fixture sous couvert, avec et sans [PSYCHIC].
 """
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import _cover_worsened_bs
-from tests.unit.engine.conftest import gs_with_units
+from tests.unit.ai._fabriques import gs_with_units
 
 
 def _sous_couvert(monkeypatch, cover=True):

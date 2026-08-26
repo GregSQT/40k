@@ -28,6 +28,7 @@ PORTÉE EXACTE, et ce qu'elle ne couvre PAS :
 import pytest
 
 from engine.phase_handlers.shared_utils import unit_can_reroll_charge
+from shared.data_validation import ConfigurationError
 
 
 def _gs(unit_rules):
@@ -51,7 +52,7 @@ def test_autre_regle_ne_declenche_pas():
 
 def test_unite_introuvable_leve():
     """Aucun repli masquant : une unité inconnue est un bug, pas un 'False' silencieux."""
-    with pytest.raises(KeyError):
+    with pytest.raises(ConfigurationError):
         unit_can_reroll_charge({"unit_by_id": {}}, "404")
 
 
