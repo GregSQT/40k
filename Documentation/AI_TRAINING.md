@@ -2360,6 +2360,12 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x5_new   --scenari
 python3 ai/train.py --agent ArmageddonAgent --training-config x5_long  --scenario bot --resolution 5 --new   # Entraînement x5 long depuis zéro
 python3 ai/train.py --agent ArmageddonAgent --training-config x1       --scenario bot --resolution 1 --new --step  # Avec step logging
 
+# Reprise sur un modèle EXISTANT — --new l'écarte, --append le remplace par le résultat du run.
+# Ne jamais choisir implicitement entre les deux (CLAUDE.md §ENTRAÎNEMENT IA).
+python3 ai/train.py --agent ArmageddonAgent --training-config x1 --scenario bot --resolution 1 --append   # Poursuit le modèle canonique
+python3 ai/train.py --agent ArmageddonAgent --scenario bot --resolution 1 \
+    --resume-from ai/models/ArmageddonAgent/ppo_checkpoint_640000_steps.zip                              # Reprend un checkpoint
+
 # Evaluation (no training)
 python3 ai/train.py --agent ArmageddonAgent --training-config x1 --resolution 1 --test-only --step
 
