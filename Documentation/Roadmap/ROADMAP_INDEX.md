@@ -305,7 +305,7 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
 | moteur | Preview de tir sans deepcopy | [moteur.md#preview-tir](moteur.md#preview-tir) | 🚫 |
-| infra | **Accélération entraînement RL** — Phase 0 ✅ (2026-08-26 : bench_env_step + harnais parité 4 verts) ; phases 1→4 à faire (queue env, pipeline SB3, évals) ; arbitrage Phase 3 après mesure | [infra.md#perf-entrainement](infra.md#perf-entrainement) | ⚡ |
+| infra | **Accélération entraînement RL** — Phase 0 ✅ + Phase 1 ✅ (2026-08-26 : items 1.1–1.9 livrés, −12 % médiane run-actif, mesure repos à faire) ; phases 2→4 à faire (pipeline SB3, évals) ; arbitrage Phase 3 après mesure | [infra.md#perf-entrainement](infra.md#perf-entrainement) | ⚡ |
 | infra | Noyau natif BFS move/empreintes — pool de move = 29 % d'une partie d'évaluation | [infra.md#noyau-natif](infra.md#noyau-natif) | ⚡ |
 | infra | Migration PostgreSQL | [infra.md#postgresql](infra.md#postgresql) | ⚡ |
 | infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) | 🚫 |
