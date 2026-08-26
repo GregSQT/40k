@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from smoke_t5_bare import MELEE_SCENARIO  # noqa: E402
+from smoke_t5_bare import MELEE_SCENARIO
 
 
 @pytest.fixture()

@@ -33,11 +33,11 @@ import pytest
 
 from smoke_t5_bare import MELEE_SCENARIO
 
-from ai.metrics_tracker import W40KMetricsTracker  # noqa: E402
-from ai.unit_registry import UnitRegistry  # noqa: E402
-from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT  # noqa: E402
-from engine.w40k_core import W40KEngine  # noqa: E402
-from tests._state_invariants import charge_log_line  # noqa: E402
+from ai.metrics_tracker import W40KMetricsTracker
+from ai.unit_registry import UnitRegistry
+from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT
+from engine.w40k_core import W40KEngine
+from tests._state_invariants import charge_log_line
 
 #: Graines essayees pour obtenir la situation EXIGEE par chaque test. Borne stricte et message
 #: d'echec explicite : si un correctif de regles fait qu'aucune ne produit plus de charge, le

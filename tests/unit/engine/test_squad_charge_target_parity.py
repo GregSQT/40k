@@ -26,16 +26,16 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pytest
 
-from smoke_t5_bare import MELEE_SCENARIO  # noqa: E402
+from smoke_t5_bare import MELEE_SCENARIO
 
-from engine.macro_intents import ACTION_WAIT, CHARGE_SLOT_BASE  # noqa: E402
-from engine.phase_handlers.shared_utils import (  # noqa: E402
+from engine.macro_intents import ACTION_WAIT, CHARGE_SLOT_BASE
+from engine.phase_handlers.shared_utils import (
     build_squad_action_mask,
     charge_build_valid_plan,
     charge_check_eligibility,
     get_enemy_slot_mapping,
 )
-from shared.data_validation import require_key  # noqa: E402
+from shared.data_validation import require_key
 
 
 def _engine(scenario_file: str, seed: int):
