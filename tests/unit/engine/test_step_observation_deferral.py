@@ -58,7 +58,6 @@ class _RecordingObsBuilder:
     def __init__(self) -> None:
         self.squad_builds = 0
         self._obs_scratch: Optional[Dict[str, np.ndarray]] = None
-        self._full_obs_scratch: Optional[Dict[str, np.ndarray]] = None
 
     def build_squad_observation(self, game_state, squad_id):
         _ = (game_state, squad_id)
@@ -83,10 +82,11 @@ class _RecordingObsBuilder:
 
     def _ensure_full_obs_scratch(self):
         assert self._obs_scratch is not None
-        if self._full_obs_scratch is None:
-            self._full_obs_scratch = dict(self._obs_scratch)
-            self._full_obs_scratch["grid"] = np.zeros((1, 1, 1), dtype=np.float32)
-        return self._full_obs_scratch
+        return {**self._obs_scratch, "grid": np.zeros((1, 1, 1), dtype=np.float32)}
+
+    def zero_full_obs_scratch(self):
+        self._empty_squad_observation()
+        return self._ensure_full_obs_scratch()
 
 
 class _EngineStub:
