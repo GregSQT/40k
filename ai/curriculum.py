@@ -61,6 +61,29 @@ _EXPLOITER_CONFIG_REQUIRED_KEYS = (
     "budget_cap",
 )
 
+#: Cles autorisees au niveau racine de `training_config_overrides` d'une etape learner.
+#: Toute cle absente de cette liste est refusee a la validation du curriculum.
+#: Les cles structurelles (deployment_mode_schedule, obs_size, vec_normalize, n_envs, seed)
+#: ne sont PAS autorisees : elles doivent rester identiques entre toutes les etapes pour
+#: que les modeles soient comparables et que les tests de profil ne divergent pas.
+STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS: frozenset = frozenset({
+    "total_episodes", "model_params", "callback_params",
+})
+
+#: Sous-cles de `model_params` autorisees dans un override d'etape.
+STAGE_HP_OVERRIDES_ALLOWED_MODEL_PARAMS: frozenset = frozenset({
+    "learning_rate", "ent_coef", "n_epochs", "vf_coef",
+})
+
+#: Sous-cles de `callback_params` autorisees dans un override d'etape.
+#: `bot_eval_freq` et `bot_eval_final` sont les seuls parametres d'evaluation qui dependent
+#: directement de `total_episodes` : les declarer explicitement ici co-localise la decision
+#: d'evaluation avec la decision de duree, sans creer deux sources de verite pour les valeurs
+#: par defaut qui restent dans x1_long.
+STAGE_HP_OVERRIDES_ALLOWED_CALLBACK_PARAMS: frozenset = frozenset({
+    "bot_eval_freq", "bot_eval_final",
+})
+
 
 def _project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -419,6 +442,114 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
             f"{source}: le curriculum a des etapes exploiteur mais pas de bloc "
             "'exploiter_config'. Ajouter ce bloc dans curriculum.json."
         )
+
+    for name in order:
+        stage = require_stage(curriculum, name)
+        _validate_stage_hp_overrides(name, stage, source)
+
+
+def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) -> None:
+    """Valide le bloc `training_config_overrides` d'une etape learner si present.
+
+    Les etapes exploiteur ignorent ce bloc : leur protocole impose la config EXACTE declaree
+    dans `exploiter_config.training_config_required`, et un override la ferait diverger sans
+    que `validate_exploiter_protocol` ne le detecte.
+    """
+    overrides = stage.get("training_config_overrides")
+    if overrides is None:
+        return
+    if is_exploiter_stage(stage):
+        raise ValueError(
+            f"{source}: stages[{name}].training_config_overrides n'est pas autorise sur une "
+            "etape exploiteur : le protocole exploiteur exige la config exacte de "
+            "exploiter_config.training_config_required."
+        )
+    if not isinstance(overrides, dict):
+        raise TypeError(
+            f"{source}: stages[{name}].training_config_overrides doit etre un objet JSON."
+        )
+    unknown_top = sorted(set(overrides) - STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS)
+    if unknown_top:
+        raise ValueError(
+            f"{source}: stages[{name}].training_config_overrides contient des cles non autorisees : "
+            f"{unknown_top}. Cles autorisees : {sorted(STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS)}"
+        )
+    if "total_episodes" in overrides:
+        ep = overrides["total_episodes"]
+        if not isinstance(ep, int) or ep <= 0:
+            raise ValueError(
+                f"{source}: stages[{name}].training_config_overrides.total_episodes doit etre "
+                f"un entier > 0 (got {ep!r})"
+            )
+    if "model_params" in overrides:
+        mp = overrides["model_params"]
+        if not isinstance(mp, dict):
+            raise TypeError(
+                f"{source}: stages[{name}].training_config_overrides.model_params doit etre un objet."
+            )
+        unknown_mp = sorted(set(mp) - STAGE_HP_OVERRIDES_ALLOWED_MODEL_PARAMS)
+        if unknown_mp:
+            raise ValueError(
+                f"{source}: stages[{name}].training_config_overrides.model_params contient des "
+                f"cles non autorisees : {unknown_mp}. Cles autorisees : "
+                f"{sorted(STAGE_HP_OVERRIDES_ALLOWED_MODEL_PARAMS)}"
+            )
+        if "n_epochs" in mp:
+            n = mp["n_epochs"]
+            if not isinstance(n, int) or n <= 0:
+                raise ValueError(
+                    f"{source}: stages[{name}].training_config_overrides.model_params.n_epochs "
+                    f"doit etre un entier > 0 (got {n!r})"
+                )
+        if "vf_coef" in mp:
+            v = mp["vf_coef"]
+            if not isinstance(v, (int, float)) or v <= 0:
+                raise ValueError(
+                    f"{source}: stages[{name}].training_config_overrides.model_params.vf_coef "
+                    f"doit etre un nombre > 0 (got {v!r})"
+                )
+    if "callback_params" in overrides:
+        cp = overrides["callback_params"]
+        if not isinstance(cp, dict):
+            raise TypeError(
+                f"{source}: stages[{name}].training_config_overrides.callback_params doit etre un objet."
+            )
+        unknown_cp = sorted(set(cp) - STAGE_HP_OVERRIDES_ALLOWED_CALLBACK_PARAMS)
+        if unknown_cp:
+            raise ValueError(
+                f"{source}: stages[{name}].training_config_overrides.callback_params contient des "
+                f"cles non autorisees : {unknown_cp}. Cles autorisees : "
+                f"{sorted(STAGE_HP_OVERRIDES_ALLOWED_CALLBACK_PARAMS)}"
+            )
+        for key in ("bot_eval_freq", "bot_eval_final"):
+            if key in cp:
+                val = cp[key]
+                if not isinstance(val, int) or val <= 0:
+                    raise ValueError(
+                        f"{source}: stages[{name}].training_config_overrides.callback_params.{key} "
+                        f"doit etre un entier > 0 (got {val!r})"
+                    )
+        # Coherence : si total_episodes ET bot_eval_freq sont tous deux dans les overrides,
+        # verifier que le nombre d'evaluations intermediaires couvre au moins robust_window=3.
+        # (La valeur exacte de robust_window reste dans x1_long ; on utilise 3 comme minimum
+        #  absolu — aucun profil long ne descend en dessous.)
+        if "bot_eval_freq" in cp and "total_episodes" in overrides:
+            total_ep = overrides["total_episodes"]
+            freq = cp["bot_eval_freq"]
+            min_robust_window = 3
+            if total_ep < freq * min_robust_window:
+                raise ValueError(
+                    f"{source}: stages[{name}].training_config_overrides — "
+                    f"total_episodes ({total_ep}) < bot_eval_freq ({freq}) * robust_window_min "
+                    f"({min_robust_window}) = {freq * min_robust_window} : le modele robuste "
+                    f"ne serait jamais selectionne (pas assez de points de mesure)."
+                )
+
+
+def get_stage_hp_overrides(stage: Dict[str, Any]) -> Dict[str, Any]:
+    """Renvoie le bloc `training_config_overrides` de l'etape, ou {} si absent."""
+    overrides = stage.get("training_config_overrides")
+    return overrides if isinstance(overrides, dict) else {}
 
 
 # ── RAMPE ──────────────────────────────────────────────────────────────────────────────────

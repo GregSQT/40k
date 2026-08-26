@@ -45,7 +45,16 @@
       "ratio_end": 0.40,
       "pool": [
         {"kind": "champion", "members": ["P0"], "weight": 0.40}
-      ]
+      ],
+      "training_config_overrides": {
+        "total_episodes": 75000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65},
+          "n_epochs": 5,
+          "vf_coef": 0.5
+        }
+      }
     },
     "P2": {
       "role": "learner",
@@ -56,7 +65,16 @@
       "pool": [
         {"kind": "champion", "members": ["P1"], "weight": 0.40},
         {"kind": "ancients", "members": ["P0"], "weight": 0.20}
-      ]
+      ],
+      "training_config_overrides": {
+        "total_episodes": 100000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65},
+          "n_epochs": 5,
+          "vf_coef": 0.5
+        }
+      }
     },
     "P3": {
       "role": "learner",
