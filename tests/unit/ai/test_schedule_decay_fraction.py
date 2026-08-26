@@ -377,6 +377,20 @@ EXPECTED_BOT_EVAL_COUNT: dict[str, int] = {
 }
 
 
+@pytest.mark.parametrize("profile_name", PROFILE_NAMES)
+def test_bot_eval_count_table_is_exhaustive(profile_name: str) -> None:
+    """Tout profil JSON doit figurer dans EXPECTED_BOT_EVAL_COUNT.
+
+    La table épingle le budget d'évaluation ; un profil absent n'est jamais vérifié par
+    `test_bot_eval_bot_count_is_pinned`, qui itère sur la table, pas sur les profils.
+    """
+    assert profile_name in EXPECTED_BOT_EVAL_COUNT, (
+        f"profil '{profile_name}' absent de EXPECTED_BOT_EVAL_COUNT : l'inscrire avec le "
+        f"nombre de bots attendus dans bot_eval_weights ET mettre à jour les décompositions "
+        f"chiffrées des notes *_normal du JSON."
+    )
+
+
 @pytest.mark.parametrize("profile_name", sorted(EXPECTED_BOT_EVAL_COUNT))
 def test_bot_eval_bot_count_is_pinned(profile_name: str) -> None:
     """Le nombre de bots joués par évaluation est épinglé : il FIXE le budget d'évaluation.
@@ -394,13 +408,13 @@ def test_bot_eval_bot_count_is_pinned(profile_name: str) -> None:
         f"Ce nombre MULTIPLIE le budget d'évaluation : mettre à jour la table ET les "
         f"décompositions chiffrées des notes *_normal du JSON."
     )
-    # `bot_eval_randomness` alimente le MÊME panel : `evaluate_against_bots` exige une entrée de
-    # randomness pour chaque nom actif et lève sinon. Un décalage entre les deux dictionnaires
-    # casse l'évaluation au démarrage, pas au moment de la lecture des poids.
-    assert sorted(cb["bot_eval_randomness"]) == sorted(weights), (
-        f"{profile_name} : bot_eval_randomness et bot_eval_weights portent des clés "
-        f"différentes — randomness={sorted(cb['bot_eval_randomness'])}, "
-        f"weights={sorted(weights)}."
+    # Miroir du contrôle runtime (bot_evaluation.py:1566) : randomness doit couvrir tous les bots
+    # pondérés ; des clés supplémentaires dans randomness sont tolérées par le runtime.
+    missing = [name for name in weights if name not in cb["bot_eval_randomness"]]
+    assert not missing, (
+        f"{profile_name} : bot_eval_randomness manque des entrées pour les bots pondérés "
+        f"— manquants={missing}, weights={sorted(weights)}, "
+        f"randomness={sorted(cb['bot_eval_randomness'])}."
     )
 
 
