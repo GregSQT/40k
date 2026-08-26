@@ -2133,11 +2133,6 @@ def _get_players_present_from_units_cache(game_state: Dict[str, Any]) -> Set[int
     return players_present
 
 
-def _build_enemy_adjacent_hexes_all_players(game_state: Dict[str, Any]) -> None:
-    """Call build_enemy_adjacent_hexes for every player present in units_cache."""
-    for player in _get_players_present_from_units_cache(game_state):
-        build_enemy_adjacent_hexes(game_state, player)
-
 
 def _build_enemy_adjacent_structures_from_units_cache(
     game_state: Dict[str, Any],
