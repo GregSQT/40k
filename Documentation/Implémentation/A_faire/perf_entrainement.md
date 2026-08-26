@@ -35,8 +35,10 @@ Mesure de référence antérieure : `x1_long` nu 50 000 ép. = 5 h 54 (2026-08-1
 | Inférence rollout : 341 forwards batch 24 × 5,84 ms (dont 1,78 ms de conversion H2D, 28 clés d'obs) | ~2 s | ~5 % |
 
 **Utilisation** : 24 workers SubprocVecEnv à ~11-13 % CPU chacun, learner ~43 %, machine idle ~72 %,
-GPU 20-38 % (3 Go/8). `n_steps=8192` de la config est un **total** divisé par `n_envs`
-(`ai/train.py` : `effective_n_steps = max(1, base_n_steps // n_envs)` → 341/env).
+GPU 20-38 % (3 Go/8). `n_steps` de la config est un **total** divisé par `n_envs`
+(`ai/train.py`, `apply_rollout_n_steps` : `effective_n_steps = max(1, base_n_steps // n_envs)`).
+Il valait **8192** au moment de cette mesure → 341/env ; il vaut **8160** depuis le 2026-08-26
+(commit `7c466b15`) → **340/env**, cf. l'encadré du budget de cycle ci-dessus.
 
 ### Répartition d'un step d'env (cProfile 300 steps, chemin exact du run P1)
 
@@ -84,8 +86,14 @@ Hors de cause (mesuré) : reward, callbacks, TensorBoard, évals (0 éval jouée
    (`ai/training_callbacks.py`).
 10. **Gate de fin d'étape curriculum** : 300 épisodes **séquentiels mono-process CPU** (~72 min à
     14,5 s/ép, `ai/bot_evaluation.py`) alors que le pool 16 workers existe pour l'éval finale.
-11. **Éval intermédiaire** : les 10 clés de `bot_eval_weights` sont jouées, poids 0,0 compris
-    (`ai/bot_evaluation.py`) — 4 bots / 10 = mesure pure, hors signal de sélection.
+11. ✅ **TRAITÉ le 2026-08-26** (commit `8bb4e42e`) — **Éval intermédiaire** : les 10 clés de
+    `bot_eval_weights` étaient jouées, poids 0,0 compris (`ai/bot_evaluation.py`) — 4 bots / 10 =
+    mesure pure, hors signal de sélection. Les 4 clés à poids nul (`tactical` et les trois
+    `reference_*`) ont été supprimées des 6 profils : **6 bots joués au lieu de 10, en
+    intermédiaire ET en finale** (les deux passent par `evaluate_against_bots` et n'y diffèrent
+    que par `n_episodes`). Motif : ces bots sont saturés à 1.00, donc sans pouvoir séparateur.
+    Verrou : `test_bot_eval_bot_count_is_pinned`
+    (`tests/unit/ai/test_schedule_decay_fraction.py`).
 
 **Déjà en place (ne pas re-livrer)** : SubprocVecEnv 24 workers ; masque construit 1×/step nominal
 avec handoff masque→obs (`w40k_core.py`) ; `action_masks()` servi sans recalcul

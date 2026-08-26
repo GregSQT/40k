@@ -23,8 +23,23 @@
 > [bot.md#league](#league). L'étalon de force non saturable reste l'échelle de checkpoints figés
 > ([#r0b-echelle](#r0b-echelle)).
 >
-> Les `reference_*` gardent leur rôle de **couverture par style et de détection de régression**
-> dans le panel ; ils ne portent plus aucun gate. Aucune action n'est en attente sur ce chantier.
+> ~~Les `reference_*` gardent leur rôle de **couverture par style et de détection de régression**
+> dans le panel~~ ; ils ne portent plus aucun gate. Aucune action n'est en attente sur ce chantier.
+>
+> **MISE À JOUR 2026-08-26/27 — deux pas de plus, décision utilisateur.**
+> 1. **Les `reference_*` et `tactical` sont sortis du panel d'évaluation** (commit `8bb4e42e`) :
+>    leurs 4 clés sont retirées de `bot_eval_weights` sur les 6 profils. Comme la boucle
+>    d'évaluation itère sur les CLÉS de ce dictionnaire, un poids nul ne coûtait pas moins cher —
+>    ils étaient joués comme les autres. Le rôle de « couverture par style » barré ci-dessus n'est
+>    donc plus tenu : ils ne sont plus joués du tout, ni en intermédiaire ni en finale. Motif :
+>    saturés, ils ne séparaient aucun modèle, et l'éval finale de `x1_long` les payait 1200
+>    épisodes sur 3000. La détection de régression repose désormais sur les 6 doctrine et sur
+>    l'échelle de checkpoints figés. Les bots restent **définis et jouables** à la demande
+>    (`ai/bot_registry.py`, `scripts/bot_ranking.py`) — c'est leur participation automatique qui
+>    cesse. Verrou : `test_bot_eval_bot_count_is_pinned`.
+> 2. **`model_gating_min_benchmark_floor` n'existe plus** (commit `16cf36b1`) : la clé, la logique
+>    de gating, les courbes TensorBoard et les tests sont supprimés. La phrase « passe de 0,90 à
+>    0,0 » ci-dessus décrit un état intermédiaire dépassé — il n'y a plus de valeur à poser.
 
 ✅ **Code livré 2026-08-21** — `ai/benchmark_bots.py` + 17 tests verts.
 §3.1 assignation réclamante, §3.2 tenue, §3.3 anti-empilement, §3.4 géométrie par aire.
