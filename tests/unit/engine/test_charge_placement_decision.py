@@ -332,7 +332,7 @@ class TestArmChargePlacementDecision:
 
 class TestApplyChargePlacementDecision:
     def _gs_armed(self) -> Dict[str, Any]:
-        gs = _make_gs([_unit("att", 1, 3, 5), _unit("tgt", 2, 8, 5)])
+        gs = _default_gs()
         plan_0 = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=8)
         assert plan_0 is not None
         arm_charge_placement_decision(gs, "att", ["tgt"], 8, plan_0, context=_ctx())
@@ -376,7 +376,7 @@ class TestApplyChargePlacementDecision:
         gs = self._gs_armed()
         # On consomme avec 0 pour ne pas avoir de plan_index=-1 qui lève.
         # Puis on réarme pour le second test.
-        gs2 = _make_gs([_unit("att", 1, 3, 5), _unit("tgt", 2, 8, 5)])
+        gs2 = _default_gs()
         plan_0 = charge_build_valid_plan(gs2, "att", ["tgt"], charge_roll=8)
         assert plan_0 is not None
         arm_charge_placement_decision(gs2, "att", ["tgt"], 8, plan_0, context=_ctx())
@@ -385,7 +385,7 @@ class TestApplyChargePlacementDecision:
 
     def test_absent_pending_raises_runtime_error(self) -> None:
         """apply sans arm préalable → RuntimeError explicite (T1 : donnée obligatoire absente)."""
-        gs = _make_gs([_unit("att", 1, 3, 5), _unit("tgt", 2, 8, 5)])
+        gs = _default_gs()
         with pytest.raises(RuntimeError, match="absent"):
             apply_charge_placement_decision(gs, "att", plan_index=0)
 
@@ -422,6 +422,7 @@ class TestChargePlanCacheIntentIsolation:
         r1 = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=1)
         r0b = charge_build_valid_plan(gs, "att", ["tgt"], charge_roll=10, intent=0)
         assert r0a is not None
+        assert r1 is not None
         assert r0b is not None
         assert r0a is not r1, (
             "intent=0 et intent=1 partagent le même objet Python — "
