@@ -201,21 +201,18 @@ elle se fait en dernier et **se saute si la décision A est prise entre-temps**.
 Sous-classes locales (dans `ai/`), jamais de fork du venv. Verrou : masques identiques bit-à-bit
 vs `env_method`, loss/approx_kl identiques à seed fixe sur un run court.
 
-### Phase 3 — Architecture de la collecte — ⛔ ARBITRAGE utilisateur
+### Phase 3 — Architecture de la collecte — ✅ Option A actée (2026-08-26)
 
 **Problème** : même après les phases 1-2, la collecte reste en pas cadencé — les 24 workers et le
 GPU s'attendent mutuellement à chaque step. C'est structurel, pas optimisable localement.
 
-- **Option A — collecte dans les workers, poids gelés par cycle** : chaque worker déroule ses
-  341 steps avec une copie CPU de la policy (3,1 M de paramètres) et renvoie sa trajectoire ; le
-  learner ne fait plus que l'update. Gain ×3-6 estimé ; coût 1-2 semaines + validation lourde.
-- **Option B — VecEnv mémoire partagée + 2 envs/process** : garde la boucle SB3, supprime le
-  pickle (~2,5 Mo/step). Gain ×1,3-1,6 ; coût 2-4 jours ; risque faible.
-- **Option C — s'arrêter aux phases 1-2-4** : ×2-3 au total. Défendable si la league peut attendre.
+**Décision : Option A** — collecte dans les workers, poids gelés par cycle : chaque worker déroule ses
+341 steps avec une copie CPU de la policy (3,1 M de paramètres) et renvoie sa trajectoire ; le
+learner ne fait plus que l'update. Gain ×3-6 estimé ; coût 1-2 semaines + validation lourde.
 
-**RECOMMANDATION : A** — seule option alignée sur le profil réel de la charge (moteur Python lourd,
-réseau minuscule), et mathématiquement neutre : SB3 gèle déjà la policy pendant toute la collecte,
-donc collecter avec les mêmes poids gelés dans les workers produit le même batch on-policy.
+Seule option alignée sur le profil réel de la charge (moteur Python lourd, réseau minuscule), et
+mathématiquement neutre : SB3 gèle déjà la policy pendant toute la collecte, donc collecter avec
+les mêmes poids gelés dans les workers produit le même batch on-policy.
 
 **Équivalences et écarts (analyse du 2026-08-26, confirmée par audit croisé)** :
 - Synchro des poids : triviale (3,1 Mo × 24, une fois par cycle).
