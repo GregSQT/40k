@@ -85,6 +85,29 @@ class SourceUnavailable(RuntimeError):
     """
 
 
+def _check_filesystem_encoding() -> None:
+    """Vérifie avant toute ouverture de fichier que le codec filesystem encode les chemins accentués.
+
+    Les chemins de ce dépôt contiennent 'é' (Documentation/Implémentation/). Sous
+    LC_ALL=C PYTHONUTF8=0, sys.getfilesystemencoding() vaut 'ascii' et os.fsencode() échoue
+    à mi-parcours avec une UnicodeEncodeError qui ne nomme ni la locale ni le remède.
+    Le script choisit de refuser plutôt que de convertir tout son parcours de fichiers en chemins
+    bytes : le coût de lisibilité est réel pour un scénario qui exige PYTHONUTF8=0 explicite,
+    que Python 3.12 n'active pas de lui-même sous locale C (PEP 538/540 active le mode UTF-8).
+    """
+    codec = sys.getfilesystemencoding()
+    try:
+        "é".encode(codec)
+    except (UnicodeEncodeError, LookupError):
+        import locale as _locale
+        loc = _locale.getlocale()[0] or "C"
+        raise SourceUnavailable(
+            f"L'encodage filesystem '{codec}' (locale détectée : {loc}) ne peut pas encoder "
+            f"les chemins accentués de ce dépôt (ex. : Documentation/Implémentation/). "
+            f"Relancer avec PYTHONUTF8=1 ou sous une locale UTF-8."
+        )
+
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DOCS = ROOT / "Documentation" / "Implémentation"
 CLAUDE_MD = ROOT / "CLAUDE.md"
@@ -1551,4 +1574,9 @@ def main(argv: list[str]) -> int:
 
 
 if __name__ == "__main__":
+    try:
+        _check_filesystem_encoding()
+    except SourceUnavailable as _env_error:
+        print(f"❌ ERREUR D'ENVIRONNEMENT : {_env_error}", file=sys.stderr)
+        sys.exit(1)
     sys.exit(main(sys.argv))

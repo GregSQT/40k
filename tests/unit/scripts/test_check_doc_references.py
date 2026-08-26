@@ -1282,9 +1282,15 @@ def test_git_output_is_decoded_regardless_of_the_locale() -> None:
     lui-même en mode UTF-8 sous locale C (PEP 538/540) et le test resterait vert quoi qu'il
     arrive — le vert vacant appliqué à son propre verrou.
 
-    BORNE : ce test couvre le DÉCODAGE de git. Sous une locale strictement ASCII, l'ouverture des
-    documents accentués échoue de toute façon, faute d'encodage de système de fichiers — c'est
-    une limite de l'environnement, pas du script, et aucun `encoding=` ne la lève.
+    BORNE : ce test couvre le DÉCODAGE de git seul, en important le module (sans lancer le script).
+    Le module peut s'importer sous fsencoding ascii — le check d'environnement (`_check_filesystem_
+    encoding`) n'est appelé que depuis le bloc `__main__`, et non à l'import. Sous une locale
+    strictement ASCII, l'ouverture des documents accentués échouerait à mi-parcours : le script
+    CHOISIT de refuser au démarrage (voir `test_ascii_fsencoding_produces_explicit_error`) plutôt
+    que de convertir tout son parcours de fichiers en chemins bytes. Ce choix est assumé : le coût
+    de lisibilité du parcours bytes est réel pour un scénario qui exige `PYTHONUTF8=0` explicitement,
+    que Python 3.12 n'active pas de lui-même sous locale C (PEP 538/540 active le mode UTF-8 seul).
+    Aucun `encoding=` ne contourne `os.fsencode` — la seconde moitié de l'ancienne BORNE est juste.
     """
     env = {
         **os.environ, "LC_ALL": "C", "LANG": "C", "PYTHONIOENCODING": "utf-8",
@@ -1302,6 +1308,33 @@ def test_git_output_is_decoded_regardless_of_the_locale() -> None:
     )
     assert done.returncode == 0, done.stderr[-2000:]
     assert done.stdout.strip() == "1"
+
+
+def test_ascii_fsencoding_produces_explicit_error() -> None:
+    """Sous fsencoding ascii, le script refuse au démarrage avec un message nommant PYTHONUTF8.
+
+    `LC_ALL=C PYTHONUTF8=0 PYTHONCOERCECLOCALE=0` désactive le basculement automatique en mode
+    UTF-8 de Python 3.12 (PEP 538/540) : sans ces variables, le test resterait vert quoi qu'il
+    arrive — le vert vacant appliqué à son propre verrou.
+
+    Ce que le test vérifie : le script sort avec un code non-nul ET la sortie d'erreur nomme
+    PYTHONUTF8 explicitement — pas une `UnicodeEncodeError` brute dont la trace ne désigne
+    ni la locale ni le remède.
+    """
+    env = {
+        **os.environ, "LC_ALL": "C", "LANG": "C", "PYTHONIOENCODING": "utf-8",
+        "PYTHONCOERCECLOCALE": "0", "PYTHONUTF8": "0",
+    }
+    done = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "check_doc_references.py")],
+        cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8",
+    )
+    combined = done.stdout + done.stderr
+    assert done.returncode != 0, "le script doit échouer sous fsencoding ascii"
+    assert "PYTHONUTF8" in combined, f"message PYTHONUTF8 absent\nstderr={done.stderr[-2000:]}"
+    assert "UnicodeEncodeError" not in combined, (
+        f"UnicodeEncodeError brute exposée au lieu d'un refus explicite\n{done.stderr[-2000:]}"
+    )
 
 
 def test_an_ambiguous_bare_name_is_not_confronted(tmp_path: pathlib.Path) -> None:
