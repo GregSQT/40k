@@ -286,6 +286,9 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | moteur | ✅ 5 CR findings corrigés (2026-08-25) — reactive-order, advance_status, turn_limit-reward, monster-firable, los-T1 | — | ⚡ |
 | moteur+analyzer | ✅ replis unit_by_id T2 (2026-08-25) — 46 sites Forme B convertis en require_unit_by_id ; unit_is_on_battlefield supprimée (code mort) ; 13 verrous rouge/vert | [moteur.md#unit-by-id](moteur.md#unit-by-id) | ⚡ |
 | analyzer | ✅ corpus lot7 — 5 règles ABSENT_LOGGABLE câblées (TORRENT, LETHAL_HITS, BLAST, 20.03, charge_impact) (2026-08-25) | — | ⚡ |
+| doc | ✅ fix-sentinel-isinstance check_doc_references (2026-08-26) — restaure le check d'identité `is` sur le sentinel _ANCHOR_UNSET dans check_doc_references.py | — | ⚡ |
+| infra | ✅ item 1.7 buffers numpy observation (2026-08-26) — ~27 np.zeros/build supprimés : buffers pré-alloués réutilisés dans observation_builder | [infra.md#perf-entrainement](infra.md#perf-entrainement) | ⚡ |
+| infra | ✅ Phase 2 pipeline SB3 learner items 2.1–2.3 (2026-08-26) — GpuMaskableDictRolloutBuffer (upload H2D ×1/rollout), accumulation GPU des métriques PPO (~225 syncs éliminés), MaskableSubprocVecEnv+PatchedMaskablePPO (RPC masks inline) ; 11 tests rouge/vert | [infra.md#perf-entrainement](infra.md#perf-entrainement) | ⚡ |
 
 ### Bloqués par une décision utilisateur
 
@@ -309,7 +312,7 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
 | moteur | Preview de tir sans deepcopy | [moteur.md#preview-tir](moteur.md#preview-tir) | 🚫 |
-| infra | **Accélération entraînement RL** — Phase 0 ✅ + Phase 1 ✅ **mesurée machine au repos 2026-08-26** (1.1–1.9 livrés ; 1.7 partiel : cache TYPES fait, buffers numpy non faits ; gain réel sur la QUEUE — P99 −44 %, wall −32 %, médiane −7 % sur 3+3 répétitions) ; bench_env_step ✅ **reproductible (2026-08-26)** (`random.seed` avant bench + test rouge/vert) ; phases 2→4 à faire (pipeline SB3, évals) ; arbitrage Phase 3 après mesure | [infra.md#perf-entrainement](infra.md#perf-entrainement) | ⚡ |
+| infra | **Accélération entraînement RL** — Phase 0 ✅ + Phase 1 ✅ **mesurée machine au repos 2026-08-26** (1.1–1.9 livrés ; **1.7 ✅ buffers numpy livrés (2026-08-26)** ; gain réel sur la QUEUE — P99 −44 %, wall −32 %, médiane −7 % sur 3+3 répétitions) ; bench_env_step ✅ **reproductible (2026-08-26)** ; **Phase 2 ✅ items 2.1–2.3 livrés (2026-08-26)** (GPU buffer, GPU metrics, inline masks) ; mesure 2.4 + phases 3→4 à faire ; arbitrage Phase 3 après mesure 2.4 | [infra.md#perf-entrainement](infra.md#perf-entrainement) | ⚡ |
 | infra | Noyau natif BFS move/empreintes — pool de move = 29 % d'une partie d'évaluation | [infra.md#noyau-natif](infra.md#noyau-natif) | ⚡ |
 | infra | Migration PostgreSQL | [infra.md#postgresql](infra.md#postgresql) | ⚡ |
 | infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) | 🚫 |
