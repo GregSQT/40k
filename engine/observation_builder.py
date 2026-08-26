@@ -1113,10 +1113,12 @@ class ObservationBuilder:
         """
         if self._full_obs_scratch is None:
             from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
-            self._full_obs_scratch = dict(self._obs_scratch)  # type: ignore[arg-type]
-            self._full_obs_scratch["grid"] = np.zeros(
+            scratch: Dict[str, np.ndarray] = dict(self._obs_scratch)  # type: ignore[arg-type]
+            scratch["grid"] = np.zeros(
                 (GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32
             )
+            self._full_obs_scratch = scratch
+        assert self._full_obs_scratch is not None
         return self._full_obs_scratch
 
     def zero_full_obs_scratch(self) -> Dict[str, np.ndarray]:
@@ -1424,7 +1426,7 @@ class ObservationBuilder:
             # Item 1.6 — pair-cache invalidé par _unit_move_version (même motif que LoS).
             from engine.phase_handlers.shared_utils import _ranged_squad_edge_distance
 
-            _ed_ver = game_state.get("_unit_move_version", 0)
+            _ed_ver = game_state.get("_unit_move_version", 0)  # get allowed (version débute à 0)
             _ed_key = (ctx["active_squad_id"], squad_id, ctx["ranged_metric"], _ed_ver)
             _ed_cache = game_state.setdefault("_edge_distance_cache", {})
             if _ed_key in _ed_cache:

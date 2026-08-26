@@ -1076,7 +1076,7 @@ def check_anchors(
     """
     if enforcement_set is _ANCHOR_UNSET:
         enforcement_set = _get_anchor_enforced()
-    if enforcement_set is not None and doc_path.name not in enforcement_set:
+    if isinstance(enforcement_set, frozenset) and doc_path.name not in enforcement_set:
         return []
     text = doc_path.read_text(encoding="utf-8")
     text = _FENCED_CODE_BLOCK.sub(_mask_fenced, text)

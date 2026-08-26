@@ -223,6 +223,7 @@ def main() -> None:
     _seed_randomness(args.seed)
     env.reset()  # Remet l'env dans un état frais et répétable pour le bench réel
 
+    pr: cProfile.Profile | None = None
     if args.profile:
         pr = cProfile.Profile()
         pr.enable()
@@ -231,7 +232,7 @@ def main() -> None:
     step_times = _run_steps(env, args.steps, rng)
     t_total = time.perf_counter() - t_total
 
-    if args.profile:
+    if pr is not None:
         pr.disable()
 
     # Statistiques
@@ -246,7 +247,7 @@ def main() -> None:
     print(f"FPS env        : {1000.0 / arr.mean():.0f} steps/s")
     print(f"{'─'*50}")
 
-    if args.profile:
+    if pr is not None:
         sio = io.StringIO()
         ps = pstats.Stats(pr, stream=sio).sort_stats(pstats.SortKey.CUMULATIVE)
         ps.print_stats(args.top)

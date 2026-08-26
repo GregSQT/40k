@@ -129,6 +129,7 @@ def _capture_fingerprints(
         action = int(rng.choice(valid))
 
         next_obs, _, terminated, truncated, _ = eng.step(action)
+        assert next_obs is not None
         fingerprints.append(_hash_step(mask_hashed, next_obs))
 
         if terminated or truncated:

@@ -155,7 +155,7 @@ def rule_error_count(stats: Dict[str, Any], entry: Dict[str, Any]) -> int:
     """Erreurs attribuées à cette règle. Chaque compteur n'appartient qu'à UNE règle : sans cette
     exclusivité, la somme par règle dépasserait le total de section et le rapport se
     contredirait — le défaut V16, par un autre bout."""
-    return sum(_counter_value(stats, path) for path in require_key(entry, "controls"))
+    return sum(_counter_value(stats, path) for path in (entry.get("controls") or []))
 
 
 def rule_is_applicable(stats: Dict[str, Any], entry: Dict[str, Any]) -> Optional[bool]:

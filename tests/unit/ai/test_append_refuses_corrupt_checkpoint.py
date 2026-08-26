@@ -300,7 +300,7 @@ def test_no_load_site_at_all_rebuilds_a_model_on_failure() -> None:
         # les chargements de modele — elle ne pouvait plus voir ce pour quoi elle existe.
         charge = any(
             isinstance(n, ast.Attribute) and n.attr == "load"
-            and isinstance(n.value, ast.Name) and n.value.id in ("MaskablePPO", "VecNormalize")
+            and isinstance(n.value, ast.Name) and n.value.id in ("MaskablePPO", "PatchedMaskablePPO", "VecNormalize")
             for corps in node.body for n in ast.walk(corps)
         )
         # `and node.handlers` : un `try/finally` NU ne peut rien rattraper, donc il ne prouve rien.

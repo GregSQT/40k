@@ -124,3 +124,8 @@ def synthetic_state(
     state.update(overrides)
     build_units_cache(state)
     return state
+
+
+def gs_with_units(shooter_sid: str = "1", target_sid: str = "2") -> Dict[str, Any]:
+    """game_state minimal avec unit_by_id pour require_unit_by_id (tests de couvert/LoS)."""
+    return {"unit_by_id": {shooter_sid: {"id": shooter_sid}, target_sid: {"id": target_sid}}}

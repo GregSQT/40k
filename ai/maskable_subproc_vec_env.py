@@ -11,6 +11,7 @@ get_action_masks() pour le bootstrap — géré dans PatchedMaskablePPO.collect_
 from __future__ import annotations
 
 import multiprocessing as mp
+from multiprocessing.connection import Connection as _MpConnection
 from typing import Any, Callable
 
 import gymnasium as gym
@@ -23,8 +24,8 @@ from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
 
 
 def _maskable_worker(
-    remote: mp.connection.Connection,
-    parent_remote: mp.connection.Connection,
+    remote: _MpConnection,
+    parent_remote: _MpConnection,
     env_fn_wrapper: CloudpickleWrapper,
 ) -> None:
     """Worker identique à SubprocVecEnv._worker, sauf que step() inclut action_masks dans info.
@@ -130,7 +131,7 @@ class MaskableSubprocVecEnv(SubprocVecEnv):
             self.work_remotes, self.remotes, env_fns, strict=True
         ):
             args = (work_remote, remote, CloudpickleWrapper(env_fn))
-            process = ctx.Process(target=_maskable_worker, args=args, daemon=True)
+            process = ctx.Process(target=_maskable_worker, args=args, daemon=True)  # type: ignore[attr-defined]
             process.start()
             self.processes.append(process)
             work_remote.close()

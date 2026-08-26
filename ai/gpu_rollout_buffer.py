@@ -71,7 +71,7 @@ class GpuMaskableDictRolloutBuffer(MaskableDictRolloutBuffer):
             for key, obs in self.observations.items():
                 self.observations[key] = self.swap_and_flatten(obs)
             for tensor_name in ["actions", "values", "log_probs", "advantages", "returns"]:
-                self.__dict__[tensor_name] = self.swap_and_flatten(self.__dict__[tensor_name])
+                self.__dict__[tensor_name] = self.swap_and_flatten(self.__dict__[tensor_name])  # type: ignore[index]
             self.action_masks = self.swap_and_flatten(self.action_masks)
 
             # Upload GPU — une seule fois pour les n_epochs epochs.

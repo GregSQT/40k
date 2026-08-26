@@ -13,7 +13,7 @@ Trois overrides, sans changer les maths :
 
 2.3 — collect_rollouts() : lit action_masks depuis infos["action_masks"] (posé par
       MaskableSubprocVecEnv dans le même RPC que step) au lieu d'un second env_method RPC.
-      Sauvegarde ~340/341 RPCs par rollout. Fallback automatique sur get_action_masks() si
+      Sauvegarde ~340/341 RPCs par rollout. Repli sur get_action_masks() si
       infos ne contiennent pas le masque (DummyVecEnv, tests).
 """
 from __future__ import annotations
@@ -69,7 +69,7 @@ class PatchedMaskablePPO(MaskablePPO):
         super()._setup_model()
         # Remplacer le buffer Dict par la version GPU-résidente.
         if isinstance(self.observation_space, spaces.Dict):
-            self.rollout_buffer = GpuMaskableDictRolloutBuffer(
+            self.rollout_buffer = GpuMaskableDictRolloutBuffer(  # type: ignore[assignment]
                 self.n_steps,
                 self.observation_space,
                 self.action_space,
@@ -295,6 +295,6 @@ class PatchedMaskablePPO(MaskablePPO):
         with th.no_grad():
             values = self.policy.predict_values(obs_as_tensor(new_obs, self.device))  # type: ignore[arg-type]
 
-        rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)
+        rollout_buffer.compute_returns_and_advantage(last_values=values, dones=dones)  # type: ignore[possibly-unbound]
         callback.on_rollout_end()
         return True
