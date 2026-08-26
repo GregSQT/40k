@@ -22,13 +22,8 @@ Durée attendue : ~10-20 s par run, ~30-40 s au total.
 from __future__ import annotations
 
 import random
-import sys
-from pathlib import Path
 
 import pytest
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
-sys.path.insert(0, str(PROJECT_ROOT))
 
 from tests._chargeur_script import charger_script
 

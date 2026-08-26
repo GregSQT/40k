@@ -177,7 +177,7 @@ def _bench_run(seed: int = 42, n_steps: int = 600) -> tuple[list[str], int, floa
     """Construit l'env, exécute le bench, retourne (séquence_scénarios, n_resets, médiane_ms).
 
     Conçu pour les tests de déterminisme : deux appels avec le même seed doivent retourner
-    la même séquence de scénarios, le même n_resets, et une médiane dans les 5%.
+    la même séquence de scénarios et le même n_resets.
     """
     _seed_randomness(seed)
     env = _build_env()
