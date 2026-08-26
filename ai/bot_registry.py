@@ -43,7 +43,7 @@ LEGACY_BOT_KEYS = ("greedy", "defensive", "control", "adaptive", "value_trade")
 DOCTRINE_BOT_KEYS = ("racer", "endgame", "alpha", "attrition", "decapitation", "scorer")
 
 #: Trois benchmarks de holdout a mecanisme de decision DIFFERENT (§4.C Bot_refactor.md).
-#: Exclus de SELECTION (ne pilotent ni combined ni worst_bot) mais CAN gate via benchmark_floor.
+#: Exclus de SELECTION (ne pilotent ni combined ni worst_bot). Mesures uniquement.
 #: Aucun de leurs parametres ne vient de config/bot_movement_weights.json.
 BENCHMARK_BOT_KEYS = ("reference_balanced", "reference_denial", "reference_reactive")
 
@@ -89,12 +89,12 @@ ALL_BOT_KEYS = frozenset(
 #: robuste) et `ai/metrics_tracker.py` (worst_bot_score de TensorBoard) la refaisaient chacun de
 #: leur cote, et le second le faisait avec une liste ECRITE A LA MAIN restee sur le panel d'origine.
 #: Pilotent combined + worst_bot : tout sauf BENCHMARK + SEALED.
-#: Les benchmarks sont mesures et peuvent GATER (benchmark_floor) mais ne pilotent PAS combined.
+#: Les benchmarks sont mesures mais ne pilotent PAS combined.
 SELECTION_BOT_KEYS = ALL_BOT_KEYS - frozenset(BENCHMARK_BOT_KEYS) - frozenset(SEALED_HOLDOUT_KEYS)
 
 #: Famille des adversaires-étalons figés (R0b). Clés DYNAMIQUES : découvertes à l'exécution
 #: depuis les archives `*_robust_*.zip` de l'agent (discover_checkpoint_archives), pas définies
-#: ici en dur. Jamais dans ALL_BOT_KEYS, SELECTION_BOT_KEYS ni benchmark_floor : indicateur de
+#: ici en dur. Jamais dans ALL_BOT_KEYS ni SELECTION_BOT_KEYS : indicateur de
 #: force relative uniquement. Tag TensorBoard : `bot_eval/vs_ckpt_<score>`.
 CHECKPOINT_OPPONENT_FAMILY = "ckpt"
 
@@ -146,7 +146,7 @@ def bot_classes() -> Dict[str, Any]:
         "tactical": TacticalBot,
         # ─ Panel refondu : six styles orthogonaux sur un plancher de competence commun ─
         **DOCTRINE_BOTS,
-        # ─ Benchmarks §4.C : holdout a mecanisme DIFFERENT, peuvent gater via benchmark_floor ─
+        # ─ Benchmarks §4.C : holdout a mecanisme DIFFERENT, mesures uniquement ─
         "reference_balanced": ReferenceBalancedBot,
         "reference_denial": ReferenceDenialBot,
         "reference_reactive": ReferenceReactiveBot,

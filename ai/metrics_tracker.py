@@ -2165,18 +2165,6 @@ class W40KMetricsTracker:
                     f'bot_eval/seat/{seat}/vs_{bot_name}', float(win_rate), x
                 )
 
-    def log_benchmark_scores(
-        self,
-        benchmark_floor: float,
-        benchmark_mean: float,
-        step: Optional[int] = None,
-    ) -> None:
-        """benchmark_floor (min des trois) et benchmark_mean dans 00_critical/ (§4.D)."""
-        x = step if step is not None else self.episode_count
-        self.writer.add_scalar("bot_eval/benchmark_floor", float(benchmark_floor), x)
-        self.writer.add_scalar("bot_eval/benchmark_mean", float(benchmark_mean), x)
-        self.writer.add_scalar("00_critical/d_benchmark_floor", float(benchmark_floor), x)
-
     def log_checkpoint_evaluations(
         self,
         ckpt_results: Dict[str, Any],

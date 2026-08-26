@@ -268,7 +268,6 @@
             "model_gating_min_worst_bot": 0.25,
             "model_gating_min_worst_scenario_combined": 0.3,
             "model_gating_min_vs_control": 0.0,
-            "model_gating_min_benchmark_floor": 0.0,
             "holdout_hard_opponent_budget_modifier": 1.1,
             "bot_eval_weights": {
                 "alpha": 0.16666666666666666,

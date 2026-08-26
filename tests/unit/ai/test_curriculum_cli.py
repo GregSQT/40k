@@ -146,27 +146,6 @@ def test_a_stage_without_pool_leaves_the_config_untouched(curriculum_agent) -> N
     assert "opponent_mix" not in config.load_agent_training_config("TestAgent", "x1")
 
 
-def test_the_stage_disarms_the_blind_benchmark_floor_gate(curriculum_agent) -> None:
-    """`benchmark_floor` compare le pire score aux bots de REFERENCE, satures a 1.00.
-
-    Le plancher de 0.9 de `x1_long` est donc franchi par n'importe quel modele : il ne separe
-    rien. La selection d'une etape appartient au plancher dur contre le champion.
-    """
-    config = curriculum_agent.config
-    config.load_agent_training_config = lambda agent_key, phase=None: {
-        "n_envs": 4,
-        "callback_params": {"model_gating_enabled": True, "model_gating_min_benchmark_floor": 0.9},
-    }
-
-    _prepare_curriculum_stage(_args("P0"), config)
-
-    cfg = config.load_agent_training_config("TestAgent", "x1_long")
-    assert cfg["callback_params"]["model_gating_min_benchmark_floor"] == 0.0
-    # Un autre agent garde le sien.
-    other = config.load_agent_training_config("OtherAgent", "x1_long")
-    assert other["callback_params"]["model_gating_min_benchmark_floor"] == 0.9
-
-
 def test_stage_opponent_mix_is_none_without_a_pool() -> None:
     assert _stage_opponent_mix(CURRICULUM, CURRICULUM["stages"]["P0"], "/m/model_A.zip") is None
 
