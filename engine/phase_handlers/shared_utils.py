@@ -3926,7 +3926,7 @@ def _apply_deadly_demise(
     import random
     import math
     d6_roll = random.randint(1, 6)
-    turn = game_state.get("turn", 0)
+    turn = game_state["turn"]
     phase = game_state.get("phase", "")
 
     if d6_roll < 6:
@@ -4020,9 +4020,8 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
     # §24.08 DEADLY DEMISE : lire la valeur de la capacite AVANT suppression (units_cache peut
     # disparaitre si c est la derniere figurine). La cle est posee par le chantier 06 sur chaque
     # unite concernee ; absente sur les unites ordinaires = regle inactive, aucun jet.
-    _deadly_demise_val = (
-        (game_state.get("units_cache") or {}).get(squad_id, {}).get("deadly_demise")
-    )
+    _unit_cache_entry = game_state["units_cache"].get(squad_id)
+    _deadly_demise_val = _unit_cache_entry.get("deadly_demise") if _unit_cache_entry is not None else None
 
     # 1. Retire du models_cache.
     del game_state["models_cache"][model_id]
@@ -6419,7 +6418,7 @@ def charge_build_valid_plan(
     # bump de _unit_move_version entre les appels — sans lui toutes les variantes retournent
     # le plan intent=0 et L10 charge placement est silencieusement non-fonctionnel.
     # Pas de guard _los_batch : charge_build_valid_plan n'est jamais appelée pendant un batch.
-    _cbvp_version = game_state.get("_unit_move_version", 0)
+    _cbvp_version = game_state["_unit_move_version"]
     _cbvp_key = (str(squad_id), tuple(str(t) for t in target_squad_ids), int(charge_roll), int(intent), _cbvp_version)
     _cbvp_cache = game_state.setdefault("_charge_plan_cache", {})
     _cbvp_hit = _cbvp_cache.get(_cbvp_key, _CBVP_MISS)
@@ -13023,7 +13022,7 @@ def build_squad_move_cell_map(
         and _tts_fp(game_state, _unit_obj_fp, str(squad_id), charge=False)
     )
     _cheap_key = (
-        game_state.get("_unit_move_version", 0),
+        game_state["_unit_move_version"],
         advance_roll,
         _phase_str,
         _bshock,
