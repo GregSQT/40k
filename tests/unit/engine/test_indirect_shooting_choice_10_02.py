@@ -229,9 +229,6 @@ def test_shooting_type_cleared_after_manual_pvp_allocation(monkeypatch):
     import engine.phase_handlers.generic_handlers as gh
 
     monkeypatch.setattr(gh, "end_activation", lambda *a, **kw: {"action": "end_activation"})
-    import engine.w40k_core as core_mod
-    monkeypatch.setattr(core_mod, "get_unit_by_id",
-                        lambda gs, sid: {"id": sid, "player": 1})
 
     eng = object.__new__(W40KEngine)
     eng.game_state = {

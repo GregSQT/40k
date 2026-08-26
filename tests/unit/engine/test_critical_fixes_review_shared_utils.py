@@ -239,6 +239,8 @@ class TestAttackerModelCanReachSquadUsesModelBase:
         # Après fix, seul tm["BASE_SHAPE"] est accédé.
         base_unit_no_shape: Dict[str, Any] = {"player": 1, "occupied_hexes": {(5, 0)}}
 
+        _u1: Dict[str, Any] = {"id": "1", "player": 0}
+        _u101: Dict[str, Any] = {"id": "101", "player": 1}
         gs: Dict[str, Any] = {
             "config": {"game_rules": {"detection_range": 200, "metric": "euclidean"}},
             "inches_to_subhex": 5,
@@ -249,7 +251,8 @@ class TestAttackerModelCanReachSquadUsesModelBase:
                       "BASE_SHAPE": "round", "BASE_SIZE": 6},
                 "101": base_unit_no_shape,
             },
-            "units": [{"id": "1", "player": 0}, {"id": "101", "player": 1}],
+            "units": [_u1, _u101],
+            "unit_by_id": {"1": _u1, "101": _u101},
         }
         return gs, attacker, tm
 
@@ -337,6 +340,7 @@ class TestAttackerModelCanReachSquadUsesModelBase:
                 "101": base_unit_no_shape,
             },
             "units": [{"id": "1", "player": 0}, {"id": "101", "player": 1}],
+            "unit_by_id": {"1": {"id": "1", "player": 0}, "101": {"id": "101", "player": 1}},
         }
         result = _attacker_model_can_reach_squad(gs, attacker, 0, 0, "101", 50)
         assert result is True

@@ -258,12 +258,13 @@ class TestChargeBuildValidDestinationsPool:
         gs["_charge_fp_offset_pair_cache"] = {}
         return gs
 
-    def test_unit_not_found_returns_empty(self):
-        """charge_pool_no_unit : unité inconnue → pool vide."""
+    def test_unit_not_found_raises(self):
+        """charge_pool_no_unit : unité inconnue → ConfigurationError (pas de pool vide silencieux)."""
+        from shared.data_validation import ConfigurationError
         units = [_unit("1", 1, 5, 10)]
         gs = self._make_pool_gs(units)
-        result = charge_build_valid_destinations_pool(gs, "99", 12)
-        assert result == []
+        with pytest.raises(ConfigurationError):
+            charge_build_valid_destinations_pool(gs, "99", 12)
 
     def test_no_enemies_returns_empty(self):
         """charge_pool_no_enemies : aucun ennemi → pool vide."""

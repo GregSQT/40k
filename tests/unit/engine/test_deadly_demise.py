@@ -248,7 +248,7 @@ from typing import Any, Dict
 
 def _unit(*, unit_id: str, col: int, row: int, with_dd_rule: bool, dd_value: Any = "D3") -> Dict[str, Any]:
     """Unité minimale compatible avec build_units_cache."""
-    unit_rules = [{"ruleId": "leader", "displayName": "Leader"}]
+    unit_rules: list[Dict[str, Any]] = [{"ruleId": "leader", "displayName": "Leader"}]
     if with_dd_rule:
         unit_rules.append({
             "ruleId": "deadly_demise",

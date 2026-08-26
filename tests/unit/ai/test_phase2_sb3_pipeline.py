@@ -81,8 +81,8 @@ class TestGpuMaskableDictRolloutBuffer:
             buffer_size=n_steps, observation_space=obs_space, action_space=act_space,
             device="cpu", gamma=0.99, gae_lambda=0.95, n_envs=n_envs,
         )
-        gpu_buf = GpuMaskableDictRolloutBuffer(**kwargs)
-        ref_buf = MaskableDictRolloutBuffer(**kwargs)
+        gpu_buf = GpuMaskableDictRolloutBuffer(**kwargs)  # type: ignore[arg-type]
+        ref_buf = MaskableDictRolloutBuffer(**kwargs)  # type: ignore[arg-type]
 
         rng = np.random.default_rng(42)
         # Remplir les deux buffers avec exactement les mêmes données.
@@ -92,7 +92,7 @@ class TestGpuMaskableDictRolloutBuffer:
         def fill(buf):
             for step in range(n_steps):
                 obs_batch = {
-                    k: rng.standard_normal((n_envs,) + v.shape).astype(np.float32)
+                    k: rng.standard_normal((n_envs,) + v.shape).astype(np.float32)  # type: ignore[operator]
                     for k, v in obs_space_obj.spaces.items()
                 }
                 action_masks = np.ones((n_envs, n_actions), dtype=bool)
@@ -140,6 +140,7 @@ class TestGpuMaskableDictRolloutBuffer:
         """Les masques GPU sont en float32 (pour la policy), même si stockés bool."""
         gpu_buf, _ = self._make_buffers()
         _ = next(iter(gpu_buf.get(batch_size=4 * 3)))
+        assert gpu_buf._gpu_action_masks is not None
         assert gpu_buf._gpu_action_masks.dtype == torch.float32, (
             f"_gpu_action_masks doit être float32, got {gpu_buf._gpu_action_masks.dtype}"
         )
@@ -184,11 +185,15 @@ class TestGpuMaskableDictRolloutBuffer:
         """Le second appel de get() ne réalloue pas les tenseurs GPU (même objet)."""
         gpu_buf, _ = self._make_buffers()
         _ = list(gpu_buf.get(batch_size=4 * 3))
+        assert gpu_buf._gpu_obs is not None
+        assert gpu_buf._gpu_action_masks is not None
         obs_ref = {k: v.data_ptr() for k, v in gpu_buf._gpu_obs.items()}
         masks_ref = gpu_buf._gpu_action_masks.data_ptr()
 
         # Deuxième epoch — generator_ready est True, upload ne doit pas se reproduire.
         _ = list(gpu_buf.get(batch_size=4 * 3))
+        assert gpu_buf._gpu_obs is not None
+        assert gpu_buf._gpu_action_masks is not None
         assert {k: v.data_ptr() for k, v in gpu_buf._gpu_obs.items()} == obs_ref, (
             "deuxième epoch : tenseurs obs réalloués (H2D supplémentaire non voulu)"
         )
@@ -332,7 +337,7 @@ class TestPatchedTrainNumericalParity:
             device="cpu", gamma=0.99, gae_lambda=0.95, n_envs=2,
         )
         for step in range(4):
-            obs_b = {k: rng.standard_normal((2,) + v.shape).astype(np.float32)
+            obs_b = {k: rng.standard_normal((2,) + v.shape).astype(np.float32)  # type: ignore[operator]
                      for k, v in obs_space.spaces.items()}
             masks = np.ones((2, 8), dtype=bool)
             buf.add(obs_b, np.zeros((2, 1), dtype=np.float32), np.ones(2, dtype=np.float32),
@@ -342,7 +347,7 @@ class TestPatchedTrainNumericalParity:
 
         # Configurer le model minimal.
         model.policy = policy_mock
-        model.rollout_buffer = buf
+        model.rollout_buffer = buf  # type: ignore[assignment]
         model.n_epochs = 1
         model.batch_size = 8  # batch complet (4 steps × 2 envs)
         model.normalize_advantage = True
@@ -409,7 +414,7 @@ class TestPatchedTrainNumericalParity:
             device="cpu", gamma=0.99, gae_lambda=0.95, n_envs=2,
         )
         for step in range(4):
-            obs_b = {k: rng.standard_normal((2,) + v.shape).astype(np.float32)
+            obs_b = {k: rng.standard_normal((2,) + v.shape).astype(np.float32)  # type: ignore[operator]
                      for k, v in obs_space.spaces.items()}
             masks = np.ones((2, 8), dtype=bool)
             buf.add(obs_b, np.zeros((2, 1), dtype=np.float32), np.ones(2, dtype=np.float32),
@@ -418,7 +423,7 @@ class TestPatchedTrainNumericalParity:
         buf.compute_returns_and_advantage(torch.zeros(2), np.zeros(2, dtype=bool))
 
         model.policy = policy_mock
-        model.rollout_buffer = buf
+        model.rollout_buffer = buf  # type: ignore[assignment]
         model.n_epochs = 4  # clé du test : > 1
         model.batch_size = 8
         model.normalize_advantage = True
@@ -494,13 +499,13 @@ class TestInlineMasks:
         env_mock.action_space = act_space
 
         # obs initiale
-        init_obs = {k: np.zeros((n_envs,) + v.shape, dtype=np.float32)
+        init_obs = {k: np.zeros((n_envs,) + v.shape, dtype=np.float32)  # type: ignore[operator]
                     for k, v in obs_space.spaces.items()}
 
         # step() retourne infos avec action_masks.
         masks_returned = np.ones((n_envs, n_actions), dtype=bool)
         masks_returned[0, 1:] = False  # env 0 strict
-        step_obs = {k: np.zeros((n_envs,) + v.shape, dtype=np.float32)
+        step_obs = {k: np.zeros((n_envs,) + v.shape, dtype=np.float32)  # type: ignore[operator]
                     for k, v in obs_space.spaces.items()}
         env_mock.step.return_value = (
             step_obs,
@@ -750,7 +755,7 @@ class TestPatchedVsReferenceParity:
             rng = np.random.default_rng(42)
             for _ in range(n_steps):
                 obs_b = {
-                    k: rng.standard_normal((n_envs,) + v.shape).astype(np.float32)
+                    k: rng.standard_normal((n_envs,) + v.shape).astype(np.float32)  # type: ignore[operator]
                     for k, v in obs_space.spaces.items()
                 }
                 masks = np.ones((n_envs, self.N_ACTIONS), dtype=bool)
@@ -789,7 +794,7 @@ class TestPatchedVsReferenceParity:
             pm.set_training_mode = MagicMock()
             pm.optimizer = MagicMock()
             model.policy = pm
-            model.rollout_buffer = buf
+            model.rollout_buffer = buf  # type: ignore[assignment]
             model.n_epochs = 2
             model.batch_size = batch_size
             model.normalize_advantage = True

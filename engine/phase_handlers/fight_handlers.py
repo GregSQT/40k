@@ -595,6 +595,7 @@ def _fight_synth_cache_entries_at_footprint(
         entry = by_base.get(key)
         if entry is None:
             entry = dict(src)
+            entry.pop("_ez_fp", None)  # stale fingerprint from src would corrupt EZ pair cache
             entry["col"] = int(anchor_col)
             entry["row"] = int(anchor_row)
             entry["BASE_SHAPE"] = shape
