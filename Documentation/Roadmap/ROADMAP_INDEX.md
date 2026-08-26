@@ -309,7 +309,7 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
 | moteur | Preview de tir sans deepcopy | [moteur.md#preview-tir](moteur.md#preview-tir) | 🚫 |
-| infra | **Accélération entraînement RL** — Phase 0 ✅ + Phase 1 ✅ **mesurée machine au repos 2026-08-26** (1.1–1.9 livrés ; 1.7 partiel : cache TYPES fait, buffers numpy non faits ; gain réel sur la QUEUE — P99 −44 %, wall −32 %, médiane −7 % sur 3+3 répétitions) ; phases 2→4 à faire (pipeline SB3, évals) ; arbitrage Phase 3 après mesure | [infra.md#perf-entrainement](infra.md#perf-entrainement) | ⚡ |
+| infra | **Accélération entraînement RL** — Phase 0 ✅ + Phase 1 ✅ **mesurée machine au repos 2026-08-26** (1.1–1.9 livrés ; 1.7 partiel : cache TYPES fait, buffers numpy non faits ; gain réel sur la QUEUE — P99 −44 %, wall −32 %, médiane −7 % sur 3+3 répétitions) ; bench_env_step ✅ **reproductible (2026-08-26)** (`random.seed` avant bench + test rouge/vert) ; phases 2→4 à faire (pipeline SB3, évals) ; arbitrage Phase 3 après mesure | [infra.md#perf-entrainement](infra.md#perf-entrainement) | ⚡ |
 | infra | Noyau natif BFS move/empreintes — pool de move = 29 % d'une partie d'évaluation | [infra.md#noyau-natif](infra.md#noyau-natif) | ⚡ |
 | infra | Migration PostgreSQL | [infra.md#postgresql](infra.md#postgresql) | ⚡ |
 | infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) | 🚫 |
