@@ -31,7 +31,7 @@
                 "end": 0.01,
                 "decay_fraction": 1.0
             },
-            "vf_coef": 1.0,
+            "vf_coef": 0.5,
             "max_grad_norm": 0.5,
             "target_kl": 0.02,
             "tensorboard_log": "./tensorboard/",
@@ -221,7 +221,7 @@
                 "end": 0.01,
                 "decay_fraction": 0.4
             },
-            "vf_coef": 1.0,
+            "vf_coef": 0.5,
             "max_grad_norm": 0.5,
             "target_kl": 0.02,
             "tensorboard_log": "./tensorboard/",
@@ -413,7 +413,7 @@
                 "end": 0.01,
                 "decay_fraction": 1.0
             },
-            "vf_coef": 1.0,
+            "vf_coef": 0.5,
             "max_grad_norm": 0.5,
             "target_kl": 0.02,
             "tensorboard_log": "./tensorboard/",
@@ -600,7 +600,7 @@
                 "end": 0.01,
                 "decay_fraction": 1.0
             },
-            "vf_coef": 1.0,
+            "vf_coef": 0.5,
             "max_grad_norm": 0.5,
             "target_kl": 0.02,
             "tensorboard_log": "./tensorboard/",
@@ -789,7 +789,7 @@
                 "end": 0.01,
                 "decay_fraction": 0.4
             },
-            "vf_coef": 1.0,
+            "vf_coef": 0.5,
             "max_grad_norm": 0.5,
             "target_kl": 0.02,
             "tensorboard_log": "./tensorboard/",
@@ -1057,7 +1057,7 @@
                 "end": 0.1,
                 "decay_fraction": 1.0
             },
-            "vf_coef": 1.0,
+            "vf_coef": 0.5,
             "max_grad_norm": 0.5,
             "target_kl": 0.02,
             "tensorboard_log": "./tensorboard/",
