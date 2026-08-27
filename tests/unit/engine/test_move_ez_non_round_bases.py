@@ -33,6 +33,7 @@ from engine.hex_utils import (
 )
 from engine.phase_handlers.movement_handlers import (
     EZ_KERNEL_TIE_EPS_NORM, _compute_mover_ez_forbidden_mask, _ez_offset_kernels,
+    _hashable_base_size,
 )
 
 EZ = 10                      # engagement_zone 2" × inches_to_subhex 5
@@ -142,10 +143,8 @@ def test_the_forbidden_pattern_only_depends_on_the_column_parity(mover_shape, mo
     Le décalage d'une demi-ligne une colonne sur deux est la SEULE dépendance admise — d'où deux
     noyaux et non un.
     """
-    key_size = tuple(mover_size) if isinstance(mover_size, list) else mover_size
-    key_enemy = tuple(ENEMY[1]) if isinstance(ENEMY[1], list) else ENEMY[1]
     _, _, dcol_max, _ = _ez_offset_kernels(
-        mover_shape, key_size, orient, ENEMY[0], key_enemy, 0, THR, True,
+        mover_shape, _hashable_base_size(mover_size), orient, ENEMY[0], ENEMY[1], 0, THR, True,
     )
     for parity in (0, 1):
         ancres = [(100, 100), (100, 137), (156, 203), (12, 9)]
@@ -288,11 +287,14 @@ def test_the_mask_agrees_with_the_rule_cell_by_cell(euclidean):
     exactement ce qu'un test sur la seule case du témoin laisserait repasser.
     """
     mask = _mask()
-    enemy_socles = [_socle(*ENEMY, c, r) for c, r in WITNESS_ENEMY_MODELS.values()]
+    enemy_socles = [
+        Socle(shape=ENEMY[0], base_size=ENEMY[1], col=c, row=r, fp=None, orientation=0)
+        for c, r in WITNESS_ENEMY_MODELS.values()
+    ]
     desaccords = []
     for col in range(170, 200):
         for row in range(195, 240):
-            mover = _socle(*MOVER, col, row)
+            mover = Socle(shape=MOVER[0], base_size=MOVER[1], col=col, row=row, fp=None, orientation=0)
             engaged = any(
                 euclidean_edge_distance(mover, e, max_distance=THR) <= THR for e in enemy_socles
             )
