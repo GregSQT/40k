@@ -56,7 +56,6 @@ def test_the_engine_publishes_its_truncation_diagnostic() -> None:
         training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
     )
     eng.reset(seed=0)
-    eng._episode_step_limit_cache = 5
     eng._get_episode_step_limit = lambda: 5  # type: ignore[method-assign]
 
     rng = np.random.default_rng(0)
@@ -604,8 +603,12 @@ def test_every_eval_producer_routes_its_truncations() -> None:
             worklist.extend(ast.iter_child_nodes(n))
         return names
 
-    for rel in ("ai/train.py", "ai/training_callbacks.py"):
-        with open(os.path.join(PROJECT_ROOT, rel), encoding="utf-8") as handle:
+    import glob
+
+    ai_sources = glob.glob(os.path.join(PROJECT_ROOT, "ai", "**", "*.py"), recursive=True)
+    for filepath in ai_sources:
+        rel = os.path.relpath(filepath, PROJECT_ROOT)
+        with open(filepath, encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):

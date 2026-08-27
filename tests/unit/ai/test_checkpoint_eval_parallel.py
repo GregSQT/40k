@@ -60,8 +60,7 @@ def test_task_builder_tiles_episode_offsets_without_gap_or_overlap(tmp_path):
             # meme scenario qui porteraient des index differents produiraient des graines
             # etrangeres a la sequence sequentielle.
             assert task["scenario_index"] == scenario_index
-        assert covered == sorted(covered)
-        assert covered == list(range(len(covered))), "trou ou recouvrement entre tranches"
+        assert covered == list(range(len(covered))), "trou, recouvrement ou ordre non monotone entre tranches"
         total += len(covered)
     assert total == 300
 
