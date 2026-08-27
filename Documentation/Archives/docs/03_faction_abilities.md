@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Reference/moteur/capacites.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # Chantier 03 — Capacités de faction : Waaagh! et Oath of Moment
 > ✅ **LIVRÉ** (vérifié code le 2026-08-10 : `waaagh`, `oath_of_moment`, `hit_any_fail` sur les trois sites jumeaux). La **CONCEPTION** reste la référence vivante. Dette bornée : « Détachement Codex » reste un champ de config déclaré, non déduit.
 >

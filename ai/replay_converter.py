@@ -572,7 +572,7 @@ def convert_to_replay_format(steplog_data, scenario_file):
         
         # Copy all unit statistics from registry (preserves UPPERCASE field names)
         for field_name, field_value in unit_stats.items():
-            if field_name.isupper():  # Only copy UPPERCASE fields per AI_TURN.md
+            if field_name.isupper():  # Only copy UPPERCASE fields per tour_de_jeu.md
                 unit_data[field_name] = field_value
         
         # Ensure CUR_HP is set to HP_MAX initially

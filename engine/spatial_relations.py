@@ -488,7 +488,8 @@ def engagement_distance_metric(game_state: Optional[Dict[str, Any]] = None) -> s
 
     L'EZ est un concept unique consommé par 4 phases (move, tir, charge, fight) → une seule
     clé ``distance_metric["engagement"]``, pas de split gym (contrairement à move/charge : le
-    retrain IA est prévu à la bascule 7.6, cf. Distance management.md). Lue depuis le config-loader
+    retrain IA est prévu à la bascule hex, cf. geometrie_et_distances.md §4.6/§4.9,
+    ex-Distance management étape 7.6). Lue depuis le config-loader
     global (``game_state`` non requis) → la primitive canonique ``unit_entries_within_engagement_zone``
     peut résoudre la métrique sans toucher ses ~60 call-sites. Aucun défaut caché : section/clé/valeur
     invalide → erreur explicite (CLAUDE.md).
@@ -532,7 +533,7 @@ def entries_in_engagement_zone(
 
     Conversion ×1,5 confinée à ``engagement_minimum_clearance_norm``, jamais dispersée.
 
-    ENGAGEMENT 3D (règle 03.04 = 2" horizontal ET 5" vertical, stage.md chantier 4). Le gate
+    ENGAGEMENT 3D (règle 03.04 = 2" horizontal ET 5" vertical, verticalite.md chantier 4). Le gate
     vertical est piloté par la DONNÉE, pas par l'opt-in de l'appelant :
     - les deux entrées portent leurs cartes verticales (``entry_has_vertical_data``) → gate
       appliqué, **par paire de figurines** (§03.04 est par-modèle) : ∃ (fig_a, fig_b) dont les

@@ -284,7 +284,7 @@ UNIT_BIN_SIZE = len(UNIT_BIN_FIELDS)
 #:   encore dans le moteur : c'est une projection de la conception du chantier 06, pas une mesure.
 #:   ⚠️ Cette projection a été calculée quand le chantier 06 comptait **17** capacités. Il en acte
 #:   **25** depuis (les chantiers 03 et 04 ont débloqué Waaagh! et ses dérivés, Deep Strike,
-#:   Da Jump — cf. `Documentation/Chantiers/backlog/06_armageddon_abilities.md` § « Note sur le décompte »). Le « 6 en
+#:   Da Jump — cf. `Documentation/Reference/moteur/capacites.md` § « Note sur le décompte »). Le « 6 en
 #:   vigueur » n'a PAS été recalculé sur les 25 : la marge réelle de `UNIT_ABILITY_SLOTS = 8`
 #:   est donc inconnue, pas seulement non mesurée. À recalculer AVANT la passe 1 du chantier 06.
 #:

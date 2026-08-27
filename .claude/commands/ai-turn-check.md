@@ -1,6 +1,6 @@
-# AI_TURN.md Compliance Verification
+# tour_de_jeu.md Compliance Verification
 
-Before implementing any phase handler changes, verify compliance with `Documentation/Reference/moteur/AI_TURN.md`:
+Before implementing any phase handler changes, verify compliance with `Documentation/Reference/moteur/tour_de_jeu.md`:
 
 ## Core Principles Checklist
 
@@ -66,6 +66,6 @@ unit_id = action.get("unitId", None)  # ❌ Hides missing field
 - [ ] Both attacker and defender removed from fight_activation_pool?
 
 ## If ANY Check Fails
-STOP and read the relevant AI_TURN.md section before proceeding.
+STOP and read the relevant tour_de_jeu.md section before proceeding.
 
-The specification in AI_TURN.md is LAW - implementation must match exactly.
+The specification in tour_de_jeu.md is LAW - implementation must match exactly.

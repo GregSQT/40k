@@ -282,13 +282,13 @@ moment. **En démo, l'incohérence coûte plus cher que la défaite.**
 
 | Document | Usage | Effet |
 |---|---|---|
-| `A_faire/MCTS/MCTS_bot_final.md` | MCTS comme **adversaire d'entraînement** (fraction d'épisodes, entre bots et self-play) | améliore l'entraînement → demande un cycle complet de plus |
-| `A_faire/MCTS/MCTS_bot_final.md` §20 bis | MCTS **dans l'agent**, à l'inférence | corrige les coups absurdes **sans retraining** |
+| `A_faire/MCTS/mcts_adversaire.md` | MCTS comme **adversaire d'entraînement** (fraction d'épisodes, entre bots et self-play) | améliore l'entraînement → demande un cycle complet de plus |
+| `A_faire/MCTS/mcts_adversaire.md` §20 bis | MCTS **dans l'agent**, à l'inférence | corrige les coups absurdes **sans retraining** |
 
 Pour l'objectif démo (§10.6 volet 2), c'est le **second** qui a le meilleur rapport
 effort/résultat : c'est l'absurdité ponctuelle qui coûte cher, et une recherche à l'inférence la
 corrige directement. Contre-argument à mesurer : la **latence** en temps réel devant un public —
-`MCTS_bot_final.md` §20 bis note lui-même « micro à chaque activation + rollouts = beaucoup
+`mcts_adversaire.md` §20 bis note lui-même « micro à chaque activation + rollouts = beaucoup
 plus lourd » et suggère « macro + feuille value seule » comme prototype. Un MCTS macro peu
 profond, ou limité aux seules décisions critiques, suffirait probablement.
 

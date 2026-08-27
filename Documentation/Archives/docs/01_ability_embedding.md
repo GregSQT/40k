@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Reference/moteur/capacites.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # Chantier 01 — Embedding des capacités et gel de l'observation
 > ✅ **LIVRÉ le 2026-08-04** (vérifié code le 2026-08-10). La **CONCEPTION** ci-dessous reste la référence vivante du socle obs/action ; l'**EXÉCUTION** n'a plus que valeur d'historique.
 >

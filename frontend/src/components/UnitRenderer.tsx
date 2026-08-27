@@ -617,7 +617,7 @@ export class UnitRenderer {
 
     const { unit } = this.props;
 
-    // AI_TURN.md COMPLIANCE: Dead units don't render - UNLESS just killed (show as grey ghost)
+    // tour_de_jeu.md COMPLIANCE: Dead units don't render - UNLESS just killed (show as grey ghost)
     // Just-killed units are shown in grey, then removed in the next action
     interface UnitWithFlags extends Unit {
       isJustKilled?: boolean;
@@ -670,7 +670,7 @@ export class UnitRenderer {
     const iconZIndex =
       minZIndex + Math.round(((maxIconScale - unitIconScale) / scaleRange) * unitZIndexRange);
 
-    // ===== AI_TURN.md COMPLIANT ELIGIBILITY =====
+    // ===== tour_de_jeu.md COMPLIANT ELIGIBILITY =====
     const isEligible = this.calculateEligibilityCompliant();
 
     // ===== MULTI-FIGURE LOOP =====
@@ -2436,7 +2436,7 @@ export class UnitRenderer {
     if (phase !== "fight") return;
     if (unit.ATTACK_LEFT === undefined || unit.ATTACK_LEFT <= 0) return;
 
-    // AI_TURN.md Lines 768, 777: ATTACK_LEFT visible during fight activation
+    // tour_de_jeu.md Lines 768, 777: ATTACK_LEFT visible during fight activation
     // Show counter for: (1) actively attacking unit (selectedUnitId in attackPreview)
     // OR (2) eligible units in their pool waiting to be activated
     const isActivelyAttacking = mode === "attackPreview" && selectedUnitId === unit.id;

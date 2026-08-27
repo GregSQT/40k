@@ -529,7 +529,7 @@ class RewardCalculator:
             return fight_reward
 
         elif action_type in ("squad_shoot", "squad_shoot_split_target", "squad_fight"):
-            # Reward shaping proportionnel aux points (spec squad.md).
+            # Reward shaping proportionnel aux points (spec squad_multi_figurines.md).
             # `squad_shoot_split_target` (P3-8) : récompense identique à `squad_shoot`
             # — le shoot_result a la même structure, l'effet mesuré est le même.
             shaping = require_key(self._get_unit_reward_config(acting_unit), "squad_shaping")
@@ -1127,7 +1127,7 @@ class RewardCalculator:
         `is_victim(target_player)` est vrai, dans un summary de resolve_squad_*.
         Toujours positif — l appelant applique le signe (offensif +, defensif -).
 
-        Composantes (spec squad.md) :
+        Composantes (spec squad_multi_figurines.md) :
           - points_per_hp * hp_damage_weight * damage  (par HP retire)
           - model_value * model_kill_bonus_factor  (par fig tuee — VALUE de CETTE
             figurine, portee par l event ; tuer le Nob rapporte plus qu un Boy)
@@ -1256,7 +1256,7 @@ class RewardCalculator:
         enriched["is_ranged"] = max_rng_range > melee_range
         enriched["is_melee"] = not enriched["is_ranged"]
         
-        # AI_TURN.md COMPLIANCE: Direct field access for required fields
+        # tour_de_jeu.md COMPLIANCE: Direct field access for required fields
         if "unitType" not in unit:
             raise KeyError(f"Unit missing required 'unitType' field: {unit}")
         

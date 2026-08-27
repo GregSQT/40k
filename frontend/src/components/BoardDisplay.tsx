@@ -929,7 +929,7 @@ export interface DrawBoardOptions {
   objectiveControl?: ObjectiveControlMap;
   /** Étage d'affichage courant (multi-niveaux). 0 = sol. Défaut 0. */
   currentLevel?: number;
-  /** Niveaux d'étage OCCUPÉS par ≥1 figurine → empreinte blanchie (idée initiale stage.md). */
+  /** Niveaux d'étage OCCUPÉS par ≥1 figurine → empreinte blanchie (idée initiale verticalite.md). */
   occupiedFloorLevels?: Set<number>;
   /** Occupation PAR-DÉCOR : clés `${zoneId}@@${level}` des planchers (niveau ≥1) occupés. Sert à
    *  colorer AU SOL le contour d'un décor donné (vert/orange/rouge) sans impacter les autres décors. */

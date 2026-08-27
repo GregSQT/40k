@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Reference/moteur/capacites.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # Chantier 02 — Points de Commandement (CP) et Battle-shock
 > ✅ **LIVRÉ** (vérifié code le 2026-08-10). La **CONCEPTION** reste la référence vivante. Dette assumée et bornée : la **dépense** de CP n'a aucun consommateur (pas de stratagèmes) et *Rites of Battle* est hors périmètre, faute de déclencheur.
 >

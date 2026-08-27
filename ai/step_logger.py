@@ -315,7 +315,7 @@ def _charge_distance_segment(details: Dict[str, Any]) -> str:
 class StepLogger:
     """
     Step-by-step action logger for training debugging.
-    Captures ALL actions that generate step increments per AI_TURN.md.
+    Captures ALL actions that generate step increments per tour_de_jeu.md.
     """
     
     def __init__(self, output_file: str = "step.log", enabled: bool = False, buffer_size: Optional[int] = None, debug_mode: bool = False):
@@ -341,7 +341,7 @@ class StepLogger:
             # Clear existing log file
             with open(self.output_file, 'w') as f:
                 f.write("=== STEP-BY-STEP ACTION LOG ===\n")
-                f.write("AI_TURN.md COMPLIANCE: Actions that increment episode_steps are logged\n")
+                f.write("tour_de_jeu.md COMPLIANCE: Actions that increment episode_steps are logged\n")
                 f.write("INCREMENTED ACTIONS: move, shoot, charge, combat, wait (SUCCESS OR FAILURE)\n")
                 f.write("NON-INCREMENTED: auto-skip ineligible units, phase transitions\n")
                 f.write("FAILED ACTIONS: Still increment steps - unit consumed time/effort\n")

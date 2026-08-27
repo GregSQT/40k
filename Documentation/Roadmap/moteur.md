@@ -76,9 +76,14 @@ Le tir est légitime côté backend : le tireur élevé ignore correctement les 
 
 ## Endless Duty {#endless-duty}
 
-**Bloqué par décision produit.** 8-13 j. Décisions en attente : obstacle 3 (format objectifs) et 7 (double sens de `VALUE`).
+**Plus aucune décision produit en attente** (constat vérifié 2026-08-28, signet
+`tests/unit/services/test_endless_duty_is_broken.py` relancé vert) : les obstacles 1, 3, 5, 6 et 7
+sont soldés en code — les décisions 3 (objectif fixe unique via terrain dédié) et 7 (séparation
+`VALUE`/`REQUISITION_COST`) sont prises. Restent l'obstacle 2 (choix de murs, level design, ~½ j),
+l'obstacle 4 (architecture d'init, ~1 j) et des résidus (FACTION_KEYWORDS vides, consommables,
+scoring, UI, cohérence investi front/back — `REQUISITION_COST` écrit mais jamais lu).
 
-→ `Documentation/Chantiers/backlog/Endless_duty_etat_mesure.md`
+→ `Documentation/Chantiers/backlog/endless_duty.md` (spec + état mesuré + obstacles, consolidés 2026-08-28)
 
 ---
 

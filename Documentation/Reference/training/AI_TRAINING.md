@@ -3,7 +3,7 @@
 
 > **📍 Purpose** : Ce document est la **référence unique** pour tout ce qui concerne l’entraînement et le tuning : architecture du pipeline, configuration, monitoring, métriques, hyperparamètres, anti-overfitting, dépannage.
 >
-> **Moteur de jeu** : voir [AI_IMPLEMENTATION.md](../moteur/AI_IMPLEMENTATION.md).  
+> **Moteur de jeu** : voir [architecture_moteur.md](../moteur/architecture_moteur.md).  
 > **Métriques détaillées et tuning ciblé** : voir [AI_METRICS.md](AI_METRICS.md) (inclut le guide de tuning rapide).
 
 > ## ⚠️ INTERFACE AGENT — chiffres en vigueur (vérifiés dans le code le **2026-07-26**)
@@ -857,7 +857,7 @@ Règles:
     // Sans effet à x1 : la résolution prime (geometry_is_hex). Coût mesuré du passage en
     // euclidean : x3,55 sur la construction du pool de move.
     // Usage prévu : curriculum x5 en "hex", phase finale en "euclidean" via --append.
-    // Détail complet : Documentation/Reference/moteur/Distance management.md
+    // Détail complet : Documentation/Reference/moteur/geometrie_et_distances.md
     "gym_distance_metric": "euclidean",  // "hex" | "euclidean" | absent
 
     "callback_params": {
@@ -2785,7 +2785,7 @@ Outil d’automatisation:
 
 **Tout ce qui concerne training / tuning** : dans ce document (AI_TRAINING.md). Compléments :
 - **Métriques et tuning (quoi changer, diagnostic)** → [AI_METRICS.md](AI_METRICS.md)
-- **Moteur de jeu** → [AI_IMPLEMENTATION.md](../moteur/AI_IMPLEMENTATION.md), `engine/w40k_core.py`
-- **Règles de tour** → [AI_TURN.md](../moteur/AI_TURN.md)
+- **Moteur de jeu** → [architecture_moteur.md](../moteur/architecture_moteur.md), `engine/w40k_core.py`
+- **Règles de tour** → [tour_de_jeu.md](../moteur/tour_de_jeu.md)
 
 En pratique : modifier les configs agent (`*_training_config.json`, `*_rewards_config.json`), surveiller TensorBoard, ajuster les hyperparamètres selon les métriques (voir AI_METRICS). Entraînement itératif : commencer en config debug, valider, puis monter en charge.

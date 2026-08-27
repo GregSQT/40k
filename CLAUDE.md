@@ -14,7 +14,7 @@ Modèles IA : ai/models/<agent_key>/model_<agent_key>.zip
 
 Configs agents : config/agents/<agent_name>/
 
-Python : type hints, docstrings, respect Documentation/Reference/moteur/AI_TURN.md
+Python : type hints, docstrings, respect Documentation/Reference/moteur/tour_de_jeu.md
 
 Aucun fallback/workaround/default anti-erreur → T1
 

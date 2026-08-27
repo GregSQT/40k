@@ -4,7 +4,7 @@ parser.py - Parse TypeScript armory files to extract weapon definitions.
 SINGLE SOURCE OF TRUTH: Weapons are only declared in TypeScript armory files.
 Python reads and parses these files at runtime - no duplicate Python armory needed.
 
-AI_IMPLEMENTATION.md COMPLIANCE:
+architecture_moteur.md COMPLIANCE:
 - NO DEFAULT: Raises error if weapon missing
 - Validation stricte: All referenced weapons must exist
 - Single source of truth: TypeScript armory files are canonical
@@ -55,7 +55,7 @@ class ArmoryParser:
         """
         Parse TypeScript armory file and extract all weapon definitions.
         
-        AI_IMPLEMENTATION.md COMPLIANCE: Validates WEAPON_RULES on load (fail-fast).
+        architecture_moteur.md COMPLIANCE: Validates WEAPON_RULES on load (fail-fast).
         """
         with open(armory_path, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -234,7 +234,7 @@ class ArmoryParser:
         """
         Get multiple weapons by code names.
         
-        AI_IMPLEMENTATION.md COMPLIANCE: NO DEFAULT - raises KeyError if any weapon missing.
+        architecture_moteur.md COMPLIANCE: NO DEFAULT - raises KeyError if any weapon missing.
         
         Args:
             faction: Faction name (e.g., "SpaceMarine", "Tyranid")

@@ -466,7 +466,7 @@ class W40KEngine(gym.Env):
                 unit_registry=None, quiet=True, gym_training_mode=False, debug_mode=False,
                 training_n_envs: Optional[int] = None,
                 training_episode_start_index: int = 0, **kwargs):
-        """Initialize W40K engine with AI_TURN.md compliance - training system compatible.
+        """Initialize W40K engine with tour_de_jeu.md compliance - training system compatible.
 
         Args:
             scenario_file: Single scenario file path (used if scenario_files not provided)
@@ -808,7 +808,7 @@ class W40KEngine(gym.Env):
         self.is_training = training_config_name in ["debug", "default", "conservative", "aggressive"]
         
         # PvE mode configuration
-        # AI_TURN.md COMPLIANCE: self.config is normalized above (training + API paths); never read
+        # tour_de_jeu.md COMPLIANCE: self.config is normalized above (training + API paths); never read
         # from the raw `config` parameter here — it can diverge from self.config after copy/fill.
         if "pve_mode" not in self.config:
             raise KeyError(
@@ -897,7 +897,7 @@ class W40KEngine(gym.Env):
             # atterrirait alors sur la premiere action de l'episode suivant.
             "_pending_zone_shaping": 0.0,
 
-            # AI_TURN.md required tracking sets
+            # tour_de_jeu.md required tracking sets
             "units_moved": set(),
             "moved_distance_by_model": {},
             "units_fled": set(),
@@ -1718,7 +1718,7 @@ class W40KEngine(gym.Env):
         #  2026-07-29 — voir la pierre tombale dans cette methode. Plus aucun lecteur.)
 
         # Reset unit health and positions to original scenario values
-        # AI_TURN.md COMPLIANCE: Direct access - units must be provided
+        # tour_de_jeu.md COMPLIANCE: Direct access - units must be provided
         if "units" not in self.config:
             raise KeyError("Config missing required 'units' field during reset")
         unit_configs = self.config["units"]
@@ -2544,7 +2544,7 @@ class W40KEngine(gym.Env):
             "fight_subphase": self.game_state.get("fight_subphase"),  # get allowed
         }
 
-        # Process semantic action with AI_TURN.md compliance
+        # Process semantic action with tour_de_jeu.md compliance
         if self.debug_mode:
             trace(
                 CH_STEP, self.debug_mode,
@@ -2585,9 +2585,9 @@ class W40KEngine(gym.Env):
         if success:
             self.game_state["episode_steps"] += 1
 
-            # NEW: AI_TURN.md compliance tracking - verify ONE unit per step
+            # NEW: tour_de_jeu.md compliance tracking - verify ONE unit per step
             compliance_data = {
-                'units_activated_this_step': 1,  # Should always be 1 per AI_TURN.md
+                'units_activated_this_step': 1,  # Should always be 1 per tour_de_jeu.md
                 'phase_end_reason': 'unknown',
                 'duplicate_activation_attempts': 0,
                 'pool_corruption_detected': 0
@@ -3542,7 +3542,7 @@ class W40KEngine(gym.Env):
     def execute_ai_turn(self) -> Tuple[bool, Dict[str, Any]]:
         """
         Execute AI turn using same decision tree as humans.
-        AI_TURN.md compliant - only decision-making logic differs from humans.
+        tour_de_jeu.md compliant - only decision-making logic differs from humans.
         """
         # Validate PvE mode and AI player turn
         if not self.is_pve_mode:
@@ -4902,7 +4902,7 @@ class W40KEngine(gym.Env):
         pre_action_phase = self.game_state["phase"]
         pre_action_turn = self.game_state.get("turn", 1)
         pre_action_episode = self.game_state.get("episode_number", 1)  # CRITICAL: Capture episode BEFORE action execution
-        # AI_TURN.md COMPLIANCE: Direct field access for semantic actions
+        # tour_de_jeu.md COMPLIANCE: Direct field access for semantic actions
         if "unitId" not in action:
             unit_id = None
         else:
@@ -5755,7 +5755,7 @@ class W40KEngine(gym.Env):
     # ete prise.
     # `coherency_removal` y figure pour la meme raison que `reactive_move` : ce n'est pas une
     # action d'agent mais un effet de fin de tour. L'incrementer decalerait `episode_steps` de la
-    # suite d'actions reellement decidees (contrat AI_TURN.md, en-tete de step.log).
+    # suite d'actions reellement decidees (contrat tour_de_jeu.md, en-tete de step.log).
     _STEP_LOG_NON_INCREMENTING_TYPES: frozenset = frozenset({
         "reactive_move", "coherency_removal",
         # 20.04 — destruction en fin de 3e round : même statut que coherency_removal, pas une
@@ -8009,7 +8009,7 @@ class W40KEngine(gym.Env):
     
     def _process_shooting_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """
-        AI_TURN.md EXACT: Pure delegation - handler manages complete phase lifecycle
+        tour_de_jeu.md EXACT: Pure delegation - handler manages complete phase lifecycle
         """
         from engine.perf_timing import append_perf_timing_line, perf_timing_enabled
 
@@ -8091,7 +8091,7 @@ class W40KEngine(gym.Env):
     
     
     def _process_charge_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """AI_TURN.md EXACT: Pure delegation - handler manages complete charge phase."""
+        """tour_de_jeu.md EXACT: Pure delegation - handler manages complete charge phase."""
         # Get current unit for handler
         unit_id = action.get("unitId")
         current_unit = None
@@ -8262,7 +8262,7 @@ class W40KEngine(gym.Env):
         return success, result
     
     def _process_fight_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """AI_TURN.md EXACT: Pure delegation - handler manages complete fight phase.
+        """tour_de_jeu.md EXACT: Pure delegation - handler manages complete fight phase.
 
         Y compris le combat PvP humain cible-d abord par arme/quantite/figurine : ces
         actions squad_fight_* sont traitees DANS la machine V11 (_fight_v11_manual_step),
@@ -8351,7 +8351,7 @@ class W40KEngine(gym.Env):
     
     
     def validate_compliance(self) -> List[str]:
-        """Validate AI_TURN.md compliance - returns list of violations."""
+        """Validate tour_de_jeu.md compliance - returns list of violations."""
         violations = []
         
         # Check single source of truth

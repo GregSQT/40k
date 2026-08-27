@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-movement_handlers.py - AI_TURN.md Movement Phase Implementation
-Pure stateless functions implementing AI_TURN.md movement specification
+movement_handlers.py - tour_de_jeu.md Movement Phase Implementation
+Pure stateless functions implementing tour_de_jeu.md movement specification
 
-References: AI_TURN.md Section 🏃 MOVEMENT PHASE LOGIC
+References: tour_de_jeu.md Section 🏃 MOVEMENT PHASE LOGIC
 ZERO TOLERANCE for state storage or wrapper patterns
 """
 
@@ -904,7 +904,7 @@ def movement_build_activation_pool(game_state: Dict[str, Any]) -> None:
 
 def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     """
-    AI_TURN.md movement eligibility decision tree implementation.
+    tour_de_jeu.md movement eligibility decision tree implementation.
 
     Returns list of unit IDs eligible for movement activation.
     Pure function - no internal state storage.
@@ -1182,12 +1182,12 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     
     elif action_type == "invalid":
         # Handle invalid actions with training penalty
-        # AI_TURN.md EXACT: end_activation(ERROR, 0, PASS, MOVE, 1, 1)
+        # tour_de_jeu.md EXACT: end_activation(ERROR, 0, PASS, MOVE, 1, 1)
         if unit_id in game_state["move_activation_pool"]:
             # Clear preview first
             movement_clear_preview(game_state)
             
-            # AI_TURN.md EXACT: Invalid actions [shoot, charge, attack] → end_activation(ERROR, 0, PASS, MOVE, 1, 1)
+            # tour_de_jeu.md EXACT: Invalid actions [shoot, charge, attack] → end_activation(ERROR, 0, PASS, MOVE, 1, 1)
             result = end_activation(
                 game_state, active_unit,
                 ERROR,       # Arg1: ERROR (not SKIP)
@@ -1331,7 +1331,7 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
     
     # Check if valid destinations exist
     if not game_state["valid_move_destinations_pool"]:
-        # No valid moves - AI_TURN.md EXACT: end_activation(NO, 0, PASS, MOVE, 1, 1)
+        # No valid moves - tour_de_jeu.md EXACT: end_activation(NO, 0, PASS, MOVE, 1, 1)
         # Skip = engine-determined "no valid actions", skip_reason for step logger
         movement_clear_preview(game_state)
         result = end_activation(
@@ -1399,9 +1399,9 @@ def _attempt_movement_to_destination(
     orientation: Optional[int] = None,
 ) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_TURN.md movement execution with destination validation.
+    tour_de_jeu.md movement execution with destination validation.
 
-    Implements AI_TURN.md movement restrictions and flee detection.
+    Implements tour_de_jeu.md movement restrictions and flee detection.
     
     Note: Pool is already built in movement_unit_execution_loop() just after activation.
     Since system is sequential, pool is already built and validated.
@@ -1567,7 +1567,7 @@ def _attempt_movement_to_destination(
 
     _mct4 = _mct.perf_counter() if _mct_pt else None
 
-    # Apply AI_TURN.md tracking
+    # Apply tour_de_jeu.md tracking
     # Normalize unit ID to string for consistent storage (units_fled stores strings)
     unit_id_str = str(unit["id"])
     game_state["units_moved"].add(unit_id_str)
@@ -1608,7 +1608,7 @@ def _attempt_movement_to_destination(
 
 def _is_in_enemy_engagement_zone(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
     """
-    AI_TURN.md flee detection logic.
+    tour_de_jeu.md flee detection logic.
 
     Check if unit is adjacent to enemy for flee marking.
 
@@ -2952,7 +2952,7 @@ def movement_build_valid_destinations_pool(
     move côté gym : ``coût <= M`` → normal, ``coût > M`` → advance (§6.2).
 
     Uses BFS to find REACHABLE hexes, not just hexes within distance.
-    This prevents movement through walls (AI_TURN.md compliance).
+    This prevents movement through walls (tour_de_jeu.md compliance).
 
     Pre-computes enemy adjacent hexes and occupied positions once at BFS start for O(1) lookups.
 
@@ -3802,7 +3802,7 @@ def movement_build_model_destinations_pool(
     level: int = 0,
     orientation: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """BFS des hexes atteignables pour UNE figurine (move par-figurine, squad.md).
+    """BFS des hexes atteignables pour UNE figurine (move par-figurine, squad_multi_figurines.md).
 
     provisional_plan : {model_id: (col, row)} positions provisoires des figs
     déjà déplacées dans le plan. Si fourni, remplace models_cache pour les
@@ -4400,7 +4400,7 @@ def movement_preview_move_plan(
     cohesion_red = coherency_violation_flags(cohesion_models, game_state)
 
     # Occupation des autres escouades PAR NIVEAU (figs à des étages différents ne se gênent pas ;
-    # murs verticaux prolongés gérés par wall_hexes, cf. stage.md). Calcul unique par niveau du plan.
+    # murs verticaux prolongés gérés par wall_hexes, cf. verticalite.md). Calcul unique par niveau du plan.
     other_occ_by_level: Dict[int, Set[Tuple[int, int]]] = {
         lv: build_occupied_positions_set(game_state, exclude_unit_id=str(squad_id), level=lv)
         for lv in {lv for _, _, _, lv, _o in norm}
@@ -4905,7 +4905,7 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
     movement_clear_preview(game_state)
 
     # End activation with position data for reward calculation
-    # AI_TURN.md EXACT: end_activation(Arg1, Arg2, Arg3, Arg4, Arg5)
+    # tour_de_jeu.md EXACT: end_activation(Arg1, Arg2, Arg3, Arg4, Arg5)
     action_type = FLED if was_adjacent else MOVE
     result = end_activation(
         game_state, unit,
@@ -4966,13 +4966,13 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
 
     had_valid_destinations: True = agent chose to pass (wait). False = no valid destinations (skip).
     """
-    # REMOVED: Duplicate logging - AI_TURN.md end_activation handles ALL logging
-    # AI_TURN.md PRINCIPLE: end_activation is SINGLE SOURCE for action logging
+    # REMOVED: Duplicate logging - tour_de_jeu.md end_activation handles ALL logging
+    # tour_de_jeu.md PRINCIPLE: end_activation is SINGLE SOURCE for action logging
 
     movement_clear_preview(game_state)
 
     if had_valid_destinations:
-        # AI_TURN.md EXACT: end_activation(WAIT, 1, PASS, MOVE, 1, 1)
+        # tour_de_jeu.md EXACT: end_activation(WAIT, 1, PASS, MOVE, 1, 1)
         result = end_activation(
             game_state, unit,
             WAIT,        # Arg1: Log wait action (SINGLE SOURCE)
@@ -4989,7 +4989,7 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
             "clear_selected_unit": True
         })
     else:
-        # AI_TURN.md EXACT: end_activation(NO, 0, PASS, MOVE, 1, 1) - no step (unit could not act)
+        # tour_de_jeu.md EXACT: end_activation(NO, 0, PASS, MOVE, 1, 1) - no step (unit could not act)
         result = end_activation(
             game_state, unit,
             NO,         # Arg1: NO (no action taken)
@@ -5873,7 +5873,7 @@ def movement_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """AI_MOVE.md: Clean up and end movement phase"""
     movement_clear_preview(game_state)
     
-    # Track phase completion reason (AI_TURN.md compliance)
+    # Track phase completion reason (tour_de_jeu.md compliance)
     if 'last_compliance_data' not in game_state:
         game_state['last_compliance_data'] = {}
     game_state['last_compliance_data']['phase_end_reason'] = 'eligibility'

@@ -304,7 +304,7 @@ class W40KMetricsTracker:
         # de Documentation/Reference/training/AI_METRICS.md. Le dernier appelant (ai/training_callbacks.py) est
         # tombe a son tour. Suppression cote produit deja actee : rien a rebrancher.
 
-        # NEW: AI_TURN.md compliance tracking
+        # NEW: tour_de_jeu.md compliance tracking
         self.compliance_data = {
             'units_per_step': [],
             'phase_end_reasons': [],
@@ -946,7 +946,7 @@ class W40KMetricsTracker:
             trade_ratio = units_killed / units_lost
             self.writer.add_scalar('game_critical/units_killed_vs_lost_ratio', trade_ratio, self.episode_count)
         
-        # GAME CRITICAL: Invalid action rate - AI_TURN.md compliance
+        # GAME CRITICAL: Invalid action rate - tour_de_jeu.md compliance
         valid_actions = require_key(tactical_data, 'valid_actions')
         invalid_actions = require_key(tactical_data, 'invalid_actions')
         total_actions = valid_actions + invalid_actions
@@ -1331,7 +1331,7 @@ class W40KMetricsTracker:
         # ne tient pas avec n_envs=48).
 
     def log_aiturn_compliance(self, compliance_data: Dict[str, Any]):
-        """Log AI_TURN.md compliance validation metrics.
+        """Log tour_de_jeu.md compliance validation metrics.
         
         GAME DETAILED METRICS (4):
         - game_detailed/aiturn_units_per_step

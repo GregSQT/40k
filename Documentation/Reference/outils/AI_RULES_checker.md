@@ -1,10 +1,10 @@
-# Script de Vérification AI_TURN.md et coding_practices.mdc — check_ai_rules.py
+# Script de Vérification tour_de_jeu.md et coding_practices.mdc — check_ai_rules.py
 
 **Fichier** : `scripts/check_ai_rules.py`
 
 ## Objectif
 
-Vérifier la conformité du code à AI_TURN.md et coding_practices.mdc : recalculs de caches, pools d'activation, normalisation des coordonnées, fallbacks anti-erreur, patterns end_activation, termes interdits.
+Vérifier la conformité du code à tour_de_jeu.md et coding_practices.mdc : recalculs de caches, pools d'activation, normalisation des coordonnées, fallbacks anti-erreur, patterns end_activation, termes interdits.
 
 ## Détections
 

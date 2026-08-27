@@ -1,6 +1,6 @@
 # Capacités — Chantier 06
 
-**Chantiers 01→05 livrés** (vérifié code, 2026-08-10) — conceptions 01→04 dans `Documentation/Reference/moteur/`, journal 05 dans `Documentation/Archives/chantiers/`, et [archives/capacites.md](archives/capacites.md).
+**Chantiers 01→05 livrés** (vérifié code, 2026-08-10) — conceptions 01→04 absorbées dans `Documentation/Reference/moteur/capacites.md` (consolidation 2026-08-28, sources en `Archives/docs/`), journal 05 dans `Documentation/Archives/chantiers/`, et [archives/capacites.md](archives/capacites.md).
 
 ---
 
@@ -14,4 +14,4 @@
 
 **Prérequis posé (2026-08-25, hors passe) :** Deadly Demise câblé sur WeirdBoy — `unit_rules.json` + `WeirdBoy.ts` + `build_units_cache` + 3 tests. Le mécanisme moteur était déjà livré (moteur.md §24.08) ; ce commit ferme la chaîne roster → engine.
 
-→ `Documentation/Chantiers/backlog/06_armageddon_abilities.md`
+→ `Documentation/Reference/moteur/capacites.md`

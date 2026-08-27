@@ -1575,7 +1575,7 @@ def test_the_real_corpus_has_no_orphan() -> None:
     """Le verrou sur le dépôt : tout chantier ouvert se rejoint depuis la feuille de route.
 
     Mesuré au premier passage (2026-08-18) : 2 orphelins sur 13 — `analyzer_conformite_lots.md`
-    (ouvert le 2026-08-16, cité par aucun fichier sujet) et `Database/DB_migration_prompt.md`.
+    (ouvert le 2026-08-16, cité par aucun fichier sujet) et `Database/migration_postgresql.md`.
     """
     assert cdr.check_reachability()[0] == []
 

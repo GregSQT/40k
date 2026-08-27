@@ -157,11 +157,11 @@ export interface Unit {
   player: PlayerId;
   col: number;
   row: number;
-  /** Niveau vertical (étages). 0 = rez-de-chaussée (défaut). Voir Documentation/Reference/moteur/stage.md. */
+  /** Niveau vertical (étages). 0 = rez-de-chaussée (défaut). Voir Documentation/Reference/moteur/verticalite.md. */
   level?: number;
   color?: number;
 
-  // Engine UPPERCASE fields (AI_TURN.md compliance)
+  // Engine UPPERCASE fields (tour_de_jeu.md compliance)
   HP_CUR: number;
   HP_MAX?: number;
   MOVE: number;
@@ -331,7 +331,7 @@ export interface TargetPreview {
 }
 
 export interface GameState {
-  // AI_TURN.md required fields
+  // tour_de_jeu.md required fields
   episode_steps: number;
   units: Unit[];
   current_player?: number; // Engine format
@@ -341,7 +341,7 @@ export interface GameState {
   game_over?: boolean;
   winner?: number | null;
 
-  // AI_TURN.md tracking sets (Frontend format - converted from Engine string[] to UnitId[])
+  // tour_de_jeu.md tracking sets (Frontend format - converted from Engine string[] to UnitId[])
   unitsMoved?: UnitId[];
   unitsFled?: UnitId[];
   units_shot?: string[]; // IDs des unités ayant tiré ce tour (règle 13.09 Hidden)

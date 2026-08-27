@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Reference/moteur/squad_multi_figurines.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # Squad - spec implementation finale (v3.7)
 
 ---

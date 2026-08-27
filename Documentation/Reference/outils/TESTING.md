@@ -102,7 +102,7 @@ Ce sont eux qui fixent le plancher du mur : aucun découpage xdist ne peut fract
 
 Ne pas alléger `test_move_mask_is_executable` en réduisant `MAX_STEPS` ou le nombre de seeds : à ce
 coût-là, la couverture d'invariant vaut plus que les secondes gagnées. Il était à **687 s** avant
-l'optimisation du 2026-07-26 (cf. `Documentation/Reference/moteur/V11_move_build_acceleration.md` §3.2).
+l'optimisation du 2026-07-26 (cf. `Documentation/Reference/moteur/perf_move_pool.md` §3.2).
 
 `test_deployment_clearance_parity::test_deployment_mask_mirrors_commit_overlap_predicate`, cité ici
 jusqu'au 2026-08-06 comme 2ᵉ plus lourd à ~20 s, est sorti du top 25.

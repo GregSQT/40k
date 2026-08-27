@@ -1,6 +1,6 @@
 """
-AI_TURN.md Phase Handler Modules
-Pure stateless functions implementing AI_TURN.md specification
+tour_de_jeu.md Phase Handler Modules
+Pure stateless functions implementing tour_de_jeu.md specification
 """
 
 from . import movement_handlers

@@ -928,7 +928,7 @@ class ActionDecoder:
         if current_phase == "command":
             return []  # Empty pool for now, ready for future
         elif current_phase == "move":
-            # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
+            # tour_de_jeu.md COMPLIANCE: Use handler's authoritative activation pool
             if "move_activation_pool" not in game_state:
                 raise KeyError("game_state missing required 'move_activation_pool' field")
             pool_unit_ids = game_state["move_activation_pool"]
@@ -939,7 +939,7 @@ class ActionDecoder:
             # légitime — une activation de tir EN COURS ne laisse pas le choix d'en démarrer une
             # autre — mais depuis V11 §0.48 L2 elle n'est plus atteignable que par le flux PvP
             # HUMAIN : l'activation de l'agent est atomique et n'écrit jamais cette clé.
-            # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
+            # tour_de_jeu.md COMPLIANCE: Use handler's authoritative activation pool
             # STEP 2: UNIT_ACTIVABLE_CHECK - Pick one unit from shoot_activation_pool
             # No filtering by SHOOT_LEFT or can_advance - pool is built once at phase start
             # Units are removed ONLY via end_activation() with Arg4 = SHOOTING
@@ -971,7 +971,7 @@ class ActionDecoder:
                     except (TypeError, ValueError) as exc:
                         raise ValueError(f"Invalid player value in units_cache for unit {uid_str}: {unit_player}") from exc
                     if unit_player_int == current_player_int:
-                        # AI_TURN.md: All units in pool are eligible - no SHOOT_LEFT filtering
+                        # tour_de_jeu.md: All units in pool are eligible - no SHOOT_LEFT filtering
                         eligible.append(unit)
             active_shooting_unit = game_state.get("active_shooting_unit")
             if active_shooting_unit is not None:
@@ -1001,7 +1001,7 @@ class ActionDecoder:
                 return [active_unit]
             return eligible
         elif current_phase == "charge":
-            # AI_TURN.md COMPLIANCE: Use handler's authoritative activation pool
+            # tour_de_jeu.md COMPLIANCE: Use handler's authoritative activation pool
             if "charge_activation_pool" not in game_state:
                 return []  # Phase not initialized yet
             pool_unit_ids = game_state["charge_activation_pool"]
@@ -2866,6 +2866,6 @@ class ActionDecoder:
     # (`engine/reward_calculator.py`), qui n'a jamais eu de rapport avec celles-ci.
     #
     # RÈGLE : ces deux méthodes étaient présentées comme « Key Methods » dans
-    # `Documentation/Reference/moteur/AI_IMPLEMENTATION.md` — une doc d'API décrit ce qu'on a écrit, jamais ce que
+    # `Documentation/Reference/moteur/architecture_moteur.md` — une doc d'API décrit ce qu'on a écrit, jamais ce que
     # la production appelle. Elle ne vaut pas preuve de vie.
     # ─────────────────────────────────────────────────────────────────────────────────────────

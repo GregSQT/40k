@@ -2,7 +2,7 @@
 """
 main.py - W40K Engine Test and Development Entry Point
 
-Test and validate the AI_TURN.md compliant W40K engine.
+Test and validate the tour_de_jeu.md compliant W40K engine.
 """
 
 import json
@@ -286,7 +286,7 @@ def test_basic_functionality():
         for violation in violations:
             print(f"   - {violation}")
     else:
-        print("✅ No AI_TURN.md compliance violations detected")
+        print("✅ No tour_de_jeu.md compliance violations detected")
     
     # Test reset
     obs, info = engine.reset()
@@ -304,7 +304,7 @@ def test_basic_functionality():
     for unit in engine.game_state["units"]:
         print(f"   Unit {unit['id']}: Player {unit['player']} at ({unit['col']}, {unit['row']}) HP:{unit['HP_CUR']}")
     
-    # Test turn/phase based logic (AI_TURN.md compliant)
+    # Test turn/phase based logic (tour_de_jeu.md compliant)
     max_turns = 3
     done = False
     

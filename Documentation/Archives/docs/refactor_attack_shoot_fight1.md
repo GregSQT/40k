@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Reference/moteur/allocation_attaques.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # Refactor — Attribution / allocation manuelle COMBAT (miroir du TIR)
 
 > Revue critique pré-implémentation. Tous les `fichier:ligne` ont été vérifiés dans le

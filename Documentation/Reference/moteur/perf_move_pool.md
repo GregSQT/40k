@@ -1,4 +1,4 @@
-# V11 §0.22 — Accélération du noyau de `_build_multi_hex_vectorized` (move pool)
+# Perf du pool de move — noyau `_build_multi_hex_vectorized` (ex-V11 §0.22)
 
 > **RÉFÉRENCE VIVANTE** — classé `Documentation/Reference/moteur/` par la refonte du 2026-08-27
 > (périmètre de validité et filet de validation toujours actifs pour le chantier noyau natif).

@@ -124,7 +124,7 @@ def once_claim(game_state: Dict[str, Any], family: OnceClaimFamily, key: Any) ->
 
 def get_unit_by_id(game_state: Dict[str, Any], unit_id: str) -> Optional[Dict[str, Any]]:
     """
-    AI_TURN.md COMPLIANCE: Direct lookup from game_state.
+    tour_de_jeu.md COMPLIANCE: Direct lookup from game_state.
     Pure utility function - no dependencies on other modules.
 
     CRITICAL: Compare both sides as strings to handle int/string ID mismatches.

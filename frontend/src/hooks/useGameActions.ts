@@ -1,4 +1,4 @@
-// frontend/src/hooks/useGameActions.ts - AI_TURN.md Compliant Version
+// frontend/src/hooks/useGameActions.ts - tour_de_jeu.md Compliant Version
 import { useCallback } from "react";
 import type {
   AttackPreview,
@@ -133,7 +133,7 @@ export const useGameActions = ({
 
       if (!unit || !playerCheck || !isUnitEligible(unit)) {
         console.log(
-          `[AI_TURN.md] Blocked selection of unit ${unitId}: player=${unit?.player}, current_player=${gameState.current_player}, eligible=${unit ? isUnitEligible(unit) : false}, fight_subphase=${gameState.fight_subphase}`
+          `[tour_de_jeu.md] Blocked selection of unit ${unitId}: player=${unit?.player}, current_player=${gameState.current_player}, eligible=${unit ? isUnitEligible(unit) : false}, fight_subphase=${gameState.fight_subphase}`
         );
         return;
       }
@@ -224,17 +224,17 @@ export const useGameActions = ({
   // Placeholder implementations for other actions
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleShoot = useCallback((_shooterId: UnitId, _targetId: UnitId) => {
-    // AI_TURN.md compliant shooting implementation
+    // tour_de_jeu.md compliant shooting implementation
   }, []);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleFightAttack = useCallback((_attackerId: UnitId, _targetId: UnitId | null) => {
-    // AI_TURN.md compliant fight implementation
+    // tour_de_jeu.md compliant fight implementation
   }, []);
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const handleCharge = useCallback((_chargerId: UnitId, _targetId: UnitId) => {
-    // AI_TURN.md compliant charge implementation
+    // tour_de_jeu.md compliant charge implementation
   }, []);
 
   const startAttackPreview = useCallback(

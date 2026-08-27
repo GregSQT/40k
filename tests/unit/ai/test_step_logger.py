@@ -22,7 +22,7 @@ def test_init_writes_header_when_enabled(tmp_path: Path) -> None:
     StepLogger(output_file=str(output_file), enabled=True, buffer_size=2)
     content = _read_text(output_file)
     assert "=== STEP-BY-STEP ACTION LOG ===" in content
-    assert "AI_TURN.md COMPLIANCE" in content
+    assert "tour_de_jeu.md COMPLIANCE" in content
 
 
 def test_format_display_name_suffix_handles_empty_and_valid_values() -> None:

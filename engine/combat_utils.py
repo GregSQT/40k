@@ -304,7 +304,7 @@ def calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
 
 # ----------------------------------------------------------------------------
 # Sélecteur de métrique de portée (point de bascule unique hex ↔ euclidien)
-# Voir Documentation/Reference/moteur/Distance management.md, Étapes 1-2.
+# Voir Documentation/Reference/moteur/geometrie_et_distances.md, Étapes 1-2.
 # ----------------------------------------------------------------------------
 
 VALID_DISTANCE_METRICS = ("hex", "euclidean")
@@ -661,7 +661,7 @@ def _trace_hex_los(
 def check_los_cached(shooter: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> float:
         """
         Check LoS using cache (required).
-        AI_TURN.md COMPLIANCE: Direct field access, uses game_state cache.
+        tour_de_jeu.md COMPLIANCE: Direct field access, uses game_state cache.
         
         Returns:
         - 1.0 = Clear line of sight
@@ -699,7 +699,7 @@ def calculate_wound_target(strength: int, toughness: int) -> int:
 
 
 def has_valid_shooting_targets(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
-        """Check if unit has valid shooting targets per AI_TURN.md restrictions."""
+        """Check if unit has valid shooting targets per tour_de_jeu.md restrictions."""
         from engine.phase_handlers import shooting_handlers
         from shared.data_validation import require_key  # Lazy: avoid circular import
         units_cache = require_key(game_state, "units_cache")
@@ -715,6 +715,6 @@ def has_valid_shooting_targets(unit: Dict[str, Any], game_state: Dict[str, Any])
 
 def is_valid_shooting_target(shooter: Dict[str, Any], target: Dict[str, Any], game_state: Dict[str, Any]) -> bool:
         """REMOVED: Redundant with handler. Use shooting_handlers._is_valid_shooting_target exclusively."""
-        # AI_IMPLEMENTATION.md: Complete delegation to handler for consistency
+        # architecture_moteur.md: Complete delegation to handler for consistency
         from engine.phase_handlers import shooting_handlers
         return shooting_handlers._is_valid_shooting_target(game_state, shooter, target)

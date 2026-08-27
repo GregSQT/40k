@@ -1,6 +1,6 @@
 # MCTS comme adversaire d’entraînement — spécification finale
 
-> **Fichier** : `Documentation/Chantiers/backlog/MCTS/MCTS_bot_final.md`  
+> **Fichier** : `Documentation/Chantiers/backlog/mcts_adversaire.md` (ex-MCTS/MCTS_bot_final.md)  
 > **Statut** : **référence unique** pour la conception et l’implémentation d’un adversaire MCTS **hors policy PPO**. En cas de divergence avec toute version antérieure, **ce document fait foi** jusqu’à révision explicite.  
 > **Contexte** : projet Warhammer 40K — moteur tactique Python, agent **PPO / MaskablePPO**, observation canonique `Documentation/Reference/training/AI_OBSERVATION.md`, pipeline `Documentation/Reference/training/AI_TRAINING.md`.
 
@@ -162,7 +162,7 @@ En **entraînement**, les transitions utilisent typiquement le **VecEnv**, les w
 
 `config/agents/<Agent>/<Agent>_training_config.json` peut définir `opponent_mix` avec notamment : `enabled`, `self_play_ratio_start`, `self_play_ratio_end`, `warmup_episodes`, `pool`, `self_play_snapshot_device`, `self_play_deterministic`. Chargement décrit dans `ai/train.py::build_training_opponents`.
 
-⚠️ **Schéma changé le 2026-08-22** ([bot.md#league](../../../Roadmap/bot.md#league)) : `snapshot_model_path` et `snapshot_update_freq_episodes` ont été remplacés par `pool`, une LISTE PONDÉRÉE d'adversaires figés (`{"label", "path", "weight"}`) répartie par ENVIRONNEMENT — chaque worker en charge un seul, une fois. La rampe pilote la frontière bots/pool, plus le couple bots/self-play. Les exemples de ce document qui portent encore les anciennes clés sont périmés sur ce point.
+⚠️ **Schéma changé le 2026-08-22** ([bot.md#league](../../Roadmap/bot.md#league)) : `snapshot_model_path` et `snapshot_update_freq_episodes` ont été remplacés par `pool`, une LISTE PONDÉRÉE d'adversaires figés (`{"label", "path", "weight"}`) répartie par ENVIRONNEMENT — chaque worker en charge un seul, une fois. La rampe pilote la frontière bots/pool, plus le couple bots/self-play. Les exemples de ce document qui portent encore les anciennes clés sont périmés sur ce point.
 
 ### 4.2 Troisième mode : comparaison
 
@@ -595,10 +595,10 @@ Le **micro-MCTS** sur masque complet reste **option expérimentale** (souvent P4
 
 | Document | Usage |
 |----------|--------|
-| [Documentation/Reference/training/AI_OBSERVATION.md](../../../Reference/training/AI_OBSERVATION.md) | Macro intent, structure d’observation. |
-| [Documentation/Reference/training/AI_TRAINING.md](../../../Reference/training/AI_TRAINING.md) | Pipeline PPO, `opponent_mix`, seat-aware, eval, callbacks. |
-| [Documentation/Reference/moteur/AI_TURN.md](../../../Reference/moteur/AI_TURN.md) | Phases légales — quand placer les points de décision. |
-| [Documentation/Reference/moteur/AI_IMPLEMENTATION.md](../../../Reference/moteur/AI_IMPLEMENTATION.md) | Handlers — effets de bord des transitions. |
+| [Documentation/Reference/training/AI_OBSERVATION.md](../../Reference/training/AI_OBSERVATION.md) | Macro intent, structure d’observation. |
+| [Documentation/Reference/training/AI_TRAINING.md](../../Reference/training/AI_TRAINING.md) | Pipeline PPO, `opponent_mix`, seat-aware, eval, callbacks. |
+| [Documentation/Reference/moteur/tour_de_jeu.md](../../Reference/moteur/tour_de_jeu.md) | Phases légales — quand placer les points de décision. |
+| [Documentation/Reference/moteur/architecture_moteur.md](../../Reference/moteur/architecture_moteur.md) | Handlers — effets de bord des transitions. |
 | `config/agents/CoreAgent/CoreAgent_training_config.json` | Config effective agents. |
 | `ai/train.py` | Chargement `opponent_mix`, construction env. |
 
@@ -626,7 +626,7 @@ Utile si priors informatifs ; **v1** peut rester sur **UCT pur** (exemple §10.2
 > ⚠️ **Ne pas confondre avec le reste de ce document.** Les §1-§20 spécifient MCTS comme
 > **adversaire d'entraînement** (`opponent_mix`). Cette annexe couvre l'autre usage : MCTS **à
 > l'inférence de l'agent joueur**, pour corriger les coups absurdes **sans retraining**.
-> Arbitrage entre les deux usages : [`Documentation/Chantiers/v11/V11_eval_strategy.md`](../../v11/V11_eval_strategy.md)
+> Arbitrage entre les deux usages : [`Documentation/Chantiers/v11/V11_eval_strategy.md`](../v11/V11_eval_strategy.md)
 > §10.7 — **non tranché, « à ne PAS anticiper » avant la mesure de référence**.
 
 L'`GameAdapter` (§6), l'algorithme (§8) et la politique de rollout (§9) sont **communs aux deux
@@ -684,4 +684,4 @@ rollouts » = beaucoup plus lourd. C'est la piste citée en §10.7 pour tenir la
 
 ---
 
-*Fin de `Documentation/Chantiers/backlog/MCTS/MCTS_bot_final.md`.*
+*Fin de `Documentation/Chantiers/backlog/mcts_adversaire.md`.*

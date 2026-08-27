@@ -42,6 +42,14 @@ Règles de vie :
   doc dit *où lire* la valeur dans le code (garde : P2).
 - **L'archivage fait partie de la clôture** — les ✅ descendent de l'index vers
   `Roadmap/archives/<sujet>.md` dans la même livraison.
+- **Un sujet = un document** (décision utilisateur 2026-08-27) : avant de créer un fichier,
+  chercher le document de sujet qui devrait l'absorber. Un chantier à venir adossé à un système
+  existant vit comme section « À faire » du document du sujet (l'état reste dans `Roadmap/`) ;
+  seul un chantier sans système derrière lui (ex. PostgreSQL, MCTS) a un doc backlog autonome.
+- **Le nom d'un fichier dit son OBJET, jamais son histoire** : pas de numéros de série, pas de
+  dates, pas de noms de versions/branches dans les noms de fichiers — l'histoire vit dans git et
+  dans les archives. Une source absorbée part en `Archives/docs/` avec un bandeau
+  « absorbé par … » ; le document absorbeur garde une table « Correspondance des sources ».
 
 ## 3. P2 — Garde machine étendue (✅ livré 2026-08-27)
 
@@ -63,7 +71,35 @@ d'entrée. Contenu :
 Critère de clôture : `check_doc_references.py` rouge si un lien du corpus vivant meurt, si une
 valeur gardée dérive, ou si l'index accumule ; suite verte sur l'état livré.
 
-## 4. P3 — Contenu (à faire, chantiers séparés)
+## 3bis. P4 — Consolidation « un sujet = un document » (en cours)
+
+Décidée le 2026-08-27 après le constat utilisateur : le rangement par rôle ne suffit pas si les
+documents gardent leurs noms de chantiers et leurs périmètres éclatés. Un domaine = une
+livraison ; chaque fusion re-vérifie ses affirmations contre le code (rédacteurs parallèles avec
+liste de purge prouvée + sections citées par le code préservées avec table de correspondance).
+
+- **moteur + backlog : ✅ livrés le 2026-08-28.** `Reference/moteur/` 16 → 9 documents aux noms
+  d'objet : `tour_de_jeu` (ex-AI_TURN réécrit : squelette pédagogique et ~800 lignes de doublons
+  purgés, matrices V11 réunies par phase, symboles morts corrigés, fausse « divergence 12.04 »
+  rectifiée preuve code à l'appui), `architecture_moteur`, `geometrie_et_distances` (fusion de
+  5 sources), `verticalite`, `ligne_de_vue`, `allocation_attaques`, `squad_multi_figurines`
+  (statut PR4 faux purgé), `capacites` (fusion 01-04 + §À faire ex-06), `perf_move_pool`.
+  Backlog : `endless_duty` (spec+état fusionnés, obstacles re-vérifiés par le signet — 1/3/5/6/7
+  soldés), `migration_postgresql` (scope pré-V11 re-cadré sur `W40KEngine`/`StepLogger`),
+  `mcts_adversaire` ; 20 sources archivées en `Archives/docs/` avec bandeau retour ;
+  `V11_entity_encoder_pointer` et `move_action_space_spatial_rework` déplacés vers
+  `Reference/training/` (fusion à venir).
+- **training : 🟡 à faire** — `observation_et_actions.md` (fusion AI_OBSERVATION +
+  entity_encoder + move_action_space), `entrainement.md` (ex-AI_TRAINING, journal → archives),
+  `metriques.md` (ex-AI_METRICS), `panel_bots.md` (fusion bots_refonte_panel + talon
+  panel_reference).
+- **jeu + outils : 🟡 à faire** — `armes.md`, `regles_unites.md`, `couverture_regles.md`,
+  `tests.md`, `configuration.md`, `outils_conformite.md` (fusion des 5 ex-Code_Compliance),
+  `tests_front.md`.
+- **infra : 🟡 à faire** — `deploiement_nas.md`, `securite.md`, `acces_utilisateurs.md`.
+- **v11 : 🟡 à faire** — noms d'objet pour les 4 specs post-scission.
+
+## 4. P3 — Contenu (✅ scission et passes unitaires livrées le 2026-08-27 ; la réécriture d'AI_TURN est absorbée par la P4 ci-dessus)
 
 Un chantier par document, préalable : P2 livré (le checker est le filet).
 

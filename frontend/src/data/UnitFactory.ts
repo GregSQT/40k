@@ -1,5 +1,5 @@
 // frontend/src/data/UnitFactory.ts
-// AI_TURN.md compliant dynamic unit factory - zero hardcoding
+// tour_de_jeu.md compliant dynamic unit factory - zero hardcoding
 
 import type { Unit, Weapon } from "../types/game";
 

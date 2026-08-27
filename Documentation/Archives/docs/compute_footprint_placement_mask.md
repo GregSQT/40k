@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Reference/moteur/geometrie_et_distances.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # compute_footprint_placement_mask — Documentation technique
 
 ## Vue d'ensemble

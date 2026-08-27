@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Reference/moteur/architecture_moteur.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # AI_TURN.md Compliant Architecture - Implementation Plan
 
 ## CORE AI CODING RULES

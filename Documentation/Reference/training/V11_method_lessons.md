@@ -342,14 +342,14 @@ une fréquence, c'est une anecdote.
 
 **Prototyper + bencher AVANT d'intégrer un levier perf (§0.22, 2026-07-21) — la mesure prime sur le plan écrit.**
 Le chantier `MOVE_POOL_BUILD` a fait CINQ mesures qui ont chacune démenti une hypothèse « évidente » du
-plan §8 de `V11_move_build_acceleration.md`, et un prototype hors-prod les a toutes attrapées avant tout code de prod :
+plan §8 de `perf_move_pool.md`, et un prototype hors-prod les a toutes attrapées avant tout code de prod :
 1. Le plan désignait le **BFS** comme reliquat n°1 (« 66 % sur petits socles », profil §2bis). Mesuré :
    le BFS deque isolé ne coûte que **0,30 ms à move_range=12** (le régime réel du training, lui aussi
    mesuré, pas supposé). Le profil §2bis englobait autre chose.
 2. Le plan proposait un **wavefront bbox-NumPy** pour le BFS. Prototype prouvé équivalent (reach+dist)
    mais **plus lent à move 12** (0,46×) ; il ne gagne qu'à move≥30. Réfuté.
 3. Le vrai hotspot mesuré (cProfile) = la **boucle Python sur les offsets** de `_dilate`/`_spread`
-   (gros socles), que le §8 de `V11_move_build_acceleration.md` avait déclaré « caduc ». Réhabilité par la mesure.
+   (gros socles), que le §8 de `perf_move_pool.md` avait déclaré « caduc ». Réhabilité par la mesure.
 4. **L2b par lignes** (décompo runs) : l'empreinte **ovale n'est pas contiguë par ligne** en coords hex
    → fallback sur le socle qui compte. Réfuté.
 5. **L2b par colonnes** (sparse-table) : équivalent, mais 1,34× ovale seulement / <1× petits socles →
@@ -359,7 +359,7 @@ plan §8 de `V11_move_build_acceleration.md`, et un prototype hors-prod les a to
 + bench AVANT de toucher la prod**. Le filet de tests (oracle + snapshot + A/B fenêtré==plein-board)
 garantissait qu'aucune régression métier ne pouvait passer ; le bench a garanti qu'aucune complexité
 inutile n'a été livrée. Seuls **L1 + L_bbox** (gain sûr, sans dépendance) ont été retenus ; décision
-**(B) STOP**. Détail complet → `V11_move_build_acceleration.md §3`.
+**(B) STOP**. Détail complet → `perf_move_pool.md §3`.
 
 **« Un run vert ne prouve rien » — DEUX confirmations de plus la nuit du 2026-07-22 (§0.25/§0.26).**
 Le motif §0.11/§0.18 s'est répété deux fois en une nuit : (1) le fix move §0.25 a passé un `--step` de

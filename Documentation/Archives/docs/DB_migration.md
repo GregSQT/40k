@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Chantiers/backlog/migration_postgresql.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # Migration PostgreSQL v3.3 (version de reference a figer)
 
 ## Pourquoi on tournait en rond

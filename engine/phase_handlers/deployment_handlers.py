@@ -214,7 +214,7 @@ def _deployed_occupied_positions(
 
     ``level`` : None = toutes figs confondues (comportement historique). Un entier
     restreint aux figurines à ce niveau (deux figs à des étages différents
-    ne se gênent pas — murs mis à part, cf. stage.md § murs verticaux prolongés).
+    ne se gênent pas — murs mis à part, cf. verticalite.md § murs verticaux prolongés).
     """
     from engine.spatial_relations import entries_on_battlefield, entry_footprint
 

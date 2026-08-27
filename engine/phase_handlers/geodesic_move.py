@@ -168,7 +168,7 @@ def reachable_multilevel_field(
       pas INFANTRY/BEASTS/SWARM/FLY/MONSTER, cf. ``unit_can_occupy_upper_floor``) → aucune transition :
       le champ reste sur ``start_level`` (au sol en pratique). Nuance non modélisée : un VEHICLE peut
       escalader l'EXTÉRIEUR d'une section >2" sans y finir (le modèle de niveaux ne distingue pas
-      intérieur/extérieur ni sections <2") — hors périmètre, documenté dans stage.md.
+      intérieur/extérieur ni sections <2") — hors périmètre, documenté dans verticalite.md.
     - ``ignore_vertical_cost=True`` (FLY « take to the skies », §21.03) → transitions à coût horizontal
       seul (le malus −2" de budget est appliqué en amont dans ``get_squad_move_budget``).
 

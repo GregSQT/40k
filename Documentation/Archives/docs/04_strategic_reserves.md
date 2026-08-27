@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Reference/moteur/capacites.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # Chantier 04 — Réserves stratégiques et Deep Strike
 > ✅ **LIVRÉ** (vérifié code le 2026-08-10). La **CONCEPTION** reste la référence vivante. Point resté conditionnel dans le texte, non tranché : le **round restant avant destruction** n'est peut-être pas observé — sans lui l'agent ne perçoit pas la pression de tempo.
 >

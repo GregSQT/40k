@@ -1735,7 +1735,7 @@ class BotControlledEnv(gym.Wrapper):
         valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
 
         if not valid_actions:
-            # AI_IMPLEMENTATION.md: No hidden contracts on magic actions.
+            # architecture_moteur.md: No hidden contracts on magic actions.
             # An empty mask here means the engine exposed a phase/turn with no
             # legal actions instead of advancing itself. This must be treated
             # as an explicit engine/flow error, not patched by returning a
@@ -2122,7 +2122,7 @@ class SelfPlayWrapper(gym.Wrapper):
                 return mi.ACTION_WAIT
             valid_actions = [i for i in range(len(action_mask)) if action_mask[i]]
             if not valid_actions:
-                # AI_IMPLEMENTATION.md: Empty masks indicate a flow/phase bug;
+                # architecture_moteur.md: Empty masks indicate a flow/phase bug;
                 # SelfPlayWrapper must not silently inject dummy actions.
                 raise RuntimeError(
                     "SelfPlayWrapper encountered an empty action mask for Player 2. "

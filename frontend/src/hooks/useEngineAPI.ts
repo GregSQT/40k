@@ -198,7 +198,7 @@ export interface APIGameState {
     ATTACK_LEFT?: number;
     _current_shoot_nb?: number;
     _current_fight_nb?: number;
-    // AI_TURN.md shooting state fields
+    // tour_de_jeu.md shooting state fields
     valid_target_pool?: string[];
     los_preview_attack_cells?: Array<{ col: number; row: number }>;
     los_preview_cover_cells?: Array<{ col: number; row: number }>;
@@ -571,7 +571,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     "move" | "move_after_shooting" | null
   >(null);
   /**
-   * Move par-figurine (squad.md brique 3) — plan provisoire NON committe au backend.
+   * Move par-figurine (squad_multi_figurines.md brique 3) — plan provisoire NON committe au backend.
    * ``models`` : position provisoire de chaque figurine (model_id -> {col,row}).
    * ``perModelValid`` : voile rouge (false = position interdite ou hors cohesion).
    * ``canValidate`` : toutes les figs valides + cohesion OK (bouton Validate actif).
@@ -2246,7 +2246,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setSelectedUnitId(unitId);
             // Clear advance preview (destinations and mode) since advance is complete
             setAdvanceDestinations([]);
-            // AI_TURN.md COMPLIANCE: Don't reset mode to "select" if unit can shoot after advance
+            // tour_de_jeu.md COMPLIANCE: Don't reset mode to "select" if unit can shoot after advance
             // If blinking_units is present, unit has valid targets and can shoot - mode will be set to "attackPreview" by blinking_units handler
             if (!data.result?.blinking_units || !data.result?.start_blinking) {
               setMode("select");
@@ -3196,7 +3196,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             clearFightAttackActivationUi();
           }
           // Set visual state based on shooting activation
-          // AI_TURN.md COMPLIANCE: Clear stale attackPreview from previous fight phases
+          // tour_de_jeu.md COMPLIANCE: Clear stale attackPreview from previous fight phases
           // This prevents Unit 3 (fled) from rendering at old position when Unit 4 (shooter) is activated
           // Root cause: attackPreview was set during fight phase and never cleared when shooting started
           // Don't set mode to attackPreview here - wait for backend response (blinking_units or allow_advance)
@@ -8428,7 +8428,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onDirectMove: handleDirectMove,
     onBumpMovePreviewOrientation: handleBumpMovePreviewOrientation,
     onBumpPerModelOrientation: handleBumpPerModelOrientation,
-    // Move par-figurine (squad.md brique 3)
+    // Move par-figurine (squad_multi_figurines.md brique 3)
     squadMovePlan,
     fleePreviewUnitId,
     squadMoveModelPoolRef,

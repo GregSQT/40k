@@ -5,8 +5,8 @@ import TooltipWrapper from "./TooltipWrapper";
 interface TurnPhaseTrackerProps {
   currentTurn: number;
   currentPhase: string;
-  phases: string[]; // Required - AI_TURN.md compliance: no config wrappers
-  maxTurns: number; // Required - AI_TURN.md compliance: direct data flow
+  phases: string[]; // Required - tour_de_jeu.md compliance: no config wrappers
+  maxTurns: number; // Required - tour_de_jeu.md compliance: direct data flow
   current_player?: number; // Current player (1 or 2) for P1/P2 buttons
   className?: string;
   onTurnClick?: (turn: number) => void; // Optional callback for turn button clicks (replay mode)

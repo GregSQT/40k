@@ -191,7 +191,7 @@ def set_analyzer_board_dims(cols: int, rows: int) -> None:
 
 def _get_inches_to_subhex_for_analyzer() -> int:
     """Échelle subhex/pouce du run en cours d'analyse (cf. parse_board_scale_from_log).
-    Boardx10-final §P3: advance budget = D6 face × this scale.
+    geometrie_et_distances.md (ex-Boardx10-final) §P3: advance budget = D6 face × this scale.
     """
     from ai.analyzer_config import get_run_inches_to_subhex
     return get_run_inches_to_subhex()

@@ -22,7 +22,7 @@
 
 ## Vue d'ensemble
 
-L'analyzer parse le fichier `step.log` généré par l'entraînement (avec `--step`) et valide la conformité aux règles du jeu (AI_TURN.md). Il détecte :
+L'analyzer parse le fichier `step.log` généré par l'entraînement (avec `--step`) et valide la conformité aux règles du jeu (tour_de_jeu.md). Il détecte :
 
 - **Violations** : mouvements invalides, tirs illégaux, charges interdites, etc.
 - **Métriques de règles spéciales** : usage des règles d'unités et d'armes.
@@ -248,7 +248,7 @@ En fin de rapport, un résumé affiche :
 **Documentation :**
 - [Fix_violations_guideline.md](Fix_violations_guideline.md) : guideline / prompt pour automatiser les correctifs
 - [Hidden_action_finder.md](Hidden_action_finder.md) : détection des actions non loguées (step.log vs debug.log)
-- [../AI_TURN.md](../moteur/AI_TURN.md) : règles du jeu
+- [../tour_de_jeu.md](../moteur/tour_de_jeu.md) : règles du jeu
 
 **Fichiers de config :**
 - `config/unit_rules.json` : règles d'unités

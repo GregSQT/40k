@@ -5,7 +5,7 @@ You are now operating under STRICT PROTOCOL for this 40K RL training project.
 ## MANDATORY OPENING CHECK
 Before ANY code changes, confirm:
 1. Have I read the actual file with Read tool?
-2. Have I read AI_TURN.md sections relevant to this change?
+2. Have I read tour_de_jeu.md sections relevant to this change?
 3. Do I understand the current implementation?
 4. Have I checked related files (imports, dependencies)?
 5. Am I 100% confident or do I need debug logs first?
@@ -16,7 +16,7 @@ Answer: [state your answers here before proceeding]
 When working on specific systems, I MUST read these docs first:
 
 ### Phase Handlers (movement_handlers.py, shooting_handlers.py, etc.)
-**MANDATORY READ**: `Documentation/Reference/moteur/AI_TURN.md` - Sections:
+**MANDATORY READ**: `Documentation/Reference/moteur/tour_de_jeu.md` - Sections:
 - 🎯 OVERVIEW
 - 🏃 MOVEMENT PHASE LOGIC (for movement changes)
 - 🎯 SHOOTING PHASE LOGIC (for shooting changes)
@@ -24,8 +24,8 @@ When working on specific systems, I MUST read these docs first:
 - Relevant phase sections
 
 ### Game Engine / Turn Logic
-**MANDATORY READ**: `Documentation/Reference/moteur/AI_TURN.md` - Full document
-**MANDATORY READ**: `Documentation/Reference/moteur/AI_IMPLEMENTATION.md` - Implementation patterns
+**MANDATORY READ**: `Documentation/Reference/moteur/tour_de_jeu.md` - Full document
+**MANDATORY READ**: `Documentation/Reference/moteur/architecture_moteur.md` - Implementation patterns
 
 ### Reward System
 **MANDATORY READ**: `Documentation/Reference/training/AI_TRAINING.md` - Reward sections
@@ -44,7 +44,7 @@ When working on specific systems, I MUST read these docs first:
 - Using ellipses (...) or partial code in Edit tool
 - Workarounds instead of root cause fixes
 - Default values when real data can be read
-- Wrapper patterns or state copying (AI_TURN.md violation)
+- Wrapper patterns or state copying (tour_de_jeu.md violation)
 - Multi-unit processing loops (single unit per action)
 - Step-based transitions (phase-based only)
 
@@ -53,11 +53,11 @@ When working on specific systems, I MUST read these docs first:
 2. **Debug with EVIDENCE**: Use diagnostic logs/prints to confirm diagnosis
 3. **Explain IMPACT**: What does this change affect? (rewards, game flow, learning)
 4. **Edit with PRECISION**: Use exact old_string matching (no approximations)
-5. **Verify COMPLIANCE**: Check against AI_TURN.md and AI_IMPLEMENTATION.md rules
+5. **Verify COMPLIANCE**: Check against tour_de_jeu.md and architecture_moteur.md rules
 
 ## PROJECT-SPECIFIC RULES
 
-### AI_TURN.md Compliance (CRITICAL)
+### tour_de_jeu.md Compliance (CRITICAL)
 - Direct field access with explicit validation (no defaults, no .get() hiding)
 - No wrapper patterns or state copying
 - Stateless handler functions only
@@ -65,8 +65,8 @@ When working on specific systems, I MUST read these docs first:
 - Single unit processing per action (no loops over multiple units)
 
 ### File Hierarchy (NEVER VIOLATE)
-1. `AI_TURN.md` = Game loop specification (law)
-2. `phase_handlers/` = Pure implementation of AI_TURN.md (no logic deviation)
+1. `tour_de_jeu.md` = Game loop specification (law)
+2. `phase_handlers/` = Pure implementation of tour_de_jeu.md (no logic deviation)
 3. `reward_mapper.py` = Reward calculation only (no game logic)
 
 ### Training Changes Protocol

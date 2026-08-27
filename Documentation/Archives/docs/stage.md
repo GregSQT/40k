@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Reference/moteur/verticalite.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # Projet Étages / Niveaux verticaux (multi-level)
 
 > Document de reformulation fondé **uniquement** sur le code existant (`engine/`, `frontend/`)

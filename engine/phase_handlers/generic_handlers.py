@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-generic_handlers.py - AI_TURN.md Generic Functions
-Pure stateless functions implementing AI_TURN.md specification exactly
+generic_handlers.py - tour_de_jeu.md Generic Functions
+Pure stateless functions implementing tour_de_jeu.md specification exactly
 
-References: AI_TURN.md END OF ACTIVATION PROCEDURE
+References: tour_de_jeu.md END OF ACTIVATION PROCEDURE
 ZERO TOLERANCE for deviations from specification
 """
 
@@ -48,7 +48,7 @@ def _log_with_context(game_state: Dict[str, Any], prefix: str, message: str) -> 
 def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any], 
                   arg1: str, arg2: int, arg3: str, arg4: str, arg5: int) -> Dict[str, Any]:
     """
-    AI_TURN.md EXACT: END OF ACTIVATION PROCEDURE
+    tour_de_jeu.md EXACT: END OF ACTIVATION PROCEDURE
     end_activation (Arg1, Arg2, Arg3, Arg4, Arg5)
     
     Args:
@@ -77,7 +77,7 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         if "action_logs" not in game_state:
             game_state["action_logs"] = []
         
-        # AI_TURN.md COMPLIANCE: Direct field access with validation
+        # tour_de_jeu.md COMPLIANCE: Direct field access with validation
         if "turn" not in game_state:
             raise KeyError("game_state missing required 'turn' field for wait action logging")
 
@@ -163,7 +163,7 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
     # │ ├── CASE Arg4 = CHARGE -> Unit removed from charge_activation_pool
     # │ └── CASE Arg4 = FIGHT -> Unit removed from fight_activation_pool
     if arg4 == "NOT_REMOVED":
-        # AI_TURN.md line 199: Do not remove the unit from an activation pool
+        # tour_de_jeu.md line 199: Do not remove the unit from an activation pool
         # Unit remains in its current activation pool (no action needed)
         response["not_removed_from_pool"] = True
     elif arg4 in ["MOVE", "FLED"]:
@@ -252,7 +252,7 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
     response["clear_unit_selection"] = True
     response["clear_green_circle"] = True
     
-    # AI_TURN.md COMPLIANCE: Clear shooting phase target selection
+    # tour_de_jeu.md COMPLIANCE: Clear shooting phase target selection
     if arg4 == "SHOOTING":
         response["clear_target_selection"] = True
         response["clear_target_blinking"] = True
