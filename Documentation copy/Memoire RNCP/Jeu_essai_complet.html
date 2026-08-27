@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Jeu_essai_complet</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="memoire_fiches.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Jeu_essai_complet</h1>
+</header>
+<h1 id="jeu-dessai-fonctionnalité-représentative-rev2">Jeu d’essai –
+Fonctionnalité représentative (REV2)</h1>
+<p>Le référentiel d’évaluation demande la <strong>présentation d’un jeu
+d’essai</strong> pour une fonctionnalité représentative, avec :
+<strong>données en entrée</strong>, <strong>données attendues</strong>,
+<strong>données obtenues</strong>, <strong>analyse des
+écarts</strong>.</p>
+<hr />
+<h2
+id="recommandation-présenter-analyzer.py-et-coupler-avec-une-vérification-visuelle">Recommandation
+: présenter Analyzer.py et coupler avec une vérification visuelle</h2>
+<p><strong>Pour la section « Jeux d’essai » du mémoire (vers
+p. 49)</strong> : utiliser comme <strong>jeu d’essai
+représentatif</strong> l’analyse des logs d’entraînement par
+<code>ai/analyzer.py</code>, puis <strong>coupler</strong> avec une
+<strong>vérification visuelle</strong> (replay ou partie courte). Cela
+met en avant la conformité aux règles métier (REAC/plan de tests) et la
+traçabilité.</p>
+<ol type="1">
+<li><strong>Entrée</strong> : fichier <code>step.log</code> produit par
+une campagne de test (ex.
+<code>ai/train.py --agent … --test-only --step --test-episodes 100</code>).</li>
+<li><strong>Traitement</strong> : exécution de
+<code>python ai/analyzer.py step.log</code> ; lecture du rapport
+(violations par phase, métriques).</li>
+<li><strong>Résultat attendu</strong> : 0 violations sur les phases
+mouvement / tir / charge / combat si le moteur est conforme.</li>
+<li><strong>Résultat obtenu</strong> : copier les chiffres réels du
+rapport (ex. « Mouvement: 0, Tir: 0, Charge: 0, Combat: 0 » ou détail
+des métriques).</li>
+<li><strong>Vérification visuelle</strong> : en complément, lancer une
+partie courte (ou un replay) et vérifier à l’écran que les transitions
+de phase et les actions (déplacement, tir, etc.) correspondent bien au
+comportement attendu. En une phrase dans le mémoire : « Une vérification
+visuelle (partie PvE ou replay) confirme l’absence d’anomalie sur les
+phases et les actions. »</li>
+</ol>
+<hr />
+<h2 id="exemple-rédigé-analyzer.py-vérification-visuelle">Exemple rédigé
+: Analyzer.py + vérification visuelle</h2>
+<p><em>À insérer dans le mémoire, section Jeux d’essai (vers p. 49),
+sous-partie « Jeu d’essai – Fonctionnalité représentative ».</em></p>
+<h3 id="contexte">Contexte</h3>
+<p>Fonctionnalité choisie : <strong>validation de la conformité du
+moteur aux règles métier</strong> via l’analyse des logs d’entraînement
+(<code>ai/analyzer.py</code>) et une <strong>vérification
+visuelle</strong> (partie ou replay). Cela illustre le plan de tests
+(scripts de conformité, traçabilité) et la compétence « Préparer et
+exécuter les plans de tests ».</p>
+<h3 id="données-en-entrée">Données en entrée</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Élément</th>
+<th>Détail</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Commande de génération du log</td>
+<td><code>python ai/train.py --agent Infantry_Troop_RangedTroop --training-config default --rewards-config Infantry_Troop_RangedTroop --scenario default --test-only --macro-eval-mode micro --test-episodes 100 --step</code></td>
+</tr>
+<tr class="even">
+<td>Fichier produit</td>
+<td><code>step.log</code> (traces détaillées de chaque step : phase,
+action, unité, cible, etc.)</td>
+</tr>
+<tr class="odd">
+<td>Commande d’analyse</td>
+<td><code>python ai/analyzer.py step.log</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="résultat-attendu">Résultat attendu</h3>
+<ul>
+<li><strong>Analyzer</strong> : 0 violations pour les phases mouvement,
+tir, charge, combat (comportement conforme à AI_TURN.md).</li>
+<li><strong>Vérification visuelle</strong> : lors d’une partie PvE ou
+d’un replay, les phases s’enchaînent correctement, les unités ne font
+pas d’actions invalides (ex. pas de tir sans ligne de vue, pas de
+mouvement vers hex adjacent ennemi).</li>
+</ul>
+<h3 id="résultat-obtenu">Résultat obtenu</h3>
+<p><em>[À remplir après exécution réelle.]</em></p>
+<p>Exemple de remplissage :</p>
+<ul>
+<li><strong>Rapport analyzer</strong> : « Mouvement: 0 violations, Tir:
+0, Charge: 0, Combat: 0 » ; métriques d’usage des règles (ex. nombre
+d’activations par phase) cohérentes.</li>
+<li><strong>Vérification visuelle</strong> : partie PvE jouée sur N
+tours ; aucune anomalie visible (transitions de phase, déplacements,
+tirs, charge, combat). Replay consulté pour un échantillon d’épisodes :
+cohérent avec le rapport analyzer.</li>
+</ul>
+<h3 id="analyse-des-écarts">Analyse des écarts</h3>
+<ul>
+<li>Si analyzer rapporte 0 violation et que la vérification visuelle ne
+montre rien d’anormal : <strong>aucun écart</strong> ; la conformité est
+validée pour la campagne testée.</li>
+<li>Si des violations apparaissent : indiquer brièvement la catégorie
+(ex. « 2 violations en phase tir »), la cause identifiée (ex. règle de
+ligne de vue) et la correction apportée (ex. mise à jour du handler ou
+des caches). Puis relancer analyzer et vérification visuelle pour
+confirmer.</li>
+</ul>
+<hr />
+<h2 id="alternative-démarrage-pve-action-mouvement">Alternative :
+Démarrage PvE + action mouvement</h2>
+<p>Si tu préfères un second exemple (ou un exemple complémentaire en
+annexe), tu peux garder le canevas « Démarrage PvE + une action
+mouvement » (entrée API, attendu, obtenu, écarts) comme dans la version
+précédente de ce fichier. L’important pour le REV2 est d’avoir
+<strong>au moins un</strong> jeu d’essai complet avec les quatre
+colonnes (entrée, attendu, obtenu, écarts) ; le choix « analyzer +
+vérification visuelle » est bien adapté à ton projet.</p>
+</body>
+</html>

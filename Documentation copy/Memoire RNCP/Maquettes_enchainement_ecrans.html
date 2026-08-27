@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Maquettes_enchainement_ecrans</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="memoire_fiches.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Maquettes_enchainement_ecrans</h1>
+</header>
+<h1 id="maquettes-et-enchaînement-des-écrans-trazyns-trials">Maquettes
+et enchaînement des écrans – Trazyn’s Trials</h1>
+<h2 id="schéma-denchaînement-des-écrans">1. Schéma d’enchaînement des
+écrans</h2>
+<p>Le parcours utilisateur principal est le suivant. Tu peux exporter ce
+schéma en image (Mermaid live editor, ou outil de ton IDE) pour
+l’insérer dans le mémoire.</p>
+<pre class="mermaid"><code>flowchart LR
+    subgraph Non connecté
+        A[&quot;/auth\nConnexion / Inscription&quot;]
+    end
+
+    subgraph Connecté
+        B[&quot;/game?mode=pvp\nJeu PvP&quot;]
+        C[&quot;/game?mode=pve\nJeu PvE&quot;]
+        D[&quot;/replay\nVisionneuse replay&quot;]
+    end
+
+    subgraph Admin
+        E[&quot;/game?mode=pve_test\nPvE Test&quot;]
+        F[&quot;/game?mode=pvp_test\nPvP Test&quot;]
+    end
+
+    A --&gt;|&quot;login OK&quot;| B
+    A --&gt;|&quot;login OK&quot;| C
+    A --&gt;|&quot;login OK&quot;| D
+    A --&gt;|&quot;login admin&quot;| E
+    A --&gt;|&quot;login admin&quot;| F
+
+    B --&gt; D
+    C --&gt; D
+    E --&gt; D
+    F --&gt; D</code></pre>
+<p><strong>Version simplifiée (flux principal) :</strong></p>
+<pre class="mermaid"><code>flowchart LR
+    A[&quot;/auth&quot;] --&gt; B[&quot;/game\n(plateau + log)&quot;] --&gt; C[&quot;/replay&quot;]</code></pre>
+<h2 id="légende">2. Légende</h2>
+<table>
+<colgroup>
+<col style="width: 35%" />
+<col style="width: 65%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Écran</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>/auth</strong></td>
+<td>Page d’authentification : formulaire connexion / inscription, appels
+à <code>POST /api/auth/login</code> et
+<code>POST /api/auth/register</code>.</td>
+</tr>
+<tr class="even">
+<td><strong>/game</strong></td>
+<td>Interface de jeu : plateau hex (PIXI), panneau de contrôle (unités,
+phase, log), choix du mode (PvP, PvE, Test, Debug) selon
+permissions.</td>
+</tr>
+<tr class="odd">
+<td><strong>/replay</strong></td>
+<td>Visionneuse de replay : sélection d’un fichier, lecture pas à pas
+des actions enregistrées.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="intégration-au-mémoire">3. Intégration au mémoire</h2>
+<ul>
+<li><strong>Dans le corps du mémoire</strong> : insérer l’image exportée
+du premier ou du second schéma Mermaid (ou les deux : flux détaillé +
+flux simplifié).</li>
+<li><strong>Légende</strong> : « Enchaînement des écrans – Parcours
+utilisateur (auth → jeu → replay). »</li>
+<li><strong>Annexes</strong> : tu peux ajouter 1–2 captures d’écran
+annotées (auth, plateau) avec la structure « Capture + Code
+correspondant » décrite dans <code>Captures_et_code.md</code>.</li>
+</ul>
+</body>
+</html>

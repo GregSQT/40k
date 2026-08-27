@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Annexe_tableau_routes_API</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="memoire_fiches.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Annexe_tableau_routes_API</h1>
+</header>
+<h1 id="annexe-tableau-des-routes-api-trazyns-trials">Annexe – Tableau
+des routes API (Trazyn’s Trials)</h1>
+<table>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 8%" />
+<col style="width: 33%" />
+<col style="width: 23%" />
+<col style="width: 18%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Méthode</th>
+<th>URL</th>
+<th>Paramètres / corps</th>
+<th>Codes retour</th>
+<th>Remarques</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>GET</td>
+<td>/api/health</td>
+<td>—</td>
+<td>200</td>
+<td>Healthcheck (Docker, monitoring).</td>
+</tr>
+<tr class="even">
+<td>POST</td>
+<td>/api/auth/register</td>
+<td>Body: <code>{ "login", "password" }</code></td>
+<td>201, 400, 409</td>
+<td>Création de compte (profil base).</td>
+</tr>
+<tr class="odd">
+<td>POST</td>
+<td>/api/auth/login</td>
+<td>Body: <code>{ "login", "password" }</code></td>
+<td>200, 400, 401</td>
+<td>Retourne <code>access_token</code>, <code>user</code>,
+<code>permissions</code>.</td>
+</tr>
+<tr class="even">
+<td>GET</td>
+<td>/api/auth/me</td>
+<td>Header: <code>Authorization: Bearer &lt;token&gt;</code></td>
+<td>200, 401</td>
+<td>Session courante et permissions.</td>
+</tr>
+<tr class="odd">
+<td>POST</td>
+<td>/api/game/start</td>
+<td>Header: Bearer. Body:
+<code>{ "pve_mode"?, "mode_code"?, "scenario_file"? }</code></td>
+<td>200, 400, 401, 403, 500</td>
+<td>Démarre une partie (mode selon droits).</td>
+</tr>
+<tr class="even">
+<td>POST</td>
+<td>/api/game/action</td>
+<td>Header: Bearer. Body: action sémantique (ex. move, shoot, wait)</td>
+<td>200, 400, 401, 403, 500</td>
+<td>Exécute une action joueur.</td>
+</tr>
+<tr class="odd">
+<td>GET</td>
+<td>/api/game/state</td>
+<td>Header: Bearer</td>
+<td>200, 400, 401</td>
+<td>État courant de la partie.</td>
+</tr>
+<tr class="even">
+<td>POST</td>
+<td>/api/game/reset</td>
+<td>Header: Bearer</td>
+<td>200, 400, 401</td>
+<td>Réinitialise la partie.</td>
+</tr>
+<tr class="odd">
+<td>POST</td>
+<td>/api/game/ai-turn</td>
+<td>Header: Bearer</td>
+<td>200, 400, 401, 403, 500</td>
+<td>Déclenche le tour de l’IA (PvE).</td>
+</tr>
+<tr class="even">
+<td>GET</td>
+<td>/api/armies</td>
+<td>—</td>
+<td>200</td>
+<td>Liste des armées (config).</td>
+</tr>
+<tr class="odd">
+<td>GET</td>
+<td>/api/config/board</td>
+<td>—</td>
+<td>200</td>
+<td>Configuration plateau (scénario).</td>
+</tr>
+<tr class="even">
+<td>GET</td>
+<td>/api/replay/list</td>
+<td>Header: Bearer</td>
+<td>200, 401</td>
+<td>Liste des fichiers replay.</td>
+</tr>
+<tr class="odd">
+<td>GET</td>
+<td>/api/replay/file/<filename></td>
+<td>Header: Bearer. Param: filename</td>
+<td>200, 400, 401, 404</td>
+<td>Contenu d’un replay (path traversal vérifié).</td>
+</tr>
+<tr class="even">
+<td>GET</td>
+<td>/api/replay/default</td>
+<td>Header: Bearer</td>
+<td>200, 401</td>
+<td>Replay par défaut.</td>
+</tr>
+<tr class="odd">
+<td>POST</td>
+<td>/api/replay/parse</td>
+<td>Header: Bearer. Body: contenu ou référence</td>
+<td>200, 400, 401</td>
+<td>Parse un replay.</td>
+</tr>
+<tr class="even">
+<td>GET</td>
+<td>/api/debug/engine-test</td>
+<td>Header: Bearer (admin)</td>
+<td>200, 401, 403</td>
+<td>Test moteur (debug).</td>
+</tr>
+<tr class="odd">
+<td>GET</td>
+<td>/api/debug/actions</td>
+<td>Header: Bearer (admin)</td>
+<td>200, 401, 403</td>
+<td>Liste des actions possibles (debug).</td>
+</tr>
+<tr class="even">
+<td>GET</td>
+<td>/</td>
+<td>—</td>
+<td>200</td>
+<td>Servi par le frontend (Nginx en prod).</td>
+</tr>
+</tbody>
+</table>
+<p><em>Routes protégées : toutes sauf <code>/api/health</code>,
+<code>/api/auth/register</code>, <code>/api/auth/login</code>,
+<code>/api/armies</code>, <code>/api/config/board</code>. Les modes
+<code>pve_test</code> et <code>pvp_test</code> sont réservés au profil
+admin.</em></p>
+</body>
+</html>

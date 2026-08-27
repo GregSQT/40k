@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>REAC_eco_conception_et_tests</title>
+  <style>
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <link rel="stylesheet" href="memoire_fiches.css" />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">REAC_eco_conception_et_tests</h1>
+</header>
+<h1 id="reac-éco-conception-et-tests-explication-courte">REAC –
+Éco-conception et tests (explication courte)</h1>
+<p>Le REAC CDA demande deux choses que tu avais notées comme peu claires
+:</p>
+<ol type="1">
+<li><strong>Éco-conception</strong></li>
+<li><strong>Tests unitaires frontend / tests d’acceptation ou de
+charge</strong></li>
+</ol>
+<p>Voici ce que ça signifie et comment en parler en une phrase dans le
+mémoire.</p>
+<hr />
+<h2 id="éco-conception">1. Éco-conception</h2>
+<p><strong>Ce que demande le REAC :</strong><br />
+Dans la compétence « Définir l’architecture logicielle d’une application
+», il est demandé d’<strong>identifier les besoins
+d’éco-conception</strong> de l’application. L’éco-conception des
+services numériques vise à réduire l’impact environnemental (énergie,
+ressources, données transférées, etc.).</p>
+<p><strong>En pratique pour ton projet :</strong><br />
+Tu n’as pas mené une démarche d’éco-conception formalisée. Tu peux quand
+même <strong>répondre en une phrase</strong> en disant soit ce que tu as
+fait, soit ce que tu as identifié (même minimal).</p>
+<p><strong>Exemple de phrase à placer</strong> (dans la section
+architecture ou objectifs qualité) :</p>
+<blockquote>
+<p>« Pour ce projet, l’éco-conception n’a pas été un critère prioritaire
+du cahier des charges. Les besoins identifiés concernent la limitation
+des requêtes inutiles (pas de polling intensif côté client, mise à jour
+de l’état uniquement après une action) et l’absence de calculs lourds
+superflus côté serveur (single source of truth, pas de duplication du
+game_state). »</p>
+</blockquote>
+<p>Tu peux adapter (ex. ajouter « réduction du volume de données
+échangées en JSON » si pertinent).</p>
+<hr />
+<h2 id="tests-unitaires-frontend-tests-dacceptation-tests-de-charge">2.
+Tests unitaires frontend / tests d’acceptation / tests de charge</h2>
+<p><strong>Ce que demande le REAC :</strong><br />
+- <strong>Tests unitaires</strong> des composants (ex. interfaces) :
+vérifier qu’un composant se comporte comme prévu (rendu, props,
+événements).<br />
+- <strong>Tests d’acceptation</strong> : un utilisateur (ou un scénario
+automatisé) valide que la fonctionnalité correspond au besoin (ex. « je
+me connecte et je démarre une partie »).<br />
+- <strong>Tests de charge</strong> : vérifier le comportement sous
+charge (nombre de requêtes, utilisateurs simultanés, etc.).</p>
+<p><strong>En pratique pour ton projet :</strong><br />
+Tu as des tests côté moteur / conformité (check_ai_rules, analyzer,
+bots) mais pas de suite de tests unitaires frontend (ex. Vitest/Jest sur
+composants React) ni de tests d’acceptation ou de charge formalisés.</p>
+<p><strong>Exemple de phrase à placer</strong> (dans la section plan de
+tests ou objectifs qualité) :</p>
+<blockquote>
+<p>« Les tests unitaires des composants React (par ex. avec Vitest) et
+les tests d’acceptation (scénarios utilisateur end-to-end) ou de charge
+n’ont pas été mis en œuvre dans le cadre du projet. La validation repose
+sur les tests manuels, les scripts de conformité du moteur
+(check_ai_rules, analyzer) et l’évaluation par bots. Les tests unitaires
+frontend et les tests d’acceptation sont prévus pour une évolution
+ultérieure (voir Roadmap). »</p>
+</blockquote>
+<p>Ainsi tu montres que tu connais ces notions (REAC) et que tu as fait
+des choix explicites dans le périmètre et le temps du projet.</p>
+<hr />
+<h2 id="où-placer-ces-phrases-dans-le-mémoire">Où placer ces phrases
+dans le mémoire</h2>
+<ul>
+<li><strong>Éco-conception :</strong> dans la section
+<strong>Architecture logicielle</strong> (3.3) ou <strong>Objectifs de
+qualité</strong> (2.3), en 1–2 phrases.</li>
+<li><strong>Tests :</strong> dans la section <strong>Plan de
+tests</strong> (4.7) ou <strong>Objectifs de qualité</strong> (2.3), en
+1–2 phrases.</li>
+</ul>
+<p>Cela suffit pour satisfaire les attendus du REAC sur ces points sans
+détailler une démarche que tu n’as pas menée.</p>
+</body>
+</html>
