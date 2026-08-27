@@ -115,15 +115,15 @@ def _move_preview_footprint_span(unit: Dict[str, Any]) -> int:
     2026-08-05 : cette fonction est désormais la seule implémentation.
     """
     bs = unit["BASE_SIZE"]
-    if isinstance(bs, (list, tuple)) and len(bs) >= 1:
+    if isinstance(bs, (list, tuple)):
+        if not bs:
+            raise ValueError(f"BASE_SIZE liste vide pour l'unité {unit.get('id', '?')!r}")
         try:
             return max(int(v) for v in bs)
         except (TypeError, ValueError) as exc:
             raise ValueError(
                 f"BASE_SIZE liste contient des valeurs non-entières : {bs!r}"
             ) from exc
-    if isinstance(bs, (list, tuple)):
-        raise ValueError(f"BASE_SIZE liste vide pour l'unité {unit.get('id', '?')!r}")
     try:
         return max(1, int(bs))
     except (TypeError, ValueError) as exc:
