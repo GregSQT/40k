@@ -49,10 +49,9 @@ WITNESS_ENEMY_MODELS = {
 }
 
 
-def _socle(shape, size, col, row, orient=0):
-    fp = set(compute_occupied_hexes(col, row, shape, size, orient))
+def _socle(shape, size, col, row, orient=0, compute_fp=True):
+    fp = set(compute_occupied_hexes(col, row, shape, size, orient)) if compute_fp else None
     return Socle(shape=shape, base_size=size, col=col, row=row, fp=fp, orientation=orient)
-
 
 
 @pytest.fixture
@@ -79,6 +78,29 @@ def _mask(models=None, mover=None):
     models = models or WITNESS_ENEMY_MODELS
     return _compute_mover_ez_forbidden_mask(
         _state(models), mover or _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1],
+    )
+
+
+def _assert_mask_agrees(mask, mover_geom, enemy_geom, models, col_range, row_range,
+                        msg_suffix=""):
+    """Vérifie l'absence de désaccord masque ↔ euclidean_edge_distance sur la fenêtre donnée."""
+    enemy_socles = [_socle(*enemy_geom, c, r, compute_fp=False) for c, r in models.values()]
+    any_engaged = False
+    desaccords = []
+    for col in col_range:
+        for row in row_range:
+            mover = _socle(*mover_geom, col, row, compute_fp=False)
+            engaged = any(
+                euclidean_edge_distance(mover, e, max_distance=THR) <= THR for e in enemy_socles
+            )
+            if engaged:
+                any_engaged = True
+            if bool(mask[col, row]) != engaged:
+                desaccords.append((col, row, bool(mask[col, row]), engaged))
+    assert any_engaged, "prémisse : aucune ancre engagée dans la fenêtre de balayage"
+    suffix = f" {msg_suffix}" if msg_suffix else ""
+    assert not desaccords, (
+        f"masque et règle divergent sur {len(desaccords)} ancres{suffix} : {desaccords[:5]}"
     )
 
 
@@ -264,25 +286,8 @@ def test_the_mask_agrees_with_the_rule_cell_by_cell(euclidean):
     Le témoin ne prouve qu'UNE case. Ce balayage prouve l'absence de frontière décalée : c'est
     exactement ce qu'un test sur la seule case du témoin laisserait repasser.
     """
-    mask = _mask()
-    enemy_socles = [
-        Socle(shape=ENEMY[0], base_size=ENEMY[1], col=c, row=r, fp=None, orientation=0)
-        for c, r in WITNESS_ENEMY_MODELS.values()
-    ]
-    desaccords = []
-    n_engaged = 0
-    for col in range(170, 200):
-        for row in range(195, 240):
-            mover = Socle(shape=MOVER[0], base_size=MOVER[1], col=col, row=row, fp=None, orientation=0)
-            engaged = any(
-                euclidean_edge_distance(mover, e, max_distance=THR) <= THR for e in enemy_socles
-            )
-            if engaged:
-                n_engaged += 1
-            if bool(mask[col, row]) != engaged:
-                desaccords.append((col, row, bool(mask[col, row]), engaged))
-    assert n_engaged > 0, "prémisse : aucune ancre engagée dans la fenêtre de balayage"
-    assert not desaccords, f"masque et règle divergent sur {len(desaccords)} ancres : {desaccords[:5]}"
+    _assert_mask_agrees(_mask(), MOVER, ENEMY, WITNESS_ENEMY_MODELS,
+                        range(170, 200), range(195, 240))
 
 
 def test_the_mask_agrees_with_the_rule_on_flat_edged_bases(euclidean):
@@ -304,28 +309,9 @@ def test_the_mask_agrees_with_the_rule_on_flat_edged_bases(euclidean):
              "orientation": 0},
         [("5", entry)], EZ, BOARD[0], BOARD[1],
     )
-    enemy_socles = [
-        Socle(shape=enemy_geom[0], base_size=enemy_geom[1], col=c, row=r, fp=None, orientation=0)
-        for c, r in models.values()
-    ]
-    desaccords = []
-    n_engaged = 0
-    for col in range(165, 205):
-        for row in range(200, 245):
-            mover = Socle(shape=mover_geom[0], base_size=mover_geom[1], col=col, row=row,
-                          fp=None, orientation=0)
-            engaged = any(
-                euclidean_edge_distance(mover, e, max_distance=THR) <= THR for e in enemy_socles
-            )
-            if engaged:
-                n_engaged += 1
-            if bool(mask[col, row]) != engaged:
-                desaccords.append((col, row, bool(mask[col, row]), engaged))
-    assert n_engaged > 0, "prémisse : aucune ancre engagée dans la fenêtre de balayage"
-    assert not desaccords, (
-        f"masque et règle divergent sur {len(desaccords)} ancres à socles carrés : "
-        f"{desaccords[:5]} — les égalités flottantes ne sont plus re-mesurées"
-    )
+    _assert_mask_agrees(mask, mover_geom, enemy_geom, models,
+                        range(165, 205), range(200, 245),
+                        msg_suffix="à socles carrés — les égalités flottantes ne sont plus re-mesurées")
 
 
 def test_round_movers_are_untouched(euclidean):
