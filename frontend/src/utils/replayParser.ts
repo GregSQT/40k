@@ -64,7 +64,7 @@ export interface ReplayAction {
   save_roll_initial?: number;
   // Weapon info
   weapon_name?: string;
-  // Fight phase metadata (AI_TURN.md compliance)
+  // Fight phase metadata (tour_de_jeu.md compliance)
   fight_subphase?: string;
   // Charge action fields
   charge_roll?: number;

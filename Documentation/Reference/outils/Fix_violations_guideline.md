@@ -93,13 +93,13 @@
 - **Critère de certitude** : Avoir identifié le code exact qui cause la violation (fichier + ligne + condition)
 - **Preuve** : Au moins 2 exemples concrets qui montrent le pattern
 - **Si incertain** : Créer un script d'investigation ciblé (max 30 lignes) pour confirmer
-- **Référence** : Vérifier que la violation est bien contraire à `AI_TURN.md` ou aux règles du jeu
+- **Référence** : Vérifier que la violation est bien contraire à `tour_de_jeu.md` ou aux règles du jeu
 
 ### Phase 3 : FIX (seulement si root cause identifiée à 100%)
 
 **Avant chaque fix** :
 1. Vérifier que le fix ne casse pas d'autres règles (lire le contexte du code)
-2. Vérifier que le fix est conforme à `AI_TURN.md`
+2. Vérifier que le fix est conforme à `tour_de_jeu.md`
 3. Fix minimal : modifier uniquement ce qui est nécessaire pour empêcher la violation
 4. Ajouter un commentaire expliquant le fix et référençant la règle si non évident
 
@@ -146,7 +146,7 @@ Résultat : [réduction % ou "stagnant"]
 
 - **Fatal errors** : Fix immédiat sans investigation approfondie
 - **Violations < 1%** : Documenter mais ne pas prioriser
-- **Comportements voulus** : Si la violation fait partie des règles du jeu (documenter dans AI_TURN.md)
+- **Comportements voulus** : Si la violation fait partie des règles du jeu (documenter dans tour_de_jeu.md)
 
 ## CONTEXTE IMPORTANT
 
@@ -155,5 +155,5 @@ Résultat : [réduction % ou "stagnant"]
   - Race conditions entre actions concurrentes
   - États du jeu non synchronisés (flags, pools)
   - Logique de filtrage incomplète dans les pools de validité
-- Toujours vérifier `AI_TURN.md` pour confirmer que c'est bien une violation
+- Toujours vérifier `tour_de_jeu.md` pour confirmer que c'est bien une violation
 - Certaines "violations" peuvent être des faux positifs du parser `ai/analyzer.py` — voir [GAME_Analyzer.md](GAME_Analyzer.md)

@@ -646,7 +646,7 @@ type BoardProps = {
   onBumpMovePreviewOrientation?: (delta: number) => void;
   /** Molette en perModelMove : pivot socle de la fig active (ou toute l'escouade si aucune active). */
   onBumpPerModelOrientation?: (delta: number) => void;
-  /** Move par-figurine (squad.md brique 3) — plan provisoire non committe. */
+  /** Move par-figurine (squad_multi_figurines.md brique 3) — plan provisoire non committe. */
   squadMovePlan?: {
     unitId: number;
     models: Record<string, { col: number; row: number; level?: number; orientation?: number }>;
@@ -1767,7 +1767,7 @@ export default function Board({
     onLogChargeRoll,
   });
 
-  /** Callbacks move par-figurine (squad.md brique 3) — ref toujours a jour pour les handlers d'event stables. */
+  /** Callbacks move par-figurine (squad_multi_figurines.md brique 3) — ref toujours a jour pour les handlers d'event stables. */
   const squadMoveCallbacksRef = useRef({
     onStartSquadModelMove,
     onSelectModelForMove,
@@ -2391,7 +2391,7 @@ export default function Board({
   useEffect(() => {
     if (currentLevel > maxFloorLevel) setCurrentLevel(0);
   }, [currentLevel, maxFloorLevel, setCurrentLevel]);
-  // Niveaux d'étage occupés par ≥1 figurine → empreinte blanchie (idée initiale stage.md).
+  // Niveaux d'étage occupés par ≥1 figurine → empreinte blanchie (idée initiale verticalite.md).
   // Source PAR-FIGURINE (level_by_model) : une escouade dont SEULE une fig non-ancre est à l'étage
   // doit blanchir cet étage (l'ancre peut rester au sol). Fallback niveau d'unité/ancre.
   const occupiedFloorLevels = useMemo(() => {
@@ -3830,7 +3830,7 @@ export default function Board({
     // DOM mousemove: icon follows cursor pixel-perfect (move, advance tir, charge destination)
     const canvas = canvasContainerRef.current?.querySelector("canvas");
     const onMouseMove = (ev: MouseEvent) => {
-      // squad.md brique 3 : en mode plan par-figurine, le fantome ne suit le curseur QUE si une
+      // squad_multi_figurines.md brique 3 : en mode plan par-figurine, le fantome ne suit le curseur QUE si une
       // fig est active. Des qu'on a pose la fig (deselection), on cache le preview (sinon il "reste").
       if (isPerModelMove && !effectivePerModelPlanRef.current?.activeModelId) {
         if (hoverSpriteRef.current && !hoverSpriteRef.current.destroyed) {
@@ -4820,7 +4820,7 @@ export default function Board({
     deploySquadPoolRef?.current,
   ]);
 
-  // squad.md brique 3 : ENTREE single-clic. En phase move + mode select, un clic gauche sur
+  // squad_multi_figurines.md brique 3 : ENTREE single-clic. En phase move + mode select, un clic gauche sur
   // une fig OWN entre en mode plan par-figurine + selectionne cette fig. Capture-phase +
   // stopImmediatePropagation pour empecher la selection rigide par defaut (PIXI → onSelectUnit).
   useEffect(() => {
@@ -5323,7 +5323,7 @@ export default function Board({
     };
   }, [coherencyRemovalArmed, measureMode.kind, boardConfig, gameState]);
 
-  // squad.md brique 3 : en mode plan par-figurine, un clic gauche sur une fig de l'escouade
+  // squad_multi_figurines.md brique 3 : en mode plan par-figurine, un clic gauche sur une fig de l'escouade
   // la selectionne (resout model_id depuis les positions provisoires du plan) → onSelectModelForMove.
   // Phase bubble : si le clic a deja servi a POSER la fig active (hex dans son pool, capture-phase
   // stopImmediatePropagation), ce handler ne se declenche pas.
@@ -6917,7 +6917,7 @@ export default function Board({
     activeChargeLikePoolRef,
   ]);
 
-  // squad.md brique 3 : dès qu'AUCUNE fig n'est active en mode plan (fig posée → deselect, ou
+  // squad_multi_figurines.md brique 3 : dès qu'AUCUNE fig n'est active en mode plan (fig posée → deselect, ou
   // entrée sans selection), couper TOUT le preview (fantome curseur + LoS + ligne guide + tooltip).
   // Le preview (ghost + LoS) n'existe QUE pendant qu'une fig est en cours de placement.
   useEffect(() => {
@@ -8967,7 +8967,7 @@ export default function Board({
     const contextMenuHandler = (e: Event) => {
       e.preventDefault();
 
-      // squad.md brique 3 : clic droit en mode plan par-figurine = annule le deplacement
+      // squad_multi_figurines.md brique 3 : clic droit en mode plan par-figurine = annule le deplacement
       // de la fig ACTIVE → la replace a sa position de debut de phase (ne quitte pas le mode).
       if (mode === "perModelMove") {
         const activeMid = squadMovePlanRef.current?.activeModelId;
@@ -9728,7 +9728,7 @@ export default function Board({
         .slice()
         .sort((a, b) => a - b)
         .join(",");
-      // squad.md brique 3 : le ghost rend les figs aux positions du PLAN provisoire (pas units_cache).
+      // squad_multi_figurines.md brique 3 : le ghost rend les figs aux positions du PLAN provisoire (pas units_cache).
       // Sans ca dans l'empreinte, un deplacement de fig ne re-render pas (ghost fige) → "move annule".
       const squadPlanFp = squadMovePlan
         ? `${squadMovePlan.unitId}:${squadMovePlan.activeModelId ?? ""}:` +
@@ -10478,7 +10478,7 @@ export default function Board({
         // Niveau (étages) par figurine : source cache (level_by_model), fallback niveau d'ancre / unité.
         const levelByModel = cacheEntry?.level_by_model;
         const unitLevel = cacheEntry?.level ?? (unit as { level?: number }).level ?? 0;
-        // squad.md brique 3 : pour l'escouade en mode plan, afficher les figs aux positions
+        // squad_multi_figurines.md brique 3 : pour l'escouade en mode plan, afficher les figs aux positions
         // PROVISOIRES (ghost) + flag de validite par fig (voile rouge sur les invalides).
         const isSquadGhost =
           isPerModelMove &&
@@ -10927,25 +10927,25 @@ export default function Board({
           // ADVANCE_IMPLEMENTATION_PLAN.md Phase 4: Advance action props
           // Check if unit can advance: eligible, not fled, and hasn't already advanced this turn
           canAdvance: (() => {
-            // AI_TURN.md STEP 1: ELIGIBILITY CHECK (lignes 583-599)
+            // tour_de_jeu.md STEP 1: ELIGIBILITY CHECK (lignes 583-599)
             // CAN_ADVANCE = true if unit is NOT adjacent to enemy AND not already advanced
             if (enginePhaseForPools !== "shoot") return false;
             if (unit.player !== current_player) return false;
             if (unitsFled?.includes(unit.id)) return false;
 
-            // Check if unit has already advanced (AI_TURN.md ligne 671: After advance, CAN_ADVANCE = false)
+            // Check if unit has already advanced (tour_de_jeu.md ligne 671: After advance, CAN_ADVANCE = false)
             const unitsAdvanced = gameState?.unitsAdvanced || [];
             if (unitsAdvanced.includes(unit.id)) return false;
 
-            // AI_TURN.md ligne 583-590: Check if unit is adjacent to enemy (melee range)
-            // CAN_ADVANCE = false if adjacent to enemy (AI_TURN.md ligne 585)
+            // tour_de_jeu.md ligne 583-590: Check if unit is adjacent to enemy (melee range)
+            // CAN_ADVANCE = false if adjacent to enemy (tour_de_jeu.md ligne 585)
             const isAdjacentToEnemy = units.some(
               (enemy: Unit) =>
                 enemy.player !== unit.player && enemy.HP_CUR > 0 && areUnitsAdjacent(unit, enemy)
             );
             if (isAdjacentToEnemy) return false;
 
-            // AI_TURN.md ligne 591: NOT adjacent to enemy -> CAN_ADVANCE = true
+            // tour_de_jeu.md ligne 591: NOT adjacent to enemy -> CAN_ADVANCE = true
             return true;
           })(),
           onAdvance: onAdvance,
@@ -10955,7 +10955,7 @@ export default function Board({
           chargeMaxDistance,
         });
 
-        // squad.md brique 3 : voile rouge sur les figs invalides (hex interdit OU hors cohesion).
+        // squad_multi_figurines.md brique 3 : voile rouge sur les figs invalides (hex interdit OU hors cohesion).
         // Pendant le preview move (fig active en cours), ce voile backend (dry-run, figé) est masqué :
         // drawHoverVeil recalcule la cohésion EN TEMPS RÉEL au survol et fait foi.
         const suppressBackendVeil =

@@ -1437,7 +1437,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     state.units_moved = set()
                     state.units_shot = set()
                     # CRITICAL: Reset state.units_fled at the start of each turn
-                    # According to AI_TURN.md and command_phase_start(), state.units_fled is reset at the start of each turn
+                    # According to tour_de_jeu.md and command_phase_start(), state.units_fled is reset at the start of each turn
                     # A unit that fled in T1 SHOULD be able to shoot/charge in T2
                     state.units_fled = set()
                     state.units_advanced = set()

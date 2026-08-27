@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Chantiers/backlog/migration_postgresql.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # Prompt implementation - Migration PostgreSQL (v1)
 
 Utilise `DB_migration.md` comme source de verite.

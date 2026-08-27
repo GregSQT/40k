@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Reference/moteur/ligne_de_vue.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # LoS & Positions — Source Unique de Vérité
 
 > Doc d'implémentation. Objectif : unifier l'invalidation des caches de Ligne de Vue (LoS) et de

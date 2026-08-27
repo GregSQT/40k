@@ -4,7 +4,7 @@
  * SINGLE SOURCE OF TRUTH: This is the ONLY place where weapons are declared.
  * Python parses this file dynamically using engine/armory_parser.py
  *
- * AI_IMPLEMENTATION.md COMPLIANCE:
+ * architecture_moteur.md COMPLIANCE:
  * - NO DEFAULT: getWeapon() raises error if weapon missing (pas de fallback)
  * - Validation stricte: toutes les armes référencées doivent exister
  * - No duplicate Python armory needed - parsed at runtime
@@ -39,7 +39,7 @@ export const ADEPTUS_CUSTODES_ARMORY: Record<string, Weapon> = {
 /**
  * Get a weapon by code name.
  *
- * AI_IMPLEMENTATION.md COMPLIANCE: NO DEFAULT - returns undefined if missing.
+ * architecture_moteur.md COMPLIANCE: NO DEFAULT - returns undefined if missing.
  * Caller must check and raise error if weapon is required.
  *
  * @param codeName Weapon code name (e.g., "fleshborer")
@@ -52,7 +52,7 @@ export function getWeapon(codeName: string): Weapon | undefined {
 /**
  * Get multiple weapons by code names.
  *
- * AI_IMPLEMENTATION.md COMPLIANCE: NO DEFAULT - raises Error if any weapon missing.
+ * architecture_moteur.md COMPLIANCE: NO DEFAULT - raises Error if any weapon missing.
  *
  * @param codeNames List of weapon code names
  * @returns List of weapons

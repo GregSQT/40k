@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Reference/moteur/geometrie_et_distances.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # Board ×10 — architecture runtime & RL
 
 **Statut :** **seule référence normative** ×10 — géométrie **B**, LoS, pathfinding, occupation, RL, migration.  

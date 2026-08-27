@@ -4323,7 +4323,7 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
             raise ValueError("Training config must have either 'total_timesteps' or 'total_episodes'")
         
         # Startup info (disabled for cleaner output)
-        # print(f"📊 Progress tracking: Episodes are primary metric (AI_TURN.md compliance)")
+        # print(f"📊 Progress tracking: Episodes are primary metric (tour_de_jeu.md compliance)")
         # print(f"📈 Metrics tracking enabled for agent: {agent_name}")
         
         # Enhanced callbacks with metrics collection
@@ -4973,7 +4973,7 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
 
 def main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
-    parser = argparse.ArgumentParser(description="Train W40K AI (see Documentation/Reference/moteur/AI_TURN.md and AI_IMPLEMENTATION.md)")
+    parser = argparse.ArgumentParser(description="Train W40K AI (see Documentation/Reference/moteur/tour_de_jeu.md and architecture_moteur.md)")
     parser.add_argument("--training-config", default=None,
                        help="Training config phase name (required, no silent default; e.g. x1, x1_debug)")
     parser.add_argument("--rewards-config", default=None, type=_non_empty_key("--rewards-config"),
@@ -5150,7 +5150,7 @@ def main():
         config.load_agent_training_config = _load_with_overrides
         print(f"⚙️  Param overrides: {len(args.param)} parameter(s) will override config file")
 
-    print("🎮 W40K AI Training (AI_TURN.md / AI_IMPLEMENTATION.md)")
+    print("🎮 W40K AI Training (tour_de_jeu.md / architecture_moteur.md)")
     print("=" * 70)
     print(f"Training config: {args.training_config}")
     print(f"Rewards config: {args.rewards_config}")

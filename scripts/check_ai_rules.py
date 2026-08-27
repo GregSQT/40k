@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-AI rules checker for AI_TURN.md and coding_practices.mdc compliance.
+AI rules checker for tour_de_jeu.md and coding_practices.mdc compliance.
 
 Purpose:
 - Detect cache recalculation violations (build_enemy_adjacent_hexes, build_units_cache)
@@ -8,7 +8,7 @@ Purpose:
 - Verify coordinate normalization (no direct col/row comparisons; supports "col"/'col')
 - Detect anti-error fallbacks (.get with None, 0, [], {}); standalone or followed by if)
   For voluntary .get on optional keys (config, feature flags), add "# get allowed" or "# fallback allowed" on the same line to avoid false positives.
-- Check AI_TURN.md specific patterns (end_activation with constants, not strings)
+- Check tour_de_jeu.md specific patterns (end_activation with constants, not strings)
 - Detect forbidden terms (workaround, fallback, magic number); skip comment lines that document the prohibition
 
 Lines containing \"\"\" are ignored for col/row checks (to avoid flagging example code in docstrings); violations inside docstrings/strings are false negatives (accepted trade-off).

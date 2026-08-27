@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-engine/phase_handlers/fight_handlers.py - AI_TURN.md Fight Phase Implementation
-Pure stateless functions implementing AI_TURN.md fight specification
+engine/phase_handlers/fight_handlers.py - tour_de_jeu.md Fight Phase Implementation
+Pure stateless functions implementing tour_de_jeu.md fight specification
 
-References: AI_TURN.md Section ⚔️ FIGHT PHASE LOGIC
+References: tour_de_jeu.md Section ⚔️ FIGHT PHASE LOGIC
 ZERO TOLERANCE for state storage or wrapper patterns
 
 CRITICAL: On ne tire PAS en phase de fight. La règle CLOSE_QUARTERS permet de tirer en phase
@@ -989,7 +989,7 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     if "fight_alternating_turn" in game_state:
         del game_state["fight_alternating_turn"]
 
-    # AI_TURN.md COMPLIANCE: Clear fight sub-phase at phase end
+    # tour_de_jeu.md COMPLIANCE: Clear fight sub-phase at phase end
     game_state["fight_subphase"] = None
 
     # Console log

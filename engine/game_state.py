@@ -256,7 +256,7 @@ class GameStateManager:
     
     def initialize_units(self, game_state: Dict[str, Any]):
         """Initialize units with UPPERCASE field validation."""
-        # AI_TURN.md COMPLIANCE: Direct access - units must be provided
+        # tour_de_jeu.md COMPLIANCE: Direct access - units must be provided
         if "units" not in self.config:
             raise KeyError("Config missing required 'units' field")
         unit_configs = self.config["units"]
@@ -280,7 +280,7 @@ class GameStateManager:
         return int(require_key(default, "inches_to_subhex"))
 
     def create_unit(self, config: Dict[str, Any]) -> Dict[str, Any]:
-        """Create unit with AI_TURN.md compliant fields."""
+        """Create unit with tour_de_jeu.md compliant fields."""
         rng_weapons = copy.deepcopy(require_key(config, "RNG_WEAPONS"))
         cc_weapons = copy.deepcopy(require_key(config, "CC_WEAPONS"))
 
@@ -357,7 +357,7 @@ class GameStateManager:
             # unité au sol), >=1 = étage d'une ruine. Ancre unité = niveau de models[0].
             "level": _validate_level(config.get("level", 0), config["id"]),  # get allowed (champ optionnel : scénarios sans étages)
             
-            # UPPERCASE STATS (AI_TURN.md requirement) - NO DEFAULTS
+            # UPPERCASE STATS (tour_de_jeu.md requirement) - NO DEFAULTS
             "HP_CUR": config["HP_CUR"],
             "HP_MAX": config["HP_MAX"],
             "MOVE": config["MOVE"],
@@ -430,7 +430,7 @@ class GameStateManager:
             # Empty list for non-leader units (valid business case: the LEADER rule is absent from their config).
             "CAN_LEAD": copy.deepcopy(config["CAN_LEAD"] if "CAN_LEAD" in config else []),
 
-            # AI_TURN.md action tracking fields
+            # tour_de_jeu.md action tracking fields
             "SHOOT_LEFT": shoot_left,
             "ATTACK_LEFT": attack_left,
 

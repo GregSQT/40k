@@ -29,7 +29,7 @@ Goulots restants : lockstep de collecte (Phase 3).
 
 **Lourd, re-cadrer avant reprise.** Plusieurs semaines. Spec de mars 2026 visant des modules `ai/` réécrits par V11 depuis — re-confronter au code avant.
 
-→ `Documentation/Chantiers/backlog/Database/DB_migration.md` ; prompt d'exécution : `Documentation/Chantiers/backlog/Database/DB_migration_prompt.md`
+→ `Documentation/Chantiers/backlog/migration_postgresql.md` ; prompt d'exécution : `Documentation/Chantiers/backlog/migration_postgresql.md`
 
 ---
 
@@ -39,4 +39,4 @@ Goulots restants : lockstep de collecte (Phase 3).
 
 Distinct du MCTS à l'inférence ([bot.md#mcts-inference](bot.md#mcts-inference)).
 
-→ `Documentation/Chantiers/backlog/MCTS/MCTS_bot_final.md`
+→ `Documentation/Chantiers/backlog/mcts_adversaire.md`

@@ -39,7 +39,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 > l'en-tête « OBSERVATION SQUAD — TENSEURS D'ENTITÉS » de
 > [`engine/observation_builder.py`](../../../engine/observation_builder.py) pour le layout.
 >
-> **Conception et journal** : [`V11_entity_encoder_pointer.md`](../../Reference/moteur/V11_entity_encoder_pointer.md)
+> **Conception et journal** : [`V11_entity_encoder_pointer.md`](../../Reference/training/V11_entity_encoder_pointer.md)
 > (encodeur partagé, tête pointeur, cardinalités) · [`V11_audit_observation.md`](../../Archives/chantiers/V11_audit_observation.md)
 > (audit d'origine) · **[§9.2.5](V11_phaseA.md#s9.2.5)** et **§0.31** de ce document (ce qui est observé, et pourquoi).
 >
@@ -369,7 +369,7 @@ PvP `squad_declare_fight_model`, `squad_declare_fight_weapon` et `squad_declare_
 mécanique de combat, c'est son EXPOSITION dans l'espace d'action et l'observation (les profils
 d'armes y sont déjà, cf. §0.27).
 
-**Contrainte tenue par le lot « attente forcée » du 2026-08-08** (cf. AI_TURN.md, STEP 7) :
+**Contrainte tenue par le lot « attente forcée » du 2026-08-08** (cf. tour_de_jeu.md, STEP 7) :
 l'auto-jeu du moteur ne porte QUE sur `wait`, jamais sur `fight_slot`. Un combat à cible unique
 reste donc une décision de l'agent, et cette porte reste ouverte sans rien à défaire — c'est un
 choix délibéré, pris alors que l'auto-jouer aurait économisé 3,4 steps par épisode (1,7 %).
@@ -2353,7 +2353,7 @@ elles, cf. É3). Coût accepté : ce chantier est **plus long qu'une simple supp
 `movement_handlers._select_strategic_destination` + son cache `_build_objective_distance_cache`
 (unique appelant = le décodeur mort) — 176 lignes retirées de `movement_handlers.py`. Les chaînes de
 debug de `w40k_core.step` qui nommaient encore la fonction, et trois documents
-(`AI_IMPLEMENTATION.md`, `TESTING.md`, `Distance management.md`), sont alignés.
+(`architecture_moteur.md`, `TESTING.md`, `geometrie_et_distances.md`), sont alignés.
 `tests/unit/engine/test_action_decoder.py` passe de **55 à 27 tests** (constaté par
 `git show <branche>:<fichier>` à 14 h 05) : ce sont les cas de la sémantique morte qui partent.
 Deux commits de relecture s'y sont ajoutés : **`a210008c`** supprime aussi
@@ -2362,7 +2362,7 @@ orphelin de son décodeur) et pose une **pierre tombale** à leur place ; **`f0e
 symboles morts **préexistants** croisés pendant l'audit (`charge_handlers._select_strategic_destination`,
 qui n'avait jamais eu d'appelant et survivait derrière son homonyme, plus
 `ActionDecoder.get_all_valid_targets` et `can_melee_units_charge_target`, présentées comme
-« Key Methods » par `AI_IMPLEMENTATION.md` et appelées nulle part).
+« Key Methods » par `architecture_moteur.md` et appelées nulle part).
 ⚠️ **Cette branche n'est PLUS autonome** : elle suppose la migration portée par
 `v11-0.47-eval-tooling-mask` — voir la contrainte d'ordre de merge en [§0.51](#s0.51).
 
@@ -3002,7 +3002,7 @@ lecture parallèle, celle du frontend signalée plus haut.
 > interprétable exige toujours un run long à `total_episodes` réel (10-30k), aujourd'hui coûteux
 > en temps (~36 h) — c'était précisément la cible du chantier §0.22, cadrage archivé
 > [`Documentation/Archives/chantiers/V11_move_pool_optimization.md`](../../Archives/chantiers/V11_move_pool_optimization.md) (**clos**),
-> suite vivante [`V11_move_build_acceleration.md`](../../Reference/moteur/V11_move_build_acceleration.md).
+> suite vivante [`perf_move_pool.md`](../../Reference/moteur/perf_move_pool.md).
 > §0.15 étant tranché, ce win-rate mesurera la robustesse à l'**adversaire**.
 
 **Run de re-mesure du 2026-07-20 — commande exacte :**
@@ -3131,10 +3131,10 @@ le run multi-env, pas le smoke, qui a validé.
 | [`V11_tranches.md`](V11_tranches.md) | **[§1](V11_tranches.md#s1) → [§8](V11_tranches.md#s8)** — objectif, l'ANCRE, état des lieux, ruptures R1→R8, décisions de design, tranches T1→T7 + Phase B, critères d'acceptation, smoke tests, tests de non-régression | **vivant** (T6-h/T6-g ouverts, cf. [§0.0](#s0.0)) |
 | [`V11_phaseA.md`](V11_phaseA.md) | **[§9](V11_phaseA.md#s9)** — Phase A' : parité de résolution des règles (P1) puis mécanisme de décision agent (P2→P5) | **vivant** |
 | [`V11_eval_strategy.md`](V11_eval_strategy.md) | **[§10](V11_eval_strategy.md#s10)** — stratégie d'entraînement et d'évaluation, rosters, holdout, win-rate par roster | **vivant** |
-| [`Documentation/Reference/moteur/V11_entity_encoder_pointer.md`](../../Reference/moteur/V11_entity_encoder_pointer.md) | Encodeur d'entités partagé + tête pointeur, cardinalités de l'observation, les 7 trous qu'il ferme | **clos** (T-A→T-H livrées) — **archivé le 2026-08-08** ; ⚠️ ses chiffres de dimensionnement sont datés, l'`obs_size` courant se lit ici en §0 |
+| [`Documentation/Reference/training/V11_entity_encoder_pointer.md`](../../Reference/training/V11_entity_encoder_pointer.md) | Encodeur d'entités partagé + tête pointeur, cardinalités de l'observation, les 7 trous qu'il ferme | **clos** (T-A→T-H livrées) — **archivé le 2026-08-08** ; ⚠️ ses chiffres de dimensionnement sont datés, l'`obs_size` courant se lit ici en §0 |
 | [`Documentation/Archives/chantiers/observation_deploiement.md`](../../Archives/chantiers/observation_deploiement.md) | Observation de la phase de déploiement — les 5 défauts et leurs correctifs (extrait de `V11_audit_observation.md` §11) | **clos** (2026-07-29, §0.40 — archive) |
 | [`Replay.md`](../Replay.md) | Replay : pipeline & contrat du `step.log`, registre des chantiers replay | **vivant** (outillage) |
-| [`V11_move_build_acceleration.md`](../../Reference/moteur/V11_move_build_acceleration.md) | Perf du noyau `_build_multi_hex_vectorized` : périmètre, filet de validation, livré (L1 + L_bbox), impasses mesurées | **clos** (décision (B) STOP, 2026-07-21) |
+| [`perf_move_pool.md`](../../Reference/moteur/perf_move_pool.md) | Perf du noyau `_build_multi_hex_vectorized` : périmètre, filet de validation, livré (L1 + L_bbox), impasses mesurées | **clos** (décision (B) STOP, 2026-07-21) |
 | [`Documentation/Archives/chantiers/V11_move_pool_optimization.md`](../../Archives/chantiers/V11_move_pool_optimization.md) | Cadrage d'origine du chantier move pool (§0.22) | **clos** — archive, ne plus s'y fier pour l'état du code |
 
 

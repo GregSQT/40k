@@ -1,8 +1,8 @@
 """
-W40K Engine Package - AI_TURN.md Compliant Game Engine
+W40K Engine Package - tour_de_jeu.md Compliant Game Engine
 
 This package implements a Warhammer 40K game engine with strict compliance
-to AI_TURN.md specifications for sequential activation and turn management.
+to tour_de_jeu.md specifications for sequential activation and turn management.
 
 Core Principles:
 - Sequential activation (ONE unit per gym step)
@@ -20,9 +20,9 @@ __author__ = "W40K Study Project"
 # Package-level exports
 __all__ = ["W40KEngine"]
 
-# AI_TURN.md compliance validation
+# tour_de_jeu.md compliance validation
 def validate_package_compliance():
-    """Validate package maintains AI_TURN.md architectural compliance."""
+    """Validate package maintains tour_de_jeu.md architectural compliance."""
     return {
         "sequential_activation": True,
         "built_in_step_counting": True,

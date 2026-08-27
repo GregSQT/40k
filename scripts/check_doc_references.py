@@ -420,7 +420,7 @@ def resolve(name: str, doc_dir: pathlib.Path) -> pathlib.Path | None:
         if candidate.exists():
             return candidate
     # Un nom NU renvoie couramment à un document rangé dans un sous-dossier (`V11_tranches.md`),
-    # à une référence vivante (`stage.md`) ou à une configuration d'agent
+    # à une référence vivante (`verticalite.md`) ou à une configuration d'agent
     # (`ArmageddonAgent_training_config.json`). Ces arbres sont petits : on les parcourt plutôt
     # que d'énumérer à la main des chemins qui bougeront.
     for tree in (DOCS, ROOT / "Documentation" / "Reference", ROOT / "config"):

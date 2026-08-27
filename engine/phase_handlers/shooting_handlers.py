@@ -1118,7 +1118,7 @@ def build_unit_los_cache(
     max_target_range: Optional[int] = None,
 ) -> None:
     """
-    AI_TURN.md: Calculate LoS cache for a specific unit.
+    tour_de_jeu.md: Calculate LoS cache for a specific unit.
     Uses units_cache and has_line_of_sight_coords() for performance.
 
     max_target_range: si fourni (> 0), les ennemis dont la distance bord-à-bord dépasse
@@ -1821,7 +1821,7 @@ def build_hidden_detection_info_by_unit_id(
 
 def update_los_cache_after_target_death(game_state: Dict[str, Any], dead_target_id: str) -> None:
     """
-    AI_TURN.md: Update LoS cache after target death.
+    tour_de_jeu.md: Update LoS cache after target death.
     Removes dead target from active unit's los_cache.
     
     NOTE: units_cache removal is handled by update_units_cache_hp when HP becomes 0.
@@ -2259,7 +2259,7 @@ def _is_valid_shooting_target(game_state: Dict[str, Any], shooter: Dict[str, Any
         return False
 
     # PERFORMANCE: Prefer unit-local los_cache (built at activation), then global, then direct calc.
-    # Unit-local cache avoids 56-call spike at shooting_phase_start (AI_TURN.md per-unit cache).
+    # Unit-local cache avoids 56-call spike at shooting_phase_start (tour_de_jeu.md per-unit cache).
     target_id_str = str(target["id"])
     has_los = False
     if "los_cache" in shooter and shooter["los_cache"] and target_id_str in shooter["los_cache"]:
@@ -2338,7 +2338,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     # This ensures attacks from different units are not mixed together
     game_state["shoot_attack_results"] = []
     
-    # AI_TURN.md STEP 2: Build unit's los_cache at activation
+    # tour_de_jeu.md STEP 2: Build unit's los_cache at activation
     # Build los_cache for units that can shoot (including shoot_after_flee exception).
     unit_id_str = str(unit_id)
     _t_los0 = time.perf_counter() if _perf_act else None
@@ -2463,7 +2463,7 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
             f"Unit {unit_id_str} SHOOT_LEFT={shoot_left} valid_targets={valid_target_pool}"
         )
     
-    # AI_TURN.md STEP 3: Pre-select first available weapon
+    # tour_de_jeu.md STEP 3: Pre-select first available weapon
     # If unit is adjacent to enemy, prioritize CLOSE_QUARTERS weapons
     if not usable_weapons:
         # No usable weapons under current rules -> no valid actions (l'advance se joue en phase de mouvement) → skip.
@@ -2629,7 +2629,7 @@ def valid_target_pool_build(
             f"(advance_status={advance_status}, adjacent_status={adjacent_status})"
         )
     
-    # AI_TURN.md: ASSERT unit["los_cache"] exists (must be created by build_unit_los_cache at activation)
+    # tour_de_jeu.md: ASSERT unit["los_cache"] exists (must be created by build_unit_los_cache at activation)
     if "los_cache" not in unit:
         # Check if unit has fled (fled units without shoot_after_flee can still advance, but cannot shoot)
         unit_id_str = str(unit["id"])
@@ -2639,7 +2639,7 @@ def valid_target_pool_build(
             # Unit has fled - cannot shoot, return empty pool
             return []
     
-    # AI_TURN.md: Filter los_cache to get only targets with LoS (optimization)
+    # tour_de_jeu.md: Filter los_cache to get only targets with LoS (optimization)
     # Filter los_cache: targets_with_los = {target_id: true for target_id, has_los in unit["los_cache"].items() if has_los == true}
     targets_with_los = {
         target_id: True 
@@ -2881,7 +2881,7 @@ def valid_target_pool_build(
                     )
                 continue
         
-        # AI_TURN.md: LoS check already done in build_unit_los_cache()
+        # tour_de_jeu.md: LoS check already done in build_unit_los_cache()
         # We filtered los_cache above to only include targets with has_los == True
         # So we can skip LoS check here (performance optimization)
         
@@ -3098,7 +3098,7 @@ def shooting_build_valid_target_pool(
                 from engine.game_utils import add_console_log, add_debug_log
                 add_console_log(game_state, f"[BUG] Cache contained friendly unit {target_id_str} (player {target['player']}) for shooter {unit_id} (player {current_player})")
                 continue  # Skip friendly units
-            # AI_TURN.md: No re-validation needed - cache is reliable during activation
+            # tour_de_jeu.md: No re-validation needed - cache is reliable during activation
             alive_targets.append(target_id_str)  # Ensure ID is string
 
         # Update unit's target pool
@@ -4860,7 +4860,7 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     
     # Player progression logic
     if game_state["current_player"] == 1:
-        # AI_TURN.md Line 105: P1 Move -> P1 Shoot -> P1 Charge -> P1 Fight
+        # tour_de_jeu.md Line 105: P1 Move -> P1 Shoot -> P1 Charge -> P1 Fight
         # Player stays 1, advance to charge phase
         return {
             **base_result,
@@ -4877,7 +4877,7 @@ def _shooting_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
             "clear_attack_preview": True
         }
     elif game_state["current_player"] == 2:
-        # AI_TURN.md Line 105: P2 Move -> P2 Shoot -> P2 Charge -> P2 Fight
+        # tour_de_jeu.md Line 105: P2 Move -> P2 Shoot -> P2 Charge -> P2 Fight
         # Player stays 2, advance to charge phase
         # Turn increment happens at P2 Fight end (fight_handlers.py:797)
         return {
@@ -4932,7 +4932,7 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["_pool_from_cache"]
     if "_pool_cache_key" in unit:
         del unit["_pool_cache_key"]
-    # AI_TURN.md: Clean up los_cache at end of activation
+    # tour_de_jeu.md: Clean up los_cache at end of activation
     if "los_cache" in unit:
         del unit["los_cache"]
     if "TOTAL_ATTACK_LOG" in unit:
@@ -5380,11 +5380,11 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         unit_id = "none"  # Allow missing for some action types
     else:
         unit_id = action["unitId"]
-    # AI_TURN.md COMPLIANCE: Pool is built once at phase start (STEP 1: ELIGIBILITY CHECK)
+    # tour_de_jeu.md COMPLIANCE: Pool is built once at phase start (STEP 1: ELIGIBILITY CHECK)
     # Units are removed ONLY via:
     # 1. end_activation() with Arg4 = SHOOTING (when unit finishes activation)
     # 2. _remove_dead_unit_from_pools() (when unit dies)
-    # No filtering or modification of pool in execute_action - this is not described in AI_TURN.md
+    # No filtering or modification of pool in execute_action - this is not described in tour_de_jeu.md
     
     # Check if shooting phase should complete - read directly from game_state (not cached)
     # CRITICAL: Read pool directly to get current state (pool may have been modified by previous actions)
@@ -5587,7 +5587,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         return success, result
 
     elif action_type == "wait" or action_type == "skip":
-        # AI_TURN.md STEP 5A/5B: Wait action - check if unit has shot with ANY weapon
+        # tour_de_jeu.md STEP 5A/5B: Wait action - check if unit has shot with ANY weapon
         # EXACT COMPLIANCE: Same logic as right_click action (lines 2453-2468)
         has_shot = _unit_has_shot_with_any_weapon(unit)
         unit_id_str = str(unit["id"])
@@ -5604,13 +5604,13 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
                 # NO -> end_activation(WAIT, 1, 0, SHOOTING, 1)
                 success, result = _handle_shooting_end_activation(game_state, unit, WAIT, 1, PASS, SHOOTING, 1)
         
-        # AI_TURN.md LINE 997: "WAIT_ACTION → UNIT_ACTIVABLE_CHECK: Always (end activation)"
+        # tour_de_jeu.md LINE 997: "WAIT_ACTION → UNIT_ACTIVABLE_CHECK: Always (end activation)"
         # After end_activation, return to UNIT_ACTIVABLE_CHECK which checks if pool is empty
-        # AI_TURN.md LINE 781: "shoot_activation_pool NOT empty?" - check pool directly
-        # CRITICAL: According to AI_TURN.md, pool should never contain dead units, so checking pool emptiness is correct
+        # tour_de_jeu.md LINE 781: "shoot_activation_pool NOT empty?" - check pool directly
+        # CRITICAL: According to tour_de_jeu.md, pool should never contain dead units, so checking pool emptiness is correct
         pool_after_removal = require_key(game_state, "shoot_activation_pool")
         if not pool_after_removal:
-            # Pool is empty - phase is complete (AI_TURN.md LINE 794: "NO → End of shooting phase")
+            # Pool is empty - phase is complete (tour_de_jeu.md LINE 794: "NO → End of shooting phase")
             game_state["_shooting_phase_initialized"] = False
             phase_complete_result = _shooting_phase_complete(game_state)
             result.update(phase_complete_result)
@@ -5626,7 +5626,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         )
     
     elif action_type == "right_click":
-        # AI_TURN.md STEP 5A/5B: Wait action - check if unit has shot with ANY weapon
+        # tour_de_jeu.md STEP 5A/5B: Wait action - check if unit has shot with ANY weapon
         has_shot = _unit_has_shot_with_any_weapon(unit)
         unit_id_str = str(unit["id"])
         if has_shot:
@@ -5642,13 +5642,13 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
                 # NO -> end_activation(WAIT, 1, 0, SHOOTING, 1)
                 success, result = _handle_shooting_end_activation(game_state, unit, WAIT, 1, PASS, SHOOTING, 1)
         
-        # AI_TURN.md LINE 997: "WAIT_ACTION → UNIT_ACTIVABLE_CHECK: Always (end activation)"
+        # tour_de_jeu.md LINE 997: "WAIT_ACTION → UNIT_ACTIVABLE_CHECK: Always (end activation)"
         # After end_activation, return to UNIT_ACTIVABLE_CHECK which checks if pool is empty
-        # AI_TURN.md LINE 781: "shoot_activation_pool NOT empty?" - check pool directly
-        # CRITICAL: According to AI_TURN.md, pool should never contain dead units, so checking pool emptiness is correct
+        # tour_de_jeu.md LINE 781: "shoot_activation_pool NOT empty?" - check pool directly
+        # CRITICAL: According to tour_de_jeu.md, pool should never contain dead units, so checking pool emptiness is correct
         pool_after_removal = require_key(game_state, "shoot_activation_pool")
         if not pool_after_removal:
-            # Pool is empty - phase is complete (AI_TURN.md LINE 794: "NO → End of shooting phase")
+            # Pool is empty - phase is complete (tour_de_jeu.md LINE 794: "NO → End of shooting phase")
             game_state["_shooting_phase_initialized"] = False
             phase_complete_result = _shooting_phase_complete(game_state)
             result.update(phase_complete_result)

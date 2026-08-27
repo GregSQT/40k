@@ -74,7 +74,7 @@ from engine.combat_utils import (
 from engine.spatial_relations import geometry_is_hex
 from engine.mask_verification import verify_memoised_move_cell_map
 
-# end_activation / _handle_shooting_end_activation argument constants (AI_TURN.md)
+# end_activation / _handle_shooting_end_activation argument constants (tour_de_jeu.md)
 ACTION = "ACTION"
 WAIT = "WAIT"
 NO = "NO"
@@ -136,7 +136,7 @@ class ManualAllocCtx:
 
     Mutualise UNIQUEMENT la couche allocation des pertes (groupes, ordre, selection
     de figurine, save check, application des degats). La resolution des jets reste
-    specifique a chaque phase (cf. Documentation/Reference/moteur/refactor_attack_shoot_fight1.md).
+    specifique a chaque phase (cf. Documentation/Reference/moteur/allocation_attaques.md).
     """
     alloc_key: str            # cle game_state de l allocation pending
     declare_order_action: str # action des payloads de declaration d ordre
@@ -469,7 +469,7 @@ def build_occupied_positions_set(
         exclude_unit_id: Optional unit to exclude (e.g. the moving unit)
         level: None = toutes figs confondues (comportement historique). Un entier restreint
             aux figurines de ce niveau (mouvement vertical : deux figs à des étages différents
-            ne se gênent pas — murs verticaux prolongés gérés séparément, cf. stage.md).
+            ne se gênent pas — murs verticaux prolongés gérés séparément, cf. verticalite.md).
 
     Returns:
         Set of (col, row) cells occupied by other units
@@ -851,7 +851,7 @@ def _build_models_for_unit(
     models_cache: Dict[str, Dict[str, Any]],
     squad_models: Dict[str, List[str]],
 ) -> None:
-    """Build per-model entries for one squad (squad.md PR1 1b).
+    """Build per-model entries for one squad (squad_multi_figurines.md PR1 1b).
 
     For mono-figurine units (no explicit unit["models"] list), create exactly
     one model entry derived from the unit's own fields. For multi-figurine
@@ -1149,7 +1149,7 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
             occupation_map[cell] = unit_id
 
         # ====================================================================
-        # MODEL-LEVEL CACHE (squad.md PR1 1b)
+        # MODEL-LEVEL CACHE (squad_multi_figurines.md PR1 1b)
         # ====================================================================
         # Build models_cache + squad_models in parallel to units_cache.
         # Backward compat: if unit has no explicit "models" list, treat it as
@@ -1178,7 +1178,7 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
             if mid in models_cache
         }
         # Hauteur (pouces) du plancher sous chaque figurine — fondation de l'engagement 3D
-        # (borne basse de l'intervalle vertical [plancher, plancher+MODEL_HEIGHT], stage.md §4/chantier 4).
+        # (borne basse de l'intervalle vertical [plancher, plancher+MODEL_HEIGHT], verticalite.md §4/chantier 4).
         # Sol = 0.0 ; étage = height_inches du floor sous la fig (résolu par position). Aucun consommateur
         # encore (backend-only) → no-op tant que tout est au niveau 0.
         from engine.terrain_utils import floor_height_at
@@ -1240,7 +1240,7 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         entry = _compute_squad_cache_entry(game_state, squad_id)
         entry["model_count_at_start"] = entry["model_count"]
         squad_cache[squad_id] = entry
-        # Mirror OC_TOTAL into units_cache (squad.md PR1 1d): observation_builder
+        # Mirror OC_TOTAL into units_cache (squad_multi_figurines.md PR1 1d): observation_builder
         # et logique d'objectifs lisent l'OC agrege depuis units_cache.
         if squad_id in units_cache:
             units_cache[squad_id]["OC_TOTAL"] = entry["oc_total"]
@@ -1524,7 +1524,7 @@ def is_unit_on_objective(unit: Dict[str, Any], game_state: Dict[str, Any]) -> bo
 
 
 # ============================================================================
-# LoS invalidation choke-point (a′) — LoS_unique_source_of_truth.md §4.1bis (D1–D4)
+# LoS invalidation choke-point (a′) — ligne_de_vue.md §4.1bis (D1–D4)
 # ============================================================================
 # _touch_unit_los est LE point unique d'invalidation LoS, déclenché par toute écriture de
 # position (update_model_position per-figurine + update_units_cache_position anchre).
@@ -3215,7 +3215,7 @@ def maybe_resolve_reactive_move(
 # ============================================================================
 # DISTANCE PRIMITIVES — Engagement Range, Base-to-Base, Coherency
 # ============================================================================
-# Reference: Documentation/Reference/moteur/squad.md §"Definition des distances en hex-grid"
+# Reference: Documentation/Reference/moteur/squad_multi_figurines.md §"Definition des distances en hex-grid"
 # Toutes les distances sont en subhexes. `inches_to_subhex` est l echelle du
 # scenario (x5: 5 subhexes par pouce, x10: 10 subhexes par pouce).
 
@@ -3426,7 +3426,7 @@ def is_base_to_base(col_a: int, row_a: int, col_b: int, row_b: int) -> bool:
 
 
 # ============================================================================
-# MODEL-LEVEL HELPERS (squad.md PR1 1b)
+# MODEL-LEVEL HELPERS (squad_multi_figurines.md PR1 1b)
 # ============================================================================
 # Source de verite par-figurine = models_cache[model_id]. Source de verite
 # agregee par-escouade = units_cache[squad_id]. Toute mutation par-figurine
@@ -4118,7 +4118,7 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
 
 
 # ============================================================================
-# MULTI-MODEL MOVEMENT PLAN (squad.md PR2 2a)
+# MULTI-MODEL MOVEMENT PLAN (squad_multi_figurines.md PR2 2a)
 # ============================================================================
 # Pipeline mutualise pour Normal/Advance/Fall Back (et plus tard Charge/Pile In/
 # Consolidation). Transaction atomique : dry-run complet → validation → commit
@@ -5971,7 +5971,7 @@ def execute_squad_move(
 
 
 # ============================================================================
-# CHARGE PLAN (squad.md PR2 2c)
+# CHARGE PLAN (squad_multi_figurines.md PR2 2c)
 # ============================================================================
 
 
@@ -6839,7 +6839,7 @@ def commit_move(
 
 
 # ============================================================================
-# PENDING INTENTS — SHOOT / FIGHT (squad.md PR3 3a)
+# PENDING INTENTS — SHOOT / FIGHT (squad_multi_figurines.md PR3 3a)
 # ============================================================================
 # Structures de declaration-puis-resolution pour le tir et la melee multi-figs.
 # Lifecycle :
@@ -6892,7 +6892,7 @@ def clear_pending_fight_intent(game_state: Dict[str, Any], squad_id: str) -> Non
 
 
 # ============================================================================
-# SQUAD SHOOTING — declaration / lock (squad.md PR3 3b)
+# SQUAD SHOOTING — declaration / lock (squad_multi_figurines.md PR3 3b)
 # ============================================================================
 # Pipeline parallele: ces fonctions s invoquent independamment du shoot flow
 # existant. Le decoder mono-fig est preserve. Branchement RL en PR4.
@@ -7211,7 +7211,7 @@ def _model_can_shoot_target(
 ) -> bool:
     """Eligibilite d une figurine attaquante a tirer sur une escouade cible.
 
-    Per-fig (squad.md §"LOS cache — strategie avec escouades") : la cible est
+    Per-fig (squad_multi_figurines.md §"LOS cache — strategie avec escouades") : la cible est
     eligible si AU MOINS UNE figurine cible est a la fois a portee de l arme
     selectionnee ET visible (LoS murs) depuis la position de la figurine
     attaquante. La LoS est testee figurine -> figurine cible, pas ancre -> ancre.
@@ -8936,7 +8936,7 @@ def squad_lock_shoot(game_state: Dict[str, Any], squad_id: str) -> List[Dict[str
 
 
 # ============================================================================
-# SQUAD SHOOTING — resolution (squad.md PR3 3c)
+# SQUAD SHOOTING — resolution (squad_multi_figurines.md PR3 3c)
 # ============================================================================
 # Hit → Wound → Save → Damage. Allocation prioritaire. Damage excess perdu.
 # BLAST bonus selon taille cible a la declaration. Fig morte mid-resolution
@@ -11415,7 +11415,7 @@ def manual_allocation_waiting_payload(game_state: Dict[str, Any], ctx: ManualAll
 
 
 # ============================================================================
-# SQUAD FIGHT — activation start + ordering (squad.md PR3 3d)
+# SQUAD FIGHT — activation start + ordering (squad_multi_figurines.md PR3 3d)
 # ============================================================================
 
 
@@ -11979,7 +11979,7 @@ def get_fighting_models(
     return out
 
 # ============================================================================
-# SQUAD FIGHT — declaration + resolution + consolidation (squad.md PR3 3f)
+# SQUAD FIGHT — declaration + resolution + consolidation (squad_multi_figurines.md PR3 3f)
 # ============================================================================
 
 
@@ -12329,12 +12329,12 @@ def squad_consolidate_plan(
 
 
 # ============================================================================
-# END-OF-TURN COHERENCY REMOVAL (squad.md PR3 3g)
+# END-OF-TURN COHERENCY REMOVAL (squad_multi_figurines.md PR3 3g)
 # ============================================================================
 
 
 # ============================================================================
-# SQUAD ACTION MASK (squad.md PR4 4b — pipeline parallele decoder)
+# SQUAD ACTION MASK (squad_multi_figurines.md PR4 4b — pipeline parallele decoder)
 # ============================================================================
 # 16 micro-actions :
 #   0-5  : Normal move direction D (cf. get_hex_neighbors, parity-aware)
@@ -13564,7 +13564,7 @@ def build_squad_action_mask(
 
 
 # ============================================================================
-# ENEMY SLOT MAPPING (squad.md PR4 4d ; V11 §0.30 T-E)
+# ENEMY SLOT MAPPING (squad_multi_figurines.md PR4 4d ; V11 §0.30 T-E)
 # ============================================================================
 # Un slot = une action de tir (`SQUAD_ACTION_SHOOT_SLOT_BASE + i`) ET la ligne `i` du tenseur
 # ennemi de l'observation : les deux DOIVENT decrire la meme escouade (invariant D1).

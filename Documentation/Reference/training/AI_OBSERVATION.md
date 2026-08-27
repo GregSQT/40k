@@ -711,7 +711,7 @@ portait déjà.
 **§0.31** (objectifs situés, règles d'unité, couvert exact, caches) et **§0.32** (audit
 d'optimalité du 2026-07-28 : T-H/T-I/T-J livrés — masque de présence, géométrie unique, phase en
 one-hot ; **T-G, la tête de move dense, reste ouvert**) ·
-[`V11_entity_encoder_pointer.md`](Documentation/Reference/moteur/V11_entity_encoder_pointer.md) (§1 constats
+[`V11_entity_encoder_pointer.md`](Documentation/Reference/training/V11_entity_encoder_pointer.md) (§1 constats
 mesurés, §3 architecture, §6 journal) · [`AI_OBSERVATION_Legacy.md`](../../Archives/docs/AI_OBSERVATION_Legacy.md)
 (archive du pipeline mono-figurine).
 

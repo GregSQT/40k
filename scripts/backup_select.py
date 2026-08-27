@@ -125,12 +125,12 @@ else:
 ######################################################################################################
     
     ### Documentation    
-        "Documentation/Reference/moteur/AI_IMPLEMENTATION.md",
+        "Documentation/Reference/moteur/architecture_moteur.md",
         "Documentation/Reference/training/AI_METRICS.md",
         "Documentation/Reference/training/AI_OBSERVATION.md",
         "Documentation/Archives/docs/AI_OBSERVATION_Legacy.md",
         "Documentation/Reference/training/AI_TRAINING.md",
-        "Documentation/Reference/moteur/AI_TURN.md",
+        "Documentation/Reference/moteur/tour_de_jeu.md",
 
 ######################################################################################################
 ##### Engine files

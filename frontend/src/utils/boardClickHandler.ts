@@ -25,7 +25,7 @@ export function setupBoardClickHandler(callbacks: {
   onChargeEnemyUnit?(chargerId: UnitId, enemyUnitId: UnitId): void;
   onStartMovePreview?(unitId: UnitId, col: number, row: number): void;
   onDirectMove?(unitId: UnitId, col: number, row: number, orientation?: number): void;
-  // Move par-figurine (squad.md brique 3)
+  // Move par-figurine (squad_multi_figurines.md brique 3)
   onStartSquadModelMove?(unitId: UnitId): void;
   onMoveModelInPlan?(modelId: string, col: number, row: number): void;
   // Charge par-figurine (V11 11.04, Slice G)

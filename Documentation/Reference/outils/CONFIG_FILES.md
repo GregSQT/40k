@@ -2,7 +2,7 @@
 
 This document describes all configuration files used in the W40K game engine.
 
-**AI_IMPLEMENTATION.md COMPLIANCE**: All tunable values, thresholds, and game parameters must be defined in these configuration files, never hardcoded in logic.
+**architecture_moteur.md COMPLIANCE**: All tunable values, thresholds, and game parameters must be defined in these configuration files, never hardcoded in logic.
 
 ---
 
@@ -351,7 +351,7 @@ When adding new configuration files:
 
 ## Related Documentation
 
-- [AI_IMPLEMENTATION.md](../moteur/AI_IMPLEMENTATION.md) - Core coding rules
+- [architecture_moteur.md](../moteur/architecture_moteur.md) - Core coding rules
 - [Weapon_rules.md](../jeu/Weapon_rules.md) - Weapon system and armory architecture
-- [Documentation/Reference/outils/AI_RULES_checker.md](AI_RULES_checker.md) - Script check_ai_rules.py (conformité AI_TURN / coding_practices)
+- [Documentation/Reference/outils/AI_RULES_checker.md](AI_RULES_checker.md) - Script check_ai_rules.py (conformité tour_de_jeu.md / coding_practices)
 

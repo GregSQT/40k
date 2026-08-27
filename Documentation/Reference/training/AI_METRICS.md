@@ -2137,4 +2137,4 @@ If after using this guide and diagnostic tree:
 
 **For configuration details and commands, see:** [AI_TRAINING.md](AI_TRAINING.md)
 
-**For system architecture details, see:** [AI_IMPLEMENTATION.md](../moteur/AI_IMPLEMENTATION.md)
+**For system architecture details, see:** [architecture_moteur.md](../moteur/architecture_moteur.md)

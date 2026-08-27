@@ -19,25 +19,19 @@ Hors documentation technique : `Review/` (état de l'outil `scripts/review_plan.
 
 ## Reference/ — les références par domaine
 
-### moteur/ — architecture du moteur de jeu
+### moteur/ — architecture du moteur de jeu (9 documents, consolidés le 2026-08-28)
 
 | Document | Rôle |
 |---|---|
-| [AI_TURN.md](Reference/moteur/AI_TURN.md) | Séquence de tour, phases, activation, matrices de conformité V11. **Contrat pour toute logique de jeu** (cité par CLAUDE.md). |
-| [AI_IMPLEMENTATION.md](Reference/moteur/AI_IMPLEMENTATION.md) | Architecture des modules `engine/` : w40k_core, phase_handlers, flux, caches. |
-| [stage.md](Reference/moteur/stage.md) | Système d'étages / niveaux verticaux (3D). |
-| [squad.md](Reference/moteur/squad.md) | Spec fondatrice du pipeline squad multi-figurines. |
-| [Distance management.md](Reference/moteur/Distance%20management.md) | Cartographie des métriques de distance backend + frontend. |
-| [LoS_unique_source_of_truth.md](Reference/moteur/LoS_unique_source_of_truth.md) | Point de passage unique d'invalidation des caches LoS/positions. |
-| [refactor_attack_shoot_fight1.md](Reference/moteur/refactor_attack_shoot_fight1.md) | Moteur d'allocation manuelle mutualisé tir/mêlée. |
-| [Boardx10-final.md](Reference/moteur/Boardx10-final.md) | Géométrie ×10 (odd-q, primitives hex) — source de vérité de `hex_utils`. |
-| [V11_board_44x60x1.md](Reference/moteur/V11_board_44x60x1.md) | Banc d'itération x1 (1 hex = 1 pouce). |
-| [1_unites_hors_table_chemins_geometriques.md](Reference/moteur/1_unites_hors_table_chemins_geometriques.md) | Contrat « unités hors table filtrées de toute mesure géométrique ». |
-| [V11_entity_encoder_pointer.md](Reference/moteur/V11_entity_encoder_pointer.md) | Encodeur d'entités partagé + tête pointeur (conception). |
-| [move_action_space_spatial_rework.md](Reference/moteur/move_action_space_spatial_rework.md) | Action space spatial de move (grille égocentrique + tête spatiale). |
-| [compute_footprint_placement_mask.md](Reference/moteur/compute_footprint_placement_mask.md) | Primitives de placement multi-hex de `hex_utils`. |
-| [V11_move_build_acceleration.md](Reference/moteur/V11_move_build_acceleration.md) | Perf du noyau de pool de move : périmètre de validité, filet de validation. |
-| [01_ability_embedding.md](Reference/moteur/01_ability_embedding.md) → [04_strategic_reserves.md](Reference/moteur/04_strategic_reserves.md) | Conceptions du socle capacités (embedding, CP/battle-shock, capacités de faction, réserves) — le chantier 06 s'appuie dessus. |
+| [tour_de_jeu.md](Reference/moteur/tour_de_jeu.md) | Séquence du tour, arbres de décision par phase, matrices de conformité V11. **Contrat pour toute logique de jeu** (cité par CLAUDE.md). |
+| [architecture_moteur.md](Reference/moteur/architecture_moteur.md) | Carte des modules `engine/`, flux d'un step et d'une action, patterns transverses et caches. |
+| [geometrie_et_distances.md](Reference/moteur/geometrie_et_distances.md) | Plateau odd-q, résolutions x1/x5/x10, empreintes et socles, métriques de distance, unités hors table. |
+| [verticalite.md](Reference/moteur/verticalite.md) | Étages et niveaux (3D) : occupation, mouvement vertical, engagement et LoS 3D. |
+| [ligne_de_vue.md](Reference/moteur/ligne_de_vue.md) | Caches LoS et point d'invalidation unique. |
+| [allocation_attaques.md](Reference/moteur/allocation_attaques.md) | Moteur d'allocation manuelle des attaques, mutualisé tir/mêlée. |
+| [squad_multi_figurines.md](Reference/moteur/squad_multi_figurines.md) | Pipeline escouades multi-figurines (briques, caches, contrats par-figurine). |
+| [capacites.md](Reference/moteur/capacites.md) | Socle capacités : embedding, CP/battle-shock, capacités de faction, réserves — **+ §À faire : chantier 06 Armageddon**. |
+| [perf_move_pool.md](Reference/moteur/perf_move_pool.md) | Perf du noyau de pool de move : périmètre de validité, filet de validation. |
 
 ### training/ — entraînement et évaluation IA
 
@@ -46,6 +40,9 @@ Hors documentation technique : `Review/` (état de l'outil `scripts/review_plan.
 | [AI_TRAINING.md](Reference/training/AI_TRAINING.md) | Référence training/tuning : pipeline `train.py`, configs, monitoring, curriculum. |
 | [AI_OBSERVATION.md](Reference/training/AI_OBSERVATION.md) | Ce que l'agent observe : tenseurs d'entités + grille égocentrique (bloc de tailles verrouillé par test). |
 | [AI_METRICS.md](Reference/training/AI_METRICS.md) | Interprétation des métriques TensorBoard et tuning correctif. |
+| [V11_entity_encoder_pointer.md](Reference/training/V11_entity_encoder_pointer.md) | Encodeur d'entités partagé + tête pointeur (conception) — fusion prévue dans `observation_et_actions.md` (consolidation training). |
+| [move_action_space_spatial_rework.md](Reference/training/move_action_space_spatial_rework.md) | Action space spatial de move (grille égocentrique + tête spatiale) — même fusion prévue. |
+| [V11_method_lessons.md](Reference/training/V11_method_lessons.md) | Pièges et leçons de méthode V11 (copie canonique, extraite de la spec). |
 | [bots_refonte_panel.md](Reference/training/bots_refonte_panel.md) | Panel de bots 6 styles : conception, protocole de mesure (§12) — la ligne de référence courante vit dans [Chantiers/backlog/panel_reference.md](Chantiers/backlog/panel_reference.md). |
 
 Le chantier perf training (mesures + Phase 3 à lancer) est un chantier OUVERT :
@@ -99,7 +96,13 @@ Discipline, exceptions actées et outillage (checker + porte de fusion) : préfa
 - [v11/](Chantiers/v11/) — les 4 specs du programme V11 (agent_rework, tranches, phaseA,
   eval_strategy). **L'état fait foi dans Roadmap/, pas ici.**
 - [backlog/](Chantiers/backlog/) — chantiers ouverts jamais commencés, tous atteignables depuis
-  l'index roadmap (vérifié par le checker, passe 6).
+  l'index roadmap (vérifié par le checker, passe 6). Noms d'objet depuis la consolidation
+  2026-08-28 : `endless_duty.md` (spec + état mesuré fusionnés), `migration_postgresql.md`,
+  `mcts_adversaire.md`, `perf_entrainement.md`, `perf_noyau_natif_et_gzip.md`,
+  `preview_tir_position_virtuelle.md`, `reactive_stratagems_overwatch_hi.md`,
+  `curriculum_adversaires_etalons.md`, `panel_reference.md`, `refonte_documentation.md` ;
+  le chantier 06 Armageddon vit en §À faire de
+  [Reference/moteur/capacites.md](Reference/moteur/capacites.md).
 
 ## Archives/ — historique clos, jamais maintenu
 
@@ -110,6 +113,6 @@ Discipline, exceptions actées et outillage (checker + porte de fusion) : préfa
 
 ---
 
-**Entrée recommandée** : priorités → Roadmap/ROADMAP_INDEX.md · moteur → Reference/moteur/AI_TURN.md
-+ AI_IMPLEMENTATION.md · training → Reference/training/AI_TRAINING.md · armes →
+**Entrée recommandée** : priorités → Roadmap/ROADMAP_INDEX.md · moteur → Reference/moteur/tour_de_jeu.md
++ architecture_moteur.md · training → Reference/training/AI_TRAINING.md · armes →
 Reference/jeu/Weapon_rules.md · règles officielles → 40k_rules/.

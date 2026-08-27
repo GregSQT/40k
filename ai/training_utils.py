@@ -129,7 +129,7 @@ def setup_imports():
     Returns W40KEngine and register_environment function.
     """
     try:
-        # AI_TURN.md COMPLIANCE: Use compliant engine with gym interface
+        # tour_de_jeu.md COMPLIANCE: Use compliant engine with gym interface
         from engine.w40k_core import W40KEngine
 
         # Compatibility function for training system

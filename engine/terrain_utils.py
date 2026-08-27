@@ -102,7 +102,7 @@ class _FloorIndex:
         self._raw_floors_by_level: Dict[int, List[Dict[str, Any]]] = {}
         self._polys_by_level: Dict[int, List[List[Tuple[float, float]]]] = {}
         # (level, cell) -> height_inches. PAR POSITION et non par niveau : deux ruines peuvent
-        # porter un étage au même `level` à des `height_inches` différents (stage.md §4.1).
+        # porter un étage au même `level` à des `height_inches` différents (verticalite.md §4.1).
         self.height_by_cell: Dict[Tuple[int, int, int], float] = {}
         # (height_inches du plancher) -> hexes, pour `low_clearance_ground_hexes` qui compare un
         # seuil variable (la taille du modèle) à une donnée fixe.
@@ -277,7 +277,7 @@ def floor_height_at(
     Rez-de-chaussée (``level`` <= 0) = ``0.0`` (retour immédiat, cas courant, aucune itération).
     Niveau >= 1 : ``height_inches`` du floor (format B) contenant la case ``(col, row)`` à ce niveau.
     La résolution est PAR POSITION (pas un mapping global niveau->hauteur) : deux ruines peuvent
-    avoir un floor au même ``level`` avec des ``height_inches`` differents (cf. stage.md §4.1).
+    avoir un floor au même ``level`` avec des ``height_inches`` differents (cf. verticalite.md §4.1).
     Aucun repli : une figurine marquee ``level >= 1`` dont la case n'appartient a aucun floor de
     ce niveau est une incoherence d'etat -> ``ValueError`` explicite (CLAUDE.md, pas de masquage)."""
     if int(level) <= 0:

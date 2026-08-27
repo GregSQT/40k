@@ -38,7 +38,7 @@ génère un `duplicate MIME type` warn). Validé end-to-end : `nginx -t` ok + `A
 **Statut** : 🔴 **jamais commencé et déclassé.** `W40K_MOVE_POOL_NATIVE` : **0 occurrence dans le
 dépôt** (vérifié 2026-08-10). Les accélérations réelles du move pool ont été menées autrement, en
 Python, et sont closes : [`Documentation/Archives/chantiers/V11_move_pool_optimization.md`](../../Archives/chantiers/V11_move_pool_optimization.md),
-[`Documentation/Reference/moteur/V11_move_build_acceleration.md`](../../Reference/moteur/V11_move_build_acceleration.md)
+[`Documentation/Reference/moteur/perf_move_pool.md`](../../Reference/moteur/perf_move_pool.md)
 (décision **(B) STOP** du 2026-07-21, `V11_agent_rework.md` §0.22).
 
 Chantier de plusieurs semaines, **hors chemin critique** — ne pas l'ouvrir sans un profil récent

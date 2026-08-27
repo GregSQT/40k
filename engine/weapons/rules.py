@@ -3,7 +3,7 @@ rules.py - Weapon Rules System
 
 Handles parsing, validation, and application of weapon rules (e.g., RAPID_FIRE, MELTA, BLAST).
 
-AI_IMPLEMENTATION.md COMPLIANCE:
+architecture_moteur.md COMPLIANCE:
 - NO DEFAULT: Raises error if weapon references non-existent rule
 - Fail-fast: Validates all rules on engine initialization
 - No hidden values: All rule definitions in config/weapon_rules.json

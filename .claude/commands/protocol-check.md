@@ -9,12 +9,12 @@ Verify I'm following proper protocols by asking these checkpoint questions:
 - [ ] Are you 100% confident or do you need debug logs?
 
 ## Code Change Checklist
-- [ ] Does this follow AI_TURN.md rules (no wrappers, direct access)?
+- [ ] Does this follow tour_de_jeu.md rules (no wrappers, direct access)?
 - [ ] Have you used exact matching (no ellipses, no approximations)?
 - [ ] Did you explain what this impacts (rewards, learning, game flow)?
 - [ ] Is this a root cause fix or a workaround?
 
-## AI_TURN.md Compliance Checklist
+## tour_de_jeu.md Compliance Checklist
 - [ ] No wrapper patterns or state copying?
 - [ ] No default values hiding missing fields?
 - [ ] Stateless functions (no internal state storage)?

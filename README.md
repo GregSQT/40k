@@ -120,7 +120,7 @@ python ai/train.py --agent CoreAgent --scenario bot --new
 ```
 
 ### Documentation utile
-- `Documentation/Reference/moteur/AI_IMPLEMENTATION.md`
+- `Documentation/Reference/moteur/architecture_moteur.md`
 - `Documentation/Reference/training/AI_TRAINING.md`
 - `Documentation/FRONTEND_UI.md`
 - `Documentation/Reference/infra/USER_ACCESS_CONTROL.md`
@@ -185,7 +185,7 @@ python ai/train.py --agent CoreAgent --scenario bot --new
 ```
 
 ### Docs
-- `Documentation/Reference/moteur/AI_IMPLEMENTATION.md`
+- `Documentation/Reference/moteur/architecture_moteur.md`
 - `Documentation/Reference/training/AI_TRAINING.md`
 - `Documentation/FRONTEND_UI.md`
 - `Documentation/Reference/infra/USER_ACCESS_CONTROL.md`

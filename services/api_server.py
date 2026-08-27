@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 services/api_server.py - HTTP API Server for W40K Engine
-Connects AI_TURN.md compliant engine to frontend board visualization
+Connects tour_de_jeu.md compliant engine to frontend board visualization
 """
 
 import ipaddress
@@ -256,7 +256,7 @@ BOARD_PATH_MAP = {
 
 # Dossier qui PORTE les scénarios de test. Il ne suit pas la résolution jouée : les scénarios
 # sont écrits une seule fois, en subhex x5, et le moteur convertit leurs coordonnées (terrain,
-# murs, positions) vers le plateau actif — cf. Documentation/Reference/moteur/V11_board_44x60x1.md.
+# murs, positions) vers le plateau actif — cf. Documentation/Reference/moteur/geometrie_et_distances.md.
 TEST_SCENARIO_BOARD_MAP = {
     "x1": "board/44x60x5",
     "x5_44x60": "board/44x60x5",
@@ -4022,7 +4022,7 @@ def execute_action():
     _ser_t1 = time.perf_counter() if _api_perf else None
 
     # WEAPON_SELECTION: Copy available_weapons from result to active unit in game_state
-    # AI_TURN.md: After advance, _shooting_unit_execution_loop returns available_weapons
+    # tour_de_jeu.md: After advance, _shooting_unit_execution_loop returns available_weapons
     # Use active_shooting_unit from game_state (not shooterId from result which doesn't exist)
     if result and isinstance(result, dict) and "available_weapons" in result:
         active_unit_id = engine.game_state.get("active_shooting_unit")
@@ -5736,7 +5736,7 @@ if __name__ == '__main__':
     print("🚀 Starting W40K Engine API Server...")
     print("📡 Server will run on http://localhost:5001")
     print("🎮 Frontend should connect to this API")
-    print("✨ Use AI_TURN.md compliant semantic actions")
+    print("✨ Use tour_de_jeu.md compliant semantic actions")
     
     # Initialize engine on startup
     if initialize_engine():

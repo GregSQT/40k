@@ -15,9 +15,24 @@ vrai), `Documentation/Chantiers/` (vivant : contrats permanents, `v11/`, `backlo
 - **P1 structure** : ✅ livrée le 2026-08-27 — déplacements, mise à jour des scripts, des tests
   et de CLAUDE.md, README régénéré, purge des ✅ de l'index, liens réparés.
 - **P2 garde machine étendue** : ✅ livrée le 2026-08-27 — passe LIENS corpus vivant, `ANCHOR_TREES` étendu à `Reference/` (23 ancres fichier:ligne purgées d'`AI_TRAINING.md`), `VALUE_CHECKS` étendus (`TOTAL_ACTION_SIZE`, dimensions `allies_cont/allies_bin`), accumulation ROADMAP ≤ 20 ✅ ; 51 fragments morts #s0.X retirés de V11_tranches/phaseA/eval_strategy.
-- **P3 contenu** : 🟡 à faire — scission `V11_agent_rework.md` (ouvert → roadmap, §0bis → doc de
-  méthode, §0hist → archive), réécriture `AI_TURN.md`, passes unitaires (`Weapon_rules.md`,
-  `USER_ACCESS_CONTROL.md`, `AI_METRICS.md`, bandeau `AI_TRAINING.md`).
+- **P3 contenu** : ✅ livrée le 2026-08-27 — scission `V11_agent_rework.md` (§0bis → doc de
+  méthode, §0hist → archive) + passes unitaires sur 11 docs (`Weapon_rules.md`,
+  `USER_ACCESS_CONTROL.md`, `AI_METRICS.md`, bandeau `AI_TRAINING.md`…).
+- **P4 consolidation « un sujet = un document »** (décision utilisateur 2026-08-27 : noms d'objet,
+  fusion des fragments, corps re-vérifiés contre le code) :
+  - **moteur + backlog** : ✅ livrés le 2026-08-28 — `Reference/moteur/` ramené de 16 fichiers à
+    9 documents aux noms d'objet (`tour_de_jeu`, `architecture_moteur`, `geometrie_et_distances`,
+    `verticalite`, `ligne_de_vue`, `allocation_attaques`, `squad_multi_figurines`, `capacites`,
+    `perf_move_pool`) ; backlog : `endless_duty.md` (spec+état fusionnés), `migration_postgresql.md`,
+    `mcts_adversaire.md`, chantier 06 absorbé en §À faire de `capacites.md` ; 20 sources archivées
+    en `Archives/docs/` avec bandeau retour.
+  - **training** : 🟡 à faire — `observation_et_actions` (fusion `AI_OBSERVATION` +
+    `V11_entity_encoder_pointer` + `move_action_space_spatial_rework`), `entrainement`,
+    `metriques`, `panel_bots` (+ talon `panel_reference`).
+  - **jeu + outils** : 🟡 à faire — renommages d'objet + fusion des 5 docs Code_Compliance en
+    `outils_conformite`.
+  - **infra** : 🟡 à faire — renommages d'objet.
+  - **v11** : 🟡 à faire — noms d'objet pour les 4 specs (post-scission).
 
 ---
 

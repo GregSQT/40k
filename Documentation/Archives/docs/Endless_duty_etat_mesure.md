@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Chantiers/backlog/endless_duty.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # Endless Duty — mode exposé, jamais démarrable : état mesuré
 
 Mesuré le **2026-07-29**. **Le mode n'a jamais pu démarrer** : `POST /game/new` en

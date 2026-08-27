@@ -1,4 +1,4 @@
-"""Non-régression LoS pair-cache (LoS_unique_source_of_truth.md §6).
+"""Non-régression LoS pair-cache (ligne_de_vue.md §6).
 
 Construit un vrai jeu (board 44x60x5, murs walls-mc1, unités placées) puis exerce DIRECTEMENT
 chaque fonction du choke-point d'invalidation LoS sur des unités réelles, en vérifiant après chaque

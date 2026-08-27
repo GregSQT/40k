@@ -24,7 +24,7 @@ def calculate_kill_probability(unit: Dict[str, Any], weapon: Dict[str, Any],
     Calculate kill probability for a specific weapon against a target.
     Simple, standalone function - pas de dépendance complexe.
     
-    AI_IMPLEMENTATION.md COMPLIANCE: No defaults - raise error if required data missing.
+    architecture_moteur.md COMPLIANCE: No defaults - raise error if required data missing.
     """
     # Extraire stats de l'arme - NO DEFAULT, raise error si manquant
     hit_target = require_key(weapon, "ATK")

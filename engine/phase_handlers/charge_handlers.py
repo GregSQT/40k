@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-charge_handlers.py - AI_TURN.md Charge Phase Implementation
-Pure stateless functions implementing AI_TURN.md charge specification
+charge_handlers.py - tour_de_jeu.md Charge Phase Implementation
+Pure stateless functions implementing tour_de_jeu.md charge specification
 
-References: AI_TURN.md Section ⚡ CHARGE PHASE LOGIC
+References: tour_de_jeu.md Section ⚡ CHARGE PHASE LOGIC
 ZERO TOLERANCE for state storage or wrapper patterns
 """
 
@@ -1044,7 +1044,7 @@ def charge_build_activation_pool(game_state: Dict[str, Any]) -> None:
 
 def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     """
-    AI_TURN.md charge eligibility decision tree implementation.
+    tour_de_jeu.md charge eligibility decision tree implementation.
 
     Charge Eligibility Requirements:
     - Alive (in units_cache)
@@ -1166,7 +1166,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     Charge phase handler action routing with complete autonomy
     """
     # Handler self-initialization on first action
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    # tour_de_jeu.md COMPLIANCE: Direct field access with validation
     if "phase" not in game_state:
         game_state_phase = None
     else:
@@ -1185,7 +1185,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
         return True, charge_phase_end(game_state)
     
     # Get unit from action (frontend specifies which unit to charge)
-    # AI_TURN.md COMPLIANCE: Direct field access - no defaults
+    # tour_de_jeu.md COMPLIANCE: Direct field access - no defaults
     if "action" not in action:
         raise KeyError(f"Action missing required 'action' field: {action}")
     # `unit_id` est DÉCLARÉ ici, à la frontière où l'action non typée (JSON du front, dict de
@@ -1242,7 +1242,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     active_unit = require_unit_by_id(game_state, unit_id)
 
     # Flag detection for consistent behavior
-    # AI_TURN.md COMPLIANCE: Direct field access with explicit validation
+    # tour_de_jeu.md COMPLIANCE: Direct field access with explicit validation
     if "gym_training_mode" not in config:
         config_gym_mode = False  # Explicit: not in training mode if flag absent
     else:
@@ -1256,7 +1256,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
     is_gym_training = config_gym_mode or state_gym_mode
 
     # Auto-activate unit if not already activated and preview not shown
-    # AI_TURN.md COMPLIANCE: Direct field access with explicit check
+    # tour_de_jeu.md COMPLIANCE: Direct field access with explicit check
     if "active_charge_unit" not in game_state:
         active_charge_unit_exists = False
     else:
@@ -1280,7 +1280,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
 
     if not active_charge_unit_exists and action_type in ["charge", "left_click"]:
         if is_gym_training:
-            # AI_TURN.md COMPLIANCE: In gym training, ActionDecoder may construct complete charge action
+            # tour_de_jeu.md COMPLIANCE: In gym training, ActionDecoder may construct complete charge action
             # Check if action already has targetId and destCol/destRow (complete charge action)
             if "targetId" in action and "destCol" in action and "destRow" in action:
                 # Action already has target and destination - execute charge directly, no waiting needed
@@ -1360,7 +1360,7 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
             pool_ids = [str(u) for u in require_key(game_state, "charge_activation_pool")]
             if unit_id in pool_ids:
                 # Unit in charge pool but not activated (e.g. API end_phase without activate_unit).
-                # Match active-unit skip: had_valid_destinations=True (AI_TURN.md line 515 path).
+                # Match active-unit skip: had_valid_destinations=True (tour_de_jeu.md line 515 path).
                 return _handle_skip_action(game_state, active_unit, had_valid_destinations=True)
             # CRITICAL: In gym training mode, skip must NOT trigger activation or movement.
             # Determine had_valid_destinations without executing charge logic.
@@ -1381,14 +1381,14 @@ def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], a
                 return _handle_skip_action(game_state, active_unit, had_valid_destinations=had_valid_destinations)
             # Unit not in charge pool and not active — ignore (e.g. stale action)
             return True, {"action": "no_effect", "unitId": unit_id, "reason": "unit_not_active_in_charge_phase"}
-        # AI_TURN.md Line 515: Agent chooses wait (has valid destinations, chooses to skip)
+        # tour_de_jeu.md Line 515: Agent chooses wait (has valid destinations, chooses to skip)
         return _handle_skip_action(game_state, active_unit, had_valid_destinations=True)
 
     elif action_type == "left_click":
         return charge_click_handler(game_state, unit_id, action)
 
     elif action_type == "right_click":
-        # AI_TURN.md Line 536: Human cancels (right-click on active unit)
+        # tour_de_jeu.md Line 536: Human cancels (right-click on active unit)
         return _handle_skip_action(game_state, active_unit, had_valid_destinations=False)
 
     elif action_type == "invalid":
@@ -1436,7 +1436,7 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
         )
 
     # Clean flag detection
-    # AI_TURN.md COMPLIANCE: Direct field access with explicit validation
+    # tour_de_jeu.md COMPLIANCE: Direct field access with explicit validation
     if "gym_training_mode" not in config:
         config_gym_mode = False  # Explicit: not in training mode if flag absent
     else:
@@ -1459,10 +1459,10 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
     current_player = require_key(game_state, "current_player")
     is_pve_ai = config_pve_mode and current_player == 2
 
-    # AI_TURN.md COMPLIANCE: In gym training, AI executes charge directly without waiting_for_player
+    # tour_de_jeu.md COMPLIANCE: In gym training, AI executes charge directly without waiting_for_player
     # PvE AI uses the same auto-execution path to avoid waiting for human input.
     if (is_gym_training or is_pve_ai) and isinstance(execution_result, tuple) and execution_result[0]:
-        # AI_TURN.md COMPLIANCE: Direct field access
+        # tour_de_jeu.md COMPLIANCE: Direct field access
         if "waiting_for_player" not in execution_result[1]:
             waiting_for_player = False
         else:
@@ -1482,7 +1482,7 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
             valid_targets = execution_result[1]["valid_targets"]
 
             if valid_targets:
-                # AI_TURN.md: AI selects target automatically and executes charge directly
+                # tour_de_jeu.md: AI selects target automatically and executes charge directly
                 # Do NOT return waiting_for_player=True - execute charge automatically
                 if is_pve_ai:
                     selected_target = _ai_select_charge_target_pve(game_state, unit, valid_targets)
@@ -1500,7 +1500,7 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
                     )
                 
                 # Execute target selection handler which will roll 2d6, build destinations, and execute charge
-                # This follows AI_TURN.md: roll → select target → build destinations → select destination → execute
+                # This follows tour_de_jeu.md: roll → select target → build destinations → select destination → execute
                 from engine.phase_handlers.charge_handlers import charge_target_selection_handler
                 target_action = {
                     "action": "charge",
@@ -1518,7 +1518,7 @@ def _handle_unit_activation(game_state: Dict[str, Any], unit: Dict[str, Any], co
 
 def _ai_select_charge_target_pve(game_state: Dict[str, Any], unit: Dict[str, Any], valid_targets: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """
-    PvE AI selects charge target using priority logic per AI_TURN.md.
+    PvE AI selects charge target using priority logic per tour_de_jeu.md.
 
     Priority order:
     1. Enemy closest to death (lowest HP_CUR)
@@ -3008,9 +3008,9 @@ def charge_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tupl
 
 def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, Any], dest_col: int, dest_row: int, target_ids: List[str], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """
-    AI_TURN.md charge execution with destination validation.
+    tour_de_jeu.md charge execution with destination validation.
 
-    Implements AI_TURN.md charge restrictions:
+    Implements tour_de_jeu.md charge restrictions:
     - Must end adjacent to target enemy
     - Within charge_range (2d6 roll result)
     - Path must be reachable via BFS pathfinding
@@ -3068,7 +3068,7 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
                 "roll_subhex": _roll_subhex,
             }
 
-    # Validate destination per AI_TURN.md charge rules
+    # Validate destination per tour_de_jeu.md charge rules
     _t_valid0 = time.perf_counter() if _perf else None
     if not _is_valid_charge_destination(game_state, dest_col, dest_row, unit, target_ids, charge_roll, config):
         return False, {"error": "invalid_charge_destination", "target": (dest_col, dest_row), "action": "charge"}
@@ -3208,7 +3208,7 @@ def _attempt_charge_to_destination(game_state: Dict[str, Any], unit: Dict[str, A
 def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int, unit: Dict[str, Any],
                                  target_ids: List[str], charge_roll: int, config: Dict[str, Any]) -> bool:
     """
-    AI_TURN.md charge destination validation.
+    tour_de_jeu.md charge destination validation.
 
     Charge destination requirements:
     - Within board bounds
@@ -3261,8 +3261,8 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     """
     Check if unit has at least one valid charge target.
 
-    AI_TURN.md Line 495: "Enemies exist within charge_max_distance hexes?"
-    AI_TURN.md Line 562: "Enemy units within charge_max_distance hexes (via pathfinding)"
+    tour_de_jeu.md Line 495: "Enemies exist within charge_max_distance hexes?"
+    tour_de_jeu.md Line 562: "Enemy units within charge_max_distance hexes (via pathfinding)"
 
     CRITICAL: Must use BFS pathfinding distance, not straight-line distance.
     Build reachable hexes within max charge distance and check if any enemy
@@ -4290,7 +4290,7 @@ def charge_clear_preview(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
 def charge_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
     """Route charge click actions"""
-    # AI_TURN.md COMPLIANCE: Direct field access
+    # tour_de_jeu.md COMPLIANCE: Direct field access
     if "clickTarget" not in action:
         click_target = "elsewhere"
     else:
@@ -4304,7 +4304,7 @@ def charge_click_handler(game_state: Dict[str, Any], unit_id: str, action: Dict[
     elif click_target == "friendly_unit":
         return False, {"error": "unit_switch_not_implemented", "action": "charge"}
     elif click_target == "active_unit":
-        # AI_TURN.md Line 1409: Left click on active_unit -> Charge postponed
+        # tour_de_jeu.md Line 1409: Left click on active_unit -> Charge postponed
         # Clear preview but keep unit in pool (different from skip which removes from pool)
         charge_clear_preview(game_state)
         # Clear charge roll and target selection if exists (postpone discards the roll)
@@ -4606,8 +4606,8 @@ def charge_target_selection_handler(game_state: Dict[str, Any], unit_id: str, ac
             "waiting_for_player": True  # Wait for destination selection
         }
     else:
-        # AI_TURN.md COMPLIANCE: In gym training, AI selects destination automatically and executes charge
-        # AI_TURN.md lines 1393-1396: Select destination hex → Move unit → end_activation
+        # tour_de_jeu.md COMPLIANCE: In gym training, AI selects destination automatically and executes charge
+        # tour_de_jeu.md lines 1393-1396: Select destination hex → Move unit → end_activation
         # No preview needed, auto-select first valid destination
         preview_data = {}
         game_state["preview_hexes"] = []
@@ -6046,7 +6046,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
 
     This is called AFTER target selection and roll (charge_target_selection_handler).
     """
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    # tour_de_jeu.md COMPLIANCE: Direct field access with validation
     if "destCol" not in action:
         raise KeyError(f"Action missing required 'destCol' field: {action}")
     if "destRow" not in action:
@@ -6211,7 +6211,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     action_reward = 0.0
     action_name = "CHARGE"
 
-    # AI_TURN.md COMPLIANCE: Direct field access with validation
+    # tour_de_jeu.md COMPLIANCE: Direct field access with validation
     _t_rew0 = time.perf_counter() if _perf else None
     reward_configs = require_key(game_state, "reward_configs")
     global _unit_registry_singleton
@@ -6291,7 +6291,7 @@ def charge_destination_selection_handler(game_state: Dict[str, Any], unit_id: st
     # Clear preview
     charge_clear_preview(game_state)
 
-    # AI_TURN.md EXACT: end_activation(Arg1, Arg2, Arg3, Arg4, Arg5)
+    # tour_de_jeu.md EXACT: end_activation(Arg1, Arg2, Arg3, Arg4, Arg5)
     _t_ea0 = time.perf_counter() if _perf else None
     result = end_activation(
         game_state, unit,
@@ -6343,7 +6343,7 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
     """
     Handle skip action during charge phase
 
-    Two cases per AI_TURN.md:
+    Two cases per tour_de_jeu.md:
     - Line 515: Valid destinations exist, agent chooses wait -> end_activation (WAIT, 1, PASS, CHARGE)
     - Line 518/536: No valid destinations OR cancel -> end_activation (PASS, 0, PASS, CHARGE)
     """
@@ -6359,9 +6359,9 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
 
     charge_clear_preview(game_state)
 
-    # AI_TURN.md EXACT: Different parameters based on whether valid destinations existed
+    # tour_de_jeu.md EXACT: Different parameters based on whether valid destinations existed
     if had_valid_destinations:
-        # AI_TURN.md Line 515: Agent actively chose to wait (valid destinations available)
+        # tour_de_jeu.md Line 515: Agent actively chose to wait (valid destinations available)
         result = end_activation(
             game_state, unit,
             WAIT,          # Arg1: Log wait action
@@ -6371,7 +6371,7 @@ def _handle_skip_action(game_state: Dict[str, Any], unit: Dict[str, Any], had_va
             0              # Arg5: No error logging
         )
     else:
-        # AI_TURN.md Line 518/536/542: No valid destinations or cancel
+        # tour_de_jeu.md Line 518/536/542: No valid destinations or cancel
         result = end_activation(
             game_state, unit,
             PASS,          # Arg1: Pass logging (no action taken)

@@ -1,5 +1,5 @@
 """
-Hex grid primitives — single source of truth (Boardx10-final §2.2, §2.3).
+Hex grid primitives — single source of truth (geometrie_et_distances.md (ex-Boardx10-final) §2.2, §2.3).
 
 Coordinate system: offset odd-q
   - (col, row) with 0 <= col < COLS, 0 <= row < ROWS
@@ -2847,7 +2847,7 @@ def _point_segment_dist_sq(
 # `cur→nb` à la capsule et écarte `nb` si le socle y chevaucherait un mur → un socle rond ne
 # peut ni traverser ni se centrer sur un goulot plus étroit que son diamètre. Sans ce test,
 # le flood cellule-par-cellule se faufilait partout (la clearance ne bornait que le raccourci
-# any-angle). Cf. « 4.0-bis » de Documentation/Reference/moteur/Distance management.md.
+# any-angle). Cf. « 4.0-bis » de Documentation/Reference/moteur/geometrie_et_distances.md.
 # ---------------------------------------------------------------------------
 
 _SEG_TOL: float = 1e-9

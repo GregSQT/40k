@@ -1,3 +1,5 @@
+> **⛔ ABSORBÉ le 2026-08-27 par `Documentation/Reference/moteur/capacites.md`** (consolidation Reference) — conservé comme source historique, ne plus maintenir ni citer.
+
 # Chantier 06 — Capacités d'unité Armageddon (6 primitives, 25 capacités)
 > 🔴 **OUVERT — 0/6 passes** (vérifié code le 2026-08-10 : aucun nom générique des 6 primitives n'existe dans `config/unit_rules.json`). Tous les prérequis (01→05) sont livrés.
 >

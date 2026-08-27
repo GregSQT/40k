@@ -499,7 +499,7 @@ IA. Côté observation, les bits `PISTOL` et `ASSAULT` décrivent donc une capac
 gym — ils sont **conservés** (l'effet PvP est réel) avec la réserve écrite dans
 `observation_weapon_profiles.py`.
 
-**Statut : ✅ FERMÉ le 2026-07-26 par la tranche **T-B** du chantier dédié [`V11_entity_encoder_pointer.md`](../../Reference/moteur/V11_entity_encoder_pointer.md) (tranche T-B), avec 5 autres trous trouvés le même jour.** Le résolveur `resolve_squad_shooting_type` ouvre 10.05 et 10.06, le masque teste toute arme éligible, et le volet MONSTER/VEHICLE de 10.06 est implémenté (13 tests, mutations → 5 rouges). ⚠️ **Résidu** : le chemin PvP/mono ne connaît toujours pas le volet MONSTER/VEHICLE — voir §1.9 du chantier. Périmètre d'origine — c'est une **nouvelle règle à implémenter**
+**Statut : ✅ FERMÉ le 2026-07-26 par la tranche **T-B** du chantier dédié [`V11_entity_encoder_pointer.md`](../../Reference/training/V11_entity_encoder_pointer.md) (tranche T-B), avec 5 autres trous trouvés le même jour.** Le résolveur `resolve_squad_shooting_type` ouvre 10.05 et 10.06, le masque teste toute arme éligible, et le volet MONSTER/VEHICLE de 10.06 est implémenté (13 tests, mutations → 5 rouges). ⚠️ **Résidu** : le chemin PvP/mono ne connaît toujours pas le volet MONSTER/VEHICLE — voir §1.9 du chantier. Périmètre d'origine — c'est une **nouvelle règle à implémenter**
 (deux types de tir, avec restriction d'armes et restriction de cibles), pas un correctif de la
 tranche observation. Périmètre estimé, à arbitrer : (1) gate `build_squad_action_mask` ;
 (2) restriction « seules les armes [ASSAULT] » / « seules les armes [PISTOL] » à la sélection
@@ -559,7 +559,7 @@ Audit refait de bout en bout après relecture des PDFs **19**, **24** (p5-p8 : L
 LONE OPERATIVE 24.24, PRECISION 24.28, SUPPORT 24.34), **25** (p1-p3 : starting strength,
 destroyed, mixed keywords, revived), **05** p5 et **08** (battle-shock 08.03).
 
-**Conforme (vérifié clause par clause, cf. la table règle 19 d'[AI_TURN.md](../../Reference/moteur/AI_TURN.md)) :**
+**Conforme (vérifié clause par clause, cf. la table règle 19 d'[tour_de_jeu.md](../../Reference/moteur/tour_de_jeu.md)) :**
 19.01 (les 4 gardes du fold + les clauses structurelles), 19.02 (T bodyguard + repli
 leader-only + trigger de destruction), 19.03 (union des keywords / keywords propres par
 figurine). Clauses connexes sans objet et documentées : Lone Operative (aucune donnée),
