@@ -111,7 +111,12 @@ def _mask(models=None, mover=None):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _forbidden_offsets(mover_shape, mover_size, orient, enemy_col, enemy_row, span=9):
-    """Offsets interdits autour d'un ennemi PLACÉ, mesurés à ses coordonnées réelles."""
+    """Offsets strictement interdits autour d'un ennemi PLACÉ, mesurés à ses coordonnées réelles.
+
+    Les offsets dont la distance tombe dans la bande EZ_KERNEL_TIE_EPS_NORM autour de THR sont
+    EXCLUS : le moteur les re-mesure à la position réelle (``_resolve_ez_ties_exactly``) et ils
+    ne font pas partie du domaine où l'invariance par translation est censée tenir.
+    """
     enemy = Socle(shape=ENEMY[0], base_size=ENEMY[1], col=enemy_col, row=enemy_row,
                   fp=None, orientation=0)
     out = set()
@@ -119,7 +124,8 @@ def _forbidden_offsets(mover_shape, mover_size, orient, enemy_col, enemy_row, sp
         for dr in range(-span, span + 1):
             mover = Socle(shape=mover_shape, base_size=mover_size, col=enemy_col + dc,
                           row=enemy_row + dr, fp=None, orientation=orient)
-            if euclidean_edge_distance(mover, enemy, max_distance=THR) <= THR:
+            d = euclidean_edge_distance(mover, enemy, max_distance=THR + EZ_KERNEL_TIE_EPS_NORM)
+            if d <= THR - EZ_KERNEL_TIE_EPS_NORM:
                 out.add((dc, dr))
     return out
 
@@ -136,12 +142,17 @@ def test_the_forbidden_pattern_only_depends_on_the_column_parity(mover_shape, mo
     Le décalage d'une demi-ligne une colonne sur deux est la SEULE dépendance admise — d'où deux
     noyaux et non un.
     """
+    key_size = tuple(mover_size) if isinstance(mover_size, list) else mover_size
+    key_enemy = tuple(ENEMY[1]) if isinstance(ENEMY[1], list) else ENEMY[1]
+    _, _, dcol_max, _ = _ez_offset_kernels(
+        mover_shape, key_size, orient, ENEMY[0], key_enemy, 0, THR, True,
+    )
     for parity in (0, 1):
         ancres = [(100, 100), (100, 137), (156, 203), (12, 9)]
         ref = None
         for col, row in ancres:
             col = col - (col & 1) + parity
-            got = _forbidden_offsets(mover_shape, mover_size, orient, col, row)
+            got = _forbidden_offsets(mover_shape, mover_size, orient, col, row, span=dcol_max)
             if ref is None:
                 ref = got
             else:
@@ -279,8 +290,8 @@ def test_the_mask_agrees_with_the_rule_cell_by_cell(euclidean):
     mask = _mask()
     enemy_socles = [_socle(*ENEMY, c, r) for c, r in WITNESS_ENEMY_MODELS.values()]
     desaccords = []
-    for col in range(170, 200, 2):
-        for row in range(195, 240, 2):
+    for col in range(170, 200):
+        for row in range(195, 240):
             mover = _socle(*MOVER, col, row)
             engaged = any(
                 euclidean_edge_distance(mover, e, max_distance=THR) <= THR for e in enemy_socles
