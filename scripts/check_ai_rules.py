@@ -132,6 +132,9 @@ def check_cache_recalculations(path: Path, text: str) -> List[RuleViolation]:
         # (jamais supprime), donc cet appel ne se produit qu'AVANT la 1ere phase move/shoot/charge
         # de la partie : une seule construction, puis la branche `if` reutilise. Pas de recalcul par step.
         "build_squad_grid",
+        # Helper de phase_start uniquement — appelé par command/deployment/fight phase_start.
+        # Le checker ne remonte pas les appelants ; l'allowlist évite le faux positif.
+        "_build_enemy_adjacent_hexes_all_players",
     }
     
     # Track whether we're inside a reset function

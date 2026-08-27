@@ -1780,21 +1780,23 @@ def _ez_offset_kernels(
     en dérivent, arrondies vers le haut : la première case exclue est au moins à 1,5 unité
     au-delà de la borne, très loin de ``EPS``.
     """
-    from engine.hex_utils import Socle, euclidean_edge_distance
+    from engine.hex_utils import (
+        Socle, _oval_local_outline, _square_local_outline,
+        _batch_poly_poly_dist, _batch_circle_poly_dist, _batch_poly_circle_dist,
+    )
 
     mover_size = list(mover_bs) if isinstance(mover_bs, tuple) else mover_bs
     enemy_size = list(enemy_bs) if isinstance(enemy_bs, tuple) else enemy_bs
     # Origine canonique : seule la PARITÉ de la colonne ennemie compte (cf. docstring).
     origin_col, origin_row = (100 if enemy_col_is_even else 101), 100
-    enemy_socle = Socle(
-        shape=enemy_shape, base_size=enemy_size, col=origin_col, row=origin_row,
-        fp=None, orientation=enemy_orient,
-    )
     mover_radius = Socle(
         shape=mover_shape, base_size=mover_size, col=0, row=0, fp=None,
         orientation=mover_orient,
     ).bounding_radius()
-    enemy_radius = enemy_socle.bounding_radius()
+    enemy_radius = Socle(
+        shape=enemy_shape, base_size=enemy_size, col=origin_col, row=origin_row,
+        fp=None, orientation=enemy_orient,
+    ).bounding_radius()
     reach = ez_norm + mover_radius + enemy_radius
     dcol_max = int(reach / 1.5) + 1
     drow_max = int(reach / _HEX_ROW_STEP) + 1
@@ -1804,45 +1806,67 @@ def _ez_offset_kernels(
     H = 2 * drow_max + 1
 
     # ── Distances centre-à-centre vectorisées ─────────────────────────────────────────────
-    # dx = dcol × 1,5  (abscisse hex, indépendant de la parité)
-    # dy = drow × √3  ±  (dcol & 1) × √3/2  selon parité de la colonne ennemie (cf. _hex_center).
-    #   colonne ennemie PAIRE  : ey = row×√3 + (mover_col & 1)×√3/2 + √3/2 − (0 + √3/2) → +
-    #   colonne ennemie IMPAIRE: ...−(1 × √3/2) → −
-    # Dérivé de _hex_center ; vérifié numériquement sur 6 paires corner/mid pour les deux parités.
     sqrt3 = _HEX_ROW_STEP
     dcol_int = np.arange(-dcol_max, dcol_max + 1, dtype=np.int64)   # (W,)
     drow_f   = np.arange(-drow_max, drow_max + 1, dtype=np.float64) # (H,)
-    dx_1d = dcol_int.astype(np.float64) * 1.5                                   # (W,)
+    dx_1d = dcol_int.astype(np.float64) * 1.5
     parity_sign = 1.0 if enemy_col_is_even else -1.0
-    parity_cor  = (dcol_int & 1).astype(np.float64) * parity_sign * (sqrt3 / 2.0)  # (W,)
-    # center_dist[i, j] = ‖(dx_1d[i], drow_f[j]×√3 + parity_cor[i])‖
+    parity_cor  = (dcol_int & 1).astype(np.float64) * parity_sign * (sqrt3 / 2.0)
     dy_2d = drow_f[np.newaxis, :] * sqrt3 + parity_cor[:, np.newaxis]  # (W, H)
     center_dist = np.hypot(dx_1d[:, np.newaxis], dy_2d)                 # (W, H)
 
-    # ── CHEMIN NON ROND : élagage par disques circonscrits ───────────────────────────────
-    # Minorant sur le gap : lower = center_dist − r_mover_bound − r_ennemi_bound.
-    # Les cases du COIN du noyau rectangulaire (≈ 22 %) vérifient lower > ez_norm + EPS et
-    # peuvent être écartées sans appeler euclidean_edge_distance.
-    # `max_distance` desserré d'une unité : on doit lire le gap des deux côtés de ez_norm.
-    lower         = center_dist - mover_radius - enemy_radius  # (W, H)
-    candidate_mask = lower <= ez_norm + EPS                    # (W, H)
-    exact_cap = ez_norm + 1.0
+    # ── Élagage par disques circonscrits ─────────────────────────────────────────────────
+    lower          = center_dist - mover_radius - enemy_radius  # (W, H)
+    candidate_mask = lower <= ez_norm + EPS                     # (W, H)
 
     sure = np.zeros((W, H), dtype=bool)
     tie  = np.zeros((W, H), dtype=bool)
     nz_i, nz_j = np.nonzero(candidate_mask)
-    for k in range(len(nz_i)):
-        i, j = int(nz_i[k]), int(nz_j[k])
-        mover_socle = Socle(
-            shape=mover_shape, base_size=mover_size,
-            col=origin_col + int(dcol_int[i]), row=origin_row + j - drow_max,
-            fp=None, orientation=mover_orient,
+    N = len(nz_i)
+    if N == 0:
+        return sure, tie, dcol_max, drow_max
+
+    # ── Centres absolus des candidats ────────────────────────────────────────────────────
+    cx_enemy, cy_enemy = _hex_center(origin_col, origin_row)
+    cx_cand = cx_enemy + dx_1d[nz_i]          # (N,)
+    cy_cand = cy_enemy + dy_2d[nz_i, nz_j]   # (N,)
+
+    # ── Contours géométriques (polygone relatif ou rayon) ────────────────────────────────
+    if mover_shape == "oval":
+        mover_rel = np.array(_oval_local_outline(mover_size[0], mover_size[1], mover_orient))
+    elif mover_shape == "square":
+        mover_rel = np.array(_square_local_outline(mover_size, mover_orient))
+    else:
+        mover_rel = None  # round
+        r_mover = round_base_radius_norm(
+            mover_size if not isinstance(mover_size, list) else mover_size[0]
         )
-        gap = euclidean_edge_distance(mover_socle, enemy_socle, max_distance=exact_cap)
-        if gap <= ez_norm - EPS:
-            sure[i, j] = True
-        elif gap <= ez_norm + EPS:
-            tie[i, j] = True
+
+    if enemy_shape == "oval":
+        enemy_rel = np.array(_oval_local_outline(enemy_size[0], enemy_size[1], enemy_orient))
+        enemy_abs = enemy_rel + np.array([cx_enemy, cy_enemy])
+    elif enemy_shape == "square":
+        enemy_rel = np.array(_square_local_outline(enemy_size, enemy_orient))
+        enemy_abs = enemy_rel + np.array([cx_enemy, cy_enemy])
+    else:
+        enemy_abs = None  # round
+        r_enemy = round_base_radius_norm(
+            enemy_size if not isinstance(enemy_size, list) else enemy_size[0]
+        )
+
+    # ── Dispatch vectorisé ───────────────────────────────────────────────────────────────
+    if mover_rel is None:
+        # round mover × poly enemy
+        gaps = _batch_circle_poly_dist(r_mover, enemy_abs, cx_cand, cy_cand)
+    elif enemy_abs is None:
+        # poly mover × round enemy
+        gaps = _batch_poly_circle_dist(mover_rel, r_enemy, cx_enemy, cy_enemy, cx_cand, cy_cand)
+    else:
+        # poly mover × poly enemy
+        gaps = _batch_poly_poly_dist(mover_rel, enemy_abs, cx_cand, cy_cand)
+
+    sure[nz_i, nz_j] = gaps <= ez_norm - EPS
+    tie[nz_i, nz_j]  = (gaps > ez_norm - EPS) & (gaps <= ez_norm + EPS)
     return sure, tie, dcol_max, drow_max
 
 
