@@ -532,3 +532,10 @@ def test_the_pool_prunes_enemies_with_the_socle_it_measures_with(monkeypatch):
         f"prune {vus['prune']} et masque {vus['masque']} ne voient pas le même socle : la prune "
         "élaguera des ennemis que le masque aurait interdits"
     )
+    # Les deux doivent voir le socle de la FIGURINE (BASE_SIZE=20), pas celui de l'escouade (=6).
+    # Si les deux régressaient vers le socle d'escouade, l'égalité ci-dessus passerait tout de
+    # même et la régression serait invisible.
+    assert vus["prune"][1] == "20", (
+        f"prune reçoit BASE_SIZE={vus['prune'][1]} au lieu de 20 : socle d'escouade utilisé à la "
+        "place du socle de la figurine"
+    )
