@@ -20,7 +20,7 @@ import shutil
 import atexit
 import numpy as np
 import re
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from typing import Callable, Optional, Dict, List, Any, Tuple, TYPE_CHECKING
 
@@ -542,8 +542,7 @@ def _filter_scenarios_from_config(
         raise ValueError("callback_params.bot_eval_scenarios cannot be an empty list")
 
     requested_names = [str(name) for name in requested]
-    seen: set[str] = set()
-    duplicates = [n for n in requested_names if n in seen or seen.add(n)]  # type: ignore[func-returns-value]
+    duplicates = [n for n, c in Counter(requested_names).items() if c > 1]
     if duplicates:
         raise ValueError(
             f"callback_params.bot_eval_scenarios contient des doublons : {duplicates}"
@@ -1689,11 +1688,12 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
         tasks: List[Dict[str, Any]] = []
         for bot_name in active_bot_names:
+            bot_name_hash = sum(ord(c) for c in bot_name)
             for scenario_index, scenario_file in enumerate(scenario_list):
                 scenario_name = _scenario_name_from_file(base_agent_key, scenario_file)
                 task_scenario_file = scenario_file
                 if scenario_pool == "holdout" and eval_ref_strict and materialize_eval_refs:
-                    wall_ref = eval_wall_refs[(scenario_index + sum(ord(c) for c in bot_name)) % len(eval_wall_refs)]
+                    wall_ref = eval_wall_refs[(scenario_index + bot_name_hash) % len(eval_wall_refs)]
                     task_scenario_file = _materialize_eval_scenario_refs(
                         scenario_path=scenario_file,
                         wall_ref=wall_ref,
