@@ -963,7 +963,7 @@ def _eval_worker_task(
         checkpoint_scenario_episodes=task.get("checkpoint_scenario_episodes"),
         # Le compteur local du wrapper doit demarrer la ou la tranche commence : c'est ce qui
         # rend le decoupage invisible au siege, au self-play et au RNG du bot.
-        episode_start_index=int(task.get("ep_offset", 0)),
+        episode_start_index=int(require_key(task, "ep_offset")),
         **{k: config_params[k] for k in [
             "training_config_name", "rewards_config_name", "controlled_agent",
             "base_agent_key", "debug_mode", "agent_seat_mode", "agent_seat_seed"
@@ -1043,7 +1043,7 @@ def _eval_worker_task(
     # font que `_episode_seed` — fonction pure de (base_seed, bot_name, scenario_index, ep_idx) —
     # rend exactement les memes graines que la boucle sequentielle, quel que soit le decoupage.
     # Defaut 0 : le chemin bot, qui ne decoupe pas, est inchange bit-a-bit.
-    ep_offset = int(task.get("ep_offset", 0))
+    ep_offset = int(require_key(task, "ep_offset"))
     for ep_idx in range(ep_offset, ep_offset + int(task["n_episodes"])):
         ep_seed = _episode_seed(task["base_seed"], task["bot_name"], task["scenario_index"], ep_idx)
         random.seed(ep_seed)
@@ -1702,6 +1702,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     "scenario_file": task_scenario_file,
                     "scenario_name": scenario_name,
                     "n_episodes": episodes_for_scenario,
+                    "ep_offset": 0,
                     "base_seed": base_seed,
                     "scenario_index": scenario_index,
                     "deterministic": deterministic,
@@ -2314,7 +2315,7 @@ def evaluate_against_checkpoints(
     results: Dict[str, Any] = {}
     failed_by_label: Dict[str, int] = {}
     for _zip_path, score_label in compatible_archives:
-        label_results = by_label.get(score_label, [])
+        label_results = by_label[score_label]
         wins = sum(int(require_key(r, "wins")) for r in label_results)
         losses = sum(int(require_key(r, "losses")) for r in label_results)
         draws = sum(int(require_key(r, "draws")) for r in label_results)

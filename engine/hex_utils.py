@@ -2430,6 +2430,224 @@ def _poly_poly_edge_dist(pa: List[Tuple[float, float]], pb: List[Tuple[float, fl
     return math.sqrt(best)
 
 
+def _vec_point_in_polygon(
+    px: "np.ndarray", py: "np.ndarray", poly: "np.ndarray"
+) -> "np.ndarray":
+    """Ray casting vectorisé : N points (px, py) (N,) vs polygone convexe (M, 2) → bool (N,)."""
+    n = len(poly)
+    xi = poly[:, 0]
+    yi = poly[:, 1]
+    idx_nxt = np.roll(np.arange(n), -1)
+    xj = xi[idx_nxt]
+    yj = yi[idx_nxt]
+    px2 = px[:, np.newaxis]       # (N, 1)
+    py2 = py[:, np.newaxis]
+    yi2 = yi[np.newaxis, :]       # (1, M)
+    yj2 = yj[np.newaxis, :]
+    xi2 = xi[np.newaxis, :]
+    xj2 = xj[np.newaxis, :]
+    cond1 = (yi2 > py2) != (yj2 > py2)                    # (N, M)
+    ydiff = np.where(cond1, yj2 - yi2, 1.0)               # safe divisor
+    cond2 = px2 < (xj2 - xi2) * (py2 - yi2) / ydiff + xi2
+    return (cond1 & cond2).sum(axis=1) % 2 == 1           # (N,) bool
+
+
+def _batch_circle_poly_dist(
+    r_mover: float,
+    enemy_abs: "np.ndarray",   # (nb, 2) sommets absolus du polygone ennemi
+    cx: "np.ndarray",          # (N,) centres x des cercles mobile
+    cy: "np.ndarray",          # (N,) centres y
+) -> "np.ndarray":             # (N,) distances ≥ 0
+    """Distance bord-à-bord vectorisée : N cercles (rayon fixe) vs 1 polygone convexe fixe."""
+    N = len(cx)
+    if N == 0:
+        return np.empty(0, dtype=np.float64)
+    nb = len(enemy_abs)
+    inside = _vec_point_in_polygon(cx, cy, enemy_abs)    # (N,) bool
+    ax_e = enemy_abs[:, 0]                               # (nb,)
+    ay_e = enemy_abs[:, 1]
+    bx_e = ax_e[np.roll(np.arange(nb), -1)]
+    by_e = ay_e[np.roll(np.arange(nb), -1)]
+    ddx = bx_e - ax_e                                   # (nb,)
+    ddy = by_e - ay_e
+    seg_sq = np.where(ddx * ddx + ddy * ddy > 0, ddx * ddx + ddy * ddy, 1.0)  # (nb,)
+    px_n = cx[:, np.newaxis]                             # (N, 1)
+    py_n = cy[:, np.newaxis]
+    t_c = np.clip(
+        ((px_n - ax_e[np.newaxis, :]) * ddx[np.newaxis, :]
+         + (py_n - ay_e[np.newaxis, :]) * ddy[np.newaxis, :]) / seg_sq[np.newaxis, :],
+        0.0, 1.0,
+    )                                                    # (N, nb)
+    qx = ax_e[np.newaxis, :] + t_c * ddx[np.newaxis, :]
+    qy = ay_e[np.newaxis, :] + t_c * ddy[np.newaxis, :]
+    d2 = (px_n - qx) ** 2 + (py_n - qy) ** 2          # (N, nb)
+    min_d = np.sqrt(d2.min(axis=1))                     # (N,)
+    return np.where(inside, 0.0, np.maximum(0.0, min_d - r_mover))
+
+
+def _batch_poly_circle_dist(
+    mover_rel: "np.ndarray",   # (na, 2) sommets relatifs au centre du polygone mobile
+    r_enemy: float,
+    enemy_cx: float,
+    enemy_cy: float,
+    cx: "np.ndarray",          # (N,) centres x des polygones mobiles
+    cy: "np.ndarray",          # (N,) centres y
+) -> "np.ndarray":             # (N,) distances ≥ 0
+    """Distance bord-à-bord vectorisée : N polygones (translaté mover_rel) vs 1 cercle fixe."""
+    N = len(cx)
+    if N == 0:
+        return np.empty(0, dtype=np.float64)
+    na = len(mover_rel)
+    rel_ex = enemy_cx - cx                              # (N,)
+    rel_ey = enemy_cy - cy
+    inside = _vec_point_in_polygon(rel_ex, rel_ey, mover_rel)  # (N,) bool
+    ax_m = mover_rel[:, 0]                              # (na,)
+    ay_m = mover_rel[:, 1]
+    bx_m = ax_m[np.roll(np.arange(na), -1)]
+    by_m = ay_m[np.roll(np.arange(na), -1)]
+    ddx = bx_m - ax_m
+    ddy = by_m - ay_m
+    seg_sq = np.where(ddx * ddx + ddy * ddy > 0, ddx * ddx + ddy * ddy, 1.0)
+    px_n = rel_ex[:, np.newaxis]                        # (N, 1)
+    py_n = rel_ey[:, np.newaxis]
+    t_c = np.clip(
+        ((px_n - ax_m[np.newaxis, :]) * ddx[np.newaxis, :]
+         + (py_n - ay_m[np.newaxis, :]) * ddy[np.newaxis, :]) / seg_sq[np.newaxis, :],
+        0.0, 1.0,
+    )                                                   # (N, na)
+    qx = ax_m[np.newaxis, :] + t_c * ddx[np.newaxis, :]
+    qy = ay_m[np.newaxis, :] + t_c * ddy[np.newaxis, :]
+    d2 = (px_n - qx) ** 2 + (py_n - qy) ** 2
+    min_d = np.sqrt(d2.min(axis=1))
+    return np.where(inside, 0.0, np.maximum(0.0, min_d - r_enemy))
+
+
+def _batch_poly_poly_dist(
+    mover_rel: "np.ndarray",   # (na, 2) sommets relatifs au centre du polygone mobile
+    enemy_abs: "np.ndarray",   # (nb, 2) sommets absolus du polygone ennemi
+    cx: "np.ndarray",          # (N,) centres x des polygones mobiles
+    cy: "np.ndarray",          # (N,) centres y
+) -> "np.ndarray":             # (N,) distances ≥ 0
+    """Distance bord-à-bord vectorisée : N polygones (translaté mover_rel) vs 1 polygone fixe.
+
+    Algorithme : containment par ray-casting vectorisé (O(N·na·nb) mémoire), puis distances
+    arête-arête en boucle sur les na×nb paires — chaque itération est O(M) en NumPy, avec
+    M = candidats non-contenus. Pic mémoire ≪ (N·na·nb), compatible avec les noyaux EZ.
+    """
+    N = len(cx)
+    na = len(mover_rel)
+    nb = len(enemy_abs)
+    if N == 0:
+        return np.empty(0, dtype=np.float64)
+
+    nxt_m = np.roll(np.arange(na), -1)
+    mpa_s = mover_rel                        # (na, 2) départ arêtes mobile
+    mpa_e = mover_rel[nxt_m]                 # (na, 2) arrivée arêtes mobile
+    r0x = (mpa_e[:, 0] - mpa_s[:, 0]).astype(np.float64)   # (na,)
+    r0y = (mpa_e[:, 1] - mpa_s[:, 1]).astype(np.float64)
+    ab_sq = r0x * r0x + r0y * r0y           # (na,)
+
+    nxt_e = np.roll(np.arange(nb), -1)
+    epb_s = enemy_abs                        # (nb, 2)
+    epb_e = enemy_abs[nxt_e]
+    s0x = (epb_e[:, 0] - epb_s[:, 0]).astype(np.float64)   # (nb,)
+    s0y = (epb_e[:, 1] - epb_s[:, 1]).astype(np.float64)
+    cd_sq = s0x * s0x + s0y * s0y           # (nb,)
+
+    # ── Containment : sommets du mobile dans le polygone ennemi ──────────────────────────
+    mover_vx = mpa_s[:, 0, np.newaxis] + cx[np.newaxis, :]   # (na, N)
+    mover_vy = mpa_s[:, 1, np.newaxis] + cy[np.newaxis, :]
+    in_enemy = _vec_point_in_polygon(
+        mover_vx.ravel(), mover_vy.ravel(), enemy_abs
+    ).reshape(na, N).any(axis=0)                             # (N,)
+
+    # ── Containment : sommets ennemis dans le polygone mobile (coordonnées relatives) ────
+    enemy_rx = epb_s[:, 0, np.newaxis] - cx[np.newaxis, :]   # (nb, N)
+    enemy_ry = epb_s[:, 1, np.newaxis] - cy[np.newaxis, :]
+    in_mover = _vec_point_in_polygon(
+        enemy_rx.ravel(), enemy_ry.ravel(), mover_rel
+    ).reshape(nb, N).any(axis=0)                             # (N,)
+
+    contained = in_enemy | in_mover
+    dist = np.full(N, np.inf, dtype=np.float64)
+    dist[contained] = 0.0
+
+    need = ~contained
+    if not need.any():
+        return dist
+
+    cx_n = cx[need]   # (M,)
+    cy_n = cy[need]
+    M = len(cx_n)
+
+    # ── Distances arête-arête pour les M candidats non-contenus ──────────────────────────
+    # Boucle sur na×nb paires d'arêtes ; chaque itération est vectorisée sur M.
+    d2_min = np.full(M, np.inf, dtype=np.float64)
+    for i in range(na):
+        ax_k = mpa_s[i, 0] + cx_n   # (M,) coord absolue du départ de l'arête i du mobile
+        ay_k = mpa_s[i, 1] + cy_n
+        r0xi = float(r0x[i])         # scalaire : direction (shift-invariant)
+        r0yi = float(r0y[i])
+        ab_sqi = float(ab_sq[i])
+        for j in range(nb):
+            cxj = float(epb_s[j, 0])
+            cyj = float(epb_s[j, 1])
+            dxj = float(epb_e[j, 0])
+            dyj = float(epb_e[j, 1])
+            s0xj = float(s0x[j])
+            s0yj = float(s0y[j])
+            cd_sqj = float(cd_sq[j])
+            # Vecteur C→A (dépend de la position du candidat)
+            dcx = cxj - ax_k   # (M,)
+            dcy = cyj - ay_k
+            # ── 4 distances point-segment ──────────────────────────────────────────────
+            # C vs AB :
+            if ab_sqi > 0.0:
+                tc = np.clip((dcx * r0xi + dcy * r0yi) / ab_sqi, 0.0, 1.0)
+            else:
+                tc = np.zeros(M, dtype=np.float64)
+            d2_cAB = (dcx - tc * r0xi) ** 2 + (dcy - tc * r0yi) ** 2
+            # D vs AB :
+            dcx_D = dcx + s0xj
+            dcy_D = dcy + s0yj
+            if ab_sqi > 0.0:
+                td = np.clip((dcx_D * r0xi + dcy_D * r0yi) / ab_sqi, 0.0, 1.0)
+            else:
+                td = np.zeros(M, dtype=np.float64)
+            d2_dAB = (dcx_D - td * r0xi) ** 2 + (dcy_D - td * r0yi) ** 2
+            # A vs CD :
+            if cd_sqj > 0.0:
+                ta = np.clip((-dcx * s0xj - dcy * s0yj) / cd_sqj, 0.0, 1.0)
+            else:
+                ta = np.zeros(M, dtype=np.float64)
+            d2_aCD = (dcx + ta * s0xj) ** 2 + (dcy + ta * s0yj) ** 2
+            # B vs CD :
+            bcx = r0xi - dcx   # = bx_k - cxj
+            bcy = r0yi - dcy
+            if cd_sqj > 0.0:
+                tb = np.clip((bcx * s0xj + bcy * s0yj) / cd_sqj, 0.0, 1.0)
+            else:
+                tb = np.zeros(M, dtype=np.float64)
+            d2_bCD = (bcx - tb * s0xj) ** 2 + (bcy - tb * s0yj) ** 2
+            d2_pair = np.minimum(np.minimum(d2_cAB, d2_dAB), np.minimum(d2_aCD, d2_bCD))
+            # Intersection → distance nulle
+            denom = r0xi * s0yj - r0yi * s0xj   # scalaire
+            if abs(denom) > 1e-12:
+                inv = 1.0 / denom
+                t_s = (dcx * s0yj - dcy * s0xj) * inv   # (M,)
+                u_s = (dcx * r0yi - dcy * r0xi) * inv
+                inter = (t_s >= -1e-12) & (t_s <= 1.0 + 1e-12) & (u_s >= -1e-12) & (u_s <= 1.0 + 1e-12)
+                d2_pair[inter] = 0.0
+            d2_min = np.minimum(d2_min, d2_pair)
+            if not (d2_min > 0.0).any():   # sortie anticipée : tous à 0
+                break
+        if not (d2_min > 0.0).any():
+            break
+
+    dist[need] = np.sqrt(d2_min)
+    return dist
+
+
 def _primitive_edge_dist(pa: Tuple, pb: Tuple) -> float:
     """Distance bord-à-bord entre deux primitives (``'c'`` cercle / ``'p'`` polygone)."""
     if pa[0] == "c" and pb[0] == "c":

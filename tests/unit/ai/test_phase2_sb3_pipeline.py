@@ -218,7 +218,7 @@ class TestGradientNormSingleReduction:
             params.append(p)
 
         class FakePolicy:
-            def parameters(self_):
+            def parameters(self):
                 return iter(params)
 
         return FakePolicy()
@@ -249,7 +249,7 @@ class TestGradientNormSingleReduction:
     def test_no_grad_returns_nothing(self):
         """Sans gradient, la condition `if grads` est False — pas d'erreur."""
         class FakePolicy:
-            def parameters(self_):
+            def parameters(self):
                 p = torch.nn.Parameter(torch.zeros(1))
                 # p.grad reste None
                 return iter([p])
