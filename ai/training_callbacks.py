@@ -2591,11 +2591,48 @@ class ExploiterProbeCallback(BaseCallback):
         self.budget: Optional[int] = None
         self.censored: bool = False
         self._next_probe_episode: int = probe_every_episodes
+        # Pool persistant créé à _on_training_start et fermé à _on_training_end (4.2).
+        # None tant que l'entraînement n'est pas démarré ou si n_workers <= 1.
+        self._eval_pool: Optional[Any] = None
 
     def _current_episode(self) -> int:
         if self.metrics_tracker is not None:
             return int(self.metrics_tracker.episode_count)
         return 0
+
+    def _on_training_start(self) -> None:
+        """Crée le pool persistant pour toutes les sondes de cette étape (4.2)."""
+        from ai.bot_evaluation import create_checkpoint_eval_pool, _strip_phase_suffix
+
+        config = get_config_loader()
+        base_agent_key = _strip_phase_suffix(self.rewards_config_name)
+        training_cfg = config.load_agent_training_config(base_agent_key, self.training_config_name)
+        vec_normalize_enabled = bool(
+            require_key(require_key(training_cfg, "vec_normalize"), "enabled")
+        )
+        vec_eval_enabled = bool(
+            require_key(require_key(training_cfg, "vec_normalize_eval"), "enabled")
+        )
+        n_workers = self.intermediate_n_workers
+        if n_workers is None:
+            callback_params = require_key(training_cfg, "callback_params")
+            n_workers = int(callback_params.get("bot_eval_n_workers_intermediate", 4))
+        if n_workers > 1:
+            self._eval_pool = create_checkpoint_eval_pool(
+                n_workers=n_workers,
+                vec_normalize_enabled=vec_normalize_enabled,
+                vec_eval_enabled=vec_eval_enabled,
+                training_config_name=self.training_config_name,
+                rewards_config_name=self.rewards_config_name,
+                controlled_agent=self.rewards_config_name,
+                base_agent_key=base_agent_key,
+            )
+
+    def _on_training_end(self) -> None:
+        """Ferme le pool persistant à la fin de l'étape (4.2)."""
+        if self._eval_pool is not None:
+            self._eval_pool.shutdown(wait=False)
+            self._eval_pool = None
 
     def _probe(self, n_episodes: int, label: str) -> float:
         """Sauvegarde le modele courant dans un fichier temporaire et evalue contre la cible.
@@ -2621,6 +2658,7 @@ class ExploiterProbeCallback(BaseCallback):
                 scenario_pool="holdout",
                 device="cpu",
                 n_workers_override=self.intermediate_n_workers,
+                pool=self._eval_pool,
             )
         finally:
             remove_model_with_companions(tmp_path)

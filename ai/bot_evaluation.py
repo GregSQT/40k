@@ -43,11 +43,18 @@ __all__ = [
     'validate_bot_eval_worker_params',
     'discover_checkpoint_archives',
     'evaluate_against_checkpoints',
+    'create_checkpoint_eval_pool',
 ]
 
 # Worker globals (scope processus)
 _worker_model = None
 _worker_obs_normalizer = None
+# Jeton de version du modèle courant dans CE worker : (model_path, model_mtime_au_moment_de_la_tâche).
+# Permet au pool persistant (4.2) de ne recharger que si le modèle a changé entre deux évals.
+_worker_model_version_key: Optional[tuple] = None
+# Drapeaux de normalisation, posés par _eval_worker_init et lus par _eval_worker_load_model_if_needed.
+_worker_vec_normalize_enabled: bool = False
+_worker_vec_eval_enabled: bool = False
 #: Adversaires checkpoint deja charges DANS CE WORKER, par chemin d'archive (Phase 4 / decision B).
 #: Sans ce cache, un worker qui traite plusieurs tranches d'un meme checkpoint rechargerait le zip
 #: a chaque tranche — le decoupage en tranches, qui existe pour saturer les workers, se paierait
@@ -867,34 +874,59 @@ def _warmup_eval_inference(model) -> None:
 
 
 def _eval_worker_init(
-    model_path: str,
-    worker_model_device: str,
     vec_normalize_enabled: bool,
     vec_eval_enabled: bool,
     training_config_name: str,
     rewards_config_name: str,
     controlled_agent: str,
     base_agent_key: str,
-    torch_compile_cpu: bool = False,
 ) -> None:
-    """Appelé une fois au démarrage de chaque worker. Charge modèle + normalizer.
+    """Appelé une fois au démarrage de chaque worker. Initialise l'état sans charger le modèle.
 
-    Les stats VecNormalize viennent du MÊME `model_path` que la politique (V11 §0.35) : un
-    worker ne peut pas normaliser avec les stats d'un autre modèle, par construction.
-    Si `torch_compile_cpu` est True, le features_extractor est compilé avec
-    torch.compile(mode='reduce-overhead') et un forward pass factice déclenche la compilation
-    avant le 1er épisode.
+    Le chargement du modèle est différé au premier appel de _eval_worker_load_model_if_needed
+    (jeton de version 4.2) : le pool peut ainsi rester persistant entre évals successives et ne
+    recharger le modèle que si celui-ci a changé (mtime différent).
     """
-    global _worker_model, _worker_obs_normalizer
+    global _worker_model, _worker_obs_normalizer, _worker_model_version_key
+    global _worker_vec_normalize_enabled, _worker_vec_eval_enabled
+    _worker_model = None
+    _worker_obs_normalizer = None
+    _worker_model_version_key = None
+    _worker_ckpt_cache.clear()
+    _worker_vec_normalize_enabled = vec_normalize_enabled
+    _worker_vec_eval_enabled = vec_eval_enabled
+
+
+def _eval_worker_load_model_if_needed(task: Dict[str, Any]) -> None:
+    """Charge (ou recharge) le modèle P1 dans le worker si le jeton de version a changé.
+
+    Le jeton est (model_path, model_mtime) calculé dans le PARENT au moment de la construction
+    de la tâche. Un worker déjà chargé avec la même version ne recharge pas — les tranches d'une
+    même éval partagent ainsi le modèle en mémoire. Un nouveau zip ou un zip mis à jour (mtime
+    différent) déclenche un rechargement propre.
+
+    La fonction reçoit le dict de tâche entier afin que require_key ne soit appelé qu'ICI :
+    patcher _eval_worker_load_model_if_needed court-circuite l'accès même aux champs absents
+    (utile dans les tests qui ne portent pas model_path dans leur tâche).
+    """
+    global _worker_model, _worker_obs_normalizer, _worker_model_version_key
+    model_path: str = require_key(task, "model_path")
+    model_device: str = require_key(task, "model_device")
+    model_mtime: float = require_key(task, "model_mtime")
+    torch_compile_cpu: bool = bool(task.get("torch_compile_cpu", False))
+    version_key = (model_path, model_mtime)
+    if version_key == _worker_model_version_key:
+        return
     from sb3_contrib import MaskablePPO
 
-    _worker_model = MaskablePPO.load(model_path, device=worker_model_device)
+    _worker_model = MaskablePPO.load(model_path, device=model_device)
     _worker_obs_normalizer = _build_eval_obs_normalizer_for_worker(
-        _worker_model, model_path, vec_normalize_enabled, vec_eval_enabled
+        _worker_model, model_path, _worker_vec_normalize_enabled, _worker_vec_eval_enabled
     )
     if torch_compile_cpu:
         _torch_compile_eval_extractor(_worker_model)
         _warmup_eval_inference(_worker_model)
+    _worker_model_version_key = version_key
 
 
 def _worker_checkpoint_opponent(
@@ -950,8 +982,9 @@ def _eval_worker_task(
     """
     from sb3_contrib.common.maskable.utils import get_action_masks
     global _worker_model, _worker_obs_normalizer
+    _eval_worker_load_model_if_needed(task)
     if _worker_model is None:
-        raise RuntimeError("Worker not initialized (call _eval_worker_init before tasks)")
+        raise RuntimeError("_eval_worker_load_model_if_needed n'a pas chargé le modèle")
 
     import random
 
@@ -1714,18 +1747,19 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     "deterministic": deterministic,
                     "config_params": config_params,
                     "max_steps_per_episode": int(get_max_turns()) * 400,  # duree de bataille = game_rules.max_turns
+                    "model_path": effective_model_path,
+                    "model_device": worker_model_device,
+                    "model_mtime": os.path.getmtime(effective_model_path),
+                    "torch_compile_cpu": torch_compile_cpu,
                 })
 
         initargs = (
-            effective_model_path,
-            worker_model_device,
             vec_normalize_enabled,
             vec_eval_enabled,
             training_config_name,
             rewards_config_name,
             controlled_agent,
             base_agent_key,
-            torch_compile_cpu,
         )
 
         total_episodes = len(active_bot_names) * n_episodes
@@ -2080,6 +2114,42 @@ def _resolve_seat_seed(training_cfg: dict) -> int:
     return seed_raw
 
 
+def create_checkpoint_eval_pool(
+    n_workers: int,
+    vec_normalize_enabled: bool,
+    vec_eval_enabled: bool,
+    training_config_name: str,
+    rewards_config_name: str,
+    controlled_agent: str,
+    base_agent_key: str,
+) -> "ProcessPoolExecutor":
+    """Crée un pool persistant pour `evaluate_against_checkpoints` (4.2).
+
+    Le pool doit être fermé par l'appelant quand il n'est plus nécessaire
+    (`pool.shutdown(wait=False)`). Passer `pool=` à chaque appel
+    évite de respawner les workers et de recharger les dépendances Python
+    entre deux évals successives (coût fixe ~46 s mesuré en §6).
+
+    Le modèle P1 n'est pas chargé à l'init : chaque tâche porte un jeton de version
+    (model_path, mtime) et le worker ne recharge que si la version a changé.
+    """
+    ctx = mp.get_context("spawn")
+    initargs = (
+        vec_normalize_enabled,
+        vec_eval_enabled,
+        training_config_name,
+        rewards_config_name,
+        controlled_agent,
+        base_agent_key,
+    )
+    return ProcessPoolExecutor(
+        max_workers=n_workers,
+        mp_context=ctx,
+        initializer=_eval_worker_init,
+        initargs=initargs,
+    )
+
+
 def evaluate_against_checkpoints(
     model_path: str,
     checkpoint_archives: List[Tuple[str, str]],
@@ -2091,6 +2161,7 @@ def evaluate_against_checkpoints(
     scenario_list_override: Optional[List[str]] = None,
     device: str = "cpu",
     n_workers_override: Optional[int] = None,
+    pool: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Win-rate du modèle courant contre chaque archive checkpoint figée.
 
@@ -2278,38 +2349,54 @@ def evaluate_against_checkpoints(
                     "checkpoint_label": score_label,
                     "checkpoint_device": device,
                     "checkpoint_scenario_episodes": scenario_episodes,
+                    # Jeton de version du modèle P1 pour le chargement paresseux (4.2) :
+                    # mtime calculé ICI (parent) afin de capturer l'état du zip au moment où
+                    # l'éval est déclenchée, avant que l'entraînement ne le remplace.
+                    "model_path": model_path,
+                    "model_device": worker_model_device,
+                    "model_mtime": os.path.getmtime(model_path),
+                    "torch_compile_cpu": torch_compile_cpu,
                 })
                 ep_offset += chunk_size
 
     if not tasks:
         return {}
 
+    # initargs : uniquement les données stables sur la durée du pool (config, flags de
+    # normalisation). Le modèle est chargé paresseusement par chaque worker sur jeton de version
+    # (4.2) — model_path/mtime/device sont dans la tâche, pas dans l'initializer.
     initargs = (
-        model_path,
-        worker_model_device,
         vec_normalize_enabled,
         vec_eval_enabled,
         training_config_name,
         rewards_config_name,
         controlled_agent,
         base_agent_key,
-        torch_compile_cpu,
     )
 
     if use_subprocess and n_workers > 1:
-        ctx = mp.get_context("spawn")
-        with ProcessPoolExecutor(
-            max_workers=n_workers,
-            mp_context=ctx,
-            initializer=_eval_worker_init,
-            initargs=initargs,
-        ) as pool:
+        if pool is not None:
+            # Pool persistant fourni par l'appelant (4.2) : on l'utilise directement sans le fermer.
             results_list = _collect_parallel_results_with_timeouts(
                 pool=pool,
                 tasks=tasks,
                 task_timeout_seconds=task_timeout_seconds,
                 max_in_flight=n_workers,
             )
+        else:
+            ctx = mp.get_context("spawn")
+            with ProcessPoolExecutor(
+                max_workers=n_workers,
+                mp_context=ctx,
+                initializer=_eval_worker_init,
+                initargs=initargs,
+            ) as temp_pool:
+                results_list = _collect_parallel_results_with_timeouts(
+                    pool=temp_pool,
+                    tasks=tasks,
+                    task_timeout_seconds=task_timeout_seconds,
+                    max_in_flight=n_workers,
+                )
     else:
         _eval_worker_init(*initargs)
         results_list = [_eval_worker_task(task) for task in tasks]

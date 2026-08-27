@@ -113,6 +113,7 @@ def test_frozen_model_injected_before_first_reset():
 
     with (
         patch.object(bot_evaluation, "_worker_model", MagicMock()),
+        patch.object(bot_evaluation, "_eval_worker_load_model_if_needed"),
         patch.object(bot_evaluation, "_create_eval_env", return_value=_FakeEnv()),
         patch.object(
             bot_evaluation,
@@ -183,6 +184,7 @@ def test_worker_task_forwards_ep_offset_as_episode_start_index():
 
     with (
         patch.object(bot_evaluation, "_worker_model", MagicMock()),
+        patch.object(bot_evaluation, "_eval_worker_load_model_if_needed"),
         patch.object(bot_evaluation, "_create_eval_env", side_effect=_capture),
         patch.object(
             bot_evaluation, "_worker_checkpoint_opponent", return_value=(object(), 1.0)
@@ -458,6 +460,7 @@ def test_bot_task_without_ep_offset_starts_at_zero():
 
     with (
         patch.object(bot_evaluation, "_worker_model", MagicMock()),
+        patch.object(bot_evaluation, "_eval_worker_load_model_if_needed"),
         patch.object(bot_evaluation, "_create_eval_env", return_value=_FakeEnv()),
     ):
         with pytest.raises(_Stop):
@@ -491,6 +494,7 @@ def test_worker_task_seeds_from_ep_offset():
 
     with (
         patch.object(bot_evaluation, "_worker_model", MagicMock()),
+        patch.object(bot_evaluation, "_eval_worker_load_model_if_needed"),
         patch.object(bot_evaluation, "_create_eval_env", return_value=_FakeEnv()),
         patch.object(
             bot_evaluation, "_worker_checkpoint_opponent", return_value=(object(), 1.0)
@@ -590,6 +594,11 @@ def _checkpoint_task(**overrides):
         "checkpoint_label": "P0",
         "checkpoint_device": "cpu",
         "checkpoint_scenario_episodes": 2,
+        # Jeton de version du modèle P1 (4.2) : champs obligatoires depuis la refonte lazy-load.
+        "model_path": "/tmp/model.zip",
+        "model_device": "cpu",
+        "model_mtime": 1.0,
+        "torch_compile_cpu": False,
     }
     task.update(overrides)
     return task
@@ -654,3 +663,133 @@ def _build_tasks(tmp_path, n_episodes, n_scenarios, n_workers, use_subprocess=Tr
         )
 
     return seen
+
+
+# ── 4.2 : jeton de version — le worker ne recharge que si le modèle a changé ───────────────
+
+
+def test_worker_does_not_reload_when_version_unchanged():
+    """Deux appels successifs avec le même (model_path, mtime) ne chargent qu'une fois."""
+    from ai import bot_evaluation
+
+    bot_evaluation._worker_model = None
+    bot_evaluation._worker_model_version_key = None
+    bot_evaluation._worker_vec_normalize_enabled = False
+    bot_evaluation._worker_vec_eval_enabled = False
+
+    _task = {"model_path": "/tmp/model.zip", "model_device": "cpu", "model_mtime": 1.0}
+    with (
+        patch("sb3_contrib.MaskablePPO") as mock_ppo_cls,
+        patch.object(bot_evaluation, "_build_eval_obs_normalizer_for_worker", return_value=None),
+    ):
+        mock_ppo_cls.load.return_value = MagicMock()
+        bot_evaluation._eval_worker_load_model_if_needed(_task)
+        bot_evaluation._eval_worker_load_model_if_needed(_task)
+
+    assert mock_ppo_cls.load.call_count == 1
+
+
+def test_worker_reloads_when_mtime_changes():
+    """Un mtime différent sur le même chemin déclenche un rechargement."""
+    from ai import bot_evaluation
+
+    bot_evaluation._worker_model = None
+    bot_evaluation._worker_model_version_key = ("/tmp/model.zip", 1.0)
+    bot_evaluation._worker_vec_normalize_enabled = False
+    bot_evaluation._worker_vec_eval_enabled = False
+
+    with (
+        patch("sb3_contrib.MaskablePPO") as mock_ppo_cls,
+        patch.object(bot_evaluation, "_build_eval_obs_normalizer_for_worker", return_value=None),
+    ):
+        mock_ppo_cls.load.return_value = MagicMock()
+        bot_evaluation._eval_worker_load_model_if_needed(
+            {"model_path": "/tmp/model.zip", "model_device": "cpu", "model_mtime": 2.0}
+        )
+
+    mock_ppo_cls.load.assert_called_once()
+    assert bot_evaluation._worker_model_version_key == ("/tmp/model.zip", 2.0)
+
+
+def test_task_dict_contains_model_version_token(tmp_path):
+    """Chaque tâche construite par evaluate_against_checkpoints porte model_path et model_mtime."""
+    from ai.bot_evaluation import evaluate_against_checkpoints
+
+    archive = tmp_path / "ckpt.zip"
+    archive.touch()
+    (tmp_path / "scenario_0.json").touch()
+
+    seen_tasks: list = []
+
+    def _record(task, progress_callback=None):
+        seen_tasks.append(task)
+        return _canned_result(task)
+
+    with (
+        patch("config_loader.get_config_loader", return_value=_fake_config()),
+        patch("config_loader.get_max_turns", return_value=10),
+        patch(
+            "ai.training_utils.get_scenario_list_for_phase",
+            return_value=[str(tmp_path / "scenario_0.json")],
+        ),
+        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation._eval_worker_init"),
+        patch("ai.bot_evaluation._eval_worker_task", side_effect=_record),
+    ):
+        evaluate_against_checkpoints(
+            model_path=str(archive),
+            checkpoint_archives=[(str(archive), "P0")],
+            training_config_name="x1_long",
+            rewards_config_name="ArmageddonAgent",
+            n_episodes=2,
+            controlled_agent="ArmageddonAgent",
+        )
+
+    assert seen_tasks, "aucune tâche produite"
+    for task in seen_tasks:
+        assert "model_path" in task
+        assert "model_device" in task
+        assert "model_mtime" in task
+        assert isinstance(task["model_mtime"], float)
+
+
+def test_external_pool_used_without_creating_new_pool(tmp_path):
+    """Quand `pool` est fourni, aucun nouveau ProcessPoolExecutor n'est créé."""
+    from ai.bot_evaluation import evaluate_against_checkpoints
+
+    archive = tmp_path / "ckpt.zip"
+    archive.touch()
+    (tmp_path / "scenario_0.json").touch()
+
+    fake_pool = MagicMock()
+
+    def _serial_collect(pool, tasks, task_timeout_seconds, max_in_flight, on_result=None):
+        return [_canned_result(t) for t in tasks]
+
+    with (
+        patch("config_loader.get_config_loader",
+              return_value=_fake_config(n_workers=2, use_subprocess=True)),
+        patch("config_loader.get_max_turns", return_value=10),
+        patch(
+            "ai.training_utils.get_scenario_list_for_phase",
+            return_value=[str(tmp_path / "scenario_0.json")],
+        ),
+        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation._eval_worker_init"),
+        patch("ai.bot_evaluation.ProcessPoolExecutor") as mock_ppe,
+        patch(
+            "ai.bot_evaluation._collect_parallel_results_with_timeouts",
+            side_effect=_serial_collect,
+        ),
+    ):
+        evaluate_against_checkpoints(
+            model_path=str(archive),
+            checkpoint_archives=[(str(archive), "P0")],
+            training_config_name="x1_long",
+            rewards_config_name="ArmageddonAgent",
+            n_episodes=2,
+            controlled_agent="ArmageddonAgent",
+            pool=fake_pool,
+        )
+
+    mock_ppe.assert_not_called()
