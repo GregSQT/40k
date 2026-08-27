@@ -75,7 +75,8 @@ def _mover(shape=MOVER[0], size=MOVER[1]):
 
 def _mask(models=None, mover=None):
     """État COMPLET — délègue à `_state()` pour éviter toute désynchronisation de fingerprint."""
-    models = models or WITNESS_ENEMY_MODELS
+    if models is None:
+        models = WITNESS_ENEMY_MODELS
     return _compute_mover_ez_forbidden_mask(
         _state(models), mover or _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1],
     )
