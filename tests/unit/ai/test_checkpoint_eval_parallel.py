@@ -793,3 +793,78 @@ def test_external_pool_used_without_creating_new_pool(tmp_path):
         )
 
     mock_ppe.assert_not_called()
+
+
+# ── Pool interne : shutdown garanti même sur exception ───────────────────────────────────────
+
+
+def test_internal_pool_shutdown_called_on_success(tmp_path):
+    """Le pool interne est fermé avec wait=False, cancel_futures=True sur le chemin nominal."""
+    from ai.bot_evaluation import evaluate_against_checkpoints
+
+    archive = tmp_path / "ckpt.zip"
+    archive.touch()
+    (tmp_path / "scenario_0.json").touch()
+
+    mock_pool_instance = MagicMock()
+    mock_pool_cls = MagicMock(return_value=mock_pool_instance)
+
+    def _serial_collect(pool, tasks, task_timeout_seconds, max_in_flight, on_result=None):
+        return [_canned_result(t) for t in tasks]
+
+    with (
+        patch("config_loader.get_config_loader",
+              return_value=_fake_config(n_workers=2, use_subprocess=True)),
+        patch("config_loader.get_max_turns", return_value=10),
+        patch("ai.training_utils.get_scenario_list_for_phase",
+              return_value=[str(tmp_path / "scenario_0.json")]),
+        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation.ProcessPoolExecutor", mock_pool_cls),
+        patch("ai.bot_evaluation._collect_parallel_results_with_timeouts",
+              side_effect=_serial_collect),
+    ):
+        evaluate_against_checkpoints(
+            model_path=str(archive),
+            checkpoint_archives=[(str(archive), "P0")],
+            training_config_name="x1_long",
+            rewards_config_name="ArmageddonAgent",
+            n_episodes=2,
+            controlled_agent="ArmageddonAgent",
+        )
+
+    mock_pool_instance.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+
+
+def test_internal_pool_shutdown_called_on_exception(tmp_path):
+    """Le pool interne est fermé via finally même quand la collecte lève (KeyboardInterrupt)."""
+    from ai.bot_evaluation import evaluate_against_checkpoints
+
+    archive = tmp_path / "ckpt.zip"
+    archive.touch()
+    (tmp_path / "scenario_0.json").touch()
+
+    mock_pool_instance = MagicMock()
+    mock_pool_cls = MagicMock(return_value=mock_pool_instance)
+
+    with (
+        patch("config_loader.get_config_loader",
+              return_value=_fake_config(n_workers=2, use_subprocess=True)),
+        patch("config_loader.get_max_turns", return_value=10),
+        patch("ai.training_utils.get_scenario_list_for_phase",
+              return_value=[str(tmp_path / "scenario_0.json")]),
+        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation.ProcessPoolExecutor", mock_pool_cls),
+        patch("ai.bot_evaluation._collect_parallel_results_with_timeouts",
+              side_effect=KeyboardInterrupt),
+    ):
+        with pytest.raises(KeyboardInterrupt):
+            evaluate_against_checkpoints(
+                model_path=str(archive),
+                checkpoint_archives=[(str(archive), "P0")],
+                training_config_name="x1_long",
+                rewards_config_name="ArmageddonAgent",
+                n_episodes=2,
+                controlled_agent="ArmageddonAgent",
+            )
+
+    mock_pool_instance.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
