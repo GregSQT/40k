@@ -4790,12 +4790,16 @@ def _score_stage_against_pool(
     stage: Dict[str, Any],
     canonical_model_path: str,
     eval_episodes: int,
+    n_workers_gate: Optional[int] = None,
 ) -> Dict[str, float]:
     """Win-rate du modele du run contre CHAQUE membre du pool, label par label.
 
     Reutilise `evaluate_against_checkpoints` (R0b) : c'est deja la mesure « modele courant
     contre une archive figee », avec la normalisation propre de l'archive. Un second harnais
     aurait mesure la meme chose autrement.
+
+    `n_workers_gate` est passe comme `n_workers_override` : si present dans callback_params, le
+    gate utilise ce compte de workers independamment de `bot_eval_n_workers` (BotEvaluationCallback).
     """
     from ai.bot_evaluation import evaluate_against_checkpoints
 
@@ -4815,6 +4819,7 @@ def _score_stage_against_pool(
         controlled_agent=args.rewards_config,
         scenario_pool="holdout",
         device="cpu",
+        n_workers_override=n_workers_gate,
     )
     scores = {
         member["label"]: float(results[member["label"]])
@@ -4898,7 +4903,13 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
     print(f"🎓 CLOTURE DE L'ETAPE {args.etape}")
     print("=" * 80)
 
-    scores_vs_pool = _score_stage_against_pool(args, stage, canonical_model_path, eval_episodes)
+    _gate_training_config = config.load_agent_training_config(args.agent, args.training_config)
+    from ai.bot_evaluation import validate_bot_eval_worker_params as _vbwp
+    _gate_worker_params = _vbwp(require_key(_gate_training_config, "callback_params"))
+    scores_vs_pool = _score_stage_against_pool(
+        args, stage, canonical_model_path, eval_episodes,
+        n_workers_gate=_gate_worker_params["n_workers_gate"],
+    )
     for label, score in scores_vs_pool.items():
         print(f"  vs {label:6s}: {score:.3f}  ({eval_episodes} episodes)")
 

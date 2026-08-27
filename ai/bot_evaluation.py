@@ -64,7 +64,7 @@ _eval_ref_temp_dir: Optional[str] = None
 
 
 def validate_bot_eval_worker_params(callback_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Valide les trois parametres de parallelisation de l'evaluation bot.
+    """Valide les parametres de parallelisation de l'evaluation bot.
 
     FABRIQUE UNIQUE, appelee a DEUX moments qui ne sont pas redondants :
     - `ai/train.py`, au demarrage, avec les autres `callback_params.bot_eval_*` : c'est la
@@ -82,6 +82,11 @@ def validate_bot_eval_worker_params(callback_params: Dict[str, Any]) -> Dict[str
 
     Aucune de ces trois cles n'est definie dans `config/agents/_training_common.json` : il n'y
     a donc pas de valeur partagee a resoudre, l'absence est une erreur de config.
+
+    `bot_eval_n_workers_gate` est OPTIONNEL : absent = None dans le dict retourne.  Le gate
+    (evaluate_against_checkpoints appele depuis train.py) a un regime tres different du bot eval
+    (peu d'episodes, cout fixe dominant) ; cette cle permet de le regler independamment sans
+    toucher `bot_eval_n_workers` qui gouverne BotEvaluationCallback.
     """
     use_subprocess = require_key(callback_params, "bot_eval_use_subprocess")
     if not isinstance(use_subprocess, bool):
@@ -105,10 +110,18 @@ def validate_bot_eval_worker_params(callback_params: Dict[str, Any]) -> Dict[str
         raise ValueError(
             f"callback_params.bot_eval_n_workers must be a positive integer (got {n_workers!r})"
         )
+    n_workers_gate: Optional[int] = callback_params.get("bot_eval_n_workers_gate")
+    if n_workers_gate is not None:
+        if isinstance(n_workers_gate, bool) or not isinstance(n_workers_gate, int) or n_workers_gate <= 0:
+            raise ValueError(
+                "callback_params.bot_eval_n_workers_gate must be a positive integer "
+                f"(got {n_workers_gate!r})"
+            )
     return {
         "use_subprocess": use_subprocess,
         "task_timeout_seconds": task_timeout_seconds,
         "n_workers": n_workers,
+        "n_workers_gate": n_workers_gate,
     }
 
 

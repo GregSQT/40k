@@ -126,20 +126,27 @@ def test_validator_rejects_each_bad_value() -> None:
         "bot_eval_n_workers": 4,
     }
     assert validate_bot_eval_worker_params(dict(valid)) == {
-        "use_subprocess": True, "task_timeout_seconds": 3600, "n_workers": 4,
+        "use_subprocess": True, "task_timeout_seconds": 3600, "n_workers": 4, "n_workers_gate": None,
+    }
+    # Avec bot_eval_n_workers_gate present, il est retourne.
+    assert validate_bot_eval_worker_params({**valid, "bot_eval_n_workers_gate": 2}) == {
+        "use_subprocess": True, "task_timeout_seconds": 3600, "n_workers": 4, "n_workers_gate": 2,
     }
     from shared.data_validation import ConfigurationError  # ce que leve require_key
 
-    for key in valid:  # absence
+    for key in valid:  # absence des cles obligatoires
         broken = {k: v for k, v in valid.items() if k != key}
         with pytest.raises(ConfigurationError):
             validate_bot_eval_worker_params(broken)
     for key, bad in (
-        ("bot_eval_use_subprocess", "true"),      # chaine, pas booleen
-        ("bot_eval_task_timeout_seconds", 0),     # pas de timeout instantane
-        ("bot_eval_n_workers", 0),                # 0 worker = aucune tache executee
-        ("bot_eval_n_workers", None),             # le `null` qui reintroduisait le repli a 24
-        ("bot_eval_n_workers", True),             # bool est un int en Python : doit etre refuse
+        ("bot_eval_use_subprocess", "true"),         # chaine, pas booleen
+        ("bot_eval_task_timeout_seconds", 0),        # pas de timeout instantane
+        ("bot_eval_n_workers", 0),                   # 0 worker = aucune tache executee
+        ("bot_eval_n_workers", None),                # le `null` qui reintroduisait le repli a 24
+        ("bot_eval_n_workers", True),                # bool est un int en Python : doit etre refuse
+        ("bot_eval_n_workers_gate", 0),              # 0 worker gate = invalide
+        ("bot_eval_n_workers_gate", True),           # bool refuse
+        ("bot_eval_n_workers_gate", -1),             # negatif refuse
     ):
         with pytest.raises((ValueError, TypeError)):
             validate_bot_eval_worker_params({**valid, key: bad})
