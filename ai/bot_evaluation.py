@@ -1081,8 +1081,11 @@ def _eval_worker_task(
     # rend exactement les memes graines que la boucle sequentielle, quel que soit le decoupage.
     # Defaut 0 : le chemin bot, qui ne decoupe pas, est inchange bit-a-bit.
     ep_offset = int(require_key(task, "ep_offset"))
-    # `task` est immuable dans la boucle : extrait une seule fois avant de partir.
+    # `task` est immuable dans la boucle : tous les champs lus plusieurs fois sont extraits ici.
     max_steps_per_episode = int(require_key(task, "max_steps_per_episode"))
+    deterministic = task.get("deterministic", True)
+    task_bot_name = task["bot_name"]
+    task_scenario_name = _scenario_name_from_task(task)
     try:
         for ep_idx in range(ep_offset, ep_offset + int(task["n_episodes"])):
             ep_seed = _episode_seed(task["base_seed"], task["bot_name"], task["scenario_index"], ep_idx)
@@ -1133,7 +1136,7 @@ def _eval_worker_task(
                 action, _ = _worker_model.predict(
                     model_input,
                     action_masks=action_masks,
-                    deterministic=task.get("deterministic", True),
+                    deterministic=deterministic,
                 )
                 action_scalar = int(np.asarray(action).flat[0])
                 obs, reward, terminated, truncated, info = env.step(action_scalar)
@@ -1141,11 +1144,11 @@ def _eval_worker_task(
                     # Le payload traverse la frontiere de process avec le resultat de la tache.
                     truncations.append({
                         "reason": require_key(info, "truncation_reason"),
-                        "bot_name": task["bot_name"],
-                        "scenario_name": _scenario_name_from_task(task),
+                        "bot_name": task_bot_name,
+                        "scenario_name": task_scenario_name,
                         "episode_index": ep_idx,
                         "episode_seed": ep_seed,
-                        "deterministic": bool(task.get("deterministic", True)),
+                        "deterministic": bool(deterministic),
                         **require_key(info, "truncation_debug"),
                     })
                 done = bool(terminated or truncated)
@@ -1157,11 +1160,11 @@ def _eval_worker_task(
                 # resultat qu'il n'a pas produit et efface l'incident. Nul + trace, comme le moteur.
                 truncations.append({
                     "reason": "eval_loop_cap",
-                    "bot_name": task["bot_name"],
-                    "scenario_name": _scenario_name_from_task(task),
+                    "bot_name": task_bot_name,
+                    "scenario_name": task_scenario_name,
                     "episode_index": ep_idx,
                     "episode_seed": ep_seed,
-                    "deterministic": bool(task.get("deterministic", True)),
+                    "deterministic": bool(deterministic),
                     # `gym_*` et non `steps`/`step_limit` : ces deux cles-la portent des STEPS
                     # MOTEUR dans les lignes `episode_steps_limit` du meme journal. Un step gym en
                     # vaut plusieurs — les melanger sous un nom commun rend les lignes
@@ -1575,11 +1578,8 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                         "Evaluer sans stats normaliserait avec celles d'un AUTRE modele (V11 §0.35)."
                     )
         except Exception:
-            os.remove(effective_model_path)
-            from ai.vec_normalize_utils import get_vec_normalize_path
-            _orphan_pkl = get_vec_normalize_path(effective_model_path)
-            if os.path.exists(_orphan_pkl):
-                os.remove(_orphan_pkl)
+            from ai.model_artifacts import remove_model_with_companions
+            remove_model_with_companions(effective_model_path)
             raise
         _temp_model_path = effective_model_path
 

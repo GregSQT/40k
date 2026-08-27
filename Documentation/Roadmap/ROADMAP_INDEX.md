@@ -168,6 +168,9 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | front | ✅ HazardWarningModal + AdvanceWarningModal simplifiés (2026-08-19) — composants nettoyés | — | ⚡ |
 | front | ✅ woundTargetFromSTR_T helper + fight blink délégué (2026-08-19) — cascade 4× factorisée en un helper partagé ; fight path blinkingHPBar délègue à calculateCombatOverallProbability | — | ⚡ |
 | front | Validations navigateur en attente | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
+| bot | ✅ fix(pool-shutdown) evaluate_against_bots (2026-08-27) — try/finally + shutdown workers orphelins ; fix evaluate_against_checkpoints | — | ⚡ |
+| bot | ✅ fix(bot-eval) /code-review 5 findings (2026-08-27) — env.close() try/finally, max_steps hoisted, pkl orphelin, global inutile, require_key T1 | — | ⚡ |
+| bot | ✅ simplify(bot-eval) /simplify (2026-08-27) — remove_model_with_companions réutilisé, deterministic/bot_name/scenario_name hoistés | — | ⚡ |
 | training+bot | ✅ Benchmark floor gate §4.D livré (2026-08-18) — 3 bots de référence (balanced/denial/reactive) sur 4 scénarios holdout_regular ; seuil 0.90 après mesure ; `model_gating_enabled` sur x1_long | [v11_chemin_critique.md#benchmark-gate](v11_chemin_critique.md#benchmark-gate) | |
 | training+bot | ✅ scenario_bench-01..04 dupliqués supprimés (2026-08-18) — fichiers byte-for-byte identiques aux scenario_bot-01..04, glob fallback ramassait 8 scénarios au lieu de 4, épisodes/scénario divisés par 2 sans contrepartie | — | |
 | training | ✅ fix combat reward V11 (2026-08-24) — correctif récompense combat gym V11 (worktree-fix-combat-reward-v11) | — | ⚡ |
