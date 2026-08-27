@@ -26,6 +26,9 @@ HOLDOUT_BOTS = {"tactical", "reference_balanced", "reference_denial", "reference
 #: supprime le 2026-08-12 : mesure sur 160 parties a 0,431 contre les heuristiques qu'il devait
 #: surclasser, pour 9,5x leur cout) ; c'est precisement la situation ou confondre les deux notions
 #: aurait double le cout de toutes les evaluations du depot.
+#: `tactical` retraite le 2026-08-27 (defaites a 100%, couteux sans valeur) : aucun sealed holdout
+#: n'est actuellement mesure dans les configs de production ; les bots de REFERENCE de la session
+#: courante sont `racer` et `attrition` (PRIMARY_BENCHMARK_BOTS ci-dessous).
 REFERENCE_HOLDOUT_BOT = "tactical"
 
 #: Quels profils doivent MESURER le holdout de reference. Table explicite et exhaustive : un profil
@@ -35,10 +38,18 @@ REFERENCE_HOLDOUT_BOT = "tactical"
 #: cle de `bot_eval_weights` coute une serie complete d'episodes (`bot_evaluation`, l'evaluation
 #: joue les cles, poids nul compris) : y laisser un adversaire hors sujet, c'est payer la mesure
 #: deux fois.
+#: Tous a False : `tactical` retire des configs de production (supprime le 2026-08-27).
 MEASURES_REFERENCE_HOLDOUT = {
-    "x1": True, "x1_long": True, "x1_debug": True,
-    "x5_new": True, "x5_long": True, "x5_debug": True,
+    "x1": False, "x1_long": False, "x1_debug": False,
+    "x5_new": False, "x5_long": False, "x5_debug": False,
 }
+
+#: Bots de SELECTION utilises comme reference de progression — les deux plus difficiles mesures
+#: le 2026-08-27 (vs_racer 81,7 %, vs_attrition 82,3 %). Ce sont des bots de SELECTION (pas de
+#: holdout architecturaux) : ils ont un poids >0 dans `bot_eval_weights` et figurent dans
+#: `bot_training.ratios`. Leur presence dans CHAQUE profil d'evaluation est verrouilee par
+#: `test_holdout_bots_present_in_evaluation` — supprimer l'un d'eux de la config rougit ici.
+PRIMARY_BENCHMARK_BOTS = {"racer", "attrition"}
 
 CONFIG_ROOT = Path(__file__).resolve().parents[3] / "config" / "agents"
 
@@ -95,6 +106,12 @@ def test_holdout_bots_present_in_evaluation(config_path: Path) -> None:
                 f"{config_path.name}[{phase_name}] : le holdout de reference "
                 f"'{REFERENCE_HOLDOUT_BOT}' est absent de bot_eval_weights — le critere de "
                 "succes §10.6 ne serait pas mesurable."
+            )
+        for primary_bot in PRIMARY_BENCHMARK_BOTS:
+            assert primary_bot in weights, (
+                f"{config_path.name}[{phase_name}] : le bot de reference primaire "
+                f"'{primary_bot}' est absent de bot_eval_weights — la progression ne serait "
+                "plus mesurable sur les adversaires les plus difficiles."
             )
         total = sum(float(w) for w in weights.values())
         assert abs(total - 1.0) < 1e-9, (
