@@ -9,12 +9,12 @@ P99 −44 % et wall −32 % (la queue, pas la moyenne) ; Phase 2 = `time/fps` 20
 Phase 4.1 = gate parallélisé, parité confirmée (2026-08-27).
 L'estimation initiale de ×2-3 pour 1+2+4 n'est pas atteinte : le lockstep de collecte (~73 % du
 budget d'un cycle) est structurel et ne cède qu'à la Phase 3.
-Phase 4 (évals/curriculum) : 4.1 ✅ gate parallélisé (B1–B7 livrés, décision B) ; **4.2 🟡** pool
-persistant (jeton de version manquant) ; **4.3 🟡** `bot_eval_n_workers` fixé à 6 (était 16 → OOM),
+Phase 4 (évals/curriculum) : 4.1 ✅ gate parallélisé (B1–B7 livrés, décision B) ; **4.2 ✅** pool
+persistant + jeton version (livré 2026-08-27) ; **4.3 🟡** `bot_eval_n_workers` fixé à 6 (était 16 → OOM),
 1re mesure ~28 s/ép, clôture = 3 reps `duration 6` machine au repos.
 Phase 3 (collecte distribuée, option A) = actée mais non lancée, chantier dédié hors
 période de run — c'est elle qui porte le ×3-6.
-Goulots restants : lockstep de collecte (Phase 3), pool d'éval non persistant (4.2).
+Goulots restants : lockstep de collecte (Phase 3), calibrage final pool d'éval (4.3).
 
 → `Documentation/Implémentation/A_faire/perf_entrainement.md`
 
