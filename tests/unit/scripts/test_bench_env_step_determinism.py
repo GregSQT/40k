@@ -33,6 +33,7 @@ def bench():
     return charger_script("scripts/bench_env_step.py")
 
 
+@pytest.mark.timeout(600)
 def test_determinism_scenario_sequence(bench) -> None:
     """Deux runs à seed=42 restent identiques même avec pollution de random entre les appels.
 
