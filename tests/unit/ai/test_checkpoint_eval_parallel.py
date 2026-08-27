@@ -109,6 +109,9 @@ def test_frozen_model_injected_before_first_reset():
             seen["frozen_mtime"] = self._frozen_model_mtime
             raise _Stop
 
+        def close(self) -> None:
+            pass
+
     sentinel_model = object()
 
     with (
@@ -175,6 +178,9 @@ def test_worker_task_forwards_ep_offset_as_episode_start_index():
 
         def reset(self, seed=None):
             raise _Stop
+
+        def close(self) -> None:
+            pass
 
     captured: dict = {}
 
@@ -443,6 +449,9 @@ def test_bot_task_without_ep_offset_starts_at_zero():
             seeds.append(seed)
             raise _Stop
 
+        def close(self) -> None:
+            pass
+
     task = {
         "bot_name": "greedy",
         "bot_type": "greedy",
@@ -491,6 +500,9 @@ def test_worker_task_seeds_from_ep_offset():
         def reset(self, seed=None):
             seeds.append(seed)
             raise _Stop
+
+        def close(self) -> None:
+            pass
 
     with (
         patch.object(bot_evaluation, "_worker_model", MagicMock()),
@@ -553,6 +565,52 @@ def test_exploiter_probe_uses_intermediate_worker_count(tmp_path):
         probe._probe(n_episodes=10, label="cheap")
 
     assert evaluate.call_args.kwargs["n_workers_override"] == 4
+
+
+def test_probe_nullifies_pool_on_evaluate_exception(tmp_path):
+    """Si evaluate_against_checkpoints lève, _eval_pool est vidé avant re-raise.
+
+    Un pool force-terminé (workers SIGTERM) est marqué _broken par ProcessPoolExecutor.
+    Le prochain submit() leverait BrokenProcessPool de façon silencieuse. En nullifiant
+    _eval_pool sur l'exception, la sonde suivante crée un pool temporaire au lieu de
+    propager le crash — critère 4.2 item 3.
+    """
+    from ai.training_callbacks import ExploiterProbeCallback
+
+    archive = tmp_path / "target.zip"
+    archive.touch()
+
+    probe = ExploiterProbeCallback(
+        target_archive_path=str(archive),
+        training_config_name="x1_long",
+        rewards_config_name="ArmageddonAgent",
+        metrics_tracker=None,
+        probe_every_episodes=100,
+        probe_cheap_n=10,
+        probe_confirm_n=20,
+        win_rate_target=0.6,
+        budget_cap=1000,
+        intermediate_n_workers=4,
+        log_fn=lambda *_a, **_k: None,
+    )
+    probe.model = MagicMock()
+    probe._eval_pool = MagicMock()  # pool persistant en place
+
+    with (
+        patch(
+            "ai.bot_evaluation.evaluate_against_checkpoints",
+            side_effect=RuntimeError("BrokenProcessPool"),
+        ),
+        patch("ai.vec_normalize_utils.save_vec_normalize"),
+        patch("ai.training_callbacks.remove_model_with_companions"),
+    ):
+        with pytest.raises(RuntimeError, match="BrokenProcessPool"):
+            probe._probe(n_episodes=10, label="cheap")
+
+    assert probe._eval_pool is None, (
+        "_eval_pool doit être None après exception : le pool peut être cassé "
+        "(workers SIGTERM → _broken=True), la prochaine sonde doit créer un pool frais"
+    )
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────────────────
@@ -700,7 +758,9 @@ def test_worker_reloads_when_mtime_changes():
 
     with (
         patch("sb3_contrib.MaskablePPO") as mock_ppo_cls,
-        patch.object(bot_evaluation, "_build_eval_obs_normalizer_for_worker", return_value=None),
+        patch.object(
+            bot_evaluation, "_build_eval_obs_normalizer_for_worker", return_value=None
+        ) as mock_normalizer,
     ):
         mock_ppo_cls.load.return_value = MagicMock()
         bot_evaluation._eval_worker_load_model_if_needed(
@@ -708,6 +768,7 @@ def test_worker_reloads_when_mtime_changes():
         )
 
     mock_ppo_cls.load.assert_called_once()
+    mock_normalizer.assert_called_once()  # critère 2 : normalizer VecNormalize aussi rechargé
     assert bot_evaluation._worker_model_version_key == ("/tmp/model.zip", 2.0)
 
 

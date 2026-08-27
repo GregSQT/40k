@@ -2648,18 +2648,24 @@ class ExploiterProbeCallback(BaseCallback):
         try:
             self.model.save(tmp_path)
             save_vec_normalize(self.model.get_env(), tmp_path)
-            results = evaluate_against_checkpoints(
-                model_path=tmp_path,
-                checkpoint_archives=[(self.target_archive_path, "target")],
-                training_config_name=self.training_config_name,
-                rewards_config_name=self.rewards_config_name,
-                n_episodes=n_episodes,
-                controlled_agent=self.rewards_config_name,
-                scenario_pool="holdout",
-                device="cpu",
-                n_workers_override=self.intermediate_n_workers,
-                pool=self._eval_pool,
-            )
+            try:
+                results = evaluate_against_checkpoints(
+                    model_path=tmp_path,
+                    checkpoint_archives=[(self.target_archive_path, "target")],
+                    training_config_name=self.training_config_name,
+                    rewards_config_name=self.rewards_config_name,
+                    n_episodes=n_episodes,
+                    controlled_agent=self.rewards_config_name,
+                    scenario_pool="holdout",
+                    device="cpu",
+                    n_workers_override=self.intermediate_n_workers,
+                    pool=self._eval_pool,
+                )
+            except Exception:
+                # Workers force-terminés → ProcessPoolExecutor._broken=True ; la prochaine
+                # sonde créera un pool temporaire plutôt que lever BrokenProcessPool.
+                self._eval_pool = None
+                raise
         finally:
             remove_model_with_companions(tmp_path)
         if not results:
