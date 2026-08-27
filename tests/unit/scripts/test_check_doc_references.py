@@ -1567,3 +1567,50 @@ def test_the_real_corpus_has_no_orphan() -> None:
     (ouvert le 2026-08-16, cité par aucun fichier sujet) et `Database/DB_migration_prompt.md`.
     """
     assert cdr.check_reachability()[0] == []
+
+
+# --------------------------------------------------------------------------- blocs fencés — passe 1
+
+
+def test_references_inside_fenced_code_block_are_ignored(tmp_path: pathlib.Path) -> None:
+    """Un renvoi dans un bloc fencé ne déclenche pas de FICHIER INTROUVABLE.
+
+    Un commentaire de code du type `# engine/w40k_core.py (_get_unit_by_id)` dans un bloc
+    ````python` est une attribution, pas une affirmation documentaire : check_references ne doit
+    pas la traiter comme un renvoi.
+    """
+    doc = write(
+        tmp_path,
+        "note.md",
+        "Texte.\n"
+        "```python\n"
+        "`engine/fichier_inexistant_xyz.py` (`_get_unit_by_id`)\n"
+        "```\n"
+        "Suite.\n",
+    )
+    _resolved, _unverifiable, broken = cdr.check_references(doc)
+    assert broken == [], broken
+
+
+# --------------------------------------------------------------------------- blocs fencés — passe 5
+
+
+def test_symbol_kinds_inside_fenced_code_block_are_ignored(tmp_path: pathlib.Path) -> None:
+    """Un renvoi de sorte dans un bloc fencé ne déclenche pas de SORTE FAUSSE.
+
+    Un exemple de code contenant `def agit` adjacent à `fichier_xyz.py` est une illustration,
+    pas une affirmation : check_symbol_kinds ne doit pas la vérifier.
+    """
+    module = tmp_path / "module.py"
+    module.write_text("class agit:\n    pass\n", encoding="utf-8")
+    doc = write(
+        tmp_path,
+        "ROADMAP_INDEX.md",
+        "Texte.\n"
+        "```python\n"
+        f"`{module}` : `def agit`\n"
+        "```\n"
+        "Suite.\n",
+    )
+    _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
+    assert broken == [], broken
