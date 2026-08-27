@@ -30,7 +30,7 @@ CE QU'IL ÉTABLIT, en six passes :
                 `ROADMAP.md` écrivait « `def EpisodeTerminationCallback` », en promettant
                 explicitement un grep reproductible — or ce sont des `class`, et le grep promis
                 rendait 0 hit. Le document se présentait comme vérifiable et ne l'était pas.
-  6. ATTEIGN. — tout chantier ouvert (`Documentation/Implémentation/A_faire/`, sous-dossiers
+  6. ATTEIGN. — tout chantier ouvert (`Documentation/Chantiers/backlog/`, sous-dossiers
                 compris) se rejoint depuis `ROADMAP_INDEX.md` en suivant les renvois. Les cinq
                 premières passes vérifient ce que les documents DISENT ; celle-ci voit ce qu'ils
                 ne disent PLUS. Mesuré au premier passage, 2026-08-18 : 2 chantiers ouverts sur
@@ -88,9 +88,11 @@ class SourceUnavailable(RuntimeError):
 def _check_filesystem_encoding() -> None:
     """Vérifie avant toute ouverture de fichier que le codec filesystem encode les chemins accentués.
 
-    Les chemins de ce dépôt contiennent 'é' (Documentation/Implémentation/). Sous
-    LC_ALL=C PYTHONUTF8=0, sys.getfilesystemencoding() vaut 'ascii' et os.fsencode() échoue
-    à mi-parcours avec une UnicodeEncodeError qui ne nomme ni la locale ni le remède.
+    L'arborescence Documentation/ est ASCII depuis la refonte 2026-08-27, mais le dépôt porte
+    encore des chemins accentués (Memoire_RNCP/, ex. « Méthodologie de la rédaction... »), que
+    `git ls-files` rend et que ce script décode. Sous LC_ALL=C PYTHONUTF8=0,
+    sys.getfilesystemencoding() vaut 'ascii' et os.fsencode() échoue à mi-parcours avec une
+    UnicodeEncodeError qui ne nomme ni la locale ni le remède.
     Le script choisit de refuser plutôt que de convertir tout son parcours de fichiers en chemins
     bytes : le coût de lisibilité est réel pour un scénario qui exige PYTHONUTF8=0 explicite,
     que Python 3.12 n'active pas de lui-même sous locale C (PEP 538/540 active le mode UTF-8).
@@ -103,13 +105,13 @@ def _check_filesystem_encoding() -> None:
         loc = _locale.getlocale()[0] or "C"
         raise SourceUnavailable(
             f"L'encodage filesystem '{codec}' (locale détectée : {loc}) ne peut pas encoder "
-            f"les chemins accentués de ce dépôt (ex. : Documentation/Implémentation/). "
+            f"les chemins accentués de ce dépôt (ex. : Memoire_RNCP/). "
             f"Relancer avec PYTHONUTF8=1 ou sous une locale UTF-8."
         )
 
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-DOCS = ROOT / "Documentation" / "Implémentation"
+DOCS = ROOT / "Documentation" / "Chantiers"
 CLAUDE_MD = ROOT / "CLAUDE.md"
 
 DEFAULT_DOCS = [
@@ -123,8 +125,8 @@ DEFAULT_DOCS = [
     "Documentation/Roadmap/infra.md",
     "Documentation/Roadmap/capacites.md",
     "Documentation/Roadmap/doc.md",
-    "Documentation/Implémentation/analyzer_couverture.md",
-    "Documentation/Implémentation/Implémenté/Security.md",
+    "Documentation/Chantiers/analyzer_couverture.md",
+    "Documentation/Reference/infra/Security.md",
 ]
 
 #: Documents soumis à la SEULE passe 3 (valeurs). Ce ne sont pas des documents d'entrée : ils ne
@@ -134,7 +136,7 @@ DEFAULT_DOCS = [
 #: entier ignorable. Mais il PORTE des valeurs recopiées d'une source mécanique, et une valeur
 #: recopiée rouille où qu'elle vive : `obs_size` y est resté à 16 659 face à une source à 16703.
 VALUE_ONLY_DOCS = [
-    "Documentation/AI_TRAINING.md",
+    "Documentation/Reference/training/AI_TRAINING.md",
 ]
 
 @functools.lru_cache(maxsize=1)
@@ -151,28 +153,34 @@ def _git_raw_listing() -> str:
         ) from exc
 
 
+#: Arbres du corpus chantiers soumis à la convention d'ancres (passe 4) : les chantiers vivants
+#: (`Chantiers/`) et l'archive des chantiers livrés (`Archives/chantiers/`) — exactement la
+#: population de l'ex-`Documentation/Implémentation/`, relocalisée par la refonte 2026-08-27.
+#: Étendre la passe à `Reference/` est le lot P2 de la refonte (doc.md#refonte) : les ex-docs
+#: racine (`AI_TRAINING.md`…) portent encore des dizaines d'ancres historiques à nettoyer d'abord.
+ANCHOR_TREES = ("Documentation/Chantiers/", "Documentation/Archives/chantiers/")
+
 #: Documents tenus à la convention « le symbole, jamais la ligne » : les documents d'entrée
-#: (DEFAULT_DOCS) et tous les .md de Documentation/Implémentation/, par basename. Les documents
+#: (DEFAULT_DOCS) et tous les .md des arbres ANCHOR_TREES, par basename. Les documents
 #: d'historique comme `archives/ROADMAP.md` restent exclus — un contrôle durablement rouge
 #: finit par être ignoré.
 def _impl_doc_basenames() -> frozenset[str]:
-    """Basenames de tous les .md de Documentation/Implémentation/ — pour la passe 4.
+    """Basenames de tous les .md des arbres ANCHOR_TREES — pour la passe 4.
 
     Utilise git ls-files plutôt que pathlib.rglob, et sans passer de chemin accentué en
-    argument : sous locale C (PYTHONUTF8=0), le codec filesystem est ASCII. os.fsencode('é')
-    échoue à la fois dans pathlib (is_dir / rglob) et dans subprocess (encodage des argv).
-    git ls-files sans filtre de chemin, puis filtrage Python sur la sortie UTF-8 décodée
-    explicitement, contourne les deux pièges quelle que soit la locale.
+    argument : sous locale C (PYTHONUTF8=0), le codec filesystem est ASCII (le dépôt garde des
+    chemins accentués dans Memoire_RNCP/). os.fsencode('é') échoue à la fois dans pathlib
+    (is_dir / rglob) et dans subprocess (encodage des argv). git ls-files sans filtre de chemin,
+    puis filtrage Python sur la sortie UTF-8 décodée explicitement, contourne les deux pièges
+    quelle que soit la locale.
     """
-    impl_prefix = "Documentation/Implémentation/"
     paths = [
         f for f in _git_raw_listing().split("\0")
-        if f.startswith(impl_prefix) and f.endswith(".md")
+        if f.endswith(".md") and any(f.startswith(prefix) for prefix in ANCHOR_TREES)
     ]
     if not paths:
         raise SourceUnavailable(
-            f"Aucun fichier .md suivi par git dans Documentation/Implémentation/ "
-            f"({ROOT / 'Documentation' / 'Implémentation'})"
+            f"Aucun fichier .md suivi par git sous {' ni '.join(ANCHOR_TREES)}"
         )
     return frozenset(f.rsplit("/", 1)[-1] for f in paths)
 
@@ -202,16 +210,16 @@ COUVERTURE = DOCS / "analyzer_couverture.md"
 ROADMAP_INDEX = ROOT / "Documentation" / "Roadmap" / "ROADMAP_INDEX.md"
 
 #: Les documents dont l'atteignabilité est EXIGÉE : les chantiers ouverts, à toute profondeur —
-#: `A_faire/` porte des sous-dossiers (`Database/`, `MCTS/`) et un chantier n'est pas moins ouvert
+#: `backlog/` porte des sous-dossiers (`Database/`, `MCTS/`) et un chantier n'est pas moins ouvert
 #: parce qu'il est rangé.
-A_FAIRE = DOCS / "A_faire"
+A_FAIRE = DOCS / "backlog"
 
 #: Les arbres par lesquels un renvoi PROPAGE l'atteignabilité : la roadmap et les chantiers
-#: ouverts. `archives/` et `Implémenté/` en sont exclus, et c'est le fond de la passe — être cité
-#: par l'historique d'un chantier clos prouve exactement le contraire d'être sur la feuille de
-#: route. Sans cette borne, un document orphelin redeviendrait vert le jour où une archive le
-#: mentionne au passé, et `archives/ROADMAP.md` — cité par l'index lui-même — rendrait à lui seul
-#: atteignable tout ce que la roadmap a jamais porté.
+#: ouverts. `Roadmap/archives/` et `Archives/chantiers/` en sont exclus, et c'est le fond de la
+#: passe — être cité par l'historique d'un chantier clos prouve exactement le contraire d'être sur
+#: la feuille de route. Sans cette borne, un document orphelin redeviendrait vert le jour où une
+#: archive le mentionne au passé, et `archives/ROADMAP.md` — cité par l'index lui-même — rendrait
+#: à lui seul atteignable tout ce que la roadmap a jamais porté.
 LIVE_TREES = (ROOT / "Documentation" / "Roadmap", A_FAIRE)
 ARCHIVES = ROOT / "Documentation" / "Roadmap" / "archives"
 
@@ -347,7 +355,7 @@ WILDCARD = re.compile(r"[*]")
 CASE_HUMP = re.compile(r"[a-z][A-Z]")
 
 #: Suffixes qu'une cible de lien doit porter pour être tenue pour un chemin. Un lien vers un
-#: répertoire (`1_Agent/`) est reconnu par sa barre finale.
+#: répertoire (`v11/`) est reconnu par sa barre finale.
 LINK_SUFFIXES = (".md", ".py", ".json", ".pdf", ".txt", ".sh", ".ts", ".tsx", ".png")
 
 #: Un fragment `#L123` ne désigne pas un titre mais une LIGNE. La passe 4 le rapporte déjà sous son
@@ -377,7 +385,7 @@ def resolve(name: str, doc_dir: pathlib.Path) -> pathlib.Path | None:
         candidate = pathlib.Path(name)
         return candidate if candidate.exists() else None
     # Deux conventions COEXISTENT dans ce corpus, et les deux sont légitimes : un lien entre
-    # documents est relatif AU DOCUMENT (`1_Agent/V11_phaseA.md`), un renvoi vers le code est
+    # documents est relatif AU DOCUMENT (`v11/V11_phaseA.md`), un renvoi vers le code est
     # relatif à la RACINE (`engine/w40k_core.py`). Essayer les deux n'est pas un repli qui
     # masquerait une erreur : c'est résoudre dans les deux systèmes que le dépôt emploie.
     if "/" in name:
@@ -397,10 +405,11 @@ def resolve(name: str, doc_dir: pathlib.Path) -> pathlib.Path | None:
         candidate = ROOT / directory / name if directory else ROOT / name
         if candidate.exists():
             return candidate
-    # Un nom NU renvoie couramment à un document rangé dans un sous-dossier (`V11_tranches.md`)
-    # ou à une configuration d'agent (`ArmageddonAgent_training_config.json`). Ces deux arbres
-    # sont petits : on les parcourt plutôt que d'énumérer à la main des chemins qui bougeront.
-    for tree in (DOCS, ROOT / "config"):
+    # Un nom NU renvoie couramment à un document rangé dans un sous-dossier (`V11_tranches.md`),
+    # à une référence vivante (`stage.md`) ou à une configuration d'agent
+    # (`ArmageddonAgent_training_config.json`). Ces arbres sont petits : on les parcourt plutôt
+    # que d'énumérer à la main des chemins qui bougeront.
+    for tree in (DOCS, ROOT / "Documentation" / "Reference", ROOT / "config"):
         found = next(tree.rglob(name), None)
         if found is not None:
             return found
@@ -412,7 +421,8 @@ def tracked_basenames() -> collections.Counter[str]:
     """Combien de fichiers SUIVIS portent chaque nom. Une seule invocation de git par run.
 
     `-z` n'est pas un détail : sans lui, git échappe les octets non-ASCII et ENTOURE le chemin de
-    guillemets (73 chemins de ce dépôt, tout `Documentation/Implémentation/` en tête). Le basename
+    guillemets (les chemins accentués de `Memoire_RNCP/`, et 73 chemins au moment de la mesure,
+    tout l'ex-`Documentation/Implémentation/` en tête). Le basename
     en sortait avec son guillemet collé, sous une clé que personne n'interroge — l'ambiguïté de ces
     fichiers-là n'aurait jamais été vue. Même piège que `core.quotePath` dans
     `scripts/check_roadmap_declared.py`, qui l'a payé le 2026-08-11.
@@ -1254,17 +1264,17 @@ def cited_documents(doc_path: pathlib.Path) -> list[pathlib.Path]:
     """Les documents que celui-ci DÉSIGNE, quelle que soit la graphie du renvoi.
 
     Pas seulement le lien markdown : le corpus roadmap renvoie à un chantier par son chemin
-    backtiqué (`→ `Documentation/Implémentation/A_faire/front_test_auto.md``), et c'est même sa
+    backtiqué (`→ `Documentation/Chantiers/backlog/panel_reference.md``), et c'est même sa
     graphie majoritaire — mesuré le 2026-08-18, 11 des 11 renvois de fichier sujet vers un
     chantier ouvert. Ne suivre que les liens markdown aurait déclaré 11 orphelins sur 13.
 
-    Un nom NU porté par plusieurs fichiers du dépôt et trouvé par RECHERCHE ne désigne rien :
-    `bots_refonte_panel.md` vit à la fois sous `A_faire/` et sous `Implémenté/`, et l'ordre de
-    recherche de `resolve` n'est pas une identification (même doctrine que `is_ambiguous` en
-    passe 1). L'ADJACENCE, elle, identifie : c'est la sémantique du lien markdown, et c'est par
-    elle que l'index nomme ses fichiers sujets — refuser `moteur.md` parce qu'`archives/` en
-    porte un homonyme coupait la marche au premier saut et déclarait orphelins 6 chantiers
-    réellement cités (mesuré).
+    Un nom NU porté par plusieurs fichiers du dépôt et trouvé par RECHERCHE ne désigne rien
+    (mesuré à l'époque où `bots_refonte_panel.md` vivait à la fois sous `A_faire/` et sous
+    `Implémenté/`) : l'ordre de recherche de `resolve` n'est pas une identification (même
+    doctrine que `is_ambiguous` en passe 1). L'ADJACENCE, elle, identifie : c'est la sémantique
+    du lien markdown, et c'est par elle que l'index nomme ses fichiers sujets — refuser
+    `moteur.md` parce qu'`archives/` en porte un homonyme coupait la marche au premier saut et
+    déclarait orphelins 6 chantiers réellement cités (mesuré).
     """
     text = doc_path.read_text(encoding="utf-8")
     found: list[pathlib.Path] = []
@@ -1491,27 +1501,29 @@ def report_values_only(doc: str, path: pathlib.Path) -> tuple[bool, list[str]]:
 
 
 def report_impl_anchors() -> tuple[bool, list[str]]:
-    """Passe 4 sur Documentation/Implémentation/ — découverte dynamique.
+    """Passe 4 sur les arbres ANCHOR_TREES — découverte dynamique.
 
     Les documents déjà dans DEFAULT_DOCS passent le contrôle complet via report() ; ils sont
     écartés ici pour ne pas être comptés deux fois. Seule la passe 4 est appliquée : ces docs ne
     sont pas des documents d'entrée au sens de la roadmap, on ne leur demande ni la vérification
     de leurs renvois, ni la passe valeurs, ni la passe sortes.
     """
-    impl_dir = ROOT / "Documentation" / "Implémentation"
-    if not impl_dir.is_dir():
-        raise SourceUnavailable(f"Répertoire Documentation/Implémentation/ introuvable : {impl_dir}")
+    trees = [ROOT / prefix.rstrip("/") for prefix in ANCHOR_TREES]
+    for tree in trees:
+        if not tree.is_dir():
+            raise SourceUnavailable(f"Arbre de la passe 4 introuvable : {tree}")
     already = set(DEFAULT_DOCS)
     all_broken: list[str] = []
     count = 0
-    for path in sorted(impl_dir.rglob("*.md")):
-        rel = path.relative_to(ROOT).as_posix()
-        if rel in already:
-            continue
-        count += 1
-        all_broken.extend(check_anchors(path, enforcement_set=None))
+    for tree in trees:
+        for path in sorted(tree.rglob("*.md")):
+            rel = path.relative_to(ROOT).as_posix()
+            if rel in already:
+                continue
+            count += 1
+            all_broken.extend(check_anchors(path, enforcement_set=None))
     lines = [
-        f"{'❌' if all_broken else '✅'} Documentation/Implémentation/ (ancres) — "
+        f"{'❌' if all_broken else '✅'} {' + '.join(ANCHOR_TREES)} (ancres) — "
         f"{count} fichier(s), {len(all_broken)} renvoi(s) de ligne",
     ]
     lines += [f"   {entry}" for entry in all_broken]
@@ -1565,7 +1577,7 @@ def main(argv: list[str]) -> int:
         try:
             has_impl_broken, lines = report_impl_anchors()
         except (SourceUnavailable, OSError) as error:
-            print(f"❌ Documentation/Implémentation/ (ancres)\n   CONTRÔLE IMPOSSIBLE — {type(error).__name__} : {error}")
+            print(f"❌ corpus chantiers (ancres)\n   CONTRÔLE IMPOSSIBLE — {type(error).__name__} : {error}")
             failed = True
         else:
             print("\n".join(lines))

@@ -2,7 +2,7 @@
 // Verrou du contrôle « résolution servie = résolution demandée » (useGameConfig).
 // Le défaut qu'il attrape ne se voyait qu'à l'œil : décor servi en x5 fusionné avec la grille x1
 // du journal → terrain cinq fois trop grand, murs et unités justes, aucune erreur.
-// cf. Documentation/Implémentation/Replay.md §2.4.
+// cf. Documentation/Chantiers/Replay.md §2.4.
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";

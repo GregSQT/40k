@@ -1,6 +1,6 @@
 """04.03 : le plafond de TIR se compte par FIGURINE, comme celui de mêlée.
 
-Vert vacant V14 de `Documentation/Implémentation/analyzer_couverture.md`. Le plafond de mêlée
+Vert vacant V14 de `Documentation/Chantiers/analyzer_couverture.md`. Le plafond de mêlée
 était passé par figurine le 2026-08-09 ; celui du tir est resté au niveau ESCOUADE
 (`NB du type de tête × socles vivants`) alors que les DEUX segments nécessaires —
 `[MODEL_TYPES:]` et `[SHOOTER_MODELS:]` — étaient déjà dans le journal et déjà lus par la mêlée.

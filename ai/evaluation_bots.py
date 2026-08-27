@@ -43,7 +43,7 @@ from engine.phase_handlers.shared_utils import (
     # HORS TABLE (20.01) : VIVANTE n'est pas SUR LA TABLE. Les bots itèrent `game_state["units"]`
     # en ne filtrant que sur `is_unit_alive`, donc une réserve ennemie y entrait avec une
     # empreinte VIDE -> `min_distance_between_sets` lève. Même motif que le moteur, mêmes
-    # primitives (cf. Documentation/Implémentation/Implémenté/1_unites_hors_table_chemins_geometriques.md).
+    # primitives (cf. Documentation/Reference/moteur/1_unites_hors_table_chemins_geometriques.md).
     entry_footprint, entry_is_on_battlefield,
 )
 from engine import macro_intents as mi

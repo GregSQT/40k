@@ -1488,7 +1488,7 @@ export function parse_log_file_from_text(text: string): ReplayData {
     // DERNIER instantane ecrit avant ou a ce point. Tant qu'aucun n'a ete lu, le champ reste
     // absent — le replay affiche « pas de donnee » plutot que d'inventer un controle.
     const controlSnapshots = episode.objective_control_snapshots;
-    // Parseur strict (cf. Documentation/Implémentation/Replay.md §2) : un journal qui déclare des
+    // Parseur strict (cf. Documentation/Chantiers/Replay.md §2) : un journal qui déclare des
     // objectifs SANS instantané de contrôle est antérieur à ce format. Le rejouer afficherait des
     // points de victoire vides sans dire pourquoi — et le contrôle n'est plus recalculable ici.
     if (episode.objectives.length > 0 && controlSnapshots.length === 0) {

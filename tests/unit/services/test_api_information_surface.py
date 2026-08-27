@@ -1,6 +1,6 @@
 """Réduction de la surface d'information et session en cookie — F3, F10, F13.
 
-Étape 4 de `Documentation/Implémentation/Security.md`. Verrouille six invariants :
+Étape 4 de `Documentation/Reference/infra/Security.md`. Verrouille six invariants :
 
 1. CORS : les origines sont une liste EXPLICITE, `*` est refusé au démarrage. Avant, `CORS(app)`
    sans `origins` valait `*` et n'importe quelle page du web pouvait lire l'API.

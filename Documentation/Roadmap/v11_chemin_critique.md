@@ -15,7 +15,7 @@ Dans la direction de l'index : lignes 1–4 = jalon J2, lignes 5–6 = J3, ligne
 - Tests : 5 nouveaux cas dans `test_pile_in_intra_squad_collision.py` (3 modes cascade + 2 restriction 12.03). 19/19 verts.
 - Validation holdout : `--test-only --training-config x1_long --step` lancé le 2026-08-18, aucun crash sur 650+ épisodes.
 
-→ `Documentation/Implémentation/1_Agent/V11_phaseA.md` §9.4 pt 5
+→ `Documentation/Chantiers/v11/V11_phaseA.md` §9.4 pt 5
 
 ---
 
@@ -23,7 +23,7 @@ Dans la direction de l'index : lignes 1–4 = jalon J2, lignes 5–6 = J3, ligne
 
 ✅ **Constaté implémenté le 2026-08-19** (antérieur à P3-5) — `move_after_shooting` et `reactive_move` présents dans `UNIT_RULE_EFFECT_IDS`, handlers actifs dans `shooting_handlers.py` et `shared_utils.py`, actions reconnues par le gym. Aucune livraison distincte à dater.
 
-→ `Documentation/Implémentation/1_Agent/V11_phaseA.md` §9.4 pt 6
+→ `Documentation/Chantiers/v11/V11_phaseA.md` §9.4 pt 6
 
 ---
 
@@ -42,7 +42,7 @@ Mesurer le regret avant de trancher (§9.0bis).
 
 🟢 **Split-fire livré le 2026-08-24** (P3-8 gym) : 10 `SHOOT_WEAPON_SEL_SLOTS` (1379–1388), `TOTAL_ACTION_SIZE` 1379→1389. Flux 2-step : slot j → `squad_shoot_weapon_sel` (init activation + pending_shoot_weapon_split) → SHOOT_SLOT i → `squad_shoot_split_target` (enregistre assignment → résolution finale). Tête dense `shoot_weapon_sel_net` (K_WEAPONS_RANGED=10 logits) dans `pointer_policy`. Masque via `_model_can_shoot_target_with_weapon` (sans activation). Ré-entraînement `--new` nécessaire.
 
-→ `Documentation/Implémentation/1_Agent/V11_phaseA.md` §9.4 pt 8
+→ `Documentation/Chantiers/v11/V11_phaseA.md` §9.4 pt 8
 
 ---
 
@@ -50,7 +50,7 @@ Mesurer le regret avant de trancher (§9.0bis).
 
 ✅ **Livré le 2026-08-19** — reliquat `effective_range` ajouté à l'encodeur d'entité (`observation_entities.py::UNIT_CONT_FIELDS`, `observation_builder.py::_encode_unit_entity`) ; LoS/couvert et flags `advanced`/`fled` étaient déjà présents. `obs_size` 16671 → 16703.
 
-→ `Documentation/Implémentation/1_Agent/V11_phaseA.md` §9.5
+→ `Documentation/Chantiers/v11/V11_phaseA.md` §9.5
 
 ---
 
@@ -73,7 +73,7 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x1_long --resoluti
 
 Erreur-type avec `eval_episodes = 100` : `0,707/√(6 × 100)` ≈ **2,9 pts**. Durée : ~8 min (350 épisodes à 0,72 ép./s, mesuré le 2026-08-18). Aucun profil dédié nécessaire.
 
-→ `Documentation/Implémentation/1_Agent/V11_phaseA.md` §9.6
+→ `Documentation/Chantiers/v11/V11_phaseA.md` §9.6
 
 ---
 
@@ -102,4 +102,4 @@ Le gate rougit si le modèle progresse sur les 7 bots de sélection mais tombe s
 
 `--append x1_selfplay` — livré, **jamais exécuté** ; le premier run est aussi son premier test d'intégration.
 
-→ `Documentation/Implémentation/1_Agent/V11_agent_rework.md` §0.59
+→ `Documentation/Chantiers/v11/V11_agent_rework.md` §0.59

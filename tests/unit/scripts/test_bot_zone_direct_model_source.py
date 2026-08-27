@@ -1,6 +1,6 @@
 """`bot_zone_direct` ne doit pas lire le modele au chemin canonique, et doit LEVER s'il manque.
 
-Contexte, mesure du 2026-08-13 (chantier `A_faire/bots_refonte_panel.md` §12.7 invalidee, §12.8) :
+Contexte, mesure du 2026-08-13 (chantier `Documentation/Reference/training/bots_refonte_panel.md` §12.7 invalidee, §12.8) :
 l'instrument visait `ai/models/ArmageddonAgent/model_ArmageddonAgent.zip` en dur. Ce chemin est
 partage et volatil — tout `train.py --new`, depuis n'importe quelle session, l'ecrase — et il
 portait ce jour-la un AUTRE modele que celui dont le chantier tire tous ses chiffres. Les deux

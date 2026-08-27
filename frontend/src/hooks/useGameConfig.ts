@@ -270,7 +270,7 @@ export const useStaticGameConfig = (): {
  * `inchesToSubhexOverride` (cases par pouce : 1, 5 ou 10) et `scenarioFileOverride` (chemin de
  * scénario relatif à la racine du dépôt) laissent l'appelant désigner le plateau à charger quand
  * il ne se déduit pas de l'URL. C'est le cas du replay, qui les tient de son journal :
- * cf. Documentation/Implémentation/Replay.md §2.4. La résolution est transmise TELLE QUELLE au
+ * cf. Documentation/Chantiers/Replay.md §2.4. La résolution est transmise TELLE QUELLE au
  * serveur, qui seul connaît les dossiers de plateau — le navigateur n'a aucune table à tenir.
  */
 export const useGameConfig = (options?: {
@@ -302,7 +302,7 @@ export const useGameConfig = (options?: {
           mode === "pve_test" ? "scenario_pve_test.json" : "scenario_pvp_test.json";
         // Dossier qui PORTE les scénarios de test : il ne suit pas la résolution jouée. `x1` et
         // `x5_44x60` sont le même plateau 44×60 à deux résolutions, et le moteur convertit les
-        // coordonnées (cf. Documentation/Implémentation/Implémenté/V11_board_44x60x1.md). Les entrées
+        // coordonnées (cf. Documentation/Reference/moteur/V11_board_44x60x1.md). Les entrées
         // `x5` -> board/180x156 et `x10` -> board/360x312 ont été retirées : dossiers inexistants.
         const boardDirMap: Record<string, string> = {
           x1: "board/44x60x5",
@@ -347,7 +347,7 @@ export const useGameConfig = (options?: {
         // savoir pour quelle demande elle a été produite. Sans ce contrôle, un `inches_to_subhex`
         // qui n'atteint pas l'API fait servir le plateau par DÉFAUT, et le replay fusionne un décor
         // x5 avec la grille x1 du journal : décor cinq fois trop grand, murs et unités justes,
-        // aucune erreur. C'est le mode de panne décrit en Documentation/Implémentation/Replay.md
+        // aucune erreur. C'est le mode de panne décrit en Documentation/Chantiers/Replay.md
         // §2.4 — il ne se voyait qu'à l'œil, sur un plateau déjà dessiné.
         if (
           inchesToSubhexOverride !== undefined &&

@@ -16,7 +16,7 @@ Answer: [state your answers here before proceeding]
 When working on specific systems, I MUST read these docs first:
 
 ### Phase Handlers (movement_handlers.py, shooting_handlers.py, etc.)
-**MANDATORY READ**: `Documentation/AI_TURN.md` - Sections:
+**MANDATORY READ**: `Documentation/Reference/moteur/AI_TURN.md` - Sections:
 - 🎯 OVERVIEW
 - 🏃 MOVEMENT PHASE LOGIC (for movement changes)
 - 🎯 SHOOTING PHASE LOGIC (for shooting changes)
@@ -24,15 +24,15 @@ When working on specific systems, I MUST read these docs first:
 - Relevant phase sections
 
 ### Game Engine / Turn Logic
-**MANDATORY READ**: `Documentation/AI_TURN.md` - Full document
-**MANDATORY READ**: `Documentation/AI_IMPLEMENTATION.md` - Implementation patterns
+**MANDATORY READ**: `Documentation/Reference/moteur/AI_TURN.md` - Full document
+**MANDATORY READ**: `Documentation/Reference/moteur/AI_IMPLEMENTATION.md` - Implementation patterns
 
 ### Reward System
-**MANDATORY READ**: `Documentation/AI_TRAINING.md` - Reward sections
+**MANDATORY READ**: `Documentation/Reference/training/AI_TRAINING.md` - Reward sections
 **OPTIONAL**: Reward config JSON for the specific agent
 
 ### Training / Learning
-**MANDATORY READ**: `Documentation/AI_TRAINING.md` - Full document
+**MANDATORY READ**: `Documentation/Reference/training/AI_TRAINING.md` - Full document
 **REFERENCE**: Training config JSON for phase-specific parameters
 
 **PROTOCOL**: If I haven't read the required docs for the system I'm modifying, I MUST read them before proceeding.

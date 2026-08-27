@@ -1,6 +1,6 @@
 """09.07 FALL-BACK MOVE : le seul des six déplacements qui n'était contrôlé par rien.
 
-Vert vacant V10 de `Documentation/Implémentation/analyzer_couverture.md`. `_handle_fled` ne
+Vert vacant V10 de `Documentation/Chantiers/analyzer_couverture.md`. `_handle_fled` ne
 regardait que la collision d'ancre et le mur d'arrivée : ni budget, ni chemin, ni éligibilité,
 ni post-condition. Une unité pouvait traverser le plateau en battant en retraite, finir encore
 engagée, ou battre en retraite sans jamais avoir été engagée — le rapport affichait 0.

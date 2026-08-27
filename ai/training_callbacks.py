@@ -174,7 +174,7 @@ def ramp_episode_span(total_episodes: int, decay_fraction: float) -> float:
 
     Cle OBLIGATOIRE en config, sans valeur par defaut : un profil qui l'omettrait retomberait en
     silence sur une rampe etiree, c'est-a-dire le defaut meme qu'elle existe pour rendre visible.
-    Detail du raisonnement et tableau des profils : Documentation/AI_TRAINING.md.
+    Detail du raisonnement et tableau des profils : Documentation/Reference/training/AI_TRAINING.md.
     """
     if not 0.0 < decay_fraction <= 1.0:
         raise ValueError(f"decay_fraction must be in ]0.0, 1.0] (got {decay_fraction})")

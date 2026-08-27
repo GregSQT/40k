@@ -1,0 +1,90 @@
+# Refonte Documentation/ — décisions actées et phases restantes
+
+> **Chantier ouvert le 2026-08-27** (P1 livrée le jour même). Ordre du travail :
+> [`../../Roadmap/ROADMAP_INDEX.md`](../../Roadmap/ROADMAP_INDEX.md) ; état des phases :
+> [`../../Roadmap/doc.md#refonte`](../../Roadmap/doc.md#refonte).
+
+## 1. Pourquoi
+
+Audit complet du corpus le 2026-08-27 (~200 fichiers, 8 lecteurs, affirmations croisées avec le
+code). Cinq constats, tous prouvés :
+
+1. **Trois index concurrents, deux morts** — `README.md` (7 liens morts, ignorait `Roadmap/`),
+   `Documentation_audit.md` (figé au 2026-07-05), `ROADMAP_INDEX.md` (seul vivant).
+2. **L'état des chantiers était tenu deux fois** — sur chaque chiffre échantillonné
+   (`TOTAL_ACTION_SIZE`, `obs_size`, P3-8, T6), `Roadmap/` était à jour et les docs `1_Agent/`
+   retardaient. 13 fichiers gardaient un lien de gouvernance mort vers l'ex-`ROADMAP.md`.
+3. **`Implémenté/` mélangeait archive et référence** — 22 références vivantes (dont 11 citées
+   par le code de production comme contrat) noyées parmi ~45 journaux datés.
+4. **Seul ce qui est sous garde machine reste vrai** — les deux seuls chiffres partout exacts
+   étaient ceux vérifiés par un test (`test_squad_obs_structure_doc.py`) ou par le checker
+   (`obs_size`). Tout le reste avait dérivé, sous des bandeaux de correction empilés.
+5. **Plus de la moitié du poids n'était pas de la documentation** — mémoire RNCP (24 Mo),
+   pitchs, prompts consommés, état d'outil.
+
+## 2. Architecture actée (arbitrages utilisateur : A / A / A)
+
+Un document = un RÔLE, lisible dans son chemin :
+
+| Zone | Rôle | Contenu |
+|---|---|---|
+| `Documentation/Reference/<domaine>/` | RÉFÉRENCE — décrit l'état actuel, doit rester vrai ; toute livraison qui la rend fausse la corrige dans la même livraison (T2) | domaines : `moteur/`, `training/`, `jeu/`, `outils/`, `infra/` |
+| `Documentation/Roadmap/` | ÉTAT — source unique de priorité ET d'état des chantiers | inchangé (outillé : checker, porte de fusion, hook) |
+| `Documentation/Chantiers/` | SPEC/CONCEPTION vivante | contrats permanents (`Replay.md`, `analyzer_couverture.md`) + `Bot_refactor.md` (exception actée) + `v11/` (specs V11) + `backlog/` (chantiers jamais commencés) |
+| `Documentation/Archives/` | ARCHIVE — jamais maintenue, bandeaux datés | `chantiers/` (journaux livrés), `docs/` (docs morts), `prompts/` (prompts consommés) |
+| `Documentation/40k_rules/`, `Review/`, `sql/` | inchangés | règles officielles ; état d'outil `review_plan.py` ; scripts SQL |
+| `Memoire_RNCP/`, `Communication/` (racine dépôt) | hors documentation technique | mémoire académique (purgé des parasites) ; pitchs, profil GitHub |
+
+Règles de vie :
+- **L'état d'un chantier vit à UN endroit : `Roadmap/`.** Aucun « statut » tenu dans les docs de
+  détail (bandeaux posés sur les 4 docs `v11/` en P1 ; suppression des strates en P3).
+- **Un chiffre recopié dans une RÉFÉRENCE est sous garde machine ou n'existe pas** — sinon le
+  doc dit *où lire* la valeur dans le code (garde : P2).
+- **L'archivage fait partie de la clôture** — les ✅ descendent de l'index vers
+  `Roadmap/archives/<sujet>.md` dans la même livraison.
+
+## 3. P2 — Garde machine étendue (à faire)
+
+Objectif : que le checker couvre la nouvelle arborescence ENTIÈRE, pas seulement les documents
+d'entrée. Contenu :
+
+- **Passe 4 (ancres) sur `Reference/`** — préalable : nettoyer les dizaines de
+  `fichier.py:ligne` historiques des ex-docs racine (`AI_TRAINING.md` en tête, raison de son
+  statut `VALUE_ONLY_DOCS`) ; étendre `ANCHOR_TREES` (`scripts/check_doc_references.py`).
+- **Passe liens sur tout le corpus vivant** (`Reference/`, `Chantiers/`, `Roadmap/`, README) —
+  les liens morts trouvés par l'audit échappaient au checker, qui ne contrôle que 12 docs.
+- **VALUE_CHECKS étendus** : `TOTAL_ACTION_SIZE` (le bandeau d'`AI_TRAINING.md` affichait 1 139
+  pour un réel de 1 389), formes d'obs (`K_ALLY_SLOTS`, largeurs de champs — le tableau d'intro
+  d'`AI_OBSERVATION.md` contredisait le bloc gardé par test).
+- **Contrôle d'accumulation** : un seuil de lignes ✅ dans `ROADMAP_INDEX.md` au-delà duquel le
+  checker exige l'archivage (la discipline existait, rien ne la vérifiait — 200 lignes ✅
+  accumulées).
+
+Critère de clôture : `check_doc_references.py` rouge si un lien du corpus vivant meurt, si une
+valeur gardée dérive, ou si l'index accumule ; suite verte sur l'état livré.
+
+## 4. P3 — Contenu (à faire, chantiers séparés)
+
+Un chantier par document, préalable : P2 livré (le checker est le filet).
+
+- **Scission `V11_agent_rework.md`** (8 350 lignes, 667 Ko) : entrées ouvertes §0 → absorbées
+  par `Roadmap/v11_chemin_critique.md` ; §0bis (leçons de méthode, copie canonique) → document
+  de méthode autonome ; §0hist → `Archives/chantiers/`. Purger les strates d'état de
+  `V11_tranches.md` (§T6 « EN COURS » périmé) et `V11_phaseA.md` (§9.4 optionnels livrés).
+- **Réécriture `AI_TURN.md`** (3 501 lignes) : le doc le plus dégradé — vieux guide comme
+  squelette, 5 matrices V11 dispersées, deux « Target Restrictions Logic » contradictoires, un
+  titre CHARGE PHASE sur du contenu de tir, `los_visibility_min_ratio` cité (0 hit code).
+- **Passes unitaires** (chacune à une correction près, preuves dans l'audit du 2026-08-27) :
+  `Weapon_rules.md` (en-tête « INDIRECT_FIRE non implémentée » contredit par sa propre table et
+  le code), `USER_ACCESS_CONTROL.md` (section Frontend pré-F12 ; 4 modes documentés sur 10 en
+  base), `AI_METRICS.md` (3 bots décrits sur 7 réels), bandeau `AI_TRAINING.md` (espace
+  d'action), `FIGHT_RESOLVER_CONVERGENCE.md` et `squad.md` (headers « non implémenté »/« en
+  pause » faux), `Endless_duty.md` (slots spec ↔ code).
+
+## 5. P1 — livrée le 2026-08-27 (référence)
+
+166 renames + 25 suppressions ; scripts recâblés (`check_doc_references.py`,
+`backup_select.py`), 4 tests fonctionnels re-pointés, CLAUDE.md et README régénérés/mis à jour,
+~110 fichiers balayés pour les chemins, liens `../ROADMAP.md` (13 fichiers) et renvois relatifs
+morts réparés, ✅ de l'index descendus en `archives/`, `panel_reference.md` renommé (collision
+d'homonymes), `coherency_removal_choix_agent.md` reclassé backlog (rien de livré, reverté).

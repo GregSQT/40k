@@ -1,6 +1,6 @@
 """T2 — Bloc A du vecteur squad : score de mission, force d'usure, objectifs stricts.
 
-Refonte V11 (Documentation/Implémentation/Implémenté/V11_audit_observation.md §9.2, §9.8, §10 Bloc A) :
+Refonte V11 (Documentation/Archives/chantiers/V11_audit_observation.md §9.2, §9.8, §10 Bloc A) :
 - score de mission (victory points) mien/ennemi : sans lui l'agent ignore qui gagne ;
 - VALUE cumulee vivante / VALUE de depart, par camp (force d'usure) ;
 - controle d'objectif = LECTURE de `objective_controllers`, l'etat persistant du moteur, au lieu

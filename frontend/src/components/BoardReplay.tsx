@@ -547,7 +547,7 @@ export const BoardReplay: React.FC = () => {
     selectedEpisode !== null && replayData ? replayData.episodes[selectedEpisode - 1] : null;
 
   // Résolution du plateau JOUÉ, transmise telle quelle à l'API pour qu'elle serve le décor que le
-  // journal ne porte pas (cf. Documentation/Implémentation/Replay.md §2.4). Aucune traduction ici :
+  // journal ne porte pas (cf. Documentation/Chantiers/Replay.md §2.4). Aucune traduction ici :
   // les dossiers de plateau sont connus du serveur seul, une table de plus dans le navigateur
   // divergerait au premier plateau ajouté. Résolution inconnue → erreur de l'API, affichée par
   // `BoardPvp` comme n'importe quel échec de configuration.
@@ -967,7 +967,7 @@ export const BoardReplay: React.FC = () => {
                   // 2026-08-12 (`Wound None(T+) [LETHAL HITS]`), mais il bute sur le MÊME
                   // mécanisme côté blessure : jambe sans dé, donc pas de détail à remplir. Seules
                   // les CRITIQUES ne sont écrites nulle part. Voir le rapport de parité de
-                  // Documentation/Weapon_rules.md.
+                  // Documentation/Reference/jeu/Weapon_rules.md.
                   woundRerollRule: action.wound_reroll_rule,
                   devastating: action.devastating_wounds_applied,
                   // Dé d'origine d'un jet relancé : le détail affiche « 1->3 », comme en PvP.
@@ -1107,7 +1107,7 @@ export const BoardReplay: React.FC = () => {
                   // [DEVASTATING WOUNDS] n'est PAS repris ici : en mêlée `step.log` écrit
                   // `Save None(T+)` au lieu du segment `Save [DEVASTATING WOUNDS]` du tir, que le
                   // parseur cherche — le champ serait mort. C'est aussi la cause d'un défaut
-                  // PRÉEXISTANT du replay mêlée, documenté dans Documentation/Weapon_rules.md.
+                  // PRÉEXISTANT du replay mêlée, documenté dans Documentation/Reference/jeu/Weapon_rules.md.
                   woundRerollRule: action.wound_reroll_rule,
                   attackRollInitial: action.hit_roll_initial,
                   strengthRollInitial: action.wound_roll_initial,

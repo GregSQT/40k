@@ -6,7 +6,7 @@
 
 ✅ CHANTIER LIVRÉ 2026-08-19 — T7-T13 complets (82 tests vitest verts, Playwright config+E2E, orchestration).
 
-→ `Documentation/Implémentation/Implémenté/front_test_auto.md`
+→ `Documentation/Reference/outils/front_test_auto.md`
 
 ---
 

@@ -157,7 +157,7 @@ const MOVE_PREVIEW_COVER_STATUS_DEBOUNCE_MS = 25;
  * Le débounce (trailing) DOIT rester au-dessus de l'intervalle entre deux hex d'un survol normal
  * (~160-240 ms mesurés) : sinon une requête part pour presque chaque hex traversé, donc il y en a
  * presque toujours une en vol au moment du clic → la transition move → tir attend jusqu'à 900 ms.
- * Voir Documentation/Implémentation/A_faire/preview_tir_position_virtuelle.md.
+ * Voir Documentation/Chantiers/backlog/preview_tir_position_virtuelle.md.
  */
 const MOVE_PREVIEW_SHOOT_DEBOUNCE_MS = 180;
 
@@ -934,7 +934,7 @@ type BoardProps = {
   // Replay : résolution (cases par pouce) et scénario JOUÉS, lus dans le journal, pour que la
   // config plateau soit chargée à la bonne échelle et pour le bon scénario. Le décor (terrain,
   // icônes, zones de déploiement, segments de murs) n'est pas journalisé et vient de là.
-  // cf. Documentation/Implémentation/Replay.md §2.4.
+  // cf. Documentation/Chantiers/Replay.md §2.4.
   inchesToSubhexOverride?: number;
   scenarioFileOverride?: string;
   wallHexesOverride?: Array<{ col: number; row: number }>; // For replay mode: override walls from log

@@ -6,7 +6,7 @@
 
 ✅ **Livré 2026-08-23.** TOTAL_ACTION_SIZE 1359 → 1379 (+20 slots COHERENCY). Queue multi-escouade, sièges muets auto-résolus, tête pointeur `coherency_query_net` sur `self_models`. 32 tests verts. Run `--new` requis.
 
-→ `Documentation/Implémentation/Implémenté/coherency_removal_choix_agent.md`
+→ `Documentation/Chantiers/backlog/coherency_removal_choix_agent.md`
 
 ---
 
@@ -34,7 +34,7 @@ Interruptions réactives pendant le tour adverse — cas le plus complexe du gym
 1. `"fire_overwatch"` + `"heroic_intervention"` dans `AGENT_DECISION_TYPE_IDS` — **gratuit** (AGENT_DECISION_TYPE_SLOTS = 8, 5 → 7 utilisés).
 2. `"charged"` dans `UNIT_BIN_FIELDS` — **+1 scalaire/entité**, nécessaire pour le mode *Leap to Defend* (distinguer les ennemis qui ont chargé). À faire en même temps que R1 pour éviter un 2e `--new` post-J3.
 
-→ `Documentation/Implémentation/A_faire/reactive_stratagems_overwatch_hi.md`
+→ `Documentation/Chantiers/backlog/reactive_stratagems_overwatch_hi.md`
 
 ---
 
@@ -44,7 +44,7 @@ Interruptions réactives pendant le tour adverse — cas le plus complexe du gym
 
 🔴 Le fix décrit est FAUX en l'état (mesuré 2026-07-20) — c'est une décision de design (plan contraint par l'ancre), pas un bug. Re-analyser avant de toucher.
 
-→ `Documentation/Implémentation/1_Agent/V11_tranches.md` §5 T7
+→ `Documentation/Chantiers/v11/V11_tranches.md` §5 T7
 
 ---
 
@@ -52,7 +52,7 @@ Interruptions réactives pendant le tour adverse — cas le plus complexe du gym
 
 **Suspendu.** Après Phase A' validée ET vérification du chantier LoS 3D (`combat_utils`/WASM, câblage incomplet).
 
-→ `Documentation/Implémentation/1_Agent/V11_tranches.md`
+→ `Documentation/Chantiers/v11/V11_tranches.md`
 
 ---
 
@@ -70,7 +70,7 @@ Le tir est légitime côté backend : le tireur élevé ignore correctement les 
 
 **Lourd, re-cadrer avant reprise.** 4-8 j. Meilleure spec du lot, mais touche `compute_unit_los` = source unique (obs RL, reward, déploiement).
 
-→ `Documentation/Implémentation/A_faire/preview_tir_position_virtuelle.md`
+→ `Documentation/Chantiers/backlog/preview_tir_position_virtuelle.md`
 
 ---
 
@@ -78,7 +78,7 @@ Le tir est légitime côté backend : le tireur élevé ignore correctement les 
 
 **Bloqué par décision produit.** 8-13 j. Décisions en attente : obstacle 3 (format objectifs) et 7 (double sens de `VALUE`).
 
-→ `Documentation/Implémentation/A_faire/Endless_duty_etat_mesure.md`
+→ `Documentation/Chantiers/backlog/Endless_duty_etat_mesure.md`
 
 ---
 
@@ -98,4 +98,4 @@ Move réactif : une escouade hors cohérence ne pouvait pas faire ce mouvement (
 
 **T3 livré le 2026-08-25** — 20 sites Forme D. **T4 livré le 2026-08-25** — 15 sites fight_handlers. **T4-bis livré le 2026-08-25** — 7 gardes résiduelles (shared_utils ×6, action_decoder ×1) + import manquant action_decoder. Re-grep global : 0 garde is-None résiduelle. Chantier clos.
 
-→ `Documentation/Implémentation/Implémenté/replis_unit_by_id_2026-08-05.md`
+→ `Documentation/Archives/chantiers/replis_unit_by_id_2026-08-05.md`

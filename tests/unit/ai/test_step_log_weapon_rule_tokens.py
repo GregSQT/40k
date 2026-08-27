@@ -1116,7 +1116,7 @@ def test_l_entete_declare_la_grammaire_du_journal(tmp_path):
 # ─────────────────────────────────────────────────────────────────────────────
 # LOT A (2026-08-12) — les six règles d'armes que `step.log` ne portait PAS
 #
-# Elles étaient dans le cas décrit par `Documentation/Implémentation/analyzer_couverture.md`
+# Elles étaient dans le cas décrit par `Documentation/Chantiers/analyzer_couverture.md`
 # §1.3 : le moteur SAIT poser leur token (`shared_utils.weapon_rule_log_tokens`), mais
 # seulement sur la ligne de synthèse du Game Log PvP, que rien ne relit automatiquement. Aucun
 # contrôle analyzer ne pouvait donc exister pour elles, et §1.8 les rendait « NOT USED » —

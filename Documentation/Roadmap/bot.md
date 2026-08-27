@@ -119,7 +119,7 @@ la fourchette. Il reste à **0,90** (inerte).
 *(État au 2026-08-22 avant décision. Le gate a été RETIRÉ le même jour — `x1_long` à 0,0 —
 et remplacé par le plancher de 0,55 contre le champion le plus récent : encadré de tête.)*
 
-→ `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §3
+→ `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md` §3
 
 ---
 
@@ -147,7 +147,7 @@ les compteurs sous `bot_eval/vs_ckpt_*` et filtre les suffixes `_wins/_losses/_d
 calcul `ckpt_min/ckpt_mean`. Publication TensorBoard câblée via SummaryWriter dans `--test-only`.
 3 tests unitaires ajoutés (commit a145b0cc).
 
-→ `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §4
+→ `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md` §4
 
 ---
 
@@ -176,7 +176,7 @@ Même sort que `standoff` (amplitude 0,05, supprimé le 2026-08-11). Décision d
 
 **→ Tranché le 2026-08-21 : RÉPARATION** ([#r0a-references](#r0a-references)) — le mécanisme (intention d'abord) est gardé, la couche déplacement est réparée ; C.4 sera rejoué après R0a sur les checkpoints chargeables.
 
-→ `Documentation/Implémentation/A_faire/bots_refonte_panel.md` (`Documentation/Implémentation/Bot_refactor.md` §7)
+→ `Documentation/Chantiers/backlog/panel_reference.md` (`Documentation/Chantiers/Bot_refactor.md` §7)
 
 ---
 
@@ -184,7 +184,7 @@ Même sort que `standoff` (amplitude 0,05, supprimé le 2026-08-11). Décision d
 
 **Suspendu** — requis pour la démo (jalon J5), au même titre que le quantitatif. Validation par un joueur externe.
 
-→ `Documentation/Implémentation/1_Agent/V11_eval_strategy.md` §10.6
+→ `Documentation/Chantiers/v11/V11_eval_strategy.md` §10.6
 
 ---
 
@@ -194,7 +194,7 @@ Même sort que `standoff` (amplitude 0,05, supprimé le 2026-08-11). Décision d
 
 Distinct du MCTS adversaire d'entraînement ([infra.md#mcts](infra.md#mcts)).
 
-→ `Documentation/Implémentation/1_Agent/V11_eval_strategy.md` §10.7
+→ `Documentation/Chantiers/v11/V11_eval_strategy.md` §10.7
 
 ---
 
@@ -204,7 +204,7 @@ Distinct du MCTS adversaire d'entraînement ([infra.md#mcts](infra.md#mcts)).
 
 État du code (2026-08-24) : `_can_unit_kill_target_in_one_phase` utilise `expected_damage()` (P(hit)×P(wound)×P(sv)) — le proxy `NB×DMG` y est soldé. `_get_unit_threat` reste `NB×DMG` par design (cible inconnue à ce stade). Aucun autre défaut structurel préidentifié : le levier R3 se tranche sur les courbes D.4 de R1.
 
-→ `Documentation/Implémentation/Bot_refactor.md` §7
+→ `Documentation/Chantiers/Bot_refactor.md` §7
 
 ---
 
@@ -259,4 +259,4 @@ champ `written_by` dérivé de `sys.argv[0]` — `ai/train.py` pour le pipeline,
 pour un script. Les entrées antérieures à cette date n'en ont pas ; leur origine se déduit du
 seul indice disponible, `gate_eval_episodes` (300 = pipeline).
 
-→ `Documentation/Implémentation/Bot_refactor.md` §0bis (décisions datées) et §7
+→ `Documentation/Chantiers/Bot_refactor.md` §0bis (décisions datées) et §7

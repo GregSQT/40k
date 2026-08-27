@@ -122,13 +122,12 @@ else:
 ######################################################################################################
     
     ### Documentation    
-        "Documentation/AI_IMPLEMENTATION.md",
-        "Documentation/AI_METRICS.md",
-        "Documentation/AI_OBSERVATION.md",
-        "Documentation/AI_OBSERVATION_Legacy.md",
-        "Documentation/AI_TARGET_SELECTION.md",
-        "Documentation/AI_TRAINING.md",
-        "Documentation/AI_TURN.md",
+        "Documentation/Reference/moteur/AI_IMPLEMENTATION.md",
+        "Documentation/Reference/training/AI_METRICS.md",
+        "Documentation/Reference/training/AI_OBSERVATION.md",
+        "Documentation/Archives/docs/AI_OBSERVATION_Legacy.md",
+        "Documentation/Reference/training/AI_TRAINING.md",
+        "Documentation/Reference/moteur/AI_TURN.md",
 
 ######################################################################################################
 ##### Engine files

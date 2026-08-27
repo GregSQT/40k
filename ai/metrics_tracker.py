@@ -301,7 +301,7 @@ class W40KMetricsTracker:
         # combat/a_position_score). Il n'a plus de producteur depuis le commit 329d140e
         # "move reward deleted" (2026-02-01), qui a supprime la recompense de mouvement basee
         # sur calculate_position_score, la cle position_score du reward_breakdown et 17 lignes
-        # de Documentation/AI_METRICS.md. Le dernier appelant (ai/training_callbacks.py) est
+        # de Documentation/Reference/training/AI_METRICS.md. Le dernier appelant (ai/training_callbacks.py) est
         # tombe a son tour. Suppression cote produit deja actee : rien a rebrancher.
 
         # NEW: AI_TURN.md compliance tracking

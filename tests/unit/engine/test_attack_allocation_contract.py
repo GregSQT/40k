@@ -5,7 +5,7 @@ jamais été allouée à une figurine (`step_logger._save_segments`, seuil de sa
 Un contrôle de `ai/analyzer.py` recoupait ces lignes avec l'état de la cible pour dénoncer un
 moteur qui cesserait d'allouer sans raison. Retiré le 2026-08-12 parce qu'il jugeait sur l'état
 RECONSTRUIT par l'analyzer : il ne pouvait donc signaler que les dérives de cette reconstruction.
-Mesures et chiffres dans `Documentation/Implémentation/analyzer_couverture.md`, table
+Mesures et chiffres dans `Documentation/Chantiers/analyzer_couverture.md`, table
 « Contrôles SUPPRIMÉS » — ils ne sont pas recopiés ici, ils y vivraient en double.
 
 L'invariant, lui, se vérifie EXACTEMENT ici, sur l'état du moteur : le seul chemin qui laisse

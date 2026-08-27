@@ -641,7 +641,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 state.current_agent_player = int(agent_player_match.group(1))
                 continue
 
-            # Instantané 14.02 écrit par le MOTEUR (cf. Documentation/Implémentation/Replay.md
+            # Instantané 14.02 écrit par le MOTEUR (cf. Documentation/Chantiers/Replay.md
             # §2.3) : SOURCE DE VÉRITÉ des points de victoire et du contrôle d'objectif.
             #   [hh:mm:ss] T{tour} OBJECTIVE CONTROL: VP1=… VP2=… CP1=… CP2=… ZONES=…
             # Ne matche PAS le récapitulatif de fin d'épisode ([ts] OBJECTIVE CONTROL:

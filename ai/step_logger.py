@@ -651,7 +651,7 @@ class StepLogger:
         ``scenario_path`` : chemin du scénario RÉELLEMENT tiré pour cet épisode, relatif à la
         racine du dépôt. C'est par lui que le replay retrouve le décor joué — ``scenario_info``
         vaut « Random from N scenarios » en entraînement et ne désigne aucun fichier
-        (cf. Documentation/Implémentation/Replay.md §2.4).
+        (cf. Documentation/Chantiers/Replay.md §2.4).
 
         ``run_rules`` : les valeurs de règle que le moteur a RÉELLEMENT appliquées. Elles vivent
         dans `config/game_config.json`, que l'on édite entre deux runs : sans elles, l'analyzer

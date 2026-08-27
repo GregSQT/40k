@@ -1,5 +1,5 @@
 """Deux obstacles que le BFS de mouvement de l'analyzer ne connaissait pas — verts vacants V7 et
-V6 de `Documentation/Implémentation/analyzer_couverture.md`.
+V6 de `Documentation/Chantiers/analyzer_couverture.md`.
 
 **V7 — le bord du plateau.** 03.01, mot pour mot : « Its base cannot cross the edge of the
 battlefield. » Le champ géodésique du MOTEUR borne ses voisins au plateau

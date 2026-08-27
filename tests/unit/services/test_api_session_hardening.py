@@ -1,4 +1,4 @@
-"""Durcissement des sessions et rate limiting du login (F2, F8) — `Documentation/Implémentation/Security.md`.
+"""Durcissement des sessions et rate limiting du login (F2, F8) — `Documentation/Reference/infra/Security.md`.
 
 Verrouille sept invariants :
 1. une session échue n'authentifie plus (avant : `WHERE s.token = ?` seul, token valide à vie) ;
@@ -114,7 +114,7 @@ class TestSchema:
 
 
 class TestReferenceScriptMatchesProduction:
-    """Le script de référence `Documentation/Memoire RNCP/Annexe_script_BDD_auth.sql` doit décrire
+    """Le script de référence `Documentation/sql/Annexe_script_BDD_auth.sql` doit décrire
     LE MÊME schéma que `initialize_auth_db()`.
 
     Il avait silencieusement divergé (`created_at TEXT`, pas d'`expires_at`, pas de journal) :
@@ -139,7 +139,7 @@ class TestReferenceScriptMatchesProduction:
     def test_reference_script_produces_the_production_schema(self, tmp_path, monkeypatch):
         script = (
             Path(__file__).resolve().parents[3]
-            / "Documentation" / "Memoire RNCP" / "Annexe_script_BDD_auth.sql"
+            / "Documentation" / "sql" / "Annexe_script_BDD_auth.sql"
         )
         assert script.exists(), f"script de référence introuvable : {script}"
 

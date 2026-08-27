@@ -98,7 +98,7 @@ pip install -r requirements-dev.txt
 ./scripts/security_check.sh    # bandit + pip-audit + npm audit ; sortie non nulle si finding haut
 ```
 
-Seuils, exceptions justifiées et findings connus : [Documentation/Implémentation/Implémenté/Security.md](Documentation/Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/Security.md).
+Seuils, exceptions justifiées et findings connus : [Documentation/Reference/infra/Security.md](Documentation/Reference/infra/Security.md).
 
 ### Entraînement IA (exemple)
 
@@ -120,11 +120,11 @@ python ai/train.py --agent CoreAgent --scenario bot --new
 ```
 
 ### Documentation utile
-- `Documentation/AI_IMPLEMENTATION.md`
-- `Documentation/AI_TRAINING.md`
+- `Documentation/Reference/moteur/AI_IMPLEMENTATION.md`
+- `Documentation/Reference/training/AI_TRAINING.md`
 - `Documentation/FRONTEND_UI.md`
-- `Documentation/USER_ACCESS_CONTROL.md`
-- `Documentation/Deployment_Synology.md`
+- `Documentation/Reference/infra/USER_ACCESS_CONTROL.md`
+- `Documentation/Reference/infra/Deployment_Synology.md`
 
 ---
 
@@ -176,7 +176,7 @@ pip install -r requirements-dev.txt
 ./scripts/security_check.sh    # bandit + pip-audit + npm audit; non-zero exit on any high finding
 ```
 
-Thresholds, written exceptions and known findings: [Documentation/Implémentation/Implémenté/Security.md](Documentation/Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/Security.md).
+Thresholds, written exceptions and known findings: [Documentation/Reference/infra/Security.md](Documentation/Reference/infra/Security.md).
 
 ### AI training example
 
@@ -185,9 +185,9 @@ python ai/train.py --agent CoreAgent --scenario bot --new
 ```
 
 ### Docs
-- `Documentation/AI_IMPLEMENTATION.md`
-- `Documentation/AI_TRAINING.md`
+- `Documentation/Reference/moteur/AI_IMPLEMENTATION.md`
+- `Documentation/Reference/training/AI_TRAINING.md`
 - `Documentation/FRONTEND_UI.md`
-- `Documentation/USER_ACCESS_CONTROL.md`
-- `Documentation/Deployment_Synology.md`
+- `Documentation/Reference/infra/USER_ACCESS_CONTROL.md`
+- `Documentation/Reference/infra/Deployment_Synology.md`
 

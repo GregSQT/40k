@@ -1,6 +1,6 @@
 # AI_TURN.md Compliance Verification
 
-Before implementing any phase handler changes, verify compliance with `Documentation/AI_TURN.md`:
+Before implementing any phase handler changes, verify compliance with `Documentation/Reference/moteur/AI_TURN.md`:
 
 ## Core Principles Checklist
 

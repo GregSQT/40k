@@ -1,4 +1,4 @@
-"""Bloc 0 — Fondations V11 de la phase de combat (Documentation/Implémentation/Implémenté/phase_fight_v11.md).
+"""Bloc 0 — Fondations V11 de la phase de combat (Documentation/Archives/chantiers/phase_fight_v11.md).
 
 Tests unitaires des helpers/primitives ADDITIFS (non branchés sur le flux V10) :
 - is_fights_first (grant 24.13 via charge / units_charged, 11.04)

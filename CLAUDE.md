@@ -14,7 +14,7 @@ Modèles IA : ai/models/<agent_key>/model_<agent_key>.zip
 
 Configs agents : config/agents/<agent_name>/
 
-Python : type hints, docstrings, respect Documentation/AI_TURN.md
+Python : type hints, docstrings, respect Documentation/Reference/moteur/AI_TURN.md
 
 Aucun fallback/workaround/default anti-erreur → T1
 
@@ -44,11 +44,11 @@ ROADMAP_INDEX.md : tranche l'ordre/priorité des chantiers, y compris contre V11
 
 Décision datée la plus récente : tranche l'approche retenue.
 
-1_Agent/ : détail/spec du programme V11.
+Chantiers/v11/ : détail/spec du programme V11.
 
-A_faire/ : contenu des chantiers ouverts (détail).
+Chantiers/backlog/ : contenu des chantiers ouverts (détail).
 
-Implémenté/ : référence de conception des chantiers livrés.
+Reference/ : références vivantes par domaine ; Archives/chantiers/ : journaux des chantiers livrés.
 
 Si aucune règle ci-dessus ne tranche : demander à l'utilisateur.
 
@@ -123,7 +123,7 @@ Tree propre → EnterWorktree directement, nom décrivant le sujet.
 Tree sale → signaler (les modifications locales ne suivent pas le worktree) et attendre.
 Lecture/analyse/doc seule → pas de worktree.
 Glissement analyse → écriture : dès que l'intention d'écrire un fichier code apparaît, re-vérifier git status + ouvrir le worktree AVANT ce write, même si la tâche a commencé en lecture pure. Le hook check-worktree-before-write.sh bloque tout write de fichier code dans main ; un refus du hook = ouvrir le worktree, pas contourner le hook.
-Fin : à la clôture de chaque chantier, sans attendre de demande : commit → ExitWorktree "keep" → merge dans main → supprimer worktree + branche → mettre à jour ROADMAP_INDEX.md + fichier sujet → déplacer le doc du chantier dans Implémenté/.
+Fin : à la clôture de chaque chantier, sans attendre de demande : commit → ExitWorktree "keep" → merge dans main → supprimer worktree + branche → mettre à jour ROADMAP_INDEX.md + fichier sujet → déplacer le doc du chantier dans Archives/chantiers/.
 Jamais remove avant merge. discard_changes: true interdit.
 Training en cours → ne toucher aucun JSON de config/ (relu à chaud par les évaluations).
 
@@ -283,7 +283,7 @@ Pas de verdict vague (optimal, tout propre, doc à jour) ; uniquement des faits 
 
 ---
 ÉTAT CHANTIER : Tests <s> · Commité <s> · Mergé <s> · ROADMAP <s> · Doc <s>
-Tests : ✅ (N verts) ou 🔴 (N rouges). Doc : ✅ déplacé dans Implémenté/ · 🟡 à faire · ⚪ pas de doc chantier associé.
+Tests : ✅ (N verts) ou 🔴 (N rouges). Doc : ✅ déplacé dans Archives/chantiers/ · 🟡 à faire · ⚪ pas de doc chantier associé.
 Symboles communs : ✅ fait · 🟡 à faire · 🔴 erreur/bloqué · ⚪ sans objet. Omis si aucun code écrit.
 
 SUITE : 🟢 Tout est terminé
