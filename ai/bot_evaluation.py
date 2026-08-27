@@ -943,7 +943,6 @@ def _worker_checkpoint_opponent(
 
     L'archive est normalisee avec SES PROPRES stats (spec R0b) — jamais celles du modele courant.
     """
-    global _worker_ckpt_cache
     cached = _worker_ckpt_cache.get(zip_path)
     if cached is not None:
         return cached
@@ -1018,8 +1017,8 @@ def _eval_worker_task(
         # (violation de la spec R0b). Ca ne leve pas et ca ne crashe pas — ca rend un score faux.
         frozen_model, frozen_mtime = _worker_checkpoint_opponent(
             checkpoint_zip,
-            bool(config_params.get("vec_normalize_enabled", False)),
-            bool(config_params.get("vec_eval_enabled", False)),
+            bool(require_key(config_params, "vec_normalize_enabled")),
+            bool(require_key(config_params, "vec_eval_enabled")),
             str(task.get("checkpoint_device", "cpu")),
         )
         env._frozen_model = frozen_model
@@ -1082,126 +1081,128 @@ def _eval_worker_task(
     # rend exactement les memes graines que la boucle sequentielle, quel que soit le decoupage.
     # Defaut 0 : le chemin bot, qui ne decoupe pas, est inchange bit-a-bit.
     ep_offset = int(require_key(task, "ep_offset"))
-    for ep_idx in range(ep_offset, ep_offset + int(task["n_episodes"])):
-        ep_seed = _episode_seed(task["base_seed"], task["bot_name"], task["scenario_index"], ep_idx)
-        random.seed(ep_seed)
-        np.random.seed(ep_seed)
-        obs, info = env.reset(seed=ep_seed)
-        episode_faction = _agent_faction_from_engine(env.engine)
-        episode_roster_ids = _episode_roster_ids(env.engine)
-        # `require_key` sur l'`info` du RESET, et non `env.engine.config` : c'est
-        # `BotControlledEnv._apply_episode_seat` qui tire le siege de l'episode et le publie ici
-        # (meme cle que celle dont vivent les courbes `seat_aware/*` de l'entrainement). Un siege
-        # absent est une anomalie d'environnement, pas un cas de jeu.
-        episode_seat = _seat_key(require_key(info, "controlled_player"))
-        done = False
-        step_count = 0
-        # BACKSTOP, et il ne peut PAS preempter le garde moteur : les deux compteurs n'ont pas
-        # la meme unite. Un step gym vaut PLUSIEURS steps moteur (tour du bot, WAIT forces —
-        # cf. `BotControlledEnv.step`), mesure a 1,3-1,4 sur ce depot, donc le compteur du
-        # moteur atteint SON plafond avant que celui-ci n'atteigne le sien. Aucun ajustement
-        # n'est donc necessaire, et en poser un serait du code pour un scenario qui n'existe pas.
-        #
-        # Ce backstop sert le cas ou le moteur n'a AUCUN plafond d'episode : duree illimitee
-        # (Endless Duty), ou `_get_episode_step_limit` rend None. Le releve est garde pour le
-        # diagnostic — savoir lequel des deux gardes etait arme change ce qu'on va chercher.
-        max_steps_per_episode = int(require_key(task, "max_steps_per_episode"))
-        engine_episode_limit = env.engine._get_episode_step_limit()
-        while not done and step_count < max_steps_per_episode:
-            model_obs = _worker_obs_normalizer(obs) if _worker_obs_normalizer else obs
-            # `get_action_masks` de sb3_contrib = le chemin de PPO : il resout `action_masks` sur
-            # le wrapper le PLUS EXTERNE, donc `BotControlledEnv.action_masks`, qui sert la decision
-            # deja etablie. L'appel direct `env.engine.get_action_mask()` qui vivait ici POIGNARDAIT
-            # ce depot : il fait avancer la phase de combat sur masque vide (cf. sa docstring), donc
-            # il pouvait deplacer l'etat ENTRE deux `step()` — le step suivant consommait alors le
-            # masque d'un etat revolu, sans que rien ne leve. Il ne gagnait rien au passage : cette
-            # boucle n'utilisait pas le depot, elle ne faisait que le perimer.
-            # L'avancement de phase reste assure : sans depot, `action_masks()` retombe sur
-            # `engine.get_action_mask()` ; avec depot, le masque est non vide par precondition, donc
-            # la boucle d'avancement n'aurait de toute facon rien fait.
-            action_masks = np.asarray(get_action_masks(env), dtype=bool)
-            if action_masks.ndim == 1:
-                action_masks = action_masks.reshape(1, -1)
-            if isinstance(model_obs, dict):
-                # Obs Dict (MultiInputPolicy + CNN) : predict la gere nativement, ne pas aplatir.
-                model_input = model_obs
-            else:
-                model_input = np.asarray(model_obs, dtype=np.float32)
-                if model_input.ndim == 1:
-                    model_input = model_input.reshape(1, -1)
-            action, _ = _worker_model.predict(
-                model_input,
-                action_masks=action_masks,
-                deterministic=task.get("deterministic", True),
-            )
-            action_scalar = int(np.asarray(action).flat[0])
-            obs, reward, terminated, truncated, info = env.step(action_scalar)
-            if truncated:
-                # Le payload traverse la frontiere de process avec le resultat de la tache.
+    # `task` est immuable dans la boucle : extrait une seule fois avant de partir.
+    max_steps_per_episode = int(require_key(task, "max_steps_per_episode"))
+    try:
+        for ep_idx in range(ep_offset, ep_offset + int(task["n_episodes"])):
+            ep_seed = _episode_seed(task["base_seed"], task["bot_name"], task["scenario_index"], ep_idx)
+            random.seed(ep_seed)
+            np.random.seed(ep_seed)
+            obs, info = env.reset(seed=ep_seed)
+            episode_faction = _agent_faction_from_engine(env.engine)
+            episode_roster_ids = _episode_roster_ids(env.engine)
+            # `require_key` sur l'`info` du RESET, et non `env.engine.config` : c'est
+            # `BotControlledEnv._apply_episode_seat` qui tire le siege de l'episode et le publie ici
+            # (meme cle que celle dont vivent les courbes `seat_aware/*` de l'entrainement). Un siege
+            # absent est une anomalie d'environnement, pas un cas de jeu.
+            episode_seat = _seat_key(require_key(info, "controlled_player"))
+            done = False
+            step_count = 0
+            # BACKSTOP, et il ne peut PAS preempter le garde moteur : les deux compteurs n'ont pas
+            # la meme unite. Un step gym vaut PLUSIEURS steps moteur (tour du bot, WAIT forces —
+            # cf. `BotControlledEnv.step`), mesure a 1,3-1,4 sur ce depot, donc le compteur du
+            # moteur atteint SON plafond avant que celui-ci n'atteigne le sien. Aucun ajustement
+            # n'est donc necessaire, et en poser un serait du code pour un scenario qui n'existe pas.
+            #
+            # Ce backstop sert le cas ou le moteur n'a AUCUN plafond d'episode : duree illimitee
+            # (Endless Duty), ou `_get_episode_step_limit` rend None. Le releve est garde pour le
+            # diagnostic — savoir lequel des deux gardes etait arme change ce qu'on va chercher.
+            engine_episode_limit = env.engine._get_episode_step_limit()
+            while not done and step_count < max_steps_per_episode:
+                model_obs = _worker_obs_normalizer(obs) if _worker_obs_normalizer else obs
+                # `get_action_masks` de sb3_contrib = le chemin de PPO : il resout `action_masks` sur
+                # le wrapper le PLUS EXTERNE, donc `BotControlledEnv.action_masks`, qui sert la decision
+                # deja etablie. L'appel direct `env.engine.get_action_mask()` qui vivait ici POIGNARDAIT
+                # ce depot : il fait avancer la phase de combat sur masque vide (cf. sa docstring), donc
+                # il pouvait deplacer l'etat ENTRE deux `step()` — le step suivant consommait alors le
+                # masque d'un etat revolu, sans que rien ne leve. Il ne gagnait rien au passage : cette
+                # boucle n'utilisait pas le depot, elle ne faisait que le perimer.
+                # L'avancement de phase reste assure : sans depot, `action_masks()` retombe sur
+                # `engine.get_action_mask()` ; avec depot, le masque est non vide par precondition, donc
+                # la boucle d'avancement n'aurait de toute facon rien fait.
+                action_masks = np.asarray(get_action_masks(env), dtype=bool)
+                if action_masks.ndim == 1:
+                    action_masks = action_masks.reshape(1, -1)
+                if isinstance(model_obs, dict):
+                    # Obs Dict (MultiInputPolicy + CNN) : predict la gere nativement, ne pas aplatir.
+                    model_input = model_obs
+                else:
+                    model_input = np.asarray(model_obs, dtype=np.float32)
+                    if model_input.ndim == 1:
+                        model_input = model_input.reshape(1, -1)
+                action, _ = _worker_model.predict(
+                    model_input,
+                    action_masks=action_masks,
+                    deterministic=task.get("deterministic", True),
+                )
+                action_scalar = int(np.asarray(action).flat[0])
+                obs, reward, terminated, truncated, info = env.step(action_scalar)
+                if truncated:
+                    # Le payload traverse la frontiere de process avec le resultat de la tache.
+                    truncations.append({
+                        "reason": require_key(info, "truncation_reason"),
+                        "bot_name": task["bot_name"],
+                        "scenario_name": _scenario_name_from_task(task),
+                        "episode_index": ep_idx,
+                        "episode_seed": ep_seed,
+                        "deterministic": bool(task.get("deterministic", True)),
+                        **require_key(info, "truncation_debug"),
+                    })
+                done = bool(terminated or truncated)
+                step_count += 1
+            if not done:
+                # Le backstop a tire : le garde moteur ne pouvait pas (duree illimitee — il rend
+                # None) ou n'a pas suffi. La partie n'a PAS fini : la compter en defaite (ce que
+                # faisait `winner is None` en tombant dans le `else` plus bas) attribue au modele un
+                # resultat qu'il n'a pas produit et efface l'incident. Nul + trace, comme le moteur.
                 truncations.append({
-                    "reason": require_key(info, "truncation_reason"),
+                    "reason": "eval_loop_cap",
                     "bot_name": task["bot_name"],
                     "scenario_name": _scenario_name_from_task(task),
                     "episode_index": ep_idx,
                     "episode_seed": ep_seed,
                     "deterministic": bool(task.get("deterministic", True)),
-                    **require_key(info, "truncation_debug"),
+                    # `gym_*` et non `steps`/`step_limit` : ces deux cles-la portent des STEPS
+                    # MOTEUR dans les lignes `episode_steps_limit` du meme journal. Un step gym en
+                    # vaut plusieurs — les melanger sous un nom commun rend les lignes
+                    # incomparables, et c'est un journal fait pour etre relu.
+                    "gym_steps": step_count,
+                    "gym_step_limit": max_steps_per_episode,
+                    "engine_step_limit": engine_episode_limit,
                 })
-            done = bool(terminated or truncated)
-            step_count += 1
-        if not done:
-            # Le backstop a tire : le garde moteur ne pouvait pas (duree illimitee — il rend
-            # None) ou n'a pas suffi. La partie n'a PAS fini : la compter en defaite (ce que
-            # faisait `winner is None` en tombant dans le `else` plus bas) attribue au modele un
-            # resultat qu'il n'a pas produit et efface l'incident. Nul + trace, comme le moteur.
-            truncations.append({
-                "reason": "eval_loop_cap",
-                "bot_name": task["bot_name"],
-                "scenario_name": _scenario_name_from_task(task),
-                "episode_index": ep_idx,
-                "episode_seed": ep_seed,
-                "deterministic": bool(task.get("deterministic", True)),
-                # `gym_*` et non `steps`/`step_limit` : ces deux cles-la portent des STEPS
-                # MOTEUR dans les lignes `episode_steps_limit` du meme journal. Un step gym en
-                # vaut plusieurs — les melanger sous un nom commun rend les lignes
-                # incomparables, et c'est un journal fait pour etre relu.
-                "gym_steps": step_count,
-                "gym_step_limit": max_steps_per_episode,
-                "engine_step_limit": engine_episode_limit,
-            })
-            draws += 1
-            _count_episode(episode_faction, episode_roster_ids, episode_seat, won=False)
-            # Profil comportemental pour cet episode (truncate = draw).
-            ep_controlled = info.get("controlled_player") if info else None
-            _accumulate_behavior(behavior_stats, "draw", env, ep_controlled)
+                draws += 1
+                _count_episode(episode_faction, episode_roster_ids, episode_seat, won=False)
+                # Profil comportemental pour cet episode (truncate = draw).
+                ep_controlled = info.get("controlled_player") if info else None
+                _accumulate_behavior(behavior_stats, "draw", env, ep_controlled)
+                if progress_callback is not None:
+                    progress_callback()
+                continue
+            # Pas de `info.get("winner")` : un `None` de repli n'est ni `controlled_player` ni -1,
+            # l'episode serait compte en DEFAITE alors que la donnee manque. Le moteur ecrit
+            # toujours la cle dans `W40KEngine.step`, partie terminee comme partie en cours :
+            # son absence est une anomalie d'environnement, pas un cas de jeu.
+            winner = require_key(info, "winner")
+            controlled_player = require_key(info, "controlled_player")
+            _count_episode(
+                episode_faction, episode_roster_ids, episode_seat,
+                won=(winner == controlled_player),
+            )
+            if winner == controlled_player:
+                wins += 1
+                ep_issue = "win"
+            elif winner == DRAW_WINNER:
+                draws += 1
+                ep_issue = "draw"
+            else:
+                losses += 1
+                ep_issue = "loss"
+            # Profil comportemental pour cet episode.
+            _accumulate_behavior(behavior_stats, ep_issue, env, controlled_player)
             if progress_callback is not None:
                 progress_callback()
-            continue
-        # Pas de `info.get("winner")` : un `None` de repli n'est ni `controlled_player` ni -1,
-        # l'episode serait compte en DEFAITE alors que la donnee manque. Le moteur ecrit
-        # toujours la cle dans `W40KEngine.step`, partie terminee comme partie en cours :
-        # son absence est une anomalie d'environnement, pas un cas de jeu.
-        winner = require_key(info, "winner")
-        controlled_player = require_key(info, "controlled_player")
-        _count_episode(
-            episode_faction, episode_roster_ids, episode_seat,
-            won=(winner == controlled_player),
-        )
-        if winner == controlled_player:
-            wins += 1
-            ep_issue = "win"
-        elif winner == DRAW_WINNER:
-            draws += 1
-            ep_issue = "draw"
-        else:
-            losses += 1
-            ep_issue = "loss"
-        # Profil comportemental pour cet episode.
-        _accumulate_behavior(behavior_stats, ep_issue, env, controlled_player)
-        if progress_callback is not None:
-            progress_callback()
-
-    env.close()
+    finally:
+        env.close()
     return {
         "wins": wins, "losses": losses, "draws": draws,
         "truncations": truncations,
@@ -1575,6 +1576,10 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     )
         except Exception:
             os.remove(effective_model_path)
+            from ai.vec_normalize_utils import get_vec_normalize_path
+            _orphan_pkl = get_vec_normalize_path(effective_model_path)
+            if os.path.exists(_orphan_pkl):
+                os.remove(_orphan_pkl)
             raise
         _temp_model_path = effective_model_path
 
