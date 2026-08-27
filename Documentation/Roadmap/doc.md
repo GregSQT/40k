@@ -14,8 +14,7 @@ vrai), `Documentation/Chantiers/` (vivant : contrats permanents, `v11/`, `backlo
 
 - **P1 structure** : ✅ livrée le 2026-08-27 — déplacements, mise à jour des scripts, des tests
   et de CLAUDE.md, README régénéré, purge des ✅ de l'index, liens réparés.
-- **P2 garde machine étendue** : 🟡 à faire — passe 4 sur `Reference/`, liens sur tout le corpus,
-  VALUE_CHECKS étendus (`TOTAL_ACTION_SIZE`, formes d'obs), contrôle d'accumulation des ✅.
+- **P2 garde machine étendue** : ✅ livrée le 2026-08-27 — passe LIENS corpus vivant, `ANCHOR_TREES` étendu à `Reference/` (23 ancres fichier:ligne purgées d'`AI_TRAINING.md`), `VALUE_CHECKS` étendus (`TOTAL_ACTION_SIZE`, dimensions `allies_cont/allies_bin`), accumulation ROADMAP ≤ 20 ✅ ; 51 fragments morts #s0.X retirés de V11_tranches/phaseA/eval_strategy.
 - **P3 contenu** : 🟡 à faire — scission `V11_agent_rework.md` (ouvert → roadmap, §0bis → doc de
   méthode, §0hist → archive), réécriture `AI_TURN.md`, passes unitaires (`Weapon_rules.md`,
   `USER_ACCESS_CONTROL.md`, `AI_METRICS.md`, bandeau `AI_TRAINING.md`).
@@ -31,7 +30,7 @@ Le solde du 2026-08-25 (sept symboles corrigés dans 4 docs) est archivé dans
 
 **Convention** : citer `def <symbole>` ou un `grep` reproductible, jamais un numéro de ligne. La passe 5, `def check_symbol_kinds` (`scripts/check_doc_references.py`), vérifie le genre déclaré ; la passe 2, `def check_links` (`scripts/check_doc_references.py`), contrôle les liens morts.
 
-**Couverture du script** : `check_doc_references.py` passe 4 (ANCRES) couvre `Documentation/Roadmap/`, les contrats permanents, et le corpus chantiers — `Documentation/Chantiers/` + `Documentation/Archives/chantiers/` (`ANCHOR_TREES`, ex-`Implémentation/` relocalisé par la refonte 2026-08-27). Les 1237 ancres stales ont été nettoyées le 2026-08-26 — le script repasse au vert sur l'ensemble du corpus. L'extension à `Documentation/Reference/` est le lot P2 de [la refonte](#refonte).
+**Couverture du script** : `check_doc_references.py` passe 4 (ANCRES) couvre `Documentation/Roadmap/`, les contrats permanents, le corpus chantiers (`Documentation/Chantiers/` + `Documentation/Archives/chantiers/`) et désormais `Documentation/Reference/` (P2 livré le 2026-08-27). Passe LIENS sur tout le corpus vivant également active depuis P2.
 
 ---
 

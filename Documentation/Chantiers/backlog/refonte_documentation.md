@@ -43,7 +43,7 @@ Règles de vie :
 - **L'archivage fait partie de la clôture** — les ✅ descendent de l'index vers
   `Roadmap/archives/<sujet>.md` dans la même livraison.
 
-## 3. P2 — Garde machine étendue (à faire)
+## 3. P2 — Garde machine étendue (✅ livré 2026-08-27)
 
 Objectif : que le checker couvre la nouvelle arborescence ENTIÈRE, pas seulement les documents
 d'entrée. Contenu :

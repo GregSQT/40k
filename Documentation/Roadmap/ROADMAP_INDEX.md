@@ -129,7 +129,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
-| doc | 🟠 **Refonte Documentation/** — architecture par rôle actée 2026-08-27 (`Reference/`, `Chantiers/`, `Archives/`, mémoire+pitchs hors Documentation) ; P1 structure livrée, restent P2 garde machine + P3 contenu | [doc.md#refonte](doc.md#refonte) | ⚡ |
+| doc | 🟠 **Refonte Documentation/** — P1 structure livrée 2026-08-27, P2 garde machine livrée 2026-08-27 (checker corpus entier : LIENS+ANCRES+VALUE_CHECKS+accumulation) ; reste P3 contenu (scission V11_agent_rework faite) | [doc.md#refonte](doc.md#refonte) | ⚡ |
 | doc | Dette d'ancres G1/G2/G4 de V11_tranches §1bis | [doc.md#dette-tranches](doc.md#dette-tranches) | ⚡ |
 | doc | Bandeaux périmés V11_agent_rework §0bis (assumés depuis 2026-07-20) | [doc.md#bandeaux-0bis](doc.md#bandeaux-0bis) | ⚡ |
 | doc | §0.19 : les ✅ T2→T5 revérifiés par lecture seule | [doc.md#reverif-t2-t5](doc.md#reverif-t2-t5) | ⚡ |
