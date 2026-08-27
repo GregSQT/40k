@@ -274,6 +274,13 @@ _FENCED_CODE_BLOCK = re.compile(
 def _mask_fenced(m: re.Match) -> str:  # type: ignore[type-arg]
     return re.sub(r"[^\n]", " ", m.group(0))
 
+
+@functools.lru_cache(maxsize=None)
+def _read_masked(path: pathlib.Path) -> str:
+    """Lit le fichier et masque les blocs fencés (résultat mis en cache par chemin)."""
+    return _FENCED_CODE_BLOCK.sub(_mask_fenced, path.read_text(encoding="utf-8"))
+
+
 #: Span de code inline — `code` — présent dans les titres comme dans le corps du document.
 _INLINE_CODE = re.compile(r"`[^`\n]*`")
 
@@ -642,8 +649,7 @@ def check_references(doc_path: pathlib.Path) -> tuple[int, int, list[str]]:
     doc_dir = doc_path.parent
     resolved = unverifiable = 0
     broken: list[str] = []
-    text = _FENCED_CODE_BLOCK.sub(_mask_fenced, doc_path.read_text(encoding="utf-8"))
-    for lineno, line in enumerate(text.split("\n"), 1):
+    for lineno, line in enumerate(_read_masked(doc_path).split("\n"), 1):
         cells, cooccurrence_allowed = fragments(line)
         for cell in cells:
             names = names_in(cell)
@@ -1194,10 +1200,8 @@ def check_anchors(
         enforcement_set = _get_anchor_enforced()
     if isinstance(enforcement_set, frozenset) and doc_path.name not in enforcement_set:
         return []
-    text = doc_path.read_text(encoding="utf-8")
-    text = _FENCED_CODE_BLOCK.sub(_mask_fenced, text)
     found: list[str] = []
-    for lineno, line in enumerate(text.split("\n"), 1):
+    for lineno, line in enumerate(_read_masked(doc_path).split("\n"), 1):
         # Un même renvoi s'écrit couramment DEUX FOIS sur une ligne — `[a.py:629](…/a.py#L629)`
         # porte le numéro dans le texte et dans l'URL. Compté deux fois, le rapport annonçait
         # « 2 ancres » là où il y en a une, et le lecteur cherchait la seconde.
@@ -1330,8 +1334,7 @@ def check_symbol_kinds(doc_path: pathlib.Path) -> tuple[int, int, list[str], lis
     broken: list[str] = []
     notes: list[str] = []
     doc_dir = doc_path.parent
-    text = _FENCED_CODE_BLOCK.sub(_mask_fenced, doc_path.read_text(encoding="utf-8"))
-    for lineno, line in enumerate(text.split("\n"), 1):
+    for lineno, line in enumerate(_read_masked(doc_path).split("\n"), 1):
         cited = len(SYMBOL_KIND.findall(line))
         if not cited:
             continue
@@ -1414,7 +1417,7 @@ def reachable_documents() -> set[pathlib.Path]:
         raise SourceUnavailable(f"la racine de l'atteignabilité a disparu : {ROADMAP_INDEX}")
     root = ROADMAP_INDEX.resolve()
     seen = {root}
-    frontier: collections.deque[pathlib.Path] = collections.deque([root])
+    frontier = collections.deque([root])
     while frontier:
         current = frontier.popleft()
         for target in cited_documents(current):
