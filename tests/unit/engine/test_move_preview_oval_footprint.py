@@ -22,7 +22,10 @@ from typing import Any, Dict, List, Tuple
 import pytest
 
 from engine.hex_utils import precompute_footprint_offsets, socle_is_single_hex
-from engine.phase_handlers.movement_handlers import movement_preview_move_plan
+from engine.phase_handlers.movement_handlers import (
+    _move_preview_footprint_span,
+    movement_preview_move_plan,
+)
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
 BASE_SIZE = [8, 4]  # socle oval DEJA scale (`_scale_socle`), cf. WarTrakk / LandSpeeder
@@ -140,3 +143,18 @@ def test_la_meme_destination_reste_valide_sans_personne_dessous() -> None:
     gs["unit_by_id"].pop("2", None)
     res = movement_preview_move_plan(gs, "1", [("1#0", DEST[0], DEST[1], 0, ORIENTATION)])
     assert res["can_validate"] is True, "la destination doit etre legale sans l'escouade amie"
+
+
+def test_move_preview_footprint_span_invalid_base_size_raises() -> None:
+    """T1 : BASE_SIZE invalide doit lever, jamais retourner 1 silencieusement."""
+    with pytest.raises(ValueError):
+        _move_preview_footprint_span({"id": "u1", "BASE_SIZE": []})
+
+    with pytest.raises(ValueError):
+        _move_preview_footprint_span({"id": "u1", "BASE_SIZE": [None, "foo"]})
+
+    with pytest.raises(ValueError):
+        _move_preview_footprint_span({"id": "u1", "BASE_SIZE": "invalid"})
+
+    assert _move_preview_footprint_span({"id": "u1", "BASE_SIZE": [60, 35]}) == 60
+    assert _move_preview_footprint_span({"id": "u1", "BASE_SIZE": 32}) == 32

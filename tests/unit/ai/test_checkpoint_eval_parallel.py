@@ -239,10 +239,10 @@ def test_checkpoint_tasks_consume_raw_scenario_files(tmp_path):
     """Le chemin checkpoint consomme les scenarios BRUTS, sans materialisation de murs.
 
     Le constructeur de taches des bots materialise des murs indexes par
-    `(scenario_index + len(bot_name)) % len(eval_wall_refs)`. Les appliquer ici changerait la
-    valeur des scores du gate — donc leur comparabilite avec `curriculum.log` — et, `bot_name`
-    valant l'etiquette d'etape, ferait dependre le terrain de la LONGUEUR de cette etiquette :
-    « P0 » et « P10 » ne joueraient pas le meme mur.
+    `(scenario_index + sum(ord(c) for c in bot_name)) % len(eval_wall_refs)`.
+    Les appliquer ici changerait la valeur des scores du gate — donc leur comparabilite avec
+    `curriculum.log` — et, `bot_name` valant l'etiquette d'etape, ferait dependre le terrain
+    du nom de cette etiquette.
     """
     from ai import bot_evaluation
 
