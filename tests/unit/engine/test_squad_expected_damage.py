@@ -15,7 +15,7 @@ Le verrou du défaut n° 2 est `test_the_special_weapons_of_a_mixed_squad_are_co
 seul test que la multiplication ne peut pas passer. Les autres tiennent les invariants déjà
 acquis (effectif vivant, tir ≠ mêlée, pas de repli).
 
-Socle du chantier `Documentation/Implémentation/A_faire/bots_refonte_panel.md`.
+Socle du chantier `Documentation/Chantiers/backlog/panel_reference.md`.
 """
 from __future__ import annotations
 

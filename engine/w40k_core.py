@@ -353,7 +353,7 @@ def repo_relative_scenario_path(scenario_file: Optional[str]) -> Optional[str]:
     """Chemin du scénario relatif à la racine du dépôt, en séparateurs POSIX. None si aucun.
 
     Journalisé par `log_episode_start` : le replay le repasse à `/api/config/board` pour retrouver
-    le décor de CE scénario (cf. Documentation/Implémentation/Replay.md §2.4). Un chemin hors du
+    le décor de CE scénario (cf. Documentation/Chantiers/Replay.md §2.4). Un chemin hors du
     dépôt lève — l'API refuserait de le résoudre, et le journaliser produirait un replay qui
     échoue silencieusement au chargement du décor.
     """

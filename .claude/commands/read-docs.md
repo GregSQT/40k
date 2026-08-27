@@ -15,9 +15,9 @@ Based on the user's request, identify which systems are involved:
 
 Use the Read tool to read the relevant documentation files from the `Documentation/` folder:
 
-1. `Documentation/AI_TURN.md` - Game loop and phase logic specification
-2. `Documentation/AI_IMPLEMENTATION.md` - Implementation patterns and rules
-3. `Documentation/AI_TRAINING.md` - Training and reward system documentation
+1. `Documentation/Reference/moteur/AI_TURN.md` - Game loop and phase logic specification
+2. `Documentation/Reference/moteur/AI_IMPLEMENTATION.md` - Implementation patterns and rules
+3. `Documentation/Reference/training/AI_TRAINING.md` - Training and reward system documentation
 4. `Documentation/ANTI_OVERFITTING_GUIDE.md` - Training optimization guide
 
 ## After Reading

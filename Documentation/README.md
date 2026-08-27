@@ -1,135 +1,115 @@
 # Documentation — Index
 
-Index des documents `Documentation/`. Statut de chaque doc : voir **[Documentation_audit.md](Documentation_audit.md)** (audit croisé code, 2026-07-05).
+**Un document = un rôle, lisible dans son chemin** (architecture actée le 2026-08-27,
+détail : [Chantiers/backlog/refonte_documentation.md](Chantiers/backlog/refonte_documentation.md)) :
 
-Les plans d'implémentation sont classés dans `Implémentation/Implémenté/` (livrés) et `Implémentation/A_faire/` (backlog).
+| Zone | Rôle | Règle |
+|---|---|---|
+| [Reference/](Reference/) | Décrit l'état ACTUEL du système | Doit rester vrai — toute livraison qui le rend faux le corrige dans la même livraison |
+| [Roadmap/](Roadmap/) | Priorités ET état des chantiers | **Source unique** — commencer par [ROADMAP_INDEX.md](Roadmap/ROADMAP_INDEX.md) |
+| [Chantiers/](Chantiers/) | Specs et conceptions vivantes | Contrats permanents, specs V11, backlog |
+| [Archives/](Archives/) | Historique clos | Jamais maintenu — bandeaux datés, renvois non garantis |
+| [40k_rules/](40k_rules/) | Règles officielles 40K (PDF) | **Source de vérité** des règles — jamais assumer, lire le PDF |
+
+Hors documentation technique : `Review/` (état de l'outil `scripts/review_plan.py`),
+`sql/` (scripts d'amorçage), et à la racine du dépôt `Memoire_RNCP/` (certification) et
+`Communication/` (pitchs).
 
 ---
 
-## Architecture moteur et règles de tour
+## Reference/ — les références par domaine
+
+### moteur/ — architecture du moteur de jeu
 
 | Document | Rôle |
-|----------|------|
-| **[AI_TURN.md](AI_TURN.md)** | Règles de tour, phases, séquence d’activation, tracking, contrat de codage (V11). **Référence pour toute logique de jeu.** |
-| **[AI_IMPLEMENTATION.md](AI_IMPLEMENTATION.md)** | Architecture du moteur : modules (`w40k_core`, phase_handlers, observation, reward, action_decoder), flux, caches. |
+|---|---|
+| [AI_TURN.md](Reference/moteur/AI_TURN.md) | Séquence de tour, phases, activation, matrices de conformité V11. **Contrat pour toute logique de jeu** (cité par CLAUDE.md). |
+| [AI_IMPLEMENTATION.md](Reference/moteur/AI_IMPLEMENTATION.md) | Architecture des modules `engine/` : w40k_core, phase_handlers, flux, caches. |
+| [stage.md](Reference/moteur/stage.md) | Système d'étages / niveaux verticaux (3D). |
+| [squad.md](Reference/moteur/squad.md) | Spec fondatrice du pipeline squad multi-figurines. |
+| [Distance management.md](Reference/moteur/Distance%20management.md) | Cartographie des métriques de distance backend + frontend. |
+| [LoS_unique_source_of_truth.md](Reference/moteur/LoS_unique_source_of_truth.md) | Point de passage unique d'invalidation des caches LoS/positions. |
+| [refactor_attack_shoot_fight1.md](Reference/moteur/refactor_attack_shoot_fight1.md) | Moteur d'allocation manuelle mutualisé tir/mêlée. |
+| [Boardx10-final.md](Reference/moteur/Boardx10-final.md) | Géométrie ×10 (odd-q, primitives hex) — source de vérité de `hex_utils`. |
+| [V11_board_44x60x1.md](Reference/moteur/V11_board_44x60x1.md) | Banc d'itération x1 (1 hex = 1 pouce). |
+| [1_unites_hors_table_chemins_geometriques.md](Reference/moteur/1_unites_hors_table_chemins_geometriques.md) | Contrat « unités hors table filtrées de toute mesure géométrique ». |
+| [V11_entity_encoder_pointer.md](Reference/moteur/V11_entity_encoder_pointer.md) | Encodeur d'entités partagé + tête pointeur (conception). |
+| [move_action_space_spatial_rework.md](Reference/moteur/move_action_space_spatial_rework.md) | Action space spatial de move (grille égocentrique + tête spatiale). |
+| [compute_footprint_placement_mask.md](Reference/moteur/compute_footprint_placement_mask.md) | Primitives de placement multi-hex de `hex_utils`. |
+| [V11_move_build_acceleration.md](Reference/moteur/V11_move_build_acceleration.md) | Perf du noyau de pool de move : périmètre de validité, filet de validation. |
+| [01_ability_embedding.md](Reference/moteur/01_ability_embedding.md) → [04_strategic_reserves.md](Reference/moteur/04_strategic_reserves.md) | Conceptions du socle capacités (embedding, CP/battle-shock, capacités de faction, réserves) — le chantier 06 s'appuie dessus. |
 
-**Voir aussi** : Weapon_rules.md, Unit_rules.md, CONFIG_FILES.md, [Old/KNOWN_ANOMALIES.md](Old/KNOWN_ANOMALIES.md) (archivé).
-
----
-
-## Entraînement et tuning
-
-| Document | Rôle |
-|----------|------|
-| **[AI_TRAINING.md](AI_TRAINING.md)** | Référence unique training/tuning : pipeline (train.py, env, wrappers), configs, monitoring, bots, anti-overfitting. |
-| **[AI_METRICS.md](AI_METRICS.md)** | Métriques et tuning : guide rapide (00_critical, matrice → paramètres) + analyse experte. |
-| **[AI_OBSERVATION.md](AI_OBSERVATION.md)** | Ce que l’agent observe : tenseurs d’entités (clés, formes, normalisation, caches) + grille égocentrique. |
-| **[AI_OBSERVATION_Legacy.md](Old/AI_OBSERVATION_Legacy.md)** | Archive : pipeline mono-figurine (vecteur plat d’offsets fixes). Ne décrit PAS le code actuel. |
-| **[self-play_organization32.md](self-play_organization32.md)** | Organisation self-play (ratio progressif, snapshots). |
-
----
-
-## Systèmes de jeu et référence métier
+### training/ — entraînement et évaluation IA
 
 | Document | Rôle |
-|----------|------|
-| **[Old/FRONTEND_UI.md](Old/FRONTEND_UI.md)** | ⚠️ **Archivé dans `Old/`** — UI frontend : LoS hex-native, couvert, tooltips, preview de tir. |
-| **[Weapon_rules.md](Weapon_rules.md)** | Système d’armes : armurerie TS, règles, sélection IA, backend/frontend. |
-| **[Unit_rules.md](Unit_rules.md)** | Règles d’unités : `unit_rules.json`, résolution, choix contextuels (dont reactive_move). |
-| **[Implémentation/Implémenté/Distance management.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/Distance%20management.md)** | Audit des calculs de distance (hex vs euclidien). |
-| **[Implémentation/Implémenté/compute_footprint_placement_mask.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/compute_footprint_placement_mask.md)** | Référence de la fonction de masque d'empreinte. |
-| **[Implémentation/Implémenté/V11_pathfinding_exact.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/V11_pathfinding_exact.md)** | ⚠️ **Code SUPPRIMÉ le 2026-07-28** — distance BFS exacte (troncature silencieuse, champ par source). Conservé pour la leçon de méthode et comme spec de reconstruction ; état en `§0.39`. |
-| **[Endless_duty.md](Endless_duty.md)** | Spec du mode Endless Duty. |
-| **[Old/Tutorial.md](Old/Tutorial.md)** | ⚠️ **Archivé dans `Old/`** — spec du tutoriel (scénarios étapes 1-3). |
+|---|---|
+| [AI_TRAINING.md](Reference/training/AI_TRAINING.md) | Référence training/tuning : pipeline `train.py`, configs, monitoring, curriculum. |
+| [AI_OBSERVATION.md](Reference/training/AI_OBSERVATION.md) | Ce que l'agent observe : tenseurs d'entités + grille égocentrique (bloc de tailles verrouillé par test). |
+| [AI_METRICS.md](Reference/training/AI_METRICS.md) | Interprétation des métriques TensorBoard et tuning correctif. |
+| [bots_refonte_panel.md](Reference/training/bots_refonte_panel.md) | Panel de bots 6 styles : conception, protocole de mesure (§12) — la ligne de référence courante vit dans [Chantiers/backlog/panel_reference.md](Chantiers/backlog/panel_reference.md). |
 
----
+Le chantier perf training (mesures + Phase 3 à lancer) est un chantier OUVERT :
+[Chantiers/backlog/perf_entrainement.md](Chantiers/backlog/perf_entrainement.md).
 
-## Configuration et outillage
+### jeu/ — systèmes de jeu et conformité règles
 
 | Document | Rôle |
-|----------|------|
-| **[CONFIG_FILES.md](CONFIG_FILES.md)** | Référence des fichiers de config : weapon_rules, game_config, training/rewards, scénarios, armurerie. |
-| **[TESTING.md](TESTING.md)** | Architecture des tests (`tests/unit/engine`, `tests/unit/services`). |
-| **[Old/KNOWN_ANOMALIES.md](Old/KNOWN_ANOMALIES.md)** | ⚠️ **Archivé dans `Old/`** — registre des anomalies connues et de leur suivi. |
-| **[Code_Compliance/](Code_Compliance/)** | Docs des outils de conformité (analyzer, check_ai_rules, hidden_action_finder). |
-| **`scripts/security_check.sh`** | Analyse statique de sécurité (bandit + pip-audit + npm audit), sortie non nulle sur finding haut. Dépendances : `requirements-dev.txt`. Seuils et exceptions : [Implémentation/Implémenté/Security.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/Security.md). |
-| **[Prompts/](Prompts/)** | Prompts outillage réutilisables (CURSOR_SUB_AGENTS, fix_game_rules_violations). |
+|---|---|
+| [Weapon_rules.md](Reference/jeu/Weapon_rules.md) | Système d'armes : registre des règles, effets moteur, armureries, sélection IA. |
+| [Unit_rules.md](Reference/jeu/Unit_rules.md) | Règles d'unités : `unit_rules.json`, résolution, choix contextuels. |
+| [Rules_Coverage.md](Reference/jeu/Rules_Coverage.md) | Audit règles officielles ↔ code (ancré sur les PDF de `40k_rules/`). |
 
----
-
-## Déploiement, infra, projet
+### outils/ — configuration, tests, conformité
 
 | Document | Rôle |
-|----------|------|
-| **[Deployment_Synology.md](Deployment_Synology.md)** | Déploiement Synology : Docker, réseau, HTTPS, DDNS. |
-| **[Implémentation/Implémenté/Security.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/Security.md)** | **Chantier sécurité — clos (2026-08-19).** F1–F15 résolues, 8 étapes livrées, validation navigateur OK. |
-| **[USER_ACCESS_CONTROL.md](USER_ACCESS_CONTROL.md)** | Auth, profils, droits d’accès. |
-| **[Various/Roadmap.md](Various/Roadmap.md)** | Paliers démo, état d’avancement (doc de pilotage courant). |
-| **[Various/conformite_regles.md](Various/conformite_regles.md)** | Audit règles ↔ code (courant). |
+|---|---|
+| [CONFIG_FILES.md](Reference/outils/CONFIG_FILES.md) | Référence des fichiers de config : weapon_rules, game_config, training, scénarios. |
+| [TESTING.md](Reference/outils/TESTING.md) | Architecture des tests, conventions (dont anomalies ANOM-XXX), DoD. |
+| [front_test_auto.md](Reference/outils/front_test_auto.md) | Plan des tests automatiques du front PvP (couches A/B/C). |
+| [GAME_Analyzer.md](Reference/outils/GAME_Analyzer.md) | Guide d'`ai/analyzer.py` (contrôles, pièges de lecture). |
+| [AI_RULES_checker.md](Reference/outils/AI_RULES_checker.md) | Guide de `scripts/check_ai_rules.py`. |
+| [Hidden_action_finder.md](Reference/outils/Hidden_action_finder.md) | Guide d'`ai/hidden_action_finder.py`. |
+| [Obs_channel_audit.md](Reference/outils/Obs_channel_audit.md) | Guide de `scripts/obs_channel_audit.py` (canaux d'observation). |
+| [Fix_violations_guideline.md](Reference/outils/Fix_violations_guideline.md) | Workflow de correction des violations de règles détectées. |
+
+### infra/ — déploiement, sécurité, accès
+
+| Document | Rôle |
+|---|---|
+| [Deployment_Synology.md](Reference/infra/Deployment_Synology.md) | Déploiement NAS : Docker, volumes, HTTPS/DDNS, durcissement. |
+| [Security.md](Reference/infra/Security.md) | Référence sécurité : failles F1–F15 (chantier clos), seuils de `security_check.sh`. |
+| [USER_ACCESS_CONTROL.md](Reference/infra/USER_ACCESS_CONTROL.md) | Auth, profils, droits d'accès, protection des modes de jeu. |
 
 ---
 
-## Plans d'implémentation
+## Roadmap/ — par quoi commencer
 
-**Règle de classement — trois emplacements, un seul critère : l'ÉTAT du chantier.**
-`Implémentation/` (racine) = chantier **vivant**, on y travaille · `Implémentation/Implémenté/` =
-**livré**, y compris avec des résidus nommés · `Implémentation/A_faire/` = **backlog**, rien
-n'est commencé. Un document qui n'est plus dans le bon dossier ment sur l'état du projet à qui
-lit l'arborescence : le déplacer fait partie de la clôture du chantier.
-*(Rangement du 2026-08-08 : 6 documents étaient au mauvais endroit — 4 chantiers livrés traînaient
-en racine ou en backlog, 1 backlog jamais commencé occupait la racine.)*
+[ROADMAP_INDEX.md](Roadmap/ROADMAP_INDEX.md) est la **source unique de priorité et d'état** ;
+un fichier par sujet (moteur, training, bot, analyzer, front, infra, capacites, doc,
+v11_chemin_critique) ; historique par sujet dans [Roadmap/archives/](Roadmap/archives/).
+Discipline, exceptions actées et outillage (checker + porte de fusion) : préface de l'index.
 
-### Chantiers V11 VIVANTS (racine `Implémentation/`)
+## Chantiers/ — specs vivantes
 
-| Document | Rôle | État |
-|----------|------|------|
-| **[Implémentation/V11_agent_rework.md](Impl%C3%A9mentation/V11_agent_rework.md)** | **Document de pilotage du chantier V11.** État ouvert (§0), pièges et leçons de méthode canoniques (§0bis), concept d'ancre (§1bis), tranches T1→T7 (§5), Phase A' (§9), stratégie d'entraînement/évaluation (§10), historique résolu intégral (§0hist, en fin de document). | 🟠 actif — **5 entrées ouvertes** au 2026-08-08 (§0.67, §0.59, §0.48, §0.47, §0.19) ; son §0 est à jour du code (`obs_size` 16659, `TOTAL_ACTION_SIZE` 1139, 7 têtes pointeur — revérifié par exécution) |
-| **[Implémentation/V11_tranches.md](Impl%C3%A9mentation/V11_tranches.md)** | La **spec** V11 : objectif, concept d'ancre, ruptures R1→R8, tranches T1→T7 + Phase B, critères d'acceptation. | 🟠 T1→T5 faits ; **T6 partiel**, **T7 en attente**, **Phase B non commencée** (aucun `level` dans l'observation, vérifié le 2026-08-08) |
-| **[Implémentation/V11_phaseA.md](Impl%C3%A9mentation/V11_phaseA.md)** | Phase A' — donner à l'agent chaque décision que les règles laissent au joueur (P1→P5). | 🟠 P1, P2, P3-0/1/2/3 livrés ; **P3-4→8, P4, P5 ouverts** (3 types de décision sur 8 slots, vérifié le 2026-08-08) |
-| **[Implémentation/V11_eval_strategy.md](Impl%C3%A9mentation/V11_eval_strategy.md)** | Stratégie d'entraînement et d'évaluation (§10) : rosters, progression d'adversaires, holdout, critère de succès. | 🟢 décisions actées ; §10.4 et §10.5 **câblés et vérifiés dans le code** (2026-08-08) |
-| **[Implémentation/Replay.md](Impl%C3%A9mentation/Replay.md)** | Replay : pipeline, contrat du `step.log`, registre des chantiers replay. | 🟠 A/C/D faits ; **résidu B ouvert** — `useEngineAPI.ts` porte encore les branches de sous-phase fight V10 (vérifié le 2026-08-08) |
+- **Contrats permanents** (jamais archivés) : [Replay.md](Chantiers/Replay.md) (contrat
+  `step.log`, pipeline replay) et [analyzer_couverture.md](Chantiers/analyzer_couverture.md)
+  (matrice règle → contrôle → champs de log) — relus à chaque livraison touchant le journal.
+- [Bot_refactor.md](Chantiers/Bot_refactor.md) — conception du chantier bots (exception actée :
+  vit à la racine).
+- [v11/](Chantiers/v11/) — les 4 specs du programme V11 (agent_rework, tranches, phaseA,
+  eval_strategy). **L'état fait foi dans Roadmap/, pas ici.**
+- [backlog/](Chantiers/backlog/) — chantiers ouverts jamais commencés, tous atteignables depuis
+  l'index roadmap (vérifié par le checker, passe 6).
 
-### Livrés récemment (`Implémentation/Implémenté/`) — avec leurs résidus nommés
+## Archives/ — historique clos, jamais maintenu
 
-| Document | Rôle | État |
-|----------|------|------|
-| **[V11_entity_encoder_pointer.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/V11_entity_encoder_pointer.md)** | Encodeur d'entités partagé + tête pointeur (conception et journal de `§0.30`). | ✅ livré, **archivé le 2026-08-08** — ⚠️ ses chiffres de dimensionnement sont datés, relire `obs_size` dans le code |
-| **[replis_units_cache_2026-08-05.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/replis_units_cache_2026-08-05.md)** | **42 replis silencieux sur `units_cache`** dans move/fight/shoot : inventaire par site et bilan par verdict. | ✅ clos, **archivé le 2026-08-08** ; reste les 26 lectures non auditées annoncées en §7 |
-| **[V11_move_build_acceleration.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/V11_move_build_acceleration.md)** | Perf du noyau de pool de move (`§0.22`) : livré, impasses mesurées, tâches résiduelles. | ✅ clos, **archivé le 2026-08-08** ; **T1 et T2 restent ouverts** (§5), T3 dépassé par §0.63/§0.64/§0.65 |
-| **[move_action_space_spatial_rework.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/move_action_space_spatial_rework.md)** | Refonte de l'action space de move : grille égocentrique + tête spatiale. | ✅ T1→T5 livrés (2026-07-18) — **sorti de `A_faire/` le 2026-08-08**, il y était classé à tort ; ⚠️ dimensions périmées |
-| **[replay_per_figurine.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/replay_per_figurine.md)** | Replay par figurine (segments `MODELS`/`TARGET_MODELS`). | ✅ livré — **sorti de `A_faire/` le 2026-08-08** ; réserve de validation navigateur suivie dans `Replay.md` |
-| **[V11_refactor_plan.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/V11_refactor_plan.md)** | Plan d'extraction de `V11_agent_rework.md` en sous-documents. | ✅ **TERMINÉ le 2026-07-28** — les 4 étapes sont exécutées (`db75417e`, `5e93fedd`, `cb77f6a6`, `5d1f1ab6`). L'ancienne mention « plan non exécuté » était fausse depuis ce jour-là |
-| **[campagne_typage_et_replis_2026-07-29.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/campagne_typage_et_replis_2026-07-29.md)** | Campagne « typage & replis silencieux » (57 commits) + **leçons de méthode réutilisables (§4)**, qui sont sa valeur résiduelle. | ✅ clos le 2026-08-05 ; reste §3.2 (arrêt décidé) et §3.7 |
-| **[observation_deploiement.md](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/observation_deploiement.md)** | Observation de la phase de déploiement : les 5 défauts et leurs correctifs. | ✅ clos le 2026-07-29 |
-
-### Archives et backlog
-
-| Dossier | Contenu |
-|---------|---------|
-| **[Implémentation/Implémenté/](Impl%C3%A9mentation/Impl%C3%A9ment%C3%A9/)** | Plans/specs de features livrées (fight V11, board ×10, rosters, command phase, déploiement…). |
-| **[Implémentation/A_faire/](Impl%C3%A9mentation/A_faire/)** | Backlog : MCTS, migration PostgreSQL, sécurité, tests front auto, accélérations 10x, overrun 12.06. **Tête de file : [`replis_unit_by_id_2026-08-05.md`](Impl%C3%A9mentation/A_faire/replis_unit_by_id_2026-08-05.md)** — 56 replis silencieux sur le second index, rien de livré (`require_unit_by_id` a 0 hit, le lookup a **5** implémentations concurrentes, vérifié le 2026-08-08). |
-| **[Old/](Old/)** | Documents archivés (FRONTEND_UI, Tutorial, KNOWN_ANOMALIES…) — ne décrivent plus le code courant. |
+- [chantiers/](Archives/chantiers/) — journaux des chantiers livrés (~45 fichiers).
+- [docs/](Archives/docs/) — documents qui ne décrivent plus le code courant
+  (FRONTEND_UI, Tutorial, AI_OBSERVATION_Legacy, KNOWN_ANOMALIES…).
+- [prompts/](Archives/prompts/) — prompts consommés (ère Cursor comprise).
 
 ---
 
-## Hors documentation technique
-
-*Rangement du 2026-08-08 : la racine mêlait la doc du code et des artefacts qui n'en sont pas
-(pitch, profil GitHub, état d'une campagne de review). Ils ont chacun leur dossier.*
-
-- **[40k_rules/](40k_rules/)** : PDF des règles officielles 40K — **source de vérité** des règles.
-- **[Review/](Review/)** : état de la campagne de code review — `review_backlog.json` (source de
-  vérité, écrite par `scripts/review_plan.py`, ne pas éditer à la main), son rendu `.md`,
-  `review_arbitrages.md` (append-only) et le guide `REVIEW_CAMPAGNE.md`. Ce n'est pas de la
-  documentation : c'est l'état d'un outil.
-- **[Various/](Various/)** : pilotage et communication — `Roadmap.md`, `conformite_regles.md`,
-  et le matériel de présentation (`Pitch_GW.md`, `Pitch_GW_Onepager.md`, `_Pitch_GW.md`,
-  `GITHUB_PROFILE_README.md`, les pitchs `.odp`/`.pdf`).
-- **[Memoire/](Memoire/)** : mémoire académique RNCP/CDA (livrables de certification).
-- **[Old/](Old/)** : documents qui ne décrivent plus le code courant.
-- **[sql/](sql/)** : `create_first_admin.sql`, script d'amorçage de la base d'auth (cf.
-  `USER_ACCESS_CONTROL.md`).
-
----
-
-**Entrée recommandée** : moteur → AI_TURN.md + AI_IMPLEMENTATION.md ; training → AI_TRAINING.md ; armes → Weapon_rules.md.
+**Entrée recommandée** : priorités → Roadmap/ROADMAP_INDEX.md · moteur → Reference/moteur/AI_TURN.md
++ AI_IMPLEMENTATION.md · training → Reference/training/AI_TRAINING.md · armes →
+Reference/jeu/Weapon_rules.md · règles officielles → 40k_rules/.

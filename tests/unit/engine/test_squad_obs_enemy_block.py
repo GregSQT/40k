@@ -1,6 +1,6 @@
 """T6 — bloc ennemi : figurine la plus proche, distance de portée, VALUE, MOVE + défensif.
 
-Refonte V11 (Documentation/Implémentation/Implémenté/V11_audit_observation.md §9.2, §10 bloc D) :
+Refonte V11 (Documentation/Archives/chantiers/V11_audit_observation.md §9.2, §10 bloc D) :
 - position mesurée depuis la figurine ennemie la PLUS PROCHE (l'ancre d'une escouade étalée peut
   être à l'opposé de la figurine qui menace) ;
 - ➕ distance bord-à-bord escouade↔escouade, avec la MÊME mesure que le gate de portée du moteur

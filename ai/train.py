@@ -205,7 +205,7 @@ def _make_constant_lr_schedule(lr_config):
     Le nom dit « constant » parce qu'une rampe rendue ici serait inerte ET fausse : le seul usage
     du callable est `optimizer(lr=lr_schedule(1))`, et `learn()` etant appele par chunks,
     `progress_remaining` refait 1 -> 0 a chaque chunk. Demonstration complete dans
-    Documentation/AI_TRAINING.md, section « Rampes learning_rate / ent_coef ».
+    Documentation/Reference/training/AI_TRAINING.md, section « Rampes learning_rate / ent_coef ».
     """
     if isinstance(lr_config, (int, float)):
         return ConstantSchedule(float(lr_config))
@@ -2750,7 +2750,7 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
 # Preuve de mort au-dela des stubs : ai/macro_training_env.py (les wrappers macro) n'existe
 # pas, config/agents/MacroController/ (config + scenarios + modele) n'existe pas, et rien
 # ne lisait les chemins macro_controller_config_* de config/config.json. La documentation
-# qui presentait ce mode comme "implemente aujourd'hui" (Documentation/AI_TRAINING.md) a ete
+# qui presentait ce mode comme "implemente aujourd'hui" (Documentation/Reference/training/AI_TRAINING.md) a ete
 # corrigee dans le meme mouvement.
 # Phase 2 : l'agent micro unifie (create_multi_agent_model) porte l'intention de zone.
 # Il n'y a pas de remplacant a chercher, il n'y a plus qu'un seul agent.
@@ -4973,7 +4973,7 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
 
 def main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
-    parser = argparse.ArgumentParser(description="Train W40K AI (see Documentation/AI_TURN.md and AI_IMPLEMENTATION.md)")
+    parser = argparse.ArgumentParser(description="Train W40K AI (see Documentation/Reference/moteur/AI_TURN.md and AI_IMPLEMENTATION.md)")
     parser.add_argument("--training-config", default=None,
                        help="Training config phase name (required, no silent default; e.g. x1, x1_debug)")
     parser.add_argument("--rewards-config", default=None, type=_non_empty_key("--rewards-config"),

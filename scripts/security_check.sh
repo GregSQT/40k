@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Analyse statique de sécurité — Documentation/Implémentation/Security.md, étape 6 (F5).
+# Analyse statique de sécurité — Documentation/Reference/infra/Security.md, étape 6 (F5).
 #
 # Enchaîne bandit (code Python), pip-audit (dépendances Python) et npm audit
 # (dépendances front). Sort en code NON NUL dès qu'un finding critique/haut subsiste.

@@ -34,7 +34,7 @@ courbes**, un run séparé n'a plus d'objet sauf si celui-ci échoue.
 - **R3** — levier récompense ([bot.md#recompense](bot.md#recompense)), jamais dans le même
   run que R2.
 
-→ `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.md` §5-7
+→ `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md` §5-7
 
 ---
 
@@ -59,4 +59,4 @@ Lancer : `python3 ai/train.py --agent ArmageddonAgent --training-config x1_long 
 
 **Suspendu** — après entraînement bot satisfaisant (jalon J4). Second scénario écrit par l'utilisateur (décision 2026-08-02).
 
-→ `Documentation/Implémentation/1_Agent/V11_agent_rework.md` §0.47
+→ `Documentation/Chantiers/v11/V11_agent_rework.md` §0.47

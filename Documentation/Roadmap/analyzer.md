@@ -1,6 +1,6 @@
 # Analyzer — Tâches ouvertes
 
-Découpage en 6 lots des trois sujets ci-dessous (ordre séquentiel imposé : tous éditent `ai/analyzer*.py`) → `Documentation/Implémentation/Implémenté/analyzer_conformite_lots.md` ✅ TOUS LIVRÉS
+Découpage en 6 lots des trois sujets ci-dessous (ordre séquentiel imposé : tous éditent `ai/analyzer*.py`) → `Documentation/Archives/chantiers/analyzer_conformite_lots.md` ✅ TOUS LIVRÉS
 
 ---
 
@@ -18,7 +18,7 @@ Bloqués sans implémentation moteur : L20 (terrain — 0 terrain dans scénario
 
 À piocher quand un contrôle analyzer manque de données.
 
-→ `Documentation/Implémentation/analyzer_couverture.md` §7
+→ `Documentation/Chantiers/analyzer_couverture.md` §7
 
 ---
 
@@ -30,4 +30,4 @@ Bloqués sans implémentation moteur : L20 (terrain — 0 terrain dans scénario
 
 **✅ LIVRÉ Lot 7 (2026-08-25)** — 5 règles ABSENT_LOGGABLE câblées : TORRENT 24.37, LETHAL HITS 24.23, BLAST 24.05, 20.03 (réserves round 1), unit.charge_impact (corpus seul). Compteurs dédiés remplacent parse_errors. COUVERT 81/273. Invariants §1.1 (13→14), §1.2 (16→19), §1.4 (9→11). 13 verrous rouges→verts.
 
-→ `Documentation/Implémentation/Implémenté/analyzer_conformite_lots.md`
+→ `Documentation/Archives/chantiers/analyzer_conformite_lots.md`

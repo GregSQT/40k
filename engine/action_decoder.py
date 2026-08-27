@@ -2866,6 +2866,6 @@ class ActionDecoder:
     # (`engine/reward_calculator.py`), qui n'a jamais eu de rapport avec celles-ci.
     #
     # RÈGLE : ces deux méthodes étaient présentées comme « Key Methods » dans
-    # `Documentation/AI_IMPLEMENTATION.md` — une doc d'API décrit ce qu'on a écrit, jamais ce que
+    # `Documentation/Reference/moteur/AI_IMPLEMENTATION.md` — une doc d'API décrit ce qu'on a écrit, jamais ce que
     # la production appelle. Elle ne vaut pas preuve de vie.
     # ─────────────────────────────────────────────────────────────────────────────────────────

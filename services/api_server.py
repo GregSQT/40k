@@ -256,7 +256,7 @@ BOARD_PATH_MAP = {
 
 # Dossier qui PORTE les scénarios de test. Il ne suit pas la résolution jouée : les scénarios
 # sont écrits une seule fois, en subhex x5, et le moteur convertit leurs coordonnées (terrain,
-# murs, positions) vers le plateau actif — cf. Documentation/Implémentation/Implémenté/V11_board_44x60x1.md.
+# murs, positions) vers le plateau actif — cf. Documentation/Reference/moteur/V11_board_44x60x1.md.
 TEST_SCENARIO_BOARD_MAP = {
     "x1": "board/44x60x5",
     "x5_44x60": "board/44x60x5",

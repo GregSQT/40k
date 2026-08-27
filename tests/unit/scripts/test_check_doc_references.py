@@ -38,8 +38,8 @@ def write(tmp_path: pathlib.Path, name: str, body: str) -> pathlib.Path:
 
 
 def test_parent_relative_path_resolves() -> None:
-    """`../../engine/…` depuis un doc de `1_Agent/` désigne bien le fichier du dépôt."""
-    doc_dir = ROOT / "Documentation" / "Implémentation" / "1_Agent"
+    """`../../engine/…` depuis un doc de `Chantiers/v11/` désigne bien le fichier du dépôt."""
+    doc_dir = ROOT / "Documentation" / "Chantiers" / "v11"
     assert cdr.resolve("../../../engine/w40k_core.py", doc_dir) == ROOT / "engine" / "w40k_core.py"
 
 
@@ -50,8 +50,8 @@ def test_parent_relative_path_is_captured_whole() -> None:
 
 def test_doc_relative_and_root_relative_both_resolve() -> None:
     """Les deux conventions du corpus coexistent et doivent être servies toutes les deux."""
-    docs = ROOT / "Documentation" / "Implémentation"
-    assert cdr.resolve("1_Agent/V11_phaseA.md", docs) is not None
+    docs = ROOT / "Documentation" / "Chantiers"
+    assert cdr.resolve("v11/V11_phaseA.md", docs) is not None
     assert cdr.resolve("engine/w40k_core.py", docs) is not None
 
 
@@ -1020,28 +1020,28 @@ def test_a_kind_without_a_single_file_is_counted_not_guessed(
     assert (checked, unverifiable, broken) == (0, 1, [])
 
 
-# --------------------------------------------------------------------------- passe 4 étendue à Documentation/Implémentation/
+# --------------------------------------------------------------------------- passe 4 étendue au corpus chantiers (ANCHOR_TREES)
 
 
 def _impl_enforced_name() -> str:
-    """Retourne un basename réel de Documentation/Implémentation/ présent dans ANCHOR_ENFORCED.
+    """Retourne un basename réel des arbres ANCHOR_TREES présent dans ANCHOR_ENFORCED.
 
     Utiliser un nom découvert dynamiquement évite de coder en dur un fichier qui pourrait être
     renommé — ce qui rendrait le test vert mais vacueux (la mutation ne serait jamais atteinte).
     """
     enforced_impl = cdr._get_anchor_enforced() - cdr.DEFAULT_DOC_NAMES
     assert enforced_impl, (
-        "Aucun doc Implémentation/ dans _get_anchor_enforced() — _impl_doc_basenames() est silencieux"
+        "Aucun doc des arbres ANCHOR_TREES dans _get_anchor_enforced() — _impl_doc_basenames() est silencieux"
     )
     return sorted(enforced_impl)[0]
 
 
 def test_impl_doc_line_anchor_is_detected(tmp_path: pathlib.Path) -> None:
-    """ROUGE : une ancre de ligne dans Documentation/Implémentation/ est détectée.
+    """ROUGE : une ancre de ligne dans le corpus chantiers (ANCHOR_TREES) est détectée.
 
     Avant cette livraison, check_anchors() ne regardait que DEFAULT_DOCS ; un renvoi de ligne
-    dans un doc Implémentation/ passait en vert sans aucune alerte. ANCHOR_ENFORCED inclut
-    désormais tous les .md de Documentation/Implémentation/ via _impl_doc_basenames().
+    dans un doc chantier passait en vert sans aucune alerte. ANCHOR_ENFORCED inclut
+    désormais tous les .md des arbres ANCHOR_TREES via _impl_doc_basenames().
     """
     chosen = _impl_enforced_name()
     # ROUGE : numéro de ligne présent → violation
@@ -1074,11 +1074,11 @@ def test_impl_doc_line_anchor_inside_fenced_block_is_ignored(tmp_path: pathlib.P
 
 
 def test_impl_real_corpus_has_no_line_anchor() -> None:
-    """VERT VACANT fermé : Documentation/Implémentation/ passe entièrement la passe 4.
+    """VERT VACANT fermé : le corpus chantiers (ANCHOR_TREES) passe entièrement la passe 4.
 
     Verrou sur le dépôt réel : report_impl_anchors() doit rendre 0 violation. Si ce test
-    rougit, un doc de Documentation/Implémentation/ a reçu un numéro de ligne lors d'une
-    livraison sans que ce tour ne le corrige.
+    rougit, un doc de Chantiers/ ou d'Archives/chantiers/ a reçu un numéro de ligne lors
+    d'une livraison sans que ce tour ne le corrige.
     """
     has_broken, lines = cdr.report_impl_anchors()
     assert not has_broken, "\n".join(lines)
@@ -1259,11 +1259,12 @@ def test_the_colon_form_does_not_swallow_the_next_reference(tmp_path: pathlib.Pa
 
 
 def test_accented_paths_are_counted_under_their_real_name() -> None:
-    """Les fichiers de `Documentation/Implémentation/` doivent EXISTER pour le compteur.
+    """Les fichiers des chemins non-ASCII du dépôt doivent EXISTER pour le compteur.
 
-    Sans `-z`, git entoure de guillemets et échappe les 73 chemins non-ASCII du dépôt : le
-    basename sortait comme `ROADMAP.md"` et tout le dossier accentué devenait invisible à la
-    détection d'ambiguïté — un contrôle qui ne regarde rien affiche « tout va bien ».
+    Sans `-z`, git entoure de guillemets et échappe les chemins non-ASCII (`Memoire_RNCP/`,
+    et à l'époque de la mesure tout `Documentation/Implémentation/`) : le basename sortait
+    comme `ROADMAP.md"` et tout le dossier accentué devenait invisible à la détection
+    d'ambiguïté — un contrôle qui ne regarde rien affiche « tout va bien ».
     """
     counts = cdr.tracked_basenames()
     assert not [name for name in counts if '"' in name or "\\" in name]
@@ -1273,7 +1274,7 @@ def test_accented_paths_are_counted_under_their_real_name() -> None:
 def test_git_output_is_decoded_regardless_of_the_locale() -> None:
     """La sortie de git est de l'UTF-8, quelle que soit la locale de la machine.
 
-    Les chemins de `Documentation/Implémentation/` sont non-ASCII : décodés avec l'encodage du
+    Le dépôt porte des chemins non-ASCII (`Memoire_RNCP/`) : décodés avec l'encodage du
     système, ils lèvent `UnicodeDecodeError` sous locale C et emportent tout le contrôle, qui
     appelle `tracked_basenames` sur son chemin principal. Sur la machine d'un CI, pas sur celle
     où le script a été écrit.

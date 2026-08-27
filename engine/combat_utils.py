@@ -304,7 +304,7 @@ def calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
 
 # ----------------------------------------------------------------------------
 # Sélecteur de métrique de portée (point de bascule unique hex ↔ euclidien)
-# Voir Documentation/Implémentation/Implémenté/Distance management.md, Étapes 1-2.
+# Voir Documentation/Reference/moteur/Distance management.md, Étapes 1-2.
 # ----------------------------------------------------------------------------
 
 VALID_DISTANCE_METRICS = ("hex", "euclidean")

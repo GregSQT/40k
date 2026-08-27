@@ -157,7 +157,7 @@ export interface Unit {
   player: PlayerId;
   col: number;
   row: number;
-  /** Niveau vertical (étages). 0 = rez-de-chaussée (défaut). Voir Documentation/Implémentation/Implémenté/stage.md. */
+  /** Niveau vertical (étages). 0 = rez-de-chaussée (défaut). Voir Documentation/Reference/moteur/stage.md. */
   level?: number;
   color?: number;
 

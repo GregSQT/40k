@@ -1,4 +1,4 @@
-"""Fermeture globale de l'API (F6, F12, F14) — `Documentation/Implémentation/Security.md`.
+"""Fermeture globale de l'API (F6, F12, F14) — `Documentation/Reference/infra/Security.md`.
 
 Verrouille l'invariant : **tout est fermé par défaut**. Une route ajoutée sans réflexion
 sur l'auth doit tomber en 401, jamais s'ouvrir. Ces tests échouent si le `before_request`

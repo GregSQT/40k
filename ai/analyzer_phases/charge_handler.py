@@ -67,7 +67,7 @@ def handle_charge(
             unit_rules = require_key(config.unit_rules_by_type, charge_unit_type)
             # Waaagh! (08.04) : DEUXIÈME source d'éligibilité à la charge après Advance, à côté
             # de la capacité de datasheet — et elle ne vit dans AUCUN `unit_rules` (capacité de
-            # FACTION, cf. Documentation/Unit_rules.md). Le seul témoin dans le journal est le
+            # FACTION, cf. Documentation/Reference/jeu/Unit_rules.md). Le seul témoin dans le journal est le
             # marqueur que le moteur écrit sur la ligne. Sans cette lecture, toute charge orke
             # après avance remonte en `charge_invalid.advanced` : une faute inventée, sur un
             # coup parfaitement légal.

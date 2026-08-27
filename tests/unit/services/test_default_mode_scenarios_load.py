@@ -14,7 +14,7 @@ PORTÉE EXACTE — les scénarios passés à `_default_board_scenario_path`, soi
 couverture totale :
 - `ED_SCENARIO_DEFAULT` (Endless Duty) pointe encore `config/scenario_endless_duty.json`, à la
   racine et au format antérieur : il échouerait ici. Sa remise en service appartient au chantier
-  Documentation/Implémentation/A_faire/Endless_duty_etat_mesure.md, qui liste d'autres obstacles que
+  Documentation/Chantiers/backlog/Endless_duty_etat_mesure.md, qui liste d'autres obstacles que
   l'emplacement — l'inclure rendrait ce fichier rouge sans rien réparer.
 - les chemins "pvp_test"/"pve_test", construits en ligne dans `start_game` à partir du
   `board_path` de la requête : ils dépendent d'un paramètre client, pas d'un défaut serveur.

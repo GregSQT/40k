@@ -142,11 +142,12 @@ def git(*args: str) -> str:
     """`core.quotePath=false` n'est PAS un confort d'affichage.
 
     Par défaut git échappe les octets non-ASCII des chemins qu'il IMPRIME :
-    `Documentation/Implémentation/…` ressort en `"Documentation/Impl\\303\\251mentation/…"`. Le
-    comparer au chemin littéral rend donc toujours faux — mesuré le 2026-08-11, la porte s'était
-    livrée avec sa sortie de secours morte, et les deux mesures de calibrage qui s'appuyaient sur
-    la même comparaison étaient à refaire. Le dossier de ce dépôt porte un accent : ce réglage est
-    une condition de correction, pas une préférence.
+    un chemin accentué comme `Memoire_RNCP/Méthodologie…` ressort en
+    `"Memoire_RNCP/M\\303\\251thodologie…"` (mesuré le 2026-08-11 sur l'ex-arbre
+    `Documentation/Implémentation/`). Le comparer au chemin littéral rend donc toujours faux —
+    la porte s'était livrée avec sa sortie de secours morte, et les deux mesures de calibrage qui
+    s'appuyaient sur la même comparaison étaient à refaire. Le dépôt porte toujours des chemins
+    accentués : ce réglage est une condition de correction, pas une préférence.
     """
     return subprocess.run(
         ["git", "-c", "core.quotePath=false", *args],

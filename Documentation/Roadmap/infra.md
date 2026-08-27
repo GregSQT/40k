@@ -13,7 +13,7 @@ Phase 3 (collecte distribuée, option A) = actée mais non lancée, chantier dé
 période de run — c'est elle qui porte le ×3-6.
 Goulots restants : lockstep de collecte (Phase 3).
 
-→ `Documentation/Implémentation/Implémenté/perf_entrainement.md`
+→ `Documentation/Chantiers/backlog/perf_entrainement.md`
 
 ---
 
@@ -21,7 +21,7 @@ Goulots restants : lockstep de collecte (Phase 3).
 
 **Lourd, EN PAUSE** (décision 2026-08-16 : non lancé). Le pool de déplacement (`build_squad_move_cell_map` → `erode_move_pool_by_squad_block` → `geodesic_move_reach`) pèse **29 % d'une partie d'évaluation** — calcul dérivé, optimisable sous verrou d'empreinte `step.log`.
 
-→ `Documentation/Implémentation/A_faire/perf_noyau_natif_et_gzip.md` §2
+→ `Documentation/Chantiers/backlog/perf_noyau_natif_et_gzip.md` §2
 
 ---
 
@@ -29,7 +29,7 @@ Goulots restants : lockstep de collecte (Phase 3).
 
 **Lourd, re-cadrer avant reprise.** Plusieurs semaines. Spec de mars 2026 visant des modules `ai/` réécrits par V11 depuis — re-confronter au code avant.
 
-→ `Documentation/Implémentation/A_faire/Database/DB_migration.md` ; prompt d'exécution : `Documentation/Implémentation/A_faire/Database/DB_migration_prompt.md`
+→ `Documentation/Chantiers/backlog/Database/DB_migration.md` ; prompt d'exécution : `Documentation/Chantiers/backlog/Database/DB_migration_prompt.md`
 
 ---
 
@@ -39,4 +39,4 @@ Goulots restants : lockstep de collecte (Phase 3).
 
 Distinct du MCTS à l'inférence ([bot.md#mcts-inference](bot.md#mcts-inference)).
 
-→ `Documentation/Implémentation/A_faire/MCTS/MCTS_bot_final.md`
+→ `Documentation/Chantiers/backlog/MCTS/MCTS_bot_final.md`

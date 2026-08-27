@@ -7,7 +7,7 @@ POURQUOI CA N'A PAS SAUTE PLUS TOT — le piege que ce fichier verrouille. La br
 par `info['phase'] in ('shoot','fight','charge')`, garde qu'aucune action d'agent ne satisfaisait
 alors : le lecteur paraissait atteint en revue, il ne l'etait pas en rollout. `select_activation`
 (V11 L2) est la premiere a porter `phase="shoot"` — elle a tue le run des la premiere phase de
-tir. Mesures et arbitrage : `Documentation/Implémentation/V11_agent_rework.md` §0.68.
+tir. Mesures et arbitrage : `Documentation/Chantiers/v11/V11_agent_rework.md` §0.68.
 
 Ce fichier verifie que `_on_step` traverse ce cas exact — observation `Dict`, action d'agent en
 phase de tir — sans lever, et que la classe n'expose plus aucun lecteur d'observation.

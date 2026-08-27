@@ -22,10 +22,12 @@ from .test_train_helpers import _function_code
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 TRAIN_PY = PROJECT_ROOT / "ai" / "train.py"
-#: Dossiers de `Documentation/` qui ARCHIVENT au lieu d'instruire : chantiers livres, spec V11,
-#: backlog, memoires, PDF de regles. Les commandes qu'ils citent sont des relevés d'execution
-#: passes — les reecrire falsifierait l'archive, donc les controler n'aurait pas de sens.
-_DOSSIERS_ARCHIVES = {"Old", "Memoire", "Implémenté", "1_Agent", "A_faire", "40k_rules"}
+#: Dossiers de `Documentation/` qui ARCHIVENT au lieu d'instruire : archives (chantiers livres,
+#: docs morts, prompts consommes), spec V11, backlog, PDF de regles. Les commandes qu'ils citent
+#: sont des relevés d'execution passes — les reecrire falsifierait l'archive, donc les controler
+#: n'aurait pas de sens. Arborescence refonte 2026-08-27 : Reference/, Chantiers/ (racine) et
+#: Roadmap/ restent scannes, ce sont les docs vivantes.
+_DOSSIERS_ARCHIVES = {"Archives", "v11", "backlog", "40k_rules"}
 
 
 def _docs_vivantes() -> list:
@@ -159,7 +161,7 @@ def test_les_deux_diagnostics_partagent_le_meme_conseil_de_reprise() -> None:
 def test_aucune_commande_documentee_ne_cite_un_flag_inexistant() -> None:
     """Les messages d'aide et les docs proposent des COMMANDES `ai/train.py` copiables. `--new-model`
     n'a jamais existe dans l'argparse : la commande copiee sortait en erreur d'argument, et le flag
-    mort a survecu dans `Documentation/AI_TRAINING.md` a sa correction dans le code.
+    mort a survecu dans `Documentation/Reference/training/AI_TRAINING.md` a sa correction dans le code.
 
     Le controle porte sur la PROPRIETE, pas sur une chaine nommee en dur : tout `--flag` cite sur
     une ligne qui appelle `ai/train.py` doit etre declare par l'argparse. N'importe quel autre flag

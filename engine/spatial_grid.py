@@ -2,7 +2,7 @@
 """engine/spatial_grid.py - Geometrie de la grille egocentrique de mouvement.
 
 SOURCE UNIQUE du mapping grille<->hex. Partagee par les trois couches de la refonte
-(Documentation/Implémentation/Implémenté/move_action_space_spatial_rework.md) :
+(Documentation/Reference/moteur/move_action_space_spatial_rework.md) :
 
   - T1 `engine/observation_builder.py`          : rasterisation des canaux (`GRID_CHANNELS`)
   - T2 `engine/phase_handlers/shared_utils.py`  : projection du pool BFS -> masque

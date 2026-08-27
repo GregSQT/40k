@@ -9,7 +9,7 @@ de l'utilisateur doit rester exploitable, donc pas de rouge durable ; et le mess
 `XPASS(strict)` ne dit pas CE QUI a changé, alors qu'une assertion nommée le dit.
 
 État complet, obstacles ordonnés et estimation d'effort :
-    Documentation/Implémentation/A_faire/Endless_duty_etat_mesure.md
+    Documentation/Chantiers/backlog/Endless_duty_etat_mesure.md
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from services.endless_duty_runtime import ED_SCENARIO_DEFAULT, _apply_slot_picks
 
 pytestmark = pytest.mark.anomaly
 
-_DOC = "Documentation/Implémentation/A_faire/Endless_duty_etat_mesure.md"
+_DOC = "Documentation/Chantiers/backlog/Endless_duty_etat_mesure.md"
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 # Les 18 fiches de `frontend/src/roster/spaceMarine/units/endlessDuty/` (index.ts exclu).
