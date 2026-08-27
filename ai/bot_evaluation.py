@@ -2125,10 +2125,18 @@ def create_checkpoint_eval_pool(
 ) -> "ProcessPoolExecutor":
     """Crée un pool persistant pour `evaluate_against_checkpoints` (4.2).
 
-    Le pool doit être fermé par l'appelant quand il n'est plus nécessaire
-    (`pool.shutdown(wait=False)`). Passer `pool=` à chaque appel
-    évite de respawner les workers et de recharger les dépendances Python
-    entre deux évals successives (coût fixe ~46 s mesuré en §6).
+    L'APPELANT EST RESPONSABLE DU SHUTDOWN. Fermer le pool avec
+    `pool.shutdown(wait=False, cancel_futures=True)` quand il n'est plus nécessaire.
+    Sans ça, les workers survivent au parent si celui-ci reçoit SIGTERM — ils deviennent
+    orphelins (PPID=1) et consomment de la RAM indéfiniment.
+
+    ExploiterProbeCallback._on_training_end fait déjà le shutdown. Les scripts standalone
+    (measure_gate_43.py et équivalents) doivent le faire explicitement dans un try/finally,
+    ET installer un handler SIGTERM qui convertit le signal en SystemExit pour que le
+    finally s'exécute même sur kill.
+
+    Passer `pool=` à chaque appel évite de respawner les workers et de recharger les
+    dépendances Python entre deux évals successives (coût fixe ~46 s mesuré en §6).
 
     Le modèle P1 n'est pas chargé à l'init : chaque tâche porte un jeton de version
     (model_path, mtime) et le worker ne recharge que si la version a changé.
@@ -2385,18 +2393,25 @@ def evaluate_against_checkpoints(
             )
         else:
             ctx = mp.get_context("spawn")
-            with ProcessPoolExecutor(
+            # try/finally plutôt que `with` : `with` appelle shutdown(wait=True), qui peut
+            # bloquer si un worker est bloqué puis laisser des orphelins si le parent reçoit
+            # un signal. shutdown(wait=False, cancel_futures=True) garantit la fermeture même
+            # sur KeyboardInterrupt ou toute autre exception.
+            temp_pool = ProcessPoolExecutor(
                 max_workers=n_workers,
                 mp_context=ctx,
                 initializer=_eval_worker_init,
                 initargs=initargs,
-            ) as temp_pool:
+            )
+            try:
                 results_list = _collect_parallel_results_with_timeouts(
                     pool=temp_pool,
                     tasks=tasks,
                     task_timeout_seconds=task_timeout_seconds,
                     max_in_flight=n_workers,
                 )
+            finally:
+                temp_pool.shutdown(wait=False, cancel_futures=True)
     else:
         _eval_worker_init(*initargs)
         results_list = [_eval_worker_task(task) for task in tasks]
