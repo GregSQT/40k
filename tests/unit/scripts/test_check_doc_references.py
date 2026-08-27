@@ -1283,6 +1283,11 @@ def test_git_output_is_decoded_regardless_of_the_locale() -> None:
     lui-même en mode UTF-8 sous locale C (PEP 538/540) et le test resterait vert quoi qu'il
     arrive — le vert vacant appliqué à son propre verrou.
 
+    CE QUI EST ASSERTÉ : aucun basename ne porte de guillemet ni d'antislash — les marques d'une
+    sortie de git non décodée — et `ROADMAP.md` est présent. Compter les occurrences d'un nom
+    serait un recensement du dépôt, que n'importe quel commit rend faux : c'est ce qui a rendu ce
+    test rouge au commit 2d19e683, lequel a ajouté un second `ROADMAP.md` suivi par git.
+
     BORNE : ce test couvre le DÉCODAGE de git seul, en important le module (sans lancer le script).
     Le module peut s'importer sous fsencoding ascii — le check d'environnement (`_check_filesystem_
     encoding`) n'est appelé que depuis le bloc `__main__`, et non à l'import. Sous une locale
@@ -1301,14 +1306,15 @@ def test_git_output_is_decoded_regardless_of_the_locale() -> None:
         "import importlib.util;"
         f"s=importlib.util.spec_from_file_location('cdr', r'{ROOT}/scripts/check_doc_references.py');"
         "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
-        "print(m.tracked_basenames()['ROADMAP.md'])"
+        "c=m.tracked_basenames();"
+        "print(len([n for n in c if chr(34) in n or chr(92) in n]), c['ROADMAP.md'] >= 1)"
     )
     done = subprocess.run(
         [sys.executable, "-c", program],
         cwd=ROOT, env=env, capture_output=True, text=True, encoding="utf-8",
     )
     assert done.returncode == 0, done.stderr[-2000:]
-    assert done.stdout.strip() == "1"
+    assert done.stdout.strip() == "0 True"
 
 
 def test_ascii_fsencoding_produces_explicit_error() -> None:
