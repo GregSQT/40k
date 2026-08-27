@@ -15,9 +15,12 @@ CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
 if os.path.exists(CONFIG_FILE):
     with open(CONFIG_FILE, "r", encoding="utf-8") as f:
         config = json.load(f)
-    ROOT = config.get("ROOT")
-    DEST_ROOT = config.get("DEST_ROOT")
-    files_to_copy = config.get("files_to_copy")
+    for _key in ("ROOT", "DEST_ROOT", "files_to_copy"):
+        if _key not in config:
+            raise KeyError(f"config.json manque la clé obligatoire : {_key!r}")
+    ROOT = config["ROOT"]
+    DEST_ROOT = config["DEST_ROOT"]
+    files_to_copy = config["files_to_copy"]
 else:
     # 2. Otherwise, use env vars or hardcoded defaults
     ROOT = os.environ.get("PROJECT_ROOT", r"E:\Dropbox\Informatique\Holberton\40k")
@@ -286,11 +289,10 @@ def run_backup() -> None:
         for file_rel in files_to_copy:
             src = os.path.join(ROOT, file_rel)
             filename = os.path.basename(file_rel)
-        
-            # Handle duplicate filenames by prefixing with folder name
-            #if filename in ["config.json", "scenario.json", "game_config.json"]:
-            #    folder_prefix = os.path.dirname(file_rel).replace("/", "_").replace("\\", "_")
-            #    filename = f"{folder_prefix}_{filename}"
+            folder = os.path.dirname(file_rel)
+            if folder:
+                folder_prefix = folder.replace("/", "_").replace("\\", "_")
+                filename = f"{folder_prefix}_{filename}"
         
             dest = os.path.join(DEST_ROOT, filename)
             if not os.path.exists(src):

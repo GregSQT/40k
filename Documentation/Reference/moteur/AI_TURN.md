@@ -1,11 +1,5 @@
 # AI TURN SEQUENCE — référence séquence de jeu
 
-> **⚠️ DOC DÉGRADÉ — RÉÉCRITURE PLANIFIÉE (P3 refonte_documentation.md §4)**
-> Correctifs appliqués le 2026-08-27 : `los_visibility_min_ratio` remplacé par `ratio > 0` (3 sites),
-> section « CHARGE PHASE » erronée renommée en « MOVEMENT PHASE — avance et tir post-avance »,
-> doublon « Target Restrictions Logic » marqué. Problèmes structurels restants : vieux guide
-> comme squelette, 5 matrices V11 dispersées, structure « Claude Learning Objectives » périmée.
-
 ## AI CODING CONTRACT (OPERATIONAL)
 
 This contract constrains how any assistant or tool is allowed to modify this codebase.
@@ -25,145 +19,17 @@ This contract constrains how any assistant or tool is allowed to modify this cod
 - **Refuse changes that violate AI_TURN or AI implementation rules**
   - If a requested change conflicts with the turn rules or architecture guidelines, explicitly call this out and ask for clarification instead of implementing it.
 
-## Claude Search Optimization
+## 📅 SÉQUENCE DE TOUR
 
-**Search Terms**: turn sequence, phase management, eligibility rules, step counting, unit activation, movement phase, shooting phase, charge phase, fight phase, tracking sets, phase transitions, decision logic, game state management
-
-**Core Concepts**: sequential activation, dynamic validation, atomic actions, phase completion, turn progression, episode lifecycle, state consistency, rule interactions, decision frameworks, validation checkpoints
-
----
-
-## 🎯 CLAUDE LEARNING OBJECTIVES
-
-This document teaches Claude to **understand the logic** behind the Warhammer 40K turn system, enabling intelligent decision-making and flexible implementation across different contexts.
-
-**Learning Approach:**
-1. **Grasp fundamental principles** - Why rules exist and how they interact
-2. **Master decision logic** - When and why to apply specific rules  
-3. **Understand state relationships** - How game state changes affect rule application
-4. **Recognize patterns** - Common scenarios and their resolution logic
-5. **Validate understanding** - Self-check comprehension at key points
-
----
-
-## 📋 NAVIGATION & LEARNING PATH
-
-- [Core Game Logic](#-core-game-logic) - Essential concepts for understanding
-- [Episode & Turn Concepts](#-episode--turn-concepts) - Game lifecycle logic
-- [State Management Principles](#-state-management-principles) - How game state works
-- [Movement Phase Logic](#-movement-phase-logic) - Movement rules and reasoning
-- [Shooting Phase Logic](#-shooting-phase-logic) - Shooting rules and targeting
-- [Charge Phase Logic](#-charge-phase-logic) - Charge mechanics and distance
-- [Fight Phase Logic](#-fight-phase-logic) - Fight phases and alternating turns
-- [Tracking System Logic](#-tracking-system-logic) - How the game remembers actions
-- [Key Scenarios](#-key-scenarios) - Essential decision examples
-- [Rule Interactions](#-rule-interactions) - How different rules affect each other
-- [Claude Validation Points](#-claude-validation-points) - Understanding checkpoints
-- [Decision Framework](#-decision-framework) - Logical patterns for any implementation
-- [Implementation Validation](#-implementation-validation) - Validation reference
----
-
-## 🧠 CORE GAME LOGIC
-
-### Game Structure Understanding
-
-**The Big Picture:**
-- Players take **complete turns** (all 4 phases) before opponent acts
-- Each phase has **specific purposes** and **different eligibility rules**
-- Units act **one at a time** within each phase (sequential activation)
-- Game state **changes dynamically** as units act
-
-**Why This Structure Exists:**
-- **Turn-based fairness**: Each player gets equal opportunity
-- **Phase specialization**: Different tactical decisions in each phase
-- **Sequential clarity**: No simultaneous action confusion
-- **State consistency**: Game state remains coherent throughout
-
-### Sequential Activation Logic
-
-**Core Principle**: One unit completes its entire action before the next unit begins.
-
-**Why Sequential Matters:**
-- **Dynamic targeting**: Available targets change as units die
-- **Position dependency**: Unit positions affect other units' options
-- **Resource tracking**: Actions consume limited resources (shots, moves, etc.)
-- **Tactical cascading**: One unit's action creates opportunities/threats for others
-
-**Activation Sequence Logic:**
+**Progression :**
 ```
-Unit Selection → Eligibility Check → Action Execution → State Update → Next Unit
+Tour 1 : P0 Move → P0 Shoot → P0 Charge → P0 Fight → P1 Move → P1 Shoot → P1 Charge → P1 Fight
+Tour 2 : P0 Move (Tour++ ici) → P0 Shoot → P0 Charge → P0 Fight → P1 Move → P1 Shoot → P1 Charge → P1 Fight
 ```
-
-**Key Understanding**: Eligibility is checked **when unit becomes active**, not when action executes.
-
-### Phase Completion Logic
-
-**Central Question**: "When does a phase end?"
-
-**Answer**: When **no more eligible units remain** for any player.
-
-**Why Not Step-Based**: Steps measure player actions, but phases end based on game state (unit availability).
-
-**Logic Pattern:**
-```
-For Each Current Player Unit:
-    Check if unit meets phase-specific eligibility criteria
-    If ANY unit is eligible: Phase continues
-If NO units are eligible: Phase ends, advance to next phase
-```
-
-**Claude Key Insight**: Phase transitions are **deterministic** based on unit eligibility, not arbitrary step counts.
-
----
-
-## 📅 EPISODE & TURN CONCEPTS
-
-### Episode Lifecycle Logic
-
-**Episode Boundaries:**
-- **Start**: First Player 0 unit begins movement (game begins)
-- **End**: One player has no living units OR maximum turns reached
-- **Purpose**: Complete game from start to victory/defeat condition
-
-**Turn Progression Sequence:**
-```
-Turn 1: P0 Move → P0 Shoot → P0 Charge → P0 Fight → P1 Move → P1 Shoot → P1 Charge → P1 Fight
-Turn 2: P0 Move (Turn++ here) → P0 Shoot → P0 Charge → P0 Fight → P1 Move → P1 Shoot → P1 Charge → P1 Fight
-Turn 3: P0 Move (Turn++ here) → ...
-```
-
-**Turn Numbering Logic:**
-- **Turn 1**: When Player 0 first moves
-- **Turn 2**: When Player 0 moves again (after Player 1's complete turn)
-- **Pattern**: Turns increment at Player 0 movement phase start
-
-**Why P0-Centric Numbering:**
-- **Consistency**: Always same player triggers turn increment
-- **Clarity**: Unambiguous turn boundaries
-- **Convention**: Standard in turn-based games
-
----
-
-## 🏗️ STATE MANAGEMENT PRINCIPLES
-
-### Single Source of Truth
-
-**Core Principle**: Only **one game_state object** exists per game.
-
-**State Reference Pattern:**
-```
-game_state ← Single authoritative object
-    ↗ ↗ ↗
-    │ │ └── Component C references same object
-    │ └──── Component B references same object  
-    └────── Component A references same object
-```
-
-**Why Single Source:**
-- **Consistency**: All components see same data
-- **Synchronization**: No conflicts between different state copies
-- **Performance**: No expensive state copying operations
-- **Debugging**: Single point of truth for state inspection
+Le compteur de tour s'incrémente au début de la phase de mouvement de P0 (joueur 0).  
+**Fin d'épisode** : un joueur n'a plus d'unités vivantes OU `max_turns` atteint.  
+**Fin de phase** : aucune unité du joueur actif ne remplit les critères d'éligibilité de la phase.  
+Pipeline d'exécution : `_process_squad_action` — `TOTAL_ACTION_SIZE` = 1389 slots — `obs_size` = 16735.
 
 ### Field Naming Logic
 
@@ -179,7 +45,7 @@ game_state ← Single authoritative object
   - `CC_WEAPONS` est **toujours présent** en runtime (liste vide autorisée).
 - **Defense**: HP_CUR, HP_MAX, T, ARMOR_SAVE, INVUL_SAVE
 
-**⚠️ MULTIPLE_WEAPONS_IMPLEMENTATION.md**: Units now have weapon arrays instead of single weapon fields. Use `engine.utils.weapon_helpers` functions to access weapon data.
+**Accès aux armes** : utiliser les fonctions de `engine.utils.weapon_helpers` pour lire `RNG_WEAPONS` / `CC_WEAPONS`.
 
 **⚠️ CRITICAL**: Must use UPPERCASE field names consistently across all components.
 
@@ -338,36 +204,17 @@ For each unit
 **Fly — pathfinding / preview:**
 - BFS exploration does not treat walls or occupation as blocking along the path; **destination** validation still applies walls, occupation, and engagement rules on the unit footprint.
 
-**Why These Restrictions:**
-- **Spatial logic**: Physical objects cannot overlap at the end of a move; enemies block passage.
-- **Engagement rules**: Entering or crossing the engagement band is handled by movement restrictions so the fight phase stays separate.
-- **Terrain realism**: Walls block ground paths.
-
 ### Flee Mechanics Logic
 
 - **Trigger**: Move action started from hex adjacent to enemy unit
 - **Implementation**: `wasAdjacentToEnemy`
-- **Note**: Unit automatically not adjacent at destination (move restrictions prevent adjacent destinations)
-- **Why This Works**: Movement restrictions forbid destinations adjacent to enemies, so checking only the starting position is sufficient to detect flee
+- **Note**: Movement restrictions forbid destinations adjacent to enemies, so checking only the starting position is sufficient to detect flee.
 
 **Flee Consequences:**
-- **Shooting phase**: Cannot shoot (disorganized from retreat)
-- **Charge phase**: Cannot charge (poor position/morale)
-- **Fight phase**: Can fight normally (no restriction)
+- **Shooting phase**: Cannot shoot
+- **Charge phase**: Cannot charge
+- **Fight phase**: Can fight normally
 - **Duration**: Until end of current turn only
-
-**Why Flee Exists:**
-- **Tactical choice**: Trade current effectiveness for survival
-- **Risk/reward**: Escape death but lose capabilities
-- **Strategic depth**: Creates meaningful positioning decisions
-
-**Key Example:**
-```
-Wounded Marine (HP_CUR 1) adjacent to healthy Ork
-Flee option: Survive to act later in the game, but lose turn effectiveness
-Stay option: 80% chance of death but maintain capabilities
-Decision factors: Unit value, importance of actions this turn, long term strategy, alternative threats
-  ```
 
 ## 🆕 V11 COMPLIANCE MATRIX — COMMAND PHASE
 
@@ -553,10 +400,6 @@ une information publique. Tests : `test_command_points_and_battle_shock.py`.
 - **24.28 PRECISION** → implémenté et cohérent avec le fold : le character est une figurine du squad, donc un groupe d'allocation ciblable. Le critère « CHARACTER model » est aujourd'hui le **rôle** leader/support, pas le keyword `CHARACTER` — équivalent sur les données actuelles, non verrouillé par un test.
 
 ## 🎯 SHOOTING PHASE Decision Tree (Optimized)
-
-**⚠️ ADVANCE_IMPLEMENTATION_PLAN.md**: Shooting phase now supports ADVANCE action in addition to SHOOT.
-
----
 
 ## 📚 SECTION 1: GLOBAL VARIABLES & REFERENCE TABLES
 
@@ -1531,22 +1374,6 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 - ✅ CAN_SHOOT / CAN_ADVANCE flags
 - ✅ Post-advance shooting restrictions
 - ✅ Unit state tracking (units_advanced, units_shot)
-
----
-
-## 📝 Document Notes
-
-**This is an optimized version of the Shooting Phase documentation.**
-
-**Optimizations made:**
-- ✅ All features preserved (no functionality removed)
-- ✅ Clear hierarchical structure: Variables → Functions → Flow → Concepts
-- ✅ Unified function definitions (AI/Human differences marked explicitly)
-- ✅ Step-based flow control (numbered steps for clarity)
-- ✅ Complete reference tables for function arguments
-- ✅ Enhanced readability with better organization
-- ✅ Clarified state management and transitions
-- ✅ Better separation of concerns (functions vs flow)
 
 ---
 
@@ -3160,7 +2987,7 @@ Result: Charging grants first strike, then fair alternation
 - **Reset timing**: Start of movement phase
 - **Usage**: Fight priority determination
 
-**units_advanced** (Shooting Phase) - ⚠️ ADVANCE_IMPLEMENTATION_PLAN.md:
+**units_advanced** (Shooting Phase):
 - **Purpose**: Track units that advanced during shooting phase
 - **Reset timing**: Start of movement phase
 - **Usage**: Prevents charge eligibility (advanced units cannot charge)
@@ -3186,69 +3013,12 @@ Result: Charging grants first strike, then fair alternation
 - **Cleanup timing**: End of unit's activation (roll discarded whether charge succeeds or fails)
 - **Example**: Marine rolls 9, can charge any target within 9 hexes of adjacent positions (*via pathfinding*)
 
-**Why Cross-Phase Tracking:**
-- **Realistic consequences**: Fleeing affects unit for entire turn
-- **Strategic depth**: Makes fleeing a meaningful choice with costs
-- **State consistency**: Same consequences applied uniformly
-
 **Slaughter Handling Explained:**
 When all valid targets are eliminated during multi-shot action:
 - Remaining shots are cancelled (cannot fire at invalid targets)
 - Unit activation ends immediately
 - Prevents units from being stuck with unusable remaining shots
 - Maintains game flow and prevents infinite loops
-
----
-
-## 🎪 KEY SCENARIOS
-
-### Critical Decision Examples
-
-**Scenario 1 - The Coordination Decision:**
-```
-Situation: 
-- Marine A can wound high-threat Enemy (2 damage, enemy has 3 HP)
-- Marine B can finish wounded enemies (2 damage)
-- Enemy will kill Marine A if allowed to act
-
-Options:
-A) Marine A shoots different target, Marine B charges Enemy independently
-B) Marine A wounds Enemy, Marine B finishes it with coordinated attack
-
-Analysis:
-Option A: Uncertain outcome, Enemy remains threat
-Option B: Guaranteed elimination of high threat
-
-Decision principle: Coordination often superior to individual optimization
-```
-
-**Scenario 2 - The Flee vs Fight Dilemma:**
-```
-Wounded Scout (HP_CUR 1) adjacent to healthy Ork
-Fight prediction: 80% chance Scout dies if stays
-Flee consequences: Scout survives but cannot shoot critical targets this turn
-
-Decision factors:
-- Scout's death may "lock" a high value unit in melee, preventing it from attacking a more precious unit
-- Scout's flee would :
-    - let him to act the subsequent turns but will "free" the ork
-    - allow his allied units to shoot at the ork during the shooting phase since it will no more be adjacent to a friendly unit
-
-Framework: Weigh certain survival vs uncertain but valuable contribution
-```
-
-**Scenario 3 - The Action Economy Challenge:**
-```
-Two enemies: one wounded (1 HP), one healthy (3 HP)
-Unit can kill wounded enemy OR significantly wound healthy enemy
-
-Standard approach: Kill wounded (guaranteed elimination)
-Advanced consideration: What can allies accomplish?
-- If ally can finish wounded in the same turn: Better to wound healthy instead
-- If no ally available: Take guaranteed elimination
-
-Principle: Optimize total force effectiveness, not individual actions
-```
 
 ---
 
@@ -3286,168 +3056,6 @@ Decision creates ripple effects throughout remaining phases
 Counter-strategy: Position units to support each other
 Prevention: Avoid isolated vulnerabilities
 ```
-
----
-
-## ✅ CLAUDE VALIDATION POINTS
-
-### Fundamental Understanding Checks
-
-**Can Claude answer these core questions?**
-
-1. **"Who can act in Movement phase?"** 
-   - Correct: Only current player's units
-   - Why: Phase-based turn system
-
-2. **"When does Shooting phase end?"**
-   - Correct: When no current player units are eligible to shoot
-   - Why: Eligibility-based phase completion
-
-3. **"Why can't fled units charge?"**
-   - Correct: They're too far from fight and demoralized
-   - Why: Logical consequence of retreat action
-
-4. **"What makes Fight phase unique?"**
-   - Correct: Both players' units can act (only such phase)
-   - Why: Fight involves units from both sides
-
-### Rule Application Checks
-
-**Can Claude correctly apply eligibility logic?**
-
-Given a unit that is:
-- Alive (HP_CUR > 0) ✓
-- Belongs to current player ✓  
-- Not in units_moved ✓
-- Adjacent to an enemy
-
-**Movement phase eligibility**: ELIGIBLE (adjacency doesn't prevent movement)
-**Shooting phase eligibility**: INELIGIBLE (adjacent = in fight = cannot shoot)
-
-### Sequence Understanding Checks
-
-**Can Claude trace phase progression?**
-
-Starting state: P0 Movement phase, Turn 1
-After P0 completes all phases and P1 completes all phases:
-Expected result: P0 Movement phase, Turn 2
-
-**When Turn increments**: Turn increments when P0 starts Movement (turn-based on P0)
-
-### Error Detection Checks
-
-**Can Claude identify common mistakes?**
-
-Scenario: "Unit perform the shoot action, then in same phase performs the same action again"
-Claude should identify: VIOLATION - units_shot tracking prevents duplicate actions
-
-Scenario: "Unit moves to hex adjacent to enemy, then shoots in same turn"
-Claude should identify: VIOLATION - Movement restrictions prevent moving TO hexes adjacent to enemies
-
-Scenario: "Unit moves from adjacent to enemy to non-adjacent hex, then shoots in same turn"
-Claude should identify: VIOLATION - Fled penalty prevents fled units from shooting in the same turn
-
-Scenario: "Unit charges from adjacent to enemy to a different adjacent hex"
-Claude should identify: VIOLATION - No charge allowed for units adjacent to enemy units
-
----
-
-## 🎯 DECISION FRAMEWORK
-
-### Universal Eligibility Pattern
-
-**For any unit in any phase:**
-```
-1. Check basic viability (alive, correct player)
-2. Check action restrictions (already acted, penalties)  
-3. Check opportunity availability (valid targets/destinations)
-4. Return eligibility result with reason
-```
-
-**Why This Pattern:**
-- **Consistent**: Same logic structure across all phases
-- **Efficient**: Most restrictive checks first
-- **Informative**: Provides reason for ineligibility
-- **Debuggable**: Clear failure points
-
-### Action Resolution Pattern
-
-**For eligible unit choosing action:**
-```
-1. Validate action preconditions
-2. Execute action atomically  
-3. Update game state (positions, health, etc.)
-4. Update tracking sets (mark as acted)
-5. Log action for replay/debugging
-6. Check for consequent state changes (death, phase completion)
-```
-
-**Why This Pattern:**
-- **Atomic**: Complete action or no action (no partial states)
-- **Traceable**: All changes logged
-- **Consistent**: Same pattern regardless of action type
-- **Complete**: Handles all necessary state updates
-
-### Phase Transition Pattern
-
-**For current phase:**
-```
-1. Identify all potentially eligible units (current player)
-2. Check each unit's phase-specific eligibility
-3. If any eligible units found: Continue phase
-4. If no eligible units found: Advance to next phase
-5. Reset appropriate tracking sets for new phase
-```
-
-**Why This Pattern:**
-- **Deterministic**: Clear rules for when phases end
-- **Complete**: Checks all units, not just some
-- **State-based**: Transitions based on game state, not arbitrary rules
-- **Clean**: Proper cleanup between phases
-
----
-
-## 🎓 CLAUDE MASTERY INDICATORS
-
-### Level 1: Basic Understanding
-- ✅ Can identify which units are eligible in each phase
-- ✅ Understands phase sequence and turn progression
-- ✅ Knows why rules exist (tactical/balance reasons)
-- ✅ Can explain basic rule interactions
-
-### Level 2: Rule Application
-- ✅ Can apply eligibility logic to complex scenarios
-- ✅ Understands rule interactions (flee penalties, fight priority)
-- ✅ Can trace game state changes through multiple actions
-- ✅ Recognizes common error patterns
-
-### Level 3: Implementation Ready
-- ✅ Can design eligibility checking algorithms
-- ✅ Understands performance implications (efficiency matters)
-- ✅ Can create validation and error handling logic
-- ✅ Applies universal patterns consistently
-
-### Level 4: System Design
-- ✅ Can explain architectural principles (single source of truth)
-- ✅ Understands cross-component communication patterns
-- ✅ Can design for extensibility and maintainability
-- ✅ Optimizes for performance and clarity
-
-
-## 🧪 IMPLEMENTATION VALIDATION
-
-### Critical Test Scenarios
-Implementation must validate these complex interactions:
-- Flee penalty chain (Move → Shoot → Charge restrictions)
-- Charge priority in fight (Sub-phase 1 first strike)
-- Alternating fight sequence (Sub-phase 2 player ordering)
-- Tracking set lifecycle (Persistence and cleanup timing)
-
-### Integration Requirements
-See AI_INTEGRATION.md for complete test scenarios that validate 
-AI_TURN.md compliance across multiple phases.
-
-**This streamlined document brings Claude to Level 4 understanding, enabling expert-level rule comprehension and intelligent decision-making in any implementation context.**
 
 ---
 

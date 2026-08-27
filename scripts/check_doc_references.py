@@ -642,7 +642,8 @@ def check_references(doc_path: pathlib.Path) -> tuple[int, int, list[str]]:
     doc_dir = doc_path.parent
     resolved = unverifiable = 0
     broken: list[str] = []
-    for lineno, line in enumerate(doc_path.read_text(encoding="utf-8").split("\n"), 1):
+    text = _FENCED_CODE_BLOCK.sub(_mask_fenced, doc_path.read_text(encoding="utf-8"))
+    for lineno, line in enumerate(text.split("\n"), 1):
         cells, cooccurrence_allowed = fragments(line)
         for cell in cells:
             names = names_in(cell)
@@ -1329,7 +1330,8 @@ def check_symbol_kinds(doc_path: pathlib.Path) -> tuple[int, int, list[str], lis
     broken: list[str] = []
     notes: list[str] = []
     doc_dir = doc_path.parent
-    for lineno, line in enumerate(doc_path.read_text(encoding="utf-8").split("\n"), 1):
+    text = _FENCED_CODE_BLOCK.sub(_mask_fenced, doc_path.read_text(encoding="utf-8"))
+    for lineno, line in enumerate(text.split("\n"), 1):
         cited = len(SYMBOL_KIND.findall(line))
         if not cited:
             continue
@@ -1412,9 +1414,9 @@ def reachable_documents() -> set[pathlib.Path]:
         raise SourceUnavailable(f"la racine de l'atteignabilité a disparu : {ROADMAP_INDEX}")
     root = ROADMAP_INDEX.resolve()
     seen = {root}
-    frontier = [root]
+    frontier: collections.deque[pathlib.Path] = collections.deque([root])
     while frontier:
-        current = frontier.pop(0)
+        current = frontier.popleft()
         for target in cited_documents(current):
             if target in seen or not is_live(target):
                 continue
