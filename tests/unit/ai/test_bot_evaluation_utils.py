@@ -335,6 +335,7 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
         "n_episodes": 3,
         "base_seed": 123,
         "scenario_index": 0,
+        "ep_offset": 0,
         "max_steps_per_episode": 500,
         "config_params": {
             "training_config_name": "suite",
@@ -520,6 +521,7 @@ def test_eval_worker_task_attaches_step_logger(monkeypatch: pytest.MonkeyPatch) 
             "n_episodes": 1,
             "base_seed": 1,
             "scenario_index": 0,
+            "ep_offset": 0,
             "max_steps_per_episode": 500,
             "config_params": {
                 "training_config_name": "suite",
