@@ -82,6 +82,9 @@ def test_filter_scenarios_from_config() -> None:
     with pytest.raises(KeyError, match=r"Unknown scenario"):
         be._filter_scenarios_from_config({"callback_params": {"bot_eval_scenarios": ["missing"]}}, scenario_list, "CoreAgent")
 
+    with pytest.raises(ValueError, match=r"doublons"):
+        be._filter_scenarios_from_config({"callback_params": {"bot_eval_scenarios": ["bot-1", "bot-1"]}}, scenario_list, "CoreAgent")
+
 
 def test_compute_holdout_split_metrics() -> None:
     training_cfg = {

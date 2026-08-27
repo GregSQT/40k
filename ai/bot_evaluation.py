@@ -542,6 +542,12 @@ def _filter_scenarios_from_config(
         raise ValueError("callback_params.bot_eval_scenarios cannot be an empty list")
 
     requested_names = [str(name) for name in requested]
+    seen: set[str] = set()
+    duplicates = [n for n in requested_names if n in seen or seen.add(n)]  # type: ignore[func-returns-value]
+    if duplicates:
+        raise ValueError(
+            f"callback_params.bot_eval_scenarios contient des doublons : {duplicates}"
+        )
     scenario_map = {
         _scenario_name_from_file(base_agent_key, path): path
         for path in scenario_list
@@ -1687,7 +1693,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 scenario_name = _scenario_name_from_file(base_agent_key, scenario_file)
                 task_scenario_file = scenario_file
                 if scenario_pool == "holdout" and eval_ref_strict and materialize_eval_refs:
-                    wall_ref = eval_wall_refs[(scenario_index + len(bot_name)) % len(eval_wall_refs)]
+                    wall_ref = eval_wall_refs[(scenario_index + sum(ord(c) for c in bot_name)) % len(eval_wall_refs)]
                     task_scenario_file = _materialize_eval_scenario_refs(
                         scenario_path=scenario_file,
                         wall_ref=wall_ref,
@@ -2107,10 +2113,10 @@ def evaluate_against_checkpoints(
 
     MURS DE RÉFÉRENCE : volontairement NON matérialisés ici, contrairement au constructeur de
     tâches des bots (`_materialize_eval_scenario_refs`, indexé par
-    `(scenario_index + len(bot_name)) % len(eval_wall_refs)`). Les appliquer changerait la valeur
-    des scores du gate — donc leur comparabilité avec ceux déjà écrits dans `curriculum.log` — et,
-    `bot_name` valant ici l'étiquette d'étape, ferait dépendre le terrain joué de la LONGUEUR de
-    cette étiquette (« P0 » et « P10 » ne joueraient pas le même mur). Verrouillé par test.
+    `(scenario_index + sum(ord(c) for c in bot_name)) % len(eval_wall_refs)`). Les appliquer
+    changerait la valeur des scores du gate — donc leur comparabilité avec ceux déjà écrits dans
+    `curriculum.log` — et, `bot_name` valant ici l'étiquette d'étape, ferait dépendre le terrain
+    joué du nom de cette étiquette. Verrouillé par test.
 
     Retourne {} si `checkpoint_archives` est vide ou si aucune archive n'est compatible.
     """

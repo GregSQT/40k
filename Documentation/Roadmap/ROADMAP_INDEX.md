@@ -295,6 +295,9 @@ Détail : `Documentation/Implémentation/A_faire/curriculum_adversaires_etalons.
 | tests+infra | ✅ purge erreurs logs check_ai_rules/pytest/pyright (2026-08-26) — 18 fichiers corrigés, 0 erreur après correction | — | ⚡ |
 | tests | ✅ fix 119 tests rouges bugs A–O (2026-08-26) — charge id, unit_by_id fixtures, analyzer, obs, rollout ; suite verte | — | ⚡ |
 | infra+moteur | ✅ /code-review findings + /simplify (2026-08-26) — garde batch obsolète move cache supprimée (shared_utils), walrus models_cache obs (observation_builder), parser.error bot_zone_direct, pop _ez_fp redondant (fight_handlers), re-export gs_with_units (_fabriques) | — | ⚡ |
+| moteur+tests | ✅ fix(pyright): 5 erreurs _ez_offset_kernels + cas round×round manquant (2026-08-27) | — | ⚡ |
+| tests | ✅ fix(ai): ep_offset=0 ajouté aux tâches de test manquantes (2026-08-27) | — | ⚡ |
+| moteur+ai | ✅ 4 findings code-review (2026-08-27) — T1 footprint span lève ValueError, FLY BFS OOB dans fly_visited, wall-ref sum(ord) vs len, doublons scénarios guards | — | ⚡ |
 
 ### Bloqués par une décision utilisateur
 

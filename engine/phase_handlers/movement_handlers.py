@@ -118,14 +118,16 @@ def _move_preview_footprint_span(unit: Dict[str, Any]) -> int:
     if isinstance(bs, (list, tuple)) and len(bs) >= 1:
         try:
             return max(int(v) for v in bs)
-        except (TypeError, ValueError):
-            return 1
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"BASE_SIZE liste contient des valeurs non-entières : {bs!r}"
+            ) from exc
     if isinstance(bs, (list, tuple)):
-        return 1
+        raise ValueError(f"BASE_SIZE liste vide pour l'unité {unit.get('id', '?')!r}")
     try:
         return max(1, int(bs))
-    except (TypeError, ValueError):
-        return 1
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"BASE_SIZE scalaire invalide : {bs!r}") from exc
 
 
 def _hex_radius_upper_for_engagement_prune(base_span: int) -> int:
@@ -997,10 +999,10 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
                 for nb in get_hex_neighbors(fc[0], fc[1]):
                     if nb in fly_visited:
                         continue
+                    fly_visited.add(nb)
                     nc, nr = nb
                     if nc < 0 or nc >= board_cols or nr < 0 or nr >= board_rows:
                         continue
-                    fly_visited.add(nb)
                     fly_q.append((nb, fd + 1))
                     candidate_fp = compute_candidate_footprint(nc, nr, unit_obj, game_state)
                     base_ok = is_footprint_placement_valid(
