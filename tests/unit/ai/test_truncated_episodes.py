@@ -593,17 +593,14 @@ def test_every_eval_producer_routes_its_truncations() -> None:
 
     def _direct_calls(func_node: "ast.FunctionDef | ast.AsyncFunctionDef") -> set:
         """Noms appelés dans le corps direct de func_node, sans descendre dans les fonctions imbriquées."""
-        names: set = set()
+        names = set()
         worklist = list(ast.iter_child_nodes(func_node))
         while worklist:
             n = worklist.pop()
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if isinstance(n, ast.Call):
-                if isinstance(n.func, ast.Name):
-                    names.add(n.func.id)
-                else:
-                    names.add(getattr(n.func, "attr", ""))
+                names.add(n.func.id if isinstance(n.func, ast.Name) else getattr(n.func, "attr", ""))
             worklist.extend(ast.iter_child_nodes(n))
         return names
 

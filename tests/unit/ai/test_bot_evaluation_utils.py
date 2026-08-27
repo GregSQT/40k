@@ -377,8 +377,8 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
 # la barre d'entrainement (tests/unit/shared/test_progress_writer.py).
 
 
-def test_eval_worker_task_requires_worker_init() -> None:
-    be._worker_model = None
+def test_eval_worker_task_requires_worker_init(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(be, "_worker_model", None)
     with pytest.raises(RuntimeError, match=r"Worker not initialized"):
         be._eval_worker_task({"config_params": {}})
 
@@ -498,8 +498,8 @@ def test_eval_worker_task_attaches_step_logger(monkeypatch: pytest.MonkeyPatch) 
             return None
 
     env = _DummyEnv()
-    be._worker_model = _DummyModel()
-    be._worker_obs_normalizer = None
+    monkeypatch.setattr(be, "_worker_model", _DummyModel())
+    monkeypatch.setattr(be, "_worker_obs_normalizer", None)
     monkeypatch.setattr(be, "_create_eval_env", lambda **kwargs: env)
 
     class _MarkerLogger:
