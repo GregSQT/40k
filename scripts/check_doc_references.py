@@ -275,9 +275,8 @@ def _mask_fenced(m: re.Match) -> str:  # type: ignore[type-arg]
     return re.sub(r"[^\n]", " ", m.group(0))
 
 
-@functools.lru_cache(maxsize=None)
 def _read_masked(path: pathlib.Path) -> str:
-    """Lit le fichier et masque les blocs fencés (résultat mis en cache par chemin)."""
+    """Lit le fichier et masque les blocs fencés."""
     return _FENCED_CODE_BLOCK.sub(_mask_fenced, path.read_text(encoding="utf-8"))
 
 
@@ -821,7 +820,7 @@ def check_links(doc_path: pathlib.Path) -> tuple[int, int, int, list[str]]:
     doc_dir = doc_path.parent
     checked = skipped = fragments = 0
     broken: list[str] = []
-    for lineno, line in enumerate(doc_path.read_text(encoding="utf-8").split("\n"), 1):
+    for lineno, line in enumerate(_read_masked(doc_path).split("\n"), 1):
         for raw in MD_LINK.findall(line):
             parts = raw.split("#", 1)
             target = urllib.parse.unquote(parts[0]).strip()

@@ -28,6 +28,11 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 cdr = charger_script("scripts/check_doc_references.py")
 
 
+@pytest.fixture(autouse=True)
+def _clear_caches() -> None:
+    cdr.md_anchors.cache_clear()
+
+
 def write(tmp_path: pathlib.Path, name: str, body: str) -> pathlib.Path:
     doc = tmp_path / name
     doc.write_text(body, encoding="utf-8")
@@ -73,6 +78,13 @@ def test_a_bare_neighbour_resolves_to_the_document_directory(tmp_path: pathlib.P
     assert cdr.resolve("bot.md", tmp_path) == tmp_path / "bot.md"
     _checked, _skipped, _fragments, broken = cdr.check_links(doc)
     assert not broken
+
+
+def test_link_inside_fenced_block_is_not_checked(tmp_path: pathlib.Path) -> None:
+    """Un lien dans un bloc fencé ne doit pas être contrôlé — il n'est pas un renvoi réel."""
+    doc = write(tmp_path, "note.md", "```\n[fake](nonexistent.md)\n```\n")
+    _checked, _skipped, _fragments, broken = cdr.check_links(doc)
+    assert not broken, f"lien dans bloc fencé signalé à tort : {broken}"
 
 
 # --------------------------------------------------------------------------- valeurs
