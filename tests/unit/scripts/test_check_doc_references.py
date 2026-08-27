@@ -30,7 +30,9 @@ cdr = charger_script("scripts/check_doc_references.py")
 
 @pytest.fixture(autouse=True)
 def _clear_caches() -> None:
-    cdr.md_anchors.cache_clear()
+    for obj in vars(cdr).values():
+        if hasattr(obj, "cache_clear"):
+            obj.cache_clear()
 
 
 def write(tmp_path: pathlib.Path, name: str, body: str) -> pathlib.Path:
@@ -222,7 +224,6 @@ def test_explicit_anchor_id_accepted_when_slug_is_dead(tmp_path: pathlib.Path) -
     write(tmp_path, "cible.md", "# Titre quelconque {#autre-id}\n\ndu contenu\n")
     doc_ok = write(tmp_path, "note_ok.md", "[texte](cible.md#autre-id)\n")
     doc_ko = write(tmp_path, "note_ko.md", "[texte](cible.md#titre-quelconque)\n")
-    cdr.md_anchors.cache_clear()
     _, _, _, broken_ok = cdr.check_links(doc_ok)
     _, _, _, broken_ko = cdr.check_links(doc_ko)
     assert not broken_ok, f"id explicite rejeté : {broken_ok}"
@@ -233,7 +234,6 @@ def test_url_encoded_fragment_is_decoded(tmp_path: pathlib.Path) -> None:
     """Un fragment URL-encodé (`%C3%A9tape`) est confronté à l'ancre décodée (`étape`)."""
     write(tmp_path, "cible.md", "# Étape 1\n")
     doc = write(tmp_path, "note.md", "[texte](cible.md#%C3%A9tape-1)\n")
-    cdr.md_anchors.cache_clear()
     _checked, _skipped, _fragments, broken = cdr.check_links(doc)
     assert not broken, f"fragment URL-encodé rejeté à tort : {broken}"
 
@@ -251,7 +251,6 @@ def test_explicit_anchor_inside_backtick_span_is_not_treated_as_explicit(
     # slug réel = "use-here" (_heading_slug supprime {#wrong-id} puis strip les backticks)
     doc_slug = write(tmp_path, "note_slug.md", "[texte](cible.md#use-here)\n")
     doc_bad = write(tmp_path, "note_bad.md", "[texte](cible.md#wrong-id)\n")
-    cdr.md_anchors.cache_clear()
     _, _, _, broken_slug = cdr.check_links(doc_slug)
     _, _, _, broken_bad = cdr.check_links(doc_bad)
     assert not broken_slug, f"slug légitime rejeté : {broken_slug}"
@@ -264,7 +263,6 @@ def test_explicit_anchor_inside_fenced_code_block_is_ignored(tmp_path: pathlib.P
     write(tmp_path, "cible.md", content)
     doc_real = write(tmp_path, "note_real.md", "[texte](cible.md#titre-réel)\n")
     doc_fake = write(tmp_path, "note_fake.md", "[texte](cible.md#config-key)\n")
-    cdr.md_anchors.cache_clear()
     _, _, _, broken_real = cdr.check_links(doc_real)
     _, _, _, broken_fake = cdr.check_links(doc_fake)
     assert not broken_real, f"ancre réelle rejetée : {broken_real}"
@@ -306,7 +304,6 @@ def test_dead_anchor_is_dead_after_mutation(tmp_path: pathlib.Path) -> None:
     _checked, _skipped, _fragments, broken = cdr.check_links(doc)
     assert not broken, f"attendu vert, obtenu : {broken}"
     # Mutation : on renomme le titre
-    cdr.md_anchors.cache_clear()
     cible.write_text("## Nouveau titre\n", encoding="utf-8")
     cdr.md_anchors.cache_clear()
     _checked, _skipped, _fragments, broken = cdr.check_links(doc)
@@ -901,12 +898,8 @@ def test_a_gate_that_no_longer_imports_is_a_source_failure(
         "import ce_module_nexiste_pas\n", encoding="utf-8"
     )
     monkeypatch.setattr(cdr, "ROOT", tmp_path)
-    cdr.gate_module.cache_clear()
-    try:
-        with pytest.raises(cdr.SourceUnavailable):
-            cdr.gate_module()
-    finally:
-        cdr.gate_module.cache_clear()
+    with pytest.raises(cdr.SourceUnavailable):
+        cdr.gate_module()
 
 
 def test_an_internal_defect_keeps_its_traceback(
@@ -1592,7 +1585,6 @@ def test_the_real_corpus_has_no_orphan() -> None:
 
 def test_corpus_links_real_corpus_has_no_dead_links() -> None:
     """Bout en bout : le corpus livré ne contient aucun lien mort."""
-    cdr.md_anchors.cache_clear()
     broken, lines = cdr.report_corpus_links()
     assert not broken, "\n".join(lines)
 
