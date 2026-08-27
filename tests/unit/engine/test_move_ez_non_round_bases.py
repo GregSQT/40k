@@ -178,13 +178,12 @@ def test_the_kernel_window_holds_every_forbidden_offset(
     et aucun balayage centré sur le témoin ne le verrait, faute d'ancre interdite si loin. Le
     contrôle se fait donc sur le noyau lui-même, en débordant délibérément sa fenêtre.
     """
-    key_size = tuple(mover_size) if isinstance(mover_size, list) else mover_size
-    key_enemy = tuple(enemy_size) if isinstance(enemy_size, list) else enemy_size
     col, row = 100, 100
     enemy = Socle(shape=enemy_shape, base_size=enemy_size, col=col, row=row, fp=None,
                   orientation=0)
     sure, tie, dcol_max, drow_max = _ez_offset_kernels(
-        mover_shape, key_size, 0, enemy_shape, key_enemy, 0, THR, True,
+        mover_shape, _hashable_base_size(mover_size), 0,
+        enemy_shape, _hashable_base_size(enemy_size), 0, THR, True,
     )
     marge = 3
     interdits = 0
