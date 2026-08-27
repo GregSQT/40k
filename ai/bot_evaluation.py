@@ -913,7 +913,7 @@ def _eval_worker_load_model_if_needed(task: Dict[str, Any]) -> None:
     model_path: str = require_key(task, "model_path")
     model_device: str = require_key(task, "model_device")
     model_mtime: float = require_key(task, "model_mtime")
-    torch_compile_cpu: bool = bool(task.get("torch_compile_cpu", False))
+    torch_compile_cpu: bool = task.get("torch_compile_cpu", False)
     version_key = (model_path, model_mtime)
     if version_key == _worker_model_version_key:
         return
@@ -1719,6 +1719,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 
         from config_loader import get_max_turns
 
+        model_mtime = os.path.getmtime(effective_model_path)
         tasks: List[Dict[str, Any]] = []
         for bot_name in active_bot_names:
             bot_name_hash = sum(ord(c) for c in bot_name)
@@ -1749,7 +1750,7 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                     "max_steps_per_episode": int(get_max_turns()) * 400,  # duree de bataille = game_rules.max_turns
                     "model_path": effective_model_path,
                     "model_device": worker_model_device,
-                    "model_mtime": os.path.getmtime(effective_model_path),
+                    "model_mtime": model_mtime,
                     "torch_compile_cpu": torch_compile_cpu,
                 })
 
@@ -2323,6 +2324,7 @@ def evaluate_against_checkpoints(
     else:
         chunks_per_scenario = 1
 
+    model_mtime = os.path.getmtime(model_path)
     tasks: List[Dict[str, Any]] = []
     for zip_path, score_label in compatible_archives:
         for scenario_index, scenario_file in enumerate(scenario_list):
@@ -2369,25 +2371,13 @@ def evaluate_against_checkpoints(
                     # l'éval est déclenchée, avant que l'entraînement ne le remplace.
                     "model_path": model_path,
                     "model_device": worker_model_device,
-                    "model_mtime": os.path.getmtime(model_path),
+                    "model_mtime": model_mtime,
                     "torch_compile_cpu": torch_compile_cpu,
                 })
                 ep_offset += chunk_size
 
     if not tasks:
         return {}
-
-    # initargs : uniquement les données stables sur la durée du pool (config, flags de
-    # normalisation). Le modèle est chargé paresseusement par chaque worker sur jeton de version
-    # (4.2) — model_path/mtime/device sont dans la tâche, pas dans l'initializer.
-    initargs = (
-        vec_normalize_enabled,
-        vec_eval_enabled,
-        training_config_name,
-        rewards_config_name,
-        controlled_agent,
-        base_agent_key,
-    )
 
     if use_subprocess and n_workers > 1:
         if pool is not None:
@@ -2399,16 +2389,18 @@ def evaluate_against_checkpoints(
                 max_in_flight=n_workers,
             )
         else:
-            ctx = mp.get_context("spawn")
             # try/finally plutôt que `with` : `with` appelle shutdown(wait=True), qui peut
             # bloquer si un worker est bloqué puis laisser des orphelins si le parent reçoit
             # un signal. shutdown(wait=False, cancel_futures=True) garantit la fermeture même
             # sur KeyboardInterrupt ou toute autre exception.
-            temp_pool = ProcessPoolExecutor(
-                max_workers=n_workers,
-                mp_context=ctx,
-                initializer=_eval_worker_init,
-                initargs=initargs,
+            temp_pool = create_checkpoint_eval_pool(
+                n_workers=n_workers,
+                vec_normalize_enabled=vec_normalize_enabled,
+                vec_eval_enabled=vec_eval_enabled,
+                training_config_name=training_config_name,
+                rewards_config_name=rewards_config_name,
+                controlled_agent=controlled_agent,
+                base_agent_key=base_agent_key,
             )
             try:
                 results_list = _collect_parallel_results_with_timeouts(
@@ -2420,6 +2412,14 @@ def evaluate_against_checkpoints(
             finally:
                 temp_pool.shutdown(wait=False, cancel_futures=True)
     else:
+        initargs = (
+            vec_normalize_enabled,
+            vec_eval_enabled,
+            training_config_name,
+            rewards_config_name,
+            controlled_agent,
+            base_agent_key,
+        )
         _eval_worker_init(*initargs)
         results_list = [_eval_worker_task(task) for task in tasks]
 
