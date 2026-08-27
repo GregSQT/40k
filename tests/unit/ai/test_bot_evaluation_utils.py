@@ -324,8 +324,8 @@ def test_eval_worker_task_counts_outcomes_and_reports_progress(monkeypatch: pyte
         def close(self):
             self._closed = True
 
-    be._worker_model = _DummyModel()
-    be._worker_obs_normalizer = lambda obs: np.asarray(obs, dtype=np.float32)
+    monkeypatch.setattr(be, "_worker_model", _DummyModel())
+    monkeypatch.setattr(be, "_worker_obs_normalizer", lambda obs: np.asarray(obs, dtype=np.float32))
     monkeypatch.setattr(be, "_create_eval_env", lambda **kwargs: _DummyEnv())
 
     progress = {"n": 0}
