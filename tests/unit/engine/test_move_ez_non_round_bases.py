@@ -28,7 +28,7 @@ import numpy as np
 import pytest
 
 from engine.hex_utils import (
-    ENGAGEMENT_NORM_HEX_WIDTH, Socle, _hex_center, compute_occupied_hexes,
+    ENGAGEMENT_NORM_HEX_WIDTH, Socle, compute_occupied_hexes,
     engagement_minimum_clearance_norm, euclidean_edge_distance,
 )
 from engine.phase_handlers.movement_handlers import (
@@ -54,17 +54,6 @@ def _socle(shape, size, col, row, orient=0):
     return Socle(shape=shape, base_size=size, col=col, row=row, fp=fp, orientation=orient)
 
 
-def _cell_distance(a: Socle, b: Socle) -> float:
-    """Distance MINIMALE entre centres de cellules — l'approximation que le masque filtre avec."""
-    if a.fp is None or b.fp is None:
-        raise ValueError("_cell_distance mesure des EMPREINTES : un socle sans `fp` n'en a pas")
-    a_centers = [_hex_center(c, r) for c, r in a.fp]
-    b_centers = [_hex_center(c, r) for c, r in b.fp]
-    return min(
-        ((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5
-        for ax, ay in a_centers for bx, by in b_centers
-    )
-
 
 @pytest.fixture
 def euclidean(monkeypatch):
@@ -86,24 +75,10 @@ def _mover(shape=MOVER[0], size=MOVER[1]):
 
 
 def _mask(models=None, mover=None):
-    """État COMPLET : le masque est mémoïsé par le fingerprint d'état partagé
-    (`_move_spatial_cache`), qui lit `models_cache`, la phase et les zones d'engagement. Une
-    fixture qui les omet ne décrit pas un état que le moteur peut produire — et le cache lève
-    plutôt que d'inventer une clé, ce qui est le comportement voulu."""
+    """État COMPLET — délègue à `_state()` pour éviter toute désynchronisation de fingerprint."""
     models = models or WITNESS_ENEMY_MODELS
-    gs = {
-        "config": {"game_rules": {"engagement_zone": EZ, "max_base_size_hex": 24}},
-        "inches_to_subhex": 5,
-        "phase": "move",
-        "units": [],
-        "models_cache": {
-            mid: {"col": c, "row": r, "level": 0} for mid, (c, r) in models.items()
-        },
-        "enemy_adjacent_hexes_player_1": set(),
-        "enemy_adjacent_hexes_player_2": set(),
-    }
     return _compute_mover_ez_forbidden_mask(
-        gs, mover or _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1],
+        _state(models), mover or _mover(), [("5", _enemy_entry(models))], EZ, BOARD[0], BOARD[1],
     )
 
 
@@ -111,7 +86,8 @@ def _mask(models=None, mover=None):
 # L'INVARIANCE PAR TRANSLATION : tout le correctif repose dessus
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _forbidden_offsets(mover_shape, mover_size, orient, enemy_col, enemy_row, span=9):
+def _forbidden_offsets(mover_shape, mover_size, orient, enemy_col, enemy_row,
+                       dcol_span=9, drow_span=9):
     """Offsets strictement interdits autour d'un ennemi PLACÉ, mesurés à ses coordonnées réelles.
 
     Les offsets dont la distance tombe dans la bande EZ_KERNEL_TIE_EPS_NORM autour de THR sont
@@ -121,12 +97,12 @@ def _forbidden_offsets(mover_shape, mover_size, orient, enemy_col, enemy_row, sp
     enemy = Socle(shape=ENEMY[0], base_size=ENEMY[1], col=enemy_col, row=enemy_row,
                   fp=None, orientation=0)
     out = set()
-    for dc in range(-span, span + 1):
-        for dr in range(-span, span + 1):
+    for dc in range(-dcol_span, dcol_span + 1):
+        for dr in range(-drow_span, drow_span + 1):
             mover = Socle(shape=mover_shape, base_size=mover_size, col=enemy_col + dc,
                           row=enemy_row + dr, fp=None, orientation=orient)
             d = euclidean_edge_distance(mover, enemy, max_distance=THR + EZ_KERNEL_TIE_EPS_NORM)
-            if d <= THR - EZ_KERNEL_TIE_EPS_NORM:
+            if d < THR - EZ_KERNEL_TIE_EPS_NORM:
                 out.add((dc, dr))
     return out
 
@@ -143,15 +119,17 @@ def test_the_forbidden_pattern_only_depends_on_the_column_parity(mover_shape, mo
     Le décalage d'une demi-ligne une colonne sur deux est la SEULE dépendance admise — d'où deux
     noyaux et non un.
     """
-    _, _, dcol_max, _ = _ez_offset_kernels(
-        mover_shape, _hashable_base_size(mover_size), orient, ENEMY[0], ENEMY[1], 0, THR, True,
+    _, _, dcol_max, drow_max = _ez_offset_kernels(
+        mover_shape, _hashable_base_size(mover_size), orient,
+        ENEMY[0], _hashable_base_size(ENEMY[1]), 0, THR, True,
     )
     for parity in (0, 1):
         ancres = [(100, 100), (100, 137), (156, 203), (12, 9)]
         ref = None
         for col, row in ancres:
             col = col - (col & 1) + parity
-            got = _forbidden_offsets(mover_shape, mover_size, orient, col, row, span=dcol_max)
+            got = _forbidden_offsets(mover_shape, mover_size, orient, col, row,
+                                     dcol_span=dcol_max, drow_span=drow_max)
             if ref is None:
                 ref = got
             else:
@@ -178,12 +156,13 @@ def test_the_kernel_window_holds_every_forbidden_offset(
     et aucun balayage centré sur le témoin ne le verrait, faute d'ancre interdite si loin. Le
     contrôle se fait donc sur le noyau lui-même, en débordant délibérément sa fenêtre.
     """
+    key_size = _hashable_base_size(mover_size)
+    key_enemy = _hashable_base_size(enemy_size)
     col, row = 100, 100
     enemy = Socle(shape=enemy_shape, base_size=enemy_size, col=col, row=row, fp=None,
                   orientation=0)
     sure, tie, dcol_max, drow_max = _ez_offset_kernels(
-        mover_shape, _hashable_base_size(mover_size), 0,
-        enemy_shape, _hashable_base_size(enemy_size), 0, THR, True,
+        mover_shape, key_size, 0, enemy_shape, key_enemy, 0, THR, True,
     )
     marge = 3
     interdits = 0
@@ -291,14 +270,18 @@ def test_the_mask_agrees_with_the_rule_cell_by_cell(euclidean):
         for c, r in WITNESS_ENEMY_MODELS.values()
     ]
     desaccords = []
+    n_engaged = 0
     for col in range(170, 200):
         for row in range(195, 240):
             mover = Socle(shape=MOVER[0], base_size=MOVER[1], col=col, row=row, fp=None, orientation=0)
             engaged = any(
                 euclidean_edge_distance(mover, e, max_distance=THR) <= THR for e in enemy_socles
             )
+            if engaged:
+                n_engaged += 1
             if bool(mask[col, row]) != engaged:
                 desaccords.append((col, row, bool(mask[col, row]), engaged))
+    assert n_engaged > 0, "prémisse : aucune ancre engagée dans la fenêtre de balayage"
     assert not desaccords, f"masque et règle divergent sur {len(desaccords)} ancres : {desaccords[:5]}"
 
 
@@ -321,16 +304,24 @@ def test_the_mask_agrees_with_the_rule_on_flat_edged_bases(euclidean):
              "orientation": 0},
         [("5", entry)], EZ, BOARD[0], BOARD[1],
     )
-    enemy_socles = [_socle(*enemy_geom, c, r) for c, r in models.values()]
+    enemy_socles = [
+        Socle(shape=enemy_geom[0], base_size=enemy_geom[1], col=c, row=r, fp=None, orientation=0)
+        for c, r in models.values()
+    ]
     desaccords = []
+    n_engaged = 0
     for col in range(165, 205):
         for row in range(200, 245):
-            mover = _socle(*mover_geom, col, row)
+            mover = Socle(shape=mover_geom[0], base_size=mover_geom[1], col=col, row=row,
+                          fp=None, orientation=0)
             engaged = any(
                 euclidean_edge_distance(mover, e, max_distance=THR) <= THR for e in enemy_socles
             )
+            if engaged:
+                n_engaged += 1
             if bool(mask[col, row]) != engaged:
                 desaccords.append((col, row, bool(mask[col, row]), engaged))
+    assert n_engaged > 0, "prémisse : aucune ancre engagée dans la fenêtre de balayage"
     assert not desaccords, (
         f"masque et règle divergent sur {len(desaccords)} ancres à socles carrés : "
         f"{desaccords[:5]} — les égalités flottantes ne sont plus re-mesurées"
