@@ -1801,19 +1801,26 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
                 )
                 _print_progress(min(_parallel_completed[0], total_episodes), total_episodes)
 
-            with ProcessPoolExecutor(
+            # try/finally plutôt que `with` : `with` appelle shutdown(wait=True), qui peut
+            # bloquer si un worker est bloqué puis laisser des orphelins si le parent reçoit
+            # un signal. shutdown(wait=False, cancel_futures=True) garantit la fermeture même
+            # sur KeyboardInterrupt ou toute autre exception.
+            _bot_pool = ProcessPoolExecutor(
                 max_workers=n_workers,
                 mp_context=ctx,
                 initializer=_eval_worker_init,
                 initargs=initargs,
-            ) as pool:
+            )
+            try:
                 results_list = _collect_parallel_results_with_timeouts(
-                    pool=pool,
+                    pool=_bot_pool,
                     tasks=tasks,
                     task_timeout_seconds=int(task_timeout_seconds),
                     max_in_flight=n_workers,
                     on_result=_on_task_result if show_progress else None,
                 )
+            finally:
+                _bot_pool.shutdown(wait=False, cancel_futures=True)
         else:
             _eval_worker_init(*initargs)
             results_list = []

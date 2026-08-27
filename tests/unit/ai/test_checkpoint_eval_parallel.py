@@ -610,7 +610,7 @@ def _canned_result(task):
         "truncations": [], "failed_episodes": 0,
         "bot_name": task["bot_name"], "scenario_name": task["scenario_name"],
         "faction_stats": {}, "seat_stats": {},
-        "roster_stats": {"p1": {}, "p2": {}}, "behavior_stats": {},
+        "roster_stats": {"agent": {}, "opponent": {}}, "behavior_stats": {},
     }
 
 
@@ -865,6 +865,110 @@ def test_internal_pool_shutdown_called_on_exception(tmp_path):
                 rewards_config_name="ArmageddonAgent",
                 n_episodes=2,
                 controlled_agent="ArmageddonAgent",
+            )
+
+    mock_pool_instance.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+
+
+# ── evaluate_against_bots : shutdown garanti même sur exception ──────────────────────────────
+
+
+def _fake_bot_eval_config(n_workers: int = 2, use_subprocess: bool = True):
+    training_cfg = {
+        "agent_seat_mode": "p1",
+        "vec_normalize": {"enabled": False},
+        "vec_normalize_eval": {"enabled": False, "training": False, "norm_reward": False},
+        "callback_params": {
+            "bot_eval_use_subprocess": use_subprocess,
+            "bot_eval_task_timeout_seconds": 600,
+            "bot_eval_n_workers": n_workers,
+            "bot_eval_worker_device": "cpu",
+        },
+    }
+    global_cfg = {"progress_bar": {"bot_eval_width": 20}}
+    fake_config = MagicMock()
+    fake_config.load_agent_training_config.return_value = training_cfg
+    fake_config.load_config.return_value = global_cfg
+    return fake_config
+
+
+def test_bot_eval_internal_pool_shutdown_called_on_success(tmp_path):
+    """Le pool interne de evaluate_against_bots est fermé avec wait=False, cancel_futures=True."""
+    from ai.bot_evaluation import evaluate_against_bots
+
+    archive = tmp_path / "model.zip"
+    archive.touch()
+    scenario = tmp_path / "scenario_0.json"
+    scenario.touch()
+
+    mock_pool_instance = MagicMock()
+    mock_pool_cls = MagicMock(return_value=mock_pool_instance)
+
+    def _serial_collect(pool, tasks, task_timeout_seconds, max_in_flight, on_result=None):
+        return [_canned_result(t) for t in tasks]
+
+    with (
+        patch("config_loader.get_config_loader",
+              return_value=_fake_bot_eval_config(n_workers=2, use_subprocess=True)),
+        patch("config_loader.get_max_turns", return_value=10),
+        patch("ai.training_utils.get_scenario_list_for_phase",
+              return_value=[str(scenario)]),
+        patch("ai.bot_evaluation._load_bot_eval_params",
+              return_value={"weights": {"random": 1.0}, "randomness": {"random": 0.0}}),
+        patch("ai.bot_evaluation._filter_scenarios_from_config", side_effect=lambda cfg, s, k: s),
+        patch("os.path.getmtime", return_value=1.0),
+        patch("ai.bot_evaluation.ProcessPoolExecutor", mock_pool_cls),
+        patch("ai.bot_evaluation._collect_parallel_results_with_timeouts",
+              side_effect=_serial_collect),
+    ):
+        evaluate_against_bots(
+            model=MagicMock(),
+            training_config_name="x1_long",
+            rewards_config_name="ArmageddonAgent",
+            n_episodes=2,
+            controlled_agent="ArmageddonAgent",
+            model_path=str(archive),
+            show_summary=False,
+        )
+
+    mock_pool_instance.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+
+
+def test_bot_eval_internal_pool_shutdown_called_on_exception(tmp_path):
+    """Le pool interne de evaluate_against_bots est fermé via finally même sur KeyboardInterrupt."""
+    from ai.bot_evaluation import evaluate_against_bots
+
+    archive = tmp_path / "model.zip"
+    archive.touch()
+    scenario = tmp_path / "scenario_0.json"
+    scenario.touch()
+
+    mock_pool_instance = MagicMock()
+    mock_pool_cls = MagicMock(return_value=mock_pool_instance)
+
+    with (
+        patch("config_loader.get_config_loader",
+              return_value=_fake_bot_eval_config(n_workers=2, use_subprocess=True)),
+        patch("config_loader.get_max_turns", return_value=10),
+        patch("ai.training_utils.get_scenario_list_for_phase",
+              return_value=[str(scenario)]),
+        patch("ai.bot_evaluation._load_bot_eval_params",
+              return_value={"weights": {"random": 1.0}, "randomness": {"random": 0.0}}),
+        patch("ai.bot_evaluation._filter_scenarios_from_config", side_effect=lambda cfg, s, k: s),
+        patch("os.path.getmtime", return_value=1.0),
+        patch("ai.bot_evaluation.ProcessPoolExecutor", mock_pool_cls),
+        patch("ai.bot_evaluation._collect_parallel_results_with_timeouts",
+              side_effect=KeyboardInterrupt),
+    ):
+        with pytest.raises(KeyboardInterrupt):
+            evaluate_against_bots(
+                model=MagicMock(),
+                training_config_name="x1_long",
+                rewards_config_name="ArmageddonAgent",
+                n_episodes=2,
+                controlled_agent="ArmageddonAgent",
+                model_path=str(archive),
+                show_summary=False,
             )
 
     mock_pool_instance.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
