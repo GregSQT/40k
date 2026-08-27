@@ -425,11 +425,11 @@ def test_capped_episode_counts_as_draw_and_keeps_win_rate(tmp_path):
     assert results["P0"] == pytest.approx(0.5)
 
 
-# ── Non-regression du chemin bot : ep_offset absent ⇒ boucle inchangee ───────────────────────
+# ── Non-regression du chemin bot : ep_offset=0 ⇒ boucle inchangee ───────────────────────────
 
 
 def test_bot_task_without_ep_offset_starts_at_zero():
-    """Sans `ep_offset`, la boucle demarre a 0 — le chemin bot ne decoupe pas et ne bouge pas."""
+    """Avec `ep_offset=0`, la boucle demarre a 0 — le chemin bot ne decoupe pas et ne bouge pas."""
     from ai import bot_evaluation
 
     class _Stop(Exception):
@@ -451,6 +451,7 @@ def test_bot_task_without_ep_offset_starts_at_zero():
         "n_episodes": 3,
         "base_seed": 42,
         "scenario_index": 1,
+        "ep_offset": 0,
         "deterministic": True,
         "config_params": {},
         "max_steps_per_episode": 100,
