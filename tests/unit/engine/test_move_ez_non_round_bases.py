@@ -156,6 +156,7 @@ def test_the_forbidden_pattern_only_depends_on_the_column_parity(mover_shape, mo
 @pytest.mark.parametrize("mover_shape,mover_size,enemy_shape,enemy_size", [
     ("oval", [20, 14], "round", 6), ("square", 10, "round", 6),
     ("round", 6, "oval", [20, 14]), ("oval", [16, 8], "square", 10),
+    ("round", 6, "round", 6),
 ])
 def test_the_kernel_window_holds_every_forbidden_offset(
     mover_shape, mover_size, enemy_shape, enemy_size
