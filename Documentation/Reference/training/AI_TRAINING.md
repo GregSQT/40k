@@ -14,7 +14,7 @@
 > | | Valeur en vigueur | Source de vérité (à relire, jamais à recopier) |
 > |---|---|---|
 > | `obs_size` | **16735** (2026-08-24 — `charged` ajouté à `UNIT_BIN_FIELDS`, slot réservé §15.08/§15.11, +32 = 1 bit × 32 entités ; 16703 avant, 2026-08-19 — V11 §9.5 P4 : `effective_range`, la portée max de tir de l'unité active en subhexes, entre dans `UNIT_CONT_FIELDS`, soit +32 = 1 scalaire × 32 entités ; 16671 avant, V11 §9.4 P3-4 : `decision_options_cont`, 6 candidats × 2 scalaires ; 16659 avant lui, V11 §0.48 `L2` : `K_ALLY_SLOTS` 8 → 12, une ligne alliée par action d'activation, +2 044 scalaires et **0 paramètre**) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params`. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
-> | espace d'action | **1 139** (1 086 micro + 15 macro + 6 `CHOICE_i` + 20 slots d'Oath of Moment, chantier 01 + **12 slots d'ACTIVATION**, V11 §0.48 `L2` : quelle escouade activer) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`), miroir de `shared_utils.SQUAD_ACTION_*` |
+> | espace d'action | **1 389** (1 024 cellules grille + 1 wait + 20 tir + 20 charge mono-cible + 190 charge multi-cibles + 20 mêlée + 1 fight sans cible + 20 tir indirect + 15 zone intents + 6 `CHOICE_i` + 20 Oath + 12 activation + 10 arme mêlée + 20 cohérence + 10 sélection arme tir) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`) |
 >
 > - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque
 >   unité — la mienne, mes alliées, les ennemies — porte le même schéma et passe par le même
@@ -22,12 +22,14 @@
 >   [AI_OBSERVATION.md](AI_OBSERVATION.md) — qui ne décrit QUE le pipeline actuel depuis le
 >   2026-07-28 (le vecteur plat mono-figurine est archivé dans
 >   [AI_OBSERVATION_Legacy.md](../../Archives/docs/AI_OBSERVATION_Legacy.md)).
-> - Espace d'action = 0-1023 cellules de la grille égocentrique, 1024 wait, **1025-1044 tir
->   (20 slots ennemis)**, **1045-1064 cible de charge (20 slots ennemis, V11 §9 P3-2)**,
->   **1065-1084 cible de mêlée (20 slots ennemis, V11 §9 P3-1)**,
->   1085 fight sans cible éligible, 1086-1100 zone intents, **1101-1106 `CHOICE_i`** (candidats de
->   `pending_agent_decision`, V11 §9.3 P2 — EXCLUSIVES : quand une décision est en attente, le
->   masque n'expose qu'elles).
+> - Espace d'action = **0-1023** cellules de la grille égocentrique, **1024** wait,
+>   **1025-1044** tir (20 slots), **1045-1064** charge mono-cible (20 slots, P3-2),
+>   **1065-1254** charge multi-cibles (190 slots C(20,2)+20, P3-8), **1255-1274** mêlée (20 slots,
+>   P3-1), **1275** fight sans cible, **1276-1295** tir indirect (20 slots), **1296-1310** zone
+>   intents (15 slots), **1311-1316** `CHOICE_i` (EXCLUSIVES — quand une décision est en attente,
+>   le masque n'expose qu'elles), **1317-1336** Oath of Moment (20 slots), **1337-1348** activation
+>   escouade (12 slots, §0.48 L2), **1349-1358** arme mêlée (10 slots), **1359-1378** cohérence
+>   (20 slots), **1379-1388** sélection arme tir (10 slots, P3-8 split-fire).
 >   **Constantes nommées obligatoires** (`engine/macro_intents.py`) : un littéral d'action dans
 >   `ai/` est un bug de revue (rupture R5).
 > - `action_space_size` **n'est plus configuré** : la taille est DÉRIVÉE du moteur. Le recopier en

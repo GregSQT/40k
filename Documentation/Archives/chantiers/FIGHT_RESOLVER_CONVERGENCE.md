@@ -1,6 +1,6 @@
 # Convergence des résolveurs de mêlée — doc d'implémentation
 
-Statut : **PLAN — non implémenté**. Date : 2026-07-05.
+Statut : **ARCHIVE — IMPLÉMENTÉ** (moteur d'allocation par-figurine actif, 2026-08-10+). Doc figé au 2026-07-05 (état pré-implémentation).
 Objectif : supprimer le résolveur de combat « pool de PV » et faire tourner le moteur
 d'allocation par-figurine (groupes 05.03/05.04) en mode **auto (headless)** pour tous les
 défenseurs non-humains (training RL, PvE, IA en PvP), afin de corriger l'attribution

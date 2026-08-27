@@ -1,8 +1,7 @@
 # Weapons System - Complete Documentation
 
-**Last Updated**: 2026-08-12  
-**Status**: Production — 22 des 23 règles du registre ont leurs effets de jeu ; seule
-`INDIRECT_FIRE` 24.19 n'est pas implémentée, et délibérément (cf. « Gameplay Effect Coverage »).
+**Last Updated**: 2026-08-16  
+**Status**: Production — 23 des 23 règles du registre ont leurs effets de jeu (`INDIRECT_FIRE` implémentée le 2026-08-16 — tir indirect 10.07, plancher d'échec et obs_id 18).
 **20 d'entre elles sont nommées dans les DEUX journaux** (Game Log PvP et `step.log`) ; les deux
 exceptions, `ASSAULT` et `CLOSE_QUARTERS`, sont mesurées et décrites en « Journal coverage ».
 
@@ -174,9 +173,7 @@ several have been for a long time. A reader trusting the old list would have con
 missing token, a zero usage counter or a surprising dice result came from an unimplemented rule —
 the exact wrong diagnosis.
 
-**22 of the 23 rules have gameplay effects. `INDIRECT_FIRE` is the only one that has none**
-(measured on `engine/**`, 2026-08-12; the observation encoder is deliberately excluded since it
-describes weapons rather than resolving them). Where each lives:
+**All 23 rules have gameplay effects** (updated 2026-08-16). Where each lives:
 
 - **Attack sequence** (`engine/phase_handlers/attack_sequence.py`), shared by shooting and melee —
   `TORRENT`, `SUSTAINED_HITS`, `LETHAL_HITS`, `TWIN_LINKED`, `ANTI_*` (all five), `DEVASTATING_WOUNDS`.
@@ -197,7 +194,7 @@ Measured rule by rule on 2026-08-16 against `weapon_rule_log_tokens` (the PvP Ga
 being *visible*: a rule that fires without being named reads as `NOT USED` in the analyzer's §1.8,
 which is the failure mode this whole area exists to prevent.
 
-**20 of the 22 live rules are named in both journals.** Two are not, and both fail the same way:
+**21 of the 23 live rules are named in both journals.** Two are not, and both fail the same way (`INDIRECT_FIRE` est nommé via `[INDIRECT FIRE:X+]` dans le step.log) :
 
 | Rule | PvP Game Log | `step.log` | State |
 |---|---|---|---|
@@ -214,21 +211,11 @@ what `[RAPID FIRE:X]` and `[CLEAVE:X]` stopped doing when their tokens were writ
 but it has its **own log line** (`type: "hazard"`, emitted by `roll_hazard_for_unit`), which
 reaches both journals — named, not re-derived.
 
-**`INDIRECT_FIRE` is not an oversight and not a backlog item that fell through.** It is the single
-entry of `weapon_rules.json` without an `obs_id`, precisely because it is not implemented, and
-that absence is itself locked by
-`tests/unit/engine/test_squad_obs_weapon_profiles.py::test_indirect_fire_is_deliberately_absent`.
-Two Tyranid weapons declare it (`impaler_cannon`, `spore_mine_launcher`) and both currently need
-line of sight like any other weapon. Implementing it changes shooting eligibility and the action
-masks — an engine project, not a logging one.
-
-What it does **not** cost is a retrain: the observation carries weapon rules as **ids in
-pre-sized slots**, and `OBS_ID_VOCAB_SIZE` is fixed at `OBS_ID_MAX + 1 = 128` rather than fitted
-to the rules that exist (`engine/observation_entities.py`). Giving `INDIRECT_FIRE` its `obs_id`
-therefore adds zero parameters and leaves `obs_size` untouched. That is the entire point of the
-id-slot design (V11 §0.48, arbitrage 2): a boolean flag per rule cost 560 observation scalars,
-*and 560 more for every rule made live*, which set « be rules-compliant » against « retrain once »
-in direct opposition.
+**`INDIRECT_FIRE` implémentée le 2026-08-16** : `obs_id` 18 dans `weapon_rules.json`,
+`squad_has_indirect_fire_weapon` + `indirect_fire_fail_below` dans `shared_utils.py`, plancher
+d'échec 10.07 (6+ ou 4+ avec spotter), cibles sans ligne de vue autorisées. Nommée via
+`[INDIRECT FIRE:X+]` dans le step.log. Armes concernées : `impaler_cannon`, `spore_mine_launcher`.
+Aucun ré-entraînement nécessaire (`OBS_ID_VOCAB_SIZE` fixe à `OBS_ID_MAX + 1 = 128`).
 
 ### Rule Validation
 

@@ -1,4 +1,10 @@
-# AI TURN SEQUENCE - Ultimate Claude Understanding Guide (Streamlined)
+# AI TURN SEQUENCE — référence séquence de jeu
+
+> **⚠️ DOC DÉGRADÉ — RÉÉCRITURE PLANIFIÉE (P3 refonte_documentation.md §4)**
+> Correctifs appliqués le 2026-08-27 : `los_visibility_min_ratio` remplacé par `ratio > 0` (3 sites),
+> section « CHARGE PHASE » erronée renommée en « MOVEMENT PHASE — avance et tir post-avance »,
+> doublon « Target Restrictions Logic » marqué. Problèmes structurels restants : vieux guide
+> comme squelette, 5 matrices V11 dispersées, structure « Claude Learning Objectives » périmée.
 
 ## AI CODING CONTRACT (OPERATIONAL)
 
@@ -646,7 +652,7 @@ on the game_state, each `{id, obscuring, polygon_vertices, hexes}`).
 perpendicular footprint extremes** (lateral “peek”, evaluated as a 2nd chance only when the anchor
 line is blocked). `visible/total` is the fraction of target footprint hexes reachable.
 
-- `can_see` ⇔ `visible/total ≥ los_visibility_min_ratio` (still read from `game_rules`).
+- `can_see` ⇔ `ratio > 0` (au moins un hex du socle cible atteignable — règle 06.01 ; pas de seuil minimum).
 - `fully_visible` ⇔ every target footprint hex is reachable.
 
 **Benefit of Cover (rule 13.08) — applies as −1 BS, not a save bonus.** A target has cover when it
@@ -759,8 +765,7 @@ build_units_cache():
 
 **Reference (LoS definition in shooting phase):**
 - The underlying LoS computation is **`compute_unit_los()`** (obscuring-aware, single source of
-  truth — see the LoS & Cover section above). `can_see` uses `los_visibility_min_ratio`; cover is
-  condition-based (NOT `cover_ratio`).
+  truth — see the LoS & Cover section above). `can_see` = `ratio > 0` (pas de seuil — voir ci-dessus) ; cover is condition-based (NOT `cover_ratio`).
 - `unit["los_cache"]` stores visibility (`can_see` per target) and `unit["los_cover_cache"]` stores
   the per-target cover bool. Both are consumed by `valid_target_pool_build` and the shot resolution.
 
@@ -1289,8 +1294,7 @@ UNIT_ACTIVABLE_CHECK
 **Valid Target Requirements (ALL must be true):**
 1. **Range check**: Enemy within unit's selected_weapon.RNG hexes (varies by weapon)
 2. **Line of sight (obscuring-aware, `compute_unit_los`)**:
-   - `can_see` ⇔ `visible/total ≥ los_visibility_min_ratio`, where a line is blocked by a dense
-     wall OR an intervening obscuring terrain area not occupied by shooter/target (rule 13.10)
+   - `can_see` ⇔ `ratio > 0` (au moins un hex du socle cible visible — règle 06.01 ; pas de seuil `los_visibility_min_ratio`). Blocage : mur dense OU terrain obscurant non occupé (règle 13.10)
    - **Cover** (rule 13.08) is condition-based, not a ratio: `can_see AND ((hideable AND in a
      terrain area) OR not fully_visible)` → applies **−1 BS** at resolution (no save bonus, no
      `cover_ratio`)
@@ -1615,7 +1619,8 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 
 ---
 
-## ⚡ CHARGE PHASE
+## 🏃 MOVEMENT PHASE — avance et tir post-avance
+> ⚠️ Ce bloc portait le titre « CHARGE PHASE » par erreur ; il décrit l'action d'avance (move phase) et le tir autorisé ensuite (ASSAULT uniquement). La vraie charge commence à [⚡ CHARGE PHASE](#-charge-phase-1).
 │   │   │       │   ├── Build VALID_ACTIONS list based on current state:
 │   │   │       │   │   ├── If unit.CAN_SHOOT = true AND valid_target_pool NOT empty → Add "shoot"
 │   │   │       │   │   ├── If unit.CAN_ADVANCE = true → Add "advance"
@@ -1929,23 +1934,7 @@ ASSERT: game_state["units_cache"] exists (doit être construit au reset)
 
 ### Target Restrictions Logic
 
-**Valid Target Requirements (ALL must be true):**
-
-1. **Range check**: Enemy within unit's selected_weapon.RNG hexes (varies by weapon)
-2. **Line of sight**: No wall hexes between shooter and target
-3. **Fight exclusion**: Enemy NOT adjacent to shooter (adjacent = melee fight)
-4. **Friendly fire prevention**: Enemy NOT adjacent to any friendly units
-
-**Target becomes invalid when:**
-- Enemy dies during shooting action
-- Enemy moves out of range (rare during shooting phase)
-- Line of sight becomes blocked (rare during shooting phase)
-
-**Why These Restrictions:**
-- **Weapon limitations**: Ranged weapons have effective range
-- **Visual requirement**: Cannot shoot what cannot be seen
-- **Engagement types**: Adjacent = melee fight, not shooting
-- **Safety**: Prevent accidental damage to own forces
+> ⚠️ Doublon — voir [§ Target Restrictions Logic](#target-restrictions-logic) (Section 5, ci-dessus), qui est la version canonique avec `compute_unit_los` et la règle hidden 13.09. Suppression lors de la réécriture planifiée.
 
 ### Multiple Shots Logic
 

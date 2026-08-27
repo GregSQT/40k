@@ -18,10 +18,10 @@ Objectif principal: tenir le plus grand nombre de vagues possible.
 ## 3) Roster Rules (Hard Constraints)
 
 - Escouade limitee a 3 slots maximum.
-- Composition imposee:
-  - Slot 1: `Leader` (unique) - seule unite autorisee a prendre un grade eleve (Sergent/Capitaine).
-  - Slot 2: `Melee` - acces uniquement aux unites orientees corps a corps.
-  - Slot 3: `Heavy/Special` - acces uniquement aux unites a armes lourdes/speciales.
+- Composition imposee (noms internes : `leader`, `melee`, `range`) :
+  - Slot `leader` (unique) - seule unite autorisee a prendre un grade eleve (Sergent/Capitaine).
+  - Slot `melee` - acces uniquement aux unites orientees corps a corps.
+  - Slot `range` - acces aux unites a tir a distance (Hellblaster, etc.). ⚠️ La spec initiale disait « Heavy/Special » ; le code (`services/endless_duty_runtime.py`) utilise la clef `range`.
 - Le Leader est l'avatar principal du joueur.
 
 Configuration de depart V1:

@@ -14,33 +14,41 @@ Mettre en place un systeme d'authentification/autorisation permettant de:
 
 ## Regles metier (version initiale)
 
+### Modes de jeu (10 codes en base, source : `config/users.db`)
+
+| Code | Label | base | admin | Remarque |
+|------|-------|------|-------|----------|
+| `pve` | Player vs Environment | ✅ | ✅ | IA pilote P2 |
+| `pvp` | Player vs Player | ✅ | ✅ | 2 humains |
+| `pve_test` | PvE Test | ✅ | ✅ | activé via `test` en backend (1364/1658) |
+| `pvp_test` | PvP Test | ✅ | ✅ | activé via `test` en backend |
+| `pve_old` | PvE (Old) | ✅ | ✅ | pipeline mono-fig hérité |
+| `pvp_old` | PvP (Old) | ✅ | ✅ | pipeline mono-fig hérité |
+| `tutorial` | Tutoriel | ✅ | ✅ | non encore câblé |
+| `endless_duty` | Endless Duty | ✅ | ✅ | activé via `pve` en backend (1662) |
+| `debug` | Debug Mode | ❌ | ✅ | accès admin uniquement |
+| `test` | Test Mode | ❌ | ✅ | accès admin uniquement |
+
+Source de vérité : `config/users.db` → tables `game_modes` et `profile_game_modes`.
+Les codes `pve_test`, `pvp_test` et `endless_duty` ne nécessitent pas leur propre ligne en DB pour le profil `base` : le backend accepte le mode si l'utilisateur a `pve` ou `test` (voir `services/api_server.py` lignes 1656–1662).
+
 ### Profil `base`
 
-Un joueur `base` peut acceder a:
+Un joueur `base` peut acceder a tous les modes sauf `debug` et `test` (voir table ci-dessus).
 
-- modes de jeu:
-  - `pve`
-  - `pvp`
-- options:
-  - `show_advance_warning` (afficher l'avertissement lors du mode advance)
-  - `auto_weapon_selection` (selection automatique d'arme)
+Options :
+- `show_advance_warning` (afficher l'avertissement lors du mode advance)
+- `auto_weapon_selection` (selection automatique d'arme)
 
 ### Redirection apres connexion
 
 Apres connexion reussie, l'utilisateur est redirige vers la route de jeu `pve`.
 
-### Profil `admin` (ajoute)
+### Profil `admin`
 
-Un utilisateur `admin` peut acceder a:
+Un utilisateur `admin` peut acceder a tous les modes, dont `debug` et `test`.
 
-- modes de jeu:
-  - `pve`
-  - `pvp`
-  - `debug`
-  - `test`
-- options:
-  - `show_advance_warning`
-  - `auto_weapon_selection`
+Options : memes que `base`.
 
 ---
 

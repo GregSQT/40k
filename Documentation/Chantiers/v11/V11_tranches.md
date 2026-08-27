@@ -813,10 +813,12 @@ Plan d'origine :
 3. Étendre le smoke test aux scénarios migrés (T4), sièges p1/p2/random, et à un scénario
    contenant Carnifex/Psychophage (validation R6).
 
-### T6 — Entraînement de validation + hygiène — ⏳ EN COURS (màj 2026-07-19)
+### T6 — Entraînement de validation + hygiène — ✅ FAIT (2026-07-19)
 
-> **Bloqueurs actifs : T6-h puis T6-g** (cf. [§0](V11_agent_rework.md#s0)). T6-a→T6-f sont résolus. Les entrées ci-dessous
-> sont chronologiques ; chercher `T6-g` / `T6-h` pour le chemin critique.
+> T6-a→T6-h résolus — clôture 2026-07-19. T6.3 (baseline bots win-rate sur x1_debug) non
+> démontrée sur 467 épisodes (bruit), mais hors critère : la mesure de référence est déportée sur
+> `x1_long` (chemin critique — [v11_chemin_critique.md](../../Roadmap/v11_chemin_critique.md)). Les
+> entrées ci-dessous sont chronologiques.
 
 **Préalable levé** : le bloqueur résiduel laissé par T5 (« reset crashe avec
 `agent_seat_mode="p2"/"random"` — `bot-owned eligible units with empty action mask` en fight

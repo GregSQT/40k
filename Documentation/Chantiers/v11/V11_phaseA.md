@@ -1047,6 +1047,12 @@ Ordre par valeur tactique :
    - **10 — `safe_rear`** : arrière-garde loin des ennemis, objectif proche (`nearest_enemy, -nearest_objective, -nearest_ally, -cluster, -center_distance`).
    Jumeaux dans `_ingress_slot_order` (sans `los`/`potential_los`, par construction du cache ingress). `obs_size` et `TOTAL_ACTION_SIZE` inchangés (§0.48). Requiert `--new` pour mesurer le regret §9.0bis.
 
+   🟢 **LIVRÉ le 2026-08-20** — Charge multi-cibles : 190 slots `CHARGE_PAIR` (1065-1254), C(20,2)+20. `TOTAL_ACTION_SIZE` 1159→1349. Tête dense `charge_pair_net` dans `pointer_policy`. Requiert `--new`.
+
+   🟢 **LIVRÉ le 2026-08-24** — Placement final de charge (`charge_placement`) : `AGENT_DECISION_TYPE_IDS` étendu, 5 intentions (Serré/Objectif/Isolation/Pénétration/Étalé), CHOICE_0 = Serré = comportement historique. `obs_size` et `TOTAL_ACTION_SIZE` inchangés (slot réservé). 20 tests rouge→vert.
+
+   🟢 **LIVRÉ le 2026-08-24** — Split-fire : 10 `SHOOT_WEAPON_SEL_SLOTS` (1379-1388), `TOTAL_ACTION_SIZE` 1379→1389. Flux 2-step : sélection arme → assignation cible. Tête dense `shoot_weapon_sel_net`. Requiert `--new`.
+
 Hors scope A' (reste auto, conforme règles car « un placement légal parmi d'autres ») :
 placement par-figurine du move rigide, pivot. Montée d'étage = Phase C.
 

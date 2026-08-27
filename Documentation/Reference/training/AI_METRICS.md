@@ -4,7 +4,12 @@
 > **📍 Purpose**: Deep dive into metrics-driven training optimization for W40K tactical AI
 >
 > **Status**: January 2025 - Expert optimization guide (Updated: Corrected metric namespaces to match actual code)
-> **⚠️ MàJ 2026-07** : namespaces (`bot_eval/`, `00_critical/`, `vs_random/greedy/defensive/combined`) confirmés dans `ai/metrics_tracker.py`. Le code évalue désormais **7 bots** (`metrics_tracker.py`) alors que ce doc n'en décrit que 3 — le reste du contenu reste exact.
+> **⚠️ MàJ 2026-08-27** : namespaces (`bot_eval/`, `00_critical/`) confirmés dans `ai/metrics_tracker.py`. Le panel de bots a été refondu (2026-08-10+) — source de vérité : `ai/bot_registry.py`. Panel courant :
+> - **Sélection** (pilotent `combined` + `worst_bot`) : random + 5 legacy (greedy, defensive, control, adaptive, value_trade) + 6 doctrine (racer, endgame, alpha, attrition, decapitation, scorer) = 12 bots
+> - **Holdout scellé** (mesuré, n'affecte pas `combined`) : tactical
+> - **Benchmarks** (mesurés uniquement, exclus de la sélection) : reference_balanced, reference_denial, reference_reactive
+>
+> Ce doc décrit random, greedy, defensive en détail — les descriptions des bots doctrine sont dans `ai/bot_doctrines.py` (docstrings de classe).
 >
 > **Companion Document**: [AI_TRAINING.md](AI_TRAINING.md) - Configuration and setup
 >
