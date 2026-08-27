@@ -50,6 +50,11 @@ MEASURES_REFERENCE_HOLDOUT = {
 #: `bot_training.ratios`. Leur presence dans CHAQUE profil d'evaluation est verrouilee par
 #: `test_holdout_bots_present_in_evaluation` — supprimer l'un d'eux de la config rougit ici.
 PRIMARY_BENCHMARK_BOTS = {"racer", "attrition"}
+assert PRIMARY_BENCHMARK_BOTS.isdisjoint(HOLDOUT_BOTS), (
+    f"PRIMARY_BENCHMARK_BOTS et HOLDOUT_BOTS se chevauchent : "
+    f"{PRIMARY_BENCHMARK_BOTS & HOLDOUT_BOTS} — un bot ne peut pas etre a la fois "
+    "de reference (poids >0) et de holdout (poids ==0)."
+)
 
 CONFIG_ROOT = Path(__file__).resolve().parents[3] / "config" / "agents"
 
@@ -112,6 +117,11 @@ def test_holdout_bots_present_in_evaluation(config_path: Path) -> None:
                 f"{config_path.name}[{phase_name}] : le bot de reference primaire "
                 f"'{primary_bot}' est absent de bot_eval_weights — la progression ne serait "
                 "plus mesurable sur les adversaires les plus difficiles."
+            )
+            assert float(weights[primary_bot]) > 0.0, (
+                f"{config_path.name}[{phase_name}] : le bot de reference primaire "
+                f"'{primary_bot}' a un poids nul dans bot_eval_weights — il n'entre pas "
+                "dans `combined` et ne pilote plus le gating (V11 §10.5)."
             )
         total = sum(float(w) for w in weights.values())
         assert abs(total - 1.0) < 1e-9, (
