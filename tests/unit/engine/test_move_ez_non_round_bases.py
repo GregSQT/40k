@@ -85,12 +85,12 @@ def _mask(models=None, mover=None):
 def _assert_mask_agrees(mask, mover_geom, enemy_geom, models, col_range, row_range,
                         msg_suffix=""):
     """Vérifie l'absence de désaccord masque ↔ euclidean_edge_distance sur la fenêtre donnée."""
-    enemy_socles = [_socle(*enemy_geom, c, r, compute_fp=False) for c, r in models.values()]
+    enemy_socles = [_socle(enemy_geom[0], enemy_geom[1], c, r, compute_fp=False) for c, r in models.values()]
     any_engaged = False
     desaccords = []
     for col in col_range:
         for row in row_range:
-            mover = _socle(*mover_geom, col, row, compute_fp=False)
+            mover = _socle(mover_geom[0], mover_geom[1], col, row, compute_fp=False)
             engaged = any(
                 euclidean_edge_distance(mover, e, max_distance=THR) <= THR for e in enemy_socles
             )
