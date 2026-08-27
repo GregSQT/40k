@@ -104,7 +104,7 @@ sont des variantes du même mensonge :
 | **T6-f** | le commit n'écrivait QUE l'ancre → figurines restées à `(-1,-1)` |
 | **T6-g** | le pool BFS validait l'ancre → le bloc translaté débordait |
 | **T6-h** | la translation « rigide » déformait le bloc selon la parité de `dx` |
-| **[§0.11](V11_agent_rework.md#s0.11)** | la collision intra-plan ignorait le **niveau**, autre attribut d'identité écrasé par le résumé |
+| **[§0.11](V11_agent_rework.md)** | la collision intra-plan ignorait le **niveau**, autre attribut d'identité écrasé par le résumé |
 | **T7** | le contrôle mono-ancre de `deploy_unit` teste ce socle fantôme |
 
 ### ⚠️ Le piège : « ancre » désigne TROIS contrats différents
@@ -134,7 +134,7 @@ l'ancre » : au déploiement, c'est faux.
 > d'équivalent de l'érosion T6-g » a été écrit ici sur la seule absence de fonction `erode_*`,
 > alors qu'une machinerie per-model existe ailleurs dans le même fichier (cf. la ligne charge
 > ci-dessous). **Ne pas ouvrir de chantier depuis une ligne non marquée ✅ sans avoir lu la
-> fonction.** C'est la même erreur de méthode que [§0.11](V11_agent_rework.md#s0.11) (« vérifié un par un » sur un
+> fonction.** C'est la même erreur de méthode que [§0.11](V11_agent_rework.md) (« vérifié un par un » sur un
 > échantillon n'est pas une vérification) et que le plan T7 (conclusion tirée sans lire les
 > deux avertissements présents dans le code).
 
@@ -212,7 +212,7 @@ endroit, et **pas** aux sites G1-G2. Le motif se répare site par site depuis de
 <a id="s2"></a>
 ## 2. État des lieux vérifié (ce qui marche)
 
-⚠️ **Affirmation périmée n°7 — voir la table de [§0bis](V11_agent_rework.md#s0bis)** : `ai.multi_agent_trainer` n'existe plus (supprimé en [§0.8](V11_agent_rework.md#s0.8)). Ligne conservée telle quelle, non corrigée.
+⚠️ **Affirmation périmée n°7 — voir la table de [§0bis](V11_agent_rework.md#s0bis)** : `ai.multi_agent_trainer` n'existe plus (supprimé en [§0.8](V11_agent_rework.md)). Ligne conservée telle quelle, non corrigée.
 
 - Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, `ai.multi_agent_trainer`,
   `ai.reward_mapper`, `ai.scenario_manager`, `ai.unit_registry`, ... — vérifié par exécution).
@@ -395,7 +395,7 @@ Analyse statique concordante : SEULE `_fight_phase_complete` (fight_handlers, de
 appelée ~1488/1904/2408) pose `game_over` en vif — et uniquement **au sein d'un `step()`**.
 Masque vide = plus aucun step légal = la complétion de phase n'est jamais déclenchée.
 ⚠️ `_advance_to_next_player` était du CODE MORT en production — **supprimée le 2026-07-19**
-(cf. [§0.4](V11_agent_rework.md#s0.4)) : elle n'existe plus, ne pas la chercher.
+(cf. [§0.4](V11_agent_rework.md)) : elle n'existe plus, ne pas la chercher.
 Nuance config : la limite de tours existe en deux endroits — `max_turns` (game_config.json L14)
 et `max_turns_per_episode` (training config) ; clarifier en T5 lequel fait foi en moteur nu.
 Dans la pile réelle, ce cas est censé être absorbé par le "WAIT forcé" du wrapper
@@ -511,23 +511,23 @@ Chaque tranche se termine par sa validation (section 6) AVANT de passer à la su
 
 ### T1 — Fixes moteur neutres (R4, R6) — ✅ FAIT, prédicat ET branchement verrouillés (2026-07-21)
 
-> **Historique du statut** : ✅ (2026-07-15) → ⏳ PARTIEL (audit [§0.19.1](V11_agent_rework.md#s0.19.1), 2026-07-20) → ✅
-> ([§0.19.3](V11_agent_rework.md#s0.19.3), 2026-07-21).
+> **Historique du statut** : ✅ (2026-07-15) → ⏳ PARTIEL (audit [§0.19.1](V11_agent_rework.md), 2026-07-20) → ✅
+> ([§0.19.3](V11_agent_rework.md), 2026-07-21).
 >
-> 🔴 **Le démenti de [§0.19.1](V11_agent_rework.md#s0.19.1)** : le code de T1 était en place et conforme, mais deux de ses trois
+> 🔴 **Le démenti de [§0.19.1](V11_agent_rework.md)** : le code de T1 était en place et conforme, mais deux de ses trois
 > volets n'étaient **verrouillés par aucun test** — le **site R6 n°1**
 > (`_charge_reverse_goal_bfs_for_eligibility`, inatteignable au x5 : mutation `int()` sur une
 > liste, suite **verte**) et **R4** (zéro occurrence de `is_programmatic_owner` /
 > `is_programmatic_defender` dans `tests/`, alors que §8.3 impose une matrice complète).
 >
-> ✅ **R6 comblé en [§0.19.3](V11_agent_rework.md#s0.19.3)** : `test_charge_oval_base_reverse_bfs.py` (+4, avec garde
+> ✅ **R6 comblé en [§0.19.3](V11_agent_rework.md)** : `test_charge_oval_base_reverse_bfs.py` (+4, avec garde
 > d'atteinte) — les DEUX sites rougissent désormais sur mutation.
 >
 > ✅ **R4 comblé** : `test_programmatic_owner_predicate.py` (+22) verrouille le **prédicat** et
 > son refus du repli ; `test_r4_auto_decider_wiring.py` (+14) verrouille son **BRANCHEMENT** —
 > or c'était ça, la rupture R4. Les **6** exigences de §8.3 sont couvertes, chaque cas gym ayant
 > son jumeau PvP. 6 mutations au total, toutes rouges, dont une qui **rejoue la rupture R4
-> d'origine**. Détail en [§0.19.3](V11_agent_rework.md#s0.19.3). Le texte ci-dessous est celui de la session d'origine,
+> d'origine**. Détail en [§0.19.3](V11_agent_rework.md). Le texte ci-dessous est celui de la session d'origine,
 > **conservé tel quel**.
 
 Réalisé : R6 normalisé dans les 2 sites ; prédicat unique `is_programmatic_owner` /
@@ -594,8 +594,8 @@ rejouée verte, grep de contrôle passé, smoke pile complète rejoué), avec 3 
    INERTE (gardée par `hasattr(actual_env, 'controller')`, attribut absent du moteur squad)
    mais « aucun littéral dans multi_agent_trainer » est faux — à condamner/purger comme
    `game_replay_logger.log_action` (raccroché à T6 hygiène ou T5).~~
-   → ✅ **SOLDÉ, NE PLUS CITER (voir [§0.8](V11_agent_rework.md#s0.8)).** Le monkeypatch a été purgé au commit `6a7a9de1`,
-   le commentaire de purge qui l'a remplacé a disparu avec [§0.8](V11_agent_rework.md#s0.8), et `game_replay_logger` est
+   → ✅ **SOLDÉ, NE PLUS CITER (voir [§0.8](V11_agent_rework.md)).** Le monkeypatch a été purgé au commit `6a7a9de1`,
+   le commentaire de purge qui l'a remplacé a disparu avec [§0.8](V11_agent_rework.md), et `game_replay_logger` est
    supprimé. **`grep 'action % 8' ai/multi_agent_trainer.py` est vide.** Ce point a induit deux
    relecteurs en erreur *après* sa résolution, parce qu'ils l'ont cité depuis cette doc au lieu de
    grep le fichier — d'où le rappel : **une doc n'est pas une source, le code l'est.**
@@ -703,7 +703,7 @@ issues du terrain (voie moderne) ne peuplaient pas le pool de déploiement rando
 alignement 0/1 vs 1/2 traverse multi_agent_trainer = chantier séparé à valider).
 > ⚠️ **Périmé depuis le 2026-07-29** : « chemin dormant » était en fait du **code mort**, et
 > `ai/scenario_manager.py` a été **supprimé** — l'alignement 0/1 vs 1/2 n'a plus d'objet.
-> Cf. [§0.45](V11_agent_rework.md#s0.45).
+> Cf. [§0.45](V11_agent_rework.md).
 **Balayage** : `scripts/sweep_scenario_bank_v11.py` — 61/61 chargés + reset. Tests +83.
 > ⚠️ **Le script n'existe plus** (supprimé au commit `924c2b41`, constaté le 2026-08-02) : cette
 > ligne décrit ce qui a été fait à l'époque, pas un livrable disponible. **La capacité de
@@ -750,11 +750,11 @@ Plan d'origine (réalisé ci-dessus) :
      110, `objectives_ref` 118/246/254) → à migrer, pas seulement à vérifier ;
    - ~~`ai/scenario_manager.py` : utilise des `deployment_zones` avec clés joueur **0/1** alors
      que les terrains modernes utilisent **"1"/"2"** → incompatibilité à résoudre~~ **SANS OBJET
-     depuis le 2026-07-29 : le fichier a été supprimé** (code mort, [§0.45](V11_agent_rework.md#s0.45)) ;
+     depuis le 2026-07-29 : le fichier a été supprimé** (code mort, [§0.45](V11_agent_rework.md)) ;
    - `scripts/rebalance_holdout_hard_scenarios.py`, `scripts/build_dynamic_rosters.py` : aucune
      clé legacy détectée, re-vérifier après migration.
 
-### T5 — Boucle complète et fin d'épisode (R7) — ✅ FAIT (moteur nu, 2026-07-16) — verrou confirmé par mutation ([§0.19.1](V11_agent_rework.md#s0.19.1))
+### T5 — Boucle complète et fin d'épisode (R7) — ✅ FAIT (moteur nu, 2026-07-16) — verrou confirmé par mutation ([§0.19.1](V11_agent_rework.md))
 
 > ✅ **Confirmé le 2026-07-20** : le fix `_deployment_clearance_filter` est verrouillé —
 > neutralisé, `test_deployment_mask_mirrors_commit_overlap_predicate` rougit en 6,7 s avec le
@@ -773,7 +773,7 @@ garanties + Carnifex en phase charge ») :
   scénario fixe pré-engagé : zéro masque vide sans terminaison, zéro exception, toutes les
   parties se terminent (turn limit). Le fix conditionnel T5.2 sur `_fight_phase_complete`
   n'était donc PAS requis — non touché ; `_advance_to_next_player` (mort) laissé tel quel
-  **à l'époque, supprimé depuis le 2026-07-19 ([§0.4](V11_agent_rework.md#s0.4))**.
+  **à l'époque, supprimé depuis le 2026-07-19 ([§0.4](V11_agent_rework.md))**.
 - **Vraie rupture bloquante en moteur nu = déploiement `active`, PAS R7 (nouvelle, hors R1-R8)** :
   `ActionDecoder._get_valid_deployment_hexes` ([action_decoder.py](../../../engine/action_decoder.py)) testait le
   chevauchement inter-unités par CELLULES (`build_occupied_positions_set`), alors que le commit
@@ -808,7 +808,7 @@ Plan d'origine :
    tour, via le SEUL chemin vif : `_fight_phase_complete` (fight_handlers, def ~1867) doit
    aboutir à `terminated` sans exiger une action supplémentaire quand le pool est vide.
    `_advance_to_next_player` était mort en production (cf. R7) — **supprimée le 2026-07-19**
-   ([§0.4](V11_agent_rework.md#s0.4)), donc plus rien à statuer. Interdit de résoudre par injection d'action côté
+   ([§0.4](V11_agent_rework.md)), donc plus rien à statuer. Interdit de résoudre par injection d'action côté
    wrapper.
 3. Étendre le smoke test aux scénarios migrés (T4), sièges p1/p2/random, et à un scénario
    contenant Carnifex/Psychophage (validation R6).
@@ -1099,7 +1099,7 @@ de T4/de code latent) :
   légale, débordement de plateau, non-sur-filtrage, court-circuit mono-figurine) ; run x5_debug
   8 workers 10/10 épisodes et run mono-env x1_debug, **zéro** « incohérence masque/exécution ».
   ⚠️ **Ce « zéro » ne vaut que pour les 10 épisodes mesurés** : une AUTRE cause de la même
-  classe a tué un run de 250 épisodes le 2026-07-20 — cf. **[§0.11](V11_agent_rework.md#s0.11)** (collision intra-plan
+  classe a tué un run de 250 épisodes le 2026-07-20 — cf. **[§0.11](V11_agent_rework.md)** (collision intra-plan
   aveugle au niveau). L'érosion de T6-g reste correcte ; c'était le prédicat de collision
   qu'elle ne teste pas — à raison — qui était faux.
   Historique de la rupture ci-dessous.
@@ -1603,8 +1603,8 @@ Spec à figer à ce moment-là, principes déjà actés :
 | T3 | `train.py --step --training-config x1_debug` dépasse la résolution walls/objectives sans FileNotFoundError |
 | T4 | Les 61 scénarios se chargent (`W40KEngine(scenario_file=...)` + reset, script de balayage) ; zéro clé legacy ; sort de training_save/ statué |
 | T5 | 10 épisodes aléatoires masqués terminés sur ≥3 scénarios × sièges p1/p2 ; zéro masque vide |
-| T6 | ⚠️ *(périmée n°3 de [§0bis](V11_agent_rework.md#s0bis) : le blocage par `CC_DMG` est levé — [§0.3](V11_agent_rework.md#s0.3) porté, run 60/60 en [§0.7](V11_agent_rework.md#s0.7) — cellule conservée telle quelle, non corrigée)* Run `--new` court complet + analyzer + replay OK ; ~~win-rate vs RandomBot en progression~~ → **critère REMPLACÉ le 2026-07-19, voir [section 10.6](V11_eval_strategy.md#s10.6)** (win-rate PAR ROSTER contre un adversaire de holdout jamais vu à l'entraînement + absence de comportement absurde en partie humaine). L'ancien critère référençait un holdout de rosters qui n'existe plus. — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ✅ **Le run TOURNE de nouveau depuis le 2026-07-19** : T6-g et T6-h sont livrés (cf. [§0](V11_agent_rework.md#s0)), x5_debug 8 workers 10/10 ép. exit 0. ❌ **Le critère T6 reste NON évaluable**, mais pour une raison DIFFÉRENTE et désormais isolée : **[§10.4](V11_eval_strategy.md#s10.4)** — sur le chemin single-scenario, P2 joue ALÉATOIRE (`SelfPlayWrapper(frozen_model=None)`, `update_frozen_model` sans appelant). Tout win-rate mesuré aujourd'hui est du bruit. ~~C'est le prochain bloqueur.~~ **✅ [§10.4](V11_eval_strategy.md#s10.4) RÉSOLU le 2026-07-19** (adversaires câblés sur les 3 chemins) ; le critère T6 reste néanmoins NON évalué, désormais bloqué par `CC_DMG` ([§0.3](V11_agent_rework.md#s0.3)) qui plante des épisodes d'évaluation. Voir [§0.0](V11_agent_rework.md#s0.0) pour l'ordre des travaux. |
-| T6-i | ⚠️ *(périmée n°2 de [§0bis](V11_agent_rework.md#s0bis) : le test de non-régression existe : `test_end_of_turn_coherency_03_03.py` — cellule conservée telle quelle, non corrigée)* Une escouade rendue incohérente par des pertes est ramenée en coherency à la fin du tour (03.03), sur les **deux** chemins de fin de Fight, avant le test de limite de tour ; aucune destination du masque de move n'est rejetée pour cause de coherency — ⏳ **PARTIEL (2026-07-19 soir)** : ✅ fix livré et vérifié par run bout-en-bout (8 épisodes plantés → 2, erreur `incohérence masque/exécution` disparue, suite sans régression) ; ❌ **test de non-régression NON écrit** — §8 l'impose, c'est la tâche n°1 de [§0.0](V11_agent_rework.md#s0.0) |
+| T6 | ⚠️ *(périmée n°3 de [§0bis](V11_agent_rework.md#s0bis) : le blocage par `CC_DMG` est levé — [§0.3](V11_agent_rework.md) porté, run 60/60 en [§0.7](V11_agent_rework.md) — cellule conservée telle quelle, non corrigée)* Run `--new` court complet + analyzer + replay OK ; ~~win-rate vs RandomBot en progression~~ → **critère REMPLACÉ le 2026-07-19, voir [section 10.6](V11_eval_strategy.md#s10.6)** (win-rate PAR ROSTER contre un adversaire de holdout jamais vu à l'entraînement + absence de comportement absurde en partie humaine). L'ancien critère référençait un holdout de rosters qui n'existe plus. — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ✅ **Le run TOURNE de nouveau depuis le 2026-07-19** : T6-g et T6-h sont livrés (cf. [§0](V11_agent_rework.md#s0)), x5_debug 8 workers 10/10 ép. exit 0. ❌ **Le critère T6 reste NON évaluable**, mais pour une raison DIFFÉRENTE et désormais isolée : **[§10.4](V11_eval_strategy.md#s10.4)** — sur le chemin single-scenario, P2 joue ALÉATOIRE (`SelfPlayWrapper(frozen_model=None)`, `update_frozen_model` sans appelant). Tout win-rate mesuré aujourd'hui est du bruit. ~~C'est le prochain bloqueur.~~ **✅ [§10.4](V11_eval_strategy.md#s10.4) RÉSOLU le 2026-07-19** (adversaires câblés sur les 3 chemins) ; le critère T6 reste néanmoins NON évalué, désormais bloqué par `CC_DMG` ([§0.3](V11_agent_rework.md)) qui plante des épisodes d'évaluation. Voir [§0.0](V11_agent_rework.md) pour l'ordre des travaux. |
+| T6-i | ⚠️ *(périmée n°2 de [§0bis](V11_agent_rework.md#s0bis) : le test de non-régression existe : `test_end_of_turn_coherency_03_03.py` — cellule conservée telle quelle, non corrigée)* Une escouade rendue incohérente par des pertes est ramenée en coherency à la fin du tour (03.03), sur les **deux** chemins de fin de Fight, avant le test de limite de tour ; aucune destination du masque de move n'est rejetée pour cause de coherency — ⏳ **PARTIEL (2026-07-19 soir)** : ✅ fix livré et vérifié par run bout-en-bout (8 épisodes plantés → 2, erreur `incohérence masque/exécution` disparue, suite sans régression) ; ❌ **test de non-régression NON écrit** — §8 l'impose, c'est la tâche n°1 de [§0.0](V11_agent_rework.md) |
 | T6-f | Après le commit de déploiement, AUCUNE figurine vivante à `(-1,-1)` et ancre `units_cache` = figurine d'index minimal, sur les 3 chemins (gym, ancre imposée tutoriel, drag) — ✅ **FAIT (2026-07-19)** |
 | T6-g | Toute cellule offerte par le masque de move est exécutable : sur N épisodes aléatoires, zéro `ValueError` « incohérence masque/exécution » — et un test dédié où une escouade dont le BLOC déborde (mur / autre escouade) ne voit PAS la cellule dans son masque — ✅ **FAIT (2026-07-19)** : `test_move_pool_block_erosion.py` (+6, mur/escouade/ER sous une SŒUR, débordement plateau, non-sur-filtrage, mono-fig) ; runs x5_debug 8 workers (10/10 ép.) et mono-env x1_debug, zéro occurrence |
 | T6-h | La translation de bloc préserve les distances internes pour TOUTES les parités de `dx` (test paramétré `dx` pair ET impair) — rouge sur le code actuel — ✅ **FAIT (2026-07-19)** : `test_rigid_plan_translation.py` (+10), rouge avant le fix aux seules parités impaires ; fix étendu à `translate_squad_to_destination` (écrivain du commit) et `preview_hidden_models_after_move` |
@@ -1700,7 +1700,7 @@ Fichier proposé : `tests/unit/engine/test_agent_interface_contract.py`.
   actions du masque ; choix hors masque = erreur explicite (test `raises`) ; les dicts de
   poids déploiement pointent des actions de `DEPLOY_SLOTS`.
 - ~~`game_replay_logger` : décodage correct du layout 41 (un cas par famille d'action) — ou, si
-  condamné, erreur explicite testée.~~ → **sans objet : le module est supprimé ([§0.8](V11_agent_rework.md#s0.8)).** Ne pas
+  condamné, erreur explicite testée.~~ → **sans objet : le module est supprimé ([§0.8](V11_agent_rework.md)).** Ne pas
   réécrire de test pour lui.
 
 **T3** :

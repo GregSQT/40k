@@ -137,6 +137,7 @@ DEFAULT_DOCS = [
 #: recopiée rouille où qu'elle vive : `obs_size` y est resté à 16 659 face à une source à 16703.
 VALUE_ONLY_DOCS = [
     "Documentation/Reference/training/AI_TRAINING.md",
+    "Documentation/Reference/training/AI_OBSERVATION.md",
 ]
 
 @functools.lru_cache(maxsize=1)
@@ -156,9 +157,13 @@ def _git_raw_listing() -> str:
 #: Arbres du corpus chantiers soumis à la convention d'ancres (passe 4) : les chantiers vivants
 #: (`Chantiers/`) et l'archive des chantiers livrés (`Archives/chantiers/`) — exactement la
 #: population de l'ex-`Documentation/Implémentation/`, relocalisée par la refonte 2026-08-27.
-#: Étendre la passe à `Reference/` est le lot P2 de la refonte (doc.md#refonte) : les ex-docs
-#: racine (`AI_TRAINING.md`…) portent encore des dizaines d'ancres historiques à nettoyer d'abord.
-ANCHOR_TREES = ("Documentation/Chantiers/", "Documentation/Archives/chantiers/")
+#: `Reference/` est inclus depuis P2 (2026-08-27) après nettoyage des ancres historiques
+#: d'`AI_TRAINING.md` (renvois `fichier:ligne` supprimés).
+ANCHOR_TREES = (
+    "Documentation/Chantiers/",
+    "Documentation/Archives/chantiers/",
+    "Documentation/Reference/",
+)
 
 #: Documents tenus à la convention « le symbole, jamais la ligne » : les documents d'entrée
 #: (DEFAULT_DOCS) et tous les .md des arbres ANCHOR_TREES, par basename. Les documents
@@ -248,6 +253,9 @@ MD_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
 #: `{#id}` explicite — dans un titre ou seul dans la ligne.
 _EXPLICIT_ANCHOR = re.compile(r"\{#([^}]+)\}")
+
+#: Ancre HTML `<a id="...">` — employée par le corpus V11 en alternative à `{#id}` GFM.
+_HTML_ANCHOR = re.compile(r'<a\s+id="([^"]+)"')
 
 #: Ligne de titre ATX (# à ######), texte jusqu'en fin de ligne.
 _MD_HEADING = re.compile(r"^#{1,6} +(.+)$", re.MULTILINE)
@@ -778,6 +786,8 @@ def md_anchors(path: pathlib.Path) -> frozenset[str]:
             result.add(_heading_slug(heading))
     for m in _EXPLICIT_ANCHOR.finditer(text_no_inline):
         result.add(m.group(1))
+    for m in _HTML_ANCHOR.finditer(text_no_inline):
+        result.add(m.group(1))
     return frozenset(result)
 
 
@@ -1000,6 +1010,97 @@ def expected_from_table_key(claim: object) -> object:
     raise AssertionError("le tableau des profils se compare par clé, pas par valeur annoncée")
 
 
+@functools.lru_cache(maxsize=1)
+def obs_entities_module() -> Any:
+    """engine/observation_entities.py chargé UNE fois — source des dimensions d'entité.
+
+    Seuls `typing` et `__future__` sont importés par ce module : pas de manipulation de
+    sys.path nécessaire, contrairement à `macro_intents.py`.
+    """
+    path = ROOT / "engine" / "observation_entities.py"
+    spec = importlib.util.spec_from_file_location("obs_entities_for_docs", path)
+    if spec is None or spec.loader is None:
+        raise SourceUnavailable(f"{path} : module illisible")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+    except Exception as error:
+        raise SourceUnavailable(f"{path} ne se charge pas : {error}") from error
+    return module
+
+
+def claim_total_action_size(text: str) -> list[tuple[str, int]]:
+    """TOTAL_ACTION_SIZE annoncé sur la ligne « espace d'action » d'AI_TRAINING.md."""
+    return [
+        (m.group(0).strip(), integers_in(m.group(1))[0])
+        for m in re.finditer(rf"espace d'action[^\n]*\*\*{_BOLD_INTEGER}\*\*", text)
+        if integers_in(m.group(1))
+    ]
+
+
+def expected_total_action_size(_claim: object) -> object:
+    """TOTAL_ACTION_SIZE depuis engine/macro_intents.py, chargé avec ROOT dans sys.path.
+
+    `macro_intents.py` importe depuis `engine.observation_entities` et `shared.data_validation` —
+    ROOT doit être dans sys.path pour que ces imports aboutissent.
+    """
+    import sys as _sys
+
+    root_str = str(ROOT)
+    already = root_str in _sys.path
+    if not already:
+        _sys.path.insert(0, root_str)
+    try:
+        path = ROOT / "engine" / "macro_intents.py"
+        spec = importlib.util.spec_from_file_location("_macro_intents_for_docs", path)
+        if spec is None or spec.loader is None:
+            raise SourceUnavailable(f"{path} : module illisible")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        if not hasattr(module, "TOTAL_ACTION_SIZE"):
+            raise SourceUnavailable("TOTAL_ACTION_SIZE absent de engine/macro_intents.py")
+        return int(module.TOTAL_ACTION_SIZE)
+    except SourceUnavailable:
+        raise
+    except Exception as error:
+        raise SourceUnavailable(
+            f"engine/macro_intents.py ne se charge pas : {error}"
+        ) from error
+    finally:
+        if not already and root_str in _sys.path:
+            _sys.path.remove(root_str)
+
+
+def claim_allies_dims(text: str) -> list[tuple[str, tuple[int, int, int, int]]]:
+    r"""Dimensions (K_cont, W_cont, K_bin, W_bin) de la ligne allies_cont/allies_bin.
+
+    Extrait le tuple depuis le tableau d'introduction d'AI_OBSERVATION.md :
+    `| \`allies_cont\` / \`allies_bin\` | (K, W_cont) / (K, W_bin) | ... |`
+    """
+    m = re.search(
+        r"`allies_cont`[^|]*\|\s*\((\d+),\s*(\d+)\)\s*/\s*\((\d+),\s*(\d+)\)\s*\|",
+        text,
+    )
+    if m is None:
+        return []
+    return [
+        (
+            m.group(0).strip(),
+            (int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))),
+        )
+    ]
+
+
+def expected_allies_dims(_claim: object) -> object:
+    """Dimensions attendues depuis engine/observation_entities.py."""
+    module = obs_entities_module()
+    for attr in ("K_ALLY_SLOTS", "UNIT_CONT_SIZE", "UNIT_BIN_SIZE"):
+        if not hasattr(module, attr):
+            raise SourceUnavailable(f"{attr} absent de observation_entities.py")
+    k = module.K_ALLY_SLOTS
+    return (k, module.UNIT_CONT_SIZE, k, module.UNIT_BIN_SIZE)
+
+
 #: label -> (extracteur des valeurs ANNONCÉES par le document, valeur ATTENDUE de la source).
 #: L'extracteur qui ne trouve rien fait ÉCHOUER le contrôle : voir la docstring du module.
 #: La valeur ANNONCÉE change de nature d'un contrôle à l'autre (un entier ici, un couple
@@ -1031,6 +1132,10 @@ VALUE_CHECKS: dict[str, dict[str, ValueCheck[Any]]] = {
     },
     "AI_TRAINING.md": {
         "obs_size": (claim_obs_size, lambda _claim: expected_obs_size()),
+        "TOTAL_ACTION_SIZE": (claim_total_action_size, expected_total_action_size),
+    },
+    "AI_OBSERVATION.md": {
+        "dimensions allies_cont/allies_bin": (claim_allies_dims, expected_allies_dims),
     },
 }
 
@@ -1532,6 +1637,84 @@ def report_impl_anchors() -> tuple[bool, list[str]]:
     return bool(all_broken), lines
 
 
+#: Arbres et fichiers individuels du corpus VIVANT pour la passe LIENS (P2, 2026-08-27).
+#: Roadmap/archives/ exclu : les archives ne sont pas maintenues, les liens qu'elles portaient
+#: ont pu mourir sans que personne ait à les corriger.
+_CORPUS_LINK_TREES = (
+    "Documentation/Reference/",
+    "Documentation/Chantiers/",
+    "Documentation/Roadmap/",
+)
+_CORPUS_LINK_EXCLUDE = ("Documentation/Roadmap/archives/",)
+
+
+def _corpus_link_paths() -> list[pathlib.Path]:
+    """Chemins .md du corpus vivant : Reference + Chantiers + Roadmap hors archives + README."""
+    paths: list[pathlib.Path] = []
+    readme = ROOT / "README.md"
+    if readme.exists():
+        paths.append(readme)
+    for item in _git_raw_listing().split("\0"):
+        if not item or not item.endswith(".md"):
+            continue
+        if any(item.startswith(ex) for ex in _CORPUS_LINK_EXCLUDE):
+            continue
+        if any(item.startswith(tree) for tree in _CORPUS_LINK_TREES):
+            paths.append(ROOT / item)
+    return sorted(set(paths))
+
+
+def report_corpus_links() -> tuple[bool, list[str]]:
+    """Passe LIENS sur tout le corpus vivant — cibles markdown ET fragments.
+
+    Extension de la passe 2 hors des seuls DEFAULT_DOCS : le corpus Reference/Chantiers/Roadmap
+    portait ~85 liens morts au 2026-08-27, invisibles parce que la passe ne regardait que 12 docs.
+    """
+    all_broken: list[str] = []
+    checked = skipped = fragments = 0
+    paths = _corpus_link_paths()
+    for path in paths:
+        c, s, f, broken = check_links(path)
+        checked += c
+        skipped += s
+        fragments += f
+        all_broken.extend(broken)
+    lines = [
+        f"{'❌' if all_broken else '✅'} LIENS corpus vivant — {len(paths)} fichier(s), "
+        f"{checked} lien(s) vérifiés, {skipped} écartés, {fragments} fragments confrontés, "
+        f"{len(all_broken)} mort(s)",
+    ]
+    lines += [f"   {entry}" for entry in all_broken]
+    return bool(all_broken), lines
+
+
+#: Au-delà de ce seuil, ROADMAP_INDEX.md accumule des ✅ qui auraient dû descendre en archives.
+MAX_ROADMAP_CHECKMARKS = 20
+
+
+def check_accumulation_roadmap() -> tuple[int, int]:
+    """Compte les lignes portant ✅ dans ROADMAP_INDEX.md."""
+    text = ROADMAP_INDEX.read_text(encoding="utf-8")
+    count = sum(1 for line in text.splitlines() if "✅" in line)
+    return count, MAX_ROADMAP_CHECKMARKS
+
+
+def report_accumulation() -> tuple[bool, list[str]]:
+    """Passe accumulation : ROADMAP_INDEX.md ne dépasse pas MAX_ROADMAP_CHECKMARKS lignes ✅."""
+    count, threshold = check_accumulation_roadmap()
+    broken = count > threshold
+    lines = [
+        f"{'❌' if broken else '✅'} accumulation ROADMAP_INDEX.md — "
+        f"{count} ligne(s) ✅ (seuil : {threshold})",
+    ]
+    if broken:
+        lines.append(
+            f"   {count} lignes ✅ dans ROADMAP_INDEX.md — archiver les chantiers clos "
+            f"dans Documentation/Roadmap/archives/<sujet>.md"
+        )
+    return broken, lines
+
+
 def main(argv: list[str]) -> int:
     docs: Iterable[str] = argv[1:] or [*DEFAULT_DOCS, *VALUE_ONLY_DOCS]
     failed = False
@@ -1584,6 +1767,22 @@ def main(argv: list[str]) -> int:
         else:
             print("\n".join(lines))
             failed = failed or has_impl_broken
+        try:
+            has_corpus_broken, lines = report_corpus_links()
+        except (SourceUnavailable, OSError) as error:
+            print(f"❌ LIENS corpus vivant\n   CONTRÔLE IMPOSSIBLE — {type(error).__name__} : {error}")
+            failed = True
+        else:
+            print("\n".join(lines))
+            failed = failed or has_corpus_broken
+        try:
+            has_accum, lines = report_accumulation()
+        except (SourceUnavailable, OSError) as error:
+            print(f"❌ accumulation ROADMAP_INDEX.md\n   CONTRÔLE IMPOSSIBLE — {type(error).__name__} : {error}")
+            failed = True
+        else:
+            print("\n".join(lines))
+            failed = failed or has_accum
     print(
         "\nNON VÉRIFIABLE, et assumé : le nombre de « contrôles analyzer vivants ». Le code n'en "
         "porte aucune énumération ; le compter depuis un tableau de document mesurerait autre "

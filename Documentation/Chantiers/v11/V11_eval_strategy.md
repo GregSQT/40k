@@ -77,7 +77,7 @@ holdout que sur `TacticalBot`.
 ⚠️ **Les points des unités Orks sont factices** : `VALUE = 70` pour TOUTES (Boyz, Gretchin,
 Warboss, WarTrakk, BigMek…). Le total « 3290 pts » du roster Orks n'a aucun sens, et le moteur
 ne valide PAS les points (`scale` n'est qu'un nom de dossier). ~~Déséquilibre réel à surveiller :
-**47 figurines côté Orks contre 23 côté SM**.~~ → chiffre périmé : **37 contre 23** depuis [§0.9](V11_agent_rework.md#s0.9)
+**47 figurines côté Orks contre 23 côté SM**.~~ → chiffre périmé : **37 contre 23** depuis [§0.9](V11_agent_rework.md)
 (10 Gretchin et non 20), et ce n'est pas un déséquilibre mais une identité de faction à 680 vs 680.
 
 **Bug corrigé au passage (registry d'unités)** : `LandSpeederOnslaughtGatlingCannon.ts` et
@@ -180,8 +180,8 @@ dans `make_training_env`, qui accepte DÉJÀ ces paramètres : seul l'appel de
 
 > **Statut 2026-07-19 : ✅ CÂBLÉ** — `TacticalBot` est le holdout, à poids nul et exclu de tout
 > signal de sélection ; le défaut silencieux de `randomness` est supprimé. Détail en [§0](V11_agent_rework.md#s0).
-> ⚠️ **Affirmation périmée n°4 — voir la table de [§0bis](V11_agent_rework.md#s0bis)** (levée par [§0.7](V11_agent_rework.md#s0.7) : `TacticalBot` a joué 10/10 épisodes). Conservée telle quelle.
-> ⚠️ **Non validé runtime** — cf. [§0.3](V11_agent_rework.md#s0.3) (`CC_DMG`). L'archivage des scénarios holdout était à
+> ⚠️ **Affirmation périmée n°4 — voir la table de [§0bis](V11_agent_rework.md#s0bis)** (levée par [§0.7](V11_agent_rework.md) : `TacticalBot` a joué 10/10 épisodes). Conservée telle quelle.
+> ⚠️ **Non validé runtime** — cf. [§0.3](V11_agent_rework.md) (`CC_DMG`). L'archivage des scénarios holdout était à
 > faire (voir plus bas). Le constat ci-dessous décrit l'état d'AVANT.
 
 **Constat (historique)** : les bots d'évaluation viennent de `callback_params.bot_eval_weights`
