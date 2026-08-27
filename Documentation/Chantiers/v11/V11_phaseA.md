@@ -47,7 +47,7 @@ absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis
 > ([shared_utils.py](../../../engine/phase_handlers/shared_utils.py), [:8667](../../../engine/phase_handlers/shared_utils.py))
 > et par le chemin de mêlée vif ([fight_handlers.py](../../../engine/phase_handlers/fight_handlers.py)).
 > ~~**Ce qui reste de P1** = la SUPPRESSION du code mort `_attack_sequence_rng`~~ → **FAITE le
-> 2026-07-28**, cf. **[§0hist.38](V11_agent_rework.md#s0.38)**. **P1 est intégralement soldé.** Les verdicts **P2, P3, P4, P5 du tableau restent exacts**, re-vérifiés le 2026-07-28
+> 2026-07-28**, cf. **[§0hist.38](V11_agent_rework.md)**. **P1 est intégralement soldé.** Les verdicts **P2, P3, P4, P5 du tableau restent exacts**, re-vérifiés le 2026-07-28
 > (grep `pending_agent_decision`/`CHOICE_[0-9]` = 0 ; `TOTAL_ACTION_SIZE` = 1062 ;
 > `raw_action_int % len(options)` toujours vif). Le titre « 0/5 » devient donc **0/4**.
 >
@@ -56,7 +56,7 @@ absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis
 > la branche `v11-p3-2-charge-target`, cf. §9.4bis**) et **P3 point 1 (cible
 > de mêlée) est LIVRÉ** — non par le `CHOICE_k` de [§9.3](#s9.3), mais par une dimension d'action par slot
 > ennemi + tête pointeur, la spec P2 ayant été jugée périmée par T-E/T-G. Détail, preuves et
-> décision d'architecture → **[§0.41](V11_agent_rework.md#s0.41)**. Le grep `pending_agent_decision`/`CHOICE_[0-9]` rend
+> décision d'architecture → **[§0.41](V11_agent_rework.md)**. Le grep `pending_agent_decision`/`CHOICE_[0-9]` rend
 > toujours 0, et c'est **voulu** : le mécanisme générique n'est plus la réponse pour les décisions
 > dont les candidats sont des entités. P3 est donc **1/9**, pas 0/9.
 
@@ -74,13 +74,13 @@ absente (stratagèmes, CP, FNP, transports, etc. restent hors scope). Prérequis
 > P3-1 (dimension d'action par slot ennemi + tête pointeur), avec son P4 (`charge_reachable_max_roll`).
 > P3 passe donc à **3/9**. `TOTAL_ACTION_SIZE` vaut **1107** et `obs_size` **20768** — les chiffres
 > ci-dessus sont périmés d'autant. Détail, preuves et mesure de coût → **§9.4bis** et
-> **[§0.43](V11_agent_rework.md#s0.43)**. ⚠️ Livré sur la branche `v11-p3-2-charge-target`,
+> **[§0.43](V11_agent_rework.md)**. ⚠️ Livré sur la branche `v11-p3-2-charge-target`,
 > **PAS mergé sur `main`** : le merge est une décision utilisateur, à ne pas prendre pendant un run.
 > 🔴 Et la bascule de branche elle-même ne l'est pas non plus : c'est elle qui a tué le 2ᵉ run
 > [§0.14](V11_agent_rework.md#s0.14) du 2026-07-28. Ce que les workers `spawn` relisent est le **working tree**, pas `main` —
 > cf. la leçon durcie en [§0bis](V11_agent_rework.md#s0bis).
 
-Revérification ligne à ligne contre le code (la première ; [§0.19](V11_agent_rework.md#s0.19) ne l'avait jamais menée, cf. sa
+Revérification ligne à ligne contre le code (la première ; [§0.19](V11_agent_rework.md) ne l'avait jamais menée, cf. sa
 correction). **Aucune des cinq sous-parties n'est réellement en place**, malgré les marqueurs
 ✅ FAIT antérieurs. Chiffres et sites relevés par grep/lecture le 2026-07-24, pas de mémoire.
 
@@ -98,7 +98,7 @@ correction). **Aucune des cinq sous-parties n'est réellement en place**, malgr�
 **dans le code mort** au lieu du chemin vif, et une batterie de tests (`test_unit_rules_shoot.py`,
 `test_shoot_attack_sequence.py`, `test_special_rules_e2e.py`, `test_fight_special_rules.py`,
 `test_phase_transitions.py`) le **monkeypatche** et passe au vert. C'est exactement le double motif
-que [§0.19](V11_agent_rework.md#s0.19) existe pour interdire : **code testé mais jamais appelé** (T6-i) + **test qui passe pour
+que [§0.19](V11_agent_rework.md) existe pour interdire : **code testé mais jamais appelé** (T6-i) + **test qui passe pour
 la mauvaise raison**. En jeu réel, ces règles ne s'exécutent nulle part.
 
 **Conséquence de planning.** La Phase A' est **à faire intégralement**, dans l'ordre du plan
@@ -224,7 +224,7 @@ une règle implémentée (le couvert). Pour les autres : soit les implémenter (
 périmètre à valider), soit retirer leurs canaux d'observation (bruit pur pour PPO), jamais
 le statu quo silencieux.
 
-~~Suppression du code mort (fin de P1)~~ : **FAITE** — cf. **[§0hist.38](V11_agent_rework.md#s0.38)**
+~~Suppression du code mort (fin de P1)~~ : **FAITE** — cf. **[§0hist.38](V11_agent_rework.md)**
 pour le détail, les deux écarts de conformité trouvés en migrant les tests, les 13 mutations de
 contre-épreuve, et la réparation de la chaîne d'affichage le 2026-07-29 (3 règles, 7 mutations
 supplémentaires). **Les deux critères de §9.2 sont atteints** : `grep _attack_sequence_rng` est
@@ -242,7 +242,7 @@ implémenter** (tranches ultérieures).
 
 | Règle | Statut | Où (vif) | Test |
 |---|---|---|---|
-| **IGNORES_COVER (24.18)** | ✅ **FAIT dans le vif** (2026-07-24) | Helper `weapon_has_rule` ([weapon_helpers.py](../../../engine/utils/weapon_helpers.py)) + court-circuit `(bs, False)` en tête de `_cover_worsened_bs` ([shared_utils.py](../../../engine/phase_handlers/shared_utils.py)), avant tout calcul de LoS. PDF 24.18 + 13.08 relus. | `tests/unit/engine/test_ignores_cover.py` (**6**) : 4 unitaires directs + **2 bout-en-bout via `_manual_roll_intent`** (verrouillent le CÂBLAGE appelant→fonction, pas la fonction seule — cf. [§0.19.3](V11_agent_rework.md#s0.19.3)). Deux contre-épreuves faites : (a) court-circuit neutralisé → 2 rouges ; (b) mauvais `weapon` passé à l'appel → l'e2e rougit. Restauré → 6 verts. |
+| **IGNORES_COVER (24.18)** | ✅ **FAIT dans le vif** (2026-07-24) | Helper `weapon_has_rule` ([weapon_helpers.py](../../../engine/utils/weapon_helpers.py)) + court-circuit `(bs, False)` en tête de `_cover_worsened_bs` ([shared_utils.py](../../../engine/phase_handlers/shared_utils.py)), avant tout calcul de LoS. PDF 24.18 + 13.08 relus. | `tests/unit/engine/test_ignores_cover.py` (**6**) : 4 unitaires directs + **2 bout-en-bout via `_manual_roll_intent`** (verrouillent le CÂBLAGE appelant→fonction, pas la fonction seule — cf. [§0.19.3](V11_agent_rework.md)). Deux contre-épreuves faites : (a) court-circuit neutralisé → 2 rouges ; (b) mauvais `weapon` passé à l'appel → l'e2e rougit. Restauré → 6 verts. |
 | **reroll_1_towound (tir) + reroll_towound_target_on_objective (tir)** | ✅ **FAIT dans le vif** (2026-07-25) | Ajoutés dans `_manual_roll_intent` (tir) en **miroir exact** de `_manual_roll_fight_intent` ([fight_handlers.py](../../../engine/phase_handlers/fight_handlers.py)) : conditions via `_unit_has_rule_effect` + `is_unit_on_objective`. Helper `_is_unit_on_objective` **déplacé** de fight_handlers vers shared_utils (`is_unit_on_objective`, générique tir/fight), fight délègue. PDF 01 Core « Re-rolls » (un dé re-roll une fois). | `tests/unit/engine/test_reroll_towound_shoot.py` (**5**, bout-en-bout via `_manual_roll_intent`, RNG déterministe) : reroll d'un 1 / reroll tout échec sur objectif / discrimination non-1 et off-objectif / sans règle. Contre-épreuve : bloc reroll neutralisé → 2 rouges. |
 | **closest_target_penetration** | ✅ **FAIT dans le vif** (2026-07-25) | Bloc dans `_manual_roll_intent` ([shared_utils.py](../../../engine/phase_handlers/shared_utils.py)), au calcul de l'AP effectif AVANT `save_threshold`/`display_save_th`. Garde `_unit_has_rule_effect(attacker_unit, "closest_target_penetration")` ; « cible la plus proche » = `min()` sur `shooting_build_valid_target_pool` (éligibles) via `ranged_edge_distance` bord-à-bord (sélecteur `ranged`), mesurée au niveau **ESCOUADE** (`attacker["squad_id"]` — dans le vif `attacker` est une FIGURINE, écart corrigé vs le mort qui utilisait `attacker["id"]`). AP+1 = `ap -= 1` (convention AP négatif, cf. `save_threshold`). Spec = `config/unit_rules.json` (aucun PDF ; le PDF 22 ne contient QUE Aura/Faction/Psychic/Wargear + Plunging Fire). Se propage au groupe d'arme (`gkey`), à l'allocation (`g["ap"]`) et au `display_save_th`. | `tests/unit/engine/test_closest_target_penetration_shoot.py` (**3**, bout-en-bout via `_manual_roll_intent`, distance mesurée pour de vrai sur `units_cache` positionnés, pool éligibles monkeypatché) : (a) cible la plus proche + règle → AP-1 + save_th dégradé ; (b) cible plus lointaine + règle → inchangé (discrimination « closest ») ; (c) plus proche sans règle → inchangé. Contre-épreuve mutation : `ap -= 1` neutralisé → (a) rouge. Suite `tests/unit/` verte. **Impact PvP** : chemin partagé → l'équilibre PvP change aussi. |
 | **HEAVY** | ✅ **FAIT dans le vif** (2026-07-25) | Bloc dans `_manual_roll_intent` après `_cover_worsened_bs` ([shared_utils.py](../../../engine/phase_handlers/shared_utils.py)) : si `weapon_has_rule(weapon, "HEAVY")` ET l'escouade est absente de `units_moved` ET `units_advanced` (« Remained Stationary »), alors `bs = max(2, bs-1)` (+1 au jet de touche, plancher 2 car un 1 naturel rate toujours, 05.01). ⚠️ ~~**Écart PDF assumé**~~ — **PÉRIMÉ, corrigé le 2026-07-26 puis re-vérifié dans le code le 2026-07-28 (§0hist.38)** : les **trois** clauses du PDF 24.16 sont désormais CÂBLÉES — *unengaged* (`_heavy_unit_is_engaged`, même prédicat que le gate 10.06), *pas posé ce tour* (`_unit_was_set_up_this_turn` sur `deployed_on_turn`) et *aucune figurine >3"* (`moved_distance_by_model`, distance de chemin géodésique accumulée par `commit_move` — la donnée qui manquait existe). Le seuil est comparé strictement (« MORE than 3\" » : 3" pile conserve le bonus). Le code mort, lui, ne testait que « absente de `units_moved`/`units_advanced` » : c'est **lui** qui s'écartait du PDF. | `tests/unit/engine/test_heavy_shoot.py` (**13** au 2026-07-28, e2e via `_manual_roll_intent`) : les 3 clauses, la borne 3" stricte (0/2/3 → bonus ; 3.5/4/12 → pas de bonus), la clause « no MODEL » sur la figurine la plus mobile de l'escouade, le plancher 2 (BS2+ ne descend pas à 1+), `bs_base` préservé, et le token `[HEAVY]` du combat log. Contre-épreuve mutation : `bs=max(2,bs-1)` neutralisé→rouge. |
@@ -385,7 +385,7 @@ comme non normatif.
 > (déjà acté ; les `.zip` existants sont incompatibles, par construction).
 >
 > ⚠️ **MAJ 2026-07-26** : le contrat décrit ici (vecteur PLAT `vec_cont`/`vec_bin`) a été
-> REMPLACÉ par les **tenseurs d'entités** de [§0.30](V11_agent_rework.md#s0.30) T-D (`obs_size` **20626** depuis [§0.32](V11_agent_rework.md#s0.32)). Ce qui suit reste
+> REMPLACÉ par les **tenseurs d'entités** de [§0.30](V11_agent_rework.md) T-D (`obs_size` **20626** depuis [§0.32](V11_agent_rework.md)). Ce qui suit reste
 > la spécification de CE QUI est observé (profils d'armes, règles, mise en place, distance
 > parcourue) ; la FORME, elle, se lit dans `V11_entity_encoder_pointer.md` §6 et dans l'en-tête
 > de `build_squad_observation`.
@@ -438,7 +438,7 @@ accesseurs de layout, pas par des index recopiés).
   K slots fixes exigerait d'inventer un ordre qu'aucune action ne consomme — cf.
   `V11_audit_observation.md` §11).
 - **Listes de longueur variable** (fin des plafonds K) : idem, c'est l'étape architecture.
-- ✅ **Les règles d'UNITÉ sont observées depuis le 2026-07-27** ([§0.31](V11_agent_rework.md#s0.31), commit `0fb94a01`) —
+- ✅ **Les règles d'UNITÉ sont observées depuis le 2026-07-27** ([§0.31](V11_agent_rework.md), commit `0fb94a01`) —
   13 bits d'EFFET par entité, amies ET ennemies, dans `UNIT_BIN_FIELDS`. Le constat qui suit
   décrit l'état AVANT ce correctif ; il est conservé parce qu'il documente le motif de trou.
 - 🔴 ~~**Les règles d'UNITÉ (`config/unit_rules.json`) ne sont PAS observées**~~ — constat vérifié le
@@ -459,7 +459,7 @@ accesseurs de layout, pas par des index recopiés).
   l'agent les subit sans les percevoir, exactement le constat qui avait motivé cette section
   pour les règles d'armes. **Enjeu accru depuis 19.04** (§9.2.8) : une escouade menée par un
   character porte désormais les règles de son leader, et cette information reste invisible.
-  ~~**Ouvert — arbitrage de périmètre à faire**~~ → **TRAITÉ le 2026-07-27, cf. [§0.31](V11_agent_rework.md#s0.31).**
+  ~~**Ouvert — arbitrage de périmètre à faire**~~ → **TRAITÉ le 2026-07-27, cf. [§0.31](V11_agent_rework.md).**
 
 <a id="s9.2.7"></a>
 ### 9.2.7 ✅ CORRIGÉ le 2026-07-26 (tranche T-B) — les types de tir 10.05 / 10.06 existent enfin pour l'agent
@@ -630,17 +630,17 @@ sont strippés à la remontée, et la résolution est dynamique (pas d'union sta
 <a id="s9.3"></a>
 ### 9.3 P2 — Mécanisme générique « décision agent » — ✅ LIVRÉ (2026-07-28, cf. §9.3bis)
 
-> 🔴 **PORTÉE RÉDUITE le 2026-07-28 ([§0.41](V11_agent_rework.md#s0.41)) — lire ceci avant d'appliquer cette section.**
+> 🔴 **PORTÉE RÉDUITE le 2026-07-28 ([§0.41](V11_agent_rework.md)) — lire ceci avant d'appliquer cette section.**
 > Le `CHOICE_0..K-1` décrit ci-dessous suppose des logits produits par des **colonnes denses de
-> `action_net`**. Cette section date du 2026-07-14, donc d'**avant** [§0.30](V11_agent_rework.md#s0.30) T-E (tête pointeur) et
-> [§0.32](V11_agent_rework.md#s0.32) T-G (tête 1x1) — qui ont supprimé ce motif : une colonne dense par rang de candidat
+> `action_net`**. Cette section date du 2026-07-14, donc d'**avant** [§0.30](V11_agent_rework.md) T-E (tête pointeur) et
+> [§0.32](V11_agent_rework.md) T-G (tête 1x1) — qui ont supprimé ce motif : une colonne dense par rang de candidat
 > n'apprend rien des autres et ignore *ce qu'est* le candidat qu'elle score.
 > - **Candidats = entités déjà observées** (cible de mêlée, de charge, de tir, unité à activer) :
 >   ➜ **une dimension d'action par slot + tête pointeur**, PAS `CHOICE_k`. Livré et verrouillé pour
->   la cible de mêlée (P3-1) → **[§0.41](V11_agent_rework.md#s0.41)**. C'est le patron à suivre.
+>   la cible de mêlée (P3-1) → **[§0.41](V11_agent_rework.md)**. C'est le patron à suivre.
 > - **Candidats non-entité** (rule-choice, FLY oui/non, pile-in oui/non) : le mécanisme générique
 >   ci-dessous reste pertinent — à ouvrir quand une telle décision est **réellement exercée par les
->   rosters du training** (ce n'est pas le cas du rule-choice, cf. [§0.41](V11_agent_rework.md#s0.41)).
+>   rosters du training** (ce n'est pas le cas du rule-choice, cf. [§0.41](V11_agent_rework.md)).
 > Le paragraphe `action_net → Linear(320, 18)` ci-dessous reste valide dans son principe (les
 > colonnes de move/tir/combat sont inertes) ; le compte « 18 » est périmé.
 
@@ -799,18 +799,18 @@ heuristiques `_ai_select_*` qui ne sont que des fallbacks/chemins legacy.
 
 Ordre par valeur tactique :
 0. **Prompts rule-choice** — ✅ **LIVRÉ le 2026-07-28** (pilote du mécanisme P2 générique, cf.
-   [§9.3bis](#s9.3bis) et [§0.42](V11_agent_rework.md#s0.42)). `raw_action_int % len(options)`
+   [§9.3bis](#s9.3bis) et [§0.42](V11_agent_rework.md)). `raw_action_int % len(options)`
    n'existe plus, ni la clé `_last_raw_action_int` qui l'alimentait : le prompt est poussé comme
    `pending_agent_decision`, l'agent le voit dans son observation et le joue par `CHOICE_i` ; le
    choix du camp bot est joué par le bot.
-   🔴 **Son étiquette « le plus urgent » était PÉRIMÉE ([§0.41](V11_agent_rework.md#s0.41)) et le reste : ce point est INERTE
+   🔴 **Son étiquette « le plus urgent » était PÉRIMÉE ([§0.41](V11_agent_rework.md)) et le reste : ce point est INERTE
    dans le training.** Une seule unité du projet porte un rule-choice (`TyranidWarriorMelee`,
    déclaré dans les rosters **TS**, pas dans `config/unit_rules.json`), et aucun roster
    d'entraînement ArmageddonAgent n'est tyranide. La correction est **structurelle** (le PvE, le
    `rule_checker` et tout futur roster tyranide en bénéficient) ; son effet sur le win-rate est
    **nul par construction**. Ce que P2 apporte vraiment est le mécanisme réutilisable par les
    décisions **non-entité** des tranches suivantes.
-1. ✅ **LIVRÉ le 2026-07-28 (mergé sur `main` le soir même) — détail → [§0.41](V11_agent_rework.md#s0.41).** La cible de
+1. ✅ **LIVRÉ le 2026-07-28 (mergé sur `main` le soir même) — détail → [§0.41](V11_agent_rework.md).** La cible de
    mêlée est désormais une **dimension d'action** (`FIGHT_SLOT` 1046-1065, un par slot ennemi,
    + `ACTION_FIGHT_NO_TARGET` 1066 pour le combat à vide 12.04/12.06), scorée par une **tête
    pointeur** sur les embeddings d'ennemis — pas par des `CHOICE_k` denses. Le masque n'ouvre un
@@ -834,8 +834,8 @@ Ordre par valeur tactique :
    production et a été **supprimée** de `engine/macro_intents.py`, avec
    `get_best_enemy_global` / `get_best_enemy_score` qui étaient ses seuls appelants restants.
    ~~Pilote du mécanisme P2.~~ → il a été le pilote, et il a **tranché la méthode** : slots +
-   pointeur, pas `CHOICE_k` ([§0.41](V11_agent_rework.md#s0.41)). Le point 2 (cible de charge) suit le même patron.
-2. ✅ **LIVRÉ le 2026-07-28 (nuit) — détail → [§9.4bis](#s9.4bis) et [§0.43](V11_agent_rework.md#s0.43).**
+   pointeur, pas `CHOICE_k` ([§0.41](V11_agent_rework.md)). Le point 2 (cible de charge) suit le même patron.
+2. ✅ **LIVRÉ le 2026-07-28 (nuit) — détail → [§9.4bis](#s9.4bis) et [§0.43](V11_agent_rework.md).**
    La cible de charge est désormais une **dimension d'action** (`CHARGE_SLOT` 1045-1064, un par
    slot ennemi), scorée par une **tête pointeur** sur les embeddings d'ennemis — même patron que
    P3-1, pas des `CHOICE_k`. Le masque n'ouvre un slot que si sa cible est déclarable (11.02) et
@@ -1020,7 +1020,7 @@ Ordre par valeur tactique :
    (`movement_handlers`, appelé depuis `action_decoder`) **avant la construction du pool** — le
    moment exact où le moteur tranchait. Un seul site couvre les DEUX mouvements que 21.03 énumère
    (move et charge, via `_TAKE_TO_THE_SKIES_BY_PHASE`) ; la constante « déclare toujours » de
-   [§0.49](V11_agent_rework.md#s0.49) point 5 est supprimée. Le type consommant une réserve
+   [§0.49](V11_agent_rework.md) point 5 est supprimée. Le type consommant une réserve
    d'`AGENT_DECISION_TYPE_SLOTS`, **`obs_size` et `TOTAL_ACTION_SIZE` sont inchangés par `L6`**.
    ⚠️ **NON MESURÉ**. *(Cette ligne décrivait encore « aujourd'hui auto pour l'IA,
    movement_handlers ~261/271 » — périmé, corrigé le 2026-08-10.)*
@@ -1128,7 +1128,7 @@ MOVING), et la pénalité de descente 13.06, retranchée du jet et exposée null
   **inchangée aux 5 autres phases**. C'est le poste le plus cher de l'observation quand il
   s'exécute ; il n'a pas été mémoïsé faute de gain démontrable (une escouade ne construit son
   observation qu'une fois par step) et parce qu'un cache d'invalidation est précisément le motif
-  qui a produit [§0.26](V11_agent_rework.md#s0.26).
+  qui a produit [§0.26](V11_agent_rework.md).
 - La parité obs↔masque est une **implication**, pas une équivalence, et c'est voulu : le masque
   suit 11.02 (déclaration possible), le bit suit 11.04 (la charge peut aboutir). Une cible
   déclarable mais inatteignable garde son slot ouvert — l'agent a le droit de tenter, il sait
@@ -1188,7 +1188,7 @@ masque sans filtre d'éligibilité → 3 tests rouges ; commit sans garde d'éli
 décodeur décalé d'un slot → 3 rouges.
 
 **Mesure in-engine** (le seul verdict qui compte, [§0bis](V11_agent_rework.md#s0bis)) : **3 épisodes
-ENCHAÎNÉS dans le MÊME moteur** (leçon [§0.42](V11_agent_rework.md#s0.42) — un smoke à un épisode ne voit pas une fuite
+ENCHAÎNÉS dans le MÊME moteur** (leçon [§0.42](V11_agent_rework.md) — un smoke à un épisode ne voit pas une fuite
 d'état), sur le scénario mêlée et sur le scénario d'entraînement réel. Slots de charge exposés et
 joués, **plusieurs slots distincts** exercés, tous les épisodes terminés, **aucun masque vide**.
 Contre-épreuve explicite de fuite d'état : comptage identique en moteur **neuf** et en moteur
@@ -1227,7 +1227,7 @@ dépend** ; ce §9.5 ne garde que le reliquat non rattachable. C'est aussi ce qu
 > 1. **La taille du buffer ne dépend plus de `n_envs`.** `apply_rollout_n_steps` (`ai/train.py`,
 >    point de passage unique) divise `n_steps` — un TOTAL par update — par `n_envs` ; le buffer
 >    vaut donc `n_steps × floats_par_obs × 4` quel que soit le nombre d'envs, soit **≈ 1 Go**
->    ([§0.33](V11_agent_rework.md#s0.33), ✅ résolu le 2026-08-01). Un garde-fou lève une erreur
+>    ([§0.33](V11_agent_rework.md), ✅ résolu le 2026-08-01). Un garde-fou lève une erreur
 >    explicite au-delà de 0,5 × la mémoire disponible : le risque est visible, pas silencieux.
 > 2. **`x5_debug` n'a plus 8 envs.** Les **7** profils de `ArmageddonAgent_training_config.json`
 >    portent `n_envs: 48` (vérifié config, 2026-08-10). Le « 8 envs » datait de CoreAgent.

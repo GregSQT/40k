@@ -1567,3 +1567,101 @@ def test_the_real_corpus_has_no_orphan() -> None:
     (ouvert le 2026-08-16, cité par aucun fichier sujet) et `Database/DB_migration_prompt.md`.
     """
     assert cdr.check_reachability()[0] == []
+
+
+# --------------------------------------------------------------------------- corpus vivant (LIENS)
+
+
+def test_corpus_links_real_corpus_has_no_dead_links() -> None:
+    """Bout en bout : le corpus livré ne contient aucun lien mort."""
+    cdr.md_anchors.cache_clear()
+    broken, lines = cdr.report_corpus_links()
+    assert not broken, "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- TOTAL_ACTION_SIZE
+
+
+def test_total_action_size_stale(tmp_path: pathlib.Path) -> None:
+    """TOTAL_ACTION_SIZE faux dans AI_TRAINING.md → VALEUR PÉRIMÉE."""
+    doc = write(tmp_path, "AI_TRAINING.md", "espace d'action | **1 000** (desc)\n")
+    _verified, broken = cdr.check_values(doc)
+    assert any("VALEUR PÉRIMÉE" in e for e in broken), f"attendu rouge, obtenu : {broken}"
+
+
+def test_total_action_size_confirmed(tmp_path: pathlib.Path) -> None:
+    """TOTAL_ACTION_SIZE exact dans AI_TRAINING.md → confirmé."""
+    real = cdr.expected_total_action_size(None)
+    formatted = f"{real:,}".replace(",", " ")
+    doc = write(tmp_path, "AI_TRAINING.md", f"espace d'action | **{formatted}** (desc)\n")
+    verified, broken = cdr.check_values(doc)
+    assert verified >= 1
+    assert not any("TOTAL_ACTION_SIZE" in e and "PÉRIMÉE" in e for e in broken)
+
+
+def test_total_action_size_orphan(tmp_path: pathlib.Path) -> None:
+    """Aucune phrase TOTAL_ACTION_SIZE dans AI_TRAINING.md → ASSERTION ORPHELINE."""
+    doc = write(tmp_path, "AI_TRAINING.md", "rien à vérifier ici\n")
+    _verified, broken = cdr.check_values(doc)
+    assert any("ASSERTION ORPHELINE" in e and "TOTAL_ACTION_SIZE" in e for e in broken)
+
+
+# --------------------------------------------------------------------------- dimensions allies
+
+
+def test_allies_dims_stale(tmp_path: pathlib.Path) -> None:
+    """Dimensions allies fausses dans AI_OBSERVATION.md → VALEUR PÉRIMÉE."""
+    doc = write(
+        tmp_path, "AI_OBSERVATION.md",
+        "| `allies_cont` / `allies_bin` | (8, 19) / (8, 20) |\n",
+    )
+    _verified, broken = cdr.check_values(doc)
+    assert any("VALEUR PÉRIMÉE" in e for e in broken), f"attendu rouge, obtenu : {broken}"
+
+
+def test_allies_dims_confirmed(tmp_path: pathlib.Path) -> None:
+    """Dimensions allies exactes dans AI_OBSERVATION.md → confirmé."""
+    k, wc, _, wb = cdr.expected_allies_dims(None)
+    doc = write(
+        tmp_path, "AI_OBSERVATION.md",
+        f"| `allies_cont` / `allies_bin` | ({k}, {wc}) / ({k}, {wb}) |\n",
+    )
+    verified, broken = cdr.check_values(doc)
+    assert verified >= 1
+    assert not any("PÉRIMÉE" in e for e in broken), f"attendu vert, obtenu : {broken}"
+
+
+def test_allies_dims_orphan(tmp_path: pathlib.Path) -> None:
+    """Aucune ligne allies_cont dans AI_OBSERVATION.md → ASSERTION ORPHELINE."""
+    doc = write(tmp_path, "AI_OBSERVATION.md", "rien ici\n")
+    _verified, broken = cdr.check_values(doc)
+    assert any("ASSERTION ORPHELINE" in e for e in broken)
+
+
+# --------------------------------------------------------------------------- accumulation ROADMAP
+
+
+def test_accumulation_at_threshold_is_green(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """Exactement MAX_ROADMAP_CHECKMARKS lignes ✅ → vert (seuil inclusif)."""
+    lines = "\n".join(f"- item {i} ✅" for i in range(cdr.MAX_ROADMAP_CHECKMARKS))
+    fake = tmp_path / "ROADMAP_INDEX.md"
+    fake.write_text(lines, encoding="utf-8")
+    monkeypatch.setattr(cdr, "ROADMAP_INDEX", fake)
+    broken, _report = cdr.report_accumulation()
+    assert not broken
+
+
+def test_accumulation_above_threshold_is_red(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """> MAX_ROADMAP_CHECKMARKS lignes ✅ → rouge avec comptage exact."""
+    n = cdr.MAX_ROADMAP_CHECKMARKS + 1
+    lines = "\n".join(f"- item {i} ✅" for i in range(n))
+    fake = tmp_path / "ROADMAP_INDEX.md"
+    fake.write_text(lines, encoding="utf-8")
+    monkeypatch.setattr(cdr, "ROADMAP_INDEX", fake)
+    broken, report = cdr.report_accumulation()
+    assert broken
+    assert any(str(n) in line for line in report)
