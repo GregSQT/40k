@@ -1832,21 +1832,27 @@ def _ez_offset_kernels(
     cy_cand = cy_enemy + dy_2d[nz_i, nz_j]   # (N,)
 
     # ── Contours géométriques (polygone relatif ou rayon) ────────────────────────────────
+    mover_rel: "np.ndarray | None"
+    r_mover: "float | None" = None
     if mover_shape == "oval":
         mover_rel = np.array(_oval_local_outline(mover_size[0], mover_size[1], mover_orient))
     elif mover_shape == "square":
-        mover_rel = np.array(_square_local_outline(mover_size, mover_orient))
+        ms: float = mover_size[0] if isinstance(mover_size, list) else mover_size
+        mover_rel = np.array(_square_local_outline(ms, mover_orient))
     else:
         mover_rel = None  # round
         r_mover = round_base_radius_norm(
             mover_size if not isinstance(mover_size, list) else mover_size[0]
         )
 
+    enemy_abs: "np.ndarray | None"
+    r_enemy: "float | None" = None
     if enemy_shape == "oval":
         enemy_rel = np.array(_oval_local_outline(enemy_size[0], enemy_size[1], enemy_orient))
         enemy_abs = enemy_rel + np.array([cx_enemy, cy_enemy])
     elif enemy_shape == "square":
-        enemy_rel = np.array(_square_local_outline(enemy_size, enemy_orient))
+        es: float = enemy_size[0] if isinstance(enemy_size, list) else enemy_size
+        enemy_rel = np.array(_square_local_outline(es, enemy_orient))
         enemy_abs = enemy_rel + np.array([cx_enemy, cy_enemy])
     else:
         enemy_abs = None  # round
@@ -1855,14 +1861,20 @@ def _ez_offset_kernels(
         )
 
     # ── Dispatch vectorisé ───────────────────────────────────────────────────────────────
-    if mover_rel is None:
+    if mover_rel is None and enemy_abs is None:
+        # round × round
+        assert r_mover is not None and r_enemy is not None
+        gaps = np.sqrt((cx_cand - cx_enemy) ** 2 + (cy_cand - cy_enemy) ** 2) - r_mover - r_enemy
+    elif mover_rel is None:
         # round mover × poly enemy
+        assert r_mover is not None and enemy_abs is not None
         gaps = _batch_circle_poly_dist(r_mover, enemy_abs, cx_cand, cy_cand)
     elif enemy_abs is None:
         # poly mover × round enemy
+        assert r_enemy is not None
         gaps = _batch_poly_circle_dist(mover_rel, r_enemy, cx_enemy, cy_enemy, cx_cand, cy_cand)
     else:
-        # poly mover × poly enemy
+        # poly × poly
         gaps = _batch_poly_poly_dist(mover_rel, enemy_abs, cx_cand, cy_cand)
 
     sure[nz_i, nz_j] = gaps <= ez_norm - EPS
