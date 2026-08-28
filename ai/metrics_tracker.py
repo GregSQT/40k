@@ -470,6 +470,9 @@ class W40KMetricsTracker:
                     "thresholds/entropy_target_min",
                     "thresholds/entropy_target_max",
                 ]],
+                "m_immediate_reward_ratio_mean": ["Multiline", [
+                    "00_critical/m_immediate_reward_ratio_mean",
+                ]],
             }
         }
         self.writer.add_custom_scalars(layout)
