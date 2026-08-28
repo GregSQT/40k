@@ -285,7 +285,22 @@ class PatchedMaskablePPO(MaskablePPO):
         for _k in ("forward", "_uncompiled_original_forward"):
             if _k in self.policy.__dict__:
                 _saved_instance_attrs[_k] = self.policy.__dict__.pop(_k)
-        policy_cpu = deepcopy(self.policy).cpu()
+
+        # torch.compile stocke des tenseurs non-leaf dans le module après train().
+        # Tensor.__deepcopy__ refuse les non-leaf ; on le remplace temporairement par
+        # detach+clone, correct car les workers n'ont besoin que des valeurs (pas du graphe).
+        def _deepcopy_tensor_detached(self: "th.Tensor", memo: dict) -> "th.Tensor":
+            result = self.detach().clone()
+            memo[id(self)] = result
+            return result
+
+        _orig_tensor_deepcopy = th.Tensor.__deepcopy__
+        th.Tensor.__deepcopy__ = _deepcopy_tensor_detached  # type: ignore[method-assign]
+        try:
+            policy_cpu = deepcopy(self.policy).cpu()
+        finally:
+            th.Tensor.__deepcopy__ = _orig_tensor_deepcopy  # type: ignore[method-assign]
+
         self.policy.__dict__.update(_saved_instance_attrs)
         policy_bytes = cloudpickle.dumps(policy_cpu)
 
