@@ -2215,6 +2215,7 @@ def _apply_torch_compile(model) -> None:
             action_masks = torch.as_tensor(action_masks, device=device, dtype=torch.bool)
         return inner_forward(obs, deterministic=deterministic, action_masks=action_masks)
 
+    policy._uncompiled_original_forward = original_forward
     policy.forward = _forward_with_device_masks
 
 

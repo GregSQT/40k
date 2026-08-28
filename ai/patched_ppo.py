@@ -277,7 +277,16 @@ class PatchedMaskablePPO(MaskablePPO):
             )
 
         # 1. Sérialiser la policy CPU (cloudpickle traverse les frontières de process).
+        # torch.compile wraps policy.forward dans une closure capturant torch._dynamo.config
+        # (ConfigModuleInstance, non-picklable). On retire temporairement les attributs
+        # d'instance forward et _uncompiled_original_forward du __dict__ : la classe fournit
+        # alors sa méthode directement (aucune closure, correctement bindée sur la copie).
+        _saved_instance_attrs: dict = {}
+        for _k in ("forward", "_uncompiled_original_forward"):
+            if _k in self.policy.__dict__:
+                _saved_instance_attrs[_k] = self.policy.__dict__.pop(_k)
         policy_cpu = deepcopy(self.policy).cpu()
+        self.policy.__dict__.update(_saved_instance_attrs)
         policy_bytes = cloudpickle.dumps(policy_cpu)
 
         # 2. Snapshot VecNormalize par worker.
