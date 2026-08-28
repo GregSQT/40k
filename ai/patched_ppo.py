@@ -277,30 +277,17 @@ class PatchedMaskablePPO(MaskablePPO):
             )
 
         # 1. Sérialiser la policy CPU (cloudpickle traverse les frontières de process).
-        # torch.compile wraps policy.forward dans une closure capturant torch._dynamo.config
-        # (ConfigModuleInstance, non-picklable). On retire temporairement les attributs
-        # d'instance forward et _uncompiled_original_forward du __dict__ : la classe fournit
-        # alors sa méthode directement (aucune closure, correctement bindée sur la copie).
+        # Trois attributs d'instance bloquent deepcopy + cloudpickle :
+        # - forward/_uncompiled_original_forward : closure capturant torch._dynamo.config
+        #   (ConfigModuleInstance non-picklable) ; la classe fournit sa méthode à la place.
+        # - action_dist : distribution laissée par le dernier evaluate_actions() de train(),
+        #   ses tenseurs (logits, probs) restent attachés au graphe de calcul et Tensor.__deepcopy__
+        #   refuse les non-leaf. Les workers recréent leur distribution au premier forward().
         _saved_instance_attrs: dict = {}
-        for _k in ("forward", "_uncompiled_original_forward"):
+        for _k in ("forward", "_uncompiled_original_forward", "action_dist"):
             if _k in self.policy.__dict__:
                 _saved_instance_attrs[_k] = self.policy.__dict__.pop(_k)
-
-        # torch.compile stocke des tenseurs non-leaf dans le module après train().
-        # Tensor.__deepcopy__ refuse les non-leaf ; on le remplace temporairement par
-        # detach+clone, correct car les workers n'ont besoin que des valeurs (pas du graphe).
-        def _deepcopy_tensor_detached(self: "th.Tensor", memo: dict) -> "th.Tensor":
-            result = self.detach().clone()
-            memo[id(self)] = result
-            return result
-
-        _orig_tensor_deepcopy = th.Tensor.__deepcopy__
-        th.Tensor.__deepcopy__ = _deepcopy_tensor_detached  # type: ignore[method-assign]
-        try:
-            policy_cpu = deepcopy(self.policy).cpu()
-        finally:
-            th.Tensor.__deepcopy__ = _orig_tensor_deepcopy  # type: ignore[method-assign]
-
+        policy_cpu = deepcopy(self.policy).cpu()
         self.policy.__dict__.update(_saved_instance_attrs)
         policy_bytes = cloudpickle.dumps(policy_cpu)
 
