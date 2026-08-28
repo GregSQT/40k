@@ -1,12 +1,21 @@
-"""MaskableSubprocVecEnv — Phase 2.3 du chantier perf_entrainement.
+"""MaskableSubprocVecEnv — Phases 2.3 et 3 du chantier perf_entrainement.
 
-Variante de SubprocVecEnv qui inclut action_masks dans le dict info retourné par step().
-Le masque est résolu dans le worker (process fils) SANS aller-retour supplémentaire :
-il est déjà mis en cache dans _served_decision à la fin du step. Le learner lit
-infos[i]["action_masks"] au lieu d'émettre un second env_method("action_masks") RPC.
+Phase 2.3 : le worker inclut action_masks dans le dict info retourné par step().
+  Le masque est résolu dans le worker (process fils) SANS aller-retour supplémentaire :
+  il est déjà mis en cache dans _served_decision à la fin du step. Le learner lit
+  infos[i]["action_masks"] au lieu d'émettre un second env_method("action_masks") RPC.
+  Gain : ~340/341 RPCs économisés par rollout.
 
-Gain : ~340/341 RPCs économisés par rollout (seul le premier step appelle encore
-get_action_masks() pour le bootstrap — géré dans PatchedMaskablePPO.collect_rollouts).
+Phase 3 : message COLLECT_TRAJECTORY.
+  Le learner sérialise la policy CPU + snapshot VecNormalize et envoie COLLECT_TRAJECTORY
+  à chaque worker. Chaque worker déroule ses n_steps steps en autonome avec les poids gelés,
+  retourne sa trajectoire complète. Le learner n'attend plus à chaque step — le lockstep
+  (~73 % du budget de cycle) disparaît.
+
+Sémantique garantie identique à SB3 :
+- VecNormalize gelé pendant le cycle, mis à jour en batch au learner (écart documenté §3).
+- Épisodes à cheval sur la frontière : tronqués à n_steps + bootstrap TimeLimit.truncated.
+- Compteurs par-env (§0.57 rampe déploiement, opponent_mix) : déjà locaux aux workers.
 """
 from __future__ import annotations
 
@@ -23,21 +32,177 @@ from stable_baselines3.common.vec_env.patch_gym import _patch_env
 from stable_baselines3.common.vec_env.subproc_vec_env import SubprocVecEnv
 
 
+def _run_worker_trajectory(
+    env: Any,
+    last_raw_obs: dict,
+    policy_bytes: bytes,
+    n_steps: int,
+    snapshot: Any,
+    initial_episode_start: bool,
+) -> dict:
+    """Collecte n_steps steps dans le worker avec policy gelée.
+
+    Réplique exacte de collect_rollouts pour UN env, avec policy CPU et stats VecNorm gelées.
+    """
+    import cloudpickle
+    import torch
+    from ai.vec_normalize_frozen import normalize_obs_with_snapshot
+
+    frozen_policy = cloudpickle.loads(policy_bytes)
+    frozen_policy.set_training_mode(False)
+
+    # Stockage de la trajectoire
+    norm_obs_seq: list[dict] = []
+    raw_obs_seq: list[dict] = []
+    actions_seq: list[int] = []
+    rewards_seq: list[float] = []      # reward normalisée (avec bootstrap)
+    dones_seq: list[bool] = []
+    episode_starts_seq: list[bool] = []
+    values_seq: list[float] = []
+    log_probs_seq: list[float] = []
+    masks_seq: list[np.ndarray] = []
+    infos_seq: list[dict] = []
+    discounted_returns_seq: list[float] = []
+
+    current_raw_obs = last_raw_obs
+    current_episode_start = initial_episode_start
+    discounted_return = snapshot.initial_return
+
+    for _step in range(n_steps):
+        norm_obs = normalize_obs_with_snapshot(current_raw_obs, snapshot)
+
+        # Masque d'action
+        try:
+            mask = env.get_wrapper_attr("action_masks")()
+        except AttributeError:
+            mask = np.ones(env.action_space.n, dtype=bool)
+
+        # Forward policy (CPU, pas de grad)
+        with torch.no_grad():
+            obs_t = {
+                k: torch.as_tensor(v[np.newaxis], dtype=torch.float32)
+                for k, v in norm_obs.items()
+            }
+            mask_t = torch.as_tensor(mask[np.newaxis], dtype=torch.float32)
+            actions_t, values_t, log_probs_t = frozen_policy(obs_t, action_masks=mask_t)
+
+        action = int(actions_t.cpu().numpy().flat[0])
+        value = float(values_t.cpu().numpy().flat[0])
+        log_prob = float(log_probs_t.cpu().numpy().flat[0])
+
+        # Step env
+        observation_raw, raw_reward, terminated, truncated, info = env.step(action)
+        done = terminated or truncated
+        info["TimeLimit.truncated"] = truncated and not terminated
+        raw_reward = float(raw_reward)
+
+        if done:
+            info["terminal_observation"] = observation_raw
+
+        # Tracking VecNormalize.returns avec raw_reward (avant normalisation).
+        discounted_return = snapshot.gamma * discounted_return + raw_reward
+        discounted_returns_seq.append(discounted_return)
+        if done:
+            discounted_return = 0.0
+
+        # Normalisation récompense — avant le bootstrap (sémantique SB3 exacte :
+        # VecNormalize normalise dans step_wait, puis collect_rollouts ajoute le bootstrap).
+        if snapshot.norm_reward:
+            norm_reward = float(np.clip(
+                raw_reward / np.sqrt(snapshot.ret_var + snapshot.epsilon),
+                -snapshot.clip_reward,
+                snapshot.clip_reward,
+            ))
+        else:
+            norm_reward = raw_reward
+
+        # Bootstrap TimeLimit.truncated — APRÈS normalisation, valeur brute ajoutée (SB3 §exact).
+        if done:
+            if truncated and not terminated:
+                norm_term = normalize_obs_with_snapshot(observation_raw, snapshot)
+                with torch.no_grad():
+                    obs_term = {
+                        k: torch.as_tensor(v[np.newaxis], dtype=torch.float32)
+                        for k, v in norm_term.items()
+                    }
+                    terminal_value = float(
+                        frozen_policy.predict_values(obs_term).cpu().numpy().flat[0]
+                    )
+                norm_reward += snapshot.gamma * terminal_value
+            observation_raw, _ = env.reset()
+
+        # Inclure action_masks dans info (parité Phase 2.3)
+        info["action_masks"] = mask
+
+        raw_obs_seq.append({k: v.copy() for k, v in current_raw_obs.items()})
+        norm_obs_seq.append(norm_obs)
+        actions_seq.append(action)
+        rewards_seq.append(norm_reward)
+        dones_seq.append(done)
+        episode_starts_seq.append(current_episode_start)
+        values_seq.append(value)
+        log_probs_seq.append(log_prob)
+        masks_seq.append(mask.copy())
+        infos_seq.append(info)
+
+        current_raw_obs = observation_raw
+        current_episode_start = done
+
+    # Dernière obs : raw (pour le prochain COLLECT_TRAJECTORY) et normalisée (pour le learner).
+    last_raw_obs = {k: v.copy() for k, v in current_raw_obs.items()}
+    norm_last = normalize_obs_with_snapshot(current_raw_obs, snapshot)
+    with torch.no_grad():
+        obs_last = {
+            k: torch.as_tensor(v[np.newaxis], dtype=torch.float32)
+            for k, v in norm_last.items()
+        }
+        last_value = float(frozen_policy.predict_values(obs_last).cpu().numpy().flat[0])
+
+    # Valeurs BRUTES global_cont pour mise à jour VecNormalize obs_rms.
+    # raw_obs_seq contient les obs brutes (avant normalisation) — jamais les obs normalisées.
+    raw_global_cont = np.array(
+        [obs.get("global_cont", np.zeros(snapshot.obs_mean.shape)) for obs in raw_obs_seq],
+        dtype=np.float64,
+    )
+
+    return {
+        "norm_obs_seq": norm_obs_seq,
+        "actions_seq": np.array(actions_seq, dtype=np.int64),
+        "rewards_seq": np.array(rewards_seq, dtype=np.float32),
+        "dones_seq": np.array(dones_seq, dtype=bool),
+        "episode_starts_seq": np.array(episode_starts_seq, dtype=bool),
+        "values_seq": np.array(values_seq, dtype=np.float32),
+        "log_probs_seq": np.array(log_probs_seq, dtype=np.float32),
+        "masks_seq": np.array(masks_seq, dtype=bool),
+        "infos_seq": infos_seq,
+        "last_raw_obs": last_raw_obs,   # obs BRUTES pour le prochain COLLECT_TRAJECTORY
+        "last_norm_obs": norm_last,      # obs normalisées pour le learner (GAE)
+        "last_done": bool(dones_seq[-1]) if dones_seq else False,
+        "last_value": last_value,
+        "raw_global_cont": raw_global_cont,
+        "discounted_returns": np.array(discounted_returns_seq, dtype=np.float64),
+        "final_discounted_return": discounted_return,
+    }
+
+
 def _maskable_worker(
     remote: _MpConnection,
     parent_remote: _MpConnection,
     env_fn_wrapper: CloudpickleWrapper,
 ) -> None:
-    """Worker identique à SubprocVecEnv._worker, sauf que step() inclut action_masks dans info.
+    """Worker pour MaskableSubprocVecEnv.
 
-    Le masque est le même que celui que MaskablePPO récupérerait via env_method("action_masks")
-    juste après le step — bit-à-bit identique, zéro coût supplémentaire (cache _served_decision).
+    Étend le worker SB3 standard avec :
+    - action_masks dans info (Phase 2.3) : zéro coût, masque déjà en cache.
+    - COLLECT_TRAJECTORY (Phase 3) : collecte autonome avec policy gelée.
+    - _worker_last_obs : état interne pour COLLECT_TRAJECTORY.
     """
     from stable_baselines3.common.env_util import is_wrapped
 
     parent_remote.close()
     env = _patch_env(env_fn_wrapper.var())
     reset_info: dict[str, Any] | None = {}
+    _worker_last_obs: dict | None = None  # état courant pour COLLECT_TRAJECTORY
 
     while True:
         try:
@@ -49,17 +214,35 @@ def _maskable_worker(
                 if done:
                     info["terminal_observation"] = observation
                     observation, reset_info = env.reset()
-                # Masque du prochain état — déjà en cache, coût nul.
                 try:
                     info["action_masks"] = env.get_wrapper_attr("action_masks")()
                 except AttributeError:
-                    pass  # env non maskable : pas de masque inline
+                    pass
+                _worker_last_obs = observation
                 remote.send((observation, reward, done, info, reset_info))
 
             elif cmd == "reset":
                 maybe_options = {"options": data[1]} if data[1] else {}
                 observation, reset_info = env.reset(seed=data[0], **maybe_options)
+                _worker_last_obs = observation
                 remote.send((observation, reset_info))
+
+            elif cmd == "COLLECT_TRAJECTORY":
+                policy_bytes, n_steps, snapshot, initial_episode_start = data
+                if _worker_last_obs is None:
+                    remote.send(RuntimeError(
+                        "COLLECT_TRAJECTORY appelé avant le premier step/reset — "
+                        "appeler reset() sur le VecEnv avant la première collecte."
+                    ))
+                    continue
+                traj = _run_worker_trajectory(
+                    env, _worker_last_obs, policy_bytes, n_steps, snapshot,
+                    initial_episode_start,
+                )
+                # Stocker les obs BRUTES pour le prochain COLLECT_TRAJECTORY.
+                # Jamais les obs normalisées : elles seraient re-normalisées au prochain cycle.
+                _worker_last_obs = traj["last_raw_obs"]
+                remote.send(traj)
 
             elif cmd == "render":
                 remote.send(env.render())
@@ -102,8 +285,9 @@ def _maskable_worker(
 
 
 class MaskableSubprocVecEnv(SubprocVecEnv):
-    """SubprocVecEnv dont le worker inclut action_masks dans les infos de step().
+    """SubprocVecEnv dont le worker inclut action_masks dans les infos de step() (Phase 2.3).
 
+    Phase 3 : ajoute collect_trajectories() pour la collecte distribuée sans lockstep.
     Drop-in replacement de SubprocVecEnv pour le pipeline PPO maskable. Compatible avec
     VecNormalize et les autres wrappers SB3.
     """
@@ -113,7 +297,6 @@ class MaskableSubprocVecEnv(SubprocVecEnv):
         env_fns: list[Callable[[], gym.Env]],
         start_method: str | None = None,
     ) -> None:
-        # Réplique de SubprocVecEnv.__init__ avec target=_maskable_worker.
         self.waiting = False
         self.closed = False
         n_envs = len(env_fns)
@@ -140,3 +323,40 @@ class MaskableSubprocVecEnv(SubprocVecEnv):
         observation_space, action_space = self.remotes[0].recv()
 
         VecEnv.__init__(self, len(env_fns), observation_space, action_space)
+
+    def collect_trajectories(
+        self,
+        policy_bytes: bytes,
+        n_steps: int,
+        snapshots: list[Any],
+        initial_episode_starts: np.ndarray,
+    ) -> list[dict]:
+        """Envoie COLLECT_TRAJECTORY à tous les workers et récupère les trajectoires.
+
+        Chaque worker tourne indépendamment ses n_steps steps avec la policy gelée.
+        Retourne une liste de trajectoires (une par worker), dans l'ordre des workers.
+        """
+        if self.waiting:
+            raise RuntimeError(
+                "collect_trajectories() appelé alors que le VecEnv attend des résultats step."
+            )
+        assert len(snapshots) == len(self.remotes), (
+            f"Nombre de snapshots ({len(snapshots)}) ≠ nombre de workers ({len(self.remotes)})"
+        )
+
+        for i, remote in enumerate(self.remotes):
+            remote.send(("COLLECT_TRAJECTORY", (
+                policy_bytes,
+                n_steps,
+                snapshots[i],
+                bool(initial_episode_starts[i]),
+            )))
+
+        trajectories = []
+        for remote in self.remotes:
+            result = remote.recv()
+            if isinstance(result, Exception):
+                raise result
+            trajectories.append(result)
+
+        return trajectories

@@ -1,6 +1,6 @@
-"""PatchedMaskablePPO — sous-classe locale de MaskablePPO pour la Phase 2 perf_entrainement.
+"""PatchedMaskablePPO — sous-classe locale de MaskablePPO pour les Phases 2 et 3 perf_entrainement.
 
-Trois overrides, sans changer les maths :
+Quatre overrides, sans changer les maths :
 
 2.1 — _setup_model() : GpuMaskableDictRolloutBuffer pour les espaces Dict (masques en bool,
       tenseurs résidents GPU — plus de H2D par epoch). Combiné avec recreate_rollout_buffer()
@@ -15,6 +15,12 @@ Trois overrides, sans changer les maths :
       MaskableSubprocVecEnv dans le même RPC que step) au lieu d'un second env_method RPC.
       Sauvegarde ~340/341 RPCs par rollout. Repli sur get_action_masks() si
       infos ne contiennent pas le masque (DummyVecEnv, tests).
+
+3 — collect_rollouts() (Phase 3 Option A) : détecte MaskableSubprocVecEnv et bascule sur
+    _collect_rollouts_distributed(). Chaque worker reçoit une copie sérialisée des poids
+    (cloudpickle) + snapshot VecNormalize, déroule ses n_steps steps en autonome, retourne
+    sa trajectoire. Le learner agrège les trajectoires dans le buffer GPU sans lockstep.
+    Écart sémantique VecNormalize documenté dans perf_entrainement.md §3 + verrou de test.
 """
 from __future__ import annotations
 
@@ -41,19 +47,36 @@ from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
 
 SelfPatchedMaskablePPO = TypeVar("SelfPatchedMaskablePPO", bound="PatchedMaskablePPO")
 
+# Sentinelle pour détecter qu'aucune trajectoire n'a été collectée (ne peut pas être None).
+_NO_OBS = object()
+
 
 def _env_has_inline_masks(env: VecEnv) -> bool:
     """True si l'env est un MaskableSubprocVecEnv (masques dans infos de step)."""
-    # Import local pour éviter la dépendance circulaire au niveau module.
     try:
         from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
     except ImportError:
         return False
-    # Remonter les wrappers VecEnv (VecNormalize, etc.)
     vec: Any = env
     while hasattr(vec, "venv"):
         vec = vec.venv
     return isinstance(vec, MaskableSubprocVecEnv)
+
+
+def _get_maskable_subproc_vec_env(env: VecEnv) -> "Any | None":
+    """Retourne le MaskableSubprocVecEnv dans la chaîne de wrappers, ou None."""
+    try:
+        from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
+    except ImportError:
+        return None
+    vec: Any = env
+    while hasattr(vec, "venv"):
+        if isinstance(vec, MaskableSubprocVecEnv):
+            return vec
+        vec = vec.venv
+    if isinstance(vec, MaskableSubprocVecEnv):
+        return vec
+    return None
 
 
 def _mean_item(tensors: list[th.Tensor]) -> float:
@@ -204,7 +227,7 @@ class PatchedMaskablePPO(MaskablePPO):
         if clip_range_vf is not None:
             self.logger.record("train/clip_range_vf", clip_range_vf)
 
-    # ── 2.3 — Un seul RPC par step ───────────────────────────────────────────────────────────
+    # ── 2.3 / 3 — collect_rollouts : step-by-step ou distribué ──────────────────────────────────
 
     def collect_rollouts(
         self,
@@ -214,11 +237,155 @@ class PatchedMaskablePPO(MaskablePPO):
         n_rollout_steps: int,
         use_masking: bool = True,
     ) -> bool:
+        """Collecte le rollout. Bascule sur la collecte distribuée (Phase 3) si disponible."""
         assert isinstance(
             rollout_buffer, (MaskableRolloutBuffer, MaskableDictRolloutBuffer)
         ), "RolloutBuffer doesn't support action masking"
         assert self._last_obs is not None
 
+        subproc = _get_maskable_subproc_vec_env(env)
+        if subproc is not None:
+            return self._collect_rollouts_distributed(
+                env, subproc, callback, rollout_buffer, n_rollout_steps, use_masking
+            )
+        return self._collect_rollouts_stepwise(
+            env, callback, rollout_buffer, n_rollout_steps, use_masking
+        )
+
+    def _collect_rollouts_distributed(
+        self,
+        env: VecEnv,
+        subproc: "Any",
+        callback: BaseCallback,
+        rollout_buffer: RolloutBuffer,
+        n_rollout_steps: int,
+        use_masking: bool,
+    ) -> bool:
+        """Phase 3 — collecte sans lockstep.
+
+        Chaque worker reçoit la policy gelée + snapshot VecNormalize, déroule ses n_steps
+        steps en autonome, renvoie sa trajectoire. Le learner ne fait que l'update GPU.
+
+        Sémantique garantie par rapport à collect_rollouts step-by-step :
+        - Mêmes poids pendant tout le rollout (SB3 ne met pas à jour la policy pendant collect).
+        - Bootstrap TimeLimit.truncated exactement comme SB3 (dans le worker).
+        - VecNormalize stats gelées pendant le cycle, mises à jour en batch après (écart voulu,
+          documenté dans perf_entrainement.md §3 et verrouillé par test_vec_normalize_stats_drift).
+        - Callbacks rejoués step-by-step APRÈS collection avec les données réelles. Une
+          callback retournant False arrête la boucle mais train() n'est jamais appelé dans ce
+          cas, donc le buffer déjà rempli est ignoré — comportement acceptable.
+        """
+        import cloudpickle
+        from copy import deepcopy
+        from ai.vec_normalize_frozen import snapshot_vec_normalize, update_vec_normalize_from_trajectories
+
+        n_envs = subproc.num_envs
+        self.policy.set_training_mode(False)
+        rollout_buffer.reset()
+
+        if use_masking and not is_masking_supported(env):
+            raise ValueError(
+                "Environment does not support action masking. Consider using ActionMasker wrapper"
+            )
+
+        # 1. Sérialiser la policy CPU (cloudpickle traverse les frontières de process).
+        policy_cpu = deepcopy(self.policy).cpu()
+        policy_bytes = cloudpickle.dumps(policy_cpu)
+
+        # 2. Snapshot VecNormalize par worker.
+        snapshots = [snapshot_vec_normalize(env, i) for i in range(n_envs)]
+
+        # 3. Dispatch : tous les workers reçoivent COLLECT_TRAJECTORY simultanément.
+        callback.on_rollout_start()
+        initial_episode_starts = self._last_episode_starts.copy()
+        trajectories = subproc.collect_trajectories(
+            policy_bytes, n_rollout_steps, snapshots, initial_episode_starts
+        )
+
+        # 4. Remplir le buffer depuis les trajectoires.
+        for step_idx in range(n_rollout_steps):
+            # Obs au step_idx depuis tous les workers (shape: n_envs × ...)
+            obs_step: dict = {}
+            for key in trajectories[0]["norm_obs_seq"][step_idx]:
+                obs_step[key] = np.stack([
+                    traj["norm_obs_seq"][step_idx][key] for traj in trajectories
+                ])
+
+            actions_step = np.array([traj["actions_seq"][step_idx] for traj in trajectories])
+            rewards_step = np.array([traj["rewards_seq"][step_idx] for traj in trajectories], dtype=np.float32)
+            dones_step = np.array([traj["dones_seq"][step_idx] for traj in trajectories], dtype=bool)
+            ep_starts_step = np.array([traj["episode_starts_seq"][step_idx] for traj in trajectories], dtype=bool)
+            values_step = th.tensor([traj["values_seq"][step_idx] for traj in trajectories], dtype=th.float32)
+            log_probs_step = th.tensor([traj["log_probs_seq"][step_idx] for traj in trajectories], dtype=th.float32)
+            masks_step = np.stack([traj["masks_seq"][step_idx] for traj in trajectories])
+
+            if isinstance(self.action_space, spaces.Discrete):
+                actions_step = actions_step.reshape(-1, 1)
+
+            rollout_buffer.add(
+                obs_step,
+                actions_step,
+                rewards_step,
+                ep_starts_step,
+                values_step,
+                log_probs_step,
+                action_masks=masks_step,
+            )
+
+        # 5. Bootstrap last_values + GAE.
+        last_obs: dict = {}
+        for key in trajectories[0]["last_norm_obs"]:
+            last_obs[key] = np.stack([traj["last_norm_obs"][key] for traj in trajectories])
+        last_dones = np.array([traj["last_done"] for traj in trajectories], dtype=bool)
+
+        with th.no_grad():
+            last_values = self.policy.predict_values(obs_as_tensor(last_obs, self.device))  # type: ignore[arg-type]
+
+        rollout_buffer.compute_returns_and_advantage(last_values=last_values, dones=last_dones)
+
+        # 6. Mettre à jour VecNormalize avec les données brutes.
+        raw_gc_batches = [traj["raw_global_cont"] for traj in trajectories]
+        disc_ret_batches = [traj["discounted_returns"] for traj in trajectories]
+        final_returns = [traj["final_discounted_return"] for traj in trajectories]
+        update_vec_normalize_from_trajectories(env, raw_gc_batches, disc_ret_batches, final_returns)
+
+        # 7. Mettre à jour l'état du learner.
+        self._last_obs = last_obs  # type: ignore[assignment]
+        self._last_episode_starts = last_dones
+
+        # 8. Rejouer les callbacks step-by-step (mêmes données, même ordre).
+        # num_timesteps est incrémenté ici step-by-step pour que les callbacks voient
+        # la même progression que dans le chemin stepwise.
+        for step_idx in range(n_rollout_steps):
+            self.num_timesteps += n_envs
+            step_dones = np.array([traj["dones_seq"][step_idx] for traj in trajectories], dtype=bool)
+            step_infos = [traj["infos_seq"][step_idx] for traj in trajectories]
+            step_actions = np.array([traj["actions_seq"][step_idx] for traj in trajectories])
+            step_rewards = np.array([traj["rewards_seq"][step_idx] for traj in trajectories], dtype=np.float32)
+            callback.update_locals({
+                "dones": step_dones,
+                "infos": step_infos,
+                "actions": step_actions,
+                "rewards": step_rewards,
+                "n_steps": step_idx + 1,
+            })
+            self._update_info_buffer(step_infos, step_dones)
+            if not callback.on_step():
+                # Callback demande l'arrêt : buffer déjà rempli, train() ne sera pas appelé.
+                return False
+
+        callback.on_rollout_end()
+        return True
+
+    def _collect_rollouts_stepwise(
+        self,
+        env: VecEnv,
+        callback: BaseCallback,
+        rollout_buffer: RolloutBuffer,
+        n_rollout_steps: int,
+        use_masking: bool,
+    ) -> bool:
+        """Phase 2.3 — collecte step-by-step avec single RPC (fallback non-MaskableSubproc)."""
         self.policy.set_training_mode(False)
         n_steps = 0
         action_masks = None
@@ -229,9 +396,7 @@ class PatchedMaskablePPO(MaskablePPO):
                 "Environment does not support action masking. Consider using ActionMasker wrapper"
             )
 
-        # Détecter si les masques voyagent dans infos (MaskableSubprocVecEnv, Phase 2.3).
         use_inline_masks = use_masking and _env_has_inline_masks(env)
-        # Pour le premier step, on n'a pas encore de masques inline — on appelle get_action_masks.
         next_step_masks: np.ndarray | None = None
 
         callback.on_rollout_start()
@@ -251,7 +416,6 @@ class PatchedMaskablePPO(MaskablePPO):
             actions = actions.cpu().numpy()
             new_obs, rewards, dones, infos = env.step(actions)
 
-            # Extraire les masques du prochain step depuis infos (évite le 2e RPC).
             if use_inline_masks:
                 try:
                     next_step_masks = np.stack([info["action_masks"] for info in infos])
