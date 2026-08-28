@@ -7,8 +7,8 @@
 >
 > Ce document porte la **spec** V11 : objectif, ancre, ruptures R1→R8, tranches T1→T7, critères et tests.
 > **L'ÉTAT des tranches fait foi dans `Documentation/Roadmap/` uniquement** (refonte 2026-08-27) —
-> les mentions « EN COURS »/« bloqueurs » du corps sont des strates datées, pas l'état courant.
-> Il fait foi sur le **détail** et l'**état** de V11 ; il ne fait pas foi sur les **priorités**.
+> les strates d'état datées du corps ont été purgées le 2026-08-28 (lot P4 v11).
+> Il fait foi sur le **détail de conception** ; il ne fait foi ni sur l'**état** ni sur les **priorités**.
 > En cas de désaccord sur l'ordre entre ce fichier et le ROADMAP, **le ROADMAP l'emporte** — et
 > l'écart se corrige dans la même livraison (règle T2 de CLAUDE.md).
 

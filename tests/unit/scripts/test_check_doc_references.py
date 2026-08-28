@@ -1271,10 +1271,22 @@ def test_accented_paths_are_counted_under_their_real_name() -> None:
     et à l'époque de la mesure tout `Documentation/Implémentation/`) : le basename sortait
     comme `ROADMAP.md"` et tout le dossier accentué devenait invisible à la détection
     d'ambiguïté — un contrôle qui ne regarde rien affiche « tout va bien ».
+
+    Le TÉMOIN POSITIF doit porter un caractère non-ASCII, sinon il ne prouve rien de ce que ce
+    test existe pour prouver : mesuré le 2026-08-28, avec un témoin purement ASCII
+    (`decisions_du_joueur.md`, hérité du renommage P4 de `V11_phaseA.md`) la suppression du `-z`
+    laissait cette assertion VERTE — seule la première l'attrapait. Le témoin est donc un
+    basename réellement accentué, tenu par sa présence dans `git ls-files`.
     """
     counts = cdr.tracked_basenames()
+    accentue = "Méthodologie de la rédaction du projet(2025).pdf"
     assert not [name for name in counts if '"' in name or "\\" in name]
-    assert counts["ROADMAP.md"] >= 1 and counts["decisions_du_joueur.md"] >= 1
+    assert counts["ROADMAP.md"] >= 1
+    assert counts[accentue] >= 1, (
+        f"témoin accentué absent du recensement : {accentue!r} — soit le fichier a été renommé "
+        f"(choisir un autre basename non-ASCII suivi par git), soit le décodage de git ls-files "
+        f"est cassé, ce que ce test existe pour attraper"
+    )
 
 
 def test_git_output_is_decoded_regardless_of_the_locale() -> None:
