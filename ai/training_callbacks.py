@@ -1127,7 +1127,7 @@ class MetricsCollectionCallback(BaseCallback):
             if hasattr(self.model, 'logger') and self.model.logger:
                 self.model.logger.record('config/discount_factor', gamma)
                 self.model.logger.record('config/immediate_reward_ratio', immediate_reward_ratio)
-                self.model.logger.record('config/immediate_reward_ratio_mean', ratio_mean)
+                self.model.logger.record('00_critical/n_immediate_reward_ratio_mean', ratio_mean)
                 self.model.logger.record('config/planning_horizon', planning_horizon)
         # tactical_data du moteur — cle EXIGEE, pas testee.
         # Le `if 'tactical_data' in info:` qui gardait ce bloc laissait passer un episode sans
