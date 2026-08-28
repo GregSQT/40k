@@ -54,7 +54,8 @@ def register_torch_safe_globals() -> None:
     # Sûreté : ce sont des descripteurs de type numpy, pas des appelables arbitraires ;
     # les autoriser ne rouvre pas l'exécution de code que `weights_only=True` ferme.
     allowed.extend(
-        getattr(np.dtypes, name) for name in dir(np.dtypes) if name.endswith("DType")
+        obj for name in dir(np.dtypes)
+        if name.endswith("DType") and isinstance(obj := getattr(np.dtypes, name), type)
     )
 
     torch.serialization.add_safe_globals(allowed)

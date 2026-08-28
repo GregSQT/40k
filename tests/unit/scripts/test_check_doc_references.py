@@ -1704,6 +1704,18 @@ def test_references_inside_fenced_code_block_are_ignored(tmp_path: pathlib.Path)
 # --------------------------------------------------------------------------- blocs fencés — passe 5
 
 
+@pytest.mark.parametrize("sep,expected", [
+    (" ", [10000]),   # espace ordinaire
+    (" ", [10000]),   # espace fine insécable
+    (" ", [10000]),   # espace fine (thin space) — oubliée dans la version d'origine
+    (" ", [10000]),   # espace insécable
+])
+def test_integers_in_thousands_separators(sep: str, expected: list[int]) -> None:
+    """integers_in reconnaît tous les séparateurs de milliers de _THOUSANDS_SEPARATORS."""
+    cell = f"10{sep}000"
+    assert cdr.integers_in(cell) == expected, f"sep U+{ord(sep):04X} → {cdr.integers_in(cell)!r}"
+
+
 def test_symbol_kinds_inside_fenced_code_block_are_ignored(tmp_path: pathlib.Path) -> None:
     """Un renvoi de sorte dans un bloc fencé ne déclenche pas de SORTE FAUSSE.
 
