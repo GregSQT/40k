@@ -303,9 +303,10 @@ def test_every_profile_declares_decay_fraction(profile_name: str, ramp_key: str)
 
 #: Longueur ATTENDUE de chaque profil `_long`. Épinglée et non lue depuis le JSON :
 #: sans elle, un `_long` ramené par mégarde à la longueur de sa référence resterait vert alors
-#: qu'il ne mesurerait plus rien de long. x1_long : 50 000 épisodes (5 points de mesure à
-#: `bot_eval_freq` 10000, soit tout juste la fenêtre de 5 évaluations qu'exige `save_best_robust`).
-LONG_PROFILE_EPISODES = {"x1_long": 50_000, "x5_long": 200_000}
+#: qu'il ne mesurerait plus rien de long. x1_long : 100 000 épisodes (10 points de mesure à
+#: `bot_eval_freq` 10000, `robust_window` 3 — maintenu à 3 car la fenêtre de 5 aurait 6 positions,
+#: choix délibéré pour la comparabilité inter-runs ; cf. `robust_window_normal` dans la config).
+LONG_PROFILE_EPISODES = {"x1_long": 100_000, "x5_long": 200_000}
 
 #: `bot_eval_final` ATTENDU de chaque profil de RÉFÉRENCE (le court des deux), par couple.
 #: ÉPINGLÉ pour la même raison que la table ci-dessus, et plus commun aux deux couples depuis le
