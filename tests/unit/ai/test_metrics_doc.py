@@ -185,7 +185,9 @@ def _doc_tags() -> frozenset[str]:
                 tags.add(expanded)
 
     # --- 2. Bold dans la section Dashboard 00_critical.
-    start = text.index("## Dashboard 00_critical")
+    start = text.find("## Dashboard 00_critical")
+    if start == -1:
+        return frozenset(tags)
     m_end = re.search(r"^## ", text[start + 1:], re.M)
     dashboard = text[start: start + 1 + m_end.start()] if m_end else text[start:]
     for raw in re.findall(r"\*\*(00_critical/[^*\s]+)\*\*", dashboard):
