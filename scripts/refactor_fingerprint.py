@@ -152,6 +152,7 @@ def _build_env(agent: str, training_config: str):
         use_bots=True,
         training_bots=opponents["training_bots"],
         agent_seat_mode=opponents["agent_seat_mode"],
+        agent_seat_p2_ratio=opponents["agent_seat_p2_ratio"],
         global_seed=opponents["agent_seat_seed"],
         opponent_mix_config=opponents["opponent_mix_config"],
         n_envs=1,

@@ -24,6 +24,9 @@ BOT_TRAINING_CONFIG = {
     },
     "agent_seat_mode": "random",
     "agent_seat_seed": 7,
+    # Obligatoire des que le siege est tire au sort (cf. tests/unit/ai/test_agent_seat_ratio.py,
+    # qui verrouille la cle elle-meme) : part des episodes joues en SECOND.
+    "agent_seat_p2_ratio": 0.65,
 }
 
 

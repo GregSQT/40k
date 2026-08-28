@@ -203,7 +203,8 @@ def build_self_play_kwargs(opponent_mix_config, env_rank: int = 0) -> dict:
 def make_training_env(rank, scenario_file, rewards_config_name, training_config_name,
                      controlled_agent_key, unit_registry, step_logger_enabled=False,
                      scenario_files=None, debug_mode=False, use_bots=False, training_bots=None,
-                     agent_seat_mode=None, global_seed=None, opponent_mix_config=None,
+                     agent_seat_mode=None, agent_seat_p2_ratio=None,
+                     global_seed=None, opponent_mix_config=None,
                      n_envs=None, episode_start_index=0,
                      vec_normalize_enabled=False, vec_normalize_eval_enabled=False):
     """
@@ -221,6 +222,10 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
         debug_mode: Enable debug mode
         use_bots: If True, wrap with BotControlledEnv instead of SelfPlayWrapper
         training_bots: List of bot instances for BotControlledEnv (required if use_bots=True)
+        agent_seat_p2_ratio: Part des episodes ou l'agent joue SECOND quand
+            `agent_seat_mode='random'`. Obligatoire dans la config d'entrainement (cf.
+            `ai.train.build_training_opponents`), et propage jusqu'ici sans reinterpretation :
+            l'evaluation, qui n'emprunte pas ce chemin, garde son tirage equitable.
         n_envs: Nombre d'environnements REELLEMENT ouverts (deja resolu par
             `_resolve_n_envs_for_step_logging`). Obligatoire : c'est le denominateur des rampes
             par-episode, moteur ET self-play (V11 §0.57).
@@ -301,6 +306,7 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             bots=training_bots,
             unit_registry=unit_registry,
             agent_seat_mode=agent_seat_mode,
+            agent_seat_p2_ratio=agent_seat_p2_ratio,
             global_seed=global_seed,
             env_rank=rank,
             self_play_vec_normalize_enabled=vec_normalize_enabled,

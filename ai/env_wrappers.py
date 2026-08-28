@@ -320,6 +320,7 @@ class BotControlledEnv(gym.Wrapper):
         unit_registry=None,
         bots=None,
         agent_seat_mode: str = "p1",
+        agent_seat_p2_ratio: Optional[float] = None,
         global_seed: Optional[int] = None,
         env_rank: int = 0,
         episode_start_index: int = 0,
@@ -365,6 +366,7 @@ class BotControlledEnv(gym.Wrapper):
             self._global_seed = int(global_seed)
         else:
             self._global_seed = None
+        self._agent_seat_p2_ratio = self._resolve_seat_p2_ratio(agent_seat_p2_ratio)
         if episode_start_index < 0:
             raise ValueError(f"episode_start_index must be >= 0 (got {episode_start_index})")
         self._episode_index = int(episode_start_index)
@@ -938,8 +940,56 @@ class BotControlledEnv(gym.Wrapper):
                 )
         return obs, terminated, truncated, info, cumulative_reward, decision
 
+    def _resolve_seat_p2_ratio(self, agent_seat_p2_ratio: Optional[float]) -> float:
+        """Part des episodes ou l'agent joue SECOND, quand `agent_seat_mode='random'`.
+
+        POURQUOI CE REGLAGE EXISTE. Le tirage etait un pile ou face exact, et l'agent joue
+        nettement moins bien en second : mesure du run x1_long du 2026-08-12, 0.707 de win-rate
+        en jouant premier contre 0.586 en jouant second, 12 points stables jusqu'a la fin du
+        run (cf. `ai.bot_evaluation.SEAT_KEYS`). Sur-echantillonner le siege faible est le seul
+        levier d'exposition disponible ; sans lui, la seule alternative etait `agent_seat_mode:
+        "p2"`, qui supprime purement et simplement l'autre siege et rend `00_critical/0_gap_p1-p2`
+        aveugle — meme travers que la rampe de deploiement a 1.0, qui tuait sa courbe de controle.
+
+        Le ratio ne s'applique QU'A L'ENTRAINEMENT : `ai/bot_evaluation.py` construit ses
+        environnements sans le passer, donc l'evaluation garde son tirage equitable. C'est
+        volontaire — le win-rate publie doit rester comparable entre runs, et un `combined`
+        mesure sur une ventilation de sieges biaisee ne le serait plus.
+
+        `None` vaut 0.5, c'est-a-dire le tirage equitable que `random` a toujours designe : ce
+        n'est pas un repli sur une valeur d'attente mais le contrat historique du mode, et il
+        sert les appelants qui n'ont aucune raison de biaiser (evaluation, scripts de mesure).
+        La CONFIG d'entrainement, elle, exige la cle explicitement (`ai/train.py`).
+        """
+        if agent_seat_p2_ratio is None:
+            return 0.5
+        if self.agent_seat_mode != "random":
+            raise ValueError(
+                f"agent_seat_p2_ratio n'a de sens qu'avec agent_seat_mode='random' "
+                f"(mode={self.agent_seat_mode!r}, ratio={agent_seat_p2_ratio!r}) : un siege fixe "
+                f"ne se pondere pas, et accepter la valeur en la ignorant ferait mentir la config."
+            )
+        if isinstance(agent_seat_p2_ratio, bool) or not isinstance(agent_seat_p2_ratio, (int, float)):
+            raise TypeError(
+                f"agent_seat_p2_ratio must be a number "
+                f"(got {type(agent_seat_p2_ratio).__name__})"
+            )
+        ratio = float(agent_seat_p2_ratio)
+        if not 0.0 <= ratio <= 1.0:
+            raise ValueError(f"agent_seat_p2_ratio must be within [0.0, 1.0] (got {ratio})")
+        return ratio
+
     def _resolve_controlled_player_for_episode(self) -> int:
-        """Resolve controlled player for this episode from seat mode."""
+        """Resolve controlled player for this episode from seat mode.
+
+        En mode `random`, le siege est tire d'un hachage de (seed, rang d'env, index d'episode)
+        compare a `_agent_seat_p2_ratio`. Le tirage retenait auparavant la PARITE de ce hachage,
+        ce qui figeait la ventilation a 50/50 ; le seuil sur les 32 premiers bits — uniformes —
+        rend le meme service pour n'importe quelle proportion. Consequence assumee : a ratio 0.5
+        un run rejoue ne redonne pas siege pour siege la meme sequence qu'avant ce changement,
+        seulement la meme distribution. Aucun invariant du depot ne porte sur le siege d'un
+        episode nomme ; les courbes `seat_aware/*` portent sur les agregats.
+        """
         if self.agent_seat_mode == "p1":
             return 1
         if self.agent_seat_mode == "p2":
@@ -948,7 +998,7 @@ class BotControlledEnv(gym.Wrapper):
         seed_material = f"{self._global_seed}:{self._env_rank}:{self._episode_index}"
         seed_hash = hashlib.sha256(seed_material.encode("utf-8")).hexdigest()
         selector = int(seed_hash[:8], 16)
-        return 1 if selector % 2 == 0 else 2
+        return 2 if (selector / 2 ** 32) < self._agent_seat_p2_ratio else 1
 
     def _apply_episode_seat(self) -> None:
         """Set controlled/opponent players in engine config and game_state."""
@@ -1859,6 +1909,7 @@ class BotControlledEnv(gym.Wrapper):
         p2_timestep_share = (self.timesteps_agent_p2 / total_timesteps * 100.0) if total_timesteps > 0 else 0.0
         return {
             "agent_seat_mode": self.agent_seat_mode,
+            "agent_seat_p2_ratio": self._agent_seat_p2_ratio,
             "episodes_agent_p1": self.episodes_agent_p1,
             "episodes_agent_p2": self.episodes_agent_p2,
             "episodes_vs_bots": self._bot_episodes,
