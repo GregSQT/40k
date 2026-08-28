@@ -44,7 +44,7 @@
       "ratio_start": 0.0,
       "ratio_end": 0.50,
       "pool": [
-        {"kind": "champion", "members": ["P0"], "weight": 0.40}
+        {"kind": "champion", "members": ["P0"], "weight": 0.50}
       ],
       "training_config_overrides": {
         "total_episodes": 75000,
