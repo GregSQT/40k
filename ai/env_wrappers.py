@@ -1909,7 +1909,7 @@ class BotControlledEnv(gym.Wrapper):
         p2_timestep_share = (self.timesteps_agent_p2 / total_timesteps * 100.0) if total_timesteps > 0 else 0.0
         return {
             "agent_seat_mode": self.agent_seat_mode,
-            "agent_seat_p2_ratio": self._agent_seat_p2_ratio,
+            "agent_seat_p2_ratio": self._agent_seat_p2_ratio if self.agent_seat_mode == "random" else None,
             "episodes_agent_p1": self.episodes_agent_p1,
             "episodes_agent_p2": self.episodes_agent_p2,
             "episodes_vs_bots": self._bot_episodes,
