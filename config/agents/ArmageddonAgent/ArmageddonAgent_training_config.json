@@ -33,7 +33,7 @@
             },
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
-            "target_kl": 0.02,
+            "target_kl": 0.015,
             "tensorboard_log": "./tensorboard/",
             "policy_kwargs": {
                 "net_arch": [
@@ -223,7 +223,7 @@
             },
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
-            "target_kl": 0.02,
+            "target_kl": 0.015,
             "tensorboard_log": "./tensorboard/",
             "policy_kwargs": {
                 "net_arch": [
@@ -415,7 +415,7 @@
             },
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
-            "target_kl": 0.02,
+            "target_kl": 0.015,
             "tensorboard_log": "./tensorboard/",
             "policy_kwargs": {
                 "net_arch": [
@@ -602,7 +602,7 @@
             },
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
-            "target_kl": 0.02,
+            "target_kl": 0.015,
             "tensorboard_log": "./tensorboard/",
             "policy_kwargs": {
                 "net_arch": [
@@ -791,7 +791,7 @@
             },
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
-            "target_kl": 0.02,
+            "target_kl": 0.015,
             "tensorboard_log": "./tensorboard/",
             "policy_kwargs": {
                 "net_arch": [
@@ -1059,7 +1059,7 @@
             },
             "vf_coef": 0.5,
             "max_grad_norm": 0.5,
-            "target_kl": 0.02,
+            "target_kl": 0.015,
             "tensorboard_log": "./tensorboard/",
             "policy_kwargs": {
                 "net_arch": [
