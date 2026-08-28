@@ -514,6 +514,10 @@ class W40KMetricsTracker:
             self.episode_count,
         )
 
+    def log_immediate_reward_ratio_mean(self, ratio_mean: float) -> None:
+        """Courbe `00_critical/m_immediate_reward_ratio_mean` — emise par training_callbacks apres log_episode_end."""
+        self.writer.add_scalar('00_critical/m_immediate_reward_ratio_mean', ratio_mean, self.episode_count)
+
     def log_truncated_episode(self, reason: str, payload: Dict[str, Any]) -> None:
         """Episode d'ENTRAINEMENT coupe par le garde anti-runaway (cf. ai/truncation_log.py).
 
