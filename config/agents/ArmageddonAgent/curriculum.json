@@ -42,7 +42,7 @@
       "init": "new",
       "warmup_episodes": 5000,
       "ratio_start": 0.0,
-      "ratio_end": 0.40,
+      "ratio_end": 0.50,
       "pool": [
         {"kind": "champion", "members": ["P0"], "weight": 0.40}
       ],
