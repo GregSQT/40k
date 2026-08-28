@@ -549,7 +549,9 @@ class TestInlineMasks:
         model._update_info_buffer = MagicMock()
 
         # Espionner get_action_masks : doit être appelé UNE SEULE FOIS (bootstrap step 0).
-        with patch("ai.patched_ppo.get_action_masks") as mock_gam:
+        # Phase 3 : forcer le chemin stepwise (pas de MaskableSubprocVecEnv réel ici).
+        with patch("ai.patched_ppo.get_action_masks") as mock_gam, \
+             patch("ai.patched_ppo._get_maskable_subproc_vec_env", return_value=None):
             # Bootstrap : get_action_masks retourne des masques plein pour step 0.
             mock_gam.return_value = np.ones((n_envs, n_actions), dtype=bool)
 

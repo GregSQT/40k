@@ -4,14 +4,12 @@
 
 ## Accélération de l'entraînement RL — phases 0→4 {#perf-entrainement}
 
-**✅ Phases 0, 1, 2 et 4 entièrement livrées et fermées (2026-08-27).** Gains réels : Phase 1 =
-P99 −44 % et wall −32 % (la queue, pas la moyenne) ; Phase 2 = `time/fps` 200 → 226-233 (+13-16 %) ;
-Phase 4 = gate parallélisé (4.1), pool persistant + jeton version (4.2, 134 tests, 4 mutations rouges), `bot_eval_n_workers` → 2 (4.3, F_6=1 293 s vs F_2=58 s).
-L'estimation initiale de ×2-3 pour 1+2+4 n'est pas atteinte : le lockstep de collecte (~73 % du
-budget d'un cycle) est structurel et ne cède qu'à la Phase 3.
-Phase 3 (collecte distribuée, option A) = actée mais non lancée, chantier dédié hors
-période de run — c'est elle qui porte le ×3-6.
-Goulots restants : lockstep de collecte (Phase 3).
+**✅ Phases 0, 1, 2, 3 et 4 entièrement livrées.** Gains réels : Phase 1 = P99 −44 % et wall −32 % ;
+Phase 2 = `time/fps` 200 → 226-233 (+13-16 %) ; Phase 4 = gate parallélisé + pool persistant + `bot_eval_n_workers` → 2.
+Phase 3 livrée (2026-08-28) : collecte distribuée Option A — chaque worker déroule 340 steps en
+autonome avec policy CPU gelée, retourne sa trajectoire ; learner fait uniquement l'update GPU.
+**Gain time/fps non encore mesuré** (à faire avant merge, ≥ 3 reps, machine au repos — §6 perf_entrainement.md).
+Goulots restants : aucun identifié de cette ampleur ; mesure time/fps Phase 3 à consigner avant merge.
 
 → `Documentation/Chantiers/backlog/perf_entrainement.md`
 
