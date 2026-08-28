@@ -319,7 +319,15 @@ def relire_faults(lines):
 
     bloc = [ln for i in labels for ln in bloc_relire(lines, i)]
     cmd_lines = [ln for ln in bloc if re.match(r"^\s*/(code-review|simplify)\b", ln)]
+
+    # Si l'agent a lancé /code-review lui-même et affiché les findings, les deux exigences
+    # (/code-review et /simplify) sont satisfaites : /simplify figure dans le bloc copiable fencé
+    # (invisible au hook) et /code-review a été exécuté — rien à réclamer.
+    findings_displayed = any(re.search(r"CODE REVIEW FINDINGS", ln) for ln in lines)
+
     for name in ("code-review", "simplify"):
+        if findings_displayed:
+            continue
         if not any(re.match(r"^\s*/" + name + r"\b", ln) for ln in cmd_lines):
             # Même indécidabilité que pour l'étiquette, un cran plus bas : une commande fencée est
             # celle du rapport OU celle d'un prompt copiable. On énonce donc les deux façons de

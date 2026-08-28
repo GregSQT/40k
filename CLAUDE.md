@@ -339,14 +339,29 @@ Une seule option réelle = décision, pas arbitrage. Jamais d'arbitrage pour rep
 RELIRE
 
 Obligatoire dès qu'un fichier compté comme code a bougé ; omis pour lecture/doc/discussion.
-L'agent ne lance JAMAIS /code-review ni /simplify.
+/code-review : lancer via le Skill tool quand pertinent — ≥ 1 fichier dans engine/**, ai/**, services/**, frontend/src/** avec un changement de logique ou de comportement (ajout/suppression de code, modification d'une condition, d'un calcul, d'un flux). Ne pas lancer pour commentaire seul, typo dans une chaîne doc, renommage pur, test isolé ou config pure. Findings = 0 → ne pas afficher la section CODE REVIEW FINDINGS.
+L'agent ne lance JAMAIS /simplify.
 Liste : .claude/hooks/relire-en-attente.sh --liste <session_id> (UUID du dossier PARENT du scratchpad). Ne jamais lancer --vider, seulement le fournir. Si hook défaillant : liste manuelle.
 Filtrage — exclus : config/**/*.json, *.md sauf CLAUDE.md, Documentation/** ; inclus sans exception : engine/**, ai/**, services/**, frontend/src/** ; zone grise (tests/**, scripts/**) : exclusion seulement avec justification.
-🟢 = sujet fini, bon moment pour /code-review + /simplify. 🟡 = arbitrage(s) ouvert(s), review utile mais partielle. Gros lot → scripts/review_plan.py. Chemins ABSOLUS ; guillemets si espace.
-Format :
+🟢 = sujet fini. 🟡 = arbitrage(s) ouvert(s). Gros lot → scripts/review_plan.py. Chemins ABSOLUS ; guillemets si espace.
+
+Format si /code-review lancé — bloc RELIRE :
+🟢 RELIRE : <n> fichiers — /code-review lancé, findings ci-dessous
+Puis, à la toute fin du rapport (après SUITE), hors de tout bloc fencé :
+🔍 CODE REVIEW FINDINGS :
+Suivi du bloc copiable (délimité par ```) commençant par :
+Assures toi que ces findings de /code-review soient pertinents et que ta solution soit optimale avant de coder :
+
+[VERDICT · category] /chemin/absolu:ligne — summary
+  Scénario : failure_scenario
+
+/simplify <chemins absolus>
+.claude/hooks/relire-en-attente.sh --vider <session_id>
+
+Format si /code-review non lancé :
 🟢 RELIRE : <n> fichiers — /code-review (bugs) + /simplify (cleanup)
-/code-review <chemins>
-/simplify <chemins>
+/code-review <chemins absolus>
+/simplify <chemins absolus>
 .claude/hooks/relire-en-attente.sh --vider <session_id>
 
 HOOK RAPPORT
