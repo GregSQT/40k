@@ -468,15 +468,21 @@ class EpisodeTerminationCallback(BaseCallback):
         if self._episode_eval_time_by_env is None:
             raise RuntimeError("Per-env eval time tracking not initialized")
 
+        injected_ep_wall: "np.ndarray | None" = self.locals.get("episode_wall_seconds")
+
         episodes_finished = 0
         for env_index, done in enumerate(done_flags):
             if not done:
                 continue
             episodes_finished += 1
-            wall_duration = (
-                (now_perf - self._episode_wall_time_by_env[env_index])
-                - (blocking_eval_seconds - self._episode_eval_time_by_env[env_index])
-            )
+            if injected_ep_wall is not None:
+                # Mode distribué : durée réelle de l'épisode mesurée dans le worker.
+                wall_duration = float(injected_ep_wall[env_index])
+            else:
+                wall_duration = (
+                    (now_perf - self._episode_wall_time_by_env[env_index])
+                    - (blocking_eval_seconds - self._episode_eval_time_by_env[env_index])
+                )
             self._episode_wall_time_by_env[env_index] = now_perf
             self._episode_eval_time_by_env[env_index] = blocking_eval_seconds
             self._slots_served.add(env_index)

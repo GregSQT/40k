@@ -360,12 +360,16 @@ class PatchedMaskablePPO(MaskablePPO):
             step_infos = [traj["infos_seq"][step_idx] for traj in trajectories]
             step_actions = np.array([traj["actions_seq"][step_idx] for traj in trajectories])
             step_rewards = np.array([traj["rewards_seq"][step_idx] for traj in trajectories], dtype=np.float32)
+            step_ep_wall_seconds = np.array(
+                [traj["episode_wall_seconds_seq"][step_idx] for traj in trajectories], dtype=np.float64
+            )
             callback.update_locals({
                 "dones": step_dones,
                 "infos": step_infos,
                 "actions": step_actions,
                 "rewards": step_rewards,
                 "n_steps": step_idx + 1,
+                "episode_wall_seconds": step_ep_wall_seconds,
             })
             self._update_info_buffer(step_infos, step_dones)
             if not callback.on_step():

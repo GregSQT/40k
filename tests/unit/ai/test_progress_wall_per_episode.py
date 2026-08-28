@@ -586,3 +586,53 @@ def test_une_sortie_cassee_n_arrete_pas_l_entrainement(monkeypatch):
         "une seule tentative d'ecriture : l'affichage se desactive au 1er echec au lieu de "
         f"retenter a chaque episode ({len(printed)} tentatives)"
     )
+
+
+def test_episode_wall_injecte_en_mode_distribue(monkeypatch):
+    """Mode distribué (replay Phase 3) : cur/min/max doivent utiliser la durée injectée.
+
+    En mode replay, time.perf_counter() mesure des microsecondes Python (ici ~10µs par step),
+    pas les vraies durées moteur. Sans injection, max afficherait ~0.000 au lieu de la vraie
+    durée. Avec episode_wall_seconds dans locals, le callback doit ignorer perf_counter et
+    utiliser la valeur injectée pour tous les slots done à ce step.
+
+    ROUGE sans la branche injected_ep_wall : max ≈ 0.000 alors qu'on attend real / n_envs.
+    VERT avec le fix : cur = min = max = real / n_envs.
+    """
+    import numpy as np
+
+    real_duration = 5.0  # durée moteur réelle en secondes
+    n_envs = 4
+
+    clock, callback, printed = _install(monkeypatch, n_envs=n_envs, steps_per_episode=5,
+                                        episodes_per_slot=1)
+
+    not_done = [False] * n_envs
+    all_done = [True] * n_envs
+
+    for step_index in range(5):
+        clock.advance(1e-5)  # 10µs → replay Python
+        is_last = step_index == 4
+        callback.locals = {
+            "dones": all_done if is_last else not_done,
+            "episode_wall_seconds": (
+                np.full(n_envs, real_duration, dtype=np.float64) if is_last
+                else np.zeros(n_envs, dtype=np.float64)
+            ),
+        }
+        callback._on_step()
+
+    assert printed, "aucune ligne affichée"
+    line = printed[-1]
+    expected = real_duration / n_envs  # même échelle que les autres colonnes
+
+    assert _read_cur(line) == pytest.approx(expected, abs=5e-4), (
+        f"cur doit refléter la durée injectée ({expected:.3f}), pas les microsecondes du replay"
+    )
+    minimum, maximum = _read_min_max(line)
+    assert maximum == pytest.approx(expected, abs=5e-4), (
+        f"max doit refléter la durée injectée ({expected:.3f})"
+    )
+    assert minimum == pytest.approx(expected, abs=5e-4), (
+        f"min doit refléter la durée injectée ({expected:.3f})"
+    )
