@@ -68,6 +68,13 @@ class _SeatDraw(BotControlledEnv):
         self._env_rank = env_rank
         self._episode_index = 0
         self._agent_seat_p2_ratio = self._resolve_seat_p2_ratio(agent_seat_p2_ratio)
+        # zero-init pour permettre l'appel de get_seat_stats() sans moteur
+        self.episodes_agent_p1 = 0
+        self.episodes_agent_p2 = 0
+        self._bot_episodes = 0
+        self._self_play_episodes = 0
+        self.timesteps_agent_p1 = 0
+        self.timesteps_agent_p2 = 0
 
     def p2_share(self, episodes: int) -> float:
         seats = []
@@ -256,6 +263,27 @@ def test_the_profiles_do_not_silently_diverge_on_the_seat_ratio() -> None:
         and profile.get("agent_seat_p2_ratio") != reference
     }
     assert not diverging, f"profils divergents (référence x1={reference}) : {diverging}"
+
+
+@pytest.mark.parametrize("fixed_mode", ["p1", "p2"])
+def test_get_seat_stats_omits_ratio_for_fixed_seat_modes(fixed_mode: str) -> None:
+    """En mode fixe, `agent_seat_p2_ratio` vaut `None` dans `get_seat_stats()`.
+
+    `_resolve_seat_p2_ratio(None)` stocke 0.5 comme valeur interne, mais ce 0.5 n'a aucun sens
+    en mode fixe — le tirage ne l'utilise jamais. Le reporter comme 0.5 dans les stats induirait
+    en erreur tout consommateur qui ne peut pas distinguer « délibérément 0.5 » de « sans objet ».
+    """
+    env = _SeatDraw(fixed_mode, None)
+    stats = env.get_seat_stats()
+    assert stats["agent_seat_p2_ratio"] is None, (
+        f"mode {fixed_mode!r}: attendu None, obtenu {stats['agent_seat_p2_ratio']!r}"
+    )
+
+
+def test_get_seat_stats_reports_ratio_for_random_mode() -> None:
+    """En mode random, `agent_seat_p2_ratio` expose la valeur configurée."""
+    env = _SeatDraw("random", 0.65)
+    assert env.get_seat_stats()["agent_seat_p2_ratio"] == 0.65
 
 
 def test_the_evaluation_never_reads_the_training_seat_ratio() -> None:

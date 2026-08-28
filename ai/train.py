@@ -2953,6 +2953,9 @@ def build_training_opponents(
         # ne lit PAS cette cle (`ai/bot_evaluation.py`) : son tirage reste equitable, faute de quoi
         # le win-rate publie cesserait d'etre comparable d'un run a l'autre.
         seat_p2_ratio_raw = require_key(training_config, "agent_seat_p2_ratio")
+        # Validation miroir de `_resolve_seat_p2_ratio` (env_wrappers.py) — doit rester en sync.
+        # Le but ici est uniquement d'émettre un message d'erreur préfixé `training_config.`
+        # avant que la valeur n'atteigne le wrapper, qui refuserait la même entrée invalide.
         if isinstance(seat_p2_ratio_raw, bool) or not isinstance(seat_p2_ratio_raw, (int, float)):
             raise TypeError(
                 f"training_config.agent_seat_p2_ratio must be a number "
@@ -2965,8 +2968,9 @@ def build_training_opponents(
                 f"(got {seat_p2_ratio})"
             )
         opponents["agent_seat_p2_ratio"] = seat_p2_ratio
-    # Mode FIXE : la cle reste SANS OBJET et n'est pas transmise (le wrapper refuse un ratio sur un
-    # siege fige). Elle n'est pas non plus une erreur, exactement comme `agent_seat_seed`, que les
+    # Mode FIXE : la cle reste SANS OBJET et n'est pas transmise (le wrapper refuse un ratio NON NUL
+    # sur un siege fige — None passe sans erreur et prend la valeur par defaut 0.5, mais n'est
+    # jamais transmis ici). Elle n'est pas non plus une erreur, exactement comme `agent_seat_seed`, que les
     # six profils declarent et que seul le mode `random` lit : `--param agent_seat_mode p2`
     # surcharge le mode sans pouvoir retirer la cle du profil, et ce chemin est documente
     # (Documentation/Reference/training/entrainement.md).
