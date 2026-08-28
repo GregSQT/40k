@@ -62,6 +62,9 @@ export default function AuthPage() {
       const errorMessage = loginPayload?.error ?? "Echec de connexion";
       throw new Error(errorMessage);
     }
+    if (!text) {
+      throw new Error("Le serveur a retourné une réponse vide. Vérifiez que le backend est démarré et accessible.");
+    }
 
     return loginPayload as LoginResponse;
   };

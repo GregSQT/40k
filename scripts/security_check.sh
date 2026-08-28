@@ -159,7 +159,7 @@ PIP_AUDIT_RC=0
 # (message de spinner, invisible hors terminal) et l'audit sort 0 sur une surface partielle.
 # Même trou que celui fermé côté bandit avec `errors`.
 pip-audit --strict -r "$RUNTIME_REQS" "${IGNORE_ARGS[@]}" || PIP_AUDIT_RC=$?
-[[ $PIP_AUDIT_RC -eq 0 ]] || FAILURES+=("pip-audit: vulnérabilité non justifiée dans la surface de production")
+[[ $PIP_AUDIT_RC -eq 0 ]] || FAILURES+=("pip-audit: échec de l'audit (CVE détectée ou paquet inauditable avec --strict) — relancer pour distinguer CVE et erreur réseau")
 
 # ---------------------------------------------------------------------------------
 echo "==> pip-audit — venv de développement (informatif, non bloquant)"
