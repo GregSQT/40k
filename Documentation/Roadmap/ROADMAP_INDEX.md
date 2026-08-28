@@ -90,7 +90,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 |---|---|---|---|---|
 | moteur | **T7** Unification validation déploiement | [moteur.md#t7](moteur.md#t7) | Fix faux — re-analyser avant | 🚫 |
 | moteur | **Phase B** Observation des niveaux | [moteur.md#phase-b](moteur.md#phase-b) | Phase A' validée + LoS 3D complet | 🚫 |
-| training+bot | **É9** Second siège + second scénario | [training.md#e9](training.md#e9) | J4 — entraînement bot satisfaisant | 🚫 |
+| training+bot | **É9** Second siège + second scénario — levier `agent_seat_p2_ratio` livré 2026-08-28, plus deux correctifs de suivi le même jour : `_resolve_seat_p2_ratio` et `get_seat_stats` retournent `None` en modes de siège fixes au lieu d'un `0.5` interne trompeur (`ai/env_wrappers.py`, `ai/train.py`, tests rouge→vert). Le second SCÉNARIO reste ouvert | [training.md#e9](training.md#e9) | J4 — entraînement bot satisfaisant | 🚫 |
 | training+bot | Validation qualitative §10.6 volet 2 | [bot.md#validation-externe](bot.md#validation-externe) | J5 — requis pour la démo | ⚡ |
 | bot | MCTS à l'inférence §10.7 (plan B anti-coups-absurdes) | [bot.md#mcts-inference](bot.md#mcts-inference) | Après J3, seulement si la démo l'exige | 🚫 |
 
@@ -129,7 +129,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
-| doc | 🟠 **Refonte Documentation/** — P1–P3 livrées (2026-08-27) ; P4 consolidation : moteur+backlog (16→9 docs, 20 sources archivées), training (7→5 docs, 7 sources archivées) et **jeu+outils** (jeu 3→3 noms d'objet, outils 7→4 dont fusion 5→1 `outils_conformite`, 11 sources archivées) livrés 2026-08-28 ; **v11** (5 renommages d'objet, strates §9.4 purges) livré 2026-08-28 ; reste infra | [doc.md#refonte](doc.md#refonte) | ⚡ |
+| doc | 🟠 **Refonte Documentation/** — P1–P3 livrées (2026-08-27) ; P4 consolidation : moteur+backlog (16→9 docs, 20 sources archivées), training (7→5 docs, 7 sources archivées) et **jeu+outils** (jeu 3→3 noms d'objet, outils 7→4 dont fusion 5→1 `outils_conformite`, 11 sources archivées) livrés 2026-08-28 ; **v11** (5 renommages d'objet, strates §9.4 purges) et **infra** (3 renommages d'objet, corps re-vérifiés, gardes re-pointées) livrés 2026-08-28 — P4 complète, les 5 lots livrés ; correctif de suivi : slot `m` du dashboard de `metriques.md` réaligné sur `m_immediate_reward_ratio_mean` (l'ancien tag n'est plus émis) | [doc.md#refonte](doc.md#refonte) | ⚡ |
 | doc | Dette d'ancres G1/G2/G4 de tranches_et_ruptures §1bis | [doc.md#dette-tranches](doc.md#dette-tranches) | ⚡ |
 | doc | Bandeaux périmés index_v11 §0bis (assumés depuis 2026-07-20) | [doc.md#bandeaux-0bis](doc.md#bandeaux-0bis) | ⚡ |
 | doc | §0.19 : les ✅ T2→T5 revérifiés par lecture seule | [doc.md#reverif-t2-t5](doc.md#reverif-t2-t5) | ⚡ |
