@@ -40,7 +40,7 @@ Rôle des sources :
 
 CODE : tranche ce qui est réellement implémenté ou non.
 
-ROADMAP_INDEX.md : tranche l'ordre/priorité des chantiers, y compris contre V11_agent_rework.md §0.
+ROADMAP_INDEX.md : tranche l'ordre/priorité des chantiers, y compris contre index_v11.md §0.
 
 Décision datée la plus récente : tranche l'approche retenue.
 

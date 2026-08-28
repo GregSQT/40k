@@ -294,3 +294,13 @@ profond, ou limité aux seules décisions critiques, suffirait probablement.
 
 **À ne PAS anticiper** : plan B après mesure. Rien ne sert de décider avant de savoir si le PPO
 spécialisé suffit.
+
+---
+
+## Correspondance des sources
+
+| Ancien fichier | Ancien § | Section actuelle |
+|---|---|---|
+| `V11_agent_rework.md` / `1_Agent/V11_agent_rework.md` | §10 | [`strategie_evaluation.md`](strategie_evaluation.md) §10 (ce fichier) |
+| `index_v11.md` avant découpage (2026-07-28) | §10 | [`strategie_evaluation.md`](strategie_evaluation.md) §10 (ce fichier) |
+| `V11_eval_strategy.md` | (ancienne tentative de nom) | [`strategie_evaluation.md`](strategie_evaluation.md) (ce fichier) |

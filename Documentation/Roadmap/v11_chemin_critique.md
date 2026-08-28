@@ -69,7 +69,7 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x1_long --resoluti
 | `x1_debug` | 96 | 0 | — |
 | `x5_debug` | 96 | 1 | — |
 | `x1` | 10 000 | 10 | 50 |
-| `x1_long` | 50 000 | 300 | **100** |
+| `x1_long` | 100 000 | 300 | **100** |
 
 Erreur-type avec `eval_episodes = 100` : `0,707/√(6 × 100)` ≈ **2,9 pts**. Durée : ~8 min (350 épisodes à 0,72 ép./s, mesuré le 2026-08-18). Aucun profil dédié nécessaire.
 
@@ -80,7 +80,7 @@ Erreur-type avec `eval_episodes = 100` : `0,707/√(6 × 100)` ≈ **2,9 pts**. 
 ## Mesure de référence {#mesure}
 
 `x1_long` — solde §0.14, §0.67, critère T6 (via §10.6) d'un coup.
-Durée mesurée du run x1_long 50 000 épisodes : **5 h 54** (2026-08-18). L'estimation antérieure de ~20 h (fondée sur 4 h 01 pour 10 000 épisodes extrapolée × 5) était fausse — un run neuf joue des parties courtes au début, la pente n'est pas linéaire.
+Durée mesurée du run x1_long (50 000 épisodes à l'époque, config actuelle : 100 000) : **5 h 54** (2026-08-18). L'estimation antérieure de ~20 h (fondée sur 4 h 01 pour 10 000 épisodes extrapolée × 5) était fausse — un run neuf joue des parties courtes au début, la pente n'est pas linéaire.
 
 ---
 

@@ -3143,3 +3143,18 @@ le run multi-env, pas le smoke, qui a validé.
 > [`Documentation/Archives/chantiers/V11_agent_rework_history.md`](../../Archives/chantiers/V11_agent_rework_history.md).
 > Les ancres `### 0.x` sont préservées dans l'archive pour ne pas casser les références.
 
+
+---
+
+## Correspondance des sources
+
+| Ancien fichier | Ancien § | Destination actuelle |
+|---|---|---|
+| `V11_agent_rework.md` / `1_Agent/V11_agent_rework.md` | §0, §0bis | [`index_v11.md`](index_v11.md) §0, §0bis (ce fichier) |
+| `V11_agent_rework.md` | §0hist (historique résolu) | [`V11_agent_rework_history.md`](../../Archives/chantiers/V11_agent_rework_history.md) (archive) |
+| `V11_agent_rework.md` | §1→§8 | [`tranches_et_ruptures.md`](tranches_et_ruptures.md) |
+| `V11_agent_rework.md` | §9 | [`decisions_du_joueur.md`](decisions_du_joueur.md) |
+| `V11_agent_rework.md` | §10 | [`strategie_evaluation.md`](strategie_evaluation.md) |
+| `V11_tranches.md` | (ancienne tentative de nom pour §1→§8) | [`tranches_et_ruptures.md`](tranches_et_ruptures.md) |
+| `V11_phaseA.md` | (ancienne tentative de nom pour §9) | [`decisions_du_joueur.md`](decisions_du_joueur.md) |
+| `V11_eval_strategy.md` | (ancienne tentative de nom pour §10) | [`strategie_evaluation.md`](strategie_evaluation.md) |

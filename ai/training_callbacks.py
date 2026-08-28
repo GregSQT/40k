@@ -749,7 +749,7 @@ class MetricsCollectionCallback(BaseCallback):
         # les rebatir sur ce chemin : leur garde de phase rend un lecteur d'observation
         # REACHABLE en revue alors qu'il ne l'etait pas en rollout — c'est ainsi qu'un extracteur
         # mort depuis la migration aux entites a survecu jusqu'a faire lever un run. Ce qu'elles
-        # avaient d'utile se compte cote MOTEUR, sur le masque. Cf. V11_agent_rework.md §0.68.
+        # avaient d'utile se compte cote MOTEUR, sur le masque. Cf. index_v11.md §0.68.
 
     _PPO_KEYS = frozenset({
         'train/policy_gradient_loss', 'train/value_loss', 'train/entropy_loss',
