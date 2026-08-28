@@ -8,8 +8,8 @@
 Phase 2 = `time/fps` 200 → 226-233 (+13-16 %) ; Phase 4 = gate parallélisé + pool persistant + `bot_eval_n_workers` → 2.
 Phase 3 livrée (2026-08-28) : collecte distribuée Option A — chaque worker déroule 340 steps en
 autonome avec policy CPU gelée, retourne sa trajectoire ; learner fait uniquement l'update GPU.
-**Gain time/fps non encore mesuré** (à faire avant merge, ≥ 3 reps, machine au repos — §6 perf_entrainement.md).
-Goulots restants : aucun identifié de cette ampleur ; mesure time/fps Phase 3 à consigner avant merge.
+**Gain time/fps mesuré (2026-08-28) : médiane 487 fps (3 reps x1_debug, machine au repos) vs 226-233 fps Phase 2 → +113 % (×2,1).** Voir §6 perf_entrainement.md.
+Goulots restants : aucun identifié de cette ampleur.
 
 → `Documentation/Chantiers/backlog/perf_entrainement.md`
 
