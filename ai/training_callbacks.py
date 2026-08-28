@@ -428,6 +428,9 @@ class EpisodeTerminationCallback(BaseCallback):
         # Track per-env episode stats from callback done flags.
         dones = self.locals['dones']
         now_perf = time.perf_counter()
+        # Mode distribué : durées réelles injectées par patched_ppo (None en mode stepwise).
+        # -1.0 = sentinelle "épisode cross-trajectoire, durée non disponible" (exclu des stats).
+        injected_ep_wall: "np.ndarray | None" = self.locals.get("episode_wall_seconds")
         try:
             done_flags = [bool(d) for d in dones]
         except TypeError:
@@ -436,9 +439,11 @@ class EpisodeTerminationCallback(BaseCallback):
         n_envs = len(done_flags)
         if n_envs <= 0:
             raise ValueError("dones must contain at least one environment flag")
-        # L'horloge doit avancer strictement : `now_perf` sert d'origine aux durees d'episode
-        # ci-dessous, un delta nul ou negatif les rendrait insensees.
-        if self._last_step_perf_time is not None:
+        # En mode stepwise, l'horloge doit avancer strictement car now_perf sert d'ancre aux
+        # durées d'épisode. En mode distribué, perf_counter n'est plus utilisé pour les durées
+        # (elles viennent des workers) : le guard est inutile et peut crasher sur un replay
+        # pur Python où deux appels consécutifs retournent le même timestamp.
+        if injected_ep_wall is None and self._last_step_perf_time is not None:
             delta_step_seconds = now_perf - self._last_step_perf_time
             if delta_step_seconds <= 0:
                 raise ValueError(
@@ -468,23 +473,30 @@ class EpisodeTerminationCallback(BaseCallback):
         if self._episode_eval_time_by_env is None:
             raise RuntimeError("Per-env eval time tracking not initialized")
 
-        injected_ep_wall: "np.ndarray | None" = self.locals.get("episode_wall_seconds")
-
         episodes_finished = 0
         for env_index, done in enumerate(done_flags):
             if not done:
                 continue
             episodes_finished += 1
             if injected_ep_wall is not None:
-                # Mode distribué : durée réelle de l'épisode mesurée dans le worker.
+                # Mode distribué : durée réelle mesurée dans le worker.
+                # -1.0 = épisode cross-trajectoire non chronométré : exclu des stats.
                 wall_duration = float(injected_ep_wall[env_index])
             else:
+                # Mode stepwise : ancre perf_counter, corrigée du temps d'eval bloquante.
                 wall_duration = (
                     (now_perf - self._episode_wall_time_by_env[env_index])
                     - (blocking_eval_seconds - self._episode_eval_time_by_env[env_index])
                 )
-            self._episode_wall_time_by_env[env_index] = now_perf
-            self._episode_eval_time_by_env[env_index] = blocking_eval_seconds
+                # Mise à jour uniquement en stepwise : en distribué, now_perf est le timestamp
+                # du replay (microsecondes), qui corromprait la baseline pour un éventuel
+                # basculement en stepwise.
+                self._episode_wall_time_by_env[env_index] = now_perf
+                self._episode_eval_time_by_env[env_index] = blocking_eval_seconds
+            if wall_duration < 0:
+                # Sentinelle cross-trajectoire ou durée négative (eval bloquante > épisode) :
+                # ne pas inclure dans min/max/cur.
+                continue
             self._slots_served.add(env_index)
             self.max_episode_duration_seconds = max(
                 self.max_episode_duration_seconds,

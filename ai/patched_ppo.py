@@ -282,7 +282,8 @@ class PatchedMaskablePPO(MaskablePPO):
         #   (ConfigModuleInstance non-picklable) ; la classe fournit sa méthode à la place.
         # - action_dist : distribution laissée par le dernier evaluate_actions() de train(),
         #   ses tenseurs (logits, probs) restent attachés au graphe de calcul et Tensor.__deepcopy__
-        #   refuse les non-leaf. Les workers recréent leur distribution au premier forward().
+        #   refuse les non-leaf. Les workers recréent leur distribution dans _distribution_from()
+        #   via make_masked_proba_distribution(action_space) si l'attribut est absent.
         _saved_instance_attrs: dict = {}
         for _k in ("forward", "_uncompiled_original_forward", "action_dist"):
             if _k in self.policy.__dict__:
@@ -402,6 +403,9 @@ class PatchedMaskablePPO(MaskablePPO):
         next_step_masks: np.ndarray | None = None
 
         callback.on_rollout_start()
+        # Purger la clé injectée par le mode distribué (si un rollout précédent en avait posé
+        # une). Sans cette purge, le callback lirait une valeur stale de l'ancien rollout.
+        callback.update_locals({"episode_wall_seconds": None})
 
         while n_steps < n_rollout_steps:
             with th.no_grad():

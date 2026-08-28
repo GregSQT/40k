@@ -441,33 +441,53 @@ class TestRunWorkerTrajectory:
             )
 
     def test_episode_wall_seconds_seq_semantique(self):
-        """episode_wall_seconds_seq : 0.0 hors done, >0 sur done, durée croissante réelle.
+        """episode_wall_seconds_seq : 0.0 hors done, -1.0 pour épisode cross-traj, >0 sinon.
 
-        Chaque step non-done doit valoir 0.0. Chaque step done doit valoir une durée
-        positive (le temps réel écoulé dans le worker depuis le début de l'épisode).
-        ROUGE si la clé manque ou si des 0.0 sont retournés sur les steps done.
+        Avec initial_episode_start=True (épisode commence dans ce rollout) : premier done > 0.
+        Avec initial_episode_start=False (épisode cross-trajectoire) : premier done = -1.0.
+        Dones suivants (épisodes complets dans ce rollout) : > 0.
+        ROUGE si la clé manque ou si les valeurs ne respectent pas cette sémantique.
         """
         from ai.maskable_subproc_vec_env import _run_worker_trajectory
 
         env = self._make_stub_env()
         obs, _ = env.reset()
-        traj = _run_worker_trajectory(
-            env, obs, self._make_stub_policy_bytes(), self.N_STEPS, self._make_snapshot(), False
+
+        # initial_episode_start=True : pas d'épisode cross-trajectoire
+        traj_fresh = _run_worker_trajectory(
+            env, obs, self._make_stub_policy_bytes(), self.N_STEPS, self._make_snapshot(), True
         )
-
-        wall_seq = traj["episode_wall_seconds_seq"]
-        dones_seq = traj["dones_seq"]
+        wall_seq = traj_fresh["episode_wall_seconds_seq"]
+        dones_seq = traj_fresh["dones_seq"]
         assert len(wall_seq) == self.N_STEPS
-
         for i, (wall, done) in enumerate(zip(wall_seq, dones_seq)):
             if done:
                 assert wall > 0.0, (
-                    f"step {i} est un done : episode_wall_seconds_seq doit être > 0, got {wall}"
+                    f"step {i} est un done (épisode frais) : wall doit être > 0, got {wall}"
                 )
             else:
                 assert wall == 0.0, (
-                    f"step {i} n'est pas un done : episode_wall_seconds_seq doit être 0.0, got {wall}"
+                    f"step {i} n'est pas un done : wall doit être 0.0, got {wall}"
                 )
+
+        # initial_episode_start=False : premier done est cross-trajectoire → -1.0
+        obs2, _ = env.reset()
+        traj_cross = _run_worker_trajectory(
+            env, obs2, self._make_stub_policy_bytes(), self.N_STEPS, self._make_snapshot(), False
+        )
+        wall_seq2 = traj_cross["episode_wall_seconds_seq"]
+        dones_seq2 = traj_cross["dones_seq"]
+        first_done_idx = next((i for i, d in enumerate(dones_seq2) if d), None)
+        if first_done_idx is not None:
+            assert wall_seq2[first_done_idx] == -1.0, (
+                f"premier done cross-traj au step {first_done_idx} doit valoir -1.0, "
+                f"got {wall_seq2[first_done_idx]}"
+            )
+            for i in range(first_done_idx + 1, len(dones_seq2)):
+                if dones_seq2[i]:
+                    assert wall_seq2[i] > 0.0, (
+                        f"done suivant (step {i}) doit être > 0.0, got {wall_seq2[i]}"
+                    )
 
     def test_bootstrap_only_on_truncated(self):
         """Le bootstrap TimeLimit.truncated s'applique UNIQUEMENT sur truncated (pas terminated).
