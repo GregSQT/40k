@@ -1,3 +1,5 @@
+> **Document absorbé.** Consolidation P4 du 2026-08-28 : ce fichier a été fusionné dans [`Documentation/Reference/outils/outils_conformite.md`](../../Reference/outils/outils_conformite.md).
+
 # ai/analyzer.py - Guide de l'analyseur step.log
 
 > **Usage** : `python ai/analyzer.py step.log`

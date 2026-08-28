@@ -967,7 +967,7 @@ export const BoardReplay: React.FC = () => {
                   // 2026-08-12 (`Wound None(T+) [LETHAL HITS]`), mais il bute sur le MÊME
                   // mécanisme côté blessure : jambe sans dé, donc pas de détail à remplir. Seules
                   // les CRITIQUES ne sont écrites nulle part. Voir le rapport de parité de
-                  // Documentation/Reference/jeu/Weapon_rules.md.
+                  // Documentation/Reference/jeu/armes.md.
                   woundRerollRule: action.wound_reroll_rule,
                   devastating: action.devastating_wounds_applied,
                   // Dé d'origine d'un jet relancé : le détail affiche « 1->3 », comme en PvP.
@@ -1107,7 +1107,7 @@ export const BoardReplay: React.FC = () => {
                   // [DEVASTATING WOUNDS] n'est PAS repris ici : en mêlée `step.log` écrit
                   // `Save None(T+)` au lieu du segment `Save [DEVASTATING WOUNDS]` du tir, que le
                   // parseur cherche — le champ serait mort. C'est aussi la cause d'un défaut
-                  // PRÉEXISTANT du replay mêlée, documenté dans Documentation/Reference/jeu/Weapon_rules.md.
+                  // PRÉEXISTANT du replay mêlée, documenté dans Documentation/Reference/jeu/armes.md.
                   woundRerollRule: action.wound_reroll_rule,
                   attackRollInitial: action.hit_roll_initial,
                   strengthRollInitial: action.wound_roll_initial,

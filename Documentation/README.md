@@ -50,22 +50,18 @@ Le chantier perf training (mesures + Phase 3 à lancer) est un chantier OUVERT :
 
 | Document | Rôle |
 |---|---|
-| [Weapon_rules.md](Reference/jeu/Weapon_rules.md) | Système d'armes : registre des règles, effets moteur, armureries, sélection IA. |
-| [Unit_rules.md](Reference/jeu/Unit_rules.md) | Règles d'unités : `unit_rules.json`, résolution, choix contextuels. |
-| [Rules_Coverage.md](Reference/jeu/Rules_Coverage.md) | Audit règles officielles ↔ code (ancré sur les PDF de `40k_rules/`). |
+| [armes.md](Reference/jeu/armes.md) | Système d'armes : registre des règles, effets moteur, armureries, sélection IA. |
+| [regles_unites.md](Reference/jeu/regles_unites.md) | Règles d'unités : `unit_rules.json`, résolution, choix contextuels. |
+| [couverture_regles.md](Reference/jeu/couverture_regles.md) | Audit règles officielles ↔ code (ancré sur les PDF de `40k_rules/`). |
 
 ### outils/ — configuration, tests, conformité
 
 | Document | Rôle |
 |---|---|
-| [CONFIG_FILES.md](Reference/outils/CONFIG_FILES.md) | Référence des fichiers de config : weapon_rules, game_config, training, scénarios. |
-| [TESTING.md](Reference/outils/TESTING.md) | Architecture des tests, conventions (dont anomalies ANOM-XXX), DoD. |
-| [front_test_auto.md](Reference/outils/front_test_auto.md) | Plan des tests automatiques du front PvP (couches A/B/C). |
-| [GAME_Analyzer.md](Reference/outils/GAME_Analyzer.md) | Guide d'`ai/analyzer.py` (contrôles, pièges de lecture). |
-| [AI_RULES_checker.md](Reference/outils/AI_RULES_checker.md) | Guide de `scripts/check_ai_rules.py`. |
-| [Hidden_action_finder.md](Reference/outils/Hidden_action_finder.md) | Guide d'`ai/hidden_action_finder.py`. |
-| [Obs_channel_audit.md](Reference/outils/Obs_channel_audit.md) | Guide de `scripts/obs_channel_audit.py` (canaux d'observation). |
-| [Fix_violations_guideline.md](Reference/outils/Fix_violations_guideline.md) | Workflow de correction des violations de règles détectées. |
+| [configuration.md](Reference/outils/configuration.md) | Référence des fichiers de config : weapon_rules, game_config, training, scénarios. |
+| [tests.md](Reference/outils/tests.md) | Architecture des tests, conventions (dont anomalies ANOM-XXX), DoD. |
+| [tests_front.md](Reference/outils/tests_front.md) | Plan des tests automatiques du front PvP (couches A/B/C). |
+| [outils_conformite.md](Reference/outils/outils_conformite.md) | Outils de conformité : `check_ai_rules.py`, `analyzer.py`, `hidden_action_finder.py`, `obs_channel_audit.py`, workflow de correction. |
 
 ### infra/ — déploiement, sécurité, accès
 
@@ -113,4 +109,4 @@ Discipline, exceptions actées et outillage (checker + porte de fusion) : préfa
 
 **Entrée recommandée** : priorités → Roadmap/ROADMAP_INDEX.md · moteur → Reference/moteur/tour_de_jeu.md
 + architecture_moteur.md · training → Reference/training/entrainement.md · armes →
-Reference/jeu/Weapon_rules.md · règles officielles → 40k_rules/.
+Reference/jeu/armes.md · règles officielles → 40k_rules/.

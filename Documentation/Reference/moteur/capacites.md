@@ -475,7 +475,7 @@ Le seuil devient `clamp(base − bonus + malus, 2, 6)`. Le **1 non modifié rest
 
 `def build_weapon_attack_profile` (`attack_sequence.py`) est le point unique où les règles d'arme sont résolues pour un couple (arme, cible). Il gagne le contexte attaquant. Les lecteurs de A / S / D suivent le même chemin.
 
-Les règles d'arme du PDF 24 sont **déjà implémentées** (`config/weapon_rules.json` : `SUSTAINED_HITS`, `LETHAL_HITS`, `BLAST`, `DEVASTATING_WOUNDS`, `HAZARDOUS`, etc. — voir [Weapon_rules.md](../jeu/Weapon_rules.md)). Cette primitive ne les réimplémente pas — elle permet à une règle d'**unité** de les accorder conditionnellement à une arme.
+Les règles d'arme du PDF 24 sont **déjà implémentées** (`config/weapon_rules.json` : `SUSTAINED_HITS`, `LETHAL_HITS`, `BLAST`, `DEVASTATING_WOUNDS`, `HAZARDOUS`, etc. — voir [armes.md](../jeu/armes.md)). Cette primitive ne les réimplémente pas — elle permet à une règle d'**unité** de les accorder conditionnellement à une arme.
 
 ### Capacités couvertes
 
@@ -645,7 +645,7 @@ Conséquence pour la passe 1 : rien à solder avant de commencer. Le témoin de 
 - `engine/game_state.py` — contrôle d'objectif, overrides
 - `config/unit_rules.json` — déclaration des règles génériques + `obs_id`
 - `frontend/src/roster/{ork,spaceMarine}/units/*.ts` — `UNIT_RULES` des unités concernées
-- Tests ciblés, [`Documentation/Reference/jeu/Unit_rules.md`](../jeu/Unit_rules.md)
+- Tests ciblés, [`Documentation/Reference/jeu/regles_unites.md`](../jeu/regles_unites.md)
 
 **Interdit :** toucher `obs_size`, l'action space, ou une unité hors rosters Armageddon.
 

@@ -1,3 +1,5 @@
+> **Document absorbé.** Consolidation P4 du 2026-08-28 : ce fichier a été fusionné dans [`Documentation/Reference/outils/outils_conformite.md`](../../Reference/outils/outils_conformite.md).
+
 # Script de Vérification tour_de_jeu.md et coding_practices.mdc — check_ai_rules.py
 
 **Fichier** : `scripts/check_ai_rules.py`

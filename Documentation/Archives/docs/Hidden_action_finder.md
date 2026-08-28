@@ -1,3 +1,5 @@
+> **Document absorbé.** Consolidation P4 du 2026-08-28 : ce fichier a été fusionné dans [`Documentation/Reference/outils/outils_conformite.md`](../../Reference/outils/outils_conformite.md).
+
 # ai/hidden_action_finder.py — Détection des actions non loguées
 
 > **Usage** : après une run avec `--step` (et éventuellement avec `debug.log`), exécuter `python ai/hidden_action_finder.py`

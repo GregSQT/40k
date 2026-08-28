@@ -1,3 +1,5 @@
+> **Document absorbé.** Consolidation P4 du 2026-08-28 : ce fichier a été fusionné dans [`Documentation/Reference/outils/outils_conformite.md`](../../Reference/outils/outils_conformite.md).
+
 # scripts/obs_channel_audit.py — Le moteur remplit-il, et le réseau lit-il, chaque canal de l'obs ?
 
 > **Usage** : `python3 scripts/obs_channel_audit.py` (venv projet activé)

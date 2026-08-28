@@ -304,14 +304,14 @@ Unit 2(23,10) SHOT Unit 7(12,2) with [Heavy Bolter] - Hit 4(3+->2+) [HEAVY] - Wo
 - Actions à effet de bord (reactive move, choix de règle, hasard) : entrée structurée dans `action_logs` **et** flush vers `step.log`.
 - Tags d'affichage canoniques (`[RAPID FIRE:n]`, `[HEAVY]`, …) ; identifiants internes inchangés (`RAPID_FIRE`, …).
 
-**Reactive move (règle d'unité)** : spécification complète (état, éligibilité, résolution, caches, erreurs, tests) dans [Unit_rules.md](../jeu/Unit_rules.md), section « 10) Specification : reactive_move ».
+**Reactive move (règle d'unité)** : spécification complète (état, éligibilité, résolution, caches, erreurs, tests) dans [regles_unites.md](../jeu/regles_unites.md), section « 10) Specification : reactive_move ».
 
 ---
 
 ## Checklist de conformité pour tout changement substantiel
 
 - **Règles** : respecte les CORE AI CODING RULES ; ne contredit pas [tour_de_jeu.md](tour_de_jeu.md).
-- **Configuration** : toute nouvelle valeur réglable vit en fichier de config ; toute nouvelle clé est documentée dans [CONFIG_FILES.md](../outils/CONFIG_FILES.md) ou le guide pertinent.
+- **Configuration** : toute nouvelle valeur réglable vit en fichier de config ; toute nouvelle clé est documentée dans [configuration.md](../outils/configuration.md) ou le guide pertinent.
 - **Validation** : tout nouvel accès obligatoire passe par `require_key` / `require_present` (`shared/data_validation.py`).
 - **Erreurs** : donnée manquante ou invalide → erreur explicite fail-fast ; aucun remplacement silencieux.
 - **Architecture** : la conception la plus simple qui satisfait le besoin ; intégration sans duplication de responsabilité dans la carte des modules ci-dessus.

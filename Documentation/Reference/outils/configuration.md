@@ -314,7 +314,7 @@ Le dossier n'est pas décoratif : le loader y résout `wall_ref` et `terrain_ref
 
 **Purpose**: Define all weapons for a faction (SINGLE SOURCE OF TRUTH).
 
-**Status**: Voir [Weapon_rules.md](../jeu/Weapon_rules.md) pour l’architecture armurerie et le parsing.
+**Status**: Voir [armes.md](../jeu/armes.md) pour l’architecture armurerie et le parsing.
 
 ### Example
 
@@ -352,6 +352,6 @@ When adding new configuration files:
 ## Related Documentation
 
 - [architecture_moteur.md](../moteur/architecture_moteur.md) - Core coding rules
-- [Weapon_rules.md](../jeu/Weapon_rules.md) - Weapon system and armory architecture
-- [Documentation/Reference/outils/AI_RULES_checker.md](AI_RULES_checker.md) - Script check_ai_rules.py (conformité tour_de_jeu.md / coding_practices)
+- [armes.md](../jeu/armes.md) - Système d'armes : armurerie, règles, sélection IA
+- [outils_conformite.md](outils_conformite.md) - Outils de conformité : check_ai_rules, analyzer, hidden_action_finder, violations, obs_channel_audit
 
