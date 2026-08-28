@@ -28,11 +28,11 @@ When working on specific systems, I MUST read these docs first:
 **MANDATORY READ**: `Documentation/Reference/moteur/architecture_moteur.md` - Implementation patterns
 
 ### Reward System
-**MANDATORY READ**: `Documentation/Reference/training/AI_TRAINING.md` - Reward sections
+**MANDATORY READ**: `Documentation/Reference/training/entrainement.md` - Reward sections
 **OPTIONAL**: Reward config JSON for the specific agent
 
 ### Training / Learning
-**MANDATORY READ**: `Documentation/Reference/training/AI_TRAINING.md` - Full document
+**MANDATORY READ**: `Documentation/Reference/training/entrainement.md` - Full document
 **REFERENCE**: Training config JSON for phase-specific parameters
 
 **PROTOCOL**: If I haven't read the required docs for the system I'm modifying, I MUST read them before proceeding.

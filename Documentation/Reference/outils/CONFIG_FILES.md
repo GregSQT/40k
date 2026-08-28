@@ -286,7 +286,7 @@ passés à haut LR / haute entropie. `1.0` = comportement historique (rampe sur 
 reste le réglage des runs courts. La clé est **propre à chaque rampe** : `x1_long` et `x5_long`
 (200 000 épisodes) mettent `0.4` sur `ent_coef` (exploration terminée à 80 000, exploitation ensuite) et `0.7`
 sur `learning_rate` (rampe jusqu'à 140 000, pour ne pas brider l'apprentissage sur 60 % du run). Détail du raisonnement et tableau des
-profils : `Documentation/Reference/training/AI_TRAINING.md`. Verrou :
+profils : `Documentation/Reference/training/entrainement.md`. Verrou :
 `tests/unit/ai/test_schedule_decay_fraction.py`.
 
 > ⚠️ `checkpoint_save_freq` ne se compte **pas** en épisodes : SB3 sauvegarde tous les

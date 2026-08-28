@@ -75,7 +75,7 @@ Validation fail-fast : toute arme référencée doit exister dans l'armory (`Key
 | `w40k_core.py` | `class W40KEngine(gym.Env)` : possède `game_state`, orchestre reset/step, route les phases, délègue tout. |
 | `game_state.py` | `class GameStateManager` : initialisation d'état, création/validation d'unités (UPPERCASE), chargement scénario, conditions de fin (`check_game_over`, `determine_winner`). |
 | `game_utils.py` | Utilitaires partagés : `get_unit_by_id(game_state, unit_id)` / `require_unit_by_id`, logs console/debug, garde-fous « une seule fois » (`once_claimed`/`once_claim`), limite de tours, `enter_phase`. |
-| `observation_builder.py` | `class ObservationBuilder` : observation squad en **Dict de tenseurs d'entités** + grille égocentrique — contrat complet dans [AI_OBSERVATION.md](../training/AI_OBSERVATION.md). |
+| `observation_builder.py` | `class ObservationBuilder` : observation squad en **Dict de tenseurs d'entités** + grille égocentrique — contrat complet dans [observation_et_actions.md](../training/observation_et_actions.md). |
 | `observation_entities.py` | Schéma unifié d'entité pour l'observation squad (V11 §0.30 T-D) : constantes de slots (`K_ALLY_SLOTS`, `SQUAD_TOP_K`, …). |
 | `observation_weapon_profiles.py` | Encodage des profils d'armes et bits de règles dans l'observation. |
 | `reward_calculator.py` | `class RewardCalculator` : rewards depuis la config de l'agent, pénalités système, rewards situationnels, intégration reward_mapper. |
@@ -151,7 +151,7 @@ W40KEngine.step(action: int)
 
 **Espace d'action** : le layout vit dans [`engine/macro_intents.py`](../../../engine/macro_intents.py) (constantes `*_SLOT_BASE`/`*_SLOT_COUNT`, total `TOTAL_ACTION_SIZE`), verrouillé par `tests/unit/engine/test_action_space_mirror.py` (miroir avec `SQUAD_ACTION_*` de `shared_utils`). Ne jamais recopier les bornes : elles se décalent à chaque famille ajoutée. Les familles :
 
-- **Cellules de move** : la destination est une cellule de la grille égocentrique 32×32 (`GRID_CELL_COUNT`, `engine/spatial_grid.py`) ; le **type** de move (normal/advance/fall back) n'est pas une dimension d'action, il est **inféré** du coût géodésique (`def infer_squad_move_type`) — cf. [move_action_space_spatial_rework.md](../training/move_action_space_spatial_rework.md) §6.2. En phase deployment, les premiers ids de cette plage servent de slots de déploiement — la **phase** désambiguïse.
+- **Cellules de move** : la destination est une cellule de la grille égocentrique 32×32 (`GRID_CELL_COUNT`, `engine/spatial_grid.py`) ; le **type** de move (normal/advance/fall back) n'est pas une dimension d'action, il est **inféré** du coût géodésique (`def infer_squad_move_type`) — cf. [observation_et_actions.md](../training/observation_et_actions.md) §6.2. En phase deployment, les premiers ids de cette plage servent de slots de déploiement — la **phase** désambiguïse.
 - **Wait / fin d'activation** (`ACTION_WAIT` ; `command_wait` en phase command).
 - **Slots de cible** : tir, tir indirect, charge (cible unique), paires de charge C(K,2), mêlée, Oath — tous indexés sur le **même** `get_enemy_slot_mapping`, donc la même ligne du tenseur ennemi de l'observation (**invariant D1** : désolidariser les comptes ferait pointer action i et observation i sur deux escouades différentes sans que rien ne lève). Logits par têtes pointeur (`ai/pointer_policy.py`) pour les slots-entités, têtes denses pour les paires et les armes.
 - **Fight sans cible éligible** (`ACTION_FIGHT_NO_TARGET`) : 12.04/12.06, sélectionnée pour combattre, 0 attaque — état légal, action propre.
@@ -180,7 +180,7 @@ W40KEngine._process_semantic_action(action)
 
 ### 3. Observation, reward, fin de partie
 
-- **Observation** : `_build_observation` / `_build_observation_and_mask` → `ObservationBuilder.build_squad_observation` (Dict de tenseurs d'entités) + `build_squad_grid` (grille égocentrique, `GRID_CHANNELS` canaux — lire `engine/spatial_grid.py`). Formes : `ObservationBuilder.squad_obs_shapes` ; taille du vecteur squad : `SQUAD_OBS_SIZE_TARGET` (calculée depuis le schéma, `engine/observation_builder.py`). Contrat complet : [AI_OBSERVATION.md](../training/AI_OBSERVATION.md). L'observation **relit la carte du masque**, jamais un second pool.
+- **Observation** : `_build_observation` / `_build_observation_and_mask` → `ObservationBuilder.build_squad_observation` (Dict de tenseurs d'entités) + `build_squad_grid` (grille égocentrique, `GRID_CHANNELS` canaux — lire `engine/spatial_grid.py`). Formes : `ObservationBuilder.squad_obs_shapes` ; taille du vecteur squad : `SQUAD_OBS_SIZE_TARGET` (calculée depuis le schéma, `engine/observation_builder.py`). Contrat complet : [observation_et_actions.md](../training/observation_et_actions.md). L'observation **relit la carte du masque**, jamais un second pool.
 - **Reward** : `RewardCalculator.calculate_reward(success, result, game_state)` — pénalités système (action invalide/interdite), rewards par action depuis la config de l'agent (`config/agents/<agent>/<agent>_rewards_config.json`), rewards situationnels (win/loss/draw), breakdown conservé pour les métriques.
 - **Fin** : `_check_game_over` (limite de tours, joueurs avec unités vivantes) ; `_determine_winner` (élimination, sinon comparaison à la limite de tours ; égalité = `DRAW_WINNER`). `info["episode"]` est rempli à la terminaison.
 
@@ -322,9 +322,9 @@ Unit 2(23,10) SHOT Unit 7(12,2) with [Heavy Bolter] - Hit 4(3+->2+) [HEAVY] - Wo
 
 ## Historique et sources
 
-- **Observation 150 floats** : le pipeline mono-figurine (`build_observation`, `_encode_*`, `_calculate_danger_probability`, …) a été supprimé le 2026-07-28 ; l'observation est un Dict de tenseurs d'entités + grille égocentrique — voir [AI_OBSERVATION.md](../training/AI_OBSERVATION.md).
+- **Observation 150 floats** : le pipeline mono-figurine (`build_observation`, `_encode_*`, `_calculate_danger_probability`, …) a été supprimé le 2026-07-28 ; l'observation est un Dict de tenseurs d'entités + grille égocentrique — voir [observation_et_actions.md](../training/observation_et_actions.md).
 - **Espace d'action 0-15** (`convert_gym_action`) : supprimé le 2026-07-29 (pierre tombale dans `engine/action_decoder.py`). Tout mapping « 0-3 move / 4-8 shoot / 9 charge / 10 fight / 11 wait » est périmé.
-- **« CPU 311 it/s » et « 4.7x speedup »** : mesures pré-V11 (obs Box 355 floats, MlpPolicy 256×256), invalidées par le profil V11 du 2026-08-26 (politique CNN sur CUDA, goulot côté workers CPU) — voir [perf_entrainement.md](../../Chantiers/backlog/perf_entrainement.md) §1/§6 et la section « CPU vs GPU » d'[AI_TRAINING.md](../training/AI_TRAINING.md). Les configs `debug`/`default` citées à l'époque n'existent plus (`config/agents/<agent>/<agent>_training_config.json`).
+- **« CPU 311 it/s » et « 4.7x speedup »** : mesures pré-V11 (obs Box 355 floats, MlpPolicy 256×256), invalidées par le profil V11 du 2026-08-26 (politique CNN sur CUDA, goulot côté workers CPU) — voir [perf_entrainement.md](../../Chantiers/backlog/perf_entrainement.md) §1/§6 et la section « CPU vs GPU » d'[entrainement.md](../training/entrainement.md). Les configs `debug`/`default` citées à l'époque n'existent plus (`config/agents/<agent>/<agent>_training_config.json`).
 - **`get_all_valid_targets` / `can_melee_units_charge_target`** (ancien `action_decoder`) : supprimées le 2026-07-29, code mort sans appelant ; les pools de cibles réels sont construits par les handlers de phase.
 - Ce document consolide `AI_IMPLEMENTATION.md` (archivé dans `Documentation/Archives/docs/`).
 

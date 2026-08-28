@@ -110,7 +110,7 @@ donner une sortie non nulle contre une liste d'exemptions déclarée reste ouver
 
 ## Voir aussi
 
-- `Documentation/Reference/training/AI_OBSERVATION.md` — ce que chaque canal signifie.
+- `Documentation/Reference/training/observation_et_actions.md` — ce que chaque canal signifie.
 - `engine/observation_entities.py` — les registres, source unique des noms de champs.
 - `Documentation/Reference/outils/Hidden_action_finder.md` et `AI_RULES_checker.md` — les deux
   autres outils de conformité, eux dans la commande de vérification de l'utilisateur.

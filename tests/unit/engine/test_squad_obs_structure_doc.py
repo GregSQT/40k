@@ -1,4 +1,4 @@
-"""Verrou : le « Structure Overview » / « Section Breakdown » d'AI_OBSERVATION.md dit vrai.
+"""Verrou : la « Vue d'ensemble » / « Description des tenseurs » d'observation_et_actions.md dit vrai.
 
 Ce depot a ete mordu trois fois en deux jours par une doc d'observation perimee : les
 « 12 unit-rule flags » du layout `obs[314:346]`, les features calculees `favorite_target`, et des
@@ -45,7 +45,9 @@ from engine.observation_weapon_profiles import (
 DOC = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
     "Documentation",
-    "AI_OBSERVATION.md",
+    "Reference",
+    "training",
+    "observation_et_actions.md",
 )
 
 
@@ -81,13 +83,13 @@ def test_every_schema_field_is_documented():
             if field not in text:
                 missing.append(f"{group}.{field}")
     assert not missing, (
-        "features absentes d'AI_OBSERVATION.md (Section Breakdown a mettre a jour) : "
+        "features absentes d'observation_et_actions.md (« Description des tenseurs » a mettre a jour) : "
         + ", ".join(missing)
     )
 
 
 def test_documented_indices_match_the_schema_order():
-    """Les INDEX ecrits dans le Section Breakdown sont ceux du schema.
+    """Les INDEX ecrits dans « Description des tenseurs » sont ceux du schema.
 
     Le breakdown liste chaque dimension sous la forme `cle[i] = nom` / `[s][i] = nom`. Ces index
     sont exacts a l'ecriture et derivent des qu'une feature est inseree ailleurs qu'en fin de
@@ -135,7 +137,7 @@ def test_weapon_profile_rules_are_documented():
 
 
 def _structure_overview() -> str:
-    """Le seul bloc « Structure Overview », isole.
+    """Le seul bloc « Vue d'ensemble », isole.
 
     Verifier les tailles sur le fichier ENTIER ne mord PAS : l'historique d'`obs_size` cite
     toutes les valeurs passees, donc n'importe quel total s'y trouve. Constate par mutation —
@@ -143,8 +145,8 @@ def _structure_overview() -> str:
     doit dire la verite COURANTE.
     """
     text = _doc()
-    start = text.index("### Structure Overview")
-    end = text.index("### Section Breakdown", start)
+    start = text.index("### Vue d'ensemble")
+    end = text.index("### Description des tenseurs", start)
     return text[start:end]
 
 

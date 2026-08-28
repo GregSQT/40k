@@ -11,7 +11,7 @@ POURQUOI CE MODULE EXISTE
 CE QUE LA TABLE CONTIENT, ET POUR COMBIEN DE TEMPS
     - `random` : la baseline, sans doctrine ni randomness parametrable.
     - Les CINQ bots d'origine, GELES et condamnes : ils ne valent plus que par la campagne de
-      correspondance (etape 7 de `Documentation/Chantiers/backlog/panel_reference.md`),
+      correspondance (etape 7 de `Documentation/Reference/training/panel_bots.md`),
       apres quoi leurs entrees et leur module partent.
     - Les SIX styles refondus (`ai/bot_doctrines.py`), qui les remplacent.
     - `tactical`, le holdout, et il le reste : la refonte « joue pour gagner » a ete ECRITE puis

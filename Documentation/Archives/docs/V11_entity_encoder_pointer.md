@@ -1,3 +1,7 @@
+> **Document absorbé.** Consolidation P4 du 2026-08-28 : ce fichier a été fusionné dans
+> `Documentation/Reference/training/observation_et_actions.md`, qui est désormais la source vivante. Conservé ici pour l'historique — ne plus
+> le citer ni le mettre à jour.
+
 # V11 — Encodeur d'entités partagé + tête pointeur (et les trous qu'il ferme)
 
 > **RÉFÉRENCE VIVANTE** — classé `Documentation/Reference/moteur/` par la refonte du 2026-08-27

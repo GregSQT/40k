@@ -494,7 +494,7 @@ hors de toute portée d'arme. Un test qui met une unité en réserves sans CONST
 > close-quarters) via `resolve_squad_shooting_type`, qui commande les armes sélectionnables. Le
 > volet MONSTER/VEHICLE de 10.06 (−1 au jet, [BLAST] interdit sur unité engagée) n'existe que
 > côté squad — divergence connue, cf.
-> [`V11_entity_encoder_pointer.md`](../training/V11_entity_encoder_pointer.md) §1.9.
+> [`observation_et_actions.md`](../training/observation_et_actions.md) §1.9.
 
 ### SECTION 1 : variables globales et tables de référence
 

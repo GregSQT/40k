@@ -161,7 +161,7 @@ def test_les_deux_diagnostics_partagent_le_meme_conseil_de_reprise() -> None:
 def test_aucune_commande_documentee_ne_cite_un_flag_inexistant() -> None:
     """Les messages d'aide et les docs proposent des COMMANDES `ai/train.py` copiables. `--new-model`
     n'a jamais existe dans l'argparse : la commande copiee sortait en erreur d'argument, et le flag
-    mort a survecu dans `Documentation/Reference/training/AI_TRAINING.md` a sa correction dans le code.
+    mort a survecu dans `Documentation/Reference/training/entrainement.md` a sa correction dans le code.
 
     Le controle porte sur la PROPRIETE, pas sur une chaine nommee en dur : tout `--flag` cite sur
     une ligne qui appelle `ai/train.py` doit etre declare par l'argparse. N'importe quel autre flag

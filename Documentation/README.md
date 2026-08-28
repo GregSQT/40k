@@ -37,13 +37,11 @@ Hors documentation technique : `Review/` (état de l'outil `scripts/review_plan.
 
 | Document | Rôle |
 |---|---|
-| [AI_TRAINING.md](Reference/training/AI_TRAINING.md) | Référence training/tuning : pipeline `train.py`, configs, monitoring, curriculum. |
-| [AI_OBSERVATION.md](Reference/training/AI_OBSERVATION.md) | Ce que l'agent observe : tenseurs d'entités + grille égocentrique (bloc de tailles verrouillé par test). |
-| [AI_METRICS.md](Reference/training/AI_METRICS.md) | Interprétation des métriques TensorBoard et tuning correctif. |
-| [V11_entity_encoder_pointer.md](Reference/training/V11_entity_encoder_pointer.md) | Encodeur d'entités partagé + tête pointeur (conception) — fusion prévue dans `observation_et_actions.md` (consolidation training). |
-| [move_action_space_spatial_rework.md](Reference/training/move_action_space_spatial_rework.md) | Action space spatial de move (grille égocentrique + tête spatiale) — même fusion prévue. |
+| [entrainement.md](Reference/training/entrainement.md) | Référence training/tuning : pipeline `train.py`, configs, monitoring, curriculum. |
+| [observation_et_actions.md](Reference/training/observation_et_actions.md) | Ce que l'agent observe et ce qu'il peut jouer : tenseurs d'entités, encodeur partagé + tête pointeur, grille égocentrique et tête spatiale (bloc de tailles verrouillé par test). |
+| [metriques.md](Reference/training/metriques.md) | Interprétation des métriques TensorBoard et tuning correctif. |
 | [V11_method_lessons.md](Reference/training/V11_method_lessons.md) | Pièges et leçons de méthode V11 (copie canonique, extraite de la spec). |
-| [bots_refonte_panel.md](Reference/training/bots_refonte_panel.md) | Panel de bots 6 styles : conception, protocole de mesure (§12) — la ligne de référence courante vit dans [Chantiers/backlog/panel_reference.md](Chantiers/backlog/panel_reference.md). |
+| [panel_bots.md](Reference/training/panel_bots.md) | Panel de bots 6 styles : conception, protocole de mesure (§12) et ligne de référence courante (§12.14). |
 
 Le chantier perf training (mesures + Phase 3 à lancer) est un chantier OUVERT :
 [Chantiers/backlog/perf_entrainement.md](Chantiers/backlog/perf_entrainement.md).
@@ -100,7 +98,7 @@ Discipline, exceptions actées et outillage (checker + porte de fusion) : préfa
   2026-08-28 : `endless_duty.md` (spec + état mesuré fusionnés), `migration_postgresql.md`,
   `mcts_adversaire.md`, `perf_entrainement.md`, `perf_noyau_natif_et_gzip.md`,
   `preview_tir_position_virtuelle.md`, `reactive_stratagems_overwatch_hi.md`,
-  `curriculum_adversaires_etalons.md`, `panel_reference.md`, `refonte_documentation.md` ;
+  `curriculum_adversaires_etalons.md`, `panel_bots.md`, `refonte_documentation.md` ;
   le chantier 06 Armageddon vit en §À faire de
   [Reference/moteur/capacites.md](Reference/moteur/capacites.md).
 
@@ -114,5 +112,5 @@ Discipline, exceptions actées et outillage (checker + porte de fusion) : préfa
 ---
 
 **Entrée recommandée** : priorités → Roadmap/ROADMAP_INDEX.md · moteur → Reference/moteur/tour_de_jeu.md
-+ architecture_moteur.md · training → Reference/training/AI_TRAINING.md · armes →
++ architecture_moteur.md · training → Reference/training/entrainement.md · armes →
 Reference/jeu/Weapon_rules.md · règles officielles → 40k_rules/.

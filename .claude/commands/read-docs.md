@@ -17,7 +17,7 @@ Use the Read tool to read the relevant documentation files from the `Documentati
 
 1. `Documentation/Reference/moteur/tour_de_jeu.md` - Game loop and phase logic specification
 2. `Documentation/Reference/moteur/architecture_moteur.md` - Implementation patterns and rules
-3. `Documentation/Reference/training/AI_TRAINING.md` - Training and reward system documentation
+3. `Documentation/Reference/training/entrainement.md` - Training and reward system documentation
 4. `Documentation/ANTI_OVERFITTING_GUIDE.md` - Training optimization guide
 
 ## After Reading

@@ -57,13 +57,13 @@ Objectif : que le checker couvre la nouvelle arborescence ENTIÈRE, pas seulemen
 d'entrée. Contenu :
 
 - **Passe 4 (ancres) sur `Reference/`** — préalable : nettoyer les dizaines de
-  `fichier.py:ligne` historiques des ex-docs racine (`AI_TRAINING.md` en tête, raison de son
+  `fichier.py:ligne` historiques des ex-docs racine (`entrainement.md` en tête, raison de son
   statut `VALUE_ONLY_DOCS`) ; étendre `ANCHOR_TREES` (`scripts/check_doc_references.py`).
 - **Passe liens sur tout le corpus vivant** (`Reference/`, `Chantiers/`, `Roadmap/`, README) —
   les liens morts trouvés par l'audit échappaient au checker, qui ne contrôle que 12 docs.
-- **VALUE_CHECKS étendus** : `TOTAL_ACTION_SIZE` (le bandeau d'`AI_TRAINING.md` affichait 1 139
+- **VALUE_CHECKS étendus** : `TOTAL_ACTION_SIZE` (le bandeau d'`entrainement.md` affichait 1 139
   pour un réel de 1 389), formes d'obs (`K_ALLY_SLOTS`, largeurs de champs — le tableau d'intro
-  d'`AI_OBSERVATION.md` contredisait le bloc gardé par test).
+  d'`observation_et_actions.md` contredisait le bloc gardé par test).
 - **Contrôle d'accumulation** : un seuil de lignes ✅ dans `ROADMAP_INDEX.md` au-delà duquel le
   checker exige l'archivage (la discipline existait, rien ne la vérifiait — 200 lignes ✅
   accumulées).
@@ -89,10 +89,12 @@ liste de purge prouvée + sections citées par le code préservées avec table d
   `mcts_adversaire` ; 20 sources archivées en `Archives/docs/` avec bandeau retour ;
   `V11_entity_encoder_pointer` et `move_action_space_spatial_rework` déplacés vers
   `Reference/training/` (fusion à venir).
-- **training : 🟡 à faire** — `observation_et_actions.md` (fusion AI_OBSERVATION +
-  entity_encoder + move_action_space), `entrainement.md` (ex-AI_TRAINING, journal → archives),
-  `metriques.md` (ex-AI_METRICS), `panel_bots.md` (fusion bots_refonte_panel + talon
-  panel_reference).
+- **training : ✅ livré le 2026-08-28** — `observation_et_actions.md` (fusion observation +
+  encodeur partagé/tête pointeur + grille égocentrique de move), `entrainement.md` (journal daté
+  extrait en `Roadmap/archives/training_journal.md`), `metriques.md`, `panel_bots.md` (fusion du
+  chantier panel + son talon chiffré) ; 7 sources archivées en `Archives/docs/` avec bandeau
+  retour ; gardes re-pointées par basename (`VALUE_ONLY_DOCS`/`VALUE_CHECKS`,
+  `test_squad_obs_structure_doc`, `test_bot_panel_reference`, `backup_select`).
 - **jeu + outils : 🟡 à faire** — `armes.md`, `regles_unites.md`, `couverture_regles.md`,
   `tests.md`, `configuration.md`, `outils_conformite.md` (fusion des 5 ex-Code_Compliance),
   `tests_front.md`.
@@ -113,7 +115,7 @@ Un chantier par document, préalable : P2 livré (le checker est le filet).
 - **Passes unitaires** (chacune à une correction près, preuves dans l'audit du 2026-08-27) :
   `Weapon_rules.md` (en-tête « INDIRECT_FIRE non implémentée » contredit par sa propre table et
   le code), `USER_ACCESS_CONTROL.md` (section Frontend pré-F12 ; 4 modes documentés sur 10 en
-  base), `AI_METRICS.md` (3 bots décrits sur 7 réels), bandeau `AI_TRAINING.md` (espace
+  base), `metriques.md` (3 bots décrits sur 7 réels), bandeau `entrainement.md` (espace
   d'action), `FIGHT_RESOLVER_CONVERGENCE.md` et `squad.md` (headers « non implémenté »/« en
   pause » faux), `Endless_duty.md` (slots spec ↔ code).
 
@@ -122,5 +124,5 @@ Un chantier par document, préalable : P2 livré (le checker est le filet).
 166 renames + 25 suppressions ; scripts recâblés (`check_doc_references.py`,
 `backup_select.py`), 4 tests fonctionnels re-pointés, CLAUDE.md et README régénérés/mis à jour,
 ~110 fichiers balayés pour les chemins, liens `../ROADMAP.md` (13 fichiers) et renvois relatifs
-morts réparés, ✅ de l'index descendus en `archives/`, `panel_reference.md` renommé (collision
+morts réparés, ✅ de l'index descendus en `archives/`, le doc du panel de bots renommé (collision
 d'homonymes), `coherency_removal_choix_agent.md` reclassé backlog (rien de livré, reverté).

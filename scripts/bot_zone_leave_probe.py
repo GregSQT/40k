@@ -3,7 +3,7 @@
 
 `bot_zone_direct.py` mesure un RÉSULTAT (zones tenues par tour) ; cette sonde mesure la
 DÉCISION qui le produit. Elle a été écrite pour départager les deux mécanismes candidats du
-§12.15 du chantier `Documentation/Reference/training/bots_refonte_panel.md`, et c'est son chiffre qui a tranché :
+§12.15 de `Documentation/Reference/training/panel_bots.md`, et c'est son chiffre qui a tranché :
 
   - côté ENNEMI : le bot abandonne la zone pour du VIDE, et neutraliser `w_enemy` le fait rester.
     Le terme ennemi, linéaire par hexe et sans plafond, bat le forfait de tenue de zone ;

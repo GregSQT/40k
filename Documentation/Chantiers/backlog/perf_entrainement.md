@@ -481,7 +481,7 @@ Une seule étape non faite = l'option reste ⛔.
 - Optimisations move pool déjà livrées : `Documentation/Archives/chantiers/V11_move_pool_optimization.md`,
   `perf_move_pool.md`, `perf_generate_compact_formation.md`.
 - Procédure de profilage : `engine/perf_timing.py` (`W40K_PERF_TIMING=1`) — ne jamais l'armer sur un run vivant.
-- ✅ (2026-08-26) La section « CPU vs GPU » de `Documentation/Reference/training/AI_TRAINING.md` a été réécrite sur les
+- ✅ (2026-08-26) La section « CPU vs GPU » de `Documentation/Reference/training/entrainement.md` a été réécrite sur les
   mesures du §1/§6 (l'ancienne « CPU 10 % plus rapide », 311 it/s, datait de l'ère pré-V11 : obs
   355 floats, MlpPolicy). Le jumeau `Documentation/Reference/moteur/architecture_moteur.md` § « CPU Optimization
   (311 it/s) » est marqué obsolète.

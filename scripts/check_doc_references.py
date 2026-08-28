@@ -131,13 +131,13 @@ DEFAULT_DOCS = [
 
 #: Documents soumis à la SEULE passe 3 (valeurs). Ce ne sont pas des documents d'entrée : ils ne
 #: disent pas par quoi commencer, on ne leur demande donc ni la convention d'ancres ni la
-#: vérification de leurs renvois — `AI_TRAINING.md` cite des dizaines de `fichier.py:ligne` et
+#: vérification de leurs renvois — `entrainement.md` cite des dizaines de `fichier.py:ligne` et
 #: passerait au rouge le jour où on l'ajouterait à DEFAULT_DOCS, ce qui rendrait le contrôle
 #: entier ignorable. Mais il PORTE des valeurs recopiées d'une source mécanique, et une valeur
 #: recopiée rouille où qu'elle vive : `obs_size` y est resté à 16 659 face à une source à 16703.
 VALUE_ONLY_DOCS = [
-    "Documentation/Reference/training/AI_TRAINING.md",
-    "Documentation/Reference/training/AI_OBSERVATION.md",
+    "Documentation/Reference/training/entrainement.md",
+    "Documentation/Reference/training/observation_et_actions.md",
 ]
 
 @functools.lru_cache(maxsize=1)
@@ -158,7 +158,7 @@ def _git_raw_listing() -> str:
 #: (`Chantiers/`) et l'archive des chantiers livrés (`Archives/chantiers/`) — exactement la
 #: population de l'ex-`Documentation/Implémentation/`, relocalisée par la refonte 2026-08-27.
 #: `Reference/` est inclus depuis P2 (2026-08-27) après nettoyage des ancres historiques
-#: d'`AI_TRAINING.md` (renvois `fichier:ligne` supprimés).
+#: du document d'entraînement (renvois `fichier:ligne` supprimés).
 ANCHOR_TREES = (
     "Documentation/Chantiers/",
     "Documentation/Archives/chantiers/",
@@ -898,7 +898,7 @@ def claim_obs_size(text: str) -> list[tuple[str, int]]:
     """Les valeurs d'`obs_size` annoncées par un document.
 
     Le séparateur de milliers n'est pas un ornement : borné à `\\d{4,}`, ce motif ne voyait pas
-    `**16 659**`, et c'est précisément la graphie qu'employait `AI_TRAINING.md`. Sa valeur y est
+    `**16 659**`, et c'est précisément la graphie qu'employait le document d'entraînement. Sa valeur y est
     restée à 16 659 pendant que la source calculée disait 16703 — le document le plus lu du
     dépôt sur ce sujet, faux, sous un contrôle vert qui regardait ailleurs.
     """
@@ -1035,7 +1035,7 @@ def obs_entities_module() -> Any:
 
 
 def claim_total_action_size(text: str) -> list[tuple[str, int]]:
-    """TOTAL_ACTION_SIZE annoncé sur la ligne « espace d'action » d'AI_TRAINING.md."""
+    """TOTAL_ACTION_SIZE annoncé sur la ligne « espace d'action » d'`entrainement.md`."""
     return [
         (m.group(0).strip(), integers_in(m.group(1))[0])
         for m in re.finditer(rf"espace d'action[^\n]*\*\*{_BOLD_INTEGER}\*\*", text)
@@ -1079,7 +1079,7 @@ def expected_total_action_size(_claim: object) -> object:
 def claim_allies_dims(text: str) -> list[tuple[str, tuple[int, int, int, int]]]:
     r"""Dimensions (K_cont, W_cont, K_bin, W_bin) de la ligne allies_cont/allies_bin.
 
-    Extrait le tuple depuis le tableau d'introduction d'AI_OBSERVATION.md :
+    Extrait le tuple depuis le tableau d'introduction d'`observation_et_actions.md` :
     `| \`allies_cont\` / \`allies_bin\` | (K, W_cont) / (K, W_bin) | ... |`
     """
     m = re.search(
@@ -1122,7 +1122,8 @@ TABLE_LABEL = "tableau des profils"
 #: profils dans le chemin critique (§P5), le décompte du `step.log` dans le sujet analyzer.
 #: `obs_size` était surveillé sur `doc.md`, qui n'en portait la valeur que le temps d'un chantier
 #: d'hygiène : le contrôle serait devenu ORPHELIN à sa clôture, et il ne voyait de toute façon pas
-#: le document qui publie vraiment cette valeur. Il est passé sur `AI_TRAINING.md` le 2026-08-23.
+#: le document qui publie vraiment cette valeur. Il est passé sur le document d'entraînement le
+#: 2026-08-23, renommé `entrainement.md` par la consolidation P4 du 2026-08-28.
 VALUE_CHECKS: dict[str, dict[str, ValueCheck[Any]]] = {
     "ROADMAP_INDEX.md": {
         "plafond de la porte de fusion": (claim_gate_ceiling, expected_gate_ceiling),
@@ -1135,11 +1136,11 @@ VALUE_CHECKS: dict[str, dict[str, ValueCheck[Any]]] = {
     "analyzer.md": {
         "entrées manquantes du step.log": (claim_step_log, expected_step_log),
     },
-    "AI_TRAINING.md": {
+    "entrainement.md": {
         "obs_size": (claim_obs_size, lambda _claim: expected_obs_size()),
         "TOTAL_ACTION_SIZE": (claim_total_action_size, expected_total_action_size),
     },
-    "AI_OBSERVATION.md": {
+    "observation_et_actions.md": {
         "dimensions allies_cont/allies_bin": (claim_allies_dims, expected_allies_dims),
     },
 }
@@ -1373,7 +1374,7 @@ def cited_documents(doc_path: pathlib.Path) -> list[pathlib.Path]:
     """Les documents que celui-ci DÉSIGNE, quelle que soit la graphie du renvoi.
 
     Pas seulement le lien markdown : le corpus roadmap renvoie à un chantier par son chemin
-    backtiqué (`→ `Documentation/Chantiers/backlog/panel_reference.md``), et c'est même sa
+    backtiqué (`→ `Documentation/Chantiers/backlog/mcts_adversaire.md``), et c'est même sa
     graphie majoritaire — mesuré le 2026-08-18, 11 des 11 renvois de fichier sujet vers un
     chantier ouvert. Ne suivre que les liens markdown aurait déclaré 11 orphelins sur 13.
 

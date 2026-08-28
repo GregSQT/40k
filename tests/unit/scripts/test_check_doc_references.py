@@ -1392,7 +1392,7 @@ def test_obs_size_is_read_through_its_thousands_separator() -> None:
     """`**16 703**` est une valeur annoncée autant que `**16703**`.
 
     Motif : borné à `\\d{4,}`, l'extracteur ne voyait pas la graphie à séparateur — et c'est
-    exactement celle qu'employait `AI_TRAINING.md`. Sa valeur y est restée à 16 659 face à une
+    exactement celle qu'employait le document d'entraînement. Sa valeur y est restée à 16 659 face à une
     source calculée à 16703, sous un contrôle qui se déclarait vert parce qu'il regardait
     ailleurs. Les trois séparateurs du corpus sont couverts.
     """
@@ -1593,25 +1593,25 @@ def test_corpus_links_real_corpus_has_no_dead_links() -> None:
 
 
 def test_total_action_size_stale(tmp_path: pathlib.Path) -> None:
-    """TOTAL_ACTION_SIZE faux dans AI_TRAINING.md → VALEUR PÉRIMÉE."""
-    doc = write(tmp_path, "AI_TRAINING.md", "espace d'action | **1 000** (desc)\n")
+    """TOTAL_ACTION_SIZE faux dans entrainement.md → VALEUR PÉRIMÉE."""
+    doc = write(tmp_path, "entrainement.md", "espace d'action | **1 000** (desc)\n")
     _verified, broken = cdr.check_values(doc)
     assert any("VALEUR PÉRIMÉE" in e for e in broken), f"attendu rouge, obtenu : {broken}"
 
 
 def test_total_action_size_confirmed(tmp_path: pathlib.Path) -> None:
-    """TOTAL_ACTION_SIZE exact dans AI_TRAINING.md → confirmé."""
+    """TOTAL_ACTION_SIZE exact dans entrainement.md → confirmé."""
     real = cdr.expected_total_action_size(None)
     formatted = f"{real:,}".replace(",", " ")
-    doc = write(tmp_path, "AI_TRAINING.md", f"espace d'action | **{formatted}** (desc)\n")
+    doc = write(tmp_path, "entrainement.md", f"espace d'action | **{formatted}** (desc)\n")
     verified, broken = cdr.check_values(doc)
     assert verified >= 1
     assert not any("TOTAL_ACTION_SIZE" in e and "PÉRIMÉE" in e for e in broken)
 
 
 def test_total_action_size_orphan(tmp_path: pathlib.Path) -> None:
-    """Aucune phrase TOTAL_ACTION_SIZE dans AI_TRAINING.md → ASSERTION ORPHELINE."""
-    doc = write(tmp_path, "AI_TRAINING.md", "rien à vérifier ici\n")
+    """Aucune phrase TOTAL_ACTION_SIZE dans entrainement.md → ASSERTION ORPHELINE."""
+    doc = write(tmp_path, "entrainement.md", "rien à vérifier ici\n")
     _verified, broken = cdr.check_values(doc)
     assert any("ASSERTION ORPHELINE" in e and "TOTAL_ACTION_SIZE" in e for e in broken)
 
@@ -1620,9 +1620,9 @@ def test_total_action_size_orphan(tmp_path: pathlib.Path) -> None:
 
 
 def test_allies_dims_stale(tmp_path: pathlib.Path) -> None:
-    """Dimensions allies fausses dans AI_OBSERVATION.md → VALEUR PÉRIMÉE."""
+    """Dimensions allies fausses dans observation_et_actions.md → VALEUR PÉRIMÉE."""
     doc = write(
-        tmp_path, "AI_OBSERVATION.md",
+        tmp_path, "observation_et_actions.md",
         "| `allies_cont` / `allies_bin` | (8, 19) / (8, 20) |\n",
     )
     _verified, broken = cdr.check_values(doc)
@@ -1630,10 +1630,10 @@ def test_allies_dims_stale(tmp_path: pathlib.Path) -> None:
 
 
 def test_allies_dims_confirmed(tmp_path: pathlib.Path) -> None:
-    """Dimensions allies exactes dans AI_OBSERVATION.md → confirmé."""
+    """Dimensions allies exactes dans observation_et_actions.md → confirmé."""
     k, wc, _, wb = cdr.expected_allies_dims(None)
     doc = write(
-        tmp_path, "AI_OBSERVATION.md",
+        tmp_path, "observation_et_actions.md",
         f"| `allies_cont` / `allies_bin` | ({k}, {wc}) / ({k}, {wb}) |\n",
     )
     verified, broken = cdr.check_values(doc)
@@ -1642,8 +1642,8 @@ def test_allies_dims_confirmed(tmp_path: pathlib.Path) -> None:
 
 
 def test_allies_dims_orphan(tmp_path: pathlib.Path) -> None:
-    """Aucune ligne allies_cont dans AI_OBSERVATION.md → ASSERTION ORPHELINE."""
-    doc = write(tmp_path, "AI_OBSERVATION.md", "rien ici\n")
+    """Aucune ligne allies_cont dans observation_et_actions.md → ASSERTION ORPHELINE."""
+    doc = write(tmp_path, "observation_et_actions.md", "rien ici\n")
     _verified, broken = cdr.check_values(doc)
     assert any("ASSERTION ORPHELINE" in e for e in broken)
 

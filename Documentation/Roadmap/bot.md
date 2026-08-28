@@ -176,7 +176,7 @@ Même sort que `standoff` (amplitude 0,05, supprimé le 2026-08-11). Décision d
 
 **→ Tranché le 2026-08-21 : RÉPARATION** ([#r0a-references](#r0a-references)) — le mécanisme (intention d'abord) est gardé, la couche déplacement est réparée ; C.4 sera rejoué après R0a sur les checkpoints chargeables.
 
-→ `Documentation/Chantiers/backlog/panel_reference.md` (`Documentation/Chantiers/Bot_refactor.md` §7)
+→ `Documentation/Reference/training/panel_bots.md` (`Documentation/Chantiers/Bot_refactor.md` §7)
 
 ---
 
