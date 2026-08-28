@@ -35,8 +35,8 @@
 > **Règles d'arbitrage entre docs** (établies le 2026-08-10) :
 > 1. **Le code fait foi** sur fait/pas fait. Un doc contredit par le code est périmé, pas le code.
 > 2. **La décision datée la plus récente tranche l'approche.** Les décisions sont recensées dans
->    `V11_agent_rework.md` §0 (tableau récapitulatif) et dans les amendements des chantiers.
-> 3. **Sur les priorités, ce fichier l'emporte** sur tout autre doc, y compris `V11_agent_rework.md`
+>    `index_v11.md` §0 (tableau récapitulatif) et dans les amendements des chantiers.
+> 3. **Sur les priorités, ce fichier l'emporte** sur tout autre doc, y compris `index_v11.md`
 >    §0 et sa colonne « Ordre ». Sur le détail et l'état de V11, c'est l'inverse.
 > 4. Conflit résiduel → section « Arbitrages ouverts » ci-dessous, tranchée par l'utilisateur.
 >
@@ -356,7 +356,7 @@
   2026-08-10) : modèle chargeable + sortie d'`analyzer.py` pour les tranches P3, rien de plus. Son
   modèle deviendra inchargeable dès P3-4. `x1` = **10 000 épisodes** (`total_episodes`, et non
   50 000 qui est la clé de commentaire `total_episodes_normal`).
-  → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.70
+  → [`1_Agent/index_v11.md`](1_Agent/index_v11.md) §0.70
 - ✅ **Livraison 2026-08-12 — trois verrous de test, aucun changement de comportement moteur.**
   (a) Deux tests analyzer étaient périmés : l'un sur le gel « Select Targets step » du 2026-08-12
   (04.02 : les cibles sont choisies avant toute résolution, donc les deux lignes d'une activation
@@ -436,8 +436,8 @@ mesure, et c'est assumé (§0.14).
    `12 Fights pahse.pdf`) : le MODE de consolidation n'est pas un choix de joueur** (12.08 l'impose
    par la situation) ; les décisions réelles sont consolider ou non, quelles unités ennemies
    sélectionner, et la destination. S'y ajoute un **écart aux règles**, pas seulement au PvP : le
-   gym ne sait pas consolider vers un objectif. → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.4 pt 5
-3. **P3-6 — Move-after-shooting + reactive move** (= L5) → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.4 pt 6
+   gym ne sait pas consolider vers un objectif. → [`1_Agent/decisions_du_joueur.md`](1_Agent/decisions_du_joueur.md) §9.4 pt 5
+3. **P3-6 — Move-after-shooting + reactive move** (= L5) → [`1_Agent/decisions_du_joueur.md`](1_Agent/decisions_du_joueur.md) §9.4 pt 6
 4. **P3-8 — Optionnels à statuer** (= L7→L11) — le choix d'arme en mêlée (§0.69) est déjà acté
    en ordre 3 ; le reste (split-fire, multi-cibles charge, placement final, stratégies de
    déploiement) exige de **mesurer le regret** avant de trancher (§9.0bis).
@@ -445,8 +445,8 @@ mesure, et c'est assumé (§0.14).
    DÉVELOPPEMENT en cours** (§0.70), pas après la mesure de référence. Le regret est un écart
    *relatif* (choix branché vs heuristique auto) : il supporte l'imprécision d'un run de 10 000
    épisodes, et l'alternative — statuer après la mesure — rachèterait un `x1_long` complet (~20 h)
-   au premier optionnel retenu. → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.4 pt 8
-5. **P4 — Observation de support** (= L12, ne se livre pas seule) → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.5
+   au premier optionnel retenu. → [`1_Agent/decisions_du_joueur.md`](1_Agent/decisions_du_joueur.md) §9.4 pt 8
+5. **P4 — Observation de support** (= L12, ne se livre pas seule) → [`1_Agent/decisions_du_joueur.md`](1_Agent/decisions_du_joueur.md) §9.5
    ⚠️ **Ordre à ne pas prendre au pied de la lettre** : les features de §9.5 (LoS/couvert par slot
    ennemi, portée effective, flags advanced/fell_back) sont ce qui rend P3-4 et P3-6 apprenables.
    Livrées APRÈS, elles font échouer le critère P5 de ces tranches pour une raison connue d'avance.
@@ -483,14 +483,14 @@ mesure, et c'est assumé (§0.14).
      rien ne l'interdit depuis la fin du run (§0). Le dimensionnement est un arbitrage de **budget
      machine par tranche** — le run `x1` de référence a pris **4 h 01** (11 h 17 → 15 h 18) pour
      10 000 épisodes.
-     → [`1_Agent/V11_phaseA.md`](1_Agent/V11_phaseA.md) §9.6
+     → [`1_Agent/decisions_du_joueur.md`](1_Agent/decisions_du_joueur.md) §9.6
 7. **Mesure de référence** `x1_long` — solde §0.14, §0.67, critère T6 (via §10.6) d'un coup.
    À ce régime mesuré (4 h 01 pour 10 000 épisodes), les **50 000** épisodes du profil valent
    ≈ **20 h** : c'est exactement le budget que le point 4 lui prête. Le profil valait 200 000
    jusqu'au 2026-08-11 — l'estimation « ~20 h » était donc fausse d'un facteur 4 tant qu'elle
    accompagnait l'ancienne valeur.
 8. **§0.59 — Phase 2 self-play** (`--append x1_selfplay`) — livré, JAMAIS exécuté ; le premier
-   run est aussi son premier test d'intégration. → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.59
+   run est aussi son premier test d'intégration. → [`1_Agent/index_v11.md`](1_Agent/index_v11.md) §0.59
    ✅ **Réorganisation metrics par phase livrée le 2026-08-16** : `ai/metrics_tracker.py` restructuré avec compteurs de phase séparés ; compteurs de charges ajoutés dans `engine/w40k_core.py` (nombres de charges déclarées/résolues par épisode) ; tests de verrouillage dans `test_episode_charge_counters.py`.
 9. **Refonte du panel de bots** (ouvert le 2026-08-11) — six styles, échelle de difficulté.
    → [`A_faire/bots_refonte_panel.md`](A_faire/bots_refonte_panel.md)
@@ -646,17 +646,17 @@ mesure, et c'est assumé (§0.14).
   chantier n'est pas en §1 alors qu'il corrige un écart aux règles.
 - **T7 — Unification validation de déploiement** — déclencheur : « le training tourne ».
   🔴 Le fix décrit est FAUX en l'état (mesuré 2026-07-20) ; c'est une décision de design
-  (plan contraint par l'ancre), pas un bug. → [`1_Agent/V11_tranches.md`](1_Agent/V11_tranches.md) §5 T7
+  (plan contraint par l'ancre), pas un bug. → [`1_Agent/tranches_et_ruptures.md`](1_Agent/tranches_et_ruptures.md) §5 T7
 - **Phase B — Observation des niveaux** (= L13) — après Phase A' validée ET vérification du
-  chantier LoS 3D (`combat_utils`/WASM, câblage incomplet). → [`1_Agent/V11_tranches.md`](1_Agent/V11_tranches.md)
+  chantier LoS 3D (`combat_utils`/WASM, câblage incomplet). → [`1_Agent/tranches_et_ruptures.md`](1_Agent/tranches_et_ruptures.md)
 - **É9 — Second siège + second scénario** — après entraînement bot satisfaisant ; second
-  scénario écrit par l'utilisateur (décision 2026-08-02). → [`1_Agent/V11_agent_rework.md`](1_Agent/V11_agent_rework.md) §0.47
+  scénario écrit par l'utilisateur (décision 2026-08-02). → [`1_Agent/index_v11.md`](1_Agent/index_v11.md) §0.47
 - **§10.6 volet 2 — Validation qualitative par un joueur externe** — requis pour la démo, au
-  même titre que le quantitatif. → [`1_Agent/V11_eval_strategy.md`](1_Agent/V11_eval_strategy.md) §10.6
+  même titre que le quantitatif. → [`1_Agent/strategie_evaluation.md`](1_Agent/strategie_evaluation.md) §10.6
 - **§10.7 — MCTS à l'inférence** — plan B anti-coups-absurdes, « à ne PAS anticiper » avant la
-  mesure ; risque = latence en démo. → [`1_Agent/V11_eval_strategy.md`](1_Agent/V11_eval_strategy.md) §10.7
+  mesure ; risque = latence en démo. → [`1_Agent/strategie_evaluation.md`](1_Agent/strategie_evaluation.md) §10.7
 - **Dette d'ancre G1/G2/G4** — recensement en fiabilité dégradée ; interdiction d'ouvrir un
-  chantier depuis une ligne non ✅. → [`1_Agent/V11_tranches.md`](1_Agent/V11_tranches.md) §1bis
+  chantier depuis une ligne non ✅. → [`1_Agent/tranches_et_ruptures.md`](1_Agent/tranches_et_ruptures.md) §1bis
 
 ## 4. Backlog hors chemin critique (`A_faire/`)
 
@@ -708,7 +708,7 @@ Prêt à démarrer, conception close, aucun arbitrage en attente :
   🔴 **Deux postulats de la proposition d'origine étaient contredits par des mesures déjà faites** :
   le seuil `benchmark_floor >= 80 %` (au-dessus du `combined = 0,7433` actuel — la porte ne
   s'ouvrirait jamais ; le seuil se pose APRÈS la première mesure), et le gating par un holdout non
-  scellé (arbitrage du 2026-08-04, `V11_eval_strategy.md` §10.6 — résolu par les deux étages).
+  scellé (arbitrage du 2026-08-04, `strategie_evaluation.md` §10.6 — résolu par les deux étages).
   Le mot « orthogonaux » est écarté au profit de « raisonne autrement », l'orthogonalité ayant été
   abandonnée comme critère le 2026-08-12 ; la complémentarité des trois benchmarks est **mesurée**
   (corrélation de rang sur ≥ 3 modèles) au lieu d'être supposée — et elle est ce qui rend le
@@ -1433,7 +1433,7 @@ vérifiée ; l'appariement reste réservé aux cellules de tableau, où le renvo
   (corrigé le 2026-08-10) : `x1.total_episodes` vaut bien **10 000** ; le 50 000 est
   `total_episodes_normal`, une clé de **commentaire** que `train.py` ne lit pas (il lit
   `total_episodes`). La `justification` avait raison. Même erreur propagée depuis
-  `V11_agent_rework.md` §0.70, corrigée là aussi.
+  `index_v11.md` §0.70, corrigée là aussi.
 - ~~`A_faire/Endless_duty_etat_mesure.md` affirme que `config/agents/CoreAgent/` n'existe plus —
   **il existe**.~~ ✅ corrigé dans le doc le 2026-08-10.
 - **Vitesse d'entraînement : deux régimes incompatibles, facteur ~14** (relevé le 2026-08-11).
@@ -1448,7 +1448,7 @@ vérifiée ; l'appariement reste réservé aux cellules de tableau, où le renvo
   plus SÉVÈRE des deux, jamais laxiste). Les durées de `x1_long` ont été réancrées sur la mesure
   le 2026-08-11 ; le reste ne l'est pas. Le traiter = re-dériver chaque note de coût d'évaluation
   des 9 profils, donc un chantier à ouvrir, pas un périmètre de clôture.
-- Bandeaux et chiffres périmés listés en `1_Agent/V11_agent_rework.md` §0bis, signalés et
+- Bandeaux et chiffres périmés listés en `1_Agent/index_v11.md` §0bis, signalés et
   volontairement non corrigés depuis le 2026-07-20.
 - `UNIT_ABILITY_SLOTS = 8` est une projection non mesurée ; le chantier 06 la rendra mesurable (§2).
 - **Ancres de ligne des docs V11 : périmées en masse** (relevé le 2026-08-10). Les symboles cités
@@ -1461,7 +1461,7 @@ vérifiée ; l'appariement reste réservé aux cellules de tableau, où le renvo
   en **nom de symbole** ; le reste des docs n'a pas été balayé.
   🟢 **DÉCISION 2026-08-10 — traitement AU FIL DE L'EAU, pas de balayage global.** Motif : le
   porteur de risque est un doc qu'on **rouvre** (c'est ainsi qu'est né le plan T7 faux, cf.
-  `V11_tranches.md` §1bis) ; un balayage complet dépenserait une journée sur `Implémenté/`, qui
+  `tranches_et_ruptures.md` §1bis) ; un balayage complet dépenserait une journée sur `Implémenté/`, qui
   n'a plus que valeur d'historique. **Règle : tout doc modifié voit ses ancres de ligne corrigées
   dans la même livraison** — cela entre dans le périmètre de clôture T2, sans validation
   supplémentaire.

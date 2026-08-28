@@ -1,8 +1,8 @@
 # V11 — Pièges et leçons de méthode
 
-> **Source** : extrait de `Documentation/Chantiers/v11/V11_agent_rework.md` §0bis lors de la refonte P3 (2026-08-27).
+> **Source** : extrait de `Documentation/Chantiers/v11/index_v11.md` §0bis lors de la refonte P3 (2026-08-27).
 > Ce document contient la **copie canonique** des leçons de méthode. En cas de divergence avec
-> `V11_agent_rework.md`, cette copie fait foi (les occurrences restées dans `V11_agent_rework.md`
+> `index_v11.md`, cette copie fait foi (les occurrences restées dans `index_v11.md`
 > §0hist ne font que documenter le raisonnement local).
 
 ## 0bis. Pièges et leçons de méthode — 📌 SECTION CANONIQUE
@@ -65,7 +65,7 @@ vert vacant — il atteste du câblage, jamais de la donnée.
 ### Un « ✅ SAIN » prononcé sur UNE règle ne dit rien des règles SATELLITES qui la modifient (§0.50, 2026-07-29)
 
 Écrit en corrigeant 01.07 (une unité **battle-shocked** contrôlait ses objectifs normalement).
-[`V11_tranches.md`](V11_tranches.md) affirmait :
+[`tranches_et_ruptures.md`](tranches_et_ruptures.md) affirmait :
 *« ✅ **Le vrai Objective Control est SAIN** : `_sum_objective_control_oc` compte bien
 OC × figurines dans la zone (14.02). Ce sont les règles satellites qui n'ont pas suivi. »*
 (la phrase est **barrée à la source** depuis le 2026-07-29, avec la mention « AFFIRMATION FAUSSE ») L'audit qui a produit cette phrase cherchait
@@ -170,7 +170,7 @@ offline ne prouve rien sur la conformité.
 **⚠️ Réserve de méthode sur ce document.** Les sections §0.x reflètent ce qui a été relu et
 exécuté pendant la session du 2026-07-19 soir. **Le reste du document — T1 à T5, section 9 — n'a
 PAS été revérifié ligne à ligne contre le code.** Trois affirmations périmées y ont été trouvées
-et corrigées ce soir-là (« prochain bloqueur [§10.4](V11_eval_strategy.md#s10.4) » alors qu'il était résolu, « archivage des
+et corrigées ce soir-là (« prochain bloqueur [§10.4](strategie_evaluation.md#s10.4) » alors qu'il était résolu, « archivage des
 holdouts à faire » alors qu'il l'était, « 9 échecs préexistants » alors que la suite est verte) —
 **il peut en rester d'autres du même genre**. Vérifier dans le code avant de s'appuyer sur une
 affirmation de ce document qui n'est pas datée de la session en cours.
@@ -186,7 +186,7 @@ working tree gelé), donc sans mutation-test.
 ➜ **Passe menée le 2026-07-20 : voir §0.19.1.** T2/T3/T4/T5 sont verrouillés par mutation-test ;
 **T1 est repassée en ⏳** (R6 site 1 inatteignable au x5, R4 sans aucun test) ; la section 9 n'a
 jamais été marquée ✅ (c'est un plan). La réserve reste valable pour **T1/R4**, dont le
-mutation-test n'a pas pu être mené (`shared_utils.py` sous instrumentation §0.18), et pour [§7](V11_tranches.md#s7)/[§10](V11_eval_strategy.md#s10)
+mutation-test n'a pas pu être mené (`shared_utils.py` sous instrumentation §0.18), et pour [§7](tranches_et_ruptures.md#s7)/[§10](strategie_evaluation.md#s10)
 qui n'ont **pas** été audités.
 
 **Comptages de tests : le seul verdict disponible est le code de sortie (§0.-1)**
@@ -212,7 +212,7 @@ Le seul contre-exemple était dans le répertoire non échantillonné.
 
 ### Un smoke à UN épisode ne voit pas un état qui fuit ENTRE épisodes (§0.42, 2026-07-28)
 
-Le mécanisme de décision agent ([§9.3](V11_phaseA.md#s9.3) P2) a été validé par un smoke in-engine : 28 décisions
+Le mécanisme de décision agent ([§9.3](decisions_du_joueur.md#s9.3) P2) a été validé par un smoke in-engine : 28 décisions
 exposées et jouées, épisodes terminés, aucun masque vide. Le smoke lançait **un épisode par
 moteur**. Le contre-audit a rejoué **3 épisodes enchaînés dans le MÊME moteur** : **16 décisions,
 puis 2, puis 0**. `_choice_timing_fired_events` indexe ses événements sans le numéro d'épisode et
@@ -435,7 +435,7 @@ d'ancrage est appelé AVANT d'y brancher quoi que ce soit.**
 **Motif récurrent : du code correct, testé, et jamais appelé (§0.4)**
 
 > **Motif récurrent à surveiller dans ce projet** — six occurrences vérifiées à ce jour.
-> **Cinq de type « jamais appelé »** : `update_frozen_model` ([§10.4](V11_eval_strategy.md#s10.4)),
+> **Cinq de type « jamais appelé »** : `update_frozen_model` ([§10.4](strategie_evaluation.md#s10.4)),
 > `end_of_turn_coherency_removal` (§0.1), `_advance_to_next_player` (§0.4),
 > `game_replay_logger` (§0.8, 795 lignes + 8 tests), `log_unified_action` (§0.8). Du code
 > correct, testé, et jamais appelé. **Devant toute fonction sur laquelle repose un
@@ -469,7 +469,7 @@ aucun biais détectable). Un premier tir de 40 resets donnait 15/13/9/**3** et l
 biais : c'était du **bruit d'échantillonnage**, pas un bug. Leçon : ne pas conclure à un biais de
 tirage sur quelques dizaines d'observations — refaire la mesure en grand avant de diagnostiquer.
 
-> **Bandeau de fiabilité du recensement d'ancre** — il vit en **[§1bis](V11_tranches.md#s1bis), « Dette d'ancre restante »**
+> **Bandeau de fiabilité du recensement d'ancre** — il vit en **[§1bis](tranches_et_ruptures.md#s1bis), « Dette d'ancre restante »**
 > et n'a pas été déplacé : seuls 4 sites y ont été relus à la main, le reste est un faisceau
 > d'indices. **Ne pas ouvrir de chantier depuis une ligne non marquée ✅ sans avoir lu la
 > fonction.** Le lire avant d'exploiter ce recensement.
@@ -511,7 +511,7 @@ Parade appliquée en §0.41 : livrer sur une branche, laisser `main` intact jusq
 
 **Une spec d'action_space peut être périmée par une évolution du RÉSEAU, pas seulement du moteur (§0.41, 2026-07-28)**
 
-[§9.3](V11_phaseA.md#s9.3) prévoyait `CHOICE_0..K-1`, K colonnes denses de `action_net`, pour tout point de décision.
+[§9.3](decisions_du_joueur.md#s9.3) prévoyait `CHOICE_0..K-1`, K colonnes denses de `action_net`, pour tout point de décision.
 Écrite le 2026-07-14, elle est antérieure à §0.30 T-E et §0.32 T-G, qui ont supprimé précisément
 ce motif (une colonne dense par rang n'apprend rien des autres et ne sait pas *ce qu'est* le
 candidat qu'elle score). **Règle** : quand les candidats d'une décision sont des ENTITÉS déjà
@@ -548,7 +548,7 @@ forme**, et de faire de l'ancienne signature son wrapper. Un seul corps, deux po
 
 **Un point de décision « le plus urgent » peut être INERTE dans le training réel (§0.41, 2026-07-28)**
 
-Le point 0 de [§9.4](V11_phaseA.md#s9.4) (pseudo-décision `raw_action_int % len(options)` sur les rule-choices) porte
+Le point 0 de [§9.4](decisions_du_joueur.md#s9.4) (pseudo-décision `raw_action_int % len(options)` sur les rule-choices) porte
 l'étiquette « le plus urgent » depuis le 2026-07-24. Vérification faite : **une seule** unité du
 projet porte un rule-choice (`TyranidWarriorMelee`, `usage: "or"`, déclaré dans les rosters **TS**
 — pas dans `config/unit_rules.json`, où le grep rend 0 et laisse croire à tort qu'il n'y en a
@@ -598,7 +598,7 @@ nombre d'épisodes du profil ⇒ **ni « best model » ni checkpoint**, sans le 
 `model_gating_enabled: False` rend en outre le `Gate 🧱` de la barre de progression purement
 décoratif. **Toujours confronter ces trois clés au `total_episodes` du profil avant de lancer**,
 et ne pas prendre un run de validation de pipeline pour une mesure : il ne peut pas servir le
-critère [§10.6](V11_eval_strategy.md#s10.6). (Valeurs constatées le 2026-08-02 sur `x5_debug` :
+critère [§10.6](strategie_evaluation.md#s10.6). (Valeurs constatées le 2026-08-02 sur `x5_debug` :
 `total_episodes` 10 000, `save_best_min_episodes` 10 000, `checkpoint_save_freq` 10 000,
 `bot_eval_final` 100.)
 
@@ -720,15 +720,15 @@ AVANT d'y lancer un entraînement.
 | # | Où | Affirmation | Pourquoi elle est suspecte |
 |---|---|---|---|
 | 1 | §0.-1 | « la suite est VERTE : `1402 passed, 2 skipped` » | Son propre ⚠️ la déclare datée. Le document porte aussi `1407`, `1440`, `1451`, `1396`, `1398` selon l'endroit. Seul verdict fiable : le code de sortie. |
-| 2 | [§5](V11_tranches.md#s5) / tableau T6-i | « ❌ test de non-régression **NON écrit** » | `tests/unit/engine/test_end_of_turn_coherency_03_03.py` **existe sur le disque** (vérifié le 2026-07-20) et §0.0 le déclare livré. |
-| 3 | [§5](V11_tranches.md#s5) / tableau T6 | « le critère T6 est désormais bloqué par `CC_DMG` (§0.3) qui plante des épisodes d'évaluation » | Le portage §0.3 est fait et le run 60/60 de §0.7 le valide runtime. |
-| 4 | [§10.5](V11_eval_strategy.md#s10.5) (bandeau) | « ⚠️ Non validé runtime — cf. §0.3 (`CC_DMG`) » | Levé par §0.7 (`TacticalBot` 10/10 épisodes). |
+| 2 | [§5](tranches_et_ruptures.md#s5) / tableau T6-i | « ❌ test de non-régression **NON écrit** » | `tests/unit/engine/test_end_of_turn_coherency_03_03.py` **existe sur le disque** (vérifié le 2026-07-20) et §0.0 le déclare livré. |
+| 3 | [§5](tranches_et_ruptures.md#s5) / tableau T6 | « le critère T6 est désormais bloqué par `CC_DMG` (§0.3) qui plante des épisodes d'évaluation » | Le portage §0.3 est fait et le run 60/60 de §0.7 le valide runtime. |
+| 4 | [§10.5](strategie_evaluation.md#s10.5) (bandeau) | « ⚠️ Non validé runtime — cf. §0.3 (`CC_DMG`) » | Levé par §0.7 (`TacticalBot` 10/10 épisodes). |
 | 5 | §0.10 | « la dette notée en **§0.0** (`--scenario bot` échoue en amont du moteur) » | Cette dette est écrite dans **§0.7**, pas §0.0. Renvoi imprécis, non corrigé. |
 | 6 | §0.12, étape 4 | « **9 tests** liés à `roster_pool_schedule` échouent indépendamment de ce travail » | ✅ **TRANCHÉ le 2026-07-20 — l'affirmation était FAUSSE.** Suite complète lancée : **1417 passed, 2 skipped, 0 failed**. Aucun échec `roster_pool_schedule`. §0.-1 avait raison : un test rouge est une régression, il n'y a pas d'échec préexistant à tolérer. |
-| 7 | [§2](V11_tranches.md#s2) « État des lieux vérifié » | « Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, **`ai.multi_agent_trainer`**, **`ai.scenario_manager`**, …) » | `ai/multi_agent_trainer.py` **n'existe plus** (supprimé en §0.8, vérifié absent du disque le 2026-07-20) ; `ai/scenario_manager.py` non plus (supprimé le 2026-07-29, §0.45). Deux des modules cités comme preuve de santé du pipeline étaient du code mort. |
+| 7 | [§2](tranches_et_ruptures.md#s2) « État des lieux vérifié » | « Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, **`ai.multi_agent_trainer`**, **`ai.scenario_manager`**, …) » | `ai/multi_agent_trainer.py` **n'existe plus** (supprimé en §0.8, vérifié absent du disque le 2026-07-20) ; `ai/scenario_manager.py` non plus (supprimé le 2026-07-29, §0.45). Deux des modules cités comme preuve de santé du pipeline étaient du code mort. |
 | 8 | §0.17 (par construction) | l'état de commit | Périmé dès le prochain `git commit` — l'entrée porte elle-même l'ordre de la reconfronter à `git status`. |
 | 10 | §0.18, note annexe | « après ce crash le process … s'est terminé avec un **code de sortie 0** » | ❌ **FAUSSE, tranchée le 2026-07-20 — voir §0.20.** Le handler `return 1`, `sys.exit` propage, et l'exécution confirme `EXIT=1`. Cause probable : un pipe (`| tee`) côté shell lors de la mesure. Enseignement : une note **« hors périmètre »** échappe à la relecture *parce qu'*elle est marquée annexe. |
-| 11-13 | [§6](V11_tranches.md#s6) (T2, T4), [§8.2](V11_tranches.md#s8.2) | layout d'actions « 41 », « 61 scénarios », `test_agent_interface_contract.py` | ➜ **détaillées en §0.19.1** (audit du 2026-07-20). Signalées, NON corrigées. ⚠️ **2026-08-02** : la n°11 a été « corrigée » une fois avec des chiffres qui sont à leur tour périmés — **ne plus citer de chiffre de layout d'action ici**, seul l'invariant « zéro littéral d'action dans `ai/` » compte, et il tient. La n°12 est aggravée : `scripts/sweep_scenario_bank_v11.py` **n'existe plus dans le dépôt** (il n'est donc plus seulement non exécutable). |
+| 11-13 | [§6](tranches_et_ruptures.md#s6) (T2, T4), [§8.2](tranches_et_ruptures.md#s8.2) | layout d'actions « 41 », « 61 scénarios », `test_agent_interface_contract.py` | ➜ **détaillées en §0.19.1** (audit du 2026-07-20). Signalées, NON corrigées. ⚠️ **2026-08-02** : la n°11 a été « corrigée » une fois avec des chiffres qui sont à leur tour périmés — **ne plus citer de chiffre de layout d'action ici**, seul l'invariant « zéro littéral d'action dans `ai/` » compte, et il tient. La n°12 est aggravée : `scripts/sweep_scenario_bank_v11.py` **n'existe plus dans le dépôt** (il n'est donc plus seulement non exécutable). |
 | 9 | §0.14 (rédigée puis **corrigée le même jour**) | « Non-régression §0.11 ✅ **VALIDÉE EN BOUT-EN-BOUT** » | ❌ **FAUSSE, retirée le 2026-07-20** — cf. §0.18 : le run suivant a crashé sur ce même message. Cas d'école : l'affirmation a été produite **par l'auteur du run lui-même**, le jour même, à partir d'un unique run vert. Le motif n°1 de ce document ne vient pas que du passé. |
 
 ---

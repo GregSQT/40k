@@ -1,4 +1,4 @@
-"""T3 (V11_agent_rework.md) — 1ter : le chemin d'éval holdout ne doit plus émettre
+"""T3 (index_v11.md) — 1ter : le chemin d'éval holdout ne doit plus émettre
 `objectives_ref` (clé rejetée par le moteur, objectifs désormais portés par le terrain).
 """
 import json

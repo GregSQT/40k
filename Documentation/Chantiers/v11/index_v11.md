@@ -1,17 +1,16 @@
-# V11 — Rétablissement de l'entraînement de l'agent (agent rework)
+# V11 — Index d'état : entrées ouvertes et pointeurs vers la spec
 
 > ### 🧭 Ce fichier n'est PAS la roadmap
 >
 > **Ordre du travail, tout projet confondu : [`../../Roadmap/ROADMAP_INDEX.md`](../../Roadmap/ROADMAP_INDEX.md)** — s'y reporter
 > pour savoir par quoi commencer, ce qui est bloqué et par quoi.
 >
-> Ce document porte le **détail de conception** de V11 : entrées ouvertes (§0), pièges et leçons de méthode (§0bis, copie canonique), historique résolu (§0hist).
-> **Depuis la refonte du 2026-08-27, l'ÉTAT des chantiers fait foi dans `Documentation/Roadmap/`
-> uniquement** — audit à l'appui : sur chaque chiffre échantillonné (TOTAL_ACTION_SIZE, obs_size,
-> P3-8, T6), la roadmap était à jour et ce fichier retardait. Ses bandeaux et chiffres d'état sont
-> donc à lire comme datés ; en cas de désaccord (état comme priorités), **la roadmap l'emporte**.
-> Scission prévue (P3 de la refonte, `Roadmap/doc.md#refonte`) : ouvert → roadmap, §0bis → doc de
-> méthode, §0hist → archive.
+> Ce document ne garde que l'**ÉTAT** de V11 : entrées ouvertes (§0), pointeurs vers la spec (§0ter
+> + Pointeurs), §0bis et §0hist redirigent vers leurs archives (refonte P3, 2026-08-27).
+> **L'ÉTAT des chantiers fait foi dans `Documentation/Roadmap/` uniquement** — audit à l'appui :
+> sur chaque chiffre échantillonné (TOTAL_ACTION_SIZE, obs_size, P3-8, T6), la roadmap était à jour
+> et ce fichier retardait. Ses bandeaux et chiffres d'état sont donc à lire comme datés ; en cas de
+> désaccord (état comme priorités), **la roadmap l'emporte**.
 
 Date d'audit : 2026-07-14. **Relecture intégrale du document contre le code le 2026-08-02**
 (8 lots de vérification en lecture seule ; corrections reportées dans les entrées concernées).
@@ -41,7 +40,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 >
 > **Conception et journal** : [`observation_et_actions.md`](../../Reference/training/observation_et_actions.md)
 > (encodeur partagé, tête pointeur, cardinalités) · [`V11_audit_observation.md`](../../Archives/chantiers/V11_audit_observation.md)
-> (audit d'origine) · **[§9.2.5](V11_phaseA.md#s9.2.5)** et **§0.31** de ce document (ce qui est observé, et pourquoi).
+> (audit d'origine) · **[§9.2.5](decisions_du_joueur.md#s9.2.5)** et **§0.31** de ce document (ce qui est observé, et pourquoi).
 >
 > **🎬 Replay (outillage d'analyse)** : [`Replay.md`](../Replay.md) — sémantique du viewer replay
 > (dont : le cercle vert fight = la seule unité activée, dérivée de l'attaquant, aucun pool loggué).
@@ -114,14 +113,14 @@ ponctuel — mais un artefact `x5_*` postérieur au 2026-08-02 n'est pas pour au
 | **§0.56** | Instrumentation : usage par **famille d'action**, et **classement bot-contre-bot** | ✅ **LIVRÉ le 2026-08-02** — reste à s'en servir | **2** | Deux angles morts fermés, aucun ne coûte de ré-entraînement. (1) `actions/share_<famille>` publie la part de chaque DÉCISION dans ce que l'agent joue : une dimension jamais choisie ou toujours choisie est cassée quel que soit le win-rate — c'est ce qui rend un lot de tranches P3 diagnosticable **en un seul run**. (2) `scripts/bot_ranking.py` fait s'affronter les bots **sans agent** : sans lui, juger un bot exigeait un modèle entraîné, donc une mesure circulaire — et §0.55 était irréalisable. Détail → §0.56. |
 | **§0.55** | Le **holdout d'évaluation** `TacticalBot` est DANS l'enveloppe d'entraînement — effet plafond | ✅ **LIVRÉ le 2026-08-04 — le mètre est GELÉ** | **1** (avant toute mesure de référence) | `tactical` gelé à **`w_objective 2.0`** (mesuré sur **x1**) : l'agent passe de **0.89 à 0.72** contre lui, et le bot de **dernier (0.357) à premier (0.636)** sur 6. `combined` inchangé à 0.8200 — le holdout pèse 0.0, c'est le contrôle que son statut est intact. ✅ Croisement `bot_eval/faction/<faction>/vs_<bot>` publié (méthode dédiée, dérivé du tally unique). 🔴 **Deux des trois leviers de la spec n'avaient aucune prise** : `w_enemy` est INERTE pour ce bot (mesuré + verrou), et le pas `0.5 → 0.8` tombait dans la partie morte d'une réponse en MARCHE. 🔴 **Piège à retenir : `--training-config` ne choisit PAS le plateau** (`config.json` → x5 ; les évals de référence passent `--resolution 1`) — une campagne entière a été jetée pour ça, et en x5 le diagnostic s'inversait. Détail → §0.55. |
 | **§0.14** | Re-mesure du run — win-rate par matchup | ✅ **MESURE OBTENUE le 2026-08-03** — ⏳ **PÉRIMÉE depuis les chantiers 01/03/04** : le modèle mesuré n'est plus chargeable, cf. [§0.67](#s0.67) ; ⚠️ **sa remplaçante est DIFFÉRÉE après P3-4/5/6/8, P4 et P5** ([§0.70](#s0.70)) — le projet reste donc SANS mesure de référence d'ici là, et c'est assumé | — | Run de **200 000 épisodes** (2026-08-02 12 h 26 → 2026-08-03 02 h 05, 19 points d'éval, 820 k → 12,1 M steps). `eval_bots/combined_win_rate` **0,283 → max 0,837 → 0,743**. Éval rejouée le 2026-08-03 sur le snapshot ROBUSTE (`robust_0.8049`), APRÈS §0.64/§0.65 : **combined 0.8200**, `tactical` 0.89, `defensive` 0.87, `greedy` 0.84, `adaptive` 0.83, **`control` 0.82**, **`value_trade` 0.74** (le pire), **0 troncature**. Le seuil de gating `vs_control ≥ 0.50` est **franchi** — le **0.04 du run 4 est périmé**. ⚠️ 0,743 → 0,820 est un écart best-contre-final, PAS l'effet de §0.64. Détail → §0.14. |
-| **[§9](V11_phaseA.md#s9)** | Phase A' — P2 + P3-0/1/2/**3**/**7** | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-4, P3-5, P3-6, P3-8**, **P4**, **P5** | **2** | ⚠️ **P3-7 (FLY / take to the skies) est livré et mergé le 2026-08-07** (élément `L6`) — [§9.4](V11_phaseA.md#s9.4) point 7 le décrivait encore comme « auto pour l'IA », corrigé le 2026-08-10 ; le reliquat n'est donc PAS « P3-4→8 ». ⚠️ **P3-3 (désignation de l'unité à activer) est livré et mergé le 2026-08-07** (élément `L2`, `ACTIVATE_SLOT` 1127-1138, `activate_query_net`) — cette cellule le comptait encore comme restant, corrigé le 2026-08-08. ⚠️ Aucune des cinq livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](V11_phaseA.md#s9). |
+| **[§9](decisions_du_joueur.md#s9)** | Phase A' — P2 + P3-0/1/2/**3**/**7** | 🟢 **LIVRÉS ET MERGÉS sur `main`** — restent **P3-4, P3-5, P3-6, P3-8**, **P4**, **P5** | **2** | ⚠️ **P3-7 (FLY / take to the skies) est livré et mergé le 2026-08-07** (élément `L6`) — [§9.4](decisions_du_joueur.md#s9.4) point 7 le décrivait encore comme « auto pour l'IA », corrigé le 2026-08-10 ; le reliquat n'est donc PAS « P3-4→8 ». ⚠️ **P3-3 (désignation de l'unité à activer) est livré et mergé le 2026-08-07** (élément `L2`, `ACTIVATE_SLOT` 1127-1138, `activate_query_net`) — cette cellule le comptait encore comme restant, corrigé le 2026-08-08. ⚠️ Aucune des cinq livraisons n'est **MESURÉE**. ⚠️ P3-0 est **inerte dans le training** (aucun roster SM/Ork ne porte de rule choice). Détail → §0.42 et §0.43 (en §0hist), et [§9](decisions_du_joueur.md#s9). |
 | **§0.44** | Tête pointeur de **déploiement** — les slots 4-11 n'avaient pas de tête dédiée | ✅ **LIVRÉ ET MERGÉ le 2026-08-07** (`91cc70d1`, élément `L1` du lot §0.48) — ⏳ **NON MESURÉ** : la mesure viendra du run du lot | — | `deploy_query_net`, jumeau exact de `choice_query_net`, score les 8 slots ; ses logits **remplacent** les colonnes 4-11 de la conv 1×1 **en phase de déploiement seulement**, le routage lisant le bit `phase_deployment` de `global_bin` par échantillon. `deploy_emb` est exposé PAR SLOT en queue du vecteur de features ; le tronc n'en garde que l'agrégation (jumeau des ennemis et des candidats de décision). Ni `obs_size` ni `TOTAL_ACTION_SIZE` (**1127** ce jour-là ; **1139** depuis `L2`) touchés **par `L1`** — architecture seule (le 14609 → **14615** du même jour vient du drapeau `declines`, pas d'ici). Détail → §0.44. |
 | **§0.48** | Inventaire des chantiers qui cassent un contrat + **périmètre du lot de ré-entraînement** | 🟠 **OUVERT** — le lot = **`L1` + `L2` + `L6`** + **[§0.64](#s0.64)** (LoS de déploiement alignée le 2026-08-03 ; ⚠️ **n'impose PLUS de run à elle seule** — mesuré le 2026-08-03 : le modèle d'avant joue à 0.82 sur `main` d'après, cf. §0.14 — elle **voyage** avec `L1`/`L2`/`L6`) | **4** | ✅ **Le prérequis d'ordre est LEVÉ au 2026-08-02** : les quatre chantiers exigés avant la mesure de référence — rampe de déploiement (§0.46 pt 2), FLY 21.03 (§0.49), bots d'éval (§0.47 É4), 01.07 (§0.50) — sont **tous mergés**. ✅ **L'arbitrage 2 est LIVRÉ le 2026-08-07** (socle : règles d'armes en ids, types de décision et slots de déploiement pré-dimensionnés — cf. §0.67). 🟢 **Le lot est COMPLET le 2026-08-07** : `L1` ([§0.44](#s0.44)), `L6` (FLY 21.03 en décision d'agent) et `L2` (choix de l'unité à activer) sont **livrés et mergés**. ⚠️ `obs_size` vaut **16659** et `TOTAL_ACTION_SIZE` **1139** (vérifié par exécution le 2026-08-08). **Il ne reste que le `--new` unique et sa mesure.** Détail → §0.48. |
 | **§0.46** | Résidus du 2026-07-29 | ✅ **CLOSE le 2026-08-03** — les trois points sont livrés | — | ✅ **SOLDÉ le 2026-08-03** (arbitrage : GARDER, sous forme optimisée). Les 4 issues du cache de déploiement deviennent des **compteurs publiés en permanence** (`perf/*`) au lieu de traces invisibles hors `--debug` ; les 37 sites passent par `engine/debug_trace.py` (canaux `W40K_TRACE`, formatage différé) ; garde verrouillée par **21 tests**, dont une **analyse AST** (fichiers découverts par leur import) qui interdit f-string, formatage anticipé et mot-clé. La passe `/simplify` du même jour y a trouvé **un bug** (`flush=True` résiduel → `TypeError` dès que le canal s'allume) et **un verrou qui mentait** (canal `train` hors garde). ⏳ Première mesure : **100 % de reconstruction** du cache de déploiement — signalé, non ouvert. Détail → §0.46. |
 | **§0.47** | Relecture T2→T5 du 2026-07-29 — 9 écarts | 🟠 **OUVERT — reste É9 (second siège + second scénario)** ; É5 et É7 ✅ corrigés le 2026-08-02 (É1, É2, É3, É4, É6 ✅ livrés **et mergés** ; **É8 est tombé**) | **6** | **É8 n'a plus d'objet** : `ai/analyzer.py` ne construit plus aucun chemin de board à la main (il lit `get_board_config()` / `get_board_size()`). **É9 était mal énoncé** : les **3 graines SONT couvertes** (`test_t5_bare_loop.py`, `for seed in (1, 2, 3)`) ; ce qui manque est le **second scénario** et les **2 sièges**. Détail → §0.47. |
 | **§0.50** | Non-conformité **01.07** — travail de suite | ✅ **CLOS le 2026-08-02** (statut corrigé le 2026-08-03 : la colonne disait encore OUVERT alors que la cellule disait SOLDÉE ; **revérifié sur `main`** — `get("battle_shocked")` hors tests **0 hit**, `computeControlCounts`/`isObjectiveScoringWindow` **0 hit** dans le front) | — | ✅ **SOLDÉE le 2026-08-02** — les deux résidus sont traités : (1) le contrat de `battle_shocked` est **tranché en lecture STRICTE**, les 7 `get(..., False)` migrés en `require_key` ; (2) la 3ᵉ lecture d'OC du frontend (journal d'événements de `BoardReplay.tsx`) diffère l'instantané moteur au lieu de recompter. Détail → §0.50. |
 | **§0.53** | Refonte du panel de bots — les adversaires ignoraient la condition de victoire | 🟢 **LIVRÉ ET MERGÉ** — plus aucun chantier ouvert (arbitrage du 2026-08-02) | — (à lire avant d'interpréter tout win-rate) | 🟢 **ARBITRAGE UTILISATEUR DU 2026-08-02 — (a) et (b) SONT SANS OBJET JUSQU'À LA DÉMO MÉTIER** : le travail porte sur **2 rosters seulement**, donc ni les matrices de matchups par roster ni le recalibrage des seuils de gate ne sont d'actualité. **Ne pas les re-signaler comme des chantiers ouverts.** Reste vrai et à retenir : (c) **aucun win-rate antérieur au 2026-07-30 n'est comparable** à un win-rate postérieur. ⏳ Le panel a **encore évolué depuis** : un **cinquième bot `ValueTradeBot`** a été ajouté, `bot_eval_weights` = `control` 0.40 / `value_trade`, `adaptive`, `greedy`, `defensive` 0.15 / `tactical` 0. Détail → §0.53 (en §0hist). |
-| **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](V11_phaseA.md#s9.0)) ; **T2→T5 relus le 2026-07-29** — les écarts vivent en **[§0.47](#s0.47)**, pas ici. Reste ouvert : les ✅ de T2→T5 ne sont revérifiés que **par LECTURE** (aucune exécution), et la conformité littérale de T2 est indécidable. ⚠️ Sa **section** est restée en §0hist pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
+| **§0.19** | Revérifier T1→T5 et la section 9 ligne à ligne | ⏳ **PARTIEL** | continu | T1 soldé (§0.19.1→§0.19.3) ; section 9 auditée le 2026-07-24 (→ [§9.0](decisions_du_joueur.md#s9.0)) ; **T2→T5 relus le 2026-07-29** — les écarts vivent en **[§0.47](#s0.47)**, pas ici. Reste ouvert : les ✅ de T2→T5 ne sont revérifiés que **par LECTURE** (aucune exécution), et la conformité littérale de T2 est indécidable. ⚠️ Sa **section** est restée en §0hist pour ne pas casser ses sous-ancres `§0.19.1`→`§0.19.3`. |
 
 ✅ **Contrôle de conformité du 2026-08-08** (vérification par lecture + exécution, PAS une
 livraison — aucune ligne de code touchée ; il REMPLACE le contrôle du 2026-08-07, dont les
@@ -204,7 +203,7 @@ jour, plus aucun code ne les lit.
 
 ⚠️ **Avant de vous appuyer sur une affirmation de ce document, lire §0bis** — en particulier la
 réserve de méthode sur le document lui-même et la règle de périmètre `ArmageddonAgent`. **Mise à
-jour 2026-07-29** : la section 9 a été auditée le 2026-07-24 ([§9.0](V11_phaseA.md#s9.0)) et
+jour 2026-07-29** : la section 9 a été auditée le 2026-07-24 ([§9.0](decisions_du_joueur.md#s9.0)) et
 **T2→T5 ont été relus le 2026-07-29 — 9 écarts, verdicts et réserves en [§0.47](#s0.47)** ; cette
 relecture s'est faite **par lecture seule, sans aucune exécution**, elle ne vaut donc pas
 mutation-test.
@@ -232,7 +231,7 @@ de produire un score. **La mesure de référence est différée** jusqu'à ce qu
 **Pourquoi c'est le bon ordre, et non un compromis.** [§0.67](#s0.67) pose la règle : tout chantier
 cassant un contrat livré avant un run en impose un second. Or il reste ouverts
 **P3-4** (allocation des pertes), **P3-5** (pile-in/consolidation), **P3-6** (move-after-shooting +
-reactive move), **P3-8**, **P4** et **P5** ([§9.4](V11_phaseA.md#s9.4)) — et **chacun ajoute des
+reactive move), **P3-8**, **P4** et **P5** ([§9.4](decisions_du_joueur.md#s9.4)) — et **chacun ajoute des
 dimensions d'action ou d'observation**. Un `x1_long` lancé aujourd'hui (200 000 épisodes, ~20 h)
 serait donc invalidé par la prochaine tranche P3, exactement comme le `combined 0.82` du run de
 200 000 épisodes du 2026-08-02 l'a été par `L1`/`L2`/`L6`. La mesure de référence se paie **une
@@ -260,7 +259,7 @@ pas : une mesure. Le modèle devient inchargeable à P3-4 (nouvelle dimension d'
 est le **diagnostic de comportement**, pas le score.
 
 🟢 **DÉCISION UTILISATEUR DU 2026-08-10 (3) — le regret de P3-8 se mesure sur CE run.**
-[§9.0bis](V11_phaseA.md#s9.0bis) exige de mesurer le regret avant de brancher un optionnel, mais
+[§9.0bis](decisions_du_joueur.md#s9.0bis) exige de mesurer le regret avant de brancher un optionnel, mais
 la mesure de référence est différée après P3-8 : la contrainte était circulaire. Elle est tranchée
 en faveur de la base de développement — le regret est un écart **relatif** (choix branché vs
 heuristique auto), il supporte l'imprécision de 10 000 épisodes, alors que l'attente rachèterait
@@ -1578,7 +1577,7 @@ mesure — l'agent joue toujours ce siège. À vérifier avec `--episodes 20` ou
 pas été (ce sont `AggressiveSmartBot` et `DefensiveSmartBot` qui l'ont été, [§0.53](#s0.53)), et
 son câblage de holdout est correct : présent dans le registre, **poids 0.0** dans
 `bot_eval_weights`, **absent de `bot_training.ratios`**, et **explicitement exclu** du
-`worst_bot_score` qui alimente le gate ([§10.5](V11_eval_strategy.md#s10.5)). Le mécanisme n'est
+`worst_bot_score` qui alimente le gate ([§10.5](strategie_evaluation.md#s10.5)). Le mécanisme n'est
 pas en cause — **le contenu du bot l'est.**
 
 **Le constat.** Les bots vivent dans un plan à deux paramètres depuis [§0.53](#s0.53)
@@ -1786,7 +1785,7 @@ le bloc LIVRÉ ci-dessus : le point 1 s'est révélé sans prise à la mesure.*
 2. **Ajouter le scalaire `vs_tactical` PAR ROSTER.** Aujourd'hui `ai/metrics_tracker.py` émet
    `bot_eval/vs_tactical` (tous rosters confondus) et `bot_eval/faction/<faction>` (le `combined`
    par faction), mais **pas le croisement** — or c'est exactement ce que
-   [§10.6](V11_eval_strategy.md#s10.6) demande.
+   [§10.6](strategie_evaluation.md#s10.6) demande.
 
 🛠️ **PRÉPARATIFS DU 2026-08-02 — spec appliquée le 2026-08-04**, avec les deux corrections de fond
 consignées dans le bloc LIVRÉ ci-dessus.
@@ -1883,7 +1882,7 @@ terrain, mêmes adversaires. C'est adapté au besoin courant (valider les param�
 `tactical` re-profilé est le SEUL signal hors distribution du dispositif** tant que le self-play
 n'est pas là. C'est ce qui fait la valeur du point 1 ci-dessus.
 
-📌 **DIVERGENCE DOC / PRATIQUE, à trancher.** [§10.6](V11_eval_strategy.md#s10.6) écrit que le
+📌 **DIVERGENCE DOC / PRATIQUE, à trancher.** [§10.6](strategie_evaluation.md#s10.6) écrit que le
 critère de succès quantitatif est le **win-rate PAR ROSTER contre `TacticalBot`**. Ce n'est **pas**
 le critère réellement utilisé : l'utilisateur suit `00_critical/a_bot_eval_combined` et
 `00_critical/b_worst_bot_score` (2026-08-02), qui portent tous deux sur les bots
@@ -2013,7 +2012,7 @@ par la cible de charge en dimension d'action (§0.43, P3-2). **Même motif que �
 ✅ **LIVRÉ ET MERGÉ** — constaté le 2026-07-29 à 13 h 56 (`git log main..v11-0.46-dead-code-charge-heuristic`) : ⏳ **MERGÉ depuis — vérifié le 2026-08-02 ; la branche citée est supprimée.**
 branche `v11-0.46-dead-code-charge-heuristic`, **2 commits**, tête **`306033ec`** (13 h 55) —
 `2d6bd2a8` (12 h 11) supprime le code, `306033ec` (13 h 55, suite de relecture adverse) répare les
-documents que la suppression rendait faux (`V11_phaseA.md` ~806 et ~959 affirmaient
+documents que la suppression rendait faux (`decisions_du_joueur.md` ~806 et ~959 affirmaient
 `get_best_enemy_score_for_unit` « encore vive » ; bandeau PÉRIMÉ de `macro_intent.md` remonté en
 tête de document, car sa table « Fichiers à modifier » PRESCRIVAIT encore de créer ces fonctions).
 Écrite dans un `git worktree` séparé — le dépôt principal n'a pas été touché,
@@ -2218,8 +2217,8 @@ simplification, efficacité, altitude) — à lire, les deux premiers points son
 ### 0.47 Relecture T2→T5 (dette §0.19) — 9 écarts, dont un outil d'éval au masque périmé — 🟠 OUVERT : É1, É2, É3, É4, É6 ✅ LIVRÉS ET MERGÉS ; **É8 EST TOMBÉ** ; restent É5, É7, É9 (mergés le 2026-07-29, vérifié le 2026-08-02)
 
 **Cadre.** La part « T2→T5 jamais revérifiés » de [§0.19](#s0.19) a été traitée le **2026-07-29** :
-relecture spec par spec de [`V11_tranches.md` §5](V11_tranches.md#s5) — T2 (524-578), T3 (579-638),
-T4 (640-702), T5 (704-761) — plus [§8.2](V11_tranches.md#s8.2) et [§8.3](V11_tranches.md#s8.3),
+relecture spec par spec de [`tranches_et_ruptures.md` §5](tranches_et_ruptures.md#s5) — T2 (524-578), T3 (579-638),
+T4 (640-702), T5 (704-761) — plus [§8.2](tranches_et_ruptures.md#s8.2) et [§8.3](tranches_et_ruptures.md#s8.3),
 en vérifiant les **instructions exécutées** et non les commentaires. Les écarts trouvés vivent
 **ici** ; §0.19 n'en garde que le renvoi.
 
@@ -2330,7 +2329,7 @@ espace d'action, pas 1127.
 
 C'est le motif **« code testé mais jamais appelé »** (§0.19, T6-i), dans sa forme aggravée :
 **testé dans une sémantique MORTE**. Cela viole frontalement le critère
-[§8.3](V11_tranches.md#s8.3) T2 (« plus AUCUN test ne référence 11/12 ou les plages 4-8 hors
+[§8.3](tranches_et_ruptures.md#s8.3) T2 (« plus AUCUN test ne référence 11/12 ou les plages 4-8 hors
 déploiement »), qui est donc **faussement coché**.
 
 ✅ **DÉCISION UTILISATEUR DU 2026-07-29 : SUPPRIMER la fonction morte ET les ~25 tests qui la
@@ -2339,7 +2338,7 @@ traitent **ENSEMBLE, en un seul chantier** — ils ne sont pas séparables. Just
 l'**absence** du verrou de É3 est précisément ce qui a laissé passer É1 ; supprimer `convert_gym_action`
 et ses tests **sans le remplacer** retirerait les derniers tests qui exercent un décodeur et
 laisserait le trou grand ouvert. Le remplacement est le fichier
-`tests/unit/engine/test_agent_interface_contract.py` exigé par [§8.2](V11_tranches.md#s8.2) : un
+`tests/unit/engine/test_agent_interface_contract.py` exigé par [§8.2](tranches_et_ruptures.md#s8.2) : un
 test qui vérifie que **chaque entier d'action est routé vers l'intention attendue dans l'espace
 d'action ACTUEL**, en **appelant réellement le décodeur** (pas en comparant des constantes entre
 elles, cf. É3). Coût accepté : ce chantier est **plus long qu'une simple suppression** — il faut
@@ -2368,7 +2367,7 @@ qui n'avait jamais eu d'appelant et survivait derrière son homonyme, plus
 
 #### É3 — le verrou anti-récidive R5 exigé par §8.2 n'existe pas — ✅ CONTRE-VÉRIFIÉ, ✅ ÉCRIT (non mergé)
 
-[§8.2](V11_tranches.md#s8.2) exigeait un fichier
+[§8.2](tranches_et_ruptures.md#s8.2) exigeait un fichier
 `tests/unit/engine/test_agent_interface_contract.py` vérifiant que **chaque entier d'action est
 routé vers l'intention attendue**, et le qualifiait de « **LE** verrou anti-récidive de R5 ».
 **Contre-vérifié : ce fichier n'existe pas et n'a jamais existé.**
@@ -2426,7 +2425,7 @@ autre chose que ce pour quoi il avait été écrit** :
   SECOND défaut, antérieur à `L2` : cette clé n'était jamais libérée sur le chemin de l'agent,
   donc la 2ᵉ activation de tir de l'IA levait `active_shooting_unit X is not in
   shoot_activation_pool` — avalé par `execute_ai_turn`, l'IA ne tirait qu'une escouade par phase
-  en PvE. Détail et mesure → [V11_phaseA.md §9 P3-3](V11_phaseA.md#s9).
+  en PvE. Détail et mesure → [decisions_du_joueur.md §9 P3-3](decisions_du_joueur.md#s9).
   ⚠️ **Leçon commune** : le premier cas d'auto-péremption ne faisait que **simuler** la sortie du
   pool, il restait donc vert sur (1). Un verrou qui construit une approximation de la situation ne
   verrouille que l'approximation.
@@ -2560,7 +2559,7 @@ Le fichier est **absent du disque** (contre-vérifié). Il a été supprimé au 
 **Atténuation** : la fonction de balayage elle-même survit, exercée par
 [`tests/unit/ai/test_scenario_bank_migration_v11.py`](../../../tests/unit/ai/test_scenario_bank_migration_v11.py).
 L'écart est donc documentaire (un inventaire faux), pas une perte de capacité.
-✅ **CORRIGÉ le 2026-08-02** : les deux mentions de `V11_tranches.md` (le livrable T4 et la
+✅ **CORRIGÉ le 2026-08-02** : les deux mentions de `tranches_et_ruptures.md` (le livrable T4 et la
 « réserve T4 close ») portent désormais l'avertissement que le script a été supprimé et que le
 balayage vit dans le test.
 
@@ -2650,18 +2649,18 @@ ré-entraînement — c'est le critère de tri, pas l'importance du chantier.
 | Réf | Chantier | Contrat cassé | Preuve | Ampleur |
 |---|---|---|---|---|
 | **1** ✅ **LIVRÉ 2026-08-07** | [§0.44](#s0.44) tête pointeur de **déploiement** | **ARCHITECTURE** seule | ✅ Livré comme prévu : `deploy_query_net` jumeau de `choice_query_net`, `deploy_emb` exposé PAR SLOT en queue du vecteur (`deploy_embeddings_slice`, le tronc n'en garde que l'agrégation), routage sur `phase_deployment`. Ni `obs_size` ni `TOTAL_ACTION_SIZE` (**1127**) touchés par ce chantier — vérifié (le 14609 → 14615 du même jour vient du drapeau `declines`, pas de `1`). ⏳ Conception d'origine ci-dessous : `deploy_query_net` serait le jumeau de `choice_query_net` ([pointer_policy.py](../../../ai/pointer_policy.py)) ; il faut **exposer `deploy_emb` hors du tronc**, où il n'entre aujourd'hui que par concaténation ([spatial_extractor.py](../../../ai/spatial_extractor.py), [:494-503](../../../ai/spatial_extractor.py)) ⇒ `features_dim` ([:304-312](../../../ai/spatial_extractor.py)) et `_split_features` changent. `obs_size` **inchangé**. | moyenne |
-| **2** ✅ **LIVRÉ 2026-08-07** | **P3-3** choix de l'unité à activer ([V11_phaseA.md](V11_phaseA.md)) | **ESPACE D'ACTION + OBSERVATION + ARCHITECTURE** | ✅ **LIVRÉ — moteur ET réseau.** `ACTIVATE_SLOT_BASE = 1127`, 12 slots ⇒ `TOTAL_ACTION_SIZE` **1127 → 1139** (c'est `2` qui met à jour le verrou d'interface de [§0.47](#s0.47) É3, comme annoncé). `K_ALLY_SLOTS` **8 → 12** et DÉMÉNAGE dans `observation_entities` (module feuille) : l'espace d'action en dérive, donc la constante ne pouvait pas rester dans `observation_builder` sans cycle ⇒ `obs_size` **14615 → 16659** (+2 044, **0 paramètre** : encodeur d'entités partagé). Nouveau `get_ally_slot_mapping`, jumeau de `get_enemy_slot_mapping` — **l'ordre des lignes alliées devient CONTRACTUEL** (D1 côté allié), là où le code affirmait qu'il n'avait « pas de sémantique ». Le blocage annoncé ici (les embeddings alliés AGRÉGÉS, absents de `features_dim`) est **LEVÉ** : `ally_embeddings_slice` les expose PAR SLOT en queue du vecteur — ligne 0 comprise, l'ancre du pool étant un candidat — et `activate_query_net`, jumelle de `deploy_query_net` livrée par `1`, les score. Livré en DEUX temps : la moitié moteur d'abord, avec 12 colonnes DENSES d'`action_net` faute de pouvoir toucher `spatial_extractor.py` pendant que `1` le réécrivait ; le pointeur les a remplacées après son merge, `action_net` repassant de 29 à 17 colonnes. | **grosse** |
+| **2** ✅ **LIVRÉ 2026-08-07** | **P3-3** choix de l'unité à activer ([decisions_du_joueur.md](decisions_du_joueur.md)) | **ESPACE D'ACTION + OBSERVATION + ARCHITECTURE** | ✅ **LIVRÉ — moteur ET réseau.** `ACTIVATE_SLOT_BASE = 1127`, 12 slots ⇒ `TOTAL_ACTION_SIZE` **1127 → 1139** (c'est `2` qui met à jour le verrou d'interface de [§0.47](#s0.47) É3, comme annoncé). `K_ALLY_SLOTS` **8 → 12** et DÉMÉNAGE dans `observation_entities` (module feuille) : l'espace d'action en dérive, donc la constante ne pouvait pas rester dans `observation_builder` sans cycle ⇒ `obs_size` **14615 → 16659** (+2 044, **0 paramètre** : encodeur d'entités partagé). Nouveau `get_ally_slot_mapping`, jumeau de `get_enemy_slot_mapping` — **l'ordre des lignes alliées devient CONTRACTUEL** (D1 côté allié), là où le code affirmait qu'il n'avait « pas de sémantique ». Le blocage annoncé ici (les embeddings alliés AGRÉGÉS, absents de `features_dim`) est **LEVÉ** : `ally_embeddings_slice` les expose PAR SLOT en queue du vecteur — ligne 0 comprise, l'ancre du pool étant un candidat — et `activate_query_net`, jumelle de `deploy_query_net` livrée par `1`, les score. Livré en DEUX temps : la moitié moteur d'abord, avec 12 colonnes DENSES d'`action_net` faute de pouvoir toucher `spatial_extractor.py` pendant que `1` le réécrivait ; le pointeur les a remplacées après son merge, `action_net` repassant de 29 à 17 colonnes. | **grosse** |
 | **3** | **P3-4** allocation des pertes (+ ordre de déclaration) | **OBSERVATION** au minimum | Nouveau type dans `AGENT_DECISION_TYPE_IDS` → `DECISION_CTX_BIN_SIZE` → `obs_size` ([observation_entities.py](../../../engine/observation_entities.py)), plus ouverture du registre continu `DECISION_OPTION_CONT_FIELDS` ([:289-292](../../../engine/observation_entities.py)). | grosse |
-| **4** | **P3-5** pile-in / consolidation | **OBSERVATION** au minimum | Idem 3, et décision **spatiale** : [V11_phaseA.md](V11_phaseA.md) **interdit** le top-K d'hex. **DÉPEND** de la migration ouverte [`Documentation/Archives/chantiers/pile_in_overrun_par_figurine_2026-08-18.md`](Documentation/Archives/chantiers/pile_in_overrun_par_figurine_2026-08-18.md). | grosse |
+| **4** | **P3-5** pile-in / consolidation | **OBSERVATION** au minimum | Idem 3, et décision **spatiale** : [decisions_du_joueur.md](decisions_du_joueur.md) **interdit** le top-K d'hex. **DÉPEND** de la migration ouverte [`Documentation/Archives/chantiers/pile_in_overrun_par_figurine_2026-08-18.md`](Documentation/Archives/chantiers/pile_in_overrun_par_figurine_2026-08-18.md). | grosse |
 | **5** | **P3-6** move-after-shooting + reactive move | **OBSERVATION** au minimum | Les **bits de règle existent déjà** ([observation_entities.py](../../../engine/observation_entities.py)) : c'est la **DÉCISION** qui manque. | moyenne |
 | **L6** | **P3-7** FLY / Take to the skies | ✅ **LIVRÉ le 2026-08-07** — AUCUN contrat cassé | Deux candidats **non-entités** ⇒ `CHOICE_0/1`, `TOTAL_ACTION_SIZE` inchangé (**1127**) ; le type `fly_declaration` consomme une **réserve** d'`AGENT_DECISION_TYPE_SLOTS`, donc `obs_size` inchangé (**14609**) — l'arbitrage 2 du socle a rendu ce chantier gratuit en contrat. La **CONSTANTE DE MOTEUR** de [§0.49](#s0.49) point 5 (« déclare systématiquement », -2" y compris en pur désavantage) est **supprimée** : `took_to_the_skies` ne lit plus que la déclaration, pour tous les sièges. | petite |
 | **7** | **P3-8a** choix d'arme par l'agent | **OBSERVATION**, + espace d'action selon la voie | `K_WEAPONS_RANGED`/`K_WEAPONS_MELEE` = **10** ([observation_builder.py](../../../engine/observation_builder.py)) dépassent `MAX_DECISION_OPTIONS = 6`. | moyenne à grosse |
 | **8** | **P3-8b** split-fire par-figurine | **ESPACE D'ACTION** | Aujourd'hui l'**escouade entière** vise UN slot ([macro_intents.py](../../../engine/macro_intents.py)) ; le par-figurine exige un produit **figurine × arme × slot**, inexprimable dans l'espace actuel. | grosse |
 | **9** | **P3-8c** charge multi-cibles (11.04 « one or more ») | **ESPACE D'ACTION** | Un seul `target_slot` de charge aujourd'hui ([macro_intents.py](../../../engine/macro_intents.py)). Le PvP le fait déjà. | moyenne |
-| **10** | **P3-8d** placement final de charge | **ESPACE D'ACTION** ou **OBSERVATION** selon paramétrisation | Décision spatiale, même réserve que 4 ([V11_phaseA.md](V11_phaseA.md)). | moyenne |
+| **10** | **P3-8d** placement final de charge | **ESPACE D'ACTION** ou **OBSERVATION** selon paramétrisation | Décision spatiale, même réserve que 4 ([decisions_du_joueur.md](decisions_du_joueur.md)). | moyenne |
 | **11** | **P3-8e** élargir les 5 stratégies de déploiement | **OBSERVATION** seule | `N_DEPLOY_SLOTS` ([observation_entities.py](../../../engine/observation_entities.py)). `TOTAL_ACTION_SIZE` **NE bouge PAS** : les ids **4-8** sont dans la plage des cellules de move (`MOVE_CELL_BASE = 0`, [macro_intents.py](../../../engine/macro_intents.py)). | petite à moyenne |
 | **12** | **P4** observation de support | **OBSERVATION**, **part résiduelle seulement** | Trois des quatre features annoncées **existent déjà** ([observation_entities.py](../../../engine/observation_entities.py), [:129-130](../../../engine/observation_entities.py), [:166](../../../engine/observation_entities.py)). | petite — **ne se livre pas seule** |
-| **13** | **Phase B** observation des niveaux / élévation ([V11_tranches.md](V11_tranches.md), [:1508-1519](V11_tranches.md), marquée « **obligatoire** ») | **OBSERVATION** | Nouvelles features par-figurine et par-slot ennemi ⇒ layout, donc `obs_size`. | grosse — **conditionnée** à la vérification du chantier LoS 3D |
+| **13** | **Phase B** observation des niveaux / élévation ([tranches_et_ruptures.md](tranches_et_ruptures.md), [:1508-1519](tranches_et_ruptures.md), marquée « **obligatoire** ») | **OBSERVATION** | Nouvelles features par-figurine et par-slot ennemi ⇒ layout, donc `obs_size`. | grosse — **conditionnée** à la vérification du chantier LoS 3D |
 
 #### HORS LOT — n'entament AUCUN contrat, livrables à tout moment
 
@@ -2711,7 +2710,7 @@ de l'inventaire ci-dessus. Motifs :
 - **L1** ✅ **LIVRÉ ET MERGÉ le 2026-08-07** (§0.44, `91cc70d1`).
 - **L2** ✅ **LIVRÉ ET MERGÉ le 2026-08-07** (`b8be3f8e`) — il portait le **plus gros gain
   stratégique annoncé** : l'unité activée était **toujours** `eligible_units[0]`
-  ([V11_phaseA.md](V11_phaseA.md)).
+  ([decisions_du_joueur.md](decisions_du_joueur.md)).
 - **L6** ✅ **LIVRÉ ET MERGÉ le 2026-08-07** (`7b4ace51`) — petit, et gratuit en contrat.
 
 ⇒ **Le lot est complet ; il ne manque que le `--new` unique** (cf. [§0.67](#s0.67)).
@@ -3045,7 +3044,7 @@ modifiée**. Lancé APRÈS §0.12, donc sur le reward définitif.)
 - **2 épisodes par bot.** `bot_eval_final` vaut **2** dans la phase `x5_debug`. C'est bien
   « > 1 » comme l'exigeait cette entrée, mais **12 épisodes ne permettent aucune conclusion** :
   chaque bot est un 2W-0L / 1W-1L / 0W-2L, soit une résolution de 50 points de pourcentage.
-  Le `61.5 %` est un chiffre **indicatif**, à ne PAS reporter dans [§10.6](V11_eval_strategy.md#s10.6).
+  Le `61.5 %` est un chiffre **indicatif**, à ne PAS reporter dans [§10.6](strategie_evaluation.md#s10.6).
 - **500 épisodes d'entraînement, ce n'est pas un agent entraîné.** Les phases réelles sont à
   10 000–30 000 (`x1`, `x5_new`, `x5_append`). Ce run valide le **pipeline**, pas la politique.
 - **`vs tactical: 100 %` ne vaut rien comme signal de holdout** à 2 épisodes — c'est
@@ -3062,14 +3061,14 @@ premier run laissait croire.
 
 **🔴 INVALIDÉ A POSTERIORI (même jour) — la rupture D de §0.12.** Ce run a tourné **avant** la
 découverte de la régression d'observation (`value_over_ttk` extrapolait le `points_per_hp` de la
-figurine d'index 0). Les deux rosters de [§10.2](V11_eval_strategy.md#s10.2) étant hétérogènes en points, **l'agent s'est
+figurine d'index 0). Les deux rosters de [§10.2](strategie_evaluation.md#s10.2) étant hétérogènes en points, **l'agent s'est
 entraîné sur une observation fausse** pendant les 500 épisodes. Ce qui reste valable malgré
 tout : la **non-régression §0.11** et la **validation runtime du fix §0.13**, qui ne dépendent
 ni du reward ni de l'observation. Le score, lui, est à jeter deux fois plutôt qu'une.
 
 **Ce qui reste à faire pour fermer cette entrée** : un run sur une phase à `bot_eval_final`
 élevé (`x1`, `x5_new` et `x5_append` sont déjà à **100**) et à `total_episodes` réel, pour
-produire un win-rate **par roster** interprétable au sens de [§10.6](V11_eval_strategy.md#s10.6). ⚠️ Cf. **§0.15** : les
+produire un win-rate **par roster** interprétable au sens de [§10.6](strategie_evaluation.md#s10.6). ⚠️ Cf. **§0.15** : les
 rosters `training` et `holdout_regular` étant identiques, ce win-rate mesurera la robustesse à
 l'**adversaire**, jamais au roster.
 
@@ -3093,7 +3092,7 @@ le run multi-env, pas le smoke, qui a validé.
 ## 0bis. Pièges et leçons de méthode → Document de méthode autonome
 
 > **Extrait le 2026-08-27 (refonte P3)** dans
-> [`Documentation/Reference/training/V11_method_lessons.md`](../../Reference/training/V11_method_lessons.md).
+> [`Documentation/Reference/training/lecons_de_methode.md`](../../Reference/training/lecons_de_methode.md).
 > Ce document est la **copie canonique** des leçons de méthode — y faire les mises à jour,
 > pas ici.
 
@@ -3112,7 +3111,7 @@ le run multi-env, pas le smoke, qui a validé.
   d'objet** ; l'entrée ne vaut plus que comme décision de périmètre (ne pas réintroduire le bot
   pour la seule couverture, cela fausserait la composition d'éval). **Ne pas re-signaler.**
 - **§0.16(c) — clé `holdout_hard_opponent_budget_modifier` + `build_holdout_benchmark.py` gardés
-  (2026-07-21).** Non consommés par le training actuel (2 rosters fixes, [§10.2](V11_eval_strategy.md#s10.2)), mais **conservés
+  (2026-07-21).** Non consommés par le training actuel (2 rosters fixes, [§10.2](strategie_evaluation.md#s10.2)), mais **conservés
   volontairement** : un holdout à armées **générées** est prévu **après la démo**. La clé est en
   attente d'usage, pas morte. **Ne pas supprimer ni la clé ni le script.**
 
@@ -3128,9 +3127,9 @@ le run multi-env, pas le smoke, qui a validé.
 
 | Document | Contenu | État |
 |---|---|---|
-| [`V11_tranches.md`](V11_tranches.md) | **[§1](V11_tranches.md#s1) → [§8](V11_tranches.md#s8)** — objectif, l'ANCRE, état des lieux, ruptures R1→R8, décisions de design, tranches T1→T7 + Phase B, critères d'acceptation, smoke tests, tests de non-régression | **vivant** (T6-h/T6-g ouverts, cf. [§0.0](#s0.0)) |
-| [`V11_phaseA.md`](V11_phaseA.md) | **[§9](V11_phaseA.md#s9)** — Phase A' : parité de résolution des règles (P1) puis mécanisme de décision agent (P2→P5) | **vivant** |
-| [`V11_eval_strategy.md`](V11_eval_strategy.md) | **[§10](V11_eval_strategy.md#s10)** — stratégie d'entraînement et d'évaluation, rosters, holdout, win-rate par roster | **vivant** |
+| [`tranches_et_ruptures.md`](tranches_et_ruptures.md) | **[§1](tranches_et_ruptures.md#s1) → [§8](tranches_et_ruptures.md#s8)** — objectif, l'ANCRE, état des lieux, ruptures R1→R8, décisions de design, tranches T1→T7 + Phase B, critères d'acceptation, smoke tests, tests de non-régression | **vivant** (T6-h/T6-g ouverts, cf. [§0.0](#s0.0)) |
+| [`decisions_du_joueur.md`](decisions_du_joueur.md) | **[§9](decisions_du_joueur.md#s9)** — Phase A' : parité de résolution des règles (P1) puis mécanisme de décision agent (P2→P5) | **vivant** |
+| [`strategie_evaluation.md`](strategie_evaluation.md) | **[§10](strategie_evaluation.md#s10)** — stratégie d'entraînement et d'évaluation, rosters, holdout, win-rate par roster | **vivant** |
 | [`Documentation/Reference/training/observation_et_actions.md`](../../Reference/training/observation_et_actions.md) | Encodeur d'entités partagé + tête pointeur, cardinalités de l'observation, les 7 trous qu'il ferme | **clos** (T-A→T-H livrées) — **archivé le 2026-08-08** ; ⚠️ ses chiffres de dimensionnement sont datés, l'`obs_size` courant se lit ici en §0 |
 | [`Documentation/Archives/chantiers/observation_deploiement.md`](../../Archives/chantiers/observation_deploiement.md) | Observation de la phase de déploiement — les 5 défauts et leurs correctifs (extrait de `V11_audit_observation.md` §11) | **clos** (2026-07-29, §0.40 — archive) |
 | [`Replay.md`](../Replay.md) | Replay : pipeline & contrat du `step.log`, registre des chantiers replay | **vivant** (outillage) |

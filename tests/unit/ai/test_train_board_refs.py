@@ -1,4 +1,4 @@
-"""T3 (V11_agent_rework.md) — chemins board + config training (R1, R2, 1bis/1ter).
+"""T3 (index_v11.md) — chemins board + config training (R1, R2, 1bis/1ter).
 
 Verrouille :
 - R2 : _list_available_board_refs résout via config_loader.get_board_dir()

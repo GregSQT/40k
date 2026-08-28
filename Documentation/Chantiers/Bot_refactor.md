@@ -51,7 +51,7 @@ machine :
    `combined = 0,7433`, pire bot `racer = 0,630`. Un holdout doit être PLUS dur que le panel
    d'entraînement : son plancher naîtrait sous 0,63. La porte ne s'ouvrirait jamais.
 3. **Un holdout qui décide cesse d'être un holdout** — arbitrage utilisateur du 2026-08-04
-   (`V11_eval_strategy.md` §10.6). Faire du `benchmark_floor` un gate le contredisait frontalement.
+   (`strategie_evaluation.md` §10.6). Faire du `benchmark_floor` un gate le contredisait frontalement.
    **Résolu le 2026-08-15 par deux étages** (§4.D.1) : les trois `reference_*` gatent, `tactical`
    reste scellé. Et le plancher ne sert pas qu'à refuser un modèle — il **diagnostique
    l'entraînement** (§4.D.3), ce qui rend le témoin scellé indispensable et non plus seulement
@@ -144,7 +144,7 @@ objectifs marquent, et il y a eu **zéro victoire par élimination sur 600 parti
 **Ce qui reste vrai de la proposition, et c'en est l'essentiel** : un adversaire qui **raisonne
 autrement** et que l'agent n'a **jamais rencontré** mesure la généralisation, qu'il ouvre ou non un
 axe nouveau. C'est même le seul instrument qui la mesure : un win-rate contre des bots
-d'entraînement mesure l'exploitation apprise (`V11_eval_strategy.md` §10.5, textuel).
+d'entraînement mesure l'exploitation apprise (`strategie_evaluation.md` §10.5, textuel).
 
 **Ce qui n'est pas garanti** : que trois benchmarks rendent trois signaux DISTINCTS. Sur une
 échelle à une dimension, ils peuvent classer les modèles dans le même ordre — auquel cas c'est un
@@ -170,7 +170,7 @@ qu'elle annonçait.
 
 ### 2.3 Un holdout qui décide cesse d'être un holdout — arbitrage du 2026-08-04
 
-`V11_eval_strategy.md` §10.6, arbitrage utilisateur, textuel : *« un holdout qui décide cesse
+`strategie_evaluation.md` §10.6, arbitrage utilisateur, textuel : *« un holdout qui décide cesse
 d'être un holdout. Dès qu'un chiffre valide un run, on optimise dessus »*. La proposition fait du
 `benchmark_floor` **la** porte d'entrée du self-play et un gate de promotion Pn→Pn+1. C'est un
 conflit frontal avec une décision datée.
@@ -1257,7 +1257,7 @@ n'est plus une question posée à l'utilisateur mais du travail :
 - [`ROADMAP_INDEX.md`](../Roadmap/ROADMAP_INDEX.md) — source unique de l'ordre du travail
 - [`Documentation/Reference/training/panel_bots.md`](../Reference/training/panel_bots.md) — panel refondu : décisions,
   mesures, protocole de réglage (§12.13), ligne de base (§12.14)
-- [`Documentation/Chantiers/v11/V11_eval_strategy.md`](v11/V11_eval_strategy.md) — §10.3 progression d'adversaires,
+- [`Documentation/Chantiers/v11/strategie_evaluation.md`](v11/strategie_evaluation.md) — §10.3 progression d'adversaires,
   §10.5 holdout d'adversaire, §10.6 critère de succès et arbitrage du 2026-08-04
-- [`Documentation/Chantiers/v11/V11_agent_rework.md`](v11/V11_agent_rework.md) — §0.55 gel de `tactical`,
+- [`Documentation/Chantiers/v11/index_v11.md`](v11/index_v11.md) — §0.55 gel de `tactical`,
   §0.57 rampes par épisode, §0.59 phase 2 self-play

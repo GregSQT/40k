@@ -239,7 +239,7 @@ SEARCH_DIRS = [
 #: Un chemin peut être relatif AU DOCUMENT (`../../engine/x.py`), absolu, ou nu. La classe de
 #: caractères doit donc accepter le point : sans lui, `../../engine/x.py` était capturé comme
 #: `/engine/x.py`, que `ROOT / name` transformait en chemin absolu inexistant — 18 fausses
-#: alertes sur `V11_phaseA.md` le 2026-08-11, sur un document dont les 9 cibles existaient toutes.
+#: alertes sur `decisions_du_joueur.md` le 2026-08-11, sur un document dont les 9 cibles existaient toutes.
 #: `(?!\w)` en queue : sans lui, `hashlib.md5` était capturé comme un fichier `hashlib.md`
 #: (mesuré sur `Security.md` le 2026-08-11).
 #: Les extensions vivent ici SEULES : `FILE_REF` et `ADJACENT` doivent les reconnaître à
@@ -400,7 +400,7 @@ def resolve(name: str, doc_dir: pathlib.Path) -> pathlib.Path | None:
         candidate = pathlib.Path(name)
         return candidate if candidate.exists() else None
     # Deux conventions COEXISTENT dans ce corpus, et les deux sont légitimes : un lien entre
-    # documents est relatif AU DOCUMENT (`v11/V11_phaseA.md`), un renvoi vers le code est
+    # documents est relatif AU DOCUMENT (`v11/decisions_du_joueur.md`), un renvoi vers le code est
     # relatif à la RACINE (`engine/w40k_core.py`). Essayer les deux n'est pas un repli qui
     # masquerait une erreur : c'est résoudre dans les deux systèmes que le dépôt emploie.
     if "/" in name:
@@ -420,7 +420,7 @@ def resolve(name: str, doc_dir: pathlib.Path) -> pathlib.Path | None:
         candidate = ROOT / directory / name if directory else ROOT / name
         if candidate.exists():
             return candidate
-    # Un nom NU renvoie couramment à un document rangé dans un sous-dossier (`V11_tranches.md`),
+    # Un nom NU renvoie couramment à un document rangé dans un sous-dossier (`tranches_et_ruptures.md`),
     # à une référence vivante (`verticalite.md`) ou à une configuration d'agent
     # (`ArmageddonAgent_training_config.json`). Ces arbres sont petits : on les parcourt plutôt
     # que d'énumérer à la main des chemins qui bougeront.

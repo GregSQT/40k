@@ -14,8 +14,8 @@ vrai), `Documentation/Chantiers/` (vivant : contrats permanents, `v11/`, `backlo
 
 - **P1 structure** : ✅ livrée le 2026-08-27 — déplacements, mise à jour des scripts, des tests
   et de CLAUDE.md, README régénéré, purge des ✅ de l'index, liens réparés.
-- **P2 garde machine étendue** : ✅ livrée le 2026-08-27 — passe LIENS corpus vivant, `ANCHOR_TREES` étendu à `Reference/` (23 ancres fichier:ligne purgées d'`entrainement.md`), `VALUE_CHECKS` étendus (`TOTAL_ACTION_SIZE`, dimensions `allies_cont/allies_bin`), accumulation ROADMAP ≤ 20 ✅ ; 51 fragments morts #s0.X retirés de V11_tranches/phaseA/eval_strategy.
-- **P3 contenu** : ✅ livrée le 2026-08-27 — scission `V11_agent_rework.md` (§0bis → doc de
+- **P2 garde machine étendue** : ✅ livrée le 2026-08-27 — passe LIENS corpus vivant, `ANCHOR_TREES` étendu à `Reference/` (23 ancres fichier:ligne purgées d'`entrainement.md`), `VALUE_CHECKS` étendus (`TOTAL_ACTION_SIZE`, dimensions `allies_cont/allies_bin`), accumulation ROADMAP ≤ 20 ✅ ; 51 fragments morts #s0.X retirés de tranches_et_ruptures/phaseA/eval_strategy.
+- **P3 contenu** : ✅ livrée le 2026-08-27 — scission `index_v11.md` (§0bis → doc de
   méthode, §0hist → archive) + passes unitaires sur 11 docs (`USER_ACCESS_CONTROL.md`,
   `metriques.md`, bandeau `entrainement.md`… — les noms de fichiers 40k_rules restant inchangés).
 - **P4 consolidation « un sujet = un document »** (décision utilisateur 2026-08-27 : noms d'objet,
@@ -38,7 +38,9 @@ vrai), `Documentation/Chantiers/` (vivant : contrats permanents, `v11/`, `backlo
     `outils_conformite.md` (fusion des 5 docs conformité) ; 11 sources archivées en `Archives/docs/`
     avec bandeau retour ; références dans le code, les tests et le corpus vivant re-pointées.
   - **infra** : 🟡 à faire — renommages d'objet.
-  - **v11** : 🟡 à faire — noms d'objet pour les 4 specs (post-scission).
+  - **v11** : ✅ livré le 2026-08-28 — `index_v11` (état ouvert + pointeurs), `tranches_et_ruptures`
+    (spec R1→R8 + T1→T7), `decisions_du_joueur` (Phase A' P1→P5), `strategie_evaluation` ;
+    `lecons_de_methode` dans `Reference/training/` ; strates §9.4 pts 5/6/8 mises à jour.
 
 ---
 
@@ -55,18 +57,18 @@ Le solde du 2026-08-25 (sept symboles corrigés dans 4 docs) est archivé dans
 
 ---
 
-## Dette d'ancres G1/G2/G4 de V11_tranches §1bis {#dette-tranches}
+## Dette d'ancres G1/G2/G4 de tranches_et_ruptures §1bis {#dette-tranches}
 
-Le recensement G1/G2/G4 de `Documentation/Chantiers/v11/V11_tranches.md` §1bis est en fiabilité dégradée. **Interdiction d'ouvrir un chantier depuis une ligne non ✅ de ce recensement sans la re-vérifier contre le code d'abord** — c'est ainsi qu'est né le plan T7 faux.
+Le recensement G1/G2/G4 de `Documentation/Chantiers/v11/tranches_et_ruptures.md` §1bis est en fiabilité dégradée. **Interdiction d'ouvrir un chantier depuis une ligne non ✅ de ce recensement sans la re-vérifier contre le code d'abord** — c'est ainsi qu'est né le plan T7 faux.
 
 ---
 
 ## §0.19 — T2→T5 revérifiés par lecture seule {#reverif-t2-t5}
 
-`Documentation/Chantiers/v11/V11_agent_rework.md` §0.19 le déclare lui-même : les ✅ de T2→T5 ne sont revérifiés que par LECTURE (aucune exécution), et la conformité littérale de T2 est indécidable. Dette de spec assumée, continue — distincte de la dette d'ancres G1/G2/G4 ci-dessus, qui porte sur le recensement de `V11_tranches.md` §1bis.
+`Documentation/Chantiers/v11/index_v11.md` §0.19 le déclare lui-même : les ✅ de T2→T5 ne sont revérifiés que par LECTURE (aucune exécution), et la conformité littérale de T2 est indécidable. Dette de spec assumée, continue — distincte de la dette d'ancres G1/G2/G4 ci-dessus, qui porte sur le recensement de `tranches_et_ruptures.md` §1bis.
 
 ---
 
-## Bandeaux périmés V11_agent_rework §0bis {#bandeaux-0bis}
+## Bandeaux périmés index_v11 §0bis {#bandeaux-0bis}
 
-Bandeaux et chiffres périmés listés dans `Documentation/Chantiers/v11/V11_agent_rework.md` §0bis — signalés et volontairement non corrigés depuis le 2026-07-20. Assumé tant qu'aucune livraison ne rouvre ces sections ; traitement au fil de l'eau, comme les ancres.
+Bandeaux et chiffres périmés listés dans `Documentation/Chantiers/v11/index_v11.md` §0bis — signalés et volontairement non corrigés depuis le 2026-07-20. Assumé tant qu'aucune livraison ne rouvre ces sections ; traitement au fil de l'eau, comme les ancres.

@@ -130,6 +130,6 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
 | doc | 🟠 **Refonte Documentation/** — P1–P3 livrées (2026-08-27) ; P4 consolidation : moteur+backlog (16→9 docs, 20 sources archivées), training (7→5 docs, 7 sources archivées) et **jeu+outils** (jeu 3→3 noms d'objet, outils 7→4 dont fusion 5→1 `outils_conformite`, 11 sources archivées) livrés 2026-08-28 ; restent infra, v11 | [doc.md#refonte](doc.md#refonte) | ⚡ |
-| doc | Dette d'ancres G1/G2/G4 de V11_tranches §1bis | [doc.md#dette-tranches](doc.md#dette-tranches) | ⚡ |
-| doc | Bandeaux périmés V11_agent_rework §0bis (assumés depuis 2026-07-20) | [doc.md#bandeaux-0bis](doc.md#bandeaux-0bis) | ⚡ |
+| doc | Dette d'ancres G1/G2/G4 de tranches_et_ruptures §1bis | [doc.md#dette-tranches](doc.md#dette-tranches) | ⚡ |
+| doc | Bandeaux périmés index_v11 §0bis (assumés depuis 2026-07-20) | [doc.md#bandeaux-0bis](doc.md#bandeaux-0bis) | ⚡ |
 | doc | §0.19 : les ✅ T2→T5 revérifiés par lecture seule | [doc.md#reverif-t2-t5](doc.md#reverif-t2-t5) | ⚡ |

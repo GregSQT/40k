@@ -3,7 +3,7 @@
 Ce que ces tests protègent, et pourquoi chacun existe :
 
 - la RÉSOLUTION des chemins relatifs. Le 2026-08-11, le contrôle rendait 18 renvois cassés sur
-  `V11_phaseA.md` alors que les 9 cibles distinctes existaient toutes : la classe de caractères
+  `decisions_du_joueur.md` alors que les 9 cibles distinctes existaient toutes : la classe de caractères
   de la regex excluait le point, `../../engine/x.py` devenait `/engine/x.py`, et `ROOT / name`
   transformait ce fragment en chemin absolu inexistant.
 - la DÉTECTION d'une valeur périmée. Un contrôle qui ne sait que confirmer ne prouve rien : il
@@ -58,7 +58,7 @@ def test_parent_relative_path_is_captured_whole() -> None:
 def test_doc_relative_and_root_relative_both_resolve() -> None:
     """Les deux conventions du corpus coexistent et doivent être servies toutes les deux."""
     docs = ROOT / "Documentation" / "Chantiers"
-    assert cdr.resolve("v11/V11_phaseA.md", docs) is not None
+    assert cdr.resolve("v11/decisions_du_joueur.md", docs) is not None
     assert cdr.resolve("engine/w40k_core.py", docs) is not None
 
 
@@ -492,7 +492,7 @@ def test_symbol_reference_is_not_an_anchor(tmp_path: pathlib.Path) -> None:
     "BoardPvp.tsx:9290",
     "useBoardHexMemos.ts:117",
     "settings.json:17",
-    "V11_agent_rework.md:3713",
+    "index_v11.md:3146",
     "docker-compose.yml:18",
     "pytest.ini:12",
     "useBoardHexMemos.test.ts:117",
@@ -522,7 +522,7 @@ def test_a_line_anchor_of_any_extension_is_reported(tmp_path: pathlib.Path, ref:
 
 @pytest.mark.parametrize("line", [
     "`_auto_declared_order` L6462 → **9133**\n",
-    "listés en `1_Agent/V11_agent_rework.md` §0bis (l.3713-3735)\n",
+    "listés en `Chantiers/v11/index_v11.md` §0bis (l.3100-3120)\n",
 ])
 def test_the_other_two_spellings_of_an_anchor_are_reported(
     tmp_path: pathlib.Path, line: str
@@ -1273,7 +1273,7 @@ def test_accented_paths_are_counted_under_their_real_name() -> None:
     """
     counts = cdr.tracked_basenames()
     assert not [name for name in counts if '"' in name or "\\" in name]
-    assert counts["ROADMAP.md"] >= 1 and counts["V11_phaseA.md"] >= 1
+    assert counts["ROADMAP.md"] >= 1 and counts["decisions_du_joueur.md"] >= 1
 
 
 def test_git_output_is_decoded_regardless_of_the_locale() -> None:
