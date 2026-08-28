@@ -155,6 +155,7 @@ S'arrêter ET répondre uniquement dans ces cas :
 • STOP explicitement imposé par ce fichier
 • Checkpoint T3 : cause établie avec preuves → annoncer cause (fichier:ligne) + plan de correction + périmètre T2, puis attendre ; l'écriture démarre au tour suivant
 • Prompt ambigu ou contradictoire → présenter la contradiction, demander de trancher, ne pas choisir
+• Investigation exhaustive sans cause identifiable → reconnaître l'échec et lister les pistes restantes
 Hors ces cas, tout ce que l'utilisateur doit lire est dans le message final.
 
 STYLE
@@ -216,7 +217,6 @@ T3 — INVESTIGATION AUTONOME
 Toute demande d'analyse/bug/root cause autorise immédiatement toutes les LECTURES nécessaires : Read, Grep, Glob, appelants, logs, flux d'exécution, fichiers non nommés initialement.
 Ne jamais demander « veux-tu que j'investigue ? » ni interrompre l'investigation pour demander de continuer.
 Conditions d'arrêt → voir UNE SEULE RÉPONSE, À LA FIN.
-Si investigation approfondie sans cause claire → reconnaître l'échec et donner les pistes restantes.
 
 T4 — DIAGNOSTIC
 
