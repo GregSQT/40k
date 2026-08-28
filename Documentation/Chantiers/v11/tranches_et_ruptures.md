@@ -1,4 +1,4 @@
-# V11_tranches.md — Spec V11 : objectif, ancre, ruptures, tranches T1→T7, critères, tests
+# V11 — Tranches et ruptures : objectif, ancre, R1→R8, T1→T7, critères, tests
 
 > ### 🧭 Ce fichier n'est PAS la roadmap
 >
@@ -12,7 +12,7 @@
 > En cas de désaccord sur l'ordre entre ce fichier et le ROADMAP, **le ROADMAP l'emporte** — et
 > l'écart se corrige dans la même livraison (règle T2 de CLAUDE.md).
 
-> **Origine.** Sections **§1 → §8** extraites de [`V11_agent_rework.md`](V11_agent_rework.md) le
+> **Origine.** Sections **§1 → §8** extraites de [`index_v11.md`](index_v11.md) le
 > **2026-07-28** (étape 3 de [`V11_refactor_plan.md`](../../Archives/chantiers/V11_refactor_plan.md)), **sans aucune
 > réécriture** : blocs déplacés tels quels, seuls les liens ont été recâblés.
 >
@@ -20,9 +20,9 @@
 > tranches T1→T7 + Phase B, critères d'acceptation, smoke tests et tests de non-régression.
 >
 > **Retour à l'index d'état** (entrées ouvertes, pièges canoniques, historique résolu) :
-> [`V11_agent_rework.md`](V11_agent_rework.md). Les autres sous-docs de la spec :
-> [`V11_phaseA.md`](V11_phaseA.md) — [§9](V11_phaseA.md#s9), Phase A' P1→P5 — et
-> [`V11_eval_strategy.md`](V11_eval_strategy.md) — [§10](V11_eval_strategy.md#s10), stratégie
+> [`index_v11.md`](index_v11.md). Les autres sous-docs de la spec :
+> [`decisions_du_joueur.md`](decisions_du_joueur.md) — [§9](decisions_du_joueur.md#s9), Phase A' P1→P5 — et
+> [`strategie_evaluation.md`](strategie_evaluation.md) — [§10](strategie_evaluation.md#s10), stratégie
 > d'entraînement et d'évaluation.
 >
 > **Convention.** Les renvois de 1 à 8 **internes à ce fichier** restent en texte nu ; les renvois
@@ -44,7 +44,7 @@ allocation des pertes par-figurine), en trois phases :
   supprimer le code mort, (P2-P3) donner à l'agent chaque décision que les règles laissent au
   joueur (mécanisme générique de décision), (P4-P5) observation de support + validation par
   tranche. Périmètre strict : règles DÉJÀ implémentées — aucune feature absente du moteur.
-  Détail en [section 9](V11_phaseA.md#s9).
+  Détail en [section 9](decisions_du_joueur.md#s9).
 - **Phase B (obligatoire)** : mise à niveau de l'observation — l'agent perçoit les niveaux
   (élévation) et les coûts associés.
 - **Phase C (optionnelle, hors scope initial)** : nouveaux points de décision au-delà de la
@@ -104,7 +104,7 @@ sont des variantes du même mensonge :
 | **T6-f** | le commit n'écrivait QUE l'ancre → figurines restées à `(-1,-1)` |
 | **T6-g** | le pool BFS validait l'ancre → le bloc translaté débordait |
 | **T6-h** | la translation « rigide » déformait le bloc selon la parité de `dx` |
-| **[§0.11](V11_agent_rework.md)** | la collision intra-plan ignorait le **niveau**, autre attribut d'identité écrasé par le résumé |
+| **[§0.11](index_v11.md)** | la collision intra-plan ignorait le **niveau**, autre attribut d'identité écrasé par le résumé |
 | **T7** | le contrôle mono-ancre de `deploy_unit` teste ce socle fantôme |
 
 ### ⚠️ Le piège : « ancre » désigne TROIS contrats différents
@@ -134,7 +134,7 @@ l'ancre » : au déploiement, c'est faux.
 > d'équivalent de l'érosion T6-g » a été écrit ici sur la seule absence de fonction `erode_*`,
 > alors qu'une machinerie per-model existe ailleurs dans le même fichier (cf. la ligne charge
 > ci-dessous). **Ne pas ouvrir de chantier depuis une ligne non marquée ✅ sans avoir lu la
-> fonction.** C'est la même erreur de méthode que [§0.11](V11_agent_rework.md) (« vérifié un par un » sur un
+> fonction.** C'est la même erreur de méthode que [§0.11](index_v11.md) (« vérifié un par un » sur un
 > échantillon n'est pas une vérification) et que le plan T7 (conclusion tirée sans lire les
 > deux avertissements présents dans le code).
 
@@ -171,7 +171,7 @@ C'est la source commune des gravités 1-2 ci-dessous.
 ([game_state.py](../../../engine/game_state.py)) compte bien OC × figurines dans la zone
 (14.02). Ce sont les règles *satellites* qui n'ont pas suivi.~~
 
-⛔ **AFFIRMATION FAUSSE, CORRIGÉE LE 2026-07-29** (§0.50 de [`V11_agent_rework.md`](V11_agent_rework.md#s0.50),
+⛔ **AFFIRMATION FAUSSE, CORRIGÉE LE 2026-07-29** (§0.50 de [`index_v11.md`](index_v11.md#s0.50),
 branche `v11-battle-shock-oc`, commit `4be41919`). Le décompte était ✅ conforme à **14.02**
 (OC × figurines dont l'empreinte recouvre la zone) mais ⛔ **PAS conforme à 01.07** : `battle_shocked`
 n'était jamais consulté, alors que la règle met l'OC de toutes les figurines d'une unité choquée à
@@ -180,7 +180,7 @@ explicitement). Une unité démoralisée tenait ses objectifs normalement.
 
 ⚠️ **C'est cette phrase qui a rendu le défaut invisible** : un « SAIN » non borné, prononcé sur UNE
 règle, a été lu comme un verdict sur le contrôle d'objectif en général. Leçon durcie en §0bis de
-[`V11_agent_rework.md`](V11_agent_rework.md#s0bis) : un verdict de conformité se borne à la règle
+[`index_v11.md`](index_v11.md#s0bis) : un verdict de conformité se borne à la règle
 vérifiée et énumère les règles satellites qui la modifient ; un ✅ exige plus de justification qu'un
 🔴, parce que personne ne va le revérifier.
 
@@ -212,7 +212,7 @@ endroit, et **pas** aux sites G1-G2. Le motif se répare site par site depuis de
 <a id="s2"></a>
 ## 2. État des lieux vérifié (ce qui marche)
 
-⚠️ **Affirmation périmée n°7 — voir la table de [§0bis](V11_agent_rework.md#s0bis)** : `ai.multi_agent_trainer` n'existe plus (supprimé en [§0.8](V11_agent_rework.md)). Ligne conservée telle quelle, non corrigée.
+⚠️ **Affirmation périmée n°7 — voir la table de [§0bis](index_v11.md#s0bis)** : `ai.multi_agent_trainer` n'existe plus (supprimé en [§0.8](index_v11.md)). Ligne conservée telle quelle, non corrigée.
 
 - Tous les imports du pipeline passent (`ai.train`, `ai.env_wrappers`, `ai.multi_agent_trainer`,
   `ai.reward_mapper`, `ai.scenario_manager`, `ai.unit_registry`, ... — vérifié par exécution).
@@ -347,7 +347,7 @@ shoot_activation_pool`, [action_decoder.py](../../../engine/action_decoder.py)) 
 (ni au montage du pool, ni en fin d'activation), et `squad_shoot` libère la clé à la fin de
 l'activation. Basculer `player_types` sur `"ai"` ne fait donc plus exploser le décodeur — mesuré
 sur les trois configurations. L'avertissement reste ici pour l'historique du diagnostic R4 ; il ne
-décrit plus le code. Cf. [V11_phaseA.md §9 P3-3](V11_phaseA.md#s9).
+décrit plus le code. Cf. [decisions_du_joueur.md §9 P3-3](decisions_du_joueur.md#s9).
 
 ### R5 — Wrappers et bots sur l'ANCIEN layout d'actions (BLOQUANT runtime)
 **Repro** (pile complète `BotControlledEnv(ActionMasker(W40KEngine))` + GreedyBot) :
@@ -395,7 +395,7 @@ Analyse statique concordante : SEULE `_fight_phase_complete` (fight_handlers, de
 appelée ~1488/1904/2408) pose `game_over` en vif — et uniquement **au sein d'un `step()`**.
 Masque vide = plus aucun step légal = la complétion de phase n'est jamais déclenchée.
 ⚠️ `_advance_to_next_player` était du CODE MORT en production — **supprimée le 2026-07-19**
-(cf. [§0.4](V11_agent_rework.md)) : elle n'existe plus, ne pas la chercher.
+(cf. [§0.4](index_v11.md)) : elle n'existe plus, ne pas la chercher.
 Nuance config : la limite de tours existe en deux endroits — `max_turns` (game_config.json L14)
 et `max_turns_per_episode` (training config) ; clarifier en T5 lequel fait foi en moteur nu.
 Dans la pile réelle, ce cas est censé être absorbé par le "WAIT forcé" du wrapper
@@ -429,7 +429,7 @@ Vérifié par lecture concordante :
 - ✅ **RÉSOLU le 2026-08-08** — `active_shooting_unit` : le cycle de vie est désormais le même
   partout (la clé désigne l'activation de tir EN COURS, posée par son début, retirée par sa fin).
   Elle reste absente du gym parce que `player_types` y vaut `human/human`, non parce que le
-  chemin serait malsain. Cf. [V11_phaseA.md §9 P3-3](V11_phaseA.md#s9).
+  chemin serait malsain. Cf. [decisions_du_joueur.md §9 P3-3](decisions_du_joueur.md#s9).
 - `ai/target_selector.py` : orphelin (importé seulement par son test unitaire).
 - Docs périmées : AI_OBSERVATION.md décrit 357 floats, AI_TRAINING.md 355 — aucun ne décrit le
   pipeline squad 108 actif ; `justification` de la config dit 31 au lieu de 41. Les snapshots
@@ -511,23 +511,23 @@ Chaque tranche se termine par sa validation (section 6) AVANT de passer à la su
 
 ### T1 — Fixes moteur neutres (R4, R6) — ✅ FAIT, prédicat ET branchement verrouillés (2026-07-21)
 
-> **Historique du statut** : ✅ (2026-07-15) → ⏳ PARTIEL (audit [§0.19.1](V11_agent_rework.md), 2026-07-20) → ✅
-> ([§0.19.3](V11_agent_rework.md), 2026-07-21).
+> **Historique du statut** : ✅ (2026-07-15) → ⏳ PARTIEL (audit [§0.19.1](index_v11.md), 2026-07-20) → ✅
+> ([§0.19.3](index_v11.md), 2026-07-21).
 >
-> 🔴 **Le démenti de [§0.19.1](V11_agent_rework.md)** : le code de T1 était en place et conforme, mais deux de ses trois
+> 🔴 **Le démenti de [§0.19.1](index_v11.md)** : le code de T1 était en place et conforme, mais deux de ses trois
 > volets n'étaient **verrouillés par aucun test** — le **site R6 n°1**
 > (`_charge_reverse_goal_bfs_for_eligibility`, inatteignable au x5 : mutation `int()` sur une
 > liste, suite **verte**) et **R4** (zéro occurrence de `is_programmatic_owner` /
 > `is_programmatic_defender` dans `tests/`, alors que §8.3 impose une matrice complète).
 >
-> ✅ **R6 comblé en [§0.19.3](V11_agent_rework.md)** : `test_charge_oval_base_reverse_bfs.py` (+4, avec garde
+> ✅ **R6 comblé en [§0.19.3](index_v11.md)** : `test_charge_oval_base_reverse_bfs.py` (+4, avec garde
 > d'atteinte) — les DEUX sites rougissent désormais sur mutation.
 >
 > ✅ **R4 comblé** : `test_programmatic_owner_predicate.py` (+22) verrouille le **prédicat** et
 > son refus du repli ; `test_r4_auto_decider_wiring.py` (+14) verrouille son **BRANCHEMENT** —
 > or c'était ça, la rupture R4. Les **6** exigences de §8.3 sont couvertes, chaque cas gym ayant
 > son jumeau PvP. 6 mutations au total, toutes rouges, dont une qui **rejoue la rupture R4
-> d'origine**. Détail en [§0.19.3](V11_agent_rework.md). Le texte ci-dessous est celui de la session d'origine,
+> d'origine**. Détail en [§0.19.3](index_v11.md). Le texte ci-dessous est celui de la session d'origine,
 > **conservé tel quel**.
 
 Réalisé : R6 normalisé dans les 2 sites ; prédicat unique `is_programmatic_owner` /
@@ -594,8 +594,8 @@ rejouée verte, grep de contrôle passé, smoke pile complète rejoué), avec 3 
    INERTE (gardée par `hasattr(actual_env, 'controller')`, attribut absent du moteur squad)
    mais « aucun littéral dans multi_agent_trainer » est faux — à condamner/purger comme
    `game_replay_logger.log_action` (raccroché à T6 hygiène ou T5).~~
-   → ✅ **SOLDÉ, NE PLUS CITER (voir [§0.8](V11_agent_rework.md)).** Le monkeypatch a été purgé au commit `6a7a9de1`,
-   le commentaire de purge qui l'a remplacé a disparu avec [§0.8](V11_agent_rework.md), et `game_replay_logger` est
+   → ✅ **SOLDÉ, NE PLUS CITER (voir [§0.8](index_v11.md)).** Le monkeypatch a été purgé au commit `6a7a9de1`,
+   le commentaire de purge qui l'a remplacé a disparu avec [§0.8](index_v11.md), et `game_replay_logger` est
    supprimé. **`grep 'action % 8' ai/multi_agent_trainer.py` est vide.** Ce point a induit deux
    relecteurs en erreur *après* sa résolution, parce qu'ils l'ont cité depuis cette doc au lieu de
    grep le fichier — d'où le rappel : **une doc n'est pas une source, le code l'est.**
@@ -703,7 +703,7 @@ issues du terrain (voie moderne) ne peuplaient pas le pool de déploiement rando
 alignement 0/1 vs 1/2 traverse multi_agent_trainer = chantier séparé à valider).
 > ⚠️ **Périmé depuis le 2026-07-29** : « chemin dormant » était en fait du **code mort**, et
 > `ai/scenario_manager.py` a été **supprimé** — l'alignement 0/1 vs 1/2 n'a plus d'objet.
-> Cf. [§0.45](V11_agent_rework.md).
+> Cf. [§0.45](index_v11.md).
 **Balayage** : `scripts/sweep_scenario_bank_v11.py` — 61/61 chargés + reset. Tests +83.
 > ⚠️ **Le script n'existe plus** (supprimé au commit `924c2b41`, constaté le 2026-08-02) : cette
 > ligne décrit ce qui a été fait à l'époque, pas un livrable disponible. **La capacité de
@@ -750,11 +750,11 @@ Plan d'origine (réalisé ci-dessus) :
      110, `objectives_ref` 118/246/254) → à migrer, pas seulement à vérifier ;
    - ~~`ai/scenario_manager.py` : utilise des `deployment_zones` avec clés joueur **0/1** alors
      que les terrains modernes utilisent **"1"/"2"** → incompatibilité à résoudre~~ **SANS OBJET
-     depuis le 2026-07-29 : le fichier a été supprimé** (code mort, [§0.45](V11_agent_rework.md)) ;
+     depuis le 2026-07-29 : le fichier a été supprimé** (code mort, [§0.45](index_v11.md)) ;
    - `scripts/rebalance_holdout_hard_scenarios.py`, `scripts/build_dynamic_rosters.py` : aucune
      clé legacy détectée, re-vérifier après migration.
 
-### T5 — Boucle complète et fin d'épisode (R7) — ✅ FAIT (moteur nu, 2026-07-16) — verrou confirmé par mutation ([§0.19.1](V11_agent_rework.md))
+### T5 — Boucle complète et fin d'épisode (R7) — ✅ FAIT (moteur nu, 2026-07-16) — verrou confirmé par mutation ([§0.19.1](index_v11.md))
 
 > ✅ **Confirmé le 2026-07-20** : le fix `_deployment_clearance_filter` est verrouillé —
 > neutralisé, `test_deployment_mask_mirrors_commit_overlap_predicate` rougit en 6,7 s avec le
@@ -773,7 +773,7 @@ garanties + Carnifex en phase charge ») :
   scénario fixe pré-engagé : zéro masque vide sans terminaison, zéro exception, toutes les
   parties se terminent (turn limit). Le fix conditionnel T5.2 sur `_fight_phase_complete`
   n'était donc PAS requis — non touché ; `_advance_to_next_player` (mort) laissé tel quel
-  **à l'époque, supprimé depuis le 2026-07-19 ([§0.4](V11_agent_rework.md))**.
+  **à l'époque, supprimé depuis le 2026-07-19 ([§0.4](index_v11.md))**.
 - **Vraie rupture bloquante en moteur nu = déploiement `active`, PAS R7 (nouvelle, hors R1-R8)** :
   `ActionDecoder._get_valid_deployment_hexes` ([action_decoder.py](../../../engine/action_decoder.py)) testait le
   chevauchement inter-unités par CELLULES (`build_occupied_positions_set`), alors que le commit
@@ -808,7 +808,7 @@ Plan d'origine :
    tour, via le SEUL chemin vif : `_fight_phase_complete` (fight_handlers, def ~1867) doit
    aboutir à `terminated` sans exiger une action supplémentaire quand le pool est vide.
    `_advance_to_next_player` était mort en production (cf. R7) — **supprimée le 2026-07-19**
-   ([§0.4](V11_agent_rework.md)), donc plus rien à statuer. Interdit de résoudre par injection d'action côté
+   ([§0.4](index_v11.md)), donc plus rien à statuer. Interdit de résoudre par injection d'action côté
    wrapper.
 3. Étendre le smoke test aux scénarios migrés (T4), sièges p1/p2/random, et à un scénario
    contenant Carnifex/Psychophage (validation R6).
@@ -893,7 +893,7 @@ de T4/de code latent) :
   légal (12.04/12.06) déjà accepté par le PvP. **Neutralité PvP totale** (`fight_handlers` intact).
   **Tests (+5)** : `tests/unit/engine/test_squad_fight_target_parity.py` (2 vérifiés comme
   échouant sur l'ancien code). Détail : `Documentation/Archives/chantiers/bug_squad_fight_mask_mismatch.md`.
-  ⚠️ **Impact sur le plan [§9.4](V11_phaseA.md#s9.4)** : le site vif de la cible de mêlée a changé → cf. [§9.4](V11_phaseA.md#s9.4) point 1.
+  ⚠️ **Impact sur le plan [§9.4](decisions_du_joueur.md#s9.4)** : le site vif de la cible de mêlée a changé → cf. [§9.4](decisions_du_joueur.md#s9.4) point 1.
 
 - **T6-d — dettes constatées pendant T6-c — DÉCISION UTILISATEUR (2026-07-16) : traiter AVANT le training**
   - **✅ RÉSOLU (2026-07-16) — Le gym n'entrait PAS dans la machine V11.** Mesuré sur épisode
@@ -967,7 +967,7 @@ de T4/de code latent) :
   (BLOQUANT gym, crash DIFFÉRÉ en phase move ; touche AUSSI des chemins PvP) — ✅ FAIT
   (2026-07-19, +10 tests `test_deployment_per_model_commit.py`)**
   ⚠️ Cet en-tête est resté « ❌ À FAIRE » jusqu'au 2026-07-19 alors que le fix était livré et
-  testé : il contredisait [§0](V11_agent_rework.md#s0) ET le tableau des critères. Corrigé. L'analyse ci-dessous reste
+  testé : il contredisait [§0](index_v11.md#s0) ET le tableau des critères. Corrigé. L'analyse ci-dessous reste
   valable comme historique de la rupture.
   **Rayon (vérifié par lecture, conséquence runtime démontrée côté gym seulement)** : le commit
   fautif est PARTAGÉ — (a) gym via l'action decoder ; (b) auto-déploiement P2 du tutoriel
@@ -1093,13 +1093,13 @@ de T4/de code latent) :
   pré-agrégées par niveau en un seul set (murs ∪ occupation ∪ ER ennemie) → un test
   d'appartenance par figurine et par candidate, pas d'appel à `validate_move_plan` dans la
   boucle. Invariants non érodés car démontrés invariants par translation : budget per-model et
-  cohésion (cf. [§0](V11_agent_rework.md#s0)). Aucune règle de jeu modifiée : l'érosion ne fait que RETIRER du masque des
+  cohésion (cf. [§0](index_v11.md#s0)). Aucune règle de jeu modifiée : l'érosion ne fait que RETIRER du masque des
   destinations que l'exécution refusait déjà.
   **Validation** : +6 tests dédiés (mur/autre escouade/ER sous une SŒUR alors que l'ANCRE est
   légale, débordement de plateau, non-sur-filtrage, court-circuit mono-figurine) ; run x5_debug
   8 workers 10/10 épisodes et run mono-env x1_debug, **zéro** « incohérence masque/exécution ».
   ⚠️ **Ce « zéro » ne vaut que pour les 10 épisodes mesurés** : une AUTRE cause de la même
-  classe a tué un run de 250 épisodes le 2026-07-20 — cf. **[§0.11](V11_agent_rework.md)** (collision intra-plan
+  classe a tué un run de 250 épisodes le 2026-07-20 — cf. **[§0.11](index_v11.md)** (collision intra-plan
   aveugle au niveau). L'érosion de T6-g reste correcte ; c'était le prédicat de collision
   qu'elle ne teste pas — à raison — qui était faux.
   Historique de la rupture ci-dessous.
@@ -1498,7 +1498,7 @@ zéro erreur. Smoke `scripts/smoke_t5_bare.py` rejoué après TOUS les fixes T6 
 
 ### T7 — Unification de la validation de déploiement — ⏸️ EN ATTENTE (déclencheur explicite)
 
-**Déclencheur : le training tourne** (donc T6-h puis T6-g livrés, cf. [§0](V11_agent_rework.md#s0)). **Ne PAS commencer
+**Déclencheur : le training tourne** (donc T6-h puis T6-g livrés, cf. [§0](index_v11.md#s0)). **Ne PAS commencer
 avant** — voir « pourquoi pas maintenant ».
 
 **Le problème.** Depuis T6-f, `deploy_unit` enchaîne DEUX contrôles :
@@ -1580,7 +1580,7 @@ refusé aujourd'hui (ancre en bord de zone, formation entièrement dedans) est A
 dédié, rouge avant le fix ; suite verte hors échecs préexistants ; PvP non régressé (le drag
 mono-socle et l'auto-déploiement passent par le même commit).
 
-### Phase B (après T6 ET Phase A' — [section 9](V11_phaseA.md#s9) — validés) — Observation niveaux
+### Phase B (après T6 ET Phase A' — [section 9](decisions_du_joueur.md#s9) — validés) — Observation niveaux
 Spec à figer à ce moment-là, principes déjà actés :
 - Ajouter aux 7 features par-figurine un `level` normalisé (source : champ `level` de la
   figurine, posé game_state.py ~162) et aux 9 features par slot ennemi le niveau de l'ancre ;
@@ -1603,8 +1603,8 @@ Spec à figer à ce moment-là, principes déjà actés :
 | T3 | `train.py --step --training-config x1_debug` dépasse la résolution walls/objectives sans FileNotFoundError |
 | T4 | Les 61 scénarios se chargent (`W40KEngine(scenario_file=...)` + reset, script de balayage) ; zéro clé legacy ; sort de training_save/ statué |
 | T5 | 10 épisodes aléatoires masqués terminés sur ≥3 scénarios × sièges p1/p2 ; zéro masque vide |
-| T6 | ⚠️ *(périmée n°3 de [§0bis](V11_agent_rework.md#s0bis) : le blocage par `CC_DMG` est levé — [§0.3](V11_agent_rework.md) porté, run 60/60 en [§0.7](V11_agent_rework.md) — cellule conservée telle quelle, non corrigée)* Run `--new` court complet + analyzer + replay OK ; ~~win-rate vs RandomBot en progression~~ → **critère REMPLACÉ le 2026-07-19, voir [section 10.6](V11_eval_strategy.md#s10.6)** (win-rate PAR ROSTER contre un adversaire de holdout jamais vu à l'entraînement + absence de comportement absurde en partie humaine). L'ancien critère référençait un holdout de rosters qui n'existe plus. — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ✅ **Le run TOURNE de nouveau depuis le 2026-07-19** : T6-g et T6-h sont livrés (cf. [§0](V11_agent_rework.md#s0)), x5_debug 8 workers 10/10 ép. exit 0. ❌ **Le critère T6 reste NON évaluable**, mais pour une raison DIFFÉRENTE et désormais isolée : **[§10.4](V11_eval_strategy.md#s10.4)** — sur le chemin single-scenario, P2 joue ALÉATOIRE (`SelfPlayWrapper(frozen_model=None)`, `update_frozen_model` sans appelant). Tout win-rate mesuré aujourd'hui est du bruit. ~~C'est le prochain bloqueur.~~ **✅ [§10.4](V11_eval_strategy.md#s10.4) RÉSOLU le 2026-07-19** (adversaires câblés sur les 3 chemins) ; le critère T6 reste néanmoins NON évalué, désormais bloqué par `CC_DMG` ([§0.3](V11_agent_rework.md)) qui plante des épisodes d'évaluation. Voir [§0.0](V11_agent_rework.md) pour l'ordre des travaux. |
-| T6-i | ⚠️ *(périmée n°2 de [§0bis](V11_agent_rework.md#s0bis) : le test de non-régression existe : `test_end_of_turn_coherency_03_03.py` — cellule conservée telle quelle, non corrigée)* Une escouade rendue incohérente par des pertes est ramenée en coherency à la fin du tour (03.03), sur les **deux** chemins de fin de Fight, avant le test de limite de tour ; aucune destination du masque de move n'est rejetée pour cause de coherency — ⏳ **PARTIEL (2026-07-19 soir)** : ✅ fix livré et vérifié par run bout-en-bout (8 épisodes plantés → 2, erreur `incohérence masque/exécution` disparue, suite sans régression) ; ❌ **test de non-régression NON écrit** — §8 l'impose, c'est la tâche n°1 de [§0.0](V11_agent_rework.md) |
+| T6 | ⚠️ *(périmée n°3 de [§0bis](index_v11.md#s0bis) : le blocage par `CC_DMG` est levé — [§0.3](index_v11.md) porté, run 60/60 en [§0.7](index_v11.md) — cellule conservée telle quelle, non corrigée)* Run `--new` court complet + analyzer + replay OK ; ~~win-rate vs RandomBot en progression~~ → **critère REMPLACÉ le 2026-07-19, voir [section 10.6](strategie_evaluation.md#s10.6)** (win-rate PAR ROSTER contre un adversaire de holdout jamais vu à l'entraînement + absence de comportement absurde en partie humaine). L'ancien critère référençait un holdout de rosters qui n'existe plus. — ⏳ **PARTIEL (2026-07-16)**. ✅ Run `--new` : déroule sans AUCUNE exception (467/500 ép.). ✅ Suite verte (1293) + smoke `(A)/(B)` OK (mêlée 5 kills, Carnifex charge). ✅ T6-c résolu : `_process_squad_action` journalise, analyzer tourne, `1.2 erreurs shooting = 0`. ✅ **T6-d résolu** : `squad_fight` = sélection FIGHT 12.04, machine V11 déroulée par `_fight_v11_gym_settle` (ordre 12.02→12.04→12.07 respecté, snapshot posé, double activation interdite). ❌ **win-rate NON concluant** : ~30 % vs GreedyBot sur 467 ép. (bruit) — mesuré AVANT T6-d, donc sur un moteur où la mêlée était fausse ; **à re-mesurer** avec phase `x1` + `bot_evaluation` holdout vs RandomBot. ✅ **Le run TOURNE de nouveau depuis le 2026-07-19** : T6-g et T6-h sont livrés (cf. [§0](index_v11.md#s0)), x5_debug 8 workers 10/10 ép. exit 0. ❌ **Le critère T6 reste NON évaluable**, mais pour une raison DIFFÉRENTE et désormais isolée : **[§10.4](strategie_evaluation.md#s10.4)** — sur le chemin single-scenario, P2 joue ALÉATOIRE (`SelfPlayWrapper(frozen_model=None)`, `update_frozen_model` sans appelant). Tout win-rate mesuré aujourd'hui est du bruit. ~~C'est le prochain bloqueur.~~ **✅ [§10.4](strategie_evaluation.md#s10.4) RÉSOLU le 2026-07-19** (adversaires câblés sur les 3 chemins) ; le critère T6 reste néanmoins NON évalué, désormais bloqué par `CC_DMG` ([§0.3](index_v11.md)) qui plante des épisodes d'évaluation. Voir [§0.0](index_v11.md) pour l'ordre des travaux. |
+| T6-i | ⚠️ *(périmée n°2 de [§0bis](index_v11.md#s0bis) : le test de non-régression existe : `test_end_of_turn_coherency_03_03.py` — cellule conservée telle quelle, non corrigée)* Une escouade rendue incohérente par des pertes est ramenée en coherency à la fin du tour (03.03), sur les **deux** chemins de fin de Fight, avant le test de limite de tour ; aucune destination du masque de move n'est rejetée pour cause de coherency — ⏳ **PARTIEL (2026-07-19 soir)** : ✅ fix livré et vérifié par run bout-en-bout (8 épisodes plantés → 2, erreur `incohérence masque/exécution` disparue, suite sans régression) ; ❌ **test de non-régression NON écrit** — §8 l'impose, c'est la tâche n°1 de [§0.0](index_v11.md) |
 | T6-f | Après le commit de déploiement, AUCUNE figurine vivante à `(-1,-1)` et ancre `units_cache` = figurine d'index minimal, sur les 3 chemins (gym, ancre imposée tutoriel, drag) — ✅ **FAIT (2026-07-19)** |
 | T6-g | Toute cellule offerte par le masque de move est exécutable : sur N épisodes aléatoires, zéro `ValueError` « incohérence masque/exécution » — et un test dédié où une escouade dont le BLOC déborde (mur / autre escouade) ne voit PAS la cellule dans son masque — ✅ **FAIT (2026-07-19)** : `test_move_pool_block_erosion.py` (+6, mur/escouade/ER sous une SŒUR, débordement plateau, non-sur-filtrage, mono-fig) ; runs x5_debug 8 workers (10/10 ép.) et mono-env x1_debug, zéro occurrence |
 | T6-h | La translation de bloc préserve les distances internes pour TOUTES les parités de `dx` (test paramétré `dx` pair ET impair) — rouge sur le code actuel — ✅ **FAIT (2026-07-19)** : `test_rigid_plan_translation.py` (+10), rouge avant le fix aux seules parités impaires ; fix étendu à `translate_squad_to_destination` (écrivain du commit) et `preview_hidden_models_after_move` |
@@ -1700,7 +1700,7 @@ Fichier proposé : `tests/unit/engine/test_agent_interface_contract.py`.
   actions du masque ; choix hors masque = erreur explicite (test `raises`) ; les dicts de
   poids déploiement pointent des actions de `DEPLOY_SLOTS`.
 - ~~`game_replay_logger` : décodage correct du layout 41 (un cas par famille d'action) — ou, si
-  condamné, erreur explicite testée.~~ → **sans objet : le module est supprimé ([§0.8](V11_agent_rework.md)).** Ne pas
+  condamné, erreur explicite testée.~~ → **sans objet : le module est supprimé ([§0.8](index_v11.md)).** Ne pas
   réécrire de test pour lui.
 
 **T3** :
@@ -1766,7 +1766,7 @@ avant de conclure quoi que ce soit sur une régression.
 <a id="s8.4"></a>
 ### 8.4 Couverture Phase A' (une règle = son fichier de tests, AVANT suppression du code mort)
 
-- Chaque règle du tableau P1 ([section 9.2](V11_phaseA.md#s9.2)) : tests sur le chemin VIF (`_manual_roll_intent` /
+- Chaque règle du tableau P1 ([section 9.2](decisions_du_joueur.md#s9.2)) : tests sur le chemin VIF (`_manual_roll_intent` /
   `_resolve_one_manual_wound`) encodant le PDF — cas nominal, cas limite, cas d'inapplicabilité.
   Minimum par règle : HEAVY (les 3 conditions 24.16, chacune isolée) ; HAZARDOUS (un jet PAR
   ARME sélectionnée, pas par attaque ; réutilisation de `roll_hazard_for_unit`) ;

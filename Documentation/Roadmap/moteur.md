@@ -44,7 +44,7 @@ Interruptions réactives pendant le tour adverse — cas le plus complexe du gym
 
 🔴 Le fix décrit est FAUX en l'état (mesuré 2026-07-20) — c'est une décision de design (plan contraint par l'ancre), pas un bug. Re-analyser avant de toucher.
 
-→ `Documentation/Chantiers/v11/V11_tranches.md` §5 T7
+→ `Documentation/Chantiers/v11/tranches_et_ruptures.md` §5 T7
 
 ---
 
@@ -52,7 +52,7 @@ Interruptions réactives pendant le tour adverse — cas le plus complexe du gym
 
 **Suspendu.** Après Phase A' validée ET vérification du chantier LoS 3D (`combat_utils`/WASM, câblage incomplet).
 
-→ `Documentation/Chantiers/v11/V11_tranches.md`
+→ `Documentation/Chantiers/v11/tranches_et_ruptures.md`
 
 ---
 

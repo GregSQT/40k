@@ -9,7 +9,7 @@ Couvre :
 
 Le balayage EXHAUSTIF des 61 (W40KEngine + reset) était fourni par `scripts/sweep_scenario_bank_v11.py`,
 trop lourd pour la suite unitaire et **supprimé le 2026-07-26** (critère T4 clos, balayage 61/61 déjà
-consigné dans `V11_agent_rework.md §3495`) ; ce test couvre l'invariant statique sur les 61 + un
+consigné dans `index_v11.md §3495`) ; ce test couvre l'invariant statique sur les 61 + un
 échantillon représentatif chargé de bout en bout.
 """
 from __future__ import annotations

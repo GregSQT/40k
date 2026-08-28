@@ -1,4 +1,4 @@
-"""T6 (V11_agent_rework.md) — contrat wall_ref du sampler de scénarios.
+"""T6 (index_v11.md) — contrat wall_ref du sampler de scénarios.
 
 Contexte : la migration T4 a rendu la banque de scénarios TERRAIN-ONLY (le script
 `migrate_scenario_bank_v11.py` supprime la clé legacy `wall_ref` ; les murs viennent

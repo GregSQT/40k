@@ -10,13 +10,13 @@
 > En cas de désaccord sur l'ordre entre ce fichier et le ROADMAP, **le ROADMAP l'emporte** — et
 > l'écart se corrige dans la même livraison (règle T2 de CLAUDE.md).
 
-> **Origine.** Section §10 extraite de [`V11_agent_rework.md`](V11_agent_rework.md) le 2026-07-28
+> **Origine.** Section §10 extraite de [`index_v11.md`](index_v11.md) le 2026-07-28
 > (plan [`V11_refactor_plan.md`](../../Archives/chantiers/V11_refactor_plan.md), étape 2). Contenu déplacé **tel quel**,
 > aucune réécriture.
 >
 > **Rôle.** Décision utilisateur du 2026-07-19 : rosters, progression d'adversaires, holdout,
 > critère de succès, place du MCTS. L'**état** (fait / à faire) reste dans l'index
-> [`V11_agent_rework.md`](V11_agent_rework.md).
+> [`index_v11.md`](index_v11.md).
 >
 > **Convention.** Les renvois `§10.x` internes restent en texte nu ; les renvois vers l'index sont
 > des liens de fichier.
@@ -77,7 +77,7 @@ holdout que sur `TacticalBot`.
 ⚠️ **Les points des unités Orks sont factices** : `VALUE = 70` pour TOUTES (Boyz, Gretchin,
 Warboss, WarTrakk, BigMek…). Le total « 3290 pts » du roster Orks n'a aucun sens, et le moteur
 ne valide PAS les points (`scale` n'est qu'un nom de dossier). ~~Déséquilibre réel à surveiller :
-**47 figurines côté Orks contre 23 côté SM**.~~ → chiffre périmé : **37 contre 23** depuis [§0.9](V11_agent_rework.md)
+**47 figurines côté Orks contre 23 côté SM**.~~ → chiffre périmé : **37 contre 23** depuis [§0.9](index_v11.md)
 (10 Gretchin et non 20), et ce n'est pas un déséquilibre mais une identité de faction à 680 vs 680.
 
 **Bug corrigé au passage (registry d'unités)** : `LandSpeederOnslaughtGatlingCannon.ts` et
@@ -135,14 +135,14 @@ point de vue de l'apprentissage.
 > **Statut 2026-07-19 : ✅ RÉSOLU** — construction d'adversaires mutualisée dans
 > `build_training_opponents`, `use_bots` dérivé de la config (`bot_training`) et non du nom de
 > fichier, repli aléatoire refusé explicitement par `SelfPlayWrapper` et `make_training_env`.
-> Détail et vérification en [§0](V11_agent_rework.md#s0). Le constat ci-dessous est conservé comme historique.
+> Détail et vérification en [§0](index_v11.md#s0). Le constat ci-dessous est conservé comme historique.
 >
 > **Constat d'origine — les trois faits ci-dessous ont été
 > re-vérifiés dans le code ce jour (aucun n'a bougé). Ce n'est plus théorique : les runs de
 > validation de T6-g/T6-h (`x5_debug`, n_envs=8, `training_benchmark`) **et** le run de mise en
 > service d'`ArmageddonAgent` (§10.2) sont tous passés par la ligne 2 du tableau — donc **contre
 > un P2 aléatoire**. Ces runs prouvent que le PIPELINE tourne (zéro exception, épisodes
-> complets) ; ils ne prouvent RIEN sur l'apprentissage. C'est le bloqueur n°1, cf. [§0](V11_agent_rework.md#s0).
+> complets) ; ils ne prouvent RIEN sur l'apprentissage. C'est le bloqueur n°1, cf. [§0](index_v11.md#s0).
 
 **Toute la machinerie d'adversaires (bots pondérés + opponent_mix) n'est câblée que sur le
 chemin ROTATION.** L'adversaire réel du chemin single-scenario dépend de `n_envs` et du NOM du
@@ -164,7 +164,7 @@ du chemin single-scenario n'en est pas : P2 joue au hasard du premier au dernier
 Ne pas confondre avec le VRAI self-play (`opponent_mix` → `BotControlledEnv`, chemin rotation),
 qui recharge un snapshot publié sur disque et fonctionne.
 
-Or `--scenario bot` est cassé en amont (rosters, cf. [§0](V11_agent_rework.md#s0)) : le chemin réellement utilisable est
+Or `--scenario bot` est cassé en amont (rosters, cf. [§0](index_v11.md#s0)) : le chemin réellement utilisable est
 le single-scenario. **Un run x5_debug lancé aujourd'hui entraînerait donc contre un adversaire
 ALÉATOIRE, sans qu'aucun log ne le signale** — pire que « spécialisé sur GreedyBot » : un agent
 qui n'a jamais rencontré d'opposition cohérente.
@@ -179,9 +179,9 @@ dans `make_training_env`, qui accepte DÉJÀ ces paramètres : seul l'appel de
 ### 10.5 Évaluation : le holdout porte sur l'ADVERSAIRE, pas sur les rosters
 
 > **Statut 2026-07-19 : ✅ CÂBLÉ** — `TacticalBot` est le holdout, à poids nul et exclu de tout
-> signal de sélection ; le défaut silencieux de `randomness` est supprimé. Détail en [§0](V11_agent_rework.md#s0).
-> ⚠️ **Affirmation périmée n°4 — voir la table de [§0bis](V11_agent_rework.md#s0bis)** (levée par [§0.7](V11_agent_rework.md) : `TacticalBot` a joué 10/10 épisodes). Conservée telle quelle.
-> ⚠️ **Non validé runtime** — cf. [§0.3](V11_agent_rework.md) (`CC_DMG`). L'archivage des scénarios holdout était à
+> signal de sélection ; le défaut silencieux de `randomness` est supprimé. Détail en [§0](index_v11.md#s0).
+> ⚠️ **Affirmation périmée n°4 — voir la table de [§0bis](index_v11.md#s0bis)** (levée par [§0.7](index_v11.md) : `TacticalBot` a joué 10/10 épisodes). Conservée telle quelle.
+> ⚠️ **Non validé runtime** — cf. [§0.3](index_v11.md) (`CC_DMG`). L'archivage des scénarios holdout était à
 > faire (voir plus bas). Le constat ci-dessous décrit l'état d'AVANT.
 
 **Constat (historique)** : les bots d'évaluation viennent de `callback_params.bot_eval_weights`
@@ -255,7 +255,7 @@ training qui les référencent.
 > robuste qui **sélectionne le modèle livré** était aveugle à l'écart. Un 0.909 pouvait cacher un
 > 0.95/0.87. L'écart n'est pas publié quand un seul siège est couvert.
 >
-> ✅ **Le holdout est désaturé et GELÉ depuis le 2026-08-04** ([§0.55](V11_agent_rework.md#s0.55)) :
+> ✅ **Le holdout est désaturé et GELÉ depuis le 2026-08-04** ([§0.55](index_v11.md#s0.55)) :
 > `w_objective 2.0`, `vs_tactical` passe de 0.89 à **0.72** et le bot passe de dernier à premier du
 > panel. L'indicateur mesure donc enfin quelque chose. Le volet 2 (qualitatif) reste entièrement
 > valide.

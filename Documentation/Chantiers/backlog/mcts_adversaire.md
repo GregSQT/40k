@@ -626,7 +626,7 @@ Utile si priors informatifs ; **v1** peut rester sur **UCT pur** (exemple §10.2
 > ⚠️ **Ne pas confondre avec le reste de ce document.** Les §1-§20 spécifient MCTS comme
 > **adversaire d'entraînement** (`opponent_mix`). Cette annexe couvre l'autre usage : MCTS **à
 > l'inférence de l'agent joueur**, pour corriger les coups absurdes **sans retraining**.
-> Arbitrage entre les deux usages : [`Documentation/Chantiers/v11/V11_eval_strategy.md`](../v11/V11_eval_strategy.md)
+> Arbitrage entre les deux usages : [`Documentation/Chantiers/v11/strategie_evaluation.md`](../v11/strategie_evaluation.md)
 > §10.7 — **non tranché, « à ne PAS anticiper » avant la mesure de référence**.
 
 L'`GameAdapter` (§6), l'algorithme (§8) et la politique de rollout (§9) sont **communs aux deux

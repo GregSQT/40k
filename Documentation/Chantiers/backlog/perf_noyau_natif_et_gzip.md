@@ -39,7 +39,7 @@ génère un `duplicate MIME type` warn). Validé end-to-end : `nginx -t` ok + `A
 dépôt** (vérifié 2026-08-10). Les accélérations réelles du move pool ont été menées autrement, en
 Python, et sont closes : [`Documentation/Archives/chantiers/V11_move_pool_optimization.md`](../../Archives/chantiers/V11_move_pool_optimization.md),
 [`Documentation/Reference/moteur/perf_move_pool.md`](../../Reference/moteur/perf_move_pool.md)
-(décision **(B) STOP** du 2026-07-21, `V11_agent_rework.md` §0.22).
+(décision **(B) STOP** du 2026-07-21, `index_v11.md` §0.22).
 
 Chantier de plusieurs semaines, **hors chemin critique** — ne pas l'ouvrir sans un profil récent
 montrant que `bfs_s` domine à nouveau.

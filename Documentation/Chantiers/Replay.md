@@ -641,7 +641,7 @@ l'épisode ; le moteur journalise un **total**, pas un delta). Sont supprimés, 
 `objective_hexes` / `objective_controllers` / `last_objective_snapshot` / `scored_turns` /
 `seen_turn_player` / `primary_objective_configs` / `episode_step_index`.
 Effet de bord bienvenu : l'appariement nom → id positionnel disparaît, donc **la coexistence de
-trois formats d'identifiant d'objectif** signalée dans `V11_tranches.md` n'a plus lieu d'être côté
+trois formats d'identifiant d'objectif** signalée dans `tranches_et_ruptures.md` n'a plus lieu d'être côté
 analyzer. Même contrat que le replay : un journal qui déclare des objectifs sans instantané est
 **rejeté** (régénérer), un scénario sans zone reste analysable.
 Verrous : `tests/unit/ai/test_analyzer_utils.py` (VP = dernier instantané et non une accumulation,

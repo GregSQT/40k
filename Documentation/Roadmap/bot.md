@@ -184,7 +184,7 @@ Même sort que `standoff` (amplitude 0,05, supprimé le 2026-08-11). Décision d
 
 **Suspendu** — requis pour la démo (jalon J5), au même titre que le quantitatif. Validation par un joueur externe.
 
-→ `Documentation/Chantiers/v11/V11_eval_strategy.md` §10.6
+→ `Documentation/Chantiers/v11/strategie_evaluation.md` §10.6
 
 ---
 
@@ -194,7 +194,7 @@ Même sort que `standoff` (amplitude 0,05, supprimé le 2026-08-11). Décision d
 
 Distinct du MCTS adversaire d'entraînement ([infra.md#mcts](infra.md#mcts)).
 
-→ `Documentation/Chantiers/v11/V11_eval_strategy.md` §10.7
+→ `Documentation/Chantiers/v11/strategie_evaluation.md` §10.7
 
 ---
 

@@ -104,20 +104,23 @@ servant d'ancres à un test (`text.index("### …")`) : un titre francisé casse
   chantier panel + son talon chiffré) ; 7 sources archivées en `Archives/docs/` avec bandeau
   retour ; gardes re-pointées par basename (`VALUE_ONLY_DOCS`/`VALUE_CHECKS`,
   `test_squad_obs_structure_doc`, `test_bot_panel_reference`, `backup_select`).
-- **jeu + outils : 🟡 à faire** — `armes.md`, `regles_unites.md`, `couverture_regles.md`,
-  `tests.md`, `configuration.md`, `outils_conformite.md` (fusion des 5 ex-Code_Compliance),
-  `tests_front.md`.
+- **jeu + outils : ✅ livré le 2026-08-28** — `Reference/jeu/` : `armes.md`, `regles_unites.md`,
+  `couverture_regles.md` ; `Reference/outils/` : `configuration.md`, `tests.md`, `tests_front.md`,
+  `outils_conformite.md` (fusion des 5 docs conformité) ; 11 sources archivées en `Archives/docs/`.
 - **infra : 🟡 à faire** — `deploiement_nas.md`, `securite.md`, `acces_utilisateurs.md`.
-- **v11 : 🟡 à faire** — noms d'objet pour les 4 specs post-scission.
+- **v11 : ✅ livré le 2026-08-28** — `index_v11` (état ouvert + pointeurs),
+  `tranches_et_ruptures` (spec R1→R8 + T1→T7), `decisions_du_joueur` (Phase A' P1→P5),
+  `strategie_evaluation` ; `lecons_de_methode` dans `Reference/training/` ; strates §9.4
+  pts 5/6/8 mises à jour.
 
 ## 4. P3 — Contenu (✅ scission et passes unitaires livrées le 2026-08-27 ; la réécriture d'AI_TURN est absorbée par la P4 ci-dessus)
 
 Un chantier par document, préalable : P2 livré (le checker est le filet).
 
-- **Scission `V11_agent_rework.md`** (8 350 lignes, 667 Ko) : entrées ouvertes §0 → absorbées
+- **Scission `index_v11.md`** (8 350 lignes, 667 Ko) : entrées ouvertes §0 → absorbées
   par `Roadmap/v11_chemin_critique.md` ; §0bis (leçons de méthode, copie canonique) → document
   de méthode autonome ; §0hist → `Archives/chantiers/`. Purger les strates d'état de
-  `V11_tranches.md` (§T6 « EN COURS » périmé) et `V11_phaseA.md` (§9.4 optionnels livrés).
+  `tranches_et_ruptures.md` (§T6 « EN COURS » périmé) et `decisions_du_joueur.md` (§9.4 optionnels livrés).
 - **Réécriture `AI_TURN.md`** (3 501 lignes) : le doc le plus dégradé — vieux guide comme
   squelette, 5 matrices V11 dispersées, deux « Target Restrictions Logic » contradictoires, un
   titre CHARGE PHASE sur du contenu de tir, `los_visibility_min_ratio` cité (0 hit code).

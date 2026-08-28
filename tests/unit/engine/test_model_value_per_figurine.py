@@ -1,4 +1,4 @@
-"""Tests de non-regression — VALUE par figurine (§0.12 de V11_agent_rework.md).
+"""Tests de non-regression — VALUE par figurine (§0.12 de index_v11.md).
 
 Trois invariants :
   A/B — `points_per_hp` est calcule PAR FIGURINE (`VALUE_i / HP_MAX_i`) et la cle

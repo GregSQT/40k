@@ -40,7 +40,7 @@ Hors documentation technique : `Review/` (état de l'outil `scripts/review_plan.
 | [entrainement.md](Reference/training/entrainement.md) | Référence training/tuning : pipeline `train.py`, configs, monitoring, curriculum. |
 | [observation_et_actions.md](Reference/training/observation_et_actions.md) | Ce que l'agent observe et ce qu'il peut jouer : tenseurs d'entités, encodeur partagé + tête pointeur, grille égocentrique et tête spatiale (bloc de tailles verrouillé par test). |
 | [metriques.md](Reference/training/metriques.md) | Interprétation des métriques TensorBoard et tuning correctif. |
-| [V11_method_lessons.md](Reference/training/V11_method_lessons.md) | Pièges et leçons de méthode V11 (copie canonique, extraite de la spec). |
+| [lecons_de_methode.md](Reference/training/lecons_de_methode.md) | Pièges et leçons de méthode V11 (copie canonique, extraite de la spec). |
 | [panel_bots.md](Reference/training/panel_bots.md) | Panel de bots 6 styles : conception, protocole de mesure (§12) et ligne de référence courante (§12.14). |
 
 Le chantier perf training (mesures + Phase 3 à lancer) est un chantier OUVERT :

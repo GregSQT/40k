@@ -1,4 +1,4 @@
-"""T6-c (V11_agent_rework.md) — journalisation des actions du pipeline squad.
+"""T6-c (index_v11.md) — journalisation des actions du pipeline squad.
 
 Contexte : `_process_squad_action` (chemin VIF du gym) n'appelait AUCUN `log_action` — les 17
 sites vivent dans `_process_semantic_action` (PvE/legacy). step.log se réduisait à ses en-têtes

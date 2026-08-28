@@ -40,7 +40,7 @@
 >   fait avec `--new`. Un `obs_size` périmé en config **lève désormais à l'init du moteur**, en
 >   citant la valeur attendue.
 >
-> Source : `Documentation/Chantiers/v11/V11_agent_rework.md` (rupture R8, hygiène T6) et
+> Source : `Documentation/Chantiers/v11/index_v11.md` (rupture R8, hygiène T6) et
 > `observation_et_actions.md` (§0.30, tranches T-A→T-F).
 
 ---

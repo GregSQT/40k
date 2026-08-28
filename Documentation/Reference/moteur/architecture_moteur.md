@@ -176,7 +176,7 @@ W40KEngine._process_semantic_action(action)
       └─ pool vide → {"phase_complete": True}
 ```
 
-À la transition, le moteur appelle l'init de la phase suivante **via son handler** (`movement_phase_start`, `shooting_phase_start`, `deployment_phase_start`, …) qui reconstruit le pool d'activation par éligibilité. (Les init privées `_movement_phase_init`/`_charge_phase_init`/`_fight_phase_init` de `w40k_core` ont été supprimées le 2026-07-19 — code mort, cf. V11_agent_rework §0.4 ; seule `_shooting_phase_init` subsiste comme délégation.)
+À la transition, le moteur appelle l'init de la phase suivante **via son handler** (`movement_phase_start`, `shooting_phase_start`, `deployment_phase_start`, …) qui reconstruit le pool d'activation par éligibilité. (Les init privées `_movement_phase_init`/`_charge_phase_init`/`_fight_phase_init` de `w40k_core` ont été supprimées le 2026-07-19 — code mort, cf. index_v11 §0.4 ; seule `_shooting_phase_init` subsiste comme délégation.)
 
 ### 3. Observation, reward, fin de partie
 

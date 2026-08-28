@@ -22,7 +22,7 @@
 >
 > Ancres `fichier:ligne` vérifiées le **2026-07-28** ; re-grep avant d'éditer.
 > Amont : [`V11_move_pool_optimization.md`](../../Archives/chantiers/V11_move_pool_optimization.md)
-> (cadrage, clos). Entrée de suivi : `V11_agent_rework.md §0.22` (barrée, résolue).
+> (cadrage, clos). Entrée de suivi : `index_v11.md §0.22` (barrée, résolue).
 
 ---
 
@@ -47,7 +47,7 @@ n'est JAMAIS APPELÉE.** Démontré par le code (2026-07-28), pas estimé :
    ([:2852](../../../engine/phase_handlers/movement_handlers.py)) et `not _fly_single_hex`
    ([:2530](../../../engine/phase_handlers/movement_handlers.py)).
 
-⟹ Le profil `x1` du curriculum (celui du run en cours, cf. `V11_agent_rework.md §0.33`) passe par le
+⟹ Le profil `x1` du curriculum (celui du run en cours, cf. `index_v11.md §0.33`) passe par le
 chemin **mono-hex**. Ni les chiffres ni les leviers ci-dessous ne s'y appliquent ; ils redeviennent
 pertinents dès le retour en `x5` (phase 2 du curriculum) ou en `x10`.
 
@@ -55,7 +55,7 @@ pertinents dès le retour en `x5` (phase 2 du curriculum) ou en `x10`.
 des fonctions appelées **à toutes les résolutions** ; et 3 des 5 copies du motif slice-OR (§5, T1)
 vivent hors de `_build_multi_hex_vectorized`.
 
-⚠️ **Le coût combattu ici est redevenu INCONTOURNABLE** (`V11_agent_rework.md §0.22`, MAJ 2026-07-22) :
+⚠️ **Le coût combattu ici est redevenu INCONTOURNABLE** (`index_v11.md §0.22`, MAJ 2026-07-22) :
 le fix de conformité move §0.25 exige une **érosion géodésique par-figurine**, exactement le poste que
 ce chantier réduisait ; il a resurgi en §0.27 (timeout d'éval d'1 h). La décision (B) n'a pas supprimé
 le coût — elle a acté qu'aucun levier mesuré ne le réduisait à un ratio gain/risque acceptable.
