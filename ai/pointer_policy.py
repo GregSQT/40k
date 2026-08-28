@@ -618,12 +618,11 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # plus rien observer (aucun rejet sur 3000 offsets, tailles d'espace d'action 1107 à 2000).
         # La forme en UNE passe RESTE : une seule initialisation au lieu de deux, et surtout
         # aucune dépendance à ce correctif d'amont.
-        action_dist = getattr(self, 'action_dist', None)
-        if action_dist is None:
+        if not hasattr(self, 'action_dist'):
             # Worker Phase 3 : action_dist retiré du dict avant sérialisation (patched_ppo.py)
             # pour éviter les tenseurs non-leaf. On le recrée ici depuis l'action_space.
             self.action_dist = make_masked_proba_distribution(self.action_space)
-            action_dist = self.action_dist
+        action_dist = self.action_dist
         if not isinstance(action_dist, MaskableCategoricalDistribution):
             raise TypeError(
                 "PointerMaskablePolicy assemble UN logit par action et exige donc un espace "
