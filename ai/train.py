@@ -2583,6 +2583,7 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
                 use_bots=opponents["use_bots"],
                 training_bots=opponents["training_bots"],
                 agent_seat_mode=opponents["agent_seat_mode"],
+                agent_seat_p2_ratio=opponents["agent_seat_p2_ratio"],
                 global_seed=opponents["agent_seat_seed"],
                 opponent_mix_config=opponents["opponent_mix_config"],
                 n_envs=n_envs,
@@ -2632,6 +2633,7 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
                 bots=opponents["training_bots"],
                 unit_registry=unit_registry,
                 agent_seat_mode=require_present(opponents["agent_seat_mode"], "agent_seat_mode"),
+                agent_seat_p2_ratio=opponents["agent_seat_p2_ratio"],
                 global_seed=opponents["agent_seat_seed"],
                 self_play_vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),  # get allowed: optional config
                 self_play_vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),  # get allowed: optional config
@@ -2914,6 +2916,7 @@ def build_training_opponents(
         "use_bots": use_bots,
         "training_bots": None,
         "agent_seat_mode": None,
+        "agent_seat_p2_ratio": None,
         "agent_seat_seed": None,
         "opponent_mix_config": None,
     }
@@ -2944,11 +2947,36 @@ def build_training_opponents(
                 "(from 'agent_seat_seed' or 'seed')."
             )
         opponents["agent_seat_seed"] = int(agent_seat_seed_raw)
+        # Part des episodes joues en SECOND. Obligatoire, sans valeur par defaut : un profil qui
+        # ne la declare pas laissait le tirage a 50/50 en silence, et c'est exactement le silence
+        # qui avait laisse deux profils diverger sur `deployment_mode_schedule`. L'evaluation, elle,
+        # ne lit PAS cette cle (`ai/bot_evaluation.py`) : son tirage reste equitable, faute de quoi
+        # le win-rate publie cesserait d'etre comparable d'un run a l'autre.
+        seat_p2_ratio_raw = require_key(training_config, "agent_seat_p2_ratio")
+        if isinstance(seat_p2_ratio_raw, bool) or not isinstance(seat_p2_ratio_raw, (int, float)):
+            raise TypeError(
+                f"training_config.agent_seat_p2_ratio must be a number "
+                f"(got {type(seat_p2_ratio_raw).__name__})"
+            )
+        seat_p2_ratio = float(seat_p2_ratio_raw)
+        if not 0.0 <= seat_p2_ratio <= 1.0:
+            raise ValueError(
+                f"training_config.agent_seat_p2_ratio must be within [0.0, 1.0] "
+                f"(got {seat_p2_ratio})"
+            )
+        opponents["agent_seat_p2_ratio"] = seat_p2_ratio
+    # Mode FIXE : la cle reste SANS OBJET et n'est pas transmise (le wrapper refuse un ratio sur un
+    # siege fige). Elle n'est pas non plus une erreur, exactement comme `agent_seat_seed`, que les
+    # six profils declarent et que seul le mode `random` lit : `--param agent_seat_mode p2`
+    # surcharge le mode sans pouvoir retirer la cle du profil, et ce chemin est documente
+    # (Documentation/Reference/training/entrainement.md).
 
     ratios = require_key(require_key(training_config, "bot_training"), "ratios")
     ratio_parts = [f"{v*100:.0f}% {k.replace('_', ' ').title()}" for k, v in ratios.items() if v > 0]
     log(f"🤖 Bot training ratios: {', '.join(ratio_parts)}")
     log(f"🤖 Agent seat mode: {agent_seat_mode}")
+    if opponents["agent_seat_p2_ratio"] is not None:
+        log(f"🤖 Agent seat P2 ratio (training only): {opponents['agent_seat_p2_ratio']:.2f}")
 
     if "opponent_mix" not in training_config:
         return opponents
@@ -3236,6 +3264,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     _opponents = build_training_opponents(training_config, use_bots, total_episodes, chunk_log)
     training_bots = _opponents["training_bots"]
     agent_seat_mode = _opponents["agent_seat_mode"]
+    agent_seat_p2_ratio = _opponents["agent_seat_p2_ratio"]
     agent_seat_seed = _opponents["agent_seat_seed"]
     opponent_mix_config = _opponents["opponent_mix_config"]
 
@@ -3256,6 +3285,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 use_bots=use_bots,
                 training_bots=training_bots,
                 agent_seat_mode=require_present(agent_seat_mode, "agent_seat_mode"),
+                agent_seat_p2_ratio=agent_seat_p2_ratio,
                 global_seed=agent_seat_seed,
                 opponent_mix_config=opponent_mix_config,
                 n_envs=n_envs,
@@ -3296,6 +3326,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 bots=training_bots,
                 unit_registry=unit_registry,
                 agent_seat_mode=require_present(agent_seat_mode, "agent_seat_mode"),
+                agent_seat_p2_ratio=agent_seat_p2_ratio,
                 global_seed=agent_seat_seed,
                 self_play_vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),  # get allowed: optional config
                 self_play_vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),  # get allowed: optional config
@@ -3469,6 +3500,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 bots=training_bots,
                 unit_registry=unit_registry,
                 agent_seat_mode=require_present(agent_seat_mode, "agent_seat_mode"),
+                agent_seat_p2_ratio=agent_seat_p2_ratio,
                 global_seed=agent_seat_seed,
                 self_play_vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),  # get allowed: optional config
                 self_play_vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),  # get allowed: optional config

@@ -159,7 +159,7 @@ explicitement plutôt que de servir les stats d'un autre modèle (V11 §0.35).
 2. **Step logger** (si `--step`) : `StepLogger("step.log", ...)` ; désactivé pour les envs vectorisés.
 3. **ActionMasker** : wrapper SB3 `ActionMasker(base_env, mask_fn)` pour MaskablePPO.
 4. **Adversaire** :
-   - **Scénario bot** : `BotControlledEnv(masked_env, bots=training_bots, unit_registry=..., agent_seat_mode=..., global_seed=..., env_rank=...)`.
+   - **Scénario bot** : `BotControlledEnv(masked_env, bots=training_bots, unit_registry=..., agent_seat_mode=..., agent_seat_p2_ratio=..., global_seed=..., env_rank=...)`.
    - **Self-play** : `SelfPlayWrapper(masked_env, ...)`.
 5. **Monitor** : `Monitor(wrapped_env)` pour les stats d'épisode.
 
@@ -187,9 +187,21 @@ Trois modes d'entraînement via `agent_seat_mode` :
 |------|---------------------|-------------|
 | `p1` | Toujours 1 | Agent = Player 1, Bot = Player 2 |
 | `p2` | Toujours 2 | Agent = Player 2, Bot = Player 1 |
-| `random` | 1 ou 2 par épisode | Tirage déterministe par `(global_seed, env_rank, episode_index)` |
+| `random` | 1 ou 2 par épisode | Tirage déterministe par `(global_seed, env_rank, episode_index)`, pondéré par `agent_seat_p2_ratio` |
 
-En mode `random`, seuils d'audit : écart épisodes ≤ 5%, écart timesteps ≤ 10%, fenêtre ≥ 2000 épisodes.
+#### `agent_seat_p2_ratio` — part des épisodes joués en SECOND
+
+Clé **obligatoire** dès que `agent_seat_mode` vaut `random` (aucune valeur par défaut). Elle donne la proportion d'épisodes d'entraînement où l'agent joue second : `0.5` est le tirage équitable, `0.65` (réglage courant, 2026-08-28) sur-échantillonne le second siège.
+
+Raison d'être : l'agent joue nettement moins bien en second — run x1_long du 2026-08-12, `0.707` de win-rate en jouant premier contre `0.586` en jouant second, 12 points stables jusqu'à la fin du run. Sur-échantillonner le siège faible est le seul levier d'exposition ; passer `agent_seat_mode` à `p2` supprimerait l'autre siège et rendrait `00_critical/0_gap_p1-p2` aveugle.
+
+**L'évaluation n'est pas concernée** : `ai/bot_evaluation.py` construit ses environnements sans passer cette clé, donc son tirage reste équitable et le win-rate publié reste comparable d'un run à l'autre. Même séparation que `deployment_mode_schedule.training_only`.
+
+Un override `--param agent_seat_mode p1|p2` rend la clé sans objet — elle n'est alors ni lue ni refusée, exactement comme `agent_seat_seed`.
+
+Le tirage est un **seuil** sur les 32 premiers bits du hachage (uniformes), et non la parité utilisée jusqu'au 2026-08-28 : à `0.5` la distribution est inchangée, mais la séquence siège-par-siège d'un run rejoué diffère.
+
+En mode `random`, l'écart d'épisodes entre les deux sièges suit `agent_seat_p2_ratio` — ce n'est plus une parité à ±5 %. Ce qui reste à auditer : que le siège minoritaire garde assez d'épisodes pour que `seat_aware/winrate_agent_p1` et `00_critical/0_gap_p1-p2` restent lisibles (fenêtre ≥ 2000 épisodes).
 
 ### Architecture (seat)
 
@@ -248,10 +260,13 @@ La ventilation `last_reward_breakdown` expose `base_actions`, `result_bonuses`, 
 **training_config.json** :
 ```json
 {
-  "agent_seat_mode": "p1",
-  "agent_seat_seed": 42
+  "agent_seat_mode": "random",
+  "agent_seat_seed": 42,
+  "agent_seat_p2_ratio": 0.65
 }
 ```
+
+`agent_seat_p2_ratio` est obligatoire avec `"agent_seat_mode": "random"` et sans objet avec `"p1"` / `"p2"`.
 
 **CLI override** :
 ```bash
