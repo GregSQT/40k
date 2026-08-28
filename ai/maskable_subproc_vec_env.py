@@ -51,6 +51,8 @@ def _run_worker_trajectory(
     frozen_policy = cloudpickle.loads(policy_bytes)
     frozen_policy.set_training_mode(False)
 
+    import time as _time
+
     # Stockage de la trajectoire
     norm_obs_lists: dict[str, list] = {}   # accumulateur → converti en dict-of-arrays en fin
     raw_gc_seq: list[np.ndarray] = []     # seul global_cont est utilisé pour VecNormalize
@@ -63,10 +65,13 @@ def _run_worker_trajectory(
     masks_seq: list[np.ndarray] = []
     infos_seq: list[dict] = []
     discounted_returns_seq: list[float] = []
+    # Durée réelle de l'épisode terminé à ce step (>0), ou 0.0 si l'épisode continue.
+    episode_wall_seconds_seq: list[float] = []
 
     current_raw_obs = last_raw_obs
     current_episode_start = initial_episode_start
     discounted_return = snapshot.initial_return
+    _episode_wall_start = _time.perf_counter()
 
     for _step in range(n_steps):
         norm_obs = normalize_obs_with_snapshot(current_raw_obs, snapshot)
@@ -149,6 +154,13 @@ def _run_worker_trajectory(
         masks_seq.append(mask.copy())
         infos_seq.append(info)
 
+        if done:
+            _now = _time.perf_counter()
+            episode_wall_seconds_seq.append(_now - _episode_wall_start)
+            _episode_wall_start = _now
+        else:
+            episode_wall_seconds_seq.append(0.0)
+
         current_raw_obs = observation_raw
         current_episode_start = done
 
@@ -184,6 +196,7 @@ def _run_worker_trajectory(
         "raw_global_cont": raw_global_cont,
         "discounted_returns": np.array(discounted_returns_seq, dtype=np.float64),
         "final_discounted_return": discounted_return,
+        "episode_wall_seconds_seq": np.array(episode_wall_seconds_seq, dtype=np.float64),
     }
 
 

@@ -401,6 +401,7 @@ class TestRunWorkerTrajectory:
         assert len(traj["masks_seq"]) == self.N_STEPS
         assert len(traj["infos_seq"]) == self.N_STEPS
         assert len(traj["discounted_returns"]) == self.N_STEPS
+        assert len(traj["episode_wall_seconds_seq"]) == self.N_STEPS
 
     def test_trajectory_keys_complete(self):
         """_run_worker_trajectory retourne toutes les clés attendues par le learner."""
@@ -417,6 +418,7 @@ class TestRunWorkerTrajectory:
             "values_seq", "log_probs_seq", "masks_seq", "infos_seq",
             "last_norm_obs", "last_done", "last_value",
             "raw_global_cont", "discounted_returns", "final_discounted_return",
+            "episode_wall_seconds_seq",
         }
         missing = required_keys - set(traj.keys())
         assert not missing, f"Clés manquantes dans la trajectoire : {missing}"
@@ -437,6 +439,35 @@ class TestRunWorkerTrajectory:
                 f"episode_starts_seq[0] = {traj['episode_starts_seq'][0]}, "
                 f"attendu initial_episode_start={initial}"
             )
+
+    def test_episode_wall_seconds_seq_semantique(self):
+        """episode_wall_seconds_seq : 0.0 hors done, >0 sur done, durée croissante réelle.
+
+        Chaque step non-done doit valoir 0.0. Chaque step done doit valoir une durée
+        positive (le temps réel écoulé dans le worker depuis le début de l'épisode).
+        ROUGE si la clé manque ou si des 0.0 sont retournés sur les steps done.
+        """
+        from ai.maskable_subproc_vec_env import _run_worker_trajectory
+
+        env = self._make_stub_env()
+        obs, _ = env.reset()
+        traj = _run_worker_trajectory(
+            env, obs, self._make_stub_policy_bytes(), self.N_STEPS, self._make_snapshot(), False
+        )
+
+        wall_seq = traj["episode_wall_seconds_seq"]
+        dones_seq = traj["dones_seq"]
+        assert len(wall_seq) == self.N_STEPS
+
+        for i, (wall, done) in enumerate(zip(wall_seq, dones_seq)):
+            if done:
+                assert wall > 0.0, (
+                    f"step {i} est un done : episode_wall_seconds_seq doit être > 0, got {wall}"
+                )
+            else:
+                assert wall == 0.0, (
+                    f"step {i} n'est pas un done : episode_wall_seconds_seq doit être 0.0, got {wall}"
+                )
 
     def test_bootstrap_only_on_truncated(self):
         """Le bootstrap TimeLimit.truncated s'applique UNIQUEMENT sur truncated (pas terminated).
