@@ -59,4 +59,7 @@ def test_distribution_from_echoue_sans_action_dist(policy):
     # action_dist doit avoir été recréé sur l'objet
     assert hasattr(policy, "action_dist"), "action_dist doit être recréé après appel"
     assert isinstance(policy.action_dist, MaskableCategoricalDistribution)
+    assert policy.action_dist.action_dim == TOTAL_ACTION_SIZE, (
+        f"action_dim diverge : {policy.action_dist.action_dim} au lieu de {TOTAL_ACTION_SIZE}"
+    )
     assert dist is not None
