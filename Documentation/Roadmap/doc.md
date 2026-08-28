@@ -16,8 +16,8 @@ vrai), `Documentation/Chantiers/` (vivant : contrats permanents, `v11/`, `backlo
   et de CLAUDE.md, README régénéré, purge des ✅ de l'index, liens réparés.
 - **P2 garde machine étendue** : ✅ livrée le 2026-08-27 — passe LIENS corpus vivant, `ANCHOR_TREES` étendu à `Reference/` (23 ancres fichier:ligne purgées d'`entrainement.md`), `VALUE_CHECKS` étendus (`TOTAL_ACTION_SIZE`, dimensions `allies_cont/allies_bin`), accumulation ROADMAP ≤ 20 ✅ ; 51 fragments morts #s0.X retirés de V11_tranches/phaseA/eval_strategy.
 - **P3 contenu** : ✅ livrée le 2026-08-27 — scission `V11_agent_rework.md` (§0bis → doc de
-  méthode, §0hist → archive) + passes unitaires sur 11 docs (`Weapon_rules.md`,
-  `USER_ACCESS_CONTROL.md`, `metriques.md`, bandeau `entrainement.md`…).
+  méthode, §0hist → archive) + passes unitaires sur 11 docs (`USER_ACCESS_CONTROL.md`,
+  `metriques.md`, bandeau `entrainement.md`… — les noms de fichiers 40k_rules restant inchangés).
 - **P4 consolidation « un sujet = un document »** (décision utilisateur 2026-08-27 : noms d'objet,
   fusion des fragments, corps re-vérifiés contre le code) :
   - **moteur + backlog** : ✅ livrés le 2026-08-28 — `Reference/moteur/` ramené de 16 fichiers à
@@ -33,8 +33,10 @@ vrai), `Documentation/Chantiers/` (vivant : contrats permanents, `v11/`, `backlo
     `archives/training_journal.md` ; 7 sources archivées en `Archives/docs/` avec
     bandeau retour ; gardes re-pointées (`VALUE_CHECKS`/`VALUE_ONLY_DOCS` du checker,
     `test_squad_obs_structure_doc`, `test_bot_panel_reference`).
-  - **jeu + outils** : 🟡 à faire — renommages d'objet + fusion des 5 docs Code_Compliance en
-    `outils_conformite`.
+  - **jeu + outils** : ✅ livré le 2026-08-28 — `Reference/jeu/` : `armes.md`, `regles_unites.md`,
+    `couverture_regles.md` ; `Reference/outils/` : `configuration.md`, `tests.md`, `tests_front.md`,
+    `outils_conformite.md` (fusion des 5 docs conformité) ; 11 sources archivées en `Archives/docs/`
+    avec bandeau retour ; références dans le code, les tests et le corpus vivant re-pointées.
   - **infra** : 🟡 à faire — renommages d'objet.
   - **v11** : 🟡 à faire — noms d'objet pour les 4 specs (post-scission).
 

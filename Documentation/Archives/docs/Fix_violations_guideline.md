@@ -1,3 +1,5 @@
+> **Document absorbé.** Consolidation P4 du 2026-08-28 : ce fichier a été fusionné dans [`Documentation/Reference/outils/outils_conformite.md`](../../Reference/outils/outils_conformite.md).
+
 # CONSIGNE OPTIMISÉE - Résolution autonome des violations de règles de jeu
 
 > Guideline / prompt pour automatiser les correctifs. À utiliser avec l’analyzer et le hidden_action_finder (voir [GAME_Analyzer.md](GAME_Analyzer.md), [Hidden_action_finder.md](Hidden_action_finder.md)).

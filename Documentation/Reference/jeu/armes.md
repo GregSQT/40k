@@ -5,7 +5,7 @@
 **20 d'entre elles sont nommées dans les DEUX journaux** (Game Log PvP et `step.log`) ; les deux
 exceptions, `ASSAULT` et `CLOSE_QUARTERS`, sont mesurées et décrites en « Journal coverage ».
 
-**Dans l’index doc** : [Documentation/README.md](README.md) (section « Systèmes de jeu et référence métier »). Vue d’ensemble du package `engine/weapons/` dans [architecture_moteur.md](../moteur/architecture_moteur.md) (section weapons/).
+**Dans l'index doc** : [Documentation/README.md](README.md) (section « Systèmes de jeu et référence métier »). Vue d'ensemble du package `engine/weapons/` dans [architecture_moteur.md](../moteur/architecture_moteur.md) (section weapons/).
 
 ---
 
@@ -792,7 +792,7 @@ print(f'Loaded {len(rules)} rules')
 
 - `architecture_moteur.md` - Core coding rules
 - `tour_de_jeu.md` - Game logic rules
-- `CONFIG_FILES.md` - Configuration reference
+- `configuration.md` - Configuration reference
 - Architecture armurerie : voir section Armory Files et Backend Implementation dans ce document
 
 ---

@@ -1,7 +1,7 @@
 """
 Weapon Selector - AI weapon selection based on kill probability
 
-Doc : Documentation/Reference/jeu/Weapon_rules.md (section "Weapon Selection").
+Doc : Documentation/Reference/jeu/armes.md (section "Weapon Selection").
 
 Le cache `game_state["kill_probability_cache"]` est rempli EXCLUSIVEMENT a la demande : un
 miss recalcule et stocke (cf. select_best_*_weapon / get_best_weapon_for_target). Aucune
@@ -261,7 +261,7 @@ def invalidate_cache_for_target(cache: Dict[Tuple[str, int, str, int], float], t
     Appelants reels : `_fight_on_target_damaged` (fight_handlers) uniquement. La phase de tir
     n'invalide pas — inutile pour la correction : la cle de cache embarque `hp_cur`, donc une
     entree perimee n'est jamais relue apres une blessure. C'est du menage memoire, pas un
-    correctif. Cf. Documentation/Reference/jeu/Weapon_rules.md (cache rempli a la demande, jamais pre-calcule).
+    correctif. Cf. Documentation/Reference/jeu/armes.md (cache rempli a la demande, jamais pre-calcule).
 
     Args:
         cache: Kill probability cache

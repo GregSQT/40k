@@ -4,7 +4,7 @@
 précédente devient inaccessible. Le front n'envoie pas de ``squad_shoot_cancel`` avant
 d'activer une autre unité (``useEngineAPI.handleStartSquadModelShoot``), le moteur fait
 donc lui-même le cancel implicite. Ce fichier verrouille ce contrat, qui a été la source
-d'une HTTP 500 trouvée par le fuzzing T7b (§0.6.2 de front_test_auto.md).
+d'une HTTP 500 trouvée par le fuzzing T7b (§0.6.2 de tests_front.md).
 """
 
 from __future__ import annotations
