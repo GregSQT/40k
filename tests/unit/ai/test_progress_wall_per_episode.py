@@ -636,3 +636,49 @@ def test_episode_wall_injecte_en_mode_distribue(monkeypatch):
     assert minimum == pytest.approx(expected, abs=5e-4), (
         f"min doit refléter la durée injectée ({expected:.3f})"
     )
+
+
+def test_sentinel_cross_traj_exclu_des_stats(monkeypatch):
+    """Durée -1.0 (épisode cross-trajectoire) doit être ignorée par cur/min/max.
+
+    Le premier épisode d'un rollout peut être un épisode commencé dans le rollout précédent.
+    Le worker émet -1.0 pour signaler que la mesure est tronquée. Le callback doit exclure
+    ces entrées de min/max/cur et ne les compter que quand une vraie durée > 0 est disponible.
+    ROUGE si -1.0 atterrit dans min (min_episode_duration_seconds = -1.0 / n_envs).
+    """
+    import numpy as np
+
+    n_envs = 4
+    real_duration = 3.0
+
+    clock, callback, printed = _install(monkeypatch, n_envs=n_envs, steps_per_episode=4,
+                                        episodes_per_slot=2)
+
+    not_done = [False] * n_envs
+    all_done = [True] * n_envs
+
+    # Rollout 1 : épisode cross-trajectoire (sentinel -1.0) puis épisode complet (real_duration)
+    for step_index in range(4):
+        clock.advance(1e-5)
+        is_cross = step_index == 1   # premier done : cross-traj
+        is_real = step_index == 3    # deuxième done : épisode complet
+        dones = all_done if (is_cross or is_real) else not_done
+        ep_wall = np.where(
+            [is_cross] * n_envs, -1.0,
+            np.where([is_real] * n_envs, real_duration, 0.0)
+        ).astype(np.float64)
+        callback.locals = {"dones": dones, "episode_wall_seconds": ep_wall}
+        callback._on_step()
+
+    assert printed, "aucune ligne affichée"
+    line = printed[-1]
+    minimum, maximum = _read_min_max(line)
+    expected = real_duration / n_envs
+
+    assert minimum >= 0, (
+        f"la sentinelle -1.0 ne doit pas atterrir dans min ({minimum:.4f})"
+    )
+    assert minimum == pytest.approx(expected, abs=5e-4), (
+        f"min doit valoir la seule vraie durée ({expected:.3f}), got {minimum:.3f}"
+    )
+    assert maximum == pytest.approx(expected, abs=5e-4)

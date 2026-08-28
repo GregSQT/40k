@@ -65,12 +65,17 @@ def _run_worker_trajectory(
     masks_seq: list[np.ndarray] = []
     infos_seq: list[dict] = []
     discounted_returns_seq: list[float] = []
-    # Durée réelle de l'épisode terminé à ce step (>0), ou 0.0 si l'épisode continue.
+    # Durée réelle de l'épisode terminé à ce step (>0), 0.0 si l'épisode continue,
+    # ou -1.0 si l'épisode a commencé dans un rollout précédent (cross-trajectoire non chronométré).
     episode_wall_seconds_seq: list[float] = []
 
     current_raw_obs = last_raw_obs
     current_episode_start = initial_episode_start
     discounted_return = snapshot.initial_return
+    # Si l'épisode était déjà en cours (initial_episode_start=False), le premier done de
+    # ce rollout est cross-trajectoire : le timer ne couvre que la fraction dans ce rollout.
+    # On marque ce cas avec _episode_cross_traj=True pour émettre -1.0 (sentinel).
+    _episode_cross_traj = not initial_episode_start
     _episode_wall_start = _time.perf_counter()
 
     for _step in range(n_steps):
@@ -123,6 +128,9 @@ def _run_worker_trajectory(
 
         # Bootstrap TimeLimit.truncated — APRÈS normalisation, valeur brute ajoutée (SB3 §exact).
         if done:
+            # Capturer le timestamp AVANT env.reset() pour exclure le coût de reset
+            # (teardown + init de l'épisode suivant) de la durée de l'épisode courant.
+            _episode_done_time = _time.perf_counter()
             if truncated and not terminated:
                 norm_term = normalize_obs_with_snapshot(observation_raw, snapshot)
                 with torch.no_grad():
@@ -155,9 +163,14 @@ def _run_worker_trajectory(
         infos_seq.append(info)
 
         if done:
-            _now = _time.perf_counter()
-            episode_wall_seconds_seq.append(_now - _episode_wall_start)
-            _episode_wall_start = _now
+            if _episode_cross_traj:
+                # Premier done d'un épisode commencé dans le rollout précédent :
+                # la durée ne couvre qu'une fraction de l'épisode réel → sentinel -1.0.
+                episode_wall_seconds_seq.append(-1.0)
+            else:
+                episode_wall_seconds_seq.append(_episode_done_time - _episode_wall_start)
+            _episode_wall_start = _episode_done_time
+            _episode_cross_traj = False
         else:
             episode_wall_seconds_seq.append(0.0)
 
