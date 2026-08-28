@@ -78,6 +78,15 @@ documents gardent leurs noms de chantiers et leurs périmètres éclatés. Un do
 livraison ; chaque fusion re-vérifie ses affirmations contre le code (rédacteurs parallèles avec
 liste de purge prouvée + sections citées par le code préservées avec table de correspondance).
 
+**Avant d'écrire un lot** : recenser les gardes qui lisent les documents cibles PAR BASENAME et les
+re-pointer dans la même livraison — `VALUE_ONLY_DOCS` et `VALUE_CHECKS` de
+`scripts/check_doc_references.py`, la liste de `scripts/backup_select.py`, et tout test qui ouvre un
+`.md` (`grep -rn "\.md\"" tests/ scripts/`). Un renommage seul laisse ces gardes muettes au lieu de
+rouges : le lot training a trouvé `test_squad_obs_structure_doc.py` déjà cassé depuis P1, son chemin
+`DOC` pointant vers un fichier supprimé par le déplacement — cinq tests rouges que personne n'avait
+vus, donc un bloc de tailles non gardé pendant tout ce temps. Vérifier aussi les titres de sections
+servant d'ancres à un test (`text.index("### …")`) : un titre francisé casse l'isolation du bloc.
+
 - **moteur + backlog : ✅ livrés le 2026-08-28.** `Reference/moteur/` 16 → 9 documents aux noms
   d'objet : `tour_de_jeu` (ex-AI_TURN réécrit : squelette pédagogique et ~800 lignes de doublons
   purgés, matrices V11 réunies par phase, symboles morts corrigés, fausse « divergence 12.04 »
