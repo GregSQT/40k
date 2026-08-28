@@ -169,7 +169,7 @@ def _run_worker_trajectory(
                 episode_wall_seconds_seq.append(-1.0)
             else:
                 episode_wall_seconds_seq.append(_episode_done_time - _episode_wall_start)
-            _episode_wall_start = _episode_done_time
+            _episode_wall_start = _time.perf_counter()
             _episode_cross_traj = False
         else:
             episode_wall_seconds_seq.append(0.0)
