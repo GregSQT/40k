@@ -44,7 +44,7 @@ def test_distribution_from_echoue_sans_action_dist(policy):
     policy.__dict__.pop("action_dist", None)
 
     # Sans le fix, self.action_dist lèverait AttributeError
-    # Avec le fix, getattr(self, 'action_dist', None) retourne None → recréation
+    # Avec le fix, hasattr(self, 'action_dist') est False → recréation
     import torch
     from engine.macro_intents import TOTAL_ACTION_SIZE
     obs_batch = _zero_obs(batch=1)

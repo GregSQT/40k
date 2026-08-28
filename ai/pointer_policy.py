@@ -96,8 +96,9 @@ from engine.spatial_grid import GRID_CELL_COUNT, GRID_SIZE
 #: Largeur de la couche cachée de la tête de move, par colonne de cellule.
 MOVE_HEAD_HIDDEN = 32
 
-#: Actions produites par `action_net`, la SEULE tête dense restante : wait, fight-sans-cible et
-#: les 15 intents de zone. Tout le reste vient d'une tête à poids partagés (conv 1x1 pour les
+#: Actions produites par `action_net`, la SEULE tête dense restante : wait, fight-sans-cible,
+#: tir indirect (20 slots, même compte D1 que le pointeur SHOOT) et les 15 intents de zone. Tout le
+#: reste vient d'une tête à poids partagés (conv 1x1 pour les
 #: cellules, pointeurs pour les slots de tir, de charge, de mêlée, d'Oath, de déploiement, les
 #: candidats de décision et les escouades à ACTIVER). Les paires de charge ont LEUR propre tête
 #: dense (`charge_pair_net`), décomptée ici pour ne pas décaler `action_net`.
@@ -386,9 +387,9 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     def _build(self, lr_schedule: Any) -> None:
         """Construit la policy SB3, puis RÉDUIT `action_net` aux seules colonnes qu'elle produit.
 
-        SB3 dimensionne `action_net` sur l'action space entier. Depuis T-E et T-G, 1050 de ses
-        1068 colonnes ne sont jamais lues (cellules, slots de tir) et, depuis P2, les 6 colonnes
-        CHOICE non plus : ce sont ~336 k paramètres qui ne reçoivent aucun gradient. La couche est
+        SB3 dimensionne `action_net` sur l'action space entier. Depuis T-E, T-G et les extensions
+        P3, 1352 de ses 1389 colonnes ne sont jamais lues (cellules, pointeurs) : ce sont ~360 k
+        paramètres qui ne reçoivent aucun gradient. La couche est
         donc reconstruite ici à sa taille utile (`DENSE_LOGIT_COUNT`), AVANT la création de
         l'optimiseur — sans quoi l'optimiseur référencerait les paramètres de l'ancienne couche.
         L'initialisation orthogonale de SB3 (gain 0,01 sur la tête d'action) est réappliquée à
@@ -546,8 +547,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         d'ennemis), pointeur de décision (candidats `CHOICE_i`, §9.3 P2), pointeur de
         DÉPLOIEMENT (§0.44, qui écrase les colonnes 4-11 des cellules en phase de déploiement) et
         pointeur d'ACTIVATION (V11 §0.48 `L2`, sur les embeddings ALLIÉS) — et UNE tête dense
-        réduite à ses colonnes réellement lues (`DENSE_LOGIT_COUNT` = 17) : wait,
-        fight-sans-cible, 15 intents de zone.
+        réduite à ses colonnes réellement lues (`DENSE_LOGIT_COUNT` = 37) : wait,
+        fight-sans-cible, 20 slots de tir indirect et 15 intents de zone.
 
         ⚠️ L'assemblage suit l'ordre EXACT des ids (`macro_intents`) : 0-1023 cellules, 1024 wait,
         1025-1044 tir, 1045-1064 charge (cible unique), 1065-1254 charge-paires, 1255-1274 mêlée,
