@@ -612,6 +612,49 @@ class TestRunWorkerTrajectory:
             f"attendu ({self.N_STEPS}, {self.GC_DIM})"
         )
 
+    def test_missing_action_masks_raises(self):
+        """Un env sans action_masks lève AttributeError — aucun fallback autorisé (T1)."""
+        import cloudpickle
+        from ai.maskable_subproc_vec_env import _run_worker_trajectory
+
+        class NoMaskEnv:
+            class _Space:
+                n = 4
+            action_space = _Space()
+
+            def reset(self, **_):
+                return {"global_cont": np.zeros(1, dtype=np.float32)}, {}
+
+            def step(self, action):
+                return {"global_cont": np.zeros(1, dtype=np.float32)}, 0.0, False, False, {}
+
+            def get_wrapper_attr(self, name):
+                raise AttributeError(name)
+
+        class TrivialPolicy:
+            def set_training_mode(self, m): pass
+            def __call__(self, obs, action_masks=None):
+                n = next(iter(obs.values())).shape[0]
+                return torch.zeros(n, dtype=torch.long), torch.zeros(n), torch.full((n,), -1.0)
+            def predict_values(self, obs):
+                n = next(iter(obs.values())).shape[0]
+                return torch.zeros(n)
+
+        from ai.vec_normalize_frozen import VecNormalizeSnapshot
+        snap = VecNormalizeSnapshot(
+            obs_mean=np.zeros(1, dtype=np.float64),
+            obs_var=np.ones(1, dtype=np.float64),
+            ret_var=1.0,
+            gamma=0.99, epsilon=1e-8, clip_obs=10.0, clip_reward=10.0,
+            norm_obs=False, norm_reward=False, initial_return=0.0,
+        )
+        env = NoMaskEnv()
+        obs, _ = env.reset()
+        policy_bytes = cloudpickle.dumps(TrivialPolicy())
+
+        with pytest.raises(AttributeError):
+            _run_worker_trajectory(env, obs, policy_bytes, 2, snap, False)
+
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 # 3.4 — collect_rollouts dispatch

@@ -82,10 +82,7 @@ def _run_worker_trajectory(
         norm_obs = normalize_obs_with_snapshot(current_raw_obs, snapshot)
 
         # Masque d'action
-        try:
-            mask = env.get_wrapper_attr("action_masks")()
-        except AttributeError:
-            mask = np.ones(env.action_space.n, dtype=bool)
+        mask = env.get_wrapper_attr("action_masks")()
 
         # Forward policy (CPU, pas de grad)
         with torch.no_grad():
@@ -242,10 +239,7 @@ def _maskable_worker(
                 if done:
                     info["terminal_observation"] = observation
                     observation, reset_info = env.reset()
-                try:
-                    info["action_masks"] = env.get_wrapper_attr("action_masks")()
-                except AttributeError:
-                    pass
+                info["action_masks"] = env.get_wrapper_attr("action_masks")()
                 _worker_last_obs = observation
                 remote.send((observation, reward, done, info, reset_info))
 
