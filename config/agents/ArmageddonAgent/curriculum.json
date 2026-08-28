@@ -81,7 +81,14 @@
       "pool": [
         {"kind": "champion", "members": ["P2"], "weight": 0.40},
         {"kind": "ancients", "members": ["P0", "P1"], "weight": 0.30}
-      ]
+      ],
+      "training_config_overrides": {
+        "total_episodes": 125000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
     },
     "E1": {
       "_doc": "Exploiteur de P3 : reprend ses poids et ne joue que contre lui.",
@@ -104,7 +111,14 @@
         {"kind": "champion", "members": ["P3"], "weight": 0.30},
         {"kind": "ancients", "members": ["P0", "P1", "P2"], "weight": 0.20},
         {"kind": "exploiters", "members": ["E1"], "weight": 0.25}
-      ]
+      ],
+      "training_config_overrides": {
+        "total_episodes": 160000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
     },
     "P5": {
       "role": "learner",
@@ -116,7 +130,14 @@
         {"kind": "champion", "members": ["P4"], "weight": 0.35},
         {"kind": "ancients", "members": ["P0", "P1", "P2", "P3"], "weight": 0.30},
         {"kind": "exploiters", "members": ["E1"], "weight": 0.15}
-      ]
+      ],
+      "training_config_overrides": {
+        "total_episodes": 180000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
     },
     "E2": {
       "_doc": "Exploiteur de P5 : reprend ses poids et ne joue que contre lui.",
@@ -139,7 +160,14 @@
         {"kind": "champion", "members": ["P5"], "weight": 0.30},
         {"kind": "ancients", "members": ["P0", "P1", "P2", "P3", "P4"], "weight": 0.25},
         {"kind": "exploiters", "members": ["E1", "E2"], "weight": 0.25}
-      ]
+      ],
+      "training_config_overrides": {
+        "total_episodes": 200000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
     },
     "P7": {
       "role": "learner",
@@ -151,7 +179,14 @@
         {"kind": "champion", "members": ["P6"], "weight": 0.30},
         {"kind": "ancients", "members": ["P0", "P1", "P2", "P3", "P4", "P5"], "weight": 0.35},
         {"kind": "exploiters", "members": ["E1", "E2"], "weight": 0.20}
-      ]
+      ],
+      "training_config_overrides": {
+        "total_episodes": 200000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
     },
     "P8": {
       "role": "learner",
@@ -163,7 +198,14 @@
         {"kind": "champion", "members": ["P7"], "weight": 0.25},
         {"kind": "ancients", "members": ["P0", "P1", "P2", "P3", "P4", "P5", "P6"], "weight": 0.40},
         {"kind": "exploiters", "members": ["E1", "E2"], "weight": 0.20}
-      ]
+      ],
+      "training_config_overrides": {
+        "total_episodes": 225000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
     },
     "E3": {
       "_doc": "Exploiteur de P8 : reprend ses poids et ne joue que contre lui.",
@@ -186,7 +228,14 @@
         {"kind": "champion", "members": ["P8"], "weight": 0.25},
         {"kind": "ancients", "members": ["P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7"], "weight": 0.35},
         {"kind": "exploiters", "members": ["E1", "E2", "E3"], "weight": 0.25}
-      ]
+      ],
+      "training_config_overrides": {
+        "total_episodes": 250000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
     },
     "P10": {
       "role": "learner",
@@ -198,7 +247,14 @@
         {"kind": "champion", "members": ["P9"], "weight": 0.25},
         {"kind": "ancients", "members": ["P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"], "weight": 0.40},
         {"kind": "exploiters", "members": ["E1", "E2", "E3"], "weight": 0.20}
-      ]
+      ],
+      "training_config_overrides": {
+        "total_episodes": 250000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
     }
   }
 }
