@@ -1127,7 +1127,6 @@ class MetricsCollectionCallback(BaseCallback):
             if hasattr(self.model, 'logger') and self.model.logger:
                 self.model.logger.record('config/discount_factor', gamma)
                 self.model.logger.record('config/immediate_reward_ratio', immediate_reward_ratio)
-                self.model.logger.record('00_critical/m_immediate_reward_ratio_mean', ratio_mean)
                 self.model.logger.record('config/planning_horizon', planning_horizon)
         # tactical_data du moteur — cle EXIGEE, pas testee.
         # Le `if 'tactical_data' in info:` qui gardait ce bloc laissait passer un episode sans
@@ -1153,6 +1152,14 @@ class MetricsCollectionCallback(BaseCallback):
 
         # Log to metrics tracker (KEEP for state tracking)
         self.metrics_tracker.log_episode_end(episode_data)
+        # Emis ici (apres log_episode_end) pour que l'abscisse soit episode_count comme toutes les
+        # autres courbes 00_critical — model.logger.dump utilise num_timesteps (millions) et
+        # decalerait la courbe loin a droite du groupe.
+        if self.immediate_reward_ratio_history:
+            ratio_mean = sum(self.immediate_reward_ratio_history) / len(self.immediate_reward_ratio_history)
+            self.metrics_tracker.writer.add_scalar(
+                '00_critical/m_immediate_reward_ratio_mean', ratio_mean, self.metrics_tracker.episode_count
+            )
         self.metrics_tracker.log_tactical_metrics(self.episode_tactical_data)
         self.metrics_tracker.log_abilities_metrics(self.episode_tactical_data)
 

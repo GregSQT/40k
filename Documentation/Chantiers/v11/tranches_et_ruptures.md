@@ -1175,7 +1175,7 @@ de T4/de code latent) :
 **T6.2 — métriques TensorBoard : RÉSOLU, la mémoire projet était périmée.** Inspection directe
 des `events.out.tfevents.*` (EventAccumulator) sur training neuf : `00_critical/` porte bien les
 métriques PPO — `f_loss_mean`, `g_explained_variance`, `h_clip_fraction`, `i_approx_kl`,
-`j_entropy_loss`, `m_value_loss_smooth`, **56 points chacune** ; `training_critical/` expose ses
+`j_entropy_loss`, `m_immediate_reward_ratio_mean`, **56 points chacune** ; `training_critical/` expose ses
 6 tags. Le fix `_dump_with_capture` du 2026-05-22 tient. Nuance non diagnostiquée (sans impact) :
 `train/*` et `training_critical/*` n'ont qu'1 point là où `00_critical/*` en a 56 — répartition
 entre les deux fichiers d'events (`CoreAgent/` et `x1_debug_CoreAgent_1/`).
