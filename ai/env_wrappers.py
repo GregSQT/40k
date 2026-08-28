@@ -940,7 +940,7 @@ class BotControlledEnv(gym.Wrapper):
                 )
         return obs, terminated, truncated, info, cumulative_reward, decision
 
-    def _resolve_seat_p2_ratio(self, agent_seat_p2_ratio: Optional[float]) -> float:
+    def _resolve_seat_p2_ratio(self, agent_seat_p2_ratio: Optional[float]) -> Optional[float]:
         """Part des episodes ou l'agent joue SECOND, quand `agent_seat_mode='random'`.
 
         POURQUOI CE REGLAGE EXISTE. Le tirage etait un pile ou face exact, et l'agent joue
@@ -956,19 +956,21 @@ class BotControlledEnv(gym.Wrapper):
         volontaire — le win-rate publie doit rester comparable entre runs, et un `combined`
         mesure sur une ventilation de sieges biaisee ne le serait plus.
 
-        `None` vaut 0.5, c'est-a-dire le tirage equitable que `random` a toujours designe : ce
-        n'est pas un repli sur une valeur d'attente mais le contrat historique du mode, et il
-        sert les appelants qui n'ont aucune raison de biaiser (evaluation, scripts de mesure).
-        La CONFIG d'entrainement, elle, exige la cle explicitement (`ai/train.py`).
+        En mode fixe (`p1`/`p2`), la notion de ratio n'existe pas : retourne `None`. Un ratio
+        non nul passe en mode fixe est une contradiction et leve ValueError.
+        En mode `random`, `None` vaut 0.5 (tirage equitable historique) ; la CONFIG d'entrainement
+        exige la cle explicitement (`ai/train.py`).
         """
+        if self.agent_seat_mode != "random":
+            if agent_seat_p2_ratio is not None:
+                raise ValueError(
+                    f"agent_seat_p2_ratio n'a de sens qu'avec agent_seat_mode='random' "
+                    f"(mode={self.agent_seat_mode!r}, ratio={agent_seat_p2_ratio!r}) : un siege fixe "
+                    f"ne se pondere pas, et accepter la valeur en la ignorant ferait mentir la config."
+                )
+            return None
         if agent_seat_p2_ratio is None:
             return 0.5
-        if self.agent_seat_mode != "random":
-            raise ValueError(
-                f"agent_seat_p2_ratio n'a de sens qu'avec agent_seat_mode='random' "
-                f"(mode={self.agent_seat_mode!r}, ratio={agent_seat_p2_ratio!r}) : un siege fixe "
-                f"ne se pondere pas, et accepter la valeur en la ignorant ferait mentir la config."
-            )
         if isinstance(agent_seat_p2_ratio, bool) or not isinstance(agent_seat_p2_ratio, (int, float)):
             raise TypeError(
                 f"agent_seat_p2_ratio must be a number "
@@ -1909,7 +1911,7 @@ class BotControlledEnv(gym.Wrapper):
         p2_timestep_share = (self.timesteps_agent_p2 / total_timesteps * 100.0) if total_timesteps > 0 else 0.0
         return {
             "agent_seat_mode": self.agent_seat_mode,
-            "agent_seat_p2_ratio": self._agent_seat_p2_ratio if self.agent_seat_mode == "random" else None,
+            "agent_seat_p2_ratio": self._agent_seat_p2_ratio,
             "episodes_agent_p1": self.episodes_agent_p1,
             "episodes_agent_p2": self.episodes_agent_p2,
             "episodes_vs_bots": self._bot_episodes,
