@@ -1056,6 +1056,7 @@ def test_impl_doc_line_anchor_is_detected(tmp_path: pathlib.Path) -> None:
 
     # VERT après correction : symbole à la place de la ligne
     doc.write_text("voir `def _get_unit_by_id` dans `engine/w40k_core.py`\n", encoding="utf-8")
+    cdr._read_masked.cache_clear()
     assert cdr.check_anchors(doc) == []
 
 
