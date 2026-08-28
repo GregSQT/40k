@@ -11,7 +11,7 @@
     "probe_cheap_n": 100,
     "probe_confirm_n": 500,
     "win_rate_target": 0.70,
-    "budget_cap": 50000
+    "budget_cap": 100000
   },
 
   "opponent": {
