@@ -61,6 +61,7 @@ tests/unit/scripts/test_roster_matchup_scenario_contract.py.
 """
 
 import argparse
+import functools
 import json
 import math
 import os
@@ -103,6 +104,7 @@ def _model_md5(path: str) -> str:
     return digest.hexdigest()
 
 
+@functools.lru_cache(maxsize=1)
 def _import_roster_aggregate() -> Any:
     import importlib.util
 
@@ -1029,7 +1031,7 @@ def _run_one_split(
             print("❌ No P1 rosters left after --p1-exclude")
             return
 
-    scenario_subdir = "holdout_regular" if current_split == "holdout_regular" else "holdout_hard" if current_split == "holdout_hard" else "training"
+    scenario_subdir = current_split
     scenario_dir = PROJECT_ROOT / "config" / "agents" / args.agent / "scenarios" / scenario_subdir
     matchup_dir = scenario_dir / "matchups"
     matchup_dir.mkdir(parents=True, exist_ok=True)

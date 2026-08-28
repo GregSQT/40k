@@ -275,6 +275,7 @@ def _mask_fenced(m: re.Match) -> str:  # type: ignore[type-arg]
     return re.sub(r"[^\n]", " ", m.group(0))
 
 
+@functools.lru_cache(maxsize=None)
 def _read_masked(path: pathlib.Path) -> str:
     """Lit le fichier et masque les blocs fencés."""
     return _FENCED_CODE_BLOCK.sub(_mask_fenced, path.read_text(encoding="utf-8"))
@@ -526,9 +527,7 @@ def symbol_is_present(symbol: str, body: str) -> bool:
     parts = symbol.split("_")
     for start in range(1, len(parts)):
         suffix = "_" + "_".join(parts[start:])
-        if len(suffix) >= 8 and f'"{{key}}{suffix}"' in body:
-            return True
-        if len(suffix) >= 8 and f"'{{key}}{suffix}'" in body:
+        if len(suffix) >= 8 and (f'"{{key}}{suffix}"' in body or f"'{{key}}{suffix}'" in body):
             return True
     return False
 

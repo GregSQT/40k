@@ -15,8 +15,10 @@ chaque cardinalite y figurent.
 
 from __future__ import annotations
 
+import functools
 import os
 import re
+from pathlib import Path
 
 import numpy as np
 
@@ -42,18 +44,12 @@ from engine.observation_weapon_profiles import (
     WEAPON_RULE_PARAMS,
 )
 
-DOC = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
-    "Documentation",
-    "Reference",
-    "training",
-    "observation_et_actions.md",
-)
+DOC = Path(__file__).resolve().parents[3] / "Documentation/Reference/training/observation_et_actions.md"
 
 
+@functools.lru_cache(maxsize=1)
 def _doc() -> str:
-    with open(DOC, encoding="utf-8") as handle:
-        return handle.read()
+    return DOC.read_text(encoding="utf-8")
 
 
 def test_every_schema_field_is_documented():
