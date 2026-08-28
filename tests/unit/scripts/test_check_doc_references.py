@@ -3,7 +3,7 @@
 Ce que ces tests protègent, et pourquoi chacun existe :
 
 - la RÉSOLUTION des chemins relatifs. Le 2026-08-11, le contrôle rendait 18 renvois cassés sur
-  `decisions_du_joueur.md` alors que les 9 cibles distinctes existaient toutes : la classe de caractères
+  `V11_phaseA.md` alors que les 9 cibles distinctes existaient toutes : la classe de caractères
   de la regex excluait le point, `../../engine/x.py` devenait `/engine/x.py`, et `ROOT / name`
   transformait ce fragment en chemin absolu inexistant.
 - la DÉTECTION d'une valeur périmée. Un contrôle qui ne sait que confirmer ne prouve rien : il
@@ -58,7 +58,7 @@ def test_parent_relative_path_is_captured_whole() -> None:
 def test_doc_relative_and_root_relative_both_resolve() -> None:
     """Les deux conventions du corpus coexistent et doivent être servies toutes les deux."""
     docs = ROOT / "Documentation" / "Chantiers"
-    assert cdr.resolve("v11/decisions_du_joueur.md", docs) is not None
+    assert cdr.resolve("v11/V11_phaseA.md", docs) is not None
     assert cdr.resolve("engine/w40k_core.py", docs) is not None
 
 
@@ -492,7 +492,7 @@ def test_symbol_reference_is_not_an_anchor(tmp_path: pathlib.Path) -> None:
     "BoardPvp.tsx:9290",
     "useBoardHexMemos.ts:117",
     "settings.json:17",
-    "index_v11.md:3146",
+    "V11_agent_rework.md:3713",
     "docker-compose.yml:18",
     "pytest.ini:12",
     "useBoardHexMemos.test.ts:117",
@@ -508,7 +508,7 @@ def test_a_line_anchor_of_any_extension_is_reported(tmp_path: pathlib.Path, ref:
     décalées de plusieurs milliers de lignes et invisibles au contrôle, qui affichait pourtant
     « 0 renvoi ». Une liste de suffixes aurait reconduit le trou sur `.yml` et `.ini` — ces deux
     cas-là sont dans l'échantillon pour cette raison, et `docker-compose.yml:18` était bel et bien
-    présent dans `Security.md`.
+    présent dans `securite.md`.
     """
     doc = write(tmp_path, "ROADMAP_INDEX.md", f"le composant `{ref}` recopie les hexes\n")
     entries = cdr.check_anchors(doc)
@@ -522,7 +522,7 @@ def test_a_line_anchor_of_any_extension_is_reported(tmp_path: pathlib.Path, ref:
 
 @pytest.mark.parametrize("line", [
     "`_auto_declared_order` L6462 → **9133**\n",
-    "listés en `Chantiers/v11/index_v11.md` §0bis (l.3100-3120)\n",
+    "listés en `1_Agent/V11_agent_rework.md` §0bis (l.3713-3735)\n",
 ])
 def test_the_other_two_spellings_of_an_anchor_are_reported(
     tmp_path: pathlib.Path, line: str
@@ -820,7 +820,7 @@ def test_a_qualified_citation_is_not_satisfied_by_a_module_level_twin(
 
 
 def test_an_extensionless_tracked_file_is_an_anchor(tmp_path: pathlib.Path) -> None:
-    """`Dockerfile:14` est un renvoi de ligne — et `Security.md` cite justement ce fichier."""
+    """`Dockerfile:14` est un renvoi de ligne — et `securite.md` cite justement ce fichier."""
     doc = write(tmp_path, "ROADMAP_INDEX.md", "le montage est décrit en `Dockerfile:14`\n")
     assert len(cdr.check_anchors(doc)) == 1
 
@@ -1056,7 +1056,7 @@ def test_impl_doc_line_anchor_is_detected(tmp_path: pathlib.Path) -> None:
 
     # VERT après correction : symbole à la place de la ligne
     doc.write_text("voir `def _get_unit_by_id` dans `engine/w40k_core.py`\n", encoding="utf-8")
-    cdr._read_masked.cache_clear()
+    cdr._read_masked.cache_clear()  # lru_cache doit être purgé avant la seconde lecture
     assert cdr.check_anchors(doc) == []
 
 
@@ -1217,7 +1217,7 @@ def test_a_json_claim_is_verified(tmp_path: pathlib.Path) -> None:
 def test_a_prose_word_in_backticks_is_not_a_symbol(tmp_path: pathlib.Path) -> None:
     """`directory` est un mot, pas un symbole : le confronter confirme n'importe quoi.
 
-    Mesuré sur `Security.md` : `directory`, `debug`/`False` et `os.system` suffisaient à faire
+    Mesuré sur `securite.md` : `directory`, `debug`/`False` et `os.system` suffisaient à faire
     passer une citation pour vérifiée. Le vrai symbole pouvait disparaître du code sans un mot.
     """
     doc = write(tmp_path, "note.md", "voir `ai/train.py` (rejet du `directory`, `os.system`)\n")
@@ -1274,7 +1274,7 @@ def test_accented_paths_are_counted_under_their_real_name() -> None:
     """
     counts = cdr.tracked_basenames()
     assert not [name for name in counts if '"' in name or "\\" in name]
-    assert counts["ROADMAP.md"] >= 1 and counts["decisions_du_joueur.md"] >= 1
+    assert counts["ROADMAP.md"] >= 1 and counts["V11_phaseA.md"] >= 1
 
 
 def test_git_output_is_decoded_regardless_of_the_locale() -> None:
@@ -1443,7 +1443,7 @@ def test_the_corpus_really_confronts_some_kinds() -> None:
     """VERT VACANT : « 0 sorte fausse » ne vaut rien si aucune sorte n'a été confrontée.
 
     Le corpus en porte au moins trois (les `def` de la convention d'ancres dans `doc.md`, une
-    dans `Security.md`). Le jour où la dernière disparaît, ce test doit le dire plutôt que
+    dans `securite.md`). Le jour où la dernière disparaît, ce test doit le dire plutôt que
     laisser la passe s'éteindre en silence.
     """
     total = 0

@@ -1,4 +1,4 @@
-"""Dépickle restreint des saves (F7) — `Documentation/Reference/infra/Security.md`.
+"""Dépickle restreint des saves (F7) — `Documentation/Reference/infra/securite.md`.
 
 Verrouille l'invariant : un fichier de save falsifié ne peut PAS exécuter de code au chargement.
 Tout gadget d'exécution (`os.system`, `subprocess.Popen`, …) passe par `find_class` ; la liste

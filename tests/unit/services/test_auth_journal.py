@@ -1,4 +1,4 @@
-"""Exploitation du journal d'authentification — étapes 7 et 8 de `Security.md`.
+"""Exploitation du journal d'authentification — étapes 7 et 8 de `securite.md`.
 
 L'étape 3 avait posé la table `auth_events` sans personne pour la lire : une table que
 personne ne consulte ne détecte rien. `scripts/auth_journal.py` la lit. Ce fichier verrouille

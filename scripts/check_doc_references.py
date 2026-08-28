@@ -3,7 +3,7 @@
 
 POURQUOI CE SCRIPT EXISTE. Les documents d'ENTRÉE sont la roadmap (`Documentation/Roadmap/` :
 `ROADMAP_INDEX.md` qui dit par quoi commencer, plus un fichier par sujet) et les deux contrats
-permanents (`analyzer_couverture.md`, `Security.md`). Ils sont tenus à la main, et rien ne les
+permanents (`analyzer_couverture.md`, `securite.md`). Ils sont tenus à la main, et rien ne les
 confrontait au dépôt. Le 2026-08-10, un contrôle ponctuel a mesuré l'état
 des renvois d'`analyzer_couverture.md` **après une seule journée de livraisons** :
 
@@ -126,7 +126,7 @@ DEFAULT_DOCS = [
     "Documentation/Roadmap/capacites.md",
     "Documentation/Roadmap/doc.md",
     "Documentation/Chantiers/analyzer_couverture.md",
-    "Documentation/Reference/infra/Security.md",
+    "Documentation/Reference/infra/securite.md",
 ]
 
 #: Documents soumis à la SEULE passe 3 (valeurs). Ce ne sont pas des documents d'entrée : ils ne
@@ -241,7 +241,7 @@ SEARCH_DIRS = [
 #: `/engine/x.py`, que `ROOT / name` transformait en chemin absolu inexistant — 18 fausses
 #: alertes sur `decisions_du_joueur.md` le 2026-08-11, sur un document dont les 9 cibles existaient toutes.
 #: `(?!\w)` en queue : sans lui, `hashlib.md5` était capturé comme un fichier `hashlib.md`
-#: (mesuré sur `Security.md` le 2026-08-11).
+#: (mesuré sur `securite.md` le 2026-08-11).
 #: Les extensions vivent ici SEULES : `FILE_REF` et `ADJACENT` doivent les reconnaître à
 #: l'identique, faute de quoi une affirmation portée par un `.json` est vue par l'un et pas par
 #: l'autre — c'est arrivé, l'appariement était resté limité au `.py`.
@@ -300,7 +300,7 @@ _INLINE_CODE = re.compile(r"`[^`\n]*`")
 #: sous son dernier segment. Autoriser l'espace ferait avaler la phrase autour du chemin dans tous
 #: les autres cas — un message tronqué vaut mieux qu'un message inventé.
 #: L'extension est OPTIONNELLE : `Dockerfile:14` est un renvoi de ligne comme un autre, et
-#: `Security.md` — document sous convention — cite justement les deux `Dockerfile` du dépôt. Sans
+#: `securite.md` — document sous convention — cite justement les deux `Dockerfile` du dépôt. Sans
 #: extension, seul le critère de dépôt s'applique (cf. `is_a_line_anchor`), ce qui écarte les
 #: `Note:12` et autres deux-points de prose.
 LINE_ANCHOR = re.compile(
@@ -494,7 +494,7 @@ def is_a_line_anchor(basename: str) -> bool:
 
     DEUX critères, en OU, et chacun ferme ce que l'autre laisse ouvert :
       - le nom est celui d'un fichier SUIVI du dépôt. Seul moyen d'atteindre les extensions rares :
-        `docker-compose.yml:18` vivait dans `Security.md`, invisible ;
+        `docker-compose.yml:18` vivait dans `securite.md`, invisible ;
       - son extension est employée quelque part dans le dépôt. Indispensable, parce que le motif
         n°1 de rouille d'une ancre est justement que son fichier ait été RENOMMÉ ou SUPPRIMÉ :
         `engine/ancien.py:412` n'est plus suivi, et le critère de dépôt seul le rendait muet — la

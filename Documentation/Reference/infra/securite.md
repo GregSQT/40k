@@ -1,4 +1,12 @@
-# Sécurité — Analyse et plan d'implémentation
+# Sécurité
+
+> **Référence sécurité** : analyse des failles F1–F15 (toutes résolues), décisions d'implémentation et
+> seuils du script d'analyse statique (`scripts/security_check.sh`).
+>
+> **Déploiement NAS** : voir [deploiement_nas.md](deploiement_nas.md).
+> **Auth et profils** : voir [acces_utilisateurs.md](acces_utilisateurs.md).
+
+---
 
 > Date : 2026-07-15 — mise à jour **2026-08-18** : étapes **4, 5 et 7 livrées**, étape 8 partielle.
 > **Les quinze failles F1–F15 sont résolues.** Ce qui reste n'est plus du code mais trois actions
@@ -365,3 +373,19 @@ Trois conditions restent avant exposition, aucune n'étant du code :
 1. changer le mot de passe du compte `greg` (`admin`, mot de passe = son login) ;
 2. fournir les certificats TLS montés sur `/etc/nginx/certs` et vérifier `docker compose up` (HTTPS servi, HTTP redirigé, port 5001 injoignable depuis l'hôte, `whoami` → `appuser`) ;
 3. valider en navigateur le passage au cookie de session (login, partie complète, déconnexion).
+
+---
+
+## Correspondance des sources
+
+Ce document est le renommage direct de `Security` (ex-`Security`, P4 infra — 2026-08-28).
+Toutes les sections sont identiques ; seul le nom de fichier a changé.
+
+| Source (ex-`Security`) | Section | Section actuelle |
+|---|---|---|
+| — | 1. Modèle de menace | §1 Modèle de menace |
+| — | 2. État des lieux | §2 État des lieux |
+| — | 3. Avis sur les sujets évoqués | §3 Avis |
+| — | 4. Plan d'implémentation (étapes 1–8) | §4 Plan d'implémentation |
+| — | 5. Hors périmètre | §5 Hors périmètre |
+| — | 6. Suivi | §6 Suivi |

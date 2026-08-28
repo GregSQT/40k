@@ -13,7 +13,7 @@ Ce qu'il ne faut PAS faire à la place : repasser `weights_only=False`. Ce serai
 l'exécution de code arbitraire au chargement d'un `.zip` de modèle — exactement le vecteur
 qu'exploitent les CVE torch listées dans `scripts/security_audit_ignore.txt`. La liste
 blanche est, côté modèles, le pendant de `_safe_loads` côté sauvegardes de partie
-(Security.md, étapes 2 et 6).
+(securite.md, étapes 2 et 6).
 
 Jeu minimal vérifié le 2026-08-11 sur torch 2.13.0 + sb3 2.9.0 : `numpy._core.multiarray.
 scalar` et `numpy.dtype` suffisent à recharger tous les modèles du dépôt. Le module reste

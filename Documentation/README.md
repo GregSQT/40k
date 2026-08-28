@@ -67,9 +67,9 @@ Le chantier perf training (mesures + Phase 3 à lancer) est un chantier OUVERT :
 
 | Document | Rôle |
 |---|---|
-| [Deployment_Synology.md](Reference/infra/Deployment_Synology.md) | Déploiement NAS : Docker, volumes, HTTPS/DDNS, durcissement. |
-| [Security.md](Reference/infra/Security.md) | Référence sécurité : failles F1–F15 (chantier clos), seuils de `security_check.sh`. |
-| [USER_ACCESS_CONTROL.md](Reference/infra/USER_ACCESS_CONTROL.md) | Auth, profils, droits d'accès, protection des modes de jeu. |
+| [deploiement_nas.md](Reference/infra/deploiement_nas.md) | Déploiement NAS : Docker, volumes, HTTPS/DDNS, durcissement. |
+| [securite.md](Reference/infra/securite.md) | Référence sécurité : failles F1–F15 (chantier clos), seuils de `security_check.sh`. |
+| [acces_utilisateurs.md](Reference/infra/acces_utilisateurs.md) | Auth, profils, droits d'accès, protection des modes de jeu. |
 
 ---
 

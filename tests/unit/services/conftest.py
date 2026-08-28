@@ -1,7 +1,7 @@
 """Fixtures partagées des tests d'API Flask.
 
 Depuis la fermeture globale de l'API (`before_request`, faille F6 de
-`Documentation/Reference/infra/Security.md`), toute route hors liste blanche exige
+`Documentation/Reference/infra/securite.md`), toute route hors liste blanche exige
 un `Authorization: Bearer <token>` valide. Les tests d'endpoints doivent donc disposer
 d'une session réelle : la fixture ci-dessous monte une base d'auth temporaire et fait
 porter le token par défaut à tout client de test.

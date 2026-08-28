@@ -4,7 +4,7 @@ import { saveAuthSession } from "../auth/authStorage";
 import { API_BASE } from "../services/apiFetch";
 
 // Pas de création de compte depuis l'interface : la route `/api/auth/register` n'existe
-// plus côté serveur (F12 de Documentation/Reference/infra/Security.md), les comptes
+// plus côté serveur (F12 de Documentation/Reference/infra/securite.md), les comptes
 // sont créés en SQL. Exposer un formulaire qui ne peut que échouer serait un leurre.
 
 // `access_token` est volontairement ABSENT de ce type alors que la réponse le contient

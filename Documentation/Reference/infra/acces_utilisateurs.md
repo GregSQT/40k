@@ -1,4 +1,12 @@
-# Gestion des users, profils et droits d'acces
+# Accès utilisateurs
+
+> **Référence auth** : authentification, profils, droits d'accès et protection des modes de jeu.
+> Base SQLite `config/users.db`, backend Flask (`services/api_server.py`).
+>
+> **Sécurité et failles** : voir [securite.md](securite.md).
+> **Déploiement NAS** : voir [deploiement_nas.md](deploiement_nas.md).
+
+---
 
 ## Objectif
 
@@ -20,17 +28,17 @@ Mettre en place un systeme d'authentification/autorisation permettant de:
 |------|-------|------|-------|----------|
 | `pve` | Player vs Environment | ✅ | ✅ | IA pilote P2 |
 | `pvp` | Player vs Player | ✅ | ✅ | 2 humains |
-| `pve_test` | PvE Test | ✅ | ✅ | activé via `test` en backend (1364/1658) |
-| `pvp_test` | PvP Test | ✅ | ✅ | activé via `test` en backend |
+| `pve_test` | PvE Test | ✅ | ✅ | accessible si profil a `test` — `api_server.py` (`_forbidden_mode_response`) |
+| `pvp_test` | PvP Test | ✅ | ✅ | accessible si profil a `test` |
 | `pve_old` | PvE (Old) | ✅ | ✅ | pipeline mono-fig hérité |
 | `pvp_old` | PvP (Old) | ✅ | ✅ | pipeline mono-fig hérité |
 | `tutorial` | Tutoriel | ✅ | ✅ | non encore câblé |
-| `endless_duty` | Endless Duty | ✅ | ✅ | activé via `pve` en backend (1662) |
+| `endless_duty` | Endless Duty | ✅ | ✅ | accessible si profil a `pve` — `api_server.py` (`is_endless_duty_mode`) |
 | `debug` | Debug Mode | ❌ | ✅ | accès admin uniquement |
 | `test` | Test Mode | ❌ | ✅ | accès admin uniquement |
 
 Source de vérité : `config/users.db` → tables `game_modes` et `profile_game_modes`.
-Les codes `pve_test`, `pvp_test` et `endless_duty` ne nécessitent pas leur propre ligne en DB pour le profil `base` : le backend accepte le mode si l'utilisateur a `pve` ou `test` (voir `services/api_server.py` lignes 1656–1662).
+Les codes `pve_test`, `pvp_test` et `endless_duty` ne nécessitent pas leur propre ligne en DB pour le profil `base` : le backend accepte le mode si l'utilisateur a `pve` ou `test` — `api_server.py` (`_forbidden_mode_response`).
 
 ### Profil `base`
 
@@ -137,7 +145,7 @@ Options : memes que `base`.
 ## Creation de compte — pas de route API
 
 `POST /api/auth/register` **n'existe plus** (faille F12, cf.
-`Documentation/Reference/infra/Security.md`). L'inscription libre etait ouverte a
+[securite.md](securite.md)). L'inscription libre etait ouverte a
 Internet, et la simple mise derriere authentification ne suffisait pas : n'importe quel
 testeur au profil `base` aurait pu creer des comptes en masse.
 
@@ -318,13 +326,15 @@ COMMIT;
 
 ---
 
-## Securite minimale recommandee
+## Securite implementee
 
-- hash mot de passe via Argon2 (prioritaire) ou bcrypt
+- hash mot de passe PBKDF2-HMAC-SHA256, sel aléatoire 16 octets — `api_server.py` (`_hash_password`)
 - validation serveur stricte des inputs
-- rate limit sur login (F8, non implemente a ce jour)
+- rate limit sur login : 5 tentatives / (login, IP) sur 60 s → 429 — `api_server.py` (`_count_login_attempts_since_success`)
 - message d'erreur neutre en auth (`identifiants invalides`)
-- expiration token/session + mecanisme de refresh
+- expiration token/session 7 jours glissants + révocation immédiate au logout — `api_server.py` (`_SESSIONS_TABLE_SQL`, `logout_user`)
+
+Détail complet des failles F1–F15 et de leur résolution : [securite.md](securite.md).
 
 ---
 
@@ -396,10 +406,8 @@ sqlite3 config/users.db < Documentation/sql/create_first_admin.sql
 - Nouveau fichier: `frontend/src/auth/authStorage.ts`
   - stockage/lecture/suppression de session auth (`localStorage`)
 - Nouvelle page: `frontend/src/pages/AuthPage.tsx`
-  - connexion
-  - creation de compte
-  - connexion automatique apres creation de compte
-  - redirection vers `/game?mode=pve`
+  - connexion uniquement (pas de création de compte — route supprimée, F12)
+  - redirection vers `/game?mode=pve` après connexion réussie
 - Routes protegees:
   - fichier modifie: `frontend/src/Routes.tsx`
   - ajout route `/auth`
@@ -420,15 +428,40 @@ sqlite3 config/users.db < Documentation/sql/create_first_admin.sql
 ## Notes de fonctionnement
 
 - Profil `base`:
-  - modes autorises: `pve`, `pvp`
+  - modes autorises (seedes par `initialize_auth_db`): `pve`, `pve_test`, `pvp`, `pvp_test`, `endless_duty`
+  - les modes `pve_old`, `pvp_old`, `tutorial` existent en base mais ne sont pas accordes par defaut
   - options autorisees:
     - `show_advance_warning`
     - `auto_weapon_selection`
 - Profil `admin`:
-  - modes autorises: `pve`, `pvp`, `debug`, `test`
+  - memes modes que `base` + `debug` et `test` (accordes via `Documentation/sql/create_first_admin.sql`)
   - options autorisees:
     - `show_advance_warning`
     - `auto_weapon_selection`
 - Redirection post-login:
   - le front redirige vers `/game?mode=pve`
 
+
+---
+
+## Correspondance des sources
+
+Ce document est le renommage direct de `USER_ACCESS_CONTROL.md` (P4 infra — 2026-08-28). Corrections
+appliquées lors du renommage : retrait des numéros de ligne dans la table des modes, retrait des
+bullet points "création de compte" d'`AuthPage.tsx` (supprimée via F12), mise à jour de la section
+sécurité (PBKDF2-HMAC-SHA256 au lieu d'Argon2/bcrypt), extension des notes de fonctionnement aux
+10 modes réels de la base.
+
+| Source | Section | Section actuelle |
+|---|---|---|
+| `USER_ACCESS_CONTROL.md` | Regles metier | Regles metier |
+| `USER_ACCESS_CONTROL.md` | Principes d'architecture | Principes d'architecture |
+| `USER_ACCESS_CONTROL.md` | Modele de donnees | Modele de donnees |
+| `USER_ACCESS_CONTROL.md` | Contrat API | Contrat API |
+| `USER_ACCESS_CONTROL.md` | Flux utilisateur | Flux utilisateur |
+| `USER_ACCESS_CONTROL.md` | Autorisation: regle non negociable | Autorisation: regle non negociable |
+| `USER_ACCESS_CONTROL.md` | SQL de reference | SQL de reference |
+| `USER_ACCESS_CONTROL.md` | Integration frontend | Integration frontend |
+| `USER_ACCESS_CONTROL.md` | Securite minimale recommandee | Securite implementee (contenu mis à jour) |
+| `USER_ACCESS_CONTROL.md` | Criteres d'acceptation | Criteres d'acceptation |
+| `USER_ACCESS_CONTROL.md` | Etat d'implementation dans ce repo | Etat d'implementation dans ce repo |
