@@ -1089,7 +1089,7 @@ observées**, donc slots + pointeur, jamais `CHOICE_k` :
   more** enemy units » ; le PvP le fait (`targetIds`, `charge_handlers`), une action de charge du
   gym ne désigne qu'**un** slot. Ce n'est pas une régression (c'était déjà le cas quand le
   décodeur tranchait) mais, la cible étant devenue une dimension d'action, il faut le dire : la
-  déclaration multi-cibles reste au point 8 de [§9.4](#s9.4), « à statuer utilisateur ».
+  ~~déclaration multi-cibles reste au point 8 de [§9.4](#s9.4), « à statuer utilisateur »~~ — ✅ **LIVRÉ le 2026-08-20** (cf. [v11_chemin_critique.md#p3-8](../../Roadmap/v11_chemin_critique.md#p3-8)).
 - Pas de garde de troncature ici (la mêlée en a une) : la mêlée confronte **deux** sources (pool
   12.05 et mapping de slots), donc une cible légale peut n'avoir aucun slot. Ici la seule source
   des candidats **est** le mapping — une escouade ennemie sans slot est déjà loguée en amont par
@@ -1277,3 +1277,12 @@ Points de vigilance :
   consommateurs, `_ai_select_shooting_target` (shooting_handlers, def ~2093), est DÉJÀ mort
   (zéro appelant) — à inclure dans la suppression P1.~~ → **fait** : `_ai_select_shooting_target`
   a **0 occurrence** dans tout le dépôt (vérifié 2026-08-10), il a été supprimé avec P1.
+
+---
+
+## Correspondance des sources
+
+| Ancien fichier | Ancien § | Section actuelle |
+|---|---|---|
+| `V11_agent_rework.md` / `1_Agent/V11_agent_rework.md` | §9 | [`decisions_du_joueur.md`](decisions_du_joueur.md) §9 (ce fichier) |
+| `index_v11.md` avant découpage (2026-07-28) | §9 | [`decisions_du_joueur.md`](decisions_du_joueur.md) §9 (ce fichier) |

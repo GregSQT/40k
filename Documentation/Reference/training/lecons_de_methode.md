@@ -733,3 +733,12 @@ AVANT d'y lancer un entraînement.
 
 ---
 
+
+---
+
+## Correspondance des sources
+
+| Ancien fichier | Ancien § | Section actuelle |
+|---|---|---|
+| `V11_agent_rework.md` / `1_Agent/V11_agent_rework.md` | §0bis | [`lecons_de_methode.md`](lecons_de_methode.md) §0bis (ce fichier) |
+| `index_v11.md` avant refonte P3 (2026-08-27) | §0bis | [`lecons_de_methode.md`](lecons_de_methode.md) §0bis (ce fichier) |

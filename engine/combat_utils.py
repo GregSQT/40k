@@ -287,7 +287,7 @@ def calculate_hex_distance(col1: int, row1: int, col2: int, row2: int) -> int:
 
         WARNING: This is straight-line distance, ignoring walls! Le moteur n'a plus de
         distance de pathfinding : `calculate_pathfinding_distance` et son champ BFS ont ete
-        supprimes le 2026-07-28, faute d'appelant (cf. `V11_agent_rework.md` §0.39).
+        supprimes le 2026-07-28, faute d'appelant (cf. `index_v11.md` §0.39).
         """
         # Convert offset to cube
         x1 = col1

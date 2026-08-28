@@ -268,7 +268,7 @@ def _debug_log(message: str) -> None:
 # Le moteur journalise désormais son état (`T{tour} OBJECTIVE CONTROL: VP1=… VP2=… ZONES=…`,
 # StepLogger.log_objective_control_snapshot) et analyzer_core.py le lit tel quel.
 # Conséquence directe : l'appariement nom → id positionnel via le terrain disparaît, et avec
-# lui la coexistence de trois formats d'identifiant d'objectif signalée dans V11_tranches.md.
+# lui la coexistence de trois formats d'identifiant d'objectif signalée dans tranches_et_ruptures.md.
 # Pour retrouver la résolution d'un chemin de scénario, le point d'entrée vivant est
 # `config_loader` (utilisé par train.py, bot_evaluation.py et le moteur).
 

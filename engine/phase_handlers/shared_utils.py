@@ -9795,7 +9795,7 @@ def unit_can_reroll_charge(game_state: Dict[str, Any], unit_id: str) -> bool:
     cette relance, et celle qui entrera au roster la declarera.
 
     Sur une unite ATTACHEE, la regle du leader vaut pour toute l unite (19.04, implemente le
-    2026-07-27, cf. V11_agent_rework.md §9.2.8) : `_unit_has_rule_effect` lit les UNIT_RULES de
+    2026-07-27, cf. index_v11.md §9.2.8) : `_unit_has_rule_effect` lit les UNIT_RULES de
     l ESCOUADE, qui sont l union EN VIGUEUR de ses sources vivantes — recalculee a chaque mort
     par `recompute_unit_rules_in_effect`. Un Captain attache confere donc bien son reroll_charge
     a l escouade, et le lui retire en mourant.
