@@ -1579,7 +1579,7 @@ class W40KMetricsTracker:
         - 00_critical/h_clip_fraction       - [0.1-0.3] -> Tune learning_rate
         - 00_critical/i_approx_kl           - <0.02 -> Policy stability
         - 00_critical/j_entropy_loss        - Decroissant -> Tune ent_coef
-        - 00_critical/m_value_loss_smooth   - Smoothed critic loss
+        - 00_critical/m_immediate_reward_ratio_mean - ratio reward immediat/total (lisse, emis par training_callbacks)
 
         ECRIT PAR `_log_zone_intent_metrics`, appele en fin de cette methode (2 tags) :
         - 00_critical/n_intent_zone_steps          - free steps zone-intent par episode
@@ -1666,9 +1666,7 @@ class W40KMetricsTracker:
             recent_value = self.hyperparameter_tracking['value_losses'][-20:]
             combined_losses = [abs(p) + abs(v) for p, v in zip(recent_policy, recent_value)]
             loss_mean = float(np.mean(combined_losses))
-            value_loss_smooth = float(np.mean(recent_value))
             self.writer.add_scalar('00_critical/f_loss_mean', loss_mean, self.episode_count)
-            self.writer.add_scalar('00_critical/m_value_loss_smooth', value_loss_smooth, self.episode_count)
         
         # ==========================================
         # HORS 00_critical : ecrit dans game_critical/ et game_detailed/
