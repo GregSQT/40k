@@ -19,14 +19,11 @@ import numpy as np
 class VecNormalizeSnapshot:
     """État gelé d'un VecNormalize pour UN worker, valide pendant un cycle de collecte."""
 
-    # obs_rms["global_cont"] — RunningMeanStd fields
+    # obs_rms["global_cont"] — RunningMeanStd fields (seuls utilisés pour normaliser)
     obs_mean: np.ndarray   # (13,) float64
     obs_var: np.ndarray    # (13,) float64
-    obs_count: float
-    # ret_rms — RunningMeanStd fields
-    ret_mean: float        # scalar float64
+    # ret_rms — seul ret_var est utilisé pour normaliser la récompense
     ret_var: float         # scalar float64
-    ret_count: float
     # VecNormalize params
     gamma: float
     epsilon: float
@@ -38,26 +35,29 @@ class VecNormalizeSnapshot:
     initial_return: float
 
 
+def _unwrap_vec_normalize(vec_env: Any) -> "Any | None":
+    """Remonte la chaîne de wrappers et retourne le VecNormalize, ou None."""
+    from stable_baselines3.common.vec_env import VecNormalize
+
+    vn = vec_env
+    while not isinstance(vn, VecNormalize) and hasattr(vn, "venv"):
+        vn = vn.venv
+    return vn if isinstance(vn, VecNormalize) else None
+
+
 def snapshot_vec_normalize(vec_env: Any, worker_idx: int) -> "VecNormalizeSnapshot":
     """Capture les stats gelées du VecNormalize pour le worker `worker_idx`.
 
     Remonte la chaîne de wrappers pour trouver le VecNormalize.
     Si aucun VecNormalize n'est trouvé, retourne un snapshot no-op (pas de normalisation).
     """
-    from stable_baselines3.common.vec_env import VecNormalize
-
-    vn = vec_env
-    while not isinstance(vn, VecNormalize) and hasattr(vn, "venv"):
-        vn = vn.venv
-    if not isinstance(vn, VecNormalize):
+    vn = _unwrap_vec_normalize(vec_env)
+    if vn is None:
         # Pas de VecNormalize — snapshot no-op
         return VecNormalizeSnapshot(
             obs_mean=np.zeros(1, dtype=np.float64),
             obs_var=np.ones(1, dtype=np.float64),
-            obs_count=1.0,
-            ret_mean=0.0,
             ret_var=1.0,
-            ret_count=1.0,
             gamma=0.99,
             epsilon=1e-8,
             clip_obs=10.0,
@@ -73,21 +73,11 @@ def snapshot_vec_normalize(vec_env: Any, worker_idx: int) -> "VecNormalizeSnapsh
         rms = obs_rms["global_cont"] if isinstance(obs_rms, dict) else obs_rms
         snap_obs_mean = rms.mean.copy()
         snap_obs_var = rms.var.copy()
-        snap_obs_count = float(rms.count)
     else:
         snap_obs_mean = np.zeros(1, dtype=np.float64)
         snap_obs_var = np.ones(1, dtype=np.float64)
-        snap_obs_count = 1.0
     # ret_rms n'existe que si norm_reward=True.
-    if vn.norm_reward and hasattr(vn, "ret_rms"):
-        ret_rms = vn.ret_rms
-        snap_ret_mean = float(ret_rms.mean)
-        snap_ret_var = float(ret_rms.var)
-        snap_ret_count = float(ret_rms.count)
-    else:
-        snap_ret_mean = 0.0
-        snap_ret_var = 1.0
-        snap_ret_count = 1.0
+    snap_ret_var = float(vn.ret_rms.var) if vn.norm_reward and hasattr(vn, "ret_rms") else 1.0
 
     initial_return = 0.0
     if hasattr(vn, "returns") and vn.returns is not None and worker_idx < len(vn.returns):
@@ -96,10 +86,7 @@ def snapshot_vec_normalize(vec_env: Any, worker_idx: int) -> "VecNormalizeSnapsh
     return VecNormalizeSnapshot(
         obs_mean=snap_obs_mean,
         obs_var=snap_obs_var,
-        obs_count=snap_obs_count,
-        ret_mean=snap_ret_mean,
         ret_var=snap_ret_var,
-        ret_count=snap_ret_count,
         gamma=float(vn.gamma),
         epsilon=float(vn.epsilon),
         clip_obs=float(vn.clip_obs),
@@ -120,9 +107,9 @@ def normalize_obs_with_snapshot(obs_dict: dict, snapshot: "VecNormalizeSnapshot"
         return dict(obs_dict)
 
     result = dict(obs_dict)
-    raw = obs_dict["global_cont"].astype(np.float64)
+    # numpy upcast float32 → float64 implicitement lors de l'arithmétique avec obs_mean (float64)
     normalized = np.clip(
-        (raw - snapshot.obs_mean) / np.sqrt(snapshot.obs_var + snapshot.epsilon),
+        (obs_dict["global_cont"] - snapshot.obs_mean) / np.sqrt(snapshot.obs_var + snapshot.epsilon),
         -snapshot.clip_obs,
         snapshot.clip_obs,
     ).astype(np.float32)
@@ -147,12 +134,8 @@ def update_vec_normalize_from_trajectories(
     l'algorithme parallèle de Welford, donc update(batch) ≠ N×update(step) numériquement mais
     converge vers la même valeur. C'est l'écart intentionnel documenté dans §3 de perf_entrainement.md.
     """
-    from stable_baselines3.common.vec_env import VecNormalize
-
-    vn = vec_env
-    while not isinstance(vn, VecNormalize) and hasattr(vn, "venv"):
-        vn = vn.venv
-    if not isinstance(vn, VecNormalize):
+    vn = _unwrap_vec_normalize(vec_env)
+    if vn is None:
         return
 
     if vn.training and vn.norm_obs:

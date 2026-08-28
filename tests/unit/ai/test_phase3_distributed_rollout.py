@@ -90,7 +90,6 @@ class TestSnapshotVecNormalize:
 
         assert isinstance(snap.obs_mean, np.ndarray)
         assert isinstance(snap.obs_var, np.ndarray)
-        assert snap.obs_count >= 1.0
         assert snap.gamma == pytest.approx(0.99)
         assert snap.norm_obs is True
         assert snap.norm_reward is True
@@ -151,8 +150,7 @@ class TestNormalizeObsWithSnapshot:
         return VecNormalizeSnapshot(
             obs_mean=np.full(13, 0.5, dtype=np.float64),
             obs_var=np.full(13, 2.0, dtype=np.float64),
-            obs_count=100.0,
-            ret_mean=0.0, ret_var=1.0, ret_count=1.0,
+            ret_var=1.0,
             gamma=0.99, epsilon=1e-8,
             clip_obs=10.0, clip_reward=10.0,
             norm_obs=norm_obs, norm_reward=True,
@@ -194,7 +192,7 @@ class TestNormalizeObsWithSnapshot:
         snap = VecNormalizeSnapshot(
             obs_mean=np.zeros(13, dtype=np.float64),
             obs_var=np.full(13, 0.01, dtype=np.float64),  # var très faible → grande valeur norm
-            obs_count=1.0, ret_mean=0.0, ret_var=1.0, ret_count=1.0,
+            ret_var=1.0,
             gamma=0.99, epsilon=1e-8, clip_obs=5.0, clip_reward=10.0,
             norm_obs=True, norm_reward=False, initial_return=0.0,
         )
@@ -377,7 +375,7 @@ class TestRunWorkerTrajectory:
         return VecNormalizeSnapshot(
             obs_mean=np.zeros(self.GC_DIM, dtype=np.float64),
             obs_var=np.ones(self.GC_DIM, dtype=np.float64),
-            obs_count=1.0, ret_mean=0.0, ret_var=1.0, ret_count=1.0,
+            ret_var=1.0,
             gamma=0.99, epsilon=1e-8, clip_obs=10.0, clip_reward=10.0,
             norm_obs=True, norm_reward=True, initial_return=initial_return,
         )
@@ -393,7 +391,7 @@ class TestRunWorkerTrajectory:
 
         traj = _run_worker_trajectory(env, obs, policy_bytes, self.N_STEPS, snap, False)
 
-        assert len(traj["norm_obs_seq"]) == self.N_STEPS
+        assert len(next(iter(traj["norm_obs_seq"].values()))) == self.N_STEPS
         assert len(traj["actions_seq"]) == self.N_STEPS
         assert len(traj["rewards_seq"]) == self.N_STEPS
         assert len(traj["dones_seq"]) == self.N_STEPS
@@ -476,7 +474,7 @@ class TestRunWorkerTrajectory:
         snap = VecNormalizeSnapshot(
             obs_mean=np.zeros(13, dtype=np.float64),
             obs_var=np.ones(13, dtype=np.float64),
-            obs_count=1.0, ret_mean=0.0, ret_var=1.0, ret_count=1.0,
+            ret_var=1.0,
             gamma=0.99, epsilon=1e-8, clip_obs=10.0, clip_reward=10.0,
             norm_obs=False, norm_reward=False, initial_return=0.0,
         )
@@ -541,7 +539,7 @@ class TestRunWorkerTrajectory:
 
         # L'obs normalisée au step 0 du 2e run = normalize(last_raw_obs) = même valeur que
         # normalize(obs_brut). Avec obs=0.1 et mean=0, var=1 : norm = 0.1/sqrt(1+eps) ≈ 0.1.
-        obs_step0_run2 = float(traj2["norm_obs_seq"][0]["global_cont"][0])
+        obs_step0_run2 = float(traj2["norm_obs_seq"]["global_cont"][0][0])
         assert abs(obs_step0_run2) < 0.2, (
             f"obs normalisée step 0 run 2 = {obs_step0_run2:.4f} — "
             f"la double normalisation est détectée si la valeur est proche de 0 "

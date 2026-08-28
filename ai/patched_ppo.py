@@ -51,18 +51,6 @@ SelfPatchedMaskablePPO = TypeVar("SelfPatchedMaskablePPO", bound="PatchedMaskabl
 _NO_OBS = object()
 
 
-def _env_has_inline_masks(env: VecEnv) -> bool:
-    """True si l'env est un MaskableSubprocVecEnv (masques dans infos de step)."""
-    try:
-        from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
-    except ImportError:
-        return False
-    vec: Any = env
-    while hasattr(vec, "venv"):
-        vec = vec.venv
-    return isinstance(vec, MaskableSubprocVecEnv)
-
-
 def _get_maskable_subproc_vec_env(env: VecEnv) -> "Any | None":
     """Retourne le MaskableSubprocVecEnv dans la chaîne de wrappers, ou None."""
     try:
@@ -303,13 +291,12 @@ class PatchedMaskablePPO(MaskablePPO):
         )
 
         # 4. Remplir le buffer depuis les trajectoires.
+        # Pré-empilement : (n_envs, n_steps, ...) par clé — remplace n_steps × n_keys np.stack par n_keys np.stack.
+        obs_keys = list(trajectories[0]["norm_obs_seq"].keys())
+        obs_all = {key: np.stack([traj["norm_obs_seq"][key] for traj in trajectories]) for key in obs_keys}
+
         for step_idx in range(n_rollout_steps):
-            # Obs au step_idx depuis tous les workers (shape: n_envs × ...)
-            obs_step: dict = {}
-            for key in trajectories[0]["norm_obs_seq"][step_idx]:
-                obs_step[key] = np.stack([
-                    traj["norm_obs_seq"][step_idx][key] for traj in trajectories
-                ])
+            obs_step = {key: obs_all[key][:, step_idx] for key in obs_keys}
 
             actions_step = np.array([traj["actions_seq"][step_idx] for traj in trajectories])
             rewards_step = np.array([traj["rewards_seq"][step_idx] for traj in trajectories], dtype=np.float32)
@@ -396,7 +383,7 @@ class PatchedMaskablePPO(MaskablePPO):
                 "Environment does not support action masking. Consider using ActionMasker wrapper"
             )
 
-        use_inline_masks = use_masking and _env_has_inline_masks(env)
+        use_inline_masks = use_masking and _get_maskable_subproc_vec_env(env) is not None
         next_step_masks: np.ndarray | None = None
 
         callback.on_rollout_start()
