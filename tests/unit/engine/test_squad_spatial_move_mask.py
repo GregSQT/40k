@@ -1,6 +1,6 @@
 """Masque spatial de la phase de move (§7 T2) — remplace les 18 dry-runs directionnels.
 
-Spec : Documentation/Reference/training/move_action_space_spatial_rework.md §3 / §6.2 / §7 T2.
+Spec : Documentation/Reference/training/observation_et_actions.md §3 / §6.2 / §7 T2.
 
 Root cause §3 : une action de move designait l'hex ADJACENT (direction 0-5), donc l'escouade
 avancait d'1 subhex par phase = 1/25e de son budget sur un board x5. Ces tests verrouillent le

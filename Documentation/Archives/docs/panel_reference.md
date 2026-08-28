@@ -1,3 +1,7 @@
+> **Document absorbé.** Consolidation P4 du 2026-08-28 : ce fichier a été fusionné dans
+> `Documentation/Reference/training/panel_bots.md`, qui est désormais la source vivante. Conservé ici pour l'historique — ne plus
+> le citer ni le mettre à jour.
+
 # Refonte du panel de bots (§12)
 
 Six styles de doctrine (alpha, attrition, decapitation, endgame, racer, scorer) remplaçant

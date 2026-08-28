@@ -387,7 +387,7 @@ comme non normatif.
 > ⚠️ **MAJ 2026-07-26** : le contrat décrit ici (vecteur PLAT `vec_cont`/`vec_bin`) a été
 > REMPLACÉ par les **tenseurs d'entités** de [§0.30](V11_agent_rework.md) T-D (`obs_size` **20626** depuis [§0.32](V11_agent_rework.md)). Ce qui suit reste
 > la spécification de CE QUI est observé (profils d'armes, règles, mise en place, distance
-> parcourue) ; la FORME, elle, se lit dans `V11_entity_encoder_pointer.md` §6 et dans l'en-tête
+> parcourue) ; la FORME, elle, se lit dans `observation_et_actions.md` §6 et dans l'en-tête
 > de `build_squad_observation`.
 
 **Ce qui a été ajouté à l'observation squad** (détail de layout : en-tête de
@@ -450,7 +450,7 @@ accesseurs de layout, pas par des index recopiés).
   endroit de tout l'encodage : `_encode_rule_features`, appelée **uniquement** par
   `build_observation` — le pipeline **mono-figurine legacy** (`obs_size` 357). Le routage
   ([w40k_core.py](../../../engine/w40k_core.py) `_build_observation`) envoie le pipeline squad sur
-  `build_squad_observation`, qui ne passe jamais par là. ⚠️ `AI_OBSERVATION.md` décrit bien
+  `build_squad_observation`, qui ne passe jamais par là. ⚠️ `observation_et_actions.md` décrit bien
   « 12 unit-rule flags », mais dans le layout `obs[314:346]` du legacy : lu vite, il fait croire
   l'inverse. Concerné : les 12 règles vives (`reroll_charge`, `closest_target_penetration`,
   `charge_after_advance`, `charge_after_flee`, `charge_impact`, `reactive_move`,
@@ -499,7 +499,7 @@ IA. Côté observation, les bits `PISTOL` et `ASSAULT` décrivent donc une capac
 gym — ils sont **conservés** (l'effet PvP est réel) avec la réserve écrite dans
 `observation_weapon_profiles.py`.
 
-**Statut : ✅ FERMÉ le 2026-07-26 par la tranche **T-B** du chantier dédié [`V11_entity_encoder_pointer.md`](../../Reference/training/V11_entity_encoder_pointer.md) (tranche T-B), avec 5 autres trous trouvés le même jour.** Le résolveur `resolve_squad_shooting_type` ouvre 10.05 et 10.06, le masque teste toute arme éligible, et le volet MONSTER/VEHICLE de 10.06 est implémenté (13 tests, mutations → 5 rouges). ⚠️ **Résidu** : le chemin PvP/mono ne connaît toujours pas le volet MONSTER/VEHICLE — voir §1.9 du chantier. Périmètre d'origine — c'est une **nouvelle règle à implémenter**
+**Statut : ✅ FERMÉ le 2026-07-26 par la tranche **T-B** du chantier dédié [`observation_et_actions.md`](../../Reference/training/observation_et_actions.md) (tranche T-B), avec 5 autres trous trouvés le même jour.** Le résolveur `resolve_squad_shooting_type` ouvre 10.05 et 10.06, le masque teste toute arme éligible, et le volet MONSTER/VEHICLE de 10.06 est implémenté (13 tests, mutations → 5 rouges). ⚠️ **Résidu** : le chemin PvP/mono ne connaît toujours pas le volet MONSTER/VEHICLE — voir §1.9 du chantier. Périmètre d'origine — c'est une **nouvelle règle à implémenter**
 (deux types de tir, avec restriction d'armes et restriction de cibles), pas un correctif de la
 tranche observation. Périmètre estimé, à arbitrer : (1) gate `build_squad_action_mask` ;
 (2) restriction « seules les armes [ASSAULT] » / « seules les armes [PISTOL] » à la sélection
@@ -693,7 +693,7 @@ est arrêté sur le point de choix, exactement comme le PvP l'est sur un `waitin
 `obs_size` **20654 → 20740** (20654 = valeur après P3-1). Un candidat est décrit par **l'effet qu'il accorde**, dans le même
 vocabulaire que les drapeaux `rule_*` d'unité — pas par son index, qui ne veut rien dire d'un
 prompt à l'autre. Le bloc reste nul quand la décision appartient à l'autre camp. Détail complet →
-[`AI_OBSERVATION.md`](../../Reference/training/AI_OBSERVATION.md), section `decision_ctx_bin`.
+[`observation_et_actions.md`](../../Reference/training/observation_et_actions.md), section `decision_ctx_bin`.
 
 **La tête d'action** : les logits `CHOICE_i` sortent d'un **pointeur** (`q_choice · c_i / √d`) sur
 des embeddings produits par un encodeur PARTAGÉ entre tous les slots de candidats — même

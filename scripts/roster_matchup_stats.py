@@ -39,7 +39,7 @@ cles que le moteur rejette.
 Trois regles a respecter en le modifiant :
 
 1. La boucle d'evaluation N'EST PAS autonome : elle est calquee sur `ai/bot_evaluation.py`,
-   la boucle d'evaluation de REFERENCE (cf. Documentation/Reference/training/AI_TRAINING.md, section
+   la boucle d'evaluation de REFERENCE (cf. Documentation/Reference/training/entrainement.md, section
    "Evaluation"). Obs Dict servie telle quelle, masque via `W40KEngine.get_action_mask`,
    plafond de pas derive de `config_loader.get_max_turns`, siege lu dans
    `info["controlled_player"]`, episodes tronques comptes a part (`failed_episodes`), jamais
@@ -891,7 +891,7 @@ def main() -> None:
     # session, l'ecrase. Une campagne de matchups ne dit donc rien de son modele si elle ne
     # l'IDENTIFIE pas. Le 2026-08-13, ce chemin portait un modele different de celui dont le
     # chantier des bots tirait tous ses chiffres, et deux tableaux ont ete publies dessus sans que
-    # rien ne le signale (cf. Documentation/Reference/training/bots_refonte_panel.md §12.7, invalidee, et §12.8).
+    # rien ne le signale (cf. Documentation/Reference/training/panel_bots.md §12.7, invalidee, et §12.8).
     # Le md5 est le seul identifiant qui survive a un renommage ou a une recopie.
     print(f"📦 Modèle : {model_path}\n   md5 : {_model_md5(model_path)}")
 

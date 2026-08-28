@@ -45,7 +45,7 @@ CE QUI RESTE DANS `evaluation_bots.py`
     Les six anciens bots, GELES (pas une ligne modifiee) jusqu'a la campagne de correspondance,
     et les primitives d'ESPACE D'ACTION (mapping slot -> escouade ennemie, pose ponderee), qui ne
     portent aucune doctrine et sont importees ici. Cf.
-    `Documentation/Chantiers/backlog/panel_reference.md`.
+    `Documentation/Reference/training/panel_bots.md`.
 """
 
 import random

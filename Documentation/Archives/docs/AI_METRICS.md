@@ -1,3 +1,7 @@
+> **Document absorbé.** Consolidation P4 du 2026-08-28 : ce fichier a été fusionné dans
+> `Documentation/Reference/training/metriques.md`, qui est désormais la source vivante. Conservé ici pour l'historique — ne plus
+> le citer ni le mettre à jour.
+
 # AI_METRICS.md
 ## Training Optimization Through Metrics Analysis
 

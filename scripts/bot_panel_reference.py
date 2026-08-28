@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Source UNIQUE de la référence chiffrée du panel de bots (§12.14 de `bots_refonte_panel.md`).
+"""Source UNIQUE de la référence chiffrée du panel de bots (§12.14 de `panel_bots.md`).
 
 POURQUOI CE MODULE EXISTE. La ligne était recopiée à la main dans `bot_zone_check.py` et
 `bot_zone_direct.py` : mêmes chiffres, étiquettes CONTRAIRES (« pre-§12.6 » d'un côté,

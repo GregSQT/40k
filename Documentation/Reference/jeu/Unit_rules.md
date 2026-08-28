@@ -56,7 +56,7 @@ Contraintes importantes:
 ### `obs_id` — identifiant d'observation
 
 `obs_id` est l'entier que l'observation de l'agent ecrit dans les slots de capacite
-(`allies_ability_ids` / `enemies_ability_ids`, cf. [`AI_OBSERVATION.md`](../training/AI_OBSERVATION.md)). Il
+(`allies_ability_ids` / `enemies_ability_ids`, cf. [`observation_et_actions.md`](../training/observation_et_actions.md)). Il
 remplace les 13 bits `rule_<effet>` : une capacite n'est plus une DIMENSION du vecteur mais une
 LIGNE d'une table d'embedding, ce qui rend son ajout gratuit — ni `obs_size`, ni le nombre de
 parametres du reseau ne changent, donc aucun retrain.

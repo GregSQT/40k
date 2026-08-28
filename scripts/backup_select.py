@@ -126,10 +126,11 @@ else:
     
     ### Documentation    
         "Documentation/Reference/moteur/architecture_moteur.md",
-        "Documentation/Reference/training/AI_METRICS.md",
-        "Documentation/Reference/training/AI_OBSERVATION.md",
+        "Documentation/Reference/training/metriques.md",
+        "Documentation/Reference/training/observation_et_actions.md",
         "Documentation/Archives/docs/AI_OBSERVATION_Legacy.md",
-        "Documentation/Reference/training/AI_TRAINING.md",
+        "Documentation/Reference/training/entrainement.md",
+        "Documentation/Reference/training/panel_bots.md",
         "Documentation/Reference/moteur/tour_de_jeu.md",
 
 ######################################################################################################

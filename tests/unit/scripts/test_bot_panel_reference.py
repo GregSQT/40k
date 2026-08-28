@@ -16,7 +16,7 @@ from tests._chargeur_script import charger_script
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS = PROJECT_ROOT / "scripts"
-DOC_PANEL = PROJECT_ROOT / "Documentation/Chantiers/backlog/panel_reference.md"
+DOC_PANEL = PROJECT_ROOT / "Documentation/Reference/training/panel_bots.md"
 
 #: Les scripts du panel qui affichent la référence. Ils l'IMPRIMENT, ils ne l'écrivent pas.
 APPELANTS = ("bot_zone_check.py", "bot_zone_direct.py")

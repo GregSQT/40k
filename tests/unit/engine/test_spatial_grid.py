@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Geometrie de la grille egocentrique de mouvement (engine/spatial_grid.py).
 
-Spec : Documentation/Reference/training/move_action_space_spatial_rework.md §6.2/§10.2/§10.9.
+Spec : Documentation/Reference/training/observation_et_actions.md §6.2/§10.2/§10.9.
 Ces tests verrouillent le contrat partage entre obs (T1), masque (T2) et decoder (T3).
 """
 

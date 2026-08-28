@@ -1,25 +1,23 @@
-# AI_OBSERVATION.md — ce que l'agent observe
+# Observation et espace d'action
 
-Référence canonique de l'observation de l'agent : **le pipeline SQUAD en tenseurs d'entités**,
-le seul sur lequel l'agent s'entraîne.
+Référence canonique de l'observation et de l'espace d'action de l'agent : **le pipeline SQUAD en
+tenseurs d'entités**, le seul sur lequel l'agent s'entraîne.
 
 > **Ce document ne décrit QUE le code actuel.** Le pipeline mono-figurine (`obs_size = 359`,
-> vecteur plat d'offsets `obs[N]`) a été déplacé dans
-> **[`AI_OBSERVATION_Legacy.md`](../../Archives/docs/AI_OBSERVATION_Legacy.md)** le 2026-07-28, puis **SUPPRIMÉ du
-> code le même jour** : `build_observation`, `build_observation_for_unit`, leurs 33 méthodes
-> d'encodage et la constante `PHASE2_OBS_SIZE` n'existent plus. Il vivait ici sous un bandeau
-> d'avertissement, et induisait quand même en erreur à chaque lecture : ses offsets, ses
-> « 12 unit-rule flags » et ses features calculées (`ranged_favorite_target`,
-> `melee_favorite_target`…) n'existent plus. Le seul pipeline d'observation est celui décrit
-> ci-dessous — le PvE y a été migré (`pve_controller.make_ai_decision`).
+> vecteur plat d'offsets `obs[N]`) a été supprimé du code le 2026-07-28 et archivé dans
+> **[`AI_OBSERVATION_Legacy.md`](../../Archives/docs/AI_OBSERVATION_Legacy.md)**.
 >
-> **Version** : 3.0 — tenseurs d'entités (V11 §0.30 T-D), complétée par V11 §0.31.
-> **Pipeline de training/évaluation** : `AI_TRAINING.md` (CLI, callbacks, évaluation contre bots).
+> **Version** : 3.0 — tenseurs d'entités (V11 §0.30 T-D), complétée par V11 §0.31 et §0.32.
+> **Pipeline de training/évaluation** : `entrainement.md` (CLI, callbacks, évaluation contre bots).
 
 **Source unique du contrat** : l'en-tête « OBSERVATION SQUAD — TENSEURS D'ENTITÉS » de
 [`engine/observation_builder.py`](../../../engine/observation_builder.py) et le schéma
 [`engine/observation_entities.py`](../../../engine/observation_entities.py). Ce document en donne la
 lecture, jamais une copie de chiffres qui dériverait.
+
+---
+
+## Observation agent
 
 **L'observation n'est plus un vecteur plat.** Elle est un `Dict` de tenseurs :
 
@@ -34,7 +32,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 | `self_models_cont` / `_bin` | (20, 2) / (20, 3) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement, **bit de présence** |
 | `grid` | (9, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37). **Centre de la fenêtre** (`ObservationBuilder.squad_grid_anchor`) : l'escouade active — sauf si elle n'est **pas encore posée** (`deployed_on_turn is None`, phase de déploiement), auquel cas c'est un hex de **sa zone de déploiement** ; avant V11 §0.40 la fenêtre était centrée sur la sentinelle `(-1,-1)`, donc sur une autre région du plateau |
 
-### Structure Overview
+### Vue d'ensemble
 
 Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 `tests/unit/engine/test_squad_obs_structure_doc.py` échoue si ce bloc dérive du schéma.
@@ -91,7 +89,7 @@ Coût d'UNE entité = 19 + 20 (unité) + 8 + 4 (capacités/statuts) + 20 × (13 
    → le bloc ARMES fait 78 % du vecteur. C'est le seul bloc mémoïsé.
 ```
 
-### Section Breakdown
+### Description des tenseurs
 
 Toutes les dimensions, dans l'ordre d'émission, avec pour chacune : **la clé du `Dict`** qui la
 porte, son **index dans cette clé**, son nom et sa plage. Le titre de chaque bloc indique **qui le
@@ -402,66 +400,32 @@ decision_options_bin[c][ 8] = present                                        # 0
 ```
 
 **Ce registre n'est PAS le vocabulaire observé** (`UNIT_RULE_EFFECT_IDS`), et c'est délibéré
-depuis le 2026-08-04. Il l'était : le bloc portait un bit `grants_*` pour **chacun** des 13
-effets observables, alors que 6 d'entre eux ne sont accordables par aucun `grantsRuleIds` de
-roster — 6 bits × 6 slots = **36 scalaires morts à vie**, et chaque capacité ajoutée à
-l'observation en payait 6 de plus, ce qui vidait de sa substance le gel du chantier 01
-(« une capacité de plus ne change pas `obs_size` »). La source est désormais
-`DECISION_GRANTABLE_EFFECT_IDS` — les 7 effets réellement accordables, recalculés depuis les
-rosters par un test de contrat (`test_agent_decision_mechanism.py`), qui échoue **dans les deux
-sens** : un accordable non déclaré, ou un déclaré que plus aucun roster n'accorde.
+depuis le 2026-08-04. La source est désormais `DECISION_GRANTABLE_EFFECT_IDS` — les 7 effets
+réellement accordables, recalculés depuis les rosters par un test de contrat
+(`test_agent_decision_mechanism.py`), qui échoue **dans les deux sens** : un accordable non déclaré,
+ou un déclaré que plus aucun roster n'accorde.
 
-**Pourquoi ce bloc existe.** Sans lui, `CHOICE_i` serait un choix à l'aveugle — exactement le
-défaut de la pseudo-décision `raw_action_int % len(options)` qu'il remplace (§9.4 point 0), où
-l'agent « choisissait » via une action émise pour tout autre chose, sans jamais voir le prompt.
-
-**L'ordre des candidats est CONTRACTUEL**, comme celui des slots ennemis (invariant D1) :
-`decision_options_bin[i]` décrit le candidat que joue `CHOICE_i`. Le producteur du prompt garantit
-un ordre STABLE d'un step à l'autre — un ordre mouvant brouillerait l'assignation de crédit PPO.
+**L'ordre des candidats est CONTRACTUEL** (invariant D1) : `decision_options_bin[i]` décrit le
+candidat que joue `CHOICE_i`. Le producteur du prompt garantit un ordre STABLE d'un step à l'autre.
 
 **Un candidat est décrit par ce qu'il ACCORDE**, dans le même vocabulaire que les drapeaux
-`rule_<id>` d'unité, pas par son index : l'option 0 d'un prompt n'a rien à voir avec l'option 0
-d'un autre. C'est aussi ce qui rend légitime l'encodeur **partagé** (`decision_encoder`) et la
-tête **pointeur** qui score les candidats (`ai/pointer_policy.py`) : le nombre de candidats est
-gratuit en paramètres, et ce que le réseau apprend d'un candidat vaut pour tous.
+`rule_<id>` d'unité, pas par son index. C'est ce qui rend légitime l'encodeur **partagé**
+(`decision_encoder`) et la tête **pointeur** qui score les candidats (`ai/pointer_policy.py`).
 
-**Un candidat qui ne fait RIEN est décrit par `declines`**, le dernier drapeau du bloc avant
-`present`. `waaagh_call` (chantier 03) porte un `effect_ids` **vide** des DEUX côtés —
-`DECISION_GRANTABLE_EFFECT_IDS` est dérivé des `grantsRuleIds` des rosters, or les effets du
-Waaagh! viennent de la faction, pas d'une datasheet. Sans `declines`, les deux candidats
-sortaient la MÊME ligne `[0…0, present=1]`.
-
-> ⚠️ **Ce paragraphe disait le contraire jusqu'au 2026-08-07** : « ce qui les distingue est le
-> couple (type de décision, INDEX) ». C'était faux, et mesuré comme tel. L'index n'est écrit dans
-> AUCUN scalaire d'observation, et la tête pointeur score chaque candidat par un produit scalaire
-> nu, sans biais par slot (`pointer_policy._point`) — elle est agnostique à la position par
-> construction, c'est le paragraphe ci-dessus qui l'exige. Deux lignes égales donnaient donc des
-> logits égaux et des gradients égaux : l'appel du Waaagh! était un pile-ou-face que PPO ne
-> pouvait pas apprendre, à aucun pas d'entraînement.
-
-`declines` est **exigé** de chaque candidat, jamais déduit de `not effect_ids` : « n'accorde aucun
-effet observable » et « ne fait rien » sont deux choses différentes, et la déduction aurait marqué
-`declines` sur le candidat qui APPELLE le Waaagh!. Il vaut 0 pour les deux candidats de
-`rule_choice`, qui n'a pas d'option « ne rien faire » — c'est une information juste, pas un
-remplissage. Et il généralise à toute décision optionnelle à venir (L4 pile-in, L5 move réactif,
-L6 FLY 21.03) sans rien ajouter au schéma.
+**Un candidat qui ne fait RIEN est décrit par `declines`** (le dernier drapeau avant `present`).
+`waaagh_call` porte un `effect_ids` **vide** des DEUX côtés — sans `declines`, les deux candidats
+sortaient la MÊME ligne `[0…0, present=1]` et les logits étaient indiscernables.
 
 **Le bloc reste nul** quand aucune décision n'est en attente, **ou** quand celle en attente
-appartient à l'autre camp : décrire à un joueur un choix qui n'est pas le sien lui ferait observer
-des candidats qu'aucune de ses actions ne peut jouer. `decision_pending` est le seul bit qui
-distingue « aucune décision » de « décision de type 0 ».
-
-**Aucun registre continu** : `rule_choice` n'a aucune grandeur continue à décrire, et un champ
-rempli de zéros serait une valeur par défaut sans signifiant. Les tranches P3 qui en auront besoin
-(distance d'une destination, dégâts attendus sur une cible) ouvriront `DECISION_OPTION_CONT_FIELDS`
-à ce moment-là — `obs_size` changera, donc retrain `--new`.
+appartient à l'autre camp. `decision_pending` est le seul bit qui distingue « aucune décision »
+de « décision de type 0 ».
 
 #### `deploy_cand_cont[s]` / `deploy_cand_bin[s]` — candidats de déploiement  ·  EntityRunningNorm / jamais normalisé
 
 Bloc de la **décision de déploiement** (V11 §0.40 point 3). Les 5 actions `4-8` ne sont pas « les
 5 premiers hexes valides » mais **5 stratégies** — front agressif · pression sur objectif ·
-sûr/cohésion · flanc gauche · flanc droit — évaluées sur **tous** les hexes valides de la zone
-(~14 000 au premier step). Ce bloc décrit, pour chaque slot, **l'hexe que sa stratégie poserait**.
+sûr/cohésion · flanc gauche · flanc droit — évaluées sur **tous** les hexes valides de la zone.
+Ce bloc décrit, pour chaque slot, **l'hexe que sa stratégie poserait**.
 
 ```python
 deploy_cand_cont[s][0] = col_rel                 # projection _hex_center SIGNEE, vs ancre de zone
@@ -478,100 +442,78 @@ deploy_cand_bin[s][2]  = in_cover                # 0.0 / 1.0 — 13.08
 deploy_cand_bin[s][3]  = present                 # 0.0 / 1.0 — slot OUVERT par le masque
 ```
 
-**Pourquoi ce bloc existe.** Depuis §0.40 points 1/2/4 l'agent sait quelle unité il pose, voit le
-terrain de sa zone et mesure tout depuis elle. Il ne savait toujours pas **ce que chaque slot en
-ferait** : cinq boîtes noires, sans position, sans distance, sans couvert, sans exposition — au
-moment précis où il choisit son point d'entrée dans la partie.
-
-**Un candidat est décrit par son EFFET, jamais par son index**, comme les candidats de décision
-ci-dessus. La raison est ici plus forte qu'ailleurs : le masque n'ouvre que `min(5, n_hexes)` slots
-(`open_deploy_slot_count`), donc en fin de déploiement, quand il reste moins de 5 hexes valides, ce
-sont les stratégies d'**indices bas** qui survivent. Le lien slot ↔ stratégie n'est pas stable, et
-un réseau qui aurait appris « le slot 7 va à gauche » se tromperait précisément là. L'encodeur est
-donc **partagé** entre les 5 slots (`deploy_cand_encoder`), avec une `EntityRunningNorm` commune.
-
-**L'ordre des slots est CONTRACTUEL** (invariant D1) : `deploy_cand_*[i]` décrit ce que pose
-l'action `DEPLOY_SLOT_BASE + i`. Un slot **fermé** est une ligne de zéros, `present` compris — un
-candidat plausible pour une action interdite serait pire que le silence.
+**Un candidat est décrit par son EFFET, jamais par son index.** L'encodeur est **partagé** entre
+les 5 slots (`deploy_cand_encoder`), avec une `EntityRunningNorm` commune. **L'ordre des slots est
+CONTRACTUEL** (invariant D1) : `deploy_cand_*[i]` décrit ce que pose l'action
+`DEPLOY_SLOT_BASE + i`.
 
 **Source unique, jamais un second calcul** : `ActionDecoder.deployment_slot_candidates`, celle-là
 même que le commit exécute — elle rend l'hexe **et le plan de formation validé** qui sera posé.
-Décrire les candidats depuis une géométrie parallèle aurait laissé l'agent choisir d'après un hexe
-que le moteur n'aurait pas posé (motif D1). Les grandeurs continues sortent telles quelles du cache
-de scoring du décodeur ; `on_objective` / `in_cover` sont lus dans `_grid_static_hex_arrays`, le
-MÊME ensemble que les canaux « objectifs » et « couvert » de la grille.
 
-**Garde obligatoire, à DEUX conditions.** Le bloc n'est rempli que si (a) la phase est
-`deployment` — même patron que `is_charge_phase` pour `charge_reachable_max_roll` — **et** (b)
-l'escouade observée n'est **pas encore posée** (`deployed_on_turn`, la même source que le bit
-`deploy_not_on_board`). La seconde n'est pas une précaution : une unité déjà sur le champ de
-bataille ne choisit plus où se déployer, par la règle. Elle rend la garde plus STRICTE — l'unité
-que le masque déploie n'est jamais posée — et évite d'interroger le décodeur pour toutes les
-escouades déjà en place. Le bloc reste nul, enfin, pour une escouade qui n'est pas celle sur
-laquelle le masque ouvre les slots 4-8. Coût **mesuré**
-sur le board x5 (3 épisodes, 33 steps de déploiement) : **285 ms → 345 ms** par step de
-déploiement, soit **+59 ms** pour décrire les 5 stratégies au lieu d'en évaluer une seule. Le
-surcoût est contenu parce que la sélection a été **vectorisée** au passage (`np.lexsort` sur des
-colonnes calculées une fois pour les 5 stratégies, au lieu d'une passe scalaire par stratégie) :
-appeler 5 fois l'ancienne sélection aurait coûté **871 ms** par step. La parité de choix avec
-l'implémentation scalaire est exacte, vérifiée hexe par hexe sur 33 états × 5 stratégies.
+**Ce bloc est SCORÉ par une tête dédiée depuis le 2026-08-07** (§0.44, élément `L1` du lot §0.48).
+`deploy_query_net` — le jumeau exact de `choice_query_net` — produit les logits des ids `4-11` par
+produit scalaire contre les embeddings de candidats. Router hors déploiement serait pire que ne pas
+router : le bloc y est nul par contrat. `obs_size` **inchangé** — c'est un changement
+d'architecture, pas d'observation.
 
-✅ **Ce bloc est SCORÉ par une tête dédiée depuis le 2026-08-07** (§0.44, élément `L1` du lot
-§0.48). `deploy_query_net` — le jumeau exact de `choice_query_net` — produit les logits des ids
-`4-11` par produit scalaire contre les embeddings de candidats, et ces 8 colonnes **remplacent**
-celles de la conv 1×1 des cellules. Les mêmes ids restent des **cellules de move** dans toutes les
-autres phases : le routage lit le bit `phase_deployment` de `global_bin`, par échantillon
-(`torch.where`, jamais une branche scalaire — un lot vectorisé mélange les phases). Router hors
-déploiement serait pire que ne pas router : le bloc y est nul par contrat, donc les 8 logits
-seraient égaux. `obs_size` **inchangé** — c'est un changement d'architecture, pas d'observation.
+### Les blocs logiques A→E
 
-### Les blocs logiques A→E, et ce qu'ils sont devenus
-
-L'observation a été conçue en **blocs thématiques** (`V11_audit_observation.md` §7.2 et §8 : A
-contexte, B mon escouade, C mes figurines, D ennemis, E escouades amies). Ces blocs n'ont pas
-disparu — T-D les a matérialisés en **clés de tenseurs**. Table de passage, parce que les deux
-vocabulaires coexistent dans la doc V11 :
+L'observation a été conçue en **blocs thématiques** (A contexte, B mon escouade, C mes figurines,
+D ennemis, E escouades amies). Ces blocs ont été matérialisés en **clés de tenseurs** par T-D.
 
 | Bloc logique | Clé(s) actuelle(s) | Note |
 |---|---|---|
-| **A** — contexte général | `global_cont` / `global_bin` | y compris les objectifs : contrôle, présence, **et depuis §0.31 distance + direction** |
+| **A** — contexte général | `global_cont` / `global_bin` | y compris les objectifs : contrôle, présence, distance + direction |
 | **B** — mon escouade | `allies_cont[0]` / `allies_bin[0]` | l'unité active est la **ligne 0** du bloc amis (contrat) ; les features « actif seulement » y sont, ailleurs à zéro |
-| **C1** — types de figurines | `allies_types_*` / `enemies_types_*` | profil défensif + rôle d'allocation + effectif du type ; décrit l'escouade ENTIÈRE sans plafonner l'effectif |
+| **C1** — types de figurines | `allies_types_*` / `enemies_types_*` | profil défensif + rôle d'allocation + effectif du type |
 | **C2** — mes figurines | `self_models_*` | seulement l'irréductiblement individuel : position relative, éligibilité au combat, engagement |
-| **D** — ennemis | `enemies_*` | **ordre contractuel = slots d'action de tir** ; porte depuis §0.31 `los_can_see` + `cover_vs_observer`, depuis §9 P3-2 `charge_reachable_max_roll` |
-| **E** — escouades amies | `allies_[1..K-1]` | livré avec T-D : les alliés sont **agrégés** par le réseau, donc leur ordre n'a pas à être inventé |
-| *(transverse)* profils d'armes | `*_wpn_*` | même encodeur pour les deux camps ; 86 % du vecteur, et le seul bloc mémoïsé |
-| *(transverse)* règles d'unité | `*_ability_ids` (8 slots d'`obs_id`) | §0.31 : sur **toute** entité, amie comme ennemie (schéma unifié). Depuis le chantier 01 ce ne sont plus 13 bits `rule_<effet>` mais des ids lus par embedding : allonger le vocabulaire coûte **zéro** scalaire |
-| *(transverse)* terrain perçu | `grid` | **9** canaux égocentriques ; **ne porte que la fenêtre** du budget d'Advance. Depuis §0.32 : un canal `self` distinct du canal allié (T-L) et le **coût géodésique** de chaque cellule du pool de move (T-K), encodé pour que la frontière normal/advance soit **constante** — la grille passe seule dans le CNN, elle doit être lisible sans le vecteur |
+| **D** — ennemis | `enemies_*` | **ordre contractuel = slots d'action de tir** ; porte `los_can_see` + `cover_vs_observer` + `charge_reachable_max_roll` |
+| **E** — escouades amies | `allies_[1..K-1]` | les alliés sont **agrégés** par le réseau, leur ordre n'a pas de sémantique |
+| *(transverse)* profils d'armes | `*_wpn_*` | même encodeur pour les deux camps ; 86 % du vecteur, seul bloc mémoïsé |
+| *(transverse)* règles d'unité | `*_ability_ids` (8 slots d'`obs_id`) | sur **toute** entité, amie comme ennemie ; ids lus par embedding, ajouter une capacité coûte **zéro scalaire** |
+| *(transverse)* terrain perçu | `grid` | **9** canaux égocentriques 32×32 |
 
-⚠️ Deux blocs sont **transverses** et non des blocs à part : les profils d'armes et les règles
-d'unité vivent DANS chaque entité, par construction du schéma unifié (invariant 1). Chercher un
-« bloc armes » ou un « bloc règles » séparé serait chercher ce qui n'existe pas — et le
-recréerait en cassant le partage de poids.
+⚠️ Deux blocs sont **transverses** : les profils d'armes et les règles d'unité vivent DANS chaque
+entité par construction du schéma unifié. Chercher un « bloc armes » ou un « bloc règles » séparé
+créerait une rupture de partage de poids.
 
-**Espace d'action** : une action de tir par slot ennemi (`SHOOT_SLOT_BASE + i`, 20 slots depuis
-T-E) ; les logits de ces actions sont produits par une **tête pointeur** (`ai/pointer_policy.py`)
-qui score `q · e_i` sur les embeddings — un slot de plus ne coûte donc aucun paramètre. **Les
-1024 logits de cellule de move ont la même propriété depuis V11 §0.32 T-G** : ils sortent d'une
-**conv 1×1** sur la colonne de features de leur cellule, prise sur une carte CNN conservée à
-résolution 32×32 (`SpatialCombinedExtractor.move_map_slice()`), et non plus d'une ligne dédiée du
-`action_net` dense. Une cellule de plus ne coûte donc, elle non plus, aucun paramètre, et
-l'alignement `cellule (gx,gy) ↔ action gy*32+gx` est **structurel** (un `reshape`) au lieu d'être
-ré-appris. Deux ajouts sont indissociables de cette tête et ne doivent jamais être retirés : les
-**canaux positionnels fixes** (x, y, rayon — une conv est invariante par translation et ne
-saurait pas que le bord de la grille est la limite d'atteignabilité) et le **conditionnement par
-le latent du tronc** (sans lui, la tête ne voit ni le tour, ni les VP, ni les objectifs hors
-fenêtre). Le mapping slot ↔ escouade est rafraîchi : les slots des escouades mortes sont rendus, et toute
-escouade vivante sans slot en reçoit un (une escouade vivante mappée ne change JAMAIS de slot).
+### Qui normalise quoi
 
-**Pourquoi ce format.** Au format plat, la première couche du réseau portait un jeu de poids
-DISTINCT par slot ennemi (mesuré : 640 paramètres par dimension d'observation, ~226 k par slot) :
-le réseau réapprenait « évaluer un ennemi » autant de fois qu'il y avait de slots, et ajouter un
-slot coûtait des centaines de milliers de paramètres. En tenseurs d'entités, **le même encodeur
-est appliqué à chaque unité et à chaque arme, des DEUX camps** (`ai/spatial_extractor.py`) : le
-réseau généralise d'un slot à l'autre et le coût d'un slot supplémentaire est nul en paramètres.
+| Clé | Répliquée par slot ? | Normalisée par |
+|---|---|---|
+| `global_cont` | non (singleton) | **`VecNormalize`** (running mean/var) |
+| `global_bin` | non (singleton) | **jamais** |
+| `*_cont` d'entités et `self_models_cont` | oui | **`EntityRunningNorm`**, une stat par feature **commune à tous les slots et aux deux camps** |
+| `*_bin` d'entités | oui | **jamais** |
+| `grid` | — | **jamais** (canaux déjà dans [0,1]) |
+
+⚠️ **`_bin` ne veut pas dire « binaire »** — il veut dire « **jamais normalisé** ». Deux groupes
+de dimensions y sont non binaires : `objective_control_*` (dans {-1, 0, +1}) et
+`objective_dir_cos/sin_*` (déjà bornés et centrés). Ne pas les déplacer vers `_cont`.
+
+### Caches d'observation
+
+L'observation lit **huit** caches, chacun avec sa propre condition d'invalidation. Un cache servi
+trop longtemps ne lève rien, il décrit un état périmé. L'inventaire est verrouillé par
+`tests/unit/engine/test_obs_caches_die_with_the_episode.py`.
+
+| Cache | Ce qu'il porte | Clé | Invalidé par |
+|---|---|---|---|
+| `_obs_weapon_profiles_cache` | les sous-tenseurs d'armes (86 % du vecteur) | `(escouade, figurines vivantes)` | `build_units_cache` — à chaque perte et à chaque reset |
+| `_obs_objective_hex_arrays` | hexes de chaque objectif (distances/directions) | par épisode | bloc de purges de `reset` |
+| `_grid_static_hex_arrays` | murs / objectifs / couvert rasterisés | par épisode | idem |
+| `_obs_solid_terrain_areas` | zones contenant un mur dense (Solid 13.11) | par épisode | idem |
+| `_grid_deployment_zone_anchor` | l'hex sur lequel la grille est centrée pour une escouade **pas encore posée** | par joueur, par épisode | idem |
+| `_deployment_scoring_cache` | expositions LoS par hexe (réelle et potentielle), alliés posés par colonne | `(déployeur, jeu d'hexes valides, snapshot des posées)` | mise à jour **incrémentale** à chaque pose, reconstruction complète sur dérive ; purgé au `reset` |
+| `_deployment_slot_candidates` | l'hexe **et le plan de formation** que chaque slot 4-8 poserait | `(escouade, déployeur, état des unités posées)` | le tampon change à chaque pose ; purgé au `reset` |
+| `_unit_los_pair_cache` | `los_can_see` / `cover_vs_observer` par paire | `(tireur, cible)` | **invalidation ciblée** au choke-point `_touch_unit_los` : toute écriture de position, toute perte de figurine |
+
+`_unit_los_pair_cache` est le seul à ne PAS être « par épisode » : il doit suivre chaque mouvement.
+
+### Invariants
 
 **Trois invariants à ne jamais casser :**
+
 1. **Schéma unifié** — une unité amie et une unité ennemie portent EXACTEMENT les mêmes features
    (les features propres à l'unité active sont à zéro ailleurs, avec le bit `is_active` pour
    masque). Sans cela, l'encodeur partagé n'a plus de sens.
@@ -582,136 +524,161 @@ réseau généralise d'un slot à l'autre et le coût d'un slot supplémentaire 
    (`EntityRunningNorm`) : une normalisation élément par élément donnerait à chaque slot ses
    propres échelles et annulerait le partage de poids. Les clés `_bin` ne sont jamais normalisées.
 
-### Qui normalise quoi — la règle se lit sur la CLÉ, jamais sur la dimension
-
-| Clé | Répliquée par slot ? | Normalisée par | Où c'est décidé |
-|---|---|---|---|
-| `global_cont` | non (singleton) | **`VecNormalize`** (running mean/var) | `_vec_norm_obs_keys` ([ai/train.py](../../../ai/train.py)) |
-| `global_bin` | non (singleton) | **jamais** | idem (hors `norm_obs_keys`) |
-| `*_cont` d'entités et `self_models_cont` | oui | **`EntityRunningNorm`**, une stat par feature **commune à tous les slots et aux deux camps** | `ENTITY_CONT_KEYS` ([observation_builder.py](../../../engine/observation_builder.py)) + [ai/spatial_extractor.py](../../../ai/spatial_extractor.py) |
-| `*_bin` d'entités | oui | **jamais** | — |
-| `grid` | — | **jamais** (canaux déjà dans [0,1]) | `_vec_norm_obs_keys` |
-
-⚠️ **`_bin` ne veut pas dire « binaire »** — il veut dire « **jamais normalisé** ». Deux groupes
-de dimensions y sont non binaires, et y sont **exprès** parce que des statistiques glissantes
-détruiraient leur sémantique ou amplifieraient leur bruit : `objective_control_*` (dans
-{-1, 0, +1}) et `objective_dir_cos/sin_*` (déjà bornés et centrés). Ne pas « corriger » cela en les
-déplaçant vers `_cont`. (`phase` était le troisième cas, comme scalaire ordinal ; c'est désormais
-un one-hot, donc réellement binaire — et toujours hors normalisation.)
-
-### Ce qui est mémoïsé, et par quelle clé d'invalidation
-
-L'observation lit **huit** caches, chacun avec sa propre condition d'invalidation. C'est le point
-le plus fragile du pipeline : un cache servi trop longtemps ne lève rien, il décrit simplement un
-état périmé (régressions V11 §0.18 et §0.26). L'inventaire est verrouillé par
-`tests/unit/engine/test_obs_caches_die_with_the_episode.py`, qui rougit si un cache d'observation
-survit à un reset — **ajouter un cache sans l'y ajouter fait échouer ce test**.
-
-| Cache | Ce qu'il porte | Clé | Invalidé par |
-|---|---|---|---|
-| `_obs_weapon_profiles_cache` | les sous-tenseurs d'armes (86 % du vecteur) | `(escouade, figurines vivantes)` | `build_units_cache` — donc à chaque perte et à chaque reset |
-| `_obs_objective_hex_arrays` | hexes de chaque objectif (distances/directions) | par épisode | bloc de purges de `reset` |
-| `_grid_static_hex_arrays` | murs / objectifs / couvert rasterisés | par épisode | idem |
-| `_obs_solid_terrain_areas` | zones contenant un mur dense (Solid 13.11) | par épisode | idem |
-| `_grid_deployment_zone_anchor` | l'hex sur lequel la grille est centrée pour une escouade **pas encore posée** (V11 §0.40) | par joueur, par épisode | idem — la zone de déploiement change avec le terrain rechargé |
-| `_deployment_scoring_cache` | expositions LoS par hexe (réelle et potentielle), alliés posés par colonne, snapshot des unités posées — **lu par le bloc candidat de déploiement**, donc sa péremption deviendrait une observation fausse | `(déployeur, jeu d'hexes valides, snapshot des posées)` | mise à jour **incrémentale** à chaque pose, reconstruction complète sur dérive ; purgé au `reset` — son garde-fou ne mord pas si un épisode s'interrompt AVANT la 1re pose (le jeu d'hexes coïncide alors avec celui du nouvel épisode, murs différents compris) |
-| `_deployment_slot_candidates` | l'hexe **et le plan de formation** que chaque slot 4-8 poserait (V11 §0.40 point 3) — lu par le décodeur ET par l'observation, donc calculé une seule fois par step | `(escouade, déployeur, état des unités posées)` | le tampon change à chaque pose ; purgé au `reset` — l'état « aucune unité posée » recommence identique d'un épisode à l'autre, donc le tampon seul ne suffirait pas |
-| `_unit_los_pair_cache` | `los_can_see` / `cover_vs_observer` par paire | `(tireur, cible)` | **invalidation ciblée** au choke-point `_touch_unit_los` : toute écriture de position, toute perte de figurine — donc correct même quand un ennemi bouge pendant mon tour (`reactive_move`) |
-
-`_unit_los_pair_cache` est le seul à ne PAS être « par épisode » : il doit suivre chaque mouvement. Sa
-fiabilité a été vérifiée par mesure — 23 398 paires comparées au calcul non caché sur 400 steps,
-0 divergence (V11 §0.31).
+### Historique de `obs_size`
 
 **`obs_size`** (config d'agent, `observation_params.obs_size`) = nombre TOTAL de scalaires,
-grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Historique : 108 (T6) →
-199 (refonte du vecteur, 2026-07-25) → 1011 (profils d'armes et règles, 2026-07-26) → 5729
-(tenseurs d'entités, T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10 par registre,
-T-F) → 20166 (plafond du bloc figurines 6 → 20, 2026-07-26) → 20181 (géométrie des objectifs,
-2026-07-27) → 20545 (règles d'unité, 13 bits par entité) → 20601 (couvert et visibilité exacts par
-slot ennemi, 2026-07-27) → 20626 (bit `present` par figurine + phase en one-hot de 6 bits,
-§0.32 T-H/T-J, 2026-07-28) → 20654 (`n_models_engaging` : mes figurines engagées avec chaque
-cible ennemie, support du choix de cible de mêlée, §9 P3-1, 2026-07-28) → 20740 (bloc
-« contexte de décision », §9.3 P2, 2026-07-28) → 20768 (`charge_reachable_max_roll` :
-support du choix de cible de charge, §9 P3-2, 2026-07-28) → 20828 (bloc « candidats de
-déploiement » : ce que chacune des 5 actions 4-8 poserait, §0.40 point 3, 2026-07-29)
-→ 20780 (RETRAIT de `ez_relayed_by_ally` et `n_relayed_ez` avec la clause « buddy » :
-04.02 WHILE FIGHTING n'autorise à frapper qu'une figurine ENGAGÉE avec la cible, le relais par
-une alliée au contact venait d'une édition antérieure de 40K, 2026-08-04)
-→ 20752 (chantier 01 : les 13 bits `rule_<effet>` remplacés par 8 slots d'ids de capacité +
-4 slots d'ids de statut, 2026-08-04)
-→ 20754 (chantier 02 : `my_command_points` / `enemy_command_points` dans `global_cont` —
-règle 08.02, les CP appartiennent au joueur, pas à une unité. Ces deux emplacements auraient dû
-être déclarés par le chantier 01, seul autorisé à bouger `obs_size` ; l'oubli est réparé là, sans
-retrain supplémentaire puisque le chantier 01 en imposait déjà un, 2026-08-04)
-→ 20718 (chantier 02 : le registre du bloc `decision_options_bin` est DÉCOUPLÉ du vocabulaire
-observé — 36 scalaires qui ne pouvaient jamais valoir 1 disparaissent, et allonger le vocabulaire
-coûte désormais 0. `cp_gain_on_objective` y entre à ce titre pour 0 scalaire, 2026-08-04)
-→ 20725 (chantier 03 : les emplacements des CAPACITÉS DE FACTION, que le chantier 01 annonçait
-dans `global_bin` — « voir chantier 03 » — sans les déclarer. Six drapeaux de `GLOBAL_BIN_FIELDS`
-(`my`/`enemy_waaagh_available`, `my`/`enemy_waaagh_active`, `my`/`enemy_oath_target_selected`) et
-une entrée de plus dans `AGENT_DECISION_TYPE_IDS` (`waaagh_call`, +1 bit de `decision_ctx_bin`).
-Même oubli et même réparation que les deux scalaires de CP du chantier 02, sans retrain
-supplémentaire : les `.zip` existants datent d'avant le gel du 2026-08-04. QUATRE bits pour le
-Waaagh! et non deux, parce que sa durée enjambe le tour adverse ; l'identité de la cible d'Oath
-n'est PAS ici mais dans le statut `oath_target` de l'entité visée, pour 0 scalaire, 2026-08-05)
-→ 20727 (chantier 03 : `my_oath_wound_bonus_active` / `enemy_oath_wound_bonus_active`. La
-clause CONDITIONNELLE du +1 au jet de blessure d'Oath — détachement Codex ET aucune unité BLOOD
-ANGELS / DARK ANGELS / DEATHWATCH / SPACE WOLVES — dépend du ROSTER, que l'agent ne construit pas
-et qu'AUCUNE autre feature ne porte : les mots-clés de sous-faction des unités ALLIÉES ne sont pas
-observés, et la clause compte les unités MORTES. Un bit distinct de `*_oath_target_selected` parce
-que la relance de touche, elle, ne dépend d'aucune des deux moitiés : sans lui, l'agent ne peut pas
-distinguer un Oath « faible » d'un Oath « fort », alors que le +1 rend une cible coriace nettement
-plus rentable à DÉSIGNER (6+ → 5+ double les blessures, 3+ → 2+ ne les augmente que d'un cinquième)
-— et la désignation est précisément ce qu'il joue par `OATH_SLOT_i`. Côté ennemi pour la raison du
-Waaagh! : ce que l'adversaire blesse mieux change ce que je protège, 2026-08-06).
-→ **14609** (socle du lot V11 §0.48, arbitrage 2 « réserver la place » — 2026-08-07), puis
-→ **14615** le même jour : le drapeau `declines` du bloc candidat de décision (1 bit × 6 slots),
-sans lequel les deux candidats de `waaagh_call` étaient indiscernables (cf. plus haut). Même
-retrain `--new`. Le socle, lui, tient en trois changements, tous destinés à ce qu'une règle
-rendue vivante ne coûte PLUS de retrain :
-(1) les 12 drapeaux de règles d'armes et le one-hot `[ANTI]` (17 dimensions **par profil**, donc
-560 scalaires par règle) passent aux **ids** — `−6 160` scalaires, et une règle de plus coûte 0 ;
-(2) le one-hot de TYPE de décision est pré-dimensionné à `AGENT_DECISION_TYPE_SLOTS = 8`
-(`+6`), de quoi ouvrir les six tranches P3 restantes sans y revenir ; (3) `N_DEPLOY_SLOTS`
-passe de 5 à **8** (`+36`), les 3 slots en trop étant RÉSERVÉS — le masque les garde fermés tant
-que `DEPLOY_STRATEGY_COUNT` vaut 5.
-→ **16653** (V11 §0.48 élément `L2` — le choix de l'escouade à ACTIVER, 2026-08-07)
-→ **16671** (V11 — ajout de la règle `INDIRECT_FIRE` dans `WEAPON_RULE_BITS` + portée
-`edge_distance` individuelle par figurine ; delta mesure en code)
-→ **16703** (`effective_range` : portée maximale de tir de l'observatrice par slot ennemi,
-V11 §9.5 P4 reliquat — 1 scalaire × 32 entités, 2026-08-19).
-→ **16735** (`charged` ajouté à `UNIT_BIN_FIELDS` — slot réservé pour les stratagèmes réactifs
-§15.08 Fire Overwatch / §15.11 Leap to Defend (HI), mécanique non implémentée, J4 — 1 bit ×
-32 entités = +32, 2026-08-24).
-`K_ALLY_SLOTS` passe de 8 à **12** (`+2 044` = 4 lignes × 511). La valeur ne porte plus une marge
-d'observation (« au plus 6 escouades par camp sur les rosters d'entraînement ») mais le **nombre de
-candidats d'activation adressables** : depuis `L2`, l'action `ACTIVATE_SLOT_i` désigne la ligne
-alliée `i`, donc l'ordre des lignes alliées devient CONTRACTUEL (invariant D1, côté allié) et leur
-nombre borne ce que l'agent peut choisir. Le sur-dimensionnement ne coûte **aucun paramètre** —
-les lignes passent par un encodeur PARTAGÉ (mesure §0.32) — seulement ces scalaires et du forward.
-**Toute évolution du schéma change cette valeur et rend les
-`.zip` existants incompatibles : le retrain `--new` est obligatoire.**
+grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Toute évolution du
+schéma change cette valeur et rend les `.zip` existants incompatibles : le retrain `--new` est
+obligatoire.
 
-⚠️ **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
-Avant le chantier 01, chaque capacité ajoutée coûtait un bit par entité, donc un `obs_size`, donc un
-retrain ; les 17 capacités Armageddon auraient coûté 476 scalaires. Depuis, une capacité, un statut
-ou une faction entière n'est qu'un `obs_id` de plus dans un registre : ni `obs_size`, ni le nombre
-de paramètres du réseau, ni `TOTAL_ACTION_SIZE` ne bougent.
+**Historique** : 108 (T6) → 199 → 1011 (profils d'armes et règles) → 5729 (tenseurs d'entités,
+T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10, T-F) → 20166 → 20181 → 20545
+→ 20601 → 20626 → 20654 → 20740 → 20768 → 20828 → 20780 → 20752 (chantier 01) → 20718
+(chantier 02) → 20725 (chantier 03) → 20727 → **14609** (socle §0.48 : règles d'armes en ids)
+→ 14615 (drapeau `declines`) → 14659 + 16653 (`L2`, `K_ALLY_SLOTS` 8 → 12) → 16671
+→ 16703 (`effective_range`) → **16735** (`charged`, 2026-08-24).
 
-**Les capacités d'unité** sont exposées depuis le 2026-07-27 (d'abord en 13 bits `rule_<effet>`
-dans `UNIT_BIN_FIELDS`, puis en ensembles d'identifiants depuis le chantier 01), **par entité**,
-amie ET ennemie. ⚠️ Ne pas les confondre avec les « 12 unit-rule flags »
-du layout `obs[314:346]` que décrit [`AI_OBSERVATION_Legacy.md`](../../Archives/docs/AI_OBSERVATION_Legacy.md) : ceux-là
-appartiennent au pipeline mono-figurine et ont longtemps fait croire que le pipeline squad les
-portait déjà.
+**C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
+Depuis le chantier 01, une capacité, un statut ou une faction entière n'est qu'un `obs_id` de
+plus dans un registre : ni `obs_size`, ni le nombre de paramètres du réseau, ni
+`TOTAL_ACTION_SIZE` ne bougent.
 
-**Historique et décisions** : [`Documentation/Archives/chantiers/V11_audit_observation.md`](Documentation/Archives/chantiers/V11_audit_observation.md)
-(§8, §10 ; §7 pour la découpe en blocs A→E) ·
-[`V11_agent_rework.md`](../../Chantiers/v11/V11_agent_rework.md) §9.2.5 (ce qui est observé des règles),
-**§0.31** (objectifs situés, règles d'unité, couvert exact, caches) et **§0.32** (audit
-d'optimalité du 2026-07-28 : T-H/T-I/T-J livrés — masque de présence, géométrie unique, phase en
-one-hot ; **T-G, la tête de move dense, reste ouvert**) ·
-[`V11_entity_encoder_pointer.md`](Documentation/Reference/training/V11_entity_encoder_pointer.md) (§1 constats
-mesurés, §3 architecture, §6 journal) · [`AI_OBSERVATION_Legacy.md`](../../Archives/docs/AI_OBSERVATION_Legacy.md)
-(archive du pipeline mono-figurine).
+---
 
+## Encodeur partagé et tête pointeur
+
+### Principe de découpe : « une action pointe-t-elle sur cette entité ? »
+
+Ce n'est **pas** « ami vs ennemi ». C'est ce qui décide entre agrégation et identité par slot.
+
+| Famille | Une action la désigne ? | Traitement | K |
+|---|---|---|---|
+| Unités **ennemies** | ✅ `shoot slot 0..K-1` | embeddings **par slot** + **tête pointeur** | 20 |
+| Unités **amies** | ❌ — le moteur impose l'unité active | encodeur partagé + **agrégation** ; depuis `L2` les slots alliés sont **contractuels** (activation) | 12 |
+| Armes **amies** | ❌ aujourd'hui | encodeur partagé + agrégation par unité | 10 / registre |
+| Armes **ennemies** | ❌ jamais | encodeur partagé + agrégation par unité | 10 / registre |
+| **Types de figurines** | ❌ | encodeur partagé + agrégation | 6 |
+
+⚠️ **L'agrégation détruit l'identité par slot.** C'est pour cela qu'elle est **interdite pour les
+ennemis** : l'alignement obs-slot-i ↔ action-slot-i est précisément ce que l'invariant D1 rétablit.
+
+### Principe : embeddings par entité TOUJOURS, agrégation seulement au tronc
+
+Les embeddings par entité sont **toujours calculés et conservés** ; seule l'entrée du tronc agrège
+ceux qu'aucune action ne désigne aujourd'hui. Le jour où une action pointe sur une **arme** (choix
+d'arme agent) ou sur une **unité amie** (ordre d'activation), il suffit de **brancher une tête
+pointeur de plus sur des embeddings qui existent déjà**. Aucune réécriture, aucune migration
+d'observation.
+
+### Schéma
+
+```
+armes (K=10 × F_w)  ──► E_w partagé ──► embeddings d_w ──┐
+                                                          ├─► concat ──► E_u partagé ──► e_i (d_u)
+features d'unité (F_u brut, + bit is_ally) ───────────────┘
+
+  e_own ────────────────────────────────┐
+  Σ/max e_ally  (agrégation)            ├─► tronc MLP ──► q (requête)
+  Σ/max e_enemy (agrégation, contexte)  │                  │
+  features globales + CNN(grille)  ─────┘                  │
+                                                            ▼
+                              logits de tir_i = q · e_enemy_i     (K-indépendant)
+                              logits de charge_i / fight_i = q_charge/q_fight · e_enemy_i  (§9 P3-1/P3-2)
+                              logits de move : conv 1x1 sur la carte (§0.32 T-G)
+                              logits de wait / fight-sans-cible / zone intent : tête dense
+```
+
+- `E_w` est **le même** pour mes armes et celles de l'ennemi.
+- `E_u` est **le même** pour mes escouades et les ennemies, avec un bit `is_ally` et un **schéma de
+  features unifié** (les features propres à un camp sont à zéro pour l'autre, avec leur masque).
+- Le réseau **généralise entre slots** : ce qu'il apprend sur le slot 2 sert au slot 9.
+
+### Cardinalités : décision actée (2026-07-27)
+
+Un audit a mesuré 29 % de remplissage des slots ennemis et ~25 % des slots d'armes sur les rosters
+d'entraînement (max réels : **6 escouades**, **6 profils de tir**, **5 de mêlée**, **4 types**,
+**12 figurines**). Décision utilisateur : les K larges sont **gardés** pour absorber des rosters
+plus fournis sans re-tailler l'obs ni retrainer. Le coût mesuré valide la décision :
+
+| | K larges (20 / 10+10) | K serrés (8 / 7+6) |
+|---|---|---|
+| paramètres de l'extracteur | 1,14 M | 1,14 M — **identiques** |
+| construction d'une obs | 1,92 ms | 1,94 ms — **aucun écart** |
+| forward extracteur (batch 1024, CPU) | 248 ms | 179 ms — **1,39×** |
+
+Un slot de plus coûte **zéro paramètre**, donc aucune capacité ni généralisation perdue. Reste un
+surcoût de forward, seul poste réel. Les slots des escouades mortes sont rendus, et toute escouade
+vivante sans slot en reçoit un (une escouade vivante mappée ne change JAMAIS de slot). Tout
+dépassement de K est **logué**, jamais silencieux.
+
+---
+
+## Espace d'action — grille égocentrique
+
+### Root cause : action = 1 subhex
+
+En pipeline squad V11 (gym), l'action de mouvement désignait une **direction 0-5**, et la
+destination était l'**hexagone adjacent** à l'ancre. Conséquence : une escouade avançait de
+**1 subhex par phase de move**, soit 0,2" sur un board ×5, au lieu des 25 subhex de son budget.
+Le facteur d'échelle aggravait le défaut : en ×1, un pas d'1 hex valait 1" ; en ×5 le déplacement
+effectif était divisé par 5.
+
+En parallèle, l'observation ne contenait **aucun terrain** — murs, couverture, zones d'engagement
+absents. L'agent ne percevait pas le terrain sur lequel il évoluait.
+
+### Décision : obs spatiale égocentrique + tête spatiale
+
+**Observation** : ajout d'une **grille locale égocentrique 32×32** autour de l'escouade active,
+avec **9 canaux** : murs/obstacles, occupation alliée, occupation ennemie, zone d'engagement,
+objectifs, niveau, couvert, escouade active seule (T-L), coût géodésique du pool de move (T-K).
+
+La demi-étendue de la grille = budget Advance **MAXIMAL** (`M + 6" × inches_to_subhex`), et **non**
+le budget du jet effectivement tiré. La géométrie de la grille doit être **identique entre l'obs,
+le masque et le decoder** et **stable d'un step à l'autre** — l'indexer sur le D6 ferait respirer
+l'échelle spatiale au gré du jet, détruisant la sémantique apprise par le CNN.
+
+**Action** : l'action de mouvement désigne une **cellule de cette grille**, masquée par le pool BFS
+projeté dessus. **Le type de move n'est PAS choisi par l'agent : il est inféré de la cellule** :
+- escouade engagée → `fall_back`
+- coût géodésique ≤ M → `normal`
+- coût géodésique > M → `advance` (jet pré-roulé)
+
+L'inférence utilise le **coût géodésique** (distance de chemin du BFS), pas la distance à vol
+d'oiseau. Sans cette inférence, `MaskablePPO` masquerait type et cellule **indépendamment** — le
+combo `normal` + cellule au-delà de M serait illégal mais non masqué.
+
+**Tête spatiale** : les 1024 logits de cellule de move sortent d'une **conv 1×1** sur la colonne de
+features de leur cellule, prise sur une carte CNN conservée à résolution 32×32
+(`SpatialCombinedExtractor.move_map_slice()`), et non d'une ligne dédiée du `action_net` dense.
+Une cellule de plus ne coûte donc **aucun paramètre**, et l'alignement `cellule (gx,gy) ↔ action
+gy*32+gx` est **structurel** (un `reshape`) au lieu d'être ré-appris.
+
+Deux ajouts sont indissociables de cette tête et ne doivent jamais être retirés :
+- **Canaux positionnels fixes** (x, y, rayon) : une conv est invariante par translation et ne
+  saurait pas que le bord de la grille est la limite d'atteignabilité.
+- **Conditionnement par le latent du tronc** : sans lui, la tête ne voit ni le tour, ni les VP,
+  ni les objectifs hors fenêtre.
+
+**Source unique du masque et du décodage** : `build_squad_move_cell_map()` — la carte
+cellule → (destination, coût) est construite **une fois** au masque, mémoïsée, puis relue au
+décodage. Évite un 2ᵉ BFS par step **et** rend la divergence masque/exécution structurellement
+impossible.
+
+**Invariance à l'échelle** : plus rien dans l'action ne dépend de `inches_to_subhex`. Passer en ×10
+ne touche ni l'action space, ni la policy, ni l'obs. Le bug d'origine disparaît structurellement.
+
+**Mesure (board ×5)** : l'agent passe de 12 destinations atteignables (6 directions × 2 types) à
+**5 386**, avec des moves de 33 à 85 subhex par phase.
+
+### Coût géodésique et frontière normal/advance
+
+Le coût géodésique de chaque cellule est encodé dans le canal T-K de la grille avec la frontière
+normal/advance à **0,5 exactement** : une cellule atteignable en Normal est ≤ 0,5, une cellule
+exigeant Advance est > 0,5. Pour une escouade **engagée**, tout move est un Fall Back qui coûte le
+tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37).
+
+### Policy
+
+`MultiInputPolicy` sur obs `Dict` (grille + vecteur), extracteur CNN `SpatialCombinedExtractor`
+(`ai/spatial_extractor.py`) pour la grille. VecNormalize reçoit `norm_obs_keys=["global_cont"]`
+(la grille 0/1 n'est jamais normalisée).

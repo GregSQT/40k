@@ -1,6 +1,6 @@
 """§4.3 — le gym doit alimenter le systeme AUTORITAIRE de l'Advance (`advance_rolls`).
 
-Spec : Documentation/Reference/training/move_action_space_spatial_rework.md §4.3 / §7 T3.
+Spec : Documentation/Reference/training/observation_et_actions.md §4.3 / §7 T3.
 
 Le bug d'origine : `commit_move` marque `units_advanced` mais n'ecrit JAMAIS `advance_rolls`.
 `_advance_roll_for` trouvait donc l'escouade advancee mais sans jet -> renvoyait None -> tout

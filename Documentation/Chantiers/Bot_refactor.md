@@ -119,7 +119,7 @@ explicitement si on l'active ailleurs. Profil `x1_selfplay` : **livré, JAMAIS e
 
 | Grandeur | Valeur | Source |
 |---|---|---|
-| `combined` panel refondu | **0,7433** | chantier `bots_refonte_panel.md` §12.14, 100 ép./bot, `robust_0.8721` |
+| `combined` panel refondu | **0,7433** | chantier `panel_bots.md` §12.14, 100 ép./bot, `robust_0.8721` |
 | Pire bot | **`racer` = 0,630** | idem |
 | Pire scénario | **0,6867** | idem |
 | Régime machine | **10 000 épisodes = 4 h 01** | AI_TRAINING.md §run 2026-08-10 |
@@ -136,7 +136,7 @@ proposition.
 
 ### 2.1 « Orthogonaux » est le mauvais mot pour la bonne idée
 
-Décision utilisateur du 2026-08-12 (`bots_refonte_panel.md` §3 pt 2) : les six bots **se déplacent
+Décision utilisateur du 2026-08-12 (`panel_bots.md` §3 pt 2) : les six bots **se déplacent
 en bloc** d'un modèle à l'autre (+3 à +7 points, **ordre strictement identique**). Ils forment une
 seule dimension mesurée à six niveaux. La cause est le FORMAT, pas le dessin des bots : seuls les
 objectifs marquent, et il y a eu **zéro victoire par élimination sur 600 parties**.
@@ -1255,7 +1255,7 @@ n'est plus une question posée à l'utilisateur mais du travail :
 ## 8. Références
 
 - [`ROADMAP_INDEX.md`](../Roadmap/ROADMAP_INDEX.md) — source unique de l'ordre du travail
-- [`Documentation/Reference/training/bots_refonte_panel.md`](../Reference/training/bots_refonte_panel.md) — panel refondu : décisions,
+- [`Documentation/Reference/training/panel_bots.md`](../Reference/training/panel_bots.md) — panel refondu : décisions,
   mesures, protocole de réglage (§12.13), ligne de base (§12.14)
 - [`Documentation/Chantiers/v11/V11_eval_strategy.md`](v11/V11_eval_strategy.md) — §10.3 progression d'adversaires,
   §10.5 holdout d'adversaire, §10.6 critère de succès et arbitrage du 2026-08-04

@@ -25,7 +25,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 
 > ### 👁️ Ce que l'agent OBSERVE — descriptif complet
 >
-> **[`Documentation/Reference/training/AI_OBSERVATION.md`](../../Reference/training/AI_OBSERVATION.md)** — il ne décrit QUE le code actuel
+> **[`Documentation/Reference/training/observation_et_actions.md`](../../Reference/training/observation_et_actions.md)** — il ne décrit QUE le code actuel
 > depuis le 2026-07-28 : les clés et leurs formes, la table blocs logiques A→E ↔ clés, l'espace
 > d'action associé, les trois invariants, **qui normalise quoi** (`VecNormalize` vs
 > `EntityRunningNorm`), **les 5 caches et leur condition d'invalidation**, et l'historique
@@ -39,7 +39,7 @@ journée). Toujours re-localiser par grep du nom avant d'éditer.
 > l'en-tête « OBSERVATION SQUAD — TENSEURS D'ENTITÉS » de
 > [`engine/observation_builder.py`](../../../engine/observation_builder.py) pour le layout.
 >
-> **Conception et journal** : [`V11_entity_encoder_pointer.md`](../../Reference/training/V11_entity_encoder_pointer.md)
+> **Conception et journal** : [`observation_et_actions.md`](../../Reference/training/observation_et_actions.md)
 > (encodeur partagé, tête pointeur, cardinalités) · [`V11_audit_observation.md`](../../Archives/chantiers/V11_audit_observation.md)
 > (audit d'origine) · **[§9.2.5](V11_phaseA.md#s9.2.5)** et **§0.31** de ce document (ce qui est observé, et pourquoi).
 >
@@ -1922,7 +1922,7 @@ les colonnes correspondantes de la conv 1×1 des cellules.
 - **Contrats.** `L1` ne touche **ni** `obs_size` **ni** `TOTAL_ACTION_SIZE` (**1127**) — c'est un
   changement d'**architecture** seul. ⚠️ `obs_size` vaut néanmoins **14615** et non 14609 : le
   drapeau `declines` du bloc candidat de décision est arrivé le MÊME jour, dans le même commit, et
-  il n'a rien à voir avec cette entrée (cf. l'historique d'`AI_OBSERVATION.md`). Les 3 slots réservés (`DEPLOY_STRATEGY_COUNT = 5` <
+  il n'a rien à voir avec cette entrée (cf. l'historique d'`observation_et_actions.md`). Les 3 slots réservés (`DEPLOY_STRATEGY_COUNT = 5` <
   `DEPLOY_SLOT_COUNT = 8`) sont scorables mais le masque ne les ouvre jamais : leur embedding est
   nul, leur logit aussi, et ils restent masqués — c'est le pré-dimensionnement de `L11`, pas un
   défaut.
@@ -3131,7 +3131,7 @@ le run multi-env, pas le smoke, qui a validé.
 | [`V11_tranches.md`](V11_tranches.md) | **[§1](V11_tranches.md#s1) → [§8](V11_tranches.md#s8)** — objectif, l'ANCRE, état des lieux, ruptures R1→R8, décisions de design, tranches T1→T7 + Phase B, critères d'acceptation, smoke tests, tests de non-régression | **vivant** (T6-h/T6-g ouverts, cf. [§0.0](#s0.0)) |
 | [`V11_phaseA.md`](V11_phaseA.md) | **[§9](V11_phaseA.md#s9)** — Phase A' : parité de résolution des règles (P1) puis mécanisme de décision agent (P2→P5) | **vivant** |
 | [`V11_eval_strategy.md`](V11_eval_strategy.md) | **[§10](V11_eval_strategy.md#s10)** — stratégie d'entraînement et d'évaluation, rosters, holdout, win-rate par roster | **vivant** |
-| [`Documentation/Reference/training/V11_entity_encoder_pointer.md`](../../Reference/training/V11_entity_encoder_pointer.md) | Encodeur d'entités partagé + tête pointeur, cardinalités de l'observation, les 7 trous qu'il ferme | **clos** (T-A→T-H livrées) — **archivé le 2026-08-08** ; ⚠️ ses chiffres de dimensionnement sont datés, l'`obs_size` courant se lit ici en §0 |
+| [`Documentation/Reference/training/observation_et_actions.md`](../../Reference/training/observation_et_actions.md) | Encodeur d'entités partagé + tête pointeur, cardinalités de l'observation, les 7 trous qu'il ferme | **clos** (T-A→T-H livrées) — **archivé le 2026-08-08** ; ⚠️ ses chiffres de dimensionnement sont datés, l'`obs_size` courant se lit ici en §0 |
 | [`Documentation/Archives/chantiers/observation_deploiement.md`](../../Archives/chantiers/observation_deploiement.md) | Observation de la phase de déploiement — les 5 défauts et leurs correctifs (extrait de `V11_audit_observation.md` §11) | **clos** (2026-07-29, §0.40 — archive) |
 | [`Replay.md`](../Replay.md) | Replay : pipeline & contrat du `step.log`, registre des chantiers replay | **vivant** (outillage) |
 | [`perf_move_pool.md`](../../Reference/moteur/perf_move_pool.md) | Perf du noyau `_build_multi_hex_vectorized` : périmètre, filet de validation, livré (L1 + L_bbox), impasses mesurées | **clos** (décision (B) STOP, 2026-07-21) |

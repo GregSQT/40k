@@ -2,14 +2,14 @@
 
 > **Fichier** : `Documentation/Chantiers/backlog/mcts_adversaire.md` (ex-MCTS/MCTS_bot_final.md)  
 > **Statut** : **référence unique** pour la conception et l’implémentation d’un adversaire MCTS **hors policy PPO**. En cas de divergence avec toute version antérieure, **ce document fait foi** jusqu’à révision explicite.  
-> **Contexte** : projet Warhammer 40K — moteur tactique Python, agent **PPO / MaskablePPO**, observation canonique `Documentation/Reference/training/AI_OBSERVATION.md`, pipeline `Documentation/Reference/training/AI_TRAINING.md`.
+> **Contexte** : projet Warhammer 40K — moteur tactique Python, agent **PPO / MaskablePPO**, observation canonique `Documentation/Reference/training/observation_et_actions.md`, pipeline `Documentation/Reference/training/entrainement.md`.
 
 **Périmètre** : MCTS **uniquement** comme **opposant d’entraînement** sur une **fraction d’épisodes**, entre bots scriptés et self-play (snapshot). **Pas** comme politique PPO, **pas** fusionné au cœur du moteur de règles : le moteur reste la **source de vérité** ; MCTS est un **client** via un **`GameAdapter`**.
 
 ### Critères de succès (résumé)
 
 1. **Diversité** : trajectoires d’entraînement plus variées qu’avec seuls bots / self-play, sans effondrer le débit (steps/s).  
-2. **Généralisation** : pas de régression sur **holdouts** et métriques robustes du pipeline (`AI_TRAINING.md`) par rapport à un run sans MCTS à **budget de steps équivalent**.  
+2. **Généralisation** : pas de régression sur **holdouts** et métriques robustes du pipeline (`entrainement.md`) par rapport à un run sans MCTS à **budget de steps équivalent**.  
 3. **Cohérence** : transitions adverses uniquement via le même chemin `apply` que les bots ; rollouts documentés côté siège PPO (**§9.3**).  
 4. **Config** : mélange d’adversaires **sans ambiguïté** (normalisation §4.4) ; pas de fallback silencieux si MCTS indisponible ou budget dépassé mal défini (**§4.6**).  
 5. **Validation** : toute montée de fraction MCTS validée par **A/B** et critères du **§16** — le gain learning n’est **pas** garanti par la spec seule.
@@ -85,7 +85,7 @@ L’adversaire MCTS est invoqué lorsque le **siège adverse** agit, selon la m�
 
 ### 2.5 Invariants siège (seat-aware)
 
-Le projet peut utiliser le **seat-aware training** (`Documentation/Reference/training/AI_TRAINING.md`). **Règles** :
+Le projet peut utiliser le **seat-aware training** (`Documentation/Reference/training/entrainement.md`). **Règles** :
 
 - MCTS décide **toujours** pour le **joueur adverse** dans l’épisode (celui **non** contrôlé par la policy PPO en train).  
 - Le **nœud racine** de la recherche correspond à une décision **du siège adverse**, pas du siège PPO.  
@@ -217,7 +217,7 @@ La policy PPO **évolue** pendant l’entraînement : le « monde » vu par MCTS
 
 ### 5.2 Macro (défaut recommandé)
 
-MCTS ne décide qu’à des **points espacés** (ex. début de tour / phase, ou intention stratégique). Le bloc *macro intent* dans `Documentation/Reference/training/AI_OBSERVATION.md` peut servir de **vocabulaire** sémantique (sans imposer le même encodage vectoriel). Viser **K petit** (souvent K ≤ 8–16).
+MCTS ne décide qu’à des **points espacés** (ex. début de tour / phase, ou intention stratégique). Le bloc *macro intent* dans `Documentation/Reference/training/observation_et_actions.md` peut servir de **vocabulaire** sémantique (sans imposer le même encodage vectoriel). Viser **K petit** (souvent K ≤ 8–16).
 
 ### 5.3 Politique auxiliaire
 
@@ -523,7 +523,7 @@ Budget adaptatif **documenté**, cache `legal_actions` sur hash d’état abstra
 | Métrique | Attention |
 |----------|-----------|
 | Winrate vs MCTS (eval) | Peut monter **sans** généraliser — **ne pas** l’utiliser seul. |
-| **Holdout / bots** (`bot_eval`, scénarios robustes) | Critère principal de **non-régression** (voir `AI_TRAINING.md`). |
+| **Holdout / bots** (`bot_eval`, scénarios robustes) | Critère principal de **non-régression** (voir `entrainement.md`). |
 
 ### 14.3 Protocole A/B
 
@@ -552,7 +552,7 @@ Le **gain en apprentissage** (meilleure généralisation, sample efficiency) n�
 
 Avant d’augmenter la fraction d’épisodes MCTS ou le budget par décision :
 
-1. Vérifier **non-régression** sur holdouts, **`worst_bot`** / **`worst_scenario`** (si applicable) et métriques robustes définies dans `Documentation/Reference/training/AI_TRAINING.md`.  
+1. Vérifier **non-régression** sur holdouts, **`worst_bot`** / **`worst_scenario`** (si applicable) et métriques robustes définies dans `Documentation/Reference/training/entrainement.md`.  
 2. Vérifier que le **throughput** (steps/s ou épisodes/h) reste dans une enveloppe acceptable pour le run.  
 3. Effectuer une comparaison **A/B** à **budget de steps environnement équivalent** (§14.3), pas seulement à temps wall-clock identique.  
 4. **Diagnostic** : si le **winrate vs MCTS** monte mais que le **holdout** stagne ou se dégrade, ou si les métriques utiles se dégradent alors que le winrate « vs MCTS » augmente — **revoir** dans l’ordre : politiques de **rollout** et **`ppo_side_rollout_policy`** (§9.3), **ratio** MCTS, **espace d’actions macro** (`macro_action_set` / vocabulaire), et **sur-adaptation** à l’opposant MCTS (§14–15).
@@ -595,8 +595,8 @@ Le **micro-MCTS** sur masque complet reste **option expérimentale** (souvent P4
 
 | Document | Usage |
 |----------|--------|
-| [Documentation/Reference/training/AI_OBSERVATION.md](../../Reference/training/AI_OBSERVATION.md) | Macro intent, structure d’observation. |
-| [Documentation/Reference/training/AI_TRAINING.md](../../Reference/training/AI_TRAINING.md) | Pipeline PPO, `opponent_mix`, seat-aware, eval, callbacks. |
+| [Documentation/Reference/training/observation_et_actions.md](../../Reference/training/observation_et_actions.md) | Macro intent, structure d’observation. |
+| [Documentation/Reference/training/entrainement.md](../../Reference/training/entrainement.md) | Pipeline PPO, `opponent_mix`, seat-aware, eval, callbacks. |
 | [Documentation/Reference/moteur/tour_de_jeu.md](../../Reference/moteur/tour_de_jeu.md) | Phases légales — quand placer les points de décision. |
 | [Documentation/Reference/moteur/architecture_moteur.md](../../Reference/moteur/architecture_moteur.md) | Handlers — effets de bord des transitions. |
 | `config/agents/CoreAgent/CoreAgent_training_config.json` | Config effective agents. |
