@@ -54,7 +54,7 @@
     "select_target_before_roll": false
   },
   "distance_metric": {
-    "distance_metric_detail": "Metrique de portee par regle (hex|euclidean). Point de bascule unique — voir Documentation/Distance management.md. Defaut tout hex = comportement historique.",
+    "distance_metric_detail": "Metrique de portee par regle (hex|euclidean). Point de bascule unique — voir Documentation/Reference/moteur/geometrie_et_distances.md. Defaut tout hex = comportement historique.",
     "ranged": "euclidean",
     "move": "euclidean",
     "move_gym": "hex",
