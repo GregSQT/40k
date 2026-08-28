@@ -18,6 +18,20 @@ Python : type hints, docstrings, respect Documentation/Reference/moteur/tour_de_
 
 Aucun fallback/workaround/default anti-erreur → T1
 
+TESTS — QUI LANCE QUOI
+
+VÉRIFICATION LARGE = utilisateur uniquement :
+python3 -m pytest tests/unit/ -q -n 16 --dist worksteal ; python3 -m pytest tests/integration/pvp/ -q -n 6 --dist load ; pyright ; p ai/hidden_action_finder.py ; p scripts/check_ai_rules.py ; npx biome check frontend/src ; (cd frontend && npx tsc --noEmit -p tsconfig.app.json)
+
+L'agent ne la lance JAMAIS, ni en totalité, ni par recomposition/contournement. .claude/hooks/deny-verif-large.sh juge chaque segment séparé par ;, &&, |; le contourner ou le désactiver est interdit.
+L'agent vérifie CE QU'IL A TOUCHÉ, rien d'autre, et DOIT lancer les fichiers de test ciblés qu'il vient d'écrire/toucher :
+
+Python : pytest tests/unit/engine/test_xxx.py
+
+Front : cd frontend && npx vitest run src/.../xxx.test.ts
+Si une validation large semble nécessaire : le dire et s'arrêter ; ne jamais annoncer « suite verte » sans l'avoir réellement obtenue.
+scripts/check_ai_rules.py et ai/hidden_action_finder.py appartiennent à la vérification utilisateur.
+
 SOURCES DE VÉRITÉ / ROADMAP
 
 Avant toute question de priorité, état d'un chantier ou « qu'est-ce qui reste » :
@@ -97,24 +111,10 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x<X> --resolution 
 
 --append exige un modèle existant et le remplace par le résultat du run.
 
-pour entraîner lorsqu'un modèle existe, ne jamais choisir implicitement entre --new et --append.
+Pour entraîner lorsqu'un modèle existe : ne jamais choisir entre --new et --append sans demander à l'utilisateur.
 
 Analyser : python3 ai/analyzer.py <fichier_de_résultats>.
 Qualité/performance PPO : validation par HOLDOUT + --step + analyzer.py + replay ; cela ne remplace jamais pytest/vitest pour les invariants logiciels.
-
-TESTS — QUI LANCE QUOI
-
-VÉRIFICATION LARGE = utilisateur uniquement :
-python3 -m pytest tests/unit/ -q -n 16 --dist worksteal ; python3 -m pytest tests/integration/pvp/ -q -n 6 --dist load ; pyright ; p ai/hidden_action_finder.py ; p scripts/check_ai_rules.py ; npx biome check frontend/src ; (cd frontend && npx tsc --noEmit -p tsconfig.app.json)
-
-L'agent ne la lance JAMAIS, ni en totalité, ni par recomposition/contournement. .claude/hooks/deny-verif-large.sh juge chaque segment séparé par ;, &&, |; le contourner ou le désactiver est interdit.
-L'agent vérifie CE QU'IL A TOUCHÉ, rien d'autre, et DOIT lancer les fichiers de test ciblés qu'il vient d'écrire/toucher :
-
-Python : pytest tests/unit/engine/test_xxx.py
-
-Front : cd frontend && npx vitest run src/.../xxx.test.ts
-Si une validation large semble nécessaire : le dire et s'arrêter ; ne jamais annoncer « suite verte » sans l'avoir réellement obtenue.
-scripts/check_ai_rules.py et ai/hidden_action_finder.py appartiennent à la vérification utilisateur.
 
 WORKTREES
 
@@ -124,8 +124,10 @@ Tree sale → signaler (les modifications locales ne suivent pas le worktree) et
 Lecture/analyse/doc seule → pas de worktree.
 Glissement analyse → écriture : dès que l'intention d'écrire un fichier code apparaît, re-vérifier git status + ouvrir le worktree AVANT ce write, même si la tâche a commencé en lecture pure. Le hook check-worktree-before-write.sh bloque tout write de fichier code dans main ; un refus du hook = ouvrir le worktree, pas contourner le hook.
 Fin : à la clôture de chaque chantier, sans attendre de demande : commit → ExitWorktree "keep" → merge dans main → supprimer worktree + branche → mettre à jour ROADMAP_INDEX.md + fichier sujet → déplacer le doc du chantier dans Archives/chantiers/.
-Jamais remove avant merge. discard_changes: true interdit.
+Jamais ExitWorktree avec action remove avant merge. discard_changes: true interdit.
 Training en cours → ne toucher aucun JSON de config/ (relu à chaud par les évaluations).
+
+Gabarit commit : <verbe impératif> <sujet court> — <raison en 5 mots max>
 
 WORKFLOW IA
 
@@ -138,28 +140,31 @@ ai/models/**/*.zip
 MODE UNIQUE : AUTO
 
 AUTO est permanent ; aucun marqueur [MODE ...].
-L'agent travaille jusqu'à résolution complète, décision utilisateur réellement nécessaire ou STOP imposé ci-dessous.
 T1–T4 ne sont JAMAIS relâchées.
 Avant modification : établir cause/hypothèse, plan et périmètre.
 Autorisé : commandes prévues par le prompt, relance automatique après fix, plusieurs modifications liées, lectures nécessaires, recherche ciblée de motifs/jumeaux/appelants.
 Toujours respecter l'ordre, les checkpoints de validation et les listes de fichiers explicitement imposés par le prompt ; vérifier après chaque modification avant de poursuivre.
 Interdit : exploration par curiosité ; refactor non demandé sauf nécessité causale pour fermer T2.
-Prompt ambigu ou contradictoire → présenter la contradiction, demander de trancher, ne pas choisir.
 
 UNE SEULE RÉPONSE, À LA FIN
 
-Ne rien adresser à l'utilisateur pendant le travail.
-Exceptions : question bloquante, worktree (tree sale au premier tour), STOP imposé par ce fichier, checkpoint T3 (cause établie → stop avant écriture). Dans ces cas, répondre puis s'arrêter.
-Sinon, tout ce que l'utilisateur doit lire est dans le message final.
+L'agent travaille jusqu'à résolution complète sans interrompre l'utilisateur.
+S'arrêter ET répondre uniquement dans ces cas :
+• Question bloquante (donnée/log indisponible indispensable)
+• Tree sale détecté avant premier write (worktree impossible)
+• STOP explicitement imposé par ce fichier
+• Checkpoint T3 : cause établie avec preuves → annoncer cause (fichier:ligne) + plan de correction + périmètre T2, puis attendre ; l'écriture démarre au tour suivant
+• Prompt ambigu ou contradictoire → présenter la contradiction, demander de trancher, ne pas choisir
+Hors ces cas, tout ce que l'utilisateur doit lire est dans le message final.
 
 STYLE
 
-Français, tutoiement, direct, strictement la demande ; pas d'étapes supplémentaires non sollicitées ; pas d'artifact/document/fichier/canvas sans demande explicite ; pas d'intro/conclusion générique ni « n'hésite pas » ; si 3 phrases suffisent, pas 3 paragraphes ; oui/ok → ne pas développer ; expliquer simplement et précisément ce qui a été fait. Être concis dans la réponse, pas dans le travail : pas de narration d'outils/étapes, pas de code recopié sauf preuve verbatim exigée par T4 REVIEW. Lecture, appelants, mesure, grep jumeau, tests, rouge/vert, vrai chemin ne se coupent jamais pour économiser.
+Français, tutoiement, direct, strictement la demande ; pas d'étapes supplémentaires non sollicitées ; pas d'artifact/document/fichier/canvas sans demande explicite ; pas d'intro/conclusion générique ni « n'hésite pas » ; si 3 phrases suffisent, pas 3 paragraphes ; oui/ok → ne pas développer, sauf si une meilleure approche existe (voir AVIS EXPERT) ; expliquer simplement et précisément ce qui a été fait. Être concis dans la réponse, pas dans le travail : pas de narration d'outils/étapes, pas de code recopié sauf preuve verbatim exigée par T4 REVIEW. Lecture, appelants, mesure, grep jumeau, tests, rouge/vert, vrai chemin ne se coupent jamais pour économiser.
 La concision ne réduit jamais le périmètre de conception ; une solution choisie seulement parce qu'elle est plus courte à expliquer est un défaut.
 Réponse analytique (investigation, arbitrage) : conclusion en une phrase d'abord, puis ce qui est attendu de l'utilisateur si nécessaire, puis détail. Jamais un mur de texte non structuré avant les sections de rapport.
 ÉTAT DU CODE : ne jamais supposer ; lire/vérifier avant d'affirmer ; pas de devrait, probablement, je pense que sur le code.
 Estimations/architecture/opinions : incertitude explicite autorisée.
-AVIS EXPERT : signaler une meilleure approche lorsqu'elle existe ; ne pas valider par défaut.
+AVIS EXPERT : signaler une meilleure approche lorsqu'elle existe ; ne pas valider par défaut. S'applique même après un « oui/ok » de l'utilisateur sur une approche sous-optimale.
 Suppression de code → commentaire seulement si contre-intuitive (contrôle retiré sciemment, branche condamnée) ; sinon git suffit, pas de commentaire-tombeau.
 
 MODÈLE / EFFORT
@@ -210,12 +215,8 @@ T3 — INVESTIGATION AUTONOME
 
 Toute demande d'analyse/bug/root cause autorise immédiatement toutes les LECTURES nécessaires : Read, Grep, Glob, appelants, logs, flux d'exécution, fichiers non nommés initialement.
 Ne jamais demander « veux-tu que j'investigue ? » ni interrompre l'investigation pour demander de continuer.
-Checkpoint dès que la cause est établie avec preuves suffisantes pour exclure les hypothèses concurrentes raisonnables : répondre avec cause (fichier:ligne), plan de correction, périmètre T2 prévu → s'arrêter et attendre. L'écriture démarre au tour suivant.
-Autres arrêts :
-
-donnée/log/exécution inaccessible indispensable → demander précisément ;
-
-investigation approfondie sans cause claire → reconnaître l'échec et donner les pistes restantes.
+Conditions d'arrêt → voir UNE SEULE RÉPONSE, À LA FIN.
+Si investigation approfondie sans cause claire → reconnaître l'échec et donner les pistes restantes.
 
 T4 — DIAGNOSTIC
 
@@ -340,7 +341,7 @@ RELIRE
 
 Obligatoire dès qu'un fichier compté comme code a bougé ; omis pour lecture/doc/discussion.
 /code-review : lancer via le Skill tool quand pertinent — ≥ 1 fichier dans engine/**, ai/**, services/**, frontend/src/** avec un changement de logique ou de comportement (ajout/suppression de code, modification d'une condition, d'un calcul, d'un flux). Ne pas lancer pour commentaire seul, typo dans une chaîne doc, renommage pur, test isolé ou config pure. Findings = 0 → ne pas afficher la section CODE REVIEW FINDINGS.
-L'agent ne lance JAMAIS /simplify.
+L'agent ne lance JAMAIS /simplify. /code-review se lance une seule fois par livraison ; ne jamais relancer après avoir vu les findings — ils sont transmis verbatim à l'utilisateur, qui décide.
 Liste : .claude/hooks/relire-en-attente.sh --liste <session_id> (UUID du dossier PARENT du scratchpad). Ne jamais lancer --vider, seulement le fournir. Si hook défaillant : liste manuelle.
 Filtrage — exclus : config/**/*.json, *.md sauf CLAUDE.md, Documentation/** ; inclus sans exception : engine/**, ai/**, services/**, frontend/src/** ; zone grise (tests/**, scripts/**) : exclusion seulement avec justification.
 🟢 = sujet fini. 🟡 = arbitrage(s) ouvert(s). Gros lot → scripts/review_plan.py. Chemins ABSOLUS ; guillemets si espace.
