@@ -508,7 +508,7 @@ def test_a_line_anchor_of_any_extension_is_reported(tmp_path: pathlib.Path, ref:
     décalées de plusieurs milliers de lignes et invisibles au contrôle, qui affichait pourtant
     « 0 renvoi ». Une liste de suffixes aurait reconduit le trou sur `.yml` et `.ini` — ces deux
     cas-là sont dans l'échantillon pour cette raison, et `docker-compose.yml:18` était bel et bien
-    présent dans `Security.md`.
+    présent dans `securite.md`.
     """
     doc = write(tmp_path, "ROADMAP_INDEX.md", f"le composant `{ref}` recopie les hexes\n")
     entries = cdr.check_anchors(doc)
@@ -820,7 +820,7 @@ def test_a_qualified_citation_is_not_satisfied_by_a_module_level_twin(
 
 
 def test_an_extensionless_tracked_file_is_an_anchor(tmp_path: pathlib.Path) -> None:
-    """`Dockerfile:14` est un renvoi de ligne — et `Security.md` cite justement ce fichier."""
+    """`Dockerfile:14` est un renvoi de ligne — et `securite.md` cite justement ce fichier."""
     doc = write(tmp_path, "ROADMAP_INDEX.md", "le montage est décrit en `Dockerfile:14`\n")
     assert len(cdr.check_anchors(doc)) == 1
 
@@ -1056,6 +1056,7 @@ def test_impl_doc_line_anchor_is_detected(tmp_path: pathlib.Path) -> None:
 
     # VERT après correction : symbole à la place de la ligne
     doc.write_text("voir `def _get_unit_by_id` dans `engine/w40k_core.py`\n", encoding="utf-8")
+    cdr._read_masked.cache_clear()  # lru_cache doit être purgé avant la seconde lecture
     assert cdr.check_anchors(doc) == []
 
 
@@ -1216,7 +1217,7 @@ def test_a_json_claim_is_verified(tmp_path: pathlib.Path) -> None:
 def test_a_prose_word_in_backticks_is_not_a_symbol(tmp_path: pathlib.Path) -> None:
     """`directory` est un mot, pas un symbole : le confronter confirme n'importe quoi.
 
-    Mesuré sur `Security.md` : `directory`, `debug`/`False` et `os.system` suffisaient à faire
+    Mesuré sur `securite.md` : `directory`, `debug`/`False` et `os.system` suffisaient à faire
     passer une citation pour vérifiée. Le vrai symbole pouvait disparaître du code sans un mot.
     """
     doc = write(tmp_path, "note.md", "voir `ai/train.py` (rejet du `directory`, `os.system`)\n")
@@ -1442,7 +1443,7 @@ def test_the_corpus_really_confronts_some_kinds() -> None:
     """VERT VACANT : « 0 sorte fausse » ne vaut rien si aucune sorte n'a été confrontée.
 
     Le corpus en porte au moins trois (les `def` de la convention d'ancres dans `doc.md`, une
-    dans `Security.md`). Le jour où la dernière disparaît, ce test doit le dire plutôt que
+    dans `securite.md`). Le jour où la dernière disparaît, ce test doit le dire plutôt que
     laisser la passe s'éteindre en silence.
     """
     total = 0

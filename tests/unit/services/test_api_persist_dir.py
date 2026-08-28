@@ -1,4 +1,4 @@
-"""Répertoire de persistance et snapshots (F7, F11) — `Documentation/Reference/infra/Security.md`.
+"""Répertoire de persistance et snapshots (F7, F11) — `Documentation/Reference/infra/securite.md`.
 
 Verrouille l'invariant : **le client ne choisit plus où le serveur écrit**. Le répertoire de
 persistance vient de l'environnement du process ; un `directory` reçu en requête est refusé, pas

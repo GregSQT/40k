@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lecture du journal d'authentification et audit des comptes (étapes 7 et 8 de Security.md).
+"""Lecture du journal d'authentification et audit des comptes (étapes 7 et 8 de securite.md).
 
 L'étape 3 a posé la table `auth_events` (append-only : tentatives, succès, échecs, refus de
 rate limiting, déconnexions, avec l'IP réelle du client). Il y manquait l'essentiel : quelqu'un

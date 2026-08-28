@@ -1,4 +1,4 @@
-"""Durcissement des sessions et rate limiting du login (F2, F8) — `Documentation/Reference/infra/Security.md`.
+"""Durcissement des sessions et rate limiting du login (F2, F8) — `Documentation/Reference/infra/securite.md`.
 
 Verrouille sept invariants :
 1. une session échue n'authentifie plus (avant : `WHERE s.token = ?` seul, token valide à vie) ;

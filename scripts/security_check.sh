@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Analyse statique de sécurité — Documentation/Reference/infra/Security.md, étape 6 (F5).
+# Analyse statique de sécurité — Documentation/Reference/infra/securite.md, étape 6 (F5).
 #
 # Enchaîne bandit (code Python), pip-audit (dépendances Python) et npm audit
 # (dépendances front). Sort en code NON NUL dès qu'un finding critique/haut subsiste.
@@ -22,7 +22,7 @@
 #     DEUX cas pickle distincts, à ne pas confondre :
 #     * services/game_saves.py — `import pickle` (B403, LOW) et RIEN d'autre : bandit ne
 #       voit pas de `pickle.load` parce que le dépickle passe par une sous-classe
-#       `pickle.Unpickler` (`_safe_loads`, liste blanche de classes, Security.md étape 2
+#       `pickle.Unpickler` (`_safe_loads`, liste blanche de classes, securite.md étape 2
 #       / F7). Le format pickle est CONSERVÉ, c'est `_safe_loads` qui ferme le vecteur.
 #       B403 tire sur 5 fichiers au total ; les 4 autres sont ceux de la ligne suivante.
 #     * les 4 `pickle.load` réels (B301, MEDIUM) sont AILLEURS et ne passent PAS par

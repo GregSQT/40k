@@ -98,7 +98,7 @@ pip install -r requirements-dev.txt
 ./scripts/security_check.sh    # bandit + pip-audit + npm audit ; sortie non nulle si finding haut
 ```
 
-Seuils, exceptions justifiées et findings connus : [Documentation/Reference/infra/Security.md](Documentation/Reference/infra/Security.md).
+Seuils, exceptions justifiées et findings connus : [Documentation/Reference/infra/securite.md](Documentation/Reference/infra/securite.md).
 
 ### Entraînement IA (exemple)
 
@@ -123,8 +123,8 @@ python ai/train.py --agent CoreAgent --scenario bot --new
 - `Documentation/Reference/moteur/architecture_moteur.md`
 - `Documentation/Reference/training/entrainement.md`
 - `Documentation/FRONTEND_UI.md`
-- `Documentation/Reference/infra/USER_ACCESS_CONTROL.md`
-- `Documentation/Reference/infra/Deployment_Synology.md`
+- `Documentation/Reference/infra/acces_utilisateurs.md`
+- `Documentation/Reference/infra/deploiement_nas.md`
 
 ---
 
@@ -176,7 +176,7 @@ pip install -r requirements-dev.txt
 ./scripts/security_check.sh    # bandit + pip-audit + npm audit; non-zero exit on any high finding
 ```
 
-Thresholds, written exceptions and known findings: [Documentation/Reference/infra/Security.md](Documentation/Reference/infra/Security.md).
+Thresholds, written exceptions and known findings: [Documentation/Reference/infra/securite.md](Documentation/Reference/infra/securite.md).
 
 ### AI training example
 
@@ -188,6 +188,6 @@ python ai/train.py --agent CoreAgent --scenario bot --new
 - `Documentation/Reference/moteur/architecture_moteur.md`
 - `Documentation/Reference/training/entrainement.md`
 - `Documentation/FRONTEND_UI.md`
-- `Documentation/Reference/infra/USER_ACCESS_CONTROL.md`
-- `Documentation/Reference/infra/Deployment_Synology.md`
+- `Documentation/Reference/infra/acces_utilisateurs.md`
+- `Documentation/Reference/infra/deploiement_nas.md`
 

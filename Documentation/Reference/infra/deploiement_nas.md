@@ -1,4 +1,12 @@
-# Déploiement Synology — Containerisation et réseau
+# Déploiement NAS
+
+> **Référence déploiement** : containerisation Docker et configuration réseau pour héberger
+> l’application sur un NAS Synology — inclut volumes, HTTPS, DDNS et procédures d’update.
+>
+> **Sécurité et seuils** : voir [securite.md](securite.md).
+> **Auth et profils** : voir [acces_utilisateurs.md](acces_utilisateurs.md).
+
+---
 
 Document unique regroupant la containerisation Docker et la configuration réseau pour héberger l’application sur un NAS Synology (ex-`containerisation.md` et `Network.md`).
 
@@ -116,7 +124,7 @@ Note Synology : utiliser `sudo /usr/local/bin/docker compose ...` (PATH `sudo` i
 
 - **Architecture** : Vérifier le NAS (amd64 / arm64). Pour multi-arch : buildx et manifest.
 - **Sécurité** : images à jour, secrets via variables d’environnement (jamais en dur dans les Dockerfiles), pas de fallback silencieux si variable critique manquante.
-- **Analyse statique avant déploiement** : `./scripts/security_check.sh` (venv actif + `pip install -r requirements-dev.txt`). Il enchaîne `bandit`, `pip-audit --strict` sur le verrou de production et `npm audit --audit-level=high`, et **sort en code non nul** dès qu'un finding haut/critique subsiste. Les exceptions acceptées sont listées **avec justification écrite** dans `scripts/security_audit_ignore.txt` (une ligne sans justification fait échouer le script). Détail des seuils et des findings connus : [Documentation/Reference/infra/Security.md](Documentation/Reference/infra/Security.md).
+- **Analyse statique avant déploiement** : `./scripts/security_check.sh` (venv actif + `pip install -r requirements-dev.txt`). Il enchaîne `bandit`, `pip-audit --strict` sur le verrou de production et `npm audit --audit-level=high`, et **sort en code non nul** dès qu'un finding haut/critique subsiste. Les exceptions acceptées sont listées **avec justification écrite** dans `scripts/security_audit_ignore.txt` (une ligne sans justification fait échouer le script). Détail des seuils et des findings connus : [securite.md](securite.md).
 - **Compatibilité modèles IA** : conserver `numpy==2.4.2` dans `requirements.runtime.in` (et donc dans le verrou) pour la compatibilité de chargement des modèles PPO sérialisés. Les poids **ne sont pas dans l'image** (`.dockerignore` exclut `ai/models/`) : ils arrivent par le montage `${SYNO_MODELS_PATH}:/app/ai/models`, dont le contenu relève de l'opérateur — aucune route de l'API n'y écrit.
 - **Healthcheck** : le backend expose `/api/health` ; le compose utilise un healthcheck HTTP sur `http://127.0.0.1:5001/api/health`.
 
@@ -248,3 +256,18 @@ flowchart LR
     DEV -->|ssh trigger checks| CHECK
     CHECK -->|health + config + numpy + bundle| STACK
 ```
+
+---
+
+## Correspondance des sources
+
+Ce document est le renommage direct de `Deployment_Synology.md` (P4 infra — 2026-08-28), lui-même
+la fusion de `containerisation.md` et `Network.md` (effectuée lors de la refonte initiale). Toutes
+les sections sont identiques ; seul le nom de fichier a changé.
+
+| Source | Section | Section actuelle |
+|---|---|---|
+| `Deployment_Synology.md` | 1. Containerisation | §1 Containerisation |
+| `Deployment_Synology.md` | 2. Réseau et accès HTTPS | §2 Réseau et accès HTTPS |
+| `Deployment_Synology.md` | 3. Checklist et durcissement | §3 Checklist et durcissement |
+| `Deployment_Synology.md` | 4. Procédure d'update standard | §4 Procédure d'update standard |
