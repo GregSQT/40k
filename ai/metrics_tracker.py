@@ -1574,16 +1574,16 @@ class W40KMetricsTracker:
          fenetres du training config different ; elles sont egales par defaut)
 
         SANTE PPO -- moyennes sur les 20 derniers updates :
-        - 00_critical/m_loss_mean           - |policy_loss| + |value_loss|, sante globale
+        - 00_critical/f_loss_mean           - |policy_loss| + |value_loss|, sante globale
         - 00_critical/g_explained_variance  - >0.3 -> Value function working
         - 00_critical/h_clip_fraction       - [0.1-0.3] -> Tune learning_rate
         - 00_critical/i_approx_kl           - <0.02 -> Policy stability
         - 00_critical/j_entropy_loss        - Decroissant -> Tune ent_coef
+        - 00_critical/m_value_loss_smooth   - Smoothed critic loss
 
-        ECRIT PAR `_log_zone_intent_metrics` ET training_callbacks :
-        - 00_critical/n_immediate_reward_ratio_mean - ratio reward immediat/total (lisse)
-        - 00_critical/o_intent_zone_steps          - free steps zone-intent par episode
-        - 00_critical/p_intent_control_dependency  - I(intent;controle)/H(controle), non emis
+        ECRIT PAR `_log_zone_intent_metrics`, appele en fin de cette methode (2 tags) :
+        - 00_critical/n_intent_zone_steps          - free steps zone-intent par episode
+        - 00_critical/o_intent_control_dependency  - I(intent;controle)/H(controle), non emis
                                                      quand H(controle) == 0
 
         ECRIT AILLEURS, volontairement -- inventaire complet du namespace :
@@ -1667,7 +1667,8 @@ class W40KMetricsTracker:
             combined_losses = [abs(p) + abs(v) for p, v in zip(recent_policy, recent_value)]
             loss_mean = float(np.mean(combined_losses))
             value_loss_smooth = float(np.mean(recent_value))
-            self.writer.add_scalar('00_critical/m_loss_mean', loss_mean, self.episode_count)
+            self.writer.add_scalar('00_critical/f_loss_mean', loss_mean, self.episode_count)
+            self.writer.add_scalar('00_critical/m_value_loss_smooth', value_loss_smooth, self.episode_count)
         
         # ==========================================
         # HORS 00_critical : ecrit dans game_critical/ et game_detailed/
@@ -1743,7 +1744,7 @@ class W40KMetricsTracker:
         self._intent_contingency_since_episode_end = [0] * (ZONE_CONTROL_CARDINALITY * INTENT_CARDINALITY)
 
         n_steps_per_ep = sum(self._zone_steps_window) / len(self._zone_steps_window)
-        self.writer.add_scalar("00_critical/o_intent_zone_steps", n_steps_per_ep, step)
+        self.writer.add_scalar("00_critical/n_intent_zone_steps", n_steps_per_ep, step)
 
         table = [0] * (ZONE_CONTROL_CARDINALITY * INTENT_CARDINALITY)
         for episode_table in self._intent_contingency_window:
@@ -1776,7 +1777,7 @@ class W40KMetricsTracker:
             # rien a apprendre. On normalise donc : U = I / H(controle) est la FRACTION de
             # l'incertitude d'intent expliquee par l'etat, 1.0 = intent entierement determine.
             self.writer.add_scalar(
-                "00_critical/p_intent_control_dependency", mutual_info / control_entropy, step
+                "00_critical/o_intent_control_dependency", mutual_info / control_entropy, step
             )
         # H(controle) == 0 : aucun contraste d'etat sur la fenetre, la question n'a pas de sens.
         # Emettre 0.0 la designerait a tort la politique.
