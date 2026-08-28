@@ -1108,6 +1108,7 @@ class MetricsCollectionCallback(BaseCallback):
         }
 
         # GAMMA MONITORING: Track discount factor effects
+        ratio_mean = None
         if hasattr(self.model, 'gamma'):
             gamma = cast(Any, self.model).gamma
            
@@ -1152,14 +1153,9 @@ class MetricsCollectionCallback(BaseCallback):
 
         # Log to metrics tracker (KEEP for state tracking)
         self.metrics_tracker.log_episode_end(episode_data)
-        # Emis ici (apres log_episode_end) pour que l'abscisse soit episode_count comme toutes les
-        # autres courbes 00_critical — model.logger.dump utilise num_timesteps (millions) et
-        # decalerait la courbe loin a droite du groupe.
-        if self.immediate_reward_ratio_history:
-            ratio_mean = sum(self.immediate_reward_ratio_history) / len(self.immediate_reward_ratio_history)
-            self.metrics_tracker.writer.add_scalar(
-                '00_critical/m_immediate_reward_ratio_mean', ratio_mean, self.metrics_tracker.episode_count
-            )
+        # Emis apres log_episode_end pour que l'abscisse soit episode_count (deja incremente).
+        if ratio_mean is not None:
+            self.metrics_tracker.log_immediate_reward_ratio_mean(ratio_mean)
         self.metrics_tracker.log_tactical_metrics(self.episode_tactical_data)
         self.metrics_tracker.log_abilities_metrics(self.episode_tactical_data)
 
