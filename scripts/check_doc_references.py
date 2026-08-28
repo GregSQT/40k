@@ -869,8 +869,8 @@ def step_log_entries() -> tuple[int, int]:
 
 def integers_in(cell: str) -> list[int]:
     """Les entiers d'une cellule, séparateur de milliers compris (« 10 000 » vaut 10000)."""
-    return [int(m.group(0).replace(" ", "").replace(" ", "").replace(" ", "").replace("\xa0", ""))
-            for m in re.finditer(r"\d[\d   \xa0]*\d|\d", cell)]
+    return [int(re.sub(f"[{_THOUSANDS_SEPARATORS}]", "", m.group(0)))
+            for m in re.finditer(rf"\d[\d{_THOUSANDS_SEPARATORS}]*\d|\d", cell)]
 
 
 def claim_profile_count(text: str) -> list[tuple[str, int]]:
