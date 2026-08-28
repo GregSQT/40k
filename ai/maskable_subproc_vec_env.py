@@ -52,8 +52,8 @@ def _run_worker_trajectory(
     frozen_policy.set_training_mode(False)
 
     # Stockage de la trajectoire
-    norm_obs_seq: list[dict] = []
-    raw_obs_seq: list[dict] = []
+    norm_obs_lists: dict[str, list] = {}   # accumulateur → converti en dict-of-arrays en fin
+    raw_gc_seq: list[np.ndarray] = []     # seul global_cont est utilisé pour VecNormalize
     actions_seq: list[int] = []
     rewards_seq: list[float] = []      # reward normalisée (avec bootstrap)
     dones_seq: list[bool] = []
@@ -134,8 +134,12 @@ def _run_worker_trajectory(
         # Inclure action_masks dans info (parité Phase 2.3)
         info["action_masks"] = mask
 
-        raw_obs_seq.append({k: v.copy() for k, v in current_raw_obs.items()})
-        norm_obs_seq.append(norm_obs)
+        for k, v in norm_obs.items():
+            if k not in norm_obs_lists:
+                norm_obs_lists[k] = []
+            norm_obs_lists[k].append(v)
+        gc = current_raw_obs.get("global_cont", np.zeros(snapshot.obs_mean.shape, dtype=np.float32))
+        raw_gc_seq.append(gc.copy())
         actions_seq.append(action)
         rewards_seq.append(norm_reward)
         dones_seq.append(done)
@@ -158,12 +162,10 @@ def _run_worker_trajectory(
         }
         last_value = float(frozen_policy.predict_values(obs_last).cpu().numpy().flat[0])
 
-    # Valeurs BRUTES global_cont pour mise à jour VecNormalize obs_rms.
-    # raw_obs_seq contient les obs brutes (avant normalisation) — jamais les obs normalisées.
-    raw_global_cont = np.array(
-        [obs.get("global_cont", np.zeros(snapshot.obs_mean.shape)) for obs in raw_obs_seq],
-        dtype=np.float64,
-    )
+    # norm_obs_seq : dict-of-arrays (n_steps, ...) par clé — évite n_steps × n_keys np.stack côté learner.
+    norm_obs_seq = {k: np.stack(v) for k, v in norm_obs_lists.items()}
+    # raw_global_cont : seul global_cont brut, shape (n_steps, 13), pour mise à jour VecNormalize obs_rms.
+    raw_global_cont = np.array(raw_gc_seq, dtype=np.float64)
 
     return {
         "norm_obs_seq": norm_obs_seq,
