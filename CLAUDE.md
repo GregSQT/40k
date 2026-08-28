@@ -349,14 +349,11 @@ Format si /code-review lancé — bloc RELIRE :
 🟢 RELIRE : <n> fichiers — /code-review lancé, findings ci-dessous
 Puis, à la toute fin du rapport (après SUITE), hors de tout bloc fencé :
 🔍 CODE REVIEW FINDINGS :
-Suivi du bloc copiable (délimité par ```) commençant par :
-Assures toi que ces findings de /code-review soient pertinents et que ta solution soit optimale avant de coder :
-
-[VERDICT · category] /chemin/absolu:ligne — summary
-  Scénario : failure_scenario
-
-/simplify <chemins absolus>
-.claude/hooks/relire-en-attente.sh --vider <session_id>
+Suivi du bloc copiable (délimité par ```) contenant dans cet ordre :
+- La phrase : Assures toi que ces findings de /code-review soient pertinents et que ta solution soit optimale avant de coder :
+- Les findings recopiés VERBATIM tels que retournés par le Skill (aucune reformulation, aucune troncature)
+- /simplify <chemins absolus>
+- .claude/hooks/relire-en-attente.sh --vider <session_id>
 
 Format si /code-review non lancé :
 🟢 RELIRE : <n> fichiers — /code-review (bugs) + /simplify (cleanup)
