@@ -280,6 +280,15 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
             )
         self.n_deploy_slots = extractor.n_deploy_slots
         self.n_ally_slots = extractor.n_ally_slots
+        # Même invariant D1, côté propre (P3-0 retrait cohérence) : un slot COHERENCY_i par
+        # figurine propre observée. Les désolidariser ferait pointer la requête vers la figurine
+        # `j` pour jouer le slot `i` — rien ne lèverait.
+        if extractor.n_self_models != COHERENCY_SLOT_COUNT:
+            raise ValueError(
+                f"Desalignement observation/action : {extractor.n_self_models} figurines propres "
+                f"observees contre {COHERENCY_SLOT_COUNT} slots d'action "
+                f"{COHERENCY_SLOT_BASE}-{COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT - 1}."
+            )
         self.n_self_models = extractor.n_self_models
         self.enemy_slice = extractor.enemy_embeddings_slice()
         self.move_map_slice = extractor.move_map_slice()
@@ -553,8 +562,9 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         ⚠️ L'assemblage suit l'ordre EXACT des ids (`macro_intents`) : 0-1023 cellules, 1024 wait,
         1025-1044 tir, 1045-1064 charge (cible unique), 1065-1254 charge-paires, 1255-1274 mêlée,
         1275 fight-sans-cible, 1276-1295 tir indirect, 1296-1310 zone, 1311-1316 CHOICE,
-        1317-1336 Oath, 1337-1348 ACTIVATION. Une permutation ici ferait jouer à l'agent une
-        action autre que celle qu'il évalue, sans que rien ne lève — verrouillé par test.
+        1317-1336 Oath, 1337-1348 ACTIVATION, 1349-1358 arme CC, 1359-1378 cohérence,
+        1379-1388 split-fire tir. Une permutation ici ferait jouer à l'agent une action autre que
+        celle qu'il évalue, sans que rien ne lève — verrouillé par test.
         """
         enemies = feats.enemies
         base = self.action_net(latent_pi)
