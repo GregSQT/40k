@@ -9,7 +9,7 @@
 > **L'ÉTAT des décisions (livré / à statuer) fait foi dans `Documentation/Roadmap/` uniquement**
 > (refonte 2026-08-27) — le §9.4 liste encore comme « à statuer » des optionnels livrés les
 > 2026-08-20→24, enregistrés dans `v11_chemin_critique.md#p3-8`.
-> Il fait foi sur le **détail** et l'**état** de V11 ; il ne fait pas foi sur les **priorités**.
+> Il fait foi sur le **détail de conception** ; il ne fait foi ni sur l'**état** ni sur les **priorités**.
 > En cas de désaccord sur l'ordre entre ce fichier et le ROADMAP, **le ROADMAP l'emporte** — et
 > l'écart se corrige dans la même livraison (règle T2 de CLAUDE.md).
 
