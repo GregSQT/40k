@@ -65,6 +65,8 @@ def _run_worker_trajectory(
     masks_seq: list[np.ndarray] = []
     infos_seq: list[dict] = []
     discounted_returns_seq: list[float] = []
+    raw_rewards_seq: list[float] = []   # raw game reward avant normalisation ni clipping
+    bootstrap_seq: list[float] = []     # gamma*V_terminal pour épisodes tronqués, 0.0 sinon
     # Durée réelle de l'épisode terminé à ce step (>0), 0.0 si l'épisode continue,
     # ou -1.0 si l'épisode a commencé dans un rollout précédent (cross-trajectoire non chronométré).
     episode_wall_seconds_seq: list[float] = []
@@ -124,6 +126,7 @@ def _run_worker_trajectory(
             norm_reward = raw_reward
 
         # Bootstrap TimeLimit.truncated — APRÈS normalisation, valeur brute ajoutée (SB3 §exact).
+        _bootstrap = 0.0
         if done:
             # Capturer le timestamp AVANT env.reset() pour exclure le coût de reset
             # (teardown + init de l'épisode suivant) de la durée de l'épisode courant.
@@ -138,7 +141,8 @@ def _run_worker_trajectory(
                     terminal_value = float(
                         frozen_policy.predict_values(obs_term).cpu().numpy().flat[0]
                     )
-                norm_reward += snapshot.gamma * terminal_value
+                _bootstrap = snapshot.gamma * terminal_value
+                norm_reward += _bootstrap
             observation_raw, _ = env.reset()
 
         # Inclure action_masks dans info (parité Phase 2.3)
@@ -150,6 +154,8 @@ def _run_worker_trajectory(
             norm_obs_lists[k].append(v)
         gc = current_raw_obs.get("global_cont", np.zeros(snapshot.obs_mean.shape, dtype=np.float32))
         raw_gc_seq.append(gc.copy())
+        raw_rewards_seq.append(raw_reward)
+        bootstrap_seq.append(_bootstrap)
         actions_seq.append(action)
         rewards_seq.append(norm_reward)
         dones_seq.append(done)
@@ -193,6 +199,8 @@ def _run_worker_trajectory(
         "norm_obs_seq": norm_obs_seq,
         "actions_seq": np.array(actions_seq, dtype=np.int64),
         "rewards_seq": np.array(rewards_seq, dtype=np.float32),
+        "raw_rewards_seq": np.array(raw_rewards_seq, dtype=np.float32),
+        "bootstrap_seq": np.array(bootstrap_seq, dtype=np.float32),
         "dones_seq": np.array(dones_seq, dtype=bool),
         "episode_starts_seq": np.array(episode_starts_seq, dtype=bool),
         "values_seq": np.array(values_seq, dtype=np.float32),

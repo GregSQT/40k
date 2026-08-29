@@ -419,6 +419,7 @@ class TestRunWorkerTrajectory:
             "last_norm_obs", "last_done", "last_value",
             "raw_global_cont", "discounted_returns", "final_discounted_return",
             "episode_wall_seconds_seq",
+            "raw_rewards_seq", "bootstrap_seq",
         }
         missing = required_keys - set(traj.keys())
         assert not missing, f"Clés manquantes dans la trajectoire : {missing}"
@@ -654,6 +655,106 @@ class TestRunWorkerTrajectory:
 
         with pytest.raises(AttributeError):
             _run_worker_trajectory(env, obs, policy_bytes, 2, snap, False)
+
+    def test_raw_rewards_seq_length_and_unclipped(self):
+        """raw_rewards_seq a la bonne longueur et contient les rewards brutes non clippées.
+
+        ROUGE si clé absente ou si raw_rewards_seq[done_step] != raw_reward (clippé à tort).
+        VERT si len == N_STEPS et raw_rewards[done] == 150.0 (non clippé au cold-start).
+        """
+        from ai.maskable_subproc_vec_env import _run_worker_trajectory
+        from ai.vec_normalize_frozen import VecNormalizeSnapshot
+
+        RAW_TERMINAL = 150.0
+        CLIP_REWARD = 10.0
+
+        class TermEnv:
+            action_space = MagicMock()
+            action_space.n = 4
+            _step = 0
+
+            def reset(self, **kw):
+                self._step = 0
+                return {"global_cont": np.zeros(13, dtype=np.float32)}, {}
+
+            def step(self, action):
+                self._step += 1
+                done = self._step >= 3
+                reward = RAW_TERMINAL if done else 0.0
+                return {"global_cont": np.zeros(13, dtype=np.float32)}, reward, done, False, {}
+
+            def get_wrapper_attr(self, name):
+                if name == "action_masks":
+                    return lambda: np.ones(4, dtype=bool)
+                raise AttributeError(name)
+
+        snap = VecNormalizeSnapshot(
+            obs_mean=np.zeros(13, dtype=np.float64), obs_var=np.ones(13, dtype=np.float64),
+            ret_var=1.0, gamma=0.99, epsilon=1e-8, clip_obs=10.0, clip_reward=CLIP_REWARD,
+            norm_obs=False, norm_reward=True, initial_return=0.0,
+        )
+
+        env = TermEnv()
+        obs, _ = env.reset()
+        traj = _run_worker_trajectory(env, obs, self._make_stub_policy_bytes(), 6, snap, True)
+
+        assert len(traj["raw_rewards_seq"]) == 6
+        assert len(traj["bootstrap_seq"]) == 6
+
+        done_indices = [i for i, d in enumerate(traj["dones_seq"]) if d]
+        assert done_indices, "Aucun done dans la trajectoire — env mal configuré"
+        first_done = done_indices[0]
+
+        # raw_rewards_seq : valeur brute non clippée.
+        raw = float(traj["raw_rewards_seq"][first_done])
+        assert raw == pytest.approx(RAW_TERMINAL, rel=1e-5), (
+            f"raw_rewards_seq[done] = {raw}, attendu {RAW_TERMINAL} (non clippé)"
+        )
+
+        # rewards_seq (callbacks) : version clippée (ancien comportement conservé pour affichage).
+        norm_clipped = float(traj["rewards_seq"][first_done])
+        assert norm_clipped == pytest.approx(CLIP_REWARD, rel=1e-5), (
+            f"rewards_seq[done] = {norm_clipped}, attendu {CLIP_REWARD} (clippé au cold-start)"
+        )
+
+    def test_bootstrap_seq_zero_for_terminated(self):
+        """bootstrap_seq est 0.0 pour les épisodes terminés (non tronqués)."""
+        from ai.maskable_subproc_vec_env import _run_worker_trajectory
+        from ai.vec_normalize_frozen import VecNormalizeSnapshot
+
+        class TerminatedEnv:
+            action_space = MagicMock()
+            action_space.n = 4
+            _step = 0
+
+            def reset(self, **kw):
+                self._step = 0
+                return {"global_cont": np.zeros(13, dtype=np.float32)}, {}
+
+            def step(self, action):
+                self._step += 1
+                done = self._step >= 3
+                return {"global_cont": np.zeros(13, dtype=np.float32)}, 1.0, done, False, {}
+
+            def get_wrapper_attr(self, name):
+                if name == "action_masks":
+                    return lambda: np.ones(4, dtype=bool)
+                raise AttributeError(name)
+
+        snap = VecNormalizeSnapshot(
+            obs_mean=np.zeros(13, dtype=np.float64), obs_var=np.ones(13, dtype=np.float64),
+            ret_var=1.0, gamma=0.99, epsilon=1e-8, clip_obs=10.0, clip_reward=10.0,
+            norm_obs=False, norm_reward=False, initial_return=0.0,
+        )
+
+        env = TerminatedEnv()
+        obs, _ = env.reset()
+        traj = _run_worker_trajectory(env, obs, self._make_stub_policy_bytes(), 6, snap, True)
+
+        for i, b in enumerate(traj["bootstrap_seq"]):
+            assert float(b) == pytest.approx(0.0), (
+                f"bootstrap_seq[{i}] = {b}, attendu 0.0 pour terminated (pas de truncation)"
+            )
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -990,3 +1091,29 @@ class TestRetVarRescaling:
         scale = update_vec_normalize_from_trajectories(vn, [], [], [])
 
         assert scale is None, f"Aucun retour fourni → scale devrait être None, obtenu {scale}"
+
+    def test_cold_start_clipping_bug_quantified(self):
+        """Formule : clip×rescale (ancien) ≠ normalisation directe (nouveau).
+
+        Au cold-start (ret_var=1.0, raw_terminal=150, clip=10, new_ret_var=22500) :
+        - Ancien : clip(150/sqrt(1))=10 → ×sqrt(1)/sqrt(22500) = 0.067 (15× trop petit)
+        - Nouveau : clip(150/sqrt(22500)) = 1.0 (correct)
+        """
+        raw_terminal = 150.0
+        clip_reward = 10.0
+        ret_var_initial = 1.0
+        new_ret_var = 22500.0
+        eps = 1e-8
+
+        # Ancien comportement (bugué).
+        norm_clipped = float(np.clip(raw_terminal / np.sqrt(ret_var_initial + eps), -clip_reward, clip_reward))
+        scale_buggy = float(np.sqrt(ret_var_initial + eps) / np.sqrt(new_ret_var + eps))
+        reward_buggy = norm_clipped * scale_buggy
+
+        # Nouveau comportement (fix) : normalise avec new_ret_var.
+        reward_fixed = float(np.clip(raw_terminal / np.sqrt(new_ret_var + eps), -clip_reward, clip_reward))
+
+        assert norm_clipped == pytest.approx(clip_reward, rel=1e-5)
+        assert reward_buggy == pytest.approx(0.0667, rel=0.01)
+        assert reward_fixed == pytest.approx(1.0, rel=0.01)
+        assert reward_fixed / reward_buggy > 10
