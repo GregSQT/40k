@@ -5721,8 +5721,11 @@ def main():
                     _curr, _stg = curriculum_stage
                     # Priorité : early_stop de l'étape, puis early_stop global du curriculum.
                     _early_stop_cfg = _stg.get("early_stop") or _curr.get("early_stop")
-                    _pool_members = stage_pool_members(_stg)
-                    if _early_stop_cfg and _pool_members:
+                    # Early stop uniquement vs le CHAMPION : les ancients ont un poids
+                    # d'entraînement plus faible, leur score converge plus lentement et
+                    # deviendrait le goulot d'étranglement sans rapport avec leur importance réelle.
+                    _champion_label = stage_champion_label(_stg)
+                    if _early_stop_cfg and _champion_label:
                         _es_threshold = float(require_key(_early_stop_cfg, "win_rate_threshold"))
                         _es_min_steps = int(require_key(_early_stop_cfg, "min_steps"))
                         _es_consec = int(require_key(_early_stop_cfg, "consecutive_evals"))
@@ -5730,10 +5733,7 @@ def main():
                         _pool_n_episodes = int(require_key(_gate_cfg, "eval_episodes"))
                         _models_root = get_config_loader().get_models_root()
                         _canonical = build_agent_model_path(_models_root, args.agent)
-                        _pool_archives = [
-                            (stage_model_path(_canonical, m["label"]), m["label"])
-                            for m in _pool_members
-                        ]
+                        _champion_archive = [(stage_model_path(_canonical, _champion_label), _champion_label)]
                         _pool_n_workers = require_key(
                             training_config, "callback_params"
                         ).get("bot_eval_n_workers_intermediate")
@@ -5741,7 +5741,7 @@ def main():
                             require_key(training_config, "callback_params"), "bot_eval_freq"
                         ))
                         _pool_early_stop = PoolEarlyStoppingCallback(
-                            pool_archives=_pool_archives,
+                            pool_archives=_champion_archive,
                             threshold=_es_threshold,
                             min_timesteps=_es_min_steps,
                             consecutive_evals=_es_consec,
@@ -5754,11 +5754,10 @@ def main():
                         )
                         _exploiter_extra_callbacks = [_pool_early_stop]
                         print(
-                            f"🎯 Pool early-stop activé : seuil={_es_threshold:.0%}, "
+                            f"🎯 Pool early-stop activé : seuil={_es_threshold:.0%} vs champion={_champion_label}, "
                             f"min_steps={_es_min_steps}, "
                             f"consecutive_evals={_es_consec}, "
-                            f"n_eval_episodes={_pool_n_episodes}, "
-                            f"pool={[m['label'] for m in _pool_members]}"
+                            f"n_eval_episodes={_pool_n_episodes}"
                         )
 
                 # Always use scenario rotation path for self/bot/all modes,
