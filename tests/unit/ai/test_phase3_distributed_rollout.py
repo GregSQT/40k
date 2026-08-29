@@ -1182,14 +1182,18 @@ class TestRetVarRescaling:
         new_ret_var = float(vn.ret_rms.var)
         assert new_ret_var > 10.0, f"ret_rms.var devrait avoir grandi : {new_ret_var}"
 
-        # Ce que fait le learner : normaliser les raw rewards avec le ret_var post-update.
-        buffer_rewards = np.clip(
-            np.full((10, 2), raw_reward, dtype=np.float32) / np.sqrt(new_ret_var + epsilon),
-            -float(vn.clip_reward), float(vn.clip_reward),
+        # Non-trivial : la normalisation POST-update donne une reward bien plus petite que
+        # la normalisation PRE-update (ret_var=1.0 gelé). Le ratio doit dépasser 5× pour prouver
+        # que l'enjeu du correctif cold-start est réel (cold-start : clip(0.27/1.0)=0.27 vs
+        # 0.27/sqrt(new_ret_var≫1) ≪ 0.27).
+        reward_pre_update = float(
+            np.clip(raw_reward / np.sqrt(1.0 + epsilon), -float(vn.clip_reward), float(vn.clip_reward))
         )
-        np.testing.assert_allclose(
-            float(buffer_rewards.mean()), raw_reward / np.sqrt(new_ret_var + epsilon), rtol=1e-5,
-            err_msg="rewards du buffer ≠ raw_reward / sqrt(new_ret_var+ε)"
+        reward_post_update = raw_reward / np.sqrt(new_ret_var + epsilon)
+        assert reward_pre_update / reward_post_update > 5.0, (
+            f"Le ratio pre/post-update doit être > 5× pour confirmer l'enjeu cold-start "
+            f"(obtenu {reward_pre_update:.4f} / {reward_post_update:.6f} = "
+            f"{reward_pre_update / reward_post_update:.2f})"
         )
 
     def test_update_returns_no_rescaling_factor(self):
@@ -1267,7 +1271,7 @@ class TestCriticOutputsNotRescaled:
             "actions_seq": np.zeros(n, dtype=np.int64),
             "rewards_seq": np.full(n, 0.27, dtype=np.float32),
             "raw_rewards_seq": np.full(n, 0.27, dtype=np.float32),
-            "bootstrap_seq": np.zeros(n, dtype=np.float32),
+            "bootstrap_seq": np.full(n, 0.1, dtype=np.float32),
             "dones_seq": np.zeros(n, dtype=bool),
             "episode_starts_seq": np.zeros(n, dtype=bool),
             # Valeurs du critique franchement non nulles : un re-scaling se verrait.
@@ -1333,7 +1337,7 @@ class TestCriticOutputsNotRescaled:
         callback.on_step.return_value = True
 
         with patch("cloudpickle.dumps", return_value=b""), \
-             patch("ai.patched_ppo.deepcopy", create=True, side_effect=lambda p: p), \
+             patch("copy.deepcopy", side_effect=lambda p: p), \
              patch("ai.patched_ppo.is_masking_supported", return_value=True):
             model._collect_rollouts_distributed(
                 vn, subproc, callback, buf, self.N_STEPS, use_masking=True
@@ -1357,4 +1361,32 @@ class TestCriticOutputsNotRescaled:
                 f"_collect_rollouts_distributed intactes (facteur qui serait appliqué : "
                 f"{would_be_scale:.4f})"
             ),
+        )
+
+        # Verrou bootstrap : bootstrap_seq = 0.1 (non nul) ; tout rescaling se verrait dans rewards.
+        eps = float(vn.epsilon)
+        clip_r = float(vn.clip_reward)
+        raw_reward = 0.27
+        bootstrap_val = 0.1
+        expected_rewards = (
+            np.clip(
+                np.full((self.N_STEPS, self.N_ENVS), raw_reward, dtype=np.float32)
+                / np.sqrt(new_ret_var + eps),
+                -clip_r, clip_r,
+            )
+            + bootstrap_val
+        ).astype(np.float32)
+        np.testing.assert_allclose(
+            buf.rewards, expected_rewards, rtol=1e-5,
+            err_msg=(
+                "rollout_buffer.rewards incorrect : raw_rewards ou bootstrap ont été rescalés "
+                f"(new_ret_var={new_ret_var:.2f}, facteur qui serait appliqué : {would_be_scale:.4f})"
+            ),
+        )
+
+        # Verrou last_values : predict_values retourne 5.0 ; si rescalé ×0.06, returns ≈ 0.3.
+        # Avec GAE et gamma=0.99 sur 4 steps, returns.mean() doit rester > 1.0.
+        assert buf.returns.mean() > 1.0, (
+            f"buf.returns.mean()={buf.returns.mean():.4f} trop bas : "
+            "last_values vraisemblablement rescalé avant compute_returns_and_advantage"
         )
