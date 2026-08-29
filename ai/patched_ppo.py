@@ -11,10 +11,10 @@ Quatre overrides, sans changer les maths :
       métriques). Parité garantie : les valeurs de loss et approx_kl sont mathématiquement
       identiques ; seul l'ordre des transferts change.
 
-2.3 — collect_rollouts() : lit action_masks depuis infos["action_masks"] (posé par
-      MaskableSubprocVecEnv dans le même RPC que step) au lieu d'un second env_method RPC.
-      Sauvegarde ~340/341 RPCs par rollout. Repli sur get_action_masks() si
-      infos ne contiennent pas le masque (DummyVecEnv, tests).
+2.3 — collect_rollouts() : collecte step-by-step, conservée comme chemin des VecEnv qui ne
+      sont pas des MaskableSubprocVecEnv (DummyVecEnv, tests). La lecture des masques depuis
+      infos["action_masks"] qui vivait ici est devenue sans objet en Phase 3 : le seul cas
+      qu'elle servait — MaskableSubprocVecEnv — part désormais en collecte distribuée.
 
 3 — collect_rollouts() (Phase 3 Option A) : détecte MaskableSubprocVecEnv et bascule sur
     _collect_rollouts_distributed(). Chaque worker reçoit une copie sérialisée des poids
@@ -446,7 +446,7 @@ class PatchedMaskablePPO(MaskablePPO):
         n_rollout_steps: int,
         use_masking: bool,
     ) -> bool:
-        """Phase 2.3 — collecte step-by-step avec single RPC (fallback non-MaskableSubproc)."""
+        """Phase 2.3 — collecte step-by-step (chemin des VecEnv non-MaskableSubproc)."""
         self.policy.set_training_mode(False)
         n_steps = 0
         action_masks = None
@@ -456,9 +456,6 @@ class PatchedMaskablePPO(MaskablePPO):
             raise ValueError(
                 "Environment does not support action masking. Consider using ActionMasker wrapper"
             )
-
-        use_inline_masks = use_masking and _get_maskable_subproc_vec_env(env) is not None
-        next_step_masks: np.ndarray | None = None
 
         callback.on_rollout_start()
         # Purger la clé injectée par le mode distribué (si un rollout précédent en avait posé
@@ -470,21 +467,12 @@ class PatchedMaskablePPO(MaskablePPO):
                 obs_tensor = obs_as_tensor(self._last_obs, self.device)  # type: ignore[arg-type]
 
                 if use_masking:
-                    if use_inline_masks and next_step_masks is not None:
-                        action_masks = next_step_masks
-                    else:
-                        action_masks = get_action_masks(env)
+                    action_masks = get_action_masks(env)
 
                 actions, values, log_probs = self.policy(obs_tensor, action_masks=action_masks)
 
             actions = actions.cpu().numpy()
             new_obs, rewards, dones, infos = env.step(actions)
-
-            if use_inline_masks:
-                try:
-                    next_step_masks = np.stack([info["action_masks"] for info in infos])
-                except (KeyError, TypeError):
-                    next_step_masks = None
 
             self.num_timesteps += env.num_envs
             callback.update_locals(locals())
