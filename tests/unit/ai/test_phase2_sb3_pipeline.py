@@ -562,6 +562,13 @@ class TestInlineMasks:
             f"get_action_masks appelé {mock_gam.call_count}× au lieu de 2 "
             f"(un masque d'infos a été réutilisé)"
         )
+        # Les masques stockes dans le buffer doivent etre ceux de get_action_masks (tout-True),
+        # pas les masques des infos (masks_returned, partiellement False pour env 0).
+        expected_masks = np.ones((n_envs, n_actions), dtype=bool)
+        for step_idx in range(2):
+            assert np.array_equal(buf.action_masks[step_idx], expected_masks), (
+                f"step {step_idx} : le buffer contient des masques infos au lieu de get_action_masks"
+            )
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
