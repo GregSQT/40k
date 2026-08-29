@@ -109,6 +109,10 @@ class PatchedMaskablePPO(MaskablePPO):
         # floats si target_kl présent (early-stopping nécessite la valeur scalaire).
         approx_kl_divs_t: list[th.Tensor] = []
         approx_kl_divs: list[float] = []
+        # Diagnostic divergence GPU/CPU — à retirer après identification de la cause.
+        # _e0 = epoch 0 uniquement (divergence pure pré-update, avant tout gradient step).
+        _diag_drift_norms_e0: list[th.Tensor] = []
+        _diag_drift_means_e0: list[th.Tensor] = []
         continue_training = True
         loss: th.Tensor = th.tensor(float("nan"))
 
@@ -125,6 +129,13 @@ class PatchedMaskablePPO(MaskablePPO):
                     action_masks=rollout_data.action_masks,
                 )
                 values = values.flatten()
+
+                # Diagnostic epoch 0 : divergence values_gpu vs old_values_cpu pré-update.
+                if epoch == 0:
+                    with th.no_grad():
+                        _drift = values - rollout_data.old_values
+                        _diag_drift_norms_e0.append(_drift.norm())
+                        _diag_drift_means_e0.append(_drift.abs().mean())
 
                 advantages = rollout_data.advantages
                 if self.normalize_advantage:
@@ -214,6 +225,13 @@ class PatchedMaskablePPO(MaskablePPO):
         self.logger.record("train/clip_range", clip_range)
         if clip_range_vf is not None:
             self.logger.record("train/clip_range_vf", clip_range_vf)
+        # Diagnostic divergence GPU/CPU — magnitudes de référence + drift epoch 0.
+        # value_drift_norm_e0 ≫ 0 → worker values ≠ GPU learner values dès la collecte.
+        # returns_mean vs old_values_mean → détecte un écart de scale (VecNormalize désynced).
+        self.logger.record("diag/value_drift_norm_e0", _mean_item(_diag_drift_norms_e0))
+        self.logger.record("diag/value_drift_mean_abs_e0", _mean_item(_diag_drift_means_e0))
+        self.logger.record("diag/returns_mean", float(self.rollout_buffer.returns.mean()))
+        self.logger.record("diag/old_values_mean", float(self.rollout_buffer.values.mean()))
 
     # ── 2.3 / 3 — collect_rollouts : step-by-step ou distribué ──────────────────────────────────
 
