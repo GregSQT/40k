@@ -45,6 +45,31 @@ PLAYER_ONE_ID = 1
 PLAYER_TWO_ID = 2
 
 
+def _detach_terminal_obs(obs: Any) -> Any:
+    """Copie l'observation rendue au step FINAL d'un episode — frontiere gym/VecEnv.
+
+    Le moteur sert ses observations depuis un buffer scratch reutilise
+    (``engine/observation_builder.py``, ``_ensure_full_obs_scratch``) : l'appelant recoit la
+    MEME reference a chaque appel. ``DummyVecEnv.step_wait`` (SB3 2.9) pose
+    ``info["terminal_observation"] = obs`` PUIS appelle ``env.reset()`` PUIS ``deepcopy`` les
+    infos : sans copie ici, le bootstrap ``TimeLimit.truncated`` de ``ai/patched_ppo.py``
+    evalue ``V(obs initiale de l'episode suivant)`` au lieu de ``V(obs terminale)``. Mesure a
+    n_envs=1 : les 25 cles de ``terminal_observation`` etaient identiques a l'obs post-reset.
+
+    ``MaskableSubprocVecEnv`` fait deja cette copie cote worker (n_envs > 1) ; la copie est
+    faite ici UNE fois par episode, pas a chaque step, donc les deux chemins ne la doublent
+    pas de facon mesurable.
+    """
+    if isinstance(obs, np.ndarray):
+        return obs.copy()
+    if isinstance(obs, dict):
+        return {k: v.copy() for k, v in obs.items()}
+    raise TypeError(
+        f"observation terminale de type inattendu {type(obs).__name__} : "
+        "aucune copie possible avant le reset du VecEnv"
+    )
+
+
 def _read_pending_oath_selection(game_state: Dict[str, Any]) -> Any:
     """Lecteur du mécanisme Oath, à la forme des autres : ``None`` = aucune désignation en attente."""
     return game_state.get("pending_oath_selection")  # get allowed : None = aucune
@@ -1467,6 +1492,8 @@ class BotControlledEnv(gym.Wrapper):
         # vide, et que l'avancement exige les deux conditions — ne PAS invoquer un pool non vide,
         # que le contrat ne garantit pas (decision en attente, intention de zone : pool vide).
         self._deposit_served_decision(ready_decision, terminated, truncated)
+        if terminated or truncated:
+            obs = _detach_terminal_obs(obs)
         return obs, reward, terminated, truncated, info
 
     def _step_with_deferred_observation(self, action, entry_decision=None):
@@ -2153,6 +2180,8 @@ class SelfPlayWrapper(gym.Wrapper):
 
         if debug_mode:
             self._last_step_return_time = time.perf_counter()
+        if terminated or truncated:
+            obs = _detach_terminal_obs(obs)
         return obs, reward, terminated, truncated, info
 
     def _get_frozen_model_action(self) -> int:
