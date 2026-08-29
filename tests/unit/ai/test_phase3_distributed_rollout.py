@@ -36,8 +36,8 @@ def _make_fake_vec_normalize(norm_obs: bool = True, norm_reward: bool = True, n_
     gc_rms.count = 100.0
 
     ret_rms = RunningMeanStd(shape=())
-    ret_rms.mean = np.float64(1.0)
-    ret_rms.var = np.float64(4.0)
+    ret_rms.mean = np.array(1.0, dtype=np.float64)
+    ret_rms.var = np.array(4.0, dtype=np.float64)
     ret_rms.count = 50.0
 
     vn = MagicMock()
@@ -69,6 +69,7 @@ class TestSnapshotVecNormalize:
     def test_snapshot_captures_rms_values(self):
         """snapshot_vec_normalize capture mean/var/count depuis un vrai VecNormalize."""
         from ai.vec_normalize_frozen import snapshot_vec_normalize
+        from stable_baselines3.common.running_mean_std import RunningMeanStd
         from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv
         import gymnasium as gym
         from gymnasium import spaces
@@ -77,7 +78,7 @@ class TestSnapshotVecNormalize:
             observation_space = spaces.Box(-1.0, 1.0, (4,), dtype=np.float32)
             action_space = spaces.Discrete(2)
             def reset(self, **kw): return np.zeros(4, dtype=np.float32), {}
-            def step(self, a): return np.zeros(4, dtype=np.float32), 0.0, False, False, {}
+            def step(self, action): return np.zeros(4, dtype=np.float32), 0.0, False, False, {}
 
         dummy = DummyVecEnv([_StubEnv])
         vn_real = VecNormalize(dummy, norm_obs=True, norm_reward=True, gamma=0.99)
@@ -94,7 +95,9 @@ class TestSnapshotVecNormalize:
         assert snap.norm_obs is True
         assert snap.norm_reward is True
         # Vérifier que mean/var sont copiés (pas les mêmes objets).
-        assert snap.obs_mean is not vn_real.obs_rms.mean
+        obs_rms = vn_real.obs_rms
+        assert isinstance(obs_rms, RunningMeanStd), "obs Box → obs_rms est un RunningMeanStd unique"
+        assert snap.obs_mean is not obs_rms.mean
 
     def test_snapshot_noop_when_no_vec_normalize(self):
         """Sans VecNormalize dans la chaîne, snapshot retourne un no-op (norm_obs=False)."""
@@ -123,7 +126,7 @@ class TestSnapshotVecNormalize:
             observation_space = spaces.Box(-1.0, 1.0, (4,), dtype=np.float32)
             action_space = spaces.Discrete(2)
             def reset(self, **kw): return np.zeros(4, dtype=np.float32), {}
-            def step(self, a): return np.zeros(4, dtype=np.float32), 1.0, False, False, {}
+            def step(self, action): return np.zeros(4, dtype=np.float32), 1.0, False, False, {}
 
         n_envs = 3
         dummy = DummyVecEnv([_StubEnv] * n_envs)
@@ -923,7 +926,7 @@ class TestUpdateVecNormalizeFromTrajectories:
             def reset(self, **kw):
                 return {"global_cont": np.zeros(13, dtype=np.float32)}, {}
 
-            def step(self, a):
+            def step(self, action):
                 return {"global_cont": np.zeros(13, dtype=np.float32)}, 0.0, False, False, {}
 
         vec = DummyVecEnv([StubEnv] * n_envs)
@@ -940,7 +943,9 @@ class TestUpdateVecNormalizeFromTrajectories:
         except Exception:
             pytest.skip("DummyVecEnv avec obs Dict non disponible")
 
-        count_before = float(vn.obs_rms["global_cont"].count)
+        obs_rms = vn.obs_rms
+        assert isinstance(obs_rms, dict), "obs Dict → obs_rms doit être un dict par clé"
+        count_before = float(obs_rms["global_cont"].count)
 
         n_steps = 10
         raw_gc = [
@@ -951,7 +956,7 @@ class TestUpdateVecNormalizeFromTrajectories:
 
         update_vec_normalize_from_trajectories(vn, raw_gc, disc_rets, final_returns)
 
-        count_after = float(vn.obs_rms["global_cont"].count)
+        count_after = float(obs_rms["global_cont"].count)
         assert count_after > count_before, (
             f"obs_rms count n'a pas augmenté après update : {count_before} → {count_after}"
         )
@@ -1018,7 +1023,7 @@ class TestRetVarRescaling:
             def reset(self, **kw):
                 return {"global_cont": np.zeros(13, dtype=np.float32)}, {}
 
-            def step(self, a):
+            def step(self, action):
                 return {"global_cont": np.zeros(13, dtype=np.float32)}, 0.0, False, False, {}
 
         vec = DummyVecEnv([StubEnv] * n_envs)

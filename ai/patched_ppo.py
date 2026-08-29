@@ -274,7 +274,7 @@ class PatchedMaskablePPO(MaskablePPO):
         env: VecEnv,
         subproc: "Any",
         callback: BaseCallback,
-        rollout_buffer: RolloutBuffer,
+        rollout_buffer: MaskableRolloutBuffer | MaskableDictRolloutBuffer,
         n_rollout_steps: int,
         use_masking: bool,
     ) -> bool:
@@ -313,12 +313,13 @@ class PatchedMaskablePPO(MaskablePPO):
         #   ses tenseurs (logits, probs) restent attachés au graphe de calcul et Tensor.__deepcopy__
         #   refuse les non-leaf. Les workers recréent leur distribution dans _distribution_from()
         #   via make_masked_proba_distribution(action_space) si l'attribut est absent.
+        _policy_attrs = vars(self.policy)
         _saved_instance_attrs: dict = {}
         for _k in ("forward", "_uncompiled_original_forward", "action_dist"):
-            if _k in self.policy.__dict__:
-                _saved_instance_attrs[_k] = self.policy.__dict__.pop(_k)
+            if _k in _policy_attrs:
+                _saved_instance_attrs[_k] = _policy_attrs.pop(_k)
         policy_cpu = deepcopy(self.policy).cpu()
-        self.policy.__dict__.update(_saved_instance_attrs)
+        _policy_attrs.update(_saved_instance_attrs)
         policy_bytes = cloudpickle.dumps(policy_cpu)
 
         # 2. Snapshot VecNormalize par worker.
@@ -326,6 +327,7 @@ class PatchedMaskablePPO(MaskablePPO):
 
         # 3. Dispatch : tous les workers reçoivent COLLECT_TRAJECTORY simultanément.
         callback.on_rollout_start()
+        assert self._last_episode_starts is not None
         initial_episode_starts = self._last_episode_starts.copy()
         trajectories = subproc.collect_trajectories(
             policy_bytes, n_rollout_steps, snapshots, initial_episode_starts
@@ -442,11 +444,11 @@ class PatchedMaskablePPO(MaskablePPO):
         self,
         env: VecEnv,
         callback: BaseCallback,
-        rollout_buffer: RolloutBuffer,
+        rollout_buffer: MaskableRolloutBuffer | MaskableDictRolloutBuffer,
         n_rollout_steps: int,
         use_masking: bool,
     ) -> bool:
-        """Phase 2.3 — collecte step-by-step avec single RPC (fallback non-MaskableSubproc)."""
+        """Phase 2.3 — collecte step-by-step avec single RPC (VecEnv non-MaskableSubproc)."""
         self.policy.set_training_mode(False)
         n_steps = 0
         action_masks = None

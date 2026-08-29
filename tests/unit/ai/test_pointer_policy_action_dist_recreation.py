@@ -35,6 +35,7 @@ def policy(tmp_path) -> PointerMaskablePolicy:
             "features_extractor_kwargs": {"cnn_features": 8},
         },
     )
+    assert isinstance(model.policy, PointerMaskablePolicy)
     return model.policy
 
 
