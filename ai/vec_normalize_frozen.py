@@ -122,7 +122,7 @@ def update_vec_normalize_from_trajectories(
     raw_global_cont_batches: list[np.ndarray],
     discounted_returns_batches: list[np.ndarray],
     final_returns_per_worker: list[float],
-) -> "float | None":
+) -> None:
     """Met à jour les stats VecNormalize avec les données brutes collectées par les workers.
 
     Équivalent batch au passage step-by-step dans VecNormalize.step_wait() :
@@ -134,13 +134,17 @@ def update_vec_normalize_from_trajectories(
     l'algorithme parallèle de Welford, donc update(batch) ≠ N×update(step) numériquement mais
     converge vers la même valeur. C'est l'écart intentionnel documenté dans §3 de perf_entrainement.md.
 
-    Retourne le facteur de re-scaling sqrt(old_ret_var+ε)/sqrt(new_ret_var+ε) si ret_rms.var a
-    changé et que norm_reward est actif, None sinon. Le buffer appelant doit multiplier rewards,
-    values et last_values par ce facteur avant de recalculer les avantages GAE.
+    Ne retourne AUCUN facteur de re-scaling, et l'appelant ne doit pas en appliquer un aux
+    sorties du critique. Un tel facteur (sqrt(old_ret_var)/sqrt(new_ret_var)) supposerait que
+    V est proportionnel à 1/sqrt(ret_var), ce qui n'est vrai qu'à convergence : au premier
+    rollout d'un run neuf, old_ret_var vaut 1.0 parce que RunningMeanStd vient d'être initialisé
+    et non parce que le critique aurait appris à cette échelle, et le facteur mesuré (0.060 sur
+    le run du 2026-08-29) écrasait ses prédictions de 17x. SB3 ne rescale jamais les values ;
+    le chemin stepwise non plus.
     """
     vn = _unwrap_vec_normalize(vec_env)
     if vn is None:
-        return None
+        return
 
     if vn.training and vn.norm_obs:
         obs_rms = vn.obs_rms
@@ -148,23 +152,11 @@ def update_vec_normalize_from_trajectories(
             all_raw = np.concatenate(raw_global_cont_batches, axis=0)  # (total_steps, 13)
             obs_rms["global_cont"].update(all_raw)
 
-    scale: float | None = None
     if vn.training and vn.norm_reward and discounted_returns_batches:
-        old_ret_var = float(vn.ret_rms.var)
-        old_count = float(vn.ret_rms.count)
-        eps = float(vn.epsilon)
         all_rets = np.concatenate(discounted_returns_batches, axis=0)
         vn.ret_rms.update(all_rets.reshape(-1))
-        new_ret_var = float(vn.ret_rms.var)
-        # Cold-start : count ≈ 1e-4 (valeur initiale SB3 RunningMeanStd).
-        # old_ret_var=1.0 est l'initialisation, pas l'échelle apprise du critique ;
-        # appliquer sqrt(1)/sqrt(new_var) aux values les écraserait de >10×.
-        if old_count > 1.0 and abs(new_ret_var - old_ret_var) > 1e-6:
-            scale = float(np.sqrt(old_ret_var + eps) / np.sqrt(new_ret_var + eps))
 
     if hasattr(vn, "returns") and vn.returns is not None:
         for i, fr in enumerate(final_returns_per_worker):
             if i < len(vn.returns):
                 vn.returns[i] = fr
-
-    return scale

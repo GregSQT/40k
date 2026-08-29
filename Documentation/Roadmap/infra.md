@@ -9,6 +9,11 @@ Phase 2 = `time/fps` 200 → 226-233 (+13-16 %) ; Phase 4 = gate parallélisé +
 Phase 3 livrée (2026-08-28) : collecte distribuée Option A — chaque worker déroule 340 steps en
 autonome avec policy CPU gelée, retourne sa trajectoire ; learner fait uniquement l'update GPU.
 **Gain time/fps mesuré (2026-08-28) : médiane 487 fps (3 reps x1_debug, machine au repos) vs 226-233 fps Phase 2 → +113 % (×2,1).** Voir §6 perf_entrainement.md.
+Correctif qualité d'apprentissage (2026-08-29) : le re-scaling des sorties du critique par
+`sqrt(old_ret_var)/sqrt(new_ret_var)` est retiré — au rollout 1 d'un run `--new` il valait 0,060
+et écrasait les prédictions de 17×, `ret_var=1.0` n'étant que la valeur d'initialisation de
+`RunningMeanStd`. **Effet sur la vitesse d'apprentissage non mesuré : à relever au prochain
+run `x1_long --new`** (`explained_variance` et `ep_rew_mean` à ~750 k steps, références au journal).
 Goulots restants : aucun identifié de cette ampleur.
 
 → `Documentation/Chantiers/backlog/perf_entrainement.md`

@@ -402,9 +402,16 @@ class PatchedMaskablePPO(MaskablePPO):
         raw_gc_batches = [traj["raw_global_cont"] for traj in trajectories]
         disc_ret_batches = [traj["discounted_returns"] for traj in trajectories]
         final_returns = [traj["final_discounted_return"] for traj in trajectories]
-        _scale = update_vec_normalize_from_trajectories(env, raw_gc_batches, disc_ret_batches, final_returns)
-        _value_scale = _scale if _scale is not None else 1.0
+        update_vec_normalize_from_trajectories(env, raw_gc_batches, disc_ret_batches, final_returns)
 
+        # Aucun re-scaling des sorties du critique (values, last_values, bootstrap). Il a existé
+        # ici jusqu'au 2026-08-29 sous la forme d'un facteur sqrt(old_ret_var)/sqrt(new_ret_var),
+        # qui suppose V proportionnel à 1/sqrt(ret_var) — vrai seulement à convergence. Au premier
+        # rollout d'un run neuf, old_ret_var vaut 1.0 parce que RunningMeanStd vient d'être
+        # initialisé, pas parce que le critique aurait appris à cette échelle : le facteur valait
+        # 0.060 et écrasait ses prédictions de 17x, d'où value_loss 15.1 et explained_variance
+        # -0.37 aux rollouts suivants. SB3 ne rescale jamais, et le chemin stepwise ci-dessous
+        # non plus (`rewards[idx] += self.gamma * terminal_value`, brut).
         vn = _unwrap_vec_normalize(env)
         if vn is not None and vn.norm_reward:
             new_ret_var = float(vn.ret_rms.var)
@@ -412,15 +419,10 @@ class PatchedMaskablePPO(MaskablePPO):
             clip_r = float(vn.clip_reward)
             rollout_buffer.rewards = (
                 np.clip(raw_rewards_all / np.sqrt(new_ret_var + eps), -clip_r, clip_r)
-                + bootstrap_all * _value_scale
+                + bootstrap_all
             ).astype(np.float32)
         else:
-            # Pas de normalisation : raw rewards + bootstrap (bootstrap_all *= _value_scale car
-            # terminal_value est en ancienne normalisation quand ret_var change).
-            rollout_buffer.rewards = (raw_rewards_all + bootstrap_all * _value_scale).astype(np.float32)
-        # _value_scale s'applique toujours aux valeurs (même si rewards non normalisées).
-        rollout_buffer.values *= _value_scale
-        last_values = last_values * _value_scale
+            rollout_buffer.rewards = (raw_rewards_all + bootstrap_all).astype(np.float32)
         rollout_buffer.compute_returns_and_advantage(last_values=last_values, dones=last_dones)
 
         # 7. Mettre à jour l'état du learner.
