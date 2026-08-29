@@ -985,7 +985,7 @@ class TestDistributedRolloutMaskPropagation:
 
         with patch.object(PatchedMaskablePPO, "_setup_model"):
             model = PatchedMaskablePPO.__new__(PatchedMaskablePPO)
-        model.policy = StubPolicy()
+        model.policy = StubPolicy()  # type: ignore[assignment]
         model.device = torch.device("cpu")
         model.action_space = act_space
         model.num_timesteps = 0
@@ -1326,7 +1326,7 @@ class TestCriticOutputsNotRescaled:
             def predict_values(self, obs):
                 return torch.full((n_envs, 1), 5.0)
 
-        model.policy = _StubPolicy()
+        model.policy = _StubPolicy()  # type: ignore[assignment]
         model.device = torch.device("cpu")
         model._last_episode_starts = np.zeros(self.N_ENVS, dtype=bool)
         model.num_timesteps = 0

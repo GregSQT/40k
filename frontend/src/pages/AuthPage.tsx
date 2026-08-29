@@ -63,7 +63,9 @@ export default function AuthPage() {
       throw new Error(errorMessage);
     }
     if (!text) {
-      throw new Error("Le serveur a retourné une réponse vide. Vérifiez que le backend est démarré et accessible.");
+      throw new Error(
+        "Le serveur a retourné une réponse vide. Vérifiez que le backend est démarré et accessible."
+      );
     }
 
     return loginPayload as LoginResponse;
