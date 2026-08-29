@@ -140,7 +140,9 @@ class PatchedMaskablePPO(MaskablePPO):
                         _diag_drift_mean_mb0 = _drift.abs().mean()
                         _lp_drift = log_prob - rollout_data.old_log_prob
                         _diag_logprob_drift_mb0 = _lp_drift.abs().mean()
-                        _diag_ratio_mb0 = th.exp(_lp_drift).mean()
+                        # exp(mean(Δlp)) = ratio géométrique moyen : vaut 1.0 à politique stable,
+                        # insensible aux extrêmes individuels (pas de débordement float32 sur le mean).
+                        _diag_ratio_mb0 = th.exp(_lp_drift.mean())
 
                 advantages = rollout_data.advantages
                 if self.normalize_advantage:
