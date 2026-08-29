@@ -29,7 +29,17 @@ def _make_args(etape: str = "P4") -> SimpleNamespace:
 
 
 def _make_config(models_root: str) -> SimpleNamespace:
-    return SimpleNamespace(get_models_root=lambda: models_root)
+    return SimpleNamespace(
+        get_models_root=lambda: models_root,
+        load_agent_training_config=lambda _agent, _phase: {
+            "callback_params": {
+                "bot_eval_use_subprocess": False,
+                "bot_eval_task_timeout_seconds": 60,
+                "bot_eval_n_workers": 1,
+                "bot_eval_n_workers_gate": 1,
+            }
+        },
+    )
 
 
 def _make_curriculum() -> dict:

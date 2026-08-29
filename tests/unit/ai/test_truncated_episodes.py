@@ -661,6 +661,7 @@ def _install_worker(monkeypatch, be, env) -> None:
             return np.array([0]), None
 
     monkeypatch.setattr(be, "_create_eval_env", lambda **_k: env)
+    monkeypatch.setattr(be, "_eval_worker_load_model_if_needed", lambda _task: None)
     monkeypatch.setattr(be, "_worker_model", _FakeModel(), raising=False)
     monkeypatch.setattr(be, "_worker_obs_normalizer", None, raising=False)
     monkeypatch.setattr(be, "_agent_faction_from_engine", lambda _e: "SpaceMarine")
@@ -724,6 +725,7 @@ def test_the_eval_worker_records_the_truncation_it_meets(monkeypatch) -> None:
             return np.array([0]), None
 
     monkeypatch.setattr(be, "_create_eval_env", lambda **_k: _TruncatingEnv())
+    monkeypatch.setattr(be, "_eval_worker_load_model_if_needed", lambda _task: None)
     monkeypatch.setattr(be, "_worker_model", _FakeModel(), raising=False)
     monkeypatch.setattr(be, "_worker_obs_normalizer", None, raising=False)
     monkeypatch.setattr(be, "_agent_faction_from_engine", lambda _e: "SpaceMarine")

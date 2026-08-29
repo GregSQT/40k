@@ -3,7 +3,7 @@
 Couvre :
   2.1  GpuMaskableDictRolloutBuffer : bool masks, tenseurs GPU, équivalence vs parent.
   2.2  PatchedMaskablePPO.train()   : gradient norm single-reduction, perte identique.
-  2.3  collect_rollouts / inline masks : _env_has_inline_masks, extraction depuis infos.
+  2.3  collect_rollouts / inline masks : _get_maskable_subproc_vec_env, extraction depuis infos.
 
 Tous les tests tournent sur CPU (device="cpu") pour ne pas exiger de GPU en CI.
 Verlock : les valeurs numériques (masques, loss, approx_kl) sont bit-à-bit identiques
@@ -448,25 +448,25 @@ class TestPatchedTrainNumericalParity:
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
-# 2.3 — _env_has_inline_masks + extraction des masques depuis infos
+# 2.3 — _get_maskable_subproc_vec_env + extraction des masques depuis infos
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 
 
 class TestInlineMasks:
 
-    def test_env_has_inline_masks_false_for_dummy(self):
-        """DummyVecEnv ne déclenche pas _env_has_inline_masks."""
-        from ai.patched_ppo import _env_has_inline_masks
+    def test_pas_de_subproc_maskable_pour_dummy(self):
+        """DummyVecEnv ne déclenche pas les masques inline."""
+        from ai.patched_ppo import _get_maskable_subproc_vec_env
         from stable_baselines3.common.vec_env import DummyVecEnv
 
         dummy = MagicMock(spec=DummyVecEnv)
         # Pas d'attribut `venv` → la boucle while s'arrête immédiatement.
         del dummy.venv
-        assert not _env_has_inline_masks(dummy)
+        assert _get_maskable_subproc_vec_env(dummy) is None
 
-    def test_env_has_inline_masks_true_for_maskable(self):
-        """MaskableSubprocVecEnv déclenche _env_has_inline_masks."""
-        from ai.patched_ppo import _env_has_inline_masks
+    def test_subproc_maskable_trouve_sous_un_wrapper(self):
+        """MaskableSubprocVecEnv déclenche les masques inline."""
+        from ai.patched_ppo import _get_maskable_subproc_vec_env
         from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
 
         # VecNormalize factice wrappant un MaskableSubprocVecEnv.
@@ -475,12 +475,16 @@ class TestInlineMasks:
         outer = MagicMock()
         outer.venv = inner
 
-        assert _env_has_inline_masks(outer)
+        assert _get_maskable_subproc_vec_env(outer) is inner
 
-    def test_collect_rollouts_extracts_masks_from_infos(self):
-        """collect_rollouts lit les masques depuis infos quand use_inline_masks=True."""
-        from ai.patched_ppo import PatchedMaskablePPO, _env_has_inline_masks
-        from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
+    def test_collect_rollouts_stepwise_interroge_lenv_a_chaque_step(self):
+        """Sans MaskableSubprocVecEnv, le stepwise redemande les masques a chaque step.
+
+        La lecture des masques depuis infos["action_masks"] a ete retiree du stepwise : le seul
+        cas qu'elle servait, MaskableSubprocVecEnv, part en collecte distribuee et n'atteint
+        jamais ce chemin. Ce test verrouille qu'aucun masque d'infos n'est reutilise ici.
+        """
+        from ai.patched_ppo import PatchedMaskablePPO
         from sb3_contrib.common.maskable.buffers import MaskableDictRolloutBuffer
 
         n_envs = 2
@@ -488,12 +492,9 @@ class TestInlineMasks:
         obs_space = _make_dict_obs_space()
         act_space = _make_discrete_action_space(n_actions)
 
-        # VecEnv factice avec MaskableSubprocVecEnv au fond.
-        inner_vec = MagicMock(spec=MaskableSubprocVecEnv)
-        del inner_vec.venv
-
         env_mock = MagicMock()
-        env_mock.venv = inner_vec
+        # Pas de `venv` : aucun MaskableSubprocVecEnv dans la chaine, donc chemin stepwise.
+        del env_mock.venv
         env_mock.num_envs = n_envs
         env_mock.observation_space = obs_space
         env_mock.action_space = act_space
@@ -548,11 +549,7 @@ class TestInlineMasks:
         callback.on_rollout_end = MagicMock()
         model._update_info_buffer = MagicMock()
 
-        # Espionner get_action_masks : doit être appelé UNE SEULE FOIS (bootstrap step 0).
-        # Phase 3 : forcer le chemin stepwise (pas de MaskableSubprocVecEnv réel ici).
-        with patch("ai.patched_ppo.get_action_masks") as mock_gam, \
-             patch("ai.patched_ppo._get_maskable_subproc_vec_env", return_value=None):
-            # Bootstrap : get_action_masks retourne des masques plein pour step 0.
+        with patch("ai.patched_ppo.get_action_masks") as mock_gam:
             mock_gam.return_value = np.ones((n_envs, n_actions), dtype=bool)
 
             result = model.collect_rollouts(
@@ -560,10 +557,10 @@ class TestInlineMasks:
             )
 
         assert result is True
-        # get_action_masks ne doit être appelé qu'au step 0 (1 fois).
-        assert mock_gam.call_count == 1, (
-            f"get_action_masks appelé {mock_gam.call_count}× au lieu de 1 "
-            f"(2e RPC non supprimé)"
+        # Un appel par step : les masques poses dans infos par le step mock sont ignores.
+        assert mock_gam.call_count == 2, (
+            f"get_action_masks appelé {mock_gam.call_count}× au lieu de 2 "
+            f"(un masque d'infos a été réutilisé)"
         )
 
 
