@@ -1035,7 +1035,9 @@ class TestRetVarRescaling:
 
     def test_rescaling_corrects_rewards_and_preserves_gae_coherence(self):
         """Après update, rewards et values rescalés par le même facteur → rewards_mean réduit,
-        et les deltas GAE restent cohérents (delta_t = scale * old_delta_t)."""
+        et les deltas GAE restent cohérents (delta_t = scale * old_delta_t).
+        Précondition : VecNormalize réchauffé (count > 1.0, var ≈ 1.0) pour modéliser un état
+        post-entraînement réel, distinct du cold-start initial (count = 1e-4)."""
         from ai.vec_normalize_frozen import update_vec_normalize_from_trajectories
 
         try:
@@ -1043,8 +1045,14 @@ class TestRetVarRescaling:
         except Exception:
             pytest.skip("DummyVecEnv Dict non disponible")
 
+        # Réchauffage : 200 retours N(0,1) → count ≈ 200 > 1.0, var ≈ 1.0.
+        # Simule un état où la policy s'est calibrée sur des returns de faible variance.
+        vn.ret_rms.update(np.random.default_rng(99).normal(0.0, 1.0, size=(200,)))
+        assert float(vn.ret_rms.count) > 1.0, "Précondition réchauffage : count > 1.0"
+
         epsilon = float(vn.epsilon)
-        old_ret_var = float(vn.ret_rms.var)  # = 1.0
+        old_ret_var = float(vn.ret_rms.var)  # ≈ 1.0
+        assert abs(old_ret_var - 1.0) < 0.3, f"Après réchauffage N(0,1), ret_var doit être ≈ 1.0 : {old_ret_var}"
 
         # Buffer simulé : rewards normalisées avec ret_var=1.0 → ≈ raw rewards ≈ 0.27.
         # Values simulées cohérentes avec l'ancienne normalisation (policy calibrée pour ret_var=1.0).
@@ -1122,3 +1130,41 @@ class TestRetVarRescaling:
         assert reward_buggy == pytest.approx(0.0667, rel=0.01)
         assert reward_fixed == pytest.approx(1.0, rel=0.01)
         assert reward_fixed / reward_buggy > 10
+
+    def test_cold_start_no_value_scale(self):
+        """Au cold-start (ret_rms.count initial ≈ 1e-4), update_vec_normalize_from_trajectories
+        doit retourner None : old_ret_var=1.0 est l'initialisation du RunningMeanStd, pas
+        l'échelle apprise du critique, et appliquer sqrt(1)/sqrt(new_var) aux values les
+        écraserait de >10× (facteur mesuré ≈ 0.06 pour std=20, soit 17× d'écrasement)."""
+        from ai.vec_normalize_frozen import update_vec_normalize_from_trajectories
+
+        try:
+            vn = self._make_vec_normalize_with_initial_ret_var(n_envs=2)
+        except Exception:
+            pytest.skip("DummyVecEnv Dict non disponible")
+
+        initial_count = float(vn.ret_rms.count)
+        assert initial_count < 1e-3, (
+            f"Précondition : ret_rms.count initial={initial_count} attendu ≈ 1e-4 (SB3 epsilon)"
+        )
+
+        # Returns d'échelle réaliste : std ≈ 20 → new_ret_var ≈ 400 → sans garde scale ≈ 0.05
+        rng = np.random.default_rng(42)
+        disc_rets = rng.normal(loc=50.0, scale=20.0, size=(64,))
+        disc_ret_batches = [disc_rets[:32], disc_rets[32:]]
+        final_returns = [float(disc_rets[31]), float(disc_rets[-1])]
+
+        scale = update_vec_normalize_from_trajectories(vn, [], disc_ret_batches, final_returns)
+
+        new_ret_var = float(vn.ret_rms.var)
+        naive_scale = float(np.sqrt(1.0 + float(vn.epsilon)) / np.sqrt(new_ret_var + float(vn.epsilon)))
+        assert scale is None, (
+            f"Cold-start (count initial={initial_count:.2e}) : scale devrait être None "
+            f"mais vaut {scale} — appliquer ce facteur aux values les écraserait de "
+            f"{1.0 / naive_scale:.1f}× (naive_scale={naive_scale:.4f}, new_ret_var={new_ret_var:.1f})"
+        )
+        # Contrôle : sans la garde, le facteur aurait écrasé les values de plus de 10×.
+        assert naive_scale < 0.1, (
+            f"Le facteur naïf ({naive_scale:.4f}) devrait être < 0.1 pour confirmer "
+            f"que la garde cold-start est nécessaire (new_ret_var={new_ret_var:.1f})"
+        )
