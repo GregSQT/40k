@@ -12,8 +12,16 @@ autonome avec policy CPU gelée, retourne sa trajectoire ; learner fait uniqueme
 Correctif qualité d'apprentissage (2026-08-29) : le re-scaling des sorties du critique par
 `sqrt(old_ret_var)/sqrt(new_ret_var)` est retiré — au rollout 1 d'un run `--new` il valait 0,060
 et écrasait les prédictions de 17×, `ret_var=1.0` n'étant que la valeur d'initialisation de
-`RunningMeanStd`. **Effet sur la vitesse d'apprentissage non mesuré : à relever au prochain
-run `x1_long --new`** (`explained_variance` et `ep_rew_mean` à ~750 k steps, références au journal).
+`RunningMeanStd`. Ce retrait était justifié mais n'était PAS la cause du non-apprentissage.
+**ROOT CAUSE trouvée et corrigée (2026-08-29) : aliasing des buffers scratch d'observation** —
+le worker Phase 3 stockait les obs par référence pendant 340 steps alors que le moteur les sert
+dans des buffers réutilisés (`observation_builder`), donc le buffer du learner contenait l'état
+FINAL répliqué (tout sauf `global_cont`) ; preuves : `diag/ratio_mb0` 0,92-0,95 au lieu de 1,
+`explained_variance` figée à ~0 sur 47 updates, `last_values` GPU/CPU pourtant identiques.
+Fix : copie profonde dans `normalize_obs_with_snapshot` + `terminal_observation` (2 sites) ;
+verrous `test_obs_stored_are_copies_not_scratch_refs` + `test_terminal_observation_is_copied_before_reset`
+(rouges constatés). Détail au journal §6 de `perf_entrainement.md`. **Validation en cours :
+run `--etape P2` lancé le 2026-08-29, critère `ratio_mb0 = 1,0` + `explained_variance` croissante.**
 Goulots restants : aucun identifié de cette ampleur.
 
 → `Documentation/Chantiers/backlog/perf_entrainement.md`
