@@ -34,28 +34,25 @@ class _ScratchEnv(gymnasium.Env):
     def step(self, action):
         self._step_count += 1
         self._buf[:] = float(self._step_count)
-        obs = {"x": self._buf}
-        return obs, 0.0, True, False, {}  # terminated=True → done immédiat
+        return {"x": self._buf}, 0.0, True, False, {}  # terminated=True → done immédiat
 
 
-def _make_env():
-    env = _ScratchEnv()
-    env.reset()
-    return env
-
-
-def test_terminal_observation_is_pre_reset():
-    """terminal_observation doit contenir la valeur terminale, pas la valeur post-reset."""
-    venv = PatchedDummyVecEnv([_make_env])
+@pytest.fixture
+def stepped_venv():
+    """PatchedDummyVecEnv après un step (episode terminé au step 1)."""
+    venv = PatchedDummyVecEnv([_ScratchEnv])
     venv.reset()
-
     venv.step_async(np.array([0]))
     _, _, dones, infos = venv.step_wait()
+    return venv, dones, infos
 
+
+def test_terminal_observation_is_pre_reset(stepped_venv):
+    """terminal_observation doit contenir la valeur terminale, pas la valeur post-reset."""
+    _, dones, infos = stepped_venv
     assert dones[0], "l'épisode doit être terminé"
     term_obs = infos[0]["terminal_observation"]
     assert term_obs is not None, "terminal_observation absent"
-
     # Valeur terminale = 1.0 (premier step) ; valeur post-reset = 0.0
     assert float(term_obs["x"][0]) == 1.0, (
         f"terminal_observation contient la valeur post-reset ({term_obs['x'][0]})"
@@ -63,19 +60,13 @@ def test_terminal_observation_is_pre_reset():
     )
 
 
-def test_terminal_observation_is_owned_copy():
+def test_terminal_observation_is_owned_copy(stepped_venv):
     """terminal_observation ne doit pas partager le buffer scratch du moteur."""
-    venv = PatchedDummyVecEnv([_make_env])
-    venv.reset()
-
-    venv.step_async(np.array([0]))
-    _, _, _, infos = venv.step_wait()
+    venv, _, infos = stepped_venv
     term_obs = infos[0]["terminal_observation"]
-
     # Faire un second step pour écraser le scratch — term_obs ne doit pas changer.
     venv.step_async(np.array([0]))
     venv.step_wait()
-
     assert float(term_obs["x"][0]) == 1.0, (
         "terminal_observation partage le buffer scratch : écrasé par le step suivant"
     )

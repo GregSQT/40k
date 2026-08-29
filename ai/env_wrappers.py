@@ -18,6 +18,7 @@ import hashlib
 import numpy as np
 from shared.data_validation import require_key, require_positive_int, require_present
 from ai.curriculum import ramped_ratio
+from ai.vec_normalize_frozen import copy_obs_dict
 from shared.torch_safe_globals import register_torch_safe_globals
 from engine.action_decoder import ActionValidationError
 from engine.debug_trace import CH_BOT_LOOP, channel_enabled, trace
@@ -63,7 +64,7 @@ def _detach_terminal_obs(obs: Any) -> Any:
     if isinstance(obs, np.ndarray):
         return obs.copy()
     if isinstance(obs, dict):
-        return {k: v.copy() for k, v in obs.items()}
+        return copy_obs_dict(obs)
     raise TypeError(
         f"observation terminale de type inattendu {type(obs).__name__} : "
         "aucune copie possible avant le reset du VecEnv"
