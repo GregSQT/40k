@@ -1289,3 +1289,10 @@ class TestRetVarRescaling:
             f"Le facteur naïf ({naive_scale:.4f}) devrait être < 0.1 pour confirmer "
             f"que la garde cold-start est nécessaire (new_ret_var={new_ret_var:.1f})"
         )
+        # ret_rms.update() doit être appelé même au cold-start : patched_ppo.py normalise
+        # les rewards avec new_ret_var post-update. Un déplacement de update() dans le bloc
+        # garde laisserait les rewards normalisées avec var=1.0, restaurant le bug d'écrasement.
+        assert new_ret_var > 10.0, (
+            f"ret_rms.update() doit s'exécuter indépendamment de la garde cold-start : "
+            f"new_ret_var={new_ret_var:.2f} (attendu > 10)"
+        )
