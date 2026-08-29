@@ -570,6 +570,78 @@ class TestRunWorkerTrajectory:
             f"Le bootstrap doit être ajouté APRÈS normalisation (sémantique SB3)."
         )
 
+    def test_obs_stored_are_copies_not_scratch_refs(self):
+        """Les obs stockées dans la trajectoire sont des COPIES, pas des références au scratch.
+
+        Le moteur réel sert ses observations dans des buffers RÉUTILISÉS entre steps
+        (engine/observation_builder._empty_squad_observation : « ne jamais stocker le dict
+        retourné au-delà du step courant »), et normalize_obs_with_snapshot ne copie que
+        global_cont. Si le worker stocke les autres clés par référence, np.stack en fin de
+        trajectoire produit n_steps répliques de l'état FINAL : le learner s'entraîne sur
+        des obs découplées des actions/rewards (root cause du non-apprentissage Phase 3,
+        run_20260829-132022 : ratio_mb0 ≈ 0.93, explained_variance figée à ~0).
+
+        ROUGE si norm_obs_seq["grid"][i] vaut la valeur du dernier step pour tout i.
+        VERT si norm_obs_seq["grid"][i] vaut la valeur servie au step i.
+        """
+        from ai.maskable_subproc_vec_env import _run_worker_trajectory
+
+        _GC_DIM = self.GC_DIM
+        _N_ACTIONS = self.N_ACTIONS
+
+        class ScratchEnv:
+            """Env qui mute EN PLACE les mêmes tableaux d'obs à chaque step (contrat moteur)."""
+
+            def __init__(self):
+                self._buf = {
+                    "global_cont": np.zeros(_GC_DIM, dtype=np.float32),
+                    "grid": np.zeros(3, dtype=np.float32),
+                }
+                self._step_count = 0
+
+            def _obs(self):
+                self._buf["global_cont"].fill(float(self._step_count))
+                self._buf["grid"].fill(float(self._step_count))
+                return self._buf
+
+            def reset(self, **kw):
+                self._step_count = 0
+                return self._obs(), {}
+
+            def step(self, action):
+                self._step_count += 1
+                return self._obs(), 1.0, False, False, {}
+
+            def get_wrapper_attr(self, name):
+                if name == "action_masks":
+                    return lambda: np.ones(_N_ACTIONS, dtype=bool)
+                raise AttributeError(name)
+
+        env = ScratchEnv()
+        obs, _ = env.reset()
+        policy_bytes = self._make_stub_policy_bytes()
+        snap = self._make_snapshot()
+
+        traj = _run_worker_trajectory(env, obs, policy_bytes, self.N_STEPS, snap, False)
+
+        # Au step i le worker a lu la valeur i (reset sert 0, chaque step sert son compteur).
+        for i in range(self.N_STEPS):
+            np.testing.assert_allclose(
+                traj["norm_obs_seq"]["grid"][i],
+                np.full(3, float(i), dtype=np.float32),
+                rtol=1e-5,
+                err_msg=(
+                    f"norm_obs_seq['grid'][{i}] ne vaut pas la valeur du step {i} — "
+                    f"le worker a stocké une référence au buffer scratch de l'env"
+                ),
+            )
+            np.testing.assert_allclose(
+                traj["norm_obs_seq"]["global_cont"][i],
+                np.full(_GC_DIM, float(i), dtype=np.float32),
+                rtol=1e-5,
+                err_msg=f"norm_obs_seq['global_cont'][{i}] ne vaut pas la valeur du step {i}",
+            )
+
     def test_no_double_normalization_across_trajectories(self):
         """last_raw_obs est brut : une 2e collecte ne re-normalise pas l'obs initiale.
 

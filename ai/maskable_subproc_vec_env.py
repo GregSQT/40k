@@ -106,7 +106,10 @@ def _run_worker_trajectory(
         raw_reward = float(raw_reward)
 
         if done:
-            info["terminal_observation"] = observation_raw
+            # Copie : observation_raw vit dans le scratch réutilisé du moteur, et cet info
+            # est stocké dans infos_seq jusqu'à la fin de la trajectoire (même contrat que
+            # les obs de norm_obs_lists ci-dessous).
+            info["terminal_observation"] = {k: v.copy() for k, v in observation_raw.items()}
 
         # Tracking VecNormalize.returns avec raw_reward (avant normalisation).
         discounted_return = snapshot.gamma * discounted_return + raw_reward
@@ -157,6 +160,9 @@ def _run_worker_trajectory(
         # Inclure action_masks dans info (parité Phase 2.3)
         info["action_masks"] = mask
 
+        # Stockage direct sûr : les tableaux de norm_obs sont des copies possédées
+        # (normalize_obs_with_snapshot copie AVANT env.step — copier ici serait trop tard,
+        # le scratch du moteur est déjà muté par le step).
         for k, v in norm_obs.items():
             if k not in norm_obs_lists:
                 norm_obs_lists[k] = []

@@ -98,22 +98,29 @@ def snapshot_vec_normalize(vec_env: Any, worker_idx: int) -> "VecNormalizeSnapsh
 
 
 def normalize_obs_with_snapshot(obs_dict: dict, snapshot: "VecNormalizeSnapshot") -> dict:
-    """Retourne une copie de obs_dict avec global_cont normalisé par stats gelées.
+    """Retourne une copie PROFONDE de obs_dict avec global_cont normalisé par stats gelées.
 
     Seule clé normalisée : "global_cont" (comportement identique au VecNormalize de production
     configuré avec norm_obs_keys=["global_cont"]).
-    """
-    if not snapshot.norm_obs or "global_cont" not in obs_dict:
-        return dict(obs_dict)
 
-    result = dict(obs_dict)
+    COPIE PROFONDE OBLIGATOIRE : le moteur sert ses observations dans des buffers scratch
+    RÉUTILISÉS entre steps (engine/observation_builder._empty_squad_observation : « ne jamais
+    stocker le dict retourné au-delà du step courant »), et env.step() les mute AVANT que la
+    trajectoire distribuée ne les stocke. Une copie superficielle remplissait le rollout
+    buffer de n_steps répliques de l'état final (root cause du non-apprentissage Phase 3,
+    run_20260829-132022) ; une copie au site de stockage capturait l'état POST-step.
+    Les tableaux retournés appartiennent donc à l'appelant.
+    """
+    result = {k: v.copy() for k, v in obs_dict.items()}
+    if not snapshot.norm_obs or "global_cont" not in obs_dict:
+        return result
+
     # numpy upcast float32 → float64 implicitement lors de l'arithmétique avec obs_mean (float64)
-    normalized = np.clip(
+    result["global_cont"] = np.clip(
         (obs_dict["global_cont"] - snapshot.obs_mean) / np.sqrt(snapshot.obs_var + snapshot.epsilon),
         -snapshot.clip_obs,
         snapshot.clip_obs,
     ).astype(np.float32)
-    result["global_cont"] = normalized
     return result
 
 
