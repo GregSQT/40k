@@ -642,6 +642,68 @@ class TestRunWorkerTrajectory:
                 err_msg=f"norm_obs_seq['global_cont'][{i}] ne vaut pas la valeur du step {i}",
             )
 
+    def test_terminal_observation_is_copied_before_reset(self):
+        """info["terminal_observation"] capture l'état TERMINAL, pas le scratch post-reset.
+
+        Même motif que test_obs_stored_are_copies_not_scratch_refs : env.reset() remplit
+        les MÊMES buffers juste après le done, et infos_seq est conservé jusqu'à la fin
+        de la trajectoire. ROUGE si terminal_observation référence le scratch (contenu =
+        dernier état servi, pas l'état terminal).
+        """
+        from ai.maskable_subproc_vec_env import _run_worker_trajectory
+
+        _GC_DIM = self.GC_DIM
+        _N_ACTIONS = self.N_ACTIONS
+
+        class ScratchTruncEnv:
+            """Scratch muté en place + truncation au step 3 (compteur encodé dans l'obs)."""
+
+            def __init__(self):
+                self._buf = {
+                    "global_cont": np.zeros(_GC_DIM, dtype=np.float32),
+                    "grid": np.zeros(3, dtype=np.float32),
+                }
+                self._step_count = 0
+
+            def _obs(self):
+                self._buf["global_cont"].fill(float(self._step_count))
+                self._buf["grid"].fill(float(self._step_count))
+                return self._buf
+
+            def reset(self, **kw):
+                self._step_count = 0
+                return self._obs(), {}
+
+            def step(self, action):
+                self._step_count += 1
+                truncated = self._step_count >= 3
+                return self._obs(), 1.0, False, truncated, {}
+
+            def get_wrapper_attr(self, name):
+                if name == "action_masks":
+                    return lambda: np.ones(_N_ACTIONS, dtype=bool)
+                raise AttributeError(name)
+
+        env = ScratchTruncEnv()
+        obs, _ = env.reset()
+        policy_bytes = self._make_stub_policy_bytes()
+        snap = self._make_snapshot()
+
+        traj = _run_worker_trajectory(env, obs, policy_bytes, self.N_STEPS, snap, False)
+
+        done_idx = next(i for i, d in enumerate(traj["dones_seq"]) if d)
+        term_obs = traj["infos_seq"][done_idx]["terminal_observation"]
+        # L'état terminal vaut done_idx + 1 (le compteur après le step qui a truncate).
+        np.testing.assert_allclose(
+            term_obs["grid"],
+            np.full(3, float(done_idx + 1), dtype=np.float32),
+            rtol=1e-5,
+            err_msg=(
+                "terminal_observation ne contient pas l'état terminal — référence au "
+                "scratch mutée par env.reset()"
+            ),
+        )
+
     def test_no_double_normalization_across_trajectories(self):
         """last_raw_obs est brut : une 2e collecte ne re-normalise pas l'obs initiale.
 

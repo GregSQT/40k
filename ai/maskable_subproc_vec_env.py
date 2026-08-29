@@ -167,6 +167,10 @@ def _run_worker_trajectory(
             if k not in norm_obs_lists:
                 norm_obs_lists[k] = []
             norm_obs_lists[k].append(v)
+        # Lecture POST-step voulue (contrairement aux obs ci-dessus) : parité avec le flux
+        # que VecNormalize voit en stepwise — step_wait met à jour obs_rms avec l'obs
+        # RETOURNÉE par le step. Le seul consommateur (update_vec_normalize_from_trajectories)
+        # concatène puis update : ensembliste, aucun alignement par index avec norm_obs_seq.
         gc = current_raw_obs.get("global_cont", np.zeros(snapshot.obs_mean.shape, dtype=np.float32))
         raw_gc_seq.append(gc.copy())
         raw_rewards_seq.append(raw_reward)
@@ -248,7 +252,10 @@ def _maskable_worker(
                 done = terminated or truncated
                 info["TimeLimit.truncated"] = truncated and not terminated
                 if done:
-                    info["terminal_observation"] = observation
+                    # Copie : env.reset() ci-dessous mute le scratch d'obs du moteur AVANT
+                    # que remote.send() ne pickle info — sans copie, terminal_observation
+                    # contient l'état post-reset (même motif que _run_worker_trajectory).
+                    info["terminal_observation"] = {k: v.copy() for k, v in observation.items()}
                     observation, reset_info = env.reset()
                 info["action_masks"] = env.get_wrapper_attr("action_masks")()
                 _worker_last_obs = observation
