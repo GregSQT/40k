@@ -130,7 +130,13 @@ def _run_worker_trajectory(
         if done:
             # Capturer le timestamp AVANT env.reset() pour exclure le coût de reset
             # (teardown + init de l'épisode suivant) de la durée de l'épisode courant.
+            # Premier done d'un épisode commencé dans le rollout précédent : la durée ne
+            # couvre qu'une fraction de l'épisode réel → sentinel -1.0.
             _episode_done_time = _time.perf_counter()
+            episode_wall_seconds_seq.append(
+                -1.0 if _episode_cross_traj else _episode_done_time - _episode_wall_start
+            )
+            _episode_cross_traj = False
             if truncated and not terminated:
                 norm_term = normalize_obs_with_snapshot(observation_raw, snapshot)
                 with torch.no_grad():
@@ -144,6 +150,9 @@ def _run_worker_trajectory(
                 _bootstrap = snapshot.gamma * terminal_value
                 norm_reward += _bootstrap
             observation_raw, _ = env.reset()
+            _episode_wall_start = _time.perf_counter()
+        else:
+            episode_wall_seconds_seq.append(0.0)
 
         # Inclure action_masks dans info (parité Phase 2.3)
         info["action_masks"] = mask
@@ -164,18 +173,6 @@ def _run_worker_trajectory(
         log_probs_seq.append(log_prob)
         masks_seq.append(mask.copy())
         infos_seq.append(info)
-
-        if done:
-            if _episode_cross_traj:
-                # Premier done d'un épisode commencé dans le rollout précédent :
-                # la durée ne couvre qu'une fraction de l'épisode réel → sentinel -1.0.
-                episode_wall_seconds_seq.append(-1.0)
-            else:
-                episode_wall_seconds_seq.append(_episode_done_time - _episode_wall_start)
-            _episode_wall_start = _time.perf_counter()
-            _episode_cross_traj = False
-        else:
-            episode_wall_seconds_seq.append(0.0)
 
         current_raw_obs = observation_raw
         current_episode_start = done

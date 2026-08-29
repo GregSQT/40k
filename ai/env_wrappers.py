@@ -996,11 +996,13 @@ class BotControlledEnv(gym.Wrapper):
             return 1
         if self.agent_seat_mode == "p2":
             return 2
-        # random mode
+        # random mode : _resolve_seat_p2_ratio garantit un ratio non-None dans ce mode.
+        ratio = self._agent_seat_p2_ratio
+        assert ratio is not None
         seed_material = f"{self._global_seed}:{self._env_rank}:{self._episode_index}"
         seed_hash = hashlib.sha256(seed_material.encode("utf-8")).hexdigest()
         selector = int(seed_hash[:8], 16)
-        return 2 if (selector / 2 ** 32) < self._agent_seat_p2_ratio else 1
+        return 2 if (selector / 2 ** 32) < ratio else 1
 
     def _apply_episode_seat(self) -> None:
         """Set controlled/opponent players in engine config and game_state."""
