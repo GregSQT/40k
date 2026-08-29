@@ -6,6 +6,7 @@ Couvre :
   3.3  _run_worker_trajectory : structure, bootstrap TimeLimit.truncated, semantics.
   3.4  collect_rollouts dispatch : bascule vers _collect_rollouts_distributed si MaskableSubprocVecEnv.
   3.5  update_vec_normalize_from_trajectories : mise à jour batch des stats.
+  3.6  Normalisation des rewards par le ret_var post-update, sans re-scaling du critique.
 
 Tous les tests tournent sur CPU. Pas de spawn de vrais workers — les trajectoires sont
 synthétiques pour tester la mécanique du learner indépendamment des workers.
@@ -994,108 +995,105 @@ class TestUpdateVecNormalizeFromTrajectories:
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
-# 3.6 — Re-scaling rewards Phase 3 après mise à jour ret_rms
+# 3.6 — Normalisation des rewards Phase 3 après mise à jour ret_rms
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 
 
-class TestRetVarRescaling:
-    """Vérifie que le re-scaling des rewards compense le ret_var gelé en Phase 3.
+def _cold_start_obs_space():
+    """Espace d'observation minimal des stubs 3.6 : la seule clé que VecNormalize normalise."""
+    from gymnasium import spaces
+    return spaces.Dict({"global_cont": spaces.Box(-1.0, 1.0, (13,), dtype=np.float32)})
 
-    Problème : en Phase 3, le snapshot gèle ret_var=1.0 (valeur initiale). Les workers
-    normalisent les rewards par sqrt(1.0+ε) ≈ 1 → rewards_mean ≈ raw rewards ≈ 0.27.
-    Après update_vec_normalize_from_trajectories, ret_rms.var reflète la vraie variance
-    (p. ex. 729 pour des retours avec std≈27). Sans re-scaling, value_loss reste gonflé.
-    Avec le fix, rewards_buffer × sqrt(old/new) ramène rewards_mean à ~0.01.
+
+def _make_cold_start_vec_normalize(n_envs: int = 2):
+    """VecNormalize réel avec ret_rms.var=1.0 — l'état d'un run neuf au rollout 1."""
+    from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv
+    import gymnasium as gym
+    from gymnasium import spaces
+
+    class StubEnv(gym.Env):
+        observation_space = _cold_start_obs_space()
+        action_space = spaces.Discrete(4)
+
+        def reset(self, **kw):
+            return {"global_cont": np.zeros(13, dtype=np.float32)}, {}
+
+        def step(self, action):
+            return {"global_cont": np.zeros(13, dtype=np.float32)}, 0.0, False, False, {}
+
+    vec = DummyVecEnv([StubEnv] * n_envs)
+    vn = VecNormalize(vec, norm_obs=False, norm_reward=True, gamma=0.99)
+    vn.reset()
+    # ret_rms.var vaut 1.0 à l'initialisation (état Phase 3 rollout 1).
+    assert abs(float(vn.ret_rms.var) - 1.0) < 1e-9, "Précondition : ret_rms.var initial = 1.0"
+    return vn
+
+
+class TestRetVarRescaling:
+    """Vérifie la normalisation des rewards par le ret_var POST-update, sans toucher au critique.
+
+    En Phase 3, le snapshot gèle ret_var pendant la collecte : au premier rollout d'un run neuf
+    il vaut 1.0, la valeur d'initialisation de RunningMeanStd. Les rewards du buffer sont donc
+    normalisées au learner, après update_vec_normalize_from_trajectories, avec le ret_var réel.
+
+    Ce qui NE doit PAS arriver : appliquer sqrt(old_ret_var)/sqrt(new_ret_var) aux sorties du
+    critique (values, last_values, bootstrap). Ce facteur suppose V proportionnel à 1/sqrt(ret_var),
+    vrai seulement à convergence ; au cold-start il vaut 0.060 et écrase les prédictions de 17x.
     """
 
-    def _make_vec_normalize_with_initial_ret_var(self, n_envs: int = 2):
-        """Crée un VecNormalize réel avec ret_rms.var=1.0 (état initial)."""
-        from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv
-        import gymnasium as gym
-        from gymnasium import spaces
-
-        class StubEnv(gym.Env):
-            observation_space = spaces.Dict({
-                "global_cont": spaces.Box(-1.0, 1.0, (13,), dtype=np.float32),
-            })
-            action_space = spaces.Discrete(4)
-
-            def reset(self, **kw):
-                return {"global_cont": np.zeros(13, dtype=np.float32)}, {}
-
-            def step(self, action):
-                return {"global_cont": np.zeros(13, dtype=np.float32)}, 0.0, False, False, {}
-
-        vec = DummyVecEnv([StubEnv] * n_envs)
-        vn = VecNormalize(vec, norm_obs=False, norm_reward=True, gamma=0.99)
-        vn.reset()
-        # ret_rms.var vaut 1.0 à l'initialisation (état Phase 3 rollout 1).
-        assert abs(float(vn.ret_rms.var) - 1.0) < 1e-9, "Précondition : ret_rms.var initial = 1.0"
-        return vn
-
-    def test_rescaling_corrects_rewards_and_preserves_gae_coherence(self):
-        """Après update, rewards et values rescalés par le même facteur → rewards_mean réduit,
-        et les deltas GAE restent cohérents (delta_t = scale * old_delta_t)."""
+    def test_rewards_normalized_with_post_update_ret_var(self):
+        """Les rewards du buffer valent raw / sqrt(ret_var POST-update), pas gelé."""
         from ai.vec_normalize_frozen import update_vec_normalize_from_trajectories
 
-        try:
-            vn = self._make_vec_normalize_with_initial_ret_var(n_envs=2)
-        except Exception:
-            pytest.skip("DummyVecEnv Dict non disponible")
-
+        vn = _make_cold_start_vec_normalize(n_envs=2)
         epsilon = float(vn.epsilon)
-        old_ret_var = float(vn.ret_rms.var)  # = 1.0
-
-        # Buffer simulé : rewards normalisées avec ret_var=1.0 → ≈ raw rewards ≈ 0.27.
-        # Values simulées cohérentes avec l'ancienne normalisation (policy calibrée pour ret_var=1.0).
         raw_reward = 0.27
-        old_norm = np.sqrt(old_ret_var + epsilon)
-        buffer_rewards = np.full((10, 2), raw_reward / old_norm, dtype=np.float32)
-        # V(s) ≈ sum_discounted raw_reward / old_norm (valeurs plausibles en ancienne normalisation)
-        buffer_values = np.full((10, 2), 5.0, dtype=np.float32)
-        rewards_mean_before = float(buffer_rewards.mean())
 
-        # Discounted returns avec std≈27 → var≈400 après update.
+        # Discounted returns avec std≈27 → ret_var ≫ 1.0 après update.
         rng = np.random.default_rng(0)
         disc_rets_worker = rng.normal(loc=50.0, scale=27.0, size=(10,))
         disc_ret_batches = [disc_rets_worker, disc_rets_worker]
         final_returns = [float(disc_rets_worker[-1])] * 2
 
-        scale = update_vec_normalize_from_trajectories(vn, [], disc_ret_batches, final_returns)
+        update_vec_normalize_from_trajectories(vn, [], disc_ret_batches, final_returns)
 
         new_ret_var = float(vn.ret_rms.var)
         assert new_ret_var > 10.0, f"ret_rms.var devrait avoir grandi : {new_ret_var}"
-        assert scale is not None, "update devrait retourner un scale non-None avec des retours variés"
 
-        buffer_rewards_rescaled = buffer_rewards * scale
-        rewards_mean_after = float(buffer_rewards_rescaled.mean())
-
-        # 1. rewards_mean doit être réduit d'un facteur > 5 (ratio sqrt(old/new) ≫ 0.2).
-        assert rewards_mean_after < rewards_mean_before / 5, (
-            f"Le re-scaling n'a pas réduit suffisamment rewards_mean : "
-            f"{rewards_mean_before:.4f} → {rewards_mean_after:.4f} (scale={scale:.4f}, "
-            f"old_ret_var={old_ret_var:.1f}, new_ret_var={new_ret_var:.1f})"
+        # Ce que fait le learner : normaliser les raw rewards avec le ret_var post-update.
+        buffer_rewards = np.clip(
+            np.full((10, 2), raw_reward, dtype=np.float32) / np.sqrt(new_ret_var + epsilon),
+            -float(vn.clip_reward), float(vn.clip_reward),
         )
-        # 2. rewards rescalées ≈ raw_reward / sqrt(new_ret_var+ε) (nouvelle normalisation correcte).
-        expected_reward = raw_reward / np.sqrt(new_ret_var + epsilon)
         np.testing.assert_allclose(
-            rewards_mean_after, expected_reward, rtol=1e-5,
-            err_msg="rewards_mean rescalées ≠ raw_reward / sqrt(new_ret_var+ε)"
+            float(buffer_rewards.mean()), raw_reward / np.sqrt(new_ret_var + epsilon), rtol=1e-5,
+            err_msg="rewards du buffer ≠ raw_reward / sqrt(new_ret_var+ε)"
         )
 
-    def test_no_rescaling_when_ret_var_unchanged(self):
-        """Pas de recalcul si ret_rms.var ne change pas (rollout sans retours)."""
+    def test_update_returns_no_rescaling_factor(self):
+        """update_vec_normalize_from_trajectories ne retourne aucun facteur de re-scaling.
+
+        Verrou de non-régression : tant que cette fonction renvoyait sqrt(old)/sqrt(new),
+        l'appelant multipliait les sorties du critique par un facteur qui valait 0.060 au
+        cold-start (run du 2026-08-29), sans que le critique ait jamais appris à l'échelle
+        old_ret_var=1.0 — celle-ci n'est que la valeur d'initialisation de RunningMeanStd.
+        """
         from ai.vec_normalize_frozen import update_vec_normalize_from_trajectories
 
-        try:
-            vn = self._make_vec_normalize_with_initial_ret_var(n_envs=1)
-        except Exception:
-            pytest.skip("DummyVecEnv Dict non disponible")
+        vn = _make_cold_start_vec_normalize(n_envs=2)
+        rng = np.random.default_rng(0)
+        disc_rets_worker = rng.normal(loc=50.0, scale=27.0, size=(10,))
 
-        # Update sans retours → ret_rms.var inchangé → scale None.
-        scale = update_vec_normalize_from_trajectories(vn, [], [], [])
+        result = update_vec_normalize_from_trajectories(
+            vn, [], [disc_rets_worker, disc_rets_worker], [float(disc_rets_worker[-1])] * 2
+        )
 
-        assert scale is None, f"Aucun retour fourni → scale devrait être None, obtenu {scale}"
+        assert float(vn.ret_rms.var) > 10.0, "précondition : ret_var a bien changé"
+        assert result is None, (
+            "update_vec_normalize_from_trajectories doit retourner None même quand ret_var "
+            f"change fortement (obtenu {result!r}) : aucun facteur ne doit être appliqué aux "
+            "sorties du critique."
+        )
 
     def test_cold_start_clipping_bug_quantified(self):
         """Formule : clip×rescale (ancien) ≠ normalisation directe (nouveau).
@@ -1122,3 +1120,119 @@ class TestRetVarRescaling:
         assert reward_buggy == pytest.approx(0.0667, rel=0.01)
         assert reward_fixed == pytest.approx(1.0, rel=0.01)
         assert reward_fixed / reward_buggy > 10
+
+
+class TestCriticOutputsNotRescaled:
+    """Verrou sur le VRAI chemin : _collect_rollouts_distributed ne rescale pas le critique.
+
+    Les deux tests de TestRetVarRescaling portent sur la fonction de mise à jour seule. Celui-ci
+    exerce _collect_rollouts_distributed de bout en bout avec un VecNormalize au cold-start
+    (ret_rms.var = 1.0) et des retours de forte variance, exactement la configuration où le
+    facteur sqrt(old)/sqrt(new) valait 0.060 sur le run du 2026-08-29.
+    """
+
+    N_ENVS = 2
+    N_STEPS = 4
+
+    def _make_trajectory(self, worker_idx: int):
+        """Trajectoire synthétique : values non nulles, retours de forte variance, sans done."""
+        rng = np.random.default_rng(100 + worker_idx)
+        n = self.N_STEPS
+        # discounted_returns de std ≈ 27 → ret_rms.var ≫ 1.0 après update.
+        disc_rets = rng.normal(loc=50.0, scale=27.0, size=(n,))
+        return {
+            "norm_obs_seq": {"global_cont": np.zeros((n, 13), dtype=np.float32)},
+            "actions_seq": np.zeros(n, dtype=np.int64),
+            "rewards_seq": np.full(n, 0.27, dtype=np.float32),
+            "raw_rewards_seq": np.full(n, 0.27, dtype=np.float32),
+            "bootstrap_seq": np.zeros(n, dtype=np.float32),
+            "dones_seq": np.zeros(n, dtype=bool),
+            "episode_starts_seq": np.zeros(n, dtype=bool),
+            # Valeurs du critique franchement non nulles : un re-scaling se verrait.
+            "values_seq": np.full(n, 5.0, dtype=np.float32),
+            "log_probs_seq": np.full(n, -1.0, dtype=np.float32),
+            "masks_seq": np.ones((n, 4), dtype=bool),
+            "infos_seq": [{} for _ in range(n)],
+            "last_raw_obs": {"global_cont": np.zeros(13, dtype=np.float32)},
+            "last_norm_obs": {"global_cont": np.zeros(13, dtype=np.float32)},
+            "last_done": False,
+            "last_value": 5.0,
+            "raw_global_cont": np.zeros((n, 13), dtype=np.float64),
+            "discounted_returns": disc_rets,
+            "final_discounted_return": float(disc_rets[-1]),
+            "episode_wall_seconds_seq": np.zeros(n, dtype=np.float64),
+        }
+
+    def test_buffer_values_untouched_when_ret_var_jumps_at_cold_start(self):
+        """rollout_buffer.values doit rester égal aux values des workers, ret_var neuf ou non."""
+        from sb3_contrib.common.maskable.buffers import MaskableDictRolloutBuffer
+        from ai.patched_ppo import PatchedMaskablePPO
+
+        vn = _make_cold_start_vec_normalize(self.N_ENVS)
+        obs_space = _cold_start_obs_space()
+        act_space = vn.action_space
+
+        trajectories = [self._make_trajectory(i) for i in range(self.N_ENVS)]
+
+        subproc = MagicMock()
+        subproc.num_envs = self.N_ENVS
+        subproc.collect_trajectories.return_value = trajectories
+
+        buf = MaskableDictRolloutBuffer(
+            buffer_size=self.N_STEPS, observation_space=obs_space, action_space=act_space,
+            device="cpu", gamma=0.99, gae_lambda=0.95, n_envs=self.N_ENVS,
+        )
+
+        with patch.object(PatchedMaskablePPO, "_setup_model"):
+            model = PatchedMaskablePPO.__new__(PatchedMaskablePPO)
+
+        n_envs = self.N_ENVS
+
+        class _StubPolicy:
+            """Policy minimale : __dict__ sans forward/action_dist, deepcopy trivial."""
+
+            def set_training_mode(self, mode: bool) -> None:
+                pass
+
+            def cpu(self):
+                return self
+
+            def predict_values(self, obs):
+                return torch.full((n_envs, 1), 5.0)
+
+        model.policy = _StubPolicy()
+        model.device = torch.device("cpu")
+        model._last_episode_starts = np.zeros(self.N_ENVS, dtype=bool)
+        model.num_timesteps = 0
+        model.action_space = act_space
+        model._update_info_buffer = MagicMock()
+
+        callback = MagicMock()
+        callback.on_step.return_value = True
+
+        with patch("cloudpickle.dumps", return_value=b""), \
+             patch("ai.patched_ppo.deepcopy", create=True, side_effect=lambda p: p), \
+             patch("ai.patched_ppo.is_masking_supported", return_value=True):
+            model._collect_rollouts_distributed(
+                vn, subproc, callback, buf, self.N_STEPS, use_masking=True
+            )
+
+        new_ret_var = float(vn.ret_rms.var)
+        assert new_ret_var > 10.0, (
+            f"précondition : ret_var doit avoir sauté depuis 1.0 (obtenu {new_ret_var})"
+        )
+
+        # Le facteur qui était appliqué avant le 2026-08-29, pour situer l'écart attendu.
+        would_be_scale = float(np.sqrt(1.0 + vn.epsilon) / np.sqrt(new_ret_var + vn.epsilon))
+        assert would_be_scale < 0.35, (
+            f"le scénario doit produire un facteur franchement < 1 (obtenu {would_be_scale:.4f})"
+        )
+
+        np.testing.assert_allclose(
+            buf.values, np.full((self.N_STEPS, self.N_ENVS), 5.0, dtype=np.float32), rtol=1e-6,
+            err_msg=(
+                "rollout_buffer.values a été rescalé : les sorties du critique doivent traverser "
+                f"_collect_rollouts_distributed intactes (facteur qui serait appliqué : "
+                f"{would_be_scale:.4f})"
+            ),
+        )
