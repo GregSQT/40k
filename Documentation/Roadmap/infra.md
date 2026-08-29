@@ -22,6 +22,15 @@ Fix : copie profonde dans `normalize_obs_with_snapshot` + `terminal_observation`
 verrous `test_obs_stored_are_copies_not_scratch_refs` + `test_terminal_observation_is_copied_before_reset`
 (rouges constatés). Détail au journal §6 de `perf_entrainement.md`. **Validation en cours :
 run `--etape P2` lancé le 2026-08-29, critère `ratio_mb0 = 1,0` + `explained_variance` croissante.**
+**Jumeau `n_envs = 1` corrigé (2026-08-29)** : même aliasing sur le chemin `DummyVecEnv` — SB3
+2.9 pose `info["terminal_observation"] = obs` puis appelle `env.reset()` puis `deepcopy` les
+infos, donc le bootstrap `TimeLimit.truncated` de `patched_ppo` évaluait `V(obs initiale de
+l'épisode suivant)`. Mesuré sur la chaîne de production (`Monitor(BotControlledEnv(ActionMasker(
+W40KEngine)))`, épisode tronqué) : 28 clés sur 28 identiques à l'obs post-reset avant le fix,
+4 clés différentes après. SB3 n'étant pas patchable, la copie est faite à la sortie des deux
+wrappers gym (`BotControlledEnv.step`, `SelfPlayWrapper.step`), une fois par épisode — 9,1 µs
+mesurés, le chemin subproc qui copie déjà côté worker n'en double rien de mesurable.
+Verrous `test_terminal_observation_dummyvecenv.py` (2 tests, rouges constatés).
 Goulots restants : aucun identifié de cette ampleur.
 
 → `Documentation/Chantiers/backlog/perf_entrainement.md`
