@@ -810,11 +810,10 @@ class MetricsCollectionCallback(BaseCallback):
                 # diag/ keys logged by train() are not routed via log_training_metrics
                 # (which only processes train/ prefix) and _original_dump may have no TF writer.
                 # Write them explicitly to the MetricsTracker's TF writer.
-                step_count = cast(Any, _model).num_timesteps
                 if hasattr(_tracker, 'writer') and _tracker.writer is not None:
                     for key, value in model_stats.items():
                         if key.startswith("diag/") and isinstance(value, (int, float)):
-                            _tracker.writer.add_scalar(key, value, step_count)
+                            _tracker.writer.add_scalar(key, value, _tracker.step_count)
             _original_dump(step)
 
         self.model.logger.dump = _dump_with_capture

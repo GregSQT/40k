@@ -397,6 +397,10 @@ class PatchedMaskablePPO(MaskablePPO):
                 np.clip(raw_rewards_all / np.sqrt(new_ret_var + eps), -clip_r, clip_r)
                 + bootstrap_all * _value_scale
             ).astype(np.float32)
+        else:
+            # Pas de normalisation : raw rewards + bootstrap (bootstrap_all *= _value_scale car
+            # terminal_value est en ancienne normalisation quand ret_var change).
+            rollout_buffer.rewards = (raw_rewards_all + bootstrap_all * _value_scale).astype(np.float32)
         # _value_scale s'applique toujours aux valeurs (même si rewards non normalisées).
         rollout_buffer.values *= _value_scale
         last_values = last_values * _value_scale
