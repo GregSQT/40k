@@ -5080,17 +5080,6 @@ def main():
                             "'init'. Exception : si --resume-from est fourni explicitement, il "
                             "remplace le point de depart de l'etape (utile pour reprendre un run "
                             "plante) — interdit si init='new'.")
-    parser.add_argument("--win-rate-threshold", type=float, default=None, metavar="THRESHOLD",
-                       help="Arrêt anticipé du curriculum : seuil de win-rate contre tous les "
-                            "membres du pool (ex: 0.60). Exige --etape sur une étape non-exploiteur. "
-                            "Inactif si absent.")
-    parser.add_argument("--min-steps", type=int, default=50000, metavar="N",
-                       help="Nombre minimal de timesteps avant que l'arrêt anticipé "
-                            "(--win-rate-threshold) soit éligible (défaut: 50000).")
-    parser.add_argument("--consecutive-evals", type=int, default=2, metavar="N",
-                       help="Nombre d'évaluations consécutives au-dessus du seuil requis "
-                            "pour déclencher l'arrêt anticipé (défaut: 2).")
-
     args = parser.parse_args()
 
     from config_loader import BOARD_DIR_BY_INCHES_TO_SUBHEX
@@ -5728,11 +5717,17 @@ def main():
                 elif (
                     curriculum_stage is not None
                     and not is_exploiter_stage(curriculum_stage[1])
-                    and args.win_rate_threshold is not None
                 ):
                     _curr, _stg = curriculum_stage
+                    # Priorité : early_stop de l'étape, puis early_stop global du curriculum.
+                    _early_stop_cfg = _stg.get("early_stop") or _curr.get("early_stop")
                     _pool_members = stage_pool_members(_stg)
-                    if _pool_members:
+                    if _early_stop_cfg and _pool_members:
+                        _es_threshold = float(require_key(_early_stop_cfg, "win_rate_threshold"))
+                        _es_min_steps = int(require_key(_early_stop_cfg, "min_steps"))
+                        _es_consec = int(require_key(_early_stop_cfg, "consecutive_evals"))
+                        _gate_cfg = require_key(_curr, "gate")
+                        _pool_n_episodes = int(require_key(_gate_cfg, "eval_episodes"))
                         _models_root = get_config_loader().get_models_root()
                         _canonical = build_agent_model_path(_models_root, args.agent)
                         _pool_archives = [
@@ -5745,14 +5740,11 @@ def main():
                         _pool_eval_freq = int(require_key(
                             require_key(training_config, "callback_params"), "bot_eval_freq"
                         ))
-                        _pool_n_episodes = int(require_key(
-                            require_key(training_config, "callback_params"), "bot_eval_intermediate"
-                        ))
                         _pool_early_stop = PoolEarlyStoppingCallback(
                             pool_archives=_pool_archives,
-                            threshold=args.win_rate_threshold,
-                            min_timesteps=args.min_steps,
-                            consecutive_evals=args.consecutive_evals,
+                            threshold=_es_threshold,
+                            min_timesteps=_es_min_steps,
+                            consecutive_evals=_es_consec,
                             eval_freq_episodes=_pool_eval_freq,
                             n_eval_episodes=_pool_n_episodes,
                             training_config_name=args.training_config,
@@ -5762,15 +5754,11 @@ def main():
                         )
                         _exploiter_extra_callbacks = [_pool_early_stop]
                         print(
-                            f"🎯 Pool early-stop activé : seuil={args.win_rate_threshold:.0%}, "
-                            f"min_steps={args.min_steps}, "
-                            f"consecutive_evals={args.consecutive_evals}, "
+                            f"🎯 Pool early-stop activé : seuil={_es_threshold:.0%}, "
+                            f"min_steps={_es_min_steps}, "
+                            f"consecutive_evals={_es_consec}, "
+                            f"n_eval_episodes={_pool_n_episodes}, "
                             f"pool={[m['label'] for m in _pool_members]}"
-                        )
-                    else:
-                        print(
-                            "⚠️  --win-rate-threshold ignoré : aucun membre dans le pool "
-                            f"de l'étape {args.etape}."
                         )
 
                 # Always use scenario rotation path for self/bot/all modes,

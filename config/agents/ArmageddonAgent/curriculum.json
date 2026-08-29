@@ -27,6 +27,13 @@
     "eval_episodes": 300
   },
 
+  "early_stop": {
+    "_doc": "Arret anticipe pendant l'entrainement : si l'agent depasse win_rate_threshold contre TOUS les membres du pool sur consecutive_evals evaluations consecutives apres min_steps steps, le run s'arrete. n_eval_episodes provient de gate.eval_episodes. Desactive si ce bloc est absent. Une etape peut surcharger ces valeurs avec son propre bloc 'early_stop'. Les etapes sans pool (P0) ou les exploiteurs l'ignorent automatiquement.",
+    "win_rate_threshold": 0.60,
+    "min_steps": 50000,
+    "consecutive_evals": 2
+  },
+
   "stages": {
     "P0": {
       "_doc": "Amorce : bots uniquement, aucun pool, aucun gate.",
