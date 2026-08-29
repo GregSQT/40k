@@ -1074,8 +1074,8 @@ class TestDistributedRolloutMaskPropagation:
             "last_norm_obs": {"global_cont": np.zeros(self.GC_DIM, dtype=np.float32)},
             "last_done": False,
             "last_value": 0.0,
-            "raw_global_cont": [np.zeros(self.GC_DIM, dtype=np.float32)] * self.N_STEPS,
-            "discounted_returns": [0.0] * self.N_STEPS,
+            "raw_global_cont": np.zeros((self.N_STEPS, self.GC_DIM), dtype=np.float64),
+            "discounted_returns": np.zeros(self.N_STEPS, dtype=np.float64),
             "final_discounted_return": 0.0,
             "episode_wall_seconds_seq": [0.0] * self.N_STEPS,
         }
@@ -1092,12 +1092,13 @@ class TestDistributedRolloutMaskPropagation:
         })
         act_space = spaces.Discrete(self.N_ACTIONS)
 
-        # Masque restrictif : action 0 interdite pour tous les workers à chaque step.
-        restricted_mask = np.array([False, True, True, True], dtype=bool)
-        masks_seq = [restricted_mask.copy() for _ in range(self.N_STEPS)]
+        # Workers avec masques DISTINCTS pour détecter un bug de permutation d'axe dans np.stack.
+        # Worker 0 : action 0 interdite ; worker 1 : action 1 interdite.
+        mask_w0 = np.array([False, True, True, True], dtype=bool)
+        mask_w1 = np.array([True, False, True, True], dtype=bool)
         trajectories = [
-            self._make_fake_trajectory(masks_seq)
-            for _ in range(self.N_ENVS)
+            self._make_fake_trajectory([mask_w0.copy() for _ in range(self.N_STEPS)]),
+            self._make_fake_trajectory([mask_w1.copy() for _ in range(self.N_STEPS)]),
         ]
 
         buf = MaskableDictRolloutBuffer(
@@ -1151,13 +1152,24 @@ class TestDistributedRolloutMaskPropagation:
 
         # buf.action_masks : shape (n_steps, n_envs, n_actions), dtype float32.
         assert buf.action_masks.shape == (self.N_STEPS, self.N_ENVS, self.N_ACTIONS)
-        action_0_values = buf.action_masks[:, :, 0]
-        assert np.all(action_0_values == 0.0), (
-            f"action_masks[:,:,0] attendu tout à 0.0 (action interdite), obtenu : {action_0_values}"
+
+        # Worker 0 (env 0) : action 0 interdite, actions 1-3 autorisées.
+        assert np.all(buf.action_masks[:, 0, 0] == 0.0), (
+            f"env 0 action 0 attendu 0.0 : {buf.action_masks[:, 0, 0]}"
         )
-        other_actions = buf.action_masks[:, :, 1:]
-        assert np.all(other_actions == 1.0), (
-            f"action_masks[:,:,1:] attendu tout à 1.0 (actions autorisées), obtenu : {other_actions}"
+        assert np.all(buf.action_masks[:, 0, 1:] == 1.0), (
+            f"env 0 actions 1-3 attendu 1.0 : {buf.action_masks[:, 0, 1:]}"
+        )
+
+        # Worker 1 (env 1) : action 1 interdite, actions 0/2/3 autorisées.
+        assert np.all(buf.action_masks[:, 1, 1] == 0.0), (
+            f"env 1 action 1 attendu 0.0 : {buf.action_masks[:, 1, 1]}"
+        )
+        assert np.all(buf.action_masks[:, 1, 0] == 1.0), (
+            f"env 1 action 0 attendu 1.0 : {buf.action_masks[:, 1, 0]}"
+        )
+        assert np.all(buf.action_masks[:, 1, 2:] == 1.0), (
+            f"env 1 actions 2-3 attendu 1.0 : {buf.action_masks[:, 1, 2:]}"
         )
 
 
