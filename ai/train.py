@@ -95,7 +95,7 @@ from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNormalize, VecEnv  # VecEnv : resout la forward-ref de GymEnv pour get_type_hints()
 
 # Phase 2 perf_entrainement — sous-classes locales (jamais de fork du venv).
-from ai.patched_ppo import PatchedMaskablePPO
+from ai.patched_ppo import PatchedDummyVecEnv, PatchedMaskablePPO
 from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
 from stable_baselines3.common.utils import ConstantSchedule, FloatSchedule  # Convert float hyperparameters to callable schedules
 from stable_baselines3.common.type_aliases import GymEnv
@@ -2397,7 +2397,7 @@ def _apply_vec_normalize(env, model_path_for_vn, vec_norm_cfg, starts_from_scrat
     rotation de scenario).
     """
     if n_envs == 1:
-        env = DummyVecEnv([cast(Any, lambda: env)])
+        env = PatchedDummyVecEnv([cast(Any, lambda: env)])
     reset_vec_normalize = vec_norm_cfg.get("reset_on_curriculum", False)
     vec_norm_loaded = (
         load_vec_normalize(env, model_path_for_vn)
@@ -3529,7 +3529,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             tmp_model_path = os.path.join(tmp_dir, "model.zip")
             try:
                 if save_vec_normalize(model.get_env(), tmp_model_path):
-                    venv = DummyVecEnv([cast(Any, lambda: env)])
+                    venv = PatchedDummyVecEnv([cast(Any, lambda: env)])
                     vec_norm = VecNormalize.load(get_vec_normalize_path(tmp_model_path), venv)
                     vec_norm.training = True
                     vec_norm.norm_reward = training_config.get("vec_normalize", {}).get("norm_reward", True)  # get allowed: optional config
