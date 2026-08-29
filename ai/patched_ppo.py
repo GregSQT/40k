@@ -25,6 +25,7 @@ Quatre overrides, sans changer les maths :
 from __future__ import annotations
 
 import time
+from copy import deepcopy
 from typing import Any, TypeVar
 
 import numpy as np
@@ -33,7 +34,7 @@ from gymnasium import spaces
 from stable_baselines3.common.buffers import RolloutBuffer
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.utils import explained_variance, obs_as_tensor
-from stable_baselines3.common.vec_env import VecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, VecEnv
 from torch.nn import functional as F
 
 from sb3_contrib import MaskablePPO
@@ -44,8 +45,41 @@ from sb3_contrib.common.maskable.buffers import (
 from sb3_contrib.common.maskable.utils import get_action_masks, is_masking_supported
 
 from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
+from ai.vec_normalize_frozen import copy_obs_dict
 
 SelfPatchedMaskablePPO = TypeVar("SelfPatchedMaskablePPO", bound="PatchedMaskablePPO")
+
+class PatchedDummyVecEnv(DummyVecEnv):
+    """DummyVecEnv qui corrige l'aliasing terminal_observation sur les envs scratch-buffer.
+
+    SB3 DummyVecEnv.step_wait stocke `terminal_observation = obs` (référence au scratch
+    moteur) AVANT d'appeler env.reset(), qui écrase ce même scratch. Le deepcopy final
+    capture alors l'obs POST-reset, pas l'obs terminale. Fix : copie possédée avant reset.
+
+    Réimplémentation nécessaire : le bug est dans le corps du loop SB3 ; il n'existe pas de
+    hook propre pour intercepter la valeur avant reset() sans réécrire la boucle. Basé sur
+    SB3 2.9.0 dummy_vec_env.py — vérifier à chaque upgrade SB3 que step_wait n'a pas changé.
+    """
+
+    def step_wait(self):  # type: ignore[override]
+        for env_idx in range(self.num_envs):
+            obs, self.buf_rews[env_idx], terminated, truncated, self.buf_infos[env_idx] = (
+                self.envs[env_idx].step(self.actions[env_idx])
+            )
+            self.buf_dones[env_idx] = terminated or truncated
+            self.buf_infos[env_idx]["TimeLimit.truncated"] = truncated and not terminated
+            if self.buf_dones[env_idx]:
+                # Copie AVANT reset : le scratch moteur sera écrasé par l'épisode suivant.
+                self.buf_infos[env_idx]["terminal_observation"] = copy_obs_dict(obs)
+                obs, self.reset_infos[env_idx] = self.envs[env_idx].reset()
+            self._save_obs(env_idx, obs)
+        return (
+            self._obs_from_buf(),
+            np.copy(self.buf_rews),
+            np.copy(self.buf_dones),
+            deepcopy(self.buf_infos),
+        )
+
 
 # Sentinelle pour détecter qu'aucune trajectoire n'a été collectée (ne peut pas être None).
 _NO_OBS = object()

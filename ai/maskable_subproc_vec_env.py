@@ -46,7 +46,7 @@ def _run_worker_trajectory(
     """
     import cloudpickle
     import torch
-    from ai.vec_normalize_frozen import normalize_obs_with_snapshot
+    from ai.vec_normalize_frozen import copy_obs_dict, normalize_obs_with_snapshot
 
     frozen_policy = cloudpickle.loads(policy_bytes)
     frozen_policy.set_training_mode(False)
@@ -109,7 +109,7 @@ def _run_worker_trajectory(
             # Copie : observation_raw vit dans le scratch réutilisé du moteur, et cet info
             # est stocké dans infos_seq jusqu'à la fin de la trajectoire (même contrat que
             # les obs de norm_obs_lists ci-dessous).
-            info["terminal_observation"] = {k: v.copy() for k, v in observation_raw.items()}
+            info["terminal_observation"] = copy_obs_dict(observation_raw)
 
         # Tracking VecNormalize.returns avec raw_reward (avant normalisation).
         discounted_return = snapshot.gamma * discounted_return + raw_reward
@@ -188,7 +188,7 @@ def _run_worker_trajectory(
         current_episode_start = done
 
     # Dernière obs : raw (pour le prochain COLLECT_TRAJECTORY) et normalisée (pour le learner).
-    last_raw_obs = {k: v.copy() for k, v in current_raw_obs.items()}
+    last_raw_obs = copy_obs_dict(current_raw_obs)
     norm_last = normalize_obs_with_snapshot(current_raw_obs, snapshot)
     with torch.no_grad():
         obs_last = {
@@ -238,6 +238,7 @@ def _maskable_worker(
     - _worker_last_obs : état interne pour COLLECT_TRAJECTORY.
     """
     from stable_baselines3.common.env_util import is_wrapped
+    from ai.vec_normalize_frozen import copy_obs_dict
 
     parent_remote.close()
     env = _patch_env(env_fn_wrapper.var())
@@ -255,7 +256,7 @@ def _maskable_worker(
                     # Copie : env.reset() ci-dessous mute le scratch d'obs du moteur AVANT
                     # que remote.send() ne pickle info — sans copie, terminal_observation
                     # contient l'état post-reset (même motif que _run_worker_trajectory).
-                    info["terminal_observation"] = {k: v.copy() for k, v in observation.items()}
+                    info["terminal_observation"] = copy_obs_dict(observation)
                     observation, reset_info = env.reset()
                 info["action_masks"] = env.get_wrapper_attr("action_masks")()
                 _worker_last_obs = observation

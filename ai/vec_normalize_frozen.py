@@ -15,6 +15,16 @@ from typing import Any
 import numpy as np
 
 
+def copy_obs_dict(obs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    """Copie possédée d'un dict d'observations scratch moteur (valeurs : np.ndarray uniquement).
+
+    CONTRAT SCRATCH : le moteur réutilise ses buffers d'observation entre steps
+    (root cause Phase 3, run_20260829-132022). Tout site qui retient une obs
+    au-delà du step courant DOIT appeler cette fonction.
+    """
+    return {k: v.copy() for k, v in obs.items()}
+
+
 @dataclass
 class VecNormalizeSnapshot:
     """État gelé d'un VecNormalize pour UN worker, valide pendant un cycle de collecte."""
@@ -103,18 +113,19 @@ def normalize_obs_with_snapshot(obs_dict: dict, snapshot: "VecNormalizeSnapshot"
     Seule clé normalisée : "global_cont" (comportement identique au VecNormalize de production
     configuré avec norm_obs_keys=["global_cont"]).
 
-    COPIE PROFONDE OBLIGATOIRE : le moteur sert ses observations dans des buffers scratch
+    COPIE POSSÉDÉE OBLIGATOIRE : le moteur sert ses observations dans des buffers scratch
     RÉUTILISÉS entre steps (engine/observation_builder._empty_squad_observation : « ne jamais
     stocker le dict retourné au-delà du step courant »), et env.step() les mute AVANT que la
-    trajectoire distribuée ne les stocke. Une copie superficielle remplissait le rollout
-    buffer de n_steps répliques de l'état final (root cause du non-apprentissage Phase 3,
+    trajectoire distribuée ne les stocke. Une référence directe (pas de copie) remplissait le
+    rollout buffer de n_steps répliques de l'état final (root cause du non-apprentissage Phase 3,
     run_20260829-132022) ; une copie au site de stockage capturait l'état POST-step.
-    Les tableaux retournés appartiennent donc à l'appelant.
+    Les tableaux retournés appartiennent donc à l'appelant (copie possédée via copy_obs_dict).
     """
-    result = {k: v.copy() for k, v in obs_dict.items()}
     if not snapshot.norm_obs or "global_cont" not in obs_dict:
-        return result
+        return copy_obs_dict(obs_dict)
 
+    # global_cont sera recalculé : copier toutes les autres clés, puis ajouter global_cont normalisé.
+    result = {k: v.copy() for k, v in obs_dict.items() if k != "global_cont"}
     # numpy upcast float32 → float64 implicitement lors de l'arithmétique avec obs_mean (float64)
     result["global_cont"] = np.clip(
         (obs_dict["global_cont"] - snapshot.obs_mean) / np.sqrt(snapshot.obs_var + snapshot.epsilon),
