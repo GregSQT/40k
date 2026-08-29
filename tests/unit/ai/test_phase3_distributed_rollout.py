@@ -1190,10 +1190,10 @@ class TestRetVarRescaling:
             np.clip(raw_reward / np.sqrt(1.0 + epsilon), -float(vn.clip_reward), float(vn.clip_reward))
         )
         reward_post_update = raw_reward / np.sqrt(new_ret_var + epsilon)
-        assert reward_pre_update / reward_post_update > 5.0, (
+        ratio = reward_pre_update / reward_post_update
+        assert ratio > 5.0, (
             f"Le ratio pre/post-update doit être > 5× pour confirmer l'enjeu cold-start "
-            f"(obtenu {reward_pre_update:.4f} / {reward_post_update:.6f} = "
-            f"{reward_pre_update / reward_post_update:.2f})"
+            f"(obtenu {reward_pre_update:.4f} / {reward_post_update:.6f} = {ratio:.2f})"
         )
 
     def test_update_returns_no_rescaling_factor(self):
@@ -1259,6 +1259,9 @@ class TestCriticOutputsNotRescaled:
 
     N_ENVS = 2
     N_STEPS = 4
+    RAW_REWARD = 0.27
+    BOOTSTRAP_VAL = 0.1
+    VALUES_PRED = 5.0
 
     def _make_trajectory(self, worker_idx: int):
         """Trajectoire synthétique : values non nulles, retours de forte variance, sans done."""
@@ -1269,28 +1272,28 @@ class TestCriticOutputsNotRescaled:
         return {
             "norm_obs_seq": {"global_cont": np.zeros((n, 13), dtype=np.float32)},
             "actions_seq": np.zeros(n, dtype=np.int64),
-            "rewards_seq": np.full(n, 0.27, dtype=np.float32),
-            "raw_rewards_seq": np.full(n, 0.27, dtype=np.float32),
-            "bootstrap_seq": np.full(n, 0.1, dtype=np.float32),
+            "rewards_seq": np.full(n, self.RAW_REWARD, dtype=np.float32),
+            "raw_rewards_seq": np.full(n, self.RAW_REWARD, dtype=np.float32),
+            "bootstrap_seq": np.full(n, self.BOOTSTRAP_VAL, dtype=np.float32),
             "dones_seq": np.zeros(n, dtype=bool),
             "episode_starts_seq": np.zeros(n, dtype=bool),
             # Valeurs du critique franchement non nulles : un re-scaling se verrait.
-            "values_seq": np.full(n, 5.0, dtype=np.float32),
+            "values_seq": np.full(n, self.VALUES_PRED, dtype=np.float32),
             "log_probs_seq": np.full(n, -1.0, dtype=np.float32),
             "masks_seq": np.ones((n, 4), dtype=bool),
             "infos_seq": [{} for _ in range(n)],
             "last_raw_obs": {"global_cont": np.zeros(13, dtype=np.float32)},
             "last_norm_obs": {"global_cont": np.zeros(13, dtype=np.float32)},
             "last_done": False,
-            "last_value": 5.0,
+            "last_value": self.VALUES_PRED,
             "raw_global_cont": np.zeros((n, 13), dtype=np.float64),
             "discounted_returns": disc_rets,
             "final_discounted_return": float(disc_rets[-1]),
             "episode_wall_seconds_seq": np.zeros(n, dtype=np.float64),
         }
 
-    def test_buffer_values_untouched_when_ret_var_jumps_at_cold_start(self):
-        """rollout_buffer.values doit rester égal aux values des workers, ret_var neuf ou non."""
+    def _collect(self):
+        """Lance _collect_rollouts_distributed ; retourne (buf, vn, would_be_scale)."""
         from sb3_contrib.common.maskable.buffers import MaskableDictRolloutBuffer
         from ai.patched_ppo import PatchedMaskablePPO
 
@@ -1298,11 +1301,11 @@ class TestCriticOutputsNotRescaled:
         obs_space = _cold_start_obs_space()
         act_space = vn.action_space
 
-        trajectories = [self._make_trajectory(i) for i in range(self.N_ENVS)]
-
         subproc = MagicMock()
         subproc.num_envs = self.N_ENVS
-        subproc.collect_trajectories.return_value = trajectories
+        subproc.collect_trajectories.return_value = [
+            self._make_trajectory(i) for i in range(self.N_ENVS)
+        ]
 
         buf = MaskableDictRolloutBuffer(
             buffer_size=self.N_STEPS, observation_space=obs_space, action_space=act_space,
@@ -1312,6 +1315,7 @@ class TestCriticOutputsNotRescaled:
         with patch.object(PatchedMaskablePPO, "_setup_model"):
             model = PatchedMaskablePPO.__new__(PatchedMaskablePPO)
 
+        values_pred = self.VALUES_PRED
         n_envs = self.N_ENVS
 
         class _StubPolicy:
@@ -1324,7 +1328,7 @@ class TestCriticOutputsNotRescaled:
                 return self
 
             def predict_values(self, obs):
-                return torch.full((n_envs, 1), 5.0)
+                return torch.full((n_envs, 1), values_pred)
 
         model.policy = _StubPolicy()  # type: ignore[assignment]
         model.device = torch.device("cpu")
@@ -1347,15 +1351,19 @@ class TestCriticOutputsNotRescaled:
         assert new_ret_var > 10.0, (
             f"précondition : ret_var doit avoir sauté depuis 1.0 (obtenu {new_ret_var})"
         )
-
-        # Le facteur qui était appliqué avant le 2026-08-29, pour situer l'écart attendu.
         would_be_scale = float(np.sqrt(1.0 + vn.epsilon) / np.sqrt(new_ret_var + vn.epsilon))
         assert would_be_scale < 0.35, (
             f"le scénario doit produire un facteur franchement < 1 (obtenu {would_be_scale:.4f})"
         )
+        return buf, vn, would_be_scale
 
+    def test_buffer_values_untouched_when_ret_var_jumps_at_cold_start(self):
+        """rollout_buffer.values doit rester égal aux values des workers, ret_var neuf ou non."""
+        buf, vn, would_be_scale = self._collect()
         np.testing.assert_allclose(
-            buf.values, np.full((self.N_STEPS, self.N_ENVS), 5.0, dtype=np.float32), rtol=1e-6,
+            buf.values,
+            np.full((self.N_STEPS, self.N_ENVS), self.VALUES_PRED, dtype=np.float32),
+            rtol=1e-6,
             err_msg=(
                 "rollout_buffer.values a été rescalé : les sorties du critique doivent traverser "
                 f"_collect_rollouts_distributed intactes (facteur qui serait appliqué : "
@@ -1363,18 +1371,19 @@ class TestCriticOutputsNotRescaled:
             ),
         )
 
-        # Verrou bootstrap : bootstrap_seq = 0.1 (non nul) ; tout rescaling se verrait dans rewards.
+    def test_buffer_rewards_include_bootstrap_at_cold_start(self):
+        """rollout_buffer.rewards = clip(raw/sqrt(new_ret_var), ±clip) + bootstrap, non rescalé."""
+        buf, vn, would_be_scale = self._collect()
+        new_ret_var = float(vn.ret_rms.var)
         eps = float(vn.epsilon)
         clip_r = float(vn.clip_reward)
-        raw_reward = 0.27
-        bootstrap_val = 0.1
         expected_rewards = (
             np.clip(
-                np.full((self.N_STEPS, self.N_ENVS), raw_reward, dtype=np.float32)
+                np.full((self.N_STEPS, self.N_ENVS), self.RAW_REWARD, dtype=np.float32)
                 / np.sqrt(new_ret_var + eps),
                 -clip_r, clip_r,
             )
-            + bootstrap_val
+            + self.BOOTSTRAP_VAL
         ).astype(np.float32)
         np.testing.assert_allclose(
             buf.rewards, expected_rewards, rtol=1e-5,
@@ -1384,9 +1393,16 @@ class TestCriticOutputsNotRescaled:
             ),
         )
 
-        # Verrou last_values : predict_values retourne 5.0 ; si rescalé ×0.06, returns ≈ 0.3.
-        # Avec GAE et gamma=0.99 sur 4 steps, returns.mean() doit rester > 1.0.
-        assert buf.returns.mean() > 1.0, (
-            f"buf.returns.mean()={buf.returns.mean():.4f} trop bas : "
+    def test_buffer_returns_not_rescaled_at_cold_start(self):
+        """rollout_buffer.returns (GAE) n'est pas écrasé par un rescaling de last_values.
+
+        predict_values retourne VALUES_PRED ; si last_values était rescalé ×would_be_scale≈0.06,
+        returns.mean() tomberait sous VALUES_PRED/2. On assert > VALUES_PRED/2 pour détecter
+        tout rescaling qui diviserait les prédictions du critique par plus de 2.
+        """
+        buf, _vn, _would_be_scale = self._collect()
+        threshold = self.VALUES_PRED / 2
+        assert buf.returns.mean() > threshold, (
+            f"buf.returns.mean()={buf.returns.mean():.4f} ≤ {threshold:.1f} : "
             "last_values vraisemblablement rescalé avant compute_returns_and_advantage"
         )
