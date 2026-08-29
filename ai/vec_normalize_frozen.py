@@ -124,8 +124,8 @@ def normalize_obs_with_snapshot(obs_dict: dict, snapshot: "VecNormalizeSnapshot"
     if not snapshot.norm_obs or "global_cont" not in obs_dict:
         return copy_obs_dict(obs_dict)
 
-    # global_cont sera recalculé : copier toutes les autres clés, puis ajouter global_cont normalisé.
-    result = {k: v.copy() for k, v in obs_dict.items() if k != "global_cont"}
+    # global_cont sera recalculé — copy_obs_dict couvre toutes les clés, l'assignation ci-dessous l'écrase.
+    result = copy_obs_dict(obs_dict)
     # numpy upcast float32 → float64 implicitement lors de l'arithmétique avec obs_mean (float64)
     result["global_cont"] = np.clip(
         (obs_dict["global_cont"] - snapshot.obs_mean) / np.sqrt(snapshot.obs_var + snapshot.epsilon),
