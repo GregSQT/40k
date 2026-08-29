@@ -454,8 +454,8 @@ class TestPatchedTrainNumericalParity:
 
 class TestInlineMasks:
 
-    def test_maskable_subproc_absent_pour_dummy(self):
-        """DummyVecEnv ne fournit pas de MaskableSubprocVecEnv."""
+    def test_pas_de_subproc_maskable_pour_dummy(self):
+        """DummyVecEnv ne déclenche pas les masques inline."""
         from ai.patched_ppo import _get_maskable_subproc_vec_env
         from stable_baselines3.common.vec_env import DummyVecEnv
 
@@ -464,8 +464,8 @@ class TestInlineMasks:
         del dummy.venv
         assert _get_maskable_subproc_vec_env(dummy) is None
 
-    def test_maskable_subproc_trouve_sous_wrappers(self):
-        """MaskableSubprocVecEnv est retrouvé au fond de la chaîne de wrappers."""
+    def test_subproc_maskable_trouve_sous_un_wrapper(self):
+        """MaskableSubprocVecEnv déclenche les masques inline."""
         from ai.patched_ppo import _get_maskable_subproc_vec_env
         from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
 
@@ -477,10 +477,14 @@ class TestInlineMasks:
 
         assert _get_maskable_subproc_vec_env(outer) is inner
 
-    def test_collect_rollouts_extracts_masks_from_infos(self):
-        """collect_rollouts lit les masques depuis infos quand use_inline_masks=True."""
+    def test_collect_rollouts_stepwise_interroge_lenv_a_chaque_step(self):
+        """Sans MaskableSubprocVecEnv, le stepwise redemande les masques a chaque step.
+
+        La lecture des masques depuis infos["action_masks"] a ete retiree du stepwise : le seul
+        cas qu'elle servait, MaskableSubprocVecEnv, part en collecte distribuee et n'atteint
+        jamais ce chemin. Ce test verrouille qu'aucun masque d'infos n'est reutilise ici.
+        """
         from ai.patched_ppo import PatchedMaskablePPO
-        from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
         from sb3_contrib.common.maskable.buffers import MaskableDictRolloutBuffer
 
         n_envs = 2
@@ -488,12 +492,9 @@ class TestInlineMasks:
         obs_space = _make_dict_obs_space()
         act_space = _make_discrete_action_space(n_actions)
 
-        # VecEnv factice avec MaskableSubprocVecEnv au fond.
-        inner_vec = MagicMock(spec=MaskableSubprocVecEnv)
-        del inner_vec.venv
-
         env_mock = MagicMock()
-        env_mock.venv = inner_vec
+        # Pas de `venv` : aucun MaskableSubprocVecEnv dans la chaine, donc chemin stepwise.
+        del env_mock.venv
         env_mock.num_envs = n_envs
         env_mock.observation_space = obs_space
         env_mock.action_space = act_space
@@ -548,29 +549,18 @@ class TestInlineMasks:
         callback.on_rollout_end = MagicMock()
         model._update_info_buffer = MagicMock()
 
-        # Espionner get_action_masks : doit être appelé UNE SEULE FOIS (bootstrap step 0).
-        # Le chemin stepwise est appelé directement : passer par collect_rollouts partirait
-        # en collecte distribuée (MaskableSubprocVecEnv au fond de env_mock), et neutraliser
-        # la détection désactiverait aussi les masques inline que ce test vérifie.
         with patch("ai.patched_ppo.get_action_masks") as mock_gam:
-            # Bootstrap : get_action_masks retourne des masques plein pour step 0.
             mock_gam.return_value = np.ones((n_envs, n_actions), dtype=bool)
 
-            result = model._collect_rollouts_stepwise(
+            result = model.collect_rollouts(
                 env_mock, callback, buf, n_rollout_steps=2, use_masking=True
             )
 
         assert result is True
-        # get_action_masks ne doit être appelé qu'au step 0 (1 fois).
-        assert mock_gam.call_count == 1, (
-            f"get_action_masks appelé {mock_gam.call_count}× au lieu de 1 "
-            f"(2e RPC non supprimé)"
-        )
-        # Step 1 : les masques du buffer sont ceux lus dans infos, pas ceux du bootstrap.
-        np.testing.assert_array_equal(
-            buf.action_masks[1].reshape(n_envs, n_actions).astype(bool),
-            masks_returned,
-            err_msg="step 1 : masques du buffer ≠ infos['action_masks']",
+        # Un appel par step : les masques poses dans infos par le step mock sont ignores.
+        assert mock_gam.call_count == 2, (
+            f"get_action_masks appelé {mock_gam.call_count}× au lieu de 2 "
+            f"(un masque d'infos a été réutilisé)"
         )
 
 

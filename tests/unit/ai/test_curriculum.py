@@ -40,7 +40,7 @@ from ai.curriculum import (
 #: constate ce que le fichier dit, elle ne le repete pas.
 EXPECTED_STAGES = {
     "P0":  (0,     0.00, None, {}),
-    "P1":  (5000,  0.40, "P0", {"P0": 0.40}),
+    "P1":  (5000,  0.50, "P0", {"P0": 0.50}),
     "P2":  (5000,  0.60, "P1", {"P1": 0.40, "P0": 0.20}),
     "P3":  (5000,  0.70, "P2", {"P2": 0.40, "P0": 0.15, "P1": 0.15}),
     "E1":  (0,     1.00, "P3", {"P3": 1.00}),
