@@ -241,6 +241,12 @@ class PatchedMaskablePPO(MaskablePPO):
         )
         self.logger.record("diag/returns_mean", float(self.rollout_buffer.returns.mean()))
         self.logger.record("diag/old_values_mean", float(self.rollout_buffer.values.mean()))
+        self.logger.record("diag/rewards_mean", float(self.rollout_buffer.rewards.mean()))
+        # Bootstrap : last_values GPU vs last_value CPU (posés par _collect_rollouts_distributed).
+        _diag_last_gpu = getattr(self, "_diag_last_values_gpu_mean", _nan)
+        _diag_last_cpu = getattr(self, "_diag_last_values_cpu_mean", _nan)
+        self.logger.record("diag/last_values_gpu_mean", _diag_last_gpu)
+        self.logger.record("diag/last_values_cpu_mean", _diag_last_cpu)
 
     # ── 2.3 / 3 — collect_rollouts : step-by-step ou distribué ──────────────────────────────────
 
@@ -366,6 +372,10 @@ class PatchedMaskablePPO(MaskablePPO):
 
         with th.no_grad():
             last_values = self.policy.predict_values(obs_as_tensor(last_obs, self.device))  # type: ignore[arg-type]
+
+        # Diagnostic bootstrap : comparer last_values GPU vs last_value CPU worker.
+        self._diag_last_values_gpu_mean = float(last_values.mean().item())
+        self._diag_last_values_cpu_mean = float(np.mean([traj["last_value"] for traj in trajectories]))
 
         rollout_buffer.compute_returns_and_advantage(last_values=last_values, dones=last_dones)
 
