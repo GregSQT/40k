@@ -955,15 +955,13 @@ class TestRetVarRescaling:
         disc_ret_batches = [disc_rets_worker, disc_rets_worker]
         final_returns = [float(disc_rets_worker[-1])] * 2
 
-        update_vec_normalize_from_trajectories(vn, [], disc_ret_batches, final_returns)
+        scale = update_vec_normalize_from_trajectories(vn, [], disc_ret_batches, final_returns)
 
         new_ret_var = float(vn.ret_rms.var)
         assert new_ret_var > 10.0, f"ret_rms.var devrait avoir grandi : {new_ret_var}"
+        assert scale is not None, "update devrait retourner un scale non-None avec des retours variés"
 
-        # Appliquer le même re-scaling que le fix dans patched_ppo (rewards ET values).
-        scale = np.sqrt(old_ret_var + epsilon) / np.sqrt(new_ret_var + epsilon)
         buffer_rewards_rescaled = buffer_rewards * scale
-        buffer_values_rescaled = buffer_values * scale
         rewards_mean_after = float(buffer_rewards_rescaled.mean())
 
         # 1. rewards_mean doit être réduit d'un facteur > 5 (ratio sqrt(old/new) ≫ 0.2).
@@ -978,14 +976,6 @@ class TestRetVarRescaling:
             rewards_mean_after, expected_reward, rtol=1e-5,
             err_msg="rewards_mean rescalées ≠ raw_reward / sqrt(new_ret_var+ε)"
         )
-        # 3. Cohérence GAE : le ratio rewards/values est IDENTIQUE avant et après rescaling
-        #    (delta_t = r_t + γ*V_{t+1} - V_t scale uniformément → advantages = scale * old_advantages).
-        ratio_before = float(buffer_rewards.mean()) / float(buffer_values.mean())
-        ratio_after = float(buffer_rewards_rescaled.mean()) / float(buffer_values_rescaled.mean())
-        np.testing.assert_allclose(
-            ratio_after, ratio_before, rtol=1e-5,
-            err_msg="Le ratio rewards/values devrait être conservé après rescaling identique"
-        )
 
     def test_no_rescaling_when_ret_var_unchanged(self):
         """Pas de recalcul si ret_rms.var ne change pas (rollout sans retours)."""
@@ -996,11 +986,7 @@ class TestRetVarRescaling:
         except Exception:
             pytest.skip("DummyVecEnv Dict non disponible")
 
-        old_ret_var = float(vn.ret_rms.var)
-        # Update sans retours → ret_rms.var inchangé.
-        update_vec_normalize_from_trajectories(vn, [], [], [])
-        new_ret_var = float(vn.ret_rms.var)
+        # Update sans retours → ret_rms.var inchangé → scale None.
+        scale = update_vec_normalize_from_trajectories(vn, [], [], [])
 
-        assert abs(new_ret_var - old_ret_var) < 1e-9, (
-            f"ret_rms.var ne devrait pas changer sans retours : {old_ret_var} → {new_ret_var}"
-        )
+        assert scale is None, f"Aucun retour fourni → scale devrait être None, obtenu {scale}"

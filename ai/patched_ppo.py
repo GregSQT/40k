@@ -113,7 +113,6 @@ class PatchedMaskablePPO(MaskablePPO):
         # Capture uniquement le minibatch 0 d'epoch 0 : seul point vraiment pré-update.
         _diag_drift_norm_mb0: th.Tensor | None = None
         _diag_drift_mean_mb0: th.Tensor | None = None
-        _diag_first_mb_done = False
         continue_training = True
         loss: th.Tensor = th.tensor(float("nan"))
 
@@ -132,12 +131,11 @@ class PatchedMaskablePPO(MaskablePPO):
                 values = values.flatten()
 
                 # Diagnostic minibatch 0/epoch 0 : seul point vraiment pré-update.
-                if epoch == 0 and not _diag_first_mb_done:
+                if epoch == 0 and _diag_drift_norm_mb0 is None:
                     with th.no_grad():
                         _drift = values - rollout_data.old_values
                         _diag_drift_norm_mb0 = _drift.norm()
                         _diag_drift_mean_mb0 = _drift.abs().mean()
-                    _diag_first_mb_done = True
 
                 advantages = rollout_data.advantages
                 if self.normalize_advantage:
@@ -243,10 +241,8 @@ class PatchedMaskablePPO(MaskablePPO):
         self.logger.record("diag/old_values_mean", float(self.rollout_buffer.values.mean()))
         self.logger.record("diag/rewards_mean", float(self.rollout_buffer.rewards.mean()))
         # Bootstrap : last_values GPU vs last_value CPU (posés par _collect_rollouts_distributed).
-        _diag_last_gpu = getattr(self, "_diag_last_values_gpu_mean", _nan)
-        _diag_last_cpu = getattr(self, "_diag_last_values_cpu_mean", _nan)
-        self.logger.record("diag/last_values_gpu_mean", _diag_last_gpu)
-        self.logger.record("diag/last_values_cpu_mean", _diag_last_cpu)
+        self.logger.record("diag/last_values_gpu_mean", getattr(self, "_diag_last_values_gpu_mean", _nan))
+        self.logger.record("diag/last_values_cpu_mean", getattr(self, "_diag_last_values_cpu_mean", _nan))
 
     # ── 2.3 / 3 — collect_rollouts : step-by-step ou distribué ──────────────────────────────────
 
@@ -298,7 +294,7 @@ class PatchedMaskablePPO(MaskablePPO):
         """
         import cloudpickle
         from copy import deepcopy
-        from ai.vec_normalize_frozen import snapshot_vec_normalize, update_vec_normalize_from_trajectories, _unwrap_vec_normalize
+        from ai.vec_normalize_frozen import snapshot_vec_normalize, update_vec_normalize_from_trajectories
 
         n_envs = subproc.num_envs
         self.policy.set_training_mode(False)
@@ -374,39 +370,24 @@ class PatchedMaskablePPO(MaskablePPO):
             last_values = self.policy.predict_values(obs_as_tensor(last_obs, self.device))  # type: ignore[arg-type]
 
         # Diagnostic bootstrap : comparer last_values GPU vs last_value CPU worker.
-        self._diag_last_values_gpu_mean = float(last_values.mean().item())
+        self._diag_last_values_gpu_mean = last_values.mean().item()
         self._diag_last_values_cpu_mean = float(np.mean([traj["last_value"] for traj in trajectories]))
 
         rollout_buffer.compute_returns_and_advantage(last_values=last_values, dones=last_dones)
 
         # 6. Mettre à jour VecNormalize avec les données brutes.
-        # Capturer ret_var AVANT update : le buffer est normalisé avec cette valeur (snapshot).
-        # Après update, ret_rms.var reflète la vraie variance → re-scaler le buffer et recalculer.
-        _vn_for_rescale = _unwrap_vec_normalize(env)
-        _old_ret_var = (
-            float(_vn_for_rescale.ret_rms.var)
-            if _vn_for_rescale is not None
-            and getattr(_vn_for_rescale, "norm_reward", False)
-            and getattr(_vn_for_rescale, "training", False)
-            and hasattr(_vn_for_rescale, "ret_rms")
-            else None
-        )
+        # Rewards et values sont dans l'ancienne normalisation (ret_rms.var pré-update) ;
+        # les rescaler par le facteur retourné maintient la cohérence interne des deltas GAE
+        # (delta_t = r_t + γ*V_{t+1} - V_t → scale * old_delta_t).
         raw_gc_batches = [traj["raw_global_cont"] for traj in trajectories]
         disc_ret_batches = [traj["discounted_returns"] for traj in trajectories]
         final_returns = [traj["final_discounted_return"] for traj in trajectories]
-        update_vec_normalize_from_trajectories(env, raw_gc_batches, disc_ret_batches, final_returns)
-        if _old_ret_var is not None:
-            _new_ret_var = float(_vn_for_rescale.ret_rms.var)
-            if abs(_new_ret_var - _old_ret_var) > 1e-6:
-                _eps = float(getattr(_vn_for_rescale, "epsilon", 1e-8))
-                _scale = np.sqrt(_old_ret_var + _eps) / np.sqrt(_new_ret_var + _eps)
-                # Rewards et values sont tous deux dans l'ancienne normalisation (snapshot.ret_var) ;
-                # les rescaler par le même facteur maintient la cohérence interne des deltas GAE
-                # (delta_t = r_t + γ*V_{t+1} - V_t → scale * old_delta_t).
-                rollout_buffer.rewards *= _scale
-                rollout_buffer.values *= _scale
-                last_values = last_values * _scale
-                rollout_buffer.compute_returns_and_advantage(last_values=last_values, dones=last_dones)
+        _scale = update_vec_normalize_from_trajectories(env, raw_gc_batches, disc_ret_batches, final_returns)
+        if _scale is not None:
+            rollout_buffer.rewards *= _scale
+            rollout_buffer.values *= _scale
+            last_values = last_values * _scale
+            rollout_buffer.compute_returns_and_advantage(last_values=last_values, dones=last_dones)
 
         # 7. Mettre à jour l'état du learner.
         self._last_obs = last_obs  # type: ignore[assignment]
