@@ -151,11 +151,15 @@ def update_vec_normalize_from_trajectories(
     scale: float | None = None
     if vn.training and vn.norm_reward and discounted_returns_batches:
         old_ret_var = float(vn.ret_rms.var)
+        old_count = float(vn.ret_rms.count)
         eps = float(vn.epsilon)
         all_rets = np.concatenate(discounted_returns_batches, axis=0)
         vn.ret_rms.update(all_rets.reshape(-1))
         new_ret_var = float(vn.ret_rms.var)
-        if abs(new_ret_var - old_ret_var) > 1e-6:
+        # Cold-start : count ≈ 1e-4 (valeur initiale SB3 RunningMeanStd).
+        # old_ret_var=1.0 est l'initialisation, pas l'échelle apprise du critique ;
+        # appliquer sqrt(1)/sqrt(new_var) aux values les écraserait de >10×.
+        if old_count > 1.0 and abs(new_ret_var - old_ret_var) > 1e-6:
             scale = float(np.sqrt(old_ret_var + eps) / np.sqrt(new_ret_var + eps))
 
     if hasattr(vn, "returns") and vn.returns is not None:
