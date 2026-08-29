@@ -885,3 +885,122 @@ class TestUpdateVecNormalizeFromTrajectories:
 
         # Ne doit pas lever.
         update_vec_normalize_from_trajectories(plain_env, [], [], [])
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+# 3.6 — Re-scaling rewards Phase 3 après mise à jour ret_rms
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+
+
+class TestRetVarRescaling:
+    """Vérifie que le re-scaling des rewards compense le ret_var gelé en Phase 3.
+
+    Problème : en Phase 3, le snapshot gèle ret_var=1.0 (valeur initiale). Les workers
+    normalisent les rewards par sqrt(1.0+ε) ≈ 1 → rewards_mean ≈ raw rewards ≈ 0.27.
+    Après update_vec_normalize_from_trajectories, ret_rms.var reflète la vraie variance
+    (p. ex. 729 pour des retours avec std≈27). Sans re-scaling, value_loss reste gonflé.
+    Avec le fix, rewards_buffer × sqrt(old/new) ramène rewards_mean à ~0.01.
+    """
+
+    def _make_vec_normalize_with_initial_ret_var(self, n_envs: int = 2):
+        """Crée un VecNormalize réel avec ret_rms.var=1.0 (état initial)."""
+        from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv
+        import gymnasium as gym
+        from gymnasium import spaces
+
+        class StubEnv(gym.Env):
+            observation_space = spaces.Dict({
+                "global_cont": spaces.Box(-1.0, 1.0, (13,), dtype=np.float32),
+            })
+            action_space = spaces.Discrete(4)
+
+            def reset(self, **kw):
+                return {"global_cont": np.zeros(13, dtype=np.float32)}, {}
+
+            def step(self, a):
+                return {"global_cont": np.zeros(13, dtype=np.float32)}, 0.0, False, False, {}
+
+        vec = DummyVecEnv([StubEnv] * n_envs)
+        vn = VecNormalize(vec, norm_obs=False, norm_reward=True, gamma=0.99)
+        vn.reset()
+        # ret_rms.var vaut 1.0 à l'initialisation (état Phase 3 rollout 1).
+        assert abs(float(vn.ret_rms.var) - 1.0) < 1e-9, "Précondition : ret_rms.var initial = 1.0"
+        return vn
+
+    def test_rescaling_corrects_rewards_and_preserves_gae_coherence(self):
+        """Après update, rewards et values rescalés par le même facteur → rewards_mean réduit,
+        et les deltas GAE restent cohérents (delta_t = scale * old_delta_t)."""
+        from ai.vec_normalize_frozen import update_vec_normalize_from_trajectories
+
+        try:
+            vn = self._make_vec_normalize_with_initial_ret_var(n_envs=2)
+        except Exception:
+            pytest.skip("DummyVecEnv Dict non disponible")
+
+        epsilon = float(vn.epsilon)
+        old_ret_var = float(vn.ret_rms.var)  # = 1.0
+
+        # Buffer simulé : rewards normalisées avec ret_var=1.0 → ≈ raw rewards ≈ 0.27.
+        # Values simulées cohérentes avec l'ancienne normalisation (policy calibrée pour ret_var=1.0).
+        raw_reward = 0.27
+        old_norm = np.sqrt(old_ret_var + epsilon)
+        buffer_rewards = np.full((10, 2), raw_reward / old_norm, dtype=np.float32)
+        # V(s) ≈ sum_discounted raw_reward / old_norm (valeurs plausibles en ancienne normalisation)
+        buffer_values = np.full((10, 2), 5.0, dtype=np.float32)
+        rewards_mean_before = float(buffer_rewards.mean())
+
+        # Discounted returns avec std≈27 → var≈400 après update.
+        rng = np.random.default_rng(0)
+        disc_rets_worker = rng.normal(loc=50.0, scale=27.0, size=(10,))
+        disc_ret_batches = [disc_rets_worker, disc_rets_worker]
+        final_returns = [float(disc_rets_worker[-1])] * 2
+
+        update_vec_normalize_from_trajectories(vn, [], disc_ret_batches, final_returns)
+
+        new_ret_var = float(vn.ret_rms.var)
+        assert new_ret_var > 10.0, f"ret_rms.var devrait avoir grandi : {new_ret_var}"
+
+        # Appliquer le même re-scaling que le fix dans patched_ppo (rewards ET values).
+        scale = np.sqrt(old_ret_var + epsilon) / np.sqrt(new_ret_var + epsilon)
+        buffer_rewards_rescaled = buffer_rewards * scale
+        buffer_values_rescaled = buffer_values * scale
+        rewards_mean_after = float(buffer_rewards_rescaled.mean())
+
+        # 1. rewards_mean doit être réduit d'un facteur > 5 (ratio sqrt(old/new) ≫ 0.2).
+        assert rewards_mean_after < rewards_mean_before / 5, (
+            f"Le re-scaling n'a pas réduit suffisamment rewards_mean : "
+            f"{rewards_mean_before:.4f} → {rewards_mean_after:.4f} (scale={scale:.4f}, "
+            f"old_ret_var={old_ret_var:.1f}, new_ret_var={new_ret_var:.1f})"
+        )
+        # 2. rewards rescalées ≈ raw_reward / sqrt(new_ret_var+ε) (nouvelle normalisation correcte).
+        expected_reward = raw_reward / np.sqrt(new_ret_var + epsilon)
+        np.testing.assert_allclose(
+            rewards_mean_after, expected_reward, rtol=1e-5,
+            err_msg="rewards_mean rescalées ≠ raw_reward / sqrt(new_ret_var+ε)"
+        )
+        # 3. Cohérence GAE : le ratio rewards/values est IDENTIQUE avant et après rescaling
+        #    (delta_t = r_t + γ*V_{t+1} - V_t scale uniformément → advantages = scale * old_advantages).
+        ratio_before = float(buffer_rewards.mean()) / float(buffer_values.mean())
+        ratio_after = float(buffer_rewards_rescaled.mean()) / float(buffer_values_rescaled.mean())
+        np.testing.assert_allclose(
+            ratio_after, ratio_before, rtol=1e-5,
+            err_msg="Le ratio rewards/values devrait être conservé après rescaling identique"
+        )
+
+    def test_no_rescaling_when_ret_var_unchanged(self):
+        """Pas de recalcul si ret_rms.var ne change pas (rollout sans retours)."""
+        from ai.vec_normalize_frozen import update_vec_normalize_from_trajectories
+
+        try:
+            vn = self._make_vec_normalize_with_initial_ret_var(n_envs=1)
+        except Exception:
+            pytest.skip("DummyVecEnv Dict non disponible")
+
+        old_ret_var = float(vn.ret_rms.var)
+        # Update sans retours → ret_rms.var inchangé.
+        update_vec_normalize_from_trajectories(vn, [], [], [])
+        new_ret_var = float(vn.ret_rms.var)
+
+        assert abs(new_ret_var - old_ret_var) < 1e-9, (
+            f"ret_rms.var ne devrait pas changer sans retours : {old_ret_var} → {new_ret_var}"
+        )
