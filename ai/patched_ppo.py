@@ -294,7 +294,7 @@ class PatchedMaskablePPO(MaskablePPO):
         """
         import cloudpickle
         from copy import deepcopy
-        from ai.vec_normalize_frozen import snapshot_vec_normalize, update_vec_normalize_from_trajectories
+        from ai.vec_normalize_frozen import snapshot_vec_normalize, update_vec_normalize_from_trajectories, _unwrap_vec_normalize
 
         n_envs = subproc.num_envs
         self.policy.set_training_mode(False)
@@ -335,12 +335,17 @@ class PatchedMaskablePPO(MaskablePPO):
         # Pré-empilement : (n_envs, n_steps, ...) par clé — remplace n_steps × n_keys np.stack par n_keys np.stack.
         obs_keys = list(trajectories[0]["norm_obs_seq"].keys())
         obs_all = {key: np.stack([traj["norm_obs_seq"][key] for traj in trajectories]) for key in obs_keys}
+        # Pré-empilement raw rewards + bootstrap pour la normalisation correcte à l'étape 6.
+        raw_rewards_all = np.stack([traj["raw_rewards_seq"] for traj in trajectories]).T  # (n_steps, n_envs)
+        bootstrap_all = np.stack([traj["bootstrap_seq"] for traj in trajectories]).T       # (n_steps, n_envs)
 
         for step_idx in range(n_rollout_steps):
             obs_step = {key: obs_all[key][:, step_idx] for key in obs_keys}
 
             actions_step = np.array([traj["actions_seq"][step_idx] for traj in trajectories])
-            rewards_step = np.array([traj["rewards_seq"][step_idx] for traj in trajectories], dtype=np.float32)
+            # Le buffer est rempli avec les rewards brutes ; elles seront normalisées à l'étape 6
+            # après la mise à jour de VecNormalize (ret_var correct disponible).
+            raw_rewards_step = raw_rewards_all[step_idx]
             dones_step = np.array([traj["dones_seq"][step_idx] for traj in trajectories], dtype=bool)
             ep_starts_step = np.array([traj["episode_starts_seq"][step_idx] for traj in trajectories], dtype=bool)
             values_step = th.tensor([traj["values_seq"][step_idx] for traj in trajectories], dtype=th.float32)
@@ -353,14 +358,14 @@ class PatchedMaskablePPO(MaskablePPO):
             rollout_buffer.add(
                 obs_step,
                 actions_step,
-                rewards_step,
+                raw_rewards_step,
                 ep_starts_step,
                 values_step,
                 log_probs_step,
                 action_masks=masks_step,
             )
 
-        # 5. Bootstrap last_values + GAE.
+        # 5. Bootstrap last_values (pas encore de GAE — rewards pas encore normalisées).
         last_obs: dict = {}
         for key in trajectories[0]["last_norm_obs"]:
             last_obs[key] = np.stack([traj["last_norm_obs"][key] for traj in trajectories])
@@ -373,21 +378,29 @@ class PatchedMaskablePPO(MaskablePPO):
         self._diag_last_values_gpu_mean = last_values.mean().item()
         self._diag_last_values_cpu_mean = float(np.mean([traj["last_value"] for traj in trajectories]))
 
-        rollout_buffer.compute_returns_and_advantage(last_values=last_values, dones=last_dones)
-
-        # 6. Mettre à jour VecNormalize avec les données brutes.
-        # Rewards et values sont dans l'ancienne normalisation (ret_rms.var pré-update) ;
-        # les rescaler par le facteur retourné maintient la cohérence interne des deltas GAE
-        # (delta_t = r_t + γ*V_{t+1} - V_t → scale * old_delta_t).
+        # 6. Mettre à jour VecNormalize avec les données brutes, puis normaliser les rewards
+        # du buffer avec le ret_var EXACT (post-update). Résout le bug cold-start : au rollout 1
+        # (--new), ret_var=1.0 ferait clipper ±150 → ±10, puis _scale=0.0067 → ±0.067 au lieu
+        # de ±1.0 dans le buffer. En normalisant APRÈS la mise à jour, clip(raw/√new_var) = ±1.0.
         raw_gc_batches = [traj["raw_global_cont"] for traj in trajectories]
         disc_ret_batches = [traj["discounted_returns"] for traj in trajectories]
         final_returns = [traj["final_discounted_return"] for traj in trajectories]
         _scale = update_vec_normalize_from_trajectories(env, raw_gc_batches, disc_ret_batches, final_returns)
-        if _scale is not None:
-            rollout_buffer.rewards *= _scale
-            rollout_buffer.values *= _scale
-            last_values = last_values * _scale
-            rollout_buffer.compute_returns_and_advantage(last_values=last_values, dones=last_dones)
+        _value_scale = _scale if _scale is not None else 1.0
+
+        vn = _unwrap_vec_normalize(env)
+        if vn is not None and vn.norm_reward:
+            new_ret_var = float(vn.ret_rms.var)
+            eps = float(vn.epsilon)
+            clip_r = float(vn.clip_reward)
+            rollout_buffer.rewards = (
+                np.clip(raw_rewards_all / np.sqrt(new_ret_var + eps), -clip_r, clip_r)
+                + bootstrap_all * _value_scale
+            ).astype(np.float32)
+        # _value_scale s'applique toujours aux valeurs (même si rewards non normalisées).
+        rollout_buffer.values *= _value_scale
+        last_values = last_values * _value_scale
+        rollout_buffer.compute_returns_and_advantage(last_values=last_values, dones=last_dones)
 
         # 7. Mettre à jour l'état du learner.
         self._last_obs = last_obs  # type: ignore[assignment]
