@@ -1653,6 +1653,7 @@ from ai.training_callbacks import (
     MetricsCollectionCallback,
     BotEvaluationCallback,
     ExploiterProbeCallback,
+    PoolEarlyStoppingCallback,
     selection_worst_bot,
 )
 
@@ -3581,6 +3582,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         for cb in extra_callbacks:
             if isinstance(cb, ExploiterProbeCallback):
                 cb.metrics_tracker = metrics_tracker
+            if isinstance(cb, PoolEarlyStoppingCallback):
+                cb.metrics_tracker = metrics_tracker
         training_callbacks = list(extra_callbacks) + training_callbacks
     callback_names = [callback.__class__.__name__ for callback in training_callbacks]
     _debug_train_marker(
@@ -5077,6 +5080,16 @@ def main():
                             "'init'. Exception : si --resume-from est fourni explicitement, il "
                             "remplace le point de depart de l'etape (utile pour reprendre un run "
                             "plante) — interdit si init='new'.")
+    parser.add_argument("--win-rate-threshold", type=float, default=None, metavar="THRESHOLD",
+                       help="Arrêt anticipé du curriculum : seuil de win-rate contre tous les "
+                            "membres du pool (ex: 0.60). Exige --etape sur une étape non-exploiteur. "
+                            "Inactif si absent.")
+    parser.add_argument("--min-steps", type=int, default=50000, metavar="N",
+                       help="Nombre minimal de timesteps avant que l'arrêt anticipé "
+                            "(--win-rate-threshold) soit éligible (défaut: 50000).")
+    parser.add_argument("--consecutive-evals", type=int, default=2, metavar="N",
+                       help="Nombre d'évaluations consécutives au-dessus du seuil requis "
+                            "pour déclencher l'arrêt anticipé (défaut: 2).")
 
     args = parser.parse_args()
 
@@ -5712,6 +5725,53 @@ def main():
                     # depuis disque une fois au demarrage, aucun mecanisme ne la recharge).
                     # freeze_opponent_pool=True est le verrou documentaire qui empecherait
                     # toute future re-introduction d'un mecanisme de republication.
+                elif (
+                    curriculum_stage is not None
+                    and not is_exploiter_stage(curriculum_stage[1])
+                    and args.win_rate_threshold is not None
+                ):
+                    _curr, _stg = curriculum_stage
+                    _pool_members = stage_pool_members(_stg)
+                    if _pool_members:
+                        _models_root = get_config_loader().get_models_root()
+                        _canonical = build_agent_model_path(_models_root, args.agent)
+                        _pool_archives = [
+                            (stage_model_path(_canonical, m["label"]), m["label"])
+                            for m in _pool_members
+                        ]
+                        _pool_n_workers = require_key(
+                            training_config, "callback_params"
+                        ).get("bot_eval_n_workers_intermediate")
+                        _pool_eval_freq = int(require_key(
+                            require_key(training_config, "callback_params"), "bot_eval_freq"
+                        ))
+                        _pool_n_episodes = int(require_key(
+                            require_key(training_config, "callback_params"), "bot_eval_intermediate"
+                        ))
+                        _pool_early_stop = PoolEarlyStoppingCallback(
+                            pool_archives=_pool_archives,
+                            threshold=args.win_rate_threshold,
+                            min_timesteps=args.min_steps,
+                            consecutive_evals=args.consecutive_evals,
+                            eval_freq_episodes=_pool_eval_freq,
+                            n_eval_episodes=_pool_n_episodes,
+                            training_config_name=args.training_config,
+                            rewards_config_name=args.rewards_config or args.agent,
+                            metrics_tracker=None,  # lie dans train_with_scenario_rotation
+                            intermediate_n_workers=_pool_n_workers,
+                        )
+                        _exploiter_extra_callbacks = [_pool_early_stop]
+                        print(
+                            f"🎯 Pool early-stop activé : seuil={args.win_rate_threshold:.0%}, "
+                            f"min_steps={args.min_steps}, "
+                            f"consecutive_evals={args.consecutive_evals}, "
+                            f"pool={[m['label'] for m in _pool_members]}"
+                        )
+                    else:
+                        print(
+                            "⚠️  --win-rate-threshold ignoré : aucun membre dans le pool "
+                            f"de l'étape {args.etape}."
+                        )
 
                 # Always use scenario rotation path for self/bot/all modes,
                 # even when a single scenario is available.

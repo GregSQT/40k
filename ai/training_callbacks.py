@@ -2749,3 +2749,186 @@ class ExploiterProbeCallback(BaseCallback):
             return False
 
         return True
+
+
+class PoolEarlyStoppingCallback(BaseCallback):
+    """Arrêt anticipé si l'agent dépasse `threshold` vs TOUS les membres du pool.
+
+    Évalue tous les membres du pool en un seul appel à `evaluate_against_checkpoints`
+    tous les `eval_freq_episodes` épisodes, après `min_timesteps` steps.
+    Arrête l'entraînement si le seuil est dépassé sur `consecutive_evals` évals consécutives.
+
+    Synchrone (même convention que ExploiterProbeCallback) : bloque le thread d'entraînement
+    le temps de l'évaluation. Ne pas utiliser avec async_eval_enabled=True côté bot-eval
+    si la latence est un problème — les deux callbacks se font en série.
+    """
+
+    def __init__(
+        self,
+        pool_archives: List[Tuple[str, str]],
+        threshold: float,
+        min_timesteps: int,
+        consecutive_evals: int,
+        eval_freq_episodes: int,
+        n_eval_episodes: int,
+        training_config_name: str,
+        rewards_config_name: str,
+        metrics_tracker: Any,
+        intermediate_n_workers: Optional[int] = None,
+        verbose: int = 1,
+    ) -> None:
+        super().__init__(verbose)
+        if not pool_archives:
+            raise ValueError("PoolEarlyStoppingCallback : pool_archives ne peut pas être vide")
+        if not (0.0 < threshold <= 1.0):
+            raise ValueError(
+                f"PoolEarlyStoppingCallback : threshold doit être dans ]0,1] (got {threshold!r})"
+            )
+        if not isinstance(min_timesteps, int) or min_timesteps < 0:
+            raise ValueError(
+                f"PoolEarlyStoppingCallback : min_timesteps doit être un entier >= 0 "
+                f"(got {min_timesteps!r})"
+            )
+        if not isinstance(consecutive_evals, int) or consecutive_evals <= 0:
+            raise ValueError(
+                f"PoolEarlyStoppingCallback : consecutive_evals doit être un entier > 0 "
+                f"(got {consecutive_evals!r})"
+            )
+        if not isinstance(eval_freq_episodes, int) or eval_freq_episodes <= 0:
+            raise ValueError(
+                f"PoolEarlyStoppingCallback : eval_freq_episodes doit être un entier > 0 "
+                f"(got {eval_freq_episodes!r})"
+            )
+        if not isinstance(n_eval_episodes, int) or n_eval_episodes <= 0:
+            raise ValueError(
+                f"PoolEarlyStoppingCallback : n_eval_episodes doit être un entier > 0 "
+                f"(got {n_eval_episodes!r})"
+            )
+        self.pool_archives = pool_archives
+        self.threshold = threshold
+        self.min_timesteps = min_timesteps
+        self.consecutive_evals = consecutive_evals
+        self.eval_freq_episodes = eval_freq_episodes
+        self.n_eval_episodes = n_eval_episodes
+        self.training_config_name = training_config_name
+        self.rewards_config_name = rewards_config_name
+        self.metrics_tracker = metrics_tracker
+        self.intermediate_n_workers = intermediate_n_workers
+
+        self._consecutive_above: int = 0
+        self._next_probe_episode: int = eval_freq_episodes
+        self._eval_pool: Optional[Any] = None
+
+    def _current_episode(self) -> int:
+        if self.metrics_tracker is not None:
+            return int(self.metrics_tracker.episode_count)
+        return 0
+
+    def _on_training_start(self) -> None:
+        from ai.bot_evaluation import create_checkpoint_eval_pool, _strip_phase_suffix
+
+        config = get_config_loader()
+        base_agent_key = _strip_phase_suffix(self.rewards_config_name)
+        training_cfg = config.load_agent_training_config(base_agent_key, self.training_config_name)
+        vec_normalize_enabled = bool(
+            require_key(require_key(training_cfg, "vec_normalize"), "enabled")
+        )
+        vec_eval_enabled = bool(
+            require_key(require_key(training_cfg, "vec_normalize_eval"), "enabled")
+        )
+        n_workers = self.intermediate_n_workers
+        if n_workers is None:
+            callback_params = require_key(training_cfg, "callback_params")
+            n_workers = int(callback_params.get("bot_eval_n_workers_intermediate", 4))
+        if n_workers > 1:
+            self._eval_pool = create_checkpoint_eval_pool(
+                n_workers=n_workers,
+                vec_normalize_enabled=vec_normalize_enabled,
+                vec_eval_enabled=vec_eval_enabled,
+                training_config_name=self.training_config_name,
+                rewards_config_name=self.rewards_config_name,
+                controlled_agent=self.rewards_config_name,
+                base_agent_key=base_agent_key,
+            )
+
+    def _on_training_end(self) -> None:
+        if self._eval_pool is not None:
+            self._eval_pool.shutdown(wait=False)
+            self._eval_pool = None
+
+    def _probe(self) -> Dict[str, float]:
+        """Sauvegarde le modèle courant et évalue contre tous les membres du pool."""
+        from ai.bot_evaluation import evaluate_against_checkpoints
+        from ai.vec_normalize_utils import save_vec_normalize
+
+        fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        try:
+            self.model.save(tmp_path)
+            save_vec_normalize(self.model.get_env(), tmp_path)
+            try:
+                results = evaluate_against_checkpoints(
+                    model_path=tmp_path,
+                    checkpoint_archives=self.pool_archives,
+                    training_config_name=self.training_config_name,
+                    rewards_config_name=self.rewards_config_name,
+                    n_episodes=self.n_eval_episodes,
+                    controlled_agent=self.rewards_config_name,
+                    scenario_pool="holdout",
+                    device="cpu",
+                    n_workers_override=self.intermediate_n_workers,
+                    pool=self._eval_pool,
+                )
+            except Exception:
+                self._eval_pool = None
+                raise
+        finally:
+            remove_model_with_companions(tmp_path)
+        return {label: float(results[label]) for _, label in self.pool_archives if label in results}
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps < self.min_timesteps:
+            return True
+
+        current = self._current_episode()
+        if current < self._next_probe_episode:
+            return True
+
+        self._next_probe_episode += self.eval_freq_episodes
+        scores = self._probe()
+
+        labels = [label for _, label in self.pool_archives]
+        missing = [lbl for lbl in labels if lbl not in scores]
+        if missing:
+            print(
+                f"⚠️  PoolEarlyStoppingCallback : scores manquants pour {missing} "
+                "— éval ignorée, entraînement continue."
+            )
+            return True
+
+        all_above = all(scores[lbl] >= self.threshold for lbl in labels)
+        score_str = ", ".join(f"{lbl}={scores[lbl]:.3f}" for lbl in labels)
+        if all_above:
+            self._consecutive_above += 1
+            print(
+                f"✅ Pool early-stop : {score_str} >= {self.threshold:.0%} "
+                f"({self._consecutive_above}/{self.consecutive_evals} évals consécutives) "
+                f"@ep{current}"
+            )
+            if self._consecutive_above >= self.consecutive_evals:
+                print(
+                    f"🛑 Early stop déclenché : seuil {self.threshold:.0%} confirmé "
+                    f"{self.consecutive_evals}× consécutif(s) contre tous les membres du pool."
+                )
+                return False
+        else:
+            if self._consecutive_above > 0:
+                print(
+                    f"↩️  Pool early-stop : seuil non atteint ({score_str}) "
+                    f"— compteur réinitialisé ({self._consecutive_above} → 0) @ep{current}"
+                )
+            else:
+                print(f"📊 Pool early-stop : {score_str} (seuil {self.threshold:.0%}) @ep{current}")
+            self._consecutive_above = 0
+
+        return True
