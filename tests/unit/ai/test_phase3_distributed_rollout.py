@@ -905,6 +905,127 @@ class TestCollectRolloutsDispatch:
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
+# 3.4b — _collect_rollouts_distributed : propagation des masques réels dans le buffer
+# ══════════════════════════════════════════════════════════════════════════════════════════════
+
+
+class TestDistributedRolloutMaskPropagation:
+    """Vérifie que _collect_rollouts_distributed stocke les masques issus des workers,
+    et non des masques pleins (np.ones) produits par MaskableDictRolloutBuffer.reset()."""
+
+    N_ENVS = 2
+    N_STEPS = 3
+    N_ACTIONS = 4
+    GC_DIM = 13
+
+    def _make_fake_trajectory(self, masks_seq: list) -> dict:
+        """Trajectoire minimale valide pour le learner (longueur N_STEPS)."""
+        obs_seq = {
+            "global_cont": np.zeros((self.N_STEPS, self.GC_DIM), dtype=np.float32),
+        }
+        return {
+            "norm_obs_seq": obs_seq,
+            "actions_seq": [0] * self.N_STEPS,
+            "rewards_seq": [0.0] * self.N_STEPS,
+            "raw_rewards_seq": np.zeros(self.N_STEPS, dtype=np.float32),
+            "bootstrap_seq": np.zeros(self.N_STEPS, dtype=np.float32),
+            "dones_seq": [False] * self.N_STEPS,
+            "episode_starts_seq": [True] + [False] * (self.N_STEPS - 1),
+            "values_seq": [0.0] * self.N_STEPS,
+            "log_probs_seq": [-1.0] * self.N_STEPS,
+            "masks_seq": masks_seq,
+            "infos_seq": [{}] * self.N_STEPS,
+            "last_norm_obs": {"global_cont": np.zeros(self.GC_DIM, dtype=np.float32)},
+            "last_done": False,
+            "last_value": 0.0,
+            "raw_global_cont": [np.zeros(self.GC_DIM, dtype=np.float32)] * self.N_STEPS,
+            "discounted_returns": [0.0] * self.N_STEPS,
+            "final_discounted_return": 0.0,
+            "episode_wall_seconds_seq": [0.0] * self.N_STEPS,
+        }
+
+    def test_restricted_masks_propagated_to_buffer(self):
+        """Les masques interdisant l'action 0 doivent se retrouver dans buf.action_masks,
+        pas les masques pleins (np.ones) initialisés par MaskableDictRolloutBuffer.reset()."""
+        from gymnasium import spaces
+        from sb3_contrib.common.maskable.buffers import MaskableDictRolloutBuffer
+        from ai.patched_ppo import PatchedMaskablePPO
+
+        obs_space = spaces.Dict({
+            "global_cont": spaces.Box(-1.0, 1.0, (self.GC_DIM,), dtype=np.float32),
+        })
+        act_space = spaces.Discrete(self.N_ACTIONS)
+
+        # Masque restrictif : action 0 interdite pour tous les workers à chaque step.
+        restricted_mask = np.array([False, True, True, True], dtype=bool)
+        masks_seq = [restricted_mask.copy() for _ in range(self.N_STEPS)]
+        trajectories = [
+            self._make_fake_trajectory(masks_seq)
+            for _ in range(self.N_ENVS)
+        ]
+
+        buf = MaskableDictRolloutBuffer(
+            buffer_size=self.N_STEPS,
+            observation_space=obs_space,
+            action_space=act_space,
+            device="cpu",
+            gamma=0.99,
+            gae_lambda=0.95,
+            n_envs=self.N_ENVS,
+        )
+
+        class StubPolicy:
+            def set_training_mode(self, mode): pass
+            def cpu(self): return self
+            def predict_values(self, obs):
+                n = next(iter(obs.values())).shape[0]
+                return torch.zeros(n)
+
+        with patch.object(PatchedMaskablePPO, "_setup_model"):
+            model = PatchedMaskablePPO.__new__(PatchedMaskablePPO)
+        model.policy = StubPolicy()
+        model.device = torch.device("cpu")
+        model.action_space = act_space
+        model.num_timesteps = 0
+        model._last_obs = {"global_cont": np.zeros((self.N_ENVS, self.GC_DIM), dtype=np.float32)}
+        model._last_episode_starts = np.zeros(self.N_ENVS, dtype=bool)
+        model._update_info_buffer = MagicMock()
+
+        subproc_mock = MagicMock()
+        subproc_mock.num_envs = self.N_ENVS
+        subproc_mock.collect_trajectories.return_value = trajectories
+
+        env_mock = MagicMock()
+        env_mock.num_envs = self.N_ENVS
+        env_mock.observation_space = obs_space
+        env_mock.action_space = act_space
+
+        callback = MagicMock()
+        callback.on_rollout_start = MagicMock()
+        callback.on_step.return_value = True
+        callback.on_rollout_end = MagicMock()
+
+        with patch("ai.vec_normalize_frozen.snapshot_vec_normalize", return_value=MagicMock()), \
+             patch("ai.vec_normalize_frozen.update_vec_normalize_from_trajectories", return_value=None), \
+             patch("ai.vec_normalize_frozen._unwrap_vec_normalize", return_value=None), \
+             patch("cloudpickle.dumps", return_value=b"stub_policy"):
+            model._collect_rollouts_distributed(
+                env_mock, subproc_mock, callback, buf, self.N_STEPS, use_masking=True
+            )
+
+        # buf.action_masks : shape (n_steps, n_envs, n_actions), dtype float32.
+        assert buf.action_masks.shape == (self.N_STEPS, self.N_ENVS, self.N_ACTIONS)
+        action_0_values = buf.action_masks[:, :, 0]
+        assert np.all(action_0_values == 0.0), (
+            f"action_masks[:,:,0] attendu tout à 0.0 (action interdite), obtenu : {action_0_values}"
+        )
+        other_actions = buf.action_masks[:, :, 1:]
+        assert np.all(other_actions == 1.0), (
+            f"action_masks[:,:,1:] attendu tout à 1.0 (actions autorisées), obtenu : {other_actions}"
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════
 # 3.5 — update_vec_normalize_from_trajectories
 # ══════════════════════════════════════════════════════════════════════════════════════════════
 
