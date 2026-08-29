@@ -1163,38 +1163,11 @@ class TestRetVarRescaling:
     vrai seulement à convergence ; au cold-start il vaut 0.060 et écrase les prédictions de 17x.
     """
 
-    def test_rewards_normalized_with_post_update_ret_var(self):
-        """Les rewards du buffer valent raw / sqrt(ret_var POST-update), pas gelé."""
-        from ai.vec_normalize_frozen import update_vec_normalize_from_trajectories
-
-        vn = _make_cold_start_vec_normalize(n_envs=2)
-        epsilon = float(vn.epsilon)
-        raw_reward = 0.27
-
-        # Discounted returns avec std≈27 → ret_var ≫ 1.0 après update.
-        rng = np.random.default_rng(0)
-        disc_rets_worker = rng.normal(loc=50.0, scale=27.0, size=(10,))
-        disc_ret_batches = [disc_rets_worker, disc_rets_worker]
-        final_returns = [float(disc_rets_worker[-1])] * 2
-
-        update_vec_normalize_from_trajectories(vn, [], disc_ret_batches, final_returns)
-
-        new_ret_var = float(vn.ret_rms.var)
-        assert new_ret_var > 10.0, f"ret_rms.var devrait avoir grandi : {new_ret_var}"
-
-        # Non-trivial : la normalisation POST-update donne une reward bien plus petite que
-        # la normalisation PRE-update (ret_var=1.0 gelé). Le ratio doit dépasser 5× pour prouver
-        # que l'enjeu du correctif cold-start est réel (cold-start : clip(0.27/1.0)=0.27 vs
-        # 0.27/sqrt(new_ret_var≫1) ≪ 0.27).
-        reward_pre_update = float(
-            np.clip(raw_reward / np.sqrt(1.0 + epsilon), -float(vn.clip_reward), float(vn.clip_reward))
-        )
-        reward_post_update = raw_reward / np.sqrt(new_ret_var + epsilon)
-        ratio = reward_pre_update / reward_post_update
-        assert ratio > 5.0, (
-            f"Le ratio pre/post-update doit être > 5× pour confirmer l'enjeu cold-start "
-            f"(obtenu {reward_pre_update:.4f} / {reward_post_update:.6f} = {ratio:.2f})"
-        )
+    # La normalisation des rewards par le ret_var post-update est vérifiée sur le vrai chemin
+    # par TestCriticOutputsNotRescaled (buf.rewards après _collect_rollouts_distributed), et son
+    # cas saturant par test_large_rewards_clipped_on_post_update_ret_var. Un test comparant ici
+    # deux scalaires calculés sur place ne toucherait aucun code de production : réintroduire le
+    # défaut cold-start (normaliser avec ret_var gelé) le laissait vert.
 
     def test_update_returns_no_rescaling_factor(self):
         """update_vec_normalize_from_trajectories ne retourne aucun facteur de re-scaling.
@@ -1262,18 +1235,20 @@ class TestCriticOutputsNotRescaled:
     RAW_REWARD = 0.27
     BOOTSTRAP_VAL = 0.1
     VALUES_PRED = 5.0
+    GAMMA = 0.99
 
-    def _make_trajectory(self, worker_idx: int):
+    def _make_trajectory(self, worker_idx: int, raw_reward: float | None = None):
         """Trajectoire synthétique : values non nulles, retours de forte variance, sans done."""
         rng = np.random.default_rng(100 + worker_idx)
         n = self.N_STEPS
+        raw = self.RAW_REWARD if raw_reward is None else raw_reward
         # discounted_returns de std ≈ 27 → ret_rms.var ≫ 1.0 après update.
         disc_rets = rng.normal(loc=50.0, scale=27.0, size=(n,))
         return {
             "norm_obs_seq": {"global_cont": np.zeros((n, 13), dtype=np.float32)},
             "actions_seq": np.zeros(n, dtype=np.int64),
-            "rewards_seq": np.full(n, self.RAW_REWARD, dtype=np.float32),
-            "raw_rewards_seq": np.full(n, self.RAW_REWARD, dtype=np.float32),
+            "rewards_seq": np.full(n, raw, dtype=np.float32),
+            "raw_rewards_seq": np.full(n, raw, dtype=np.float32),
             "bootstrap_seq": np.full(n, self.BOOTSTRAP_VAL, dtype=np.float32),
             "dones_seq": np.zeros(n, dtype=bool),
             "episode_starts_seq": np.zeros(n, dtype=bool),
@@ -1292,7 +1267,7 @@ class TestCriticOutputsNotRescaled:
             "episode_wall_seconds_seq": np.zeros(n, dtype=np.float64),
         }
 
-    def _collect(self):
+    def _collect(self, raw_reward: float | None = None):
         """Lance _collect_rollouts_distributed ; retourne (buf, vn, would_be_scale)."""
         from sb3_contrib.common.maskable.buffers import MaskableDictRolloutBuffer
         from ai.patched_ppo import PatchedMaskablePPO
@@ -1304,12 +1279,12 @@ class TestCriticOutputsNotRescaled:
         subproc = MagicMock()
         subproc.num_envs = self.N_ENVS
         subproc.collect_trajectories.return_value = [
-            self._make_trajectory(i) for i in range(self.N_ENVS)
+            self._make_trajectory(i, raw_reward=raw_reward) for i in range(self.N_ENVS)
         ]
 
         buf = MaskableDictRolloutBuffer(
             buffer_size=self.N_STEPS, observation_space=obs_space, action_space=act_space,
-            device="cpu", gamma=0.99, gae_lambda=0.95, n_envs=self.N_ENVS,
+            device="cpu", gamma=self.GAMMA, gae_lambda=0.95, n_envs=self.N_ENVS,
         )
 
         with patch.object(PatchedMaskablePPO, "_setup_model"):
@@ -1396,13 +1371,64 @@ class TestCriticOutputsNotRescaled:
     def test_buffer_returns_not_rescaled_at_cold_start(self):
         """rollout_buffer.returns (GAE) n'est pas écrasé par un rescaling de last_values.
 
-        predict_values retourne VALUES_PRED ; si last_values était rescalé ×would_be_scale≈0.06,
-        returns.mean() tomberait sous VALUES_PRED/2. On assert > VALUES_PRED/2 pour détecter
-        tout rescaling qui diviserait les prédictions du critique par plus de 2.
+        Assertion EXACTE, pas un seuil. Au dernier step il n'y a ni done ni step suivant, donc
+        GAE se réduit à A_last = r_last + gamma*last_value - V(s_last) ; comme returns = A + values,
+        le V(s_last) s'annule et returns[-1] = r_last + gamma*last_value. C'est la seule quantité
+        du buffer où last_values entre sans être mélangé au reste, ce qui rend n'importe quel
+        facteur détectable. Un seuil sur returns.mean() ne détectait qu'un rescaling fort :
+        avec VALUES_PRED/2, un last_values ×0.5 donnait 2.87 > 2.5 et passait au vert.
         """
-        buf, _vn, _would_be_scale = self._collect()
-        threshold = self.VALUES_PRED / 2
-        assert buf.returns.mean() > threshold, (
-            f"buf.returns.mean()={buf.returns.mean():.4f} ≤ {threshold:.1f} : "
-            "last_values vraisemblablement rescalé avant compute_returns_and_advantage"
+        buf, vn, _would_be_scale = self._collect()
+        new_ret_var = float(vn.ret_rms.var)
+        expected_last_reward = float(
+            np.clip(
+                self.RAW_REWARD / np.sqrt(new_ret_var + float(vn.epsilon)),
+                -float(vn.clip_reward), float(vn.clip_reward),
+            )
+        ) + self.BOOTSTRAP_VAL
+        expected_last_return = expected_last_reward + self.GAMMA * self.VALUES_PRED
+        np.testing.assert_allclose(
+            buf.returns[-1], np.full(self.N_ENVS, expected_last_return, dtype=np.float32),
+            rtol=1e-5,
+            err_msg=(
+                f"buf.returns[-1] ≠ r_last + gamma*last_value ({expected_last_return:.4f}) : "
+                "last_values a été rescalé avant compute_returns_and_advantage"
+            ),
+        )
+
+    def test_large_rewards_clipped_on_post_update_ret_var(self):
+        """Le clip ±clip_reward porte sur raw/sqrt(ret_var POST-update), jamais sur le gelé.
+
+        C'est le scénario cold-start réel : normalisée par ret_var=1.0 gelé, une reward de 150
+        sature le clip à 10.0 ; normalisée par le ret_var réel elle ne sature pas. Le chemin de
+        clipping n'est jamais touché par RAW_REWARD=0.27, qui reste loin du seuil.
+        """
+        raw_reward = 150.0
+        buf, vn, _would_be_scale = self._collect(raw_reward=raw_reward)
+
+        new_ret_var = float(vn.ret_rms.var)
+        eps, clip_r = float(vn.epsilon), float(vn.clip_reward)
+
+        saturated = float(np.clip(raw_reward / np.sqrt(1.0 + eps), -clip_r, clip_r))
+        assert saturated == pytest.approx(clip_r), (
+            "précondition : normalisée par le ret_var GELÉ, la reward doit saturer le clip"
+        )
+
+        expected = (
+            np.clip(
+                np.full((self.N_STEPS, self.N_ENVS), raw_reward, dtype=np.float32)
+                / np.sqrt(new_ret_var + eps),
+                -clip_r, clip_r,
+            )
+            + self.BOOTSTRAP_VAL
+        ).astype(np.float32)
+        assert float(expected[0, 0]) < clip_r, (
+            "précondition : normalisée par le ret_var POST-update, la reward ne doit pas saturer"
+        )
+        np.testing.assert_allclose(
+            buf.rewards, expected, rtol=1e-5,
+            err_msg=(
+                f"buf.rewards saturé à {clip_r} : le clip a été appliqué sur le ret_var gelé "
+                f"au lieu du ret_var post-update ({new_ret_var:.2f})"
+            ),
         )
