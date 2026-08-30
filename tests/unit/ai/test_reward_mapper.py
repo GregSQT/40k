@@ -149,12 +149,6 @@ def test_threat_and_hp_comparison_helpers(monkeypatch: pytest.MonkeyPatch) -> No
     assert mapper._is_lowest_hp_among_adjacent_threats(targets[1], targets, {}) is True
 
 
-def test_not_implemented_accessors_raise() -> None:
-    mapper = RewardMapper(_base_cfg())
-    with pytest.raises(NotImplementedError):
-        mapper._get_max_melee_damage_vs_target({"id": "T"})
-
-
 def test_was_lowest_hp_target(monkeypatch: pytest.MonkeyPatch) -> None:
     mapper = RewardMapper(_base_cfg())
     targets = [{"id": "A"}, {"id": "B"}, {"id": "C"}]
@@ -173,9 +167,9 @@ def test_was_lowest_hp_target(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_can_unit_kill_target_in_one_phase_handles_dead_and_missing_weapon(monkeypatch: pytest.MonkeyPatch) -> None:
     mapper = RewardMapper(_base_cfg())
-    # Dead/absent target hp -> immediately killable
+    # Dead/absent target (hp=0) → not killable (already dead)
     monkeypatch.setattr(mapper, "_get_target_hp", lambda target, gs: 0)
-    assert mapper._can_unit_kill_target_in_one_phase({"id": "u"}, {"id": "t"}, True, {}) is True
+    assert mapper._can_unit_kill_target_in_one_phase({"id": "u"}, {"id": "t"}, True, {}) is False
 
     # Alive target but no selected weapon -> not killable
     monkeypatch.setattr(mapper, "_get_target_hp", lambda target, gs: 5)
@@ -202,7 +196,6 @@ def test_shoot_charge_and_combat_priority_rewards(monkeypatch: pytest.MonkeyPatc
     target = {"id": "T1", "unitType": "Tyranid_Infantry_Elite_MeleeTroop"}
     all_targets = [target]
 
-    monkeypatch.setattr(mapper, "_get_max_melee_damage_vs_target", lambda t: 2)
     monkeypatch.setattr(mapper, "_get_target_hp", lambda t, gs: 4)
     monkeypatch.setattr(mapper, "_is_highest_threat_in_range", lambda t, ts: True)
     monkeypatch.setattr(mapper, "_is_lowest_hp_high_threat", lambda t, ts, gs: False)
@@ -236,3 +229,14 @@ def test_shoot_charge_and_combat_priority_rewards(monkeypatch: pytest.MonkeyPatc
     # Combat priority 1 path
     combat_reward = mapper.get_combat_priority_reward(unit, target, all_targets, {})
     assert abs(combat_reward - 2.2) < 1e-9  # melee_attack 1.5 + attack_priority_1 0.7
+
+    # Shooting priority 1 path: can_melee_charge_target=True + highest threat
+    shoot_reward_p1 = mapper.get_shooting_priority_reward(
+        unit, target, all_targets, can_melee_charge_target=True, game_state={}
+    )
+    assert abs(shoot_reward_p1 - 1.9) < 1e-9  # ranged_attack 1.0 + shoot_priority_1 0.9
+
+
+def test_is_lowest_hp_high_threat_empty_targets() -> None:
+    mapper = RewardMapper(_base_cfg())
+    assert mapper._is_lowest_hp_high_threat({"id": "T"}, [], {}) is False

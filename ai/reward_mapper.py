@@ -42,7 +42,7 @@ class RewardMapper:
         """
         target_hp = self._get_target_hp(target, game_state)
         if target_hp <= 0:
-            return True
+            return False
         
         if is_ranged:
             weapon = get_selected_ranged_weapon(unit)
@@ -64,7 +64,6 @@ class RewardMapper:
         1. Enemy unit at ranged range:
            - with highest threat score (max of ranged/melee damage)
            - that one or more of our melee units can charge
-           - would not kill in 1 melee phase
 
         3. Enemy unit at ranged range (checked before P2 — most specific sub-case):
            - with highest threat score (max of ranged/melee damage)
@@ -84,13 +83,9 @@ class RewardMapper:
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate target threat using weapon arrays
         can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state=game_state)
 
-        # Priority 1: High threat target that melee can charge but won't kill in 1 melee phase
-        if can_melee_charge_target:
-            melee_damage = self._get_max_melee_damage_vs_target(target)
-            target_hp = self._get_target_hp(target, game_state)
-            if target_hp > melee_damage:  # Won't be killed by melee in 1 phase
-                if self._is_highest_threat_in_range(target, all_targets):
-                    return base_reward + require_key(unit_rewards, "shoot_priority_1")
+        # Priority 1: High threat target that melee can charge — soften before the charge
+        if can_melee_charge_target and self._is_highest_threat_in_range(target, all_targets):
+            return base_reward + require_key(unit_rewards, "shoot_priority_1")
 
         # Priority 3: High threat, lowest HP, killable — checked before P2 as the more specific sub-case
         if can_kill_1_phase and self._is_lowest_hp_high_threat(target, all_targets, game_state):
@@ -315,7 +310,6 @@ class RewardMapper:
 
         # If rewards_config is already an agent section, return it directly
         if "base_actions" in self.rewards_config:
-            require_key(self.rewards_config, "base_actions")
             return self.rewards_config
 
         # Direct lookup using exact unit type from rewards_config.json
@@ -360,18 +354,6 @@ class RewardMapper:
         attack_pref = unit_parsed["attack_pref"]
         target_power = target_parsed["power_level"]
         
-        # Extract preferred target type from attack preference
-        if "Swarm" in attack_pref:
-            preferred_target = "swarm"
-        elif "Troop" in attack_pref:
-            preferred_target = "troop"
-        elif "Elite" in attack_pref:
-            preferred_target = "elite"
-        elif "Leader" in attack_pref:
-            preferred_target = "leader"
-        else:
-            preferred_target = "troop"  # Default
-        
         # Calculate penalty for targeting non-preferred types
         target_power_lower = target_power.lower()
         if f"vs_{target_power_lower}" in target_bonuses:
@@ -411,17 +393,18 @@ class RewardMapper:
     
     def _is_lowest_hp_high_threat(self, target, all_targets, game_state: Dict[str, Any]):
         """Check if target has lowest HP among high threat targets. Phase 2: HP from _get_target_hp."""
-        target_threat = self._get_unit_threat(target)
-        max_threat = max(self._get_unit_threat(t) for t in all_targets)
+        if not all_targets:
+            return False
+        threats = {id(t): self._get_unit_threat(t) for t in all_targets}
+        max_threat = max(threats.values())
+        target_threat = threats[id(target)]
+        if target_threat != max_threat:
+            return False
         target_hp = self._get_target_hp(target, game_state)
-        if target_threat == max_threat:
-            for other in all_targets:
-                other_threat = self._get_unit_threat(other)
-                other_hp = self._get_target_hp(other, game_state)
-                if other_threat == max_threat and other_hp < target_hp:
-                    return False
-            return True
-        return False
+        for other in all_targets:
+            if threats[id(other)] == max_threat and self._get_target_hp(other, game_state) < target_hp:
+                return False
+        return True
     
     def _is_lowest_hp_among_threats(self, target, all_targets, game_state: Dict[str, Any]):
         """Check if target has lowest HP among targets of same threat level. Phase 2: HP from _get_target_hp."""
@@ -456,12 +439,6 @@ class RewardMapper:
                 if other_threat == target_threat and other_hp < target_hp:
                     return False
         return True
-    
-    def _get_max_melee_damage_vs_target(self, target):
-        """Get maximum melee damage our units can do to target.""" 
-        # This would need access to friendly units list
-        # Throw error instead of using default
-        raise NotImplementedError("_get_max_melee_damage_vs_target requires access to friendly units list")
     
     def _was_lowest_hp_target(self, target, all_targets: List[Dict[str, Any]], target_hp: int, game_state: Dict[str, Any]) -> bool:
         """Check if this target had the lowest HP among all_targets when the kill action was taken."""
