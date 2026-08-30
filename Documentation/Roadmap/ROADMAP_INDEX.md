@@ -119,6 +119,9 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | infra | Migration PostgreSQL | [infra.md#postgresql](infra.md#postgresql) | ⚡ |
 | infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) | 🚫 |
 | bot | Tranches 2-3 benchmark — schedule P0→P10 + exploiters : code et tests livrés 2026-08-22 (`--etape`, `curriculum.json`, pool figé par-env, `ExploiterProbeCallback` sondage synchrone + `validate_exploiter_protocol` + `exploiter_config`, 24 tests verrou) ; restent les 14 runs (~260 h) | [bot.md#league](bot.md#league) | 🚫 |
+| training | ✅ `ramp_end_episodes` — découple durée run et vitesse d'introduction self-play ; plateau `ratio_end` atteint à l'épisode déclaré indépendamment de `total_episodes` (2026-08-30) | [training.md#curriculum](training.md#curriculum) | ⚡ |
+| moteur+infra | ✅ fix §04.02 pool stale — clé cache `_move_ver` (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
+| infra | ✅ fix comment-cache-revalidation (2026-08-30) | [infra.md](infra.md) | ⚡ |
 
 ---
 

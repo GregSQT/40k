@@ -64,6 +64,7 @@
       "role": "learner",
       "init": "new",
       "warmup_episodes": 5000,
+      "ramp_end_episodes": 150000,
       "ratio_start": 0.0,
       "ratio_end": 0.60,
       "pool": [

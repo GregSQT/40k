@@ -3048,8 +3048,22 @@ def build_training_opponents(
             "opponent_mix.enabled=True requires a known total_episodes to schedule the "
             "bots/pool ratio."
         )
+    ramp_end_episodes_raw = mix_cfg.get("ramp_end_episodes")
+    ramp_end_episodes: Optional[int] = None
+    if ramp_end_episodes_raw is not None:
+        ramp_end_episodes = int(ramp_end_episodes_raw)
+        if ramp_end_episodes <= warmup_episodes:
+            raise ValueError(
+                f"opponent_mix.ramp_end_episodes ({ramp_end_episodes}) doit etre "
+                f"> warmup_episodes ({warmup_episodes})."
+            )
+        if ramp_end_episodes > int(total_episodes):
+            raise ValueError(
+                f"opponent_mix.ramp_end_episodes ({ramp_end_episodes}) depasse "
+                f"total_episodes ({total_episodes}) : la rampe est deja terminee avant ce point."
+            )
 
-    opponents["opponent_mix_config"] = {
+    opponent_mix: Dict[str, Any] = {
         "enabled": True,
         "self_play_ratio_start": self_play_ratio_start,
         "self_play_ratio_end": self_play_ratio_end,
@@ -3068,10 +3082,14 @@ def build_training_opponents(
         "snapshot_device": snapshot_device,
         "deterministic": self_play_deterministic,
     }
+    if ramp_end_episodes is not None:
+        opponent_mix["ramp_end_episodes"] = ramp_end_episodes
+    opponents["opponent_mix_config"] = opponent_mix
+    ramp_end_info = f", rampe->plateau a {ramp_end_episodes} ep" if ramp_end_episodes is not None else ""
     log(
         "🤝 Opponent mix enabled: "
         f"part du pool {self_play_ratio_start:.2f}->{self_play_ratio_end:.2f} "
-        f"(warmup={warmup_episodes} ep), {len(pool)} adversaire(s) fige(s) : "
+        f"(warmup={warmup_episodes} ep{ramp_end_info}), {len(pool)} adversaire(s) fige(s) : "
         + ", ".join(f"{m['label']} {float(m['weight']):.3f}" for m in pool)
     )
     return opponents
@@ -4652,7 +4670,7 @@ def _stage_opponent_mix(
     if not members:
         return None
     opponent = require_key(curriculum, "opponent")
-    return {
+    mix: Dict[str, Any] = {
         "enabled": True,
         "self_play_ratio_start": float(require_key(stage, "ratio_start")),
         "self_play_ratio_end": float(require_key(stage, "ratio_end")),
@@ -4668,6 +4686,10 @@ def _stage_opponent_mix(
             for member in members
         ],
     }
+    ramp_end = stage.get("ramp_end_episodes")
+    if ramp_end is not None:
+        mix["ramp_end_episodes"] = int(ramp_end)
+    return mix
 
 
 def _apply_stage_hp_overrides(cfg: Dict[str, Any], hp_overrides: Dict[str, Any]) -> None:

@@ -302,6 +302,57 @@ def test_ramp_with_no_room_left_is_flat_at_ratio_end() -> None:
     assert ramped_ratio(101, 100, 100, 0.0, 0.8) == pytest.approx(0.8)
 
 
+def test_ramp_end_episodes_plateaus_before_total() -> None:
+    """ramp_end_episodes atteint ratio_end avant total_episodes : la rampe est plus rapide."""
+    # Sans ramp_end : a episode 60 sur total=100, warmup=20 → progress 50% → ratio=0.4
+    assert ramped_ratio(60, 20, 100, 0.0, 0.8) == pytest.approx(0.4)
+    # Avec ramp_end=60 : la rampe se termine a 60, donc ratio_end est deja atteint
+    assert ramped_ratio(60, 20, 100, 0.0, 0.8, ramp_end_episodes=60) == pytest.approx(0.8)
+    # Bien au-dela de ramp_end : ratio reste plat a ratio_end
+    assert ramped_ratio(100, 20, 100, 0.0, 0.8, ramp_end_episodes=60) == pytest.approx(0.8)
+
+
+def test_ramp_end_episodes_interpolates_up_to_ramp_end() -> None:
+    """Avant ramp_end, la rampe interpole normalement (comme si total=ramp_end)."""
+    # warmup=20, ramp_end=60 → 40 episodes de rampe pour 0.8 → +0.02/ep
+    assert ramped_ratio(40, 20, 100, 0.0, 0.8, ramp_end_episodes=60) == pytest.approx(0.4)
+
+
+def test_ramp_end_none_is_identical_to_original_behavior() -> None:
+    """ramp_end_episodes=None est strictement equivalent a l'absence du parametre."""
+    for episode in (0, 20, 40, 60, 80, 100, 500):
+        assert ramped_ratio(episode, 20, 100, 0.0, 0.8, ramp_end_episodes=None) == pytest.approx(
+            ramped_ratio(episode, 20, 100, 0.0, 0.8)
+        ), f"episode {episode}"
+
+
+def test_env_wrapper_ramp_end_episodes_is_passed_to_curriculum_ramp() -> None:
+    """BotControlledEnv convertit ramp_end_episodes en budget par env et le passe a ramped_ratio."""
+    from tests.unit.ai.test_env_wrappers import _DummyBot, _DummyEngine
+    from ai.env_wrappers import BotControlledEnv
+
+    wrapper = BotControlledEnv(
+        _DummyEngine(),
+        bot=_DummyBot(),
+        self_play_opponent_enabled=True,
+        self_play_ratio_start=0.0,
+        self_play_ratio_end=0.8,
+        self_play_total_episodes=100,
+        self_play_warmup_episodes=20,
+        self_play_ramp_end_episodes=60,
+        self_play_n_envs=1,
+        self_play_snapshot_path="snapshot.zip",
+        self_play_snapshot_frozen=True,
+        self_play_snapshot_device="cpu",
+        self_play_snapshot_label="test-snapshot",
+    )
+    for episode in (0, 20, 40, 60, 100):
+        wrapper._episode_index = episode
+        assert wrapper._compute_pool_ratio_for_episode() == pytest.approx(
+            ramped_ratio(episode, 20, 100, 0.0, 0.8, ramp_end_episodes=60)
+        ), f"episode {episode}"
+
+
 def test_env_wrapper_ramp_is_the_curriculum_ramp() -> None:
     """`BotControlledEnv` ne recalcule pas la rampe : un warmup interprete des deux facons ne
     se verrait dans aucune courbe."""
