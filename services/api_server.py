@@ -3240,10 +3240,10 @@ def start_game():
         elif requested_mode == "pvp":
             initialize_engine(scenario_file=scenario_file)
         elif requested_mode == "pve":
-            # Le `scenario_file` du client est TRANSMIS, comme en "pvp" : l'écraser rendait 200
-            # sur une partie qui n'est pas celle demandée, donc un board client désynchronisé et
-            # muet. Sans clé, `initialize_test_engine` résout le défaut du dossier de board ; un
-            # chemin hérité pointant la copie racine supprimée échoue explicitement.
+            # terrain_ref sélectionne mc1 (défaut, scenario_pve.json) ou mc2 (scenario_pve_mc2.json).
+            # scenario_file explicite du client prime toujours.
+            if scenario_file is None and terrain_ref == "mc2":
+                scenario_file = "config/board/44x60x5/scenario/scenario_pve_mc2.json"
             initialize_test_engine(
                 scenario_file=scenario_file,
                 forced_agent_key=_configured_agent_key(),

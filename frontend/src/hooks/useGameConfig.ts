@@ -298,7 +298,11 @@ export const useGameConfig = (options?: {
         const isTestMode = mode === "pvp_test" || mode === "pve_test";
         const DEFAULT_TEST_BOARD = "x5_44x60";
         const boardParam = isTestMode ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD) : null;
-        const terrainParam = isTestMode ? (urlParams.get("terrain") ?? "mc2") : "mc2";
+        const defaultTerrain = mode === "pve" ? "mc1" : "mc2";
+        const terrainParam =
+          isTestMode || mode === "pve"
+            ? (urlParams.get("terrain") ?? defaultTerrain)
+            : defaultTerrain;
         const terrainSuffix = terrainParam === "mc1" ? "_mc1" : "";
         const scenarioName =
           mode === "pve_test"
@@ -312,9 +316,13 @@ export const useGameConfig = (options?: {
           x1: "board/44x60x5",
           x5_44x60: "board/44x60x5",
         };
+        const pveScenario =
+          terrainParam === "mc2"
+            ? "config/board/44x60x5/scenario/scenario_pve_mc2.json"
+            : "config/board/44x60x5/scenario/scenario_pve.json";
         const scenarioMap: Record<string, string> = {
           endless_duty: "config/scenario_endless_duty.json",
-          pve: "config/board/44x60x5/scenario/scenario_pve.json",
+          pve: pveScenario,
         };
         const scenarioFile =
           scenarioFileOverride ??

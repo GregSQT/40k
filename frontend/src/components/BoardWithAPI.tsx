@@ -715,8 +715,10 @@ export const BoardWithAPI: React.FC = () => {
   const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp" || gameMode === "pve";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
   const [selectedTerrain, setSelectedTerrain] = useState<"mc1" | "mc2">(() => {
-    const t = new URLSearchParams(window.location.search).get("terrain");
-    return t === "mc1" ? "mc1" : "mc2";
+    const params = new URLSearchParams(window.location.search);
+    const t = params.get("terrain");
+    if (t === "mc1" || t === "mc2") return t;
+    return params.get("mode") === "pve" ? "mc1" : "mc2";
   });
 
   const endlessDutyProfileOptions = useMemo(

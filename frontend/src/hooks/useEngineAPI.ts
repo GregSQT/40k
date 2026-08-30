@@ -1174,6 +1174,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           requestPayload.board_path = boardParam;
           const terrainParam = new URLSearchParams(window.location.search).get("terrain") ?? "mc2";
           requestPayload.terrain_ref = terrainParam;
+        } else if (isPvEMode) {
+          const terrainParam = new URLSearchParams(window.location.search).get("terrain") ?? "mc1";
+          requestPayload.terrain_ref = terrainParam;
         }
 
         const response = await apiFetch(`${API_BASE}/game/start`, {
