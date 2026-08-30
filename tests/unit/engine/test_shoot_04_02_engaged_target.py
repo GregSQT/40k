@@ -156,14 +156,7 @@ class TestEngagedTargetExcludedFromPool:
         _model_keys = list(uc[ally_id].get("occupied_hexes_by_model", {}).keys())
         if _model_keys:
             uc[ally_id]["occupied_hexes_by_model"] = {_model_keys[0]: (9, 5)}
-        # Mettre à jour models_cache si présent
-        _ally_models = gs.get("squad_models", {}).get(ally_id, [])
-        for _mid in _ally_models:
-            if _mid in gs.get("models_cache", {}):
-                gs["models_cache"][_mid]["col"] = 9
-                gs["models_cache"][_mid]["row"] = 5
-        uc[ally_id].pop("_ez_fp", None)  # purge empreinte mémoïsée (cf. _engagement_entry_fingerprint)
-        # Invalider le cache de versions (toute unité bougée)
+        uc[ally_id].pop("_ez_fp", None)
         gs["_unit_move_version"] = gs["_unit_move_version"] + 1
         # NE PAS vider _target_pool_cache : c'est le cœur du test.
         # Ancien code (enemy_pos_hash) → même clé → cache HIT → pool stale ['1'] → ROUGE
@@ -203,9 +196,9 @@ class TestEngagedTargetExcludedFromPool:
         uc[ally_id]["col"] = 25
         uc[ally_id]["row"] = 5
         uc[ally_id]["occupied_hexes"] = {(25, 5)}
-        _model_keys2 = list(uc[ally_id].get("occupied_hexes_by_model", {}).keys())
-        if _model_keys2:
-            uc[ally_id]["occupied_hexes_by_model"] = {_model_keys2[0]: (25, 5)}
+        _model_keys = list(uc[ally_id].get("occupied_hexes_by_model", {}).keys())
+        if _model_keys:
+            uc[ally_id]["occupied_hexes_by_model"] = {_model_keys[0]: (25, 5)}
         uc[ally_id].pop("_ez_fp", None)
         gs["_unit_move_version"] = gs["_unit_move_version"] + 1
         _sr._EZ_PAIR_CACHE.clear()

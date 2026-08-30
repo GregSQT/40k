@@ -3068,21 +3068,14 @@ def shooting_build_valid_target_pool(
 
         # Filter out units that died, friendly, or lost LoS
         alive_targets = []
-        current_player = unit["player"]
-        # CRITICAL: Convert to int for consistent comparison (player can be int or string)
-        current_player_int = int(current_player) if current_player is not None else None
+        from engine.game_utils import add_console_log
         for target_id_str in cached_pool:  # Iterate over string IDs
             if not is_unit_alive(target_id_str, game_state):
                 continue
             target = require_unit_by_id(game_state, target_id_str)
-            # CRITICAL: First check - target must not be friendly (fast check)
-            # This is the most important check - friendly units should NEVER be in the pool
-            # CRITICAL: Convert to int for consistent comparison (player can be int or string)
             target_player = int(target["player"]) if target["player"] is not None else None
-            if target_player == current_player_int:
-                # This is a bug - log it for debugging
-                from engine.game_utils import add_console_log, add_debug_log
-                add_console_log(game_state, f"[BUG] Cache contained friendly unit {target_id_str} (player {target['player']}) for shooter {unit_id} (player {current_player})")
+            if target_player == unit_player_int:
+                add_console_log(game_state, f"[BUG] Cache contained friendly unit {target_id_str} (player {target['player']}) for shooter {unit_id} (player {unit_player_int})")
                 continue  # Skip friendly units
             # Guard : filtre les unités mortes ou devenues alliées depuis la mise en cache
             alive_targets.append(target_id_str)  # Ensure ID is string
