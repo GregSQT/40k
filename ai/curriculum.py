@@ -33,7 +33,7 @@ import shutil
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from shared.data_validation import require_key
+from shared.data_validation import require_key, require_non_negative_int, require_positive_int
 
 #: Tolerance des sommes de ratios. Les poids sont ecrits a deux decimales dans le JSON ; la
 #: somme flottante de treize d'entre eux ne retombe pas sur 1.0 au bit pres.
@@ -276,21 +276,11 @@ def _validate_early_stop_block(block: Any, context: str) -> None:
     """Valide un bloc `early_stop` (racine ou par etape). Leve si une cle est absente ou invalide."""
     if not isinstance(block, dict):
         raise TypeError(f"{context} doit etre un objet JSON.")
-    for key in _EARLY_STOP_REQUIRED_KEYS:
-        if key not in block:
-            raise KeyError(
-                f"{context} manque la cle '{key}'. "
-                f"Cles requises : {_EARLY_STOP_REQUIRED_KEYS}"
-            )
-    threshold = float(block["win_rate_threshold"])
-    min_steps = int(block["min_steps"])
-    consecutive_evals = int(block["consecutive_evals"])
+    threshold = float(require_key(block, "win_rate_threshold"))
+    require_non_negative_int(require_key(block, "min_steps"), "min_steps")
+    require_positive_int(require_key(block, "consecutive_evals"), "consecutive_evals")
     if not (0.0 < threshold <= 1.0):
         raise ValueError(f"{context}.win_rate_threshold doit etre dans ]0,1] (got {threshold})")
-    if min_steps < 0:
-        raise ValueError(f"{context}.min_steps doit etre >= 0 (got {min_steps})")
-    if consecutive_evals < 1:
-        raise ValueError(f"{context}.consecutive_evals doit etre >= 1 (got {consecutive_evals})")
 
 
 def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>") -> None:
@@ -393,7 +383,7 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
                     f"{source}: stages[{name}].ramp_end_episodes ({ramp_end_episodes}) doit "
                     f"etre > warmup_episodes ({warmup_episodes})."
                 )
-            overrides = stage.get("training_config_overrides") or {}
+            overrides = get_stage_hp_overrides(stage)
             override_total = overrides.get("total_episodes")
             if override_total is None:
                 raise ValueError(
@@ -412,20 +402,7 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
         members = stage_pool_members(stage)
 
         if role == "exploiter":
-            if ratio_start != 1.0 or ratio_end != 1.0 or warmup_episodes != 0:
-                raise ValueError(
-                    f"{source}: stages[{name}] est exploiteur mais son protocole n'est pas "
-                    f"gele : exige ratio_start=1.0, ratio_end=1.0, warmup_episodes=0 "
-                    f"(got ratio_start={ratio_start}, ratio_end={ratio_end}, "
-                    f"warmup_episodes={warmup_episodes}). Corriger l'etape ou changer son role."
-                )
-            if len(members) != 1 or abs(float(members[0]["weight"]) - 1.0) > RATIO_SUM_TOLERANCE:
-                raise ValueError(
-                    f"{source}: stages[{name}] est exploiteur mais son pool ne contient pas "
-                    f"exactement un membre a weight=1.0 "
-                    f"(got {[(m['label'], m['weight']) for m in members]!r}). "
-                    "Le protocole gele exige un adversaire unique a 100%."
-                )
+            validate_exploiter_protocol(curriculum, stage, name, "")
 
         for member in members:
             if member["label"] not in earlier:
@@ -653,7 +630,7 @@ def ramped_ratio(
         return ratio_end
     effective_index = episode_index - warmup_episodes
     effective_total = ramp_end - warmup_episodes
-    progress = min(1.0, max(0.0, float(effective_index) / float(effective_total)))
+    progress = float(effective_index) / float(effective_total)
     return ratio_start + ((ratio_end - ratio_start) * progress)
 
 
