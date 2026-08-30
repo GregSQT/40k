@@ -749,9 +749,13 @@ def copy_tensorboard_run(run_dir: str, stage_name: str) -> str:
     target = os.path.join(
         os.path.dirname(os.path.abspath(run_dir)), f"tensorboard_{stage_name}"
     )
+    target_tmp = target + ".new"
+    if os.path.exists(target_tmp):
+        shutil.rmtree(target_tmp)
+    shutil.copytree(run_dir, target_tmp)
     if os.path.exists(target):
         shutil.rmtree(target)
-    shutil.copytree(run_dir, target)
+    os.rename(target_tmp, target)
     return target
 
 

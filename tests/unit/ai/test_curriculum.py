@@ -23,6 +23,7 @@ from shared.data_validation import ConfigurationError
 from ai.curriculum import (
     RATIO_SUM_TOLERANCE,
     assign_pool_members_to_envs,
+    copy_tensorboard_run,
     evaluate_stage_gate,
     load_curriculum,
     pool_monotonicity_diagnostic,
@@ -664,3 +665,58 @@ def test_written_by_supplied_by_caller_raises(tmp_path) -> None:
         append_curriculum_log({"etape": "P1", "written_by": "ai/train.py"}, str(log_path))
 
     assert not log_path.exists()  # rien n'a ete ecrit avant de lever
+
+
+# ── COPIE TENSORBOARD ──────────────────────────────────────────────────────────────────────
+
+def test_copy_tensorboard_run_copies_source_to_named_target(tmp_path) -> None:
+    run_dir = tmp_path / "run_0"
+    run_dir.mkdir()
+    (run_dir / "events.out").write_bytes(b"tb")
+    target = copy_tensorboard_run(str(run_dir), "P4")
+    assert os.path.isdir(target)
+    assert (tmp_path / "tensorboard_P4" / "events.out").read_bytes() == b"tb"
+    assert run_dir.exists(), "le run source ne doit pas etre supprime"
+
+
+def test_copy_tensorboard_run_replaces_existing_target(tmp_path) -> None:
+    run_dir = tmp_path / "run_0"
+    run_dir.mkdir()
+    (run_dir / "events.out").write_bytes(b"new")
+    target_dir = tmp_path / "tensorboard_P4"
+    target_dir.mkdir()
+    (target_dir / "stale.out").write_bytes(b"old")
+    copy_tensorboard_run(str(run_dir), "P4")
+    assert not (target_dir / "stale.out").exists()
+    assert (target_dir / "events.out").read_bytes() == b"new"
+
+
+def test_copy_tensorboard_run_preserves_source_on_copy_failure(tmp_path, monkeypatch) -> None:
+    """Si copytree echoue, le target precedent doit rester intact."""
+    import shutil as _shutil
+
+    run_dir = tmp_path / "run_0"
+    run_dir.mkdir()
+    (run_dir / "events.out").write_bytes(b"new")
+    target_dir = tmp_path / "tensorboard_P4"
+    target_dir.mkdir()
+    (target_dir / "events.out").write_bytes(b"preserved")
+
+    original_copytree = _shutil.copytree
+
+    def failing_copytree(src: str, dst: str) -> None:
+        raise OSError("disk full (simulated)")
+
+    import ai.curriculum as _curriculum_mod
+    monkeypatch.setattr(_curriculum_mod.shutil, "copytree", failing_copytree)
+
+    with pytest.raises(OSError, match="disk full"):
+        copy_tensorboard_run(str(run_dir), "P4")
+
+    assert target_dir.exists(), "le target existant doit survivre a l'echec de copytree"
+    assert (target_dir / "events.out").read_bytes() == b"preserved"
+
+
+def test_copy_tensorboard_run_raises_when_source_is_missing(tmp_path) -> None:
+    with pytest.raises(FileNotFoundError, match="absent"):
+        copy_tensorboard_run(str(tmp_path / "nonexistent"), "P4")
