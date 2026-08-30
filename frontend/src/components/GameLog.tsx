@@ -629,6 +629,12 @@ export const GameLog: React.FC<GameLogProps> = ({
                                     `Tir: ${shot.hitResult === "HIT" ? "✓" : "✗"}`,
                                     rollWithReroll(shot.attackRoll, shot.attackRollInitial),
                                     ruleToken(shot.hitAbility),
+                                    // Primitive A : MODIFICATEURS du seuil (déjà net dans
+                                    // `hitTarget`), pas des relances. Ici le champ est
+                                    // structuré, donc aucune ambiguïté avec `hitAbility` —
+                                    // contrairement à step.log, où ils sont en tag de ligne.
+                                    ruleToken(shot.hitRollBonusAbility),
+                                    ruleToken(shot.hitRollMalusAbility),
                                     flagToken(shot.autoHit, "TORRENT"),
                                     flagToken(shot.sustainedHit, "SUSTAINED HITS"),
                                     flagToken(shot.criticalHit, "CRITICAL HIT"),
@@ -642,6 +648,9 @@ export const GameLog: React.FC<GameLogProps> = ({
                                       ruleToken(shot.woundAbility),
                                       ruleToken(shot.woundRerollRule),
                                       ruleToken(shot.woundBonusAbility),
+                                      // JUMEAU côté touche ci-dessus : +1 de mêlée d'une règle
+                                      // d'unité, cumulable avec le +1 d'Oath juste avant.
+                                      ruleToken(shot.woundRollBonusAbility),
                                       flagToken(shot.lethalHit, "LETHAL HITS"),
                                       flagToken(shot.criticalWound, "CRITICAL WOUND"),
                                     ].join("")

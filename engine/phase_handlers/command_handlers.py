@@ -173,6 +173,15 @@ def command_step_start_of_phase(game_state: Dict[str, Any]) -> None:
     game_state["units_fought"] = set()
     game_state["units_advanced"] = set()
     game_state["advance_rolls"] = {}
+    # Suppression (Indiscriminate Detonations, chantier 06) : « That enemy unit is suppressed
+    # until the start of YOUR next Command phase. » La duree appartient au joueur QUI A
+    # SUPPRIME, pas a la victime : elle traverse donc le tour adverse, et se purge ici, au
+    # debut de la phase de commande du suppresseur. La ranger avec les sets ci-dessus (purges
+    # a chaque debut de tour, quel que soit le camp) diviserait sa duree par deux.
+    _suppressor = int(require_key(game_state, "current_player"))
+    _suppressed = game_state.setdefault("suppressed_squads", {})
+    for _sid in [s for s, p in _suppressed.items() if int(p) == _suppressor]:
+        del _suppressed[_sid]
     # 21.03 `L6` — déclarations de vol ET traces « la question a été posée », les deux ayant le
     # MÊME cycle de vie (la question vaut pour le mouvement du tour, elle se repose au tour
     # suivant). Les clés sont DÉRIVÉES de `_TAKE_TO_THE_SKIES_BY_PHASE` : les réénumérer ici

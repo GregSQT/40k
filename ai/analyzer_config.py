@@ -171,6 +171,10 @@ class AnalyzerConfig:
     unit_socle_by_type: Dict[str, Any]
     unit_choice_effect_to_source_rules: Dict[str, Dict[str, Set[str]]]
     display_rule_name_to_ids: Dict[str, Set[str]]
+    #: `effet technique -> noms d'affichage de DATASHEET` qui le confèrent, en MAJUSCULES.
+    #: C'est la forme sous laquelle le journal les écrit (`step_logger._ability_token`), donc
+    #: la seule qui permette de reconnaître un token de step.log comme celui d'un effet.
+    effect_display_tokens: Dict[str, Set[str]]
     rule_to_units: Dict[str, Set[str]]
     weapon_rule_to_weapons: Dict[str, Set[str]]
     resolve_rule_id: Callable  # closure over all_unit_rules_config
@@ -258,6 +262,7 @@ def load_analyzer_config() -> AnalyzerConfig:
     unit_faction_keywords_by_type: Dict[str, frozenset] = {}
     unit_toughness_by_type: Dict[str, int] = {}
     display_rule_name_to_ids: Dict[str, Set[str]] = {}
+    effect_display_tokens: Dict[str, Set[str]] = {}
 
     for display_rule_id, rule_cfg in all_unit_rules_config.items():
         rule_name_raw = rule_cfg.get("name")
@@ -334,6 +339,11 @@ def load_analyzer_config() -> AnalyzerConfig:
         # seuil de blessure lève pour une unité RÉELLEMENT jouée dont la F ou l'E manque.
         rng_str_by_weapon = _int_by_weapon(rng_weapons, "STR")
         cc_str_by_weapon = _int_by_weapon(cc_weapons, "STR")
+        # CARACTERISTIQUE DE TOUCHE de mêlée (WS), lue au MÊME endroit et sous la même clé de nom
+        # que la Force juste au-dessus, et pour la même raison : le contrôle du seuil de touche
+        # (`analyzer_hit.check_melee_hit_threshold`) doit la résoudre PAR FIGURINE — cinq armes
+        # s'appellent « Close Combat Weapon » et leur WS diffère selon la datasheet.
+        cc_atk_by_weapon = _int_by_weapon(cc_weapons, "ATK")
         _t_raw = require_key(unit_data, "T")
         if _numeric(_t_raw) is not None:
             unit_toughness_by_type[unit_type] = int(_t_raw)
@@ -346,6 +356,7 @@ def load_analyzer_config() -> AnalyzerConfig:
             "sustained_hits_by_weapon": sustained_hits_by_weapon,
             "rng_str_by_weapon": rng_str_by_weapon,
             "cc_str_by_weapon": cc_str_by_weapon,
+            "cc_atk_by_weapon": cc_atk_by_weapon,
         }
         weapons_info: List[Dict] = []
         for weapon in rng_weapons:
@@ -421,6 +432,16 @@ def load_analyzer_config() -> AnalyzerConfig:
                     for rid in granted_rule_ids
                 ],
             }
+            # TOKEN que le journal écrit pour cet effet : le `displayName` de la DATASHEET, mis
+            # en majuscules par `step_logger._ability_token`. C'est le seul lien entre un effet
+            # technique et le texte de step.log — `display_rule_name_to_ids` ci-dessus part du
+            # `name` du REGISTRE (« Charge roll bonus »), que le journal n'écrit jamais.
+            _display_name = rule.get("displayName")
+            if isinstance(_display_name, str) and _display_name.strip():
+                for _effect_id in rule_effect_ids:
+                    effect_display_tokens.setdefault(_effect_id, set()).add(
+                        _display_name.strip().upper()
+                    )
             if "move_after_shooting" in rule_effect_ids:
                 rule_args = rule.get("rule_args")
                 if not isinstance(rule_args, dict):
@@ -526,6 +547,7 @@ def load_analyzer_config() -> AnalyzerConfig:
         unit_socle_by_type=unit_socle_by_type,
         unit_choice_effect_to_source_rules=unit_choice_effect_to_source_rules,
         display_rule_name_to_ids=display_rule_name_to_ids,
+        effect_display_tokens=effect_display_tokens,
         rule_to_units=rule_to_units,
         weapon_rule_to_weapons=weapon_rule_to_weapons,
         resolve_rule_id=resolve_effect_rule_id_to_technical,

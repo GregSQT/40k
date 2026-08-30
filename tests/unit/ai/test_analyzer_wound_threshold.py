@@ -85,7 +85,10 @@ def _expected(state, action_desc="", *, melee=True, attacker="Trooper", weapon="
     `shooters=` la résolution par FIGURINE."""
     return aw.expected_wound_threshold(
         state, config if config is not None else _config(),
-        action_desc, 1, attacker, weapon, "9", shooters, is_melee=melee
+        # `"1"` = l'escouade ATTAQUANTE (la cible est `"9"`). Elle sert aux capacites d'unite
+        # 19.04 qui modifient le seuil (Litany of Hate) : aucune datasheet de ce fichier ne les
+        # porte, donc le verdict ne change pas — c'est la contre-epreuve qui le dit.
+        action_desc, 1, "1", attacker, weapon, "9", shooters, is_melee=melee
     )
 
 
@@ -226,7 +229,7 @@ def _stats() -> Dict[str, Any]:
 def _check(state, stats, desc, *, config=None, weapon="Choppa", melee=True):
     aw.check_wound_threshold(
         state, config if config is not None else _config(),
-        stats, desc, desc, 1, "Trooper", weapon, "9", (), is_melee=melee,
+        stats, desc, desc, 1, "1", "Trooper", weapon, "9", (), is_melee=melee,
     )
 
 

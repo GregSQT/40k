@@ -13,6 +13,72 @@ if TYPE_CHECKING:
     from ai.analyzer_config import AnalyzerConfig
 
 
+#: Bornes du jet de charge NU (11.02, 2D6). Le `charge_roll_bonus` de la Primitive A les décale
+#: toutes deux de +1 — il s'ajoute au jet, pas au budget, et n'a aucun plafond.
+_CHARGE_ROLL_MIN = 2
+_CHARGE_ROLL_MAX = 12
+
+
+def _check_charge_roll_range(
+    state: "AnalyzerState",
+    config: "AnalyzerConfig",
+    line: str,
+    action_desc: str,
+    charge_unit_id: str,
+    player: int,
+) -> None:
+    """11.02 + Primitive A : le jet imprimé tient-il dans les bornes que ses tokens annoncent ?
+
+    Le jet écrit dans `[Roll: N]` est NET — le `+1` de Somethin' to Prove y est déjà. Un 13 est
+    donc légitime, et un 13 SANS la capacité ne l'est pas : c'est exactement ce que ce contrôle
+    sépare, et rien d'autre ne le faisait. Le budget de charge, lui, est déjà vérifié en aval
+    (`charge_invalid.distance_over_roll`), mais il PART de ce jet : un jet faux y passe inaperçu.
+
+    Le verdict « la capacité est en vigueur » vient des DATASHEETS des figurines vivantes (19.04),
+    pas du token — un contrôle qui confronte deux sorties du même moteur ne prouve rien. Le token
+    est vérifié CONTRE ce verdict, ce qui couvre les deux sens de l'erreur : bonus appliqué sans
+    la capacité, et capacité en vigueur dont le jet n'a pas bougé.
+
+    Ne se prononce pas quand les socles vivants du chargeur sont inconnus (`None`) : on ne devine
+    pas quelle figurine porte encore la capacité.
+    """
+    from ai.analyzer_perfig import unit_effect_in_force
+
+    roll_match = re.search(r'\[Roll:\s*(\d+)\]', action_desc)
+    if roll_match is None:
+        return
+    in_force = unit_effect_in_force(state, config, charge_unit_id, "charge_roll_bonus")
+    if in_force is None:
+        return
+    stats = state.stats
+    bonus = 1 if in_force else 0
+    roll = int(roll_match.group(1))
+    tokens = config.effect_display_tokens.get("charge_roll_bonus", set())  # get allowed
+    token_seen = any(f"[{name}]" in action_desc.upper() for name in tokens)
+    detail = None
+    if not (_CHARGE_ROLL_MIN + bonus <= roll <= _CHARGE_ROLL_MAX + bonus):
+        detail = (
+            f"jet {roll} hors de [{_CHARGE_ROLL_MIN + bonus},{_CHARGE_ROLL_MAX + bonus}] "
+            f"(charge_roll_bonus={'oui' if bonus else 'non'})"
+        )
+    elif token_seen != bool(bonus):
+        detail = (
+            f"token de charge_roll_bonus {'present' if token_seen else 'absent'} "
+            f"alors que la capacite est {'en vigueur' if bonus else 'absente'} (19.04)"
+        )
+    if detail is not None:
+        stats['charge_roll_out_of_range'][player] += 1
+        first = stats['first_error_lines']['charge_roll_out_of_range']
+        if first[player] is None:
+            first[player] = {
+                'episode': state.current_episode_num,
+                'line': line.strip(),
+                'detail': detail,
+            }
+    if bonus:
+        note_rule_usage(stats, "PROJ.1.3.charge_roll_bonus", player)
+
+
 def handle_charge(
     state: "AnalyzerState",
     config: "AnalyzerConfig",
@@ -62,6 +128,9 @@ def handle_charge(
         start_row = int(charge_match.group(8))
         _track_action_phase_accuracy(stats, "charge", phase, state.current_episode_num, line)
         stats['charge_invalid'][player]['total'] += 1
+        # 11.02 + Primitive A : bornes du jet imprimé. AVANT le contrôle de budget ci-dessous,
+        # qui PART de ce jet — un jet faux y passerait pour un budget légitime.
+        _check_charge_roll_range(state, config, line, action_desc, charge_unit_id, player)
         if charge_unit_id in state.units_advanced:
             charge_unit_type = require_key(state.unit_types, charge_unit_id)
             unit_rules = require_key(config.unit_rules_by_type, charge_unit_type)
@@ -363,6 +432,12 @@ def handle_charge(
             re.IGNORECASE
         )
         if failed_charge_match:
+            # JUMEAU de la branche CHARGED : un jet raté porte les mêmes bornes et le même token,
+            # et c'est la MOITIÉ des jets de charge d'une partie. Ne contrôler que les charges
+            # réussies laisserait la moitié du dé hors de toute vérification.
+            _check_charge_roll_range(
+                state, config, line, action_desc, failed_charge_match.group(1), player
+            )
             if not stats['sample_actions']['charge']:
                 stats['sample_actions']['charge'] = line.strip()
         else:

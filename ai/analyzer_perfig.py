@@ -568,6 +568,43 @@ def models_for_unit(
     return m
 
 
+def unit_effect_in_force(
+    state: Any,
+    config: Any,
+    unit_id: str,
+    effect_rule_id: str,
+) -> Optional[bool]:
+    """19.04 — l'effet est-il EN VIGUEUR sur cette escouade ? ``None`` = indécidable.
+
+    « An Attached unit has the abilities of its Leader » : la règle est portée par une FIGURINE
+    (le Warboss, le Chaplain) et vaut pour toute l'escouade TANT QUE cette figurine vit. Le
+    verdict se prend donc sur les SOCLES VIVANTS — `positions_by_model` — et jamais sur le type
+    de l'escouade : `unit_rules_by_type["Boyz"]` ne connaît pas Might Is Right, alors que des
+    Boyz menés par un Warboss touchent bel et bien à +1.
+
+    ``None`` (indécidable) quand les socles vivants sont inconnus, ou qu'une figurine porte un
+    type absent du registre : le contrôle appelant compte alors la ligne en « non vérifiable »
+    plutôt que de trancher. Retomber sur le roster complet (`model_types`) serait FAUX ici,
+    contrairement à l'Endurance de 19.02 : une capacité de leader DISPARAÎT à sa mort, donc un
+    roster qui contient les morts répondrait « oui » à une escouade décapitée.
+    """
+    mids = positions_by_model_for(state, unit_id)
+    if not mids:
+        return None
+    for mid in mids:
+        model_type = state.model_types.get(mid)  # get allowed : figurine de type inconnu
+        if model_type is None:
+            return None
+        if effect_rule_id in config.unit_rules_by_type.get(model_type, set()):  # get allowed
+            return True
+    return False
+
+
+def positions_by_model_for(state: Any, unit_id: str) -> Dict[str, Tuple[int, int]]:
+    """Socles vivants connus d'une escouade, `{}` si l'analyzer ne les a jamais vus."""
+    return state.positions_by_model.get(unit_id) or {}  # get allowed : jamais vue en per-figurine
+
+
 def surviving_start_models(
     prev_models: Optional[Dict[str, Tuple[int, int]]],
     line_models: Optional[Dict[str, Tuple[int, int]]],

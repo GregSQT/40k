@@ -230,6 +230,7 @@ def expected_wound_threshold(
     config: Any,
     action_desc: str,
     attacker_player: int,
+    attacker_unit_id: str,
     attacker_unit_type: str,
     weapon_display_name: str,
     target_id: str,
@@ -271,10 +272,35 @@ def expected_wound_threshold(
     # Magnitude du bonus de blessure Oath : lue dans la snapshot `oath_wound` (EFFECTS), jamais
     # recodée. Minimum 1 : journaux antérieurs au 2026-08-10 n'émettaient pas la clé → 0 lu → 1.
     oath_mag = max(1, _effect_bonus(state, attacker_player, "oath_wound")) if oath else 0
+    # Litany of Hate (`wound_roll_bonus_fight`, Primitive A, chantier 06) : SECOND +1 au même
+    # jet, mêlée seulement, qui se CUMULE avec Oath. Sans lui, chaque ligne de mêlée d'une
+    # escouade menée par un Chaplain sortirait en « seuil de blessure faux » alors que le moteur
+    # a raison — un faux positif systématique, le défaut que ce contrôle existe pour éviter.
+    #
+    # Dérivé des DATASHEETS des figurines vivantes (19.04) et non du token du journal : le token
+    # vient du moteur, comme le seuil, et les confronter ne prouverait rien. Un `None` (socles
+    # vivants inconnus) rend la ligne NON VÉRIFIABLE — on ne devine pas.
+    #
+    # LE ROSTER EST INTERROGÉ D'ABORD, et ce n'est pas une optimisation : aucune datasheet vue
+    # ne porte la capacité ⇒ le bonus vaut 0 sans regarder les socles. Sans ce court-circuit,
+    # toute partie SANS Chaplain paierait la même « ligne non vérifiable » qu'avec, dès que les
+    # socles vivants de l'attaquant manquent — un contrôle qui cesse de juger là où il n'y avait
+    # rien à juger.
+    litany_mag = 0
+    if is_melee and config.rule_to_units.get("wound_roll_bonus_fight"):  # get allowed
+        from ai.analyzer_perfig import unit_effect_in_force
+
+        in_force = unit_effect_in_force(
+            state, config, attacker_unit_id, "wound_roll_bonus_fight"
+        )
+        if in_force is None:
+            return None
+        litany_mag = 1 if in_force else 0
     thresholds = set()
     for strength in strengths:
         threshold = calculate_wound_target(strength + bonus, toughness)
-        thresholds.add(max(2, threshold - oath_mag) if oath_mag else threshold)
+        total_bonus = oath_mag + litany_mag
+        thresholds.add(max(2, threshold - total_bonus) if total_bonus else threshold)
     return thresholds.pop() if len(thresholds) == 1 else None
 
 
@@ -285,6 +311,7 @@ def check_wound_threshold(
     line: str,
     action_desc: str,
     attacker_player: int,
+    attacker_unit_id: str,
     attacker_unit_type: str,
     weapon_display_name: str,
     target_id: str,
@@ -297,7 +324,7 @@ def check_wound_threshold(
         return
     key = "fight_wound_threshold" if is_melee else "shoot_wound_threshold"
     expected = expected_wound_threshold(
-        state, config, action_desc, attacker_player, attacker_unit_type,
+        state, config, action_desc, attacker_player, attacker_unit_id, attacker_unit_type,
         weapon_display_name, target_id, shooters, is_melee,
     )
     if expected is None:

@@ -193,5 +193,27 @@
     "has_parameter": true,
     "parameter_name": "value",
     "description": "CORE (24.08): when a model with this ability is destroyed, roll one D6: on a 6, each unit within 6\" suffers X mortal wounds (X = rule_args.value, int or dice expression like 'D3'). Roll X separately per unit."
+  },
+  "hit_roll_bonus_fight": {
+    "id": "hit_roll_bonus_fight",
+    "obs_id": 18,
+    "name": "Melee hit roll bonus",
+    "description": "Primitive A (chantier 06): this unit's melee weapons have +1 to hit rolls. Modelled by LOWERING the hit threshold, clamped to 2 (05.01: an unmodified 1 always fails). Carried by Might Is Right (Warboss)."
+  },
+  "wound_roll_bonus_fight": {
+    "id": "wound_roll_bonus_fight",
+    "obs_id": 19,
+    "name": "Melee wound roll bonus",
+    "description": "Primitive A (chantier 06): this unit's melee weapons have +1 to wound rolls. Modelled by LOWERING the wound threshold, clamped to 2 (05.02). Carried by Litany of Hate (Chaplain with Jump Pack)."
+  },
+  "charge_roll_bonus": {
+    "id": "charge_roll_bonus",
+    "obs_id": 20,
+    "name": "Charge roll bonus",
+    "description": "Primitive A (chantier 06): this unit has +1 to charge rolls (11.02). Applies to the 2D6 itself, not to an attack. Carried by Somethin' to Prove (Bigboss)."
+  },
+  "hit_roll_malus_suppressed": {
+    "id": "hit_roll_malus_suppressed",
+    "description": "Primitive A (chantier 06): -1 to hit rolls while the unit is suppressed (Indiscriminate Detonations, Wartrakk). Pas d'obs_id, et c'est delibere : aucune datasheet ne PORTE cette regle, elle est l'effet du STATUT `suppressed`, deja observable par son propre registre (config/unit_statuses.json, obs_id 3). Lui donner un obs_id de capacite creerait un identifiant qu'aucune entite n'ecrirait jamais."
   }
 }

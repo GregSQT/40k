@@ -1514,6 +1514,7 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled']
             + _pair('charge_impact_wrong_threshold')
             + _pair('charge_impact_wrong_damage')
+            + _pair('charge_roll_out_of_range')
         ),
         'fight': (
             # Deux clés RETIRÉES de ce total, pas seulement remises à zéro — un terme mort dans un
@@ -1529,6 +1530,7 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('fight_move_invalid', 'consolidation')
             + _pair('fight_hit_result_mismatch')
             + _pair('fight_wound_threshold_mismatch')
+            + _pair('fight_hit_threshold_mismatch')
             + _pair('fight_alternation_violations')
             + _pair('fight_double_pile_in')
             # 24.15 HAZARDOUS : déclenchements en mêlée seulement (tir dans le total shooting).
@@ -1835,6 +1837,15 @@ def parse_step_log(filepath: str) -> Dict:
         'shoot_wound_threshold_unverifiable': {1: 0, 2: 0},
         'fight_wound_threshold_mismatch': {1: 0, 2: 0},
         'fight_wound_threshold_unverifiable': {1: 0, 2: 0},
+        # 05.01 + Primitive A (chantier 06) : le SEUIL de touche de melee, recalcule depuis la WS
+        # des datasheets et les modificateurs en vigueur. Le compteur `_unverifiable` existe pour
+        # la meme raison que son jumeau de blessure : un compteur d'erreur a zero parce qu'il ne
+        # regarde plus rien est le defaut le plus couteux de ce depot.
+        'fight_hit_threshold_mismatch': {1: 0, 2: 0},
+        'fight_hit_threshold_unverifiable': {1: 0, 2: 0},
+        # 11.02 + Primitive A : le jet de charge imprime est-il dans les bornes que ses tokens
+        # annoncent (2-12 nu, 3-13 sous `charge_roll_bonus`) ?
+        'charge_roll_out_of_range': {1: 0, 2: 0},
         'dead_unit_moving': {1: 0, 2: 0},
         'charge_from_adjacent': {1: 0, 2: 0},
         'charge_impact_wrong_threshold': {1: 0, 2: 0},
@@ -2020,6 +2031,8 @@ def parse_step_log(filepath: str) -> Dict:
             'fight_hit_result_mismatch': {1: None, 2: None},
             'shoot_wound_threshold_mismatch': {1: None, 2: None},
             'fight_wound_threshold_mismatch': {1: None, 2: None},
+            'fight_hit_threshold_mismatch': {1: None, 2: None},
+            'charge_roll_out_of_range': {1: None, 2: None},
             'dead_unit_moving': {1: None, 2: None},
             'charge_from_adjacent': {1: None, 2: None},
             'charge_impact_wrong_threshold': {1: None, 2: None},

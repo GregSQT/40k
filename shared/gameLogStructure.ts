@@ -121,6 +121,19 @@ export interface ShootDetail {
    */
   woundBonusAbility?: string;
   /**
+   * Primitive A (chantier 06) — MODIFICATEURS de jet portés par une règle d'UNITÉ : +1 touche
+   * mêlée (Might Is Right), -1 touche sous suppression, +1 blessure mêlée (Litany of Hate).
+   *
+   * Trois champs et non un : les trois peuvent jouer sur la MÊME attaque. Distincts de
+   * `hitAbility` / `woundAbility` (relances) et de `woundBonusAbility` (le +1 d'Oath, propriété
+   * du DÉ) : ceux-ci décrivent une règle en vigueur sur toute l'activation, et les seuils
+   * (`hitTarget`, `woundTarget`) arrivent déjà nets — sans eux, rien n'expliquerait l'écart avec
+   * la caractéristique de l'arme.
+   */
+  hitRollBonusAbility?: string;
+  hitRollMalusAbility?: string;
+  woundRollBonusAbility?: string;
+  /**
    * Jet AVANT relance, présent uniquement quand une relance a EU LIEU. Le champ courant
    * (`attackRoll`…) porte toujours le jet FINAL : le log affiche « initial->final ».
    */

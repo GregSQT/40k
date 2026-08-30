@@ -191,8 +191,11 @@ def _fight_state(weapons):
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "pending_squad_fight_intents": {"1": []},
         "pending_squad_shoot_intents": {},
-        "unit_by_id": {"1": {"id": "1", "UNIT_KEYWORDS": []},
-                       "2": {"id": "2", "UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}]}},
+        # `UNIT_RULES` : toute unite reelle en porte (`_build_enhanced_unit`), et la declaration
+        # de combat les lit depuis la Primitive A (modificateurs de seuil de touche).
+        "unit_by_id": {"1": {"id": "1", "UNIT_KEYWORDS": [], "UNIT_RULES": []},
+                       "2": {"id": "2", "UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}],
+                             "UNIT_RULES": []}},
     }
 
 

@@ -134,6 +134,18 @@ UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     # la percevoir — c'est le trou que la section « Observation » du chantier 04 prescrivait de
     # fermer et qui ne l'avait pas été.
     "deep_strike",
+    # Primitive A (chantier 06, passe 1) : les trois MODIFICATEURS de jet portés par une
+    # datasheet — +1 touche mêlée (Might Is Right), +1 blessure mêlée (Litany of Hate), +1 au
+    # jet de charge (Somethin' to Prove). Ils changent directement l'espérance d'une attaque ou
+    # d'une charge, chez moi comme chez l'ennemi : les taire ferait subir à l'agent une escouade
+    # qui touche sur 2+ là où sa datasheet dit 3+.
+    #
+    # ⚠️ `hit_roll_malus_suppressed` N'ENTRE PAS ici, et ce n'est pas un oubli : aucune datasheet
+    # ne le porte, il est l'effet du STATUT `suppressed` (`UNIT_STATUS_SLOTS`, registre
+    # `config/unit_statuses.json`). Il est donc déjà observable, par l'autre registre.
+    "hit_roll_bonus_fight",
+    "wound_roll_bonus_fight",
+    "charge_roll_bonus",
     "move_after_shooting",
     "reactive_move",
     "reroll_1_save_fight",

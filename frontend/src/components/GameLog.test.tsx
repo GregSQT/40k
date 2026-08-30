@@ -77,6 +77,26 @@ describe("GameLog — tokens de relance", () => {
     expect(shotRowText()).toContain("Bless: ✓ (5) [OATH OF MOMENT]");
   });
 
+  it("nomme les MODIFICATEURS de seuil de la Primitive A, sur les deux jets", () => {
+    // Les seuils (`hitTarget`, `woundTarget`) arrivent DÉJÀ NETS du moteur : sans ces tokens,
+    // une escouade menée par un Warboss touche à 3+ dans le Game Log avec une datasheet à 4+ et
+    // rien ne l'explique. Trois champs distincts, parce que les trois jouent ensemble.
+    render(
+      <GameLog
+        events={[
+          shootEvent({
+            hitRollBonusAbility: "Might Is Right",
+            hitRollMalusAbility: "Suppressed",
+            woundRollBonusAbility: "Litany of Hate",
+          }),
+        ]}
+      />,
+    );
+    expandFirstEntry();
+    expect(shotRowText()).toContain("Tir: ✓ (4) [MIGHT IS RIGHT] [SUPPRESSED]");
+    expect(shotRowText()).toContain("Bless: ✓ (5) [LITANY OF HATE]");
+  });
+
   it("n'affiche AUCUN token quand aucune relance n'a eu lieu", () => {
     render(<GameLog events={[shootEvent({})]} />);
     expandFirstEntry();

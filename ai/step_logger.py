@@ -11,7 +11,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 import time
 import builtins
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from shared.data_validation import require_key, HAZARD_CONTEXT_DESPERATE_ESCAPE
 
@@ -267,6 +267,37 @@ def _ability_token(display_name: Any) -> str:
     if not isinstance(display_name, str) or not display_name.strip():
         return ""
     return f" [{display_name.strip().upper()}]"
+
+
+#: Primitive A (chantier 06) — champs de `details` portant un MODIFICATEUR de jet de regle
+#: d unite, dans l ordre d emission : +1 touche melee, -1 touche sous suppression, +1 blessure
+#: melee. Une table et non trois `details.get` en ligne : SHOOT et FOUGHT la lisent tous deux,
+#: et c est exactement la paire ou ce depot diverge.
+_ROLL_MODIFIER_TAG_FIELDS: Tuple[str, ...] = (
+    "hit_roll_bonus_ability",
+    "hit_roll_malus_ability",
+    "wound_roll_bonus_ability",
+)
+
+
+def _roll_modifier_tokens(details: Dict[str, Any]) -> List[str]:
+    """Tags de LIGNE des modificateurs de jet de la Primitive A (`[MIGHT IS RIGHT]`…).
+
+    TAG DE LIGNE, et pas suffixe de segment. Deux raisons, et la seconde est dure :
+      - ces modificateurs sont des proprietes de l ACTIVATION (une regle d unite en vigueur,
+        constante d un bout a l autre de la ligne), comme `[WAAAGH!]` et `[CLEAVE:X]` ;
+      - `abilityTokensForRoll` (`frontend/src/utils/replayParser.ts`) ne retient QU UNE capacite
+        par segment de jet. Un second token accole au segment `Hit` y ecraserait en silence le
+        nom de la relance de touche.
+
+    Le seuil imprime est deja NET (`clamp(base - bonus + malus, 2, 6)`, applique par le moteur) :
+    le token est la seule chose qui dise pourquoi il ne vaut pas la caracteristique de l arme.
+    """
+    return [
+        token.strip()
+        for token in (_ability_token(details.get(field)) for field in _ROLL_MODIFIER_TAG_FIELDS)
+        if token
+    ]
 
 
 def _build_hit_suffix(details: Dict[str, Any], hit_ability_display_name: Any) -> str:
@@ -1169,6 +1200,9 @@ class StepLogger:
             # surtout. Le token se range avec les tags de ligne (et non sur un jet) parce qu il
             # decrit le GROUPE d attaques, comme [RAPID FIRE:X] et [BLAST:X].
             shot_tags.extend(_flag_rule_tokens(details, _LINE_TAG_RULE_TOKENS))
+            # Primitive A (chantier 06) : au tir, seul `[SUPPRESSED]` peut apparaitre — les deux
+            # autres modificateurs sont explicitement melee. MEME helper que FOUGHT.
+            shot_tags.extend(_roll_modifier_tokens(details))
             # [PRECISION] 24.28 : drapeau sans parametre — meme regime que les precedents, le
             # token n est pose que si le moteur a applique la regle.
             if details.get("precision_applied") is True:
@@ -1361,9 +1395,13 @@ class StepLogger:
                     if charge_roll is not None:
                         # L28 — relance de charge : token [REROLLED:<jet initial>] quand presente.
                         _charge_rerolled = _rerolled_token(details, "charge_roll_initial")
+                        # Primitive A (chantier 06) : `[SOMETHIN' TO PROVE]` accole au jet, qui
+                        # est deja NET (2D6+1). Sans ce token, un 13 sur 2D6 apparait dans
+                        # step.log comme un jet impossible.
+                        _charge_bonus = _ability_token(details.get("charge_roll_bonus_ability"))
                         base_msg = (
                             f"{unit_label} CHARGED{ability_suffix}{_fly_seg} {target_label} "
-                            f"from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {charge_roll}]{_charge_rerolled}"
+                            f"from ({start_col},{start_row}) to ({end_col},{end_row}) [Roll: {charge_roll}]{_charge_bonus}{_charge_rerolled}"
                         )
                     else:
                         base_msg = (
@@ -1413,8 +1451,14 @@ class StepLogger:
             # `n_charge_success_rate` bloque a 1.000 sur tout un run de 50 000 episodes.
             target_id = details.get("target_id")
             target_coords = details.get("target_coords")
+            # JUMEAU de la ligne CHARGED : un jet rate porte lui aussi son +1, et c'est meme la
+            # ou il compte le plus (l'analyzer borne les jets sur les DEUX issues).
+            _charge_bonus = _ability_token(details.get("charge_roll_bonus_ability"))
             if target_id is None:
-                base_msg = f"{unit_label} FAILED CHARGE - no target within reach [Roll: {charge_roll}]"
+                base_msg = (
+                    f"{unit_label} FAILED CHARGE - no target within reach "
+                    f"[Roll: {charge_roll}]{_charge_bonus}"
+                )
             else:
                 if target_coords is None:
                     raise KeyError("Charge_fail action missing required target_coords")
@@ -1425,7 +1469,7 @@ class StepLogger:
                 target_col, target_row = target_coords
                 base_msg = (
                     f"{unit_label} FAILED CHARGE to unit {target_id}({target_col},{target_row}) "
-                    f"[Roll: {charge_roll}]"
+                    f"[Roll: {charge_roll}]{_charge_bonus}"
                 )
             base_msg += _charge_distance_segment(details)
 
@@ -1522,6 +1566,10 @@ class StepLogger:
             _waaagh_seg += "".join(
                 f" {tok}" for tok in _flag_rule_tokens(details, _LINE_TAG_RULE_TOKENS)
             )
+            # Primitive A (chantier 06) : `[MIGHT IS RIGHT]`, `[SUPPRESSED]`, `[LITANY OF HATE]`.
+            # MEME helper que le tir — les seuils imprimes plus bas sont deja nets, ces tags sont
+            # la seule chose qui dise pourquoi ils s ecartent de la caracteristique de l arme.
+            _waaagh_seg += "".join(f" {tok}" for tok in _roll_modifier_tokens(details))
             # [TARGET_DECL:N] — JUMEAU du tir : effectif de la cible au Select Targets step.
             _tgt_alive = details.get("target_alive_count")
             if _tgt_alive is not None:

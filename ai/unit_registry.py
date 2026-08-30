@@ -199,14 +199,26 @@ class UnitRegistry:
         properties = {}
 
         def _extract_top_level_object_bodies(block: str) -> List[str]:
-            """Extract top-level object bodies from a JS/TS array literal body."""
+            """Extract top-level object bodies from a JS/TS array literal body.
+
+            LES COMMENTAIRES SONT SAUTES, et ce n'est pas du confort. Le scanner traitait `'`
+            comme un debut de chaine OU QU'IL SOIT : une apostrophe francaise dans un
+            commentaire (`l'escouade`, `qu'il`) ouvrait une chaine qui avalait la suite du
+            bloc. Mesure sur `Warboss.ts` : trois apostrophes dans un commentaire de datasheet
+            faisaient DISPARAITRE l'entree `UNIT_RULES` qui suivait — sans erreur, sans trace,
+            la capacite simplement absente du registre et donc du moteur et de l'observation.
+            Le nombre PAIR d'apostrophes des autres datasheets masquait le defaut.
+            """
             object_bodies: List[str] = []
             depth = 0
             object_start = -1
             in_string = False
             string_delimiter = ""
             escape_next = False
+            skip_until = 0
             for idx, ch in enumerate(block):
+                if idx < skip_until:
+                    continue
                 if escape_next:
                     escape_next = False
                     continue
@@ -216,6 +228,16 @@ class UnitRegistry:
                         continue
                     if ch == string_delimiter:
                         in_string = False
+                    continue
+                if ch == "/" and block[idx + 1:idx + 2] == "/":
+                    end = block.find("\n", idx)
+                    skip_until = len(block) if end == -1 else end
+                    continue
+                if ch == "/" and block[idx + 1:idx + 2] == "*":
+                    end = block.find("*/", idx + 2)
+                    if end == -1:
+                        raise ValueError("Unterminated block comment in UNIT_RULES declaration")
+                    skip_until = end + 2
                     continue
                 if ch in {"'", '"'}:
                     in_string = True

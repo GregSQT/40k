@@ -910,6 +910,12 @@ class W40KEngine(gym.Env):
             "units_shot": set(),
             "units_shot_previous_turn": set(),
             "units_charged": set(),
+            # Suppression (Indiscriminate Detonations, chantier 06) : `squad_id -> joueur
+            # qui a supprime`. La duree est « until the start of YOUR next Command phase »,
+            # donc elle traverse le tour adverse : la purge ne peut pas etre celle des sets
+            # de tour ci-dessus, elle est faite par joueur au debut de SA phase de commande
+            # (`command_handlers`). Le joueur est stocke pour cela, et pour cela seulement.
+            "suppressed_squads": {},
             "units_reacted_this_enemy_turn": set(),
             "reaction_window_active": False,
             "_unit_move_version": 0,
@@ -1657,6 +1663,12 @@ class W40KEngine(gym.Env):
             "units_shot": set(),
             "units_shot_previous_turn": set(),
             "units_charged": set(),
+            # Suppression (Indiscriminate Detonations, chantier 06) : `squad_id -> joueur
+            # qui a supprime`. La duree est « until the start of YOUR next Command phase »,
+            # donc elle traverse le tour adverse : la purge ne peut pas etre celle des sets
+            # de tour ci-dessus, elle est faite par joueur au debut de SA phase de commande
+            # (`command_handlers`). Le joueur est stocke pour cela, et pour cela seulement.
+            "suppressed_squads": {},
             "units_advanced": set(),
             "advance_rolls": {},
             # 21.03 `L6` : declarations de vol, et « la question a ete posee » (distinct — un refus
@@ -5888,6 +5900,15 @@ class W40KEngine(gym.Env):
         # MODIFICATEUR de blessure (+1 d Oath), pas une relance : sans cette entree le seuil
         # ameliore atteint step.log sans sa cause, alors que la relance de touche y est nommee.
         "woundBonusAbility": "wound_bonus_ability_display_name",
+        # Primitive A (chantier 06) — MODIFICATEURS de jet portes par une regle d UNITE :
+        # +1 touche melee (Might Is Right), -1 touche sous suppression, +1 blessure melee
+        # (Litany of Hate). Les seuils imprimes sont deja nets : sans ces trois entrees, une
+        # escouade menee par un Warboss toucherait sur 2+ dans step.log avec une datasheet a 3+
+        # et RIEN ne dirait pourquoi. Rendus en TAGS DE LIGNE par le formateur (cf.
+        # `stamp_roll_modifier_abilities`), pas accoles a un segment de jet.
+        "hitRollBonusAbility": "hit_roll_bonus_ability",
+        "hitRollMalusAbility": "hit_roll_malus_ability",
+        "woundRollBonusAbility": "wound_roll_bonus_ability",
         # Jets AVANT relance. Sans ces trois entrees, step.log rend `Hit 3(3+) [OATH OF MOMENT]`,
         # indiscernable d une touche directe : le nom de la capacite dit que la relance ETAIT
         # POSSIBLE, le de d origine est le seul a dire qu elle a EU LIEU (et ce qu elle a change).
@@ -6521,6 +6542,24 @@ class W40KEngine(gym.Env):
             value = raw_log.get(src)  # get allowed
             if value is not None:
                 details[dst] = value
+        # Primitive A (chantier 06) — `charge_roll_bonus` (Somethin' to Prove). DÉRIVÉ ICI, et
+        # pas posé par les producteurs : le jet de charge est journalisé par plus de vingt
+        # `append_action_log` répartis sur trois fichiers, et un champ à recopier vingt fois est
+        # la définition même du jumeau qui divergera. Ce site est LE point de traduction unique
+        # (cf. la docstring), et le flush suit immédiatement l'action — les `UNIT_RULES` en
+        # vigueur (19.04) y sont encore celles du jet.
+        if "charge_roll" in details and unit_id is not None:
+            from engine.phase_handlers.shared_utils import (
+                _get_source_unit_rule_display_name_for_effect,
+                unit_charge_roll_bonus,
+            )
+            if unit_charge_roll_bonus(self.game_state, str(unit_id)):
+                details["charge_roll_bonus_ability"] = (
+                    _get_source_unit_rule_display_name_for_effect(
+                        require_unit_by_id(self.game_state, str(unit_id)),
+                        "charge_roll_bonus",
+                    )
+                )
         # Préférer le segment pré-capturé (pile-in/consolidation gym) au segment lu en temps
         # réel. Cf. `_gym_commit_fight_move` : le segment est capturé juste après commit_move
         # pour éviter qu'un flush tardif (après enchaînement pile-in+consolidation dans le même

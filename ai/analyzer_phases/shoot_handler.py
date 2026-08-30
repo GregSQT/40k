@@ -338,7 +338,7 @@ def handle_shoot(
         # depuis F et E. Cf. ai/analyzer_wound.py.
         from ai.analyzer_wound import check_wound_threshold, wound_bonus_applies
         check_wound_threshold(
-            state, config, stats, line, action_desc, player, shooter_unit_type,
+            state, config, stats, line, action_desc, player, shooter_id, shooter_unit_type,
             weapon_display_name, target_id, parse_shooter_models_segment(action_desc), is_melee=False,
         )
         # 08.04 Oath of Moment : quand [OATH OF MOMENT] est dans le segment de blessure, la cible
