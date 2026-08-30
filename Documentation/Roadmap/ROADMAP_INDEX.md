@@ -130,6 +130,8 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | ai | ✅ simplify reward_mapper + expected_damage — `require_key` remplace guards inline, `_waaagh_game_state` spread BASE (2026-08-30) | [bot.md](bot.md) | ⚡ |
 | moteur+training | ✅ lot moteur 2026-08-30 — bonus-malus-cap (89 tests), expected-damage-unit-modifiers (Primitive A + Waaagh), simplify-died-before-phase (4 boucles), terrain-selector-purge-foe | [moteur.md](moteur.md) | ⚡ |
 | ai | ✅ shoot-priority-3 — implémentation bloc P3 reward_mapper (killable+highest threat+lowest HP) (2026-08-30) | [bot.md](bot.md) | ⚡ |
+| config | ✅ purge-train-terrains — purger terrains hors mission des configs scénario entraînement (2026-08-30) | [training.md](training.md) | ⚡ |
+| ai+moteur | ✅ fix-kill-lowest-hp-production — câbler `target_lowest_hp` dans `squad_fight` via `hp_before` dans `targets_meta` ; corriger `_fight_lowest_hp_wipe_bonus` T1 + multi-wipe + dead-unit (2026-08-30) | [bot.md](bot.md) | ⚡ |
 
 ---
 

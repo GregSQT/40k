@@ -1173,20 +1173,28 @@ class RewardCalculator:
             return 0.0
         targets_meta = require_key(combat, "targets_meta")
         units_cache = require_key(game_state, "units_cache")
-        bonus = 0.0
+        enemy_wiped_hps: Dict[str, int] = {}
         for sid in squads_wiped:
             meta = require_key(targets_meta, sid)
             if int(require_key(meta, "player")) == acting_player:
                 continue
-            hp_before = meta.get("hp_before", 0)
-            if hp_before <= 0:
-                continue
-            living_enemy_hps = [
-                int(entry.get("HP_CUR", 0))
-                for uid, entry in units_cache.items()
-                if int(entry.get("player", acting_player)) != acting_player
-            ]
-            if not any(hp > 0 and hp < hp_before for hp in living_enemy_hps):
+            hp_before = int(require_key(meta, "hp_before"))
+            if hp_before > 0:
+                enemy_wiped_hps[sid] = hp_before
+
+        living_enemy_hps = [
+            int(entry.get("HP_CUR", 0))
+            for entry in units_cache.values()
+            if int(require_key(entry, "player")) != acting_player
+        ]
+
+        bonus = 0.0
+        for sid, hp_before in enemy_wiped_hps.items():
+            other_hps = (
+                [hp for hp in living_enemy_hps if hp > 0]
+                + [hp for other_sid, hp in enemy_wiped_hps.items() if other_sid != sid]
+            )
+            if not any(hp < hp_before for hp in other_hps):
                 bonus += lowest_hp_bonus
         return bonus
 
