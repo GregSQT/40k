@@ -275,5 +275,21 @@
     "has_parameter": true,
     "parameter_name": "attacks_bonus",
     "description": "Primitive B (chantier 06) : une fois par bataille en phase de corps a corps, les armes de melee de CE MODELE gagnent +attacks_bonus A et [DEVASTATING WOUNDS] jusqu'a la fin de la phase. Portee par Finest Hour (CaptainRelicShield)."
+  },
+  "feel_no_pain_vs_psychic": {
+    "id": "feel_no_pain_vs_psychic",
+    "obs_id": 29,
+    "name": "Feel No Pain vs Psychic",
+    "has_parameter": true,
+    "parameter_name": "threshold",
+    "description": "Primitive C (chantier 06) : Feel No Pain X+ uniquement contre les attaques et capacites PSYCHIC (24.12). Conditionnel : l arme ou la source doit porter le mot-cle PSYCHIC. Porte par Psychic Hood (Librarian), seuil 4."
+  },
+  "feel_no_pain_near_objective": {
+    "id": "feel_no_pain_near_objective",
+    "obs_id": 30,
+    "name": "Feel No Pain near objective",
+    "has_parameter": true,
+    "parameter_name": "threshold",
+    "description": "Primitive C (chantier 06) : Feel No Pain X+ tant que le modele est a portee d un objectif (3\") ou a 6\" du centre du champ de bataille (24.12). Porte par Unbreakable Resolve (Ancient), seuil 4."
   }
 }

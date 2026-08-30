@@ -24,10 +24,13 @@ export class Librarian extends LeaderEliteMeleeElite {
   static CC_WEAPONS = getWeapons(Librarian.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "leader", displayName: "Leader" }];
+  static UNIT_RULES = [
+    { ruleId: "leader", displayName: "Leader" },
+    { ruleId: "feel_no_pain_vs_psychic", displayName: "Psychic Hood (FNP 4+ vs PSYCHIC)", rule_args: { threshold: 4 } },
+  ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { leader: 2 };
+  static RULES_STATUS = { leader: 2, feel_no_pain_vs_psychic: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = [
