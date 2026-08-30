@@ -49,6 +49,7 @@ _BASE_GAME_STATE: Dict[str, Any] = {
     # waaagh_applies_to_unit appelle _player_flag_map(game_state, "waaagh_active") en premier;
     # si toutes les valeurs sont False, sortie anticipée sans lire army_faction ni "units".
     "waaagh_active": {1: False, 2: False},
+    "config": {"game_rules": {"bonus_malus_cap": 0}},
 }
 
 
@@ -61,7 +62,7 @@ def _waaagh_game_state() -> Dict[str, Any]:
     return {
         "suppressed_squads": {},
         "waaagh_active": {1: True, 2: False},
-        "config": {"army_faction": {"1": "ORKS", "2": "TYRANIDS"}},
+        "config": {"army_faction": {"1": "ORKS", "2": "TYRANIDS"}, "game_rules": {"bonus_malus_cap": 0}},
         "units": [
             {"id": "1", "player": 1, "FACTION_KEYWORDS": ["ORKS"]},
         ],

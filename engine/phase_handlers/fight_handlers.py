@@ -50,6 +50,7 @@ from .shared_utils import (
     resolve_oath_effects,
     # Primitive A (chantier 06) : modificateurs de jet. MEMES helpers que le roller de tir,
     # pour la meme raison que la ligne du dessus.
+    _bonus_malus_cap,
     resolve_hit_roll_modifiers,
     resolve_melee_wound_bonus,
     stamp_reroll_abilities,
@@ -4684,7 +4685,6 @@ def _manual_roll_fight_intent(
     wth, _wound_bonus_ability = resolve_melee_wound_bonus(attacker_unit, wth)
     # bonus_malus_cap : si actif, le total Oath+Litany est clampe avant application.
     if _oath_wound_bonus or _wound_bonus_ability:
-        from engine.phase_handlers.shared_utils import _bonus_malus_cap
         _cap_wound = _bonus_malus_cap(game_state)
         if _cap_wound:
             _litany_bonus = 1 if _wound_bonus_ability else 0

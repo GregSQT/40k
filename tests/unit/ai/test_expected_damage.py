@@ -153,7 +153,7 @@ def test_can_kill_uses_probabilistic_damage(monkeypatch: pytest.MonkeyPatch) -> 
     }
 
     def can_kill() -> bool:
-        return mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={})
+        return mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={"config": {"game_rules": {"bonus_malus_cap": 0}}})
 
     hp = 2
     monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: hp)
@@ -189,7 +189,7 @@ def test_can_kill_melee_path_uses_expected_damage(monkeypatch: pytest.MonkeyPatc
     target = _target(t=4, sv=3)
     target["id"] = "t1"
     # is_melee=True → expected_damage lit waaagh_active ; {1:False,2:False} = sortie anticipée
-    game_state: dict = {"suppressed_squads": {}, "waaagh_active": {1: False, 2: False}}
+    game_state: dict = {"suppressed_squads": {}, "waaagh_active": {1: False, 2: False}, "config": {"game_rules": {"bonus_malus_cap": 0}}}
 
     hp = 2
     monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: hp)
