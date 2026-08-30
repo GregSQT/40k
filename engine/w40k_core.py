@@ -5846,6 +5846,29 @@ class W40KEngine(gym.Env):
         if d6 <= 3:
             return None
         mw_count = 3 if d6 == 6 else random.randint(1, 3)
+        if len(engaged) == 1:
+            # Cible unique : aucune décision à poser, application directe.
+            from engine.phase_handlers.shared_utils import allocate_mortal_wounds
+            from engine.action_log_utils import append_action_log
+            target_eid = engaged[0]
+            _exhort_details: List[Dict[str, Any]] = []
+            player_single = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
+            append_action_log(self.game_state, {
+                "type": "exhortation_de_rage",
+                "message": (
+                    f"[EXHORTATION DE RAGE] {squad_id} -> {target_eid}: "
+                    f"{mw_count} MW (D6={d6}) [auto: cible unique]"
+                ),
+                "turn": self.game_state.get("turn", 0),  # get allowed
+                "phase": "fight",
+                "unitId": squad_id,
+                "targetId": target_eid,
+                "player": player_single,
+                "exhortationMortalWounds": mw_count,
+                "exhortationDetails": _exhort_details,
+            })
+            allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
+            return self._continue_squad_fight_after_selection(squad_id, target_slot)
         self.game_state["_pending_exhortation_fight"] = {
             "squad_id": squad_id,
             "mw_count": mw_count,
