@@ -291,5 +291,21 @@
     "has_parameter": true,
     "parameter_name": "threshold",
     "description": "Primitive C (chantier 06) : Feel No Pain X+ tant que le modele est a portee d un objectif (3\") ou a 6\" du centre du champ de bataille (24.12). Porte par Unbreakable Resolve (Ancient), seuil 4."
+  },
+  "mortal_wounds_on_critical_wound": {
+    "id": "mortal_wounds_on_critical_wound",
+    "obs_id": 31,
+    "name": "Mortal wounds on critical wound",
+    "has_parameter": true,
+    "parameter_name": "mw_dice",
+    "description": "Primitive D (chantier 06) : sur une blessure critique avec l arme designee (rule_args.weapon), inflige mw_dice blessures mortelles a la cible (fin de sequence). Non VEHICLE uniquement. Porte par Hold Still and Say Aargh (PainBoy, 'urty Syringe, D6 MW)."
+  },
+  "mortal_wounds_on_fight_activation": {
+    "id": "mortal_wounds_on_fight_activation",
+    "obs_id": 32,
+    "name": "Mortal wounds on fight activation",
+    "has_parameter": true,
+    "parameter_name": "mw_on_6",
+    "description": "Primitive D (chantier 06) : a la selection en combat, lance D6 : 4-5 -> D3 BM, 6 -> mw_on_6 BM sur un ennemi engage au choix du joueur (decision agent mortal_wounds_target). Porte par Exhortation de Rage (ChaplainJumpPack), mw_on_6=3."
   }
 }

@@ -4139,6 +4139,40 @@ class W40KEngine(gym.Env):
                 decision_player=decision_player,
             )
 
+        if decision_type == "mortal_wounds_target":
+            # Exhortation de Rage (chantier 06 Passe 4) : l agent choisit l ennemi engage cible
+            # des blessures mortelles, puis le combat normal reprend.
+            pending_exhort = self.game_state.pop("_pending_exhortation_fight", None)
+            if pending_exhort is None:
+                raise RuntimeError(
+                    "agent_decision mortal_wounds_target: pas de _pending_exhortation_fight — "
+                    "l etat a ete efface entre la pose de la decision et sa resolution."
+                )
+            target_eid = str(selected_option["effect_ids"][0])
+            mw_count = int(require_key(pending_exhort, "mw_count"))
+            exhort_squad_id = str(require_key(pending_exhort, "squad_id"))
+            target_slot_stored: Optional[int] = pending_exhort.get("target_slot")  # get allowed
+            clear_pending_agent_decision(self.game_state)
+            from engine.phase_handlers.shared_utils import allocate_mortal_wounds
+            from engine.action_log_utils import append_action_log
+            _exhort_details: List[Dict[str, Any]] = []
+            append_action_log(self.game_state, {
+                "type": "exhortation_de_rage",
+                "message": (
+                    f"[EXHORTATION DE RAGE] {exhort_squad_id} -> {target_eid}: "
+                    f"{mw_count} MW (D6={pending_exhort.get('d6_roll', '?')})"
+                ),
+                "turn": self.game_state.get("turn", 0),  # get allowed
+                "phase": "fight",
+                "unitId": exhort_squad_id,
+                "targetId": target_eid,
+                "player": int(require_key(decision, "player")),
+                "exhortationMortalWounds": mw_count,
+                "exhortationDetails": _exhort_details,
+            })
+            allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
+            return self._continue_squad_fight_after_selection(exhort_squad_id, target_slot_stored)
+
         if decision_type != "rule_choice":
             raise NotImplementedError(
                 f"agent_decision: type '{decision_type}' declare mais sans application moteur. "
@@ -5674,6 +5708,170 @@ class W40KEngine(gym.Env):
         }
         self._fight_v11_gym_settle()
         return True, result
+
+    def _continue_squad_fight_after_selection(
+        self, squad_id: str, target_slot: Optional[int]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Reprend le flux squad_fight après register_selection (overrun → cible → arme).
+
+        Extrait pour permettre au handler mortal_wounds_target (Exhortation de Rage) de
+        reprendre le combat après avoir appliqué les blessures mortelles. target_slot est
+        l index de cible dans le mapping slot ennemi (None = combat à vide).
+        """
+        from engine.phase_handlers.fight_handlers import (
+            build_manual_fight_allocation,
+            _fight_build_valid_target_pool,
+            fight_v11_current_pool,
+            _fight_v11_engaged_now,
+            fight_weapon_eligible_slots,
+        )
+        from engine.phase_handlers.shared_utils import (
+            _fight_overrun_pile_in_plan,
+            squad_fight_restart_activation,
+            get_enemy_slot_mapping,
+        )
+        units_cache = require_key(self.game_state, "units_cache")
+        cache_entry = units_cache.get(squad_id)
+        if cache_entry is None:
+            raise KeyError(f"Squad {squad_id} absent de units_cache pour _continue_squad_fight_after_selection")
+        unit = require_unit_by_id(self.game_state, squad_id)
+        _did_overrun = False
+        if not _fight_v11_engaged_now(self.game_state, unit):
+            _ov_plan = _fight_overrun_pile_in_plan(self.game_state, squad_id)
+            if _ov_plan is not None:
+                self._gym_commit_fight_move(self.game_state, squad_id, _ov_plan, "overrun_pile_in")
+                unit = require_unit_by_id(self.game_state, squad_id)
+                _did_overrun = True
+        _commit_enemy_slots = get_enemy_slot_mapping(
+            self.game_state, int(require_key(cache_entry, "player"))
+        )
+        if _did_overrun:
+            from engine.phase_handlers.fight_handlers import _model_can_fight_target
+            _mc = self.game_state["models_cache"]
+            _uid_str = str(squad_id)
+            _alive_mids = [
+                m for m in self.game_state["squad_models"].get(_uid_str, [])  # fallback allowed
+                if m in _mc
+            ]
+            targets = [
+                _eid
+                for _eid in _commit_enemy_slots
+                if _eid is not None
+                and any(_model_can_fight_target(self.game_state, _mc[m], _uid_str, _eid) for m in _alive_mids)
+            ]
+        else:
+            targets = [str(t) for t in _fight_build_valid_target_pool(self.game_state, unit)]
+        if target_slot is not None:
+            enemy_slot_ids = _commit_enemy_slots
+            if not (0 <= target_slot < len(enemy_slot_ids)):
+                raise ValueError(
+                    f"_continue_squad_fight: target_slot {target_slot} hors du mapping "
+                    f"({len(enemy_slot_ids)} slots)"
+                )
+            best_target_id = enemy_slot_ids[target_slot]
+            if best_target_id is None or str(best_target_id) not in targets:
+                raise ValueError(
+                    f"_continue_squad_fight: slot {target_slot} -> {best_target_id!r} hors pool "
+                    f"12.05 {targets} pour squad {squad_id}"
+                )
+            best_target_id = str(best_target_id)
+        else:
+            if targets:
+                raise ValueError(
+                    f"_continue_squad_fight: combat à vide pour {squad_id} mais pool {targets} non vide"
+                )
+            best_target_id = None
+        squad_fight_restart_activation(self.game_state, squad_id)
+        if best_target_id is not None:
+            slot_to_code = fight_weapon_eligible_slots(
+                self.game_state, squad_id, best_target_id
+            )
+            if not slot_to_code:
+                raise RuntimeError(
+                    f"_continue_squad_fight: aucune arme CC éligible pour {squad_id!r} vs "
+                    f"{best_target_id!r}"
+                )
+            self.game_state[PENDING_FIGHT_WEAPON_KEY] = {
+                "squad_id": squad_id,
+                "target_id": best_target_id,
+                "slot_to_code": slot_to_code,
+            }
+            return True, {
+                "action": "squad_fight",
+                "squad_id": squad_id,
+                "target_squad_id": best_target_id,
+                "waiting_for_weapon_select": True,
+            }
+        _fight_alloc = build_manual_fight_allocation(self.game_state, squad_id)
+        if _fight_alloc.get("waiting_for_player"):
+            return True, _fight_alloc
+        if not _fight_alloc.get("done"):
+            raise RuntimeError(
+                f"_continue_squad_fight: allocation combat non terminée en auto pour {squad_id}"
+            )
+        fight_result = _fight_alloc["shoot_result"]
+        from engine.phase_handlers.generic_handlers import end_activation
+        unit = require_unit_by_id(self.game_state, squad_id)
+        end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
+        end_result.pop("phase_complete", None)
+        result = {
+            **end_result,
+            "action": "squad_fight",
+            "squad_id": squad_id,
+            "target_squad_id": None,
+            "fight_result": fight_result,
+        }
+        self._fight_v11_gym_settle()
+        return True, result
+
+    def _check_and_trigger_exhortation_de_rage(
+        self, squad_id: str, unit: Dict[str, Any], target_slot: Optional[int]
+    ) -> Optional[Tuple[bool, Dict[str, Any]]]:
+        """Vérifie et déclenche l'Exhortation de Rage (mortal_wounds_on_fight_activation).
+
+        Retourne None si la règle n'est pas présente, si le D6 ne trigger pas (1-3), ou si
+        aucun ennemi engagé n'est disponible. Retourne le payload waiting si décision posée.
+        """
+        import random
+        from engine.phase_handlers.fight_handlers import (
+            _unit_has_rule, _fight_build_valid_target_pool,
+        )
+        from engine.observation_entities import MAX_DECISION_OPTIONS
+        if not _unit_has_rule(unit, "mortal_wounds_on_fight_activation"):
+            return None
+        engaged = [str(t) for t in _fight_build_valid_target_pool(self.game_state, unit)]
+        if not engaged:
+            return None
+        d6 = random.randint(1, 6)
+        if d6 <= 3:
+            return None
+        mw_count = 3 if d6 == 6 else random.randint(1, 3)
+        self.game_state["_pending_exhortation_fight"] = {
+            "squad_id": squad_id,
+            "mw_count": mw_count,
+            "target_slot": target_slot,
+            "d6_roll": d6,
+        }
+        player = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
+        options = [
+            {"effect_ids": [eid], "declines": False}
+            for eid in engaged[:MAX_DECISION_OPTIONS]
+        ]
+        set_pending_agent_decision(
+            self.game_state,
+            decision_type="mortal_wounds_target",
+            player=player,
+            unit_id=squad_id,
+            options=options,
+        )
+        return True, {
+            "action": "squad_fight",
+            "squad_id": squad_id,
+            "waiting_for_agent_decision": True,
+            "decision_type": "mortal_wounds_target",
+            "exhortation_d6_roll": d6,
+            "mw_count": mw_count,
+        }
 
 
     def _finish_charge_after_placement(
@@ -7498,8 +7696,7 @@ class W40KEngine(gym.Env):
         elif action_name == "squad_fight":
             squad_id = str(semantic["squad_id"])
             units_cache = require_key(self.game_state, "units_cache")
-            cache_entry = units_cache.get(squad_id)
-            if cache_entry is None:
+            if units_cache.get(squad_id) is None:
                 raise KeyError(f"Squad {squad_id} absent de units_cache pour squad_fight")
 
             # `squad_fight` = UNE selection de l etape FIGHT (12.04), rien d autre. Le PILE IN
@@ -7517,12 +7714,7 @@ class W40KEngine(gym.Env):
                     f"chemin d entree en phase fight"
                 )
 
-            # Convergence §9.4b-1 : resolution combat via le moteur d allocation par-figurine
-            # (groupes 05.03/05.04, T bodyguard 19.02, save par-fig allouee). Defenseur IA
-            # garanti en training -> auto_decider headless -> resolution complete (done).
             from engine.phase_handlers.fight_handlers import (
-                build_manual_fight_allocation,
-                _fight_build_valid_target_pool,
                 _fight_v11_register_selection,
                 fight_v11_current_pool,
             )
@@ -7542,133 +7734,26 @@ class W40KEngine(gym.Env):
             # son eligibilite a la consolidation (12.08, « was eligible to fight this phase »).
             _fight_v11_register_selection(self.game_state, squad_id)
 
-            # OVERRUN FIGHT 12.06 : pile-in additionnel par-figurine avant les attaques. Une unite
-            # non engagee dans le pool de selection (chargee ce tour, cible detruite) tente de se
-            # reengager. check `not engaged_now` en premier pour eviter require_key snapshot
-            # (jamais pose si le snapshot etait absent — safe depuis que _fight_v11_gym_settle
-            # appelle fight_v11_enter_fight_step, qui le pose TOUJOURS avant cette branche).
-            from engine.phase_handlers.fight_handlers import _fight_v11_engaged_now
-            from engine.phase_handlers.shared_utils import _fight_overrun_pile_in_plan
-            _did_overrun = False
-            if not _fight_v11_engaged_now(self.game_state, unit):
-                _ov_plan = _fight_overrun_pile_in_plan(self.game_state, squad_id)
-                if _ov_plan is not None:
-                    self._gym_commit_fight_move(self.game_state, squad_id, _ov_plan, "overrun_pile_in")
-                    unit = require_unit_by_id(self.game_state, squad_id)
-                    _did_overrun = True
-
-            # Slot mapping calcule une seule fois : reutilise dans la boucle overrun ET dans la
-            # validation target_slot ci-dessous (evite un double parcours de units_cache).
-            _commit_enemy_slots = get_enemy_slot_mapping(
-                self.game_state, int(require_key(cache_entry, "player"))
+            # Exhortation de Rage (mortal_wounds_on_fight_activation, chantier 06 Passe 4) :
+            # « At the start of the Fight step, roll one D6 : on a 4+, the chosen enemy unit
+            # suffers D3 (4-5) or 3 (6) mortal wounds. »
+            # AVANT overrun/cible : la selection se fait AVANT que les attaques soient resolues.
+            target_slot_from_semantic: Optional[int] = (
+                int(semantic["target_slot"]) if "target_slot" in semantic else None
             )
+            _exhort = self._check_and_trigger_exhortation_de_rage(
+                squad_id, unit, target_slot_from_semantic
+            )
+            if _exhort is not None:
+                return _exhort
 
-            # Prédicat de cible = celui du flux PvP (_fight_v11_resolve_attacks) : pool
-            # d ennemis en zone d engagement (12.05), pas le mapping de slots gele du tir.
-            # Pool vide = fight « a vide » (12.04 : une unite qui a charge reste eligible
-            # meme si sa cible est morte -> overrun 12.06 sans cible). Le PvP le resout en
-            # 0 attaque ; le gym en fait autant, via le MEME moteur (0 intent declare ->
-            # summary vide, done=True). Aucun dict fabrique a la main.
-            if _did_overrun:
-                # Post-overrun : meme ensemble d ennemis que le masque (slots mappe uniquement).
-                # `_fight_build_valid_target_pool` applique le socle de l ESCOUADE ; un
-                # personnage attache a un socle propre plus grand -> delta jusqu a 4
-                # subhexes a x5 -> pool masque non vide, pool commit vide -> crash.
-                # `enemy_entries_on_battlefield` retournerait TOUS les ennemis (y compris hors
-                # slots) : si un ennemi en EZ post-overrun n a pas de slot, le masque ne peut
-                # pas ouvrir de slot pour lui, mais le commit le trouvait -> rupture parite.
-                from engine.phase_handlers.fight_handlers import _model_can_fight_target
-                _mc = self.game_state["models_cache"]
-                _uid_str = str(squad_id)
-                _alive_mids = [
-                    m for m in self.game_state["squad_models"].get(_uid_str, [])  # fallback allowed: squad détruite → liste vide
-                    if m in _mc
-                ]
-                targets = [
-                    _eid
-                    for _eid in _commit_enemy_slots
-                    if _eid is not None
-                    and any(_model_can_fight_target(self.game_state, _mc[m], _uid_str, _eid) for m in _alive_mids)
-                ]
-            else:
-                targets = [str(t) for t in _fight_build_valid_target_pool(self.game_state, unit)]
-
-            # V11 §9 P3-1 : la cible est CHOISIE PAR L AGENT, via le slot ennemi porte par
-            # l action. `_ai_select_fight_target` ne tranche plus rien ici — elle reste vive pour
-            # le flux PvP (clic sans cible) et pour les bots, jamais pour le pipeline gym.
-            # Parite masque/commit, dans les DEUX sens : le masque n ouvre un slot que si sa cible
-            # est dans le pool 12.05, et n ouvre `FIGHT_NO_TARGET` que si le pool est vide. Toute
-            # divergence est une rupture, pas un cas a absorber par un repli sur une heuristique.
-            if "target_slot" in semantic:
-                target_slot = int(semantic["target_slot"])
-                enemy_slot_ids = _commit_enemy_slots
-                if not (0 <= target_slot < len(enemy_slot_ids)):
-                    raise ValueError(
-                        f"squad_fight: target_slot {target_slot} hors du mapping de slots ennemis "
-                        f"({len(enemy_slot_ids)} slots)"
-                    )
-                best_target_id = enemy_slot_ids[target_slot]
-                if best_target_id is None or str(best_target_id) not in targets:
-                    raise ValueError(
-                        f"squad_fight: slot {target_slot} -> cible {best_target_id!r} hors du pool "
-                        f"de combat 12.05 {targets} pour squad {squad_id} (rupture masque/commit)"
-                    )
-                best_target_id = str(best_target_id)
-            else:
-                if targets:
-                    raise ValueError(
-                        f"squad_fight: action « combat a vide » recue pour squad {squad_id} alors "
-                        f"que le pool 12.05 offre {targets} (rupture masque/commit)"
-                    )
-                best_target_id = None
-
-            squad_fight_restart_activation(self.game_state, squad_id)
-            if best_target_id is not None:
-                # V11 §0.69 : l'agent choisit l'arme — armer l'état intermédiaire au lieu de
-                # l'auto-sélection. Le masque du prochain step ouvrira exclusivement les slots
-                # FIGHT_WEAPON_* éligibles. La résolution intervient dans `squad_fight_weapon`.
-                from engine.phase_handlers.fight_handlers import fight_weapon_eligible_slots
-                slot_to_code = fight_weapon_eligible_slots(
-                    self.game_state, squad_id, best_target_id
-                )
-                if not slot_to_code:
-                    raise RuntimeError(
-                        f"squad_fight: aucune arme CC éligible pour {squad_id!r} vs "
-                        f"{best_target_id!r} — le masque n'aurait pas dû ouvrir ce combat"
-                    )
-                self.game_state[PENDING_FIGHT_WEAPON_KEY] = {
-                    "squad_id": squad_id,
-                    "target_id": best_target_id,
-                    "slot_to_code": slot_to_code,
-                }
-                return True, {
-                    "action": "squad_fight",
-                    "squad_id": squad_id,
-                    "target_squad_id": best_target_id,
-                    "waiting_for_weapon_select": True,
-                }
-            # Combat à vide (12.04/12.06) : aucune arme à choisir, résolution directe.
-            _fight_alloc = build_manual_fight_allocation(self.game_state, squad_id)
-            if _fight_alloc.get("waiting_for_player"):
-                return True, _fight_alloc
-            if not _fight_alloc.get("done"):
-                raise RuntimeError(
-                    f"squad_fight: allocation combat non terminee en auto pour squad {squad_id} "
-                    f"(defenseur non-IA ?) — action={_fight_alloc.get('action')}"
-                )
-            fight_result = _fight_alloc["shoot_result"]
-
-            unit = require_unit_by_id(self.game_state, squad_id)
-            end_result = end_activation(self.game_state, unit, ACTION, 1, FIGHT, FIGHT, 0)
-            end_result.pop("phase_complete", None)
-            result = {
-                **end_result,
-                "action": "squad_fight",
-                "squad_id": squad_id,
-                "target_squad_id": None,
-                "fight_result": fight_result,
-            }
-            self._fight_v11_gym_settle()
+            result = self._continue_squad_fight_after_selection(
+                squad_id, target_slot_from_semantic
+            )
+            # _continue retourne (True, {...}) ou lève ; on en extrait le résultat pour suivre
+            # le même chemin que l ancien code (result assigné avant _fight_v11_gym_settle).
+            # NOTE: la branche à vide déjà fait gym_settle en interne ; la branche weapon non.
+            return result
 
         elif action_name == "squad_fight_weapon":
             # V11 §0.69 : résolution du combat après sélection d'arme par l'agent.

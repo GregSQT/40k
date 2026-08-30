@@ -4851,6 +4851,52 @@ def _manual_roll_fight_intent(
     if _waaagh_bonus:
         for _rec in rolled["shot_records"]:
             _rec["waaaghMelee"] = True
+    # Hold Still and Say Aargh (mortal_wounds_on_critical_wound, chantier 06 Passe 4).
+    # « Each time a model in this unit makes a melee attack with 'urty syringe, on a critical
+    # wound, that attack inflicts D6 mortal wounds on the target and the attack sequence ends. »
+    # Resolution AUTO (auto_resolve=True toujours). Non VEHICLE uniquement. Sequence terminee :
+    # les records critiques consommes sont retires de pending_wounds et ne font pas de degats
+    # supplementaires via l allocation normale.
+    from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args
+    _hs_args = _unit_get_primitive_b_rule_args(attacker, "mortal_wounds_on_critical_wound")
+    if _hs_args is not None:
+        _req_weapon_code = _hs_args.get("weapon")  # get allowed : absent -> None -> skip
+        _this_weapon_code = weapon.get("code")  # get allowed
+        if _req_weapon_code is not None and _this_weapon_code == _req_weapon_code:
+            _tgt_keywords = [k.upper() for k in target.get("keywords", [])]  # get allowed
+            if "VEHICLE" not in _tgt_keywords:
+                from .shared_utils import allocate_mortal_wounds as _alloc_mw
+                _hs_mw_total = 0
+                _hs_consumed: set = set()
+                for _hs_rec in rolled["shot_records"]:
+                    if _hs_rec.get("criticalWound") and not _hs_rec.get("devastating"):  # get allowed
+                        _hs_mw_total += random.randint(1, 6)
+                        _hs_rec["holdStillMW"] = True
+                        _hs_rec["saveSkipped"] = True
+                        _hs_rec["saveSkipReason"] = "HOLD_STILL_AND_SAY_AARGH"
+                        _hs_consumed.add(id(_hs_rec))
+                if _hs_mw_total > 0:
+                    _hs_details: List[Dict[str, Any]] = []
+                    append_action_log(game_state, {
+                        "type": "hold_still_mortal_wounds",
+                        "message": (
+                            f"[HOLD STILL AND SAY AARGH] {attacker_mid} -> {target_sid}: "
+                            f"{len(_hs_consumed)} crit(s) -> {_hs_mw_total} MW"
+                        ),
+                        "turn": game_state.get("turn", 0),  # get allowed
+                        "phase": "fight",
+                        "unitId": str(attacker["squad_id"]),
+                        "targetId": target_sid,
+                        "player": int(attacker.get("player", 0)),  # get allowed
+                        "holdStillCrits": len(_hs_consumed),
+                        "holdStillMortalWounds": _hs_mw_total,
+                        "holdStillDetails": _hs_details,
+                    })
+                    _alloc_mw(game_state, target_sid, _hs_mw_total, True, _hs_details)
+                    rolled["pending_wounds"] = [
+                        pw for pw in rolled["pending_wounds"]
+                        if id(pw["rec"]) not in _hs_consumed
+                    ]
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,

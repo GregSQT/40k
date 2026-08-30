@@ -38,6 +38,7 @@ from engine.combat_utils import (
 )
 from .shared_utils import (
     ACTION, WAIT, NO, ERROR, PASS, CHARGE,
+    allocate_mortal_wounds,
     update_units_cache_position, translate_squad_to_destination, update_units_cache_hp, is_unit_alive, get_hp_from_cache, require_hp_from_cache,
     get_unit_position, require_unit_position, require_unit_from_cache,
     resolve_model_effective_level,
@@ -4654,14 +4655,11 @@ def _apply_charge_impact(
         )
     impact_roll = resolve_dice_value("D6", "charge_impact_roll")
     impact_hit_result = "FAIL"
+    mortal_wounds = 0
+    _impact_details: List[Dict[str, Any]] = []
     if impact_roll >= CHARGE_IMPACT_TRIGGER_THRESHOLD:
         impact_hit_result = "HIT"
         mortal_wounds = CHARGE_IMPACT_MORTAL_WOUNDS
-        target_hp = require_hp_from_cache(str(target_id), game_state)
-        new_target_hp = max(0, target_hp - mortal_wounds)
-        update_units_cache_hp(game_state, str(target_id), new_target_hp)
-    else:
-        mortal_wounds = 0
     impact_message = (
         f"Unit {unit['id']}({dest_col},{dest_row}) IMPACTED [{impact_ability_display_name}] "
         f"Unit {target_id}({target_col},{target_row}) - "
@@ -4688,12 +4686,15 @@ def _apply_charge_impact(
             "attackerRow": dest_row,
             "targetCol": target_col,
             "targetRow": target_row,
+            "chargeImpactDetails": _impact_details,
             "reward": 0.0,
             "timestamp": "server_time",
             "is_ai_action": unit["player"] == 1,
         },
     )
     add_console_log(game_state, impact_message)
+    if mortal_wounds > 0:
+        allocate_mortal_wounds(game_state, str(target_id), mortal_wounds, True, _impact_details)
 
 
 def _charge_model_pos_is_closer(
