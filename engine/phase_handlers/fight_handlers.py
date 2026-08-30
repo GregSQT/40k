@@ -4658,6 +4658,8 @@ def _manual_roll_fight_intent(
     target_sid = str(intent["target_unit_id"])
     if target_sid not in game_state.get("squad_models", {}):  # get allowed
         return None
+    if target_sid not in game_state.get("units_cache", {}):  # get allowed — source unique de vérité : absent = mort
+        return None
     target = require_unit_by_id(game_state, target_sid)
     if target_sid not in targets_meta:
         _tgt_uc = require_key(game_state, "units_cache")[target_sid]

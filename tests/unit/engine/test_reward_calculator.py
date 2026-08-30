@@ -489,6 +489,49 @@ class TestSplitFireRewardPaths:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Exhortation de Rage — mortal_wounds_target (waiting_for_agent_decision)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestExhortationMortalWoundsTargetRewardPath:
+    """calculate_reward retourne 0.0 pour le payload mortal_wounds_target.
+
+    Avant le correctif, calculate_reward levait ValueError : le résultat a
+    action='squad_fight' (→ is_action_result=True) mais ne porte ni unitId ni
+    shooterId ni unit_id.
+    """
+
+    def test_mortal_wounds_target_returns_zero(self) -> None:
+        """exhortation_mwt_zero : waiting_for_agent_decision → reward 0, pas de ValueError."""
+        rc = _rc_desp()
+        gs = dict(_MINIMAL_GS)
+        result = {
+            "action": "squad_fight",
+            "squad_id": "101",
+            "waiting_for_agent_decision": True,
+            "decision_type": "mortal_wounds_target",
+            "exhortation_d6_roll": 6,
+            "mw_count": 3,
+        }
+        reward = rc.calculate_reward(True, result, gs)
+        assert reward == 0.0
+
+    def test_mortal_wounds_target_d4_roll_returns_zero(self) -> None:
+        """exhortation_mwt_d4_zero : variante D6=4 (mw_count aléatoire) → reward 0."""
+        rc = _rc_desp()
+        gs = dict(_MINIMAL_GS)
+        result = {
+            "action": "squad_fight",
+            "squad_id": "42",
+            "waiting_for_agent_decision": True,
+            "decision_type": "mortal_wounds_target",
+            "exhortation_d6_roll": 4,
+            "mw_count": 2,
+        }
+        reward = rc.calculate_reward(True, result, gs)
+        assert reward == 0.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # _fight_lowest_hp_wipe_bonus
 # ─────────────────────────────────────────────────────────────────────────────
 
