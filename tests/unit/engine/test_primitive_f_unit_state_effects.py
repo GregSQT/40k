@@ -201,6 +201,44 @@ def test_invul_save_override_mental_fortress_librarian() -> None:
     assert effective_invul_save(gs, unit, 7) == 4
 
 
+def test_invul_save_override_propagation_19_04_librarian_bodyguard() -> None:
+    """19.04 : invul_save_override du Librarian doit atteindre le bodyguard Intercessors.
+
+    Simule l'état post-fold _fold_attached_characters + _build_enhanced_unit :
+    le bodyguard n'a pas la règle en propre (_UNIT_RULES_OWN vide), elle vient
+    du groupe attaché (Librarian). effective_invul_save doit retourner 4 pour
+    un Intercessor dont la base INVUL_SAVE est 7+ (aucune InSv native).
+    Un bug dans compute_unit_rules_in_effect ou dans le fold qui oublierait
+    d'alimenter _ATTACHED_RULE_GROUPS ferait retourner 7 et échouerait le test.
+    """
+    import copy
+    from engine.game_state import effective_invul_save
+    from engine.phase_handlers.shared_utils import compute_unit_rules_in_effect
+
+    librarian_id = "lib1"
+    bodyguard_id = "inter1"
+
+    invul_rule = _rule("invul_save_override", {"value": 4})
+
+    own_rules: List[Dict[str, Any]] = []
+    attached_groups: Dict[str, List[Dict[str, Any]]] = {
+        librarian_id: [copy.deepcopy(invul_rule)],
+    }
+    unit_rules_in_effect = compute_unit_rules_in_effect(
+        own_rules,
+        attached_groups,
+        native_alive=True,
+        alive_attached_sources={librarian_id},
+    )
+
+    bodyguard = _unit(bodyguard_id, 1, unit_rules=unit_rules_in_effect)
+    bodyguard["_UNIT_RULES_OWN"] = own_rules
+    bodyguard["_ATTACHED_RULE_GROUPS"] = attached_groups
+
+    gs = _base_state([bodyguard])
+    assert effective_invul_save(gs, bodyguard, 7) == 4
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # toughness_bonus_while_waaagh
 # ─────────────────────────────────────────────────────────────────────────────
