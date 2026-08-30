@@ -371,6 +371,14 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
             raise ValueError(
                 f"{source}: stages[{name}].warmup_episodes doit etre >= 0 (got {warmup_episodes})"
             )
+        ramp_end_episodes = stage.get("ramp_end_episodes")
+        if ramp_end_episodes is not None:
+            ramp_end_episodes = int(ramp_end_episodes)
+            if ramp_end_episodes <= warmup_episodes:
+                raise ValueError(
+                    f"{source}: stages[{name}].ramp_end_episodes ({ramp_end_episodes}) doit "
+                    f"etre > warmup_episodes ({warmup_episodes})."
+                )
 
         members = stage_pool_members(stage)
         for member in members:
@@ -579,17 +587,25 @@ def ramped_ratio(
     total_episodes: int,
     ratio_start: float,
     ratio_end: float,
+    ramp_end_episodes: Optional[int] = None,
 ) -> float:
     """Part du POOL a l'episode `episode_index` : palier a `ratio_start`, puis interpolation.
 
     SOURCE UNIQUE de la rampe : `BotControlledEnv._compute_pool_ratio_for_episode` l'appelle au
     lieu de la recalculer. Les indices sont LOCAUX a un environnement — l'appelant a deja ramene
     les budgets globaux au budget d'un env (cf. `engine/episode_schedule.py`).
+
+    `ramp_end_episodes` (optionnel, en budget par env) : episode auquel `ratio_end` est atteint.
+    Independant de `total_episodes` — permet d'allonger un run sans ralentir la montee en self-play.
+    Quand absent, la rampe se termine a `total_episodes` (comportement d'origine).
     """
     if episode_index <= warmup_episodes:
         return ratio_start
+    ramp_end = ramp_end_episodes if ramp_end_episodes is not None else total_episodes
+    if episode_index >= ramp_end:
+        return ratio_end
     effective_index = episode_index - warmup_episodes
-    effective_total = total_episodes - warmup_episodes
+    effective_total = ramp_end - warmup_episodes
     if effective_total <= 0:
         return ratio_end
     progress = min(1.0, max(0.0, float(effective_index) / float(effective_total)))

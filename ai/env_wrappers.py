@@ -362,6 +362,7 @@ class BotControlledEnv(gym.Wrapper):
         self_play_deterministic: bool = False,
         self_play_snapshot_frozen: bool = False,
         self_play_snapshot_label: Optional[str] = None,
+        self_play_ramp_end_episodes: Optional[int] = None,
         self_play_vec_normalize_enabled: bool = False,
         self_play_vec_normalize_eval_enabled: bool = False,
     ):
@@ -526,11 +527,16 @@ class BotControlledEnv(gym.Wrapper):
                 episodes_per_env(self._self_play_warmup_episodes, n_envs)
                 if self._self_play_warmup_episodes > 0 else 0
             )
+            self._self_play_ramp_end_episodes = (
+                episodes_per_env(int(self_play_ramp_end_episodes), n_envs)
+                if self_play_ramp_end_episodes is not None else None
+            )
         else:
             self._self_play_ratio_start = 0.0
             self._self_play_ratio_end = 0.0
             self._self_play_total_episodes = 1
             self._self_play_warmup_episodes = 0
+            self._self_play_ramp_end_episodes = None
             self._self_play_snapshot_path = ""
             self._self_play_snapshot_label = ""
             self._self_play_snapshot_refresh_episodes = 1
@@ -1060,6 +1066,7 @@ class BotControlledEnv(gym.Wrapper):
             total_episodes=self._self_play_total_episodes,
             ratio_start=self._self_play_ratio_start,
             ratio_end=self._self_play_ratio_end,
+            ramp_end_episodes=self._self_play_ramp_end_episodes,
         )
 
     def _reload_self_play_snapshot_if_needed(self, force: bool = False) -> None:
