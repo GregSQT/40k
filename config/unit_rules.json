@@ -321,5 +321,31 @@
     "has_parameter": true,
     "parameter_name": "oc_bonus",
     "description": "Primitive E (chantier 06) : ajoute oc_bonus a la caracteristique OC de chaque figurine de l unite pour le controle d objectif (14.02). Porte par Relic Banner (Ancient), oc_bonus=1."
+  },
+  "invul_save_override": {
+    "id": "invul_save_override",
+    "obs_id": 35,
+    "name": "Invulnerable save override",
+    "has_parameter": true,
+    "parameter_name": "value",
+    "description": "Primitive F (chantier 06) : confere une sauvegarde invulnerable egale a value+ a TOUTE l unite (19.04 — disparait si le porteur meurt). Porte par Waaagh! Banner (BannerNob, 5+) et Mental Fortress (Librarian, 4+)."
+  },
+  "toughness_bonus_while_waaagh": {
+    "id": "toughness_bonus_while_waaagh",
+    "obs_id": 36,
+    "name": "Toughness bonus while Waaagh!",
+    "has_parameter": true,
+    "parameter_name": "toughness_bonus",
+    "description": "Primitive F (chantier 06) : +toughness_bonus a la Resistance de l unite pendant que le Waaagh! est actif. Porte par Waaagh! Banner (BannerNob), toughness_bonus=1."
+  },
+  "suppress_target_on_shooting": {
+    "id": "suppress_target_on_shooting",
+    "obs_id": 37,
+    "description": "Primitive F (chantier 06) : apres avoir tire, l unite cible est supprimee jusqu au debut de la prochaine phase de commandement du tireur (-1 aux jets de touche via le statut suppressed). Porte par Indiscriminate Detonations (WarTrakk)."
+  },
+  "return_destroyed_models": {
+    "id": "return_destroyed_models",
+    "obs_id": 38,
+    "description": "Primitive F (chantier 06) : 1x/partie, en phase de commandement, retourne D3 figurines detruites de l unite. Porte par Grot Orderly (PainBoy)."
   }
 }

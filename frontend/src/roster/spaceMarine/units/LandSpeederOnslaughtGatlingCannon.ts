@@ -28,10 +28,13 @@ export class LandSpeederOnslaughtGatlingCannon extends EliteRangeTroop {
   static CC_WEAPONS = getWeapons(LandSpeederOnslaughtGatlingCannon.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "deep_strike", displayName: "Deep Strike" }];
+  static UNIT_RULES = [
+    { ruleId: "deep_strike", displayName: "Deep Strike" },
+    { ruleId: "move_after_shooting", displayName: "Purgation Run (D6\")", rule_args: { distance_dice: "D6" } },
+  ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { deep_strike: 2 };
+  static RULES_STATUS = { deep_strike: 2, move_after_shooting: 2 };
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [

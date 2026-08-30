@@ -52,6 +52,7 @@ _target_pool_cache = {}  # per-process, per-env, per-episode; invalidates when u
 _move_los_preview_cache = {}
 _cache_size_limit = 100  # Prevent memory leak in long episodes
 _MOVE_AFTER_SHOOTING_DISTANCE_ARG = "distance"
+_MOVE_AFTER_SHOOTING_DISTANCE_DICE_ARG = "distance_dice"
 _unit_registry_singleton = None  # UnitRegistry reads static files — safe to share across all episodes
 
 
@@ -314,6 +315,48 @@ def _get_required_rule_int_argument(
             f"for unit {require_key(unit, 'id')}"
         )
     return raw
+
+
+def _resolve_move_after_shooting_distance(unit: Dict[str, Any]) -> int:
+    """Distance du move_after_shooting : fixe (rule_args.distance) ou lancee (rule_args.distance_dice).
+
+    Primitive F (chantier 06, passe 6) — Purgation Run (LandSpeeder) : D6", pas 6" fixes.
+    Les deux parametres sont mutuellement exclusifs dans rule_args ; `distance` prime si les deux
+    sont presents (defaut de securite). Un lancer de D6 est effectue une seule fois ici.
+
+    Lit rule_args DIRECTEMENT (iteration sur UNIT_RULES) : les deux cles sont alternatives, et
+    `_get_unit_rule_arg` leve quand la cle demandee est absente, ce qui empeche le test de la
+    seconde alternative sans try/except.
+    """
+    unit_id = require_key(unit, "id")
+    for rule_entry in require_key(unit, "UNIT_RULES"):
+        if str(require_key(rule_entry, "ruleId")) != "move_after_shooting":
+            continue
+        rule_args = rule_entry.get("rule_args") or {}
+        distance = rule_args.get(_MOVE_AFTER_SHOOTING_DISTANCE_ARG)
+        if distance is not None:
+            d = int(distance)
+            if d <= 0:
+                raise ValueError(
+                    f"move_after_shooting.distance must be > 0, got {d} for unit {unit_id}"
+                )
+            return d
+        dice_spec = rule_args.get(_MOVE_AFTER_SHOOTING_DISTANCE_DICE_ARG)
+        if dice_spec is not None:
+            rolled = resolve_dice_value(str(dice_spec), "move_after_shooting_distance")
+            if rolled <= 0:
+                raise ValueError(
+                    f"move_after_shooting.distance_dice rolled {rolled} for unit {unit_id}"
+                )
+            return int(rolled)
+        raise ValueError(
+            f"move_after_shooting rule on unit {unit_id} requires either "
+            f"'{_MOVE_AFTER_SHOOTING_DISTANCE_ARG}' (int) or "
+            f"'{_MOVE_AFTER_SHOOTING_DISTANCE_DICE_ARG}' (str) in rule_args"
+        )
+    raise ValueError(
+        f"move_after_shooting rule absent from UNIT_RULES for unit {unit_id}"
+    )
 
 
 def _can_unit_shoot_after_advance_with_weapon(unit: Dict[str, Any], weapon: Dict[str, Any]) -> bool:
@@ -4937,6 +4980,8 @@ def shooting_clear_activation_state(game_state: Dict[str, Any], unit: Dict[str, 
         del unit["_move_after_shooting_resolved"]
     if "_move_after_shooting_distance" in unit:
         del unit["_move_after_shooting_distance"]
+    if "_last_shoot_target_id" in unit:
+        del unit["_last_shoot_target_id"]
     if "_current_shoot_nb" in unit:
         del unit["_current_shoot_nb"]
     if "advance_range" in unit:
@@ -5136,6 +5181,21 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
     """
     from engine.phase_handlers.generic_handlers import end_activation
 
+    # Primitive F (chantier 06, passe 6) — suppress_target_on_shooting (Indiscriminate Detonations).
+    # Déclenché après une vraie activation de tir : l'unité cible est supprimée jusqu'au début de
+    # la prochaine phase de commandement du tireur. La cible est le `priority_target_squad_id`
+    # mémorisé dans `_last_shoot_target_id` par squad_declare_shoot (shared_utils).
+    if (
+        arg5 == 1
+        and arg1 == ACTION
+        and arg3 == SHOOTING
+        and _unit_has_rule(unit, "suppress_target_on_shooting")
+    ):
+        _suppress_target_id = unit.get("_last_shoot_target_id")
+        if _suppress_target_id is not None:
+            _suppressor_player = int(require_key(unit, "player"))
+            game_state.setdefault("suppressed_squads", {})[str(_suppress_target_id)] = _suppressor_player
+
     # Optional post-shoot movement rule: move_after_shooting.
     # Only relevant when a real shooting activation is ending.
     from engine.phase_handlers.movement_handlers import unit_ingress_move_locked
@@ -5151,9 +5211,7 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
         # arrivée de réserves ce tour-ci ne le fait pas.
         and not unit_ingress_move_locked(game_state, str(require_key(unit, "id")))
     ):
-        move_after_shooting_distance = _get_required_rule_int_argument(
-            unit, "move_after_shooting", _MOVE_AFTER_SHOOTING_DISTANCE_ARG
-        )
+        move_after_shooting_distance = _resolve_move_after_shooting_distance(unit)
         if not _is_adjacent_to_enemy_within_cc_range(game_state, unit):
             destinations = _build_move_after_shooting_destinations(
                 game_state, unit, move_after_shooting_distance

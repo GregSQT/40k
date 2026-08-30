@@ -156,6 +156,17 @@ UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     "reroll_towound_target_on_objective",
     "shoot_after_advance",
     "shoot_after_flee",
+    # Primitive F (chantier 06, passe 6) : effets d'état d'unité.
+    # `invul_save_override` : confère une InSv à TOUTE l'unité via 19.04 (BannerNob 5+, Librarian 4+).
+    # `toughness_bonus_while_waaagh` : +1 T pendant le Waaagh! (BannerNob).
+    # `suppress_target_on_shooting` : pose le statut `suppressed` sur la cible après le tir (WarTrakk).
+    # `return_destroyed_models` : Grot Orderly — 1×/partie, D3 figurines restituées (PainBoy).
+    # `once_per_battle_melee_buff` : Finest Hour — observable ET absent quand dépensé (Captain, passe 2+6).
+    "invul_save_override",
+    "toughness_bonus_while_waaagh",
+    "suppress_target_on_shooting",
+    "return_destroyed_models",
+    "once_per_battle_melee_buff",
 )
 
 #: Effets qu'un CANDIDAT DE DÉCISION peut accorder — sous-ensemble STRICT de

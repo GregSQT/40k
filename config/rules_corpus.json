@@ -741,8 +741,8 @@
         "rule_id": "hit_roll_malus_suppressed"
       },
       "controls": [],
-      "status": "COUVERT",
-      "status_note": "HORS ROSTER tant que la passe 6 n'a pas câblé Indiscriminate Detonations : aucune datasheet ne pose le statut `suppressed`, donc le malus ne peut pas se présenter. Le mécanisme, lui, est vif (tir ET mêlée) et son écart serait porté par PROJ.1.4.seuil_touche."
+      "status": "IMPLÉMENTÉ",
+      "status_note": "Passe 6 chantier 06 : WarTrakk (suppress_target_on_shooting) câblé. Le malus -1 touche via statut `suppressed` est vif (tir ET mêlée), porté par le registre unit_statuses.json et _unit_statuses_in_effect."
     },
     {
       "id": "PROJ.1.4.alternance",
@@ -3878,6 +3878,58 @@
       "controls": [],
       "status": "IMPLÉMENTÉ",
       "status_note": "Relic Banner (Ancient) : +1 OC par figurine de l'unité via unit_effective_oc dans objective_control_contributions. Passe 5 chantier 06."
+    },
+    {
+      "id": "unit.invul_save_override",
+      "source": "config/unit_rules.json",
+      "label": "invul_save_override",
+      "section": "unit",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "invul_save_override"
+      },
+      "controls": [],
+      "status": "IMPLÉMENTÉ",
+      "status_note": "Passe 6 chantier 06 (Primitive F) : confère une InSv value+ à TOUTE l'unité via 19.04 (effective_invul_save). Porté par BannerNob (5+) et LibrarianTerminator (4+)."
+    },
+    {
+      "id": "unit.toughness_bonus_while_waaagh",
+      "source": "config/unit_rules.json",
+      "label": "toughness_bonus_while_waaagh",
+      "section": "unit",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "toughness_bonus_while_waaagh"
+      },
+      "controls": [],
+      "status": "IMPLÉMENTÉ",
+      "status_note": "Passe 6 chantier 06 (Primitive F) : +1 T à l'unité cible pendant que le Waaagh! est actif, via _target_highest_bodyguard_toughness (point unique tir+mêlée). Porté par BannerNob."
+    },
+    {
+      "id": "unit.suppress_target_on_shooting",
+      "source": "config/unit_rules.json",
+      "label": "suppress_target_on_shooting",
+      "section": "unit",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "suppress_target_on_shooting"
+      },
+      "controls": [],
+      "status": "IMPLÉMENTÉ",
+      "status_note": "Passe 6 chantier 06 (Primitive F) : après tir, la cible est supprimée (-1 touche) jusqu'au début de la prochaine phase de commandement du tireur. Porté par WarTrakk (Indiscriminate Detonations)."
+    },
+    {
+      "id": "unit.return_destroyed_models",
+      "source": "config/unit_rules.json",
+      "label": "return_destroyed_models",
+      "section": "unit",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "return_destroyed_models"
+      },
+      "controls": [],
+      "status": "IMPLÉMENTÉ",
+      "status_note": "Passe 6 chantier 06 (Primitive F) : 1×/partie, au début de la phase de commandement, D3 figurines détruites de l'unité sont restaurées (command_handlers._apply_return_destroyed_models). Porté par PainBoy (Grot Orderly)."
     }
   ]
 }

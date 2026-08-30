@@ -7373,6 +7373,11 @@ def squad_declare_shoot(
 
     intents: List[Dict[str, Any]] = game_state["pending_squad_shoot_intents"][attacker_squad_id]
 
+    # Primitive F (chantier 06, passe 6) — suppress_target_on_shooting (Indiscriminate Detonations) :
+    # stocker la cible prioritaire sur l unite attaquante pour l appliquer a la fin du tir.
+    attacker_unit = require_unit_by_id(game_state, str(attacker_squad_id))
+    attacker_unit["_last_shoot_target_id"] = str(priority_target_squad_id)
+
     def _target_size(target_sid: str) -> int:
         return sum(
             1 for mid in squad_models.get(target_sid, []) if mid in models_cache  # get allowed
@@ -9704,7 +9709,12 @@ def _target_highest_bodyguard_toughness(game_state: Dict[str, Any], target_sid: 
     leader/support, meme si l attaque lui est ensuite allouee). Si l unite ne contient
     que des figurines leader/support, utiliser la plus haute T de celles-ci.
     Bodyguard = figurine non-CHARACTER au sens allocation (cf. _is_character_role).
-    Leve si la cible n a aucune figurine vivante."""
+    Leve si la cible n a aucune figurine vivante.
+
+    Primitive F (chantier 06, passe 6) : `toughness_bonus_while_waaagh` — +N T pendant le
+    Waaagh! actif pour le joueur de l unite cible. BannerNob confere ce bonus a TOUTE l unite
+    via 19.04 ; la fonction l applique ici, point unique pour tir ET melee (jumeau couvert).
+    """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     alive = [m for m in squad_models.get(target_sid, []) if m in models_cache]  # get allowed
@@ -9712,7 +9722,15 @@ def _target_highest_bodyguard_toughness(game_state: Dict[str, Any], target_sid: 
         raise ValueError(f"Cible {target_sid} sans figurine vivante pour T (19.02)")
     bodyguard = [m for m in alive if not _is_character_role(models_cache[m].get("role"))]
     pool = bodyguard if bodyguard else alive
-    return max(int(models_cache[m]["T"]) for m in pool)
+    base_t = max(int(models_cache[m]["T"]) for m in pool)
+    # toughness_bonus_while_waaagh (19.04 : le bonus est dans UNIT_RULES de l unite apres fold)
+    target_unit = require_unit_by_id(game_state, str(target_sid))
+    bonus_args = _get_unit_rule_arg(target_unit, "toughness_bonus_while_waaagh", "toughness_bonus", (int,))
+    if bonus_args is not None:
+        from engine.game_state import waaagh_applies_to_unit  # cycle : cf. plus haut
+        if waaagh_applies_to_unit(game_state, target_unit):
+            return base_t + int(bonus_args)
+    return base_t
 
 
 def _build_alloc_groups(game_state: Dict[str, Any], target_sid: str) -> List[Dict[str, Any]]:

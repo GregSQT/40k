@@ -1499,11 +1499,14 @@ class ObservationBuilder:
         # nommée confère un effet technique), donc ce qui est écrit décrit ce que le moteur
         # applique — et le jeu produit est identique à celui d'avant le chantier.
         ability_obs_ids = unit_ability_obs_ids()
+        _spent_squad_ids = ctx["once_per_battle_spent_squad_ids"]
         ability_ids = _fill_id_slots(
             [
                 ability_obs_ids[rule_id]
                 for rule_id in UNIT_RULE_EFFECT_IDS
                 if unit_has_rule_effect(unit, rule_id)
+                # once_per_battle_melee_buff (chantier 06) : invisible quand déjà dépensé.
+                and not (rule_id == "once_per_battle_melee_buff" and squad_id in _spent_squad_ids)
             ],
             UNIT_ABILITY_SLOTS,
             registry=ability_obs_ids,
@@ -2030,6 +2033,12 @@ class ObservationBuilder:
             # qui porte le statut, la valeur ne sert qu'a la purge (cf. `command_handlers`).
             "suppressed_squad_ids": frozenset(
                 str(sid) for sid in game_state.get("suppressed_squads", {})  # get allowed
+            ),
+            # once_per_battle_melee_buff (chantier 06, passe 6) : le buff est DÉJÀ DÉPENSÉ pour
+            # les escouades de cet ensemble — l'obs l'efface de leurs ability_ids pour que
+            # l'agent ne perçoive pas un avantage qui n'est plus disponible.
+            "once_per_battle_spent_squad_ids": frozenset(
+                str(sid) for sid in game_state.get("finest_hour_used", set())  # get allowed
             ),
             "engaged_squads": engaged_squads,
             "moved_by_model": require_key(game_state, "moved_distance_by_model"),

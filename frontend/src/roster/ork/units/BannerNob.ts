@@ -24,10 +24,14 @@ export class BannerNob extends SwarmRangeSwarm {
   static CC_WEAPONS = getWeapons(BannerNob.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "support", displayName: "Support" }];
+  static UNIT_RULES = [
+    { ruleId: "support", displayName: "Support" },
+    { ruleId: "invul_save_override", displayName: "Waaagh! Banner (InSv)", rule_args: { value: 5 } },
+    { ruleId: "toughness_bonus_while_waaagh", displayName: "Waaagh! Banner (T+1)", rule_args: { toughness_bonus: 1 } },
+  ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { support: 2 };
+  static RULES_STATUS = { support: 2, invul_save_override: 2, toughness_bonus_while_waaagh: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = [
