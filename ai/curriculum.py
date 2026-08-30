@@ -31,6 +31,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from shared.data_validation import require_key, require_non_negative_int, require_positive_int
@@ -749,13 +750,15 @@ def copy_tensorboard_run(run_dir: str, stage_name: str) -> str:
     target = os.path.join(
         os.path.dirname(os.path.abspath(run_dir)), f"tensorboard_{stage_name}"
     )
-    target_tmp = target + ".new"
-    if os.path.exists(target_tmp):
-        shutil.rmtree(target_tmp)
-    shutil.copytree(run_dir, target_tmp)
-    if os.path.exists(target):
-        shutil.rmtree(target)
-    os.rename(target_tmp, target)
+    parent = os.path.dirname(target)
+    target_tmp = tempfile.mkdtemp(dir=parent)
+    try:
+        shutil.copytree(run_dir, target_tmp, dirs_exist_ok=True)
+        shutil.rmtree(target, ignore_errors=True)
+        os.rename(target_tmp, target)
+    except Exception:
+        shutil.rmtree(target_tmp, ignore_errors=True)
+        raise
     return target
 
 

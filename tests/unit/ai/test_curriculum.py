@@ -693,8 +693,6 @@ def test_copy_tensorboard_run_replaces_existing_target(tmp_path) -> None:
 
 def test_copy_tensorboard_run_preserves_source_on_copy_failure(tmp_path, monkeypatch) -> None:
     """Si copytree echoue, le target precedent doit rester intact."""
-    import shutil as _shutil
-
     run_dir = tmp_path / "run_0"
     run_dir.mkdir()
     (run_dir / "events.out").write_bytes(b"new")
@@ -702,9 +700,7 @@ def test_copy_tensorboard_run_preserves_source_on_copy_failure(tmp_path, monkeyp
     target_dir.mkdir()
     (target_dir / "events.out").write_bytes(b"preserved")
 
-    original_copytree = _shutil.copytree
-
-    def failing_copytree(src: str, dst: str) -> None:
+    def failing_copytree(src: str, dst: str, **kwargs: object) -> None:
         raise OSError("disk full (simulated)")
 
     import ai.curriculum as _curriculum_mod
