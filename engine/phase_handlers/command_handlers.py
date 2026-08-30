@@ -622,7 +622,7 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
 
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    squad_cache = game_state.get("squad_cache", {})
+    squad_cache = require_key(game_state, "squad_cache")
     used: set = game_state.setdefault("return_destroyed_models_used", set())
 
     for unit in require_key(game_state, "units"):

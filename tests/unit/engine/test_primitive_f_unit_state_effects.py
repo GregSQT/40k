@@ -26,7 +26,7 @@ import pytest
 
 def _rule(rule_id: str, rule_args: Optional[Dict[str, Any]] = None, **kw: Any) -> Dict[str, Any]:
     r: Dict[str, Any] = {"ruleId": rule_id, "displayName": rule_id}
-    if rule_args:
+    if rule_args is not None:
         r["rule_args"] = rule_args
     r.update(kw)
     return r
@@ -200,6 +200,71 @@ def test_invul_save_override_cumule_waaagh() -> None:
     gs = _base_state([unit], waaagh_active=True, army_faction_orks=True)
     # Waaagh! accorde 5+, override 4+ → 4+ gagne
     assert effective_invul_save(gs, unit, 7) == 4
+
+
+def test_invul_save_override_mental_fortress_librarian_19_04() -> None:
+    """Mental Fortress : la règle du Librarian se propage au bodyguard via le fold 19.04.
+
+    Scénario : bodyguard sans invul_save_override propre ; Librarian attaché en porte une (4+).
+    Vérifie compute_unit_rules_in_effect plutôt qu'un standalone déjà couvert ligne 152.
+    """
+    from engine.phase_handlers.shared_utils import compute_unit_rules_in_effect
+
+    own_rules: list = []
+    lib_rule = _rule("invul_save_override", {"value": 4})
+    attached_groups = {"lib": [lib_rule]}
+
+    # Librarian vivant → règle présente dans l'union
+    merged = compute_unit_rules_in_effect(
+        own_rules, attached_groups, native_alive=True, alive_attached_sources={"lib"}
+    )
+    rule_ids = [r["ruleId"] for r in merged]
+    assert "invul_save_override" in rule_ids
+    override = next(r for r in merged if r["ruleId"] == "invul_save_override")
+    assert override["rule_args"]["value"] == 4
+
+    # Librarian mort → règle absente (19.04 : éteinte à la mort du porteur)
+    merged_dead = compute_unit_rules_in_effect(
+        own_rules, attached_groups, native_alive=True, alive_attached_sources=set()
+    )
+    assert all(r["ruleId"] != "invul_save_override" for r in merged_dead)
+
+
+def test_invul_save_override_propagation_19_04_librarian_bodyguard() -> None:
+    """19.04 : invul_save_override du Librarian doit atteindre le bodyguard Intercessors.
+
+    Simule l'état post-fold _fold_attached_characters + _build_enhanced_unit :
+    le bodyguard n'a pas la règle en propre (_UNIT_RULES_OWN vide), elle vient
+    du groupe attaché (Librarian). effective_invul_save doit retourner 4 pour
+    un Intercessor dont la base INVUL_SAVE est 7+ (aucune InSv native).
+    Un bug dans compute_unit_rules_in_effect qui omettrait les règles attachées
+    ferait retourner 7 et échouerait le test (le fold _fold_attached_characters
+    n'est pas appelé ici — couvert par test_invul_save_override_mental_fortress_librarian_19_04).
+    """
+    import copy
+    from engine.game_state import effective_invul_save
+    from engine.phase_handlers.shared_utils import compute_unit_rules_in_effect
+
+    librarian_id = "lib1"
+    bodyguard_id = "inter1"
+
+    invul_rule = _rule("invul_save_override", {"value": 4})
+
+    own_rules: List[Dict[str, Any]] = []
+    attached_groups: Dict[str, List[Dict[str, Any]]] = {
+        librarian_id: [copy.deepcopy(invul_rule)],
+    }
+    unit_rules_in_effect = compute_unit_rules_in_effect(
+        own_rules,
+        attached_groups,
+        native_alive=True,
+        alive_attached_sources={librarian_id},
+    )
+
+    bodyguard = _unit(bodyguard_id, 1, unit_rules=unit_rules_in_effect)
+
+    gs = _base_state([bodyguard])
+    assert effective_invul_save(gs, bodyguard, 7) == 4
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -461,3 +526,24 @@ def test_once_per_battle_melee_buff_exclu_obs_si_depense() -> None:
 
     assert obs_ids[rule_id] in ids_normal, "Buff doit être visible avant dépense"
     assert obs_ids[rule_id] not in ids_spent, "Buff ne doit pas être visible après dépense"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Finding F4 — _apply_return_destroyed_models lève si squad_cache absent (T1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_return_destroyed_models_leve_si_squad_cache_absent() -> None:
+    """Finding F4 : squad_cache obligatoire — require_key doit lever, jamais silencer.
+
+    Avant le fix, game_state.get('squad_cache', {}) retournait {} et faisait croire que
+    toutes les unités n'ont pas de cache entry, les ignorant silencieusement (T1).
+    """
+    from engine.phase_handlers.command_handlers import _apply_return_destroyed_models
+
+    gs = _state_with_painboy_and_destroyed(n_alive=2, n_destroyed=3)
+    del gs["squad_cache"]  # simuler l'absence du cache
+
+    from shared.data_validation import ConfigurationError
+
+    with pytest.raises(ConfigurationError):
+        _apply_return_destroyed_models(gs, 1)

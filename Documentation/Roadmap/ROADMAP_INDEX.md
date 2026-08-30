@@ -125,6 +125,9 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | moteur+ai | ✅ fix reward exhortation + intent cible morte (2026-08-30) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
 | moteur+ai | ✅ re-sélection cible mêlée quand l'Exhortation tue la cible désignée — `pending_fight_target_select` (jumeau de la sélection d'arme CC), overrun 12.06, 13 tests (2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
 | moteur | ✅ Primitive F (passe 6/6) — unit_state_effects (invul_save_override, toughness_bonus_while_waaagh, suppress_target_on_shooting, return_destroyed_models, once_per_battle_melee_buff obs, move_after_shooting D6, 17 tests, 2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
+| moteur | ✅ fix-librarian-mental-fortress — invul_save_override Librarian (Mental Fortress) : règle absente du Librarian Terminator + Psychic Hood, corrigés dans Librarian.ts (2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
+| moteur+training | ✅ fix-review-findings-suppress-invul-t1 — 4 findings review : suppress PvP, invul obs, T1 squad_cache corrigés (2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
+| moteur | ✅ test propagation 19.04 invul_save_override bodyguard — trou couvert : propagation leader→bodyguard via _ATTACHED_RULE_GROUPS + compute_unit_rules_in_effect (2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
 
 ---
 

@@ -273,6 +273,39 @@ def test_enemy_model_types_are_exposed():
     assert any(profile[4] == 2.0 and role is None for profile, role in types)
 
 
+def test_invul_save_override_applied_in_model_types():
+    """Finding F2 : invul_save_override doit être visible dans les types de figurines.
+
+    Sans le fix, _encode_entity_model_types n'appliquait que waaagh_invul et laissait
+    invul_save_override (19.04 : BannerNob/Librarian) invisible dans le tenseur TYPES.
+    L'agent voyait invul=7 (aucune InSv native) alors que l'unité bénéficie de 5+.
+    """
+    eng = _make_engine([
+        _unit_cfg(1, 1, [(20, 20)]),
+        _unit_cfg(2, 2, [(60, 20)], invul=7),  # pas d'InSv native
+    ])
+    gs = eng.game_state
+    unit = gs["unit_by_id"]["2"]
+    # Simule la présence du BannerNob : InSv 5+ conférée à toute l'unité (19.04).
+    unit["UNIT_RULES"].append({
+        "ruleId": "invul_save_override",
+        "displayName": "Waaagh! Banner",
+        "rule_args": {"value": 5},
+    })
+    obs = eng.obs_builder.build_squad_observation(gs, "1")
+    present = MODEL_TYPE_BIN_FIELDS.index("present")
+    invul_col = 3  # cont layout : (hp_max, toughness, save, invul, count)
+    filled = [
+        obs["enemies_types_cont"][0][t]
+        for t in range(ObservationBuilder.K_MODEL_TYPES)
+        if float(obs["enemies_types_bin"][0][t][present]) == 1.0
+    ]
+    assert len(filled) == 1, "escouade à 1 seul type"
+    assert float(filled[0][invul_col]) == 5.0, (
+        f"invul attendu 5.0 (override), obtenu {filled[0][invul_col]}"
+    )
+
+
 def test_ally_overflow_is_logged_never_silent():
     """Plus d'escouades alliées que de slots -> le dépassement est TRACÉ (§11)."""
     n = ObservationBuilder.K_ALLY_SLOTS + 1
