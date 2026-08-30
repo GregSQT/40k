@@ -303,7 +303,8 @@ export const useGameConfig = (options?: {
           isTestMode || mode === "pve"
             ? (urlParams.get("terrain") ?? defaultTerrain)
             : defaultTerrain;
-        const terrainSuffix = terrainParam === "mc1" ? "_mc1" : "";
+        const terrainSuffix =
+          terrainParam === "mc1" ? "_mc1" : terrainParam === "pfm2" ? "_pfm2" : "";
         const scenarioName =
           mode === "pve_test"
             ? `scenario_pve_test${terrainSuffix}.json`
