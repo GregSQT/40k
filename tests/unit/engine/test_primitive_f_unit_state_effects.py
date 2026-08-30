@@ -115,13 +115,6 @@ def _base_state(
         "suppressed_squads": {},
         "finest_hour_used": set(),
         "squad_cache": dict(squad_cache or {}),
-        # Plateau : exigé depuis que les figurines rendues sont POSÉES sur des cases légales
-        # (REVIVED) au lieu d'être empilées sur le template.
-        "board_cols": 24,
-        "board_rows": 24,
-        "wall_hexes": set(),
-        "terrain_areas": [],
-        "objectives": [],
         "config": {
             "game_rules": {
                 "engagement_zone": 2,
@@ -421,6 +414,13 @@ def _state_with_painboy_and_destroyed(n_alive: int = 3, n_destroyed: int = 2) ->
     """Game state : PainBoy attaché à un squad avec des figurines détruites."""
     unit = _unit("pain", 1, unit_rules=[_rule("return_destroyed_models")])
     gs = _base_state([unit])
+    gs.update({
+        "board_cols": 24,
+        "board_rows": 24,
+        "wall_hexes": set(),
+        "terrain_areas": [],
+        "objectives": [],
+    })
 
     # Remplacer les figurines par n_alive figurines
     mids = [f"pain#{i}" for i in range(n_alive)]
