@@ -622,7 +622,6 @@ body {
   min-width: 300px;
   color: #e5fbe9;
   user-select: none;
-  overflow: visible;
 }
 
 .test-start-modal__header {
