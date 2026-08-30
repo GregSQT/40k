@@ -47,7 +47,7 @@ from .shared_utils import (
 # PERFORMANCE: Target pool caching (30-40% speedup)
 # ============================================================================
 # Cache valid target pools to avoid repeated distance/LoS calculations
-# Cache key: (pid, id(game_state), episode_num, turn, unit_id, col, row, advance_status, adjacent_status, player)
+# Cache key: (pid, instance_id, episode_num, turn, unit_id, col, row, advance_status, adjacent_status, player, _move_ver, wall_hexes_tuple, precheck_tag)
 _target_pool_cache = {}  # per-process, per-env, per-episode; invalidates when unit/weapon changes
 _move_los_preview_cache = {}
 _cache_size_limit = 100  # Prevent memory leak in long episodes
@@ -3040,24 +3040,10 @@ def shooting_build_valid_target_pool(
             _norm.append((_wc, _wr))
         game_state["_wall_hexes_tuple_cache"] = tuple(sorted(_norm))
     wall_hexes_tuple = game_state["_wall_hexes_tuple_cache"]
-    # enemy_pos_hash: cache per player, invalidate when any unit moves (_unit_move_version)
-    # Safe on unit death: cache-hit path re-filters with is_unit_alive()
+    # §04.02 : le pool capture l'état d'engagement — invalider dès que TOUTE unité bouge
+    # (allié ou ennemi). enemy_pos_hash ne trackait que les ennemis : un allié qui pile-in
+    # adjacent à une cible après le premier build laissait la cible dans le pool stale.
     _move_ver = game_state["_unit_move_version"]
-    _eph_store = game_state.setdefault("_enemy_pos_hash_v", {})
-    _eph_entry = _eph_store.get(unit_player_int)
-    if _eph_entry is None or _eph_entry[0] != _move_ver:
-        units_cache = require_key(game_state, "units_cache")
-        _eph = tuple(
-            sorted(
-                (tid, int(e["col"]), int(e["row"]))
-                for tid, e in units_cache.items()
-                if int(e.get("player", -1)) != unit_player_int and is_unit_alive(tid, game_state)
-            )
-        )
-        _eph_store[unit_player_int] = (_move_ver, _eph)
-        enemy_pos_hash = _eph
-    else:
-        enemy_pos_hash = _eph_entry[1]
     precheck_cache_tag = 1 if precomputed_enemy_precheck is not None else 0
     cache_key = (
         os.getpid(),
@@ -3070,7 +3056,7 @@ def shooting_build_valid_target_pool(
         advance_status,
         adjacent_status,
         unit_player_int,
-        enemy_pos_hash,
+        _move_ver,
         wall_hexes_tuple,
         precheck_cache_tag,
     )
