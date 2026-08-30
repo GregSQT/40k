@@ -31,10 +31,18 @@ export class WeirdBoy extends SwarmRangeSwarm {
       displayName: "Deadly Demise D3",
       rule_args: { value: "D3" },
     },
+    // Waaagh! Energy : « For every 5 models in this unit, add 1 to the S and D of this
+    // model's 'Eadbanger weapon. While this unit contains 10 or more models, that weapon
+    // has [HAZARDOUS]. » Portée par CE MODÈLE uniquement.
+    {
+      ruleId: "weapon_profile_scaling_by_model_count",
+      displayName: "Waaagh! Energy",
+      rule_args: { weapon_code: "eadbanger", per_count: 5, str_bonus: 1, dmg_bonus: 1, hazardous_threshold: 10 },
+    },
   ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { leader: 2, deadly_demise: 2 };
+  static RULES_STATUS = { leader: 2, deadly_demise: 2, weapon_profile_scaling_by_model_count: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = ["BOYZ"];

@@ -3678,6 +3678,102 @@
       "controls": [],
       "status": "NON_VERIFIABLE",
       "status_note": "Marqueur de rôle."
+    },
+    {
+      "id": "PROJ.1.5.grant_weapon_rule_melee",
+      "section": "1.5",
+      "label": "Breakin' Heads — SUSTAINED HITS 1 sur toutes les armes de mêlée (Primitive B)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "grant_weapon_rule_melee"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "Implémenté dans build_weapon_attack_profile (is_melee=True). Testé dans test_primitive_b_granted_weapon_effects."
+    },
+    {
+      "id": "PROJ.1.5.grant_weapon_rule_melee_after_charge",
+      "section": "1.5",
+      "label": "Vanguard Assault — LETHAL HITS en mêlée après charge (Primitive B)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "grant_weapon_rule_melee_after_charge"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "Implémenté dans build_weapon_attack_profile ; conditionnel sur units_charged. Testé dans test_primitive_b_granted_weapon_effects."
+    },
+    {
+      "id": "PROJ.1.5.grant_weapon_rule_vs_designated_target",
+      "section": "1.5",
+      "label": "Overlapping Detonations — BLAST (dés extra/5 figs) vs non-MONSTER/VEHICLE (Primitive B)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "grant_weapon_rule_vs_designated_target"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "Implémenté dans _manual_roll_intent (Bloc B). Testé dans test_primitive_b_granted_weapon_effects."
+    },
+    {
+      "id": "PROJ.1.5.weapon_attacks_bonus_vs_keyword",
+      "section": "1.5",
+      "label": "Dakkablitz — +N A sur une arme spécifique vs keywords exclus (Primitive B)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "weapon_attacks_bonus_vs_keyword"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "Implémenté dans _manual_roll_intent (Bloc B). Testé dans test_primitive_b_granted_weapon_effects."
+    },
+    {
+      "id": "PROJ.1.5.weapon_attacks_bonus_vs_designated_target",
+      "section": "1.5",
+      "label": "Hail of Bolts — +N A sur une arme spécifique vs cible désignée (Primitive B)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "weapon_attacks_bonus_vs_designated_target"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "Implémenté dans _manual_roll_intent (Bloc B). Testé dans test_primitive_b_granted_weapon_effects."
+    },
+    {
+      "id": "PROJ.1.5.weapon_profile_scaling_by_model_count",
+      "section": "1.5",
+      "label": "Waaagh! Energy — +S +D par tranche de N figurines survivantes (Primitive B)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "weapon_profile_scaling_by_model_count"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "Implémenté dans _manual_roll_intent (Blocs A et B). HAZARDOUS conditionnel dans _count_selected_hazardous_weapons. Testé dans test_primitive_b_granted_weapon_effects."
+    },
+    {
+      "id": "PROJ.1.5.melee_attacks_bonus_while_waaagh",
+      "section": "1.5",
+      "label": "Da Biggest and da Best — +N A sur ce modèle tant que Waaagh! actif (Primitive B)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "melee_attacks_bonus_while_waaagh"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "Implémenté dans _manual_roll_fight_intent ; lu sur UNIT_RULES du modèle (pas de l'unité fusionnée). Testé dans test_primitive_b_granted_weapon_effects."
+    },
+    {
+      "id": "PROJ.1.5.once_per_battle_melee_buff",
+      "section": "1.5",
+      "label": "Finest Hour — +N A + DEVASTATING WOUNDS jusqu'à fin de phase, une fois par partie (Primitive B)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "once_per_battle_melee_buff"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "Implémenté dans _manual_roll_fight_intent (flag finest_hour_used) et build_weapon_attack_profile (finest_hour_active). Testé dans test_primitive_b_granted_weapon_effects."
     }
   ]
 }

@@ -24,10 +24,15 @@ export class VanguardVeteranSquadJumpPack extends TroopRangeSwarm {
   static CC_WEAPONS = getWeapons(VanguardVeteranSquadJumpPack.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "deep_strike", displayName: "Deep Strike" }];
+  static UNIT_RULES = [
+    { ruleId: "deep_strike", displayName: "Deep Strike" },
+    // Vanguard Assault : « In a turn in which this unit made a charge move, this unit's
+    // melee weapons have [LETHAL HITS]. »
+    { ruleId: "grant_weapon_rule_melee_after_charge", displayName: "Vanguard Assault" },
+  ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { deep_strike: 2 };
+  static RULES_STATUS = { deep_strike: 2, grant_weapon_rule_melee_after_charge: 2 };
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [

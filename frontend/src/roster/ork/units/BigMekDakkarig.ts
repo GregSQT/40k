@@ -23,6 +23,20 @@ export class BigMekDakkarig extends SwarmRangeSwarm {
   static CC_WEAPON_CODES = ["stompy_feet"];
   static CC_WEAPONS = getWeapons(BigMekDakkarig.CC_WEAPON_CODES);
 
+  // UNIT RULES
+  static UNIT_RULES = [
+    // Dakkablitz : « In your Shooting phase, while making attacks with this unit, if its
+    // blitzcannon targeted a non-MONSTER/VEHICLE unit, that weapon has +6 A. »
+    {
+      ruleId: "weapon_attacks_bonus_vs_keyword",
+      displayName: "Dakkablitz",
+      rule_args: { weapon_code: "blitzcannon", attacks_bonus: 6, excluded_keywords: ["MONSTER", "VEHICLE"] },
+    },
+  ];
+
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = { weapon_attacks_bonus_vs_keyword: 2 };
+
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "VEHICLE" },

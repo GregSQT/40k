@@ -29,10 +29,12 @@ export class Bigboss extends SwarmRangeSwarm {
     // Somethin' to Prove : « This unit has +1 to charge rolls. » En vigueur sur toute
     // l'escouade menée (19.04), et sur le jet 2D6 lui-même — pas sur une attaque.
     { ruleId: "charge_roll_bonus", displayName: "Somethin' to Prove" },
+    // Breakin' Heads : « This unit's melee weapons have [SUSTAINED HITS 1]. »
+    { ruleId: "grant_weapon_rule_melee", displayName: "Breakin' Heads" },
   ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { leader: 2, charge_roll_bonus: 2 };
+  static RULES_STATUS = { leader: 2, charge_roll_bonus: 2, grant_weapon_rule_melee: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = ["BOYZ", "BREAKA BOYZ", "NOBZ"];

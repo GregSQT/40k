@@ -23,6 +23,21 @@ export class Intercessor extends TroopRangeSwarm {
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(Intercessor.CC_WEAPON_CODES);
 
+  // UNIT RULES
+  static UNIT_RULES = [
+    // Hail of Bolts : « ...when this unit is selected to shoot you can select one enemy unit
+    // visible to this unit. While making attacks, this unit's bolt rifles that targeted that
+    // selected unit have +2 A. » Dans ce moteur la cible de l'intent est la cible désignée.
+    {
+      ruleId: "weapon_attacks_bonus_vs_designated_target",
+      displayName: "Hail of Bolts",
+      rule_args: { weapon_code: "bolt_rifle", attacks_bonus: 2 },
+    },
+  ];
+
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = { weapon_attacks_bonus_vs_designated_target: 2 };
+
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "INFANTRY" },

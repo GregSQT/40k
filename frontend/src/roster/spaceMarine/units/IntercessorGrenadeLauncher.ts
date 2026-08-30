@@ -31,7 +31,16 @@ export class IntercessorGrenadeLauncher extends TroopRangeSwarm {
   static CC_WEAPONS = getWeapons(IntercessorGrenadeLauncher.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "special_weapon", displayName: "Special Weapon" }];
+  static UNIT_RULES = [
+    { ruleId: "special_weapon", displayName: "Special Weapon" },
+    // Hail of Bolts : portee pour l'union 19.04 ; weapon_code "bolt_rifle" ne matchera pas
+    // le grenade_launcher — aucun bonus n'est applique a ses intents.
+    {
+      ruleId: "weapon_attacks_bonus_vs_designated_target",
+      displayName: "Hail of Bolts",
+      rule_args: { weapon_code: "bolt_rifle", attacks_bonus: 2 },
+    },
+  ];
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [

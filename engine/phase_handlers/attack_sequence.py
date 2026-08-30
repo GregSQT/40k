@@ -43,6 +43,32 @@ ANTI_RULE_IDS = ("ANTI_INFANTRY", "ANTI_VEHICLE", "ANTI_FLY", "ANTI_PSYKER", "AN
 assert MIN_ANTI_THRESHOLD == NATURAL_FAIL_ROLL + 1
 
 
+# Primitive B (chantier 06) — helpers sans import circulaire.
+# attack_sequence n importe jamais shared_utils : ces fonctions sont importees par les deux
+# rollers (fight_handlers, shared_utils) qui, eux, importent deja depuis ce module.
+
+def _unit_has_primitive_b_rule(unit: Optional[Dict[str, Any]], rule_id: str) -> bool:
+    """Vrai si l unite (ou un dict mock {"UNIT_RULES": [...]}) porte rule_id dans UNIT_RULES."""
+    if unit is None:
+        return False
+    for entry in unit.get("UNIT_RULES", []):  # get allowed
+        if isinstance(entry, dict) and entry.get("ruleId") == rule_id:  # get allowed
+            return True
+    return False
+
+
+def _unit_get_primitive_b_rule_args(
+    unit: Optional[Dict[str, Any]], rule_id: str
+) -> Optional[Dict[str, Any]]:
+    """rule_args de la premiere entree matching rule_id dans UNIT_RULES, ou None si absent."""
+    if unit is None:
+        return None
+    for entry in unit.get("UNIT_RULES", []):  # get allowed
+        if isinstance(entry, dict) and entry.get("ruleId") == rule_id:  # get allowed
+            return entry.get("rule_args")  # None si absent — les appelants guettent is not None
+    return None
+
+
 def anti_threshold_of(weapon: Dict[str, Any], rule_id: str) -> int:
     """Seuil Y+ DECLARE par l instance `rule_id` de [ANTI-X Y+] 24.03, valide en DOMAINE.
 
@@ -184,9 +210,22 @@ def _anti_crit_wound_threshold(
 
 
 def build_weapon_attack_profile(
-    weapon: Dict[str, Any], target_unit: Optional[Dict[str, Any]],
+    weapon: Dict[str, Any],
+    target_unit: Optional[Dict[str, Any]],
+    attacker_unit: Optional[Dict[str, Any]] = None,
+    game_state: Optional[Dict[str, Any]] = None,
+    is_melee: bool = False,
+    finest_hour_active: bool = False,
 ) -> WeaponAttackProfile:
-    """Profil de regles d arme pour un intent (arme fixee, unite cible fixee)."""
+    """Profil de regles d arme pour un intent (arme fixee, unite cible fixee).
+
+    Parametres Primitive B (chantier 06) :
+      attacker_unit   : unite FUSIONNEE de l attaquant (UNIT_RULES = union 19.04) ; None au tir gym.
+      game_state      : etat courant (pour units_charged) ; None au tir gym.
+      is_melee        : True au corps a corps, False au tir.
+      finest_hour_active : True quand le flag once_per_battle_melee_buff est actif pour CET intent
+                           (calcule ET pose dans fight_handlers, pas ici).
+    """
     anti = _anti_crit_wound_threshold(weapon, unit_keywords_upper(target_unit))
     crit_wound_on = (
         NATURAL_CRITICAL_WOUND_ROLL if anti is None
@@ -198,12 +237,30 @@ def build_weapon_attack_profile(
         if value is None:
             raise ValueError(f"[SUSTAINED HITS] sans parametre X sur l arme {weapon!r}")
         sustained = int(value)
+    lethal = weapon_has_rule(weapon, "LETHAL_HITS")
+    devastating = weapon_has_rule(weapon, "DEVASTATING_WOUNDS")
+    # Primitive B (chantier 06) : regles accordees par la capacite d unite (melee seulement).
+    if is_melee and attacker_unit is not None:
+        # grant_weapon_rule_melee : [SUSTAINED HITS 1] en melee (Breakin' Heads, Bigboss)
+        if _unit_has_primitive_b_rule(attacker_unit, "grant_weapon_rule_melee"):
+            sustained = max(sustained, 1)
+        # grant_weapon_rule_melee_after_charge : [LETHAL HITS] au tour ou l unite a charge
+        if _unit_has_primitive_b_rule(attacker_unit, "grant_weapon_rule_melee_after_charge"):
+            squad_id = str(require_key(attacker_unit, "id"))
+            if game_state is not None and squad_id in game_state.get("units_charged", set()):  # get allowed
+                lethal = True
+    # once_per_battle_melee_buff : [DEVASTATING WOUNDS] (Finest Hour, CaptainRelicShield).
+    # Le bool est calcule ET le flag finest_hour_used est pose dans fight_handlers ; ce site
+    # ne lit que le bool pour eviter une double pose du flag (une pose par intent si plusieurs
+    # armes). L absence de lecture directe du flag ici est intentionnelle.
+    if finest_hour_active and is_melee:
+        devastating = True
     return WeaponAttackProfile(
         crit_hit_on=CRITICAL_HIT_ROLL,
         crit_wound_on=crit_wound_on,
         sustained_hits=sustained,
-        lethal_hits=weapon_has_rule(weapon, "LETHAL_HITS"),
-        devastating=weapon_has_rule(weapon, "DEVASTATING_WOUNDS"),
+        lethal_hits=lethal,
+        devastating=devastating,
         twin_linked=weapon_has_rule(weapon, "TWIN_LINKED"),
         torrent=weapon_has_rule(weapon, "TORRENT"),
         anti_keyword=None if anti is None else anti[1],

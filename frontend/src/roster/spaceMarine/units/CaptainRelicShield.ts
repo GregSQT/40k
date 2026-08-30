@@ -24,10 +24,20 @@ export class CaptainRelicShield extends LeaderEliteMeleeElite {
   static CC_WEAPONS = getWeapons(CaptainRelicShield.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "leader", displayName: "Leader" }];
+  static UNIT_RULES = [
+    { ruleId: "leader", displayName: "Leader" },
+    // Finest Hour (Once per battle) : « In the Fight phase, when this unit is selected to
+    // fight, this model's melee weapons have the following until the end of the phase:
+    // +3 A; [DEVASTATING WOUNDS]. »
+    {
+      ruleId: "once_per_battle_melee_buff",
+      displayName: "Finest Hour",
+      rule_args: { attacks_bonus: 3 },
+    },
+  ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { leader: 2 };
+  static RULES_STATUS = { leader: 2, once_per_battle_melee_buff: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = [

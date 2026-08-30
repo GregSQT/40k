@@ -23,6 +23,21 @@ export class EradicatorHeavyBolter extends EliteRangeTroop {
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(EradicatorHeavyBolter.CC_WEAPON_CODES);
 
+  // UNIT RULES
+  static UNIT_RULES = [
+    // Overlapping Detonations : « ...when this unit is selected to shoot you can select one
+    // non-MONSTER/VEHICLE enemy unit visible to it. While making attacks, this unit's heavy
+    // bolters that targeted that selected unit have [BLAST 1]. »
+    {
+      ruleId: "grant_weapon_rule_vs_designated_target",
+      displayName: "Overlapping Detonations",
+      rule_args: { weapon_code: "heavy_bolter" },
+    },
+  ];
+
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = { grant_weapon_rule_vs_designated_target: 2 };
+
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "INFANTRY" },
