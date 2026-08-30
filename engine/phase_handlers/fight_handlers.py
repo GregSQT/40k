@@ -852,6 +852,34 @@ def _ai_select_pile_in_destination(
     return best if best is not None else pile_dests[0]
 
 
+def _get_max_allied_melee_by_target(
+    game_state: Dict[str, Any], unit_id_str: str, target_ids: List[str]
+) -> Dict[str, float]:
+    """Per-target max melee damage from OTHER alive friendly units actually engaged with each target.
+
+    Guards P1: filters to engaged-only so a non-adjacent ally cannot suppress P1 for a target
+    it cannot reach this turn.
+    """
+    unit_by_id_map = require_key(game_state, "unit_by_id")
+    units_cache = require_key(game_state, "units_cache")
+    excluder_unit = require_key(unit_by_id_map, unit_id_str)
+    result: Dict[str, float] = {tid: 0.0 for tid in target_ids}
+    for fuid, fentry in entries_on_battlefield(units_cache):
+        if fuid == unit_id_str:
+            continue
+        if int(require_key(fentry, "player")) != int(excluder_unit["player"]):
+            continue
+        if fuid not in unit_by_id_map:
+            continue
+        f_dmg = get_max_melee_damage(unit_by_id_map[fuid])
+        if f_dmg <= 0.0:
+            continue
+        for enemy_id in _fight_units_engaged_with(game_state, unit_by_id_map[fuid]):
+            if enemy_id in result:
+                result[enemy_id] = max(result[enemy_id], f_dmg)
+    return result
+
+
 def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targets: List[str]) -> str:
     """
     AI target selection for fight phase using RewardMapper system.
@@ -904,27 +932,8 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
         resolved.append((tid, t))
     all_targets = [t for _tid, t in resolved]
 
-    # Per-target max melee damage from OTHER alive friendly units actually engaged with that target.
-    # Guards P1: don't over-reward fighting a target already covered by an adjacent friendly.
-    # Raw NB×DMG proxy (conservative overestimate). Filtered to engaged-only so a non-adjacent
-    # ally at 20" cannot suppress P1 for a target it cannot reach this turn.
-    units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(unit_id)
-    unit_by_id_map = require_key(game_state, "unit_by_id")
-    target_max_melee: Dict[str, float] = {tid: 0.0 for tid, _ in resolved}
-    for fuid, fentry in entries_on_battlefield(units_cache):
-        if fuid == unit_id_str:
-            continue
-        if int(require_key(fentry, "player")) != int(unit["player"]):
-            continue
-        if fuid not in unit_by_id_map:
-            continue
-        f_dmg = get_max_melee_damage(unit_by_id_map[fuid])
-        if f_dmg <= 0.0:
-            continue
-        for enemy_id in _fight_units_engaged_with(game_state, unit_by_id_map[fuid]):
-            if enemy_id in target_max_melee:
-                target_max_melee[enemy_id] = max(target_max_melee[enemy_id], f_dmg)
+    target_max_melee = _get_max_allied_melee_by_target(game_state, unit_id_str, [tid for tid, _ in resolved])
 
     # Fight phase uses same priority logic as shooting — RewardMapper handles both.
     # `max` retient le PREMIER maximum : même sémantique de départage que l'ancienne

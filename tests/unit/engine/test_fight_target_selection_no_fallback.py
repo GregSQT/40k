@@ -22,7 +22,7 @@ from typing import Any, Dict, List
 import pytest
 
 from ai.reward_mapper import RewardMapper
-from engine.phase_handlers.fight_handlers import _ai_select_fight_target
+from engine.phase_handlers.fight_handlers import _ai_select_fight_target, _get_max_allied_melee_by_target
 from shared.data_validation import ConfigurationError
 
 # La clé de l'agent combattant est résolue par le registry en mode single-agent
@@ -215,7 +215,35 @@ def test_p1_can_melee_charge_target_is_true(monkeypatch):
     gs = _game_state(reward_configs={_AGENT_KEY: {}})
     _ai_select_fight_target(gs, "1", ["2"])
 
-    assert captured, "get_shooting_priority_reward n'a pas été appelé"
-    assert all(c is True for c in captured), (
+    assert captured == [True], (
         f"can_melee_charge_target devrait être True (P1 accessible), reçu : {captured}"
     )
+
+
+def test_get_max_allied_melee_by_target_engaged_only(monkeypatch):
+    """_get_max_allied_melee_by_target : seuls les alliés engagés avec une cible contribuent.
+
+    Ally "10" engagé avec T1 ("2") mais pas T2 ("3") → result["2"]=10.0, result["3"]=0.0.
+    Pas de monkeypatch sur RewardMapper : teste le helper directement.
+    """
+    import engine.phase_handlers.fight_handlers as fh
+
+    monkeypatch.setattr(fh, "get_max_melee_damage", lambda u: 10.0 if u.get("id") == "10" else 0.0)
+    monkeypatch.setattr(fh, "_fight_units_engaged_with", lambda gs, u: ["2"] if u.get("id") == "10" else [])
+
+    gs = {
+        "unit_by_id": {
+            "1": {"id": "1", "unitType": "Intercessor", "player": 1},
+            "2": {"id": "2", "unitType": "Intercessor", "player": 2},
+            "3": {"id": "3", "unitType": "Intercessor", "player": 2},
+            "10": {"id": "10", "unitType": "Intercessor", "player": 1, "CC_WEAPONS": []},
+        },
+        "units_cache": {
+            "10": {"col": 0, "row": 0, "player": 1, "HP_CUR": 5},
+            "2": {"col": 1, "row": 0, "player": 2, "HP_CUR": 5},
+            "3": {"col": 10, "row": 0, "player": 2, "HP_CUR": 5},
+        },
+    }
+    result = _get_max_allied_melee_by_target(gs, "1", ["2", "3"])
+
+    assert result == {"2": 10.0, "3": 0.0}, f"résultat inattendu : {result}"
