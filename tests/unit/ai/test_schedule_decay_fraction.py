@@ -259,7 +259,7 @@ def _resolved_cb(callback_params: dict, key: str):
 # modèle est mécaniquement le dernier point évalué (`x1` depuis le 2026-08-11 : 5 points pour une
 # fenêtre de 5). Dans les deux cas la promesse était vide ; c'est le sens du `false`.
 PROMISES_BEST_MODEL = {
-    "x1": False, "x1_long": True, "x1_selfplay": True, "x1_debug": False,
+    "x1": False, "x1_long": True, "x1_debug": False,
     "x5_new": False, "x5_long": True, "x5_debug": False,
 }
 
@@ -490,9 +490,9 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     assert long_cb["bot_eval_final"] == LONG_PROFILE_BOT_EVAL_FINAL[long_name]
     assert ref_cb["bot_eval_final"] == REFERENCE_BOT_EVAL_FINAL[ref_name]
     # Corollaire OBLIGATOIRE de la ligne précédente : le timeout porte sur un TASK, et un task
-    # joue `bot_eval_final / nb_scenarios` épisodes en séquence. ×6 sur `bot_eval_final` = ×6 sur
-    # la durée d'un task (150 épisodes au lieu de 25 sur les 4 scénarios du holdout). Laisser
-    # 3600 s ne laisserait que 24 s/épisode contre les 17 s/ép. mesurées sur parties dégénérées
+    # joue `bot_eval_final / nb_scenarios` épisodes en séquence. ×3 sur `bot_eval_final` = ×3 sur
+    # la durée d'un task (75 épisodes au lieu de 25 sur les 4 scénarios du holdout). Laisser
+    # 3600 s ne laisserait que 48 s/épisode contre les 17 s/ép. mesurées sur parties dégénérées
     # (V11 §0.14) — et un seul task qui déborde force-termine tout le pool, donc perd la mesure
     # publiée après un run mesuré à 5 h 54 (x1_long, 50 000 épisodes, 2026-08-18 ; le « ~5 h 30 »
     # qui figurait ici sortait du régime `0.1 s/ep` périmé). Le détail est dans
