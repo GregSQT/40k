@@ -47,7 +47,7 @@ from .shared_utils import (
 # PERFORMANCE: Target pool caching (30-40% speedup)
 # ============================================================================
 # Cache valid target pools to avoid repeated distance/LoS calculations
-# Cache key: (pid, id(game_state), episode_num, turn, unit_id, col, row, advance_status, adjacent_status, player)
+# Cache key: (pid, instance_id, episode_num, turn, unit_id, col, row, advance_status, adjacent_status, player, _move_ver, wall_hexes_tuple, precheck_tag)
 _target_pool_cache = {}  # per-process, per-env, per-episode; invalidates when unit/weapon changes
 _move_los_preview_cache = {}
 _cache_size_limit = 100  # Prevent memory leak in long episodes

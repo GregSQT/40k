@@ -118,9 +118,12 @@ class TestEngagedTargetExcludedFromPool:
         - Tireur 102 (p2) en (2, 5), arme RNG=24.
         - Cible 1 (p1) en (8, 5) — 6 hexes du tireur, hors EZ des deux alliés.
         - Allié 103 (p2) d'abord en (15, 5) — loin de la cible (hors EZ).
-        Étape 1 : build pool → cible 1 doit être dans le pool.
+        Étape 1 : build pool → cible 1 doit être dans le pool (cache populé).
         Étape 2 : « mouvement » allié 103 → (9, 5) — adjacent à la cible (dans EZ=1).
-                  bump _unit_move_version, purger _EZ_PAIR_CACHE et _target_pool_cache.
+                  bump _unit_move_version, purger _EZ_PAIR_CACHE.
+                  NE PAS vider _target_pool_cache : c'est le cœur du test —
+                  l'ancien code (enemy_pos_hash) génère la même clé → HIT stale,
+                  le fix (_move_ver) génère une clé différente → MISS → rebuild frais.
         Étape 3 : rebuild pool → cible 1 DOIT être absente (§04.02 : cible engagée).
         """
         shooter_id = "102"
