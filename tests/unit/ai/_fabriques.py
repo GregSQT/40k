@@ -206,6 +206,8 @@ def analyzer_config(**overrides: Any) -> AnalyzerConfig:
         # 07.02 — nombre de tours max ; 0 = non disponible (valeur neutre pour les tests
         # qui ne testent pas la durée de la partie).
         "max_turns": 0,
+        # Comportement 10e par défaut ; 0 = pas de cap.
+        "bonus_malus_cap": 0,
     }
     unknown = set(overrides) - set(fields)
     if unknown:

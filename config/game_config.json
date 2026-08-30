@@ -42,7 +42,9 @@
       "troop": 1.5,
       "elite": 2.0
     },
-    "max_base_size_hex": 35
+    "max_base_size_hex": 35,
+    "bonus_malus_cap": 0,
+    "bonus_malus_cap_detail": "Cap sur le total des modificateurs d'un jet de touche ou de blessure. 0 = pas de cap (comportement 10e edition). N > 0 : clamp(bonus_total - malus_total, -N, N) avant ajustement du seuil de touche ; clamp(bonus_total, 0, N) avant ajustement du seuil de blessure."
   },
   "move": {
     "can_move_through_enemy_engagement_zone": true,

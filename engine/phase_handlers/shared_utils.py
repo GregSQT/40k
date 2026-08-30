@@ -10313,9 +10313,14 @@ def _manual_roll_intent(
     wth = wound_threshold(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
     target_unit = require_unit_by_id(game_state, str(target_sid))
     # Oath of Moment (chantier 03) : MEME helper que la melee, plancher compris.
+    _base_wth_shoot = wth
     _is_oath_target, _oath_wound_bonus, wth = resolve_oath_effects(
         game_state, attacker_unit, target_sid, wth
     )
+    if _oath_wound_bonus:
+        _cap_wound = _bonus_malus_cap(game_state)
+        if _cap_wound and _oath_wound_bonus > _cap_wound:
+            wth = max(2, _base_wth_shoot - _cap_wound)
     first_alive = models_cache[alive0[0]]
     display_wth = wth
     # Seuil affiche + Waaagh! de la CIBLE : helper partage avec la melee. Le +1 F / +1 A, lui,
@@ -12027,6 +12032,7 @@ def _select_fight_weapon_indices_for_fig(
     melee_bonus: int = 0,
     hit_bonus: int = 0,
     hit_malus: int = 0,
+    cap: int = 0,
 ) -> List[int]:
     """Armes de melee SELECTIONNEES par une figurine (Select Weapons step, 04.01).
 
@@ -12049,7 +12055,7 @@ def _select_fight_weapon_indices_for_fig(
     main = _auto_select_cc_weapon_for_fig(
         attacker, target_t, target_sv, target_invul, target_unit,
         excluded_indices=frozenset(extra),
-        melee_bonus=melee_bonus, hit_bonus=hit_bonus, hit_malus=hit_malus,
+        melee_bonus=melee_bonus, hit_bonus=hit_bonus, hit_malus=hit_malus, cap=cap,
     )
     # « if possible » : une figurine qui n a QUE des armes EXTRA ATTACKS n en ajoute pas d autre.
     return ([main] if main is not None else []) + extra
@@ -12063,6 +12069,7 @@ def _auto_select_cc_weapon_for_fig(
     melee_bonus: int = 0,
     hit_bonus: int = 0,
     hit_malus: int = 0,
+    cap: int = 0,
 ) -> Optional[int]:
     """Choisit l arme de melee maximisant l esperance de degats, REGLES D ARME COMPRISES.
 
@@ -12113,7 +12120,7 @@ def _auto_select_cc_weapon_for_fig(
         profile = build_weapon_attack_profile(w, target_unit)
         score = n_attacks * expected_damage_per_attack(
             profile,
-            hit_target=apply_hit_roll_modifiers(ws, hit_bonus, hit_malus),
+            hit_target=apply_hit_roll_modifiers(ws, hit_bonus, hit_malus, cap=cap),
             wound_target=wound_threshold(s, target_t),
             save_threshold_value=save_threshold(target_sv, target_invul, ap),
             damage=dmg,
@@ -12180,6 +12187,7 @@ def squad_declare_fight(
     _hit_bonus, _hit_malus, _, _ = hit_roll_modifier_terms(
         game_state, attacker_unit_for_select, is_melee=True
     )
+    _hit_cap = _bonus_malus_cap(game_state)
 
     fighting = get_fighting_models(game_state, attacker_squad_id, target_squad_id)
     intents: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"][attacker_squad_id]
@@ -12191,7 +12199,7 @@ def squad_declare_fight(
         # (24.11). Un intent par arme selectionnee -> une figurine peut produire 2 intents.
         selected_indices = _select_fight_weapon_indices_for_fig(
             m, target_t, target_sv, target_invul, target_unit_for_select,
-            melee_bonus=melee_bonus, hit_bonus=_hit_bonus, hit_malus=_hit_malus,
+            melee_bonus=melee_bonus, hit_bonus=_hit_bonus, hit_malus=_hit_malus, cap=_hit_cap,
         )
         if not selected_indices:
             continue
@@ -14130,7 +14138,8 @@ def resolve_hit_roll_modifiers(
     )
     if not bonus and not malus:
         return hit_target, None, None
-    return apply_hit_roll_modifiers(hit_target, bonus, malus), bonus_name, malus_name
+    cap = _bonus_malus_cap(game_state)
+    return apply_hit_roll_modifiers(hit_target, bonus, malus, cap=cap), bonus_name, malus_name
 
 
 def hit_roll_modifier_terms(
@@ -14167,15 +14176,23 @@ def hit_roll_modifier_terms(
     return bonus, malus, bonus_name, malus_name
 
 
-def apply_hit_roll_modifiers(hit_target: int, bonus: int, malus: int) -> int:
-    """`clamp(base - bonus + malus, 2, 6)` — LE clamp, ecrit une seule fois.
+def _bonus_malus_cap(game_state: Dict[str, Any]) -> int:
+    """Cap sur le total net des modificateurs de jet, lu dans game_rules (0 = pas de cap)."""
+    return int(require_key(require_key(require_key(game_state, "config"), "game_rules"), "bonus_malus_cap"))
+
+
+def apply_hit_roll_modifiers(hit_target: int, bonus: int, malus: int, *, cap: int = 0) -> int:
+    """`clamp(base - net, 2, 6)` avec `net = clamp(bonus - malus, -cap, cap)` si cap > 0.
 
     Deux lecteurs : la resolution (via `resolve_hit_roll_modifiers`) et l heuristique de choix
     d arme. Recopier la formule chez le second, c est laisser le score diverger du seuil
     reellement joue le jour ou une borne bouge — exactement ce que le `melee_bonus` du Waaagh! a
     deja corrige pour la Force et le nombre d attaques.
     """
-    return max(2, min(6, hit_target - bonus + malus))
+    net = bonus - malus
+    if cap:
+        net = max(-cap, min(cap, net))
+    return max(2, min(6, hit_target - net))
 
 
 def resolve_melee_wound_bonus(

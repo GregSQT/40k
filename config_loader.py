@@ -194,6 +194,11 @@ class ConfigLoader:
         """Get maximum number of turns per game."""
         game_config = self.get_game_config()
         return game_config["game_rules"]["max_turns"]
+
+    def get_bonus_malus_cap(self) -> int:
+        """Cap sur le total des modificateurs de jet (0 = pas de cap)."""
+        game_config = self.get_game_config()
+        return game_config["game_rules"]["bonus_malus_cap"]
     
     def get_board_size(self) -> tuple[int, int]:
         """Get board size as (cols, rows) from board_config as single source of truth."""

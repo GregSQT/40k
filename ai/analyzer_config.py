@@ -201,6 +201,8 @@ class AnalyzerConfig:
     unit_toughness_by_type: Dict[str, int]
     #: Nombre de tours maximum déclaré dans game_config (07.02 / P2). 0 = non disponible.
     max_turns: int
+    #: Cap sur le total des modificateurs de jet (0 = pas de cap, comportement 10e).
+    bonus_malus_cap: int
 
 
 def load_analyzer_config() -> AnalyzerConfig:
@@ -562,4 +564,5 @@ def load_analyzer_config() -> AnalyzerConfig:
         weapon_range_global=weapon_range_global,
         weapon_is_close_quarters_global=weapon_is_close_quarters_global,
         max_turns=config_loader.get_max_turns(),
+        bonus_malus_cap=config_loader.get_bonus_malus_cap(),
     )

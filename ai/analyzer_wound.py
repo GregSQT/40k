@@ -296,10 +296,13 @@ def expected_wound_threshold(
         if in_force is None:
             return None
         litany_mag = 1 if in_force else 0
+    cap_val = config.bonus_malus_cap
     thresholds = set()
     for strength in strengths:
         threshold = calculate_wound_target(strength + bonus, toughness)
         total_bonus = oath_mag + litany_mag
+        if cap_val and total_bonus > cap_val:
+            total_bonus = cap_val
         thresholds.add(max(2, threshold - total_bonus) if total_bonus else threshold)
     return thresholds.pop() if len(thresholds) == 1 else None
 

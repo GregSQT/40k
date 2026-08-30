@@ -79,6 +79,7 @@ def _fight_state(unit_rules, *, ws=4, strength=4, toughness=4, suppressed=False)
         },
         "objectives": [{"id": "o1", "hexes": [[5, 5]]}],
         "suppressed_squads": {"1": 2} if suppressed else {},
+        "config": {"game_rules": {"bonus_malus_cap": 0}},
     }
     intent = {"model_id": "A1", "target_unit_id": "2", "weapon_index": 0, "n_attacks_resolved": 1}
     return game_state, intent
@@ -105,6 +106,7 @@ def _shoot_state(unit_rules, *, bs=4, suppressed=False):
         },
         "objectives": [], "units_moved": set(), "units_advanced": set(),
         "suppressed_squads": {"1": 2} if suppressed else {},
+        "config": {"game_rules": {"bonus_malus_cap": 0}},
     }
     intent = {"model_id": "A1", "target_unit_id": "2", "weapon_index": 0, "n_attacks_resolved": 1}
     return gs, intent, shooting_handlers
@@ -294,6 +296,7 @@ def test_litany_se_cumule_avec_oath_et_respecte_le_plancher(monkeypatch):
     gs["config"] = {
         "uses_codex_detachment": {"1": True, "2": True},
         "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ORKS"},
+        "game_rules": {"bonus_malus_cap": 0},
     }
     gs["unit_by_id"]["1"]["FACTION_KEYWORDS"] = [{"keywordId": "ADEPTUS ASTARTES"}]
     gs["units"] = [gs["unit_by_id"]["1"], gs["unit_by_id"]["2"]]
