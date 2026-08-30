@@ -86,6 +86,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | Sujets | Chantier | Fichier | Jalon | ⚡/🚫 |
 |---|---|---|---|---|
 | moteur | **T7** Unification validation déploiement | [moteur.md#t7](moteur.md#t7) | Fix faux — re-analyser avant | 🚫 |
+| moteur+training | **Force dispositions & missions** — home obj, VP scoring 4 missions, obs mission, reward conditionné, sampling, métriques | [missions.md](missions.md) | Terrains 4 missions créés par utilisateur | 🚫 |
 | moteur | **Phase B** Observation des niveaux | [moteur.md#phase-b](moteur.md#phase-b) | Phase A' validée + LoS 3D complet | 🚫 |
 | training+bot | **É9** Second siège + second scénario — levier `agent_seat_p2_ratio` livré 2026-08-28, plus deux correctifs de suivi le même jour : `_resolve_seat_p2_ratio` et `get_seat_stats` retournent `None` en modes de siège fixes au lieu d'un `0.5` interne trompeur (`ai/env_wrappers.py`, `ai/train.py`, tests rouge→vert). Le second SCÉNARIO reste ouvert | [training.md#e9](training.md#e9) | J4 — entraînement bot satisfaisant | 🚫 |
 | training+bot | Validation qualitative §10.6 volet 2 | [bot.md#validation-externe](bot.md#validation-externe) | J5 — requis pour la démo | ⚡ |
