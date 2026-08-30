@@ -3003,34 +3003,12 @@ class GameStateManager:
             # indépendamment du control_method global. Si l'objectif est sécurisé pour le
             # contrôleur courant, l'adversaire doit avoir STRICTEMENT plus d'OC pour le reprendre.
             obj_secured_by = game_state.get("secured_objectives", {}).get(obj_id_key)
-            use_secured = (
-                control_method == "secured"
-                or (obj_secured_by is not None and obj_secured_by == current_controller)
+            new_controller, _should_clear = _resolve_objective_controller(
+                player_1_oc, player_2_oc, current_controller, obj_secured_by, control_method
             )
-
-            if use_secured:
-                new_controller = current_controller  # keep by default
-                if player_1_oc > player_2_oc:
-                    new_controller = 1
-                elif player_2_oc > player_1_oc:
-                    new_controller = 2
-                # Equal OC: current controller keeps control
-            elif control_method == "default":
-                new_controller = None
-                if player_1_oc > player_2_oc:
-                    new_controller = 1
-                elif player_2_oc > player_1_oc:
-                    new_controller = 2
-            else:
-                raise ValueError(f"Unsupported control_method: {control_method}")
-
             # Cleared when captured by the opponent (la capacité de sécurisation de l'adversaire
             # sera réévaluée à sa prochaine fin de phase de commandement).
-            if (
-                obj_secured_by is not None
-                and new_controller is not None
-                and new_controller != obj_secured_by
-            ):
+            if _should_clear:
                 game_state["secured_objectives"].pop(obj_id_key, None)
 
             # Update persistent state
@@ -3217,29 +3195,10 @@ class GameStateManager:
                 objective_controllers[obj_id_key] = None
             current_controller = objective_controllers[obj_id_key]
             obj_secured_by = game_state.get("secured_objectives", {}).get(obj_id_key)
-            use_secured = (
-                control_method == "secured"
-                or (obj_secured_by is not None and obj_secured_by == current_controller)
+            new_controller, _should_clear = _resolve_objective_controller(
+                player_1_oc, player_2_oc, current_controller, obj_secured_by, control_method
             )
-            if use_secured:
-                new_controller = current_controller
-                if player_1_oc > player_2_oc:
-                    new_controller = 1
-                elif player_2_oc > player_1_oc:
-                    new_controller = 2
-            elif control_method == "default":
-                new_controller = None
-                if player_1_oc > player_2_oc:
-                    new_controller = 1
-                elif player_2_oc > player_1_oc:
-                    new_controller = 2
-            else:
-                raise ValueError(f"Unsupported control_method: {control_method}")
-            if (
-                obj_secured_by is not None
-                and new_controller is not None
-                and new_controller != obj_secured_by
-            ):
+            if _should_clear:
                 game_state["secured_objectives"].pop(obj_id_key, None)
 
             objective_controllers[obj_id_key] = new_controller
@@ -3841,6 +3800,43 @@ def unit_is_within_objective(
     return False
 
 
+def _resolve_objective_controller(
+    player_1_oc: int,
+    player_2_oc: int,
+    current_controller: Optional[int],
+    obj_secured_by: Optional[int],
+    control_method: str,
+) -> Tuple[Optional[int], bool]:
+    """Résout le contrôleur d'un objectif et indique si le statut sécurisé doit être effacé.
+
+    Retourne (new_controller, should_clear_secured).
+    """
+    use_secured = (
+        control_method == "secured"
+        or (obj_secured_by is not None and obj_secured_by == current_controller)
+    )
+    if use_secured:
+        new_controller: Optional[int] = current_controller
+        if player_1_oc > player_2_oc:
+            new_controller = 1
+        elif player_2_oc > player_1_oc:
+            new_controller = 2
+    elif control_method == "default":
+        new_controller = None
+        if player_1_oc > player_2_oc:
+            new_controller = 1
+        elif player_2_oc > player_1_oc:
+            new_controller = 2
+    else:
+        raise ValueError(f"Unsupported control_method: {control_method}")
+    should_clear = (
+        obj_secured_by is not None
+        and new_controller is not None
+        and new_controller != obj_secured_by
+    )
+    return new_controller, should_clear
+
+
 def unit_effective_oc(unit: Dict[str, Any]) -> int:
     """OC effectif de l'unite, incluant oc_bonus (Relic Banner, Primitive E chantier 06).
 
@@ -3902,22 +3898,23 @@ def apply_secure_objective_on_control(game_state: Dict[str, Any]) -> List[int]:
     if "secured_objectives" not in game_state:
         game_state["secured_objectives"] = {}
 
+    from engine.action_log_utils import append_action_log
     controllers = require_key(game_state, "objective_controllers")
     newly_secured: List[int] = []
     for objective_id, zone in objective_hex_zones(game_state):
         obj_key = str(objective_id)
         if controllers.get(obj_key) != current_player:
             continue
+        zone_list = [zone]
         securing_units = [
             u for u in carriers
-            if unit_is_within_objective(game_state, u, zones=[zone])
+            if unit_is_within_objective(game_state, u, zones=zone_list)
         ]
         if not securing_units:
             continue
         game_state["secured_objectives"][obj_key] = current_player
         newly_secured.append(objective_id)
 
-        from engine.action_log_utils import append_action_log
         for unit in securing_units:
             append_action_log(game_state, {
                 "type": "secure_objective",
