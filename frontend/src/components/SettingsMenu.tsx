@@ -54,6 +54,8 @@ interface SettingsMenuProps {
   autoSaveGranularity?: "phase" | "turn";
   onSetAutoSaveGranularity?: (value: "phase" | "turn") => void;
   onDeleteSaves?: () => Promise<void> | void;
+  player2Name?: string;
+  onSetPlayer2Name?: (name: string) => void;
 }
 
 /**
@@ -190,7 +192,10 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
   autoSaveGranularity = "phase",
   onSetAutoSaveGranularity,
   onDeleteSaves,
+  player2Name,
+  onSetPlayer2Name,
 }) => {
+  const [p2NameInput, setP2NameInput] = useState(player2Name ?? "");
   const [confirmingDeleteSaves, setConfirmingDeleteSaves] = useState(false);
   const [deletedSavesMsg, setDeletedSavesMsg] = useState<string | null>(null);
   // Snapshot des réglages à l'ouverture du menu, pour pouvoir annuler les
@@ -557,7 +562,8 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
             onToggleStatusBadgePerModel ||
             onSetBoardDisplayMode ||
             onToggleReplayContainer ||
-            onToggleDeployIconBaseSizeBounded) && (
+            onToggleDeployIconBaseSizeBounded ||
+            onSetPlayer2Name) && (
             <CollapsibleSection title="Display">
               {onToggleReplayContainer && (
                 <ToggleRow
@@ -647,6 +653,60 @@ export const SettingsMenu: React.FC<SettingsMenuProps> = ({
                   label="Bornes taille icônes (déploiement)"
                   description="Activé : les icônes du panneau de déploiement sont bornées (24–60px) pour préserver la mise en page. Désactivé : affiche la taille réelle du socle de chaque figurine."
                 />
+              )}
+              {onSetPlayer2Name && (
+                <div style={{ marginBottom: "16px" }}>
+                  <span
+                    style={{
+                      display: "block",
+                      color: "var(--tooltip-text-color)",
+                      marginBottom: "6px",
+                    }}
+                  >
+                    Nom joueur 2 (PvP)
+                  </span>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <input
+                      type="text"
+                      value={p2NameInput}
+                      onChange={(e) => setP2NameInput(e.target.value)}
+                      maxLength={50}
+                      style={{
+                        flex: 1,
+                        padding: "6px 10px",
+                        backgroundColor: "#111827",
+                        color: "var(--tooltip-text-color)",
+                        border: "1px solid #4b5563",
+                        borderRadius: "4px",
+                        fontSize: "14px",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onSetPlayer2Name(p2NameInput)}
+                      style={{
+                        padding: "6px 12px",
+                        backgroundColor: "#374151",
+                        color: "var(--tooltip-text-color)",
+                        border: "1px solid #4b5563",
+                        borderRadius: "4px",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                      }}
+                    >
+                      OK
+                    </button>
+                  </div>
+                  <p
+                    style={{
+                      color: "var(--tooltip-text-color)",
+                      fontSize: "14px",
+                      marginTop: "4px",
+                    }}
+                  >
+                    Vider le champ pour réactiver le popup au prochain démarrage PvP.
+                  </p>
+                </div>
               )}
             </CollapsibleSection>
           )}

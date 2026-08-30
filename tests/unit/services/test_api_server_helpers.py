@@ -298,6 +298,17 @@ def test_build_and_attach_player_types_for_pve() -> None:
     api_server._attach_player_types(serializable_state, engine_instance)
     assert serializable_state["player_types"]["2"] == "ai"
     assert engine_instance.game_state["current_mode_code"] == "pve"
+    # player_names absent du game_state → non émis (aucune erreur)
+    assert "player_names" not in serializable_state
+
+
+def test_attach_player_types_emits_player_names_when_present() -> None:
+    """player_names présent dans game_state → propagé dans la réponse sérialisée."""
+    names = {"1": "alice", "2": "bob"}
+    engine_instance = _EngineStub({"player_names": names}, current_mode_code="pvp")
+    serializable_state: Dict[str, Any] = {}
+    api_server._attach_player_types(serializable_state, engine_instance)
+    assert serializable_state["player_names"] == names
 
 
 def test_attach_player_types_rejects_invalid_mode() -> None:
