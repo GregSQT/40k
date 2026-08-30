@@ -728,14 +728,6 @@ export const BoardWithAPI: React.FC = () => {
     posX: number;
     posY: number;
   } | null>(null);
-  const [previewPos, setPreviewPos] = useState<{ x: number; y: number } | null>(null);
-  const previewRef = useRef<HTMLDivElement>(null);
-  const previewDragStartRef = useRef<{
-    mouseX: number;
-    mouseY: number;
-    posX: number;
-    posY: number;
-  } | null>(null);
 
   const endlessDutyProfileOptions = useMemo(
     () => ({
@@ -4687,26 +4679,40 @@ export const BoardWithAPI: React.FC = () => {
                   </div>
                   <div className="test-start-modal__section test-start-modal__section--spaced">
                     <div className="test-start-modal__terrain-category">Select your terrain :</div>
-                    <div className="test-start-modal__terrain-options">
-                      {(
-                        [
-                          { value: "mc1", label: "Terrain 1" },
-                          { value: "mc2", label: "Terrain 2" },
-                        ] as const
-                      ).map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          className={`test-start-modal__terrain-option terrain-opt-${opt.value}${selectedTerrain === opt.value ? " test-start-modal__terrain-option--active" : ""}`}
-                          onClick={() => {
-                            const url = new URL(window.location.href);
-                            url.searchParams.set("terrain", opt.value);
-                            window.location.href = url.toString();
-                          }}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
+                    <div className="test-start-modal__terrain-row">
+                      <div className="test-start-modal__terrain-options">
+                        {(
+                          [
+                            { value: "mc1", label: "Terrain 1" },
+                            { value: "mc2", label: "Terrain 2" },
+                          ] as const
+                        ).map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            className={`test-start-modal__terrain-option terrain-opt-${opt.value}${selectedTerrain === opt.value ? " test-start-modal__terrain-option--active" : ""}`}
+                            onClick={() => {
+                              const url = new URL(window.location.href);
+                              url.searchParams.set("terrain", opt.value);
+                              window.location.href = url.toString();
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="test-start-modal__terrain-preview">
+                        <img
+                          className="test-start-modal__terrain-side-img preview-mc1"
+                          src="/icons/Terrain/terrain-mc1.jpg"
+                          alt="Terrain 1"
+                        />
+                        <img
+                          className="test-start-modal__terrain-side-img preview-mc2"
+                          src="/icons/Terrain/terrain-mc2.jpg"
+                          alt="Terrain 2"
+                        />
+                      </div>
                     </div>
                   </div>
                   <button
@@ -4719,70 +4725,6 @@ export const BoardWithAPI: React.FC = () => {
                   >
                     Start Deployment
                   </button>
-                </div>
-                <div
-                  ref={previewRef}
-                  className="test-start-modal__terrain-preview-panel"
-                  style={
-                    previewPos
-                      ? {
-                          position: "absolute",
-                          left: previewPos.x,
-                          top: previewPos.y,
-                          transform: "translate(-50%, -50%)",
-                        }
-                      : {
-                          position: "absolute",
-                          right: "20px",
-                          top: "50%",
-                          transform: "translateY(-50%)",
-                        }
-                  }
-                >
-                  {/* biome-ignore lint/a11y/noStaticElementInteractions: drag handle — poignée de déplacement intentionnelle */}
-                  <div
-                    className="test-start-modal__preview-header"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const preview = previewRef.current;
-                      const overlay = preview?.parentElement;
-                      if (!preview || !overlay) return;
-                      const overlayRect = overlay.getBoundingClientRect();
-                      const previewRect = preview.getBoundingClientRect();
-                      previewDragStartRef.current = {
-                        mouseX: e.clientX,
-                        mouseY: e.clientY,
-                        posX: previewRect.left + previewRect.width / 2 - overlayRect.left,
-                        posY: previewRect.top + previewRect.height / 2 - overlayRect.top,
-                      };
-                      const onMove = (me: MouseEvent) => {
-                        const start = previewDragStartRef.current;
-                        if (!start) return;
-                        setPreviewPos({
-                          x: start.posX + me.clientX - start.mouseX,
-                          y: start.posY + me.clientY - start.mouseY,
-                        });
-                      };
-                      const onUp = () => {
-                        window.removeEventListener("mousemove", onMove);
-                        window.removeEventListener("mouseup", onUp);
-                      };
-                      window.addEventListener("mousemove", onMove);
-                      window.addEventListener("mouseup", onUp);
-                    }}
-                  >
-                    {selectedTerrain === "mc1" ? "Terrain 1" : "Terrain 2"} — Preview
-                  </div>
-                  <img
-                    className="test-start-modal__terrain-side-img preview-mc1"
-                    src="/icons/Terrain/terrain-mc1.jpg"
-                    alt="Terrain 1"
-                  />
-                  <img
-                    className="test-start-modal__terrain-side-img preview-mc2"
-                    src="/icons/Terrain/terrain-mc2.jpg"
-                    alt="Terrain 2"
-                  />
                 </div>
               </div>
             )}
