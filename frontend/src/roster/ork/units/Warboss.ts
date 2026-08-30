@@ -29,10 +29,13 @@ export class Warboss extends SwarmRangeSwarm {
     // Might Is Right : « This unit's melee weapons have +1 to hit rolls. » Portée par le
     // Warboss, donc en vigueur sur TOUTE l'escouade qu'il mène (19.04).
     { ruleId: "hit_roll_bonus_fight", displayName: "Might Is Right" },
+    // Da Biggest and da Best : « While the Waaagh! is active for this unit, this model's
+    // melee weapons have +4 A. » Portée par CE MODÈLE uniquement (ce n'est pas une règle d'unité).
+    { ruleId: "melee_attacks_bonus_while_waaagh", displayName: "Da Biggest and da Best", rule_args: { attacks_bonus: 4 } },
   ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { leader: 2, hit_roll_bonus_fight: 2 };
+  static RULES_STATUS = { leader: 2, hit_roll_bonus_fight: 2, melee_attacks_bonus_while_waaagh: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = ["BOYZ", "BREAKA BOYZ", "NOBZ"];

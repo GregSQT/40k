@@ -23,6 +23,20 @@ export class EradicatorHeavyBolterSergeant extends EliteRangeTroop {
   static CC_WEAPON_CODES = ["close_combat_weapon"];
   static CC_WEAPONS = getWeapons(EradicatorHeavyBolterSergeant.CC_WEAPON_CODES);
 
+  // UNIT RULES
+  static UNIT_RULES = [
+    // Overlapping Detonations : meme regle que le corps (union 19.04 ; le sergent porte aussi
+    // le heavy_bolter donc la regle s applique directement a ses intents).
+    {
+      ruleId: "grant_weapon_rule_vs_designated_target",
+      displayName: "Overlapping Detonations",
+      rule_args: { weapon_code: "heavy_bolter" },
+    },
+  ];
+
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = { grant_weapon_rule_vs_designated_target: 2 };
+
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "INFANTRY" },

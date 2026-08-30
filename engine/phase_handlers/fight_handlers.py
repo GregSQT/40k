@@ -4670,6 +4670,30 @@ def _manual_roll_fight_intent(
     _waaagh_bonus = waaagh_melee_bonus(game_state, attacker_unit)
     strength += _waaagh_bonus
     n_attacks += _waaagh_bonus
+    # Primitive B (chantier 06) : bonus d attaques de MODELE ("this model's melee weapons").
+    # On lit attacker["UNIT_RULES"] (regles du modele seul, pas de l unite fusionnee) pour
+    # que le bonus ne s applique qu aux intents du porteur de la regle.
+    from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args
+    _attacker_model_as_unit: Dict[str, Any] = {"UNIT_RULES": attacker.get("UNIT_RULES", [])}  # get allowed
+    # melee_attacks_bonus_while_waaagh : +N A tant que Waaagh! actif (Da Biggest and da Best)
+    _waaagh_atk_args = _unit_get_primitive_b_rule_args(
+        _attacker_model_as_unit, "melee_attacks_bonus_while_waaagh"
+    )
+    if _waaagh_atk_args is not None and _waaagh_bonus > 0:
+        n_attacks += int(require_key(_waaagh_atk_args, "attacks_bonus"))
+    # once_per_battle_melee_buff : +N A + [DEVASTATING WOUNDS] jusqu a fin de phase (Finest Hour).
+    # Le flag finest_hour_used est pose ICI, lu dans build_weapon_attack_profile via finest_hour_active.
+    _finest_hour_args = _unit_get_primitive_b_rule_args(
+        _attacker_model_as_unit, "once_per_battle_melee_buff"
+    )
+    _finest_hour_active = False
+    if _finest_hour_args is not None:
+        _squad_id_fh = str(attacker_unit.get("id", ""))  # get allowed
+        _finest_hour_used = game_state.setdefault("finest_hour_used", set())
+        if _squad_id_fh not in _finest_hour_used:
+            n_attacks += int(require_key(_finest_hour_args, "attacks_bonus"))
+            _finest_hour_active = True
+            _finest_hour_used.add(_squad_id_fh)
     wth = _calculate_wound_target(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
     # Oath of Moment : MEME helper que le tir (modelisation par abaissement du seuil, plancher
     # a 2, et une seule interrogation de `unit_is_oath_target_of` pour les deux effets).
@@ -4717,7 +4741,13 @@ def _manual_roll_fight_intent(
         RerollProfile, build_weapon_attack_profile, roll_attack_pool,
     )
     from engine.utils.weapon_helpers import weapon_has_rule, weapon_rule_signature
-    _attack_profile = build_weapon_attack_profile(weapon, target)
+    _attack_profile = build_weapon_attack_profile(
+        weapon, target,
+        attacker_unit=attacker_unit,
+        game_state=game_state,
+        is_melee=True,
+        finest_hour_active=_finest_hour_active,
+    )
     rolled = roll_attack_pool(
         n_attacks=int(n_attacks),
         hit_target=ws,

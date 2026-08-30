@@ -26,7 +26,15 @@ export class IntercessorSergeant extends TroopMeleeElite {
   static CC_WEAPONS = getWeapons(IntercessorSergeant.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "sergeant", displayName: "Sergeant" }];
+  static UNIT_RULES = [
+    { ruleId: "sergeant", displayName: "Sergeant" },
+    // Hail of Bolts : meme regle que le corps (union 19.04 ; le sergent porte bolt_rifle).
+    {
+      ruleId: "weapon_attacks_bonus_vs_designated_target",
+      displayName: "Hail of Bolts",
+      rule_args: { weapon_code: "bolt_rifle", attacks_bonus: 2 },
+    },
+  ];
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
