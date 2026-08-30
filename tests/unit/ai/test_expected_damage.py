@@ -178,6 +178,9 @@ def test_can_kill_melee_path_uses_expected_damage(monkeypatch: pytest.MonkeyPatc
     cc_weapon = _weapon(atk=3, strength=4, ap=0, nb=9, dmg=1)
     unit = {
         "id": "u1",
+        "player": 1,
+        "UNIT_RULES": [],
+        "FACTION_KEYWORDS": [],
         "RNG_WEAPONS": [],
         "selectedRngWeaponIndex": 0,
         "CC_WEAPONS": [cc_weapon],
@@ -185,13 +188,15 @@ def test_can_kill_melee_path_uses_expected_damage(monkeypatch: pytest.MonkeyPatc
     }
     target = _target(t=4, sv=3)
     target["id"] = "t1"
+    # is_melee=True → expected_damage lit waaagh_active ; {1:False,2:False} = sortie anticipée
+    game_state: dict = {"suppressed_squads": {}, "waaagh_active": {1: False, 2: False}}
 
     hp = 2
     monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: hp)
-    assert mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False, game_state={}) is False
+    assert mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False, game_state=game_state) is False
 
     hp = 1
-    assert mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False, game_state={}) is True
+    assert mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False, game_state=game_state) is True
 
 
 def test_can_kill_returns_true_when_target_already_dead(monkeypatch: pytest.MonkeyPatch) -> None:

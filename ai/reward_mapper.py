@@ -48,12 +48,12 @@ class RewardMapper:
             weapon = get_selected_ranged_weapon(unit)
             if not weapon:
                 return False
-            max_damage = expected_damage(weapon, target)
+            max_damage = expected_damage(weapon, target, unit, game_state, is_melee=False)
         else:
             weapon = get_selected_melee_weapon(unit)
             if not weapon:
                 return False
-            max_damage = expected_damage(weapon, target)
+            max_damage = expected_damage(weapon, target, unit, game_state, is_melee=True)
         
         return target_hp <= max_damage
     
