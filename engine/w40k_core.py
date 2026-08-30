@@ -6461,12 +6461,15 @@ class W40KEngine(gym.Env):
             details["hazard_context"] = _hazard_ctx
         _hazard_details = raw_log.get("hazardDetails")  # get allowed : absent sur les types sans HAZARDOUS
         if _hazard_details:
-            # Premier modele reellement blesse (ignore les entrees fnpSaved=True).
-            _real_hit = next((d for d in _hazard_details if not d.get("fnpSaved")), None)
+            _real_hit = None
+            _fnp_saves_mortal = 0
+            for _d in _hazard_details:
+                if _d.get("fnpSaved"):
+                    _fnp_saves_mortal += 1
+                elif _real_hit is None:
+                    _real_hit = _d
             if _real_hit:
                 details["target_model_id"] = _real_hit["modelId"]
-            # L12 — FNP mortal wounds (24.12) : nombre de blessures sauvees par FNP.
-            _fnp_saves_mortal = sum(1 for d in _hazard_details if d.get("fnpSaved"))
             if _fnp_saves_mortal > 0:
                 details["fnp_saves_mortal"] = _fnp_saves_mortal
         # L15 — 24.15 HAZARDOUS : nombre d'armes et jets individuels (absents pour Desperate Escape).
