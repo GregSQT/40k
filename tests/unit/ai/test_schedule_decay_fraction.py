@@ -490,13 +490,9 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     assert long_cb["bot_eval_final"] == LONG_PROFILE_BOT_EVAL_FINAL[long_name]
     assert ref_cb["bot_eval_final"] == REFERENCE_BOT_EVAL_FINAL[ref_name]
     # Corollaire OBLIGATOIRE de la ligne précédente : le timeout porte sur un TASK, et un task
-    # joue `bot_eval_final / nb_scenarios` épisodes en séquence. ×3 sur `bot_eval_final` = ×3 sur
-    # la durée d'un task (75 épisodes au lieu de 25 sur les 4 scénarios du holdout). Laisser
-    # 3600 s ne laisserait que 48 s/épisode contre les 17 s/ép. mesurées sur parties dégénérées
-    # (V11 §0.14) — et un seul task qui déborde force-termine tout le pool, donc perd la mesure
-    # publiée après un run mesuré à 5 h 54 (x1_long, 50 000 épisodes, 2026-08-18 ; le « ~5 h 30 »
-    # qui figurait ici sortait du régime `0.1 s/ep` périmé). Le détail est dans
-    # `bot_eval_task_timeout_seconds_normal`.
+    # joue `bot_eval_final / nb_scenarios` épisodes en séquence — un seul task qui déborde
+    # force-termine tout le pool et perd la mesure publiée en fin de run. Arithmétique et marges
+    # dans `bot_eval_task_timeout_seconds_normal` (source unique).
     assert long_cb["bot_eval_task_timeout_seconds"] == 7200
     assert ref_cb["bot_eval_task_timeout_seconds"] == 3600
     # `bot_eval_intermediate` est un nombre d'épisodes PAR BOT payé à CHAQUE éval intermédiaire :
