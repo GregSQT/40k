@@ -60,19 +60,19 @@ class RewardMapper:
     def get_shooting_priority_reward(self, unit, target, all_targets, can_melee_charge_target, game_state: Dict[str, Any]):
         """
         Calculate shooting reward based on AI_GAME_OVERVIEW.md priority system:
-        
+
         1. Enemy unit at ranged range:
            - with highest threat score (max of ranged/melee damage)
            - that one or more of our melee units can charge
            - would not kill in 1 melee phase
-        
-        2. Enemy unit at ranged range:
-           - with highest threat score (max of ranged/melee damage)
-           - can be killed by active unit in 1 shooting phase
-        
-        3. Enemy unit at ranged range:
+
+        3. Enemy unit at ranged range (checked before P2 — most specific sub-case):
            - with highest threat score (max of ranged/melee damage)
            - having the less HP
+           - can be killed by active unit in 1 shooting phase
+
+        2. Enemy unit at ranged range:
+           - with highest threat score (max of ranged/melee damage)
            - can be killed by active unit in 1 shooting phase
         """
         unit_rewards = self._get_unit_rewards(unit)
@@ -80,10 +80,10 @@ class RewardMapper:
         if "ranged_attack" not in base_actions:
             raise ValueError("ranged_attack reward not found in unit rewards config")
         base_reward = base_actions["ranged_attack"]
-        
+
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate target threat using weapon arrays
         can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state=game_state)
-        
+
         # Priority 1: High threat target that melee can charge but won't kill in 1 melee phase
         if can_melee_charge_target:
             melee_damage = self._get_max_melee_damage_vs_target(target)
@@ -93,13 +93,19 @@ class RewardMapper:
                     if "shoot_priority_1" not in unit_rewards:
                         raise ValueError("shoot_priority_1 reward not found in unit rewards config")
                     return base_reward + unit_rewards["shoot_priority_1"]
-        
+
+        # Priority 3: High threat, lowest HP, killable — checked before P2 as the more specific sub-case
+        if can_kill_1_phase and self._is_lowest_hp_high_threat(target, all_targets, game_state):
+            if "shoot_priority_3" not in unit_rewards:
+                raise ValueError("shoot_priority_3 reward not found in unit rewards config")
+            return base_reward + unit_rewards["shoot_priority_3"]
+
         # Priority 2: High threat target that can be killed in 1 shooting phase
         if can_kill_1_phase and self._is_highest_threat_in_range(target, all_targets):
             if "shoot_priority_2" not in unit_rewards:
                 raise ValueError("shoot_priority_2 reward not found in unit rewards config")
             return base_reward + unit_rewards["shoot_priority_2"]
-        
+
         # Standard shooting reward
         return base_reward
     
