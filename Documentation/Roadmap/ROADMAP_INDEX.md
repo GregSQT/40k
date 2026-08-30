@@ -52,17 +52,14 @@ Tout chantier sert un jalon ci-dessous, ou attend. Les jalons sont séquentiels 
 
 ---
 
-## 🔴 URGENCE — Curriculum : adversaires et étalons (décision 2026-08-21)
+## ✅ URGENCE — Curriculum : adversaires et étalons (décision 2026-08-21)
 
-**Décision utilisateur du 2026-08-21 — passe devant les lignes J2.** Les instruments
-d'évaluation sont saturés (reference_* battus 93-100 % dès 10k épisodes, `vs_tactical` à 1,00
-dès 30k) : R0a/R0b se livrent AVANT le prochain run long, puis le curriculum R1→R3 enchaîne
-(R2 = ligne 7 du chemin critique, R3 = chantier récompense). tactical reste gelé (§0.55/D10).
+**R0a/R0b livrés. R1→R3 absorbés par le curriculum `--etape` (décision 2026-08-30)** : le fix
+aliasing obs Phase 3 (2026-08-29) invalide toute baseline antérieure ; le run `--etape P2`
+post-fix tient lieu de R1 (ratio_mb0=1.0, EV→0.85). Le curriculum P0→P10 intègre les leviers
+R2 (self-play) et R3 (récompense, si D.4 le justifie) séquentiellement — mesurer en standalone
+n'apporterait que la décomposition du gain par levier. Fermé sans dette.
 Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
-
-| # | Sujets | Chantier | Fichier | ⚡/🚫 |
-|---|---|---|---|---|
-| 3 | training | **R1→R3** Séquence des runs du curriculum (un levier par run) | [training.md#curriculum](training.md#curriculum) | 🚫 |
 
 ---
 
@@ -70,8 +67,8 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
 | # | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|---|
-| 6 | training | Curriculum R1→R3 (un levier par run) — débloque la mesure | [training.md#curriculum](training.md#curriculum) | 🚫 |
-| 7 | training | Mesure de référence `x1_long` (~6 h) | [v11_chemin_critique.md#mesure](v11_chemin_critique.md#mesure) | 🚫 |
+| 6 | training | ✅ R1→R3 absorbés par `--etape` P0→P10 (2026-08-30) | [training.md#curriculum](training.md#curriculum) | ✅ |
+| 7 | training | Mesure de référence `x1_long` (~6 h) — sur champion final P10 | [v11_chemin_critique.md#mesure](v11_chemin_critique.md#mesure) | 🚫 |
 
 ---
 

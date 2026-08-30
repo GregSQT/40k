@@ -20,21 +20,26 @@ courbes**, un run séparé n'a plus d'objet sauf si celui-ci échoue.
 
 ---
 
-## 🔴 Curriculum R1→R3 — séquence des runs {#curriculum}
+## ✅ Curriculum R1→R3 — absorbés par le curriculum `--etape` {#curriculum}
 
-**Décision utilisateur 2026-08-21 — priorité haute.** Le curriculum démarre dès R0a+R0b livrés
-([bot.md#r0a-references](bot.md#r0a-references), [bot.md#r0b-echelle](bot.md#r0b-echelle)).
-**Un levier par run** :
+**Décision 2026-08-30 — R1→R3 abandonnés comme runs standalone.**
 
-- **R1** — run de référence `x1_long --new`, rien d'autre ne bouge : ligne de base du
-  curriculum (panel + references réparées + `vs_ckpt`) et premier barreau d'échelle.
-- **R2** — mix self-play (= chemin critique ligne 7, §0.59) : profil dérivé de `x1_long`,
-  clés `self_play_*` récupérables au git (`x1_selfplay` purgé par `18dc8599`) ; parts
-  proposées NON MESURÉES ~55-60 % doctrine / 25-30 % self / 15 % random, à trancher au chantier.
-- **R3** — levier récompense ([bot.md#recompense](bot.md#recompense)), jamais dans le même
-  run que R2.
+Deux raisons rendent ces runs redondants :
 
-→ `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md` §5-7
+1. Le bug d'aliasing obs Phase 3 (corrigé 2026-08-29) invalide toute ligne de base antérieure.
+   La validation du fix s'est faite sur le run `--etape P2` (ratio_mb0=1.0, EV→0.85) — ce run
+   tient lieu de R1.
+2. Le curriculum `--etape` P0→P10 intègre déjà les trois leviers séquentiellement : P0 = bots
+   purs (≡ R1), P1/P2/… = self-play progressif (≡ R2), levier récompense = à tester via
+   `--etape` sur un run ultérieur si D.4 le justifie (≡ R3).
+
+Mesurer R1/R2/R3 en standalone n'apporterait que la décomposition du gain par levier — utile
+pour arbitrer, mais le curriculum `--etape` les intègre tous et la mesure J3 se fera sur le
+champion final.
+
+**Le chiffre J3 se lit sur le champion issu du curriculum P0→P10, pas sur un run standalone.**
+
+→ `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md` §5-7 (historique)
 
 ---
 

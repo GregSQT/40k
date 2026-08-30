@@ -236,30 +236,17 @@ But : l'étalon de force non saturable — win-rate du modèle courant contre se
 C'est la première marche de la league ([bot.md#league](../../Roadmap/bot.md#league)) : les
 tranches 2-3 (PFSP, exploiters) restent différées post-démo.
 
-## 5. R1 — Run de référence du curriculum
+## ✅ 5-7. R1/R2/R3 — Absorbés par le curriculum `--etape` (décision 2026-08-30)
 
-`x1_long --new`, APRÈS R0a + R0b, **rien d'autre ne bouge**. Produit : la ligne de base du
-curriculum (panel + references réparées + `vs_ckpt`) et un nouveau barreau d'échelle.
+Ces trois runs standalone sont abandonnés. Raisons :
 
-## 6. R2 — Mix self-play (un levier)
+1. Le bug aliasing obs Phase 3 (corrigé 2026-08-29) invalide toute baseline antérieure aux runs
+   post-fix. Le run `--etape P2` du 2026-08-30 (ratio_mb0=1.0, EV→0.85) tient lieu de R1.
+2. Le curriculum P0→P10 intègre déjà les leviers séquentiellement : P0 = bots purs (≡ R1),
+   P1/P2/… = self-play progressif (≡ R2), levier récompense câblable via `--etape` si D.4 le
+   justifie (≡ R3).
 
-= exécution de la ligne 7 du chemin critique (§0.59, livré jamais exécuté — câblage vérifié vif
-dans `train.py`/`env_wrappers.py` le 2026-08-21). Profil dérivé de `x1_long`.
-⚠️ **Les clés `self_play_*` de l'ancien `x1_selfplay` (purgé par `18dc8599`) ne se récupèrent
-PLUS au git telles quelles** : depuis le 2026-08-22, `snapshot_model_path` et
-`snapshot_update_freq_episodes` n'existent plus, `opponent_mix` porte `pool`. Le plus simple
-est de passer par `--etape` (`config/agents/<agent>/curriculum.json`), qui écrit
-`opponent_mix` lui-même.
-Parts PROPOSÉES NON MESURÉES : ~55-60 % doctrine / 25-30 % self-play / 15 % random — à trancher
-au chantier. Justification du mix : la part self-play casse la stationnarité (source de
-l'exploitation apprise), la majorité doctrine garde les ancres de style (polyvalence).
-Sortie : panel, references réparées, `vs_ckpt(R1)`, profils D.4, écart p1/p2.
-
-## 7. R3 — Levier récompense
-
-= [bot.md#recompense](../../Roadmap/bot.md#recompense), cadre acté : le proxy `max(NB×DMG)`
-connu faux vit encore dans `reward_mapper` ; D.4 nomme les fautes d'abord ; **jamais dans le
-même run que R2**.
+La mesure J3 se lit sur le champion final du curriculum `--etape`, pas sur un run standalone.
 
 ## 8. Hors périmètre
 
