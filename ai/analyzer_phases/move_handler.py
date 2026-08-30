@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from shared.data_validation import require_key
 from ai.analyzer_rules import note_rule_usage
+from ai.analyzer_phases import PHASE_ORDER
 
 if TYPE_CHECKING:
     from ai.analyzer_state import AnalyzerState
@@ -440,8 +441,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
     move_unit_dead = move_unit_id not in state.unit_hp or require_key(state.unit_hp, move_unit_id) <= 0
     if move_unit_dead:
         unit_died_before_move = False
-        phase_order = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
-        current_phase_order = phase_order.get(phase)
+        current_phase_order = PHASE_ORDER.get(phase)
         if current_phase_order is not None:
             for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
                 if dead_unit_id == move_unit_id:
@@ -449,7 +449,7 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
                         unit_died_before_move = True
                         break
                     if death_turn == turn:
-                        death_phase_order = phase_order.get(death_phase)
+                        death_phase_order = PHASE_ORDER.get(death_phase)
                         if death_phase_order is None:
                             continue
                         if death_phase_order < current_phase_order:

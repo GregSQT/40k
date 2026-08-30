@@ -131,6 +131,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | front | ✅ preview-size-315 — taille preview ajustée à 315 (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
 | front | ✅ terrain-btn-nowrap — bouton terrain sans retour à la ligne (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
 | training | ✅ simplify-curriculum — reuse helpers data_validation, déduplique protocole exploiteur, clamp mort retiré (2026-08-30) | [training.md#curriculum](training.md#curriculum) | ⚡ |
+| analyzer | ✅ fix-analyzer-findings — T1 pl_int, garde morte fight_over, PHASE_ORDER partagé (7 occurrences × 4 fichiers), doublon import charge_handler (2026-08-30) | [analyzer.md](analyzer.md) | ⚡ |
 
 ---
 
