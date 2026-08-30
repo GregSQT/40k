@@ -82,16 +82,6 @@ def handle_charge(
                 stats['charge_invalid'][player]['advanced'] += 1
                 if stats['first_error_lines']['charge_invalid'][player] is None:
                     stats['first_error_lines']['charge_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
-        if charge_unit_id in state.units_fled:
-            charge_unit_type_for_flee = require_key(state.unit_types, charge_unit_id)
-            charge_unit_rules_for_flee = require_key(config.unit_rules_by_type, charge_unit_type_for_flee)
-            if "charge_after_flee" in charge_unit_rules_for_flee:
-                key = ("charge_after_flee", charge_unit_type_for_flee)
-                stats['special_rule_usage'][key][player] += 1
-            else:
-                stats['charge_invalid'][player]['fled'] += 1
-                if stats['first_error_lines']['charge_invalid'][player] is None:
-                    stats['first_error_lines']['charge_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
         # reroll_charge — capacité exercée si [REROLLED:] présent dans la ligne CHARGED.
         if re.search(r'\[REROLLED:\d+\]', action_desc):
             _reroll_type = require_key(state.unit_types, charge_unit_id)
@@ -335,7 +325,6 @@ def handle_charge(
                             and move.get('turn') == turn
                             and move.get('episode') is not None
                             and move.get('episode') == state.current_episode_num
-                            and state.current_episode_num > 0
                             for move in state.unit_movement_history[uid]
                         )
                         if has_moved_to_dest:
@@ -352,7 +341,7 @@ def handle_charge(
                     'charge_to': (dest_col, dest_row)
                 })
         else:
-            if require_key(state.unit_hp, charge_unit_id) > 0:
+            if charge_unit_id in state.unit_hp and require_key(state.unit_hp, charge_unit_id) > 0:
                 _position_cache_set(state.unit_positions, charge_unit_id, dest_col, dest_row)
 
         # Sample action
