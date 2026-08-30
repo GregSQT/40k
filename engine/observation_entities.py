@@ -282,16 +282,15 @@ UNIT_BIN_SIZE = len(UNIT_BIN_FIELDS)
 #:   `Intercessor + Captain Relic Shield + Ancient` → Objective Secured, Hail of Bolts, Finest
 #:   Hour, Rites of Battle, Relic Banner, Unbreakable Resolve). Ces capacités N'EXISTENT PAS
 #:   encore dans le moteur : c'est une projection de la conception du chantier 06, pas une mesure.
-#:   ⚠️ Cette projection a été calculée quand le chantier 06 comptait **17** capacités. Il en acte
-#:   **25** depuis (les chantiers 03 et 04 ont débloqué Waaagh! et ses dérivés, Deep Strike,
-#:   Da Jump — cf. `Documentation/Reference/moteur/capacites.md` § « Note sur le décompte »). Le « 6 en
-#:   vigueur » n'a PAS été recalculé sur les 25 : la marge réelle de `UNIT_ABILITY_SLOTS = 8`
-#:   est donc inconnue, pas seulement non mesurée. À recalculer AVANT la passe 1 du chantier 06.
+#:   Recalculé le 2026-08-30 sur les 25 capacités actées (contrainte 19.01 : max 1 leader +
+#:   1 support par escouade ; Da Jump = action active, pas d'obs_id — même logique que Waaagh!
+#:   en global_bin) : 6 au maximum sur une entité, marge 2 slots.
+#:   UNIT_ABILITY_SLOTS = 8 tient pour l'intégralité du chantier 06.
+#:   Détail : Documentation/Reference/moteur/capacites.md § « Dimensionnement des slots ».
 #:
 #: 8 et non 6 : dimensionner sur la projection laisserait ZÉRO marge le jour où elle se réalise —
 #: une seule capacité ajoutée à une figurine rattachée ferait déborder. 8 coûte 2 × 28 = 56
 #: scalaires (0,3 % de l'observation) pour supprimer un mode de défaillance dur.
-#: ⚠️ À rouvrir au chantier 06 : c'est lui qui rendra la projection mesurable.
 #:
 #: ⚠️ Débordement = ERREUR, jamais troncature (`observation_builder`) : tronquer ferait subir à
 #: l'agent des règles qu'il ne perçoit pas — exactement le trou que V11 §0.30 avait fermé.
