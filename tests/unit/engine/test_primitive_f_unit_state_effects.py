@@ -233,7 +233,6 @@ def test_invul_save_override_propagation_19_04_librarian_bodyguard() -> None:
     ferait retourner 7 et échouerait le test (le fold _fold_attached_characters
     n'est pas appelé ici — couvert par test_invul_save_override_mental_fortress_librarian_19_04).
     """
-    import copy
     from engine.game_state import effective_invul_save
     from engine.phase_handlers.shared_utils import compute_unit_rules_in_effect
 
@@ -266,7 +265,6 @@ def test_invul_save_override_librarian_mort_retourne_base() -> None:
     est mort (alive_attached_sources=set()). Le bodyguard ne possède aucune
     invul_save_override propre → effective_invul_save doit conserver la base.
     """
-    import copy
     from engine.game_state import effective_invul_save
     from engine.phase_handlers.shared_utils import compute_unit_rules_in_effect
 
