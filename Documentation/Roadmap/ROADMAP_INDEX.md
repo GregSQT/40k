@@ -128,6 +128,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | moteur | ✅ fix-librarian-mental-fortress — invul_save_override Librarian (Mental Fortress) : règle absente du Librarian Terminator + Psychic Hood, corrigés dans Librarian.ts (2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
 | moteur+training | ✅ fix-review-findings-suppress-invul-t1 — 4 findings review : suppress PvP, invul obs, T1 squad_cache corrigés (2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
 | moteur | ✅ test propagation 19.04 invul_save_override bodyguard — trou couvert : propagation leader→bodyguard via _ATTACHED_RULE_GROUPS + compute_unit_rules_in_effect (2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
+| moteur | ✅ fix-grot-orderly-template-mid — ConfigurationError `require_key(template, "id")` : clé absente du dict models_cache (l'id est la clé du parent, pas un champ) ; `template_mid` capturé dans la boucle de sélection (2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
 
 ---
 

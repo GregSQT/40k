@@ -92,7 +92,6 @@ def _state(
     for i in range(n_alive):
         mid = f"{_SQUAD}#{i}"
         models_cache[mid] = _model(_SQUAD, 6, 4 + i * spacing, base_size)
-        models_cache[mid]["id"] = mid
         squad_models[_SQUAD].append(mid)
     units_cache: Dict[str, Any] = {
         _SQUAD: {
@@ -108,7 +107,6 @@ def _state(
         })
         emid = f"{_ENEMY}#0"
         models_cache[emid] = _model(_ENEMY, enemy_at[0], enemy_at[1], base_size)
-        models_cache[emid]["id"] = emid
         squad_models[_ENEMY] = [emid]
         units_cache[_ENEMY] = {
             "player": 2, "col": enemy_at[0], "row": enemy_at[1], "HP_CUR": 3, "OC_TOTAL": 1,
@@ -428,7 +426,6 @@ def test_reserves_do_not_block_placement() -> None:
     })
     gs["unit_by_id"]["res"] = gs["units"][-1]
     gs["models_cache"]["res#0"] = _model("res", -1, -1)
-    gs["models_cache"]["res#0"]["id"] = "res#0"
     gs["squad_models"]["res"] = ["res#0"]
     gs["units_cache"]["res"] = {
         "player": 2, "col": -1, "row": -1, "HP_CUR": 3, "OC_TOTAL": 1,

@@ -651,10 +651,12 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
         # Template = première figurine vivante (bodyguard, pas personnage attaché).
         mid_list = squad_models.get(unit_id, [])
         template = None
+        template_mid = None
         for mid in mid_list:
             m = models_cache.get(mid)
             if m is not None and model_is_on_board(m) and "attached_from" not in m:
                 template = m
+                template_mid = mid
                 break
         if template is None:
             # Repli : n'importe quel modèle vivant.
@@ -662,6 +664,7 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
                 m = models_cache.get(mid)
                 if m is not None and model_is_on_board(m):
                     template = m
+                    template_mid = mid
                     break
         if template is None:
             continue  # impossible si is_unit_alive, défense en profondeur
@@ -686,7 +689,7 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
         if len(distinct) > 1:
             game_state["_pending_returned_placement"] = {
                 "squad_id": unit_id,
-                "template_mid": str(require_key(template, "id")),
+                "template_mid": str(template_mid),
                 "to_restore": int(to_restore),
                 "d3": int(d3),
                 "destroyed": int(destroyed),
