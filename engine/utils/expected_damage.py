@@ -63,7 +63,8 @@ def expected_damage(
         hit_bonus, hit_malus, _, _ = hit_roll_modifier_terms(
             game_state, attacker_unit, is_melee=is_melee
         )
-        hit_target = apply_hit_roll_modifiers(hit_target, hit_bonus, hit_malus, cap=_bonus_malus_cap(game_state))
+        if hit_bonus or hit_malus:
+            hit_target = apply_hit_roll_modifiers(hit_target, hit_bonus, hit_malus, cap=_bonus_malus_cap(game_state))
 
         if is_melee and attacker_unit is not None:
             from engine.game_state import waaagh_melee_bonus  # cycle : cf. shared_utils

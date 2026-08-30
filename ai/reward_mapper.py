@@ -90,21 +90,15 @@ class RewardMapper:
             target_hp = self._get_target_hp(target, game_state)
             if target_hp > melee_damage:  # Won't be killed by melee in 1 phase
                 if self._is_highest_threat_in_range(target, all_targets):
-                    if "shoot_priority_1" not in unit_rewards:
-                        raise ValueError("shoot_priority_1 reward not found in unit rewards config")
-                    return base_reward + unit_rewards["shoot_priority_1"]
+                    return base_reward + require_key(unit_rewards, "shoot_priority_1")
 
         # Priority 3: High threat, lowest HP, killable — checked before P2 as the more specific sub-case
         if can_kill_1_phase and self._is_lowest_hp_high_threat(target, all_targets, game_state):
-            if "shoot_priority_3" not in unit_rewards:
-                raise ValueError("shoot_priority_3 reward not found in unit rewards config")
-            return base_reward + unit_rewards["shoot_priority_3"]
+            return base_reward + require_key(unit_rewards, "shoot_priority_3")
 
         # Priority 2: High threat target that can be killed in 1 shooting phase
         if can_kill_1_phase and self._is_highest_threat_in_range(target, all_targets):
-            if "shoot_priority_2" not in unit_rewards:
-                raise ValueError("shoot_priority_2 reward not found in unit rewards config")
-            return base_reward + unit_rewards["shoot_priority_2"]
+            return base_reward + require_key(unit_rewards, "shoot_priority_2")
 
         # Standard shooting reward
         return base_reward
