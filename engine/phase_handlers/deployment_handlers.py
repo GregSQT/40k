@@ -485,6 +485,308 @@ def generate_compact_formation(
     return placed
 
 
+#: Intentions de placement des figurines rendues (REVIVED). L'ORDRE est contractuel : il fixe
+#: l'index des candidats de la décision d'agent `returned_models_placement`.
+RETURNED_PLACEMENT_INTENTS: Tuple[str, ...] = (
+    "toward_enemy",
+    "toward_objective",
+    "away_from_enemy",
+)
+
+def _returned_placement_search_radius(
+    game_state: Dict[str, Any], template: Dict[str, Any], anchor: Tuple[int, int]
+) -> int:
+    """Rayon de la spirale de recherche, en hexes — DÉRIVÉ de la géométrie, jamais figé.
+
+    Une constante ne peut pas convenir : à x5 un socle couvre plusieurs subhexes, et deux socles
+    voisins ne peuvent se toucher qu'à `2 × extension` l'un de l'autre. Un rayon trop court ne
+    trouverait AUCUNE case légale sur les grandes bases et ferait silencieusement échouer la
+    restitution. La borne est donc « deux socles côte à côte, plus la portée de cohérence ».
+    """
+    from engine.phase_handlers.shared_utils import get_coherency_subhex
+
+    col, row = int(anchor[0]), int(anchor[1])
+    footprint = _model_footprint(game_state, template, col, row)
+    extent = max(
+        (max(abs(c - col), abs(r - row)) for c, r in footprint),
+        default=0,
+    )
+    return 2 * int(extent) + int(get_coherency_subhex(game_state)) + 1
+
+
+def returned_models_legal_cells(
+    game_state: Dict[str, Any], squad_id: str, template: Dict[str, Any]
+) -> List[Tuple[int, int]]:
+    """Ancres où une figurine RENDUE peut légalement être posée (25 Rules appendix, REVIVED).
+
+    « Models returned to a unit on the battlefield must be set up […] in coherency with models in
+    that unit that started that phase on the battlefield […] They can be engaged with one or more
+    enemy units, but only if those enemy units are already engaged with the unit those models are
+    being returned to. »
+
+    Le test est PAR EMPREINTE, jamais par ancre : à x5 un socle couvre plusieurs subhexes, et le
+    validateur de plan de move ne compare, lui, que les ancres (`explain_move_plan_rejection`) —
+    deux socles posés sur des ancres distinctes mais dont les empreintes se recouvrent
+    passeraient donc INAPERÇUS et se propageraient à chaque mouvement suivant.
+
+    Contrairement à `generate_compact_formation`, aucune marge d'un hex entre socles : celle-là
+    est propre à la GÉNÉRATION d'une formation aérée, alors qu'ici c'est la règle de validité qui
+    s'applique — le contact entre socles est légal.
+    """
+    from collections import deque
+
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.phase_handlers.shared_utils import (
+        _synth_model_entry, get_engagement_zone, require_unit_from_cache,
+    )
+
+    models_cache = require_key(game_state, "models_cache")
+    units_cache = require_key(game_state, "units_cache")
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    squad_id = str(squad_id)
+    entry = require_key(units_cache, squad_id)
+    player = int(require_key(entry, "player"))
+    level = int(require_key(template, "level"))
+
+    present = [
+        models_cache[mid] for mid in _alive_model_ids(game_state, squad_id)
+        if int(require_key(models_cache[mid], "level")) == level
+    ]
+    if not present:
+        return []
+    own_occupied: Set[Tuple[int, int]] = set()
+    for m in present:
+        own_occupied.update(_model_footprint(game_state, m, int(m["col"]), int(m["row"])))
+
+    walls = wall_blocked_anchors(game_state, template)
+    ez = get_engagement_zone(game_state)
+    # « only if those enemy units are already engaged with the unit » : les ennemis DÉJÀ engagés
+    # avec l'escouade ne ferment aucune case ; les autres ferment celles qui les engageraient.
+    # `*_on_battlefield` et pas « toutes les entrées du cache » : une unité en réserves (20.01)
+    # est vivante et présente dans `units_cache`, mais posée à la sentinelle (-1,-1). Comptée
+    # comme ennemi bloquant, elle fermerait toutes les cases du coin du plateau.
+    from engine.spatial_relations import enemy_entries_on_battlefield
+
+    blocking_enemies = []
+    for esid, e_entry in enemy_entries_on_battlefield(units_cache, player):
+        already = any(
+            unit_entries_within_engagement_zone(
+                _synth_model_entry(game_state, squad_id, m, int(m["col"]), int(m["row"]), level=level),
+                e_entry, ez, game_state=game_state,
+            )
+            for m in present
+        )
+        if not already:
+            blocking_enemies.append(require_unit_from_cache(str(esid), game_state, "returned/enemy"))
+
+    from engine.hex_utils import (
+        _HEX_CIRCUMRADIUS, build_hex_center_index, get_neighbors, round_base_radius_norm,
+    )
+    from engine.terrain_utils import low_clearance_ground_hexes
+
+    # Clairance verticale §13.06 du gabarit rendu — construite UNE fois : le socle est le même
+    # pour toutes les cases de la spirale (jumeau de `_clearance_for`, formation compacte).
+    unit = get_unit_by_id(game_state, squad_id)
+    if unit is None:
+        raise KeyError(
+            f"returned_models_legal_cells: unite {squad_id} absente de game_state['units']"
+        )
+    lc_shape = require_key(template, "BASE_SHAPE")
+    lc_radius = (
+        round_base_radius_norm(require_key(template, "BASE_SIZE"))
+        if lc_shape == "round" else 0.0
+    )
+    lc_cells = low_clearance_ground_hexes(
+        require_key(game_state, "terrain_areas"), template, unit
+    )
+    lc_bucket = lc_radius + _HEX_CIRCUMRADIUS
+    low_clearance = (
+        lc_cells,
+        build_hex_center_index(lc_cells, lc_bucket) if (lc_shape == "round" and lc_cells) else {},
+        lc_bucket,
+        lc_radius,
+    )
+
+    anchor_col, anchor_row = int(template["col"]), int(template["row"])
+    radius = _returned_placement_search_radius(
+        game_state, template, (anchor_col, anchor_row)
+    )
+    legal: List[Tuple[int, int]] = []
+    seen: Set[Tuple[int, int]] = {(anchor_col, anchor_row)}
+    queue: "deque[Tuple[int, int, int]]" = deque([(anchor_col, anchor_row, 0)])
+    while queue:
+        col, row, dist = queue.popleft()
+        if 0 <= col < board_cols and 0 <= row < board_rows:
+            if _returned_cell_is_legal(
+                game_state, squad_id, template, col, row, level,
+                walls, own_occupied, blocking_enemies, ez, low_clearance,
+            ):
+                legal.append((col, row))
+        if dist >= radius:
+            continue
+        for ncol, nrow in get_neighbors(col, row):
+            if (ncol, nrow) in seen:
+                continue
+            seen.add((ncol, nrow))
+            queue.append((ncol, nrow, dist + 1))
+    return legal
+
+
+def _returned_cell_is_legal(
+    game_state: Dict[str, Any], squad_id: str, template: Dict[str, Any],
+    col: int, row: int, level: int,
+    walls: AbstractSet[Tuple[int, int]], own_occupied: Set[Tuple[int, int]],
+    blocking_enemies: List[Dict[str, Any]], ez: int,
+    low_clearance: Tuple[Set[Tuple[int, int]], Dict[Any, Any], float, float],
+) -> bool:
+    """Une ancre est légale pour une figurine rendue : empreinte libre, hors mur, hors EZ interdite.
+
+    La cohérence n'est PAS testée ici : elle porte sur l'ENSEMBLE des positions retenues, donc
+    elle est vérifiée par `plan_returned_models_placement` au fur et à mesure des choix.
+    """
+    from engine.hex_utils import Socle, _hex_center, disc_overlaps_indexed_hexes
+    from engine.spatial_relations import unit_entries_within_engagement_zone
+    from engine.phase_handlers.shared_utils import _synth_model_entry
+
+    board_cols = require_key(game_state, "board_cols")
+    board_rows = require_key(game_state, "board_rows")
+    if (int(col), int(row)) in walls:
+        return False
+    footprint = _model_footprint(game_state, template, int(col), int(row))
+    # L'EMPREINTE doit tenir sur le plateau, pas seulement l'ancre : à x5 un socle posé près du
+    # bord déborderait, et le validateur de plan de move (qui ne regarde que les ancres) ne le
+    # signalerait jamais — jumeau du contrôle de `generate_compact_formation`.
+    if any(
+        cc < 0 or cc >= board_cols or rr < 0 or rr >= board_rows
+        for cc, rr in footprint
+    ):
+        return False
+    if any(cell in own_occupied for cell in footprint):
+        return False
+    # Clairance verticale §13.06 AU SOL, miroir de la formation compacte : socle rond → le DISQUE
+    # ne doit chevaucher aucun hex de clairance ; socle non-rond → empreinte hex.
+    lc_cells, lc_index, lc_bucket, lc_radius = low_clearance
+    is_round = require_key(template, "BASE_SHAPE") == "round"
+    if is_round:
+        if lc_index:
+            cx, cy = _hex_center(int(col), int(row))
+            if disc_overlaps_indexed_hexes(cx, cy, lc_radius, lc_index, lc_bucket):
+                return False
+    elif any(cell in lc_cells for cell in footprint):
+        return False
+    candidate = Socle(
+        shape=require_key(template, "BASE_SHAPE"),
+        base_size=require_key(template, "BASE_SIZE"),
+        col=int(col), row=int(row), fp=footprint,
+    )
+    if candidate_overlaps_any_unit(game_state, candidate, exclude_unit_id=str(squad_id)):
+        return False
+    # 13.06 : contrainte d'étage seulement à partir du niveau 1 (le sol n'en a aucune).
+    if int(level) >= 1:
+        unit = get_unit_by_id(game_state, str(squad_id))
+        if unit is None:
+            raise KeyError(f"_returned_cell_is_legal: unite {squad_id} absente de game_state['units']")
+        floor_ok, _reason = validate_floor_placement(
+            {
+                "id": str(squad_id),
+                "UNIT_KEYWORDS": require_key(unit, "UNIT_KEYWORDS"),
+                "BASE_SHAPE": require_key(template, "BASE_SHAPE"),
+                "BASE_SIZE": require_key(template, "BASE_SIZE"),
+                "orientation": int(template.get("orientation", 0)),  # get allowed
+            },
+            int(col), int(row), int(level), require_key(game_state, "terrain_areas"),
+        )
+        if not floor_ok:
+            return False
+    if blocking_enemies:
+        synth = _synth_model_entry(game_state, str(squad_id), template, int(col), int(row), level=level)
+        for enemy in blocking_enemies:
+            if unit_entries_within_engagement_zone(synth, enemy, ez, game_state=game_state):
+                return False
+    return True
+
+
+def plan_returned_models_placement(
+    game_state: Dict[str, Any], squad_id: str, template: Dict[str, Any],
+    count: int, intent: str,
+) -> List[Tuple[int, int]]:
+    """Positions retenues pour `count` figurines rendues, selon l'`intent` de placement.
+
+    Les cases légales sont ORDONNÉES par l'intention, puis retenues une à une : chaque case prise
+    retire son empreinte des suivantes, et la cohérence (03.03) est vérifiée sur l'ensemble
+    accumulé. Une figurine sans case légale n'est pas rendue — la règle impose un placement
+    conforme, elle ne prévoit aucune pose illégale de repli.
+    """
+    from engine.phase_handlers.shared_utils import _positions_in_coherency
+
+    if intent not in RETURNED_PLACEMENT_INTENTS:
+        raise ValueError(
+            f"plan_returned_models_placement: intention {intent!r} inconnue "
+            f"(attendu : {RETURNED_PLACEMENT_INTENTS})"
+        )
+    models_cache = require_key(game_state, "models_cache")
+    cells = returned_models_legal_cells(game_state, squad_id, template)
+    if not cells:
+        return []
+
+    ordered = sorted(cells, key=_returned_placement_sort_key(game_state, squad_id, intent))
+
+    present = [models_cache[mid] for mid in _alive_model_ids(game_state, str(squad_id))]
+    taken: List[Tuple[int, int]] = []
+    taken_cells: Set[Tuple[int, int]] = set()
+    for col, row in ordered:
+        if len(taken) >= int(count):
+            break
+        footprint = _model_footprint(game_state, template, col, row)
+        if any(cell in taken_cells for cell in footprint):
+            continue
+        hypothetical = present + [
+            {**template, "col": c, "row": r} for c, r in taken + [(col, row)]
+        ]
+        if not _positions_in_coherency(hypothetical, game_state):
+            continue
+        taken.append((col, row))
+        taken_cells.update(footprint)
+    return taken
+
+
+def _returned_placement_sort_key(game_state: Dict[str, Any], squad_id: str, intent: str):
+    """Clé de tri des cases légales pour une intention de placement."""
+    from engine.combat_utils import calculate_hex_distance
+    from engine.objective_distance import distance_to_objective, nearest_objective_zone
+    from engine.spatial_relations import enemy_entries_on_battlefield
+
+    units_cache = require_key(game_state, "units_cache")
+    player = int(require_key(require_key(units_cache, str(squad_id)), "player"))
+    # POSÉES seulement : une unité en réserves est à la sentinelle (-1,-1) et orienterait
+    # `toward_enemy` / `away_from_enemy` vers un ennemi qui n'est pas sur la table — ce qui
+    # décide aussi, en amont, si les intentions divergent assez pour poser une décision.
+    enemy_positions = [
+        (int(require_key(e, "col")), int(require_key(e, "row")))
+        for _eid, e in enemy_entries_on_battlefield(units_cache, player)
+    ]
+
+    def _enemy_distance(col: int, row: int) -> int:
+        if not enemy_positions:
+            return 0
+        return min(calculate_hex_distance(col, row, ec, er) for ec, er in enemy_positions)
+
+    if intent == "toward_enemy":
+        return lambda cr: (_enemy_distance(cr[0], cr[1]), cr)
+    if intent == "away_from_enemy":
+        return lambda cr: (-_enemy_distance(cr[0], cr[1]), cr)
+    # toward_objective : l'aire la plus proche de la case, pas le centroïde (14.02).
+    if not game_state["objectives"]:
+        return lambda cr: cr
+    return lambda cr: (
+        distance_to_objective(
+            game_state, nearest_objective_zone(game_state, cr[0], cr[1]), cr[0], cr[1]
+        ),
+        cr,
+    )
+
+
 def erode_pool_by_block_offsets(
     pool_set: AbstractSet[Tuple[int, int]],
     offsets: Iterable[Tuple[int, int, int]],

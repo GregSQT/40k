@@ -577,6 +577,19 @@ C'est la primitive résiduelle. Elle est large mais cohérente : tout ce qui mod
 | Finest Hour (compteur) | Captain | `once_per_battle` | compteur, l'effet est en primitive B |
 | Purgation Run | Land Speeder | `move_after_shooting` **étendu** | voir ci-dessous |
 
+### Grot Orderly : le PLACEMENT est la moitié de la règle
+
+`25 Rules appendix`, entrée REVIVED : *« Models returned to a unit on the battlefield must be set up […] in coherency with models in that unit that started that phase on the battlefield. […] They can be engaged with one or more enemy units, but only if those enemy units are already engaged with the unit those models are being returned to. »*
+
+Restituer les figurines sans les POSER est un défaut silencieux, pas une approximation : la première implémentation les empilait toutes sur la case du template, et comme le move d'escouade est rigide, la superposition se reportait sur chaque destination — `execute_squad_move` refusait ensuite **tous** les mouvements de l'escouade (« collision intra-plan »), pour le reste de la partie.
+
+Deux points à ne pas perdre :
+
+- **Le test est par EMPREINTE, jamais par ancre.** À x5 un socle couvre plusieurs subhexes, et `def explain_move_plan_rejection` ne compare, lui, que les ancres `(niveau, col, row)` : deux socles posés sur des ancres distinctes mais aux empreintes recouvrantes ne déclencheraient AUCUN contrôle. Le placement doit donc être validé à la source (`def returned_models_legal_cells`).
+- **Aucune marge entre socles.** `def generate_compact_formation` impose un hex de marge, mais c'est propre à la génération d'une formation aérée ; la règle de validité tolère le contact, et l'appliquer ici refuserait des placements légaux.
+
+Le choix des positions est une décision de joueur, exposée à l'agent en **intentions** (`toward_enemy`, `toward_objective`, `away_from_enemy`) et non en cases : les cases légales dépassent `MAX_DECISION_OPTIONS`, et §9.0bis interdit un top-K tronqué. Une seule intention possible = aucune décision posée. Aucune case légale = aucune figurine rendue, et le « once per battle » n'est **pas** consommé.
+
 ### Le piège des InSv conférés
 
 `frontend/src/roster/ork/units/BannerNob.ts` porte `INVUL_SAVE = 5` **sur la figurine**. La datasheet dit *« This unit has a 5+ InSv »* — donc **toute l'escouade** à laquelle il est rattaché. Aujourd'hui, attacher un Bannernob à des Boyz ne leur donne rien. Même défaut pour Mental Fortress (Librarian, 4+ InSv, *« This unit »*). Ce n'est pas une caractéristique statique : c'est un effet conféré, qui disparaît si le porteur meurt (règle 19.04 sur l'union des règles en vigueur). Le motif d'override existe déjà pour le Waaagh! (`def effective_invul_save`, §3) — la déclinaison « accordé par une règle d'unité » reste à créer.

@@ -2078,6 +2078,15 @@ export const BoardWithAPI: React.FC = () => {
     const pending = apiProps.gameState?.pending_agent_decision ?? null;
     return pending && pending.type === "waaagh_call" ? pending : null;
   })();
+  // Grot Orderly (chantier 06, passe 6) — placement des figurines rendues. Le moteur arrête AUSSI
+  // la phase de commandement dessus (`COMMAND_PHASE_DECISION_TYPES`) : sans ce panneau, une partie
+  // PvP dont un joueur a la capacité et des pertes reste bloquée, le PvP n'ayant aucun verbe de
+  // sortie de cette phase. Les intentions viennent du moteur (`RETURNED_PLACEMENT_INTENTS`), leur
+  // ORDRE est contractuel — c'est l'INDEX qui est joué, jamais le libellé.
+  const returnedPlacementDecision = (() => {
+    const pending = apiProps.gameState?.pending_agent_decision ?? null;
+    return pending && pending.type === "returned_models_placement" ? pending : null;
+  })();
   const oathSelectionPlayer = apiProps.gameState?.pending_oath_selection ?? null;
   // Les cibles légales : les MÊMES que celles du moteur (`oath_selectable_enemy_ids`) — unités
   // adverses encore vivantes. Une liste plus large ferait proposer une désignation que
@@ -4169,6 +4178,40 @@ export const BoardWithAPI: React.FC = () => {
               >
                 Call the Waaagh!
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Grot Orderly : où poser les figurines rendues. Un bouton par intention offerte par le
+          moteur ; `onCallWaaagh` est le verbe GÉNÉRIQUE `agent_decision` + `option_index` (son
+          nom vient de son premier usage), c'est la même route que le Waaagh! et l'ordre des
+          candidats est contractuel. */}
+      {returnedPlacementDecision && (
+        <div className="rule-choice-overlay">
+          <div className="deployment-panel__picker deployment-panel__picker--oath">
+            <div className="deployment-panel__picker-title">
+              {`Returned models — player ${returnedPlacementDecision.player}`}
+            </div>
+            <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
+              <div className="deployment-panel__picker-tooltip">
+                {
+                  "Destroyed models are returned to this unit. They must be set up in coherency with the models that started this phase on the battlefield, and can only end up engaged with enemy units already engaged with this unit.\n\nChoose where they are placed:\n\n- toward_enemy: as close as possible to the nearest enemy.\n- toward_objective: as close as possible to the nearest objective.\n- away_from_enemy: as far as possible from the nearest enemy."
+                }
+              </div>
+            </div>
+            <div className="deployment-panel__picker-actions deployment-panel__picker-actions--oath">
+              {returnedPlacementDecision.options.map((option, index) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  className="deployment-panel__picker-close deployment-panel__picker-close--validate"
+                  onClick={() => {
+                    void apiProps.onCallWaaagh(index);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
           </div>
         </div>

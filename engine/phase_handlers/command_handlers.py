@@ -8,7 +8,7 @@ before the movement phase. In Phase 2, the agent may take zone intent free steps
 (up to MAX_OBJECTIVES) before transitioning to move.
 """
 
-from typing import Dict, List, Tuple, Set, Optional, Any
+from typing import Dict, List, Sequence, Tuple, Set, Optional, Any
 from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
 from .shared_utils import _build_enemy_adjacent_hexes_all_players
@@ -270,14 +270,31 @@ def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
     """
     current_player = int(require_key(game_state, "current_player"))
 
-    # Grot Orderly (chantier 06, passe 6) — « Once per battle, at the start of your Command
-    # phase, D3 destroyed models … are returned to that unit. »
-    # Automatique : aucune décision d'agent. L'effet est résolu ici, avant Waaagh!/Oath.
-    _apply_return_destroyed_models(game_state, current_player)
-
     # 1. « Until the start of your NEXT Command phase » — la borne est ici.
+    #    AVANT Grot Orderly, et ce n'est pas cosmétique : cette purge efface les décisions de
+    #    08.04 restées en attente d'un tour précédent (siège sans décideur, partie rechargée).
+    #    Poser la décision de placement avant elle ferait LEVER `set_pending_agent_decision`
+    #    sur une `waaagh_call` périmée — le défaut du 2026-08-05, finding 3.
     expire_faction_abilities_for_player(game_state, current_player)
 
+    # Grot Orderly (chantier 06, passe 6) — « Once per battle, at the start of your Command
+    # phase, D3 destroyed models … are returned to that unit. »
+    # Le PLACEMENT est un choix de joueur (REVIVED) : si une décision est posée, le moteur rend
+    # la main ICI, comme il le fait pour le Waaagh!. La suite de 08.04 est jouée à la reprise.
+    if _apply_return_destroyed_models(game_state, current_player):
+        return None
+
+    _command_abilities_after_returns(game_state, current_player)
+    return None
+
+
+def _command_abilities_after_returns(game_state: Dict[str, Any], current_player: int) -> None:
+    """Suite de 08.04 une fois les figurines rendues placées — Waaagh!, puis Oath.
+
+    SCINDÉ de `command_step_command_abilities` parce que la restitution peut poser une décision
+    et rendre la main : la reprise doit pouvoir enchaîner ICI sans rejouer l'extinction des
+    capacités de faction, qui n'a lieu qu'une fois par phase.
+    """
     # 2. Waaagh! — « once per battle, at the start of your Command phase, YOU CAN call a Waaagh! ».
     #    « You can » : c'est optionnel, d'où deux candidats. L'ordre reste CONTRACTUEL (§9.6)
     #    pour le moteur — 0 = appeler, 1 = passer —, mais ce n'est PAS lui qui les distingue POUR
@@ -413,7 +430,9 @@ def oath_selectable_enemy_ids(game_state: Dict[str, Any], player: int) -> List[s
 #:
 #: `rule_choice` n'en fait PAS partie : il a son propre cycle (`pending_rule_choice_queue`) et
 #: peut être posé hors phase de commandement (`trigger: on_deploy`).
-COMMAND_PHASE_DECISION_TYPES: frozenset = frozenset({"waaagh_call"})
+COMMAND_PHASE_DECISION_TYPES: frozenset = frozenset(
+    {"waaagh_call", "returned_models_placement"}
+)
 
 
 def faction_decision_is_pending(game_state: Dict[str, Any], player: Optional[int] = None) -> bool:
@@ -443,6 +462,49 @@ def faction_decision_is_pending(game_state: Dict[str, Any], player: Optional[int
     if decision is None or str(require_key(decision, "type")) not in COMMAND_PHASE_DECISION_TYPES:
         return False
     return player is None or int(require_key(decision, "player")) == int(player)
+
+
+def apply_returned_models_placement_decision(
+    game_state: Dict[str, Any], player: int, intent: str
+) -> None:
+    """Applique l'intention de placement choisie pour `returned_models_placement`.
+
+    EFFACE la décision elle-même (`consume_pending_agent_decision`), comme les autres
+    `apply_*_decision`, puis enchaîne sur la suite de 08.04 : les unités que le balayage n'avait
+    pas encore traitées, et — s'il n'en reste plus — l'extinction et le Waaagh!/Oath.
+    """
+    from engine.agent_decision import consume_pending_agent_decision
+    from engine.phase_handlers.deployment_handlers import plan_returned_models_placement
+
+    consume_pending_agent_decision(
+        game_state, decision_type="returned_models_placement", player=int(player)
+    )
+    pending = game_state.pop("_pending_returned_placement", None)
+    if pending is None:
+        raise RuntimeError(
+            "returned_models_placement: pas de _pending_returned_placement — l'etat a ete "
+            "efface entre la pose de la decision et sa resolution."
+        )
+    squad_id = str(require_key(pending, "squad_id"))
+    models_cache = require_key(game_state, "models_cache")
+    template = models_cache.get(str(require_key(pending, "template_mid")))
+    if template is None:
+        raise RuntimeError(
+            f"returned_models_placement: figurine modele "
+            f"{pending['template_mid']!r} disparue entre la pose de la decision et sa resolution."
+        )
+    cells = plan_returned_models_placement(
+        game_state, squad_id, template, int(require_key(pending, "to_restore")), str(intent)
+    )
+    if cells:
+        apply_returned_models_placement(
+            game_state, squad_id, cells,
+            int(require_key(pending, "d3")), int(require_key(pending, "destroyed")),
+        )
+
+    if _apply_return_destroyed_models(game_state, int(player)):
+        return
+    _command_abilities_after_returns(game_state, int(player))
 
 
 def apply_waaagh_call_decision(game_state: Dict[str, Any], player: int, called: bool) -> None:
@@ -540,24 +602,26 @@ def command_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: int) -> None:
+def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: int) -> bool:
     """Grot Orderly (chantier 06, passe 6) — « Once per battle, at the start of your Command
     phase, D3 destroyed models of that unit are returned. »
 
-    Résolution automatique (aucune décision d'agent) pour chaque unité vivante du joueur actif
-    portant la règle `return_destroyed_models` et n'ayant pas encore utilisé l'effet.
+    Traite chaque unité vivante du joueur actif portant la règle et n'ayant pas encore utilisé
+    l'effet. Le PLACEMENT des figurines rendues (25 Rules appendix, REVIVED) est un choix de
+    joueur : la fonction retourne ``True`` quand elle a POSÉ une décision d'agent et interrompu
+    son balayage — l'appelant doit alors rendre la main, et rappeler cette fonction une fois la
+    décision jouée pour traiter les unités suivantes.
     """
-    import copy
+    from engine.agent_decision import set_pending_agent_decision
     from engine.combat_utils import resolve_dice_value
+    from engine.phase_handlers.deployment_handlers import RETURNED_PLACEMENT_INTENTS
     from engine.phase_handlers.shared_utils import (
         unit_has_rule_effect, is_unit_alive, model_is_on_board,
-        _recompute_squad_cache, _recompute_squad_occupied_hexes, _recompute_squad_hp_total,
     )
     from engine.game_utils import add_debug_file_log
 
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
-    units_cache = require_key(game_state, "units_cache")
     squad_cache = require_key(game_state, "squad_cache")
     used: set = game_state.setdefault("return_destroyed_models_used", set())
 
@@ -602,49 +666,147 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
         if template is None:
             continue  # impossible si is_unit_alive, défense en profondeur
 
-        anchor_col = int(template["col"])
-        anchor_row = int(template["row"])
-        counter = game_state.get("_restored_model_counter", 0)
+        # REVIVED (25 Rules appendix) : les figurines rendues sont POSÉES en cohérence, sur des
+        # cases légales — jamais empilées sur le template. Le placement est un choix de joueur
+        # (intention), il est donc soumis à l'agent quand plusieurs intentions aboutissent à des
+        # positions différentes ; sinon il n'y a rien à choisir et l'effet s'applique ici.
+        plans = _returned_placement_plans(game_state, unit_id, template, to_restore)
+        if not plans:
+            # Aucune case légale : rien n'est rendu, et le « once per battle » n'est PAS
+            # consommé — la règle exige un placement conforme, elle n'ouvre aucune pose de repli.
+            add_debug_file_log(
+                game_state,
+                f"[GROT ORDERLY] E{game_state.get('episode_number', '?')} "
+                f"T{game_state.get('turn', '?')} unit={unit_id} aucune case legale — "
+                f"aucune figurine rendue"
+            )
+            continue
 
-        for _ in range(to_restore):
-            new_mid = f"{unit_id}#r{counter}"
-            counter += 1
-            new_model = copy.copy(template)
-            new_model["col"] = anchor_col
-            new_model["row"] = anchor_row
-            new_model["HP_CUR"] = int(new_model["HP_MAX"])
-            # Transient shooting/fight state ne se copie jamais depuis le template.
-            new_model.pop("SHOOT_LEFT", None)
-            new_model.pop("ATTACK_LEFT", None)
-            new_model["SHOOT_LEFT"] = int(template.get("SHOOT_LEFT", 1))
-            new_model["ATTACK_LEFT"] = int(template.get("ATTACK_LEFT", 1))
-            models_cache[new_mid] = new_model
-            mid_list.append(new_mid)
+        distinct = {tuple(cells) for cells in plans.values()}
+        if len(distinct) > 1:
+            game_state["_pending_returned_placement"] = {
+                "squad_id": unit_id,
+                "template_mid": str(require_key(template, "id")),
+                "to_restore": int(to_restore),
+                "d3": int(d3),
+                "destroyed": int(destroyed),
+            }
+            set_pending_agent_decision(
+                game_state,
+                decision_type="returned_models_placement",
+                player=current_player,
+                unit_id=unit_id,
+                options=[
+                    {
+                        "label": intent,
+                        "effect_ids": (),
+                        "declines": False,
+                        "payload": {"intent": intent},
+                    }
+                    for intent in RETURNED_PLACEMENT_INTENTS
+                    if intent in plans
+                ],
+            )
+            return True
 
-        game_state["_restored_model_counter"] = counter
-        _recompute_squad_cache(game_state, unit_id)
-        _recompute_squad_occupied_hexes(game_state, unit_id)
-        squad_total = _recompute_squad_hp_total(game_state, unit_id)
-        uc = units_cache.get(unit_id)
-        if uc is not None:
-            uc["HP_CUR"] = squad_total
-        used.add(unit_id)
-
-        episode = game_state.get("episode_number", "?")
-        turn = game_state.get("turn", "?")
-        add_debug_file_log(
-            game_state,
-            f"[GROT ORDERLY] E{episode} T{turn} unit={unit_id} restored={to_restore} "
-            f"(D3={d3}, destroyed={destroyed})"
+        apply_returned_models_placement(
+            game_state, unit_id, next(iter(distinct)), d3, destroyed
         )
-        append_action_log(game_state, {
-            "type": "return_destroyed_models",
-            "unitId": unit_id,
-            "player": current_player,
-            "phase": "command",
-            "turn": require_key(game_state, "turn"),
-            "restored": to_restore,
-        })
+
+    return False
+
+
+def _returned_placement_plans(
+    game_state: Dict[str, Any], squad_id: str, template: Dict[str, Any], to_restore: int
+) -> Dict[str, Tuple[Tuple[int, int], ...]]:
+    """Positions retenues par intention, pour les intentions qui aboutissent à un placement."""
+    from engine.phase_handlers.deployment_handlers import (
+        RETURNED_PLACEMENT_INTENTS, plan_returned_models_placement,
+    )
+
+    plans: Dict[str, Tuple[Tuple[int, int], ...]] = {}
+    for intent in RETURNED_PLACEMENT_INTENTS:
+        cells = plan_returned_models_placement(
+            game_state, squad_id, template, to_restore, intent
+        )
+        if cells:
+            plans[intent] = tuple(cells)
+    return plans
+
+
+def apply_returned_models_placement(
+    game_state: Dict[str, Any], squad_id: str,
+    cells: Sequence[Tuple[int, int]], d3: int, destroyed: int,
+) -> None:
+    """Crée les figurines rendues aux positions `cells` — ÉCRIVAIN UNIQUE de la restitution.
+
+    `cells` vient de `plan_returned_models_placement` : positions déjà validées par empreinte,
+    en cohérence, hors engagement interdit. Une par figurine rendue.
+    """
+    import copy
+
+    from engine.phase_handlers.shared_utils import (
+        _recompute_squad_cache, _recompute_squad_occupied_hexes, _recompute_squad_hp_total,
+    )
+    from engine.game_utils import add_debug_file_log
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    units_cache = require_key(game_state, "units_cache")
+    squad_id = str(squad_id)
+    mid_list = squad_models.get(squad_id, [])  # get allowed
+    template = None
+    for mid in mid_list:
+        m = models_cache.get(mid)
+        if m is not None:
+            template = m
+            break
+    if template is None:
+        raise KeyError(
+            f"apply_returned_models_placement: escouade {squad_id} sans figurine vivante"
+        )
+
+    counter = game_state.get("_restored_model_counter", 0)
+    for col, row in cells:
+        new_mid = f"{squad_id}#r{counter}"
+        counter += 1
+        new_model = copy.copy(template)
+        new_model["id"] = new_mid
+        new_model["col"] = int(col)
+        new_model["row"] = int(row)
+        new_model["HP_CUR"] = int(new_model["HP_MAX"])
+        # Transient shooting/fight state ne se copie jamais depuis le template.
+        new_model.pop("SHOOT_LEFT", None)
+        new_model.pop("ATTACK_LEFT", None)
+        new_model["SHOOT_LEFT"] = int(template.get("SHOOT_LEFT", 1))
+        new_model["ATTACK_LEFT"] = int(template.get("ATTACK_LEFT", 1))
+        models_cache[new_mid] = new_model
+        mid_list.append(new_mid)
+
+    game_state["_restored_model_counter"] = counter
+    _recompute_squad_cache(game_state, squad_id)
+    _recompute_squad_occupied_hexes(game_state, squad_id)
+    squad_total = _recompute_squad_hp_total(game_state, squad_id)
+    uc = units_cache.get(squad_id)
+    if uc is not None:
+        uc["HP_CUR"] = squad_total
+    game_state.setdefault("return_destroyed_models_used", set()).add(squad_id)
+
+    episode = game_state.get("episode_number", "?")
+    turn = game_state.get("turn", "?")
+    add_debug_file_log(
+        game_state,
+        f"[GROT ORDERLY] E{episode} T{turn} unit={squad_id} restored={len(cells)} "
+        f"(D3={d3}, destroyed={destroyed}) cells={list(cells)}"
+    )
+    append_action_log(game_state, {
+        "type": "return_destroyed_models",
+        "unitId": squad_id,
+        "player": int(require_key(require_key(units_cache, squad_id), "player")),
+        "phase": "command",
+        "turn": require_key(game_state, "turn"),
+        "restored": len(cells),
+    })
 
 
 def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:

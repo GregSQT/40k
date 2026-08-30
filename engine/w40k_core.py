@@ -4036,6 +4036,30 @@ class W40KEngine(gym.Env):
                 }
             )
 
+        if decision_type == "returned_models_placement":
+            # Grot Orderly (chantier 06, passe 6) : l'agent choisit l'INTENTION de placement des
+            # figurines rendues, jamais la case — les cases légales dépassent le plafond de
+            # `MAX_DECISION_OPTIONS`, et §9.0bis interdit un top-K tronqué.
+            # `apply_returned_models_placement_decision` efface la decision elle-meme et enchaine
+            # sur la suite de 08.04 (ecrivain unique).
+            intent = str(require_key(require_key(selected_option, "payload"), "intent"))
+            decision_player = int(require_key(self.game_state, "current_player"))
+            command_handlers.apply_returned_models_placement_decision(
+                self.game_state, decision_player, intent
+            )
+            return True, self._resume_command_phase_after_faction_decision(
+                {
+                    "action": "agent_decision",
+                    "waiting_for_player": False,
+                    "decision_type": decision_type,
+                    "unitId": require_key(decision, "unit_id"),
+                    "player": decision_player,
+                    "option_index": option_index,
+                    "returnedPlacementIntent": intent,
+                    "success": True,
+                }
+            )
+
         if decision_type == "fly_declaration":
             # 21.03 « take to the skies » (V11 §0.48 `L6`) : décision d'ESCOUADE, par mouvement,
             # sans file de prompts. Comme pour le Waaagh!, c'est l'ORDRE des candidats qui porte
@@ -4278,10 +4302,16 @@ class W40KEngine(gym.Env):
         if self.gym_training_mode:
             return
         current_player = int(require_key(self.game_state, "current_player"))
-        # Bornée par le nombre de mécanismes de 08.04, pas par un littéral : appliquer le Waaagh!
-        # peut poser l'Oath juste derrière (armée portant les deux mots-clés de faction), et une
-        # itération de plus signalerait un état qui ne se vide pas — pas un cas de jeu.
-        for _ in range(len(command_handlers.COMMAND_PHASE_DECISION_TYPES) + 1):
+        # Bornée par ce qui peut réellement s'enchaîner, pas par un littéral : le Waaagh! peut
+        # poser l'Oath juste derrière, et `returned_models_placement` se pose PAR UNITÉ — une
+        # armée à deux Painboys en pose donc deux. Compter les seuls TYPES bornait à 2 et faisait
+        # lever alors que toutes les décisions avaient été jouées.
+        _max_chain = (
+            len(command_handlers.COMMAND_PHASE_DECISION_TYPES)
+            + len(require_key(self.game_state, "units"))
+            + 1
+        )
+        for _ in range(_max_chain):
             if not command_handlers.faction_decision_is_pending(self.game_state, current_player):
                 return
             if self._is_player_human(current_player):
@@ -4290,9 +4320,19 @@ class W40KEngine(gym.Env):
             if decision is not None and str(
                 require_key(decision, "type")
             ) in command_handlers.COMMAND_PHASE_DECISION_TYPES:
-                command_handlers.apply_waaagh_call_decision(
-                    self.game_state, current_player, self._select_ai_waaagh_call(current_player)
-                )
+                # Chaque type de 08.04 a son application : dispatcher sur le TYPE et non sur
+                # l'appartenance au frozenset, sans quoi une décision de placement se verrait
+                # appliquer le Waaagh! — et `consume_pending_agent_decision` refuserait.
+                if str(require_key(decision, "type")) == "returned_models_placement":
+                    command_handlers.apply_returned_models_placement_decision(
+                        self.game_state, current_player,
+                        self._select_ai_returned_placement(decision),
+                    )
+                else:
+                    command_handlers.apply_waaagh_call_decision(
+                        self.game_state, current_player,
+                        self._select_ai_waaagh_call(current_player),
+                    )
                 continue
             command_handlers.apply_oath_selection(
                 self.game_state, current_player, self._select_ai_oath_target(current_player)
@@ -4336,6 +4376,27 @@ class W40KEngine(gym.Env):
             "phase": "command",
             "player": current_player,
         }
+
+    def _select_ai_returned_placement(self, decision: Dict[str, Any]) -> str:
+        """Politique du siège IA hors gym pour l'intention de placement des figurines rendues.
+
+        `toward_objective` quand elle est offerte : les figurines rendues pèsent sur le contrôle
+        (14.02) sans s'exposer, alors que `toward_enemy` offre des cibles à l'adversaire avant
+        même que l'unité ait bougé. Politique explicite, du même ordre que `_select_ai_waaagh_call`
+        — le gym ne passe jamais ici, l'agent choisit lui-même.
+        """
+        offered = [
+            str(require_key(require_key(option, "payload"), "intent"))
+            for option in require_key(decision, "options")
+        ]
+        if not offered:
+            raise RuntimeError(
+                "returned_models_placement: decision posee sans aucune intention offerte."
+            )
+        for preferred in ("toward_objective", "away_from_enemy"):
+            if preferred in offered:
+                return preferred
+        return offered[0]
 
     def _select_ai_waaagh_call(self, player: int) -> bool:
         """Politique du siège IA hors gym pour « appeler ou non le Waaagh! ».
