@@ -364,6 +364,14 @@ def load_engine_from_scenario(scenario: Dict[str, Any], *, seed: int = 0, **over
 ATTACHED_LEADER_RULE = "deep_strike"
 ATTACHED_BODYGUARD_RULE = "charge_impact"
 
+#: TOUTES les capacités observables du leader de la fixture, et pas seulement celle que les tests
+#: 19.04 suivent. Depuis la passe 1 du chantier 06, le Chaplain porte aussi Litany of Hate
+#: (`wound_roll_bonus_fight`) : les assertions qui comparent l'ENSEMBLE des ids observés doivent
+#: donc lire cette liste, tandis que celles qui suivent UNE source gardent `ATTACHED_LEADER_RULE`.
+#: Écrite ici et pas dans le test : c'est la datasheet qui la fixe, et la prochaine capacité
+#: ajoutée au Chaplain doit avoir un seul endroit à toucher.
+ATTACHED_LEADER_RULES = frozenset({"deep_strike", "wound_roll_bonus_fight"})
+
 #: Escouade de 3 figurines : l'unité attachée en comptera 4 (le Chaplain replié).
 ATTACHED_BODYGUARD: Dict[str, Any] = {
     "id": 101, "unit_type": "AssaultIntercessorJumpPack", "player": 2, "col": 12, "row": 10,

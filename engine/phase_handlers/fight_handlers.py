@@ -48,7 +48,12 @@ from .shared_utils import (
     # Traducteurs de causes de relance et marqueurs de capacite, PARTAGES avec le roller de tir :
     # les inliner est la forme exacte sous laquelle ces deux chemins ont deja diverge.
     resolve_oath_effects,
+    # Primitive A (chantier 06) : modificateurs de jet. MEMES helpers que le roller de tir,
+    # pour la meme raison que la ligne du dessus.
+    resolve_hit_roll_modifiers,
+    resolve_melee_wound_bonus,
     stamp_reroll_abilities,
+    stamp_roll_modifier_abilities,
     stamp_wound_bonus_ability,
     enemy_entries_on_battlefield,
     entries_on_battlefield,
@@ -4671,6 +4676,17 @@ def _manual_roll_fight_intent(
     _is_oath_target, _oath_wound_bonus, wth = resolve_oath_effects(
         game_state, attacker_unit, target_sid, wth
     )
+    # Primitive A (chantier 06) — Litany of Hate : « This unit's melee weapons have +1 to wound
+    # rolls. » APRES Oath, et le cumul est voulu : deux sources de +1 au meme jet descendent le
+    # seuil de deux crans, chacune plafonnee par le meme plancher 2 (05.02). Melee SEULE : le
+    # roller de tir n appelle pas ce helper.
+    wth, _wound_bonus_ability = resolve_melee_wound_bonus(attacker_unit, wth)
+    # Primitive A cote TOUCHE : +1 de Might Is Right (melee) et -1 de suppression (toutes
+    # phases). MEME helper que le tir — c est le seul moyen que le clamp 2..6 et l ordre des
+    # deux effets ne divergent pas entre les deux rollers.
+    ws, _hit_bonus_ability, _hit_malus_ability = resolve_hit_roll_modifiers(
+        game_state, attacker_unit, ws, is_melee=True
+    )
     first_alive = models_cache[alive0[0]]
     display_wth = wth
     # Seuil affiche + Waaagh! de la CIBLE (invulnerable 5+ octroyee) : helper partage avec le
@@ -4724,6 +4740,13 @@ def _manual_roll_fight_intent(
     )
     # +1 au jet de blessure d Oath. Meme helper que le tir (cf. `stamp_wound_bonus_ability`).
     stamp_wound_bonus_ability(rolled["shot_records"], _oath_wound_bonus)
+    # Primitive A (chantier 06) : les trois modificateurs de la melee, JUMEAU du site de tir.
+    stamp_roll_modifier_abilities(
+        rolled["shot_records"],
+        hit_bonus=_hit_bonus_ability,
+        hit_malus=_hit_malus_ability,
+        wound_bonus=_wound_bonus_ability,
+    )
     # L27 — nom de la capacite de relance de sauvegarde (reroll_1_save_fight). La cause est
     # COTE CIBLE (pas de l'attaquant) : le record porte deja `saveRollInitial` quand la relance
     # a eu lieu (attack_sequence.py). On n'ajoute le nom que si la relance a REELLEMENT joue.

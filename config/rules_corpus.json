@@ -562,6 +562,22 @@
       "status_note": "La règle est exercée (compteur incrémenté sur [REROLLED:] dans la ligne CHARGED), mais aucun contrôle d'erreur — le moteur ne peut pas relancer un résultat qui aurait dû rester."
     },
     {
+      "id": "PROJ.1.3.charge_roll_bonus",
+      "section": "1.3",
+      "label": "Somethin' to Prove — +1 au jet de charge (11.02, Primitive A)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "charge_roll_bonus"
+      },
+      "controls": [
+        [
+          "charge_roll_out_of_range"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "Le jet imprimé dans [Roll: N] est NET. Le contrôle borne ce jet selon la capacité EN VIGUEUR (19.04, socles vivants) et non selon le token, puis vérifie que le token dit la même chose — les deux sens de l'erreur sont donc couverts : bonus appliqué sans la capacité, et capacité en vigueur dont le jet n'a pas bougé. Contrôle appliqué aux DEUX issues, CHARGED et FAILED CHARGE."
+    },
+    {
       "id": "PROJ.1.3.charge_impact",
       "section": "1.3",
       "label": "Charge impact — seuil et dégât de l'impact (11.01)",
@@ -676,6 +692,57 @@
         ]
       ],
       "status": "COUVERT"
+    },
+    {
+      "id": "PROJ.1.4.seuil_touche",
+      "section": "1.4",
+      "label": "Seuil de touche en mêlée — écart WS + modificateurs (05.01)",
+      "applicability": {
+        "kind": "always"
+      },
+      "controls": [
+        [
+          "fight_hit_threshold_mismatch"
+        ]
+      ],
+      "status": "COUVERT",
+      "status_note": "Le seuil imprimé n'est plus la WS de l'arme depuis la Primitive A : clamp(WS - bonus + malus, 2, 6). Le contrôle recalcule la WS PAR FIGURINE depuis les datasheets, dérive le bonus des figurines VIVANTES de l'escouade (19.04) et lit le malus de suppression sur son token — un +1 oublié sort donc en écart, ce qu'un contrôle lisant seulement les tokens du moteur n'aurait pas vu."
+    },
+    {
+      "id": "PROJ.1.4.hit_roll_bonus_fight",
+      "section": "1.4",
+      "label": "Might Is Right — +1 au jet de touche en mêlée (Primitive A)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "hit_roll_bonus_fight"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "Aucun compteur propre : les écarts sont portés par PROJ.1.4.seuil_touche, dont le seuil attendu inclut ce bonus. Un second compteur ferait de ce fichier une seconde somme d'erreurs, divergeant de la première (défaut V16)."
+    },
+    {
+      "id": "PROJ.1.4.wound_roll_bonus_fight",
+      "section": "1.4",
+      "label": "Litany of Hate — +1 au jet de blessure en mêlée (Primitive A)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "wound_roll_bonus_fight"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "Même raison que Might Is Right : les écarts sont portés par PROJ.1.4.blessure, dont le seuil attendu cumule ce +1 avec celui d'Oath of Moment."
+    },
+    {
+      "id": "PROJ.1.4.hit_roll_malus_suppressed",
+      "section": "1.4",
+      "label": "Suppression — -1 aux jets de touche (Primitive A)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "hit_roll_malus_suppressed"
+      },
+      "controls": [],
+      "status": "COUVERT",
+      "status_note": "HORS ROSTER tant que la passe 6 n'a pas câblé Indiscriminate Detonations : aucune datasheet ne pose le statut `suppressed`, donc le malus ne peut pas se présenter. Le mécanisme, lui, est vif (tir ET mêlée) et son écart serait porté par PROJ.1.4.seuil_touche."
     },
     {
       "id": "PROJ.1.4.alternance",

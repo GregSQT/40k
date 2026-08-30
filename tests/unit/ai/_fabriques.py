@@ -183,6 +183,7 @@ def analyzer_config(**overrides: Any) -> AnalyzerConfig:
         "unit_socle_by_type": {},
         "unit_choice_effect_to_source_rules": {},
         "display_rule_name_to_ids": {},
+        "effect_display_tokens": {},
         "rule_to_units": {},
         "weapon_rule_to_weapons": {},
         "resolve_rule_id": _no_rule_resolution,

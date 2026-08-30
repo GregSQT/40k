@@ -34,6 +34,7 @@ from tests.unit.engine._config_helpers import (
     ATTACHED_ENEMY as _ENEMY,
     ATTACHED_LEADER as _LEADER,
     ATTACHED_LEADER_RULE as _REGLE_DU_LEADER,
+    ATTACHED_LEADER_RULES as _REGLES_DU_LEADER,
     attached_scenario as _scenario,
     load_engine_from_scenario as _load,
 )
@@ -107,7 +108,7 @@ def test_provenance_des_regles_separee_par_source():
     unit = eng.game_state["unit_by_id"]["101"]
     assert [r["ruleId"] for r in unit["_UNIT_RULES_OWN"]] == [_REGLE_DU_BODYGUARD]
     assert {k: [r["ruleId"] for r in v] for k, v in unit["_ATTACHED_RULE_GROUPS"].items()} == {
-        "102": [_REGLE_DU_LEADER]
+        "102": sorted(_REGLES_DU_LEADER)
     }
 
 
@@ -161,12 +162,12 @@ def test_mort_des_bodyguards_eteint_la_regle_du_datasheet_pas_celle_du_leader():
 
     for mid in natives[:-1]:
         _kill(eng, mid)
-    assert _rule_ids(eng, "101") == {_REGLE_DU_BODYGUARD, _REGLE_DU_LEADER}, (
+    assert _rule_ids(eng, "101") == {_REGLE_DU_BODYGUARD, *_REGLES_DU_LEADER}, (
         "tant qu'un bodyguard vit, les deux sources sont en vigueur"
     )
 
     _kill(eng, natives[-1])
-    assert _rule_ids(eng, "101") == {_REGLE_DU_LEADER}
+    assert _rule_ids(eng, "101") == set(_REGLES_DU_LEADER)
     assert _porte_la_regle_du_leader(eng) is True
 
 

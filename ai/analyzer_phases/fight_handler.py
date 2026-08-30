@@ -284,13 +284,32 @@ def handle_fight(
             fighter_unit_type = require_key(state.unit_types, fighter_id)
             # Résultat de touche 05.01, JUMEAU du tir : même table, même fonction. Cf.
             # ai/analyzer_hit.py.
-            from ai.analyzer_hit import check_hit_result
+            from ai.analyzer_hit import check_hit_result, check_melee_hit_threshold
             check_hit_result(state, stats, line, action_desc, player, is_melee=True)
+            # Seuil de TOUCHE 05.01 + modificateurs Primitive A (chantier 06). `check_hit_result`
+            # ci-dessus juge le VERDICT contre le seuil imprimé ; celui-ci juge le SEUIL lui-même
+            # contre la WS des datasheets — sans lui, un +1 appliqué à tort passerait les deux.
+            check_melee_hit_threshold(
+                state, config, stats, line, action_desc, player, fighter_id,
+                fighter_unit_type, weapon_display_name,
+                parse_shooter_models_segment(action_desc),
+            )
+            # Primitive A : la règle a été JUGÉE sur cette ligne (le contrôle ci-dessus s'est
+            # prononcé sur un seuil qui l'inclut), donc l'exercice se note ici et pas à l'entrée
+            # du handler. `unit_effect_in_force` — pas `unit_rules_by_type[fighter_unit_type]` :
+            # la capacité vient du LEADER attaché, jamais du type de l'escouade.
+            from ai.analyzer_perfig import unit_effect_in_force
+            for _effect, _rule in (
+                ("hit_roll_bonus_fight", "PROJ.1.4.hit_roll_bonus_fight"),
+                ("wound_roll_bonus_fight", "PROJ.1.4.wound_roll_bonus_fight"),
+            ):
+                if unit_effect_in_force(state, config, fighter_id, _effect):
+                    note_rule_usage(stats, _rule, player)
             # Seuil de blessure 05.02, JUMEAU du tir : même contrôle, même fonction, avec le
             # +1 Force du Waaagh qui n'existe qu'ici (08.04). Cf. ai/analyzer_wound.py.
             from ai.analyzer_wound import check_wound_threshold, wound_bonus_applies
             check_wound_threshold(
-                state, config, stats, line, action_desc, player, fighter_unit_type,
+                state, config, stats, line, action_desc, player, fighter_id, fighter_unit_type,
                 weapon_display_name, target_id, parse_shooter_models_segment(action_desc), is_melee=True,
             )
             # 08.04 Oath of Moment — JUMEAU du tir : la règle joue aussi en mêlée.

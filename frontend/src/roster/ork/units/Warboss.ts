@@ -24,10 +24,15 @@ export class Warboss extends SwarmRangeSwarm {
   static CC_WEAPONS = getWeapons(Warboss.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "leader", displayName: "Leader" }];
+  static UNIT_RULES = [
+    { ruleId: "leader", displayName: "Leader" },
+    // Might Is Right : « This unit's melee weapons have +1 to hit rolls. » Portée par le
+    // Warboss, donc en vigueur sur TOUTE l'escouade qu'il mène (19.04).
+    { ruleId: "hit_roll_bonus_fight", displayName: "Might Is Right" },
+  ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { leader: 2 };
+  static RULES_STATUS = { leader: 2, hit_roll_bonus_fight: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = ["BOYZ", "BREAKA BOYZ", "NOBZ"];

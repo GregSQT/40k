@@ -427,7 +427,7 @@ Les PDF font foi. Toute divergence avec ce document se tranche en leur faveur.
 
 Les premières analyses annonçaient « 17 capacités ». Le chiffre a monté à **25** parce que les chantiers 03 et 04 ont débloqué ce qui était classé non codable : Waaagh! et ses effets dérivés, Deep Strike, Da Jump. Rien n'a été ajouté au périmètre — des capacités en sont sorties de la catégorie « impossible ».
 
-Conséquence sur le socle : la projection « 6 capacités en vigueur au maximum sur une entité », qui justifie `UNIT_ABILITY_SLOTS = 8`, a été calculée sur les 17 — elle n'a pas été recalculée sur les 25. **À recalculer AVANT la passe 1** (le commentaire de `UNIT_ABILITY_SLOTS`, `engine/observation_entities.py`, renvoie à cette note).
+Conséquence sur le socle : la projection « 6 capacités en vigueur au maximum sur une entité », qui justifie `UNIT_ABILITY_SLOTS = 8`, a été calculée sur les 17 — elle n'a pas été recalculée sur les 25. **Recalculée le 2026-08-30, avant la passe 1** : mesure sur les 179 datasheets du registre après câblage de la passe 1 → **2 capacités observables au maximum par datasheet**, donc au plus 6 sur une entité attachée (escouade + 1 leader + 1 support, contrainte 19.01). `UNIT_ABILITY_SLOTS = 8` tient, marge 2 slots ; aucun ajustement n'a été nécessaire.
 
 ## Vocabulaire
 
@@ -435,7 +435,7 @@ Une **primitive** est un mécanisme moteur irréductible, absent au moment de la
 
 ## État du code constaté (2026-08-28 — à re-vérifier au démarrage de chaque passe)
 
-- **Primitive A** : `hit_any_fail` est livré par le chantier 03 (`class RerollProfile`, sites tir/mêlée, cf. §3) ; les autres modificateurs (`hit_roll_bonus_fight`, `wound_roll_bonus_fight`, `charge_roll_bonus`, `hit_roll_malus_suppressed`) n'existent pas.
+- **Primitive A** : **LIVRÉE** (passe 1, 2026-08-30). `hit_any_fail` venait du chantier 03 ; les quatre autres modificateurs sont vifs — `def resolve_hit_roll_modifiers` et `def resolve_melee_wound_bonus` (`shared_utils.py`, appelés par les DEUX rollers), `def unit_charge_roll_bonus` lu dans `def roll_charge_distance`. Statut `suppressed` stocké dans `game_state["suppressed_squads"]` (`squad_id -> joueur suppresseur`), purgé au début de la phase de commande du suppresseur ; aucune datasheet ne le POSE encore — c'est la passe 6 (Indiscriminate Detonations).
 - **Primitive B/F** : `invul_save_override`, `melee_strength_bonus`, `melee_attacks_bonus` rendent **0 hit** dans tout le dépôt — le Waaagh! est passé par des fonctions dédiées (`waaagh_melee_bonus`, `effective_invul_save`, §3). Les primitives génériques sont à **créer**, ne pas partir du principe qu'il suffit de les câbler.
 - **Primitive C** : mécanisme moteur livré (voir passe 3) ; aucune datasheet ne porte encore `feel_no_pain` (`grep feel_no_pain frontend/src/roster` → 0 hit).
 - **Primitive D** : le helper commun **existe** — `def allocate_mortal_wounds` (`shared_utils.py`), consommé par `def _apply_deadly_demise` (Deadly Demise) et `def roll_hazard_for_unit` (`[HAZARDOUS]`). `deadly_demise` est au registre (`config/unit_rules.json`, paramètre `value`) et câblée sur le WeirdBoy (prérequis posé hors passe, 2026-08-25, cf. Roadmap). Restent à unifier : `charge_impact` (`def _apply_charge_impact`, `charge_handlers.py`, chemin direct) et le lien avec `[DEVASTATING WOUNDS]`.

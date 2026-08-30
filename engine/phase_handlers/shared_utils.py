@@ -9815,10 +9815,20 @@ def roll_charge_distance(
 
     Aucun choix implicite ici : la DECISION de relancer appartient a l appelant, qui seul sait
     si le jet suffit (cf. `squad_charge` : relance si aucun plan n atteint la cible).
+
+    `charge_roll_bonus` (Primitive A, chantier 06) est ajoute ICI et nulle part ailleurs : c est
+    le SEUL producteur de jet de charge du moteur, donc le seul endroit ou les deux chemins (gym
+    et PvP/roll-first) et la relance passent tous. Le poser chez un appelant en oublierait
+    forcement un — et une relance qui perdrait le +1 serait pire qu un bonus absent. Aucun
+    plafond : `+1 to charge rolls` n en a pas, un 2D6+1 va de 3 a 13.
     """
     import random
     del previous_roll  # signature explicite : le jet precedent est jete, jamais combine
-    return random.randint(1, 6) + random.randint(1, 6)
+    return (
+        random.randint(1, 6)
+        + random.randint(1, 6)
+        + unit_charge_roll_bonus(game_state, str(unit_id))
+    )
 
 
 def _unit_was_set_up_this_turn(game_state: Dict[str, Any], squad_id: str) -> bool:
@@ -10268,6 +10278,14 @@ def _manual_roll_intent(
     # Attaquant (escouade) resolu ICI : sert closest_target_penetration (ci-dessous) ET les
     # rerolls to-wound (plus bas). Constant pour l intent.
     attacker_unit = require_unit_by_id(game_state, str(attacker["squad_id"]))
+    # Primitive A cote touche (chantier 06) : au TIR seul le MALUS de suppression peut jouer
+    # (« While a unit is suppressed, it has -1 to hit rolls » ne restreint aucune phase) ; le +1
+    # de Might Is Right est explicitement melee. Applique APRES couvert / [HEAVY] / 10.06 /
+    # PLUNGING FIRE, qui ont deja borne `bs` chacun de leur cote : c est le meme seuil, et
+    # `resolve_hit_roll_modifiers` re-applique le clamp 2..6 sur le total.
+    bs, _hit_bonus_ability, _hit_malus_ability = resolve_hit_roll_modifiers(
+        game_state, attacker_unit, bs, is_melee=False
+    )
     # closest_target_penetration (regle projet unit_rules.json) : +1 de penetration (AP-1,
     # convention AP negatif cf. save_threshold) quand l unite tire sur la cible ELIGIBLE la
     # plus proche. Seule implementation depuis la suppression du code mort de tir (V11 §0.38).
@@ -10362,6 +10380,16 @@ def _manual_roll_intent(
     )
     # +1 au jet de blessure d Oath. Meme helper que la melee (cf. `stamp_wound_bonus_ability`).
     stamp_wound_bonus_ability(rolled["shot_records"], _oath_wound_bonus)
+    # Primitive A (chantier 06) : au tir, seul le malus de suppression peut avoir joue — le
+    # bonus de melee est None par construction (`is_melee=False`) et le +1 de blessure n a pas
+    # de jumeau au tir. Les trois arguments sont passes explicitement pour que le site de tir et
+    # celui de melee restent lisibles l un a cote de l autre.
+    stamp_roll_modifier_abilities(
+        rolled["shot_records"],
+        hit_bonus=_hit_bonus_ability,
+        hit_malus=_hit_malus_ability,
+        wound_bonus=None,
+    )
 
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
@@ -11997,6 +12025,8 @@ def _select_fight_weapon_indices_for_fig(
     target_unit: Optional[Dict[str, Any]] = None,
     *,
     melee_bonus: int = 0,
+    hit_bonus: int = 0,
+    hit_malus: int = 0,
 ) -> List[int]:
     """Armes de melee SELECTIONNEES par une figurine (Select Weapons step, 04.01).
 
@@ -12019,7 +12049,7 @@ def _select_fight_weapon_indices_for_fig(
     main = _auto_select_cc_weapon_for_fig(
         attacker, target_t, target_sv, target_invul, target_unit,
         excluded_indices=frozenset(extra),
-        melee_bonus=melee_bonus,
+        melee_bonus=melee_bonus, hit_bonus=hit_bonus, hit_malus=hit_malus,
     )
     # « if possible » : une figurine qui n a QUE des armes EXTRA ATTACKS n en ajoute pas d autre.
     return ([main] if main is not None else []) + extra
@@ -12031,6 +12061,8 @@ def _auto_select_cc_weapon_for_fig(
     excluded_indices: frozenset = frozenset(),
     *,
     melee_bonus: int = 0,
+    hit_bonus: int = 0,
+    hit_malus: int = 0,
 ) -> Optional[int]:
     """Choisit l arme de melee maximisant l esperance de degats, REGLES D ARME COMPRISES.
 
@@ -12065,7 +12097,13 @@ def _auto_select_cc_weapon_for_fig(
         ws = int(require_key(w, "ATK"))
         # `melee_bonus` = +1 S / +1 A du Waaagh! (0 hors Waaagh!). Applique aux MEMES
         # caracteristiques que la resolution (`_manual_roll_fight_intent`) : Force et nombre
-        # d attaques. `ATK` est le seuil de touche dans la convention du projet, il ne bouge pas.
+        # d attaques.
+        #
+        # `ATK` est le seuil de touche dans la convention du projet, et il BOUGE depuis la
+        # Primitive A (chantier 06) : Might Is Right l abaisse, la suppression le degrade, avec
+        # un clamp 2..6 qui rapproche deux armes de seuils voisins. Le score doit donc porter le
+        # seuil que le moteur APPLIQUERA — meme raison que le `melee_bonus` ci-dessus, et meme
+        # clamp que la resolution (`apply_hit_roll_modifiers`), jamais une copie.
         s = int(require_key(w, "STR")) + int(melee_bonus)
         ap = int(require_key(w, "AP"))
         # Aucun repli silencieux : une valeur de DMG non resoluble est une donnee d arme
@@ -12075,7 +12113,7 @@ def _auto_select_cc_weapon_for_fig(
         profile = build_weapon_attack_profile(w, target_unit)
         score = n_attacks * expected_damage_per_attack(
             profile,
-            hit_target=ws,
+            hit_target=apply_hit_roll_modifiers(ws, hit_bonus, hit_malus),
             wound_target=wound_threshold(s, target_t),
             save_threshold_value=save_threshold(target_sv, target_invul, ap),
             damage=dmg,
@@ -12137,6 +12175,11 @@ def squad_declare_fight(
     # que le moteur n appliquera pas (§9.2.3 : une seule definition de l esperance de degats).
     attacker_unit_for_select = require_unit_by_id(game_state, str(attacker_squad_id))
     melee_bonus = waaagh_melee_bonus(game_state, attacker_unit_for_select)
+    # Primitive A cote touche : MEMES termes que la resolution, resolus UNE fois pour toute
+    # l escouade (ils sont constants sur l activation) et appliques par arme dans le score.
+    _hit_bonus, _hit_malus, _, _ = hit_roll_modifier_terms(
+        game_state, attacker_unit_for_select, is_melee=True
+    )
 
     fighting = get_fighting_models(game_state, attacker_squad_id, target_squad_id)
     intents: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"][attacker_squad_id]
@@ -12148,7 +12191,7 @@ def squad_declare_fight(
         # (24.11). Un intent par arme selectionnee -> une figurine peut produire 2 intents.
         selected_indices = _select_fight_weapon_indices_for_fig(
             m, target_t, target_sv, target_invul, target_unit_for_select,
-            melee_bonus=melee_bonus,
+            melee_bonus=melee_bonus, hit_bonus=_hit_bonus, hit_malus=_hit_malus,
         )
         if not selected_indices:
             continue
@@ -14031,6 +14074,144 @@ def resolve_oath_effects(
     return is_oath_target, wound_bonus, adjusted
 
 
+#: Nom d affichage du malus de suppression (Indiscriminate Detonations, chantier 06).
+#:
+#: CONSTANTE et non `displayName` de roster, parce qu il n y a AUCUNE datasheet a interroger :
+#: `hit_roll_malus_suppressed` n est portee par aucune unite — elle est l EFFET du statut
+#: `suppressed`, pose sur la VICTIME par l attaquant. Chercher un nom de source sur l unite qui
+#: subit le malus ne rendrait jamais rien.
+SUPPRESSED_MALUS_DISPLAY_NAME = "Suppressed"
+
+
+def unit_is_suppressed(game_state: Dict[str, Any], unit_id: Any) -> bool:
+    """L unite est-elle SUPPRIMEE (statut chantier 06) ?
+
+    Source unique : `game_state["suppressed_squads"]` — `squad_id -> joueur qui a supprime`. Le
+    joueur y est stocke parce que la duree lui appartient (« until the start of YOUR next
+    Command phase », Indiscriminate Detonations) : la purge est faite par joueur au debut de SA
+    phase de commande (`command_handlers.command_step_start_of_phase`), pas avec les sets de
+    tour, qui la couperaient en deux.
+
+    Absente = AUCUNE escouade supprimee, et c'est un etat metier valide, pas une donnee
+    manquante : meme regime que `units_fought` / `units_advanced`, les autres tables de suivi de
+    ce moteur. `reset` la cree aux deux sites d'initialisation, donc la production ne repose
+    jamais sur ce defaut.
+    """
+    return str(unit_id) in game_state.get("suppressed_squads", {})  # get allowed
+
+
+def resolve_hit_roll_modifiers(
+    game_state: Dict[str, Any],
+    attacker_unit: Optional[Dict[str, Any]],
+    hit_target: int,
+    *,
+    is_melee: bool,
+) -> Tuple[int, Optional[str], Optional[str]]:
+    """Primitive A cote TOUCHE : `(seuil ajuste, nom du bonus, nom du malus)`.
+
+    `clamp(base - bonus + malus, 2, 6)`, exactement comme le prescrit la conception (§5). Le
+    modificateur porte sur le SEUIL et jamais sur le de : le 1 non modifie echoue toujours et le
+    6 non modifie reste critique (05.01), les deux etant testes sur le de brut par
+    `attack_sequence._evaluate_roll`. C est la MEME modelisation que le couvert 13.08 et que le
+    +1 de blessure d Oath — trois modificateurs, une seule mecanique.
+
+    Deux effets, un seul site, et c est le point : ils s appliquent au tir COMME a la melee pour
+    le malus (« While a unit is suppressed, it has -1 to hit rolls », sans restriction de phase),
+    a la melee SEULE pour le bonus (« This unit's melee weapons have +1 to hit rolls »). Les
+    ecrire dans chacun des deux rollers ferait exactement le jumeau divergent que ce depot paie
+    le plus cher.
+
+    Les noms rendus sont ceux du JOURNAL : ils ne sont resolus que si le modificateur a REELLEMENT
+    joue, et le `displayName` du bonus vient de la datasheet source (Might Is Right), jamais d une
+    constante recopiee.
+    """
+    bonus, malus, bonus_name, malus_name = hit_roll_modifier_terms(
+        game_state, attacker_unit, is_melee=is_melee
+    )
+    if not bonus and not malus:
+        return hit_target, None, None
+    return apply_hit_roll_modifiers(hit_target, bonus, malus), bonus_name, malus_name
+
+
+def hit_roll_modifier_terms(
+    game_state: Dict[str, Any],
+    attacker_unit: Optional[Dict[str, Any]],
+    *,
+    is_melee: bool,
+) -> Tuple[int, int, Optional[str], Optional[str]]:
+    """`(bonus, malus, nom du bonus, nom du malus)` de la Primitive A pour CETTE unite.
+
+    Separe du calcul de seuil parce que les termes sont CONSTANTS sur une activation alors que
+    le seuil, lui, se recalcule par arme : l heuristique de choix d arme de melee
+    (`_auto_select_cc_weapon_for_fig`) doit noter chaque arme sur le seuil que le moteur
+    APPLIQUERA, et les resoudre dans sa boucle relirait les regles d unite a chaque profil.
+    """
+    bonus_name: Optional[str] = None
+    malus_name: Optional[str] = None
+    bonus = 0
+    malus = 0
+    if (
+        is_melee
+        and attacker_unit is not None
+        and _unit_has_rule_effect(attacker_unit, "hit_roll_bonus_fight")
+    ):
+        bonus = 1
+        bonus_name = _get_source_unit_rule_display_name_for_effect(
+            attacker_unit, "hit_roll_bonus_fight"
+        )
+    if attacker_unit is not None and unit_is_suppressed(
+        game_state, require_key(attacker_unit, "id")
+    ):
+        malus = 1
+        malus_name = SUPPRESSED_MALUS_DISPLAY_NAME
+    return bonus, malus, bonus_name, malus_name
+
+
+def apply_hit_roll_modifiers(hit_target: int, bonus: int, malus: int) -> int:
+    """`clamp(base - bonus + malus, 2, 6)` — LE clamp, ecrit une seule fois.
+
+    Deux lecteurs : la resolution (via `resolve_hit_roll_modifiers`) et l heuristique de choix
+    d arme. Recopier la formule chez le second, c est laisser le score diverger du seuil
+    reellement joue le jour ou une borne bouge — exactement ce que le `melee_bonus` du Waaagh! a
+    deja corrige pour la Force et le nombre d attaques.
+    """
+    return max(2, min(6, hit_target - bonus + malus))
+
+
+def resolve_melee_wound_bonus(
+    attacker_unit: Optional[Dict[str, Any]], wound_target: int
+) -> Tuple[int, Optional[str]]:
+    """Primitive A cote BLESSURE (melee) : `(seuil ajuste, nom du bonus)`. Plancher 2 (05.02).
+
+    JUMEAU de `resolve_oath_effects` pour l autre source de +1 au jet de blessure, et les deux se
+    CUMULENT : une escouade menee par un Chaplain qui frappe la cible d un Oath descend de deux
+    crans, chacun plafonne par le meme plancher. « This unit's melee weapons have +1 to wound
+    rolls » ne parle que de la melee : aucun jumeau au tir, et le site de tir ne l appelle pas.
+    """
+    if attacker_unit is None or not _unit_has_rule_effect(
+        attacker_unit, "wound_roll_bonus_fight"
+    ):
+        return wound_target, None
+    return (
+        max(2, wound_target - 1),
+        _get_source_unit_rule_display_name_for_effect(
+            attacker_unit, "wound_roll_bonus_fight"
+        ),
+    )
+
+
+def unit_charge_roll_bonus(game_state: Dict[str, Any], unit_id: str) -> int:
+    """Primitive A cote CHARGE : `+1` si l unite porte `charge_roll_bonus`, sinon `0`.
+
+    « This unit has +1 to charge rolls » (Somethin' to Prove, Bigboss). JUMEAU de
+    `unit_can_reroll_charge` : meme registre, meme lecture 19.04 (les `UNIT_RULES` de
+    l ESCOUADE sont l union en vigueur de ses sources VIVANTES, recalculee a chaque mort), donc
+    un Bigboss attache confere bien son bonus a toute l escouade et le lui retire en mourant.
+    """
+    unit = require_unit_by_id(game_state, str(unit_id))
+    return 1 if _unit_has_rule_effect(unit, "charge_roll_bonus") else 0
+
+
 def stamp_reroll_abilities(
     shot_records: List[Dict[str, Any]],
     attacker_unit: Optional[Dict[str, Any]],
@@ -14118,3 +14299,36 @@ def stamp_wound_bonus_ability(
         if record.get("strengthRoll") is None:  # get allowed : cle absente = touche ratee
             continue
         record["woundBonusAbility"] = OATH_ABILITY_DISPLAY_NAME
+
+
+def stamp_roll_modifier_abilities(
+    shot_records: List[Dict[str, Any]],
+    *,
+    hit_bonus: Optional[str],
+    hit_malus: Optional[str],
+    wound_bonus: Optional[str],
+) -> None:
+    """Pose les MODIFICATEURS de jet de la Primitive A sur chaque record. En place.
+
+    TROIS champs distincts et non un seul : les trois peuvent jouer sur la MEME attaque (une
+    escouade menee par un Chaplain, supprimee par un Wartrakk, frappe en melee), et un champ
+    unique perdrait alors deux causes sur trois.
+
+    POSE SUR TOUS LES RECORDS, y compris ceux sans de. Ces modificateurs sont des proprietes de
+    l ACTIVATION — une regle d unite en vigueur, constante d un bout a l autre de la ligne —
+    exactement comme `waaaghMelee`, et le formateur les rend en TAGS DE LIGNE, hors de tout
+    segment de jet. C est aussi ce qui les distingue de `woundBonusAbility` juste au-dessus, qui
+    decrit UN de et se tait quand ce de n a pas ete lance.
+
+    ⚠️ LE TAG DE LIGNE N EST PAS DECORATIF, c est le seul rendu correct disponible : cote replay,
+    `abilityTokensForRoll` (`frontend/src/utils/replayParser.ts`) ne retient QU UNE capacite par
+    segment de jet. Un second token accole au segment `Hit` y ecraserait silencieusement le nom
+    de la relance de touche.
+    """
+    for record in shot_records:
+        if hit_bonus:
+            record["hitRollBonusAbility"] = str(hit_bonus)
+        if hit_malus:
+            record["hitRollMalusAbility"] = str(hit_malus)
+        if wound_bonus:
+            record["woundRollBonusAbility"] = str(wound_bonus)

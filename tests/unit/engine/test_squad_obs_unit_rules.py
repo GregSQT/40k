@@ -60,6 +60,7 @@ from tests.unit.engine._config_helpers import (
     ATTACHED_ENEMY,
     ATTACHED_LEADER,
     ATTACHED_LEADER_RULE,
+    ATTACHED_LEADER_RULES,
     attached_scenario,
     load_engine_from_scenario,
 )
@@ -148,7 +149,7 @@ def test_attached_squad_rule_is_observed_then_extinguished_with_its_source():
     assert ATTACHED_BODYGUARD_RULE in union, "l'escouade a perdu sa propre regle au fold"
 
     before = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
-    assert before == {ATTACHED_BODYGUARD_RULE, ATTACHED_LEADER_RULE}, (
+    assert before == {ATTACHED_BODYGUARD_RULE, *ATTACHED_LEADER_RULES}, (
         "l'observation doit porter les DEUX sources de l'union 19.04 — celle de l'escouade et "
         "celle du leader attache"
     )
@@ -180,7 +181,7 @@ def test_attached_squad_rule_is_observed_then_extinguished_with_its_source():
     # Le leader vit encore : l'unite existe, et c'est bien la SOURCE morte qui a disparu.
     assert eng.game_state["squad_models"]["101"], "le Chaplain attache doit survivre"
     after = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
-    assert after == {ATTACHED_LEADER_RULE}, (
+    assert after == set(ATTACHED_LEADER_RULES), (
         "la regle du bodyguard mort doit disparaitre, celle du Chaplain VIVANT doit rester — "
         "un bloc entierement vide prouverait un zerotage, pas 19.04"
     )
@@ -233,7 +234,12 @@ def test_composite_datasheet_abilities_are_captured_through_their_effects():
         # Deep Strike (24.09) : les trois porteurs des rosters Armageddon. `ChaplainJumpPack`
         # porte aussi `leader`, marqueur de ROLE sans `obs_id` — il ne doit PAS remonter ici.
         # Les autres entrees de ce tableau font la contre-epreuve : aucune ne porte la capacite.
-        "ChaplainJumpPack": {"deep_strike"},
+        # Primitive A (chantier 06, passe 1) : les trois porteurs des modificateurs de jet. Le
+        # Chaplain en porte DEUX effets avec Deep Strike, ce qui est aussi la contre-epreuve que
+        # le bloc suit bien une UNION et non un premier hit.
+        "ChaplainJumpPack": {"deep_strike", "wound_roll_bonus_fight"},
+        "Warboss": {"hit_roll_bonus_fight"},
+        "Bigboss": {"charge_roll_bonus"},
         "VanguardVeteranSquadJumpPack": {"deep_strike"},
         "LandSpeederOnslaughtGatlingCannon": {"deep_strike"},
         "Gargoyle": {"move_after_shooting"},
@@ -280,8 +286,12 @@ def test_real_training_roster_writes_the_expected_id():
     assert obs is not None
     for _ in range(400):
         ennemis = obs["enemies_ability_ids"]
+        # On attend l'id CHERCHÉ, pas « un id quelconque ». Depuis que le Warboss et le Bigboss
+        # portent leurs modificateurs de jet (chantier 06), le premier id non nul du bloc ennemi
+        # est le leur : sortir de la boucle là dessus faisait tomber l'assertion Gretchin sur une
+        # observation où leur escouade n'était simplement pas encore dans les slots ennemis.
         if (eng.game_state.get("phase") != "deployment"
-                and int((ennemis != 0).sum()) > 0):
+                and int((ennemis == obs_ids["cp_gain_on_objective"]).sum()) > 0):
             break
         mask = eng.get_action_mask()
         valid = list(np.flatnonzero(mask))

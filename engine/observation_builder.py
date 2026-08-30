@@ -142,9 +142,9 @@ def unit_status_obs_ids() -> Dict[str, int]:
     """`{statut -> obs_id}` du registre `config/unit_statuses.json`.
 
     Registre JUMEAU de `unit_ability_obs_ids` : meme convention, seconde table d'embedding. Les
-    trois statuts (`battle_shock`, `oath_target`, `suppressed`) y sont DECLARES mais pas encore
-    poses — ce sont les chantiers 02, 03 et 06 qui le feront. Les declarer des maintenant est ce
-    qui garantit qu'aucun d'eux ne retouchera `obs_size`.
+    trois statuts (`battle_shock`, `oath_target`, `suppressed`) y ont ete DECLARES avant leurs
+    chantiers respectifs (02, 03, 06) : c'est ce qui a garanti qu'aucun d'eux ne retouche
+    `obs_size`. Les trois sont poses depuis la passe 1 du chantier 06.
     """
     global _STATUS_OBS_IDS
     if _STATUS_OBS_IDS is None:
@@ -195,7 +195,7 @@ def _unit_statuses_in_effect(unit: Dict[str, Any], ctx: Dict[str, Any]) -> List[
     ⚠️ C'EST ICI que les chantiers suivants posent leur statut, et nulle part ailleurs :
       - 02 : `battle_shock` — 08.03, etat d'unite (`unit["battle_shocked"]`) — POSE ;
       - 03 : `oath_target` — l'unite designee par un Oath, le mien comme celui de l'adversaire ;
-      - 06 : `suppressed` — capacites Armageddon.
+      - 06 : `suppressed` — capacites Armageddon (Indiscriminate Detonations) — POSE ;
     Le retour part ensuite dans `_fill_id_slots`, qui applique le tri, le padding et les gardes
     de domaine et de debordement. Poser un statut AILLEURS (un bit de `UNIT_BIN_FIELDS`, une
     ecriture directe du tenseur) ferait rater ces quatre proprietes a la fois — c'est le motif du
@@ -204,7 +204,8 @@ def _unit_statuses_in_effect(unit: Dict[str, Any], ctx: Dict[str, Any]) -> List[
     `battle_shock` est ecrit pour TOUTE unite, alliee comme ennemie : c'est une information
     publique (l'OC de l'unite est a '-' pour tout le monde, 01.07/02.02), et la cacher a l'agent
     lui ferait croire qu'un objectif tenu par une escouade ennemie choquee lui echappe encore.
-    `suppressed` reste absent tant que le chantier 06 ne le pose pas.
+    `suppressed` suit la MEME regle, et pour la meme raison : « -1 to hit rolls » s applique
+    aux attaques de l unite supprimee, donc l information vaut des deux cotes du plateau.
 
     `oath_target` est ecrit pour les DEUX camps, et c'est le point important : sur une entite
     ENNEMIE il signale MA cible designee (mes attaques contre elle relancent la touche) ; sur une
@@ -217,6 +218,8 @@ def _unit_statuses_in_effect(unit: Dict[str, Any], ctx: Dict[str, Any]) -> List[
         statuses.append(require_key(unit_status_obs_ids(), "battle_shock"))
     if str(require_key(unit, "id")) in ctx["oath_target_ids"]:
         statuses.append(require_key(unit_status_obs_ids(), "oath_target"))
+    if str(require_key(unit, "id")) in ctx["suppressed_squad_ids"]:
+        statuses.append(require_key(unit_status_obs_ids(), "suppressed"))
     return statuses
 
 
@@ -2017,6 +2020,16 @@ class ObservationBuilder:
                 target for target in (
                     oath_target_id(game_state, 1), oath_target_id(game_state, 2),
                 ) if target is not None
+            ),
+            # Escouades SUPPRIMEES (chantier 06), les deux camps confondus, resolues une fois
+            # pour les 28 entites. Meme raison que l'ensemble d'Oath juste au-dessus : sur une
+            # entite ALLIEE le statut dit « mes attaques touchent a -1 ce tour », sur une entite
+            # ENNEMIE il dit « celle-ci tire moins bien » — les deux changent la decision, et
+            # n'en poser qu'un des deux rendrait la moitie de l'effet invisible. Le registre
+            # `suppressed_squads` est une table `squad_id -> joueur suppresseur` : c'est la CLE
+            # qui porte le statut, la valeur ne sert qu'a la purge (cf. `command_handlers`).
+            "suppressed_squad_ids": frozenset(
+                str(sid) for sid in game_state.get("suppressed_squads", {})  # get allowed
             ),
             "engaged_squads": engaged_squads,
             "moved_by_model": require_key(game_state, "moved_distance_by_model"),
