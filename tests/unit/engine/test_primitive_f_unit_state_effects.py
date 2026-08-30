@@ -63,6 +63,9 @@ def _model(uid: str, col: int = 5, row: int = 5, t: int = 4, role: str = "bodygu
         "VALUE": 10,
         "BASE_SHAPE": "round",
         "BASE_SIZE": 13,
+        # Exigée par la clairance verticale §13.06, que le placement des figurines rendues
+        # vérifie désormais au sol comme la formation compacte le fait déjà.
+        "MODEL_HEIGHT": 2.0,
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
         "UNIT_RULES": [],
@@ -113,6 +116,13 @@ def _base_state(
         "suppressed_squads": {},
         "finest_hour_used": set(),
         "squad_cache": dict(squad_cache or {}),
+        # Plateau : exigé depuis que les figurines rendues sont POSÉES sur des cases légales
+        # (REVIVED) au lieu d'être empilées sur le template.
+        "board_cols": 24,
+        "board_rows": 24,
+        "wall_hexes": set(),
+        "terrain_areas": [],
+        "objectives": [],
         "config": {
             "game_rules": {
                 "engagement_zone": 2,
@@ -339,6 +349,7 @@ def _state_with_painboy_and_destroyed(n_alive: int = 3, n_destroyed: int = 2) ->
             "VALUE": 10,
             "BASE_SHAPE": "round",
             "BASE_SIZE": 13,
+            "MODEL_HEIGHT": 2.0,
             "RNG_WEAPONS": [],
             "CC_WEAPONS": [],
             "UNIT_RULES": [],
