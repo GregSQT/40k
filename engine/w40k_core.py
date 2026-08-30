@@ -5769,12 +5769,17 @@ class W40KEngine(gym.Env):
                     f"({len(enemy_slot_ids)} slots)"
                 )
             best_target_id = enemy_slot_ids[target_slot]
-            if best_target_id is None or str(best_target_id) not in targets:
-                raise ValueError(
-                    f"_continue_squad_fight: slot {target_slot} -> {best_target_id!r} hors pool "
-                    f"12.05 {targets} pour squad {squad_id}"
-                )
-            best_target_id = str(best_target_id)
+            _target_str = str(best_target_id) if best_target_id is not None else None
+            if _target_str is None or _target_str not in targets:
+                if targets:
+                    raise ValueError(
+                        f"_continue_squad_fight: slot {target_slot} -> {best_target_id!r} hors pool "
+                        f"12.05 {targets} pour squad {squad_id}"
+                    )
+                # Cible détruite par Exhortation de Rage (slot=None ou squad hors pool) — combat à vide.
+                best_target_id = None
+            else:
+                best_target_id = _target_str
         else:
             if targets:
                 raise ValueError(
@@ -5832,7 +5837,6 @@ class W40KEngine(gym.Env):
         Retourne None si la règle n'est pas présente, si le D6 ne trigger pas (1-3), ou si
         aucun ennemi engagé n'est disponible. Retourne le payload waiting si décision posée.
         """
-        import random
         from engine.phase_handlers.fight_handlers import (
             _unit_has_rule, _fight_build_valid_target_pool,
         )
