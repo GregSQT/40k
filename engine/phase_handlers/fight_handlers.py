@@ -4730,14 +4730,15 @@ def _manual_roll_fight_intent(
     if _finest_hour_args is not None:
         _squad_id_fh = str(require_key(attacker_unit, "id"))
         _finest_hour_used = game_state.setdefault("finest_hour_used", set())
-        _finest_hour_this_phase = game_state.setdefault("finest_hour_active_this_phase", set())
+        _finest_hour_this_phase = game_state["finest_hour_active_this_phase"]
         if _squad_id_fh not in _finest_hour_used:
             n_attacks += int(require_key(_finest_hour_args, "attacks_bonus"))
             _finest_hour_used.add(_squad_id_fh)
-            # « until end of phase » : marquer actif pour CETTE phase seulement.
             _finest_hour_this_phase.add(_squad_id_fh)
-        # DEVASTATING WOUNDS actif uniquement si marqué dans le set de la phase courante.
-        _finest_hour_active = _squad_id_fh in _finest_hour_this_phase
+            _finest_hour_active = True
+        else:
+            # DEVASTATING WOUNDS actif seulement si l'abilité a été déclenchée dans cette phase.
+            _finest_hour_active = _squad_id_fh in _finest_hour_this_phase
     _base_wth = _calculate_wound_target(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
     wth = _base_wth
     # Oath of Moment : MEME helper que le tir (modelisation par abaissement du seuil, plancher

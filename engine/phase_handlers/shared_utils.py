@@ -12403,9 +12403,12 @@ def squad_declare_fight(
 
     fighting = get_fighting_models(game_state, attacker_squad_id, target_squad_id)
     intents: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"][attacker_squad_id]
-    _fh_used = game_state.get("finest_hour_used", set())
-    _fh_active_phase = game_state.get("finest_hour_active_this_phase", set())
     _attacker_sq_id_str = str(attacker_squad_id)
+    # Lookup squad-level : constant sur toute la boucle, calculé une seule fois.
+    _sq_fh_available = (
+        _attacker_sq_id_str not in game_state.get("finest_hour_used", set())
+        or _attacker_sq_id_str in game_state.get("finest_hour_active_this_phase", set())
+    )
     for mid in fighting:
         m = models_cache.get(mid)
         if m is None:
@@ -12413,10 +12416,9 @@ def squad_declare_fight(
         # once_per_battle_melee_buff : si l'abilité n'a pas encore été consommée cette partie
         # (pas dans finest_hour_used) OU est déjà active cette phase (finest_hour_active_this_phase),
         # le scoring arme doit inclure DEVASTATING WOUNDS — identique au chemin de résolution.
-        _fig_fh_args = _unit_get_primitive_b_rule_args(m, "once_per_battle_melee_buff")
         _fig_finest_hour_active = (
-            _fig_fh_args is not None
-            and (_attacker_sq_id_str not in _fh_used or _attacker_sq_id_str in _fh_active_phase)
+            _unit_get_primitive_b_rule_args(m, "once_per_battle_melee_buff") is not None
+            and _sq_fh_available
         )
         # Select Weapons step (04.01) : arme principale + TOUTES les armes [EXTRA ATTACKS]
         # (24.11). Un intent par arme selectionnee -> une figurine peut produire 2 intents.
