@@ -267,6 +267,40 @@ def test_invul_save_override_propagation_19_04_librarian_bodyguard() -> None:
     assert effective_invul_save(gs, bodyguard, 7) == 4
 
 
+def test_invul_save_override_librarian_mort_retourne_base() -> None:
+    """Librarian mort : effective_invul_save doit retourner la valeur base (7), pas 4.
+
+    Scénario 19.04 : la règle du Librarian disparaît de l'union quand le porteur
+    est mort (alive_attached_sources=set()). Le bodyguard ne possède aucune
+    invul_save_override propre → effective_invul_save doit conserver la base.
+    """
+    import copy
+    from engine.game_state import effective_invul_save
+    from engine.phase_handlers.shared_utils import compute_unit_rules_in_effect
+
+    librarian_id = "lib1"
+    bodyguard_id = "inter1"
+
+    invul_rule = _rule("invul_save_override", {"value": 4})
+
+    own_rules: List[Dict[str, Any]] = []
+    attached_groups: Dict[str, List[Dict[str, Any]]] = {
+        librarian_id: [copy.deepcopy(invul_rule)],
+    }
+    # Librarian mort → alive_attached_sources vide
+    unit_rules_in_effect = compute_unit_rules_in_effect(
+        own_rules,
+        attached_groups,
+        native_alive=True,
+        alive_attached_sources=set(),
+    )
+
+    bodyguard = _unit(bodyguard_id, 1, unit_rules=unit_rules_in_effect)
+
+    gs = _base_state([bodyguard])
+    assert effective_invul_save(gs, bodyguard, 7) == 7
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # toughness_bonus_while_waaagh
 # ─────────────────────────────────────────────────────────────────────────────
