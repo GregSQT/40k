@@ -537,7 +537,7 @@ def returned_models_legal_cells(
 
     from engine.spatial_relations import unit_entries_within_engagement_zone
     from engine.phase_handlers.shared_utils import (
-        _synth_model_entry, get_engagement_zone, require_unit_from_cache,
+        _synth_model_entry, get_engagement_zone,
     )
 
     models_cache = require_key(game_state, "models_cache")
@@ -578,7 +578,7 @@ def returned_models_legal_cells(
             for m in present
         )
         if not already:
-            blocking_enemies.append(require_unit_from_cache(str(esid), game_state, "returned/enemy"))
+            blocking_enemies.append(e_entry)
 
     from engine.hex_utils import (
         _HEX_CIRCUMRADIUS, build_hex_center_index, get_neighbors, round_base_radius_norm,
@@ -710,6 +710,7 @@ def _returned_cell_is_legal(
 def plan_returned_models_placement(
     game_state: Dict[str, Any], squad_id: str, template: Dict[str, Any],
     count: int, intent: str,
+    precomputed_cells: Optional[List[Tuple[int, int]]] = None,
 ) -> List[Tuple[int, int]]:
     """Positions retenues pour `count` figurines rendues, selon l'`intent` de placement.
 
@@ -717,6 +718,10 @@ def plan_returned_models_placement(
     retire son empreinte des suivantes, et la cohérence (03.03) est vérifiée sur l'ensemble
     accumulé. Une figurine sans case légale n'est pas rendue — la règle impose un placement
     conforme, elle ne prévoit aucune pose illégale de repli.
+
+    `precomputed_cells` : cases légales déjà calculées par `returned_models_legal_cells` — évite
+    de refaire le BFS quand plusieurs intentions sont évaluées sur le même template (cf.
+    `_returned_placement_plans`).
     """
     from engine.phase_handlers.shared_utils import _positions_in_coherency
 
@@ -726,7 +731,11 @@ def plan_returned_models_placement(
             f"(attendu : {RETURNED_PLACEMENT_INTENTS})"
         )
     models_cache = require_key(game_state, "models_cache")
-    cells = returned_models_legal_cells(game_state, squad_id, template)
+    cells = (
+        precomputed_cells
+        if precomputed_cells is not None
+        else returned_models_legal_cells(game_state, squad_id, template)
+    )
     if not cells:
         return []
 
