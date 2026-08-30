@@ -2620,19 +2620,6 @@ def _collect_fnp_thresholds_mortal(
     return thresholds
 
 
-def _roll_feel_no_pain(n_wounds: int, threshold: int) -> int:
-    """Retourne les blessures subies après jets Feel No Pain X+ (24.12).
-
-    Pour chaque blessure, jet D6 >= threshold → blessure ignorée.
-    """
-    import random
-    remaining = 0
-    for _ in range(n_wounds):
-        if random.randint(1, 6) < threshold:
-            remaining += 1
-    return remaining
-
-
 def _roll_fnp_sequential(n_wounds: int, thresholds: List[int]) -> int:
     """Retourne les blessures non sauvées après jets FNP séquentiels (24.12).
 

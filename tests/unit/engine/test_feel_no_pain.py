@@ -16,7 +16,7 @@ import pytest
 from engine.phase_handlers import shooting_handlers
 from engine.phase_handlers.shared_utils import (
     _get_feel_no_pain_threshold,
-    _roll_feel_no_pain,
+    _roll_fnp_sequential,
     allocate_mortal_wounds,
     build_manual_shoot_allocation,
 )
@@ -163,23 +163,23 @@ def test_get_fnp_threshold_hors_bornes():
         _get_feel_no_pain_threshold(unit)
 
 
-def test_roll_fnp_tous_sauves(monkeypatch):
+def test_roll_fnp_sequential_tous_sauves(monkeypatch):
     """3 jets >= 5 : 0 blessures restantes."""
     monkeypatch.setattr(random, "randint", lambda a, b: 5)
-    assert _roll_feel_no_pain(3, 5) == 0
+    assert _roll_fnp_sequential(3, [5]) == 0
 
 
-def test_roll_fnp_aucun_sauve(monkeypatch):
+def test_roll_fnp_sequential_aucun_sauve(monkeypatch):
     """3 jets < 5 : 3 blessures restantes."""
     monkeypatch.setattr(random, "randint", lambda a, b: 4)
-    assert _roll_feel_no_pain(3, 5) == 3
+    assert _roll_fnp_sequential(3, [5]) == 3
 
 
-def test_roll_fnp_partiel(monkeypatch):
+def test_roll_fnp_sequential_partiel(monkeypatch):
     """Jets alternés 5 / 4 / 5 -> 1 blessure restante."""
     seq = [5, 4, 5]
     monkeypatch.setattr(random, "randint", lambda a, b: seq.pop(0))
-    assert _roll_feel_no_pain(3, 5) == 1
+    assert _roll_fnp_sequential(3, [5]) == 1
 
 
 # ---------------------------------------------------------------------------
