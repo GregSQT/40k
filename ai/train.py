@@ -3060,7 +3060,7 @@ def build_training_opponents(
         if ramp_end_episodes > int(total_episodes):
             raise ValueError(
                 f"opponent_mix.ramp_end_episodes ({ramp_end_episodes}) depasse "
-                f"total_episodes ({total_episodes}) : la rampe est deja terminee avant ce point."
+                f"total_episodes ({total_episodes}) : ratio_end ne serait jamais atteint en fin de run."
             )
 
     opponent_mix: Dict[str, Any] = {
@@ -4838,11 +4838,13 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
     if opponent_mix is None:
         print(f"🎓 Etape {args.etape} — aucun pool : entrainement contre les bots seuls.")
     else:
+        ramp_end_ep = opponent_mix.get('ramp_end_episodes')
+        ramp_end_str = f", rampe->plateau a {ramp_end_ep} ep" if ramp_end_ep is not None else ""
         print(
             f"🎓 Etape {args.etape} — pool de {len(opponent_mix['pool'])} adversaire(s) fige(s), "
             f"part {opponent_mix['self_play_ratio_start']:.2f}->"
             f"{opponent_mix['self_play_ratio_end']:.2f} "
-            f"(warmup {opponent_mix['warmup_episodes']} ep)"
+            f"(warmup {opponent_mix['warmup_episodes']} ep{ramp_end_str})"
         )
     return curriculum, stage
 

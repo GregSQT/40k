@@ -379,6 +379,14 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
                     f"{source}: stages[{name}].ramp_end_episodes ({ramp_end_episodes}) doit "
                     f"etre > warmup_episodes ({warmup_episodes})."
                 )
+            overrides = stage.get("training_config_overrides") or {}
+            override_total = overrides.get("total_episodes")
+            if override_total is not None and ramp_end_episodes > int(override_total):
+                raise ValueError(
+                    f"{source}: stages[{name}].ramp_end_episodes ({ramp_end_episodes}) depasse "
+                    f"training_config_overrides.total_episodes ({override_total}) : "
+                    f"ratio_end ne serait jamais atteint en fin de run."
+                )
 
         members = stage_pool_members(stage)
         for member in members:
@@ -606,8 +614,6 @@ def ramped_ratio(
         return ratio_end
     effective_index = episode_index - warmup_episodes
     effective_total = ramp_end - warmup_episodes
-    if effective_total <= 0:
-        return ratio_end
     progress = min(1.0, max(0.0, float(effective_index) / float(effective_total)))
     return ratio_start + ((ratio_end - ratio_start) * progress)
 
