@@ -130,6 +130,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | ai | ✅ simplify reward_mapper + expected_damage — `require_key` remplace guards inline, `_waaagh_game_state` spread BASE (2026-08-30) | [bot.md](bot.md) | ⚡ |
 | moteur+training | ✅ lot moteur 2026-08-30 — bonus-malus-cap (89 tests), expected-damage-unit-modifiers (Primitive A + Waaagh), simplify-died-before-phase (4 boucles), terrain-selector-purge-foe | [moteur.md](moteur.md) | ⚡ |
 | ai | ✅ shoot-priority-3 — implémentation bloc P3 reward_mapper (killable+highest threat+lowest HP) (2026-08-30) | [bot.md](bot.md) | ⚡ |
+| front+moteur | ✅ terrain-pfm2-selection — le terrain choisi agit enfin en PvP et PvE (scénarios suffixés), murs des ruines de `terrain-purge-foe-mirror-2`, preview au survol réparée (2026-08-30) | [front.md](front.md) | ⚡ |
 
 ---
 

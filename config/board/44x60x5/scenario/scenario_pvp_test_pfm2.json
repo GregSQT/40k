@@ -26,20 +26,20 @@
       ]
     },
     {
-      "id": 205, "unit_type": "Boyz", "player": 1, "col": 110, "row": 118,
+      "id": 205, "unit_type": "Boyz", "player": 1, "col": 110, "row": 128,
       "models": [
-        {"unit_type": "Boyz", "col": 110, "row": 118},
-        {"unit_type": "Boyz", "col": 116, "row": 118},
-        {"unit_type": "Boyz", "col": 122, "row": 118},
-        {"unit_type": "Boyz", "col": 128, "row": 118},
-        {"unit_type": "Boyz", "col": 134, "row": 118},
-        {"unit_type": "Boyz", "col": 113, "row": 122},
-        {"unit_type": "Boyz", "col": 119, "row": 122},
-        {"unit_type": "Boyz", "col": 125, "row": 122},
-        {"unit_type": "Boyz", "col": 131, "row": 122},
-        {"unit_type": "BoyzNobKombi", "col": 139, "row": 122},
-        {"unit_type": "Bigboss", "col": 145, "row": 116},
-        {"unit_type": "BannerNob", "col": 148, "row": 124}
+        {"unit_type": "Boyz", "col": 110, "row": 128},
+        {"unit_type": "Boyz", "col": 116, "row": 128},
+        {"unit_type": "Boyz", "col": 122, "row": 128},
+        {"unit_type": "Boyz", "col": 128, "row": 128},
+        {"unit_type": "Boyz", "col": 134, "row": 128},
+        {"unit_type": "Boyz", "col": 113, "row": 132},
+        {"unit_type": "Boyz", "col": 119, "row": 132},
+        {"unit_type": "Boyz", "col": 125, "row": 132},
+        {"unit_type": "Boyz", "col": 131, "row": 132},
+        {"unit_type": "BoyzNobKombi", "col": 139, "row": 132},
+        {"unit_type": "Bigboss", "col": 145, "row": 126},
+        {"unit_type": "BannerNob", "col": 148, "row": 134}
       ]
     },
     {
@@ -69,11 +69,11 @@
       ]
     },
     {
-      "id": 102, "unit_type": "EradicatorHeavyBolter", "player": 2, "col": 105, "row": 88,
+      "id": 102, "unit_type": "EradicatorHeavyBolter", "player": 2, "col": 105, "row": 80,
       "models": [
-        {"unit_type": "EradicatorHeavyBolter", "col": 105, "row": 88},
-        {"unit_type": "EradicatorHeavyBolter", "col": 115, "row": 88},
-        {"unit_type": "EradicatorHeavyBolterSergeant", "col": 125, "row": 88}
+        {"unit_type": "EradicatorHeavyBolter", "col": 105, "row": 80},
+        {"unit_type": "EradicatorHeavyBolter", "col": 115, "row": 80},
+        {"unit_type": "EradicatorHeavyBolterSergeant", "col": 125, "row": 80}
       ]
     },
     { "id": 103, "unit_type": "LandSpeederOnslaughtGatlingCannon", "player": 2, "col": 106, "row": 65 },

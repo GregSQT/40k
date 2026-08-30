@@ -747,31 +747,25 @@ body {
 .test-start-overlay:has(.terrain-opt-mc2.test-start-modal__terrain-option--active) .preview-mc2 {
   display: block;
 }
-
-/* switch on hover */
-.test-start-overlay:has(.terrain-opt-mc1:hover) .preview-mc1 {
+.test-start-overlay:has(.terrain-opt-pfm2.test-start-modal__terrain-option--active) .preview-pfm2 {
   display: block;
 }
-.test-start-overlay:has(.terrain-opt-mc1:hover) .preview-mc2 {
+
+/* switch on hover : masquer d'abord TOUTES les previews, puis révéler la survolée.
+   Le masquage global évite une règle par couple (option survolée, preview active) —
+   un terrain de plus n'exige que les deux règles qui le nomment. */
+.test-start-overlay:has(.test-start-modal__terrain-option:hover)
+  .test-start-modal__terrain-side-img {
   display: none;
+}
+.test-start-overlay:has(.terrain-opt-mc1:hover) .preview-mc1 {
+  display: block;
 }
 .test-start-overlay:has(.terrain-opt-mc2:hover) .preview-mc2 {
   display: block;
 }
-.test-start-overlay:has(.terrain-opt-mc2:hover) .preview-mc1 {
-  display: none;
-}
-.test-start-overlay:has(.terrain-opt-pfm2.test-start-modal__terrain-option--active) .preview-pfm2 {
-  display: block;
-}
 .test-start-overlay:has(.terrain-opt-pfm2:hover) .preview-pfm2 {
   display: block;
-}
-.test-start-overlay:has(.terrain-opt-pfm2:hover) .preview-mc1 {
-  display: none;
-}
-.test-start-overlay:has(.terrain-opt-pfm2:hover) .preview-mc2 {
-  display: none;
 }
 
 .test-start-modal__roster-error {
