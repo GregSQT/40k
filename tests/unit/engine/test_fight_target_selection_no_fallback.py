@@ -41,6 +41,7 @@ def _game_state(reward_configs: Dict[str, Any], fighter_type: str = "Intercessor
     return {
         "unit_by_id": {"1": fighter, "2": _unit("2"), "3": _unit("3")},
         "reward_configs": reward_configs,
+        "units_cache": {},
     }
 
 
@@ -100,7 +101,7 @@ class _ScriptedRewardMapper:
     def __init__(self, _config):
         pass
 
-    def get_shooting_priority_reward(self, _unit, target, _all_targets, _flag, _gs):
+    def get_shooting_priority_reward(self, _unit, target, _all_targets, _flag, _kill_flag, _gs):
         tid = str(target["id"])
         type(self).calls.append(tid)
         return type(self).scores[tid]

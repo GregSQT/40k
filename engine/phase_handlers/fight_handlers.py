@@ -16,7 +16,7 @@ from collections import deque
 from typing import Dict, List, Tuple, Set, Optional, Any, Mapping
 from .generic_handlers import end_activation
 from shared.data_validation import require_key
-from engine.utils.weapon_helpers import melee_weapons
+from engine.utils.weapon_helpers import melee_weapons, get_max_melee_damage
 from engine.action_log_utils import append_action_log
 from engine.game_utils import add_console_log, safe_print, enter_phase
 from engine.combat_utils import (
@@ -904,16 +904,37 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
         resolved.append((tid, t))
     all_targets = [t for _tid, t in resolved]
 
+    # Precompute max melee damage any OTHER alive friendly unit can deal (raw NB×DMG proxy).
+    # Used to populate melee_will_kill_target per target — guards P1 against over-rewarding
+    # softening a target that a friendly melee unit will already kill.
+    units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(unit_id)
+    unit_by_id_map = require_key(game_state, "unit_by_id")
+    friendly_max_melee: float = max(
+        (
+            get_max_melee_damage(unit_by_id_map[fuid])
+            for fuid, fentry in entries_on_battlefield(units_cache)
+            if fuid != unit_id_str
+            and int(require_key(fentry, "player")) == int(unit["player"])
+            and fuid in unit_by_id_map
+        ),
+        default=0.0,
+    )
+
     # Fight phase uses same priority logic as shooting — RewardMapper handles both.
     # `max` retient le PREMIER maximum : même sémantique de départage que l'ancienne
     # comparaison `>` stricte, donc sélection STABLE à pool identique (déterminisme exigé
     # par §8.1 — l'assignation de crédit PPO se brouille si l'ordre varie).
     # L'ancienne sentinelle `best_reward = -999999` est retirée : depuis que toute cible
     # non résolue lève, il n'existe plus de cas où aucun candidat n'est scoré (V11 §0.19.3).
+    def _melee_will_kill(target: Dict[str, Any]) -> bool:
+        hp = get_hp_from_cache(str(target["id"]), game_state)
+        return hp is not None and hp > 0 and friendly_max_melee >= hp
+
     best_target, _best_unit = max(
         resolved,
         key=lambda pair: reward_mapper.get_shooting_priority_reward(
-            unit, pair[1], all_targets, False, game_state
+            unit, pair[1], all_targets, False, _melee_will_kill(pair[1]), game_state
         ),
     )
     return best_target
