@@ -1239,10 +1239,12 @@ class ObservationBuilder:
         ⚠️ Les tableaux renvoyés sont ceux du cache : l'appelant les écrit dans l'observation par
         affectation numpy (copie) et ne les mute jamais.
         """
-        from engine.game_state import WAAAGH_INVUL_SAVE, waaagh_applies_to_unit
+        from engine.game_state import effective_invul_save
 
         entity_unit = require_unit_by_id(game_state, str(squad_id))
-        waaagh_invul = waaagh_applies_to_unit(game_state, entity_unit)
+        # _effective_invul_floor : invul effective sur une fig sans invul native (valeur sentinelle 7).
+        # Capture Waaagh! ET invul_save_override d'un seul appel, pour la clé de cache.
+        _effective_invul_floor = effective_invul_save(game_state, entity_unit, 7)
         _types_cache = game_state.setdefault("_entity_types_cache", {})
         # Les attributs définissant le TYPE (role, HP_MAX, T, saves) font partie de la clé :
         # `alive_mids` seul ne change pas quand une figurine est mutée en cours de test ou
@@ -1258,7 +1260,7 @@ class ObservationBuilder:
             )
             for mid in alive_mids
         )
-        _types_key = (squad_id, tuple(alive_mids), bool(waaagh_invul), _type_attrs)
+        _types_key = (squad_id, tuple(alive_mids), _effective_invul_floor, _type_attrs)
         _types_hit = _types_cache.get(_types_key)
         if _types_hit is not None:
             return _types_hit
@@ -1275,20 +1277,11 @@ class ObservationBuilder:
                 f"[OBS] escouade {squad_id} : {len(types)} types de figurines pour "
                 f"{self.K_MODEL_TYPES} slots — les moins prioritaires ne sont pas observes.",
             )
-        # Waaagh! (chantier 03) : « models from your army with this ability have a 5+ invulnerable
-        # save ». La sauvegarde EFFECTIVE, pas celle de la datasheet — c'est elle que la
-        # résolution appliquera, et rien d'autre dans l'observation ne permettrait de la déduire
-        # (aucune feature ne dit « cette entité est orke », et les slots de capacité ne portent
-        # pas les effets de faction, par construction). Le facteur est uniforme sur l'unité :
-        # il ne change donc ni le regroupement par type ni leur ordre, calculés au-dessus.
-        # Le prédicat est évalué UNE fois pour l'entité, pas par type de figurine : il ne dépend
-        # que de l'unité, et cette boucle tourne jusqu'à `K_MODEL_TYPES` fois — pour 28 entités,
-        # à CHAQUE step gym. Seul l'octroi lui-même reste dans la boucle, car il dépend de
-        # l'invulnérable propre à chaque type (une 4+ existante est conservée).
+        # InSv effective par type : effective_invul_save couvre Waaagh! (chantier 03) ET
+        # invul_save_override (chantier 06, 19.04). Jumeau de _encode_unit_entity l.1457.
         for t_idx in range(min(self.K_MODEL_TYPES, len(types))):
             (role, hp_max, toughness, save, invul), count = types[t_idx]
-            if waaagh_invul:
-                invul = min(int(invul), WAAAGH_INVUL_SAVE)
+            invul = effective_invul_save(game_state, entity_unit, int(invul))
             cont[t_idx] = (
                 float(hp_max), float(toughness), float(save), float(invul), float(count)
             )
