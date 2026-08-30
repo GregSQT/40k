@@ -4688,7 +4688,7 @@ def _manual_roll_fight_intent(
     )
     _finest_hour_active = False
     if _finest_hour_args is not None:
-        _squad_id_fh = str(attacker_unit.get("id", ""))  # get allowed
+        _squad_id_fh = str(require_key(attacker_unit, "id"))
         _finest_hour_used = game_state.setdefault("finest_hour_used", set())
         if _squad_id_fh not in _finest_hour_used:
             n_attacks += int(require_key(_finest_hour_args, "attacks_bonus"))

@@ -2274,7 +2274,7 @@ def _unit_has_rule_effect(unit: Dict[str, Any], rule_id: str) -> bool:
     """
     Check if unit has rule_id directly or through grants_rule_ids.
     """
-    unit_rules = require_key(unit, "UNIT_RULES")
+    unit_rules = unit.get("UNIT_RULES", [])
     target_effect_rule_id = _resolve_effect_rule_id_to_technical(rule_id)
     for rule in unit_rules:
         resolved_effect_ids = _resolve_unit_rule_entry_effect_rule_ids(rule)
@@ -10290,7 +10290,7 @@ def _manual_roll_intent(
     if _waaagh_energy_args is not None and weapon.get("code") == _waaagh_energy_args.get("weapon_code"):  # get allowed
         _we_per_count = int(_waaagh_energy_args.get("per_count", 5))  # get allowed
         _we_str_bonus = int(_waaagh_energy_args.get("str_bonus", 0))  # get allowed
-        _we_squad_id = str(attacker_unit.get("id", ""))  # get allowed
+        _we_squad_id = str(require_key(attacker_unit, "id"))
         _we_model_count = sum(
             1 for m in game_state.get("squad_models", {}).get(_we_squad_id, [])  # get allowed
             if m in models_cache
@@ -10388,7 +10388,7 @@ def _manual_roll_intent(
     if (_od_args is not None
             and weapon.get("code") == _od_args.get("weapon_code")  # get allowed
             and _target_is_non_mv):
-        _od_tgt_size = int(intent.get("target_squad_size_at_declaration", 0))  # get allowed
+        _od_tgt_size = int(require_key(intent, "target_squad_size_at_declaration"))
         n_attacks += _od_tgt_size // 5
     # Waaagh! Energy +D : les scalings _we_n_scalings et _waaagh_energy_args sont du Bloc A.
     if _we_n_scalings > 0 and _waaagh_energy_args is not None:
@@ -11017,7 +11017,7 @@ def _count_selected_hazardous_weapons(
     # (Waaagh! Energy, WeirdBoy 'Eadbanger a 10+ figurines dans l unite).
     from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args as _pB_hz
     conditional_hazardous: set = set()
-    unit_by_id = game_state.get("unit_by_id") or {}  # get allowed
+    unit_by_id = require_key(game_state, "unit_by_id")
     for intent in intents:
         mid = str(require_key(intent, "model_id"))
         widx = int(require_key(intent, "weapon_index"))
@@ -12115,6 +12115,8 @@ def _select_fight_weapon_indices_for_fig(
     melee_bonus: int = 0,
     hit_bonus: int = 0,
     hit_malus: int = 0,
+    attacker_unit: Optional[Dict[str, Any]] = None,
+    game_state: Optional[Dict[str, Any]] = None,
 ) -> List[int]:
     """Armes de melee SELECTIONNEES par une figurine (Select Weapons step, 04.01).
 
@@ -12138,6 +12140,7 @@ def _select_fight_weapon_indices_for_fig(
         attacker, target_t, target_sv, target_invul, target_unit,
         excluded_indices=frozenset(extra),
         melee_bonus=melee_bonus, hit_bonus=hit_bonus, hit_malus=hit_malus,
+        attacker_unit=attacker_unit, game_state=game_state,
     )
     # « if possible » : une figurine qui n a QUE des armes EXTRA ATTACKS n en ajoute pas d autre.
     return ([main] if main is not None else []) + extra
@@ -12151,6 +12154,8 @@ def _auto_select_cc_weapon_for_fig(
     melee_bonus: int = 0,
     hit_bonus: int = 0,
     hit_malus: int = 0,
+    attacker_unit: Optional[Dict[str, Any]] = None,
+    game_state: Optional[Dict[str, Any]] = None,
 ) -> Optional[int]:
     """Choisit l arme de melee maximisant l esperance de degats, REGLES D ARME COMPRISES.
 
@@ -12198,7 +12203,9 @@ def _auto_select_cc_weapon_for_fig(
         # invalide, elle doit lever (l ancien try/except la remplacait par 1.0 en silence).
         dmg = float(expected_dice_value(require_key(w, "DMG"), "auto_select_cc_dmg"))
         n_attacks = float(expected_dice_value(require_key(w, "NB"), "auto_select_cc_nb")) + int(melee_bonus)
-        profile = build_weapon_attack_profile(w, target_unit)
+        profile = build_weapon_attack_profile(
+            w, target_unit, attacker_unit=attacker_unit, game_state=game_state, is_melee=True
+        )
         score = n_attacks * expected_damage_per_attack(
             profile,
             hit_target=apply_hit_roll_modifiers(ws, hit_bonus, hit_malus),
@@ -12280,6 +12287,7 @@ def squad_declare_fight(
         selected_indices = _select_fight_weapon_indices_for_fig(
             m, target_t, target_sv, target_invul, target_unit_for_select,
             melee_bonus=melee_bonus, hit_bonus=_hit_bonus, hit_malus=_hit_malus,
+            attacker_unit=attacker_unit_for_select, game_state=game_state,
         )
         if not selected_indices:
             continue

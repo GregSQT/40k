@@ -65,7 +65,7 @@ def _unit_get_primitive_b_rule_args(
         return None
     for entry in unit.get("UNIT_RULES", []):  # get allowed
         if isinstance(entry, dict) and entry.get("ruleId") == rule_id:  # get allowed
-            return entry.get("rule_args") or {}  # get allowed
+            return entry.get("rule_args")  # None si absent — les appelants guettent is not None
     return None
 
 
@@ -246,7 +246,7 @@ def build_weapon_attack_profile(
             sustained = max(sustained, 1)
         # grant_weapon_rule_melee_after_charge : [LETHAL HITS] au tour ou l unite a charge
         if _unit_has_primitive_b_rule(attacker_unit, "grant_weapon_rule_melee_after_charge"):
-            squad_id = str(attacker_unit.get("id", ""))  # get allowed
+            squad_id = str(require_key(attacker_unit, "id"))
             if game_state is not None and squad_id in game_state.get("units_charged", set()):  # get allowed
                 lethal = True
     # once_per_battle_melee_buff : [DEVASTATING WOUNDS] (Finest Hour, CaptainRelicShield).
