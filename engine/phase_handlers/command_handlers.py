@@ -507,8 +507,8 @@ def command_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     08.05 END OF PHASE — end command phase and transition to move phase.
 
-    Point d'accrochage des capacités « at the end of your Command phase » (Get da Good Bitz,
-    chantier 06).
+    Point d'accrochage des capacités « at the end of your Command phase » (Get da Good Bitz /
+    Objective Secured : `secure_objective_on_control`, Primitive E chantier 06).
 
     CRITICAL: Returns ONLY the dict, does NOT call movement_phase_start() directly.
     The cascade loop in w40k_core.py handles the transition automatically.
@@ -516,12 +516,15 @@ def command_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
     from engine.game_utils import add_console_log
     add_console_log(game_state, "COMMAND PHASE COMPLETE")
 
+    from engine.game_state import apply_secure_objective_on_control
+    apply_secure_objective_on_control(game_state)
+
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")
     turn = game_state.get("turn", "?")
     command_pool = require_key(game_state, "command_activation_pool")
     add_debug_file_log(game_state, f"[POOL PRE-TRANSITION] E{episode} T{turn} command command_activation_pool={command_pool}")
-    
+
     # Return only the dict - cascade loop will call movement_phase_start()
     return {
         "phase_complete": True,

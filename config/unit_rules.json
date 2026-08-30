@@ -307,5 +307,19 @@
     "has_parameter": true,
     "parameter_name": "mw_on_6",
     "description": "Primitive D (chantier 06) : a la selection en combat, lance D6 : 4-5 -> D3 BM, 6 -> mw_on_6 BM sur un ennemi engage au choix du joueur (decision agent mortal_wounds_target). Porte par Exhortation de Rage (ChaplainJumpPack), mw_on_6=3."
+  },
+  "secure_objective_on_control": {
+    "id": "secure_objective_on_control",
+    "obs_id": 33,
+    "name": "Secure objective on control",
+    "description": "Primitive E (chantier 06) : en fin de phase de commandement, si l unite controle un objectif, cet objectif est securise pour ce joueur — l adversaire doit avoir STRICTEMENT plus d OC pour le reprendre (14.03). Textes identiques dans les deux PDF : une seule regle, deux declarations (Get da Good Bitz / Boyz, Objective Secured / Intercessor)."
+  },
+  "oc_bonus": {
+    "id": "oc_bonus",
+    "obs_id": 34,
+    "name": "OC bonus",
+    "has_parameter": true,
+    "parameter_name": "oc_bonus",
+    "description": "Primitive E (chantier 06) : ajoute oc_bonus a la caracteristique OC de chaque figurine de l unite pour le controle d objectif (14.02). Porte par Relic Banner (Ancient), oc_bonus=1."
   }
 }
