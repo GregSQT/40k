@@ -142,13 +142,13 @@
         },
         "bot_training": {
             "ratios": {
-                "alpha": 0.14,
+                "alpha": 0.16,
                 "attrition": 0.14,
-                "decapitation": 0.14,
+                "decapitation": 0.16,
                 "endgame": 0.14,
-                "racer": 0.14,
-                "scorer": 0.14,
-                "random": 0.16
+                "racer": 0.10,
+                "scorer": 0.21,
+                "random": 0.09
             },
             "randomness": {
                 "alpha": 0.05,
@@ -337,13 +337,13 @@
         },
         "bot_training": {
             "ratios": {
-                "alpha": 0.14,
+                "alpha": 0.16,
                 "attrition": 0.14,
-                "decapitation": 0.14,
+                "decapitation": 0.16,
                 "endgame": 0.14,
-                "racer": 0.14,
-                "scorer": 0.14,
-                "random": 0.16
+                "racer": 0.10,
+                "scorer": 0.21,
+                "random": 0.09
             },
             "randomness": {
                 "alpha": 0.05,
@@ -525,13 +525,13 @@
         },
         "bot_training": {
             "ratios": {
-                "alpha": 0.14,
+                "alpha": 0.16,
                 "attrition": 0.14,
-                "decapitation": 0.14,
+                "decapitation": 0.16,
                 "endgame": 0.14,
-                "racer": 0.14,
-                "scorer": 0.14,
-                "random": 0.16
+                "racer": 0.10,
+                "scorer": 0.21,
+                "random": 0.09
             },
             "randomness": {
                 "alpha": 0.05,
@@ -717,13 +717,13 @@
         },
         "bot_training": {
             "ratios": {
-                "alpha": 0.14,
+                "alpha": 0.16,
                 "attrition": 0.14,
-                "decapitation": 0.14,
+                "decapitation": 0.16,
                 "endgame": 0.14,
-                "racer": 0.14,
-                "scorer": 0.14,
-                "random": 0.16
+                "racer": 0.10,
+                "scorer": 0.21,
+                "random": 0.09
             },
             "randomness": {
                 "alpha": 0.05,
@@ -912,13 +912,13 @@
         },
         "bot_training": {
             "ratios": {
-                "alpha": 0.14,
+                "alpha": 0.16,
                 "attrition": 0.14,
-                "decapitation": 0.14,
+                "decapitation": 0.16,
                 "endgame": 0.14,
-                "racer": 0.14,
-                "scorer": 0.14,
-                "random": 0.16
+                "racer": 0.10,
+                "scorer": 0.21,
+                "random": 0.09
             },
             "randomness": {
                 "alpha": 0.05,
@@ -1103,13 +1103,13 @@
         },
         "bot_training": {
             "ratios": {
-                "alpha": 0.14,
+                "alpha": 0.16,
                 "attrition": 0.14,
-                "decapitation": 0.14,
+                "decapitation": 0.16,
                 "endgame": 0.14,
-                "racer": 0.14,
-                "scorer": 0.14,
-                "random": 0.16
+                "racer": 0.10,
+                "scorer": 0.21,
+                "random": 0.09
             },
             "randomness": {
                 "alpha": 0.05,
