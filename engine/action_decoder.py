@@ -96,6 +96,13 @@ DEPLOY_SLOT_CANDIDATES_CACHE_KEY = "_deployment_slot_candidates"
 #: FIGHT_WEAPON_SLOT (arme). Valeur : `{"squad_id": str, "target_id": str,
 #: "slot_to_code": Dict[int, str]}`. Absente tant qu'aucune sélection d'arme n'est attendue.
 PENDING_FIGHT_WEAPON_KEY = "pending_fight_weapon_select"
+#: Clé du `game_state` portant la RE-sélection de cible de mêlée. Valeur :
+#: `{"squad_id": str, "slot_to_target": Dict[int, str]}`. Posée quand la cible désignée par
+#: l'action a été tuée PENDANT l'activation (Exhortation de Rage, 06 Primitive D) et que le
+#: pile-in overrun 12.06 en a rendu PLUSIEURS autres frappables : le masque ne pouvait pas
+#: anticiper le D6, donc la cible est redemandée au lieu d'être choisie par le moteur.
+#: Une seule cible restante ne pose pas cet état (aucun choix à faire).
+PENDING_FIGHT_TARGET_KEY = "pending_fight_target_select"
 #: Clé du `game_state` portant l'état de split-fire en cours (P3-8). Valeur :
 #: `{"squad_id": str, "shooting_type": str, "pending_weapon": Optional[str],
 #:  "assignments": Dict[str, str],      # weapon_code -> target_id
@@ -524,6 +531,16 @@ class ActionDecoder:
         if pending_fw is not None:
             for slot_j in pending_fw["slot_to_code"]:
                 mask[FIGHT_WEAPON_SLOT_BASE + slot_j] = True
+            return mask, []
+
+        # ─── 1b-bis. RE-SÉLECTION DE CIBLE CC (Exhortation de Rage + overrun 12.06) ───
+        # Même doctrine que 1b : pool vide, exclusivité, early-return. Le moteur est arrêté
+        # entre la mort de la cible désignée et la résolution ; les slots ouverts sont ceux
+        # du pool 12.05 recalculé APRÈS le pile-in overrun, seule source du commit.
+        pending_ft = game_state.get(PENDING_FIGHT_TARGET_KEY)
+        if pending_ft is not None:
+            for slot_i in pending_ft["slot_to_target"]:
+                mask[SQUAD_ACTION_FIGHT_SLOT_BASE + slot_i] = True
             return mask, []
 
         # ─── 1c. SPLIT-FIRE (P3-8) ───
@@ -1196,6 +1213,29 @@ class ActionDecoder:
                 "action": "squad_fight_weapon",
                 "squad_id": str(pending_fw["squad_id"]),
                 "weapon_slot": weapon_slot,
+            }
+
+        # Re-sélection de la cible CC après la mort de la cible désignée (Exhortation de Rage) :
+        # prime sur la phase pour la MÊME raison que le choix d'arme ci-dessus — l'escouade est
+        # déjà enregistrée dans la pool 12.04, donc `eligible_units` est vide et la branche
+        # FIGHT_SLOT ordinaire n'a plus de `squad_id` à lire. Le pending est la source unique.
+        pending_ft = game_state.get(PENDING_FIGHT_TARGET_KEY)
+        if pending_ft is not None and (
+            SQUAD_ACTION_FIGHT_SLOT_BASE
+            <= action_int
+            < SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT
+        ):
+            target_slot = action_int - SQUAD_ACTION_FIGHT_SLOT_BASE
+            if target_slot not in pending_ft["slot_to_target"]:
+                raise ValueError(
+                    f"convert_squad_action: FIGHT_SLOT slot {target_slot} non éligible à la "
+                    f"re-sélection (éligibles : {sorted(pending_ft['slot_to_target'])}) — "
+                    "rupture masque/commit"
+                )
+            return {
+                "action": "squad_fight_target_sel",
+                "squad_id": str(pending_ft["squad_id"]),
+                "target_slot": target_slot,
             }
 
         # Choix de l'escouade à activer : prime sur la phase pour la MÊME raison que les CHOICE

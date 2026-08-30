@@ -1024,8 +1024,9 @@ def _fight_phase_complete(game_state: Dict[str, Any]) -> Dict[str, Any]:
     Partie B (`_fight_end_progression_v10`) : progression joueur/tour, déclenchée immédiatement
     si la queue est vide, sinon différée jusqu'à résolution de tous les pendings.
     """
-    from engine.action_decoder import PENDING_FIGHT_WEAPON_KEY
+    from engine.action_decoder import PENDING_FIGHT_TARGET_KEY, PENDING_FIGHT_WEAPON_KEY
     game_state.pop(PENDING_FIGHT_WEAPON_KEY, None)
+    game_state.pop(PENDING_FIGHT_TARGET_KEY, None)
 
     # Clear alternation tracking state
     if "fight_alternating_turn" in game_state:

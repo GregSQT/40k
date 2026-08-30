@@ -39,6 +39,9 @@ def _gs():
 
 class _FakeEngine:
     _continue_squad_fight_after_selection = wcore.W40KEngine._continue_squad_fight_after_selection
+    # Extraits par la re-sélection de cible CC : le combat à vide traverse les deux.
+    _fight_target_after_designated_death = wcore.W40KEngine._fight_target_after_designated_death
+    _fight_resolve_with_target = wcore.W40KEngine._fight_resolve_with_target
     _fight_v11_gym_settle = lambda self: None
 
     def __init__(self, gs):

@@ -1106,6 +1106,31 @@ def test_le_predicat_de_pause_couvre_les_quatre_mecanismes_de_choix() -> None:
     assert engine_is_paused_on_player_choice(
         {**base, "pending_fight_weapon_select": {"unit_id": "u2", "weapons": []}}
     ) is True
+    # Re-sélection de cible CC (Exhortation de Rage + overrun 12.06) : le pool est vide et
+    # ACTION_WAIT hors masque, exactement comme pour la sélection d'arme ci-dessus.
+    assert engine_is_paused_on_player_choice(
+        {**base, "pending_fight_target_select": {"squad_id": "u3", "slot_to_target": {1: "A"}}}
+    ) is True
+
+
+def test_le_tirage_repond_a_la_reselection_de_cible_cc() -> None:
+    """`random_action_for_pending_choice` doit rendre un FIGHT_SLOT ouvert, pas `None`.
+
+    Sans l'entrée dans `_PLAYER_CHOICE_MECHANISMS`, les quatre replis « pool vide -> WAIT »
+    renvoient `ACTION_WAIT` (hors masque) et `convert_squad_action` lève.
+    """
+    import numpy as np
+
+    from ai.env_wrappers import random_action_for_pending_choice
+
+    gs = {"pending_fight_target_select": {"squad_id": "u3", "slot_to_target": {1: "A", 3: "B"}}}
+    mask = np.zeros(mi.TOTAL_ACTION_SIZE, dtype=bool)
+    mask[mi.FIGHT_SLOT_BASE + 1] = True
+    mask[mi.FIGHT_SLOT_BASE + 3] = True
+
+    action = random_action_for_pending_choice(gs, mask, "test")
+
+    assert action in {mi.FIGHT_SLOT_BASE + 1, mi.FIGHT_SLOT_BASE + 3}
 
 
 def test_bot_joue_un_slot_d_oath_au_lieu_d_un_wait_hors_masque() -> None:
