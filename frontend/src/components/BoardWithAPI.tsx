@@ -741,8 +741,32 @@ export const BoardWithAPI: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("terrain");
     if (t === "mc1" || t === "mc2") return t;
-    return params.get("mode") === "pve" ? "mc1" : "mc2";
+    if (params.get("mode") === "pve") return "mc1";
+    const saved = localStorage.getItem("gameprep_terrain");
+    if (saved === "mc1" || saved === "mc2") return saved;
+    return "mc2";
   });
+  const [saveConfigAsDefault, setSaveConfigAsDefault] = useState(
+    () =>
+      localStorage.getItem("gameprep_terrain") !== null ||
+      localStorage.getItem("gameprep_roster_p1") !== null ||
+      localStorage.getItem("gameprep_roster_p2") !== null
+  );
+  const [currentRosterFile, setCurrentRosterFile] = useState<{
+    p1: string | null;
+    p2: string | null;
+  }>({
+    p1: null,
+    p2: null,
+  });
+  const [rosterNotFoundError, setRosterNotFoundError] = useState<{
+    p1: string | null;
+    p2: string | null;
+  }>({
+    p1: null,
+    p2: null,
+  });
+  const hasAutoAppliedRostersRef = useRef(false);
   const [modalPos, setModalPos] = useState<{ x: number; y: number } | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const modalDragStartRef = useRef<{
@@ -803,6 +827,44 @@ export const BoardWithAPI: React.FC = () => {
     },
     [endlessDutyDefaultPicks]
   );
+
+  const isPopupVisible =
+    isRosterSetupMode &&
+    apiProps.gameState?.phase === "deployment" &&
+    apiProps.gameState?.deployment_type === "active" &&
+    !testDeploymentStarted;
+
+  useEffect(() => {
+    if (!isPopupVisible || hasAutoAppliedRostersRef.current || !apiProps.changeRoster) return;
+    hasAutoAppliedRostersRef.current = true;
+
+    const savedP1 = localStorage.getItem("gameprep_roster_p1");
+    const savedP2 = localStorage.getItem("gameprep_roster_p2");
+    if (!savedP1 && !savedP2) return;
+
+    const changeRoster = apiProps.changeRoster;
+
+    const applyAll = async () => {
+      if (savedP1) {
+        try {
+          await changeRoster(savedP1, 1);
+          setCurrentRosterFile((prev) => ({ ...prev, p1: savedP1 }));
+        } catch {
+          setRosterNotFoundError((prev) => ({ ...prev, p1: "Roster enregistré introuvable" }));
+        }
+      }
+      if (savedP2) {
+        try {
+          await changeRoster(savedP2, 2);
+          setCurrentRosterFile((prev) => ({ ...prev, p2: savedP2 }));
+        } catch {
+          setRosterNotFoundError((prev) => ({ ...prev, p2: "Roster enregistré introuvable" }));
+        }
+      }
+    };
+
+    void applyAll();
+  }, [isPopupVisible, apiProps.changeRoster]);
 
   useEffect(() => {
     if (gameMode !== "endless_duty") {
@@ -980,6 +1042,11 @@ export const BoardWithAPI: React.FC = () => {
     try {
       const targetPlayer = isRosterSetupMode ? rosterPickerPlayer : undefined;
       await apiProps.changeRoster(armyFile, targetPlayer);
+      if (isRosterSetupMode) {
+        const playerKey = rosterPickerPlayer === 1 ? "p1" : "p2";
+        setCurrentRosterFile((prev) => ({ ...prev, [playerKey]: armyFile }));
+        setRosterNotFoundError((prev) => ({ ...prev, [playerKey]: null }));
+      }
       closeRosterPicker();
     } catch (err) {
       setRosterPickerError(err instanceof Error ? err.message : "Failed to change roster");
@@ -4765,6 +4832,11 @@ export const BoardWithAPI: React.FC = () => {
                       >
                         Change Roster
                       </button>
+                      {rosterNotFoundError.p1 && (
+                        <span className="test-start-modal__roster-error">
+                          {rosterNotFoundError.p1}
+                        </span>
+                      )}
                     </div>
                     <div className="test-start-modal__roster-row">
                       <span className="test-start-modal__player-label">{p2DisplayName} :</span>
@@ -4775,6 +4847,11 @@ export const BoardWithAPI: React.FC = () => {
                       >
                         Change Roster
                       </button>
+                      {rosterNotFoundError.p2 && (
+                        <span className="test-start-modal__roster-error">
+                          {rosterNotFoundError.p2}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="test-start-modal__section test-start-modal__section--spaced">
@@ -4815,10 +4892,35 @@ export const BoardWithAPI: React.FC = () => {
                       </div>
                     </div>
                   </div>
+                  <label className="test-start-modal__default-config">
+                    <input
+                      type="checkbox"
+                      checked={saveConfigAsDefault}
+                      onChange={(e) => setSaveConfigAsDefault(e.target.checked)}
+                    />
+                    Garder cette configuration par défaut
+                  </label>
                   <button
                     type="button"
                     className="test-start-bar__button"
                     onClick={() => {
+                      if (saveConfigAsDefault) {
+                        localStorage.setItem("gameprep_terrain", selectedTerrain);
+                        if (currentRosterFile.p1) {
+                          localStorage.setItem("gameprep_roster_p1", currentRosterFile.p1);
+                        } else {
+                          localStorage.removeItem("gameprep_roster_p1");
+                        }
+                        if (currentRosterFile.p2) {
+                          localStorage.setItem("gameprep_roster_p2", currentRosterFile.p2);
+                        } else {
+                          localStorage.removeItem("gameprep_roster_p2");
+                        }
+                      } else {
+                        localStorage.removeItem("gameprep_terrain");
+                        localStorage.removeItem("gameprep_roster_p1");
+                        localStorage.removeItem("gameprep_roster_p2");
+                      }
                       closeRosterPicker();
                       setTestDeploymentStarted(true);
                     }}
