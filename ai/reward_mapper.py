@@ -397,7 +397,7 @@ class RewardMapper:
             return False
         threats = {id(t): self._get_unit_threat(t) for t in all_targets}
         max_threat = max(threats.values())
-        target_threat = threats[id(target)]
+        target_threat = self._get_unit_threat(target)
         if target_threat != max_threat:
             return False
         target_hp = self._get_target_hp(target, game_state)

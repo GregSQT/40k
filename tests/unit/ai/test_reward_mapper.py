@@ -240,3 +240,16 @@ def test_shoot_charge_and_combat_priority_rewards(monkeypatch: pytest.MonkeyPatc
 def test_is_lowest_hp_high_threat_empty_targets() -> None:
     mapper = RewardMapper(_base_cfg())
     assert mapper._is_lowest_hp_high_threat({"id": "T"}, [], {}) is False
+
+
+def test_is_lowest_hp_high_threat_target_not_in_all_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """target is a different object than any element of all_targets (same content, distinct identity)."""
+    mapper = RewardMapper(_base_cfg())
+    target = {"id": "A"}
+    all_targets = [{"id": "A"}, {"id": "B"}]  # distinct objects, same id value
+    threat_map = {"A": 3.0, "B": 1.0}
+    hp_map = {"A": 5, "B": 8}
+    monkeypatch.setattr(mapper, "_get_unit_threat", lambda t: threat_map[t["id"]])
+    monkeypatch.setattr(mapper, "_get_target_hp", lambda t, gs: hp_map[t["id"]])
+    # Must not raise KeyError; target has highest threat and lowest HP among high-threat targets
+    assert mapper._is_lowest_hp_high_threat(target, all_targets, {}) is True
