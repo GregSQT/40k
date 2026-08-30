@@ -4891,7 +4891,7 @@ def _close_exploiter_stage(args, curriculum, stage, run_info) -> int:
     censored = run_info.get("exploiter_censored", False)
     win_rate_curve = run_info.get("exploiter_win_rate_curve", [])  # get allowed: absent si exploiter non lancé
     cfg = load_exploiter_config(curriculum)
-    budget_cap = int(require_key(cfg, "budget_cap"))
+    budget_cap = int(require_key(stage, "budget_cap"))
     win_rate_target = float(require_key(cfg, "win_rate_target"))
 
     if censored:
@@ -5704,7 +5704,7 @@ def main():
                         probe_cheap_n=int(require_key(_exploit_cfg, "probe_cheap_n")),
                         probe_confirm_n=int(require_key(_exploit_cfg, "probe_confirm_n")),
                         win_rate_target=float(require_key(_exploit_cfg, "win_rate_target")),
-                        budget_cap=int(require_key(_exploit_cfg, "budget_cap")),
+                        budget_cap=int(require_key(_stg, "budget_cap")),
                         intermediate_n_workers=_probe_n_workers,
                     )
                     _exploiter_extra_callbacks = [_exploiter_probe]

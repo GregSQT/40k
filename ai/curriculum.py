@@ -271,14 +271,14 @@ def validate_exploiter_protocol(
             "dans curriculum.json si la config de reference a change."
         )
     if profile_total_episodes is not None:
-        budget_cap = int(require_key(cfg, "budget_cap"))
+        budget_cap = int(require_key(stage, "budget_cap"))
         if profile_total_episodes < budget_cap:
             raise ValueError(
                 f"Etape exploiteur {stage_name} : le profil '{training_config_name}' a "
                 f"total_episodes={profile_total_episodes} < budget_cap={budget_cap}. "
                 "La branche de censure '>budget_cap' est inatteignable — le run s'arreterait "
                 "avant d'atteindre le plafond. Choisir un profil dont total_episodes >= budget_cap "
-                "ou abaisser budget_cap dans exploiter_config."
+                "ou abaisser budget_cap dans l'etape du curriculum."
             )
 
 
@@ -420,7 +420,6 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
         probe_cheap = int(cfg["probe_cheap_n"])
         probe_confirm = int(cfg["probe_confirm_n"])
         win_rate_target = float(cfg["win_rate_target"])
-        budget_cap = int(cfg["budget_cap"])
         if probe_every <= 0:
             raise ValueError(f"{source}: exploiter_config.probe_every_episodes doit etre > 0")
         if probe_cheap <= 0:
@@ -435,8 +434,6 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
                 f"{source}: exploiter_config.win_rate_target doit etre dans ]0,1] "
                 f"(got {win_rate_target})"
             )
-        if budget_cap <= 0:
-            raise ValueError(f"{source}: exploiter_config.budget_cap doit etre > 0")
     elif has_exploiter:
         raise KeyError(
             f"{source}: le curriculum a des etapes exploiteur mais pas de bloc "
@@ -445,6 +442,15 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
 
     for name in order:
         stage = require_stage(curriculum, name)
+        if is_exploiter_stage(stage):
+            bc = stage.get("budget_cap")
+            if bc is None:
+                raise KeyError(
+                    f"{source}: stages[{name}] est exploiteur mais n'a pas de 'budget_cap'. "
+                    "Ajouter 'budget_cap' dans l'etape."
+                )
+            if int(bc) <= 0:
+                raise ValueError(f"{source}: stages[{name}].budget_cap doit etre > 0")
         _validate_stage_hp_overrides(name, stage, source)
 
 

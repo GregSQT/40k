@@ -32,7 +32,6 @@ CURRICULUM = {
         "probe_cheap_n": 100,
         "probe_confirm_n": 500,
         "win_rate_target": 0.70,
-        "budget_cap": 50000,
     },
     "stages": {
         "P0": {
@@ -47,6 +46,7 @@ CURRICULUM = {
         "E1": {
             "role": "exploiter", "init": "from:P1", "warmup_episodes": 0,
             "ratio_start": 1.0, "ratio_end": 1.0,
+            "budget_cap": 50000,
             "pool": [{"kind": "champion", "members": ["P1"], "weight": 1.0}],
         },
     },
