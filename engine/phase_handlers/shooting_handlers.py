@@ -5188,7 +5188,7 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
     if (
         arg5 == 1
         and arg1 == ACTION
-        and arg3 == SHOOTING
+        and arg3 in (SHOOTING, ADVANCE)
         and _unit_has_rule(unit, "suppress_target_on_shooting")
     ):
         _suppress_target_id = unit.get("_last_shoot_target_id")

@@ -437,3 +437,52 @@ class TestModelsStatus:
         _activate(gs, "1")
         s = squad_shoot_models_status(gs, "1", "2")[0]
         assert s["can_shoot"] is False and s["exhausted"] is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# suppress_target_on_shooting : _last_shoot_target_id settée sur les 3 chemins PvP
+# ─────────────────────────────────────────────────────────────────────────────
+class TestLastShootTargetIdPvP:
+    """Finding F1 : _last_shoot_target_id doit être settée dans les 3 fonctions PvP de déclaration
+    (squad_declare_shoot_model, squad_declare_shoot_weapon, squad_declare_shoot_weapon_qty) afin
+    que suppress_target_on_shooting fonctionne en PvP (non plus seulement en gym)."""
+
+    def _gs(self):
+        atk = _unit(1, 1, [_m(5, 5, [STORM]), _m(5, 6, [STORM])], [STORM])
+        tgt = _unit(2, 2, [_m(5, 15, [STORM])], [STORM])
+        gs = _make_gs([atk, tgt])
+        _activate(gs, "1")
+        return gs
+
+    def test_declare_model_sets_last_shoot_target(self):
+        gs = self._gs()
+        squad_declare_shoot_model(gs, "1", "1#0", "2")
+        unit = gs["unit_by_id"]["1"]
+        assert unit.get("_last_shoot_target_id") == "2"
+
+    def test_declare_weapon_sets_last_shoot_target(self):
+        gs = self._gs()
+        squad_declare_shoot_weapon(gs, "1", 0, "2")
+        unit = gs["unit_by_id"]["1"]
+        assert unit.get("_last_shoot_target_id") == "2"
+
+    def test_declare_weapon_qty_sets_last_shoot_target(self):
+        atk = _unit(1, 1, [_m(5, 5, [STORM]), _m(5, 6, [STORM])], [STORM])
+        tgt = _unit(2, 2, [_m(5, 15, [STORM])], [STORM])
+        gs = _make_gs([atk, tgt])
+        _activate(gs, "1")
+        squad_declare_shoot_weapon_qty(gs, "1", "storm_bolter", 1, "2")
+        unit = gs["unit_by_id"]["1"]
+        assert unit.get("_last_shoot_target_id") == "2"
+
+    def test_first_target_wins_no_overwrite(self):
+        """Deuxième déclaration vers cible différente ne doit pas écraser la première."""
+        atk = _unit(1, 1, [_m(5, 5, [STORM]), _m(5, 6, [STORM])], [STORM])
+        tgt_a = _unit(2, 2, [_m(5, 15, [STORM])], [STORM])
+        tgt_b = _unit(3, 2, [_m(10, 15, [STORM])], [STORM])
+        gs = _make_gs([atk, tgt_a, tgt_b])
+        _activate(gs, "1")
+        squad_declare_shoot_model(gs, "1", "1#0", "2")
+        squad_declare_shoot_model(gs, "1", "1#1", "3")
+        unit = gs["unit_by_id"]["1"]
+        assert unit.get("_last_shoot_target_id") == "2"  # première cible conservée

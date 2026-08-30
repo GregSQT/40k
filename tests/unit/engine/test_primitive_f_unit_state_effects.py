@@ -450,3 +450,24 @@ def test_once_per_battle_melee_buff_exclu_obs_si_depense() -> None:
 
     assert obs_ids[rule_id] in ids_normal, "Buff doit être visible avant dépense"
     assert obs_ids[rule_id] not in ids_spent, "Buff ne doit pas être visible après dépense"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Finding F4 — _apply_return_destroyed_models lève si squad_cache absent (T1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_return_destroyed_models_leve_si_squad_cache_absent() -> None:
+    """Finding F4 : squad_cache obligatoire — require_key doit lever, jamais silencer.
+
+    Avant le fix, game_state.get('squad_cache', {}) retournait {} et faisait croire que
+    toutes les unités n'ont pas de cache entry, les ignorant silencieusement (T1).
+    """
+    from engine.phase_handlers.command_handlers import _apply_return_destroyed_models
+
+    gs = _state_with_painboy_and_destroyed(n_alive=2, n_destroyed=3)
+    del gs["squad_cache"]  # simuler l'absence du cache
+
+    from shared.data_validation import ConfigurationError
+
+    with pytest.raises(ConfigurationError):
+        _apply_return_destroyed_models(gs, 1)
