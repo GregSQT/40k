@@ -13,6 +13,7 @@ autre. Un suffixe oublié ramène deux terrains sur le même fichier et rougit i
 import json
 import os
 import pathlib
+from collections import Counter
 
 import pytest
 
@@ -20,6 +21,7 @@ from ai.unit_registry import UnitRegistry
 from config_loader import get_config_loader
 from engine.game_state import GameStateManager
 from services.api_server import (
+    MODES_WITH_TERRAIN_SELECTOR,
     TERRAIN_SCENARIO_SUFFIX_BY_MODE,
     TEST_SCENARIO_BOARD_MAP,
     VALID_TERRAIN_REFS,
@@ -36,10 +38,7 @@ _MODES = {
     "pve_test": "scenario_pve_test",
 }
 _MODES_A_BOARD_PATH = ("pvp_test", "pve_test")
-# Modes qui exposent le sélecteur de terrain, donc dont CHAQUE terrain doit mener à un décor.
-# `pve_test` en est exclu : son scénario de base ne déclare aucun `terrain_ref` et le popup de
-# préparation ne s'y affiche pas.
-_MODES_A_SELECTEUR = ("pve", "pvp", "pvp_test")
+_MODES_A_SELECTEUR = tuple(sorted(MODES_WITH_TERRAIN_SELECTOR))
 
 
 def _terrains(mode: str) -> list[str]:
@@ -104,7 +103,8 @@ def test_deux_terrains_ne_partagent_jamais_le_meme_fichier_de_terrain(mode: str)
         with open(_REPO_ROOT / _resolve(mode, terrain_ref), encoding="utf-8-sig") as f:
             par_terrain[terrain_ref] = json.load(f)["terrain_ref"]
 
-    doublons = [t for t, ref in par_terrain.items() if list(par_terrain.values()).count(ref) > 1]
+    counts = Counter(par_terrain.values())
+    doublons = [t for t, ref in par_terrain.items() if counts[ref] > 1]
     assert not doublons, (
         f"{mode} : les terrains {sorted(doublons)} pointent le même fichier "
         f"({par_terrain}) — le sélecteur afficherait le même plateau pour des choix différents"
