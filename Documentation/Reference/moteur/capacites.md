@@ -537,6 +537,8 @@ Le helper commun « infliger N blessures mortelles à une unité » existe : `de
 
 **Exhortation of Rage** : *« you can select one enemy unit it is engaged with »* — c'est un choix de joueur, donc une décision d'agent, pas une heuristique interne.
 
+**Exhortation of Rage — cible de mêlée invalidée.** Les MW sont appliquées APRÈS que l'agent a joué son `FIGHT_SLOT`, donc le masque ne peut pas anticiper le D6 : si elles tuent la cible désignée, ce `target_slot` pointe sur un mort sans qu'il y ait rupture masque/commit. 12.06 autorise alors un pile-in overrun qui peut rendre d'autres ennemis frappables (*« your unit is unengaged […] one additional pile-in move, then fights »*). Le moteur ne choisit jamais à la place de l'agent : une seule cible restante est frappée directement, plusieurs rouvrent les `FIGHT_SLOT` via `pending_fight_target_select` (jumeau de `pending_fight_weapon_select`), plus aucune donne un combat à vide.
+
 ## Primitive E — `objective_effects`
 
 **Sécurisation d'objectif et modification d'OC.**

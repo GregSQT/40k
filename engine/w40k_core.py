@@ -127,6 +127,7 @@ from engine.observation_builder import ObservationBuilder
 from engine.action_decoder import (
     DEPLOY_SLOT_CANDIDATES_CACHE_KEY,
     INGRESS_SLOT_CANDIDATES_CACHE_KEY,
+    PENDING_FIGHT_TARGET_KEY,
     PENDING_FIGHT_WEAPON_KEY,
     PENDING_SHOOT_WEAPON_SEL_KEY,
     ActionDecoder,
@@ -2249,8 +2250,9 @@ class W40KEngine(gym.Env):
             return observation, reward, terminated, truncated, info, out_mask
         if out_mask is None:
             # Masque de sortie non construit : on ne draine pas, et on ne le RECONSTRUIT pas. Les
-            # cinq etats concernes (`_build_observation_and_mask`) sont : retrait de coherence en
+            # six etats concernes (`_build_observation_and_mask`) sont : retrait de coherence en
             # attente (pending_coherency_removal), selection d'arme CC (PENDING_FIGHT_WEAPON_KEY),
+            # re-selection de cible CC (PENDING_FIGHT_TARGET_KEY),
             # decision d'agent en attente — masque reduit aux `CHOICE_i` —, la phase de deploiement
             # — au moins un slot de pose ouvert, `wait` n'y etant jamais seul —, et `game_over`.
             # Aucun ne peut produire un masque reduit a `wait` : la reponse du test est connue
@@ -5702,15 +5704,11 @@ class W40KEngine(gym.Env):
         l index de cible dans le mapping slot ennemi (None = combat à vide).
         """
         from engine.phase_handlers.fight_handlers import (
-            build_manual_fight_allocation,
             _fight_build_valid_target_pool,
-            fight_v11_current_pool,
             _fight_v11_engaged_now,
-            fight_weapon_eligible_slots,
         )
         from engine.phase_handlers.shared_utils import (
             _fight_overrun_pile_in_plan,
-            squad_fight_restart_activation,
             get_enemy_slot_mapping,
         )
         units_cache = require_key(self.game_state, "units_cache")
@@ -5753,13 +5751,22 @@ class W40KEngine(gym.Env):
                 )
             best_target_id = enemy_slot_ids[target_slot]
             if best_target_id is None or str(best_target_id) not in targets:
-                if targets:
-                    raise ValueError(
-                        f"_continue_squad_fight: slot {target_slot} -> {best_target_id!r} hors pool "
-                        f"12.05 {targets} pour squad {squad_id}"
-                    )
-                # Cible détruite par Exhortation de Rage (slot=None ou squad hors pool) — combat à vide.
-                best_target_id = None
+                # La cible désignée par l'action a été tuée PENDANT l'activation (Exhortation de
+                # Rage) : le masque ne pouvait pas anticiper le D6, ce n'est donc pas une rupture
+                # masque/commit. Le pool ci-dessus est celui d'APRÈS le pile-in overrun 12.06,
+                # que 12.06 autorise explicitement (« your unit is unengaged » → overrun fight,
+                # « one additional pile-in move, then fights »).
+                best_target_id = self._fight_target_after_designated_death(
+                    squad_id, targets, enemy_slot_ids
+                )
+                if best_target_id is None and targets:
+                    # Plusieurs cibles frappables : la cible reste un choix de l'agent (V11 §9
+                    # P3-1), redemandé au step suivant. L'état est posé par le helper.
+                    return True, {
+                        "action": "squad_fight",
+                        "squad_id": squad_id,
+                        "waiting_for_target_select": True,
+                    }
             else:
                 best_target_id = str(best_target_id)
         else:
@@ -5768,6 +5775,56 @@ class W40KEngine(gym.Env):
                     f"_continue_squad_fight: combat à vide pour {squad_id} mais pool {targets} non vide"
                 )
             best_target_id = None
+        return self._fight_resolve_with_target(squad_id, best_target_id)
+
+    def _fight_target_after_designated_death(
+        self, squad_id: str, targets: List[str], enemy_slot_ids: List[Optional[str]]
+    ) -> Optional[str]:
+        """Cible de remplacement quand celle désignée par l'action est morte à l'activation.
+
+        Retourne l'unique cible frappable s'il n'y en a qu'une (aucun choix à poser), sinon
+        pose `PENDING_FIGHT_TARGET_KEY` et retourne None : l'agent rejoue un FIGHT_SLOT.
+        Retourne None sans rien poser quand `targets` est vide (combat à vide 12.04/12.06).
+        """
+        from engine.phase_handlers.shared_utils import SQUAD_ACTION_FIGHT_SLOT_COUNT
+
+        if not targets:
+            return None
+        slot_to_target = {
+            slot_i: str(esid)
+            for slot_i, esid in enumerate(enemy_slot_ids[:SQUAD_ACTION_FIGHT_SLOT_COUNT])
+            if esid is not None and str(esid) in targets
+        }
+        if not slot_to_target:
+            # Cibles légales mais aucune n'occupe un slot : elles seraient INFRAPPABLES et le
+            # combat à vide donnerait des attaques perdues en silence. Même refus que le masque.
+            raise RuntimeError(
+                f"_continue_squad_fight: {len(targets)} cible(s) 12.05 {targets} pour "
+                f"{squad_id} mais aucun slot ennemi mappé — cible(s) infrappable(s)"
+            )
+        if len(slot_to_target) == 1:
+            return next(iter(slot_to_target.values()))
+        self.game_state[PENDING_FIGHT_TARGET_KEY] = {
+            "squad_id": str(squad_id),
+            "slot_to_target": slot_to_target,
+        }
+        return None
+
+    def _fight_resolve_with_target(
+        self, squad_id: str, best_target_id: Optional[str]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Résout le combat de `squad_id` sur `best_target_id` (None = combat à vide).
+
+        Extrait pour être partagé par le flux ordinaire et par la re-sélection de cible
+        (`squad_fight_target_sel`), qui reprend EXACTEMENT ici : le pile-in overrun a déjà
+        été commité et l'escouade déjà enregistrée dans la pool 12.04.
+        """
+        from engine.phase_handlers.fight_handlers import (
+            build_manual_fight_allocation,
+            fight_weapon_eligible_slots,
+        )
+        from engine.phase_handlers.shared_utils import squad_fight_restart_activation
+
         squad_fight_restart_activation(self.game_state, squad_id)
         if best_target_id is not None:
             slot_to_code = fight_weapon_eligible_slots(
@@ -7770,6 +7827,29 @@ class W40KEngine(gym.Env):
             # NOTE: la branche à vide déjà fait gym_settle en interne ; la branche weapon non.
             return result
 
+        elif action_name == "squad_fight_target_sel":
+            # Re-sélection de la cible CC après la mort de la cible désignée (Exhortation de
+            # Rage). `pending_fight_target_select` a été posé par `squad_fight` ci-dessus ;
+            # le pile-in overrun 12.06 est DÉJÀ commité et l'escouade DÉJÀ enregistrée dans la
+            # pool 12.04 : la reprise ne refait ni l'un ni l'autre.
+            pending_ft = self.game_state.pop(PENDING_FIGHT_TARGET_KEY, None)
+            if pending_ft is None:
+                raise RuntimeError(
+                    "squad_fight_target_sel: aucun état pending_fight_target_select — "
+                    "le masque n'aurait pas dû ouvrir un FIGHT_SLOT"
+                )
+            ft_squad_id = str(pending_ft["squad_id"])
+            ft_slot = int(semantic["target_slot"])
+            slot_to_target = pending_ft["slot_to_target"]
+            if ft_slot not in slot_to_target:
+                raise ValueError(
+                    f"squad_fight_target_sel: slot {ft_slot} non éligible "
+                    f"(éligibles : {sorted(slot_to_target)}) — rupture masque/commit"
+                )
+            return self._fight_resolve_with_target(
+                ft_squad_id, str(slot_to_target[ft_slot])
+            )
+
         elif action_name == "squad_fight_weapon":
             # V11 §0.69 : résolution du combat après sélection d'arme par l'agent.
             # `pending_fight_weapon_select` a été posé par la branche `squad_fight` ci-dessus.
@@ -8956,6 +9036,12 @@ class W40KEngine(gym.Env):
         pending_fw = self.game_state.get(PENDING_FIGHT_WEAPON_KEY)
         if pending_fw is not None:
             return _build_for_squad(str(pending_fw["squad_id"])), None
+
+        # Re-sélection de cible CC : même doctrine et même raison que le pending d'arme
+        # ci-dessus — pool vide, l'observateur DOIT rester l'escouade qui rejoue son FIGHT_SLOT.
+        pending_ft = self.game_state.get(PENDING_FIGHT_TARGET_KEY)
+        if pending_ft is not None:
+            return _build_for_squad(str(pending_ft["squad_id"])), None
 
         # Décision agent en attente (V11 §9.3 P2) : l'observateur est l'unité SUR LAQUELLE porte
         # la décision — c'est elle que les candidats concernent. La prendre ailleurs décrirait un

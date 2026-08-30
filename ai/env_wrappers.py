@@ -86,6 +86,15 @@ def _read_pending_fight_weapon_select(game_state: Dict[str, Any]) -> Any:
     return game_state.get("pending_fight_weapon_select")  # get allowed : None = aucune
 
 
+def _read_pending_fight_target_select(game_state: Dict[str, Any]) -> Any:
+    """Lecteur de la re-sélection de cible CC : ``None`` = aucune re-sélection en attente.
+
+    Armé quand l'Exhortation de Rage tue la cible désignée et que le pile-in overrun 12.06 en
+    rend plusieurs autres frappables : la cible est rejouée par un `FIGHT_SLOT`.
+    """
+    return game_state.get("pending_fight_target_select")  # get allowed : None = aucune
+
+
 def _read_pending_shoot_weapon_sel(game_state: Dict[str, Any]) -> Any:
     """Lecteur du split-fire tir (P3-8) — SHOOT_WEAPON_SEL : arme à sélectionner (pending_weapon None)."""
     sw = game_state.get("pending_shoot_weapon_split")  # get allowed : None = aucun split-fire
@@ -118,6 +127,7 @@ _PLAYER_CHOICE_MECHANISMS: Tuple[
     (_read_pending_oath_selection, mi.OATH_SLOTS, "designation d'Oath"),
     (_read_pending_coherency_removal, mi.COHERENCY_SLOTS, "retrait coherence"),
     (_read_pending_fight_weapon_select, mi.FIGHT_WEAPON_SLOTS, "arme CC"),
+    (_read_pending_fight_target_select, mi.FIGHT_SLOTS, "re-selection cible CC"),
     (_read_pending_shoot_weapon_sel, mi.SHOOT_WEAPON_SEL_SLOTS, "split-fire arme TIR"),
     (_read_pending_shoot_split_target, mi.SHOOT_SLOTS, "split-fire cible TIR"),
 )
