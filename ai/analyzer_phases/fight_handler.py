@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional, Tuple
 
 from ai.analyzer_perfig import parse_shooter_models_segment
 from ai.analyzer_rules import check_anti_x_threshold, note_rule_usage
-from ai.analyzer_phases import PHASE_ORDER
+from ai.analyzer_phases import died_before_phase
 from shared.data_validation import require_key
 
 if TYPE_CHECKING:
@@ -475,22 +475,7 @@ def handle_fight(
         # RULE: Dead unit Fighting (attacker is dead)
         attacker_is_dead = state.unit_hp.get(fighter_id, 0) <= 0
         if attacker_is_dead:
-            current_phase_order = require_key(PHASE_ORDER, phase)
-            attacker_died_before_fight = False
-            for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
-                if dead_unit_id == fighter_id:
-                    if death_turn < turn:
-                        attacker_died_before_fight = True
-                        break
-                    elif death_turn == turn:
-                        death_phase_order = require_key(PHASE_ORDER, death_phase)
-                        if death_phase_order < current_phase_order:
-                            attacker_died_before_fight = True
-                            break
-                        elif death_phase_order == current_phase_order and death_line_num < state.line_number:
-                            attacker_died_before_fight = True
-                            break
-            if attacker_died_before_fight:
+            if died_before_phase(fighter_id, turn, phase, state.line_number, state.unit_deaths):
                 attacker_player = require_key(state.unit_player, fighter_id)
                 stats['fight_dead_unit_attacker'][attacker_player] += 1
                 if stats['first_error_lines']['fight_dead_unit_attacker'][attacker_player] is None:
@@ -499,21 +484,7 @@ def handle_fight(
         # RULE: Fight a dead unit (target is dead)
         target_is_dead = state.unit_hp.get(target_id, 0) <= 0
         if target_is_dead:
-            current_phase_order = require_key(PHASE_ORDER, phase)
-            target_died_before_fight = False
-            for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
-                if dead_unit_id == target_id:
-                    if death_turn < turn:
-                        target_died_before_fight = True
-                        break
-                    elif death_turn == turn:
-                        death_phase_order = require_key(PHASE_ORDER, death_phase)
-                        if death_phase_order < current_phase_order:
-                            target_died_before_fight = True
-                            break
-                        elif death_phase_order == current_phase_order and death_line_num < state.line_number:
-                            target_died_before_fight = True
-                            break
+            target_died_before_fight = died_before_phase(target_id, turn, phase, state.line_number, state.unit_deaths)
             # Exception 05 Attack sequence : les attaques restantes de la MÊME activation
             # (même attaquant, même turn/phase) qui a détruit la cible sont des « excess
             # attacks lost », pas une attaque sur cadavre → ne pas compter.
