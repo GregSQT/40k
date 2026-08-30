@@ -2161,7 +2161,7 @@ export const BoardWithAPI: React.FC = () => {
     setIsDraggingRosterPicker(true);
   };
   const rosterPickerAboveStart =
-    gameMode === "pvp" &&
+    isRosterSetupMode &&
     apiProps.gameState?.phase === "deployment" &&
     apiProps.gameState?.deployment_type === "active" &&
     !testDeploymentStarted;
