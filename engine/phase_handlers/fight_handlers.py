@@ -4627,6 +4627,7 @@ def _manual_roll_fight_intent(
             "value": float(require_key(_tgt_uc, "VALUE")),
             "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
             "player": int(require_key(_tgt_uc, "player")),
+            "hp_before": int(require_key(_tgt_uc, "HP_CUR")),
         }
     weapon_index = int(intent.get("weapon_index", 0))  # get allowed
     weapons = melee_weapons(attacker)
