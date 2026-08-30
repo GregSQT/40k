@@ -2274,7 +2274,7 @@ def _unit_has_rule_effect(unit: Dict[str, Any], rule_id: str) -> bool:
     """
     Check if unit has rule_id directly or through grants_rule_ids.
     """
-    unit_rules = require_key(unit, "UNIT_RULES")
+    unit_rules = unit.get("UNIT_RULES", [])
     target_effect_rule_id = _resolve_effect_rule_id_to_technical(rule_id)
     for rule in unit_rules:
         resolved_effect_ids = _resolve_unit_rule_entry_effect_rule_ids(rule)
@@ -10279,6 +10279,23 @@ def _manual_roll_intent(
     # Attaquant (escouade) resolu ICI : sert closest_target_penetration (ci-dessous) ET les
     # rerolls to-wound (plus bas). Constant pour l intent.
     attacker_unit = require_unit_by_id(game_state, str(attacker["squad_id"]))
+    # Primitive B (chantier 06) — Bloc A : weapon_profile_scaling_by_model_count.
+    # +S et +D par tranche de per_count figurines (Waaagh! Energy, WeirdBoy 'Eadbanger).
+    # Doit preceder `wth = wound_threshold(strength, ...)` — la modification de Force doit
+    # etre prise en compte dans le seuil de blessure. La modification de D (dmg_bonus) est
+    # reportee au Bloc B (apres target_unit) pour etre disponible au meme endroit que les
+    # autres bonus de D.
+    from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args as _pB_get_args
+    _waaagh_energy_args = _pB_get_args(attacker_unit, "weapon_profile_scaling_by_model_count")
+    _we_n_scalings = 0
+    if _waaagh_energy_args is not None and weapon.get("code") == _waaagh_energy_args.get("weapon_code"):  # get allowed
+        _we_per_count = int(_waaagh_energy_args.get("per_count", 5))  # get allowed
+        _we_str_bonus = int(_waaagh_energy_args.get("str_bonus", 0))  # get allowed
+        _we_squad_id = str(require_key(attacker_unit, "id"))
+        _we_model_count = require_key(game_state, "squad_cache").get(_we_squad_id, {}).get("model_count", 0)
+        _we_n_scalings = _we_model_count // _we_per_count
+        if _we_n_scalings > 0:
+            strength += _we_n_scalings * _we_str_bonus
     # Primitive A cote touche (chantier 06) : au TIR seul le MALUS de suppression peut jouer
     # (« While a unit is suppressed, it has -1 to hit rolls » ne restreint aucune phase) ; le +1
     # de Might Is Right est explicitement melee. Applique APRES couvert / [HEAVY] / 10.06 /
@@ -10346,8 +10363,46 @@ def _manual_roll_intent(
     # (couvert/HEAVY/PSYCHIC), AP effectif (closest_target_penetration) et l allocation.
     from engine.phase_handlers.attack_sequence import (
         RerollProfile, build_weapon_attack_profile, roll_attack_pool,
+        _unit_get_primitive_b_rule_args as _pB_get_args_b, unit_keywords_upper as _kw_upper_b,
     )
-    _attack_profile = build_weapon_attack_profile(weapon, target_unit)
+    # Primitive B (chantier 06) — Bloc B : bonus d attaques de tir et D scaling.
+    # target_unit est disponible ici (resolu plus haut) — on peut lire ses keywords.
+    _target_kws_b = _kw_upper_b(target_unit)
+    _target_is_non_mv = _target_kws_b.isdisjoint({"MONSTER", "VEHICLE"})
+    # weapon_attacks_bonus_vs_keyword : +N A si cible hors excluded_keywords (Dakkablitz)
+    _dakkablitz_args = _pB_get_args_b(attacker_unit, "weapon_attacks_bonus_vs_keyword")
+    if _dakkablitz_args is not None:
+        _dk_weapon_code = _dakkablitz_args.get("weapon_code")  # get allowed
+        _dk_excl = _dakkablitz_args.get("excluded_keywords", [])  # get allowed
+        _dk_target_ok = all(
+            kw.strip().upper().replace(" ", "_").replace("-", "_") not in _target_kws_b
+            for kw in _dk_excl
+        )
+        if weapon.get("code") == _dk_weapon_code and _dk_target_ok:  # get allowed
+            n_attacks += int(require_key(_dakkablitz_args, "attacks_bonus"))
+    # weapon_attacks_bonus_vs_designated_target : +N A vs cible designee (Hail of Bolts).
+    # Dans ce moteur la cible de l intent EST la cible designee — pas de designation separee.
+    _hob_args = _pB_get_args_b(attacker_unit, "weapon_attacks_bonus_vs_designated_target")
+    if _hob_args is not None and weapon.get("code") == _hob_args.get("weapon_code"):  # get allowed
+        n_attacks += int(require_key(_hob_args, "attacks_bonus"))
+    # grant_weapon_rule_vs_designated_target : [BLAST 1] hors MONSTER/VEHICLE (Overlapping Detonations).
+    # [BLAST 1] = 1 de par tranche de 5 figurines dans la cible.
+    _od_args = _pB_get_args_b(attacker_unit, "grant_weapon_rule_vs_designated_target")
+    if (_od_args is not None
+            and weapon.get("code") == _od_args.get("weapon_code")  # get allowed
+            and _target_is_non_mv):
+        _od_tgt_size = int(require_key(intent, "target_squad_size_at_declaration"))
+        n_attacks += _od_tgt_size // 5
+    # Waaagh! Energy +D : les scalings _we_n_scalings et _waaagh_energy_args sont du Bloc A.
+    if _we_n_scalings > 0 and _waaagh_energy_args is not None:
+        _we_dmg_bonus_per = int(_waaagh_energy_args.get("dmg_bonus", 0))  # get allowed
+        dmg_bonus += _we_n_scalings * _we_dmg_bonus_per
+    _attack_profile = build_weapon_attack_profile(
+        weapon, target_unit,
+        attacker_unit=attacker_unit,
+        game_state=game_state,
+        is_melee=False,
+    )
     rolled = roll_attack_pool(
         n_attacks=int(n_attacks),
         hit_target=bs,
@@ -10961,7 +11016,36 @@ def _count_selected_hazardous_weapons(
             continue
         if weapon_has_rule(weapons[widx], "HAZARDOUS"):
             selected.add((mid, widx))
-    return len(selected)
+    # Primitive B (chantier 06) : HAZARDOUS conditionnel via weapon_profile_scaling_by_model_count
+    # (Waaagh! Energy, WeirdBoy 'Eadbanger a 10+ figurines dans l unite).
+    from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args as _pB_hz
+    conditional_hazardous: set = set()
+    unit_by_id = require_key(game_state, "unit_by_id")
+    squad_cache_hz = require_key(game_state, "squad_cache")
+    _hz_args_cache: Dict[str, Optional[Dict[str, Any]]] = {}
+    for intent in intents:
+        mid = str(require_key(intent, "model_id"))
+        widx = int(require_key(intent, "weapon_index"))
+        if (mid, widx) in selected:
+            continue  # deja compte comme HAZARDOUS permanent
+        model = models_cache.get(mid)  # get allowed
+        if model is None:
+            continue
+        weapons_c = model.get(ctx.weapons_key, [])  # get allowed
+        if not (0 <= widx < len(weapons_c)) or not isinstance(weapons_c[widx], dict):
+            continue
+        squad_id_c = str(model.get("squad_id", ""))  # get allowed
+        if squad_id_c not in _hz_args_cache:
+            unit_c = unit_by_id.get(squad_id_c)  # get allowed
+            _hz_args_cache[squad_id_c] = _pB_hz(unit_c, "weapon_profile_scaling_by_model_count") if unit_c is not None else None
+        args_c = _hz_args_cache[squad_id_c]
+        if args_c is None or weapons_c[widx].get("code") != args_c.get("weapon_code"):  # get allowed
+            continue
+        threshold_c = int(args_c.get("hazardous_threshold", 99))  # get allowed
+        alive_c = squad_cache_hz.get(squad_id_c, {}).get("model_count", 0)
+        if alive_c >= threshold_c:
+            conditional_hazardous.add((mid, widx))
+    return len(selected) + len(conditional_hazardous)
 
 
 def _build_manual_allocation(
@@ -12034,6 +12118,8 @@ def _select_fight_weapon_indices_for_fig(
     hit_bonus: int = 0,
     hit_malus: int = 0,
     cap: int = 0,
+    attacker_unit: Optional[Dict[str, Any]] = None,
+    game_state: Optional[Dict[str, Any]] = None,
 ) -> List[int]:
     """Armes de melee SELECTIONNEES par une figurine (Select Weapons step, 04.01).
 
@@ -12057,6 +12143,7 @@ def _select_fight_weapon_indices_for_fig(
         attacker, target_t, target_sv, target_invul, target_unit,
         excluded_indices=frozenset(extra),
         melee_bonus=melee_bonus, hit_bonus=hit_bonus, hit_malus=hit_malus, cap=cap,
+        attacker_unit=attacker_unit, game_state=game_state,
     )
     # « if possible » : une figurine qui n a QUE des armes EXTRA ATTACKS n en ajoute pas d autre.
     return ([main] if main is not None else []) + extra
@@ -12071,6 +12158,8 @@ def _auto_select_cc_weapon_for_fig(
     hit_bonus: int = 0,
     hit_malus: int = 0,
     cap: int = 0,
+    attacker_unit: Optional[Dict[str, Any]] = None,
+    game_state: Optional[Dict[str, Any]] = None,
 ) -> Optional[int]:
     """Choisit l arme de melee maximisant l esperance de degats, REGLES D ARME COMPRISES.
 
@@ -12118,7 +12207,9 @@ def _auto_select_cc_weapon_for_fig(
         # invalide, elle doit lever (l ancien try/except la remplacait par 1.0 en silence).
         dmg = float(expected_dice_value(require_key(w, "DMG"), "auto_select_cc_dmg"))
         n_attacks = float(expected_dice_value(require_key(w, "NB"), "auto_select_cc_nb")) + int(melee_bonus)
-        profile = build_weapon_attack_profile(w, target_unit)
+        profile = build_weapon_attack_profile(
+            w, target_unit, attacker_unit=attacker_unit, game_state=game_state, is_melee=True
+        )
         score = n_attacks * expected_damage_per_attack(
             profile,
             hit_target=apply_hit_roll_modifiers(ws, hit_bonus, hit_malus, cap=cap),
@@ -12201,6 +12292,7 @@ def squad_declare_fight(
         selected_indices = _select_fight_weapon_indices_for_fig(
             m, target_t, target_sv, target_invul, target_unit_for_select,
             melee_bonus=melee_bonus, hit_bonus=_hit_bonus, hit_malus=_hit_malus, cap=_hit_cap,
+            attacker_unit=attacker_unit_for_select, game_state=game_state,
         )
         if not selected_indices:
             continue

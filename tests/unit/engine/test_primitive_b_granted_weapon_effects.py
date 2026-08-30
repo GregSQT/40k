@@ -145,7 +145,7 @@ def _fight_state(
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
         "units_cache": {
             "1": {"col": 0, "row": 0, "VALUE": 10.0, "player": 1, "orientation": 0},
-            "2": {"col": 9, "row": 9, "VALUE": 10.0, "player": 2, "orientation": 0},
+            "2": {"col": 9, "row": 9, "VALUE": 10.0, "player": 2, "orientation": 0, "HP_CUR": 4},
         },
         "unit_by_id": {
             "1": unit_entry,
@@ -218,7 +218,7 @@ def _shoot_state(
             "1": {"model_count": n_models_in_shooter_squad, "model_count_at_start": n_models_in_shooter_squad},
             "2": {"model_count_at_start": target_squad_size},
         },
-        "units_cache": {"1": _uc(0, 0, player=0), "2": _uc(0, 1)},
+        "units_cache": {"1": _uc(0, 0, player=0), "2": {**_uc(0, 1), "HP_CUR": 1}},
         "unit_by_id": {
             "1": {"id": "1", "UNIT_RULES": unit_rules},
             "2": target_unit_entry,
