@@ -154,6 +154,7 @@ def _fight_state(
         "objectives": [{"id": "o1", "hexes": [[5, 5]]}],
         "suppressed_squads": {},
         "units_charged": set(units_charged) if units_charged else set(),
+        "finest_hour_active_this_phase": set(),
     }
     if waaagh_player is not None:
         gs["waaagh_active"] = {waaagh_player: True}
