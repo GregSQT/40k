@@ -605,33 +605,56 @@ body {
 .test-start-overlay {
   position: absolute;
   inset: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background: rgba(0, 0, 0, 0.38);
+  background: rgba(0, 0, 0, 0.5);
   z-index: 700;
 }
 
 .test-start-modal {
-  padding: 20px 24px;
-  border-radius: 12px;
-  border: 1px solid #f59e0b;
-  background: rgba(17, 24, 39, 0.95);
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  padding: 0 0 20px 0;
+  border-radius: 10px;
+  border: 2px solid #22c55e;
+  background: #06120a;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55);
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  min-width: 280px;
+  align-items: center;
+  gap: 16px;
+  min-width: 300px;
+  color: #e5fbe9;
+  user-select: none;
+}
+
+.test-start-modal__header {
+  width: 100%;
+  padding: 14px 20px;
+  border-radius: 8px 8px 0 0;
+  background: rgba(34, 197, 94, 0.12);
+  border-bottom: 1px solid #22c55e;
+  color: #86efac;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: center;
+  cursor: grab;
+  box-sizing: border-box;
+}
+
+.test-start-modal__header:active {
+  cursor: grabbing;
 }
 
 .test-start-modal__section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0 20px;
+  box-sizing: border-box;
 }
 
 .test-start-modal__label {
-  color: #fcd34d;
+  color: #86efac;
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -640,84 +663,98 @@ body {
 .test-start-modal__roster-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  gap: 12px;
 }
 
 .test-start-modal__player-label {
-  color: #d1d5db;
+  color: #d1fae5;
   font-size: 13px;
   min-width: 60px;
+  text-align: right;
 }
 
-.test-start-modal__terrain-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
+.test-start-modal__terrain-category {
+  width: 100%;
+  padding: 8px 12px;
+  background: rgba(34, 197, 94, 0.12);
+  border-left: 3px solid #22c55e;
+  color: #86efac;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-align: center;
+  box-sizing: border-box;
+  border-radius: 4px;
 }
 
 .test-start-modal__terrain-options {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+  justify-content: center;
 }
 
 .test-start-modal__terrain-option {
-  padding: 6px 14px;
+  padding: 7px 18px;
   border-radius: 6px;
-  border: 1px solid #4b5563;
-  background: #1f2937;
-  color: #d1d5db;
+  border: 1px solid #166534;
+  background: #052e16;
+  color: #d1fae5;
   font-size: 13px;
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 
 .test-start-modal__terrain-option:hover {
-  border-color: #f59e0b;
-  color: #fcd34d;
+  border-color: #22c55e;
+  color: #86efac;
+  background: #064e3b;
 }
 
 .test-start-modal__terrain-option--active {
-  border-color: #f59e0b;
-  background: #292524;
-  color: #fcd34d;
+  border-color: #22c55e;
+  background: #065f46;
+  color: #86efac;
   font-weight: 700;
 }
 
-.test-start-modal__terrain-side {
-  width: 440px;
-  flex-shrink: 0;
+/* preview panel — outside the modal, right side of overlay */
+.test-start-modal__terrain-preview-panel {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 
 .test-start-modal__terrain-side-img {
   display: none;
   width: 440px;
+  max-width: calc(100vw - 40px);
   border-radius: 8px;
-  border: 2px solid #f59e0b;
+  border: 2px solid #22c55e;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
 }
 
 /* show selected terrain by default */
-.test-start-modal__terrain-row:has(.terrain-opt-mc1.test-start-modal__terrain-option--active)
-  .preview-mc1 {
+.test-start-overlay:has(.terrain-opt-mc1.test-start-modal__terrain-option--active) .preview-mc1 {
   display: block;
 }
-.test-start-modal__terrain-row:has(.terrain-opt-mc2.test-start-modal__terrain-option--active)
-  .preview-mc2 {
+.test-start-overlay:has(.terrain-opt-mc2.test-start-modal__terrain-option--active) .preview-mc2 {
   display: block;
 }
 
 /* switch on hover */
-.test-start-modal__terrain-row:has(.terrain-opt-mc1:hover) .preview-mc1 {
+.test-start-overlay:has(.terrain-opt-mc1:hover) .preview-mc1 {
   display: block;
 }
-.test-start-modal__terrain-row:has(.terrain-opt-mc1:hover) .preview-mc2 {
+.test-start-overlay:has(.terrain-opt-mc1:hover) .preview-mc2 {
   display: none;
 }
-.test-start-modal__terrain-row:has(.terrain-opt-mc2:hover) .preview-mc2 {
+.test-start-overlay:has(.terrain-opt-mc2:hover) .preview-mc2 {
   display: block;
 }
-.test-start-modal__terrain-row:has(.terrain-opt-mc2:hover) .preview-mc1 {
+.test-start-overlay:has(.terrain-opt-mc2:hover) .preview-mc1 {
   display: none;
 }
 
