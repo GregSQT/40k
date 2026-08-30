@@ -39,11 +39,11 @@
       "name": "Ruin Center N",
       "obscuring": true,
       "shape": "polygon",
-      "vertices": [[83,85],[137,85],[137,127],[83,127]],
+      "vertices": [[83,35],[137,35],[137,85],[83,85]],
       "objective": false,
       "floors": [
-        { "level": 1, "height_inches": 3, "vertices": [[86,88],[112,88],[112,102],[86,102]] },
-        { "level": 1, "height_inches": 3, "vertices": [[110,110],[134,110],[134,124],[110,124]] }
+        { "level": 1, "height_inches": 3, "vertices": [[86,38],[112,38],[112,52],[86,52]] },
+        { "level": 1, "height_inches": 3, "vertices": [[110,60],[134,60],[134,74],[110,74]] }
       ]
     },
     {
@@ -84,21 +84,21 @@
       "name": "Ruin Center S",
       "obscuring": true,
       "shape": "polygon",
-      "vertices": [[83,173],[137,173],[137,215],[83,215]],
+      "vertices": [[83,215],[137,215],[137,265],[83,265]],
       "objective": false,
       "floors": [
-        { "level": 1, "height_inches": 3, "vertices": [[86,176],[110,176],[110,190],[86,190]] },
-        { "level": 1, "height_inches": 3, "vertices": [[108,198],[134,198],[134,212],[108,212]] }
+        { "level": 1, "height_inches": 3, "vertices": [[86,226],[110,226],[110,240],[86,240]] },
+        { "level": 1, "height_inches": 3, "vertices": [[108,248],[134,248],[134,262],[108,262]] }
       ]
     }
   ],
   "walls": [
     { "name": "home_nw_d", "type": "dense", "segments": [[[28,43],[58,43]], [[28,43],[28,60]]] },
-    { "name": "ruin_center_n_a_d", "type": "dense", "segments": [[[86,88],[112,88]], [[86,88],[86,102]]] },
-    { "name": "ruin_center_n_b_d", "type": "dense", "segments": [[[110,124],[134,124]], [[134,110],[134,124]]] },
+    { "name": "ruin_center_n_a_d", "type": "dense", "segments": [[[86,38],[112,38]], [[86,38],[86,52]]] },
+    { "name": "ruin_center_n_b_d", "type": "dense", "segments": [[[110,74],[134,74]], [[134,60],[134,74]]] },
     { "name": "home_se_d", "type": "dense", "segments": [[[162,257],[192,257]], [[192,240],[192,257]]] },
-    { "name": "ruin_center_s_a_d", "type": "dense", "segments": [[[86,176],[110,176]], [[86,176],[86,190]]] },
-    { "name": "ruin_center_s_b_d", "type": "dense", "segments": [[[108,212],[134,212]], [[134,198],[134,212]]] }
+    { "name": "ruin_center_s_a_d", "type": "dense", "segments": [[[86,226],[110,226]], [[86,226],[86,240]]] },
+    { "name": "ruin_center_s_b_d", "type": "dense", "segments": [[[108,262],[134,262]], [[134,248],[134,262]]] }
   ],
   "icons": [
     { "id": 1, "name": "HomeRed", "path": "frontend/public/icons/Terrain/HomeRed.png", "center": [53, 60], "size": 80, "alpha": 0.7 },
