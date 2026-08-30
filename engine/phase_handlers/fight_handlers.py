@@ -4857,7 +4857,6 @@ def _manual_roll_fight_intent(
     # Resolution AUTO (auto_resolve=True toujours). Non VEHICLE uniquement. Sequence terminee :
     # les records critiques consommes sont retires de pending_wounds et ne font pas de degats
     # supplementaires via l allocation normale.
-    from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args
     _hs_args = _unit_get_primitive_b_rule_args(attacker, "mortal_wounds_on_critical_wound")
     if _hs_args is not None:
         _req_weapon_code = _hs_args.get("weapon")  # get allowed : absent -> None -> skip
