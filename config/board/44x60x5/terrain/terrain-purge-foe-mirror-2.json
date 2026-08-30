@@ -1,0 +1,124 @@
+{
+  "terrain_id": "terrain-purge-foe-mirror-2",
+  "terrain": [
+    {
+      "id": "home_nw",
+      "name": "Home NW",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [[25,40],[82,40],[82,80],[25,80]],
+      "objective": true,
+      "floors": [{ "level": 1, "height_inches": 3, "vertices": [[28,43],[58,43],[58,60],[28,60]] }]
+    },
+    {
+      "id": "baseplate_ne",
+      "name": "Baseplate NE",
+      "obscuring": false,
+      "shape": "polygon",
+      "vertices": [[157,39],[185,39],[185,74],[157,74]],
+      "objective": true
+    },
+    {
+      "id": "obstacle_ne",
+      "name": "Obstacle NE",
+      "obscuring": false,
+      "shape": "polygon",
+      "vertices": [[200,68],[210,68],[210,98],[200,98]],
+      "objective": false
+    },
+    {
+      "id": "obstacle_w",
+      "name": "Obstacle W",
+      "obscuring": false,
+      "shape": "polygon",
+      "vertices": [[15,95],[25,95],[25,125],[15,125]],
+      "objective": false
+    },
+    {
+      "id": "ruin_center_n",
+      "name": "Ruin Center N",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [[83,85],[137,85],[137,127],[83,127]],
+      "objective": false,
+      "floors": [
+        { "level": 1, "height_inches": 3, "vertices": [[86,88],[112,88],[112,102],[86,102]] },
+        { "level": 1, "height_inches": 3, "vertices": [[110,110],[134,110],[134,124],[110,124]] }
+      ]
+    },
+    {
+      "id": "centre_w",
+      "name": "Centre W",
+      "obscuring": false,
+      "shape": "polygon",
+      "vertices": [[33,128],[61,128],[61,163],[33,163]],
+      "objective": true
+    },
+    {
+      "id": "centre_e",
+      "name": "Centre E",
+      "obscuring": false,
+      "shape": "polygon",
+      "vertices": [[160,128],[188,128],[188,163],[160,163]],
+      "objective": true
+    },
+    {
+      "id": "home_se",
+      "name": "Home SE",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [[138,220],[195,220],[195,260],[138,260]],
+      "objective": true,
+      "floors": [{ "level": 1, "height_inches": 3, "vertices": [[162,240],[192,240],[192,257],[162,257]] }]
+    },
+    {
+      "id": "baseplate_sw",
+      "name": "Baseplate SW",
+      "obscuring": false,
+      "shape": "polygon",
+      "vertices": [[35,226],[63,226],[63,261],[35,261]],
+      "objective": true
+    },
+    {
+      "id": "obstacle_sw",
+      "name": "Obstacle SW",
+      "obscuring": false,
+      "shape": "polygon",
+      "vertices": [[10,202],[20,202],[20,232],[10,232]],
+      "objective": false
+    },
+    {
+      "id": "obstacle_e",
+      "name": "Obstacle E",
+      "obscuring": false,
+      "shape": "polygon",
+      "vertices": [[195,175],[205,175],[205,205],[195,205]],
+      "objective": false
+    },
+    {
+      "id": "ruin_center_s",
+      "name": "Ruin Center S",
+      "obscuring": true,
+      "shape": "polygon",
+      "vertices": [[83,173],[137,173],[137,215],[83,215]],
+      "objective": false,
+      "floors": [
+        { "level": 1, "height_inches": 3, "vertices": [[86,176],[110,176],[110,190],[86,190]] },
+        { "level": 1, "height_inches": 3, "vertices": [[108,198],[134,198],[134,212],[108,212]] }
+      ]
+    }
+  ],
+  "walls": [],
+  "icons": [
+    { "id": 1, "name": "HomeRed", "path": "frontend/public/icons/Terrain/HomeRed.png", "center": [53, 60], "size": 80, "alpha": 0.7 },
+    { "id": 2, "name": "HomeBlue", "path": "frontend/public/icons/Terrain/HomeBlue.png", "center": [166, 240], "size": 80, "alpha": 0.7 },
+    { "id": 3, "name": "SkullRound", "path": "frontend/public/icons/Terrain/SkullRound.png", "center": [47, 145], "size": 80, "alpha": 0.7 },
+    { "id": 4, "name": "SkullRound", "path": "frontend/public/icons/Terrain/SkullRound.png", "center": [174, 145], "size": 80, "alpha": 0.7 },
+    { "id": 5, "name": "SkullSquare1", "path": "frontend/public/icons/Terrain/SkullSquare.png", "center": [171, 56], "size": 80, "alpha": 0.7 },
+    { "id": 6, "name": "SkullSquare2", "path": "frontend/public/icons/Terrain/SkullSquare.png", "center": [49, 243], "size": 80, "alpha": 0.7 }
+  ],
+  "deployment_zones": [
+    { "id": "1", "name": "Deployment zone attacker", "shape": "polygon", "vertices": [[0,0],[220,0],[220,90],[0,90]], "objective": false },
+    { "id": "2", "name": "Deployment zone defender", "shape": "polygon", "vertices": [[0,210],[220,210],[220,300],[0,300]], "objective": false }
+  ]
+}
