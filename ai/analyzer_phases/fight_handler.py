@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Optional, Tuple
 
 from ai.analyzer_perfig import parse_shooter_models_segment
 from ai.analyzer_rules import check_anti_x_threshold, note_rule_usage
+from ai.analyzer_phases import PHASE_ORDER
 from shared.data_validation import require_key
 
 if TYPE_CHECKING:
@@ -128,8 +129,7 @@ def _note_melee_weapon_rule_usage(
         return
     weapon_rules_list = require_key(weapon_info, "rules")
     weapon_key = f"{weapon_display_name} ({carrier_type})"
-    fighter_pl = require_key(state.unit_player, fighter_id)
-    pl_int = int(fighter_pl) if fighter_pl is not None else player
+    pl_int = int(require_key(state.unit_player, fighter_id))
     if "TWIN_LINKED" in weapon_rules_list:
         stats['weapon_rule_usage'][("TWIN_LINKED", weapon_key)][pl_int] += 1
     if re.search(r'\[SUSTAINED(?: |_)?HITS\]', action_desc, re.IGNORECASE):
@@ -406,8 +406,6 @@ def handle_fight(
                             stats['fight_over_cc_nb'][attacker_player] += 1
                             fight_over_by_unit = require_key(stats, 'fight_over_cc_nb_by_unit')
                             fight_over_by_player = require_key(fight_over_by_unit, attacker_player)
-                            if fighter_id not in fight_over_by_player:
-                                raise KeyError(f"Missing fight_over_cc_nb_by_unit for fighter_id={fighter_id}, player={attacker_player}")
                             fight_over_by_player[fighter_id] = fight_over_by_player[fighter_id] + 1
                             if stats['first_error_lines']['fight_over_cc_nb'][attacker_player] is None:
                                 stats['first_error_lines']['fight_over_cc_nb'][attacker_player] = {'episode': state.current_episode_num, 'line': line.strip()}
@@ -458,8 +456,7 @@ def handle_fight(
         # RULE: Dead unit Fighting (attacker is dead)
         attacker_is_dead = fighter_id not in state.unit_hp or require_key(state.unit_hp, fighter_id) <= 0
         if attacker_is_dead:
-            phase_order = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
-            current_phase_order = require_key(phase_order, phase)
+            current_phase_order = require_key(PHASE_ORDER, phase)
             attacker_died_before_fight = False
             for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
                 if dead_unit_id == fighter_id:
@@ -467,7 +464,7 @@ def handle_fight(
                         attacker_died_before_fight = True
                         break
                     elif death_turn == turn:
-                        death_phase_order = require_key(phase_order, death_phase)
+                        death_phase_order = require_key(PHASE_ORDER, death_phase)
                         if death_phase_order < current_phase_order:
                             attacker_died_before_fight = True
                             break
@@ -483,8 +480,7 @@ def handle_fight(
         # RULE: Fight a dead unit (target is dead)
         target_is_dead = target_id not in state.unit_hp or require_key(state.unit_hp, target_id) <= 0
         if target_is_dead:
-            phase_order = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
-            current_phase_order = require_key(phase_order, phase)
+            current_phase_order = require_key(PHASE_ORDER, phase)
             target_died_before_fight = False
             for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
                 if dead_unit_id == target_id:
@@ -492,7 +488,7 @@ def handle_fight(
                         target_died_before_fight = True
                         break
                     elif death_turn == turn:
-                        death_phase_order = require_key(phase_order, death_phase)
+                        death_phase_order = require_key(PHASE_ORDER, death_phase)
                         if death_phase_order < current_phase_order:
                             target_died_before_fight = True
                             break

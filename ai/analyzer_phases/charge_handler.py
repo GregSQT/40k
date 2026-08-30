@@ -6,6 +6,7 @@ import re
 from typing import TYPE_CHECKING
 
 from ai.analyzer_rules import note_rule_usage
+from ai.analyzer_phases import PHASE_ORDER
 from shared.data_validation import require_key
 
 if TYPE_CHECKING:
@@ -162,15 +163,14 @@ def handle_charge(
         charge_unit_dead = charge_unit_id not in state.unit_hp or require_key(state.unit_hp, charge_unit_id) <= 0
         if charge_unit_dead:
             unit_died_before_charge = False
-            phase_order = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
-            current_phase_order = require_key(phase_order, phase)
+            current_phase_order = require_key(PHASE_ORDER, phase)
             for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
                 if dead_unit_id == charge_unit_id:
                     if death_turn < turn:
                         unit_died_before_charge = True
                         break
                     if death_turn == turn:
-                        death_phase_order = require_key(phase_order, death_phase)
+                        death_phase_order = require_key(PHASE_ORDER, death_phase)
                         if death_phase_order < current_phase_order:
                             unit_died_before_charge = True
                             break
@@ -189,7 +189,6 @@ def handle_charge(
             _position_cache_set(state.unit_positions, charge_unit_id, start_col, start_row)
 
         # RULE: Charge from adjacent
-        from ai.analyzer_perfig import surviving_start_models
         if charge_unit_id not in state.units_advanced:
             if is_within_engine_engagement_zone(
                 charge_unit_id,
@@ -229,8 +228,7 @@ def handle_charge(
         # RULE: Charge a dead unit
         target_is_dead = charge_target_id not in state.unit_hp or require_key(state.unit_hp, charge_target_id) <= 0
         if target_is_dead:
-            phase_order = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
-            current_phase_order = require_key(phase_order, phase)
+            current_phase_order = require_key(PHASE_ORDER, phase)
             target_died_before_charge = False
             for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
                 if dead_unit_id == charge_target_id:
@@ -238,7 +236,7 @@ def handle_charge(
                         target_died_before_charge = True
                         break
                     elif death_turn == turn:
-                        death_phase_order = require_key(phase_order, death_phase)
+                        death_phase_order = require_key(PHASE_ORDER, death_phase)
                         if death_phase_order < current_phase_order:
                             target_died_before_charge = True
                             break

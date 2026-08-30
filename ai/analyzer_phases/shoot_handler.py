@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict, NamedTuple, Optional
 
 from shared.data_validation import require_key
 from ai.analyzer_rules import note_rule_usage, check_anti_x_threshold
+from ai.analyzer_phases import PHASE_ORDER
 from engine.combat_utils import calculate_hex_distance, ranged_edge_distance, get_distance_metric
 from ai.analyzer_perfig import (
     additive_rule_extra_dice,
@@ -233,8 +234,7 @@ def handle_shoot(
     shooter_is_dead = shooter_id in state.unit_hp and require_key(state.unit_hp, shooter_id) <= 0
     if shooter_is_dead:
         is_false_positive = False
-        phase_order = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
-        current_phase_order = require_key(phase_order, phase)
+        current_phase_order = require_key(PHASE_ORDER, phase)
         unit_died_before_shoot = False
         for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
             if dead_unit_id == shooter_id:
@@ -242,7 +242,7 @@ def handle_shoot(
                     unit_died_before_shoot = True
                     break
                 elif death_turn == turn:
-                    death_phase_order = require_key(phase_order, death_phase)
+                    death_phase_order = require_key(PHASE_ORDER, death_phase)
                     if death_phase_order < current_phase_order:
                         unit_died_before_shoot = True
                         break
@@ -1111,15 +1111,14 @@ def handle_wait(
         wait_unit_dead = wait_unit_id not in state.unit_hp or require_key(state.unit_hp, wait_unit_id) <= 0
         if wait_unit_dead:
             unit_died_before_wait = False
-            phase_order = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
-            current_phase_order = require_key(phase_order, phase)
+            current_phase_order = require_key(PHASE_ORDER, phase)
             for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
                 if dead_unit_id == wait_unit_id:
                     if death_turn < turn:
                         unit_died_before_wait = True
                         break
                     if death_turn == turn:
-                        death_phase_order = require_key(phase_order, death_phase)
+                        death_phase_order = require_key(PHASE_ORDER, death_phase)
                         if death_phase_order < current_phase_order:
                             unit_died_before_wait = True
                             break
@@ -1406,15 +1405,14 @@ def handle_advance(
     advance_unit_dead = advance_unit_id not in state.unit_hp or require_key(state.unit_hp, advance_unit_id) <= 0
     if advance_unit_dead:
         unit_died_before_advance = False
-        phase_order = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
-        current_phase_order = require_key(phase_order, phase)
+        current_phase_order = require_key(PHASE_ORDER, phase)
         for death_turn, death_phase, dead_unit_id, death_line_num in state.unit_deaths:
             if dead_unit_id == advance_unit_id:
                 if death_turn < turn:
                     unit_died_before_advance = True
                     break
                 if death_turn == turn:
-                    death_phase_order = require_key(phase_order, death_phase)
+                    death_phase_order = require_key(PHASE_ORDER, death_phase)
                     if death_phase_order < current_phase_order:
                         unit_died_before_advance = True
                         break
