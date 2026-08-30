@@ -904,22 +904,27 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
         resolved.append((tid, t))
     all_targets = [t for _tid, t in resolved]
 
-    # Precompute max melee damage any OTHER alive friendly unit can deal (raw NB×DMG proxy).
-    # Used to populate melee_will_kill_target per target — guards P1 against over-rewarding
-    # softening a target that a friendly melee unit will already kill.
+    # Per-target max melee damage from OTHER alive friendly units actually engaged with that target.
+    # Guards P1: don't over-reward fighting a target already covered by an adjacent friendly.
+    # Raw NB×DMG proxy (conservative overestimate). Filtered to engaged-only so a non-adjacent
+    # ally at 20" cannot suppress P1 for a target it cannot reach this turn.
     units_cache = require_key(game_state, "units_cache")
     unit_id_str = str(unit_id)
     unit_by_id_map = require_key(game_state, "unit_by_id")
-    friendly_max_melee: float = max(
-        (
-            get_max_melee_damage(unit_by_id_map[fuid])
-            for fuid, fentry in entries_on_battlefield(units_cache)
-            if fuid != unit_id_str
-            and int(require_key(fentry, "player")) == int(unit["player"])
-            and fuid in unit_by_id_map
-        ),
-        default=0.0,
-    )
+    target_max_melee: Dict[str, float] = {tid: 0.0 for tid, _ in resolved}
+    for fuid, fentry in entries_on_battlefield(units_cache):
+        if fuid == unit_id_str:
+            continue
+        if int(require_key(fentry, "player")) != int(unit["player"]):
+            continue
+        if fuid not in unit_by_id_map:
+            continue
+        f_dmg = get_max_melee_damage(unit_by_id_map[fuid])
+        if f_dmg <= 0.0:
+            continue
+        for enemy_id in _fight_units_engaged_with(game_state, unit_by_id_map[fuid]):
+            if enemy_id in target_max_melee:
+                target_max_melee[enemy_id] = max(target_max_melee[enemy_id], f_dmg)
 
     # Fight phase uses same priority logic as shooting — RewardMapper handles both.
     # `max` retient le PREMIER maximum : même sémantique de départage que l'ancienne
@@ -928,13 +933,14 @@ def _ai_select_fight_target(game_state: Dict[str, Any], unit_id: str, valid_targ
     # L'ancienne sentinelle `best_reward = -999999` est retirée : depuis que toute cible
     # non résolue lève, il n'existe plus de cas où aucun candidat n'est scoré (V11 §0.19.3).
     def _melee_will_kill(target: Dict[str, Any]) -> bool:
-        hp = get_hp_from_cache(str(target["id"]), game_state)
-        return hp is not None and hp > 0 and friendly_max_melee >= hp
+        tid = str(target["id"])
+        hp = get_hp_from_cache(tid, game_state)
+        return hp is not None and hp > 0 and target_max_melee.get(tid, 0.0) >= hp
 
     best_target, _best_unit = max(
         resolved,
         key=lambda pair: reward_mapper.get_shooting_priority_reward(
-            unit, pair[1], all_targets, False, _melee_will_kill(pair[1]), game_state
+            unit, pair[1], all_targets, True, _melee_will_kill(pair[1]), game_state
         ),
     )
     return best_target

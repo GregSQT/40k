@@ -21,6 +21,7 @@ from typing import Any, Dict, List
 
 import pytest
 
+from ai.reward_mapper import RewardMapper
 from engine.phase_handlers.fight_handlers import _ai_select_fight_target
 from shared.data_validation import ConfigurationError
 
@@ -155,3 +156,66 @@ def test_unknown_fighter_unit_raises():
     gs = _game_state(reward_configs={_AGENT_KEY: {}})
     with pytest.raises(ConfigurationError, match="Unit '99'"):
         _ai_select_fight_target(gs, "99", ["2", "3"])
+
+
+def test_adjacency_loop_suppresses_p1_only_for_engaged_targets(monkeypatch):
+    """target_max_melee filtre sur l'adjacence : P1 supprimé seulement pour les cibles engagées.
+
+    Ami "10" adjacent à T1 ("2") mais pas T2 ("3") : melee_will_kill=True pour T1, False pour T2.
+    La boucle adjacence et le dict par-cible sont couverts (units_cache non vide, fuid "10").
+    """
+    import engine.phase_handlers.fight_handlers as fh
+
+    monkeypatch.setattr(fh, "get_max_melee_damage", lambda u: 10.0 if u.get("id") == "10" else 0.0)
+    monkeypatch.setattr(fh, "_fight_units_engaged_with", lambda gs, u: ["2"] if u.get("id") == "10" else [])
+
+    kill_flags: Dict[str, bool] = {}
+
+    def capturing(self, unit, target, all_targets, can_melee_charge_target, melee_will_kill_target, game_state):
+        kill_flags[str(target["id"])] = melee_will_kill_target
+        return 1.0
+
+    monkeypatch.setattr(RewardMapper, "get_shooting_priority_reward", capturing)
+
+    # T1 HP=5 < 10 (dégâts ami) → melee_will_kill True ; T2 HP=5, aucun ami adjacent → False
+    gs = {
+        "unit_by_id": {
+            "1": {"id": "1", "unitType": "Intercessor", "player": 1},
+            "2": {"id": "2", "unitType": "Intercessor", "player": 2},
+            "3": {"id": "3", "unitType": "Intercessor", "player": 2},
+            "10": {"id": "10", "unitType": "Intercessor", "player": 1, "CC_WEAPONS": []},
+        },
+        "reward_configs": {_AGENT_KEY: {}},
+        "units_cache": {
+            "10": {"col": 0, "row": 0, "player": 1, "HP_CUR": 5},
+            "2": {"col": 1, "row": 0, "player": 2, "HP_CUR": 5},
+            "3": {"col": 10, "row": 0, "player": 2, "HP_CUR": 5},
+        },
+    }
+    _ai_select_fight_target(gs, "1", ["2", "3"])
+
+    assert kill_flags.get("2") is True, f"T1 adjacent → melee_will_kill True attendu, reçu {kill_flags.get('2')}"
+    assert kill_flags.get("3") is False, f"T2 non adjacent → melee_will_kill False attendu, reçu {kill_flags.get('3')}"
+
+
+def test_p1_can_melee_charge_target_is_true(monkeypatch):
+    """P1 est accessible en mêlée : can_melee_charge_target=True passé au RewardMapper.
+
+    Avant le fix : False hardcodé — P1 définitivement inaccessible quelle que soit la cible.
+    Ce test est ROUGE avec False et VERT avec True.
+    """
+    captured: List[bool] = []
+
+    def capturing(self, unit, target, all_targets, can_melee_charge_target, melee_will_kill_target, game_state):
+        captured.append(can_melee_charge_target)
+        return 1.0
+
+    monkeypatch.setattr(RewardMapper, "get_shooting_priority_reward", capturing)
+
+    gs = _game_state(reward_configs={_AGENT_KEY: {}})
+    _ai_select_fight_target(gs, "1", ["2"])
+
+    assert captured, "get_shooting_priority_reward n'a pas été appelé"
+    assert all(c is True for c in captured), (
+        f"can_melee_charge_target devrait être True (P1 accessible), reçu : {captured}"
+    )
