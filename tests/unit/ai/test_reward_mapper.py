@@ -189,6 +189,7 @@ def test_shoot_charge_and_combat_priority_rewards(monkeypatch: pytest.MonkeyPatc
         {
             "shoot_priority_1": 0.9,
             "shoot_priority_2": 0.6,
+            "shoot_priority_3": 0.8,
             "charge_priority_1": 0.8,
             "charge_priority_2": 0.5,
             "charge_priority_3": 0.3,
@@ -214,7 +215,15 @@ def test_shoot_charge_and_combat_priority_rewards(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(mapper, "_is_highest_threat_adjacent", lambda t, ts: True)
     monkeypatch.setattr(mapper, "_is_lowest_hp_among_adjacent_threats", lambda t, ts, gs: True)
 
-    # Shooting priority 2 path (killable + highest threat)
+    # Shooting priority 3 path (killable + highest threat + lowest HP — checked before P2)
+    monkeypatch.setattr(mapper, "_is_lowest_hp_high_threat", lambda t, ts, gs: True)
+    shoot_reward_p3 = mapper.get_shooting_priority_reward(
+        unit, target, all_targets, can_melee_charge_target=False, game_state={}
+    )
+    assert abs(shoot_reward_p3 - 1.8) < 1e-9  # ranged_attack 1.0 + shoot_priority_3 0.8
+
+    # Shooting priority 2 path (killable + highest threat, NOT lowest HP)
+    monkeypatch.setattr(mapper, "_is_lowest_hp_high_threat", lambda t, ts, gs: False)
     shoot_reward = mapper.get_shooting_priority_reward(
         unit, target, all_targets, can_melee_charge_target=False, game_state={}
     )

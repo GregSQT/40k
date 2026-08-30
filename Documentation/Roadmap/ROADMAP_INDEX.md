@@ -129,6 +129,9 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | moteur | ✅ fix-check-ai-rules-fallbacks — 3 fallbacks anti-erreur analyzer corrigés (2026-08-30) | [analyzer.md](analyzer.md) | ⚡ |
 | moteur | ✅ simplify-died-before-phase — 4 boucles mortes dupliquées extraites (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
 | moteur | ✅ bonus-malus-cap — flag game_config clamp modificateurs touche/blessure, 89 tests verts (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
+| moteur+training | ✅ expected-damage-unit-modifiers — modificateurs Primitive A + Waaagh dans expected_damage (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
+| front+infra | ✅ terrain-selector-purge-foe — ajout terrain Purge the Foe Mirror 2 au sélecteur (2026-08-30) | [front.md](front.md) | ⚡ |
+| ai | ✅ shoot-priority-3 — implémentation bloc P3 reward_mapper (killable+highest threat+lowest HP) (2026-08-30) | [bot.md](bot.md) | ⚡ |
 
 ---
 
