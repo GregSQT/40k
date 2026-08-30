@@ -16,9 +16,7 @@ from engine.phase_handlers.attack_sequence import (
 from engine.phase_handlers.shared_utils import (
     wound_threshold,
     save_threshold,
-    hit_roll_modifier_terms,
-    apply_hit_roll_modifiers,
-    _bonus_malus_cap,
+    resolve_hit_roll_modifiers,
 )
 
 
@@ -37,8 +35,7 @@ def expected_damage(
       target_unit — T, ARMOR_SAVE, INVUL_SAVE (7 = aucune invul)
 
     Quand attacker_unit ET game_state sont fournis, les modificateurs de la Primitive A
-    (Might Is Right, suppression) sont appliqués au seuil de touche via hit_roll_modifier_terms /
-    apply_hit_roll_modifiers, exactement comme le fait _auto_select_cc_weapon_for_fig.
+    (Might Is Right, suppression) sont appliqués au seuil de touche via resolve_hit_roll_modifiers.
     Si is_melee=True, le bonus Waaagh! (+1 STR, +1 NB) est également appliqué.
 
     Contrat game_state quand game_state is not None :
@@ -60,10 +57,7 @@ def expected_damage(
     invul_sv = int(require_key(target_unit, "INVUL_SAVE"))
 
     if game_state is not None:
-        hit_bonus, hit_malus, _, _ = hit_roll_modifier_terms(
-            game_state, attacker_unit, is_melee=is_melee
-        )
-        hit_target = apply_hit_roll_modifiers(hit_target, hit_bonus, hit_malus, cap=_bonus_malus_cap(game_state))
+        hit_target, _, _ = resolve_hit_roll_modifiers(game_state, attacker_unit, hit_target, is_melee=is_melee)
 
         if is_melee and attacker_unit is not None:
             from engine.game_state import waaagh_melee_bonus  # cycle : cf. shared_utils
