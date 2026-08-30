@@ -7987,9 +7987,9 @@ def squad_declare_shoot_model(
     """
     # Primitive F (chantier 06) — suppress_target_on_shooting : enregistrer la cible principale
     # (première déclarée) pour _handle_shooting_end_activation. Miroir du gym (squad_declare_shoot).
-    attacker_unit = require_unit_by_id(game_state, str(attacker_squad_id))
-    if "_last_shoot_target_id" not in attacker_unit:
-        attacker_unit["_last_shoot_target_id"] = str(target_squad_id)
+    require_unit_by_id(game_state, str(attacker_squad_id)).setdefault(
+        "_last_shoot_target_id", str(target_squad_id)
+    )
     return declare_attack_model(
         game_state, SHOOT_DECLARE_CTX, attacker_squad_id, attacker_model_id, target_squad_id
     )
@@ -8607,9 +8607,9 @@ def squad_declare_shoot_weapon(
 
     Wrapper fin de declare_attack_weapon via SHOOT_DECLARE_CTX (portee + LoS).
     """
-    attacker_unit = require_unit_by_id(game_state, str(attacker_squad_id))
-    if "_last_shoot_target_id" not in attacker_unit:
-        attacker_unit["_last_shoot_target_id"] = str(target_squad_id)
+    require_unit_by_id(game_state, str(attacker_squad_id)).setdefault(
+        "_last_shoot_target_id", str(target_squad_id)
+    )
     return declare_attack_weapon(
         game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_index, target_squad_id
     )
@@ -8625,9 +8625,9 @@ def squad_declare_shoot_weapon_qty(
     `only_model_id` (optionnel) : attribution restreinte a CETTE figurine (menu par-fig).
     Wrapper fin de declare_attack_weapon_qty via SHOOT_DECLARE_CTX (portee + LoS).
     """
-    attacker_unit = require_unit_by_id(game_state, str(attacker_squad_id))
-    if "_last_shoot_target_id" not in attacker_unit:
-        attacker_unit["_last_shoot_target_id"] = str(target_squad_id)
+    require_unit_by_id(game_state, str(attacker_squad_id)).setdefault(
+        "_last_shoot_target_id", str(target_squad_id)
+    )
     return declare_attack_weapon_qty(
         game_state, SHOOT_DECLARE_CTX, attacker_squad_id, weapon_code, count, target_squad_id,
         only_model_id,
