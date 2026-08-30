@@ -28,7 +28,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import pytest
 
 from engine.phase_handlers.command_handlers import (
-    _apply_return_destroyed_models, apply_returned_models_placement_decision,
+    _apply_return_destroyed_models, apply_returned_models_placement,
+    apply_returned_models_placement_decision,
 )
 from engine.phase_handlers.deployment_handlers import (
     RETURNED_PLACEMENT_INTENTS, _model_footprint, plan_returned_models_placement,
@@ -480,3 +481,70 @@ def test_expired_waaagh_decision_does_not_break_the_command_phase() -> None:
     assert str(pending["type"]) == "returned_models_placement", (
         "la décision périmée doit avoir été purgée et remplacée par celle du placement"
     )
+
+
+# ---------------------------------------------------------------------------
+# Correctifs de revue : boucle re-décision et template mort
+# ---------------------------------------------------------------------------
+
+
+def test_squad_marked_used_even_when_cells_empty_at_apply_time() -> None:
+    """Finding 3 — si le board change entre pose et résolution de la décision, cells peut être
+    vide : le squad doit quand même entrer dans return_destroyed_models_used pour ne pas être
+    reposé en boucle.
+
+    ROUGE avant le fix : squad absente de return_destroyed_models_used → boucle _max_chain.
+
+    Stratégie : plateau 1×1 ; le template occupe (0,0) — aucune case libre, plan retourne [].
+    """
+    gs = _state(n_alive=3, n_destroyed=3)
+    assert _apply_return_destroyed_models(gs, 1) is True  # décision posée
+
+    # Réduire le plateau à (0,0) pour que plan_returned_models_placement ne trouve aucune case.
+    gs["board_cols"] = 1
+    gs["board_rows"] = 1
+    # Déplacer toutes les figurines sur la seule case disponible pour bloquer le BFS.
+    for mid in gs["squad_models"][_SQUAD]:
+        gs["models_cache"][mid]["col"] = 0
+        gs["models_cache"][mid]["row"] = 0
+
+    before_count = len(gs["squad_models"][_SQUAD])
+    apply_returned_models_placement_decision(gs, 1, "away_from_enemy")
+
+    # Aucune figurine ajoutée (aucune case légale).
+    assert len(gs["squad_models"][_SQUAD]) == before_count
+    # Mais l'escouade est quand même marquée comme traitée.
+    assert _SQUAD in gs.get("return_destroyed_models_used", set()), (
+        "squad doit être dans return_destroyed_models_used même sans pose de figurine"
+    )
+
+
+def test_dead_model_not_used_as_template() -> None:
+    """Finding 2 — le template doit être une figurine vivante (model_is_on_board).
+
+    Un modèle mort (col=-1) en tête de mid_list ne doit pas être cloné : ses stats de base
+    pourraient différer (HP_MAX, BASE_SIZE…) de celles des bodyguards vivants.
+
+    ROUGE avant le fix : HP_CUR était réinitialisé à HP_MAX du mort (999 ici).
+    """
+    gs = _state(n_alive=3, n_destroyed=0, enemy_at=None)
+
+    # Injecter un modèle mort EN TÊTE de mid_list avec des stats délibérément différentes.
+    dead_mid = f"{_SQUAD}#dead"
+    gs["models_cache"][dead_mid] = {
+        **_model(_SQUAD, -1, -1),
+        "HP_MAX": 999,
+        "HP_CUR": 0,
+    }
+    gs["squad_models"][_SQUAD].insert(0, dead_mid)
+
+    # Appeler directement apply_returned_models_placement avec une case arbitraire.
+    apply_returned_models_placement(gs, _SQUAD, [(10, 10)], d3=1, destroyed=1)
+
+    restored = [mid for mid in gs["squad_models"][_SQUAD] if "#r" in mid]
+    assert restored, "au moins une figurine doit être créée"
+    for mid in restored:
+        assert gs["models_cache"][mid]["HP_MAX"] == 3, (
+            f"template mort (HP_MAX=999) ne doit pas être utilisé ; "
+            f"HP_MAX obtenu : {gs['models_cache'][mid]['HP_MAX']}"
+        )
