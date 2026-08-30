@@ -720,6 +720,14 @@ export const BoardWithAPI: React.FC = () => {
     if (t === "mc1" || t === "mc2") return t;
     return params.get("mode") === "pve" ? "mc1" : "mc2";
   });
+  const [modalPos, setModalPos] = useState<{ x: number; y: number } | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const modalDragStartRef = useRef<{
+    mouseX: number;
+    mouseY: number;
+    posX: number;
+    posY: number;
+  } | null>(null);
 
   const endlessDutyProfileOptions = useMemo(
     () => ({
@@ -4593,7 +4601,71 @@ export const BoardWithAPI: React.FC = () => {
             apiProps.gameState?.deployment_type === "active" &&
             !testDeploymentStarted && (
               <div className="test-start-overlay">
-                <div className="test-start-modal">
+                <div className="test-start-modal__terrain-preview-panel">
+                  <img
+                    className="test-start-modal__terrain-side-img preview-mc1"
+                    src="/icons/Terrain/terrain-mc1.jpg"
+                    alt="Terrain 1"
+                  />
+                  <img
+                    className="test-start-modal__terrain-side-img preview-mc2"
+                    src="/icons/Terrain/terrain-mc2.jpg"
+                    alt="Terrain 2"
+                  />
+                </div>
+                <div
+                  ref={modalRef}
+                  className="test-start-modal"
+                  style={
+                    modalPos
+                      ? {
+                          position: "absolute",
+                          left: modalPos.x,
+                          top: modalPos.y,
+                          transform: "translate(-50%, -50%)",
+                        }
+                      : {
+                          position: "absolute",
+                          left: "50%",
+                          top: "40%",
+                          transform: "translate(-50%, -50%)",
+                        }
+                  }
+                >
+                  {/* biome-ignore lint/a11y/noStaticElementInteractions: drag handle — poignée de déplacement intentionnelle */}
+                  <div
+                    className="test-start-modal__header"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      const modal = modalRef.current;
+                      const overlay = modal?.parentElement;
+                      if (!modal || !overlay) return;
+                      const overlayRect = overlay.getBoundingClientRect();
+                      const modalRect = modal.getBoundingClientRect();
+                      modalDragStartRef.current = {
+                        mouseX: e.clientX,
+                        mouseY: e.clientY,
+                        posX: modalRect.left + modalRect.width / 2 - overlayRect.left,
+                        posY: modalRect.top + modalRect.height / 2 - overlayRect.top,
+                      };
+                      const onMove = (me: MouseEvent) => {
+                        const start = modalDragStartRef.current;
+                        if (!start) return;
+                        setModalPos({
+                          x: start.posX + me.clientX - start.mouseX,
+                          y: start.posY + me.clientY - start.mouseY,
+                        });
+                      };
+                      const onUp = () => {
+                        window.removeEventListener("mousemove", onMove);
+                        window.removeEventListener("mouseup", onUp);
+                      };
+                      window.addEventListener("mousemove", onMove);
+                      window.addEventListener("mouseup", onUp);
+                    }}
+                  >
+                    Game preparation
+                  </div>
                   <div className="test-start-modal__section">
                     <span className="test-start-modal__label">Select your roster :</span>
                     <div className="test-start-modal__roster-row">
@@ -4618,49 +4690,27 @@ export const BoardWithAPI: React.FC = () => {
                     </div>
                   </div>
                   <div className="test-start-modal__section">
-                    <span className="test-start-modal__label">Select your terrain :</span>
-                    <div className="test-start-modal__terrain-row">
-                      <div className="test-start-modal__terrain-options">
-                        {(
-                          [
-                            {
-                              value: "mc1",
-                              label: "Terrain 1",
-                              img: "/icons/Terrain/terrain-mc1.jpg",
-                            },
-                            {
-                              value: "mc2",
-                              label: "Terrain 2",
-                              img: "/icons/Terrain/terrain-mc2.jpg",
-                            },
-                          ] as const
-                        ).map((opt) => (
-                          <button
-                            key={opt.value}
-                            type="button"
-                            className={`test-start-modal__terrain-option terrain-opt-${opt.value}${selectedTerrain === opt.value ? " test-start-modal__terrain-option--active" : ""}`}
-                            onClick={() => {
-                              const url = new URL(window.location.href);
-                              url.searchParams.set("terrain", opt.value);
-                              window.location.href = url.toString();
-                            }}
-                          >
-                            {opt.label}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="test-start-modal__terrain-side">
-                        <img
-                          className="test-start-modal__terrain-side-img preview-mc1"
-                          src="/icons/Terrain/terrain-mc1.jpg"
-                          alt="Terrain 1"
-                        />
-                        <img
-                          className="test-start-modal__terrain-side-img preview-mc2"
-                          src="/icons/Terrain/terrain-mc2.jpg"
-                          alt="Terrain 2"
-                        />
-                      </div>
+                    <div className="test-start-modal__terrain-category">Select your terrain :</div>
+                    <div className="test-start-modal__terrain-options">
+                      {(
+                        [
+                          { value: "mc1", label: "Terrain 1" },
+                          { value: "mc2", label: "Terrain 2" },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          className={`test-start-modal__terrain-option terrain-opt-${opt.value}${selectedTerrain === opt.value ? " test-start-modal__terrain-option--active" : ""}`}
+                          onClick={() => {
+                            const url = new URL(window.location.href);
+                            url.searchParams.set("terrain", opt.value);
+                            window.location.href = url.toString();
+                          }}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
                   <button
