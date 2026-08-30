@@ -655,6 +655,25 @@ def test_finest_hour_pose_le_flag_apres_premiere_activation(monkeypatch):
     assert "1" in gs.get("finest_hour_used", set()), "le flag doit être posé après activation"
 
 
+def test_finest_hour_devastating_wounds_inactif_phase_suivante(monkeypatch):
+    """JUSQU'À FIN DE PHASE : DEVASTATING WOUNDS absent en fight phase 2 (bug regression)."""
+    # Phase 2 simulée : finest_hour_used contient "1" (posé en phase 1),
+    # finest_hour_active_this_phase vide (purgé par fight_v11_start).
+    # wound=6 → critique, mais pas devastating car Finest Hour expiré.
+    _seq(monkeypatch, [4, 6, 4])  # hit, wound (crit), save (si pas devastating)
+    gs, intent = _fight_state(unit_rules=[], model_unit_rules=[_FINEST_HOUR],
+                              toughness=4, save=5)
+    gs["finest_hour_used"] = {"1"}
+    gs["finest_hour_active_this_phase"] = set()
+
+    result = roll_fight_intent(gs, {**intent, "n_attacks_resolved": 1})
+
+    hit_records = [r for r in result["shot_records"] if r.get("hitResult") == "HIT"]
+    assert hit_records, "l'attaque doit toucher"
+    assert not hit_records[0].get("devastating"), \
+        "Finest Hour expiré fin phase 1 → pas de devastating en phase 2"
+
+
 def test_finest_hour_devastating_wounds_sur_deuxieme_arme(monkeypatch):
     """Finest Hour actif sur intent 1 → DEVASTATING WOUNDS appliqué sur intent 2 (2e CC weapon, même phase)."""
     # Intent 1 (weapon 0, 4 attaques) : 4 × [hit=4, wound=4, save=4] = 12 dés

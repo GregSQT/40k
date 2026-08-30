@@ -1889,6 +1889,9 @@ def fight_v11_start(game_state: Dict[str, Any]) -> None:
     game_state["units_selected_to_fight"] = set()
     game_state["pile_in_done"] = set()
     game_state["consolidation_done"] = set()
+    # « until end of phase » : purgé à chaque nouvelle fight phase pour que
+    # DEVASTATING WOUNDS ne persiste pas au-delà de la phase d'activation.
+    game_state["finest_hour_active_this_phase"] = set()
     game_state.pop("engaged_at_fight_step_start", None)
     game_state["fight_step"] = None
     game_state["fight_selector"] = None
@@ -4727,12 +4730,14 @@ def _manual_roll_fight_intent(
     if _finest_hour_args is not None:
         _squad_id_fh = str(require_key(attacker_unit, "id"))
         _finest_hour_used = game_state.setdefault("finest_hour_used", set())
+        _finest_hour_this_phase = game_state.setdefault("finest_hour_active_this_phase", set())
         if _squad_id_fh not in _finest_hour_used:
             n_attacks += int(require_key(_finest_hour_args, "attacks_bonus"))
             _finest_hour_used.add(_squad_id_fh)
-        # « until end of phase » : DEVASTATING WOUNDS actif des l activation et pour tous les
-        # intents suivants du meme modele dans la meme phase.
-        _finest_hour_active = _squad_id_fh in _finest_hour_used
+            # « until end of phase » : marquer actif pour CETTE phase seulement.
+            _finest_hour_this_phase.add(_squad_id_fh)
+        # DEVASTATING WOUNDS actif uniquement si marqué dans le set de la phase courante.
+        _finest_hour_active = _squad_id_fh in _finest_hour_this_phase
     _base_wth = _calculate_wound_target(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
     wth = _base_wth
     # Oath of Moment : MEME helper que le tir (modelisation par abaissement du seuil, plancher
