@@ -690,7 +690,7 @@ body {
 }
 
 .test-start-modal__section--spaced {
-  margin-top: 12px;
+  margin-top: 24px;
 }
 
 .test-start-modal__terrain-options {
@@ -780,6 +780,7 @@ body {
 }
 
 .test-start-bar__button {
+  margin-top: 24px;
   padding: 12px 28px;
   border-radius: 8px;
   border: 1px solid #f59e0b;
