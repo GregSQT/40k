@@ -68,15 +68,15 @@ def test_resolve_board_dir_unsafe_board_ref(gsm, bad):
 
 def test_read_terrain_file_via_board_ref(gsm):
     """_read_terrain_file route vers config/board/<board_ref>/terrain/ quand board_ref est fourni."""
-    data, path = gsm._read_terrain_file("terrain-train-01.json", BANK_SCEN, board_ref=BOARD)
-    assert path == BOARD_DIR / "terrain" / "terrain-train-01.json"
+    data, path = gsm._read_terrain_file("terrain-mc1.json", BANK_SCEN, board_ref=BOARD)
+    assert path == BOARD_DIR / "terrain" / "terrain-mc1.json"
     assert "deployment_zones" in data
 
 
 def test_read_terrain_file_no_board_ref_outside_scenario_errors(gsm):
     """Sans board_ref et hors 'scenario/', terrain_ref est irrésolvable → erreur explicite."""
     with pytest.raises(ValueError, match="board_ref"):
-        gsm._read_terrain_file("terrain-train-01.json", BANK_SCEN, board_ref=None)
+        gsm._read_terrain_file("terrain-mc1.json", BANK_SCEN, board_ref=None)
 
 
 def test_random_wall_ref_via_board_ref(gsm):

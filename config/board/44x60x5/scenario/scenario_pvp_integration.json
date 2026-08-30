@@ -1,7 +1,7 @@
 {
   "_comment": "FIGÉ — fixture de tests/integration/pvp/. Contenu exact de scenario_pvp_test.json d'avant le commit 02454a34 (`training`), qui l'a remplacé par un roster SM/Orks dont les deux armées ne se rencontrent jamais : la suite entière est tombée (ids attendus absents, phase de charge jamais atteinte, fight_subphase toujours None). Ne PAS retoucher pour jouer — ces positions SONT ce que la suite mesure (contact au tour 1, unités engagées, cibles à couvert, unités cachées hors portée). Les bacs à sable jouables sont scenario_pvp_test.json et scenario_pvp_test_sm_tyranids.json. Murs INLINE plutôt que wall_ref : un walls-*.json de plus entrerait dans le tirage aléatoire du training (game_state._load_shared_walls_from_ref, ai/train._list_available_board_refs) ; le dossier terrain/ n'est lu que par référence explicite, d'où la copie terrain-integration.json.",
   "wall_hexes": [],
-  "terrain_ref": "terrain-integration.json",
+  "terrain_ref": "divers/terrain-integration.json",
   "uses_codex_detachment": {
     "1": true,
     "2": true

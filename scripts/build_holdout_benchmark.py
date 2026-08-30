@@ -79,8 +79,7 @@ def _sync_regular_common_pool(agent_key: str, scale: str) -> None:
         write_json_atomic(opponent_regular_dir / new_name, data)
 
 
-# Terrains d'entraînement plats (V11 T4) — cyclés comme la migration de la banque.
-_TRAIN_TERRAINS = ["terrain-train-01.json", "terrain-train-02.json", "terrain-train-03.json"]
+_TRAIN_TERRAINS = ["terrain-mc1.json", "terrain-mc2.json"]
 
 
 def _build_scenarios(

@@ -43,7 +43,7 @@ MELEE_SCENARIO = {
     # OBLIGATOIRE — 08.04 le lit a chaque phase de commandement, quelle que soit la faction.
     "army_faction": {"1": "TYRANIDS", "2": "TYRANIDS"},
     "board_ref": "44x60x5",
-    "terrain_ref": "terrain-train-01.json",
+    "terrain_ref": "terrain-mc1.json",
     "deployment_type": "fixed",
     "units": [
         {"id": "1", "player": 1, "unit_type": "ScreamerKiller", "col": 60, "row": 200},

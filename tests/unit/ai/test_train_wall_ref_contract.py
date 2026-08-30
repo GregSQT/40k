@@ -33,7 +33,7 @@ TERRAIN_ONLY_SCENARIO = {
     "opponent_roster_ref": "training_random",
     "primary_objectives": ["objectives_control"],
     "board_ref": "44x60x5",
-    "terrain_ref": "terrain-train-01.json",
+    "terrain_ref": "terrain-mc1.json",
 }
 
 
@@ -101,7 +101,7 @@ def test_materialize_scenario_with_refs_wall_override_emits_no_legacy_key(tmp_pa
     produced = json.loads(Path(out).read_text(encoding="utf-8"))
 
     assert produced["wall_ref"] == "walls-33.json"
-    assert produced["terrain_ref"] == "terrain-train-01.json"  # terrain préservé
+    assert produced["terrain_ref"] == "terrain-mc1.json"  # terrain préservé
     for legacy in ("objectives", "objectives_ref", "objective_hexes"):
         assert legacy not in produced
 
