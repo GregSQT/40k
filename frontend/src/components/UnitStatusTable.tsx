@@ -622,6 +622,7 @@ interface UnitStatusTableProps {
   units: Unit[];
   player: 1 | 2;
   playerTypes?: Record<string, "human" | "ai" | "bot">;
+  playerNames?: Record<string, string>;
   selectedUnitId: UnitId | null;
   guidedFocusUnitId?: UnitId | null;
   clickedUnitId?: UnitId | null;
@@ -1446,6 +1447,7 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
     units,
     player,
     playerTypes,
+    playerNames,
     selectedUnitId,
     guidedFocusUnitId = null,
     clickedUnitId,
@@ -1665,18 +1667,19 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
           "UnitStatusTable requires game_state.player_types for player header labels"
         );
       }
+      const playerName = playerNames?.[String(playerNumber)] ?? `Player ${playerNumber}`;
       const runtimePlayerType = playerTypes[String(playerNumber)];
       if (runtimePlayerType === "human") {
-        return `Player ${playerNumber} - Human`;
+        return `${playerName} - Human`;
       }
       if (runtimePlayerType === "ai") {
         if (gameMode === "training" || isReplay) {
-          return `Player ${playerNumber} - AI/Bot`;
+          return `${playerName} - AI/Bot`;
         }
-        return `Player ${playerNumber} - AI`;
+        return `${playerName} - AI`;
       }
       if (runtimePlayerType === "bot") {
-        return `Player ${playerNumber} - Bot`;
+        return `${playerName} - Bot`;
       }
       throw new Error(
         `Invalid player type for player ${playerNumber}: ${String(runtimePlayerType)}. ` +

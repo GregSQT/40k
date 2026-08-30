@@ -1901,7 +1901,8 @@ export const BoardWithAPI: React.FC = () => {
                     {isCollapsed ? "+" : "−"}
                   </button>
                   <span>
-                    Player {player} - Deployment {isCurrentDeployer ? "(Active)" : "(Waiting)"}
+                    {player === 1 ? p1DisplayName : p2DisplayName} - Deployment{" "}
+                    {isCurrentDeployer ? "(Active)" : "(Waiting)"}
                   </span>
                 </div>
                 {canChangeRoster && (
@@ -2242,6 +2243,7 @@ export const BoardWithAPI: React.FC = () => {
           player={1}
           inchesToSubhex={inchesToSubhex}
           playerTypes={apiProps.gameState?.player_types}
+          playerNames={apiProps.gameState?.player_names}
           selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
           guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
           clickedUnitId={clickedUnitId}
@@ -2291,6 +2293,7 @@ export const BoardWithAPI: React.FC = () => {
           player={2}
           inchesToSubhex={inchesToSubhex}
           playerTypes={apiProps.gameState?.player_types}
+          playerNames={apiProps.gameState?.player_names}
           selectedUnitId={highlightedRuleChoiceUnitId ?? apiProps.selectedUnitId ?? null}
           guidedFocusUnitId={activeRuleChoicePrompt ? highlightedRuleChoiceUnitId : null}
           clickedUnitId={clickedUnitId}
