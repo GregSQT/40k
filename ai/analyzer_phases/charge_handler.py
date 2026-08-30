@@ -408,7 +408,16 @@ def handle_charge(
                     'charge_to': (dest_col, dest_row)
                 })
         else:
-            if state.unit_hp.get(charge_unit_id, 0) > 0:
+            if charge_unit_id not in state.unit_hp:
+                stats['parse_errors'].append({
+                    'episode': state.current_episode_num,
+                    'turn': turn,
+                    'phase': phase,
+                    'line': line.strip(),
+                    'error': f"Charge action for unknown unit_id (missing in unit_hp): {charge_unit_id}"
+                })
+                return
+            if require_key(state.unit_hp, charge_unit_id) > 0:
                 _position_cache_set(state.unit_positions, charge_unit_id, dest_col, dest_row)
 
         # Sample action

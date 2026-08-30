@@ -473,7 +473,7 @@ def handle_fight(
                 stats['first_error_lines']['fight_friendly'][attacker_player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
         # RULE: Dead unit Fighting (attacker is dead)
-        attacker_is_dead = state.unit_hp.get(fighter_id, 0) <= 0
+        attacker_is_dead = fighter_id in state.unit_hp and state.unit_hp[fighter_id] <= 0
         if attacker_is_dead:
             current_phase_order = require_key(PHASE_ORDER, phase)
             attacker_died_before_fight = False
@@ -497,7 +497,7 @@ def handle_fight(
                     stats['first_error_lines']['fight_dead_unit_attacker'][attacker_player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
         # RULE: Fight a dead unit (target is dead)
-        target_is_dead = state.unit_hp.get(target_id, 0) <= 0
+        target_is_dead = target_id in state.unit_hp and state.unit_hp[target_id] <= 0
         if target_is_dead:
             current_phase_order = require_key(PHASE_ORDER, phase)
             target_died_before_fight = False
