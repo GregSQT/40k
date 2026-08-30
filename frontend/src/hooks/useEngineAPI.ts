@@ -7891,6 +7891,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       unitChargeRolls: {},
       pve_mode: gameState.pve_mode,
       player_types: gameState.player_types,
+      player_names: gameState.player_names,
       deployment_type: gameState.deployment_type,
       deployment_state: memoizedDeploymentState,
       // Zones de déploiement : donnée de scénario, à la racine (elles survivent à la phase).
