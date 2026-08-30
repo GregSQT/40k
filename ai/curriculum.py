@@ -257,8 +257,8 @@ def validate_exploiter_protocol(
     members = stage_pool_members(stage)
     if len(members) != 1 or abs(members[0]["weight"] - 1.0) > RATIO_SUM_TOLERANCE:
         raise ValueError(
-            f"Etape exploiteur {stage_name} : protocole gele exige un seul membre de pool "
-            f"a weight=1.0 (got {[(m['label'], m['weight']) for m in members]!r})."
+            f"Etape exploiteur {stage_name} : pool ne contient pas exactement un membre a weight=1.0 "
+            f"(got {[(m['label'], m['weight']) for m in members]!r})."
         )
     if profile_total_episodes is not None:
         budget_cap = int(require_key(stage, "budget_cap"))
