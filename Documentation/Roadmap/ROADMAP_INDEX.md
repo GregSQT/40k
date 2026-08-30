@@ -125,6 +125,12 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | front | ✅ terrain preview inline + popup test-start (popup-*, preview-*, terrain-*) — 9 merges UI (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
 | infra | ✅ simplify-cache-hit-cleanup (2026-08-30) | [infra.md](infra.md) | ⚡ |
 | front | ✅ player-names-display — username Player 1/2 via player_names dans game_state + popup PvP (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
+| training | ✅ ajuster-bot-ratios-training — ratios bots ajustés dans la config d'entraînement (2026-08-30) | [training.md](training.md) | ⚡ |
+| training | ✅ curriculum-review-fixes — 6 findings /code-review curriculum fermés (2026-08-30) | [training.md#curriculum](training.md#curriculum) | ⚡ |
+| front | ✅ gameprep-save-default — case "Garder configuration par défaut" popup Game preparation (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
+| front | ✅ preview-size-315 — taille preview ajustée à 315 (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
+| front | ✅ terrain-btn-nowrap — bouton terrain sans retour à la ligne (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
+| training | ✅ simplify-curriculum — reuse helpers data_validation, déduplique protocole exploiteur, clamp mort retiré (2026-08-30) | [training.md#curriculum](training.md#curriculum) | ⚡ |
 
 ---
 
