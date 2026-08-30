@@ -3852,6 +3852,32 @@
       "controls": [],
       "status": "COUVERT",
       "status_note": "Implémenté dans _manual_roll_fight_intent (flag finest_hour_used) et build_weapon_attack_profile (finest_hour_active). Testé dans test_primitive_b_granted_weapon_effects."
+    },
+    {
+      "id": "unit.secure_objective_on_control",
+      "source": "config/unit_rules.json",
+      "label": "secure_objective_on_control",
+      "section": "unit",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "secure_objective_on_control"
+      },
+      "controls": [],
+      "status": "IMPLÉMENTÉ",
+      "status_note": "Get da Good Bitz (Boyz) / Objective Secured (Intercessor) : en fin de phase de commandement, les objectifs contrôlés par l'unité sont sécurisés (secured_objectives). Passe 5 chantier 06."
+    },
+    {
+      "id": "unit.oc_bonus",
+      "source": "config/unit_rules.json",
+      "label": "oc_bonus",
+      "section": "unit",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "oc_bonus"
+      },
+      "controls": [],
+      "status": "IMPLÉMENTÉ",
+      "status_note": "Relic Banner (Ancient) : +1 OC par figurine de l'unité via unit_effective_oc dans objective_control_contributions. Passe 5 chantier 06."
     }
   ]
 }

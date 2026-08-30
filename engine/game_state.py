@@ -2998,18 +2998,23 @@ class GameStateManager:
                 game_state["objective_controllers"][obj_id_key] = None
             current_controller = game_state["objective_controllers"][obj_id_key]
 
-            if control_method == "secured":
-                # Determine new controller with PERSISTENT control rules
-                new_controller = current_controller  # Default: keep current control
+            # Primitive E (chantier 06) : un objectif peut être sécurisé par une unité
+            # portant `secure_objective_on_control` (Get da Good Bitz / Objective Secured),
+            # indépendamment du control_method global. Si l'objectif est sécurisé pour le
+            # contrôleur courant, l'adversaire doit avoir STRICTEMENT plus d'OC pour le reprendre.
+            obj_secured_by = game_state.get("secured_objectives", {}).get(obj_id_key)
+            use_secured = (
+                control_method == "secured"
+                or (obj_secured_by is not None and obj_secured_by == current_controller)
+            )
 
+            if use_secured:
+                new_controller = current_controller  # keep by default
                 if player_1_oc > player_2_oc:
-                    # P1 has more OC - P1 captures/keeps
                     new_controller = 1
                 elif player_2_oc > player_1_oc:
-                    # P2 has more OC - P2 captures/keeps
                     new_controller = 2
-                # If equal OC: current controller keeps control (no change)
-                # This includes 0-0 case where objective stays in its current state
+                # Equal OC: current controller keeps control
             elif control_method == "default":
                 new_controller = None
                 if player_1_oc > player_2_oc:
@@ -3018,6 +3023,15 @@ class GameStateManager:
                     new_controller = 2
             else:
                 raise ValueError(f"Unsupported control_method: {control_method}")
+
+            # Cleared when captured by the opponent (la capacité de sécurisation de l'adversaire
+            # sera réévaluée à sa prochaine fin de phase de commandement).
+            if (
+                obj_secured_by is not None
+                and new_controller is not None
+                and new_controller != obj_secured_by
+            ):
+                game_state["secured_objectives"].pop(obj_id_key, None)
 
             # Update persistent state
             game_state["objective_controllers"][obj_id_key] = new_controller
@@ -3202,13 +3216,17 @@ class GameStateManager:
             if obj_id_key not in objective_controllers:
                 objective_controllers[obj_id_key] = None
             current_controller = objective_controllers[obj_id_key]
-            if control_method == "secured":
+            obj_secured_by = game_state.get("secured_objectives", {}).get(obj_id_key)
+            use_secured = (
+                control_method == "secured"
+                or (obj_secured_by is not None and obj_secured_by == current_controller)
+            )
+            if use_secured:
                 new_controller = current_controller
                 if player_1_oc > player_2_oc:
                     new_controller = 1
                 elif player_2_oc > player_1_oc:
                     new_controller = 2
-                # If equal OC: current controller keeps control (secured)
             elif control_method == "default":
                 new_controller = None
                 if player_1_oc > player_2_oc:
@@ -3217,6 +3235,12 @@ class GameStateManager:
                     new_controller = 2
             else:
                 raise ValueError(f"Unsupported control_method: {control_method}")
+            if (
+                obj_secured_by is not None
+                and new_controller is not None
+                and new_controller != obj_secured_by
+            ):
+                game_state["secured_objectives"].pop(obj_id_key, None)
 
             objective_controllers[obj_id_key] = new_controller
             if new_controller is not None:
@@ -3817,6 +3841,104 @@ def unit_is_within_objective(
     return False
 
 
+def unit_effective_oc(unit: Dict[str, Any]) -> int:
+    """OC effectif de l'unite, incluant oc_bonus (Relic Banner, Primitive E chantier 06).
+
+    Regle 14.02 : chaque figurine de l'unite apporte sa caracteristique OC. La regle `oc_bonus`
+    ajoute un bonus fixe a cet OC par figurine. Somme sur toutes les entrees `oc_bonus` de
+    UNIT_RULES (une seule declaree en pratique ; la somme generalise sans casse supplementaire).
+
+    Source unique du OC effectif : `objective_control_contributions` l'appelle en lieu et place
+    de `require_key(unit, "OC")`. Aucun autre site ne lit l'OC pour le controle : la modifier
+    ici couvre tout le systeme d'objectif.
+    """
+    base_oc = int(require_key(unit, "OC"))
+    for rule_entry in unit.get("UNIT_RULES", []):
+        if rule_entry.get("ruleId") == "oc_bonus":
+            rule_args = rule_entry.get("rule_args")
+            if not isinstance(rule_args, dict) or "oc_bonus" not in rule_args:
+                raise ValueError(
+                    f"Rule 'oc_bonus' on unit {unit.get('id')} "
+                    "must define rule_args.oc_bonus"
+                )
+            base_oc += int(rule_args["oc_bonus"])
+    return base_oc
+
+
+def apply_secure_objective_on_control(game_state: Dict[str, Any]) -> List[int]:
+    """Primitive E — fin de phase de commandement, marque les objectifs securises.
+
+    Regle : si l'unite active portant `secure_objective_on_control` controle un objectif en fin
+    de phase de commandement, cet objectif est securise pour ce joueur (14.03) — l'adversaire
+    doit avoir STRICTEMENT plus d'OC pour le reprendre. `calculate_objective_control` lit
+    `secured_objectives` pour appliquer la logique securisee par objectif.
+
+    Retourne la liste des obj_id securises lors de cet appel (0 = rien de nouveau).
+    Prerequis : `objective_controllers` doit etre a jour (appeler apres le checkpoint 14.02).
+    """
+    from engine.phase_handlers.shared_utils import is_unit_alive, unit_has_rule_effect
+
+    current_player = int(require_key(game_state, "current_player"))
+    units = require_key(game_state, "units")
+
+    # Porteurs vivants, non battle-shocked, du joueur actif ayant la capacite.
+    carriers = [
+        unit for unit in units
+        if int(require_key(unit, "player")) == current_player
+        and unit_has_rule_effect(unit, "secure_objective_on_control")
+        and not require_key(unit, "battle_shocked")
+        and is_unit_alive(str(require_key(unit, "id")), game_state)
+    ]
+    if not carriers:
+        return []
+
+    # S'assure que `objective_controllers` reflète l'OC ACTUEL (après le battle-shock 08.03).
+    # Sans cet appel, l'état peut être périmé : au tour 1 le dict est encore vide (aucun
+    # checkpoint antérieur), et au tour 2+ `_calculate_primary_objective_control_counts` peut
+    # avoir été ignoré si le scoring était déjà résolu pour ce tour-ci. Même motif que
+    # `movement_step_cp_gain_on_objective` (cp_gain_on_objective).
+    GameStateManager(require_key(game_state, "config")).calculate_objective_control(game_state)
+
+    if "secured_objectives" not in game_state:
+        game_state["secured_objectives"] = {}
+
+    controllers = require_key(game_state, "objective_controllers")
+    newly_secured: List[int] = []
+    for objective_id, zone in objective_hex_zones(game_state):
+        obj_key = str(objective_id)
+        if controllers.get(obj_key) != current_player:
+            continue
+        securing_units = [
+            u for u in carriers
+            if unit_is_within_objective(game_state, u, zones=[zone])
+        ]
+        if not securing_units:
+            continue
+        game_state["secured_objectives"][obj_key] = current_player
+        newly_secured.append(objective_id)
+
+        from engine.action_log_utils import append_action_log
+        for unit in securing_units:
+            append_action_log(game_state, {
+                "type": "secure_objective",
+                "unitId": str(require_key(unit, "id")),
+                "player": current_player,
+                "phase": "command",
+                "turn": game_state.get("turn", 0),
+                "objectiveId": objective_id,
+            })
+
+    from engine.game_utils import add_debug_file_log
+    if newly_secured:
+        add_debug_file_log(
+            game_state,
+            f"[SECURE OBJECTIVE] E{game_state.get('episode_number', '?')} "
+            f"T{game_state.get('turn', '?')} player={current_player} "
+            f"secured={newly_secured}"
+        )
+    return newly_secured
+
+
 def objective_control_contributions(
     game_state: Dict[str, Any], hex_sets: List[Set[Tuple[int, int]]]
 ) -> Dict[str, Tuple[int, List[int]]]:
@@ -3886,7 +4008,7 @@ def objective_control_contributions(
         # construction de chaque unite ; son absence est un etat corrompu, pas un defaut.
         if bool(require_key(unit, "battle_shocked")):
             continue
-        oc = require_key(unit, "OC")
+        oc = unit_effective_oc(unit)
         if oc <= 0:
             continue
         unit_player = int(require_key(unit, "player"))

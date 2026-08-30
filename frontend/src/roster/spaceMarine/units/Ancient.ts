@@ -26,11 +26,16 @@ export class Ancient extends LeaderEliteMeleeElite {
   // UNIT RULES
   static UNIT_RULES = [
     { ruleId: "support", displayName: "Support" },
-    { ruleId: "feel_no_pain_near_objective", displayName: "Unbreakable Resolve (FNP 4+ near obj)", rule_args: { threshold: 4 } },
+    {
+      ruleId: "feel_no_pain_near_objective",
+      displayName: "Unbreakable Resolve (FNP 4+ near obj)",
+      rule_args: { threshold: 4 },
+    },
+    { ruleId: "oc_bonus", displayName: "Relic Banner", rule_args: { oc_bonus: 1 } },
   ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { support: 2, feel_no_pain_near_objective: 2 };
+  static RULES_STATUS = { support: 2, feel_no_pain_near_objective: 2, oc_bonus: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = [

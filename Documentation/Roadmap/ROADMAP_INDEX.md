@@ -77,7 +77,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | # | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|---|
 | 8 | training+bot | ✅ Self-play §0.59 absorbé par `--etape` (décision 2026-08-30) | [v11_chemin_critique.md#selfplay](v11_chemin_critique.md#selfplay) | ✅ |
-| 9 | moteur+training | **06** Armageddon abilities — 4/6 passes (passe 4 : Primitive D mortal_wounds — Hold Still PainBoy, Exhortation ChaplainJumpPack, charge_impact unifié, 2026-08-30) | [capacites.md#armageddon-06](capacites.md#armageddon-06) | 🚫 |
+| 9 | moteur+training | **06** Armageddon abilities — 5/6 passes (passe 5 : Primitive E objective_effects — secure_objective_on_control Get da Good Bitz/Objective Secured, oc_bonus Relic Banner, 2026-08-30) | [capacites.md#armageddon-06](capacites.md#armageddon-06) | 🚫 |
 
 ---
 

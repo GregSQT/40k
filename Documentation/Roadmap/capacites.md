@@ -6,7 +6,7 @@
 
 ## 06 — Armageddon abilities {#armageddon-06}
 
-**4/6 passes.** Tous prérequis (01→05) livrés et vérifiés. Jalon J4 — hors du chemin de la mesure de référence.
+**5/6 passes.** Tous prérequis (01→05) livrés et vérifiés. Jalon J4 — hors du chemin de la mesure de référence.
 
 ✅ **Passe 1 — Primitive A `roll_modifiers` (2026-08-30).** Might Is Right (Warboss), Litany of Hate (ChaplainJumpPack), Somethin' to Prove (Bigboss) et le malus de suppression sont vifs, tir et mêlée, avec `clamp(base − bonus + malus, 2, 6)`. Journalisés en tags de ligne (`[MIGHT IS RIGHT]`, `[SUPPRESSED]`, `[LITANY OF HATE]`, `[SOMETHIN' TO PROVE]`), observés (obs_size inchangé), contrôlés par l'analyzer (`fight_hit_threshold_mismatch`, `charge_roll_out_of_range`, plus le seuil de blessure qui connaît désormais Litany). Le statut `suppressed` existe et est purgé au bon moment ; **aucune datasheet ne le POSE avant la passe 6**.
 
@@ -16,7 +16,9 @@
 
 ✅ **Passe 4 — Primitive D `mortal_wounds` (2026-08-30).** 3 capacités : Hold Still and Say Aargh (PainBoy/'urty Syringe, crit wound → D6 BM sur cible non-VEHICLE, séquence d'attaque terminée), Exhortation de Rage (ChaplainJumpPack, sélection combat → D6 : 4-5=D3 BM, 6=3 BM sur ennemi engagé au choix, décision agent `mortal_wounds_target`). Charge impact unifié via `allocate_mortal_wounds` (suppression du décrément HP direct). Deadly Demise WeirdBoy vérifié (chemin déjà câblé). Da Jump failure bloqué Type C (action non implémentée). Nouveau type agent `mortal_wounds_target` (slot 6/8, obs_size inchangé). Deux nouveaux types registrés (`mortal_wounds_on_critical_wound` obs_id 31, `mortal_wounds_on_fight_activation` obs_id 32). 14 tests rouge→vert. `rules_corpus.json` à jour.
 
-**Ordre** : passes 1-4 livrées ; FNP déjà câblé côté moteur.
+✅ **Passe 5 — Primitive E `objective_effects` (2026-08-30).** 3 capacités : Get da Good Bitz (Boyz/Orks) et Objective Secured (Intercessor/SM) — une seule règle générique `secure_objective_on_control` ; en fin de phase de commandement, si l'unité contrôle l'objectif, celui-ci est sécurisé dans `secured_objectives` : l'adversaire doit avoir STRICTEMENT plus d'OC pour le reprendre (14.03). Relic Banner (Ancient) — `oc_bonus` (+1 OC par figurine via `unit_effective_oc`). `calculate_objective_control` et `_calculate_primary_objective_control_counts` honorent les deux mécanismes ; `apply_secure_objective_on_control` appelée en `command_phase_end` après rafraîchissement explicite des contrôleurs. Deux nouveaux types registrés (`secure_objective_on_control` obs_id 33, `oc_bonus` obs_id 34). 12 tests rouge→vert.
+
+**Ordre** : passes 1-5 livrées ; FNP déjà câblé côté moteur.
 
 ✅ Recalculé le 2026-08-30 : max 6 capacités simultanées sur une entité (contrainte 19.01 : 1 leader + 1 support max), marge 2 slots. `UNIT_ABILITY_SLOTS = 8` tient pour l'intégralité du chantier 06.
 

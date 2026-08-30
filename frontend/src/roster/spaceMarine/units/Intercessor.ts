@@ -33,10 +33,17 @@ export class Intercessor extends TroopRangeSwarm {
       displayName: "Hail of Bolts",
       rule_args: { weapon_code: "bolt_rifle", attacks_bonus: 2 },
     },
+    {
+      ruleId: "secure_objective_on_control",
+      displayName: "Objective Secured",
+    },
   ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { weapon_attacks_bonus_vs_designated_target: 2 };
+  static RULES_STATUS = {
+    weapon_attacks_bonus_vs_designated_target: 2,
+    secure_objective_on_control: 2,
+  };
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
