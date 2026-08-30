@@ -393,18 +393,10 @@ class RewardMapper:
     
     def _is_lowest_hp_high_threat(self, target, all_targets, game_state: Dict[str, Any]):
         """Check if target has lowest HP among high threat targets. Phase 2: HP from _get_target_hp."""
-        if not all_targets:
-            return False
-        threats = {id(t): self._get_unit_threat(t) for t in all_targets}
-        max_threat = max(threats.values())
-        target_threat = self._get_unit_threat(target)
-        if target_threat != max_threat:
-            return False
-        target_hp = self._get_target_hp(target, game_state)
-        for other in all_targets:
-            if threats[id(other)] == max_threat and self._get_target_hp(other, game_state) < target_hp:
-                return False
-        return True
+        return (
+            self._is_highest_threat_in_range(target, all_targets)
+            and self._is_lowest_hp_among_threats(target, all_targets, game_state)
+        )
     
     def _is_lowest_hp_among_threats(self, target, all_targets, game_state: Dict[str, Any]):
         """Check if target has lowest HP among targets of same threat level. Phase 2: HP from _get_target_hp."""

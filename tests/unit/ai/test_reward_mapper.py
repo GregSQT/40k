@@ -237,9 +237,12 @@ def test_shoot_charge_and_combat_priority_rewards(monkeypatch: pytest.MonkeyPatc
     assert abs(shoot_reward_p1 - 1.9) < 1e-9  # ranged_attack 1.0 + shoot_priority_1 0.9
 
 
-def test_is_lowest_hp_high_threat_empty_targets() -> None:
+def test_is_lowest_hp_high_threat_empty_targets(monkeypatch: pytest.MonkeyPatch) -> None:
     mapper = RewardMapper(_base_cfg())
-    assert mapper._is_lowest_hp_high_threat({"id": "T"}, [], {}) is False
+    monkeypatch.setattr(mapper, "_get_unit_threat", lambda t: 1.0)
+    monkeypatch.setattr(mapper, "_get_target_hp", lambda t, gs: 5)
+    # No other targets → target is vacuously highest-threat and lowest-HP
+    assert mapper._is_lowest_hp_high_threat({"id": "T"}, [], {}) is True
 
 
 def test_is_lowest_hp_high_threat_target_not_in_all_targets(monkeypatch: pytest.MonkeyPatch) -> None:
