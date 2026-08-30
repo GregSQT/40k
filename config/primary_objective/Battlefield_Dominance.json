@@ -1,0 +1,37 @@
+{
+  "id": "battlefield_dominance",
+  "name": "Battlefield Dominance",
+  "identifier": "battlefield_dominance",
+  "force_disposition": "take_and_hold",
+  "opponent_force_disposition": "take_and_hold",
+  "description": "Mission miroir TaH vs TaH. Contrôler plus d'objectifs que l'adversaire en R1-2 ; scorer par objectif tenu à la Command phase à partir de R2, avec bonus par non-home si le home est tenu.",
+  "scoring_events": [
+    {
+      "id": "end_turn_lead_r1_r2",
+      "timing": "end_of_turn",
+      "rounds": "1-2",
+      "condition": "control_more_than_opponent",
+      "points": 2
+    },
+    {
+      "id": "command_per_objective_r2plus",
+      "timing": "end_of_command_phase",
+      "rounds": "2+",
+      "condition": "per_objective",
+      "points_per": 3
+    },
+    {
+      "id": "command_home_bonus_r2plus",
+      "timing": "end_of_command_phase",
+      "rounds": "2+",
+      "condition": "per_non_home_objective_if_home_held",
+      "points_per": 2
+    }
+  ],
+  "end_of_battle_events": [],
+  "control": {
+    "method": "oc_sum_greater",
+    "control_method": "default",
+    "tie_behavior": "no_control"
+  }
+}

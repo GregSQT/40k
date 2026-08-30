@@ -1,0 +1,37 @@
+{
+  "id": "immovable_object",
+  "name": "Immovable Object",
+  "identifier": "immovable_object",
+  "force_disposition": "take_and_hold",
+  "opponent_force_disposition": "purge_the_foe",
+  "description": "TaH vs PtF. Tenir les objectifs centraux (tous rounds, fin de tour) ; scorer par objectif non-home à la Command phase R2-4 ; idem fin de tour R5.",
+  "scoring_events": [
+    {
+      "id": "end_turn_central_all_rounds",
+      "timing": "end_of_turn",
+      "rounds": "all",
+      "condition": "control_at_least_one_central",
+      "points": 3
+    },
+    {
+      "id": "command_per_non_home_r2_r4",
+      "timing": "end_of_command_phase",
+      "rounds": "2-4",
+      "condition": "per_objective_excl_home",
+      "points_per": 5
+    },
+    {
+      "id": "end_turn_per_non_home_r5",
+      "timing": "end_of_turn",
+      "rounds": "5",
+      "condition": "per_objective_excl_home",
+      "points_per": 5
+    }
+  ],
+  "end_of_battle_events": [],
+  "control": {
+    "method": "oc_sum_greater",
+    "control_method": "default",
+    "tie_behavior": "no_control"
+  }
+}

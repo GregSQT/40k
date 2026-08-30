@@ -1,0 +1,45 @@
+{
+  "id": "meatgrinder",
+  "name": "Meatgrinder",
+  "identifier": "meatgrinder",
+  "force_disposition": "purge_the_foe",
+  "opponent_force_disposition": "purge_the_foe",
+  "description": "Mission miroir PtF vs PtF. Éliminer des unités (tous rounds, fin de tour) ; tenir ≥1 objectif non-home (Command phase R2+) ; bonus si kills ce tour > kills adversaire tour précédent et pour contrôler le home adverse (fin de tour R2+).",
+  "scoring_events": [
+    {
+      "id": "end_turn_kill_any_round",
+      "timing": "end_of_turn",
+      "rounds": "all",
+      "condition": "kill_at_least_one_enemy",
+      "points": 3
+    },
+    {
+      "id": "command_per_non_home_r2plus",
+      "timing": "end_of_command_phase",
+      "rounds": "2+",
+      "condition": "per_objective_excl_home",
+      "points_per": 4
+    },
+    {
+      "id": "end_turn_kill_differential_r2plus",
+      "timing": "end_of_turn",
+      "rounds": "2+",
+      "condition": "kill_more_than_opponent_killed_last_turn",
+      "points": 5,
+      "_note": "Unités ennemies détruites ce tour > unités alliées détruites au tour précédent"
+    },
+    {
+      "id": "end_turn_opponent_home_r2plus",
+      "timing": "end_of_turn",
+      "rounds": "2+",
+      "condition": "control_opponent_home",
+      "points": 5
+    }
+  ],
+  "end_of_battle_events": [],
+  "control": {
+    "method": "oc_sum_greater",
+    "control_method": "default",
+    "tie_behavior": "no_control"
+  }
+}

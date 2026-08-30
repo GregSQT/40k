@@ -1,0 +1,44 @@
+{
+  "id": "unstoppable_force",
+  "name": "Unstoppable Force",
+  "identifier": "unstoppable_force",
+  "force_disposition": "purge_the_foe",
+  "opponent_force_disposition": "take_and_hold",
+  "description": "PtF vs TaH. Éliminer des unités (tous rounds, fin de tour) ; scorer par objectif non-home à la Command phase R2+ et pour avoir pris de nouveaux objectifs ; bonus fin de partie pour les centraux.",
+  "scoring_events": [
+    {
+      "id": "end_turn_kill_any_round",
+      "timing": "end_of_turn",
+      "rounds": "all",
+      "condition": "kill_at_least_one_enemy",
+      "points": 3
+    },
+    {
+      "id": "command_per_non_home_r2plus",
+      "timing": "end_of_command_phase",
+      "rounds": "2+",
+      "condition": "per_objective_excl_home",
+      "points_per": 4
+    },
+    {
+      "id": "command_newly_taken_excl_home_r2plus",
+      "timing": "end_of_command_phase",
+      "rounds": "2+",
+      "condition": "control_at_least_one_new_excl_home",
+      "points": 3,
+      "_note": "≥1 objectif (hors home) contrôlé ce tour que tu ne contrôlais pas en début de tour"
+    }
+  ],
+  "end_of_battle_events": [
+    {
+      "id": "eob_central_objective",
+      "condition": "control_at_least_one_central",
+      "points": 5
+    }
+  ],
+  "control": {
+    "method": "oc_sum_greater",
+    "control_method": "default",
+    "tie_behavior": "no_control"
+  }
+}
