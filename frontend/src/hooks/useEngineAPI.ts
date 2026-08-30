@@ -40,7 +40,7 @@ import {
   getSelectedRangedWeaponAgainstTarget,
 } from "../utils/probabilityCalculator";
 import { selectReserveUnits, shouldWarnReservesLastRound } from "../utils/strategicReservesUi";
-import { resolveSelectedTerrain } from "../utils/terrainSelection";
+import { resolveSelectedTerrain, terrainsForMode } from "../utils/terrainSelection";
 
 // Get max_turns from config instead of hardcoded fallback
 const getMaxTurnsFromConfig = async (): Promise<number> => {
@@ -1176,7 +1176,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
         // Le terrain part avec TOUS les modes qui exposent le sélecteur — PvP compris, où il
         // n'était pas transmis : le serveur restait alors sur le scénario mc2.
-        if (requestedModeCode !== "endless_duty") {
+        if (terrainsForMode(mode).length > 0) {
           requestPayload.terrain_ref = resolveSelectedTerrain(mode, window.location.search);
         }
         if (!isPvEMode && !isPvETestMode && !isEndlessDutyMode) {

@@ -278,6 +278,8 @@ TERRAIN_SCENARIO_SUFFIX_BY_MODE = {
 }
 # Terrain retenu quand la requête n'en nomme aucun : celui du scénario de base du mode.
 DEFAULT_TERRAIN_BY_MODE = {"pvp": "mc2", "pvp_test": "mc2", "pve": "mc1", "pve_test": "mc2"}
+# Modes qui exposent le sélecteur de terrain dans le popup de préparation.
+MODES_WITH_TERRAIN_SELECTOR: frozenset = frozenset({"pvp", "pvp_test", "pve"})
 
 
 def _terrain_scenario_suffix(mode: str, terrain_ref: Optional[str]) -> str:

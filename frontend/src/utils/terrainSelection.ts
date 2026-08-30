@@ -10,14 +10,16 @@ export const TERRAIN_LABELS: Record<TerrainRef, string> = {
   pfm2: "Purge the Foe Mirror 2",
 };
 
+const PVP_TERRAINS: readonly TerrainRef[] = ["mc1", "mc2", "pfm2"];
+
 /**
  * Terrains qu'un mode sait charger : il lui faut un scénario par terrain proposé.
  * `pve_test` n'a pas de scénario `pfm2`, il ne l'expose donc pas.
  */
 const TERRAINS_BY_MODE: Record<string, readonly TerrainRef[]> = {
-  pvp: ["mc1", "mc2", "pfm2"],
-  pvp_test: ["mc1", "mc2", "pfm2"],
-  pve: ["mc1", "mc2", "pfm2"],
+  pvp: PVP_TERRAINS,
+  pvp_test: PVP_TERRAINS,
+  pve: PVP_TERRAINS,
   pve_test: ["mc1", "mc2"],
 };
 
@@ -29,11 +31,21 @@ const DEFAULT_BY_MODE: Record<string, TerrainRef> = {
   pve_test: "mc1",
 };
 
-/** Le mode PvP est celui de `/game` SANS paramètre `mode`. */
-const normalizeMode = (mode: string | null): string => (mode === null ? "pvp" : mode);
+/** Miroir client de `TERRAIN_SCENARIO_SUFFIX_BY_MODE` du backend. */
+const TERRAIN_SUFFIX_BY_MODE: Record<string, Partial<Record<TerrainRef, string>>> = {
+  pvp: { mc1: "_mc1", mc2: "", pfm2: "_pfm2" },
+  pvp_test: { mc1: "_mc1", mc2: "", pfm2: "_pfm2" },
+  pve: { mc1: "", mc2: "_mc2", pfm2: "_pfm2" },
+  pve_test: { mc1: "_mc1", mc2: "" },
+};
 
 export function terrainsForMode(mode: string | null): readonly TerrainRef[] {
-  return TERRAINS_BY_MODE[normalizeMode(mode)] ?? [];
+  return TERRAINS_BY_MODE[mode ?? "pvp"] ?? [];
+}
+
+/** Suffixe de scénario du terrain pour ce mode — miroir de `_terrain_scenario_suffix` Python. */
+export function clientTerrainSuffix(mode: string | null, terrain: TerrainRef): string {
+  return TERRAIN_SUFFIX_BY_MODE[mode ?? "pvp"]?.[terrain] ?? "";
 }
 
 /**
@@ -61,5 +73,5 @@ export function resolveSelectedTerrain(mode: string | null, search: string): Ter
   }
   if (accepts(saved)) return saved;
 
-  return DEFAULT_BY_MODE[normalizeMode(mode)] ?? "mc2";
+  return DEFAULT_BY_MODE[mode ?? "pvp"] ?? "mc2";
 }

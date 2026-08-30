@@ -1,7 +1,7 @@
 // frontend/src/hooks/useGameConfig.ts
 import { useEffect, useState } from "react";
 import { apiFetch } from "../services/apiFetch";
-import { resolveSelectedTerrain } from "../utils/terrainSelection";
+import { clientTerrainSuffix, resolveSelectedTerrain } from "../utils/terrainSelection";
 
 export interface DisplayConfig {
   resolution?: "auto" | number;
@@ -300,12 +300,10 @@ export const useGameConfig = (options?: {
         const DEFAULT_TEST_BOARD = "x5_44x60";
         const boardParam = isTestMode ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD) : null;
         const terrainParam = resolveSelectedTerrain(mode, window.location.search);
-        const terrainSuffix =
-          terrainParam === "mc1" ? "_mc1" : terrainParam === "pfm2" ? "_pfm2" : "";
         const scenarioName =
           mode === "pve_test"
-            ? `scenario_pve_test${terrainSuffix}.json`
-            : `scenario_pvp_test${terrainSuffix}.json`;
+            ? `scenario_pve_test${clientTerrainSuffix("pve_test", terrainParam)}.json`
+            : `scenario_pvp_test${clientTerrainSuffix("pvp_test", terrainParam)}.json`;
         // Dossier qui PORTE les scénarios de test : il ne suit pas la résolution jouée. `x1` et
         // `x5_44x60` sont le même plateau 44×60 à deux résolutions, et le moteur convertit les
         // coordonnées (cf. Documentation/Reference/moteur/geometrie_et_distances.md). Les entrées
@@ -314,9 +312,7 @@ export const useGameConfig = (options?: {
           x1: "board/44x60x5",
           x5_44x60: "board/44x60x5",
         };
-        // Le PvE a sa propre table de suffixes : son scénario NON suffixé est celui de mc1.
-        const pveSuffix = terrainParam === "mc2" ? "_mc2" : terrainParam === "pfm2" ? "_pfm2" : "";
-        const pveScenario = `config/board/44x60x5/scenario/scenario_pve${pveSuffix}.json`;
+        const pveScenario = `config/board/44x60x5/scenario/scenario_pve${clientTerrainSuffix("pve", terrainParam)}.json`;
         const scenarioMap: Record<string, string> = {
           endless_duty: "config/scenario_endless_duty.json",
           pve: pveScenario,
@@ -324,7 +320,7 @@ export const useGameConfig = (options?: {
         // Le sélecteur de terrain agit aussi en PvP : le scénario suffixé doit être celui que
         // `POST /api/game/start` résout côté serveur, sinon le plateau dessiné et le plateau
         // joué divergeraient.
-        const pvpScenario = `config/board/44x60x5/scenario/scenario_pvp${terrainSuffix}.json`;
+        const pvpScenario = `config/board/44x60x5/scenario/scenario_pvp${clientTerrainSuffix("pvp", terrainParam)}.json`;
         const scenarioFile =
           scenarioFileOverride ??
           (isTestMode && boardParam && boardDirMap[boardParam]
