@@ -5107,8 +5107,17 @@ def main():
     args = parser.parse_args()
 
     from config_loader import BOARD_DIR_BY_INCHES_TO_SUBHEX
-    if args.resolution is not None:
-        os.environ["W40K_BOARD_PATH"] = BOARD_DIR_BY_INCHES_TO_SUBHEX[args.resolution]
+    if args.resolution is None:
+        import re as _re
+        _m = _re.search(r"_x(\d+)$", args.agent)
+        if _m:
+            args.resolution = int(_m.group(1))
+        else:
+            raise ValueError(
+                f"Impossible de deduire la resolution depuis le nom d'agent '{args.agent}' "
+                f"(suffixe _x1 / _x5 attendu). Passe --resolution explicitement."
+            )
+    os.environ["W40K_BOARD_PATH"] = BOARD_DIR_BY_INCHES_TO_SUBHEX[args.resolution]
 
     # `--new` cree un modele neuf, `--append` continue l'existant : c'est l'un OU l'autre. Rien
     # dans argparse ne les rend exclusifs, et le code choisissait `--new` en silence — une
