@@ -68,7 +68,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | # | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|---|
 | 6 | training | ✅ R1→R3 absorbés par `--etape` P0→P10 (2026-08-30) | [training.md#curriculum](training.md#curriculum) | ✅ |
-| 7 | training | Mesure de référence `x1_long` (~6 h) — sur champion final P10 | [v11_chemin_critique.md#mesure](v11_chemin_critique.md#mesure) | 🚫 |
+| 7 | training | Mesure de référence — `--test-only --step` sur champion final P10 (~8 min) | [v11_chemin_critique.md#mesure](v11_chemin_critique.md#mesure) | 🚫 |
 
 ---
 
