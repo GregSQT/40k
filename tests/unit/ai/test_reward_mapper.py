@@ -211,14 +211,14 @@ def test_shoot_charge_and_combat_priority_rewards(monkeypatch: pytest.MonkeyPatc
     # Shooting priority 3 path (killable + highest threat + lowest HP — checked before P2)
     monkeypatch.setattr(mapper, "_is_lowest_hp_high_threat", lambda t, ts, gs: True)
     shoot_reward_p3 = mapper.get_shooting_priority_reward(
-        unit, target, all_targets, can_melee_charge_target=False, game_state={}
+        unit, target, all_targets, can_melee_charge_target=False, melee_will_kill_target=False, game_state={}
     )
     assert abs(shoot_reward_p3 - 1.8) < 1e-9  # ranged_attack 1.0 + shoot_priority_3 0.8
 
     # Shooting priority 2 path (killable + highest threat, NOT lowest HP)
     monkeypatch.setattr(mapper, "_is_lowest_hp_high_threat", lambda t, ts, gs: False)
     shoot_reward = mapper.get_shooting_priority_reward(
-        unit, target, all_targets, can_melee_charge_target=False, game_state={}
+        unit, target, all_targets, can_melee_charge_target=False, melee_will_kill_target=False, game_state={}
     )
     assert abs(shoot_reward - 1.6) < 1e-9  # ranged_attack 1.0 + shoot_priority_2 0.6
 
@@ -230,11 +230,18 @@ def test_shoot_charge_and_combat_priority_rewards(monkeypatch: pytest.MonkeyPatc
     combat_reward = mapper.get_combat_priority_reward(unit, target, all_targets, {})
     assert abs(combat_reward - 2.2) < 1e-9  # melee_attack 1.5 + attack_priority_1 0.7
 
-    # Shooting priority 1 path: can_melee_charge_target=True + highest threat
+    # Shooting priority 1 path: can_melee_charge_target=True + melee won't kill → P1 fires
     shoot_reward_p1 = mapper.get_shooting_priority_reward(
-        unit, target, all_targets, can_melee_charge_target=True, game_state={}
+        unit, target, all_targets, can_melee_charge_target=True, melee_will_kill_target=False, game_state={}
     )
     assert abs(shoot_reward_p1 - 1.9) < 1e-9  # ranged_attack 1.0 + shoot_priority_1 0.9
+
+    # P1 suppressed when melee will already kill: falls through to P3 (killable + lowest HP high threat)
+    monkeypatch.setattr(mapper, "_is_lowest_hp_high_threat", lambda t, ts, gs: True)
+    shoot_reward_p1_suppressed = mapper.get_shooting_priority_reward(
+        unit, target, all_targets, can_melee_charge_target=True, melee_will_kill_target=True, game_state={}
+    )
+    assert abs(shoot_reward_p1_suppressed - 1.8) < 1e-9  # P3 only: ranged_attack 1.0 + shoot_priority_3 0.8
 
 
 def test_is_lowest_hp_high_threat_empty_targets(monkeypatch: pytest.MonkeyPatch) -> None:

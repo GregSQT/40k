@@ -57,13 +57,14 @@ class RewardMapper:
         
         return target_hp <= max_damage
     
-    def get_shooting_priority_reward(self, unit, target, all_targets, can_melee_charge_target, game_state: Dict[str, Any]):
+    def get_shooting_priority_reward(self, unit, target, all_targets, can_melee_charge_target: bool, melee_will_kill_target: bool, game_state: Dict[str, Any]):
         """
         Calculate shooting reward based on AI_GAME_OVERVIEW.md priority system:
 
         1. Enemy unit at ranged range:
            - with highest threat score (max of ranged/melee damage)
            - that one or more of our melee units can charge
+           - and melee will NOT kill it already (avoid over-rewarding redundant softening)
 
         3. Enemy unit at ranged range (checked before P2 — most specific sub-case):
            - with highest threat score (max of ranged/melee damage)
@@ -83,8 +84,8 @@ class RewardMapper:
         # MULTIPLE_WEAPONS_IMPLEMENTATION.md: Calculate target threat using weapon arrays
         can_kill_1_phase = self._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state=game_state)
 
-        # Priority 1: High threat target that melee can charge — soften before the charge
-        if can_melee_charge_target and self._is_highest_threat_in_range(target, all_targets):
+        # Priority 1: High threat target that melee can charge and won't already kill
+        if can_melee_charge_target and not melee_will_kill_target and self._is_highest_threat_in_range(target, all_targets):
             return base_reward + require_key(unit_rewards, "shoot_priority_1")
 
         # Priority 3: High threat, lowest HP, killable — checked before P2 as the more specific sub-case
