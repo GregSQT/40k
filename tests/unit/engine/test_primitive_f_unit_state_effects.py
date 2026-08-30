@@ -26,7 +26,7 @@ import pytest
 
 def _rule(rule_id: str, rule_args: Optional[Dict[str, Any]] = None, **kw: Any) -> Dict[str, Any]:
     r: Dict[str, Any] = {"ruleId": rule_id, "displayName": rule_id}
-    if rule_args:
+    if rule_args is not None:
         r["rule_args"] = rule_args
     r.update(kw)
     return r
@@ -227,8 +227,9 @@ def test_invul_save_override_propagation_19_04_librarian_bodyguard() -> None:
     le bodyguard n'a pas la règle en propre (_UNIT_RULES_OWN vide), elle vient
     du groupe attaché (Librarian). effective_invul_save doit retourner 4 pour
     un Intercessor dont la base INVUL_SAVE est 7+ (aucune InSv native).
-    Un bug dans compute_unit_rules_in_effect ou dans le fold qui oublierait
-    d'alimenter _ATTACHED_RULE_GROUPS ferait retourner 7 et échouerait le test.
+    Un bug dans compute_unit_rules_in_effect qui omettrait les règles attachées
+    ferait retourner 7 et échouerait le test (le fold _fold_attached_characters
+    n'est pas appelé ici — couvert par test_invul_save_override_mental_fortress_librarian_19_04).
     """
     import copy
     from engine.game_state import effective_invul_save
@@ -251,8 +252,6 @@ def test_invul_save_override_propagation_19_04_librarian_bodyguard() -> None:
     )
 
     bodyguard = _unit(bodyguard_id, 1, unit_rules=unit_rules_in_effect)
-    bodyguard["_UNIT_RULES_OWN"] = own_rules
-    bodyguard["_ATTACHED_RULE_GROUPS"] = attached_groups
 
     gs = _base_state([bodyguard])
     assert effective_invul_save(gs, bodyguard, 7) == 4
