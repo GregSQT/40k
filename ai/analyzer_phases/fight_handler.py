@@ -245,6 +245,10 @@ def handle_fight(
         fight_attacks_by_player[fighter_id] = fight_attacks_by_player[fighter_id] + 1
         if fighter_id in state.charged_units_current_fight:
             state.charged_units_fought.add(fighter_id)
+        elif '[FIGHTS FIRST]' in line:
+            # 24.13 : FIGHTS FIRST combat avant l'alternance ordinaire — légal même si des
+            # unités chargées n'ont pas encore combattu.
+            pass
         else:
             eligible_charged_units = []
             for charged_id in state.charged_units_current_fight:
@@ -568,7 +572,7 @@ def handle_fight_move(
         state.current_line_models.get(unit_id),  # get allowed
     )
     new_models = state.current_line_models.get(unit_id)  # get allowed
-    moved = bool(prev_models and new_models) or anchor_from != anchor_to
+    moved = anchor_from != anchor_to
     if moved:
         occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
             state.positions_by_model, state.unit_positions, state.unit_base,

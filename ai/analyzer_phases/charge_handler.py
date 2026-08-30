@@ -50,7 +50,7 @@ def handle_charge(
     # aucun contrôle `charge_invalid`, et la position de l'unité figée sur un fantôme. Le
     # marqueur de tir (`SHOT`) utilise déjà cette forme : c'est celle-ci qui est la référence.
     charge_match = re.search(
-        r'Unit (\d+)\s*\((\d+),\s*(\d+)\)\s+CHARGED(?:\s+(?:\([^)]+\)|\[[^\]]+\]))*\s+Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?\s+from \((\d+),\s*(\d+)\)\s+to \((\d+),\s*(\d+)\)',
+        r'Unit (\d+)\s*\((\d+),\s*(\d+)\)\s+CHARGED(?:\s+(?:\([^)]+\)|\[[^\]]+\]))*\s+Unit (\d+)(?:\s*\((\d+),\s*(\d+)\))?(?:,Unit \d+(?:\s*\(\d+,\s*\d+\))?)*\s+from \((\d+),\s*(\d+)\)\s+to \((\d+),\s*(\d+)\)',
         action_desc
     )
     if charge_match:
