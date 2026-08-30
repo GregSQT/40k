@@ -649,13 +649,19 @@ body {
   min-width: 60px;
 }
 
+.test-start-modal__terrain-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
 .test-start-modal__terrain-options {
   display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
 .test-start-modal__terrain-option {
-  position: relative;
   padding: 6px 14px;
   border-radius: 6px;
   border: 1px solid #4b5563;
@@ -678,22 +684,41 @@ body {
   font-weight: 700;
 }
 
-.test-start-modal__terrain-preview {
+.test-start-modal__terrain-side {
+  width: 440px;
+  flex-shrink: 0;
+}
+
+.test-start-modal__terrain-side-img {
   display: none;
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: 220px;
+  width: 440px;
   border-radius: 8px;
   border: 2px solid #f59e0b;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
-  pointer-events: none;
-  z-index: 10;
 }
 
-.test-start-modal__terrain-option:hover .test-start-modal__terrain-preview {
+/* show selected terrain by default */
+.test-start-modal__terrain-row:has(.terrain-opt-mc1.test-start-modal__terrain-option--active)
+  .preview-mc1 {
   display: block;
+}
+.test-start-modal__terrain-row:has(.terrain-opt-mc2.test-start-modal__terrain-option--active)
+  .preview-mc2 {
+  display: block;
+}
+
+/* switch on hover */
+.test-start-modal__terrain-row:has(.terrain-opt-mc1:hover) .preview-mc1 {
+  display: block;
+}
+.test-start-modal__terrain-row:has(.terrain-opt-mc1:hover) .preview-mc2 {
+  display: none;
+}
+.test-start-modal__terrain-row:has(.terrain-opt-mc2:hover) .preview-mc2 {
+  display: block;
+}
+.test-start-modal__terrain-row:has(.terrain-opt-mc2:hover) .preview-mc1 {
+  display: none;
 }
 
 .test-start-bar__button {
