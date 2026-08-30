@@ -123,6 +123,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | moteur+training+front+ai | ✅ lots 2026-08-30 — ramp_end_episodes, UI/infra (9 merges), ajuster-bot-ratios, curriculum-review-fixes, simplify-curriculum, fix-analyzer-findings, fix-check-ai-rules-fallbacks, simplify-fnp-passe3, simplify-finest-hour, simplify-terrain-cleanup, fix-finest-hour-primitive-b, lot ai, lot moteur, lot corrections (shoot-priority, Primitive B passes 2-5) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) [moteur.md](moteur.md) [bot.md](bot.md) | ⚡ |
 | moteur | ✅ simplify-is-unit-alive-guard + parametrize tests (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
 | moteur+ai | ✅ fix reward exhortation + intent cible morte (2026-08-30) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
+| moteur+ai | ✅ re-sélection cible mêlée quand l'Exhortation tue la cible désignée — `pending_fight_target_select` (jumeau de la sélection d'arme CC), overrun 12.06, 13 tests (2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
 | moteur | ✅ Primitive F (passe 6/6) — unit_state_effects (invul_save_override, toughness_bonus_while_waaagh, suppress_target_on_shooting, return_destroyed_models, once_per_battle_melee_buff obs, move_after_shooting D6, 17 tests, 2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
 
 ---
