@@ -4153,25 +4153,8 @@ class W40KEngine(gym.Env):
             exhort_squad_id = str(require_key(pending_exhort, "squad_id"))
             target_slot_stored: Optional[int] = pending_exhort.get("target_slot")  # get allowed
             clear_pending_agent_decision(self.game_state)
-            from engine.phase_handlers.shared_utils import allocate_mortal_wounds
-            from engine.action_log_utils import append_action_log
-            _exhort_details: List[Dict[str, Any]] = []
-            append_action_log(self.game_state, {
-                "type": "exhortation_de_rage",
-                "message": (
-                    f"[EXHORTATION DE RAGE] {exhort_squad_id} -> {target_eid}: "
-                    f"{mw_count} MW (D6={pending_exhort.get('d6_roll', '?')})"
-                ),
-                "turn": self.game_state.get("turn", 0),  # get allowed
-                "phase": "fight",
-                "unitId": exhort_squad_id,
-                "targetId": target_eid,
-                "player": int(require_key(decision, "player")),
-                "exhortationMortalWounds": mw_count,
-                "exhortationDetails": _exhort_details,
-            })
-            allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
-            return self._continue_squad_fight_after_selection(exhort_squad_id, target_slot_stored)
+            d6_roll = int(require_key(pending_exhort, "d6_roll"))
+            return self._apply_exhortation_de_rage(exhort_squad_id, target_eid, mw_count, d6_roll, target_slot_stored)
 
         if decision_type != "rule_choice":
             raise NotImplementedError(
@@ -5769,8 +5752,7 @@ class W40KEngine(gym.Env):
                     f"({len(enemy_slot_ids)} slots)"
                 )
             best_target_id = enemy_slot_ids[target_slot]
-            _target_str = str(best_target_id) if best_target_id is not None else None
-            if _target_str is None or _target_str not in targets:
+            if best_target_id is None or str(best_target_id) not in targets:
                 if targets:
                     raise ValueError(
                         f"_continue_squad_fight: slot {target_slot} -> {best_target_id!r} hors pool "
@@ -5779,7 +5761,7 @@ class W40KEngine(gym.Env):
                 # Cible détruite par Exhortation de Rage (slot=None ou squad hors pool) — combat à vide.
                 best_target_id = None
             else:
-                best_target_id = _target_str
+                best_target_id = str(best_target_id)
         else:
             if targets:
                 raise ValueError(
@@ -5829,6 +5811,32 @@ class W40KEngine(gym.Env):
         self._fight_v11_gym_settle()
         return True, result
 
+    def _apply_exhortation_de_rage(
+        self, squad_id: str, target_eid: str, mw_count: int, d6: int,
+        target_slot: Optional[int], auto: bool = False,
+    ) -> Tuple[bool, Dict[str, Any]]:
+        from engine.phase_handlers.shared_utils import allocate_mortal_wounds
+        from engine.action_log_utils import append_action_log
+        player = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
+        _exhort_details: List[Dict[str, Any]] = []
+        suffix = " [auto: cible unique]" if auto else ""
+        append_action_log(self.game_state, {
+            "type": "exhortation_de_rage",
+            "message": (
+                f"[EXHORTATION DE RAGE] {squad_id} -> {target_eid}: "
+                f"{mw_count} MW (D6={d6}){suffix}"
+            ),
+            "turn": self.game_state.get("turn", 0),  # get allowed
+            "phase": "fight",
+            "unitId": squad_id,
+            "targetId": target_eid,
+            "player": player,
+            "exhortationMortalWounds": mw_count,
+            "exhortationDetails": _exhort_details,
+        })
+        allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
+        return self._continue_squad_fight_after_selection(squad_id, target_slot)
+
     def _check_and_trigger_exhortation_de_rage(
         self, squad_id: str, unit: Dict[str, Any], target_slot: Optional[int]
     ) -> Optional[Tuple[bool, Dict[str, Any]]]:
@@ -5852,27 +5860,7 @@ class W40KEngine(gym.Env):
         mw_count = 3 if d6 == 6 else random.randint(1, 3)
         if len(engaged) == 1:
             # Cible unique : aucune décision à poser, application directe.
-            from engine.phase_handlers.shared_utils import allocate_mortal_wounds
-            from engine.action_log_utils import append_action_log
-            target_eid = engaged[0]
-            _exhort_details: List[Dict[str, Any]] = []
-            player_single = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
-            append_action_log(self.game_state, {
-                "type": "exhortation_de_rage",
-                "message": (
-                    f"[EXHORTATION DE RAGE] {squad_id} -> {target_eid}: "
-                    f"{mw_count} MW (D6={d6}) [auto: cible unique]"
-                ),
-                "turn": self.game_state.get("turn", 0),  # get allowed
-                "phase": "fight",
-                "unitId": squad_id,
-                "targetId": target_eid,
-                "player": player_single,
-                "exhortationMortalWounds": mw_count,
-                "exhortationDetails": _exhort_details,
-            })
-            allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
-            return self._continue_squad_fight_after_selection(squad_id, target_slot)
+            return self._apply_exhortation_de_rage(squad_id, engaged[0], mw_count, d6, target_slot, auto=True)
         self.game_state["_pending_exhortation_fight"] = {
             "squad_id": squad_id,
             "mw_count": mw_count,

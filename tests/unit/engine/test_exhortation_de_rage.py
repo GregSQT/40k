@@ -58,6 +58,7 @@ def _gs():
 class _FakeEngine:
     """Stub minimal de W40KEngine pour tester _check_and_trigger_exhortation_de_rage."""
     _check_and_trigger_exhortation_de_rage = wcore.W40KEngine._check_and_trigger_exhortation_de_rage
+    _apply_exhortation_de_rage = wcore.W40KEngine._apply_exhortation_de_rage
 
     def __init__(self, gs):
         self.game_state = gs
