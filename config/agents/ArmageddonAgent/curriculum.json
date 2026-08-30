@@ -5,8 +5,7 @@
   "order": ["P0", "P1", "P2", "P3", "E1", "P4", "P5", "E2", "P6", "P7", "P8", "E3", "P9", "P10"],
 
   "exploiter_config": {
-    "_doc": "Parametres geles partages par toutes les etapes exploiteurs (E1..E3). training_config_required : le --training-config exact a utiliser pour les trois runs — diverger = run refuse avant demarrage (meme seed, memes hyperparametres, comparabilite des budgets garantie). probe_every_episodes/probe_cheap_n : sonde bon marche. probe_confirm_n : sonde de confirmation declenchee des que la sonde bon marche passe le seuil. win_rate_target : seuil de franchissement (0.70). budget_cap : defini par etape dans chaque bloc E.",
-    "training_config_required": "x1_long",
+    "_doc": "Parametres geles partages par toutes les etapes exploiteurs (E1..E3). probe_every_episodes/probe_cheap_n : sonde bon marche. probe_confirm_n : sonde de confirmation declenchee des que la sonde bon marche passe le seuil. win_rate_target : seuil de franchissement (0.70). budget_cap : defini par etape dans chaque bloc E. La config d'entrainement est fixee via --training-config a la ligne de commande ; tous les runs E d'un meme curriculum doivent utiliser la meme valeur.",
     "probe_every_episodes": 2000,
     "probe_cheap_n": 100,
     "probe_confirm_n": 500,

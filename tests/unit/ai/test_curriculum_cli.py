@@ -27,7 +27,6 @@ CURRICULUM = {
         "eval_episodes": 300,
     },
     "exploiter_config": {
-        "training_config_required": "x1",
         "probe_every_episodes": 2000,
         "probe_cheap_n": 100,
         "probe_confirm_n": 500,

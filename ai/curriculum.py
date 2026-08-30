@@ -54,7 +54,6 @@ CURRICULUM_LOG_FILENAME = "curriculum.log"
 
 #: Cles obligatoires du bloc `exploiter_config` dans `curriculum.json`.
 _EXPLOITER_CONFIG_REQUIRED_KEYS = (
-    "training_config_required",
     "probe_every_episodes",
     "probe_cheap_n",
     "probe_confirm_n",
@@ -228,12 +227,10 @@ def validate_exploiter_protocol(
 ) -> None:
     """Refuse le run si la configuration de l'etape exploiteur diverge du protocole gele.
 
-    Quatre verrous :
+    Trois verrous :
     1. Role exploiter, ratio_start==1.0, ratio_end==1.0, warmup_episodes==0.
     2. Un seul membre de pool a weight==1.0 (adversaire unique fige a 100%).
-    3. --training-config correspond a exploiter_config.training_config_required
-       (meme seed, memes hyperparametres, budgets comparables entre E1/E2/E3).
-    4. total_episodes du profil >= budget_cap : un run plus court que le plafond rend la
+    3. total_episodes du profil >= budget_cap : un run plus court que le plafond rend la
        branche de censure inatteignable et le marqueur '>budget_cap' jamais emis.
        Fournir `profile_total_episodes` depuis le profil charge pour activer ce verrou.
 
@@ -259,16 +256,6 @@ def validate_exploiter_protocol(
         raise ValueError(
             f"Etape exploiteur {stage_name} : protocole gele exige un seul membre de pool "
             f"a weight=1.0 (got {[(m['label'], m['weight']) for m in members]!r})."
-        )
-    cfg = load_exploiter_config(curriculum)
-    required_tc = str(require_key(cfg, "training_config_required"))
-    if training_config_name != required_tc:
-        raise ValueError(
-            f"Etape exploiteur {stage_name} : protocole gele exige "
-            f"--training-config {required_tc!r} (got {training_config_name!r}). "
-            "Tous les runs E1/E2/E3 doivent utiliser la meme config pour que les budgets "
-            "soient comparables. Mettre a jour exploiter_config.training_config_required "
-            "dans curriculum.json si la config de reference a change."
         )
     if profile_total_episodes is not None:
         budget_cap = int(require_key(stage, "budget_cap"))
@@ -487,9 +474,8 @@ def _check_eval_coherence(source: str, name: str, total_episodes: int, bot_eval_
 def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) -> None:
     """Valide le bloc `training_config_overrides` d'une etape learner si present.
 
-    Les etapes exploiteur ignorent ce bloc : leur protocole impose la config EXACTE declaree
-    dans `exploiter_config.training_config_required`, et un override la ferait diverger sans
-    que `validate_exploiter_protocol` ne le detecte.
+    Les etapes exploiteur ignorent ce bloc : leur protocole impose une config fixe passee
+    via --training-config, et un override la ferait diverger silencieusement.
     """
     overrides = stage.get("training_config_overrides")
     if overrides is None:
@@ -501,8 +487,7 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
     if is_exploiter_stage(stage):
         raise ValueError(
             f"{source}: stages[{name}].training_config_overrides n'est pas autorise sur une "
-            "etape exploiteur : le protocole exploiteur exige la config exacte de "
-            "exploiter_config.training_config_required."
+            "etape exploiteur : la config est fixee via --training-config a la ligne de commande."
         )
     unknown_top = sorted(set(overrides) - STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS)
     if unknown_top:
