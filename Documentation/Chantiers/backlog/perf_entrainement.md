@@ -402,6 +402,67 @@ que sur 19 épisodes par tâche. Le nombre de tranches est un paramètre de mesu
 égale à `n_workers`. Mesure de clôture : durée du gate avant/après, **≥ 3 répétitions, lecture sur
 la médiane**, machine au repos (règle §1 « Pièges de mesure », établie par la Phase 1).
 
+### Post-Phase 3 — Investigation des goulots résiduels (2026-08-30)
+
+**Contexte** : Phases 1–4 closes. Fix obs aliasing validé sur run P2. Re-profilage sur le chemin distribué pour identifier les prochains leviers.
+
+**Nouvelles mesures mono-env (machine au repos, 3 reps)** : médiane **24,6 ms**, P99 **983 ms** — vs 29,4 ms / 1 062 ms en Phase 1 post. Gain résiduel (−16 % médiane, −7 % P99) vient des fixes /simplify post-Phase 1.
+
+**Nouveau profil cProfile 300 steps** (% sur cumtime `monitor.step`, overhead ×2,6) :
+
+| Poste | % step | Δ vs §1 |
+|---|---|---|
+| `build_squad_observation` | **< 3 %** | ✅ Phase 1 — disparu du top 25 (était 31,9 %) |
+| `charge_build_valid_plan` | **26,5 %** — 130 appels, 125 ms/appel | 🆕 #1 |
+| `build_squad_move_cell_map` (BFS move) | 25 % — 317 appels | présent |
+| `geodesic_move_reach` (BFS nu) | 21 % — 1 735 appels | présent |
+| `_los_line_segment_clear` (LoS) | **20 %** — 285 024 appels | 🆕 visible |
+| `entries_in_engagement_zone` | 19 % — 427 613 appels | ≈ |
+| `erode_move_pool_by_squad_block` | 18 % — 209 appels | présent |
+
+#### Option A — cache `charge_build_valid_plan` — ⛔ ÉLIMINÉE
+
+**Hypothèse** : le cache actuel (clé = squad, targets, roll, intent, version) a un hit rate trop bas.
+
+**Mesure instrumentée (monkey-patch, 300 steps)** :
+- Appels : **130 total** (0,43/step)
+- Hit rate : **43 %** (56 hits / 74 misses)
+- Distribution des `charge_roll` : roll=12 (`CHARGE_MAX_ROLL`, obs) → 52 appels ; rolls 2–11 (masque/commit) → 78 appels.
+
+**Cause des 74 misses** : l'obs appelle `charge_build_valid_plan(gs, squad, [enemy], CHARGE_MAX_ROLL=12)` dans l'état **postérieur** au commit (obs différée, version bumped). Le masque avait calculé le plan avec `actual_roll` (2D6) dans l'état précédent → deux clés toujours différentes (roll différent + version différente). Les 56 hits viennent exclusivement du pattern masque→commit (même clé, version pas encore bumped). P(roll_2D6 = 12) = 1/36 ≈ 3 % : le masque et l'obs ne partagent quasiment jamais de clé commune.
+
+**Pour capturer les 52 misses obs** : soit changer l'obs pour utiliser `actual_roll` (change la sémantique de `charge_reachable_max_roll`), soit construire l'obs dans l'état pré-commit (refactor architecture). Gain si résolu : +8 % fps. Complexité non nulle, risque métier non nul. **Décision : abandonné.**
+
+#### Option C — invalidation fine `entries_in_engagement_zone` — ⛔ ÉLIMINÉE
+
+**Hypothèse** : 94,5 % de miss rate sur `_EZ_PAIR_CACHE` → invalidation trop globale.
+
+**Mesure instrumentée (monkey-patch, 300 steps)** :
+- Appels total : **374 254** (1 248/step)
+- `memoise=False` (cellules candidates BFS de charge) : **346 227** = **92,5 %** — bypass intentionnel, non cacheable par nature (entrée synthétique unique par cellule candidate × ennemi)
+- `memoise=True` (paires unité↔unité réelles) : **28 027** = 7,5 %
+  - Hit rate **réel** sur ces appels : **84,8 %** ✅
+  - Miss rate réel : 15,2 %
+- Purges `_EZ_PAIR_CACHE` : **8** sur 300 steps
+
+**Conclusion** : le cache fonctionne correctement (84,8 % sur les appels qu'il couvre). Le « 94,5 % de miss » initial était un artefact — il incluait les 92,5 % de `memoise=False` qui ne sont pas des misses mais des bypasses de conception. Le vrai problème est le volume de checks BFS non-cacheables (346k/300 steps). **Décision : abandonné.**
+
+#### Option B — cache au niveau segment LoS (`_los_line_segment_clear`) — ⛔ ÉLIMINÉE
+
+**Structure** : `_los_line_segment_clear` n'a pas de cache. Le cache existe à un niveau au-dessus (`build_unit_los_cache`, par tireur, invalidé à `_unit_move_version`). Les 285k appels se produisent lors des reconstructions de cache (bots activés → version bumped → invalidation).
+
+**Cachabilité au niveau segment** : la clé minimale doit inclure `excluded_areas` (areas du tireur + de la cible, qui exclut ces hexes du test de blocage). `excluded_areas` varie à chaque paire (tireur, cible) → hit rate quasi nul entre paires différentes. Dans une même paire, `_compute_visibility_with_obscuring` appelle `_los_hex_visible` une fois par (hex_tireur, hex_cible) avec le même `excluded_areas` → potentiel de hit, mais `_los_hex_visible` lui-même appelle `_los_line_segment_clear` avec des `src` différents (ancre + chaque hex du tireur) → clés différentes.
+
+**Vrai levier** : l'overhead n'est pas la répétition d'appels, c'est le coût brut de `hex_line_iter` en Python (itération hex-par-hex dans la boucle interne). La solution est une implémentation native, pas un cache. **Décision : abandonné.**
+
+#### Option D — Noyau natif BFS/LoS — 🟡 différée
+
+**Cibles** : `geodesic_move_reach` (21 %) + `erode_move_pool_by_squad_block` (18 %) + `hex_line_iter` dans `_los_line_segment_clear` (20 %) = **~59 % du step**. Un noyau C/Cython réduirait ces postes d'un facteur ×5–10. Gain estimé sur fps : **+25–35 %** (confiance : **moyenne** — le gain sur le poste est déterministe, la fraction du wall restante l'est moins).
+
+Chantier de plusieurs jours. Non lancé : trop lourd pour le moment.
+
+---
+
 ### Phase 5 — Options qui touchent au métier — ⛔ chacune = décision utilisateur explicite
 
 À ne rouvrir qu'après mesure des phases 1-3. Aucune n'est recommandée par défaut.
@@ -490,6 +551,9 @@ Une seule étape non faite = l'option reste ⛔.
 
 | Date | Contexte | Métrique | Valeur |
 |---|---|---|---|
+| 2026-08-30 | **Option A — hit rate `charge_build_valid_plan`** (monkey-patch, 300 steps) | hits · misses · distribution rolls | **43 % de hits (56/130)** — hits = masque→commit uniquement ; 52 appels obs (roll=12) toujours dans l'état v+1 (post-commit) → jamais de hit masque↔obs. Gain accessible sans refactor : **0 %**. Avec refactor obs ou architecture : +8 % fps. Abandonné. |
+| 2026-08-30 | **Option C — hit rate `entries_in_engagement_zone`** (monkey-patch, 300 steps) | memoise=False · hit rate réel · purges | **92,5 % des 374 254 appels = `memoise=False`** (bypass BFS intentionnel). Sur les 7,5 % restants (`memoise=True`) : **hit rate 84,8 %**. Le « 94,5 % de miss » du profil cProfile était un artefact (bypass comptés comme misses). Cache correct. Abandonné. |
+| 2026-08-30 | **Option B — cachabilité `_los_line_segment_clear`** (analyse de code) | hit rate potentiel | Nul : `excluded_areas` varie par paire (tireur, cible), pas de clé stable. Cache au niveau supérieur (`build_unit_los_cache`) déjà en place. Levier réel = `hex_line_iter` en natif. Abandonné. |
 | 2026-08-30 | **Re-profilage post-Phase 3** — `bench_env_step.py --steps 600`, machine au repos, **3 répétitions** | wall · médiane · P95 · P99 | **57,1 / 57,8 / 57,3 s · 24,61 / 24,67 / 23,37 ms · 503 / 487 / 502 ms · 982 / 983 / 1014 ms** — médiane **24,6 ms** (médiane des médianes), P99 médiane **983 ms**. Stabilité nettement meilleure qu'en Phase 1 (46,6–68,9 s de wall). Gain vs Phase 1 post (machine au repos) : médiane −16 %, P99 −7 %. |
 | 2026-08-30 | **Nouveau profil cProfile 300 steps** (overhead ×2,6 — % seuls font foi) | répartition cumtime dans `monitor.step` (~61 s / 65,7 s totaux) | **Disparu** : `build_squad_observation` absent du top 25 (était 31,9 %) ✅. **Nouveau #1** : `charge_build_valid_plan` — 130 appels, 16,2 s, **26,5 %** du step, **125 ms/appel**. `get_squad_action_mask_and_eligible_units` : 895 appels, 36,4 s, **59,5 %** (inclut bots). `_run_bot_until_not_bot_turn` : 30 séquences, 26,3 s, **43,1 %**. `build_squad_move_cell_map` (BFS) : 317 appels, 15,3 s, **25 %**. `geodesic_move_reach` : 1 735 appels, 12,9 s, **21 %**. `_los_line_segment_clear` : 285 024 appels, 12,4 s, **20 %** — nouveau visible. `entries_in_engagement_zone` : 427 613 appels, 11,8 s, **19 %** — cache miss rate **94,5 %** (404 144 / 427 613 appels non cachés → pair-cache Phase 1.8 quasi-inefficace). `_hex_legal_for_charge` : 84 626 appels, 11,0 s, 18 %. `erode_move_pool_by_squad_block` : 209 appels, 10,8 s, 18 %. |
 
