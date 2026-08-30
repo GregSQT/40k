@@ -3999,21 +3999,29 @@ def execute_action():
             result["endless_duty"] = ed_post
 
     # Snapshots temporels (rewind) + timeline par action : capturés après chaque action réussie (PvP).
+    _inter_snap_s = 0.0
+    _inter_timeline_s = 0.0
     if success:
         # Empiler les events de log de CETTE action dans log_delta AVANT la capture de row. La row de
         # fin d'activation draine log_delta ; si on empile après, elle ne contient pas l'action courante
         # et ses events glissent dans la row suivante (visibles seulement au pas de flèche suivant),
         # typiquement une unité multi-armes dont les derniers tirs manquent au 1er clic.
         _buffer_log_delta(engine, engine.game_state.get("action_logs", []))
+        _t_snap0 = time.perf_counter()
         _capture_and_autosave(engine)
+        _inter_snap_s = time.perf_counter() - _t_snap0
+        _t_tl0 = time.perf_counter()
         _timeline_capture(engine)
+        _inter_timeline_s = time.perf_counter() - _t_tl0
 
     # Réserves (20.04) : réchauffer l'aire d'arrivée AVANT que le joueur ne clique. Mesuré sur
     # board x5 : 2,3 s pour les deux signatures d'un roster (pool + contours), puis 9 ms par
     # sélection. Payer ça au clic se verrait ; le payer ici le noie dans le tour adverse.
     # CÔTÉ API SEULEMENT : en entraînement, la plupart des phases de mouvement n'ont aucune
     # réserve et le masque construit déjà, paresseusement, ce dont il a besoin.
+    _t_ingress0 = time.perf_counter()
     _maybe_precompute_ingress_pools(engine)
+    _inter_ingress_s = time.perf_counter() - _t_ingress0
 
     # Convert game state to JSON-serializable format
     _ser_t0 = time.perf_counter() if _api_perf else None
@@ -4077,7 +4085,9 @@ def execute_action():
         act = action.get("action") if isinstance(action, dict) else None
         append_perf_timing_line(
             f"API_POST_ACTION episode={ep} turn={trn} phase={ph} action={act!r} "
-            f"engine_s={_api_t1 - _api_t0:.6f} serialize_game_state_s={_ser_t1 - _ser_t0:.6f} "
+            f"engine_s={_api_t1 - _api_t0:.6f} snapshot_s={_inter_snap_s:.6f} "
+            f"timeline_s={_inter_timeline_s:.6f} ingress_s={_inter_ingress_s:.6f} "
+            f"serialize_game_state_s={_ser_t1 - _ser_t0:.6f} "
             f"response_encode_s={_j1 - _j0:.6f} total_wall_s={_j1 - _api_t0:.6f} "
             f"payload_bytes={_payload_bytes if _payload_bytes is not None else -1}"
         )
