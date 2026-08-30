@@ -463,7 +463,7 @@ def test_rule_checker_keeps_the_parameters_of_the_last_explicit_generation(
     rule_checker_scenarios.generate(
         tmp_path, agent_key="CoreAgent",
         params=rule_checker_scenarios.GenerationParams(
-            scale="500pts", board_ref="44x60x10", terrain_ref="terrain-train-02.json"
+            scale="500pts", board_ref="44x60x10", terrain_ref="terrain-mc1.json"
         ),
     )
 
@@ -471,7 +471,7 @@ def test_rule_checker_keeps_the_parameters_of_the_last_explicit_generation(
     payload = json.loads(Path(repris[0]).read_text(encoding="utf-8"))
     assert payload["scale"] == "500pts"
     assert payload["board_ref"] == "44x60x10"
-    assert payload["terrain_ref"] == "terrain-train-02.json"
+    assert payload["terrain_ref"] == "terrain-mc1.json"
 
 
 def test_rule_checker_cache_hit_still_refreshes_manifest_audit_and_params(
@@ -500,7 +500,7 @@ def test_rule_checker_cache_hit_still_refreshes_manifest_audit_and_params(
     rule_checker_scenarios.generate(
         tmp_path, agent_key="CoreAgent",
         params=rule_checker_scenarios.GenerationParams(
-            scale="500pts", board_ref="44x60x10", terrain_ref="terrain-train-02.json"
+            scale="500pts", board_ref="44x60x10", terrain_ref="terrain-mc1.json"
         ),
     )
 

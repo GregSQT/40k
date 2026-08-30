@@ -87,10 +87,10 @@ def test_migrate_scenario_strips_legacy_and_adds_refs():
         "objectives_ref": "objectives-51.json",
         "primary_objectives": ["objectives_control"],
     }
-    out = MIG._migrate_scenario(src, "terrain-train-01.json")
+    out = MIG._migrate_scenario(src, "terrain-mc1.json")
     assert not any(k in out for k in LEGACY_KEYS)
     assert out["board_ref"] == "44x60x5"
-    assert out["terrain_ref"] == "terrain-train-01.json"
+    assert out["terrain_ref"] == "terrain-mc1.json"
     assert out["deployment_type"] == "active"  # clé non-legacy préservée
 
 
@@ -105,8 +105,8 @@ def test_migrate_scenario_is_idempotent():
         "objectives_ref": "objectives-51.json",
         "primary_objectives": ["objectives_control"],
     }
-    once = MIG._migrate_scenario(src, "terrain-train-02.json")
-    twice = MIG._migrate_scenario(once, "terrain-train-02.json")
+    once = MIG._migrate_scenario(src, "terrain-mc1.json")
+    twice = MIG._migrate_scenario(once, "terrain-mc1.json")
     assert once == twice
 
 

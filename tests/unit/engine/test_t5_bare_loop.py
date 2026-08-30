@@ -21,7 +21,7 @@ porte en plus une garde d'atteinte — c'est ce fichier-là qui l'a repris (V11 
 
 Scénario fixe minimal (écrit en tmp) : ScreamerKiller(P1) pré-engagé avec Termagant(P2) ;
 Carnifex(P1) non engagé à portée de charge d'un Termagant(P2). Positions vérifiées hors murs sur
-terrain-train-01.
+terrain-mc1.
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _SCENARIO = {
     "primary_objectives": ["objectives_control"],
     "board_ref": "44x60x5",
-    "terrain_ref": "terrain-train-01.json",
+    "terrain_ref": "terrain-mc1.json",
     "deployment_type": "fixed",
     # Faction d'Armée DÉCLARÉE des deux camps : 08.04 la demande à chaque phase de commandement et
     # refuse de la déduire des unités. TYRANIDS est la faction RÉELLE des datasheets ci-dessous

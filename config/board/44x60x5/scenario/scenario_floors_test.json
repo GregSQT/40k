@@ -5,7 +5,7 @@
     "objectives_control"
   ],
   "wall_ref": "walls-mc1.json",
-  "terrain_ref": "terrain-floors-test.json",
+  "terrain_ref": "divers/terrain-floors-test.json",
   "units": [
     {
       "id": 2,

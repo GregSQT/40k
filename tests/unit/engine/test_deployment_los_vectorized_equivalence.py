@@ -32,7 +32,7 @@ from engine.phase_handlers.shooting_handlers import (
 
 #: Second TERRAIN (pas seulement un second roster) : le tracé ne dépend que des murs et des areas
 #: obscurantes, donc deux scénarios sur `terrain-mc1` ne prouveraient qu'une fois la même chose.
-SECOND_TERRAIN_REF = "terrain-train-02.json"
+SECOND_TERRAIN_REF = "terrain-mc2.json"
 
 
 def _scalar_can_see(game_state, source, hexes):
