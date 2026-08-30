@@ -77,7 +77,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | # | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|---|
 | 8 | training+bot | ✅ Self-play §0.59 absorbé par `--etape` (décision 2026-08-30) | [v11_chemin_critique.md#selfplay](v11_chemin_critique.md#selfplay) | ✅ |
-| 9 | moteur+training | **06** Armageddon abilities — 3/6 passes (passe 3 : FNP conditionnel PainBoy/Librarian/Ancient, 2026-08-30) | [capacites.md#armageddon-06](capacites.md#armageddon-06) | 🚫 |
+| 9 | moteur+training | **06** Armageddon abilities — 4/6 passes (passe 4 : Primitive D mortal_wounds — Hold Still PainBoy, Exhortation ChaplainJumpPack, charge_impact unifié, 2026-08-30) | [capacites.md#armageddon-06](capacites.md#armageddon-06) | 🚫 |
 
 ---
 
@@ -125,6 +125,10 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | training | ✅ lot training 2026-08-30 — ajuster-bot-ratios, curriculum-review-fixes (6 findings), simplify-curriculum (data_validation, déduplique exploiteur) | [training.md#curriculum](training.md#curriculum) | ⚡ |
 | analyzer | ✅ fix-analyzer-findings — T1 pl_int, garde morte fight_over, PHASE_ORDER partagé (7 occurrences × 4 fichiers), doublon import charge_handler (2026-08-30) | [analyzer.md](analyzer.md) | ⚡ |
 | moteur | ✅ fix-check-ai-rules-fallbacks — 3 fallbacks anti-erreur analyzer corrigés (2026-08-30) | [analyzer.md](analyzer.md) | ⚡ |
+| moteur | ✅ simplify-fnp-passe3 — refactor FNP passe 3 (2026-08-30) | [capacites.md#armageddon-06](capacites.md#armageddon-06) | ⚡ |
+| moteur | ✅ simplify-finest-hour — simplifier finest_hour (setdefault→accès direct, if/else, hoist lookup, 2026-08-30) | [moteur.md](moteur.md) | ⚡ |
+| moteur | ✅ simplify-terrain-cleanup — nettoyage terrain (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
+| moteur | ✅ fix-finest-hour-primitive-b — correctif finest_hour primitive B (2026-08-30) | [capacites.md#armageddon-06](capacites.md#armageddon-06) | ⚡ |
 | ai | ✅ lot ai 2026-08-30 — fix-was-lowest-hp-dead-filter, expected-damage-cap-cleanup, simplify reward_mapper + expected_damage (require_key + waaagh BASE) | [bot.md](bot.md) | ⚡ |
 | moteur+training | ✅ lot moteur 2026-08-30 — bonus-malus-cap (89 tests), expected-damage-unit-modifiers (Primitive A + Waaagh), simplify-died-before-phase (4 boucles), terrain-selector-purge-foe | [moteur.md](moteur.md) | ⚡ |
 | ai+moteur+front+config | ✅ lot corrections 2026-08-30 (suite) — shoot-priority-3 (P3 reward), purge-train-terrains, fix-kill-lowest-hp-production (`hp_before` fight), simplify-fight-lowest-hp-wipe-bonus, fix-p1-melee-will-kill-adjacency, terrain-pfm2-selection (PvP/PvE), Primitive B passe 2 (8 capacités) | [bot.md](bot.md) [moteur.md](moteur.md) [capacites.md#armageddon-06](capacites.md#armageddon-06) | ⚡ |

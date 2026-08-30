@@ -30,10 +30,21 @@ export class ChaplainJumpPack extends LeaderEliteMeleeElite {
     // Litany of Hate : « This unit's melee weapons have +1 to wound rolls. » En vigueur sur
     // toute l'escouade menée (19.04). Jumeau exact de Might Is Right, côté blessure.
     { ruleId: "wound_roll_bonus_fight", displayName: "Litany of Hate" },
+    // Exhortation de Rage : à la sélection en combat, D6 : 4-5 → D3 BM, 6 → 3 BM sur un ennemi engagé au choix.
+    {
+      ruleId: "mortal_wounds_on_fight_activation",
+      displayName: "Exhortation de Rage",
+      rule_args: { mw_on_6: 3 },
+    },
   ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { leader: 2, deep_strike: 2, wound_roll_bonus_fight: 2 };
+  static RULES_STATUS = {
+    leader: 2,
+    deep_strike: 2,
+    wound_roll_bonus_fight: 2,
+    mortal_wounds_on_fight_activation: 2,
+  };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = [

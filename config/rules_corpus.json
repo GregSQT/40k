@@ -3732,6 +3732,32 @@
       "status_note": "Marqueur de rôle."
     },
     {
+      "id": "unit.mortal_wounds_on_critical_wound",
+      "source": "config/unit_rules.json",
+      "label": "mortal_wounds_on_critical_wound",
+      "section": "unit",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "mortal_wounds_on_critical_wound"
+      },
+      "controls": [],
+      "status": "IMPLÉMENTÉ",
+      "status_note": "Hold Still and Say Aargh (PainBoy/'urty Syringe) : crit wound → D6 BM sur cible non-VEHICLE. Passe 4 chantier 06."
+    },
+    {
+      "id": "unit.mortal_wounds_on_fight_activation",
+      "source": "config/unit_rules.json",
+      "label": "mortal_wounds_on_fight_activation",
+      "section": "unit",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "mortal_wounds_on_fight_activation"
+      },
+      "controls": [],
+      "status": "IMPLÉMENTÉ",
+      "status_note": "Exhortation de Rage (ChaplainJumpPack) : sélection combat → D6 4-5=D3 BM, 6=3 BM sur ennemi engagé au choix (décision agent mortal_wounds_target). Passe 4 chantier 06."
+    },
+    {
       "id": "PROJ.1.5.grant_weapon_rule_melee",
       "section": "1.5",
       "label": "Breakin' Heads — SUSTAINED HITS 1 sur toutes les armes de mêlée (Primitive B)",

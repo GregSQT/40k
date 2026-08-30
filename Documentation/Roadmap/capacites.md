@@ -6,7 +6,7 @@
 
 ## 06 — Armageddon abilities {#armageddon-06}
 
-**3/6 passes.** Tous prérequis (01→05) livrés et vérifiés. Jalon J4 — hors du chemin de la mesure de référence.
+**4/6 passes.** Tous prérequis (01→05) livrés et vérifiés. Jalon J4 — hors du chemin de la mesure de référence.
 
 ✅ **Passe 1 — Primitive A `roll_modifiers` (2026-08-30).** Might Is Right (Warboss), Litany of Hate (ChaplainJumpPack), Somethin' to Prove (Bigboss) et le malus de suppression sont vifs, tir et mêlée, avec `clamp(base − bonus + malus, 2, 6)`. Journalisés en tags de ligne (`[MIGHT IS RIGHT]`, `[SUPPRESSED]`, `[LITANY OF HATE]`, `[SOMETHIN' TO PROVE]`), observés (obs_size inchangé), contrôlés par l'analyzer (`fight_hit_threshold_mismatch`, `charge_roll_out_of_range`, plus le seuil de blessure qui connaît désormais Litany). Le statut `suppressed` existe et est purgé au bon moment ; **aucune datasheet ne le POSE avant la passe 6**.
 
@@ -14,7 +14,9 @@
 
 ✅ **Passe 3 — Primitive C `feel_no_pain` conditionnel (2026-08-30).** 3 capacités : Dok's Toolz (PainBoy, FNP 5+ générique), Psychic Hood (Librarian, FNP 4+ vs arme PSYCHIC uniquement), Unbreakable Resolve (Ancient, FNP 4+ à ≤3" d'un objectif ou ≤6" du centre). Deux nouveaux types registrés (`feel_no_pain_vs_psychic` obs_id 29, `feel_no_pain_near_objective` obs_id 30). Jets FNP journalisés dans step.log (`fnpSaves`, `fnpThreshold`, `fnp_saves_mortal`, `[FNP:N]`). Multi-FNP séquentiels via `_collect_fnp_thresholds` / `_collect_fnp_thresholds_mortal` / `_roll_fnp_sequential`. 41 tests verts (rouge→vert prouvé).
 
-**Ordre** : passes 1-3 livrées ; FNP déjà câblé côté moteur.
+✅ **Passe 4 — Primitive D `mortal_wounds` (2026-08-30).** 3 capacités : Hold Still and Say Aargh (PainBoy/'urty Syringe, crit wound → D6 BM sur cible non-VEHICLE, séquence d'attaque terminée), Exhortation de Rage (ChaplainJumpPack, sélection combat → D6 : 4-5=D3 BM, 6=3 BM sur ennemi engagé au choix, décision agent `mortal_wounds_target`). Charge impact unifié via `allocate_mortal_wounds` (suppression du décrément HP direct). Deadly Demise WeirdBoy vérifié (chemin déjà câblé). Da Jump failure bloqué Type C (action non implémentée). Nouveau type agent `mortal_wounds_target` (slot 6/8, obs_size inchangé). Deux nouveaux types registrés (`mortal_wounds_on_critical_wound` obs_id 31, `mortal_wounds_on_fight_activation` obs_id 32). 14 tests rouge→vert. `rules_corpus.json` à jour.
+
+**Ordre** : passes 1-4 livrées ; FNP déjà câblé côté moteur.
 
 ✅ Recalculé le 2026-08-30 : max 6 capacités simultanées sur une entité (contrainte 19.01 : 1 leader + 1 support max), marge 2 slots. `UNIT_ABILITY_SLOTS = 8` tient pour l'intégralité du chantier 06.
 

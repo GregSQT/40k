@@ -1,0 +1,159 @@
+"""Exhortation de Rage (passe 4) — D6 à la sélection combat → D3 ou 3 BM sur ennemi engagé.
+
+Invariants vérifiés :
+- Unité sans règle → retourne None (pas de déclenchement)
+- Aucun ennemi engagé → retourne None
+- D6 <= 3 → retourne None
+- D6 4-5 → payload waiting_for_agent_decision, décision posée, mw_count ∈ [1, 3]
+- D6 == 6 → payload waiting, mw_count = 3 (fixe)
+
+Verrou ROUGE/VERT documenté pour chaque invariant.
+"""
+
+import random
+import pytest
+
+import engine.phase_handlers.fight_handlers as fh
+import engine.w40k_core as wcore
+
+
+# ---------------------------------------------------------------------------
+# Fixtures minimales
+# ---------------------------------------------------------------------------
+
+_EXHORT_RULE = {
+    "ruleId": "mortal_wounds_on_fight_activation",
+    "displayName": "Exhortation de Rage",
+    "rule_args": {"mw_on_6": 3},
+}
+
+
+def _unit_with_rule():
+    return {
+        "id": "CHAP", "player": 1, "HP_CUR": 4,
+        "UNIT_RULES": [_EXHORT_RULE],
+        "keywords": ["INFANTRY", "CHARACTER", "FLY"],
+    }
+
+
+def _unit_without_rule():
+    return {
+        "id": "CHAP", "player": 1, "HP_CUR": 4,
+        "UNIT_RULES": [],
+        "keywords": ["INFANTRY", "CHARACTER", "FLY"],
+    }
+
+
+def _gs():
+    chap_unit = {"player": 1, "HP_CUR": 4}
+    return {
+        "units_cache": {"CHAP": chap_unit},
+        "action_logs": [],
+        "action_log_seq": 0,
+        "turn": 1,
+        "pending_agent_decision": None,
+    }
+
+
+class _FakeEngine:
+    """Stub minimal de W40KEngine pour tester _check_and_trigger_exhortation_de_rage."""
+    _check_and_trigger_exhortation_de_rage = wcore.W40KEngine._check_and_trigger_exhortation_de_rage
+
+    def __init__(self, gs):
+        self.game_state = gs
+
+
+# ---------------------------------------------------------------------------
+# Unité sans règle → None
+# ---------------------------------------------------------------------------
+
+def test_sans_regle_retourne_none(monkeypatch):
+    """ROUGE sans le fix : le code plante ou retourne un résultat inattendu."""
+    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY"])
+    engine = _FakeEngine(_gs())
+    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_without_rule(), None)
+    assert result is None, f"attendu None sans règle, got {result}"
+
+
+# ---------------------------------------------------------------------------
+# Aucun ennemi engagé → None
+# ---------------------------------------------------------------------------
+
+def test_pas_d_ennemis_engages_retourne_none(monkeypatch):
+    """ROUGE sans le fix : IndexError ou résultat inattendu sur liste vide."""
+    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: [])
+    engine = _FakeEngine(_gs())
+    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None)
+    assert result is None, f"attendu None sans ennemis engagés, got {result}"
+
+
+# ---------------------------------------------------------------------------
+# D6 <= 3 → None (pas de déclenchement)
+# ---------------------------------------------------------------------------
+
+def test_d6_bas_retourne_none(monkeypatch):
+    """ROUGE sans le fix : la décision est posée même sur D6 <= 3."""
+    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY"])
+    monkeypatch.setattr(random, "randint", lambda a, b: 3)  # D6 = 3 → seuil 4 non atteint
+    engine = _FakeEngine(_gs())
+    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None)
+    assert result is None, f"D6=3 ne doit pas déclencher l'exhortation, got {result}"
+
+
+# ---------------------------------------------------------------------------
+# D6 == 6 → mw_count = 3, décision posée
+# ---------------------------------------------------------------------------
+
+def test_d6_6_pose_decision_et_mw_count_3(monkeypatch):
+    """ROUGE sans le fix : décision non posée ou mw_count != 3."""
+    decisions_posed = []
+    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY1", "ENEMY2"])
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)  # D6 = 6
+    monkeypatch.setattr(
+        wcore, "set_pending_agent_decision",
+        lambda gs, **kw: decisions_posed.append(kw),
+    )
+    engine = _FakeEngine(_gs())
+    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None)
+
+    assert result is not None, "D6=6 doit déclencher l'exhortation"
+    ok, payload = result
+    assert ok is True
+    assert payload.get("waiting_for_agent_decision") is True
+    assert payload.get("decision_type") == "mortal_wounds_target"
+    assert len(decisions_posed) == 1, "set_pending_agent_decision doit être appelé une fois"
+    assert decisions_posed[0].get("decision_type") == "mortal_wounds_target"
+
+    # mw_count = 3 stocké dans le pending
+    pending = engine.game_state.get("_pending_exhortation_fight")
+    assert pending is not None
+    assert pending["mw_count"] == 3, f"mw_count doit être 3 sur D6=6, got {pending['mw_count']}"
+
+
+# ---------------------------------------------------------------------------
+# D6 == 4 → mw_count = D3, décision posée
+# ---------------------------------------------------------------------------
+
+def test_d6_4_pose_decision_et_mw_count_d3(monkeypatch):
+    """D6=4 → D3 MW (1-3) et décision posée."""
+    decisions_posed = []
+    rolls = iter([4, 2])  # premier randint → D6=4, second → D3=2
+
+    def _fake_randint(a, b):
+        return next(rolls)
+
+    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY"])
+    monkeypatch.setattr(random, "randint", _fake_randint)
+    monkeypatch.setattr(
+        wcore, "set_pending_agent_decision",
+        lambda gs, **kw: decisions_posed.append(kw),
+    )
+    engine = _FakeEngine(_gs())
+    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None)
+
+    assert result is not None, "D6=4 doit déclencher l'exhortation"
+    pending = engine.game_state.get("_pending_exhortation_fight")
+    assert pending is not None
+    assert 1 <= pending["mw_count"] <= 3, f"mw_count D3 hors plage : {pending['mw_count']}"
+    assert pending["mw_count"] == 2, f"D3 simulé à 2, got {pending['mw_count']}"
+    assert len(decisions_posed) == 1

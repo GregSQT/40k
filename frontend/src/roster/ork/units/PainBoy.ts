@@ -26,10 +26,15 @@ export class PainBoy extends SwarmRangeSwarm {
   static UNIT_RULES = [
     { ruleId: "support", displayName: "Support" },
     { ruleId: "feel_no_pain", displayName: "Dok's Toolz (FNP 5+)", rule_args: { threshold: 5 } },
+    {
+      ruleId: "mortal_wounds_on_critical_wound",
+      displayName: "Hold Still and Say Aargh",
+      rule_args: { weapon: "urty_syringe", mw_dice: "D6" },
+    },
   ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { support: 2, feel_no_pain: 2 };
+  static RULES_STATUS = { support: 2, feel_no_pain: 2, mortal_wounds_on_critical_wound: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = ["BOYZ", "BREAKA BOYZ", "BURNA BOYZ", "LOOTAS", "NOBZ", "TANKBUSTAS"];
