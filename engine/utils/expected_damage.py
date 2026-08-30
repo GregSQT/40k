@@ -16,9 +16,7 @@ from engine.phase_handlers.attack_sequence import (
 from engine.phase_handlers.shared_utils import (
     wound_threshold,
     save_threshold,
-    hit_roll_modifier_terms,
-    apply_hit_roll_modifiers,
-    _bonus_malus_cap,
+    resolve_hit_roll_modifiers,
 )
 
 
@@ -42,9 +40,10 @@ def expected_damage(
     Si is_melee=True, le bonus Waaagh! (+1 STR, +1 NB) est également appliqué.
 
     Contrat game_state quand game_state is not None :
-      - game_state["suppressed_squads"] (get autorisé — absence == aucune suppression)
-      - game_state["waaagh_active"]     (require_key — TOUJOURS présent dans un état de jeu réel,
-        posé par initial_faction_ability_state() ; exigé seulement si is_melee=True)
+      - game_state["suppressed_squads"]               (get autorisé — absence == aucune suppression)
+      - game_state["waaagh_active"]                   (require_key — exigé seulement si is_melee=True)
+      - game_state["config"]["game_rules"]["bonus_malus_cap"] (require_key — TOUJOURS présent dans
+        un état de jeu réel, posé par la config ; transmis à resolve_hit_roll_modifiers)
 
     V1 : règles agissant sur le POOL ([BLAST], [RAPID FIRE], [CLEAVE], [EXTRA ATTACKS])
     non intégrées — elles multiplient le nombre d'attaques, pas la valeur par attaque.
@@ -60,10 +59,9 @@ def expected_damage(
     invul_sv = int(require_key(target_unit, "INVUL_SAVE"))
 
     if game_state is not None:
-        hit_bonus, hit_malus, _, _ = hit_roll_modifier_terms(
-            game_state, attacker_unit, is_melee=is_melee
+        hit_target, _, _ = resolve_hit_roll_modifiers(
+            game_state, attacker_unit, hit_target, is_melee=is_melee
         )
-        hit_target = apply_hit_roll_modifiers(hit_target, hit_bonus, hit_malus, cap=_bonus_malus_cap(game_state))
 
         if is_melee and attacker_unit is not None:
             from engine.game_state import waaagh_melee_bonus  # cycle : cf. shared_utils
