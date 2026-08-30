@@ -540,6 +540,10 @@ class RewardCalculator:
             squad_reward = self._squad_combat_shaping(
                 combat, lambda p: p != acting_player, shaping
             )
+            if action_type == "squad_fight":
+                squad_reward += self._fight_lowest_hp_wipe_bonus(
+                    combat, acting_unit, acting_player, game_state
+                )
 
             squad_total = squad_reward + objective_turn_reward
             reward_breakdown['result_bonuses'] = squad_reward
@@ -1149,6 +1153,42 @@ class RewardCalculator:
             if is_victim(int(require_key(meta, "player"))):
                 total += float(require_key(meta, "value")) * wipe_f
         return total
+
+    def _fight_lowest_hp_wipe_bonus(
+        self,
+        combat: Dict[str, Any],
+        acting_unit: Dict[str, Any],
+        acting_player: int,
+        game_state: Dict[str, Any],
+    ) -> float:
+        """Bonus result_bonuses.target_lowest_hp pour chaque escouade ennemie wipée
+        dont le hp_before était inférieur ou égal à celui de tous les autres ennemis vivants."""
+        unit_rewards = self._get_unit_reward_config(acting_unit)
+        result_bonuses = require_key(unit_rewards, "result_bonuses")
+        lowest_hp_bonus = result_bonuses.get("target_lowest_hp", 0.0)
+        if lowest_hp_bonus == 0.0:
+            return 0.0
+        squads_wiped = require_key(combat, "squads_wiped")
+        if not squads_wiped:
+            return 0.0
+        targets_meta = require_key(combat, "targets_meta")
+        units_cache = require_key(game_state, "units_cache")
+        bonus = 0.0
+        for sid in squads_wiped:
+            meta = require_key(targets_meta, sid)
+            if int(require_key(meta, "player")) == acting_player:
+                continue
+            hp_before = meta.get("hp_before", 0)
+            if hp_before <= 0:
+                continue
+            living_enemy_hps = [
+                int(entry.get("HP_CUR", 0))
+                for uid, entry in units_cache.items()
+                if int(entry.get("player", acting_player)) != acting_player
+            ]
+            if not any(hp > 0 and hp < hp_before for hp in living_enemy_hps):
+                bonus += lowest_hp_bonus
+        return bonus
 
     def _get_system_penalties(self):
         """Get system penalty values from rewards config."""

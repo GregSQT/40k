@@ -486,3 +486,118 @@ class TestSplitFireRewardPaths:
         gs = dict(_MINIMAL_GS)
         reward = rc.calculate_reward(True, result, gs)
         assert reward == 0.0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _fight_lowest_hp_wipe_bonus
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _rc_with_lowest_hp_bonus(bonus: float) -> RewardCalculator:
+    rc = RewardCalculator(
+        config={"quiet": True, "controlled_agent": "TestAgent"},
+        rewards_config={
+            "TestAgent": {
+                "squad_shaping": {
+                    "hp_damage_weight": 0.1,
+                    "model_kill_bonus_factor": 0.1,
+                    "squad_kill_bonus_factor": 0.1,
+                    "incoherent_weight": 0.0,
+                },
+                "base_actions": {"ranged_attack": 0.0, "melee_attack": 0.0, "charge_success": 0.0, "charge_fail": 0.0, "wait": 0.0},
+                "result_bonuses": {"kill_target": 1.0, "target_lowest_hp": bonus},
+                "target_type_bonuses": {},
+                "situational_modifiers": {"win": 0, "lose": 0, "draw": 0},
+                "objective_rewards": {"objective_reward_factor": 0.0, "reward_per_objective_turn5": 0.0, "on_objective_bonus": 0.0},
+                "system_penalties": {"forbidden_action": 0.0, "invalid_action": 0.0, "system_response": 0.0, "generic_error": 0.0},
+            }
+        },
+        unit_registry=None,
+        state_manager=None,
+    )
+    return rc
+
+
+def _combat_result(squads_wiped: list, targets_meta: dict) -> dict:
+    return {
+        "events": [],
+        "squads_wiped": squads_wiped,
+        "targets_meta": targets_meta,
+        "damage_total": 0,
+        "models_killed": len(squads_wiped),
+        "attacks_made": 1,
+        "hits": 1,
+        "wounds": 1,
+        "failed_saves": 1,
+    }
+
+
+def _acting_unit(player: int = 1) -> dict:
+    return {"id": "a1", "player": player, "unitType": "TestAgent"}
+
+
+class TestFightLowestHpWipeBonus:
+    """_fight_lowest_hp_wipe_bonus : bonus target_lowest_hp quand escouade wipée était la plus faible."""
+
+    def test_no_wiped_squads_returns_zero(self) -> None:
+        """no_wipe_zero : aucune escouade wipée → 0.0."""
+        rc = _rc_with_lowest_hp_bonus(0.3)
+        combat = _combat_result(squads_wiped=[], targets_meta={})
+        gs = {"units_cache": {}}
+        assert rc._fight_lowest_hp_wipe_bonus(combat, _acting_unit(), 1, gs) == 0.0
+
+    def test_bonus_zero_in_config_returns_zero(self) -> None:
+        """config_zero : target_lowest_hp=0 → 0.0 sans lecture du cache."""
+        rc = _rc_with_lowest_hp_bonus(0.0)
+        meta = {"e1": {"value": 10.0, "player": 2, "model_count_at_start": 1, "hp_before": 3}}
+        combat = _combat_result(squads_wiped=["e1"], targets_meta=meta)
+        gs = {"units_cache": {}}
+        assert rc._fight_lowest_hp_wipe_bonus(combat, _acting_unit(), 1, gs) == 0.0
+
+    def test_bonus_granted_when_killed_was_lowest(self) -> None:
+        """lowest_hp_bonus : cible wipée (hp=3) seule ennemie vivante → bonus accordé."""
+        rc = _rc_with_lowest_hp_bonus(0.3)
+        meta = {"e1": {"value": 10.0, "player": 2, "model_count_at_start": 1, "hp_before": 3}}
+        combat = _combat_result(squads_wiped=["e1"], targets_meta=meta)
+        gs = {"units_cache": {}}
+        assert rc._fight_lowest_hp_wipe_bonus(combat, _acting_unit(), 1, gs) == pytest.approx(0.3)
+
+    def test_no_bonus_when_living_enemy_has_lower_hp(self) -> None:
+        """not_lowest : ennemi vivant avec HP=2 < hp_before=5 → bonus refusé."""
+        rc = _rc_with_lowest_hp_bonus(0.3)
+        meta = {"e1": {"value": 10.0, "player": 2, "model_count_at_start": 1, "hp_before": 5}}
+        combat = _combat_result(squads_wiped=["e1"], targets_meta=meta)
+        gs = {"units_cache": {"e2": {"player": 2, "HP_CUR": 2}}}
+        assert rc._fight_lowest_hp_wipe_bonus(combat, _acting_unit(), 1, gs) == 0.0
+
+    def test_bonus_granted_when_other_enemy_has_equal_hp(self) -> None:
+        """equal_hp : ennemi vivant avec HP=3 == hp_before=3 → bonus accordé (pas strictement inférieur)."""
+        rc = _rc_with_lowest_hp_bonus(0.3)
+        meta = {"e1": {"value": 10.0, "player": 2, "model_count_at_start": 1, "hp_before": 3}}
+        combat = _combat_result(squads_wiped=["e1"], targets_meta=meta)
+        gs = {"units_cache": {"e2": {"player": 2, "HP_CUR": 3}}}
+        assert rc._fight_lowest_hp_wipe_bonus(combat, _acting_unit(), 1, gs) == pytest.approx(0.3)
+
+    def test_friendly_wipe_ignored(self) -> None:
+        """friendly_wipe : escouade alliée wipée (player=1) → bonus ignoré."""
+        rc = _rc_with_lowest_hp_bonus(0.3)
+        meta = {"a2": {"value": 10.0, "player": 1, "model_count_at_start": 1, "hp_before": 2}}
+        combat = _combat_result(squads_wiped=["a2"], targets_meta=meta)
+        gs = {"units_cache": {}}
+        assert rc._fight_lowest_hp_wipe_bonus(combat, _acting_unit(player=1), 1, gs) == 0.0
+
+    def test_hp_before_missing_ignored(self) -> None:
+        """no_hp_before : hp_before absent dans targets_meta → 0.0 (rétrocompat)."""
+        rc = _rc_with_lowest_hp_bonus(0.3)
+        meta = {"e1": {"value": 10.0, "player": 2, "model_count_at_start": 1}}
+        combat = _combat_result(squads_wiped=["e1"], targets_meta=meta)
+        gs = {"units_cache": {}}
+        assert rc._fight_lowest_hp_wipe_bonus(combat, _acting_unit(), 1, gs) == 0.0
+
+    def test_dead_enemy_in_cache_does_not_block_bonus(self) -> None:
+        """dead_in_cache : ennemi mort (HP_CUR=0) dans units_cache ne bloque pas le bonus."""
+        rc = _rc_with_lowest_hp_bonus(0.3)
+        meta = {"e1": {"value": 10.0, "player": 2, "model_count_at_start": 1, "hp_before": 3}}
+        combat = _combat_result(squads_wiped=["e1"], targets_meta=meta)
+        # e2 est mort (HP_CUR=0) — hp=0 < hp_before=3 sans le garde hp>0 → faux blocage
+        gs = {"units_cache": {"e2": {"player": 2, "HP_CUR": 0}}}
+        assert rc._fight_lowest_hp_wipe_bonus(combat, _acting_unit(), 1, gs) == pytest.approx(0.3)
