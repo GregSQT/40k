@@ -192,6 +192,15 @@ def test_invul_save_override_cumule_waaagh() -> None:
     assert effective_invul_save(gs, unit, 7) == 4
 
 
+def test_invul_save_override_mental_fortress_librarian() -> None:
+    """Mental Fortress (Librarian) : InSv 4+ conférée à l'unité, base 7+ (aucune InSv)."""
+    from engine.game_state import effective_invul_save
+
+    unit = _unit("lib", 1, unit_rules=[_rule("invul_save_override", {"value": 4})])
+    gs = _base_state([unit])
+    assert effective_invul_save(gs, unit, 7) == 4
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # toughness_bonus_while_waaagh
 # ─────────────────────────────────────────────────────────────────────────────
