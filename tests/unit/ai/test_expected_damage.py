@@ -226,3 +226,34 @@ def test_string_nb_d3_expected_damage() -> None:
     assert expected_damage(_weapon(atk=3, strength=4, ap=0, nb="D3", dmg=1), target) == pytest.approx(
         expected_damage(_weapon(atk=3, strength=4, ap=0, nb=2, dmg=1), target)
     )
+
+
+# ---------------------------------------------------------------------------
+# _was_lowest_hp_target : les cibles mortes (hp=0) ne bloquent pas le bonus
+# ---------------------------------------------------------------------------
+def test_was_lowest_hp_target_ignores_dead_units(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Une cible morte dans all_targets ne doit pas empêcher le bonus lowest-HP."""
+    import ai.reward_mapper as rmod
+    from ai.reward_mapper import RewardMapper
+
+    mapper = RewardMapper({})
+    target = {"id": "t1"}
+    dead = {"id": "dead"}
+    hp_map = {"t1": 2, "dead": 0}
+    monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: hp_map.get(uid, 0))
+
+    assert mapper._was_lowest_hp_target(target, [dead, target], target_hp=2, game_state={}) is True
+
+
+def test_was_lowest_hp_target_returns_false_when_alive_lower(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Une cible vivante avec HP inférieur doit bien bloquer le bonus."""
+    import ai.reward_mapper as rmod
+    from ai.reward_mapper import RewardMapper
+
+    mapper = RewardMapper({})
+    target = {"id": "t1"}
+    other = {"id": "t2"}
+    hp_map = {"t1": 4, "t2": 2}
+    monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: hp_map.get(uid, 0))
+
+    assert mapper._was_lowest_hp_target(target, [other, target], target_hp=4, game_state={}) is False
