@@ -44,7 +44,8 @@ def _unit(uid: str, player: int, unit_rules: Optional[List[Dict[str, Any]]] = No
 
 
 def _model(uid: str, col: int = 5, row: int = 5, t: int = 4, role: str = "bodyguard",
-           hp_cur: int = 3, hp_max: int = 3, invul_save: int = 7) -> Dict[str, Any]:
+           hp_cur: int = 3, hp_max: int = 3, invul_save: int = 7,
+           armor_save: int = 4) -> Dict[str, Any]:
     return {
         "squad_id": uid,
         "col": col,
@@ -55,7 +56,7 @@ def _model(uid: str, col: int = 5, row: int = 5, t: int = 4, role: str = "bodygu
         "HP_CUR": hp_cur,
         "HP_MAX": hp_max,
         "INVUL_SAVE": invul_save,
-        "ARMOR_SAVE": 4,
+        "ARMOR_SAVE": armor_save,
         "OC": 1,
         "SHOOT_LEFT": 1,
         "ATTACK_LEFT": 1,
@@ -63,9 +64,7 @@ def _model(uid: str, col: int = 5, row: int = 5, t: int = 4, role: str = "bodygu
         "VALUE": 10,
         "BASE_SHAPE": "round",
         "BASE_SIZE": 13,
-        # Exigée par la clairance verticale §13.06, que le placement des figurines rendues
-        # vérifie désormais au sol comme la formation compacte le fait déjà.
-        "MODEL_HEIGHT": 2.0,
+        "MODEL_HEIGHT": 2.0,  # requis par le moteur
         "RNG_WEAPONS": [],
         "CC_WEAPONS": [],
         "UNIT_RULES": [],
@@ -430,29 +429,7 @@ def _state_with_painboy_and_destroyed(n_alive: int = 3, n_destroyed: int = 2) ->
         if old_mid.startswith("pain#"):
             del gs["models_cache"][old_mid]
     for mid in mids:
-        gs["models_cache"][mid] = {
-            "squad_id": "pain",
-            "col": 5,
-            "row": 5,
-            "level": 0,
-            "T": 5,
-            "role": "bodyguard",
-            "HP_CUR": 3,
-            "HP_MAX": 3,
-            "INVUL_SAVE": 7,
-            "ARMOR_SAVE": 5,
-            "OC": 1,
-            "SHOOT_LEFT": 1,
-            "ATTACK_LEFT": 1,
-            "player": 1,
-            "VALUE": 10,
-            "BASE_SHAPE": "round",
-            "BASE_SIZE": 13,
-            "MODEL_HEIGHT": 2.0,
-            "RNG_WEAPONS": [],
-            "CC_WEAPONS": [],
-            "UNIT_RULES": [],
-        }
+        gs["models_cache"][mid] = _model("pain", t=5, armor_save=5)
     gs["squad_models"]["pain"] = mids
     gs["squad_cache"]["pain"] = {
         "model_count": n_alive,
