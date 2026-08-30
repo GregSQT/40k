@@ -222,16 +222,19 @@ def test_invul_save_override_mental_fortress_librarian_19_04() -> None:
     assert all(r["ruleId"] != "invul_save_override" for r in merged_dead)
 
 
-def test_invul_save_override_propagation_19_04_librarian_bodyguard() -> None:
-    """19.04 : invul_save_override du Librarian doit atteindre le bodyguard Intercessors.
+@pytest.mark.parametrize("alive_attached_sources,expected", [
+    ({"lib1"}, 4),
+    (set(), 7),
+], ids=["librarian_vivant", "librarian_mort"])
+def test_invul_save_override_19_04_librarian_bodyguard(
+    alive_attached_sources: set, expected: int
+) -> None:
+    """19.04 : effective_invul_save reflète la présence du Librarian.
 
-    Simule l'état post-fold _fold_attached_characters + _build_enhanced_unit :
-    le bodyguard n'a pas la règle en propre (_UNIT_RULES_OWN vide), elle vient
-    du groupe attaché (Librarian). effective_invul_save doit retourner 4 pour
-    un Intercessor dont la base INVUL_SAVE est 7+ (aucune InSv native).
-    Un bug dans compute_unit_rules_in_effect qui omettrait les règles attachées
-    ferait retourner 7 et échouerait le test (le fold _fold_attached_characters
-    n'est pas appelé ici — couvert par test_invul_save_override_mental_fortress_librarian_19_04).
+    Librarian vivant → override (4+) propagé au bodyguard Intercessor (base InSv 7+).
+    Librarian mort (alive_attached_sources vide) → règle absente, retour valeur base (7).
+    Le fold _fold_attached_characters n'est pas appelé ici — couvert par
+    test_invul_save_override_mental_fortress_librarian_19_04.
     """
     from engine.game_state import effective_invul_save
     from engine.phase_handlers.shared_utils import compute_unit_rules_in_effect
@@ -243,52 +246,19 @@ def test_invul_save_override_propagation_19_04_librarian_bodyguard() -> None:
 
     own_rules: List[Dict[str, Any]] = []
     attached_groups: Dict[str, List[Dict[str, Any]]] = {
-        librarian_id: [copy.deepcopy(invul_rule)],
+        librarian_id: [invul_rule],
     }
     unit_rules_in_effect = compute_unit_rules_in_effect(
         own_rules,
         attached_groups,
         native_alive=True,
-        alive_attached_sources={librarian_id},
+        alive_attached_sources=alive_attached_sources,
     )
 
     bodyguard = _unit(bodyguard_id, 1, unit_rules=unit_rules_in_effect)
 
     gs = _base_state([bodyguard])
-    assert effective_invul_save(gs, bodyguard, 7) == 4
-
-
-def test_invul_save_override_librarian_mort_retourne_base() -> None:
-    """Librarian mort : effective_invul_save doit retourner la valeur base (7), pas 4.
-
-    Scénario 19.04 : la règle du Librarian disparaît de l'union quand le porteur
-    est mort (alive_attached_sources=set()). Le bodyguard ne possède aucune
-    invul_save_override propre → effective_invul_save doit conserver la base.
-    """
-    from engine.game_state import effective_invul_save
-    from engine.phase_handlers.shared_utils import compute_unit_rules_in_effect
-
-    librarian_id = "lib1"
-    bodyguard_id = "inter1"
-
-    invul_rule = _rule("invul_save_override", {"value": 4})
-
-    own_rules: List[Dict[str, Any]] = []
-    attached_groups: Dict[str, List[Dict[str, Any]]] = {
-        librarian_id: [copy.deepcopy(invul_rule)],
-    }
-    # Librarian mort → alive_attached_sources vide
-    unit_rules_in_effect = compute_unit_rules_in_effect(
-        own_rules,
-        attached_groups,
-        native_alive=True,
-        alive_attached_sources=set(),
-    )
-
-    bodyguard = _unit(bodyguard_id, 1, unit_rules=unit_rules_in_effect)
-
-    gs = _base_state([bodyguard])
-    assert effective_invul_save(gs, bodyguard, 7) == 7
+    assert effective_invul_save(gs, bodyguard, 7) == expected
 
 
 # ─────────────────────────────────────────────────────────────────────────────
