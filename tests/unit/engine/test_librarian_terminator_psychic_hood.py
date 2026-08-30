@@ -7,10 +7,10 @@ Verrou ROUGE/VERT sur le spec parsé par UnitRegistry et sur le getter moteur.
 
 from __future__ import annotations
 
-import pytest
-
 from ai.unit_registry import UnitRegistry
 from engine.phase_handlers.shared_utils import _get_feel_no_pain_vs_psychic_threshold
+
+_REGISTRY = UnitRegistry()
 
 
 # ---------------------------------------------------------------------------
@@ -18,7 +18,7 @@ from engine.phase_handlers.shared_utils import _get_feel_no_pain_vs_psychic_thre
 # ---------------------------------------------------------------------------
 
 def _get_unit_rules(unit_type: str):
-    return UnitRegistry().get_unit_data(unit_type)["UNIT_RULES"]
+    return _REGISTRY.get_unit_data(unit_type)["UNIT_RULES"]
 
 
 def _rule_by_id(rules, rule_id: str):
