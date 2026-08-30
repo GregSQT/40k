@@ -27,6 +27,12 @@ import {
   canSelectReserveUnitForIngress,
   selectReserveUnits,
 } from "../utils/strategicReservesUi";
+import {
+  resolveSelectedTerrain,
+  TERRAIN_LABELS,
+  type TerrainRef,
+  terrainsForMode,
+} from "../utils/terrainSelection";
 import { AdvanceWarningModal } from "./AdvanceWarningModal";
 import BoardPvp, { type BoardDisplayMode, type MeasureModeState } from "./BoardPvp";
 import { ErrorBoundary } from "./ErrorBoundary";
@@ -738,15 +744,11 @@ export const BoardWithAPI: React.FC = () => {
   });
   const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp" || gameMode === "pve";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
-  const [selectedTerrain, _setSelectedTerrain] = useState<"mc1" | "mc2" | "pfm2">(() => {
-    const params = new URLSearchParams(window.location.search);
-    const t = params.get("terrain");
-    if (t === "mc1" || t === "mc2" || t === "pfm2") return t;
-    if (params.get("mode") === "pve") return "mc1";
-    const saved = localStorage.getItem("gameprep_terrain");
-    if (saved === "mc1" || saved === "mc2" || saved === "pfm2") return saved;
-    return "mc2";
-  });
+  const urlMode = new URLSearchParams(window.location.search).get("mode");
+  const availableTerrains = terrainsForMode(urlMode);
+  const [selectedTerrain, _setSelectedTerrain] = useState<TerrainRef>(() =>
+    resolveSelectedTerrain(urlMode, window.location.search)
+  );
   const [saveConfigAsDefault, setSaveConfigAsDefault] = useState(
     () =>
       localStorage.getItem("gameprep_terrain") !== null ||
@@ -4859,43 +4861,30 @@ export const BoardWithAPI: React.FC = () => {
                     <div className="test-start-modal__terrain-category">Select your terrain :</div>
                     <div className="test-start-modal__terrain-row">
                       <div className="test-start-modal__terrain-options">
-                        {(
-                          [
-                            { value: "mc1", label: "Terrain 1" },
-                            { value: "mc2", label: "Terrain 2" },
-                            { value: "pfm2", label: "Purge the Foe Mirror 2" },
-                          ] as const
-                        ).map((opt) => (
+                        {availableTerrains.map((value) => (
                           <button
-                            key={opt.value}
+                            key={value}
                             type="button"
-                            className={`test-start-modal__terrain-option terrain-opt-${opt.value}${selectedTerrain === opt.value ? " test-start-modal__terrain-option--active" : ""}`}
+                            className={`test-start-modal__terrain-option terrain-opt-${value}${selectedTerrain === value ? " test-start-modal__terrain-option--active" : ""}`}
                             onClick={() => {
                               const url = new URL(window.location.href);
-                              url.searchParams.set("terrain", opt.value);
+                              url.searchParams.set("terrain", value);
                               window.location.href = url.toString();
                             }}
                           >
-                            {opt.label}
+                            {TERRAIN_LABELS[value]}
                           </button>
                         ))}
                       </div>
                       <div className="test-start-modal__terrain-preview">
-                        <img
-                          className="test-start-modal__terrain-side-img preview-mc1"
-                          src="/icons/Terrain/terrain-mc1.jpg"
-                          alt="Terrain 1"
-                        />
-                        <img
-                          className="test-start-modal__terrain-side-img preview-mc2"
-                          src="/icons/Terrain/terrain-mc2.jpg"
-                          alt="Terrain 2"
-                        />
-                        <img
-                          className="test-start-modal__terrain-side-img preview-pfm2"
-                          src="/icons/Terrain/terrain-pfm2.jpg"
-                          alt="Purge the Foe Mirror 2"
-                        />
+                        {availableTerrains.map((value) => (
+                          <img
+                            key={value}
+                            className={`test-start-modal__terrain-side-img preview-${value}`}
+                            src={`/icons/Terrain/terrain-${value}.jpg`}
+                            alt={TERRAIN_LABELS[value]}
+                          />
+                        ))}
                       </div>
                     </div>
                   </div>

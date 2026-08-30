@@ -413,3 +413,42 @@ describe("useEngineAPI — targetPreview", () => {
     expect(result.current.error).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Le terrain choisi doit partir avec le démarrage de partie — en PvP aussi
+// ---------------------------------------------------------------------------
+
+describe("useEngineAPI — terrain_ref envoyé au démarrage", () => {
+  const captureStartBody = () => {
+    const captured: { value: Record<string, unknown> | null } = { value: null };
+    server.use(
+      http.post("/api/game/start", async ({ request }) => {
+        captured.value = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ success: true, game_state: makeGameState() });
+      })
+    );
+    return captured;
+  };
+
+  it("PvP avec ?terrain=pfm2 → terrain_ref transmis (sinon le serveur reste sur mc2)", async () => {
+    const captured = captureStartBody();
+    window.history.replaceState({}, "", "/game?terrain=pfm2");
+
+    const { result } = renderHook(() => useEngineAPI());
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+    expect(captured.value).not.toBeNull();
+    expect(captured.value?.mode_code).toBe("pvp");
+    expect(captured.value?.terrain_ref).toBe("pfm2");
+  });
+
+  it("PvP sans paramètre terrain → mc2, le terrain du scénario non suffixé", async () => {
+    const captured = captureStartBody();
+    window.history.replaceState({}, "", "/game");
+
+    const { result } = renderHook(() => useEngineAPI());
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+    expect(captured.value?.terrain_ref).toBe("mc2");
+  });
+});

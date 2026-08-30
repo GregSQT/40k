@@ -262,6 +262,37 @@ TEST_SCENARIO_BOARD_MAP = {
     "x5_44x60": "board/44x60x5",
 }
 
+# Terrains proposés par le popup de préparation, et suffixe du scénario qui porte chacun.
+# Le suffixe VIDE désigne le terrain du scénario de base du mode — il n'est pas le même partout,
+# d'où une table PAR MODE plutôt qu'une table unique. Un mode n'y déclare que les terrains dont
+# il possède le scénario : demander les autres lève, au lieu de charger un plateau différent de
+# celui qui est affiché.
+VALID_TERRAIN_REFS = {"mc1", "mc2", "pfm2"}
+TERRAIN_SCENARIO_SUFFIX_BY_MODE = {
+    "pvp": {"mc1": "_mc1", "mc2": "", "pfm2": "_pfm2"},
+    "pvp_test": {"mc1": "_mc1", "mc2": "", "pfm2": "_pfm2"},
+    "pve": {"mc1": "", "mc2": "_mc2", "pfm2": "_pfm2"},
+    # `scenario_pve_test.json` ne déclare aucun terrain : "mc2" y désigne ce scénario sans décor,
+    # pas le terrain mc2. Le popup de préparation n'est pas affiché dans ce mode.
+    "pve_test": {"mc1": "_mc1", "mc2": ""},
+}
+# Terrain retenu quand la requête n'en nomme aucun : celui du scénario de base du mode.
+DEFAULT_TERRAIN_BY_MODE = {"pvp": "mc2", "pvp_test": "mc2", "pve": "mc1", "pve_test": "mc2"}
+
+
+def _terrain_scenario_suffix(mode: str, terrain_ref: Optional[str]) -> str:
+    """Suffixe de scénario du terrain demandé, pour ce mode."""
+    table = require_key(TERRAIN_SCENARIO_SUFFIX_BY_MODE, mode)
+    resolved = terrain_ref if terrain_ref is not None else require_key(
+        DEFAULT_TERRAIN_BY_MODE, mode
+    )
+    if resolved not in table:
+        raise ValueError(
+            f"terrain_ref {resolved!r} n'est pas disponible en mode {mode!r} "
+            f"(attendu l'un de {sorted(table)})"
+        )
+    return table[resolved]
+
 # Sérialise toute section qui mute W40K_BOARD_PATH (état global processus) puis
 # lit/charge le board. Évite la race entre GET /api/config/board et
 # POST /api/game/start sur le serveur Flask multithread (cf. footprint « invalid hex »
@@ -3181,16 +3212,17 @@ def start_game():
         raise ValueError(f"scenario_file must be string or null (got {type(data['scenario_file']).__name__})")
     if "board_path" in data and data["board_path"] is not None and data["board_path"] not in BOARD_PATH_MAP:
         raise ValueError(f"board_path must be one of {sorted(BOARD_PATH_MAP)} (got {data['board_path']!r})")
-    _VALID_TERRAIN_REFS = {"mc1", "mc2", "pfm2"}
-    if "terrain_ref" in data and data["terrain_ref"] is not None and data["terrain_ref"] not in _VALID_TERRAIN_REFS:
-        raise ValueError(f"terrain_ref must be one of {sorted(_VALID_TERRAIN_REFS)} (got {data['terrain_ref']!r})")
+    if "terrain_ref" in data and data["terrain_ref"] is not None and data["terrain_ref"] not in VALID_TERRAIN_REFS:
+        raise ValueError(f"terrain_ref must be one of {sorted(VALID_TERRAIN_REFS)} (got {data['terrain_ref']!r})")
     if "player2_name" in data and data["player2_name"] is not None and not isinstance(data["player2_name"], str):
         raise ValueError(f"player2_name must be string or null (got {type(data['player2_name']).__name__})")
     pve_mode = data.get('pve_mode', False)
     mode_code = data.get('mode_code', None)
     scenario_file = data.get('scenario_file', None)
     board_path = data.get('board_path', None)
-    terrain_ref = data.get('terrain_ref', 'mc2')
+    # `terrain_ref: null` vaut « pas de terrain choisi », comme la clé absente. Le terrain retenu
+    # dans ce cas dépend du mode (`_terrain_scenario_suffix`), il n'est donc pas résolu ici.
+    terrain_ref = data.get('terrain_ref')
 
     requested_mode = "pvp"
     if mode_code is not None:
@@ -3231,7 +3263,7 @@ def start_game():
                         f"config.json defaults.test_board = {board_path!r} : attendu l'un de "
                         f"{sorted(BOARD_PATH_MAP)}"
                     )
-            _terrain_suffix = {"mc1": "_mc1", "pfm2": "_pfm2"}.get(terrain_ref, "")
+            _terrain_suffix = _terrain_scenario_suffix("pvp_test", terrain_ref)
             scenario_file = os.path.join("config", TEST_SCENARIO_BOARD_MAP[board_path], "scenario", f"scenario_pvp_test{_terrain_suffix}.json")
             _prev_board = os.environ.get("W40K_BOARD_PATH")
             os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
@@ -3243,12 +3275,24 @@ def start_game():
                 elif "W40K_BOARD_PATH" in os.environ:
                     del os.environ["W40K_BOARD_PATH"]
         elif requested_mode == "pvp":
+            # Le sélecteur de terrain du popup de préparation est affiché en PvP comme en
+            # PvP test : sans cette résolution il n'y aurait aucun effet et le plateau
+            # resterait mc2. `scenario_file` explicite du client prime toujours.
+            if scenario_file is None:
+                _terrain_suffix = _terrain_scenario_suffix("pvp", terrain_ref)
+                scenario_file = _default_board_scenario_path(
+                    f"scenario_pvp{_terrain_suffix}.json"
+                )
             initialize_engine(scenario_file=scenario_file)
         elif requested_mode == "pve":
-            # terrain_ref sélectionne mc1 (défaut, scenario_pve.json) ou mc2 (scenario_pve_mc2.json).
+            # Le popup PvE propose les mêmes terrains que le PvP : chacun doit mener à son
+            # scénario, sinon `pfm2` retomberait en silence sur celui de mc1.
             # scenario_file explicite du client prime toujours.
-            if scenario_file is None and terrain_ref == "mc2":
-                scenario_file = "config/board/44x60x5/scenario/scenario_pve_mc2.json"
+            if scenario_file is None:
+                _terrain_suffix = _terrain_scenario_suffix("pve", terrain_ref)
+                scenario_file = _default_board_scenario_path(
+                    f"scenario_pve{_terrain_suffix}.json"
+                )
             initialize_test_engine(
                 scenario_file=scenario_file,
                 forced_agent_key=_configured_agent_key(),
@@ -3265,7 +3309,7 @@ def start_game():
                         f"config.json defaults.test_board = {board_path!r} : attendu l'un de "
                         f"{sorted(BOARD_PATH_MAP)}"
                     )
-            _terrain_suffix = "_mc1" if terrain_ref == "mc1" else ""
+            _terrain_suffix = _terrain_scenario_suffix("pve_test", terrain_ref)
             scenario_file = os.path.join("config", TEST_SCENARIO_BOARD_MAP[board_path], "scenario", f"scenario_pve_test{_terrain_suffix}.json")
             _prev_board = os.environ.get("W40K_BOARD_PATH")
             os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]

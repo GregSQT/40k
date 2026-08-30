@@ -40,6 +40,7 @@ import {
   getSelectedRangedWeaponAgainstTarget,
 } from "../utils/probabilityCalculator";
 import { selectReserveUnits, shouldWarnReservesLastRound } from "../utils/strategicReservesUi";
+import { resolveSelectedTerrain } from "../utils/terrainSelection";
 
 // Get max_turns from config instead of hardcoded fallback
 const getMaxTurnsFromConfig = async (): Promise<number> => {
@@ -1171,13 +1172,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         // Mode PvE : aucun `scenario_file` envoyé, comme en PvP. Le backend résout le scénario
         // dans le dossier de board courant ; le client n'a pas à connaître cette arborescence.
         if (isPvPTestMode || isPvETestMode) {
-          const boardParam = new URLSearchParams(window.location.search).get("board") ?? "x5_44x60";
-          requestPayload.board_path = boardParam;
-          const terrainParam = new URLSearchParams(window.location.search).get("terrain") ?? "mc2";
-          requestPayload.terrain_ref = terrainParam;
-        } else if (isPvEMode) {
-          const terrainParam = new URLSearchParams(window.location.search).get("terrain") ?? "mc1";
-          requestPayload.terrain_ref = terrainParam;
+          requestPayload.board_path = urlParams.get("board") ?? "x5_44x60";
+        }
+        // Le terrain part avec TOUS les modes qui exposent le sélecteur — PvP compris, où il
+        // n'était pas transmis : le serveur restait alors sur le scénario mc2.
+        if (requestedModeCode !== "endless_duty") {
+          requestPayload.terrain_ref = resolveSelectedTerrain(mode, window.location.search);
         }
         if (!isPvEMode && !isPvETestMode && !isEndlessDutyMode) {
           const savedP2Name = localStorage.getItem("w40k_pvp_p2_name");

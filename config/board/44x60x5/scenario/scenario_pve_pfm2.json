@@ -1,0 +1,106 @@
+{
+  "uses_codex_detachment": { "1": true, "2": true },
+  "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ORKS"},
+  "deployment_type": "active",
+  "terrain_ref": "terrain-purge-foe-mirror-2.json",
+  "primary_objectives": [
+    "objectives_control"
+  ],
+  "units": [
+    {
+      "id": 1, "unit_type": "VanguardVeteranSquadJumpPack", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "VanguardVeteranSquadJumpPackSergeant" },
+        { "col": 0, "row": 0, "unit_type": "VanguardVeteranSquadJumpPackPlasma" },
+        { "col": 0, "row": 0, "unit_type": "ChaplainJumpPack" }
+      ]
+    },
+    {
+      "id": 2, "unit_type": "EradicatorHeavyBolter", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "EradicatorHeavyBolterSergeant" }
+      ]
+    },
+    { "id": 3, "unit_type": "LandSpeederOnslaughtGatlingCannon", "player": 1, "col": 0, "row": 0 },
+    {
+      "id": 4, "unit_type": "Intercessor", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "IntercessorGrenadeLauncher" },
+        { "col": 0, "row": 0, "unit_type": "IntercessorSergeant" },
+        { "col": 0, "row": 0, "unit_type": "Librarian" }
+      ]
+    },
+    {
+      "id": 5, "unit_type": "Intercessor", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "IntercessorGrenadeLauncher" },
+        { "col": 0, "row": 0, "unit_type": "IntercessorSergeant" },
+        { "col": 0, "row": 0, "unit_type": "CaptainRelicShield" },
+        { "col": 0, "row": 0, "unit_type": "Ancient" }
+      ]
+    },
+    {
+      "id": 6, "unit_type": "Boyz", "player": 2, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "BoyzNobKombi" },
+        { "col": 0, "row": 0, "unit_type": "Warboss" },
+        { "col": 0, "row": 0, "unit_type": "PainBoy" }
+      ]
+    },
+    {
+      "id": 7, "unit_type": "Boyz", "player": 2, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "BoyzNobKombi" },
+        { "col": 0, "row": 0, "unit_type": "Bigboss" },
+        { "col": 0, "row": 0, "unit_type": "BannerNob" }
+      ]
+    },
+    {
+      "id": 8, "unit_type": "Gretchin", "player": 2, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 }
+      ]
+    },
+    { "id": 9, "unit_type": "WeirdBoy", "player": 2, "col": 0, "row": 0 },
+    { "id": 10, "unit_type": "WarTrakk", "player": 2, "col": 0, "row": 0 },
+    { "id": 11, "unit_type": "BigMekDakkarig", "player": 2, "col": 0, "row": 0 }
+  ]
+}

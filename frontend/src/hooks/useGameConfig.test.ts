@@ -93,3 +93,33 @@ describe("useGameConfig — résolution servie vs demandée", () => {
     expect(result.current.boardConfig?.cols).toBe(44);
   });
 });
+
+// Le terrain choisi dans le popup de préparation ne changeait le plateau DESSINÉ que dans les
+// modes de test : en PvP le hook demandait `scenario_pvp.json` quel que soit le terrain, donc
+// toujours mc2, sans la moindre erreur. Ce bloc verrouille le scénario réellement demandé.
+describe("useGameConfig — le terrain choisi décide du scénario demandé", () => {
+  const scenarioDemande = (): string => {
+    const url = String(apiFetchMock.mock.calls[0][0]);
+    const raw = new URL(url, "http://localhost").searchParams.get("scenario_file");
+    return raw ?? "";
+  };
+
+  it.each([
+    ["", "config/board/44x60x5/scenario/scenario_pvp.json"],
+    ["?terrain=mc1", "config/board/44x60x5/scenario/scenario_pvp_mc1.json"],
+    ["?terrain=pfm2", "config/board/44x60x5/scenario/scenario_pvp_pfm2.json"],
+    ["?mode=pve&terrain=pfm2", "config/board/44x60x5/scenario/scenario_pve_pfm2.json"],
+    ["?mode=pve", "config/board/44x60x5/scenario/scenario_pve.json"],
+    ["?mode=pvp_test&terrain=pfm2", "config/board/44x60x5/scenario/scenario_pvp_test_pfm2.json"],
+  ])("%s → %s", async (search, attendu) => {
+    mockServer(5);
+    window.history.replaceState({}, "", `/game${search}`);
+
+    const { result } = renderHook(() => useGameConfig({}));
+
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalled());
+    expect(scenarioDemande()).toBe(attendu);
+    // VERT VACANT : une URL bien formée mais une config rejetée ne prouverait rien du rendu.
+    await waitFor(() => expect(result.current.boardConfig).not.toBeNull());
+  });
+});

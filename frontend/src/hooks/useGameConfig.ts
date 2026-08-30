@@ -1,6 +1,7 @@
 // frontend/src/hooks/useGameConfig.ts
 import { useEffect, useState } from "react";
 import { apiFetch } from "../services/apiFetch";
+import { resolveSelectedTerrain } from "../utils/terrainSelection";
 
 export interface DisplayConfig {
   resolution?: "auto" | number;
@@ -298,11 +299,7 @@ export const useGameConfig = (options?: {
         const isTestMode = mode === "pvp_test" || mode === "pve_test";
         const DEFAULT_TEST_BOARD = "x5_44x60";
         const boardParam = isTestMode ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD) : null;
-        const defaultTerrain = mode === "pve" ? "mc1" : "mc2";
-        const terrainParam =
-          isTestMode || mode === "pve"
-            ? (urlParams.get("terrain") ?? defaultTerrain)
-            : defaultTerrain;
+        const terrainParam = resolveSelectedTerrain(mode, window.location.search);
         const terrainSuffix =
           terrainParam === "mc1" ? "_mc1" : terrainParam === "pfm2" ? "_pfm2" : "";
         const scenarioName =
@@ -317,19 +314,22 @@ export const useGameConfig = (options?: {
           x1: "board/44x60x5",
           x5_44x60: "board/44x60x5",
         };
-        const pveScenario =
-          terrainParam === "mc2"
-            ? "config/board/44x60x5/scenario/scenario_pve_mc2.json"
-            : "config/board/44x60x5/scenario/scenario_pve.json";
+        // Le PvE a sa propre table de suffixes : son scénario NON suffixé est celui de mc1.
+        const pveSuffix = terrainParam === "mc2" ? "_mc2" : terrainParam === "pfm2" ? "_pfm2" : "";
+        const pveScenario = `config/board/44x60x5/scenario/scenario_pve${pveSuffix}.json`;
         const scenarioMap: Record<string, string> = {
           endless_duty: "config/scenario_endless_duty.json",
           pve: pveScenario,
         };
+        // Le sélecteur de terrain agit aussi en PvP : le scénario suffixé doit être celui que
+        // `POST /api/game/start` résout côté serveur, sinon le plateau dessiné et le plateau
+        // joué divergeraient.
+        const pvpScenario = `config/board/44x60x5/scenario/scenario_pvp${terrainSuffix}.json`;
         const scenarioFile =
           scenarioFileOverride ??
           (isTestMode && boardParam && boardDirMap[boardParam]
             ? `config/${boardDirMap[boardParam]}/scenario/${scenarioName}`
-            : (mode && scenarioMap[mode]) || "config/board/44x60x5/scenario/scenario_pvp.json");
+            : (mode && scenarioMap[mode]) || pvpScenario);
         let boardUrl =
           "/api/config/board?scenario_file=" +
           encodeURIComponent(scenarioFile) +

@@ -132,6 +132,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | ai+moteur | ✅ fix-kill-lowest-hp-production — câbler `target_lowest_hp` dans `squad_fight` via `hp_before` dans `targets_meta` ; corriger `_fight_lowest_hp_wipe_bonus` T1 + multi-wipe + dead-unit (2026-08-30) | [bot.md](bot.md) | ⚡ |
 | moteur | ✅ simplify-fight-lowest-hp-wipe-bonus — `enemy_entries_on_battlefield` + `require_key(HP_CUR)` remplace filtre inline + `.get()` silencieux (2026-08-30) | [bot.md](bot.md) | ⚡ |
 | ai+moteur | ✅ fix-p1-melee-will-kill-adjacency — activer P1 mêlée (False→True) + filtrer adjacence par-cible via `_fight_units_engaged_with` (2026-08-30) | [bot.md](bot.md) | ⚡ |
+| front+moteur | ✅ terrain-pfm2-selection — le terrain choisi agit enfin en PvP et PvE (scénarios suffixés), murs des ruines de `terrain-purge-foe-mirror-2`, preview au survol réparée (2026-08-30) | [front.md](front.md) | ⚡ |
 
 ---
 
