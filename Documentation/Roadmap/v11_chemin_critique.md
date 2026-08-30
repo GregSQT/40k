@@ -100,6 +100,6 @@ Le gate rougit si le modèle progresse sur les 7 bots de sélection mais tombe s
 
 ## Self-play §0.59 {#selfplay}
 
-`--append x1_selfplay` — livré, **jamais exécuté** ; le premier run est aussi son premier test d'intégration.
+✅ **Absorbé par `--etape` (décision 2026-08-30).** Le curriculum P0→P10 joue contre des snapshots figés de champions précédents — c'est le levier self-play R2. `SelfPlayWrapper` (adversaire live, poids copiés toutes les `update_frequency` steps) et la config `x1_selfplay` n'apportent rien de distinct ; fermé sans dette.
 
 → `Documentation/Chantiers/v11/index_v11.md` §0.59

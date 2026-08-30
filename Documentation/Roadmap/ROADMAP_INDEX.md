@@ -47,7 +47,7 @@ Tout chantier sert un jalon ci-dessous, ou attend. Les jalons sont séquentiels 
 | **J1 — Pipeline prouvé, ligne de base** ✅ | Run `x1_long --new` terminé le 2026-08-20 ; ligne de base REJOUÉE le 2026-08-21 sur `robust_0.8463` (post-rupture §12.15) : combined agent `0,8567`, pire bot `attrition = 0,810` ; reference bots mesurés bot-contre-bot (balanced `0,168`, denial `0,155`, reactive `0,139`) ; `benchmark_floor` remis à `0,90` le 2026-08-20 (le `0,049` mélangeait les sémantiques) — gate RETIRÉ depuis, le 2026-08-22 | Critères de [training.md#run-verif](training.md#run-verif) verts ; ligne de base panel rejouée ✅ |
 | **J2 — Le gym décide tout** ✅ | P3-5, P3-6, P3-8, P4, P5 livrés ; `TOTAL_ACTION_SIZE` 1159→1389, `obs_size` 16671→16703 ; ré-entraînement `--new` nécessaire | Plus aucune décision de jeu jouée par une heuristique à la place de l'agent, hors optionnels statués par mesure de regret ✅ |
 | **J3 — Mesure de référence** | Curriculum R1→R3 (URGENCE), puis `x1_long` (~6 h) | LE chiffre officiel du projet — solde §0.14, §0.67 et le critère T6 (via §10.6) |
-| **J4 — Dépasser la mesure** | Self-play §0.59 (ligne 7), capacités 06, É9 second scénario — priorisés selon ce que la mesure révèle | Win-rate au-dessus de la mesure de référence, reproductible |
+| **J4 — Dépasser la mesure** | Capacités 06, É9 second scénario — priorisés selon ce que la mesure révèle | Win-rate au-dessus de la mesure de référence, reproductible |
 | **J5 — Démo** | Validation qualitative §10.6 volet 2 (joueur externe), validations navigateur front soldées | Un externe joue contre l'agent et le trouve crédible ; le front tient la partie de bout en bout |
 
 ---
@@ -72,11 +72,11 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
 ---
 
-## J4 — Self-play + Capacités
+## J4 — Capacités
 
 | # | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|---|
-| 8 | training+bot | Self-play §0.59 (livré, jamais exécuté) | [v11_chemin_critique.md#selfplay](v11_chemin_critique.md#selfplay) | 🚫 |
+| 8 | training+bot | ✅ Self-play §0.59 absorbé par `--etape` (décision 2026-08-30) | [v11_chemin_critique.md#selfplay](v11_chemin_critique.md#selfplay) | ✅ |
 | 9 | moteur+training | **06** Armageddon abilities — 0/6 passes | [capacites.md#armageddon-06](capacites.md#armageddon-06) | 🚫 |
 
 ---
