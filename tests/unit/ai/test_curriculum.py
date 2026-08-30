@@ -235,6 +235,104 @@ def test_ramp_end_below_override_total_is_accepted() -> None:
     validate_curriculum(ok)  # ne leve pas
 
 
+def test_ramp_end_without_override_total_is_refused() -> None:
+    """ramp_end_episodes sans training_config_overrides.total_episodes = validation impossible."""
+    broken = _minimal_curriculum()
+    broken["stages"]["P1"]["ramp_end_episodes"] = 50
+    # Pas de training_config_overrides du tout
+    with pytest.raises(ValueError, match="total_episodes"):
+        validate_curriculum(broken)
+
+
+def _minimal_curriculum_with_exploiter() -> dict:
+    """Curriculum minimal valide avec une etape exploiteur (E1 joue 100% contre P0)."""
+    return {
+        "order": ["P0", "E1"],
+        "opponent": {"snapshot_device": "cpu", "deterministic": False},
+        "gate": {
+            "min_score_vs_champion": 0.55,
+            "target_score_vs_champion": 0.60,
+            "eval_episodes": 300,
+        },
+        "exploiter_config": {
+            "probe_every_episodes": 1000,
+            "probe_cheap_n": 100,
+            "probe_confirm_n": 500,
+            "win_rate_target": 0.70,
+        },
+        "stages": {
+            "P0": {
+                "role": "learner", "init": "new", "warmup_episodes": 0,
+                "ratio_start": 0.0, "ratio_end": 0.0, "pool": [],
+            },
+            "E1": {
+                "role": "exploiter", "init": "from:P0", "warmup_episodes": 0,
+                "ratio_start": 1.0, "ratio_end": 1.0,
+                "budget_cap": 50000,
+                "pool": [{"kind": "champion", "members": ["P0"], "weight": 1.0}],
+            },
+        },
+    }
+
+
+def test_exploiter_with_correct_protocol_is_accepted() -> None:
+    validate_curriculum(_minimal_curriculum_with_exploiter())  # ne leve pas
+
+
+def test_exploiter_with_wrong_ratio_start_is_refused() -> None:
+    broken = _minimal_curriculum_with_exploiter()
+    broken["stages"]["E1"]["ratio_start"] = 0.5
+    with pytest.raises(ValueError, match="protocole"):
+        validate_curriculum(broken)
+
+
+def test_exploiter_with_nonzero_warmup_is_refused() -> None:
+    broken = _minimal_curriculum_with_exploiter()
+    broken["stages"]["E1"]["warmup_episodes"] = 500
+    with pytest.raises(ValueError, match="protocole"):
+        validate_curriculum(broken)
+
+
+def test_exploiter_with_non_unit_weight_pool_is_refused() -> None:
+    """Un membre unique dont le weight n'est pas 1.0 viole le protocole gele."""
+    broken = _minimal_curriculum_with_exploiter()
+    broken["stages"]["E1"]["pool"] = [{"kind": "champion", "members": ["P0"], "weight": 0.7}]
+    with pytest.raises(ValueError, match="pool ne contient pas"):
+        validate_curriculum(broken)
+
+
+def test_early_stop_with_missing_key_is_refused() -> None:
+    broken = _minimal_curriculum()
+    broken["early_stop"] = {"win_rate_threshold": 0.60, "min_steps": 1000}  # manque consecutive_evals
+    with pytest.raises(KeyError, match="consecutive_evals"):
+        validate_curriculum(broken)
+
+
+def test_early_stop_with_wrong_key_name_is_refused() -> None:
+    """Cle erronee (ex. 'win_rate_thresh') doit etre refusee."""
+    broken = _minimal_curriculum()
+    broken["early_stop"] = {"win_rate_thresh": 0.60, "min_steps": 1000, "consecutive_evals": 2}
+    with pytest.raises(KeyError, match="win_rate_threshold"):
+        validate_curriculum(broken)
+
+
+def test_early_stop_with_valid_block_is_accepted() -> None:
+    ok = _minimal_curriculum()
+    ok["early_stop"] = {"win_rate_threshold": 0.60, "min_steps": 50000, "consecutive_evals": 2}
+    validate_curriculum(ok)  # ne leve pas
+
+
+def test_stage_early_stop_override_with_wrong_key_is_refused() -> None:
+    broken = _minimal_curriculum()
+    broken["stages"]["P1"]["early_stop"] = {
+        "win_rate_thresh": 0.70,  # typo
+        "min_steps": 1000,
+        "consecutive_evals": 2,
+    }
+    with pytest.raises(KeyError, match="win_rate_threshold"):
+        validate_curriculum(broken)
+
+
 # ── 2. REPARTITION PAR ENVIRONNEMENT ───────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("stage_name", sorted(EXPECTED_STAGES))

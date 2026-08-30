@@ -60,6 +60,9 @@ _EXPLOITER_CONFIG_REQUIRED_KEYS = (
     "win_rate_target",
 )
 
+#: Cles obligatoires du bloc `early_stop` (racine et surcharge par etape).
+_EARLY_STOP_REQUIRED_KEYS = ("win_rate_threshold", "min_steps", "consecutive_evals")
+
 #: Cles autorisees au niveau racine de `training_config_overrides` d'une etape learner.
 #: Toute cle absente de cette liste est refusee a la validation du curriculum.
 #: Les cles structurelles (deployment_mode_schedule, obs_size, vec_normalize, n_envs, seed)
@@ -269,6 +272,27 @@ def validate_exploiter_protocol(
             )
 
 
+def _validate_early_stop_block(block: Any, context: str) -> None:
+    """Valide un bloc `early_stop` (racine ou par etape). Leve si une cle est absente ou invalide."""
+    if not isinstance(block, dict):
+        raise TypeError(f"{context} doit etre un objet JSON.")
+    for key in _EARLY_STOP_REQUIRED_KEYS:
+        if key not in block:
+            raise KeyError(
+                f"{context} manque la cle '{key}'. "
+                f"Cles requises : {_EARLY_STOP_REQUIRED_KEYS}"
+            )
+    threshold = float(block["win_rate_threshold"])
+    min_steps = int(block["min_steps"])
+    consecutive_evals = int(block["consecutive_evals"])
+    if not (0.0 < threshold <= 1.0):
+        raise ValueError(f"{context}.win_rate_threshold doit etre dans ]0,1] (got {threshold})")
+    if min_steps < 0:
+        raise ValueError(f"{context}.min_steps doit etre >= 0 (got {min_steps})")
+    if consecutive_evals < 1:
+        raise ValueError(f"{context}.consecutive_evals doit etre >= 1 (got {consecutive_evals})")
+
+
 def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>") -> None:
     """Verrous structurels du curriculum. Tout manquement leve, aucun n'est rattrape.
 
@@ -324,6 +348,9 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
     if gate_episodes <= 0:
         raise ValueError(f"{source}: gate.eval_episodes doit etre > 0 (got {gate_episodes})")
 
+    if "early_stop" in curriculum:
+        _validate_early_stop_block(curriculum["early_stop"], f"{source}: early_stop")
+
     for position, name in enumerate(order):
         stage = require_stage(curriculum, name)
         earlier = set(order[:position])
@@ -368,7 +395,14 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
                 )
             overrides = stage.get("training_config_overrides") or {}
             override_total = overrides.get("total_episodes")
-            if override_total is not None and ramp_end_episodes > int(override_total):
+            if override_total is None:
+                raise ValueError(
+                    f"{source}: stages[{name}].ramp_end_episodes est present sans "
+                    "training_config_overrides.total_episodes — impossible de garantir que "
+                    "ratio_end sera atteint. Ajouter total_episodes dans "
+                    "training_config_overrides de l'etape."
+                )
+            if ramp_end_episodes > int(override_total):
                 raise ValueError(
                     f"{source}: stages[{name}].ramp_end_episodes ({ramp_end_episodes}) depasse "
                     f"training_config_overrides.total_episodes ({override_total}) : "
@@ -376,6 +410,23 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
                 )
 
         members = stage_pool_members(stage)
+
+        if role == "exploiter":
+            if ratio_start != 1.0 or ratio_end != 1.0 or warmup_episodes != 0:
+                raise ValueError(
+                    f"{source}: stages[{name}] est exploiteur mais son protocole n'est pas "
+                    f"gele : exige ratio_start=1.0, ratio_end=1.0, warmup_episodes=0 "
+                    f"(got ratio_start={ratio_start}, ratio_end={ratio_end}, "
+                    f"warmup_episodes={warmup_episodes}). Corriger l'etape ou changer son role."
+                )
+            if len(members) != 1 or abs(float(members[0]["weight"]) - 1.0) > RATIO_SUM_TOLERANCE:
+                raise ValueError(
+                    f"{source}: stages[{name}] est exploiteur mais son pool ne contient pas "
+                    f"exactement un membre a weight=1.0 "
+                    f"(got {[(m['label'], m['weight']) for m in members]!r}). "
+                    "Le protocole gele exige un adversaire unique a 100%."
+                )
+
         for member in members:
             if member["label"] not in earlier:
                 raise ValueError(
@@ -403,6 +454,9 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
                 f"{source}: stages[{name}] n'a pas de pool mais un ratio_end de {ratio_end!r} : "
                 "la rampe conduirait a des episodes sans adversaire."
             )
+
+        if "early_stop" in stage:
+            _validate_early_stop_block(stage["early_stop"], f"{source}: stages[{name}].early_stop")
 
     # Validation du bloc exploiter_config si present (obligatoire des qu'il existe au moins
     # une etape exploiteur dans le curriculum).
@@ -640,7 +694,7 @@ def assign_pool_members_to_envs(
     # repartition ne doit dependre que des poids, jamais d'un ordre d'iteration.
     ranking = sorted(range(len(members)), key=lambda i: (-(exact[i] - counts[i]), i))
     for position in range(leftover):
-        counts[ranking[position % len(ranking)]] += 1
+        counts[ranking[position]] += 1
 
     starved = [members[i]["label"] for i, count in enumerate(counts) if count == 0]
     if starved:
