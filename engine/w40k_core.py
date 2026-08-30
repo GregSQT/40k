@@ -4148,7 +4148,7 @@ class W40KEngine(gym.Env):
                     "agent_decision mortal_wounds_target: pas de _pending_exhortation_fight — "
                     "l etat a ete efface entre la pose de la decision et sa resolution."
                 )
-            target_eid = str(selected_option["effect_ids"][0])
+            target_eid = str(require_key(require_key(selected_option, "payload"), "target_eid"))
             mw_count = int(require_key(pending_exhort, "mw_count"))
             exhort_squad_id = str(require_key(pending_exhort, "squad_id"))
             target_slot_stored: Optional[int] = pending_exhort.get("target_slot")  # get allowed
@@ -5881,7 +5881,7 @@ class W40KEngine(gym.Env):
         }
         player = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
         options = [
-            {"effect_ids": [eid], "declines": False}
+            {"label": eid, "effect_ids": (), "declines": False, "payload": {"target_eid": eid}}
             for eid in engaged[:MAX_DECISION_OPTIONS]
         ]
         set_pending_agent_decision(

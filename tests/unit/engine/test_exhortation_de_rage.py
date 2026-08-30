@@ -124,6 +124,15 @@ def test_d6_6_pose_decision_et_mw_count_3(monkeypatch):
     assert len(decisions_posed) == 1, "set_pending_agent_decision doit être appelé une fois"
     assert decisions_posed[0].get("decision_type") == "mortal_wounds_target"
 
+    # Vérifier le format des options : label, effect_ids vide, payload avec target_eid.
+    opts = decisions_posed[0].get("options", [])
+    assert len(opts) == 2, f"2 cibles → 2 options, got {len(opts)}"
+    for opt in opts:
+        assert "label" in opt and opt["label"], f"option sans label : {opt}"
+        assert opt.get("effect_ids") == (), f"effect_ids doit être () : {opt}"
+        assert "payload" in opt and "target_eid" in opt["payload"], f"payload manquant : {opt}"
+        assert not opt.get("declines"), f"declines doit être False : {opt}"
+
     # mw_count = 3 stocké dans le pending
     pending = engine.game_state.get("_pending_exhortation_fight")
     assert pending is not None
