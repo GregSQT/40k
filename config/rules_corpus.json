@@ -1071,14 +1071,38 @@
     {
       "id": "PROJ.1.9.feel_no_pain",
       "section": "1.9",
-      "label": "Feel No Pain — jets FNP non journalisés",
+      "label": "Feel No Pain — câblé + journalisé (passe 3)",
       "applicability": {
         "kind": "unit_rule_in_roster",
         "rule_id": "feel_no_pain"
       },
       "controls": [],
-      "status": "PARTIEL",
-      "status_note": "Les jets FNP ne sont pas journalisés dans step.log : aucune donnée disponible pour exercer ou contrôler la règle."
+      "status": "IMPLÉMENTÉ",
+      "status_note": "Passe 3/6 : FNP générique (Dok's Toolz 5+), FNP vs PSYCHIC (Psychic Hood 4+), FNP near objective (Unbreakable Resolve 4+) câblés dans shared_utils._collect_fnp_thresholds / _collect_fnp_thresholds_mortal. Jets journalisés dans step.log (fnpSaves, fnpThreshold, fnp_saves_mortal)."
+    },
+    {
+      "id": "PROJ.1.9.feel_no_pain_vs_psychic",
+      "section": "1.9",
+      "label": "Feel No Pain vs PSYCHIC (Psychic Hood 4+)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "feel_no_pain_vs_psychic"
+      },
+      "controls": [],
+      "status": "IMPLÉMENTÉ",
+      "status_note": "Passe 3/6 : activé seulement si l'arme ou la source porte le mot-clé PSYCHIC (weapon_has_rule). Porté par Librarian. Hookable pour les blessures mortelles de Da Jump (is_psychic=True) en passe D."
+    },
+    {
+      "id": "PROJ.1.9.feel_no_pain_near_objective",
+      "section": "1.9",
+      "label": "Feel No Pain near objective (Unbreakable Resolve 4+)",
+      "applicability": {
+        "kind": "unit_rule_in_roster",
+        "rule_id": "feel_no_pain_near_objective"
+      },
+      "controls": [],
+      "status": "IMPLÉMENTÉ",
+      "status_note": "Passe 3/6 : activé si l'unité est à ≤3\" d'un objectif (_fight_v11_objectives_within_range) OU à ≤6\" du centre (inches_to_subhex). Porté par Ancient."
     },
     {
       "id": "01.01",
@@ -3650,9 +3674,37 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOG_MANQUANT",
+      "status": "IMPLÉMENTÉ",
       "co_verified_by": [
         "PROJ.1.9.feel_no_pain"
+      ]
+    },
+    {
+      "id": "unit.feel_no_pain_vs_psychic",
+      "source": "config/unit_rules.json",
+      "label": "feel_no_pain_vs_psychic",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "IMPLÉMENTÉ",
+      "co_verified_by": [
+        "PROJ.1.9.feel_no_pain_vs_psychic"
+      ]
+    },
+    {
+      "id": "unit.feel_no_pain_near_objective",
+      "source": "config/unit_rules.json",
+      "label": "feel_no_pain_near_objective",
+      "section": "unit",
+      "applicability": {
+        "kind": "indecidable"
+      },
+      "controls": [],
+      "status": "IMPLÉMENTÉ",
+      "co_verified_by": [
+        "PROJ.1.9.feel_no_pain_near_objective"
       ]
     },
     {

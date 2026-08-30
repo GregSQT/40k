@@ -81,9 +81,9 @@ def _game_state(target_unit_rules, *, dmg=1, hp=3, sv=2):
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
         "units_cache": {
             "1": {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": 0, "row": 0,
-                  "VALUE": 10.0, "player": 0},
+                  "VALUE": 10.0, "player": 0, "HP_CUR": hp},
             "2": {"BASE_SHAPE": "round", "BASE_SIZE": 1, "col": 9, "row": 9,
-                  "VALUE": 10.0, "player": 1},
+                  "VALUE": 10.0, "player": 1, "HP_CUR": hp},
         },
         "units": [attacker_unit, target_unit],
         "unit_by_id": {"1": attacker_unit, "2": target_unit},
@@ -270,7 +270,7 @@ def test_fnp_sauve_blessure_mortelle(monkeypatch):
 
     assert applied == 0, "MW sauvée par FNP : rien d appliqué"
     assert gs["models_cache"]["T1"]["HP_CUR"] == 1, "figurine intacte"
-    assert details == [], "aucun record (MW sauvée avant consommation)"
+    assert len(details) == 1 and details[0].get("fnpSaved") is True, "record fnpSaved=True attendu"
 
 
 def test_fnp_echoue_applique_blessure_mortelle(monkeypatch):

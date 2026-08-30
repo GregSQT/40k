@@ -77,7 +77,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | # | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|---|
 | 8 | training+bot | ✅ Self-play §0.59 absorbé par `--etape` (décision 2026-08-30) | [v11_chemin_critique.md#selfplay](v11_chemin_critique.md#selfplay) | ✅ |
-| 9 | moteur+training | **06** Armageddon abilities — 2/6 passes | [capacites.md#armageddon-06](capacites.md#armageddon-06) | 🚫 |
+| 9 | moteur+training | **06** Armageddon abilities — 3/6 passes (passe 3 : FNP conditionnel PainBoy/Librarian/Ancient, 2026-08-30) | [capacites.md#armageddon-06](capacites.md#armageddon-06) | 🚫 |
 
 ---
 

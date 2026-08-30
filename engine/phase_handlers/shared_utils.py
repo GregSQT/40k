@@ -2522,6 +2522,104 @@ def _get_feel_no_pain_threshold(unit: Dict[str, Any]) -> Optional[int]:
     return raw
 
 
+def _get_feel_no_pain_vs_psychic_threshold(unit: Dict[str, Any]) -> Optional[int]:
+    """Retourne le seuil FNP vs attaques PSYCHIC (Psychic Hood), ou None (24.12).
+
+    Leve si la règle est présente mais mal configurée — pas de repli silencieux.
+    """
+    raw = _get_unit_rule_arg(unit, "feel_no_pain_vs_psychic", "threshold", (int,))
+    if raw is None:
+        return None
+    if not 2 <= raw <= 6:
+        raise ValueError(
+            f"FNP vs psychic threshold must be 2-6, got {raw} "
+            f"for unit {require_key(unit, 'id')}"
+        )
+    return raw
+
+
+def _get_feel_no_pain_near_objective_threshold(unit: Dict[str, Any]) -> Optional[int]:
+    """Retourne le seuil FNP near objective (Unbreakable Resolve), ou None (24.12).
+
+    Leve si la règle est présente mais mal configurée — pas de repli silencieux.
+    """
+    raw = _get_unit_rule_arg(unit, "feel_no_pain_near_objective", "threshold", (int,))
+    if raw is None:
+        return None
+    if not 2 <= raw <= 6:
+        raise ValueError(
+            f"FNP near objective threshold must be 2-6, got {raw} "
+            f"for unit {require_key(unit, 'id')}"
+        )
+    return raw
+
+
+def _unit_is_near_objective_or_center(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """True si l'unité est à portée d'un objectif (3") ou à 6" du centre (Unbreakable Resolve).
+
+    Condition positionnelle de feel_no_pain_near_objective (24.12).
+    """
+    # Lazy import pour eviter le cycle shared_utils ← fight_handlers ← shared_utils.
+    from engine.phase_handlers.fight_handlers import _fight_v11_objectives_within_range  # noqa: PLC0415
+    if _fight_v11_objectives_within_range(game_state, unit, 3):
+        return True
+    ish = int(require_key(game_state, "inches_to_subhex"))
+    center_range = 6 * ish
+    board_cols = int(require_key(game_state, "board_cols"))
+    board_rows = int(require_key(game_state, "board_rows"))
+    center_col = board_cols // 2
+    center_row = board_rows // 2
+    units_cache = require_key(game_state, "units_cache")
+    uid = str(require_key(unit, "id"))
+    entry = units_cache.get(uid)
+    if entry is None or not entry_is_on_battlefield(entry):
+        return False
+    from engine.hex_utils import min_distance_between_sets  # noqa: PLC0415
+    ufp = entry_footprint(entry)
+    return min_distance_between_sets(ufp, {(center_col, center_row)}, max_distance=center_range) <= center_range
+
+
+def _collect_fnp_thresholds(
+    unit: Dict[str, Any], game_state: Dict[str, Any], weapon: Dict[str, Any]
+) -> List[int]:
+    """Seuils FNP applicables à une blessure normale (tir/mêlée), dans l'ordre de tentative.
+
+    Générique d'abord, puis conditionnel PSYCHIC si l'arme porte le mot-clé, puis conditionnel
+    near_objective si l'unité est à portée d'un objectif ou du centre (24.12).
+    """
+    thresholds: List[int] = []
+    th = _get_feel_no_pain_threshold(unit)
+    if th is not None:
+        thresholds.append(th)
+    th_psy = _get_feel_no_pain_vs_psychic_threshold(unit)
+    if th_psy is not None and weapon_has_rule(weapon, "PSYCHIC"):
+        thresholds.append(th_psy)
+    th_obj = _get_feel_no_pain_near_objective_threshold(unit)
+    if th_obj is not None and _unit_is_near_objective_or_center(game_state, unit):
+        thresholds.append(th_obj)
+    return thresholds
+
+
+def _collect_fnp_thresholds_mortal(
+    unit: Dict[str, Any], game_state: Dict[str, Any], *, is_psychic: bool = False
+) -> List[int]:
+    """Seuils FNP applicables à une blessure mortelle, dans l'ordre de tentative.
+
+    is_psychic=True si la source est une attaque ou capacité PSYCHIC (ex. Da Jump).
+    """
+    thresholds: List[int] = []
+    th = _get_feel_no_pain_threshold(unit)
+    if th is not None:
+        thresholds.append(th)
+    th_psy = _get_feel_no_pain_vs_psychic_threshold(unit)
+    if th_psy is not None and is_psychic:
+        thresholds.append(th_psy)
+    th_obj = _get_feel_no_pain_near_objective_threshold(unit)
+    if th_obj is not None and _unit_is_near_objective_or_center(game_state, unit):
+        thresholds.append(th_obj)
+    return thresholds
+
+
 def _roll_feel_no_pain(n_wounds: int, threshold: int) -> int:
     """Retourne les blessures subies après jets Feel No Pain X+ (24.12).
 
@@ -2531,6 +2629,21 @@ def _roll_feel_no_pain(n_wounds: int, threshold: int) -> int:
     remaining = 0
     for _ in range(n_wounds):
         if random.randint(1, 6) < threshold:
+            remaining += 1
+    return remaining
+
+
+def _roll_fnp_sequential(n_wounds: int, thresholds: List[int]) -> int:
+    """Retourne les blessures non sauvées après jets FNP séquentiels (24.12).
+
+    Pour chaque blessure, on tente chaque seuil en ordre : dès qu'un jet >= seuil, la
+    blessure est ignorée. Utilisé quand plusieurs FNP (génériques ou conditionnels) s'appliquent.
+    """
+    import random
+    remaining = 0
+    for _ in range(n_wounds):
+        saved = any(random.randint(1, 6) >= th for th in thresholds)
+        if not saved:
             remaining += 1
     return remaining
 
@@ -5548,6 +5661,8 @@ def select_eligible_models(game_state: Dict[str, Any], squad_id: str) -> List[st
 def allocate_mortal_wounds(
     game_state: Dict[str, Any], squad_id: str, n_wounds: int, auto_resolve: bool,
     details_sink: List[Dict[str, Any]],
+    *,
+    is_psychic: bool = False,
 ) -> int:
     """Attribue ``n_wounds`` mortal wounds à une unité (séquence 06.02), une par une, en
     mode AUTO uniquement (IA / gym). Le défenseur humain passe par
@@ -5557,13 +5672,16 @@ def allocate_mortal_wounds(
       également éligibles.
     - ``auto_resolve=False`` : non supporté ici → erreur explicite (root cause : appeler
       ``build_manual_hazard_allocation``).
+    - ``is_psychic`` : True si les MW proviennent d'une source PSYCHIC (ex. Da Jump),
+      ce qui active feel_no_pain_vs_psychic si l'unité cible en dispose.
 
     Chaque MW retire 1 HP à la figurine choisie ; la figurine n'est retirée du jeu
     (``destroy_model`` reason='hazard') qu'à ``HP_CUR == 0``. On s'arrête si l'unité
     est détruite avant d'avoir attribué toutes les MW (06.02 : « until … destroyed »).
 
-    ``details_sink`` reçoit 1 record ``{modelId, col, row, died}`` par MW appliquée
-    (col/row capturés AVANT destroy) — alimente ``hazardDetails`` du log, comme le tir.
+    ``details_sink`` reçoit 1 record ``{modelId, col, row, died}`` par MW traitée
+    (col/row capturés AVANT destroy, ``fnpSaved=True`` si sauvée par FNP) — alimente
+    ``hazardDetails`` du log, comme le tir.
 
     Retourne le nombre de mortal wounds réellement attribués.
     """
@@ -5581,10 +5699,15 @@ def allocate_mortal_wounds(
                 "(utiliser build_manual_hazard_allocation pour le défenseur humain)"
             )
         target = eligibles[0]
+        col = int(require_key(models_cache[target], "col"))
+        row = int(require_key(models_cache[target], "row"))
         # Feel No Pain (24.12) : jet D6 par blessure mortelle avant application.
+        # Inclut variantes conditionnelles (PSYCHIC, near_objective).
         _fnp_unit = require_unit_by_id(game_state, str(models_cache[target]["squad_id"]))
-        _fnp_th = _get_feel_no_pain_threshold(_fnp_unit)
-        if _fnp_th is not None and _roll_feel_no_pain(1, _fnp_th) == 0:
+        _fnp_ths = _collect_fnp_thresholds_mortal(_fnp_unit, game_state, is_psychic=is_psychic)
+        if _fnp_ths and _roll_fnp_sequential(1, _fnp_ths) == 0:
+            # L12 — FNP mortal wounds : journaliser la sauvegarde dans details_sink.
+            details_sink.append({"modelId": str(target), "col": col, "row": row, "died": False, "fnpSaved": True})
             remaining -= 1
             continue
         new_hp = int(models_cache[target]["HP_CUR"]) - 1
@@ -10655,15 +10778,16 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
     hp_before = int(m["HP_CUR"])
     dmg_dealt = min(int(dmg), hp_before)
     # Feel No Pain (24.12) : jet D6 par HP perdu ; sur threshold+, la blessure est ignorée.
+    # Inclut les variantes conditionnelles (PSYCHIC, near_objective) via _collect_fnp_thresholds.
     _def_squad_fnp = require_unit_by_id(game_state, str(batch["target_sid"]))
-    _fnp_th = _get_feel_no_pain_threshold(_def_squad_fnp)
-    if _fnp_th is not None:
+    _fnp_ths = _collect_fnp_thresholds(_def_squad_fnp, game_state, require_key(g, "weapon"))
+    if _fnp_ths:
         _fnp_attempts = dmg_dealt
-        dmg_dealt = _roll_feel_no_pain(dmg_dealt, _fnp_th)
+        dmg_dealt = _roll_fnp_sequential(dmg_dealt, _fnp_ths)
         # L12 — jets FNP dans step.log (24.12) : saves/seuil+/tentatives.
         rec["fnpSaves"] = _fnp_attempts - dmg_dealt
         rec["fnpAttempts"] = _fnp_attempts
-        rec["fnpThreshold"] = _fnp_th
+        rec["fnpThreshold"] = _fnp_ths[0]
     if dmg_dealt <= 0:
         rec["damageDealt"] = 0
         rec["targetDied"] = False
@@ -11324,9 +11448,13 @@ def _resolve_one_hazard_wound(
     col = int(require_key(m, "col"))
     row = int(require_key(m, "row"))
     # Feel No Pain (24.12) : MW = blessure sans sauvegarde, mais FNP reste applicable.
+    # Inclut feel_no_pain_near_objective ; PSYCHIC non pertinent (blessures auto-infligées
+    # par [HAZARDOUS] — pas des attaques ennemies).
     _fnp_unit = require_unit_by_id(game_state, str(require_key(m, "squad_id")))
-    _fnp_th = _get_feel_no_pain_threshold(_fnp_unit)
-    if _fnp_th is not None and _roll_feel_no_pain(1, _fnp_th) == 0:
+    _fnp_ths = _collect_fnp_thresholds_mortal(_fnp_unit, game_state, is_psychic=False)
+    if _fnp_ths and _roll_fnp_sequential(1, _fnp_ths) == 0:
+        # L12 — FNP mortal wounds : journaliser la sauvegarde.
+        alloc["hazard_details"].append({"modelId": str(cur), "col": col, "row": row, "died": False, "fnpSaved": True})
         batch["pool_index"] += 1
         return
     hp_before = int(m["HP_CUR"])
