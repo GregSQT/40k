@@ -4670,7 +4670,8 @@ def _manual_roll_fight_intent(
     _waaagh_bonus = waaagh_melee_bonus(game_state, attacker_unit)
     strength += _waaagh_bonus
     n_attacks += _waaagh_bonus
-    wth = _calculate_wound_target(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
+    _base_wth = _calculate_wound_target(strength, _target_highest_bodyguard_toughness(game_state, target_sid))
+    wth = _base_wth
     # Oath of Moment : MEME helper que le tir (modelisation par abaissement du seuil, plancher
     # a 2, et une seule interrogation de `unit_is_oath_target_of` pour les deux effets).
     _is_oath_target, _oath_wound_bonus, wth = resolve_oath_effects(
@@ -4681,6 +4682,15 @@ def _manual_roll_fight_intent(
     # seuil de deux crans, chacune plafonnee par le meme plancher 2 (05.02). Melee SEULE : le
     # roller de tir n appelle pas ce helper.
     wth, _wound_bonus_ability = resolve_melee_wound_bonus(attacker_unit, wth)
+    # bonus_malus_cap : si actif, le total Oath+Litany est clampe avant application.
+    if _oath_wound_bonus or _wound_bonus_ability:
+        from engine.phase_handlers.shared_utils import _bonus_malus_cap
+        _cap_wound = _bonus_malus_cap(game_state)
+        if _cap_wound:
+            _litany_bonus = 1 if _wound_bonus_ability else 0
+            _total_wound_bonus = _oath_wound_bonus + _litany_bonus
+            if _total_wound_bonus > _cap_wound:
+                wth = max(2, _base_wth - _cap_wound)
     # Primitive A cote TOUCHE : +1 de Might Is Right (melee) et -1 de suppression (toutes
     # phases). MEME helper que le tir — c est le seul moyen que le clamp 2..6 et l ordre des
     # deux effets ne divergent pas entre les deux rollers.

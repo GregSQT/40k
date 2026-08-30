@@ -123,16 +123,12 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | training | ✅ `ramp_end_episodes` — découple durée run et vitesse d'introduction self-play ; plateau `ratio_end` atteint à l'épisode déclaré indépendamment de `total_episodes` (2026-08-30) | [training.md#curriculum](training.md#curriculum) | ⚡ |
 | moteur+infra | ✅ fix §04.02 pool stale — clé cache `_move_ver` (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
 | infra | ✅ fix comment-cache-revalidation (2026-08-30) | [infra.md](infra.md) | ⚡ |
-| front | ✅ terrain preview inline + popup test-start (popup-*, preview-*, terrain-*) — 9 merges UI (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
-| infra | ✅ simplify-cache-hit-cleanup (2026-08-30) | [infra.md](infra.md) | ⚡ |
-| front | ✅ player-names-display — username Player 1/2 via player_names dans game_state + popup PvP (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
-| training | ✅ ajuster-bot-ratios-training — ratios bots ajustés dans la config d'entraînement (2026-08-30) | [training.md](training.md) | ⚡ |
-| training | ✅ curriculum-review-fixes — 6 findings /code-review curriculum fermés (2026-08-30) | [training.md#curriculum](training.md#curriculum) | ⚡ |
-| front | ✅ gameprep-save-default — case "Garder configuration par défaut" popup Game preparation (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
-| front | ✅ preview-size-315 — taille preview ajustée à 315 (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
-| front | ✅ terrain-btn-nowrap — bouton terrain sans retour à la ligne (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
-| training | ✅ simplify-curriculum — reuse helpers data_validation, déduplique protocole exploiteur, clamp mort retiré (2026-08-30) | [training.md#curriculum](training.md#curriculum) | ⚡ |
+| front+infra | ✅ lot UI/infra 2026-08-30 — terrain preview inline, popup test-start (9 merges), player-names-display, gameprep-save-default, preview-size-315, terrain-btn-nowrap, simplify-cache-hit-cleanup | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
+| training | ✅ lot training 2026-08-30 — ajuster-bot-ratios, curriculum-review-fixes (6 findings), simplify-curriculum (data_validation, déduplique exploiteur) | [training.md#curriculum](training.md#curriculum) | ⚡ |
 | analyzer | ✅ fix-analyzer-findings — T1 pl_int, garde morte fight_over, PHASE_ORDER partagé (7 occurrences × 4 fichiers), doublon import charge_handler (2026-08-30) | [analyzer.md](analyzer.md) | ⚡ |
+| moteur | ✅ fix-check-ai-rules-fallbacks — 3 fallbacks anti-erreur analyzer corrigés (2026-08-30) | [analyzer.md](analyzer.md) | ⚡ |
+| moteur | ✅ simplify-died-before-phase — 4 boucles mortes dupliquées extraites (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
+| moteur | ✅ bonus-malus-cap — flag game_config clamp modificateurs touche/blessure, 89 tests verts (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
 
 ---
 
