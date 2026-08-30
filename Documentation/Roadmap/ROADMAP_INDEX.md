@@ -125,13 +125,12 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | training | ✅ lot training 2026-08-30 — ajuster-bot-ratios, curriculum-review-fixes (6 findings), simplify-curriculum (data_validation, déduplique exploiteur) | [training.md#curriculum](training.md#curriculum) | ⚡ |
 | analyzer | ✅ fix-analyzer-findings — T1 pl_int, garde morte fight_over, PHASE_ORDER partagé (7 occurrences × 4 fichiers), doublon import charge_handler (2026-08-30) | [analyzer.md](analyzer.md) | ⚡ |
 | moteur | ✅ fix-check-ai-rules-fallbacks — 3 fallbacks anti-erreur analyzer corrigés (2026-08-30) | [analyzer.md](analyzer.md) | ⚡ |
-| ai | ✅ fix-was-lowest-hp-dead-filter — filtrer cibles mortes dans `_was_lowest_hp_target` (2026-08-30) | [bot.md](bot.md) | ⚡ |
-| ai | ✅ expected-damage-cap-cleanup — `resolve_hit_roll_modifiers` remplace pipeline hit_roll_modifier_terms+apply+_bonus_malus_cap (2026-08-30) | [bot.md](bot.md) | ⚡ |
-| ai | ✅ simplify reward_mapper + expected_damage — `require_key` remplace guards inline, `_waaagh_game_state` spread BASE (2026-08-30) | [bot.md](bot.md) | ⚡ |
+| ai | ✅ lot ai 2026-08-30 — fix-was-lowest-hp-dead-filter, expected-damage-cap-cleanup, simplify reward_mapper + expected_damage (require_key + waaagh BASE) | [bot.md](bot.md) | ⚡ |
 | moteur+training | ✅ lot moteur 2026-08-30 — bonus-malus-cap (89 tests), expected-damage-unit-modifiers (Primitive A + Waaagh), simplify-died-before-phase (4 boucles), terrain-selector-purge-foe | [moteur.md](moteur.md) | ⚡ |
 | ai | ✅ shoot-priority-3 — implémentation bloc P3 reward_mapper (killable+highest threat+lowest HP) (2026-08-30) | [bot.md](bot.md) | ⚡ |
 | config | ✅ purge-train-terrains — purger terrains hors mission des configs scénario entraînement (2026-08-30) | [training.md](training.md) | ⚡ |
 | ai+moteur | ✅ fix-kill-lowest-hp-production — câbler `target_lowest_hp` dans `squad_fight` via `hp_before` dans `targets_meta` ; corriger `_fight_lowest_hp_wipe_bonus` T1 + multi-wipe + dead-unit (2026-08-30) | [bot.md](bot.md) | ⚡ |
+| moteur | ✅ simplify-fight-lowest-hp-wipe-bonus — `enemy_entries_on_battlefield` + `require_key(HP_CUR)` remplace filtre inline + `.get()` silencieux (2026-08-30) | [bot.md](bot.md) | ⚡ |
 
 ---
 
