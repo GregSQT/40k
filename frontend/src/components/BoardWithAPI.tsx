@@ -714,6 +714,10 @@ export const BoardWithAPI: React.FC = () => {
   });
   const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp" || gameMode === "pve";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
+  const [selectedTerrain, setSelectedTerrain] = useState<"mc1" | "mc2">(() => {
+    const t = new URLSearchParams(window.location.search).get("terrain");
+    return t === "mc1" ? "mc1" : "mc2";
+  });
 
   const endlessDutyProfileOptions = useMemo(
     () => ({
@@ -4588,6 +4592,49 @@ export const BoardWithAPI: React.FC = () => {
             !testDeploymentStarted && (
               <div className="test-start-overlay">
                 <div className="test-start-modal">
+                  <div className="test-start-modal__section">
+                    <span className="test-start-modal__label">Select your roster :</span>
+                    <div className="test-start-modal__roster-row">
+                      <span className="test-start-modal__player-label">Player 1 :</span>
+                      <button
+                        type="button"
+                        className="deployment-panel__change-roster deployment-panel__change-roster--player1"
+                        onClick={() => openRosterPicker(1)}
+                      >
+                        Change Roster
+                      </button>
+                    </div>
+                    <div className="test-start-modal__roster-row">
+                      <span className="test-start-modal__player-label">Player 2 :</span>
+                      <button
+                        type="button"
+                        className="deployment-panel__change-roster deployment-panel__change-roster--player2"
+                        onClick={() => openRosterPicker(2)}
+                      >
+                        Change Roster
+                      </button>
+                    </div>
+                  </div>
+                  <div className="test-start-modal__section">
+                    <label className="test-start-modal__label" htmlFor="terrain-select">
+                      Select your terrain :
+                    </label>
+                    <select
+                      id="terrain-select"
+                      className="test-start-modal__terrain-select"
+                      value={selectedTerrain}
+                      onChange={(e) => {
+                        const next = e.target.value as "mc1" | "mc2";
+                        setSelectedTerrain(next);
+                        const url = new URL(window.location.href);
+                        url.searchParams.set("terrain", next);
+                        window.location.href = url.toString();
+                      }}
+                    >
+                      <option value="mc1">Terrain 1</option>
+                      <option value="mc2">Terrain 2</option>
+                    </select>
+                  </div>
                   <button
                     type="button"
                     className="test-start-bar__button"

@@ -298,8 +298,12 @@ export const useGameConfig = (options?: {
         const isTestMode = mode === "pvp_test" || mode === "pve_test";
         const DEFAULT_TEST_BOARD = "x5_44x60";
         const boardParam = isTestMode ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD) : null;
+        const terrainParam = isTestMode ? (urlParams.get("terrain") ?? "mc2") : "mc2";
+        const terrainSuffix = terrainParam === "mc1" ? "_mc1" : "";
         const scenarioName =
-          mode === "pve_test" ? "scenario_pve_test.json" : "scenario_pvp_test.json";
+          mode === "pve_test"
+            ? `scenario_pve_test${terrainSuffix}.json`
+            : `scenario_pvp_test${terrainSuffix}.json`;
         // Dossier qui PORTE les scénarios de test : il ne suit pas la résolution jouée. `x1` et
         // `x5_44x60` sont le même plateau 44×60 à deux résolutions, et le moteur convertit les
         // coordonnées (cf. Documentation/Reference/moteur/geometrie_et_distances.md). Les entrées

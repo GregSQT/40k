@@ -3178,10 +3178,14 @@ def start_game():
         raise ValueError(f"scenario_file must be string or null (got {type(data['scenario_file']).__name__})")
     if "board_path" in data and data["board_path"] is not None and data["board_path"] not in BOARD_PATH_MAP:
         raise ValueError(f"board_path must be one of {sorted(BOARD_PATH_MAP)} (got {data['board_path']!r})")
+    _VALID_TERRAIN_REFS = {"mc1", "mc2"}
+    if "terrain_ref" in data and data["terrain_ref"] is not None and data["terrain_ref"] not in _VALID_TERRAIN_REFS:
+        raise ValueError(f"terrain_ref must be one of {sorted(_VALID_TERRAIN_REFS)} (got {data['terrain_ref']!r})")
     pve_mode = data.get('pve_mode', False)
     mode_code = data.get('mode_code', None)
     scenario_file = data.get('scenario_file', None)
     board_path = data.get('board_path', None)
+    terrain_ref = data.get('terrain_ref', 'mc2')
 
     requested_mode = "pvp"
     if mode_code is not None:
@@ -3222,7 +3226,8 @@ def start_game():
                         f"config.json defaults.test_board = {board_path!r} : attendu l'un de "
                         f"{sorted(BOARD_PATH_MAP)}"
                     )
-            scenario_file = os.path.join("config", TEST_SCENARIO_BOARD_MAP[board_path], "scenario", "scenario_pvp_test.json")
+            _terrain_suffix = "_mc1" if terrain_ref == "mc1" else ""
+            scenario_file = os.path.join("config", TEST_SCENARIO_BOARD_MAP[board_path], "scenario", f"scenario_pvp_test{_terrain_suffix}.json")
             _prev_board = os.environ.get("W40K_BOARD_PATH")
             os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
             try:
@@ -3255,7 +3260,8 @@ def start_game():
                         f"config.json defaults.test_board = {board_path!r} : attendu l'un de "
                         f"{sorted(BOARD_PATH_MAP)}"
                     )
-            scenario_file = os.path.join("config", TEST_SCENARIO_BOARD_MAP[board_path], "scenario", "scenario_pve_test.json")
+            _terrain_suffix = "_mc1" if terrain_ref == "mc1" else ""
+            scenario_file = os.path.join("config", TEST_SCENARIO_BOARD_MAP[board_path], "scenario", f"scenario_pve_test{_terrain_suffix}.json")
             _prev_board = os.environ.get("W40K_BOARD_PATH")
             os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
             try:
