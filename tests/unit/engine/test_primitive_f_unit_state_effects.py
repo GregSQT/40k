@@ -192,13 +192,32 @@ def test_invul_save_override_cumule_waaagh() -> None:
     assert effective_invul_save(gs, unit, 7) == 4
 
 
-def test_invul_save_override_mental_fortress_librarian() -> None:
-    """Mental Fortress (Librarian) : InSv 4+ conférée à l'unité, base 7+ (aucune InSv)."""
-    from engine.game_state import effective_invul_save
+def test_invul_save_override_mental_fortress_librarian_19_04() -> None:
+    """Mental Fortress : la règle du Librarian se propage au bodyguard via le fold 19.04.
 
-    unit = _unit("lib", 1, unit_rules=[_rule("invul_save_override", {"value": 4})])
-    gs = _base_state([unit])
-    assert effective_invul_save(gs, unit, 7) == 4
+    Scénario : bodyguard sans invul_save_override propre ; Librarian attaché en porte une (4+).
+    Vérifie compute_unit_rules_in_effect plutôt qu'un standalone déjà couvert ligne 152.
+    """
+    from engine.phase_handlers.shared_utils import compute_unit_rules_in_effect
+
+    own_rules: list = []
+    lib_rule = _rule("invul_save_override", {"value": 4})
+    attached_groups = {"lib": [lib_rule]}
+
+    # Librarian vivant → règle présente dans l'union
+    merged = compute_unit_rules_in_effect(
+        own_rules, attached_groups, native_alive=True, alive_attached_sources={"lib"}
+    )
+    rule_ids = [r["ruleId"] for r in merged]
+    assert "invul_save_override" in rule_ids
+    override = next(r for r in merged if r["ruleId"] == "invul_save_override")
+    assert override["rule_args"]["value"] == 4
+
+    # Librarian mort → règle absente (19.04 : éteinte à la mort du porteur)
+    merged_dead = compute_unit_rules_in_effect(
+        own_rules, attached_groups, native_alive=True, alive_attached_sources=set()
+    )
+    assert all(r["ruleId"] != "invul_save_override" for r in merged_dead)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
