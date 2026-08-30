@@ -47,22 +47,6 @@
       ]
     },
     {
-      "id": "centre_w",
-      "name": "Centre W",
-      "obscuring": false,
-      "shape": "polygon",
-      "vertices": [[33,128],[61,128],[61,163],[33,163]],
-      "objective": true
-    },
-    {
-      "id": "centre_e",
-      "name": "Centre E",
-      "obscuring": false,
-      "shape": "polygon",
-      "vertices": [[160,128],[188,128],[188,163],[160,163]],
-      "objective": true
-    },
-    {
       "id": "home_se",
       "name": "Home SE",
       "obscuring": true,
@@ -119,8 +103,8 @@
   "icons": [
     { "id": 1, "name": "HomeRed", "path": "frontend/public/icons/Terrain/HomeRed.png", "center": [53, 60], "size": 80, "alpha": 0.7 },
     { "id": 2, "name": "HomeBlue", "path": "frontend/public/icons/Terrain/HomeBlue.png", "center": [166, 240], "size": 80, "alpha": 0.7 },
-    { "id": 3, "name": "SkullRound", "path": "frontend/public/icons/Terrain/SkullRound.png", "center": [47, 145], "size": 80, "alpha": 0.7 },
-    { "id": 4, "name": "SkullRound", "path": "frontend/public/icons/Terrain/SkullRound.png", "center": [174, 145], "size": 80, "alpha": 0.7 },
+    { "id": 3, "name": "SkullRound", "path": "frontend/public/icons/Terrain/SkullRound.png", "center": [33, 128], "size": 80, "alpha": 0.7 },
+    { "id": 4, "name": "SkullRound", "path": "frontend/public/icons/Terrain/SkullRound.png", "center": [187, 172], "size": 80, "alpha": 0.7 },
     { "id": 5, "name": "SkullSquare1", "path": "frontend/public/icons/Terrain/SkullSquare.png", "center": [171, 56], "size": 80, "alpha": 0.7 },
     { "id": 6, "name": "SkullSquare2", "path": "frontend/public/icons/Terrain/SkullSquare.png", "center": [49, 243], "size": 80, "alpha": 0.7 }
   ],

@@ -490,6 +490,11 @@ Une seule étape non faite = l'option reste ⛔.
 
 | Date | Contexte | Métrique | Valeur |
 |---|---|---|---|
+| 2026-08-30 | **Re-profilage post-Phase 3** — `bench_env_step.py --steps 600`, machine au repos, **3 répétitions** | wall · médiane · P95 · P99 | **57,1 / 57,8 / 57,3 s · 24,61 / 24,67 / 23,37 ms · 503 / 487 / 502 ms · 982 / 983 / 1014 ms** — médiane **24,6 ms** (médiane des médianes), P99 médiane **983 ms**. Stabilité nettement meilleure qu'en Phase 1 (46,6–68,9 s de wall). Gain vs Phase 1 post (machine au repos) : médiane −16 %, P99 −7 %. |
+| 2026-08-30 | **Nouveau profil cProfile 300 steps** (overhead ×2,6 — % seuls font foi) | répartition cumtime dans `monitor.step` (~61 s / 65,7 s totaux) | **Disparu** : `build_squad_observation` absent du top 25 (était 31,9 %) ✅. **Nouveau #1** : `charge_build_valid_plan` — 130 appels, 16,2 s, **26,5 %** du step, **125 ms/appel**. `get_squad_action_mask_and_eligible_units` : 895 appels, 36,4 s, **59,5 %** (inclut bots). `_run_bot_until_not_bot_turn` : 30 séquences, 26,3 s, **43,1 %**. `build_squad_move_cell_map` (BFS) : 317 appels, 15,3 s, **25 %**. `geodesic_move_reach` : 1 735 appels, 12,9 s, **21 %**. `_los_line_segment_clear` : 285 024 appels, 12,4 s, **20 %** — nouveau visible. `entries_in_engagement_zone` : 427 613 appels, 11,8 s, **19 %** — cache miss rate **94,5 %** (404 144 / 427 613 appels non cachés → pair-cache Phase 1.8 quasi-inefficace). `_hex_legal_for_charge` : 84 626 appels, 11,0 s, 18 %. `erode_move_pool_by_squad_block` : 209 appels, 10,8 s, 18 %. |
+
+| Date | Contexte | Métrique | Valeur |
+|---|---|---|---|
 | 2026-08-18 | `x1_long --new` 50k ép. (pré-P3-8/P4) | durée totale | 5 h 54 |
 | 2026-08-26 | `n_steps` 8192→8160 (commit `7c466b15`) sur 6 profils x1/x1_long/x1_debug/x5_* | steps/env avant → après · structure minibatch | 341 → 340 vec-steps/env · 9ᵉ minibatch de 24 supprimé → **8 × 1020 pile, zéro résidu** · les parts du profil §1 restent valides (−0,4 % de volume) |
 | 2026-08-26 | run P1 vivant (pré-rampe self-play, 0 éval) | `time/fps` global · débit épisodes | ~200 steps/s · ~96 ép./min |

@@ -1,0 +1,64 @@
+{
+  "description": "config/agents/CoreAgent/CoreAgent_rewards_config.json",
+  "ArmageddonAgent_x1": {
+    "Unit": "######################### CoreAgent ######################################################",
+    "Info": "######################### MINIMAL CONFIG - Only 5 reward signals per RL_TRAINING_ROADMAP.md ##############################",
+    "squad_shaping": {
+      "_comment": "PR4 squad pipeline reward shaping (squad.md §Reward function). Calibrate after first runs.",
+      "hp_damage_weight": 0.35,
+      "model_kill_bonus_factor": 0.1,
+      "squad_kill_bonus_factor": 0.15,
+      "incoherent_weight": 0.2
+    },
+    "base_actions": {
+      "ranged_attack": 0.3,
+      "melee_attack": 0.3,
+      "charge_success": 0.05,
+      "charge_fail": -0.01,
+      "wait": -0.1
+    },
+    "result_bonuses": {
+      "damage_target": 0.2,
+      "kill_target": 2.0,
+      "target_lowest_hp": 0.3
+    },
+    "target_type_bonuses": {},
+    "situational_modifiers": {
+      "win": 150,
+      "lose": -150,
+      "draw": 0.0
+    },
+    "objective_rewards": {
+      "objective_reward_factor": 6.0,
+      "reward_per_objective_turn5": 0.0,
+      "on_objective_bonus": 5.0
+    },
+    "system_penalties": {
+      "forbidden_action": -1.0,
+      "invalid_action": -0.5,
+      "system_response": 0.0,
+      "generic_error": -0.1
+    },
+    "reserves_shaping": {
+      "enabled": true,
+      "declined_arrival_lost_penalty": -25.0,
+      "declined_arrival_lost_penalty_comment": "COUT PAR ESCOUADE detruite par 20.04 APRES avoir refuse au moins une arrivee possible. Facture uniquement ce qui est une DECISION : une escouade qui n'a jamais eu de destination legale (pool d'ingress vide) n'entre pas dans le compte, la punir reviendrait a punir un choix qui n'a pas existe. MESURE QUI MOTIVE LE TERME, run x1_long du 2026-08-11 : la part des reserves de l'agent detruites sans etre arrivees monte de 0 % a 14 % en fin d'entrainement, en hausse monotone, pendant qu'il en place de plus en plus (0,81 -> 1,33 par episode, a mesure que la part d'episodes en deploiement actif passe de 0,31 a 0,80). Rien dans le bareme ne s'y opposait. CALIBRAGE DE -25 : a comparer aux 150 de la victoire et aux 269 de la moyenne d'objectifs par episode, soit un sixieme du gain de victoire pour une escouade entiere perdue sans avoir combattu. Au taux de gaspillage mesure (0,19 escouade par episode), le cout attendu est de ~4,7 par episode sur un retour moyen de ~485 : assez pour etre appris, trop peu pour dominer le jeu d'objectifs. Le signe est VERIFIE au chargement (un montant positif leve) : il recompenserait la perte d'une unite hors table. `enabled` est lu par require_key, sans defaut."
+    },
+    "zone_intent_shaping": {
+      "enabled": false,
+      "enabled_comment": "false depuis le 2026-08-11 (true auparavant). MESURE qui a tranche, sur le run x1_long du meme jour : la part des declarations d'intent PAYEES par ce bloc valait 0.269 contre 0.355 pour la meme politique tirant son intent au hasard (combat/intent_shaping_aligned_ratio vs son _baseline), et l'agent est reste SOUS ce hasard dans 95 % des fenetres des 10 000 derniers episodes -- tout en conditionnant de mieux en mieux son intent sur l'etat du plateau (00_critical/o_intent_control_dependency 0.004 -> 0.104). Il a donc appris a lire le plateau puis a en tirer l'intention que ce bareme ne paie pas, et il gagne (96,9 % de combined) en encaissant la penalite tour apres tour : le terme est anti-correle au comportement gagnant, donc c'est du bruit dans le gradient. Les quatre montants ci-dessous sont CONSERVES, tout comme le code de settle_zone_intent_declaration et les courbes combat/intent_* : seule la prime est retiree, la mesure de ce que l'agent declare reste lisible. Passer ce drapeau a true suffit a tout rebrancher. La cle est lue par require_key (engine/reward_calculator.py) : l'omettre fait lever, elle ne retombe pas en silence sur un shaping actif.",
+      "defend_held_bonus": 1.0,
+      "invade_success_bonus": 1.5,
+      "invade_neutral_bonus": 0.5,
+      "invade_lost_penalty": -0.5
+    },
+    "shoot_priority_1": 0.0,
+    "shoot_priority_2": 0.0,
+    "shoot_priority_3": 0.0,
+    "charge_priority_1": 0.0,
+    "charge_priority_2": 0.0,
+    "charge_priority_3": 0.0,
+    "attack_priority_1": 0.0,
+    "attack_priority_2": 0.0
+  }
+}
