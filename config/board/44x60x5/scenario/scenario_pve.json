@@ -1,7 +1,7 @@
 {
-  "uses_codex_detachment": { "1": true, "2": true },
-  "army_faction": {"1": "ADEPTUS ASTARTES", "2": "TYRANIDS"},
-  "deployment_zone": "hammer",
+  "uses_codex_detachment": { "1": true, "2": false },
+  "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ORKS"},
+  "deployment_zone": "mc1",
   "deployment_type": "active",
   "wall_ref": "walls-mc1.json",
   "terrain_ref": "terrain-mc1.json",
@@ -10,151 +10,99 @@
   ],
   "units": [
     {
-      "id": 1,
-      "unit_type": "IntercessorSergeant",
-      "player": 1,
-      "col": 12,
-      "row": 2
+      "id": 1, "unit_type": "VanguardVeteranSquadJumpPack", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "VanguardVeteranSquadJumpPackSergeant" },
+        { "col": 0, "row": 0, "unit_type": "VanguardVeteranSquadJumpPackPlasma" },
+        { "col": 0, "row": 0, "unit_type": "ChaplainJumpPack" }
+      ]
     },
     {
-      "id": 2,
-      "unit_type": "IntercessorGrenadeLauncher",
-      "player": 1,
-      "col": 7,
-      "row": 6
+      "id": 2, "unit_type": "EradicatorHeavyBolter", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "EradicatorHeavyBolterSergeant" }
+      ]
+    },
+    { "id": 3, "unit_type": "LandSpeederOnslaughtGatlingCannon", "player": 1, "col": 0, "row": 0 },
+    {
+      "id": 4, "unit_type": "Intercessor", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "IntercessorGrenadeLauncher" },
+        { "col": 0, "row": 0, "unit_type": "IntercessorSergeant" },
+        { "col": 0, "row": 0, "unit_type": "Librarian" }
+      ]
     },
     {
-      "id": 3,
-      "unit_type": "Intercessor",
-      "player": 1,
-      "col": 3,
-      "row": 10
+      "id": 5, "unit_type": "Intercessor", "player": 1, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "IntercessorGrenadeLauncher" },
+        { "col": 0, "row": 0, "unit_type": "IntercessorSergeant" },
+        { "col": 0, "row": 0, "unit_type": "CaptainRelicShield" },
+        { "col": 0, "row": 0, "unit_type": "Ancient" }
+      ]
     },
     {
-      "id": 4,
-      "unit_type": "Intercessor",
-      "player": 1,
-      "col": 11,
-      "row": 6
+      "id": 6, "unit_type": "Boyz", "player": 2, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "BoyzNobKombi" },
+        { "col": 0, "row": 0, "unit_type": "Warboss" },
+        { "col": 0, "row": 0, "unit_type": "PainBoy" }
+      ]
     },
     {
-      "id": 5,
-      "unit_type": "Intercessor",
-      "player": 1,
-      "col": 17,
-      "row": 6
+      "id": 7, "unit_type": "Boyz", "player": 2, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0, "unit_type": "BoyzNobKombi" },
+        { "col": 0, "row": 0, "unit_type": "Bigboss" },
+        { "col": 0, "row": 0, "unit_type": "BannerNob" }
+      ]
     },
     {
-      "id": 6,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 18,
-      "row": 12
+      "id": 8, "unit_type": "Gretchin", "player": 2, "col": 0, "row": 0,
+      "models": [
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 },
+        { "col": 0, "row": 0 }
+      ]
     },
-    {
-      "id": 7,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 7,
-      "row": 14
-    },
-    {
-      "id": 8,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 14,
-      "row": 16
-    },
-    {
-      "id": 9,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 1,
-      "row": 13
-    },
-    {
-      "id": 10,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 10,
-      "row": 5
-    },
-    {
-      "id": 11,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 23,
-      "row": 6
-    },
-    {
-      "id": 12,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 6,
-      "row": 8
-    },
-    {
-      "id": 13,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 8,
-      "row": 6
-    },
-    {
-      "id": 14,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 15,
-      "row": 4
-    },
-    {
-      "id": 15,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 12,
-      "row": 2
-    },
-    {
-      "id": 16,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 7,
-      "row": 6
-    },
-    {
-      "id": 17,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 3,
-      "row": 6
-    },
-    {
-      "id": 18,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 3,
-      "row": 10
-    },
-    {
-      "id": 19,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 21,
-      "row": 8
-    },
-    {
-      "id": 20,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 8,
-      "row": 4
-    },
-    {
-      "id": 21,
-      "unit_type": "Hormagaunt",
-      "player": 2,
-      "col": 10,
-      "row": 5
-    }
+    { "id": 9, "unit_type": "WeirdBoy", "player": 2, "col": 0, "row": 0 },
+    { "id": 10, "unit_type": "WarTrakk", "player": 2, "col": 0, "row": 0 },
+    { "id": 11, "unit_type": "BigMekDakkarig", "player": 2, "col": 0, "row": 0 }
   ]
 }
