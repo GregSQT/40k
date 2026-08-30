@@ -557,6 +557,25 @@ export const BoardWithAPI: React.FC = () => {
   );
   // Répertoire de persistance : lecture seule, fixé par le serveur (W40K_PERSIST_DIR).
   const [snapshotPersistDir, setSnapshotPersistDir] = useState("logs");
+
+  // Popup nom joueur 2 (PvP uniquement)
+  const [showP2NamePopup, setShowP2NamePopup] = useState(
+    () => gameMode === "pvp" && localStorage.getItem("w40k_pvp_skip_name_popup") !== "true"
+  );
+  const [p2NameInput, setP2NameInput] = useState(
+    () => localStorage.getItem("w40k_pvp_p2_name") ?? "Player 2"
+  );
+  const [p2NameSkipPopup, setP2NameSkipPopup] = useState(false);
+
+  const handleP2NameConfirm = () => {
+    const name = p2NameInput.trim() || "Player 2";
+    localStorage.setItem("w40k_pvp_p2_name", name);
+    if (p2NameSkipPopup) {
+      localStorage.setItem("w40k_pvp_skip_name_popup", "true");
+    }
+    setShowP2NamePopup(false);
+    apiProps.updatePlayerNames(name).catch(() => {});
+  };
   const isAiMode = (() => {
     const playerTypes = apiProps.gameState?.player_types;
     if (!playerTypes) {
@@ -576,6 +595,10 @@ export const BoardWithAPI: React.FC = () => {
   const objectivesOverride = useNormalizedObjectives(
     apiProps.gameState?.objectives as RawObjective[] | undefined
   );
+
+  // Noms des joueurs issus du game state (défauts génériques si partie non encore démarrée)
+  const p1DisplayName = apiProps.gameState?.player_names?.["1"] ?? "Player 1";
+  const p2DisplayName = apiProps.gameState?.player_names?.["2"] ?? "Player 2";
 
   // Get board configuration for line of sight calculations
   const { gameConfig, boardConfig } = useGameConfig();
@@ -3759,8 +3782,12 @@ export const BoardWithAPI: React.FC = () => {
                   const p2 = getVictoryPointsForPlayer(2);
                   const winner = apiProps.gameState?.winner;
                   const winnerText =
-                    winner === 1 ? "Winner: Player 1" : winner === 2 ? "Winner: Player 2" : "Draw";
-                  return `Final score:\nP1: ${p1}\nP2: ${p2}\n${winnerText}`;
+                    winner === 1
+                      ? `Winner: ${p1DisplayName}`
+                      : winner === 2
+                        ? `Winner: ${p2DisplayName}`
+                        : "Draw";
+                  return `Final score:\n${p1DisplayName}: ${p1}\n${p2DisplayName}: ${p2}\n${winnerText}`;
                 })()}
               </div>
             </div>
@@ -3771,6 +3798,76 @@ export const BoardWithAPI: React.FC = () => {
                 onClick={() => setShowGameOverPopup(false)}
               >
                 OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showP2NamePopup && (
+        <div className="deployment-panel__picker-backdrop" style={{ zIndex: 9999 }}>
+          <div className="deployment-panel__picker" style={{ minWidth: "320px" }}>
+            <div className="deployment-panel__picker-title">Nom du joueur 2</div>
+            <div
+              className="deployment-panel__picker-content"
+              style={{ display: "block", padding: "16px" }}
+            >
+              <span
+                style={{
+                  display: "block",
+                  marginBottom: "8px",
+                  color: "var(--tooltip-text-color)",
+                }}
+              >
+                Entrez le nom du joueur 2 :
+              </span>
+              <input
+                id="p2-name-input"
+                type="text"
+                value={p2NameInput}
+                onChange={(e) => setP2NameInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleP2NameConfirm();
+                }}
+                maxLength={50}
+                style={{
+                  width: "100%",
+                  padding: "6px 10px",
+                  backgroundColor: "#111827",
+                  color: "var(--tooltip-text-color)",
+                  border: "1px solid #4b5563",
+                  borderRadius: "4px",
+                  fontSize: "14px",
+                  boxSizing: "border-box",
+                }}
+              />
+              <label
+                htmlFor="p2-name-skip"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  marginTop: "12px",
+                  cursor: "pointer",
+                  color: "var(--tooltip-text-color)",
+                  fontSize: "14px",
+                }}
+              >
+                <input
+                  id="p2-name-skip"
+                  type="checkbox"
+                  checked={p2NameSkipPopup}
+                  onChange={(e) => setP2NameSkipPopup(e.target.checked)}
+                />
+                Ne plus demander
+              </label>
+            </div>
+            <div className="deployment-panel__picker-actions">
+              <button
+                type="button"
+                className="deployment-panel__picker-close"
+                onClick={handleP2NameConfirm}
+              >
+                Démarrer
               </button>
             </div>
           </div>
@@ -4657,7 +4754,7 @@ export const BoardWithAPI: React.FC = () => {
                   <div className="test-start-modal__section">
                     <div className="test-start-modal__terrain-category">Select your roster :</div>
                     <div className="test-start-modal__roster-row">
-                      <span className="test-start-modal__player-label">Player 1 :</span>
+                      <span className="test-start-modal__player-label">{p1DisplayName} :</span>
                       <button
                         type="button"
                         className="deployment-panel__change-roster deployment-panel__change-roster--player1"
@@ -4667,7 +4764,7 @@ export const BoardWithAPI: React.FC = () => {
                       </button>
                     </div>
                     <div className="test-start-modal__roster-row">
-                      <span className="test-start-modal__player-label">Player 2 :</span>
+                      <span className="test-start-modal__player-label">{p2DisplayName} :</span>
                       <button
                         type="button"
                         className="deployment-panel__change-roster deployment-panel__change-roster--player2"
@@ -5682,6 +5779,21 @@ export const BoardWithAPI: React.FC = () => {
         autoSaveGranularity={settings.autoSaveGranularity}
         onSetAutoSaveGranularity={handleSetAutoSaveGranularity}
         onDeleteSaves={handleDeleteSaves}
+        player2Name={
+          gameMode === "pvp" ? (localStorage.getItem("w40k_pvp_p2_name") ?? "Player 2") : undefined
+        }
+        onSetPlayer2Name={
+          gameMode === "pvp"
+            ? (name: string) => {
+                const trimmed = name.trim() || "Player 2";
+                localStorage.setItem("w40k_pvp_p2_name", trimmed);
+                if (!name.trim()) {
+                  localStorage.removeItem("w40k_pvp_skip_name_popup");
+                }
+                apiProps.updatePlayerNames(trimmed).catch(() => {});
+              }
+            : undefined
+        }
       />
     </>
   );

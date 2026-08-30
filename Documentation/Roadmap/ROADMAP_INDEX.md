@@ -122,6 +122,9 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | training | ✅ `ramp_end_episodes` — découple durée run et vitesse d'introduction self-play ; plateau `ratio_end` atteint à l'épisode déclaré indépendamment de `total_episodes` (2026-08-30) | [training.md#curriculum](training.md#curriculum) | ⚡ |
 | moteur+infra | ✅ fix §04.02 pool stale — clé cache `_move_ver` (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
 | infra | ✅ fix comment-cache-revalidation (2026-08-30) | [infra.md](infra.md) | ⚡ |
+| front | ✅ terrain preview inline + popup test-start (popup-*, preview-*, terrain-*) — 9 merges UI (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
+| infra | ✅ simplify-cache-hit-cleanup (2026-08-30) | [infra.md](infra.md) | ⚡ |
+| front | ✅ player-names-display — username Player 1/2 via player_names dans game_state + popup PvP (2026-08-30) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
 
 ---
 

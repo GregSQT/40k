@@ -272,6 +272,7 @@ export interface APIGameState {
   active_fight_unit?: string;
   pve_mode?: boolean;
   player_types?: Record<string, "human" | "ai">;
+  player_names?: Record<string, string>;
   deployment_type?: "random" | "fixed" | "active";
   deployment_state?: {
     current_deployer: number;
@@ -1178,6 +1179,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           const terrainParam = new URLSearchParams(window.location.search).get("terrain") ?? "mc1";
           requestPayload.terrain_ref = terrainParam;
         }
+        if (!isPvEMode && !isPvETestMode && !isEndlessDutyMode) {
+          const savedP2Name = localStorage.getItem("w40k_pvp_p2_name");
+          if (savedP2Name) requestPayload.player2_name = savedP2Name;
+        }
 
         const response = await apiFetch(`${API_BASE}/game/start`, {
           method: "POST",
@@ -1318,46 +1323,70 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   }, [clearReservesLastRoundMemo]);
 
   /** POST /api/game/start pour une partie PvP locale (Continuer sans PvE). */
-  const startPvpGame = useCallback(async () => {
-    setLoading(true);
-    try {
-      const requestPayload = {
-        pve_mode: false,
-        mode_code: "pvp",
-        scenario_file: "config/scenario_pvp.json",
-      };
-      const response = await apiFetch(`${API_BASE}/game/start`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestPayload),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to start game: ${response.status}`);
+  const startPvpGame = useCallback(
+    async (player2Name?: string) => {
+      setLoading(true);
+      try {
+        const p2Name = player2Name ?? localStorage.getItem("w40k_pvp_p2_name") ?? undefined;
+        const requestPayload: Record<string, unknown> = {
+          pve_mode: false,
+          mode_code: "pvp",
+          scenario_file: "config/scenario_pvp.json",
+        };
+        if (p2Name) requestPayload.player2_name = p2Name;
+        const response = await apiFetch(`${API_BASE}/game/start`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(requestPayload),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to start game: ${response.status}`);
+        }
+        const data = await response.json();
+        if (!data.success || !data.game_state) {
+          throw new Error(data.error || "Failed to start game");
+        }
+        const expectedPlayer2Type: "human" | "ai" = "human";
+        const player2Type = data.game_state?.player_types?.["2"];
+        if (player2Type !== expectedPlayer2Type) {
+          throw new Error(
+            `Game mode mismatch: expected player 2 type '${expectedPlayer2Type}', got '${String(player2Type)}'`
+          );
+        }
+        setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
+        setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
+        // Partie NEUVE : les avertissements 20.04 de la partie précédente ne la concernent pas.
+        clearReservesLastRoundMemo();
+      } catch (err) {
+        setError(formatApiConnectionError(err));
+        throw err;
+      } finally {
+        setLoading(false);
       }
-      const data = await response.json();
-      if (!data.success || !data.game_state) {
-        throw new Error(data.error || "Failed to start game");
-      }
-      const expectedPlayer2Type: "human" | "ai" = "human";
-      const player2Type = data.game_state?.player_types?.["2"];
-      if (player2Type !== expectedPlayer2Type) {
-        throw new Error(
-          `Game mode mismatch: expected player 2 type '${expectedPlayer2Type}', got '${String(player2Type)}'`
-        );
-      }
-      setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
-      setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
-      // Partie NEUVE : les avertissements 20.04 de la partie précédente ne la concernent pas.
-      clearReservesLastRoundMemo();
-    } catch (err) {
-      setError(formatApiConnectionError(err));
-      throw err;
-    } finally {
-      setLoading(false);
+    },
+    [clearReservesLastRoundMemo]
+  );
+
+  /** POST /api/game/player-names — met à jour le nom du joueur 2 dans la partie en cours. */
+  const updatePlayerNames = useCallback(async (player2Name: string) => {
+    const response = await apiFetch(`${API_BASE}/game/player-names`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ player2_name: player2Name }),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to update player names: HTTP ${response.status}`);
     }
-  }, [clearReservesLastRoundMemo]);
+    const data = (await response.json()) as {
+      success: boolean;
+      player_names?: Record<string, string>;
+    };
+    if (data.success && data.player_names) {
+      setGameState((prev) => (prev ? { ...prev, player_names: data.player_names } : prev));
+    }
+  }, []);
 
   // Listen for weapon selection events to update gameState
   useEffect(() => {
@@ -8171,6 +8200,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       startGameWithScenario: async () => {},
       startPveGame: async () => {},
       startPvpGame: async () => {},
+      updatePlayerNames: async () => {},
       endlessDutyState: null,
       fetchEndlessDutyStatus: async () => null,
       commitEndlessDuty: async () => {},
@@ -9623,6 +9653,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     startGameWithScenario,
     startPveGame,
     startPvpGame,
+    updatePlayerNames,
     endlessDutyState,
     fetchEndlessDutyStatus,
     commitEndlessDuty,

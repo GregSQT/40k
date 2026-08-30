@@ -822,6 +822,10 @@ class W40KEngine(gym.Env):
             "1": "human",
             "2": "ai" if self.is_pve_mode else "human",
         }
+        player_names: Dict[str, str] = {
+            "1": "Player 1",
+            "2": "IA" if self.is_pve_mode else "Player 2",
+        }
 
         board_cols = self.config["board"]["default"]["cols"] if "default" in self.config["board"] else self.config["board"]["cols"]
         board_rows = self.config["board"]["default"]["rows"] if "default" in self.config["board"] else self.config["board"]["rows"]
@@ -856,6 +860,7 @@ class W40KEngine(gym.Env):
             "units": [],
             "current_player": 1,
             "player_types": player_types,
+            "player_names": player_names,
             "gym_training_mode": self.config["gym_training_mode"],  # Embed for handler access
             "debug_mode": self.config.get("debug_mode", False),  # Embed for handler access
             "training_config_name": training_config_name if training_config_name else "",  # NEW: For debug mode detection
@@ -1605,11 +1610,16 @@ class W40KEngine(gym.Env):
             "1": "human",
             "2": "ai" if self.is_pve_mode else "human",
         }
-        
+        reset_player_names: Dict[str, str] = {
+            "1": "Player 1",
+            "2": "IA" if self.is_pve_mode else "Player 2",
+        }
+
         # Reset game state
         self.game_state.update({
             "current_player": 1,
             "player_types": player_types,
+            "player_names": reset_player_names,
             "phase": "command",
             "turn": 1,
             "episode_steps": 0,

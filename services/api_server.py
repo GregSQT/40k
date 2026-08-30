@@ -1370,6 +1370,9 @@ def _attach_player_types(serializable_state: Dict[str, Any], engine_instance: _P
     engine_instance.game_state["current_mode_code"] = current_mode_code
     serializable_state["player_types"] = player_types
     serializable_state["current_mode_code"] = current_mode_code
+    player_names = engine_instance.game_state.get("player_names")
+    if player_names is not None:
+        serializable_state["player_names"] = player_names
 
 
 _auth_read_connection: Optional[sqlite3.Connection] = None
@@ -3181,6 +3184,8 @@ def start_game():
     _VALID_TERRAIN_REFS = {"mc1", "mc2"}
     if "terrain_ref" in data and data["terrain_ref"] is not None and data["terrain_ref"] not in _VALID_TERRAIN_REFS:
         raise ValueError(f"terrain_ref must be one of {sorted(_VALID_TERRAIN_REFS)} (got {data['terrain_ref']!r})")
+    if "player2_name" in data and data["player2_name"] is not None and not isinstance(data["player2_name"], str):
+        raise ValueError(f"player2_name must be string or null (got {type(data['player2_name']).__name__})")
     pve_mode = data.get('pve_mode', False)
     mode_code = data.get('mode_code', None)
     scenario_file = data.get('scenario_file', None)
@@ -3308,6 +3313,14 @@ def start_game():
         import traceback
         print(f"FULL TRACEBACK:\n{traceback.format_exc()}")
         raise
+
+    # Noms des joueurs : player 1 = login de la session ; player 2 = fourni par le client
+    # (modes PvP uniquement) ou "IA" (modes PvE). reset() a initialisé player_names avec les
+    # valeurs par défaut ; on les écrase ici avec les valeurs de la session HTTP.
+    _is_pve_requested = requested_mode in {"pve", "pve_test", ED_MODE_CODE}
+    _raw_p2 = (data.get("player2_name") or "").strip()[:50] if not _is_pve_requested else ""
+    _p2_name = _raw_p2 if _raw_p2 else ("IA" if _is_pve_requested else "Player 2")
+    engine.game_state["player_names"] = {"1": auth_user["login"], "2": _p2_name}
 
     if requested_mode == ED_MODE_CODE:
         project_root = Path(abs_parent)
@@ -4710,6 +4723,30 @@ def get_game_state():
             _SAVE_STORE.current_party(), None, include_pending_from=engine
         ),
     })
+
+@app.route('/api/game/player-names', methods=['POST'])
+@with_engine_state_lock
+def update_player_names():
+    """Met à jour le nom du joueur 2 dans la partie en cours."""
+    global engine
+    if not engine:
+        return jsonify({"success": False, "error": "No game in progress"}), 400
+    data = request.get_json() or {}
+    if "player2_name" not in data:
+        return jsonify({"success": False, "error": "player2_name is required"}), 400
+    if not isinstance(data["player2_name"], str):
+        raise ValueError(f"player2_name must be a string (got {type(data['player2_name']).__name__})")
+    player2_name = data["player2_name"].strip()[:50]
+    if not player2_name:
+        raise ValueError("player2_name must not be empty")
+    auth_user = g.auth_user
+    current_names: Dict[str, str] = dict(
+        engine.game_state.get("player_names") or {"1": auth_user["login"], "2": "Player 2"}
+    )
+    current_names["2"] = player2_name
+    engine.game_state["player_names"] = current_names
+    return jsonify({"success": True, "player_names": current_names})
+
 
 @app.route('/api/game/reset', methods=['POST'])
 @with_engine_state_lock
