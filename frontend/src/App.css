@@ -692,10 +692,21 @@ body {
   margin-top: 24px;
 }
 
+.test-start-modal__terrain-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
 .test-start-modal__terrain-options {
   display: flex;
+  flex-direction: column;
   gap: 10px;
-  justify-content: center;
+  justify-content: flex-start;
+}
+
+.test-start-modal__terrain-preview {
+  flex-shrink: 0;
 }
 
 .test-start-modal__terrain-option {
@@ -722,38 +733,10 @@ body {
   font-weight: 700;
 }
 
-/* preview panel — enfant absolu du modal, collé à droite, déplaçable */
-.test-start-modal__terrain-preview-panel {
-  position: absolute;
-  top: 0;
-  border: 2px solid #22c55e;
-  border-radius: 10px;
-  background: #06120a;
-  overflow: hidden;
-  user-select: none;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
-  white-space: nowrap;
-}
-
-.test-start-modal__preview-header {
-  padding: 8px 16px;
-  background: rgba(34, 197, 94, 0.15);
-  border-bottom: 1px solid #22c55e;
-  color: #86efac;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-align: center;
-  cursor: grab;
-}
-
-.test-start-modal__preview-header:active {
-  cursor: grabbing;
-}
-
 .test-start-modal__terrain-side-img {
   display: none;
-  width: 440px;
+  width: 280px;
+  border-radius: 6px;
 }
 
 /* show selected terrain by default */
