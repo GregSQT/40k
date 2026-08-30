@@ -1,9 +1,11 @@
-"""_continue_squad_fight_after_selection — invariant : cible tuée par Exhortation de Rage.
+"""Invariants : cible tuée par Exhortation de Rage + inconsistance units_cache/squad_models.
 
-Si Exhortation détruit la seule cible avant le combat (pool vide, target_slot fourni),
-la fonction doit retourner un combat à vide sans lever ValueError.
+1. _continue_squad_fight_after_selection : pool vide + target_slot fourni → combat à vide,
+   pas de ValueError.
+2. _manual_roll_fight_intent / _manual_roll_intent : target absent de units_cache → None,
+   pas de crash à _build_manual_allocation:11216 ou shared_utils:10120.
 
-Verrou ROUGE/VERT : test écrit AVANT le fix, rouge avec l'ancienne logique.
+Verrous ROUGE/VERT : tests écrits AVANT le fix, rouges avec l'ancienne logique.
 """
 
 import pytest
@@ -11,6 +13,8 @@ import engine.phase_handlers.fight_handlers as fh
 import engine.phase_handlers.shared_utils as su
 import engine.phase_handlers.generic_handlers as gh
 import engine.w40k_core as wcore
+from engine.phase_handlers.fight_handlers import _manual_roll_fight_intent
+from engine.phase_handlers.shared_utils import _manual_roll_intent
 
 
 # ---------------------------------------------------------------------------
@@ -74,3 +78,57 @@ def test_exhortation_kill_target_no_crash(monkeypatch):
     assert result.get("target_squad_id") is None, (
         "cible tuée → combat à vide, target_squad_id doit être None"
     )
+
+
+# ---------------------------------------------------------------------------
+# Invariant : target absent de units_cache → intent ignoré (pas de crash)
+# ---------------------------------------------------------------------------
+
+def test_manual_roll_fight_intent_returns_none_when_target_absent_from_units_cache():
+    """ROUGE sans le fix : crash à shared_utils:11216 (units_cache[target_sid] absent).
+
+    Inconsistance : squad_models['3'] non vide + models_cache vivant,
+    mais units_cache['3'] absent (purgé sans destroy_model complet).
+    Attendu : return None (cible considérée morte, intent ignoré).
+    """
+    gs = {
+        "models_cache": {
+            "atk#0": {"squad_id": "CHAP", "player": 1, "col": 0, "row": 0, "HP_CUR": 2},
+            "tgt#0": {"squad_id": "3",    "player": 2, "col": 1, "row": 0, "HP_CUR": 1},
+        },
+        "squad_models": {"CHAP": ["atk#0"], "3": ["tgt#0"]},
+        "units_cache": {"CHAP": {"player": 1}},  # "3" absent — inconsistance
+        "unit_by_id": {
+            "CHAP": {"id": "CHAP", "player": 1, "UNIT_RULES": []},
+            "3":    {"id": "3",    "player": 2, "UNIT_RULES": []},
+        },
+        "squad_cache": {"3": {"model_count_at_start": 1}},
+    }
+    intent = {"model_id": "atk#0", "target_unit_id": "3", "n_attacks_resolved": 1, "weapon_index": 0}
+    result = _manual_roll_fight_intent(gs, intent, {})
+    assert result is None, "cible absente de units_cache → intent ignoré, pas de crash"
+
+
+def test_manual_roll_intent_returns_none_when_target_absent_from_units_cache():
+    """Jumeau tir : ROUGE sans le fix → crash à shared_utils:10120 (units_cache[target_sid] absent)."""
+    gs = {
+        "models_cache": {
+            "atk#0": {"squad_id": "CHAP", "player": 1, "col": 0, "row": 0, "HP_CUR": 2,
+                      "RNG_WEAPONS": [{"ATK": 1, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
+                                       "WEAPON_RULES": [], "code": "gun", "display_name": "Gun"}]},
+        },
+        "squad_models": {"CHAP": ["atk#0"], "3": []},
+        "units_cache": {"CHAP": {"player": 1}},  # "3" absent — inconsistance
+        "unit_by_id": {
+            "CHAP": {"id": "CHAP", "player": 1, "UNIT_RULES": []},
+            "3":    {"id": "3",    "player": 2, "UNIT_RULES": []},
+        },
+        "squad_cache": {"3": {"model_count_at_start": 1}},
+        # faction ability state minimal
+        "oath_target": None, "waaagh_active": False, "waaagh_declared": False,
+        "finest_hour_active_this_phase": set(), "finest_hour_used": set(),
+        "suppression_active": False, "bonus_malus_cap": None,
+    }
+    intent = {"model_id": "atk#0", "target_unit_id": "3", "n_attacks_resolved": 1, "weapon_index": 0}
+    result = _manual_roll_intent(gs, intent, {})
+    assert result is None, "cible absente de units_cache → intent ignoré (jumeau tir)"

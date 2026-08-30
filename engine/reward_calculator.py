@@ -127,6 +127,7 @@ class RewardCalculator:
             result.get("waiting_for_weapon_select")
             or result.get("waiting_for_target_select")
             or result.get("waiting_for_next_weapon_sel")
+            or result.get("waiting_for_agent_decision")
         ):
             reward_breakdown['total'] = 0.0
             game_state['last_reward_breakdown'] = reward_breakdown
