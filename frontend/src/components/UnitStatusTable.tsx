@@ -1667,7 +1667,8 @@ export const UnitStatusTable = memo<UnitStatusTableProps>(
           "UnitStatusTable requires game_state.player_types for player header labels"
         );
       }
-      const playerName = playerNames?.[String(playerNumber)] ?? `Player ${playerNumber}`;
+      const rawName = playerNames?.[String(playerNumber)] ?? `Player ${playerNumber}`;
+      const playerName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
       const runtimePlayerType = playerTypes[String(playerNumber)];
       if (runtimePlayerType === "human") {
         return `${playerName} - Human`;

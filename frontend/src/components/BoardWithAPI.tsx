@@ -597,8 +597,9 @@ export const BoardWithAPI: React.FC = () => {
   );
 
   // Noms des joueurs issus du game state (défauts génériques si partie non encore démarrée)
-  const p1DisplayName = apiProps.gameState?.player_names?.["1"] ?? "Player 1";
-  const p2DisplayName = apiProps.gameState?.player_names?.["2"] ?? "Player 2";
+  const capitalizeFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+  const p1DisplayName = capitalizeFirst(apiProps.gameState?.player_names?.["1"] ?? "Player 1");
+  const p2DisplayName = capitalizeFirst(apiProps.gameState?.player_names?.["2"] ?? "Player 2");
 
   // Get board configuration for line of sight calculations
   const { gameConfig, boardConfig } = useGameConfig();
