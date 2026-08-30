@@ -201,6 +201,38 @@ export class SomeUnit extends Base {{
             registry._extract_static_properties(content, "sm")
 
 
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_extract_static_properties_parses_string_rule_args(
+    monkeypatch: pytest.MonkeyPatch, quote: str
+) -> None:
+    """rule_args avec une valeur textuelle pure (weapon_code: "heavy_bolter") doit être acceptée.
+
+    Régression c81f68fd : le parser ne capturait que les entiers et les dés, rejetant les
+    identifiants quoted comme weapon_code de grant_weapon_rule_vs_designated_target (Overlapping
+    Detonations). Le mode PvE s'arrêtait au chargement de tout scénario contenant un Eradicator.
+    Couverture double : guillemets simples ET doubles (les .ts réels utilisent des guillemets
+    doubles ; les deux doivent passer).
+    """
+    registry = _make_registry_stub()
+    registry._unit_rules = {"grant_weapon_rule_vs_designated_target": {}}
+    monkeypatch.setattr("engine.weapons.get_weapons", lambda faction, codes: [])
+    content = f"""
+export class EradicatorHeavyBolter extends SpaceMarineBase {{
+  static HP_MAX = 2;
+  static MOVE = 6;
+  static RNG_WEAPON_CODES = [{quote}heavy_bolter{quote}];
+  static CC_WEAPON_CODES = [];
+  static UNIT_RULES = [
+    {{ ruleId: "grant_weapon_rule_vs_designated_target", displayName: "Overlapping Detonations", rule_args: {{ weapon_code: {quote}heavy_bolter{quote} }} }}
+  ];
+}}
+"""
+    props = registry._extract_static_properties(content, "sm")
+    rule = props["UNIT_RULES"][0]
+    assert rule["ruleId"] == "grant_weapon_rule_vs_designated_target"
+    assert rule["rule_args"] == {"weapon_code": "heavy_bolter"}
+
+
 def test_save_registry_cache_writes_json(tmp_path: Path) -> None:
     registry = _make_registry_stub()
     registry.project_root = tmp_path
