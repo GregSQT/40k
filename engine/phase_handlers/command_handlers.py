@@ -265,9 +265,15 @@ def command_step_command_abilities(game_state: Dict[str, Any]) -> None:
       3. Oath — désignation d'une unité ennemie, obligatoire, chaque tour.
 
     Le moteur ne tranche rien : il POSE la décision et `command_phase_resume` rend la main.
-    (Grot Orderly et les autres capacités « in your command phase » viendront au chantier 06.)
+    Grot Orderly (chantier 06, passe 6) : return_destroyed_models — automatique, avant toute
+    décision.
     """
     current_player = int(require_key(game_state, "current_player"))
+
+    # Grot Orderly (chantier 06, passe 6) — « Once per battle, at the start of your Command
+    # phase, D3 destroyed models … are returned to that unit. »
+    # Automatique : aucune décision d'agent. L'effet est résolu ici, avant Waaagh!/Oath.
+    _apply_return_destroyed_models(game_state, current_player)
 
     # 1. « Until the start of your NEXT Command phase » — la borne est ici.
     expire_faction_abilities_for_player(game_state, current_player)
@@ -532,6 +538,113 @@ def command_phase_end(game_state: Dict[str, Any]) -> Dict[str, Any]:
         "phase_transition": True,
         "clear_blinking_gentle": True
     }
+
+
+def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: int) -> None:
+    """Grot Orderly (chantier 06, passe 6) — « Once per battle, at the start of your Command
+    phase, D3 destroyed models of that unit are returned. »
+
+    Résolution automatique (aucune décision d'agent) pour chaque unité vivante du joueur actif
+    portant la règle `return_destroyed_models` et n'ayant pas encore utilisé l'effet.
+    """
+    import copy
+    from engine.combat_utils import resolve_dice_value
+    from engine.phase_handlers.shared_utils import (
+        unit_has_rule_effect, is_unit_alive, model_is_on_board,
+        _recompute_squad_cache, _recompute_squad_occupied_hexes, _recompute_squad_hp_total,
+    )
+    from engine.game_utils import add_debug_file_log
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    units_cache = require_key(game_state, "units_cache")
+    squad_cache = game_state.get("squad_cache", {})
+    used: set = game_state.setdefault("return_destroyed_models_used", set())
+
+    for unit in require_key(game_state, "units"):
+        if int(require_key(unit, "player")) != current_player:
+            continue
+        unit_id = str(require_key(unit, "id"))
+        if unit_id in used:
+            continue
+        if not is_unit_alive(unit_id, game_state):
+            continue
+        if not unit_has_rule_effect(unit, "return_destroyed_models"):
+            continue
+
+        cache_entry = squad_cache.get(unit_id)
+        if cache_entry is None:
+            continue
+        count_start = int(cache_entry.get("model_count_at_start", 0))
+        count_now = int(cache_entry.get("model_count", 0))
+        destroyed = count_start - count_now
+        if destroyed <= 0:
+            continue
+
+        d3 = resolve_dice_value("D3", "grot_orderly_return")
+        to_restore = min(d3, destroyed)
+
+        # Template = première figurine vivante (bodyguard, pas personnage attaché).
+        mid_list = squad_models.get(unit_id, [])
+        template = None
+        for mid in mid_list:
+            m = models_cache.get(mid)
+            if m is not None and model_is_on_board(m) and "attached_from" not in m:
+                template = m
+                break
+        if template is None:
+            # Repli : n'importe quel modèle vivant.
+            for mid in mid_list:
+                m = models_cache.get(mid)
+                if m is not None and model_is_on_board(m):
+                    template = m
+                    break
+        if template is None:
+            continue  # impossible si is_unit_alive, défense en profondeur
+
+        anchor_col = int(template["col"])
+        anchor_row = int(template["row"])
+        counter = game_state.get("_restored_model_counter", 0)
+
+        for _ in range(to_restore):
+            new_mid = f"{unit_id}#r{counter}"
+            counter += 1
+            new_model = copy.copy(template)
+            new_model["col"] = anchor_col
+            new_model["row"] = anchor_row
+            new_model["HP_CUR"] = int(new_model["HP_MAX"])
+            # Transient shooting/fight state ne se copie jamais depuis le template.
+            new_model.pop("SHOOT_LEFT", None)
+            new_model.pop("ATTACK_LEFT", None)
+            new_model["SHOOT_LEFT"] = int(template.get("SHOOT_LEFT", 1))
+            new_model["ATTACK_LEFT"] = int(template.get("ATTACK_LEFT", 1))
+            models_cache[new_mid] = new_model
+            mid_list.append(new_mid)
+
+        game_state["_restored_model_counter"] = counter
+        _recompute_squad_cache(game_state, unit_id)
+        _recompute_squad_occupied_hexes(game_state, unit_id)
+        squad_total = _recompute_squad_hp_total(game_state, unit_id)
+        uc = units_cache.get(unit_id)
+        if uc is not None:
+            uc["HP_CUR"] = squad_total
+        used.add(unit_id)
+
+        episode = game_state.get("episode_number", "?")
+        turn = game_state.get("turn", "?")
+        add_debug_file_log(
+            game_state,
+            f"[GROT ORDERLY] E{episode} T{turn} unit={unit_id} restored={to_restore} "
+            f"(D3={d3}, destroyed={destroyed})"
+        )
+        append_action_log(game_state, {
+            "type": "return_destroyed_models",
+            "unitId": unit_id,
+            "player": current_player,
+            "phase": "command",
+            "turn": require_key(game_state, "turn"),
+            "restored": to_restore,
+        })
 
 
 def execute_action(game_state: Dict[str, Any], unit: Optional[Dict[str, Any]], action: Dict[str, Any], config: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:

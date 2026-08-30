@@ -28,10 +28,13 @@ export class LibrarianTerminator extends LeaderEliteMeleeElite {
   static CC_WEAPONS = getWeapons(LibrarianTerminator.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [{ ruleId: "support", displayName: "Support" }];
+  static UNIT_RULES = [
+    { ruleId: "support", displayName: "Support" },
+    { ruleId: "invul_save_override", displayName: "Mental Fortress (InSv 4+)", rule_args: { value: 4 } },
+  ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { support: 2 };
+  static RULES_STATUS = { support: 2, invul_save_override: 2 };
 
   // CAN LEAD (bodyguard unit-name keywords this leader may attach to — rule 19.01)
   static CAN_LEAD = ["terminator squad"];

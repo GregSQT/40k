@@ -23,6 +23,14 @@ export class WarTrakk extends SwarmRangeSwarm {
   static CC_WEAPON_CODES = ["choppa_a5"];
   static CC_WEAPONS = getWeapons(WarTrakk.CC_WEAPON_CODES);
 
+  // UNIT RULES
+  static UNIT_RULES = [
+    { ruleId: "suppress_target_on_shooting", displayName: "Indiscriminate Detonations" },
+  ];
+
+  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
+  static RULES_STATUS = { suppress_target_on_shooting: 2 };
+
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
     { keywordId: "MOUNTED" },

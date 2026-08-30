@@ -6,7 +6,7 @@
 
 ## 06 — Armageddon abilities {#armageddon-06}
 
-**5/6 passes.** Tous prérequis (01→05) livrés et vérifiés. Jalon J4 — hors du chemin de la mesure de référence.
+**6/6 passes.** Tous prérequis (01→05) livrés et vérifiés. Jalon J4 — hors du chemin de la mesure de référence.
 
 ✅ **Passe 1 — Primitive A `roll_modifiers` (2026-08-30).** Might Is Right (Warboss), Litany of Hate (ChaplainJumpPack), Somethin' to Prove (Bigboss) et le malus de suppression sont vifs, tir et mêlée, avec `clamp(base − bonus + malus, 2, 6)`. Journalisés en tags de ligne (`[MIGHT IS RIGHT]`, `[SUPPRESSED]`, `[LITANY OF HATE]`, `[SOMETHIN' TO PROVE]`), observés (obs_size inchangé), contrôlés par l'analyzer (`fight_hit_threshold_mismatch`, `charge_roll_out_of_range`, plus le seuil de blessure qui connaît désormais Litany). Le statut `suppressed` existe et est purgé au bon moment ; **aucune datasheet ne le POSE avant la passe 6**.
 
@@ -18,7 +18,9 @@
 
 ✅ **Passe 5 — Primitive E `objective_effects` (2026-08-30).** 3 capacités : Get da Good Bitz (Boyz/Orks) et Objective Secured (Intercessor/SM) — une seule règle générique `secure_objective_on_control` ; en fin de phase de commandement, si l'unité contrôle l'objectif, celui-ci est sécurisé dans `secured_objectives` : l'adversaire doit avoir STRICTEMENT plus d'OC pour le reprendre (14.03). Relic Banner (Ancient) — `oc_bonus` (+1 OC par figurine via `unit_effective_oc`). `calculate_objective_control` et `_calculate_primary_objective_control_counts` honorent les deux mécanismes ; `apply_secure_objective_on_control` appelée en `command_phase_end` après rafraîchissement explicite des contrôleurs. Deux nouveaux types registrés (`secure_objective_on_control` obs_id 33, `oc_bonus` obs_id 34). 12 tests rouge→vert.
 
-**Ordre** : passes 1-5 livrées ; FNP déjà câblé côté moteur.
+✅ **Passe 6 — Primitive F `unit_state_effects` (2026-08-31).** 7 capacités : Waaagh! Banner clause 1 (`invul_save_override 5+` sur toute l'unité via 19.04, BannerNob), Waaagh! Banner clause 2 (`toughness_bonus_while_waaagh` +1 T pendant Waaagh!, point unique tir+mêlée via `_target_highest_bodyguard_toughness`), Mental Fortress (`invul_save_override 4+`, LibrarianTerminator), Indiscriminate Detonations (`suppress_target_on_shooting`, WarTrakk — cible supprimée jusqu'à la prochaine phase de commandement du tireur), Grot Orderly (`return_destroyed_models`, PainBoy — 1×/partie, D3 figurines restaurées en phase de commandement, `_apply_return_destroyed_models`), Finest Hour counter (`once_per_battle_melee_buff` ajouté à `UNIT_RULE_EFFECT_IDS`, masqué dans l'obs quand dépensé via `once_per_battle_spent_squad_ids`), Purgation Run (`move_after_shooting` avec `distance_dice: "D6"`, LandSpeederOnslaughtGatlingCannon). Quatre nouveaux obs_ids (35-38). `hit_roll_malus_suppressed` IMPLÉMENTÉ (WarTrakk câblé). 17 tests rouge→vert.
+
+**Ordre** : passes 1-6 livrées — chantier 06 complet.
 
 ✅ Recalculé le 2026-08-30 : max 6 capacités simultanées sur une entité (contrainte 19.01 : 1 leader + 1 support max), marge 2 slots. `UNIT_ABILITY_SLOTS = 8` tient pour l'intégralité du chantier 06.
 

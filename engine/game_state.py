@@ -4546,18 +4546,27 @@ def waaagh_applies_to_unit(game_state: Dict[str, Any], unit: Dict[str, Any]) -> 
 def effective_invul_save(
     game_state: Dict[str, Any], unit: Dict[str, Any], base_invul_save: int
 ) -> int:
-    """Sauvegarde invulnérable EFFECTIVE d'une figurine de `unit`, Waaagh! compris.
+    """Sauvegarde invulnérable EFFECTIVE d'une figurine de `unit`, Waaagh! et overrides compris.
 
-    « Models from your army with this ability have a 5+ invulnerable save. » C'est un OCTROI,
-    pas un plafond : une figurine qui a déjà une 4+ (Warboss, BannerNob) la GARDE — d'où le
-    `min`. Une figurine sans invulnérable (sentinelle 7) passe à 5+, ce qui est tout l'effet.
+    Deux sources d'override (ordre d'application : chacune prend le min) :
+    1. Waaagh! actif (chantier 03) : 5+ conféré à toute unité portant la capacité waaagh.
+    2. `invul_save_override` (chantier 06, passe 6) : InSv conférée par une règle d'unité
+       (ex. Waaagh! Banner / BannerNob → 5+, Mental Fortress / Librarian → 4+), via 19.04 :
+       l'effet est sur TOUTE l'unité et s'éteint si le porteur meurt.
 
     `base_invul_save` est passé par l'appelant plutôt que relu ici : la valeur vit sur la
     FIGURINE (`models_cache`), pas sur l'unité, et c'est la figurine qui encaisse.
     """
-    if not waaagh_applies_to_unit(game_state, unit):
-        return int(base_invul_save)
-    return min(int(base_invul_save), WAAAGH_INVUL_SAVE)
+    invul = int(base_invul_save)
+    if waaagh_applies_to_unit(game_state, unit):
+        invul = min(invul, WAAAGH_INVUL_SAVE)
+    # invul_save_override : confère une InSv à toute l'unité (19.04). La valeur vit dans
+    # rule_args["value"] ; la règle est dans UNIT_RULES après le fold 19.04. Lazy import (cycle).
+    from engine.phase_handlers.shared_utils import _get_unit_rule_arg  # cycle : cf. plus haut
+    override_value = _get_unit_rule_arg(unit, "invul_save_override", "value", (int,))
+    if override_value is not None:
+        invul = min(invul, int(override_value))
+    return invul
 
 
 def waaagh_melee_bonus(game_state: Dict[str, Any], unit: Dict[str, Any]) -> int:
