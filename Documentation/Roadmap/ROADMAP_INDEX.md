@@ -77,7 +77,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | # | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|---|
 | 8 | training+bot | ✅ Self-play §0.59 absorbé par `--etape` (décision 2026-08-30) | [v11_chemin_critique.md#selfplay](v11_chemin_critique.md#selfplay) | ✅ |
-| 9 | moteur+training | ✅ **06** Armageddon abilities — 6/6 passes (passe 6 : Primitive F unit_state_effects — invul_save_override, toughness_bonus_while_waaagh, suppress_target_on_shooting, return_destroyed_models, once_per_battle_melee_buff obs, move_after_shooting D6, 2026-08-31) | [capacites.md#armageddon-06](capacites.md#armageddon-06) | ✅ |
+| 9 | moteur+training | ✅ **06** Armageddon abilities — 6/6 passes (passe 6 : Primitive F unit_state_effects — invul_save_override, toughness_bonus_while_waaagh, suppress_target_on_shooting, return_destroyed_models, once_per_battle_melee_buff obs, move_after_shooting D6, 2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ✅ |
 
 ---
 
@@ -120,10 +120,10 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | infra | Migration PostgreSQL | [infra.md#postgresql](infra.md#postgresql) | ⚡ |
 | infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) | 🚫 |
 | bot | Tranches 2-3 benchmark — schedule P0→P10 + exploiters : code et tests livrés 2026-08-22 (`--etape`, `curriculum.json`, pool figé par-env, `ExploiterProbeCallback` sondage synchrone + `validate_exploiter_protocol` + `exploiter_config`, 24 tests verrou) ; restent les 14 runs (~260 h) | [bot.md#league](bot.md#league) | 🚫 |
-| moteur+training+front+ai | ✅ lots 2026-08-30 — ramp_end_episodes, UI/infra (9 merges), ajuster-bot-ratios, curriculum-review-fixes, simplify-curriculum, fix-analyzer-findings, fix-check-ai-rules-fallbacks, simplify-fnp-passe3, simplify-finest-hour, simplify-terrain-cleanup, fix-finest-hour-primitive-b, lot ai, lot moteur, lot corrections (shoot-priority, Primitive B passes 2-5) | [capacites.md#armageddon-06](capacites.md#armageddon-06) [moteur.md](moteur.md) [bot.md](bot.md) | ⚡ |
+| moteur+training+front+ai | ✅ lots 2026-08-30 — ramp_end_episodes, UI/infra (9 merges), ajuster-bot-ratios, curriculum-review-fixes, simplify-curriculum, fix-analyzer-findings, fix-check-ai-rules-fallbacks, simplify-fnp-passe3, simplify-finest-hour, simplify-terrain-cleanup, fix-finest-hour-primitive-b, lot ai, lot moteur, lot corrections (shoot-priority, Primitive B passes 2-5) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) [moteur.md](moteur.md) [bot.md](bot.md) | ⚡ |
 | moteur | ✅ simplify-is-unit-alive-guard + parametrize tests (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
-| moteur+ai | ✅ fix reward exhortation + intent cible morte (2026-08-30) | [capacites.md#armageddon-06](capacites.md#armageddon-06) | ⚡ |
-| moteur | ✅ Primitive F (passe 6/6) — unit_state_effects (invul_save_override, toughness_bonus_while_waaagh, suppress_target_on_shooting, return_destroyed_models, once_per_battle_melee_buff obs, move_after_shooting D6, 17 tests, 2026-08-31) | [capacites.md#armageddon-06](capacites.md#armageddon-06) | ⚡ |
+| moteur+ai | ✅ fix reward exhortation + intent cible morte (2026-08-30) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
+| moteur | ✅ Primitive F (passe 6/6) — unit_state_effects (invul_save_override, toughness_bonus_while_waaagh, suppress_target_on_shooting, return_destroyed_models, once_per_battle_melee_buff obs, move_after_shooting D6, 17 tests, 2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
 
 ---
 

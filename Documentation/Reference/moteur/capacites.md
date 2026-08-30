@@ -2,7 +2,7 @@
 
 > **Objet** : référence de conception consolidée du système de capacités — le socle observation/action (embedding des capacités), les points de commandement et le battle-shock, les capacités de faction (Waaagh!, Oath of Moment), les réserves stratégiques / Deep Strike, et le chantier ouvert 06 (capacités d'unité Armageddon).
 > **Sources absorbées** : `01_ability_embedding.md`, `02_command_points.md`, `03_faction_abilities.md`, `04_strategic_reserves.md` (Reference/moteur) et `06_armageddon_abilities.md` (Chantiers/backlog) — elles partent dans `Documentation/Archives/docs/` avec un bandeau retour.
-> **L'état des chantiers fait foi dans `Documentation/Roadmap/`, jamais ici** — pour le 06 : [Roadmap/capacites.md](../../Roadmap/capacites.md) ; ordre global : [ROADMAP_INDEX.md](../../Roadmap/ROADMAP_INDEX.md).
+> **L'état des chantiers fait foi dans `Documentation/Roadmap/`, jamais ici** — pour le 06 : [Roadmap/capacites.md](../../Roadmap/archives/capacites.md) ; ordre global : [ROADMAP_INDEX.md](../../Roadmap/ROADMAP_INDEX.md).
 > Chiffres volatils (`obs_size`, `TOTAL_ACTION_SIZE`, `obs_id` occupés) : jamais recopiés ici — les emplacements où les lire sont donnés à chaque fois.
 
 ---
@@ -411,7 +411,7 @@ Les trois porteurs sont ancrés dans `test_composite_datasheet_abilities_are_cap
 
 # 5. À FAIRE — chantier 06 Armageddon
 
-> 🔴 **Chantier OUVERT.** L'état d'avancement (passes livrées, prérequis, jalon) fait foi dans [Roadmap/capacites.md](../../Roadmap/capacites.md), jamais ici. Tout ce qui suit est la CONCEPTION et le PLAN D'EXÉCUTION du chantier : 6 primitives moteur pour les 25 capacités d'unités des rosters Armageddon.
+> 🔴 **Chantier OUVERT.** L'état d'avancement (passes livrées, prérequis, jalon) fait foi dans [Roadmap/capacites.md](../../Roadmap/archives/capacites.md), jamais ici. Tout ce qui suit est la CONCEPTION et le PLAN D'EXÉCUTION du chantier : 6 primitives moteur pour les 25 capacités d'unités des rosters Armageddon.
 >
 > ⚠️ Risque d'exécution : `UNIT_ABILITY_SLOTS = 8` est une projection non mesurée (voir [§1](#dimensionnement-des-slots--mesure-vs-projection)) — si une entité dépasse 8 capacités en vigueur, le moteur lève. Ce chantier est ce qui rend le chiffre mesurable ; le recalcul de la projection se fait AVANT la passe 1.
 
@@ -608,7 +608,7 @@ La règle **existe** (`UNIT_RULE_EFFECT_IDS`, `def _build_move_after_shooting_de
 
 ## Prompt d'exécution — 6 passes
 
-> Prompt CONSERVÉ (chantier à venir) : une passe par primitive, exécutables séparément sans replanifier. L'avancement se pointe dans [Roadmap/capacites.md](../../Roadmap/capacites.md).
+> Prompt CONSERVÉ (chantier à venir) : une passe par primitive, exécutables séparément sans replanifier. L'avancement se pointe dans [Roadmap/capacites.md](../../Roadmap/archives/capacites.md).
 
 ### Préalable
 
@@ -708,6 +708,6 @@ Conséquence pour la passe 1 : rien à solder avant de commencer. Le témoin de 
 - **Chantier 03** (Waaagh! / Oath) : livré, vérifié code le 2026-08-10 (`waaagh`, `oath_of_moment`, `hit_any_fail` sur les sites jumeaux). Condition `player_has_squads_on_board` ajoutée le 2026-08-11. Dette bornée : `uses_codex_detachment` déclaré, non déduit.
 - **Chantier 04** (réserves / Deep Strike) : livré, vérifié code le 2026-08-10 ; `obs_id` de `deep_strike` posé le 2026-08-10 (six jours après la mécanique). Point non tranché : round restant avant destruction non observé.
 - **Chantier 05** (purge du placeholder `reroll_charge`) : livré le 2026-08-10 — son legs pour le 06 est en §5.
-- **Chantier 06** : ouvert — état dans [Roadmap/capacites.md](../../Roadmap/capacites.md) ; recomptage du bandeau le 2026-08-10 (seul `hit_any_fail` était posé) ; Deadly Demise câblée hors passe le 2026-08-25.
+- **Chantier 06** : ouvert — état dans [Roadmap/capacites.md](../../Roadmap/archives/capacites.md) ; recomptage du bandeau le 2026-08-10 (seul `hit_any_fail` était posé) ; Deadly Demise câblée hors passe le 2026-08-25.
 - **Gel rompu hors série** par V11 §0.48 L2 (2026-08-07) — cf. [ROADMAP_INDEX.md](../../Roadmap/ROADMAP_INDEX.md).
 - Chiffres volatils : `obs_size` → clé `obs_size` + `justification` de `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` (lignée complète) ; `TOTAL_ACTION_SIZE` et la carte des familles d'actions → `engine/macro_intents.py` ; `obs_id` occupés → `config/unit_rules.json` + `config/unit_statuses.json` ; schéma d'observation → `engine/observation_entities.py` et [observation_et_actions.md](../training/observation_et_actions.md).
