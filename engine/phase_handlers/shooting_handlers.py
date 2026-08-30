@@ -3084,7 +3084,7 @@ def shooting_build_valid_target_pool(
                 from engine.game_utils import add_console_log, add_debug_log
                 add_console_log(game_state, f"[BUG] Cache contained friendly unit {target_id_str} (player {target['player']}) for shooter {unit_id} (player {current_player})")
                 continue  # Skip friendly units
-            # tour_de_jeu.md: No re-validation needed - cache is reliable during activation
+            # Guard : filtre les unités mortes ou devenues alliées depuis la mise en cache
             alive_targets.append(target_id_str)  # Ensure ID is string
 
         # Update unit's target pool
