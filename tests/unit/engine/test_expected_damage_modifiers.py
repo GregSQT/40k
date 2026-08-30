@@ -61,9 +61,9 @@ def _waaagh_game_state() -> Dict[str, Any]:
     par au moins une unité du joueur — il faut donc une entrée minimale dans "units".
     """
     return {
-        "suppressed_squads": {},
+        **_BASE_GAME_STATE,
         "waaagh_active": {1: True, 2: False},
-        "config": {"army_faction": {"1": "ORKS", "2": "TYRANIDS"}, "game_rules": {"bonus_malus_cap": 0}},
+        "config": {**_BASE_GAME_STATE["config"], "army_faction": {"1": "ORKS", "2": "TYRANIDS"}},
         "units": [
             {"id": "1", "player": 1, "FACTION_KEYWORDS": ["ORKS"]},
         ],
@@ -161,10 +161,7 @@ def test_waaagh_does_not_apply_to_ranged() -> None:
 def test_waaagh_inactive_no_bonus() -> None:
     """Waaagh! non actif (waaagh_active=False) → aucun bonus même pour une unité ORKS."""
     attacker = {**_BASE_ATTACKER, "FACTION_KEYWORDS": ["ORKS"]}
-    game_state = {
-        **_waaagh_game_state(),
-        "waaagh_active": {1: False, 2: False},
-    }
+    game_state = _BASE_GAME_STATE
 
     result = expected_damage(_WEAPON, _TARGET, attacker, game_state, is_melee=True)
     assert result == pytest.approx(1 / 3)

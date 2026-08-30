@@ -121,16 +121,14 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) | 🚫 |
 | bot | Tranches 2-3 benchmark — schedule P0→P10 + exploiters : code et tests livrés 2026-08-22 (`--etape`, `curriculum.json`, pool figé par-env, `ExploiterProbeCallback` sondage synchrone + `validate_exploiter_protocol` + `exploiter_config`, 24 tests verrou) ; restent les 14 runs (~260 h) | [bot.md#league](bot.md#league) | 🚫 |
 | training | ✅ `ramp_end_episodes` — découple durée run et vitesse d'introduction self-play ; plateau `ratio_end` atteint à l'épisode déclaré indépendamment de `total_episodes` (2026-08-30) | [training.md#curriculum](training.md#curriculum) | ⚡ |
-| moteur+infra | ✅ fix §04.02 pool stale — clé cache `_move_ver` (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
-| infra | ✅ fix comment-cache-revalidation (2026-08-30) | [infra.md](infra.md) | ⚡ |
-| front+infra | ✅ lot UI/infra 2026-08-30 — terrain preview inline, popup test-start (9 merges), player-names-display, gameprep-save-default, preview-size-315, terrain-btn-nowrap, simplify-cache-hit-cleanup | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
+| front+infra | ✅ lot UI/infra 2026-08-30 — terrain preview inline, popup test-start (9 merges), player-names-display, gameprep-save-default, preview-size-315, terrain-btn-nowrap, simplify-cache-hit-cleanup, fix §04.02 pool stale, fix comment-cache-revalidation | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
 | training | ✅ lot training 2026-08-30 — ajuster-bot-ratios, curriculum-review-fixes (6 findings), simplify-curriculum (data_validation, déduplique exploiteur) | [training.md#curriculum](training.md#curriculum) | ⚡ |
 | analyzer | ✅ fix-analyzer-findings — T1 pl_int, garde morte fight_over, PHASE_ORDER partagé (7 occurrences × 4 fichiers), doublon import charge_handler (2026-08-30) | [analyzer.md](analyzer.md) | ⚡ |
 | moteur | ✅ fix-check-ai-rules-fallbacks — 3 fallbacks anti-erreur analyzer corrigés (2026-08-30) | [analyzer.md](analyzer.md) | ⚡ |
-| moteur | ✅ simplify-died-before-phase — 4 boucles mortes dupliquées extraites (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
-| moteur | ✅ bonus-malus-cap — flag game_config clamp modificateurs touche/blessure, 89 tests verts (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
-| moteur+training | ✅ expected-damage-unit-modifiers — modificateurs Primitive A + Waaagh dans expected_damage (2026-08-30) | [moteur.md](moteur.md) | ⚡ |
-| front+infra | ✅ terrain-selector-purge-foe — ajout terrain Purge the Foe Mirror 2 au sélecteur (2026-08-30) | [front.md](front.md) | ⚡ |
+| ai | ✅ fix-was-lowest-hp-dead-filter — filtrer cibles mortes dans `_was_lowest_hp_target` (2026-08-30) | [bot.md](bot.md) | ⚡ |
+| ai | ✅ expected-damage-cap-cleanup — `resolve_hit_roll_modifiers` remplace pipeline hit_roll_modifier_terms+apply+_bonus_malus_cap (2026-08-30) | [bot.md](bot.md) | ⚡ |
+| ai | ✅ simplify reward_mapper + expected_damage — `require_key` remplace guards inline, `_waaagh_game_state` spread BASE (2026-08-30) | [bot.md](bot.md) | ⚡ |
+| moteur+training | ✅ lot moteur 2026-08-30 — bonus-malus-cap (89 tests), expected-damage-unit-modifiers (Primitive A + Waaagh), simplify-died-before-phase (4 boucles), terrain-selector-purge-foe | [moteur.md](moteur.md) | ⚡ |
 | ai | ✅ shoot-priority-3 — implémentation bloc P3 reward_mapper (killable+highest threat+lowest HP) (2026-08-30) | [bot.md](bot.md) | ⚡ |
 
 ---
