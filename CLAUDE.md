@@ -47,7 +47,6 @@ Fichiers par sujet (tâches ouvertes uniquement) :
 - Documentation/Roadmap/front.md — frontend
 - Documentation/Roadmap/moteur.md — moteur de jeu
 - Documentation/Roadmap/infra.md — infra / perf / DB
-- Documentation/Roadmap/capacites.md — chantier 06 capacités
 - Documentation/Roadmap/missions.md — force dispositions & missions primaires
 - Documentation/Roadmap/doc.md — hygiène documentaire
 
