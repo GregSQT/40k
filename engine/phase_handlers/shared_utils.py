@@ -10363,14 +10363,14 @@ def _manual_roll_intent(
     # (couvert/HEAVY/PSYCHIC), AP effectif (closest_target_penetration) et l allocation.
     from engine.phase_handlers.attack_sequence import (
         RerollProfile, build_weapon_attack_profile, roll_attack_pool,
-        _unit_get_primitive_b_rule_args as _pB_get_args_b, unit_keywords_upper as _kw_upper_b,
+        unit_keywords_upper as _kw_upper_b,
     )
     # Primitive B (chantier 06) — Bloc B : bonus d attaques de tir et D scaling.
     # target_unit est disponible ici (resolu plus haut) — on peut lire ses keywords.
     _target_kws_b = _kw_upper_b(target_unit)
     _target_is_non_mv = _target_kws_b.isdisjoint({"MONSTER", "VEHICLE"})
     # weapon_attacks_bonus_vs_keyword : +N A si cible hors excluded_keywords (Dakkablitz)
-    _dakkablitz_args = _pB_get_args_b(attacker_unit, "weapon_attacks_bonus_vs_keyword")
+    _dakkablitz_args = _pB_get_args(attacker_unit, "weapon_attacks_bonus_vs_keyword")
     if _dakkablitz_args is not None:
         _dk_weapon_code = _dakkablitz_args.get("weapon_code")  # get allowed
         _dk_excl = _dakkablitz_args.get("excluded_keywords", [])  # get allowed
@@ -10382,12 +10382,12 @@ def _manual_roll_intent(
             n_attacks += int(require_key(_dakkablitz_args, "attacks_bonus"))
     # weapon_attacks_bonus_vs_designated_target : +N A vs cible designee (Hail of Bolts).
     # Dans ce moteur la cible de l intent EST la cible designee — pas de designation separee.
-    _hob_args = _pB_get_args_b(attacker_unit, "weapon_attacks_bonus_vs_designated_target")
+    _hob_args = _pB_get_args(attacker_unit, "weapon_attacks_bonus_vs_designated_target")
     if _hob_args is not None and weapon.get("code") == _hob_args.get("weapon_code"):  # get allowed
         n_attacks += int(require_key(_hob_args, "attacks_bonus"))
     # grant_weapon_rule_vs_designated_target : [BLAST 1] hors MONSTER/VEHICLE (Overlapping Detonations).
     # [BLAST 1] = 1 de par tranche de 5 figurines dans la cible.
-    _od_args = _pB_get_args_b(attacker_unit, "grant_weapon_rule_vs_designated_target")
+    _od_args = _pB_get_args(attacker_unit, "grant_weapon_rule_vs_designated_target")
     if (_od_args is not None
             and weapon.get("code") == _od_args.get("weapon_code")  # get allowed
             and _target_is_non_mv):
