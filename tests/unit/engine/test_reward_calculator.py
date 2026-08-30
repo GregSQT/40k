@@ -566,7 +566,7 @@ class TestFightLowestHpWipeBonus:
         rc = _rc_with_lowest_hp_bonus(0.3)
         meta = {"e1": {"value": 10.0, "player": 2, "model_count_at_start": 1, "hp_before": 5}}
         combat = _combat_result(squads_wiped=["e1"], targets_meta=meta)
-        gs = {"units_cache": {"e2": {"player": 2, "HP_CUR": 2}}}
+        gs = {"units_cache": {"e2": {"player": 2, "HP_CUR": 2, "col": 10, "row": 100}}}
         assert rc._fight_lowest_hp_wipe_bonus(combat, _acting_unit(), 1, gs) == 0.0
 
     def test_bonus_granted_when_other_enemy_has_equal_hp(self) -> None:
@@ -574,7 +574,7 @@ class TestFightLowestHpWipeBonus:
         rc = _rc_with_lowest_hp_bonus(0.3)
         meta = {"e1": {"value": 10.0, "player": 2, "model_count_at_start": 1, "hp_before": 3}}
         combat = _combat_result(squads_wiped=["e1"], targets_meta=meta)
-        gs = {"units_cache": {"e2": {"player": 2, "HP_CUR": 3}}}
+        gs = {"units_cache": {"e2": {"player": 2, "HP_CUR": 3, "col": 10, "row": 100}}}
         assert rc._fight_lowest_hp_wipe_bonus(combat, _acting_unit(), 1, gs) == pytest.approx(0.3)
 
     def test_friendly_wipe_ignored(self) -> None:
@@ -599,7 +599,7 @@ class TestFightLowestHpWipeBonus:
         rc = _rc_with_lowest_hp_bonus(0.3)
         meta = {"e1": {"value": 10.0, "player": 2, "model_count_at_start": 1, "hp_before": 3}}
         combat = _combat_result(squads_wiped=["e1"], targets_meta=meta)
-        gs = {"units_cache": {"e2": {"HP_CUR": 5}}}  # pas de "player"
+        gs = {"units_cache": {"e2": {"HP_CUR": 5, "col": 10}}}  # pas de "player"
         with pytest.raises(ConfigurationError, match="player"):
             rc._fight_lowest_hp_wipe_bonus(combat, _acting_unit(), 1, gs)
 
@@ -609,7 +609,7 @@ class TestFightLowestHpWipeBonus:
         meta = {"e1": {"value": 10.0, "player": 2, "model_count_at_start": 1, "hp_before": 3}}
         combat = _combat_result(squads_wiped=["e1"], targets_meta=meta)
         # e2 est mort (HP_CUR=0) — hp=0 < hp_before=3 sans le garde hp>0 → faux blocage
-        gs = {"units_cache": {"e2": {"player": 2, "HP_CUR": 0}}}
+        gs = {"units_cache": {"e2": {"player": 2, "HP_CUR": 0, "col": 10, "row": 100}}}
         assert rc._fight_lowest_hp_wipe_bonus(combat, _acting_unit(), 1, gs) == pytest.approx(0.3)
 
     def test_multi_wipe_only_lowest_gets_bonus(self) -> None:

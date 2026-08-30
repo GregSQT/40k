@@ -1173,6 +1173,7 @@ class RewardCalculator:
             return 0.0
         targets_meta = require_key(combat, "targets_meta")
         units_cache = require_key(game_state, "units_cache")
+        from engine.spatial_relations import enemy_entries_on_battlefield
         enemy_wiped_hps: Dict[str, int] = {}
         for sid in squads_wiped:
             meta = require_key(targets_meta, sid)
@@ -1183,9 +1184,8 @@ class RewardCalculator:
                 enemy_wiped_hps[sid] = hp_before
 
         living_enemy_hps = [
-            int(entry.get("HP_CUR", 0))
-            for entry in units_cache.values()
-            if int(require_key(entry, "player")) != acting_player
+            int(require_key(entry, "HP_CUR"))
+            for _eid, entry in enemy_entries_on_battlefield(units_cache, acting_player)
         ]
 
         bonus = 0.0
