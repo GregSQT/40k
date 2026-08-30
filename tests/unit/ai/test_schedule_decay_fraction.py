@@ -303,10 +303,10 @@ def test_every_profile_declares_decay_fraction(profile_name: str, ramp_key: str)
 
 #: Longueur ATTENDUE de chaque profil `_long`. Épinglée et non lue depuis le JSON :
 #: sans elle, un `_long` ramené par mégarde à la longueur de sa référence resterait vert alors
-#: qu'il ne mesurerait plus rien de long. x1_long : 100 000 épisodes (10 points de mesure à
-#: `bot_eval_freq` 10000, `robust_window` 3 — maintenu à 3 car la fenêtre de 5 aurait 6 positions,
-#: choix délibéré pour la comparabilité inter-runs ; cf. `robust_window_normal` dans la config).
-LONG_PROFILE_EPISODES = {"x1_long": 100_000, "x5_long": 200_000}
+#: qu'il ne mesurerait plus rien de long. x1_long et x5_long : 100 000 épisodes chacun (10 points
+#: de mesure à `bot_eval_freq` 10000, `robust_window` 3 identique sur les deux profils depuis
+#: le 2026-08-30 ; cf. `robust_window_normal` dans la config).
+LONG_PROFILE_EPISODES = {"x1_long": 100_000, "x5_long": 100_000}
 
 #: `bot_eval_final` ATTENDU de chaque profil de RÉFÉRENCE (le court des deux), par couple.
 #: ÉPINGLÉ pour la même raison que la table ci-dessus, et plus commun aux deux couples depuis le
@@ -326,31 +326,31 @@ REFERENCE_BOT_EVAL_FINAL = {"x1": 10, "x5_new": 100}
 #: alors que 10 bots étaient alors joués (cf. `EXPECTED_BOT_EVAL_COUNT`), soit 3000 épisodes et
 #: ~2 h 18. Depuis la suppression des 4 bots à poids nul, 6 × 300 = 1800 épisodes et le ~1 h 23
 #: redevient exact — mais il DÉPEND du nombre de bots, jamais du seul `bot_eval_final`.
-LONG_PROFILE_BOT_EVAL_FINAL = {"x1_long": 300, "x5_long": 600}
+LONG_PROFILE_BOT_EVAL_FINAL = {"x1_long": 300, "x5_long": 300}
 
-#: `bot_eval_intermediate` ATTENDU de chaque profil `_long`. x1_long : 30 (passé de 100 à 30
-#: par e07bdfd1, avec 4 workers intermédiaires).
-LONG_PROFILE_BOT_EVAL_INTERMEDIATE = {"x1_long": 30, "x5_long": 100}
+#: `bot_eval_intermediate` ATTENDU de chaque profil `_long`. x1_long et x5_long : 30 (aligné
+#: depuis le 2026-08-30, avec 4 workers intermédiaires sur les deux profils).
+LONG_PROFILE_BOT_EVAL_INTERMEDIATE = {"x1_long": 30, "x5_long": 30}
 
 #: Fenêtre du score robuste de chaque profil `_long`. Elle DÉPEND de la longueur du run : la
 #: fenêtre glisse sur les points de mesure, donc `total // freq - window + 1` est le nombre de
-#: positions. À une seule position le « meilleur modèle » est mécaniquement le dernier. x1_long :
-#: 50 000 épisodes → 5 points, fenêtre de 3 (3 positions).
-LONG_PROFILE_ROBUST_WINDOW = {"x1_long": 3, "x5_long": 5}
+#: positions. À une seule position le « meilleur modèle » est mécaniquement le dernier. x1_long
+#: et x5_long : 100 000 épisodes → 10 points, fenêtre de 3 (8 positions). Aligné 2026-08-30.
+LONG_PROFILE_ROBUST_WINDOW = {"x1_long": 3, "x5_long": 3}
 
 #: `eval_episodes` ATTENDU des profils `_long` et de leurs références. Épinglé pour la même raison
 #: que les tables ci-dessus : un glissement silencieux du nombre d'épisodes holdout changerait la
 #: puissance statistique du signal sans rien casser dans la comparaison en bloc.
 #: x1_long=100 vs x1=50 : signal plus fort sur le profil de mesure ;
-#: x5_long=10 = x5_new=10 : la longueur du run n'impose pas davantage d'épisodes holdout à x5.
-LONG_PROFILE_EVAL_EPISODES: dict[str, int] = {"x1_long": 100, "x5_long": 10}
+#: x5_long=100 = x1_long=100 : aligné sur x1_long depuis le 2026-08-30.
+LONG_PROFILE_EVAL_EPISODES: dict[str, int] = {"x1_long": 100, "x5_long": 100}
 REFERENCE_EVAL_EPISODES: dict[str, int] = {"x1": 50, "x5_new": 10}
 
 #: `model_gating_enabled` ATTENDU de chaque profil `_long`. Lié à `save_best_robust` : un profil
 #: qui ne sélectionne rien (save_best_robust=false) n'a aucun modèle candidat à filtrer, donc le
-#: gate n'y a pas de sens. x1_long active le gate (save_best_robust=true) ; x5_long ne le fait pas
-#: encore — ce n'est pas un oubli, c'est une décision à date, et cette table en est le verrou.
-LONG_PROFILE_MODEL_GATING_ENABLED: dict[str, bool] = {"x1_long": True, "x5_long": False}
+#: gate n'y a pas de sens. x1_long et x5_long activent le gate (save_best_robust=true sur les
+#: deux) depuis le 2026-08-30 où x5_long a été aligné sur x1_long.
+LONG_PROFILE_MODEL_GATING_ENABLED: dict[str, bool] = {"x1_long": True, "x5_long": True}
 
 #: Nombre de bots RÉELLEMENT joués à chaque évaluation, par profil. C'est `len(bot_eval_weights)`
 #: et RIEN D'AUTRE : `evaluate_against_bots` construit ses adversaires par
@@ -477,18 +477,15 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
 
     long_cb, ref_cb = long_["callback_params"], ref["callback_params"]
     assert long_cb["bot_eval_freq"] == 10000, (
-        "Un point de mesure tous les 10 000 épisodes : 20 sur x5_long (200k), 5 sur x1_long (50k) "
-        "— c'est ce dernier compte qui a imposé à x1_long une fenêtre robuste de 3 (verrouillée "
-        "plus bas), et non l'inverse. Descendre à 5000 doublerait le nombre de points, donc le "
-        "coût de l'évaluation intermédiaire : ~2 h 10 au lieu de ~1 h 05 sur x1_long (13 min "
-        "l'unité à 100 ép./bot, commit 42326ed0), sur un run mesuré à ~20 h (4 h 01 pour 10 000 "
-        "épisodes, ROADMAP §1 pt 6, run du 2026-08-10)."
+        "Un point de mesure tous les 10 000 épisodes : 10 sur x1_long (100k), 10 sur x5_long (100k) "
+        "depuis le 2026-08-30 où les deux profils ont été alignés. La fenêtre robuste de 3 donne "
+        "8 positions sur 10 points — la même sur les deux. Descendre à 5000 doublerait le coût "
+        "de l'évaluation intermédiaire sans gain sur la précision du win-rate final."
     )
     # `bot_eval_final` est un nombre d'épisodes PAR BOT, et un profil `_long` est un run de
     # MESURE : son win-rate final est le chiffre publié, donc sa précision fait partie du
     # livrable. L'erreur-type d'un win-rate autour de 0,5 vaut 0,5/√n — 5,0 points à 100,
-    # 2,9 à 300, 2,0 à 600. La valeur diverge entre les deux couples (cf. LONG_PROFILE_BOT_EVAL_FINAL) :
-    # x1_long chronométré à 300, x5_long conservé à 600 faute de mesure. Détail dans
+    # 2,9 à 300. x1_long et x5_long : 300, alignés depuis le 2026-08-30. Détail dans
     # `bot_eval_final_normal` du JSON, seule source.
     assert long_cb["bot_eval_final"] == LONG_PROFILE_BOT_EVAL_FINAL[long_name]
     assert ref_cb["bot_eval_final"] == REFERENCE_BOT_EVAL_FINAL[ref_name]
