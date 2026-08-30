@@ -213,6 +213,28 @@ def test_decreasing_ramp_is_refused() -> None:
         validate_curriculum(broken)
 
 
+def test_ramp_end_below_warmup_is_refused() -> None:
+    broken = _minimal_curriculum()
+    broken["stages"]["P1"]["ramp_end_episodes"] = 5  # warmup_episodes=10
+    with pytest.raises(ValueError, match="ramp_end_episodes"):
+        validate_curriculum(broken)
+
+
+def test_ramp_end_exceeding_override_total_is_refused() -> None:
+    broken = _minimal_curriculum()
+    broken["stages"]["P1"]["ramp_end_episodes"] = 200
+    broken["stages"]["P1"]["training_config_overrides"] = {"total_episodes": 100}
+    with pytest.raises(ValueError, match="ramp_end_episodes"):
+        validate_curriculum(broken)
+
+
+def test_ramp_end_below_override_total_is_accepted() -> None:
+    ok = _minimal_curriculum()
+    ok["stages"]["P1"]["ramp_end_episodes"] = 50
+    ok["stages"]["P1"]["training_config_overrides"] = {"total_episodes": 100}
+    validate_curriculum(ok)  # ne leve pas
+
+
 # ── 2. REPARTITION PAR ENVIRONNEMENT ───────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("stage_name", sorted(EXPECTED_STAGES))
