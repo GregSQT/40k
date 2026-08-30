@@ -496,6 +496,10 @@ def apply_returned_models_placement_decision(
     cells = plan_returned_models_placement(
         game_state, squad_id, template, int(require_key(pending, "to_restore")), str(intent)
     )
+    # Marquer l'escouade comme traitée AVANT le test : si cells est vide (état du board
+    # changé depuis la pose de la décision), on évite que _apply_return_destroyed_models
+    # repose la même décision en boucle.
+    game_state.setdefault("return_destroyed_models_used", set()).add(squad_id)
     if cells:
         apply_returned_models_placement(
             game_state, squad_id, cells,
@@ -754,6 +758,7 @@ def apply_returned_models_placement(
 
     from engine.phase_handlers.shared_utils import (
         _recompute_squad_cache, _recompute_squad_occupied_hexes, _recompute_squad_hp_total,
+        model_is_on_board,
     )
     from engine.game_utils import add_debug_file_log
 
@@ -765,7 +770,7 @@ def apply_returned_models_placement(
     template = None
     for mid in mid_list:
         m = models_cache.get(mid)
-        if m is not None:
+        if m is not None and model_is_on_board(m):
             template = m
             break
     if template is None:
