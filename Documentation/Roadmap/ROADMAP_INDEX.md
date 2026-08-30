@@ -77,7 +77,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | # | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|---|
 | 8 | training+bot | ✅ Self-play §0.59 absorbé par `--etape` (décision 2026-08-30) | [v11_chemin_critique.md#selfplay](v11_chemin_critique.md#selfplay) | ✅ |
-| 9 | moteur+training | **06** Armageddon abilities — 1/6 passes | [capacites.md#armageddon-06](capacites.md#armageddon-06) | 🚫 |
+| 9 | moteur+training | **06** Armageddon abilities — 2/6 passes | [capacites.md#armageddon-06](capacites.md#armageddon-06) | 🚫 |
 
 ---
 
@@ -127,12 +127,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | moteur | ✅ fix-check-ai-rules-fallbacks — 3 fallbacks anti-erreur analyzer corrigés (2026-08-30) | [analyzer.md](analyzer.md) | ⚡ |
 | ai | ✅ lot ai 2026-08-30 — fix-was-lowest-hp-dead-filter, expected-damage-cap-cleanup, simplify reward_mapper + expected_damage (require_key + waaagh BASE) | [bot.md](bot.md) | ⚡ |
 | moteur+training | ✅ lot moteur 2026-08-30 — bonus-malus-cap (89 tests), expected-damage-unit-modifiers (Primitive A + Waaagh), simplify-died-before-phase (4 boucles), terrain-selector-purge-foe | [moteur.md](moteur.md) | ⚡ |
-| ai | ✅ shoot-priority-3 — implémentation bloc P3 reward_mapper (killable+highest threat+lowest HP) (2026-08-30) | [bot.md](bot.md) | ⚡ |
-| config | ✅ purge-train-terrains — purger terrains hors mission des configs scénario entraînement (2026-08-30) | [training.md](training.md) | ⚡ |
-| ai+moteur | ✅ fix-kill-lowest-hp-production — câbler `target_lowest_hp` dans `squad_fight` via `hp_before` dans `targets_meta` ; corriger `_fight_lowest_hp_wipe_bonus` T1 + multi-wipe + dead-unit (2026-08-30) | [bot.md](bot.md) | ⚡ |
-| moteur | ✅ simplify-fight-lowest-hp-wipe-bonus — `enemy_entries_on_battlefield` + `require_key(HP_CUR)` remplace filtre inline + `.get()` silencieux (2026-08-30) | [bot.md](bot.md) | ⚡ |
-| ai+moteur | ✅ fix-p1-melee-will-kill-adjacency — activer P1 mêlée (False→True) + filtrer adjacence par-cible via `_fight_units_engaged_with` (2026-08-30) | [bot.md](bot.md) | ⚡ |
-| front+moteur | ✅ terrain-pfm2-selection — le terrain choisi agit enfin en PvP et PvE (scénarios suffixés), murs des ruines de `terrain-purge-foe-mirror-2`, preview au survol réparée (2026-08-30) | [front.md](front.md) | ⚡ |
+| ai+moteur+front+config | ✅ lot corrections 2026-08-30 (suite) — shoot-priority-3 (P3 reward), purge-train-terrains, fix-kill-lowest-hp-production (`hp_before` fight), simplify-fight-lowest-hp-wipe-bonus, fix-p1-melee-will-kill-adjacency, terrain-pfm2-selection (PvP/PvE), Primitive B passe 2 (8 capacités) | [bot.md](bot.md) [moteur.md](moteur.md) [capacites.md#armageddon-06](capacites.md#armageddon-06) | ⚡ |
 
 ---
 
