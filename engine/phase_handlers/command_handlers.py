@@ -649,23 +649,22 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
         to_restore = min(d3, destroyed)
 
         # Template = première figurine vivante (bodyguard, pas personnage attaché).
+        # Repli si toutes sont attachées : n'importe quel modèle vivant — une seule passe.
         mid_list = squad_models.get(unit_id, [])
         template = None
         template_mid = None
+        fallback = None
+        fallback_mid = None
         for mid in mid_list:
             m = models_cache.get(mid)
-            if m is not None and model_is_on_board(m) and "attached_from" not in m:
-                template = m
-                template_mid = mid
-                break
-        if template is None:
-            # Repli : n'importe quel modèle vivant.
-            for mid in mid_list:
-                m = models_cache.get(mid)
-                if m is not None and model_is_on_board(m):
-                    template = m
-                    template_mid = mid
+            if m is not None and model_is_on_board(m):
+                if "attached_from" not in m:
+                    template, template_mid = m, mid
                     break
+                if fallback is None:
+                    fallback, fallback_mid = m, mid
+        if template is None:
+            template, template_mid = fallback, fallback_mid
         if template is None:
             continue  # impossible si is_unit_alive, défense en profondeur
 
@@ -722,18 +721,23 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
 def _returned_placement_plans(
     game_state: Dict[str, Any], squad_id: str, template: Dict[str, Any], to_restore: int
 ) -> Dict[str, Tuple[Tuple[int, int], ...]]:
-    """Positions retenues par intention, pour les intentions qui aboutissent à un placement."""
+    """Positions retenues par intention, pour les intentions qui aboutissent à un placement.
+
+    Le BFS de `returned_models_legal_cells` est lancé UNE SEULE FOIS pour les trois intentions :
+    les cases légales ne dépendent pas de l'intention, seul le tri change.
+    """
     from engine.phase_handlers.deployment_handlers import (
-        RETURNED_PLACEMENT_INTENTS, plan_returned_models_placement,
+        RETURNED_PLACEMENT_INTENTS, plan_returned_models_placement, returned_models_legal_cells,
     )
 
+    legal = returned_models_legal_cells(game_state, squad_id, template)
     plans: Dict[str, Tuple[Tuple[int, int], ...]] = {}
     for intent in RETURNED_PLACEMENT_INTENTS:
-        cells = plan_returned_models_placement(
-            game_state, squad_id, template, to_restore, intent
+        result = plan_returned_models_placement(
+            game_state, squad_id, template, to_restore, intent, precomputed_cells=legal
         )
-        if cells:
-            plans[intent] = tuple(cells)
+        if result:
+            plans[intent] = tuple(result)
     return plans
 
 
@@ -778,9 +782,6 @@ def apply_returned_models_placement(
         new_model["col"] = int(col)
         new_model["row"] = int(row)
         new_model["HP_CUR"] = int(new_model["HP_MAX"])
-        # Transient shooting/fight state ne se copie jamais depuis le template.
-        new_model.pop("SHOOT_LEFT", None)
-        new_model.pop("ATTACK_LEFT", None)
         new_model["SHOOT_LEFT"] = int(template.get("SHOOT_LEFT", 1))
         new_model["ATTACK_LEFT"] = int(template.get("ATTACK_LEFT", 1))
         models_cache[new_mid] = new_model

@@ -4328,10 +4328,16 @@ class W40KEngine(gym.Env):
                         self.game_state, current_player,
                         self._select_ai_returned_placement(decision),
                     )
-                else:
+                elif str(require_key(decision, "type")) == "waaagh_call":
                     command_handlers.apply_waaagh_call_decision(
                         self.game_state, current_player,
                         self._select_ai_waaagh_call(current_player),
+                    )
+                else:
+                    raise NotImplementedError(
+                        f"_resolve_faction_decisions_for_ai_seats: type "
+                        f"{require_key(decision, 'type')!r} dans COMMAND_PHASE_DECISION_TYPES "
+                        f"sans application IA — ajouter la branche correspondante."
                     )
                 continue
             command_handlers.apply_oath_selection(
