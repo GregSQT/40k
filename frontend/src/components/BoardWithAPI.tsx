@@ -728,6 +728,13 @@ export const BoardWithAPI: React.FC = () => {
     posX: number;
     posY: number;
   } | null>(null);
+  const [previewOffset, setPreviewOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const previewDragStartRef = useRef<{
+    mouseX: number;
+    mouseY: number;
+    posX: number;
+    posY: number;
+  } | null>(null);
 
   const endlessDutyProfileOptions = useMemo(
     () => ({
@@ -4601,18 +4608,6 @@ export const BoardWithAPI: React.FC = () => {
             apiProps.gameState?.deployment_type === "active" &&
             !testDeploymentStarted && (
               <div className="test-start-overlay">
-                <div className="test-start-modal__terrain-preview-panel">
-                  <img
-                    className="test-start-modal__terrain-side-img preview-mc1"
-                    src="/icons/Terrain/terrain-mc1.jpg"
-                    alt="Terrain 1"
-                  />
-                  <img
-                    className="test-start-modal__terrain-side-img preview-mc2"
-                    src="/icons/Terrain/terrain-mc2.jpg"
-                    alt="Terrain 2"
-                  />
-                </div>
                 <div
                   ref={modalRef}
                   className="test-start-modal"
@@ -4667,7 +4662,7 @@ export const BoardWithAPI: React.FC = () => {
                     Game preparation
                   </div>
                   <div className="test-start-modal__section">
-                    <span className="test-start-modal__label">Select your roster :</span>
+                    <div className="test-start-modal__terrain-category">Select your roster :</div>
                     <div className="test-start-modal__roster-row">
                       <span className="test-start-modal__player-label">Player 1 :</span>
                       <button
@@ -4689,7 +4684,7 @@ export const BoardWithAPI: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                  <div className="test-start-modal__section">
+                  <div className="test-start-modal__section test-start-modal__section--spaced">
                     <div className="test-start-modal__terrain-category">Select your terrain :</div>
                     <div className="test-start-modal__terrain-options">
                       {(
@@ -4723,6 +4718,54 @@ export const BoardWithAPI: React.FC = () => {
                   >
                     Start Deployment
                   </button>
+                  {/* preview panel — enfant du modal, positionné à droite, déplaçable */}
+                  <div
+                    className="test-start-modal__terrain-preview-panel"
+                    style={{
+                      left: `calc(100% + 16px + ${previewOffset.x}px)`,
+                      top: previewOffset.y,
+                    }}
+                  >
+                    {/* biome-ignore lint/a11y/noStaticElementInteractions: drag handle — poignée de déplacement intentionnelle */}
+                    <div
+                      className="test-start-modal__preview-header"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        previewDragStartRef.current = {
+                          mouseX: e.clientX,
+                          mouseY: e.clientY,
+                          posX: previewOffset.x,
+                          posY: previewOffset.y,
+                        };
+                        const onMove = (me: MouseEvent) => {
+                          const start = previewDragStartRef.current;
+                          if (!start) return;
+                          setPreviewOffset({
+                            x: start.posX + me.clientX - start.mouseX,
+                            y: start.posY + me.clientY - start.mouseY,
+                          });
+                        };
+                        const onUp = () => {
+                          window.removeEventListener("mousemove", onMove);
+                          window.removeEventListener("mouseup", onUp);
+                        };
+                        window.addEventListener("mousemove", onMove);
+                        window.addEventListener("mouseup", onUp);
+                      }}
+                    >
+                      {selectedTerrain === "mc1" ? "Terrain 1" : "Terrain 2"} — Preview
+                    </div>
+                    <img
+                      className="test-start-modal__terrain-side-img preview-mc1"
+                      src="/icons/Terrain/terrain-mc1.jpg"
+                      alt="Terrain 1"
+                    />
+                    <img
+                      className="test-start-modal__terrain-side-img preview-mc2"
+                      src="/icons/Terrain/terrain-mc2.jpg"
+                      alt="Terrain 2"
+                    />
+                  </div>
                 </div>
               </div>
             )}
