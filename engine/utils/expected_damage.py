@@ -68,7 +68,10 @@ def expected_damage(
             strength += melee_bonus
             nb += melee_bonus
 
-    profile = build_weapon_attack_profile(weapon, target_unit)
+    profile = build_weapon_attack_profile(
+        weapon, target_unit,
+        attacker_unit=attacker_unit, game_state=game_state, is_melee=is_melee,
+    )
     ev_per_attack = expected_damage_per_attack(
         profile,
         hit_target=hit_target,

@@ -2274,7 +2274,7 @@ def _unit_has_rule_effect(unit: Dict[str, Any], rule_id: str) -> bool:
     """
     Check if unit has rule_id directly or through grants_rule_ids.
     """
-    unit_rules = unit.get("UNIT_RULES", [])
+    unit_rules = require_key(unit, "UNIT_RULES")
     target_effect_rule_id = _resolve_effect_rule_id_to_technical(rule_id)
     for rule in unit_rules:
         resolved_effect_ids = _resolve_unit_rule_entry_effect_rule_ids(rule)
@@ -12248,6 +12248,7 @@ def _select_fight_weapon_indices_for_fig(
     cap: int = 0,
     attacker_unit: Optional[Dict[str, Any]] = None,
     game_state: Optional[Dict[str, Any]] = None,
+    finest_hour_active: bool = False,
 ) -> List[int]:
     """Armes de melee SELECTIONNEES par une figurine (Select Weapons step, 04.01).
 
@@ -12272,6 +12273,7 @@ def _select_fight_weapon_indices_for_fig(
         excluded_indices=frozenset(extra),
         melee_bonus=melee_bonus, hit_bonus=hit_bonus, hit_malus=hit_malus, cap=cap,
         attacker_unit=attacker_unit, game_state=game_state,
+        finest_hour_active=finest_hour_active,
     )
     # « if possible » : une figurine qui n a QUE des armes EXTRA ATTACKS n en ajoute pas d autre.
     return ([main] if main is not None else []) + extra
@@ -12288,6 +12290,7 @@ def _auto_select_cc_weapon_for_fig(
     cap: int = 0,
     attacker_unit: Optional[Dict[str, Any]] = None,
     game_state: Optional[Dict[str, Any]] = None,
+    finest_hour_active: bool = False,
 ) -> Optional[int]:
     """Choisit l arme de melee maximisant l esperance de degats, REGLES D ARME COMPRISES.
 
@@ -12336,7 +12339,8 @@ def _auto_select_cc_weapon_for_fig(
         dmg = float(expected_dice_value(require_key(w, "DMG"), "auto_select_cc_dmg"))
         n_attacks = float(expected_dice_value(require_key(w, "NB"), "auto_select_cc_nb")) + int(melee_bonus)
         profile = build_weapon_attack_profile(
-            w, target_unit, attacker_unit=attacker_unit, game_state=game_state, is_melee=True
+            w, target_unit, attacker_unit=attacker_unit, game_state=game_state, is_melee=True,
+            finest_hour_active=finest_hour_active,
         )
         score = n_attacks * expected_damage_per_attack(
             profile,
@@ -12368,6 +12372,7 @@ def squad_declare_fight(
 
     Returns la liste d intents (aussi stockee dans pending_squad_fight_intents).
     """
+    from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args
     init_pending_intents(game_state)
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
@@ -12411,16 +12416,28 @@ def squad_declare_fight(
 
     fighting = get_fighting_models(game_state, attacker_squad_id, target_squad_id)
     intents: List[Dict[str, Any]] = game_state["pending_squad_fight_intents"][attacker_squad_id]
+    _fh_used = game_state.get("finest_hour_used", set())
+    _fh_active_phase = game_state.get("finest_hour_active_this_phase", set())
+    _attacker_sq_id_str = str(attacker_squad_id)
     for mid in fighting:
         m = models_cache.get(mid)
         if m is None:
             continue
+        # once_per_battle_melee_buff : si l'abilité n'a pas encore été consommée cette partie
+        # (pas dans finest_hour_used) OU est déjà active cette phase (finest_hour_active_this_phase),
+        # le scoring arme doit inclure DEVASTATING WOUNDS — identique au chemin de résolution.
+        _fig_fh_args = _unit_get_primitive_b_rule_args(m, "once_per_battle_melee_buff")
+        _fig_finest_hour_active = (
+            _fig_fh_args is not None
+            and (_attacker_sq_id_str not in _fh_used or _attacker_sq_id_str in _fh_active_phase)
+        )
         # Select Weapons step (04.01) : arme principale + TOUTES les armes [EXTRA ATTACKS]
         # (24.11). Un intent par arme selectionnee -> une figurine peut produire 2 intents.
         selected_indices = _select_fight_weapon_indices_for_fig(
             m, target_t, target_sv, target_invul, target_unit_for_select,
             melee_bonus=melee_bonus, hit_bonus=_hit_bonus, hit_malus=_hit_malus, cap=_hit_cap,
             attacker_unit=attacker_unit_for_select, game_state=game_state,
+            finest_hour_active=_fig_finest_hour_active,
         )
         if not selected_indices:
             continue
