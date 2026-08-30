@@ -46,7 +46,7 @@
       "role": "learner",
       "init": "new",
       "warmup_episodes": 5000,
-      "ramp_end_episodes": 100000,
+      "ramp_end_episodes": 60000,
       "ratio_start": 0.0,
       "ratio_end": 0.50,
       "pool": [
@@ -64,7 +64,7 @@
       "role": "learner",
       "init": "new",
       "warmup_episodes": 5000,
-      "ramp_end_episodes": 100000,
+      "ramp_end_episodes": 60000,
       "ratio_start": 0.0,
       "ratio_end": 0.60,
       "pool": [
@@ -83,7 +83,7 @@
       "role": "learner",
       "init": "new",
       "warmup_episodes": 5000,
-      "ramp_end_episodes": 100000,
+      "ramp_end_episodes": 60000,
       "ratio_start": 0.0,
       "ratio_end": 0.70,
       "pool": [
@@ -114,7 +114,7 @@
       "role": "learner",
       "init": "new",
       "warmup_episodes": 8000,
-      "ramp_end_episodes": 100000,
+      "ramp_end_episodes": 60000,
       "ratio_start": 0.0,
       "ratio_end": 0.75,
       "pool": [
@@ -134,7 +134,7 @@
       "role": "learner",
       "init": "new",
       "warmup_episodes": 8000,
-      "ramp_end_episodes": 100000,
+      "ramp_end_episodes": 60000,
       "ratio_start": 0.0,
       "ratio_end": 0.80,
       "pool": [
@@ -166,7 +166,7 @@
       "role": "learner",
       "init": "new",
       "warmup_episodes": 8000,
-      "ramp_end_episodes": 100000,
+      "ramp_end_episodes": 60000,
       "ratio_start": 0.0,
       "ratio_end": 0.80,
       "pool": [
@@ -186,7 +186,7 @@
       "role": "learner",
       "init": "new",
       "warmup_episodes": 8000,
-      "ramp_end_episodes": 100000,
+      "ramp_end_episodes": 60000,
       "ratio_start": 0.0,
       "ratio_end": 0.85,
       "pool": [
@@ -206,7 +206,7 @@
       "role": "learner",
       "init": "new",
       "warmup_episodes": 10000,
-      "ramp_end_episodes": 100000,
+      "ramp_end_episodes": 60000,
       "ratio_start": 0.0,
       "ratio_end": 0.85,
       "pool": [
@@ -238,7 +238,7 @@
       "role": "learner",
       "init": "new",
       "warmup_episodes": 10000,
-      "ramp_end_episodes": 100000,
+      "ramp_end_episodes": 60000,
       "ratio_start": 0.0,
       "ratio_end": 0.85,
       "pool": [
@@ -258,7 +258,7 @@
       "role": "learner",
       "init": "new",
       "warmup_episodes": 10000,
-      "ramp_end_episodes": 100000,
+      "ramp_end_episodes": 60000,
       "ratio_start": 0.0,
       "ratio_end": 0.85,
       "pool": [
