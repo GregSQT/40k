@@ -4893,7 +4893,7 @@ export const BoardWithAPI: React.FC = () => {
                         />
                         <img
                           className="test-start-modal__terrain-side-img preview-pfm2"
-                          src="/icons/Terrain/terrain-mc2.jpg"
+                          src="/icons/Terrain/terrain-pfm2.jpg"
                           alt="Purge the Foe Mirror 2"
                         />
                       </div>
