@@ -761,6 +761,18 @@ body {
 .test-start-overlay:has(.terrain-opt-mc2:hover) .preview-mc1 {
   display: none;
 }
+.test-start-overlay:has(.terrain-opt-pfm2.test-start-modal__terrain-option--active) .preview-pfm2 {
+  display: block;
+}
+.test-start-overlay:has(.terrain-opt-pfm2:hover) .preview-pfm2 {
+  display: block;
+}
+.test-start-overlay:has(.terrain-opt-pfm2:hover) .preview-mc1 {
+  display: none;
+}
+.test-start-overlay:has(.terrain-opt-pfm2:hover) .preview-mc2 {
+  display: none;
+}
 
 .test-start-modal__roster-error {
   color: #f87171;

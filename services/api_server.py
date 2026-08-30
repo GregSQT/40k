@@ -3181,7 +3181,7 @@ def start_game():
         raise ValueError(f"scenario_file must be string or null (got {type(data['scenario_file']).__name__})")
     if "board_path" in data and data["board_path"] is not None and data["board_path"] not in BOARD_PATH_MAP:
         raise ValueError(f"board_path must be one of {sorted(BOARD_PATH_MAP)} (got {data['board_path']!r})")
-    _VALID_TERRAIN_REFS = {"mc1", "mc2"}
+    _VALID_TERRAIN_REFS = {"mc1", "mc2", "pfm2"}
     if "terrain_ref" in data and data["terrain_ref"] is not None and data["terrain_ref"] not in _VALID_TERRAIN_REFS:
         raise ValueError(f"terrain_ref must be one of {sorted(_VALID_TERRAIN_REFS)} (got {data['terrain_ref']!r})")
     if "player2_name" in data and data["player2_name"] is not None and not isinstance(data["player2_name"], str):
@@ -3231,7 +3231,7 @@ def start_game():
                         f"config.json defaults.test_board = {board_path!r} : attendu l'un de "
                         f"{sorted(BOARD_PATH_MAP)}"
                     )
-            _terrain_suffix = "_mc1" if terrain_ref == "mc1" else ""
+            _terrain_suffix = {"mc1": "_mc1", "pfm2": "_pfm2"}.get(terrain_ref, "")
             scenario_file = os.path.join("config", TEST_SCENARIO_BOARD_MAP[board_path], "scenario", f"scenario_pvp_test{_terrain_suffix}.json")
             _prev_board = os.environ.get("W40K_BOARD_PATH")
             os.environ["W40K_BOARD_PATH"] = BOARD_PATH_MAP[board_path]
