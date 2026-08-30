@@ -135,14 +135,14 @@ def test_d6_6_pose_decision_et_mw_count_3(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_d6_4_pose_decision_et_mw_count_d3(monkeypatch):
-    """D6=4 → D3 MW (1-3) et décision posée."""
+    """D6=4 → D3 MW (1-3) et décision posée (≥2 cibles : path normal)."""
     decisions_posed = []
     rolls = iter([4, 2])  # premier randint → D6=4, second → D3=2
 
     def _fake_randint(a, b):
         return next(rolls)
 
-    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY"])
+    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY1", "ENEMY2"])
     monkeypatch.setattr(random, "randint", _fake_randint)
     monkeypatch.setattr(
         wcore, "set_pending_agent_decision",
@@ -157,3 +157,48 @@ def test_d6_4_pose_decision_et_mw_count_d3(monkeypatch):
     assert 1 <= pending["mw_count"] <= 3, f"mw_count D3 hors plage : {pending['mw_count']}"
     assert pending["mw_count"] == 2, f"D3 simulé à 2, got {pending['mw_count']}"
     assert len(decisions_posed) == 1
+
+
+# ---------------------------------------------------------------------------
+# Cible unique → application directe (pas de décision)
+# ---------------------------------------------------------------------------
+
+def test_single_target_auto_applique_sans_decision(monkeypatch):
+    """D6=4, 1 seule cible : pas de set_pending_agent_decision, MW appliquées directement."""
+    import engine.phase_handlers.shared_utils as su
+    decisions_posed = []
+    mw_applied = []
+    continue_called = []
+    rolls = iter([4, 2])  # D6=4, D3=2
+
+    def _fake_randint(a, b):
+        return next(rolls)
+
+    def _fake_allocate(gs, target_eid, count, auto_resolve, details):
+        mw_applied.append({"target": target_eid, "count": count})
+
+    def _fake_continue(self_engine, squad_id, target_slot):
+        continue_called.append(squad_id)
+        return True, {"action": "squad_fight", "squad_id": squad_id}
+
+    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ONLY_ENEMY"])
+    monkeypatch.setattr(random, "randint", _fake_randint)
+    monkeypatch.setattr(wcore, "set_pending_agent_decision",
+                        lambda gs, **kw: decisions_posed.append(kw))
+    monkeypatch.setattr(su, "allocate_mortal_wounds", _fake_allocate)
+
+    engine = _FakeEngine(_gs())
+    # _FakeEngine ne hérite pas de W40KEngine : poser le stub directement sur l'instance.
+    engine._continue_squad_fight_after_selection = (
+        lambda squad_id, target_slot: _fake_continue(engine, squad_id, target_slot)
+    )
+    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None)
+
+    assert len(decisions_posed) == 0, "cible unique : aucune décision ne doit être posée"
+    assert len(mw_applied) == 1, "les BM doivent être appliquées"
+    assert mw_applied[0]["target"] == "ONLY_ENEMY"
+    assert mw_applied[0]["count"] == 2
+    assert len(continue_called) == 1, "_continue_squad_fight_after_selection doit être appelé"
+    assert result is not None
+    ok, payload = result
+    assert ok is True
