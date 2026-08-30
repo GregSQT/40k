@@ -10291,10 +10291,7 @@ def _manual_roll_intent(
         _we_per_count = int(_waaagh_energy_args.get("per_count", 5))  # get allowed
         _we_str_bonus = int(_waaagh_energy_args.get("str_bonus", 0))  # get allowed
         _we_squad_id = str(require_key(attacker_unit, "id"))
-        _we_model_count = sum(
-            1 for m in game_state.get("squad_models", {}).get(_we_squad_id, [])  # get allowed
-            if m in models_cache
-        )
+        _we_model_count = require_key(game_state, "squad_cache").get(_we_squad_id, {}).get("model_count", 0)
         _we_n_scalings = _we_model_count // _we_per_count
         if _we_n_scalings > 0:
             strength += _we_n_scalings * _we_str_bonus
@@ -10365,7 +10362,7 @@ def _manual_roll_intent(
     # Primitive B (chantier 06) — Bloc B : bonus d attaques de tir et D scaling.
     # target_unit est disponible ici (resolu plus haut) — on peut lire ses keywords.
     _target_kws_b = _kw_upper_b(target_unit)
-    _target_is_non_mv = "MONSTER" not in _target_kws_b and "VEHICLE" not in _target_kws_b
+    _target_is_non_mv = _target_kws_b.isdisjoint({"MONSTER", "VEHICLE"})
     # weapon_attacks_bonus_vs_keyword : +N A si cible hors excluded_keywords (Dakkablitz)
     _dakkablitz_args = _pB_get_args_b(attacker_unit, "weapon_attacks_bonus_vs_keyword")
     if _dakkablitz_args is not None:
@@ -11018,6 +11015,8 @@ def _count_selected_hazardous_weapons(
     from engine.phase_handlers.attack_sequence import _unit_get_primitive_b_rule_args as _pB_hz
     conditional_hazardous: set = set()
     unit_by_id = require_key(game_state, "unit_by_id")
+    squad_cache_hz = require_key(game_state, "squad_cache")
+    _hz_args_cache: Dict[str, Optional[Dict[str, Any]]] = {}
     for intent in intents:
         mid = str(require_key(intent, "model_id"))
         widx = int(require_key(intent, "weapon_index"))
@@ -11030,17 +11029,14 @@ def _count_selected_hazardous_weapons(
         if not (0 <= widx < len(weapons_c)) or not isinstance(weapons_c[widx], dict):
             continue
         squad_id_c = str(model.get("squad_id", ""))  # get allowed
-        unit_c = unit_by_id.get(squad_id_c)  # get allowed
-        if unit_c is None:
-            continue
-        args_c = _pB_hz(unit_c, "weapon_profile_scaling_by_model_count")
+        if squad_id_c not in _hz_args_cache:
+            unit_c = unit_by_id.get(squad_id_c)  # get allowed
+            _hz_args_cache[squad_id_c] = _pB_hz(unit_c, "weapon_profile_scaling_by_model_count") if unit_c is not None else None
+        args_c = _hz_args_cache[squad_id_c]
         if args_c is None or weapons_c[widx].get("code") != args_c.get("weapon_code"):  # get allowed
             continue
         threshold_c = int(args_c.get("hazardous_threshold", 99))  # get allowed
-        alive_c = sum(
-            1 for m in game_state.get("squad_models", {}).get(squad_id_c, [])  # get allowed
-            if m in models_cache
-        )
+        alive_c = squad_cache_hz.get(squad_id_c, {}).get("model_count", 0)
         if alive_c >= threshold_c:
             conditional_hazardous.add((mid, widx))
     return len(selected) + len(conditional_hazardous)

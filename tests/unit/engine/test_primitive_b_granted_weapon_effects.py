@@ -214,7 +214,10 @@ def _shoot_state(
         **initial_faction_ability_state(),
         "models_cache": {"A1": attacker, "T1": target_model, **extra_models},
         "squad_models": {"1": shooter_mids, "2": ["T1"]},
-        "squad_cache": {"2": {"model_count_at_start": target_squad_size}},
+        "squad_cache": {
+            "1": {"model_count": n_models_in_shooter_squad, "model_count_at_start": n_models_in_shooter_squad},
+            "2": {"model_count_at_start": target_squad_size},
+        },
         "units_cache": {"1": _uc(0, 0, player=0), "2": _uc(0, 1)},
         "unit_by_id": {
             "1": {"id": "1", "UNIT_RULES": unit_rules},
@@ -650,3 +653,51 @@ def test_finest_hour_pose_le_flag_apres_premiere_activation(monkeypatch):
     roll_fight_intent(gs, intent)
 
     assert "1" in gs.get("finest_hour_used", set()), "le flag doit être posé après activation"
+
+
+def test_finest_hour_devastating_wounds_sur_deuxieme_arme(monkeypatch):
+    """Finest Hour actif sur intent 1 → DEVASTATING WOUNDS appliqué sur intent 2 (2e CC weapon, même phase)."""
+    # Intent 1 (weapon 0, 4 attaques) : 4 × [hit=4, wound=4, save=4] = 12 dés
+    # Intent 2 (weapon 1, 1 attaque) : [hit=4, wound=6, save=4] = 3 dés SANS fix (crit sans DEVASTATING)
+    #   ou [hit=4, wound=6] = 2 dés AVEC fix (DEVASTATING WOUNDS actif → pas de save)
+    _seq(monkeypatch, [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 6, 4])
+    gs, intent = _fight_state(unit_rules=[], model_unit_rules=[_FINEST_HOUR])
+    weapon2 = {
+        "ATK": 1, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
+        "WEAPON_RULES": [], "code": "test_blade", "display_name": "Blade",
+    }
+    gs["models_cache"]["A1"]["CC_WEAPONS"].append(weapon2)
+
+    roll_fight_intent(gs, {**intent, "weapon_index": 0, "n_attacks_resolved": 1})
+    assert "1" in gs.get("finest_hour_used", set()), "flag posé après intent 1"
+
+    result2 = roll_fight_intent(gs, {**intent, "weapon_index": 1, "n_attacks_resolved": 1})
+
+    assert len(result2["shot_records"]) == 1, "pas de +3A sur la 2e arme"
+    hit_records = [r for r in result2["shot_records"] if r.get("hitResult") == "HIT"]
+    assert hit_records, "l'attaque doit toucher (roll 4 vs ws 4)"
+    assert hit_records[0].get("devastating"), "Finest Hour toujours actif → devastating sur blessure critique (2e arme)"
+
+
+def test_finest_hour_devastating_wounds_sur_deuxieme_arme(monkeypatch):
+    """Finest Hour actif sur intent 1 → DEVASTATING WOUNDS appliqué sur intent 2 (2e CC weapon, même phase)."""
+    # Intent 1 (weapon 0, 4 attaques) : 4 × [hit=4, wound=4, save=4] = 12 dés
+    # Intent 2 (weapon 1, 1 attaque) : [hit=4, wound=6, save=4] = 3 dés SANS fix (crit sans DEVASTATING)
+    #   ou [hit=4, wound=6] = 2 dés AVEC fix (DEVASTATING WOUNDS actif → pas de save)
+    _seq(monkeypatch, [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 6, 4])
+    gs, intent = _fight_state(unit_rules=[], model_unit_rules=[_FINEST_HOUR])
+    weapon2 = {
+        "ATK": 1, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
+        "WEAPON_RULES": [], "code": "test_blade", "display_name": "Blade",
+    }
+    gs["models_cache"]["A1"]["CC_WEAPONS"].append(weapon2)
+
+    roll_fight_intent(gs, {**intent, "weapon_index": 0, "n_attacks_resolved": 1})
+    assert "1" in gs.get("finest_hour_used", set()), "flag posé après intent 1"
+
+    result2 = roll_fight_intent(gs, {**intent, "weapon_index": 1, "n_attacks_resolved": 1})
+
+    assert len(result2["shot_records"]) == 1, "pas de +3A sur la 2e arme"
+    hit_records = [r for r in result2["shot_records"] if r.get("hitResult") == "HIT"]
+    assert hit_records, "l'attaque doit toucher (roll 4 vs ws 4)"
+    assert hit_records[0].get("devastating"), "Finest Hour toujours actif → devastating sur blessure critique (2e arme)"
