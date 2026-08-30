@@ -79,7 +79,7 @@ def _sync_regular_common_pool(agent_key: str, scale: str) -> None:
         write_json_atomic(opponent_regular_dir / new_name, data)
 
 
-_TRAIN_TERRAINS = ["terrain-mc1.json", "terrain-mc2.json"]
+_TRAIN_TERRAINS = ["terrain-mc1.json"]
 
 
 def _build_scenarios(

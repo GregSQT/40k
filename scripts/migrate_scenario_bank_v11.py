@@ -40,7 +40,7 @@ BASE_TERRAIN = TERRAIN_DIR / "terrain-mc1.json"
 SCEN_ROOT = PROJECT_ROOT / "config" / "agents" / "CoreAgent" / "scenarios"
 ARCHIVE_DIR = SCEN_ROOT / "_archive_pre_v11"
 
-TRAIN_TERRAINS = ["terrain-train-01.json", "terrain-train-02.json", "terrain-train-03.json"]
+TRAIN_TERRAINS = ["terrain-mc1.json", "terrain-mc2.json"]
 
 LEGACY_KEYS = ("objectives", "objectives_ref", "objective_hexes", "deployment_zone", "wall_ref")
 
@@ -180,11 +180,9 @@ def migrate_bank() -> int:
 def main() -> int:
     if not BASE_TERRAIN.exists():
         raise FileNotFoundError(f"Terrain de base absent : {BASE_TERRAIN}")
-    print("[1/3] Génération des terrains d'entraînement plats")
-    build_training_terrains()
-    print("[2/3] Archivage de training_save/")
+    print("[1/2] Archivage de training_save/")
     archive_training_save()
-    print("[3/3] Migration de la banque active")
+    print("[2/2] Migration de la banque active")
     migrate_bank()
     print("OK")
     return 0
