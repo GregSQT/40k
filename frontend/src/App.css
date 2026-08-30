@@ -649,19 +649,51 @@ body {
   min-width: 60px;
 }
 
-.test-start-modal__terrain-select {
-  appearance: none;
-  -webkit-appearance: none;
-  padding: 6px 28px 6px 10px;
+.test-start-modal__terrain-options {
+  display: flex;
+  gap: 8px;
+}
+
+.test-start-modal__terrain-option {
+  position: relative;
+  padding: 6px 14px;
   border-radius: 6px;
-  border: 1px solid #f59e0b;
-  background-color: #111827;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23f59e0b' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  color: #f3f4f6;
-  font-size: 14px;
+  border: 1px solid #4b5563;
+  background: #1f2937;
+  color: #d1d5db;
+  font-size: 13px;
   cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.test-start-modal__terrain-option:hover {
+  border-color: #f59e0b;
+  color: #fcd34d;
+}
+
+.test-start-modal__terrain-option--active {
+  border-color: #f59e0b;
+  background: #292524;
+  color: #fcd34d;
+  font-weight: 700;
+}
+
+.test-start-modal__terrain-preview {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 220px;
+  border-radius: 8px;
+  border: 2px solid #f59e0b;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.7);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.test-start-modal__terrain-option:hover .test-start-modal__terrain-preview {
+  display: block;
 }
 
 .test-start-bar__button {

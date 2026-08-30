@@ -714,7 +714,7 @@ export const BoardWithAPI: React.FC = () => {
   });
   const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp" || gameMode === "pve";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
-  const [selectedTerrain, setSelectedTerrain] = useState<"mc1" | "mc2">(() => {
+  const [selectedTerrain, _setSelectedTerrain] = useState<"mc1" | "mc2">(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("terrain");
     if (t === "mc1" || t === "mc2") return t;
@@ -4618,24 +4618,41 @@ export const BoardWithAPI: React.FC = () => {
                     </div>
                   </div>
                   <div className="test-start-modal__section">
-                    <label className="test-start-modal__label" htmlFor="terrain-select">
-                      Select your terrain :
-                    </label>
-                    <select
-                      id="terrain-select"
-                      className="test-start-modal__terrain-select"
-                      value={selectedTerrain}
-                      onChange={(e) => {
-                        const next = e.target.value as "mc1" | "mc2";
-                        setSelectedTerrain(next);
-                        const url = new URL(window.location.href);
-                        url.searchParams.set("terrain", next);
-                        window.location.href = url.toString();
-                      }}
-                    >
-                      <option value="mc1">Terrain 1</option>
-                      <option value="mc2">Terrain 2</option>
-                    </select>
+                    <span className="test-start-modal__label">Select your terrain :</span>
+                    <div className="test-start-modal__terrain-options">
+                      {(
+                        [
+                          {
+                            value: "mc1",
+                            label: "Terrain 1",
+                            img: "/icons/Terrain/terrain-mc1.jpg",
+                          },
+                          {
+                            value: "mc2",
+                            label: "Terrain 2",
+                            img: "/icons/Terrain/terrain-mc2.jpg",
+                          },
+                        ] as const
+                      ).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          className={`test-start-modal__terrain-option${selectedTerrain === opt.value ? " test-start-modal__terrain-option--active" : ""}`}
+                          onClick={() => {
+                            const url = new URL(window.location.href);
+                            url.searchParams.set("terrain", opt.value);
+                            window.location.href = url.toString();
+                          }}
+                        >
+                          {opt.label}
+                          <img
+                            className="test-start-modal__terrain-preview"
+                            src={opt.img}
+                            alt={opt.label}
+                          />
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <button
                     type="button"
