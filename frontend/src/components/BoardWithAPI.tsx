@@ -4619,39 +4619,48 @@ export const BoardWithAPI: React.FC = () => {
                   </div>
                   <div className="test-start-modal__section">
                     <span className="test-start-modal__label">Select your terrain :</span>
-                    <div className="test-start-modal__terrain-options">
-                      {(
-                        [
-                          {
-                            value: "mc1",
-                            label: "Terrain 1",
-                            img: "/icons/Terrain/terrain-mc1.jpg",
-                          },
-                          {
-                            value: "mc2",
-                            label: "Terrain 2",
-                            img: "/icons/Terrain/terrain-mc2.jpg",
-                          },
-                        ] as const
-                      ).map((opt) => (
-                        <button
-                          key={opt.value}
-                          type="button"
-                          className={`test-start-modal__terrain-option${selectedTerrain === opt.value ? " test-start-modal__terrain-option--active" : ""}`}
-                          onClick={() => {
-                            const url = new URL(window.location.href);
-                            url.searchParams.set("terrain", opt.value);
-                            window.location.href = url.toString();
-                          }}
-                        >
-                          {opt.label}
-                          <img
-                            className="test-start-modal__terrain-preview"
-                            src={opt.img}
-                            alt={opt.label}
-                          />
-                        </button>
-                      ))}
+                    <div className="test-start-modal__terrain-row">
+                      <div className="test-start-modal__terrain-options">
+                        {(
+                          [
+                            {
+                              value: "mc1",
+                              label: "Terrain 1",
+                              img: "/icons/Terrain/terrain-mc1.jpg",
+                            },
+                            {
+                              value: "mc2",
+                              label: "Terrain 2",
+                              img: "/icons/Terrain/terrain-mc2.jpg",
+                            },
+                          ] as const
+                        ).map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            className={`test-start-modal__terrain-option terrain-opt-${opt.value}${selectedTerrain === opt.value ? " test-start-modal__terrain-option--active" : ""}`}
+                            onClick={() => {
+                              const url = new URL(window.location.href);
+                              url.searchParams.set("terrain", opt.value);
+                              window.location.href = url.toString();
+                            }}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="test-start-modal__terrain-side">
+                        <img
+                          className="test-start-modal__terrain-side-img preview-mc1"
+                          src="/icons/Terrain/terrain-mc1.jpg"
+                          alt="Terrain 1"
+                        />
+                        <img
+                          className="test-start-modal__terrain-side-img preview-mc2"
+                          src="/icons/Terrain/terrain-mc2.jpg"
+                          alt="Terrain 2"
+                        />
+                      </div>
                     </div>
                   </div>
                   <button
