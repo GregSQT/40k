@@ -473,6 +473,7 @@ class RewardMapper:
         """Check if this target had the lowest HP among all_targets when the kill action was taken."""
         for other in all_targets:
             if other is not target:
-                if self._get_target_hp(other, game_state) < target_hp:
+                other_hp = self._get_target_hp(other, game_state)
+                if other_hp > 0 and other_hp < target_hp:
                     return False
         return True
