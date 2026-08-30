@@ -4615,7 +4615,7 @@ export const BoardWithAPI: React.FC = () => {
                       : {
                           position: "absolute",
                           left: "50%",
-                          top: "40%",
+                          top: "50%",
                           transform: "translate(-50%, -50%)",
                         }
                   }
