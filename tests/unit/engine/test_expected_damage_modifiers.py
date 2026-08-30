@@ -19,6 +19,7 @@ Convention de calcul des valeurs de référence (voir commentaire dans le module
 from __future__ import annotations
 
 from typing import Any, Dict
+from unittest.mock import patch
 
 import pytest
 
@@ -167,3 +168,35 @@ def test_waaagh_inactive_no_bonus() -> None:
 
     result = expected_damage(_WEAPON, _TARGET, attacker, game_state, is_melee=True)
     assert result == pytest.approx(1 / 3)
+
+
+# ---------------------------------------------------------------------------
+# 6. bonus_malus_cap lu depuis game_state et transmis à apply_hit_roll_modifiers
+# ---------------------------------------------------------------------------
+
+def test_hit_cap_clamps_net_modifier() -> None:
+    """bonus_malus_cap=1 clamp un net=2 à 1 : hit 2+ devient 3+.
+
+    hit_roll_modifier_terms retourne bonus=1 au maximum avec les règles actuelles.
+    On patch à bonus=2 pour couvrir le chemin cap > 0 qui était absent (ligne 65).
+
+    Arme ATK=4, bonus=2 cappé à 1 → hit 3+ :
+      p_hit=4/6, wound_threshold(4,4)=4 → p_wound=3/6, save_threshold(5,7,0)=5 → p_fail=4/6
+      ev/atk = 4/6×3/6×4/6×1 = 2/9   total = 2×2/9 = 4/9
+
+    Sans cap (cap=0), bonus=2 → hit 2+ :
+      p_hit=5/6   →   ev/atk = 5/6×3/6×4/6 = 5/18   total = 2×5/18 = 5/9
+    """
+    attacker = {**_BASE_ATTACKER}
+
+    gs_cap1 = {**_BASE_GAME_STATE, "config": {"game_rules": {"bonus_malus_cap": 1}}}
+    gs_cap0 = {**_BASE_GAME_STATE, "config": {"game_rules": {"bonus_malus_cap": 0}}}
+
+    _hit_terms_bonus2 = "engine.utils.expected_damage.hit_roll_modifier_terms"
+
+    with patch(_hit_terms_bonus2, return_value=(2, 0, None, None)):
+        result_cap1 = expected_damage(_WEAPON, _TARGET, attacker, gs_cap1, is_melee=True)
+        result_cap0 = expected_damage(_WEAPON, _TARGET, attacker, gs_cap0, is_melee=True)
+
+    assert result_cap1 == pytest.approx(4 / 9)
+    assert result_cap0 == pytest.approx(5 / 9)
