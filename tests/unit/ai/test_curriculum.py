@@ -18,6 +18,8 @@ from collections import Counter
 
 import pytest
 
+from shared.data_validation import ConfigurationError
+
 from ai.curriculum import (
     RATIO_SUM_TOLERANCE,
     assign_pool_members_to_envs,
@@ -304,7 +306,7 @@ def test_exploiter_with_non_unit_weight_pool_is_refused() -> None:
 def test_early_stop_with_missing_key_is_refused() -> None:
     broken = _minimal_curriculum()
     broken["early_stop"] = {"win_rate_threshold": 0.60, "min_steps": 1000}  # manque consecutive_evals
-    with pytest.raises(KeyError, match="consecutive_evals"):
+    with pytest.raises(ConfigurationError, match="consecutive_evals"):
         validate_curriculum(broken)
 
 
@@ -312,7 +314,7 @@ def test_early_stop_with_wrong_key_name_is_refused() -> None:
     """Cle erronee (ex. 'win_rate_thresh') doit etre refusee."""
     broken = _minimal_curriculum()
     broken["early_stop"] = {"win_rate_thresh": 0.60, "min_steps": 1000, "consecutive_evals": 2}
-    with pytest.raises(KeyError, match="win_rate_threshold"):
+    with pytest.raises(ConfigurationError, match="win_rate_threshold"):
         validate_curriculum(broken)
 
 
@@ -329,7 +331,7 @@ def test_stage_early_stop_override_with_wrong_key_is_refused() -> None:
         "min_steps": 1000,
         "consecutive_evals": 2,
     }
-    with pytest.raises(KeyError, match="win_rate_threshold"):
+    with pytest.raises(ConfigurationError, match="win_rate_threshold"):
         validate_curriculum(broken)
 
 

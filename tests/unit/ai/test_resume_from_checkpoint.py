@@ -387,7 +387,7 @@ def _run_main_failing_after_promotion(monkeypatch, ckpt, exc):
 
     monkeypatch.setattr(
         sys, "argv",
-        ["train.py", "--agent", "TestAgent", "--training-config", "x1", "--resume-from", ckpt],
+        ["train.py", "--agent", "TestAgent", "--training-config", "x1", "--resolution", "1", "--resume-from", ckpt],
     )
 
     def _fail(*_args, **_kwargs):

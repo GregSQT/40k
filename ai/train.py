@@ -5106,19 +5106,6 @@ def main():
                             "plante) — interdit si init='new'.")
     args = parser.parse_args()
 
-    from config_loader import BOARD_DIR_BY_INCHES_TO_SUBHEX
-    if args.resolution is None:
-        import re as _re
-        _m = _re.search(r"_x(\d+)$", args.agent)
-        if _m:
-            args.resolution = int(_m.group(1))
-        else:
-            raise ValueError(
-                f"Impossible de deduire la resolution depuis le nom d'agent '{args.agent}' "
-                f"(suffixe _x1 / _x5 attendu). Passe --resolution explicitement."
-            )
-    os.environ["W40K_BOARD_PATH"] = BOARD_DIR_BY_INCHES_TO_SUBHEX[args.resolution]
-
     # `--new` cree un modele neuf, `--append` continue l'existant : c'est l'un OU l'autre. Rien
     # dans argparse ne les rend exclusifs, et le code choisissait `--new` en silence — une
     # commande dont un drapeau ne sert a rien est une faute de frappe, pas une intention.
@@ -5186,6 +5173,19 @@ def main():
                 f"installe au chemin canonique puis remis en etat en sortie."
             )
         args.append = True
+
+    from config_loader import BOARD_DIR_BY_INCHES_TO_SUBHEX
+    if args.resolution is None:
+        import re as _re
+        _m = _re.search(r"_x(\d+)$", args.agent)
+        if _m:
+            args.resolution = int(_m.group(1))
+        else:
+            raise ValueError(
+                f"Impossible de deduire la resolution depuis le nom d'agent '{args.agent}' "
+                f"(suffixe _x1 / _x5 attendu). Passe --resolution explicitement."
+            )
+    os.environ["W40K_BOARD_PATH"] = BOARD_DIR_BY_INCHES_TO_SUBHEX[args.resolution]
 
     # AU PLUS TOT : avant le StepLogger, avant `node scripts/copy-configs.js`, avant toute
     # construction d'environnement. Ce qui se joue ici, c'est un modele entraine des heures
