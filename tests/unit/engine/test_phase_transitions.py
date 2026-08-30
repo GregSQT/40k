@@ -274,3 +274,16 @@ class TestFightTransition:
         assert "active_alternating_activation_pool" in gs
         assert "non_active_alternating_activation_pool" in gs
 
+    def test_fight_phase_start_efface_finest_hour_active_this_phase(self):
+        """fight_fh_clear : finest_hour_active_this_phase remis à vide au début de chaque phase de fight.
+
+        Régression : sans ce clear, DEVASTATING WOUNDS reste actif en phase 2 si l'abilité
+        once_per_battle_melee_buff a été déclenchée en phase 1.
+        """
+        units = [_unit(1, 1, 5, 10), _unit(2, 2, 6, 10)]
+        gs = _make_fight_gs(units)
+        gs["finest_hour_active_this_phase"] = {"1"}  # simulé depuis phase 1
+        fight_phase_start(gs)
+        assert gs.get("finest_hour_active_this_phase") == set(), \
+            "finest_hour_active_this_phase doit être purgé à chaque fight_phase_start"
+
