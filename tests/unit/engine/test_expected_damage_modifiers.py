@@ -171,20 +171,20 @@ def test_waaagh_inactive_no_bonus() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 6. bonus_malus_cap lu depuis game_state et transmis à apply_hit_roll_modifiers
+# 6. expected_damage utilise le hit_target retourné par resolve_hit_roll_modifiers
 # ---------------------------------------------------------------------------
 
-def test_hit_cap_clamps_net_modifier() -> None:
-    """expected_damage délègue à resolve_hit_roll_modifiers, qui applique le cap.
+def test_hit_modifier_applied_via_resolve_hit_roll_modifiers() -> None:
+    """Le hit_target ajusté par resolve_hit_roll_modifiers est bien utilisé dans le calcul.
 
-    On patch resolve_hit_roll_modifiers pour simuler deux résultats :
-      - hit_target=3 (bonus=2 cappé à 1 par cap=1 : net clamped → 4-1=3)
-      - hit_target=2 (bonus=2 sans cap : net=2 → 4-2=2)
+    On patch resolve_hit_roll_modifiers pour simuler bonus=2 cappé à 1 (hit 3+)
+    puis bonus=2 sans cap (hit 2+). La logique de cap est interne à resolve_hit_roll_modifiers
+    (testée dans shared_utils) ; ici on vérifie que expected_damage utilise le retour.
 
-    Arme ATK=4, NB=2, DMG=1, T=4, SV=5 :
-      hit 3+ → p_hit=4/6, wound_threshold(4,4)=4 → p_wound=3/6, save(5,7,0)=5 → p_fail=4/6
-               ev/atk = 4/6×3/6×4/6 = 2/9   total = 4/9
-      hit 2+ → p_hit=5/6   → ev/atk = 5/6×3/6×4/6 = 5/18   total = 5/9
+    Arme ATK=4, hit 3+ → p_hit=4/6, wound(4,4)=4+, save(5,7,0)=5+ → p_fail=4/6
+      ev/atk = 4/6×3/6×4/6×1 = 2/9   total = 2×2/9 = 4/9
+
+    hit 2+ → p_hit=5/6   →   ev/atk = 5/6×3/6×4/6 = 5/18   total = 2×5/18 = 5/9
     """
     attacker = {**_BASE_ATTACKER}
     game_state = {**_BASE_GAME_STATE}

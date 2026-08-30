@@ -35,8 +35,7 @@ def expected_damage(
       target_unit — T, ARMOR_SAVE, INVUL_SAVE (7 = aucune invul)
 
     Quand attacker_unit ET game_state sont fournis, les modificateurs de la Primitive A
-    (Might Is Right, suppression) sont appliqués au seuil de touche via hit_roll_modifier_terms /
-    apply_hit_roll_modifiers, exactement comme le fait _auto_select_cc_weapon_for_fig.
+    (Might Is Right, suppression) sont appliqués au seuil de touche via resolve_hit_roll_modifiers.
     Si is_melee=True, le bonus Waaagh! (+1 STR, +1 NB) est également appliqué.
 
     Contrat game_state quand game_state is not None :
