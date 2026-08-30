@@ -5,13 +5,12 @@
   "order": ["P0", "P1", "P2", "P3", "E1", "P4", "P5", "E2", "P6", "P7", "P8", "E3", "P9", "P10"],
 
   "exploiter_config": {
-    "_doc": "Parametres geles partages par toutes les etapes exploiteurs (E1..E3). training_config_required : le --training-config exact a utiliser pour les trois runs — diverger = run refuse avant demarrage (meme seed, memes hyperparametres, comparabilite des budgets garantie). probe_every_episodes/probe_cheap_n : sonde bon marche. probe_confirm_n : sonde de confirmation declenchee des que la sonde bon marche passe le seuil. win_rate_target : seuil de franchissement (0.70). budget_cap : plafond en episodes ; journalise '>budget_cap' si non atteint.",
+    "_doc": "Parametres geles partages par toutes les etapes exploiteurs (E1..E3). training_config_required : le --training-config exact a utiliser pour les trois runs — diverger = run refuse avant demarrage (meme seed, memes hyperparametres, comparabilite des budgets garantie). probe_every_episodes/probe_cheap_n : sonde bon marche. probe_confirm_n : sonde de confirmation declenchee des que la sonde bon marche passe le seuil. win_rate_target : seuil de franchissement (0.70). budget_cap : defini par etape dans chaque bloc E.",
     "training_config_required": "x1_long",
     "probe_every_episodes": 2000,
     "probe_cheap_n": 100,
     "probe_confirm_n": 500,
-    "win_rate_target": 0.70,
-    "budget_cap": 100000
+    "win_rate_target": 0.70
   },
 
   "opponent": {
@@ -54,7 +53,7 @@
         {"kind": "champion", "members": ["P0"], "weight": 0.50}
       ],
       "training_config_overrides": {
-        "total_episodes": 75000,
+        "total_episodes": 150000,
         "model_params": {
           "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
           "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
@@ -72,7 +71,7 @@
         {"kind": "ancients", "members": ["P0"], "weight": 0.20}
       ],
       "training_config_overrides": {
-        "total_episodes": 100000,
+        "total_episodes": 200000,
         "model_params": {
           "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
           "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
@@ -90,7 +89,7 @@
         {"kind": "ancients", "members": ["P0", "P1"], "weight": 0.30}
       ],
       "training_config_overrides": {
-        "total_episodes": 125000,
+        "total_episodes": 250000,
         "model_params": {
           "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
           "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
@@ -104,6 +103,7 @@
       "warmup_episodes": 0,
       "ratio_start": 1.0,
       "ratio_end": 1.0,
+      "budget_cap": 100000,
       "pool": [
         {"kind": "champion", "members": ["P3"], "weight": 1.0}
       ]
@@ -120,7 +120,7 @@
         {"kind": "exploiters", "members": ["E1"], "weight": 0.25}
       ],
       "training_config_overrides": {
-        "total_episodes": 160000,
+        "total_episodes": 300000,
         "model_params": {
           "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
           "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
@@ -153,6 +153,7 @@
       "warmup_episodes": 0,
       "ratio_start": 1.0,
       "ratio_end": 1.0,
+      "budget_cap": 100000,
       "pool": [
         {"kind": "champion", "members": ["P5"], "weight": 1.0}
       ]
@@ -221,6 +222,7 @@
       "warmup_episodes": 0,
       "ratio_start": 1.0,
       "ratio_end": 1.0,
+      "budget_cap": 100000,
       "pool": [
         {"kind": "champion", "members": ["P8"], "weight": 1.0}
       ]

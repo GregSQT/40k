@@ -59,7 +59,6 @@ _EXPLOITER_CONFIG_REQUIRED_KEYS = (
     "probe_cheap_n",
     "probe_confirm_n",
     "win_rate_target",
-    "budget_cap",
 )
 
 #: Cles autorisees au niveau racine de `training_config_overrides` d'une etape learner.
