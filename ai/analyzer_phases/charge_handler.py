@@ -341,7 +341,7 @@ def handle_charge(
                     'charge_to': (dest_col, dest_row)
                 })
         else:
-            if state.unit_hp.get(charge_unit_id, 0) > 0:
+            if charge_unit_id in state.unit_hp and require_key(state.unit_hp, charge_unit_id) > 0:
                 _position_cache_set(state.unit_positions, charge_unit_id, dest_col, dest_row)
 
         # Sample action
