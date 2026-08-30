@@ -738,13 +738,13 @@ export const BoardWithAPI: React.FC = () => {
   });
   const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp" || gameMode === "pve";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
-  const [selectedTerrain, _setSelectedTerrain] = useState<"mc1" | "mc2">(() => {
+  const [selectedTerrain, _setSelectedTerrain] = useState<"mc1" | "mc2" | "pfm2">(() => {
     const params = new URLSearchParams(window.location.search);
     const t = params.get("terrain");
-    if (t === "mc1" || t === "mc2") return t;
+    if (t === "mc1" || t === "mc2" || t === "pfm2") return t;
     if (params.get("mode") === "pve") return "mc1";
     const saved = localStorage.getItem("gameprep_terrain");
-    if (saved === "mc1" || saved === "mc2") return saved;
+    if (saved === "mc1" || saved === "mc2" || saved === "pfm2") return saved;
     return "mc2";
   });
   const [saveConfigAsDefault, setSaveConfigAsDefault] = useState(
@@ -4863,6 +4863,7 @@ export const BoardWithAPI: React.FC = () => {
                           [
                             { value: "mc1", label: "Terrain 1" },
                             { value: "mc2", label: "Terrain 2" },
+                            { value: "pfm2", label: "Purge the Foe Mirror 2" },
                           ] as const
                         ).map((opt) => (
                           <button
@@ -4889,6 +4890,11 @@ export const BoardWithAPI: React.FC = () => {
                           className="test-start-modal__terrain-side-img preview-mc2"
                           src="/icons/Terrain/terrain-mc2.jpg"
                           alt="Terrain 2"
+                        />
+                        <img
+                          className="test-start-modal__terrain-side-img preview-pfm2"
+                          src="/icons/Terrain/terrain-mc2.jpg"
+                          alt="Purge the Foe Mirror 2"
                         />
                       </div>
                     </div>
