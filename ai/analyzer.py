@@ -847,7 +847,7 @@ def _analyzer_engagement_metric() -> str:
     return get_run_rule("metric.engagement")
 
 
-def _analyzer_engagement_zone_vertical() -> float:
+def _analyzer_engagement_zone_vertical() -> Optional[float]:
     """Volet VERTICAL de la zone d'engagement (§03.04 : 2" horizontal ET 5" vertical), en POUCES.
 
     Même contrat que `_analyzer_engagement_metric` : la valeur vient de l'entête `Run rules:` du
@@ -858,9 +858,13 @@ def _analyzer_engagement_zone_vertical() -> float:
     hauteurs de plancher, déjà en pouces (même contrat que
     `spatial_relations.get_engagement_zone_vertical`). Le multiplier par `inches_to_subhex`
     rendrait le gate inopérant (5 → 25" à x5).
+
+    Retourne ``None`` si la clé est absente du journal (logs antérieurs au gate vertical, ou run
+    2D sans seuil). L'appelant traite ``None`` comme l'absence de gate vertical.
     """
-    from ai.analyzer_config import get_run_rule
-    return float(get_run_rule("engagement_zone_vertical_inches"))
+    from ai.analyzer_config import get_run_rule_optional
+    v = get_run_rule_optional("engagement_zone_vertical_inches")
+    return float(v) if v is not None else None
 
 
 def _offenders_str(first_err: Dict[str, Any]) -> str:
@@ -1040,7 +1044,9 @@ def _iter_engaging_enemy_ids(
     # Seuil vertical lu PARESSEUSEMENT, à la première paire qui porte réellement des altitudes :
     # un journal sans hauteurs n'a pas besoin de la règle, et l'exiger d'emblée rendrait
     # inanalysable tout journal antérieur à cette clé d'entête sans rien mesurer de plus.
-    vertical_zone: Optional[float] = None
+    # Sentinelle distincte de None (= pas de gate) pour éviter de refetcher à chaque paire.
+    _VERTICAL_NOT_FETCHED: object = object()
+    vertical_zone: Any = _VERTICAL_NOT_FETCHED
     for uid, anchor in unit_positions.items():
         if uid == unit_id or uid == exclude_unit_id or uid not in unit_player:
             continue
@@ -1063,7 +1069,7 @@ def _iter_engaging_enemy_ids(
                 # Gate vertical UNIQUEMENT si les deux entrées le portent (cf. docstring).
                 _vz: Optional[float] = None
                 if "MODEL_HEIGHT" in subject_entry and "MODEL_HEIGHT" in enemy_entry:
-                    if vertical_zone is None:
+                    if vertical_zone is _VERTICAL_NOT_FETCHED:
                         vertical_zone = _analyzer_engagement_zone_vertical()
                     _vz = vertical_zone
                 if unit_entries_within_engagement_zone(
