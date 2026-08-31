@@ -18,6 +18,7 @@ import os
 import time
 import re
 import math
+from tqdm import tqdm as _tqdm
 import tempfile
 from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -2900,7 +2901,7 @@ class PoolEarlyStoppingCallback(BaseCallback):
         labels = [label for _, label in self.pool_archives]
         missing = [lbl for lbl in labels if lbl not in scores]
         if missing:
-            print(
+            _tqdm.write(
                 f"⚠️  PoolEarlyStoppingCallback : scores manquants pour {missing} "
                 "— éval ignorée, entraînement continue."
             )
@@ -2910,25 +2911,25 @@ class PoolEarlyStoppingCallback(BaseCallback):
         score_str = ", ".join(f"{lbl}={scores[lbl]:.3f}" for lbl in labels)
         if all_above:
             self._consecutive_above += 1
-            print(
+            _tqdm.write(
                 f"✅ Pool early-stop : {score_str} >= {self.threshold:.0%} "
                 f"({self._consecutive_above}/{self.consecutive_evals} évals consécutives) "
                 f"@ep{current}"
             )
             if self._consecutive_above >= self.consecutive_evals:
-                print(
+                _tqdm.write(
                     f"🛑 Early stop déclenché : seuil {self.threshold:.0%} confirmé "
                     f"{self.consecutive_evals}× consécutif(s) contre tous les membres du pool."
                 )
                 return False
         else:
             if self._consecutive_above > 0:
-                print(
+                _tqdm.write(
                     f"↩️  Pool early-stop : seuil non atteint ({score_str}) "
                     f"— compteur réinitialisé ({self._consecutive_above} → 0) @ep{current}"
                 )
             else:
-                print(f"📊 Pool early-stop : {score_str} (seuil {self.threshold:.0%}) @ep{current}")
+                _tqdm.write(f"📊 Pool early-stop : {score_str} (seuil {self.threshold:.0%}) @ep{current}")
             self._consecutive_above = 0
 
         return True
