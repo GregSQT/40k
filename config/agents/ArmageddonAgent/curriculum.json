@@ -45,7 +45,7 @@
     "P1": {
       "role": "learner",
       "init": "new",
-      "warmup_episodes": 5000,
+      "warmup_episodes": 20000,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
       "ratio_end": 0.50,
