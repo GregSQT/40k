@@ -11182,8 +11182,7 @@ def _count_selected_hazardous_weapons(
         if args_c is None or weapons_c[widx].get("code") != args_c.get("weapon_code"):  # get allowed
             continue
         threshold_c = int(args_c.get("hazardous_threshold", 99))  # get allowed
-        entry_c = squad_cache_hz.get(squad_id_c)
-        if entry_c is None:
+        if (entry_c := squad_cache_hz.get(squad_id_c)) is None:
             continue
         alive_c = int(require_key(entry_c, "model_count"))
         if alive_c >= threshold_c:

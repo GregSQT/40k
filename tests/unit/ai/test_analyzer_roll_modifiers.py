@@ -92,7 +92,6 @@ class _State(AnalyzerState):
             "1": {mid: (0, 0) for mid in attacker_models},
             "9": {"9#0": (5, 5)},
         }
-        self.active_effects = {}
         self.current_episode_num = 1
 
 

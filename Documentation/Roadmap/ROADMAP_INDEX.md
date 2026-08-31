@@ -130,6 +130,9 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | ai | ✅ simplify-rule-ids-leader-mid — diagnostics tests : _leader_mid try/except StopIteration, _rule_ids try plus étroit + walrus (2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
 | moteur | ✅ simplify-grot-orderly — _squad_mode_level O(n) mutualisé (Counter), double _alive_model_ids réduit à un appel, list() inutile retiré (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
 | ai+moteur | ✅ lots 2026-08-31 bugs — fix-analyzer-config-findings (8 bugs analyzer), placement-result-enum (PlacementResult Enum), fix-grot-orderly-destroyed-models (destroyed_models adversaire préservé vague endless_duty) | [analyzer.md](analyzer.md) [moteur.md](moteur.md) | ⚡ |
+| moteur+ai | ✅ fix-grot-orderly-command-resume — 2 bugs command_handlers (skip temporaire + require_key), simplify opponent_unit_ids, simplify analyzer_config (2026-08-31) | [moteur.md](moteur.md) [analyzer.md](analyzer.md) | ⚡ |
+| moteur+ai+tests | ✅ fix-pyright-ai-rules — corriger 22 erreurs pyright/check_ai_rules root causes structurelles (secured_objectives, _restored_model_counter, require_key, _State→AnalyzerState, walrus) (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
+| moteur+tests | ✅ simplify-active-effects-walrus — active_effects redondant retiré (_State hérite AnalyzerState), walrus entry_c shared_utils (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
 
 ---
 
