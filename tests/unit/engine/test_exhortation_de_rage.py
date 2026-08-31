@@ -202,7 +202,7 @@ def test_single_target_auto_applique_sans_decision(monkeypatch):
     engine = _FakeEngine(_gs())
     # _FakeEngine ne hérite pas de W40KEngine : poser le stub directement sur l'instance.
     engine._continue_squad_fight_after_selection = (
-        lambda squad_id, target_slot: _fake_continue(engine, squad_id, target_slot)
+        lambda squad_id, target_slot, **_kw: _fake_continue(engine, squad_id, target_slot)
     )
     result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None)
 
