@@ -463,7 +463,7 @@ def self_model_bin_index(field: str) -> int:
 #: aucune datasheet — c'est le mot-clé FLY qui l'ouvre et 21.03 qui en fixe le prix —, donc ses
 #: deux candidats portent eux aussi un `effect_ids` VIDE. C'est `declines` qui les sépare :
 #: `CHOICE_1` renonce au vol, et le renoncement est précisément « ne rien faire ».
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement")
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots
@@ -486,6 +486,12 @@ MAX_DECISION_OPTIONS = 6
 #: pas se retrouver à un type près. Coût du pré-dimensionnement : 6 scalaires par observation.
 #: Dépasser ce nombre LÈVE ci-dessous — jamais de troncature, un type non observé serait une
 #: décision que l'agent prend sans savoir laquelle on lui demande.
+#:
+#: ⚠️ PLUS AUCUN SLOT LIBRE : `returned_models_profile` (Grot Orderly, quelles figurines détruites
+#: reviennent) a consommé le huitième. La marge prévue pour les tranches P3 est épuisée — la
+#: prochaine ouverture de type devra augmenter cette constante, ce qui change `obs_size` et impose
+#: un ré-entraînement `--new`. Ce n'est plus une extension gratuite : à budgéter avant de promettre
+#: un type à une tranche.
 AGENT_DECISION_TYPE_SLOTS = 8
 
 if len(AGENT_DECISION_TYPE_IDS) > AGENT_DECISION_TYPE_SLOTS:

@@ -577,9 +577,23 @@ C'est la primitive résiduelle. Elle est large mais cohérente : tout ce qui mod
 | Finest Hour (compteur) | Captain | `once_per_battle` | compteur, l'effet est en primitive B |
 | Purgation Run | Land Speeder | `move_after_shooting` **étendu** | voir ci-dessous |
 
-### Grot Orderly : le PLACEMENT est la moitié de la règle
+### Grot Orderly : QUELLES figurines reviennent, avant même où les poser
 
-`25 Rules appendix`, entrée REVIVED : *« Models returned to a unit on the battlefield must be set up […] in coherency with models in that unit that started that phase on the battlefield. […] They can be engaged with one or more enemy units, but only if those enemy units are already engaged with the unit those models are being returned to. »*
+`25 Rules appendix`, entrée REVIVED : *« When a rule revives, resurrects or returns models to a unit, **the specified number of destroyed models are added to the unit**. This cannot expand a unit beyond its starting strength. **Such models are added with all wargear and enhancements they started the battle with** and, unless otherwise stated, they are returned with their full wounds remaining. »*
+
+Ce sont les figurines **réellement détruites** qui reviennent, avec leur propre profil. La première implémentation clonait la première figurine VIVANTE de l'escouade (`copy.copy(template)`), faute de savoir ce qui était mort : `destroy_model` supprime l'entrée de `models_cache` et le profil disparaît avec elle. Sur le roster Armageddon (9 Boyz à 8 pts + Nob à 12 + Warboss à 85 + PainBoy à 90 dans une même escouade), une escouade réduite à son PainBoy rendait **trois PainBoy à 90 points** pour des Boyz à 8 : mesuré à **+101 points au-dessus de la valeur de départ de l'armée**, ce qui faisait lever l'invariant de VALUE de `w40k_core` en fin d'épisode et arrêtait l'entraînement.
+
+Le garde qui devait l'éviter (`if "attached_from" not in m`) ne filtrait rien : `attached_from` n'est posé que sur les personnages attachés via `attached_to`, jamais sur ceux que le **roster fusionne directement dans `models[]`** — ce que font tous les rosters d'entraînement. C'est le piège à retenir : **une escouade peut contenir un personnage sans qu'aucune figurine ne porte `attached_from`.**
+
+D'où `game_state["destroyed_models"]` : `destroy_model` archive le profil au moment du `del`, seul instant où il existe encore ; `build_units_cache` vide l'archive au reset, à côté de `value_at_start`. Une figurine rendue **sort** de l'archive — sans quoi elle pourrait revenir deux fois, et là la valeur augmenterait pour de bon.
+
+Le choix des figurines est une décision de joueur (`returned_models_profile`), posée seulement si plusieurs profils sont morts : la règle fixe le NOMBRE (D3), jamais l'identité, et un Warboss à 85 points ne vaut pas trois Boyz — les points et le contrôle d'objectif (14.02) ne désignent pas le même gagnant. Si le profil choisi compte moins de figurines détruites que le D3 ne l'autorise, le complément suit l'**ordre de destruction** : compléter par les plus chères rendrait le choix sans effet, par les moins chères le punirait.
+
+⚠️ Ce type a consommé le **dernier slot** de `AGENT_DECISION_TYPE_SLOTS` (8). La prochaine ouverture de type changera `obs_size` et imposera un ré-entraînement `--new`.
+
+### Le placement est l'autre moitié de la règle
+
+*« Models returned to a unit on the battlefield must be set up […] in coherency with models in that unit that started that phase on the battlefield. […] They can be engaged with one or more enemy units, but only if those enemy units are already engaged with the unit those models are being returned to. »*
 
 Restituer les figurines sans les POSER est un défaut silencieux, pas une approximation : la première implémentation les empilait toutes sur la case du template, et comme le move d'escouade est rigide, la superposition se reportait sur chaque destination — `execute_squad_move` refusait ensuite **tous** les mouvements de l'escouade (« collision intra-plan »), pour le reste de la partie.
 
@@ -588,7 +602,11 @@ Deux points à ne pas perdre :
 - **Le test est par EMPREINTE, jamais par ancre.** À x5 un socle couvre plusieurs subhexes, et `def explain_move_plan_rejection` ne compare, lui, que les ancres `(niveau, col, row)` : deux socles posés sur des ancres distinctes mais aux empreintes recouvrantes ne déclencheraient AUCUN contrôle. Le placement doit donc être validé à la source (`def returned_models_legal_cells`).
 - **Aucune marge entre socles.** `def generate_compact_formation` impose un hex de marge, mais c'est propre à la génération d'une formation aérée ; la règle de validité tolère le contact, et l'appliquer ici refuserait des placements légaux.
 
+- **Le BFS part d'une figurine PRÉSENTE, pas du gabarit.** Depuis que le gabarit d'empreinte est un profil *archivé*, ses coordonnées sont la sentinelle `(-1,-1)` : asseoir la recherche dessus explorait le coin `(0,0)` du plateau et ne trouvait aucune case cohérente. Le gabarit ne sert plus qu'au socle, à la hauteur et au niveau ; c'est celui de la figurine **au plus grand socle** parmi celles qui reviennent, sans quoi une case validée sur le plus petit laisserait la plus grosse dans le décor.
+
 Le choix des positions est une décision de joueur, exposée à l'agent en **intentions** (`toward_enemy`, `toward_objective`, `away_from_enemy`) et non en cases : les cases légales dépassent `MAX_DECISION_OPTIONS`, et §9.0bis interdit un top-K tronqué. Une seule intention possible = aucune décision posée. Aucune case légale = aucune figurine rendue, et le « once per battle » n'est **pas** consommé.
+
+`plan_returned_models_placement` peut rendre **moins** de cases que de figurines choisies : c'est un cas de jeu, pas une erreur — la règle n'ouvre aucune pose de repli, et les figurines sans case restent détruites, donc dans l'archive.
 
 ### Le piège des InSv conférés
 

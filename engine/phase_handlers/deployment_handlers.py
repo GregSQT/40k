@@ -608,7 +608,14 @@ def returned_models_legal_cells(
         lc_radius,
     )
 
-    anchor_col, anchor_row = int(template["col"]), int(template["row"])
+    # Le BFS part d'une figurine PRÉSENTE, jamais de `template` : depuis que les figurines rendues
+    # sont les vraies figurines détruites (REVIVED), le template est un profil ARCHIVÉ, dont les
+    # coordonnées sont la sentinelle (-1,-1) — la recherche explorait alors le coin (0,0) du
+    # plateau et ne trouvait aucune case cohérente avec l'escouade. `template` ne sert plus qu'à
+    # l'EMPREINTE (socle, hauteur, niveau) ; l'origine de la recherche est l'escouade, ce que dit
+    # d'ailleurs la règle : « in coherency with models in that unit that started that phase on the
+    # battlefield ». `present` est non vide (contrôlé plus haut) et filtré sur le bon niveau.
+    anchor_col, anchor_row = int(present[0]["col"]), int(present[0]["row"])
     radius = _returned_placement_search_radius(
         game_state, template, (anchor_col, anchor_row)
     )

@@ -2087,6 +2087,15 @@ export const BoardWithAPI: React.FC = () => {
     const pending = apiProps.gameState?.pending_agent_decision ?? null;
     return pending && pending.type === "returned_models_placement" ? pending : null;
   })();
+  // Grot Orderly, PREMIÈRE étape — QUELLES figurines détruites reviennent. La règle fixe le
+  // nombre (D3) mais pas l'identité, et un personnage à 90 points ne vaut pas trois figurines de
+  // base à 8 : le choix appartient au joueur. Le moteur arrête la phase dessus comme sur le
+  // placement, donc sans ce panneau une partie PvP resterait bloquée. Cette décision n'est posée
+  // que si PLUSIEURS profils sont morts — sinon il n'y a rien à choisir.
+  const returnedProfileDecision = (() => {
+    const pending = apiProps.gameState?.pending_agent_decision ?? null;
+    return pending && pending.type === "returned_models_profile" ? pending : null;
+  })();
   const oathSelectionPlayer = apiProps.gameState?.pending_oath_selection ?? null;
   // Les cibles légales : les MÊMES que celles du moteur (`oath_selectable_enemy_ids`) — unités
   // adverses encore vivantes. Une liste plus large ferait proposer une désignation que
@@ -4182,9 +4191,44 @@ export const BoardWithAPI: React.FC = () => {
           </div>
         </div>
       )}
-      {/* Grot Orderly : où poser les figurines rendues. Un bouton par intention offerte par le
-          moteur ; `onCallWaaagh` est le verbe GÉNÉRIQUE `agent_decision` + `option_index` (son
-          nom vient de son premier usage), c'est la même route que le Waaagh! et l'ordre des
+      {/* Grot Orderly, temps 1 : QUELLES figurines reviennent. Même route générique que les
+          autres décisions (`agent_decision` + `option_index`, d'où `onCallWaaagh`), et l'ordre
+          des candidats est contractuel. Le libellé affiche la valeur en points et l'effectif
+          disponible, sans quoi le choix serait illisible : « Boyz » ou « Warboss » ne dit pas au
+          joueur ce qu'il récupère. */}
+      {returnedProfileDecision && (
+        <div className="rule-choice-overlay">
+          <div className="deployment-panel__picker deployment-panel__picker--oath">
+            <div className="deployment-panel__picker-title">
+              {`Returned models — which ones? — player ${returnedProfileDecision.player}`}
+            </div>
+            <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
+              <div className="deployment-panel__picker-tooltip">
+                {
+                  "Destroyed models are returned to this unit, with the wargear they started the battle with. The rule sets how MANY come back, not which ones.\n\nChoose the profile to bring back first. If fewer models of that profile were destroyed than the roll allows, the remaining slots are filled in order of destruction."
+                }
+              </div>
+            </div>
+            <div className="deployment-panel__picker-actions deployment-panel__picker-actions--oath">
+              {returnedProfileDecision.options.map((option, index) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  className="deployment-panel__picker-close deployment-panel__picker-close--validate"
+                  onClick={() => {
+                    void apiProps.onCallWaaagh(index);
+                  }}
+                >
+                  {`${option.label} — ${option.payload?.value ?? "?"} pts × ${option.payload?.count ?? "?"}`}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Grot Orderly, temps 2 : où poser les figurines rendues. Un bouton par intention offerte
+          par le moteur ; `onCallWaaagh` est le verbe GÉNÉRIQUE `agent_decision` + `option_index`
+          (son nom vient de son premier usage), c'est la même route que le Waaagh! et l'ordre des
           candidats est contractuel. */}
       {returnedPlacementDecision && (
         <div className="rule-choice-overlay">

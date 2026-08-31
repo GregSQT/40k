@@ -1264,6 +1264,11 @@ def build_units_cache(game_state: Dict[str, Any]) -> None:
         model_count_at_start_by_player[p] = model_count_at_start_by_player.get(p, 0) + 1  # get allowed : accumulateur, 0 = 1re figurine du joueur
     game_state["value_at_start"] = value_at_start
     game_state["model_count_at_start_by_player"] = model_count_at_start_by_player
+    # Archive des figurines detruites (alimentee par `destroy_model`, lue par la restitution
+    # Grot Orderly). VIDEE ICI, au meme instant que les deux photos de depart ci-dessus : elle
+    # decrit un episode, et une archive qui survivrait au reset ferait rendre a l'episode suivant
+    # des figurines mortes dans le precedent.
+    game_state["destroyed_models"] = {}
 
     from engine.game_utils import add_debug_file_log
     episode = game_state.get("episode_number", "?")
@@ -4101,6 +4106,20 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
 
     # 1. Retire du models_cache.
     del game_state["models_cache"][model_id]
+    # 1 bis. ARCHIVE le profil detruit (25 Rules appendix, REVIVED) : « the specified number of
+    # destroyed models are added to the unit […] with all wargear and enhancements they started
+    # the battle with ». Une regle de restitution rend les figurines REELLEMENT detruites, avec
+    # leur profil — or le `del` ci-dessus est le dernier endroit ou ce profil existe.
+    # Sans cette archive, la restitution n'avait rien a rendre et clonait une figurine VIVANTE :
+    # elle ressuscitait des personnages a la place des figurines de base (mesure sur le roster
+    # Armageddon : 3 PainBoy a 90 pts rendus pour des Boyz a 8), d'ou le depassement de VALUE
+    # detecte par l'invariant de `w40k_core`.
+    # INCONDITIONNEL : filtrer sur « l'escouade porte-t-elle la regle » ferait dependre l'archive
+    # de l'extinction 19.04, donc de l'ordre des morts — le porteur tombe souvent en premier.
+    # Le cout est une reference par mort, et `build_units_cache` vide l'archive au reset.
+    # Le dict vient d'etre retire du cache : plus personne ne le reference, la copie se fait a la
+    # RE-CREATION (`apply_returned_models_placement`) et pas ici.
+    game_state.setdefault("destroyed_models", {}).setdefault(squad_id, []).append(model)
     # 2. Retire de squad_models (preserve l ordre des autres figurines).
     squad_list = game_state["squad_models"].get(squad_id)
     if squad_list is not None and model_id in squad_list:
