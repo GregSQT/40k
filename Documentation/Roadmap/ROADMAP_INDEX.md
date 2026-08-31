@@ -104,6 +104,8 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
 ✅ **Simplification double str() overrun (2026-08-31)** — `best_str` local élimine le double appel `str(best_target_id)` dans `_continue_squad_fight_after_selection` (lignes 5874 et 5879) ; 12+34 tests verts.
 
+✅ **Correctifs 2026-09-01** — (1) 14 tests rouges : warmup_episodes P2–P10, lambda exhortation kwarg `from_exhortation`, scénarios terrain sélecteur `pve_mc1`/`pvp_test_mc2` créés. (2) Espace obs J4/J5 réservé : `reserved_mission_cont` → `bin` (éviter collapse VecNormalize ; éviter `--new` au chantier missions).
+
 ✅ **Faux ValueError overrun fight 12.06 corrigé (2026-08-31)** — garde `_did_overrun` ajoutée : une cible vivante mais non adjacente après le pile-in overrun ne déclenche plus ValueError, fallthrough vers `_fight_target_after_designated_death` ; test rouge→vert ajouté (`test_fight_target_reselect_overrun.py`, 12 verts).
 
 ✅ **270 échecs pytest corrigés (2026-08-31)** — 15 causes distinctes : `units_cache_entry` sans `HP_CUR`/`HP_MAX` (192+ failures), `allocate_mortal_wounds` patché sur le mauvais module, `BASE_SHAPE` absent des fixtures, `bonus_malus_cap` manquant, `squad_cache` absent, `unit_by_id` absent, `UNIT_RULES` absent, regex accent, message d'erreur périmé, garde overrun manquante, `step_logger` retour silencieux, terrain pfm2 mauvais chemin, `capacites.md` absent, doc action size / decision_ctx périmés. Aucun chantier doc.
