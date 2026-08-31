@@ -646,8 +646,8 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
         cache_entry = squad_cache.get(unit_id)
         if cache_entry is None:
             continue
-        count_start = int(cache_entry.get("model_count_at_start", 0))
-        count_now = int(cache_entry.get("model_count", 0))
+        count_start = int(require_key(cache_entry, "model_count_at_start"))
+        count_now = int(require_key(cache_entry, "model_count"))
         destroyed = count_start - count_now
         if destroyed <= 0:
             continue
@@ -969,7 +969,7 @@ def apply_returned_models_placement(
     # aucune pose de repli. Les figurines sans case restent détruites — donc dans l'archive.
     selected = list(selected)[:len(cells)]
 
-    counter = game_state.get("_restored_model_counter", 0)
+    counter = require_key(game_state, "_restored_model_counter")
     for (col, row), archive_index in zip(cells, selected):
         new_mid = f"{squad_id}#r{counter}"
         counter += 1

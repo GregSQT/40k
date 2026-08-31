@@ -194,10 +194,6 @@ def test_no_target_left_fights_empty(monkeypatch):
         fh, "build_manual_fight_allocation",
         lambda gs, sid: {"done": True, "waiting_for_player": False, "shoot_result": {}},
     )
-    monkeypatch.setattr(
-        wcore.generic_handlers if hasattr(wcore, "generic_handlers") else wcore,
-        "end_activation", lambda gs, unit, *a, **kw: {"ok": True}, raising=False,
-    )
     import engine.phase_handlers.generic_handlers as gh
     monkeypatch.setattr(gh, "end_activation", lambda gs, unit, *a, **kw: {"ok": True})
 

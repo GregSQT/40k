@@ -167,6 +167,7 @@ def _state(
         "suppressed_squads": {},
         "finest_hour_used": set(),
         "pending_agent_decision": None,
+        "_restored_model_counter": 0,
         "config": {
             "game_rules": {
                 "engagement_zone": 1,
@@ -687,7 +688,7 @@ def test_agent_profile_choice_is_honoured(monkeypatch: pytest.MonkeyPatch) -> No
     _real_dice = combat_utils.resolve_dice_value
     monkeypatch.setattr(
         combat_utils, "resolve_dice_value",
-        lambda spec, context=None: 2 if context == "grot_orderly_return"
+        lambda spec, context="": 2 if context == "grot_orderly_return"
         else _real_dice(spec, context),
     )
 
@@ -785,7 +786,7 @@ def test_profile_choice_no_cells_does_not_consume_once_per_battle(
     _real_dice = combat_utils.resolve_dice_value
     monkeypatch.setattr(
         combat_utils, "resolve_dice_value",
-        lambda spec, context=None: 1 if context == "grot_orderly_return"
+        lambda spec, context="": 1 if context == "grot_orderly_return"
         else _real_dice(spec, context),
     )
 

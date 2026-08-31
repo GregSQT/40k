@@ -1705,6 +1705,8 @@ class W40KEngine(gym.Env):
             "console_logs": [],  # CRITICAL: Initialize console_logs for debug logging across all episodes
             "hex_los_cache": {},  # PERFORMANCE: Clear hex-coordinate LoS cache for new episode
             "objective_controllers": {},  # RESET: Clear objective control for new episode
+            "secured_objectives": {},
+            "_restored_model_counter": 0,
             "pending_shooting_phase_init": False,
             "_pile_in_toCol": None,
             "_pile_in_toRow": None,
@@ -7949,13 +7951,9 @@ class W40KEngine(gym.Env):
             if _exhort is not None:
                 return _exhort
 
-            result = self._continue_squad_fight_after_selection(
+            return self._continue_squad_fight_after_selection(
                 squad_id, target_slot_from_semantic
             )
-            # _continue retourne (True, {...}) ou lève ; on en extrait le résultat pour suivre
-            # le même chemin que l ancien code (result assigné avant _fight_v11_gym_settle).
-            # NOTE: la branche à vide déjà fait gym_settle en interne ; la branche weapon non.
-            return result
 
         elif action_name == "squad_fight_target_sel":
             # Re-sélection de la cible CC après la mort de la cible désignée (Exhortation de

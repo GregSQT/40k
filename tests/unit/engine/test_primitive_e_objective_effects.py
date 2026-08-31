@@ -102,14 +102,13 @@ def _state(
         "command_points": {1: 0, 2: 0},
         "action_logs": [],
         "action_log_seq": 0,
+        "secured_objectives": dict(secured_objectives) if secured_objectives is not None else {},
         "config": {
             "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
             "controlled_player": 1,
         },
     }
-    if secured_objectives is not None:
-        gs["secured_objectives"] = dict(secured_objectives)
     return gs
 
 
@@ -173,7 +172,7 @@ def test_apply_secure_sans_porteur_renvoie_vide() -> None:
     u["col"], u["row"] = ZONE_HEX
     gs = _state([u], objective_controllers={str(OBJ_ID): 1})
     assert apply_secure_objective_on_control(gs) == []
-    assert "secured_objectives" not in gs
+    assert gs["secured_objectives"] == {}
 
 
 def test_apply_secure_porteur_hors_zone_ne_secure_pas() -> None:

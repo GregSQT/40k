@@ -23,6 +23,7 @@ from typing import Any, Dict
 
 import ai.analyzer_hit as ah
 import ai.analyzer_wound as aw
+from ai.analyzer_state import AnalyzerState
 from tests.unit.ai._fabriques import analyzer_config
 
 #: Escouade « 1 » : deux troupiers et un Warboss attaché. C'est le Warboss qui porte
@@ -79,20 +80,20 @@ def _config(**overrides: Any):
     })
 
 
-class _State:
+class _State(AnalyzerState):
     """Escouade attaquante « 1 » aux socles CONNUS — c'est le cas de production sur une ligne
     de mêlée : l'attaquant vient d'agir, donc son `[MODELS:]` est celui de la ligne."""
 
     def __init__(self, attacker_models=("1#0", "1#1", "1#2")) -> None:
+        super().__init__(stats=_stats())
         self.model_types = dict(MODEL_TYPES)
         self.unit_models_alive = {"1": len(attacker_models), "9": 1}
         self.positions_by_model = {
             "1": {mid: (0, 0) for mid in attacker_models},
             "9": {"9#0": (5, 5)},
         }
-        self.active_effects: Dict[int, Dict[str, str]] = {}
+        self.active_effects = {}
         self.current_episode_num = 1
-        self.stats: Dict[str, Any] = _stats()
 
 
 def _stats() -> Dict[str, Any]:

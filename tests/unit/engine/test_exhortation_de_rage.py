@@ -59,6 +59,8 @@ class _FakeEngine:
     """Stub minimal de W40KEngine pour tester _check_and_trigger_exhortation_de_rage."""
     _check_and_trigger_exhortation_de_rage = wcore.W40KEngine._check_and_trigger_exhortation_de_rage
     _apply_exhortation_de_rage = wcore.W40KEngine._apply_exhortation_de_rage
+    _continue_squad_fight_after_selection = wcore.W40KEngine._continue_squad_fight_after_selection
+    _fight_v11_gym_settle = wcore.W40KEngine._fight_v11_gym_settle
 
     def __init__(self, gs):
         self.game_state = gs
