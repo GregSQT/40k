@@ -43,6 +43,7 @@ from engine.combat_utils import resolve_dice_value, set_unit_coordinates
 from engine.phase_handlers.shared_utils import build_units_cache, rebuild_choice_timing_index, _is_character_role
 from engine.phase_handlers import command_handlers, movement_handlers, deployment_handlers
 from engine.hex_utils import expand_wall_group_to_hex_list
+from engine import demo_names as _demo_names
 from services.endless_duty_runtime import (
     ED_MODE_CODE,
     ED_SCENARIO_DEFAULT,
@@ -712,6 +713,7 @@ def _slim_unit_for_api(unit: Any) -> Any:
             else:
                 new_models.append(m)
         out["models"] = new_models
+    _demo_names.apply_to_unit(out)
     return out
 
 # Ne pas omettre les boucles masque sur la base du seul hash client si le contour est petit
@@ -4574,6 +4576,7 @@ def _build_units_from_army_config(
                     "battle_shocked": False,
                 }
             )
+            _demo_names.apply_to_unit(built_units[-1])
     return built_units, next_unit_id
 
 
