@@ -367,3 +367,46 @@ def test_mw_tuent_seule_cible_emet_log_combat(monkeypatch):
     assert combat_logs[0].get("phase") == "fight", (
         f"le log combat doit avoir phase='fight', got {combat_logs[0]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# counts["wounds"] décrémenté des crits consommés par Hold Still
+# ---------------------------------------------------------------------------
+
+def _multi_crit_rolled():
+    """2 crits Hold Still + 1 blessure normale → counts['wounds'] = 3."""
+    crit1 = {"criticalWound": True, "devastating": False}
+    crit2 = {"criticalWound": True, "devastating": False}
+    normal = {"criticalWound": False, "devastating": False}
+    pw_crit1 = {"save_roll": 4, "rec": crit1, "devastating": False}
+    pw_crit2 = {"save_roll": 4, "rec": crit2, "devastating": False}
+    pw_normal = {"save_roll": 4, "rec": normal, "devastating": False}
+    return {
+        "shot_records": [crit1, crit2, normal],
+        "pending_wounds": [pw_crit1, pw_crit2, pw_normal],
+        "counts": {"attacks": 3, "hits": 3, "wounds": 3},
+    }
+
+
+def test_hold_still_decremente_counts_wounds(monkeypatch):
+    """ROUGE sans fix : counts['wounds'] inclut les crits MW → double-comptage dans
+    summary['wounds'] de _build_manual_allocation (Hold Still en journalise déjà 2 via
+    hold_still_mortal_wounds, et _build_manual_allocation en rajouterait 2 de plus).
+    VERT avec fix : counts['wounds'] est décrémenté de len(_hs_consumed)."""
+    from engine.phase_handlers import fight_handlers as _fh
+
+    _patch_fight_harness(monkeypatch, _multi_crit_rolled())
+    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda *a, **kw: None)
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+
+    gs = _gs()
+    result = _fh._manual_roll_fight_intent(gs, _intent(weapon_index=1), {})
+    assert result is not None
+    # 2 crits consommés par Hold Still : wounds = 3 - 2 = 1
+    assert result["counts"]["wounds"] == 1, (
+        f"counts['wounds'] doit être 1 (2 crits consommés par MW), got {result['counts']['wounds']}"
+    )
+    # La blessure normale reste dans pending_wounds
+    assert len(result["pending_wounds"]) == 1, (
+        f"pending_wounds doit contenir uniquement la blessure normale, got {len(result['pending_wounds'])}"
+    )

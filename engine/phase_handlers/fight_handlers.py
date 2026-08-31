@@ -4886,7 +4886,7 @@ def _manual_roll_fight_intent(
                     _hs_details: List[Dict[str, Any]] = []
                     # Capturer les coords AVANT _alloc_mw : si l'unité est détruite,
                     # units_cache[target_sid] est retiré et inaccessible au retour.
-                    _tgt_uc_snap = require_key(game_state, "units_cache")[target_sid]
+                    _tgt_uc_snap = require_key(require_key(game_state, "units_cache"), target_sid)
                     _tgt_col_snap = int(require_key(_tgt_uc_snap, "col"))
                     _tgt_row_snap = int(require_key(_tgt_uc_snap, "row"))
                     append_action_log(game_state, {
@@ -4905,17 +4905,21 @@ def _manual_roll_fight_intent(
                         "holdStillDetails": _hs_details,
                     })
                     _alloc_mw(game_state, target_sid, _hs_mw_total, True, _hs_details)
-                    rolled["pending_wounds"] = [
-                        pw for pw in rolled["pending_wounds"]
-                        if id(pw["rec"]) not in _hs_consumed
-                    ]
-                    # Si les MW ont détruit la cible, vider pending_wounds (no-ops).
+                    # Les crits consommés par Hold Still ne sont pas des blessures normales :
+                    # _alloc_mw les a déjà journalisés séparément. Soustraire ici évite le
+                    # double-comptage dans summary["wounds"] de _build_manual_allocation.
+                    rolled["counts"]["wounds"] -= len(_hs_consumed)
                     # NE PAS retourner None : _build_manual_allocation doit créer le groupe
                     # et émettre l'entrée type='combat' pour que le frontend yield avant la
                     # mise à jour d'état. Les coords pré-capturées (_tgt_col_snap/_tgt_row_snap)
                     # transitent dans le retour pour contourner l'absence de units_cache[target_sid].
                     if not is_unit_alive(target_sid, game_state):
                         rolled["pending_wounds"] = []
+                    else:
+                        rolled["pending_wounds"] = [
+                            pw for pw in rolled["pending_wounds"]
+                            if id(pw["rec"]) not in _hs_consumed
+                        ]
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,
@@ -4974,9 +4978,9 @@ def _manual_roll_fight_intent(
         "waaagh_target_invul": _waaagh_target_invul,
         "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
         "counts": rolled["counts"],
-        # Coords pré-capturées avant allocation MW (None si Hold Still n'a pas détruit la cible).
-        # Lues par _build_manual_allocation pour créer le groupe quand units_cache[target_sid]
-        # a déjà été purgé (cible tuée par MW avant la création du groupe).
+        # Coords pré-capturées avant allocation MW (None si aucun BM Hold Still, non-None dès
+        # que _hs_mw_total > 0 — que la cible soit tuée ou non). Lues par _build_manual_allocation
+        # pour créer le groupe quand units_cache[target_sid] a déjà été purgé.
         "precap_target_col": _tgt_col_snap,
         "precap_target_row": _tgt_row_snap,
     }
