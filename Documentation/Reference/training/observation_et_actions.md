@@ -80,7 +80,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_cont       (8, 8)               =      64               │
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      16 735              │
+│  TOTAL vectoriel (= obs_size)                      16 791              │
 │  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -534,7 +534,10 @@ T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10, T-F) → 20166 �
 → 20601 → 20626 → 20654 → 20740 → 20768 → 20828 → 20780 → 20752 (chantier 01) → 20718
 (chantier 02) → 20725 (chantier 03) → 20727 → **14609** (socle §0.48 : règles d'armes en ids)
 → 14615 (drapeau `declines`) → 14659 + 16653 (`L2`, `K_ALLY_SLOTS` 8 → 12) → 16671
-→ 16703 (`effective_range`) → **16735** (`charged`, 2026-08-24).
+→ 16703 (`effective_range`) → 16735 (`charged`, 2026-08-24)
+→ **16791** (réservations J4/J5, 2026-08-31 : `AGENT_DECISION_TYPE_SLOTS` 8→16 +8,
+`reserved_mission_cont_0..15` dans `GLOBAL_CONT_FIELDS` +16,
+`reserved_mission_bin_0..31` dans `GLOBAL_BIN_FIELDS` +32).
 
 **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
 Depuis le chantier 01, une capacité, un statut ou une faction entière n'est qu'un `obs_id` de
