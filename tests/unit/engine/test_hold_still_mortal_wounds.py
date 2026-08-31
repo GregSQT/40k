@@ -257,13 +257,10 @@ def test_hold_still_kill_total_action_logs(monkeypatch):
       du log combat manquant : retourner None empêchait _emit_squad_shoot_log).
     """
     from engine.phase_handlers import fight_handlers as _fh
-    from engine.phase_handlers.shared_utils import append_action_log
 
     def _alloc_mw_kill(gs, uid, n, auto, sink):
-        gs["models_cache"].pop(f"{uid}#0", None)
-        gs["squad_models"][uid] = []
-        gs["units_cache"].pop(uid, None)
-        append_action_log(gs, {
+        _alloc_mw_destroy_full(gs, uid, n, auto, sink)
+        su.append_action_log(gs, {
             "type": "dead", "model_id": f"{uid}#0",
             "unitId": uid, "reason": "hazard",
             "turn": gs.get("turn", 0), "phase": "fight",
@@ -299,13 +296,8 @@ def test_mw_tuent_cible_retournent_resultat_complet(monkeypatch):
     pré-capturées (precap_target_col/row) pour que le groupe puisse être créé."""
     from engine.phase_handlers import fight_handlers as _fh
 
-    def _alloc_mw_destroy(gs, uid, n, auto, sink):
-        gs["models_cache"].pop("TGT#0", None)
-        gs["squad_models"][uid] = []
-        gs["units_cache"].pop(uid, None)
-
     _patch_fight_harness(monkeypatch, _crit_rolled())
-    monkeypatch.setattr(su, "allocate_mortal_wounds", _alloc_mw_destroy)
+    monkeypatch.setattr(su, "allocate_mortal_wounds", _alloc_mw_destroy_full)
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
 
     gs = _gs()
