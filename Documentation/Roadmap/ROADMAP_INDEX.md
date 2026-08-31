@@ -128,6 +128,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | front | ✅ simplify-gamelog-lowercase — toLowerCase extrait en helper, step index display correct (2026-08-31) | [front.md](front.md) | ⚡ |
 | ai | ✅ simplify-twin-linked-regex — vérif TWIN_LINKED : substring au lieu de regex (2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
 | ai | ✅ simplify-rule-ids-leader-mid — diagnostics tests : _leader_mid try/except StopIteration, _rule_ids try plus étroit + walrus (2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
+| moteur | ✅ simplify-grot-orderly — _squad_mode_level O(n) mutualisé (Counter), double _alive_model_ids réduit à un appel, list() inutile retiré (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
 
 ---
 
