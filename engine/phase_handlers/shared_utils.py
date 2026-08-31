@@ -10155,6 +10155,8 @@ def _manual_roll_intent(
             "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
             "player": int(require_key(_tgt_uc, "player")),
             "hp_before": int(require_key(_tgt_uc, "HP_CUR")),
+            "col": int(require_key(_tgt_uc, "col")),
+            "row": int(require_key(_tgt_uc, "row")),
         }
     weapon_index = int(intent.get("weapon_index", 0))  # get allowed
     weapons = ranged_weapons(attacker)
@@ -11240,18 +11242,11 @@ def _build_manual_allocation(
                 target_sid)
         if gkey not in group_index_by_key:
             group_index_by_key[gkey] = len(weapon_groups)
-            # Position de l'ancre cible : capturée ICI en temps normal (cible vivante, aucune
-            # figurine retirée avant l'allocation). Exception MW : si roll_intent_fn a alloué des
-            # MW qui ont tué la cible, units_cache[target_sid] est purgé — les coords transitent
-            # alors via r["precap_target_col"/"precap_target_row"] pré-capturées avant _alloc_mw.
-            _precap_col = r.get("precap_target_col")  # get allowed : None si aucun BM Hold Still
-            if _precap_col is not None:
-                _tgt_col = _precap_col
-                _tgt_row = r["precap_target_row"]
-            else:
-                _tgt_uc_live = require_key(require_key(game_state, "units_cache"), target_sid)
-                _tgt_col = int(require_key(_tgt_uc_live, "col"))
-                _tgt_row = int(require_key(_tgt_uc_live, "row"))
+            # Coords de la cible au moment où roll_intent_fn a été appelé (avant toute
+            # allocation MW qui pourrait purger units_cache[target_sid]).
+            _tgt_meta = require_key(targets_meta, target_sid)
+            _tgt_col = int(require_key(_tgt_meta, "col"))
+            _tgt_row = int(require_key(_tgt_meta, "row"))
             # JUMEAU de la capture ci-dessus, pour l ATTAQUANT : meme emission differee, donc
             # meme exigence. `_emit_squad_shoot_log` relisait units_cache et retombait sur
             # (0,0) — une case reelle du plateau — pour une escouade absente. Le squad_id est

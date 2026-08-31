@@ -97,8 +97,8 @@ def _gs(*, vehicle=False, attacker_model=None):
         "models_cache": {"PAIN#0": attacker_model, "TGT#0": tgt_model},
         "squad_models": {"PAIN": ["PAIN#0"], "TGT": ["TGT#0"]},
         "unit_by_id": {"PAIN": pain_unit, "TGT": tgt_unit},
-        # col/row requis dans units_cache : _manual_roll_fight_intent les capture
-        # AVANT _alloc_mw pour les transmettre à _build_manual_allocation si la cible meurt.
+        # col/row requis dans units_cache : _manual_roll_fight_intent les lit pour
+        # les stocker dans targets_meta AVANT _alloc_mw (résistant à la mort de la cible).
         "units_cache": {
             "PAIN": {**pain_unit, "col": 0, "row": 0},
             "TGT": {**tgt_unit, "col": 5, "row": 5},
@@ -292,8 +292,7 @@ def test_mw_tuent_cible_retournent_resultat_complet(monkeypatch):
     """ROUGE sans fix : _manual_roll_fight_intent retourne None quand les MW détruisent
     la cible, ce qui empêche _build_manual_allocation de créer le groupe et d'émettre
     l'entrée type='combat' — le frontend ne yield pas avant la mise à jour d'état.
-    VERT avec fix : retourne un dict complet avec pending_wounds=[] et les coords
-    pré-capturées (precap_target_col/row) pour que le groupe puisse être créé."""
+    VERT avec fix : retourne un dict complet avec pending_wounds=[]."""
     from engine.phase_handlers import fight_handlers as _fh
 
     _patch_fight_harness(monkeypatch, _crit_rolled())
@@ -305,12 +304,6 @@ def test_mw_tuent_cible_retournent_resultat_complet(monkeypatch):
     assert result is not None, "attendu un dict complet (pas None) quand MW détruisent la cible"
     assert result["pending_wounds"] == [], (
         f"pending_wounds doit être vide (cible morte, aucun dégât normal), got {result['pending_wounds']}"
-    )
-    assert result["precap_target_col"] == 5, (
-        f"coords pré-capturées attendues col=5, got {result['precap_target_col']}"
-    )
-    assert result["precap_target_row"] == 5, (
-        f"coords pré-capturées attendues row=5, got {result['precap_target_row']}"
     )
 
 
