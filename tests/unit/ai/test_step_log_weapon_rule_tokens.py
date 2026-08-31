@@ -767,6 +767,19 @@ def test_la_melee_nomme_aussi_la_relance_twin_linked(monkeypatch, tmp_path):
     assert "[TWIN-LINKED]" in line, line
 
 
+def test_l_analyzer_compte_l_usage_de_twin_linked(monkeypatch, tmp_path):
+    """Maillon 4 : le token [TWIN-LINKED] doit alimenter le compteur d'usage de §1.8.
+
+    Sans ce compteur, une arme TWIN_LINKED dont les relances ont joué ressort « NOT USED »
+    dans le tableau — même écart que [MELTA] mesuré sur le run du 2026-08-11."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["TWIN_LINKED"], [3, 1, 5, 2])
+    stats = _analyzer_stats(tmp_path, _step_log_line(tmp_path, gs, raw_log))
+
+    usage = {k: v for k, v in stats["weapon_rule_usage"].items() if k[0] == "TWIN_LINKED"}
+    assert usage, ("aucun usage de TWIN_LINKED compté : la chaîne moteur → step.log → analyzer "
+                   "est rompue")
+    assert all(sum(v.values()) > 0 for v in usage.values()), usage
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
