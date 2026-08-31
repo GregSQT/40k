@@ -781,6 +781,24 @@ def test_l_analyzer_compte_l_usage_de_twin_linked(monkeypatch, tmp_path):
     assert all(sum(v.values()) > 0 for v in usage.values()), usage
 
 
+def test_l_analyzer_compte_l_usage_de_twin_linked_en_melee(monkeypatch, tmp_path):
+    """Maillon 4, côté MÊLÉE : fight_handler.py:134 lit `[TWIN-LINKED]` sur les lignes FOUGHT.
+
+    Sans ce test, le compteur pouvait exister dans le code sans jamais être alimenté en mêlée :
+    le même écart que [MELTA] au tir (708 tirs, 0 usage compté). `MELEE_KWARGS` est obligatoire
+    parce que `weapon_profile_for_line(is_melee=True)` doit trouver l'arme dans l'armurerie CC ;
+    avec l'arme de tir par défaut, elle rend `(None, None, ())` et le compteur reste à zéro."""
+    gs, raw_log = _engine_shoot_log(monkeypatch, ["TWIN_LINKED"], [3, 1, 5, 2], melee=True,
+                                    **MELEE_KWARGS)
+    stats = _analyzer_stats(tmp_path, _step_log_line(tmp_path, gs, raw_log),
+                            unit_type=CLEAVE_UNIT, melee=True)
+
+    usage = {k: v for k, v in stats["weapon_rule_usage"].items() if k[0] == "TWIN_LINKED"}
+    assert usage, ("aucun usage de TWIN_LINKED compté en mêlée : la chaîne moteur → step.log "
+                   "→ analyzer (fight_handler.py:134) est rompue")
+    assert all(sum(v.values()) > 0 for v in usage.values()), usage
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # [MELTA X] 24.25 — le token n'atteignait PAS step.log
 #
