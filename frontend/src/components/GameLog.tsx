@@ -261,7 +261,7 @@ export const GameLog: React.FC<GameLogProps> = ({
         setRuleDescription(descriptions, ruleEntry.name, description, true);
       }
       if (typeof ruleEntry.alias === "string" && ruleEntry.alias.trim() !== "") {
-        setRuleDescription(descriptions, ruleEntry.alias, description, true);
+        setRuleDescription(descriptions, ruleEntry.alias, description, false);
       }
     }
 
@@ -425,6 +425,19 @@ export const GameLog: React.FC<GameLogProps> = ({
     [events]
   );
 
+  const visibleEvents = React.useMemo(
+    () =>
+      displayedEvents.filter((event) => {
+        const hasMessage = typeof event.message === "string" && event.message.trim().length > 0;
+        const hasDetails =
+          (event.shootDetails && event.shootDetails.length > 0) ||
+          (event.moveDetails && event.moveDetails.length > 0) ||
+          (event.hazardDetails && event.hazardDetails.length > 0);
+        return hasMessage || hasDetails;
+      }),
+    [displayedEvents]
+  );
+
   // Keep newest entry visible when new events arrive
   // biome-ignore lint/correctness/useExhaustiveDependencies: events.length is an intentional trigger, not a value read inside the callback
   React.useEffect(() => {
@@ -476,14 +489,7 @@ export const GameLog: React.FC<GameLogProps> = ({
               overflow: "auto",
             }}
           >
-            {displayedEvents.filter((event) => {
-              const hasMessage = typeof event.message === "string" && event.message.trim().length > 0;
-              const hasDetails =
-                (event.shootDetails && event.shootDetails.length > 0) ||
-                (event.moveDetails && event.moveDetails.length > 0) ||
-                (event.hazardDetails && event.hazardDetails.length > 0);
-              return hasMessage || hasDetails;
-            }).map((event, index) => {
+            {visibleEvents.map((event, index) => {
               // Check if this is a wait/skip action
               // Multiple detection methods:
               // 1. Check action_name field
@@ -585,11 +591,9 @@ export const GameLog: React.FC<GameLogProps> = ({
                       )}
                     </span>
                     {useStepNumbers && (
-                      <span className="game-log-entry__turn">
-                        #{displayedEvents.length - index}
-                      </span>
+                      <span className="game-log-entry__turn">#{visibleEvents.length - index}</span>
                     )}
-                    {event.turnNumber && (
+                    {event.turnNumber != null && (
                       <span className="game-log-entry__turn">T{event.turnNumber}</span>
                     )}
                     {event.player !== undefined && (
