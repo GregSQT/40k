@@ -44,6 +44,7 @@ from .shared_utils import (
     # partage. Importee et non reecrite en litteral — c est ce qui lie les deux producteurs
     # (tir et melee) au meme vocabulaire.
     RULE_LABEL_CLEAVE,
+    _build_target_meta,
     _build_enemy_adjacent_hexes_all_players,
     # Traducteurs de causes de relance et marqueurs de capacite, PARTAGES avec le roller de tir :
     # les inliner est la forme exacte sous laquelle ces deux chemins ont deja diverge.
@@ -4663,16 +4664,7 @@ def _manual_roll_fight_intent(
         return None
     target = require_unit_by_id(game_state, target_sid)
     if target_sid not in targets_meta:
-        _tgt_uc = require_key(game_state, "units_cache")[target_sid]
-        _tgt_sc = require_key(game_state, "squad_cache")[target_sid]
-        targets_meta[target_sid] = {
-            "value": float(require_key(_tgt_uc, "VALUE")),
-            "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
-            "player": int(require_key(_tgt_uc, "player")),
-            "hp_before": int(require_key(_tgt_uc, "HP_CUR")),
-            "col": int(require_key(_tgt_uc, "col")),
-            "row": int(require_key(_tgt_uc, "row")),
-        }
+        targets_meta[target_sid] = _build_target_meta(game_state, target_sid)
     weapon_index = int(intent.get("weapon_index", 0))  # get allowed
     weapons = melee_weapons(attacker)
     if not (0 <= weapon_index < len(weapons)):
@@ -4871,28 +4863,28 @@ def _manual_roll_fight_intent(
             if "VEHICLE" not in _tgt_keywords:
                 from .shared_utils import allocate_mortal_wounds as _alloc_mw
                 _hs_mw_total = 0
-                _hs_consumed: set = set()
+                _hs_count = 0
                 for _hs_rec in rolled["shot_records"]:
                     if _hs_rec.get("criticalWound") and not _hs_rec.get("devastating"):  # get allowed
                         _hs_mw_total += random.randint(1, 6)
                         _hs_rec["holdStillMW"] = True
                         _hs_rec["saveSkipped"] = True
                         _hs_rec["saveSkipReason"] = "HOLD_STILL_AND_SAY_AARGH"
-                        _hs_consumed.add(id(_hs_rec))
+                        _hs_count += 1
                 if _hs_mw_total > 0:
                     _hs_details: List[Dict[str, Any]] = []
                     append_action_log(game_state, {
                         "type": "hold_still_mortal_wounds",
                         "message": (
                             f"[HOLD STILL AND SAY AARGH] {attacker_mid} -> {target_sid}: "
-                            f"{len(_hs_consumed)} crit(s) -> {_hs_mw_total} MW"
+                            f"{_hs_count} crit(s) -> {_hs_mw_total} MW"
                         ),
                         "turn": game_state.get("turn", 0),  # get allowed
                         "phase": "fight",
                         "unitId": str(attacker["squad_id"]),
                         "targetId": target_sid,
                         "player": int(attacker.get("player", 0)),  # get allowed
-                        "holdStillCrits": len(_hs_consumed),
+                        "holdStillCrits": _hs_count,
                         "holdStillMortalWounds": _hs_mw_total,
                         "holdStillDetails": _hs_details,
                     })
@@ -4900,14 +4892,11 @@ def _manual_roll_fight_intent(
                     # Les crits consommés par Hold Still ne sont pas des blessures normales :
                     # _alloc_mw les a déjà journalisés séparément. Soustraire ici évite le
                     # double-comptage dans summary["wounds"] de _build_manual_allocation.
-                    rolled["counts"]["wounds"] -= len(_hs_consumed)
-                    if is_unit_alive(target_sid, game_state):
-                        rolled["pending_wounds"] = [
-                            pw for pw in rolled["pending_wounds"]
-                            if id(pw["rec"]) not in _hs_consumed
-                        ]
-                    else:
-                        rolled["pending_wounds"] = []
+                    rolled["counts"]["wounds"] -= _hs_count
+                    rolled["pending_wounds"] = (
+                        [pw for pw in rolled["pending_wounds"] if not pw["rec"].get("holdStillMW")]
+                        if is_unit_alive(target_sid, game_state) else []
+                    )
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,

@@ -10126,6 +10126,19 @@ def _target_within_half_range(
     return _ranged_squad_edge_distance(game_state, attacker_sid, target_sid) <= rng / 2.0
 
 
+def _build_target_meta(game_state: Dict[str, Any], target_sid: str) -> Dict[str, Any]:
+    _tgt_uc = require_key(game_state, "units_cache")[target_sid]
+    _tgt_sc = require_key(game_state, "squad_cache")[target_sid]
+    return {
+        "value": float(require_key(_tgt_uc, "VALUE")),
+        "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
+        "player": int(require_key(_tgt_uc, "player")),
+        "hp_before": int(require_key(_tgt_uc, "HP_CUR")),
+        "col": int(require_key(_tgt_uc, "col")),
+        "row": int(require_key(_tgt_uc, "row")),
+    }
+
+
 def _manual_roll_intent(
     game_state: Dict[str, Any], intent: Dict[str, Any],
     targets_meta: Dict[str, Dict[str, Any]],
@@ -10148,16 +10161,7 @@ def _manual_roll_intent(
     if not is_unit_alive(target_sid, game_state):
         return None
     if target_sid not in targets_meta:
-        _tgt_uc = require_key(game_state, "units_cache")[target_sid]
-        _tgt_sc = require_key(game_state, "squad_cache")[target_sid]
-        targets_meta[target_sid] = {
-            "value": float(require_key(_tgt_uc, "VALUE")),
-            "model_count_at_start": int(require_key(_tgt_sc, "model_count_at_start")),
-            "player": int(require_key(_tgt_uc, "player")),
-            "hp_before": int(require_key(_tgt_uc, "HP_CUR")),
-            "col": int(require_key(_tgt_uc, "col")),
-            "row": int(require_key(_tgt_uc, "row")),
-        }
+        targets_meta[target_sid] = _build_target_meta(game_state, target_sid)
     weapon_index = int(intent.get("weapon_index", 0))  # get allowed
     weapons = ranged_weapons(attacker)
     if not (0 <= weapon_index < len(weapons)):
