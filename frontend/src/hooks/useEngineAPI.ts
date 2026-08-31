@@ -8353,12 +8353,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (data.needs_decision) return data; // divergence non tranchée : pas de commit
     setViewActive(mode === "view");
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
-    setGameSessionKey((k) => k + 1);
     // COMMIT seulement. Un `mode: "view"` est un aperçu non destructif de la partie EN COURS :
     // purger là rouvrirait l'avertissement 20.04 que le joueur vient de fermer, à chaque row de
     // la timeline qu'il regarde. Sur un commit, en revanche, la partie jouée est remplacée et une
     // clé retenue ferait sauter l'avertissement d'une sauvegarde reprise au round de destruction.
-    if (mode === "resume") clearReservesLastRoundMemo();
+    if (mode === "resume") {
+      setGameSessionKey((k) => k + 1);
+      clearReservesLastRoundMemo();
+    }
     resetInteractionState();
     dispatchGameLogHydrate(data.game_log_history); // replay : réhydrate le Game Log au point chargé
     return data;
@@ -8386,12 +8388,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (data.needs_decision) return data; // divergence non tranchée : pas de commit
     setViewActive(mode === "view");
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
-    setGameSessionKey((k) => k + 1);
     // COMMIT seulement. Un `mode: "view"` est un aperçu non destructif de la partie EN COURS :
     // purger là rouvrirait l'avertissement 20.04 que le joueur vient de fermer, à chaque row de
     // la timeline qu'il regarde. Sur un commit, en revanche, la partie jouée est remplacée et une
     // clé retenue ferait sauter l'avertissement d'une sauvegarde reprise au round de destruction.
-    if (mode === "resume") clearReservesLastRoundMemo();
+    if (mode === "resume") {
+      setGameSessionKey((k) => k + 1);
+      clearReservesLastRoundMemo();
+    }
     resetInteractionState();
     dispatchGameLogHydrate(data.game_log_history); // replay : réhydrate le Game Log de la partie chargée
     return data;
