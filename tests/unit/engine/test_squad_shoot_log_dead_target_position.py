@@ -25,6 +25,7 @@ import pytest
 
 from engine.phase_handlers.attack_sequence import WeaponAttackProfile
 from engine.phase_handlers.shared_utils import SHOOT_CTX, _emit_squad_shoot_log
+from shared.data_validation import ConfigurationError
 from tests._state_invariants import turn_state_invariants
 from tests.unit.engine._state_builders import units_cache_entry
 
@@ -135,9 +136,8 @@ def test_missing_captured_position_raises_instead_of_silent_zero() -> None:
     gs = _game_state_target_removed()
     g = _weapon_group()
     del g["target_col"]
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(ConfigurationError, match="target_col"):
         _emit_squad_shoot_log(gs, g, SHOOT_CTX)
-    assert "target_col" in str(exc_info.value)
 
 
 def test_log_uses_captured_attacker_position_not_zero_zero() -> None:
@@ -157,9 +157,8 @@ def test_missing_captured_attacker_position_raises_instead_of_silent_zero() -> N
     gs = _game_state_target_removed()
     g = _weapon_group()
     del g["attacker_col"]
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(ConfigurationError, match="attacker_col"):
         _emit_squad_shoot_log(gs, g, SHOOT_CTX)
-    assert "attacker_col" in str(exc_info.value)
 
 
 # --------------------------------------------------------------------------------------

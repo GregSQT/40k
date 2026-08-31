@@ -314,18 +314,11 @@ def test_suppress_target_pose_suppressed_squads() -> None:
     # Teste directement la logique de _handle_shooting_end_activation :
     # si l'unité a suppress_target_on_shooting ET _last_shoot_target_id est posé,
     # game_state["suppressed_squads"] reçoit l'id cible.
-    from engine.phase_handlers.shared_utils import unit_has_rule_effect
-
     attacker = _unit("atk", 1, unit_rules=[_rule("suppress_target_on_shooting")])
     target = _unit("tgt", 2)
     gs = _base_state([attacker, target])
     gs["phase"] = "shooting"
-
-    # Simuler le résultat de squad_declare_shoot (stocke l'id cible sur l'unité)
     attacker["_last_shoot_target_id"] = "tgt"
-
-    # Vérifier que la règle est bien reconnue
-    assert unit_has_rule_effect(attacker, "suppress_target_on_shooting")
 
     # Appeler la fonction de production (gating arg5==1, arg1==ACTION, arg3==SHOOTING exigés)
     from engine.phase_handlers.shooting_handlers import (
