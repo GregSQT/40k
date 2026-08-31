@@ -11244,7 +11244,7 @@ def _build_manual_allocation(
             # figurine retirée avant l'allocation). Exception MW : si roll_intent_fn a alloué des
             # MW qui ont tué la cible, units_cache[target_sid] est purgé — les coords transitent
             # alors via r["precap_target_col"/"precap_target_row"] pré-capturées avant _alloc_mw.
-            _precap_col = r.get("precap_target_col")  # get allowed : absent hors MW kill
+            _precap_col = r.get("precap_target_col")  # get allowed : None si aucun BM Hold Still
             if _precap_col is not None:
                 _tgt_col = _precap_col
                 _tgt_row = r["precap_target_row"]
