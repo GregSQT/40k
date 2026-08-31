@@ -1610,18 +1610,18 @@ export const BoardWithAPI: React.FC = () => {
     if (!playerTypes) {
       throw new Error("Missing player_types in gameState for AI turn orchestration");
     }
-    const getPlayerType = (playerId: number): "human" | "ai" => {
-      const playerType = playerTypes[String(playerId)];
+    const getPlayerType = (playerId: number, pt: Record<string, string> = playerTypes): "human" | "ai" => {
+      const playerType = pt[String(playerId)];
       if (!playerType) {
         throw new Error(`Missing player type for player ${playerId}`);
       }
       return playerType;
     };
-    const isAiUnit = (unit: Unit): boolean => getPlayerType(unit.player) === "ai";
-    const hasAiUnitsInPool = (pool: Array<string | number>, state: { units: Unit[] }): boolean =>
+    const isAiUnit = (unit: Unit, pt: Record<string, string> = playerTypes): boolean => getPlayerType(unit.player, pt) === "ai";
+    const hasAiUnitsInPool = (pool: Array<string | number>, state: { units: Unit[] }, pt: Record<string, string> = playerTypes): boolean =>
       pool.some((unitId) => {
         const unit = state.units.find((u: Unit) => String(u.id) === String(unitId));
-        return !!unit && isAiUnit(unit) && unit.HP_CUR > 0;
+        return !!unit && isAiUnit(unit, pt) && unit.HP_CUR > 0;
       });
 
     const isAiEnabled = isAiMode;
@@ -1748,20 +1748,7 @@ export const BoardWithAPI: React.FC = () => {
           if (!latestPlayerTypes) {
             throw new Error("Missing player_types before AI turn");
           }
-          const getLatestPlayerType = (playerId: number): "human" | "ai" => {
-            const pt = latestPlayerTypes[String(playerId)];
-            if (!pt) throw new Error(`Missing player type for player ${playerId}`);
-            return pt;
-          };
-          const hasLatestAiUnitsInPool = (
-            pool: Array<string | number>,
-            state: { units: Unit[] }
-          ): boolean =>
-            pool.some((unitId) => {
-              const unit = state.units.find((u: Unit) => String(u.id) === String(unitId));
-              return !!unit && getLatestPlayerType(unit.player) === "ai" && unit.HP_CUR > 0;
-            });
-          if (latestPhase !== "fight" && getLatestPlayerType(latestPlayer) !== "ai") {
+          if (latestPhase !== "fight" && getPlayerType(latestPlayer, latestPlayerTypes) !== "ai") {
             return;
           }
           if (latestPhase === "fight") {
@@ -1769,7 +1756,7 @@ export const BoardWithAPI: React.FC = () => {
             const latestFightPool: string[] = (latestState.fight_eligible_units ?? []).map((id) =>
               String(id)
             );
-            const isAITurnNow = hasLatestAiUnitsInPool(latestFightPool, latestState);
+            const isAITurnNow = hasAiUnitsInPool(latestFightPool, latestState, latestPlayerTypes);
             if (!isAITurnNow) {
               return;
             }
