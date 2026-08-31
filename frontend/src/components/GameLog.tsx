@@ -481,16 +481,17 @@ export const GameLog: React.FC<GameLogProps> = ({
               // Multiple detection methods:
               // 1. Check action_name field
               const actionName = event.action_name || event.actionName;
+              const lowerAction = actionName ? actionName.toLowerCase() : "";
               const hasWaitActionName =
-                actionName &&
-                (actionName.toLowerCase() === "wait" || actionName.toLowerCase() === "skip");
+                actionName && (lowerAction === "wait" || lowerAction === "skip");
 
               // 2. Check message content (frontend logs "chose not to move")
               const message = event.message || "";
+              const lowerMessage = message.toLowerCase();
               const hasWaitMessage =
-                message.toLowerCase().includes("chose not to move") ||
-                message.toLowerCase().includes("chose not to charge") ||
-                message.toLowerCase().endsWith(" wait");
+                lowerMessage.includes("chose not to move") ||
+                lowerMessage.includes("chose not to charge") ||
+                lowerMessage.endsWith(" wait");
 
               const isWaitAction = hasWaitActionName || hasWaitMessage;
               const waitClass = isWaitAction ? "game-log-entry--wait" : "";
@@ -577,7 +578,7 @@ export const GameLog: React.FC<GameLogProps> = ({
                       )}
                     </span>
                     {useStepNumbers && (
-                      <span className="game-log-entry__turn">#{events.length - index}</span>
+                      <span className="game-log-entry__turn">#{displayedEvents.length - index}</span>
                     )}
                     {event.turnNumber && (
                       <span className="game-log-entry__turn">T{event.turnNumber}</span>
