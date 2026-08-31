@@ -11240,11 +11240,18 @@ def _build_manual_allocation(
                 target_sid)
         if gkey not in group_index_by_key:
             group_index_by_key[gkey] = len(weapon_groups)
-            # Position de l'ancre cible CAPTURÉE ICI (cible vivante : aucune figurine n'est
-            # retirée avant l'allocation) pour le log de fin de groupe. Sans ça, l'émission
-            # différée relit units_cache après un éventuel retrait de l'escouade détruite et
-            # tombait sur (0,0) (fallback anti-erreur supprimé).
-            _tgt_uc_live = require_key(require_key(game_state, "units_cache"), target_sid)
+            # Position de l'ancre cible : capturée ICI en temps normal (cible vivante, aucune
+            # figurine retirée avant l'allocation). Exception MW : si roll_intent_fn a alloué des
+            # MW qui ont tué la cible, units_cache[target_sid] est purgé — les coords transitent
+            # alors via r["precap_target_col"/"precap_target_row"] pré-capturées avant _alloc_mw.
+            _precap_col = r.get("precap_target_col")  # get allowed : absent hors MW kill
+            if _precap_col is not None:
+                _tgt_col = _precap_col
+                _tgt_row = r["precap_target_row"]
+            else:
+                _tgt_uc_live = require_key(require_key(game_state, "units_cache"), target_sid)
+                _tgt_col = int(require_key(_tgt_uc_live, "col"))
+                _tgt_row = int(require_key(_tgt_uc_live, "row"))
             # JUMEAU de la capture ci-dessus, pour l ATTAQUANT : meme emission differee, donc
             # meme exigence. `_emit_squad_shoot_log` relisait units_cache et retombait sur
             # (0,0) — une case reelle du plateau — pour une escouade absente. Le squad_id est
@@ -11257,8 +11264,8 @@ def _build_manual_allocation(
                 "attacker_col": int(require_key(_atk_uc_live, "col")),
                 "attacker_row": int(require_key(_atk_uc_live, "row")),
                 "weapon_name": weapon_name, "weapon_names": [weapon_name], "target_sid": target_sid,
-                "target_col": int(require_key(_tgt_uc_live, "col")),
-                "target_row": int(require_key(_tgt_uc_live, "row")),
+                "target_col": _tgt_col,
+                "target_row": _tgt_row,
                 "bs": r["bs"], "ap": r["ap"], "dmg_raw": r["dmg_raw"],
                 "dmg_bonus": require_key(r, "dmg_bonus"),
                 # [PRECISION] 24.28 : porte par le PROFIL d arme du lot (l override d allocation

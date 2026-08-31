@@ -4860,6 +4860,11 @@ def _manual_roll_fight_intent(
     # Resolution AUTO (auto_resolve=True toujours). Non VEHICLE uniquement. Sequence terminee :
     # les records critiques consommes sont retires de pending_wounds et ne font pas de degats
     # supplementaires via l allocation normale.
+    # Coords pré-capturées avant toute allocation MW : si les MW détruisent la cible,
+    # units_cache[target_sid] est purgé par _alloc_mw. _build_manual_allocation ne peut
+    # alors plus lire les coords pour créer le groupe — on les transmet dans le retour.
+    _tgt_col_snap: Optional[int] = None
+    _tgt_row_snap: Optional[int] = None
     _hs_args = _unit_get_primitive_b_rule_args(attacker, "mortal_wounds_on_critical_wound")
     if _hs_args is not None:
         _req_weapon_code = _hs_args.get("weapon")  # get allowed : absent -> None -> skip
@@ -4879,6 +4884,11 @@ def _manual_roll_fight_intent(
                         _hs_consumed.add(id(_hs_rec))
                 if _hs_mw_total > 0:
                     _hs_details: List[Dict[str, Any]] = []
+                    # Capturer les coords AVANT _alloc_mw : si l'unité est détruite,
+                    # units_cache[target_sid] est retiré et inaccessible au retour.
+                    _tgt_uc_snap = require_key(game_state, "units_cache")[target_sid]
+                    _tgt_col_snap = int(require_key(_tgt_uc_snap, "col"))
+                    _tgt_row_snap = int(require_key(_tgt_uc_snap, "row"))
                     append_action_log(game_state, {
                         "type": "hold_still_mortal_wounds",
                         "message": (
@@ -4899,12 +4909,13 @@ def _manual_roll_fight_intent(
                         pw for pw in rolled["pending_wounds"]
                         if id(pw["rec"]) not in _hs_consumed
                     ]
-                    # Si les MW ont détruit la cible, les pending_wounds restants sont des
-                    # no-ops (plus de figurines à allouer). On retourne None pour éviter que
-                    # _build_manual_allocation tente require_key(units_cache, target_sid)
-                    # sur une escouade déjà retirée du cache.
+                    # Si les MW ont détruit la cible, vider pending_wounds (no-ops).
+                    # NE PAS retourner None : _build_manual_allocation doit créer le groupe
+                    # et émettre l'entrée type='combat' pour que le frontend yield avant la
+                    # mise à jour d'état. Les coords pré-capturées (_tgt_col_snap/_tgt_row_snap)
+                    # transitent dans le retour pour contourner l'absence de units_cache[target_sid].
                     if not is_unit_alive(target_sid, game_state):
-                        return None
+                        rolled["pending_wounds"] = []
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,
@@ -4963,6 +4974,11 @@ def _manual_roll_fight_intent(
         "waaagh_target_invul": _waaagh_target_invul,
         "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
         "counts": rolled["counts"],
+        # Coords pré-capturées avant allocation MW (None si Hold Still n'a pas détruit la cible).
+        # Lues par _build_manual_allocation pour créer le groupe quand units_cache[target_sid]
+        # a déjà été purgé (cible tuée par MW avant la création du groupe).
+        "precap_target_col": _tgt_col_snap,
+        "precap_target_row": _tgt_row_snap,
     }
 
 
