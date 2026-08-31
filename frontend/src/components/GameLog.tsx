@@ -429,10 +429,9 @@ export const GameLog: React.FC<GameLogProps> = ({
     () =>
       displayedEvents.filter((event) => {
         const hasMessage = typeof event.message === "string" && event.message.trim().length > 0;
-        const hasDetails =
-          (event.shootDetails && event.shootDetails.length > 0) ||
-          (event.moveDetails && event.moveDetails.length > 0) ||
-          (event.hazardDetails && event.hazardDetails.length > 0);
+        const hasDetails = [event.shootDetails, event.moveDetails, event.hazardDetails].some(
+          (d) => !!d?.length
+        );
         return hasMessage || hasDetails;
       }),
     [displayedEvents]
