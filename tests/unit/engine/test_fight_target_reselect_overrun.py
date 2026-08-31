@@ -152,6 +152,54 @@ def test_designated_target_dead_single_target_resolves_directly(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 2b. Cible désignée VIVANTE mais non adjacente après le pile-in overrun →
+#     fallthrough légitime, pas ValueError
+# ---------------------------------------------------------------------------
+
+
+def test_designated_target_alive_non_adjacent_after_overrun_no_valueerror(monkeypatch):
+    """ROUGE avant le fix : ValueError « hors du pool de combat 12.05 ».
+
+    Après le pile-in overrun, l'attaquant s'est rapproché de target_B et s'est éloigné de
+    target_A (vivante). Le masque avait été construit pré-pile-in alors que target_A était
+    adjacente : le slot 0 désigne target_A, qui est vivante dans units_cache mais absente du
+    pool post-pile-in. Ce n'est pas une rupture masque/commit — le pile-in peut légitimement
+    modifier l'adjacence. Attendu : fallthrough vers _fight_target_after_designated_death
+    qui choisit target_B.
+    """
+    gs = _gs()
+    gs["units_cache"]["target_A"] = {"player": 2}
+    gs["units_cache"]["target_B"] = {"player": 2}
+
+    monkeypatch.setattr(fh, "_fight_v11_engaged_now", lambda gs, u: False)
+    monkeypatch.setattr(su, "_fight_overrun_pile_in_plan", lambda gs, sid: [("atk#0", 0, 0, 0)])
+    monkeypatch.setattr(
+        su, "get_enemy_slot_mapping",
+        lambda gs, player: ["target_A", "target_B"],
+    )
+    # target_A n'est plus adjacente après le pile-in ; target_B l'est.
+    monkeypatch.setattr(
+        fh, "_model_can_fight_target",
+        lambda gs, m, uid, eid: eid == "target_B",
+    )
+    monkeypatch.setattr(su, "squad_fight_restart_activation", lambda gs, sid: None)
+    monkeypatch.setattr(wcore, "require_unit_by_id", lambda gs, uid: {"id": uid, "player": 1})
+    monkeypatch.setattr(
+        fh, "fight_weapon_eligible_slots", lambda gs, sid, tid: {0: "chainsword"}
+    )
+
+    eng = _FakeEngine(gs)
+    # Ne doit pas lever ValueError même si target_A est vivante et dans units_cache.
+    ok, result = eng._continue_squad_fight_after_selection(_SQUAD, target_slot=0)
+
+    assert ok is True
+    assert result.get("target_squad_id") == "target_B", (
+        "fallthrough légitime : target_B est la seule cible adjacente post-pile-in"
+    )
+    assert eng.moves == [(_SQUAD, "overrun_pile_in")]
+
+
+# ---------------------------------------------------------------------------
 # 3. Cibles légales mais aucun slot mappé → refus explicite
 # ---------------------------------------------------------------------------
 
