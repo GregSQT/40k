@@ -1503,7 +1503,7 @@ export const BoardWithAPI: React.FC = () => {
         }));
       })
       .catch(console.error);
-  }, [isSnapshotMode, apiProps.gameState == null]);
+  }, [isSnapshotMode, apiProps.gameSessionKey]);
 
   const handleToggleBattleShockTest = (value: boolean) => {
     setSettings((prev) => ({ ...prev, battleShockTestEnabled: value }));
@@ -1597,6 +1597,10 @@ export const BoardWithAPI: React.FC = () => {
   } | null>(null);
 
   const clearAIError = () => setAiError(null);
+
+  // Ref mis à jour à chaque render pour que le setTimeout AI lise toujours le gameState courant.
+  const latestGameStateRef = useRef(apiProps.gameState);
+  latestGameStateRef.current = apiProps.gameState;
 
   // AI Turn Processing Effect - Trigger AI when it's AI player's turn and has eligible units
   useEffect(() => {
@@ -1731,7 +1735,7 @@ export const BoardWithAPI: React.FC = () => {
       // Small delay to ensure UI updates are complete
       setTimeout(async () => {
         try {
-          const latestState = apiProps.gameState;
+          const latestState = latestGameStateRef.current;
           if (!latestState) {
             throw new Error("Missing gameState before AI turn");
           }
@@ -1740,7 +1744,24 @@ export const BoardWithAPI: React.FC = () => {
           if (latestPlayer === undefined || latestPlayer === null) {
             throw new Error("Missing current_player before AI turn");
           }
-          if (latestPhase !== "fight" && getPlayerType(latestPlayer) !== "ai") {
+          const latestPlayerTypes = latestState.player_types;
+          if (!latestPlayerTypes) {
+            throw new Error("Missing player_types before AI turn");
+          }
+          const getLatestPlayerType = (playerId: number): "human" | "ai" => {
+            const pt = latestPlayerTypes[String(playerId)];
+            if (!pt) throw new Error(`Missing player type for player ${playerId}`);
+            return pt;
+          };
+          const hasLatestAiUnitsInPool = (
+            pool: Array<string | number>,
+            state: { units: Unit[] }
+          ): boolean =>
+            pool.some((unitId) => {
+              const unit = state.units.find((u: Unit) => String(u.id) === String(unitId));
+              return !!unit && getLatestPlayerType(unit.player) === "ai" && unit.HP_CUR > 0;
+            });
+          if (latestPhase !== "fight" && getLatestPlayerType(latestPlayer) !== "ai") {
             return;
           }
           if (latestPhase === "fight") {
@@ -1748,7 +1769,7 @@ export const BoardWithAPI: React.FC = () => {
             const latestFightPool: string[] = (latestState.fight_eligible_units ?? []).map((id) =>
               String(id)
             );
-            const isAITurnNow = hasAiUnitsInPool(latestFightPool, latestState);
+            const isAITurnNow = hasLatestAiUnitsInPool(latestFightPool, latestState);
             if (!isAITurnNow) {
               return;
             }
@@ -4833,11 +4854,7 @@ export const BoardWithAPI: React.FC = () => {
             }
             onStartTargetPreview={isGameOver ? () => {} : apiProps.onStartTargetPreview}
             onCancelTargetPreview={() => {
-              const targetPreview = apiProps.targetPreview as TargetPreview | null;
-              if (targetPreview?.blinkTimer) {
-                clearInterval(targetPreview.blinkTimer);
-              }
-              // Clear target preview in engine API
+              apiProps.onCancelTargetPreview?.();
             }}
             onFightAttack={isGameOver ? () => {} : apiProps.onFightAttack}
             current_player={apiProps.current_player as PlayerId}

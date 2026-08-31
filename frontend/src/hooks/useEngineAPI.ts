@@ -545,6 +545,7 @@ const deriveShootTargets = (
 export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const currentLevelRef = options?.currentLevelRef;
   const [gameState, setGameState] = useState<APIGameState | null>(null);
+  const [gameSessionKey, setGameSessionKey] = useState(0);
   const [endlessDutyState, setEndlessDutyState] = useState<EndlessDutyState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1268,6 +1269,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         const data = await response.json();
         if (data.success && data.game_state) {
           setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
+          setGameSessionKey((k) => k + 1);
           setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
           // Partie NEUVE : les avertissements 20.04 de la partie précédente ne la concernent pas.
           clearReservesLastRoundMemo();
@@ -1315,6 +1317,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         );
       }
       setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
+      setGameSessionKey((k) => k + 1);
       setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
       // Partie NEUVE : les avertissements 20.04 de la partie précédente ne la concernent pas.
       clearReservesLastRoundMemo();
@@ -1360,6 +1363,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           );
         }
         setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
+        setGameSessionKey((k) => k + 1);
         setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
         // Partie NEUVE : les avertissements 20.04 de la partie précédente ne la concernent pas.
         clearReservesLastRoundMemo();
@@ -8349,6 +8353,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (data.needs_decision) return data; // divergence non tranchée : pas de commit
     setViewActive(mode === "view");
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
+    setGameSessionKey((k) => k + 1);
     // COMMIT seulement. Un `mode: "view"` est un aperçu non destructif de la partie EN COURS :
     // purger là rouvrirait l'avertissement 20.04 que le joueur vient de fermer, à chaque row de
     // la timeline qu'il regarde. Sur un commit, en revanche, la partie jouée est remplacée et une
@@ -8381,6 +8386,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (data.needs_decision) return data; // divergence non tranchée : pas de commit
     setViewActive(mode === "view");
     setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
+    setGameSessionKey((k) => k + 1);
     // COMMIT seulement. Un `mode: "view"` est un aperçu non destructif de la partie EN COURS :
     // purger là rouvrirait l'avertissement 20.04 que le joueur vient de fermer, à chaque row de
     // la timeline qu'il regarde. Sur un commit, en revanche, la partie jouée est remplacée et une
@@ -8426,6 +8432,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     error: null,
     units: memoizedUnits,
     selectedUnitId,
+    gameSessionKey,
     eligibleUnitIds: getEligibleUnitIds(),
     phaseInitPending,
     mode,
@@ -8586,6 +8593,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     listArmies,
     changeRoster,
     onStartTargetPreview: handleStartTargetPreview,
+    onCancelTargetPreview: () => {
+      if (targetPreview?.blinkTimer) clearInterval(targetPreview.blinkTimer);
+      setTargetPreview(null);
+    },
     onFightAttack: handleFightAttack,
     onFightPhaseRightClick: handleRightClick,
     onEndPileIn: handleEndPileIn,

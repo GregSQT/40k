@@ -3586,7 +3586,10 @@ export default function Board({
         movePreviewHiddenCacheRef.current.set(key, hiddenModels);
         if (!cancelled) setMovePreviewHiddenModelIds(new Set(hiddenModels));
       })().catch((err) => {
-        if (!cancelled) console.error(err);
+        if (!cancelled) {
+          console.error(err);
+          setMovePreviewHiddenModelIds(new Set());
+        }
       });
     }, 25); // debounce survol (ms) avant l'appel backend du hidden preview
     return () => {
@@ -4936,7 +4939,7 @@ export default function Board({
         const planAfterStart = squadMovePlanRef.current;
         if (!planAfterStart || Number(planAfterStart.unitId) !== Number(uid)) return;
         await squadMoveCallbacksRef.current.onSelectModelForMove?.(mid);
-      })();
+      })().catch(console.error);
     };
 
     document.addEventListener("pointerdown", onEntryPointerDown, true);
@@ -5543,7 +5546,13 @@ export default function Board({
     };
 
     canvas.addEventListener("pointerdown", onPointerDownSelect);
-    return () => canvas.removeEventListener("pointerdown", onPointerDownSelect);
+    return () => {
+      canvas.removeEventListener("pointerdown", onPointerDownSelect);
+      if (deploySelectTimerRef.current !== null) {
+        clearTimeout(deploySelectTimerRef.current);
+        deploySelectTimerRef.current = null;
+      }
+    };
   }, [
     isPerModelMove,
     perModelChargeLike,
@@ -9093,8 +9102,7 @@ export default function Board({
           if (u.player === selectedUnit.player) {
             return false;
           }
-          if (u.HP_CUR == null)
-            throw new Error(`Unit ${u.id} missing HP_CUR for fight target filter`);
+          if (u.HP_CUR == null) return false;
           let hp = u.HP_CUR;
           const ce = ucFight?.[String(u.id)];
           if (ce && typeof ce.HP_CUR === "number") {
@@ -9662,6 +9670,7 @@ export default function Board({
       objectiveControlStartTurn = primaryObjectiveConfig.scoring.start_turn;
     }
     if (replayActionIndex === undefined) {
+      if (!gameState) return;
       const livePrimaryObjective = gameState?.primary_objective as
         | PrimaryObjectiveRule
         | PrimaryObjectiveRule[]

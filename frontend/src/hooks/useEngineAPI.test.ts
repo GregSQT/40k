@@ -412,6 +412,29 @@ describe("useEngineAPI — targetPreview", () => {
     // Aucune erreur dans le hook
     expect(result.current.error).toBeNull();
   });
+
+  it("onCancelTargetPreview : exposé dans le hook et ne plante pas si targetPreview est null", async () => {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: makeGameState() })
+      )
+    );
+    const { result } = renderHook(() => useEngineAPI());
+    await waitFor(
+      () => {
+        expect(result.current.loading).toBe(false);
+        expect(result.current.maxTurns).not.toBeNull();
+      },
+      { timeout: 5000 }
+    );
+    expect(typeof result.current.onCancelTargetPreview).toBe("function");
+    // targetPreview null au repos : l'appel doit être un no-op sans erreur.
+    await act(async () => {
+      result.current.onCancelTargetPreview();
+    });
+    expect(result.current.targetPreview).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
