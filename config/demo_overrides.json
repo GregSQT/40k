@@ -1,6 +1,8 @@
 {
   "unit_names": {
-    "Intercessor": "Soldier"
+    "Intercessor": "Soldier",
+    "Vanguard Veteran Squad with Jump Packs": "Flying Soldier",
+    "Ork": "Orc"
   },
   "weapon_names": {},
   "ability_names": {}
