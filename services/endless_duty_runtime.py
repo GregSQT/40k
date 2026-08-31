@@ -704,14 +704,23 @@ def _replace_units_for_player(gs: Dict[str, Any], player: int, replacement_units
     # disparaissent de l observation (son ratio remonterait a 1.0 sans avoir rien regagne).
     # `model_count_at_start_by_player` est la meme photo, en figurines : elle se preserve
     # exactement de la meme facon, sinon les deux references de depart divergeraient.
+    # `destroyed_models` (archive Grot Orderly) est aussi remis a {} par build_units_cache :
+    # les entrees de l adversaire doivent survivre, sinon Grot Orderly reste muet sur ce run.
+    opponent = 1 if int(player) == 2 else 2
     previous_value_at_start = dict(gs.get("value_at_start") or {})  # get allowed (1er appel)
     previous_models_at_start = dict(gs.get("model_count_at_start_by_player") or {})  # get allowed (1er appel)
+    opponent_unit_ids = {str(require_key(u, "id")) for u in gs["units"] if int(require_key(u, "player")) == opponent}
+    previous_destroyed_models = {
+        squad_id: models
+        for squad_id, models in (gs.get("destroyed_models") or {}).items()
+        if squad_id in opponent_unit_ids
+    }
     build_units_cache(gs)
-    opponent = 1 if int(player) == 2 else 2
     if opponent in previous_value_at_start:
         require_key(gs, "value_at_start")[opponent] = previous_value_at_start[opponent]
     if opponent in previous_models_at_start:
         require_key(gs, "model_count_at_start_by_player")[opponent] = previous_models_at_start[opponent]
+    require_key(gs, "destroyed_models").update(previous_destroyed_models)
     rebuild_choice_timing_index(gs)
     units_cache = require_key(gs, "units_cache")
     gs["units_cache_prev"] = {
