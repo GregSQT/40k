@@ -406,11 +406,6 @@ def test_overrun_squad_absent_from_squad_models_raises(monkeypatch):
     gs["squad_models"] = {}  # squad 101 absente de squad_models
 
     _patch_overrun(monkeypatch, ["enemy_A"])
-    # Stubbe _fight_resolve_with_target pour isoler le code path squad_models.
-    monkeypatch.setattr(
-        _FakeEngine, "_fight_resolve_with_target",
-        lambda self, sid, tid: (True, {"target_squad_id": tid}),
-    )
     eng = _FakeEngine(gs)
 
     with pytest.raises(KeyError):
