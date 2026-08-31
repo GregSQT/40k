@@ -38,7 +38,8 @@ def _game_state(weapon_rules, *, target_keywords=()):
         "models_cache": {"A1": attacker, "T1": target_model},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
-        "units_cache": {"1": {"VALUE": 10.0, "player": 0}, "2": {"VALUE": 10.0, "player": 1}},
+        "units_cache": {"1": {"col": 0, "row": 0, "VALUE": 10.0, "player": 0, "HP_CUR": 1, "HP_MAX": 1},
+                        "2": {"col": 1, "row": 0, "VALUE": 10.0, "player": 1, "HP_CUR": 2, "HP_MAX": 2}},
         # `player` sur les DEUX : aucun constructeur du moteur ne produit une unite sans camp
         # (`create_unit` l'exige), et les capacites de faction le lisent — une doublure qui
         # l'omet decrit une unite impossible. Meme doctrine que `tests/_state_invariants.py`.

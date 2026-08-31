@@ -67,11 +67,11 @@ def _game_state(
         "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "role": None, "unitType": "Grunt", "player": 1,
     }
 
-    atk_uc: dict = {"col": 0, "row": 0, "VALUE": 10.0, "player": 0}
+    atk_uc: dict = {"col": 0, "row": 0, "VALUE": 10.0, "player": 0, "HP_CUR": 1, "HP_MAX": 1}
     if atk_floor_height is not None:
         atk_uc["floor_height_by_model"] = {"A1": atk_floor_height}
 
-    tgt_uc: dict = {"col": 5, "row": 5, "VALUE": 10.0, "player": 1}
+    tgt_uc: dict = {"col": 5, "row": 5, "VALUE": 10.0, "player": 1, "HP_CUR": 2, "HP_MAX": 2}
     if tgt_floor_height is not None:
         tgt_uc["floor_height_by_model"] = {"T1": tgt_floor_height}
 

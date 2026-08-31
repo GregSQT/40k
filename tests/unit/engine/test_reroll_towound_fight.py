@@ -55,9 +55,9 @@ def _fight_state(unit_rules, *, target_col=9, target_row=9):
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
         "units_cache": {
-            "1": {"col": 0, "row": 0, "VALUE": 10.0, "player": 1, "orientation": 0},
+            "1": {"col": 0, "row": 0, "VALUE": 10.0, "player": 1, "orientation": 0, "HP_CUR": 1, "HP_MAX": 1},
             "2": {"col": target_col, "row": target_row, "VALUE": 10.0, "player": 2,
-                  "orientation": 0},
+                  "orientation": 0, "HP_CUR": 2, "HP_MAX": 2},
         },
         "unit_by_id": {
             "1": {"id": "1", "player": 1, "UNIT_RULES": unit_rules},

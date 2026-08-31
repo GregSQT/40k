@@ -238,7 +238,7 @@ class TestModeRbacOnEveryRequest:
             # tant qu'une partie `pvp` traîne dans le process.
             "current_user", "logout_user", "list_armies", "get_board_config",
             "get_config_defaults", "get_default_replay_log", "get_replay_log_file",
-            "list_replay_logs", "parse_replay_log",
+            "list_replay_logs", "parse_replay_log", "get_terrain_list",
         }
 
     def test_engine_without_mode_is_refused(self, monkeypatch):

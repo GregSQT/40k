@@ -67,8 +67,8 @@ def _game_state(weapon_rules, *, attackers=1, attacker_keywords=("INFANTRY",), a
         "squad_models": {"1": [f"A{i}" for i in range(attackers)], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": attackers},
                         "2": {"model_count_at_start": 1}},
-        "units_cache": {"1": {"col": 0, "row": 0, "VALUE": 10.0, "player": 0},
-                        "2": {"col": 1, "row": 0, "VALUE": 10.0, "player": 1}},
+        "units_cache": {"1": {"col": 0, "row": 0, "VALUE": 10.0, "player": 0, "HP_CUR": attacker_hp * attackers, "HP_MAX": attacker_hp * attackers},
+                        "2": {"col": 1, "row": 0, "VALUE": 10.0, "player": 1, "HP_CUR": 9, "HP_MAX": 9}},
         "units": [{"id": "1", "player": 0, "UNIT_KEYWORDS": _kw(*attacker_keywords)},
                   {"id": "2", "player": 1, "UNIT_KEYWORDS": _kw("INFANTRY")}],
         "unit_by_id": {

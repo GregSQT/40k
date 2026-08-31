@@ -58,14 +58,14 @@
       ]
     },
     {
-      "id": 101, "unit_type": "VanguardVeteranSquadJumpPack", "player": 2, "col": 136, "row": 86,
+      "id": 101, "unit_type": "VanguardVeteranSquadJumpPack", "player": 2, "col": 142, "row": 86,
       "models": [
-        {"unit_type": "VanguardVeteranSquadJumpPack", "col": 136, "row": 86},
         {"unit_type": "VanguardVeteranSquadJumpPack", "col": 142, "row": 86},
         {"unit_type": "VanguardVeteranSquadJumpPack", "col": 148, "row": 86},
-        {"unit_type": "VanguardVeteranSquadJumpPackSergeant", "col": 139, "row": 90},
-        {"unit_type": "VanguardVeteranSquadJumpPackPlasma", "col": 145, "row": 90},
-        {"unit_type": "ChaplainJumpPack", "col": 142, "row": 96}
+        {"unit_type": "VanguardVeteranSquadJumpPack", "col": 154, "row": 86},
+        {"unit_type": "VanguardVeteranSquadJumpPackSergeant", "col": 145, "row": 90},
+        {"unit_type": "VanguardVeteranSquadJumpPackPlasma", "col": 151, "row": 90},
+        {"unit_type": "ChaplainJumpPack", "col": 148, "row": 96}
       ]
     },
     {

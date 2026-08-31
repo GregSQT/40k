@@ -49,6 +49,7 @@ def _state(
     for squad_id, player, (col, row), oc in figurines:
         units.append({
             "id": squad_id, "player": player, "OC": oc, "battle_shocked": squad_id in shocked,
+            "UNIT_RULES": [],
         })
         units_cache[squad_id] = {"player": player, "col": col, "row": row, "orientation": 0}
         model_id = f"{squad_id}#0"

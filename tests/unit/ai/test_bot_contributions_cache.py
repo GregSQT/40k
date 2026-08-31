@@ -38,7 +38,7 @@ def _state(
     models_cache: Dict[str, Any] = {}
     squad_models: Dict[str, Any] = {}
     for squad_id, player, (col, row), oc in figurines:
-        units.append({"id": squad_id, "player": player, "OC": oc, "battle_shocked": False})
+        units.append({"id": squad_id, "player": player, "OC": oc, "battle_shocked": False, "UNIT_RULES": []})
         units_cache[squad_id] = {"player": player, "col": col, "row": row, "orientation": 0}
         model_id = f"{squad_id}#0"
         squad_models[squad_id] = [model_id]

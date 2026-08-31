@@ -98,6 +98,7 @@ def _make_unit(uid: str, player: int, rng: int) -> Dict[str, Any]:
         "VALUE": 100.0,
         "RNG_WEAPONS": weapons,
         "HP_MAX": 2,
+        "UNIT_RULES": [],
     }
 
 

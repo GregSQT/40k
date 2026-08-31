@@ -65,7 +65,7 @@ def _game_state(unit_rules, weapon_rules=(), *, target_col=9, target_row=9, armo
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"2": {"model_count_at_start": 1}},
         "units_cache": {"2": {"col": target_col, "row": target_row, "VALUE": 10.0, "player": 1,
-                              "orientation": 0}},
+                              "orientation": 0, "HP_CUR": 2, "HP_MAX": 2}},
         "unit_by_id": {"1": {"id": "1", "UNIT_RULES": list(unit_rules)},
                        "2": {"id": "2", "UNIT_RULES": []}},
         "objectives": [{"id": "o1", "hexes": [[5, 5]]}],
