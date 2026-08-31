@@ -94,12 +94,10 @@ def get_run_rule_optional(key: str) -> Optional[str]:
     n'a pas la clé, et l'absence est un comportement valide (pas une erreur).
     Lève quand même si ``set_run_rules()`` n'a pas encore été appelé.
     """
-    if _run_rules is None:
-        raise RuntimeError(
-            "Règles du run non fixées : set_run_rules() doit être appelé depuis l'entête "
-            "`Run rules:` du step.log avant tout contrôle de règle."
-        )
-    return _run_rules.get(key)
+    try:
+        return get_run_rule(key)
+    except KeyError:
+        return None
 
 
 def set_run_inches_to_subhex(inches_to_subhex: int) -> None:
@@ -155,10 +153,10 @@ def _numeric(value: Any) -> Optional[int]:
     if isinstance(value, int):
         return value
     if isinstance(value, str):
-        s = value.strip()
-        s_no_sign = s.lstrip("-")
-        if s_no_sign and s_no_sign.isdigit() and s.count("-") <= 1:
-            return int(s)
+        try:
+            return int(value.strip())
+        except ValueError:
+            return None
     return None
 
 

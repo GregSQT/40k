@@ -46,6 +46,7 @@ def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: A
 # anti-psychic — rien ne « joue » à un instant précis, donc il n'y a rien à compter.
 # Afficher "NOT USED" induirait en erreur (laisse croire que le moteur ne l'applique jamais).
 _INTERACTION_ONLY_WEAPON_RULES: frozenset[str] = frozenset({"PSYCHIC"})
+_VERTICAL_NOT_FETCHED: object = object()
 
 
 def _compute_weapon_rule_not_used_warnings(stats: Dict[str, Any]) -> int:
@@ -1045,7 +1046,6 @@ def _iter_engaging_enemy_ids(
     # un journal sans hauteurs n'a pas besoin de la règle, et l'exiger d'emblée rendrait
     # inanalysable tout journal antérieur à cette clé d'entête sans rien mesurer de plus.
     # Sentinelle distincte de None (= pas de gate) pour éviter de refetcher à chaque paire.
-    _VERTICAL_NOT_FETCHED: object = object()
     vertical_zone: Any = _VERTICAL_NOT_FETCHED
     for uid, anchor in unit_positions.items():
         if uid == unit_id or uid == exclude_unit_id or uid not in unit_player:
