@@ -94,6 +94,7 @@ import {
 } from "../utils/objectiveControlKey";
 import { destroyLayerChild } from "../utils/pixiTeardown";
 import { pointInAnyMaskLoop, pointInMaskLoopsEvenOdd } from "../utils/pointInPolygon";
+import type { TerrainEntry } from "../utils/terrainSelection";
 import {
   getNonRoundBasePixelLayout,
   getNonRoundIconRadius,
@@ -966,6 +967,10 @@ type BoardProps = {
   hideIndicators?: boolean;
   /** true → cercles de portée (2/6/9/12/15/18/24″) autour de la SEULE figurine activée. */
   showRangeRings?: boolean;
+  /** Liste des terrains disponibles (terrain_list.json via API). Requise pour que useGameConfig
+   * puisse résoudre le bon suffixe de scénario (ex. mc1 vs défaut). Non fournie en mode replay
+   * car boardConfigOverride prend le relais. */
+  terrainList?: TerrainEntry[];
 };
 
 /** Échelle affichage tooltip mouvement : nombre de pas hex entre centres pour 1″ (règle plateau). */
@@ -1412,6 +1417,7 @@ export default function Board({
   onMeasureJunctionCommit,
   hideIndicators = false,
   showRangeRings = false,
+  terrainList,
 }: BoardProps) {
   /** Aligné sur drawBoard / ``boardHexClick`` (command & déploiement → move). */
   const effectivePhase = phase === "command" || phase === "deployment" ? "move" : phase;
@@ -1553,7 +1559,7 @@ export default function Board({
     gameConfig,
     loading,
     error,
-  } = useGameConfig({ inchesToSubhexOverride, scenarioFileOverride });
+  } = useGameConfig({ inchesToSubhexOverride, scenarioFileOverride, terrainList });
   // Plateau du journal (replay) puis échelle d'affichage, mémoïsés pour la RÉFÉRENCE : sans quoi
   // tout ce qui se mémoïse sur `boardConfig` est inopérant. cf. useResolvedBoardConfig.
   const boardConfig = useResolvedBoardConfig(_boardConfigFromHook, boardConfigOverride);
@@ -8464,7 +8470,7 @@ export default function Board({
     // Early returns INSIDE useEffect to avoid hooks order violation
     if (!canvasContainerRef.current) return;
 
-    if (loading) {
+    if (!boardConfig && error === null) {
       canvasContainerRef.current.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:400px;background:#1f2937;border-radius:8px;color:white;">Loading board configuration...</div>`;
       if (overlayRef.current) {
         overlayRef.current.innerHTML = "";

@@ -4646,6 +4646,7 @@ export const BoardWithAPI: React.FC = () => {
           style={snapshotViewActive ? { position: "relative", zIndex: 4000 } : undefined}
         >
           <BoardPvp
+            terrainList={terrainList}
             units={apiProps.units}
             loadEpoch={loadEpoch}
             currentLevel={currentLevel}
