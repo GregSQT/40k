@@ -16,6 +16,7 @@ Plusieurs chantiers récents ont été livrés sans passage navigateur. À valid
 
 | Chantier | Quoi valider |
 |---|---|
+| Grot Orderly panneau 2026-08-31 | ✅ Validé via test intégration API (4 tests verts) : décision `returned_models_placement` postée + `player` correct + 3 option_index résolvent + partie continue en MOVE |
 | Socle vs mur 2026-08-11 | Vérification large utilisateur (suite complète, pyright, conformité, PvE navigateur) |
 | Contrôle objectif 2026-08-12 | Vérification large utilisateur |
 | Objectif → couleur 2026-08-12 | Validation navigateur (capture d'objectif doit recolorer la zone) |
