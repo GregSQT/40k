@@ -58,6 +58,11 @@ def _patch_weapons(weapons: Any) -> None:
             w["display_name"] = _sub(w["display_name"], _weapon_names)
 
 
+def _patch_obj_weapons(obj: dict[str, Any]) -> None:
+    for wkey in ("RNG_WEAPONS", "CC_WEAPONS"):
+        _patch_weapons(obj.get(wkey))
+
+
 def apply_to_unit(unit: dict[str, Any]) -> None:
     """Patche les noms d'affichage d'un dict unité en place. No-op si DEMO_MODE non actif.
 
@@ -68,24 +73,17 @@ def apply_to_unit(unit: dict[str, Any]) -> None:
         return
     if "DISPLAY_NAME" in unit:
         unit["DISPLAY_NAME"] = _sub(unit["DISPLAY_NAME"], _unit_names)
-    for wkey in ("RNG_WEAPONS", "CC_WEAPONS"):
-        _patch_weapons(unit.get(wkey))
-    models = unit.get("models")
-    if isinstance(models, list):
-        for m in models:
-            if isinstance(m, dict):
-                for wkey in ("RNG_WEAPONS", "CC_WEAPONS"):
-                    _patch_weapons(m.get(wkey))
+    _patch_obj_weapons(unit)
+    for m in unit.get("models") or []:
+        if isinstance(m, dict):
+            _patch_obj_weapons(m)
     rules = unit.get("UNIT_RULES")
     if isinstance(rules, list):
         new_rules = []
-        changed = False
         for rule in rules:
             if isinstance(rule, dict) and "displayName" in rule:
                 patched = _sub(rule["displayName"], _ability_names)
                 if patched != rule["displayName"]:
                     rule = {**rule, "displayName": patched}
-                    changed = True
             new_rules.append(rule)
-        if changed:
-            unit["UNIT_RULES"] = new_rules
+        unit["UNIT_RULES"] = new_rules

@@ -4576,7 +4576,6 @@ def _build_units_from_army_config(
                     "battle_shocked": False,
                 }
             )
-            _demo_names.apply_to_unit(built_units[-1])
     return built_units, next_unit_id
 
 
