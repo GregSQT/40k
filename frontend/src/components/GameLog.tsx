@@ -420,15 +420,18 @@ export const GameLog: React.FC<GameLogProps> = ({
     [ruleDescriptionByLookup]
   );
 
-  // Display all events (newest first) - sort by timestamp descending, no limit
-  const displayedEvents = [...events].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+  const displayedEvents = React.useMemo(
+    () => [...events].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()),
+    [events]
+  );
 
   // Keep newest entry visible when new events arrive
+  // biome-ignore lint/correctness/useExhaustiveDependencies: events.length is an intentional trigger, not a value read inside the callback
   React.useEffect(() => {
     if (eventsContainerRef.current) {
       eventsContainerRef.current.scrollTop = 0;
     }
-  }, []);
+  }, [events.length]);
 
   return (
     <div className="game-log">
@@ -473,7 +476,7 @@ export const GameLog: React.FC<GameLogProps> = ({
               overflow: "auto",
             }}
           >
-            {displayedEvents.map((event) => {
+            {displayedEvents.map((event, index) => {
               // Check if this is a wait/skip action
               // Multiple detection methods:
               // 1. Check action_name field
@@ -482,17 +485,14 @@ export const GameLog: React.FC<GameLogProps> = ({
                 actionName &&
                 (actionName.toLowerCase() === "wait" || actionName.toLowerCase() === "skip");
 
-              // 2. Check event type (backend logs wait actions differently - check message instead)
-              const isWaitType = false; // 'wait' is not a valid type in BaseLogEntry, check message instead
-
-              // 3. Check message content (frontend logs "chose not to move")
+              // 2. Check message content (frontend logs "chose not to move")
               const message = event.message || "";
               const hasWaitMessage =
                 message.toLowerCase().includes("chose not to move") ||
                 message.toLowerCase().includes("chose not to charge") ||
                 message.toLowerCase().endsWith(" wait");
 
-              const isWaitAction = hasWaitActionName || isWaitType || hasWaitMessage;
+              const isWaitAction = hasWaitActionName || hasWaitMessage;
               const waitClass = isWaitAction ? "game-log-entry--wait" : "";
               const isObjectiveControl = actionName === "objective_control";
               const objectiveControlClass = isObjectiveControl
@@ -577,9 +577,7 @@ export const GameLog: React.FC<GameLogProps> = ({
                       )}
                     </span>
                     {useStepNumbers && (
-                      <span className="game-log-entry__turn">
-                        #{events.length - displayedEvents.findIndex((e) => e.id === event.id)}
-                      </span>
+                      <span className="game-log-entry__turn">#{events.length - index}</span>
                     )}
                     {event.turnNumber && (
                       <span className="game-log-entry__turn">T{event.turnNumber}</span>
