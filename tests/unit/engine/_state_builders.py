@@ -19,17 +19,22 @@ from engine.phase_handlers.shared_utils import build_units_cache
 from tests._state_invariants import turn_state_invariants, unit_invariants
 from tests.unit.engine._config_helpers import build_game_rules, build_move_rules
 
-def units_cache_entry(col: int, row: int, *, value: float = 10.0, player: int = 1) -> Dict[str, Any]:
+def units_cache_entry(col: int, row: int, *, value: float = 10.0, player: int = 1, hp: int = 1) -> Dict[str, Any]:
     """Entrée ``units_cache`` minimale : socle rond taille 1, hex occupé, VALUE et player pilotables.
 
     Utilisé par les tests tir/mêlée qui construisent ``units_cache`` à la main plutôt que via
     ``build_units_cache`` — tous appellent la même structure, d'où ce helper partagé.
+
+    ``hp`` : HP_CUR et HP_MAX, identiques (unité à plein). HP_CUR est requis par
+    ``_build_target_meta`` pour initialiser ``hp_before`` dans ``targets_meta``
+    avant l'allocation des pertes.
     """
     return {
         "BASE_SHAPE": "round", "BASE_SIZE": 1,
         "col": col, "row": row,
         "occupied_hexes": {(col, row)} if col >= 0 and row >= 0 else set(),
         "VALUE": value, "player": player,
+        "HP_CUR": hp, "HP_MAX": hp,
     }
 
 

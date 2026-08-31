@@ -2,7 +2,7 @@
   "uses_codex_detachment": { "1": true, "2": true },
   "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ORKS"},
   "deployment_type": "active",
-  "terrain_ref": "terrain-purge-foe-mirror-2.json",
+  "terrain_ref": "divers/terrain-purge-foe-mirror-2.json",
   "primary_objectives": [
     "objectives_control"
   ],

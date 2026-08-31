@@ -13,7 +13,7 @@ import builtins
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
-from shared.data_validation import require_key, HAZARD_CONTEXT_DESPERATE_ESCAPE
+from shared.data_validation import require_key, ConfigurationError, HAZARD_CONTEXT_DESPERATE_ESCAPE
 
 from ai.bot_registry import bot_display_name
 
@@ -661,9 +661,11 @@ class StepLogger:
                 except Exception:
                     pass
                 
+        except ConfigurationError:
+            raise
         except Exception as e:
             print(f"⚠️ Step logging error: {e}")
-    
+
     def _flush_buffer(self):
         """Flush buffered logs to file"""
         if not self.enabled or not self.log_buffer:
@@ -1329,6 +1331,11 @@ class StepLogger:
                 return f"Unit {unit_with_coords} SUFFERS 0 Mortal Wounds {tag}{dice_suffix} [NO ALLOC]"
             target_model_id = details.get("target_model_id")  # get allowed : absent si tout sauve par FNP
             if target_model_id is None:
+                if _fnp_saves_mortal is None:
+                    raise ConfigurationError(
+                        f"hazardous: target_model_id manquant et fnp_saves_mortal absent — "
+                        f"payload: unit_with_coords={unit_with_coords!r}, wounds={hazardous_mortal_wounds}"
+                    )
                 return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag}{dice_suffix}{_fnp_suffix} [ALL FNP SAVED]"
             return f"Unit {unit_with_coords} SUFFERS {hazardous_mortal_wounds} Mortal Wounds {tag}{dice_suffix}{_fnp_suffix} [ALLOC_MODEL: {target_model_id}]"
 

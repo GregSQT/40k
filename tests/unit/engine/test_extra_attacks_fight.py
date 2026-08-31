@@ -80,8 +80,10 @@ def test_declaration_produit_un_intent_par_arme(monkeypatch):
         "pending_squad_shoot_intents": {},
         # Keywords de la cible : exiges par [ANTI-X] 24.03, que l heuristique de choix d arme
         # consulte desormais (elle passe par le socle de resolution).
-        "unit_by_id": {"1": {"id": "1", "UNIT_KEYWORDS": []},
-                       "2": {"id": "2", "UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}]}},
+        "unit_by_id": {"1": {"id": "1", "UNIT_KEYWORDS": [], "UNIT_RULES": []},
+                       "2": {"id": "2", "UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}], "UNIT_RULES": []}},
+        # `bonus_malus_cap` : lu par `_bonus_malus_cap` dans squad_declare_fight (seuil de touche).
+        "config": {"game_rules": {"bonus_malus_cap": 0}},
     }
 
     intents = squad_declare_fight(gs, "1", "2")
@@ -104,8 +106,10 @@ def test_declaration_sans_extra_reste_a_un_intent(monkeypatch):
         "pending_squad_shoot_intents": {},
         # Keywords de la cible : exiges par [ANTI-X] 24.03, que l heuristique de choix d arme
         # consulte desormais (elle passe par le socle de resolution).
-        "unit_by_id": {"1": {"id": "1", "UNIT_KEYWORDS": []},
-                       "2": {"id": "2", "UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}]}},
+        "unit_by_id": {"1": {"id": "1", "UNIT_KEYWORDS": [], "UNIT_RULES": []},
+                       "2": {"id": "2", "UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}], "UNIT_RULES": []}},
+        # `bonus_malus_cap` : lu par `_bonus_malus_cap` dans squad_declare_fight (seuil de touche).
+        "config": {"game_rules": {"bonus_malus_cap": 0}},
     }
 
     intents = squad_declare_fight(gs, "1", "2")

@@ -123,7 +123,7 @@ DEFAULT_DOCS = [
     "Documentation/Roadmap/analyzer.md",
     "Documentation/Roadmap/front.md",
     "Documentation/Roadmap/infra.md",
-    "Documentation/Roadmap/capacites.md",
+
     "Documentation/Roadmap/doc.md",
     "Documentation/Chantiers/analyzer_couverture.md",
     "Documentation/Reference/infra/securite.md",

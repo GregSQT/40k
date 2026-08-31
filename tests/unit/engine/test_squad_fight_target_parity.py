@@ -282,7 +282,7 @@ def test_commit_refuses_empty_fight_when_targets_exist(melee_scenario_file):
         if _fight_build_valid_target_pool(gs, require_present(get_unit_by_id(gs, str(sid)), f"unit {sid}"))
     ]
     assert candidates
-    with pytest.raises(ValueError, match="combat a vide"):
+    with pytest.raises(ValueError, match=r"combat.+vide"):
         eng._process_squad_action({"action": "squad_fight", "squad_id": str(candidates[0])})
 
 
