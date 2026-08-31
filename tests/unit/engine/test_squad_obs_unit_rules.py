@@ -291,7 +291,7 @@ def test_real_training_roster_writes_the_expected_id():
     # que les ennemis soient visibles dans l'observation.
     rng = _random.Random(0)
     assert obs is not None
-    for _ in range(400):
+    for i in range(400):
         ennemis = obs["enemies_ability_ids"]
         # On attend l'id CHERCHÉ, pas « un id quelconque ». Depuis que le Warboss et le Bigboss
         # portent leurs modificateurs de jet (chantier 06), le premier id non nul du bloc ennemi
@@ -300,8 +300,7 @@ def test_real_training_roster_writes_the_expected_id():
         if (eng.game_state.get("phase") != "deployment"
                 and int((ennemis == obs_ids["cp_gain_on_objective"]).sum()) > 0):
             break
-        mask = eng.get_action_mask()
-        valid = list(np.flatnonzero(mask))
+        valid = list(np.flatnonzero(eng.get_action_mask()))
         assert valid, (
             f"masque entierement vide a l'iteration {i} (phase={eng.game_state.get('phase')!r}) "
             "— invariant moteur viole : aucune action valide hors terminaison"
