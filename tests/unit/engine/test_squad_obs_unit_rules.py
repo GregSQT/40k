@@ -95,8 +95,9 @@ def _load(units: List[Dict[str, Any]]) -> W40KEngine:
 def _rule_ids(obs, family: str, row: int) -> set:
     """Capacites en vigueur sur un slot d'entite, relues depuis les `obs_id` ecrits."""
     by_obs_id = {obs_id: rule_id for rule_id, obs_id in unit_ability_obs_ids().items()}
+    row_vals = obs[f"{family}_ability_ids"][row]
     try:
-        return {by_obs_id[int(v)] for v in obs[f"{family}_ability_ids"][row] if int(v) != 0}
+        return {by_obs_id[k] for v in row_vals if (k := int(v)) != 0}
     except KeyError as exc:
         raise KeyError(
             f"obs_id {exc} absent de unit_ability_obs_ids (family={family!r}, row={row})"

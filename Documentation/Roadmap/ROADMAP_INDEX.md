@@ -137,6 +137,10 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | moteur | ✅ fix-hold-still-wounds-count — double-comptage wounds corrigé (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
 | moteur | ✅ fix-urty-syringe-mw-crash — crash mortal wounds Urty Syringe corrigé (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
 | ai | ✅ fix-twin-linked-usage-token — compteur TWIN_LINKED sur token [TWIN-LINKED] (relance effective) au lieu déclaration arme, idem fight_handler ; test discriminant ajouté (2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
+| ai | ✅ fix-rules-corpus-absent-loggable — corpus armes : tokens weapon ABSENT_LOGGABLE promus PARTIEL (lot2, 2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
+| front | ✅ simplify-gamelog-lowercase — toLowerCase extrait en helper, step index display correct (2026-08-31) | [front.md](front.md) | ⚡ |
+| ai | ✅ simplify-twin-linked-regex — vérif TWIN_LINKED : substring au lieu de regex (2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
+| ai | ✅ simplify-rule-ids-leader-mid — diagnostics tests : _leader_mid try/except StopIteration, _rule_ids try plus étroit + walrus (2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
 
 ---
 

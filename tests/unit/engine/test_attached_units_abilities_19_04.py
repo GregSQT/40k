@@ -130,16 +130,16 @@ def _leader_mid(engine) -> str:
     avaient besoin de cette figurine — recopier la recherche à chaque fois laissait à chacun la
     possibilité de la retrouver autrement, donc de ne plus tester la même chose.
     """
-    mid = next(
-        (mid for mid in _models(engine)
-         if "attached_from" in engine.game_state["models_cache"][mid]),
-        None,
-    )
-    assert mid is not None, (
-        "_leader_mid: aucun modele avec 'attached_from' dans models_cache — "
-        "_fold_attached_characters n'a pas marque le leader"
-    )
-    return mid
+    try:
+        return next(
+            mid for mid in _models(engine)
+            if "attached_from" in engine.game_state["models_cache"][mid]
+        )
+    except StopIteration:
+        raise AssertionError(
+            "_leader_mid: aucun modele avec 'attached_from' dans models_cache — "
+            "_fold_attached_characters n'a pas marque le leader"
+        ) from None
 
 
 def test_mort_du_leader_eteint_sa_regle():
