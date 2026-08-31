@@ -6011,6 +6011,17 @@ class W40KEngine(gym.Env):
             "exhortationDetails": _exhort_details,
         })
         allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
+        # §24.08 Deadly Demise : la cascade peut tuer l'attaquant lui-même (engagé à ≤6").
+        # Si squad_id a disparu de units_cache, son combat ne peut pas se poursuivre.
+        if squad_id not in require_key(self.game_state, "units_cache"):
+            self._fight_v11_gym_settle()
+            return True, {
+                "action": "squad_fight",
+                "unitId": squad_id,
+                "squad_id": squad_id,
+                "target_squad_id": None,
+                "fight_result": {"targets_meta": {}, "events": [], "squads_wiped": []},
+            }
         return self._continue_squad_fight_after_selection(squad_id, target_slot)
 
     def _check_and_trigger_exhortation_de_rage(

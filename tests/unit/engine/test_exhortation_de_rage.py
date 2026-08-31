@@ -212,3 +212,46 @@ def test_single_target_auto_applique_sans_decision(monkeypatch):
     assert result is not None
     ok, payload = result
     assert ok is True
+
+
+# ---------------------------------------------------------------------------
+# §24.08 Deadly Demise : l'attaquant détruit par cascade → pas de crash
+# ---------------------------------------------------------------------------
+
+def test_attaquant_detruit_par_deadly_demise_pas_de_crash(monkeypatch):
+    """ROUGE sans le fix : KeyError 'Squad CHAP absent de units_cache'.
+
+    Reproduit le crash d'entraînement : allocate_mortal_wounds sur la cible
+    déclenche Deadly Demise (D6=6) qui détruit l'attaquant (squad_id=CHAP) avant
+    que _continue_squad_fight_after_selection soit appelé.
+    """
+    import engine.phase_handlers.shared_utils as su
+
+    settle_called = []
+
+    def _fake_allocate_destroys_attacker(gs, target_eid, count, auto_resolve, details):
+        # Simule la cascade Deadly Demise : retire l'attaquant de units_cache.
+        gs["units_cache"].pop("CHAP", None)
+
+    def _fake_settle(self_engine):
+        settle_called.append(True)
+
+    monkeypatch.setattr(su, "allocate_mortal_wounds", _fake_allocate_destroys_attacker)
+
+    engine = _FakeEngine(_gs())
+    engine._fight_v11_gym_settle = lambda: _fake_settle(engine)
+
+    # D6=4, cible unique → chemin auto (_apply_exhortation_de_rage direct).
+    rolls = iter([4, 2])
+    monkeypatch.setattr(random, "randint", lambda a, b: next(rolls))
+    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY"])
+
+    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None)
+
+    assert result is not None, "doit retourner un résultat, pas None"
+    ok, payload = result
+    assert ok is True
+    assert payload.get("action") == "squad_fight"
+    assert payload.get("squad_id") == "CHAP"
+    assert payload.get("target_squad_id") is None
+    assert len(settle_called) == 1, "_fight_v11_gym_settle doit être appelé une fois"
