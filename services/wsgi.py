@@ -88,7 +88,7 @@ def _resolve_waitress_trusted_proxy() -> str | None:
 
 
 def main() -> None:
-    from waitress import serve
+    from waitress import serve  # pyright: ignore[reportMissingModuleSource]
 
     port = _resolve_positive_int("W40K_PORT", DEFAULT_PORT)
     threads = _resolve_positive_int("W40K_WSGI_THREADS", DEFAULT_THREADS)
