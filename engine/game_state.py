@@ -3002,7 +3002,7 @@ class GameStateManager:
             # portant `secure_objective_on_control` (Get da Good Bitz / Objective Secured),
             # indépendamment du control_method global. Si l'objectif est sécurisé pour le
             # contrôleur courant, l'adversaire doit avoir STRICTEMENT plus d'OC pour le reprendre.
-            obj_secured_by = game_state.get("secured_objectives", {}).get(obj_id_key)
+            obj_secured_by = game_state["secured_objectives"].get(obj_id_key)
             new_controller, _should_clear = _resolve_objective_controller(
                 player_1_oc, player_2_oc, current_controller, obj_secured_by, control_method
             )
@@ -3194,7 +3194,7 @@ class GameStateManager:
             if obj_id_key not in objective_controllers:
                 objective_controllers[obj_id_key] = None
             current_controller = objective_controllers[obj_id_key]
-            obj_secured_by = game_state.get("secured_objectives", {}).get(obj_id_key)
+            obj_secured_by = game_state["secured_objectives"].get(obj_id_key)
             new_controller, _should_clear = _resolve_objective_controller(
                 player_1_oc, player_2_oc, current_controller, obj_secured_by, control_method
             )
@@ -3849,7 +3849,7 @@ def unit_effective_oc(unit: Dict[str, Any]) -> int:
     ici couvre tout le systeme d'objectif.
     """
     base_oc = int(require_key(unit, "OC"))
-    for rule_entry in unit.get("UNIT_RULES", []):
+    for rule_entry in require_key(unit, "UNIT_RULES"):
         if rule_entry.get("ruleId") == "oc_bonus":
             rule_args = rule_entry.get("rule_args")
             if not isinstance(rule_args, dict) or "oc_bonus" not in rule_args:
@@ -3895,9 +3895,6 @@ def apply_secure_objective_on_control(game_state: Dict[str, Any]) -> List[int]:
     # `movement_step_cp_gain_on_objective` (cp_gain_on_objective).
     GameStateManager(require_key(game_state, "config")).calculate_objective_control(game_state)
 
-    if "secured_objectives" not in game_state:
-        game_state["secured_objectives"] = {}
-
     from engine.action_log_utils import append_action_log
     controllers = require_key(game_state, "objective_controllers")
     newly_secured: List[int] = []
@@ -3921,7 +3918,7 @@ def apply_secure_objective_on_control(game_state: Dict[str, Any]) -> List[int]:
                 "unitId": str(require_key(unit, "id")),
                 "player": current_player,
                 "phase": "command",
-                "turn": game_state.get("turn", 0),
+                "turn": require_key(game_state, "turn"),
                 "objectiveId": objective_id,
             })
 

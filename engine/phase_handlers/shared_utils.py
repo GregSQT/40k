@@ -23,9 +23,9 @@ from engine.utils.weapon_helpers import (
 )
 
 
-def _squad_mode_level(alive_levels: List[int], fallback: int) -> int:
+def _squad_mode_level(alive_levels: List[int], default_level: int) -> int:
     from collections import Counter
-    return Counter(alive_levels).most_common(1)[0][0] if alive_levels else fallback
+    return Counter(alive_levels).most_common(1)[0][0] if alive_levels else default_level
 
 
 # --- Type de plan de mouvement (source unique) ---------------------------------
@@ -11182,7 +11182,10 @@ def _count_selected_hazardous_weapons(
         if args_c is None or weapons_c[widx].get("code") != args_c.get("weapon_code"):  # get allowed
             continue
         threshold_c = int(args_c.get("hazardous_threshold", 99))  # get allowed
-        alive_c = squad_cache_hz.get(squad_id_c, {}).get("model_count", 0)
+        entry_c = squad_cache_hz.get(squad_id_c)
+        if entry_c is None:
+            continue
+        alive_c = int(require_key(entry_c, "model_count"))
         if alive_c >= threshold_c:
             conditional_hazardous.add((mid, widx))
     return len(selected) + len(conditional_hazardous)

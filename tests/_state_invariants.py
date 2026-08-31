@@ -154,6 +154,13 @@ def turn_state_invariants() -> Dict[str, Any]:
         # `require_key` par `resolve_model_effective_level` (shared_utils.py) : toute fixture
         # qui calcule un niveau effectif (step_log, pile-in, tir) leve sans cette cle.
         "terrain_areas": [],
+        # Objectifs sécurisés (chantier 06 primitive E) — posés par reset(), lus en accès
+        # direct (`game_state["secured_objectives"]`) dans calculate_objective_control et
+        # apply_secure_objective_on_control. Vide en début d'épisode.
+        "secured_objectives": {},
+        # Compteur de nommage des figurines rendues (command_handlers : apply_returned_models_
+        # placement). Posé par reset(), lu en `require_key`. Vide en début d'épisode.
+        "_restored_model_counter": 0,
     }
 
 

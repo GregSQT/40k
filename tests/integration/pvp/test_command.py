@@ -225,6 +225,7 @@ class TestGrotOrderly:
             # et place le curseur en phase MOVE, tour 1, player 1.
             client.drain_to("move")
 
+            assert api_server.engine is not None
             gs = api_server.engine.game_state
             assert _BOYZ_UNIT_ID in gs["squad_models"], (
                 f"unité {_BOYZ_UNIT_ID!r} absente de squad_models "
