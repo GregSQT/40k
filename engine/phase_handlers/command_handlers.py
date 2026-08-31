@@ -107,7 +107,7 @@ def command_phase_resume(game_state: Dict[str, Any]) -> Dict[str, Any]:
     from engine.macro_intents import MAX_OBJECTIVES
 
     gym_training_mode = game_state.get("gym_training_mode", False)
-    current_player = game_state.get("current_player")
+    current_player = require_key(game_state, "current_player")
     config = game_state["config"]
     controlled_player = config.get("controlled_player")
 
@@ -499,15 +499,15 @@ def apply_returned_models_placement_decision(
         game_state, squad_id, max((archived[i] for i in selected), key=_returned_base_extent),
         len(selected), str(intent),
     )
-    # Marquer l'escouade comme traitée AVANT le test : si cells est vide (état du board
-    # changé depuis la pose de la décision), on évite que _apply_return_destroyed_models
-    # repose la même décision en boucle.
-    game_state.setdefault("return_destroyed_models_used", set()).add(squad_id)
     if cells:
         apply_returned_models_placement(
             game_state, squad_id, cells, selected,
             int(require_key(pending, "d3")), int(require_key(pending, "destroyed")),
         )
+    else:
+        # Board changé depuis la pose : skip temporaire (non consomme once-per-battle),
+        # identique aux chemins profile_decision/mono-profil quand NO_CELL.
+        game_state.setdefault("_grot_orderly_skipped_this_phase", set()).add(squad_id)
 
     if _apply_return_destroyed_models(game_state, int(player)):
         return

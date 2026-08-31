@@ -201,6 +201,19 @@ class TestCommandPhaseHandlerIsolation:
         assert result.get("phase_complete") is True
         assert result.get("next_phase") == "move"
 
+    def test_resume_raises_when_current_player_absent(self):
+        """cmd_iso_no_player : current_player absent → ConfigurationError immédiat.
+
+        ROUGE avant le fix : game_state.get("current_player") retournait None silencieusement.
+        faction_decision_is_pending(gs, None) répondait True pour n'importe quelle décision
+        en attente, gelant la phase de commandement sans issue.
+        """
+        from shared.data_validation import ConfigurationError
+        gs = _make_cmd_gs()
+        del gs["current_player"]
+        with pytest.raises(ConfigurationError):
+            command_handlers.command_phase_resume(gs)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests — via W40KEngine
