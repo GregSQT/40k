@@ -24,7 +24,7 @@ import random
 
 import pytest
 
-from tests.integration.pvp._shared import GameClient
+from tests.integration.pvp._shared import ActionsExhausted, GameClient
 
 pytestmark = pytest.mark.integration
 
@@ -266,9 +266,7 @@ class TestGrotOrderly:
                     == "returned_models_placement"
                 ),
             )
-        except AssertionError as exc:
-            if "actions sans atteindre" not in str(exc):
-                raise
+        except ActionsExhausted as exc:
             raise AssertionError(
                 "returned_models_placement non déclenchée (600 actions épuisées — "
                 "cause probable : moteur a appliqué le placement automatiquement, "

@@ -41,6 +41,10 @@ class ActionRejected(RuntimeError):
         self.status = status
 
 
+class ActionsExhausted(AssertionError):
+    """Budget d'actions épuisé dans play_nominal sans atteindre la condition d'arrêt."""
+
+
 class GameClient:
     """Pilote une partie via les vraies routes Flask, comme le front.
 
@@ -197,7 +201,7 @@ class GameClient:
                 return played
             action, payload = self.nominal_action()
             self.act(action, **payload)
-        raise AssertionError(f"{max_actions} actions sans atteindre la condition d'arrêt")
+        raise ActionsExhausted(f"{max_actions} actions sans atteindre la condition d'arrêt")
 
     def drain_to(self, target_phase: str) -> Dict[str, Any]:
         """Skippe toutes les activations jusqu'à atteindre ``target_phase``."""
