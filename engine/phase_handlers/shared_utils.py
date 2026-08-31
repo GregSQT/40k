@@ -22,6 +22,12 @@ from engine.utils.weapon_helpers import (
     weapon_rule_signature,
 )
 
+
+def _squad_mode_level(alive_levels: List[int], fallback: int) -> int:
+    from collections import Counter
+    return Counter(alive_levels).most_common(1)[0][0] if alive_levels else fallback
+
+
 # --- Type de plan de mouvement (source unique) ---------------------------------
 # Une entrée positionne UNE figurine : (model_id, col, row, level) OU
 # (model_id, col, row, level, orientation). Le 4e élément (niveau/étage de destination) est

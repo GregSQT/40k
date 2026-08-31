@@ -18,6 +18,7 @@ from engine.phase_handlers.shared_utils import (
     place_model_at_effective_level, resolve_model_effective_level, wall_blocked_anchors,
     _model_height_of,
     _build_enemy_adjacent_hexes_all_players,
+    _squad_mode_level,
 )
 
 
@@ -552,10 +553,10 @@ def returned_models_legal_cells(
     # `template["level"]` (niveau de la mort), et aucune case légale ne serait retournée.
     _alive = _alive_model_ids(game_state, squad_id)
     _alive_levels = [int(require_key(models_cache[mid], "level")) for mid in _alive if mid in models_cache]
-    level = max(set(_alive_levels), key=_alive_levels.count) if _alive_levels else int(require_key(template, "level"))
+    level = _squad_mode_level(_alive_levels, int(require_key(template, "level")))
 
     present = [
-        models_cache[mid] for mid in _alive_model_ids(game_state, squad_id)
+        models_cache[mid] for mid in _alive
         if int(require_key(models_cache[mid], "level")) == level
     ]
     if not present:

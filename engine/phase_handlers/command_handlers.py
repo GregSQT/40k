@@ -11,7 +11,7 @@ before the movement phase. In Phase 2, the agent may take zone intent free steps
 from typing import Dict, List, Sequence, Tuple, Set, Optional, Any
 from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
-from .shared_utils import _build_enemy_adjacent_hexes_all_players
+from .shared_utils import _build_enemy_adjacent_hexes_all_players, _squad_mode_level
 from engine.game_state import (
     CORE_CP_GAIN_PER_COMMAND_PHASE, GameStateManager, gain_command_points,
     WAAAGH_FACTION_KEYWORD,
@@ -945,9 +945,9 @@ def apply_returned_models_placement(
     archived = require_key(game_state, "destroyed_models").get(squad_id, [])  # get allowed
     # Niveau courant du squad : mode des survivants présents au moment du revival.
     # Snapshot AVANT la boucle d'ajout pour ne pas compter les nouvelles figurines.
-    _alive_snapshot = [mid for mid in list(mid_list) if mid in models_cache]
+    _alive_snapshot = [mid for mid in mid_list if mid in models_cache]
     _alive_levels = [int(require_key(models_cache[mid], "level")) for mid in _alive_snapshot]
-    current_level = max(set(_alive_levels), key=_alive_levels.count) if _alive_levels else 0
+    current_level = _squad_mode_level(_alive_levels, 0)
     if len(cells) > len(selected):
         raise ValueError(
             f"apply_returned_models_placement: {len(cells)} cases pour {len(selected)} figurines "
