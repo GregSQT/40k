@@ -4,6 +4,8 @@
    pas de ValueError.
 2. _manual_roll_fight_intent / _manual_roll_intent : target absent de units_cache → None,
    pas de crash à _build_manual_allocation:11216 ou shared_utils:10120.
+3. _continue_squad_fight_after_selection from_exhortation=True : cible vivante mais hors pool
+   (modèles adjacents tués par MW) → _fight_target_after_designated_death, pas de ValueError.
 
 Verrous ROUGE/VERT : tests écrits AVANT le fix, rouges avec l'ancienne logique.
 """
@@ -135,3 +137,71 @@ def test_manual_roll_intent_returns_none_when_target_absent_from_units_cache():
     intent = {"model_id": "atk#0", "target_unit_id": "3", "n_attacks_resolved": 1, "weapon_index": 0}
     result = _manual_roll_intent(gs, intent, {})
     assert result is None, "cible absente de units_cache → intent ignoré (jumeau tir)"
+
+
+# ---------------------------------------------------------------------------
+# Invariant 3 : cible vivante mais hors pool après MW exhortation → pas de ValueError
+# ---------------------------------------------------------------------------
+
+_ALIVE_ENEMY = "ENEMY_ALIVE"
+
+
+def _gs_alive_enemy_out_of_pool():
+    """Game state : ENEMY_ALIVE est dans units_cache (vivant) mais pool 12.05 vide
+    (ses modèles adjacents ont été tués par les MW de l'Exhortation de Rage)."""
+    return {
+        "units_cache": {
+            _SQUAD_ID: {"player": 1},
+            _ALIVE_ENEMY: {"player": 2},
+        },
+        "action_logs": [],
+        "action_log_seq": 0,
+        "turn": 1,
+        "pending_agent_decision": None,
+        "models_cache": {},
+        "squad_models": {_SQUAD_ID: [], _ALIVE_ENEMY: []},
+    }
+
+
+def test_exhortation_alive_target_out_of_pool_no_crash(monkeypatch):
+    """ROUGE sans le fix : raise ValueError car cible vivante + hors pool + from_exhortation=False.
+
+    Scénario : cible unique, MW exhortation tuent les modèles adjacents ; l'escouade ennemie
+    survit (modèles non-adjacents) → slot pointe une cible in units_cache mais absente du pool.
+    Avec from_exhortation=True : chemin _fight_target_after_designated_death → combat à vide.
+    """
+    monkeypatch.setattr(fh, "_fight_v11_engaged_now", lambda gs, u: True)
+    # Pool vide : aucun modèle adjacent ne reste après les MW.
+    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: [])
+    # Slot 0 pointe ALIVE_ENEMY — escouade vivante, mais modèles adjacents détruits.
+    monkeypatch.setattr(
+        su, "get_enemy_slot_mapping",
+        lambda gs, player: [_ALIVE_ENEMY],
+    )
+    monkeypatch.setattr(su, "squad_fight_restart_activation", lambda gs, sid: None)
+    monkeypatch.setattr(
+        fh, "build_manual_fight_allocation",
+        lambda gs, sid: {"done": True, "waiting_for_player": False, "shoot_result": {}},
+    )
+    monkeypatch.setattr(
+        gh, "end_activation",
+        lambda gs, unit, *args, **kw: {"some": "result"},
+    )
+    monkeypatch.setattr(wcore, "require_unit_by_id", lambda gs, uid: {"id": uid, "player": 1})
+
+    engine = _FakeEngine(_gs_alive_enemy_out_of_pool())
+
+    # Sans from_exhortation : doit lever (vérifie que le garde est actif hors contexte exhortation)
+    with pytest.raises(ValueError, match="hors du pool de combat 12.05"):
+        engine._continue_squad_fight_after_selection(_SQUAD_ID, target_slot=0, from_exhortation=False)
+
+    # Avec from_exhortation=True : ne doit pas lever, combat à vide car pool vide
+    engine2 = _FakeEngine(_gs_alive_enemy_out_of_pool())
+    ok, result = engine2._continue_squad_fight_after_selection(
+        _SQUAD_ID, target_slot=0, from_exhortation=True
+    )
+    assert ok is True
+    assert result.get("action") == "squad_fight"
+    assert result.get("target_squad_id") is None, (
+        "pool vide après MW → combat à vide, target_squad_id doit être None"
+    )
