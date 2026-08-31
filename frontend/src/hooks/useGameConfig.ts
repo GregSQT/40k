@@ -1,7 +1,11 @@
 // frontend/src/hooks/useGameConfig.ts
 import { useEffect, useState } from "react";
 import { apiFetch } from "../services/apiFetch";
-import { clientTerrainSuffix, resolveSelectedTerrain } from "../utils/terrainSelection";
+import {
+  resolveSelectedTerrain,
+  type TerrainEntry,
+  terrainSuffix,
+} from "../utils/terrainSelection";
 
 export interface DisplayConfig {
   resolution?: "auto" | number;
@@ -277,9 +281,11 @@ export const useStaticGameConfig = (): {
 export const useGameConfig = (options?: {
   inchesToSubhexOverride?: number;
   scenarioFileOverride?: string;
+  terrainList?: TerrainEntry[];
 }): ExtendedGameConfig => {
   const inchesToSubhexOverride = options?.inchesToSubhexOverride;
   const scenarioFileOverride = options?.scenarioFileOverride;
+  const terrainList = options?.terrainList;
   const [boardConfig, setBoardConfig] = useState<BoardConfig | null>(null);
   const [boardError, setBoardError] = useState<string | null>(null);
   const { gameConfig, error: gameError } = useStaticGameConfig();
@@ -293,6 +299,7 @@ export const useGameConfig = (options?: {
     const controller = new AbortController();
     let cancelled = false;
     const loadBoardConfig = async () => {
+      if (!terrainList) return;
       try {
         const urlParams = new URLSearchParams(window.location.search);
         const mode = urlParams.get("mode");
@@ -300,10 +307,11 @@ export const useGameConfig = (options?: {
         const DEFAULT_TEST_BOARD = "x5_44x60";
         const boardParam = isTestMode ? (urlParams.get("board") ?? DEFAULT_TEST_BOARD) : null;
         const terrainParam = resolveSelectedTerrain(mode, window.location.search);
+        const suffix = (m: string) => terrainSuffix(terrainParam, m, terrainList);
         const scenarioName =
           mode === "pve_test"
-            ? `scenario_pve_test${clientTerrainSuffix("pve_test", terrainParam)}.json`
-            : `scenario_pvp_test${clientTerrainSuffix("pvp_test", terrainParam)}.json`;
+            ? `scenario_pve_test${suffix("pve_test")}.json`
+            : `scenario_pvp_test${suffix("pvp_test")}.json`;
         // Dossier qui PORTE les scénarios de test : il ne suit pas la résolution jouée. `x1` et
         // `x5_44x60` sont le même plateau 44×60 à deux résolutions, et le moteur convertit les
         // coordonnées (cf. Documentation/Reference/moteur/geometrie_et_distances.md). Les entrées
@@ -312,7 +320,7 @@ export const useGameConfig = (options?: {
           x1: "board/44x60x5",
           x5_44x60: "board/44x60x5",
         };
-        const pveScenario = `config/board/44x60x5/scenario/scenario_pve${clientTerrainSuffix("pve", terrainParam)}.json`;
+        const pveScenario = `config/board/44x60x5/scenario/scenario_pve${suffix("pve")}.json`;
         const scenarioMap: Record<string, string> = {
           endless_duty: "config/scenario_endless_duty.json",
           pve: pveScenario,
@@ -320,7 +328,7 @@ export const useGameConfig = (options?: {
         // Le sélecteur de terrain agit aussi en PvP : le scénario suffixé doit être celui que
         // `POST /api/game/start` résout côté serveur, sinon le plateau dessiné et le plateau
         // joué divergeraient.
-        const pvpScenario = `config/board/44x60x5/scenario/scenario_pvp${clientTerrainSuffix("pvp", terrainParam)}.json`;
+        const pvpScenario = `config/board/44x60x5/scenario/scenario_pvp${suffix("pvp")}.json`;
         const scenarioFile =
           scenarioFileOverride ??
           (isTestMode && boardParam && boardDirMap[boardParam]
@@ -387,7 +395,7 @@ export const useGameConfig = (options?: {
       cancelled = true;
       controller.abort();
     };
-  }, [inchesToSubhexOverride, scenarioFileOverride]);
+  }, [inchesToSubhexOverride, scenarioFileOverride, terrainList]);
 
   const error = boardError ?? gameError;
   // `loading` est DÉRIVÉ, il n'est plus un état posé au début de chaque chargement. Un

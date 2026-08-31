@@ -19,7 +19,7 @@ import {
 } from "../hooks/useEngineAPI";
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
-import { logoutSession } from "../services/apiFetch";
+import { apiFetch, logoutSession } from "../services/apiFetch";
 import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
 import type { DeploymentState, UnitId } from "../types/game";
 import {
@@ -29,8 +29,8 @@ import {
 } from "../utils/strategicReservesUi";
 import {
   resolveSelectedTerrain,
-  TERRAIN_LABELS,
-  type TerrainRef,
+  setTerrainList,
+  type TerrainEntry,
   terrainsForMode,
 } from "../utils/terrainSelection";
 import { AdvanceWarningModal } from "./AdvanceWarningModal";
@@ -607,8 +607,22 @@ export const BoardWithAPI: React.FC = () => {
   const p1DisplayName = capitalizeFirst(apiProps.gameState?.player_names?.["1"] ?? "Player 1");
   const p2DisplayName = capitalizeFirst(apiProps.gameState?.player_names?.["2"] ?? "Player 2");
 
+  // Terrain list loaded from terrain_list.json via API ; gate useGameConfig until available.
+  const [terrainList, setTerrainListState] = useState<TerrainEntry[] | undefined>(undefined);
+  useEffect(() => {
+    apiFetch("/api/config/terrain-list")
+      .then((r) => r.json())
+      .then((data: { terrains: TerrainEntry[] }) => {
+        setTerrainList(data.terrains);
+        setTerrainListState(data.terrains);
+      })
+      .catch(() => {
+        // Fallback vide : le plateau ne charge pas, erreur remontée par useGameConfig.
+      });
+  }, []);
+
   // Get board configuration for line of sight calculations
-  const { gameConfig, boardConfig } = useGameConfig();
+  const { gameConfig, boardConfig } = useGameConfig({ terrainList });
   // MOVE/portées sont stockés ×inches_to_subhex par le moteur : facteur pour reconvertir en pouces à l'affichage.
   const inchesToSubhex =
     (boardConfig as unknown as { inches_to_subhex?: number } | null)?.inches_to_subhex ?? 1;
@@ -745,8 +759,8 @@ export const BoardWithAPI: React.FC = () => {
   const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp" || gameMode === "pve";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
   const urlMode = new URLSearchParams(window.location.search).get("mode");
-  const availableTerrains = terrainsForMode(urlMode);
-  const [selectedTerrain, _setSelectedTerrain] = useState<TerrainRef>(() =>
+  const availableTerrains = terrainList ? terrainsForMode(urlMode) : [];
+  const [selectedTerrain, _setSelectedTerrain] = useState<string>(() =>
     resolveSelectedTerrain(urlMode, window.location.search)
   );
   const [saveConfigAsDefault, setSaveConfigAsDefault] = useState(
@@ -4948,28 +4962,28 @@ export const BoardWithAPI: React.FC = () => {
                     <div className="test-start-modal__terrain-category">Select your terrain :</div>
                     <div className="test-start-modal__terrain-row">
                       <div className="test-start-modal__terrain-options">
-                        {availableTerrains.map((value) => (
+                        {availableTerrains.map((terrain) => (
                           <button
-                            key={value}
+                            key={terrain.id}
                             type="button"
-                            className={`test-start-modal__terrain-option terrain-opt-${value}${selectedTerrain === value ? " test-start-modal__terrain-option--active" : ""}`}
+                            className={`test-start-modal__terrain-option terrain-opt-${terrain.id}${selectedTerrain === terrain.id ? " test-start-modal__terrain-option--active" : ""}`}
                             onClick={() => {
                               const url = new URL(window.location.href);
-                              url.searchParams.set("terrain", value);
+                              url.searchParams.set("terrain", terrain.id);
                               window.location.href = url.toString();
                             }}
                           >
-                            {TERRAIN_LABELS[value]}
+                            {terrain.label}
                           </button>
                         ))}
                       </div>
                       <div className="test-start-modal__terrain-preview">
-                        {availableTerrains.map((value) => (
+                        {availableTerrains.map((terrain) => (
                           <img
-                            key={value}
-                            className={`test-start-modal__terrain-side-img preview-${value}`}
-                            src={`/icons/Terrain/terrain-${value}.jpg`}
-                            alt={TERRAIN_LABELS[value]}
+                            key={terrain.id}
+                            className={`test-start-modal__terrain-side-img preview-${terrain.id}`}
+                            src={terrain.preview_image}
+                            alt={terrain.label}
                           />
                         ))}
                       </div>
