@@ -8,7 +8,7 @@ INTENT_INVADE = 0
 INTENT_DEFEND = 1
 INTENT_ATTACK = 2
 
-MAX_OBJECTIVES = 8
+MAX_OBJECTIVES = 5
 # Refonte spatiale du move (move_action_space_spatial_rework.md §6.2) : une action de mouvement
 # designe une CELLULE de la grille egocentrique 32x32, plus une direction 0-5. Le TYPE de move
 # (normal/advance/fall_back) n'est PAS une dimension d'action : il est infere du cout geodesique
