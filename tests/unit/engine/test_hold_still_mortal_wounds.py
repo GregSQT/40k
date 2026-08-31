@@ -238,6 +238,55 @@ def test_target_vehicle_pas_de_hold_still(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Kill total Hold Still → action_logs contient hold_still_mortal_wounds + dead
+# ---------------------------------------------------------------------------
+
+def test_hold_still_kill_total_action_logs(monkeypatch):
+    """ROUGE sans le chemin : aucune de ces entrées ne serait émise si Hold Still
+    était absent ou si le log était émis APRÈS l'appel _alloc_mw (qui retourne None
+    quand la cible est détruite, coupant le chemin).
+
+    VERT : vérifie que :
+    - hold_still_mortal_wounds EST dans action_logs (émis avant l'appel _alloc_mw)
+    - un signal 'dead' EST dans action_logs (destroy_model → reason='hazard')
+    - le retour est None (cible détruite, pending_wounds moot)
+
+    Ces deux entrées sont le prérequis pour que le frontend puisse animer la
+    disparition de l'unité (yieldAfterFightCombatLogsBeforeStateSuite côté
+    useEngineAPI.ts doit pouvoir détecter au moins un signal de mort).
+    """
+    from engine.phase_handlers import fight_handlers as _fh
+    from engine.phase_handlers.shared_utils import append_action_log
+
+    def _alloc_mw_kill(gs, uid, n, auto, sink):
+        gs["units_cache"].pop(uid, None)
+        gs["squad_models"][uid] = []
+        append_action_log(gs, {
+            "type": "dead", "model_id": f"{uid}#0",
+            "unitId": uid, "reason": "hazard",
+            "turn": gs.get("turn", 0), "phase": "fight",
+        })
+
+    _patch_fight_harness(monkeypatch, _crit_rolled())
+    monkeypatch.setattr(su, "allocate_mortal_wounds", _alloc_mw_kill)
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+
+    gs = _gs()
+    result = _fh._manual_roll_fight_intent(gs, _intent(weapon_index=1), {})
+
+    types_logged = [e["type"] for e in gs["action_logs"]]
+    assert "hold_still_mortal_wounds" in types_logged, (
+        f"hold_still_mortal_wounds absent des action_logs : {types_logged}"
+    )
+    assert "dead" in types_logged, (
+        f"Signal de mort ('dead') absent des action_logs après kill total Hold Still : {types_logged}"
+    )
+    assert result is None, (
+        f"La cible entièrement détruite par les MW doit faire retourner None, got {result!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
 # MW tuent la cible → retour None (invariant _build_manual_allocation)
 # ---------------------------------------------------------------------------
 
