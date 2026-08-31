@@ -26,8 +26,16 @@ export class BannerNob extends SwarmRangeSwarm {
   // UNIT RULES
   static UNIT_RULES = [
     { ruleId: "support", displayName: "Support" },
-    { ruleId: "invul_save_override", displayName: "Waaagh! Banner (InSv)", rule_args: { value: 5 } },
-    { ruleId: "toughness_bonus_while_waaagh", displayName: "Waaagh! Banner (T+1)", rule_args: { toughness_bonus: 1 } },
+    {
+      ruleId: "invul_save_override",
+      displayName: "Waaagh! Banner (InSv)",
+      rule_args: { value: 5 },
+    },
+    {
+      ruleId: "toughness_bonus_while_waaagh",
+      displayName: "Waaagh! Banner (T+1)",
+      rule_args: { toughness_bonus: 1 },
+    },
   ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)

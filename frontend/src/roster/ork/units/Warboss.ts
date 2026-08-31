@@ -31,7 +31,11 @@ export class Warboss extends SwarmRangeSwarm {
     { ruleId: "hit_roll_bonus_fight", displayName: "Might Is Right" },
     // Da Biggest and da Best : « While the Waaagh! is active for this unit, this model's
     // melee weapons have +4 A. » Portée par CE MODÈLE uniquement (ce n'est pas une règle d'unité).
-    { ruleId: "melee_attacks_bonus_while_waaagh", displayName: "Da Biggest and da Best", rule_args: { attacks_bonus: 4 } },
+    {
+      ruleId: "melee_attacks_bonus_while_waaagh",
+      displayName: "Da Biggest and da Best",
+      rule_args: { attacks_bonus: 4 },
+    },
   ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)

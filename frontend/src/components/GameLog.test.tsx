@@ -90,7 +90,7 @@ describe("GameLog — tokens de relance", () => {
             woundRollBonusAbility: "Litany of Hate",
           }),
         ]}
-      />,
+      />
     );
     expandFirstEntry();
     expect(shotRowText()).toContain("Tir: ✓ (4) [MIGHT IS RIGHT] [SUPPRESSED]");

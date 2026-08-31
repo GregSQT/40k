@@ -30,8 +30,16 @@ export class LibrarianTerminator extends LeaderEliteMeleeElite {
   // UNIT RULES
   static UNIT_RULES = [
     { ruleId: "support", displayName: "Support" },
-    { ruleId: "invul_save_override", displayName: "Mental Fortress (InSv 4+)", rule_args: { value: 4 } },
-    { ruleId: "feel_no_pain_vs_psychic", displayName: "Psychic Hood (FNP 4+ vs PSYCHIC)", rule_args: { threshold: 4 } },
+    {
+      ruleId: "invul_save_override",
+      displayName: "Mental Fortress (InSv 4+)",
+      rule_args: { value: 4 },
+    },
+    {
+      ruleId: "feel_no_pain_vs_psychic",
+      displayName: "Psychic Hood (FNP 4+ vs PSYCHIC)",
+      rule_args: { threshold: 4 },
+    },
   ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)

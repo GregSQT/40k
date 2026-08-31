@@ -30,7 +30,11 @@ export class BigMekDakkarig extends SwarmRangeSwarm {
     {
       ruleId: "weapon_attacks_bonus_vs_keyword",
       displayName: "Dakkablitz",
-      rule_args: { weapon_code: "blitzcannon", attacks_bonus: 6, excluded_keywords: ["MONSTER", "VEHICLE"] },
+      rule_args: {
+        weapon_code: "blitzcannon",
+        attacks_bonus: 6,
+        excluded_keywords: ["MONSTER", "VEHICLE"],
+      },
     },
   ];
 

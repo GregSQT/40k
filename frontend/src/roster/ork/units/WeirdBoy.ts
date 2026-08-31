@@ -37,7 +37,13 @@ export class WeirdBoy extends SwarmRangeSwarm {
     {
       ruleId: "weapon_profile_scaling_by_model_count",
       displayName: "Waaagh! Energy",
-      rule_args: { weapon_code: "eadbanger", per_count: 5, str_bonus: 1, dmg_bonus: 1, hazardous_threshold: 10 },
+      rule_args: {
+        weapon_code: "eadbanger",
+        per_count: 5,
+        str_bonus: 1,
+        dmg_bonus: 1,
+        hazardous_threshold: 10,
+      },
     },
   ];
 

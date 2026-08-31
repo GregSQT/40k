@@ -30,7 +30,11 @@ export class LandSpeederOnslaughtGatlingCannon extends EliteRangeTroop {
   // UNIT RULES
   static UNIT_RULES = [
     { ruleId: "deep_strike", displayName: "Deep Strike" },
-    { ruleId: "move_after_shooting", displayName: "Purgation Run (D6\")", rule_args: { distance_dice: "D6" } },
+    {
+      ruleId: "move_after_shooting",
+      displayName: 'Purgation Run (D6")',
+      rule_args: { distance_dice: "D6" },
+    },
   ];
 
   // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)

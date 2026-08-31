@@ -578,7 +578,9 @@ export const GameLog: React.FC<GameLogProps> = ({
                       )}
                     </span>
                     {useStepNumbers && (
-                      <span className="game-log-entry__turn">#{displayedEvents.length - index}</span>
+                      <span className="game-log-entry__turn">
+                        #{displayedEvents.length - index}
+                      </span>
                     )}
                     {event.turnNumber && (
                       <span className="game-log-entry__turn">T{event.turnNumber}</span>
