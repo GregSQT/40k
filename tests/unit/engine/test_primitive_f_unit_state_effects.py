@@ -45,9 +45,12 @@ def _unit(uid: str, player: int, unit_rules: Optional[List[Dict[str, Any]]] = No
 
 def _model(uid: str, col: int = 5, row: int = 5, t: int = 4, role: str = "bodyguard",
            hp_cur: int = 3, hp_max: int = 3, invul_save: int = 7,
-           armor_save: int = 4) -> Dict[str, Any]:
+           armor_save: int = 4, unit_type: str = "Boyz") -> Dict[str, Any]:
     return {
         "squad_id": uid,
+        # Identité de PROFIL : la restitution Grot Orderly la lit pour rendre la figurine
+        # RÉELLEMENT détruite plutôt qu'un clone d'une survivante.
+        "unitType": unit_type,
         "col": col,
         "row": row,
         "level": 0,
@@ -408,6 +411,12 @@ def _state_with_painboy_and_destroyed(n_alive: int = 3, n_destroyed: int = 2) ->
         "centroid_row": 5,
     }
     gs["units_cache"]["pain"]["HP_CUR"] = n_alive * 3
+    # Archive des figurines détruites : c'est ELLE que la restitution rend (REVIVED). Un seul
+    # profil ici — le choix « quelles figurines » ne se pose pas, ces tests portent sur le NOMBRE
+    # rendu et le « once per battle ».
+    gs["destroyed_models"] = {
+        "pain": [_model("pain", col=-1, row=-1, t=5, armor_save=5) for _ in range(n_destroyed)]
+    }
     return gs
 
 

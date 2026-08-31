@@ -547,7 +547,12 @@ def returned_models_legal_cells(
     squad_id = str(squad_id)
     entry = require_key(units_cache, squad_id)
     player = int(require_key(entry, "player"))
-    level = int(require_key(template, "level"))
+    # Niveau COURANT du squad (mode des survivants) — pas le niveau archivé du template.
+    # Un squad qui change d'étage après des pertes verrait `present` vide si on lisait
+    # `template["level"]` (niveau de la mort), et aucune case légale ne serait retournée.
+    _alive = _alive_model_ids(game_state, squad_id)
+    _alive_levels = [int(require_key(models_cache[mid], "level")) for mid in _alive if mid in models_cache]
+    level = max(set(_alive_levels), key=_alive_levels.count) if _alive_levels else int(require_key(template, "level"))
 
     present = [
         models_cache[mid] for mid in _alive_model_ids(game_state, squad_id)
@@ -608,7 +613,14 @@ def returned_models_legal_cells(
         lc_radius,
     )
 
-    anchor_col, anchor_row = int(template["col"]), int(template["row"])
+    # Le BFS part d'une figurine PRÉSENTE, jamais de `template` : depuis que les figurines rendues
+    # sont les vraies figurines détruites (REVIVED), le template est un profil ARCHIVÉ, dont les
+    # coordonnées sont la sentinelle (-1,-1) — la recherche explorait alors le coin (0,0) du
+    # plateau et ne trouvait aucune case cohérente avec l'escouade. `template` ne sert plus qu'à
+    # l'EMPREINTE (socle, hauteur, niveau) ; l'origine de la recherche est l'escouade, ce que dit
+    # d'ailleurs la règle : « in coherency with models in that unit that started that phase on the
+    # battlefield ». `present` est non vide (contrôlé plus haut) et filtré sur le bon niveau.
+    anchor_col, anchor_row = int(present[0]["col"]), int(present[0]["row"])
     radius = _returned_placement_search_radius(
         game_state, template, (anchor_col, anchor_row)
     )

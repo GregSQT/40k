@@ -4036,8 +4036,32 @@ class W40KEngine(gym.Env):
                 }
             )
 
+        if decision_type == "returned_models_profile":
+            # Grot Orderly, PREMIÈRE étape : QUELLES figurines détruites reviennent. La règle fixe
+            # le nombre (D3), pas l'identité — et un Warboss à 85 pts n'est pas trois Boyz à 8 :
+            # les points et le contrôle d'objectif (14.02) ne désignent pas le même gagnant, donc
+            # le choix revient au joueur. `apply_returned_models_profile_decision` efface la
+            # décision et enchaîne sur le placement (écrivain unique).
+            profile = str(require_key(require_key(selected_option, "payload"), "profile"))
+            decision_player = int(require_key(self.game_state, "current_player"))
+            command_handlers.apply_returned_models_profile_decision(
+                self.game_state, decision_player, profile
+            )
+            return True, self._resume_command_phase_after_faction_decision(
+                {
+                    "action": "agent_decision",
+                    "waiting_for_player": False,
+                    "decision_type": decision_type,
+                    "unitId": require_key(decision, "unit_id"),
+                    "player": decision_player,
+                    "option_index": option_index,
+                    "returnedProfile": profile,
+                    "success": True,
+                }
+            )
+
         if decision_type == "returned_models_placement":
-            # Grot Orderly (chantier 06, passe 6) : l'agent choisit l'INTENTION de placement des
+            # Grot Orderly, SECONDE étape : l'agent choisit l'INTENTION de placement des
             # figurines rendues, jamais la case — les cases légales dépassent le plafond de
             # `MAX_DECISION_OPTIONS`, et §9.0bis interdit un top-K tronqué.
             # `apply_returned_models_placement_decision` efface la decision elle-meme et enchaine
@@ -4323,7 +4347,12 @@ class W40KEngine(gym.Env):
                 # Chaque type de 08.04 a son application : dispatcher sur le TYPE et non sur
                 # l'appartenance au frozenset, sans quoi une décision de placement se verrait
                 # appliquer le Waaagh! — et `consume_pending_agent_decision` refuserait.
-                if str(require_key(decision, "type")) == "returned_models_placement":
+                if str(require_key(decision, "type")) == "returned_models_profile":
+                    command_handlers.apply_returned_models_profile_decision(
+                        self.game_state, current_player,
+                        self._select_ai_returned_profile(decision),
+                    )
+                elif str(require_key(decision, "type")) == "returned_models_placement":
                     command_handlers.apply_returned_models_placement_decision(
                         self.game_state, current_player,
                         self._select_ai_returned_placement(decision),
@@ -4382,6 +4411,29 @@ class W40KEngine(gym.Env):
             "phase": "command",
             "player": current_player,
         }
+
+    def _select_ai_returned_profile(self, decision: Dict[str, Any]) -> str:
+        """Politique du siège IA hors gym pour « quelles figurines détruites reviennent ».
+
+        Le profil de plus haute VALUE : à nombre de figurines rendues égal (D3 est déjà tiré), il
+        récupère le plus de points, et un personnage rendu ramène aussi ses règles d'unité à
+        l'escouade (19.04). Politique explicite, du même ordre que `_select_ai_returned_placement`
+        — le gym ne passe jamais ici, l'agent choisit lui-même.
+
+        Ce n'est PAS un optimum universel : trois Boyz tiennent un objectif là où un Warboss ne
+        pose qu'un socle (OC, 14.02). C'est précisément pourquoi le choix est exposé à l'agent
+        plutôt que codé en dur pour les deux sièges.
+        """
+        options = require_key(decision, "options")
+        if not options:
+            raise RuntimeError(
+                "returned_models_profile: decision posee sans aucun profil offert."
+            )
+        best = max(
+            options,
+            key=lambda option: int(require_key(require_key(option, "payload"), "value")),
+        )
+        return str(require_key(require_key(best, "payload"), "profile"))
 
     def _select_ai_returned_placement(self, decision: Dict[str, Any]) -> str:
         """Politique du siège IA hors gym pour l'intention de placement des figurines rendues.

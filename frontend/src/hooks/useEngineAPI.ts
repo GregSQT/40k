@@ -330,7 +330,11 @@ export type PendingAgentDecision = {
   type: string;
   player: number;
   unit_id: string;
-  options: Array<{ label: string }>;
+  /** `payload` porte ce qui n'est pas lisible dans le libellé. `returned_models_profile` y met la
+   *  valeur en points et l'effectif détruit du profil : « Warboss » seul ne dit pas au joueur s'il
+   *  récupère 85 points ou 8. Optionnel — la plupart des décisions n'ont rien à y mettre, et c'est
+   *  l'INDEX du candidat qui est joué, jamais son contenu. */
+  options: Array<{ label: string; payload?: { value?: number; count?: number } }>;
 };
 
 /** Cache dernier payload ``move_preview_footprint_mask_loops`` + hash pour omission JSON (POST /action). */

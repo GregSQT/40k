@@ -164,6 +164,7 @@ def command_step_start_of_phase(game_state: Dict[str, Any]) -> None:
 
     # Reset ALL tracking sets (moved from movement_phase_start)
     game_state["units_moved"] = set()
+    game_state.pop("_grot_orderly_skipped_this_phase", None)
     # Distance parcourue par figurine (V11 §9.2.5) — MEME cycle de vie que `units_moved` :
     # c'est la version continue du meme fait ("cette figurine a bouge de X ce tour").
     game_state["moved_distance_by_model"] = {}
@@ -431,7 +432,7 @@ def oath_selectable_enemy_ids(game_state: Dict[str, Any], player: int) -> List[s
 #: `rule_choice` n'en fait PAS partie : il a son propre cycle (`pending_rule_choice_queue`) et
 #: peut être posé hors phase de commandement (`trigger: on_deploy`).
 COMMAND_PHASE_DECISION_TYPES: frozenset = frozenset(
-    {"waaagh_call", "returned_models_placement"}
+    {"waaagh_call", "returned_models_profile", "returned_models_placement"}
 )
 
 
@@ -486,15 +487,16 @@ def apply_returned_models_placement_decision(
             "efface entre la pose de la decision et sa resolution."
         )
     squad_id = str(require_key(pending, "squad_id"))
-    models_cache = require_key(game_state, "models_cache")
-    template = models_cache.get(str(require_key(pending, "template_mid")))
-    if template is None:
+    selected = [int(i) for i in require_key(pending, "selected")]
+    archived = require_key(game_state, "destroyed_models").get(squad_id, [])  # get allowed
+    if any(i >= len(archived) for i in selected):
         raise RuntimeError(
-            f"returned_models_placement: figurine modele "
-            f"{pending['template_mid']!r} disparue entre la pose de la decision et sa resolution."
+            f"returned_models_placement: archive de {squad_id!r} reduite entre la pose de la "
+            f"decision et sa resolution ({len(archived)} entrees pour les index {selected})."
         )
     cells = plan_returned_models_placement(
-        game_state, squad_id, template, int(require_key(pending, "to_restore")), str(intent)
+        game_state, squad_id, max((archived[i] for i in selected), key=_returned_base_extent),
+        len(selected), str(intent),
     )
     # Marquer l'escouade comme traitée AVANT le test : si cells est vide (état du board
     # changé depuis la pose de la décision), on évite que _apply_return_destroyed_models
@@ -502,7 +504,7 @@ def apply_returned_models_placement_decision(
     game_state.setdefault("return_destroyed_models_used", set()).add(squad_id)
     if cells:
         apply_returned_models_placement(
-            game_state, squad_id, cells,
+            game_state, squad_id, cells, selected,
             int(require_key(pending, "d3")), int(require_key(pending, "destroyed")),
         )
 
@@ -611,29 +613,26 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
     phase, D3 destroyed models of that unit are returned. »
 
     Traite chaque unité vivante du joueur actif portant la règle et n'ayant pas encore utilisé
-    l'effet. Le PLACEMENT des figurines rendues (25 Rules appendix, REVIVED) est un choix de
-    joueur : la fonction retourne ``True`` quand elle a POSÉ une décision d'agent et interrompu
-    son balayage — l'appelant doit alors rendre la main, et rappeler cette fonction une fois la
-    décision jouée pour traiter les unités suivantes.
+    l'effet. DEUX choix de joueur peuvent s'ouvrir, dans cet ordre : QUELLES figurines détruites
+    reviennent (`returned_models_profile`, seulement si plusieurs profils sont morts) puis OÙ elles
+    sont posées (`returned_models_placement`, 25 Rules appendix REVIVED). La fonction retourne
+    ``True`` quand elle a POSÉ une décision d'agent et interrompu son balayage — l'appelant doit
+    alors rendre la main, et rappeler cette fonction une fois la décision jouée pour traiter les
+    unités suivantes.
     """
     from engine.agent_decision import set_pending_agent_decision
     from engine.combat_utils import resolve_dice_value
-    from engine.phase_handlers.deployment_handlers import RETURNED_PLACEMENT_INTENTS
-    from engine.phase_handlers.shared_utils import (
-        unit_has_rule_effect, is_unit_alive, model_is_on_board,
-    )
-    from engine.game_utils import add_debug_file_log
+    from engine.phase_handlers.shared_utils import unit_has_rule_effect, is_unit_alive
 
-    models_cache = require_key(game_state, "models_cache")
-    squad_models = require_key(game_state, "squad_models")
     squad_cache = require_key(game_state, "squad_cache")
     used: set = game_state.setdefault("return_destroyed_models_used", set())
+    skipped: set = game_state.get("_grot_orderly_skipped_this_phase", set())
 
     for unit in require_key(game_state, "units"):
         if int(require_key(unit, "player")) != current_player:
             continue
         unit_id = str(require_key(unit, "id"))
-        if unit_id in used:
+        if unit_id in used or unit_id in skipped:
             continue
         if not is_unit_alive(unit_id, game_state):
             continue
@@ -649,77 +648,249 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
         if destroyed <= 0:
             continue
 
-        d3 = resolve_dice_value("D3", "grot_orderly_return")
-        to_restore = min(d3, destroyed)
-
-        # Template = première figurine vivante (bodyguard, pas personnage attaché).
-        # Repli si toutes sont attachées : n'importe quel modèle vivant — une seule passe.
-        mid_list = squad_models.get(unit_id, [])
-        template = None
-        template_mid = None
-        fallback = None
-        fallback_mid = None
-        for mid in mid_list:
-            m = models_cache.get(mid)
-            if m is not None and model_is_on_board(m):
-                if "attached_from" not in m:
-                    template, template_mid = m, mid
-                    break
-                if fallback is None:
-                    fallback, fallback_mid = m, mid
-        if template is None:
-            template, template_mid = fallback, fallback_mid
-        if template is None:
-            continue  # impossible si is_unit_alive, défense en profondeur
-
-        # REVIVED (25 Rules appendix) : les figurines rendues sont POSÉES en cohérence, sur des
-        # cases légales — jamais empilées sur le template. Le placement est un choix de joueur
-        # (intention), il est donc soumis à l'agent quand plusieurs intentions aboutissent à des
-        # positions différentes ; sinon il n'y a rien à choisir et l'effet s'applique ici.
-        plans = _returned_placement_plans(game_state, unit_id, template, to_restore)
-        if not plans:
-            # Aucune case légale : rien n'est rendu, et le « once per battle » n'est PAS
-            # consommé — la règle exige un placement conforme, elle n'ouvre aucune pose de repli.
-            add_debug_file_log(
-                game_state,
-                f"[GROT ORDERLY] E{game_state.get('episode_number', '?')} "
-                f"T{game_state.get('turn', '?')} unit={unit_id} aucune case legale — "
-                f"aucune figurine rendue"
-            )
+        # Les figurines rendues sont les figurines REELLEMENT detruites (REVIVED, 25 Rules
+        # appendix) : elles se lisent dans l'archive tenue par `destroy_model`, jamais en clonant
+        # une survivante. `destroyed` reste calcule sur le cache parce que c'est LUI qui porte la
+        # borne reglementaire « cannot expand a unit beyond its starting strength » ; l'archive en
+        # est le contenu. Les deux doivent concorder — un ecart signalerait une mort passee hors
+        # de `destroy_model`, donc une archive incomplete, pas un cas de jeu.
+        archived = require_key(game_state, "destroyed_models").get(unit_id, [])  # get allowed (aucune mort = aucune entree)
+        if not archived:
             continue
 
-        distinct = {tuple(cells) for cells in plans.values()}
-        if len(distinct) > 1:
-            game_state["_pending_returned_placement"] = {
+        d3 = resolve_dice_value("D3", "grot_orderly_return")
+        to_restore = min(d3, destroyed, len(archived))
+        if to_restore <= 0:
+            continue
+
+        # QUELLES figurines reviennent est un choix de joueur : la regle fixe le NOMBRE (D3), pas
+        # l'identite. Un Warboss a 85 pts rend un corps, trois Boyz a 8 en rendent trois — la
+        # valeur en points et le controle d'objectif (OC, 14.02) ne designent pas le meme gagnant,
+        # donc le moteur n'a pas a trancher. L'agent choisit le PROFIL prioritaire ; le choix ne se
+        # pose que s'il existe plusieurs profils distincts parmi les detruites.
+        profiles = _returned_profile_groups(archived)
+        if len(profiles) > 1:
+            game_state["_pending_returned_selection"] = {
                 "squad_id": unit_id,
-                "template_mid": str(template_mid),
                 "to_restore": int(to_restore),
                 "d3": int(d3),
                 "destroyed": int(destroyed),
             }
             set_pending_agent_decision(
                 game_state,
-                decision_type="returned_models_placement",
+                decision_type="returned_models_profile",
                 player=current_player,
                 unit_id=unit_id,
                 options=[
                     {
-                        "label": intent,
+                        # `value` et `count` ne sont pas décoratifs : ils portent l'arbitrage
+                        # « un gros profil ou plusieurs petits » que l'agent doit trancher, et
+                        # l'UI PvP en a besoin pour que le choix soit lisible par un humain.
+                        "label": profile,
                         "effect_ids": (),
                         "declines": False,
-                        "payload": {"intent": intent},
+                        "payload": {
+                            "profile": profile,
+                            "value": int(require_key(archived[indices[0]], "VALUE")),
+                            "count": len(indices),
+                        },
                     }
-                    for intent in RETURNED_PLACEMENT_INTENTS
-                    if intent in plans
+                    for profile, indices in profiles.items()
                 ],
             )
             return True
 
-        apply_returned_models_placement(
-            game_state, unit_id, next(iter(distinct)), d3, destroyed
+        _mono_result = _arm_returned_placement(
+            game_state, unit_id, current_player,
+            _select_returned_models(archived, next(iter(profiles)), to_restore),
+            d3, destroyed,
         )
+        if _mono_result is True:
+            return True
+        if _mono_result is None:
+            # Aucune case légale, chemin mono-profil : même traitement que le chemin multi-profil
+            # dans `apply_returned_models_profile_decision` — skip temporaire, pas « used ».
+            game_state.setdefault("_grot_orderly_skipped_this_phase", set()).add(unit_id)
 
     return False
+
+
+def _returned_profile_key(model: Dict[str, Any]) -> str:
+    """Identité de PROFIL d'une figurine archivée — ce qui distingue un Boy d'un Warboss.
+
+    `unitType` et non `DISPLAY_NAME` : c'est la clé de datasheet, celle qui porte VALUE, socle et
+    armes. Absente ou nulle, elle LÈVE : regrouper des profils sous une clé inventée ferait rendre
+    au joueur une figurine qu'il n'a pas choisie.
+    """
+    unit_type = model.get("unitType")  # get allowed (le None explicite est traité juste après)
+    if unit_type is None:
+        raise KeyError(
+            f"returned_models: figurine archivee sans 'unitType' "
+            f"(squad {model.get('squad_id')!r}) — profil de restitution indeterminable."
+        )
+    return str(unit_type)
+
+
+def _returned_profile_groups(archived: Sequence[Dict[str, Any]]) -> Dict[str, List[int]]:
+    """Profils distincts parmi les figurines détruites → indices dans l'archive.
+
+    L'ordre des clés est celui des DESTRUCTIONS, pas un tri : il fixe l'ordre des candidats offerts
+    à l'agent, et §9.6 veut cet ordre contractuel plutôt que dépendant d'un hachage.
+    """
+    groups: Dict[str, List[int]] = {}
+    for index, model in enumerate(archived):
+        groups.setdefault(_returned_profile_key(model), []).append(index)
+    return groups
+
+
+def _select_returned_models(
+    archived: Sequence[Dict[str, Any]], profile: str, to_restore: int
+) -> List[int]:
+    """Indices des figurines rendues : le profil choisi d'abord, puis l'ordre de destruction.
+
+    Le complément est nécessaire — la règle rend D3 figurines, et le profil choisi n'en compte pas
+    toujours assez (un seul Warboss détruit pour un D3 de 3). Il suit l'ordre de destruction et
+    NON la valeur : compléter par les plus chères rendrait le choix de l'agent sans effet (il
+    récupérerait les mêmes figurines quelle que soit son option), et par les moins chères le
+    punirait silencieusement. L'ordre de destruction ne favorise ni ne pénalise aucune option.
+    """
+    chosen = [i for i, model in enumerate(archived) if _returned_profile_key(model) == profile]
+    if len(chosen) < to_restore:
+        already = set(chosen)
+        chosen = chosen + [i for i in range(len(archived)) if i not in already]
+    return chosen[:to_restore]
+
+
+def _arm_returned_placement(
+    game_state: Dict[str, Any], squad_id: str, current_player: int,
+    selected: Sequence[int], d3: int, destroyed: int,
+) -> Optional[bool]:
+    """Ouvre l'étape de PLACEMENT pour les figurines `selected` de l'archive.
+
+    Rend ``True`` si une décision d'agent a été posée (l'appelant doit rendre la main),
+    ``False`` si le placement était forcé et a déjà été appliqué,
+    ``None`` s'il n'existait aucune case légale (la capacité n'est PAS consommée — REVIVED).
+    """
+    from engine.agent_decision import set_pending_agent_decision
+    from engine.phase_handlers.deployment_handlers import RETURNED_PLACEMENT_INTENTS
+    from engine.game_utils import add_debug_file_log
+
+    archived = require_key(game_state, "destroyed_models").get(squad_id, [])  # get allowed
+    models = [archived[i] for i in selected]
+    # Template d'EMPREINTE : la figurine au plus grand socle parmi celles qui reviennent. Le BFS
+    # de `returned_models_legal_cells` valide une empreinte unique ; la valider sur le plus petit
+    # socle laisserait passer des cases où la plus grosse figurine ne tient pas. Les profils
+    # rendus sont hétérogènes depuis que ce sont les VRAIES figurines détruites.
+    template = max(models, key=_returned_base_extent)
+
+    # REVIVED (25 Rules appendix) : les figurines rendues sont POSÉES en cohérence, sur des cases
+    # légales — jamais empilées sur le template. Le placement est un choix de joueur (intention),
+    # il est donc soumis à l'agent quand plusieurs intentions aboutissent à des positions
+    # différentes ; sinon il n'y a rien à choisir et l'effet s'applique ici.
+    plans = _returned_placement_plans(game_state, squad_id, template, len(models))
+    if not plans:
+        # Aucune case légale : rien n'est rendu, et le « once per battle » n'est PAS consommé —
+        # la règle exige un placement conforme, elle n'ouvre aucune pose de repli.
+        add_debug_file_log(
+            game_state,
+            f"[GROT ORDERLY] E{game_state.get('episode_number', '?')} "
+            f"T{game_state.get('turn', '?')} unit={squad_id} aucune case legale — "
+            f"aucune figurine rendue"
+        )
+        return None
+
+    distinct = {tuple(cells) for cells in plans.values()}
+    if len(distinct) > 1:
+        game_state["_pending_returned_placement"] = {
+            "squad_id": squad_id,
+            "selected": [int(i) for i in selected],
+            "to_restore": len(models),
+            "d3": int(d3),
+            "destroyed": int(destroyed),
+        }
+        set_pending_agent_decision(
+            game_state,
+            decision_type="returned_models_placement",
+            player=current_player,
+            unit_id=squad_id,
+            options=[
+                {
+                    "label": intent,
+                    "effect_ids": (),
+                    "declines": False,
+                    "payload": {"intent": intent},
+                }
+                for intent in RETURNED_PLACEMENT_INTENTS
+                if intent in plans
+            ],
+        )
+        return True
+
+    apply_returned_models_placement(
+        game_state, squad_id, next(iter(distinct)), selected, d3, destroyed
+    )
+    return False
+
+
+def _returned_base_extent(model: Dict[str, Any]) -> float:
+    """Encombrement du socle, pour retenir la figurine la plus contraignante au placement.
+
+    `BASE_SIZE` est propagé SANS invention par `build_units_cache` : son absence signifie que le
+    scénario ne décrit pas de socle, et toutes les figurines sont alors logées à la même enseigne
+    (0.0 partout, le `max` retombe sur la première). Ce n'est pas un défaut masqué — le BFS
+    d'empreinte lit la même donnée et tire les mêmes conclusions.
+    """
+    size = model.get("BASE_SIZE")  # get allowed (champ optionnel, cf. build_units_cache)
+    return float(size) if size is not None else 0.0
+
+
+def apply_returned_models_profile_decision(
+    game_state: Dict[str, Any], player: int, profile: str
+) -> None:
+    """Applique le PROFIL choisi pour `returned_models_profile`, puis ouvre le placement.
+
+    Jumeau d'`apply_returned_models_placement_decision` : efface la décision elle-même
+    (`consume_pending_agent_decision`) puis enchaîne — ici sur la seconde étape du même effet,
+    le placement, et non directement sur la suite de 08.04.
+    """
+    from engine.agent_decision import consume_pending_agent_decision
+
+    consume_pending_agent_decision(
+        game_state, decision_type="returned_models_profile", player=int(player)
+    )
+    pending = game_state.pop("_pending_returned_selection", None)
+    if pending is None:
+        raise RuntimeError(
+            "returned_models_profile: pas de _pending_returned_selection — l'etat a ete "
+            "efface entre la pose de la decision et sa resolution."
+        )
+    squad_id = str(require_key(pending, "squad_id"))
+    archived = require_key(game_state, "destroyed_models").get(squad_id, [])  # get allowed
+    if not archived:
+        raise RuntimeError(
+            f"returned_models_profile: archive de {squad_id!r} videe entre la pose de la "
+            f"decision et sa resolution."
+        )
+    selected = _select_returned_models(
+        archived, str(profile), int(require_key(pending, "to_restore"))
+    )
+    result = _arm_returned_placement(
+        game_state, squad_id, int(player), selected,
+        int(require_key(pending, "d3")), int(require_key(pending, "destroyed")),
+    )
+    if result is True:
+        return
+    if result is None:
+        # Aucune case légale après choix de profil : la capacité n'est PAS consommée (REVIVED —
+        # règle exige un placement conforme). Pour éviter que le balayage repose la même décision
+        # de profil dans ce tour, on inscrit l'escouade dans le set temporaire (vidé au prochain
+        # début de phase), et jamais dans `return_destroyed_models_used`.
+        game_state.setdefault("_grot_orderly_skipped_this_phase", set()).add(squad_id)
+    # result is False : `apply_returned_models_placement` a déjà marqué dans `return_destroyed_
+    # models_used` (ligne ~976) — pas besoin de le refaire ici.
+    if _apply_return_destroyed_models(game_state, int(player)):
+        return
+    _command_abilities_after_returns(game_state, int(player))
 
 
 def _returned_placement_plans(
@@ -747,18 +918,22 @@ def _returned_placement_plans(
 
 def apply_returned_models_placement(
     game_state: Dict[str, Any], squad_id: str,
-    cells: Sequence[Tuple[int, int]], d3: int, destroyed: int,
+    cells: Sequence[Tuple[int, int]], selected: Sequence[int], d3: int, destroyed: int,
 ) -> None:
     """Crée les figurines rendues aux positions `cells` — ÉCRIVAIN UNIQUE de la restitution.
 
     `cells` vient de `plan_returned_models_placement` : positions déjà validées par empreinte,
     en cohérence, hors engagement interdit. Une par figurine rendue.
+
+    `selected` indexe l'archive `destroyed_models[squad_id]` : ce sont les figurines RÉELLEMENT
+    détruites qui reviennent, chacune avec SON profil (REVIVED : « added with all wargear and
+    enhancements they started the battle with »). Elles quittent l'archive — une figurine rendue
+    n'est plus détruite, et pourrait sinon être rendue deux fois.
     """
     import copy
 
     from engine.phase_handlers.shared_utils import (
         _recompute_squad_cache, _recompute_squad_occupied_hexes, _recompute_squad_hp_total,
-        model_is_on_board,
     )
     from engine.game_utils import add_debug_file_log
 
@@ -767,30 +942,46 @@ def apply_returned_models_placement(
     units_cache = require_key(game_state, "units_cache")
     squad_id = str(squad_id)
     mid_list = squad_models.get(squad_id, [])  # get allowed
-    template = None
-    for mid in mid_list:
-        m = models_cache.get(mid)
-        if m is not None and model_is_on_board(m):
-            template = m
-            break
-    if template is None:
-        raise KeyError(
-            f"apply_returned_models_placement: escouade {squad_id} sans figurine vivante"
+    archived = require_key(game_state, "destroyed_models").get(squad_id, [])  # get allowed
+    # Niveau courant du squad : mode des survivants présents au moment du revival.
+    # Snapshot AVANT la boucle d'ajout pour ne pas compter les nouvelles figurines.
+    _alive_snapshot = [mid for mid in list(mid_list) if mid in models_cache]
+    _alive_levels = [int(require_key(models_cache[mid], "level")) for mid in _alive_snapshot]
+    current_level = max(set(_alive_levels), key=_alive_levels.count) if _alive_levels else 0
+    if len(cells) > len(selected):
+        raise ValueError(
+            f"apply_returned_models_placement: {len(cells)} cases pour {len(selected)} figurines "
+            f"selectionnees (escouade {squad_id}) — jamais plus de cases que de figurines."
         )
+    # MOINS de cases que de figurines est un cas de JEU, pas une erreur : `plan_returned_models_
+    # placement` s'arrête dès qu'une figurine n'a plus de case légale, et la règle ne prévoit
+    # aucune pose de repli. Les figurines sans case restent détruites — donc dans l'archive.
+    selected = list(selected)[:len(cells)]
 
     counter = game_state.get("_restored_model_counter", 0)
-    for col, row in cells:
+    for (col, row), archive_index in zip(cells, selected):
         new_mid = f"{squad_id}#r{counter}"
         counter += 1
-        new_model = copy.copy(template)
+        # COPIE PROFONDE : le profil archivé porte des structures partagées au build (armes,
+        # règles, keywords). Une copie superficielle ferait muter le profil d'une figurine rendue
+        # à travers une autre — le motif d'aliasing déjà rencontré sur les observations.
+        new_model = copy.deepcopy(archived[archive_index])
         new_model["id"] = new_mid
         new_model["col"] = int(col)
         new_model["row"] = int(row)
+        new_model["level"] = current_level
+        # REVIVED : « unless otherwise stated, they are returned with their full wounds remaining ».
         new_model["HP_CUR"] = int(new_model["HP_MAX"])
-        new_model["SHOOT_LEFT"] = int(template.get("SHOOT_LEFT", 1))
-        new_model["ATTACK_LEFT"] = int(template.get("ATTACK_LEFT", 1))
+        # La figurine revient au DÉBUT de la phase de commandement : elle n'a encore ni tiré ni
+        # combattu ce tour. Les compteurs se relisent sur son propre profil de départ, pas sur
+        # ceux d'une survivante qui a peut-être déjà agi.
+        new_model["SHOOT_LEFT"] = int(new_model.get("SHOOT_LEFT", 1))
+        new_model["ATTACK_LEFT"] = int(new_model.get("ATTACK_LEFT", 1))
         models_cache[new_mid] = new_model
         mid_list.append(new_mid)
+
+    for archive_index in sorted(selected, reverse=True):
+        del archived[archive_index]
 
     game_state["_restored_model_counter"] = counter
     _recompute_squad_cache(game_state, squad_id)
