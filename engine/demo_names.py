@@ -76,6 +76,8 @@ def apply_to_unit(unit: dict[str, Any]) -> None:
     _patch_obj_weapons(unit)
     for m in unit.get("models") or []:
         if isinstance(m, dict):
+            if "DISPLAY_NAME" in m:
+                m["DISPLAY_NAME"] = _sub(m["DISPLAY_NAME"], _unit_names)
             _patch_obj_weapons(m)
     rules = unit.get("UNIT_RULES")
     if isinstance(rules, list):

@@ -114,6 +114,21 @@ def test_apply_model_weapons():
     assert unit["models"][0]["RNG_WEAPONS"][0]["display_name"] == "Rifle"
 
 
+def test_apply_model_display_name():
+    mod = _make_module(unit_names={"Intercessor": "Soldier", "Intercessor (Sergeant)": "Soldier (Sergeant)"})
+    unit: dict[str, Any] = {
+        "DISPLAY_NAME": "Intercessor",
+        "models": [
+            {"DISPLAY_NAME": "Intercessor (Sergeant)", "RNG_WEAPONS": [], "CC_WEAPONS": []},
+            {"DISPLAY_NAME": "Intercessor", "RNG_WEAPONS": [], "CC_WEAPONS": []},
+        ],
+    }
+    mod.apply_to_unit(unit)
+    assert unit["DISPLAY_NAME"] == "Soldier"
+    assert unit["models"][0]["DISPLAY_NAME"] == "Soldier (Sergeant)"
+    assert unit["models"][1]["DISPLAY_NAME"] == "Soldier"
+
+
 # ---------------------------------------------------------------------------
 # apply_to_unit — UNIT_RULES (ne mute jamais les dicts originaux)
 # ---------------------------------------------------------------------------
