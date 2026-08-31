@@ -948,7 +948,7 @@ def handle_shoot(
         weapon_key = f"{weapon_display_name} ({weapon_carrier_type})"
         shooter_pl = require_key(state.unit_player, shooter_id)
         pl_int = int(shooter_pl) if shooter_pl is not None else player
-        if "TWIN_LINKED" in weapon_rules_list:
+        if re.search(r'\[TWIN-LINKED\]', action_desc, re.IGNORECASE):
             key = ("TWIN_LINKED", weapon_key)
             stats['weapon_rule_usage'][key][pl_int] += 1
         # [ASSAULT] 24.04 — règle d'éligibilité : token si la grammaire le garantit, sinon

@@ -131,6 +131,12 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | moteur | ✅ fix-grot-orderly-template-mid — ConfigurationError `require_key(template, "id")` : clé absente du dict models_cache (l'id est la clé du parent, pas un champ) ; `template_mid` capturé dans la boucle de sélection (2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
 | moteur | ✅ fix-grot-orderly-return-loop + simplify-grot-orderly — boucle re-décision, template mort, simplifications suite (2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ⚡ |
 | moteur+front | ✅ test-grot-orderly-panel + fix-grot-orderly-review + fix-grot-review-asserts + simplify-grot-exhaustion-exc — validation intégration panneau returned_models_placement (4 tests) + code review : message erreur exhaustion, assert vacueux, KeyError explicite ; findings /code-review : except AssertionError trop large + guard vide labels ; /simplify : ActionsExhausted typé (supprime couplage chaîne play_nominal) (2026-08-31) | [front.md#validations-nav](front.md#validations-nav) | ⚡ |
+| moteur | ✅ fix-stale-comments-action-slots — commentaires index action slots décalage +190 post charge-pair (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
+| training | ✅ fix-max-objectives — révert MAX_OBJECTIVES 8→5 (2026-08-31) | [training.md](training.md) | ⚡ |
+| moteur | ✅ simplify-fight-targets-meta — _build_target_meta + purge _hs_consumed (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
+| moteur | ✅ fix-hold-still-wounds-count — double-comptage wounds corrigé (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
+| moteur | ✅ fix-urty-syringe-mw-crash — crash mortal wounds Urty Syringe corrigé (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
+| ai | ✅ fix-twin-linked-usage-token — compteur TWIN_LINKED sur token [TWIN-LINKED] (relance effective) au lieu déclaration arme, idem fight_handler ; test discriminant ajouté (2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
 
 ---
 

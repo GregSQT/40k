@@ -84,8 +84,9 @@ def _note_melee_weapon_rule_usage(
 
     CE QUI EST COMPTÉ ICI, et rien d'autre : les règles dont la ligne `FOUGHT` porte la trace.
       - `[CLEAVE:X]` et `[SUSTAINED HITS]` : tokens posés par le moteur quand la règle a JOUÉ ;
-      - `TWIN_LINKED` : comptée sur la DÉCLARATION de l'arme, exactement comme au tir (la
-        relance qu'elle ouvre n'a pas de trace propre dans la ligne).
+      - `[TWIN-LINKED]` : token posé par `_ability_token(woundRerollRule)` UNIQUEMENT quand une
+        relance de blessure a effectivement eu lieu (cause `twin_linked`) — le token est absent
+        si la blessure passe du premier coup. Même régime que les capacités d'unité relanceuses.
 
       - `DEVASTATING_WOUNDS` : `Save [DEVASTATING WOUNDS]`, que le formateur de mêlée écrit
         depuis le 2026-08-11 — il imprimait jusque-là `Save None(<seuil>+)`, un jet inexistant
@@ -130,7 +131,7 @@ def _note_melee_weapon_rule_usage(
     weapon_rules_list = require_key(weapon_info, "rules")
     weapon_key = f"{weapon_display_name} ({carrier_type})"
     pl_int = int(require_key(state.unit_player, fighter_id))
-    if "TWIN_LINKED" in weapon_rules_list:
+    if re.search(r'\[TWIN-LINKED\]', action_desc, re.IGNORECASE):
         stats['weapon_rule_usage'][("TWIN_LINKED", weapon_key)][pl_int] += 1
     if re.search(r'\[SUSTAINED(?: |_)?HITS\]', action_desc, re.IGNORECASE):
         stats['weapon_rule_usage'][("SUSTAINED_HITS", weapon_key)][pl_int] += 1
