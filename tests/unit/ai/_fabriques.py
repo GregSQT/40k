@@ -202,6 +202,9 @@ def analyzer_config(**overrides: Any) -> AnalyzerConfig:
         "sustained_hits_by_weapon_global": {},
         "weapon_range_global": {},
         "weapon_is_close_quarters_global": {},
+        "rng_str_by_weapon_global": {},
+        "cc_str_by_weapon_global": {},
+        "cc_atk_by_weapon_global": {},
         "unit_toughness_by_type": {},
         # 07.02 — nombre de tours max ; 0 = non disponible (valeur neutre pour les tests
         # qui ne testent pas la durée de la partie).
@@ -223,6 +226,9 @@ def pose_etat_du_run(
     ez_vertical_inches: float | str | None = None,
     metric_engagement: str = "hex",
     board_dims: tuple[int, int] | None = None,
+    cohesion_model_subhex: int | str | None = None,
+    cohesion_global_subhex: int | str | None = None,
+    cohesion_min_neighbors: int | str = 1,
 ) -> None:
     """Fixe l'état du run dans le module `ai.analyzer` pour les tests qui n'appellent pas
     `parse_step_log` (les getters d'analyzer lèvent si l'état n'a pas été initialisé).
@@ -230,6 +236,10 @@ def pose_etat_du_run(
     Cinq sites le faisaient à la main — `set_analyzer_board_scale` + `set_run_rules` avec un dict
     de 6 ou 7 clés dont les copies avaient divergé sur `engagement_zone_vertical_inches`. Ce
     motif est concentré ici.
+
+    Les clés `cohesion.*` sont OPTIONNELLES : ``None`` les omet (simule un log antérieur au
+    tracking de cohérence, ce qui saute le check). Passer `cohesion_model_subhex` active les
+    trois ; `cohesion_global_subhex` utilise 9× l'échelle par défaut si omis.
     """
     import ai.analyzer as an
     from ai.analyzer_config import set_run_rules
@@ -240,6 +250,11 @@ def pose_etat_du_run(
     rules: Dict[str, str] = {"engagement_zone_subhex": str(ez_subhex)}
     if ez_vertical_inches is not None:
         rules["engagement_zone_vertical_inches"] = str(ez_vertical_inches)
+    if cohesion_model_subhex is not None:
+        _global = cohesion_global_subhex if cohesion_global_subhex is not None else 9 * scale
+        rules["cohesion.model_subhex"] = str(cohesion_model_subhex)
+        rules["cohesion.global_subhex"] = str(_global)
+        rules["cohesion.min_neighbors"] = str(cohesion_min_neighbors)
     rules.update({
         "metric.engagement": metric_engagement,
         "metric.ranged": "euclidean",

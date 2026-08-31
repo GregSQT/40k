@@ -63,6 +63,11 @@ def set_run_rules(rules: Dict[str, str]) -> None:
     global _run_rules
     if not isinstance(rules, dict) or not rules:
         raise ValueError(f"run_rules invalide: {rules!r}")
+    for k, v in rules.items():
+        if not isinstance(v, str):
+            raise TypeError(
+                f"run_rules[{k!r}] doit être str, reçu {type(v).__name__}: {v!r}"
+            )
     _run_rules = dict(rules)
 
 
@@ -80,6 +85,21 @@ def get_run_rule(key: str) -> str:
             f"(présentes : {sorted(_run_rules)})"
         )
     return _run_rules[key]
+
+
+def get_run_rule_optional(key: str) -> Optional[str]:
+    """Valeur d'une règle du run, ou ``None`` si la clé est absente.
+
+    Réservé aux clés introduites après les premiers journaux de production : un log ANCIEN
+    n'a pas la clé, et l'absence est un comportement valide (pas une erreur).
+    Lève quand même si ``set_run_rules()`` n'a pas encore été appelé.
+    """
+    if _run_rules is None:
+        raise RuntimeError(
+            "Règles du run non fixées : set_run_rules() doit être appelé depuis l'entête "
+            "`Run rules:` du step.log avant tout contrôle de règle."
+        )
+    return _run_rules.get(key)
 
 
 def set_run_inches_to_subhex(inches_to_subhex: int) -> None:
@@ -134,8 +154,11 @@ def _numeric(value: Any) -> Optional[int]:
         return None
     if isinstance(value, int):
         return value
-    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
-        return int(value.strip())
+    if isinstance(value, str):
+        s = value.strip()
+        s_no_sign = s.lstrip("-")
+        if s_no_sign and s_no_sign.isdigit() and s.count("-") <= 1:
+            return int(s)
     return None
 
 
@@ -196,6 +219,13 @@ class AnalyzerConfig:
     sustained_hits_by_weapon_global: Dict[str, int]
     weapon_range_global: Dict[str, int]
     weapon_is_close_quarters_global: Dict[str, bool]
+    # Cartes GLOBALES arme→STR/ATK (mêlée uniquement pour cc_str/cc_atk), agrégées sur tous les
+    # model-types du registre. Même motif que rng_nb_by_weapon_global / cc_nb_by_weapon_global :
+    # un leader rattaché porte une arme dont le type diffère de celui de l'escouade ; la résolution
+    # per-unit-type échoue et on tombe ici. MAX en cas d'homonymie inter-datasheets.
+    rng_str_by_weapon_global: Dict[str, int]
+    cc_str_by_weapon_global: Dict[str, int]
+    cc_atk_by_weapon_global: Dict[str, int]
     #: ENDURANCE par datasheet. Par FIGURINE et non par escouade : 19.02 impose la plus haute E
     #: des figurines bodyguard, jamais celle du leader rattaché.
     unit_toughness_by_type: Dict[str, int]
@@ -275,9 +305,6 @@ def load_analyzer_config() -> AnalyzerConfig:
             display_rule_name_to_ids[normalized_rule_name] = set()
         display_rule_name_to_ids[normalized_rule_name].add(display_rule_id)
 
-    _MOVE_AFTER_SHOOTING_DICE_MAX: Dict[str, int] = {
-        "D3": 3, "D6": 6, "2D6": 12, "D6+1": 7, "D6+2": 8, "D6+3": 9,
-    }
     for unit_type, unit_data in unit_registry.units.items():
         rng_weapons = require_key(unit_data, "RNG_WEAPONS")
         cc_weapons = require_key(unit_data, "CC_WEAPONS")
@@ -467,24 +494,22 @@ def load_analyzer_config() -> AnalyzerConfig:
                         )
                 elif "distance_dice" in rule_args:
                     dice_spec = rule_args["distance_dice"]
-                    if dice_spec not in _MOVE_AFTER_SHOOTING_DICE_MAX:
-                        raise ValueError(
-                            f"Unit '{unit_type}' rule '{direct_rule_id}' rule_args.distance_dice "
-                            f"'{dice_spec}' is not a supported dice expression"
-                        )
-                    move_after_shooting_distance = _MOVE_AFTER_SHOOTING_DICE_MAX[dice_spec]
+                    move_after_shooting_distance = max_dice_value(
+                        dice_spec, "analyzer_move_after_shooting_dice"
+                    )
                 else:
                     raise ValueError(
                         f"Unit '{unit_type}' rule '{direct_rule_id}' missing rule_args.distance (int) "
                         f"or rule_args.distance_dice (str) for move_after_shooting"
                     )
+                scaled_distance = move_after_shooting_distance * inches_to_subhex
                 existing_distance = unit_move_after_shooting_distance_by_type.get(unit_type)
-                if existing_distance is not None and existing_distance != move_after_shooting_distance:
+                if existing_distance is not None and existing_distance != scaled_distance:
                     raise ValueError(
                         f"Unit '{unit_type}' has conflicting move_after_shooting distances: "
-                        f"{existing_distance} vs {move_after_shooting_distance}"
+                        f"{existing_distance} vs {scaled_distance}"
                     )
-                unit_move_after_shooting_distance_by_type[unit_type] = move_after_shooting_distance * inches_to_subhex
+                unit_move_after_shooting_distance_by_type[unit_type] = scaled_distance
         unit_rules_by_type[unit_type] = expanded_rule_ids
         unit_choice_effect_to_source_rules[unit_type] = choice_effect_to_source_rules_for_unit
 
@@ -515,7 +540,7 @@ def load_analyzer_config() -> AnalyzerConfig:
                 rule_base = str(r).split(":")[0] if ":" in str(r) else str(r)
                 weapon_rule_to_weapons.setdefault(rule_base, set()).add(weapon_key)
 
-    # Cartes globales arme→NB/portée (agrégation MAX sur tous les model-types).
+    # Cartes globales arme→NB/portée/STR/ATK (agrégation MAX sur tous les model-types).
     rng_nb_by_weapon_global: Dict[str, int] = {}
     cc_nb_by_weapon_global: Dict[str, int] = {}
     rapid_fire_by_weapon_global: Dict[str, int] = {}
@@ -524,6 +549,9 @@ def load_analyzer_config() -> AnalyzerConfig:
     sustained_hits_by_weapon_global: Dict[str, int] = {}
     weapon_range_global: Dict[str, int] = {}
     weapon_is_close_quarters_global: Dict[str, bool] = {}
+    rng_str_by_weapon_global: Dict[str, int] = {}
+    cc_str_by_weapon_global: Dict[str, int] = {}
+    cc_atk_by_weapon_global: Dict[str, int] = {}
     for _ut, _limits in unit_attack_limits.items():
         for _wname, _nb in _limits["rng_nb_by_weapon"].items():
             rng_nb_by_weapon_global[_wname] = max(rng_nb_by_weapon_global.get(_wname, 0), _nb)  # get allowed : max cumulatif, 0 = neutre
@@ -537,6 +565,12 @@ def load_analyzer_config() -> AnalyzerConfig:
             sustained_hits_by_weapon_global[_wname] = max(sustained_hits_by_weapon_global.get(_wname, 0), _sh)  # get allowed : max cumulatif, 0 = neutre
         for _wname, _nb in _limits["cc_nb_by_weapon"].items():
             cc_nb_by_weapon_global[_wname] = max(cc_nb_by_weapon_global.get(_wname, 0), _nb)  # get allowed : max cumulatif, 0 = neutre
+        for _wname, _s in _limits["rng_str_by_weapon"].items():
+            rng_str_by_weapon_global[_wname] = max(rng_str_by_weapon_global.get(_wname, 0), _s)  # get allowed : max cumulatif, 0 = neutre
+        for _wname, _s in _limits["cc_str_by_weapon"].items():
+            cc_str_by_weapon_global[_wname] = max(cc_str_by_weapon_global.get(_wname, 0), _s)  # get allowed : max cumulatif, 0 = neutre
+        for _wname, _a in _limits["cc_atk_by_weapon"].items():
+            cc_atk_by_weapon_global[_wname] = max(cc_atk_by_weapon_global.get(_wname, 0), _a)  # get allowed : max cumulatif, 0 = neutre
     for _ut, _winfos in unit_weapons_cache.items():
         for _winfo in _winfos:
             # Cartes de TIR : les entrées de mêlée en sont exclues, et pas seulement parce que
@@ -573,6 +607,9 @@ def load_analyzer_config() -> AnalyzerConfig:
         blast_by_weapon_global=blast_by_weapon_global,
         cleave_by_weapon_global=cleave_by_weapon_global,
         sustained_hits_by_weapon_global=sustained_hits_by_weapon_global,
+        rng_str_by_weapon_global=rng_str_by_weapon_global,
+        cc_str_by_weapon_global=cc_str_by_weapon_global,
+        cc_atk_by_weapon_global=cc_atk_by_weapon_global,
         unit_toughness_by_type=unit_toughness_by_type,
         weapon_range_global=weapon_range_global,
         weapon_is_close_quarters_global=weapon_is_close_quarters_global,

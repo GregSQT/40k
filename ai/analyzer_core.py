@@ -240,16 +240,22 @@ def _check_line_coherency(state: AnalyzerState, line: str) -> None:
     taille de l'escouade.
     """
     from ai.analyzer_perfig import _unit_base, squad_coherency_offenders
-    from ai.analyzer_config import get_run_rule
+    from ai.analyzer_config import get_run_rule_optional
 
     if not state.current_line_models:
         return
     upper = line.upper()
     if not any(verb in upper for verb in _COHERENCY_LINE_VERBS):
         return
-    coh = int(get_run_rule("cohesion.model_subhex"))
-    coh_max = int(get_run_rule("cohesion.global_subhex"))
-    min_neighbors = int(get_run_rule("cohesion.min_neighbors"))
+    # Clés absentes = journal antérieur au tracking de cohérence (check sauté, pas d'erreur).
+    _coh = get_run_rule_optional("cohesion.model_subhex")
+    _coh_max = get_run_rule_optional("cohesion.global_subhex")
+    _min_nb = get_run_rule_optional("cohesion.min_neighbors")
+    if _coh is None or _coh_max is None or _min_nb is None:
+        return
+    coh = int(_coh)
+    coh_max = int(_coh_max)
+    min_neighbors = int(_min_nb)
     stats = state.stats
     for unit_id, models in state.current_line_models.items():
         if unit_id not in state.unit_player:
