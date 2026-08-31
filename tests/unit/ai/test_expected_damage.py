@@ -199,8 +199,8 @@ def test_can_kill_melee_path_uses_expected_damage(monkeypatch: pytest.MonkeyPatc
     assert mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=False, game_state=game_state) is True
 
 
-def test_can_kill_returns_true_when_target_already_dead(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Branche target_hp <= 0 : retour immédiat True sans calculer les dégâts."""
+def test_can_kill_returns_false_when_target_hp_is_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Branche target_hp <= 0 : retour immédiat False — cible déjà morte, aucun intérêt à cibler."""
     import ai.reward_mapper as rmod
     from ai.reward_mapper import RewardMapper
 
@@ -215,7 +215,7 @@ def test_can_kill_returns_true_when_target_already_dead(monkeypatch: pytest.Monk
     target = _target(t=4, sv=3)
     target["id"] = "t1"
     monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: 0)
-    assert mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={}) is True
+    assert mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={}) is False
 
 
 # ---------------------------------------------------------------------------

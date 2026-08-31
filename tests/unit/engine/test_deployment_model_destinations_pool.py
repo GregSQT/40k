@@ -58,11 +58,20 @@ def _pool_over_the_upper_floor(game_state: Dict[str, Any], level: int) -> Set[Tu
 
 @pytest.fixture(scope="module")
 def floors_case():
-    eng = _floors_engine()
-    gs = eng.game_state
-    pool = _pool_over_the_upper_floor(gs, 1)
-    assert len(pool) > 1000, "pool de test trop petit — les propriétés ne prouveraient rien"
-    return eng, gs, pool
+    import os
+    previous = os.environ.get("W40K_BOARD_PATH")
+    os.environ["W40K_BOARD_PATH"] = "board/44x60x5"
+    try:
+        eng = _floors_engine()
+        gs = eng.game_state
+        pool = _pool_over_the_upper_floor(gs, 1)
+        assert len(pool) > 1000, "pool de test trop petit — les propriétés ne prouveraient rien"
+        yield eng, gs, pool
+    finally:
+        if previous is None:
+            os.environ.pop("W40K_BOARD_PATH", None)
+        else:
+            os.environ["W40K_BOARD_PATH"] = previous
 
 
 def _pool_for(monkeypatch, gs, model_id: str, pool, level: int):
