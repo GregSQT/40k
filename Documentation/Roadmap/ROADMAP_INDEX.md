@@ -129,6 +129,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | ai | ✅ simplify-twin-linked-regex — vérif TWIN_LINKED : substring au lieu de regex (2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
 | ai | ✅ simplify-rule-ids-leader-mid — diagnostics tests : _leader_mid try/except StopIteration, _rule_ids try plus étroit + walrus (2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
 | moteur | ✅ simplify-grot-orderly — _squad_mode_level O(n) mutualisé (Counter), double _alive_model_ids réduit à un appel, list() inutile retiré (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
+| ai+moteur | ✅ lots 2026-08-31 bugs — fix-analyzer-config-findings (8 bugs analyzer), placement-result-enum (PlacementResult Enum), fix-grot-orderly-destroyed-models (destroyed_models adversaire préservé vague endless_duty) | [analyzer.md](analyzer.md) [moteur.md](moteur.md) | ⚡ |
 
 ---
 

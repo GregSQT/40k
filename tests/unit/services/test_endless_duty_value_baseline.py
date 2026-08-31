@@ -90,3 +90,19 @@ def test_replacing_one_player_keeps_the_other_baseline():
     assert gs["value_at_start"][2] == 25
     # Joueur 1 : reference INCHANGEE (sinon ses pertes seraient effacees de l'observation).
     assert gs["value_at_start"][1] == 30
+
+
+def test_replacing_one_player_preserves_opponent_destroyed_models():
+    """build_units_cache remet destroyed_models={} ; l'archive Grot Orderly du non-remplace
+    doit survivre au remplacement de vague adverse, sinon Grot Orderly reste silencieux."""
+    gs = _gs()
+    # Le joueur 2 (unite 2) perd une figurine — elle entre dans l'archive.
+    destroy_model(gs, "2#0", reason="combat")
+    assert "2" in gs["destroyed_models"]
+    archived_before = gs["destroyed_models"]["2"][:]
+
+    # On remplace la vague du joueur 1 — c'est build_units_cache qui efface destroyed_models.
+    _replace_units_for_player(gs, 1, [_unit(3, 1, [(20, 10)], value=15)])
+
+    # L'archive du joueur 2 doit etre intacte (Grot Orderly peut encore s'activer).
+    assert gs["destroyed_models"].get("2") == archived_before
