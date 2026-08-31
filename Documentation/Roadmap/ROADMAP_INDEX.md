@@ -94,6 +94,12 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
 ---
 
+## ✅ Hygiène — correctifs ponctuels
+
+✅ **270 échecs pytest corrigés (2026-08-31)** — 15 causes distinctes : `units_cache_entry` sans `HP_CUR`/`HP_MAX` (192+ failures), `allocate_mortal_wounds` patché sur le mauvais module, `BASE_SHAPE` absent des fixtures, `bonus_malus_cap` manquant, `squad_cache` absent, `unit_by_id` absent, `UNIT_RULES` absent, regex accent, message d'erreur périmé, garde overrun manquante, `step_logger` retour silencieux, terrain pfm2 mauvais chemin, `capacites.md` absent, doc action size / decision_ctx périmés. Aucun chantier doc.
+
+---
+
 ## Soutien — backlog hors jalons
 
 ### Prêt à démarrer
@@ -120,19 +126,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | infra | Migration PostgreSQL | [infra.md#postgresql](infra.md#postgresql) | ⚡ |
 | infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) | 🚫 |
 | bot | Tranches 2-3 benchmark — schedule P0→P10 + exploiters : code et tests livrés 2026-08-22 (`--etape`, `curriculum.json`, pool figé par-env, `ExploiterProbeCallback` sondage synchrone + `validate_exploiter_protocol` + `exploiter_config`, 24 tests verrou) ; restent les 14 runs (~260 h) | [bot.md#league](bot.md#league) | 🚫 |
-| moteur+training+front+ai | ✅ lots 2026-08-30 — ramp_end_episodes, UI/infra, curriculum-review-fixes, simplify-*, fix-analyzer-findings, shoot-priority, Primitive B passes 2-5, simplify-is-unit-alive-guard, fix reward exhortation + intent cible morte | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) [moteur.md](moteur.md) [bot.md](bot.md) | ⚡ |
-| moteur+ai+front | ✅ lots 2026-08-31 capacités — re-sélection cible mêlée, Primitive F, fix-librarian-mental-fortress, fix-review-findings-suppress-invul-t1, test propagation 19.04 invul bodyguard, fix-grot-orderly (template+loop+panel+review) ; fix-grot-orderly-review-findings (F1 level revival, F2 niveau squad courant, F5+A once-per-battle, skip temporaire) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) [front.md#validations-nav](front.md#validations-nav) | ⚡ |
-| moteur+training | ✅ lots 2026-08-31 moteur — fix-stale-comments-action-slots, fix-max-objectives (MAX_OBJECTIVES 8→5), simplify-fight-targets-meta, fix-hold-still-wounds-count, fix-urty-syringe-mw-crash | [moteur.md](moteur.md) [training.md](training.md) | ⚡ |
-| ai | ✅ fix-twin-linked-usage-token — compteur TWIN_LINKED sur token [TWIN-LINKED] (relance effective) au lieu déclaration arme, idem fight_handler ; test discriminant ajouté (2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
-| ai | ✅ fix-rules-corpus-absent-loggable — corpus armes : tokens weapon ABSENT_LOGGABLE promus PARTIEL (lot2, 2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
-| front | ✅ simplify-gamelog-lowercase — toLowerCase extrait en helper, step index display correct (2026-08-31) | [front.md](front.md) | ⚡ |
-| ai | ✅ simplify-twin-linked-regex — vérif TWIN_LINKED : substring au lieu de regex (2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
-| ai | ✅ simplify-rule-ids-leader-mid — diagnostics tests : _leader_mid try/except StopIteration, _rule_ids try plus étroit + walrus (2026-08-31) | [analyzer.md](analyzer.md) | ⚡ |
-| moteur | ✅ simplify-grot-orderly — _squad_mode_level O(n) mutualisé (Counter), double _alive_model_ids réduit à un appel, list() inutile retiré (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
-| ai+moteur | ✅ lots 2026-08-31 bugs — fix-analyzer-config-findings (8 bugs analyzer), placement-result-enum (PlacementResult Enum), fix-grot-orderly-destroyed-models (destroyed_models adversaire préservé vague endless_duty) | [analyzer.md](analyzer.md) [moteur.md](moteur.md) | ⚡ |
-| moteur+ai | ✅ fix-grot-orderly-command-resume — 2 bugs command_handlers (skip temporaire + require_key), simplify opponent_unit_ids, simplify analyzer_config (2026-08-31) | [moteur.md](moteur.md) [analyzer.md](analyzer.md) | ⚡ |
-| moteur+ai+tests | ✅ fix-pyright-ai-rules — corriger 22 erreurs pyright/check_ai_rules root causes structurelles (secured_objectives, _restored_model_counter, require_key, _State→AnalyzerState, walrus) (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
-| moteur+tests | ✅ simplify-active-effects-walrus — active_effects redondant retiré (_State hérite AnalyzerState), walrus entry_c shared_utils (2026-08-31) | [moteur.md](moteur.md) | ⚡ |
+| tous | ✅ lots 2026-08-30/31 — capacités 06, moteur, analyzer, front, hygiène (voir git log + archives) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) [moteur.md](moteur.md) [analyzer.md](analyzer.md) [front.md](front.md) | ⚡ |
 
 ---
 
