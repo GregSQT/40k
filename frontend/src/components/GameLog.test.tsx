@@ -293,3 +293,27 @@ describe("GameLog — règles d'arme par dé", () => {
     }
   });
 });
+
+describe("GameLog — token [HALF RANGE]", () => {
+  it("expose la bulle d'aide de [HALF RANGE] dans le message de synthèse", () => {
+    // [HALF RANGE] est posé sur la ligne de synthèse par step_logger (§24.25/24.30) quand la
+    // cible était à demi-portée d'une arme RAPID_FIRE ou MELTA. Sans entrée dans le registre,
+    // le token restait du texte brut non cliquable.
+    render(
+      <GameLog
+        events={[
+          {
+            ...shootEvent({}),
+            message:
+              "Unit 1 SHOT [HALF RANGE] Unit 2 with [Bolt rifle] - Shots:2 - Hit:3+ Wound:4+ Save:3+ - HP lost:1 Killed:0",
+          } as unknown as GameLogEvent,
+        ]}
+      />
+    );
+    const tag = screen.getByRole("button", {
+      name: "Afficher la description de la regle HALF RANGE",
+    });
+    fireEvent.mouseEnter(tag);
+    expect(document.body.textContent).toContain("half the weapon's range");
+  });
+});

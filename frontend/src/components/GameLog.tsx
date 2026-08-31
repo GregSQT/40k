@@ -327,6 +327,16 @@ export const GameLog: React.FC<GameLogProps> = ({
       "Hazard roll (06.03): roll one D6 — on a 1-2 the unit suffers 1 mortal wound, or 3 if every model in it is a MONSTER or VEHICLE. Desperate Escape rolls one die per model; a Hazardous weapon rolls one die per selected weapon.",
       false
     );
+    // 24.25 / 24.30 : étiquette contextuelle indiquant que la cible était à demi-portée au
+    // moment du Select Targets step — ce qui active [MELTA X] (bonus de dommages) et
+    // [RAPID FIRE X] (attaques supplémentaires). Absent de weapon_rules.json car c'est un
+    // verdict de portée, pas une règle d'arme en soi.
+    setRuleDescription(
+      descriptions,
+      "HALF RANGE",
+      "Half range (24.25/24.30): the target unit was within half the weapon's range at the Select Targets step — this activates [MELTA X] bonus damage and [RAPID FIRE X] extra attacks.",
+      false
+    );
 
     return descriptions;
   }, []);
