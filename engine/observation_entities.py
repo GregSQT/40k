@@ -482,17 +482,13 @@ MAX_DECISION_OPTIONS = 6
 #: comme `OBS_ID_VOCAB_SIZE` la rend gratuite pour une capacité. Les colonnes en trop restent à
 #: zéro et ne reçoivent aucun gradient.
 #:
-#: 8 et non 6 : les six tranches P3 restantes ouvrent chacune un type, et le lot §0.48 ne doit
-#: pas se retrouver à un type près. Coût du pré-dimensionnement : 6 scalaires par observation.
+#: 16 et non 8 : 8 types actuels (P3 complet, Grot Orderly) + 8 réservés pour J4/J5. Estimé :
+#: fire_overwatch + heroic_intervention + da_jump_target (3) + 5 de marge. Le coût par type
+#: ajouté est 1 scalaire par observation ; le coût d'un --new est plusieurs dizaines d'heures
+#: à x1 et plusieurs centaines à x5 — la marge large est délibérée.
 #: Dépasser ce nombre LÈVE ci-dessous — jamais de troncature, un type non observé serait une
 #: décision que l'agent prend sans savoir laquelle on lui demande.
-#:
-#: ⚠️ PLUS AUCUN SLOT LIBRE : `returned_models_profile` (Grot Orderly, quelles figurines détruites
-#: reviennent) a consommé le huitième. La marge prévue pour les tranches P3 est épuisée — la
-#: prochaine ouverture de type devra augmenter cette constante, ce qui change `obs_size` et impose
-#: un ré-entraînement `--new`. Ce n'est plus une extension gratuite : à budgéter avant de promettre
-#: un type à une tranche.
-AGENT_DECISION_TYPE_SLOTS = 8
+AGENT_DECISION_TYPE_SLOTS = 16
 
 if len(AGENT_DECISION_TYPE_IDS) > AGENT_DECISION_TYPE_SLOTS:
     raise ValueError(
@@ -775,6 +771,12 @@ GLOBAL_CONT_FIELDS: Tuple[str, ...] = (
     # qu'il ne percevait pas.
     "objective_distance_0", "objective_distance_1", "objective_distance_2",
     "objective_distance_3", "objective_distance_4",
+    # -----------------------------------------------------------------------
+    # RÉSERVÉ — missions primaires (J4). Slots volontairement nuls jusqu'à
+    # l'implémentation : obs_size gelé, --append possible depuis le champion.
+    # Capacité estimée : scoring par round, ratio VP primaire, round triggers.
+    # -----------------------------------------------------------------------
+    *tuple(f"reserved_mission_cont_{i}" for i in range(16)),
 )
 #: Phases du moteur, dans l'ordre FIGÉ du one-hot `phase_*` de `GLOBAL_BIN_FIELDS`. DOIT valoir
 #: `engine.action_decoder.GAME_PHASES` — verrouillé par test de contrat, comme
@@ -846,6 +848,11 @@ GLOBAL_BIN_FIELDS: Tuple[str, ...] = (
     # Côté ENNEMI pour la même raison que le Waaagh! : savoir que l'adversaire blesse mieux ma
     # cible désignée change ce que je dois protéger. Aucun des deux ne se déduit de l'autre.
     "my_oath_wound_bonus_active", "enemy_oath_wound_bonus_active",
+    # -----------------------------------------------------------------------
+    # RÉSERVÉ — missions primaires (J4). Type mission (one-hot), triggers
+    # par round, flags d'objectif scoring. Tous nuls jusqu'à l'implémentation.
+    # -----------------------------------------------------------------------
+    *tuple(f"reserved_mission_bin_{i}" for i in range(32)),
 )
 GLOBAL_CONT_SIZE = len(GLOBAL_CONT_FIELDS)
 GLOBAL_BIN_SIZE = len(GLOBAL_BIN_FIELDS)
