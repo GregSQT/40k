@@ -2036,19 +2036,11 @@ def initialize_auth_db() -> None:
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
-            (profile_id, pve_test_row["id"]),
-        )
-        cursor.execute(
-            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
             (profile_id, pvp_row["id"]),
         )
         cursor.execute(
-            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
-            (profile_id, pvp_test_row["id"]),
-        )
-        cursor.execute(
-            "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
-            (profile_id, endless_duty_row["id"]),
+            "DELETE FROM profile_game_modes WHERE profile_id = ? AND game_mode_id IN (?, ?, ?)",
+            (profile_id, pve_test_row["id"], pvp_test_row["id"], endless_duty_row["id"]),
         )
         cursor.execute(
             "INSERT OR IGNORE INTO profile_game_modes (profile_id, game_mode_id) VALUES (?, ?)",
