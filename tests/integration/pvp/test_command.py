@@ -24,6 +24,8 @@ import random
 
 import pytest
 
+from tests.integration.pvp._shared import GameClient
+
 pytestmark = pytest.mark.integration
 
 # game_config.json : starting_command_points = 0
@@ -178,4 +180,144 @@ class TestForceBattleShock:
         )
         assert game.unit(unit_id)["battle_shocked"] is False, (
             "le drapeau battle_shocked doit être False dans le game_state"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Grot Orderly (Primitive F, chantier 06 passe 6) — returned_models_placement
+# ---------------------------------------------------------------------------
+
+_PVP_TEST_SCENARIO = "config/board/44x60x5/scenario/scenario_pvp_test.json"
+# Unité 204 = escouade Boyz (Orks, player 1) qui inclut un PainBoy portant la règle
+# `return_destroyed_models`.  L'escouade commence à 12 figurines.
+_BOYZ_UNIT_ID = "204"
+
+
+class TestGrotOrderly:
+    """Panneau Grot Orderly : pending_agent_decision.type == returned_models_placement.
+
+    Scénario pvp_test.json : Orks (p1, avec PainBoy dans unité 204) vs SM (p2).
+    Flux minimal testé :
+      1. Démarrage → phase MOVE tour 1 (Waaagh! résolu par drain_to).
+      2. 2 Boyz de l'unité 204 détruits directement dans le game_state.
+      3. Jeu avancé jusqu'à la phase command du tour 2 (p1).
+      4. La décision returned_models_placement est posée.
+      5. Chaque option_index disponible la résout et débloque la partie.
+
+    Hors couverture (couverts en tests unitaires test_returned_models_placement.py) :
+      - non-superposition des empreintes à x5 ;
+      - correspondance intent → positions exactes.
+    """
+
+    @pytest.fixture
+    def grot_game(self, api_isolated):
+        """Partie pvp_test avec 2 Boyz de l'unité 204 détruits, prête au tour 2."""
+        import services.api_server as api_server
+        from engine.phase_handlers.shared_utils import destroy_model
+        from services.api_server import app
+
+        with app.test_client() as flask_client:
+            client = GameClient(flask_client)
+            # mode_code="pvp" + scenario_file explicite : même chemin d'init que "pvp",
+            # toutes unités déjà placées, aucun déploiement requis.
+            client.start(mode_code="pvp", scenario_file=_PVP_TEST_SCENARIO)
+            # drain_to("move") résout waaagh_call tour 1 (option 0 = appeler le Waaagh!)
+            # et place le curseur en phase MOVE, tour 1, player 1.
+            client.drain_to("move")
+
+            gs = api_server.engine.game_state
+            squad_mids = list(gs["squad_models"][_BOYZ_UNIT_ID])
+            killed = 0
+            for mid in squad_mids:
+                if killed >= 2:
+                    break
+                m = gs["models_cache"].get(mid)
+                if m is None or "attached_from" in m:
+                    # Ne pas tuer les personnages attachés (PainBoy, Warboss) :
+                    # détruire le PainBoy ferait perdre la règle return_destroyed_models
+                    # à l'unité avant que la command phase ne la vérifie.
+                    continue
+                destroy_model(gs, mid, "combat")
+                killed += 1
+
+            assert killed == 2, (
+                f"impossible de trouver 2 Boyz réguliers dans {_BOYZ_UNIT_ID} : "
+                f"{killed} détruits"
+            )
+            # Re-synchronise client.state avec le game_state modifié directement.
+            client.refresh()
+            yield client
+
+    def _advance_to_returned_models_decision(self, client) -> dict:
+        """Joue toutes les actions nominales jusqu'à la décision returned_models_placement.
+
+        Stopppe AVANT de la résoudre — play_nominal vérifie `until` AVANT d'exécuter
+        l'action nominale suivante, donc la décision reste pendante à la sortie.
+        """
+        client.play_nominal(
+            max_actions=600,
+            until=lambda c: (
+                (c.state.get("pending_agent_decision") or {}).get("type")
+                == "returned_models_placement"
+            ),
+        )
+        decision = client.state.get("pending_agent_decision")
+        assert decision is not None, (
+            "returned_models_placement non déclenchée après 600 actions : "
+            f"phase={client.phase} player={client.current_player} state_keys={list(client.state)}"
+        )
+        assert decision["type"] == "returned_models_placement", (
+            f"mauvais type de décision : {decision['type']!r}"
+        )
+        return decision
+
+    def test_decision_apparait_avec_player_et_options(self, grot_game):
+        """Panel 'Returned models — player 1' : décision correctement structurée.
+
+        Le front lit `pending_agent_decision.player` pour afficher le numéro de joueur
+        (BoardWithAPI.tsx:4193) et `pending_agent_decision.options` pour les boutons.
+        """
+        decision = self._advance_to_returned_models_decision(grot_game)
+        assert decision["player"] == 1, (
+            f"attendu player=1 (Orks), obtenu {decision['player']}"
+        )
+        options = decision.get("options", [])
+        assert len(options) >= 2, (
+            f"au moins 2 intentions attendues (distincts), obtenu {len(options)} : {options}"
+        )
+        labels = [o["label"] for o in options]
+        # Les labels contractuels viennent de RETURNED_PLACEMENT_INTENTS.
+        valid_intents = {"toward_enemy", "toward_objective", "away_from_enemy"}
+        assert all(lbl in valid_intents for lbl in labels), (
+            f"libellés hors contrat : {labels}"
+        )
+
+    @pytest.mark.parametrize("option_index", [0, 1, 2])
+    def test_chaque_bouton_resout_la_decision(self, grot_game, option_index):
+        """option_index 0/1/2 résout returned_models_placement et débloque la partie.
+
+        Critère front : après le clic, pending_agent_decision.type ≠
+        returned_models_placement, et la partie peut avancer en MOVE.
+        """
+        decision = self._advance_to_returned_models_decision(grot_game)
+        options = decision.get("options", [])
+        if option_index >= len(options):
+            pytest.skip(
+                f"option_index={option_index} non offert dans ce contexte géométrique "
+                f"({len(options)} options : {[o['label'] for o in options]})"
+            )
+
+        grot_game.act("agent_decision", option_index=option_index)
+
+        new_decision = grot_game.state.get("pending_agent_decision")
+        assert new_decision is None or new_decision.get("type") != "returned_models_placement", (
+            f"returned_models_placement encore pendante après option_index={option_index} : "
+            f"{new_decision}"
+        )
+
+        # La partie n'est pas bloquée : on peut atteindre la phase MOVE.
+        grot_game.drain_to("move")
+        assert grot_game.phase == "move", (
+            f"phase {grot_game.phase!r} après résolution Grot Orderly "
+            f"(option_index={option_index})"
         )
