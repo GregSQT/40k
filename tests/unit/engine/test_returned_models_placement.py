@@ -705,3 +705,125 @@ def test_agent_profile_choice_is_honoured(monkeypatch: pytest.MonkeyPatch) -> No
         f"le profil choisi (Boyz) doit etre rendu, obtenu "
         f"{[m['unitType'] for m in restored]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# F1 + F2 : figurines archivées à un étage différent des survivants
+# ---------------------------------------------------------------------------
+
+
+def _state_multi_level(
+    *, alive_level: int = 0, archived_level: int = 1,
+) -> Dict[str, Any]:
+    """Survivants à `alive_level`, figurines archivées mortes à `archived_level`."""
+    gs = _state(n_alive=2, n_destroyed=2, enemy_at=None)
+    # Positionner les survivants au niveau demandé.
+    for mid in gs["squad_models"][_SQUAD]:
+        gs["models_cache"][mid]["level"] = alive_level
+    # Les figurines archivées sont mortes à un autre niveau.
+    for archived in gs["destroyed_models"][_SQUAD]:
+        archived["level"] = archived_level
+    return gs
+
+
+def test_legal_cells_found_when_survivors_changed_floor() -> None:
+    """F2 — `returned_models_legal_cells` retourne des cases même si les survivants ont changé
+    d'étage par rapport au niveau où les figurines archivées sont mortes.
+
+    ROUGE avant le fix : `level` lu sur le template archivé (niveau 1), `present` filtré sur
+    ce niveau alors que les survivants sont au niveau 0 → `present` vide → liste vide.
+    """
+    gs = _state_multi_level(alive_level=0, archived_level=1)
+    template = gs["destroyed_models"][_SQUAD][0]
+
+    cells = returned_models_legal_cells(gs, _SQUAD, template)
+
+    assert cells, (
+        "des cases légales doivent exister autour des survivants (niveau 0) "
+        "même si le template est archivé au niveau 1"
+    )
+
+
+def test_revived_model_level_matches_current_squad() -> None:
+    """F1 — le modèle rendu hérite du niveau COURANT du squad, pas du niveau archivé.
+
+    ROUGE avant le fix : `new_model["level"]` conservait la valeur de l'archive (niveau 1)
+    alors que les cases validées sont au niveau 0 → crash dans `_recompute_squad_occupied_hexes`.
+    """
+    gs = _state_multi_level(alive_level=0, archived_level=1)
+    # Fournir des cases au niveau 0 (là où les survivants se trouvent).
+    cells = [(8, 5), (8, 6)]
+
+    apply_returned_models_placement(gs, _SQUAD, cells, [0, 1], d3=2, destroyed=2)
+
+    restored = [gs["models_cache"][mid] for mid in gs["squad_models"][_SQUAD] if "#r" in mid]
+    assert restored, "au moins une figurine doit être rendue"
+    for m in restored:
+        assert int(m["level"]) == 0, (
+            f"la figurine rendue doit être au niveau 0 (niveau actuel du squad), "
+            f"obtenu level={m['level']}"
+        )
+
+
+def test_profile_choice_no_cells_does_not_consume_once_per_battle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F5 — après un choix de profil, si aucune case n'est légale, le « once per battle »
+    n'est PAS consommé.
+
+    ROUGE avant le fix : `apply_returned_models_profile_choice` ajoutait l'escouade dans
+    `return_destroyed_models_used` même quand `_arm_returned_placement` retournait None.
+    """
+    import engine.combat_utils as combat_utils
+
+    _real_dice = combat_utils.resolve_dice_value
+    monkeypatch.setattr(
+        combat_utils, "resolve_dice_value",
+        lambda spec, context=None: 1 if context == "grot_orderly_return"
+        else _real_dice(spec, context),
+    )
+
+    gs = _state(n_alive=3, n_destroyed=3, enemy_at=None,
+                destroyed_profiles=[("Boyz", 8), ("Boyz", 8), ("Warboss", 85)])
+    # Poser la décision de profil.
+    _apply_return_destroyed_models(gs, 1)
+    assert gs.get("pending_agent_decision", {}).get("type") == "returned_models_profile"
+
+    # Murer le plateau : aucune case légale disponible pour le placement.
+    gs["wall_hexes"] = {
+        (c, r) for c in range(gs["board_cols"]) for r in range(gs["board_rows"])
+    }
+
+    apply_returned_models_profile_decision(gs, 1, "Boyz")
+
+    assert _SQUAD not in gs.get("return_destroyed_models_used", set()), (
+        "le 'once per battle' ne doit pas être consommé quand aucune case n'est légale"
+    )
+    assert len(gs["squad_models"][_SQUAD]) == 3, "aucune figurine ne doit avoir été rendue"
+
+
+def test_mono_profile_no_cells_added_to_phase_skip_set() -> None:
+    """Finding A — chemin mono-profil sans case : l'escouade entre dans le set temporaire.
+
+    Sans ce skip, un re-sweep dans la même phase de commandement (déclenché par la résolution
+    d'une autre décision d'escouade) relancerait le D3 une deuxième fois pour cette escouade.
+
+    ROUGE avant le fix : `_apply_return_destroyed_models` ne modifiait pas
+    `_grot_orderly_skipped_this_phase` pour le chemin mono-profil (path `if _mono_result is None`
+    absent), laissant l'escouade sans protection contre le re-sweep.
+    """
+    gs = _state(n_alive=3, n_destroyed=2, enemy_at=None,
+                destroyed_profiles=[("Boyz", 8), ("Boyz", 8)])
+    gs["wall_hexes"] = {
+        (c, r) for c in range(gs["board_cols"]) for r in range(gs["board_rows"])
+    }
+
+    _apply_return_destroyed_models(gs, 1)
+
+    assert _SQUAD in gs.get("_grot_orderly_skipped_this_phase", set()), (
+        "l'escouade doit être dans _grot_orderly_skipped_this_phase pour ne pas être "
+        "re-traitée dans le même tour de commandement"
+    )
+    assert _SQUAD not in gs.get("return_destroyed_models_used", set()), (
+        "le 'once per battle' ne doit pas être consommé"
+    )

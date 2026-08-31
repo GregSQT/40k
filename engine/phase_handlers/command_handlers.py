@@ -164,6 +164,7 @@ def command_step_start_of_phase(game_state: Dict[str, Any]) -> None:
 
     # Reset ALL tracking sets (moved from movement_phase_start)
     game_state["units_moved"] = set()
+    game_state.pop("_grot_orderly_skipped_this_phase", None)
     # Distance parcourue par figurine (V11 §9.2.5) — MEME cycle de vie que `units_moved` :
     # c'est la version continue du meme fait ("cette figurine a bouge de X ce tour").
     game_state["moved_distance_by_model"] = {}
@@ -625,12 +626,13 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
 
     squad_cache = require_key(game_state, "squad_cache")
     used: set = game_state.setdefault("return_destroyed_models_used", set())
+    skipped: set = game_state.get("_grot_orderly_skipped_this_phase", set())
 
     for unit in require_key(game_state, "units"):
         if int(require_key(unit, "player")) != current_player:
             continue
         unit_id = str(require_key(unit, "id"))
-        if unit_id in used:
+        if unit_id in used or unit_id in skipped:
             continue
         if not is_unit_alive(unit_id, game_state):
             continue
@@ -698,12 +700,17 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
             )
             return True
 
-        if _arm_returned_placement(
+        _mono_result = _arm_returned_placement(
             game_state, unit_id, current_player,
             _select_returned_models(archived, next(iter(profiles)), to_restore),
             d3, destroyed,
-        ):
+        )
+        if _mono_result is True:
             return True
+        if _mono_result is None:
+            # Aucune case légale, chemin mono-profil : même traitement que le chemin multi-profil
+            # dans `apply_returned_models_profile_decision` — skip temporaire, pas « used ».
+            game_state.setdefault("_grot_orderly_skipped_this_phase", set()).add(unit_id)
 
     return False
 
@@ -757,11 +764,12 @@ def _select_returned_models(
 def _arm_returned_placement(
     game_state: Dict[str, Any], squad_id: str, current_player: int,
     selected: Sequence[int], d3: int, destroyed: int,
-) -> bool:
+) -> Optional[bool]:
     """Ouvre l'étape de PLACEMENT pour les figurines `selected` de l'archive.
 
-    Rend ``True`` si une décision d'agent a été posée (l'appelant doit rendre la main), ``False``
-    si le placement était forcé et a déjà été appliqué — ou s'il n'existait aucune case légale.
+    Rend ``True`` si une décision d'agent a été posée (l'appelant doit rendre la main),
+    ``False`` si le placement était forcé et a déjà été appliqué,
+    ``None`` s'il n'existait aucune case légale (la capacité n'est PAS consommée — REVIVED).
     """
     from engine.agent_decision import set_pending_agent_decision
     from engine.phase_handlers.deployment_handlers import RETURNED_PLACEMENT_INTENTS
@@ -789,7 +797,7 @@ def _arm_returned_placement(
             f"T{game_state.get('turn', '?')} unit={squad_id} aucune case legale — "
             f"aucune figurine rendue"
         )
-        return False
+        return None
 
     distinct = {tuple(cells) for cells in plans.values()}
     if len(distinct) > 1:
@@ -866,17 +874,20 @@ def apply_returned_models_profile_decision(
     selected = _select_returned_models(
         archived, str(profile), int(require_key(pending, "to_restore"))
     )
-    if _arm_returned_placement(
+    result = _arm_returned_placement(
         game_state, squad_id, int(player), selected,
         int(require_key(pending, "d3")), int(require_key(pending, "destroyed")),
-    ):
+    )
+    if result is True:
         return
-    # Le balayage va reprendre sur les unités suivantes et repasserait par CELLE-CI : la marquer
-    # traitée d'abord, faute de quoi elle reposerait la même décision de profil indéfiniment.
-    # Même raison — et même convention — qu'au bout du chemin de placement ci-dessous : le cas
-    # « aucune case légale » est le seul qui arrive ici sans que `apply_returned_models_placement`
-    # ait déjà marqué l'unité.
-    game_state.setdefault("return_destroyed_models_used", set()).add(squad_id)
+    if result is None:
+        # Aucune case légale après choix de profil : la capacité n'est PAS consommée (REVIVED —
+        # règle exige un placement conforme). Pour éviter que le balayage repose la même décision
+        # de profil dans ce tour, on inscrit l'escouade dans le set temporaire (vidé au prochain
+        # début de phase), et jamais dans `return_destroyed_models_used`.
+        game_state.setdefault("_grot_orderly_skipped_this_phase", set()).add(squad_id)
+    # result is False : `apply_returned_models_placement` a déjà marqué dans `return_destroyed_
+    # models_used` (ligne ~976) — pas besoin de le refaire ici.
     if _apply_return_destroyed_models(game_state, int(player)):
         return
     _command_abilities_after_returns(game_state, int(player))
@@ -932,6 +943,11 @@ def apply_returned_models_placement(
     squad_id = str(squad_id)
     mid_list = squad_models.get(squad_id, [])  # get allowed
     archived = require_key(game_state, "destroyed_models").get(squad_id, [])  # get allowed
+    # Niveau courant du squad : mode des survivants présents au moment du revival.
+    # Snapshot AVANT la boucle d'ajout pour ne pas compter les nouvelles figurines.
+    _alive_snapshot = [mid for mid in list(mid_list) if mid in models_cache]
+    _alive_levels = [int(require_key(models_cache[mid], "level")) for mid in _alive_snapshot]
+    current_level = max(set(_alive_levels), key=_alive_levels.count) if _alive_levels else 0
     if len(cells) > len(selected):
         raise ValueError(
             f"apply_returned_models_placement: {len(cells)} cases pour {len(selected)} figurines "
@@ -953,6 +969,7 @@ def apply_returned_models_placement(
         new_model["id"] = new_mid
         new_model["col"] = int(col)
         new_model["row"] = int(row)
+        new_model["level"] = current_level
         # REVIVED : « unless otherwise stated, they are returned with their full wounds remaining ».
         new_model["HP_CUR"] = int(new_model["HP_MAX"])
         # La figurine revient au DÉBUT de la phase de commandement : elle n'a encore ni tiré ni

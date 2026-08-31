@@ -547,7 +547,12 @@ def returned_models_legal_cells(
     squad_id = str(squad_id)
     entry = require_key(units_cache, squad_id)
     player = int(require_key(entry, "player"))
-    level = int(require_key(template, "level"))
+    # Niveau COURANT du squad (mode des survivants) — pas le niveau archivé du template.
+    # Un squad qui change d'étage après des pertes verrait `present` vide si on lisait
+    # `template["level"]` (niveau de la mort), et aucune case légale ne serait retournée.
+    _alive = _alive_model_ids(game_state, squad_id)
+    _alive_levels = [int(require_key(models_cache[mid], "level")) for mid in _alive if mid in models_cache]
+    level = max(set(_alive_levels), key=_alive_levels.count) if _alive_levels else int(require_key(template, "level"))
 
     present = [
         models_cache[mid] for mid in _alive_model_ids(game_state, squad_id)
