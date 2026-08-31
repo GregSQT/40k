@@ -4899,6 +4899,12 @@ def _manual_roll_fight_intent(
                         pw for pw in rolled["pending_wounds"]
                         if id(pw["rec"]) not in _hs_consumed
                     ]
+                    # Si les MW ont détruit la cible, les pending_wounds restants sont des
+                    # no-ops (plus de figurines à allouer). On retourne None pour éviter que
+                    # _build_manual_allocation tente require_key(units_cache, target_sid)
+                    # sur une escouade déjà retirée du cache.
+                    if not is_unit_alive(target_sid, game_state):
+                        return None
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,

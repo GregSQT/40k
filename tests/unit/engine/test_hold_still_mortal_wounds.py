@@ -235,3 +235,28 @@ def test_target_vehicle_pas_de_hold_still(monkeypatch):
     result = _fh._manual_roll_fight_intent(gs, _intent(weapon_index=1), {})
     assert result is not None
     assert not alloc_calls, "Hold Still ne doit pas se déclencher vs VEHICLE"
+
+
+# ---------------------------------------------------------------------------
+# MW tuent la cible → retour None (invariant _build_manual_allocation)
+# ---------------------------------------------------------------------------
+
+def test_mw_tuent_cible_retourne_none(monkeypatch):
+    """ROUGE sans fix : _manual_roll_fight_intent retourne r même après que les MW ont détruit
+    la cible, ce qui fait crasher _build_manual_allocation sur require_key(units_cache, target_sid).
+    VERT avec fix : retourne None dès que is_unit_alive est False après _alloc_mw."""
+    from engine.phase_handlers import fight_handlers as _fh
+
+    def _alloc_mw_destroy(gs, uid, n, auto, sink):
+        gs["units_cache"].pop(uid, None)
+        gs["squad_models"][uid] = []
+
+    _patch_fight_harness(monkeypatch, _crit_rolled())
+    monkeypatch.setattr(su, "allocate_mortal_wounds", _alloc_mw_destroy)
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+
+    gs = _gs()
+    result = _fh._manual_roll_fight_intent(gs, _intent(weapon_index=1), {})
+    assert result is None, (
+        f"attendu None (cible détruite par MW, pending_wounds moot), got {result!r}"
+    )
