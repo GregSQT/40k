@@ -5852,7 +5852,7 @@ class W40KEngine(gym.Env):
             _mc = self.game_state["models_cache"]
             _uid_str = str(squad_id)
             _alive_mids = [
-                m for m in self.game_state["squad_models"].get(_uid_str, [])  # fallback allowed
+                m for m in self.game_state["squad_models"][_uid_str]
                 if m in _mc
             ]
             targets = [

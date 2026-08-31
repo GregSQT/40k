@@ -391,6 +391,32 @@ def test_convert_rejects_fight_slot_outside_pending(melee_scenario_file):
         )
 
 
+# ---------------------------------------------------------------------------
+# 9. T1 : squad absente de squad_models dans la branche overrun → KeyError
+# ---------------------------------------------------------------------------
+
+
+def test_overrun_squad_absent_from_squad_models_raises(monkeypatch):
+    """ROUGE avant le fix : combat à vide silencieux (T1 violé).
+
+    État incohérent : squad présente dans units_cache mais absente de squad_models après
+    un overrun. Le .get(..., []) masquait l'incohérence ; l'accès direct lève KeyError.
+    """
+    gs = _gs()
+    gs["squad_models"] = {}  # squad 101 absente de squad_models
+
+    _patch_overrun(monkeypatch, ["enemy_A"])
+    # Stubbe _fight_resolve_with_target pour isoler le code path squad_models.
+    monkeypatch.setattr(
+        _FakeEngine, "_fight_resolve_with_target",
+        lambda self, sid, tid: (True, {"target_squad_id": tid}),
+    )
+    eng = _FakeEngine(gs)
+
+    with pytest.raises(KeyError):
+        eng._continue_squad_fight_after_selection(_SQUAD, target_slot=0)
+
+
 def test_pending_target_purged_at_fight_phase_end(melee_scenario_file):
     """Le pending ne doit pas survivre à la phase : il rouvrirait des FIGHT_SLOT au tour suivant."""
     from engine.phase_handlers.fight_handlers import _fight_phase_complete
