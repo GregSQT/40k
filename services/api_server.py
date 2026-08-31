@@ -268,7 +268,7 @@ TEST_SCENARIO_BOARD_MAP = {
 # il possède le scénario : demander les autres lève, au lieu de charger un plateau différent de
 # celui qui est affiché.
 # Source unique : config/board/44x60x5/terrain/terrain_list.json
-def _load_terrain_list_constants() -> tuple[set, dict, dict, frozenset]:
+def _load_terrain_list_constants() -> tuple[list, set, dict, dict, frozenset]:
     """Charge terrain_list.json et dérive les constantes terrain."""
     _path = Path("config/board/44x60x5/terrain/terrain_list.json")
     with open(_path) as _f:
@@ -276,10 +276,15 @@ def _load_terrain_list_constants() -> tuple[set, dict, dict, frozenset]:
 
     valid: set[str] = {e["id"] for e in _entries}
 
-    # default_for[mode] = terrain_id dont suffix vaut ""
+    # default_for[mode] = terrain_id dont suffix vaut "" ; un seul défaut autorisé par mode.
     _default_for: dict[str, str] = {}
     for e in _entries:
         for m in e.get("default_for", []):
+            if m in _default_for:
+                raise ValueError(
+                    f"terrain_list.json : deux terrains déclarent default_for={m!r} "
+                    f"({_default_for[m]!r} et {e['id']!r})"
+                )
             _default_for[m] = e["id"]
 
     # Suffix table : "" pour le terrain par défaut du mode, "_{id}" pour les autres.
@@ -314,12 +319,16 @@ def _load_terrain_list_constants() -> tuple[set, dict, dict, frozenset]:
         and m != "pve_test"  # pve_test n'expose pas le sélecteur (scénario sans décor)
     )
 
-    return valid, suffix_table, defaults, selector_modes
+    return _entries, valid, suffix_table, defaults, selector_modes
 
 
-VALID_TERRAIN_REFS, TERRAIN_SCENARIO_SUFFIX_BY_MODE, DEFAULT_TERRAIN_BY_MODE, MODES_WITH_TERRAIN_SELECTOR = (
-    _load_terrain_list_constants()
-)
+(
+    _TERRAIN_LIST_ENTRIES,
+    VALID_TERRAIN_REFS,
+    TERRAIN_SCENARIO_SUFFIX_BY_MODE,
+    DEFAULT_TERRAIN_BY_MODE,
+    MODES_WITH_TERRAIN_SELECTOR,
+) = _load_terrain_list_constants()
 
 
 def _terrain_scenario_suffix(mode: str, terrain_ref: Optional[str]) -> str:
@@ -5210,11 +5219,8 @@ def delete_saves():
 @app.route('/api/config/terrain-list', methods=['GET'])
 @mode_agnostic
 def get_terrain_list():
-    """Liste des terrains disponibles, issue de terrain_list.json."""
-    _path = Path("config/board/44x60x5/terrain/terrain_list.json")
-    with open(_path) as _f:
-        entries = json.load(_f)
-    return jsonify({"success": True, "terrains": entries})
+    """Liste des terrains disponibles, issue de terrain_list.json (chargée au démarrage)."""
+    return jsonify({"success": True, "terrains": _TERRAIN_LIST_ENTRIES})
 
 
 @app.route('/api/config/defaults', methods=['GET'])

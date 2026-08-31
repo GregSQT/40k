@@ -609,15 +609,27 @@ export const BoardWithAPI: React.FC = () => {
 
   // Terrain list loaded from terrain_list.json via API ; gate useGameConfig until available.
   const [terrainList, setTerrainListState] = useState<TerrainEntry[] | undefined>(undefined);
+  const [terrainListError, setTerrainListError] = useState<string | null>(null);
   useEffect(() => {
     apiFetch("/api/config/terrain-list")
-      .then((r) => r.json())
-      .then((data: { terrains: TerrainEntry[] }) => {
-        setTerrainList(data.terrains);
-        setTerrainListState(data.terrains);
+      .then((r) => {
+        if (!r.ok) throw new Error(`terrain-list: HTTP ${r.status}`);
+        return r.json();
       })
-      .catch(() => {
-        // Fallback vide : le plateau ne charge pas, erreur remontée par useGameConfig.
+      .then((data: unknown) => {
+        if (
+          typeof data !== "object" ||
+          data === null ||
+          !Array.isArray((data as { terrains?: unknown }).terrains)
+        ) {
+          throw new Error("terrain-list: réponse invalide");
+        }
+        const list = (data as { terrains: TerrainEntry[] }).terrains;
+        setTerrainList(list);
+        setTerrainListState(list);
+      })
+      .catch((err: unknown) => {
+        setTerrainListError(err instanceof Error ? err.message : "terrain-list: erreur inconnue");
       });
   }, []);
 
@@ -1857,6 +1869,26 @@ export const BoardWithAPI: React.FC = () => {
         }}
       >
         Starting W40K Engine Game...
+      </div>
+    );
+  }
+
+  if (terrainListError) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          height: "600px",
+          background: "#7f1d1d",
+          borderRadius: "8px",
+          color: "#fecaca",
+          fontSize: "18px",
+          padding: "20px",
+        }}
+      >
+        <div>Impossible de charger la liste des terrains : {terrainListError}</div>
       </div>
     );
   }
