@@ -788,6 +788,10 @@ OBS_PHASE_IDS: Tuple[str, ...] = (
 #: ids d'action 4–8 signifient l'un « slot de déploiement », l'autre « cellule de move ».
 #: Les sin/cos de direction d'objectif sont ici pour la MÊME raison de non-normalisation : déjà
 #: bornés dans [-1,1] et centrés, les passer à `VecNormalize` ne ferait qu'amplifier leur bruit.
+#: Slots pré-alloués pour les missions primaires (J4). Même logique que AGENT_DECISION_TYPE_SLOTS :
+#: la taille reste stable à l'implémentation — les réservés se remplacent par des champs réels.
+GLOBAL_BIN_MISSION_SLOTS = 48
+
 GLOBAL_BIN_FIELDS: Tuple[str, ...] = (
     "is_my_turn",
 ) + tuple(f"phase_{phase}" for phase in OBS_PHASE_IDS) + (
@@ -851,7 +855,7 @@ GLOBAL_BIN_FIELDS: Tuple[str, ...] = (
     # VP primaire quantifié (ex. 6 niveaux → 6 bits par joueur). 48 slots
     # couvrent largement ces besoins (estimation : ~35 bits réels).
     # -----------------------------------------------------------------------
-    *tuple(f"reserved_mission_bin_{i}" for i in range(48)),
+    *tuple(f"reserved_mission_bin_{i}" for i in range(GLOBAL_BIN_MISSION_SLOTS)),
 )
 GLOBAL_CONT_SIZE = len(GLOBAL_CONT_FIELDS)
 GLOBAL_BIN_SIZE = len(GLOBAL_BIN_FIELDS)
