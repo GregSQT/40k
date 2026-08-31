@@ -36,7 +36,7 @@ def _minimal_shoot_game_state(weapon_rules):
         **initial_faction_ability_state(),
         "models_cache": {"A1": attacker, "T1": target},
         "squad_models": {"2": ["T1"]},
-        "units_cache": {"2": {"VALUE": 10.0, "player": 1}},
+        "units_cache": {"2": {"VALUE": 10.0, "player": 1, "HP_CUR": 2, "col": 0, "row": 0}},
         "squad_cache": {"2": {"model_count_at_start": 1}},
         # _manual_roll_intent résout attaquant/cible (rerolls to-wound) via get_unit_by_id -> unit_by_id.
         "unit_by_id": {"1": {"id": "1", "UNIT_RULES": []}, "2": {"id": "2", "UNIT_RULES": []}},
