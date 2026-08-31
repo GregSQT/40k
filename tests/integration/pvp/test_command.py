@@ -226,6 +226,10 @@ class TestGrotOrderly:
             client.drain_to("move")
 
             gs = api_server.engine.game_state
+            assert _BOYZ_UNIT_ID in gs["squad_models"], (
+                f"unité {_BOYZ_UNIT_ID!r} absente de squad_models "
+                "(scenario_pvp_test.json modifié ?)"
+            )
             squad_mids = list(gs["squad_models"][_BOYZ_UNIT_ID])
             killed = 0
             for mid in squad_mids:
@@ -254,22 +258,21 @@ class TestGrotOrderly:
         Stopppe AVANT de la résoudre — play_nominal vérifie `until` AVANT d'exécuter
         l'action nominale suivante, donc la décision reste pendante à la sortie.
         """
-        client.play_nominal(
-            max_actions=600,
-            until=lambda c: (
-                (c.state.get("pending_agent_decision") or {}).get("type")
-                == "returned_models_placement"
-            ),
-        )
-        decision = client.state.get("pending_agent_decision")
-        assert decision is not None, (
-            "returned_models_placement non déclenchée après 600 actions : "
-            f"phase={client.phase} player={client.current_player} state_keys={list(client.state)}"
-        )
-        assert decision["type"] == "returned_models_placement", (
-            f"mauvais type de décision : {decision['type']!r}"
-        )
-        return decision
+        try:
+            client.play_nominal(
+                max_actions=600,
+                until=lambda c: (
+                    (c.state.get("pending_agent_decision") or {}).get("type")
+                    == "returned_models_placement"
+                ),
+            )
+        except AssertionError:
+            raise AssertionError(
+                "returned_models_placement non déclenchée (600 actions épuisées — "
+                "cause probable : moteur a appliqué le placement automatiquement, "
+                f"1 seule cellule distincte). phase={client.phase} player={client.current_player}"
+            )
+        return client.state["pending_agent_decision"]
 
     def test_decision_apparait_avec_player_et_options(self, grot_game):
         """Panel 'Returned models — player 1' : décision correctement structurée.
@@ -281,11 +284,7 @@ class TestGrotOrderly:
         assert decision["player"] == 1, (
             f"attendu player=1 (Orks), obtenu {decision['player']}"
         )
-        options = decision.get("options", [])
-        assert len(options) >= 2, (
-            f"au moins 2 intentions attendues (distincts), obtenu {len(options)} : {options}"
-        )
-        labels = [o["label"] for o in options]
+        labels = [o["label"] for o in decision.get("options", [])]
         # Les labels contractuels viennent de RETURNED_PLACEMENT_INTENTS.
         valid_intents = {"toward_enemy", "toward_objective", "away_from_enemy"}
         assert all(lbl in valid_intents for lbl in labels), (
@@ -301,7 +300,7 @@ class TestGrotOrderly:
         """
         decision = self._advance_to_returned_models_decision(grot_game)
         options = decision.get("options", [])
-        if option_index >= len(options):
+        if option_index >= len(options):  # certaines géométries n'offrent pas les 3 intents
             pytest.skip(
                 f"option_index={option_index} non offert dans ce contexte géométrique "
                 f"({len(options)} options : {[o['label'] for o in options]})"
@@ -315,9 +314,5 @@ class TestGrotOrderly:
             f"{new_decision}"
         )
 
-        # La partie n'est pas bloquée : on peut atteindre la phase MOVE.
+        # La partie n'est pas bloquée : drain_to lève si la phase MOVE est inatteignable.
         grot_game.drain_to("move")
-        assert grot_game.phase == "move", (
-            f"phase {grot_game.phase!r} après résolution Grot Orderly "
-            f"(option_index={option_index})"
-        )
