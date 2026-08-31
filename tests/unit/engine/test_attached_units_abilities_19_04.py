@@ -106,7 +106,7 @@ def test_provenance_des_regles_separee_par_source():
     """
     eng = _load(_scenario([_BODYGUARD, _LEADER, _ENEMY]))
     unit = eng.game_state["unit_by_id"]["101"]
-    assert [r["ruleId"] for r in unit["_UNIT_RULES_OWN"]] == [_REGLE_DU_BODYGUARD]
+    assert sorted(r["ruleId"] for r in unit["_UNIT_RULES_OWN"]) == sorted([_REGLE_DU_BODYGUARD])
     assert {k: sorted(r["ruleId"] for r in v) for k, v in unit["_ATTACHED_RULE_GROUPS"].items()} == {
         "102": sorted(_REGLES_DU_LEADER)
     }

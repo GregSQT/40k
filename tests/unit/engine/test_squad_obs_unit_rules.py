@@ -302,14 +302,18 @@ def test_real_training_roster_writes_the_expected_id():
             break
         mask = eng.get_action_mask()
         valid = list(np.flatnonzero(mask))
-        action = int(rng.choice(valid)) if valid else 0
+        assert valid, (
+            f"masque entierement vide a l'iteration {i} (phase={eng.game_state.get('phase')!r}) "
+            "— invariant moteur viole : aucune action valide hors terminaison"
+        )
+        action = int(rng.choice(valid))
         obs, _, terminated, truncated, _ = eng.step(action)
         if terminated or truncated:
             obs, _ = eng.reset()
         assert obs is not None
     else:
         raise AssertionError(
-            "budget 400 pas epuise sans trouver cp_gain_on_objective hors deploiement "
+            "budget 400 epuise sans trouver cp_gain_on_objective hors deploiement "
             "— augmenter la limite ou verifier que le roster ORK contient Gretchin"
         )
 
