@@ -12668,7 +12668,7 @@ SQUAD_ACTION_CHARGE_PAIR_SLOT_COUNT = (
 SQUAD_ACTION_FIGHT_SLOT_BASE = (
     SQUAD_ACTION_CHARGE_PAIR_SLOT_BASE + SQUAD_ACTION_CHARGE_PAIR_SLOT_COUNT
 )  # 1255
-SQUAD_ACTION_FIGHT_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1065-1084
+SQUAD_ACTION_FIGHT_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1255-1274
 # Combat « a vide » (12.04/12.06) : selectionne pour combattre sans cible eligible. Etat legal.
 SQUAD_ACTION_FIGHT_NO_TARGET = SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT_SLOT_COUNT  # 1275
 # 10.02 / 10.07 : le TYPE DE TIR est un choix du joueur (« Select one shooting type that unit is
@@ -12687,11 +12687,11 @@ SQUAD_ACTION_FIGHT_NO_TARGET = SQUAD_ACTION_FIGHT_SLOT_BASE + SQUAD_ACTION_FIGHT
 # 2026-08-16), mais garder les indices stables laisse comparables les journaux et les replays
 # d avant. Cout en parametres : ZERO — la tete pointeur produit les logits par produit scalaire
 # sur les embeddings ennemis, comme pour les 20 slots de tir (cf. leur commentaire).
-SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE = SQUAD_ACTION_FIGHT_NO_TARGET + 1  # 1086
-SQUAD_ACTION_SHOOT_INDIRECT_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1086-1105
+SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE = SQUAD_ACTION_FIGHT_NO_TARGET + 1  # 1276
+SQUAD_ACTION_SHOOT_INDIRECT_SLOT_COUNT = SQUAD_ACTION_SHOOT_SLOT_COUNT  # 20 -> 1276-1295
 SQUAD_ACTION_SIZE = (
     SQUAD_ACTION_SHOOT_INDIRECT_SLOT_BASE + SQUAD_ACTION_SHOOT_INDIRECT_SLOT_COUNT
-)  # 1106
+)  # 1296
 # Chantier 01 : la CIBLE D'OATH OF MOMENT est une dimension d'action, sur le MEME mapping de
 # slots ennemis que le tir, la charge et la melee (`get_enemy_slot_mapping`, invariant D1). Le
 # compte est DERIVE de celui du tir, exactement comme les deux precedents.

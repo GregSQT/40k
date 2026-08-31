@@ -117,7 +117,7 @@ CHOICE_COUNT = MAX_DECISION_OPTIONS                            # 6
 # l'agent ne peut pas les jouer (`ActionDecoder` part d'un masque tout a zero et n'ouvre que ce
 # qu'une phase autorise).
 OATH_SLOT_BASE = CHOICE_BASE + CHOICE_COUNT                    # 1317
-OATH_SLOT_COUNT = SHOOT_SLOT_COUNT                             # 20 -> 1127-1146
+OATH_SLOT_COUNT = SHOOT_SLOT_COUNT                             # 20 -> 1317-1336
 # V11 §0.48 element L2 / §9 P3-3 — CHOIX DE L'ESCOUADE A ACTIVER. Jusqu'ici l'unite activee etait
 # TOUJOURS `eligible_units[0]` : l'ORDRE d'activation, c'est-a-dire la premiere decision de chaque
 # phase, echappait entierement a l'agent.
