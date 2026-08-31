@@ -131,7 +131,7 @@ def _note_melee_weapon_rule_usage(
     weapon_rules_list = require_key(weapon_info, "rules")
     weapon_key = f"{weapon_display_name} ({carrier_type})"
     pl_int = int(require_key(state.unit_player, fighter_id))
-    if re.search(r'\[TWIN-LINKED\]', action_desc, re.IGNORECASE):
+    if '[TWIN-LINKED]' in action_desc:
         stats['weapon_rule_usage'][("TWIN_LINKED", weapon_key)][pl_int] += 1
     if re.search(r'\[SUSTAINED(?: |_)?HITS\]', action_desc, re.IGNORECASE):
         stats['weapon_rule_usage'][("SUSTAINED_HITS", weapon_key)][pl_int] += 1
