@@ -266,12 +266,14 @@ class TestGrotOrderly:
                     == "returned_models_placement"
                 ),
             )
-        except AssertionError:
+        except AssertionError as exc:
+            if "actions sans atteindre" not in str(exc):
+                raise
             raise AssertionError(
                 "returned_models_placement non déclenchée (600 actions épuisées — "
                 "cause probable : moteur a appliqué le placement automatiquement, "
                 f"1 seule cellule distincte). phase={client.phase} player={client.current_player}"
-            )
+            ) from exc
         return client.state["pending_agent_decision"]
 
     def test_decision_apparait_avec_player_et_options(self, grot_game):
@@ -285,6 +287,7 @@ class TestGrotOrderly:
             f"attendu player=1 (Orks), obtenu {decision['player']}"
         )
         labels = [o["label"] for o in decision.get("options", [])]
+        assert labels, f"pending_agent_decision ne contient aucune option : {decision}"
         # Les labels contractuels viennent de RETURNED_PLACEMENT_INTENTS.
         valid_intents = {"toward_enemy", "toward_objective", "away_from_enemy"}
         assert all(lbl in valid_intents for lbl in labels), (
