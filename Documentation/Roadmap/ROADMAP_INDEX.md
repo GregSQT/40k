@@ -96,6 +96,8 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
 ## ✅ Hygiène — correctifs ponctuels
 
+✅ **Faux ValueError overrun fight 12.06 corrigé (2026-08-31)** — garde `_did_overrun` ajoutée : une cible vivante mais non adjacente après le pile-in overrun ne déclenche plus ValueError, fallthrough vers `_fight_target_after_designated_death` ; test rouge→vert ajouté (`test_fight_target_reselect_overrun.py`, 12 verts).
+
 ✅ **270 échecs pytest corrigés (2026-08-31)** — 15 causes distinctes : `units_cache_entry` sans `HP_CUR`/`HP_MAX` (192+ failures), `allocate_mortal_wounds` patché sur le mauvais module, `BASE_SHAPE` absent des fixtures, `bonus_malus_cap` manquant, `squad_cache` absent, `unit_by_id` absent, `UNIT_RULES` absent, regex accent, message d'erreur périmé, garde overrun manquante, `step_logger` retour silencieux, terrain pfm2 mauvais chemin, `capacites.md` absent, doc action size / decision_ctx périmés. Aucun chantier doc.
 
 ---
