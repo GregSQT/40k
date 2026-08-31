@@ -533,6 +533,8 @@ Le helper commun « infliger N blessures mortelles à une unité » existe : `de
 | Deadly Demise D3 | Weirdboy | `deadly_demise` | figurine détruite : D6 → sur 6, D3 MW à chaque unité dans 6" — **livrée hors passe** (registre + WeirdBoy, cf. Roadmap) |
 | Da Jump (échec) | Weirdboy | — | D6 = 1 → D6 MW à l'unité elle-même (réserves : §4) |
 
+**Da Jump — bloqueur architectural** : l'effet principal (placement en réserves + Deep Strike accordé) requiert une action psychique de phase de mouvement (§16) absente du moteur. L'effet d'échec (D6 MW) dépend du même déclencheur. Impact mesuré : `AGENT_DECISION_TYPE_SLOTS = 8` est à saturation — ajouter `da_jump_target` bumpe le one-hot → **`obs_size` change** ; aucun slot de ciblage d'escouade amie n'existe dans l'action space (pas d'équivalent allié de `OATH_SLOTS`) → **`TOTAL_ACTION_SIZE` change**. Retrain `--new` obligatoire. Ne pas implémenter avant d'avoir tranché l'architecture d'actions §16.
+
 **Deadly Demise 24.08** : le jet se fait **par figurine détruite**, après les débarquements d'urgence, et le X est tiré **séparément pour chaque unité** dans les 6" si c'est un nombre aléatoire. Trois détails qu'une implémentation rapide rate.
 
 **Exhortation of Rage** : *« you can select one enemy unit it is engaged with »* — c'est un choix de joueur, donc une décision d'agent, pas une heuristique interne.
@@ -632,7 +634,7 @@ La règle **existe** (`UNIT_RULE_EFFECT_IDS`, `def _build_move_after_shooting_de
 | Thievin' Scavengers | Gretchin | §2 (CP) |
 | Rites of Battle | Captain Relic Shield | §2 — **non livrable** sans stratagèmes |
 | CORE: Deep Strike | Chaplain JP, Vanguard JP, Land Speeder | §4 |
-| Da Jump | Weirdboy | §4 (20.02) + primitive D |
+| Da Jump | Weirdboy | §4 (20.02) + primitive D — **non livrable** sans système d'actions §16 ; casse `obs_size` + `TOTAL_ACTION_SIZE` |
 
 ## Déjà correct, à ne pas retoucher
 
