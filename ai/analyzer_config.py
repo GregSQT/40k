@@ -275,6 +275,9 @@ def load_analyzer_config() -> AnalyzerConfig:
             display_rule_name_to_ids[normalized_rule_name] = set()
         display_rule_name_to_ids[normalized_rule_name].add(display_rule_id)
 
+    _MOVE_AFTER_SHOOTING_DICE_MAX: Dict[str, int] = {
+        "D3": 3, "D6": 6, "2D6": 12, "D6+1": 7, "D6+2": 8, "D6+3": 9,
+    }
     for unit_type, unit_data in unit_registry.units.items():
         rng_weapons = require_key(unit_data, "RNG_WEAPONS")
         cc_weapons = require_key(unit_data, "CC_WEAPONS")
@@ -450,9 +453,6 @@ def load_analyzer_config() -> AnalyzerConfig:
                     raise ValueError(
                         f"Unit '{unit_type}' rule '{direct_rule_id}' must define rule_args for move_after_shooting"
                     )
-                _DICE_MAX: Dict[str, int] = {
-                    "D3": 3, "D6": 6, "2D6": 12, "D6+1": 7, "D6+2": 8, "D6+3": 9,
-                }
                 if "distance" in rule_args:
                     move_after_shooting_distance = rule_args["distance"]
                     if not isinstance(move_after_shooting_distance, int):
@@ -467,12 +467,12 @@ def load_analyzer_config() -> AnalyzerConfig:
                         )
                 elif "distance_dice" in rule_args:
                     dice_spec = rule_args["distance_dice"]
-                    if dice_spec not in _DICE_MAX:
+                    if dice_spec not in _MOVE_AFTER_SHOOTING_DICE_MAX:
                         raise ValueError(
                             f"Unit '{unit_type}' rule '{direct_rule_id}' rule_args.distance_dice "
                             f"'{dice_spec}' is not a supported dice expression"
                         )
-                    move_after_shooting_distance = _DICE_MAX[dice_spec]
+                    move_after_shooting_distance = _MOVE_AFTER_SHOOTING_DICE_MAX[dice_spec]
                 else:
                     raise ValueError(
                         f"Unit '{unit_type}' rule '{direct_rule_id}' missing rule_args.distance (int) "
