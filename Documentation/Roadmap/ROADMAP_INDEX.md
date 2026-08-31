@@ -96,6 +96,12 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
 ## ✅ Hygiène — correctifs ponctuels
 
+✅ **terrain_list.json source unique des terrains (2026-08-31)** — popup game preparation lit la liste depuis `config/board/44x60x5/terrain/terrain_list.json` via `GET /api/config/terrain-list` ; suppression des constantes dupliquées frontend/backend ; ajout d'un terrain = édition JSON uniquement.
+
+✅ **Simplification GameLog hasDetails (2026-08-31)** — refactor interne du composant GameLog.
+
+✅ **3 bugs GameLog corrigés (2026-08-31)** — correctifs de rendu/comportement GameLog.
+
 ✅ **Simplification double str() overrun (2026-08-31)** — `best_str` local élimine le double appel `str(best_target_id)` dans `_continue_squad_fight_after_selection` (lignes 5874 et 5879) ; 12+34 tests verts.
 
 ✅ **Faux ValueError overrun fight 12.06 corrigé (2026-08-31)** — garde `_did_overrun` ajoutée : une cible vivante mais non adjacente après le pile-in overrun ne déclenche plus ValueError, fallthrough vers `_fight_target_after_designated_death` ; test rouge→vert ajouté (`test_fight_target_reselect_overrun.py`, 12 verts).
