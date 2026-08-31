@@ -21,6 +21,9 @@ from engine.game_state import (
 )
 
 
+_GROT_ORDERLY_SKIPPED: str = "_grot_orderly_skipped_this_phase"
+
+
 def command_phase_start(game_state: Dict[str, Any]) -> None:
     """
     Initialize command phase - do all maintenance/resets, then either:
@@ -165,7 +168,7 @@ def command_step_start_of_phase(game_state: Dict[str, Any]) -> None:
 
     # Reset ALL tracking sets (moved from movement_phase_start)
     game_state["units_moved"] = set()
-    game_state.pop("_grot_orderly_skipped_this_phase", None)
+    game_state.pop(_GROT_ORDERLY_SKIPPED, None)
     # Distance parcourue par figurine (V11 §9.2.5) — MEME cycle de vie que `units_moved` :
     # c'est la version continue du meme fait ("cette figurine a bouge de X ce tour").
     game_state["moved_distance_by_model"] = {}
@@ -507,7 +510,7 @@ def apply_returned_models_placement_decision(
     else:
         # Board changé depuis la pose : skip temporaire (non consomme once-per-battle),
         # identique aux chemins profile_decision/mono-profil quand NO_CELL.
-        game_state.setdefault("_grot_orderly_skipped_this_phase", set()).add(squad_id)
+        game_state.setdefault(_GROT_ORDERLY_SKIPPED, set()).add(squad_id)
 
     if _apply_return_destroyed_models(game_state, int(player)):
         return
@@ -627,7 +630,7 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
 
     squad_cache = require_key(game_state, "squad_cache")
     used: set = game_state.setdefault("return_destroyed_models_used", set())
-    skipped: set = game_state.get("_grot_orderly_skipped_this_phase", set())
+    skipped: set = game_state.get(_GROT_ORDERLY_SKIPPED, set())
 
     for unit in require_key(game_state, "units"):
         if int(require_key(unit, "player")) != current_player:
@@ -711,7 +714,7 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
         if _mono_result is PlacementResult.NO_CELL:
             # Aucune case légale, chemin mono-profil : même traitement que le chemin multi-profil
             # dans `apply_returned_models_profile_decision` — skip temporaire, pas « used ».
-            game_state.setdefault("_grot_orderly_skipped_this_phase", set()).add(unit_id)
+            game_state.setdefault(_GROT_ORDERLY_SKIPPED, set()).add(unit_id)
 
     return False
 
@@ -893,7 +896,7 @@ def apply_returned_models_profile_decision(
         # règle exige un placement conforme). Pour éviter que le balayage repose la même décision
         # de profil dans ce tour, on inscrit l'escouade dans le set temporaire (vidé au prochain
         # début de phase), et jamais dans `return_destroyed_models_used`.
-        game_state.setdefault("_grot_orderly_skipped_this_phase", set()).add(squad_id)
+        game_state.setdefault(_GROT_ORDERLY_SKIPPED, set()).add(squad_id)
     # PlacementResult.APPLIED : `apply_returned_models_placement` a déjà marqué dans
     # `return_destroyed_models_used` (ligne ~976) — pas besoin de le refaire ici.
     if _apply_return_destroyed_models(game_state, int(player)):
