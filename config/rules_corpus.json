@@ -2996,8 +2996,8 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [ANTI-FLY:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire."
+      "status": "PARTIEL",
+      "status_note": "Token [ANTI-FLY:Y+] loggué et usage compté (tir et mêlée via regex). Seuil critique vérifié via check_anti_x_threshold() (token vs armurerie). Condition 'cible porte le keyword FLY' non rejouée."
     },
     {
       "id": "weapon.ANTI_INFANTRY",
@@ -3008,8 +3008,8 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [ANTI-INFANTRY:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire."
+      "status": "PARTIEL",
+      "status_note": "Token [ANTI-INFANTRY:Y+] loggué et usage compté (tir et mêlée via regex). Seuil critique vérifié via check_anti_x_threshold() (token vs armurerie). Condition 'cible porte le keyword INFANTRY' non rejouée."
     },
     {
       "id": "weapon.ANTI_MONSTER",
@@ -3020,8 +3020,8 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [ANTI-MONSTER:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire."
+      "status": "PARTIEL",
+      "status_note": "Token [ANTI-MONSTER:Y+] loggué et usage compté (tir et mêlée via regex). Seuil critique vérifié via check_anti_x_threshold() (token vs armurerie). Condition 'cible porte le keyword MONSTER' non rejouée."
     },
     {
       "id": "weapon.ANTI_PSYKER",
@@ -3032,8 +3032,8 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [ANTI-PSYKER:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire."
+      "status": "PARTIEL",
+      "status_note": "Token [ANTI-PSYKER:Y+] loggué et usage compté (tir et mêlée via regex). Seuil critique vérifié via check_anti_x_threshold() (token vs armurerie). Condition 'cible porte le keyword PSYKER' non rejouée."
     },
     {
       "id": "weapon.ANTI_VEHICLE",
@@ -3044,8 +3044,8 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [ANTI-VEHICLE:Y+] dans step.log depuis le 2026-08-12. Contrôle à écrire."
+      "status": "PARTIEL",
+      "status_note": "Token [ANTI-VEHICLE:Y+] loggué et usage compté (tir et mêlée via regex). Seuil critique vérifié via check_anti_x_threshold() (token vs armurerie). Condition 'cible porte le keyword VEHICLE' non rejouée."
     },
     {
       "id": "weapon.ASSAULT",
@@ -3082,8 +3082,8 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [CLEAVE:X] depuis le 2026-08-11. Aucun contrôle de conformité."
+      "status": "PARTIEL",
+      "status_note": "Token [CLEAVE:X] loggué et usage compté en mêlée. Clause 'une seule cible' non rejouée par l'analyzer."
     },
     {
       "id": "weapon.CLOSE_QUARTERS",
@@ -3118,8 +3118,8 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [EXTRA ATTACKS] depuis le 2026-08-12. Contrôle à écrire."
+      "status": "PARTIEL",
+      "status_note": "Token [EXTRA ATTACKS] loggué et usage compté (tir et mêlée). Aucun contrôle de conformité du pool d'attaques bonus."
     },
     {
       "id": "weapon.HAZARDOUS",
@@ -3158,8 +3158,8 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [IGNORES COVER] depuis le 2026-08-12. Contrôle à écrire."
+      "status": "PARTIEL",
+      "status_note": "Token [IGNORES COVER] loggué et usage compté (tir et mêlée). Suppression effective du [COVER] non re-vérifiée."
     },
     {
       "id": "weapon.INDIRECT_FIRE",
@@ -3197,8 +3197,8 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [MELTA:X] depuis le 2026-08-11. Aucun contrôle de conformité."
+      "status": "PARTIEL",
+      "status_note": "Token [MELTA:X] loggué et usage compté (tir uniquement). Bonus D et condition demi-portée non re-dérivables séparément depuis le journal."
     },
     {
       "id": "weapon.PRECISION",
@@ -3209,8 +3209,8 @@
         "kind": "indecidable"
       },
       "controls": [],
-      "status": "ABSENT_LOGGABLE",
-      "status_note": "Token [PRECISION] depuis le 2026-08-11. Aucun contrôle de conformité."
+      "status": "PARTIEL",
+      "status_note": "Token [PRECISION] loggué et usage compté côté tir uniquement. Règle de tir : pas de token en mêlée (fight_handler.py:95). Allocation forcée sur CHARACTER non re-vérifiée."
     },
     {
       "id": "weapon.PSYCHIC",
