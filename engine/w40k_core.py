@@ -5872,9 +5872,11 @@ class W40KEngine(gym.Env):
                 )
             best_target_id = enemy_slot_ids[target_slot]
             if best_target_id is None or str(best_target_id) not in targets:
-                # Si la cible désignée est VIVANTE mais hors du pool 12.05, c'est une rupture
-                # masque/commit : le masque n'aurait jamais dû offrir ce slot.
-                if best_target_id is not None and str(best_target_id) in units_cache:
+                # Si la cible désignée est VIVANTE mais hors du pool 12.05 ET qu'aucun overrun
+                # n'a eu lieu, c'est une rupture masque/commit : le masque n'aurait jamais dû
+                # offrir ce slot. Avec overrun, le pile-in déplace l'attaquant et peut rendre
+                # une cible préalablement adjacente non-adjacente — ce n'est pas une rupture.
+                if best_target_id is not None and str(best_target_id) in units_cache and not _did_overrun:
                     raise ValueError(
                         f"_continue_squad_fight: {best_target_id} hors du pool de combat 12.05"
                     )
