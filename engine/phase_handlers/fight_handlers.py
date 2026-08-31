@@ -82,6 +82,7 @@ from .shared_utils import (
     update_enemy_adjacent_caches_after_unit_move,
     ManualAllocCtx,
     _build_manual_allocation,
+    allocate_mortal_wounds,
     apply_manual_shoot_declare_order,
     apply_manual_shoot_allocation,
     manual_allocation_waiting_payload,
@@ -4861,7 +4862,6 @@ def _manual_roll_fight_intent(
         if _req_weapon_code is not None and _this_weapon_code == _req_weapon_code:
             _tgt_keywords = [k.upper() for k in target.get("keywords", [])]  # get allowed
             if "VEHICLE" not in _tgt_keywords:
-                from .shared_utils import allocate_mortal_wounds as _alloc_mw
                 _hs_mw_total = 0
                 _hs_count = 0
                 for _hs_rec in rolled["shot_records"]:
@@ -4888,15 +4888,17 @@ def _manual_roll_fight_intent(
                         "holdStillMortalWounds": _hs_mw_total,
                         "holdStillDetails": _hs_details,
                     })
-                    _alloc_mw(game_state, target_sid, _hs_mw_total, True, _hs_details)
+                    allocate_mortal_wounds(game_state, target_sid, _hs_mw_total, True, _hs_details)
                     # Les crits consommés par Hold Still ne sont pas des blessures normales :
-                    # _alloc_mw les a déjà journalisés séparément. Soustraire ici évite le
+                    # allocate_mortal_wounds les a déjà journalisés séparément. Soustraire ici évite le
                     # double-comptage dans summary["wounds"] de _build_manual_allocation.
                     rolled["counts"]["wounds"] -= _hs_count
-                    rolled["pending_wounds"] = (
-                        [pw for pw in rolled["pending_wounds"] if not pw["rec"].get("holdStillMW")]
-                        if is_unit_alive(target_sid, game_state) else []
-                    )
+                    if is_unit_alive(target_sid, game_state):
+                        rolled["pending_wounds"] = [
+                            pw for pw in rolled["pending_wounds"] if not pw["rec"].get("holdStillMW")
+                        ]
+                    else:
+                        rolled["pending_wounds"] = []
     return {
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,
