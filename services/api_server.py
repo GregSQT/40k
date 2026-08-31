@@ -279,7 +279,9 @@ def _load_terrain_list_constants() -> tuple[list, set, dict, dict, frozenset]:
 
     # default_for[mode] = terrain_id dont suffix vaut "" ; un seul défaut autorisé par mode.
     _default_for: dict[str, str] = {}
+    _all_modes: set[str] = set()
     for e in _entries:
+        _all_modes.update(e["modes"])
         for m in e.get("default_for", []):
             if m in _default_for:
                 raise ValueError(
@@ -289,9 +291,6 @@ def _load_terrain_list_constants() -> tuple[list, set, dict, dict, frozenset]:
             _default_for[m] = e["id"]
 
     # Suffix table : "" pour le terrain par défaut du mode, "_{id}" pour les autres.
-    _all_modes: set[str] = set()
-    for e in _entries:
-        _all_modes.update(e["modes"])
 
     suffix_table: dict[str, dict[str, str]] = {}
     for mode in _all_modes:
@@ -315,9 +314,8 @@ def _load_terrain_list_constants() -> tuple[list, set, dict, dict, frozenset]:
 
     # Modes avec sélecteur = ceux qui ont >1 terrain dans terrain_list.json.
     selector_modes: frozenset = frozenset(
-        m for m in _all_modes
-        if sum(1 for e in _entries if m in e["modes"]) > 1
-        and m != "pve_test"  # pve_test n'expose pas le sélecteur (scénario sans décor)
+        m for m in suffix_table
+        if len(suffix_table[m]) > 1 and m != "pve_test"
     )
 
     return _entries, valid, suffix_table, defaults, selector_modes
@@ -5214,7 +5212,7 @@ def delete_saves():
 @mode_agnostic
 def get_terrain_list():
     """Liste des terrains disponibles, issue de terrain_list.json (chargée au démarrage)."""
-    return jsonify({"success": True, "terrains": _TERRAIN_LIST_ENTRIES})
+    return api_json_response({"success": True, "terrains": _TERRAIN_LIST_ENTRIES})
 
 
 @app.route('/api/config/defaults', methods=['GET'])
