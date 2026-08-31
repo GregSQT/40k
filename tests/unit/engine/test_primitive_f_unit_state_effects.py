@@ -118,6 +118,7 @@ def _base_state(
         "suppressed_squads": {},
         "finest_hour_used": set(),
         "squad_cache": dict(squad_cache or {}),
+        "_restored_model_counter": 0,
         "config": {
             "game_rules": {
                 "engagement_zone": 2,

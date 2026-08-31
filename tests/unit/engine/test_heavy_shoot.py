@@ -63,7 +63,7 @@ def _game_state(weapon_rules, *, moved_inches=0.0, deployed_on_turn=0, bs=4):
         "models_cache": {"A1": attacker, "T1": target_model},
         "squad_models": {"2": ["T1"]},
         "squad_cache": {"2": {"model_count_at_start": 1}},
-        "units_cache": {"2": {"col": 9, "row": 9, "VALUE": 10.0, "player": 1}},
+        "units_cache": {"2": {"col": 9, "row": 9, "VALUE": 10.0, "player": 1, "HP_CUR": 2, "HP_MAX": 2}},
         "unit_by_id": {"1": {"id": "1", "UNIT_RULES": [], "deployed_on_turn": deployed_on_turn},
                        "2": {"id": "2", "UNIT_RULES": [], "deployed_on_turn": 0}},
         "objectives": [], "turn": 2,

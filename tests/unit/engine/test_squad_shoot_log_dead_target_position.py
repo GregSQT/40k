@@ -233,6 +233,7 @@ def _manual_wound_fixture(gs):
         "weapon_groups": [{
             "ap": 0, "dmg_raw": 1, "dmg_bonus": 0,
             "damage": 0, "kills": 0, "killed_model_ids": [],
+            "weapon": {"WEAPON_RULES": [], "code": "test_bolter", "display_name": "Bolter"},
         }],
     }
     batch = {

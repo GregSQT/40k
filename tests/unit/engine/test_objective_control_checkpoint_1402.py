@@ -173,7 +173,7 @@ def _manager_et_etat_avec_un_objectif_tenu_par_p1():
     unit = {
         "id": "1", "player": 1, "OC": 2, "battle_shocked": False,
         "col": 0, "row": 0, "orientation": 0,
-        "BASE_SHAPE": "round", "BASE_SIZE": 1, "HP_CUR": 1,
+        "BASE_SHAPE": "round", "BASE_SIZE": 1, "HP_CUR": 1, "UNIT_RULES": [],
     }
     game_state = {
         "turn": 1,
@@ -194,6 +194,7 @@ def _manager_et_etat_avec_un_objectif_tenu_par_p1():
                 "BASE_SHAPE": "round", "BASE_SIZE": 1,
             }
         },
+        "secured_objectives": {},
     }
     return manager, game_state
 

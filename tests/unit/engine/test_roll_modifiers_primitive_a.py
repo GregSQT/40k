@@ -70,8 +70,8 @@ def _fight_state(unit_rules, *, ws=4, strength=4, toughness=4, suppressed=False)
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "squad_cache": {"1": {"model_count_at_start": 1}, "2": {"model_count_at_start": 1}},
         "units_cache": {
-            "1": {"col": 0, "row": 0, "VALUE": 10.0, "player": 1, "orientation": 0},
-            "2": {"col": 9, "row": 9, "VALUE": 10.0, "player": 2, "orientation": 0},
+            "1": {"col": 0, "row": 0, "VALUE": 10.0, "player": 1, "orientation": 0, "HP_CUR": 1, "HP_MAX": 1},
+            "2": {"col": 9, "row": 9, "VALUE": 10.0, "player": 2, "orientation": 0, "HP_CUR": 2, "HP_MAX": 2},
         },
         "unit_by_id": {
             "1": {"id": "1", "player": 1, "UNIT_RULES": unit_rules},

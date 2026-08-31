@@ -21,6 +21,7 @@ def _gs(models: dict) -> dict:
     return {
         "models_cache": models,
         "squad_models": {"9": list(models.keys())},
+        "unit_by_id": {"9": {"id": "9", "UNIT_RULES": []}},
     }
 
 

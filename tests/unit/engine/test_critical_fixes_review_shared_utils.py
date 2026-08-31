@@ -90,7 +90,7 @@ class TestDevastatingWoundsSortOrder:
                     "HP_CUR": 9, "HP_MAX": 9, "ARMOR_SAVE": 2, "INVUL_SAVE": 7,
                     "role": None, "unitType": "AssaultIntercessor", "points_per_hp": 5.0,
                     "VALUE": 10.0, "col": TARGET[0], "row": TARGET[1]}
-        uc_entry = {"BASE_SHAPE": "round", "BASE_SIZE": 6, "occupied_hexes": set(), "VALUE": 10.0}
+        uc_entry = {"BASE_SHAPE": "round", "BASE_SIZE": 6, "occupied_hexes": set(), "VALUE": 10.0, "HP_CUR": 9, "HP_MAX": 9}
         gs: Dict[str, Any] = {
             **turn_state_invariants(),
             # pas de gym_training_mode → defender player 1 est "human"

@@ -72,7 +72,7 @@ def _game_state(unit_rules, target_col=9, target_row=9, model_col=None, model_ro
         "squad_cache": {"2": {"model_count_at_start": 1}},
         "units_cache": {
             "2": {"col": target_col, "row": target_row, "VALUE": 10.0, "player": 1,
-                  "orientation": 0},
+                  "orientation": 0, "HP_CUR": 2, "HP_MAX": 2},
         },
         "unit_by_id": {"1": attacker_unit, "2": target_unit},
         "objectives": [{"id": "o1", "hexes": [[5, 5]]}],
