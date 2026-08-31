@@ -8,6 +8,7 @@ before the movement phase. In Phase 2, the agent may take zone intent free steps
 (up to MAX_OBJECTIVES) before transitioning to move.
 """
 
+from enum import Enum
 from typing import Dict, List, Sequence, Tuple, Set, Optional, Any
 from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
@@ -705,9 +706,9 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
             _select_returned_models(archived, next(iter(profiles)), to_restore),
             d3, destroyed,
         )
-        if _mono_result is True:
+        if _mono_result is PlacementResult.PENDING:
             return True
-        if _mono_result is None:
+        if _mono_result is PlacementResult.NO_CELL:
             # Aucune case légale, chemin mono-profil : même traitement que le chemin multi-profil
             # dans `apply_returned_models_profile_decision` — skip temporaire, pas « used ».
             game_state.setdefault("_grot_orderly_skipped_this_phase", set()).add(unit_id)
@@ -761,15 +762,22 @@ def _select_returned_models(
     return chosen[:to_restore]
 
 
+class PlacementResult(Enum):
+    PENDING = "pending"    # décision d'agent posée — l'appelant doit rendre la main
+    APPLIED = "applied"    # placement forcé déjà appliqué
+    NO_CELL = "no_cell"    # aucune case légale — capacité NON consommée (REVIVED)
+
+
 def _arm_returned_placement(
     game_state: Dict[str, Any], squad_id: str, current_player: int,
     selected: Sequence[int], d3: int, destroyed: int,
-) -> Optional[bool]:
+) -> PlacementResult:
     """Ouvre l'étape de PLACEMENT pour les figurines `selected` de l'archive.
 
-    Rend ``True`` si une décision d'agent a été posée (l'appelant doit rendre la main),
-    ``False`` si le placement était forcé et a déjà été appliqué,
-    ``None`` s'il n'existait aucune case légale (la capacité n'est PAS consommée — REVIVED).
+    Rend ``PlacementResult.PENDING`` si une décision d'agent a été posée (l'appelant doit rendre
+    la main), ``PlacementResult.APPLIED`` si le placement était forcé et a déjà été appliqué,
+    ``PlacementResult.NO_CELL`` s'il n'existait aucune case légale (la capacité n'est PAS
+    consommée — REVIVED).
     """
     from engine.agent_decision import set_pending_agent_decision
     from engine.phase_handlers.deployment_handlers import RETURNED_PLACEMENT_INTENTS
@@ -797,7 +805,7 @@ def _arm_returned_placement(
             f"T{game_state.get('turn', '?')} unit={squad_id} aucune case legale — "
             f"aucune figurine rendue"
         )
-        return None
+        return PlacementResult.NO_CELL
 
     distinct = {tuple(cells) for cells in plans.values()}
     if len(distinct) > 1:
@@ -824,12 +832,12 @@ def _arm_returned_placement(
                 if intent in plans
             ],
         )
-        return True
+        return PlacementResult.PENDING
 
     apply_returned_models_placement(
         game_state, squad_id, next(iter(distinct)), selected, d3, destroyed
     )
-    return False
+    return PlacementResult.APPLIED
 
 
 def _returned_base_extent(model: Dict[str, Any]) -> float:
@@ -878,16 +886,16 @@ def apply_returned_models_profile_decision(
         game_state, squad_id, int(player), selected,
         int(require_key(pending, "d3")), int(require_key(pending, "destroyed")),
     )
-    if result is True:
+    if result is PlacementResult.PENDING:
         return
-    if result is None:
+    if result is PlacementResult.NO_CELL:
         # Aucune case légale après choix de profil : la capacité n'est PAS consommée (REVIVED —
         # règle exige un placement conforme). Pour éviter que le balayage repose la même décision
         # de profil dans ce tour, on inscrit l'escouade dans le set temporaire (vidé au prochain
         # début de phase), et jamais dans `return_destroyed_models_used`.
         game_state.setdefault("_grot_orderly_skipped_this_phase", set()).add(squad_id)
-    # result is False : `apply_returned_models_placement` a déjà marqué dans `return_destroyed_
-    # models_used` (ligne ~976) — pas besoin de le refaire ici.
+    # PlacementResult.APPLIED : `apply_returned_models_placement` a déjà marqué dans
+    # `return_destroyed_models_used` (ligne ~976) — pas besoin de le refaire ici.
     if _apply_return_destroyed_models(game_state, int(player)):
         return
     _command_abilities_after_returns(game_state, int(player))
