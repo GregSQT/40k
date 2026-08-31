@@ -186,7 +186,8 @@ def _shoot_state(
         "army_faction": declared_factions or {
             "1": _declared_faction(attacker_faction),
             "2": _declared_faction(defender_faction),
-        }
+        },
+        "game_rules": {"bonus_malus_cap": 0},
     }
     if uses_codex_detachment != {}:
         config["uses_codex_detachment"] = uses_codex_detachment or {"1": True, "2": True}
@@ -250,6 +251,7 @@ def _fight_state(
                 "1": _declared_faction(attacker_faction),
                 "2": _declared_faction(defender_faction),
             },
+            "game_rules": {"bonus_malus_cap": 0},
         },
         "models_cache": {"A1": attacker, "T1": target_model},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
@@ -302,6 +304,7 @@ def _command_state(current_player, *, p1_faction, p2_faction, alive=("1", "2")):
                 "2": _declared_faction(p2_faction),
             },
             "gym_training_mode": True,
+            "game_rules": {"bonus_malus_cap": 0},
         },
         "gym_training_mode": True,
         "units": units,
@@ -310,6 +313,7 @@ def _command_state(current_player, *, p1_faction, p2_faction, alive=("1", "2")):
             uid: _uc(int(uid), 0, player=int(uid))
             for uid in alive
         },
+        "squad_cache": {uid: {"model_count_at_start": 1} for uid in alive},
         "squad_models": {uid: [f"M{uid}"] for uid in alive},
         "models_cache": {
             f"M{uid}": {"id": f"M{uid}", "squad_id": uid, "player": int(uid),

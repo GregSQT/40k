@@ -272,6 +272,7 @@ def test_le_marqueur_fly_de_charge_atteint_bien_step_log():
     from ai.step_logger import StepLogger
 
     class _Bridge:
+        game_state = {"unit_by_id": {"3": {"UNIT_RULES": []}}}
         def _models_segment_for_unit(self, unit_id):
             return ""
 

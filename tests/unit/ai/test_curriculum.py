@@ -300,7 +300,7 @@ def test_exploiter_with_non_unit_weight_pool_is_refused() -> None:
     """Un membre unique dont le weight n'est pas 1.0 viole le protocole gele."""
     broken = _minimal_curriculum_with_exploiter()
     broken["stages"]["E1"]["pool"] = [{"kind": "champion", "members": ["P0"], "weight": 0.7}]
-    with pytest.raises(ValueError, match="pool ne contient pas"):
+    with pytest.raises(ValueError, match="un seul membre de pool"):
         validate_curriculum(broken)
 
 

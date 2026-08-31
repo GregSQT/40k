@@ -5870,6 +5870,12 @@ class W40KEngine(gym.Env):
                 )
             best_target_id = enemy_slot_ids[target_slot]
             if best_target_id is None or str(best_target_id) not in targets:
+                # Si la cible désignée est VIVANTE mais hors du pool 12.05, c'est une rupture
+                # masque/commit : le masque n'aurait jamais dû offrir ce slot.
+                if best_target_id is not None and str(best_target_id) in units_cache:
+                    raise ValueError(
+                        f"_continue_squad_fight: {best_target_id} hors du pool de combat 12.05"
+                    )
                 # La cible désignée par l'action a été tuée PENDANT l'activation (Exhortation de
                 # Rage) : le masque ne pouvait pas anticiper le D6, ce n'est donc pas une rupture
                 # masque/commit. Le pool ci-dessus est celui d'APRÈS le pile-in overrun 12.06,

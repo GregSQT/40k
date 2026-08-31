@@ -4,7 +4,7 @@
   "scale": "1000pts",
   "primary_objectives": ["objectives_control"],
   "deployment_type": "active",
-  "terrain_ref": "terrain-purge-foe-mirror-2.json",
+  "terrain_ref": "divers/terrain-purge-foe-mirror-2.json",
   "units": [
     { "id": 5, "unit_type": "DreadnoughtBallistus", "player": 1, "col": 180, "row": 10 },
     {

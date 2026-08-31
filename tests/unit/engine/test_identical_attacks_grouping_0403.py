@@ -180,22 +180,26 @@ def _run_real_grouping(rolled: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                    "points_per_hp": 5.0}
         for i in range(len(rolled))
     }
+    _units = [
+        {"id": "1", "player": 1, "col": 10, "row": 10, "unitType": "Stubber", "UNIT_RULES": []},
+        {"id": "101", "player": 2, "col": 20, "row": 10, "unitType": "StubTarget", "UNIT_RULES": []},
+        {"id": "102", "player": 2, "col": 30, "row": 10, "unitType": "StubTarget", "UNIT_RULES": []},
+    ]
     game_state: Dict[str, Any] = {
-        "units": [
-            {"id": "1", "player": 1, "col": 10, "row": 10, "unitType": "Stubber"},
-            {"id": "101", "player": 2, "col": 20, "row": 10, "unitType": "StubTarget"},
-            {"id": "102", "player": 2, "col": 30, "row": 10, "unitType": "StubTarget"},
-        ],
+        "units": _units,
+        "unit_by_id": {u["id"]: u for u in _units},
         "action_logs": [],
         "action_log_seq": 0,
         "turn": 1,
         "models_cache": models_cache,
         "squad_models": {"1": list(models_cache), "101": ["101#0"], "102": ["102#0"]},
         "units_cache": {
-            "1": {"col": 10, "row": 10, "player": 1, "VALUE": 100},
-            "101": {"col": 20, "row": 10, "player": 2, "VALUE": 100},
-            "102": {"col": 30, "row": 10, "player": 2, "VALUE": 100},
+            "1": {"col": 10, "row": 10, "player": 1, "VALUE": 100, "HP_CUR": 2, "HP_MAX": 2},
+            "101": {"col": 20, "row": 10, "player": 2, "VALUE": 100, "HP_CUR": 2, "HP_MAX": 2},
+            "102": {"col": 30, "row": 10, "player": 2, "VALUE": 100, "HP_CUR": 2, "HP_MAX": 2},
         },
+        "config": {"game_rules": {"bonus_malus_cap": 0}},
+        "squad_cache": {"1": {"model_count_at_start": len(models_cache)}, "101": {"model_count_at_start": 1}, "102": {"model_count_at_start": 1}},
         SHOOT_CTX.intents_key: {
             "1": [{"model_id": f"1#{i}", "weapon_index": 0, "target_unit_id": r["target_sid"],
                    "target_squad_size_at_declaration": 1}
@@ -209,7 +213,7 @@ def _run_real_grouping(rolled: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         r = {**r, "attacker": models_cache[str(intent["model_id"])],
              "attacker_mid": str(intent["model_id"])}
         targets_meta.setdefault(
-            r["target_sid"], {"value": 100.0, "model_count_at_start": 1, "player": 2}
+            r["target_sid"], {"value": 100.0, "model_count_at_start": 1, "player": 2, "col": 20, "row": 10, "hp_before": 1}
         )
         return r
 

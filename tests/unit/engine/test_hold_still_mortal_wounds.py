@@ -43,7 +43,7 @@ _HOLD_STILL_RULE = {
 def _attacker_model(*, weapon_index=0):
     return {
         "squad_id": "PAIN", "player": 1,
-        "T": 5, "col": 0, "row": 0, "level": 0, "HP_CUR": 3,
+        "T": 5, "col": 0, "row": 0, "level": 0, "HP_CUR": 3, "HP_MAX": 3,
         "ARMOR_SAVE": 5, "INVUL_SAVE": 7,
         "CC_WEAPONS": [_DOK_TOOLS, _URTY_SYRINGE],
         "UNIT_RULES": [_HOLD_STILL_RULE],
@@ -65,7 +65,7 @@ def _attacker_model_no_rule(*, weapon_index=0):
 def _target_model(*, vehicle=False):
     return {
         "squad_id": "TGT", "player": 2,
-        "T": 4, "col": 5, "row": 5, "level": 0, "HP_CUR": 2,
+        "T": 4, "col": 5, "row": 5, "level": 0, "HP_CUR": 2, "HP_MAX": 2,
         "ARMOR_SAVE": 4, "INVUL_SAVE": 7,
         "role": None,
     }
@@ -73,7 +73,7 @@ def _target_model(*, vehicle=False):
 
 def _pain_unit():
     return {
-        "id": "PAIN", "player": 1, "HP_CUR": 3, "VALUE": 90.0,
+        "id": "PAIN", "player": 1, "HP_CUR": 3, "HP_MAX": 3, "VALUE": 90.0,
         "UNIT_RULES": [], "keywords": [],
     }
 
@@ -81,7 +81,7 @@ def _pain_unit():
 def _target_unit(*, vehicle=False):
     keywords = ["VEHICLE"] if vehicle else ["INFANTRY"]
     return {
-        "id": "TGT", "player": 2, "HP_CUR": 2, "VALUE": 10.0,
+        "id": "TGT", "player": 2, "HP_CUR": 2, "HP_MAX": 2, "VALUE": 10.0,
         "ARMOR_SAVE": 4, "INVUL_SAVE": 7,
         "UNIT_RULES": [], "keywords": keywords,
     }
@@ -100,13 +100,15 @@ def _gs(*, vehicle=False, attacker_model=None):
         # col/row requis dans units_cache : _manual_roll_fight_intent les lit pour
         # les stocker dans targets_meta AVANT _alloc_mw (résistant à la mort de la cible).
         "units_cache": {
-            "PAIN": {**pain_unit, "col": 0, "row": 0},
-            "TGT": {**tgt_unit, "col": 5, "row": 5},
+            "PAIN": {**pain_unit, "col": 0, "row": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1},
+            "TGT": {**tgt_unit, "col": 5, "row": 5, "BASE_SHAPE": "round", "BASE_SIZE": 1},
         },
         "squad_cache": {"PAIN": {"model_count_at_start": 1}, "TGT": {"model_count_at_start": 1}},
         "action_logs": [], "action_log_seq": 0, "turn": 1,
         "objectives": [],
         "waaagh_active_player": None,
+        "_unit_move_version": 0,
+        "config": {"game_rules": {"bonus_malus_cap": 0}},
     }
 
 
@@ -162,7 +164,7 @@ def test_crit_urty_syringe_appelle_allocate_mw(monkeypatch):
     from engine.phase_handlers import fight_handlers as _fh
     alloc_calls = []
     _patch_fight_harness(monkeypatch, _crit_rolled())
-    monkeypatch.setattr(su, "allocate_mortal_wounds",
+    monkeypatch.setattr(fh, "allocate_mortal_wounds",
                         lambda gs, uid, n, auto, sink: alloc_calls.append((uid, n)))
     monkeypatch.setattr(random, "randint", lambda a, b: 6)  # D6 = 6 MW
 
@@ -177,7 +179,7 @@ def test_crit_urty_syringe_retire_record_de_pending_wounds(monkeypatch):
     """Le record critique doit être retiré de pending_wounds (fin de séquence, sans double-dommage)."""
     from engine.phase_handlers import fight_handlers as _fh
     _patch_fight_harness(monkeypatch, _crit_rolled())
-    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda *a, **kw: None)
+    monkeypatch.setattr(fh, "allocate_mortal_wounds", lambda *_a, **_kw: None)
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
 
     gs = _gs()
@@ -192,7 +194,7 @@ def test_crit_devastating_non_consomme_par_hold_still(monkeypatch):
     from engine.phase_handlers import fight_handlers as _fh
     alloc_calls = []
     _patch_fight_harness(monkeypatch, _crit_devastating_rolled())
-    monkeypatch.setattr(su, "allocate_mortal_wounds",
+    monkeypatch.setattr(fh, "allocate_mortal_wounds",
                         lambda gs, uid, n, auto, sink: alloc_calls.append((uid, n)))
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
 
@@ -213,7 +215,7 @@ def test_mauvaise_arme_pas_de_hold_still(monkeypatch):
     from engine.phase_handlers import fight_handlers as _fh
     alloc_calls = []
     _patch_fight_harness(monkeypatch, _crit_rolled())
-    monkeypatch.setattr(su, "allocate_mortal_wounds",
+    monkeypatch.setattr(fh, "allocate_mortal_wounds",
                         lambda gs, uid, n, auto, sink: alloc_calls.append((uid, n)))
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
 
@@ -232,7 +234,7 @@ def test_target_vehicle_pas_de_hold_still(monkeypatch):
     from engine.phase_handlers import fight_handlers as _fh
     alloc_calls = []
     _patch_fight_harness(monkeypatch, _crit_rolled())
-    monkeypatch.setattr(su, "allocate_mortal_wounds",
+    monkeypatch.setattr(fh, "allocate_mortal_wounds",
                         lambda gs, uid, n, auto, sink: alloc_calls.append((uid, n)))
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
 
@@ -267,7 +269,7 @@ def test_hold_still_kill_total_action_logs(monkeypatch):
         })
 
     _patch_fight_harness(monkeypatch, _crit_rolled())
-    monkeypatch.setattr(su, "allocate_mortal_wounds", _alloc_mw_kill)
+    monkeypatch.setattr(fh, "allocate_mortal_wounds", _alloc_mw_kill)
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
 
     gs = _gs()
@@ -296,7 +298,7 @@ def test_mw_tuent_cible_retournent_resultat_complet(monkeypatch):
     from engine.phase_handlers import fight_handlers as _fh
 
     _patch_fight_harness(monkeypatch, _crit_rolled())
-    monkeypatch.setattr(su, "allocate_mortal_wounds", _alloc_mw_destroy_full)
+    monkeypatch.setattr(fh, "allocate_mortal_wounds", _alloc_mw_destroy_full)
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
 
     gs = _gs()
@@ -328,7 +330,7 @@ def test_mw_tuent_seule_cible_emet_log_combat(monkeypatch):
     from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 
     _patch_fight_harness(monkeypatch, _crit_rolled())
-    monkeypatch.setattr(su, "allocate_mortal_wounds", _alloc_mw_destroy_full)
+    monkeypatch.setattr(fh, "allocate_mortal_wounds", _alloc_mw_destroy_full)
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
     # _emit_squad_shoot_log dépend de WeaponAttackProfile.torrent/.anti_keyword (harness None).
     # On court-circuite la fonction entière pour isoler l'invariant : est-elle appelée ?
@@ -389,7 +391,7 @@ def test_hold_still_decremente_counts_wounds(monkeypatch):
     from engine.phase_handlers import fight_handlers as _fh
 
     _patch_fight_harness(monkeypatch, _multi_crit_rolled())
-    monkeypatch.setattr(su, "allocate_mortal_wounds", lambda *a, **kw: None)
+    monkeypatch.setattr(fh, "allocate_mortal_wounds", lambda *_a, **_kw: None)
     monkeypatch.setattr(random, "randint", lambda a, b: 6)
 
     gs = _gs()

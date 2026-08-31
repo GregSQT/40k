@@ -89,8 +89,8 @@ def _game_state(
     *, turn: int, current_player: int, controlled_player: int, mine: int = 0, theirs: int = 0
 ) -> Dict[str, Any]:
     units: List[Dict[str, Any]] = [
-        {"id": "1", "player": controlled_player, "unitType": "Intercessor"},
-        {"id": "2", "player": 2 if controlled_player == 1 else 1, "unitType": "Intercessor"},
+        {"id": "1", "player": controlled_player, "unitType": "Intercessor", "UNIT_RULES": []},
+        {"id": "2", "player": 2 if controlled_player == 1 else 1, "unitType": "Intercessor", "UNIT_RULES": []},
     ]
     return {
         "turn": turn,
@@ -103,8 +103,8 @@ def _game_state(
         # Index exige par get_unit_by_id (construit au reset dans le moteur).
         "unit_by_id": {str(unit["id"]): unit for unit in units},
         "units_cache": {
-            "1": {"player": controlled_player, "col": 1, "row": 1, "HP_CUR": 6},
-            "2": {"player": 2 if controlled_player == 1 else 1, "col": 9, "row": 9, "HP_CUR": 6},
+            "1": {"player": controlled_player, "col": 1, "row": 1, "HP_CUR": 6, "HP_MAX": 6},
+            "2": {"player": 2 if controlled_player == 1 else 1, "col": 9, "row": 9, "HP_CUR": 6, "HP_MAX": 6},
         },
         # Escouades coherentes : la penalite de coherency partage la garde du reward d'objectif
         # et serait versee au meme instant. La neutraliser ici isole le montant teste.

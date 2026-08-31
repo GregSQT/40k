@@ -377,11 +377,9 @@ decision_ctx_bin[2]      = decision_type_waaagh_call         # 0.0 / 1.0 — app
 decision_ctx_bin[3]      = decision_type_fly_declaration     # 0.0 / 1.0 — « take to the skies » 21.03 (L6)
 decision_ctx_bin[4]      = decision_type_allocation_model    # 0.0 / 1.0 — choix figurine réceptrice 05.04 (P3-4)
 decision_ctx_bin[5]      = decision_type_charge_placement    # 0.0 / 1.0 — placement charge par figurine (chantier 04)
-decision_ctx_bin[6]      = decision_type_reserved_0          # colonne RÉSERVÉE : le one-hot fait
-                                                             # AGENT_DECISION_TYPE_SLOTS bits, donc ajouter un type
-                                                             # consomme une réserve : les bits NE BOUGENT PAS.
-decision_ctx_bin[7]      = decision_type_reserved_1          # colonne RÉSERVÉE (idem reserved_0)
-decision_ctx_bin[8]      = decision_type_reserved_2          # colonne RÉSERVÉE (idem reserved_0)
+decision_ctx_bin[6]      = decision_type_mortal_wounds_target      # 0.0 / 1.0 — cible des blessures mortelles (Exhortation de Rage)
+decision_ctx_bin[7]      = decision_type_returned_models_placement # 0.0 / 1.0 — placement des figurines rendues (Grot Orderly)
+decision_ctx_bin[8]      = decision_type_returned_models_profile   # 0.0 / 1.0 — profil des figurines rendues (Grot Orderly)
 
 decision_options_cont[c][0] = role_tier_norm                 # [0, 1] — ROLE_TIER / 4 (base=0, leader=1)
 decision_options_cont[c][1] = dist_enemy_norm                # [0, 1] — distance ennemi / (cols+rows) du plateau

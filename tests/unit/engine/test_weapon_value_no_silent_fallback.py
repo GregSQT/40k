@@ -196,6 +196,8 @@ def _fight_state(weapons):
         "unit_by_id": {"1": {"id": "1", "UNIT_KEYWORDS": [], "UNIT_RULES": []},
                        "2": {"id": "2", "UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}],
                              "UNIT_RULES": []}},
+        # `bonus_malus_cap` : lu par `_bonus_malus_cap` dans squad_declare_fight (seuil de touche).
+        "config": {"game_rules": {"bonus_malus_cap": 0}},
     }
 
 

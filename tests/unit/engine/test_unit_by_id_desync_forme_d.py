@@ -115,7 +115,7 @@ def test_display_save_threshold_calls_effective_invul() -> None:
     # first_alive : ARMOR_SAVE 3+, INVUL_SAVE 4+ (valeur datasheet)
     first_alive = {"ARMOR_SAVE": 3, "INVUL_SAVE": 4}
     # target_unit sans WAAAGH! actif → effective_invul_save renvoie base_invul
-    target_unit = {"id": "t1", "player": 2}
+    target_unit = {"id": "t1", "player": 2, "UNIT_RULES": []}
     gs = _base_gs(unit_by_id={"t1": target_unit}, waaagh_active={1: False, 2: False})
 
     save_th, waaagh_improved = display_save_threshold_with_waaagh(gs, target_unit, first_alive, ap=0)

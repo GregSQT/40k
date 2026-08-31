@@ -3,7 +3,7 @@
   "army_faction": {"1": "ORKS", "2": "ADEPTUS ASTARTES"},
   "scale": "500pts",
   "primary_objectives": ["objectives_control"],
-  "terrain_ref": "terrain-purge-foe-mirror-2.json",
+  "terrain_ref": "divers/terrain-purge-foe-mirror-2.json",
   "units": [
     { "id": 201, "unit_type": "WeirdBoy",       "player": 1, "col": 23,  "row": 98 },
     { "id": 202, "unit_type": "WarTrakk",       "player": 1, "col": 203,  "row": 93 },
