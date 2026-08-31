@@ -43,7 +43,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (13,)                =      13               │
-│    global_bin             (35,)                =      35               │
+│    global_bin             (83,)                =      83               │
 │                                                                        │
 │  MES ESCOUADES — ordre = slots d'activation       K_ALLY_SLOTS = 12    │
 │    allies_cont            (12, 20)             =     240               │
@@ -72,7 +72,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    self_models_bin        (20, 3)              =      60               │
 │                                                                        │
 │  DÉCISION AGENT — candidats de CHOICE_i        MAX_DECISION_OPTIONS = 6│
-│    decision_ctx_bin       (9,)                 =       9               │
+│    decision_ctx_bin       (17,)                =      17               │
 │    decision_options_bin   (6, 9)               =      54               │
 │    decision_options_cont  (6, 2)               =      12               │
 │                                                                        │
@@ -161,6 +161,58 @@ global_bin[31]     = my_oath_target_selected                # 0.0 / 1.0 — une 
 global_bin[32]     = enemy_oath_target_selected             # 0.0 / 1.0 — idem cote adverse
 global_bin[33]     = my_oath_wound_bonus_active             # 0.0 / 1.0 — clause du +1 Wound d'Oath ouverte pour MON armee
 global_bin[34]     = enemy_oath_wound_bonus_active          # 0.0 / 1.0 — idem cote adverse
+# RÉSERVÉ — missions primaires (J4). Dans global_bin et non global_cont : VecNormalize ne
+# normalise que global_cont ; des slots toujours nuls y auraient variance ≈ 0 → clipping ±10
+# au --append. Ici les valeurs restent brutes. Implémentation prévue : type mission (one-hot
+# ~5 bits), triggers par round (~5), flags objectif (~10), VP primaire quantifié (~12).
+global_bin[35]     = reserved_mission_bin_0                 # réservé J4 — voir ci-dessus
+global_bin[36]     = reserved_mission_bin_1                 # réservé J4
+global_bin[37]     = reserved_mission_bin_2                 # réservé J4
+global_bin[38]     = reserved_mission_bin_3                 # réservé J4
+global_bin[39]     = reserved_mission_bin_4                 # réservé J4
+global_bin[40]     = reserved_mission_bin_5                 # réservé J4
+global_bin[41]     = reserved_mission_bin_6                 # réservé J4
+global_bin[42]     = reserved_mission_bin_7                 # réservé J4
+global_bin[43]     = reserved_mission_bin_8                 # réservé J4
+global_bin[44]     = reserved_mission_bin_9                 # réservé J4
+global_bin[45]     = reserved_mission_bin_10                # réservé J4
+global_bin[46]     = reserved_mission_bin_11                # réservé J4
+global_bin[47]     = reserved_mission_bin_12                # réservé J4
+global_bin[48]     = reserved_mission_bin_13                # réservé J4
+global_bin[49]     = reserved_mission_bin_14                # réservé J4
+global_bin[50]     = reserved_mission_bin_15                # réservé J4
+global_bin[51]     = reserved_mission_bin_16                # réservé J4
+global_bin[52]     = reserved_mission_bin_17                # réservé J4
+global_bin[53]     = reserved_mission_bin_18                # réservé J4
+global_bin[54]     = reserved_mission_bin_19                # réservé J4
+global_bin[55]     = reserved_mission_bin_20                # réservé J4
+global_bin[56]     = reserved_mission_bin_21                # réservé J4
+global_bin[57]     = reserved_mission_bin_22                # réservé J4
+global_bin[58]     = reserved_mission_bin_23                # réservé J4
+global_bin[59]     = reserved_mission_bin_24                # réservé J4
+global_bin[60]     = reserved_mission_bin_25                # réservé J4
+global_bin[61]     = reserved_mission_bin_26                # réservé J4
+global_bin[62]     = reserved_mission_bin_27                # réservé J4
+global_bin[63]     = reserved_mission_bin_28                # réservé J4
+global_bin[64]     = reserved_mission_bin_29                # réservé J4
+global_bin[65]     = reserved_mission_bin_30                # réservé J4
+global_bin[66]     = reserved_mission_bin_31                # réservé J4
+global_bin[67]     = reserved_mission_bin_32                # réservé J4
+global_bin[68]     = reserved_mission_bin_33                # réservé J4
+global_bin[69]     = reserved_mission_bin_34                # réservé J4
+global_bin[70]     = reserved_mission_bin_35                # réservé J4
+global_bin[71]     = reserved_mission_bin_36                # réservé J4
+global_bin[72]     = reserved_mission_bin_37                # réservé J4
+global_bin[73]     = reserved_mission_bin_38                # réservé J4
+global_bin[74]     = reserved_mission_bin_39                # réservé J4
+global_bin[75]     = reserved_mission_bin_40                # réservé J4
+global_bin[76]     = reserved_mission_bin_41                # réservé J4
+global_bin[77]     = reserved_mission_bin_42                # réservé J4
+global_bin[78]     = reserved_mission_bin_43                # réservé J4
+global_bin[79]     = reserved_mission_bin_44                # réservé J4
+global_bin[80]     = reserved_mission_bin_45                # réservé J4
+global_bin[81]     = reserved_mission_bin_46                # réservé J4
+global_bin[82]     = reserved_mission_bin_47                # réservé J4
 ```
 
 Les huit derniers bits sont les **capacites de FACTION** (chantier 03) : globales par construction,
@@ -380,6 +432,17 @@ decision_ctx_bin[5]      = decision_type_charge_placement    # 0.0 / 1.0 — pla
 decision_ctx_bin[6]      = decision_type_mortal_wounds_target      # 0.0 / 1.0 — cible des blessures mortelles (Exhortation de Rage)
 decision_ctx_bin[7]      = decision_type_returned_models_placement # 0.0 / 1.0 — placement des figurines rendues (Grot Orderly)
 decision_ctx_bin[8]      = decision_type_returned_models_profile   # 0.0 / 1.0 — profil des figurines rendues (Grot Orderly)
+# RÉSERVÉ J4 — AGENT_DECISION_TYPE_SLOTS 8→16 ; slots 9..16 nuls jusqu'à implémentation.
+# Candidats prévus : decision_type_fire_overwatch (§15.08), decision_type_heroic_intervention
+# (§15.11), decision_type_da_jump_target (Da Jump WeirdBoy). 5 slots de marge supplémentaires.
+decision_ctx_bin[9]      = decision_type_reserved_0    # réservé J4 (ex. fire_overwatch §15.08)
+decision_ctx_bin[10]     = decision_type_reserved_1    # réservé J4 (ex. heroic_intervention §15.11)
+decision_ctx_bin[11]     = decision_type_reserved_2    # réservé J4 (ex. da_jump_target)
+decision_ctx_bin[12]     = decision_type_reserved_3    # réservé J4
+decision_ctx_bin[13]     = decision_type_reserved_4    # réservé J4
+decision_ctx_bin[14]     = decision_type_reserved_5    # réservé J4
+decision_ctx_bin[15]     = decision_type_reserved_6    # réservé J4
+decision_ctx_bin[16]     = decision_type_reserved_7    # réservé J4
 
 decision_options_cont[c][0] = role_tier_norm                 # [0, 1] — ROLE_TIER / 4 (base=0, leader=1)
 decision_options_cont[c][1] = dist_enemy_norm                # [0, 1] — distance ennemi / (cols+rows) du plateau

@@ -771,12 +771,6 @@ GLOBAL_CONT_FIELDS: Tuple[str, ...] = (
     # qu'il ne percevait pas.
     "objective_distance_0", "objective_distance_1", "objective_distance_2",
     "objective_distance_3", "objective_distance_4",
-    # -----------------------------------------------------------------------
-    # RÉSERVÉ — missions primaires (J4). Slots volontairement nuls jusqu'à
-    # l'implémentation : obs_size gelé, --append possible depuis le champion.
-    # Capacité estimée : scoring par round, ratio VP primaire, round triggers.
-    # -----------------------------------------------------------------------
-    *tuple(f"reserved_mission_cont_{i}" for i in range(16)),
 )
 #: Phases du moteur, dans l'ordre FIGÉ du one-hot `phase_*` de `GLOBAL_BIN_FIELDS`. DOIT valoir
 #: `engine.action_decoder.GAME_PHASES` — verrouillé par test de contrat, comme
@@ -849,10 +843,15 @@ GLOBAL_BIN_FIELDS: Tuple[str, ...] = (
     # cible désignée change ce que je dois protéger. Aucun des deux ne se déduit de l'autre.
     "my_oath_wound_bonus_active", "enemy_oath_wound_bonus_active",
     # -----------------------------------------------------------------------
-    # RÉSERVÉ — missions primaires (J4). Type mission (one-hot), triggers
-    # par round, flags d'objectif scoring. Tous nuls jusqu'à l'implémentation.
+    # RÉSERVÉ — missions primaires (J4). global_bin est délibérément choisi
+    # (et non global_cont) : VecNormalize normalise UNIQUEMENT global_cont ;
+    # des slots toujours nuls y auraient une variance ≈ 0 → clipping à ±10.0
+    # au --append. Dans global_bin, les valeurs restent brutes — pas de risque.
+    # Capacité : type mission (one-hot ~5), triggers par round, flags objectif,
+    # VP primaire quantifié (ex. 6 niveaux → 6 bits par joueur). 48 slots
+    # couvrent largement ces besoins (estimation : ~35 bits réels).
     # -----------------------------------------------------------------------
-    *tuple(f"reserved_mission_bin_{i}" for i in range(32)),
+    *tuple(f"reserved_mission_bin_{i}" for i in range(48)),
 )
 GLOBAL_CONT_SIZE = len(GLOBAL_CONT_FIELDS)
 GLOBAL_BIN_SIZE = len(GLOBAL_BIN_FIELDS)
