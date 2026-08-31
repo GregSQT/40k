@@ -508,12 +508,15 @@ def test_expired_waaagh_decision_does_not_break_the_command_phase() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_squad_marked_used_even_when_cells_empty_at_apply_time() -> None:
-    """Finding 3 — si le board change entre pose et résolution de la décision, cells peut être
-    vide : le squad doit quand même entrer dans return_destroyed_models_used pour ne pas être
-    reposé en boucle.
+def test_squad_added_to_phase_skip_when_cells_empty_at_apply_time() -> None:
+    """Board changé entre pose et résolution de placement_decision : cells vide → skip temporaire.
 
-    ROUGE avant le fix : squad absente de return_destroyed_models_used → boucle _max_chain.
+    Le « once per battle » ne doit PAS être consommé (cohérent avec le chemin profile_decision
+    et mono-profil). L'escouade entre dans _grot_orderly_skipped_this_phase pour ne pas être
+    reposée en boucle dans la même phase de commandement.
+
+    ROUGE avant le fix : return_destroyed_models_used.add() était appelé inconditionnellement
+    (ligne 505 de l'original), consommant la capacité sans avoir rendu de figurine.
 
     Stratégie : plateau 1×1 ; le template occupe (0,0) — aucune case libre, plan retourne [].
     """
@@ -533,9 +536,12 @@ def test_squad_marked_used_even_when_cells_empty_at_apply_time() -> None:
 
     # Aucune figurine ajoutée (aucune case légale).
     assert len(gs["squad_models"][_SQUAD]) == before_count
-    # Mais l'escouade est quand même marquée comme traitée.
-    assert _SQUAD in gs.get("return_destroyed_models_used", set()), (
-        "squad doit être dans return_destroyed_models_used même sans pose de figurine"
+    # Skip temporaire posé — pas le once-per-battle.
+    assert _SQUAD in gs.get("_grot_orderly_skipped_this_phase", set()), (
+        "squad doit être dans _grot_orderly_skipped_this_phase pour bloquer le re-sweep"
+    )
+    assert _SQUAD not in gs.get("return_destroyed_models_used", set()), (
+        "le 'once per battle' ne doit pas être consommé quand aucune case n'est légale"
     )
 
 
