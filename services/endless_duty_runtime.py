@@ -709,7 +709,7 @@ def _replace_units_for_player(gs: Dict[str, Any], player: int, replacement_units
     opponent = 1 if int(player) == 2 else 2
     previous_value_at_start = dict(gs.get("value_at_start") or {})  # get allowed (1er appel)
     previous_models_at_start = dict(gs.get("model_count_at_start_by_player") or {})  # get allowed (1er appel)
-    opponent_unit_ids = {str(require_key(u, "id")) for u in gs["units"] if int(require_key(u, "player")) == opponent}
+    opponent_unit_ids = {str(require_key(u, "id")) for u in kept}
     previous_destroyed_models = {
         squad_id: models
         for squad_id, models in (gs.get("destroyed_models") or {}).items()
