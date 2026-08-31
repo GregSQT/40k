@@ -327,11 +327,11 @@ def test_suppress_target_pose_suppressed_squads() -> None:
     # Vérifier que la règle est bien reconnue
     assert unit_has_rule_effect(attacker, "suppress_target_on_shooting")
 
-    # Simuler la logique de _handle_shooting_end_activation
-    if unit_has_rule_effect(attacker, "suppress_target_on_shooting"):
-        _target_id = attacker.get("_last_shoot_target_id")
-        if _target_id is not None:
-            gs.setdefault("suppressed_squads", {})[str(_target_id)] = int(attacker["player"])
+    # Appeler la fonction de production (gating arg5==1, arg1==ACTION, arg3==SHOOTING exigés)
+    from engine.phase_handlers.shooting_handlers import (
+        ACTION, SHOOTING, _handle_shooting_end_activation,
+    )
+    _handle_shooting_end_activation(gs, attacker, ACTION, 1, SHOOTING, SHOOTING, 1)
 
     assert "tgt" in gs["suppressed_squads"]
     assert gs["suppressed_squads"]["tgt"] == 1
