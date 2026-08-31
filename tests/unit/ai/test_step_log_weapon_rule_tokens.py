@@ -781,7 +781,6 @@ def test_l_analyzer_compte_l_usage_de_twin_linked(monkeypatch, tmp_path):
     assert all(sum(v.values()) > 0 for v in usage.values()), usage
 
 
-
 # ─────────────────────────────────────────────────────────────────────────────
 # [MELTA X] 24.25 — le token n'atteignait PAS step.log
 #
