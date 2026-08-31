@@ -61,6 +61,7 @@ from tests.unit.engine._config_helpers import (
     ATTACHED_LEADER,
     ATTACHED_LEADER_RULE,
     ATTACHED_LEADER_RULES,
+    ATTACHED_LEADER_RULES_OBS,
     attached_scenario,
     load_engine_from_scenario,
 )
@@ -149,7 +150,7 @@ def test_attached_squad_rule_is_observed_then_extinguished_with_its_source():
     assert ATTACHED_BODYGUARD_RULE in union, "l'escouade a perdu sa propre regle au fold"
 
     before = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
-    assert before == {ATTACHED_BODYGUARD_RULE, *ATTACHED_LEADER_RULES}, (
+    assert before == {ATTACHED_BODYGUARD_RULE, *ATTACHED_LEADER_RULES_OBS}, (
         "l'observation doit porter les DEUX sources de l'union 19.04 — celle de l'escouade et "
         "celle du leader attache"
     )
@@ -181,7 +182,7 @@ def test_attached_squad_rule_is_observed_then_extinguished_with_its_source():
     # Le leader vit encore : l'unite existe, et c'est bien la SOURCE morte qui a disparu.
     assert eng.game_state["squad_models"]["101"], "le Chaplain attache doit survivre"
     after = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
-    assert after == set(ATTACHED_LEADER_RULES), (
+    assert after == set(ATTACHED_LEADER_RULES_OBS), (
         "la regle du bodyguard mort doit disparaitre, celle du Chaplain VIVANT doit rester — "
         "un bloc entierement vide prouverait un zerotage, pas 19.04"
     )
@@ -241,7 +242,7 @@ def test_composite_datasheet_abilities_are_captured_through_their_effects():
         "Warboss": {"hit_roll_bonus_fight"},
         "Bigboss": {"charge_roll_bonus"},
         "VanguardVeteranSquadJumpPack": {"deep_strike"},
-        "LandSpeederOnslaughtGatlingCannon": {"deep_strike"},
+        "LandSpeederOnslaughtGatlingCannon": {"deep_strike", "move_after_shooting"},
         "Gargoyle": {"move_after_shooting"},
         "Termagant": {"reactive_move"},
         "Neurogaunt": {"charge_after_advance"},

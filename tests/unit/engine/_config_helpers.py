@@ -364,13 +364,20 @@ def load_engine_from_scenario(scenario: Dict[str, Any], *, seed: int = 0, **over
 ATTACHED_LEADER_RULE = "deep_strike"
 ATTACHED_BODYGUARD_RULE = "charge_impact"
 
-#: TOUTES les capacités observables du leader de la fixture, et pas seulement celle que les tests
-#: 19.04 suivent. Depuis la passe 1 du chantier 06, le Chaplain porte aussi Litany of Hate
-#: (`wound_roll_bonus_fight`) : les assertions qui comparent l'ENSEMBLE des ids observés doivent
-#: donc lire cette liste, tandis que celles qui suivent UNE source gardent `ATTACHED_LEADER_RULE`.
-#: Écrite ici et pas dans le test : c'est la datasheet qui la fixe, et la prochaine capacité
-#: ajoutée au Chaplain doit avoir un seul endroit à toucher.
-ATTACHED_LEADER_RULES = frozenset({"deep_strike", "wound_roll_bonus_fight"})
+#: TOUTES les règles du leader de la fixture présentes en UNIT_RULES (hors `leader`, marqueur de
+#: rôle sans obs_id). Depuis la passe 1 du chantier 06, le Chaplain porte Litany of Hate
+#: (`wound_roll_bonus_fight`) ; depuis la passe 6, Exhortation de Rage
+#: (`mortal_wounds_on_fight_activation`). À lire dans les tests qui inspectent `unit["UNIT_RULES"]`
+#: directement (test_attached_units_abilities_19_04.py). Écrite ici et pas dans le test : c'est
+#: la datasheet qui la fixe, et la prochaine capacité ajoutée au Chaplain doit avoir un seul
+#: endroit à toucher.
+ATTACHED_LEADER_RULES = frozenset({"deep_strike", "wound_roll_bonus_fight", "mortal_wounds_on_fight_activation"})
+
+#: Sous-ensemble de `ATTACHED_LEADER_RULES` présent dans `UNIT_RULE_EFFECT_IDS`, donc visible
+#: dans l'observation. `mortal_wounds_on_fight_activation` a un obs_id dans unit_rules.json
+#: mais n'est pas encore dans le vocabulaire d'obs : l'observation ne peut pas la voir.
+#: À lire dans les tests qui lisent l'observation (test_squad_obs_unit_rules.py).
+ATTACHED_LEADER_RULES_OBS = frozenset({"deep_strike", "wound_roll_bonus_fight"})
 
 #: Escouade de 3 figurines : l'unité attachée en comptera 4 (le Chaplain replié).
 ATTACHED_BODYGUARD: Dict[str, Any] = {
