@@ -95,7 +95,12 @@ def _load(units: List[Dict[str, Any]]) -> W40KEngine:
 def _rule_ids(obs, family: str, row: int) -> set:
     """Capacites en vigueur sur un slot d'entite, relues depuis les `obs_id` ecrits."""
     by_obs_id = {obs_id: rule_id for rule_id, obs_id in unit_ability_obs_ids().items()}
-    return {by_obs_id[int(v)] for v in obs[f"{family}_ability_ids"][row] if int(v) != 0}
+    try:
+        return {by_obs_id[int(v)] for v in obs[f"{family}_ability_ids"][row] if int(v) != 0}
+    except KeyError as exc:
+        raise KeyError(
+            f"obs_id {exc} absent de unit_ability_obs_ids (family={family!r}, row={row})"
+        ) from exc
 
 
 #: Regle propre du BODYGUARD, telle que l'observation l'expose. `charge_impact` est un effet
@@ -301,6 +306,11 @@ def test_real_training_roster_writes_the_expected_id():
         if terminated or truncated:
             obs, _ = eng.reset()
         assert obs is not None
+    else:
+        raise AssertionError(
+            "budget 400 pas epuise sans trouver cp_gain_on_objective hors deploiement "
+            "— augmenter la limite ou verifier que le roster ORK contient Gretchin"
+        )
 
     # Le bloc ENNEMI, et lui seul. En phase de deploiement les unites amies ne sont
     # pas encore posees, donc `allies_ability_ids` est INTEGRALEMENT nul (mesure : 0 valeur non
