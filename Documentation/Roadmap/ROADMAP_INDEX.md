@@ -137,6 +137,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) | 🚫 |
 | bot | Tranches 2-3 benchmark — schedule P0→P10 + exploiters : code et tests livrés 2026-08-22 (`--etape`, `curriculum.json`, pool figé par-env, `ExploiterProbeCallback` sondage synchrone + `validate_exploiter_protocol` + `exploiter_config`, 24 tests verrou) ; restent les 14 runs (~260 h) | [bot.md#league](bot.md#league) | 🚫 |
 | tous | ✅ lots 2026-08-30/31 — capacités 06, moteur, analyzer, front, hygiène (voir git log + archives) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) [moteur.md](moteur.md) [analyzer.md](analyzer.md) [front.md](front.md) | ⚡ |
+| infra | ✅ **Couche demo_names (2026-08-31)** — substitution noms d'affichage à la sortie API via `DEMO_MODE=1` + `config/demo_overrides.json` ; moteur interne inchangé | — | ⚡ |
 
 ---
 
