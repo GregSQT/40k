@@ -233,13 +233,10 @@ def test_attaquant_detruit_par_deadly_demise_pas_de_crash(monkeypatch):
         # Simule la cascade Deadly Demise : retire l'attaquant de units_cache.
         gs["units_cache"].pop("CHAP", None)
 
-    def _fake_settle(self_engine):
-        settle_called.append(True)
-
     monkeypatch.setattr(su, "allocate_mortal_wounds", _fake_allocate_destroys_attacker)
 
     engine = _FakeEngine(_gs())
-    engine._fight_v11_gym_settle = lambda: _fake_settle(engine)
+    engine._fight_v11_gym_settle = lambda: settle_called.append(True)
 
     # D6=4, cible unique → chemin auto (_apply_exhortation_de_rage direct).
     rolls = iter([4, 2])

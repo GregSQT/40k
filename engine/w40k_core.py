@@ -5993,7 +5993,8 @@ class W40KEngine(gym.Env):
     ) -> Tuple[bool, Dict[str, Any]]:
         from engine.phase_handlers.shared_utils import allocate_mortal_wounds
         from engine.action_log_utils import append_action_log
-        player = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
+        units_cache = require_key(self.game_state, "units_cache")
+        player = int(require_key(units_cache[squad_id], "player"))
         _exhort_details: List[Dict[str, Any]] = []
         suffix = " [auto: cible unique]" if auto else ""
         append_action_log(self.game_state, {
@@ -6013,7 +6014,7 @@ class W40KEngine(gym.Env):
         allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
         # §24.08 Deadly Demise : la cascade peut tuer l'attaquant lui-même (engagé à ≤6").
         # Si squad_id a disparu de units_cache, son combat ne peut pas se poursuivre.
-        if squad_id not in require_key(self.game_state, "units_cache"):
+        if squad_id not in units_cache:
             self._fight_v11_gym_settle()
             return True, {
                 "action": "squad_fight",
