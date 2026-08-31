@@ -450,20 +450,33 @@ def load_analyzer_config() -> AnalyzerConfig:
                     raise ValueError(
                         f"Unit '{unit_type}' rule '{direct_rule_id}' must define rule_args for move_after_shooting"
                     )
-                if "distance" not in rule_args:
+                _DICE_MAX: Dict[str, int] = {
+                    "D3": 3, "D6": 6, "2D6": 12, "D6+1": 7, "D6+2": 8, "D6+3": 9,
+                }
+                if "distance" in rule_args:
+                    move_after_shooting_distance = rule_args["distance"]
+                    if not isinstance(move_after_shooting_distance, int):
+                        raise TypeError(
+                            f"Unit '{unit_type}' rule '{direct_rule_id}' rule_args.distance must be int, "
+                            f"got {type(move_after_shooting_distance).__name__}"
+                        )
+                    if move_after_shooting_distance <= 0:
+                        raise ValueError(
+                            f"Unit '{unit_type}' rule '{direct_rule_id}' rule_args.distance must be > 0, "
+                            f"got {move_after_shooting_distance}"
+                        )
+                elif "distance_dice" in rule_args:
+                    dice_spec = rule_args["distance_dice"]
+                    if dice_spec not in _DICE_MAX:
+                        raise ValueError(
+                            f"Unit '{unit_type}' rule '{direct_rule_id}' rule_args.distance_dice "
+                            f"'{dice_spec}' is not a supported dice expression"
+                        )
+                    move_after_shooting_distance = _DICE_MAX[dice_spec]
+                else:
                     raise ValueError(
-                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing rule_args.distance for move_after_shooting"
-                    )
-                move_after_shooting_distance = rule_args["distance"]
-                if not isinstance(move_after_shooting_distance, int):
-                    raise TypeError(
-                        f"Unit '{unit_type}' rule '{direct_rule_id}' rule_args.distance must be int, "
-                        f"got {type(move_after_shooting_distance).__name__}"
-                    )
-                if move_after_shooting_distance <= 0:
-                    raise ValueError(
-                        f"Unit '{unit_type}' rule '{direct_rule_id}' rule_args.distance must be > 0, "
-                        f"got {move_after_shooting_distance}"
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing rule_args.distance (int) "
+                        f"or rule_args.distance_dice (str) for move_after_shooting"
                     )
                 existing_distance = unit_move_after_shooting_distance_by_type.get(unit_type)
                 if existing_distance is not None and existing_distance != move_after_shooting_distance:
