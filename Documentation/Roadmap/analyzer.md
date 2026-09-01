@@ -17,7 +17,12 @@ Nouveau `unit_ability_attack_cap` (`analyzer_perfig.py`), jumeau INVERSE de `per
 
 Verrous : `test_analyzer_unit_ability_attached_19_04.py`, `test_analyzer_hail_of_bolts.py`.
 
-**Reste ouvert** : 1935 `surcharge_atk` de cause DIFFÉRENTE — armes à [SUSTAINED HITS] (Heavy Bolter, Blitzcannon). Piste : le gate `is_sustained_hit_line` qui doit exclure du comptage les lignes de touche additionnelle. Non diagnostiqué.
+**✅ LIVRÉ (2026-09-02) — 1935 → 0 `surcharge_atk` restants** : deux capacités Primitive B absentes de `max_allowed_shots` :
+
+3. **`weapon_attacks_bonus_vs_keyword` (Dakkablitz / BigMekDakkarig)** — +6 A au Blitzcannon si cible hors MONSTER/VEHICLE. `excluded_keywords` absent du registre JSON (tableau TS silencieusement ignoré par le parseur). Fix : `unit_registry.py` parse désormais les tableaux de chaînes dans `rule_args`. Nouveau `unit_ability_atk_bonus_vs_keyword_cap` dans `analyzer_perfig.py`.
+4. **`grant_weapon_rule_vs_designated_target` (Overlapping Detonations / EradicatorHeavyBolter×2+Sergent)** — +`target_size//5` A au Heavy Bolter vs non-MONSTER/VEHICLE. Nouveau `unit_blast_per5_nonmv_bonus` dans `analyzer_perfig.py`. `unit_upper_keywords_by_type` ajouté à `AnalyzerConfig` pour vérifier les mots-clés de la cible.
+
+Verrous : `test_analyzer_dakkablitz.py` (4 verts), `test_analyzer_overlapping_detonations.py` (6 verts).
 
 ---
 
