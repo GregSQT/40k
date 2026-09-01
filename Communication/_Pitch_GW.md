@@ -40,19 +40,7 @@ The design principle is consistent: **the application does the arithmetic; the p
 
 > **Note on the board model.** The battlefield uses a fine hexagonal grid rather than free measurement, a deliberate engineering choice that bounds the state space for reinforcement-learning training. The resolution is calibrated at **1 inch = 5 hexes**, keeping positional error well below one inch so that ranges, charges, and engagement distances remain faithful to tabletop measurement while staying tractable for the AI.
 
-## 3. Value for Games Workshop
-
-**List-testing before purchase.** Players build and play a list before buying and painting it, validating purchases in play rather than abandoning them after one game.
-
-**Tournament training.** Competitive players rehearse matchups, deployments, and sequencing far more often than physical play allows, strengthening the organised-play ecosystem.
-
-**Reduced game length.** A full game runs in roughly **one hour** versus **three to four** physically, because measurement, range-checking, and dice handling are automated. More games played means more rules learned and more reasons to stay engaged.
-
-**New-player acquisition.** The engine enforces the rules, so newcomers learn correctly by playing, not by reading the rules or asking someone else. This lowers the single largest barrier to entry and creates a funnel toward the physical product.
-
-The net effect: more games played per player, faster rules mastery, and de-risked miniature purchases — supporting physical sales rather than cannibalising them.
-
-## 4. Project Status
+## 3. Project Status
 
 - **PvP — functional.** Complete human-versus-human games are playable end to end, with the full four-phase core loop.
 - **AI — in development.** A reinforcement-learning opponent (MaskablePPO, with action masking, parallel environment training, and evaluation against scripted bots) is being trained for solo play and sparring.
@@ -62,8 +50,44 @@ The net effect: more games played per player, faster rules mastery, and de-riske
 
 Stratagems are not yet in the engine.
 
-## 5. Proposal
+## 4. Industry Precedent: MTG Arena
 
-The project is fully functional and actively expanding — additional game modes, deeper faction coverage, and campaign content are already in progress. An official collaboration would be mutually beneficial: Games Workshop gains a controlled, rules-accurate digital tool that drives newcomer engagement and miniature sales; the project gains official sanction, access to authoritative rules data, and legitimacy with the player base.
+Wizards of the Coast faced the same apparent dilemma when launching MTG Arena in 2018: how do you digitise a business whose economic foundation is a physical collectible product without cannibalising it?
+
+The answer turned out to be the opposite of cannibalisation. Arena now has more than **17 million registered players**. Over the same period, Magic's physical organised-play network grew from roughly 6,000 stores to more than **10,000 active WPN stores**, and physical organised play reached more than **one million unique participants** in a single year. Both channels grew simultaneously.
+
+The single most commercially significant figure Hasbro has published is this: players who engage with both tabletop Magic and Arena spend approximately **40% more** than the average Magic player. The digital platform did not redirect spending away from physical product — it increased total engagement and total spend per customer.
+
+**Warhammer has more friction than Magic, not less.** A casual game of Magic requires two decks and a table. A casual game of Warhammer 40,000 requires an army, a painted board, terrain, a second player, and several hours. Every one of those barriers has a direct digital equivalent that a virtual platform removes. If a moderate friction reduction drove +40% hybrid spend in Magic, the effect for Warhammer — starting from a higher friction baseline — should be at least as large.
+
+## 5. Value for Games Workshop
+
+**Two customers, not one.** The platform serves players directly, and simultaneously serves Games Workshop as a game-development tool.
+
+*For players:*
+
+**List-testing before purchase.** Players build and try a list digitally before buying and painting the models — validating purchases rather than abandoning them after one game.
+
+**Tournament training.** Competitive players rehearse matchups, deployments, and sequencing far more than physical play allows, deepening engagement with the organised-play ecosystem.
+
+**Reduced game length.** A full game runs in roughly **one hour** versus three to four physically. More games played means faster rules mastery and stronger attachment to a faction.
+
+**New-player acquisition.** The engine enforces the rules, so newcomers learn by playing rather than by reading. This removes the single largest barrier to entry and feeds new customers toward physical product.
+
+*For Games Workshop:*
+
+**AI-powered play design.** The reinforcement-learning engine can run thousands of games per hour against itself, producing matchup win-rates, first-player advantage data, and outlier unit performance across any combination of rosters — before a dataslate is published, not after. This is something MTG Arena does not provide to Wizards at this scale: simulation data ahead of publication, not only reaction data after it.
+
+The resulting cycle: design → AI simulation → targeted human playtest → refined publication → real-world data → informed dataslate. Every step is faster and better evidenced than physical playtesting alone can achieve.
+
+*Financial framing:*
+
+Games Workshop's core revenue for FY2025/26 stands at **£626.8 million**, with 890,000 active My Warhammer users already on platform. Applying the Magic hybrid-spend benchmark conservatively — assuming 25% of customers become hybrid users with a +20% spend increase — implies roughly **£31 million of additional annual core revenue**. Even the most cautious scenario (10% of customers, +10% spend) implies +£6 million. These are sensitivity estimates, not forecasts; the point is that the lever is large relative to the cost of creating it.
+
+The net effect: more games played per player, faster rules mastery, de-risked miniature purchases, and a continuous AI-assisted feedback loop for GW's own game design — all supporting physical sales rather than competing with them.
+
+## 6. Proposal
+
+The project's core is fully functional and actively expanding — additional game modes, deeper faction coverage, and campaign content are already in progress. An official collaboration would be mutually beneficial: Games Workshop gains a controlled, rules-accurate digital platform that drives newcomer engagement and miniature sales while providing AI-assisted game-design data; the project gains official sanction, access to authoritative rules data, and legitimacy with the player base.
 
 We are open to discussing a licensing arrangement covering use of the Warhammer 40,000 intellectual property and rules content, and would welcome an initial conversation to explore terms.
