@@ -66,19 +66,18 @@ def _grantable_per_carrier(stats: Dict[str, Any]) -> Dict[str, Set[str]]:
     SUSTAINED_HITS sur une autre arme/unité est légitimement accordé.
     """
     rule_to_units_map = stats.get('rule_to_units', {})
-    unit_types_seen = set(stats.get('unit_types_seen', set()))
-    result: Dict[str, Set[str]] = {}
-    for ability, weapon_rule in _GRANT_ABILITY_TO_WEAPON_RULE.items():
-        granting = rule_to_units_map.get(ability, set()) & unit_types_seen
-        if granting:
-            result[weapon_rule] = granting
-    return result
+    unit_types_seen = stats.get('unit_types_seen', set())
+    return {
+        weapon_rule: granting
+        for ability, weapon_rule in _GRANT_ABILITY_TO_WEAPON_RULE.items()
+        if (granting := rule_to_units_map.get(ability, set()) & unit_types_seen)
+    }
 
 
 def _pair_is_conditional(rule_name: str, weapon_key: str, grantable: Dict[str, Set[str]]) -> bool:
     """True ssi le porteur de weapon_key possède l'ability qui accorde rule_name dynamiquement."""
     granting_units = grantable.get(rule_name.upper(), set())
-    return any(weapon_key.endswith(f" ({ut})") for ut in granting_units)
+    return weapon_key.endswith(tuple(f" ({ut})" for ut in granting_units))
 
 
 def _compute_weapon_rule_not_used_warnings(stats: Dict[str, Any]) -> int:
@@ -1491,6 +1490,7 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
         for field in ('out_of_range', 'engaged_non_close_quarters')
     )
     _grantable = _grantable_per_carrier(stats)
+    weapon_rule_to_weapons = require_key(stats, 'weapon_rule_to_weapons')
     buckets = {
         # §1.1 — les six déplacements de la phase de Mouvement, plus le move réactif.
         'move': (
@@ -1622,8 +1622,8 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
         ),
         'weapon_rules_invalid': sum(
             1 for (rule_name, weapon_key) in require_key(stats, 'weapon_rule_usage')
-            if (rule_name not in stats['weapon_rule_to_weapons']
-                or weapon_key not in stats['weapon_rule_to_weapons'][rule_name])
+            if (rule_name not in weapon_rule_to_weapons
+                or weapon_key not in weapon_rule_to_weapons[rule_name])
             and not _pair_is_conditional(rule_name, weapon_key, _grantable)
         ),
         'episodes_ending': len(stats['episodes_without_end']) + len(stats['episodes_without_method']),

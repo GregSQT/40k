@@ -119,16 +119,20 @@ def test_error_totals_weapon_rules_invalid_excludes_conditional(tmp_path):
     )
 
 
-def test_cross_pair_contamination_error_totals(tmp_path):
-    """Bigboss dans le run ne doit pas exempter SUSTAINED_HITS sur une autre unité sans l'ability."""
+_CROSS_PAIR = ("SUSTAINED_HITS", "Astartes Chainsword (AssaultIntercessor)")
+
+
+def _stats_with_cross_pair(tmp_path):
     stats, _ = _parse_and_render(tmp_path)
     assert "Bigboss" in stats["unit_types_seen"]
-    # Simuler un bug moteur : AssaultIntercessor (sans grant_weapon_rule_melee) génère SUSTAINED_HITS.
-    other_pair = ("SUSTAINED_HITS", "Astartes Chainsword (AssaultIntercessor)")
-    stats["weapon_rule_usage"][other_pair] = {1: 0, 2: 1}
-    # Prémisse : non déclaré statiquement.
-    assert "Astartes Chainsword (AssaultIntercessor)" not in stats.get("weapon_rule_to_weapons", {}).get("SUSTAINED_HITS", set())
-    # AssaultIntercessor n'a pas l'ability → cette paire est un vrai INVALID.
+    stats["weapon_rule_usage"][_CROSS_PAIR] = {1: 0, 2: 1}
+    assert _CROSS_PAIR[1] not in stats.get("weapon_rule_to_weapons", {}).get("SUSTAINED_HITS", set())
+    return stats
+
+
+def test_cross_pair_contamination_error_totals(tmp_path):
+    """Bigboss dans le run ne doit pas exempter SUSTAINED_HITS sur une autre unité sans l'ability."""
+    stats = _stats_with_cross_pair(tmp_path)
     totals = an.error_totals(stats)
     assert totals["weapon_rules_invalid"] == 1, (
         f"weapon_rules_invalid={totals['weapon_rules_invalid']} : "
@@ -138,10 +142,7 @@ def test_cross_pair_contamination_error_totals(tmp_path):
 
 def test_cross_pair_contamination_section_1_8(tmp_path):
     """§1.8 affiche INVALID (pas CONDITIONAL) pour une paire sans ability dynamique."""
-    stats, _ = _parse_and_render(tmp_path)
-    assert "Bigboss" in stats["unit_types_seen"]
-    other_pair = ("SUSTAINED_HITS", "Astartes Chainsword (AssaultIntercessor)")
-    stats["weapon_rule_usage"][other_pair] = {1: 0, 2: 1}
+    stats = _stats_with_cross_pair(tmp_path)
     lines: list[str] = []
     an.print_statistics(stats, debug_section_filter="1.8", output_lines=lines, emit_console=False)
     chainsword_sustained = [
