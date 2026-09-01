@@ -453,7 +453,6 @@ def handle_shoot(
                 if rapid_fire_value is None:
                     rapid_fire_value = 0
                 rapid_fire_match = re.search(r'\[RAPID(?: |_)?FIRE:(\d+)\]', action_desc, re.IGNORECASE)
-                rapid_fire_bonus_for_this_shot = 0
                 if rapid_fire_match:
                     rapid_fire_logged_value = int(rapid_fire_match.group(1))
                     if rapid_fire_value <= 0:
@@ -478,8 +477,6 @@ def handle_shoot(
                                 f"log={rapid_fire_logged_value}, expected={rapid_fire_value}"
                             )
                         })
-                    else:
-                        rapid_fire_bonus_for_this_shot = rapid_fire_value
                 combi_key = None
                 if shooter_unit_type in config.unit_combi_by_weapon:
                     combi_by_weapon = config.unit_combi_by_weapon[shooter_unit_type]
@@ -618,9 +615,7 @@ def handle_shoot(
                     stats['blast_x_mismatch'][shooter_player_for_stats] += 1
                     if stats['first_error_lines']['blast_x_mismatch'][shooter_player_for_stats] is None:
                         stats['first_error_lines']['blast_x_mismatch'][shooter_player_for_stats] = {'episode': state.current_episode_num, 'line': line.strip()}
-                max_allowed_shots = rng_nb_squad + blast_dice + (
-                    rapid_fire_value_squad if rapid_fire_bonus_for_this_shot > 0 else 0
-                )
+                max_allowed_shots = rng_nb_squad + blast_dice + rapid_fire_value_squad
                 if state.shot_sequence_counts[seq_key] > max_allowed_shots:
                     stats['shoot_over_rng_nb'][shooter_player_for_stats] += 1
                     if stats['first_error_lines']['shoot_over_rng_nb'][shooter_player_for_stats] is None:
