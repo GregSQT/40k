@@ -211,6 +211,8 @@ def analyzer_config(**overrides: Any) -> AnalyzerConfig:
         "max_turns": 0,
         # Comportement 10e par défaut ; 0 = pas de cap.
         "bonus_malus_cap": 0,
+        # Bonus d'attaques de Finest Hour (once_per_battle_melee_buff) par type ; vide par défaut.
+        "once_per_battle_melee_bonus_by_type": {},
     }
     unknown = set(overrides) - set(fields)
     if unknown:

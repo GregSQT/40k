@@ -231,6 +231,10 @@ class AnalyzerConfig:
     max_turns: int
     #: Cap sur le total des modificateurs de jet (0 = pas de cap, comportement 10e).
     bonus_malus_cap: int
+    #: `attacks_bonus` de `once_per_battle_melee_buff` (Finest Hour) par type d'unité porteur.
+    #: Absent = 0 (unité sans la règle). Lu dans `_cc_cap_for_line` quand `[FINEST HOUR]` est
+    #: présent sur la ligne, pour lever le plafond du bon montant sans re-dériver la règle.
+    once_per_battle_melee_bonus_by_type: Dict[str, int]
 
 
 def load_analyzer_config() -> AnalyzerConfig:
@@ -283,6 +287,7 @@ def load_analyzer_config() -> AnalyzerConfig:
     unit_combi_by_weapon: Dict[str, Dict] = {}
     unit_rules_by_type: Dict[str, Set[str]] = {}
     unit_move_after_shooting_distance_by_type: Dict[str, int] = {}
+    once_per_battle_melee_bonus_by_type: Dict[str, int] = {}
     unit_is_fly_by_type: Dict[str, bool] = {}
     unit_is_monster_or_vehicle_by_type: Dict[str, bool] = {}
     unit_socle_by_type: Dict[str, Any] = {}
@@ -508,6 +513,26 @@ def load_analyzer_config() -> AnalyzerConfig:
                         f"{existing_distance} vs {scaled_distance}"
                     )
                 unit_move_after_shooting_distance_by_type[unit_type] = scaled_distance
+            if "once_per_battle_melee_buff" in rule_effect_ids:
+                _buff_args = rule.get("rule_args")
+                if not isinstance(_buff_args, dict):
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' must define rule_args "
+                        f"for once_per_battle_melee_buff"
+                    )
+                if "attacks_bonus" not in _buff_args:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
+                        f"rule_args.attacks_bonus for once_per_battle_melee_buff"
+                    )
+                _fh_bonus_val = int(_buff_args["attacks_bonus"])
+                _existing = once_per_battle_melee_bonus_by_type.get(unit_type)
+                if _existing is not None and _existing != _fh_bonus_val:
+                    raise ValueError(
+                        f"Unit '{unit_type}' has conflicting once_per_battle_melee_buff bonuses: "
+                        f"{_existing} vs {_fh_bonus_val}"
+                    )
+                once_per_battle_melee_bonus_by_type[unit_type] = _fh_bonus_val
         unit_rules_by_type[unit_type] = expanded_rule_ids
         unit_choice_effect_to_source_rules[unit_type] = choice_effect_to_source_rules_for_unit
 
@@ -613,4 +638,5 @@ def load_analyzer_config() -> AnalyzerConfig:
         weapon_is_close_quarters_global=weapon_is_close_quarters_global,
         max_turns=config_loader.get_max_turns(),
         bonus_malus_cap=config_loader.get_bonus_malus_cap(),
+        once_per_battle_melee_bonus_by_type=once_per_battle_melee_bonus_by_type,
     )

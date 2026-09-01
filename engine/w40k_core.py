@@ -6587,6 +6587,9 @@ class W40KEngine(gym.Env):
         # Pose uniquement en combat (ctx.log_type == "combat") par _emit_squad_shoot_log.
         if raw_log.get("fightsFirst"):  # get allowed
             details["fights_first"] = True
+        # L15 — [FINEST HOUR] once_per_battle_melee_buff : Finest Hour actif cette phase pour cet attaquant.
+        if raw_log.get("finestHour"):  # get allowed
+            details["finest_hour"] = True
         # Effectif de la cible au Select Targets step (voir `targetAliveCount` dans l'émetteur).
         # Porté sur TOUTES les lignes du groupe pour que l'analyzer puisse le lire à n'importe
         # quelle position de l'activation.
