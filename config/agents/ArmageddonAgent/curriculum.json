@@ -94,6 +94,7 @@
     "P3": {
       "role": "learner",
       "init": "from:P00",
+      "warmup_episodes": 0,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
       "ratio_end": 0.70,
@@ -124,6 +125,7 @@
     "P4": {
       "role": "learner",
       "init": "from:P00",
+      "warmup_episodes": 0,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
       "ratio_end": 0.75,
@@ -143,6 +145,7 @@
     "P5": {
       "role": "learner",
       "init": "from:P00",
+      "warmup_episodes": 0,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
       "ratio_end": 0.80,
@@ -174,6 +177,7 @@
     "P6": {
       "role": "learner",
       "init": "from:P00",
+      "warmup_episodes": 0,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
       "ratio_end": 0.80,
@@ -193,6 +197,7 @@
     "P7": {
       "role": "learner",
       "init": "from:P00",
+      "warmup_episodes": 0,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
       "ratio_end": 0.85,
@@ -212,6 +217,7 @@
     "P8": {
       "role": "learner",
       "init": "from:P00",
+      "warmup_episodes": 0,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
       "ratio_end": 0.85,
@@ -243,6 +249,7 @@
     "P9": {
       "role": "learner",
       "init": "from:P00",
+      "warmup_episodes": 0,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
       "ratio_end": 0.85,
@@ -262,6 +269,7 @@
     "P10": {
       "role": "learner",
       "init": "from:P00",
+      "warmup_episodes": 0,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
       "ratio_end": 0.85,
