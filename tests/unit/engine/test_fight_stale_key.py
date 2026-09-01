@@ -221,6 +221,19 @@ class TestAttackerPreCapture:
         with pytest.raises(ConfigurationError):
             build_manual_fight_allocation(gs, "1")
 
+    def test_attacker_absent_empty_intents_raises_configuration_error(self):
+        """precap_empty_loop : pré-capture lève ConfigurationError même boucle vide (intents={}).
+
+        Sans pré-capture, la boucle ne tourne pas → aucune erreur. Avec pré-capture (fix),
+        require_key(units_cache, attacker_squad_id) est appelé avant la boucle → ConfigurationError.
+        Ce cas prouve que la garde est hors boucle, pas à l'intérieur.
+        """
+        gs = _fight_gs()
+        gs["pending_squad_fight_intents"] = {}
+        del gs["units_cache"]["1"]
+        with pytest.raises(ConfigurationError):
+            build_manual_fight_allocation(gs, "1")
+
     def test_normal_allocation_completes(self, monkeypatch):
         """precap_normal : allocation complète avec attaquant présent → pas d'erreur."""
         monkeypatch.setattr(random, "randint", lambda a, b: 4)
