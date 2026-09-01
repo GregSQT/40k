@@ -275,21 +275,6 @@ class ConfigLoader:
             raise ValueError(f"Aucune phase après {from_phase!r} (dernière de l'ordre)")
         return _order[_idx + 1]
 
-    def get_reward_value(self, unit_type: str, action: str) -> float:
-        """Get specific reward value - raises error if missing."""
-        rewards_config = self.load_rewards_config(unit_type)
-        
-        if unit_type not in rewards_config:
-            available_types = list(rewards_config.keys())
-            raise KeyError(f"Unit type '{unit_type}' not found in rewards config. Available: {available_types}")
-        
-        unit_rewards = rewards_config[unit_type]
-        if action not in unit_rewards:
-            available_actions = list(unit_rewards.keys())
-            raise KeyError(f"Action '{action}' not found for unit type '{unit_type}'. Available: {available_actions}")
-        
-        return unit_rewards[action]    
-    
     def get_max_history(self, training_config_name: str = "default") -> int:
         """Get max history for state management - raises error if missing."""
         full_config = self.load_config("training_config", force_reload=False)
@@ -886,33 +871,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"❌ Config loading failed: {e}")
 
-def get_reward_value(self, unit_type: str, action: str, rewards_config_name: str) -> float:
-    """Get specific reward value - raises error if missing."""
-    rewards_config = self.load_rewards_config(rewards_config_name)
-    
-    if unit_type not in rewards_config:
-        available_types = list(rewards_config.keys())
-        raise KeyError(f"Unit type '{unit_type}' not found in rewards config '{rewards_config_name}'. Available: {available_types}")
-    
-    unit_rewards = rewards_config[unit_type]
-    if action not in unit_rewards:
-        available_actions = list(unit_rewards.keys())
-        raise KeyError(f"Action '{action}' not found for unit '{unit_type}' in rewards config '{rewards_config_name}'. Available: {available_actions}")
-    
-    return unit_rewards[action]
-
-def get_ai_behavior_config(self) -> dict:
-    """Get AI behavior configuration with fallbacks."""
-    try:
-        game_config = self.get_game_config()
-        return game_config.get("ai_behavior", {
-            "timeout_ms": 5000,
-            "retries": 3,
-            "fallback_action": "wait"
-        })
-    except (KeyError, FileNotFoundError):
-        return {
-            "timeout_ms": 5000,
-            "retries": 3,
-            "fallback_action": "wait"
-        }

@@ -725,11 +725,9 @@ def _count_units_from_roster_scenario(scenario_data: Dict[str, Any], scenario_fi
                 return 0
             max_count = 0
             for rf in roster_files:
-                try:
-                    rd = json.load(open(rf))
-                    max_count = max(max_count, _roster_model_count(rd))
-                except Exception:
-                    pass
+                with open(rf) as fh:
+                    rd = json.load(fh)
+                max_count = max(max_count, _roster_model_count(rd))
             return max_count
         else:
             parts_ref = ref_stripped.split("/")
@@ -740,11 +738,9 @@ def _count_units_from_roster_scenario(scenario_data: Dict[str, Any], scenario_fi
                 roster_path = project_root / "config" / "agents" / "_p2_rosters" / scale_name / ref_stripped
             if not roster_path.exists():
                 return 0
-            try:
-                rd = json.load(open(roster_path))
-                return _roster_model_count(rd)
-            except Exception:
-                return 0
+            with open(roster_path) as fh:
+                rd = json.load(fh)
+            return _roster_model_count(rd)
 
     agent_ref = require_key(scenario_data, "agent_roster_ref")
     opponent_ref = require_key(scenario_data, "opponent_roster_ref")
