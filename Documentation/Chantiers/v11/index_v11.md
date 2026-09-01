@@ -3114,6 +3114,10 @@ le run multi-env, pas le smoke, qui a validé.
   (2026-07-21).** Non consommés par le training actuel (2 rosters fixes, [§10.2](strategie_evaluation.md#s10.2)), mais **conservés
   volontairement** : un holdout à armées **générées** est prévu **après la démo**. La clé est en
   attente d'usage, pas morte. **Ne pas supprimer ni la clé ni le script.**
+- **§0.19 — conformité T2→T5 vérifiable par lecture seule (assumé depuis 2026-07-29).** Les ✅
+  de T2→T5 dans [`tranches_et_ruptures.md`](tranches_et_ruptures.md) ont été posés par lecture du code, sans
+  ré-exécution. La conformité littérale de T2 est indécidable (migration structurelle, aucun test
+  ne peut la capturer complètement). Ce niveau de preuve est assumé. **Ne pas rouvrir.**
 
 ---
 
