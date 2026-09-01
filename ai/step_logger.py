@@ -1588,6 +1588,9 @@ class StepLogger:
                 _waaagh_seg += f" [TARGET_DECL:{int(_tgt_alive)}]"
             # L14 — [FIGHTS FIRST] 24.13 : l'unité a chargé ce tour.
             _fights_first_seg = " [FIGHTS FIRST]" if details.get("fights_first") else ""
+            # L15 — [FINEST HOUR] once_per_battle_melee_buff : sur CHAQUE attaque pour que l'analyzer
+            # lève le plafond par ligne sans état inter-lignes.
+            _fights_first_seg += " [FINEST HOUR]" if details.get("finest_hour") else ""
             if weapon_name:
                 base_msg = f"{unit_label} FOUGHT{_waaagh_seg} {target_label} with [{weapon_name}]{_fights_first_seg}"
             else:

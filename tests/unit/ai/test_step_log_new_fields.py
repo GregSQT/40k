@@ -76,6 +76,42 @@ def test_l14_fights_first_with_weapon() -> None:
     assert "Chainsword" in msg
 
 
+# ── L15 ─────────────────────────────────────────────────────────────────────
+
+
+def test_l15_finest_hour_appended_when_present() -> None:
+    logger = StepLogger(enabled=False)
+    msg = logger._format_replay_style_message(
+        1, "combat", _base_combat_details(finest_hour=True)
+    )
+    assert "[FINEST HOUR]" in msg
+    assert "FOUGHT" in msg
+
+
+def test_l15_finest_hour_absent_when_false() -> None:
+    logger = StepLogger(enabled=False)
+    msg = logger._format_replay_style_message(
+        1, "combat", _base_combat_details(finest_hour=False)
+    )
+    assert "[FINEST HOUR]" not in msg
+
+
+def test_l15_finest_hour_absent_when_not_in_details() -> None:
+    logger = StepLogger(enabled=False)
+    msg = logger._format_replay_style_message(1, "combat", _base_combat_details())
+    assert "[FINEST HOUR]" not in msg
+
+
+def test_l15_finest_hour_with_fights_first() -> None:
+    """Les deux tokens peuvent coexister sur la même ligne."""
+    logger = StepLogger(enabled=False)
+    msg = logger._format_replay_style_message(
+        1, "combat", _base_combat_details(fights_first=True, finest_hour=True, weapon_name="Power Fist")
+    )
+    assert "[FIGHTS FIRST]" in msg
+    assert "[FINEST HOUR]" in msg
+
+
 # ── L19 ─────────────────────────────────────────────────────────────────────
 
 

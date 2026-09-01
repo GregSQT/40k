@@ -9578,6 +9578,13 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
             atk_unit is not None
             and str(require_key(atk_unit, "id")) in {str(uid) for uid in game_state.get("units_charged", [])}
         ) if ctx.log_type == "combat" else None,
+        # L15 — [FINEST HOUR] once_per_battle_melee_buff : l'escouade a declenche Finest Hour cette
+        # phase. Lu de `finest_hour_active_this_phase` pose par le roller fight a chaque activation ;
+        # le token figure sur CHAQUE dé d'une telle activation pour que l'analyzer puisse lever le
+        # plafond par attaque individuelle, sans etat inter-lignes.
+        "finestHour": (
+            attacker_squad_id_str in game_state.get("finest_hour_active_this_phase", set())
+        ) if ctx.log_type == "combat" else None,
         "targetId": target_sid_g,
         "weaponName": weapon_name_g if weapon_name_g else None,
         "targetUnitType": tgt_unit_type_g,

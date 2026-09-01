@@ -55,6 +55,21 @@ def _cc_cap_for_line(
         config.unit_attack_limits, "cc_nb_by_weapon", config.cc_nb_by_weapon_global,
         cc_nb_squad_type, n_fighter_models, waaagh_bonus,
     )
+    # [FINEST HOUR] once_per_battle_melee_buff : la règle est portée par un modèle spécifique
+    # (« this model's melee weapons get +N A »). Le bonus se calcule PAR FIGURINE et PAR TYPE
+    # de figurine, car une escouade hétérogène (leader attaché + troupe) peut mêler des socles
+    # avec et sans la règle sur la même ligne. On itère donc sur `shooters` comme per_model_attack_cap
+    # et on consulte le type RÉEL de chaque socle (model_types), jamais le type d'escouade.
+    if "[FINEST HOUR]" in action_desc:
+        if shooters:
+            for _mid in shooters:
+                _model_type = state.model_types.get(_mid, fighter_unit_type)  # get allowed
+                cap += config.once_per_battle_melee_bonus_by_type.get(_model_type, 0)  # get allowed
+        else:
+            # Repli : pas de [SHOOTER_MODELS:] → Finest Hour s'applique UNE FOIS par activation
+            # (once_per_battle_melee_buff : once per battle, une escouade ne peut déclencher
+            # l'abilité qu'une seule fois). Pas de multiplication par n_fighter_models.
+            cap += config.once_per_battle_melee_bonus_by_type.get(fighter_unit_type, 0)  # get allowed
     cleave_dice, cleave_error = additive_rule_extra_dice(
         "CLEAVE", action_desc, shooters, state.model_types, fighter_unit_type,
         weapon_display_name, config.unit_attack_limits, "cleave_by_weapon",
