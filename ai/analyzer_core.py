@@ -144,7 +144,7 @@ _STATE_MODEL_RE = re.compile(MODEL_TOKEN_PATTERN + r':(-?\d+)')
 #: `[ALLOC_MODEL: 101#3]` — la figurine CIBLE à qui le moteur a alloué cette attaque (05).
 #: Le motif de socle est celui des segments `[MODELS:]`, pour la même raison qu'au-dessus : deux
 #: écritures d'un même token finissent par diverger, et celle qui ne matche plus est silencieuse.
-_ALLOC_MODEL_RE = re.compile(r'\[ALLOC_MODEL:\s*(\d+#\d+)\s*\]')
+_ALLOC_MODEL_RE = re.compile(r'\[ALLOC_MODEL:\s*(\d+#[^\s\]]+)\s*\]')
 
 
 def _alloc_model_from_line(state: AnalyzerState, action_desc: str, line: str) -> Optional[str]:

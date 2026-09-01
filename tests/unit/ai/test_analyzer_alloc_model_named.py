@@ -220,3 +220,17 @@ def test_dead_avant_shoot_n_est_pas_alloc_model_unknown(tmp_path):
         "la ligne DEAD précède la ligne SHOOT qui l'a causée : c'est un artifact d'ordonnancement, "
         "pas une divergence moteur/analyzer — alloc_model_unknown doit rester à 0"
     )
+
+
+def test_alloc_model_format_r_est_reconnu(tmp_path):
+    """VERROU : [ALLOC_MODEL: 101#r0] (figurine rendue/reinforcement) ne lève pas ValueError.
+
+    Le moteur attribue des ids `{squad_id}#r{counter}` aux figurines rendues via
+    apply_returned_models_placement (command_handlers.py). Le regex _ALLOC_MODEL_RE
+    n'acceptait que \\d+#\\d+ et crashait sur ce format.
+    """
+    stats = _analyse(tmp_path, _jet(2, mid="1#r0"))
+    assert stats["state_resync"]["alloc_model_unknown"] == 1, (
+        "1#r0 est inconnu dans l'état reconstruit (aucune figurine rendue) : "
+        "alloc_model_unknown doit valoir 1 — mais surtout, pas de ValueError"
+    )
