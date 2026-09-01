@@ -1,10 +1,11 @@
-"""Clés de phase combat en attente : purge au reset et pré-capture de l'attaquant.
+"""Clés de phase en attente : purge au reset et pré-capture de l'attaquant.
 
-Deux invariants :
-1. `PENDING_FIGHT_WEAPON_KEY` et `PENDING_FIGHT_TARGET_KEY` doivent être effacées à chaque
-   `reset()`. Un épisode peut se terminer (turn limit) pendant la fenêtre d'attente d'arme, et
-   ces clés survivaient dans game_state, forçant au reset suivant un masque de sélection d'arme
-   pour une escouade qui n'avait jamais activé — cause du crash ConfigurationError en training.
+Invariants couverts :
+1. `PENDING_FIGHT_WEAPON_KEY`, `PENDING_FIGHT_TARGET_KEY` et `PENDING_SHOOT_WEAPON_SEL_KEY`
+   doivent être effacées à chaque `reset()`. Un épisode peut se terminer (turn limit) pendant
+   la fenêtre d'attente d'arme, et ces clés survivaient dans game_state, forçant au reset
+   suivant un masque de sélection d'arme pour une escouade qui n'avait jamais activé — cause
+   du crash ConfigurationError en training.
 2. `_build_manual_allocation` doit pré-capturer la position de l'attaquant AVANT la boucle
    d'intents. Lue après `roll_intent_fn` (qui modifie game_state), elle ouvrait une fenêtre de
    corruption symétrique au bug cible corrigé en de9f8230.
@@ -19,7 +20,11 @@ from typing import Any, Dict
 
 import pytest
 
-from engine.action_decoder import PENDING_FIGHT_TARGET_KEY, PENDING_FIGHT_WEAPON_KEY
+from engine.action_decoder import (
+    PENDING_FIGHT_TARGET_KEY,
+    PENDING_FIGHT_WEAPON_KEY,
+    PENDING_SHOOT_WEAPON_SEL_KEY,
+)
 import engine.phase_handlers.shooting_handlers as _sh
 from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from shared.data_validation import ConfigurationError
@@ -104,6 +109,28 @@ class TestStaleKeyPurgedAtReset:
         }
         eng.reset(seed=2)
         assert eng.game_state.get("pending_squad_shoot_intents") == {}
+
+    def test_pending_shoot_weapon_sel_key_cleared(self, _melee_file):
+        """stale_shoot_weapon_sel : PENDING_SHOOT_WEAPON_SEL_KEY est effacée à chaque reset.
+
+        Jumeau tir de test_pending_fight_weapon_key_cleared. Un épisode tronqué pendant
+        split-fire weapon selection laissait la clé active ; au reset suivant, le mask builder
+        (action_decoder.py ~l.550) forçait SHOOT_WEAPON_SPLIT pour une escouade qui n'avait
+        jamais activé.
+        """
+        eng = _engine(_melee_file)
+        eng.reset(seed=1)
+        eng.game_state[PENDING_SHOOT_WEAPON_SEL_KEY] = {
+            "squad_id": "1",
+            "model_weapon_pairs": [("11", 0)],
+            "targets_already_shot": [],
+            "remaining_pairs": [("11", 0)],
+        }
+        eng.reset(seed=2)
+        assert PENDING_SHOOT_WEAPON_SEL_KEY not in eng.game_state, (
+            f"PENDING_SHOOT_WEAPON_SEL_KEY doit être purgée au reset ; "
+            f"valeur stale trouvée : {eng.game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)!r}"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

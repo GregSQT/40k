@@ -1604,6 +1604,7 @@ class W40KEngine(gym.Env):
         # Même famille de marqueur que ONCE_CLAIMS_KEY : purge obligatoire à chaque reset.
         self.game_state.pop(PENDING_FIGHT_WEAPON_KEY, None)
         self.game_state.pop(PENDING_FIGHT_TARGET_KEY, None)
+        self.game_state.pop(PENDING_SHOOT_WEAPON_SEL_KEY, None)
         # Les intents en attente (tir et combat) ne sont jamais purgés par game_state.update() ci-
         # dessous : un dict stale de l'épisode N déroute declare_attack_weapon_qty et
         # _build_manual_allocation au N+1. Remise à zéro explicite, identique à _fight_v11_phase_complete.
