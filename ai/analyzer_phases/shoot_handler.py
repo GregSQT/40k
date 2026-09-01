@@ -639,11 +639,13 @@ def handle_shoot(
                 )
                 # Primitive B — mots-clés et type de la cible, nécessaires aux deux contrôles ci-dessous.
                 # `.get()` sur `unit_types` : la cible peut ne pas encore avoir été vue (rare) ;
-                # dans ce cas `frozenset()` → bénéfice du doute (pas de faux positif).
+                # dans ce cas bénéfice du doute accordé au moteur pour les deux bonus (pas de faux positif) :
+                # Dakkablitz → `frozenset()` → aucun exclu → bonus inclus ;
+                # OD → `_tgt_is_nonmv = True` → bonus inclus (le moteur n'exclut que M/V).
                 _tgt_type = state.unit_types.get(target_id)  # get allowed : cible non encore vue
                 _tgt_is_nonmv = (
-                    _tgt_type is not None
-                    and not config.unit_is_monster_or_vehicle_by_type.get(_tgt_type, False)  # get allowed
+                    _tgt_type is None  # bénéfice du doute : type inconnu → non M/V
+                    or not config.unit_is_monster_or_vehicle_by_type.get(_tgt_type, False)  # get allowed
                 )
                 _tgt_upper_kws = (
                     config.unit_upper_keywords_by_type.get(_tgt_type, frozenset())  # get allowed
