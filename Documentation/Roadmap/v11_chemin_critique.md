@@ -69,7 +69,7 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x1_long --resoluti
 | `x1_debug` | 96 | 0 | — |
 | `x5_debug` | 96 | 1 | — |
 | `x1` | 10 000 | 10 | 50 |
-| `x1_long` | 750 000 | 300 | **100** |
+| `x1_long` | 100 000 | 300 | **100** |
 
 Erreur-type avec `eval_episodes = 100` : `0,707/√(6 × 100)` ≈ **2,9 pts**. Durée : ~8 min (350 épisodes à 0,72 ép./s, mesuré le 2026-08-18). Aucun profil dédié nécessaire.
 

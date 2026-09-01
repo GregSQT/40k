@@ -218,7 +218,7 @@ class TestAttackerPreCapture:
         """precap_missing : attaquant absent de units_cache → erreur levée avant la boucle."""
         gs = _fight_gs()
         del gs["units_cache"]["1"]
-        with pytest.raises((ConfigurationError, ValueError)):
+        with pytest.raises(ValueError):
             build_manual_fight_allocation(gs, "1")
 
     def test_attacker_absent_empty_intents_raises_error(self):
@@ -231,7 +231,7 @@ class TestAttackerPreCapture:
         gs = _fight_gs()
         gs["pending_squad_fight_intents"] = {}
         del gs["units_cache"]["1"]
-        with pytest.raises((ConfigurationError, ValueError)):
+        with pytest.raises(ValueError):
             build_manual_fight_allocation(gs, "1")
 
     def test_normal_allocation_completes(self, monkeypatch):

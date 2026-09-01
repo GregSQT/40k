@@ -104,7 +104,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
 ✅ **Simplification double str() overrun (2026-08-31)** — `best_str` local élimine le double appel `str(best_target_id)` dans `_continue_squad_fight_after_selection` (lignes 5874 et 5879) ; 12+34 tests verts.
 
-✅ **Correctifs 2026-09-01** — (1) 14 tests rouges : warmup_episodes P2–P10, lambda exhortation kwarg `from_exhortation`, scénarios terrain sélecteur `pve_mc1`/`pvp_test_mc2` créés. (2) Espace obs J4/J5 réservé : `reserved_mission_cont` → `bin` (éviter collapse VecNormalize ; éviter `--new` au chantier missions). (3) Crash training fight corrigé : `PENDING_FIGHT_WEAPON_KEY`/`TARGET_KEY`/intents purgés au `reset()` + pré-capture position attaquant dans `_build_manual_allocation` ; 6 tests rouge→vert.
+✅ **Correctifs 2026-09-01** — (1) 14 tests rouges : warmup_episodes P2–P10, lambda exhortation kwarg `from_exhortation`, scénarios terrain sélecteur `pve_mc1`/`pvp_test_mc2` créés. (2) Espace obs J4/J5 réservé : `reserved_mission_cont` → `bin`. (3) Crash training fight : `PENDING_FIGHT_WEAPON_KEY`/`TARGET_KEY`/intents purgés au `reset()` + pré-capture attaquant dans `_build_manual_allocation` ; 6 tests rouge→vert. (4) `PENDING_*_KEY` dans `constants.py`, nettoyage stale-key (`require_unit_position`), `pytest.raises` → `ValueError` exact dans `test_fight_stale_key.py` ; 11 verts.
 
 ✅ **Faux ValueError overrun fight 12.06 corrigé (2026-08-31)** — garde `_did_overrun` ajoutée : une cible vivante mais non adjacente après le pile-in overrun ne déclenche plus ValueError, fallthrough vers `_fight_target_after_designated_death` ; test rouge→vert ajouté (`test_fight_target_reselect_overrun.py`, 12 verts).
 
