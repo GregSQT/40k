@@ -1881,7 +1881,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 del state.unit_hp[_rt_uid]
                         stats['reserves_timeout_destroyed'][player] += 1
                         note_rule_usage(stats, "20.04", player)
-                elif " SUFFERS " in action_desc and "[HAZARDOUS]" in action_desc:
+                elif " SUFFERS " in action_desc and re.search(r'\[HAZARDOUS(?::\d+)?\]', action_desc):
                         # 24.15 [HAZARDOUS] : après résolution de ses attaques (tir ou mêlée),
                         # l'unité subit X blessures mortelles auto-infligées.
                         # Grammaire : `Unit N(c,r) SUFFERS X Mortal Wounds [HAZARDOUS]`.
@@ -1889,7 +1889,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # exactement comme pour les attaques régulières (cf. step_logger.py §569).
                         action_type = 'hazardous'
                         _hz_match = re.search(
-                            r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[HAZARDOUS\]',
+                            r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[HAZARDOUS(?::\d+)?\]',
                             action_desc,
                         )
                         if _hz_match:

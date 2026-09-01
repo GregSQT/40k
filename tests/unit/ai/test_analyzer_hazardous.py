@@ -613,3 +613,26 @@ def test_desperate_escape_all_fnp_saved_no_crash_no_damage_grammar6(tmp_path, mo
     stats = _parse(tmp_path, monkeypatch, _DESPERATE_ESCAPE_ALL_FNP_SAVED, log_grammar=6)
     assert stats["parse_errors"] == [], "[ALL FNP SAVED] DESPERATE ESCAPE ne doit générer aucune parse_error"
 
+
+# ── Format [HAZARDOUS:N] — step_logger.py:1323 émet ce tag quand hazardous_weapon_count est connu.
+# Sans le fix, "[HAZARDOUS]" n'est pas sous-chaîne de "[HAZARDOUS:3]" (le ']' diffère) →
+# la branche HAZARDOUS est sautée et hazardous_mortal_wounds reste à 0.
+_HAZARDOUS_COUNT_TAG = (
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 3 Mortal Wounds [HAZARDOUS:3] "
+    "[R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_hazardous_count_tag_incrémente_mortal_wounds(tmp_path, monkeypatch):
+    """VERROU : le format [HAZARDOUS:N] (step_logger.py:1323) doit entrer dans la branche HAZARDOUS.
+
+    Sans le fix (condition "[HAZARDOUS]" in action_desc) : [HAZARDOUS:3] est ignoré →
+    hazardous_mortal_wounds reste à 0 alors que 3 BM ont été infligées.
+    Avec le fix (regex \\[HAZARDOUS(?::\\d+)?\\]) : les deux formats sont reconnus.
+    """
+    stats = _parse(tmp_path, monkeypatch, _HAZARDOUS_COUNT_TAG)
+    assert stats["hazardous_mortal_wounds"][1] == 3, (
+        "la ligne [HAZARDOUS:3] doit incrémenter hazardous_mortal_wounds de 3"
+    )
+    assert stats["hazardous_mortal_wounds"][2] == 0
+
