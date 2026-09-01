@@ -101,19 +101,38 @@ def test_living_mids_none_repli_historique():
     assert _cap(("5#0", "5#4", "5#6")) == 6
 
 
-def test_le_personnage_rattache_recoit_le_bonus_via_living_mids():
-    """VERROU production path 19.04 : le chemin avec living_mids rend le même résultat que None.
+def test_porteurs_types_morts_mid_vivant_non_type_perd_la_capacite():
+    """VERROU : porteurs typés tous morts, seul un mid sans entrée model_types survit → 0.
 
-    `_cap()` teste la branche `living_mids=None` (logs anciens). Ce test vérifie la branche
-    de PRODUCTION (shoot_handler passe `living_mids=set(current_line_models[id])`). Sans ce
-    verrou, une régression dans la branche `living_mids` serait invisible : le verrou principal
-    resterait vert mais le chemin réel serait cassé.
+    Scénario : Intercessors (5#0, 5#4) ont été loggués via [MODEL_TYPES:] puis sont morts.
+    L'Ancient (5#6) survit mais n'a jamais tiré → absent de model_types. Sans garde,
+    _types={} → fallback squad_unit_type="Intercessor" → bonus accordé à tort (porteurs
+    native_alive=False côté moteur). Avec garde : model_types a des entrées pour le préfixe
+    "5#" mais aucune n'est vivante → return 0.
+    """
+    model_types_sans_ancient = {
+        "5#0": "Intercessor",
+        "5#4": "IntercessorSergeant",
+    }
+    assert unit_ability_attack_cap(
+        ("5#6",), model_types_sans_ancient, "5", "Intercessor", "Bolt Rifle",
+        LIMITS, "atk_bonus_by_weapon", 1,
+        living_mids={"5#6"},
+    ) == 0, "porteurs natifs morts, mid vivant non typé : aucun bonus"
+
+
+def test_living_mids_vide_perd_la_capacite():
+    """VERROU : living_mids={} (aucun socle vivant dans ce segment) → 0, pas de fallback.
+
+    Scénario dégénéré : [MODELS:] présent mais vide ou parsé comme dict vide →
+    set({}) = set() → living_mids fourni et vide. Sans garde : _types={} → fallback →
+    bonus accordé alors qu'aucun socle n'est vivant.
     """
     assert unit_ability_attack_cap(
-        ("5#0", "5#4", "5#6"), MODEL_TYPES, "5", "Intercessor", "Bolt Rifle",
-        LIMITS, "atk_bonus_by_weapon", 3,
-        living_mids={"5#0", "5#4", "5#6"},
-    ) == 6, "19.04 production path : Ancient doit recevoir le bonus via living_mids"
+        ("5#0",), MODEL_TYPES, "5", "Intercessor", "Bolt Rifle",
+        LIMITS, "atk_bonus_by_weapon", 1,
+        living_mids=set(),
+    ) == 0, "living_mids vide : aucun bonus"
 
 
 def test_mids_vivants_non_types_repli_squad_unit_type():

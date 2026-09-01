@@ -603,10 +603,16 @@ def unit_ability_attack_cap(
             if _mid.startswith(_prefix) and _mid in living_mids
         }
         if not _types:
-            # Aucun mid vivant typé dans model_types — le type de l'escouade reste le seul
-            # ancre possible (parité avec la branche else et avec per_model_attack_cap qui
-            # utilise model_types.get(mid, squad_unit_type)). Ne pas retourner 0 ici : un
-            # log sans [MODEL_TYPES:] pour ces mids ne signifie pas que les porteurs sont morts.
+            if not living_mids:
+                # living_mids vide = aucun socle vivant dans ce segment → pas de bonus.
+                return 0
+            if any(mid.startswith(_prefix) for mid in model_types):
+                # model_types a des entrées pour cette unité mais aucune n'est vivante :
+                # tous les porteurs typés sont morts → native_alive=False côté moteur → 0.
+                return 0
+            # model_types n'a aucune entrée pour cette unité (log sans [MODEL_TYPES:] pour
+            # ces mids) : des socles vivants existent mais ne sont pas encore typés.
+            # Miroir de per_model_attack_cap qui utilise model_types.get(mid, squad_unit_type).
             _types = {squad_unit_type}
     else:
         _types = {squad_unit_type}
