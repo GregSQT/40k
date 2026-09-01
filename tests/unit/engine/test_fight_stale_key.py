@@ -124,41 +124,28 @@ class TestStaleKeyPurgedAtReset:
                 "pending_hazard_allocation",
                 {"squad_id": "101", "remaining_mw": 1},
             ),
+            (
+                PENDING_SHOOT_WEAPON_SEL_KEY,
+                {
+                    "squad_id": "1",
+                    "model_weapon_pairs": [("11", 0)],
+                    "targets_already_shot": [],
+                    "remaining_pairs": [("11", 0)],
+                },
+            ),
         ],
     )
     def test_pending_allocation_cleared(self, _melee_file, key, sentinel):
-        """stale_alloc : les clés d'allocation manuelle (fight/shoot/hazard) sont effacées au reset.
+        """stale_alloc : les clés d'allocation et de sélection d'arme sont effacées au reset.
 
-        Sans ces pop, un épisode tronqué pendant une allocation humaine gelait l'épisode suivant
-        dès le premier step (guards lignes 5022/5056/5065 bloquent toute action).
+        Sans ces pop, un épisode tronqué pendant une allocation humaine ou une sélection
+        d'arme en split-fire gelait l'épisode suivant dès le premier step.
         """
         eng = _engine(_melee_file)
         eng.reset(seed=1)
         eng.game_state[key] = sentinel
         eng.reset(seed=2)
         assert key not in eng.game_state
-
-    def test_pending_shoot_weapon_sel_key_cleared(self, _melee_file):
-        """stale_shoot_weapon_sel : PENDING_SHOOT_WEAPON_SEL_KEY est effacée à chaque reset.
-
-        Jumeau tir de test_pending_fight_weapon_key_cleared. Un épisode tronqué pendant
-        split-fire weapon selection laissait la clé active ; au reset suivant, le mask builder
-        (action_decoder.py ~l.550) forçait SHOOT_WEAPON_SPLIT pour une escouade qui n'avait
-        jamais activé.
-        """
-        eng = _engine(_melee_file)
-        eng.reset(seed=1)
-        eng.game_state[PENDING_SHOOT_WEAPON_SEL_KEY] = {
-            "squad_id": "1",
-            "model_weapon_pairs": [("11", 0)],
-            "targets_already_shot": [],
-            "remaining_pairs": [("11", 0)],
-        }
-        eng.reset(seed=2)
-        assert PENDING_SHOOT_WEAPON_SEL_KEY not in eng.game_state, (
-            f"PENDING_SHOOT_WEAPON_SEL_KEY doit être purgée au reset ; "
-            f"valeur stale trouvée : {eng.game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)!r}"
-        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -243,8 +230,8 @@ class TestAttackerPreCapture:
             build_manual_fight_allocation(gs, "1")
 
     def test_normal_allocation_completes(self, monkeypatch):
-        """precap_normal : allocation complète avec attaquant présent → 2 attaques résolues."""
+        """precap_normal : allocation complète avec attaquant présent → cible détruite."""
         monkeypatch.setattr(random, "randint", lambda a, b: 4)
         gs = _fight_gs(n_attacks=2)
-        result = build_manual_fight_allocation(gs, "1")
-        assert result["shoot_result"]["attacks_made"] == 2
+        build_manual_fight_allocation(gs, "1")
+        assert "T1" not in gs["models_cache"]
