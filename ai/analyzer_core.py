@@ -1894,6 +1894,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         )
                         if _hz_match:
                             _hz_mw = int(_hz_match.group(1))
+                            if "[ALL FNP SAVED]" in action_desc:
+                                _hz_mw = 0
                             # Cible = acteur : le préfixe "Unit N(" d'action_desc est la seule
                             # source fiable de l'ID de l'unité sur une ligne SUFFERS (action_unit_id
                             # retient le dernier ID de header, pas celui de la ligne courante).
@@ -1947,7 +1949,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # `pending_model_removals=None` : les removals d'une attaque précédente
                             # de la MÊME activation ne doivent pas être fusionnés ici — cette mort
                             # est distincte, et le flush se produit au changement d'acteur.
-                            if _hz_mw > 0 and "[ALL FNP SAVED]" not in action_desc:
+                            if _hz_mw > 0:
                                 stats['hazardous_mortal_wounds'][player] += _hz_mw
                                 _apply_damage_and_handle_death(
                                     _hz_unit_id, _hz_unit_id, _hz_mw,
@@ -1984,6 +1986,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         )
                         if _de_match:
                             _de_mw = int(_de_match.group(1))
+                            if "[ALL FNP SAVED]" in action_desc:
+                                _de_mw = 0
                             _de_unit_id = _dmg_actor_id
                             if _de_unit_id is None:
                                 stats['parse_errors'].append({
@@ -1994,7 +1998,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     'error': "ligne DESPERATE ESCAPE : ID unité introuvable "
                                              "(attendu : 'Unit N(' en tête d'action)",
                                 })
-                            elif _de_mw > 0 and "[ALL FNP SAVED]" not in action_desc:
+                            elif _de_mw > 0:
                                 _apply_damage_and_handle_death(
                                     _de_unit_id, _de_unit_id, _de_mw,
                                     player, turn, phase, state.line_number, state.current_episode_num,

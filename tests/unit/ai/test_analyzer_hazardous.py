@@ -603,13 +603,7 @@ def test_hazardous_all_fnp_saved_no_crash_no_damage_grammar6(tmp_path, monkeypat
 
 
 def test_desperate_escape_all_fnp_saved_no_crash_no_damage_grammar6(tmp_path, monkeypatch):
-    """VERROU : [ALL FNP SAVED] sur une ligne DESPERATE ESCAPE ne lève pas ValueError.
-
-    Le producteur (step_logger.py l.1339) omet [ALLOC_MODEL:] quand tous les FNP
-    ont sauvé les blessures mortelles — aucune allocation côté moteur. L'analyzer
-    appelait quand même _alloc_model_from_line (guard _de_mw > 0 est vrai) → crash.
-    Avec le fix : [ALL FNP SAVED] court-circuite le bloc de dégâts, HP inchangé.
-    """
+    """VERROU : même cas que test_hazardous_all_fnp_saved_no_crash_no_damage_grammar6 sur [DESPERATE ESCAPE]."""
     stats = _parse(tmp_path, monkeypatch, _DESPERATE_ESCAPE_ALL_FNP_SAVED, log_grammar=6)
     assert stats["parse_errors"] == [], "[ALL FNP SAVED] DESPERATE ESCAPE ne doit générer aucune parse_error"
 
