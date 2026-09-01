@@ -11209,6 +11209,15 @@ def _build_manual_allocation(
         "attacks_made": 0, "hits": 0, "wounds": 0, "failed_saves": 0,
         "damage_total": 0, "models_killed": 0, "events": [],
     }
+    # Position de l'attaquant capturée AVANT la boucle (invariant : l'escouade est vivante au
+    # départ de l'allocation — validé par squad_fight / squad_fight_weapon / build_units_cache
+    # au reset). Les MW Hold Still peuvent retirer la CIBLE de units_cache en cours de boucle ;
+    # le cas symétrique (attaquant retiré en cours de boucle) n'a pas de mécanisme connu, mais
+    # la capture anticipée garantit qu'aucun appel intermédiaire à roll_intent_fn ne peut plus
+    # corrompre la lecture. Conforme à l'invariant des coords cible (targets_meta).
+    _atk_uc_snap = require_key(require_key(game_state, "units_cache"), attacker_squad_id)
+    _atk_col_snap = int(require_key(_atk_uc_snap, "col"))
+    _atk_row_snap = int(require_key(_atk_uc_snap, "row"))
     targets_meta: Dict[str, Dict[str, Any]] = {}
     weapon_groups: List[Dict[str, Any]] = []
     group_index_by_key: Dict[tuple, int] = {}
@@ -11278,17 +11287,14 @@ def _build_manual_allocation(
             _tgt_meta = require_key(targets_meta, target_sid)
             _tgt_col = int(require_key(_tgt_meta, "col"))
             _tgt_row = int(require_key(_tgt_meta, "row"))
-            # JUMEAU de la capture ci-dessus, pour l ATTAQUANT : meme emission differee, donc
-            # meme exigence. `_emit_squad_shoot_log` relisait units_cache et retombait sur
-            # (0,0) — une case reelle du plateau — pour une escouade absente. Le squad_id est
-            # requis (toute figurine du models_cache le porte) : sans lui, la cle de lecture
-            # elle-meme etait devinee a partir de l id de figurine.
+            # Position de l'attaquant : pré-capturée avant la boucle (_atk_col_snap/_atk_row_snap).
+            # squad_id lu depuis le modèle plutôt que depuis attacker_squad_id pour homogénéité
+            # avec le chemin tir (le paramètre et la valeur du modèle coïncident toujours).
             _atk_sid = str(require_key(attacker, "squad_id"))
-            _atk_uc_live = require_key(require_key(game_state, "units_cache"), _atk_sid)
             _grp = {
                 "attacker_squad_id": _atk_sid,
-                "attacker_col": int(require_key(_atk_uc_live, "col")),
-                "attacker_row": int(require_key(_atk_uc_live, "row")),
+                "attacker_col": _atk_col_snap,
+                "attacker_row": _atk_row_snap,
                 "weapon_name": weapon_name, "weapon_names": [weapon_name], "target_sid": target_sid,
                 "target_col": _tgt_col,
                 "target_row": _tgt_row,
