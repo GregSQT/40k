@@ -196,7 +196,7 @@
     "x1_long": {
         "type": "################################################### x1_long — runs longs (board 44x60x1, scale x1) ###################################################",
         "seed": 12345,
-        "total_episodes": 100000,
+        "total_episodes": 750000,
         "total_episodes_normal": "100000 : run long ; rampe entropie achevee a 40000 (decay_fraction 0.4), rampe learning_rate a 90000 (0.9). MESURE DIRECTE : 5 h 54 pour 50 000 episodes (2026-08-18) -- prise sur l'ANCIEN budget de 50k avant le passage a 100k (commit ecbf843f) ; la duree d'un run complet de 100k n'est pas encore mesuree. C'est la mesure de reference du depot, et elle REFUTE l'extrapolation lineaire : les 4 h 01 mesurees sur les 10 000 episodes de x1 predisaient ~20 h, soit 3,4 fois trop. La duree d'un episode depend de ce que la politique a appris, aucun taux ep./h constant n'est donc publiable.",
         "agent_seat_mode": "random",
         "agent_seat_p2_ratio": 0.70,
