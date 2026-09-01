@@ -402,6 +402,11 @@ def get_scenario_list_for_phase(config, agent_key, training_config_name, scenari
 
     scenarios_root = os.path.join(config.config_dir, "agents", agent_key, "scenarios")
     if not os.path.isdir(scenarios_root):
+        import re as _re
+        base_key = _re.sub(r"_P\d+$", "", agent_key)
+        if base_key != agent_key:
+            scenarios_root = os.path.join(config.config_dir, "agents", base_key, "scenarios")
+    if not os.path.isdir(scenarios_root):
         return scenarios
 
     training_dir = os.path.join(scenarios_root, "training")
