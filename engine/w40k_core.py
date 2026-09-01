@@ -5838,7 +5838,7 @@ class W40KEngine(gym.Env):
         return True, result
 
     def _continue_squad_fight_after_selection(
-        self, squad_id: str, target_slot: Optional[int], from_exhortation: bool = False
+        self, squad_id: str, target_slot: Optional[int], skip_pool_check: bool = False
     ) -> Tuple[bool, Dict[str, Any]]:
         """Reprend le flux squad_fight après register_selection (overrun → cible → arme).
 
@@ -5899,7 +5899,7 @@ class W40KEngine(gym.Env):
                 # n'a eu lieu, c'est une rupture masque/commit : le masque n'aurait jamais dû
                 # offrir ce slot. Avec overrun, le pile-in déplace l'attaquant et peut rendre
                 # une cible préalablement adjacente non-adjacente — ce n'est pas une rupture.
-                if best_str is not None and best_str in units_cache and not _did_overrun and not from_exhortation:
+                if best_str is not None and best_str in units_cache and not _did_overrun and not skip_pool_check:
                     raise ValueError(
                         f"_continue_squad_fight: {best_target_id} hors du pool de combat 12.05"
                     )
@@ -6056,7 +6056,7 @@ class W40KEngine(gym.Env):
                 "target_squad_id": None,
                 "fight_result": {"targets_meta": {}, "events": [], "squads_wiped": []},
             }
-        return self._continue_squad_fight_after_selection(squad_id, target_slot, from_exhortation=True)
+        return self._continue_squad_fight_after_selection(squad_id, target_slot, skip_pool_check=True)
 
     def _check_and_trigger_exhortation_de_rage(
         self, squad_id: str, unit: Dict[str, Any], target_slot: Optional[int]

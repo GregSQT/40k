@@ -4,7 +4,7 @@
    pas de ValueError.
 2. _manual_roll_fight_intent / _manual_roll_intent : target absent de units_cache → None,
    pas de crash à _build_manual_allocation:11216 ou shared_utils:10120.
-3. _continue_squad_fight_after_selection from_exhortation=True : cible vivante mais hors pool
+3. _continue_squad_fight_after_selection skip_pool_check=True : cible vivante mais hors pool
    (modèles adjacents tués par MW) → _fight_target_after_designated_death, pas de ValueError.
 
 Verrous ROUGE/VERT : tests écrits AVANT le fix, rouges avec l'ancienne logique.
@@ -164,11 +164,11 @@ def _gs_alive_enemy_out_of_pool():
 
 
 def test_exhortation_alive_target_out_of_pool_no_crash(monkeypatch):
-    """ROUGE sans le fix : raise ValueError car cible vivante + hors pool + from_exhortation=False.
+    """ROUGE sans le fix : raise ValueError car cible vivante + hors pool + skip_pool_check=False.
 
     Scénario : cible unique, MW exhortation tuent les modèles adjacents ; l'escouade ennemie
     survit (modèles non-adjacents) → slot pointe une cible in units_cache mais absente du pool.
-    Avec from_exhortation=True : chemin _fight_target_after_designated_death → combat à vide.
+    Avec skip_pool_check=True : chemin _fight_target_after_designated_death → combat à vide.
     """
     monkeypatch.setattr(fh, "_fight_v11_engaged_now", lambda gs, u: True)
     # Pool vide : aucun modèle adjacent ne reste après les MW.
@@ -191,14 +191,14 @@ def test_exhortation_alive_target_out_of_pool_no_crash(monkeypatch):
 
     engine = _FakeEngine(_gs_alive_enemy_out_of_pool())
 
-    # Sans from_exhortation : doit lever (vérifie que le garde est actif hors contexte exhortation)
+    # Sans skip_pool_check : doit lever (vérifie que le garde est actif hors contexte exhortation)
     with pytest.raises(ValueError, match="hors du pool de combat 12.05"):
-        engine._continue_squad_fight_after_selection(_SQUAD_ID, target_slot=0, from_exhortation=False)
+        engine._continue_squad_fight_after_selection(_SQUAD_ID, target_slot=0, skip_pool_check=False)
 
-    # Avec from_exhortation=True : ne doit pas lever, combat à vide car pool vide
+    # Avec skip_pool_check=True : ne doit pas lever, combat à vide car pool vide
     engine2 = _FakeEngine(_gs_alive_enemy_out_of_pool())
     ok, result = engine2._continue_squad_fight_after_selection(
-        _SQUAD_ID, target_slot=0, from_exhortation=True
+        _SQUAD_ID, target_slot=0, skip_pool_check=True
     )
     assert ok is True
     assert result.get("action") == "squad_fight"
