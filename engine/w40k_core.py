@@ -1596,6 +1596,20 @@ class W40KEngine(gym.Env):
         # tests/unit/engine/test_agent_decision_mechanism.py::test_the_choice_mechanism_survives_the_first_episode.
         self.game_state.pop(ONCE_CLAIMS_KEY, None)
 
+        # Clés de phase combat en attente : posées quand l'agent a sélectionné une cible et attend
+        # la sélection d'arme, ou re-sélectionne une cible. Si l'épisode se termine (turn limit)
+        # pendant cette attente, ces clés survivent dans game_state et forceraient au reset suivant
+        # un masque de sélection d'arme/cible pour une escouade qui n'a jamais activé en combat —
+        # ce qui provoque un ConfigurationError dans _build_manual_allocation (units_cache[attacker]).
+        # Même famille de marqueur que ONCE_CLAIMS_KEY : purge obligatoire à chaque reset.
+        self.game_state.pop(PENDING_FIGHT_WEAPON_KEY, None)
+        self.game_state.pop(PENDING_FIGHT_TARGET_KEY, None)
+        # Les intents en attente (tir et combat) ne sont jamais purgés par game_state.update() ci-
+        # dessous : un dict stale de l'épisode N déroute declare_attack_weapon_qty et
+        # _build_manual_allocation au N+1. Remise à zéro explicite, identique à _fight_v11_phase_complete.
+        self.game_state["pending_squad_fight_intents"] = {}
+        self.game_state["pending_squad_shoot_intents"] = {}
+
         # Choix d'escouade à activer (V11 §0.48 `L2`) : sa portée est (tour, phase, joueur), donc
         # elle REDEVIENT valide par coïncidence à l'épisode suivant — le tour repart à 1. Un
         # marqueur survivant supprimerait le premier choix de sa phase, en silence (vérifié :
