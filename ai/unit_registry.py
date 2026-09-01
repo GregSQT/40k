@@ -386,9 +386,7 @@ class UnitRegistry:
                         rule_args_block,
                     ):
                         arr_key = arr_match.group(1)
-                        parsed_rule_args[arr_key] = [
-                            m.group(1) for m in re.finditer(r'"([^"]*)"', arr_match.group(2))
-                        ]
+                        parsed_rule_args[arr_key] = [m[1] for m in re.findall(TS_QUOTED_STRING, arr_match.group(2))]
                     for arg_match in re.finditer(
                         r'([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:(-?\d+)|"(\d*D\d+(?:[+\-]\d+)?)"|([\'"])([A-Za-z_][A-Za-z0-9_]*)\4)',
                         rule_args_block,

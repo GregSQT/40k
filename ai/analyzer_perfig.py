@@ -574,11 +574,7 @@ def _build_unit_types(
                 return set()
             return {squad_unit_type}
         return _types
-    _types = {squad_unit_type}
-    for _mid, _mt in model_types.items():
-        if _mid.startswith(_prefix):
-            _types.add(_mt)
-    return _types
+    return {squad_unit_type} | {_mt for _mid, _mt in model_types.items() if _mid.startswith(_prefix)}
 
 
 def unit_ability_attack_cap(
@@ -710,7 +706,7 @@ def unit_blast_per5_nonmv_bonus(
         limits = unit_attack_limits.get(_t)  # get allowed : type hors registre
         if limits is None:
             continue
-        if weapon_display_name in require_key(limits, "blast_per5_nonmv_weapons"):
+        if any(n in require_key(limits, "blast_per5_nonmv_weapons") for n in weapon_profile_names(weapon_display_name)):
             extra = target_models_alive // 5
             return extra * (len(shooters) if shooters else n_models)
     return 0
