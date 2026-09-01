@@ -176,6 +176,8 @@ def _alloc_model_from_line(state: AnalyzerState, action_desc: str, line: str) ->
 
 _EFFECTS_PLAYER_RE = re.compile(r'P(\d+)\s+([^|]*)')
 _RT_UNIT_ID_RE = re.compile(r'Unit\s+(\d+)')
+_HAZARDOUS_TAG_RE = re.compile(r'\[HAZARDOUS(?::\d+)?\]')
+_HAZARDOUS_SUFFERS_RE = re.compile(r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[HAZARDOUS(?::\d+)?\]')
 
 
 def _parse_effects_snapshot(payload: str) -> "Dict[int, Dict[str, str]]":
@@ -1881,17 +1883,14 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 del state.unit_hp[_rt_uid]
                         stats['reserves_timeout_destroyed'][player] += 1
                         note_rule_usage(stats, "20.04", player)
-                elif " SUFFERS " in action_desc and re.search(r'\[HAZARDOUS(?::\d+)?\]', action_desc):
+                elif " SUFFERS " in action_desc and _HAZARDOUS_TAG_RE.search(action_desc):
                         # 24.15 [HAZARDOUS] : après résolution de ses attaques (tir ou mêlée),
                         # l'unité subit X blessures mortelles auto-infligées.
                         # Grammaire : `Unit N(c,r) SUFFERS X Mortal Wounds [HAZARDOUS]`.
                         # Grammar ≥ 6 : le moteur nomme le socle cible dans [ALLOC_MODEL:],
                         # exactement comme pour les attaques régulières (cf. step_logger.py §569).
                         action_type = 'hazardous'
-                        _hz_match = re.search(
-                            r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[HAZARDOUS(?::\d+)?\]',
-                            action_desc,
-                        )
+                        _hz_match = _HAZARDOUS_SUFFERS_RE.search(action_desc)
                         if _hz_match:
                             _hz_mw = int(_hz_match.group(1))
                             if "[ALL FNP SAVED]" in action_desc:
@@ -1944,8 +1943,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # retient le dernier ID de header, pas celui de la ligne courante).
                             # grammar ≥ 6 : [ALLOC_MODEL:] présent si mw>0, lu comme pour tir/mêlée.
                             # grammar < 6 : None → chemin hérité (ordered_living_mids[0]).
-                            # mw==0 : aucun dé raté → aucune blessure → aucune allocation possible
-                            # (step.log émet [NO ALLOC]) ; on saute le bloc de dégâts entièrement.
+                            # mw==0 : aucun dé raté (step.log émet [NO ALLOC]) ou [ALL FNP SAVED]
+                            # → aucune blessure effective → aucune allocation possible ; on saute
+                            # le bloc de dégâts entièrement.
                             # `pending_model_removals=None` : les removals d'une attaque précédente
                             # de la MÊME activation ne doivent pas être fusionnés ici — cette mort
                             # est distincte, et le flush se produit au changement d'acteur.
