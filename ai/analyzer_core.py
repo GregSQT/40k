@@ -1948,7 +1948,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # `pending_model_removals=None` : les removals d'une attaque précédente
                             # de la MÊME activation ne doivent pas être fusionnés ici — cette mort
                             # est distincte, et le flush se produit au changement d'acteur.
-                            if _hz_mw > 0:
+                            if _hz_mw > 0 and "[ALL FNP SAVED]" not in action_desc:
                                 _apply_damage_and_handle_death(
                                     _hz_unit_id, _hz_unit_id, _hz_mw,
                                     player, turn, phase, state.line_number, state.current_episode_num,
@@ -1994,7 +1994,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     'error': "ligne DESPERATE ESCAPE : ID unité introuvable "
                                              "(attendu : 'Unit N(' en tête d'action)",
                                 })
-                            elif _de_mw > 0:
+                            elif _de_mw > 0 and "[ALL FNP SAVED]" not in action_desc:
                                 _apply_damage_and_handle_death(
                                     _de_unit_id, _de_unit_id, _de_mw,
                                     player, turn, phase, state.line_number, state.current_episode_num,

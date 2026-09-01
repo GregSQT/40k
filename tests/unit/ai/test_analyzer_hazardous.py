@@ -574,3 +574,39 @@ def test_desperate_escape_0_mw_no_crash_no_damage_grammar6(tmp_path, monkeypatch
         "DESPERATE ESCAPE ne doit jamais incrémenter hazardous_mortal_wounds"
     )
 
+
+_DESPERATE_ESCAPE_ALL_FNP_SAVED = (
+    "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 1 Mortal Wounds [DESPERATE ESCAPE] "
+    "[FNP:1] [ALL FNP SAVED] [MODELS: 1#0@(20,20,z0)] [R:+0.0] [SUCCESS]\n"
+)
+
+
+_HAZARDOUS_ALL_FNP_SAVED = (
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 1 Mortal Wounds [HAZARDOUS] "
+    "[FNP:1] [ALL FNP SAVED] [MODELS: 1#0@(20,20,z0)] [R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_hazardous_all_fnp_saved_no_crash_no_damage_grammar6(tmp_path, monkeypatch):
+    """VERROU : [ALL FNP SAVED] sur une ligne HAZARDOUS ne lève pas ValueError.
+
+    Le producteur (step_logger.py l.1339) omet [ALLOC_MODEL:] quand tous les FNP
+    ont sauvé les blessures mortelles. L'analyzer appelait quand même
+    _alloc_model_from_line (guard _hz_mw > 0 est vrai) → crash sur grammar >= 6.
+    Avec le fix : [ALL FNP SAVED] court-circuite le bloc de dégâts, HP inchangé.
+    """
+    stats = _parse(tmp_path, monkeypatch, _HAZARDOUS_ALL_FNP_SAVED, log_grammar=6)
+    assert stats["parse_errors"] == [], "[ALL FNP SAVED] HAZARDOUS ne doit générer aucune parse_error"
+
+
+def test_desperate_escape_all_fnp_saved_no_crash_no_damage_grammar6(tmp_path, monkeypatch):
+    """VERROU : [ALL FNP SAVED] sur une ligne DESPERATE ESCAPE ne lève pas ValueError.
+
+    Le producteur (step_logger.py l.1339) omet [ALLOC_MODEL:] quand tous les FNP
+    ont sauvé les blessures mortelles — aucune allocation côté moteur. L'analyzer
+    appelait quand même _alloc_model_from_line (guard _de_mw > 0 est vrai) → crash.
+    Avec le fix : [ALL FNP SAVED] court-circuite le bloc de dégâts, HP inchangé.
+    """
+    stats = _parse(tmp_path, monkeypatch, _DESPERATE_ESCAPE_ALL_FNP_SAVED, log_grammar=6)
+    assert stats["parse_errors"] == [], "[ALL FNP SAVED] DESPERATE ESCAPE ne doit générer aucune parse_error"
+
