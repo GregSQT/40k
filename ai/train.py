@@ -725,7 +725,7 @@ def _count_units_from_roster_scenario(scenario_data: Dict[str, Any], scenario_fi
                 return 0
             max_count = 0
             for rf in roster_files:
-                with open(rf) as fh:
+                with open(rf, encoding="utf-8-sig") as fh:
                     rd = json.load(fh)
                 max_count = max(max_count, _roster_model_count(rd))
             return max_count
@@ -738,7 +738,7 @@ def _count_units_from_roster_scenario(scenario_data: Dict[str, Any], scenario_fi
                 roster_path = project_root / "config" / "agents" / "_p2_rosters" / scale_name / ref_stripped
             if not roster_path.exists():
                 return 0
-            with open(roster_path) as fh:
+            with open(roster_path, encoding="utf-8-sig") as fh:
                 rd = json.load(fh)
             return _roster_model_count(rd)
 
