@@ -615,7 +615,12 @@ def handle_shoot(
                     stats['blast_x_mismatch'][shooter_player_for_stats] += 1
                     if stats['first_error_lines']['blast_x_mismatch'][shooter_player_for_stats] is None:
                         stats['first_error_lines']['blast_x_mismatch'][shooter_player_for_stats] = {'episode': state.current_episode_num, 'line': line.strip()}
-                max_allowed_shots = rng_nb_squad + blast_dice + rapid_fire_value_squad
+                # [RAPID FIRE] 24.30 — le bonus ne s'applique qu'à demi-portée ; le moteur
+                # le dit en posant (ou non) [RAPID FIRE:X] sur la ligne (token présent sur
+                # TOUTES les lignes du groupe quand RF s'applique, absent sinon). Gater ici
+                # est le symétrique exact de ce que fait additive_rule_extra_dice pour [BLAST].
+                rapid_fire_cap = rapid_fire_value_squad if rapid_fire_match else 0
+                max_allowed_shots = rng_nb_squad + blast_dice + rapid_fire_cap
                 if state.shot_sequence_counts[seq_key] > max_allowed_shots:
                     stats['shoot_over_rng_nb'][shooter_player_for_stats] += 1
                     if stats['first_error_lines']['shoot_over_rng_nb'][shooter_player_for_stats] is None:
