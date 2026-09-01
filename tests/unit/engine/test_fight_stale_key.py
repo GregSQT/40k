@@ -217,9 +217,10 @@ class TestAttackerPreCapture:
             build_manual_fight_allocation(gs, "1")
 
     def test_normal_allocation_completes(self, monkeypatch):
-        """precap_normal : allocation complète avec attaquant présent → pas d'erreur."""
+        """precap_normal : allocation complète avec attaquant présent → 2 attaques résolues."""
         monkeypatch.setattr(random, "randint", lambda a, b: 4)
         monkeypatch.setattr(_sh, "compute_unit_los", lambda gs, s, t: {"cover": False})
         monkeypatch.setattr(_sh, "_get_unit_by_id", lambda gs, sid: {"id": sid})
         gs = _fight_gs(n_attacks=2)
-        build_manual_fight_allocation(gs, "1")  # ne doit pas lever
+        result = build_manual_fight_allocation(gs, "1")
+        assert result["shoot_result"]["attacks_made"] == 2
