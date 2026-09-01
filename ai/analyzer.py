@@ -57,6 +57,30 @@ _GRANT_ABILITY_TO_WEAPON_RULE: Dict[str, str] = {
 _VERTICAL_NOT_FETCHED: object = object()
 
 
+def _grantable_per_carrier(stats: Dict[str, Any]) -> Dict[str, Set[str]]:
+    """Retourne {RULE_NAME_UPPER → set(unit_types vus qui peuvent l'accorder dynamiquement)}.
+
+    Utilisé pour distinguer CONDITIONAL (paire accordée par l'ability du porteur spécifique)
+    de INVALID (paire sans aucune justification). Le contrôle est per-carrier : ce n'est pas
+    parce que Bigboss (grant_weapon_rule_melee → SUSTAINED_HITS) est dans le run que
+    SUSTAINED_HITS sur une autre arme/unité est légitimement accordé.
+    """
+    rule_to_units_map = stats.get('rule_to_units', {})
+    unit_types_seen = set(stats.get('unit_types_seen', set()))
+    result: Dict[str, Set[str]] = {}
+    for ability, weapon_rule in _GRANT_ABILITY_TO_WEAPON_RULE.items():
+        granting = rule_to_units_map.get(ability, set()) & unit_types_seen
+        if granting:
+            result[weapon_rule] = granting
+    return result
+
+
+def _pair_is_conditional(rule_name: str, weapon_key: str, grantable: Dict[str, Set[str]]) -> bool:
+    """True ssi le porteur de weapon_key possède l'ability qui accorde rule_name dynamiquement."""
+    granting_units = grantable.get(rule_name.upper(), set())
+    return any(weapon_key.endswith(f" ({ut})") for ut in granting_units)
+
+
 def _compute_weapon_rule_not_used_warnings(stats: Dict[str, Any]) -> int:
     """Nombre de paires (règle d'arme, arme) attendues mais jamais observées, hors INTERACTION_ONLY."""
     weapon_rule_to_weapons: Dict[str, Any] = require_key(stats, 'weapon_rule_to_weapons')
@@ -1466,6 +1490,7 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
         for player in (1, 2)
         for field in ('out_of_range', 'engaged_non_close_quarters')
     )
+    _grantable = _grantable_per_carrier(stats)
     buckets = {
         # §1.1 — les six déplacements de la phase de Mouvement, plus le move réactif.
         'move': (
@@ -1599,10 +1624,7 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             1 for (rule_name, weapon_key) in require_key(stats, 'weapon_rule_usage')
             if (rule_name not in stats['weapon_rule_to_weapons']
                 or weapon_key not in stats['weapon_rule_to_weapons'][rule_name])
-            and rule_name.upper() not in {
-                wr for ab, wr in _GRANT_ABILITY_TO_WEAPON_RULE.items()
-                if stats.get('rule_to_units', {}).get(ab, set()) & set(stats.get('unit_types_seen', set()))
-            }
+            and not _pair_is_conditional(rule_name, weapon_key, _grantable)
         ),
         'episodes_ending': len(stats['episodes_without_end']) + len(stats['episodes_without_method']),
         'core_issues': len(stats['parse_errors']) + len(stats['unit_id_mismatches']),
@@ -3821,11 +3843,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     weapon_rule_to_weapons = require_key(stats, 'weapon_rule_to_weapons')
     unit_types_seen = set(require_key(stats, "unit_types_seen"))
     unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
-    _grantable_rules: Set[str] = {
-        weapon_rule
-        for ability, weapon_rule in _GRANT_ABILITY_TO_WEAPON_RULE.items()
-        if rule_to_units.get(ability, set()) & unit_types_seen
-    }
+    _grantable = _grantable_per_carrier(stats)
     expected_wr_keys = {
         (rule_name, weapon_key)
         for rule_name, weapon_keys in weapon_rule_to_weapons.items()
@@ -3843,7 +3861,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             # « CONDITIONAL » = paire non déclarée dans la datasheet mais accordée par une ability
             # (grant_weapon_rule_melee, grant_weapon_rule_melee_after_charge, once_per_battle_melee_buff).
             if not has_rule:
-                if rule_name.upper() in _grantable_rules:
+                if _pair_is_conditional(rule_name, weapon_key, _grantable):
                     validite = "CONDITIONAL"
                 else:
                     validite = "INVALID"

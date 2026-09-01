@@ -117,3 +117,42 @@ def test_error_totals_weapon_rules_invalid_excludes_conditional(tmp_path):
         f"weapon_rules_invalid={totals['weapon_rules_invalid']} : "
         "la paire SUSTAINED_HITS/Bigboss accordée dynamiquement ne doit pas compter"
     )
+
+
+def test_cross_pair_contamination_error_totals(tmp_path):
+    """Bigboss dans le run ne doit pas exempter SUSTAINED_HITS sur une autre unité sans l'ability."""
+    stats, _ = _parse_and_render(tmp_path)
+    assert "Bigboss" in stats["unit_types_seen"]
+    # Simuler un bug moteur : AssaultIntercessor (sans grant_weapon_rule_melee) génère SUSTAINED_HITS.
+    other_pair = ("SUSTAINED_HITS", "Astartes Chainsword (AssaultIntercessor)")
+    stats["weapon_rule_usage"][other_pair] = {1: 0, 2: 1}
+    # Prémisse : non déclaré statiquement.
+    assert "Astartes Chainsword (AssaultIntercessor)" not in stats.get("weapon_rule_to_weapons", {}).get("SUSTAINED_HITS", set())
+    # AssaultIntercessor n'a pas l'ability → cette paire est un vrai INVALID.
+    totals = an.error_totals(stats)
+    assert totals["weapon_rules_invalid"] == 1, (
+        f"weapon_rules_invalid={totals['weapon_rules_invalid']} : "
+        "la paire Chainsword/AssaultIntercessor est INVALID, pas CONDITIONAL"
+    )
+
+
+def test_cross_pair_contamination_section_1_8(tmp_path):
+    """§1.8 affiche INVALID (pas CONDITIONAL) pour une paire sans ability dynamique."""
+    stats, _ = _parse_and_render(tmp_path)
+    assert "Bigboss" in stats["unit_types_seen"]
+    other_pair = ("SUSTAINED_HITS", "Astartes Chainsword (AssaultIntercessor)")
+    stats["weapon_rule_usage"][other_pair] = {1: 0, 2: 1}
+    lines: list[str] = []
+    an.print_statistics(stats, debug_section_filter="1.8", output_lines=lines, emit_console=False)
+    chainsword_sustained = [
+        l for l in lines
+        if "Astartes Chainsword (AssaultIntercessor)" in l and "Sustained_hits" in l
+    ]
+    assert chainsword_sustained, "Ligne §1.8 pour Astartes Chainsword/SUSTAINED_HITS introuvable"
+    for line in chainsword_sustained:
+        assert "INVALID" in line, (
+            f"Attendu INVALID pour Chainsword/AssaultIntercessor, obtenu : {line!r}"
+        )
+        assert "CONDITIONAL" not in line, (
+            f"CONDITIONAL ne doit pas apparaître pour une paire sans ability : {line!r}"
+        )
