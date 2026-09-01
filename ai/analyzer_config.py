@@ -235,6 +235,12 @@ class AnalyzerConfig:
     #: Absent = 0 (unité sans la règle). Lu dans `_cc_cap_for_line` quand `[FINEST HOUR]` est
     #: présent sur la ligne, pour lever le plafond du bon montant sans re-dériver la règle.
     once_per_battle_melee_bonus_by_type: Dict[str, int]
+    toughness_bonus_waaagh_by_type: Dict[str, int]
+    #: `toughness_bonus` de `toughness_bonus_while_waaagh` (BannerNob) par type d'unité porteur.
+    #: Appliqué sur l'E cible quand le Waaagh est actif pour le joueur cible. 0 = pas de règle.
+    squadmates_by_type: Dict[str, Set[str]]
+    #: Unités que chaque leader peut mener (CAN_LEAD → types d'unité via leurs mots-clés).
+    #: Sert à `_pair_is_conditional` pour les grants croisés leader/menés.
 
 
 def load_analyzer_config() -> AnalyzerConfig:
@@ -288,6 +294,7 @@ def load_analyzer_config() -> AnalyzerConfig:
     unit_rules_by_type: Dict[str, Set[str]] = {}
     unit_move_after_shooting_distance_by_type: Dict[str, int] = {}
     once_per_battle_melee_bonus_by_type: Dict[str, int] = {}
+    toughness_bonus_waaagh_by_type: Dict[str, int] = {}
     unit_is_fly_by_type: Dict[str, bool] = {}
     unit_is_monster_or_vehicle_by_type: Dict[str, bool] = {}
     unit_socle_by_type: Dict[str, Any] = {}
@@ -329,6 +336,7 @@ def load_analyzer_config() -> AnalyzerConfig:
         blast_by_weapon: Dict[str, int] = {}
         cleave_by_weapon: Dict[str, int] = {}
         sustained_hits_by_weapon: Dict[str, int] = {}
+        atk_bonus_by_weapon: Dict[str, int] = {}
         combi_by_weapon: Dict[str, str] = {}
         for weapon in rng_weapons:
             if isinstance(weapon, dict):
@@ -389,6 +397,7 @@ def load_analyzer_config() -> AnalyzerConfig:
             "blast_by_weapon": blast_by_weapon,
             "cleave_by_weapon": cleave_by_weapon,
             "sustained_hits_by_weapon": sustained_hits_by_weapon,
+            "atk_bonus_by_weapon": atk_bonus_by_weapon,
             "rng_str_by_weapon": rng_str_by_weapon,
             "cc_str_by_weapon": cc_str_by_weapon,
             "cc_atk_by_weapon": cc_atk_by_weapon,
@@ -533,6 +542,33 @@ def load_analyzer_config() -> AnalyzerConfig:
                         f"{existing_bonus} vs {fh_bonus_val}"
                     )
                 once_per_battle_melee_bonus_by_type[unit_type] = fh_bonus_val
+            if "weapon_attacks_bonus_vs_designated_target" in rule_effect_ids:
+                rule_args = rule.get("rule_args", {})
+                weapon_code = rule_args.get("weapon_code")
+                attacks_bonus = rule_args.get("attacks_bonus", 0)
+                if not weapon_code:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
+                        f"rule_args.weapon_code for weapon_attacks_bonus_vs_designated_target"
+                    )
+                if not attacks_bonus:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
+                        f"rule_args.attacks_bonus for weapon_attacks_bonus_vs_designated_target"
+                    )
+                for _w in rng_weapons:
+                    if isinstance(_w, dict) and _w.get("code") == weapon_code:
+                        atk_bonus_by_weapon[require_key(_w, "display_name")] = int(attacks_bonus)
+                        break
+            if "toughness_bonus_while_waaagh" in rule_effect_ids:
+                rule_args = rule.get("rule_args", {})
+                t_bonus = rule_args.get("toughness_bonus", 0)
+                if not t_bonus:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
+                        f"rule_args.toughness_bonus for toughness_bonus_while_waaagh"
+                    )
+                toughness_bonus_waaagh_by_type[unit_type] = int(t_bonus)
         unit_rules_by_type[unit_type] = expanded_rule_ids
         unit_choice_effect_to_source_rules[unit_type] = choice_effect_to_source_rules_for_unit
 
@@ -540,6 +576,22 @@ def load_analyzer_config() -> AnalyzerConfig:
     for ut, rules in unit_rules_by_type.items():
         for rid in rules:
             rule_to_units.setdefault(rid, set()).add(ut)
+
+    # Mots-clés → types d'unité : sert à résoudre CAN_LEAD (keywords) vers des types TS concrets.
+    keyword_to_unit_types: Dict[str, Set[str]] = {}
+    for _ut, _ud in unit_registry.units.items():
+        for _kw_entry in _ud.get("UNIT_KEYWORDS", []):
+            _kw = str(require_key(_kw_entry, "keywordId")).strip().upper()
+            keyword_to_unit_types.setdefault(_kw, set()).add(_ut)
+    squadmates_by_type: Dict[str, Set[str]] = {}
+    for _ut, _ud in unit_registry.units.items():
+        _can_lead = _ud.get("CAN_LEAD", [])
+        if _can_lead:
+            _led: Set[str] = set()
+            for _kw in _can_lead:
+                _led.update(keyword_to_unit_types.get(str(_kw).strip().upper(), set()))
+            if _led:
+                squadmates_by_type[_ut] = _led
 
     # Capacités de FACTION (08.04 : Waaagh!, Oath of Moment). Elles ne sont dans aucun
     # `UNIT_RULES` — c'est le mot-clé de faction qui les porte, exactement comme le moteur les
@@ -639,4 +691,6 @@ def load_analyzer_config() -> AnalyzerConfig:
         max_turns=config_loader.get_max_turns(),
         bonus_malus_cap=config_loader.get_bonus_malus_cap(),
         once_per_battle_melee_bonus_by_type=once_per_battle_melee_bonus_by_type,
+        toughness_bonus_waaagh_by_type=toughness_bonus_waaagh_by_type,
+        squadmates_by_type=squadmates_by_type,
     )

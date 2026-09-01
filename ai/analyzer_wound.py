@@ -222,7 +222,25 @@ def target_bodyguard_toughness(state: Any, config: Any, target_id: str) -> Optio
         # la donnée disponible — on le dit au lieu de trancher. Bodyguards homogènes (le cas
         # courant) → la mort d'un socle ne change pas le max, le repli reste exact.
         return None
-    return max(toughness[m] for m in pool)
+    base_toughness = max(toughness[m] for m in pool)
+    # `toughness_bonus_while_waaagh` (BannerNob) : +N à l'E de la cible quand le Waaagh est actif
+    # pour le joueur cible. Miroir de `_target_highest_bodyguard_toughness` (engine). Le bonus est
+    # accordé par une figurine vivante de la pool — on vérifie via `model_types`, jamais deviné.
+    target_player = state.unit_player.get(target_id)
+    if target_player is not None:
+        waaagh_on = (
+            state.active_effects.get(int(target_player), {}).get("waaagh") == "on"  # get allowed
+        )
+        if waaagh_on:
+            # Cherche dans `mids` (tous les socles) et non dans `pool` (bodyguards) : le BannerNob
+            # est un CHARACTER, donc absent de `pool` — or c'est LUI qui porte le bonus Waaagh.
+            for m in mids:
+                mt = state.model_types.get(m)  # get allowed
+                bonus = config.toughness_bonus_waaagh_by_type.get(mt, 0)  # get allowed
+                if bonus:
+                    base_toughness += bonus
+                    break
+    return base_toughness
 
 
 def expected_wound_threshold(

@@ -1486,7 +1486,26 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 # §2.9 : les lignes DEAD (unité tuée par l'adversaire) portent le player du
                 # PROPRIÉTAIRE de l'unité et la phase COURANTE (phase de l'adversaire). Elles ne
                 # représentent pas une action volontaire du joueur victime → exclues du suivi.
-                _is_dead_event = bool(re.match(r'Unit \d+ DEAD model=', action_desc))
+                # Regex `\S*` absorbe les coordonnées optionnelles `(col,row)` — présentes quand
+                # `unit_with_coords` est fourni au step_logger, absentes sur les journaux antérieurs.
+                _dead_event_m = re.match(r'Unit (\d+)\S* DEAD model=(\S+)', action_desc)
+                _is_dead_event = _dead_event_m is not None
+                if _dead_event_m:
+                    _dead_uid = _dead_event_m.group(1)
+                    _dead_mid = _dead_event_m.group(2).rstrip()
+                    # Appliquer immédiatement la suppression : si c'est le DERNIER socle, il
+                    # n'y aura plus de [MODELS:] pour déclencher la purge `pending_model_removals`,
+                    # et le modèle resterait « fantôme » dans `positions_by_model`.
+                    _dead_unit_models = state.positions_by_model.get(_dead_uid)
+                    if _dead_unit_models is not None:
+                        _dead_unit_models.pop(_dead_mid, None)
+                        if not _dead_unit_models:
+                            state.positions_by_model.pop(_dead_uid, None)
+                    _pend = state.pending_model_removals.get(_dead_uid)
+                    if _pend is not None:
+                        _pend.discard(_dead_mid)
+                        if not _pend:
+                            state.pending_model_removals.pop(_dead_uid, None)
                 if phase != state.last_phase_by_player.get(int(player)):
                     _player_seq = state.phase_seq_current_turn.get(int(player))
                     if _player_seq is not None or phase == 'COMMAND':

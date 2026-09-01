@@ -1219,6 +1219,11 @@ def movement_set_advance_mode_handler(game_state: Dict[str, Any], unit_id: str, 
     par le flow squad par-figurine (bloc + placements fins, commit_move_plan).
     """
     unit = require_unit_by_id(game_state, unit_id)
+    # 09.03 / 09.06 : une escouade engagée (dans l'Engagement Range d'un ennemi) ne peut pas
+    # avancer — elle doit tomber en retraite (Fall Back). Refuser ici plutôt que de le détecter
+    # après le fait, c'est le même garde que pour le move normal (09.03, ligne ~1361).
+    if _squad_is_in_enemy_er(game_state, str(unit_id)):
+        return False, {"error": "unit_engaged", "unitId": unit["id"]}
     # Advance = engagement irréversible : marque l'escouade ``units_advanced`` (bloque tir/charge)
     # et fige son jet dans ``advance_rolls``. Jet figé : un squad déjà advancé réutilise son jet
     # (pas de re-roll), donc le mode survit aux cancel/ré-activations jusqu'à la fin de la phase.
