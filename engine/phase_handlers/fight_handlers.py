@@ -18,6 +18,7 @@ from .generic_handlers import end_activation
 from shared.data_validation import require_key
 from engine.utils.weapon_helpers import melee_weapons, get_max_melee_damage
 from engine.action_log_utils import append_action_log
+from engine.constants import PENDING_FIGHT_ALLOCATION_KEY
 from engine.game_utils import add_console_log, safe_print, enter_phase
 from engine.combat_utils import (
     normalize_coordinates,
@@ -4984,7 +4985,7 @@ def _fight_auto_defender(game_state: Dict[str, Any], target_sid: str) -> bool:
 
 
 FIGHT_CTX = ManualAllocCtx(
-    alloc_key="pending_fight_allocation",
+    alloc_key=PENDING_FIGHT_ALLOCATION_KEY,
     declare_order_action="squad_fight_declare_order",
     manual_alloc_action="squad_fight_manual_alloc",
     phase_label="fight",
@@ -5026,7 +5027,7 @@ def _fight_v11_manual_step(
 
     # Allocation manuelle des pertes (defenseur) en cours : seules les actions d allocation
     # passent ; toute autre action re-signale l attente (garde-fou, §J).
-    if "pending_fight_allocation" in game_state:
+    if PENDING_FIGHT_ALLOCATION_KEY in game_state:
         if atype == "squad_fight_declare_order":
             order = action.get("order")
             if order is None:
@@ -5044,7 +5045,7 @@ def _fight_v11_manual_step(
                 return True, res
             return _fight_v11_manual_state(game_state)
         if atype == "squad_fight_cancel":
-            del game_state["pending_fight_allocation"]
+            del game_state[PENDING_FIGHT_ALLOCATION_KEY]
             _fight_v11_log(game_state, "FIGHT allocation annulee par le joueur")
             return _fight_v11_manual_state(game_state)
         return True, manual_allocation_waiting_payload(game_state, FIGHT_CTX)

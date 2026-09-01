@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from typing import List
 
+from engine.constants import PENDING_SHOOT_ALLOCATION_KEY
 from tests.unit.engine._config_helpers import (
     ATTACHED_BODYGUARD as _BODYGUARD,
     ATTACHED_BODYGUARD_RULE as _REGLE_DU_BODYGUARD,
@@ -200,7 +201,7 @@ def test_escouade_sans_character_perd_ses_regles_a_la_derniere_figurine():
 def _open_shoot_allocation(engine, attacker_sid: str = "1", target_sid: str = "101") -> None:
     """Ouvre une activation de tir minimale — ce que lisent `destroy_model` et
     `_finalize_manual_allocation` (clé réelle `pending_shoot_allocation` de SHOOT_CTX)."""
-    engine.game_state["pending_shoot_allocation"] = {
+    engine.game_state[PENDING_SHOOT_ALLOCATION_KEY] = {
         "attacker_squad_id": attacker_sid,
         "summary": {"targets_meta": {target_sid: {}}},
         "weapon_groups": [],
@@ -260,7 +261,7 @@ def test_pas_de_sursis_sans_activation_ouverte():
     """Hors activation, la mort éteint immédiatement : le sursis n'est pas un délai global."""
     eng = _load(_scenario([_BODYGUARD, _LEADER, _ENEMY]))
     leader_mid = _leader_mid(eng)
-    assert "pending_shoot_allocation" not in eng.game_state
+    assert PENDING_SHOOT_ALLOCATION_KEY not in eng.game_state
 
     _kill(eng, leader_mid)
 

@@ -20,6 +20,11 @@ from typing import Any, Dict
 
 import pytest
 
+from engine.constants import (
+    PENDING_FIGHT_ALLOCATION_KEY,
+    PENDING_SHOOT_ALLOCATION_KEY,
+    PENDING_HAZARD_ALLOCATION_KEY,
+)
 from engine.action_decoder import (
     PENDING_FIGHT_TARGET_KEY,
     PENDING_FIGHT_WEAPON_KEY,
@@ -114,15 +119,15 @@ class TestStaleKeyPurgedAtReset:
         "key,sentinel",
         [
             (
-                "pending_fight_allocation",
+                PENDING_FIGHT_ALLOCATION_KEY,
                 {"attacker_squad_id": "101", "remaining_hits": [{"dmg": 1, "ap": 0, "mw": False}]},
             ),
             (
-                "pending_shoot_allocation",
+                PENDING_SHOOT_ALLOCATION_KEY,
                 {"attacker_squad_id": "1", "remaining_hits": [{"dmg": 1, "ap": 0, "mw": False}]},
             ),
             (
-                "pending_hazard_allocation",
+                PENDING_HAZARD_ALLOCATION_KEY,
                 {"squad_id": "101", "remaining_mw": 1},
             ),
         ],

@@ -21,6 +21,7 @@ import random
 import pytest
 
 from engine.phase_handlers import shooting_handlers
+from engine.constants import PENDING_HAZARD_ALLOCATION_KEY
 from engine.phase_handlers.shared_utils import build_manual_shoot_allocation, roll_hazard_for_unit
 from tests._state_invariants import turn_state_invariants
 from tests.unit.engine._state_builders import units_cache_entry as _uc
@@ -161,7 +162,7 @@ def test_le_log_est_publie_avant_le_choix_des_pertes(monkeypatch):
     hazard_logs = [l for l in gs["action_logs"] if l.get("type") == "hazard"]
     assert len(hazard_logs) == 1, "la ligne hazard doit être publiée une seule fois"
     assert "[HAZARD]" in hazard_logs[0]["message"]
-    assert "pending_hazard_allocation" in gs, "le joueur doit encore avoir à choisir ses pertes"
+    assert PENDING_HAZARD_ALLOCATION_KEY in gs, "le joueur doit encore avoir à choisir ses pertes"
 
 
 def test_une_seule_figurine_vehicule_ne_suffit_pas(monkeypatch):
