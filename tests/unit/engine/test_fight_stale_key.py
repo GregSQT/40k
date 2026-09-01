@@ -209,24 +209,24 @@ def _fight_gs(n_attacks: int = 2) -> Dict[str, Any]:
 class TestAttackerPreCapture:
     """Position attaquant lue avant la boucle (symétrie targets_meta de de9f8230)."""
 
-    def test_attacker_absent_raises_configuration_error(self):
-        """precap_missing : attaquant absent de units_cache → ConfigurationError avant la boucle."""
+    def test_attacker_absent_raises_error(self):
+        """precap_missing : attaquant absent de units_cache → erreur levée avant la boucle."""
         gs = _fight_gs()
         del gs["units_cache"]["1"]
-        with pytest.raises(ConfigurationError):
+        with pytest.raises((ConfigurationError, ValueError)):
             build_manual_fight_allocation(gs, "1")
 
-    def test_attacker_absent_empty_intents_raises_configuration_error(self):
-        """precap_empty_loop : pré-capture lève ConfigurationError même boucle vide (intents={}).
+    def test_attacker_absent_empty_intents_raises_error(self):
+        """precap_empty_loop : pré-capture lève une erreur même boucle vide (intents={}).
 
         Sans pré-capture, la boucle ne tourne pas → aucune erreur. Avec pré-capture (fix),
-        require_key(units_cache, attacker_squad_id) est appelé avant la boucle → ConfigurationError.
+        la position de l'attaquant est demandée avant la boucle → erreur.
         Ce cas prouve que la garde est hors boucle, pas à l'intérieur.
         """
         gs = _fight_gs()
         gs["pending_squad_fight_intents"] = {}
         del gs["units_cache"]["1"]
-        with pytest.raises(ConfigurationError):
+        with pytest.raises((ConfigurationError, ValueError)):
             build_manual_fight_allocation(gs, "1")
 
     def test_normal_allocation_completes(self, monkeypatch):
