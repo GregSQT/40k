@@ -105,6 +105,53 @@ class TestStaleKeyPurgedAtReset:
         eng.reset(seed=2)
         assert eng.game_state.get("pending_squad_shoot_intents") == {}
 
+    def test_pending_fight_allocation_cleared(self, _melee_file):
+        """stale_fight_alloc : pending_fight_allocation est effacée à chaque reset.
+
+        Sans ce pop, un épisode tronqué pendant une allocation manuelle combat gelait
+        l'épisode suivant dès le premier step (guard ligne 5065 bloque toute action).
+        """
+        eng = _engine(_melee_file)
+        eng.reset(seed=1)
+        eng.game_state["pending_fight_allocation"] = {
+            "attacker_squad_id": "101",
+            "targets_meta": [],
+            "remaining_hits": [{"dmg": 1, "ap": 0, "mw": False}],
+        }
+        eng.reset(seed=2)
+        assert "pending_fight_allocation" not in eng.game_state
+
+    def test_pending_shoot_allocation_cleared(self, _melee_file):
+        """stale_shoot_alloc : pending_shoot_allocation est effacée à chaque reset.
+
+        Sans ce pop, un épisode tronqué pendant une allocation manuelle tir gelait
+        l'épisode suivant dès le premier step (guard ligne 5056 bloque toute action).
+        """
+        eng = _engine(_melee_file)
+        eng.reset(seed=1)
+        eng.game_state["pending_shoot_allocation"] = {
+            "attacker_squad_id": "1",
+            "targets_meta": [],
+            "remaining_hits": [{"dmg": 1, "ap": 0, "mw": False}],
+        }
+        eng.reset(seed=2)
+        assert "pending_shoot_allocation" not in eng.game_state
+
+    def test_pending_hazard_allocation_cleared(self, _melee_file):
+        """stale_hazard_alloc : pending_hazard_allocation est effacée à chaque reset.
+
+        Sans ce pop, un épisode tronqué pendant une allocation hazardous gelait
+        l'épisode suivant dès le premier step (guard ligne 5022 bloque toute action).
+        """
+        eng = _engine(_melee_file)
+        eng.reset(seed=1)
+        eng.game_state["pending_hazard_allocation"] = {
+            "squad_id": "101",
+            "remaining_mw": 1,
+        }
+        eng.reset(seed=2)
+        assert "pending_hazard_allocation" not in eng.game_state
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Invariant 2 — pré-capture position attaquant dans _build_manual_allocation
