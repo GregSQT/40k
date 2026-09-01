@@ -58,20 +58,3 @@ Le solde du 2026-08-25 (sept symboles corrigés dans 4 docs) est archivé dans
 
 **Couverture du script** : `check_doc_references.py` passe 4 (ANCRES) couvre `Documentation/Roadmap/`, les contrats permanents, le corpus chantiers (`Documentation/Chantiers/` + `Documentation/Archives/chantiers/`) et désormais `Documentation/Reference/` (P2 livré le 2026-08-27). Passe LIENS sur tout le corpus vivant également active depuis P2.
 
----
-
-## Dette d'ancres G1/G2/G4 de tranches_et_ruptures §1bis {#dette-tranches}
-
-Le recensement G1/G2/G4 de `Documentation/Chantiers/v11/tranches_et_ruptures.md` §1bis est en fiabilité dégradée. **Interdiction d'ouvrir un chantier depuis une ligne non ✅ de ce recensement sans la re-vérifier contre le code d'abord** — c'est ainsi qu'est né le plan T7 faux.
-
----
-
-## §0.19 — T2→T5 revérifiés par lecture seule {#reverif-t2-t5}
-
-`Documentation/Chantiers/v11/index_v11.md` §0.19 le déclare lui-même : les ✅ de T2→T5 ne sont revérifiés que par LECTURE (aucune exécution), et la conformité littérale de T2 est indécidable. Dette de spec assumée, continue — distincte de la dette d'ancres G1/G2/G4 ci-dessus, qui porte sur le recensement de `tranches_et_ruptures.md` §1bis.
-
----
-
-## Bandeaux périmés index_v11 §0bis {#bandeaux-0bis}
-
-Bandeaux et chiffres périmés listés dans `Documentation/Chantiers/v11/index_v11.md` §0bis — signalés et volontairement non corrigés depuis le 2026-07-20. Assumé tant qu'aucune livraison ne rouvre ces sections ; traitement au fil de l'eau, comme les ancres.
