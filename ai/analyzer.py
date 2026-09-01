@@ -46,6 +46,14 @@ def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: A
 # anti-psychic — rien ne « joue » à un instant précis, donc il n'y a rien à compter.
 # Afficher "NOT USED" induirait en erreur (laisse croire que le moteur ne l'applique jamais).
 _INTERACTION_ONLY_WEAPON_RULES: frozenset[str] = frozenset({"PSYCHIC"})
+# Abilities d'unité qui accordent une règle d'arme à l'exécution (non déclarée dans la datasheet).
+# Une paire (règle, arme) observée dans step.log pour une de ces abilities n'est pas INVALID
+# mais CONDITIONAL — la règle est légitimement acquise sous condition (leader présent, après charge…).
+_GRANT_ABILITY_TO_WEAPON_RULE: Dict[str, str] = {
+    "grant_weapon_rule_melee": "SUSTAINED_HITS",
+    "grant_weapon_rule_melee_after_charge": "LETHAL_HITS",
+    "once_per_battle_melee_buff": "DEVASTATING_WOUNDS",
+}
 _VERTICAL_NOT_FETCHED: object = object()
 
 
@@ -1589,8 +1597,12 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
         ),
         'weapon_rules_invalid': sum(
             1 for (rule_name, weapon_key) in require_key(stats, 'weapon_rule_usage')
-            if rule_name not in stats['weapon_rule_to_weapons']
-            or weapon_key not in stats['weapon_rule_to_weapons'][rule_name]
+            if (rule_name not in stats['weapon_rule_to_weapons']
+                or weapon_key not in stats['weapon_rule_to_weapons'][rule_name])
+            and rule_name.upper() not in {
+                wr for ab, wr in _GRANT_ABILITY_TO_WEAPON_RULE.items()
+                if stats.get('rule_to_units', {}).get(ab, set()) & set(stats.get('unit_types_seen', set()))
+            }
         ),
         'episodes_ending': len(stats['episodes_without_end']) + len(stats['episodes_without_method']),
         'core_issues': len(stats['parse_errors']) + len(stats['unit_id_mismatches']),
@@ -3809,6 +3821,11 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     weapon_rule_to_weapons = require_key(stats, 'weapon_rule_to_weapons')
     unit_types_seen = set(require_key(stats, "unit_types_seen"))
     unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
+    _grantable_rules: Set[str] = {
+        weapon_rule
+        for ability, weapon_rule in _GRANT_ABILITY_TO_WEAPON_RULE.items()
+        if rule_to_units.get(ability, set()) & unit_types_seen
+    }
     expected_wr_keys = {
         (rule_name, weapon_key)
         for rule_name, weapon_keys in weapon_rule_to_weapons.items()
@@ -3822,10 +3839,14 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             p1 = counts.get(1, 0)  # get allowed: optional player counts
             p2 = counts.get(2, 0)  # get allowed: optional player counts
             has_rule = weapon_key in weapon_rule_to_weapons.get(rule_name, set())
-            # « INVALID » ne qualifie plus qu'une chose verifiable depuis step.log : une paire
-            # (regle, arme) observee alors que l'armurerie ne la declare pas.
+            # « INVALID » = paire observée que ni la datasheet ni une ability dynamique n'autorise.
+            # « CONDITIONAL » = paire non déclarée dans la datasheet mais accordée par une ability
+            # (grant_weapon_rule_melee, grant_weapon_rule_melee_after_charge, once_per_battle_melee_buff).
             if not has_rule:
-                validite = "INVALID"
+                if rule_name.upper() in _grantable_rules:
+                    validite = "CONDITIONAL"
+                else:
+                    validite = "INVALID"
             elif rule_name in _INTERACTION_ONLY_WEAPON_RULES:
                 validite = "N/A — KEYWORD"
             elif (p1 + p2) == 0:
