@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import pytest
 
+from engine.constants import PENDING_SHOOT_ALLOCATION_KEY
+
 pytestmark = pytest.mark.integration
 
 
@@ -603,7 +605,7 @@ class TestShootResolution:
             body = game.act("squad_shoot_validate", unitId=squad)
             # Les lots d'attaques ne sont exposés que tant qu'une blessure reste à allouer :
             # une salve sans sauvegarde ratée termine l'activation sans passer par là.
-            allocation = game.state.get("pending_shoot_allocation")
+            allocation = game.state.get(PENDING_SHOOT_ALLOCATION_KEY)
             if allocation is None:
                 continue
             for group in allocation["weapon_groups"]:

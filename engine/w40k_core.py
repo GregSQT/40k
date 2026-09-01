@@ -21,7 +21,12 @@ from shared.data_validation import (
     require_positive_int,
     require_present,
 )
-from engine.constants import DRAW_WINNER
+from engine.constants import (
+    DRAW_WINNER,
+    PENDING_FIGHT_ALLOCATION_KEY,
+    PENDING_SHOOT_ALLOCATION_KEY,
+    PENDING_HAZARD_ALLOCATION_KEY,
+)
 from engine.combat_utils import calculate_hex_distance, normalize_coordinates, resolve_dice_value, set_unit_coordinates
 from engine.hex_utils import phantom_bottom_hexes
 from engine.weapon_damage_cache import load_weapon_damage_table, stamp_weapon_keys, build_best_weapon_cache
@@ -1609,9 +1614,9 @@ class W40KEngine(gym.Env):
         # dessus — un épisode tronqué (turn limit) pendant une allocation humaine laisse ces clés
         # vivantes, et le guard step() (l.5022/5056/5065) bloque TOUTE action dès le premier step
         # de l'épisode suivant, gelant l'épisode indéfiniment.
-        self.game_state.pop("pending_fight_allocation", None)
-        self.game_state.pop("pending_shoot_allocation", None)
-        self.game_state.pop("pending_hazard_allocation", None)
+        self.game_state.pop(PENDING_FIGHT_ALLOCATION_KEY, None)
+        self.game_state.pop(PENDING_SHOOT_ALLOCATION_KEY, None)
+        self.game_state.pop(PENDING_HAZARD_ALLOCATION_KEY, None)
         # Les intents en attente (tir et combat) ne sont jamais purgés par game_state.update() ci-
         # dessous : un dict stale de l'épisode N déroute declare_attack_weapon_qty et
         # _build_manual_allocation au N+1. Remise à zéro explicite, identique à _fight_v11_phase_complete.
@@ -4840,7 +4845,7 @@ class W40KEngine(gym.Env):
 
         # Un choix d'attribution joueur est-il en attente ? → prompt (declaration d'ordre des
         # groupes puis/ou clic figurine), calque sur l'allocation des pertes au tir.
-        if self.game_state.get("pending_hazard_allocation") is not None:
+        if self.game_state.get(PENDING_HAZARD_ALLOCATION_KEY) is not None:
             from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload, HAZARD_CTX
             return True, manual_allocation_waiting_payload(self.game_state, HAZARD_CTX)
 
@@ -4854,7 +4859,7 @@ class W40KEngine(gym.Env):
         Enregistre l'ordre puis avance : nouveau point de decision (choix de figurine) →
         prompt ; allocation terminee → reprise du flux move (Fall Back ou mort de l'unité)."""
         from engine.phase_handlers.shared_utils import apply_manual_shoot_declare_order, HAZARD_CTX
-        pending = self.game_state.get("pending_hazard_allocation")
+        pending = self.game_state.get(PENDING_HAZARD_ALLOCATION_KEY)
         if pending is None:
             return False, {"error": "squad_hazard_declare_order: no pending hazard allocation"}
         order = action.get("order")
@@ -4873,7 +4878,7 @@ class W40KEngine(gym.Env):
         Applique 1 MW à la figurine choisie puis poursuit la séquence : si un nouveau choix
         apparaît → re-prompt ; sinon → reprise du flux move (Fall Back ou mort de l'unité)."""
         from engine.phase_handlers.shared_utils import apply_manual_shoot_allocation, HAZARD_CTX
-        pending = self.game_state.get("pending_hazard_allocation")
+        pending = self.game_state.get(PENDING_HAZARD_ALLOCATION_KEY)
         if pending is None:
             return False, {"error": "squad_hazard_allocate_model: no pending hazard allocation"}
         model_id = action.get("modelId")
@@ -5027,7 +5032,7 @@ class W40KEngine(gym.Env):
         # Desperate Escape (09.07) : tant qu'une attribution de mortal wounds (hazard) est en
         # attente d'un choix joueur, seul le clic figurine (squad_hazard_allocate_model) passe.
         if (
-            self.game_state.get("pending_hazard_allocation") is not None
+            self.game_state.get(PENDING_HAZARD_ALLOCATION_KEY) is not None
             and action.get("action") not in ("squad_hazard_allocate_model", "squad_hazard_declare_order")
         ):
             from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload, HAZARD_CTX
@@ -5061,7 +5066,7 @@ class W40KEngine(gym.Env):
         # Block gameplay actions while a manual casualty allocation is pending
         # (defenseur humain). Only the allocation action is allowed through.
         if (
-            self.game_state.get("pending_shoot_allocation") is not None
+            self.game_state.get(PENDING_SHOOT_ALLOCATION_KEY) is not None
             and action.get("action") not in ("squad_shoot_allocate_model", "squad_shoot_declare_order")
         ):
             from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload, SHOOT_CTX
@@ -5070,7 +5075,7 @@ class W40KEngine(gym.Env):
         # Idem combat (defenseur humain) : pendant l'allocation des pertes, seules les
         # actions d'allocation fight passent.
         if (
-            self.game_state.get("pending_fight_allocation") is not None
+            self.game_state.get(PENDING_FIGHT_ALLOCATION_KEY) is not None
             and action.get("action") not in ("squad_fight_manual_alloc", "squad_fight_declare_order", "squad_fight_cancel")
         ):
             from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload

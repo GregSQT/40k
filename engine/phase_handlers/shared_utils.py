@@ -44,6 +44,11 @@ MovePlan = Sequence[MovePlanEntry]
 
 
 from engine.action_log_utils import append_action_log, models_segment_for_unit
+from engine.constants import (
+    PENDING_FIGHT_ALLOCATION_KEY,
+    PENDING_SHOOT_ALLOCATION_KEY,
+    PENDING_HAZARD_ALLOCATION_KEY,
+)
 # `spatial_grid` ne depend que de `hex_utils` -> import direct sans cycle (il importe
 # `get_squad_move_budget` en local dans sa seule fonction qui en a besoin).
 from engine.spatial_grid import GRID_CELL_COUNT
@@ -218,7 +223,7 @@ def _target_defender_is_ai(game_state: Dict[str, Any], target_sid: str) -> bool:
 
 
 SHOOT_CTX = ManualAllocCtx(
-    alloc_key="pending_shoot_allocation",
+    alloc_key=PENDING_SHOOT_ALLOCATION_KEY,
     declare_order_action="squad_shoot_declare_order",
     manual_alloc_action="squad_shoot_manual_alloc",
     phase_label="shoot",
@@ -772,7 +777,7 @@ def _attack_allocation_in_progress(game_state: Dict[str, Any]) -> Optional[Dict[
     pending_hazard_allocation en est exclu a dessein : une blessure mortelle HAZARDOUS n est pas
     une attaque (24.15 / 06.03), le PDF ne lui accorde donc aucun sursis.
     """
-    for key in ("pending_shoot_allocation", "pending_fight_allocation"):
+    for key in (PENDING_SHOOT_ALLOCATION_KEY, PENDING_FIGHT_ALLOCATION_KEY):
         alloc = game_state.get(key)  # get allowed (l allocation n existe que pendant l activation)
         if alloc is not None:
             return alloc
@@ -10961,7 +10966,7 @@ def _finalize_manual_allocation(game_state: Dict[str, Any], ctx: ManualAllocCtx)
             attacker_squad_id, game_state, auto,
             n_rolls=hazardous_count, context_label="Hazardous",
         )
-        if not auto and "pending_hazard_allocation" in game_state:
+        if not auto and PENDING_HAZARD_ALLOCATION_KEY in game_state:
             # Joueur humain : l attribution des MW est un point de decision (05.03/06.02).
             # La main lui est rendue ; la reprise post-allocation lit `hazard_origin`.
             return manual_allocation_waiting_payload(game_state, HAZARD_CTX)
@@ -11504,7 +11509,7 @@ def _finalize_hazard_alloc_log(
 
 
 HAZARD_CTX = ManualAllocCtx(
-    alloc_key="pending_hazard_allocation",
+    alloc_key=PENDING_HAZARD_ALLOCATION_KEY,
     declare_order_action="squad_hazard_declare_order",
     manual_alloc_action="squad_hazard_manual_alloc",
     phase_label="move",

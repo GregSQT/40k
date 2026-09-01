@@ -24,6 +24,8 @@ from typing import Any, Dict
 
 import pytest
 
+from engine.constants import PENDING_SHOOT_ALLOCATION_KEY
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fix 1 — sort DEVASTATING_WOUNDS (ligne 9175)
@@ -133,7 +135,7 @@ class TestDevastatingWoundsSortOrder:
 
         build_manual_shoot_allocation(gs, "1")
 
-        alloc = gs.get("pending_shoot_allocation")
+        alloc = gs.get(PENDING_SHOOT_ALLOCATION_KEY)
         assert alloc, "allocation non créée — mode human-defender devrait laisser la structure"
         assert alloc["batches"], "batches vides — au moins un batch attendu"
         pool = alloc["batches"][0]["pool"]
