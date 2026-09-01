@@ -566,6 +566,7 @@ def unit_ability_attack_cap(
     unit_attack_limits: Dict[str, Any],
     per_unit_key: str,
     n_models: int,
+    living_mids: Optional[Set[str]] = None,
 ) -> int:
     """Plafond apporté par une capacité d'UNITÉ, propagée selon 19.04.
 
@@ -587,12 +588,27 @@ def unit_ability_attack_cap(
 
     La source peut être N'IMPORTE QUELLE unité composante (l'escouade ou un de ses meneurs) :
     on balaie donc tous les types présents dans l'unité, pas seulement celui de l'escouade.
+
+    `living_mids` — socles VIVANTS de l'unité sur cette ligne d'action (`[MODELS:]`). Quand
+    fourni, seuls les types de ces socles entrent dans `_types` : le moteur retire `own_rules`
+    dès que `native_alive` est faux (compute_unit_rules_in_effect), donc si tous les porteurs
+    natifs sont morts, aucune capacité d'unité ne doit être accordée. Sans ce filtre, `model_types`
+    conserve les morts tout l'épisode et rendrait le bonus même après décès du dernier porteur.
+    `None` = logs sans [MODELS:] → repli sur le comportement historique (model_types non filtré).
     """
-    _types = {squad_unit_type}
     _prefix = f"{unit_id}#"
-    for _mid, _mt in model_types.items():
-        if _mid.startswith(_prefix):
-            _types.add(_mt)
+    if living_mids is not None:
+        _types: Set[str] = {
+            _mt for _mid, _mt in model_types.items()
+            if _mid.startswith(_prefix) and _mid in living_mids
+        }
+        if not _types:
+            return 0
+    else:
+        _types = {squad_unit_type}
+        for _mid, _mt in model_types.items():
+            if _mid.startswith(_prefix):
+                _types.add(_mt)
     per_model_bonus = 0
     for _t in _types:
         limits = unit_attack_limits.get(_t)  # get allowed : type hors registre

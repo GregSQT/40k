@@ -627,10 +627,12 @@ def handle_shoot(
                 # (`shared_utils.py` — « la cible de l intent EST la cible designee »). Gater ce
                 # bonus sur `oath_target` faisait tomber le plafond sous le nombre de tirs légitimes
                 # dès qu'une escouade répartissait son tir sur une seconde cible.
+                _shooter_living = state.current_line_models.get(shooter_id)  # get allowed
                 atk_bonus_squad = unit_ability_attack_cap(
                     shooter_models, state.model_types, shooter_id, shooter_unit_type,
                     weapon_name_for_limits, config.unit_attack_limits,
                     "atk_bonus_by_weapon", n_shooter_models,
+                    living_mids=set(_shooter_living) if _shooter_living is not None else None,
                 )
                 max_allowed_shots = rng_nb_squad + blast_dice + rapid_fire_cap + atk_bonus_squad
                 if state.shot_sequence_counts[seq_key] > max_allowed_shots:

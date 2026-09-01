@@ -66,3 +66,36 @@ def test_aucune_capacite_dans_l_unite_donne_zero():
         ("5#6",), {"5#6": "Ancient"}, "5", "Ancient", "Bolt Rifle",
         limits_sans_regle, "atk_bonus_by_weapon", 1,
     ) == 0
+
+
+def test_porteurs_natifs_morts_perd_la_capacite():
+    """VERROU mort-porteur : model_types garde les morts, living_mids ne garde que les vivants.
+
+    Scénario : tous les Intercessors sont morts, seul l'Ancient (5#6) est vivant et tire.
+    model_types contient encore 5#0 et 5#4 (Intercessor) → sans filtre, _types inclurait
+    Intercessor → bonus accordé alors que le moteur l'a retiré (native_alive=False).
+    Avec living_mids={5#6}, seul le type Ancient entre dans _types → 0.
+    """
+    assert unit_ability_attack_cap(
+        ("5#6",), MODEL_TYPES, "5", "Intercessor", "Bolt Rifle",
+        LIMITS, "atk_bonus_by_weapon", 1,
+        living_mids={"5#6"},
+    ) == 0
+
+
+def test_porteurs_natifs_vivants_avec_living_mids():
+    """living_mids fourni, natives vivants → bonus accordé comme sans filtre."""
+    assert unit_ability_attack_cap(
+        ("5#0", "5#4", "5#6"), MODEL_TYPES, "5", "Intercessor", "Bolt Rifle",
+        LIMITS, "atk_bonus_by_weapon", 3,
+        living_mids={"5#0", "5#4", "5#6"},
+    ) == 6
+
+
+def test_living_mids_none_repli_historique():
+    """Sans living_mids, le repli historique (model_types non filtré) s'applique.
+
+    Régression : les appels anciens (logs sans [MODELS:]) continuent à rendre le bonus
+    via squad_unit_type, sans que la signature change ait cassé quoi que ce soit.
+    """
+    assert _cap(("5#0", "5#4", "5#6")) == 6
