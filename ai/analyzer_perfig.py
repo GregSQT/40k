@@ -660,7 +660,11 @@ def unit_ability_atk_bonus_vs_keyword_cap(
             if _mid.startswith(_prefix) and _mid in living_mids
         }
         if not _types:
-            return 0
+            if not living_mids:
+                return 0
+            if any(mid.startswith(_prefix) for mid in model_types):
+                return 0
+            _types = {squad_unit_type}
     else:
         _types = {squad_unit_type}
         for _mid, _mt in model_types.items():
@@ -712,7 +716,11 @@ def unit_blast_per5_nonmv_bonus(
             if _mid.startswith(_prefix) and _mid in living_mids
         }
         if not _types:
-            return 0
+            if not living_mids:
+                return 0
+            if any(mid.startswith(_prefix) for mid in model_types):
+                return 0
+            _types = {squad_unit_type}
     else:
         _types = {squad_unit_type}
         for _mid, _mt in model_types.items():

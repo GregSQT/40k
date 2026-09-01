@@ -13,7 +13,41 @@ Scénarios :
 """
 from __future__ import annotations
 
+from ai.analyzer_perfig import unit_ability_atk_bonus_vs_keyword_cap
 from tests.unit.ai._fabriques import entete_step_log
+
+_MODEL_TYPES = {"1#0": "BigMekDakkarig"}
+_LIMITS = {
+    "BigMekDakkarig": {
+        "atk_bonus_vs_keyword_by_weapon": {
+            "Blitzcannon": {"excluded_keywords": ["MONSTER", "VEHICLE"], "attacks_bonus": 6}
+        }
+    }
+}
+_TARGET_KWS: frozenset = frozenset()
+
+
+def _cap(living_mids=None, model_types=None):
+    return unit_ability_atk_bonus_vs_keyword_cap(
+        ("1#0",), model_types if model_types is not None else _MODEL_TYPES,
+        "1", "BigMekDakkarig", "Blitzcannon", _LIMITS, _TARGET_KWS, 1,
+        living_mids=living_mids,
+    )
+
+
+def test_dakkablitz_living_mids_vide_perd_bonus():
+    """living_mids={} → aucun socle vivant → 0, pas de fallback squad_unit_type."""
+    assert _cap(living_mids=set()) == 0
+
+
+def test_dakkablitz_porteurs_types_morts_mid_vivant_non_type_perd_bonus():
+    """Porteurs typés morts, mid vivant absent de model_types → 0 (pas de faux positif)."""
+    assert _cap(living_mids={"1#1"}, model_types={"1#0": "BigMekDakkarig"}) == 0
+
+
+def test_dakkablitz_mids_vivants_non_types_repli_squad_unit_type():
+    """model_types={} mais mids vivants → fallback squad_unit_type → bonus accordé."""
+    assert _cap(living_mids={"1#0"}, model_types={}) == 6
 
 SHOOTER_POS = (50, 50)
 TARGET_POS = (80, 80)

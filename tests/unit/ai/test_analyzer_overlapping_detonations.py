@@ -15,7 +15,37 @@ Scénarios :
 """
 from __future__ import annotations
 
+from ai.analyzer_perfig import unit_blast_per5_nonmv_bonus
 from tests.unit.ai._fabriques import entete_step_log
+
+_MODEL_TYPES = {"1#0": "EradicatorHeavyBolter", "1#1": "EradicatorHeavyBolter", "1#2": "EradicatorHeavyBolterSergeant"}
+_LIMITS = {
+    "EradicatorHeavyBolter": {"blast_per5_nonmv_weapons": {"Heavy Bolter"}},
+    "EradicatorHeavyBolterSergeant": {"blast_per5_nonmv_weapons": {"Heavy Bolter"}},
+}
+
+
+def _cap(living_mids=None, model_types=None, target_models_alive=6):
+    return unit_blast_per5_nonmv_bonus(
+        ("1#0", "1#1", "1#2"), model_types if model_types is not None else _MODEL_TYPES,
+        "1", "EradicatorHeavyBolter", "Heavy Bolter", _LIMITS, target_models_alive, 3,
+        living_mids=living_mids,
+    )
+
+
+def test_od_living_mids_vide_perd_bonus():
+    """living_mids={} → aucun socle vivant → 0, pas de fallback squad_unit_type."""
+    assert _cap(living_mids=set()) == 0
+
+
+def test_od_porteurs_types_morts_mid_vivant_non_type_perd_bonus():
+    """Porteurs typés morts, mid vivant absent de model_types → 0 (pas de faux positif)."""
+    assert _cap(living_mids={"1#3"}, model_types={"1#0": "EradicatorHeavyBolter"}) == 0
+
+
+def test_od_mids_vivants_non_types_repli_squad_unit_type():
+    """model_types={} mais mids vivants → fallback squad_unit_type → bonus OD accordé."""
+    assert _cap(living_mids={"1#0", "1#1", "1#2"}, model_types={}) == 3  # 6//5=1 × 3 tireurs
 
 SHOOTER_POS = (50, 50)
 TARGET_POS = (80, 80)
