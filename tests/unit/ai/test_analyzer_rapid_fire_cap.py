@@ -1,12 +1,12 @@
-"""Verrou — surcharge_atk tir : RAPID FIRE à demi-portée sans [RAPID FIRE:X] dans le log.
+"""Verrou — surcharge_atk tir : cap RAPID FIRE conditionnelle à la présence du token.
 
-Le token [RAPID FIRE:X] a été supprimé du log moteur le 2026-07-29 (modèle pool).
-Sans lui, `rapid_fire_bonus_for_this_shot` restait 0, et `rapid_fire_value_squad` n'était jamais
-ajouté au plafond → toute activation RAPID FIRE à demi-portée produisait un faux
-« shoot_over_rng_nb ». Fix : toujours additionner rapid_fire_value_squad dans max_allowed_shots.
+[RAPID FIRE:X] est émis par le moteur sur TOUTES les lignes d'un groupe quand la cible
+est à demi-portée, et ABSENT sinon. Le plafond doit donc inclure RF_CAP uniquement quand
+le token est présent — symétrique exact de [BLAST] via additive_rule_extra_dice.
 
-Cycle rouge→vert : réintroduire la conditionnelle supprimée dans shoot_handler.py L621 fait
-passer test_rapid_fire_legal_shots_not_flagged en rouge (2 faux positifs au lieu de 0).
+Cycle rouge→vert :
+  - test_half_range_legal_shots_not_flagged : remettre la cap inconditionnelle → 2 faux positifs.
+  - test_long_range_over_nb_is_caught       : remettre la cap inconditionnelle → violation manquée.
 """
 from __future__ import annotations
 
@@ -27,7 +27,8 @@ T = f"({TARGET[0]},{TARGET[1]})"
 
 PER_MODEL_CAP = NB * N_SHOOTERS       # 4
 RF_CAP = RF * N_SHOOTERS              # 2
-MAX_LEGAL = PER_MODEL_CAP + RF_CAP    # 6  — plafond correct avec RF
+MAX_LEGAL_HALF = PER_MODEL_CAP + RF_CAP    # 6 — plafond demi-portée (RF actif)
+MAX_LEGAL_LONG = PER_MODEL_CAP             # 4 — plafond longue portée (RF inactif)
 
 _MODELS = (
     f"[MODELS: 1#0@({SHOOTER[0]},{SHOOTER[1]},z0)"
@@ -50,20 +51,25 @@ _HEADER = entete_step_log(
 )
 
 
-def _shot(i: int) -> str:
-    """Une ligne de tir sans token [RAPID FIRE:X] — format post-2026-07-29."""
+def _shot(i: int, *, with_rf_token: bool) -> str:
+    """Ligne de tir avec ou sans [RAPID FIRE:X] selon que la cible est à demi-portée."""
     ts = f"[10:00:{2 + i:02d}]"
+    rf_tag = f" [RAPID FIRE:{RF}]" if with_rf_token else ""
     return (
-        f"{ts} E1 T1 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [{WEAPON}]"
+        f"{ts} E1 T1 P1 SHOOT : Unit 1{S} SHOT{rf_tag} Unit 101{T} with [{WEAPON}]"
         f" - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:0HP {_MODELS} {_SHOOTERS}"
         " [R:+0.0] [SUCCESS]\n"
     )
 
 
-def _stats(tmp_path, n_shots: int):
+def _stats(tmp_path, n_shots: int, *, with_rf_token: bool):
     import ai.analyzer as an
     log = tmp_path / "step.log"
-    log.write_text(_HEADER + "".join(_shot(i) for i in range(n_shots)) + EPISODE_TAIL)
+    log.write_text(
+        _HEADER
+        + "".join(_shot(i, with_rf_token=with_rf_token) for i in range(n_shots))
+        + EPISODE_TAIL
+    )
     return an.parse_step_log(str(log))
 
 
@@ -82,17 +88,29 @@ def test_registry_premise_boyz_shoota_has_rapid_fire():
     assert rf_rules[0] == f"RAPID_FIRE:{RF}", rf_rules[0]
 
 
-def test_rapid_fire_legal_shots_not_flagged(tmp_path):
-    """MAX_LEGAL tirs d'un groupe RF sans token [RAPID FIRE:X] → 0 violation (§1.7).
-
-    Avant fix : rapid_fire_bonus_for_this_shot=0 → cap=4 → 2 faux positifs (shots 5 et 6).
-    Après fix  : cap=4+2=6 → 0 violation.
-    """
-    stats = _stats(tmp_path, MAX_LEGAL)
+def test_half_range_legal_shots_not_flagged(tmp_path):
+    """MAX_LEGAL_HALF tirs à demi-portée (token [RAPID FIRE:X] présent) → 0 violation (§1.7)."""
+    stats = _stats(tmp_path, MAX_LEGAL_HALF, with_rf_token=True)
     assert stats["shoot_over_rng_nb"][1] == 0, stats["first_error_lines"]["shoot_over_rng_nb"][1]
 
 
-def test_beyond_rf_cap_is_still_caught(tmp_path):
-    """Anti-vert-vacant : un vrai dépassement au-delà de NB+RF est toujours compté."""
-    stats = _stats(tmp_path, MAX_LEGAL + 2)
+def test_half_range_beyond_rf_cap_is_caught(tmp_path):
+    """Anti-vert-vacant : un vrai dépassement au-delà de NB+RF à demi-portée est toujours compté."""
+    stats = _stats(tmp_path, MAX_LEGAL_HALF + 2, with_rf_token=True)
     assert stats["shoot_over_rng_nb"][1] == 2
+
+
+def test_long_range_over_nb_is_caught(tmp_path):
+    """Longue portée (pas de token) : NB+1 tirs → 1 violation détectée (cap = NB, pas NB+RF).
+
+    Avant fix : cap = NB+RF inconditionnellement → violation manquée (NB+1 ≤ NB+RF si RF≥1).
+    Après fix : cap = NB → NB+1 > NB → 1 violation.
+    """
+    stats = _stats(tmp_path, MAX_LEGAL_LONG + 1, with_rf_token=False)
+    assert stats["shoot_over_rng_nb"][1] == 1, stats["first_error_lines"]["shoot_over_rng_nb"][1]
+
+
+def test_long_range_legal_shots_not_flagged(tmp_path):
+    """Longue portée (pas de token) : NB tirs exacts → 0 violation."""
+    stats = _stats(tmp_path, MAX_LEGAL_LONG, with_rf_token=False)
+    assert stats["shoot_over_rng_nb"][1] == 0, stats["first_error_lines"]["shoot_over_rng_nb"][1]
