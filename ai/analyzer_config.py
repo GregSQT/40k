@@ -247,6 +247,16 @@ class AnalyzerConfig:
     unit_upper_keywords_by_type: Dict[str, FrozenSet[str]]
 
 
+def _rng_weapon_display_name(
+    rng_weapons: List[Any], weapon_code: str
+) -> Optional[str]:
+    """Display name du premier profil d'arme RNG dont le code correspond, ou None."""
+    for _w in rng_weapons:
+        if isinstance(_w, dict) and _w.get("code") == weapon_code:
+            return require_key(_w, "display_name")
+    return None
+
+
 def load_analyzer_config() -> AnalyzerConfig:
     """Load all static unit/weapon/rule config from disk. Called once per parse run.
 
@@ -568,10 +578,9 @@ def load_analyzer_config() -> AnalyzerConfig:
                         f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
                         f"rule_args.attacks_bonus for weapon_attacks_bonus_vs_designated_target"
                     )
-                for _w in rng_weapons:
-                    if isinstance(_w, dict) and _w.get("code") == weapon_code:
-                        atk_bonus_by_weapon[require_key(_w, "display_name")] = int(attacks_bonus)
-                        break
+                _dn = _rng_weapon_display_name(rng_weapons, weapon_code)
+                if _dn is not None:
+                    atk_bonus_by_weapon[_dn] = int(attacks_bonus)
             if "weapon_attacks_bonus_vs_keyword" in rule_effect_ids:
                 rule_args = rule.get("rule_args", {})
                 weapon_code = rule_args.get("weapon_code")
@@ -592,13 +601,12 @@ def load_analyzer_config() -> AnalyzerConfig:
                     str(k).strip().upper().replace(" ", "_").replace("-", "_")
                     for k in excluded_kws
                 ]
-                for _w in rng_weapons:
-                    if isinstance(_w, dict) and _w.get("code") == weapon_code:
-                        atk_bonus_vs_keyword_by_weapon[require_key(_w, "display_name")] = {
-                            "attacks_bonus": int(attacks_bonus),
-                            "excluded_keywords": _excl_norm,
-                        }
-                        break
+                _dn = _rng_weapon_display_name(rng_weapons, weapon_code)
+                if _dn is not None:
+                    atk_bonus_vs_keyword_by_weapon[_dn] = {
+                        "attacks_bonus": int(attacks_bonus),
+                        "excluded_keywords": _excl_norm,
+                    }
             if "grant_weapon_rule_vs_designated_target" in rule_effect_ids:
                 rule_args = rule.get("rule_args", {})
                 weapon_code = rule_args.get("weapon_code")
@@ -607,10 +615,9 @@ def load_analyzer_config() -> AnalyzerConfig:
                         f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
                         f"rule_args.weapon_code for grant_weapon_rule_vs_designated_target"
                     )
-                for _w in rng_weapons:
-                    if isinstance(_w, dict) and _w.get("code") == weapon_code:
-                        blast_per5_nonmv_weapons.add(require_key(_w, "display_name"))
-                        break
+                _dn = _rng_weapon_display_name(rng_weapons, weapon_code)
+                if _dn is not None:
+                    blast_per5_nonmv_weapons.add(_dn)
             if "toughness_bonus_while_waaagh" in rule_effect_ids:
                 rule_args = rule.get("rule_args", {})
                 t_bonus = rule_args.get("toughness_bonus", 0)
