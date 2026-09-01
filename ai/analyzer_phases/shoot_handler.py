@@ -647,10 +647,7 @@ def handle_shoot(
                     _tgt_type is None  # bénéfice du doute : type inconnu → non M/V
                     or not config.unit_is_monster_or_vehicle_by_type.get(_tgt_type, False)  # get allowed
                 )
-                _tgt_upper_kws = (
-                    config.unit_upper_keywords_by_type.get(_tgt_type, frozenset())  # get allowed
-                    if _tgt_type is not None else frozenset()
-                )
+                _tgt_upper_kws = config.unit_upper_keywords_by_type.get(_tgt_type, frozenset())  # get allowed
                 # `weapon_attacks_bonus_vs_keyword` (Dakkablitz) : +N A si cible hors excluded_keywords.
                 dakkablitz_bonus = unit_ability_atk_bonus_vs_keyword_cap(
                     shooter_models, state.model_types, shooter_id, shooter_unit_type,
@@ -659,14 +656,11 @@ def handle_shoot(
                 )
                 # `grant_weapon_rule_vs_designated_target` (Overlapping Detonations) :
                 # +target_size//5 A par figurine tirante, seulement vs non-MONSTER/VEHICLE.
-                od_bonus = (
-                    unit_blast_per5_nonmv_bonus(
-                        shooter_models, state.model_types, shooter_id, shooter_unit_type,
-                        weapon_name_for_limits, config.unit_attack_limits,
-                        frozen_target.models_alive, n_shooter_models,
-                        living_mids=_living_mids_set,
-                    )
-                    if _tgt_is_nonmv else 0
+                od_bonus = unit_blast_per5_nonmv_bonus(
+                    shooter_models, state.model_types, shooter_id, shooter_unit_type,
+                    weapon_name_for_limits, config.unit_attack_limits,
+                    _tgt_is_nonmv, frozen_target.models_alive, n_shooter_models,
+                    living_mids=_living_mids_set,
                 )
                 max_allowed_shots = (
                     rng_nb_squad + blast_dice + rapid_fire_cap
