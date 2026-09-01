@@ -8,7 +8,7 @@ an AnalyzerConfig that handlers can use as a read-only context.
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Set, Tuple
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
@@ -241,6 +241,10 @@ class AnalyzerConfig:
     squadmates_by_type: Dict[str, Set[str]]
     #: Unités que chaque leader peut mener (CAN_LEAD → types d'unité via leurs mots-clés).
     #: Sert à `_pair_is_conditional` pour les grants croisés leader/menés.
+    #: Mots-clés en MAJUSCULES par type d'unité (même normalisation que le moteur).
+    #: Sert à évaluer les conditions cible des règles Primitive B : Dakkablitz
+    #: (`weapon_attacks_bonus_vs_keyword`) vérifie que la cible ne porte pas `excluded_keywords`.
+    unit_upper_keywords_by_type: Dict[str, FrozenSet[str]]
 
 
 def load_analyzer_config() -> AnalyzerConfig:
@@ -297,6 +301,7 @@ def load_analyzer_config() -> AnalyzerConfig:
     toughness_bonus_waaagh_by_type: Dict[str, int] = {}
     unit_is_fly_by_type: Dict[str, bool] = {}
     unit_is_monster_or_vehicle_by_type: Dict[str, bool] = {}
+    unit_upper_keywords_by_type: Dict[str, FrozenSet[str]] = {}
     unit_socle_by_type: Dict[str, Any] = {}
     unit_choice_effect_to_source_rules: Dict[str, Dict[str, Set[str]]] = {}
     # Mots-clés de FACTION par type d'unité, sous la forme NORMALISÉE du moteur : c'est eux qui
@@ -331,12 +336,15 @@ def load_analyzer_config() -> AnalyzerConfig:
         unit_is_monster_or_vehicle_by_type[unit_type] = bool(
             keyword_ids_lower & {"monster", "vehicle"}
         )
+        unit_upper_keywords_by_type[unit_type] = frozenset(kw.upper() for kw in keyword_ids_lower)
         rng_nb_by_weapon: Dict[str, int] = {}
         rapid_fire_by_weapon: Dict[str, int] = {}
         blast_by_weapon: Dict[str, int] = {}
         cleave_by_weapon: Dict[str, int] = {}
         sustained_hits_by_weapon: Dict[str, int] = {}
         atk_bonus_by_weapon: Dict[str, int] = {}
+        atk_bonus_vs_keyword_by_weapon: Dict[str, Dict[str, Any]] = {}
+        blast_per5_nonmv_weapons: Set[str] = set()
         combi_by_weapon: Dict[str, str] = {}
         for weapon in rng_weapons:
             if isinstance(weapon, dict):
@@ -398,6 +406,8 @@ def load_analyzer_config() -> AnalyzerConfig:
             "cleave_by_weapon": cleave_by_weapon,
             "sustained_hits_by_weapon": sustained_hits_by_weapon,
             "atk_bonus_by_weapon": atk_bonus_by_weapon,
+            "atk_bonus_vs_keyword_by_weapon": atk_bonus_vs_keyword_by_weapon,
+            "blast_per5_nonmv_weapons": blast_per5_nonmv_weapons,
             "rng_str_by_weapon": rng_str_by_weapon,
             "cc_str_by_weapon": cc_str_by_weapon,
             "cc_atk_by_weapon": cc_atk_by_weapon,
@@ -560,6 +570,45 @@ def load_analyzer_config() -> AnalyzerConfig:
                     if isinstance(_w, dict) and _w.get("code") == weapon_code:
                         atk_bonus_by_weapon[require_key(_w, "display_name")] = int(attacks_bonus)
                         break
+            if "weapon_attacks_bonus_vs_keyword" in rule_effect_ids:
+                rule_args = rule.get("rule_args", {})
+                weapon_code = rule_args.get("weapon_code")
+                attacks_bonus = rule_args.get("attacks_bonus", 0)
+                excluded_kws = rule_args.get("excluded_keywords", [])
+                if not weapon_code:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
+                        f"rule_args.weapon_code for weapon_attacks_bonus_vs_keyword"
+                    )
+                if not attacks_bonus:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
+                        f"rule_args.attacks_bonus for weapon_attacks_bonus_vs_keyword"
+                    )
+                # Normalisation identique au moteur (shared_utils.py ligne ~10529).
+                _excl_norm = [
+                    str(k).strip().upper().replace(" ", "_").replace("-", "_")
+                    for k in excluded_kws
+                ]
+                for _w in rng_weapons:
+                    if isinstance(_w, dict) and _w.get("code") == weapon_code:
+                        atk_bonus_vs_keyword_by_weapon[require_key(_w, "display_name")] = {
+                            "attacks_bonus": int(attacks_bonus),
+                            "excluded_keywords": _excl_norm,
+                        }
+                        break
+            if "grant_weapon_rule_vs_designated_target" in rule_effect_ids:
+                rule_args = rule.get("rule_args", {})
+                weapon_code = rule_args.get("weapon_code")
+                if not weapon_code:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
+                        f"rule_args.weapon_code for grant_weapon_rule_vs_designated_target"
+                    )
+                for _w in rng_weapons:
+                    if isinstance(_w, dict) and _w.get("code") == weapon_code:
+                        blast_per5_nonmv_weapons.add(require_key(_w, "display_name"))
+                        break
             if "toughness_bonus_while_waaagh" in rule_effect_ids:
                 rule_args = rule.get("rule_args", {})
                 t_bonus = rule_args.get("toughness_bonus", 0)
@@ -668,6 +717,7 @@ def load_analyzer_config() -> AnalyzerConfig:
         unit_move_after_shooting_distance_by_type=unit_move_after_shooting_distance_by_type,
         unit_is_fly_by_type=unit_is_fly_by_type,
         unit_is_monster_or_vehicle_by_type=unit_is_monster_or_vehicle_by_type,
+        unit_upper_keywords_by_type=unit_upper_keywords_by_type,
         unit_socle_by_type=unit_socle_by_type,
         unit_choice_effect_to_source_rules=unit_choice_effect_to_source_rules,
         display_rule_name_to_ids=display_rule_name_to_ids,
