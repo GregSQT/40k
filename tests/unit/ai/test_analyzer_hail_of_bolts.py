@@ -36,8 +36,11 @@ _SETUP = (
     f" 1#1@({SHOOTER_POS[0]},{SHOOTER_POS[1]},z0)] [SUCCESS]\n"
     f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{T} DEPLOYED from (-1,-1) to {T}"
     f" [R:+0.0] [MODELS: 101#0@({TARGET_POS[0]},{TARGET_POS[1]},z0)] [SUCCESS]\n"
-    # Oath of Moment P1 → unité 101 : active weapon_attacks_bonus_vs_designated_target
-    "[10:00:01] T1 EFFECTS: P1 oath_target=101 | P2 none\n"
+    # Oath of Moment de P1 posé sur une TROISIÈME unité (999), jamais sur la cible tirée.
+    # « Cible désignée » = la cible déclarée du tir, pas l'Oath : le bonus doit tomber quand
+    # même. C'est le verrou de la régression du 2026-09-02 (gate `oath_target` → 4879 faux
+    # `shoot_over_rng_nb` sur le run de 300 épisodes).
+    "[10:00:01] T1 EFFECTS: P1 oath_target=999 | P2 none\n"
 )
 
 
@@ -75,6 +78,20 @@ def _stats(tmp_path, n_shots: int) -> dict:
         )
     )
     return an.parse_step_log(str(log))
+
+
+def test_bonus_applique_meme_si_la_cible_n_est_pas_l_oath_target(tmp_path):
+    """VERROU : l'Oath de P1 vise 999, le tir vise 101 — le bonus tombe quand même.
+
+    Le moteur (`shared_utils.py`) n'applique AUCUN filtre : « la cible de l intent EST la
+    cible designee ». Gater le bonus sur `oath_target` avait fait passer le plafond de 4 à 2
+    par figurine, donc 4 faux positifs sur ces 8 tirs légitimes.
+    """
+    stats = _stats(tmp_path, 8)
+    assert stats["shoot_over_rng_nb"][1] == 0, (
+        "Le bonus Hail of Bolts doit s'appliquer quelle que soit la cible de l'Oath ; "
+        f"obtenu {stats['shoot_over_rng_nb'][1]} erreur(s)"
+    )
 
 
 def test_8_tirs_bolt_rifle_hail_of_bolts_pas_d_erreur(tmp_path):

@@ -557,6 +557,58 @@ def per_model_attack_cap(
     return total
 
 
+def unit_ability_attack_cap(
+    shooters: Tuple[str, ...],
+    model_types: Dict[str, str],
+    unit_id: str,
+    squad_unit_type: str,
+    weapon_display_name: str,
+    unit_attack_limits: Dict[str, Any],
+    per_unit_key: str,
+    n_models: int,
+) -> int:
+    """Plafond apporté par une capacité d'UNITÉ, propagée selon 19.04.
+
+    JUMEAU INVERSE de `per_model_attack_cap`, et la distinction est la règle elle-même. Ce que
+    `per_model_attack_cap` résout — NB, [RAPID FIRE], [BLAST], [CLEAVE], [SUSTAINED HITS] — est
+    INTRINSÈQUE À L'ARME : chaque socle apporte ce que sa propre datasheet lui donne, et un
+    personnage rattaché tire avec SON arme, pas avec celle de l'escouade.
+
+    Une capacité d'UNITÉ obéit à la règle inverse. 19.04 : « abilities/rules that affect a unit
+    (or models in it) apply to EVERY model in an attached unit » — seules les capacités visant un
+    socle nommé (enhancement, wargear) restent locales. Hail of Bolts
+    (`weapon_attacks_bonus_vs_designated_target`) est une capacité d'escouade : elle vaut donc
+    aussi pour l'Ancient et le Captain rattachés, dont la datasheet ne la porte pas.
+
+    Le moteur applique déjà cette lecture — `shared_utils.py` lit les arguments sur
+    `attacker_unit`, jamais sur le socle. Résoudre le bonus par datasheet individuelle refusait
+    aux personnages rattachés un bonus que le moteur leur accorde : 2447 faux
+    `shoot_over_rng_nb` sur le run de 300 épisodes du 2026-09-02.
+
+    La source peut être N'IMPORTE QUELLE unité composante (l'escouade ou un de ses meneurs) :
+    on balaie donc tous les types présents dans l'unité, pas seulement celui de l'escouade.
+    """
+    _types = {squad_unit_type}
+    _prefix = f"{unit_id}#"
+    for _mid, _mt in model_types.items():
+        if _mid.startswith(_prefix):
+            _types.add(_mt)
+    per_model_bonus = 0
+    for _t in _types:
+        limits = unit_attack_limits.get(_t)  # get allowed : type hors registre
+        if limits is None:
+            continue
+        value = resolve_weapon_value(
+            weapon_display_name, require_key(limits, per_unit_key), {},
+        )
+        if value is not None and value > per_model_bonus:
+            per_model_bonus = value
+    if not per_model_bonus:
+        return 0
+    # Le bonus modifie la caractéristique d'Attaques : il vaut PAR SOCLE qui tire, comme le NB.
+    return per_model_bonus * (len(shooters) if shooters else n_models)
+
+
 def models_for_unit(
     positions_by_model: Dict[str, Dict[str, Tuple[int, int]]],
     unit_id: str,
