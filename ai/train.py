@@ -5177,7 +5177,7 @@ def main():
     from config_loader import BOARD_DIR_BY_INCHES_TO_SUBHEX
     if args.resolution is None:
         import re
-        _m = re.search(r"_x(\d+)$", args.agent)
+        _m = re.search(r"_x(\d+)", args.agent)
         if _m:
             args.resolution = int(_m.group(1))
         else:
