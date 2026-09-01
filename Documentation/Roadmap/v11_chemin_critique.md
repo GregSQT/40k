@@ -69,7 +69,7 @@ python3 ai/train.py --agent ArmageddonAgent --training-config x1_long --resoluti
 | `x1_debug` | 96 | 0 | — |
 | `x5_debug` | 96 | 1 | — |
 | `x1` | 10 000 | 10 | 50 |
-| `x1_long` | 100 000 | 300 | **100** |
+| `x1_long` | 750 000 | 300 | **100** |
 
 Erreur-type avec `eval_episodes = 100` : `0,707/√(6 × 100)` ≈ **2,9 pts**. Durée : ~8 min (350 épisodes à 0,72 ép./s, mesuré le 2026-08-18). Aucun profil dédié nécessaire.
 
@@ -80,7 +80,7 @@ Erreur-type avec `eval_episodes = 100` : `0,707/√(6 × 100)` ≈ **2,9 pts**. 
 ## Mesure de référence {#mesure}
 
 `--test-only --step` sur le champion final P10 — solde §0.14, §0.67, critère T6 (via §10.6) d'un coup.
-Durée : **~8 min** (100 épisodes × 6 profils, mesuré le 2026-08-18). Un `--new` serait absurde ici : il jetterait le champion P10. Le ~6 h antérieur désignait la durée d'un run `x1_long --new` complet (5 h 54 mesuré le 2026-08-18, config actuelle 100 000 épisodes) — sans rapport avec la mesure.
+Durée : **~8 min** (100 épisodes × 6 profils, mesuré le 2026-08-18). Un `--new` serait absurde ici : il jetterait le champion P10. Le ~6 h antérieur désignait la durée d'un run `x1_long --new` complet (5 h 54 mesuré le 2026-08-18 sur l'ancienne config 100 000 épisodes — portée à 750 000 depuis) — sans rapport avec la mesure.
 
 ---
 
