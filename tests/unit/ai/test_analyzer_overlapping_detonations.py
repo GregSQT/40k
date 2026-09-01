@@ -28,7 +28,7 @@ _LIMITS = {
 def _cap(living_mids=None, model_types=None, target_models_alive=6):
     return unit_blast_per5_nonmv_bonus(
         ("1#0", "1#1", "1#2"), model_types if model_types is not None else _MODEL_TYPES,
-        "1", "EradicatorHeavyBolter", "Heavy Bolter", _LIMITS, target_models_alive, 3,
+        "1", "EradicatorHeavyBolter", "Heavy Bolter", _LIMITS, True, target_models_alive, 3,
         living_mids=living_mids,
     )
 

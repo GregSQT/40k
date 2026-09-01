@@ -557,6 +557,30 @@ def per_model_attack_cap(
     return total
 
 
+def _build_unit_types(
+    unit_id: str,
+    squad_unit_type: str,
+    model_types: Dict[str, str],
+    living_mids: Optional[Set[str]],
+) -> Set[str]:
+    _prefix = f"{unit_id}#"
+    if living_mids is not None:
+        _types: Set[str] = {
+            _mt for _mid, _mt in model_types.items()
+            if _mid.startswith(_prefix) and _mid in living_mids
+        }
+        if not _types:
+            if not living_mids or any(mid.startswith(_prefix) for mid in model_types):
+                return set()
+            return {squad_unit_type}
+        return _types
+    _types = {squad_unit_type}
+    for _mid, _mt in model_types.items():
+        if _mid.startswith(_prefix):
+            _types.add(_mt)
+    return _types
+
+
 def unit_ability_attack_cap(
     shooters: Tuple[str, ...],
     model_types: Dict[str, str],
@@ -596,29 +620,9 @@ def unit_ability_attack_cap(
     conserve les morts tout l'épisode et rendrait le bonus même après décès du dernier porteur.
     `None` = logs sans [MODELS:] → repli sur le comportement historique (model_types non filtré).
     """
-    _prefix = f"{unit_id}#"
-    if living_mids is not None:
-        _types: Set[str] = {
-            _mt for _mid, _mt in model_types.items()
-            if _mid.startswith(_prefix) and _mid in living_mids
-        }
-        if not _types:
-            if not living_mids:
-                # living_mids vide = aucun socle vivant dans ce segment → pas de bonus.
-                return 0
-            if any(mid.startswith(_prefix) for mid in model_types):
-                # model_types a des entrées pour cette unité mais aucune n'est vivante :
-                # tous les porteurs typés sont morts → native_alive=False côté moteur → 0.
-                return 0
-            # model_types n'a aucune entrée pour cette unité (log sans [MODEL_TYPES:] pour
-            # ces mids) : des socles vivants existent mais ne sont pas encore typés.
-            # Miroir de per_model_attack_cap qui utilise model_types.get(mid, squad_unit_type).
-            _types = {squad_unit_type}
-    else:
-        _types = {squad_unit_type}
-        for _mid, _mt in model_types.items():
-            if _mid.startswith(_prefix):
-                _types.add(_mt)
+    _types = _build_unit_types(unit_id, squad_unit_type, model_types, living_mids)
+    if not _types:
+        return 0
     per_model_bonus = 0
     for _t in _types:
         limits = unit_attack_limits.get(_t)  # get allowed : type hors registre
@@ -653,29 +657,19 @@ def unit_ability_atk_bonus_vs_keyword_cap(
     cible est inconnu, bénéfice du doute accordé au moteur (`target_upper_kws = frozenset()`
     → condition remplie → pas de faux positif).
     """
-    _prefix = f"{unit_id}#"
-    if living_mids is not None:
-        _types: Set[str] = {
-            _mt for _mid, _mt in model_types.items()
-            if _mid.startswith(_prefix) and _mid in living_mids
-        }
-        if not _types:
-            if not living_mids:
-                return 0
-            if any(mid.startswith(_prefix) for mid in model_types):
-                return 0
-            _types = {squad_unit_type}
-    else:
-        _types = {squad_unit_type}
-        for _mid, _mt in model_types.items():
-            if _mid.startswith(_prefix):
-                _types.add(_mt)
+    _types = _build_unit_types(unit_id, squad_unit_type, model_types, living_mids)
+    if not _types:
+        return 0
     per_model_bonus = 0
     for _t in _types:
         limits = unit_attack_limits.get(_t)  # get allowed : type hors registre
         if limits is None:
             continue
-        bonus_info = limits.get("atk_bonus_vs_keyword_by_weapon", {}).get(weapon_display_name)  # get allowed
+        _atk_bonus_map = limits.get("atk_bonus_vs_keyword_by_weapon", {})  # get allowed
+        bonus_info = next(
+            (_atk_bonus_map[n] for n in weapon_profile_names(weapon_display_name) if n in _atk_bonus_map),
+            None,
+        )
         if bonus_info is None:
             continue
         excluded = bonus_info["excluded_keywords"]
@@ -696,41 +690,27 @@ def unit_blast_per5_nonmv_bonus(
     squad_unit_type: str,
     weapon_display_name: str,
     unit_attack_limits: Dict[str, Any],
+    target_is_nonmv: bool,
     target_models_alive: int,
     n_models: int,
     living_mids: Optional[Set[str]] = None,
 ) -> int:
     """Plafond Overlapping Detonations (`grant_weapon_rule_vs_designated_target`).
 
-    +target_size//5 A par figurine tirante si l'arme a la règle OD. L'appelant a déjà vérifié
-    que la cible n'est pas MONSTER/VEHICLE. Retourne 0 si target_models_alive < 5 ou si aucun
-    type dans l'unité ne porte la règle pour cette arme. Même logique `living_mids` que
-    `unit_ability_attack_cap`.
+    +target_size//5 A par figurine tirante si `target_is_nonmv` et si l'arme a la règle OD.
+    Retourne 0 si target_models_alive < 5 ou si aucun type dans l'unité ne porte la règle
+    pour cette arme. Même logique `living_mids` que `unit_ability_attack_cap`.
     """
-    if target_models_alive < 5:
+    if not target_is_nonmv or target_models_alive < 5:
         return 0
-    _prefix = f"{unit_id}#"
-    if living_mids is not None:
-        _types: Set[str] = {
-            _mt for _mid, _mt in model_types.items()
-            if _mid.startswith(_prefix) and _mid in living_mids
-        }
-        if not _types:
-            if not living_mids:
-                return 0
-            if any(mid.startswith(_prefix) for mid in model_types):
-                return 0
-            _types = {squad_unit_type}
-    else:
-        _types = {squad_unit_type}
-        for _mid, _mt in model_types.items():
-            if _mid.startswith(_prefix):
-                _types.add(_mt)
+    _types = _build_unit_types(unit_id, squad_unit_type, model_types, living_mids)
+    if not _types:
+        return 0
     for _t in _types:
         limits = unit_attack_limits.get(_t)  # get allowed : type hors registre
         if limits is None:
             continue
-        if weapon_display_name in limits.get("blast_per5_nonmv_weapons", set()):  # get allowed
+        if weapon_display_name in require_key(limits, "blast_per5_nonmv_weapons"):
             extra = target_models_alive // 5
             return extra * (len(shooters) if shooters else n_models)
     return 0
