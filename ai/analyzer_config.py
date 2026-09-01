@@ -514,25 +514,25 @@ def load_analyzer_config() -> AnalyzerConfig:
                     )
                 unit_move_after_shooting_distance_by_type[unit_type] = scaled_distance
             if "once_per_battle_melee_buff" in rule_effect_ids:
-                _buff_args = rule.get("rule_args")
-                if not isinstance(_buff_args, dict):
+                rule_args = rule.get("rule_args")
+                if not isinstance(rule_args, dict):
                     raise ValueError(
                         f"Unit '{unit_type}' rule '{direct_rule_id}' must define rule_args "
                         f"for once_per_battle_melee_buff"
                     )
-                if "attacks_bonus" not in _buff_args:
+                if "attacks_bonus" not in rule_args:
                     raise ValueError(
                         f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
                         f"rule_args.attacks_bonus for once_per_battle_melee_buff"
                     )
-                _fh_bonus_val = int(_buff_args["attacks_bonus"])
-                _existing = once_per_battle_melee_bonus_by_type.get(unit_type)
-                if _existing is not None and _existing != _fh_bonus_val:
+                fh_bonus_val = int(rule_args["attacks_bonus"])
+                existing_bonus = once_per_battle_melee_bonus_by_type.get(unit_type)
+                if existing_bonus is not None and existing_bonus != fh_bonus_val:
                     raise ValueError(
                         f"Unit '{unit_type}' has conflicting once_per_battle_melee_buff bonuses: "
-                        f"{_existing} vs {_fh_bonus_val}"
+                        f"{existing_bonus} vs {fh_bonus_val}"
                     )
-                once_per_battle_melee_bonus_by_type[unit_type] = _fh_bonus_val
+                once_per_battle_melee_bonus_by_type[unit_type] = fh_bonus_val
         unit_rules_by_type[unit_type] = expanded_rule_ids
         unit_choice_effect_to_source_rules[unit_type] = choice_effect_to_source_rules_for_unit
 
