@@ -20,3 +20,22 @@
 | 2026-08-26 | ✅ fix-sentinel-isinstance check_doc_references (2026-08-26) — restaure le check d'identité `is` sur le sentinel _ANCHOR_UNSET dans check_doc_references.py | doc · — |
 | 2026-08-23 | ✅ `obs_size` justification réécrite (2026-08-23) — 16703 sur les 7 profils, lignée 20xxx retirée, appendice P4 dépollué de 5 champs étrangers ; verrou `obs_size` déplacé sur `Documentation/Reference/training/AI_TRAINING.md` | doc · — |
 | 2026-08-23 | ✅ Notes vitesse entraînement (2026-08-23) — aucun taux ép./h publié : mesures directes seules (x1 4 h 01, x1_long 5 h 54), `36k ep / hour` retiré de 4 configs | doc · — |
+
+---
+
+## Hygiène — correctifs ponctuels {#hygiene-correctifs-ponctuels}
+
+✅ **terrain_list.json source unique des terrains (2026-08-31)** — popup game preparation lit la liste depuis `config/board/44x60x5/terrain/terrain_list.json` via `GET /api/config/terrain-list` ; suppression des constantes dupliquées frontend/backend ; ajout d'un terrain = édition JSON uniquement.
+
+✅ **Simplification GameLog hasDetails (2026-08-31)** — refactor interne du composant GameLog.
+
+✅ **3 bugs GameLog corrigés (2026-08-31)** — correctifs de rendu/comportement GameLog.
+
+✅ **Simplification double str() overrun (2026-08-31)** — `best_str` local élimine le double appel `str(best_target_id)` dans `_continue_squad_fight_after_selection` (lignes 5874 et 5879) ; 12+34 tests verts.
+
+✅ **Correctifs 2026-09-01** — (1) 14 tests rouges : warmup_episodes P2–P10, lambda exhortation kwarg `from_exhortation`, scénarios terrain sélecteur `pve_mc1`/`pvp_test_mc2` créés. (2) Espace obs J4/J5 réservé : `reserved_mission_cont` → `bin`. (3) Crash training fight : `PENDING_FIGHT_WEAPON_KEY`/`TARGET_KEY`/intents purgés au `reset()` + pré-capture attaquant dans `_build_manual_allocation` ; 6 tests rouge→vert. (4) `PENDING_*_KEY` dans `constants.py`, nettoyage stale-key (`require_unit_position`), `pytest.raises` → `ValueError` exact dans `test_fight_stale_key.py` ; 11 verts. (5) Faux positifs INVALID §1.8 abilities dynamiques → CONDITIONAL : abilities éphémères (Oath, Waaagh, Litany) tracées comme CONDITIONAL et non INVALID dans rules_corpus. (6) Plafond RAPID FIRE : additionner rapid_fire_value_squad systématiquement (cap correct même sans `[SHOOTER_MODELS:]`). (7) Faux positifs surcharge_atk Finest Hour : token `[FINEST HOUR]` émis sur chaque ligne FOUGHT d'une activation Finest Hour ; `_cc_cap_for_line` lève le plafond de `attacks_bonus` par socle portant la règle, lu depuis `once_per_battle_melee_bonus_by_type` ; 30 tests verts.
+
+✅ **Faux ValueError overrun fight 12.06 corrigé (2026-08-31)** — garde `_did_overrun` ajoutée : une cible vivante mais non adjacente après le pile-in overrun ne déclenche plus ValueError, fallthrough vers `_fight_target_after_designated_death` ; test rouge→vert ajouté (`test_fight_target_reselect_overrun.py`, 12 verts).
+
+✅ **270 échecs pytest corrigés (2026-08-31)** — 15 causes distinctes : `units_cache_entry` sans `HP_CUR`/`HP_MAX` (192+ failures), `allocate_mortal_wounds` patché sur le mauvais module, `BASE_SHAPE` absent des fixtures, `bonus_malus_cap` manquant, `squad_cache` absent, `unit_by_id` absent, `UNIT_RULES` absent, regex accent, message d'erreur périmé, garde overrun manquante, `step_logger` retour silencieux, terrain pfm2 mauvais chemin, `capacites.md` absent, doc action size / decision_ctx périmés. Aucun chantier doc.
+

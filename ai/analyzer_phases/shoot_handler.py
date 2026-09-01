@@ -14,6 +14,7 @@ from ai.analyzer_perfig import (
     parse_shooter_models_segment,
     per_model_attack_cap,
     position_is_on_battlefield,
+    unit_ability_attack_cap,
 )
 
 if TYPE_CHECKING:
@@ -621,17 +622,15 @@ def handle_shoot(
                 # est le symétrique exact de ce que fait additive_rule_extra_dice pour [BLAST].
                 rapid_fire_cap = rapid_fire_value_squad if rapid_fire_match else 0
                 # `weapon_attacks_bonus_vs_designated_target` (Hail of Bolts) : +N A par figurine
-                # pour l'arme ciblant la cible désignée (Oath of Moment). Le bonus ne s'applique
-                # QUE si target_id == oath_target du tireur ; sans oath_target, aucun bonus.
-                _oath_target = state.active_effects.get(shooter_player_for_stats, {}).get("oath_target")
-                atk_bonus_squad = (
-                    per_model_attack_cap(
-                        shooter_models, state.model_types, shooter_unit_type, weapon_name_for_limits,
-                        config.unit_attack_limits, "atk_bonus_by_weapon", {},
-                        0, n_shooter_models,
-                    )
-                    if _oath_target is not None and target_id == _oath_target
-                    else 0
+                # pour l'arme, INCONDITIONNEL. « Cible désignée » = la cible déclarée du tir, PAS
+                # l'Oath of Moment : le moteur le dit explicitement et n'applique aucun filtre
+                # (`shared_utils.py` — « la cible de l intent EST la cible designee »). Gater ce
+                # bonus sur `oath_target` faisait tomber le plafond sous le nombre de tirs légitimes
+                # dès qu'une escouade répartissait son tir sur une seconde cible.
+                atk_bonus_squad = unit_ability_attack_cap(
+                    shooter_models, state.model_types, shooter_id, shooter_unit_type,
+                    weapon_name_for_limits, config.unit_attack_limits,
+                    "atk_bonus_by_weapon", n_shooter_models,
                 )
                 max_allowed_shots = rng_nb_squad + blast_dice + rapid_fire_cap + atk_bonus_squad
                 if state.shot_sequence_counts[seq_key] > max_allowed_shots:

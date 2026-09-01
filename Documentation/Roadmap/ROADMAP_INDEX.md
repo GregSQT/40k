@@ -96,19 +96,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
 ## ✅ Hygiène — correctifs ponctuels
 
-✅ **terrain_list.json source unique des terrains (2026-08-31)** — popup game preparation lit la liste depuis `config/board/44x60x5/terrain/terrain_list.json` via `GET /api/config/terrain-list` ; suppression des constantes dupliquées frontend/backend ; ajout d'un terrain = édition JSON uniquement.
-
-✅ **Simplification GameLog hasDetails (2026-08-31)** — refactor interne du composant GameLog.
-
-✅ **3 bugs GameLog corrigés (2026-08-31)** — correctifs de rendu/comportement GameLog.
-
-✅ **Simplification double str() overrun (2026-08-31)** — `best_str` local élimine le double appel `str(best_target_id)` dans `_continue_squad_fight_after_selection` (lignes 5874 et 5879) ; 12+34 tests verts.
-
-✅ **Correctifs 2026-09-01** — (1) 14 tests rouges : warmup_episodes P2–P10, lambda exhortation kwarg `from_exhortation`, scénarios terrain sélecteur `pve_mc1`/`pvp_test_mc2` créés. (2) Espace obs J4/J5 réservé : `reserved_mission_cont` → `bin`. (3) Crash training fight : `PENDING_FIGHT_WEAPON_KEY`/`TARGET_KEY`/intents purgés au `reset()` + pré-capture attaquant dans `_build_manual_allocation` ; 6 tests rouge→vert. (4) `PENDING_*_KEY` dans `constants.py`, nettoyage stale-key (`require_unit_position`), `pytest.raises` → `ValueError` exact dans `test_fight_stale_key.py` ; 11 verts. (5) Faux positifs INVALID §1.8 abilities dynamiques → CONDITIONAL : abilities éphémères (Oath, Waaagh, Litany) tracées comme CONDITIONAL et non INVALID dans rules_corpus. (6) Plafond RAPID FIRE : additionner rapid_fire_value_squad systématiquement (cap correct même sans `[SHOOTER_MODELS:]`). (7) Faux positifs surcharge_atk Finest Hour : token `[FINEST HOUR]` émis sur chaque ligne FOUGHT d'une activation Finest Hour ; `_cc_cap_for_line` lève le plafond de `attacks_bonus` par socle portant la règle, lu depuis `once_per_battle_melee_bonus_by_type` ; 30 tests verts.
-
-✅ **Faux ValueError overrun fight 12.06 corrigé (2026-08-31)** — garde `_did_overrun` ajoutée : une cible vivante mais non adjacente après le pile-in overrun ne déclenche plus ValueError, fallthrough vers `_fight_target_after_designated_death` ; test rouge→vert ajouté (`test_fight_target_reselect_overrun.py`, 12 verts).
-
-✅ **270 échecs pytest corrigés (2026-08-31)** — 15 causes distinctes : `units_cache_entry` sans `HP_CUR`/`HP_MAX` (192+ failures), `allocate_mortal_wounds` patché sur le mauvais module, `BASE_SHAPE` absent des fixtures, `bonus_malus_cap` manquant, `squad_cache` absent, `unit_by_id` absent, `UNIT_RULES` absent, regex accent, message d'erreur périmé, garde overrun manquante, `step_logger` retour silencieux, terrain pfm2 mauvais chemin, `capacites.md` absent, doc action size / decision_ctx périmés. Aucun chantier doc.
+Correctifs ponctuels livrés → `archives/doc.md#hygiene-correctifs-ponctuels`
 
 ---
 
@@ -141,6 +129,9 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 | tous | ✅ lots 2026-08-30/31 — capacités 06, moteur, analyzer, front, hygiène (voir git log + archives) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) [moteur.md](moteur.md) [analyzer.md](analyzer.md) [front.md](front.md) | ⚡ |
 | infra | ✅ **Couche demo_names (2026-08-31)** — substitution noms d'affichage à la sortie API via `DEMO_MODE=1` + `config/demo_overrides.json` ; moteur interne inchangé | — | ⚡ |
 | infra/tests | ✅ **Fix pytest_back 2026-08-31** — terrain-endless-duty.json sorti de divers/ ; fixture HP_CUR/col/row manquants (test_ignores_cover) ; pool W40K_BOARD_PATH épinglé (test_deployment_model_destinations_pool) ; assertion inversée corrigée (test_expected_damage) ; simplifications terrain-list | — | ⚡ |
+| ai/train | ✅ **Suffixe `_P<n>` dans la résolution de scénarios (2026-09-01)** — `worktree-agent-phase-suffix`, mergé `a19b8537` ; purge code mort `config_loader` + fix T1 `train.py` (erreurs masquées) | — | ⚡ |
+| analyzer | ✅ **9 corrections analyzer.log (2026-09-01)** — `worktree-fix-analyzer-bugs`, mergé `de516696` ; distance FLY euclidienne (move + charge), `pending_model_removals` dans `unit_effect_in_force`, plafond tir par-figurine, bonus E Waaagh (BannerNob), grant croisé de meneur dans `_pair_is_conditional`, événement DEAD retiré de `positions_by_model`, garde d'engagement avant ADVANCE ; 7 fichiers de tests, cycles rouge/vert | [analyzer.md](analyzer.md) | ⚡ |
+| analyzer | ✅ **Faux positifs `shoot_over_rng_nb` (2026-09-02)** — run 300 épisodes **5187 → 2243** (`surcharge_atk` 4879 → 1935). (1) gate `oath_target` erroné sur le bonus Hail of Bolts, contredit par le moteur (« la cible de l intent EST la cible designee ») — 2432 faux positifs ; (2) capacités d'unité non propagées aux personnages rattachés, contre 19.04 (« apply to EVERY model in an attached unit ») — 512 faux positifs. Nouveau `unit_ability_attack_cap`, jumeau inverse de `per_model_attack_cap`. **Reste ouvert : 1935 `surcharge_atk` de cause différente ([SUSTAINED HITS])** | [analyzer.md#faux-positifs-plafond-tir](analyzer.md#faux-positifs-plafond-tir) | ⚡ |
 
 ---
 
