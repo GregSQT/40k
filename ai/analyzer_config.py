@@ -336,7 +336,9 @@ def load_analyzer_config() -> AnalyzerConfig:
         unit_is_monster_or_vehicle_by_type[unit_type] = bool(
             keyword_ids_lower & {"monster", "vehicle"}
         )
-        unit_upper_keywords_by_type[unit_type] = frozenset(kw.upper() for kw in keyword_ids_lower)
+        unit_upper_keywords_by_type[unit_type] = frozenset(
+            kw.upper().replace(" ", "_").replace("-", "_") for kw in keyword_ids_lower
+        )
         rng_nb_by_weapon: Dict[str, int] = {}
         rapid_fire_by_weapon: Dict[str, int] = {}
         blast_by_weapon: Dict[str, int] = {}
