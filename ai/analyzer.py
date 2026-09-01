@@ -74,10 +74,31 @@ def _grantable_per_carrier(stats: Dict[str, Any]) -> Dict[str, Set[str]]:
     }
 
 
-def _pair_is_conditional(rule_name: str, weapon_key: str, grantable: Dict[str, Set[str]]) -> bool:
-    """True ssi le porteur de weapon_key possède l'ability qui accorde rule_name dynamiquement."""
+def _pair_is_conditional(
+    rule_name: str,
+    weapon_key: str,
+    grantable: Dict[str, Set[str]],
+    squadmates_by_type: Optional[Dict[str, Set[str]]] = None,
+) -> bool:
+    """True ssi le porteur de weapon_key possède l'ability qui accorde rule_name dynamiquement.
+
+    Deux cas :
+    - DIRECT : le porteur de l'arme EST le leader accordant la règle (weapon_key se termine par
+      « (LeaderType) »).
+    - CROISÉ : le porteur de l'arme est une unité MENÉE par ce leader (ex. « Choppa (Boyz) »
+      accordé par Bigboss via grant_weapon_rule_melee). Nécessite squadmates_by_type.
+    """
     granting_units = grantable.get(rule_name.upper(), set())
-    return weapon_key.endswith(tuple(f" ({ut})" for ut in granting_units))
+    if not granting_units:
+        return False
+    if weapon_key.endswith(tuple(f" ({ut})" for ut in granting_units)):
+        return True
+    if squadmates_by_type:
+        for gu in granting_units:
+            led_types = squadmates_by_type.get(gu, set())
+            if led_types and weapon_key.endswith(tuple(f" ({lt})" for lt in led_types)):
+                return True
+    return False
 
 
 def _compute_weapon_rule_not_used_warnings(stats: Dict[str, Any]) -> int:
@@ -1410,7 +1431,7 @@ def _per_model_move_violation(
     for mid, (o_col, o_row) in moved:
         d_col, d_row = new_models[mid]
         if is_fly:
-            if calculate_hex_distance(o_col, o_row, d_col, d_row) > budget:
+            if math.sqrt((d_col - o_col) ** 2 + (d_row - o_row) ** 2) > budget:
                 return True
         elif _bfs_shortest_path_length(
             o_col, o_row, d_col, d_row, budget,
@@ -1490,6 +1511,7 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
         for field in ('out_of_range', 'engaged_non_close_quarters')
     )
     _grantable = _grantable_per_carrier(stats)
+    _squadmates = stats.get('squadmates_by_type')  # get allowed : absent sur vieux stats
     weapon_rule_to_weapons = require_key(stats, 'weapon_rule_to_weapons')
     buckets = {
         # §1.1 — les six déplacements de la phase de Mouvement, plus le move réactif.
@@ -1624,7 +1646,7 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             1 for (rule_name, weapon_key) in require_key(stats, 'weapon_rule_usage')
             if (rule_name not in weapon_rule_to_weapons
                 or weapon_key not in weapon_rule_to_weapons[rule_name])
-            and not _pair_is_conditional(rule_name, weapon_key, _grantable)
+            and not _pair_is_conditional(rule_name, weapon_key, _grantable, _squadmates)
         ),
         'episodes_ending': len(stats['episodes_without_end']) + len(stats['episodes_without_method']),
         'core_issues': len(stats['parse_errors']) + len(stats['unit_id_mismatches']),
@@ -1784,6 +1806,7 @@ def parse_step_log(filepath: str) -> Dict:
     # Statistics structure
     stats = {
         'rule_to_units': rule_to_units,  # rule_id -> set of unit_types (for validity)
+        'squadmates_by_type': _cfg.squadmates_by_type,  # leader_type -> set of led unit_types
         'weapon_rule_to_weapons': weapon_rule_to_weapons,  # rule -> set of "weapon (unit)"
         'weapon_rule_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (rule, weapon_key) -> {1,2}
         # NB : il n'existe plus de compteur d'usage INVALIDE. Le seul qui ait jamais existe
@@ -3844,6 +3867,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     unit_types_seen = set(require_key(stats, "unit_types_seen"))
     unit_type_suffixes = tuple(f" ({unit_type})" for unit_type in unit_types_seen)
     _grantable = _grantable_per_carrier(stats)
+    _squadmates = stats.get('squadmates_by_type')  # get allowed : absent sur vieux stats
     expected_wr_keys = {
         (rule_name, weapon_key)
         for rule_name, weapon_keys in weapon_rule_to_weapons.items()
@@ -3861,7 +3885,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             # « CONDITIONAL » = paire non déclarée dans la datasheet mais accordée par une ability
             # (grant_weapon_rule_melee, grant_weapon_rule_melee_after_charge, once_per_battle_melee_buff).
             if not has_rule:
-                if _pair_is_conditional(rule_name, weapon_key, _grantable):
+                if _pair_is_conditional(rule_name, weapon_key, _grantable, _squadmates):
                     validite = "CONDITIONAL"
                 else:
                     validite = "INVALID"

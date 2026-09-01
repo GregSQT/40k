@@ -206,6 +206,10 @@ def analyzer_config(**overrides: Any) -> AnalyzerConfig:
         "cc_str_by_weapon_global": {},
         "cc_atk_by_weapon_global": {},
         "unit_toughness_by_type": {},
+        # Bonus E Waaagh par type (BannerNob) — vide par défaut, aucune fixture ne le teste ici.
+        "toughness_bonus_waaagh_by_type": {},
+        # Coéquipiers d'escouade par type (pour _pair_is_conditional cross-unit) — vide par défaut.
+        "squadmates_by_type": {},
         # 07.02 — nombre de tours max ; 0 = non disponible (valeur neutre pour les tests
         # qui ne testent pas la durée de la partie).
         "max_turns": 0,

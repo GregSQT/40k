@@ -472,15 +472,32 @@ class UnitRegistry:
         else:
             properties["FACTION_KEYWORDS"] = []
 
+        # Pattern 1d : CAN_LEAD (tableau de strings, possiblement multi-lignes)
+        # Jumeau de UNIT_KEYWORDS, mais les éléments sont des strings directes, pas des objets.
+        can_lead_match = re.search(
+            r'static\s+CAN_LEAD(?:\s*:\s*[^=]+)?\s*=\s*\[([\s\S]*?)\]\s*;',
+            content,
+            re.MULTILINE,
+        )
+        if can_lead_match:
+            can_lead_block = can_lead_match.group(1).strip()
+            properties["CAN_LEAD"] = (
+                [m[1] for m in re.findall(TS_QUOTED_STRING, can_lead_block)]
+                if can_lead_block else []
+            )
+        else:
+            properties["CAN_LEAD"] = []
+
         # Pattern 2: Static properties simples (HP_MAX, MOVE, etc.)
         static_pattern = r'static\s+([A-Z_]+)\s*=\s*([^;]+);'
         matches = re.findall(static_pattern, content)
 
         for prop_name, prop_value in matches:
-            # Skip RNG_WEAPONS/CC_WEAPONS, UNIT_RULES, UNIT_KEYWORDS, FACTION_KEYWORDS
+            # Skip RNG_WEAPONS/CC_WEAPONS, UNIT_RULES, UNIT_KEYWORDS, FACTION_KEYWORDS, CAN_LEAD
             # (handled separately above)
             if prop_name in [
                 "RNG_WEAPONS", "CC_WEAPONS", "UNIT_RULES", "UNIT_KEYWORDS", "FACTION_KEYWORDS",
+                "CAN_LEAD",
             ]:
                 continue
             

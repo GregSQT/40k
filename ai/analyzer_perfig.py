@@ -591,7 +591,11 @@ def unit_effect_in_force(
     mids = positions_by_model_for(state, unit_id)
     if not mids:
         return None
-    for mid in mids:
+    pending_dead = state.pending_model_removals.get(unit_id, frozenset())
+    effective_mids = {m for m in mids if m not in pending_dead}
+    if not effective_mids:
+        return None
+    for mid in effective_mids:
         model_type = state.model_types.get(mid)  # get allowed : figurine de type inconnu
         if model_type is None:
             return None

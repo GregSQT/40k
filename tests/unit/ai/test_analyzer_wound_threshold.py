@@ -76,6 +76,7 @@ class _State:
         self.unit_models_alive = {"9": alive}
         self.positions_by_model = {"9": {m: (0, 0) for m in MODEL_TYPES}} if known_models else {}
         self.active_effects: Dict[int, Dict[str, str]] = {}
+        self.unit_player: Dict[str, int] = {}
         self.current_episode_num = 1
 
 
