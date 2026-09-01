@@ -1492,20 +1492,19 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 _is_dead_event = _dead_event_m is not None
                 if _dead_event_m:
                     _dead_uid = _dead_event_m.group(1)
-                    _dead_mid = _dead_event_m.group(2).rstrip()
+                    _dead_mid = _dead_event_m.group(2)
                     # Appliquer immédiatement la suppression : si c'est le DERNIER socle, il
                     # n'y aura plus de [MODELS:] pour déclencher la purge `pending_model_removals`,
                     # et le modèle resterait « fantôme » dans `positions_by_model`.
-                    _dead_unit_models = state.positions_by_model.get(_dead_uid)
-                    if _dead_unit_models is not None:
-                        _dead_unit_models.pop(_dead_mid, None)
-                        if not _dead_unit_models:
-                            state.positions_by_model.pop(_dead_uid, None)
-                    _pend = state.pending_model_removals.get(_dead_uid)
-                    if _pend is not None:
-                        _pend.discard(_dead_mid)
-                        if not _pend:
-                            state.pending_model_removals.pop(_dead_uid, None)
+                    for _mapping, _rm in (
+                        (state.positions_by_model, lambda d, m: d.pop(m, None)),
+                        (state.pending_model_removals, lambda s, m: s.discard(m)),
+                    ):
+                        _inner = _mapping.get(_dead_uid)
+                        if _inner is not None:
+                            _rm(_inner, _dead_mid)
+                            if not _inner:
+                                _mapping.pop(_dead_uid, None)
                 if phase != state.last_phase_by_player.get(int(player)):
                     _player_seq = state.phase_seq_current_turn.get(int(player))
                     if _player_seq is not None or phase == 'COMMAND':

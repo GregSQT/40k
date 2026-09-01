@@ -89,8 +89,6 @@ def _pair_is_conditional(
       accordé par Bigboss via grant_weapon_rule_melee). Nécessite squadmates_by_type.
     """
     granting_units = grantable.get(rule_name.upper(), set())
-    if not granting_units:
-        return False
     if weapon_key.endswith(tuple(f" ({ut})" for ut in granting_units)):
         return True
     if squadmates_by_type:
@@ -1431,7 +1429,7 @@ def _per_model_move_violation(
     for mid, (o_col, o_row) in moved:
         d_col, d_row = new_models[mid]
         if is_fly:
-            if math.sqrt((d_col - o_col) ** 2 + (d_row - o_row) ** 2) > budget:
+            if (d_col - o_col) ** 2 + (d_row - o_row) ** 2 > budget ** 2:
                 return True
         elif _bfs_shortest_path_length(
             o_col, o_row, d_col, d_row, budget,
