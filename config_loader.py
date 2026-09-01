@@ -8,6 +8,7 @@ Place this file in the PROJECT ROOT directory.
 import json
 import os
 import logging
+import re
 from typing import Dict, Any, Optional
 from pathlib import Path
 
@@ -21,6 +22,8 @@ BOARD_DIR_BY_INCHES_TO_SUBHEX = {
     5: "board/44x60x5",
     10: "board/44x60x10",
 }
+
+_AGENT_PHASE_RE = re.compile(r"_P\d+$")
 
 #: Sections de `config/game_config.json` que le moteur lit DANS SA PROPRE CONFIG, quel que soit
 #: le chemin de construction (branche d'entrainement de `W40KEngine.__init__`, les deux
@@ -687,16 +690,17 @@ class ConfigLoader:
 
     def _resolve_agent_config_key(self, agent_key: str) -> str:
         """Resolve agent config directory using explicit inherits_from metadata."""
-        import re as _re
         direct_path = self.config_dir / "agents" / agent_key
         if not direct_path.exists():
             # _P<n> suffix = phase identifier; strip it and fall back to base config dir
-            base_key = _re.sub(r"_P\d+$", "", agent_key)
-            base_path = self.config_dir / "agents" / base_key
-            if base_key != agent_key and base_path.exists():
-                agent_key = base_key
-                direct_path = base_path
-            else:
+            base_key = _AGENT_PHASE_RE.sub("", agent_key)
+            if base_key != agent_key:
+                direct_path = self.config_dir / "agents" / base_key
+                if direct_path.exists():
+                    agent_key = base_key
+                else:
+                    direct_path = self.config_dir / "agents" / agent_key
+            if not direct_path.exists():
                 available_agents = sorted([p.name for p in (self.config_dir / "agents").iterdir() if p.is_dir()])
                 raise FileNotFoundError(
                     f"No config directory found for agent key '{agent_key}'. "
