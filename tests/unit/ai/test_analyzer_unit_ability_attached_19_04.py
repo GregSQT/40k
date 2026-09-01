@@ -99,3 +99,33 @@ def test_living_mids_none_repli_historique():
     via squad_unit_type, sans que la signature change ait cassé quoi que ce soit.
     """
     assert _cap(("5#0", "5#4", "5#6")) == 6
+
+
+def test_le_personnage_rattache_recoit_le_bonus_via_living_mids():
+    """VERROU production path 19.04 : le chemin avec living_mids rend le même résultat que None.
+
+    `_cap()` teste la branche `living_mids=None` (logs anciens). Ce test vérifie la branche
+    de PRODUCTION (shoot_handler passe `living_mids=set(current_line_models[id])`). Sans ce
+    verrou, une régression dans la branche `living_mids` serait invisible : le verrou principal
+    resterait vert mais le chemin réel serait cassé.
+    """
+    assert unit_ability_attack_cap(
+        ("5#0", "5#4", "5#6"), MODEL_TYPES, "5", "Intercessor", "Bolt Rifle",
+        LIMITS, "atk_bonus_by_weapon", 3,
+        living_mids={"5#0", "5#4", "5#6"},
+    ) == 6, "19.04 production path : Ancient doit recevoir le bonus via living_mids"
+
+
+def test_mids_vivants_non_types_repli_squad_unit_type():
+    """living_mids fourni mais aucun mid dans model_types → fallback squad_unit_type.
+
+    Scénario : log sans [MODEL_TYPES:] ou modèles non encore typés. Les mids sont dans
+    living_mids (le segment [MODELS:] les voit vivants) mais absents de model_types.
+    Sans fallback : _types = {} → return 0 → faux positif shoot_over_rng_nb sur une
+    escouade vivante. Avec fallback squad_unit_type : Intercessor → Hail of Bolts → bonus.
+    """
+    assert unit_ability_attack_cap(
+        ("5#0", "5#4"), {}, "5", "Intercessor", "Bolt Rifle",
+        LIMITS, "atk_bonus_by_weapon", 2,
+        living_mids={"5#0", "5#4"},
+    ) == 4, "fallback squad_unit_type obligatoire quand model_types ne type pas les vivants"

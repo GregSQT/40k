@@ -603,7 +603,11 @@ def unit_ability_attack_cap(
             if _mid.startswith(_prefix) and _mid in living_mids
         }
         if not _types:
-            return 0
+            # Aucun mid vivant typé dans model_types — le type de l'escouade reste le seul
+            # ancre possible (parité avec la branche else et avec per_model_attack_cap qui
+            # utilise model_types.get(mid, squad_unit_type)). Ne pas retourner 0 ici : un
+            # log sans [MODEL_TYPES:] pour ces mids ne signifie pas que les porteurs sont morts.
+            _types = {squad_unit_type}
     else:
         _types = {squad_unit_type}
         for _mid, _mt in model_types.items():
