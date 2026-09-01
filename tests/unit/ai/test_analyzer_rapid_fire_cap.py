@@ -5,10 +5,12 @@ est à demi-portée, et ABSENT sinon. Le plafond doit donc inclure RF_CAP unique
 le token est présent — symétrique exact de [BLAST] via additive_rule_extra_dice.
 
 Cycle rouge→vert :
-  - test_half_range_legal_shots_not_flagged : remettre la cap inconditionnelle → 2 faux positifs.
-  - test_long_range_over_nb_is_caught       : remettre la cap inconditionnelle → violation manquée.
+  - test_rapid_fire_cap[half-range-legal]  : remettre la cap inconditionnelle → 2 faux positifs.
+  - test_rapid_fire_cap[long-range-over-nb]: remettre la cap inconditionnelle → violation manquée.
 """
 from __future__ import annotations
+
+import pytest
 
 from tests.unit.ai._fabriques import entete_step_log, EPISODE_TAIL
 
@@ -88,29 +90,14 @@ def test_registry_premise_boyz_shoota_has_rapid_fire():
     assert rf_rules[0] == f"RAPID_FIRE:{RF}", rf_rules[0]
 
 
-def test_half_range_legal_shots_not_flagged(tmp_path):
-    """MAX_LEGAL_HALF tirs à demi-portée (token [RAPID FIRE:X] présent) → 0 violation (§1.7)."""
-    stats = _stats(tmp_path, MAX_LEGAL_HALF, with_rf_token=True)
-    assert stats["shoot_over_rng_nb"][1] == 0, stats["first_error_lines"]["shoot_over_rng_nb"][1]
-
-
-def test_half_range_beyond_rf_cap_is_caught(tmp_path):
-    """Anti-vert-vacant : un vrai dépassement au-delà de NB+RF à demi-portée est toujours compté."""
-    stats = _stats(tmp_path, MAX_LEGAL_HALF + 2, with_rf_token=True)
-    assert stats["shoot_over_rng_nb"][1] == 2
-
-
-def test_long_range_over_nb_is_caught(tmp_path):
-    """Longue portée (pas de token) : NB+1 tirs → 1 violation détectée (cap = NB, pas NB+RF).
-
-    Avant fix : cap = NB+RF inconditionnellement → violation manquée (NB+1 ≤ NB+RF si RF≥1).
-    Après fix : cap = NB → NB+1 > NB → 1 violation.
-    """
-    stats = _stats(tmp_path, MAX_LEGAL_LONG + 1, with_rf_token=False)
-    assert stats["shoot_over_rng_nb"][1] == 1, stats["first_error_lines"]["shoot_over_rng_nb"][1]
-
-
-def test_long_range_legal_shots_not_flagged(tmp_path):
-    """Longue portée (pas de token) : NB tirs exacts → 0 violation."""
-    stats = _stats(tmp_path, MAX_LEGAL_LONG, with_rf_token=False)
-    assert stats["shoot_over_rng_nb"][1] == 0, stats["first_error_lines"]["shoot_over_rng_nb"][1]
+@pytest.mark.parametrize("with_rf_token,n_shots,expected", [
+    pytest.param(True,  MAX_LEGAL_HALF,     0, id="half-range-legal"),
+    pytest.param(True,  MAX_LEGAL_HALF + 2, 2, id="half-range-over-cap"),
+    pytest.param(False, MAX_LEGAL_LONG + 1, 1, id="long-range-over-nb"),
+    pytest.param(False, MAX_LEGAL_LONG,     0, id="long-range-legal"),
+])
+def test_rapid_fire_cap(tmp_path, with_rf_token, n_shots, expected):
+    stats = _stats(tmp_path, n_shots, with_rf_token=with_rf_token)
+    assert stats["shoot_over_rng_nb"][1] == expected, (
+        stats["first_error_lines"]["shoot_over_rng_nb"][1]
+    )
