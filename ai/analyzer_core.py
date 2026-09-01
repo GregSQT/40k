@@ -1894,7 +1894,6 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         )
                         if _hz_match:
                             _hz_mw = int(_hz_match.group(1))
-                            stats['hazardous_mortal_wounds'][player] += _hz_mw
                             # Cible = acteur : le préfixe "Unit N(" d'action_desc est la seule
                             # source fiable de l'ID de l'unité sur une ligne SUFFERS (action_unit_id
                             # retient le dernier ID de header, pas celui de la ligne courante).
@@ -1949,6 +1948,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # de la MÊME activation ne doivent pas être fusionnés ici — cette mort
                             # est distincte, et le flush se produit au changement d'acteur.
                             if _hz_mw > 0 and "[ALL FNP SAVED]" not in action_desc:
+                                stats['hazardous_mortal_wounds'][player] += _hz_mw
                                 _apply_damage_and_handle_death(
                                     _hz_unit_id, _hz_unit_id, _hz_mw,
                                     player, turn, phase, state.line_number, state.current_episode_num,

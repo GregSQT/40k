@@ -597,6 +597,9 @@ def test_hazardous_all_fnp_saved_no_crash_no_damage_grammar6(tmp_path, monkeypat
     """
     stats = _parse(tmp_path, monkeypatch, _HAZARDOUS_ALL_FNP_SAVED, log_grammar=6)
     assert stats["parse_errors"] == [], "[ALL FNP SAVED] HAZARDOUS ne doit générer aucune parse_error"
+    assert stats["hazardous_mortal_wounds"][1] == 0, (
+        "[ALL FNP SAVED] : aucun dommage net, le compteur ne doit pas être incrémenté"
+    )
 
 
 def test_desperate_escape_all_fnp_saved_no_crash_no_damage_grammar6(tmp_path, monkeypatch):
