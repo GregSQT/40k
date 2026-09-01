@@ -625,6 +625,99 @@ def unit_ability_attack_cap(
     return per_model_bonus * (len(shooters) if shooters else n_models)
 
 
+def unit_ability_atk_bonus_vs_keyword_cap(
+    shooters: Tuple[str, ...],
+    model_types: Dict[str, str],
+    unit_id: str,
+    squad_unit_type: str,
+    weapon_display_name: str,
+    unit_attack_limits: Dict[str, Any],
+    target_upper_kws: FrozenSet[str],
+    n_models: int,
+    living_mids: Optional[Set[str]] = None,
+) -> int:
+    """Plafond Dakkablitz (`weapon_attacks_bonus_vs_keyword`) : +N A si cible hors excluded_keywords.
+
+    Même balayage multi-types et même logique `living_mids` que `unit_ability_attack_cap` (19.04).
+    Le bonus ne s'applique que si AUCUN mot-clé exclu n'est présent sur la cible. Si le type de
+    cible est inconnu, bénéfice du doute accordé au moteur (`target_upper_kws = frozenset()`
+    → condition remplie → pas de faux positif).
+    """
+    _prefix = f"{unit_id}#"
+    if living_mids is not None:
+        _types: Set[str] = {
+            _mt for _mid, _mt in model_types.items()
+            if _mid.startswith(_prefix) and _mid in living_mids
+        }
+        if not _types:
+            return 0
+    else:
+        _types = {squad_unit_type}
+        for _mid, _mt in model_types.items():
+            if _mid.startswith(_prefix):
+                _types.add(_mt)
+    per_model_bonus = 0
+    for _t in _types:
+        limits = unit_attack_limits.get(_t)  # get allowed : type hors registre
+        if limits is None:
+            continue
+        bonus_info = limits.get("atk_bonus_vs_keyword_by_weapon", {}).get(weapon_display_name)  # get allowed
+        if bonus_info is None:
+            continue
+        excluded = bonus_info["excluded_keywords"]
+        if any(kw in target_upper_kws for kw in excluded):
+            continue  # condition non remplie : cible porte un mot-clé exclu
+        ab = int(bonus_info["attacks_bonus"])
+        if ab > per_model_bonus:
+            per_model_bonus = ab
+    if not per_model_bonus:
+        return 0
+    return per_model_bonus * (len(shooters) if shooters else n_models)
+
+
+def unit_blast_per5_nonmv_bonus(
+    shooters: Tuple[str, ...],
+    model_types: Dict[str, str],
+    unit_id: str,
+    squad_unit_type: str,
+    weapon_display_name: str,
+    unit_attack_limits: Dict[str, Any],
+    target_models_alive: int,
+    n_models: int,
+    living_mids: Optional[Set[str]] = None,
+) -> int:
+    """Plafond Overlapping Detonations (`grant_weapon_rule_vs_designated_target`).
+
+    +target_size//5 A par figurine tirante si l'arme a la règle OD. L'appelant a déjà vérifié
+    que la cible n'est pas MONSTER/VEHICLE. Retourne 0 si target_models_alive < 5 ou si aucun
+    type dans l'unité ne porte la règle pour cette arme. Même logique `living_mids` que
+    `unit_ability_attack_cap`.
+    """
+    if target_models_alive < 5:
+        return 0
+    _prefix = f"{unit_id}#"
+    if living_mids is not None:
+        _types: Set[str] = {
+            _mt for _mid, _mt in model_types.items()
+            if _mid.startswith(_prefix) and _mid in living_mids
+        }
+        if not _types:
+            return 0
+    else:
+        _types = {squad_unit_type}
+        for _mid, _mt in model_types.items():
+            if _mid.startswith(_prefix):
+                _types.add(_mt)
+    for _t in _types:
+        limits = unit_attack_limits.get(_t)  # get allowed : type hors registre
+        if limits is None:
+            continue
+        if weapon_display_name in limits.get("blast_per5_nonmv_weapons", set()):  # get allowed
+            extra = target_models_alive // 5
+            return extra * (len(shooters) if shooters else n_models)
+    return 0
+
+
 def models_for_unit(
     positions_by_model: Dict[str, Dict[str, Tuple[int, int]]],
     unit_id: str,

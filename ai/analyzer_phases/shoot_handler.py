@@ -15,6 +15,8 @@ from ai.analyzer_perfig import (
     per_model_attack_cap,
     position_is_on_battlefield,
     unit_ability_attack_cap,
+    unit_ability_atk_bonus_vs_keyword_cap,
+    unit_blast_per5_nonmv_bonus,
 )
 
 if TYPE_CHECKING:
@@ -628,13 +630,46 @@ def handle_shoot(
                 # bonus sur `oath_target` faisait tomber le plafond sous le nombre de tirs légitimes
                 # dès qu'une escouade répartissait son tir sur une seconde cible.
                 _shooter_living = state.current_line_models.get(shooter_id)  # get allowed
+                _living_mids_set = set(_shooter_living) if _shooter_living is not None else None
                 atk_bonus_squad = unit_ability_attack_cap(
                     shooter_models, state.model_types, shooter_id, shooter_unit_type,
                     weapon_name_for_limits, config.unit_attack_limits,
                     "atk_bonus_by_weapon", n_shooter_models,
-                    living_mids=set(_shooter_living) if _shooter_living is not None else None,
+                    living_mids=_living_mids_set,
                 )
-                max_allowed_shots = rng_nb_squad + blast_dice + rapid_fire_cap + atk_bonus_squad
+                # Primitive B — mots-clés et type de la cible, nécessaires aux deux contrôles ci-dessous.
+                # `.get()` sur `unit_types` : la cible peut ne pas encore avoir été vue (rare) ;
+                # dans ce cas `frozenset()` → bénéfice du doute (pas de faux positif).
+                _tgt_type = state.unit_types.get(target_id)  # get allowed : cible non encore vue
+                _tgt_is_nonmv = (
+                    _tgt_type is not None
+                    and not config.unit_is_monster_or_vehicle_by_type.get(_tgt_type, False)  # get allowed
+                )
+                _tgt_upper_kws = (
+                    config.unit_upper_keywords_by_type.get(_tgt_type, frozenset())  # get allowed
+                    if _tgt_type is not None else frozenset()
+                )
+                # `weapon_attacks_bonus_vs_keyword` (Dakkablitz) : +N A si cible hors excluded_keywords.
+                dakkablitz_bonus = unit_ability_atk_bonus_vs_keyword_cap(
+                    shooter_models, state.model_types, shooter_id, shooter_unit_type,
+                    weapon_name_for_limits, config.unit_attack_limits,
+                    _tgt_upper_kws, n_shooter_models, living_mids=_living_mids_set,
+                )
+                # `grant_weapon_rule_vs_designated_target` (Overlapping Detonations) :
+                # +target_size//5 A par figurine tirante, seulement vs non-MONSTER/VEHICLE.
+                od_bonus = (
+                    unit_blast_per5_nonmv_bonus(
+                        shooter_models, state.model_types, shooter_id, shooter_unit_type,
+                        weapon_name_for_limits, config.unit_attack_limits,
+                        frozen_target.models_alive, n_shooter_models,
+                        living_mids=_living_mids_set,
+                    )
+                    if _tgt_is_nonmv else 0
+                )
+                max_allowed_shots = (
+                    rng_nb_squad + blast_dice + rapid_fire_cap
+                    + atk_bonus_squad + dakkablitz_bonus + od_bonus
+                )
                 if state.shot_sequence_counts[seq_key] > max_allowed_shots:
                     stats['shoot_over_rng_nb'][shooter_player_for_stats] += 1
                     if stats['first_error_lines']['shoot_over_rng_nb'][shooter_player_for_stats] is None:

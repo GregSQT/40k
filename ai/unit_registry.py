@@ -381,11 +381,21 @@ class UnitRegistry:
                 if rule_args_match:
                     rule_args_block = rule_args_match.group(1)
                     parsed_rule_args = {}
+                    for arr_match in re.finditer(
+                        r'([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\[([^\]]*)\]',
+                        rule_args_block,
+                    ):
+                        arr_key = arr_match.group(1)
+                        parsed_rule_args[arr_key] = [
+                            m.group(1) for m in re.finditer(r'"([^"]*)"', arr_match.group(2))
+                        ]
                     for arg_match in re.finditer(
                         r'([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:(-?\d+)|"(\d*D\d+(?:[+\-]\d+)?)"|([\'"])([A-Za-z_][A-Za-z0-9_]*)\4)',
                         rule_args_block,
                     ):
                         arg_key = arg_match.group(1)
+                        if arg_key in parsed_rule_args:
+                            continue
                         if arg_match.group(2) is not None:
                             arg_value: Union[int, str] = int(arg_match.group(2))
                         elif arg_match.group(3) is not None:
