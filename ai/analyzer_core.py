@@ -1970,7 +1970,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 'phase': phase,
                                 'line': line.strip(),
                                 'error': "ligne HAZARDOUS : format inattendu (attendu : "
-                                         "'SUFFERS N Mortal Wounds [HAZARDOUS]')",
+                                         "'SUFFERS N Mortal Wounds [HAZARDOUS]' ou '[HAZARDOUS:K]')",
                             })
                 elif " SUFFERS " in action_desc and "[DESPERATE ESCAPE]" in action_desc:
                         # 09.07 [DESPERATE ESCAPE] : blessures mortelles auto-infligées lors d'un
