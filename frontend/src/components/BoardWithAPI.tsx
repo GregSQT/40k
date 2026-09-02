@@ -31,6 +31,7 @@ import {
   resolveSelectedTerrain,
   setTerrainList,
   STORAGE_KEY as TERRAIN_STORAGE_KEY,
+  terrainsForMode,
   type TerrainEntry,
   terrainsForMode,
 } from "../utils/terrainSelection";
