@@ -771,7 +771,7 @@ def positions_by_model_for(state: Any, unit_id: str) -> Dict[str, Tuple[int, int
     `current_line_models` reflète toujours l'acteur réel de la ligne courante.
     """
     current = state.current_line_models.get(unit_id)  # get allowed
-    if current:
+    if current is not None:
         return current
     return state.positions_by_model.get(unit_id) or {}  # get allowed : jamais vue en per-figurine
 

@@ -136,3 +136,21 @@ def test_unit_effect_in_force_none_quand_unit_absente():
     )
     result = unit_effect_in_force(state, _config(), "102", "charge_roll_bonus")
     assert result is None
+
+
+def test_positions_by_model_for_dict_vide_ne_retombe_pas_sur_n_moins_1():
+    """current_line_models[unit_id] == {} → retourner {} sans retomber sur positions_by_model.
+
+    Distinguer None (absent) de {} (présent, 0 modèle vivant) : si tous les modèles sont morts
+    dans l'épisode courant, les données périmées de N-1 (autre épisode) ne doivent pas s'appliquer.
+    """
+    from ai.analyzer_perfig import positions_by_model_for
+
+    state = SimpleNamespace(
+        positions_by_model={"102": BOYZ_MODELS},
+        current_line_models={"102": {}},
+        model_types=MODEL_TYPES_BOYZ,
+        pending_model_removals={},
+    )
+    result = positions_by_model_for(state, "102")
+    assert result == {}, "dict vide dans current_line_models doit être retourné, pas les Boyz de N-1"
