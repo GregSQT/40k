@@ -20,7 +20,7 @@ import {
 import { useGameConfig } from "../hooks/useGameConfig";
 import { useGameLog } from "../hooks/useGameLog";
 import { apiFetch, logoutSession } from "../services/apiFetch";
-import type { GamePhase, GameState, PlayerId, TargetPreview, Unit } from "../types";
+import type { GamePhase, GameState, PlayerId, Unit } from "../types";
 import type { DeploymentState, UnitId } from "../types/game";
 import {
   canDropUnitIntoReserves,
@@ -1619,6 +1619,9 @@ export const BoardWithAPI: React.FC = () => {
       const playerType = pt[String(playerId)];
       if (!playerType) {
         throw new Error(`Missing player type for player ${playerId}`);
+      }
+      if (playerType !== "human" && playerType !== "ai") {
+        throw new Error(`Invalid player type for player ${playerId}: "${playerType}"`);
       }
       return playerType;
     };

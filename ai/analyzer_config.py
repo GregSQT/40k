@@ -590,9 +590,19 @@ def load_analyzer_config() -> AnalyzerConfig:
                     )
                 melee_atk_bonus_waaagh_by_type[unit_type] = mab_val
             if "weapon_attacks_bonus_vs_designated_target" in rule_effect_ids:
-                rule_args = rule.get("rule_args", {})
+                rule_args = rule.get("rule_args")
+                if not isinstance(rule_args, dict):
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' must define rule_args "
+                        f"for weapon_attacks_bonus_vs_designated_target"
+                    )
                 weapon_code = rule_args.get("weapon_code")
-                attacks_bonus = rule_args.get("attacks_bonus", 0)
+                if "attacks_bonus" not in rule_args:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
+                        f"rule_args.attacks_bonus for weapon_attacks_bonus_vs_designated_target"
+                    )
+                attacks_bonus = rule_args["attacks_bonus"]
                 if not weapon_code:
                     raise ValueError(
                         f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
@@ -607,10 +617,20 @@ def load_analyzer_config() -> AnalyzerConfig:
                 if _dn is not None:
                     atk_bonus_by_weapon[_dn] = int(attacks_bonus)
             if "weapon_attacks_bonus_vs_keyword" in rule_effect_ids:
-                rule_args = rule.get("rule_args", {})
+                rule_args = rule.get("rule_args")
+                if not isinstance(rule_args, dict):
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' must define rule_args "
+                        f"for weapon_attacks_bonus_vs_keyword"
+                    )
                 weapon_code = rule_args.get("weapon_code")
-                attacks_bonus = rule_args.get("attacks_bonus", 0)
-                excluded_kws = rule_args.get("excluded_keywords", [])
+                if "attacks_bonus" not in rule_args:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
+                        f"rule_args.attacks_bonus for weapon_attacks_bonus_vs_keyword"
+                    )
+                attacks_bonus = rule_args["attacks_bonus"]
+                excluded_kws = rule_args.get("excluded_keywords") or []  # get allowed: optionnel, absent = aucune exclusion
                 if not weapon_code:
                     raise ValueError(
                         f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
@@ -633,7 +653,12 @@ def load_analyzer_config() -> AnalyzerConfig:
                         "excluded_keywords": _excl_norm,
                     }
             if "grant_weapon_rule_vs_designated_target" in rule_effect_ids:
-                rule_args = rule.get("rule_args", {})
+                rule_args = rule.get("rule_args")
+                if not isinstance(rule_args, dict):
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' must define rule_args "
+                        f"for grant_weapon_rule_vs_designated_target"
+                    )
                 weapon_code = rule_args.get("weapon_code")
                 if not weapon_code:
                     raise ValueError(
@@ -644,8 +669,18 @@ def load_analyzer_config() -> AnalyzerConfig:
                 if _dn is not None:
                     blast_per5_nonmv_weapons.add(_dn)
             if "toughness_bonus_while_waaagh" in rule_effect_ids:
-                rule_args = rule.get("rule_args", {})
-                t_bonus = rule_args.get("toughness_bonus", 0)
+                rule_args = rule.get("rule_args")
+                if not isinstance(rule_args, dict):
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' must define rule_args "
+                        f"for toughness_bonus_while_waaagh"
+                    )
+                if "toughness_bonus" not in rule_args:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
+                        f"rule_args.toughness_bonus for toughness_bonus_while_waaagh"
+                    )
+                t_bonus = rule_args["toughness_bonus"]
                 if not t_bonus:
                     raise ValueError(
                         f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
@@ -663,12 +698,12 @@ def load_analyzer_config() -> AnalyzerConfig:
     # Mots-clés → types d'unité : sert à résoudre CAN_LEAD (keywords) vers des types TS concrets.
     keyword_to_unit_types: Dict[str, Set[str]] = {}
     for _ut, _ud in unit_registry.units.items():
-        for _kw_entry in _ud.get("UNIT_KEYWORDS", []):
+        for _kw_entry in _ud["UNIT_KEYWORDS"]:
             _kw = str(require_key(_kw_entry, "keywordId")).strip().upper()
             keyword_to_unit_types.setdefault(_kw, set()).add(_ut)
     squadmates_by_type: Dict[str, Set[str]] = {}
     for _ut, _ud in unit_registry.units.items():
-        _can_lead = _ud.get("CAN_LEAD", [])
+        _can_lead = _ud.get("CAN_LEAD") or []  # get allowed: optionnel, absent pour non-leaders
         if _can_lead:
             _led: Set[str] = set()
             for _kw in _can_lead:

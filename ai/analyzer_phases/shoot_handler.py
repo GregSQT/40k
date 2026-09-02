@@ -647,7 +647,10 @@ def handle_shoot(
                     _tgt_type is None  # bénéfice du doute : type inconnu → non M/V
                     or not config.unit_is_monster_or_vehicle_by_type.get(_tgt_type, False)  # get allowed
                 )
-                _tgt_upper_kws = config.unit_upper_keywords_by_type.get(_tgt_type, frozenset())  # get allowed
+                _tgt_upper_kws = (
+                    config.unit_upper_keywords_by_type.get(_tgt_type, frozenset())
+                    if _tgt_type is not None else frozenset()
+                )  # _tgt_type None → type inconnu → bénéfice du doute = frozenset()
                 # `weapon_attacks_bonus_vs_keyword` (Dakkablitz) : +N A si cible hors excluded_keywords.
                 dakkablitz_bonus = unit_ability_atk_bonus_vs_keyword_cap(
                     shooter_models, state.model_types, shooter_id, shooter_unit_type,

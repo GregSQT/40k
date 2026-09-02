@@ -32,9 +32,16 @@ def _load() -> None:
         raise FileNotFoundError(
             f"DEMO_MODE=1 est activé mais config/demo_overrides.json est introuvable : {exc}"
         ) from exc
-    _unit_names.update(data.get("unit_names", {}))
-    _weapon_names.update(data.get("weapon_names", {}))
-    _ability_names.update(data.get("ability_names", {}))
+    for _key, _mapping in [
+        ("unit_names", _unit_names),
+        ("weapon_names", _weapon_names),
+        ("ability_names", _ability_names),
+    ]:
+        if _key not in data:
+            raise KeyError(
+                f"config/demo_overrides.json manque la clé requise '{_key}'"
+            )
+        _mapping.update(data[_key])
 
 
 if _ACTIVE:

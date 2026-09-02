@@ -87,7 +87,11 @@ class TestChargeEligibility:
 
     def test_units_that_advanced_are_excluded_from_the_charge_pool(self, game):
         """t5_11_02_advance : une unité qui a avancé ne peut pas déclarer de charge."""
-        unit_id = game.pool("move_activation_pool")[0]
+        pool = game.pool("move_activation_pool")
+        unit_id = next((uid for uid in pool if not _engaged_pairs(game, uid)), None)
+        assert unit_id is not None, (
+            f"Aucune unité non-engagée dans move_activation_pool {pool} — le scénario a évolué"
+        )
         game.act("activate_unit", unitId=unit_id)
         game.act("advance", unitId=unit_id)
         assert unit_id in [str(u) for u in game.state["units_advanced"]]
