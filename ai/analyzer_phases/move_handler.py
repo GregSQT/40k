@@ -295,6 +295,12 @@ def _handle_fled(state, config, line, action_desc, player, turn, phase, fled_mat
         old_position = state.unit_positions.get(move_unit_id)
         _position_cache_set(state.unit_positions, move_unit_id, dest_col, dest_row)
         _debug_log(f"[FLED DEBUG] AFTER update: unit_positions[{move_unit_id}] = {state.unit_positions[move_unit_id]} (was {old_position})")
+        # Ancre mise à jour sans segment [MODELS:] (les lignes FLED n'en portent pas) : les
+        # socles restent à l'ancienne position dans positions_by_model → faux positifs
+        # shoot_at_engaged_enemy quand le moteur tire sur une cible que cette unité n'engage
+        # plus. On purge pour forcer le retour à l'ancre dans les contrôles suivants.
+        if (start_col, start_row) != (dest_col, dest_row):
+            state.positions_by_model.pop(move_unit_id, None)
 
         # Historique et collision gardés dans le bloc hp>0 : une unité morte n'ayant jamais
         # atteint dest, enregistrer sa destination provoquerait des faux positifs de collision
@@ -585,6 +591,10 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
 
         if require_key(state.unit_hp, move_unit_id) > 0:
             _position_cache_set(state.unit_positions, move_unit_id, dest_col, dest_row)
+            # Ancre mise à jour sans [MODELS:] (les lignes MOVED n'en portent pas) : purge pour
+            # forcer l'ancre dans les contrôles d'engagement suivants et éviter les faux
+            # positifs shoot_at_engaged_enemy sur des unités qui se sont éloignées de la cible.
+            state.positions_by_model.pop(move_unit_id, None)
 
         # Deux ennemis qui se déplacent vers le même hexe par un move ordinaire = chevauchement
         # d'ancre attendu en engagement (les socles réels sont distincts). En revanche, un ennemi

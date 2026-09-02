@@ -1637,6 +1637,9 @@ def handle_advance(
         return True  # equivalent to continue in the main loop
     if require_key(state.unit_hp, advance_unit_id) > 0:
         _position_cache_set(state.unit_positions, advance_unit_id, dest_col, dest_row)
+        # Même raison que MOVED/FLED : pas de [MODELS:] sur les lignes ADVANCED.
+        if (start_col, start_row) != (dest_col, dest_row):
+            state.positions_by_model.pop(advance_unit_id, None)
 
     advance_player = state.unit_player.get(advance_unit_id)
     real_colliding_units = []
