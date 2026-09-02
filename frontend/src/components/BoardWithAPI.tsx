@@ -2577,14 +2577,18 @@ export const BoardWithAPI: React.FC = () => {
                 const next = !sandboxMode;
                 setSandboxMode(next);
                 if (!next && sandboxFreeMove) {
-                  setSandboxFreeMove(false);
-                  apiProps.onSandboxSet?.(false).catch(console.error);
+                  apiProps
+                    .onSandboxSet?.(false)
+                    .then(() => setSandboxFreeMove(false))
+                    .catch(console.error);
                 }
               }}
               sandboxFreeMove={sandboxFreeMove}
               onSandboxFreeMoveToggle={(val) => {
-                setSandboxFreeMove(val);
-                apiProps.onSandboxSet?.(val).catch(console.error);
+                apiProps
+                  .onSandboxSet?.(val)
+                  .then(() => setSandboxFreeMove(val))
+                  .catch(console.error);
               }}
               onJumpToPhase={
                 sandboxMode

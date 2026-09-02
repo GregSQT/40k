@@ -4680,6 +4680,7 @@ def movement_commit_move_plan_handler(
         if squad_id_str not in pool:
             pool.append(squad_id_str)
         game_state.setdefault("units_moved", set()).discard(squad_id_str)
+        game_state.setdefault("units_fled", set()).discard(squad_id_str)
 
     return True, result
 

@@ -5233,6 +5233,8 @@ def move_plan_path_distances(
     """
     if not plan:
         return {}
+    if game_state.get("sandbox_free_move"):
+        return {str(entry[0]): 0.0 for entry in plan}
     models_cache = require_key(game_state, "models_cache")
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")

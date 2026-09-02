@@ -4401,6 +4401,9 @@ def _execute_sandbox_jump_to_phase(engine_instance: _EndPhaseEngine, action: Dic
     if "target_phase" not in action:
         raise KeyError("sandbox_jump_to_phase action missing required 'target_phase' field")
     target_phase = str(action["target_phase"])
+    _KNOWN_PHASES = {"deployment", "command", "move", "shoot", "charge", "fight"}
+    if target_phase not in _KNOWN_PHASES:
+        return False, {"error": "sandbox_jump_unknown_phase", "target_phase": target_phase}
     game_state = engine_instance.game_state
 
     max_iterations = 12  # 2 rounds complets de 6 phases max
