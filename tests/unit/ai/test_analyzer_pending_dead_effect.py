@@ -29,6 +29,7 @@ def _make_state(
         pending_removals[unit_id] = {model_id}
     return SimpleNamespace(
         positions_by_model=pos,
+        current_line_models={},
         model_types={model_id: model_type},
         pending_model_removals=pending_removals,
     )
@@ -70,6 +71,7 @@ def test_effet_faux_si_survivants_sans_la_regle():
         positions_by_model={
             unit_id: {"1#0": (10, 10), "1#1": (11, 10)},  # 1#0 = Warboss, 1#1 = Boyz
         },
+        current_line_models={},
         model_types={"1#0": "Warboss", "1#1": "Boyz"},
         pending_model_removals={unit_id: {"1#0"}},  # Warboss pending dead
     )
