@@ -1504,6 +1504,17 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # Dernier socle retiré : unit_hp doit refléter la mort pour que
                             # _build_move_bfs_blockers ne traite pas l'ancre comme bloqueur fantôme.
                             state.unit_hp[_dead_uid] = 0
+                    else:
+                        # positions_by_model déjà purgé (charge_handler + pile-in handler) :
+                        # _resync_living_models ne s'est pas encore déclenché pour cette unité —
+                        # utiliser unit_model_hp pour détecter le dernier socle.
+                        # Le pop ici (et non avant la branche) évite d'interférer avec
+                        # dead_model_positions_episode quand _pbm is not None (chemin normal).
+                        _umhp = state.unit_model_hp.get(_dead_uid)
+                        if _umhp is not None:
+                            _umhp.pop(_dead_mid, None)
+                            if not _umhp:
+                                state.unit_hp[_dead_uid] = 0
                     _prm = state.pending_model_removals.get(_dead_uid)
                     if _prm is not None:
                         _prm.discard(_dead_mid)
