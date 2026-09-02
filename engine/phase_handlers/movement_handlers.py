@@ -4692,6 +4692,8 @@ def movement_commit_move_plan_handler(
         game_state.setdefault("units_advanced", set()).discard(squad_id_str)
         game_state.setdefault("advance_rolls", {}).pop(squad_id_str, None)
         result["action"] = "move"
+        if game_state.get("unit_activation_count", 0) > 0:
+            game_state["unit_activation_count"] -= 1
 
     return True, result
 
