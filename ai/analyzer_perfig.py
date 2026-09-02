@@ -763,7 +763,16 @@ def unit_effect_in_force(
 
 
 def positions_by_model_for(state: Any, unit_id: str) -> Dict[str, Tuple[int, int]]:
-    """Socles vivants connus d'une escouade, `{}` si l'analyzer ne les a jamais vus."""
+    """Socles vivants connus d'une escouade, `{}` si l'analyzer ne les a jamais vus.
+
+    La ligne courante (`current_line_models`) prime sur l'état N-1 (`positions_by_model`) :
+    en entraînement parallèle, un épisode précédent peut contaminer `positions_by_model`
+    avec un type d'unité différent pour le même unit_id (ex. Boyz/Bigboss vs Eradicator).
+    `current_line_models` reflète toujours l'acteur réel de la ligne courante.
+    """
+    current = state.current_line_models.get(unit_id)  # get allowed
+    if current is not None:
+        return current
     return state.positions_by_model.get(unit_id) or {}  # get allowed : jamais vue en per-figurine
 
 
