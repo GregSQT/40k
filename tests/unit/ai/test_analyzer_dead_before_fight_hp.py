@@ -133,6 +133,6 @@ class TestDeadBeforeFightHp:
             alloc_model_id=None,
         )
 
-        assert unit_hp["105"] == 0, "unit_hp ne doit pas être supprimé ni restauré"
+        assert "105" in unit_hp and unit_hp["105"] == 0, "unit_hp ne doit pas être supprimé ni restauré"
         assert unit_models_alive["105"] == 0, "unit_models_alive ne doit pas descendre à -1"
         assert stats["current_episode_deaths"] == [], "pas de double-comptage dans deaths"
