@@ -4689,6 +4689,9 @@ def movement_commit_move_plan_handler(
             pool.append(squad_id_str)
         game_state.setdefault("units_moved", set()).discard(squad_id_str)
         game_state.setdefault("units_fled", set()).discard(squad_id_str)
+        game_state.setdefault("units_advanced", set()).discard(squad_id_str)
+        game_state.setdefault("advance_rolls", {}).pop(squad_id_str, None)
+        result["action"] = "move"
 
     return True, result
 
