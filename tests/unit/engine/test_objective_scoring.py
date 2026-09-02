@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from engine.game_state import GameStateManager
+from engine.game_state import GameStateManager, _resolve_objective_controller
 from engine.phase_handlers.shared_utils import build_units_cache
 from engine.combat_utils import normalize_coordinates
 from shared.data_validation import ConfigurationError
@@ -382,3 +382,71 @@ class TestBattleShockObjectiveControl:
 
         with pytest.raises(ConfigurationError, match="battle_shocked"):
             mgr.calculate_objective_control(gs)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — run_objective_control_checkpoint : units_cache vide (F3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCheckpointEmptyUnitsCache:
+
+    def test_units_cache_vide_ne_bloque_pas_le_checkpoint(self, monkeypatch):
+        """units_cache={} (toutes unités mortes) : calculate_objective_control est quand même appelé.
+
+        Avant correction, `not {}` était vrai → le checkpoint retournait False sans calculer,
+        laissant les objectifs figés après la mort de la dernière unité adverse.
+        """
+        config = {
+            "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5, "max_base_size_hex": 35},
+            "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
+            "controlled_player": 1,
+            "objective_control_check": {
+                "points": [{"phase": "move", "moment": "end"}],
+            },
+        }
+        mgr = GameStateManager(config, unit_registry=None)
+
+        calls: list = []
+        monkeypatch.setattr(mgr, "calculate_objective_control", lambda gs: calls.append(True))
+
+        gs = _make_gs([], turn=2, primary_objective=_primary_objective())
+        gs["units_cache"] = {}  # toutes unités mortes
+        gs["config"] = config
+
+        result = mgr.run_objective_control_checkpoint(gs, "move", "fight", turn_changed=False)
+
+        assert result is True, "le checkpoint doit tirer même avec units_cache vide"
+        assert calls, "calculate_objective_control doit être appelé quand units_cache={}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — _resolve_objective_controller : ValueError toujours atteignable (F8)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestResolveObjectiveControllerInvalidMethod:
+
+    def test_control_method_invalide_leve_meme_quand_secured(self):
+        """control_method inconnu → ValueError, même quand obj_secured_by == current_controller.
+
+        Avant correction, use_secured=True court-circuitait le elif/else, rendant le
+        ValueError inatteignable pour un contrôleur sécurisé.
+        """
+        with pytest.raises(ValueError, match="Unsupported control_method"):
+            _resolve_objective_controller(
+                player_1_oc=1,
+                player_2_oc=0,
+                current_controller=1,
+                obj_secured_by=1,  # même joueur → avant correction, use_secured=True → pas de raise
+                control_method="legacy",
+            )
+
+    def test_control_method_invalide_leve_sans_secured(self):
+        """control_method inconnu → ValueError quand aucun secured (chemin déjà couvert)."""
+        with pytest.raises(ValueError, match="Unsupported control_method"):
+            _resolve_objective_controller(
+                player_1_oc=1,
+                player_2_oc=0,
+                current_controller=None,
+                obj_secured_by=None,
+                control_method="legacy",
+            )

@@ -1407,8 +1407,7 @@ class GameStateManager:
                     _ish_local = self._get_inches_to_subhex()
                     if _ish_local != 1:
                         for w in m_rng:
-                            if "RNG" in w:
-                                w["RNG"] = int(w["RNG"]) * _ish_local
+                            w["RNG"] = int(require_key(w, "RNG")) * _ish_local
                         for w in m_cc:
                             if "RNG" in w:
                                 w["RNG"] = int(w["RNG"]) * _ish_local
@@ -1818,6 +1817,10 @@ class GameStateManager:
             normalized = f"{normalized}.json"
 
         ref_split, _, ref_filename = normalized.partition("/")
+        if ref_filename.startswith("/"):
+            raise ValueError(
+                f"Scenario '{scenario_file}' has unsafe roster ref in '{field_name}': {normalized!r}"
+            )
         VALID_AGENT_SPLITS = {"training", "holdout_regular", "holdout_hard"}
         VALID_OPPONENT_SPLITS = {"training", "holdout", "holdout_regular", "holdout_hard"}
         valid_splits = VALID_AGENT_SPLITS if roster_kind == "agent" else VALID_OPPONENT_SPLITS
@@ -3086,7 +3089,7 @@ class GameStateManager:
         if not (
             game_state.get("objectives")
             and game_state.get("primary_objective") is not None
-            and game_state.get("units_cache")
+            and game_state.get("units_cache") is not None
         ):
             return False
         self.calculate_objective_control(game_state)
@@ -3821,6 +3824,8 @@ def _resolve_objective_controller(
 
     Retourne (new_controller, should_clear_secured).
     """
+    if control_method not in ("secured", "default"):
+        raise ValueError(f"Unsupported control_method: {control_method}")
     use_secured = (
         control_method == "secured"
         or (obj_secured_by is not None and obj_secured_by == current_controller)
@@ -3831,14 +3836,12 @@ def _resolve_objective_controller(
             new_controller = 1
         elif player_2_oc > player_1_oc:
             new_controller = 2
-    elif control_method == "default":
+    else:
         new_controller = None
         if player_1_oc > player_2_oc:
             new_controller = 1
         elif player_2_oc > player_1_oc:
             new_controller = 2
-    else:
-        raise ValueError(f"Unsupported control_method: {control_method}")
     should_clear = (
         obj_secured_by is not None
         and new_controller is not None
@@ -4404,7 +4407,9 @@ def set_oath_target(game_state: Dict[str, Any], player: int, unit_id: str) -> No
     if not is_unit_alive(target_id, game_state):
         raise ValueError(f"set_oath_target: l'unite {target_id!r} est detruite")
     _player_flag_map(game_state, "oath_target")[player_int] = target_id
-    game_state["pending_oath_selection"] = None
+    pending_oath = game_state.get("pending_oath_selection")
+    if pending_oath is not None and int(pending_oath) == player_int:
+        game_state["pending_oath_selection"] = None
     from engine.game_utils import add_console_log
 
     add_console_log(game_state, f"P{player_int} declares Oath of Moment target: unit {target_id}")

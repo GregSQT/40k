@@ -1569,3 +1569,35 @@ def test_the_gym_seat_checks_the_waaagh_owner_against_the_state():
 
     assert read_pending_agent_decision(gs) is not None, "refus qui efface la décision"
     assert gs["waaagh_active"][1] is False and gs["waaagh_called"][1] is False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Verrou F9 — set_oath_target ne touche pas pending_oath_selection d'un autre joueur
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_set_oath_target_ne_efface_pas_la_designation_en_attente_du_mauvais_joueur():
+    """Joueur 1 désigne sa cible alors que joueur 2 a une désignation en attente → état P2 intact.
+
+    Avant correction, `set_oath_target` écrasait inconditionnellement `pending_oath_selection`
+    à None, quelle que soit la désignation en attente. Un état P2 pending survécu au tour
+    adverse (anormal mais atteignable via snapshot ou phase-skip) était effacé en silence.
+    """
+    gs = _command_state(1, p1_faction=ASTARTES, p2_faction=ORKS)
+    gs["pending_oath_selection"] = 2  # P2 est en attente (état anormal mais valide)
+
+    # P1 désigne sa cible (unité "2" appartient à P2)
+    set_oath_target(gs, 1, "2")
+
+    assert gs["pending_oath_selection"] == 2, (
+        "set_oath_target pour P1 ne doit pas effacer la désignation en attente de P2"
+    )
+
+
+def test_set_oath_target_efface_sa_propre_designation_en_attente():
+    """Joueur 1 désigne sa cible : sa désignation en attente est effacée (comportement normal)."""
+    gs = _command_state(1, p1_faction=ASTARTES, p2_faction=ORKS)
+    gs["pending_oath_selection"] = 1  # P1 est en attente
+
+    set_oath_target(gs, 1, "2")
+
+    assert gs["pending_oath_selection"] is None
