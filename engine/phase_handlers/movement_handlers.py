@@ -4587,13 +4587,6 @@ def movement_commit_move_plan_handler(
     # ici : c'est le même invariant, mais tenu par construction au lieu de la discipline de chacun.
     commit_move(plan, game_state, move_type)
 
-    # Advance déclaré mais invalidé par engagement réactif (09.03) : commit_move enregistre
-    # fall_back mais ne purge pas les flags advance posés par movement_set_advance_mode_handler.
-    # Purge inconditionnelle sur fall_back : une unité qui recule ne peut pas avoir avancé.
-    if move_type == "fall_back":
-        game_state["units_advanced"].discard(str(squad_id))
-        game_state["advance_rolls"].pop(str(squad_id), None)
-
     unit = require_unit_by_id(game_state, squad_id)
     # Sync ancre de la liste units sur l'ancre recalculee dans units_cache
     # (commit_move ne touche que models_cache/units_cache).

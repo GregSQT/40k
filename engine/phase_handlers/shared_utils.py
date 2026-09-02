@@ -6948,6 +6948,9 @@ def commit_move(
             game_state.setdefault("units_advanced", set()).add(squad_id)
         elif move_type == "fall_back":
             game_state.setdefault("units_fled", set()).add(squad_id)
+            # Purge advance flags : une unité qui recule ne peut pas avoir avancé.
+            game_state["units_advanced"].discard(squad_id)
+            game_state["advance_rolls"].pop(squad_id, None)
         elif move_type == "charge":
             game_state.setdefault("units_charged", set()).add(squad_id)
     finally:

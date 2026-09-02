@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from engine.phase_handlers import movement_handlers as mh
-from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache
+from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache, _squad_is_in_enemy_er
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
@@ -74,7 +74,6 @@ class TestSandboxFreeMove:
         gs = _make_gs(units, sandbox=True)
 
         # Prémisse : les deux unités doivent être engagées (ER = 10 > distance bord-à-bord ~2)
-        from engine.phase_handlers.shared_utils import _squad_is_in_enemy_er
         assert _squad_is_in_enemy_er(gs, "1"), (
             "prémisse : unit 1 doit être engagée pour que le test soit valide"
         )
@@ -159,7 +158,6 @@ class TestSandboxFreeMove:
         units = [_unit("1", 1, 5, 10), _unit("2", 2, 6, 10)]
         gs = _make_gs(units, sandbox=True)
 
-        from engine.phase_handlers.shared_utils import _squad_is_in_enemy_er
         assert _squad_is_in_enemy_er(gs, "1"), (
             "prémisse : unit 1 doit être engagée"
         )
@@ -182,7 +180,6 @@ class TestSandboxFreeMove:
         units = [_unit("1", 1, 5, 10), _unit("2", 2, 6, 10)]
         gs = _make_gs(units, sandbox=True)
 
-        from engine.phase_handlers.shared_utils import _squad_is_in_enemy_er
         assert _squad_is_in_enemy_er(gs, "1"), (
             "prémisse : unit 1 doit être engagée pour déclencher le flee"
         )
