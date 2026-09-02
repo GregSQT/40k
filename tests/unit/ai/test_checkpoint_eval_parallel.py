@@ -224,9 +224,9 @@ def test_create_eval_env_forwards_episode_start_index():
             randomness_config={},
             scenario_file="scenario.json",
             training_config_name="x1_long",
-            rewards_config_name="ArmageddonAgent",
-            controlled_agent="ArmageddonAgent",
-            base_agent_key="ArmageddonAgent",
+            rewards_config_name="ArmageddonAgent_x1",
+            controlled_agent="ArmageddonAgent_x1",
+            base_agent_key="ArmageddonAgent_x1",
             debug_mode=False,
             agent_seat_mode="p1",
             agent_seat_seed=None,
@@ -300,9 +300,9 @@ def test_incompatible_archive_is_skipped_not_crashed(tmp_path):
             model_path=str(good),
             checkpoint_archives=[(str(good), "P0"), (str(bad), "P1")],
             training_config_name="x1_long",
-            rewards_config_name="ArmageddonAgent",
+            rewards_config_name="ArmageddonAgent_x1",
             n_episodes=4,
-            controlled_agent="ArmageddonAgent",
+            controlled_agent="ArmageddonAgent_x1",
         )
 
     seen_tasks.extend(call.args[0] for call in worker_task.call_args_list)
@@ -333,9 +333,9 @@ def test_non_missing_key_runtime_error_is_not_swallowed(tmp_path):
                 model_path=str(archive),
                 checkpoint_archives=[(str(archive), "P0")],
                 training_config_name="x1_long",
-                rewards_config_name="ArmageddonAgent",
+                rewards_config_name="ArmageddonAgent_x1",
                 n_episodes=2,
-                controlled_agent="ArmageddonAgent",
+                controlled_agent="ArmageddonAgent_x1",
             )
 
 
@@ -377,9 +377,9 @@ def test_failed_episodes_raise_instead_of_shrinking_denominator(tmp_path):
                 model_path=str(archive),
                 checkpoint_archives=[(str(archive), "P0")],
                 training_config_name="x1_long",
-                rewards_config_name="ArmageddonAgent",
+                rewards_config_name="ArmageddonAgent_x1",
                 n_episodes=4,
-                controlled_agent="ArmageddonAgent",
+                controlled_agent="ArmageddonAgent_x1",
             )
 
 
@@ -420,9 +420,9 @@ def test_capped_episode_counts_as_draw_and_keeps_win_rate(tmp_path):
             model_path=str(archive),
             checkpoint_archives=[(str(archive), "P0")],
             training_config_name="x1_long",
-            rewards_config_name="ArmageddonAgent",
+            rewards_config_name="ArmageddonAgent_x1",
             n_episodes=2,
-            controlled_agent="ArmageddonAgent",
+            controlled_agent="ArmageddonAgent_x1",
         )
 
     assert results["P0_wins"] == 1
@@ -542,7 +542,7 @@ def test_exploiter_probe_uses_intermediate_worker_count(tmp_path):
     probe = ExploiterProbeCallback(
         target_archive_path=str(archive),
         training_config_name="x1_long",
-        rewards_config_name="ArmageddonAgent",
+        rewards_config_name="ArmageddonAgent_x1",
         metrics_tracker=None,
         probe_every_episodes=100,
         probe_cheap_n=10,
@@ -583,7 +583,7 @@ def test_probe_nullifies_pool_on_evaluate_exception(tmp_path):
     probe = ExploiterProbeCallback(
         target_archive_path=str(archive),
         training_config_name="x1_long",
-        rewards_config_name="ArmageddonAgent",
+        rewards_config_name="ArmageddonAgent_x1",
         metrics_tracker=None,
         probe_every_episodes=100,
         probe_cheap_n=10,
@@ -715,9 +715,9 @@ def _build_tasks(tmp_path, n_episodes, n_scenarios, n_workers, use_subprocess=Tr
             model_path=str(archive),
             checkpoint_archives=[(str(archive), "P0")],
             training_config_name="x1_long",
-            rewards_config_name="ArmageddonAgent",
+            rewards_config_name="ArmageddonAgent_x1",
             n_episodes=n_episodes,
-            controlled_agent="ArmageddonAgent",
+            controlled_agent="ArmageddonAgent_x1",
         )
 
     return seen
@@ -801,9 +801,9 @@ def test_task_dict_contains_model_version_token(tmp_path):
             model_path=str(archive),
             checkpoint_archives=[(str(archive), "P0")],
             training_config_name="x1_long",
-            rewards_config_name="ArmageddonAgent",
+            rewards_config_name="ArmageddonAgent_x1",
             n_episodes=2,
-            controlled_agent="ArmageddonAgent",
+            controlled_agent="ArmageddonAgent_x1",
         )
 
     assert seen_tasks, "aucune tâche produite"
@@ -847,9 +847,9 @@ def test_external_pool_used_without_creating_new_pool(tmp_path):
             model_path=str(archive),
             checkpoint_archives=[(str(archive), "P0")],
             training_config_name="x1_long",
-            rewards_config_name="ArmageddonAgent",
+            rewards_config_name="ArmageddonAgent_x1",
             n_episodes=2,
-            controlled_agent="ArmageddonAgent",
+            controlled_agent="ArmageddonAgent_x1",
             pool=fake_pool,
         )
 
@@ -888,9 +888,9 @@ def test_internal_pool_shutdown_called_on_success(tmp_path):
             model_path=str(archive),
             checkpoint_archives=[(str(archive), "P0")],
             training_config_name="x1_long",
-            rewards_config_name="ArmageddonAgent",
+            rewards_config_name="ArmageddonAgent_x1",
             n_episodes=2,
-            controlled_agent="ArmageddonAgent",
+            controlled_agent="ArmageddonAgent_x1",
         )
 
     mock_pool_instance.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
@@ -923,9 +923,9 @@ def test_internal_pool_shutdown_called_on_exception(tmp_path):
                 model_path=str(archive),
                 checkpoint_archives=[(str(archive), "P0")],
                 training_config_name="x1_long",
-                rewards_config_name="ArmageddonAgent",
+                rewards_config_name="ArmageddonAgent_x1",
                 n_episodes=2,
-                controlled_agent="ArmageddonAgent",
+                controlled_agent="ArmageddonAgent_x1",
             )
 
     mock_pool_instance.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
@@ -985,9 +985,9 @@ def test_bot_eval_internal_pool_shutdown_called_on_success(tmp_path):
         evaluate_against_bots(
             model=MagicMock(),
             training_config_name="x1_long",
-            rewards_config_name="ArmageddonAgent",
+            rewards_config_name="ArmageddonAgent_x1",
             n_episodes=2,
-            controlled_agent="ArmageddonAgent",
+            controlled_agent="ArmageddonAgent_x1",
             model_path=str(archive),
             show_summary=False,
         )
@@ -1025,9 +1025,9 @@ def test_bot_eval_internal_pool_shutdown_called_on_exception(tmp_path):
             evaluate_against_bots(
                 model=MagicMock(),
                 training_config_name="x1_long",
-                rewards_config_name="ArmageddonAgent",
+                rewards_config_name="ArmageddonAgent_x1",
                 n_episodes=2,
-                controlled_agent="ArmageddonAgent",
+                controlled_agent="ArmageddonAgent_x1",
                 model_path=str(archive),
                 show_summary=False,
             )

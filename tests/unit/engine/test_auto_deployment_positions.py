@@ -38,7 +38,7 @@ from engine.phase_handlers.shared_utils import validate_squad_coherency
 from shared.data_validation import require_key
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-BANK = os.path.join(PROJECT_ROOT, "config/agents/ArmageddonAgent/scenarios/training")
+BANK = os.path.join(PROJECT_ROOT, "config/agents/ArmageddonAgent_x1/scenarios/training")
 # Une variante par terrain : ce test est de ceux dont le résultat DÉPEND du terrain (zones,
 # murs), il tourne donc sur les deux — c'est exactement le défaut que `mc2` a révélé.
 TEMPLATES = ["scenario_training_armageddon1.json", "scenario_training_armageddon2.json"]
@@ -49,9 +49,9 @@ def _make_env(active_ratio: float, scenario: str):
     from engine.w40k_core import W40KEngine
 
     env = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=os.path.join(BANK, scenario),
         unit_registry=UnitRegistry(),
         quiet=True,

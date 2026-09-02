@@ -338,7 +338,7 @@ def test_after_the_answer_the_mask_serves_the_move_pool_of_that_answer(declared)
 # ─────────────────────────────────────────────────────────────────────────────
 
 _ARMAGEDDON_TRAINING_SCENARIO = (
-    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
+    "config/agents/ArmageddonAgent_x1/scenarios/training/scenario_training_armageddon1.json"
 )
 
 
@@ -360,7 +360,7 @@ def test_the_engine_routes_the_choice_action_to_the_declaration(option_index, ex
     engine = W40KEngine(
         rewards_config="default",
         training_config_name="x1",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         active_agents=None,
         scenario_file=_ARMAGEDDON_TRAINING_SCENARIO,
         unit_registry=UnitRegistry(),
@@ -421,7 +421,7 @@ def test_the_observation_describes_the_squad_the_choice_is_about():
     engine = W40KEngine(
         rewards_config="default",
         training_config_name="x1",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         active_agents=None,
         scenario_file=_ARMAGEDDON_TRAINING_SCENARIO,
         unit_registry=UnitRegistry(),

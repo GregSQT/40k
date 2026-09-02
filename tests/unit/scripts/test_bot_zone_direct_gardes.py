@@ -51,7 +51,7 @@ def test_require_board_path_retourne_le_chemin_quand_definie(script, monkeypatch
 
 def _model_dir(tmp_path: Path) -> Path:
     """Structure ai/models/ArmageddonAgent/ sous tmp_path."""
-    d = tmp_path / "ai" / "models" / "ArmageddonAgent"
+    d = tmp_path / "ai" / "models" / "ArmageddonAgent_x1"
     d.mkdir(parents=True)
     return d
 
@@ -97,7 +97,7 @@ def test_require_reference_model_chemin_non_canonique_verifie_md5(script, monkey
     monkeypatch.setattr(script, "_DEFAULT_MODEL", str(cible))
     monkeypatch.setattr(script, "REFERENCE_MD5", "000000000000000000000000deadbeef")
     # chemin équivalent via .. — string != _DEFAULT_MODEL, mais realpath identique
-    non_canonique = str(d / ".." / "ArmageddonAgent" / nom)
+    non_canonique = str(d / ".." / "ArmageddonAgent_x1" / nom)
     with pytest.raises(RuntimeError, match="md5"):
         script._require_reference_model(non_canonique)
 

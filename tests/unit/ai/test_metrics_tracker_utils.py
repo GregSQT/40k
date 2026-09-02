@@ -20,7 +20,7 @@ from tests.unit.ai._fabriques import tactical_data
 
 # Agent de reference de ces tests : il porte le training config lu ci-dessous ET la config de
 # rewards que `__init__` charge dans le verrou `test_stub_matches_the_attributes_of_a_real_tracker`.
-_AGENT_KEY = "ArmageddonAgent"
+_AGENT_KEY = "ArmageddonAgent_x1"
 _AGENT_CONFIG = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
     f"config/agents/{_AGENT_KEY}/{_AGENT_KEY}_training_config.json",
@@ -56,7 +56,7 @@ def test_every_training_profile_carries_its_smoothing_windows() -> None:
     )
     loader = get_config_loader()
     for profile in ARMAGEDDON_PROFILES:
-        training_config = loader.load_agent_training_config("ArmageddonAgent", profile)
+        training_config = loader.load_agent_training_config("ArmageddonAgent_x1", profile)
         window, fast = resolve_perf_windows(training_config)
         assert fast <= window, f"{profile}: la fenetre reactive ne peut pas depasser le fond"
         assert window >= 100, f"{profile}: fenetre de fond trop courte pour trancher une tendance"

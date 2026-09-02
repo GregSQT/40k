@@ -88,7 +88,7 @@ def _build_env():
     from sb3_contrib.common.wrappers import ActionMasker
     from engine.w40k_core import W40KEngine
 
-    AGENT_KEY = "ArmageddonAgent"
+    AGENT_KEY = "ArmageddonAgent_x1"
     TRAINING_CONFIG_NAME = "x1_long"
     REWARDS_CONFIG_NAME = AGENT_KEY  # par défaut dans train.py: rewards_config = agent
     SCENARIO_TYPE = "bot"

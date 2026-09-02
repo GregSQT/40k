@@ -91,8 +91,8 @@ def _play(
     encore la quand le moteur fait sa passe de comptage a la terminaison.
     """
     engine = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent", scenario_file=scenario_file,
+        rewards_config="ArmageddonAgent_x1", training_config_name="x1_debug",
+        controlled_agent="ArmageddonAgent_x1", scenario_file=scenario_file,
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
     )
     engine.reset(seed=seed)
@@ -390,7 +390,7 @@ def _recording_tracker(tmp_path: Any) -> Tuple[W40KMetricsTracker, _RecordingWri
     suppriment aussi le doublon reactif ``_<fast>ep``, donc chaque tag n'apparait qu'une fois.
     """
     tracker = W40KMetricsTracker(
-        "ArmageddonAgent", log_dir=str(tmp_path), show_banner=False,
+        "ArmageddonAgent_x1", log_dir=str(tmp_path), show_banner=False,
         perf_window=1, perf_window_fast=1,
     )
     recording = _RecordingWriter()
@@ -693,7 +693,7 @@ def test_fight_activations_per_turn_is_windowed_ratio(melee_scenario_file, tmp_p
     )
 
     tracker = W40KMetricsTracker(
-        "ArmageddonAgent", log_dir=str(tmp_path), show_banner=False,
+        "ArmageddonAgent_x1", log_dir=str(tmp_path), show_banner=False,
         perf_window=2, perf_window_fast=2,
     )
     recording = _RecordingWriter()

@@ -29,7 +29,7 @@ def _load(scenario_file: str):
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x1_debug", controlled_agent="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1", training_config_name="x1_debug", controlled_agent="ArmageddonAgent_x1",
         scenario_file=scenario_file, unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
         training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
     )

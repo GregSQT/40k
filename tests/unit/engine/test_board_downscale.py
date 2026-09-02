@@ -18,7 +18,7 @@ from engine.game_state import GameStateManager
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BANK_SCEN = str(
-    PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
+    PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent_x1" / "scenarios" / "training"
     / "scenario_training_armageddon1.json"
 )
 
@@ -307,8 +307,8 @@ def test_squads_stay_coherent_on_the_real_scenario(board_x1) -> None:
     from engine.w40k_core import W40KEngine
 
     engine = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x1",
-        controlled_agent="ArmageddonAgent", scenario_file=str(BANK_SCEN),
+        rewards_config="ArmageddonAgent_x1", training_config_name="x1",
+        controlled_agent="ArmageddonAgent_x1", scenario_file=str(BANK_SCEN),
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
         training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
     )

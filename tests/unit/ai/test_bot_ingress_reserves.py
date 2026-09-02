@@ -485,7 +485,7 @@ def test_bot_ingress_end_to_end() -> None:
 
     from ai.bot_evaluation import _create_eval_env
 
-    scenario = "config/agents/ArmageddonAgent/scenarios/training/reserves_ingress_fixture1.json"
+    scenario = "config/agents/ArmageddonAgent_x1/scenarios/training/reserves_ingress_fixture1.json"
     env = _create_eval_env(
         bot_name="greedy",
         bot_type="greedy",
@@ -493,8 +493,8 @@ def test_bot_ingress_end_to_end() -> None:
         scenario_file=scenario,
         training_config_name="x1",
         rewards_config_name="default",
-        controlled_agent="ArmageddonAgent",
-        base_agent_key="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
+        base_agent_key="ArmageddonAgent_x1",
         debug_mode=False,
         agent_seat_mode="p1",
         agent_seat_seed=1234,
@@ -606,7 +606,7 @@ def test_bot_deployment_never_reserves_on_the_real_path(monkeypatch) -> None:
     # `scenario_training_armageddon1.json` tire son roster au sort et le tirage contient désormais
     # des variantes à réserves : la liste du bot en portait une fois sur deux, et le test ne
     # pouvait plus distinguer la déclaration de liste de la décision du bot.
-    scenario = "config/agents/ArmageddonAgent/scenarios/training/reserves_20_fixture1.json"
+    scenario = "config/agents/ArmageddonAgent_x1/scenarios/training/reserves_20_fixture1.json"
     env = _create_eval_env(
         bot_name="tactical",
         bot_type="tactical",
@@ -614,8 +614,8 @@ def test_bot_deployment_never_reserves_on_the_real_path(monkeypatch) -> None:
         scenario_file=scenario,
         training_config_name="x1",
         rewards_config_name="default",
-        controlled_agent="ArmageddonAgent",
-        base_agent_key="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
+        base_agent_key="ArmageddonAgent_x1",
         debug_mode=False,
         agent_seat_mode="p1",
         agent_seat_seed=1234,

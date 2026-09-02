@@ -36,7 +36,7 @@ from tests.unit.engine._config_helpers import (
 # Cle d'agent REELLE : `config_loader._resolve_agent_config_key` exige un repertoire existant sous
 # `config/agents/`. La VALEUR de la penalite, elle, reste injectee par `_rewards()` — le test
 # verrouille un comportement du moteur, il ne doit pas rougir si tu retouches ton reglage.
-AGENT_KEY = "ArmageddonAgent"
+AGENT_KEY = "ArmageddonAgent_x1"
 WAIT_PENALTY = -0.1
 
 # Les trois positions sont sur la MEME ligne : seule la distance change entre les deux cas, donc
@@ -113,7 +113,7 @@ def _make_engine(
 
     # Config de recompense posee explicitement : la valeur de la penalite appartient au TEST, pas
     # au reglage de l'agent — sans quoi ce verrou rougirait a chaque retouche de
-    # `ArmageddonAgent_rewards_config.json`, ce qu'il n'a aucune raison de surveiller.
+    # `ArmageddonAgent_x1_rewards_config.json`, ce qu'il n'a aucune raison de surveiller.
     eng.reward_calculator.rewards_config = _rewards()
 
     eng.game_state["phase"] = "shoot"

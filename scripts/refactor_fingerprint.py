@@ -225,7 +225,7 @@ def _play(env, episodes: int, seed_base: int, counters: dict) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--agent", default="ArmageddonAgent")
+    parser.add_argument("--agent", default="ArmageddonAgent_x1")
     parser.add_argument("--training-config", default="x1_debug")
     parser.add_argument("--episodes", type=int, default=8)
     parser.add_argument("--seed-base", type=int, default=1000)

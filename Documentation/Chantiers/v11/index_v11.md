@@ -128,7 +128,7 @@ chiffres d'architecture étaient périmés le jour même par `L1` puis `L2`) :
 - `obs_size` : `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` = **16659** (14615 avant `L2` du
   2026-08-07 ; 14609 avant le drapeau `declines` de `L1` ; 20727 avant le socle, cf. §0.67), et
   les **8** profils de
-  `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` portent **16659**
+  `config/agents/ArmageddonAgent_x1/ArmageddonAgent_training_config.json` portent **16659**
   (`x1`, `x1_long`, `x1_selfplay`, `x1_debug`, `x5_new`, `x5_append`, `x5_long`, `x5_debug` —
   `x5_long` ajouté le 2026-08-10).
 - `squad_obs_shapes()` : **26** clés ; `sum(prod(shape))` grille exclue = **16659**, égale à
@@ -2028,7 +2028,7 @@ fonctions comme du code vivant. Vérifié dans le worktree : import du module OK
 validée au-delà de ces tests ciblés — la vérification large appartient à l'utilisateur (§0.51).
 
 **2. Rampe de déploiement réglée sur le SEUL profil `x1`.** Vérifié dans
-[`ArmageddonAgent_training_config.json`](../../../config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json) :
+[`ArmageddonAgent_training_config.json`](../../../config/agents/ArmageddonAgent_x1/ArmageddonAgent_training_config.json) :
 
 | Profil | `deployment_mode_schedule` | `active_ratio_start` → `active_ratio_end` |
 |---|---|---|

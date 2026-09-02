@@ -156,14 +156,14 @@ def build_move_rules(**overrides: Any) -> Dict[str, Any]:
 #: fichier, sinon il observe un état qui ne se produit jamais et affiche « tout va bien » — le
 #: VERT VACANT déjà payé en V11 §0.56.
 ACTIVE_DEPLOYMENT_SCENARIO = (
-    "config/agents/ArmageddonAgent/scenarios/holdout_regular/scenario_bot-01.json"
+    "config/agents/ArmageddonAgent_x1/scenarios/holdout_regular/scenario_bot-01.json"
 )
 
 
 #: Racine de la banque de scénarios d'entraînement.
 TRAINING_BANK = (
     Path(__file__).resolve().parents[3]
-    / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
+    / "config" / "agents" / "ArmageddonAgent_x1" / "scenarios" / "training"
 )
 
 
@@ -194,7 +194,7 @@ def bank_training_scenarios() -> List[str]:
 #: pour qui un second terrain ne serait qu'un doublement du temps d'exécution. Les autres passent
 #: par `bank_training_scenarios()`.
 TRAINING_SCENARIO = (
-    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
+    "config/agents/ArmageddonAgent_x1/scenarios/training/scenario_training_armageddon1.json"
 )
 
 
@@ -269,9 +269,9 @@ def build_armageddon_engine(seed: int, **overrides):
     from engine.w40k_core import W40KEngine
 
     kwargs = {
-        "rewards_config": "ArmageddonAgent",
+        "rewards_config": "ArmageddonAgent_x1",
         "training_config_name": "x1_debug",
-        "controlled_agent": "ArmageddonAgent",
+        "controlled_agent": "ArmageddonAgent_x1",
         "scenario_file": ACTIVE_DEPLOYMENT_SCENARIO,
         "unit_registry": UnitRegistry(),
         "quiet": True,

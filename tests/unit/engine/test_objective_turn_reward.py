@@ -27,7 +27,7 @@ from engine.game_state import primary_objective_points
 from engine.phase_handlers.command_handlers import command_phase_end
 from engine.reward_calculator import RewardCalculator
 
-AGENT = "ArmageddonAgent"
+AGENT = "ArmageddonAgent_x1"
 
 # La mission REELLE, pas une recopie. Le versement vaut `facteur x VP marques` : un `rules: []`
 # code en dur ici — ce qu'il y avait avant, du temps ou seule la formule lineaire etait testee —
@@ -489,7 +489,7 @@ def test_combat_action_v11_reaches_fight_branch_not_system_response() -> None:
     calc = _calculator(controlled_player=1)
     state = _move_state()
 
-    base_melee = float(_rewards_config()["ArmageddonAgent"]["base_actions"]["melee_attack"])
+    base_melee = float(_rewards_config()["ArmageddonAgent_x1"]["base_actions"]["melee_attack"])
     assert base_melee > 0.0, "melee_attack nul en config : le test ne discrimine pas les deux chemins"
 
     reward = calc.calculate_reward(

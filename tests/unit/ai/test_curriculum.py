@@ -42,19 +42,20 @@ from ai.curriculum import (
 #: Table ecrite depuis la specification, PAS relue du JSON — c'est tout l'interet : elle
 #: constate ce que le fichier dit, elle ne le repete pas.
 EXPECTED_STAGES = {
+    "P00": (0,     0.00, None, {}),
     "P0":  (0,     0.00, None, {}),
-    "P1":  (20000, 0.50, "P0", {"P0": 0.50}),
-    "P2":  (5000,  0.60, "P1", {"P1": 0.40, "P0": 0.20}),
-    "P3":  (5000,  0.70, "P2", {"P2": 0.40, "P0": 0.15, "P1": 0.15}),
+    "P1":  (10000, 0.50, "P0", {"P0": 0.50}),
+    "P2":  (10000, 0.60, "P1", {"P1": 0.40, "P0": 0.20}),
+    "P3":  (10000, 0.70, "P2", {"P2": 0.40, "P0": 0.15, "P1": 0.15}),
     "E1":  (0,     1.00, "P3", {"P3": 1.00}),
-    "P4":  (8000,  0.75, "P3", {"P3": 0.30, "P0": 0.20 / 3, "P1": 0.20 / 3, "P2": 0.20 / 3,
+    "P4":  (10000, 0.75, "P3", {"P3": 0.30, "P0": 0.20 / 3, "P1": 0.20 / 3, "P2": 0.20 / 3,
                                 "E1": 0.25}),
-    "P5":  (8000,  0.80, "P4", {"P4": 0.35, "P0": 0.075, "P1": 0.075, "P2": 0.075, "P3": 0.075,
+    "P5":  (10000, 0.80, "P4", {"P4": 0.35, "P0": 0.075, "P1": 0.075, "P2": 0.075, "P3": 0.075,
                                 "E1": 0.15}),
     "E2":  (0,     1.00, "P5", {"P5": 1.00}),
-    "P6":  (8000,  0.80, "P5", {"P5": 0.30, "P0": 0.05, "P1": 0.05, "P2": 0.05, "P3": 0.05,
+    "P6":  (10000, 0.80, "P5", {"P5": 0.30, "P0": 0.05, "P1": 0.05, "P2": 0.05, "P3": 0.05,
                                 "P4": 0.05, "E1": 0.125, "E2": 0.125}),
-    "P7":  (8000,  0.85, "P6", {"P6": 0.30, "P0": 0.35 / 6, "P1": 0.35 / 6, "P2": 0.35 / 6,
+    "P7":  (10000, 0.85, "P6", {"P6": 0.30, "P0": 0.35 / 6, "P1": 0.35 / 6, "P2": 0.35 / 6,
                                 "P3": 0.35 / 6, "P4": 0.35 / 6, "P5": 0.35 / 6,
                                 "E1": 0.10, "E2": 0.10}),
     "P8":  (10000, 0.85, "P7", {"P7": 0.25, "P0": 0.40 / 7, "P1": 0.40 / 7, "P2": 0.40 / 7,
@@ -77,7 +78,7 @@ ARMAGEDDON_N_ENVS = 48
 
 @pytest.fixture(scope="module")
 def curriculum():
-    return load_curriculum("ArmageddonAgent")
+    return load_curriculum("ArmageddonAgent_x1")
 
 
 def _minimal_curriculum() -> dict:
@@ -106,12 +107,12 @@ def _minimal_curriculum() -> dict:
 
 # ── 1. SOMME DES RATIOS = 1.0 ──────────────────────────────────────────────────────────────
 
-def test_shipped_curriculum_declares_fourteen_stages(curriculum) -> None:
+def test_shipped_curriculum_declares_fifteen_stages(curriculum) -> None:
     order = stage_order(curriculum)
     assert order == [
-        "P0", "P1", "P2", "P3", "E1", "P4", "P5", "E2", "P6", "P7", "P8", "E3", "P9", "P10"
+        "P00", "P0", "P1", "P2", "P3", "E1", "P4", "P5", "E2", "P6", "P7", "P8", "E3", "P9", "P10"
     ]
-    assert len(order) == 14
+    assert len(order) == 15
     assert sorted(order) == sorted(EXPECTED_STAGES)
 
 
@@ -166,11 +167,18 @@ def test_exploiters_resume_the_champion_they_only_ever_play(curriculum) -> None:
         assert float(stage["ratio_end"]) == 1.0
 
 
-def test_learners_are_all_new(curriculum) -> None:
+def test_seed_stage_is_new(curriculum) -> None:
+    """P00 est la seule etape learner qui demarre from scratch (pas de warm start)."""
+    stage = require_stage(curriculum, "P00")
+    assert stage_init_source(stage) is None
+
+
+def test_learners_start_from_seed(curriculum) -> None:
+    """Tous les learners hors P00 demarrent depuis P00 (warm start commun)."""
     for name in stage_order(curriculum):
         stage = require_stage(curriculum, name)
-        if stage["role"] == "learner":
-            assert stage_init_source(stage) is None, name
+        if stage["role"] == "learner" and name != "P00":
+            assert stage_init_source(stage) == "P00", name
 
 
 def test_a_stage_whose_weights_do_not_reach_ratio_end_is_refused() -> None:

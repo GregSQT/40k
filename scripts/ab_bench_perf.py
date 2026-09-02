@@ -177,7 +177,7 @@ def main() -> int:
     parser.add_argument("--episodes", type=int, required=True, help="budget d'episodes par run")
     parser.add_argument("--graines", default="1,2,3,4,5", help="graines, separees par des virgules")
     parser.add_argument("--eval-episodes", type=int, default=100, help="episodes par bot, eval finale")
-    parser.add_argument("--agent", default="ArmageddonAgent")
+    parser.add_argument("--agent", default="ArmageddonAgent_x1")
     parser.add_argument("--scenario", default="bot")
     parser.add_argument("--training-config", default="x1", help="phase de config d'entrainement")
     parser.add_argument("--timeout", type=float, default=None, help="delai par run, en secondes")

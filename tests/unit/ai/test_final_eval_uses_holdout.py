@@ -46,7 +46,7 @@ def test_final_bot_eval_passes_holdout_pool(monkeypatch: pytest.MonkeyPatch) -> 
     callback = training_callbacks.MetricsCollectionCallback.__new__(
         training_callbacks.MetricsCollectionCallback
     )
-    callback.controlled_agent = "ArmageddonAgent"
+    callback.controlled_agent = "ArmageddonAgent_x1"
     # `_run_final_bot_eval` route ses troncatures vers le tracker (V11 §0.61) ; ce test-ci n'en
     # a pas, et un `None` explicite vaut mieux qu'un AttributeError sur une doublure muette.
     callback.metrics_tracker = None
@@ -58,7 +58,7 @@ def test_final_bot_eval_passes_holdout_pool(monkeypatch: pytest.MonkeyPatch) -> 
         model=object(),
         training_config=training_config,
         training_config_name="x1_debug",
-        rewards_config_name="ArmageddonAgent",
+        rewards_config_name="ArmageddonAgent_x1",
     )
 
     assert captured, "evaluate_against_bots n'a pas ete appelee"

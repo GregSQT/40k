@@ -22,7 +22,7 @@ import pytest
 from tests._chargeur_script import charger_script
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SCEN_ROOT = PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios"
+SCEN_ROOT = PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent_x1" / "scenarios"
 ACTIVE_DIRS = ["training", "holdout_regular", "holdout_hard"]
 LEGACY_KEYS = ("objectives", "objectives_ref", "objective_hexes", "deployment_zone", "wall_ref")
 # Décision utilisateur 2026-07-19 : `terrain-train-01/02/03` sont OBSOLÈTES, la banque tourne sur
@@ -174,9 +174,9 @@ def test_sample_scenario_loads_and_resets(rel):
 
     f = SCEN_ROOT / rel
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=str(f),
         unit_registry=UnitRegistry(),
         quiet=True,

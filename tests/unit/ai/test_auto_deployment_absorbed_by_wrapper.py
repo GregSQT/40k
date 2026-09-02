@@ -30,7 +30,7 @@ PROJECT_ROOT = os.path.dirname(
 )
 SCENARIO = os.path.join(
     PROJECT_ROOT,
-    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json",
+    "config/agents/ArmageddonAgent_x1/scenarios/training/scenario_training_armageddon1.json",
 )
 
 
@@ -39,9 +39,9 @@ def _make_engine(active_ratio: float):
     from engine.w40k_core import W40KEngine
 
     engine = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),
         quiet=True,

@@ -33,7 +33,7 @@ from config_loader import get_config_loader
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 AGENT_CONFIG = os.path.join(
-    PROJECT_ROOT, "config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json"
+    PROJECT_ROOT, "config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json"
 )
 
 

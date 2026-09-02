@@ -53,7 +53,7 @@ def _tracker(tmp_path: Any, window: int = 1) -> Tuple[W40KMetricsTracker, _Recor
     d'episodes par cas.
     """
     tracker = W40KMetricsTracker(
-        "ArmageddonAgent", log_dir=str(tmp_path), show_banner=False,
+        "ArmageddonAgent_x1", log_dir=str(tmp_path), show_banner=False,
         perf_window=window, perf_window_fast=window,
     )
     tracker.writer = _RecordingWriter()

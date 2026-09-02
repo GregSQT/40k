@@ -39,7 +39,7 @@ import pytest
 
 # ── Constantes ────────────────────────────────────────────────────────────────────────────────
 
-AGENT_KEY = "ArmageddonAgent"
+AGENT_KEY = "ArmageddonAgent_x1"
 TRAINING_CONFIG = "x1_debug"
 SEED = 42
 N_STEPS = 80  # ~1 épisode ; balancé temps/couverture
@@ -65,7 +65,7 @@ def _make_engine(seed: int):
     if not scenario_list:
         pytest.skip(
             f"Aucun scénario bot trouvé pour {AGENT_KEY}/{TRAINING_CONFIG}. "
-            "Vérifier config/agents/ArmageddonAgent/scenarios/training/."
+            "Vérifier config/agents/ArmageddonAgent_x1/scenarios/training/."
         )
 
     eng = W40KEngine(

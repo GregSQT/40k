@@ -147,7 +147,7 @@ def _play_match(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Classement bot contre bot (sans agent).")
-    parser.add_argument("--agent", default="ArmageddonAgent")
+    parser.add_argument("--agent", default="ArmageddonAgent_x1")
     parser.add_argument("--training-config", default="x1")
     parser.add_argument("--scenario-pool", default="holdout", choices=["holdout", "training"])
     parser.add_argument("--episodes", type=int, default=20,

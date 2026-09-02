@@ -799,9 +799,9 @@ def _reward_calculator():
     from config_loader import get_config_loader
     from engine.reward_calculator import RewardCalculator
 
-    rewards_config = get_config_loader().load_agent_rewards_config("ArmageddonAgent")
+    rewards_config = get_config_loader().load_agent_rewards_config("ArmageddonAgent_x1")
     return RewardCalculator(
-        {"controlled_agent": "ArmageddonAgent", "controlled_player": 1, "quiet": True},
+        {"controlled_agent": "ArmageddonAgent_x1", "controlled_player": 1, "quiet": True},
         rewards_config,
     )
 
@@ -919,7 +919,7 @@ def _full_engine_config() -> Dict[str, Any]:
                  "can_move_through_friendly_model": True},
         "pve_mode": False,
         "controlled_player": 1,
-        "controlled_agent": "ArmageddonAgent",
+        "controlled_agent": "ArmageddonAgent_x1",
         "observation_params": obs_params,
         "training_config": {"observation_params": obs_params, "max_turns_per_episode": 3},
         "units": [unit, enemy],

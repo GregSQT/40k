@@ -40,7 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-AGENT = "ArmageddonAgent"
+AGENT = "ArmageddonAgent_x1"
 TRAINING_CONFIG = "x1_debug"
 BANK = PROJECT_ROOT / "config" / "agents" / AGENT / "scenarios" / "training"
 #: Scénarios « pleins » de la banque (roster tiré au sort), un par terrain — DÉCOUVERTS, jamais

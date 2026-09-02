@@ -233,7 +233,7 @@ def main() -> int:
     # 5, pas 3 : a 3 paires il ne reste que 2 ratios, donc UN couple, et l'etendue affichee est
     # de largeur nulle (cf. `print_spread` dans ab_bench.py).
     parser.add_argument("--paires", type=int, default=5)
-    parser.add_argument("--agent", default="ArmageddonAgent")
+    parser.add_argument("--agent", default="ArmageddonAgent_x1")
     parser.add_argument("--scenario", default="bot")
     # train.py exige une phase explicite (R1, `_require_training_config_phase`). La phase fixe
     # `n_steps`/`batch_size`/... : elle doit etre celle du run de production a optimiser, sinon le

@@ -149,15 +149,15 @@ def test_le_vectorise_egale_la_regle_scalaire_sur_un_second_terrain(board_x5, tm
     scenario["terrain_ref"] = SECOND_TERRAIN_REF
     # L'arborescence `agents/<agent>/scenarios/...` n'est pas décorative : le chargeur en déduit
     # la clé d'agent (`_load_units_from_roster_refs`) et lève si elle manque.
-    chemin = tmp_path / "agents" / "ArmageddonAgent" / "scenarios" / "holdout_regular"
+    chemin = tmp_path / "agents" / "ArmageddonAgent_x1" / "scenarios" / "holdout_regular"
     chemin.mkdir(parents=True)
     fichier = chemin / "scenario_second_terrain.json"
     fichier.write_text(json.dumps(scenario), encoding="utf-8")
 
     engine = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=str(fichier),
         unit_registry=UnitRegistry(),
         quiet=True,

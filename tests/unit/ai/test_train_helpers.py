@@ -278,7 +278,7 @@ def test_curriculum_covers_every_model_param(rollout_rebuilds) -> None:
     # (un BOM ne casserait donc que ce test) et resout les alias de cle d'agent.
     from config_loader import get_config_loader
 
-    profiles = get_config_loader().load_agent_training_config("ArmageddonAgent")
+    profiles = get_config_loader().load_agent_training_config("ArmageddonAgent_x1")
     with_params = {
         name: profile for name, profile in profiles.items()
         if isinstance(profile, dict) and "model_params" in profile

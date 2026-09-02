@@ -184,7 +184,7 @@ def _callback_for_construction_check(penalty_hard: float) -> BotEvaluationCallba
     cb.robust_penalty_hard = penalty_hard
     cb.save_best_robust = True
     cb.training_config_name = "x1"
-    cb.rewards_config_name = "ArmageddonAgent"
+    cb.rewards_config_name = "ArmageddonAgent_x1"
     cb.scenario_pool = "holdout"
     return cb
 

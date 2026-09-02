@@ -112,9 +112,9 @@ def test_a_unit_carrying_the_rule_can_play_a_whole_episode(rule_id: str, unit_ty
         scenario_path.write_text(json.dumps(payload), encoding="utf-8")
 
         engine = W40KEngine(
-            rewards_config="ArmageddonAgent",
+            rewards_config="ArmageddonAgent_x1",
             training_config_name="x1_debug",
-            controlled_agent="ArmageddonAgent",
+            controlled_agent="ArmageddonAgent_x1",
             scenario_file=str(scenario_path),
             unit_registry=UnitRegistry(),
             quiet=True,

@@ -267,7 +267,7 @@ Verrou : mêmes win-rates qu'en séquentiel à seeds fixes.
 
 #### État mesuré du gate (2026-08-26, lecture de code)
 
-`gate.eval_episodes = 300` **par membre de pool** (`config/agents/ArmageddonAgent/curriculum.json`),
+`gate.eval_episodes = 300` **par membre de pool** (`config/agents/ArmageddonAgent_x1/curriculum.json`),
 holdout = **4 scénarios** (`scenarios/holdout_regular`, `holdout_hard` vide). Pools : P1 = 1 membre
 (300 ép.), P2 = 2 (600 ép.), P3 = 3 (900 ép.). Le gate est joué séquentiellement dans le process
 appelant par `evaluate_against_checkpoints` (`bot_evaluation.py`), boucle archive → scénario →

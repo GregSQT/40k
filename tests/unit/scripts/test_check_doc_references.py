@@ -1208,8 +1208,8 @@ def test_adjacent_is_a_subset(line: str) -> None:
 
 def test_a_json_claim_is_verified(tmp_path: pathlib.Path) -> None:
     """Le sous-ensemble ne suffit pas : les extensions non-`.py` doivent VRAIMENT être appariées."""
-    doc = write(tmp_path, "note.md", "le profil `config/agents/ArmageddonAgent/"
-                                     "ArmageddonAgent_training_config.json` (`total_episodes`)\n")
+    doc = write(tmp_path, "note.md", "le profil `config/agents/ArmageddonAgent_x1/"
+                                     "ArmageddonAgent_x1_training_config.json` (`total_episodes`)\n")
     resolved, _unverifiable, broken = cdr.check_references(doc)
     assert (resolved, broken) == (1, [])
 
