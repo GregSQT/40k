@@ -228,11 +228,28 @@ class TestSandboxFreeMove:
 
         Le chemin réel n'est pas calculé (aucun BFS) : toute entrée du plan
         reçoit la distance 0.0, quel que soit l'écart col/row entre origine et destination.
-        """
-        units = [_unit("1", 1, 0, 0)]
-        gs = _make_gs(units, sandbox=True)
 
-        plan = [["1#0", 10, 10, 0, 0], ["1#1", 5, 5, 0, 0]]
+        Les deux modèles existent dans models_cache (unité à 2 figurines) et leurs destinations
+        sont atteignables par BFS (distance < MOVE=6). Ainsi, retirer la garde sandbox renvoie
+        des distances réelles > 0.0 — l'échec d'assertion prouve que le verrou est actif.
+        """
+        from tests._state_invariants import unit_invariants
+        unit = {**unit_invariants(),
+            "id": "1", "player": 1, "col": 1, "row": 0,
+            "HP_CUR": 2, "HP_MAX": 2, "VALUE": 100, "OC": 2, "T": 4,
+            "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
+            "MOVE": 6, "RNG_WEAPONS": [], "CC_WEAPONS": [],
+            "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round",
+            "UNIT_RULES": [],
+            "models": [
+                {"col": 1, "row": 0, "VALUE": 50, "orientation": 0},
+                {"col": 2, "row": 0, "VALUE": 50, "orientation": 0},
+            ],
+        }
+        gs = _make_gs([unit], sandbox=True)
+
+        # Destinations non nulles et atteignables (distance BFS < MOVE=6)
+        plan = [["1#0", 4, 0, 0, 0], ["1#1", 5, 0, 0, 0]]
         result = move_plan_path_distances(plan, gs, "normal")
 
         assert result == {"1#0": 0.0, "1#1": 0.0}, (
