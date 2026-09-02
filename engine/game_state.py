@@ -4382,6 +4382,12 @@ def oath_target_id(game_state: Dict[str, Any], player: int) -> Optional[str]:
     return None if target is None else str(target)
 
 
+def _clear_pending_oath_if_owner(game_state: Dict[str, Any], player_int: int) -> None:
+    pending_oath = game_state.get("pending_oath_selection")
+    if pending_oath is not None and pending_oath == player_int:
+        game_state["pending_oath_selection"] = None
+
+
 def set_oath_target(game_state: Dict[str, Any], player: int, unit_id: str) -> None:
     """ÉCRIVAIN UNIQUE de la cible d'Oath. Exige une unité ENNEMIE VIVANTE — sinon LÈVE.
 
@@ -4407,9 +4413,7 @@ def set_oath_target(game_state: Dict[str, Any], player: int, unit_id: str) -> No
     if not is_unit_alive(target_id, game_state):
         raise ValueError(f"set_oath_target: l'unite {target_id!r} est detruite")
     _player_flag_map(game_state, "oath_target")[player_int] = target_id
-    pending_oath = game_state.get("pending_oath_selection")
-    if pending_oath is not None and int(pending_oath) == player_int:
-        game_state["pending_oath_selection"] = None
+    _clear_pending_oath_if_owner(game_state, player_int)
     from engine.game_utils import add_console_log
 
     add_console_log(game_state, f"P{player_int} declares Oath of Moment target: unit {target_id}")
@@ -4446,9 +4450,7 @@ def expire_faction_abilities_for_player(game_state: Dict[str, Any], player: int)
     player_int = int(player)
     _player_flag_map(game_state, "waaagh_active")[player_int] = False
     _player_flag_map(game_state, "oath_target")[player_int] = None
-    pending_oath = game_state.get("pending_oath_selection")  # get allowed : None = aucune
-    if pending_oath is not None and int(pending_oath) == player_int:
-        game_state["pending_oath_selection"] = None
+    _clear_pending_oath_if_owner(game_state, player_int)
     pending_decision = read_pending_agent_decision(game_state)
     if (
         pending_decision is not None

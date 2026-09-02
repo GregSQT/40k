@@ -5,7 +5,6 @@ F7 — arme RNG par-figurine sans clé "RNG" passe en silence le scaling à x5
 """
 from __future__ import annotations
 
-import copy
 from unittest.mock import MagicMock
 
 import pytest
@@ -112,6 +111,46 @@ def _full_unit_data_minimal() -> dict:
     }
 
 
+def _heavy_model_data(**overrides: object) -> dict:
+    base = {
+        "DISPLAY_NAME": "Heavy",
+        "ICON": "heavy.png",
+        "ICON_SCALE": 1.0,
+        "ILLUSTRATION_RATIO": 1.0,
+        "HP_MAX": 3,
+        "HP": 3,
+        "T": 5,
+        "ARMOR_SAVE": 2,
+        "INVUL_SAVE": 7,
+        "LD": 7,
+        "OC": 2,
+        "MOVE": 5,
+        "BASE_SHAPE": "round",
+        "BASE_SIZE": 1,
+        "MODEL_HEIGHT": 4.0,
+        "VALUE": 40,
+        "CC_WEAPONS": [],
+        "UNIT_RULES": [],
+        "UNIT_KEYWORDS": [],
+        "FACTION_KEYWORDS": [],
+    }
+    return {**base, **overrides}
+
+
+def _unit_data_with_per_model_override() -> dict:
+    return {
+        "id": "u1",
+        "player": 1,
+        "unit_type": "MainType",
+        "col": 5,
+        "row": 5,
+        "models": [
+            {"col": 5, "row": 5},
+            {"col": 6, "row": 5, "unit_type": "HeavyModel"},
+        ],
+    }
+
+
 class TestPerModelRngScaling:
 
     def test_rng_weapon_sans_cle_rng_leve_a_x5(self):
@@ -121,45 +160,15 @@ class TestPerModelRngScaling:
         laissant la portée à sa valeur native non-scalée (ex. 24 subhex au lieu de 120).
         """
         mgr = _make_manager_x5()
-
-        # Mock unit_registry : le type par-figurine a un RNG_WEAPONS SANS champ 'RNG'
         mock_registry = MagicMock()
-        mock_registry.get_unit_data.return_value = {
-            "DISPLAY_NAME": "Heavy",
-            "ICON": "heavy.png",
-            "HP": 3,
-            "T": 5,
-            "ARMOR_SAVE": 2,
-            "INVUL_SAVE": 7,
-            "LD": 7,
-            "OC": 2,
-            "MOVE": 5,
-            "BASE_SHAPE": "round",
-            "BASE_SIZE": 1,
-            "MODEL_HEIGHT": 4.0,
-            "VALUE": 40,
-            "RNG_WEAPONS": [{"code": "heavy_bolter", "NB": 3, "STR": 5, "AP": 2, "DMG": 2, "WEAPON_RULES": []}],
-            "CC_WEAPONS": [],
-            "UNIT_RULES": [],
-        }
-
-        unit_data = {
-            "id": "u1",
-            "player": 1,
-            "unit_type": "MainType",
-            "col": 5,
-            "row": 5,
-            "models": [
-                {"col": 5, "row": 5},
-                {"col": 6, "row": 5, "unit_type": "HeavyModel"},
-            ],
-        }
-        full_unit_data = _full_unit_data_minimal()
+        mock_registry.get_unit_data.return_value = _heavy_model_data(
+            RNG_WEAPONS=[{"code": "heavy_bolter", "NB": 3, "STR": 5, "AP": 2, "DMG": 2, "WEAPON_RULES": []}],
+        )
 
         with pytest.raises(ConfigurationError, match="RNG"):
             mgr._build_enhanced_unit(
-                unit_data=unit_data,
-                full_unit_data=full_unit_data,
+                unit_data=_unit_data_with_per_model_override(),
+                full_unit_data=_full_unit_data_minimal(),
                 unit_type="MainType",
                 unit_player=1,
                 player_deployment_type="fixed",
@@ -171,48 +180,14 @@ class TestPerModelRngScaling:
     def test_rng_weapon_avec_cle_rng_scale_correctement_a_x5(self):
         """Un override par-figurine avec RNG_WEAPONS avec champ 'RNG' est scalé correctement."""
         mgr = _make_manager_x5()
-
         mock_registry = MagicMock()
-        mock_registry.get_unit_data.return_value = {
-            "DISPLAY_NAME": "Heavy",
-            "ICON": "heavy.png",
-            "ICON_SCALE": 1.0,
-            "ILLUSTRATION_RATIO": 1.0,
-            "HP_MAX": 3,
-            "HP": 3,
-            "T": 5,
-            "ARMOR_SAVE": 2,
-            "INVUL_SAVE": 7,
-            "LD": 7,
-            "OC": 2,
-            "MOVE": 5,
-            "BASE_SHAPE": "round",
-            "BASE_SIZE": 1,
-            "MODEL_HEIGHT": 4.0,
-            "VALUE": 40,
-            "RNG_WEAPONS": [{"code": "heavy_bolter", "RNG": 36, "NB": 3, "STR": 5, "AP": 2, "DMG": 2, "WEAPON_RULES": []}],
-            "CC_WEAPONS": [],
-            "UNIT_RULES": [],
-            "UNIT_KEYWORDS": [],
-            "FACTION_KEYWORDS": [],
-        }
-
-        unit_data = {
-            "id": "u1",
-            "player": 1,
-            "unit_type": "MainType",
-            "col": 5,
-            "row": 5,
-            "models": [
-                {"col": 5, "row": 5},
-                {"col": 6, "row": 5, "unit_type": "HeavyModel"},
-            ],
-        }
-        full_unit_data = _full_unit_data_minimal()
+        mock_registry.get_unit_data.return_value = _heavy_model_data(
+            RNG_WEAPONS=[{"code": "heavy_bolter", "RNG": 36, "NB": 3, "STR": 5, "AP": 2, "DMG": 2, "WEAPON_RULES": []}],
+        )
 
         result = mgr._build_enhanced_unit(
-            unit_data=unit_data,
-            full_unit_data=full_unit_data,
+            unit_data=_unit_data_with_per_model_override(),
+            full_unit_data=_full_unit_data_minimal(),
             unit_type="MainType",
             unit_player=1,
             player_deployment_type="fixed",
