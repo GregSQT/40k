@@ -32,6 +32,7 @@ import {
   setTerrainList,
   STORAGE_KEY as TERRAIN_STORAGE_KEY,
   type TerrainEntry,
+  terrainsForMode,
 } from "../utils/terrainSelection";
 import { AdvanceWarningModal } from "./AdvanceWarningModal";
 import BoardPvp, { type BoardDisplayMode, type MeasureModeState } from "./BoardPvp";
@@ -773,16 +774,14 @@ export const BoardWithAPI: React.FC = () => {
   const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp" || gameMode === "pve";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
   const urlMode = new URLSearchParams(window.location.search).get("mode");
-  const availableTerrains = terrainList?.filter((t) => t.modes.includes(urlMode ?? "pvp")) ?? [];
+  const availableTerrains = terrainsForMode(urlMode);
   const [selectedTerrain, _setSelectedTerrain] = useState<string>(() =>
     resolveSelectedTerrain(urlMode, window.location.search)
   );
   // Re-résout une fois la liste chargée : au mount, _terrainList est vide donc
   // localStorage/URL ne sont pas validés ; le useEffect corrige après le fetch.
-  const _terrainSyncedRef = useRef(false);
   useEffect(() => {
-    if (terrainList === undefined || _terrainSyncedRef.current) return;
-    _terrainSyncedRef.current = true;
+    if (terrainList === undefined) return;
     _setSelectedTerrain(resolveSelectedTerrain(urlMode, window.location.search));
   }, [terrainList, urlMode]);
   const [saveConfigAsDefault, setSaveConfigAsDefault] = useState(
