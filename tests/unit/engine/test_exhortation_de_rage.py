@@ -12,6 +12,7 @@ Verrou ROUGE/VERT documenté pour chaque invariant.
 
 import random
 import pytest
+from typing import Any
 
 import engine.phase_handlers.fight_handlers as fh
 import engine.w40k_core as wcore
@@ -59,7 +60,7 @@ class _FakeEngine:
     """Stub minimal de W40KEngine pour tester _check_and_trigger_exhortation_de_rage."""
     _check_and_trigger_exhortation_de_rage = wcore.W40KEngine._check_and_trigger_exhortation_de_rage
     _apply_exhortation_de_rage = wcore.W40KEngine._apply_exhortation_de_rage
-    _continue_squad_fight_after_selection = wcore.W40KEngine._continue_squad_fight_after_selection
+    _continue_squad_fight_after_selection: Any = wcore.W40KEngine._continue_squad_fight_after_selection
     _fight_v11_gym_settle = wcore.W40KEngine._fight_v11_gym_settle
 
     def __init__(self, gs):

@@ -65,7 +65,7 @@ def _grantable_per_carrier(stats: Dict[str, Any]) -> Dict[str, Set[str]]:
     parce que Bigboss (grant_weapon_rule_melee → SUSTAINED_HITS) est dans le run que
     SUSTAINED_HITS sur une autre arme/unité est légitimement accordé.
     """
-    rule_to_units_map = stats.get('rule_to_units', {})
+    rule_to_units_map = stats.get('rule_to_units', {})  # get allowed: absent sur vieux stats
     unit_types_seen = stats.get('unit_types_seen', set())
     return {
         weapon_rule: granting

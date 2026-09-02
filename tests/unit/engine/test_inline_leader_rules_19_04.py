@@ -15,6 +15,8 @@ Figurines : Boyz (bodyguard, `secure_objective_on_control`) + Bigboss inline (`c
 """
 from __future__ import annotations
 
+from typing import TypedDict
+
 from engine.phase_handlers.shared_utils import destroy_model, unit_has_rule_effect
 from tests.unit.engine._config_helpers import load_engine_from_scenario
 
@@ -46,7 +48,12 @@ def _inline_scenario():
     }
 
 
-_ENGINE_OVERRIDES = {
+class _EngineOverrides(TypedDict):
+    controlled_agent: str
+    rewards_config: str
+
+
+_ENGINE_OVERRIDES: _EngineOverrides = {
     "controlled_agent": "ArmageddonAgent_x1",
     "rewards_config": "ArmageddonAgent_x1",
 }
