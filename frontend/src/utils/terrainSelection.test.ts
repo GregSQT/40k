@@ -80,24 +80,14 @@ describe("resolveSelectedTerrain", () => {
 });
 
 describe("resolveSelectedTerrain — avant chargement de la liste", () => {
-  beforeEach(() => {
-    setTerrainList([]);
-  });
-
-  it("accepte tout paramètre d'URL non vide avant chargement", () => {
-    expect(resolveSelectedTerrain(null, "?terrain=garbage")).toBe("garbage");
-  });
-
-  it("rejette '' (URL ?terrain= vide) même sans liste chargée", () => {
-    expect(resolveSelectedTerrain(null, "?terrain=")).toBe("mc2");
-  });
-});
-
-describe("resolveSelectedTerrain — liste non encore chargée", () => {
   beforeEach(() => setTerrainList([]));
 
   it("n'accepte pas un terrain inconnu depuis l'URL", () => {
     expect(resolveSelectedTerrain(null, "?terrain=garbage")).toBe("mc2");
+  });
+
+  it("rejette '' (URL ?terrain= vide) même sans liste chargée", () => {
+    expect(resolveSelectedTerrain(null, "?terrain=")).toBe("mc2");
   });
 });
 
@@ -106,20 +96,26 @@ describe("terrainsForMode", () => {
     expect(terrainsForMode(null).map((t) => t.id)).toContain("pfm2");
     expect(terrainsForMode("pve").map((t) => t.id)).toContain("pfm2");
     expect(terrainsForMode("pvp_test").map((t) => t.id)).toContain("pfm2");
+    expect(terrainsForMode("pve_test").map((t) => t.id)).not.toContain("pfm2");
+  });
+
+  it("n'expose que mc1 en mode pve_test", () => {
     expect(terrainsForMode("pve_test").map((t) => t.id)).toEqual(["mc1"]);
   });
 });
 
 describe("terrainSuffix", () => {
+  const suf = (id: string) => terrainSuffix(id, "pvp", MOCK_TERRAIN_LIST);
+
   it("renvoie _id pour un terrain inconnu", () => {
-    expect(terrainSuffix("xyz", "pvp", MOCK_TERRAIN_LIST)).toBe("_xyz");
+    expect(suf("xyz")).toBe("_xyz");
   });
 
   it("renvoie '' pour le terrain par défaut du mode", () => {
-    expect(terrainSuffix("mc2", "pvp", MOCK_TERRAIN_LIST)).toBe("");
+    expect(suf("mc2")).toBe("");
   });
 
   it("renvoie _id pour un terrain connu mais non-défaut du mode", () => {
-    expect(terrainSuffix("mc1", "pvp", MOCK_TERRAIN_LIST)).toBe("_mc1");
+    expect(suf("mc1")).toBe("_mc1");
   });
 });
