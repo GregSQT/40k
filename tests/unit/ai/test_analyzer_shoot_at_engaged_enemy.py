@@ -99,3 +99,42 @@ def test_the_verdict_survives_the_kill(tmp_path):
     """
     stats = _stats(tmp_path, BRAWLER_ENGAGED, _SHOT_KILLS)
     assert stats["shoot_at_engaged_enemy"][1] == 1
+
+
+# --- cas FLED ---
+# L'allié (unité 2) est déployé avec [MODELS:] adjacent à la cible, puis se dégage (FLED).
+# Les lignes FLED ne portent pas de [MODELS:], donc positions_by_model reste à l'ancienne
+# position sauf si on le purge explicitement après la mise à jour de l'ancre.
+BE = f"({BRAWLER_ENGAGED[0]},{BRAWLER_ENGAGED[1]})"
+BA = f"({BRAWLER_AWAY[0]},{BRAWLER_AWAY[1]})"
+
+_SETUP_WITH_MODELS = (
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{S} DEPLOYED from (-1,-1) to {S} [R:+0.0] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 2{BE} DEPLOYED from (-1,-1) to {BE}"
+    f" [R:+0.0] [MODELS: 2#0@({BRAWLER_ENGAGED[0]},{BRAWLER_ENGAGED[1]},z0)] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{T} DEPLOYED from (-1,-1) to {T} [R:+0.0] [SUCCESS]\n"
+)
+
+_UNIT2_FLED = (
+    f"[10:00:01] E1 T1 P1 MOVE : Unit 2{BA} FLED from {BE} to {BA} [R:+0.0] [SUCCESS]\n"
+)
+
+
+def _stats_fled(tmp_path, body: str):
+    import ai.analyzer as an
+
+    log = tmp_path / "step.log"
+    log.write_text(entete_step_log(_SETUP_WITH_MODELS + body, units=_UNITS, ez_vertical_inches=None))
+    return an.parse_step_log(str(log))
+
+
+def test_fled_ally_no_longer_engages_target(tmp_path):
+    """Faux positif 04.02 : positions_by_model périmées après un FLED sans [MODELS:].
+
+    L'allié est déployé avec [MODELS:] adjacent à la cible (positions_by_model = engagé).
+    Il se dégage via FLED (pas de [MODELS:] → ancre mise à jour mais positions_by_model stale).
+    Le tir suivant sur la cible ne doit PAS compter comme shoot_at_engaged_enemy : l'allié
+    n'engage plus la cible depuis sa nouvelle position (ancre = BRAWLER_AWAY).
+    """
+    stats = _stats_fled(tmp_path, _UNIT2_FLED + _SHOT)
+    assert stats["shoot_at_engaged_enemy"][1] == 0
