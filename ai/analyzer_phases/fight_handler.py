@@ -75,16 +75,23 @@ def _cc_cap_for_line(
     # global waaagh_melee_atk déjà absorbé dans per_model_attack_cap via le paramètre `bonus`.
     # Le moteur applique les deux (fight_handlers.py:4710-4722) ; sans ce terme l'analyzer
     # sous-estime le plafond du Warboss de 4 et génère 4 faux positifs fight_over_cc_nb.
-    if waaagh_bonus > 0 and shooters:
-        for _mid in shooters:
-            _mtype = state.model_types.get(_mid, fighter_unit_type)  # get allowed
-            cap += config.melee_atk_bonus_waaagh_by_type.get(_mtype, 0)  # get allowed
+    _da_biggest_extra = 0
+    if waaagh_bonus > 0:
+        if shooters:
+            for _mid in shooters:
+                _mtype = state.model_types.get(_mid, fighter_unit_type)  # get allowed
+                _da_biggest_extra += config.melee_atk_bonus_waaagh_by_type.get(_mtype, 0)  # get allowed
+        else:
+            # Repli : pas de [SHOOTER_MODELS:] → bonus appliqué pour n_fighter_models modèles
+            # de type fighter_unit_type (Da Biggest est un bonus PER-MODÈLE, cf. Finest Hour
+            # ligne 69 pour le régime once-per-battle qui, lui, n'est pas multiplié).
+            _da_biggest_extra += config.melee_atk_bonus_waaagh_by_type.get(fighter_unit_type, 0) * n_fighter_models  # get allowed
     cleave_dice, cleave_error = additive_rule_extra_dice(
         "CLEAVE", action_desc, shooters, state.model_types, fighter_unit_type,
         weapon_display_name, config.unit_attack_limits, "cleave_by_weapon",
         config.cleave_by_weapon_global, n_fighter_models, target_models_at_declaration,
     )
-    return cap + cleave_dice, cleave_error
+    return cap + _da_biggest_extra + cleave_dice, cleave_error
 
 
 def _note_melee_weapon_rule_usage(

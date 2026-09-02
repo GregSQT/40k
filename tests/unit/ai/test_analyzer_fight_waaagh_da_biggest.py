@@ -8,8 +8,6 @@ Sans ce fix, l'analyzer comptait 7 et signalait les attaques 8–11 comme fight_
 """
 from __future__ import annotations
 
-import pytest
-
 from ai.analyzer_state import AnalyzerState
 from ai.analyzer_phases.fight_handler import _cc_cap_for_line
 from tests.unit.ai._fabriques import analyzer_config
@@ -26,17 +24,17 @@ def _state_waaagh_actif() -> AnalyzerState:
     return st
 
 
-def test_warboss_sans_waaagh_cap_est_6() -> None:
-    """Hors WAAAGH! : seul cc_nb_by_weapon compte, pas de Da Biggest."""
-    st = AnalyzerState(stats={})
-    st.model_types = {"101#10": "Warboss"}
-    st.active_effects = {}
+def test_warboss_waaagh_sans_shooter_models_cap_est_11() -> None:
+    """Fallback : log sans [SHOOTER_MODELS:] → Da Biggest via n_fighter_models, cap = 11."""
     cfg = analyzer_config(
         unit_attack_limits=_UNIT_LIMITS,
         melee_atk_bonus_waaagh_by_type={"Warboss": 4},
     )
-    cap, _ = _cc_cap_for_line(st, cfg, _LINE, 2, "Warboss", "Kustom Choppa", 6, 1, _SHOOTER, 1)
-    assert cap == 6
+    line_sans_shooter = "FOUGHT Unit 6(1,1) with [Kustom Choppa] [TARGET_DECL:1]"
+    cap, _ = _cc_cap_for_line(
+        _state_waaagh_actif(), cfg, line_sans_shooter, 2, "Warboss", "Kustom Choppa", 6, 1, (), 1,
+    )
+    assert cap == 11, f"attendu 11 (6+1+4) sans [SHOOTER_MODELS:], obtenu {cap}"
 
 
 def test_warboss_waaagh_global_seul_cap_est_7() -> None:

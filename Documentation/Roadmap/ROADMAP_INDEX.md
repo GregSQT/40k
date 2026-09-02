@@ -146,6 +146,11 @@ Correctifs ponctuels livrés → `archives/doc.md#hygiene-correctifs-ponctuels`
 | analyzer | ✅ **Ancre fantôme chargeur corrigée (2026-09-02)** — `worktree-fix-analyzer-charge-dead-ghost`, mergé `8c26cf7c` ; ancre fantôme dans `analyzer_core` après mort d'unité en charge ; cycles rouge/vert. | [analyzer.md](analyzer.md) | ⚡ |
 | moteur | ✅ **Sandbox free-move multi-niveaux (2026-09-02)** — `worktree-sandbox-free-move-multilevel`, mergé `a0484c4b` ; free-move sandbox étendu aux niveaux de terrain ; tests rouge/vert. | — | ⚡ |
 | analyzer | ✅ **Faux positifs `fight_over_cc_nb` Warboss WAAAGH! — Da Biggest (2026-09-02)** — `worktree-fix-analyzer-fight-waaagh-da-biggest` ; `melee_attacks_bonus_while_waaagh` ignoré dans le plafond mêlée (cap 7 au lieu de 11) ; `melee_atk_bonus_waaagh_by_type` dans `analyzer_config` + `_da_biggest_extra` dans `_cc_cap_for_line` ; 5 tests rouge/vert. | [analyzer.md](analyzer.md) | ⚡ |
+| analyzer | ✅ **Simplify cap Da Biggest (2026-09-02)** — `worktree-simplify-da-biggest-cap`, mergé `ec70728c` ; variable temporaire supprimée. | — | ⚡ |
+| analyzer | ✅ **Fix dead-elif altitude (2026-09-02)** — `worktree-fix-simplify-dead-elif-altitude`, mergé `fbb2dbf5` ; `unit_models_alive` sync both DEAD paths. | — | ⚡ |
+| moteur | ✅ **Fix sandbox activation count (2026-09-02)** — `worktree-fix-sandbox-activation-count`, mergé `4c5e45bb`. | — | ⚡ |
+| moteur | ✅ **Fix sandbox re-pool advance/flee (2026-09-02)** — `worktree-fix-sandbox-reppool-advance-flee`, mergé `c2bac7e4` ; purge `units_advanced`/`advance_rolls` et `action=move` au re-pool, budget M+D6 fantôme. | — | ⚡ |
+| analyzer | ✅ **Da Biggest fallback sans `[SHOOTER_MODELS:]` (2026-09-02)** — `worktree-fix-analyzer-da-biggest-fallback` ; bonus per-modèle appliqué via `fighter_unit_type × n_fighter_models` quand `shooters` vide ; test verrou rouge/vert ; `import pytest` mort retiré ; slot dupliqué remplacé par test fallback. | [analyzer.md](analyzer.md) | ⚡ |
 
 ---
 
