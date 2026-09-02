@@ -100,6 +100,54 @@ class TestSandboxFreeMove:
             "hors sandbox, finalize_flee_marking doit ajouter l'unité à units_fled"
         )
 
+    def test_sandbox_advance_cleared_after_commit(self):
+        """VERROU : unité ayant avancé → units_advanced et advance_rolls purgés après re-pool sandbox.
+
+        Sans le purge, _advance_roll_for renvoie le jet figé à la re-activation suivante
+        et le pool de destinations applique M+D6 au lieu de M.
+        """
+        units = [_unit("1", 1, 5, 10)]
+        gs = _make_gs(units, sandbox=True)
+        # Marquer manuellement l'advance (équivalent à movement_set_advance_mode_handler)
+        gs.setdefault("units_advanced", set()).add("1")
+        gs.setdefault("advance_rolls", {})["1"] = 4
+
+        plan = [["1#0", 8, 10, 0, 0]]
+        ok, res = mh.movement_commit_move_plan_handler(gs, "1", {"plan": plan})
+
+        assert ok is True, f"commit échoué en sandbox : {res}"
+        assert "1" not in gs.get("units_advanced", set()), (
+            "units_advanced doit être purgé après sandbox move d'une unité advance"
+        )
+        assert "1" not in gs.get("advance_rolls", {}), (
+            "advance_rolls doit être purgé après sandbox move d'une unité advance"
+        )
+        assert "1" in gs["move_activation_pool"], (
+            "l'unité doit être re-poolée après sandbox move"
+        )
+
+    def test_sandbox_flee_result_action_is_move(self):
+        """VERROU : result['action'] est 'move' (pas 'flee') après re-pool sandbox sur fuite.
+
+        Sans l'override, le front reçoit action='flee' alors que units_fled est vide
+        — discordance moteur/front qui peut bloquer les actions tir/mêlée au tour suivant.
+        """
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 6, 10)]
+        gs = _make_gs(units, sandbox=True)
+
+        from engine.phase_handlers.shared_utils import _squad_is_in_enemy_er
+        assert _squad_is_in_enemy_er(gs, "1"), (
+            "prémisse : unit 1 doit être engagée pour déclencher le flee"
+        )
+
+        plan = [["1#0", 20, 10, 0, 0]]
+        ok, res = mh.movement_commit_move_plan_handler(gs, "1", {"plan": plan})
+
+        assert ok is True, f"commit échoué en sandbox : {res}"
+        assert res["action"] == "move", (
+            f"result['action'] doit être 'move' en sandbox après fuite re-poolée, obtenu '{res['action']}'"
+        )
+
 
 class TestSandboxFreeMoveDestinations:
     """VERROU : sandbox_free_move génère toutes les cellules sol + cellules terrain aux niveaux réels."""
