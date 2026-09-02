@@ -93,6 +93,14 @@ describe("resolveSelectedTerrain — avant chargement de la liste", () => {
   });
 });
 
+describe("resolveSelectedTerrain — liste non encore chargée", () => {
+  beforeEach(() => setTerrainList([]));
+
+  it("n'accepte pas un terrain inconnu depuis l'URL", () => {
+    expect(resolveSelectedTerrain(null, "?terrain=garbage")).toBe("mc2");
+  });
+});
+
 describe("terrainsForMode", () => {
   it("n'expose pfm2 que dans les modes qui en ont le scénario", () => {
     expect(terrainsForMode(null).map((t) => t.id)).toContain("pfm2");
