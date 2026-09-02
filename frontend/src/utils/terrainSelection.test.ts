@@ -4,7 +4,12 @@
 // pfm2 pendant qu'on jouait mc2. Ce fichier verrouille la résolution partagée.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { resolveSelectedTerrain, setTerrainList, terrainsForMode, type TerrainEntry } from "./terrainSelection";
+import {
+  resolveSelectedTerrain,
+  setTerrainList,
+  type TerrainEntry,
+  terrainsForMode,
+} from "./terrainSelection";
 
 const MOCK_TERRAIN_LIST: TerrainEntry[] = [
   {
