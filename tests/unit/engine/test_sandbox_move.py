@@ -233,14 +233,8 @@ class TestSandboxFreeMove:
         sont atteignables par BFS (distance < MOVE=6). Ainsi, retirer la garde sandbox renvoie
         des distances réelles > 0.0 — l'échec d'assertion prouve que le verrou est actif.
         """
-        from tests._state_invariants import unit_invariants
-        unit = {**unit_invariants(),
-            "id": "1", "player": 1, "col": 1, "row": 0,
-            "HP_CUR": 2, "HP_MAX": 2, "VALUE": 100, "OC": 2, "T": 4,
-            "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
-            "MOVE": 6, "RNG_WEAPONS": [], "CC_WEAPONS": [],
-            "BASE_SIZE": 3, "MODEL_HEIGHT": 2.5, "BASE_SHAPE": "round",
-            "UNIT_RULES": [],
+        unit = {**_unit("1", 1, 1, 0),
+            "HP_CUR": 2, "HP_MAX": 2, "VALUE": 100, "OC": 2,
             "models": [
                 {"col": 1, "row": 0, "VALUE": 50, "orientation": 0},
                 {"col": 2, "row": 0, "VALUE": 50, "orientation": 0},
