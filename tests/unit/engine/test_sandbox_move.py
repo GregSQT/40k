@@ -149,6 +149,30 @@ class TestSandboxFreeMove:
             "l'unité doit être re-poolée après sandbox move"
         )
 
+    def test_sandbox_advance_mode_allowed_on_engaged_unit(self):
+        """VERROU : sandbox_free_move bypass le garde engagement de movement_set_advance_mode_handler.
+
+        Sans le bypass, un opérateur sandbox ne peut pas tester le marquage advance
+        sur une unité engagée, alors que le pool de destinations et la liste éligible
+        ne vérifient pas l'engagement en sandbox.
+        """
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 6, 10)]
+        gs = _make_gs(units, sandbox=True)
+
+        from engine.phase_handlers.shared_utils import _squad_is_in_enemy_er
+        assert _squad_is_in_enemy_er(gs, "1"), (
+            "prémisse : unit 1 doit être engagée"
+        )
+
+        ok, result = mh.movement_set_advance_mode_handler(gs, "1", {})
+
+        assert ok is True, (
+            f"sandbox doit autoriser le mode advance sur une unité engagée, refusé : {result}"
+        )
+        assert "1" in gs["units_advanced"], (
+            "units_advanced doit contenir l'unité après set_advance_mode en sandbox"
+        )
+
     def test_sandbox_flee_result_action_is_move(self):
         """VERROU : result['action'] est 'move' (pas 'flee') après re-pool sandbox sur fuite.
 

@@ -919,7 +919,7 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
         return [
             uid for uid, entry in units_cache.items()
             if entry["player"] == current_player
-            and int(entry.get("HP_CUR", 0)) > 0
+            and int(entry["HP_CUR"]) > 0
             and entry_is_on_battlefield(entry)
         ]
 
@@ -1232,7 +1232,7 @@ def movement_set_advance_mode_handler(game_state: Dict[str, Any], unit_id: str, 
     # 09.03 / 09.06 : une escouade engagée (dans l'Engagement Range d'un ennemi) ne peut pas
     # avancer — elle doit tomber en retraite (Fall Back). Refuser ici plutôt que de le détecter
     # après le fait, c'est le même garde que pour le move normal (09.03, ligne ~1361).
-    if _squad_is_in_enemy_er(game_state, str(unit_id)):
+    if not game_state.get("sandbox_free_move") and _squad_is_in_enemy_er(game_state, str(unit_id)):
         return False, {"error": "unit_engaged", "unitId": unit["id"]}
     # Advance = engagement irréversible : marque l'escouade ``units_advanced`` (bloque tir/charge)
     # et fige son jet dans ``advance_rolls``. Jet figé : un squad déjà advancé réutilise son jet
@@ -3849,7 +3849,7 @@ def movement_build_model_destinations_pool(
     if game_state.get("sandbox_free_move"):
         board_cols = require_key(game_state, "board_cols")
         board_rows = require_key(game_state, "board_rows")
-        terrain_areas = game_state.get("terrain_areas", [])
+        terrain_areas = game_state.get("terrain_areas", [])  # get allowed (peut être vide)
         from engine.terrain_utils import floor_hexes_at_level, floor_levels_present
         return {
             "destinations": (
@@ -4587,6 +4587,13 @@ def movement_commit_move_plan_handler(
     # ici : c'est le même invariant, mais tenu par construction au lieu de la discipline de chacun.
     commit_move(plan, game_state, move_type)
 
+    # Advance déclaré mais invalidé par engagement réactif (09.03) : commit_move enregistre
+    # fall_back mais ne purge pas les flags advance posés par movement_set_advance_mode_handler.
+    # Purge inconditionnelle sur fall_back : une unité qui recule ne peut pas avoir avancé.
+    if move_type == "fall_back":
+        game_state["units_advanced"].discard(str(squad_id))
+        game_state["advance_rolls"].pop(str(squad_id), None)
+
     unit = require_unit_by_id(game_state, squad_id)
     # Sync ancre de la liste units sur l'ancre recalculee dans units_cache
     # (commit_move ne touche que models_cache/units_cache).
@@ -4683,14 +4690,14 @@ def movement_commit_move_plan_handler(
     )
 
     if game_state.get("sandbox_free_move"):
-        pool = game_state.setdefault("move_activation_pool", [])
+        pool = game_state["move_activation_pool"]
         squad_id_str = str(squad_id)
         if squad_id_str not in pool:
             pool.append(squad_id_str)
-        game_state.setdefault("units_moved", set()).discard(squad_id_str)
-        game_state.setdefault("units_fled", set()).discard(squad_id_str)
-        game_state.setdefault("units_advanced", set()).discard(squad_id_str)
-        game_state.setdefault("advance_rolls", {}).pop(squad_id_str, None)
+        game_state["units_moved"].discard(squad_id_str)
+        game_state["units_fled"].discard(squad_id_str)
+        game_state["units_advanced"].discard(squad_id_str)
+        game_state["advance_rolls"].pop(squad_id_str, None)
         result["action"] = "move"
         count = game_state["unit_activation_count"]
         assert count > 0, f"unit_activation_count attendu > 0 après end_activation, obtenu {count}"
