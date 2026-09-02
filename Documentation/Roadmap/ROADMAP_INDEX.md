@@ -94,6 +94,8 @@ Tâches J4 archivées → `archives/doc.md#hygiene-correctifs-ponctuels`
 
 Correctifs ponctuels livrés → `archives/doc.md#hygiene-correctifs-ponctuels`
 
+Correctifs hors chantier (2026-09-03) : `worktree-fix-terrain-empty-string` (rejette chaîne vide dans accepts), `worktree-fix-biome-terrain-imports` (ordre imports Biome), `worktree-test-terrain-list-not-loaded` (trou test resolveSelectedTerrain liste non chargée + corrige accepts listLoaded).
+
 ---
 
 ## Soutien — backlog hors jalons
