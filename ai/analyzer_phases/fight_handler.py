@@ -595,3 +595,6 @@ def handle_fight_move(
     # Recale l'ancre : sans ça elle reste figée sur la position de combat et le move suivant
     # remonte un faux mismatch position/log (2.2).
     _position_cache_set(state.unit_positions, unit_id, anchor_to[0], anchor_to[1])
+    # Ancre mise à jour sans [MODELS:] (les lignes PILED IN/CONSOLIDATED n'en portent pas) :
+    # purge pour forcer le retour à l'ancre dans les contrôles suivants (miroir du fix FLED/MOVED).
+    state.positions_by_model.pop(unit_id, None)

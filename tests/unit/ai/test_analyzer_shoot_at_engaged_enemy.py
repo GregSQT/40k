@@ -138,3 +138,46 @@ def test_fled_ally_no_longer_engages_target(tmp_path):
     """
     stats = _stats_fled(tmp_path, _UNIT2_FLED + _SHOT)
     assert stats["shoot_at_engaged_enemy"][1] == 0
+
+
+# --- cas PILED IN ---
+# Miroir exact du cas FLED : l'allié (unité 2) est déployé avec [MODELS:] adjacent à la cible,
+# puis pile-in vers BRAWLER_AWAY (phase FIGHT). Les lignes PILED IN ne portent pas de [MODELS:],
+# donc positions_by_model reste à l'ancienne position (adjacent) sauf si on le purge après
+# _position_cache_set. Le tir au tour suivant sur la cible doit être un faux positif avant fix.
+_UNIT2_PILED_IN = (
+    f"[10:00:02] E1 T1 P1 FIGHT : Unit 2{BA} PILED IN from {BE} to {BA} [R:+0.0] [SUCCESS]\n"
+)
+
+_UNIT2_CONSOLIDATED = (
+    f"[10:00:02] E1 T1 P1 FIGHT : Unit 2{BA} CONSOLIDATED from {BE} to {BA} [R:+0.0] [SUCCESS]\n"
+)
+
+_SHOT_T2 = (
+    f"[10:00:03] E1 T2 P1 SHOOT : Unit 1{S} SHOT Unit 101{T} with [Bolt Rifle]"
+    " - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_piled_in_ally_no_longer_engages_target(tmp_path):
+    """Faux positif 04.02 : positions_by_model périmées après un PILED IN sans [MODELS:].
+
+    L'allié est déployé avec [MODELS:] adjacent à la cible (positions_by_model = engagé).
+    Il pile-in vers BRAWLER_AWAY en phase FIGHT (pas de [MODELS:] → ancre mise à jour mais
+    positions_by_model stale à l'ancienne position adjacente). Le tir au tour suivant sur la
+    cible ne doit PAS compter comme shoot_at_engaged_enemy : l'allié n'engage plus la cible
+    depuis sa nouvelle position (ancre = BRAWLER_AWAY).
+    """
+    stats = _stats_fled(tmp_path, _UNIT2_PILED_IN + _SHOT_T2)
+    assert stats["shoot_at_engaged_enemy"][1] == 0
+
+
+def test_consolidated_ally_no_longer_engages_target(tmp_path):
+    """Faux positif 04.02 : même invariant que PILED IN, couverture du verbe CONSOLIDATED.
+
+    Verrou contre toute dérive qui limiterait le pop(positions_by_model) au seul
+    kind=='pile_in' : la consolidation passe par le même handler (handle_fight_move) et le
+    même _position_cache_set, le purge doit couvrir les deux verbes.
+    """
+    stats = _stats_fled(tmp_path, _UNIT2_CONSOLIDATED + _SHOT_T2)
+    assert stats["shoot_at_engaged_enemy"][1] == 0
