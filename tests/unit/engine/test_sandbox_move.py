@@ -91,6 +91,31 @@ class TestSandboxFreeMove:
             "l'unité doit être re-poolée après sandbox move"
         )
 
+    def test_sandbox_does_not_inflate_unit_activation_count(self):
+        """VERROU : un double commit sandbox ne doit pas gonfler unit_activation_count.
+
+        end_activation incrémente le compteur ; le bloc sandbox doit le décrémenter
+        pour que N re-commits d'une même unité ne génèrent qu'un seul compte final.
+        """
+        units = [_unit("1", 1, 5, 10)]
+        gs = _make_gs(units, sandbox=True)
+
+        plan1 = [["1#0", 10, 10, 0, 0]]
+        ok1, _ = mh.movement_commit_move_plan_handler(gs, "1", {"plan": plan1})
+        assert ok1 is True
+        count_after_first = gs.get("unit_activation_count", 0)
+
+        # Re-commit depuis la position intermédiaire
+        plan2 = [["1#0", 15, 10, 0, 0]]
+        ok2, _ = mh.movement_commit_move_plan_handler(gs, "1", {"plan": plan2})
+        assert ok2 is True
+        count_after_second = gs.get("unit_activation_count", 0)
+
+        assert count_after_second == count_after_first, (
+            f"sandbox re-commit ne doit pas incrémenter unit_activation_count "
+            f"({count_after_first} → {count_after_second})"
+        )
+
     def test_normal_finalize_flee_marking_stays(self):
         """Contrôle : finalize_flee_marking marque units_fled hors sandbox, sans sandbox bypass."""
         from engine.phase_handlers.movement_handlers import finalize_flee_marking
