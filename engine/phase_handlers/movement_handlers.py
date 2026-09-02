@@ -4692,7 +4692,9 @@ def movement_commit_move_plan_handler(
         game_state.setdefault("units_advanced", set()).discard(squad_id_str)
         game_state.setdefault("advance_rolls", {}).pop(squad_id_str, None)
         result["action"] = "move"
-        game_state["unit_activation_count"] = max(0, game_state.get("unit_activation_count", 0) - 1)
+        count = game_state.get("unit_activation_count", 0)
+        assert count > 0, f"unit_activation_count attendu > 0 après end_activation, obtenu {count}"
+        game_state["unit_activation_count"] = count - 1
 
     return True, result
 
