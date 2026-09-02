@@ -3849,9 +3849,16 @@ def movement_build_model_destinations_pool(
     if game_state.get("sandbox_free_move"):
         board_cols = require_key(game_state, "board_cols")
         board_rows = require_key(game_state, "board_rows")
-        _lv = int(model.get("level", 0))  # get allowed (figurine au sol par défaut)
+        terrain_areas = game_state.get("terrain_areas", [])
+        destinations: List[List[int]] = [
+            [c, r, 0] for c in range(board_cols) for r in range(board_rows)
+        ]
+        from engine.terrain_utils import floor_hexes_at_level, floor_levels_present
+        for lv in floor_levels_present(terrain_areas):
+            for c, r in floor_hexes_at_level(terrain_areas, lv):
+                destinations.append([c, r, lv])
         return {
-            "destinations": [[c, r, _lv] for c in range(board_cols) for r in range(board_rows)],
+            "destinations": destinations,
             "footprint_mask_loops": [],
         }
 
