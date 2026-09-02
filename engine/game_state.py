@@ -1464,6 +1464,16 @@ class GameStateManager:
                         "selectedRngWeaponIndex": 0 if m_rng else None,
                         "selectedCcWeaponIndex": 0 if m_cc else None,
                     })
+                    # 19.04 : un modèle inline avec rôle leader/support porte des règles qui
+                    # doivent s'éteindre à sa mort, exactement comme un character replié par
+                    # _fold_attached_characters. On lui assigne une source fictive unique :
+                    # ses règles iront dans _ATTACHED_RULE_GROUPS (pas _UNIT_RULES_OWN) et
+                    # recompute_unit_rules_in_effect les exclura d'alive_attached_sources
+                    # dès que la figurine sort de squad_models.
+                    if "attached_from" not in m_spec:
+                        _inline_role = _derive_model_role(require_key(m_data, "UNIT_RULES"))
+                        if _inline_role in ("leader", "support"):
+                            m_spec["attached_from"] = f"_inline_{unit_data['id']}_{idx}"
                     total_hp_cur += int(require_key(m_data, "HP_MAX"))
                     total_value += int(require_key(m_data, "VALUE"))
                 else:
