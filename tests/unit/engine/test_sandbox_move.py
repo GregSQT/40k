@@ -295,3 +295,30 @@ class TestSandboxFreeMoveDestinations:
         result = mh.movement_build_model_destinations_pool(gs, model_id)
         levels = {d[2] for d in result["destinations"]}
         assert levels == {0}, f"sans étage, seul le niveau 0 attendu, obtenu : {levels}"
+
+
+class TestSandboxExplainMoveRejection:
+    """VERROU : explain_move_plan_rejection en mode sandbox — hors plateau = erreur, valide = None."""
+
+    def _gs(self) -> dict:
+        return {
+            "board_cols": 30,
+            "board_rows": 25,
+            "sandbox_free_move": True,
+            "models_cache": {},
+        }
+
+    def test_hors_plateau_nc_negatif_retourne_erreur(self):
+        """Plan avec nc=-1 → retourne une chaîne d'erreur (pas None)."""
+        from engine.phase_handlers.shared_utils import explain_move_plan_rejection
+        plan = [["1#0", -1, 10, 0, 0]]
+        result = explain_move_plan_rejection(plan, self._gs())
+        assert result is not None, "nc=-1 doit être rejeté en sandbox"
+        assert "-1" in result, f"le message doit mentionner la colonne invalide, obtenu : {result!r}"
+
+    def test_plan_valide_retourne_none(self):
+        """Plan dans les limites du plateau → retourne None (plan accepté)."""
+        from engine.phase_handlers.shared_utils import explain_move_plan_rejection
+        plan = [["1#0", 10, 5, 0, 0]]
+        result = explain_move_plan_rejection(plan, self._gs())
+        assert result is None, f"plan valide doit être accepté en sandbox, obtenu : {result!r}"
