@@ -43,8 +43,13 @@ def _call_damage(
     unit_model_hp: dict,
     unit_models_alive: dict,
     damage: int = 1,
-) -> None:
-    """Appelle _apply_damage_and_handle_death sur l'unité 105 avec ordered_living_mids réel."""
+    alloc_model_id: str | None = "105#0",
+) -> dict:
+    """Appelle _apply_damage_and_handle_death sur l'unité 105 avec ordered_living_mids réel.
+
+    Retourne le dict stats pour que les tests puissent inspecter current_episode_deaths.
+    """
+    stats = _make_stats()
     _apply_damage_and_handle_death(
         target_id="105",
         attacker_id="1",
@@ -65,10 +70,11 @@ def _call_damage(
         unit_positions={"105": (105, 150)},
         unit_deaths=[],
         unit_kill_context={},
-        stats=_make_stats(),
-        alloc_model_id="105#0",
-        dead_model_ids_episode={"105": {"105#0"}},
+        stats=stats,
+        alloc_model_id=alloc_model_id,
+        dead_model_ids_episode={"105": {"105#0"}} if alloc_model_id is not None else None,
     )
+    return stats
 
 
 class TestDeadBeforeFightHp:
@@ -106,3 +112,27 @@ class TestDeadBeforeFightHp:
                      unit_models_alive=unit_models_alive, damage=1)
 
         assert unit_hp["105"] == 1
+
+    def test_unnamed_path_post_dead_does_not_double_count(self) -> None:
+        """Chemin non-nommé (alloc_model_id=None, grammaire 1) post-DEAD : la garde bloque.
+
+        Sans la garde `unit_hp[target_id] <= 0`, le chemin unnamed calculerait
+        front_hp = 0 - damage = -damage → branche létale → unit_models_alive décrémenté
+        à -1 et current_episode_deaths incrémenté une seconde fois. La garde doit
+        retourner avant d'atteindre cette branche.
+        """
+        unit_hp = {"105": 0}
+        unit_model_hp: dict = {}
+        unit_models_alive = {"105": 0}  # déjà décrémenté par le DEAD handler
+
+        stats = _call_damage(
+            unit_hp=unit_hp,
+            unit_model_hp=unit_model_hp,
+            unit_models_alive=unit_models_alive,
+            damage=1,
+            alloc_model_id=None,
+        )
+
+        assert unit_hp["105"] == 0, "unit_hp ne doit pas être supprimé ni restauré"
+        assert unit_models_alive["105"] == 0, "unit_models_alive ne doit pas descendre à -1"
+        assert stats["current_episode_deaths"] == [], "pas de double-comptage dans deaths"
