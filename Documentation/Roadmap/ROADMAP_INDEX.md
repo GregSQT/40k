@@ -152,6 +152,7 @@ Correctifs ponctuels livrés → `archives/doc.md#hygiene-correctifs-ponctuels`
 | moteur | ✅ **Fix sandbox activation count (2026-09-02)** — `worktree-fix-sandbox-activation-count`, mergé `4c5e45bb`. | — | ⚡ |
 | moteur | ✅ **Fix sandbox re-pool advance/flee (2026-09-02)** — `worktree-fix-sandbox-reppool-advance-flee`, mergé `c2bac7e4` ; purge `units_advanced`/`advance_rolls` et `action=move` au re-pool, budget M+D6 fantôme. | — | ⚡ |
 | analyzer | ✅ **Da Biggest fallback sans `[SHOOTER_MODELS:]` (2026-09-02)** — `worktree-fix-analyzer-da-biggest-fallback` ; bonus per-modèle appliqué via `fighter_unit_type × n_fighter_models` quand `shooters` vide ; test verrou rouge/vert ; `import pytest` mort retiré ; slot dupliqué remplacé par test fallback. | [analyzer.md](analyzer.md) | ⚡ |
+| analyzer | ✅ **Faux positifs `move_adjacent_before_non_flee` — DEAD-before-FIGHT (2026-09-02)** — `worktree-fix-move-adjacent-analyzer` ; DEAD handler met `unit_hp=0` (clé présente) mais `unit_model_hp` non purgé ; attaques post-DEAD prenaient le chemin non-létal et restauraient `unit_hp` via `_sync_front_hp_mirror` → unité morte dans `positions_at_movement_filtered` au tour suivant ; garde dans `_apply_damage_and_handle_death` ; 2 tests rouge/vert. | — | ⚡ |
 
 ---
 
