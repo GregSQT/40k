@@ -1496,14 +1496,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     # Appliquer immédiatement la suppression : si c'est le DERNIER socle, il
                     # n'y aura plus de [MODELS:] pour déclencher la purge `pending_model_removals`,
                     # et le modèle resterait « fantôme » dans `positions_by_model`.
+                    state.unit_models_alive[_dead_uid] = max(
+                        0, state.unit_models_alive.get(_dead_uid, 1) - 1
+                    )
                     _pbm = state.positions_by_model.get(_dead_uid)
                     if _pbm is not None:
                         _pbm.pop(_dead_mid, None)
-                        # Décrémenter unit_models_alive pour que le elif-branch ait le bon
-                        # compte si le handler purge positions_by_model entre deux DEAD.
-                        state.unit_models_alive[_dead_uid] = max(
-                            0, state.unit_models_alive.get(_dead_uid, 1) - 1
-                        )
                         if not _pbm:
                             state.positions_by_model.pop(_dead_uid, None)
                             # Dernier socle retiré : unit_hp doit refléter la mort pour que
@@ -1511,13 +1509,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             state.unit_hp[_dead_uid] = 0
                     elif state.unit_hp.get(_dead_uid, 0) > 0:
                         # positions_by_model absent (purgé par charge_handler, move_handler, etc.)
-                        # avant ce DEAD : le if-branch ne peut pas compter les socles restants.
-                        # Décrémenter le compteur local ; quand il atteint 0 (tous les socles
-                        # déclarés morts via DEAD), zéroer unit_hp pour que _build_move_bfs_blockers
-                        # n'inclue plus l'ancre fantôme dans occupied_positions.
-                        _models_left = state.unit_models_alive.get(_dead_uid, 1) - 1
-                        state.unit_models_alive[_dead_uid] = max(0, _models_left)
-                        if _models_left <= 0:
+                        # avant ce DEAD : quand unit_models_alive atteint 0, zéroer unit_hp pour
+                        # que _build_move_bfs_blockers n'inclue plus l'ancre fantôme.
+                        if state.unit_models_alive[_dead_uid] <= 0:
                             state.unit_hp[_dead_uid] = 0
                     _prm = state.pending_model_removals.get(_dead_uid)
                     if _prm is not None:
