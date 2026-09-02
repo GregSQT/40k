@@ -7,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   resolveSelectedTerrain,
   setTerrainList,
-  terrainSuffix,
   type TerrainEntry,
+  terrainSuffix,
   terrainsForMode,
 } from "./terrainSelection";
 
