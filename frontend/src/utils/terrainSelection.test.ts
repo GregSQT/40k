@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   resolveSelectedTerrain,
   setTerrainList,
+  terrainSuffix,
   type TerrainEntry,
   terrainsForMode,
 } from "./terrainSelection";
@@ -67,11 +68,24 @@ describe("resolveSelectedTerrain", () => {
     localStorage.setItem("gameprep_terrain", "pfm2");
     expect(resolveSelectedTerrain("pve_test", "?terrain=pfm2")).toBe("mc1");
   });
+
+  it("reprend le localStorage valide quand l'URL est invalide", () => {
+    localStorage.setItem("gameprep_terrain", "mc1");
+    expect(resolveSelectedTerrain(null, "?terrain=nonexistent")).toBe("mc1");
+  });
+
+  it("pvp_test sans URL ni localStorage : mc2 via default_for, pas supported[0]", () => {
+    expect(resolveSelectedTerrain("pvp_test", "")).toBe("mc2");
+  });
 });
 
 describe("resolveSelectedTerrain — avant chargement de la liste", () => {
   beforeEach(() => {
     setTerrainList([]);
+  });
+
+  it("accepte tout paramètre d'URL non vide avant chargement", () => {
+    expect(resolveSelectedTerrain(null, "?terrain=garbage")).toBe("garbage");
   });
 
   it("rejette '' (URL ?terrain= vide) même sans liste chargée", () => {
@@ -84,6 +98,20 @@ describe("terrainsForMode", () => {
     expect(terrainsForMode(null).map((t) => t.id)).toContain("pfm2");
     expect(terrainsForMode("pve").map((t) => t.id)).toContain("pfm2");
     expect(terrainsForMode("pvp_test").map((t) => t.id)).toContain("pfm2");
-    expect(terrainsForMode("pve_test").map((t) => t.id)).not.toContain("pfm2");
+    expect(terrainsForMode("pve_test").map((t) => t.id)).toEqual(["mc1"]);
+  });
+});
+
+describe("terrainSuffix", () => {
+  it("renvoie _id pour un terrain inconnu", () => {
+    expect(terrainSuffix("xyz", "pvp", MOCK_TERRAIN_LIST)).toBe("_xyz");
+  });
+
+  it("renvoie '' pour le terrain par défaut du mode", () => {
+    expect(terrainSuffix("mc2", "pvp", MOCK_TERRAIN_LIST)).toBe("");
+  });
+
+  it("renvoie _id pour un terrain connu mais non-défaut du mode", () => {
+    expect(terrainSuffix("mc1", "pvp", MOCK_TERRAIN_LIST)).toBe("_mc1");
   });
 });
