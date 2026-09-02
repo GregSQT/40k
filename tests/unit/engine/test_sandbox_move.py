@@ -104,6 +104,10 @@ class TestSandboxFreeMove:
         ok1, _ = mh.movement_commit_move_plan_handler(gs, "1", {"plan": plan1})
         assert ok1 is True
         count_after_first = gs.get("unit_activation_count", 0)
+        assert count_after_first == 0, (
+            f"sandbox commit doit neutraliser l'incrément de end_activation "
+            f"(attendu 0, obtenu {count_after_first})"
+        )
 
         # Re-commit depuis la position intermédiaire
         plan2 = [["1#0", 15, 10, 0, 0]]
