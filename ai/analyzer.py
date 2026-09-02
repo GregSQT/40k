@@ -442,6 +442,12 @@ def _apply_damage_and_handle_death(
         `T{n} STATE:` — minorant, l'instantané recalant tout à chaque tour."""
     if damage <= 0:
         return
+    # DEAD-before-FIGHT : le moteur journalise DEAD avant la ou les lignes d'attaque létales.
+    # Le DEAD handler a déjà mis unit_hp[target_id] = 0 (clé présente). Les blessures qui
+    # suivent sont des « excess wounds lost » ; les appliquer déclencherait _sync_front_hp_mirror
+    # et restaurerait unit_hp à une valeur positive — faussant les snapshots des tours suivants.
+    if target_id in unit_hp and unit_hp[target_id] <= 0:
+        return
     if target_id not in unit_hp:
         # Exception 05 Attack sequence : blessure de la MÊME activation qui a détruit la
         # cible (même attaquant, même turn/phase) = « excess wound lost », pas une anomalie.
