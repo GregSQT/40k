@@ -173,6 +173,38 @@ class TestSandboxFreeMove:
             "units_advanced doit contenir l'unité après set_advance_mode en sandbox"
         )
 
+    def test_sandbox_advance_engaged_flags_cleared_after_commit(self):
+        """VERROU : unité engagée advance-mode (sandbox) → flags purgés après commit.
+
+        set_advance_mode_handler écrit units_advanced + advance_rolls ; le bloc sandbox
+        du commit doit les effacer inconditionnellement, même si l'unité était engagée.
+        Sans ce purge, la re-activation suivante hérite du jet advance et restreint
+        tir/charge alors que l'unité s'est juste re-poolée.
+        """
+        units = [_unit("1", 1, 5, 10), _unit("2", 2, 6, 10)]
+        gs = _make_gs(units, sandbox=True)
+
+        from engine.phase_handlers.shared_utils import _squad_is_in_enemy_er
+        assert _squad_is_in_enemy_er(gs, "1"), (
+            "prémisse : unit 1 doit être engagée"
+        )
+
+        ok_adv, _ = mh.movement_set_advance_mode_handler(gs, "1", {})
+        assert ok_adv is True
+        assert "1" in gs["units_advanced"], "prémisse : flag advance posé"
+        assert "1" in gs["advance_rolls"], "prémisse : roll advance enregistré"
+
+        plan = [["1#0", 20, 10, 0, 0]]
+        ok, _ = mh.movement_commit_move_plan_handler(gs, "1", {"plan": plan})
+
+        assert ok is True
+        assert "1" not in gs.get("units_advanced", set()), (
+            "units_advanced doit être purgé après commit sandbox (unité engagée)"
+        )
+        assert "1" not in gs.get("advance_rolls", {}), (
+            "advance_rolls doit être purgé après commit sandbox (unité engagée)"
+        )
+
     def test_sandbox_flee_result_action_is_move(self):
         """VERROU : result['action'] est 'move' (pas 'flee') après re-pool sandbox sur fuite.
 
