@@ -235,6 +235,10 @@ class AnalyzerConfig:
     #: Absent = 0 (unité sans la règle). Lu dans `_cc_cap_for_line` quand `[FINEST HOUR]` est
     #: présent sur la ligne, pour lever le plafond du bon montant sans re-dériver la règle.
     once_per_battle_melee_bonus_by_type: Dict[str, int]
+    #: `attacks_bonus` de `melee_attacks_bonus_while_waaagh` (Da Biggest and da Best) par type.
+    #: S'ajoute PAR FIGURINE au plafond d'attaques de mêlée quand le Waaagh! est actif pour ce
+    #: joueur (conditionnel waaagh_bonus > 0, distinct du global waaagh_melee_atk). 0 = pas de règle.
+    melee_atk_bonus_waaagh_by_type: Dict[str, int]
     toughness_bonus_waaagh_by_type: Dict[str, int]
     #: `toughness_bonus` de `toughness_bonus_while_waaagh` (BannerNob) par type d'unité porteur.
     #: Appliqué sur l'E cible quand le Waaagh est actif pour le joueur cible. 0 = pas de règle.
@@ -308,6 +312,7 @@ def load_analyzer_config() -> AnalyzerConfig:
     unit_rules_by_type: Dict[str, Set[str]] = {}
     unit_move_after_shooting_distance_by_type: Dict[str, int] = {}
     once_per_battle_melee_bonus_by_type: Dict[str, int] = {}
+    melee_atk_bonus_waaagh_by_type: Dict[str, int] = {}
     toughness_bonus_waaagh_by_type: Dict[str, int] = {}
     unit_is_fly_by_type: Dict[str, bool] = {}
     unit_is_monster_or_vehicle_by_type: Dict[str, bool] = {}
@@ -564,6 +569,26 @@ def load_analyzer_config() -> AnalyzerConfig:
                         f"{existing_bonus} vs {fh_bonus_val}"
                     )
                 once_per_battle_melee_bonus_by_type[unit_type] = fh_bonus_val
+            if "melee_attacks_bonus_while_waaagh" in rule_effect_ids:
+                rule_args = rule.get("rule_args")
+                if not isinstance(rule_args, dict):
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' must define rule_args "
+                        f"for melee_attacks_bonus_while_waaagh"
+                    )
+                if "attacks_bonus" not in rule_args:
+                    raise ValueError(
+                        f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
+                        f"rule_args.attacks_bonus for melee_attacks_bonus_while_waaagh"
+                    )
+                mab_val = int(rule_args["attacks_bonus"])
+                existing_mab = melee_atk_bonus_waaagh_by_type.get(unit_type)
+                if existing_mab is not None and existing_mab != mab_val:
+                    raise ValueError(
+                        f"Unit '{unit_type}' has conflicting melee_attacks_bonus_while_waaagh: "
+                        f"{existing_mab} vs {mab_val}"
+                    )
+                melee_atk_bonus_waaagh_by_type[unit_type] = mab_val
             if "weapon_attacks_bonus_vs_designated_target" in rule_effect_ids:
                 rule_args = rule.get("rule_args", {})
                 weapon_code = rule_args.get("weapon_code")
@@ -750,6 +775,7 @@ def load_analyzer_config() -> AnalyzerConfig:
         max_turns=config_loader.get_max_turns(),
         bonus_malus_cap=config_loader.get_bonus_malus_cap(),
         once_per_battle_melee_bonus_by_type=once_per_battle_melee_bonus_by_type,
+        melee_atk_bonus_waaagh_by_type=melee_atk_bonus_waaagh_by_type,
         toughness_bonus_waaagh_by_type=toughness_bonus_waaagh_by_type,
         squadmates_by_type=squadmates_by_type,
     )

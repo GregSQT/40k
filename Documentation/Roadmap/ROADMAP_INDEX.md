@@ -143,6 +143,9 @@ Correctifs ponctuels livrés → `archives/doc.md#hygiene-correctifs-ponctuels`
 | analyzer | ✅ **Simplify `_resolve_active_unit_types` (2026-09-02)** — triple duplication du bloc `_types`/`living_mids` extraite en helper privé ; double passe sur `model_types` supprimée (passe unique avec `has_unit_entry`) ; constantes `SHOOTER_POS/TARGET_POS/S/T` partagées dans `_fabriques`. | — | ⚡ |
 | analyzer | ✅ **Simplify analyzer weapon lookup (2026-09-02)** — 4 cleanups `unit_registry` : `TS_QUOTED_STRING`, helper weapon lookup, set expr, `weapon_profile_names` OD ; normalise `unit_upper_keywords_by_type` (cohérence moteur). | — | ⚡ |
 | analyzer | ✅ **Faux positifs analyzer.log — FLY hex + Litany + INVERSE-CROISÉ (2026-09-02)** — distance FLY mesurée en `calculate_hex_distance` (156 faux positifs) ; Litany of Hate lue depuis le token `[LITANY OF HATE]` (35 faux positifs) ; cas INVERSE-CROISÉ dans `_pair_is_conditional` quand le bodyguard accorde une règle au leader (1 faux positif) ; `unit_upper_keywords_by_type` ajouté dans `_fabriques` (fixture cassée pré-existante). | [analyzer.md](analyzer.md) | ⚡ |
+| analyzer | ✅ **Ancre fantôme chargeur corrigée (2026-09-02)** — `worktree-fix-analyzer-charge-dead-ghost`, mergé `8c26cf7c` ; ancre fantôme dans `analyzer_core` après mort d'unité en charge ; cycles rouge/vert. | [analyzer.md](analyzer.md) | ⚡ |
+| moteur | ✅ **Sandbox free-move multi-niveaux (2026-09-02)** — `worktree-sandbox-free-move-multilevel`, mergé `a0484c4b` ; free-move sandbox étendu aux niveaux de terrain ; tests rouge/vert. | — | ⚡ |
+| analyzer | ✅ **Faux positifs `fight_over_cc_nb` Warboss WAAAGH! — Da Biggest (2026-09-02)** — `worktree-fix-analyzer-fight-waaagh-da-biggest` ; `melee_attacks_bonus_while_waaagh` ignoré dans le plafond mêlée (cap 7 au lieu de 11) ; `melee_atk_bonus_waaagh_by_type` dans `analyzer_config` + `_da_biggest_extra` dans `_cc_cap_for_line` ; 5 tests rouge/vert. | [analyzer.md](analyzer.md) | ⚡ |
 
 ---
 

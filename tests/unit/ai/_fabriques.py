@@ -219,6 +219,8 @@ def analyzer_config(**overrides: Any) -> AnalyzerConfig:
         "bonus_malus_cap": 0,
         # Bonus d'attaques de Finest Hour (once_per_battle_melee_buff) par type ; vide par défaut.
         "once_per_battle_melee_bonus_by_type": {},
+        # Bonus d'attaques en WAAAGH! par type (Da Biggest and da Best) ; vide par défaut.
+        "melee_atk_bonus_waaagh_by_type": {},
     }
     unknown = set(overrides) - set(fields)
     if unknown:
