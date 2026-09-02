@@ -97,10 +97,12 @@ def _pair_is_conditional(
             led_types = squadmates_by_type.get(gu, set())
             if led_types and weapon_key.endswith(tuple(f" ({lt})" for lt in led_types)):
                 return True
-            # INVERSE-CROISÉ : le porteur EST un leader qui mène gu (gu est le bodyguard accordant)
-            for carrier_type, led_set in squadmates_by_type.items():
-                if gu in led_set and weapon_key.endswith(f" ({carrier_type})"):
-                    return True
+        # INVERSE-CROISÉ : le porteur EST un leader dont un bodyguard accordant est mené par lui
+        if any(
+            granting_units & led_set and weapon_key.endswith(f" ({carrier_type})")
+            for carrier_type, led_set in squadmates_by_type.items()
+        ):
+            return True
     return False
 
 

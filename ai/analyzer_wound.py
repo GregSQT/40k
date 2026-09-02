@@ -306,7 +306,7 @@ def expected_wound_threshold(
     # paierait le coût de la recherche du token même quand il est impossible de l'y trouver.
     litany_mag = 0
     if is_melee and config.rule_to_units.get("wound_roll_bonus_fight"):  # get allowed
-        litany_mag = 1 if LITANY_MARKER in action_desc else 0
+        litany_mag = int(LITANY_MARKER in action_desc)
     cap_val = config.bonus_malus_cap
     total_bonus = oath_mag + litany_mag
     if cap_val and total_bonus > cap_val:
