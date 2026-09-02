@@ -93,9 +93,14 @@ def _pair_is_conditional(
         return True
     if squadmates_by_type:
         for gu in granting_units:
+            # CROISÉ : le porteur est une unité MENÉE par gu (le leader accordant)
             led_types = squadmates_by_type.get(gu, set())
             if led_types and weapon_key.endswith(tuple(f" ({lt})" for lt in led_types)):
                 return True
+            # INVERSE-CROISÉ : le porteur EST un leader qui mène gu (gu est le bodyguard accordant)
+            for carrier_type, led_set in squadmates_by_type.items():
+                if gu in led_set and weapon_key.endswith(f" ({carrier_type})"):
+                    return True
     return False
 
 
@@ -1429,7 +1434,7 @@ def _per_model_move_violation(
     for mid, (o_col, o_row) in moved:
         d_col, d_row = new_models[mid]
         if is_fly:
-            if (d_col - o_col) ** 2 + (d_row - o_row) ** 2 > budget ** 2:
+            if calculate_hex_distance(o_col, o_row, d_col, d_row) > budget:
                 return True
         elif _bfs_shortest_path_length(
             o_col, o_row, d_col, d_row, budget,

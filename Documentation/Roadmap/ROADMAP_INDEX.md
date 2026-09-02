@@ -136,6 +136,8 @@ Correctifs ponctuels livrés → `archives/doc.md#hygiene-correctifs-ponctuels`
 | analyzer | ✅ **Dakkablitz+OD dans `max_allowed_shots` (2026-09-02)** — `unit_ability_atk_bonus_vs_keyword_cap` + `unit_blast_per5_nonmv_bonus` câblés dans `shoot_handler` ; `living_mids` fallback corrigé dans les deux jumeaux. Ferme les 1935 faux positifs `surcharge_atk` restants. | [analyzer.md](analyzer.md) | ⚡ |
 | analyzer | ✅ **Bénéfice du doute OD type cible inconnu (2026-09-02)** — `target_upper_kws = frozenset()` quand le type de cible est inconnu → OD non écarté, évite les faux positifs OD rares. | — | ⚡ |
 | analyzer | ✅ **Simplify `_resolve_active_unit_types` (2026-09-02)** — triple duplication du bloc `_types`/`living_mids` extraite en helper privé ; double passe sur `model_types` supprimée (passe unique avec `has_unit_entry`) ; constantes `SHOOTER_POS/TARGET_POS/S/T` partagées dans `_fabriques`. | — | ⚡ |
+| analyzer | ✅ **Simplify analyzer weapon lookup (2026-09-02)** — 4 cleanups `unit_registry` : `TS_QUOTED_STRING`, helper weapon lookup, set expr, `weapon_profile_names` OD ; normalise `unit_upper_keywords_by_type` (cohérence moteur). | — | ⚡ |
+| analyzer | ✅ **Faux positifs analyzer.log — FLY hex + Litany + INVERSE-CROISÉ (2026-09-02)** — distance FLY mesurée en `calculate_hex_distance` (156 faux positifs) ; Litany of Hate lue depuis le token `[LITANY OF HATE]` (35 faux positifs) ; cas INVERSE-CROISÉ dans `_pair_is_conditional` quand le bodyguard accorde une règle au leader (1 faux positif) ; `unit_upper_keywords_by_type` ajouté dans `_fabriques` (fixture cassée pré-existante). | [analyzer.md](analyzer.md) | ⚡ |
 
 ---
 
