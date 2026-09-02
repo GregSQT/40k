@@ -98,6 +98,8 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
 Correctifs ponctuels livrés → `archives/doc.md#hygiene-correctifs-ponctuels`
 
+- ✅ analyzer : lot correctifs ponctuels 2026-09-02 — purge `positions_by_model` faux positifs engagement, simplification inverse/croisé/litany, retrait guard `current_episode_num > 0` collision move
+
 ---
 
 ## Soutien — backlog hors jalons
