@@ -69,6 +69,16 @@ describe("resolveSelectedTerrain", () => {
   });
 });
 
+describe("resolveSelectedTerrain — avant chargement de la liste", () => {
+  beforeEach(() => {
+    setTerrainList([]);
+  });
+
+  it("rejette '' (URL ?terrain= vide) même sans liste chargée", () => {
+    expect(resolveSelectedTerrain(null, "?terrain=")).toBe("mc2");
+  });
+});
+
 describe("terrainsForMode", () => {
   it("n'expose pfm2 que dans les modes qui en ont le scénario", () => {
     expect(terrainsForMode(null).map((t) => t.id)).toContain("pfm2");
