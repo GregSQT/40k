@@ -15,6 +15,8 @@ piège, autre règle.
 """
 from __future__ import annotations
 
+import pytest
+
 from tests.unit.ai._fabriques import entete_step_log
 
 OBJECTIVES = ";".join(f"(150,{r})" for r in range(150, 156))
@@ -120,7 +122,7 @@ _UNIT2_FLED = (
 )
 
 
-def _stats_fled(tmp_path, body: str):
+def _stats_with_models(tmp_path, body: str):
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
@@ -136,7 +138,7 @@ def test_fled_ally_no_longer_engages_target(tmp_path):
     Le tir suivant sur la cible ne doit PAS compter comme shoot_at_engaged_enemy : l'allié
     n'engage plus la cible depuis sa nouvelle position (ancre = BRAWLER_AWAY).
     """
-    stats = _stats_fled(tmp_path, _UNIT2_FLED + _SHOT)
+    stats = _stats_with_models(tmp_path, _UNIT2_FLED + _SHOT)
     assert stats["shoot_at_engaged_enemy"][1] == 0
 
 
@@ -159,25 +161,13 @@ _SHOT_T2 = (
 )
 
 
-def test_piled_in_ally_no_longer_engages_target(tmp_path):
-    """Faux positif 04.02 : positions_by_model périmées après un PILED IN sans [MODELS:].
+@pytest.mark.parametrize("action", [_UNIT2_PILED_IN, _UNIT2_CONSOLIDATED], ids=["piled_in", "consolidated"])
+def test_fight_move_ally_no_longer_engages_target(tmp_path, action):
+    """Faux positif 04.02 : positions_by_model périmées après PILED IN ou CONSOLIDATED sans [MODELS:].
 
-    L'allié est déployé avec [MODELS:] adjacent à la cible (positions_by_model = engagé).
-    Il pile-in vers BRAWLER_AWAY en phase FIGHT (pas de [MODELS:] → ancre mise à jour mais
-    positions_by_model stale à l'ancienne position adjacente). Le tir au tour suivant sur la
-    cible ne doit PAS compter comme shoot_at_engaged_enemy : l'allié n'engage plus la cible
-    depuis sa nouvelle position (ancre = BRAWLER_AWAY).
+    Verrou contre toute dérive qui limiterait le pop(positions_by_model) au seul kind=='pile_in' :
+    PILED IN et CONSOLIDATED passent par le même handler (handle_fight_move) et le même
+    _position_cache_set, le purge doit couvrir les deux verbes.
     """
-    stats = _stats_fled(tmp_path, _UNIT2_PILED_IN + _SHOT_T2)
-    assert stats["shoot_at_engaged_enemy"][1] == 0
-
-
-def test_consolidated_ally_no_longer_engages_target(tmp_path):
-    """Faux positif 04.02 : même invariant que PILED IN, couverture du verbe CONSOLIDATED.
-
-    Verrou contre toute dérive qui limiterait le pop(positions_by_model) au seul
-    kind=='pile_in' : la consolidation passe par le même handler (handle_fight_move) et le
-    même _position_cache_set, le purge doit couvrir les deux verbes.
-    """
-    stats = _stats_fled(tmp_path, _UNIT2_CONSOLIDATED + _SHOT_T2)
+    stats = _stats_with_models(tmp_path, action + _SHOT_T2)
     assert stats["shoot_at_engaged_enemy"][1] == 0
