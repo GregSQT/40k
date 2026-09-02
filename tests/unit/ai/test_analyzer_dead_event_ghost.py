@@ -164,3 +164,90 @@ def test_charge_dead_consolidated_no_fight_move_invalid(tmp_path):
         f"fight_move_invalid consolidation P2={stats['fight_move_invalid']['consolidation'][2]} : "
         "l'ancre fantôme du chargeur (unit_hp non remis à 0 par l'elif) bloque le BFS de consolidation"
     )
+
+
+# ---------------------------------------------------------------------------
+# Scénario 3 : chemin MIXTE — 1 DEAD via if-branch (pbm présent) + charge purge + 1 DEAD via elif
+# ---------------------------------------------------------------------------
+# Sans fix if-branch : unit_models_alive["1"] = 2 ; après le 1er DEAD (if-branch, pbm vivant)
+# le compteur n'est PAS décrémenté → reste 2 ; après le 2nd DEAD (elif-branch), il passe
+# de 2 à 1 (pas ≤ 0) → unit_hp non remis à 0 → ancre fantôme bloque le BFS de consolidation.
+# Avec fix : if-branch décrémente aussi → après 1er DEAD il passe à 1 ; après 2nd DEAD (elif)
+# il passe à 0 → unit_hp = 0 → ancre ignorée → BFS direct (100,92)→(100,107) = 15 ≤ 15.
+
+_MX_ANCHOR_INIT = (100, 112)   # ancre déploiement du chargeur P1 (2 socles)
+_MX_CHARGE_DEST = (100, 100)   # ancre finale de la charge (futur bloqueur fantôme)
+_MX_ENEMY_ANCHOR = (100, 92)   # cible de la charge (Unit 101), anchor_from de la consolidation
+_MX_CONS_DEPLOY = (100, 80)    # déploiement du consolidateur (Unit 3)
+_MX_CONS_DEST = (100, 107)     # destination de la consolidation
+
+MXA = f"({_MX_ANCHOR_INIT[0]},{_MX_ANCHOR_INIT[1]})"
+MXC = f"({_MX_CHARGE_DEST[0]},{_MX_CHARGE_DEST[1]})"
+MXE = f"({_MX_ENEMY_ANCHOR[0]},{_MX_ENEMY_ANCHOR[1]})"
+MXCD = f"({_MX_CONS_DEST[0]},{_MX_CONS_DEST[1]})"
+MXDP = f"({_MX_CONS_DEPLOY[0]},{_MX_CONS_DEPLOY[1]})"
+
+_UNITS_MX = (
+    "[10:00:00] Unit 1 (AssaultIntercessor) P1: Starting position (-1,-1), HP_MAX=4 base=round/6\n"
+    "[10:00:00] Unit 3 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=4 base=round/6\n"
+    "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=4 base=round/6\n"
+)
+
+# Unité 1 : 2 socles → unit_models_alive["1"] = 2 à l'initialisation.
+_DEPLOY_MX = (
+    f"[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1{MXA} DEPLOYED from (-1,-1) to {MXA}"
+    f" [R:+0.0] [MODELS: 1#0@({_MX_ANCHOR_INIT[0]},{_MX_ANCHOR_INIT[1]},z0)"
+    f" 1#1@({_MX_ANCHOR_INIT[0]},{_MX_ANCHOR_INIT[1] - 2},z0)] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101{MXE} DEPLOYED from (-1,-1) to {MXE}"
+    f" [R:+0.0] [MODELS: 101#0@({_MX_ENEMY_ANCHOR[0]},{_MX_ENEMY_ANCHOR[1]},z0)] [SUCCESS]\n"
+    f"[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 3{MXDP} DEPLOYED from (-1,-1) to {MXDP}"
+    f" [R:+0.0] [MODELS: 3#0@({_MX_CONS_DEPLOY[0]},{_MX_CONS_DEPLOY[1]},z0)] [SUCCESS]\n"
+)
+
+# 1er DEAD via if-branch : pbm contient encore 1#1 → pop(1#0) laisse {1#1}, non vide.
+# Sans fix if-branch : unit_models_alive["1"] reste à 2.
+# Avec fix : decrementé de 2 à 1.
+_DEAD_MX_1 = (
+    f"[10:00:02] E1 T1 P1 FIGHT : Unit 1{MXA} DEAD model=1#0 reason=combat [SUCCESS]\n"
+)
+
+# CHARGED sans [MODELS:] → charge_handler vide positions_by_model["1"]. Ancre → (100,100).
+# (100,112) → (100,100) = 12 subhex = 2.4" ; Roll:3 → budget 15. 12 ≤ 15 ✓.
+_CHARGED_MX = (
+    f"[10:00:03] E1 T1 P1 CHARGE : Unit 1{MXC} CHARGED Unit 101{MXE}"
+    f" from {MXA} to {MXC} [Roll: 3] [Dist: 2.4\" | Nearest: 2.0\"] [R:+0.0] [SUCCESS]\n"
+)
+
+# 2nd DEAD via elif : _pbm = None (purgé par charge_handler).
+# Sans fix if-branch : unit_models_alive.get("1",1) = 2 → _models_left=1 → unit_hp non remis à 0.
+# Avec fix : unit_models_alive["1"] = 1 → _models_left=0 → unit_hp = 0.
+_DEAD_MX_2 = (
+    f"[10:00:04] E1 T1 P1 FIGHT : Unit 1{MXC} DEAD model=1#1 reason=combat [SUCCESS]\n"
+)
+
+# Consolidation P2 de (100,92) à (100,107) : 15 subhex direct, 16 avec ancre (100,100) bloquée.
+_CONS_MX = (
+    f"[10:00:05] E1 T1 P2 FIGHT : Unit 3{MXCD} CONSOLIDATED from {MXE} to {MXCD}"
+    f" [R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_mixed_path_dead_no_fight_move_invalid(tmp_path):
+    """if-branch DEAD (pbm vivant) + charge purge + elif DEAD : unit_models_alive reste en sync."""
+    import ai.analyzer as an
+
+    log = tmp_path / "step.log"
+    log.write_text(
+        entete_step_log(
+            _DEPLOY_MX + _DEAD_MX_1 + _CHARGED_MX + _DEAD_MX_2 + _CONS_MX,
+            units=_UNITS_MX,
+            ez_vertical_inches=None,
+        )
+    )
+    stats = an.parse_step_log(str(log))
+    # Sans fix : unit_hp["1"] > 0 → ancre (100,100) bloque → BFS = 16 > 15 → violation.
+    # Avec fix : unit_hp["1"] = 0 → ancre ignorée → BFS = 15 ≤ 15 → pas de violation.
+    assert stats["fight_move_invalid"]["consolidation"][2] == 0, (
+        f"fight_move_invalid consolidation P2={stats['fight_move_invalid']['consolidation'][2]} : "
+        "ancre fantôme unité 1 (unit_models_alive non décrémenté par if-branch) bloque le BFS"
+    )
