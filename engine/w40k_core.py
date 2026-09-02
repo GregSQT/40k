@@ -41,6 +41,7 @@ from engine.phase_handlers.shared_utils import (
     build_units_cache,
     destroy_model,
     rebuild_choice_timing_index,
+    recompute_unit_rules_in_effect,
     is_unit_alive,
     get_unit_position,
     require_unit_position,
@@ -1901,6 +1902,13 @@ class W40KEngine(gym.Env):
         
         # Build units_cache once after all units are initialized (single source of truth)
         build_units_cache(self.game_state)
+        # UNIT_RULES peut rester vide si l'unité a été entièrement détruite en épisode précédent
+        # (recompute_unit_rules_in_effect pose UNIT_RULES=[] quand native_alive=False).
+        # build_units_cache restaure les modèles dans squad_models sans recalculer UNIT_RULES :
+        # le recalcul est donc obligatoire ici pour que les règles actives soient correctes dès E+1.
+        for _reset_unit in self.game_state["units"]:
+            if "_UNIT_RULES_OWN" in _reset_unit:
+                recompute_unit_rules_in_effect(self.game_state, _reset_unit["id"])
         rebuild_choice_timing_index(self.game_state)
 
         # Nombre de FIGURINES reellement en jeu : base des gardes anti-runaway, qui sont

@@ -569,6 +569,11 @@ def handle_fight_move(
     if unit_id not in state.unit_hp or require_key(state.unit_hp, unit_id) <= 0:
         return
 
+    # Une unité chargée sélectionnée sans cible vivante ne produit pas de ligne FOUGHT :
+    # la marquer ici comme ayant eu son tour évite un faux positif d'alternance (12.04).
+    if unit_id in state.charged_units_current_fight:
+        state.charged_units_fought.add(unit_id)
+
     prev_models = surviving_start_models(
         state.positions_by_model.get(unit_id),  # get allowed
         state.current_line_models.get(unit_id),  # get allowed

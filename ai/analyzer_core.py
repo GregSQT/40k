@@ -1496,15 +1496,19 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     # Appliquer immédiatement la suppression : si c'est le DERNIER socle, il
                     # n'y aura plus de [MODELS:] pour déclencher la purge `pending_model_removals`,
                     # et le modèle resterait « fantôme » dans `positions_by_model`.
-                    for _mapping, _rm in (
-                        (state.positions_by_model, lambda d, m: d.pop(m, None)),
-                        (state.pending_model_removals, lambda s, m: s.discard(m)),
-                    ):
-                        _inner = _mapping.get(_dead_uid)
-                        if _inner is not None:
-                            _rm(_inner, _dead_mid)
-                            if not _inner:
-                                _mapping.pop(_dead_uid, None)
+                    _pbm = state.positions_by_model.get(_dead_uid)
+                    if _pbm is not None:
+                        _pbm.pop(_dead_mid, None)
+                        if not _pbm:
+                            state.positions_by_model.pop(_dead_uid, None)
+                            # Dernier socle retiré : unit_hp doit refléter la mort pour que
+                            # _build_move_bfs_blockers ne traite pas l'ancre comme bloqueur fantôme.
+                            state.unit_hp[_dead_uid] = 0
+                    _prm = state.pending_model_removals.get(_dead_uid)
+                    if _prm is not None:
+                        _prm.discard(_dead_mid)
+                        if not _prm:
+                            state.pending_model_removals.pop(_dead_uid, None)
                 if phase != state.last_phase_by_player.get(int(player)):
                     _player_seq = state.phase_seq_current_turn.get(int(player))
                     if _player_seq is not None or phase == 'COMMAND':

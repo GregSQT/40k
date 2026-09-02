@@ -341,6 +341,11 @@ def handle_charge(
                 return
             if require_key(state.unit_hp, charge_unit_id) > 0:
                 _position_cache_set(state.unit_positions, charge_unit_id, dest_col, dest_row)
+                # Le moteur inclut [MODELS:] dans les lignes CHARGED, mais les journaux
+                # synthétiques de tests peuvent l'omettre. Purge préventive : sans elle,
+                # positions_by_model garde l'ancienne position et les contrôles d'engagement
+                # suivants voient l'unité là où elle n'est plus (miroir FLED/MOVED/PILED IN).
+                state.positions_by_model.pop(charge_unit_id, None)
 
             # A charge lands in engagement with the target — the charger sharing the target's
             # anchor hex is the expected outcome, not a collision. Only ally-ally same-hex
@@ -389,6 +394,11 @@ def handle_charge(
                 return
             if require_key(state.unit_hp, charge_unit_id) > 0:
                 _position_cache_set(state.unit_positions, charge_unit_id, dest_col, dest_row)
+                # Le moteur inclut [MODELS:] dans les lignes CHARGED, mais les journaux
+                # synthétiques de tests peuvent l'omettre. Purge préventive : sans elle,
+                # positions_by_model garde l'ancienne position et les contrôles d'engagement
+                # suivants voient l'unité là où elle n'est plus (miroir FLED/MOVED/PILED IN).
+                state.positions_by_model.pop(charge_unit_id, None)
 
         # Sample action
         if not stats['sample_actions']['charge']:

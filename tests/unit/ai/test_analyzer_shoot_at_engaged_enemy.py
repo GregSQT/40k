@@ -171,3 +171,26 @@ def test_fight_move_ally_no_longer_engages_target(tmp_path, action):
     """
     stats = _stats_with_models(tmp_path, action + _SHOT_T2)
     assert stats["shoot_at_engaged_enemy"][1] == 0
+
+
+# --- cas CHARGED ---
+# L'allié (unité 2) est déployé avec [MODELS:] adjacent à la cible, puis charge une autre
+# cible (CHARGED sans [MODELS:] — les journaux synthétiques peuvent omettre ce segment).
+# Sans le pop de positions_by_model après _position_cache_set, l'ancienne position (proche)
+# reste dans positions_by_model et le tir au tour suivant est faussement signalé comme faute.
+_UNIT2_CHARGED_TO_AWAY = (
+    f"[10:00:02] E1 T1 P1 CHARGE : Unit 2{BA} CHARGED Unit 101{T} "
+    f"from {BE} to {BA} [R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_charged_ally_no_longer_engages_target(tmp_path):
+    """Faux positif 04.02 : positions_by_model périmées après CHARGED sans [MODELS:].
+
+    L'allié est déployé avec [MODELS:] adjacent à la cible (positions_by_model = engagé).
+    Il charge vers BA via CHARGED (pas de [MODELS:] → ancre mise à jour mais
+    positions_by_model stale). Le tir suivant sur la cible ne doit PAS compter comme
+    shoot_at_engaged_enemy : l'allié n'engage plus la cible depuis BA.
+    """
+    stats = _stats_with_models(tmp_path, _UNIT2_CHARGED_TO_AWAY + _SHOT_T2)
+    assert stats["shoot_at_engaged_enemy"][1] == 0

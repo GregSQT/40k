@@ -4534,9 +4534,12 @@ def movement_commit_move_plan_handler(
     was_engaged = _squad_is_in_enemy_er(game_state, str(squad_id))
 
     _adv_roll = _advance_roll_for(str(squad_id), game_state)
-    if _adv_roll is not None:
+    if _adv_roll is not None and not was_engaged:
         move_type = "advance"
     else:
+        # Si un ennemi a réagi après la déclaration d'avance (mouvement réactif), l'unité
+        # est désormais engagée au moment du commit : l'avance est invalide, on commit en
+        # fall_back pour respecter 09.03 et éviter "ADVANCED from adjacent hex" dans l'analyzer.
         move_type = "fall_back" if was_engaged else "normal"
 
     # Snapshot par-figurine + ancre AVANT le commit, pour le log de mouvement
