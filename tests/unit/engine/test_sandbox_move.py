@@ -99,3 +99,78 @@ class TestSandboxFreeMove:
         assert "1" in gs["units_fled"], (
             "hors sandbox, finalize_flee_marking doit ajouter l'unité à units_fled"
         )
+
+
+class TestSandboxFreeMoveDestinations:
+    """VERROU : sandbox_free_move génère toutes les cellules sol + cellules terrain aux niveaux réels."""
+
+    def _terrain_with_floor(self) -> list:
+        """Terrain avec un étage niveau 1 en (2,2) et (3,2)."""
+        return [
+            {
+                "floors": [
+                    {
+                        "level": 1,
+                        "height_inches": 4.0,
+                        "hexes": [[2, 2], [3, 2]],
+                    }
+                ]
+            }
+        ]
+
+    def _gs_for_pool(self, terrain_areas: list) -> dict:
+        from tests._state_invariants import turn_state_invariants
+        from engine.phase_handlers.shared_utils import build_units_cache, build_enemy_adjacent_hexes
+        units = [_unit("1", 1, 0, 0)]
+        gs: dict = {
+            **turn_state_invariants(),
+            "config": _cfg(),
+            "board_cols": 5,
+            "board_rows": 5,
+            "current_player": 1,
+            "phase": "move",
+            "wall_hexes": set(),
+            "terrain_areas": terrain_areas,
+            "units": units,
+            "unit_by_id": {"1": units[0]},
+            "move_activation_pool": ["1"],
+            "_unit_move_version": 0,
+            "inches_to_subhex": 1,
+            "sandbox_free_move": True,
+        }
+        build_units_cache(gs)
+        build_enemy_adjacent_hexes(gs, 1)
+        return gs
+
+    def test_all_ground_cells_present(self):
+        """Toutes les 25 cellules au niveau 0 doivent être dans le pool."""
+        gs = self._gs_for_pool(self._terrain_with_floor())
+        model_id = next(iter(gs["models_cache"]))
+        result = mh.movement_build_model_destinations_pool(gs, model_id)
+        level0 = {(d[0], d[1]) for d in result["destinations"] if d[2] == 0}
+        assert len(level0) == 25, f"attendu 25 cellules sol, obtenu {len(level0)}"
+
+    def test_floor_cells_present_at_level1(self):
+        """Les cellules (2,2) et (3,2) au niveau 1 doivent être dans le pool."""
+        gs = self._gs_for_pool(self._terrain_with_floor())
+        model_id = next(iter(gs["models_cache"]))
+        result = mh.movement_build_model_destinations_pool(gs, model_id)
+        level1 = {(d[0], d[1]) for d in result["destinations"] if d[2] == 1}
+        assert (2, 2) in level1, "cellule (2,2) level 1 absente du pool sandbox"
+        assert (3, 2) in level1, "cellule (3,2) level 1 absente du pool sandbox"
+
+    def test_non_floor_cell_absent_at_level1(self):
+        """Une cellule sans plancher (0,0) ne doit pas apparaître au niveau 1."""
+        gs = self._gs_for_pool(self._terrain_with_floor())
+        model_id = next(iter(gs["models_cache"]))
+        result = mh.movement_build_model_destinations_pool(gs, model_id)
+        level1 = {(d[0], d[1]) for d in result["destinations"] if d[2] == 1}
+        assert (0, 0) not in level1, "cellule (0,0) sans plancher ne doit pas apparaître au niveau 1"
+
+    def test_no_floor_terrain_yields_only_level0(self):
+        """Sans terrain à étage, le pool ne contient que le niveau 0."""
+        gs = self._gs_for_pool([])
+        model_id = next(iter(gs["models_cache"]))
+        result = mh.movement_build_model_destinations_pool(gs, model_id)
+        levels = {d[2] for d in result["destinations"]}
+        assert levels == {0}, f"sans étage, seul le niveau 0 attendu, obtenu : {levels}"
