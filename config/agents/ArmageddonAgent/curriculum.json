@@ -1,0 +1,291 @@
+ {
+  "_doc": "Curriculum par etapes. Une etape = UN run d'ai/train.py, lance avec --etape <nom>. --training-config reste la source des episodes et des hyperparametres ; ce fichier ne decrit QUE l'adversite. Les poids de 'pool' sont des parts du budget TOTAL d'episodes, pas des parts du pool : les bots prennent (1 - ratio_end), le pool prend ratio_end, et la somme des deux vaut 1.0 (verrou ai/curriculum.py::validate_curriculum). La rampe (warmup a ratio_start, puis interpolation lineaire jusqu'a ratio_end) pilote la seule frontiere bots/pool ; la composition INTERNE du pool est fixe et realisee par ENVIRONNEMENT, chaque env chargeant un unique adversaire fige une fois pour toutes.",
+  "_doc_lignees": "P0..P10 = learners, la lignee des champions : chacun demarre 'new' pour que deux champions consecutifs soient des runs independants (c'est aussi pourquoi la monotonie du pool est un diagnostic et pas un gate). E1..E3 = exploiteurs : ils reprennent les poids du champion qu'ils doivent exploiter et jouent 100% contre lui, sans bots — leur ratio_start vaut donc 1.0, contrairement aux learners qui partent tous de 0.0. Un exploiteur n'est jamais promu champion, il n'entre que dans les pools suivants.",
+  "_doc_ordre": "L'ordre ci-dessous est celui d'execution, et c'est lui qui definit 'etape anterieure' : ni 'init' ni 'pool' ne peuvent nommer une etape qui n'a pas encore tourne.",
+  "order": ["P00", "P0", "P1", "P2", "P3", "E1", "P4", "P5", "E2", "P6", "P7", "P8", "E3", "P9", "P10"],
+
+  "exploiter_config": {
+    "_doc": "Parametres geles partages par toutes les etapes exploiteurs (E1..E3). probe_every_episodes/probe_cheap_n : sonde bon marche. probe_confirm_n : sonde de confirmation declenchee des que la sonde bon marche passe le seuil. win_rate_target : seuil de franchissement (0.70). budget_cap : defini par etape dans chaque bloc E. La config d'entrainement est fixee via --training-config a la ligne de commande ; tous les runs E d'un meme curriculum doivent utiliser la meme valeur.",
+    "probe_every_episodes": 2000,
+    "probe_cheap_n": 100,
+    "probe_confirm_n": 500,
+    "win_rate_target": 0.70
+  },
+
+  "opponent": {
+    "_doc": "Comment chaque environnement joue SON adversaire fige. snapshot_device='cpu' : quarante-huit processus chargent chacun un modele, les mettre sur le GPU disputerait la memoire a l'entrainement lui-meme. deterministic=false : un adversaire fige joue deja toujours la meme politique, le rendre deterministe rendrait en plus identiques tous les episodes joues contre lui depuis un meme etat.",
+    "snapshot_device": "cpu",
+    "deterministic": false
+  },
+
+  "gate": {
+    "_doc": "Plancher DUR sur le score contre le champion le PLUS RECENT du pool, mesure en fin d'etape. Il remplace benchmark_floor, aveugle ici : les reference bots sont satures a 1.00, donc un plancher pose sur eux est franchi par n'importe quel modele. Sur 300 episodes l'erreur-type d'un taux proche de 0.5 vaut 2.9 points, d'ou l'ecart entre le plancher (0.55) et la cible affichee (0.60) : un run a 0.57 est accepte sans etre annonce comme atteignant la cible. P0 n'a pas de champion : le gate y est sans objet.",
+    "min_score_vs_champion": 0.55,
+    "target_score_vs_champion": 0.60,
+    "eval_episodes": 300
+  },
+
+  "early_stop": {
+    "_doc": "Arret anticipe pendant l'entrainement : si l'agent depasse win_rate_threshold contre TOUS les membres du pool sur consecutive_evals evaluations consecutives apres min_steps steps, le run s'arrete. n_eval_episodes provient de gate.eval_episodes. Desactive si ce bloc est absent. Une etape peut surcharger ces valeurs avec son propre bloc 'early_stop'. Les etapes sans pool (P0) ou les exploiteurs l'ignorent automatiquement.",
+    "win_rate_threshold": 0.60,
+    "min_steps": 50000,
+    "consecutive_evals": 2
+  },
+
+  "stages": {
+    "P00": {
+      "_doc": "Graine universelle : bots uniquement, arrete quand le win-rate bot atteint ~55-60 %. Sert de point de depart commun a tous les learners (P0-P10) pour eviter la repetition du warmup de 25 000 episodes a chaque etape. Budget calibre empiriquement ; la cible est la competence de base (connait les regles, pas sur-specialise bots). Pour le run courant, cette etape peut etre promue manuellement depuis un checkpoint de P0 extrait au bon moment (python3 ai/train.py ... --resume-from <checkpoint> puis promote).",
+      "role": "learner",
+      "init": "new",
+      "warmup_episodes": 0,
+      "ratio_start": 0.0,
+      "ratio_end": 0.0,
+      "pool": [],
+      "training_config_overrides": {
+        "total_episodes": 5000
+      }
+    },
+    "P0": {
+      "_doc": "Premier champion : bots uniquement, aucun pool, aucun gate. Demarre depuis P00 (graine).",
+      "role": "learner",
+      "init": "from:P00",
+      "warmup_episodes": 0,
+      "ratio_start": 0.0,
+      "ratio_end": 0.0,
+      "pool": []
+    },
+    "P1": {
+      "role": "learner",
+      "init": "from:P00",
+      "warmup_episodes": 10000,
+      "ramp_end_episodes": 100000,
+      "ratio_start": 0.0,
+      "ratio_end": 0.50,
+      "pool": [
+        {"kind": "champion", "members": ["P0"], "weight": 0.50}
+      ],
+      "training_config_overrides": {
+        "total_episodes": 200000,
+        "model_params": {
+          "n_epochs": 2,
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
+    },
+    "P2": {
+      "role": "learner",
+      "init": "from:P00",
+      "warmup_episodes": 10000,
+      "ramp_end_episodes": 100000,
+      "ratio_start": 0.0,
+      "ratio_end": 0.60,
+      "pool": [
+        {"kind": "champion", "members": ["P1"], "weight": 0.40},
+        {"kind": "ancients", "members": ["P0"], "weight": 0.20}
+      ],
+      "training_config_overrides": {
+        "total_episodes": 250000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
+    },
+    "P3": {
+      "role": "learner",
+      "init": "from:P00",
+      "warmup_episodes": 10000,
+      "ramp_end_episodes": 100000,
+      "ratio_start": 0.0,
+      "ratio_end": 0.70,
+      "pool": [
+        {"kind": "champion", "members": ["P2"], "weight": 0.40},
+        {"kind": "ancients", "members": ["P0", "P1"], "weight": 0.30}
+      ],
+      "training_config_overrides": {
+        "total_episodes": 300000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
+    },
+    "E1": {
+      "_doc": "Exploiteur de P3 : reprend ses poids et ne joue que contre lui.",
+      "role": "exploiter",
+      "init": "from:P3",
+      "warmup_episodes": 0,
+      "ratio_start": 1.0,
+      "ratio_end": 1.0,
+      "budget_cap": 200000,
+      "pool": [
+        {"kind": "champion", "members": ["P3"], "weight": 1.0}
+      ]
+    },
+    "P4": {
+      "role": "learner",
+      "init": "from:P00",
+      "warmup_episodes": 10000,
+      "ramp_end_episodes": 100000,
+      "ratio_start": 0.0,
+      "ratio_end": 0.75,
+      "pool": [
+        {"kind": "champion", "members": ["P3"], "weight": 0.30},
+        {"kind": "ancients", "members": ["P0", "P1", "P2"], "weight": 0.20},
+        {"kind": "exploiters", "members": ["E1"], "weight": 0.25}
+      ],
+      "training_config_overrides": {
+        "total_episodes": 400000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
+    },
+    "P5": {
+      "role": "learner",
+      "init": "from:P00",
+      "warmup_episodes": 10000,
+      "ramp_end_episodes": 100000,
+      "ratio_start": 0.0,
+      "ratio_end": 0.80,
+      "pool": [
+        {"kind": "champion", "members": ["P4"], "weight": 0.35},
+        {"kind": "ancients", "members": ["P0", "P1", "P2", "P3"], "weight": 0.30},
+        {"kind": "exploiters", "members": ["E1"], "weight": 0.15}
+      ],
+      "training_config_overrides": {
+        "total_episodes": 300000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
+    },
+    "E2": {
+      "_doc": "Exploiteur de P5 : reprend ses poids et ne joue que contre lui.",
+      "role": "exploiter",
+      "init": "from:P5",
+      "warmup_episodes": 0,
+      "ratio_start": 1.0,
+      "ratio_end": 1.0,
+      "budget_cap": 200000,
+      "pool": [
+        {"kind": "champion", "members": ["P5"], "weight": 1.0}
+      ]
+    },
+    "P6": {
+      "role": "learner",
+      "init": "from:P00",
+      "warmup_episodes": 10000,
+      "ramp_end_episodes": 100000,
+      "ratio_start": 0.0,
+      "ratio_end": 0.80,
+      "pool": [
+        {"kind": "champion", "members": ["P5"], "weight": 0.30},
+        {"kind": "ancients", "members": ["P0", "P1", "P2", "P3", "P4"], "weight": 0.25},
+        {"kind": "exploiters", "members": ["E1", "E2"], "weight": 0.25}
+      ],
+      "training_config_overrides": {
+        "total_episodes": 300000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
+    },
+    "P7": {
+      "role": "learner",
+      "init": "from:P00",
+      "warmup_episodes": 10000,
+      "ramp_end_episodes": 100000,
+      "ratio_start": 0.0,
+      "ratio_end": 0.85,
+      "pool": [
+        {"kind": "champion", "members": ["P6"], "weight": 0.30},
+        {"kind": "ancients", "members": ["P0", "P1", "P2", "P3", "P4", "P5"], "weight": 0.35},
+        {"kind": "exploiters", "members": ["E1", "E2"], "weight": 0.20}
+      ],
+      "training_config_overrides": {
+        "total_episodes": 300000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
+    },
+    "P8": {
+      "role": "learner",
+      "init": "from:P00",
+      "warmup_episodes": 10000,
+      "ramp_end_episodes": 100000,
+      "ratio_start": 0.0,
+      "ratio_end": 0.85,
+      "pool": [
+        {"kind": "champion", "members": ["P7"], "weight": 0.25},
+        {"kind": "ancients", "members": ["P0", "P1", "P2", "P3", "P4", "P5", "P6"], "weight": 0.40},
+        {"kind": "exploiters", "members": ["E1", "E2"], "weight": 0.20}
+      ],
+      "training_config_overrides": {
+        "total_episodes": 300000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
+    },
+    "E3": {
+      "_doc": "Exploiteur de P8 : reprend ses poids et ne joue que contre lui.",
+      "role": "exploiter",
+      "init": "from:P8",
+      "warmup_episodes": 0,
+      "ratio_start": 1.0,
+      "ratio_end": 1.0,
+      "budget_cap": 300000,
+      "pool": [
+        {"kind": "champion", "members": ["P8"], "weight": 1.0}
+      ]
+    },
+    "P9": {
+      "role": "learner",
+      "init": "from:P00",
+      "warmup_episodes": 10000,
+      "ramp_end_episodes": 100000,
+      "ratio_start": 0.0,
+      "ratio_end": 0.85,
+      "pool": [
+        {"kind": "champion", "members": ["P8"], "weight": 0.25},
+        {"kind": "ancients", "members": ["P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7"], "weight": 0.35},
+        {"kind": "exploiters", "members": ["E1", "E2", "E3"], "weight": 0.25}
+      ],
+      "training_config_overrides": {
+        "total_episodes": 300000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
+    },
+    "P10": {
+      "role": "learner",
+      "init": "from:P00",
+      "warmup_episodes": 10000,
+      "ramp_end_episodes": 100000,
+      "ratio_start": 0.0,
+      "ratio_end": 0.85,
+      "pool": [
+        {"kind": "champion", "members": ["P9"], "weight": 0.25},
+        {"kind": "ancients", "members": ["P0", "P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8"], "weight": 0.40},
+        {"kind": "exploiters", "members": ["E1", "E2", "E3"], "weight": 0.20}
+      ],
+      "training_config_overrides": {
+        "total_episodes": 300000,
+        "model_params": {
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+        }
+      }
+    }
+  }
+}
