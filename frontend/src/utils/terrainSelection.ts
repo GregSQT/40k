@@ -46,7 +46,7 @@ export function resolveSelectedTerrain(mode: string | null, search: string): str
   const entries = terrainsForMode(mode);
 
   const accepts = (value: string | null): value is string =>
-    value !== null && value.trim() !== "" && entries.some((t) => t.id === value);
+    value !== null && entries.some((t) => t.id === value);
 
   const fromUrl = new URLSearchParams(search).get("terrain");
   if (accepts(fromUrl)) return fromUrl;
