@@ -1496,9 +1496,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     # Appliquer immédiatement la suppression : si c'est le DERNIER socle, il
                     # n'y aura plus de [MODELS:] pour déclencher la purge `pending_model_removals`,
                     # et le modèle resterait « fantôme » dans `positions_by_model`.
-                    state.unit_models_alive[_dead_uid] = max(
-                        0, state.unit_models_alive.get(_dead_uid, 1) - 1
-                    )
+                    _models_left = max(0, state.unit_models_alive.get(_dead_uid, 1) - 1)
+                    state.unit_models_alive[_dead_uid] = _models_left
                     _pbm = state.positions_by_model.get(_dead_uid)
                     if _pbm is not None:
                         _pbm.pop(_dead_mid, None)
@@ -1507,7 +1506,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # Dernier socle retiré : unit_hp doit refléter la mort pour que
                             # _build_move_bfs_blockers ne traite pas l'ancre comme bloqueur fantôme.
                             state.unit_hp[_dead_uid] = 0
-                    elif state.unit_models_alive[_dead_uid] <= 0:
+                    elif _models_left <= 0:
                         # positions_by_model absent (purgé par charge_handler, move_handler, etc.)
                         # avant ce DEAD : zéroer unit_hp pour que _build_move_bfs_blockers
                         # n'inclue plus l'ancre fantôme.
