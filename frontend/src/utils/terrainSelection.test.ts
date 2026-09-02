@@ -84,12 +84,16 @@ describe("resolveSelectedTerrain — avant chargement de la liste", () => {
     setTerrainList([]);
   });
 
-  it("accepte tout paramètre d'URL non vide avant chargement", () => {
-    expect(resolveSelectedTerrain(null, "?terrain=garbage")).toBe("garbage");
+  it("n'accepte pas un terrain inconnu depuis l'URL", () => {
+    expect(resolveSelectedTerrain(null, "?terrain=garbage")).toBe("mc2");
   });
 
   it("rejette '' (URL ?terrain= vide) même sans liste chargée", () => {
     expect(resolveSelectedTerrain(null, "?terrain=")).toBe("mc2");
+  });
+
+  it("rejette une chaîne blanche (%20) depuis l'URL", () => {
+    expect(resolveSelectedTerrain(null, "?terrain=%20")).toBe("mc2");
   });
 });
 

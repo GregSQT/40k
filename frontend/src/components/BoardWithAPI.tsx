@@ -30,6 +30,7 @@ import {
 import {
   resolveSelectedTerrain,
   setTerrainList,
+  STORAGE_KEY as TERRAIN_STORAGE_KEY,
   type TerrainEntry,
 } from "../utils/terrainSelection";
 import { AdvanceWarningModal } from "./AdvanceWarningModal";
@@ -776,9 +777,17 @@ export const BoardWithAPI: React.FC = () => {
   const [selectedTerrain, _setSelectedTerrain] = useState<string>(() =>
     resolveSelectedTerrain(urlMode, window.location.search)
   );
+  // Re-résout une fois la liste chargée : au mount, _terrainList est vide donc
+  // localStorage/URL ne sont pas validés ; le useEffect corrige après le fetch.
+  const _terrainSyncedRef = useRef(false);
+  useEffect(() => {
+    if (terrainList === undefined || _terrainSyncedRef.current) return;
+    _terrainSyncedRef.current = true;
+    _setSelectedTerrain(resolveSelectedTerrain(urlMode, window.location.search));
+  }, [terrainList, urlMode]);
   const [saveConfigAsDefault, setSaveConfigAsDefault] = useState(
     () =>
-      localStorage.getItem("gameprep_terrain") !== null ||
+      localStorage.getItem(TERRAIN_STORAGE_KEY) !== null ||
       localStorage.getItem("gameprep_roster_p1") !== null ||
       localStorage.getItem("gameprep_roster_p2") !== null
   );
@@ -5074,7 +5083,7 @@ export const BoardWithAPI: React.FC = () => {
                     className="test-start-bar__button"
                     onClick={() => {
                       if (saveConfigAsDefault) {
-                        localStorage.setItem("gameprep_terrain", selectedTerrain);
+                        localStorage.setItem(TERRAIN_STORAGE_KEY, selectedTerrain);
                         if (currentRosterFile.p1) {
                           localStorage.setItem("gameprep_roster_p1", currentRosterFile.p1);
                         } else {
@@ -5086,7 +5095,7 @@ export const BoardWithAPI: React.FC = () => {
                           localStorage.removeItem("gameprep_roster_p2");
                         }
                       } else {
-                        localStorage.removeItem("gameprep_terrain");
+                        localStorage.removeItem(TERRAIN_STORAGE_KEY);
                         localStorage.removeItem("gameprep_roster_p1");
                         localStorage.removeItem("gameprep_roster_p2");
                       }

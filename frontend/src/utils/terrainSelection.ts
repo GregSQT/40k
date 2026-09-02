@@ -6,7 +6,7 @@ export interface TerrainEntry {
   default_for: string[];
 }
 
-const STORAGE_KEY = "gameprep_terrain";
+export const STORAGE_KEY = "gameprep_terrain";
 
 // Liste chargée depuis /api/config/terrain-list au montage de BoardWithAPI.
 let _terrainList: TerrainEntry[] = [];
@@ -21,7 +21,7 @@ export function getTerrainList(): readonly TerrainEntry[] {
 
 export function terrainsForMode(mode: string | null): readonly TerrainEntry[] {
   const m = mode ?? "pvp";
-  return _terrainList.filter((t) => t.modes.includes(m));
+  return _terrainList.filter((t) => Array.isArray(t.modes) && t.modes.includes(m));
 }
 
 /**
@@ -41,15 +41,13 @@ export function terrainSuffix(
 /**
  * Terrain retenu pour ce mode : paramètre d'URL, sinon configuration gardée par défaut,
  * sinon le premier terrain disponible pour ce mode.
- * Si la liste n'est pas encore chargée, accepte tout param d'URL non-null.
  */
 export function resolveSelectedTerrain(mode: string | null, search: string): string {
   const entries = terrainsForMode(mode);
   const supported = entries.map((t) => t.id);
-  const listLoaded = supported.length > 0;
 
   const accepts = (value: string | null): value is string =>
-    value !== null && value !== "" && (!listLoaded || supported.includes(value));
+    value !== null && value.trim() !== "" && supported.includes(value);
 
   const fromUrl = new URLSearchParams(search).get("terrain");
   if (accepts(fromUrl)) return fromUrl!;
