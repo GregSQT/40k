@@ -12,7 +12,7 @@ export const STORAGE_KEY = "gameprep_terrain";
 let _terrainList: TerrainEntry[] = [];
 
 export function setTerrainList(list: TerrainEntry[]): void {
-  _terrainList = list;
+  _terrainList = list.filter((t) => Array.isArray(t.modes) && Array.isArray(t.default_for));
 }
 
 export function getTerrainList(): readonly TerrainEntry[] {
@@ -21,7 +21,7 @@ export function getTerrainList(): readonly TerrainEntry[] {
 
 export function terrainsForMode(mode: string | null): readonly TerrainEntry[] {
   const m = mode ?? "pvp";
-  return _terrainList.filter((t) => Array.isArray(t.modes) && t.modes.includes(m));
+  return _terrainList.filter((t) => t.modes.includes(m));
 }
 
 /**
@@ -44,13 +44,12 @@ export function terrainSuffix(
  */
 export function resolveSelectedTerrain(mode: string | null, search: string): string {
   const entries = terrainsForMode(mode);
-  const supported = entries.map((t) => t.id);
 
   const accepts = (value: string | null): value is string =>
-    value !== null && value.trim() !== "" && supported.includes(value);
+    value !== null && value.trim() !== "" && entries.some((t) => t.id === value);
 
   const fromUrl = new URLSearchParams(search).get("terrain");
-  if (accepts(fromUrl)) return fromUrl!;
+  if (accepts(fromUrl)) return fromUrl;
 
   let saved: string | null = null;
   try {
@@ -58,9 +57,9 @@ export function resolveSelectedTerrain(mode: string | null, search: string): str
   } catch {
     saved = null;
   }
-  if (accepts(saved)) return saved!;
+  if (accepts(saved)) return saved;
 
   const m = mode ?? "pvp";
   const defaultEntry = entries.find((t) => t.default_for.includes(m));
-  return defaultEntry?.id ?? supported[0] ?? "mc2";
+  return defaultEntry?.id ?? entries[0]?.id ?? "mc2";
 }
