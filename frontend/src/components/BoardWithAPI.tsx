@@ -544,6 +544,8 @@ export const BoardWithAPI: React.FC = () => {
             : "pvp";
   // Snapshots temporels (rewind / playback par phase) — PvP / PvP test uniquement.
   const isSnapshotMode = gameMode === "pvp" || gameMode === "pvp_test";
+  const [sandboxMode, setSandboxMode] = useState(false);
+  const [sandboxFreeMove, setSandboxFreeMove] = useState(false);
   const [snapshotJump, setSnapshotJump] = useState<SnapshotJump | null>(null);
   const [snapshotViewActive, setSnapshotViewActive] = useState(false);
   // Popup « tu vas modifier la partie » : ouvert quand un clic board est tenté pendant l'aperçu.
@@ -1610,15 +1612,23 @@ export const BoardWithAPI: React.FC = () => {
     if (!playerTypes) {
       throw new Error("Missing player_types in gameState for AI turn orchestration");
     }
-    const getPlayerType = (playerId: number, pt: Record<string, string> = playerTypes): "human" | "ai" => {
+    const getPlayerType = (
+      playerId: number,
+      pt: Record<string, string> = playerTypes
+    ): "human" | "ai" => {
       const playerType = pt[String(playerId)];
       if (!playerType) {
         throw new Error(`Missing player type for player ${playerId}`);
       }
       return playerType;
     };
-    const isAiUnit = (unit: Unit, pt: Record<string, string> = playerTypes): boolean => getPlayerType(unit.player, pt) === "ai";
-    const hasAiUnitsInPool = (pool: Array<string | number>, state: { units: Unit[] }, pt: Record<string, string> = playerTypes): boolean =>
+    const isAiUnit = (unit: Unit, pt: Record<string, string> = playerTypes): boolean =>
+      getPlayerType(unit.player, pt) === "ai";
+    const hasAiUnitsInPool = (
+      pool: Array<string | number>,
+      state: { units: Unit[] },
+      pt: Record<string, string> = playerTypes
+    ): boolean =>
       pool.some((unitId) => {
         const unit = state.units.find((u: Unit) => String(u.id) === String(unitId));
         return !!unit && isAiUnit(unit, pt) && unit.HP_CUR > 0;
@@ -2562,6 +2572,25 @@ export const BoardWithAPI: React.FC = () => {
                 }
                 return gameConfig.game_rules.max_turns;
               })()}
+              sandboxMode={sandboxMode}
+              onSandboxToggle={() => {
+                const next = !sandboxMode;
+                setSandboxMode(next);
+                if (!next && sandboxFreeMove) {
+                  setSandboxFreeMove(false);
+                  apiProps.onSandboxSet?.(false).catch(console.error);
+                }
+              }}
+              sandboxFreeMove={sandboxFreeMove}
+              onSandboxFreeMoveToggle={(val) => {
+                setSandboxFreeMove(val);
+                apiProps.onSandboxSet?.(val).catch(console.error);
+              }}
+              onJumpToPhase={
+                sandboxMode
+                  ? (phase) => apiProps.onJumpToPhase?.(phase).catch(console.error)
+                  : undefined
+              }
               className=""
             />
           </div>

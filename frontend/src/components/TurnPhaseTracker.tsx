@@ -20,6 +20,12 @@ interface TurnPhaseTrackerProps {
   fightAtkPlayer?: number; // Joueur (1/2) qui doit faire attaquer une unité → libellé + couleur
   onFightAtk?: () => void; // Active la 1ère unité éligible du joueur concerné
   onSkipFight?: () => void; // Skippe toutes les attaques (2 joueurs) → consolidation directe
+  // Mode sandbox
+  sandboxMode?: boolean;
+  onSandboxToggle?: () => void;
+  sandboxFreeMove?: boolean;
+  onSandboxFreeMoveToggle?: (val: boolean) => void;
+  onJumpToPhase?: (phase: string) => void;
 }
 
 export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
@@ -40,6 +46,11 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
   fightAtkPlayer,
   onFightAtk,
   onSkipFight,
+  sandboxMode = false,
+  onSandboxToggle,
+  sandboxFreeMove = false,
+  onSandboxFreeMoveToggle,
+  onJumpToPhase,
 }) => {
   // Validate required props (raise errors for missing data)
   if (!phases || phases.length === 0) {
@@ -403,7 +414,8 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
               .filter((phase) => !(phase === "deployment" && currentPhase !== "deployment"))
               .map((phase) => {
                 const status = getPhaseStatus(phase);
-                const style = getPhaseStyle(phase, status, !!onPhaseClick);
+                const hasHandler = sandboxMode ? !!onJumpToPhase : !!onPhaseClick;
+                const style = getPhaseStyle(phase, status, hasHandler);
 
                 return (
                   <button
@@ -411,9 +423,17 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
                     key={phase}
                     data-testid={`phase-btn-${phase}`}
                     className="phase-btn"
-                    style={style}
-                    disabled={!onPhaseClick}
-                    onClick={() => onPhaseClick?.(phase)}
+                    style={
+                      sandboxMode && onJumpToPhase
+                        ? {
+                            ...style,
+                            cursor: "pointer",
+                            outline: sandboxMode ? "1px dashed #A78BFA" : "none",
+                          }
+                        : style
+                    }
+                    disabled={!hasHandler}
+                    onClick={() => (sandboxMode ? onJumpToPhase?.(phase) : onPhaseClick?.(phase))}
                   >
                     {formatPhaseName(phase)}
                   </button>
@@ -444,9 +464,85 @@ export const TurnPhaseTracker: React.FC<TurnPhaseTrackerProps> = ({
                 <span aria-hidden="true">→</span>
               </button>
             )}
+            {onSandboxToggle && (
+              <TooltipWrapper
+                text={
+                  sandboxMode
+                    ? "Quitter le mode sandbox"
+                    : "Mode sandbox : repositionnement libre + saut de phase"
+                }
+              >
+                <button
+                  type="button"
+                  data-testid="sandbox-toggle-btn"
+                  style={{
+                    padding: "4px 8px",
+                    borderRadius: "4px",
+                    fontSize: "13px",
+                    border: "1px solid",
+                    cursor: "pointer",
+                    outline: "none",
+                    fontWeight: "bold",
+                    backgroundColor: sandboxMode ? "#7C3AED" : "#374151",
+                    color: "#FFFFFF",
+                    borderColor: sandboxMode ? "#5B21B6" : "#4B5563",
+                  }}
+                  onClick={onSandboxToggle}
+                >
+                  🧪
+                </button>
+              </TooltipWrapper>
+            )}
           </div>
         </div>
       </div>
+      {sandboxMode && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            marginTop: "6px",
+            paddingTop: "6px",
+            borderTop: "1px solid #4B5563",
+          }}
+        >
+          <span style={{ color: "#A78BFA", fontSize: "12px", fontWeight: "bold" }}>SANDBOX</span>
+          {onSandboxFreeMoveToggle && (
+            <TooltipWrapper
+              text={
+                sandboxFreeMove
+                  ? "Désactiver le déplacement libre"
+                  : "Activer le déplacement libre (tout le plateau)"
+              }
+            >
+              <button
+                type="button"
+                data-testid="sandbox-free-move-btn"
+                style={{
+                  padding: "2px 8px",
+                  borderRadius: "4px",
+                  fontSize: "12px",
+                  border: "1px solid",
+                  cursor: "pointer",
+                  outline: "none",
+                  backgroundColor: sandboxFreeMove ? "#059669" : "#374151",
+                  color: "#FFFFFF",
+                  borderColor: sandboxFreeMove ? "#047857" : "#4B5563",
+                }}
+                onClick={() => onSandboxFreeMoveToggle(!sandboxFreeMove)}
+              >
+                Free Move {sandboxFreeMove ? "ON" : "OFF"}
+              </button>
+            </TooltipWrapper>
+          )}
+          {onJumpToPhase && (
+            <span style={{ color: "#9CA3AF", fontSize: "12px" }}>
+              Cliquer une phase pour y sauter →
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 };

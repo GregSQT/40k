@@ -4085,6 +4085,10 @@ def execute_action():
             success, result = _execute_end_phase_action(engine, action)
         elif action.get("action") == "change_roster":
             success, result = _execute_change_roster_action(engine, action)
+        elif action.get("action") == "sandbox_set":
+            success, result = _execute_sandbox_set_action(engine, action)
+        elif action.get("action") == "sandbox_jump_to_phase":
+            success, result = _execute_sandbox_jump_to_phase(engine, action)
         else:
             success, result = engine.execute_semantic_action(action)
         _api_t1 = time.perf_counter() if _api_perf else None
@@ -4378,6 +4382,40 @@ def _execute_end_phase_action(engine_instance: _EndPhaseEngine, action: Dict[str
     if isinstance(advance_result, dict):
         advance_result["action"] = "end_phase"
     return True, advance_result
+
+
+def _execute_sandbox_set_action(engine_instance: _EndPhaseEngine, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """Active ou désactive le mode free_move sandbox dans le game_state."""
+    game_state = engine_instance.game_state
+    val = bool(action.get("sandbox_free_move", False))
+    game_state["sandbox_free_move"] = val
+    return True, {"action": "sandbox_set", "sandbox_free_move": val}
+
+
+def _execute_sandbox_jump_to_phase(engine_instance: _EndPhaseEngine, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+    """Avance la partie jusqu'à la phase cible en appelant end_phase en boucle.
+
+    Passe toujours le joueur courant (lu depuis game_state à chaque itération) pour
+    satisfaire la guard de joueur de _execute_end_phase_action sans la lever.
+    """
+    if "target_phase" not in action:
+        raise KeyError("sandbox_jump_to_phase action missing required 'target_phase' field")
+    target_phase = str(action["target_phase"])
+    game_state = engine_instance.game_state
+
+    max_iterations = 12  # 2 rounds complets de 6 phases max
+    for _ in range(max_iterations):
+        current_phase = require_key(game_state, "phase")
+        if current_phase == target_phase:
+            return True, {"action": "sandbox_jump_to_phase", "phase": current_phase}
+        current_player = int(require_key(game_state, "current_player"))
+        success, result = _execute_end_phase_action(
+            engine_instance, {"action": "end_phase", "player": current_player}
+        )
+        if not success:
+            return False, {"error": "sandbox_jump_end_phase_failed", "details": result}
+
+    return False, {"error": "sandbox_jump_max_iterations", "target_phase": target_phase}
 
 
 def _load_army_file(army_file: str) -> Dict[str, Any]:

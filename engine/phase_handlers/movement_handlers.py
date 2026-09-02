@@ -913,6 +913,16 @@ def get_eligible_units(game_state: Dict[str, Any]) -> List[str]:
     current_player = game_state["current_player"]
 
     units_cache = require_key(game_state, "units_cache")
+
+    if game_state.get("sandbox_free_move"):
+        from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+        return [
+            uid for uid, entry in units_cache.items()
+            if entry["player"] == current_player
+            and int(entry.get("HP_CUR", 0)) > 0
+            and entry_is_on_battlefield(entry)
+        ]
+
     ez_elig = get_engagement_zone(game_state)
     from engine.phase_handlers.shared_utils import entry_is_on_battlefield
 
@@ -3835,6 +3845,16 @@ def movement_build_model_destinations_pool(
         raise KeyError(
             f"movement_build_model_destinations_pool: model {model_id} not in models_cache"
         )
+
+    if game_state.get("sandbox_free_move"):
+        board_cols = require_key(game_state, "board_cols")
+        board_rows = require_key(game_state, "board_rows")
+        _lv = int(model.get("level", 0))  # get allowed (figurine au sol par défaut)
+        return {
+            "destinations": [[c, r, _lv] for c in range(board_cols) for r in range(board_rows)],
+            "footprint_mask_loops": [],
+        }
+
     squad_id = str(model["squad_id"])
     unit = require_unit_by_id(game_state, squad_id)
 
@@ -4653,6 +4673,14 @@ def movement_commit_move_plan_handler(
             "clear_selected_unit": True,
         }
     )
+
+    if game_state.get("sandbox_free_move"):
+        pool = game_state.setdefault("move_activation_pool", [])
+        squad_id_str = str(squad_id)
+        if squad_id_str not in pool:
+            pool.append(squad_id_str)
+        game_state.setdefault("units_moved", set()).discard(squad_id_str)
+
     return True, result
 
 

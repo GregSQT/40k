@@ -5335,6 +5335,13 @@ def explain_move_plan_rejection(
     models_cache = require_key(game_state, "models_cache")
     board_cols = require_key(game_state, "board_cols")
     board_rows = require_key(game_state, "board_rows")
+
+    if game_state.get("sandbox_free_move"):
+        for entry in plan:
+            mid, nc, nr = entry[0], int(entry[1]), int(entry[2])
+            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
+                return f"figurine {mid} hors plateau en ({nc},{nr})"
+        return None
     wall_hexes = game_state.get("wall_hexes", set())
 
     first_model = models_cache.get(plan[0][0])

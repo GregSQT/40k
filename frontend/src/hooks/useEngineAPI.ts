@@ -4166,6 +4166,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     [executeAction, gameState]
   );
 
+  const handleSandboxSet = useCallback(
+    async (sandboxFreeMove: boolean) => {
+      await executeAction({ action: "sandbox_set", sandbox_free_move: sandboxFreeMove });
+    },
+    [executeAction]
+  );
+
+  const handleJumpToPhase = useCallback(
+    async (targetPhase: string) => {
+      await executeAction({ action: "sandbox_jump_to_phase", target_phase: targetPhase });
+    },
+    [executeAction]
+  );
+
   const validateOrientationStep = useCallback(
     (rawOrientation: unknown, context: string): number => {
       return validateOrientationStepValue(rawOrientation, context);
@@ -8475,6 +8489,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     onSelectUnit: handleSelectUnit,
     onSkipUnit: handleSkipUnit,
     onEndPhase: handleEndPhase,
+    onSandboxSet: handleSandboxSet,
+    onJumpToPhase: handleJumpToPhase,
     onStartMovePreview: handleStartMovePreview,
     onDirectMove: handleDirectMove,
     onBumpMovePreviewOrientation: handleBumpMovePreviewOrientation,
