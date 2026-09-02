@@ -1499,12 +1499,17 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     _pbm = state.positions_by_model.get(_dead_uid)
                     if _pbm is not None:
                         _pbm.pop(_dead_mid, None)
+                        # Décrémenter unit_models_alive pour que le elif-branch ait le bon
+                        # compte si le handler purge positions_by_model entre deux DEAD.
+                        state.unit_models_alive[_dead_uid] = max(
+                            0, state.unit_models_alive.get(_dead_uid, 1) - 1
+                        )
                         if not _pbm:
                             state.positions_by_model.pop(_dead_uid, None)
                             # Dernier socle retiré : unit_hp doit refléter la mort pour que
                             # _build_move_bfs_blockers ne traite pas l'ancre comme bloqueur fantôme.
                             state.unit_hp[_dead_uid] = 0
-                    elif _dead_uid in state.unit_hp and state.unit_hp[_dead_uid] > 0:
+                    elif state.unit_hp.get(_dead_uid, 0) > 0:
                         # positions_by_model absent (purgé par charge_handler, move_handler, etc.)
                         # avant ce DEAD : le if-branch ne peut pas compter les socles restants.
                         # Décrémenter le compteur local ; quand il atteint 0 (tous les socles
