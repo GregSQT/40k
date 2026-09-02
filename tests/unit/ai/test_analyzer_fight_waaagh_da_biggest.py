@@ -30,9 +30,9 @@ def test_warboss_waaagh_sans_shooter_models_cap_est_11() -> None:
         unit_attack_limits=_UNIT_LIMITS,
         melee_atk_bonus_waaagh_by_type={"Warboss": 4},
     )
-    line_sans_shooter = "FOUGHT Unit 6(1,1) with [Kustom Choppa] [TARGET_DECL:1]"
     cap, _ = _cc_cap_for_line(
-        _state_waaagh_actif(), cfg, line_sans_shooter, 2, "Warboss", "Kustom Choppa", 6, 1, (), 1,
+        _state_waaagh_actif(), cfg, "FOUGHT Unit 6(1,1) with [Kustom Choppa] [TARGET_DECL:1]",
+        2, "Warboss", "Kustom Choppa", 6, 1, (), 1,
     )
     assert cap == 11, f"attendu 11 (6+1+4) sans [SHOOTER_MODELS:], obtenu {cap}"
 
