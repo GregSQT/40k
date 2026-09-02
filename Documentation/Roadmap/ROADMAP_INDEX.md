@@ -99,6 +99,7 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 Correctifs ponctuels livrés → `archives/doc.md#hygiene-correctifs-ponctuels`
 
 - ✅ analyzer : lot correctifs ponctuels 2026-09-02 — purge `positions_by_model` faux positifs engagement, simplification inverse/croisé/litany, retrait guard `current_episode_num > 0` collision move
+- ✅ moteur 19.04 : extinction règles leader/support inline 2026-09-02 — `_build_enhanced_unit` assigne `attached_from` fictif aux modèles inline avec rôle leader/support ; `charge_roll_bonus` (Bigboss) ne persistait plus après sa mort dans `_UNIT_RULES_OWN`
 
 ---
 
