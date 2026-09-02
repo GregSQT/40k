@@ -89,6 +89,10 @@ describe("resolveSelectedTerrain — avant chargement de la liste", () => {
   it("rejette '' (URL ?terrain= vide) même sans liste chargée", () => {
     expect(resolveSelectedTerrain(null, "?terrain=")).toBe("mc2");
   });
+
+  it("rejette une chaîne blanche (%20) depuis l'URL", () => {
+    expect(resolveSelectedTerrain(null, "?terrain=%20")).toBe("mc2");
+  });
 });
 
 describe("terrainsForMode", () => {
