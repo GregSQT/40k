@@ -569,17 +569,15 @@ def handle_fight_move(
     if unit_id not in state.unit_hp or require_key(state.unit_hp, unit_id) <= 0:
         return
 
-    # Une unité chargée sélectionnée sans cible vivante ne produit pas de ligne FOUGHT :
-    # la marquer ici comme ayant eu son tour évite un faux positif d'alternance (12.04).
-    if unit_id in state.charged_units_current_fight:
-        state.charged_units_fought.add(unit_id)
-
     prev_models = surviving_start_models(
         state.positions_by_model.get(unit_id),  # get allowed
         state.current_line_models.get(unit_id),  # get allowed
     )
     new_models = state.current_line_models.get(unit_id)  # get allowed
     moved = anchor_from != anchor_to
+    # Pile-in invalide (budget dépassé) : ne pas marquer comme ayant combattu afin que
+    # la violation d'alternance 12.04 reste détectable si une unité non-chargée combat ensuite.
+    pile_in_move_valid = True
     if moved:
         occupied_positions, enemy_adjacent_hexes = _build_move_bfs_blockers(
             state.positions_by_model, state.unit_positions, state.unit_base,
@@ -596,10 +594,20 @@ def handle_fight_move(
                 stats['first_error_lines']['fight_move_invalid'][kind][player] = {
                     'episode': state.current_episode_num, 'line': line.strip()
                 }
+            pile_in_move_valid = False
+
+    # Une unité chargée sélectionnée sans cible vivante ne produit pas de ligne FOUGHT :
+    # la marquer ici comme ayant eu son tour évite un faux positif d'alternance (12.04).
+    # Condition : le pile-in doit être valide ; sinon la violation d'alternance reste détectable.
+    if unit_id in state.charged_units_current_fight and pile_in_move_valid:
+        state.charged_units_fought.add(unit_id)
 
     # Recale l'ancre : sans ça elle reste figée sur la position de combat et le move suivant
     # remonte un faux mismatch position/log (2.2).
-    _position_cache_set(state.unit_positions, unit_id, anchor_to[0], anchor_to[1])
+    # Pile-in invalide : ne pas mettre à jour — l'ancre "réelle" reste à anchor_from,
+    # ce qui préserve le statut en zone d'engagement pour le contrôle d'alternance 12.04.
+    if pile_in_move_valid:
+        _position_cache_set(state.unit_positions, unit_id, anchor_to[0], anchor_to[1])
     # Ancre mise à jour sans [MODELS:] (les lignes PILED IN/CONSOLIDATED n'en portent pas) :
     # purge pour forcer le retour à l'ancre dans les contrôles suivants (miroir du fix FLED/MOVED).
     state.positions_by_model.pop(unit_id, None)
