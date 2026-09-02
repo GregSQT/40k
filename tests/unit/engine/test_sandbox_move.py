@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from engine.phase_handlers import movement_handlers as mh
-from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache, _squad_is_in_enemy_er
+from engine.phase_handlers.shared_utils import build_enemy_adjacent_hexes, build_units_cache, _squad_is_in_enemy_er, move_plan_path_distances
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
 
@@ -221,6 +221,22 @@ class TestSandboxFreeMove:
         assert ok is True, f"commit échoué en sandbox : {res}"
         assert res["action"] == "move", (
             f"result['action'] doit être 'move' en sandbox après fuite re-poolée, obtenu '{res['action']}'"
+        )
+
+    def test_move_plan_path_distances_returns_zero_in_sandbox(self):
+        """VERROU : move_plan_path_distances retourne 0.0 pour chaque figurine quand sandbox_free_move=True.
+
+        Le chemin réel n'est pas calculé (aucun BFS) : toute entrée du plan
+        reçoit la distance 0.0, quel que soit l'écart col/row entre origine et destination.
+        """
+        units = [_unit("1", 1, 0, 0)]
+        gs = _make_gs(units, sandbox=True)
+
+        plan = [["1#0", 10, 10, 0, 0], ["1#1", 5, 5, 0, 0]]
+        result = move_plan_path_distances(plan, gs, "normal")
+
+        assert result == {"1#0": 0.0, "1#1": 0.0}, (
+            f"sandbox_free_move doit retourner 0.0 pour chaque figurine, obtenu : {result}"
         )
 
 
