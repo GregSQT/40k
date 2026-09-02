@@ -7,7 +7,7 @@ SCÉNARIO
   B attaque A (FOUGHT line, [MODELS: B]) → A's last model dies (DEAD event) :
     _pbm = positions_by_model.get("1") → None (effacé par pile-in, non restauré)
     AVANT FIX : la branche `if _pbm is not None` ne s'exécute pas → unit_hp["1"] reste > 0
-    APRÈS FIX : unit_model_hp mis à jour → vide → unit_hp["1"] = 0
+    APRÈS FIX : elif unit_models_alive atteint 0 → unit_hp["1"] = 0
   B consolide de (54,50) à (52,50), seul chemin disponible = (54,50)→(53,50)→(52,50).
     AVANT FIX : (53,50) fantôme dans occupied_positions (unit_hp["1"] > 0) → transit bloqué
                 → BFS ne trouve aucun chemin ≤ 3 → fight_move_invalid : faux positif.
@@ -64,24 +64,23 @@ _BODY = (
 )
 
 
-def _make_log() -> str:
-    return entete_step_log(
-        _BODY + EPISODE_TAIL,
-        inches_to_subhex=1,
-        units=_UNITS,
-        objectives=None,
-        ez_vertical_inches=None,
-        rosters="scale=100pts AGENT_PLAYER=1 AGENT=a (a.json) OPPONENT=o (o.json)",
-        # (53,49) est le seul hex voisin de (54,50) ET adjacent à (52,50) autre que (53,50).
-        # Le murer force l'unique chemin ≤ 3 vers (52,50) à transiter par (53,50) — l'ancre fantôme.
-        walls="(53,49)",
-    )
+# (53,49) est le seul hex voisin de (54,50) ET adjacent à (52,50) autre que (53,50).
+# Le murer force l'unique chemin ≤ 3 vers (52,50) à transiter par (53,50) — l'ancre fantôme.
+_LOG = entete_step_log(
+    _BODY + EPISODE_TAIL,
+    inches_to_subhex=1,
+    units=_UNITS,
+    objectives=None,
+    ez_vertical_inches=None,
+    rosters="scale=100pts AGENT_PLAYER=1 AGENT=a (a.json) OPPONENT=o (o.json)",
+    walls="(53,49)",
+)
 
 
 def test_dead_unit_after_charge_pile_in_does_not_block_consolidation_bfs(tmp_path):
     """VERROU : aucun fight_move_invalid quand B consolide après avoir tué A (charge+pile-in)."""
     log = tmp_path / "step.log"
-    log.write_text(_make_log(), encoding="utf-8")
+    log.write_text(_LOG, encoding="utf-8")
     stats = an.parse_step_log(str(log))
 
     # Aucune violation de move fight : l'ancre fantôme de A ne doit pas bloquer le BFS de B.
