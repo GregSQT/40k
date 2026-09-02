@@ -48,6 +48,19 @@ def test_chapelain_accorde_lethal_hits_a_vanguard():
     )
 
 
+def test_cas_inverse_croise_vanguard_accorde_au_chaplain():
+    """VanguardVeteranSquadJumpPack accorde LETHAL_HITS via grant_weapon_rule_melee_after_charge :
+    le ChaplainJumpPack qui le mène bénéficie aussi de la règle sur son propre Crozius Arcanum."""
+    grantable = {"LETHAL_HITS": {"VanguardVeteranSquadJumpPack"}}
+    squadmates = {"ChaplainJumpPack": {"VanguardVeteranSquadJumpPack"}}
+    assert _pair_is_conditional(
+        "Lethal_hits",
+        "Crozius Arcanum (ChaplainJumpPack)",
+        grantable,
+        squadmates,
+    ), "Crozius (ChaplainJumpPack) doit être CONDITIONAL quand il mène VanguardVeteranSquadJumpPack qui accorde"
+
+
 def test_regle_inconnue_retourne_false():
     """Règle absente de grantable → False."""
     grantable = _grantable({"Bigboss"})

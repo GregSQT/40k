@@ -51,6 +51,7 @@ WOUND_SEGMENT_RE = re.compile(
     r"Wound\s+(\d+)\((\d+)\+\)(" + ACTION_ABILITY_TOKENS + r")"
 )
 OATH_MARKER = "[OATH OF MOMENT]"
+LITANY_MARKER = "[LITANY OF HATE]"
 
 
 def parse_wound_threshold(action_desc: str) -> Optional[int]:
@@ -295,25 +296,17 @@ def expected_wound_threshold(
     # escouade menée par un Chaplain sortirait en « seuil de blessure faux » alors que le moteur
     # a raison — un faux positif systématique, le défaut que ce contrôle existe pour éviter.
     #
-    # Dérivé des DATASHEETS des figurines vivantes (19.04) et non du token du journal : le token
-    # vient du moteur, comme le seuil, et les confronter ne prouverait rien. Un `None` (socles
-    # vivants inconnus) rend la ligne NON VÉRIFIABLE — on ne devine pas.
+    # Lu depuis le token `[LITANY OF HATE]` sur la ligne d'action, en miroir de `[OATH OF MOMENT]`
+    # lu sur le segment Wound. La vérification par datasheet échouait quand le ChaplainJumpPack
+    # était suivi sous son propre unit_id : `positions_by_model` du squad mené ne contenait pas
+    # ses modèles, et `unit_effect_in_force` retournait `False` systématiquement.
     #
-    # LE ROSTER EST INTERROGÉ D'ABORD, et ce n'est pas une optimisation : aucune datasheet vue
-    # ne porte la capacité ⇒ le bonus vaut 0 sans regarder les socles. Sans ce court-circuit,
-    # toute partie SANS Chaplain paierait la même « ligne non vérifiable » qu'avec, dès que les
-    # socles vivants de l'attaquant manquent — un contrôle qui cesse de juger là où il n'y avait
-    # rien à juger.
+    # LE ROSTER EST INTERROGÉ D'ABORD (court-circuit) : aucune datasheet vue ne porte la capacité
+    # ⇒ le bonus vaut 0 sans examiner la ligne. Sans ce court-circuit, toute partie SANS Chaplain
+    # paierait le coût de la recherche du token même quand il est impossible de l'y trouver.
     litany_mag = 0
     if is_melee and config.rule_to_units.get("wound_roll_bonus_fight"):  # get allowed
-        from ai.analyzer_perfig import unit_effect_in_force
-
-        in_force = unit_effect_in_force(
-            state, config, attacker_unit_id, "wound_roll_bonus_fight"
-        )
-        if in_force is None:
-            return None
-        litany_mag = 1 if in_force else 0
+        litany_mag = 1 if LITANY_MARKER in action_desc else 0
     cap_val = config.bonus_malus_cap
     total_bonus = oath_mag + litany_mag
     if cap_val and total_bonus > cap_val:

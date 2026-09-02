@@ -641,3 +641,57 @@ def test_roster_fallback_declines_when_bodyguards_have_mixed_toughness():
     # Socles vivants CONNUS : plus d'ambiguïté, même roster hétérogène.
     mixte.positions_by_model = {"9": {m: (0, 0) for m in mixte.model_types}}
     assert aw.target_bodyguard_toughness(mixte, _config(), "9") == 8
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Litany of Hate — token [LITANY OF HATE] sur la ligne d'action
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _config_litany() -> AnalyzerConfig:
+    """Config avec wound_roll_bonus_fight actif (ChaplainJumpPack dans le roster)."""
+    return _config(rule_to_units={"wound_roll_bonus_fight": {"ChaplainJumpPack"}})
+
+
+def test_litany_token_abaisse_le_seuil_en_melee():
+    """F4 vs E4 = 4+ ; avec [LITANY OF HATE] en mêlée → 3+ (bonus cumulé de 1)."""
+    threshold = _expected(
+        _State(),
+        action_desc="Fight [LITANY OF HATE] Wound 4(4+)",
+        melee=True,
+        config=_config_litany(),
+    )
+    assert threshold == 3
+
+
+def test_litany_sans_token_ne_change_pas_le_seuil():
+    """Même config avec Chaplain dans le roster mais token absent → 4+ inchangé."""
+    threshold = _expected(
+        _State(),
+        action_desc="Fight Wound 4(4+)",
+        melee=True,
+        config=_config_litany(),
+    )
+    assert threshold == 4
+
+
+def test_litany_ignoree_au_tir():
+    """Token présent mais is_melee=False → litany_mag = 0 → seuil 4+ inchangé."""
+    threshold = _expected(
+        _State(),
+        action_desc="Shoot [LITANY OF HATE] Wound 4(4+)",
+        melee=False,
+        weapon="Bolter",
+        config=_config_litany(),
+    )
+    assert threshold == 4
+
+
+def test_litany_ignoree_si_absente_du_roster():
+    """Token présent mais rule_to_units vide → court-circuit roster → seuil 4+ inchangé."""
+    threshold = _expected(
+        _State(),
+        action_desc="Fight [LITANY OF HATE] Wound 4(4+)",
+        melee=True,
+        config=_config(),  # rule_to_units = {} → get retourne None → litany_mag = 0
+    )
+    assert threshold == 4
