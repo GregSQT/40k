@@ -44,6 +44,7 @@ def _call_damage(
     unit_models_alive: dict,
     damage: int = 1,
     alloc_model_id: str | None = "105#0",
+    dead_model_ids_episode: dict | None = None,
 ) -> dict:
     """Appelle _apply_damage_and_handle_death sur l'unité 105 avec ordered_living_mids réel.
 
@@ -72,7 +73,7 @@ def _call_damage(
         unit_kill_context={},
         stats=stats,
         alloc_model_id=alloc_model_id,
-        dead_model_ids_episode={"105": {"105#0"}} if alloc_model_id is not None else None,
+        dead_model_ids_episode=dead_model_ids_episode,
     )
     return stats
 
@@ -92,7 +93,8 @@ class TestDeadBeforeFightHp:
         unit_models_alive = {"105": 1}  # valeur stale — unité déclarée morte par DEAD event
 
         _call_damage(unit_hp=unit_hp, unit_model_hp=unit_model_hp,
-                     unit_models_alive=unit_models_alive, damage=1)
+                     unit_models_alive=unit_models_alive, damage=1,
+                     dead_model_ids_episode={"105": {"105#0"}})
 
         assert unit_hp["105"] == 0, (
             "Attaque post-DEAD : _sync_front_hp_mirror ne doit pas restaurer unit_hp à 1"
@@ -109,7 +111,8 @@ class TestDeadBeforeFightHp:
         unit_models_alive = {"105": 1}
 
         _call_damage(unit_hp=unit_hp, unit_model_hp=unit_model_hp,
-                     unit_models_alive=unit_models_alive, damage=1)
+                     unit_models_alive=unit_models_alive, damage=1,
+                     dead_model_ids_episode={})
 
         assert unit_hp["105"] == 1
 
@@ -133,6 +136,6 @@ class TestDeadBeforeFightHp:
             alloc_model_id=None,
         )
 
-        assert "105" in unit_hp and unit_hp["105"] == 0, "unit_hp ne doit pas être supprimé ni restauré"
+        assert unit_hp.get("105") == 0, "unit_hp ne doit pas être supprimé ni restauré"
         assert unit_models_alive["105"] == 0, "unit_models_alive ne doit pas descendre à -1"
         assert stats["current_episode_deaths"] == [], "pas de double-comptage dans deaths"
