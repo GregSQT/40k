@@ -620,7 +620,6 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
                             and move.get('turn') == turn
                             and move.get('episode') is not None
                             and move.get('episode') == state.current_episode_num
-                            and state.current_episode_num > 0
                             and move.get('action') == 'ingress'
                             for move in state.unit_movement_history[uid]
                         )
@@ -632,7 +631,6 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
                             and move.get('turn') == turn
                             and move.get('episode') is not None
                             and move.get('episode') == state.current_episode_num
-                            and state.current_episode_num > 0
                             for move in state.unit_movement_history[uid]
                         )
                         if has_moved_to_dest:
