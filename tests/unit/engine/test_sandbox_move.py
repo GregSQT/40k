@@ -182,7 +182,6 @@ class TestSandboxFreeMove:
         units = [_unit("1", 1, 5, 10), _unit("2", 2, 6, 10)]
         gs = _make_gs(units, sandbox=True)
 
-        from engine.phase_handlers.shared_utils import _squad_is_in_enemy_er
         assert _squad_is_in_enemy_er(gs, "1"), (
             "prémisse : unit 1 doit être engagée"
         )
