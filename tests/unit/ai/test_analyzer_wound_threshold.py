@@ -78,6 +78,8 @@ class _State:
         self.active_effects: Dict[int, Dict[str, str]] = {}
         self.unit_player: Dict[str, int] = {}
         self.current_episode_num = 1
+        self.current_line_models: Dict[str, Any] = {}
+        self.pending_model_removals: Dict[str, Any] = {}
 
 
 def _expected(state, action_desc="", *, melee=True, attacker="Trooper", weapon="Choppa",

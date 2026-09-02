@@ -223,7 +223,7 @@ endroit, et **pas** aux sites G1-G2. Le motif se répare site par site depuis de
   défaut. ⚠️ **Fichier SUPPRIMÉ depuis** (commit `20a2d479`, « retrait de la banque CoreAgent », avec
   ses 3 variantes `BEST_*`/`*_BEST_X1`/`*_save_avant_X10`) : lien retiré le 2026-07-28, valeurs
   conservées pour la trace historique. La config vivante est
-  [ArmageddonAgent_training_config.json](../../../config/agents/ArmageddonAgent_x1/ArmageddonAgent_training_config.json).
+  [ArmageddonAgent_x1_training_config.json](../../../config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json).
 - Espace d'action squad actuel — source unique [macro_intents.py](../../../engine/macro_intents.py) :
   - 0-5 move normal (6 directions), 6-11 advance (6 dir), 12-17 fall back (6 dir),
   - 18 wait/end activation, 19-23 shoot slots 0-4, 24 charge, 25 fight,

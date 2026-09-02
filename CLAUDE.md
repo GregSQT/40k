@@ -98,10 +98,10 @@ ENTRAÎNEMENT IA
 
 <X> = résolution 1 ou 5.
 Entraîner :
-python3 ai/train.py --agent ArmageddonAgent --training-config x<X> --scenario bot --resolution <X> --new
+python3 ai/train.py --agent ArmageddonAgent_x1 --training-config x<X> --scenario bot --resolution <X> --new
 
 Évaluer le modèle existant sur HOLDOUT :
-python3 ai/train.py --agent ArmageddonAgent --training-config x<X> --resolution <X> --test-only --step
+python3 ai/train.py --agent ArmageddonAgent_x1 --training-config x<X> --resolution <X> --test-only --step
 
 --test-only n'entraîne RIEN et laisse le modèle intact.
 
