@@ -49,7 +49,7 @@ export function resolveSelectedTerrain(mode: string | null, search: string): str
   const listLoaded = supported.length > 0;
 
   const accepts = (value: string | null): value is string =>
-    value !== null && (!listLoaded || supported.includes(value));
+    value !== null && value !== "" && (!listLoaded || supported.includes(value));
 
   const fromUrl = new URLSearchParams(search).get("terrain");
   if (accepts(fromUrl)) return fromUrl!;
