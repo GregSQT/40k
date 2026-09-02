@@ -41,15 +41,13 @@ export function terrainSuffix(
 /**
  * Terrain retenu pour ce mode : paramètre d'URL, sinon configuration gardée par défaut,
  * sinon le premier terrain disponible pour ce mode.
- * Si la liste n'est pas encore chargée, accepte tout param d'URL non-null.
  */
 export function resolveSelectedTerrain(mode: string | null, search: string): string {
   const entries = terrainsForMode(mode);
   const supported = entries.map((t) => t.id);
-  const listLoaded = supported.length > 0;
 
   const accepts = (value: string | null): value is string =>
-    value !== null && value !== "" && (!listLoaded || supported.includes(value));
+    value !== null && value !== "" && supported.includes(value);
 
   const fromUrl = new URLSearchParams(search).get("terrain");
   if (accepts(fromUrl)) return fromUrl!;
