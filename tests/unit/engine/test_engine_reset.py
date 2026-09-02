@@ -301,6 +301,37 @@ class TestEngineResetUnitState:
         unit_ids_after = {str(u["id"]) for u in engine.game_state["units"]}
         assert unit_ids_before == unit_ids_after
 
+    def test_reset_recomputes_unit_rules_for_units_with_own_rules(self):
+        """reset_unit_rules : UNIT_RULES recalculé depuis _UNIT_RULES_OWN après reset().
+
+        Bug : build_units_cache restaure les figurines dans squad_models mais ne rappelle
+        pas recompute_unit_rules_in_effect. Si ce dernier avait vidé UNIT_RULES=[] lors de
+        la destruction complète de l'unité en épisode N, UNIT_RULES restait vide en E+1
+        jusqu'à la prochaine mort de figurine.
+
+        Fix : reset() appelle recompute_unit_rules_in_effect pour toutes les unités
+        portant _UNIT_RULES_OWN.
+        """
+        engine = _make_engine()
+        gs = engine.game_state
+        unit = gs["units"][0]
+        unit_id = str(unit["id"])
+
+        # Simule l'état post-destruction : _UNIT_RULES_OWN défini, UNIT_RULES vidé
+        # par recompute_unit_rules_in_effect lors de la mort de la dernière figurine.
+        test_rule = {"ruleId": "hit_roll_bonus_fight", "displayName": "Test Bonus", "bonus": 1}
+        unit["_UNIT_RULES_OWN"] = [test_rule]
+        unit["_ATTACHED_RULE_GROUPS"] = {}
+        unit["UNIT_RULES"] = []
+
+        engine.reset()
+
+        unit_after = next(u for u in engine.game_state["units"] if str(u["id"]) == unit_id)
+        assert unit_after["UNIT_RULES"] == [test_rule], (
+            f"UNIT_RULES={unit_after['UNIT_RULES']} après reset() — "
+            "attendu [{test_rule}] : recompute_unit_rules_in_effect non appelé"
+        )
+
 
 class TestEngineResetPools:
 
