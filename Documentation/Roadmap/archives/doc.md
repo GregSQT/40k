@@ -39,3 +39,25 @@
 
 ✅ **270 échecs pytest corrigés (2026-08-31)** — 15 causes distinctes : `units_cache_entry` sans `HP_CUR`/`HP_MAX` (192+ failures), `allocate_mortal_wounds` patché sur le mauvais module, `BASE_SHAPE` absent des fixtures, `bonus_malus_cap` manquant, `squad_cache` absent, `unit_by_id` absent, `UNIT_RULES` absent, regex accent, message d'erreur périmé, garde overrun manquante, `step_logger` retour silencieux, terrain pfm2 mauvais chemin, `capacites.md` absent, doc action size / decision_ctx périmés. Aucun chantier doc.
 
+✅ **Lots 2026-08-30/31** — capacités 06, moteur, analyzer, front, hygiène (voir git log + archives/capacites.md).
+
+✅ **Couche demo_names (2026-08-31)** — `DEMO_MODE=1` + `config/demo_overrides.json`.
+
+✅ **Fix pytest_back 2026-08-31** — terrain-endless-duty.json, fixtures HP_CUR/col/row, W40K_BOARD_PATH, assertion inversée.
+
+✅ **Suffixe `_P<n>` scénarios (2026-09-01)** — `worktree-agent-phase-suffix`, purge code mort `config_loader`.
+
+✅ **9 corrections analyzer.log (2026-09-01)** — `worktree-fix-analyzer-bugs` ; FLY euclidienne, `pending_model_removals`, plafond tir, Waaagh E, croisé, DEAD positions, engagement ADVANCE.
+
+✅ **Faux positifs shoot_over_rng_nb + unit_ability_attack_cap (2026-09-02)** — 5187→0 ; oath_target Hail of Bolts, 19.04 rattachés, Dakkablitz/OD, bénéfice du doute type inconnu.
+
+✅ **Sandbox mode free-move + phases (2026-09-02)** — `worktree-sandbox-mode` + multi-niveaux + fix activation count + re-pool advance/flee + purge flags advance + test end-to-end.
+
+✅ **Correctifs analyzer 2026-09-02** — FLY hex (156 fp), Litany token (35 fp), INVERSE-CROISÉ (1 fp), ancre fantôme chargeur, masquage alternance 12.04 pile-in invalide, Da Biggest WAAAGH! (cap 7→11), Da Biggest fallback sans SHOOTER_MODELS, DEAD-before-FIGHT move_adjacent.
+
+✅ **Simplifications 2026-09-02** — `_resolve_active_unit_types` (triple duplication → helper), weapon lookup analyzer, cap Da Biggest, dead-elif altitude, sandbox-assert, dead-handler-test.
+
+✅ **Correctifs ponctuels analyzer+moteur 2026-09-02** — `worktree-fix-analyzer-engine-bugs`, lot 19.04 leader/support inline.
+
+✅ **Renommage ArmageddonAgent → ArmageddonAgent_x1 (2026-09-02)** — suppression répertoire orphelin, 121 fichiers, correctifs litany/curriculum/géométrie PILED IN ; 6 tests cassés suivants corrigés (liens morts docs, `_State.current_line_models`, CLAUDE.md agent key).
+

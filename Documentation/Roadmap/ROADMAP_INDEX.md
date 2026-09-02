@@ -67,17 +67,13 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
 | # | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|---|
-| 6 | training | ✅ R1→R3 absorbés par `--etape` P0→P10 (2026-08-30) | [training.md#curriculum](training.md#curriculum) | ✅ |
 | 7 | training | Mesure de référence — `--test-only --step` sur champion final P10 (~8 min) | [v11_chemin_critique.md#mesure](v11_chemin_critique.md#mesure) | 🚫 |
 
 ---
 
 ## J4 — Capacités
 
-| # | Sujets | Chantier | Fichier | ⚡/🚫 |
-|---|---|---|---|---|
-| 8 | training+bot | ✅ Self-play §0.59 absorbé par `--etape` (décision 2026-08-30) | [v11_chemin_critique.md#selfplay](v11_chemin_critique.md#selfplay) | ✅ |
-| 9 | moteur+training | ✅ **06** Armageddon abilities — 6/6 passes (passe 6 : Primitive F unit_state_effects — invul_save_override, toughness_bonus_while_waaagh, suppress_target_on_shooting, return_destroyed_models, once_per_battle_melee_buff obs, move_after_shooting D6, 2026-08-31) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) | ✅ |
+Tâches J4 archivées → `archives/doc.md#hygiene-correctifs-ponctuels`
 
 ---
 
@@ -97,13 +93,6 @@ Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 ## ✅ Hygiène — correctifs ponctuels
 
 Correctifs ponctuels livrés → `archives/doc.md#hygiene-correctifs-ponctuels`
-
-- ✅ analyzer : lot correctifs ponctuels 2026-09-02 — purge `positions_by_model` faux positifs engagement, simplification inverse/croisé/litany, retrait guard `current_episode_num > 0` collision move
-- ✅ moteur 19.04 : extinction règles leader/support inline 2026-09-02 — `_build_enhanced_unit` assigne `attached_from` fictif aux modèles inline avec rôle leader/support ; `charge_roll_bonus` (Bigboss) ne persistait plus après sa mort dans `_UNIT_RULES_OWN`
-- ✅ simplify dead-handler-test 2026-09-02 — fusion guard redondant, inline `_make_log`
-- ✅ simplify sandbox-count-test 2026-09-02 — assertion absolue == 0 (assertion relative retirée)
-- ✅ simplify sandbox-assert 2026-09-02 — accès direct dict + `-= 1` inline
-- ✅ test unnamed-path post-DEAD 2026-09-02 — verrouille garde double-mort chemin `alloc_model_id=None`
 
 ---
 
@@ -133,32 +122,6 @@ Correctifs ponctuels livrés → `archives/doc.md#hygiene-correctifs-ponctuels`
 | infra | Migration PostgreSQL | [infra.md#postgresql](infra.md#postgresql) | ⚡ |
 | infra | MCTS adversaire d'entraînement | [infra.md#mcts](infra.md#mcts) | 🚫 |
 | bot | Tranches 2-3 benchmark — schedule P0→P10 + exploiters : code et tests livrés 2026-08-22 (`--etape`, `curriculum.json`, pool figé par-env, `ExploiterProbeCallback` sondage synchrone + `validate_exploiter_protocol` + `exploiter_config`, 24 tests verrou) ; restent les 14 runs (~260 h) | [bot.md#league](bot.md#league) | 🚫 |
-| tous | ✅ lots 2026-08-30/31 — capacités 06, moteur, analyzer, front, hygiène (voir git log + archives) | [archives/capacites.md#armageddon-06](archives/capacites.md#armageddon-06) [moteur.md](moteur.md) [analyzer.md](analyzer.md) [front.md](front.md) | ⚡ |
-| infra | ✅ **Couche demo_names (2026-08-31)** — substitution noms d'affichage à la sortie API via `DEMO_MODE=1` + `config/demo_overrides.json` ; moteur interne inchangé | — | ⚡ |
-| infra/tests | ✅ **Fix pytest_back 2026-08-31** — terrain-endless-duty.json sorti de divers/ ; fixture HP_CUR/col/row manquants (test_ignores_cover) ; pool W40K_BOARD_PATH épinglé (test_deployment_model_destinations_pool) ; assertion inversée corrigée (test_expected_damage) ; simplifications terrain-list | — | ⚡ |
-| ai/train | ✅ **Suffixe `_P<n>` dans la résolution de scénarios (2026-09-01)** — `worktree-agent-phase-suffix`, mergé `a19b8537` ; purge code mort `config_loader` + fix T1 `train.py` (erreurs masquées) | — | ⚡ |
-| analyzer | ✅ **9 corrections analyzer.log (2026-09-01)** — `worktree-fix-analyzer-bugs`, mergé `de516696` ; distance FLY euclidienne (move + charge), `pending_model_removals` dans `unit_effect_in_force`, plafond tir par-figurine, bonus E Waaagh (BannerNob), grant croisé de meneur dans `_pair_is_conditional`, événement DEAD retiré de `positions_by_model`, garde d'engagement avant ADVANCE ; 7 fichiers de tests, cycles rouge/vert | [analyzer.md](analyzer.md) | ⚡ |
-| analyzer | ✅ **Faux positifs `shoot_over_rng_nb` (2026-09-02)** — run 300 épisodes **5187 → 2243** (`surcharge_atk` 4879 → 1935). (1) gate `oath_target` erroné sur le bonus Hail of Bolts — 2432 faux positifs ; (2) capacités d'unité non propagées aux personnages rattachés, contre 19.04 — 512 faux positifs. Nouveau `unit_ability_attack_cap`. **Reste ouvert : 1935 `surcharge_atk` de cause différente ([SUSTAINED HITS])** | [analyzer.md#faux-positifs-plafond-tir](analyzer.md#faux-positifs-plafond-tir) | ⚡ |
-| analyzer | ✅ **`unit_ability_attack_cap` filtre les porteurs morts (2026-09-02)** — `model_types` conserve les morts tout l'épisode ; le moteur retire `own_rules` dès que `native_alive` est faux. Ajout de `living_mids` (socles vivants de `current_line_models`) : quand fourni, seuls les types des mids vivants entrent dans `_types`. Corrige le cas escouade réduite à son seul personnage rattaché (ex. Ancient seul). 3 tests rouge→vert. | — | ⚡ |
-| analyzer | ✅ **Dakkablitz+OD dans `max_allowed_shots` (2026-09-02)** — `unit_ability_atk_bonus_vs_keyword_cap` + `unit_blast_per5_nonmv_bonus` câblés dans `shoot_handler` ; `living_mids` fallback corrigé dans les deux jumeaux. Ferme les 1935 faux positifs `surcharge_atk` restants. | [analyzer.md](analyzer.md) | ⚡ |
-| analyzer | ✅ **Bénéfice du doute OD type cible inconnu (2026-09-02)** — `target_upper_kws = frozenset()` quand le type de cible est inconnu → OD non écarté, évite les faux positifs OD rares. | — | ⚡ |
-| moteur | ✅ **Sandbox mode — free move + saut de phase (2026-09-02)** — `worktree-sandbox-mode`, mergé `5828406e` | — | ⚡ |
-| analyzer | ✅ **5 corrections analyzer+moteur (2026-09-02)** — `worktree-fix-analyzer-engine-bugs`, mergé `0296c03b` | [analyzer.md](analyzer.md) | ⚡ |
-| analyzer | ✅ **Masquage alternance 12.04 sur pile-in invalide corrigé (2026-09-02)** — `charged_units_fought` conditionné à `pile_in_move_valid` + `_position_cache_set` ignoré si invalide ; `worktree-fix-analyzer-pilein-alternance` | [analyzer.md](analyzer.md) | ⚡ |
-| analyzer | ✅ **Simplify `_resolve_active_unit_types` (2026-09-02)** — triple duplication du bloc `_types`/`living_mids` extraite en helper privé ; double passe sur `model_types` supprimée (passe unique avec `has_unit_entry`) ; constantes `SHOOTER_POS/TARGET_POS/S/T` partagées dans `_fabriques`. | — | ⚡ |
-| analyzer | ✅ **Simplify analyzer weapon lookup (2026-09-02)** — 4 cleanups `unit_registry` : `TS_QUOTED_STRING`, helper weapon lookup, set expr, `weapon_profile_names` OD ; normalise `unit_upper_keywords_by_type` (cohérence moteur). | — | ⚡ |
-| analyzer | ✅ **Faux positifs analyzer.log — FLY hex + Litany + INVERSE-CROISÉ (2026-09-02)** — distance FLY mesurée en `calculate_hex_distance` (156 faux positifs) ; Litany of Hate lue depuis le token `[LITANY OF HATE]` (35 faux positifs) ; cas INVERSE-CROISÉ dans `_pair_is_conditional` quand le bodyguard accorde une règle au leader (1 faux positif) ; `unit_upper_keywords_by_type` ajouté dans `_fabriques` (fixture cassée pré-existante). | [analyzer.md](analyzer.md) | ⚡ |
-| analyzer | ✅ **Ancre fantôme chargeur corrigée (2026-09-02)** — `worktree-fix-analyzer-charge-dead-ghost`, mergé `8c26cf7c` ; ancre fantôme dans `analyzer_core` après mort d'unité en charge ; cycles rouge/vert. | [analyzer.md](analyzer.md) | ⚡ |
-| moteur | ✅ **Sandbox free-move multi-niveaux (2026-09-02)** — `worktree-sandbox-free-move-multilevel`, mergé `a0484c4b` ; free-move sandbox étendu aux niveaux de terrain ; tests rouge/vert. | — | ⚡ |
-| analyzer | ✅ **Faux positifs `fight_over_cc_nb` Warboss WAAAGH! — Da Biggest (2026-09-02)** — `worktree-fix-analyzer-fight-waaagh-da-biggest` ; `melee_attacks_bonus_while_waaagh` ignoré dans le plafond mêlée (cap 7 au lieu de 11) ; `melee_atk_bonus_waaagh_by_type` dans `analyzer_config` + `_da_biggest_extra` dans `_cc_cap_for_line` ; 5 tests rouge/vert. | [analyzer.md](analyzer.md) | ⚡ |
-| analyzer | ✅ **Simplify cap Da Biggest (2026-09-02)** — `worktree-simplify-da-biggest-cap`, mergé `ec70728c` ; variable temporaire supprimée. | — | ⚡ |
-| analyzer | ✅ **Fix dead-elif altitude (2026-09-02)** — `worktree-fix-simplify-dead-elif-altitude`, mergé `fbb2dbf5` ; `unit_models_alive` sync both DEAD paths. | — | ⚡ |
-| moteur | ✅ **Fix sandbox activation count (2026-09-02)** — `worktree-fix-sandbox-activation-count`, mergé `4c5e45bb`. | — | ⚡ |
-| moteur | ✅ **Fix sandbox re-pool advance/flee (2026-09-02)** — `worktree-fix-sandbox-reppool-advance-flee`, mergé `c2bac7e4` ; purge `units_advanced`/`advance_rolls` et `action=move` au re-pool, budget M+D6 fantôme. | — | ⚡ |
-| analyzer | ✅ **Da Biggest fallback sans `[SHOOTER_MODELS:]` (2026-09-02)** — `worktree-fix-analyzer-da-biggest-fallback` ; bonus per-modèle appliqué via `fighter_unit_type × n_fighter_models` quand `shooters` vide ; test verrou rouge/vert ; `import pytest` mort retiré ; slot dupliqué remplacé par test fallback. | [analyzer.md](analyzer.md) | ⚡ |
-| analyzer | ✅ **Faux positifs `move_adjacent_before_non_flee` — DEAD-before-FIGHT (2026-09-02)** — `worktree-fix-move-adjacent-analyzer` ; DEAD handler met `unit_hp=0` (clé présente) mais `unit_model_hp` non purgé ; attaques post-DEAD prenaient le chemin non-létal et restauraient `unit_hp` via `_sync_front_hp_mirror` → unité morte dans `positions_at_movement_filtered` au tour suivant ; garde dans `_apply_damage_and_handle_death` ; 2 tests rouge/vert. | — | ⚡ |
-| moteur | ✅ **Purge flags advance après downgrade fall_back (2026-09-02)** — `worktree-fix-advance-fallback-stale-state`, mergé `c481911d` ; `units_advanced`/`advance_rolls` non purgés après advance→fall_back (engagement réactif 09.03) ; sandbox advance mode bypass engagement check (cohérence sandbox) ; T1 setdefault→direct access sandbox re-pool ; test rouge/vert. | — | ⚡ |
-| moteur | ✅ **Test end-to-end avance+engagé → commit sandbox purge flags (2026-09-02)** — `worktree-test-sandbox-advance-engaged-commit` ; trou identifié par code review : chemin set_advance_mode (unité engagée, sandbox) → commit → flags purgés non couvert ; test rouge/vert ajouté. | — | ⚡ |
 
 ---
 

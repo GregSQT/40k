@@ -2028,7 +2028,7 @@ fonctions comme du code vivant. Vérifié dans le worktree : import du module OK
 validée au-delà de ces tests ciblés — la vérification large appartient à l'utilisateur (§0.51).
 
 **2. Rampe de déploiement réglée sur le SEUL profil `x1`.** Vérifié dans
-[`ArmageddonAgent_training_config.json`](../../../config/agents/ArmageddonAgent_x1/ArmageddonAgent_training_config.json) :
+[`ArmageddonAgent_x1_training_config.json`](../../../config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json) :
 
 | Profil | `deployment_mode_schedule` | `active_ratio_start` → `active_ratio_end` |
 |---|---|---|
