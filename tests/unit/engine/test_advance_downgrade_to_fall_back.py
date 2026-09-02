@@ -118,3 +118,12 @@ def test_advance_downgrade_to_fall_back_when_engaged_at_commit():
         f"action_log : attendu 'FLED', obtenu {move_log['action_name']!r}"
     )
     assert move_log["was_flee"] is True, "was_flee doit être True pour un fall_back"
+
+    # F1 : les flags advance doivent être purgés après le downgrade (sinon has_advanced=True
+    # en phase de tir, budget M+D6 réutilisé, unité exclue à tort du pool de charge).
+    assert "1" not in gs["units_advanced"], (
+        "units_advanced doit être purgé après downgrade advance→fall_back"
+    )
+    assert "1" not in gs["advance_rolls"], (
+        "advance_rolls doit être purgé après downgrade advance→fall_back"
+    )
