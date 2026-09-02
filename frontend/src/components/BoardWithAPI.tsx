@@ -31,6 +31,7 @@ import {
   resolveSelectedTerrain,
   setTerrainList,
   STORAGE_KEY as TERRAIN_STORAGE_KEY,
+  terrainsForMode,
   type TerrainEntry,
 } from "../utils/terrainSelection";
 import { AdvanceWarningModal } from "./AdvanceWarningModal";
@@ -773,7 +774,7 @@ export const BoardWithAPI: React.FC = () => {
   const isRosterSetupMode = gameMode === "pvp_test" || gameMode === "pvp" || gameMode === "pve";
   const [testDeploymentStarted, setTestDeploymentStarted] = useState(!isRosterSetupMode);
   const urlMode = new URLSearchParams(window.location.search).get("mode");
-  const availableTerrains = terrainList?.filter((t) => t.modes.includes(urlMode ?? "pvp")) ?? [];
+  const availableTerrains = terrainsForMode(urlMode);
   const [selectedTerrain, _setSelectedTerrain] = useState<string>(() =>
     resolveSelectedTerrain(urlMode, window.location.search)
   );

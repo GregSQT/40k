@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   resolveSelectedTerrain,
   setTerrainList,
+  STORAGE_KEY,
   terrainSuffix,
   type TerrainEntry,
   terrainsForMode,
@@ -47,12 +48,12 @@ afterEach(() => {
 
 describe("resolveSelectedTerrain", () => {
   it("prend le paramètre d'URL avant tout le reste", () => {
-    localStorage.setItem("gameprep_terrain", "mc1");
+    localStorage.setItem(STORAGE_KEY, "mc1");
     expect(resolveSelectedTerrain(null, "?terrain=pfm2")).toBe("pfm2");
   });
 
   it("PvP sans URL : reprend le terrain gardé par défaut", () => {
-    localStorage.setItem("gameprep_terrain", "pfm2");
+    localStorage.setItem(STORAGE_KEY, "pfm2");
     expect(resolveSelectedTerrain(null, "")).toBe("pfm2");
   });
 
@@ -65,17 +66,21 @@ describe("resolveSelectedTerrain", () => {
   });
 
   it("ignore un terrain que le mode ne sait pas charger", () => {
-    localStorage.setItem("gameprep_terrain", "pfm2");
+    localStorage.setItem(STORAGE_KEY, "pfm2");
     expect(resolveSelectedTerrain("pve_test", "?terrain=pfm2")).toBe("mc1");
   });
 
   it("reprend le localStorage valide quand l'URL est invalide", () => {
-    localStorage.setItem("gameprep_terrain", "mc1");
+    localStorage.setItem(STORAGE_KEY, "mc1");
     expect(resolveSelectedTerrain(null, "?terrain=nonexistent")).toBe("mc1");
   });
 
   it("pvp_test sans URL ni localStorage : mc2 via default_for, pas supported[0]", () => {
     expect(resolveSelectedTerrain("pvp_test", "")).toBe("mc2");
+  });
+
+  it("rejette une chaîne blanche (%20) depuis l'URL", () => {
+    expect(resolveSelectedTerrain(null, "?terrain=%20")).toBe("mc2");
   });
 });
 
@@ -88,10 +93,6 @@ describe("resolveSelectedTerrain — avant chargement de la liste", () => {
 
   it("rejette '' (URL ?terrain= vide) même sans liste chargée", () => {
     expect(resolveSelectedTerrain(null, "?terrain=")).toBe("mc2");
-  });
-
-  it("rejette une chaîne blanche (%20) depuis l'URL", () => {
-    expect(resolveSelectedTerrain(null, "?terrain=%20")).toBe("mc2");
   });
 });
 
