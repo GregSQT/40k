@@ -22,7 +22,7 @@ from typing import Iterator, List
 
 import pytest
 
-SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
+SCENARIO = "config/agents/ArmageddonAgent_x1/scenarios/training/scenario_training_armageddon1.json"
 
 
 @pytest.fixture
@@ -43,9 +43,9 @@ def _engine(seed: int):
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),
         quiet=True,

@@ -64,7 +64,7 @@ def _tracker(tmp_path: Any, window: int = 1) -> Tuple[W40KMetricsTracker, _Recor
     des fenetres, lui, a ses propres tests (``test_no_point_is_emitted_before...``).
     """
     tracker = W40KMetricsTracker(
-        "ArmageddonAgent", log_dir=str(tmp_path), show_banner=False,
+        "ArmageddonAgent_x1", log_dir=str(tmp_path), show_banner=False,
         perf_window=window, perf_window_fast=window,
     )
     recording = _RecordingWriter()
@@ -227,7 +227,7 @@ def test_obj_rewards_equals_what_the_reward_calculator_actually_pays(tmp_path: A
     """
     from config_loader import get_config_loader
 
-    cfg = get_config_loader().load_agent_rewards_config("ArmageddonAgent")["ArmageddonAgent"]
+    cfg = get_config_loader().load_agent_rewards_config("ArmageddonAgent_x1")["ArmageddonAgent_x1"]
     factor = float(cfg["objective_rewards"]["objective_reward_factor"])
     assert factor > 0.0, "facteur nul : le controle ne mesurerait rien"
 

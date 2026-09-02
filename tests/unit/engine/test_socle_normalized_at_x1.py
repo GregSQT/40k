@@ -85,8 +85,8 @@ def _engine(tmp_path, mover_type: str, mover: tuple, enemy: tuple):
     path = tmp_path / "scenario_socle.json"
     path.write_text(json.dumps(scenario), encoding="utf-8")
     engine = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent", scenario_file=str(path),
+        rewards_config="ArmageddonAgent_x1", training_config_name="x1_debug",
+        controlled_agent="ArmageddonAgent_x1", scenario_file=str(path),
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
     )
     engine.reset(seed=0)

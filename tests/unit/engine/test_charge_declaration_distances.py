@@ -73,8 +73,8 @@ def _play(
         activation close sur un renoncement ne doit produire aucune tentative.
     """
     engine = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent", scenario_file=scenario_file,
+        rewards_config="ArmageddonAgent_x1", training_config_name="x1_debug",
+        controlled_agent="ArmageddonAgent_x1", scenario_file=scenario_file,
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
     )
     engine.reset(seed=seed)
@@ -303,7 +303,7 @@ class _RecordingWriter:
 
 def _recording_tracker(tmp_path: Any) -> Tuple[W40KMetricsTracker, _RecordingWriter]:
     tracker = W40KMetricsTracker(
-        "ArmageddonAgent", log_dir=str(tmp_path), show_banner=False,
+        "ArmageddonAgent_x1", log_dir=str(tmp_path), show_banner=False,
         perf_window=1, perf_window_fast=1,
     )
     tracker.writer = _RecordingWriter()

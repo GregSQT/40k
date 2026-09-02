@@ -182,21 +182,21 @@ def main() -> None:
     board_path = _require_board_path()
     model_path = _require_reference_model()
     config = get_config_loader()
-    tc = config.load_agent_training_config("ArmageddonAgent", _TRAINING_CONFIG)
+    tc = config.load_agent_training_config("ArmageddonAgent_x1", _TRAINING_CONFIG)
     model = MaskablePPO.load(model_path, device="cpu")
     normalize = _build_eval_obs_normalizer_for_worker(
         model, model_path,
         bool(tc.get("vec_normalize", {}).get("enabled", False)),
         bool(tc.get("vec_normalize_eval", {}).get("enabled", False)),
     )
-    params = _load_bot_eval_params(config, "ArmageddonAgent", _TRAINING_CONFIG)
+    params = _load_bot_eval_params(config, "ArmageddonAgent_x1", _TRAINING_CONFIG)
     randomness = params["randomness"]
     agent_seat_mode = require_key(tc, "agent_seat_mode")
     base_seed = int(require_key(tc, "seed"))
     seat_seed = tc.get("agent_seat_seed", base_seed)
-    scenarios = get_scenario_list_for_phase(config, "ArmageddonAgent", _TRAINING_CONFIG, scenario_type="holdout")
+    scenarios = get_scenario_list_for_phase(config, "ArmageddonAgent_x1", _TRAINING_CONFIG, scenario_type="holdout")
     if not scenarios:
-        raise RuntimeError(f"Aucun scénario holdout trouvé pour ArmageddonAgent/{_TRAINING_CONFIG} — vérifier config/agents/ArmageddonAgent/scenarios/")
+        raise RuntimeError(f"Aucun scénario holdout trouvé pour ArmageddonAgent/{_TRAINING_CONFIG} — vérifier config/agents/ArmageddonAgent_x1/scenarios/")
     scenario_file = scenarios[0]
 
     print(f"Modèle : {os.path.basename(model_path)}   Plateau : {board_path}")
@@ -210,8 +210,8 @@ def main() -> None:
         bot = build_bot(bot_name, dict(randomness))
         registry = UnitRegistry()
         base_env = W40KEngine(
-            rewards_config="ArmageddonAgent", training_config_name=_TRAINING_CONFIG,
-            controlled_agent="ArmageddonAgent", active_agents=None,
+            rewards_config="ArmageddonAgent_x1", training_config_name=_TRAINING_CONFIG,
+            controlled_agent="ArmageddonAgent_x1", active_agents=None,
             scenario_file=scenario_file, unit_registry=registry,
             quiet=True, gym_training_mode=True, training_n_envs=1,
         )

@@ -42,7 +42,7 @@ from engine.macro_intents import (
 from engine.observation_entities import K_ALLY_SLOTS, unit_cont_index
 from engine.phase_handlers.shared_utils import SQUAD_ACTION_WAIT, get_ally_slot_mapping
 
-SCENARIO = "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
+SCENARIO = "config/agents/ArmageddonAgent_x1/scenarios/training/scenario_training_armageddon1.json"
 
 #: Phases où le choix d'activation se pose. Doit rester le miroir de
 #: `ActionDecoder.ACTIVATION_CHOICE_PHASES` — verrouillé ci-dessous.
@@ -58,9 +58,9 @@ def _new_engine():
     from engine.w40k_core import W40KEngine
 
     engine = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),
         quiet=True,

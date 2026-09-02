@@ -27,7 +27,7 @@ PROJECT_ROOT = os.path.dirname(
 #: Scénario à déploiement ACTIF : c'est le seul mode où la phase `deployment` existe, donc le
 #: seul où un snapshot de cette phase peut être capturé.
 SCENARIO = os.path.join(
-    PROJECT_ROOT, "config/agents/ArmageddonAgent/scenarios/holdout_regular/scenario_bot-01.json"
+    PROJECT_ROOT, "config/agents/ArmageddonAgent_x1/scenarios/holdout_regular/scenario_bot-01.json"
 )
 
 
@@ -37,9 +37,9 @@ def engine():
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),
         quiet=True,

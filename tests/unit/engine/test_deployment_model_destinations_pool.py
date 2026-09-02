@@ -26,8 +26,8 @@ def _floors_engine():
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1", training_config_name="x1_debug",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file="config/board/44x60x5/scenario/scenario_floors_test.json",
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
     )

@@ -38,7 +38,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 from tests.unit.engine._config_helpers import both_terrains
 
 SCENARIO = (
-    PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
+    PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent_x1" / "scenarios" / "training"
     / "reserves_20_fixture1.json"
 )
 
@@ -66,8 +66,8 @@ def _engine(training_config_name: str = "x1_debug", seed: int = 0):
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name=training_config_name,
-        controlled_agent="ArmageddonAgent", scenario_file=str(SCENARIO),
+        rewards_config="ArmageddonAgent_x1", training_config_name=training_config_name,
+        controlled_agent="ArmageddonAgent_x1", scenario_file=str(SCENARIO),
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
     )
     # Le scheduler par-épisode peut rejouer le scénario en 'fixed' : ces tests exigent la phase

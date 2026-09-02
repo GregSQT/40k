@@ -48,7 +48,7 @@ sys.path[:0] = [_ROOT, os.path.join(_ROOT, "scripts")]
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--agent", default="ArmageddonAgent")
+    parser.add_argument("--agent", default="ArmageddonAgent_x1")
     parser.add_argument("--training-config", default="x1_debug")
     parser.add_argument("--episodes", type=int, default=4)
     parser.add_argument("--seed-base", type=int, default=1000)

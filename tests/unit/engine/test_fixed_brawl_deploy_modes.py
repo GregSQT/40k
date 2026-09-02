@@ -45,9 +45,9 @@ def _build_env(scenario_path: str):
     from engine.w40k_core import W40KEngine
 
     env = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=scenario_path,
         unit_registry=UnitRegistry(),
         quiet=True,

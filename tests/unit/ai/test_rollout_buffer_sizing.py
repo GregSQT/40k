@@ -197,7 +197,7 @@ def test_every_profile_batch_size_divides_its_real_rollout() -> None:
 
     config_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
-        "config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json",
+        "config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json",
     )
     with open(config_path, encoding="utf-8-sig") as f:
         profiles = {k: v for k, v in json.load(f).items() if isinstance(v, dict)}

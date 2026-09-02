@@ -95,9 +95,9 @@ def test_engine_ramp_resumes_from_the_start_index() -> None:
 
     def _p_active(start_index: int) -> float:
         env = W40KEngine(
-            rewards_config="ArmageddonAgent",
+            rewards_config="ArmageddonAgent_x1",
             training_config_name="x1",
-            controlled_agent="ArmageddonAgent",
+            controlled_agent="ArmageddonAgent_x1",
             scenario_file=scenario,
             unit_registry=UnitRegistry(),
             quiet=True,
@@ -282,7 +282,7 @@ def test_a_new_run_never_inherits_the_previous_offset(tmp_path) -> None:
 
     models_root = str(tmp_path / "models")
     model_path, offset, start_index = prepare_run_artifacts(
-        models_root, "ArmageddonAgent", new_model=False, append_training=False, n_envs=4,
+        models_root, "ArmageddonAgent_x1", new_model=False, append_training=False, n_envs=4,
         log_fn=lambda _m: None,
     )
     open(model_path, "wb").close()
@@ -290,14 +290,14 @@ def test_a_new_run_never_inherits_the_previous_offset(tmp_path) -> None:
 
     # Reprise nominale : l'offset remonte, converti en index PAR ENVIRONNEMENT.
     _, offset, start_index = prepare_run_artifacts(
-        models_root, "ArmageddonAgent", new_model=False, append_training=True, n_envs=4,
+        models_root, "ArmageddonAgent_x1", new_model=False, append_training=True, n_envs=4,
         log_fn=lambda _m: None,
     )
     assert (offset, start_index) == (200_000, 50_000)
 
     # `--new --append` : le compte de l'ancien ne doit PAS suivre, et l'ancien doit être archivé.
     _, offset, start_index = prepare_run_artifacts(
-        models_root, "ArmageddonAgent", new_model=True, append_training=True, n_envs=4,
+        models_root, "ArmageddonAgent_x1", new_model=True, append_training=True, n_envs=4,
         log_fn=lambda _m: None,
     )
     assert (offset, start_index) == (0, 0), (
@@ -320,7 +320,7 @@ def test_a_new_run_ignores_the_offset_even_without_archiving(tmp_path, monkeypat
 
     models_root = str(tmp_path / "models")
     model_path, _, _ = train.prepare_run_artifacts(
-        models_root, "ArmageddonAgent", new_model=False, append_training=False, n_envs=1,
+        models_root, "ArmageddonAgent_x1", new_model=False, append_training=False, n_envs=1,
         log_fn=lambda _m: None,
     )
     open(model_path, "wb").close()
@@ -328,7 +328,7 @@ def test_a_new_run_ignores_the_offset_even_without_archiving(tmp_path, monkeypat
 
     monkeypatch.setattr(train, "archive_canonical_artifacts_for_new_run", lambda *_a, **_k: [])
     _, offset, start_index = train.prepare_run_artifacts(
-        models_root, "ArmageddonAgent", new_model=True, append_training=True, n_envs=4,
+        models_root, "ArmageddonAgent_x1", new_model=True, append_training=True, n_envs=4,
         log_fn=lambda _m: None,
     )
 
@@ -345,7 +345,7 @@ def test_the_prologue_creates_the_model_directory_on_every_path(tmp_path) -> Non
 
     models_root = str(tmp_path / "models")
     model_path, _, _ = prepare_run_artifacts(
-        models_root, "ArmageddonAgent", new_model=False, append_training=False, n_envs=1,
+        models_root, "ArmageddonAgent_x1", new_model=False, append_training=False, n_envs=1,
         log_fn=lambda _m: None,
     )
     assert os.path.isdir(os.path.dirname(model_path))
@@ -398,7 +398,7 @@ def test_the_final_summary_target_is_cumulative_like_the_counter(monkeypatch) ->
         monkeypatch.setattr(train, name, _spy)
 
     cfg = get_config_loader()
-    training_config = dict(cfg.load_agent_training_config("ArmageddonAgent", "x1_debug"))
+    training_config = dict(cfg.load_agent_training_config("ArmageddonAgent_x1", "x1_debug"))
     training_config["total_episodes"] = total
     training_config["_turn_step_limit"] = 100
     training_config["model_params"] = {
@@ -409,7 +409,7 @@ def test_the_final_summary_target_is_cumulative_like_the_counter(monkeypatch) ->
     train.setup_callbacks(
         cfg, "/tmp/model_ArmageddonAgent.zip", training_config,
         training_config_name="x1_debug", global_episode_offset=offset,
-        agent="ArmageddonAgent", rewards_config_name="ArmageddonAgent", silent_logs=True,
+        agent="ArmageddonAgent_x1", rewards_config_name="ArmageddonAgent_x1", silent_logs=True,
     )
 
     assert captured["BotEvaluationCallback"]["final_summary_target_episodes"] == offset + total

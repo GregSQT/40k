@@ -305,7 +305,7 @@ def test_apply_hp_overrides_bot_eval_final():
 def test_real_curriculum_validates_with_overrides():
     """validate_curriculum accepte le curriculum reel qui contient des overrides sur P1/P2."""
     from ai.curriculum import load_curriculum
-    curriculum = load_curriculum("ArmageddonAgent")
+    curriculum = load_curriculum("ArmageddonAgent_x1")
     # validate_curriculum est appele par load_curriculum — si on arrive ici, il a passe.
     stages = curriculum["stages"]
     assert "training_config_overrides" in stages["P1"]

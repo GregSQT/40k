@@ -52,7 +52,7 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ARMAGEDDON_SCENARIOS = (
-    PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "scenarios" / "training"
+    PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent_x1" / "scenarios" / "training"
 )
 
 from ai.metrics_tracker import W40KMetricsTracker  # noqa: E402
@@ -73,9 +73,9 @@ _SEEDS = (0, 1, 2)
 def _play(scenario_file: str, seed: int) -> Dict[str, Any]:
     """Joue un épisode complet en actions légales tirées au sort ; rend tactical_data."""
     engine = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=scenario_file,
         unit_registry=UnitRegistry(),
         quiet=True,
@@ -216,9 +216,9 @@ def _play_always_declining_ingress(seed: int) -> Dict[str, Any]:
     from engine.macro_intents import DEPLOY_SLOTS
 
     engine = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=_FIXTURE_RESERVES,
         unit_registry=UnitRegistry(),
         quiet=True,
@@ -296,8 +296,8 @@ def test_the_shipped_config_declares_the_reserves_penalty() -> None:
     """
     import json
 
-    path = PROJECT_ROOT / "config/agents/ArmageddonAgent/ArmageddonAgent_rewards_config.json"
-    shaping = json.loads(path.read_text(encoding="utf-8"))["ArmageddonAgent"]["reserves_shaping"]
+    path = PROJECT_ROOT / "config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_rewards_config.json"
+    shaping = json.loads(path.read_text(encoding="utf-8"))["ArmageddonAgent_x1"]["reserves_shaping"]
     assert isinstance(shaping.get("enabled"), bool)
     montant = shaping.get("declined_arrival_lost_penalty")
     assert isinstance(montant, (int, float)) and not isinstance(montant, bool)
@@ -392,7 +392,7 @@ def test_ingress_opportunities_are_recorded_at_all(seed: int) -> None:
 def _recorded_scalars(tactical: Dict[str, Any], tmp_path: Any) -> Dict[str, float]:
     """Passe `tactical` au VRAI `log_tactical_metrics` et rend les scalaires écrits."""
     tracker = W40KMetricsTracker(
-        "ArmageddonAgent", log_dir=str(tmp_path), show_banner=False,
+        "ArmageddonAgent_x1", log_dir=str(tmp_path), show_banner=False,
         perf_window=1, perf_window_fast=1,
     )
     written: Dict[str, float] = {}

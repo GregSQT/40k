@@ -74,7 +74,7 @@ PROJECT_ROOT = os.path.dirname(
 #: (`agent_roster_ref: training_random`), ce qui ne construit aucune situation observable.
 ORK_VS_ORK = os.path.join(
     PROJECT_ROOT,
-    "config/agents/ArmageddonAgent/scenarios/holdout_regular/scenario_bot-04.json",
+    "config/agents/ArmageddonAgent_x1/scenarios/holdout_regular/scenario_bot-04.json",
 )
 
 # Fixtures d'unites attachees PARTAGEES avec `test_attached_units_abilities_19_04` : elles y
@@ -277,8 +277,8 @@ def test_real_training_roster_writes_the_expected_id():
     """
     import random as _random
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x1",
-        controlled_agent="ArmageddonAgent", scenario_file=ORK_VS_ORK,
+        rewards_config="ArmageddonAgent_x1", training_config_name="x1",
+        controlled_agent="ArmageddonAgent_x1", scenario_file=ORK_VS_ORK,
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
         training_n_envs=1,  # UN environnement joue en serie (engine/episode_schedule.py)
     )

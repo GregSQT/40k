@@ -52,7 +52,7 @@ from tests._state_invariants import turn_state_invariants, unit_invariants
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 ARMAGEDDON_ROSTERS = (
-    PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent" / "rosters" / "500pts"
+    PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent_x1" / "rosters" / "500pts"
 )
 
 
@@ -533,7 +533,7 @@ def test_human_charge_flight_still_requires_an_explicit_declaration():
 # ─────────────────────────────────────────────────────────────────────────────
 
 _ARMAGEDDON_TRAINING_SCENARIO = (
-    "config/agents/ArmageddonAgent/scenarios/training/scenario_training_armageddon1.json"
+    "config/agents/ArmageddonAgent_x1/scenarios/training/scenario_training_armageddon1.json"
 )
 
 
@@ -559,7 +559,7 @@ def test_in_engine_armageddon_flying_units_fly_and_pay_for_it():
     env = W40KEngine(
         rewards_config="default",
         training_config_name="x1",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         active_agents=None,
         scenario_file=_ARMAGEDDON_TRAINING_SCENARIO,
         unit_registry=UnitRegistry(),

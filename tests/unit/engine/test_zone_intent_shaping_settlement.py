@@ -562,9 +562,9 @@ def test_the_shipped_config_declares_the_flag() -> None:
     from pathlib import Path
 
     path = Path(__file__).resolve().parents[3] / (
-        "config/agents/ArmageddonAgent/ArmageddonAgent_rewards_config.json"
+        "config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_rewards_config.json"
     )
-    shaping = json.loads(path.read_text(encoding="utf-8"))["ArmageddonAgent"]["zone_intent_shaping"]
+    shaping = json.loads(path.read_text(encoding="utf-8"))["ArmageddonAgent_x1"]["zone_intent_shaping"]
     assert isinstance(shaping.get("enabled"), bool), (
         f"{path.name} : zone_intent_shaping.enabled absent ou non booleen"
     )

@@ -85,8 +85,8 @@ def _load(units: List[Dict[str, Any]], *, player_2_faction: str = "ORKS"):
         path = Path(td) / "chantier02.json"
         path.write_text(json.dumps(scenario))
         eng = W40KEngine(
-            rewards_config="ArmageddonAgent", training_config_name="x1_debug",
-            controlled_agent="ArmageddonAgent", scenario_file=str(path),
+            rewards_config="ArmageddonAgent_x1", training_config_name="x1_debug",
+            controlled_agent="ArmageddonAgent_x1", scenario_file=str(path),
             unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
         )
         eng.reset(seed=0)

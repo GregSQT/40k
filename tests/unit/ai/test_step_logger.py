@@ -156,11 +156,11 @@ def test_log_episode_start_writes_scenario_path(tmp_path: Path) -> None:
             "cols": 15, "rows": 13, "hex_radius": 1.0,
             "margin": 0.0, "inches_to_subhex": 2.0,
         },
-        scenario_path="config/agents/ArmageddonAgent/scenarios/training/scenario_bot-02.json",
+        scenario_path="config/agents/ArmageddonAgent_x1/scenarios/training/scenario_bot-02.json",
     )
     content = _read_text(output_file)
     assert (
-        "Scenario file: config/agents/ArmageddonAgent/scenarios/training/scenario_bot-02.json"
+        "Scenario file: config/agents/ArmageddonAgent_x1/scenarios/training/scenario_bot-02.json"
         in content
     )
     assert "Scenario: Random from 3 scenarios" in content

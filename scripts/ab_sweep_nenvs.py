@@ -253,7 +253,7 @@ def main() -> int:
         "--tours", type=int, default=None,
         help="nombre de tours a executer (defaut : autant que l'echeance en autorise)",
     )
-    parser.add_argument("--agent", default="ArmageddonAgent")
+    parser.add_argument("--agent", default="ArmageddonAgent_x1")
     parser.add_argument("--scenario", default="bot")
     parser.add_argument("--training-config", default="x1")
     parser.add_argument("--journal", default=None, help="journal JSONL (defaut: a cote du script)")

@@ -88,7 +88,7 @@ Durée : **~8 min** (100 épisodes × 6 profils, mesuré le 2026-08-18). Un `--n
 
 🟢 **Livré le 2026-08-18** — détecteur de non-généralisation sur x1_long.
 
-4 scénarios `scenario_bench-01` à `scenario_bench-04` dans `config/agents/ArmageddonAgent/scenarios/holdout_regular/` (matchups SM/SM, SM/Ork, Ork/SM, Ork/Ork) pour les 3 bots de référence `reference_balanced / reference_denial / reference_reactive`. Ajoutés à `bot_eval_weights` (poids 0,0 — hors combined) et `bot_eval_randomness` (0,0 — déterministes).
+4 scénarios `scenario_bench-01` à `scenario_bench-04` dans `config/agents/ArmageddonAgent_x1/scenarios/holdout_regular/` (matchups SM/SM, SM/Ork, Ork/SM, Ork/Ork) pour les 3 bots de référence `reference_balanced / reference_denial / reference_reactive`. Ajoutés à `bot_eval_weights` (poids 0,0 — hors combined) et `bot_eval_randomness` (0,0 — déterministes).
 
 Seuil posé après mesure sur le modèle courant : `model_gating_min_benchmark_floor = 0.90` (scores mesurés : 0,99 / 1,00 / 1,00 → seuil = min − 0,09). `model_gating_enabled = true` sur x1_long uniquement.
 

@@ -116,7 +116,7 @@ def main() -> int:
     # en fin de campagne serait de largeur nulle — un echantillon unique presente comme un
     # resultat resserre. Le garde-fou "l'etendue enjambe 1.000" ne commence a exister qu'a 5.
     parser.add_argument("--paires", type=int, default=5)
-    parser.add_argument("--agent", default="ArmageddonAgent")
+    parser.add_argument("--agent", default="ArmageddonAgent_x1")
     parser.add_argument("--scenario", default="bot")
     parser.add_argument("--training-config", default="x1", help="phase de config d'entrainement")
     parser.add_argument("--timeout", type=float, default=None, help="delai par run, en secondes")

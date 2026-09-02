@@ -80,7 +80,7 @@ REFERENCE_MD5 = "794335b6979b9532f7ce7c83c59c950e"
 
 #: Chemin ABSOLU de l'archive de référence. Séparé de REFERENCE_MODEL pour être monkeypatchable
 #: dans les tests sans toucher au nom qui identifie le checkpoint dans les logs et justifications.
-_DEFAULT_MODEL = os.path.join(_PROJECT_ROOT, "ai", "models", "ArmageddonAgent", REFERENCE_MODEL)
+_DEFAULT_MODEL = os.path.join(_PROJECT_ROOT, "ai", "models", "ArmageddonAgent_x1", REFERENCE_MODEL)
 
 #: Config d'entraînement sur laquelle TOUTES les mesures du §12 sont faites.
 _TRAINING_CONFIG = "x1_long"
@@ -471,7 +471,7 @@ def _run_meta(
     fixe l'échelle à laquelle `w_crowd` se lit, donc il périme la campagne entière s'il bouge.
     """
     meta: Dict[str, Any] = {
-        "agent": "ArmageddonAgent",
+        "agent": "ArmageddonAgent_x1",
         "training_config": training_config,
         **model_fingerprint,
         "scenario_file": scenario_file,
@@ -549,7 +549,7 @@ def main() -> None:
         from shared.data_validation import require_key
 
         config = get_config_loader()
-        tc = config.load_agent_training_config("ArmageddonAgent", _TRAINING_CONFIG)
+        tc = config.load_agent_training_config("ArmageddonAgent_x1", _TRAINING_CONFIG)
 
         vec_norm_enabled = bool(tc.get("vec_normalize", {}).get("enabled", False))
         vec_eval_enabled = bool(tc.get("vec_normalize_eval", {}).get("enabled", False))
@@ -570,7 +570,7 @@ def main() -> None:
         # `"episodes": []` en sortant 0), coerce les valeurs en float, et vérifie que les poids
         # somment à 1.0. Relire `cb` ici privait CE script — et lui seul — de ces trois contrôles,
         # alors qu'il compare ses moyennes à celles produites par `ai/bot_evaluation.py`.
-        bot_eval_params = _load_bot_eval_params(config, "ArmageddonAgent", _TRAINING_CONFIG)
+        bot_eval_params = _load_bot_eval_params(config, "ArmageddonAgent_x1", _TRAINING_CONFIG)
         bot_weights: dict = bot_eval_params["weights"]
         bot_randomness: dict = bot_eval_params["randomness"]
         # `require_key` : `agent_seat_mode` décide de quel siège occupe le bot, et le défaut
@@ -582,9 +582,9 @@ def main() -> None:
         base_seed: int = int(tc["seed"])
         agent_seat_seed: Optional[int] = tc.get("agent_seat_seed", base_seed)
 
-        scenarios = get_scenario_list_for_phase(config, "ArmageddonAgent", _TRAINING_CONFIG, scenario_type="holdout")
+        scenarios = get_scenario_list_for_phase(config, "ArmageddonAgent_x1", _TRAINING_CONFIG, scenario_type="holdout")
         if not scenarios:
-            raise RuntimeError(f"Aucun scénario holdout trouvé pour ArmageddonAgent/{_TRAINING_CONFIG} — vérifier config/agents/ArmageddonAgent/scenarios/")
+            raise RuntimeError(f"Aucun scénario holdout trouvé pour ArmageddonAgent/{_TRAINING_CONFIG} — vérifier config/agents/ArmageddonAgent_x1/scenarios/")
         scenario_file = scenarios[0]
 
         for bot_name in bot_weights:
@@ -593,9 +593,9 @@ def main() -> None:
             unit_registry = UnitRegistry()
 
             base_env = W40KEngine(
-                rewards_config="ArmageddonAgent",
+                rewards_config="ArmageddonAgent_x1",
                 training_config_name=_TRAINING_CONFIG,
-                controlled_agent="ArmageddonAgent",
+                controlled_agent="ArmageddonAgent_x1",
                 active_agents=None,
                 scenario_file=scenario_file,
                 unit_registry=unit_registry,

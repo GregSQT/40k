@@ -63,9 +63,9 @@ def terrain(request, monkeypatch):
 
 def _make_env() -> W40KEngine:
     return W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=TEMPLATE,
         unit_registry=UnitRegistry(),
         quiet=True,

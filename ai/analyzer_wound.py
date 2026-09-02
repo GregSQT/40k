@@ -296,17 +296,18 @@ def expected_wound_threshold(
     # escouade menée par un Chaplain sortirait en « seuil de blessure faux » alors que le moteur
     # a raison — un faux positif systématique, le défaut que ce contrôle existe pour éviter.
     #
-    # Lu depuis le token `[LITANY OF HATE]` sur la ligne d'action, en miroir de `[OATH OF MOMENT]`
-    # lu sur le segment Wound. La vérification par datasheet échouait quand le ChaplainJumpPack
-    # était suivi sous son propre unit_id : `positions_by_model` du squad mené ne contenait pas
-    # ses modèles, et `unit_effect_in_force` retournait `False` systématiquement.
+    # Détection duale : datasheet d'abord (Chaplain directement dans l'escouade via
+    # positions_by_model), puis token `[LITANY OF HATE]` pour le ChaplainJumpPack attaché sous
+    # son propre unit_id (ses socles ne sont pas dans positions_by_model du squad mené, donc
+    # `unit_effect_in_force` retourne False pour lui).
     #
     # LE ROSTER EST INTERROGÉ D'ABORD (court-circuit) : aucune datasheet vue ne porte la capacité
-    # ⇒ le bonus vaut 0 sans examiner la ligne. Sans ce court-circuit, toute partie SANS Chaplain
-    # paierait le coût de la recherche du token même quand il est impossible de l'y trouver.
+    # ⇒ le bonus vaut 0 sans examiner ni l'état ni la ligne.
     litany_mag = 0
     if is_melee and config.rule_to_units.get("wound_roll_bonus_fight"):  # get allowed
-        litany_mag = int(LITANY_MARKER in action_desc)
+        from ai.analyzer_perfig import unit_effect_in_force
+        in_squad = unit_effect_in_force(state, config, attacker_unit_id, "wound_roll_bonus_fight")
+        litany_mag = 1 if in_squad or LITANY_MARKER in action_desc else 0
     cap_val = config.bonus_malus_cap
     total_bonus = oath_mag + litany_mag
     if cap_val and total_bonus > cap_val:

@@ -144,15 +144,20 @@ def test_fled_ally_no_longer_engages_target(tmp_path):
 
 # --- cas PILED IN ---
 # Miroir exact du cas FLED : l'allié (unité 2) est déployé avec [MODELS:] adjacent à la cible,
-# puis pile-in vers BRAWLER_AWAY (phase FIGHT). Les lignes PILED IN ne portent pas de [MODELS:],
-# donc positions_by_model reste à l'ancienne position (adjacent) sauf si on le purge après
-# _position_cache_set. Le tir au tour suivant sur la cible doit être un faux positif avant fix.
+# puis pile-in vers BRAWLER_PILE_IN (13 subhex de BE, dans le budget 3" = 15 subhex à x5).
+# Les lignes PILED IN ne portent pas de [MODELS:], donc positions_by_model reste à l'ancienne
+# position (adjacent) sauf si on le purge après _position_cache_set.
+# BRAWLER_PILE_IN doit être : ≤15 subhex de BE (move valide) ET >10 subhex de TARGET (sans engagement).
+# (100,79) → 13 subhex de BE (100,92) et 21 subhex de TARGET (100,100).
+BRAWLER_PILE_IN = (100, 79)
+BPI = f"({BRAWLER_PILE_IN[0]},{BRAWLER_PILE_IN[1]})"
+
 _UNIT2_PILED_IN = (
-    f"[10:00:02] E1 T1 P1 FIGHT : Unit 2{BA} PILED IN from {BE} to {BA} [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 FIGHT : Unit 2{BPI} PILED IN from {BE} to {BPI} [R:+0.0] [SUCCESS]\n"
 )
 
 _UNIT2_CONSOLIDATED = (
-    f"[10:00:02] E1 T1 P1 FIGHT : Unit 2{BA} CONSOLIDATED from {BE} to {BA} [R:+0.0] [SUCCESS]\n"
+    f"[10:00:02] E1 T1 P1 FIGHT : Unit 2{BPI} CONSOLIDATED from {BE} to {BPI} [R:+0.0] [SUCCESS]\n"
 )
 
 _SHOT_T2 = (

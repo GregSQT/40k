@@ -36,7 +36,7 @@ import pytest
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 SCENARIO = os.path.join(PROJECT_ROOT, "config/board/44x60x5/scenario/scenario_fixed_brawl_sm_orks.json")
 AGENT_CONFIG = os.path.join(
-    PROJECT_ROOT, "config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json"
+    PROJECT_ROOT, "config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json"
 )
 
 
@@ -50,9 +50,9 @@ def _make_env(start: float, end: float, total_episodes: int, freeze: float = 1.0
     from engine.w40k_core import W40KEngine
 
     env = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),
         quiet=True,
@@ -353,9 +353,9 @@ def test_runtime_n_envs_overrides_the_declared_profile_value() -> None:
     from engine.w40k_core import W40KEngine
 
     env = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),
         quiet=True,
@@ -389,9 +389,9 @@ def test_unresolved_n_envs_refuses_to_ramp() -> None:
     from engine.w40k_core import W40KEngine
 
     env = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),
         quiet=True,

@@ -213,7 +213,7 @@ Distinct du MCTS adversaire d'entraînement ([infra.md#mcts](infra.md#mcts)).
 **Schedule P0→P10 + exploiters : CODE ET TESTS LIVRÉS le 2026-08-22.** Les runs restent à
 jouer (~200 h pour P1→P10, ~60 h pour trois exploiters), un par commande `--etape`.
 
-Livré : `config/agents/ArmageddonAgent/curriculum.json` (14 étapes P0..P10 + E1..E3),
+Livré : `config/agents/ArmageddonAgent_x1/curriculum.json` (14 étapes P0..P10 + E1..E3),
 `ai/curriculum.py`, `--etape` dans `ai/train.py`, `opponent_mix.pool` (liste pondérée
 d'adversaires figés) à la place de `snapshot_model_path`.
 

@@ -206,7 +206,7 @@ def _get_anchor_enforced() -> frozenset[str]:
     """Calcul paresseux de l'ensemble des basenames soumis à la passe 4."""
     return DEFAULT_DOC_NAMES | _impl_doc_basenames()
 
-AGENT_CONFIG = ROOT / "config" / "agents" / "ArmageddonAgent" / "ArmageddonAgent_training_config.json"
+AGENT_CONFIG = ROOT / "config" / "agents" / "ArmageddonAgent_x1" / "ArmageddonAgent_x1_training_config.json"
 COUVERTURE = DOCS / "analyzer_couverture.md"
 
 #: La RACINE de l'atteignabilité (passe 6). `ROADMAP_INDEX.md` se déclare source unique de l'ordre
@@ -422,7 +422,7 @@ def resolve(name: str, doc_dir: pathlib.Path) -> pathlib.Path | None:
             return candidate
     # Un nom NU renvoie couramment à un document rangé dans un sous-dossier (`tranches_et_ruptures.md`),
     # à une référence vivante (`verticalite.md`) ou à une configuration d'agent
-    # (`ArmageddonAgent_training_config.json`). Ces arbres sont petits : on les parcourt plutôt
+    # (`ArmageddonAgent_x1_training_config.json`). Ces arbres sont petits : on les parcourt plutôt
     # que d'énumérer à la main des chemins qui bougeront.
     for tree in (DOCS, ROOT / "Documentation" / "Reference", ROOT / "config"):
         found = next(tree.rglob(name), None)

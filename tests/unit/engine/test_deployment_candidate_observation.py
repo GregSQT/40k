@@ -74,8 +74,8 @@ def _load():
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent", scenario_file=str(SCENARIO),
+        rewards_config="ArmageddonAgent_x1", training_config_name="x1_debug",
+        controlled_agent="ArmageddonAgent_x1", scenario_file=str(SCENARIO),
         unit_registry=UnitRegistry(), quiet=True, gym_training_mode=True,
     )
     # Déploiement ACTIF garanti. Lu par épisode → doit précéder le `reset`. Le scénario, la

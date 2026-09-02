@@ -49,7 +49,7 @@ def _tracker(tmp_path) -> Tuple[Any, _StubWriter]:
     from ai.metrics_tracker import W40KMetricsTracker
 
     tracker = W40KMetricsTracker(
-        "ArmageddonAgent", str(tmp_path), perf_window=10, perf_window_fast=5,
+        "ArmageddonAgent_x1", str(tmp_path), perf_window=10, perf_window_fast=5,
         initial_episode_count=0,
     )
     writer = _StubWriter()

@@ -631,7 +631,7 @@ def _recording_tracker(tmp_path: Any) -> Tuple[W40KMetricsTracker, _RecordingWri
     aussi le doublon reactif ``_<fast>ep``, donc chaque tag n'apparait qu'une fois.
     """
     tracker = W40KMetricsTracker(
-        "ArmageddonAgent", log_dir=str(tmp_path), show_banner=False,
+        "ArmageddonAgent_x1", log_dir=str(tmp_path), show_banner=False,
         perf_window=1, perf_window_fast=1,
     )
     recording = _RecordingWriter()

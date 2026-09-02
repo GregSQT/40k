@@ -1337,8 +1337,8 @@ def test_le_cycle_pvp_complet_s_arrete_puis_repart(tmp_path) -> None:
 
     scenario = "config/board/44x60x5/scenario/scenario_attached_unit_test.json"
     engine = W40KEngine(
-        config=None, rewards_config="ArmageddonAgent", training_config_name="x1",
-        controlled_agent="ArmageddonAgent", active_agents=["ArmageddonAgent"],
+        config=None, rewards_config="ArmageddonAgent_x1", training_config_name="x1",
+        controlled_agent="ArmageddonAgent_x1", active_agents=["ArmageddonAgent_x1"],
         scenario_file=scenario, unit_registry=UnitRegistry(),
         quiet=True, gym_training_mode=False, training_n_envs=1,
     )
@@ -1475,8 +1475,8 @@ def test_verrou_l_arret_de_08_04_est_opposable_a_toute_autre_action(tmp_path) ->
 
     scenario = "config/board/44x60x5/scenario/scenario_attached_unit_test.json"
     engine = W40KEngine(
-        config=None, rewards_config="ArmageddonAgent", training_config_name="x1",
-        controlled_agent="ArmageddonAgent", active_agents=["ArmageddonAgent"],
+        config=None, rewards_config="ArmageddonAgent_x1", training_config_name="x1",
+        controlled_agent="ArmageddonAgent_x1", active_agents=["ArmageddonAgent_x1"],
         scenario_file=scenario, unit_registry=UnitRegistry(),
         quiet=True, gym_training_mode=False, training_n_envs=1,
     )

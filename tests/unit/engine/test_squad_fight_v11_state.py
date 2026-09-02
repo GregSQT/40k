@@ -50,7 +50,7 @@ def _engine_in_fight_phase(scenario_file: str, seed: int = 1):
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x1_debug", controlled_agent="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1", training_config_name="x1_debug", controlled_agent="ArmageddonAgent_x1",
         scenario_file=scenario_file, unit_registry=UnitRegistry(), quiet=True,
         gym_training_mode=True,
     )
@@ -184,7 +184,7 @@ def test_squad_fight_rejected_when_machine_not_at_fight_step(melee_scenario_file
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent", training_config_name="x1_debug", controlled_agent="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1", training_config_name="x1_debug", controlled_agent="ArmageddonAgent_x1",
         scenario_file=melee_scenario_file, unit_registry=UnitRegistry(), quiet=True,
         gym_training_mode=True,
     )

@@ -48,7 +48,7 @@ def test_evaluate_against_bots_temp_zip_oserror_propagates(tmp_path) -> None:
             evaluate_against_bots(
                 model=fake_model,
                 training_config_name="x1",
-                rewards_config_name="ArmageddonAgent",
+                rewards_config_name="ArmageddonAgent_x1",
                 n_episodes=1,
-                controlled_agent="ArmageddonAgent",
+                controlled_agent="ArmageddonAgent_x1",
             )

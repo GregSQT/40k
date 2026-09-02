@@ -46,9 +46,9 @@ def test_the_engine_publishes_its_truncation_diagnostic() -> None:
     from engine.w40k_core import W40KEngine
 
     eng = W40KEngine(
-        rewards_config="ArmageddonAgent",
+        rewards_config="ArmageddonAgent_x1",
         training_config_name="x1_debug",
-        controlled_agent="ArmageddonAgent",
+        controlled_agent="ArmageddonAgent_x1",
         scenario_file=SCENARIO,
         unit_registry=UnitRegistry(),
         quiet=True,
@@ -108,7 +108,7 @@ def _tracker(tmp_path, initial: int = 0):
     from ai.metrics_tracker import W40KMetricsTracker
 
     tracker = W40KMetricsTracker(
-        "ArmageddonAgent", str(tmp_path), perf_window=10, perf_window_fast=5,
+        "ArmageddonAgent_x1", str(tmp_path), perf_window=10, perf_window_fast=5,
         initial_episode_count=initial,
     )
     tracker.writer = _StubWriter()  # type: ignore[assignment]
@@ -443,8 +443,8 @@ def test_one_gym_step_is_at_least_one_engine_step() -> None:
     env = _create_eval_env(
         bot_name="greedy", bot_type="greedy", randomness_config={"greedy": 0.15},
         scenario_file=SCENARIO,
-        training_config_name="x1_debug", rewards_config_name="ArmageddonAgent",
-        controlled_agent="ArmageddonAgent", base_agent_key="ArmageddonAgent",
+        training_config_name="x1_debug", rewards_config_name="ArmageddonAgent_x1",
+        controlled_agent="ArmageddonAgent_x1", base_agent_key="ArmageddonAgent_x1",
         debug_mode=False, agent_seat_mode="p1", agent_seat_seed=0,
     )
     rng = np.random.default_rng(0)
@@ -532,7 +532,7 @@ def test_the_journal_creates_its_own_directory(tmp_path) -> None:
     """
     from ai.truncation_log import TruncationLog
 
-    absent = tmp_path / "tensorboard" / "x1_ArmageddonAgent" / "ArmageddonAgent"
+    absent = tmp_path / "tensorboard" / "x1_ArmageddonAgent_x1" / "ArmageddonAgent_x1"
     assert not absent.exists()
 
     log = TruncationLog(str(absent))
@@ -773,7 +773,7 @@ def test_the_eval_path_routes_its_truncations_to_the_tracker(tmp_path, monkeypat
     cb.metrics_tracker = tracker
     cb.model = cast(Any, object())
     cb.training_config_name = "x1_debug"
-    cb.rewards_config_name = "ArmageddonAgent"
+    cb.rewards_config_name = "ArmageddonAgent_x1"
     cb.n_eval_episodes = 1
     cb.eval_deterministic = True
     cb.show_eval_progress = False
@@ -844,7 +844,7 @@ def test_new_and_append_are_refused_together() -> None:
     sur le VRAI point d'entrée : c'est la ligne de commande qui est refusée, pas une fonction.
     """
     proc = subprocess.run(
-        [sys.executable, "ai/train.py", "--agent", "ArmageddonAgent",
+        [sys.executable, "ai/train.py", "--agent", "ArmageddonAgent_x1",
          "--training-config", "x1_debug", "--new", "--append"],
         cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=300,
     )
