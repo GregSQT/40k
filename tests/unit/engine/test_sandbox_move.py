@@ -119,28 +119,17 @@ class TestSandboxFreeMoveDestinations:
         ]
 
     def _gs_for_pool(self, terrain_areas: list) -> dict:
-        from tests._state_invariants import turn_state_invariants
-        from engine.phase_handlers.shared_utils import build_units_cache, build_enemy_adjacent_hexes
-        units = [_unit("1", 1, 0, 0)]
-        gs: dict = {
-            **turn_state_invariants(),
-            "config": _cfg(),
-            "board_cols": 5,
-            "board_rows": 5,
-            "current_player": 1,
-            "phase": "move",
-            "wall_hexes": set(),
-            "terrain_areas": terrain_areas,
-            "units": units,
-            "unit_by_id": {"1": units[0]},
-            "move_activation_pool": ["1"],
-            "_unit_move_version": 0,
-            "inches_to_subhex": 1,
-            "sandbox_free_move": True,
-        }
-        build_units_cache(gs)
-        build_enemy_adjacent_hexes(gs, 1)
+        gs = _make_gs([_unit("1", 1, 0, 0)], sandbox=True)
+        gs["board_cols"] = 5
+        gs["board_rows"] = 5
+        gs["terrain_areas"] = terrain_areas
         return gs
+
+    def _level1_set(self) -> set:
+        gs = self._gs_for_pool(self._terrain_with_floor())
+        model_id = next(iter(gs["models_cache"]))
+        result = mh.movement_build_model_destinations_pool(gs, model_id)
+        return {(d[0], d[1]) for d in result["destinations"] if d[2] == 1}
 
     def test_all_ground_cells_present(self):
         """Toutes les 25 cellules au niveau 0 doivent être dans le pool."""
@@ -152,20 +141,13 @@ class TestSandboxFreeMoveDestinations:
 
     def test_floor_cells_present_at_level1(self):
         """Les cellules (2,2) et (3,2) au niveau 1 doivent être dans le pool."""
-        gs = self._gs_for_pool(self._terrain_with_floor())
-        model_id = next(iter(gs["models_cache"]))
-        result = mh.movement_build_model_destinations_pool(gs, model_id)
-        level1 = {(d[0], d[1]) for d in result["destinations"] if d[2] == 1}
+        level1 = self._level1_set()
         assert (2, 2) in level1, "cellule (2,2) level 1 absente du pool sandbox"
         assert (3, 2) in level1, "cellule (3,2) level 1 absente du pool sandbox"
 
     def test_non_floor_cell_absent_at_level1(self):
         """Une cellule sans plancher (0,0) ne doit pas apparaître au niveau 1."""
-        gs = self._gs_for_pool(self._terrain_with_floor())
-        model_id = next(iter(gs["models_cache"]))
-        result = mh.movement_build_model_destinations_pool(gs, model_id)
-        level1 = {(d[0], d[1]) for d in result["destinations"] if d[2] == 1}
-        assert (0, 0) not in level1, "cellule (0,0) sans plancher ne doit pas apparaître au niveau 1"
+        assert (0, 0) not in self._level1_set(), "cellule (0,0) sans plancher ne doit pas apparaître au niveau 1"
 
     def test_no_floor_terrain_yields_only_level0(self):
         """Sans terrain à étage, le pool ne contient que le niveau 0."""

@@ -3850,15 +3850,16 @@ def movement_build_model_destinations_pool(
         board_cols = require_key(game_state, "board_cols")
         board_rows = require_key(game_state, "board_rows")
         terrain_areas = game_state.get("terrain_areas", [])
-        destinations: List[List[int]] = [
-            [c, r, 0] for c in range(board_cols) for r in range(board_rows)
-        ]
         from engine.terrain_utils import floor_hexes_at_level, floor_levels_present
-        for lv in floor_levels_present(terrain_areas):
-            for c, r in floor_hexes_at_level(terrain_areas, lv):
-                destinations.append([c, r, lv])
         return {
-            "destinations": destinations,
+            "destinations": (
+                [[c, r, 0] for c in range(board_cols) for r in range(board_rows)]
+                + [
+                    [c, r, lv]
+                    for lv in floor_levels_present(terrain_areas)
+                    for c, r in floor_hexes_at_level(terrain_areas, lv)
+                ]
+            ),
             "footprint_mask_loops": [],
         }
 
