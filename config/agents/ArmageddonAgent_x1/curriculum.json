@@ -69,7 +69,7 @@
         "model_params": {
           "n_epochs": 2,
           "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.2, "end": 0.01, "decay_fraction": 0.65}
+          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
         }
       }
     },
