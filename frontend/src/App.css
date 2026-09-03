@@ -2206,6 +2206,17 @@ body {
   }
 }
 
+.ai-thinking-spinner {
+  animation: ai-thinking-spin 1s steps(8) infinite;
+  will-change: transform;
+}
+
+@keyframes ai-thinking-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Error States */
 .error {
   background: rgba(255, 68, 68, 0.1);

@@ -3946,7 +3946,7 @@ export const BoardWithAPI: React.FC = () => {
               </span>
               {isCurrentPlayerAI && isAIProcessingRef.current && (
                 <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-300"></div>
+                  <div className="ai-thinking-spinner rounded-full h-4 w-4 border-b-2 border-purple-300"></div>
                   <span className="text-purple-200 text-sm">AI thinking...</span>
                 </>
               )}
