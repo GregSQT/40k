@@ -49,6 +49,10 @@ def test_forkserver_child_reads_json_total_episodes() -> None:
     proc = ctx.Process(target=_read_total_episodes_in_child, args=(queue,))
     proc.start()
     proc.join(timeout=120)
+    if proc.exitcode is None:
+        proc.kill()
+        proc.join()
+        pytest.fail("le worker n'a pas termine dans le delai imparti (120s)")
     assert proc.exitcode == 0, "le worker n'a pas pu lire la config"
     assert queue.get(timeout=10) == X1_LONG_JSON_TOTAL_EPISODES, (
         "le worker ne lit pas la valeur JSON attendue : le profil x1_long a change, "
