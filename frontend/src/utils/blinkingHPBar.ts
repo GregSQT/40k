@@ -427,11 +427,12 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   if (existingContainer) {
     if (existingContainer.cleanupBlink) {
       existingContainer.cleanupBlink();
+    } else {
+      if (existingContainer.parent) {
+        existingContainer.parent.removeChild(existingContainer);
+      }
+      existingContainer.destroy({ children: true });
     }
-    if (existingContainer.parent) {
-      existingContainer.parent.removeChild(existingContainer);
-    }
-    existingContainer.destroy({ children: true });
   }
 
   // Create container
