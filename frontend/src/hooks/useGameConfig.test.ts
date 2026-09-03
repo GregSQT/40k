@@ -6,35 +6,9 @@
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setTerrainList, type TerrainEntry } from "../utils/terrainSelection";
+import { setTerrainList } from "../utils/terrainSelection";
+import { TEST_TERRAIN_LIST } from "./__fixtures__/terrainFixtures";
 import { useGameConfig } from "./useGameConfig";
-
-/** Liste servie par /api/config/terrain-list. Le hook l'ATTEND avant de demander le plateau
- *  (`if (!terrainList) return;`) et `resolveSelectedTerrain` lit la liste GLOBALE : sans les deux,
- *  aucune requête ne part et tout le fichier échoue sur un plateau resté nul. */
-const TEST_TERRAIN_LIST: TerrainEntry[] = [
-  {
-    id: "mc1",
-    label: "Terrain 1",
-    preview_image: "/icons/Terrain/terrain-mc1.jpg",
-    modes: ["pvp", "pvp_test", "pve", "pve_test"],
-    default_for: ["pve"],
-  },
-  {
-    id: "mc2",
-    label: "Terrain 2",
-    preview_image: "/icons/Terrain/terrain-mc2.jpg",
-    modes: ["pvp", "pvp_test", "pve", "pve_test"],
-    default_for: ["pvp", "pvp_test", "pve_test"],
-  },
-  {
-    id: "pfm2",
-    label: "Purge the Foe mirror 2",
-    preview_image: "/icons/Terrain/terrain-pfm2.jpg",
-    modes: ["pvp", "pvp_test", "pve"],
-    default_for: [],
-  },
-];
 
 beforeEach(() => {
   setTerrainList(TEST_TERRAIN_LIST);

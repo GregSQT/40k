@@ -28,6 +28,7 @@ import {
   selectReserveUnits,
 } from "../utils/strategicReservesUi";
 import {
+  getTerrainList,
   resolveSelectedTerrain,
   setTerrainList,
   STORAGE_KEY as TERRAIN_STORAGE_KEY,
@@ -506,9 +507,8 @@ export const BoardWithAPI: React.FC = () => {
         ) {
           throw new Error("terrain-list: réponse invalide");
         }
-        const list = (data as { terrains: TerrainEntry[] }).terrains;
-        setTerrainList(list);
-        setTerrainListState(list);
+        setTerrainList((data as { terrains: TerrainEntry[] }).terrains);
+        setTerrainListState([...getTerrainList()]);
       })
       .catch((err: unknown) => {
         setTerrainListError(err instanceof Error ? err.message : "terrain-list: erreur inconnue");
