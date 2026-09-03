@@ -486,8 +486,38 @@ export const BoardWithAPI: React.FC = () => {
   const [currentLevel, setCurrentLevel] = useState(0);
   const currentLevelRef = useRef(0);
   currentLevelRef.current = currentLevel;
+
+  // Terrain list loaded from terrain_list.json via API ; gate useGameConfig until available.
+  // Déclarée AVANT `useEngineAPI` : le démarrage de partie l'attend lui aussi, pour envoyer le
+  // terrain choisi au serveur (cf. UseEngineAPIOptions.terrainList).
+  const [terrainList, setTerrainListState] = useState<TerrainEntry[] | undefined>(undefined);
+  const [terrainListError, setTerrainListError] = useState<string | null>(null);
+  useEffect(() => {
+    apiFetch("/api/config/terrain-list")
+      .then((r) => {
+        if (!r.ok) throw new Error(`terrain-list: HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data: unknown) => {
+        if (
+          typeof data !== "object" ||
+          data === null ||
+          !Array.isArray((data as { terrains?: unknown }).terrains)
+        ) {
+          throw new Error("terrain-list: réponse invalide");
+        }
+        const list = (data as { terrains: TerrainEntry[] }).terrains;
+        setTerrainList(list);
+        setTerrainListState(list);
+      })
+      .catch((err: unknown) => {
+        setTerrainListError(err instanceof Error ? err.message : "terrain-list: erreur inconnue");
+      });
+  }, []);
+
   const apiProps = useEngineAPI({
     currentLevelRef,
+    terrainList,
   });
   const gameLog = useGameLog(apiProps.gameState?.currentTurn ?? 1);
 
@@ -609,32 +639,6 @@ export const BoardWithAPI: React.FC = () => {
   const capitalizeFirst = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   const p1DisplayName = capitalizeFirst(apiProps.gameState?.player_names?.["1"] ?? "Player 1");
   const p2DisplayName = capitalizeFirst(apiProps.gameState?.player_names?.["2"] ?? "Player 2");
-
-  // Terrain list loaded from terrain_list.json via API ; gate useGameConfig until available.
-  const [terrainList, setTerrainListState] = useState<TerrainEntry[] | undefined>(undefined);
-  const [terrainListError, setTerrainListError] = useState<string | null>(null);
-  useEffect(() => {
-    apiFetch("/api/config/terrain-list")
-      .then((r) => {
-        if (!r.ok) throw new Error(`terrain-list: HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((data: unknown) => {
-        if (
-          typeof data !== "object" ||
-          data === null ||
-          !Array.isArray((data as { terrains?: unknown }).terrains)
-        ) {
-          throw new Error("terrain-list: réponse invalide");
-        }
-        const list = (data as { terrains: TerrainEntry[] }).terrains;
-        setTerrainList(list);
-        setTerrainListState(list);
-      })
-      .catch((err: unknown) => {
-        setTerrainListError(err instanceof Error ? err.message : "terrain-list: erreur inconnue");
-      });
-  }, []);
 
   // Get board configuration for line of sight calculations
   const { gameConfig, boardConfig } = useGameConfig({ terrainList });
@@ -1882,25 +1886,9 @@ export const BoardWithAPI: React.FC = () => {
   // PvP, où le panneau lui-même est démonté.
   useUnitIllustrationPreload(apiProps.gameState?.units ?? []);
 
-  if (apiProps.loading) {
-    return (
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          height: "600px",
-          background: "#1f2937",
-          borderRadius: "8px",
-          color: "white",
-          fontSize: "18px",
-        }}
-      >
-        Starting W40K Engine Game...
-      </div>
-    );
-  }
-
+  // AVANT le voile de chargement : la partie ATTEND la liste des terrains, donc un fetch en échec
+  // laisse `apiProps.loading` à true pour toujours. Testé après, ce message était inatteignable et
+  // l'écran restait sur « Starting W40K Engine Game... » sans jamais dire pourquoi.
   if (terrainListError) {
     return (
       <div
@@ -1917,6 +1905,25 @@ export const BoardWithAPI: React.FC = () => {
         }}
       >
         <div>Impossible de charger la liste des terrains : {terrainListError}</div>
+      </div>
+    );
+  }
+
+  if (apiProps.loading) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          height: "600px",
+          background: "#1f2937",
+          borderRadius: "8px",
+          color: "white",
+          fontSize: "18px",
+        }}
+      >
+        Starting W40K Engine Game...
       </div>
     );
   }

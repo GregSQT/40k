@@ -40,7 +40,11 @@ import {
   getSelectedRangedWeaponAgainstTarget,
 } from "../utils/probabilityCalculator";
 import { selectReserveUnits, shouldWarnReservesLastRound } from "../utils/strategicReservesUi";
-import { resolveSelectedTerrain, terrainsForMode } from "../utils/terrainSelection";
+import {
+  resolveSelectedTerrain,
+  type TerrainEntry,
+  terrainsForMode,
+} from "../utils/terrainSelection";
 
 // Get max_turns from config instead of hardcoded fallback
 const getMaxTurnsFromConfig = async (): Promise<number> => {
@@ -517,6 +521,13 @@ export interface UseEngineAPIOptions {
   /** Étage courant (multi-niveaux) : niveau de destination pour le déploiement/move à l'étage.
    *  Ref (pas valeur) pour rester stable dans les callbacks. 0 = sol. */
   currentLevelRef?: MutableRefObject<number>;
+  /** Liste des terrains (terrain_list.json via API). Le démarrage de partie l'ATTEND, comme
+   *  `useGameConfig` : `terrainsForMode` / `resolveSelectedTerrain` lisent la liste globale de
+   *  `terrainSelection`, vide tant que le fetch n'a pas répondu. L'effet de démarrage partant au
+   *  montage, il gagnait toujours cette course : `terrain_ref` ne partait JAMAIS, le serveur
+   *  restait sur le terrain par défaut du mode pendant que le plateau dessinait le terrain choisi
+   *  — murs joués et murs affichés différents. `undefined` = pas encore chargée. */
+  terrainList?: readonly TerrainEntry[];
 }
 
 /** Props blink passées au plateau : même forme en chargement et en jeu pour stabiliser l’inférence d’union (BoardWithAPI). */
@@ -544,6 +555,7 @@ const deriveShootTargets = (
 
 export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const currentLevelRef = options?.currentLevelRef;
+  const terrainList = options?.terrainList;
   const [gameState, setGameState] = useState<APIGameState | null>(null);
   const [gameSessionKey, setGameSessionKey] = useState(0);
   const [endlessDutyState, setEndlessDutyState] = useState<EndlessDutyState | null>(null);
@@ -1140,6 +1152,12 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     if (gameInitialized.current) {
       return;
     }
+    // La liste des terrains conditionne le terrain ENVOYÉ au serveur (`terrain_ref` plus bas) :
+    // démarrer avant qu'elle soit là revient à démarrer sans terrain choisi. On attend, comme
+    // `useGameConfig`. Le drapeau n'est pas encore posé : l'effet rejoue à l'arrivée de la liste.
+    if (terrainList === undefined) {
+      return;
+    }
 
     const startGame = async () => {
       try {
@@ -1235,7 +1253,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     };
 
     startGame();
-  }, [clearReservesLastRoundMemo]);
+  }, [clearReservesLastRoundMemo, terrainList]);
 
   /** Relance une partie avec le scénario donné. options.preserveP1PositionsFrom : état de jeu à partir duquel garder les positions des unités P1. skipLoading : ne pas afficher l'écran de chargement. */
   const startGameWithScenario = useCallback(
