@@ -4740,7 +4740,7 @@ def _apply_stage_hp_overrides(cfg: Dict[str, Any], hp_overrides: Dict[str, Any])
                     )
 
 
-def _pin_deployment_ramp_for_warm_start(cfg: Dict[str, Any]) -> Optional[Tuple[float, float]]:
+def _pin_deployment_ramp_for_warm_start(cfg: Dict[str, Any]) -> None:
     """Fige la rampe de deploiement a sa valeur terminale, pour une etape REPRISE A CHAUD.
 
     `active_ratio_start -> active_ratio_end` est exprimee en FRACTION de la duree du run
@@ -4766,19 +4766,15 @@ def _pin_deployment_ramp_for_warm_start(cfg: Dict[str, Any]) -> Optional[Tuple[f
     Un demarrage a froid (`init: new`) n'est PAS concerne : sa rampe est legitime, elle existe pour
     qu'une politique naive ne soit pas jetee d'emblee dans le deploiement complet.
 
-    Rend `(avant, apres)` quand la valeur a change, `None` sinon. L'ABSENCE du bloc n'est pas
-    traitee ici : `W40KEngine._configure_deployment_mode_for_episode` la refuse deja par
-    `require_key`, avec le contexte utile ; la dupliquer ici ferait diverger deux messages.
+    L'ABSENCE du bloc n'est pas traitee ici : `W40KEngine._configure_deployment_mode_for_episode`
+    la refuse deja par `require_key`, avec le contexte utile ; la dupliquer ici ferait diverger
+    deux messages.
     """
     schedule = cfg.get("deployment_mode_schedule")  # get allowed: le moteur est l'autorite
     if not isinstance(schedule, dict):
-        return None
-    start = float(require_key(schedule, "active_ratio_start"))
+        return
     end = float(require_key(schedule, "active_ratio_end"))
-    if start == end:
-        return None
     schedule["active_ratio_start"] = end
-    return start, end
 
 
 def parent_deploy_active_ratio_start(training_config: Dict[str, Any]) -> float:
@@ -4907,16 +4903,18 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
     warm_start = source_stage is not None
     # Valeurs LUES AVANT l'installation du decorateur : apres, toute lecture rend deja la rampe
     # figee et la ligne de log ne pourrait plus dire de quoi on part.
-    _ramp_before = (
-        _pin_deployment_ramp_for_warm_start(
-            config.load_agent_training_config(args.agent, args.training_config)
-        )
-        if warm_start
-        else None
-    )
+    _ramp_log: Optional[Tuple[float, float]] = None
+    if warm_start:
+        _tmp = config.load_agent_training_config(args.agent, args.training_config)
+        _sched = _tmp.get("deployment_mode_schedule")
+        if isinstance(_sched, dict):
+            _before = float(require_key(_sched, "active_ratio_start"))
+            _after = float(require_key(_sched, "active_ratio_end"))
+            if _before != _after:
+                _ramp_log = (_before, _after)
     _install_stage_config_overrides(config, args.agent, opponent_mix, hp_overrides, warm_start)
-    if _ramp_before is not None:
-        _before, _after = _ramp_before
+    if _ramp_log is not None:
+        _before, _after = _ramp_log
         print(
             f"🎓 Etape {args.etape} — reprise a chaud : rampe de deploiement figee a "
             f"{_after:.2f} (au lieu de repartir de {_before:.2f}), le modele repris a deja "

@@ -90,15 +90,14 @@ class _StubConfig:
 
 def test_warm_start_pins_start_on_end():
     cfg = _cfg(0.3, 0.9)
-    changed = _pin_deployment_ramp_for_warm_start(cfg)
-    assert changed == (0.3, 0.9)
+    _pin_deployment_ramp_for_warm_start(cfg)
     assert cfg["deployment_mode_schedule"]["active_ratio_start"] == 0.9
     assert cfg["deployment_mode_schedule"]["active_ratio_end"] == 0.9
 
 
 def test_already_constant_ramp_is_left_alone():
     cfg = _cfg(0.9, 0.9)
-    assert _pin_deployment_ramp_for_warm_start(cfg) is None
+    _pin_deployment_ramp_for_warm_start(cfg)
     assert cfg["deployment_mode_schedule"]["active_ratio_start"] == 0.9
 
 
@@ -106,7 +105,7 @@ def test_absent_block_is_left_to_the_engine():
     # Le moteur refuse deja l'absence par require_key, avec le contexte utile : dupliquer le
     # refus ici ferait diverger deux messages pour une meme faute.
     cfg = {"total_episodes": 200000}
-    assert _pin_deployment_ramp_for_warm_start(cfg) is None
+    _pin_deployment_ramp_for_warm_start(cfg)  # ne leve pas
 
 
 def test_missing_ratio_key_raises():
