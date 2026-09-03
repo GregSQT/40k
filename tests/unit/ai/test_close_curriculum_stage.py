@@ -163,6 +163,25 @@ def test_gate_accepte_renvoie_exit_0_et_ecrit_zip_et_journal(tmp_path, monkeypat
     assert entries[-1]["scores_vs_bots"] == {"random": 0.80}
 
 
+def test_gate_accepte_episode_count_total_absent_lève(tmp_path, monkeypatch):
+    """episode_count_total absent de run_info → ConfigurationError, pas de skip silencieux.
+
+    Rouge sans le require_key : save_run_state sautée silencieusement.
+    Vert avec le require_key : lève avant toute écriture.
+    """
+    from shared.data_validation import ConfigurationError
+
+    canonical, args, config, curriculum, stage, run_info = _make_context(tmp_path)
+    del run_info["episode_count_total"]
+
+    log_path = _patch_common(monkeypatch, tmp_path, canonical, score=0.65)
+    monkeypatch.setattr(train_mod, "copy_tensorboard_run", lambda *_a: "/fake/tb")
+
+    import pytest
+    with pytest.raises(ConfigurationError, match="episode_count_total"):
+        train_mod._close_curriculum_stage(args, config, curriculum, stage, run_info)
+
+
 def test_gate_accepte_run_state_reflète_episodes_entraînes(tmp_path, monkeypatch):
     """Gate acceptée : run_state de l'étape promue porte episode_count_total du run_info.
 
