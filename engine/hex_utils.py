@@ -349,6 +349,25 @@ def hex_line_iter(
     premier hex bloquant (LoS) ne paient plus la construction de la ligne entière — mesuré : 52 % des
     cellules construites n'étaient jamais examinées. Séquence, ordre et déduplication IDENTIQUES à
     :func:`hex_line`, qui n'est plus qu'un ``list()`` de ce générateur (source de vérité unique).
+
+    **Biais de départage des égalités exactes (invariant à ne pas corriger)**
+
+    Les coordonnées cube de départ sont décalées de ``(+1e-6, +1e-6, -2e-6)`` et celles d'arrivée
+    identiquement, de sorte que la somme reste nulle (contrainte cube x+y+z=0 conservée). Ce nudge
+    constant rompt les égalités *dz == dy* qui surviennent sur les **segments horizontaux** (row
+    constant) : sur ces lignes, les colonnes de parité alternante atterrissent systématiquement sur la
+    rangée ``row`` ou ``row - 1`` selon la parité de la colonne.
+
+    Conséquence pour les auteurs de terrain : un mur déclaré sur ``row = R`` bloque la LoS sur
+    ``row = R - 1`` pour les colonnes de parité opposée à l'extrémité. En pratique, la ligne
+    bloquante effective se situe **une demi-case au-dessus** de la ligne telle qu'écrite.
+
+    Exemple vérifié : ``[[132,123],[126,123]]`` et ``[[88,123],[108,123]]`` rasterisent en rangées
+    alternant entre 123 et 122 selon la parité de colonne, dans les deux sens de parcours.
+
+    Ce biais est **partagé bit-à-bit** par :func:`hex_line_iter_t` (LoS 3D plancher-occulteur) et
+    par la version vectorisée ``batch_hex_line_steps`` : ne jamais modifier le nudge sans propager la
+    modification aux deux miroirs ET re-valider que les résultats restent identiques.
     """
     if col1 == col2 and row1 == row2:
         yield (col1, row1)

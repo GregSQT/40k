@@ -133,6 +133,14 @@ Implémentations : `def hex_distance` et `def offset_to_cube` / `def cube_to_off
 - objectifs : `def expand_objectives_to_hex_list` et les `_objective_*_hexes` (les sommets de polygone sont des **indices de cellule**, projetés par `def _hex_projected` avant test d'appartenance) ;
 - dilatations : `def dilate_hex_set`, `def dilate_hex_set_unbounded` (zone d'engagement hex), noyaux `dilate_by_kernel`/`erode_by_kernel`.
 
+**Biais de départage des segments horizontaux — à lire avant d'écrire des murs de terrain**
+
+`hex_line_iter` applique un nudge constant ``(+1e-6, +1e-6, -2e-6)`` aux coordonnées cube des deux extrémités pour rompre les égalités exactes. Sur un **segment horizontal** (row constant), ce nudge fait que la comparaison `dz > dy` alterne selon la parité de colonne : la rangée rasterisée est `R` pour certaines colonnes et `R − 1` pour les autres. Résultat observable : un mur déclaré à `row = R` bloque la LoS sur `row = R − 1` pour les colonnes de parité opposée à l'extrémité — la ligne bloquante effective se situe **une demi-case au-dessus** de la ligne écrite, sur les colonnes de parité alternante.
+
+Exemples vérifiés : `[[132,123],[126,123]]` et `[[88,123],[108,123]]` rasterisent en rangées alternant entre 123 et 122, dans les deux sens de parcours.
+
+Ce biais est **partagé bit-à-bit** par `hex_line_iter_t` (LoS 3D plancher-occulteur) et par `batch_hex_line_steps` (LoS vectorisée) — le nudge ne doit jamais être modifié sans propager la modification aux deux miroirs. Il n'est **pas corrigé** : il sert à résoudre les égalités exactes de façon déterministe et symétrique en translation.
+
 ### 2.4 Changement de résolution : `downscale_cell` et conversion au chargement
 
 `board_ref` déclare la résolution **native** des fichiers partagés d'un scénario (murs, terrain, positions de roster). Quand le plateau actif est plus **grossier**, `engine/game_state.py` convertit **à la lecture** — aucune donnée dupliquée par résolution (une copie divergerait en silence au premier changement) :
