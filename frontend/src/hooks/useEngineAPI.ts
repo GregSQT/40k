@@ -1257,56 +1257,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     startGame();
   }, [clearReservesLastRoundMemo, terrainList]);
 
-  /** Relance une partie avec le scénario donné. options.preserveP1PositionsFrom : état de jeu à partir duquel garder les positions des unités P1. skipLoading : ne pas afficher l'écran de chargement. */
-  const startGameWithScenario = useCallback(
-    async (
-      scenarioFile: string,
-      options?: { preserveP1PositionsFrom?: APIGameState | null; skipLoading?: boolean }
-    ) => {
-      const skipLoading = options?.skipLoading ?? options?.preserveP1PositionsFrom != null;
-      if (!skipLoading) {
-        setLoading(true);
-      }
-      try {
-        const body: Record<string, unknown> = {
-          pve_mode: true,
-          mode_code: "pve",
-          scenario_file: scenarioFile,
-        };
-        if (options?.preserveP1PositionsFrom != null) {
-          body.preserve_p1_positions_from = options.preserveP1PositionsFrom;
-        }
-        const response = await apiFetch(`${API_BASE}/game/start`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(body),
-        });
-        if (!response.ok) {
-          throw new Error(`Failed to start game: ${response.status}`);
-        }
-        const data = await response.json();
-        if (data.success && data.game_state) {
-          setGameState(hydrateApiGameStateMovePreviewTransport(data.game_state ?? null));
-          setGameSessionKey((k) => k + 1);
-          setEndlessDutyState((data.endless_duty_state as EndlessDutyState | undefined) ?? null);
-          // Partie NEUVE : les avertissements 20.04 de la partie précédente ne la concernent pas.
-          clearReservesLastRoundMemo();
-        } else {
-          throw new Error(data.error || "Failed to start game");
-        }
-      } catch (err) {
-        setError(formatApiConnectionError(err));
-      } finally {
-        if (!skipLoading) {
-          setLoading(false);
-        }
-      }
-    },
-    [clearReservesLastRoundMemo]
-  );
-
   /** POST /api/game/start pour le scénario PvE standard (fin tutoriel → mode PvE). */
   const startPveGame = useCallback(async () => {
     setLoading(true);
@@ -8187,7 +8137,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       onSandboxSet: async (_sandboxFreeMove: boolean) => {},
       onJumpToPhase: async (_targetPhase: string) => {},
       executeAITurn: async () => {},
-      startGameWithScenario: async () => {},
       startPveGame: async () => {},
       updatePlayerNames: async () => {},
       endlessDutyState: null,
@@ -9656,7 +9605,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         aiTurnInProgress = false;
       }
     },
-    startGameWithScenario,
     startPveGame,
     updatePlayerNames,
     endlessDutyState,
