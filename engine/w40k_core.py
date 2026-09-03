@@ -5444,9 +5444,14 @@ class W40KEngine(gym.Env):
             """Condition 13.08 par FIGURINE de chaque cible valide (badge de couvert par figurine).
 
             Diagnostic d'affichage strictement parallèle à ``_squad_cover_by_unit_id``, qui reste
-            la seule source du -1 BS. Même brique LoS partagée (build_unit_los_cache idempotent).
+            la seule source du -1 BS.
+
+            Pas de ``build_unit_los_cache`` ici, à la différence des trois helpers voisins : eux
+            lisent ``los_cover_cache`` / les caches de l'unité, que cette fonction n'ouvre jamais.
+            Elle passe par ``compute_unit_los``, qui porte son propre pair-cache et se suffit à
+            lui-même. La raison n'est donc PAS que ``_squad_cover_by_unit_id`` s'exécute avant
+            dans les littéraux de dict des appelants : réordonner ces clés resterait sans effet.
             """
-            build_unit_los_cache(self.game_state, squad_id)
             unit_obj = require_unit_by_id(self.game_state, squad_id)
             return build_cover_conditions_by_unit_id(self.game_state, unit_obj, valid_targets)
 

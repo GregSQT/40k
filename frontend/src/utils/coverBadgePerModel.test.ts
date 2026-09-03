@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ModelCoverCondition } from "../types/game";
-import { modelCoverBadge } from "./coverBadgePerModel";
+import { coverConditionsFingerprint, modelCoverBadge } from "./coverBadgePerModel";
 
 /** 4 figurines dans le terrain (condition "a"), 1 à découvert — la 3e, volontairement pas la dernière. */
 const FOUR_IN_TERRAIN_ONE_EXPOSED: ModelCoverCondition[] = ["a", "a", "", "a", "a"];
@@ -76,5 +76,49 @@ describe("modelCoverBadge — escouade entièrement à découvert", () => {
     const conditions: ModelCoverCondition[] = ["", "", ""];
     const badges = conditions.map((_c, i) => modelCoverBadge(i, conditions, false));
     expect(badges).toEqual(["none", "none", "none"]);
+  });
+});
+
+describe("coverConditionsFingerprint", () => {
+  it("distingue deux escouades où ce n'est pas la même figurine qui est exposée", () => {
+    // `""` est une valeur, pas une absence : une concaténation sans séparateur rendait ces deux
+    // états identiques, donc aucun redraw — le badge restait sur la mauvaise figurine.
+    expect(coverConditionsFingerprint({ "7": ["b", ""] })).not.toBe(
+      coverConditionsFingerprint({ "7": ["", "b"] })
+    );
+    expect(coverConditionsFingerprint({ "7": ["a", "a", "", "a", "a"] })).not.toBe(
+      coverConditionsFingerprint({ "7": ["a", "a", "a", "a", ""] })
+    );
+  });
+
+  it("distingue une escouade de celle obtenue après la mort d'une figurine", () => {
+    // Deux figurines exposées, une meurt : le couvert d'unité reste false et le jeu de cibles
+    // ne bouge pas, mais tous les index suivants ont glissé.
+    expect(coverConditionsFingerprint({ "7": ["a", "", "a", ""] })).not.toBe(
+      coverConditionsFingerprint({ "7": ["a", "", "a"] })
+    );
+    expect(coverConditionsFingerprint({ "7": ["a", "a"] })).not.toBe(
+      coverConditionsFingerprint({ "7": ["a", "a", ""] })
+    );
+  });
+
+  it("est stable quel que soit l'ordre d'insertion des unités", () => {
+    const a: Record<string, ModelCoverCondition[]> = { "3": ["a"], "11": ["b", ""] };
+    const b: Record<string, ModelCoverCondition[]> = { "11": ["b", ""], "3": ["a"] };
+    expect(coverConditionsFingerprint(a)).toBe(coverConditionsFingerprint(b));
+  });
+
+  it("distingue deux unités différentes portant les mêmes conditions", () => {
+    expect(coverConditionsFingerprint({ "3": ["a", ""] })).not.toBe(
+      coverConditionsFingerprint({ "4": ["a", ""] })
+    );
+  });
+
+  it("rend la même empreinte pour un état inchangé (pas de redraw parasite)", () => {
+    const state: Record<string, ModelCoverCondition[]> = { "7": ["a", "a", "", "a", "a"] };
+    expect(coverConditionsFingerprint(state)).toBe(
+      coverConditionsFingerprint({ "7": ["a", "a", "", "a", "a"] })
+    );
+    expect(coverConditionsFingerprint({})).toBe(coverConditionsFingerprint({}));
   });
 });

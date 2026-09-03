@@ -48,6 +48,7 @@ import {
   computeStaticLayerReusable,
   planBoardRedraw,
 } from "../utils/boardRedrawDecision";
+import { coverConditionsFingerprint } from "../utils/coverBadgePerModel";
 import { areUnitsAdjacent, cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import {
   boardWorldSize,
@@ -130,12 +131,6 @@ function stableBoolRecordJson(m: Record<string, boolean>): string {
     sorted[k] = m[k] === true;
   }
   return JSON.stringify(sorted);
-}
-
-/** Empreinte stable des conditions 13.08 par figurine, pour la clé de rendu PIXI. */
-function stableCoverConditionsJson(m: CoverConditionsByUnitId): string {
-  const keys = Object.keys(m).sort();
-  return JSON.stringify(keys.map((k) => [k, m[k].join("")]));
 }
 
 interface BackendLosPreviewCell {
@@ -2994,11 +2989,11 @@ export default function Board({
     [blinkingHiddenTooFarByUnitId]
   );
   const movePreviewLosCoverCondsKey = useMemo(
-    () => stableCoverConditionsJson(movePreviewLosCoverCondsById),
+    () => coverConditionsFingerprint(movePreviewLosCoverCondsById),
     [movePreviewLosCoverCondsById]
   );
   const blinkingCoverCondsByUnitIdKey = useMemo(
-    () => stableCoverConditionsJson(blinkingCoverCondsByUnitId ?? {}),
+    () => coverConditionsFingerprint(blinkingCoverCondsByUnitId ?? {}),
     [blinkingCoverCondsByUnitId]
   );
   const movePreviewLosDetectionInfoKey = useMemo(

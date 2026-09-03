@@ -16,7 +16,30 @@
  * gardant les deux informations distinctes plutôt qu'en les aplatissant : ce qui protège la
  * figurine, et si l'escouade touche réellement le bonus.
  */
-import type { ModelCoverCondition } from "../types/game";
+import type { CoverConditionsByUnitId, ModelCoverCondition } from "../types/game";
+
+/**
+ * Empreinte stable des conditions par figurine, pour détecter un changement.
+ *
+ * Deux pièges, tous deux constatés en revue, et tous deux dus au fait que `""` (figurine à
+ * découvert) est une valeur PORTEUSE DE SENS et non une absence :
+ *
+ *  - concaténer sans séparateur confond `["b", ""]` et `["", "b"]`, c'est-à-dire deux escouades
+ *    où ce n'est pas la même figurine qui est exposée ;
+ *  - ignorer la longueur confond une escouade de 5 avec la même après la mort d'une figurine,
+ *    alors que tous les index suivants ont glissé d'un cran.
+ *
+ * Sérialiser le tableau tel quel écarte les deux : chaque élément reste distinct et positionné.
+ * Consommée à la fois par la clé de rendu du plateau et par la détection de changement du blink —
+ * une seule définition, pour que ces deux-là ne puissent pas diverger.
+ */
+export function coverConditionsFingerprint(m: CoverConditionsByUnitId): string {
+  return JSON.stringify(
+    Object.keys(m)
+      .sort()
+      .map((k) => [k, m[k]])
+  );
+}
 
 /**
  * - `"none"` → aucun badge : la figurine est à découvert (et si l'unité n'a pas le couvert,

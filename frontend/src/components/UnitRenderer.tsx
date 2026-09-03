@@ -565,12 +565,8 @@ export class UnitRenderer {
         (this.props.phase === "move" &&
           (this.props.mode === "select" || this.props.mode === "movePreview"));
       if (attacker && useRangedForBlinkSignature) {
-        const selectedRangedWeapon = getSelectedRangedWeapon(attacker);
-        const selectedWeaponIgnoresCover =
-          Array.isArray(selectedRangedWeapon?.WEAPON_RULES) &&
-          selectedRangedWeapon.WEAPON_RULES.some((rule) => rule === "IGNORES_COVER");
         let effectiveTargetInCover = false;
-        if (selectedWeaponIgnoresCover) {
+        if (this.weaponIgnoresCover(attacker)) {
           effectiveTargetInCover = false;
         } else if (
           (this.props.mode === "movePreview" ||
@@ -2751,6 +2747,11 @@ export class UnitRenderer {
     );
   }
 
+  private weaponIgnoresCover(attacker: Unit): boolean {
+    const w = getSelectedRangedWeapon(attacker);
+    return Array.isArray(w?.WEAPON_RULES) && w.WEAPON_RULES.some((r) => r === "IGNORES_COVER");
+  }
+
   /** Couvert effectif de cette unité-cible vis-à-vis du tireur (ajusté IGNORES_COVER). */
   private getEffectiveTargetInCover(attacker: Unit | null): boolean {
     if (!attacker) {
@@ -2765,11 +2766,7 @@ export class UnitRenderer {
     if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
       return false;
     }
-    const selectedRangedWeapon = getSelectedRangedWeapon(attacker);
-    const selectedWeaponIgnoresCover =
-      Array.isArray(selectedRangedWeapon?.WEAPON_RULES) &&
-      selectedRangedWeapon.WEAPON_RULES.some((rule) => rule === "IGNORES_COVER");
-    if (selectedWeaponIgnoresCover) {
+    if (this.weaponIgnoresCover(attacker)) {
       return false;
     }
     if (
@@ -2814,11 +2811,7 @@ export class UnitRenderer {
     if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
       return null;
     }
-    const selectedRangedWeapon = getSelectedRangedWeapon(attacker);
-    const selectedWeaponIgnoresCover =
-      Array.isArray(selectedRangedWeapon?.WEAPON_RULES) &&
-      selectedRangedWeapon.WEAPON_RULES.some((rule) => rule === "IGNORES_COVER");
-    if (selectedWeaponIgnoresCover) {
+    if (this.weaponIgnoresCover(attacker)) {
       return null;
     }
     const key = String(this.props.unit.id);

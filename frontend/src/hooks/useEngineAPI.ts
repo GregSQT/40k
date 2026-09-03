@@ -31,6 +31,7 @@ import {
   getFightAttackerAttackLeft,
   isFightAttackSelectionUiOpen,
 } from "../utils/activationClickTarget";
+import { coverConditionsFingerprint } from "../utils/coverBadgePerModel";
 import { readEngineActionOutcome } from "../utils/engineActionOutcome";
 import { logFightClick } from "../utils/fightClickDebug";
 import { cubeDistance, cubeToOffset, offsetToCube } from "../utils/gameHelpers";
@@ -2504,6 +2505,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 hiddenDetectionInfoByUnitId[unitId] = { detection_inches, too_far };
               }
             }
+            const nextCoverCondsByUnitId = parseCoverConditionsByUnitId(
+              data.result.cover_conditions_by_unit_id
+            );
             const coverKey = JSON.stringify(
               Object.entries(coverByUnitId ?? {}).sort(([a], [b]) => a.localeCompare(b))
             );
@@ -2528,12 +2532,21 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             const attackerIdChanged = newAttackerId !== blinkingUnits.attackerId;
             const coverByUnitIdChanged = coverKey !== previousCoverKey;
             const tooFarByUnitIdChanged = tooFarKey !== previousTooFarKey;
+            // Les conditions par figurine changent SANS que le couvert d'unité bouge : une
+            // escouade à deux figurines exposées qui en perd une garde `cover` à false et le
+            // même jeu de cibles, mais tous les index suivants ont glissé d'un cran. Sans ce
+            // test, `blinkingCoverCondsByUnitId` resterait sur l'escouade d'avant et les badges
+            // se poseraient sur les mauvaises figurines.
+            const coverCondsChanged =
+              coverConditionsFingerprint(nextCoverCondsByUnitId) !==
+              coverConditionsFingerprint(blinkingUnits.coverCondsByUnitId ?? {});
             const needsUpdate =
               !blinkingUnits.blinkTimer ||
               unitIdsChanged ||
               attackerIdChanged ||
               coverByUnitIdChanged ||
-              tooFarByUnitIdChanged;
+              tooFarByUnitIdChanged ||
+              coverCondsChanged;
 
             if (needsUpdate) {
               // Clear any existing blinking timer
@@ -2563,9 +2576,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 blinkTimer: timer,
                 attackerId: newAttackerId,
                 coverByUnitId,
-                coverCondsByUnitId: parseCoverConditionsByUnitId(
-                  data.result.cover_conditions_by_unit_id
-                ),
+                coverCondsByUnitId: nextCoverCondsByUnitId,
                 hiddenTooFarByUnitId,
                 hiddenDetectionInfoByUnitId,
               });
