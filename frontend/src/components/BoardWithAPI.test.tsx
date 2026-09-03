@@ -16,6 +16,7 @@ import { setupServer } from "msw/node";
 import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AuthSession } from "../auth/authStorage";
 import { BoardWithAPI } from "./BoardWithAPI";
 
 vi.mock("./BoardPvp", () => ({
@@ -43,7 +44,7 @@ const FAKE_SESSION = JSON.stringify({
     options: { show_advance_warning: false, auto_weapon_selection: false },
   },
   default_redirect_mode: "pvp",
-});
+} satisfies AuthSession);
 
 const BOARD_CONFIG = {
   cols: 20,
