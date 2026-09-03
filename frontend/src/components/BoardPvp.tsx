@@ -1138,7 +1138,7 @@ function destroyAndFilterOrphanHpBlinkContainers(
     const uid = bc.unitId;
     if (uid !== undefined && uid !== null && !Object.hasOwn(unitsCache, String(uid))) {
       if (bc.cleanupBlink) bc.cleanupBlink();
-      blink.destroy({ children: true });
+      else blink.destroy({ children: true });
       continue;
     }
     kept.push(blink);

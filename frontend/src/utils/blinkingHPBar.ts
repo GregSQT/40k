@@ -383,7 +383,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   const existingContainer = app.stage.children.find((child) => {
     if (child.name !== "hp-blink-container") return false;
     const container = child as HPBlinkContainer;
-    if (!container.unitId) return false;
+    if (container.unitId == null) return false;
     const containerUnitIdNum =
       typeof container.unitId === "string" ? parseInt(container.unitId, 10) : container.unitId;
     return containerUnitIdNum === unitIdNum && (container.modelId ?? null) === modelIdKey;
@@ -472,7 +472,10 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   const normalSlices: PIXI.Graphics[] = [];
   const highlightSlices: PIXI.Graphics[] = [];
 
-  if (!unit.HP_MAX) return { container: hpContainer, cleanup: () => {} };
+  if (!unit.HP_MAX) {
+    hpContainer.destroy({ children: true });
+    throw new Error(`createBlinkingHPBar: unit ${unit.ID} has HP_MAX=${unit.HP_MAX}`);
+  }
 
   for (let i = 0; i < unit.HP_MAX; i++) {
     // Normal HP slice
@@ -600,10 +603,14 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
   }
 
   // Cleanup function
+  let cleaned = false;
   const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
     onBlinkProbHtml?.({ action: "hide", unitId: unitIdNum });
     if (hpContainer.blinkTicker) {
       app.ticker.remove(hpContainer.blinkTicker);
+      hpContainer.blinkTicker = undefined;
     }
     if (hpContainer.parent) {
       hpContainer.parent.removeChild(hpContainer);
