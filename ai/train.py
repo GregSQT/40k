@@ -3860,6 +3860,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # qu'une etape de curriculum recopie en `tensorboard_<etape>`, et `model.tensorboard_log`
         # a ete remis a la RACINE plus haut — il ne designe plus ce run.
         run_info: Dict[str, Any] = {"tensorboard_run_dir": specific_log_dir}
+        run_info["episode_count_total"] = int(metrics_tracker.episode_count)
         bot_eval_callback = next(
             (cb for cb in training_callbacks if isinstance(cb, BotEvaluationCallback)),
             None
@@ -5024,6 +5025,9 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
         )
         return 1
 
+    episode_count_total = run_info.get("episode_count_total")
+    if episode_count_total is not None:
+        save_run_state(canonical_model_path, episode_count_total)
     for written in promote_stage_model(canonical_model_path, args.etape):
         print(f"📦 {written}")
     tensorboard_run_dir = require_key(run_info, "tensorboard_run_dir")

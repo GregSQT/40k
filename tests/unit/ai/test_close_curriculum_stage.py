@@ -160,3 +160,24 @@ def test_gate_accepte_renvoie_exit_0_et_ecrit_zip_et_journal(tmp_path, monkeypat
     assert entries[-1]["gate_accepted"] is True
     assert entries[-1]["scores_vs_pool"] == {"P3": 0.65}
     assert entries[-1]["scores_vs_bots"] == {"random": 0.80}
+
+
+def test_gate_accepte_run_state_reflète_episodes_entraînes(tmp_path, monkeypatch):
+    """Gate acceptée : run_state de l'étape promue porte episode_count_total du run_info.
+
+    Rouge avant le fix : canonical run_state absent → promote_stage_model le saute → FileNotFoundError.
+    Vert après le fix : _close_curriculum_stage écrit le canonical run_state avant promotion.
+    """
+    from ai.run_state import load_run_state
+
+    canonical, args, config, curriculum, stage, run_info = _make_context(tmp_path)
+    run_info["episode_count_total"] = 5000
+
+    log_path = _patch_common(monkeypatch, tmp_path, canonical, score=0.65)
+    monkeypatch.setattr(train_mod, "copy_tensorboard_run", lambda *_a: "/fake/tb")
+
+    exit_code = train_mod._close_curriculum_stage(args, config, curriculum, stage, run_info)
+    assert exit_code == 0
+
+    promoted = tmp_path / "model_Stub_P4.zip"
+    assert load_run_state(str(promoted)) == 5000
