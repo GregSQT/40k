@@ -733,6 +733,11 @@ class MetricsCollectionCallback(BaseCallback):
         self.model = model
         self.controlled_agent = controlled_agent  # CRITICAL FIX: Store controlled_agent for bot evaluation
         self.episode_count = 0
+
+        # Etat de l'enveloppe posee sur `logger.dump` : le logger vise et sa methode d'origine.
+        # Les deux vont par paire, `_on_training_start` les pose et `_on_training_end` les rend.
+        self._dump_logger: Any = None
+        self._original_dump: Any = None
         
         # VIDE, et c'est le point. Ce dict etait pre-rempli a 0 sur 18 cles, ici et au reset,
         # mot pour mot. Rien ne le lit ni ne l'incremente entre les deux : `_handle_episode_end`
@@ -777,24 +782,20 @@ class MetricsCollectionCallback(BaseCallback):
         'train/learning_rate',
     })
 
-    #: Attribut pose sur la fonction `dump` enveloppee ci-dessous, portant le callback qui l'a
-    #: installee. C'est lui qui distingue « deja enveloppe par MOI » (rien a faire) de « enveloppe
-    #: par un AUTRE collecteur » (etat invalide). Un simple booleen ne separerait pas les deux.
-    _DUMP_CAPTURE_OWNER_ATTR = "_w40k_dump_capture_owner"
-
     def _on_training_start(self) -> None:
         """Enveloppe `logger.dump` pour capturer les metriques PPO AVANT que SB3 ne vide
-        `name_to_value`.
+        `name_to_value`. DESINSTALLEE par `_on_training_end`, et c'est le point.
 
-        IDEMPOTENT, et c'est le coeur de la methode. SB3 appelle `_on_training_start` a CHAQUE
-        `learn()`, et la boucle budgetee en episodes de `train_with_scenario_rotation` enchaine un
-        `learn()` par tranche de quatre updates. Sur un run NEUF, SB3 reconstruit son logger a
-        chaque `learn()` (`base_class._setup_learn`, garde par `_custom_logger`) : chaque appel
-        enveloppait un `dump` neuf et la couche restait unique, ce qui a masque le defaut. Sur une
-        REPRISE, `ai/train.py` pose le logger lui-meme (`model.set_logger`), `_custom_logger` passe
-        a True, SB3 ne reconstruit plus rien et les enveloppes s'EMPILAIENT — une capture par
-        couche a chaque `dump`, donc la meme valeur d'update poussee des centaines de fois dans les
-        listes de `hyperparameter_tracking`, et la norme du gradient recalculee autant de fois.
+        SB3 appaire `on_training_start` et `on_training_end` autour de CHAQUE `learn()`
+        (`sb3_contrib/ppo_mask/ppo_mask.py`, lignes 448 et 467), et la boucle budgetee en episodes
+        de `train_with_scenario_rotation` enchaine un `learn()` par tranche de quatre updates.
+        Cette methode posait une enveloppe sans que rien ne la retire : sur un run NEUF, SB3
+        reconstruit son logger a chaque `learn()` (`base_class._setup_learn`, garde par
+        `_custom_logger`) et l'enveloppe morte partait avec l'ancien logger, ce qui a masque le
+        defaut. Sur une REPRISE, `ai/train.py` pose le logger lui-meme (`model.set_logger`),
+        `_custom_logger` passe a True, SB3 ne reconstruit plus rien et les enveloppes
+        s'EMPILAIENT : une capture par couche a chaque `dump`, donc la meme valeur d'update poussee
+        des centaines de fois dans les listes de `hyperparameter_tracking`.
 
         Mesure du run du 2026-09-03 (etape P1, reprise depuis P00) : 41 756 points sur
         `training_critical/clip_fraction` pour 575 updates reels, contre 1 063 points pour 1 063
@@ -803,28 +804,33 @@ class MetricsCollectionCallback(BaseCallback):
         vingt copies du dernier : les quatre courbes de sante PPO de `00_critical` n'etaient plus
         lissees, et paraissaient quatre a quatorze fois plus bruitees qu'un run neuf.
 
+        La depose/retrait symetrique est la meme discipline que le pool des deux callbacks de
+        sonde de ce fichier, et elle rend inutile toute marque posee sur la fonction enveloppee.
+
         Verrou : tests/unit/ai/test_metrics_dump_wrapper_idempotent.py.
         """
         if not (hasattr(self.model, 'logger') and self.model.logger and hasattr(self, 'metrics_tracker') and self.metrics_tracker):
             return
-        installed_by = getattr(self.model.logger.dump, self._DUMP_CAPTURE_OWNER_ATTR, None)
-        if installed_by is self:
+        if self._dump_logger is not None:
+            # `learn()` non appaire : sans cette garde on empilerait a nouveau. La production
+            # n'y passe pas, SB3 appairant start et end.
             return
-        if installed_by is not None:
-            # Envelopper par-dessus ferait recevoir CHAQUE update aux deux trackers, sans que rien
-            # ne le signale : le defaut que cette methode vient de fermer, sous une autre forme.
-            raise RuntimeError(
-                "MetricsCollectionCallback : le `logger.dump` de ce modele est deja enveloppe par "
-                "un AUTRE collecteur de metriques. Un seul MetricsCollectionCallback par modele "
-                "est attendu (ai/train.py, chemin rotation et chemin standard)."
-            )
         _original_dump = self.model.logger.dump
         _tracker = self.metrics_tracker
         _model = self.model
 
         def _dump_with_capture(step: int = 0) -> None:
             ntv = getattr(_model.logger, 'name_to_value', {})
-            if ntv:
+            # `_PPO_KEYS` et NON `if ntv:` : `_handle_episode_end` appelle `logger.dump` a CHAQUE
+            # fin d'episode avec les seules cles `game_critical/*`. Sans ce filtre, chaque episode
+            # declenchait une capture complete — norme du gradient recalculee sur tous les
+            # parametres (une synchronisation GPU) et `train/ent_coef` reinjecte — pour un dump
+            # qui ne porte AUCUN update PPO : les gradients y sont ceux laisses par le dernier
+            # `train()`. Mesure du run neuf du 2026-08-29, ou aucune enveloppe ne s'empilait :
+            # 101 415 points sur `training_diagnostic/entropy_coef` pour 100 000 episodes et
+            # 1 063 updates — un point par EPISODE au lieu d'un par update. `_PPO_KEYS` etait
+            # declare juste au-dessus depuis l'origine, et n'avait jamais eu de lecteur.
+            if ntv and not self._PPO_KEYS.isdisjoint(ntv):
                 model_stats: Dict[str, Any] = dict(ntv)
                 if hasattr(_model, 'policy') and hasattr(_model.policy, 'parameters'):
                     # Réduction en une seule op GPU + un seul .item() au lieu de N syncs.
@@ -844,8 +850,12 @@ class MetricsCollectionCallback(BaseCallback):
                     else:
                         ent_coef_value = float(ent_coef_value)
                     model_stats['train/ent_coef'] = ent_coef_value
-                _tracker.log_training_metrics(model_stats)
+                # AVANT `log_training_metrics`, qui ecrit chacun de ses scalaires a
+                # `_tracker.step_count` : pose apres, l'update courant partait a l'abscisse du
+                # dump PRECEDENT, et toutes les courbes `training_critical/*` et
+                # `training_diagnostic/*` etaient decalees d'un dump sur l'axe des pas.
                 _tracker.step_count = cast(Any, _model).num_timesteps
+                _tracker.log_training_metrics(model_stats)
                 # diag/ keys logged by train() are not routed via log_training_metrics
                 # (which only processes train/ prefix) and _original_dump may have no TF writer.
                 # Write them explicitly to the MetricsTracker's TF writer.
@@ -855,8 +865,23 @@ class MetricsCollectionCallback(BaseCallback):
                             _tracker.writer.add_scalar(key, value, _tracker.step_count)
             _original_dump(step)
 
-        setattr(_dump_with_capture, self._DUMP_CAPTURE_OWNER_ATTR, self)
+        self._dump_logger = self.model.logger
+        self._original_dump = _original_dump
         self.model.logger.dump = _dump_with_capture
+
+    def _on_training_end(self) -> None:
+        """Retire l'enveloppe posee par `_on_training_start`. Symetrique, et obligatoire.
+
+        Sans elle, chaque `learn()` en ajoutait une couche sur un logger persistant. La
+        restauration vise le logger SUR LEQUEL l'enveloppe a ete posee, et non
+        `self.model.logger` : si SB3 en a reconstruit un entre-temps, y ecrire le `dump` de
+        l'ancien remplacerait un logger neuf et sain par la methode liee d'un logger mort.
+        """
+        if self._dump_logger is None:
+            return
+        self._dump_logger.dump = self._original_dump
+        self._dump_logger = None
+        self._original_dump = None
 
     def _on_rollout_start(self) -> None:
         pass
@@ -2669,23 +2694,18 @@ class ExploiterProbeCallback(BaseCallback):
         return 0
 
     def _on_training_start(self) -> None:
-        """Crée le pool persistant pour toutes les sondes de cette étape (4.2).
+        """Crée le pool pour les sondes de la tranche d'entraînement qui commence.
 
-        IDEMPOTENT : SB3 rappelle cette methode a CHAQUE `learn()`, et la boucle budgetee en
-        episodes en enchaine un par tranche de quatre updates. Sans la garde, chaque tranche
-        remplacait `_eval_pool` par un executeur NEUF sans fermer le precedent : le pool cessait
-        d'etre persistant — ce que sa propre docstring annonce — et chaque sonde repayait le
-        demarrage de ses workers, moteur et modele compris. `_on_training_end` n'en fermait
-        alors qu'un seul, le dernier.
-
-        `_probe` remet `_eval_pool` a None quand une evaluation leve : la garde laisse donc bien
-        le pool se reconstruire apres un incident, seul cas ou il doit l'etre.
+        PAS « de cette étape », contrairement à ce que cette docstring a longtemps annoncé : SB3
+        appaire `on_training_start` et `on_training_end` autour de chaque `learn()`
+        (`sb3_contrib/ppo_mask/ppo_mask.py`, lignes 448 et 467), et la boucle budgétée en épisodes
+        en enchaîne un par tranche de quatre updates. Le pool est donc créé puis fermé une fois
+        par tranche, et chaque sonde repaie le démarrage de ses workers. Rien n'est perdu ni
+        abandonné — `_on_training_end` ferme bien celui de sa tranche — mais la persistance
+        annoncée n'existe pas. Cf. Documentation/Roadmap/training.md#pool-sondes.
 
         Jumeau exact : `PoolEarlyStoppingCallback._on_training_start`.
-        Verrou : tests/unit/ai/test_metrics_dump_wrapper_idempotent.py.
         """
-        if self._eval_pool is not None:
-            return
         from ai.bot_evaluation import create_checkpoint_eval_pool, _strip_phase_suffix
 
         config = get_config_loader()
@@ -2881,15 +2901,11 @@ class PoolEarlyStoppingCallback(BaseCallback):
         return 0
 
     def _on_training_start(self) -> None:
-        """Crée le pool persistant pour toutes les sondes de cette étape.
+        """Crée le pool pour les sondes de la tranche d'entraînement qui commence.
 
-        IDEMPOTENT, pour la raison exacte de son jumeau
-        `ExploiterProbeCallback._on_training_start` : SB3 rappelle cette methode a chaque
-        `learn()`, donc une fois par tranche de quatre updates, et sans la garde chaque tranche
-        abandonnait un executeur sans le fermer.
+        Jumeau exact d'`ExploiterProbeCallback._on_training_start`, y compris sur la portée
+        réelle du pool : une tranche de `learn()`, pas l'étape.
         """
-        if self._eval_pool is not None:
-            return
         from ai.bot_evaluation import create_checkpoint_eval_pool, _strip_phase_suffix
 
         config = get_config_loader()
