@@ -170,11 +170,12 @@ Suppression de code → commentaire seulement si contre-intuitive (contrôle ret
 
 MODÈLE / EFFORT
 
-Recommander Opus 5 uniquement si : refactor >3 fichiers interdépendants, architecture irréversible, ou bug impliquant 3+ systèmes.
+Le modèle par défaut est Opus 5. Ne jamais recommander de passer sur Sonnet.
+Signaler par bannière quand la complexité est particulièrement élevée (refactor >3 fichiers interdépendants, architecture irréversible, bug impliquant 3+ systèmes) :
 Format : 🔴🔴🔴 Modèle suggéré : Opus 5 — [critère exact rempli] 🔴🔴🔴
 Recommander effort high uniquement si : algorithme à cas limites complexes ou raisonnement multi-étapes à dépendances croisées.
 Format : 🟡🟡🟡 Effort suggéré : high — [critère exact rempli] 🟡🟡🟡
-Sinon Sonnet 5 ; ne rien afficher. Les deux bannières peuvent coexister.
+Les deux bannières peuvent coexister.
 
 T1 — AUCUN FALLBACK / WORKAROUND ANTI-ERREUR
 
