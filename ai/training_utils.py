@@ -208,7 +208,8 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
                      agent_seat_mode=None, agent_seat_p2_ratio=None,
                      global_seed=None, opponent_mix_config=None,
                      n_envs=None, episode_start_index=0,
-                     vec_normalize_enabled=False, vec_normalize_eval_enabled=False):
+                     vec_normalize_enabled=False, vec_normalize_eval_enabled=False,
+                     deploy_active_ratio_start=None):
     """
     Factory function to create a single W40KEngine instance for vectorization.
 
@@ -236,6 +237,12 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             ACQUISE, elle reprend ou elle en etait. Le wrapper, lui, part de zero — la rampe de
             self-play appartient au REGIME du run qu'on lance, et son introduction progressive
             n'a de sens que depuis le debut de ce run. Cf. ai/run_state.py.
+        deploy_active_ratio_start: Depart de la rampe de deploiement decide par le PARENT, ou
+            None pour laisser le JSON faire foi. Une etape de curriculum reprise a chaud le fige
+            a sa valeur terminale ; ce figeage vit dans le parent (decoration du loader) et NE
+            FRANCHIT PAS la frontiere `forkserver`/`spawn` d'un worker, qui reimporte tout et
+            relit le JSON. Le passer en argument est donc la seule facon qu'il atteigne le
+            moteur — meme raison que `n_envs` et `episode_start_index` ci-dessus.
 
     Returns:
         Callable that creates and returns a wrapped environment instance
@@ -285,6 +292,7 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             # denominateur (V11 §0.57).
             training_n_envs=n_envs,
             training_episode_start_index=episode_start_index,
+            training_deploy_active_ratio_start=deploy_active_ratio_start,
         )
         
         # ✓ CHANGE 9: Removed seed() call - W40KEngine uses reset(seed=...) instead

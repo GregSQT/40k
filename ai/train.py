@@ -2588,6 +2588,7 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
                 episode_start_index=episode_start_index,
                 vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),  # get allowed: optional config
                 vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),  # get allowed: optional config
+                deploy_active_ratio_start=parent_deploy_active_ratio_start(training_config),
             )
             for i in range(n_envs)
         ]))
@@ -3312,6 +3313,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 episode_start_index=episode_start_index,
                 vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),  # get allowed: optional config
                 vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),  # get allowed: optional config
+                deploy_active_ratio_start=parent_deploy_active_ratio_start(training_config),
             )
             for i in range(n_envs)
         ]))
@@ -4738,9 +4740,66 @@ def _apply_stage_hp_overrides(cfg: Dict[str, Any], hp_overrides: Dict[str, Any])
                     )
 
 
+def _pin_deployment_ramp_for_warm_start(cfg: Dict[str, Any]) -> Optional[Tuple[float, float]]:
+    """Fige la rampe de deploiement a sa valeur terminale, pour une etape REPRISE A CHAUD.
+
+    `active_ratio_start -> active_ratio_end` est exprimee en FRACTION de la duree du run
+    (`engine/episode_schedule.py::ramp_progress`). Une etape qui reprend les poids d'une autre
+    herite donc d'un modele ayant DEJA parcouru sa rampe -- P00 la termine a 0.9 -- et la
+    redemarrerait a `active_ratio_start`, soit 0.3. Mesure sur le run du 2026-09-03 : `active_ratio`
+    valait 0.315 a l'episode 5000 d'un run de 200 000, donc pres de 69 % des episodes etaient
+    deployes PAR LE MOTEUR pour un modele qui savait se deployer -- alors que l'EVALUATION impose
+    toujours le deploiement actif (cf. la justification du bloc dans le profil). Symptome observe :
+    `p_reward_deploy_active` montait pendant que `d_win_rate`, qui melange les deux modes, restait
+    plat.
+
+    Reporter l'offset d'episodes de l'etape source ne suffit PAS, et c'est pour cela que la regle
+    vit ici et non dans `run_state` : la rampe de P00 couvrait 5 000 episodes, celle de P1 en
+    couvre 200 000, donc 5 000 episodes reportes ne valent que 2,5 % de progression. C'est la
+    fraction elle-meme qu'il faut neutraliser, pas son point de depart.
+
+    Figer `start` SUR `end` rend la rampe constante a la valeur qu'un run complet de l'etape source
+    a atteinte. `end` (et non 1.0) parce qu'un profil garde deliberement une part d'episodes en
+    'auto' pour que la courbe de controle `r_win_rate_deploy_auto` continue de mesurer quelque
+    chose.
+
+    Un demarrage a froid (`init: new`) n'est PAS concerne : sa rampe est legitime, elle existe pour
+    qu'une politique naive ne soit pas jetee d'emblee dans le deploiement complet.
+
+    Rend `(avant, apres)` quand la valeur a change, `None` sinon. L'ABSENCE du bloc n'est pas
+    traitee ici : `W40KEngine._configure_deployment_mode_for_episode` la refuse deja par
+    `require_key`, avec le contexte utile ; la dupliquer ici ferait diverger deux messages.
+    """
+    schedule = cfg.get("deployment_mode_schedule")  # get allowed: le moteur est l'autorite
+    if not isinstance(schedule, dict):
+        return None
+    start = float(require_key(schedule, "active_ratio_start"))
+    end = float(require_key(schedule, "active_ratio_end"))
+    if start == end:
+        return None
+    schedule["active_ratio_start"] = end
+    return start, end
+
+
+def parent_deploy_active_ratio_start(training_config: Dict[str, Any]) -> float:
+    """Depart de rampe de deploiement tel que le PARENT l'a decide — a passer aux workers.
+
+    Dans le parent, `_install_stage_config_overrides` a deja fige la rampe quand l'etape reprend
+    des poids ; hors curriculum, la valeur est simplement celle du JSON. Dans les deux cas c'est
+    CETTE valeur qui fait autorite.
+
+    Elle doit voyager en ARGUMENT jusqu'au moteur : un worker `forkserver`/`spawn` reimporte tout
+    et rappelle un loader NON decore, donc il relirait 0.3 dans le JSON pendant que le parent
+    croit avoir impose 0.9 (mesure du defaut : parent 0.9, worker 0.3). Cf. le commentaire de
+    `W40KEngine.__init__` sur `training_deploy_active_ratio_start`.
+    """
+    schedule = require_key(training_config, "deployment_mode_schedule")
+    return float(require_key(schedule, "active_ratio_start"))
+
+
 def _install_stage_config_overrides(
     config, agent_key: str, opponent_mix: Optional[Dict[str, Any]],
-    hp_overrides: Dict[str, Any],
+    hp_overrides: Dict[str, Any], warm_start: bool,
 ) -> None:
     """Ce que l'etape impose a TOUTE lecture ulterieure de la config de cet agent.
 
@@ -4749,11 +4808,25 @@ def _install_stage_config_overrides(
     laisserait les autres sans, en silence. Le decorateur s'installe PAR-DESSUS celui de
     `--param` quand les deux sont demandes : ils ne touchent pas les memes cles.
 
-    Deux effets :
+    Trois effets :
 
     - `opponent_mix` : le pool de l'etape, quand elle en a un.
     - `hp_overrides` : surcharges HP declarees dans `training_config_overrides` de l'etape
       (total_episodes, model_params.*)  — ignorees quand le dict est vide.
+    - `warm_start` : quand l'etape reprend les poids d'une autre, la rampe de deploiement est
+      figee a sa valeur terminale (cf. `_pin_deployment_ramp_for_warm_start`). C'est un
+      COMPORTEMENT et non un override declarable : `deployment_mode_schedule` est exclu des cles
+      surchargeables par etape (`STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS`), et les etapes exploiteur
+      n'ont pas droit a `training_config_overrides` du tout — les couvrir imposait de sortir du
+      JSON.
+
+      ⚠️ Ce figeage ne vaut QUE DANS CE PROCESSUS. Le seul lecteur de
+      `deployment_mode_schedule` est `W40KEngine._configure_deployment_mode_for_episode`, et un
+      worker vectorise demarre en `forkserver`/`spawn` : il reimporte tout, rappelle un loader
+      NON decore et relit le JSON. Mesure du defaut : parent 0.9, worker 0.3. La valeur atteint
+      donc le moteur par `parent_deploy_active_ratio_start` -> `make_training_env` ->
+      `W40KEngine(training_deploy_active_ratio_start=...)`, en donnee. Ce que le decorateur sert
+      ici, c'est a rendre cette valeur lisible dans le parent — pas a la propager.
     """
     original_load = config.load_agent_training_config
 
@@ -4763,6 +4836,8 @@ def _install_stage_config_overrides(
             if opponent_mix is not None:
                 cfg["opponent_mix"] = opponent_mix
             _apply_stage_hp_overrides(cfg, hp_overrides)
+            if warm_start:
+                _pin_deployment_ramp_for_warm_start(cfg)
         return cfg
 
     config.load_agent_training_config = _load_with_stage
@@ -4829,7 +4904,24 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
 
     opponent_mix = _stage_opponent_mix(curriculum, stage, canonical_model_path)
     hp_overrides = get_stage_hp_overrides(stage)
-    _install_stage_config_overrides(config, args.agent, opponent_mix, hp_overrides)
+    warm_start = source_stage is not None
+    # Valeurs LUES AVANT l'installation du decorateur : apres, toute lecture rend deja la rampe
+    # figee et la ligne de log ne pourrait plus dire de quoi on part.
+    _ramp_before = (
+        _pin_deployment_ramp_for_warm_start(
+            config.load_agent_training_config(args.agent, args.training_config)
+        )
+        if warm_start
+        else None
+    )
+    _install_stage_config_overrides(config, args.agent, opponent_mix, hp_overrides, warm_start)
+    if _ramp_before is not None:
+        _before, _after = _ramp_before
+        print(
+            f"🎓 Etape {args.etape} — reprise a chaud : rampe de deploiement figee a "
+            f"{_after:.2f} (au lieu de repartir de {_before:.2f}), le modele repris a deja "
+            "parcouru la sienne."
+        )
     if hp_overrides:
         print(f"🎓 Etape {args.etape} — HP overrides : {list(hp_overrides)}")
     if opponent_mix is None:

@@ -69,6 +69,11 @@ _EARLY_STOP_REQUIRED_KEYS = ("win_rate_threshold", "min_steps", "consecutive_eva
 #: Les cles structurelles (deployment_mode_schedule, obs_size, vec_normalize, n_envs, seed)
 #: ne sont PAS autorisees : elles doivent rester identiques entre toutes les etapes pour
 #: que les modeles soient comparables et que les tests de profil ne divergent pas.
+#: `deployment_mode_schedule` reste donc hors de cette liste, MAIS sa rampe est figee a sa
+#: valeur terminale pour toute etape reprise a chaud — c'est un comportement porte par
+#: `ai/train.py::_pin_deployment_ramp_for_warm_start`, pas une cle declarable. Le faire en code
+#: et non en JSON est ce qui couvre aussi les etapes exploiteur, auxquelles
+#: `_validate_stage_hp_overrides` interdit tout `training_config_overrides`.
 STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS: frozenset = frozenset({
     "total_episodes", "model_params", "callback_params",
 })
