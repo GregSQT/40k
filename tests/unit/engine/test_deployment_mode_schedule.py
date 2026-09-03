@@ -526,3 +526,67 @@ def test_missing_block_in_an_agent_profile_is_an_explicit_error() -> None:
     # Chemin API/PvP (fragment de config, pas de profil) : absence légitime, pas d'erreur.
     env._training_config_is_agent_profile = False
     assert env._configure_deployment_mode_for_episode() is None
+
+
+# --- Départ de rampe imposé PAR LE PARENT (reprise à chaud de curriculum) -----------------------
+#
+# Une étape de curriculum reprise à chaud fige la rampe à sa valeur terminale : le modèle repris a
+# déjà parcouru la sienne (P00 la termine à 0.9), et la redémarrer à `active_ratio_start` renverrait
+# la majorité des épisodes en déploiement 'auto' pour un modèle qui sait se déployer — alors que
+# l'évaluation impose TOUJOURS le déploiement actif. Mesure du défaut (run du 2026-09-03, P1 repris
+# de P00) : `active_ratio` valait 0.315 à l'épisode 5000 d'un run de 200 000.
+#
+# Ce figeage est décidé dans le processus PARENT, mais son seul lecteur est le moteur, construit
+# dans un worker `forkserver`/`spawn` qui réimporte tout et relit le JSON. Il ne peut donc voyager
+# que par ARGUMENT — c'est ce que ce bloc verrouille, côté moteur.
+
+
+def test_parent_ratio_argument_overrides_the_profile_json(board_x5) -> None:
+    """L'argument gagne sur le JSON, et il ne déplace QUE le départ."""
+    from ai.unit_registry import UnitRegistry
+    from engine.w40k_core import W40KEngine
+
+    def _engine(**kwargs):
+        return W40KEngine(
+            rewards_config="ArmageddonAgent_x1",
+            training_config_name="x1_long",
+            controlled_agent="ArmageddonAgent_x1",
+            scenario_file=SCENARIO,
+            unit_registry=UnitRegistry(),
+            quiet=True,
+            gym_training_mode=True,
+            training_n_envs=1,
+            **kwargs,
+        )
+
+    from_json = _engine().training_config["deployment_mode_schedule"]
+    assert from_json["active_ratio_start"] == 0.3, (
+        "le profil x1_long ne démarre plus à 0.3 : ce test compare l'argument à cette valeur."
+    )
+
+    pinned = _engine(training_deploy_active_ratio_start=0.9).training_config[
+        "deployment_mode_schedule"
+    ]
+    assert pinned["active_ratio_start"] == 0.9
+    # Figer, c'est aligner le départ sur l'arrivée — jamais déplacer l'arrivée : un profil garde
+    # délibérément une part d'épisodes en 'auto' pour que `r_win_rate_deploy_auto` mesure encore.
+    assert pinned["active_ratio_end"] == 0.9
+
+
+def test_parent_ratio_argument_absent_leaves_the_profile_alone(board_x5) -> None:
+    """`None` = personne n'impose rien : tout chemin hors curriculum garde le JSON."""
+    from ai.unit_registry import UnitRegistry
+    from engine.w40k_core import W40KEngine
+
+    env = W40KEngine(
+        rewards_config="ArmageddonAgent_x1",
+        training_config_name="x1_long",
+        controlled_agent="ArmageddonAgent_x1",
+        scenario_file=SCENARIO,
+        unit_registry=UnitRegistry(),
+        quiet=True,
+        gym_training_mode=True,
+        training_n_envs=1,
+        training_deploy_active_ratio_start=None,
+    )
+    assert env.training_config["deployment_mode_schedule"]["active_ratio_start"] == 0.3

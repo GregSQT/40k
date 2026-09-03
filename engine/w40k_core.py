@@ -472,7 +472,8 @@ class W40KEngine(gym.Env):
                 scenario_files=None,  # NEW: List of scenarios for random selection per episode
                 unit_registry=None, quiet=True, gym_training_mode=False, debug_mode=False,
                 training_n_envs: Optional[int] = None,
-                training_episode_start_index: int = 0, **kwargs):
+                training_episode_start_index: int = 0,
+                training_deploy_active_ratio_start: Optional[float] = None, **kwargs):
         """Initialize W40K engine with tour_de_jeu.md compliance - training system compatible.
 
         Args:
@@ -556,6 +557,27 @@ class W40KEngine(gym.Env):
             self.training_config = config_loader.load_agent_training_config(base_agent_key, training_config_name)
             if not self.training_config:
                 raise RuntimeError(f"Failed to load training configuration for agent {controlled_agent}, phase {training_config_name}")
+            # Depart de rampe de deploiement DECIDE PAR LE PARENT, quand il l'impose.
+            #
+            # POURQUOI EN DONNEE ET NON PAR LA CONFIG. Une etape de curriculum reprise a chaud
+            # fige cette rampe (le modele repris a deja parcouru la sienne, cf.
+            # `ai/train.py::_pin_deployment_ramp_for_warm_start`). Ce figeage est pose dans le
+            # PROCESSUS PARENT, en decorant `load_agent_training_config`. Or un worker vectorise
+            # demarre en `forkserver`/`spawn` (`ai/maskable_subproc_vec_env.py`), reimporte tout,
+            # et rappelle le loader NON decore juste au-dessus : il relisait donc 0.3 dans le JSON
+            # pendant que le parent croyait avoir impose 0.9. MESURE du defaut : parent 0.9,
+            # worker forkserver 0.3. Aucun patch de loader ne franchit cette frontiere ; seule une
+            # valeur passee en argument le fait — meme raison que `training_n_envs`,
+            # `training_episode_start_index` et `opponent_mix_config`.
+            #
+            # `None` = personne n'impose rien, le JSON fait foi (tout chemin hors curriculum).
+            # La validation de la valeur reste celle de `_configure_deployment_mode_for_episode` :
+            # elle relit la cle apres cette ecriture, donc une valeur hors [0,1] y leve comme
+            # n'importe quelle autre.
+            if training_deploy_active_ratio_start is not None:
+                schedule = self.training_config.get("deployment_mode_schedule")  # get allowed: validé plus bas
+                if isinstance(schedule, dict):
+                    schedule["active_ratio_start"] = float(training_deploy_active_ratio_start)
             # PROFIL d'entraînement chargé depuis config/agents/<agent>/<agent>_training_config.json :
             # le contrat complet des schedulers y est EXIGÉ (cf.
             # _configure_deployment_mode_for_episode). Les autres chemins de construction (API/PvP)
