@@ -17,6 +17,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { Unit, Weapon } from "../types/game";
 import { setTerrainList } from "../utils/terrainSelection";
 import { TEST_TERRAIN_LIST } from "./__fixtures__/terrainFixtures";
+import type { AuthSession } from "../auth/authStorage";
 import { useEngineAPI } from "./useEngineAPI";
 
 // ---------------------------------------------------------------------------
@@ -129,12 +130,13 @@ afterAll(() => server.close());
 // ---------------------------------------------------------------------------
 
 const FAKE_SESSION = JSON.stringify({
-  user: { id: 1, email: "test@example.com" },
+  user: { id: 1, login: "test_user", profile: "player" },
   permissions: {
     game_modes: ["pvp"],
     options: { show_advance_warning: false, auto_weapon_selection: false },
   },
-});
+  default_redirect_mode: "pvp",
+} satisfies AuthSession);
 
 beforeEach(() => {
   localStorage.setItem("w40k_auth_session_v2", FAKE_SESSION);
