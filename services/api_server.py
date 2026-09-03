@@ -301,10 +301,23 @@ def _load_terrain_list_constants() -> tuple[list, set, dict, dict, frozenset]:
             for tid in mode_terrains
         }
 
-    # pve_test : scenario_pve_test.json n'a pas de terrain ; "mc2" y désigne ce scénario sans
-    # décor. Le popup n'est pas affiché dans ce mode, mc2 n'est pas dans ses modes UI.
-    if "pve_test" in suffix_table and "mc2" not in suffix_table["pve_test"]:
-        suffix_table["pve_test"]["mc2"] = ""
+    # pve_test n'a qu'UN scénario sur disque — scenario_pve_test.json, sans décor — et aucun
+    # sélecteur de terrain (cf. MODES_WITH_TERRAIN_SELECTOR plus bas). Tout terrain que le mode
+    # accepte y résout donc ce scénario unique.
+    #
+    # L'ancienne garde `"mc2" not in suffix_table["pve_test"]` ne se déclenchait jamais : mc2
+    # déclare bien pve_test dans ses `modes` (terrain_list.json). La table gardait alors le
+    # suffixe "_mc2" dérivé plus haut et résolvait scenario_pve_test_mc2.json, fichier absent
+    # → FileNotFoundError au démarrage du mode.
+    #
+    # L'écrasement porte sur TOUS les terrains du mode et pas seulement mc2 : ne neutraliser
+    # que mc2 laisserait la table prétendre que mc1 et mc2 mènent à deux plateaux distincts,
+    # alors qu'il n'en existe qu'un. `scenario_pve_test_mc1.json` existe mais n'est atteint par
+    # aucune résolution — il l'était déjà avant ce correctif (mc1 est default_for pve_test,
+    # donc suffixe vide, donc scenario_pve_test.json).
+    # Miroir front : `terrainSuffix` dans frontend/src/utils/terrainSelection.ts.
+    if "pve_test" in suffix_table:
+        suffix_table["pve_test"] = {tid: "" for tid in suffix_table["pve_test"]}
 
     # Terrain retenu quand la requête n'en nomme aucun.
     defaults: dict[str, str] = dict(_default_for)

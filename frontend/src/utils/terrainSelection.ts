@@ -33,6 +33,12 @@ export function terrainSuffix(
   mode: string,
   list: readonly TerrainEntry[]
 ): string {
+  // pve_test n'a qu'UN scénario sur disque (scenario_pve_test.json, sans décor) et aucun
+  // sélecteur : tout terrain accepté par ce mode y mène. Sans ce cas, `mc2` — qui n'a pas
+  // pve_test dans son `default_for` — rendait "_mc2" et faisait demander
+  // scenario_pve_test_mc2.json, fichier absent, donc board config en erreur. Le backend
+  // applique exactement la même règle (`_load_terrain_list_constants`, api_server.py).
+  if (mode === "pve_test") return "";
   const entry = list.find((t) => t.id === terrainId);
   if (!entry) return `_${terrainId}`;
   return entry.default_for.includes(mode) ? "" : `_${terrainId}`;
