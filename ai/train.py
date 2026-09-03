@@ -2589,7 +2589,7 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
                 vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),  # get allowed: optional config
                 vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),  # get allowed: optional config
                 deploy_active_ratio_start=parent_deploy_active_ratio_start(training_config),
-                total_episodes=training_config.get("total_episodes"),
+                total_episodes=parent_total_episodes(training_config),
             )
             for i in range(n_envs)
         ]))
@@ -3315,7 +3315,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                 vec_normalize_enabled=bool(training_config.get("vec_normalize", {}).get("enabled", False)),  # get allowed: optional config
                 vec_normalize_eval_enabled=bool(training_config.get("vec_normalize_eval", {}).get("enabled", False)),  # get allowed: optional config
                 deploy_active_ratio_start=parent_deploy_active_ratio_start(training_config),
-                total_episodes=training_config.get("total_episodes"),
+                total_episodes=parent_total_episodes(training_config),
             )
             for i in range(n_envs)
         ]))
@@ -4777,6 +4777,15 @@ def _pin_deployment_ramp_for_warm_start(cfg: Dict[str, Any]) -> None:
         return
     end = float(require_key(schedule, "active_ratio_end"))
     schedule["active_ratio_start"] = end
+
+
+def parent_total_episodes(training_config: Dict[str, Any]) -> Optional[int]:
+    """Budget d'episodes tel que le PARENT l'a decide — a passer aux workers.
+
+    Meme raison que `parent_deploy_active_ratio_start` : un worker forkserver relit le JSON et
+    ignorerait un override in-process (etape de curriculum). None = le JSON fait foi.
+    """
+    return training_config.get("total_episodes")
 
 
 def parent_deploy_active_ratio_start(training_config: Dict[str, Any]) -> float:
