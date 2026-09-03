@@ -8814,9 +8814,10 @@ export default function Board({
       backgroundColor: parseInt(boardConfig.colors.background.replace("0x", ""), 16),
       backgroundAlpha: 1, // Ensure background is opaque
       antialias: displayConfig.antialias!,
-      powerPreference: "high-performance" as WebGLPowerPreference,
+      powerPreference: "default" as WebGLPowerPreference,
       resolution: renderResolution,
       autoDensity: displayConfig.autoDensity!,
+      autoStart: false,
     };
 
     // ✅ VALIDATE PIXI CONFIG VALUES

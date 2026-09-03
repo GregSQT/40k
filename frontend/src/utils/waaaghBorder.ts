@@ -520,8 +520,10 @@ export function startWaaaghFangsPulse(
     lastPulseMs = elapsedMs;
     setWaaaghFangsPulse(overlay, geometry, elapsedMs);
   };
+  ticker.start();
   ticker.add(tick);
   return () => {
     ticker.remove(tick);
+    if (ticker.count === 0) ticker.stop();
   };
 }
