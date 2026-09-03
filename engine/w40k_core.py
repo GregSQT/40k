@@ -5416,7 +5416,6 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers.shooting_handlers import (
             build_unit_los_cache,
             build_cover_by_unit_id_for_valid_targets,
-            build_cover_conditions_by_unit_id,
             build_hidden_too_far_by_unit_id,
             build_hidden_detection_info_by_unit_id,
         )
@@ -5439,21 +5438,6 @@ class W40KEngine(gym.Env):
             build_unit_los_cache(self.game_state, squad_id)
             unit_obj = require_unit_by_id(self.game_state, squad_id)
             return build_cover_by_unit_id_for_valid_targets(self.game_state, unit_obj, valid_targets)
-
-        def _squad_cover_conditions_by_unit_id(valid_targets: List[str]) -> Dict[str, List[str]]:
-            """Condition 13.08 par FIGURINE de chaque cible valide (badge de couvert par figurine).
-
-            Diagnostic d'affichage strictement parallèle à ``_squad_cover_by_unit_id``, qui reste
-            la seule source du -1 BS.
-
-            Pas de ``build_unit_los_cache`` ici, à la différence des trois helpers voisins : eux
-            lisent ``los_cover_cache`` / les caches de l'unité, que cette fonction n'ouvre jamais.
-            Elle passe par ``compute_unit_los``, qui porte son propre pair-cache et se suffit à
-            lui-même. La raison n'est donc PAS que ``_squad_cover_by_unit_id`` s'exécute avant
-            dans les littéraux de dict des appelants : réordonner ces clés resterait sans effet.
-            """
-            unit_obj = require_unit_by_id(self.game_state, squad_id)
-            return build_cover_conditions_by_unit_id(self.game_state, unit_obj, valid_targets)
 
         def _squad_hidden_too_far() -> Dict[str, bool]:
             """Ennemis cachés-trop-loin (œil rouge) relativement au squad actif. Même brique LoS
@@ -5545,7 +5529,6 @@ class W40KEngine(gym.Env):
                 "action": name, "unitId": squad_id, "weaponIndex": weapon_index,
                 "available_weapons": available_weapons, "valid_targets": valid_targets,
                 "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
-                "cover_conditions_by_unit_id": _squad_cover_conditions_by_unit_id(valid_targets),
                 "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
                 "hidden_detection_info_by_unit_id": _squad_hidden_detection_info(),
             }
@@ -5558,7 +5541,6 @@ class W40KEngine(gym.Env):
                 "action": name, "unitId": squad_id, "modelId": model_id,
                 "valid_targets": valid_targets,
                 "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
-                "cover_conditions_by_unit_id": _squad_cover_conditions_by_unit_id(valid_targets),
                 "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
                 "hidden_detection_info_by_unit_id": _squad_hidden_detection_info(),
             }  # get allowed
@@ -5574,9 +5556,6 @@ class W40KEngine(gym.Env):
                 "squad_alive_count": overview["squad_alive_count"],
                 "squad_free_count": overview["squad_free_count"],
                 "cover_by_unit_id": _squad_cover_by_unit_id(overview["valid_targets"]),
-                "cover_conditions_by_unit_id": _squad_cover_conditions_by_unit_id(
-                    overview["valid_targets"]
-                ),
                 "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
                 "hidden_detection_info_by_unit_id": _squad_hidden_detection_info(),
             }  # get allowed
@@ -5615,7 +5594,6 @@ class W40KEngine(gym.Env):
                 "action": name, "unitId": squad_id, "weaponIndex": weapon_index,
                 "valid_targets": valid_targets,
                 "cover_by_unit_id": _squad_cover_by_unit_id(valid_targets),
-                "cover_conditions_by_unit_id": _squad_cover_conditions_by_unit_id(valid_targets),
                 "hidden_too_far_by_unit_id": _squad_hidden_too_far(),
                 "hidden_detection_info_by_unit_id": _squad_hidden_detection_info(),
             }

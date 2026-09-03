@@ -1484,7 +1484,6 @@ def _preview_shoot_valid_targets(
         "los_preview_cover_cells": [],
         "los_preview_ratio_by_hex": {},
         "cover_by_unit_id": {},
-        "cover_conditions_by_unit_id": {},
         "hidden_too_far_by_unit_id": {},
         "hidden_detection_info_by_unit_id": {},
         "visible_cells_by_target": {},
@@ -1633,7 +1632,6 @@ def _preview_shoot_valid_targets(
         u["los_preview_ratio_by_hex"] = {}
 
     cover_by_unit_id = build_cover_by_unit_id_for_valid_targets(gs, u, valid_targets)
-    cover_conditions_by_unit_id = build_cover_conditions_by_unit_id(gs, u, valid_targets)
     visible_cells_by_target = build_visible_cells_by_target(gs, u, valid_targets)
 
     result_payload = {
@@ -1642,7 +1640,6 @@ def _preview_shoot_valid_targets(
         "los_preview_cover_cells": require_key(u, "los_preview_cover_cells"),
         "los_preview_ratio_by_hex": require_key(u, "los_preview_ratio_by_hex"),
         "cover_by_unit_id": cover_by_unit_id,
-        "cover_conditions_by_unit_id": cover_conditions_by_unit_id,
         "hidden_too_far_by_unit_id": build_hidden_too_far_by_unit_id(gs, u),
         "hidden_detection_info_by_unit_id": build_hidden_detection_info_by_unit_id(gs, u),
         "visible_cells_by_target": visible_cells_by_target,
@@ -1668,33 +1665,6 @@ def build_cover_by_unit_id_for_valid_targets(
             raise KeyError(f"Target {target_id_str} is in valid_target_pool but missing from los_cover_cache")
         cover_by_unit_id[target_id_str] = bool(los_cover_cache[target_id_str])
     return cover_by_unit_id
-
-
-def build_cover_conditions_by_unit_id(
-    game_state: Dict[str, Any],
-    shooter: Dict[str, Any],
-    valid_targets: List[str],
-) -> Dict[str, List[str]]:
-    """Condition 13.08 remplie par CHAQUE figurine, pour chaque cible valide.
-
-    DIAGNOSTIC D'AFFICHAGE : alimente le badge de couvert par figurine du PvP. Le couvert reste
-    tout-ou-rien pour la RÉSOLUTION (-1 BS) — celui-là se lit sur
-    ``build_cover_by_unit_id_for_valid_targets``, jamais ici.
-
-    Sans cette information, le frontend ne peut que répliquer le booléen d'unité sur chaque
-    figurine : une escouade dont une seule figurine est découverte perd le couvert, et AUCUNE
-    des figurines réellement en terrain n'affiche alors de badge — le joueur lit une inversion.
-
-    Source unique = ``compute_unit_los`` (la même que le blink et le couvert d'unité) ; le
-    pair-cache absorbe l'appel, déjà fait par les autres constructeurs de l'aperçu.
-    """
-    out: Dict[str, List[str]] = {}
-    for target_id in valid_targets:
-        target_id_str = str(target_id)
-        target_unit = require_unit_by_id(game_state, target_id_str)
-        los = compute_unit_los(game_state, shooter, target_unit)
-        out[target_id_str] = [str(c) for c in los["cover_conditions"]]
-    return out
 
 
 def build_visible_cells_by_target(
@@ -4183,16 +4153,13 @@ def compute_unit_los(
 ) -> Dict[str, Any]:
     """Single source of truth for unit→unit Line of Sight (obscuring-aware).
 
-    Returns {can_see, fully_visible, cover, cover_conditions, visible, total, visible_cells}:
+    Returns {can_see, fully_visible, cover, visible, total, visible_cells}:
     - can_see: >= 1 target model has >= 1 base cell reachable (rule 06.01 — binary,
       per-model; no visibility ratio threshold).
     - visible_cells: sorted list of (col,row) of the target footprint hexes actually seen.
     - fully_visible: every target footprint hex is reachable (no intervening terrain).
     - cover (rule 13.08, unit-level): can_see AND ((target hideable AND within a terrain area)
       OR not fully_visible).
-    - cover_conditions: la condition 13.08 remplie par CHAQUE figurine cible ("a" / "b" / "").
-      DIAGNOSTIC D'AFFICHAGE uniquement (badge par figurine) — le -1 BS se lit sur ``cover``,
-      qui reste tout-ou-rien : une seule figurine à "" annule le couvert de toute l'escouade.
 
     All shooting LoS/cover/eligibility/observation must route through this function so the engine
     enforces one consistent visibility everywhere.
@@ -4648,26 +4615,15 @@ def _compute_unit_los_uncached(
     #   (a) INFANTRY/BEASTS/SWARM et dans un terrain area (test terrain pur, indépendant du tireur),
     #   (b) pas entièrement visible par le tireur (socle partiellement masqué, ou figurine invisible).
     # Une seule figurine entièrement visible ET hors terrain area annule le couvert de toute l'unité.
-    #
-    # ``cover_conditions`` retient EN PLUS, pour chaque figurine, la condition qu'elle remplit
-    # ("a", "b", ou "" = aucune). C'est un DIAGNOSTIC d'affichage (badge de couvert par figurine
-    # côté PvP) : le -1 BS reste unité-niveau et se lit sur ``cover``, jamais ici. Le balayage est
-    # donc complet, sans la sortie anticipée que le seul booléen d'unité autoriserait — mesuré à
-    # 0,49 % du coût de cette fonction en PvP (153 us contre 31 ms/paire), et nul en entraînement
-    # où ``_resolve_target_models_for_los`` ne découpe pas la cible par figurine (boucle à un
-    # élément). La clé est TOUJOURS présente : ``assert_los_pair_cache_consistent`` compare le
-    # résultat du pair-cache à celui-ci par égalité stricte, une clé conditionnelle le casserait.
     from engine.terrain_utils import model_within_terrain
     terrain_areas = require_key(game_state, "terrain_areas")
     target_hideable = bool(target.get("hideable"))
     cover = False
-    cover_conditions: List[str] = []
     if can_see:
         all_models_covered = True
         for idx in range(len(target_model_footprints)):
             # (b) : figurine pas entièrement visible → couverte, condition remplie.
             if not model_full_vis[idx]:
-                cover_conditions.append("b")
                 continue
             # Figurine entièrement visible → doit remplir (a), sinon l'unité perd le couvert.
             center = target_model_centers[idx]
@@ -4680,19 +4636,15 @@ def _compute_unit_los_uncached(
                     terrain_areas, obscuring_only=False,
                 )
             )
-            cover_conditions.append("a" if cond_a else "")
             if not cond_a:
                 all_models_covered = False
+                break
         cover = all_models_covered
 
     return {
         "can_see": can_see,
         "fully_visible": fully_visible,
         "cover": cover,
-        # Condition 13.08 remplie par CHAQUE figurine cible, alignée index-pour-index sur les
-        # empreintes : "a" (dans un terrain area), "b" (pas entièrement visible), "" (découverte —
-        # c'est elle qui annule le couvert de l'escouade). Vide si la cible n'est pas vue.
-        "cover_conditions": cover_conditions,
         "visible": visible,
         "total": total,
         # Cellules de l'empreinte cible réellement vues (règle 06.01/13.10 par-figurine).

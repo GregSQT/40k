@@ -29,33 +29,6 @@ export function drawDetectionNumberBadgeBackground(
   g.lineStyle(0);
 }
 
-/**
- * Badge TERRAIN (condition 13.08a) : triangle montagne dans le cercle du badge.
- * Distinct du badge œil (13.08b) pour que le joueur comprenne POURQUOI la figurine est couverte.
- * `color` = couleur du glyphe : 0xc8c8c8 si le couvert est effectif, 0x6b6b6b si non qualifié.
- */
-export function drawTerrainCoverBadge(
-  g: PIXI.Graphics,
-  badgeX: number,
-  badgeY: number,
-  r: number,
-  color: number = 0xc8c8c8
-): void {
-  drawDetectionNumberBadgeBackground(g, badgeX, badgeY, r);
-  // Triangle montagne plein (symbolise la terrain area).
-  g.lineStyle(0);
-  g.beginFill(color, 1);
-  g.moveTo(badgeX, badgeY - r * 0.45);
-  g.lineTo(badgeX + r * 0.5, badgeY + r * 0.32);
-  g.lineTo(badgeX - r * 0.5, badgeY + r * 0.32);
-  g.endFill();
-  // Ligne de sol sous le triangle.
-  const lw = Math.max(0.8, r * 0.15);
-  g.lineStyle(lw * 1.5, color, 1);
-  g.moveTo(badgeX - r * 0.6, badgeY + r * 0.42);
-  g.lineTo(badgeX + r * 0.6, badgeY + r * 0.42);
-}
-
 export function drawHiddenEyeBadge(
   g: PIXI.Graphics,
   badgeX: number,
@@ -63,7 +36,16 @@ export function drawHiddenEyeBadge(
   r: number,
   eyeColor: number = 0xc8c8c8
 ): void {
-  drawDetectionNumberBadgeBackground(g, badgeX, badgeY, r);
+  // Anneau noir externe pour détacher le badge du plateau.
+  g.lineStyle(0);
+  g.beginFill(0x000000, 1);
+  g.drawCircle(badgeX, badgeY, r + 1);
+  g.endFill();
+  // Corps du badge (noir, bord gris clair).
+  g.beginFill(0x000000, 0.9);
+  g.lineStyle(1, 0xb0b0b0, 1);
+  g.drawCircle(badgeX, badgeY, r);
+  g.endFill();
   // Icône "visibility off" → gris clair = couvert ; rouge = caché trop loin (hors detection range).
   const ew = r * 0.82;
   const eh = r * 0.52;

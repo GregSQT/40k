@@ -17,11 +17,9 @@ if (import.meta.env.VITE_TEST_HOOKS === "1") {
 
 import { ORIENTATION_STEP_COUNT, orientationStepToRadians } from "../constants/gameConfig";
 import type {
-  CoverConditionsByUnitId,
   FightSubPhase,
   GameState,
   HiddenDetectionInfo,
-  ModelCoverCondition,
   PlayerId,
   TargetPreview,
   Unit,
@@ -36,18 +34,13 @@ import {
   type HPBlinkContainer,
   type HpBarHtmlTooltipPayload,
 } from "../utils/blinkingHPBar";
-import { type ModelCoverBadge, modelCoverBadge } from "../utils/coverBadgePerModel";
 import { logFightClick } from "../utils/fightClickDebug";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import {
   minHexDistanceBetweenUnitFootprintsLive,
   resolveBaseSizeForUnitDisplay,
 } from "../utils/hexFootprint";
-import {
-  drawDetectionNumberBadgeBackground,
-  drawHiddenEyeBadge,
-  drawTerrainCoverBadge,
-} from "../utils/hiddenBadgeDraw";
+import { drawDetectionNumberBadgeBackground, drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
 import { enqueueForIconLoad } from "../utils/iconLoadQueue";
 import {
   drawBattleShockBadge,
@@ -82,16 +75,6 @@ function statusBadgeRadius(HEX_RADIUS: number): number {
 
 /** Couleur de l'œil "caché trop loin" (hors detection range), distincte du gris "couvert". */
 const EYE_COLOR_TOO_FAR = 0xff3b30;
-
-/**
- * Œil ATTÉNUÉ : cette figurine remplit bien une condition de couvert (13.08), mais son escouade
- * ne qualifie pas — une autre figurine est à découvert, donc AUCUN `-1 BS` ne s'applique.
- *
- * Sans cette nuance, le badge par figurine mentirait dans l'autre sens : il annoncerait un bonus
- * que la règle refuse. Gris sombre, volontairement de la même famille que le gris "couvert"
- * (0xc8c8c8) : même signal, force moindre.
- */
-const EYE_COLOR_COVER_UNQUALIFIED = 0x6b6b6b;
 
 /**
  * Cache des textures d'icône rognées en disque (clé = chemin d'icône). Une base ronde est
@@ -286,19 +269,6 @@ interface UnitRendererProps {
   shootingTargetInCover?: boolean;
   /** Per-unit cover from move-preview LoS hover (footprint ratio); overrides shootingTargetInCover when set */
   movePreviewShootingTargetInCoverByUnitId?: Record<string, boolean>;
-  /**
-   * Condition de couvert 13.08 remplie par CHAQUE figurine, par unité cible ("a" / "b" / "").
-   * Source : `compute_unit_los(...)["cover_conditions"]` — la même que le couvert d'unité.
-   *
-   * Sert UNIQUEMENT à savoir sur quelles figurines poser le badge. Le `-1 BS` reste tout-ou-rien
-   * au niveau de l'unité et continue de se lire sur `movePreviewShootingTargetInCoverByUnitId` /
-   * `shootingTargetInCover` : une figurine peut remplir une condition dans une escouade qui
-   * n'a PAS le couvert, et le rendu doit alors la distinguer plutôt que de laisser croire au bonus.
-   *
-   * Absente pour une unité → repli sur le booléen d'unité (couvert calculé côté WASM, qui n'a pas
-   * de détail par figurine).
-   */
-  movePreviewShootingTargetCoverConditionsByUnitId?: CoverConditionsByUnitId;
   /** True if this target is hidden beyond the active shooter's detection range ("trop loin" → œil rouge). */
   hiddenTooFar?: boolean;
   /** Per-unit "trop loin" from LoS hover/blink; overrides hiddenTooFar when set. Parallèle au cover. */
@@ -569,8 +539,12 @@ export class UnitRenderer {
         (this.props.phase === "move" &&
           (this.props.mode === "select" || this.props.mode === "movePreview"));
       if (attacker && useRangedForBlinkSignature) {
+        const selectedRangedWeapon = getSelectedRangedWeapon(attacker);
+        const selectedWeaponIgnoresCover =
+          Array.isArray(selectedRangedWeapon?.WEAPON_RULES) &&
+          selectedRangedWeapon.WEAPON_RULES.some((rule) => rule === "IGNORES_COVER");
         let effectiveTargetInCover = false;
-        if (this.weaponIgnoresCover(attacker)) {
+        if (selectedWeaponIgnoresCover) {
           effectiveTargetInCover = false;
         } else if (
           (this.props.mode === "movePreview" ||
@@ -2559,32 +2533,14 @@ export class UnitRenderer {
     const r = statusBadgeRadius(HEX_RADIUS);
     const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
     // Bottom-left of a figure (mirror of the bottom-right charge badge).
-    // Badge de COUVERT ou CACHÉ : dispatche entre glyphe terrain (a) et œil (b) selon la
-    // condition 13.08, ou force le glyphe œil avec une couleur arbitraire pour les autres badges.
-    const drawCoverAt = (
-      cx: number,
-      cy: number,
-      name: string,
-      badge: Exclude<ModelCoverBadge, "none">,
-      overrideColor?: number
-    ): void => {
+    const drawBadgeAt = (cx: number, cy: number, name: string, eyeColor?: number): void => {
       const badgeX = cx - scaledOffset;
       const badgeY = cy + scaledOffset;
       const g = new PIXI.Graphics();
-      const color =
-        overrideColor ??
-        (badge === "cover-a" || badge === "cover-b" ? 0xc8c8c8 : EYE_COLOR_COVER_UNQUALIFIED);
-      if (badge === "cover-a" || badge === "cover-unqualified-a") {
-        drawTerrainCoverBadge(g, badgeX, badgeY, r, color);
-      } else {
-        drawHiddenEyeBadge(g, badgeX, badgeY, r, color);
-      }
+      drawHiddenEyeBadge(g, badgeX, badgeY, r, eyeColor);
       g.name = name;
       g.zIndex = 10001;
       targetContainer.addChild(g);
-    };
-    const drawBadgeAt = (cx: number, cy: number, name: string, eyeColor?: number): void => {
-      drawCoverAt(cx, cy, name, "cover-b", eyeColor);
     };
     const drawNumberAt = (
       cx: number,
@@ -2618,26 +2574,16 @@ export class UnitRenderer {
 
     if (this.props.statusBadgePerModel) {
       // Per-figure mode (rule 13.09) — un badge sur chaque figurine cachée (suit modelHidden), et,
-      // pour les figurines non cachées, un badge de COUVERT décidé FIGURINE PAR FIGURINE.
-      // Miroir du mode escouade plus bas : œil gris = couvert ou caché, œil rouge = caché
+      // pour les figurines non cachées, le badge de COUVERT de l'unité dès qu'il s'applique.
+      // Miroir exact du mode escouade plus bas : œil gris = couvert ou caché, œil rouge = caché
       // hors detection range, numéro = detection range effective (15" / 12" gone to ground).
-      //
-      // Le couvert 13.08 est un booléen d'UNITÉ (« if EVERY model in that unit meets one or more
-      // of the following conditions ») : le répliquer tel quel sur chaque figurine donne une
-      // lecture inversée. Une escouade de 5 dont 4 sont en terrain et 1 à découvert n'a PAS le
-      // couvert, et aucune des 4 n'affichait alors de badge. On lit donc `cover_conditions`, la
-      // condition remplie par CHAQUE figurine, et on distingue trois cas :
-      //   - condition remplie ET unité qualifiée  → œil plein : le -1 BS s'applique vraiment ;
-      //   - condition remplie mais unité NON qualifiée → œil atténué : la figurine est
-      //     géométriquement protégée, mais l'escouade ne touche aucun bonus ;
-      //   - aucune condition → pas de badge : c'est cette figurine qui coûte le couvert au groupe.
-      // Sans le second cas, on remplacerait simplement un affichage faux par un autre.
+      // Le couvert est un booléen d'UNITÉ (cover_by_unit_id) : sur une escouade de plusieurs
+      // figurines, il est répliqué sur chacune faute d'un cover_by_model_id côté moteur.
       const centers = this.props.modelCenters;
       const flags = this.props.modelHidden;
       if (!centers || !flags) return;
       const tooFar = this.getEffectiveTargetTooFar(attacker);
       const inCover = this.getEffectiveTargetInCover(attacker);
-      const coverConditions = this.getEffectiveTargetCoverConditions(attacker);
       centers.forEach(([cx, cy], i) => {
         const name = `hidden-badge-${unitIdNum}-${i}`;
         if (flags[i]) {
@@ -2656,9 +2602,9 @@ export class UnitRenderer {
           return;
         }
         // Figurine non cachée : seul le couvert peut lui valoir un badge.
-        const badge = modelCoverBadge(i, coverConditions, inCover);
-        if (badge === "none") return;
-        drawCoverAt(cx, cy, name, badge);
+        if (inCover) {
+          drawBadgeAt(cx, cy, name);
+        }
       });
       return;
     }
@@ -2769,11 +2715,6 @@ export class UnitRenderer {
     );
   }
 
-  private weaponIgnoresCover(attacker: Unit): boolean {
-    const w = getSelectedRangedWeapon(attacker);
-    return Array.isArray(w?.WEAPON_RULES) && w.WEAPON_RULES.some((r) => r === "IGNORES_COVER");
-  }
-
   /** Couvert effectif de cette unité-cible vis-à-vis du tireur (ajusté IGNORES_COVER). */
   private getEffectiveTargetInCover(attacker: Unit | null): boolean {
     if (!attacker) {
@@ -2788,7 +2729,11 @@ export class UnitRenderer {
     if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
       return false;
     }
-    if (this.weaponIgnoresCover(attacker)) {
+    const selectedRangedWeapon = getSelectedRangedWeapon(attacker);
+    const selectedWeaponIgnoresCover =
+      Array.isArray(selectedRangedWeapon?.WEAPON_RULES) &&
+      selectedRangedWeapon.WEAPON_RULES.some((rule) => rule === "IGNORES_COVER");
+    if (selectedWeaponIgnoresCover) {
       return false;
     }
     if (
@@ -2806,38 +2751,6 @@ export class UnitRenderer {
       }
     }
     return this.props.shootingTargetInCover === true;
-  }
-
-  /**
-   * Condition 13.08 remplie par CHAQUE figurine de cette unité-cible, ou `null` quand le moteur
-   * ne l'a pas fournie (couvert calculé côté WASM) — l'appelant retombe alors sur le booléen
-   * d'unité, comportement historique.
-   *
-   * Miroir exact de ``getEffectiveTargetInCover`` : mêmes gates de contexte, même court-circuit
-   * IGNORES_COVER. Diverger sur l'un des deux ferait clignoter des badges dans des contextes où
-   * le couvert d'unité, lui, ne s'affiche pas.
-   */
-  private getEffectiveTargetCoverConditions(attacker: Unit | null): ModelCoverCondition[] | null {
-    if (!attacker) {
-      return null;
-    }
-    const map = this.props.movePreviewShootingTargetCoverConditionsByUnitId;
-    if (!map) {
-      return null;
-    }
-    const movePhaseLosHover =
-      this.props.phase === "move" &&
-      (this.props.mode === "select" ||
-        this.props.mode === "movePreview" ||
-        this.props.mode === "perModelMove");
-    if (this.props.phase !== "shoot" && this.props.mode !== "movePreview" && !movePhaseLosHover) {
-      return null;
-    }
-    if (this.weaponIgnoresCover(attacker)) {
-      return null;
-    }
-    const key = String(this.props.unit.id);
-    return Object.hasOwn(map, key) ? map[key] : null;
   }
 
   /** "Trop loin" : cette unité-cible est cachée hors detection range du tireur (œil rouge).
