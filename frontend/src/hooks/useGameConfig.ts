@@ -68,8 +68,11 @@ interface ObjectiveZone {
 }
 
 interface Wall {
+  id?: string;
+  start: { col: number; row: number };
+  end: { col: number; row: number };
+  thickness?: number;
   type?: "dense" | "light";
-  hexes: [number, number][];
 }
 
 interface BoardConfig {

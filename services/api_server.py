@@ -5278,8 +5278,7 @@ def get_board_config():
                 )
 
         wall_hexes: list = []
-        wall_groups_out: list[dict] = []
-        _dense_group = lambda hexes: {"type": "dense", "hexes": [[int(h[0]), int(h[1])] for h in hexes]}
+        wall_segments_raw: list[dict] = []
         if scenario_file and isinstance(scenario_data, dict) and "wall_hexes" in scenario_data:
             scenario_wall_hexes = scenario_data.get("wall_hexes")
             if not isinstance(scenario_wall_hexes, list):
@@ -5289,7 +5288,6 @@ def get_board_config():
                 from engine.game_state import GameStateManager as _GSM
                 wall_hexes = _GSM._downscale_terrain_data(
                     {"walls": [{"hexes": wall_hexes}]}, board_data_ratio)["walls"][0]["hexes"]
-            wall_groups_out.append(_dense_group(wall_hexes))
         elif wall_ref and wall_ref.endswith(".json"):
             wall_path = board_data_dir / "walls" / wall_ref
             if not wall_path.exists():
@@ -5306,16 +5304,23 @@ def get_board_config():
                     if not isinstance(g, dict):
                         raise ValueError(f"wall group {gi} must be an object")
                     hint = f"{wall_path} walls[{gi}]"
-                    group_hexes = expand_wall_group_to_hex_list(g, path_hint=hint)
-                    wall_hexes.extend(group_hexes)
-                    wall_groups_out.append({"type": g.get("type", "dense"), "hexes": group_hexes})
+                    has_segments = bool(g.get("segments"))
+                    if has_segments:
+                        for seg in g["segments"]:
+                            if isinstance(seg, list) and len(seg) == 2:
+                                a, b = seg[0], seg[1]
+                                wall_segments_raw.append({
+                                    "start": {"col": int(a[0]), "row": int(a[1])},
+                                    "end": {"col": int(b[0]), "row": int(b[1])},
+                                })
+                    from engine.hex_utils import expand_wall_group_to_hex_list as _expand
+                    wall_hexes.extend(_expand(g, path_hint=hint))
             elif "wall_hexes" in wall_data:
                 wall_hexes = wall_data["wall_hexes"]
                 if board_data_ratio != 1:
                     from engine.game_state import GameStateManager as _GSM
                     wall_hexes = _GSM._downscale_terrain_data(
                         {"walls": [{"hexes": wall_hexes}]}, board_data_ratio)["walls"][0]["hexes"]
-                wall_groups_out.append(_dense_group(wall_hexes))
             else:
                 raise ValueError(f"Wall file {wall_path} must contain 'walls' or 'wall_hexes'")
 
@@ -5325,8 +5330,8 @@ def get_board_config():
 
         merged = dict(board_spec)
         merged["wall_hexes"] = wall_hexes
-        if wall_groups_out:
-            merged["walls"] = wall_groups_out
+        if wall_segments_raw:
+            merged["walls"] = wall_segments_raw
         def _zone_entry(o: dict) -> dict:
             entry: dict = {"id": str(o["id"]), "name": str(o.get("name", o["id"])), "hexes": o["hexes"]}
             if "shape" in o:
@@ -5388,12 +5393,18 @@ def get_board_config():
             for gi, g in enumerate(terrain_data.get("walls", [])):
                 if not isinstance(g, dict):
                     continue
-                group_hexes = expand_wall_group_to_hex_list(g, path_hint=f"board terrain ({board_subdir}) walls[{gi}]")
-                wall_hexes.extend(group_hexes)
-                wall_groups_out.append({"type": g.get("type", "dense"), "hexes": group_hexes})
+                for seg in g.get("segments", []):
+                    if isinstance(seg, list) and len(seg) == 2:
+                        a, b = seg[0], seg[1]
+                        wall_segments_raw.append({
+                            "start": {"col": int(a[0]), "row": int(a[1])},
+                            "end":   {"col": int(b[0]), "row": int(b[1])},
+                            "type":  g.get("type", "dense"),
+                        })
+                wall_hexes.extend(expand_wall_group_to_hex_list(g, path_hint=f"board terrain ({board_subdir}) walls[{gi}]"))
             merged["wall_hexes"] = wall_hexes
-            if wall_groups_out:
-                merged["walls"] = wall_groups_out
+            if wall_segments_raw:
+                merged["walls"] = wall_segments_raw
         merged["terrain_zones"] = terrain_zones
         merged["terrain_icons"] = terrain_icons
         merged["deployment_zones"] = deployment_zones_cfg

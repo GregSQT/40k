@@ -792,6 +792,7 @@ function appendMovePreviewMaskTilesAndCoverageToParent(
 // plateau), converties en pouces : le rendu x5 est inchangé au pixel près, le x1 s'aligne dessus.
 // Conversion : `hex_radius * inches_to_subhex` = pixels par pouce (13,90 sur les plateaux 44×60).
 const WALL_DOT_RADIUS_INCHES = 0.2;
+const WALL_SEGMENT_HALF_WIDTH_INCHES = Math.sqrt(3) / 5;
 
 interface BoardConfig {
   cols: number;
@@ -866,8 +867,10 @@ interface BoardConfig {
   }>;
   wall_hexes: [number, number][];
   walls?: Array<{
+    start: { col: number; row: number };
+    end: { col: number; row: number };
+    thickness?: number;
     type?: "light" | "dense";
-    hexes: [number, number][];
   }>;
   terrain_zones?: Array<{
     id: string;
@@ -3094,13 +3097,14 @@ export const drawBoard = (
     }
     app.stage.addChild(highlightContainer);
 
-    // Render wall groups as filled hex-polygon unions.
+    // Render wall segments as filled polygons.
     // Skip if reusing static layers (walls are already on stage).
     let wallsResult: PIXI.Container | null = null;
     if (!reuseStatic && boardConfig.walls && boardConfig.walls.length > 0) {
       const wallsContainer = new PIXI.Container();
       wallsContainer.name = "walls";
 
+      const halfW = HEX_RADIUS * boardConfig.inches_to_subhex * WALL_SEGMENT_HALF_WIDTH_INCHES;
       const wallTextureLightPath =
         boardConfig.display?.wall_texture_light?.trim() || "/textures/wall1.webp";
       const wallTextureDensePath =
@@ -3117,23 +3121,26 @@ export const drawBoard = (
         row * HEX_VERT_SPACING + ((col % 2) * HEX_VERT_SPACING) / 2 + HEX_HEIGHT / 2 + MARGIN,
       ];
 
-      boardConfig.walls.forEach((wallGroup) => {
-        if (!wallGroup.hexes || wallGroup.hexes.length === 0) return;
+      boardConfig.walls.forEach((wall) => {
+        const [sx, sy] = toPixel(wall.start.col, wall.start.row);
+        const [ex, ey] = toPixel(wall.end.col, wall.end.row);
+
+        const dx = ex - sx,
+          dy = ey - sy;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (len < 0.01) return;
+        const nx = (-dy / len) * halfW;
+        const ny = (dx / len) * halfW;
+
         const g = new PIXI.Graphics();
-        if (wallGroup.type === "light") {
+        if (wall.type === "light") {
           g.beginTextureFill({ texture: wallTextureLight, alpha: wallTextureAlpha });
         } else {
           g.beginTextureFill({ texture: wallTextureDense, alpha: wallTextureAlpha });
         }
-        for (const [col, row] of wallGroup.hexes) {
-          const [cx, cy] = toPixel(col, row);
-          const corners: number[] = [];
-          for (let i = 0; i < 6; i++) {
-            const angle = (Math.PI / 3) * i;
-            corners.push(cx + HEX_RADIUS * Math.cos(angle), cy + HEX_RADIUS * Math.sin(angle));
-          }
-          g.drawPolygon(corners);
-        }
+        g.drawCircle(sx, sy, halfW);
+        g.drawCircle(ex, ey, halfW);
+        g.drawPolygon([sx + nx, sy + ny, ex + nx, ey + ny, ex - nx, ey - ny, sx - nx, sy - ny]);
         g.endFill();
         wallsContainer.addChild(g);
       });
