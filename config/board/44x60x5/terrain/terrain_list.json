@@ -4,13 +4,13 @@
     "label": "Terrain 1",
     "preview_image": "/icons/Terrain/terrain-mc1.jpg",
     "modes": ["pvp", "pvp_test", "pve", "pve_test"],
-    "default_for": ["pvp_test", "pve_test"]
+    "default_for": ["pve"]
   },
   {
     "id": "mc2",
     "label": "Terrain 2",
     "preview_image": "/icons/Terrain/terrain-mc2.jpg",
     "modes": ["pvp", "pvp_test", "pve", "pve_test"],
-    "default_for": ["pvp", "pve"]
+    "default_for": ["pvp", "pvp_test", "pve_test"]
   }
 ]
