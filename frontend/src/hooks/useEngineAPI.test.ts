@@ -15,7 +15,36 @@ import { setupServer } from "msw/node";
 import React from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Unit, Weapon } from "../types/game";
+import { setTerrainList, type TerrainEntry } from "../utils/terrainSelection";
 import { useEngineAPI } from "./useEngineAPI";
+
+/** Liste de terrains servie par /api/config/terrain-list en production (terrain_list.json).
+ *  Les deux consommateurs la reçoivent ensemble : la liste GLOBALE (lue par `terrainsForMode` /
+ *  `resolveSelectedTerrain`) et la prop du hook, qui débloque le démarrage de partie. Monter le
+ *  hook sans elle, c'est le montage d'AVANT la réponse du fetch : aucune partie ne démarre. */
+const TEST_TERRAIN_LIST: TerrainEntry[] = [
+  {
+    id: "mc1",
+    label: "Terrain 1",
+    preview_image: "/icons/Terrain/terrain-mc1.jpg",
+    modes: ["pvp", "pvp_test", "pve", "pve_test"],
+    default_for: ["pve"],
+  },
+  {
+    id: "mc2",
+    label: "Terrain 2",
+    preview_image: "/icons/Terrain/terrain-mc2.jpg",
+    modes: ["pvp", "pvp_test", "pve", "pve_test"],
+    default_for: ["pvp", "pvp_test", "pve_test"],
+  },
+  {
+    id: "pfm2",
+    label: "Purge the Foe mirror 2",
+    preview_image: "/icons/Terrain/terrain-pfm2.jpg",
+    modes: ["pvp", "pvp_test", "pve"],
+    default_for: [],
+  },
+];
 
 // ---------------------------------------------------------------------------
 // ErrorBoundary pour tester les hooks qui lancent une exception sur erreur
@@ -136,6 +165,7 @@ const FAKE_SESSION = JSON.stringify({
 
 beforeEach(() => {
   localStorage.setItem("w40k_auth_session_v2", FAKE_SESSION);
+  setTerrainList(TEST_TERRAIN_LIST);
 });
 
 // ---------------------------------------------------------------------------
@@ -144,7 +174,7 @@ beforeEach(() => {
 
 describe("useEngineAPI — eligibleUnitIds", () => {
   it("phase move → eligibleUnitIds = move_activation_pool (en nombres)", async () => {
-    const { result } = renderHook(() => useEngineAPI());
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
 
     await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
 
@@ -167,7 +197,7 @@ describe("useEngineAPI — eligibleUnitIds", () => {
       )
     );
 
-    const { result } = renderHook(() => useEngineAPI());
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
     await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
 
     expect(result.current.eligibleUnitIds).toEqual([5, 6]);
@@ -188,7 +218,7 @@ describe("useEngineAPI — eligibleUnitIds", () => {
       )
     );
 
-    const { result } = renderHook(() => useEngineAPI());
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
     await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
 
     expect(result.current.eligibleUnitIds).toEqual([7, 8, 9]);
@@ -209,7 +239,7 @@ describe("useEngineAPI — eligibleUnitIds", () => {
       )
     );
 
-    const { result } = renderHook(() => useEngineAPI());
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
     await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
 
     expect(result.current.eligibleUnitIds).toEqual([11, 12]);
@@ -226,7 +256,7 @@ describe("useEngineAPI — eligibleUnitIds", () => {
       )
     );
 
-    const { result } = renderHook(() => useEngineAPI());
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
     await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
 
     expect(result.current.eligibleUnitIds).toEqual([]);
@@ -258,7 +288,7 @@ describe("useEngineAPI — gestion d'erreur", () => {
         children,
       });
 
-    renderHook(() => useEngineAPI(), { wrapper });
+    renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }), { wrapper });
     await waitFor(() => expect(caughtError).not.toBeNull(), { timeout: 5000 });
 
     expect(caughtError).toContain("scénario introuvable");
@@ -282,7 +312,7 @@ describe("useEngineAPI — gestion d'erreur", () => {
         children,
       });
 
-    renderHook(() => useEngineAPI(), { wrapper });
+    renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }), { wrapper });
     await waitFor(() => expect(caughtError).not.toBeNull(), { timeout: 5000 });
 
     expect(caughtError).toBeTruthy();
@@ -296,7 +326,7 @@ describe("useEngineAPI — gestion d'erreur", () => {
 
 describe("useEngineAPI — état de chargement", () => {
   it("loading=true au premier render, eligibleUnitIds = [] pendant le chargement", () => {
-    const { result } = renderHook(() => useEngineAPI());
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
     // Synchronous: before any await, loading is true
     expect(result.current.loading).toBe(true);
     expect(result.current.eligibleUnitIds).toEqual([]);
@@ -327,7 +357,7 @@ describe("useEngineAPI — movePreview", () => {
       })
     );
 
-    const { result } = renderHook(() => useEngineAPI());
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
     await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
 
     await act(async () => {
@@ -388,7 +418,7 @@ describe("useEngineAPI — targetPreview", () => {
       })
     );
 
-    const { result } = renderHook(() => useEngineAPI());
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
     // Attendre que le hook soit ENTIÈREMENT prêt : loading=false ET maxTurns chargé.
     // maxTurnsFromConfig === null → chemin de chargement → onStartTargetPreview: () => {}
     await waitFor(
@@ -419,7 +449,7 @@ describe("useEngineAPI — targetPreview", () => {
         HttpResponse.json({ success: true, game_state: makeGameState() })
       )
     );
-    const { result } = renderHook(() => useEngineAPI());
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
     await waitFor(
       () => {
         expect(result.current.loading).toBe(false);
@@ -457,7 +487,7 @@ describe("useEngineAPI — terrain_ref envoyé au démarrage", () => {
     const captured = captureStartBody();
     window.history.replaceState({}, "", "/game?terrain=pfm2");
 
-    const { result } = renderHook(() => useEngineAPI());
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
     await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
 
     expect(captured.value).not.toBeNull();
@@ -469,9 +499,29 @@ describe("useEngineAPI — terrain_ref envoyé au démarrage", () => {
     const captured = captureStartBody();
     window.history.replaceState({}, "", "/game");
 
-    const { result } = renderHook(() => useEngineAPI());
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
     await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
 
     expect(captured.value?.terrain_ref).toBe("mc2");
+  });
+
+  it("liste pas encore chargée → aucune partie démarrée, puis démarrage avec le terrain choisi", async () => {
+    const captured = captureStartBody();
+    window.history.replaceState({}, "", "/game?terrain=mc1");
+    // Montage d'AVANT la réponse de /api/config/terrain-list : c'est l'état réel au mount, et
+    // c'est là que `terrain_ref` se perdait. Démarrer ici enverrait une partie sans terrain choisi.
+    const { result, rerender } = renderHook(
+      ({ list }: { list?: TerrainEntry[] }) => useEngineAPI({ terrainList: list }),
+      { initialProps: { list: undefined as TerrainEntry[] | undefined } }
+    );
+
+    // Rien ne part tant que la liste manque — et le hook reste en chargement.
+    await waitFor(() => expect(result.current.loading).toBe(true), { timeout: 5000 });
+    expect(captured.value).toBeNull();
+
+    // La liste arrive : le démarrage se déclenche, avec le terrain demandé.
+    rerender({ list: TEST_TERRAIN_LIST });
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+    expect(captured.value?.terrain_ref).toBe("mc1");
   });
 });

@@ -5,8 +5,40 @@
 // cf. Documentation/Chantiers/Replay.md §2.4.
 
 import { renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setTerrainList, type TerrainEntry } from "../utils/terrainSelection";
 import { useGameConfig } from "./useGameConfig";
+
+/** Liste servie par /api/config/terrain-list. Le hook l'ATTEND avant de demander le plateau
+ *  (`if (!terrainList) return;`) et `resolveSelectedTerrain` lit la liste GLOBALE : sans les deux,
+ *  aucune requête ne part et tout le fichier échoue sur un plateau resté nul. */
+const TEST_TERRAIN_LIST: TerrainEntry[] = [
+  {
+    id: "mc1",
+    label: "Terrain 1",
+    preview_image: "/icons/Terrain/terrain-mc1.jpg",
+    modes: ["pvp", "pvp_test", "pve", "pve_test"],
+    default_for: ["pve"],
+  },
+  {
+    id: "mc2",
+    label: "Terrain 2",
+    preview_image: "/icons/Terrain/terrain-mc2.jpg",
+    modes: ["pvp", "pvp_test", "pve", "pve_test"],
+    default_for: ["pvp", "pvp_test", "pve_test"],
+  },
+  {
+    id: "pfm2",
+    label: "Purge the Foe mirror 2",
+    preview_image: "/icons/Terrain/terrain-pfm2.jpg",
+    modes: ["pvp", "pvp_test", "pve"],
+    default_for: [],
+  },
+];
+
+beforeEach(() => {
+  setTerrainList(TEST_TERRAIN_LIST);
+});
 
 const { apiFetchMock } = vi.hoisted(() => ({ apiFetchMock: vi.fn() }));
 vi.mock("../services/apiFetch", () => ({ apiFetch: apiFetchMock }));
@@ -71,7 +103,11 @@ describe("useGameConfig — résolution servie vs demandée", () => {
     mockServer(5);
 
     const { result } = renderHook(() =>
-      useGameConfig({ inchesToSubhexOverride: 1, scenarioFileOverride: "config/scenario_x1.json" })
+      useGameConfig({
+        inchesToSubhexOverride: 1,
+        scenarioFileOverride: "config/scenario_x1.json",
+        terrainList: TEST_TERRAIN_LIST,
+      })
     );
 
     await waitFor(() => expect(result.current.error).not.toBeNull());
@@ -85,7 +121,11 @@ describe("useGameConfig — résolution servie vs demandée", () => {
     mockServer(1);
 
     const { result } = renderHook(() =>
-      useGameConfig({ inchesToSubhexOverride: 1, scenarioFileOverride: "config/scenario_x1.json" })
+      useGameConfig({
+        inchesToSubhexOverride: 1,
+        scenarioFileOverride: "config/scenario_x1.json",
+        terrainList: TEST_TERRAIN_LIST,
+      })
     );
 
     await waitFor(() => expect(result.current.boardConfig).not.toBeNull());
@@ -115,7 +155,7 @@ describe("useGameConfig — le terrain choisi décide du scénario demandé", ()
     mockServer(5);
     window.history.replaceState({}, "", `/game${search}`);
 
-    const { result } = renderHook(() => useGameConfig({}));
+    const { result } = renderHook(() => useGameConfig({ terrainList: TEST_TERRAIN_LIST }));
 
     await waitFor(() => expect(apiFetchMock).toHaveBeenCalled());
     expect(scenarioDemande()).toBe(attendu);
