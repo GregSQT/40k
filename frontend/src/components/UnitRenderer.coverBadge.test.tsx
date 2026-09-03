@@ -10,17 +10,25 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-/** Graphics minimal : on retient le nom du badge et les couleurs de trait, seuls faits observés. */
+/**
+ * Graphics minimal : on retient le nom, les couleurs de trait, les couleurs de remplissage
+ * (non-noires, pour ignorer les fonds), et si `quadraticCurveTo` a été appelé — ce qui distingue
+ * le glyphe œil (13.08b) du glyphe terrain (13.08a) qui n'a que moveTo/lineTo.
+ */
 class FakeGraphics {
   name = "";
   zIndex = 0;
   children: unknown[] = [];
   strokeColors: number[] = [];
+  fillColors: number[] = [];
+  /** true si l'œil en amande a été dessiné (quadraticCurveTo) — discrimine glyphe œil vs terrain. */
+  hasEyeCurve = false;
   lineStyle(_width?: number, color?: number) {
     if (typeof color === "number") this.strokeColors.push(color);
     return this;
   }
-  beginFill() {
+  beginFill(color?: number) {
+    if (typeof color === "number" && color !== 0x000000) this.fillColors.push(color);
     return this;
   }
   endFill() {
@@ -36,6 +44,7 @@ class FakeGraphics {
     return this;
   }
   quadraticCurveTo() {
+    this.hasEyeCurve = true;
     return this;
   }
   addChild(child: unknown) {
@@ -116,25 +125,33 @@ function buildRenderer(overrides: Record<string, unknown>) {
   return { renderer, uiElementsContainer };
 }
 
-/** Badges effectivement posés : index de figurine → couleur de l'œil. */
-function drawnBadges(container: FakeContainer): Map<number, number> {
-  const out = new Map<number, number>();
+/**
+ * Badges effectivement posés : index de figurine → { color, isEye }.
+ * `color` = couleur du glyphe (0xc8c8c8 plein ou 0x6b6b6b atténué).
+ * `isEye` = true si glyphe œil (quadraticCurveTo), false si glyphe terrain (triangle).
+ */
+function drawnBadges(container: FakeContainer): Map<number, { color: number; isEye: boolean }> {
+  const out = new Map<number, { color: number; isEye: boolean }>();
   for (const child of container.children) {
     const match = /^hidden-badge-\d+-(\d+)$/.exec(child.name);
     if (!match) continue;
-    const eye = child.strokeColors.find((c) => c === EYE_COVER || c === EYE_COVER_UNQUALIFIED);
-    if (eye !== undefined) out.set(Number(match[1]), eye);
+    const color = child.strokeColors.find((c) => c === EYE_COVER || c === EYE_COVER_UNQUALIFIED);
+    if (color !== undefined) {
+      out.set(Number(match[1]), { color, isEye: child.hasEyeCurve });
+    }
   }
   return out;
 }
 
-function renderBadges(overrides: Record<string, unknown>): Map<number, number> {
+function renderBadges(overrides: Record<string, unknown>): Map<number, { color: number; isEye: boolean }> {
   const { renderer, uiElementsContainer } = buildRenderer(overrides);
   (renderer as unknown as { renderHiddenBadge: (s: number) => void }).renderHiddenBadge(1);
   return drawnBadges(uiElementsContainer);
 }
 
-describe("UnitRenderer — badge de couvert par figurine (4 dans le terrain, 1 dehors)", () => {
+const CONDITIONS_4A_1EXPOSED = ["a", "a", "", "a", "a"] as const;
+
+describe("UnitRenderer — badge de couvert par figurine (4 dans le terrain condition a, 1 dehors)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -144,20 +161,18 @@ describe("UnitRenderer — badge de couvert par figurine (4 dans le terrain, 1 d
       shootingTargetInCover: false,
       movePreviewShootingTargetInCoverByUnitId: { [TARGET_ID]: false },
       movePreviewShootingTargetCoverConditionsByUnitId: {
-        [TARGET_ID]: ["a", "a", "", "a", "a"],
+        [TARGET_ID]: [...CONDITIONS_4A_1EXPOSED],
       },
     });
     expect(badges.has(2)).toBe(false);
   });
 
   it("pose un badge sur les 4 figurines protégées, alors que l'unité n'a pas le couvert", () => {
-    // C'EST le défaut corrigé : avec le booléen d'unité répliqué, ces 4 figurines n'avaient
-    // aucun badge alors qu'elles sont visiblement dans le terrain.
     const badges = renderBadges({
       shootingTargetInCover: false,
       movePreviewShootingTargetInCoverByUnitId: { [TARGET_ID]: false },
       movePreviewShootingTargetCoverConditionsByUnitId: {
-        [TARGET_ID]: ["a", "a", "", "a", "a"],
+        [TARGET_ID]: [...CONDITIONS_4A_1EXPOSED],
       },
     });
     expect([...badges.keys()].sort()).toEqual([0, 1, 3, 4]);
@@ -168,16 +183,30 @@ describe("UnitRenderer — badge de couvert par figurine (4 dans le terrain, 1 d
       shootingTargetInCover: false,
       movePreviewShootingTargetInCoverByUnitId: { [TARGET_ID]: false },
       movePreviewShootingTargetCoverConditionsByUnitId: {
-        [TARGET_ID]: ["a", "a", "", "a", "a"],
+        [TARGET_ID]: [...CONDITIONS_4A_1EXPOSED],
       },
     });
-    expect([...badges.values()]).toEqual([
+    const colors = [...badges.values()].map((b) => b.color);
+    expect(colors).toEqual([
       EYE_COVER_UNQUALIFIED,
       EYE_COVER_UNQUALIFIED,
       EYE_COVER_UNQUALIFIED,
       EYE_COVER_UNQUALIFIED,
     ]);
-    expect([...badges.values()]).not.toContain(EYE_COVER);
+    expect(colors).not.toContain(EYE_COVER);
+  });
+
+  it("utilise le glyphe TERRAIN (pas l'œil) pour la condition (a) — terrain area", () => {
+    const badges = renderBadges({
+      shootingTargetInCover: false,
+      movePreviewShootingTargetInCoverByUnitId: { [TARGET_ID]: false },
+      movePreviewShootingTargetCoverConditionsByUnitId: {
+        [TARGET_ID]: [...CONDITIONS_4A_1EXPOSED],
+      },
+    });
+    for (const [, badge] of badges) {
+      expect(badge.isEye).toBe(false);
+    }
   });
 });
 
@@ -191,12 +220,28 @@ describe("UnitRenderer — badge de couvert par figurine, unité qui qualifie", 
       },
     });
     expect([...badges.keys()].sort()).toEqual([0, 1, 2, 3, 4]);
-    expect(new Set(badges.values())).toEqual(new Set([EYE_COVER]));
+    expect(new Set([...badges.values()].map((b) => b.color))).toEqual(new Set([EYE_COVER]));
+  });
+
+  it("dispatche le glyphe TERRAIN pour (a) et ŒEIL pour (b) dans une escouade mixte", () => {
+    // Conditions : ["a", "b", "a", "b", "a"] → index 0, 2, 4 = terrain ; index 1, 3 = œil.
+    const badges = renderBadges({
+      shootingTargetInCover: true,
+      movePreviewShootingTargetInCoverByUnitId: { [TARGET_ID]: true },
+      movePreviewShootingTargetCoverConditionsByUnitId: {
+        [TARGET_ID]: ["a", "b", "a", "b", "a"],
+      },
+    });
+    expect(badges.get(0)?.isEye).toBe(false); // condition a → terrain
+    expect(badges.get(1)?.isEye).toBe(true); // condition b → œil
+    expect(badges.get(2)?.isEye).toBe(false);
+    expect(badges.get(3)?.isEye).toBe(true);
+    expect(badges.get(4)?.isEye).toBe(false);
   });
 });
 
 describe("UnitRenderer — repli quand le moteur ne fournit pas le détail par figurine", () => {
-  it("garde le comportement historique : booléen d'unité répliqué sur chaque figurine", () => {
+  it("garde le comportement historique : booléen d'unité répliqué, glyphe œil par défaut", () => {
     // Couvert calculé côté WASM : aucune condition par figurine n'est transmise.
     const badges = renderBadges({
       shootingTargetInCover: true,
@@ -204,7 +249,11 @@ describe("UnitRenderer — repli quand le moteur ne fournit pas le détail par f
       movePreviewShootingTargetCoverConditionsByUnitId: undefined,
     });
     expect([...badges.keys()].sort()).toEqual([0, 1, 2, 3, 4]);
-    expect(new Set(badges.values())).toEqual(new Set([EYE_COVER]));
+    expect(new Set([...badges.values()].map((b) => b.color))).toEqual(new Set([EYE_COVER]));
+    // Glyphe œil (quadraticCurveTo) car condition inconnue → repli sur (b).
+    for (const [, badge] of badges) {
+      expect(badge.isEye).toBe(true);
+    }
   });
 
   it("ne pose aucun badge quand l'unité n'a pas le couvert et qu'aucun détail n'est fourni", () => {

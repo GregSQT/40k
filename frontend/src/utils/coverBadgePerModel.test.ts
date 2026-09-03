@@ -19,9 +19,11 @@ describe("modelCoverBadge — escouade 4-dans-terrain / 1-dehors", () => {
     expect(modelCoverBadge(2, FOUR_IN_TERRAIN_ONE_EXPOSED, false)).toBe("none");
   });
 
-  it("distingue les 4 figurines protégées, sans leur promettre le -1 BS que l'unité n'a pas", () => {
+  it("distingue les 4 figurines protégées (condition a), sans leur promettre le -1 BS que l'unité n'a pas", () => {
     for (const index of [0, 1, 3, 4]) {
-      expect(modelCoverBadge(index, FOUR_IN_TERRAIN_ONE_EXPOSED, false)).toBe("cover-unqualified");
+      expect(modelCoverBadge(index, FOUR_IN_TERRAIN_ONE_EXPOSED, false)).toBe(
+        "cover-unqualified-a"
+      );
     }
   });
 
@@ -31,36 +33,39 @@ describe("modelCoverBadge — escouade 4-dans-terrain / 1-dehors", () => {
     const badges = FOUR_IN_TERRAIN_ONE_EXPOSED.map((_c, i) =>
       modelCoverBadge(i, FOUR_IN_TERRAIN_ONE_EXPOSED, false)
     );
-    expect(badges).not.toContain("cover");
+    expect(badges).not.toContain("cover-a");
+    expect(badges).not.toContain("cover-b");
     expect(badges).toEqual([
-      "cover-unqualified",
-      "cover-unqualified",
+      "cover-unqualified-a",
+      "cover-unqualified-a",
       "none",
-      "cover-unqualified",
-      "cover-unqualified",
+      "cover-unqualified-a",
+      "cover-unqualified-a",
     ]);
   });
 });
 
 describe("modelCoverBadge — unité qui qualifie", () => {
-  it("affiche le badge plein sur chaque figurine quand toutes remplissent une condition", () => {
+  it("préserve la condition (a/b) dans le badge quand l'unité qualifie", () => {
     const conditions: ModelCoverCondition[] = ["a", "b", "a", "b", "a"];
     const badges = conditions.map((_c, i) => modelCoverBadge(i, conditions, true));
-    expect(badges).toEqual(["cover", "cover", "cover", "cover", "cover"]);
+    expect(badges).toEqual(["cover-a", "cover-b", "cover-a", "cover-b", "cover-a"]);
   });
 
-  it("traite (b) — pas entièrement visible — exactement comme (a)", () => {
-    expect(modelCoverBadge(0, ["b"], true)).toBe("cover");
-    expect(modelCoverBadge(0, ["b"], false)).toBe("cover-unqualified");
+  it("distingue (a) terrain de (b) visibilité dans le badge — condition portée dans le type", () => {
+    expect(modelCoverBadge(0, ["a"], true)).toBe("cover-a");
+    expect(modelCoverBadge(0, ["b"], true)).toBe("cover-b");
+    expect(modelCoverBadge(0, ["a"], false)).toBe("cover-unqualified-a");
+    expect(modelCoverBadge(0, ["b"], false)).toBe("cover-unqualified-b");
   });
 });
 
 describe("modelCoverBadge — absence de détail par figurine", () => {
-  it("retombe sur le booléen d'unité quand le moteur ne fournit pas les conditions", () => {
+  it("retombe sur le booléen d'unité quand le moteur ne fournit pas les conditions (glyphe œil par défaut)", () => {
     // Couvert calculé côté WASM : pas de détail par figurine. On garde le comportement
-    // historique plutôt que de reconstruire un second modèle de couvert côté client.
-    expect(modelCoverBadge(0, null, true)).toBe("cover");
-    expect(modelCoverBadge(3, null, true)).toBe("cover");
+    // historique (œil) plutôt que de reconstruire un second modèle de couvert côté client.
+    expect(modelCoverBadge(0, null, true)).toBe("cover-b");
+    expect(modelCoverBadge(3, null, true)).toBe("cover-b");
     expect(modelCoverBadge(0, null, false)).toBe("none");
   });
 
