@@ -219,24 +219,43 @@ def _read_ratio_in_child(queue) -> None:
     queue.put(cfg["deployment_mode_schedule"]["active_ratio_start"])
 
 
-# ── Verrou structurel : aucun site de construction ne peut oublier l'argument ────────────────
+# ── Verrou structurel : aucun site de construction ne peut oublier un membre de la famille ───
 #
 # Le defaut d'origine n'etait pas une valeur fausse mais un site OUBLIE : le figeage n'atteignait
 # pas le moteur du worker. Un test de comportement ne couvre pas un site qui n'existe pas encore ;
 # celui-ci lit l'AST de `ai/train.py` et exige que la famille reste complete.
 #
-# `training_episode_start_index` sert de marqueur : c'est l'autre etat par-environnement qui doit
-# traverser jusqu'au moteur. Tout site qui le passe monte un environnement d'ENTRAINEMENT et doit
-# donc aussi poser le depart de rampe. Le chemin API/PvP, lui, ne le passe pas et n'est pas vise.
+# LA FAMILLE : toute valeur qu'un override d'etape decide DANS LE PARENT et dont le moteur a
+# besoin. Un worker `forkserver`/`spawn` reimporte tout et relit le JSON, donc aucune de ces
+# valeurs ne traverse par la decoration du loader — chacune doit etre passee en argument. Deux
+# membres a ce jour, tous deux nes du meme defaut mesure :
+#   - le depart de rampe de deploiement (etape reprise a chaud) ;
+#   - `total_episodes` (denominateur des rampes par-episode).
+#
+# `training_episode_start_index` sert de marqueur du chemin d'ENTRAINEMENT : le chemin API/PvP ne
+# le passe pas et n'est pas vise. Ajouter un membre a la famille = ajouter une entree ici.
 
-def test_every_training_env_site_also_passes_the_deploy_ratio():
+CROSS_BOUNDARY_FAMILY = {
+    "depart de rampe de deploiement": {
+        "training_deploy_active_ratio_start",
+        "deploy_active_ratio_start",
+    },
+    "budget d'episodes (denominateur des rampes)": {
+        "training_total_episodes",
+        "total_episodes",
+    },
+}
+
+
+@pytest.mark.parametrize("label", sorted(CROSS_BOUNDARY_FAMILY))
+def test_every_training_env_site_passes_the_whole_family(label: str):
     import ast
 
     train_py = os.path.join(PROJECT_ROOT, "ai", "train.py")
     with open(train_py, encoding="utf-8") as handle:
         tree = ast.parse(handle.read())
 
-    ratio_kwargs = {"training_deploy_active_ratio_start", "deploy_active_ratio_start"}
+    expected = CROSS_BOUNDARY_FAMILY[label]
     markers = {"training_episode_start_index", "episode_start_index"}
 
     offenders = []
@@ -249,13 +268,12 @@ def test_every_training_env_site_also_passes_the_deploy_ratio():
         kwargs = {kw.arg for kw in node.keywords if kw.arg}
         if not (kwargs & markers):
             continue
-        if not (kwargs & ratio_kwargs):
+        if not (kwargs & expected):
             offenders.append(f"{name} ligne {node.lineno}")
 
     assert not offenders, (
-        "site(s) de construction d'environnement d'entrainement sans depart de rampe : "
+        f"site(s) de construction d'environnement d'entrainement sans « {label} » : "
         f"{offenders}. Un worker forkserver y relirait la valeur du JSON pendant que le parent "
-        "croit avoir impose la valeur figee — c'est le no-op mesure a l'origine de ce fichier. "
-        "Ajouter `deploy_active_ratio_start=parent_deploy_active_ratio_start(training_config)`, "
-        "ou `training_deploy_active_ratio_start=` sur un W40KEngine direct."
+        "croit avoir impose la sienne — c'est le no-op mesure a l'origine de ce fichier. "
+        f"Passer l'un de {sorted(expected)} depuis le helper `parent_*` correspondant."
     )

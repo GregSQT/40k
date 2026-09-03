@@ -2616,6 +2616,7 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
             # dependre l'invariant de la localite du processus est precisement ce qui a
             # laisse passer le no-op mesure (parent 0.9 / worker 0.3). Une seule voie.
             training_deploy_active_ratio_start=parent_deploy_active_ratio_start(training_config),
+            training_total_episodes=parent_total_episodes(training_config),
         )
         
         # Connect step logger after environment creation - compliant engine compatibility
@@ -3347,6 +3348,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             # dependre l'invariant de la localite du processus est precisement ce qui a
             # laisse passer le no-op mesure (parent 0.9 / worker 0.3). Une seule voie.
             training_deploy_active_ratio_start=parent_deploy_active_ratio_start(training_config),
+            training_total_episodes=parent_total_episodes(training_config),
         )
         if step_logger:
             base_env.step_logger = step_logger
@@ -3521,6 +3523,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             # dependre l'invariant de la localite du processus est precisement ce qui a
             # laisse passer le no-op mesure (parent 0.9 / worker 0.3). Une seule voie.
             training_deploy_active_ratio_start=parent_deploy_active_ratio_start(training_config),
+            training_total_episodes=parent_total_episodes(training_config),
         )
         # V11 T6 : ce bloc RECREE l'environnement (cf. commentaire ci-dessus) et remplace le
         # base_env construit plus haut — celui-la seul recevait le StepLogger (~L2377). Sans
