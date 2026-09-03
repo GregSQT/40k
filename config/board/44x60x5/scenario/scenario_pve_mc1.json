@@ -1,10 +1,10 @@
 {
   "uses_codex_detachment": { "1": true, "2": true },
   "army_faction": {"1": "ADEPTUS ASTARTES", "2": "ORKS"},
-  "deployment_zone": "mc2",
+  "deployment_zone": "mc1",
   "deployment_type": "active",
-  "wall_ref": "walls-mc2.json",
-  "terrain_ref": "terrain-mc2.json",
+  "wall_ref": "walls-mc1.json",
+  "terrain_ref": "terrain-mc1.json",
   "primary_objectives": [
     "objectives_control"
   ],
