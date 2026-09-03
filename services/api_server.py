@@ -5277,6 +5277,7 @@ def get_board_config():
 
         wall_hexes: list = []
         wall_groups_out: list[dict] = []
+        _dense_group = lambda hexes: {"type": "dense", "hexes": [[int(h[0]), int(h[1])] for h in hexes]}
         if scenario_file and isinstance(scenario_data, dict) and "wall_hexes" in scenario_data:
             scenario_wall_hexes = scenario_data.get("wall_hexes")
             if not isinstance(scenario_wall_hexes, list):
@@ -5286,7 +5287,7 @@ def get_board_config():
                 from engine.game_state import GameStateManager as _GSM
                 wall_hexes = _GSM._downscale_terrain_data(
                     {"walls": [{"hexes": wall_hexes}]}, board_data_ratio)["walls"][0]["hexes"]
-            wall_groups_out.append({"type": "dense", "hexes": [[int(h[0]), int(h[1])] for h in wall_hexes]})
+            wall_groups_out.append(_dense_group(wall_hexes))
         elif wall_ref and wall_ref.endswith(".json"):
             wall_path = board_data_dir / "walls" / wall_ref
             if not wall_path.exists():
@@ -5299,12 +5300,11 @@ def get_board_config():
                     {"walls": wall_data["walls"]}, board_data_ratio)["walls"]}
             if "walls" in wall_data:
                 wall_hexes = []
-                from engine.hex_utils import expand_wall_group_to_hex_list as _expand
                 for gi, g in enumerate(wall_data.get("walls", [])):
                     if not isinstance(g, dict):
                         raise ValueError(f"wall group {gi} must be an object")
                     hint = f"{wall_path} walls[{gi}]"
-                    group_hexes = _expand(g, path_hint=hint)
+                    group_hexes = expand_wall_group_to_hex_list(g, path_hint=hint)
                     wall_hexes.extend(group_hexes)
                     wall_groups_out.append({"type": g.get("type", "dense"), "hexes": group_hexes})
             elif "wall_hexes" in wall_data:
@@ -5313,7 +5313,7 @@ def get_board_config():
                     from engine.game_state import GameStateManager as _GSM
                     wall_hexes = _GSM._downscale_terrain_data(
                         {"walls": [{"hexes": wall_hexes}]}, board_data_ratio)["walls"][0]["hexes"]
-                wall_groups_out.append({"type": "dense", "hexes": [[int(h[0]), int(h[1])] for h in wall_hexes]})
+                wall_groups_out.append(_dense_group(wall_hexes))
             else:
                 raise ValueError(f"Wall file {wall_path} must contain 'walls' or 'wall_hexes'")
 
