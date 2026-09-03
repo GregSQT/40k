@@ -12,6 +12,8 @@ Tout le reste s'execute reellement.
 import json
 from types import SimpleNamespace
 
+import pytest
+
 import ai.train as train_mod
 import ai.curriculum as curriculum_mod
 
@@ -174,10 +176,8 @@ def test_gate_accepte_episode_count_total_absent_lève(tmp_path, monkeypatch):
     canonical, args, config, curriculum, stage, run_info = _make_context(tmp_path)
     del run_info["episode_count_total"]
 
-    log_path = _patch_common(monkeypatch, tmp_path, canonical, score=0.65)
-    monkeypatch.setattr(train_mod, "copy_tensorboard_run", lambda *_a: "/fake/tb")
+    _patch_common(monkeypatch, tmp_path, canonical, score=0.65)
 
-    import pytest
     with pytest.raises(ConfigurationError, match="episode_count_total"):
         train_mod._close_curriculum_stage(args, config, curriculum, stage, run_info)
 
