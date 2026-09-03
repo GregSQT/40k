@@ -1101,7 +1101,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   useEffect(() => {
     getMaxTurnsFromConfig()
       .then(setMaxTurnsFromConfig)
-      .catch((e) => setError(String(e)));
+      .catch((e) => setError(formatApiConnectionError(e)));
   }, []);
 
   const activeRuleChoicePromptFromState = gameState?.active_rule_choice_prompt ?? null;
@@ -8868,6 +8868,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           };
         };
 
+        const applyGameStateIfPresent = (data: { game_state?: unknown }) => {
+          if (data.game_state) {
+            setGameState((p) =>
+              mergeGameStatePreservingOmittedObjectives(p, data.game_state as APIGameState)
+            );
+          }
+        };
         let totalUnitsProcessed = 0;
         let iteration = 0;
         const maxIterations = 25; // Allow larger armies (e.g. 12+ units in move phase)
@@ -9421,14 +9428,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }
 
               // Update game state from decision
-              if (decisionData.game_state) {
-                setGameState((p) =>
-                  mergeGameStatePreservingOmittedObjectives(
-                    p,
-                    decisionData.game_state as APIGameState
-                  )
-                );
-              }
+              applyGameStateIfPresent(decisionData);
               setEndlessDutyState(
                 (decisionData.endless_duty_state as EndlessDutyState | undefined) ?? null
               );
@@ -9476,14 +9476,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
                 if (skipResponse.ok) {
                   const skipData = await skipResponse.json();
-                  if (skipData.game_state) {
-                    setGameState((p) =>
-                      mergeGameStatePreservingOmittedObjectives(
-                        p,
-                        skipData.game_state as APIGameState
-                      )
-                    );
-                  }
+                  applyGameStateIfPresent(skipData);
                   setEndlessDutyState(
                     (skipData.endless_duty_state as EndlessDutyState | undefined) ?? null
                   );
