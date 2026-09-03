@@ -254,6 +254,42 @@ export interface HiddenDetectionInfo {
   too_far: boolean;
 }
 
+/**
+ * Condition de couvert (règle 13.08) remplie par UNE figurine, telle que le moteur la calcule
+ * (`compute_unit_los(...)["cover_conditions"]`).
+ *
+ * - "a" → la figurine est within a terrain area (et son unité est hideable) ;
+ * - "b" → la figurine n'est pas entièrement visible du tireur ;
+ * - ""  → la figurine est à découvert. C'est ELLE qui annule le couvert de toute l'escouade.
+ *
+ * ⚠️ DIAGNOSTIC D'AFFICHAGE. Le `-1 BS` reste tout-ou-rien au niveau de l'UNITÉ (13.08 :
+ * « if EVERY model in that unit meets one or more of the following conditions ») et se lit
+ * exclusivement sur `cover_by_unit_id`. Une figurine en "a" dans une escouade qui n'a PAS le
+ * couvert ne bénéficie d'aucun bonus : le rendu doit le distinguer, pas l'aplatir.
+ */
+export type ModelCoverCondition = "a" | "b" | "";
+
+/** Conditions 13.08 par figurine, par unité cible. Index aligné sur les figurines de l'unité. */
+export type CoverConditionsByUnitId = Record<string, ModelCoverCondition[]>;
+
+/**
+ * Parse `cover_conditions_by_unit_id` d'une réponse moteur.
+ *
+ * Champ DIAGNOSTIQUE, donc tolérant par conception, à l'inverse de `cover_by_unit_id` qui est
+ * contractuel et lève : une réponse d'un backend plus ancien (ou une action qui ne le porte pas)
+ * rend simplement `{}`, et l'affichage retombe sur le booléen d'unité au lieu de casser le tour
+ * du joueur. Les valeurs inconnues sont écartées plutôt que réinterprétées.
+ */
+export function parseCoverConditionsByUnitId(raw: unknown): CoverConditionsByUnitId {
+  const out: CoverConditionsByUnitId = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [unitId, conditions] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(conditions)) continue;
+    out[unitId] = conditions.map((c) => (c === "a" || c === "b" ? c : ""));
+  }
+  return out;
+}
+
 export interface SingleShotState {
   isActive: boolean;
   shooterId: UnitId;

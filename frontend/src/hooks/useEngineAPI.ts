@@ -6,12 +6,14 @@ import { validateOrientationStepValue, wrapOrientationStep } from "../constants/
 import { API_BASE, apiFetch } from "../services/apiFetch";
 import type { GameMode, PlayerId, Unit } from "../types";
 import type {
+  CoverConditionsByUnitId,
   DiceValue,
   HiddenDetectionInfo,
   StrategicReservesSummary,
   UnitModel,
   Weapon,
 } from "../types/game";
+import { parseCoverConditionsByUnitId } from "../types/game";
 import {
   CROSS_ACTION_LOG_SUPPRESS_MS,
   dedupeActionLogBatch,
@@ -524,6 +526,8 @@ export type UseEngineAPIBlinkBoardProps = {
   blinkingUnits: number[];
   blinkingAttackerId: number | null;
   blinkingCoverByUnitId: Record<string, boolean> | undefined;
+  /** Conditions 13.08 par figurine (badge de couvert par-fig) — diagnostic, jamais le -1 BS. */
+  blinkingCoverCondsByUnitId: CoverConditionsByUnitId | undefined;
   blinkingHiddenTooFarByUnitId: Record<string, boolean> | undefined;
   blinkingHiddenDetectionInfoByUnitId: Record<string, HiddenDetectionInfo> | undefined;
   blinkingLosCountByUnitId: Record<string, number> | undefined;
@@ -991,6 +995,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     blinkTimer: number | null;
     attackerId?: number | null;
     coverByUnitId?: Record<string, boolean>;
+    /** Conditions 13.08 par figurine (badge par-fig) — diagnostic, parallèle à coverByUnitId. */
+    coverCondsByUnitId?: CoverConditionsByUnitId;
     hiddenTooFarByUnitId?: Record<string, boolean>;
     hiddenDetectionInfoByUnitId?: Record<string, HiddenDetectionInfo>;
     // Mode "vue escouade" (double-clic sur une fig) : N figs qui voient chaque
@@ -1412,6 +1418,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         weaponCode?: string;
         validTargets?: Array<string | number>;
         coverByUnitId?: Record<string, boolean>;
+        coverCondsByUnitId?: unknown;
         hiddenTooFarByUnitId?: Record<string, boolean>;
         hiddenDetectionInfoByUnitId?: Record<string, HiddenDetectionInfo>;
         isSquadMode?: boolean;
@@ -1423,6 +1430,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         weaponCode: selectedWeaponCode,
         validTargets: weaponValidTargets,
         coverByUnitId: weaponCoverByUnitId,
+        coverCondsByUnitId: weaponCoverCondsByUnitId,
         hiddenTooFarByUnitId: weaponHiddenTooFarByUnitId,
         hiddenDetectionInfoByUnitId: weaponHiddenDetectionInfoByUnitId,
         isSquadMode: weaponIsSquadMode,
@@ -1513,6 +1521,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             blinkTimer: timer,
             attackerId: squadShootPlanRef.current?.unitId ?? null,
             coverByUnitId,
+            coverCondsByUnitId: parseCoverConditionsByUnitId(weaponCoverCondsByUnitId),
             hiddenTooFarByUnitId,
             hiddenDetectionInfoByUnitId,
           };
@@ -2554,6 +2563,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
                 blinkTimer: timer,
                 attackerId: newAttackerId,
                 coverByUnitId,
+                coverCondsByUnitId: parseCoverConditionsByUnitId(
+                  data.result.cover_conditions_by_unit_id
+                ),
                 hiddenTooFarByUnitId,
                 hiddenDetectionInfoByUnitId,
               });
@@ -4878,6 +4890,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           blinkTimer: timer,
           attackerId: unitId,
           coverByUnitId,
+          coverCondsByUnitId: parseCoverConditionsByUnitId(result.cover_conditions_by_unit_id),
           hiddenTooFarByUnitId,
           hiddenDetectionInfoByUnitId,
         };
@@ -4989,6 +5002,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           blinkTimer: timer,
           attackerId: unitId,
           coverByUnitId,
+          coverCondsByUnitId: parseCoverConditionsByUnitId(result.cover_conditions_by_unit_id),
           hiddenTooFarByUnitId,
           hiddenDetectionInfoByUnitId,
           losCountByUnitId,
@@ -7988,6 +8002,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       blinkingUnits: [],
       blinkingAttackerId: null,
       blinkingCoverByUnitId: undefined,
+      blinkingCoverCondsByUnitId: undefined,
       blinkingHiddenTooFarByUnitId: undefined,
       blinkingHiddenDetectionInfoByUnitId: undefined,
       blinkingLosCountByUnitId: undefined,
@@ -8239,6 +8254,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     blinkingUnits: blinkingUnitsIds,
     blinkingAttackerId: blinkingUnits.attackerId ?? null,
     blinkingCoverByUnitId: blinkingUnits.coverByUnitId,
+    blinkingCoverCondsByUnitId: blinkingUnits.coverCondsByUnitId,
     blinkingHiddenTooFarByUnitId: blinkingUnits.hiddenTooFarByUnitId,
     blinkingHiddenDetectionInfoByUnitId: blinkingUnits.hiddenDetectionInfoByUnitId,
     blinkingLosCountByUnitId: blinkingUnits.losCountByUnitId,

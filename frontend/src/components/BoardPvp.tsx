@@ -19,6 +19,7 @@ import { type BoardConfigOverride, useResolvedBoardConfig } from "../hooks/useRe
 import { useSingleDoubleClick } from "../hooks/useSingleDoubleClick";
 import { API_BASE, apiFetch } from "../services/apiFetch";
 import type {
+  CoverConditionsByUnitId,
   FightSubPhase,
   GameState,
   PlayerId,
@@ -30,6 +31,7 @@ import type {
   Weapon,
   WeaponOption,
 } from "../types/game";
+import { parseCoverConditionsByUnitId } from "../types/game";
 import {
   type BlinkProbHtmlPayload,
   DAMAGE_PROBABILITY_TOOLTIP_HTML_OPACITY,
@@ -130,6 +132,12 @@ function stableBoolRecordJson(m: Record<string, boolean>): string {
   return JSON.stringify(sorted);
 }
 
+/** Empreinte stable des conditions 13.08 par figurine, pour la clé de rendu PIXI. */
+function stableCoverConditionsJson(m: CoverConditionsByUnitId): string {
+  const keys = Object.keys(m).sort();
+  return JSON.stringify(keys.map((k) => [k, m[k].join("")]));
+}
+
 interface BackendLosPreviewCell {
   col: number;
   row: number;
@@ -140,6 +148,8 @@ interface BackendMoveLosPreviewPayload {
   clearCells: BackendLosPreviewCell[];
   coverCells: BackendLosPreviewCell[];
   coverByUnitId: Record<string, boolean>;
+  /** Condition 13.08 par figurine, par cible (badge par-fig). Diagnostic : jamais le -1 BS. */
+  coverConditionsByUnitId: CoverConditionsByUnitId;
   hiddenTooFarByUnitId: Record<string, boolean>;
   hiddenDetectionInfoByUnitId: Record<string, { detection_inches: 15 | 12; too_far: boolean }>;
   /** Cases visibles des cibles ciblables (backend, règle 06.01/13.10), aplaties+dédupliquées. */
@@ -279,6 +289,7 @@ function parseBackendMoveLosPreviewPayload(
       "los_preview_cover_cells"
     ),
     coverByUnitId,
+    coverConditionsByUnitId: parseCoverConditionsByUnitId(result.cover_conditions_by_unit_id),
     hiddenTooFarByUnitId,
     hiddenDetectionInfoByUnitId,
     visibleTargetCells,
@@ -594,6 +605,11 @@ type BoardProps = {
   blinkingUnits?: number[];
   blinkingAttackerId?: number | null;
   blinkingCoverByUnitId?: Record<string, boolean>;
+  /**
+   * Conditions 13.08 PAR FIGURINE des cibles qui clignotent (badge de couvert par-fig).
+   * Diagnostic d'affichage : le -1 BS reste porté par `blinkingCoverByUnitId`, unité-niveau.
+   */
+  blinkingCoverCondsByUnitId?: CoverConditionsByUnitId;
   /** Parallèle au cover : cibles cachées hors detection range pendant le blink de tir → œil rouge. */
   blinkingHiddenTooFarByUnitId?: Record<string, boolean>;
   /** Detection range effective (15" / 12" GtG) par ennemi caché pendant le blink de tir → badge numérique. */
@@ -1258,6 +1274,7 @@ export default function Board({
   blinkingUnits,
   blinkingAttackerId,
   blinkingCoverByUnitId,
+  blinkingCoverCondsByUnitId,
   blinkingHiddenTooFarByUnitId,
   blinkingHiddenDetectionInfoByUnitId,
   blinkingLosCountByUnitId,
@@ -2913,6 +2930,14 @@ export default function Board({
   const [movePreviewLosCoverById, setMovePreviewLosCoverById] = useState<Record<string, boolean>>(
     {}
   );
+  /**
+   * Parallèle au cover, mais PAR FIGURINE : la condition 13.08 remplie par chaque figurine de
+   * chaque cible ("a" / "b" / ""). Alimente le badge de couvert par-fig, qui ne peut pas se
+   * déduire du booléen d'unité — celui-ci tombe à false dès qu'UNE figurine est découverte,
+   * même quand toutes les autres sont en terrain.
+   */
+  const [movePreviewLosCoverCondsById, setMovePreviewLosCoverCondsById] =
+    useState<CoverConditionsByUnitId>({});
   /** Parallèle au cover : ennemis "cachés trop loin" (hors detection range) à la destination du move preview → œil rouge. */
   const [movePreviewLosTooFarById, setMovePreviewLosTooFarById] = useState<Record<string, boolean>>(
     {}
@@ -2967,6 +2992,14 @@ export default function Board({
   const blinkingHiddenTooFarByUnitIdKey = useMemo(
     () => stableBoolRecordJson(blinkingHiddenTooFarByUnitId ?? {}),
     [blinkingHiddenTooFarByUnitId]
+  );
+  const movePreviewLosCoverCondsKey = useMemo(
+    () => stableCoverConditionsJson(movePreviewLosCoverCondsById),
+    [movePreviewLosCoverCondsById]
+  );
+  const blinkingCoverCondsByUnitIdKey = useMemo(
+    () => stableCoverConditionsJson(blinkingCoverCondsByUnitId ?? {}),
+    [blinkingCoverCondsByUnitId]
   );
   const movePreviewLosDetectionInfoKey = useMemo(
     () => JSON.stringify(movePreviewLosDetectionInfoById),
@@ -3460,6 +3493,7 @@ export default function Board({
     if (isMoveLosPreviewContext) return;
     setMovePreviewLosBlinkIds([]);
     setMovePreviewLosCoverById({});
+    setMovePreviewLosCoverCondsById({});
     setMovePreviewLosTooFarById({});
     setMovePreviewLosDetectionInfoById({});
     movePreviewBackendLosCacheRef.current.clear();
@@ -3631,6 +3665,7 @@ export default function Board({
       setMovePreviewDistanceTooltip(null);
       setMovePreviewLosBlinkIds([]);
       setMovePreviewLosCoverById({});
+      setMovePreviewLosCoverCondsById({});
       setMovePreviewLosTooFarById({});
       setMovePreviewLosDetectionInfoById({});
       if (hoverOverlayRef.current) hoverOverlayRef.current.visible = false;
@@ -4278,6 +4313,7 @@ export default function Board({
         if (!selectedUnit) {
           setMovePreviewLosBlinkIds([]);
           setMovePreviewLosCoverById({});
+          setMovePreviewLosCoverCondsById({});
           setMovePreviewLosTooFarById({});
           setMovePreviewLosDetectionInfoById({});
           return;
@@ -4286,6 +4322,7 @@ export default function Board({
         if (range <= 0 || !selectedUnit.RNG_WEAPONS?.length) {
           setMovePreviewLosBlinkIds([]);
           setMovePreviewLosCoverById({});
+          setMovePreviewLosCoverCondsById({});
           setMovePreviewLosTooFarById({});
           setMovePreviewLosDetectionInfoById({});
           return;
@@ -4372,6 +4409,7 @@ export default function Board({
         if (!currentLosHex || currentLosHex.col !== col || currentLosHex.row !== row) return;
         setMovePreviewLosBlinkIds(losPreview.blinkIds);
         setMovePreviewLosCoverById(losPreview.coverByUnitId);
+        setMovePreviewLosCoverCondsById(losPreview.coverConditionsByUnitId);
         setMovePreviewLosTooFarById(losPreview.hiddenTooFarByUnitId);
         setMovePreviewLosDetectionInfoById(losPreview.hiddenDetectionInfoByUnitId);
         // Cases visibles des cibles (backend) pour cette position → redessine le cône WASM
@@ -4388,6 +4426,7 @@ export default function Board({
         if (!losEffectActive) return;
         setMovePreviewLosBlinkIds([]);
         setMovePreviewLosCoverById({});
+        setMovePreviewLosCoverCondsById({});
         setMovePreviewLosTooFarById({});
         setMovePreviewLosDetectionInfoById({});
         console.error("Move preview backend LoS failed:", error);
@@ -4403,6 +4442,7 @@ export default function Board({
       if (phase === "move" && gameState?.active_movement_unit == null) {
         setMovePreviewLosBlinkIds([]);
         setMovePreviewLosCoverById({});
+        setMovePreviewLosCoverCondsById({});
         setMovePreviewLosTooFarById({});
         setMovePreviewLosDetectionInfoById({});
         return;
@@ -6961,6 +7001,7 @@ export default function Board({
     }
     setMovePreviewLosBlinkIds([]);
     setMovePreviewLosCoverById({});
+    setMovePreviewLosCoverCondsById({});
 
     // Baseline œil "trop loin" au repos (aucune fig active) : recalculée depuis la position ACTUELLE
     // de l'unité, pour que le badge persiste tant que l'unité est active — pas seulement au survol.
@@ -7078,6 +7119,7 @@ export default function Board({
 
     const applyPreview = (preview: BackendMoveLosPreviewPayload): void => {
       setMovePreviewLosCoverById(preview.coverByUnitId);
+      setMovePreviewLosCoverCondsById(preview.coverConditionsByUnitId);
       setMovePreviewLosTooFarById(preview.hiddenTooFarByUnitId);
       setMovePreviewLosDetectionInfoById(preview.hiddenDetectionInfoByUnitId);
     };
@@ -7226,6 +7268,7 @@ export default function Board({
         const targetCells: Array<{ col: number; row: number }> = [];
         const blinkSet = new Set<number>();
         const coverById: Record<string, boolean> = {};
+        const coverCondsById: CoverConditionsByUnitId = {};
         for (const [, pos] of placed) {
           if (cancelled) return;
           // Cône WASM par-fig depuis la position posée (socle recalculé à fromCol/fromRow).
@@ -7319,6 +7362,9 @@ export default function Board({
           for (const [uid, inCover] of Object.entries(losPreview.coverByUnitId)) {
             coverById[uid] = inCover;
           }
+          for (const [uid, conds] of Object.entries(losPreview.coverConditionsByUnitId)) {
+            coverCondsById[uid] = conds;
+          }
           targetCells.push(...losPreview.visibleTargetCells);
         }
         if (cancelled) return;
@@ -7337,6 +7383,7 @@ export default function Board({
         overlay.visible = true;
         setMovePreviewLosBlinkIds([...blinkSet]);
         setMovePreviewLosCoverById(coverById);
+        setMovePreviewLosCoverCondsById(coverCondsById);
       } catch (error) {
         if (cancelled) return;
         console.error("Persist placed-model LoS preview failed:", error);
@@ -7350,6 +7397,7 @@ export default function Board({
       }
       setMovePreviewLosBlinkIds([]);
       setMovePreviewLosCoverById({});
+      setMovePreviewLosCoverCondsById({});
     };
   }, [
     mode,
@@ -7938,6 +7986,7 @@ export default function Board({
         if (`${pending.col},${pending.row}` !== lastShootPreviewHexKey) return;
         setMovePreviewLosBlinkIds(losPreview.blinkIds);
         setMovePreviewLosCoverById(losPreview.coverByUnitId);
+        setMovePreviewLosCoverCondsById(losPreview.coverConditionsByUnitId);
         setMovePreviewLosTooFarById(losPreview.hiddenTooFarByUnitId);
         setMovePreviewLosDetectionInfoById(losPreview.hiddenDetectionInfoByUnitId);
         // Cône déjà peint au survol (cache miss → sans cases cibles). La réponse backend est
@@ -7948,6 +7997,7 @@ export default function Board({
         if (!shootPreviewActive) return;
         setMovePreviewLosBlinkIds([]);
         setMovePreviewLosCoverById({});
+        setMovePreviewLosCoverCondsById({});
         setMovePreviewLosTooFarById({});
         setMovePreviewLosDetectionInfoById({});
         console.error("Squad per-fig shoot preview backend LoS failed:", error);
@@ -7996,6 +8046,7 @@ export default function Board({
       if (cached) {
         setMovePreviewLosBlinkIds(cached.blinkIds);
         setMovePreviewLosCoverById(cached.coverByUnitId);
+        setMovePreviewLosCoverCondsById(cached.coverConditionsByUnitId);
         setMovePreviewLosTooFarById(cached.hiddenTooFarByUnitId);
         setMovePreviewLosDetectionInfoById(cached.hiddenDetectionInfoByUnitId);
       } else {
@@ -8206,6 +8257,7 @@ export default function Board({
       }
       setMovePreviewLosBlinkIds([]);
       setMovePreviewLosCoverById({});
+      setMovePreviewLosCoverCondsById({});
       setMovePreviewLosTooFarById({});
       setMovePreviewLosDetectionInfoById({});
     };
@@ -9788,7 +9840,7 @@ export default function Board({
             .map(([m, v]) => `${m}=${v ? 1 : 0}`)
             .join(",")
         : "";
-      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#mdi:${movePreviewLosDetectionInfoKey}#bdi:${blinkingHiddenDetectionInfoKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}#pip:${phaseInitPending ? 1 : 0}#lvl:${currentLevel}`;
+      return `${parts.join("|")}#${selectedUnitId}#${phase}#${mode}#${movePreview?.destCol ?? ""},${movePreview?.destRow ?? ""},o${movePreview?.orientation ?? ""}#${attackPreview?.col ?? ""},${attackPreview?.row ?? ""}#sqshoot:${squadShootFp}#sqfight:${squadFightFp}#${blinkVersion}#${fightSubPhase}#fe:${(gameState?.fight_eligible_units ?? []).join(",")}#${chargeTargetId}#cpti:${chargePreviewTargetIds?.join(",") ?? ""}#chfocus:${chargeFocusActive ? 1 : 0}#pifocus:${pileInFocusActive ? 1 : 0}#pieng:${pileInMovePlan?.engagedModels?.join(",") ?? ""}#pitgt:${pileInMovePlan?.pileInTargets?.join(",") ?? ""}#${shootingTargetId}#${shootingUnitId}#${movingUnitId}#${chargingUnitId}#${chargeRoll ?? ""}#${chargeSuccess === true ? "1" : chargeSuccess === false ? "0" : ""}#${fightingUnitId}#${fightTargetId}#${advancingUnitId}#${ruleChoiceHighlightedUnitId}#${moveLosIds}#${movePreviewLosCoverKey}#mcc:${movePreviewLosCoverCondsKey}#mtf:${movePreviewLosTooFarKey}#bc:${blinkingCoverByUnitIdKey}#bcc:${blinkingCoverCondsByUnitIdKey}#bttf:${blinkingHiddenTooFarByUnitIdKey}#mdi:${movePreviewLosDetectionInfoKey}#bdi:${blinkingHiddenDetectionInfoKey}#swlos:${shootPreviewWasmLos.key}#saa:${shootAdvanceLosAnchorKey}#bb:${backendBlink}#chov:${chargePreviewOverlayKey}#cref:${chargeReferenceKey}#sqplan:${squadPlanFp}#chgplan:${chargePlanFp}#dg:${deadModelGhostsForRender.length}#hpbm:${hpBarPerModel ? 1 : 0}#hpbe:${hpBarBlinkEnlarged ? 1 : 0}#swp:${showWoundProbability ? 1 : 0}#sbpm:${statusBadgePerModel ? 1 : 0}#hp13:${[...movePreviewHiddenModelIds].sort().join(",")}#flee:${fleePreviewUnitId ?? ""}#hide:${hideIndicators ? 1 : 0}#dplan:${deployPlanFp}#elig:${[...eligibleUnitIds].sort((a, b) => a - b).join(",")}#pip:${phaseInitPending ? 1 : 0}#lvl:${currentLevel}`;
     })();
     const unitsChanged = unitsFingerprint !== unitsFingerprintRef.current;
 
@@ -10874,6 +10926,30 @@ export default function Board({
             }
             return undefined;
           })(),
+          // Conditions 13.08 PAR FIGURINE, strictement parallèles à la prop ci-dessus (mêmes
+          // gates de phase/mode, mêmes sources). Absentes → UnitRenderer retombe sur le booléen
+          // d'unité : c'est le cas du couvert calculé côté WASM (`coverTargets`), qui n'a pas de
+          // détail par figurine et qu'on se garde bien de recalculer ici — ce serait un second
+          // modèle de couvert, libre de diverger de `compute_unit_los`.
+          movePreviewShootingTargetCoverConditionsByUnitId: (() => {
+            if (
+              phase === "move" &&
+              (mode === "select" || mode === "movePreview" || mode === "perModelMove")
+            ) {
+              return movePreviewLosCoverCondsById;
+            }
+            if (
+              phase === "shoot" &&
+              (mode === "select" ||
+                mode === "attackPreview" ||
+                mode === "movePreview" ||
+                mode === "squadModelShoot") &&
+              blinkingCoverCondsByUnitId !== undefined
+            ) {
+              return blinkingCoverCondsByUnitId;
+            }
+            return undefined;
+          })(),
           movePreviewHiddenTooFarByUnitId: (() => {
             if (
               phase === "move" &&
@@ -11793,6 +11869,8 @@ export default function Board({
     movePreviewLosCoverKey,
     movePreviewLosTooFarKey,
     blinkingCoverByUnitIdKey,
+    movePreviewLosCoverCondsKey,
+    blinkingCoverCondsByUnitIdKey,
     blinkingHiddenTooFarByUnitIdKey,
     movePreviewLosDetectionInfoKey,
     blinkingHiddenDetectionInfoKey,
@@ -11809,6 +11887,7 @@ export default function Board({
     gameState?.primary_objective,
     shootAdvanceLosAnchor,
     movePreviewLosCoverById,
+    movePreviewLosCoverCondsById,
     movePreviewLosTooFarById,
     movePreviewLosDetectionInfoById,
     resolvedMoveDestPoolRef.current,
@@ -11832,6 +11911,7 @@ export default function Board({
     chargePreviewOverlayHexes,
     footprintZoneRef,
     blinkingCoverByUnitId,
+    blinkingCoverCondsByUnitId,
     blinkingHiddenTooFarByUnitId,
     blinkingHiddenDetectionInfoByUnitId,
     blinkingLosOverviewUnitId,
@@ -12191,6 +12271,7 @@ export default function Board({
             weaponIndex,
             validTargets: data.result?.valid_targets,
             coverByUnitId: data.result?.cover_by_unit_id,
+            coverCondsByUnitId: data.result?.cover_conditions_by_unit_id,
             hiddenTooFarByUnitId: data.result?.hidden_too_far_by_unit_id,
             isSquadMode: true,
           },
