@@ -1087,7 +1087,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   // Load config values
   useEffect(() => {
-    getMaxTurnsFromConfig().then(setMaxTurnsFromConfig);
+    getMaxTurnsFromConfig()
+      .then(setMaxTurnsFromConfig)
+      .catch((e) => setError(String(e)));
   }, []);
 
   const activeRuleChoicePromptFromState = gameState?.active_rule_choice_prompt ?? null;
@@ -5413,15 +5415,6 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (modelId: string) => {
       const alloc = manualAllocationRef.current;
       if (!alloc) return;
-      // DIAGNOSTIC (temporaire) : capture les choices réelles au moment de l'envoi.
-      const choiceIds = (alloc.choices ?? []).map((c) => c.model_id);
-      console.warn("[MANUAL-ALLOC-DBG] envoi", {
-        modelId,
-        kind: alloc.kind,
-        choices: choiceIds,
-        modelInChoices: choiceIds.includes(modelId),
-        current_group_id: (alloc as { current_group_id?: unknown }).current_group_id,
-      });
       if (allocInFlightRef.current) return; // une allocation est déjà en vol → ignorer ce clic
       allocInFlightRef.current = true;
       try {
@@ -9461,12 +9454,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               }
 
               // Update game state from decision
-              setGameState((p) =>
-                mergeGameStatePreservingOmittedObjectives(
-                  p,
-                  decisionData.game_state as APIGameState
-                )
-              );
+              if (decisionData.game_state) {
+                setGameState((p) =>
+                  mergeGameStatePreservingOmittedObjectives(
+                    p,
+                    decisionData.game_state as APIGameState
+                  )
+                );
+              }
               setEndlessDutyState(
                 (decisionData.endless_duty_state as EndlessDutyState | undefined) ?? null
               );
@@ -9514,12 +9509,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
                 if (skipResponse.ok) {
                   const skipData = await skipResponse.json();
-                  setGameState((p) =>
-                    mergeGameStatePreservingOmittedObjectives(
-                      p,
-                      skipData.game_state as APIGameState
-                    )
-                  );
+                  if (skipData.game_state) {
+                    setGameState((p) =>
+                      mergeGameStatePreservingOmittedObjectives(
+                        p,
+                        skipData.game_state as APIGameState
+                      )
+                    );
+                  }
                   setEndlessDutyState(
                     (skipData.endless_duty_state as EndlessDutyState | undefined) ?? null
                   );
