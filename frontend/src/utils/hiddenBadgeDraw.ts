@@ -41,15 +41,7 @@ export function drawTerrainCoverBadge(
   r: number,
   color: number = 0xc8c8c8
 ): void {
-  // Fond : même structure que le badge œil.
-  g.lineStyle(0);
-  g.beginFill(0x000000, 1);
-  g.drawCircle(badgeX, badgeY, r + 1);
-  g.endFill();
-  g.beginFill(0x000000, 0.9);
-  g.lineStyle(1, 0xb0b0b0, 1);
-  g.drawCircle(badgeX, badgeY, r);
-  g.endFill();
+  drawDetectionNumberBadgeBackground(g, badgeX, badgeY, r);
   // Triangle montagne plein (symbolise la terrain area).
   g.lineStyle(0);
   g.beginFill(color, 1);
@@ -71,16 +63,7 @@ export function drawHiddenEyeBadge(
   r: number,
   eyeColor: number = 0xc8c8c8
 ): void {
-  // Anneau noir externe pour détacher le badge du plateau.
-  g.lineStyle(0);
-  g.beginFill(0x000000, 1);
-  g.drawCircle(badgeX, badgeY, r + 1);
-  g.endFill();
-  // Corps du badge (noir, bord gris clair).
-  g.beginFill(0x000000, 0.9);
-  g.lineStyle(1, 0xb0b0b0, 1);
-  g.drawCircle(badgeX, badgeY, r);
-  g.endFill();
+  drawDetectionNumberBadgeBackground(g, badgeX, badgeY, r);
   // Icône "visibility off" → gris clair = couvert ; rouge = caché trop loin (hors detection range).
   const ew = r * 0.82;
   const eh = r * 0.52;

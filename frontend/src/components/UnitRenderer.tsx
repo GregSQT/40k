@@ -2559,27 +2559,21 @@ export class UnitRenderer {
     const r = statusBadgeRadius(HEX_RADIUS);
     const scaledOffset = ((HEX_RADIUS * unitIconScale) / 2) * 0.8;
     // Bottom-left of a figure (mirror of the bottom-right charge badge).
-    const drawBadgeAt = (cx: number, cy: number, name: string, eyeColor?: number): void => {
-      const badgeX = cx - scaledOffset;
-      const badgeY = cy + scaledOffset;
-      const g = new PIXI.Graphics();
-      drawHiddenEyeBadge(g, badgeX, badgeY, r, eyeColor);
-      g.name = name;
-      g.zIndex = 10001;
-      targetContainer.addChild(g);
-    };
-    // Badge de COUVERT : dispatche entre glyphe terrain (a) et œil (b) selon la condition 13.08.
+    // Badge de COUVERT ou CACHÉ : dispatche entre glyphe terrain (a) et œil (b) selon la
+    // condition 13.08, ou force le glyphe œil avec une couleur arbitraire pour les autres badges.
     const drawCoverAt = (
       cx: number,
       cy: number,
       name: string,
-      badge: Exclude<ModelCoverBadge, "none">
+      badge: Exclude<ModelCoverBadge, "none">,
+      overrideColor?: number
     ): void => {
       const badgeX = cx - scaledOffset;
       const badgeY = cy + scaledOffset;
       const g = new PIXI.Graphics();
       const color =
-        badge === "cover-a" || badge === "cover-b" ? 0xc8c8c8 : EYE_COLOR_COVER_UNQUALIFIED;
+        overrideColor ??
+        (badge === "cover-a" || badge === "cover-b" ? 0xc8c8c8 : EYE_COLOR_COVER_UNQUALIFIED);
       if (badge === "cover-a" || badge === "cover-unqualified-a") {
         drawTerrainCoverBadge(g, badgeX, badgeY, r, color);
       } else {
@@ -2588,6 +2582,9 @@ export class UnitRenderer {
       g.name = name;
       g.zIndex = 10001;
       targetContainer.addChild(g);
+    };
+    const drawBadgeAt = (cx: number, cy: number, name: string, eyeColor?: number): void => {
+      drawCoverAt(cx, cy, name, "cover-b", eyeColor);
     };
     const drawNumberAt = (
       cx: number,
