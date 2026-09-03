@@ -556,7 +556,8 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     slice.visible = true;
   });
 
-  // Add to PIXI Ticker
+  // Add to PIXI Ticker — start it on-demand (autoStart: false on app)
+  app.ticker.start();
   app.ticker.add(blinkTicker);
   hpContainer.blinkTicker = blinkTicker;
 
@@ -611,6 +612,8 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     if (hpContainer.blinkTicker) {
       app.ticker.remove(hpContainer.blinkTicker);
       hpContainer.blinkTicker = undefined;
+      // count === 1 : seul le callback PIXI interne reste → plus d'animation active
+      if (app.ticker.count === 1) app.ticker.stop();
     }
     if (hpContainer.parent) {
       hpContainer.parent.removeChild(hpContainer);

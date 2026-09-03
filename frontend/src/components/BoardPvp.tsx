@@ -6901,6 +6901,7 @@ export default function Board({
           globalCohesionInches,
         });
       }
+      appRef.current?.render();
     };
 
     canvas.addEventListener("mousemove", onMouseMove);
@@ -8817,6 +8818,7 @@ export default function Board({
       powerPreference: "default" as WebGLPowerPreference,
       resolution: renderResolution,
       autoDensity: displayConfig.autoDensity!,
+      autoStart: false,
     };
 
     // ✅ VALIDATE PIXI CONFIG VALUES
@@ -8830,6 +8832,7 @@ export default function Board({
     if (!appRef.current) {
       appRef.current = app;
       app.stage.sortableChildren = true;
+      app.ticker.stop();
     } else {
       app.renderer.resolution = renderResolution;
       app.renderer.resize(canvasWidth, canvasHeight);
@@ -11599,6 +11602,7 @@ export default function Board({
         const valid = inBounds && !onWall && !overlapping && inPool;
         const contestedIds = getContestedObjectives(fp, objectivesForIntersection);
         drawDragOverlay(hex, fp, valid, contestedIds);
+        appRef.current?.render();
       };
 
       dragPointerUp = (e: PointerEvent) => {
@@ -11626,6 +11630,7 @@ export default function Board({
       dragPointerLeave = () => {
         lastHexKey = "";
         drawDragOverlay(null, [], false, []);
+        appRef.current?.render();
       };
 
       canvas.addEventListener("pointermove", dragPointerMove);
@@ -11687,11 +11692,13 @@ export default function Board({
           idText.alpha = 0.7;
           dragContainer.addChild(ghost);
           dragContainer.addChild(idText);
+          appRef.current?.render();
         };
 
         dragPointerLeave = () => {
           lastMoveHexKey = "";
           dragContainer.removeChildren();
+          appRef.current?.render();
         };
 
         canvas.addEventListener("pointermove", dragPointerMove);
@@ -11941,6 +11948,13 @@ export default function Board({
     },
     []
   );
+
+  // Render-on-demand : déclenche un rendu PIXI après chaque cycle React.
+  // Le ticker étant arrêté (autoStart: false), cette seule ligne couvre tous
+  // les chemins pilotés par du state React.
+  useEffect(() => {
+    appRef.current?.render();
+  });
 
   // weapons_for_target pour UNE cible (profils éligibles + m/x). Read-only backend.
   const fetchWeaponsForTarget = async (
