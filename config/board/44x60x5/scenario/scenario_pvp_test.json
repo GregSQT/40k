@@ -10,37 +10,37 @@
     { "id": 202, "unit_type": "WarTrakk",       "player": 1, "col": 203,  "row": 93 },
     { "id": 203, "unit_type": "BigMekDakkarig", "player": 1, "col": 171, "row": 153 },
     {
-      "id": 204, "unit_type": "Boyz", "player": 1, "col": 60, "row": 110,
+      "id": 204, "unit_type": "Boyz", "player": 1, "col": 60, "row": 100,
       "models": [
-        {"unit_type": "Boyz", "col": 60, "row": 110},
-        {"unit_type": "Boyz", "col": 66, "row": 110},
-        {"unit_type": "Boyz", "col": 72, "row": 110},
-        {"unit_type": "Boyz", "col": 78, "row": 110},
-        {"unit_type": "Boyz", "col": 84, "row": 110},
-        {"unit_type": "Boyz", "col": 63, "row": 114},
-        {"unit_type": "Boyz", "col": 69, "row": 114},
-        {"unit_type": "Boyz", "col": 75, "row": 114},
-        {"unit_type": "Boyz", "col": 81, "row": 114},
-        {"unit_type": "BoyzNobKombi", "col": 89, "row": 114},
-        {"unit_type": "Warboss", "col": 95, "row": 108},
-        {"unit_type": "PainBoy", "col": 96, "row": 116}
+        {"unit_type": "Boyz", "col": 60, "row": 100},
+        {"unit_type": "Boyz", "col": 66, "row": 100},
+        {"unit_type": "Boyz", "col": 72, "row": 100},
+        {"unit_type": "Boyz", "col": 78, "row": 100},
+        {"unit_type": "Boyz", "col": 84, "row": 100},
+        {"unit_type": "Boyz", "col": 63, "row": 104},
+        {"unit_type": "Boyz", "col": 69, "row": 104},
+        {"unit_type": "Boyz", "col": 75, "row": 104},
+        {"unit_type": "Boyz", "col": 81, "row": 104},
+        {"unit_type": "BoyzNobKombi", "col": 82, "row": 111},
+        {"unit_type": "Warboss", "col": 89, "row": 105},
+        {"unit_type": "PainBoy", "col": 75, "row": 110}
       ]
     },
     {
-      "id": 205, "unit_type": "Boyz", "player": 1, "col": 110, "row": 118,
+      "id": 205, "unit_type": "Boyz", "player": 1, "col": 112, "row": 114,
       "models": [
-        {"unit_type": "Boyz", "col": 110, "row": 118},
-        {"unit_type": "Boyz", "col": 116, "row": 118},
-        {"unit_type": "Boyz", "col": 122, "row": 118},
-        {"unit_type": "Boyz", "col": 128, "row": 118},
-        {"unit_type": "Boyz", "col": 134, "row": 118},
-        {"unit_type": "Boyz", "col": 113, "row": 122},
-        {"unit_type": "Boyz", "col": 119, "row": 122},
-        {"unit_type": "Boyz", "col": 125, "row": 122},
-        {"unit_type": "Boyz", "col": 131, "row": 122},
+        {"unit_type": "Boyz", "col": 112, "row": 114},
+        {"unit_type": "Boyz", "col": 118, "row": 114},
+        {"unit_type": "Boyz", "col": 124, "row": 114},
+        {"unit_type": "Boyz", "col": 130, "row": 114},
+        {"unit_type": "Boyz", "col": 136, "row": 114},
+        {"unit_type": "Boyz", "col": 115, "row": 118},
+        {"unit_type": "Boyz", "col": 121, "row": 118},
+        {"unit_type": "Boyz", "col": 127, "row": 118},
+        {"unit_type": "Boyz", "col": 133, "row": 118},
         {"unit_type": "BoyzNobKombi", "col": 139, "row": 122},
-        {"unit_type": "Bigboss", "col": 145, "row": 116},
-        {"unit_type": "BannerNob", "col": 148, "row": 124}
+        {"unit_type": "Bigboss", "col": 144, "row": 116},
+        {"unit_type": "BannerNob", "col": 147, "row": 123}
       ]
     },
     {
@@ -77,7 +77,7 @@
         {"unit_type": "EradicatorHeavyBolterSergeant", "col": 125, "row": 88}
       ]
     },
-    { "id": 103, "unit_type": "LandSpeederOnslaughtGatlingCannon", "player": 2, "col": 106, "row": 65 },
+    { "id": 103, "unit_type": "LandSpeederOnslaughtGatlingCannon", "player": 2, "col": 109, "row": 65 },
     {
       "id": 104, "unit_type": "Intercessor", "player": 2, "col": 136, "row": 55,
       "models": [
@@ -94,8 +94,8 @@
       "models": [
         {"unit_type": "Intercessor", "col": 46, "row": 77},
         {"unit_type": "Intercessor", "col": 42, "row": 85},
-        {"unit_type": "Intercessor", "col": 50, "row": 85},
-        {"unit_type": "IntercessorGrenadeLauncher", "col": 55, "row": 77},
+        {"unit_type": "Intercessor", "col": 51, "row": 81},
+        {"unit_type": "IntercessorGrenadeLauncher", "col": 52, "row": 75},
         {"unit_type": "IntercessorSergeant", "col": 50, "row": 69},
         {"unit_type": "CaptainRelicShield", "col": 42, "row": 69},
         {"unit_type": "Ancient", "col": 37, "row": 77}
