@@ -94,7 +94,7 @@ Tâches J4 archivées → `archives/doc.md#hygiene-correctifs-ponctuels`
 
 Correctifs ponctuels livrés → `archives/doc.md#hygiene-correctifs-ponctuels`
 
-Correctifs hors chantier (2026-09-03) : `worktree-fix-terrain-empty-string` (rejette chaîne vide dans accepts), `worktree-fix-biome-terrain-imports` (ordre imports Biome), `worktree-test-terrain-list-not-loaded` (trou test resolveSelectedTerrain liste non chargée + corrige accepts listLoaded).
+Correctifs hors chantier (2026-09-03) : `worktree-fix-terrain-empty-string` (rejette chaîne vide dans accepts), `worktree-fix-biome-terrain-imports` (ordre imports Biome), `worktree-test-terrain-list-not-loaded` (trou test resolveSelectedTerrain liste non chargée + corrige accepts listLoaded), `worktree-fix-terrain-findings` (résolution conflit trim()), `worktree-fix-terrain-review-findings` (corrige 3 findings review terrain), `worktree-fix-terrain-review2` (guard availableTerrains + STORAGE_KEY test + trim test), `worktree-fix-terrain-simplify` (doublon import + trim redondant), `worktree-config-opus-default` (modèle par défaut Opus 5 + critères bannières CLAUDE.md).
 
 ---
 
