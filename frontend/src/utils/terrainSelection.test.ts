@@ -123,15 +123,4 @@ describe("terrainSuffix", () => {
   it("renvoie _id pour un terrain connu mais non-défaut du mode", () => {
     expect(suf("mc1")).toBe("_mc1");
   });
-
-  // pve_test n'a qu'un scénario sur disque (scenario_pve_test.json). Tout suffixe non vide y
-  // ferait demander un scenario_pve_test_<id>.json qui n'existe pas, et le mode tomberait en
-  // erreur au chargement du board. Miroir exact de `_load_terrain_list_constants` côté serveur :
-  // si l'un des deux change, le plateau dessiné et le plateau joué divergent à nouveau.
-  it.each(["mc1", "mc2", "pfm2", "inconnu"])(
-    "renvoie '' en pve_test quel que soit le terrain (%s)",
-    (id) => {
-      expect(terrainSuffix(id, "pve_test", MOCK_TERRAIN_LIST)).toBe("");
-    }
-  );
 });

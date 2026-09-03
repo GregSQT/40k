@@ -3,8 +3,8 @@
   "army_faction": {"1": "ORKS", "2": "ADEPTUS ASTARTES"},
   "scale": "500pts",
   "primary_objectives": ["objectives_control"],
-  "wall_ref": "walls-mc2.json",
-  "terrain_ref": "terrain-mc2.json",
+  "wall_ref": "walls-mc1.json",
+  "terrain_ref": "terrain-mc1.json",
   "units": [
     { "id": 201, "unit_type": "WeirdBoy",       "player": 1, "col": 23,  "row": 98 },
     { "id": 202, "unit_type": "WarTrakk",       "player": 1, "col": 203,  "row": 93 },
