@@ -5144,7 +5144,21 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
         )
         return 1
 
-    save_run_state(canonical_model_path, require_key(run_info, "episode_count_total"))
+    # Le compte est EXIGE dans tous les cas : son absence est une erreur de contrat, pas un motif
+    # de saut silencieux (T1). L'ECRITURE, elle, est conditionnelle.
+    _episode_count_total = require_key(run_info, "episode_count_total")
+    # N'ECRIRE QUE SI ABSENT. Le defaut d'origine etait un run_state canonique MANQUANT, que
+    # `promote_stage_model` sautait — d'ou une reprise qui levait. Mais ecrire inconditionnellement
+    # casse le cas `save_best_robust` (profils x1_long/x5_long, ceux des etapes de curriculum) :
+    # le zip canonique y est l'INSTANTANE ROBUSTE pris plus tot dans le run, et
+    # `BotEvaluationCallback._copy_model_artifacts` lui a deja ecrit un run_state coherent avec
+    # SES poids. Poser ici le compte de FIN de run daterait ce modele d'episodes qu'il n'a jamais
+    # joues ; `promote_stage_model` propagerait l'ecart a `model_<agent>_<etape>.zip`, et l'etape
+    # suivante repartirait sur un `episode_offset` gonfle (axe TensorBoard, barre de progression,
+    # `target_episode_count`). Hors `save_best_robust`, la ligne 3714 a deja ecrit la meme valeur :
+    # la garde n'y change rien.
+    if not os.path.exists(get_run_state_path(canonical_model_path)):
+        save_run_state(canonical_model_path, _episode_count_total)
     for written in promote_stage_model(canonical_model_path, args.etape):
         print(f"📦 {written}")
     tensorboard_run_dir = require_key(run_info, "tensorboard_run_dir")

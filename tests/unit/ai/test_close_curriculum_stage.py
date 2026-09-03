@@ -201,3 +201,35 @@ def test_gate_accepte_run_state_reflète_episodes_entraînes(tmp_path, monkeypat
 
     promoted = tmp_path / "model_Stub_P4.zip"
     assert load_run_state(str(promoted)) == 5000
+
+
+def test_gate_accepte_run_state_canonique_existant_nest_pas_ecrase(tmp_path, monkeypatch):
+    """Un run_state canonique DEJA ecrit fait autorite : la cloture ne l'ecrase pas.
+
+    C'est le cas `save_best_robust` (profils x1_long/x5_long, ceux des etapes de curriculum) : le
+    zip canonique est l'INSTANTANE ROBUSTE pris plus tot dans le run, et
+    `BotEvaluationCallback._copy_model_artifacts` lui a deja ecrit un run_state coherent avec SES
+    poids. Y poser le compte de FIN de run daterait le modele d'episodes qu'il n'a pas joues, et
+    `promote_stage_model` propagerait l'ecart a l'etape suivante, qui repartirait sur un
+    `episode_offset` gonfle.
+    """
+    from ai.run_state import load_run_state, save_run_state
+
+    canonical, args, config, curriculum, stage, run_info = _make_context(tmp_path)
+    # Le run a tourne 50 000 episodes, mais l'instantane robuste retenu date de l'episode 30 000.
+    run_info["episode_count_total"] = 50000
+    save_run_state(canonical, 30000)
+
+    _patch_common(monkeypatch, tmp_path, canonical, score=0.65)
+    monkeypatch.setattr(train_mod, "copy_tensorboard_run", lambda *_a: "/fake/tb")
+
+    exit_code = train_mod._close_curriculum_stage(args, config, curriculum, stage, run_info)
+    assert exit_code == 0
+
+    assert load_run_state(canonical) == 30000, (
+        "le run_state canonique, deja coherent avec les poids de l'instantane, a ete ecrase"
+    )
+    promoted = tmp_path / "model_Stub_P4.zip"
+    assert load_run_state(str(promoted)) == 30000, (
+        "l'etape promue doit porter le compte de l'instantane promu, pas celui de fin de run"
+    )
