@@ -2,14 +2,6 @@
 import type { Position, Unit, UnitId } from "../types";
 import { getDiceAverage, getSelectedMeleeWeapon, getSelectedRangedWeapon } from "./weaponHelpers";
 
-// Wall interface for collision detection
-interface Wall {
-  id: string;
-  start: { col: number; row: number };
-  end: { col: number; row: number };
-  thickness?: number;
-}
-
 // Distance calculations for hex grid
 export function offsetToCube(col: number, row: number): { x: number; y: number; z: number } {
   const x = col;
@@ -100,40 +92,6 @@ function lineSegmentsIntersect(
   const t2 = cross3 / cross1;
 
   return t1 >= 0 && t1 <= 1 && t2 >= 0 && t2 <= 1;
-}
-
-// Check if a line segment from start to end intersects with a wall
-function lineIntersectsWall(
-  startCol: number,
-  startRow: number,
-  endCol: number,
-  endRow: number,
-  wall: Wall,
-  hexRadius: number = 21
-): boolean {
-  // Convert hex coordinates to pixel coordinates
-  const lineStart = hexToPixel(startCol, startRow, hexRadius);
-  const lineEnd = hexToPixel(endCol, endRow, hexRadius);
-  const wallStart = hexToPixel(wall.start.col, wall.start.row, hexRadius);
-  const wallEnd = hexToPixel(wall.end.col, wall.end.row, hexRadius);
-
-  // Line segment intersection using cross products
-  const lineDir = { x: lineEnd.x - lineStart.x, y: lineEnd.y - lineStart.y };
-  const wallDir = { x: wallEnd.x - wallStart.x, y: wallEnd.y - wallStart.y };
-  const toWallStart = { x: wallStart.x - lineStart.x, y: wallStart.y - lineStart.y };
-
-  const lineCrossWall = lineDir.x * wallDir.y - lineDir.y * wallDir.x;
-  const toCrossWall = toWallStart.x * wallDir.y - toWallStart.y * wallDir.x;
-  const toCrossLine = toWallStart.x * lineDir.y - toWallStart.y * lineDir.x;
-
-  // Lines are parallel
-  if (Math.abs(lineCrossWall) < 0.0001) return false;
-
-  const t = toCrossWall / lineCrossWall;
-  const u = toCrossLine / lineCrossWall;
-
-  // Intersection occurs within both line segments
-  return t >= 0 && t <= 1 && u >= 0 && u <= 1;
 }
 
 // Hex-native Line of Sight System (center + 6 vertices)
@@ -261,31 +219,6 @@ function roundCube(cube: { x: number; y: number; z: number }): { x: number; y: n
   }
 
   return { x: rx, y: ry, z: rz };
-}
-
-// Check if movement from one hex to another is blocked by walls
-export function isMovementBlocked(
-  fromCol: number,
-  fromRow: number,
-  toCol: number,
-  toRow: number,
-  walls: Wall[]
-): boolean {
-  if (walls.length === 0) return false;
-
-  // Check if direct movement line intersects any wall
-  for (const wall of walls) {
-    if (lineIntersectsWall(fromCol, fromRow, toCol, toRow, wall)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-// Check if a charge path is blocked by walls
-export function isChargeBlocked(charger: Unit, target: Unit, walls: Wall[]): boolean {
-  return isMovementBlocked(charger.col, charger.row, target.col, target.row, walls);
 }
 
 export function getHexDistance(pos1: Position, pos2: Position): number {
