@@ -590,3 +590,60 @@ def test_parent_ratio_argument_absent_leaves_the_profile_alone(board_x5) -> None
         training_deploy_active_ratio_start=None,
     )
     assert env.training_config["deployment_mode_schedule"]["active_ratio_start"] == 0.3
+
+
+# ── training_total_episodes ──────────────────────────────────────────────────
+#
+# Miroir de `training_deploy_active_ratio_start` : un override de total_episodes dans une etape
+# de curriculum vit dans le parent, mais un worker forkserver relit le JSON et l'ignorerait.
+# Le passage en argument est la seule voie — cf. engine/w40k_core.py et le test de traversee
+# dans tests/unit/ai/test_total_episodes_cross_boundary.py.
+
+def test_parent_total_episodes_argument_overrides_json(board_x5) -> None:
+    """L'argument gagne sur le JSON, et il n'affecte QUE total_episodes."""
+    from ai.unit_registry import UnitRegistry
+    from engine.w40k_core import W40KEngine
+
+    # x1_long a total_episodes=100000 dans le JSON ; l'etape simule 200000.
+    json_value = 100000
+    override = 200000
+
+    def _engine(**kwargs):
+        return W40KEngine(
+            rewards_config="ArmageddonAgent_x1",
+            training_config_name="x1_long",
+            controlled_agent="ArmageddonAgent_x1",
+            scenario_file=SCENARIO,
+            unit_registry=UnitRegistry(),
+            quiet=True,
+            gym_training_mode=True,
+            training_n_envs=1,
+            **kwargs,
+        )
+
+    from_json = _engine().training_config["total_episodes"]
+    assert from_json == json_value, (
+        f"le profil x1_long ne vaut plus {json_value} : mettre a jour ce test."
+    )
+
+    overridden = _engine(training_total_episodes=override).training_config["total_episodes"]
+    assert overridden == override
+
+
+def test_parent_total_episodes_argument_absent_leaves_json(board_x5) -> None:
+    """`None` = personne n'impose rien : le JSON fait foi."""
+    from ai.unit_registry import UnitRegistry
+    from engine.w40k_core import W40KEngine
+
+    env = W40KEngine(
+        rewards_config="ArmageddonAgent_x1",
+        training_config_name="x1_long",
+        controlled_agent="ArmageddonAgent_x1",
+        scenario_file=SCENARIO,
+        unit_registry=UnitRegistry(),
+        quiet=True,
+        gym_training_mode=True,
+        training_n_envs=1,
+        training_total_episodes=None,
+    )
+    assert env.training_config["total_episodes"] == 100000
