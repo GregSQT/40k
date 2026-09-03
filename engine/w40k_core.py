@@ -473,7 +473,8 @@ class W40KEngine(gym.Env):
                 unit_registry=None, quiet=True, gym_training_mode=False, debug_mode=False,
                 training_n_envs: Optional[int] = None,
                 training_episode_start_index: int = 0,
-                training_deploy_active_ratio_start: Optional[float] = None, **kwargs):
+                training_deploy_active_ratio_start: Optional[float] = None,
+                training_total_episodes: Optional[int] = None, **kwargs):
         """Initialize W40K engine with tour_de_jeu.md compliance - training system compatible.
 
         Args:
@@ -590,10 +591,18 @@ class W40KEngine(gym.Env):
             # un worker relit le JSON (48) même quand `--step` n'a ouvert qu'un environnement.
             # Écrit sur une COPIE — rien ne garantit que ce dict ne soit pas partagé ailleurs.
             # Pourquoi ce nombre décide de tout : engine/episode_schedule.py.
-            if training_n_envs is not None:
+            if training_n_envs is not None or training_total_episodes is not None:
                 self.training_config = dict(self.training_config)
-                self.training_config["n_envs"] = require_positive_int(training_n_envs, "training_n_envs")
-                self._episode_ramp_n_envs_is_runtime = True
+                if training_n_envs is not None:
+                    self.training_config["n_envs"] = require_positive_int(training_n_envs, "training_n_envs")
+                    self._episode_ramp_n_envs_is_runtime = True
+                if training_total_episodes is not None:
+                    # Budget impose par le PARENT (etape de curriculum) : meme raison que
+                    # `training_deploy_active_ratio_start` — un worker forkserver relit le JSON et
+                    # ignorerait l'override ; seul un argument le fait traverser la frontiere.
+                    self.training_config["total_episodes"] = require_positive_int(
+                        training_total_episodes, "training_total_episodes"
+                    )
             
             # Load base configuration
             board_config = config_loader.get_board_config()

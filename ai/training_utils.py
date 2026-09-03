@@ -209,7 +209,7 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
                      global_seed=None, opponent_mix_config=None,
                      n_envs=None, episode_start_index=0,
                      vec_normalize_enabled=False, vec_normalize_eval_enabled=False,
-                     deploy_active_ratio_start=None):
+                     deploy_active_ratio_start=None, total_episodes=None):
     """
     Factory function to create a single W40KEngine instance for vectorization.
 
@@ -243,6 +243,10 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             FRANCHIT PAS la frontiere `forkserver`/`spawn` d'un worker, qui reimporte tout et
             relit le JSON. Le passer en argument est donc la seule facon qu'il atteigne le
             moteur — meme raison que `n_envs` et `episode_start_index` ci-dessus.
+        total_episodes: Budget d'episodes de l'etape decide par le PARENT (surcharge curriculum),
+            ou None pour laisser le JSON faire foi. Meme raison que `deploy_active_ratio_start` :
+            un worker forkserver relit le JSON et ignorerait un override in-process ; seul un
+            argument franchit la frontiere.
 
     Returns:
         Callable that creates and returns a wrapped environment instance
@@ -293,6 +297,7 @@ def make_training_env(rank, scenario_file, rewards_config_name, training_config_
             training_n_envs=n_envs,
             training_episode_start_index=episode_start_index,
             training_deploy_active_ratio_start=deploy_active_ratio_start,
+            training_total_episodes=total_episodes,
         )
         
         # ✓ CHANGE 9: Removed seed() call - W40KEngine uses reset(seed=...) instead
