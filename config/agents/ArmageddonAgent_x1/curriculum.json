@@ -56,7 +56,7 @@
     },
     "P1": {
       "role": "learner",
-      "init": "from:P00",
+      "init": "from:P0",
       "warmup_episodes": 10000,
       "ramp_end_episodes": 50000,
       "ratio_start": 0.0,
@@ -75,7 +75,7 @@
     },
     "P2": {
       "role": "learner",
-      "init": "from:P00",
+      "init": "from:P1",
       "warmup_episodes": 10000,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
@@ -94,7 +94,7 @@
     },
     "P3": {
       "role": "learner",
-      "init": "from:P00",
+      "init": "from:P2",
       "warmup_episodes": 10000,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
@@ -125,7 +125,7 @@
     },
     "P4": {
       "role": "learner",
-      "init": "from:P00",
+      "init": "from:P3",
       "warmup_episodes": 10000,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
@@ -145,7 +145,7 @@
     },
     "P5": {
       "role": "learner",
-      "init": "from:P00",
+      "init": "from:P4",
       "warmup_episodes": 10000,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
@@ -177,7 +177,7 @@
     },
     "P6": {
       "role": "learner",
-      "init": "from:P00",
+      "init": "from:P5",
       "warmup_episodes": 10000,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
@@ -197,7 +197,7 @@
     },
     "P7": {
       "role": "learner",
-      "init": "from:P00",
+      "init": "from:P6",
       "warmup_episodes": 10000,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
@@ -217,7 +217,7 @@
     },
     "P8": {
       "role": "learner",
-      "init": "from:P00",
+      "init": "from:P7",
       "warmup_episodes": 10000,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
@@ -249,7 +249,7 @@
     },
     "P9": {
       "role": "learner",
-      "init": "from:P00",
+      "init": "from:P8",
       "warmup_episodes": 10000,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,
@@ -269,7 +269,7 @@
     },
     "P10": {
       "role": "learner",
-      "init": "from:P00",
+      "init": "from:P9",
       "warmup_episodes": 10000,
       "ramp_end_episodes": 100000,
       "ratio_start": 0.0,

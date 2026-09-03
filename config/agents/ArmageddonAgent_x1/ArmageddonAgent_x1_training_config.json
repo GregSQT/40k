@@ -134,7 +134,7 @@
             "clip_obs": 10.0,
             "clip_reward": 10.0,
             "gamma": 0.99,
-            "reset_on_curriculum": true
+            "reset_on_curriculum": false
         },
         "vec_normalize_eval": {
             "enabled": true,
@@ -330,7 +330,7 @@
             "clip_obs": 10.0,
             "clip_reward": 10.0,
             "gamma": 0.99,
-            "reset_on_curriculum": true
+            "reset_on_curriculum": false
         },
         "vec_normalize_eval": {
             "enabled": true,
