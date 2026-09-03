@@ -4825,7 +4825,7 @@ def parent_deploy_active_ratio_start(training_config: Dict[str, Any]) -> float:
 def _install_stage_config_overrides(
     config, agent_key: str, opponent_mix: Optional[Dict[str, Any]],
     hp_overrides: Dict[str, Any], warm_start: bool,
-) -> None:
+) -> Optional[Tuple[float, float]]:
     """Ce que l'etape impose a TOUTE lecture ulterieure de la config de cet agent.
 
     Meme mecanisme que `--param` : la config d'entrainement est rechargee a plusieurs endroits
@@ -4855,6 +4855,16 @@ def _install_stage_config_overrides(
     """
     original_load = config.load_agent_training_config
 
+    ramp_log: Optional[Tuple[float, float]] = None
+    if warm_start:
+        _pre = original_load(agent_key, None)
+        _sched = _pre.get("deployment_mode_schedule")
+        if isinstance(_sched, dict):
+            before = float(require_key(_sched, "active_ratio_start"))
+            after = float(require_key(_sched, "active_ratio_end"))
+            if before != after:
+                ramp_log = (before, after)
+
     def _load_with_stage(loaded_agent_key: str, phase: Optional[str] = None) -> Dict[str, Any]:
         cfg = original_load(loaded_agent_key, phase)
         if isinstance(cfg, dict) and loaded_agent_key == agent_key:
@@ -4866,6 +4876,7 @@ def _install_stage_config_overrides(
         return cfg
 
     config.load_agent_training_config = _load_with_stage
+    return ramp_log
 
 
 def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -4930,23 +4941,12 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
     opponent_mix = _stage_opponent_mix(curriculum, stage, canonical_model_path)
     hp_overrides = get_stage_hp_overrides(stage)
     warm_start = source_stage is not None
-    # Valeurs LUES AVANT l'installation du decorateur : apres, toute lecture rend deja la rampe
-    # figee et la ligne de log ne pourrait plus dire de quoi on part.
-    _ramp_log: Optional[Tuple[float, float]] = None
-    if warm_start:
-        _tmp = config.load_agent_training_config(args.agent, args.training_config)
-        _sched = _tmp.get("deployment_mode_schedule")
-        if isinstance(_sched, dict):
-            _before = float(require_key(_sched, "active_ratio_start"))
-            _after = float(require_key(_sched, "active_ratio_end"))
-            if _before != _after:
-                _ramp_log = (_before, _after)
-    _install_stage_config_overrides(config, args.agent, opponent_mix, hp_overrides, warm_start)
-    if _ramp_log is not None:
-        _before, _after = _ramp_log
+    ramp_log = _install_stage_config_overrides(config, args.agent, opponent_mix, hp_overrides, warm_start)
+    if ramp_log is not None:
+        before, after = ramp_log
         print(
             f"🎓 Etape {args.etape} — reprise a chaud : rampe de deploiement figee a "
-            f"{_after:.2f} (au lieu de repartir de {_before:.2f}), le modele repris a deja "
+            f"{after:.2f} (au lieu de repartir de {before:.2f}), le modele repris a deja "
             "parcouru la sienne."
         )
     if hp_overrides:
