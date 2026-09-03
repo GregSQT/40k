@@ -37,11 +37,12 @@ const TEST_TERRAIN_LIST = [
 ];
 
 const FAKE_SESSION = JSON.stringify({
-  user: { id: 1, email: "test@example.com" },
+  user: { id: 1, login: "test_user", profile: "player" },
   permissions: {
     game_modes: ["pvp"],
     options: { show_advance_warning: false, auto_weapon_selection: false },
   },
+  default_redirect_mode: "pvp",
 });
 
 const BOARD_CONFIG = {
@@ -122,7 +123,7 @@ const server = setupServer(
   ),
 );
 
-beforeAll(() => server.listen({ onUnhandledRequest: "bypass" }));
+beforeAll(() => server.listen({ onUnhandledRequest: "warn" }));
 afterEach(() => {
   server.resetHandlers();
   cleanup();
