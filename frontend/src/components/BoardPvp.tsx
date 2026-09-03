@@ -8815,7 +8815,7 @@ export default function Board({
       backgroundColor: parseInt(boardConfig.colors.background.replace("0x", ""), 16),
       backgroundAlpha: 1, // Ensure background is opaque
       antialias: displayConfig.antialias!,
-      powerPreference: "default" as WebGLPowerPreference,
+      powerPreference: "high-performance" as WebGLPowerPreference,
       resolution: renderResolution,
       autoDensity: displayConfig.autoDensity!,
       autoStart: false,
