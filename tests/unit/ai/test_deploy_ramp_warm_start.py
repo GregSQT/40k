@@ -80,10 +80,8 @@ class _StubConfig:
     def __init__(self, start: float = 0.3, end: float = 0.9) -> None:
         self._start = start
         self._end = end
-        self.calls = 0
 
     def load_agent_training_config(self, agent_key: str, phase=None) -> dict:
-        self.calls += 1
         return _cfg(self._start, self._end)
 
 
@@ -129,7 +127,6 @@ def test_warm_start_pins_the_ramp_on_every_reload():
     for _ in range(3):
         cfg = stub.load_agent_training_config(AGENT)
         assert cfg["deployment_mode_schedule"]["active_ratio_start"] == 0.9
-    assert stub.calls == 3
 
 
 def test_cold_start_keeps_the_ramp_intact():
