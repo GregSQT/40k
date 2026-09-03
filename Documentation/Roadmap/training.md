@@ -2,6 +2,38 @@
 
 ---
 
+## ⚠️ Courbes de santé PPO — runs REPRIS lancés avant le 2026-09-04 {#courbes-ppo-reprise}
+
+Sur tout run **repris** (`--resume-from`, donc toute étape de curriculum à `init: "from:..."`)
+lancé **avant** le correctif du 2026-09-04, les quatre courbes de santé PPO du dashboard
+`00_critical` ne sont **pas lissées** et ne doivent pas être lues :
+
+- `00_critical/g_explained_variance`
+- `00_critical/h_clip_fraction`
+- `00_critical/i_approx_kl`
+- `00_critical/j_entropy_loss`
+
+Cause : `MetricsCollectionCallback._on_training_start` réenveloppait `logger.dump` à chaque
+`learn()`, donc une fois par tranche de quatre updates, sur un logger que `model.set_logger` rend
+persistant en reprise. Chaque update était poussé autant de fois qu'il y avait de couches, et la
+fenêtre de vingt valeurs de `_calculate_smoothed_metric` finissait par couvrir vingt copies du
+même update. Mesure sur le run P1 du 2026-09-03 : 41 756 points sur
+`training_critical/clip_fraction` pour **575 updates réels**, contre 1 063 points pour 1 063
+updates sur un run neuf comparable. Les courbes paraissaient 4× à 14× plus bruitées qu'un run
+neuf, sans que la politique ni le régime d'update soient en cause.
+
+**Ce qu'il faut lire à la place**, sur ces runs : les séries brutes `training_critical/*`
+(`clip_fraction`, `approx_kl`, `explained_variance`) et `training_diagnostic/entropy_loss`. Les
+valeurs y sont exactes, seulement répétées — la courbe est en escalier.
+
+Les courbes de jeu (`d_win_rate`, `e_episode_reward_smooth`, `03_selfplay/*`) ne passent pas par
+ce chemin et n'ont jamais été touchées.
+
+Le run P1 en cours au 2026-09-04 a chargé le code avant le correctif : ses courbes restent
+fausses jusqu'à sa fin. Verrou : `tests/unit/ai/test_metrics_dump_wrapper_idempotent.py`.
+
+---
+
 ## Critères pipeline du run en cours (ex-« run x1 de vérification ») {#run-verif}
 
 Un run `x1` de vérification dédié avait été décidé le 2026-08-11 pour prouver que le pipeline
