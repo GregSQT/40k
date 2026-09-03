@@ -44,12 +44,21 @@ export function coverConditionsFingerprint(m: CoverConditionsByUnitId): string {
 /**
  * - `"none"` → aucun badge : la figurine est à découvert (et si l'unité n'a pas le couvert,
  *   c'est une figurine comme elle qui le lui coûte).
- * - `"cover"` → badge plein : la figurine est protégée ET son unité qualifie → le -1 BS s'applique.
- * - `"cover-unqualified"` → badge atténué : la figurine est géométriquement protégée, mais une
- *   autre figurine de l'escouade est à découvert → AUCUN bonus. Sans cet état, afficher le badge
- *   remplacerait un affichage faux par un autre, en promettant un -1 BS que la règle refuse.
+ * - `"cover-a"` → badge plein (glyphe terrain) : la figurine est dans une terrain area (13.08a)
+ *   ET son unité qualifie → le -1 BS s'applique.
+ * - `"cover-b"` → badge plein (glyphe œil) : la figurine n'est pas entièrement visible (13.08b)
+ *   ET son unité qualifie → le -1 BS s'applique.
+ * - `"cover-unqualified-a"` → badge atténué (glyphe terrain) : condition (a) remplie mais l'unité
+ *   ne qualifie pas — une autre figurine est à découvert, AUCUN bonus.
+ * - `"cover-unqualified-b"` → badge atténué (glyphe œil) : condition (b) remplie mais l'unité
+ *   ne qualifie pas. Sans ces états, le badge mentait dans l'autre sens.
  */
-export type ModelCoverBadge = "none" | "cover" | "cover-unqualified";
+export type ModelCoverBadge =
+  | "none"
+  | "cover-a"
+  | "cover-b"
+  | "cover-unqualified-a"
+  | "cover-unqualified-b";
 
 /**
  * @param index        Index de la figurine, aligné sur `modelCenters`.
@@ -65,12 +74,15 @@ export function modelCoverBadge(
   unitInCover: boolean
 ): ModelCoverBadge {
   if (conditions === null) {
-    return unitInCover ? "cover" : "none";
+    // Couvert calculé côté WASM sans détail par figurine : repli sur le comportement historique
+    // (booléen d'unité), glyphe œil pour rester cohérent avec l'affichage d'avant cette migration.
+    return unitInCover ? "cover-b" : "none";
   }
   // Hors bornes = figurine que le moteur n'a pas décrite (cible non vue, escouade désynchronisée
   // d'un rendu en retard). On n'invente pas de couvert pour elle.
-  if (!conditions[index]) {
+  const cond = conditions[index];
+  if (cond !== "a" && cond !== "b") {
     return "none";
   }
-  return unitInCover ? "cover" : "cover-unqualified";
+  return unitInCover ? `cover-${cond}` : `cover-unqualified-${cond}`;
 }

@@ -36,14 +36,18 @@ import {
   type HPBlinkContainer,
   type HpBarHtmlTooltipPayload,
 } from "../utils/blinkingHPBar";
-import { modelCoverBadge } from "../utils/coverBadgePerModel";
+import { type ModelCoverBadge, modelCoverBadge } from "../utils/coverBadgePerModel";
 import { logFightClick } from "../utils/fightClickDebug";
 import { cubeDistance, offsetToCube } from "../utils/gameHelpers";
 import {
   minHexDistanceBetweenUnitFootprintsLive,
   resolveBaseSizeForUnitDisplay,
 } from "../utils/hexFootprint";
-import { drawDetectionNumberBadgeBackground, drawHiddenEyeBadge } from "../utils/hiddenBadgeDraw";
+import {
+  drawDetectionNumberBadgeBackground,
+  drawHiddenEyeBadge,
+  drawTerrainCoverBadge,
+} from "../utils/hiddenBadgeDraw";
 import { enqueueForIconLoad } from "../utils/iconLoadQueue";
 import {
   drawBattleShockBadge,
@@ -2564,6 +2568,27 @@ export class UnitRenderer {
       g.zIndex = 10001;
       targetContainer.addChild(g);
     };
+    // Badge de COUVERT : dispatche entre glyphe terrain (a) et œil (b) selon la condition 13.08.
+    const drawCoverAt = (
+      cx: number,
+      cy: number,
+      name: string,
+      badge: Exclude<ModelCoverBadge, "none">
+    ): void => {
+      const badgeX = cx - scaledOffset;
+      const badgeY = cy + scaledOffset;
+      const g = new PIXI.Graphics();
+      const color =
+        badge === "cover-a" || badge === "cover-b" ? 0xc8c8c8 : EYE_COLOR_COVER_UNQUALIFIED;
+      if (badge === "cover-a" || badge === "cover-unqualified-a") {
+        drawTerrainCoverBadge(g, badgeX, badgeY, r, color);
+      } else {
+        drawHiddenEyeBadge(g, badgeX, badgeY, r, color);
+      }
+      g.name = name;
+      g.zIndex = 10001;
+      targetContainer.addChild(g);
+    };
     const drawNumberAt = (
       cx: number,
       cy: number,
@@ -2636,7 +2661,7 @@ export class UnitRenderer {
         // Figurine non cachée : seul le couvert peut lui valoir un badge.
         const badge = modelCoverBadge(i, coverConditions, inCover);
         if (badge === "none") return;
-        drawBadgeAt(cx, cy, name, badge === "cover" ? undefined : EYE_COLOR_COVER_UNQUALIFIED);
+        drawCoverAt(cx, cy, name, badge);
       });
       return;
     }
