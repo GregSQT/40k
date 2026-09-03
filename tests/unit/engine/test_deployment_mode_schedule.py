@@ -79,6 +79,23 @@ def _make_env(start: float, end: float, total_episodes: int, freeze: float = 1.0
     return env
 
 
+def _engine_x1_long(**kwargs):
+    from ai.unit_registry import UnitRegistry
+    from engine.w40k_core import W40KEngine
+
+    return W40KEngine(
+        rewards_config="ArmageddonAgent_x1",
+        training_config_name="x1_long",
+        controlled_agent="ArmageddonAgent_x1",
+        scenario_file=SCENARIO,
+        unit_registry=UnitRegistry(),
+        quiet=True,
+        gym_training_mode=True,
+        training_n_envs=1,
+        **kwargs,
+    )
+
+
 def _collect_modes(env, n: int) -> list[str]:
     """Rejoue `n` épisodes et renvoie le mode tiré, en vérifiant la cohérence mode ↔ phase moteur.
 
@@ -543,28 +560,12 @@ def test_missing_block_in_an_agent_profile_is_an_explicit_error() -> None:
 
 def test_parent_ratio_argument_overrides_the_profile_json(board_x5) -> None:
     """L'argument gagne sur le JSON, et il ne déplace QUE le départ."""
-    from ai.unit_registry import UnitRegistry
-    from engine.w40k_core import W40KEngine
-
-    def _engine(**kwargs):
-        return W40KEngine(
-            rewards_config="ArmageddonAgent_x1",
-            training_config_name="x1_long",
-            controlled_agent="ArmageddonAgent_x1",
-            scenario_file=SCENARIO,
-            unit_registry=UnitRegistry(),
-            quiet=True,
-            gym_training_mode=True,
-            training_n_envs=1,
-            **kwargs,
-        )
-
-    from_json = _engine().training_config["deployment_mode_schedule"]
+    from_json = _engine_x1_long().training_config["deployment_mode_schedule"]
     assert from_json["active_ratio_start"] == 0.3, (
         "le profil x1_long ne démarre plus à 0.3 : ce test compare l'argument à cette valeur."
     )
 
-    pinned = _engine(training_deploy_active_ratio_start=0.9).training_config[
+    pinned = _engine_x1_long(training_deploy_active_ratio_start=0.9).training_config[
         "deployment_mode_schedule"
     ]
     assert pinned["active_ratio_start"] == 0.9
@@ -601,49 +602,14 @@ def test_parent_ratio_argument_absent_leaves_the_profile_alone(board_x5) -> None
 
 def test_parent_total_episodes_argument_overrides_json(board_x5) -> None:
     """L'argument gagne sur le JSON, et il n'affecte QUE total_episodes."""
-    from ai.unit_registry import UnitRegistry
-    from engine.w40k_core import W40KEngine
-
     # x1_long a total_episodes=100000 dans le JSON ; l'etape simule 200000.
     json_value = 100000
     override = 200000
 
-    def _engine(**kwargs):
-        return W40KEngine(
-            rewards_config="ArmageddonAgent_x1",
-            training_config_name="x1_long",
-            controlled_agent="ArmageddonAgent_x1",
-            scenario_file=SCENARIO,
-            unit_registry=UnitRegistry(),
-            quiet=True,
-            gym_training_mode=True,
-            training_n_envs=1,
-            **kwargs,
-        )
-
-    from_json = _engine().training_config["total_episodes"]
+    from_json = _engine_x1_long().training_config["total_episodes"]
     assert from_json == json_value, (
         f"le profil x1_long ne vaut plus {json_value} : mettre a jour ce test."
     )
 
-    overridden = _engine(training_total_episodes=override).training_config["total_episodes"]
+    overridden = _engine_x1_long(training_total_episodes=override).training_config["total_episodes"]
     assert overridden == override
-
-
-def test_parent_total_episodes_argument_absent_leaves_json(board_x5) -> None:
-    """`None` = personne n'impose rien : le JSON fait foi."""
-    from ai.unit_registry import UnitRegistry
-    from engine.w40k_core import W40KEngine
-
-    env = W40KEngine(
-        rewards_config="ArmageddonAgent_x1",
-        training_config_name="x1_long",
-        controlled_agent="ArmageddonAgent_x1",
-        scenario_file=SCENARIO,
-        unit_registry=UnitRegistry(),
-        quiet=True,
-        gym_training_mode=True,
-        training_n_envs=1,
-        training_total_episodes=None,
-    )
-    assert env.training_config["total_episodes"] == 100000
