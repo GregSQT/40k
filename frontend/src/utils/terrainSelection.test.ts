@@ -6,10 +6,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   resolveSelectedTerrain,
-  setTerrainList,
   STORAGE_KEY,
-  terrainSuffix,
+  setTerrainList,
   type TerrainEntry,
+  terrainSuffix,
   terrainsForMode,
 } from "./terrainSelection";
 

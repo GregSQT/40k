@@ -243,7 +243,7 @@ class TestSandboxFreeMove:
         gs = _make_gs([unit], sandbox=True)
 
         # Destinations non nulles et atteignables (distance BFS < MOVE=6)
-        plan = [["1#0", 4, 0, 0, 0], ["1#1", 5, 0, 0, 0]]
+        plan = [("1#0", 4, 0, 0, 0), ("1#1", 5, 0, 0, 0)]
         result = move_plan_path_distances(plan, gs, "normal")
 
         assert result == {"1#0": 0.0, "1#1": 0.0}, (
@@ -322,7 +322,7 @@ class TestSandboxExplainMoveRejection:
     def test_hors_plateau_nc_negatif_retourne_erreur(self):
         """Plan avec nc=-1 → retourne une chaîne d'erreur (pas None)."""
         from engine.phase_handlers.shared_utils import explain_move_plan_rejection
-        plan = [["1#0", -1, 10, 0, 0]]
+        plan = [("1#0", -1, 10, 0, 0)]
         result = explain_move_plan_rejection(plan, self._gs())
         assert result is not None, "nc=-1 doit être rejeté en sandbox"
         assert "-1" in result, f"le message doit mentionner la colonne invalide, obtenu : {result!r}"
@@ -330,6 +330,6 @@ class TestSandboxExplainMoveRejection:
     def test_plan_valide_retourne_none(self):
         """Plan dans les limites du plateau → retourne None (plan accepté)."""
         from engine.phase_handlers.shared_utils import explain_move_plan_rejection
-        plan = [["1#0", 10, 5, 0, 0]]
+        plan = [("1#0", 10, 5, 0, 0)]
         result = explain_move_plan_rejection(plan, self._gs())
         assert result is None, f"plan valide doit être accepté en sandbox, obtenu : {result!r}"

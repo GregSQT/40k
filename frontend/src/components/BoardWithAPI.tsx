@@ -31,8 +31,8 @@ import {
   resolveSelectedTerrain,
   setTerrainList,
   STORAGE_KEY as TERRAIN_STORAGE_KEY,
-  terrainsForMode,
   type TerrainEntry,
+  terrainsForMode,
 } from "../utils/terrainSelection";
 import { AdvanceWarningModal } from "./AdvanceWarningModal";
 import BoardPvp, { type BoardDisplayMode, type MeasureModeState } from "./BoardPvp";
