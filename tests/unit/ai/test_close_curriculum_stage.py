@@ -70,6 +70,7 @@ def _make_run_info(tmp_path) -> dict:
     return {
         "last_bot_eval": {"random": 0.80},
         "episodes_trained": 50000,
+        "episode_count_total": 50000,
         "tensorboard_run_dir": str(tb_dir),
     }
 

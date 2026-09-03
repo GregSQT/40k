@@ -5025,9 +5025,7 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
         )
         return 1
 
-    episode_count_total = run_info.get("episode_count_total")
-    if episode_count_total is not None:
-        save_run_state(canonical_model_path, episode_count_total)
+    save_run_state(canonical_model_path, require_key(run_info, "episode_count_total"))
     for written in promote_stage_model(canonical_model_path, args.etape):
         print(f"📦 {written}")
     tensorboard_run_dir = require_key(run_info, "tensorboard_run_dir")
