@@ -2,6 +2,72 @@
 
 ---
 
+## ⚠️ Courbes de santé PPO — runs lancés avant le 2026-09-04 {#courbes-ppo-reprise}
+
+Trois défauts vivaient sur la capture des métriques PPO
+(`MetricsCollectionCallback._on_training_start`), corrigés le 2026-09-04. Ce qu'ils rendent
+illisible sur les runs antérieurs :
+
+**Sur les runs REPRIS uniquement** (`--resume-from`, donc toute étape de curriculum à
+`init: "from:..."`) — les quatre courbes de santé PPO de `00_critical` ne sont **pas lissées** et
+ne doivent pas être lues : `g_explained_variance`, `h_clip_fraction`, `i_approx_kl`,
+`j_entropy_loss`. L'enveloppe posée sur `logger.dump` n'était jamais retirée, et SB3 appaire
+pourtant `on_training_start`/`on_training_end` autour de chaque `learn()`. Sur un run neuf le
+logger est reconstruit à chaque `learn()` et l'enveloppe morte partait avec lui ; en reprise
+`model.set_logger` le rend persistant et les couches s'accumulaient. Chaque update était alors
+capturé autant de fois qu'il y avait de couches, et la fenêtre de vingt valeurs de
+`_calculate_smoothed_metric` finissait par couvrir vingt copies du même update. Mesure sur le run
+P1 du 2026-09-03 : 41 756 points sur `training_critical/clip_fraction` pour **575 updates réels**,
+contre 1 063 points pour 1 063 updates sur un run neuf comparable. Les courbes paraissaient 4× à
+14× plus bruitées, sans que la politique ni le régime d'update soient en cause.
+
+**Sur TOUS les runs, neufs compris** :
+
+- `training_diagnostic/entropy_coef` et `training_diagnostic/gradient_norm` portent **un point par
+  ÉPISODE** et non par update. `_handle_episode_end` appelle `logger.dump` à chaque fin d'épisode,
+  et la capture s'y déclenchait alors qu'aucun update PPO n'y figure — les gradients y sont ceux
+  laissés par le dernier `train()`. Mesure sur le run neuf du 2026-08-29 : 101 415 points pour
+  100 000 épisodes et 1 063 updates.
+- Toutes les courbes `training_critical/*` et `training_diagnostic/*` sont **décalées d'un dump**
+  sur l'axe des pas : l'abscisse était posée après l'écriture, donc chaque update partait au pas du
+  dump précédent.
+
+**Ce qu'il faut lire sur ces runs** : les séries brutes `training_critical/clip_fraction`,
+`approx_kl`, `explained_variance` et `training_diagnostic/entropy_loss`. Les valeurs y sont
+exactes ; sur un run repris elles sont répétées, et les copies d'un même update se superposent à
+la **même** abscisse plutôt que de former un escalier — la courbe reste donc lisible, à condition
+de la lire comme une suite de paliers et non comme un signal bruité.
+
+Les courbes de jeu (`d_win_rate`, `e_episode_reward_smooth`, `03_selfplay/*`) ne passent pas par
+ce chemin et n'ont jamais été touchées.
+
+Le run P1 en cours au 2026-09-04 a chargé le code avant le correctif : ses courbes restent
+fausses jusqu'à sa fin. Verrou : `tests/unit/ai/test_metrics_dump_wrapper_idempotent.py`.
+
+---
+
+## Pool de workers des sondes — recréé à chaque tranche {#pool-sondes}
+
+`ExploiterProbeCallback` et `PoolEarlyStoppingCallback` créent leur pool de workers dans
+`_on_training_start` et le ferment dans `_on_training_end`. Or SB3 appelle ces deux méthodes
+autour de **chaque** `learn()` (`MaskablePPO.learn`, sb3-contrib, lignes 448 et 467), et la
+boucle budgétée en épisodes de `train_with_scenario_rotation` enchaîne un `learn()` par tranche de
+quatre updates. Le pool est donc créé puis fermé une fois par tranche.
+
+Rien n'est abandonné ni fuité — chaque pool est bien fermé par le `_on_training_end` de sa tranche
+— mais la persistance que les docstrings annonçaient (« pool persistant pour toutes les sondes de
+cette étape ») **n'existe pas** : chaque sonde repaie le démarrage de ses workers, moteur et
+modèle compris. Les docstrings ont été corrigées le 2026-09-04 ; le comportement, lui, reste à
+traiter.
+
+Piste : déplacer création et fermeture hors du couple `_on_training_start`/`_on_training_end`, par
+exemple une création paresseuse à la première sonde et une fermeture confiée à la fin d'étape
+(`_close_curriculum_stage`) ou à un `atexit`. Le choix engage le cycle de vie des deux callbacks,
+et un pool laissé ouvert après un `learn()` doit être fermé sur tous les chemins de sortie, y
+compris l'exception qui remonte de `_probe`.
+
+---
+
 ## Critères pipeline du run en cours (ex-« run x1 de vérification ») {#run-verif}
 
 Un run `x1` de vérification dédié avait été décidé le 2026-08-11 pour prouver que le pipeline
