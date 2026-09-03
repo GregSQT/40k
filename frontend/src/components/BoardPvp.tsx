@@ -9571,8 +9571,9 @@ export default function Board({
       }>;
       wall_hexes: [number, number][];
       walls?: Array<{
-        type?: "light" | "dense";
-        hexes: [number, number][];
+        start: { col: number; row: number };
+        end: { col: number; row: number };
+        thickness?: number;
       }>;
       terrain_zones?: Array<{
         id: string;
