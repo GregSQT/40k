@@ -553,8 +553,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     slice.visible = true;
   });
 
-  // Add to PIXI Ticker — start it on-demand (autoStart: false on app)
-  app.ticker.start();
+  // Add to PIXI Ticker
   app.ticker.add(blinkTicker);
   hpContainer.blinkTicker = blinkTicker;
 
@@ -605,7 +604,6 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
     onBlinkProbHtml?.({ action: "hide", unitId: unitIdNum });
     if (hpContainer.blinkTicker) {
       app.ticker.remove(hpContainer.blinkTicker);
-      if (app.ticker.count === 0) app.ticker.stop();
     }
     if (hpContainer.parent) {
       hpContainer.parent.removeChild(hpContainer);

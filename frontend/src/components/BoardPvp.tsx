@@ -8817,7 +8817,6 @@ export default function Board({
       powerPreference: "default" as WebGLPowerPreference,
       resolution: renderResolution,
       autoDensity: displayConfig.autoDensity!,
-      autoStart: false,
     };
 
     // ✅ VALIDATE PIXI CONFIG VALUES
