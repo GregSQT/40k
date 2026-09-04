@@ -996,8 +996,6 @@ def _log_objective_control_snapshot(engine_instance: Any) -> None:
     La clé de dédup (``_objective_control_logged_for_api``) est préfixée ``_`` et
     donc filtrée du JSON par ``_exclude_game_state_key_for_api_json``.
     """
-    import json as _json_mod
-
     from engine.action_log_utils import append_action_log
     from engine.game_state import iter_living_model_footprints
 
@@ -1021,11 +1019,11 @@ def _log_objective_control_snapshot(engine_instance: Any) -> None:
     # Zones d'objectif : obj_id → frozenset de (col, row).
     # Les objectifs sans 'id' (stubs de test, scénarios partiels) sont ignorés.
     objectives: List[Dict[str, Any]] = game_state.get("objectives") or []
+    valid_objs: List[Tuple[Dict[str, Any], str]] = [
+        (obj, obj["id"]) for obj in objectives if obj.get("id") is not None
+    ]
     obj_hex_zones: Dict[str, Any] = {}
-    for obj in objectives:
-        oid = obj.get("id")
-        if oid is None:
-            continue
+    for obj, oid in valid_objs:
         hexes_raw = obj.get("hexes") or []
         hex_set: set = set()
         for h in hexes_raw:
@@ -1043,24 +1041,22 @@ def _log_objective_control_snapshot(engine_instance: Any) -> None:
     has_units_cache = game_state.get("units_cache") is not None
 
     models_in_area: Dict[str, Dict[int, int]] = {}
-    for oid, hex_zone in obj_hex_zones.items():
-        counts: Dict[int, int] = {}
-        if hex_zone and uid_to_player and has_units_cache:
-            for uid, player in uid_to_player.items():
-                for footprint in iter_living_model_footprints(game_state, uid):
-                    if footprint & hex_zone:
-                        counts[player] = counts.get(player, 0) + 1
-        models_in_area[oid] = counts
+    if uid_to_player and has_units_cache:
+        for oid, hex_zone in obj_hex_zones.items():
+            counts: Dict[int, int] = {}
+            if hex_zone:
+                for uid, player in uid_to_player.items():
+                    for footprint in iter_living_model_footprints(game_state, uid):
+                        if footprint & hex_zone:
+                            counts[player] = counts.get(player, 0) + 1
+            models_in_area[oid] = counts
 
     # Clé de dédup pour les objectifs actifs (tour + phase + contenu du détail).
-    regular_key = (turn, phase, _json_mod.dumps(detail, sort_keys=True, default=str))
+    regular_key = (turn, phase, json.dumps(detail, sort_keys=True, default=str))
 
     # Collecte des lignes à émettre (objectifs avec 'id' uniquement).
     entries: List[Dict[str, Any]] = []
-    for obj in objectives:
-        oid = obj.get("id")
-        if oid is None:
-            continue
+    for obj, oid in valid_objs:
         entry_data = detail.get(oid)
         if entry_data is None:
             continue
@@ -1093,9 +1089,7 @@ def _log_objective_control_snapshot(engine_instance: Any) -> None:
             "objectiveId": oid,
         })
 
-    logged_any = bool(entries)
-
-    if logged_any:
+    if entries:
         if state.get("regular_key") != regular_key:
             for log_entry in entries:
                 append_action_log(game_state, log_entry)
