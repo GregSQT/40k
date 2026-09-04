@@ -30,6 +30,7 @@ from ai.training_callbacks import (  # noqa: E402
     prepare_probe_eval_pools,
     shutdown_probe_eval_pools,
 )
+from shared.data_validation import ConfigurationError  # noqa: E402
 from tests.unit.ai._fabriques import (  # noqa: E402
     PROBE_REWARDS_CONFIG as REWARDS_CONFIG,
     PROBE_TRAINING_CONFIG as TRAINING_CONFIG,
@@ -55,26 +56,17 @@ def _patched_probe_environment(create_pool, results):
     )
 
 
-def _training_cfg(**overrides):
-    """Profil d'entraînement minimal, réduit aux clés que la résolution du pool lit."""
-    cfg = {
+def _training_cfg(**callback_params):
+    """Profil d'entraînement réduit à ce que la résolution du pool lit."""
+    return {
         "vec_normalize": {"enabled": True},
-        "vec_normalize_eval": {"enabled": False},
-        # 7, et non 4 : c'est le compte que `validate_bot_eval_worker_params` rend et
-        # qu'`evaluate_against_checkpoints` prend en `max_in_flight`. Le distinguer du 4 des
-        # fabriques rend visible un pool dimensionné sur autre chose.
-        "callback_params": {
-            "bot_eval_use_subprocess": True,
-            "bot_eval_task_timeout_seconds": 3600,
-            "bot_eval_n_workers": 7,
-        },
+        "vec_normalize_eval": {"enabled": True},
+        "callback_params": dict(callback_params),
     }
-    cfg.update(overrides)
-    return cfg
 
 
 def _patched_config_loader(cfg):
-    """Substitue le profil d'entraînement lu sur disque par `cfg`."""
+    """Substitue le profil d'entraînement lu sur disque par `cfg`, et rend le chargeur doublé."""
     loader = MagicMock()
     loader.load_agent_training_config.return_value = cfg
     return patch("ai.training_callbacks.get_config_loader", return_value=loader), loader
@@ -106,40 +98,12 @@ def test_prepare_raises_on_a_profile_missing_a_key(archive):
     Portés par la sonde seule, ils ne s'exécuteraient qu'après `probe_every_episodes` épisodes —
     2000 sur le curriculum courant, soit des heures de run avant que la config ne se signale.
     """
-    from shared.data_validation import ConfigurationError
-
-    cfg = _training_cfg()
+    cfg = _training_cfg(bot_eval_n_workers_intermediate=4)
     del cfg["vec_normalize_eval"]
     p_config, _ = _patched_config_loader(cfg)
 
     with p_config, pytest.raises(ConfigurationError, match="vec_normalize_eval"):
         prepare_probe_eval_pools([_make_exploiter_probe(archive)])
-
-
-def test_without_an_override_the_pool_matches_max_in_flight(archive):
-    """Sans surcharge, le pool prend le compte que l'évaluation utilisera en `max_in_flight`.
-
-    Un nombre décidé ici indépendamment pourrait être INFÉRIEUR à celui des tâches soumises, et
-    les tâches en trop attendraient un worker libre avec leur chrono de timeout déjà lancé.
-    """
-    p_config, _ = _patched_config_loader(_training_cfg())
-    probe = _make_exploiter_probe(archive, n_workers=None)
-
-    with p_config:
-        prepare_probe_eval_pools([probe])
-
-    assert probe._pool_kwargs is not None
-    assert probe._pool_kwargs["n_workers"] == 7
-
-
-def test_the_worker_count_has_no_silent_default(archive):
-    """Config sans compte de workers = erreur explicite, jamais un nombre inventé."""
-    from shared.data_validation import ConfigurationError
-
-    p_config, _ = _patched_config_loader(_training_cfg(callback_params={}))
-
-    with p_config, pytest.raises(ConfigurationError, match="bot_eval_use_subprocess"):
-        prepare_probe_eval_pools([_make_exploiter_probe(archive, n_workers=None)])
 
 
 def test_the_config_is_read_once_for_the_whole_run(archive):
@@ -257,6 +221,113 @@ def test_single_worker_creates_no_pool(archive):
 
     create_pool.assert_not_called()
     assert evaluate.call_args.kwargs["pool"] is None
+
+
+# ── Compte de workers : lu dans le profil, jamais choisi par le code ─────────────────────────
+
+
+def _profile(**callback_params):
+    """Patch du chargeur de config sur un profil réduit à ce que la résolution du pool lit.
+
+    SYNTHÉTIQUE, et non un profil réel dont la clé serait absente (`x1_debug`, `x5_debug`) :
+    le test doit CONSTRUIRE l'absence, sinon le jour où quelqu'un ajoute la clé à ce profil il
+    reste vert en n'exerçant plus rien.
+    """
+    return _patched_config_loader(_training_cfg(**callback_params))[0]
+
+
+@pytest.mark.parametrize("make", [_make_exploiter_probe, _make_pool_early_stop])
+def test_a_profile_without_the_worker_count_raises(archive, make):
+    """Un profil qui ne déclare pas `bot_eval_n_workers_intermediate` arrête la sonde.
+
+    Le code y retombait sur 4 workers de son cru — un chiffre que la config ne dit nulle part,
+    et qui n'a aucune raison de valoir celui d'un `max_in_flight` dérivé, lui, de
+    `bot_eval_n_workers`. Les autres lectures de la même fonction (`vec_normalize`,
+    `vec_normalize_eval`) sont strictes ; celle-ci doit l'être aussi.
+    """
+    callback = make(archive, n_workers=None)
+    create_pool = MagicMock()
+
+    with _profile(), patch("ai.bot_evaluation.create_checkpoint_eval_pool", create_pool):
+        with pytest.raises(ConfigurationError, match="bot_eval_n_workers_intermediate"):
+            callback._ensure_eval_pool()
+
+    create_pool.assert_not_called()
+    assert callback._eval_pool is None
+
+
+@pytest.mark.parametrize("make", [_make_exploiter_probe, _make_pool_early_stop])
+def test_the_worker_count_declared_by_the_profile_sizes_the_pool(archive, make):
+    """Déclarée, la valeur du profil est celle que reçoit `create_checkpoint_eval_pool`."""
+    callback = make(archive, n_workers=None)
+    create_pool = MagicMock(return_value=MagicMock())
+
+    with _profile(bot_eval_n_workers_intermediate=6), patch(
+        "ai.bot_evaluation.create_checkpoint_eval_pool", create_pool
+    ):
+        callback._ensure_eval_pool()
+
+    assert create_pool.call_args.kwargs["n_workers"] == 6
+
+
+@pytest.mark.parametrize("declared, expected", [(None, 6), (3, 3)])
+def test_the_pool_size_is_the_max_in_flight_of_the_evaluation(archive, declared, expected):
+    """Le pool et `max_in_flight` sortent du MÊME nombre, que la sonde le porte ou non.
+
+    `evaluate_against_checkpoints` fait de `n_workers_override` son `max_in_flight`, et retombe
+    sur `bot_eval_n_workers` — le compte de l'éval FINALE — quand il vaut None. Passer
+    `intermediate_n_workers` brut au lieu du compte résolu par `_ensure_eval_pool` faisait donc
+    dimensionner le pool sur une clé et `max_in_flight` sur une autre : un `max_in_flight`
+    supérieur au nombre de workers laisse des tâches EN FILE alors que leur chronomètre de
+    `bot_eval_task_timeout_seconds` court déjà (`_collect_parallel_results_with_timeouts`).
+    """
+    probe = _make_exploiter_probe(archive, n_workers=declared)
+    create_pool = MagicMock(return_value=MagicMock())
+    p_create, p_eval, p_vecnorm, p_remove = _patched_probe_environment(
+        create_pool, {"target": 0.5}
+    )
+
+    with _profile(bot_eval_n_workers_intermediate=6), p_create, p_eval as evaluate, (
+        p_vecnorm
+    ), p_remove:
+        probe._probe(n_episodes=10, label="bon-marche")
+
+    assert create_pool.call_args.kwargs["n_workers"] == expected
+    assert evaluate.call_args.kwargs["n_workers_override"] == expected
+
+
+def test_only_setup_callbacks_reads_the_worker_count_leniently():
+    """Les sites qui construisent les sondes exigent la clé AU DÉMARRAGE, pas à la 1re sonde.
+
+    `_ensure_eval_pool` lève déjà — il est le point d'entrée autonome des sondes — mais il n'est
+    atteint qu'à la première sonde, donc après des minutes d'entraînement : la même raison pour
+    laquelle `validate_bot_eval_worker_params` est appelée depuis `setup_callbacks` et pas
+    seulement depuis `evaluate_against_bots`. Un test de comportement demanderait un run complet
+    (config, env, modèle) : le contrat est donc lu dans l'AST.
+
+    `setup_callbacks` est la SEULE lecture indulgente légitime : `BotEvaluationCallback` accepte
+    `None` (l'éval bot crée alors son pool sur `bot_eval_n_workers`, taille et `max_in_flight`
+    sortant de la même valeur), alors qu'une étape de curriculum ne peut pas s'en passer.
+    """
+    tree = ast.parse((PROJECT_ROOT / "ai" / "train.py").read_text(encoding="utf-8"))
+    lenient_readers = {
+        function.name
+        for function in ast.walk(tree)
+        if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for call in ast.walk(function)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and call.func.attr == "get"
+        and call.args
+        and isinstance(call.args[0], ast.Constant)
+        and call.args[0].value == "bot_eval_n_workers_intermediate"
+    }
+
+    assert lenient_readers == {"setup_callbacks"}, (
+        "`bot_eval_n_workers_intermediate` est lu avec `.get()` hors de `setup_callbacks` "
+        f"({sorted(lenient_readers - {'setup_callbacks'})}) — le run démarrerait sur un profil "
+        "qui ne déclare pas la clé pour mourir à la première sonde"
+    )
 
 
 # ── Survie aux frontières de learn() ────────────────────────────────────────────────────────

@@ -776,11 +776,13 @@ class MetricsCollectionCallback(BaseCallback):
         # mort depuis la migration aux entites a survecu jusqu'a faire lever un run. Ce qu'elles
         # avaient d'utile se compte cote MOTEUR, sur le masque. Cf. index_v11.md §0.68.
 
-    _PPO_KEYS = frozenset({
-        'train/policy_gradient_loss', 'train/value_loss', 'train/entropy_loss',
-        'train/clip_fraction', 'train/approx_kl', 'train/explained_variance',
-        'train/learning_rate',
-    })
+    #: Marqueur d'un update PPO. `patched_ppo.train()` l'enregistre une fois par update, en
+    #: dernier lot avec les metriques de sante, et c'est le SEUL producteur de cles `train/` du
+    #: projet : `PatchedMaskablePPO` surcharge `train()`, donc le `ppo.py` de SB3 ne s'execute
+    #: jamais, et `train/learning_rate` vient de `_update_learning_rate` appele en tete du meme
+    #: `train()`. Un inventaire de noms de metriques occupait cette place et devait etre tenu en
+    #: phase avec `train()` a la main.
+    _PPO_UPDATE_KEY = 'train/n_updates'
 
     def _on_training_start(self) -> None:
         """Enveloppe `logger.dump` pour capturer les metriques PPO AVANT que SB3 ne vide
@@ -820,24 +822,23 @@ class MetricsCollectionCallback(BaseCallback):
         _original_dump = self.model.logger.dump
         _tracker = self.metrics_tracker
         _model = self.model
-        # `_ppo_keys` et non `self._PPO_KEYS` lu dans l'enveloppe : lire l'attribut ferait de
-        # `self` une variable libre de plus, donc un cycle `callback → _dump_logger → logger →
-        # dump → callback` que le comptage de references ne casse pas — un par logger que SB3
-        # reconstruit. Verifie par `co_freevars` de l'enveloppe compilee.
-        _ppo_keys = self._PPO_KEYS
+        # `_ppo_update_key` et non `self._PPO_UPDATE_KEY` lu dans l'enveloppe : lire l'attribut
+        # ferait de `self` une variable libre de plus, donc un cycle `callback → _dump_logger →
+        # logger → dump → callback` que le comptage de references ne casse pas — un par logger que
+        # SB3 reconstruit. Verifie par `co_freevars` de l'enveloppe compilee.
+        _ppo_update_key = self._PPO_UPDATE_KEY
 
         def _dump_with_capture(step: int = 0) -> None:
             ntv = getattr(_model.logger, 'name_to_value', {})
-            # `_PPO_KEYS` et NON `if ntv:` : `_handle_episode_end` appelle `logger.dump` a CHAQUE
-            # fin d'episode avec les seules cles `game_critical/*`. Sans ce filtre, chaque episode
-            # declenchait une capture complete — norme du gradient recalculee sur tous les
+            # Le marqueur d'update et NON `if ntv:` : `_handle_episode_end` appelle `logger.dump`
+            # a CHAQUE fin d'episode avec les seules cles `game_critical/*`. Sans ce filtre, chaque
+            # episode declenchait une capture complete — norme du gradient recalculee sur tous les
             # parametres (une synchronisation GPU) et `train/ent_coef` reinjecte — pour un dump
             # qui ne porte AUCUN update PPO : les gradients y sont ceux laisses par le dernier
             # `train()`. Mesure du run neuf du 2026-08-29, ou aucune enveloppe ne s'empilait :
             # 101 415 points sur `training_diagnostic/entropy_coef` pour 100 000 episodes et
-            # 1 063 updates — un point par EPISODE au lieu d'un par update. `_PPO_KEYS` etait
-            # declare juste au-dessus depuis l'origine, et n'avait jamais eu de lecteur.
-            if ntv and not _ppo_keys.isdisjoint(ntv):
+            # 1 063 updates — un point par EPISODE au lieu d'un par update.
+            if _ppo_update_key in ntv:
                 model_stats: Dict[str, Any] = dict(ntv)
                 if hasattr(_model, 'policy') and hasattr(_model.policy, 'parameters'):
                     # Réduction en une seule op GPU + un seul .item() au lieu de N syncs.
@@ -2662,6 +2663,7 @@ class _EvalPoolOwnerMixin:
     # AttributeError, depuis le `finally` de la boucle — l'endroit exact où une exception en
     # remplace une autre.
     _eval_pool: Optional[Any] = None
+    _eval_n_workers: Optional[int] = None
     _pool_kwargs: Optional[Dict[str, Any]] = None
     _pool_kwargs_resolved: bool = False
 
@@ -2670,10 +2672,18 @@ class _EvalPoolOwnerMixin:
 
         `_pool_kwargs` reste None quand le compte de workers ne justifie pas un pool : la sonde
         passe alors `pool=None` et `evaluate_against_checkpoints` reste séquentiel.
+
+        Pose aussi `_eval_n_workers`, que `_probe` passe en `n_workers_override` : c'est de LUI
+        qu'`evaluate_against_checkpoints` dérive `max_in_flight`, donc il doit valoir la taille du
+        pool. Lire `intermediate_n_workers` des deux côtés faisait dimensionner le pool ici et
+        `max_in_flight` là-bas à partir de deux clés différentes dès que l'attribut vaut None ;
+        `max_in_flight` supérieur au nombre de workers laisse des tâches EN FILE alors que leur
+        chronomètre de `bot_eval_task_timeout_seconds` court déjà (cf.
+        `_collect_parallel_results_with_timeouts`).
         """
         if self._pool_kwargs_resolved:
             return
-        from ai.bot_evaluation import _strip_phase_suffix, validate_bot_eval_worker_params
+        from ai.bot_evaluation import _strip_phase_suffix
 
         config = get_config_loader()
         base_agent_key = _strip_phase_suffix(self.rewards_config_name)
@@ -2686,17 +2696,13 @@ class _EvalPoolOwnerMixin:
         )
         n_workers = self.intermediate_n_workers
         if n_workers is None:
-            # Sans surcharge, le pool prend le compte de la MÊME fabrique qu'`evaluate_against_
-            # checkpoints` : `n_workers_override=None` lui fait tirer `bot_eval_n_workers` et le
-            # passer en `max_in_flight`. Un nombre décidé ici indépendamment pourrait être
-            # INFÉRIEUR, et les tâches en trop attendraient un worker libre avec un chrono de
-            # timeout qui court depuis leur soumission. La valeur n'est donc pas devinée : elle
-            # vient de la clé qui gouverne déjà l'évaluation.
-            n_workers = int(
-                validate_bot_eval_worker_params(
-                    require_key(training_cfg, "callback_params")
-                )["n_workers"]
-            )
+            callback_params = require_key(training_cfg, "callback_params")
+            # `require_key` et non un défaut : les autres lectures de cette fonction
+            # (`vec_normalize`, `vec_normalize_eval`) le font déjà, et un défaut silencieux ici
+            # contredirait la config au lieu de l'appliquer — un profil qui ne déclare pas la clé
+            # doit s'arrêter, pas sonder à 4 workers choisis par le code.
+            n_workers = int(require_key(callback_params, "bot_eval_n_workers_intermediate"))
+        self._eval_n_workers = n_workers
         self._pool_kwargs_resolved = True
         if n_workers <= 1:
             return
@@ -2828,8 +2834,8 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
         self.budget: Optional[int] = None
         self.censored: bool = False
         self._next_probe_episode: int = probe_every_episodes
-        # `_eval_pool` et les paramètres du pool sont des attributs de classe du mixin : rien à
-        # initialiser ici. Cf. `_EvalPoolOwnerMixin` pour leur cycle de vie.
+        # `_eval_pool`, `_eval_n_workers` et les paramètres du pool sont des attributs de classe
+        # du mixin : rien à initialiser ici. Cf. `_EvalPoolOwnerMixin` pour leur cycle de vie.
 
     def _current_episode(self) -> int:
         if self.metrics_tracker is not None:
@@ -2861,7 +2867,10 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
                     controlled_agent=self.rewards_config_name,
                     scenario_pool="holdout",
                     device="cpu",
-                    n_workers_override=self.intermediate_n_workers,
+                    # Le compte RÉSOLU par `_ensure_eval_pool`, jamais `intermediate_n_workers` :
+                    # c'est celui qui a dimensionné le pool juste au-dessus, et il devient ici
+                    # `max_in_flight`.
+                    n_workers_override=self._eval_n_workers,
                     pool=self._eval_pool,
                 )
             except Exception:
@@ -3022,7 +3031,8 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
                     controlled_agent=self.rewards_config_name,
                     scenario_pool="holdout",
                     device="cpu",
-                    n_workers_override=self.intermediate_n_workers,
+                    # Jumeau de `ExploiterProbeCallback._probe` : cf. son commentaire.
+                    n_workers_override=self._eval_n_workers,
                     pool=self._eval_pool,
                 )
             except Exception:
