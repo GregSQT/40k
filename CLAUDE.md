@@ -294,10 +294,10 @@ SUITE : 🟢 Tout est terminé
 — ou —
 SUITE :
 → Ce prompt : <actions 🟡 restantes>
-→ 🔴 Bug : `"<prompt complet — voir gabarit Bug>"`
-→ 🕳 Trou : `"<prompt complet — voir gabarit Trou>"`
-→ 💡 Amélioration : `"<prompt complet — voir gabarit Amélioration>"`
-→ 📋 Sous-tâche : `"<prompt complet — voir gabarit Sous-tâche>"`
+→ 🔴 Bug : <ce que corrige ce prompt, ≤10 mots> — `"<prompt complet — voir gabarit Bug>"`
+→ 🕳 Trou : <cas couvert par ce prompt, ≤10 mots> — `"<prompt complet — voir gabarit Trou>"`
+→ 💡 Amélioration : <ce qu'améliore ce prompt, ≤10 mots> — `"<prompt complet — voir gabarit Amélioration>"`
+→ 📋 Sous-tâche : <ce que fait ce prompt, ≤10 mots> — `"<prompt complet — voir gabarit Sous-tâche>"`
 
 Catégories : Bug = invariant cassé prouvé hors périmètre ; Trou = cas non couvert par les tests ; Amélioration = code correct mais optimisable ; Sous-tâche = morceau hors livraison.
 Suspicion non prouvée → une ligne dans LU, aucune entrée SUITE. SUITE ne remplace jamais T2.
@@ -309,6 +309,7 @@ Gates obligatoires — avant d'écrire toute entrée SUITE, répondre à la ques
   💡 Amélioration : « Ai-je une mesure (temps, mémoire, token) ou un invariant prouvé sous-optimal — pas une préférence de style ? » → non = LU uniquement.
   📋 Sous-tâche : « Est-ce strictement impossible T2-C (dépendance externe ou décision utilisateur manquante) — pas simplement long ou hors chemin critique ? » → non = traiter maintenant (T2), jamais externaliser.
 Une gate non franchie interdit l'entrée SUITE correspondante ; le constat va en LU.
+Auto-critique obligatoire après chaque gate franchie : « Si l'utilisateur me demande si ce prompt est optimal et nécessaire, puis-je défendre oui sans hésitation ? » → non = supprimer l'entrée, déplacer le constat en LU.
 
 Gabarits SUITE — seulement si des entrées SUITE sont présentes : chaque prompt doit être autonome, lisible sans le contexte de la conversation, copiable-collable directement comme prochain prompt. Jamais une phrase vague ; toujours les références exactes.
 
