@@ -28,6 +28,7 @@ from ai.curriculum import StageOrigin, stage_model_path, stage_origin
 from ai.run_state import save_run_state
 from ai.training_callbacks import ExploiterProbeCallback, PoolEarlyStoppingCallback
 from shared.data_validation import ConfigurationError
+from tests.unit.ai._fabriques import exploiter_probe_callback, pool_early_stopping_callback
 
 # Valeurs du run mesuré : offset de reprise et `num_timesteps` relu dans model_ArmageddonAgent_x1_P1.zip.
 P2_EPISODE_OFFSET = 80_000
@@ -41,52 +42,38 @@ def _tracker(episode_count: int) -> MagicMock:
 
 
 def _pool_callback(**overrides: Any) -> PoolEarlyStoppingCallback:
-    params: Dict[str, Any] = dict(
-        pool_archives=[("/fake/P1.zip", "P1")],
-        threshold=0.6,
-        min_timesteps=0,
-        consecutive_evals=2,
-        eval_freq_episodes=10_000,
-        n_eval_episodes=300,
-        training_config_name="x1_long",
-        rewards_config_name="ArmageddonAgent_x1",
-        metrics_tracker=None,
-        intermediate_n_workers=4,
+    """Cadence du run mesuré (10 000 épisodes, 300 par éval) posée sur la fabrique partagée."""
+    callback = pool_early_stopping_callback(
+        "/fake/P1.zip", eval_freq_episodes=10_000, n_eval_episodes=300, **overrides
     )
-    params.update(overrides)
-    callback = PoolEarlyStoppingCallback(**params)
-    callback.model = MagicMock()
     callback.num_timesteps = 0
     return callback
 
 
 def _exploiter_callback(**overrides: Any) -> ExploiterProbeCallback:
-    params: Dict[str, Any] = dict(
-        target_archive_path="/fake/P3.zip",
-        training_config_name="x1_long",
-        rewards_config_name="ArmageddonAgent_x1",
-        metrics_tracker=None,
+    """Budget du run mesuré (`budget_cap` 200 000) posé sur la fabrique partagée."""
+    return exploiter_probe_callback(
+        "/fake/P3.zip",
         probe_every_episodes=2_000,
         probe_cheap_n=100,
         probe_confirm_n=500,
         win_rate_target=0.7,
         budget_cap=200_000,
-        intermediate_n_workers=4,
-        log_fn=lambda _msg: None,
+        **overrides,
     )
-    params.update(overrides)
-    callback = ExploiterProbeCallback(**params)
-    callback.model = MagicMock()
-    return callback
 
 
 def _count_pool_probes(callback: PoolEarlyStoppingCallback, score: float = 0.3) -> List[int]:
-    """Enregistre le compteur cumulé à chaque sonde ; le score reste sous le seuil (pas d'arrêt)."""
+    """Enregistre le compteur cumulé à chaque sonde ; le score reste sous le seuil (pas d'arrêt).
+
+    Les labels rendus sont ceux du pool du callback : un score manquant ferait ignorer l'éval
+    (`scores manquants`) et le test passerait sans exercer la comparaison au seuil.
+    """
     probed: List[int] = []
 
     def fake_probe() -> Dict[str, float]:
         probed.append(callback._current_episode())
-        return {"P1": score}
+        return {label: score for _, label in callback.pool_archives}
 
     callback._probe = fake_probe  # type: ignore[method-assign]
     return probed

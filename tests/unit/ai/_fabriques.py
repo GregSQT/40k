@@ -401,12 +401,16 @@ PROBE_TRAINING_CONFIG = "x1_long"
 PROBE_REWARDS_CONFIG = "ArmageddonAgent_x1"
 
 
-def exploiter_probe_callback(archive: Any, n_workers: int | None = 4) -> Any:
+def exploiter_probe_callback(archive: Any, n_workers: int | None = 4, **overrides: Any) -> Any:
     """`ExploiterProbeCallback` prêt à sonder, `model` doublé.
 
     Ces onze arguments étaient retapés à l'identique dans `test_checkpoint_eval_parallel.py`
     (deux fois) et `test_probe_eval_pool_lifetime.py` : tout argument requis ajouté au
     constructeur cassait trois blocs, un par un.
+
+    `**overrides` pour que les tests qui ont besoin d'une cadence ou d'un budget particuliers
+    (`test_probe_resume_offset.py`) les posent SANS recopier le reste de la liste — sinon ils
+    rouvrent exactement la brèche que cette fabrique ferme.
 
     Import différé : `ai.training_callbacks` tire stable-baselines3, que les tests d'analyzer
     important ce module n'ont aucune raison de charger.
@@ -415,7 +419,7 @@ def exploiter_probe_callback(archive: Any, n_workers: int | None = 4) -> Any:
 
     from ai.training_callbacks import ExploiterProbeCallback
 
-    probe = ExploiterProbeCallback(
+    params: Dict[str, Any] = dict(
         target_archive_path=str(archive),
         training_config_name=PROBE_TRAINING_CONFIG,
         rewards_config_name=PROBE_REWARDS_CONFIG,
@@ -428,11 +432,13 @@ def exploiter_probe_callback(archive: Any, n_workers: int | None = 4) -> Any:
         intermediate_n_workers=n_workers,
         log_fn=lambda *_a, **_k: None,
     )
+    params.update(overrides)
+    probe = ExploiterProbeCallback(**params)
     probe.model = MagicMock()
     return probe
 
 
-def pool_early_stopping_callback(archive: Any, n_workers: int | None = 4) -> Any:
+def pool_early_stopping_callback(archive: Any, n_workers: int | None = 4, **overrides: Any) -> Any:
     """Jumeau de `exploiter_probe_callback` pour `PoolEarlyStoppingCallback`.
 
     Les deux callbacks partagent `_EvalPoolOwnerMixin`, donc tout test de cycle de vie du pool
@@ -442,7 +448,7 @@ def pool_early_stopping_callback(archive: Any, n_workers: int | None = 4) -> Any
 
     from ai.training_callbacks import PoolEarlyStoppingCallback
 
-    callback = PoolEarlyStoppingCallback(
+    params: Dict[str, Any] = dict(
         pool_archives=[(str(archive), "champion")],
         threshold=0.6,
         min_timesteps=0,
@@ -454,5 +460,7 @@ def pool_early_stopping_callback(archive: Any, n_workers: int | None = 4) -> Any
         metrics_tracker=None,
         intermediate_n_workers=n_workers,
     )
+    params.update(overrides)
+    callback = PoolEarlyStoppingCallback(**params)
     callback.model = MagicMock()
     return callback

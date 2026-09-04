@@ -2658,6 +2658,10 @@ class _EvalPoolOwnerMixin:
     training_config_name: str
     rewards_config_name: str
     intermediate_n_workers: Optional[int]
+    metrics_tracker: Any
+    # Porte par `BaseCallback`, avec lequel ce mixin est toujours melange : declare ici parce que
+    # `_stage_timesteps` le lit, et que le contrat d'un mixin doit tenir dans le mixin.
+    num_timesteps: int
     # Valeurs de CLASSE, pas de simples annotations : un futur porteur du mixin qui oublierait de
     # les initialiser dans son `__init__` ferait lever `shutdown_probe_eval_pools` par
     # AttributeError, depuis le `finally` de la boucle — l'endroit exact où une exception en
@@ -2677,7 +2681,6 @@ class _EvalPoolOwnerMixin:
     # celle du modèle repris : après un crash, `--resume-from <checkpoint>` reprend au milieu de
     # l'étape, et un compteur ancré sur ce checkpoint remettrait `budget_cap` et `min_steps` à
     # zéro, prolongeant en silence le budget d'un exploiteur du nombre d'épisodes déjà joués.
-    metrics_tracker: Any
     _episode_origin: int = 0
     _timesteps_origin: int = 0
 
@@ -2705,7 +2708,7 @@ class _EvalPoolOwnerMixin:
 
     def _stage_timesteps(self) -> int:
         """Pas d'entraînement DANS CETTE ÉTAPE (`num_timesteps` moins ceux hérités de l'archive)."""
-        return int(self.num_timesteps) - self._timesteps_origin  # type: ignore[attr-defined]
+        return int(self.num_timesteps) - self._timesteps_origin
 
     def resolve_eval_pool_params(self) -> None:
         """Lit la config du pool et la mémorise. Idempotent, ne démarre AUCUN processus.
