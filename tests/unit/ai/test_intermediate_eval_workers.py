@@ -12,11 +12,15 @@ Contrat :
 - `BotEvaluationCallback.__init__` rejette les valeurs invalides pour intermediate_n_workers.
 - Les evals finales et `--test-only` ne passent JAMAIS n_workers_override
   (elles restent sur bot_eval_n_workers).
+- TOUS les profils déclarent la clé : elle est exigée par `require_key` au démarrage de
+  tout run `--etape` sur une étape à pool (ai/train.py, branches sonde exploiteur et
+  `PoolEarlyStoppingCallback`).
 """
 
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 from typing import Any, Dict, cast
 from unittest.mock import MagicMock, patch
@@ -27,6 +31,23 @@ import ai.bot_evaluation
 from ai.training_callbacks import BotEvaluationCallback
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+# Seule la config de `ArmageddonAgent_x1` est verrouillée ici : c'est la seule que le config
+# loader sache atteindre. `config/agents/ArmageddonAgent_old/ArmageddonAgent_training_config.json`
+# porte les mêmes six profils, mais son nom de fichier ne correspond plus à celui de son dossier
+# (`_resolve_agent_config_key` construit `<dossier>/<clé>_training_config.json`), donc aucun run ne
+# peut le charger — lui poser un contrat affirmerait une exigence qu'aucun chemin n'a.
+AGENT_CONFIG = (
+    PROJECT_ROOT / "config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json"
+)
+
+
+def _profiles() -> Dict[str, Dict[str, Any]]:
+    with open(AGENT_CONFIG, encoding="utf-8-sig") as fh:
+        return {k: v for k, v in json.load(fh).items() if isinstance(v, dict)}
+
+
+PROFILE_NAMES = sorted(_profiles())
 
 
 # ---------------------------------------------------------------------------
@@ -154,3 +175,45 @@ def test_evaluate_against_bots_contient_validation_n_workers_override():
             return
 
     pytest.fail("Fonction evaluate_against_bots introuvable dans ai/bot_evaluation.py")
+
+
+# ---------------------------------------------------------------------------
+# 4. Contrat de CONFIG : les profils déclarent tous la clé, à la même valeur
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("profile_name", PROFILE_NAMES)
+def test_every_profile_declares_the_intermediate_workers_key(profile_name: str) -> None:
+    """La clé est OBLIGATOIRE dans chaque profil, sans défaut ni valeur implicite.
+
+    `ai/train.py` la lit avec `require_key` au DÉMARRAGE de tout run `--etape` dont l'étape a un
+    pool : sonde exploiteur d'un côté, `PoolEarlyStoppingCallback` de l'autre. Un profil qui ne la
+    porte pas fait donc refuser le run, et c'est exactement ainsi que `x1_debug` et `x5_debug` sont
+    restés inutilisables pour les étapes P1 à P10 — ils déclaraient pourtant déjà
+    `bot_eval_n_workers_gate`, clé que SEUL un run d'étape consomme.
+    """
+    callback_params = _profiles()[profile_name]["callback_params"]
+    assert "bot_eval_n_workers_intermediate" in callback_params, (
+        f"{profile_name} ne déclare pas bot_eval_n_workers_intermediate"
+    )
+    value = callback_params["bot_eval_n_workers_intermediate"]
+    assert isinstance(value, int) and not isinstance(value, bool), profile_name
+    assert value > 0, profile_name
+
+
+def test_the_profiles_do_not_silently_diverge_on_intermediate_workers() -> None:
+    """Tous les profils partagent la MÊME valeur, `x1` faisant référence.
+
+    Ce compte décrit un RÉGIME — combien de workers d'évaluation tournent EN CONCURRENCE des envs
+    de collecte pendant l'entraînement — et non une longueur de run. La contrainte qui l'a fixé à 4
+    est identique dans un profil de debug et dans un profil de mesure, puisque `n_envs` y vaut 24
+    des deux côtés ; le laisser diverger rendrait un run de mise au point non représentatif du run
+    qu'il prépare. Même règle que `agent_seat_p2_ratio` et `deployment_mode_schedule`.
+    """
+    profiles = _profiles()
+    reference = profiles["x1"]["callback_params"]["bot_eval_n_workers_intermediate"]
+    diverging = {
+        name: profile["callback_params"].get("bot_eval_n_workers_intermediate")
+        for name, profile in profiles.items()
+        if profile["callback_params"].get("bot_eval_n_workers_intermediate") != reference
+    }
+    assert not diverging, f"profils divergents (référence x1={reference}) : {diverging}"

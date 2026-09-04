@@ -481,7 +481,8 @@
                 "endgame": 0.05,
                 "racer": 0.05,
                 "scorer": 0.05
-            }
+            },
+            "bot_eval_n_workers_intermediate": 4
         },
         "roster_pool_schedule": {
             "enabled": false,
@@ -1024,7 +1025,8 @@
                 "endgame": 0.05,
                 "racer": 0.05,
                 "scorer": 0.05
-            }
+            },
+            "bot_eval_n_workers_intermediate": 4
         },
         "roster_pool_schedule": {
             "enabled": false,
