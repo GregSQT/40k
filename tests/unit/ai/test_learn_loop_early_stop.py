@@ -17,6 +17,7 @@ sondes dans `test_probe_eval_pool_lifetime.py`.
 """
 
 import ast
+import functools
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -106,6 +107,16 @@ def test_the_flag_survives_the_learn_chunk_boundary():
 # ── La boucle de production ─────────────────────────────────────────────────────────────────
 
 
+def _while_calls_learn(node: ast.While) -> bool:
+    return any(
+        isinstance(call.func, ast.Attribute) and call.func.attr == "learn"
+        for stmt in node.body
+        for call in ast.walk(stmt)
+        if isinstance(call, ast.Call)
+    )
+
+
+@functools.cache
 def _rotation_learn_loop() -> ast.While:
     tree = ast.parse((PROJECT_ROOT / "ai" / "train.py").read_text(encoding="utf-8"))
     # `train_with_scenario_rotation` est précédée de trois `@overload` : l'implémentation est la
@@ -119,13 +130,7 @@ def _rotation_learn_loop() -> ast.While:
     loops = [
         node
         for node in ast.walk(definitions[-1])
-        if isinstance(node, ast.While)
-        and any(
-            isinstance(call.func, ast.Attribute) and call.func.attr == "learn"
-            for stmt in node.body
-            for call in ast.walk(stmt)
-            if isinstance(call, ast.Call)
-        )
+        if isinstance(node, ast.While) and _while_calls_learn(node)
     ]
     assert len(loops) == 1, (
         f"attendu UNE boucle `while` appelant `learn()` dans `train_with_scenario_rotation`, "
