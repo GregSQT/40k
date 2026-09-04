@@ -28,6 +28,8 @@ import time
 from copy import deepcopy
 from typing import Any, TypeVar
 
+import cloudpickle
+
 import numpy as np
 import torch as th
 from gymnasium import spaces
@@ -333,15 +335,10 @@ class PatchedMaskablePPO(MaskablePPO):
           dans le blob — chaque worker ouvrait alors un contexte CUDA rien qu'en le désérialisant,
           et prenait au learner la VRAM de son buffer d'update. Le worker n'optimise rien.
         """
-        import cloudpickle
-
-        _policy_attrs = vars(self.policy)
-        _saved_instance_attrs: dict = {}
-        for _k in ("forward", "_uncompiled_original_forward", "action_dist", "optimizer"):
-            if _k in _policy_attrs:
-                _saved_instance_attrs[_k] = _policy_attrs.pop(_k)
+        policy_attrs = vars(self.policy)
+        saved = {k: policy_attrs.pop(k) for k in ("forward", "_uncompiled_original_forward", "action_dist", "optimizer") if k in policy_attrs}
         policy_cpu = deepcopy(self.policy).cpu()
-        _policy_attrs.update(_saved_instance_attrs)
+        policy_attrs.update(saved)
         return cloudpickle.dumps(policy_cpu)
 
     def _collect_rollouts_distributed(

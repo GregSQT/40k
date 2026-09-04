@@ -40,7 +40,7 @@ def test_env_worker_voit_aucun_gpu(monkeypatch) -> None:
     # Le parent expose explicitement un GPU : sans neutralisation le worker en hérite.
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
 
-    vec_env = MaskableSubprocVecEnv([lambda: _GpuProbeEnv() for _ in range(2)])
+    vec_env = MaskableSubprocVecEnv([_GpuProbeEnv] * 2)
     try:
         exposures = vec_env.env_method("gpu_exposure")
     finally:
