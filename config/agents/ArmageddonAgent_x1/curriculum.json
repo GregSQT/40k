@@ -5,7 +5,7 @@
   "order": ["P00", "P0", "P1", "P2", "P3", "E1", "P4", "P5", "E2", "P6", "P7", "P8", "E3", "P9", "P10"],
 
   "exploiter_config": {
-    "_doc": "Parametres geles partages par toutes les etapes exploiteurs (E1..E3). probe_every_episodes/probe_cheap_n : sonde bon marche. probe_confirm_n : sonde de confirmation declenchee des que la sonde bon marche passe le seuil. win_rate_target : seuil de franchissement (0.70). budget_cap : defini par etape dans chaque bloc E. La config d'entrainement est fixee via --training-config a la ligne de commande ; tous les runs E d'un meme curriculum doivent utiliser la meme valeur.",
+    "_doc": "Parametres geles partages par toutes les etapes exploiteurs (E1..E3). probe_every_episodes/probe_cheap_n : sonde bon marche. probe_confirm_n : sonde de confirmation declenchee des que la sonde bon marche passe le seuil. win_rate_target : seuil de franchissement (0.70). budget_cap : defini par etape dans chaque bloc E, en episodes DE L'ETAPE — comme probe_every_episodes et le budget journalise ; le compteur cumule de la lignee reprise 'from:' ne compte pas (cf. ai/curriculum.py::stage_origin). La config d'entrainement est fixee via --training-config a la ligne de commande ; tous les runs E d'un meme curriculum doivent utiliser la meme valeur.",
     "probe_every_episodes": 2000,
     "probe_cheap_n": 100,
     "probe_confirm_n": 500,
@@ -26,7 +26,7 @@
   },
 
   "early_stop": {
-    "_doc": "Arret anticipe pendant l'entrainement : si l'agent depasse win_rate_threshold contre TOUS les membres du pool sur consecutive_evals evaluations consecutives apres min_steps steps, le run s'arrete. n_eval_episodes provient de gate.eval_episodes. Desactive si ce bloc est absent. Une etape peut surcharger ces valeurs avec son propre bloc 'early_stop'. Les etapes sans pool (P0) ou les exploiteurs l'ignorent automatiquement.",
+    "_doc": "Arret anticipe pendant l'entrainement : si l'agent depasse win_rate_threshold contre TOUS les membres du pool sur consecutive_evals evaluations consecutives apres min_steps steps DEPUIS LE DEBUT DE L'ETAPE, le run s'arrete. Pas et episodes se comptent depuis la reprise, jamais depuis la naissance de la lignee : le num_timesteps du modele repris 'from:' n'est pas remis a zero (13,7 M sur P1) et le compteur d'episodes est cumule (80 000 a l'ouverture de P2) ; compares en absolu, min_steps ne gardait rien et la cadence enchainait 8 sondes consecutives au premier pas (2026-09-04, cf. ai/curriculum.py::stage_origin et tests/unit/ai/test_probe_resume_offset.py). n_eval_episodes provient de gate.eval_episodes. Desactive si ce bloc est absent. Une etape peut surcharger ces valeurs avec son propre bloc 'early_stop'. Les etapes sans pool (P0) ou les exploiteurs l'ignorent automatiquement.",
     "win_rate_threshold": 0.60,
     "min_steps": 50000,
     "consecutive_evals": 2

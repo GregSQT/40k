@@ -15,10 +15,23 @@ import hashlib
 
 import warnings
 
-# Fix Windows encoding for emoji/Unicode output with line buffering
+# Sortie LIGNE PAR LIGNE sur toutes les plateformes, pas seulement Windows. Hors TTY — c'est le
+# mode nominal des runs, lancés derrière `| tee` — Python bufferise stdout par blocs de 8 Ko :
+# la barre de progression et les scores de sonde restaient dans le buffer jusqu'au prochain
+# spawn de workers (multiprocessing vide les flux avant chaque spawn). Mesuré le 2026-09-04 :
+# 18 min sans une ligne alors qu'une sonde s'était terminée et avait « affiché » son score.
+# Verrou : tests/unit/ai/test_train_stdout_line_buffering.py.
+# `reconfigure` EN PLACE, pas un nouveau TextIOWrapper sur `.buffer` : le wrapper orphelin
+# fermait le tampon sous-jacent à sa collecte, et pytest — qui restaure ses propres flux après
+# chaque test — sortait en « I/O operation on closed file » dans tout module important ai.train.
+for _std_stream in (sys.stdout, sys.stderr):
+    if not isinstance(_std_stream, io.TextIOWrapper):
+        raise RuntimeError(
+            f"ai.train : flux standard inattendu ({type(_std_stream).__name__}), impossible de "
+            "forcer le line-buffering ; sans lui la sortie d'un run derrière `| tee` reste muette."
+        )
+    _std_stream.reconfigure(encoding='utf-8', errors='replace', line_buffering=True)
 if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
     # Le seul avertissement vise : NumPy compile avec MINGW-W64 (MUST be before numpy import).
     # Filtrer plus large eteignait les depreciations de nos propres dependances pour tout script
     # qui importe simplement `ai.train`.
@@ -1700,6 +1713,8 @@ from ai.curriculum import (
     stage_init_source,
     stage_model_path,
     stage_order,
+    stage_origin,
+    stage_source_model,
     stage_pool_members,
     validate_exploiter_protocol,
 )
@@ -3620,11 +3635,12 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     )
     if extra_callbacks:
         # Lier metrics_tracker aux callbacks exploiteur avant de les injecter, comme on le
-        # fait pour BotEvaluationCallback (cf. boucle de liaison plus bas).
+        # fait pour BotEvaluationCallback (cf. boucle de liaison plus bas). Leur ORIGINE
+        # d'étape ne vient PAS d'ici : `episode_offset` est l'état du modèle repris, qui après
+        # un `--resume-from` est un checkpoint de milieu d'étape ; ils la reçoivent à la
+        # construction, lue sur l'archive source de l'étape (`ai.curriculum.stage_origin`).
         for cb in extra_callbacks:
-            if isinstance(cb, ExploiterProbeCallback):
-                cb.metrics_tracker = metrics_tracker
-            if isinstance(cb, PoolEarlyStoppingCallback):
+            if isinstance(cb, (ExploiterProbeCallback, PoolEarlyStoppingCallback)):
                 cb.metrics_tracker = metrics_tracker
         training_callbacks = list(extra_callbacks) + training_callbacks
     callback_names = [callback.__class__.__name__ for callback in training_callbacks]
@@ -5314,18 +5330,10 @@ def _run_info_from_disk(args, config, curriculum) -> Dict[str, Any]:
             "l'artefact a la main si la re-cloture est bien l'intention."
         )
     episode_count_total = load_run_state(canonical_model_path)
-    source_stage = stage_init_source(require_stage(curriculum, args.etape))
-    episode_offset = 0
-    if source_stage is not None:
-        source_model = stage_model_path(canonical_model_path, source_stage)
-        if not os.path.exists(source_model):
-            raise FileNotFoundError(
-                f"--close-stage : l'etape {args.etape} reprend 'from:{source_stage}', dont le "
-                f"modele est absent ({source_model}). Son compte d'episodes est l'offset de "
-                "cette etape ; sans lui, le nombre d'episodes journalise serait celui de la vie "
-                "entiere du modele."
-            )
-        episode_offset = load_run_state(source_model)
+    # Même archive source que l'origine des sondes du run (`stage_origin`) ; seul le compte
+    # d'épisodes sert ici, pas les pas.
+    _source_model = stage_source_model(canonical_model_path, require_stage(curriculum, args.etape))
+    episode_offset = 0 if _source_model is None else load_run_state(_source_model)
     return {
         "episode_count_total": episode_count_total,
         "tensorboard_run_dir": require_key(
@@ -6211,6 +6219,7 @@ def main():
                         require_key(training_config, "callback_params"),
                         "bot_eval_n_workers_intermediate",
                     )
+                    _stage_start = stage_origin(_canonical, _stg)
                     _exploiter_probe = ExploiterProbeCallback(
                         target_archive_path=_target_path,
                         training_config_name=args.training_config,
@@ -6222,6 +6231,11 @@ def main():
                         win_rate_target=float(require_key(_exploit_cfg, "win_rate_target")),
                         budget_cap=int(require_key(_stg, "budget_cap")),
                         intermediate_n_workers=_probe_n_workers,
+                        # Origine de l'ÉTAPE (archive source), pas du modèle repris : voir
+                        # `stage_origin`. `budget_cap`, la cadence et le budget journalisé se
+                        # comptent depuis elle, y compris après un `--resume-from` de crash.
+                        episode_origin=_stage_start.episodes,
+                        timesteps_origin=_stage_start.timesteps,
                     )
                     _exploiter_extra_callbacks = [_exploiter_probe]
                     _exploiter_async_eval_enabled = False
@@ -6259,6 +6273,7 @@ def main():
                         _pool_eval_freq = int(require_key(
                             require_key(training_config, "callback_params"), "bot_eval_freq"
                         ))
+                        _stage_start = stage_origin(_canonical, _stg)
                         _pool_early_stop = PoolEarlyStoppingCallback(
                             pool_archives=_champion_archive,
                             threshold=_es_threshold,
@@ -6270,6 +6285,9 @@ def main():
                             rewards_config_name=args.rewards_config or args.agent,
                             metrics_tracker=None,  # lie dans train_with_scenario_rotation
                             intermediate_n_workers=_pool_n_workers,
+                            # Origine de l'ÉTAPE (archive source) : cf. la sonde exploiteur.
+                            episode_origin=_stage_start.episodes,
+                            timesteps_origin=_stage_start.timesteps,
                         )
                         _exploiter_extra_callbacks = [_pool_early_stop]
                         print(

@@ -32,7 +32,7 @@ import os
 import shutil
 import sys
 import tempfile
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from shared.data_validation import require_key, require_non_negative_int, require_positive_int
 
@@ -730,6 +730,63 @@ def stage_model_path(canonical_model_path: str, stage_name: str) -> str:
     """
     stem, ext = os.path.splitext(canonical_model_path)
     return f"{stem}_{stage_name}{ext}"
+
+
+def stage_source_model(canonical_model_path: str, stage: Dict[str, Any]) -> Optional[str]:
+    """Chemin de l'archive que l'etape reprend (`init: from:<etape>`), None pour 'new'. LEVE si absente.
+
+    Point unique pour tout ce qui se compte DEPUIS L'ETAPE : `stage_origin` (sondes du run) et
+    `episodes_trained` de la cloture (`--close-stage`, ai/train.py). Deux lectures separees de
+    la meme archive avaient deja diverge une fois (origine des sondes ancree sur le modele
+    repris, cf. tests/unit/ai/test_probe_resume_offset.py).
+    """
+    source_stage = stage_init_source(stage)
+    if source_stage is None:
+        return None
+    source_model = stage_model_path(canonical_model_path, source_stage)
+    if not os.path.exists(source_model):
+        raise FileNotFoundError(
+            f"L'etape reprend 'from:{source_stage}', dont le modele est absent ({source_model}). "
+            "Son etat est l'origine de cette etape ; sans lui, budgets, cadences et nombre "
+            "d'episodes journalise seraient ceux de la vie entiere du modele."
+        )
+    return source_model
+
+
+class StageOrigin(NamedTuple):
+    """Point de depart d'une etape : etat de son ARCHIVE SOURCE, en episodes et en pas."""
+
+    episodes: int
+    timesteps: int
+
+
+def stage_origin(canonical_model_path: str, stage: Dict[str, Any]) -> StageOrigin:
+    """Origine d'une etape = l'etat de l'archive qu'elle reprend (`init: from:<etape>`) ; 0/0 si 'new'.
+
+    C'est l'origine des grandeurs D'ETAPE : cadence des sondes, `min_steps` de l'early-stop,
+    `budget_cap` et budget journalise de l'exploiteur, `episodes_trained` de curriculum.log.
+    Elle se lit sur l'ARCHIVE SOURCE et non sur le modele repris : apres un crash,
+    `--resume-from <checkpoint>` reprend au milieu de l'etape, et un compteur ancre sur ce
+    checkpoint remettrait budget et cadence a zero — le budget d'un exploiteur s'allongerait en
+    silence du nombre d'episodes deja joues.
+
+    `num_timesteps` est lu dans le `data` du zip, comme `ent_coef` (ai/train.py) : la valeur
+    sert avant toute construction de modele. Le compteur d'episodes vient de l'etat de run
+    compagnon (`ai/run_state.py`), le zip SB3 ne persistant que les pas.
+    """
+    import zipfile
+
+    from ai.run_state import load_run_state
+
+    source_model = stage_source_model(canonical_model_path, stage)
+    if source_model is None:
+        return StageOrigin(episodes=0, timesteps=0)
+    with zipfile.ZipFile(source_model) as archive:
+        data = json.loads(archive.read("data"))
+    timesteps = require_key(data, "num_timesteps")
+    if isinstance(timesteps, bool) or not isinstance(timesteps, int) or timesteps < 0:
+        raise ValueError(f"`num_timesteps` invalide dans {source_model} : {timesteps!r}")
+    return StageOrigin(episodes=load_run_state(source_model), timesteps=timesteps)
 
 
 def promote_stage_model(canonical_model_path: str, stage_name: str) -> List[str]:
