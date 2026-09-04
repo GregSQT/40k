@@ -2156,10 +2156,11 @@ def create_checkpoint_eval_pool(
     Sans ça, les workers survivent au parent si celui-ci reçoit SIGTERM — ils deviennent
     orphelins (PPID=1) et consomment de la RAM indéfiniment.
 
-    ExploiterProbeCallback._on_training_end fait déjà le shutdown. Les scripts standalone
-    (measure_gate_43.py et équivalents) doivent le faire explicitement dans un try/finally,
-    ET installer un handler SIGTERM qui convertit le signal en SystemExit pour que le
-    finally s'exécute même sur kill.
+    Côté entraînement, les sondes (`_EvalPoolOwnerMixin`) créent leur pool à la première sonde et
+    `shutdown_probe_eval_pools` le ferme dans le `finally` de la boucle `learn()` de
+    `train_with_scenario_rotation`. Les scripts standalone (measure_gate_43.py et équivalents)
+    doivent le faire explicitement dans un try/finally, ET installer un handler SIGTERM qui
+    convertit le signal en SystemExit pour que le finally s'exécute même sur kill.
 
     Passer `pool=` à chaque appel évite de respawner les workers et de recharger les
     dépendances Python entre deux évals successives (coût fixe ~46 s mesuré en §6).

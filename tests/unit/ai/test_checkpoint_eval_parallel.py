@@ -559,6 +559,9 @@ def test_exploiter_probe_uses_intermediate_worker_count(tmp_path):
             "ai.bot_evaluation.evaluate_against_checkpoints",
             return_value={"target": 0.5},
         ) as evaluate,
+        # Le pool est desormais cree PARESSEUSEMENT par la sonde elle-meme : sans ce patch, ce
+        # test unitaire construirait un vrai ProcessPoolExecutor.
+        patch("ai.bot_evaluation.create_checkpoint_eval_pool", return_value=MagicMock()),
         patch("ai.vec_normalize_utils.save_vec_normalize"),
         patch("ai.training_callbacks.remove_model_with_companions"),
     ):
@@ -567,13 +570,18 @@ def test_exploiter_probe_uses_intermediate_worker_count(tmp_path):
     assert evaluate.call_args.kwargs["n_workers_override"] == 4
 
 
-def test_probe_nullifies_pool_on_evaluate_exception(tmp_path):
-    """Si evaluate_against_checkpoints lève, _eval_pool est vidé avant re-raise.
+def test_probe_shuts_down_pool_on_evaluate_exception(tmp_path):
+    """Si evaluate_against_checkpoints lève, le pool est FERMÉ puis détaché avant re-raise.
 
     Un pool force-terminé (workers SIGTERM) est marqué _broken par ProcessPoolExecutor.
-    Le prochain submit() leverait BrokenProcessPool de façon silencieuse. En nullifiant
-    _eval_pool sur l'exception, la sonde suivante crée un pool temporaire au lieu de
-    propager le crash — critère 4.2 item 3.
+    Le prochain submit() leverait BrokenProcessPool de façon silencieuse. En détachant
+    _eval_pool sur l'exception, la sonde suivante en crée un neuf au lieu de propager le crash
+    — critère 4.2 item 3.
+
+    Le `shutdown` est l'autre moitié : depuis que le pool survit à un `learn()`, cette exception
+    est le seul chemin qui court-circuite la fermeture de fin de boucle. Détacher sans fermer y
+    laisserait des workers orphelins (PPID=1), ce contre quoi met en garde la docstring de
+    `create_checkpoint_eval_pool`.
     """
     from ai.training_callbacks import ExploiterProbeCallback
 
@@ -594,7 +602,8 @@ def test_probe_nullifies_pool_on_evaluate_exception(tmp_path):
         log_fn=lambda *_a, **_k: None,
     )
     probe.model = MagicMock()
-    probe._eval_pool = MagicMock()  # pool persistant en place
+    pool = MagicMock()
+    probe._eval_pool = pool  # pool persistant en place
 
     with (
         patch(
@@ -611,6 +620,7 @@ def test_probe_nullifies_pool_on_evaluate_exception(tmp_path):
         "_eval_pool doit être None après exception : le pool peut être cassé "
         "(workers SIGTERM → _broken=True), la prochaine sonde doit créer un pool frais"
     )
+    pool.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────────────────

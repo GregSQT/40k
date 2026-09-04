@@ -1651,6 +1651,7 @@ from ai.training_callbacks import (
     ExploiterProbeCallback,
     PoolEarlyStoppingCallback,
     selection_worst_bot,
+    shutdown_probe_eval_pools,
 )
 
 # Training utilities (extracted to ai/training_utils.py)
@@ -3675,29 +3676,41 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # `finally` : une interruption (Ctrl-C) ou un echec est justement le moment ou l'on veut
     # savoir si le moteur bouclait. Jumeau du `finally` de `train_model`.
     try:
-        while metrics_tracker.episode_count < target_episode_count:
-            # As a safety guard, we still use the same chunk_timesteps. 
-            # EpisodeTerminationCallback is responsible for stopping promptly when the episode budget is reached.
-            _debug_train_marker(
-                "before model.learn(): episode_count=%s target_episode_count=%s "
-                "chunk_timesteps=%s model_num_timesteps=%s",
-                metrics_tracker.episode_count, target_episode_count, chunk_timesteps,
-                model.num_timesteps,
-            )
-            model.learn(
-                total_timesteps=chunk_timesteps,
-                reset_num_timesteps=(not append_training and model.num_timesteps == 0),
-                tb_log_name=tb_log_name,  # Same name = continuous graph
-                callback=enhanced_callbacks,
-                log_interval=1,  # Every iteration so MetricsCollectionCallback captures PPO metrics
-                progress_bar=False  # Disabled - using episode-based progress
-            )
-            _debug_train_marker(
-                "after model.learn(): episode_count=%s target_episode_count=%s "
-                "chunk_timesteps=%s model_num_timesteps=%s",
-                metrics_tracker.episode_count, target_episode_count, chunk_timesteps,
-                model.num_timesteps,
-            )
+        # Le pool de workers des sondes vit exactement le temps de CETTE boucle : les callbacks le
+        # creent a leur premiere sonde et ne le ferment plus eux-memes, parce que SB3 appaire
+        # `on_training_start`/`on_training_end` autour de CHAQUE `learn()` et que la boucle en
+        # enchaine un par tranche de quatre updates — le pool y etait recree a chaque tranche.
+        # Ce `finally` est le seul point qui couvre tous les chemins de sortie, y compris
+        # l'exception et le Ctrl-C, la ou `_close_curriculum_stage` n'est pas atteint. Il ferme
+        # aussi AVANT l'evaluation finale, qui prend ses propres 16 workers : laisser les 4 du
+        # pool tourner a cote d'elle est precisement le regime a 47 Go que documente
+        # `validate_bot_eval_worker_params`.
+        try:
+            while metrics_tracker.episode_count < target_episode_count:
+                # As a safety guard, we still use the same chunk_timesteps.
+                # EpisodeTerminationCallback is responsible for stopping promptly when the episode budget is reached.
+                _debug_train_marker(
+                    "before model.learn(): episode_count=%s target_episode_count=%s "
+                    "chunk_timesteps=%s model_num_timesteps=%s",
+                    metrics_tracker.episode_count, target_episode_count, chunk_timesteps,
+                    model.num_timesteps,
+                )
+                model.learn(
+                    total_timesteps=chunk_timesteps,
+                    reset_num_timesteps=(not append_training and model.num_timesteps == 0),
+                    tb_log_name=tb_log_name,  # Same name = continuous graph
+                    callback=enhanced_callbacks,
+                    log_interval=1,  # Every iteration so MetricsCollectionCallback captures PPO metrics
+                    progress_bar=False  # Disabled - using episode-based progress
+                )
+                _debug_train_marker(
+                    "after model.learn(): episode_count=%s target_episode_count=%s "
+                    "chunk_timesteps=%s model_num_timesteps=%s",
+                    metrics_tracker.episode_count, target_episode_count, chunk_timesteps,
+                    model.num_timesteps,
+                )
+        finally:
+            shutdown_probe_eval_pools(training_callbacks)
 
         # Final episode count
         episodes_trained = metrics_tracker.episode_count - episode_offset

@@ -26,7 +26,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import numpy as np
 import torch
 import gymnasium as gym
-from typing import Dict, Optional, Any, List, Set, Tuple, cast
+from typing import Dict, Iterable, Optional, Any, List, Set, Tuple, cast
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.utils import ConstantSchedule
 
@@ -2616,7 +2616,88 @@ class BotEvaluationCallback(BaseCallback):
         return results
 
 
-class ExploiterProbeCallback(BaseCallback):
+class _EvalPoolOwnerMixin:
+    """Pool de workers d'évaluation, créé à la PREMIÈRE sonde et fermé à la sortie de la boucle.
+
+    PAS dans `_on_training_start`/`_on_training_end` : SB3 appaire ces deux hooks autour de
+    CHAQUE `learn()` (`sb3_contrib/ppo_mask/ppo_mask.py`, lignes 448 et 467) et la boucle budgétée
+    en épisodes de `train_with_scenario_rotation` en enchaîne un par tranche de quatre updates.
+    Le pool y était donc créé puis fermé une fois par tranche, et comme une sonde tombe dans une
+    tranche différente de la précédente, chaque sonde repayait le démarrage de ses workers.
+    Mesuré sur trois sondes traversant des frontières de `learn()` : 2,46 / 2,04 / 2,03 s avant,
+    2,57 / 0,02 / 0,00 s après — spawn des workers et `import sb3_contrib`. S'y ajoute, en sonde
+    réelle, le chargement de l'archive adverse dans `_worker_ckpt_cache`, mesuré à 9,4 s pour un
+    zip de 45 Mo : son chemin ne change pas d'une sonde à l'autre, un pool persistant le garde.
+
+    Le rechargement du modèle P1, lui, n'est PAS économisé : `_probe` sauvegarde dans un `mkstemp`
+    neuf à chaque sonde, donc le jeton de version du worker change de toute façon.
+
+    La fermeture appartient à `shutdown_probe_eval_pools`, appelée par le `finally` de la boucle
+    `learn()`. C'est le seul point qui couvre TOUS les chemins de sortie — y compris l'échec et
+    l'interruption, où `_close_curriculum_stage` n'est jamais atteint.
+
+    Ce mixin ne doit définir AUCUN hook SB3 : les deux callbacks l'héritent APRÈS `BaseCallback`,
+    dont les stubs `_on_training_*` gagneraient dans le MRO — un hook posé ici ne serait jamais
+    appelé, sans la moindre erreur. L'ordre est celui-là parce que `super().__init__(verbose)` doit
+    atteindre `BaseCallback`, et il ne coûte rien tant que le mixin n'apporte que ses deux méthodes.
+    """
+
+    training_config_name: str
+    rewards_config_name: str
+    intermediate_n_workers: Optional[int]
+    _eval_pool: Optional[Any]
+
+    def _ensure_eval_pool(self) -> None:
+        """Crée le pool si absent. Ne fait rien si le compte de workers ne justifie pas un pool."""
+        if self._eval_pool is not None:
+            return
+        from ai.bot_evaluation import create_checkpoint_eval_pool, _strip_phase_suffix
+
+        config = get_config_loader()
+        base_agent_key = _strip_phase_suffix(self.rewards_config_name)
+        training_cfg = config.load_agent_training_config(base_agent_key, self.training_config_name)
+        vec_normalize_enabled = bool(
+            require_key(require_key(training_cfg, "vec_normalize"), "enabled")
+        )
+        vec_eval_enabled = bool(
+            require_key(require_key(training_cfg, "vec_normalize_eval"), "enabled")
+        )
+        n_workers = self.intermediate_n_workers
+        if n_workers is None:
+            callback_params = require_key(training_cfg, "callback_params")
+            n_workers = int(callback_params.get("bot_eval_n_workers_intermediate", 4))
+        if n_workers <= 1:
+            return
+        self._eval_pool = create_checkpoint_eval_pool(
+            n_workers=n_workers,
+            vec_normalize_enabled=vec_normalize_enabled,
+            vec_eval_enabled=vec_eval_enabled,
+            training_config_name=self.training_config_name,
+            rewards_config_name=self.rewards_config_name,
+            controlled_agent=self.rewards_config_name,
+            base_agent_key=base_agent_key,
+        )
+
+    def _shutdown_eval_pool(self) -> None:
+        """Ferme le pool et le détache. Idempotent.
+
+        L'attribut est détaché AVANT le `shutdown` : si celui-ci lève sur un pool déjà cassé,
+        la sonde suivante en recrée un neuf au lieu de retrouver un exécuteur mort.
+        """
+        pool = self._eval_pool
+        self._eval_pool = None
+        if pool is not None:
+            pool.shutdown(wait=False, cancel_futures=True)
+
+
+def shutdown_probe_eval_pools(callbacks: Iterable[Any]) -> None:
+    """Ferme les pools de sondes portés par `callbacks`. Idempotent, sûr sur une liste mixte."""
+    for callback in callbacks:
+        if isinstance(callback, _EvalPoolOwnerMixin):
+            callback._shutdown_eval_pool()
+
+
+class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
     """Sonde synchrone du win-rate de l'exploiteur contre sa cible figee.
 
     Protocole en deux temps :
@@ -2684,59 +2765,14 @@ class ExploiterProbeCallback(BaseCallback):
         self.budget: Optional[int] = None
         self.censored: bool = False
         self._next_probe_episode: int = probe_every_episodes
-        # Pool persistant créé à _on_training_start et fermé à _on_training_end (4.2).
-        # None tant que l'entraînement n'est pas démarré ou si n_workers <= 1.
+        # Pool créé à la première sonde par `_ensure_eval_pool`, fermé par
+        # `shutdown_probe_eval_pools` à la sortie de la boucle `learn()`. Cf. `_EvalPoolOwnerMixin`.
         self._eval_pool: Optional[Any] = None
 
     def _current_episode(self) -> int:
         if self.metrics_tracker is not None:
             return int(self.metrics_tracker.episode_count)
         return 0
-
-    def _on_training_start(self) -> None:
-        """Crée le pool pour les sondes de la tranche d'entraînement qui commence.
-
-        PAS « de cette étape », contrairement à ce que cette docstring a longtemps annoncé : SB3
-        appaire `on_training_start` et `on_training_end` autour de chaque `learn()`
-        (`sb3_contrib/ppo_mask/ppo_mask.py`, lignes 448 et 467), et la boucle budgétée en épisodes
-        en enchaîne un par tranche de quatre updates. Le pool est donc créé puis fermé une fois
-        par tranche, et chaque sonde repaie le démarrage de ses workers. Rien n'est perdu ni
-        abandonné — `_on_training_end` ferme bien celui de sa tranche — mais la persistance
-        annoncée n'existe pas. Cf. Documentation/Roadmap/training.md#pool-sondes.
-
-        Jumeau exact : `PoolEarlyStoppingCallback._on_training_start`.
-        """
-        from ai.bot_evaluation import create_checkpoint_eval_pool, _strip_phase_suffix
-
-        config = get_config_loader()
-        base_agent_key = _strip_phase_suffix(self.rewards_config_name)
-        training_cfg = config.load_agent_training_config(base_agent_key, self.training_config_name)
-        vec_normalize_enabled = bool(
-            require_key(require_key(training_cfg, "vec_normalize"), "enabled")
-        )
-        vec_eval_enabled = bool(
-            require_key(require_key(training_cfg, "vec_normalize_eval"), "enabled")
-        )
-        n_workers = self.intermediate_n_workers
-        if n_workers is None:
-            callback_params = require_key(training_cfg, "callback_params")
-            n_workers = int(callback_params.get("bot_eval_n_workers_intermediate", 4))
-        if n_workers > 1:
-            self._eval_pool = create_checkpoint_eval_pool(
-                n_workers=n_workers,
-                vec_normalize_enabled=vec_normalize_enabled,
-                vec_eval_enabled=vec_eval_enabled,
-                training_config_name=self.training_config_name,
-                rewards_config_name=self.rewards_config_name,
-                controlled_agent=self.rewards_config_name,
-                base_agent_key=base_agent_key,
-            )
-
-    def _on_training_end(self) -> None:
-        """Ferme le pool persistant à la fin de l'étape (4.2)."""
-        if self._eval_pool is not None:
-            self._eval_pool.shutdown(wait=False)
-            self._eval_pool = None
 
     def _probe(self, n_episodes: int, label: str) -> float:
         """Sauvegarde le modele courant dans un fichier temporaire et evalue contre la cible.
@@ -2752,6 +2788,7 @@ class ExploiterProbeCallback(BaseCallback):
         try:
             self.model.save(tmp_path)
             save_vec_normalize(self.model.get_env(), tmp_path)
+            self._ensure_eval_pool()
             try:
                 results = evaluate_against_checkpoints(
                     model_path=tmp_path,
@@ -2767,8 +2804,10 @@ class ExploiterProbeCallback(BaseCallback):
                 )
             except Exception:
                 # Workers force-terminés → ProcessPoolExecutor._broken=True ; la prochaine
-                # sonde créera un pool temporaire plutôt que lever BrokenProcessPool.
-                self._eval_pool = None
+                # sonde créera un pool neuf plutôt que lever BrokenProcessPool. Le `shutdown`
+                # est indispensable ici : détacher sans fermer laissait des workers orphelins,
+                # et cette exception court-circuite justement la fermeture de fin de boucle.
+                self._shutdown_eval_pool()
                 raise
         finally:
             remove_model_with_companions(tmp_path)
@@ -2827,7 +2866,7 @@ class ExploiterProbeCallback(BaseCallback):
         return True
 
 
-class PoolEarlyStoppingCallback(BaseCallback):
+class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
     """Arrêt anticipé si l'agent dépasse `threshold` vs TOUS les membres du pool.
 
     Évalue tous les membres du pool en un seul appel à `evaluate_against_checkpoints`
@@ -2893,49 +2932,13 @@ class PoolEarlyStoppingCallback(BaseCallback):
 
         self._consecutive_above: int = 0
         self._next_probe_episode: int = eval_freq_episodes
+        # Même cycle de vie que celui d'`ExploiterProbeCallback` : cf. `_EvalPoolOwnerMixin`.
         self._eval_pool: Optional[Any] = None
 
     def _current_episode(self) -> int:
         if self.metrics_tracker is not None:
             return int(self.metrics_tracker.episode_count)
         return 0
-
-    def _on_training_start(self) -> None:
-        """Crée le pool pour les sondes de la tranche d'entraînement qui commence.
-
-        Jumeau exact d'`ExploiterProbeCallback._on_training_start`, y compris sur la portée
-        réelle du pool : une tranche de `learn()`, pas l'étape.
-        """
-        from ai.bot_evaluation import create_checkpoint_eval_pool, _strip_phase_suffix
-
-        config = get_config_loader()
-        base_agent_key = _strip_phase_suffix(self.rewards_config_name)
-        training_cfg = config.load_agent_training_config(base_agent_key, self.training_config_name)
-        vec_normalize_enabled = bool(
-            require_key(require_key(training_cfg, "vec_normalize"), "enabled")
-        )
-        vec_eval_enabled = bool(
-            require_key(require_key(training_cfg, "vec_normalize_eval"), "enabled")
-        )
-        n_workers = self.intermediate_n_workers
-        if n_workers is None:
-            callback_params = require_key(training_cfg, "callback_params")
-            n_workers = int(callback_params.get("bot_eval_n_workers_intermediate", 4))
-        if n_workers > 1:
-            self._eval_pool = create_checkpoint_eval_pool(
-                n_workers=n_workers,
-                vec_normalize_enabled=vec_normalize_enabled,
-                vec_eval_enabled=vec_eval_enabled,
-                training_config_name=self.training_config_name,
-                rewards_config_name=self.rewards_config_name,
-                controlled_agent=self.rewards_config_name,
-                base_agent_key=base_agent_key,
-            )
-
-    def _on_training_end(self) -> None:
-        if self._eval_pool is not None:
-            self._eval_pool.shutdown(wait=False)
-            self._eval_pool = None
 
     def _probe(self) -> Dict[str, float]:
         """Sauvegarde le modèle courant et évalue contre tous les membres du pool."""
@@ -2947,6 +2950,7 @@ class PoolEarlyStoppingCallback(BaseCallback):
         try:
             self.model.save(tmp_path)
             save_vec_normalize(self.model.get_env(), tmp_path)
+            self._ensure_eval_pool()
             try:
                 results = evaluate_against_checkpoints(
                     model_path=tmp_path,
@@ -2961,7 +2965,9 @@ class PoolEarlyStoppingCallback(BaseCallback):
                     pool=self._eval_pool,
                 )
             except Exception:
-                self._eval_pool = None
+                # Jumeau du `except` d'`ExploiterProbeCallback._probe` : fermer, pas seulement
+                # détacher — sinon les workers d'un pool cassé survivent à l'exception.
+                self._shutdown_eval_pool()
                 raise
         finally:
             remove_model_with_companions(tmp_path)
