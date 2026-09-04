@@ -2732,17 +2732,36 @@ class ExploiterProbeCallback(BaseCallback):
                 base_agent_key=base_agent_key,
             )
 
-    def _on_training_end(self) -> None:
-        """Ferme le pool persistant à la fin de l'étape (4.2)."""
+    def _shutdown_eval_pool(self) -> None:
+        """Ferme le pool et lâche la référence. Idempotent.
+
+        `cancel_futures=True` fait partie du contrat de `create_checkpoint_eval_pool` : sans lui
+        les tâches déjà en file restent à jouer et les workers ne rendent pas la main tout de
+        suite. `wait=False` pour ne pas bloquer sur un worker figé.
+        """
         if self._eval_pool is not None:
-            self._eval_pool.shutdown(wait=False)
+            self._eval_pool.shutdown(wait=False, cancel_futures=True)
             self._eval_pool = None
+
+    def _on_training_end(self) -> None:
+        """Ferme le pool de la tranche de `learn()` qui s'achève."""
+        self._shutdown_eval_pool()
 
     def _probe(self, n_episodes: int, label: str) -> float:
         """Sauvegarde le modele courant dans un fichier temporaire et evalue contre la cible.
 
         Synchrone : bloque le thread d'entrainement le temps de l'evaluation. Aucun Future,
         aucune sonde ne peut etre abandonnee en silence.
+
+        L'`except` ci-dessous est le SEUL endroit qui ferme le pool sur le chemin d'exception :
+        elle remonte `_on_step`, et `MaskablePPO.learn` appelle `on_training_end` HORS `finally`
+        (`sb3_contrib/ppo_mask/ppo_mask.py`, ligne 467), donc `_on_training_end` ne tournera pas.
+        Le pool n'est pas forcement casse — `evaluate_against_checkpoints` leve aussi sur un
+        denominateur tronque, workers vivants (`ai/bot_evaluation.py`, « episodes non joues ») —
+        et ses workers, chacun portant un MaskablePPO charge, resteraient residents jusqu'a la
+        sortie du processus, que `close_all_training_envs` retarde de 30 s par VecEnv. Un SIGTERM
+        dans cette fenetre les rend orphelins (PPID=1), le regime que documente
+        `create_checkpoint_eval_pool`.
         """
         from ai.bot_evaluation import evaluate_against_checkpoints
         from ai.vec_normalize_utils import save_vec_normalize
@@ -2766,9 +2785,7 @@ class ExploiterProbeCallback(BaseCallback):
                     pool=self._eval_pool,
                 )
             except Exception:
-                # Workers force-terminés → ProcessPoolExecutor._broken=True ; la prochaine
-                # sonde créera un pool temporaire plutôt que lever BrokenProcessPool.
-                self._eval_pool = None
+                self._shutdown_eval_pool()
                 raise
         finally:
             remove_model_with_companions(tmp_path)
@@ -2932,13 +2949,21 @@ class PoolEarlyStoppingCallback(BaseCallback):
                 base_agent_key=base_agent_key,
             )
 
-    def _on_training_end(self) -> None:
+    def _shutdown_eval_pool(self) -> None:
+        """Jumeau exact d'`ExploiterProbeCallback._shutdown_eval_pool`."""
         if self._eval_pool is not None:
-            self._eval_pool.shutdown(wait=False)
+            self._eval_pool.shutdown(wait=False, cancel_futures=True)
             self._eval_pool = None
 
+    def _on_training_end(self) -> None:
+        self._shutdown_eval_pool()
+
     def _probe(self) -> Dict[str, float]:
-        """Sauvegarde le modèle courant et évalue contre tous les membres du pool."""
+        """Sauvegarde le modèle courant et évalue contre tous les membres du pool.
+
+        Jumeau exact d'`ExploiterProbeCallback._probe`, y compris sur la fermeture du pool quand
+        l'évaluation lève : voir sa docstring pour le chemin que suit l'exception.
+        """
         from ai.bot_evaluation import evaluate_against_checkpoints
         from ai.vec_normalize_utils import save_vec_normalize
 
@@ -2961,7 +2986,7 @@ class PoolEarlyStoppingCallback(BaseCallback):
                     pool=self._eval_pool,
                 )
             except Exception:
-                self._eval_pool = None
+                self._shutdown_eval_pool()
                 raise
         finally:
             remove_model_with_companions(tmp_path)

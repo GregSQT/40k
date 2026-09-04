@@ -60,11 +60,19 @@ cette étape ») **n'existe pas** : chaque sonde repaie le démarrage de ses wor
 modèle compris. Les docstrings ont été corrigées le 2026-09-04 ; le comportement, lui, reste à
 traiter.
 
-Piste : déplacer création et fermeture hors du couple `_on_training_start`/`_on_training_end`, par
-exemple une création paresseuse à la première sonde et une fermeture confiée à la fin d'étape
-(`_close_curriculum_stage`) ou à un `atexit`. Le choix engage le cycle de vie des deux callbacks,
-et un pool laissé ouvert après un `learn()` doit être fermé sur tous les chemins de sortie, y
-compris l'exception qui remonte de `_probe`.
+Le chemin d'exception, lui, est traité depuis le 2026-09-04 : `_probe` ferme le pool via
+`_shutdown_eval_pool()` avant de laisser remonter, parce que `MaskablePPO.learn` appelle
+`on_training_end` **hors** `finally` — `_on_training_end` ne tourne donc pas sur ce chemin. Les
+trois sites de fermeture passent `shutdown(wait=False, cancel_futures=True)`, le contrat que
+`create_checkpoint_eval_pool` documente. Verrou :
+`test_exploiter_probe_closes_its_pool_when_the_evaluation_raises` et son jumeau
+`test_pool_early_stopping_...` dans `tests/unit/ai/test_checkpoint_eval_parallel.py`.
+
+Piste pour la persistance elle-même : déplacer création et fermeture hors du couple
+`_on_training_start`/`_on_training_end`, par exemple une création paresseuse à la première sonde
+et une fermeture confiée à la fin d'étape (`_close_curriculum_stage`) ou à un `atexit`. Le choix
+engage le cycle de vie des deux callbacks, et tout pool laissé ouvert après un `learn()` devra
+rester fermé sur tous les chemins de sortie.
 
 ---
 
