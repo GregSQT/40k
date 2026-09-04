@@ -219,6 +219,40 @@ def test_the_pool_size_is_the_max_in_flight_of_the_evaluation(archive, declared,
     assert evaluate.call_args.kwargs["n_workers_override"] == expected
 
 
+def test_only_setup_callbacks_reads_the_worker_count_leniently():
+    """Les sites qui construisent les sondes exigent la clé AU DÉMARRAGE, pas à la 1re sonde.
+
+    `_ensure_eval_pool` lève déjà — il est le point d'entrée autonome des sondes — mais il n'est
+    atteint qu'à la première sonde, donc après des minutes d'entraînement : la même raison pour
+    laquelle `validate_bot_eval_worker_params` est appelée depuis `setup_callbacks` et pas
+    seulement depuis `evaluate_against_bots`. Un test de comportement demanderait un run complet
+    (config, env, modèle) : le contrat est donc lu dans l'AST.
+
+    `setup_callbacks` est la SEULE lecture indulgente légitime : `BotEvaluationCallback` accepte
+    `None` (l'éval bot crée alors son pool sur `bot_eval_n_workers`, taille et `max_in_flight`
+    sortant de la même valeur), alors qu'une étape de curriculum ne peut pas s'en passer.
+    """
+    tree = ast.parse((PROJECT_ROOT / "ai" / "train.py").read_text(encoding="utf-8"))
+    lenient_readers = {
+        function.name
+        for function in ast.walk(tree)
+        if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for call in ast.walk(function)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Attribute)
+        and call.func.attr == "get"
+        and call.args
+        and isinstance(call.args[0], ast.Constant)
+        and call.args[0].value == "bot_eval_n_workers_intermediate"
+    }
+
+    assert lenient_readers == {"setup_callbacks"}, (
+        "`bot_eval_n_workers_intermediate` est lu avec `.get()` hors de `setup_callbacks` "
+        f"({sorted(lenient_readers - {'setup_callbacks'})}) — le run démarrerait sur un profil "
+        "qui ne déclare pas la clé pour mourir à la première sonde"
+    )
+
+
 # ── Survie aux frontières de learn() ────────────────────────────────────────────────────────
 
 
