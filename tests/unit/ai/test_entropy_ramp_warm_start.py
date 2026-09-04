@@ -198,17 +198,26 @@ def test_a_nan_entropy_is_refused(tmp_path) -> None:
 
 
 class _Loader:
-    """Loader double : rend une copie fraiche de la config a chaque lecture, comme le vrai."""
+    """Loader double, FIDELE a la forme du vrai.
 
-    def __init__(self, cfg: Dict[str, Any]) -> None:
+    `config_loader.load_agent_training_config` rend le FICHIER multi-profils entier quand `phase`
+    vaut None — `_require_training_config_phase` s'en sert justement pour lister les profils
+    disponibles — et le profil seul sinon. Les deux formes traversent le decorateur : un double
+    qui rendrait le profil dans les deux cas laisserait passer une pose de rampe sur le fichier
+    entier, qui ecrirait des cles a cote des profils ou ferait lever la lecture stricte.
+    """
+
+    def __init__(self, cfg: Dict[str, Any], phase: str = "x1_long") -> None:
         self._cfg = cfg
+        self._phase = phase
         self.lectures = 0
 
     def load_agent_training_config(
         self, agent_key: str, phase: Any = None
     ) -> Dict[str, Any]:
         self.lectures += 1
-        return json.loads(json.dumps(self._cfg))
+        profil = json.loads(json.dumps(self._cfg))
+        return profil if phase is not None else {self._phase: profil}
 
 
 def test_a_warm_started_stage_gets_the_pinned_ramp_on_every_read(tmp_path) -> None:
@@ -226,7 +235,7 @@ def test_a_warm_started_stage_gets_the_pinned_ramp_on_every_read(tmp_path) -> No
     )
 
     for _ in range(3):
-        cfg = loader.load_agent_training_config("ArmageddonAgent_x1")
+        cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
         assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.0177)
 
 
@@ -240,7 +249,7 @@ def test_a_cold_started_stage_keeps_its_declared_start(tmp_path) -> None:
         warm_start_model_path=None,
     )
 
-    cfg = loader.load_agent_training_config("ArmageddonAgent_x1")
+    cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
     assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.1)
 
 
@@ -260,8 +269,32 @@ def test_the_stage_override_is_applied_before_being_pinned(tmp_path) -> None:
         warm_start_model_path=_model_zip(tmp_path, 0.0177),
     )
 
-    cfg = loader.load_agent_training_config("ArmageddonAgent_x1")
+    cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
     assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.0177)
+
+
+def test_the_whole_config_file_is_left_untouched(tmp_path) -> None:
+    """Une lecture SANS phase rend le fichier multi-profils : il ne doit rien recevoir.
+
+    `_require_training_config_phase` demande justement cette forme pour lister les profils
+    disponibles, et elle traverse le decorateur comme les autres. Y poser une rampe ecrirait des
+    cles a cote des profils — que personne ne lit — et la lecture stricte de la rampe d'entropie
+    y leverait, faisant echouer une commande qui ne demandait qu'un inventaire.
+    """
+    from ai.train import _install_stage_config_overrides
+
+    loader = _Loader(_cfg(start=0.1), phase="x1_long")
+    _install_stage_config_overrides(
+        loader, "ArmageddonAgent_x1", None, {}, True, stage_label="P2",
+        warm_start_model_path=_model_zip(tmp_path, 0.0177),
+    )
+
+    fichier = loader.load_agent_training_config("ArmageddonAgent_x1")
+
+    assert set(fichier) == {"x1_long"}, "le fichier a recu des cles de profil"
+    assert fichier["x1_long"]["model_params"]["ent_coef"]["start"] == pytest.approx(0.1), (
+        "la rampe a ete posee sur le fichier entier au lieu d'un profil"
+    )
 
 
 def test_another_agent_is_not_decorated(tmp_path) -> None:
@@ -274,7 +307,7 @@ def test_another_agent_is_not_decorated(tmp_path) -> None:
         warm_start_model_path=_model_zip(tmp_path, 0.0177),
     )
 
-    cfg = loader.load_agent_training_config("UnAutreAgent")
+    cfg = loader.load_agent_training_config("UnAutreAgent", "x1_long")
     assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.1)
 
 
@@ -298,7 +331,7 @@ def test_the_model_is_read_once_not_at_every_config_read(tmp_path) -> None:
             warm_start_model_path=_model_zip(tmp_path, 0.0177),
         )
         for _ in range(5):
-            loader.load_agent_training_config("ArmageddonAgent_x1")
+            loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
     finally:
         train_module.read_model_ent_coef = vraie_lecture  # type: ignore[assignment]
 
