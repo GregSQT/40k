@@ -5108,7 +5108,7 @@ def _close_exploiter_stage(args, curriculum, stage, run_info) -> int:
     return 0
 
 
-def _run_info_from_disk(args, config) -> Dict[str, Any]:
+def _run_info_from_disk(args, config, curriculum) -> Dict[str, Any]:
     """`run_info` reconstruit depuis les artefacts d'un run INTERROMPU, pour `--close-stage`.
 
     Un run tue au clavier ou mort en vol ne rend jamais son `run_info` : il ne revient pas de
@@ -5116,10 +5116,16 @@ def _run_info_from_disk(args, config) -> Dict[str, Any]:
     l'etape reste sans gate, sans ligne de journal et sans `model_<agent>_<etape>.zip`. L'etape
     SUIVANTE, qui nomme celle-ci dans son `init`, ne peut alors pas demarrer.
 
-    Les deux cles que la cloture EXIGE vivent deja a cote du modele canonique, ecrites par
-    `BotEvaluationCallback._copy_model_artifacts` a chaque instantane robuste :
-    le compte d'episodes (`<model>_run_state.json`) et le repertoire TensorBoard du run
-    (`<model>.tb_run.json`). Elles sont lues ici, jamais devinees.
+    Tout ce que la cloture lit vit deja a cote du modele canonique, ecrit par
+    `BotEvaluationCallback._copy_model_artifacts` a chaque instantane robuste : le compte
+    d'episodes (`<model>_run_state.json`) et le repertoire TensorBoard du run
+    (`<model>.tb_run.json`). Rien n'est devine.
+
+    `episodes_trained` est le compte de CETTE etape, et non le compte de vie du modele : le
+    chemin nominal y met `metrics_tracker.episode_count - episode_offset`, et l'offset est le
+    compte que portait le modele repris. Publier le total ferait entrer dans `curriculum.log` un
+    chiffre qui n'est pas celui de la colonne, et incomparable d'une etape a l'autre. L'offset se
+    relit sur le modele de l'etape SOURCE ; une etape `init: "new"` n'en a pas, et vaut zero.
 
     `last_bot_eval` reste ABSENTE : `_close_curriculum_stage` la lit avec `.get` et n'ecrit alors
     aucun score bot dans le journal. C'est la lecture juste — les scores publies doivent etre ceux
@@ -5133,14 +5139,33 @@ def _run_info_from_disk(args, config) -> Dict[str, Any]:
             f"--close-stage : modele canonique absent ({canonical_model_path}). Le run n'a rien "
             "ecrit, il n'y a aucune etape a clore."
         )
+    already_promoted = stage_model_path(canonical_model_path, args.etape)
+    if os.path.exists(already_promoted):
+        raise FileExistsError(
+            f"--close-stage : {args.etape} est DEJA promue ({already_promoted}). Clore une "
+            "seconde fois ecraserait ce modele et son run TensorBoard par ce qui se trouve "
+            "aujourd'hui au chemin canonique, qui peut appartenir a une autre etape. Retirer "
+            "l'artefact a la main si la re-cloture est bien l'intention."
+        )
     episode_count_total = load_run_state(canonical_model_path)
-    tensorboard_run_dir = require_key(
-        _read_tensorboard_run_meta(canonical_model_path), "run_dir"
-    )
+    source_stage = stage_init_source(require_stage(curriculum, args.etape))
+    episode_offset = 0
+    if source_stage is not None:
+        source_model = stage_model_path(canonical_model_path, source_stage)
+        if not os.path.exists(source_model):
+            raise FileNotFoundError(
+                f"--close-stage : l'etape {args.etape} reprend 'from:{source_stage}', dont le "
+                f"modele est absent ({source_model}). Son compte d'episodes est l'offset de "
+                "cette etape ; sans lui, le nombre d'episodes journalise serait celui de la vie "
+                "entiere du modele."
+            )
+        episode_offset = load_run_state(source_model)
     return {
         "episode_count_total": episode_count_total,
-        "tensorboard_run_dir": tensorboard_run_dir,
-        "episodes_trained": episode_count_total,
+        "tensorboard_run_dir": require_key(
+            _read_tensorboard_run_meta(canonical_model_path), "run_dir"
+        ),
+        "episodes_trained": episode_count_total - episode_offset,
     }
 
 
@@ -5322,7 +5347,8 @@ def main():
                             "promotion en model_<agent>_<etape>.zip, copie du run TensorBoard). "
                             "Pour un run interrompu ou mort en vol, qui n'atteint jamais la "
                             "cloture : sans elle, l'etape suivante ne trouve pas son modele "
-                            "source et refuse de demarrer. Exige --etape et --training-config.")
+                            "source et refuse de demarrer. Exige --etape et --training-config ; "
+                            "exclusif avec --resume-from ; refuse une etape deja promue.")
     args = parser.parse_args()
 
     # `--new` cree un modele neuf, `--append` continue l'existant : c'est l'un OU l'autre. Rien
@@ -5370,30 +5396,32 @@ def main():
                 f"{', '.join(non_training_modes)}."
             )
         if args.close_stage:
-            # AVANT la garde `--scenario bot` et avant `_prepare_curriculum_stage` : la cloture
-            # ne monte aucun environnement d'entrainement, donc elle n'a pas de scenario a
-            # exiger, et surtout `_prepare_curriculum_stage` POSE `--new` ou `--resume-from`
-            # d'apres l'`init` de l'etape. Sur une cloture, cela ecarterait ou remplacerait le
-            # modele canonique que l'on vient precisement clore.
-            _close_config = get_config_loader()
-            _close_curriculum = load_curriculum(args.agent)
-            _close_stage = require_stage(_close_curriculum, args.etape)
-            if is_exploiter_stage(_close_stage):
+            # Les VALIDATIONS ici, l'EXECUTION apres le prologue partage (cf. le bloc
+            # `--close-stage` plus bas). Ce qui doit se decider ici, et seulement ici, c'est de ne
+            # PAS appeler `_prepare_curriculum_stage` : il pose `--new` ou `--resume-from` d'apres
+            # l'`init` de l'etape, ce qui ecarterait ou remplacerait le modele canonique que la
+            # cloture vient precisement mesurer et promouvoir.
+            if args.resume_from:
+                raise ValueError(
+                    "--close-stage et --resume-from sont exclusifs : la cloture mesure et promeut "
+                    "le modele CANONIQUE deja sur disque, alors que --resume-from installerait un "
+                    "autre checkpoint a sa place. Pour clore sur un checkpoint precis, l'installer "
+                    "d'abord par un run, ou le nommer directement."
+                )
+            _close_stage_cfg = require_stage(load_curriculum(args.agent), args.etape)
+            if is_exploiter_stage(_close_stage_cfg):
                 raise ValueError(
                     f"--close-stage : {args.etape} est une etape EXPLOITEUR. Sa cloture publie le "
                     "budget mesure par la sonde, que seul le run produit et qu'aucun artefact sur "
                     "disque ne porte."
                 )
-            return _close_curriculum_stage(
-                args, _close_config, _close_curriculum, _close_stage,
-                _run_info_from_disk(args, _close_config),
-            )
-        if args.scenario != "bot":
+        elif args.scenario != "bot":
             raise ValueError(
                 f"--etape exige --scenario bot (got {args.scenario!r}) : le curriculum melange "
                 "bots d'entrainement et pool d'adversaires figes, ce que seul ce chemin monte."
             )
-        curriculum_stage = _prepare_curriculum_stage(args, get_config_loader())
+        if not args.close_stage:
+            curriculum_stage = _prepare_curriculum_stage(args, get_config_loader())
 
     if args.resume_from and not args.etape:
         if args.new:
@@ -5520,6 +5548,27 @@ def main():
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Config sync failed: {e}")
         
+        # Cloture d'une etape dont le run ne l'a pas atteinte (run interrompu ou mort en vol).
+        # PLACE ICI, avec les autres modes qui n'entrainent pas, et non dans le bloc de
+        # validation de `--etape` : le prologue partage doit avoir tourne d'abord. Il pose
+        # `W40K_BOARD_PATH` d'apres la resolution de l'agent — sans quoi le gate se jouerait en
+        # silence sur le plateau par defaut de `config.json`, donc sur une autre resolution que
+        # celle de l'agent —, il defaute `--rewards-config` sur `--agent` — sans quoi
+        # `evaluate_against_checkpoints` recoit `controlled_agent=None` et meurt dans
+        # `_strip_phase_suffix` —, il installe les overrides `--param` et il exige un
+        # `--training-config` valide en nommant les profils disponibles. Un `return` place avant
+        # sautait les quatre.
+        if args.close_stage:
+            # `require_present` et non `args.etape` nu : la garde qui exige `--etape` vit dans le
+            # bloc de validation plus haut, que le typage ne suit pas jusqu'ici.
+            _close_etape = require_present(args.etape, "--etape")
+            _close_curriculum = load_curriculum(args.agent)
+            return _close_curriculum_stage(
+                args, config, _close_curriculum,
+                require_stage(_close_curriculum, _close_etape),
+                _run_info_from_disk(args, config, _close_curriculum),
+            )
+
         # Convert existing steplog mode
         if args.convert_steplog:
             # Le scenario est resolu depuis --agent, comme pour --replay. Il transitait avant par
