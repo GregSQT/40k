@@ -55,8 +55,9 @@
       "pool": []
     },
     "P1": {
+      "_doc": "init 'from:P00' et non 'from:P0' : c'est ce que le run du 2026-09-03 a REELLEMENT repris (cf. training_x1_02-p01.log). L'init d'une etape DEJA JOUEE decrit son histoire, et il sert d'offset d'episodes a la cloture — le declarer 'from:P0' faisait journaliser 9 831 episodes au lieu de 80 000. Le chainage decide le 2026-09-04 commence donc a P2, qui reprend bien P1.",
       "role": "learner",
-      "init": "from:P0",
+      "init": "from:P00",
       "warmup_episodes": 10000,
       "ramp_end_episodes": 50000,
       "ratio_start": 0.0,
