@@ -1541,12 +1541,20 @@ def append_without_model(model_path: str) -> ValueError:
 def is_training_invocation(args) -> bool:
     """`main()` entraine-t-il, ou joue-t-il un des modes qui se contentent de LIRE le modele ?
 
-    `--test-only`/`--eval`, `--convert-steplog` et `--replay` ne lisent ni `--new` ni `--append` :
-    leur imposer une intention sur le cycle de vie du modele interdirait d'evaluer un agent.
-    Enumerer ce qui n'entraine PAS est le seul sens possible ici : la garde est jouee avant le
-    dispatch de `main()`, donc avant que le mode ne soit tranche.
+    `--test-only`/`--eval`, `--convert-steplog`, `--replay` et `--close-stage` ne lisent ni
+    `--new` ni `--append` : leur imposer une intention sur le cycle de vie du modele interdirait
+    d'evaluer un agent. Enumerer ce qui n'entraine PAS est le seul sens possible ici : la garde
+    est jouee avant le dispatch de `main()`, donc avant que le mode ne soit tranche.
+
+    `--close-stage` y entre pour une raison plus forte que les autres : il MESURE et PROMEUT le
+    modele canonique en place. Les deux intentions que la garde reclame le detruiraient — `--new`
+    l'ecarterait sous un nom horodate avant de le clore, `--append` annoncerait une reprise qui
+    n'a pas lieu. Une commande qui ne peut repondre a la question sans se nier n'a pas a se la
+    voir poser.
     """
-    return not (args.test_only or args.convert_steplog or args.replay)
+    return not (
+        args.test_only or args.convert_steplog or args.replay or args.close_stage
+    )
 
 
 def check_model_lifecycle(

@@ -129,11 +129,24 @@ def test_les_invocations_realisables_passent(
 
 
 @pytest.mark.parametrize(
-    "mode", [{"test_only": True}, {"convert_steplog": "step.log"}, {"replay": True}]
+    "mode",
+    [
+        {"test_only": True},
+        {"convert_steplog": "step.log"},
+        {"replay": True},
+        {"close_stage": True},
+    ],
 )
 def test_les_modes_sans_entrainement_ne_sont_pas_concernes(mode) -> None:
-    """Ils ne lisent ni `--new` ni `--append` : les exiger interdirait d'évaluer un modèle."""
-    base = dict(test_only=False, convert_steplog=None, replay=False)
+    """Ils ne lisent ni `--new` ni `--append` : les exiger interdirait d'évaluer un modèle.
+
+    `--close-stage` y entre pour une raison plus forte : il MESURE et PROMEUT le modèle
+    canonique en place, donc les deux intentions réclamées le détruiraient — `--new` l'écarterait
+    sous un nom horodaté avant de le clore, `--append` annoncerait une reprise qui n'a pas lieu.
+    Sans cette exemption, la clôture d'une étape est simplement impossible : le modèle existe
+    toujours, par construction.
+    """
+    base = dict(test_only=False, convert_steplog=None, replay=False, close_stage=False)
     assert is_training_invocation(argparse.Namespace(**base)), (
         "sans aucun de ces modes, la commande entraîne — sinon la garde ne se déclenche jamais"
     )
