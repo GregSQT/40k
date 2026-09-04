@@ -560,14 +560,16 @@ def test_missing_block_in_an_agent_profile_is_an_explicit_error() -> None:
 
 def test_parent_ratio_argument_overrides_the_profile_json(board_x5) -> None:
     """L'argument gagne sur le JSON, et il ne déplace QUE le départ."""
-    from_json = _engine_x1_long().training_config["deployment_mode_schedule"]
+    tc = _engine_x1_long().training_config
+    assert tc is not None
+    from_json = tc["deployment_mode_schedule"]
     assert from_json["active_ratio_start"] == 0.3, (
         "le profil x1_long ne démarre plus à 0.3 : ce test compare l'argument à cette valeur."
     )
 
-    pinned = _engine_x1_long(training_deploy_active_ratio_start=0.9).training_config[
-        "deployment_mode_schedule"
-    ]
+    tc_pinned = _engine_x1_long(training_deploy_active_ratio_start=0.9).training_config
+    assert tc_pinned is not None
+    pinned = tc_pinned["deployment_mode_schedule"]
     assert pinned["active_ratio_start"] == 0.9
     # Figer, c'est aligner le départ sur l'arrivée — jamais déplacer l'arrivée : un profil garde
     # délibérément une part d'épisodes en 'auto' pour que `r_win_rate_deploy_auto` mesure encore.
@@ -590,6 +592,7 @@ def test_parent_ratio_argument_absent_leaves_the_profile_alone(board_x5) -> None
         training_n_envs=1,
         training_deploy_active_ratio_start=None,
     )
+    assert env.training_config is not None
     assert env.training_config["deployment_mode_schedule"]["active_ratio_start"] == 0.3
 
 
@@ -606,10 +609,14 @@ def test_parent_total_episodes_argument_overrides_json(board_x5) -> None:
     json_value = 100000
     override = 200000
 
-    from_json = _engine_x1_long().training_config["total_episodes"]
+    tc_json = _engine_x1_long().training_config
+    assert tc_json is not None
+    from_json = tc_json["total_episodes"]
     assert from_json == json_value, (
         f"le profil x1_long ne vaut plus {json_value} : mettre a jour ce test."
     )
 
-    overridden = _engine_x1_long(training_total_episodes=override).training_config["total_episodes"]
+    tc_overridden = _engine_x1_long(training_total_episodes=override).training_config
+    assert tc_overridden is not None
+    overridden = tc_overridden["total_episodes"]
     assert overridden == override

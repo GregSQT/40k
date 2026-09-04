@@ -475,7 +475,7 @@ export function createBlinkingHPBar(config: BlinkingHPBarConfig): BlinkingHPBarR
 
   if (!unit.HP_MAX) {
     hpContainer.destroy({ children: true });
-    throw new Error(`createBlinkingHPBar: unit ${unit.ID} has HP_MAX=${unit.HP_MAX}`);
+    throw new Error(`createBlinkingHPBar: unit ${unit.id} has HP_MAX=${unit.HP_MAX}`);
   }
 
   for (let i = 0; i < unit.HP_MAX; i++) {

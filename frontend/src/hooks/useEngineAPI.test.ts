@@ -14,10 +14,10 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import React from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Unit, Weapon } from "../types/game";
-import { setTerrainList } from "../utils/terrainSelection";
-import { TEST_TERRAIN_LIST } from "./__fixtures__/terrainFixtures";
 import type { AuthSession } from "../auth/authStorage";
+import type { Unit, Weapon } from "../types/game";
+import { setTerrainList, type TerrainEntry } from "../utils/terrainSelection";
+import { TEST_TERRAIN_LIST } from "./__fixtures__/terrainFixtures";
 import { useEngineAPI } from "./useEngineAPI";
 
 // ---------------------------------------------------------------------------

@@ -13,7 +13,6 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
-import React from "react";
 import { MemoryRouter } from "react-router-dom";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthSession } from "../auth/authStorage";
@@ -110,18 +109,12 @@ function makeGameState() {
 // ---------------------------------------------------------------------------
 
 const server = setupServer(
-  http.get("/config/game_config.json", () =>
-    HttpResponse.json({ game_rules: { max_turns: 5 } })
-  ),
-  http.get("/api/config/terrain-list", () =>
-    HttpResponse.json({ terrains: TEST_TERRAIN_LIST })
-  ),
-  http.get("/api/config/board", () =>
-    HttpResponse.json({ success: true, config: BOARD_CONFIG })
-  ),
+  http.get("/config/game_config.json", () => HttpResponse.json({ game_rules: { max_turns: 5 } })),
+  http.get("/api/config/terrain-list", () => HttpResponse.json({ terrains: TEST_TERRAIN_LIST })),
+  http.get("/api/config/board", () => HttpResponse.json({ success: true, config: BOARD_CONFIG })),
   http.post("/api/game/start", () =>
     HttpResponse.json({ success: true, game_state: makeGameState() })
-  ),
+  )
 );
 
 beforeAll(() => server.listen({ onUnhandledRequest: "warn" }));
@@ -150,17 +143,13 @@ function renderBoard() {
 
 describe("BoardWithAPI — écrans de garde", () => {
   it("terrain-list 500 → message d'erreur affiché, pas l'écran de chargement", async () => {
-    server.use(
-      http.get("/api/config/terrain-list", () => new HttpResponse(null, { status: 500 }))
-    );
+    server.use(http.get("/api/config/terrain-list", () => new HttpResponse(null, { status: 500 })));
 
     renderBoard();
 
     await waitFor(
       () => {
-        expect(
-          screen.getByText(/Impossible de charger la liste des terrains/)
-        ).toBeTruthy();
+        expect(screen.getByText(/Impossible de charger la liste des terrains/)).toBeTruthy();
       },
       { timeout: 5000 }
     );

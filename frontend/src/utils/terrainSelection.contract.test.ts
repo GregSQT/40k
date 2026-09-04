@@ -8,7 +8,7 @@ import { readFileSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
-import { terrainSuffix, type TerrainEntry } from "./terrainSelection";
+import { type TerrainEntry, terrainSuffix } from "./terrainSelection";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TERRAIN_LIST_PATH = resolve(
@@ -20,9 +20,7 @@ const TERRAIN_LIST_PATH = resolve(
  * Réplique exacte de _load_terrain_list_constants() (api_server.py:272-321).
  * Construit suffix_table[mode][terrainId] → "" | "_<id>".
  */
-function buildBackendSuffixTable(
-  entries: TerrainEntry[]
-): Record<string, Record<string, string>> {
+function buildBackendSuffixTable(entries: TerrainEntry[]): Record<string, Record<string, string>> {
   const defaultFor: Record<string, string> = {};
   const allModes = new Set<string>();
 
@@ -41,9 +39,7 @@ function buildBackendSuffixTable(
 
   const suffixTable: Record<string, Record<string, string>> = {};
   for (const mode of allModes) {
-    const modeTerrains = entries
-      .filter((e) => e.modes.includes(mode))
-      .map((e) => e.id);
+    const modeTerrains = entries.filter((e) => e.modes.includes(mode)).map((e) => e.id);
     const defaultTid = defaultFor[mode];
     suffixTable[mode] = Object.fromEntries(
       modeTerrains.map((tid) => [tid, tid === defaultTid ? "" : `_${tid}`])
@@ -60,9 +56,7 @@ function buildBackendSuffixTable(
 }
 
 describe("terrainSuffix — contrat front/back (terrain_list.json réel)", () => {
-  const realList: TerrainEntry[] = JSON.parse(
-    readFileSync(TERRAIN_LIST_PATH, "utf-8")
-  );
+  const realList: TerrainEntry[] = JSON.parse(readFileSync(TERRAIN_LIST_PATH, "utf-8"));
   const suffixTable = buildBackendSuffixTable(realList);
 
   for (const [mode, terrains] of Object.entries(suffixTable)) {
