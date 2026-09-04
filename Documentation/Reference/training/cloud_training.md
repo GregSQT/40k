@@ -905,20 +905,60 @@ High rewards but nonsensical behavior → find the exploited reward ; reduce by 
 
 ### CPU vs GPU
 
-**Mesuré le 2026-08-26** (i9-13900H 16 threads WSL2, RTX 4060 Laptop 8 Go, torch 2.13 cu130 — run `x1_long`).
+**Mesuré le 2026-09-05** (i9-13900H 16 threads WSL2, RTX 4060 Laptop 8 Go — run `x1_long` en cours, step ~19,5 M, TensorBoard `run_20260904-182509`, 50 derniers points de `time/fps`).
 
-| Metric | Value |
-|---|---|
-| Global throughput (`time/fps`) | ~200 steps/s (~96 episodes/min) |
-| GPU utilisation | 20-38%, 3 Go / 8 Go VRAM |
-| PPO update | 142 ms per minibatch of 1020 |
-| Env step (offline bench) | 9,47 ms |
+| Metric | x1 (mesuré) | x5 (bench 2026-09-05) |
+|---|---|---|
+| Global throughput (`time/fps`) | **270 steps/s** | ~79 steps/s @ n_envs=24 projeté |
+| FPS par env | 11,3 steps/s | 3,3 steps/s |
+| PPO update moyen | **2,61 s** | idem (réseau inchangé) |
+| Rollout time (n_steps=8160, n_envs=24) | ~725 s | ~2 495 s |
+| Ratio env/update | **278×** | **956×** |
 
-**Où va le temps** (cycle PPO, ~41 s de wall) : attente lockstep + IPC ≈ **73%**, GPU update ≈ 15%, env compute ≈ 8%, rollout inference ≈ 5%.
+Le ratio env/update — temps de collecte vs temps de mise à jour réseau — prouve que le goulot est **le moteur Python, pas le GPU**. Le réseau n'est sollicité que 2,6 s pour 725 s (x1) ou 2 495 s (x5) de rollout, soit respectivement 0,4 % et 0,1 % du temps de mur. Un meilleur GPU n'apporterait rien.
 
-**Recommandation** : laisser `auto` (ne pas passer `--mode`). Avec l'obs `Dict` V11, la policy est un CNN et `auto` choisit CUDA si un GPU est présent. Forcer `--mode CPU` charge les mêmes cœurs que les 24 workers. L'effort d'optimisation appartient côté workers (action mask 33,2%, observation 31,9%, bot turns 30,7% d'un env step).
+Le x5 est 3,4× plus lent que le x1 à n_envs égal (surface 25× plus grande, mais une partie du compute — logique de combat, rewards, masque — ne scale pas avec la carte).
+
+**Recommandation** : laisser `auto` pour le device. L'effort d'optimisation appartient côté workers (action mask, observation, bot turns — mesure 2026-08-26 : 33 %, 32 %, 31 % du step).
 
 La configuration actuelle est `n_envs: 24`, `n_steps: 8160`, `batch_size: 1020`. Pour l'historique des benchmarks de perf et des tentatives d'optimisation BFS, voir [training_journal.md](../../Roadmap/archives/training_journal.md).
+
+### Cloud (x5 et runs longs)
+
+Le seul levier réel pour accélérer un run x5 est **plus de cœurs CPU** pour augmenter `n_envs`. Les plateformes de GPU cloud (A100, H100) ne changent rien au goulot.
+
+**Pour atteindre en x5 la même vitesse de collecte qu'un run x1 à n_envs=24 (270 fps) :**
+
+```
+fps_par_env_x5  = 3,3 steps/s
+n_envs_nécessaires = 270 / 3,3 ≈ 82 envs
+machine cible      = ~40–48 cœurs physiques (~80–96 vCPU)
+```
+
+**Plateformes recommandées (CPU-heavy, sans GPU requis) :**
+
+| Plateforme | Machine typique | Prix/h indicatif | Notes |
+|---|---|---|---|
+| [Vast.ai](https://vast.ai) | 32–96 vCPU CPU-only | 0,05–0,25 $ | filtre "CPU-only", tarif variable |
+| [RunPod](https://runpod.io) | 32–96 vCPU | 0,08–0,25 $ | pods CPU disponibles |
+| AWS `c7g.16xlarge` | 64 cœurs ARM Graviton | ~1,10 $/h | fiable, SLA, plus cher |
+
+Avec `n_envs=64` sur 64 vCPU, FPS x5 attendu ≈ 64 × 3,3 ≈ **210 fps** — comparable au run x1 local.
+
+**Migration :** le setup est portable (venv standard, pas de dépendance matérielle locale).
+
+```bash
+# Sur la machine distante
+git clone <repo> && pip install -r requirements.txt
+# Copier le .zip + .pkl du modèle de départ si warm-start
+python3 ai/train.py --agent ArmageddonAgent_x1 \
+    --training-config x5_new --scenario bot --resolution 5 --new
+# Rapatrier à la fin
+scp remote:ai/models/ArmageddonAgent_x1/model_*.zip ./
+scp -r remote:tensorboard/x5_new_* ./tensorboard/
+```
+
+⚠️ Ne jamais lancer `--new` et `--append` sans avoir tranché au préalable (CLAUDE.md).
 
 ### Training Speed Tips
 
