@@ -8,7 +8,7 @@ Sortie: pour chaque style du panel refondu, zones contrôlées (Ctrl=2) et VP cu
         du bot à chaque tour, moyennés sur tous les épisodes.
 
 Pré-requis: lancer
-    python3 ai/train.py --agent ArmageddonAgent --training-config x1_long
+    python3 ai/train.py --agent ArmageddonAgent_x1 --training-config x1_long
         --test-only --test-episodes 20 --resolution 1
 Le step_logger activé force le mode sérial, ce qui écrit Opponent: <bot> par épisode.
 

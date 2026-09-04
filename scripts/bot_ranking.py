@@ -40,7 +40,7 @@ CE QU'IL NE FAIT PAS
     ici est exactement le bot joue en evaluation. Une seconde implementation divergerait.
 
 USAGE
-    python scripts/bot_ranking.py --agent ArmageddonAgent --training-config x1 --episodes 20
+    python scripts/bot_ranking.py --agent ArmageddonAgent_x1 --training-config x1 --episodes 20
     python scripts/bot_ranking.py --bots control,tactical --episodes 50
     python scripts/bot_ranking.py --scenario-pool training --csv /tmp/ranking.csv
 """
