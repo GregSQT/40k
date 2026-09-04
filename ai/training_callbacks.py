@@ -2803,10 +2803,11 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
                     pool=self._eval_pool,
                 )
             except Exception:
-                # Workers force-terminés → ProcessPoolExecutor._broken=True ; la prochaine
-                # sonde créera un pool neuf plutôt que lever BrokenProcessPool. Le `shutdown`
-                # est indispensable ici : détacher sans fermer laissait des workers orphelins,
-                # et cette exception court-circuite justement la fermeture de fin de boucle.
+                # Ferme ICI plutôt que d'attendre le `finally` de la boucle `learn()` : le pool
+                # peut être cassé (workers SIGTERM → `_broken=True`) et une sonde ultérieure y
+                # lèverait BrokenProcessPool, ou intact mais inutile pendant que l'exception
+                # traverse `close_all_training_envs`, que 30 s par VecEnv retardent — un SIGTERM
+                # dans cette fenêtre rendrait ses workers orphelins (PPID=1).
                 self._shutdown_eval_pool()
                 raise
         finally:
@@ -2965,8 +2966,7 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
                     pool=self._eval_pool,
                 )
             except Exception:
-                # Jumeau du `except` d'`ExploiterProbeCallback._probe` : fermer, pas seulement
-                # détacher — sinon les workers d'un pool cassé survivent à l'exception.
+                # Jumeau du `except` d'`ExploiterProbeCallback._probe` : voir son commentaire.
                 self._shutdown_eval_pool()
                 raise
         finally:

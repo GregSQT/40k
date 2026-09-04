@@ -294,33 +294,14 @@ def test_learn_loop_closes_the_pools_in_a_finally():
     )
 
 
-def test_early_stop_probe_shuts_down_pool_on_evaluate_exception(archive):
-    """Jumeau d'`ExploiterProbeCallback` : l'exception ferme le pool, elle ne le détache pas.
-
-    Depuis que le pool survit à un `learn()`, cette exception court-circuite la fermeture de fin
-    de boucle : détacher sans fermer laisserait des workers orphelins.
-    """
-    early_stop = _make_pool_early_stop(archive)
-    pool = MagicMock()
-    early_stop._eval_pool = pool
-
-    with (
-        patch(
-            "ai.bot_evaluation.evaluate_against_checkpoints",
-            side_effect=RuntimeError("BrokenProcessPool"),
-        ),
-        patch("ai.vec_normalize_utils.save_vec_normalize"),
-        patch("ai.training_callbacks.remove_model_with_companions"),
-    ):
-        with pytest.raises(RuntimeError, match="BrokenProcessPool"):
-            early_stop._probe()
-
-    assert early_stop._eval_pool is None
-    pool.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
-
-
 def test_probe_after_a_broken_pool_creates_a_fresh_one(archive):
-    """Après l'exception, la sonde suivante recrée un pool au lieu de retomber sur le cassé."""
+    """Après l'exception, la sonde suivante recrée un pool au lieu de retomber sur le cassé.
+
+    Que l'exception FERME le pool est verrouillé par
+    `test_exploiter_probe_closes_its_pool_when_the_evaluation_raises` et son jumeau, dans
+    `test_checkpoint_eval_parallel.py`. Ce qui est propre à la création paresseuse, et vérifié
+    ici, c'est la reprise : sans elle la sonde suivante partirait sans pool du tout.
+    """
     pools = [MagicMock(), MagicMock()]
     create_pool = MagicMock(side_effect=pools)
     probe = _make_exploiter_probe(archive)

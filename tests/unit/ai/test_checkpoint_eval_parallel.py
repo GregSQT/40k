@@ -5,6 +5,9 @@
 l'evaluation contre les bots. Ces tests verrouillent ce que l'unification peut casser en silence.
 """
 
+import os
+import tempfile
+from typing import List
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -563,25 +566,45 @@ def test_exploiter_probe_uses_intermediate_worker_count(tmp_path):
         # test unitaire construirait un vrai ProcessPoolExecutor.
         patch("ai.bot_evaluation.create_checkpoint_eval_pool", return_value=MagicMock()),
         patch("ai.vec_normalize_utils.save_vec_normalize"),
-        patch("ai.training_callbacks.remove_model_with_companions"),
     ):
         probe._probe(n_episodes=10, label="cheap")
 
     assert evaluate.call_args.kwargs["n_workers_override"] == 4
 
 
-def test_probe_shuts_down_pool_on_evaluate_exception(tmp_path):
-    """Si evaluate_against_checkpoints lève, le pool est FERMÉ puis détaché avant re-raise.
+def _mkstemp_spy(created: List[str]):
+    """Espionne `tempfile.mkstemp` sans le neutraliser : le fichier reste réel, donc le
+    `finally` de `_probe` a quelque chose à effacer et le test peut vérifier qu'il l'a fait."""
+    real_mkstemp = tempfile.mkstemp
 
-    Un pool force-terminé (workers SIGTERM) est marqué _broken par ProcessPoolExecutor.
-    Le prochain submit() leverait BrokenProcessPool de façon silencieuse. En détachant
-    _eval_pool sur l'exception, la sonde suivante en crée un neuf au lieu de propager le crash
-    — critère 4.2 item 3.
+    def _spy(*args, **kwargs):
+        fd, path = real_mkstemp(*args, **kwargs)
+        created.append(path)
+        return fd, path
 
-    Le `shutdown` est l'autre moitié : depuis que le pool survit à un `learn()`, cette exception
-    est le seul chemin qui court-circuite la fermeture de fin de boucle. Détacher sans fermer y
-    laisserait des workers orphelins (PPID=1), ce contre quoi met en garde la docstring de
-    `create_checkpoint_eval_pool`.
+    return _spy
+
+
+def _assert_probe_closed_its_pool(probe, pool, created: List[str]) -> None:
+    """Invariants communs aux deux sondes quand `evaluate_against_checkpoints` lève."""
+    pool.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+    assert probe._eval_pool is None, "la référence au pool fermé doit être lâchée"
+    assert len(created) == 1, "la sonde crée exactement un .zip temporaire"
+    assert not os.path.exists(created[0]), (
+        "le .zip temporaire doit être effacé même quand l'évaluation lève"
+    )
+
+
+def test_exploiter_probe_closes_its_pool_when_the_evaluation_raises(tmp_path):
+    """Une évaluation qui lève ferme le pool avant de remonter, et efface le modèle temporaire.
+
+    C'est le SEUL endroit qui ferme ce pool sur ce chemin : l'exception remonte `_on_step`, et
+    `MaskablePPO.learn` appelle `on_training_end` HORS `finally` (sb3_contrib, ligne 467), donc
+    `_on_training_end` ne tournera pas. Elle traverse ensuite le `try/finally` sans `except` de
+    `train_with_scenario_rotation` jusqu'au `except` de `main`. Sans cette fermeture les workers
+    — un MaskablePPO chargé chacun — restent résidents jusqu'à la sortie du processus, que
+    `close_all_training_envs` retarde de 30 s par VecEnv ; un SIGTERM dans cette fenêtre les rend
+    orphelins (PPID=1).
     """
     from ai.training_callbacks import ExploiterProbeCallback
 
@@ -603,24 +626,63 @@ def test_probe_shuts_down_pool_on_evaluate_exception(tmp_path):
     )
     probe.model = MagicMock()
     pool = MagicMock()
-    probe._eval_pool = pool  # pool persistant en place
+    probe._eval_pool = pool
+    created: List[str] = []
 
     with (
         patch(
             "ai.bot_evaluation.evaluate_against_checkpoints",
-            side_effect=RuntimeError("BrokenProcessPool"),
+            side_effect=RuntimeError("épisodes non joués"),
         ),
         patch("ai.vec_normalize_utils.save_vec_normalize"),
-        patch("ai.training_callbacks.remove_model_with_companions"),
+        patch("tempfile.mkstemp", side_effect=_mkstemp_spy(created)),
     ):
-        with pytest.raises(RuntimeError, match="BrokenProcessPool"):
+        with pytest.raises(RuntimeError, match="épisodes non joués"):
             probe._probe(n_episodes=10, label="cheap")
 
-    assert probe._eval_pool is None, (
-        "_eval_pool doit être None après exception : le pool peut être cassé "
-        "(workers SIGTERM → _broken=True), la prochaine sonde doit créer un pool frais"
+    _assert_probe_closed_its_pool(probe, pool, created)
+
+
+def test_pool_early_stopping_closes_its_pool_when_the_evaluation_raises(tmp_path):
+    """Jumeau du test ci-dessus : `PoolEarlyStoppingCallback._probe` porte le même contrat.
+
+    Ce callback est construit par `setup_callbacks` dès qu'une étape de curriculum non-exploiteur
+    déclare `early_stop` avec un champion, et n'avait aucun test.
+    """
+    from ai.training_callbacks import PoolEarlyStoppingCallback
+
+    archive = tmp_path / "P0.zip"
+    archive.touch()
+
+    probe = PoolEarlyStoppingCallback(
+        pool_archives=[(str(archive), "P0")],
+        threshold=0.6,
+        min_timesteps=0,
+        consecutive_evals=2,
+        eval_freq_episodes=100,
+        n_eval_episodes=10,
+        training_config_name="x1_long",
+        rewards_config_name="ArmageddonAgent_x1",
+        metrics_tracker=None,
+        intermediate_n_workers=4,
     )
-    pool.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+    probe.model = MagicMock()
+    pool = MagicMock()
+    probe._eval_pool = pool
+    created: List[str] = []
+
+    with (
+        patch(
+            "ai.bot_evaluation.evaluate_against_checkpoints",
+            side_effect=RuntimeError("épisodes non joués"),
+        ),
+        patch("ai.vec_normalize_utils.save_vec_normalize"),
+        patch("tempfile.mkstemp", side_effect=_mkstemp_spy(created)),
+    ):
+        with pytest.raises(RuntimeError, match="épisodes non joués"):
+            probe._probe()
+
+    _assert_probe_closed_its_pool(probe, pool, created)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────────────────
