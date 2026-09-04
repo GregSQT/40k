@@ -13,6 +13,8 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from tests.unit.ai._fabriques import exploiter_probe_callback, pool_early_stopping_callback
+
 
 # ── Graines : le decoupage en tranches doit reproduire la sequence sequentielle ──────────────
 
@@ -537,25 +539,10 @@ def test_exploiter_probe_uses_intermediate_worker_count(tmp_path):
     la ferait concourir avec les 24 workers de collecte du run — le regime documente par
     `validate_bot_eval_worker_params` : 47 Go de RSS et une evaluation 42 % PLUS LENTE qu'a 4.
     """
-    from ai.training_callbacks import ExploiterProbeCallback
-
     archive = tmp_path / "target.zip"
     archive.touch()
 
-    probe = ExploiterProbeCallback(
-        target_archive_path=str(archive),
-        training_config_name="x1_long",
-        rewards_config_name="ArmageddonAgent_x1",
-        metrics_tracker=None,
-        probe_every_episodes=100,
-        probe_cheap_n=10,
-        probe_confirm_n=20,
-        win_rate_target=0.6,
-        budget_cap=1000,
-        intermediate_n_workers=4,
-        log_fn=lambda *_a, **_k: None,
-    )
-    probe.model = MagicMock()
+    probe = exploiter_probe_callback(archive)
 
     with (
         patch(
@@ -598,33 +585,14 @@ def _assert_probe_closed_its_pool(probe, pool, created: List[str]) -> None:
 def test_exploiter_probe_closes_its_pool_when_the_evaluation_raises(tmp_path):
     """Une évaluation qui lève ferme le pool avant de remonter, et efface le modèle temporaire.
 
-    C'est le SEUL endroit qui ferme ce pool sur ce chemin : l'exception remonte `_on_step`, et
-    `MaskablePPO.learn` appelle `on_training_end` HORS `finally` (sb3_contrib, ligne 467), donc
-    `_on_training_end` ne tournera pas. Elle traverse ensuite le `try/finally` sans `except` de
-    `train_with_scenario_rotation` jusqu'au `except` de `main`. Sans cette fermeture les workers
-    — un MaskablePPO chargé chacun — restent résidents jusqu'à la sortie du processus, que
-    `close_all_training_envs` retarde de 30 s par VecEnv ; un SIGTERM dans cette fenêtre les rend
-    orphelins (PPID=1).
+    La fermeture de fin de boucle couvrirait ce chemin, mais trop tard — l'exception traverse
+    d'abord `close_all_training_envs` et ses 30 s par VecEnv. Le `except` de `_probe` porte le
+    motif complet ; ce test verrouille son effet.
     """
-    from ai.training_callbacks import ExploiterProbeCallback
-
     archive = tmp_path / "target.zip"
     archive.touch()
 
-    probe = ExploiterProbeCallback(
-        target_archive_path=str(archive),
-        training_config_name="x1_long",
-        rewards_config_name="ArmageddonAgent_x1",
-        metrics_tracker=None,
-        probe_every_episodes=100,
-        probe_cheap_n=10,
-        probe_confirm_n=20,
-        win_rate_target=0.6,
-        budget_cap=1000,
-        intermediate_n_workers=4,
-        log_fn=lambda *_a, **_k: None,
-    )
-    probe.model = MagicMock()
+    probe = exploiter_probe_callback(archive)
     pool = MagicMock()
     probe._eval_pool = pool
     created: List[str] = []
@@ -649,24 +617,10 @@ def test_pool_early_stopping_closes_its_pool_when_the_evaluation_raises(tmp_path
     Ce callback est construit par `setup_callbacks` dès qu'une étape de curriculum non-exploiteur
     déclare `early_stop` avec un champion, et n'avait aucun test.
     """
-    from ai.training_callbacks import PoolEarlyStoppingCallback
-
-    archive = tmp_path / "P0.zip"
+    archive = tmp_path / "champion.zip"
     archive.touch()
 
-    probe = PoolEarlyStoppingCallback(
-        pool_archives=[(str(archive), "P0")],
-        threshold=0.6,
-        min_timesteps=0,
-        consecutive_evals=2,
-        eval_freq_episodes=100,
-        n_eval_episodes=10,
-        training_config_name="x1_long",
-        rewards_config_name="ArmageddonAgent_x1",
-        metrics_tracker=None,
-        intermediate_n_workers=4,
-    )
-    probe.model = MagicMock()
+    probe = pool_early_stopping_callback(archive)
     pool = MagicMock()
     probe._eval_pool = pool
     created: List[str] = []

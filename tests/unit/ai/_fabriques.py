@@ -395,3 +395,64 @@ def units_cache_entry(
         entry["occupied_hexes_by_model"] = dict(models)
         entry["floor_height_by_model"] = {mid: 0.0 for mid in models}
     return entry
+
+
+PROBE_TRAINING_CONFIG = "x1_long"
+PROBE_REWARDS_CONFIG = "ArmageddonAgent_x1"
+
+
+def exploiter_probe_callback(archive: Any, n_workers: int | None = 4) -> Any:
+    """`ExploiterProbeCallback` prêt à sonder, `model` doublé.
+
+    Ces onze arguments étaient retapés à l'identique dans `test_checkpoint_eval_parallel.py`
+    (deux fois) et `test_probe_eval_pool_lifetime.py` : tout argument requis ajouté au
+    constructeur cassait trois blocs, un par un.
+
+    Import différé : `ai.training_callbacks` tire stable-baselines3, que les tests d'analyzer
+    important ce module n'ont aucune raison de charger.
+    """
+    from unittest.mock import MagicMock
+
+    from ai.training_callbacks import ExploiterProbeCallback
+
+    probe = ExploiterProbeCallback(
+        target_archive_path=str(archive),
+        training_config_name=PROBE_TRAINING_CONFIG,
+        rewards_config_name=PROBE_REWARDS_CONFIG,
+        metrics_tracker=None,
+        probe_every_episodes=100,
+        probe_cheap_n=10,
+        probe_confirm_n=20,
+        win_rate_target=0.6,
+        budget_cap=1000,
+        intermediate_n_workers=n_workers,
+        log_fn=lambda *_a, **_k: None,
+    )
+    probe.model = MagicMock()
+    return probe
+
+
+def pool_early_stopping_callback(archive: Any, n_workers: int | None = 4) -> Any:
+    """Jumeau de `exploiter_probe_callback` pour `PoolEarlyStoppingCallback`.
+
+    Les deux callbacks partagent `_EvalPoolOwnerMixin`, donc tout test de cycle de vie du pool
+    les exerce en paire — les fabriques vont par paire pour la même raison.
+    """
+    from unittest.mock import MagicMock
+
+    from ai.training_callbacks import PoolEarlyStoppingCallback
+
+    callback = PoolEarlyStoppingCallback(
+        pool_archives=[(str(archive), "champion")],
+        threshold=0.6,
+        min_timesteps=0,
+        consecutive_evals=2,
+        eval_freq_episodes=100,
+        n_eval_episodes=10,
+        training_config_name=PROBE_TRAINING_CONFIG,
+        rewards_config_name=PROBE_REWARDS_CONFIG,
+        metrics_tracker=None,
+        intermediate_n_workers=n_workers,
+    )
+    callback.model = MagicMock()
+    return callback

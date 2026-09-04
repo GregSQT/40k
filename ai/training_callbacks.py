@@ -787,8 +787,8 @@ class MetricsCollectionCallback(BaseCallback):
         `name_to_value`. DESINSTALLEE par `_on_training_end`, et c'est le point.
 
         SB3 appaire `on_training_start` et `on_training_end` autour de CHAQUE `learn()`
-        (`sb3_contrib/ppo_mask/ppo_mask.py`, lignes 448 et 467), et la boucle budgetee en episodes
-        de `train_with_scenario_rotation` enchaine un `learn()` par tranche de quatre updates.
+        (`MaskablePPO.learn`, sb3-contrib), et la boucle budgetee en episodes de
+        `train_with_scenario_rotation` enchaine un `learn()` par tranche de quatre updates.
         Cette methode posait une enveloppe sans que rien ne la retire : sur un run NEUF, SB3
         reconstruit son logger a chaque `learn()` (`base_class._setup_learn`, garde par
         `_custom_logger`) et l'enveloppe morte partait avec l'ancien logger, ce qui a masque le
@@ -804,8 +804,10 @@ class MetricsCollectionCallback(BaseCallback):
         vingt copies du dernier : les quatre courbes de sante PPO de `00_critical` n'etaient plus
         lissees, et paraissaient quatre a quatorze fois plus bruitees qu'un run neuf.
 
-        La depose/retrait symetrique est la meme discipline que le pool des deux callbacks de
-        sonde de ce fichier, et elle rend inutile toute marque posee sur la fonction enveloppee.
+        Le retrait rend inutile toute marque posee sur la fonction enveloppee : c'est l'absence
+        de `_dump_logger`, et non l'inspection de `logger.dump`, qui dit si une enveloppe est en
+        place. Le pool des deux callbacks de sonde de ce fichier souffrait du meme couple de
+        hooks ; il en est sorti autrement, cf. `_EvalPoolOwnerMixin`.
 
         Verrou : tests/unit/ai/test_metrics_dump_wrapper_idempotent.py.
         """
@@ -818,6 +820,11 @@ class MetricsCollectionCallback(BaseCallback):
         _original_dump = self.model.logger.dump
         _tracker = self.metrics_tracker
         _model = self.model
+        # `_ppo_keys` et non `self._PPO_KEYS` lu dans l'enveloppe : lire l'attribut ferait de
+        # `self` une variable libre de plus, donc un cycle `callback → _dump_logger → logger →
+        # dump → callback` que le comptage de references ne casse pas — un par logger que SB3
+        # reconstruit. Verifie par `co_freevars` de l'enveloppe compilee.
+        _ppo_keys = self._PPO_KEYS
 
         def _dump_with_capture(step: int = 0) -> None:
             ntv = getattr(_model.logger, 'name_to_value', {})
@@ -830,7 +837,7 @@ class MetricsCollectionCallback(BaseCallback):
             # 101 415 points sur `training_diagnostic/entropy_coef` pour 100 000 episodes et
             # 1 063 updates — un point par EPISODE au lieu d'un par update. `_PPO_KEYS` etait
             # declare juste au-dessus depuis l'origine, et n'avait jamais eu de lecteur.
-            if ntv and not self._PPO_KEYS.isdisjoint(ntv):
+            if ntv and not _ppo_keys.isdisjoint(ntv):
                 model_stats: Dict[str, Any] = dict(ntv)
                 if hasattr(_model, 'policy') and hasattr(_model.policy, 'parameters'):
                     # Réduction en une seule op GPU + un seul .item() au lieu de N syncs.

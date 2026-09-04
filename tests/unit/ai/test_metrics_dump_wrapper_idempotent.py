@@ -1,38 +1,15 @@
 """Verrou — l'enveloppe posee sur `logger.dump` est retiree, et ne capture que les updates PPO.
 
 `MetricsCollectionCallback._on_training_start` enveloppe `logger.dump` pour lire les metriques PPO
-avant que SB3 ne vide `name_to_value`. Trois defauts vivaient sur ce chemin.
-
-1. AUCUN RETRAIT. SB3 appaire `on_training_start` et `on_training_end` autour de CHAQUE `learn()`
-   (`sb3_contrib/ppo_mask/ppo_mask.py`, lignes 448 et 467), et la boucle budgetee en episodes de
-   `train_with_scenario_rotation` enchaine un `learn()` par tranche de quatre updates. Sans
-   `_on_training_end`, chaque tranche ajoutait une couche. Sur un run NEUF le defaut ne se voyait
-   pas — SB3 reconstruit son logger a chaque `learn()`, l'enveloppe morte partait avec lui. Sur une
-   REPRISE, `ai/train.py` pose le logger via `model.set_logger`, SB3 ne le reconstruit plus et les
-   couches s'accumulaient. Mesure du run P1 du 2026-09-03 : 41 756 points sur
-   `training_critical/clip_fraction` pour 575 updates PPO reels, contre 1 063 points pour 1 063
-   updates sur un run neuf comparable. La fenetre de vingt valeurs de
-   `W40KMetricsTracker._calculate_smoothed_metric` couvrait alors vingt copies du meme update : les
-   quatre courbes de sante PPO de `00_critical` n'etaient plus lissees du tout.
-
-2. CAPTURE A CHAQUE EPISODE. La garde etait `if ntv:`, or `_handle_episode_end` appelle
-   `logger.dump` a chaque fin d'episode avec les seules cles `game_critical/*`. Chaque episode
-   declenchait donc une capture complete, norme du gradient comprise, pour un dump ne portant aucun
-   update. Mesure sur le run neuf du 2026-08-29, ou aucune couche ne s'empilait : 101 415 points
-   sur `training_diagnostic/entropy_coef` pour 100 000 episodes et 1 063 updates.
-
-3. ABSCISSE DECALEE. `_tracker.step_count` etait pose APRES `log_training_metrics`, qui ecrit
-   chacun de ses scalaires a cette abscisse : chaque update partait au pas du dump precedent.
-
-Les courbes de jeu (`d_win_rate`, `e_episode_reward_smooth`, `03_selfplay/*`) ne passent pas par ce
-chemin et n'ont jamais ete touchees.
+avant que SB3 ne vide `name_to_value`. Trois defauts vivaient sur ce chemin : aucun retrait de
+l'enveloppe, une capture declenchee a chaque fin d'episode, et une abscisse decalee d'un dump.
+Chaque test ci-dessous en verrouille un et dit ce qu'il defend ; le recit mesure, lui, appartient a
+`Documentation/Roadmap/training.md#courbes-ppo-reprise` — a mettre a jour la, pas ici.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List
-
-import pytest
 
 
 #: Un dump d'update PPO : ce que `patched_ppo.train()` enregistre avant de vider `name_to_value`.
@@ -98,27 +75,22 @@ def _dump(model: _FakeModel, payload: Dict[str, Any]) -> None:
     model.logger.name_to_value = {}
 
 
-def _run_chunks(callback: Any, model: _FakeModel, n_chunks: int, updates: int = 4) -> None:
-    """Rejoue la sequence de production : un `learn()` par tranche, `updates` updates dedans.
-
-    C'est `on_training_start` PUIS `on_training_end` a chaque tranche, comme
-    `sb3_contrib/ppo_mask/ppo_mask.py` les appelle. Omettre le `end` testerait une sequence que la
-    production ne produit jamais.
-    """
-    for _ in range(n_chunks):
-        callback._on_training_start()
-        for _ in range(updates):
-            _dump(model, _PPO_DUMP)
-        callback._on_training_end()
-
-
 def test_each_ppo_update_is_captured_exactly_once_across_chunks() -> None:
-    """Dix tranches de quatre updates : quarante captures, pas un multiple du nombre de tranches."""
+    """Dix tranches de quatre updates : quarante captures, pas un multiple du nombre de tranches.
+
+    La boucle rejoue la sequence de production — `on_training_start` PUIS `on_training_end` a
+    chaque tranche, comme `MaskablePPO.learn` les appelle. Omettre le `end` testerait une sequence
+    que la production ne produit jamais.
+    """
     model = _FakeModel()
     tracker = _CountingTracker()
     callback = _callback(model, tracker)
 
-    _run_chunks(callback, model, n_chunks=10)
+    for _ in range(10):
+        callback._on_training_start()
+        for _ in range(4):
+            _dump(model, _PPO_DUMP)
+        callback._on_training_end()
 
     assert len(tracker.calls) == 40, (
         f"{len(tracker.calls)} captures pour 40 updates : facteur de duplication "
@@ -257,6 +229,30 @@ def test_unpaired_training_starts_do_not_stack() -> None:
 
     assert len(tracker.calls) == 1
     assert model.logger.original_dump_calls == 1
+
+
+def test_the_wrapper_does_not_capture_the_callback() -> None:
+    """L'enveloppe ne ferme sur aucune reference au callback.
+
+    Elle est posee sur `logger.dump` pour toute la duree d'un `learn()`. Y lire un attribut de
+    `self` — `self._PPO_KEYS` etait le seul candidat — ferait de `self` une variable libre, donc
+    un cycle `callback → _dump_logger → logger → dump → callback` que le comptage de references ne
+    casse pas : le callback, son tracker et ses historiques d'episodes attendraient le gc
+    generationnel, un cycle par logger que SB3 reconstruit.
+
+    L'assertion porte sur `co_freevars` et non sur la memoire : c'est le fait verifiable, et il
+    rougit des qu'un futur attribut de `self` est lu dans le corps de l'enveloppe.
+    """
+    model = _FakeModel()
+    callback = _callback(model, _CountingTracker())
+
+    callback._on_training_start()
+
+    freevars = model.logger.dump.__code__.co_freevars
+    assert "self" not in freevars, (
+        f"l'enveloppe capture le callback (freevars={freevars}) : hisser l'attribut lu dans une "
+        "variable locale avant la definition de la closure."
+    )
 
 
 def test_capture_survives_a_missing_tracker() -> None:

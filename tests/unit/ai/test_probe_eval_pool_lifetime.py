@@ -2,7 +2,7 @@
 """Cycle de vie du pool de workers des sondes (`_EvalPoolOwnerMixin`).
 
 Le pool vivait dans `_on_training_start`/`_on_training_end`. SB3 appaire ces deux hooks autour
-de CHAQUE `learn()` (`MaskablePPO.learn`, sb3-contrib, lignes 448 et 467) et la boucle budgétée
+de CHAQUE `learn()` (`MaskablePPO.learn`, sb3-contrib) et la boucle budgétée
 en épisodes de `train_with_scenario_rotation` en enchaîne un par tranche de quatre updates : le
 pool était donc recréé et refermé une fois par tranche, et chaque sonde repayait le démarrage de
 ses workers (spawn + import + chargement de l'archive adverse).
@@ -25,49 +25,13 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai.training_callbacks import (  # noqa: E402
-    ExploiterProbeCallback,
-    PoolEarlyStoppingCallback,
-    shutdown_probe_eval_pools,
+from ai.training_callbacks import shutdown_probe_eval_pools  # noqa: E402
+from tests.unit.ai._fabriques import (  # noqa: E402
+    PROBE_REWARDS_CONFIG as REWARDS_CONFIG,
+    PROBE_TRAINING_CONFIG as TRAINING_CONFIG,
+    exploiter_probe_callback as _make_exploiter_probe,
+    pool_early_stopping_callback as _make_pool_early_stop,
 )
-
-TRAINING_CONFIG = "x1_long"
-REWARDS_CONFIG = "ArmageddonAgent_x1"
-
-
-def _make_exploiter_probe(archive: Path, n_workers=4) -> ExploiterProbeCallback:
-    probe = ExploiterProbeCallback(
-        target_archive_path=str(archive),
-        training_config_name=TRAINING_CONFIG,
-        rewards_config_name=REWARDS_CONFIG,
-        metrics_tracker=None,
-        probe_every_episodes=100,
-        probe_cheap_n=10,
-        probe_confirm_n=20,
-        win_rate_target=0.6,
-        budget_cap=1000,
-        intermediate_n_workers=n_workers,
-        log_fn=lambda *_a, **_k: None,
-    )
-    probe.model = MagicMock()
-    return probe
-
-
-def _make_pool_early_stop(archive: Path, n_workers=4) -> PoolEarlyStoppingCallback:
-    callback = PoolEarlyStoppingCallback(
-        pool_archives=[(str(archive), "champion")],
-        threshold=0.6,
-        min_timesteps=0,
-        consecutive_evals=2,
-        eval_freq_episodes=100,
-        n_eval_episodes=10,
-        training_config_name=TRAINING_CONFIG,
-        rewards_config_name=REWARDS_CONFIG,
-        metrics_tracker=None,
-        intermediate_n_workers=n_workers,
-    )
-    callback.model = MagicMock()
-    return callback
 
 
 @pytest.fixture
