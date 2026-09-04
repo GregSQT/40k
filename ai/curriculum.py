@@ -74,8 +74,16 @@ _EARLY_STOP_REQUIRED_KEYS = ("win_rate_threshold", "min_steps", "consecutive_eva
 #: `ai/train.py::_pin_deployment_ramp_for_warm_start`, pas une cle declarable. Le faire en code
 #: et non en JSON est ce qui couvre aussi les etapes exploiteur, auxquelles
 #: `_validate_stage_hp_overrides` interdit tout `training_config_overrides`.
+#: `agent_seat_p2_ratio` EST autorise, et c'est la seule cle non structurelle de la liste : il
+#: ne decrit pas le modele mais l'EXPOSITION — quelle part des episodes l'agent joue en second,
+#: le siege ou il est le plus faible. Il varie donc legitimement d'une etape a l'autre, comme le
+#: pool et la rampe, et pour la meme raison : c'est de l'adversite. Il ne compromet pas la
+#: comparabilite que cette liste protege, parce que `ai/bot_evaluation.py` ne le lit JAMAIS —
+#: l'evaluation construit ses environnements sans le passer et garde un tirage equitable
+#: (cf. `ai/env_wrappers.py::_resolve_seat_p2_ratio`), donc les scores publies restent mesures
+#: dans les memes conditions quelle que soit l'etape.
 STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS: frozenset = frozenset({
-    "total_episodes", "model_params", "callback_params",
+    "total_episodes", "model_params", "callback_params", "agent_seat_p2_ratio",
 })
 
 #: Sous-cles de `model_params` autorisees dans un override d'etape.
@@ -538,6 +546,21 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
             raise ValueError(
                 f"{source}: stages[{name}].training_config_overrides.total_episodes doit etre "
                 f"un entier > 0 (got {ep!r})"
+            )
+    if "agent_seat_p2_ratio" in overrides:
+        ratio = overrides["agent_seat_p2_ratio"]
+        # Meme controle que `ai/train.py::build_training_opponents` sur la valeur du profil, pose
+        # ici pour qu'une etape fautive soit refusee au chargement du curriculum et non au montage
+        # des environnements, plusieurs minutes plus tard.
+        if not isinstance(ratio, (int, float)) or isinstance(ratio, bool):
+            raise TypeError(
+                f"{source}: stages[{name}].training_config_overrides.agent_seat_p2_ratio doit "
+                f"etre un nombre (got {ratio!r})"
+            )
+        if not 0.0 <= float(ratio) <= 1.0:
+            raise ValueError(
+                f"{source}: stages[{name}].training_config_overrides.agent_seat_p2_ratio doit "
+                f"etre dans [0.0, 1.0] (got {ratio!r}) : c'est une PART des episodes."
             )
     if "model_params" in overrides:
         mp = overrides["model_params"]

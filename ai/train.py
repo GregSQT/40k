@@ -4773,6 +4773,8 @@ def _apply_stage_hp_overrides(cfg: Dict[str, Any], hp_overrides: Dict[str, Any])
         return
     if "total_episodes" in hp_overrides:
         cfg["total_episodes"] = hp_overrides["total_episodes"]
+    if "agent_seat_p2_ratio" in hp_overrides:
+        cfg["agent_seat_p2_ratio"] = hp_overrides["agent_seat_p2_ratio"]
     if "model_params" in hp_overrides:
         base_mp = cfg.get("model_params")
         if not isinstance(base_mp, dict):
