@@ -303,6 +303,13 @@ Catégories : Bug = invariant cassé prouvé hors périmètre ; Trou = cas non c
 Suspicion non prouvée → une ligne dans LU, aucune entrée SUITE. SUITE ne remplace jamais T2.
 Si analyse seule (aucun fichier modifié) : SUITE uniquement, avec une proposition d'action concrète.
 
+Gates obligatoires — avant d'écrire toute entrée SUITE, répondre à la question de gate par oui/non :
+  🔴 Bug : « Ai-je un fichier:ligne précis + un scénario de reproduction minimal qui produit la mauvaise valeur sur le chemin de production ? » → non = LU uniquement.
+  🕳 Trou : « Ai-je identifié la branche exacte (fichier:ligne) qui manque le cas, et vérifié qu'aucun test ne la couvre ? » → non = LU uniquement.
+  💡 Amélioration : « Ai-je une mesure (temps, mémoire, token) ou un invariant prouvé sous-optimal — pas une préférence de style ? » → non = LU uniquement.
+  📋 Sous-tâche : « Est-ce strictement impossible T2-C (dépendance externe ou décision utilisateur manquante) — pas simplement long ou hors chemin critique ? » → non = traiter maintenant (T2), jamais externaliser.
+Une gate non franchie interdit l'entrée SUITE correspondante ; le constat va en LU.
+
 Gabarits SUITE — seulement si des entrées SUITE sont présentes : chaque prompt doit être autonome, lisible sans le contexte de la conversation, copiable-collable directement comme prochain prompt. Jamais une phrase vague ; toujours les références exactes.
 
 🔴 Bug — champs obligatoires :
