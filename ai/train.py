@@ -1714,6 +1714,7 @@ from ai.curriculum import (
     stage_model_path,
     stage_order,
     stage_origin,
+    StageOrigin,
     stage_source_model,
     stage_pool_members,
     validate_exploiter_protocol,
@@ -3141,7 +3142,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                                  return_run_info: Literal[False] = ...,
                                  freeze_opponent_pool: bool = ...,
                                  async_eval_enabled: bool = ...,
-                                 extra_callbacks: Optional[List[BaseCallback]] = ...) -> TrainRunResult: ...
+                                 extra_callbacks: Optional[List[BaseCallback]] = ...,
+                                 stage_episode_origin: Optional[int] = ...) -> TrainRunResult: ...
 
 
 @overload
@@ -3155,7 +3157,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                                  return_run_info: Literal[True],
                                  freeze_opponent_pool: bool = ...,
                                  async_eval_enabled: bool = ...,
-                                 extra_callbacks: Optional[List[BaseCallback]] = ...) -> TrainRunResultWithInfo: ...
+                                 extra_callbacks: Optional[List[BaseCallback]] = ...,
+                                 stage_episode_origin: Optional[int] = ...) -> TrainRunResultWithInfo: ...
 
 
 def train_with_scenario_rotation(config, agent_key, training_config_name, rewards_config_name,
@@ -3168,6 +3171,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                                  freeze_opponent_pool: bool = False,
                                  async_eval_enabled: bool = True,
                                  extra_callbacks: Optional[List[BaseCallback]] = None,
+                                 stage_episode_origin: Optional[int] = None,
                                  ) -> Union[TrainRunResult, TrainRunResultWithInfo]:
     """Train model with random scenario selection per episode.
     
@@ -3764,8 +3768,12 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         finally:
             shutdown_probe_eval_pools(training_callbacks)
 
-        # Final episode count
-        episodes_trained = metrics_tracker.episode_count - episode_offset
+        # Final episode count — ancré sur l'archive SOURCE de l'étape si fournie ; sinon sur le
+        # modèle repris. Sans stage_episode_origin, les deux coïncident (run hors curriculum ou
+        # run nominal sans crash). Avec, stage_episode_origin = stage_origin.episodes (archive
+        # source), ce qui garantit la même ancre que --close-stage même après --resume-from crash.
+        _ep_origin = stage_episode_origin if stage_episode_origin is not None else episode_offset
+        episodes_trained = metrics_tracker.episode_count - _ep_origin
 
         callback_params = require_key(training_config, "callback_params")
         save_best_robust = bool(require_key(callback_params, "save_best_robust"))
@@ -5303,11 +5311,13 @@ def _run_info_from_disk(args, config, curriculum) -> Dict[str, Any]:
     d'episodes (`<model>_run_state.json`) et le repertoire TensorBoard du run
     (`<model>.tb_run.json`). Rien n'est devine.
 
-    `episodes_trained` est le compte de CETTE etape, et non le compte de vie du modele : le
-    chemin nominal y met `metrics_tracker.episode_count - episode_offset`, et l'offset est le
-    compte que portait le modele repris. Publier le total ferait entrer dans `curriculum.log` un
-    chiffre qui n'est pas celui de la colonne, et incomparable d'une etape a l'autre. L'offset se
-    relit sur le modele de l'etape SOURCE ; une etape `init: "new"` n'en a pas, et vaut zero.
+    `episodes_trained` est le compte de CETTE etape, et non le compte de vie du modele. Publier
+    le total ferait entrer dans `curriculum.log` un chiffre incomparable d'une etape a l'autre.
+    L'offset se relit sur le modele de l'etape SOURCE (`stage_origin.episodes`) ; une etape
+    `init: "new"` n'en a pas (offset zero). Le chemin nominal utilise le meme offset via
+    `stage_episode_origin` passe a `train_with_scenario_rotation` : les deux chemins de cloture
+    s'accordent, y compris apres un `--resume-from` de crash (le canonique est alors un checkpoint
+    de mi-etape, pas l'archive source).
 
     `last_bot_eval` reste ABSENTE : `_close_curriculum_stage` la lit avec `.get` et n'ecrit alors
     aucun score bot dans le journal. C'est la lecture juste — les scores publies doivent etre ceux
@@ -6189,6 +6199,17 @@ def main():
                 else:
                     total_episodes = training_config["total_episodes"]
 
+                # Origine de l'étape calculée UNE FOIS pour les callbacks ET pour episodes_trained
+                # du run nominal : les deux doivent être ancrés sur la même archive source, y
+                # compris après un --resume-from de crash (le canonique est alors le checkpoint,
+                # pas l'archive source — stage_origin lit l'archive source directement).
+                _stage_start: Optional[StageOrigin] = None
+                if curriculum_stage is not None:
+                    _canonical_for_stage = build_agent_model_path(
+                        get_config_loader().get_models_root(), args.agent
+                    )
+                    _stage_start = stage_origin(_canonical_for_stage, curriculum_stage[1])
+
                 # Parametres supplementaires pour les etapes exploiteur.
                 _exploiter_extra_callbacks: Optional[List[BaseCallback]] = None
                 _exploiter_async_eval_enabled: bool = True
@@ -6219,7 +6240,7 @@ def main():
                         require_key(training_config, "callback_params"),
                         "bot_eval_n_workers_intermediate",
                     )
-                    _stage_start = stage_origin(_canonical, _stg)
+                    assert _stage_start is not None  # curriculum_stage is not None ici
                     _exploiter_probe = ExploiterProbeCallback(
                         target_archive_path=_target_path,
                         training_config_name=args.training_config,
@@ -6273,7 +6294,7 @@ def main():
                         _pool_eval_freq = int(require_key(
                             require_key(training_config, "callback_params"), "bot_eval_freq"
                         ))
-                        _stage_start = stage_origin(_canonical, _stg)
+                        assert _stage_start is not None  # curriculum_stage is not None ici
                         _pool_early_stop = PoolEarlyStoppingCallback(
                             pool_archives=_champion_archive,
                             threshold=_es_threshold,
@@ -6316,6 +6337,7 @@ def main():
                     freeze_opponent_pool=_exploiter_freeze_pool,
                     async_eval_enabled=_exploiter_async_eval_enabled,
                     extra_callbacks=_exploiter_extra_callbacks,
+                    stage_episode_origin=_stage_start.episodes if _stage_start is not None else None,
                 )
 
                 if success and args.test_episodes > 0:
