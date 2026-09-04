@@ -32,8 +32,10 @@ import os
 import shutil
 import sys
 import tempfile
+import zipfile
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
+from ai.run_state import load_run_state
 from shared.data_validation import require_key, require_non_negative_int, require_positive_int
 
 #: Tolerance des sommes de ratios. Les poids sont ecrits a deux decimales dans le JSON ; la
@@ -774,18 +776,14 @@ def stage_origin(canonical_model_path: str, stage: Dict[str, Any]) -> StageOrigi
     sert avant toute construction de modele. Le compteur d'episodes vient de l'etat de run
     compagnon (`ai/run_state.py`), le zip SB3 ne persistant que les pas.
     """
-    import zipfile
-
-    from ai.run_state import load_run_state
-
     source_model = stage_source_model(canonical_model_path, stage)
     if source_model is None:
         return StageOrigin(episodes=0, timesteps=0)
     with zipfile.ZipFile(source_model) as archive:
         data = json.loads(archive.read("data"))
-    timesteps = require_key(data, "num_timesteps")
-    if isinstance(timesteps, bool) or not isinstance(timesteps, int) or timesteps < 0:
-        raise ValueError(f"`num_timesteps` invalide dans {source_model} : {timesteps!r}")
+    timesteps = require_non_negative_int(
+        require_key(data, "num_timesteps"), f"num_timesteps ({source_model})"
+    )
     return StageOrigin(episodes=load_run_state(source_model), timesteps=timesteps)
 
 
