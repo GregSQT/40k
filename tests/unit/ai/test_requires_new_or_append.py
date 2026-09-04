@@ -25,7 +25,7 @@ Verrous :
 - MESSAGE : chacun nomme le modèle concerné et l'option à passer ;
 - LAISSER-PASSER : `--new`, `--append` sur un modèle présent, l'absence de modèle sans drapeau,
   `--new --append` (où `--new` gagne), et `--resume-from` avant promotion du checkpoint ;
-- HORS SUJET : `--test-only`, `--convert-steplog`, `--replay` ne s'entraînent pas ;
+- HORS SUJET : `--test-only`, `--convert-steplog`, `--replay`, `--close-stage` ne s'entraînent pas ;
 - PROLOGUE : `prepare_run_artifacts` refuse avant son premier effet de bord ;
 - PLACEMENT : `main()` refuse avant le `try:` qui monte tout le reste.
 """

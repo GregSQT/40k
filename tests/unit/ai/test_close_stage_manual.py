@@ -222,16 +222,29 @@ def test_a_missing_tensorboard_sidecar_is_refused(tmp_path) -> None:
 # repaierait un demarrage d'interpreteur et la chaine torch/stable_baselines3 par cas.
 
 
-def _run_main(monkeypatch, argv: list) -> Any:
+def _run_main(monkeypatch, argv: list, *, neutralise_closure: bool = True) -> Any:
     """Joue `main()` sur `argv`. Rend son code de sortie.
 
     Les gardes d'arguments LEVENT (elles sont hors du `try` de `main`), tandis qu'un echec
     survenant apres le prologue est attrape et rendu comme code non nul.
+
+    `neutralise_closure` remplace la cloture et la lecture d'artefacts par des doubles. Sans
+    cela, un test qui va jusqu'au bout du dispatch joue une VRAIE cloture sur `ai/models/` : gate
+    de 300 episodes contre l'archive du champion, ligne ajoutee a `curriculum.log`,
+    `promote_stage_model` qui ecrit `model_<agent>_<etape>.zip` et `copy_tensorboard_run` qui
+    `rmtree` sa cible. CLAUDE.md interdit d'ecrire dans `ai/models/**/*.zip`, et rien n'y
+    redirige la racine des modeles comme `tests/conftest.py` le fait pour `config/users.db`.
+    C'est le controle de cycle de vie qui arretait ces tests avant, par accident : depuis que
+    `--close-stage` en est exempte, l'arret ne tenait plus qu'a la presence fortuite d'un zip
+    d'etape deja promu.
     """
     import sys
 
     import ai.train as train_module
 
+    if neutralise_closure:
+        monkeypatch.setattr(train_module, "_close_curriculum_stage", lambda *a, **k: 0)
+        monkeypatch.setattr(train_module, "_run_info_from_disk", lambda *a, **k: {})
     monkeypatch.setattr(sys, "argv", ["ai/train.py"] + argv)
     return train_module.main()
 
@@ -254,6 +267,22 @@ def test_close_stage_refuses_resume_from(monkeypatch) -> None:
         _run_main(monkeypatch, [
             "--close-stage", "--agent", "ArmageddonAgent_x1", "--training-config", "x1_long",
             "--etape", "P1", "--resume-from", "/inexistant/checkpoint.zip",
+        ])
+
+
+def test_close_stage_combined_with_another_read_only_mode_names_the_right_culprit(
+    monkeypatch,
+) -> None:
+    """Le refus doit designer `--close-stage`, pas un entrainement qui n'a pas lieu.
+
+    Le message generique de `--etape` annonce « joue un ENTRAINEMENT complet », ce qui est faux
+    des que `--close-stage` est present : les deux drapeaux sont alors deux modes de LECTURE
+    demandes en meme temps, et l'utilisateur enverrait retirer le mauvais.
+    """
+    with pytest.raises(ValueError, match="--close-stage ne fait que mesurer"):
+        _run_main(monkeypatch, [
+            "--close-stage", "--agent", "ArmageddonAgent_x1", "--training-config", "x1_long",
+            "--etape", "P1", "--test-only",
         ])
 
 
@@ -292,13 +321,14 @@ def test_close_stage_runs_after_the_shared_prologue(monkeypatch) -> None:
         seen["stage_is_p1"] = stage_ is curriculum_["stages"]["P1"]
         return 0
 
+    # La cloture est remplacee par `_capture` : elle ne doit RIEN ecrire dans `ai/models/`.
     monkeypatch.setattr(train_module, "_close_curriculum_stage", _capture)
     monkeypatch.setattr(train_module, "_run_info_from_disk", lambda *a, **k: {})
 
     exit_code = _run_main(monkeypatch, [
         "--close-stage", "--agent", "ArmageddonAgent_x1", "--training-config", "x1_long",
         "--etape", "P1",
-    ])
+    ], neutralise_closure=False)
 
     assert exit_code == 0
     assert seen["rewards_config"] == "ArmageddonAgent_x1", (
@@ -311,13 +341,45 @@ def test_close_stage_runs_after_the_shared_prologue(monkeypatch) -> None:
     assert seen["stage_is_p1"] is True
 
 
+def test_close_stage_is_not_asked_for_a_model_lifecycle_intention(monkeypatch) -> None:
+    """`check_model_lifecycle` ne doit pas s'appliquer a une cloture.
+
+    Elle exige `--new` ou `--append` des qu'un modele canonique existe — ce qui est toujours le
+    cas quand on clot une etape, par construction. Or `--close-stage` exige `--etape`, et
+    `--etape` combine a `--new` ou `--append` est rejete plus haut comme exclusif : la condition
+    est insatisfiable, donc la cloture etait purement impossible.
+
+    Le test porte sur l'APPEL et non sur la levee : la garde ne leve que si un modele existe
+    reellement au chemin canonique, ce qui depend de l'arborescence ambiante. Verifier qu'elle
+    n'est pas appelee du tout est ce qui reste vrai sur un depot fraichement clone comme sur le
+    poste de l'utilisateur.
+    """
+    import ai.train as train_module
+
+    appels: list = []
+    monkeypatch.setattr(
+        train_module, "check_model_lifecycle",
+        lambda *a, **k: appels.append(a),
+    )
+
+    exit_code = _run_main(monkeypatch, [
+        "--close-stage", "--agent", "ArmageddonAgent_x1", "--training-config", "x1_long",
+        "--etape", "P1",
+    ])
+
+    assert exit_code == 0
+    assert appels == [], (
+        "check_model_lifecycle appele sur une cloture : elle reclamerait --new ou --append, que "
+        "--etape interdit deja"
+    )
+
+
 def test_close_stage_does_not_prepare_the_stage_init(monkeypatch) -> None:
     """`_prepare_curriculum_stage` ne doit PAS tourner : il pose `--new` ou `--resume-from`.
 
     Sur une cloture, cela ecarterait ou remplacerait le modele canonique que l'on vient
-    precisement mesurer et promouvoir. Le test laisse la cloture echouer plus loin (aucun modele
-    sur disque dans l'environnement de test) et verifie seulement que la preparation n'a pas eu
-    lieu.
+    precisement mesurer et promouvoir. La cloture elle-meme est neutralisee par `_run_main` : ce
+    test observe le dispatch, il ne doit toucher a aucun artefact.
     """
     import ai.train as train_module
 
@@ -334,6 +396,6 @@ def test_close_stage_does_not_prepare_the_stage_init(monkeypatch) -> None:
     ])
 
     assert called == []
-    # La cloture est bien ALLEE jusqu'au bout du prologue puis a echoue sur l'absence de modele
-    # canonique dans l'arborescence de test — pas sur la preparation d'etape.
-    assert exit_code != 0
+    # La cloture neutralisee rend 0 : le dispatch est bien alle jusqu'au bout SANS passer par la
+    # preparation d'etape.
+    assert exit_code == 0

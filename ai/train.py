@@ -1546,11 +1546,11 @@ def is_training_invocation(args) -> bool:
     d'evaluer un agent. Enumerer ce qui n'entraine PAS est le seul sens possible ici : la garde
     est jouee avant le dispatch de `main()`, donc avant que le mode ne soit tranche.
 
-    `--close-stage` y entre pour une raison plus forte que les autres : il MESURE et PROMEUT le
-    modele canonique en place. Les deux intentions que la garde reclame le detruiraient — `--new`
-    l'ecarterait sous un nom horodate avant de le clore, `--append` annoncerait une reprise qui
-    n'a pas lieu. Une commande qui ne peut repondre a la question sans se nier n'a pas a se la
-    voir poser.
+    `--close-stage` y entre pour une raison plus forte que les autres : la garde lui demanderait
+    une intention que la ligne de commande REFUSE de lui laisser exprimer. Il exige `--etape`, et
+    `--etape` combine a `--new` ou `--append` est rejete plus haut comme exclusif. La condition
+    serait donc insatisfiable et la cloture d'une etape impossible, alors qu'elle ne fait que
+    mesurer puis copier le modele canonique.
     """
     return not (
         args.test_only or args.convert_steplog or args.replay or args.close_stage
@@ -5391,9 +5391,21 @@ def main():
             ) if active
         ]
         if non_training_modes:
+            # Le motif du refus depend de `--close-stage` : sans lui l'etape entraine, avec lui
+            # elle ne fait que mesurer et promouvoir. Servir « --etape joue un ENTRAINEMENT
+            # complet » a une commande qui porte `--close-stage` designerait le mauvais coupable
+            # et enverrait l'utilisateur retirer le mauvais drapeau.
             raise ValueError(
-                f"--etape joue un ENTRAINEMENT complet : il n'a pas de sens avec "
-                f"{', '.join(non_training_modes)}."
+                (
+                    f"--close-stage ne fait que mesurer et promouvoir le modele deja entraine : "
+                    f"il n'a pas de sens avec {', '.join(non_training_modes)}, qui sont d'autres "
+                    "modes de lecture. En demander deux a la fois est une faute de frappe."
+                )
+                if args.close_stage else
+                (
+                    f"--etape joue un ENTRAINEMENT complet : il n'a pas de sens avec "
+                    f"{', '.join(non_training_modes)}."
+                )
             )
         if args.close_stage:
             # Les VALIDATIONS ici, l'EXECUTION apres le prologue partage (cf. le bloc
@@ -5563,7 +5575,11 @@ def main():
             # `require_present` et non `args.etape` nu : la garde qui exige `--etape` vit dans le
             # bloc de validation plus haut, que le typage ne suit pas jusqu'ici.
             _close_etape = require_present(args.etape, "--etape")
-            _close_curriculum = _close_stage_curriculum or load_curriculum(args.agent)
+            # Le curriculum LU PAR LES VALIDATIONS, pas une seconde lecture : un `or
+            # load_curriculum(...)` en repli relirait le disque si l'assignation d'en haut venait
+            # a disparaitre, et la cloture repartirait alors sur un curriculum que les refus
+            # (etape exploiteur, `--resume-from`) n'ont jamais vu.
+            _close_curriculum = require_present(_close_stage_curriculum, "_close_stage_curriculum")
             return _close_curriculum_stage(
                 args, config, _close_curriculum,
                 require_stage(_close_curriculum, _close_etape),
