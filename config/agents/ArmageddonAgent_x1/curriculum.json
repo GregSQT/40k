@@ -89,7 +89,6 @@
         "total_episodes": 250000,
         "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "n_epochs": 4,
           "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
         }
       }
@@ -97,8 +96,8 @@
     "P3": {
       "role": "learner",
       "init": "from:P2",
-      "warmup_episodes": 10000,
-      "ramp_end_episodes": 100000,
+      "warmup_episodes": 0,
+      "ramp_end_episodes": 10000,
       "ratio_start": 0.0,
       "ratio_end": 0.70,
       "pool": [
@@ -106,10 +105,10 @@
         {"kind": "ancients", "members": ["P0", "P1"], "weight": 0.30}
       ],
       "training_config_overrides": {
-        "total_episodes": 300000,
+        "total_episodes": 250000,
+        "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
         }
       }
     },
@@ -128,8 +127,8 @@
     "P4": {
       "role": "learner",
       "init": "from:P3",
-      "warmup_episodes": 10000,
-      "ramp_end_episodes": 100000,
+      "warmup_episodes": 0,
+      "ramp_end_episodes": 10000,
       "ratio_start": 0.0,
       "ratio_end": 0.75,
       "pool": [
@@ -138,18 +137,18 @@
         {"kind": "exploiters", "members": ["E1"], "weight": 0.25}
       ],
       "training_config_overrides": {
-        "total_episodes": 400000,
+        "total_episodes": 250000,
+        "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
         }
       }
     },
     "P5": {
       "role": "learner",
       "init": "from:P4",
-      "warmup_episodes": 10000,
-      "ramp_end_episodes": 100000,
+      "warmup_episodes": 0,
+      "ramp_end_episodes": 10000,
       "ratio_start": 0.0,
       "ratio_end": 0.80,
       "pool": [
@@ -159,9 +158,9 @@
       ],
       "training_config_overrides": {
         "total_episodes": 300000,
+        "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
         }
       }
     },
@@ -180,8 +179,8 @@
     "P6": {
       "role": "learner",
       "init": "from:P5",
-      "warmup_episodes": 10000,
-      "ramp_end_episodes": 100000,
+      "warmup_episodes": 0,
+      "ramp_end_episodes": 10000,
       "ratio_start": 0.0,
       "ratio_end": 0.80,
       "pool": [
@@ -191,17 +190,17 @@
       ],
       "training_config_overrides": {
         "total_episodes": 300000,
+        "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
         }
       }
     },
     "P7": {
       "role": "learner",
       "init": "from:P6",
-      "warmup_episodes": 10000,
-      "ramp_end_episodes": 100000,
+      "warmup_episodes": 0,
+      "ramp_end_episodes": 10000,
       "ratio_start": 0.0,
       "ratio_end": 0.85,
       "pool": [
@@ -211,17 +210,17 @@
       ],
       "training_config_overrides": {
         "total_episodes": 300000,
+        "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
         }
       }
     },
     "P8": {
       "role": "learner",
       "init": "from:P7",
-      "warmup_episodes": 10000,
-      "ramp_end_episodes": 100000,
+      "warmup_episodes": 0,
+      "ramp_end_episodes": 10000,
       "ratio_start": 0.0,
       "ratio_end": 0.85,
       "pool": [
@@ -231,9 +230,9 @@
       ],
       "training_config_overrides": {
         "total_episodes": 300000,
+        "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
         }
       }
     },
@@ -252,8 +251,8 @@
     "P9": {
       "role": "learner",
       "init": "from:P8",
-      "warmup_episodes": 10000,
-      "ramp_end_episodes": 100000,
+      "warmup_episodes": 0,
+      "ramp_end_episodes": 10000,
       "ratio_start": 0.0,
       "ratio_end": 0.85,
       "pool": [
@@ -263,17 +262,17 @@
       ],
       "training_config_overrides": {
         "total_episodes": 300000,
+        "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
         }
       }
     },
     "P10": {
       "role": "learner",
       "init": "from:P9",
-      "warmup_episodes": 10000,
-      "ramp_end_episodes": 100000,
+      "warmup_episodes": 0,
+      "ramp_end_episodes": 10000,
       "ratio_start": 0.0,
       "ratio_end": 0.85,
       "pool": [
@@ -283,9 +282,9 @@
       ],
       "training_config_overrides": {
         "total_episodes": 300000,
+        "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
         }
       }
     }
