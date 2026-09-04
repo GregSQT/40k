@@ -318,6 +318,32 @@ class PatchedMaskablePPO(MaskablePPO):
             env, callback, rollout_buffer, n_rollout_steps, use_masking
         )
 
+    def _serialize_policy_for_workers(self) -> bytes:
+        """Blob de la policy CPU envoyé aux workers, sans attribut non-picklable ni tenseur CUDA.
+
+        Quatre attributs d'instance sont retirés avant deepcopy + cloudpickle :
+        - forward/_uncompiled_original_forward : closure capturant torch._dynamo.config
+          (ConfigModuleInstance non-picklable) ; la classe fournit sa méthode à la place.
+        - action_dist : distribution laissée par le dernier evaluate_actions() de train(),
+          ses tenseurs (logits, probs) restent attachés au graphe de calcul et Tensor.__deepcopy__
+          refuse les non-leaf. Les workers recréent leur distribution dans _distribution_from()
+          via make_masked_proba_distribution(action_space) si l'attribut est absent.
+        - optimizer : `.cpu()` ne déplace que paramètres et buffers, jamais `optimizer.state`.
+          Dès le premier `step()` d'Adam, `exp_avg`/`exp_avg_sq` restent sur cuda:0 et voyagent
+          dans le blob — chaque worker ouvrait alors un contexte CUDA rien qu'en le désérialisant,
+          et prenait au learner la VRAM de son buffer d'update. Le worker n'optimise rien.
+        """
+        import cloudpickle
+
+        _policy_attrs = vars(self.policy)
+        _saved_instance_attrs: dict = {}
+        for _k in ("forward", "_uncompiled_original_forward", "action_dist", "optimizer"):
+            if _k in _policy_attrs:
+                _saved_instance_attrs[_k] = _policy_attrs.pop(_k)
+        policy_cpu = deepcopy(self.policy).cpu()
+        _policy_attrs.update(_saved_instance_attrs)
+        return cloudpickle.dumps(policy_cpu)
+
     def _collect_rollouts_distributed(
         self,
         env: VecEnv,
@@ -341,8 +367,6 @@ class PatchedMaskablePPO(MaskablePPO):
           callback retournant False arrête la boucle mais train() n'est jamais appelé dans ce
           cas, donc le buffer déjà rempli est ignoré — comportement acceptable.
         """
-        import cloudpickle
-        from copy import deepcopy
         from ai.vec_normalize_frozen import snapshot_vec_normalize, update_vec_normalize_from_trajectories, _unwrap_vec_normalize
 
         n_envs = subproc.num_envs
@@ -355,21 +379,7 @@ class PatchedMaskablePPO(MaskablePPO):
             )
 
         # 1. Sérialiser la policy CPU (cloudpickle traverse les frontières de process).
-        # Trois attributs d'instance bloquent deepcopy + cloudpickle :
-        # - forward/_uncompiled_original_forward : closure capturant torch._dynamo.config
-        #   (ConfigModuleInstance non-picklable) ; la classe fournit sa méthode à la place.
-        # - action_dist : distribution laissée par le dernier evaluate_actions() de train(),
-        #   ses tenseurs (logits, probs) restent attachés au graphe de calcul et Tensor.__deepcopy__
-        #   refuse les non-leaf. Les workers recréent leur distribution dans _distribution_from()
-        #   via make_masked_proba_distribution(action_space) si l'attribut est absent.
-        _policy_attrs = vars(self.policy)
-        _saved_instance_attrs: dict = {}
-        for _k in ("forward", "_uncompiled_original_forward", "action_dist"):
-            if _k in _policy_attrs:
-                _saved_instance_attrs[_k] = _policy_attrs.pop(_k)
-        policy_cpu = deepcopy(self.policy).cpu()
-        _policy_attrs.update(_saved_instance_attrs)
-        policy_bytes = cloudpickle.dumps(policy_cpu)
+        policy_bytes = self._serialize_policy_for_workers()
 
         # 2. Snapshot VecNormalize par worker.
         snapshots = [snapshot_vec_normalize(env, i) for i in range(n_envs)]

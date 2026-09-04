@@ -20,6 +20,7 @@ Sémantique garantie identique à SB3 :
 from __future__ import annotations
 
 import multiprocessing as mp
+import os
 from multiprocessing.connection import Connection as _MpConnection
 from typing import Any, Callable
 
@@ -237,6 +238,14 @@ def _maskable_worker(
     - COLLECT_TRAJECTORY (Phase 3) : collecte autonome avec policy gelée.
     - _worker_last_obs : état interne pour COLLECT_TRAJECTORY.
     """
+    # Un worker d'env ne calcule que sur CPU : forward de policy gelée, adversaire chargé en
+    # `snapshot_device: cpu`. Un contexte CUDA ici ne lui sert à rien et prend au learner la VRAM
+    # de son buffer d'update (P2 du 2026-09-04 : 7218 des 8188 MiB pris, update à ~1 % de sa
+    # vitesse). La source mesurée est l'état Adam qui voyageait dans le blob de policy, retirée
+    # dans patched_ppo.py ; cette ligne est la garde qui empêche la fuite de revenir. Elle rend
+    # un tenseur CUDA dans le blob FATAL au lieu de silencieux — c'est voulu.
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
     from stable_baselines3.common.env_util import is_wrapped
     from ai.vec_normalize_frozen import copy_obs_dict
 
