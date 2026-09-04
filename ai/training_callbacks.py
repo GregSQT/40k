@@ -2639,6 +2639,11 @@ class _EvalPoolOwnerMixin:
     Le rechargement du modèle P1, lui, n'est PAS économisé : `_probe` sauvegarde dans un `mkstemp`
     neuf à chaque sonde, donc le jeton de version du worker change de toute façon.
 
+    La CONFIGURATION du pool, elle, est lue avant la boucle par `prepare_probe_eval_pools` :
+    ces `require_key` vivaient dans `_on_training_start`, donc au premier pas d'entraînement. Les
+    laisser à la charge de la première sonde les repousserait de `probe_every_episodes` épisodes
+    — des heures de run avant qu'un profil incomplet ne se signale.
+
     La fermeture appartient à `shutdown_probe_eval_pools`, appelée par le `finally` de la boucle
     `learn()`. C'est le seul point qui couvre TOUS les chemins de sortie — y compris l'échec et
     l'interruption, où `_close_curriculum_stage` n'est jamais atteint.
@@ -2646,19 +2651,29 @@ class _EvalPoolOwnerMixin:
     Ce mixin ne doit définir AUCUN hook SB3 : les deux callbacks l'héritent APRÈS `BaseCallback`,
     dont les stubs `_on_training_*` gagneraient dans le MRO — un hook posé ici ne serait jamais
     appelé, sans la moindre erreur. L'ordre est celui-là parce que `super().__init__(verbose)` doit
-    atteindre `BaseCallback`, et il ne coûte rien tant que le mixin n'apporte que ses deux méthodes.
+    atteindre `BaseCallback`, et il ne coûte rien tant que le mixin n'apporte que ses méthodes.
     """
 
     training_config_name: str
     rewards_config_name: str
     intermediate_n_workers: Optional[int]
-    _eval_pool: Optional[Any]
+    # Valeurs de CLASSE, pas de simples annotations : un futur porteur du mixin qui oublierait de
+    # les initialiser dans son `__init__` ferait lever `shutdown_probe_eval_pools` par
+    # AttributeError, depuis le `finally` de la boucle — l'endroit exact où une exception en
+    # remplace une autre.
+    _eval_pool: Optional[Any] = None
+    _pool_kwargs: Optional[Dict[str, Any]] = None
+    _pool_kwargs_resolved: bool = False
 
-    def _ensure_eval_pool(self) -> None:
-        """Crée le pool si absent. Ne fait rien si le compte de workers ne justifie pas un pool."""
-        if self._eval_pool is not None:
+    def resolve_eval_pool_params(self) -> None:
+        """Lit la config du pool et la mémorise. Idempotent, ne démarre AUCUN processus.
+
+        `_pool_kwargs` reste None quand le compte de workers ne justifie pas un pool : la sonde
+        passe alors `pool=None` et `evaluate_against_checkpoints` reste séquentiel.
+        """
+        if self._pool_kwargs_resolved:
             return
-        from ai.bot_evaluation import create_checkpoint_eval_pool, _strip_phase_suffix
+        from ai.bot_evaluation import _strip_phase_suffix, validate_bot_eval_worker_params
 
         config = get_config_loader()
         base_agent_key = _strip_phase_suffix(self.rewards_config_name)
@@ -2671,19 +2686,40 @@ class _EvalPoolOwnerMixin:
         )
         n_workers = self.intermediate_n_workers
         if n_workers is None:
-            callback_params = require_key(training_cfg, "callback_params")
-            n_workers = int(callback_params.get("bot_eval_n_workers_intermediate", 4))
+            # Sans surcharge, le pool prend le compte de la MÊME fabrique qu'`evaluate_against_
+            # checkpoints` : `n_workers_override=None` lui fait tirer `bot_eval_n_workers` et le
+            # passer en `max_in_flight`. Un nombre décidé ici indépendamment pourrait être
+            # INFÉRIEUR, et les tâches en trop attendraient un worker libre avec un chrono de
+            # timeout qui court depuis leur soumission. La valeur n'est donc pas devinée : elle
+            # vient de la clé qui gouverne déjà l'évaluation.
+            n_workers = int(
+                validate_bot_eval_worker_params(
+                    require_key(training_cfg, "callback_params")
+                )["n_workers"]
+            )
+        self._pool_kwargs_resolved = True
         if n_workers <= 1:
             return
-        self._eval_pool = create_checkpoint_eval_pool(
-            n_workers=n_workers,
-            vec_normalize_enabled=vec_normalize_enabled,
-            vec_eval_enabled=vec_eval_enabled,
-            training_config_name=self.training_config_name,
-            rewards_config_name=self.rewards_config_name,
-            controlled_agent=self.rewards_config_name,
-            base_agent_key=base_agent_key,
-        )
+        self._pool_kwargs = {
+            "n_workers": n_workers,
+            "vec_normalize_enabled": vec_normalize_enabled,
+            "vec_eval_enabled": vec_eval_enabled,
+            "training_config_name": self.training_config_name,
+            "rewards_config_name": self.rewards_config_name,
+            "controlled_agent": self.rewards_config_name,
+            "base_agent_key": base_agent_key,
+        }
+
+    def _ensure_eval_pool(self) -> None:
+        """Crée le pool si absent. Ne fait rien si le compte de workers ne justifie pas un pool."""
+        if self._eval_pool is not None:
+            return
+        self.resolve_eval_pool_params()
+        if self._pool_kwargs is None:
+            return
+        from ai.bot_evaluation import create_checkpoint_eval_pool
+
+        self._eval_pool = create_checkpoint_eval_pool(**self._pool_kwargs)
 
     def _shutdown_eval_pool(self) -> None:
         """Ferme le pool et le détache. Idempotent.
@@ -2697,11 +2733,31 @@ class _EvalPoolOwnerMixin:
             pool.shutdown(wait=False, cancel_futures=True)
 
 
+def prepare_probe_eval_pools(callbacks: Iterable[Any]) -> None:
+    """Résout la config du pool de chaque sonde de `callbacks`, AVANT la boucle `learn()`.
+
+    Aucun processus n'est démarré ici : seule la lecture de configuration est avancée, pour
+    qu'un profil auquel il manque une clé lève au démarrage du run et non à la première sonde.
+    """
+    for callback in callbacks:
+        if isinstance(callback, _EvalPoolOwnerMixin):
+            callback.resolve_eval_pool_params()
+
+
 def shutdown_probe_eval_pools(callbacks: Iterable[Any]) -> None:
     """Ferme les pools de sondes portés par `callbacks`. Idempotent, sûr sur une liste mixte."""
     for callback in callbacks:
         if isinstance(callback, _EvalPoolOwnerMixin):
-            callback._shutdown_eval_pool()
+            try:
+                callback._shutdown_eval_pool()
+            except Exception as exc:
+                # Appelée depuis le `finally` de la boucle : laisser lever remplacerait
+                # l'exception en cours de propagation — le Ctrl-C compris — par celle-ci, et
+                # abandonnerait les pools des callbacks suivants, soit exactement les workers
+                # orphelins que cette fonction existe pour éviter.
+                safe_print(
+                    f"⚠️  Fermeture du pool de sonde {type(callback).__name__} : {exc!r}"
+                )
 
 
 class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
@@ -2772,9 +2828,8 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
         self.budget: Optional[int] = None
         self.censored: bool = False
         self._next_probe_episode: int = probe_every_episodes
-        # Pool créé à la première sonde par `_ensure_eval_pool`, fermé par
-        # `shutdown_probe_eval_pools` à la sortie de la boucle `learn()`. Cf. `_EvalPoolOwnerMixin`.
-        self._eval_pool: Optional[Any] = None
+        # `_eval_pool` et les paramètres du pool sont des attributs de classe du mixin : rien à
+        # initialiser ici. Cf. `_EvalPoolOwnerMixin` pour leur cycle de vie.
 
     def _current_episode(self) -> int:
         if self.metrics_tracker is not None:
@@ -2940,8 +2995,6 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
 
         self._consecutive_above: int = 0
         self._next_probe_episode: int = eval_freq_episodes
-        # Même cycle de vie que celui d'`ExploiterProbeCallback` : cf. `_EvalPoolOwnerMixin`.
-        self._eval_pool: Optional[Any] = None
 
     def _current_episode(self) -> int:
         if self.metrics_tracker is not None:
