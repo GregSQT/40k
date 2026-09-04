@@ -3346,10 +3346,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             debug_mode=debug_mode,
             training_n_envs=n_envs,
             training_episode_start_index=episode_start_index,
-            # Meme valeur, meme voie que la branche vectorisee : ici le moteur est
-            # construit DANS ce processus, donc le decorateur suffirait — mais faire
-            # dependre l'invariant de la localite du processus est precisement ce qui a
-            # laisse passer le no-op mesure (parent 0.9 / worker 0.3). Une seule voie.
+            # voir parent_deploy_active_ratio_start — une seule voie (worker reimporte le JSON)
             training_deploy_active_ratio_start=parent_deploy_active_ratio_start(training_config),
             training_total_episodes=parent_total_episodes(training_config),
         )
@@ -3520,10 +3517,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             debug_mode=debug_mode,
             training_n_envs=n_envs,
             training_episode_start_index=episode_start_index,
-            # Meme valeur, meme voie que la branche vectorisee : ici le moteur est
-            # construit DANS ce processus, donc le decorateur suffirait — mais faire
-            # dependre l'invariant de la localite du processus est precisement ce qui a
-            # laisse passer le no-op mesure (parent 0.9 / worker 0.3). Une seule voie.
+            # voir parent_deploy_active_ratio_start — une seule voie (worker reimporte le JSON)
             training_deploy_active_ratio_start=parent_deploy_active_ratio_start(training_config),
             training_total_episodes=parent_total_episodes(training_config),
         )
@@ -4869,8 +4863,8 @@ def parent_deploy_active_ratio_start(training_config: Dict[str, Any]) -> float:
 
 def _install_stage_config_overrides(
     config, agent_key: str, opponent_mix: Optional[Dict[str, Any]],
-    hp_overrides: Dict[str, Any], warm_start: bool,
-) -> Optional[Tuple[float, float]]:
+    hp_overrides: Dict[str, Any], warm_start: bool, stage_label: str = "",
+) -> None:
     """Ce que l'etape impose a TOUTE lecture ulterieure de la config de cet agent.
 
     Meme mecanisme que `--param` : la config d'entrainement est rechargee a plusieurs endroits
@@ -4900,7 +4894,6 @@ def _install_stage_config_overrides(
     """
     original_load = config.load_agent_training_config
 
-    ramp_log: Optional[Tuple[float, float]] = None
     if warm_start:
         _pre = original_load(agent_key, None)
         _sched = _pre.get("deployment_mode_schedule")
@@ -4908,7 +4901,11 @@ def _install_stage_config_overrides(
             before = float(require_key(_sched, "active_ratio_start"))
             after = float(require_key(_sched, "active_ratio_end"))
             if before != after:
-                ramp_log = (before, after)
+                print(
+                    f"🎓 Etape {stage_label} — reprise a chaud : rampe de deploiement figee a "
+                    f"{after:.2f} (au lieu de repartir de {before:.2f}), le modele repris a deja "
+                    "parcouru la sienne."
+                )
 
     def _load_with_stage(loaded_agent_key: str, phase: Optional[str] = None) -> Dict[str, Any]:
         cfg = original_load(loaded_agent_key, phase)
@@ -4921,7 +4918,6 @@ def _install_stage_config_overrides(
         return cfg
 
     config.load_agent_training_config = _load_with_stage
-    return ramp_log
 
 
 def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -4986,14 +4982,9 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
     opponent_mix = _stage_opponent_mix(curriculum, stage, canonical_model_path)
     hp_overrides = get_stage_hp_overrides(stage)
     warm_start = source_stage is not None
-    ramp_log = _install_stage_config_overrides(config, args.agent, opponent_mix, hp_overrides, warm_start)
-    if ramp_log is not None:
-        before, after = ramp_log
-        print(
-            f"🎓 Etape {args.etape} — reprise a chaud : rampe de deploiement figee a "
-            f"{after:.2f} (au lieu de repartir de {before:.2f}), le modele repris a deja "
-            "parcouru la sienne."
-        )
+    _install_stage_config_overrides(
+        config, args.agent, opponent_mix, hp_overrides, warm_start, stage_label=args.etape
+    )
     if hp_overrides:
         print(f"🎓 Etape {args.etape} — HP overrides : {list(hp_overrides)}")
     if opponent_mix is None:
@@ -5364,6 +5355,7 @@ def main():
     # qui DECIDE de `--new` ou de `--resume-from`, donc les controles en aval doivent voir son
     # choix et pas la ligne de commande nue.
     curriculum_stage: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+    _close_stage_curriculum: Optional[Dict[str, Any]] = None
     if args.close_stage and args.etape is None:
         raise ValueError(
             "--close-stage exige --etape : c'est l'etape qui nomme le champion a affronter pour "
@@ -5408,7 +5400,8 @@ def main():
                     "autre checkpoint a sa place. Pour clore sur un checkpoint precis, l'installer "
                     "d'abord par un run, ou le nommer directement."
                 )
-            _close_stage_cfg = require_stage(load_curriculum(args.agent), args.etape)
+            _close_stage_curriculum = load_curriculum(args.agent)
+            _close_stage_cfg = require_stage(_close_stage_curriculum, args.etape)
             if is_exploiter_stage(_close_stage_cfg):
                 raise ValueError(
                     f"--close-stage : {args.etape} est une etape EXPLOITEUR. Sa cloture publie le "
@@ -5420,7 +5413,7 @@ def main():
                 f"--etape exige --scenario bot (got {args.scenario!r}) : le curriculum melange "
                 "bots d'entrainement et pool d'adversaires figes, ce que seul ce chemin monte."
             )
-        if not args.close_stage:
+        else:
             curriculum_stage = _prepare_curriculum_stage(args, get_config_loader())
 
     if args.resume_from and not args.etape:
@@ -5562,7 +5555,7 @@ def main():
             # `require_present` et non `args.etape` nu : la garde qui exige `--etape` vit dans le
             # bloc de validation plus haut, que le typage ne suit pas jusqu'ici.
             _close_etape = require_present(args.etape, "--etape")
-            _close_curriculum = load_curriculum(args.agent)
+            _close_curriculum = _close_stage_curriculum or load_curriculum(args.agent)
             return _close_curriculum_stage(
                 args, config, _close_curriculum,
                 require_stage(_close_curriculum, _close_etape),
