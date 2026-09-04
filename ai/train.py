@@ -5050,10 +5050,29 @@ def _install_stage_config_overrides(
     """
     original_load = config.load_agent_training_config
 
+    # QUI DECLARE DECIDE. Une etape qui ecrit son propre `ent_coef` dans
+    # `training_config_overrides` a exprime une intention sur son regime d'exploration : la
+    # continuite depuis le modele repris ne doit pas la recouvrir. Elle ne sert de defaut que
+    # quand l'etape se TAIT — cas ou la valeur viendrait sinon du profil, dont le `start` de 0.1
+    # a detruit la politique de P2 le 2026-09-04 (evaluation bots de 0,911 a 0,694 en 10 000
+    # episodes de warmup, score contre P1 tombe a 0,118).
+    #
+    # MESURE qui impose de rendre la main a l'etape, run P2 du 2026-09-05 : partie de la valeur
+    # atteinte par P1, soit 0,0177, la sonde du gate est restee PLATE a 0,496 sur six mesures et
+    # 60 000 episodes (chi2 de 2,16 pour 5 degres de liberte, donc indistinguable d'une
+    # constante), pendant que l'evaluation bots retombait de 0,917 a 0,856 — sous les 0,928 du
+    # modele de depart. La montee de la courbe d'entrainement, +6,1 points, suit l'entropie de la
+    # politique a -0,92 de correlation : l'agent durcissait sa politique au lieu d'en trouver une
+    # meilleure. Une etape qui affronte un adversaire de son PROPRE niveau a besoin de plus
+    # d'exploration que la valeur ou la precedente s'est arretee.
+    stage_declares_entropy = isinstance(
+        hp_overrides.get("model_params", {}).get("ent_coef"), dict
+    )
+
     # Lu UNE fois, ici : le decorateur est rappele a chaque lecture de config, et rouvrir le zip
     # a chaque fois paierait la lecture pour rien.
     warm_start_ent_coef: Optional[float] = None
-    if warm_start and pin_entropy_ramp:
+    if warm_start and pin_entropy_ramp and not stage_declares_entropy:
         # PAS de repli sur None quand le chemin manque : une reprise a chaud sans modele source
         # est un etat impossible en production — les deux branches d'`_apply_stage_init` posent
         # `args.resume_from` — et l'accepter en silence rendrait le garde-fou inoperant sur le
@@ -5106,6 +5125,15 @@ def _install_stage_config_overrides(
                             f"(au lieu du {declared:.5f} declare). Repartir au-dessus efface ce "
                             "que le run precedent a converge."
                         ))
+                elif stage_declares_entropy:
+                    # L'annonce vaut autant que l'autre : sans elle, rien ne distingue au journal
+                    # une etape qui a repris le niveau du modele d'une etape qui l'a refuse.
+                    _announce_once("entropy", (
+                        f"🎓 Etape {stage_label} — reprise a chaud : rampe d'entropie demarree a "
+                        f"{float(cfg['model_params']['ent_coef']['start']):.5f}, la valeur "
+                        "DECLAREE par l'etape. Le niveau atteint par le modele repris n'est pas "
+                        "repris — l'etape a exprime son propre regime d'exploration."
+                    ))
         return cfg
 
     config.load_agent_training_config = _load_with_stage

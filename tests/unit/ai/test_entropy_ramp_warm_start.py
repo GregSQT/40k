@@ -239,6 +239,93 @@ def test_a_warm_started_stage_gets_the_pinned_ramp_on_every_read(tmp_path) -> No
         assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.0177)
 
 
+def test_a_stage_that_declares_its_entropy_keeps_it(tmp_path) -> None:
+    """QUI DECLARE DECIDE : la valeur de l'etape n'est pas recouverte par celle du modele.
+
+    Une etape qui ecrit son propre `ent_coef` a exprime une intention sur son regime
+    d'exploration. MESURE qui l'impose, run P2 du 2026-09-05 : partie de la valeur atteinte par
+    P1, soit 0,0177, la sonde du gate est restee plate a 0,496 sur six mesures et 60 000
+    episodes — un chi2 de 2,16 pour 5 degres de liberte, donc indistinguable d'une constante —
+    pendant que l'evaluation bots retombait sous celle du modele de depart. L'agent durcissait sa
+    politique au lieu d'en trouver une meilleure, la correlation entre son entropie et son score
+    d'entrainement valant -0,92.
+    """
+    from ai.train import _install_stage_config_overrides
+
+    loader = _Loader(_cfg(start=0.1))
+    _install_stage_config_overrides(
+        loader, "ArmageddonAgent_x1", None,
+        {"model_params": {"ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}}},
+        True, stage_label="P2",
+        warm_start_model_path=_model_zip(tmp_path, 0.0177),
+    )
+
+    cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
+    assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.03), (
+        "la valeur declaree par l'etape a ete recouverte par celle du modele repris"
+    )
+
+
+def test_a_silent_stage_still_takes_the_model_level(tmp_path) -> None:
+    """L'etape MUETTE garde la continuite : c'est la ou elle protege.
+
+    Sans declaration, la valeur viendrait du profil, dont le `start` de 0,1 a detruit la
+    politique du premier P2 le 2026-09-04 — evaluation bots de 0,911 a 0,694 en 10 000 episodes
+    de warmup, et score contre P1 tombe a 0,118 la ou l'agent partait de ses propres poids.
+    """
+    from ai.train import _install_stage_config_overrides
+
+    loader = _Loader(_cfg(start=0.1))
+    _install_stage_config_overrides(
+        loader, "ArmageddonAgent_x1", None, {}, True, stage_label="P2",
+        warm_start_model_path=_model_zip(tmp_path, 0.0177),
+    )
+
+    cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
+    assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.0177)
+
+
+def test_a_stage_declaring_only_other_params_still_takes_the_model_level(tmp_path) -> None:
+    """Declarer `n_epochs` ou `learning_rate` ne vaut pas declarer un regime d'exploration."""
+    from ai.train import _install_stage_config_overrides
+
+    loader = _Loader(_cfg(start=0.1))
+    _install_stage_config_overrides(
+        loader, "ArmageddonAgent_x1", None,
+        {"model_params": {"n_epochs": 4}}, True, stage_label="P2",
+        warm_start_model_path=_model_zip(tmp_path, 0.0177),
+    )
+
+    cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
+    assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.0177)
+
+
+def test_a_declaring_stage_never_opens_the_model_zip(tmp_path) -> None:
+    """Le zip n'est pas lu quand l'etape decide : une lecture inutile est aussi un chemin d'echec.
+
+    Un checkpoint illisible ou sans `ent_coef` ferait alors echouer une etape qui n'avait pas
+    besoin de cette valeur.
+    """
+    import ai.train as train_module
+    from ai.train import _install_stage_config_overrides
+
+    lectures: list = []
+    vraie = train_module.read_model_ent_coef
+    train_module.read_model_ent_coef = lambda p: (lectures.append(p), vraie(p))[1]  # type: ignore[assignment]
+    try:
+        loader = _Loader(_cfg(start=0.1))
+        _install_stage_config_overrides(
+            loader, "ArmageddonAgent_x1", None,
+            {"model_params": {"ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}}},
+            True, stage_label="P2",
+            warm_start_model_path=_model_zip(tmp_path, 0.0177),
+        )
+    finally:
+        train_module.read_model_ent_coef = vraie  # type: ignore[assignment]
+
+    assert lectures == []
+
+
 def test_a_cold_started_stage_keeps_its_declared_start(tmp_path) -> None:
     """`init: "new"` n'a aucun modele d'ou partir : le `start` du JSON reste la verite."""
     from ai.train import _install_stage_config_overrides
@@ -253,24 +340,29 @@ def test_a_cold_started_stage_keeps_its_declared_start(tmp_path) -> None:
     assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.1)
 
 
-def test_the_stage_override_is_applied_before_being_pinned(tmp_path) -> None:
-    """C'est le `start` de l'ETAPE qui est remplace, pas seulement celui du profil.
+def test_the_pin_comes_after_the_other_stage_overrides(tmp_path) -> None:
+    """La pose s'applique SUR le resultat des autres surcharges, sans les defaire.
 
-    `_apply_stage_hp_overrides` pose d'abord la valeur declaree par l'etape ; la pose doit venir
-    apres, sans quoi l'override la reecrirait et le defaut resterait entier.
+    Ce test verrouillait auparavant l'inverse — la valeur d'entropie declaree par l'etape etait
+    elle aussi remplacee. La regle a change le 2026-09-05 : qui declare decide, et la continuite
+    ne vaut plus que pour l'etape muette. Ce qui reste vrai, et que ce test garde, c'est l'ORDRE :
+    `_apply_stage_hp_overrides` passe d'abord, la pose ensuite, sans que l'une annule l'autre.
     """
     from ai.train import _install_stage_config_overrides
 
     loader = _Loader(_cfg(start=0.05))
     _install_stage_config_overrides(
         loader, "ArmageddonAgent_x1", None,
-        {"model_params": {"ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}}},
+        {"total_episodes": 250000, "model_params": {"n_epochs": 4, "vf_coef": 0.7}},
         True, stage_label="P2",
         warm_start_model_path=_model_zip(tmp_path, 0.0177),
     )
 
     cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
-    assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.0177)
+    assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.0177), "pose non appliquee"
+    assert cfg["model_params"]["n_epochs"] == 4, "surcharge de l'etape defaite par la pose"
+    assert cfg["model_params"]["vf_coef"] == pytest.approx(0.7)
+    assert cfg["total_episodes"] == 250000
 
 
 def test_the_whole_config_file_is_left_untouched(tmp_path) -> None:
