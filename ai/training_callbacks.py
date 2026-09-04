@@ -776,11 +776,13 @@ class MetricsCollectionCallback(BaseCallback):
         # mort depuis la migration aux entites a survecu jusqu'a faire lever un run. Ce qu'elles
         # avaient d'utile se compte cote MOTEUR, sur le masque. Cf. index_v11.md §0.68.
 
-    _PPO_KEYS = frozenset({
-        'train/policy_gradient_loss', 'train/value_loss', 'train/entropy_loss',
-        'train/clip_fraction', 'train/approx_kl', 'train/explained_variance',
-        'train/learning_rate',
-    })
+    #: Marqueur d'un update PPO. `patched_ppo.train()` l'enregistre une fois par update, en
+    #: dernier lot avec les metriques de sante, et c'est le SEUL producteur de cles `train/` du
+    #: projet : `PatchedMaskablePPO` surcharge `train()`, donc le `ppo.py` de SB3 ne s'execute
+    #: jamais, et `train/learning_rate` vient de `_update_learning_rate` appele en tete du meme
+    #: `train()`. Un inventaire de noms de metriques occupait cette place et devait etre tenu en
+    #: phase avec `train()` a la main.
+    _PPO_UPDATE_KEY = 'train/n_updates'
 
     def _on_training_start(self) -> None:
         """Enveloppe `logger.dump` pour capturer les metriques PPO AVANT que SB3 ne vide
@@ -820,24 +822,23 @@ class MetricsCollectionCallback(BaseCallback):
         _original_dump = self.model.logger.dump
         _tracker = self.metrics_tracker
         _model = self.model
-        # `_ppo_keys` et non `self._PPO_KEYS` lu dans l'enveloppe : lire l'attribut ferait de
-        # `self` une variable libre de plus, donc un cycle `callback → _dump_logger → logger →
-        # dump → callback` que le comptage de references ne casse pas — un par logger que SB3
-        # reconstruit. Verifie par `co_freevars` de l'enveloppe compilee.
-        _ppo_keys = self._PPO_KEYS
+        # `_ppo_update_key` et non `self._PPO_UPDATE_KEY` lu dans l'enveloppe : lire l'attribut
+        # ferait de `self` une variable libre de plus, donc un cycle `callback → _dump_logger →
+        # logger → dump → callback` que le comptage de references ne casse pas — un par logger que
+        # SB3 reconstruit. Verifie par `co_freevars` de l'enveloppe compilee.
+        _ppo_update_key = self._PPO_UPDATE_KEY
 
         def _dump_with_capture(step: int = 0) -> None:
             ntv = getattr(_model.logger, 'name_to_value', {})
-            # `_PPO_KEYS` et NON `if ntv:` : `_handle_episode_end` appelle `logger.dump` a CHAQUE
-            # fin d'episode avec les seules cles `game_critical/*`. Sans ce filtre, chaque episode
-            # declenchait une capture complete — norme du gradient recalculee sur tous les
+            # Le marqueur d'update et NON `if ntv:` : `_handle_episode_end` appelle `logger.dump`
+            # a CHAQUE fin d'episode avec les seules cles `game_critical/*`. Sans ce filtre, chaque
+            # episode declenchait une capture complete — norme du gradient recalculee sur tous les
             # parametres (une synchronisation GPU) et `train/ent_coef` reinjecte — pour un dump
             # qui ne porte AUCUN update PPO : les gradients y sont ceux laisses par le dernier
             # `train()`. Mesure du run neuf du 2026-08-29, ou aucune enveloppe ne s'empilait :
             # 101 415 points sur `training_diagnostic/entropy_coef` pour 100 000 episodes et
-            # 1 063 updates — un point par EPISODE au lieu d'un par update. `_PPO_KEYS` etait
-            # declare juste au-dessus depuis l'origine, et n'avait jamais eu de lecteur.
-            if ntv and not _ppo_keys.isdisjoint(ntv):
+            # 1 063 updates — un point par EPISODE au lieu d'un par update.
+            if _ppo_update_key in ntv:
                 model_stats: Dict[str, Any] = dict(ntv)
                 if hasattr(_model, 'policy') and hasattr(_model.policy, 'parameters'):
                     # Réduction en une seule op GPU + un seul .item() au lieu de N syncs.

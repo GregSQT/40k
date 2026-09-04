@@ -13,7 +13,10 @@ from typing import Any, Dict, List
 
 
 #: Un dump d'update PPO : ce que `patched_ppo.train()` enregistre avant de vider `name_to_value`.
+#: `train/n_updates` en est le marqueur — la cle sur laquelle l'enveloppe decide de capturer, et
+#: la seule dont le retrait doit suffire a faire rougir la capture.
 _PPO_DUMP: Dict[str, Any] = {
+    "train/n_updates": 575,
     "train/clip_fraction": 0.074,
     "train/approx_kl": 0.0087,
     "train/explained_variance": 0.884,
@@ -167,7 +170,7 @@ def test_removal_targets_the_logger_that_was_wrapped() -> None:
 
 
 def test_end_of_episode_dumps_are_not_captured() -> None:
-    """Un dump sans cle `train/` ne declenche aucune capture.
+    """Un dump sans marqueur d'update ne declenche aucune capture.
 
     `_handle_episode_end` appelle `logger.dump` a chaque fin d'episode. Le capturer recalculait la
     norme du gradient sur tous les parametres pour un dump ne portant aucun update, et publiait un
@@ -188,6 +191,34 @@ def test_end_of_episode_dumps_are_not_captured() -> None:
         "sont captures."
     )
     assert model.logger.original_dump_calls == 51, "les dumps d'episode doivent passer au logger"
+
+
+def test_the_predicate_is_the_marker_and_not_the_health_metrics() -> None:
+    """Les seules metriques de sante, sans `train/n_updates`, ne declenchent aucune capture.
+
+    Ce que ce test defend est l'ETROITESSE du predicat. Un inventaire des noms de metriques de
+    sante a tenu cette place et devait etre garde en phase avec `patched_ppo.train()` a la main ;
+    y revenir laisserait vertes toutes les autres assertions du fichier, dont les dumps portent
+    ces noms. `train/n_updates` est enregistre exactement une fois par update
+    (`ai/patched_ppo.py`), donc il compte les updates la ou un nom de metrique compte les dumps
+    qui en portent une.
+    """
+    model = _FakeModel()
+    tracker = _CountingTracker()
+    callback = _callback(model, tracker)
+
+    sans_marqueur = {k: v for k, v in _PPO_DUMP.items() if k != "train/n_updates"}
+    assert sans_marqueur, "le double ne porte plus que le marqueur : le test ne verifie rien"
+
+    callback._on_training_start()
+    _dump(model, sans_marqueur)
+    callback._on_training_end()
+
+    assert tracker.calls == [], (
+        "capture declenchee sans marqueur d'update : le predicat retient un nom de metrique de "
+        "sante, donc un inventaire a maintenir."
+    )
+    assert model.logger.original_dump_calls == 1, "le dump d'origine doit rester joignable"
 
 
 def test_ppo_scalars_are_written_at_the_timestep_of_their_own_update() -> None:
@@ -235,7 +266,7 @@ def test_the_wrapper_does_not_capture_the_callback() -> None:
     """L'enveloppe ne ferme sur aucune reference au callback.
 
     Elle est posee sur `logger.dump` pour toute la duree d'un `learn()`. Y lire un attribut de
-    `self` — `self._PPO_KEYS` etait le seul candidat — ferait de `self` une variable libre, donc
+    `self` — `self._PPO_UPDATE_KEY` est le seul candidat — ferait de `self` une variable libre, donc
     un cycle `callback → _dump_logger → logger → dump → callback` que le comptage de references ne
     casse pas : le callback, son tracker et ses historiques d'episodes attendraient le gc
     generationnel, un cycle par logger que SB3 reconstruit.
