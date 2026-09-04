@@ -55,12 +55,6 @@ def _args(agent: str = "ArmageddonAgent_x1", etape: str = "P1") -> Any:
     return SimpleNamespace(agent=agent, etape=etape)
 
 
-def _canonical_path(models_root: str, agent: str) -> str:
-    from ai.train import build_agent_model_path
-
-    return build_agent_model_path(models_root, agent)
-
-
 def _write_model(path: str, episodes: Any = None) -> None:
     from ai.run_state import get_run_state_path
 
@@ -80,8 +74,9 @@ def _write_run_artifacts(
 ) -> str:
     """Pose sur disque ce qu'un run interrompu laisse derriere lui."""
     from ai.curriculum import stage_model_path
+    from ai.train import build_agent_model_path
 
-    model_path = _canonical_path(models_root, agent)
+    model_path = build_agent_model_path(models_root, agent)
     if with_model:
         _write_model(model_path, episodes if with_run_state else None)
     if with_tb_meta:
