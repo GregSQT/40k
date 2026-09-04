@@ -2653,9 +2653,19 @@ class _EvalPoolOwnerMixin:
     rewards_config_name: str
     intermediate_n_workers: Optional[int]
     _eval_pool: Optional[Any]
+    _eval_n_workers: Optional[int]
 
     def _ensure_eval_pool(self) -> None:
-        """Crée le pool si absent. Ne fait rien si le compte de workers ne justifie pas un pool."""
+        """Crée le pool si absent. Ne fait rien si le compte de workers ne justifie pas un pool.
+
+        Pose aussi `_eval_n_workers`, que `_probe` passe en `n_workers_override` : c'est de LUI
+        qu'`evaluate_against_checkpoints` dérive `max_in_flight`, donc il doit valoir la taille du
+        pool. Lire `intermediate_n_workers` des deux côtés faisait dimensionner le pool ici et
+        `max_in_flight` là-bas à partir de deux clés différentes dès que l'attribut vaut None ;
+        `max_in_flight` supérieur au nombre de workers laisse des tâches EN FILE alors que leur
+        chronomètre de `bot_eval_task_timeout_seconds` court déjà (cf.
+        `_collect_parallel_results_with_timeouts`).
+        """
         if self._eval_pool is not None:
             return
         from ai.bot_evaluation import create_checkpoint_eval_pool, _strip_phase_suffix
@@ -2672,7 +2682,12 @@ class _EvalPoolOwnerMixin:
         n_workers = self.intermediate_n_workers
         if n_workers is None:
             callback_params = require_key(training_cfg, "callback_params")
-            n_workers = int(callback_params.get("bot_eval_n_workers_intermediate", 4))
+            # `require_key` et non un défaut : les autres lectures de cette fonction
+            # (`vec_normalize`, `vec_normalize_eval`) le font déjà, et un défaut silencieux ici
+            # contredirait la config au lieu de l'appliquer — un profil qui ne déclare pas la clé
+            # doit s'arrêter, pas sonder à 4 workers choisis par le code.
+            n_workers = int(require_key(callback_params, "bot_eval_n_workers_intermediate"))
+        self._eval_n_workers = n_workers
         if n_workers <= 1:
             return
         self._eval_pool = create_checkpoint_eval_pool(
@@ -2775,6 +2790,7 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
         # Pool créé à la première sonde par `_ensure_eval_pool`, fermé par
         # `shutdown_probe_eval_pools` à la sortie de la boucle `learn()`. Cf. `_EvalPoolOwnerMixin`.
         self._eval_pool: Optional[Any] = None
+        self._eval_n_workers: Optional[int] = None
 
     def _current_episode(self) -> int:
         if self.metrics_tracker is not None:
@@ -2806,7 +2822,10 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
                     controlled_agent=self.rewards_config_name,
                     scenario_pool="holdout",
                     device="cpu",
-                    n_workers_override=self.intermediate_n_workers,
+                    # Le compte RÉSOLU par `_ensure_eval_pool`, jamais `intermediate_n_workers` :
+                    # c'est celui qui a dimensionné le pool juste au-dessus, et il devient ici
+                    # `max_in_flight`.
+                    n_workers_override=self._eval_n_workers,
                     pool=self._eval_pool,
                 )
             except Exception:
@@ -2942,6 +2961,7 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         self._next_probe_episode: int = eval_freq_episodes
         # Même cycle de vie que celui d'`ExploiterProbeCallback` : cf. `_EvalPoolOwnerMixin`.
         self._eval_pool: Optional[Any] = None
+        self._eval_n_workers: Optional[int] = None
 
     def _current_episode(self) -> int:
         if self.metrics_tracker is not None:
@@ -2969,7 +2989,8 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
                     controlled_agent=self.rewards_config_name,
                     scenario_pool="holdout",
                     device="cpu",
-                    n_workers_override=self.intermediate_n_workers,
+                    # Jumeau de `ExploiterProbeCallback._probe` : cf. son commentaire.
+                    n_workers_override=self._eval_n_workers,
                     pool=self._eval_pool,
                 )
             except Exception:

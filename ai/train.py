@@ -5868,10 +5868,17 @@ def main():
                     # La sonde evalue PENDANT l'entrainement : elle prend le meme nombre de
                     # workers que les evaluations intermediaires (`BotEvaluationCallback`), pas
                     # les 16 de l'evaluation finale, qui concourraient avec les workers de
-                    # collecte. `setup_callbacks` valide deja cette cle ; ici on la lit seulement.
+                    # collecte.
+                    # REQUISE ICI, au demarrage, et non laissee a `_ensure_eval_pool` : celui-ci
+                    # leve aussi (il est le point d'entree autonome de la sonde), mais il n'est
+                    # atteint qu'a la premiere sonde, donc apres des minutes d'entrainement. Meme
+                    # raison que `validate_bot_eval_worker_params` plus haut dans ce fichier.
+                    # `setup_callbacks` ne suffit pas : il ne valide cette cle QUE si elle est
+                    # presente, une etape de curriculum ne pouvant pas s'en passer.
                     _probe_n_workers = require_key(
-                        training_config, "callback_params"
-                    ).get("bot_eval_n_workers_intermediate")
+                        require_key(training_config, "callback_params"),
+                        "bot_eval_n_workers_intermediate",
+                    )
                     _exploiter_probe = ExploiterProbeCallback(
                         target_archive_path=_target_path,
                         training_config_name=args.training_config,
@@ -5911,9 +5918,12 @@ def main():
                         _models_root = get_config_loader().get_models_root()
                         _canonical = build_agent_model_path(_models_root, args.agent)
                         _champion_archive = [(stage_model_path(_canonical, _champion_label), _champion_label)]
+                        # Requise au demarrage pour la meme raison que chez la sonde exploiteur
+                        # ci-dessus : cf. son commentaire.
                         _pool_n_workers = require_key(
-                            training_config, "callback_params"
-                        ).get("bot_eval_n_workers_intermediate")
+                            require_key(training_config, "callback_params"),
+                            "bot_eval_n_workers_intermediate",
+                        )
                         _pool_eval_freq = int(require_key(
                             require_key(training_config, "callback_params"), "bot_eval_freq"
                         ))
