@@ -811,10 +811,21 @@ def pool_monotonicity_diagnostic(
     """Lignes de DIAGNOSTIC sur la monotonie du pool. Jamais un gate.
 
     Attendu intuitif : plus un adversaire du pool est ancien, plus le score contre lui est eleve.
-    Ce n'est PAS une propriete garantie ici — les learners demarrent `--new`, donc deux etapes
-    voisines sont des runs INDEPENDANTS et peuvent se departager dans le desordre sans qu'aucune
-    anomalie ne se soit produite. En faire un gate refuserait des etapes saines ; on le
-    journalise pour le lire, pas pour trancher.
+
+    La raison d'origine de ne PAS en faire un gate a disparu le 2026-09-04. Elle tenait a
+    l'independance des runs : les learners demarraient tous `--new`, donc deux etapes voisines
+    etaient des entrainements separes et pouvaient se departager dans le desordre par simple
+    variance, sans qu'aucune anomalie ne se soit produite. La lignee est desormais CHAINEE
+    (`_doc_lignees` de curriculum.json) : une etape REPREND les poids de la precedente, donc une
+    inversion dit qu'un entrainement supplementaire a rendu le modele moins bon contre le meme
+    etalon — une regression a l'interieur d'une seule lignee, pas un tirage.
+
+    Reste un diagnostic malgre tout, pour une raison qui n'est plus celle-la : les scores viennent
+    d'une evaluation FINIE (`gate.eval_episodes`, 300 episodes), ou l'erreur-type d'un taux proche
+    de 0.5 vaut 2,9 points — le meme chiffre qui separe deja le plancher du gate (0.55) de sa cible
+    (0.60). Une comparaison BRUTE de deux scores voisins refuserait donc des etapes saines sur du
+    bruit. En faire un gate demanderait une MARGE au-dessus de cette erreur-type, pas l'inegalite
+    stricte codee ici. Decision non prise : on journalise pour lire, pas pour trancher.
     """
     ordered = [label for label in pool_order if label in scores_vs_pool]
     lines = [
