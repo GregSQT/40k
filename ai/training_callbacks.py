@@ -27,7 +27,7 @@ import numpy as np
 import torch
 import gymnasium as gym
 from typing import Dict, Iterable, Optional, Any, List, Set, Tuple, cast
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.utils import ConstantSchedule
 
 from engine.episode_schedule import ramp_progress
@@ -2737,6 +2737,31 @@ class _EvalPoolOwnerMixin:
         self._eval_pool = None
         if pool is not None:
             pool.shutdown(wait=False, cancel_futures=True)
+
+
+class StopAwareCallbackList(CallbackList):
+    """`CallbackList` qui MEMORISE qu'un callback a demande l'arret.
+
+    SB3 n'expose le `False` d'un callback que comme sortie de `learn()` : l'appelant qui
+    enchaine les `learn()` par tranches (boucle budgetee en episodes de
+    `train_with_scenario_rotation`) ne peut pas distinguer « tranche consommee » de « arret
+    demande », et rappelle donc `learn()` alors que l'arret anticipe a deja ete decide. Ce
+    drapeau porte l'information au-dela de la frontiere de tranche.
+
+    Le drapeau n'est JAMAIS remis a zero : dans cette boucle, tous les `False` (budget
+    d'episodes atteint, early-stop bot, budget exploiteur confirme ou censure, seuil de pool
+    confirme) sont des arrets de RUN, pas de tranche.
+    """
+
+    def __init__(self, callbacks: List[BaseCallback]):
+        super().__init__(callbacks)
+        self.stop_requested = False
+
+    def _on_step(self) -> bool:
+        continue_training = super()._on_step()
+        if not continue_training:
+            self.stop_requested = True
+        return continue_training
 
 
 def prepare_probe_eval_pools(callbacks: Iterable[Any]) -> None:

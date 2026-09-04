@@ -1653,6 +1653,7 @@ from ai.training_callbacks import (
     prepare_probe_eval_pools,
     selection_worst_bot,
     shutdown_probe_eval_pools,
+    StopAwareCallbackList,
 )
 
 # Training utilities (extracted to ai/training_utils.py)
@@ -3488,7 +3489,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     # print(f"📈 Metrics tracking enabled for agent: {agent_key}")
 
     # Create metrics callback ONCE before loop (not inside it)
-    from stable_baselines3.common.callbacks import CallbackList
     metrics_callback = MetricsCollectionCallback(metrics_tracker, model, controlled_agent=effective_agent_key)
 
     # Training loop with random scenario selection per episode
@@ -3648,7 +3648,7 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             non_terminal_callbacks.append(callback)
 
     ordered_training_callbacks = non_terminal_callbacks + terminal_callbacks
-    enhanced_callbacks = CallbackList(cast(List[BaseCallback], [metrics_callback] + ordered_training_callbacks))
+    enhanced_callbacks = StopAwareCallbackList(cast(List[BaseCallback], [metrics_callback] + ordered_training_callbacks))
     _debug_train_marker(
         "after CallbackList assembly: ordered_callbacks=%s",
         [callback.__class__.__name__ for callback in ordered_training_callbacks],
@@ -3718,6 +3718,29 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                     metrics_tracker.episode_count, target_episode_count, chunk_timesteps,
                     model.num_timesteps,
                 )
+                # SB3 ne rend le `False` d'un callback que comme SORTIE de `learn()` : sans ce
+                # relais, l'arret anticipe ne coupait que la tranche courante et la boucle
+                # rappelait `learn()` jusqu'a la cible d'episodes. Cas exploiteur censure :
+                # `_on_step` rend False des le premier pas de chaque tranche, donc chaque
+                # iteration ne progressait que de `n_envs` pas en repayant `_setup_learn`.
+                if enhanced_callbacks.stop_requested:
+                    # `EpisodeTerminationCallback` rend aussi False au budget ATTEINT : le drapeau
+                    # se leve donc a la fin de tout run nominal, ou `break` et condition du `while`
+                    # disent la meme chose. Seul le cas ou la cible n'est PAS atteinte est un arret
+                    # anticipe, et lui seul s'annonce.
+                    if metrics_tracker.episode_count < target_episode_count:
+                        _debug_train_marker(
+                            "learn loop stopped early by callback: episode_count=%s "
+                            "target_episode_count=%s model_num_timesteps=%s",
+                            metrics_tracker.episode_count, target_episode_count,
+                            model.num_timesteps,
+                        )
+                        chunk_log(
+                            f"🛑 Arret anticipe demande par un callback a "
+                            f"{int(metrics_tracker.episode_count)} episodes "
+                            f"(cible {target_episode_count}) — fin du run."
+                        )
+                    break
         finally:
             shutdown_probe_eval_pools(training_callbacks)
 
