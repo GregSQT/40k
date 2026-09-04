@@ -8,6 +8,7 @@ pool était donc recréé et refermé une fois par tranche, et chaque sonde repa
 ses workers (spawn + import + chargement de l'archive adverse).
 
 Ces tests verrouillent le contrat qui remplace ce couple :
+- configuration lue AVANT la boucle par `prepare_probe_eval_pools`, sans démarrer de worker ;
 - création PARESSEUSE, à la première sonde et une seule fois ;
 - survie aux frontières de `learn()` ;
 - fermeture par `shutdown_probe_eval_pools`, appelée par le `finally` de la boucle ;
@@ -25,7 +26,10 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from ai.training_callbacks import shutdown_probe_eval_pools  # noqa: E402
+from ai.training_callbacks import (  # noqa: E402
+    prepare_probe_eval_pools,
+    shutdown_probe_eval_pools,
+)
 from shared.data_validation import ConfigurationError  # noqa: E402
 from tests.unit.ai._fabriques import (  # noqa: E402
     PROBE_REWARDS_CONFIG as REWARDS_CONFIG,
@@ -50,6 +54,85 @@ def _patched_probe_environment(create_pool, results):
         patch("ai.vec_normalize_utils.save_vec_normalize"),
         patch("ai.training_callbacks.remove_model_with_companions"),
     )
+
+
+def _training_cfg(**callback_params):
+    """Profil d'entraînement réduit à ce que la résolution du pool lit."""
+    return {
+        "vec_normalize": {"enabled": True},
+        "vec_normalize_eval": {"enabled": True},
+        "callback_params": dict(callback_params),
+    }
+
+
+def _patched_config_loader(cfg):
+    """Substitue le profil d'entraînement lu sur disque par `cfg`, et rend le chargeur doublé."""
+    loader = MagicMock()
+    loader.load_agent_training_config.return_value = cfg
+    return patch("ai.training_callbacks.get_config_loader", return_value=loader), loader
+
+
+# ── Résolution de la configuration, avant la boucle ─────────────────────────────────────────
+
+
+def test_prepare_resolves_the_config_without_starting_a_worker(archive):
+    """`prepare_probe_eval_pools` lit la config des deux sondes et ne démarre aucun processus."""
+    probe = _make_exploiter_probe(archive)
+    early_stop = _make_pool_early_stop(archive)
+
+    with patch("ai.bot_evaluation.create_checkpoint_eval_pool") as create_pool:
+        prepare_probe_eval_pools([probe, MagicMock(), early_stop])
+
+    create_pool.assert_not_called()
+    assert probe._eval_pool is None and early_stop._eval_pool is None
+    for callback in (probe, early_stop):
+        assert callback._pool_kwargs is not None
+        assert callback._pool_kwargs["n_workers"] == 4
+        assert callback._pool_kwargs["base_agent_key"] == REWARDS_CONFIG
+
+
+def test_prepare_raises_on_a_profile_missing_a_key(archive):
+    """Un profil incomplet lève AU DÉMARRAGE, pas à la première sonde.
+
+    Ces `require_key` vivaient dans `_on_training_start`, joué au premier pas d'entraînement.
+    Portés par la sonde seule, ils ne s'exécuteraient qu'après `probe_every_episodes` épisodes —
+    2000 sur le curriculum courant, soit des heures de run avant que la config ne se signale.
+    """
+    cfg = _training_cfg(bot_eval_n_workers_intermediate=4)
+    del cfg["vec_normalize_eval"]
+    p_config, _ = _patched_config_loader(cfg)
+
+    with p_config, pytest.raises(ConfigurationError, match="vec_normalize_eval"):
+        prepare_probe_eval_pools([_make_exploiter_probe(archive)])
+
+
+def test_the_config_is_read_once_for_the_whole_run(archive):
+    """Résolue avant la boucle, la config n'est plus relue par aucune sonde."""
+    p_config, loader = _patched_config_loader(_training_cfg())
+    probe = _make_exploiter_probe(archive)
+    p_create, p_eval, p_vecnorm, p_remove = _patched_probe_environment(
+        MagicMock(return_value=MagicMock()), {"target": 0.5}
+    )
+
+    with p_config, p_create, p_eval, p_vecnorm, p_remove:
+        prepare_probe_eval_pools([probe])
+        for _ in range(3):
+            probe._probe(n_episodes=10, label="bon-marche")
+
+    assert loader.load_agent_training_config.call_count == 1
+
+
+def test_a_single_worker_resolves_to_no_pool_at_all(archive):
+    """Un seul worker : la résolution mémorise « pas de pool » au lieu de rejouer la lecture."""
+    p_config, loader = _patched_config_loader(_training_cfg())
+    probe = _make_exploiter_probe(archive, n_workers=1)
+
+    with p_config:
+        prepare_probe_eval_pools([probe])
+        prepare_probe_eval_pools([probe])
+
+    assert probe._pool_kwargs is None
+    assert loader.load_agent_training_config.call_count == 1
 
 
 # ── Création paresseuse ─────────────────────────────────────────────────────────────────────
@@ -144,19 +227,13 @@ def test_single_worker_creates_no_pool(archive):
 
 
 def _profile(**callback_params):
-    """Patch du chargeur de config sur un profil réduit à ce que `_ensure_eval_pool` lit.
+    """Patch du chargeur de config sur un profil réduit à ce que la résolution du pool lit.
 
     SYNTHÉTIQUE, et non un profil réel dont la clé serait absente (`x1_debug`, `x5_debug`) :
     le test doit CONSTRUIRE l'absence, sinon le jour où quelqu'un ajoute la clé à ce profil il
     reste vert en n'exerçant plus rien.
     """
-    loader = MagicMock()
-    loader.load_agent_training_config.return_value = {
-        "vec_normalize": {"enabled": True},
-        "vec_normalize_eval": {"enabled": True},
-        "callback_params": dict(callback_params),
-    }
-    return patch("ai.training_callbacks.get_config_loader", return_value=loader)
+    return _patched_config_loader(_training_cfg(**callback_params))[0]
 
 
 @pytest.mark.parametrize("make", [_make_exploiter_probe, _make_pool_early_stop])
@@ -330,6 +407,73 @@ def test_shutdown_probe_eval_pools_accepts_a_never_probed_callback(archive):
     shutdown_probe_eval_pools([_make_exploiter_probe(archive), _make_pool_early_stop(archive)])
 
 
+def test_a_failing_shutdown_isolates_its_owner(archive):
+    """Un pool qui lève à la fermeture n'emporte ni les suivants, ni l'exception en cours.
+
+    Appelée depuis un `finally`, cette fonction remplacerait l'exception qui se propageait — le
+    Ctrl-C compris — et laisserait résidents les workers des callbacks suivants, soit exactement
+    ce qu'elle existe pour éviter.
+    """
+    probe = _make_exploiter_probe(archive)
+    early_stop = _make_pool_early_stop(archive)
+    broken_pool = MagicMock()
+    broken_pool.shutdown.side_effect = RuntimeError("executor déjà mort")
+    healthy_pool = MagicMock()
+    probe._eval_pool = broken_pool
+    early_stop._eval_pool = healthy_pool
+
+    shutdown_probe_eval_pools([probe, early_stop])
+
+    healthy_pool.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+    assert probe._eval_pool is None and early_stop._eval_pool is None
+
+
+def _train_with_scenario_rotation_ast():
+    """Corps de `train_with_scenario_rotation`, lu dans l'AST de `ai/train.py`.
+
+    Un test de comportement sur cette fonction demanderait un run complet (config, env, modèle) :
+    le câblage de production s'y vérifie donc par lecture du source.
+    """
+    tree = ast.parse((PROJECT_ROOT / "ai" / "train.py").read_text(encoding="utf-8"))
+    # `train_with_scenario_rotation` est précédée de trois `@overload` : l'implémentation est la
+    # DERNIÈRE définition du nom, les précédentes n'ont qu'un corps vide.
+    definitions = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "train_with_scenario_rotation"
+    ]
+    assert definitions, "`train_with_scenario_rotation` introuvable dans ai/train.py"
+    return definitions[-1]
+
+
+def test_learn_loop_prepares_the_pools_before_entering_the_loop():
+    """La résolution de config est câblée AVANT la boucle, seul endroit qui la rend précoce.
+
+    Sans cet appel, les `require_key` du profil ne tournent qu'à la première sonde : un profil
+    incomplet ne se signale plus qu'après `probe_every_episodes` épisodes, des heures de run
+    plus tard, et la suite resterait verte.
+    """
+    rotation = _train_with_scenario_rotation_ast()
+
+    prepare_lines = [
+        call.lineno
+        for call in ast.walk(rotation)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == "prepare_probe_eval_pools"
+    ]
+    loop_lines = [node.lineno for node in ast.walk(rotation) if isinstance(node, ast.While)]
+
+    assert prepare_lines, (
+        "`train_with_scenario_rotation` n'appelle pas `prepare_probe_eval_pools` — la config du "
+        "pool ne serait lue qu'à la première sonde"
+    )
+    assert min(prepare_lines) < min(loop_lines), (
+        "`prepare_probe_eval_pools` doit précéder la boucle `learn()` : appelé après, il ne rend "
+        "plus rien précoce"
+    )
+
+
 def test_learn_loop_closes_the_pools_in_a_finally():
     """Le SEUL point de fermeture de production est bien câblé, et dans un `finally`.
 
@@ -341,16 +485,7 @@ def test_learn_loop_closes_the_pools_in_a_finally():
     Le `finally` est la moitié qui compte : posé après la boucle, il serait sauté par l'exception
     et par le Ctrl-C, précisément les sorties où les workers survivent au parent.
     """
-    tree = ast.parse((PROJECT_ROOT / "ai" / "train.py").read_text(encoding="utf-8"))
-    # `train_with_scenario_rotation` est précédée de trois `@overload` : l'implémentation est la
-    # DERNIÈRE définition du nom, les précédentes n'ont qu'un corps vide.
-    definitions = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "train_with_scenario_rotation"
-    ]
-    assert definitions, "`train_with_scenario_rotation` introuvable dans ai/train.py"
-    rotation = definitions[-1]
+    rotation = _train_with_scenario_rotation_ast()
 
     guarded_loops = [
         handler

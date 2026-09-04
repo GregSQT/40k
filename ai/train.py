@@ -1650,6 +1650,7 @@ from ai.training_callbacks import (
     BotEvaluationCallback,
     ExploiterProbeCallback,
     PoolEarlyStoppingCallback,
+    prepare_probe_eval_pools,
     selection_worst_bot,
     shutdown_probe_eval_pools,
 )
@@ -3681,10 +3682,18 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # `on_training_start`/`on_training_end` autour de CHAQUE `learn()` et que la boucle en
         # enchaine un par tranche de quatre updates — le pool y etait recree a chaque tranche.
         # Ce `finally` est le seul point qui couvre tous les chemins de sortie, y compris
-        # l'exception et le Ctrl-C, la ou `_close_curriculum_stage` n'est pas atteint. Il ferme
-        # aussi AVANT l'evaluation finale, qui prend ses propres 16 workers : laisser les 4 du
-        # pool tourner a cote d'elle est precisement le regime a 47 Go que documente
-        # `validate_bot_eval_worker_params`.
+        # l'exception et le Ctrl-C, la ou `_close_curriculum_stage` n'est pas atteint. Il DEMANDE
+        # aussi la fermeture avant l'evaluation finale, qui prend ses propres workers, mais
+        # `shutdown(wait=False)` ne l'ATTEND pas : les workers du pool sont inactifs entre deux
+        # sondes et sortent des qu'ils lisent la fin de leur file, sans que rien ici ne garantisse
+        # qu'ils sont morts quand l'evaluation finale demarre. `wait=True` le garantirait, au prix
+        # d'un Ctrl-C bloque jusqu'a la fin de la sonde en vol — `KeyboardInterrupt` n'est pas
+        # attrape par l'`except Exception` de `_probe`, donc le pool y arrive avec une tache en
+        # cours. C'est ce compromis-la qui est retenu, pas une exclusion stricte du recouvrement.
+        #
+        # La CONFIGURATION du pool, elle, est lue maintenant : une cle absente doit lever au
+        # demarrage du run, pas a la premiere sonde, `probe_every_episodes` episodes plus tard.
+        prepare_probe_eval_pools(training_callbacks)
         try:
             while metrics_tracker.episode_count < target_episode_count:
                 # As a safety guard, we still use the same chunk_timesteps.
