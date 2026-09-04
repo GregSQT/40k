@@ -75,9 +75,20 @@ def _args(etape: str) -> SimpleNamespace:
     )
 
 
-def _write_stage_model(models_root, stage: str) -> str:
+def _write_stage_model(models_root, stage: str, ent_coef: float = 0.0177) -> str:
+    """Un zip SB3 reduit a son membre `data`, et non un fichier de remplissage.
+
+    Depuis que la rampe d'entropie d'une etape reprise part du niveau ATTEINT par le modele
+    source (`_pin_entropy_ramp_for_warm_start`), `_prepare_curriculum_stage` ouvre ce zip et y
+    lit `ent_coef`. Des octets arbitraires y levaient `BadZipFile`.
+    """
+    import json
+    import zipfile
+
     path = models_root / "TestAgent" / f"model_TestAgent_{stage}.zip"
-    path.write_bytes(b"POIDS")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("data", json.dumps({"ent_coef": ent_coef}))
     return str(path)
 
 
@@ -176,8 +187,14 @@ def test_etape_resume_from_on_new_stage_is_refused(curriculum_agent, tmp_path, m
 def test_etape_resume_from_on_from_stage_keeps_user_checkpoint(curriculum_agent, tmp_path) -> None:
     """--etape E1 (init='from:P1') + --resume-from : le checkpoint utilisateur est conserve,
     pas remplace par le stage_model_path de P1."""
+    import json
+    import zipfile
+
     ckpt = tmp_path / "ppo_checkpoint_640000_steps.zip"
-    ckpt.write_bytes(b"POIDS")
+    # Zip SB3 reduit, pour la meme raison que `_write_stage_model` : c'est de CE checkpoint que
+    # la rampe d'entropie repart quand l'utilisateur en nomme un explicitement.
+    with zipfile.ZipFile(ckpt, "w") as archive:
+        archive.writestr("data", json.dumps({"ent_coef": 0.0177}))
     # Le modele P1 EXISTE aussi, pour s'assurer que stage_init_source n'est pas utilise.
     _write_stage_model(curriculum_agent.models_root, "P1")
     args = _args("E1")
