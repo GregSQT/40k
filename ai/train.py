@@ -27,6 +27,7 @@ if sys.platform == 'win32':
 import subprocess
 import json
 import multiprocessing
+import zipfile
 from copy import deepcopy
 
 # Load training_env from config/config.json (MUST be before numpy/torch import)
@@ -4844,6 +4845,74 @@ def _pin_deployment_ramp_for_warm_start(cfg: Dict[str, Any]) -> None:
     schedule["active_ratio_start"] = end
 
 
+def read_model_ent_coef(model_zip_path: str) -> float:
+    """Coefficient d'entropie que porte un modele SB3 sur disque.
+
+    Lu dans le `data` du zip plutot qu'en chargeant le modele : la valeur est necessaire AVANT
+    toute construction d'environnement, pour poser la rampe, et un `MaskablePPO.load` couterait
+    ici plusieurs secondes et exigerait un espace d'observation deja resolu.
+
+    `ent_coef` est un flottant dans un PPO SB3 — c'est `EntropyScheduleCallback` qui le reecrit
+    au fil du run, pas un schedule serialise. Une valeur absente ou non numerique est une
+    surprise sur laquelle il faut lever : la rampe partirait sinon d'un chiffre invente.
+    """
+    with zipfile.ZipFile(model_zip_path) as archive:
+        data = json.loads(archive.read("data"))
+    if "ent_coef" not in data:
+        raise KeyError(
+            f"Modele repris sans `ent_coef` : {model_zip_path}. La rampe d'entropie d'une etape "
+            "reprise a chaud part de la valeur du modele, elle ne peut pas la deviner."
+        )
+    ent_coef = data["ent_coef"]
+    if not isinstance(ent_coef, (int, float)) or isinstance(ent_coef, bool):
+        raise TypeError(
+            f"`ent_coef` du modele repris n'est pas un nombre ({ent_coef!r}, {model_zip_path})."
+        )
+    return float(ent_coef)
+
+
+def _pin_entropy_ramp_for_warm_start(cfg: Dict[str, Any], model_ent_coef: float) -> None:
+    """Fait partir la rampe d'entropie du niveau ATTEINT par le modele repris.
+
+    Jumeau exact de `_pin_deployment_ramp_for_warm_start`, meme defaut de fond : une etape qui
+    reprend des poids herite d'un modele ayant deja parcouru une rampe, et la redeclarer depuis
+    son `start` de config efface ce que le run precedent a converge.
+
+    MESURE qui l'impose, etape P2 du 2026-09-04 : P1 s'est arretee a un `ent_coef` d'environ
+    0,018 et P2 est repartie a 0,100, soit un facteur cinq. L'evaluation bots est tombee de 0,911
+    a 0,778 pendant les seuls 10 000 episodes de warmup — joues SANS pool, donc contre les memes
+    bots que P1 — puis a 0,694 ; le score contre P1, ou l'agent devait etre a 0,50 puisqu'il part
+    de ses propres poids, est tombe a 0,118. La politique promue avait ete detruite avant meme de
+    rencontrer son adversaire.
+
+    CONTINUITE STRICTE, et non un regain d'exploration au changement d'adversaire : la rampe du
+    pool (`warmup_episodes` puis interpolation) sert deja cette adaptation, progressivement. Un
+    regain, lui, ne peut que detruire — c'est ce qui vient d'etre mesure. Si un curriculum en veut
+    un un jour, il devra l'exprimer comme un multiplicateur borne de la valeur atteinte, jamais
+    comme une valeur absolue redeclaree.
+
+    Le `start` du JSON n'est pas efface : il reste la valeur d'un demarrage a froid (`init:
+    "new"`), qui n'a aucun modele d'ou partir. Il devient seulement sans effet sur les etapes
+    reprises, comme `active_ratio_start` l'est deja pour le deploiement.
+    """
+    model_params = cfg.get("model_params")  # get allowed: profil sans model_params = rien a figer
+    if not isinstance(model_params, dict):
+        return
+    ent_coef = model_params.get("ent_coef")  # get allowed: rampe d'entropie optionnelle
+    if not isinstance(ent_coef, dict) or "start" not in ent_coef:
+        return
+    end = float(require_key(ent_coef, "end"))
+    if model_ent_coef < end:
+        raise ValueError(
+            f"Modele repris a un `ent_coef` de {model_ent_coef:.5f}, SOUS le plancher {end:.5f} "
+            "de la rampe de l'etape. Partir du plancher REMONTERAIT l'entropie du modele, partir "
+            "de sa valeur ferait monter la rampe au lieu de la faire descendre : les deux "
+            "trahissent l'intention. Aligner `ent_coef.end` de l'etape sur celui de l'etape "
+            "source, ou declarer l'etape en `init: \"new\"`."
+        )
+    ent_coef["start"] = model_ent_coef
+
+
 def parent_total_episodes(training_config: Dict[str, Any]) -> Optional[int]:
     """Budget d'episodes tel que le PARENT l'a decide — a passer aux workers.
 
@@ -4872,6 +4941,7 @@ def parent_deploy_active_ratio_start(training_config: Dict[str, Any]) -> float:
 def _install_stage_config_overrides(
     config, agent_key: str, opponent_mix: Optional[Dict[str, Any]],
     hp_overrides: Dict[str, Any], warm_start: bool, stage_label: str = "",
+    warm_start_model_path: Optional[str] = None,
 ) -> None:
     """Ce que l'etape impose a TOUTE lecture ulterieure de la config de cet agent.
 
@@ -4902,6 +4972,13 @@ def _install_stage_config_overrides(
     """
     original_load = config.load_agent_training_config
 
+    # Lu UNE fois, ici : le decorateur est rappele a chaque lecture de config, et rouvrir le zip
+    # a chaque fois paierait la lecture pour rien. `None` quand l'etape demarre a froid.
+    warm_start_ent_coef: Optional[float] = (
+        read_model_ent_coef(warm_start_model_path)
+        if warm_start and warm_start_model_path else None
+    )
+
     if warm_start:
         _pre = original_load(agent_key, None)
         _sched = _pre.get("deployment_mode_schedule")
@@ -4914,6 +4991,17 @@ def _install_stage_config_overrides(
                     f"{after:.2f} (au lieu de repartir de {before:.2f}), le modele repris a deja "
                     "parcouru la sienne."
                 )
+        if warm_start_ent_coef is not None:
+            _ent = _pre.get("model_params", {}).get("ent_coef")
+            if isinstance(_ent, dict) and "start" in _ent:
+                declared = float(_ent["start"])
+                if declared != warm_start_ent_coef:
+                    print(
+                        f"🎓 Etape {stage_label} — reprise a chaud : rampe d'entropie demarree a "
+                        f"{warm_start_ent_coef:.5f}, le niveau atteint par le modele repris "
+                        f"(au lieu du {declared:.5f} declare). Repartir au-dessus efface ce que "
+                        "le run precedent a converge."
+                    )
 
     def _load_with_stage(loaded_agent_key: str, phase: Optional[str] = None) -> Dict[str, Any]:
         cfg = original_load(loaded_agent_key, phase)
@@ -4923,6 +5011,10 @@ def _install_stage_config_overrides(
             _apply_stage_hp_overrides(cfg, hp_overrides)
             if warm_start:
                 _pin_deployment_ramp_for_warm_start(cfg)
+                # APRES `_apply_stage_hp_overrides` : c'est justement le `start` declare par
+                # l'etape qu'il faut remplacer, pas celui du profil.
+                if warm_start_ent_coef is not None:
+                    _pin_entropy_ramp_for_warm_start(cfg, warm_start_ent_coef)
         return cfg
 
     config.load_agent_training_config = _load_with_stage
@@ -4990,8 +5082,12 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
     opponent_mix = _stage_opponent_mix(curriculum, stage, canonical_model_path)
     hp_overrides = get_stage_hp_overrides(stage)
     warm_start = source_stage is not None
+    # `args.resume_from` et non `stage_model_path(...)` : les deux branches d'`_apply_stage_init`
+    # y ont depose le modele effectivement repris, y compris quand l'utilisateur en a nomme un
+    # explicitement pour relancer un run plante. C'est de CE modele que part la rampe.
     _install_stage_config_overrides(
-        config, args.agent, opponent_mix, hp_overrides, warm_start, stage_label=args.etape
+        config, args.agent, opponent_mix, hp_overrides, warm_start, stage_label=args.etape,
+        warm_start_model_path=args.resume_from,
     )
     if hp_overrides:
         print(f"🎓 Etape {args.etape} — HP overrides : {list(hp_overrides)}")
