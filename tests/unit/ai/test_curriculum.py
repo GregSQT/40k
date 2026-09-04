@@ -173,12 +173,30 @@ def test_seed_stage_is_new(curriculum) -> None:
     assert stage_init_source(stage) is None
 
 
-def test_learners_start_from_seed(curriculum) -> None:
-    """Tous les learners hors P00 demarrent depuis P00 (warm start commun)."""
-    for name in stage_order(curriculum):
-        stage = require_stage(curriculum, name)
-        if stage["role"] == "learner" and name != "P00":
-            assert stage_init_source(stage) == "P00", name
+def test_learners_form_a_single_chain(curriculum) -> None:
+    """Chaque learner reprend le learner qui le PRECEDE dans `order` — une lignee chainee.
+
+    P00 mis a part (`test_seed_stage_is_new`), un learner ne repart jamais de zero ni d'une etape
+    quelconque : il reprend son predecesseur immediat, les exploiteurs etant sautes puisqu'ils ne
+    sont jamais promus champions. La forme de la lignee ne se voit NULLE PART ailleurs — ni dans
+    `EXPECTED_STAGES`, qui epingle warmup, ratio_end, champion et poids mais pas `init`, ni dans
+    `validate_curriculum`, qui interdit seulement de nommer une etape posterieure. Une etoile
+    (tous depuis P00) et une chaine tournent toutes deux sans erreur : sans ce verrou, passer de
+    l'une a l'autre ne se remarque nulle part, alors que le choix change ce que le curriculum
+    MESURE — deux champions chaines ne sont pas deux runs independants, cf. la docstring de
+    `pool_monotonicity_diagnostic`.
+
+    La chaine est DERIVEE de `order` et non recopiee ici : inserer une etape ne doit pas obliger
+    a rediter ce test. Verrou precedent : « tous les learners depuis P00 », design abandonne le
+    2026-09-04 au profit du chainage, et qui laissait ce test rouge sur main.
+    """
+    learners = [
+        name for name in stage_order(curriculum)
+        if require_stage(curriculum, name)["role"] == "learner"
+    ]
+    assert learners[0] == "P00", learners
+    for previous, name in zip(learners, learners[1:]):
+        assert stage_init_source(require_stage(curriculum, name)) == previous, name
 
 
 def test_a_stage_whose_weights_do_not_reach_ratio_end_is_refused() -> None:
