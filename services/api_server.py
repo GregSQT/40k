@@ -987,6 +987,132 @@ class _EndPhaseEngine(_GameStateHolder, Protocol):
     def execute_semantic_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]: ...
 
 
+def _log_objective_control_snapshot(engine_instance: Any) -> None:
+    """Journal 14.02 : explique pourquoi chaque objectif est tenu, contesté ou vide.
+
+    Appel inconditionnel depuis ``_game_state_for_json``. Déduplique par
+    (tour, phase, snapshot du détail) pour les objectifs actifs, et par tour
+    (avec reset si le plateau a été occupé entre-temps) pour la ligne silence.
+    La clé de dédup (``_objective_control_logged_for_api``) est préfixée ``_`` et
+    donc filtrée du JSON par ``_exclude_game_state_key_for_api_json``.
+    """
+    import json as _json_mod
+
+    from engine.action_log_utils import append_action_log
+    from engine.game_state import iter_living_model_footprints
+
+    game_state = engine_instance.game_state
+    detail: Dict[str, Any] = game_state.get("_objective_control_detail") or {}
+    turn = game_state.get("turn")
+    phase = game_state.get("phase")
+
+    # T1 — valider le détail avant tout effet de bord.
+    _REQUIRED = ("controller", "previous_controller", "player_1_oc", "player_2_oc")
+    for obj_id, entry in detail.items():
+        for key in _REQUIRED:
+            if key not in entry:
+                raise ConfigurationError(
+                    f"_objective_control_detail[{obj_id!r}] manque la clé requise {key!r}."
+                )
+
+    # État de déduplication (préfixe _ → filtré du JSON).
+    state: Dict[str, Any] = game_state.setdefault("_objective_control_logged_for_api", {})
+
+    # Zones d'objectif : obj_id → frozenset de (col, row).
+    # Les objectifs sans 'id' (stubs de test, scénarios partiels) sont ignorés.
+    objectives: List[Dict[str, Any]] = game_state.get("objectives") or []
+    obj_hex_zones: Dict[str, Any] = {}
+    for obj in objectives:
+        oid = obj.get("id")
+        if oid is None:
+            continue
+        hexes_raw = obj.get("hexes") or []
+        hex_set: set = set()
+        for h in hexes_raw:
+            if isinstance(h, dict):
+                col_v, row_v = h.get("col"), h.get("row")
+                if col_v is not None and row_v is not None:
+                    hex_set.add((int(col_v), int(row_v)))
+            elif isinstance(h, (list, tuple)) and len(h) >= 2:
+                hex_set.add((int(h[0]), int(h[1])))
+        obj_hex_zones[oid] = frozenset(hex_set)
+
+    # Comptage figurines vivantes par joueur dans chaque zone.
+    units: List[Dict[str, Any]] = game_state.get("units") or []
+    uid_to_player: Dict[str, int] = {str(u["id"]): int(u["player"]) for u in units}
+    has_units_cache = game_state.get("units_cache") is not None
+
+    models_in_area: Dict[str, Dict[int, int]] = {}
+    for oid, hex_zone in obj_hex_zones.items():
+        counts: Dict[int, int] = {}
+        if hex_zone and uid_to_player and has_units_cache:
+            for uid, player in uid_to_player.items():
+                for footprint in iter_living_model_footprints(game_state, uid):
+                    if footprint & hex_zone:
+                        counts[player] = counts.get(player, 0) + 1
+        models_in_area[oid] = counts
+
+    # Clé de dédup pour les objectifs actifs (tour + phase + contenu du détail).
+    regular_key = (turn, phase, _json_mod.dumps(detail, sort_keys=True, default=str))
+
+    # Collecte des lignes à émettre (objectifs avec 'id' uniquement).
+    entries: List[Dict[str, Any]] = []
+    for obj in objectives:
+        oid = obj.get("id")
+        if oid is None:
+            continue
+        entry_data = detail.get(oid)
+        if entry_data is None:
+            continue
+        controller = entry_data["controller"]
+        previous_controller = entry_data["previous_controller"]
+        p1_oc = int(entry_data["player_1_oc"])
+        p2_oc = int(entry_data["player_2_oc"])
+        counts = models_in_area.get(oid, {})
+        p1_models = counts.get(1, 0)
+        p2_models = counts.get(2, 0)
+
+        # Objectif vraiment vide : aucun contrôleur, jamais tenu, aucun modèle.
+        if (controller is None and previous_controller is None
+                and p1_models == 0 and p2_models == 0):
+            continue
+
+        if controller is None:
+            verdict = "contested — no controller"
+        elif controller == previous_controller:
+            verdict = f"held by P{controller}"
+        else:
+            verdict = f"captured by P{controller}"
+
+        obj_name = obj.get("name", oid)
+        entries.append({
+            "message": (
+                f"OBJECTIVE {obj_name} | OC P1={p1_oc} P2={p2_oc} | "
+                f"models in area P1={p1_models} P2={p2_models} | {verdict}"
+            ),
+            "objectiveId": oid,
+        })
+
+    logged_any = bool(entries)
+
+    if logged_any:
+        if state.get("regular_key") != regular_key:
+            for log_entry in entries:
+                append_action_log(game_state, log_entry)
+            state["regular_key"] = regular_key
+            state["silence_broken"] = True
+    else:
+        # Ligne silence « aucun objectif disputé » — uniquement si le détail existe.
+        if detail:
+            silence_turn = state.get("silence_turn")
+            silence_broken = state.get("silence_broken", False)
+            if silence_turn != turn or silence_broken:
+                append_action_log(game_state, {"message": "aucun objectif disputé"})
+                state["silence_turn"] = turn
+                state["silence_broken"] = False
+        state["regular_key"] = regular_key
+
+
 def _game_state_for_json(
     engine_instance: _SerializableGameSource,
     *,
@@ -1033,6 +1159,7 @@ def _game_state_for_json(
     # Détection de frontière + checkpoint = `refresh_objective_control_on_boundary` (moteur),
     # partagée avec le chemin gym : une seule implémentation pour PvP et entraînement.
     engine_instance.state_manager.refresh_objective_control_on_boundary(engine_instance.game_state)
+    _log_objective_control_snapshot(engine_instance)
 
     had_engine_mask_loops = bool(engine_instance.game_state.get("move_preview_footprint_mask_loops"))
     gs = {
