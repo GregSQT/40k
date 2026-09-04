@@ -33,7 +33,7 @@ Les DEUX sources passent par le meme parseur strict (``_parse_level``) : desarme
 (``0`` / ``false`` / ``no`` / ``off`` / ``n``), niveau, ou erreur. Aucune valeur n'est ignoree en
 silence — c'est par la que se glisse un run entierement vert sans qu'aucun controle ne tourne.
 
-    W40K_MASK_VERIFY=1 python3 ai/train.py --agent ArmageddonAgent --training-config x1_debug \\
+    W40K_MASK_VERIFY=1 python3 ai/train.py --agent ArmageddonAgent_x1 --training-config x1_debug \\
         --scenario bot --new --resolution 1
 
 POURQUOI DEUX NIVEAUX, et pas un seul. Mesure sur 2 episodes du banc d'empreinte : 3,8 s sans

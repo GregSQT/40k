@@ -32,11 +32,11 @@ from ai.training_callbacks import BotEvaluationCallback
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-# Seule la config de `ArmageddonAgent_x1` est verrouillée ici : c'est la seule que le config
-# loader sache atteindre. `config/agents/ArmageddonAgent_old/ArmageddonAgent_training_config.json`
-# porte les mêmes six profils, mais son nom de fichier ne correspond plus à celui de son dossier
-# (`_resolve_agent_config_key` construit `<dossier>/<clé>_training_config.json`), donc aucun run ne
-# peut le charger — lui poser un contrat affirmerait une exigence qu'aucun chemin n'a.
+# `ArmageddonAgent_x1` est le seul agent dont le config loader sache atteindre la configuration
+# d'entraînement, donc le seul à verrouiller ici. Un second dossier en portait une copie complète
+# des six profils sans qu'aucun run ne puisse la charger — son nom de fichier ne répétait plus
+# celui de son dossier, ce que `_resolve_agent_config_key` exige — et il a été supprimé le
+# 2026-09-04 plutôt que maintenu à la main pour personne.
 AGENT_CONFIG = (
     PROJECT_ROOT / "config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json"
 )
