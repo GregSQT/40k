@@ -89,7 +89,8 @@
         "total_episodes": 250000,
         "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
         }
       }
     },
@@ -108,7 +109,8 @@
         "total_episodes": 250000,
         "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
         }
       }
     },
@@ -140,7 +142,8 @@
         "total_episodes": 250000,
         "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
         }
       }
     },
@@ -160,7 +163,8 @@
         "total_episodes": 300000,
         "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
         }
       }
     },
@@ -192,7 +196,8 @@
         "total_episodes": 300000,
         "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
         }
       }
     },
@@ -212,7 +217,8 @@
         "total_episodes": 300000,
         "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
         }
       }
     },
@@ -232,7 +238,8 @@
         "total_episodes": 300000,
         "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
         }
       }
     },
@@ -264,7 +271,8 @@
         "total_episodes": 300000,
         "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
         }
       }
     },
@@ -284,7 +292,8 @@
         "total_episodes": 300000,
         "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
         }
       }
     }
