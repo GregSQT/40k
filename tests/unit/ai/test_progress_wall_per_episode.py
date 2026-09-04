@@ -59,8 +59,9 @@ def _install(monkeypatch, n_envs: int, steps_per_episode: int, episodes_per_slot
     """Pose l'horloge factice, le callback et la capture de stdout. Rend (clock, cb, printed).
 
     `global_episode_offset` simule la rotation de scenarios : le callback du chunk courant
-    affiche un compteur qui CUMULE les chunks precedents, alors que son chronometre, lui, part
-    du debut de ce chunk.
+    n'affiche QUE les episodes de ce chunk, alors que son chronometre part du debut de ce chunk.
+    L'offset du modele repris n'entre PAS dans `total_episodes` (affiché seul depuis le fix
+    display_progress) ; il reste dans `global_episode_offset` pour l'axe TensorBoard.
     """
     clock = _FakeClock(1000.0)
     monkeypatch.setattr(time, "perf_counter", clock.read)
@@ -70,7 +71,7 @@ def _install(monkeypatch, n_envs: int, steps_per_episode: int, episodes_per_slot
     callback = EpisodeTerminationCallback(
         max_episodes=chunk_episodes,
         expected_timesteps=chunk_episodes * steps_per_episode,
-        total_episodes=global_episode_offset + chunk_episodes,
+        total_episodes=chunk_episodes,
         disable_early_stopping=True,
         gate_display_state=gate_display_state,
     )
