@@ -123,14 +123,75 @@ def test_a_model_below_the_floor_is_refused() -> None:
         _pin_entropy_ramp_for_warm_start(_cfg(end=0.01), 0.005)
 
 
-def test_a_profile_without_an_entropy_ramp_is_left_alone() -> None:
-    """Rien a figer quand l'etape ne declare pas de rampe : pas de cle inventee."""
+def test_a_scalar_ent_coef_is_refused() -> None:
+    """Un `ent_coef` scalaire sur une reprise a chaud est refuse, pas ignore.
+
+    `_apply_curriculum_model_params` le pose tel quel sur le modele et `setup_callbacks` ne cree
+    alors aucune rampe : la valeur est figee pour tout le run, sans jamais redescendre. Sur une
+    reprise a chaud c'est le saut d'entropie que cette fonction existe pour empecher, en pire.
+    Passer en silence rendrait le garde-fou inoperant sur ce profil.
+    """
     from ai.train import _pin_entropy_ramp_for_warm_start
 
-    cfg: Dict[str, Any] = {"model_params": {"ent_coef": 0.01}}
+    with pytest.raises(TypeError, match="exige une RAMPE"):
+        _pin_entropy_ramp_for_warm_start({"model_params": {"ent_coef": 0.1}}, 0.0177)
+
+
+def test_a_finished_ramp_endpoint_is_accepted() -> None:
+    """La valeur exacte de fin de rampe ne doit pas etre prise pour un depassement de plancher.
+
+    `EntropyScheduleCallback` rend `start + (end - start) * 1.0`, soit 0.009999999999999995 pour
+    la rampe 0.1 -> 0.01 du profil : c'est le plancher a l'arrondi pres. Un test strict
+    refuserait toute etape chainee apres une etape arrivee au bout de sa rampe, donc toute la
+    chaine a partir de P4.
+    """
+    from ai.train import _pin_entropy_ramp_for_warm_start
+
+    fin_de_rampe = 0.1 + (0.01 - 0.1) * 1.0
+    assert fin_de_rampe < 0.01, "le cas teste n'est plus celui de l'arrondi"
+
+    cfg = _cfg(start=0.1, end=0.01)
+    _pin_entropy_ramp_for_warm_start(cfg, fin_de_rampe)
+
+    assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.01)
+
+
+def test_the_curriculum_object_is_not_mutated() -> None:
+    """La pose ecrit un dict NEUF : le bloc de l'etape est insere PAR REFERENCE.
+
+    `get_stage_hp_overrides` rend `stage["training_config_overrides"]` sans copie et
+    `_apply_stage_hp_overrides` l'insere tel quel, si bien qu'une ecriture en place modifierait le
+    curriculum en memoire — l'objet rendu a `main()` cesserait de correspondre au fichier.
+    """
+    from ai.train import _apply_stage_hp_overrides, _pin_entropy_ramp_for_warm_start
+
+    bloc_etape: Dict[str, Any] = {
+        "model_params": {"ent_coef": {"start": 0.1, "end": 0.01, "decay_fraction": 0.65}}
+    }
+    cfg = _cfg(start=0.05)
+    _apply_stage_hp_overrides(cfg, bloc_etape)
     _pin_entropy_ramp_for_warm_start(cfg, 0.0177)
 
-    assert cfg["model_params"]["ent_coef"] == 0.01
+    assert bloc_etape["model_params"]["ent_coef"]["start"] == pytest.approx(0.1), (
+        "le bloc du curriculum a ete reecrit par alias"
+    )
+    assert cfg["model_params"]["ent_coef"]["start"] == pytest.approx(0.0177)
+
+
+def test_a_nan_entropy_is_refused(tmp_path) -> None:
+    """Un modele diverge sauve un NaN, flottant en regle mais inutilisable comme depart.
+
+    Toute comparaison avec NaN etant fausse, il traverserait le controle de plancher, puis
+    empoisonnerait la perte a chaque pas du run suivant.
+    """
+    from ai.train import read_model_ent_coef
+
+    path = str(tmp_path / "diverge.zip")
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("data", '{"ent_coef": NaN}')
+
+    with pytest.raises(ValueError, match="ni fini ni utilisable"):
+        read_model_ent_coef(path)
 
 
 # ── CABLAGE DANS LE DECORATEUR DE CONFIG ───────────────────────────────────────────────────

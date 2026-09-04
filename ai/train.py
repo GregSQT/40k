@@ -26,6 +26,7 @@ if sys.platform == 'win32':
 
 import subprocess
 import json
+import math
 import multiprocessing
 import zipfile
 from copy import deepcopy
@@ -4868,6 +4869,14 @@ def read_model_ent_coef(model_zip_path: str) -> float:
         raise TypeError(
             f"`ent_coef` du modele repris n'est pas un nombre ({ent_coef!r}, {model_zip_path})."
         )
+    # `isfinite` et pas seulement le type : un run dont l'optimiseur a diverge sauve un NaN, qui
+    # est un flottant en regle. Toute comparaison avec NaN etant fausse, il traverserait le
+    # controle de plancher plus bas, puis empoisonnerait la perte a chaque pas du run suivant.
+    if not math.isfinite(float(ent_coef)):
+        raise ValueError(
+            f"`ent_coef` du modele repris vaut {ent_coef!r} ({model_zip_path}) : ni fini ni "
+            "utilisable comme depart de rampe. Le run qui l'a produit a diverge."
+        )
     return float(ent_coef)
 
 
@@ -4891,26 +4900,53 @@ def _pin_entropy_ramp_for_warm_start(cfg: Dict[str, Any], model_ent_coef: float)
     un un jour, il devra l'exprimer comme un multiplicateur borne de la valeur atteinte, jamais
     comme une valeur absolue redeclaree.
 
+    NE VAUT QUE POUR LES LEARNERS. Un exploiteur reprend les poids du champion pour CHERCHER sa
+    faiblesse : le devier est sa raison d'etre, pas un accident, et le figer au plancher
+    d'entropie du champion lui retirerait le budget d'exploration qui le definit. Il n'a d'ailleurs
+    aucune echappatoire — `validate_exploiter_protocol` lui interdit tout
+    `training_config_overrides`, et `init: "new"` contredirait sa definition meme. L'appelant ne
+    lui applique donc pas cette fonction.
+
     Le `start` du JSON n'est pas efface : il reste la valeur d'un demarrage a froid (`init:
     "new"`), qui n'a aucun modele d'ou partir. Il devient seulement sans effet sur les etapes
     reprises, comme `active_ratio_start` l'est deja pour le deploiement.
     """
-    model_params = cfg.get("model_params")  # get allowed: profil sans model_params = rien a figer
+    model_params = require_key(cfg, "model_params")
     if not isinstance(model_params, dict):
-        return
-    ent_coef = model_params.get("ent_coef")  # get allowed: rampe d'entropie optionnelle
-    if not isinstance(ent_coef, dict) or "start" not in ent_coef:
-        return
-    end = float(require_key(ent_coef, "end"))
-    if model_ent_coef < end:
-        raise ValueError(
-            f"Modele repris a un `ent_coef` de {model_ent_coef:.5f}, SOUS le plancher {end:.5f} "
-            "de la rampe de l'etape. Partir du plancher REMONTERAIT l'entropie du modele, partir "
-            "de sa valeur ferait monter la rampe au lieu de la faire descendre : les deux "
-            "trahissent l'intention. Aligner `ent_coef.end` de l'etape sur celui de l'etape "
-            "source, ou declarer l'etape en `init: \"new\"`."
+        raise TypeError(
+            f"`model_params` doit etre un dict pour figer la rampe d'entropie "
+            f"(got {type(model_params).__name__})."
         )
-    ent_coef["start"] = model_ent_coef
+    ent_coef = require_key(model_params, "ent_coef")
+    if not isinstance(ent_coef, dict) or "start" not in ent_coef:
+        # Un `ent_coef` SCALAIRE n'est pas une rampe : `_apply_curriculum_model_params` le pose
+        # tel quel sur le modele et `setup_callbacks` ne cree aucun callback, donc la valeur est
+        # figee pour tout le run. Sur une reprise a chaud, c'est exactement le saut d'entropie
+        # que cette fonction existe pour empecher, en pire — il ne redescend jamais. Passer
+        # silencieusement rendrait le garde-fou inoperant sur ce profil sans que rien ne le dise.
+        raise TypeError(
+            f"`ent_coef` vaut {ent_coef!r} : une reprise a chaud exige une RAMPE "
+            "({'start', 'end', 'decay_fraction'}), pas un scalaire, qui figerait l'entropie a "
+            "cette valeur pour tout le run sans jamais redescendre."
+        )
+    end = float(require_key(ent_coef, "end"))
+    # `isclose` et non `<` nu : une rampe achevee rend `start + (end - start) * 1.0`, soit
+    # 0.009999999999999995 pour la rampe 0.1 -> 0.01 du profil. C'est le plancher a l'arrondi
+    # pres, et un test strict refuserait toute etape chainee apres une etape arrivee au bout de
+    # sa rampe — c'est-a-dire toute la chaine a partir de P4.
+    if model_ent_coef < end and not math.isclose(model_ent_coef, end, rel_tol=1e-9):
+        raise ValueError(
+            f"Modele repris a un `ent_coef` de {model_ent_coef!r}, SOUS le plancher {end!r} de la "
+            "rampe de l'etape. Partir du plancher REMONTERAIT l'entropie du modele, partir de sa "
+            "valeur ferait monter la rampe au lieu de la faire descendre : les deux trahissent "
+            "l'intention. Aligner `ent_coef.end` de l'etape sur celui de l'etape source, ou "
+            "declarer l'etape en `init: \"new\"`."
+        )
+    # Un dict NEUF, jamais une ecriture dans celui-ci : `get_stage_hp_overrides` rend le bloc
+    # `training_config_overrides` de l'etape PAR REFERENCE et `_apply_stage_hp_overrides` l'insere
+    # tel quel, si bien qu'ecrire ici modifierait le curriculum en memoire — l'objet que
+    # `_prepare_curriculum_stage` rend a `main()` cesserait de correspondre au fichier.
+    model_params["ent_coef"] = {**ent_coef, "start": max(model_ent_coef, end)}
 
 
 def parent_total_episodes(training_config: Dict[str, Any]) -> Optional[int]:
@@ -4938,10 +4974,26 @@ def parent_deploy_active_ratio_start(training_config: Dict[str, Any]) -> float:
     return float(require_key(schedule, "active_ratio_start"))
 
 
+def _is_phase_config(cfg: Dict[str, Any]) -> bool:
+    """Ce dict est-il un PROFIL d'entrainement, ou le fichier multi-profils entier ?
+
+    `config_loader.load_agent_training_config(agent, None)` rend le fichier complet, dont les
+    cles sont des noms de profils ; avec une phase, il rend le profil. Les deux traversent le
+    decorateur — `_require_training_config_phase` demande justement le fichier entier pour lister
+    les profils disponibles — et poser une rampe dessus ecrirait des cles a cote des profils, que
+    personne ne lit, ou ferait lever la lecture stricte de la rampe d'entropie.
+
+    Le test porte sur des MARQUEURS de profil et non sur une cle unique : un profil reduit est un
+    cas legitime (les doubles de test n'en portent qu'une partie), alors qu'un fichier
+    multi-profils n'a aucun de ces trois noms a son premier niveau.
+    """
+    return any(key in cfg for key in ("model_params", "deployment_mode_schedule", "total_episodes"))
+
+
 def _install_stage_config_overrides(
     config, agent_key: str, opponent_mix: Optional[Dict[str, Any]],
     hp_overrides: Dict[str, Any], warm_start: bool, stage_label: str = "",
-    warm_start_model_path: Optional[str] = None,
+    warm_start_model_path: Optional[str] = None, pin_entropy_ramp: bool = True,
 ) -> None:
     """Ce que l'etape impose a TOUTE lecture ulterieure de la config de cet agent.
 
@@ -4973,35 +5025,27 @@ def _install_stage_config_overrides(
     original_load = config.load_agent_training_config
 
     # Lu UNE fois, ici : le decorateur est rappele a chaque lecture de config, et rouvrir le zip
-    # a chaque fois paierait la lecture pour rien. `None` quand l'etape demarre a froid.
-    warm_start_ent_coef: Optional[float] = (
-        read_model_ent_coef(warm_start_model_path)
-        if warm_start and warm_start_model_path else None
-    )
+    # a chaque fois paierait la lecture pour rien.
+    warm_start_ent_coef: Optional[float] = None
+    if warm_start and pin_entropy_ramp:
+        # PAS de repli sur None quand le chemin manque : une reprise a chaud sans modele source
+        # est un etat impossible en production — les deux branches d'`_apply_stage_init` posent
+        # `args.resume_from` — et l'accepter en silence rendrait le garde-fou inoperant sur le
+        # chemin meme qu'il protege.
+        warm_start_ent_coef = read_model_ent_coef(
+            require_present(warm_start_model_path, "warm_start_model_path")
+        )
 
-    if warm_start:
-        _pre = original_load(agent_key, None)
-        _sched = _pre.get("deployment_mode_schedule")
-        if isinstance(_sched, dict):
-            before = float(require_key(_sched, "active_ratio_start"))
-            after = float(require_key(_sched, "active_ratio_end"))
-            if before != after:
-                print(
-                    f"🎓 Etape {stage_label} — reprise a chaud : rampe de deploiement figee a "
-                    f"{after:.2f} (au lieu de repartir de {before:.2f}), le modele repris a deja "
-                    "parcouru la sienne."
-                )
-        if warm_start_ent_coef is not None:
-            _ent = _pre.get("model_params", {}).get("ent_coef")
-            if isinstance(_ent, dict) and "start" in _ent:
-                declared = float(_ent["start"])
-                if declared != warm_start_ent_coef:
-                    print(
-                        f"🎓 Etape {stage_label} — reprise a chaud : rampe d'entropie demarree a "
-                        f"{warm_start_ent_coef:.5f}, le niveau atteint par le modele repris "
-                        f"(au lieu du {declared:.5f} declare). Repartir au-dessus efface ce que "
-                        "le run precedent a converge."
-                    )
+    # UNE seule annonce par run, posee au premier passage du decorateur : la config est relue des
+    # dizaines de fois. La lire ICI pour l'annonce ne marcherait pas — `original_load(agent_key,
+    # None)` rend le FICHIER multi-profils entier (`config_loader`, branche `phase is None`), donc
+    # `model_params` y est toujours absent et le message ne partait jamais.
+    announced: Dict[str, bool] = {}
+
+    def _announce_once(key: str, message: str) -> None:
+        if not announced.get(key):
+            announced[key] = True
+            print(message)
 
     def _load_with_stage(loaded_agent_key: str, phase: Optional[str] = None) -> Dict[str, Any]:
         cfg = original_load(loaded_agent_key, phase)
@@ -5009,12 +5053,33 @@ def _install_stage_config_overrides(
             if opponent_mix is not None:
                 cfg["opponent_mix"] = opponent_mix
             _apply_stage_hp_overrides(cfg, hp_overrides)
-            if warm_start:
+            if warm_start and _is_phase_config(cfg):
+                _sched = cfg.get("deployment_mode_schedule")  # get allowed: bloc optionnel
+                if isinstance(_sched, dict):
+                    before = float(require_key(_sched, "active_ratio_start"))
+                    after = float(require_key(_sched, "active_ratio_end"))
+                    if before != after:
+                        _announce_once("deploy", (
+                            f"🎓 Etape {stage_label} — reprise a chaud : rampe de deploiement "
+                            f"figee a {after:.2f} (au lieu de repartir de {before:.2f}), le "
+                            "modele repris a deja parcouru la sienne."
+                        ))
                 _pin_deployment_ramp_for_warm_start(cfg)
                 # APRES `_apply_stage_hp_overrides` : c'est justement le `start` declare par
                 # l'etape qu'il faut remplacer, pas celui du profil.
                 if warm_start_ent_coef is not None:
+                    declared = float(require_key(
+                        require_key(require_key(cfg, "model_params"), "ent_coef"), "start"
+                    ))
                     _pin_entropy_ramp_for_warm_start(cfg, warm_start_ent_coef)
+                    posed = float(cfg["model_params"]["ent_coef"]["start"])
+                    if declared != posed:
+                        _announce_once("entropy", (
+                            f"🎓 Etape {stage_label} — reprise a chaud : rampe d'entropie "
+                            f"demarree a {posed:.5f}, le niveau atteint par le modele repris "
+                            f"(au lieu du {declared:.5f} declare). Repartir au-dessus efface ce "
+                            "que le run precedent a converge."
+                        ))
         return cfg
 
     config.load_agent_training_config = _load_with_stage
@@ -5088,6 +5153,10 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
     _install_stage_config_overrides(
         config, args.agent, opponent_mix, hp_overrides, warm_start, stage_label=args.etape,
         warm_start_model_path=args.resume_from,
+        # Un exploiteur reprend le champion pour CHERCHER sa faiblesse : le devier est sa raison
+        # d'etre. Le figer au plancher d'entropie du champion lui retirerait le budget
+        # d'exploration qui le definit, et il n'a aucune echappatoire — ni override, ni `new`.
+        pin_entropy_ramp=not is_exploiter_stage(stage),
     )
     if hp_overrides:
         print(f"🎓 Etape {args.etape} — HP overrides : {list(hp_overrides)}")
