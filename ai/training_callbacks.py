@@ -2665,7 +2665,6 @@ class _EvalPoolOwnerMixin:
     _eval_pool: Optional[Any] = None
     _eval_n_workers: Optional[int] = None
     _pool_kwargs: Optional[Dict[str, Any]] = None
-    _pool_kwargs_resolved: bool = False
 
     def resolve_eval_pool_params(self) -> None:
         """Lit la config du pool et la mémorise. Idempotent, ne démarre AUCUN processus.
@@ -2681,7 +2680,7 @@ class _EvalPoolOwnerMixin:
         chronomètre de `bot_eval_task_timeout_seconds` court déjà (cf.
         `_collect_parallel_results_with_timeouts`).
         """
-        if self._pool_kwargs_resolved:
+        if self._eval_n_workers is not None:
             return
         from ai.bot_evaluation import _strip_phase_suffix
 
@@ -2703,7 +2702,6 @@ class _EvalPoolOwnerMixin:
             # doit s'arrêter, pas sonder à 4 workers choisis par le code.
             n_workers = int(require_key(callback_params, "bot_eval_n_workers_intermediate"))
         self._eval_n_workers = n_workers
-        self._pool_kwargs_resolved = True
         if n_workers <= 1:
             return
         self._pool_kwargs = {
