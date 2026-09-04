@@ -19,10 +19,16 @@ DEUX choses sont verrouillees ici, et la seconde est celle qui a failli passer :
 
 from __future__ import annotations
 
+import ast
+import functools
 import json
 import os
+import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 import pytest
 
@@ -399,3 +405,137 @@ def test_close_stage_does_not_prepare_the_stage_init(monkeypatch) -> None:
     # La cloture neutralisee rend 0 : le dispatch est bien alle jusqu'au bout SANS passer par la
     # preparation d'etape.
     assert exit_code == 0
+
+
+# ── ANCRE episodes_trained APRÈS CRASH+RESUME ───────────────────────────────────────────────────
+#
+# Scénario : étape P1 `init: from:P0`, run planté en cours d'étape, relancé avec
+# --resume-from <checkpoint>. Le canonique porte l'état DU CHECKPOINT (C épisodes), pas celui de
+# l'archive source (S épisodes, S < C). Les deux chemins de clôture doivent s'accorder sur le
+# même episodes_trained = C - S.
+#
+# Chemin --close-stage  : _run_info_from_disk → load_run_state(source)  → offset = S.
+# Chemin run nominal    : stage_origin(canonical, stage).episodes        → offset = S.
+# La MÊME ancre doit être utilisée ; c'est ce que ce test verrouille.
+
+
+def _write_sb3_zip(path: str, num_timesteps: int) -> None:
+    """Crée un zip minimal lisible par stage_origin (zipfile + clé 'data')."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("data", json.dumps({"num_timesteps": num_timesteps, "ent_coef": 0.01}))
+
+
+def test_episodes_trained_anchor_identical_for_both_closure_paths_after_crash_resume(
+    tmp_path,
+) -> None:
+    """Crash+resume : run nominal et --close-stage utilisent la même ancre (archive source P0).
+
+    Rouge avant le fix : episode_offset = checkpoint_episodes → run nominal donnait C - C = 0.
+    Vert après le fix  : stage_episode_origin = source_episodes → les deux chemins donnent C - S.
+    """
+    from ai.curriculum import stage_origin
+    from ai.run_state import save_run_state
+    from ai.train import _run_info_from_disk, build_agent_model_path
+
+    models_root = str(tmp_path / "models")
+
+    source_episodes = 50_000
+    checkpoint_episodes = 70_000
+
+    # Archive source P0 : un vrai zip (stage_origin le lit) avec son run_state.
+    canonical = build_agent_model_path(models_root, "ArmageddonAgent_x1")
+    from ai.curriculum import stage_model_path
+    source_path = stage_model_path(canonical, "P0")
+    _write_sb3_zip(source_path, num_timesteps=10_000_000)
+    save_run_state(source_path, source_episodes)
+
+    # Canonique = checkpoint de mi-étape (état après crash+resume, pas l'archive source).
+    os.makedirs(os.path.dirname(canonical), exist_ok=True)
+    with open(canonical, "wb") as fh:
+        fh.write(b"zip")
+    save_run_state(canonical, checkpoint_episodes)
+    with open(f"{canonical}.tb_run.json", "w", encoding="utf-8") as fh:
+        json.dump({"run_dir": "./tensorboard/x1/run_1"}, fh)
+
+    stage = _CURRICULUM["stages"]["P1"]
+
+    # Chemin --close-stage.
+    run_info = _run_info_from_disk(_args(), _Config(models_root), _CURRICULUM)
+    close_stage_trained = run_info["episodes_trained"]
+
+    # Ancre du chemin run nominal (la valeur qui sera passée en stage_episode_origin).
+    nominal_origin = stage_origin(canonical, stage).episodes
+    nominal_trained = checkpoint_episodes - nominal_origin
+
+    assert close_stage_trained == nominal_trained, (
+        f"Les deux chemins de clôture divergent après crash+resume : "
+        f"--close-stage={close_stage_trained}, run nominal={nominal_trained}. "
+        f"L'ancre doit être l'archive source ({source_episodes} épisodes), "
+        f"pas le checkpoint ({checkpoint_episodes} épisodes)."
+    )
+
+
+# ── Verrou AST : stage_episode_origin utilisé dans episodes_trained ─────────────────────────────
+#
+# `train_with_scenario_rotation` lance un vrai training (trop lourd à tester bout-en-bout).
+# L'invariant structurel est verrouillé dans l'AST : la formule de `episodes_trained` passe
+# par `_ep_origin`, qui lui-même dérive de `stage_episode_origin` quand il est fourni.
+# Une mutation naïve (`_ep_origin = episode_offset`) serait détectée ici.
+
+
+@functools.cache
+def _train_with_scenario_rotation_ast() -> ast.FunctionDef:
+    tree = ast.parse((PROJECT_ROOT / "ai" / "train.py").read_text(encoding="utf-8"))
+    definitions = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "train_with_scenario_rotation"
+    ]
+    assert definitions, "`train_with_scenario_rotation` introuvable dans ai/train.py"
+    return definitions[-1]  # implémentation (pas les @overload)
+
+
+def test_stage_episode_origin_is_used_as_episodes_trained_anchor() -> None:
+    """La formule de episodes_trained passe par _ep_origin = stage_episode_origin or episode_offset.
+
+    Rouge sans le fix : _ep_origin = episode_offset (checkpoint, pas archive source).
+    Vert avec le fix  : _ep_origin utilise stage_episode_origin quand fourni.
+    """
+    func = _train_with_scenario_rotation_ast()
+    src = ast.unparse(func)
+
+    # La ligne _ep_origin doit mentionner stage_episode_origin.
+    assert "stage_episode_origin" in src, (
+        "stage_episode_origin absent du corps de train_with_scenario_rotation"
+    )
+    assert "_ep_origin" in src, (
+        "_ep_origin absent : la formule de episodes_trained n'utilise pas stage_episode_origin"
+    )
+    # L'assignation FINALE de episodes_trained (celle qui alimente run_info) doit passer par
+    # _ep_origin. L'assignation d'initialisation `episodes_trained = 0` (ligne ~3521, compteur de
+    # frozen-model-update dans la boucle) n'est pas concernée — on isole en cherchant l'assignation
+    # dont la RHS référence `metrics_tracker`.
+    episodes_trained_final_assigns = [
+        node
+        for node in ast.walk(func)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(t, ast.Name) and t.id == "episodes_trained"
+            for t in node.targets
+        )
+        and any(
+            isinstance(n, ast.Name) and n.id == "_ep_origin"
+            for n in ast.walk(node.value)
+        )
+    ]
+    assert episodes_trained_final_assigns, (
+        "aucune assignation de `episodes_trained` passant par `_ep_origin` trouvée dans "
+        "train_with_scenario_rotation — la formule a été mutée"
+    )
+    for assign in episodes_trained_final_assigns:
+        names_in_rhs = {n.id for n in ast.walk(assign.value) if isinstance(n, ast.Name)}
+        assert "episode_offset" not in names_in_rhs, (
+            f"episodes_trained utilise episode_offset directement (bypass de stage_episode_origin) : "
+            f"{ast.unparse(assign)}"
+        )
