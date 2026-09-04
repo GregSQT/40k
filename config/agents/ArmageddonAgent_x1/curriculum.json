@@ -77,8 +77,8 @@
     "P2": {
       "role": "learner",
       "init": "from:P1",
-      "warmup_episodes": 10000,
-      "ramp_end_episodes": 100000,
+      "warmup_episodes": 0,
+      "ramp_end_episodes": 10000,
       "ratio_start": 0.0,
       "ratio_end": 0.60,
       "pool": [
@@ -87,10 +87,10 @@
       ],
       "training_config_overrides": {
         "total_episodes": 250000,
+        "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "n_epochs": 2,
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
+          "n_epochs": 4,
+          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9}
         }
       }
     },
