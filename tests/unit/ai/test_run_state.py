@@ -192,8 +192,13 @@ def test_companion_path_refuses_a_directory(tmp_path) -> None:
         companion_path(str(tmp_path) + "/", "_run_state.json")
 
 
-def test_progress_display_counts_the_resumed_episodes_on_both_sides() -> None:
-    """Barre de progression : offset des DEUX côtés, sinon 1000 % et une ETA négative."""
+def test_progress_display_shows_only_current_run_episodes() -> None:
+    """Barre de progression : n'affiche QUE les episodes du run courant.
+
+    Un P2 qui reprend un P1 de 505 000 episodes doit afficher 500/1000, pas 505500/506000.
+    L'offset reste dans global_episode_offset pour l'axe TensorBoard, mais n'entre pas
+    dans le compteur affiché.
+    """
     from ai.training_callbacks import EpisodeTerminationCallback
 
     callback = EpisodeTerminationCallback(max_episodes=1000, expected_timesteps=10_000, total_episodes=1000)
@@ -201,7 +206,7 @@ def test_progress_display_counts_the_resumed_episodes_on_both_sides() -> None:
     callback.episode_count = 500
 
     count, total = callback.display_progress()
-    assert (count, total) == (505500, 506000)
+    assert (count, total) == (500, 1000)
     assert count / total <= 1.0, "barre au-dela de 100 %"
     assert total - count > 0, "reste-a-faire negatif : ETA absurde"
 

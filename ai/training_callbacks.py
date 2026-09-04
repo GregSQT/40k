@@ -341,16 +341,12 @@ class EpisodeTerminationCallback(BaseCallback):
             self.start_time = time.time()
 
     def display_progress(self) -> Tuple[int, int]:
-        """(episodes affiches, total affiche). Les deux dans le MEME referentiel.
+        """(episodes affiches, total affiche) pour le run COURANT uniquement.
 
-        `global_episode_offset` porte les episodes d'un run PRECEDENT (reprise, cf.
-        ai/run_state.py) : le total doit donc les inclure aussi, sinon la barre affiche 1000 %
-        et le reste-a-faire devient negatif, donc l'ETA absurde.
+        L'offset du modele repris (global_episode_offset) n'entre pas dans l'affichage :
+        un P2 qui reprend un P1 de 80 k episodes affiche 10k/250k, pas 90k/330k.
         """
-        return (
-            self.global_episode_offset + self.episode_count,
-            self.global_episode_offset + self.total_episodes,
-        )
+        return (self.episode_count, self.total_episodes)
 
     def _compute_training_roster_count(self, display_episode_count: int) -> Optional[int]:
         """Compute active training roster count (per side) for progress display."""
