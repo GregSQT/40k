@@ -78,7 +78,7 @@
       "init": "from:P1",
       "warmup_episodes": 0,
       "ramp_end_episodes": 10000,
-      "ratio_start": 0.0,
+      "ratio_start": 0.60,
       "ratio_end": 0.60,
       "pool": [
         {"kind": "champion", "members": ["P1"], "weight": 0.40},
@@ -87,9 +87,10 @@
       "training_config_overrides": {
         "total_episodes": 250000,
         "agent_seat_p2_ratio": 0.6,
+        "callback_params": {"bot_eval_freq": 5000},
         "model_params": {
           "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
+          "ent_coef": {"start": 0.017692307692307695, "end": 0.01, "decay_fraction": 0.65}
         }
       }
     },
