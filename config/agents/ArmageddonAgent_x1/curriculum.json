@@ -58,8 +58,8 @@
       "_doc": "Chainage decide le 2026-09-04 : P1 reprend P0, tous les learners suivants reprendront leur predecesseur immediat. Le run du 2026-09-03 avait demarre de P00 directement (cf. training_x1_02-p01.log), mais la spec du chainage prime desormais sur l'historique.",
       "role": "learner",
       "init": "from:P0",
-      "warmup_episodes": 10000,
-      "ramp_end_episodes": 50000,
+      "warmup_episodes": 0,
+      "ramp_end_episodes": 10000,
       "ratio_start": 0.0,
       "ratio_end": 0.50,
       "pool": [
@@ -68,7 +68,6 @@
       "training_config_overrides": {
         "total_episodes": 200000,
         "model_params": {
-          "n_epochs": 2,
           "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
           "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
         }
