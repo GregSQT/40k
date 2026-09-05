@@ -99,6 +99,12 @@ FLED = "FLED"
 ADVANCE = "ADVANCE"
 NOT_REMOVED = "NOT_REMOVED"
 
+#: Escouade dont le fall-back en cours a retenu le mode Desperate Escape (09.07). Posée par
+#: ``desperate_escape_pre_move`` (sélection du mode, AVANT le hazard) et purgée à la fin de
+#: l'activation de move. Une seule escouade bouge à la fois (09.02 « one at a time »), donc un
+#: identifiant suffit. Voir ``squad_is_battle_shocked_in_enemy_er`` pour ce que le verrou décide.
+DESPERATE_ESCAPE_MODE_KEY = "_desperate_escape_mode_squad"
+
 
 def plan_entry_level(entry: Sequence[Any]) -> int:
     """Étage VISÉ par la figurine — 4e élément, TOUJOURS présent (frontière de décodage).
@@ -5919,6 +5925,18 @@ def desperate_escape_pre_move(
         return False, True, 0
     # L11 — mode enregistré pour le formateur step.log (consommé à l'émission action_log flee).
     game_state["_flee_mode"] = "desperate_escape"
+    # 09.07 « BEFORE MOVING: Select fall-back mode » — le mode est ARRÊTÉ ICI, avant le hazard.
+    # Tout ce que 09.07 étiquette « Desperate Escape » (la traversée des figurines ennemies en
+    # WHILE MOVING, les interdits d'AFTER MOVING) découle du mode SÉLECTIONNÉ, pas de l'état
+    # d'engagement d'après-jets : « Those that are labelled with a mode name only apply if you
+    # selected that mode » (encart SELECTING MODES). Sans ce verrou, les consommateurs
+    # re-dérivaient le mode de `squad_is_battle_shocked_in_enemy_er` APRÈS que le hazard a tué
+    # les figurines engagées — le prédicat basculait à False et l'exemption disparaissait au
+    # milieu de son propre mouvement. Deux conséquences mesurées : le masque offrait des
+    # destinations que `validate_move_plan` refusait ensuite (« incohérence masque/exécution »,
+    # ValueError qui tue les workers du training), et le commit PvP reclassait le fall-back en
+    # `normal`, donc sans `units_fled` — l'unité gardait tir et charge après sa retraite.
+    game_state[DESPERATE_ESCAPE_MODE_KEY] = str(squad_id)
     hazard_wounds = roll_hazard_for_unit(str(squad_id), game_state, auto_resolve)
     return True, is_unit_alive(str(squad_id), game_state), hazard_wounds
 
@@ -5938,6 +5956,7 @@ def clear_desperate_escape_state(game_state: Dict[str, Any]) -> None:
     """Purge les clés transitoires posées par desperate_escape_pre_move (chemins de mort)."""
     game_state.pop("_flee_mode", None)
     game_state.pop("_desperate_escape_rolls", None)
+    game_state.pop(DESPERATE_ESCAPE_MODE_KEY, None)
 
 
 def roll_advance_for_squad(squad_id: str, game_state: Dict[str, Any]) -> int:
@@ -12791,6 +12810,39 @@ def _squad_is_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
     return unit_within_engagement_zone_footprints(game_state, stub, ez, max_distance=ez)
 
 
+def desperate_escape_mode_selected(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Le mode Desperate Escape (09.07) a-t-il déjà été retenu pour le fall-back en cours ?
+
+    Lecture du verrou posé par ``desperate_escape_pre_move``. Écrite ici une seule fois : ses
+    trois lecteurs (les deux prédicats ci-dessous et la purge de ``end_activation``) comparent
+    sinon le même littéral chacun de leur côté.
+    """
+    return str(game_state.get(DESPERATE_ESCAPE_MODE_KEY)) == str(squad_id)  # get allowed
+
+
+def squad_move_is_fall_back(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """« Le mouvement que cette escouade est en train de faire est-il un fall-back ? » (09.07)
+
+    SOURCE UNIQUE des trois sites PvP qui doivent répondre la MÊME chose sur un même mouvement :
+    le badge « fui » de la preview (``movement_preview_move_plan``), le commit du plan
+    par-figurine (``movement_commit_move_plan_handler``) et le commit rapide à l'ancre
+    (``_attempt_movement_to_destination``, qui pose le marquage flee). Les trois lisaient
+    ``_squad_is_in_enemy_er`` chacun de leur côté.
+
+    C'EST INSUFFISANT APRÈS UN DESPERATE ESCAPE. Les jets de hazard (06.03) sont résolus à
+    l'activation, AVANT ces trois lectures : s'ils tuent les seules figurines engagées,
+    l'escouade n'est plus dans l'ER ennemie et le fall-back en cours se relisait comme un move
+    ``normal``. Mesuré : ``commit_move`` ne pose ``units_fled`` que pour ``fall_back``, donc
+    l'unité repartait avec son tir et sa charge intacts, contre 09.07 AFTER MOVING (« not
+    eligible to shoot, declare a charge or start an action ») ; et la preview affichait un badge
+    contredisant ce que le bouton Valider allait faire. Le mode retenu à l'activation fait donc
+    foi — c'est la lecture de 09.07 (« BEFORE MOVING: Select fall-back mode »).
+    """
+    if desperate_escape_mode_selected(game_state, squad_id):
+        return True
+    return _squad_is_in_enemy_er(game_state, str(squad_id))
+
+
 def squad_is_battle_shocked_in_enemy_er(game_state: Dict[str, Any], squad_id: str) -> bool:
     """Escouade battle-shocked ET engagée : les deux conditions d'un Desperate Escape (09.07).
 
@@ -12802,7 +12854,23 @@ def squad_is_battle_shocked_in_enemy_er(game_state: Dict[str, Any], squad_id: st
     NE contient PAS la garde de phase : 09.07 ne parle que du fall-back move, mais tous les
     appelants ne sont pas dans la même position pour le savoir. C'est à l'appelant qui borne
     aussi le pile-in/consolidation (12.03) de la poser.
+
+    DEUX RÉGIMES, et c'est la règle qui les impose. 09.07 fait sélectionner le mode « BEFORE
+    MOVING », et le hazard fait partie de la résolution de ce mode :
+      - mode DÉJÀ retenu (``DESPERATE_ESCAPE_MODE_KEY`` posé) → il fait foi, quoi qu'aient tué
+        les jets. Sans lui, une escouade dont le hazard vient de tuer les seules figurines
+        engagées perdait son exemption de traversée AU MILIEU de son propre mouvement ;
+      - mode pas encore retenu (masque, éligibilité) → on PRÉDIT celui que 09.07 imposera,
+        c'est-à-dire les deux conditions ci-dessous. Le masque est bâti avant le hazard : il ne
+        peut rien lire d'autre, et cette prédiction est exacte puisque le mode est déterminé.
+
+    Le verrou n'a pas besoin d'entrer dans le fingerprint de ``_move_spatial_cache`` : il ne
+    diverge de la prédiction que lorsque des figurines sont MORTES, et une mort déplace toujours
+    ce fingerprint (il porte la position de chaque figurine vivante). Un ensemble mémoïsé avant
+    la pose du verrou vaut donc encore après elle.
     """
+    if desperate_escape_mode_selected(game_state, squad_id):
+        return True
     unit = require_unit_by_id(game_state, str(squad_id))
     return (
         bool(require_key(unit, "battle_shocked"))

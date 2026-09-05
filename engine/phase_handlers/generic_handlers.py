@@ -190,6 +190,16 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
                 episode = game_state.get("episode_number", "?")
                 turn = game_state.get("turn", "?")
                 add_debug_log(game_state, f"[END_ACTIVATION DEBUG] E{episode} T{turn} end_activation: Unit {unit_id_str} NOT removed from move_activation_pool. Pool={pool_before} (len={pool_before_len}), unit_id_str={unit_id_str}, unit_id={unit_id}, arg1={arg1}, arg4={arg4}, arg5={arg5}")
+        # 09.07 — LE MODE MEURT AVEC L'ACTIVATION, comme le jet de charge ci-dessous. Le mode de
+        # fall-back est sélectionné « BEFORE MOVING » pour CE mouvement-là : le laisser derrière
+        # accorderait la traversée des figurines ennemies (WHILE MOVING) aux mouvements suivants
+        # de la même escouade. Ici et pas au commit : le PvP peut abandonner l'activation sans
+        # jamais committer, et cette sortie-là passe quand même par `end_activation`.
+        from engine.phase_handlers.shared_utils import (
+            DESPERATE_ESCAPE_MODE_KEY, desperate_escape_mode_selected,
+        )
+        if desperate_escape_mode_selected(game_state, str(unit_id)):
+            game_state.pop(DESPERATE_ESCAPE_MODE_KEY, None)
     elif arg4 == "SHOOTING":
         if "shoot_activation_pool" in game_state:
             # PRINCIPLE: "Le Pool DOIT gérer les morts" - Use string comparison to handle int/string ID mismatches

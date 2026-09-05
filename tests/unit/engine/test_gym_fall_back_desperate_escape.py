@@ -23,7 +23,10 @@ from unittest.mock import patch
 
 import pytest
 
-from engine.phase_handlers.shared_utils import MOVE_CELL_MAP_CACHE_KEY
+from engine.phase_handlers.shared_utils import (
+    DESPERATE_ESCAPE_MODE_KEY,
+    MOVE_CELL_MAP_CACHE_KEY,
+)
 from engine.w40k_core import W40KEngine
 from tests.unit.engine._config_helpers import (
     _fall_back_base_config as _base_config,
@@ -286,4 +289,259 @@ def test_gym_fall_back_anchor_shifted_skips_move() -> None:
     assert "1" not in gs.get("units_fled", set()), (
         "units_fled posé alors qu'aucun fall back n'a été exécuté : "
         f"{gs.get('units_fled')}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# 09.07 — le MODE survit à ses propres jets de hazard
+#
+# « BEFORE MOVING: Select fall-back mode … Desperate Escape … Make a hazard roll for each model »
+# puis « WHILE MOVING — Desperate Escape: Each model that is moved can be moved through enemy
+# models », et l'encart SELECTING MODES : « Those that are labelled with a mode name only apply
+# if you selected that mode ». Le mode est donc arrêté AVANT les jets, et tout ce qu'il étiquette
+# vaut pour le mouvement entier.
+#
+# Le moteur re-dérivait le mode de `squad_is_battle_shocked_in_enemy_er` À CHAQUE lecture. Quand
+# les jets tuaient les seules figurines engagées, ce prédicat basculait à False au milieu du
+# mouvement et le mode disparaissait avec lui. Les trois tests ci-dessous verrouillent les trois
+# conséquences mesurées.
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+
+#: Ligne de figurines ennemies infranchissable sans l'exemption 09.07 : le contournement dépasse
+#: le budget. Le fixture pose `can_move_through_enemy_model: False`, donc seules les figurines
+#: ennemies bloquent (la bande d'EZ est traversable) — l'exemption est isolée.
+_BARRIER_COL = 22
+_BARRIER_ROWS = list(range(6, 35))
+#: Ancre HORS de l'ER ennemie ; c'est `1#1` qui engage l'escouade, et c'est lui que le hazard tue.
+_DE_ANCHOR = (19, 20)
+_DE_ENGAGED_MODEL = (21, 20)
+#: Au-delà de la ligne ennemie : 5 pas en la traversant, hors budget en la contournant.
+_DE_DEST = (24, 20)
+
+
+def _barrier_cfg() -> Dict[str, Any]:
+    base = _unit_cfg(2, 2, _BARRIER_COL, _BARRIER_ROWS[0])
+    base["HP_CUR"] = len(_BARRIER_ROWS)
+    base["HP_MAX"] = len(_BARRIER_ROWS)
+    base["models"] = [{"col": _BARRIER_COL, "row": r, "VALUE": 10} for r in _BARRIER_ROWS]
+    return base
+
+
+def _engine_behind_enemy_line() -> W40KEngine:
+    """Escouade 1 battle-shocked, engagée par `1#1` seul, derrière une ligne ennemie.
+
+    L'escouade 3 ne sert qu'à garder le pool d'activation non vide : sans elle, la fin
+    d'activation de l'escouade 1 clôt la phase de move du joueur, ce qui RÉINITIALISE
+    `units_moved` / `units_fled` — les assertions de ces tests liraient alors des sets vides
+    sans rien prouver. Elle est hors de portée de tout le reste (coin opposé du plateau).
+    """
+    squad = _unit_cfg(1, 1, _DE_ANCHOR[0], _DE_ANCHOR[1])
+    squad["MOVE"] = 10
+    squad["HP_CUR"] = 2
+    squad["HP_MAX"] = 2
+    squad["models"] = [
+        {"col": _DE_ANCHOR[0], "row": _DE_ANCHOR[1], "VALUE": 100},
+        {"col": _DE_ENGAGED_MODEL[0], "row": _DE_ENGAGED_MODEL[1], "VALUE": 100},
+    ]
+    eng = _make_engine(_base_config([squad, _barrier_cfg(), _unit_cfg(3, 1, 5, 5)]))
+    gs = eng.game_state
+    gs["phase"] = "move"
+    gs["move_activation_pool"] = ["1", "3"]
+    next(u for u in gs["units"] if str(u["id"]) == "1")["battle_shocked"] = True
+    return eng
+
+
+def _hazard_kills_engaged_model(squad_id, game_state, auto_resolve, **kwargs) -> int:
+    """Jets 06.03 : seule la figurine engagée meurt, l'ancre survit et ne bouge pas.
+
+    Remplace UNIQUEMENT la résolution des jets. `desperate_escape_pre_move` — qui sélectionne le
+    mode — reste le vrai code : c'est lui qui est sous test.
+    """
+    from engine.phase_handlers.shared_utils import destroy_model
+
+    destroy_model(game_state, "1#1", "hazard")
+    return 1
+
+
+def test_desperate_escape_keeps_enemy_traversal_after_hazard_losses() -> None:
+    """Masque ⊆ exécutable à travers les pertes du hazard (crash training P2, 2026-09-05).
+
+    Le masque offre (24,20) parce que l'exemption 09.07 laisse le pool traverser la ligne
+    ennemie. Les jets tuent ensuite `1#1`, seule figurine engagée : l'escouade sort de l'ER
+    ennemie sans que l'ancre bouge, donc le garde `fall_back_anchor_shifted` ne se déclenche pas.
+    Sans le verrou de mode, `validate_move_plan` re-bloque les figurines ennemies et refuse la
+    destination que le masque venait d'offrir → `ValueError: execute_squad_move a échoué …
+    incohérence masque/exécution`, qui tue les workers `SubprocVecEnv` du training.
+
+    Cycle rouge→vert : supprimer `game_state[DESPERATE_ESCAPE_MODE_KEY] = str(squad_id)` de
+    `desperate_escape_pre_move` fait remonter ce ValueError.
+    """
+    from engine.phase_handlers.shared_utils import build_squad_move_cell_map
+
+    eng = _engine_behind_enemy_line()
+    gs = eng.game_state
+
+    offered = {cell for (cell, _cost) in build_squad_move_cell_map(gs, "1", None).values()}
+    assert _DE_DEST in offered, (
+        f"fixture caduque : le masque n'offre pas {_DE_DEST} avant le hazard, le test "
+        f"n'exercerait plus l'invariant masque ⊆ exécutable"
+    )
+
+    with patch(
+        "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
+        side_effect=_hazard_kills_engaged_model,
+    ):
+        ok, result = eng._process_squad_action(
+            {"action": "squad_fall_back", "squad_id": "1",
+             "destCol": _DE_DEST[0], "destRow": _DE_DEST[1]}
+        )
+
+    assert ok, f"squad_fall_back a échoué après les pertes du hazard : {result}"
+    assert result.get("action") == "squad_fall_back", (
+        f"le move a été sauté au lieu d'être exécuté : {result.get('action')!r}"
+    )
+    assert (gs["units_cache"]["1"]["col"], gs["units_cache"]["1"]["row"]) == _DE_DEST, (
+        "l'escouade n'a pas atteint la destination offerte par le masque : "
+        f"{(gs['units_cache']['1']['col'], gs['units_cache']['1']['row'])}"
+    )
+    assert "1" in gs["units_fled"], "fall back exécuté mais units_fled absent (09.07)"
+    # LE MODE MEURT AVEC L'ACTIVATION : sinon l'escouade garderait la traversée des figurines
+    # ennemies pour tous ses mouvements suivants.
+    assert DESPERATE_ESCAPE_MODE_KEY not in gs, (
+        f"verrou de mode non purgé en fin d'activation : {gs.get(DESPERATE_ESCAPE_MODE_KEY)!r}"
+    )
+
+
+def test_desperate_escape_model_pool_keeps_enemy_traversal_after_hazard_losses() -> None:
+    """Pool par-figurine (preview PvP) : la traversée 09.07 survit aux pertes du hazard.
+
+    `movement_build_model_destinations_pool` lit le même prédicat de mode. Sans le verrou, le
+    survivant ne se voyait plus offrir la moindre case au-delà de la ligne ennemie — la preview
+    PvP amputait un mouvement que la règle autorise.
+    """
+    from engine.phase_handlers.movement_handlers import (
+        movement_build_model_destinations_pool,
+    )
+    from engine.phase_handlers.shared_utils import desperate_escape_pre_move
+
+    eng = _engine_behind_enemy_line()
+    gs = eng.game_state
+
+    with patch(
+        "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
+        side_effect=_hazard_kills_engaged_model,
+    ):
+        is_desperate, is_alive, _ = desperate_escape_pre_move("1", gs, True, True)
+    assert is_desperate and is_alive, "fixture caduque : Desperate Escape non déclenché"
+
+    pool = movement_build_model_destinations_pool(gs, "1#0")
+    reachable = {(int(d[0]), int(d[1])) for d in pool["destinations"]}
+    assert _DE_DEST in reachable, (
+        f"{_DE_DEST} absent du pool par-figurine : l'exemption de traversée 09.07 a été perdue "
+        f"avec les figurines tuées par le hazard"
+    )
+
+
+def test_desperate_escape_commits_as_fall_back_after_hazard_losses() -> None:
+    """Commit PvP : le move reste un fall-back, donc `units_fled` est posé.
+
+    `movement_commit_move_plan_handler` déduisait le type de move de l'engagement relu AU COMMIT.
+    Après des pertes qui sortent l'escouade de l'ER ennemie, il committait `normal` — et
+    `commit_move` ne pose `units_fled` que pour `fall_back`. L'unité repartait avec son tir et sa
+    charge intacts, contre 09.07 AFTER MOVING (« not eligible to shoot, declare a charge or start
+    an action »).
+
+    Cycle rouge→vert : retirer le terme `DESPERATE_ESCAPE_MODE_KEY` de `was_engaged` dans
+    `movement_commit_move_plan_handler` fait tomber l'assertion `units_fled`.
+    """
+    from engine.phase_handlers.movement_handlers import (
+        movement_commit_move_plan_handler,
+    )
+    from engine.phase_handlers.shared_utils import desperate_escape_pre_move
+
+    eng = _engine_behind_enemy_line()
+    gs = eng.game_state
+
+    with patch(
+        "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
+        side_effect=_hazard_kills_engaged_model,
+    ):
+        desperate_escape_pre_move("1", gs, True, True)
+
+    # Repli d'UN hexe vers l'arrière : le type de move est ce qui est testé, pas le trajet.
+    ok, result = movement_commit_move_plan_handler(
+        gs, "1", {"plan": [["1#0", _DE_ANCHOR[0] - 1, _DE_ANCHOR[1], 0]]}
+    )
+
+    assert ok, f"commit du plan de fall back refusé : {result}"
+    assert "1" in gs.get("units_fled", set()), (
+        "fall back committé sans units_fled : le move a été reclassé en normal parce que les "
+        "pertes du hazard ont sorti l'escouade de l'ER ennemie — l'unité garde tir et charge"
+    )
+
+
+def test_desperate_escape_preview_badge_matches_commit_after_hazard_losses() -> None:
+    """Preview PvP : le badge « fui » dit ce que le bouton Valider va faire.
+
+    `movement_preview_move_plan` et le handler de commit lisent désormais la même source
+    (`squad_move_is_fall_back`). Sans elle, la preview annonçait `would_flee=False` sur un ghost
+    que le commit enregistre en fall-back : l'affichage contredisait l'action.
+    """
+    from engine.phase_handlers.movement_handlers import movement_preview_move_plan
+    from engine.phase_handlers.shared_utils import desperate_escape_pre_move
+
+    eng = _engine_behind_enemy_line()
+    gs = eng.game_state
+
+    with patch(
+        "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
+        side_effect=_hazard_kills_engaged_model,
+    ):
+        desperate_escape_pre_move("1", gs, True, True)
+
+    preview = movement_preview_move_plan(
+        gs, "1", [("1#0", _DE_ANCHOR[0] - 1, _DE_ANCHOR[1], 0)]
+    )
+    assert preview["would_flee"] is True, (
+        "preview annonce un move normal alors que le commit posera units_fled"
+    )
+
+
+def test_desperate_escape_quick_move_marks_flee_after_hazard_losses() -> None:
+    """Commit rapide à l'ancre (PvP) : le marquage flee survit aux pertes du hazard.
+
+    `_attempt_movement_to_destination` déduisait la fuite du même engagement relu au commit.
+    C'est ce marquage qui pose `units_fled` sur ce chemin-là : sans le mode retenu, une retraite
+    désespérée y était enregistrée comme un déplacement ordinaire.
+    """
+    from engine.phase_handlers.movement_handlers import (
+        movement_build_valid_destinations_pool,
+        movement_destination_selection_handler,
+    )
+    from engine.phase_handlers.shared_utils import desperate_escape_pre_move
+
+    eng = _engine_behind_enemy_line()
+    gs = eng.game_state
+
+    with patch(
+        "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
+        side_effect=_hazard_kills_engaged_model,
+    ):
+        desperate_escape_pre_move("1", gs, True, True)
+
+    gs["active_movement_unit"] = "1"
+    movement_build_valid_destinations_pool(gs, "1")
+    dest = (_DE_ANCHOR[0] - 1, _DE_ANCHOR[1])
+    assert dest in gs["valid_move_destinations_pool"], (
+        f"fixture caduque : {dest} absent du pool de repli"
+    )
+
+    ok, result = movement_destination_selection_handler(
+        gs, "1", {"destCol": dest[0], "destRow": dest[1]}
+    )
+
+    assert ok, f"commit rapide refusé : {result}"
+    assert "1" in gs.get("units_fled", set()), (
+        "commit rapide enregistré comme move normal : le marquage flee 09.07 a été perdu avec "
+        "les figurines tuées par le hazard"
     )

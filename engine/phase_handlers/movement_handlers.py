@@ -42,6 +42,7 @@ from .shared_utils import (
     get_coherency_subhex, get_cohesion_max_subhex, get_min_neighbors,
     coherency_violation_flags,
     _compute_unit_occupied_hexes, _squad_is_in_enemy_er, squad_is_battle_shocked_in_enemy_er,
+    squad_move_is_fall_back,
     roll_advance_for_squad, unit_is_in_strategic_reserves,
     MovePlan, parse_model_plan_with_orientation, plan_entry_level, plan_entry_model_orientation,
     resolve_model_effective_level,
@@ -1428,8 +1429,10 @@ def _attempt_movement_to_destination(
     # Store original position
     orig_col, orig_row = require_unit_position(unit, game_state)
 
-    # Flee detection: was adjacent to enemy before move
-    was_adjacent = _squad_is_in_enemy_er(game_state, str(unit["id"]))
+    # Flee detection : ce mouvement est-il un Fall Back ? MEME source que le commit du plan
+    # par-figurine et que le badge de preview — le hazard d'un Desperate Escape a pu retirer
+    # les figurines engagees, et c'est ce marquage-la qui pose `units_fled` (09.07 AFTER MOVING).
+    was_adjacent = squad_move_is_fall_back(game_state, str(unit["id"]))
 
     # Final footprint-aware occupation check IMMEDIATELY before position assignment.
     # Prevents race conditions from reactive moves between pool build and commit.
@@ -4501,10 +4504,11 @@ def movement_preview_move_plan(
 
     coherency_ok = not any(cohesion_red)
     all_valid = len(per_model) > 0 and all(per_model.values())
-    # would_flee : l escouade est-elle actuellement engagee (positions PRE-move) ? Si oui,
-    # tout commit sera un Fall Back => badge fui sur le ghost de preview. Independant du plan
-    # (meme primitive bord-a-bord que le commit, cf was_engaged dans le handler de commit).
-    would_flee = _squad_is_in_enemy_er(game_state, str(squad_id))
+    # would_flee : le mouvement en cours est-il un Fall Back ? Si oui, badge fui sur le ghost de
+    # preview. Independant du plan, et MEME source que le commit (`squad_move_is_fall_back`) :
+    # sur un Desperate Escape dont le hazard a tue les figurines engagees, relire l'engagement
+    # ici afficherait « pas de fuite » sur un ghost que le bouton Valider committe en fall-back.
+    would_flee = squad_move_is_fall_back(game_state, str(squad_id))
     return {
         "per_model": per_model,
         "coherency_ok": coherency_ok,
@@ -4558,8 +4562,10 @@ def movement_commit_move_plan_handler(
         }
 
     # Desperate Escape (09.07) : le hazard est désormais résolu à l'ACTIVATION (action
-    # hazard_confirm), plus au commit. Ici on commit un Fall Back déjà autorisé.
-    was_engaged = _squad_is_in_enemy_er(game_state, str(squad_id))
+    # hazard_confirm), plus au commit. Ici on commit un Fall Back déjà autorisé — et c'est
+    # pourquoi l'engagement ne peut PAS être relu ici seul : cf. `squad_move_is_fall_back`.
+    # Le chemin gym ne passe pas ici, il transmet le `move_type` décidé au masque.
+    was_engaged = squad_move_is_fall_back(game_state, str(squad_id))
 
     _adv_roll = _advance_roll_for(str(squad_id), game_state)
     if _adv_roll is not None and not was_engaged:
