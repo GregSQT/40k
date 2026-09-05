@@ -1290,7 +1290,7 @@ def movement_set_fly_mode_handler(game_state: Dict[str, Any], unit_id: str, acti
         "took_to_skies": declared,
         "valid_destinations": pool,
         "waiting_for_player": True,
-        "would_flee": bool(_squad_is_in_enemy_er(game_state, str(unit_id))),
+        "would_flee": bool(squad_move_is_fall_back(game_state, str(unit_id))),
         "advance_roll": _advance_roll_for(str(unit_id), game_state),
     }
 
@@ -1397,9 +1397,14 @@ def movement_unit_execution_loop(game_state: Dict[str, Any], unit_id: str) -> Tu
         "valid_destinations": game_state["valid_move_destinations_pool"],
         "preview_data": preview_data,
         "waiting_for_player": True,
-        # V11 : engagement de l'escouade dès l'activation (positions PRE-move). Pilote l'UI
-        # des modes de deplacement (engagee => Fall-back/Stationary ; non engagee => Move/Advance).
-        "would_flee": bool(_squad_is_in_enemy_er(game_state, str(unit_id))),
+        # V11 : le mouvement en cours est-il un Fall Back ? Pilote l'UI des modes de deplacement
+        # (fall-back => Fall-back/Stationary ; sinon => Move/Advance). MEME source que le commit
+        # (`squad_move_is_fall_back`) : apres un report d'activation (`postpone`) qui suit un
+        # Desperate Escape, les jets de hazard sont DEJA faits et ne se rejouent pas — le mode
+        # retenu vaut encore, alors que l'engagement, lui, a pu disparaitre avec les figurines
+        # tuees. Relire l'engagement seul reproposait les modes Move/Advance sur un fall-back
+        # que le commit enregistre en `flee`.
+        "would_flee": bool(squad_move_is_fall_back(game_state, str(unit_id))),
         # V11 : jet d'Advance figé si l'escouade a déjà advancé ce tour (sinon None) — restaure
         # le badge + l'état « advancé » du bouton à la ré-activation après un cancel.
         "advance_roll": _advance_roll_for(str(unit_id), game_state),

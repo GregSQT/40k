@@ -194,7 +194,10 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         # fall-back est sélectionné « BEFORE MOVING » pour CE mouvement-là : le laisser derrière
         # accorderait la traversée des figurines ennemies (WHILE MOVING) aux mouvements suivants
         # de la même escouade. Ici et pas au commit : le PvP peut abandonner l'activation sans
-        # jamais committer, et cette sortie-là passe quand même par `end_activation`.
+        # jamais committer (bouton Annuler), et cette sortie-là passe quand même par ici.
+        # Le REPORT (`postpone`), lui, ne passe pas par `end_activation` et c'est VOULU : il
+        # laisse l'escouade dans le pool, ses jets de hazard sont faits et ne se rejoueront pas,
+        # donc le mode reste retenu jusqu'à la fin réelle de son activation.
         from engine.phase_handlers.shared_utils import (
             DESPERATE_ESCAPE_MODE_KEY, desperate_escape_mode_selected,
         )

@@ -545,3 +545,48 @@ def test_desperate_escape_quick_move_marks_flee_after_hazard_losses() -> None:
         "commit rapide enregistré comme move normal : le marquage flee 09.07 a été perdu avec "
         "les figurines tuées par le hazard"
     )
+
+
+def test_desperate_escape_mode_survives_activation_postpone() -> None:
+    """Report d'activation (`postpone`) : le mode retenu tient jusqu'à la fin RÉELLE.
+
+    `_handle_movement_postpone` repose l'unité sans clore son activation — elle reste dans
+    `move_activation_pool` et sera ré-activée plus tard dans la même phase. Ses jets de hazard
+    sont faits et ne se rejoueront pas : le mode Desperate Escape vaut encore. Le payload de
+    ré-activation doit donc annoncer `would_flee=True`, sans quoi l'UI reproposerait les modes
+    Move/Advance sur un mouvement que le commit enregistre en `flee`.
+    """
+    from engine.phase_handlers.movement_handlers import (
+        _handle_movement_postpone,
+        movement_unit_execution_loop,
+    )
+    from engine.phase_handlers.shared_utils import (
+        desperate_escape_mode_selected, desperate_escape_pre_move,
+    )
+
+    eng = _engine_behind_enemy_line()
+    gs = eng.game_state
+    unit = next(u for u in gs["units"] if str(u["id"]) == "1")
+
+    with patch(
+        "engine.phase_handlers.shared_utils.roll_hazard_for_unit",
+        side_effect=_hazard_kills_engaged_model,
+    ):
+        desperate_escape_pre_move("1", gs, True, True)
+    gs["active_movement_unit"] = "1"
+
+    ok, _ = _handle_movement_postpone(gs, unit)
+    assert ok, "report d'activation refusé"
+    assert "1" in gs["move_activation_pool"], (
+        "fixture caduque : le report doit LAISSER l'escouade dans le pool"
+    )
+    assert desperate_escape_mode_selected(gs, "1"), (
+        "mode purgé au report : la ré-activation reperdrait l'exemption de traversée alors que "
+        "les jets de hazard, eux, ne se rejouent pas"
+    )
+
+    ok, payload = movement_unit_execution_loop(gs, "1")
+    assert ok, f"ré-activation refusée : {payload}"
+    assert payload["would_flee"] is True, (
+        "la ré-activation annonce un move normal alors que le commit posera units_fled"
+    )
