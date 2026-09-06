@@ -81,15 +81,16 @@
       "ratio_start": 0.80,
       "ratio_end": 0.80,
       "pool": [
-        {"kind": "champion", "members": ["P1"], "weight": 0.55},
-        {"kind": "ancients", "members": ["P0"], "weight": 0.25}
+        {"kind": "champion", "members": ["P1"], "weight": 0.50},
+        {"kind": "ancients", "members": ["P0"], "weight": 0.30}
       ],
       "training_config_overrides": {
         "total_episodes": 250000,
         "agent_seat_p2_ratio": 0.6,
         "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
+          "learning_rate": {"initial": 0.002, "final": 0.0005, "decay_fraction": 0.9},
+          "ent_coef": {"start": 0.07, "end": 0.01, "decay_fraction": 0.65},
+          "n_epochs": 6
         }
       }
     },
