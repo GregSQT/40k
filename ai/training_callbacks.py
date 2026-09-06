@@ -2655,10 +2655,6 @@ class BotEvaluationCallback(BaseCallback):
                 model_path=model_path,
                 n_workers_override=self.intermediate_n_workers,
             )
-            if self.metrics_tracker is not None:
-                self.metrics_tracker.log_eval_truncations(
-                    require_key(training_probe, "truncations")
-                )
             results["_training_probe_combined"] = float(
                 require_key(training_probe, "combined")
             )

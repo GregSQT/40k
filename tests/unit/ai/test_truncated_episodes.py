@@ -782,6 +782,7 @@ def test_the_eval_path_routes_its_truncations_to_the_tracker(tmp_path, monkeypat
     cb.scenario_pool = "holdout"
     cb.eval_count = 0
     cb.intermediate_n_workers = None
+    cb._next_eval_run_training_probe = False
 
     monkeypatch.setattr(
         tc, "evaluate_against_bots", None, raising=False
