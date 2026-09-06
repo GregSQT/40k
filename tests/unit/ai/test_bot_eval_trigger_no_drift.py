@@ -46,6 +46,7 @@ def _callback(eval_freq: int, initial_marker: int = 0) -> BotEvaluationCallback:
     callback.early_stopping_patience = 0
     callback.should_stop_early = False
     callback.metrics_tracker = cast(Any, SimpleNamespace(episode_count=0))
+    callback.training_probe_every_n_evals = 0
     return callback
 
 

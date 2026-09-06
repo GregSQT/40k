@@ -4252,6 +4252,12 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     from ai.bot_evaluation import validate_bot_eval_worker_params
 
     validate_bot_eval_worker_params(callback_params)
+    training_probe_every_n_evals: int = int(callback_params.get("training_probe_every_n_evals", 0))
+    if isinstance(training_probe_every_n_evals, bool) or not isinstance(training_probe_every_n_evals, int) or training_probe_every_n_evals < 0:
+        raise ValueError(
+            f"callback_params.training_probe_every_n_evals must be an integer >= 0 "
+            f"(got {training_probe_every_n_evals!r})"
+        )
     bot_eval_n_workers_intermediate: Optional[int] = callback_params.get("bot_eval_n_workers_intermediate")
     if bot_eval_n_workers_intermediate is not None:
         if (
@@ -4398,6 +4404,7 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
             save_best_min_episodes=int(callback_params["save_best_min_episodes"]),
             intermediate_n_workers=bot_eval_n_workers_intermediate,
             async_eval_enabled=async_eval_enabled,
+            training_probe_every_n_evals=training_probe_every_n_evals,
         )
         callbacks.append(bot_eval_callback)
 

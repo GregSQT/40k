@@ -1434,7 +1434,8 @@ class BotEvaluationCallback(BaseCallback):
                  async_eval_enabled: bool = True,
                  early_stopping_patience: int = 0,
                  save_best_min_episodes: int = 0,
-                 intermediate_n_workers: Optional[int] = None):
+                 intermediate_n_workers: Optional[int] = None,
+                 training_probe_every_n_evals: int = 0):
         super().__init__(verbose)
         if not training_config_name or not rewards_config_name:
             raise ValueError("BotEvaluationCallback requires training_config_name and rewards_config_name")
@@ -1490,6 +1491,15 @@ class BotEvaluationCallback(BaseCallback):
         self.async_eval_enabled = async_eval_enabled
         self.show_eval_progress = show_eval_progress
         self.scenario_pool = scenario_pool
+        if not isinstance(training_probe_every_n_evals, int) or isinstance(training_probe_every_n_evals, bool) or training_probe_every_n_evals < 0:
+            raise ValueError(
+                f"training_probe_every_n_evals must be an integer >= 0 "
+                f"(got {training_probe_every_n_evals!r})"
+            )
+        self.training_probe_every_n_evals = training_probe_every_n_evals
+        # Capture-et-relai : posé AVANT la soumission du future, lu dans le thread d'éval.
+        # Sûr car un seul future peut être en vol (garde _pending_eval_future is not None).
+        self._next_eval_run_training_probe: bool = False
         self.early_stopping_patience = int(early_stopping_patience)
         self.save_best_min_episodes = int(save_best_min_episodes)
         # Signal d'early stopping : le `combined` de SELECTION (holdout exclu). Il remplace
@@ -2194,6 +2204,15 @@ class BotEvaluationCallback(BaseCallback):
                     results["behavioral_profile"], step=int(eval_marker)
                 )
 
+        # Sonde d'apprentissage (1 eval sur N) : publiee ici pour partager l'abscisse eval_marker.
+        training_probe_combined = results.get("_training_probe_combined")
+        if isinstance(training_probe_combined, float) and self.metrics_tracker is not None:
+            self.metrics_tracker.writer.add_scalar(
+                "bot_eval/training_combined",
+                training_probe_combined,
+                int(eval_marker),
+            )
+
         self._log_scenario_scores(results)
 
         if gate_pass and combined_win_rate > self.best_combined_win_rate and eval_marker >= self.save_best_min_episodes:
@@ -2422,6 +2441,10 @@ class BotEvaluationCallback(BaseCallback):
 
         if should_evaluate:
             self.eval_count += 1
+            self._next_eval_run_training_probe = (
+                self.training_probe_every_n_evals > 0
+                and self.eval_count % self.training_probe_every_n_evals == 0
+            )
             if self.use_episode_freq and self.metrics_tracker is not None:
                 # AVANCE PAR MULTIPLES ENTIERS de `eval_freq`, jamais « = compteur courant ».
                 # L'entraînement vectorisé fait sauter le compteur d'épisodes (plusieurs `dones`
@@ -2617,6 +2640,28 @@ class BotEvaluationCallback(BaseCallback):
         # bilan de fin de run affichait « 0 troncature » (V11 §0.61).
         if self.metrics_tracker is not None:
             self.metrics_tracker.log_eval_truncations(require_key(results, "truncations"))
+        # Sonde d'apprentissage : meme modele, memes bots, meme n_episodes, mais sur les
+        # scenarios d'ENTRAINEMENT. Court dans ce meme thread (async ou sync). Ne gate rien.
+        if self._next_eval_run_training_probe:
+            training_probe = evaluate_against_bots(
+                model=self.model,
+                training_config_name=self.training_config_name,
+                rewards_config_name=self.rewards_config_name,
+                n_episodes=self.n_eval_episodes,
+                controlled_agent=self.rewards_config_name,
+                show_progress=False,
+                deterministic=self.eval_deterministic,
+                scenario_pool="training",
+                model_path=model_path,
+                n_workers_override=self.intermediate_n_workers,
+            )
+            if self.metrics_tracker is not None:
+                self.metrics_tracker.log_eval_truncations(
+                    require_key(training_probe, "truncations")
+                )
+            results["_training_probe_combined"] = float(
+                require_key(training_probe, "combined")
+            )
         return results
 
 
