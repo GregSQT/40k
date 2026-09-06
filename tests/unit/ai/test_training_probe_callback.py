@@ -29,7 +29,7 @@ class TestTrainingProbeFlagFromOnStep:
     Inverser la condition en production (`!= 0` au lieu de `== 0`) doit faire rougir ce test.
     """
 
-    def _make_callback(self):
+    def _make_callback(self, n_evals: int = 3):
         from ai.training_callbacks import BotEvaluationCallback
 
         cb = BotEvaluationCallback.__new__(BotEvaluationCallback)
@@ -40,13 +40,12 @@ class TestTrainingProbeFlagFromOnStep:
         cb.async_eval_enabled = False
         cb.early_stopping_patience = 0
         cb.should_stop_early = False
-        cb.training_probe_every_n_evals = 3
+        cb.training_probe_every_n_evals = n_evals
         return cb
 
     def _collect_probe_flags(self, n_evals: int = 3, steps: int = 9) -> list:
         """Retourne les flags run_training_probe transmis par _on_step sur <steps> évaluations."""
-        cb = self._make_callback()
-        cb.training_probe_every_n_evals = n_evals
+        cb = self._make_callback(n_evals)
         flags: list = []
 
         def _fake_eval(marker, run_training_probe: bool = False, **_):
@@ -83,13 +82,10 @@ class TestTrainingProbeFlagFromOnStep:
         aux évaluations 3, 6 et 9 ; False partout ailleurs."""
         probe_flags = self._collect_probe_flags(n_evals=3, steps=9)
 
-        assert len(probe_flags) == 9, f"9 évals attendues, obtenues : {len(probe_flags)}"
-        expected = {3: True, 6: True, 9: True}
-        for i, flag in enumerate(probe_flags, start=1):
-            wanted = expected.get(i, False)
-            assert flag is wanted, (
-                f"eval {i}: run_training_probe attendu {wanted}, reçu {flag}"
-            )
+        expected = [i % 3 == 0 for i in range(1, 10)]
+        assert probe_flags == expected, (
+            f"run_training_probe attendu {expected}, reçu {probe_flags}"
+        )
 
 
 class TestTrainingProbeValidation:
@@ -188,20 +184,19 @@ class TestTrainingProbeLogging:
         cb._apply_eval_results(_base_results(with_probe=True), eval_marker=5000)
 
         calls = cb.metrics_tracker.writer.add_scalar.call_args_list
-        matching = [c for c in calls if "training_combined" in str(c)]
+        matching = [c for c in calls if c.args[0] == "bot_eval/training_combined"]
         assert matching, (
             f"add_scalar('bot_eval/training_combined') non appelé. Appels: {calls}"
         )
-        for c in calls:
-            if "training_combined" in str(c):
-                assert c.args[1] == pytest.approx(0.75)
+        for c in matching:
+            assert c.args[1] == pytest.approx(0.75)
 
     def test_add_scalar_not_called_when_probe_absent(self):
         cb = _make_apply_cb()
         cb._apply_eval_results(_base_results(with_probe=False), eval_marker=5000)
 
         calls = cb.metrics_tracker.writer.add_scalar.call_args_list
-        matching = [c for c in calls if "training_combined" in str(c)]
+        matching = [c for c in calls if c.args[0] == "bot_eval/training_combined"]
         assert not matching, (
             f"add_scalar('bot_eval/training_combined') appelé alors qu'il ne devrait pas. Appels: {calls}"
         )
