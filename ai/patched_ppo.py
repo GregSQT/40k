@@ -151,6 +151,12 @@ class PatchedMaskablePPO(MaskablePPO):
         _diag_drift_mean_mb0: th.Tensor | None = None
         _diag_logprob_drift_mb0: th.Tensor | None = None
         _diag_ratio_mb0: th.Tensor | None = None
+        # MESURE TEMPORAIRE (2026-09-06) : decomposition de la norme du gradient par terme.
+        # Repond a « le gradient est ecrete dans 93 % des updates a max_grad_norm 0.5 — quel
+        # terme le domine ». Les VALEURS de loss ne repondent pas : policy_loss vaut ~0.0001
+        # parce que normalize_advantage centre les avantages et que le ratio vaut 1 au premier
+        # minibatch, ce qui ne dit rien de son gradient. A RETIRER une fois la mesure exploitee.
+        _diag_grad_norms_mb0: dict[str, float] | None = None
         continue_training = True
         loss: th.Tensor = th.tensor(float("nan"))
 
@@ -211,6 +217,27 @@ class PatchedMaskablePPO(MaskablePPO):
                 entropy_losses_t.append(entropy_loss)
 
                 loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
+
+                # MESURE TEMPORAIRE : norme du gradient de CHAQUE terme, pondere comme dans la
+                # loss. `clip_grad_norm_` avec max_norm=inf retourne la norme sans rien ecreter.
+                # retain_graph=True : trois backward successifs sur le meme graphe, libere par le
+                # backward reel plus bas. Minibatch 0 / epoch 0 seulement, comme les diagnostics
+                # voisins — trois backward par UPDATE, pas par minibatch.
+                if epoch == 0 and _diag_grad_norms_mb0 is None:
+                    _diag_grad_norms_mb0 = {}
+                    for _term_name, _term in (
+                        ("policy", policy_loss),
+                        ("value", self.vf_coef * value_loss),
+                        ("entropy", self.ent_coef * entropy_loss),
+                    ):
+                        self.policy.optimizer.zero_grad()
+                        _term.backward(retain_graph=True)
+                        _diag_grad_norms_mb0[_term_name] = float(
+                            th.nn.utils.clip_grad_norm_(
+                                self.policy.parameters(), float("inf")
+                            )
+                        )
+                    self.policy.optimizer.zero_grad()
 
                 with th.no_grad():
                     approx_kl_div_t = th.mean((th.exp(log_ratio) - 1) - log_ratio)
@@ -288,6 +315,14 @@ class PatchedMaskablePPO(MaskablePPO):
             "diag/ratio_mb0_mean",
             _diag_ratio_mb0.item() if _diag_ratio_mb0 is not None else _nan,
         )
+        # MESURE TEMPORAIRE : decomposition de la norme du gradient (cf. _diag_grad_norms_mb0).
+        for _term_name in ("policy", "value", "entropy"):
+            self.logger.record(
+                f"diag/grad_norm_{_term_name}_mb0",
+                _diag_grad_norms_mb0[_term_name]
+                if _diag_grad_norms_mb0 is not None
+                else _nan,
+            )
         self.logger.record("diag/returns_mean", float(self.rollout_buffer.returns.mean()))
         self.logger.record("diag/old_values_mean", float(self.rollout_buffer.values.mean()))
         self.logger.record("diag/rewards_mean", float(self.rollout_buffer.rewards.mean()))
