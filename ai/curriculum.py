@@ -88,6 +88,7 @@ STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS: frozenset = frozenset({
     "total_episodes", "model_params", "callback_params", "agent_seat_p2_ratio",
 })
 
+
 class _ModelParamSpec(NamedTuple):
     """Contrainte d'une sous-cle de `model_params` surchargeable par une etape."""
 
@@ -572,7 +573,7 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
         )
     if "total_episodes" in overrides:
         ep = overrides["total_episodes"]
-        if not isinstance(ep, int) or ep <= 0:
+        if isinstance(ep, bool) or not isinstance(ep, int) or ep <= 0:
             raise ValueError(
                 f"{source}: stages[{name}].training_config_overrides.total_episodes doit etre "
                 f"un entier > 0 (got {ep!r})"
@@ -640,7 +641,7 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
         for key in ("bot_eval_freq", "bot_eval_final"):
             if key in cp:
                 val = cp[key]
-                if not isinstance(val, int) or val <= 0:
+                if isinstance(val, bool) or not isinstance(val, int) or val <= 0:
                     raise ValueError(
                         f"{source}: stages[{name}].training_config_overrides.callback_params.{key} "
                         f"doit etre un entier > 0 (got {val!r})"

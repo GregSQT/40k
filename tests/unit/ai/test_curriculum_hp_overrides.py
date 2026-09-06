@@ -144,6 +144,25 @@ def test_validate_hp_overrides_bool_rejected_on_every_model_param(key):
         _validate_stage_hp_overrides("P2", stage, "<test>")
 
 
+@pytest.mark.parametrize(
+    "overrides, attendu",
+    [
+        ({"total_episodes": True}, "total_episodes"),
+        ({"callback_params": {"bot_eval_freq": True}}, "bot_eval_freq"),
+        ({"callback_params": {"bot_eval_final": True}}, "bot_eval_final"),
+    ],
+)
+def test_validate_hp_overrides_bool_rejected_on_integer_fields(overrides, attendu):
+    """Meme piege que sur `model_params`, sur les trois autres champs entiers du bloc.
+
+    Un `true` y passait aussi pour 1 : un curriculum declarant `total_episodes: true` lancait
+    une etape d'UN episode au lieu d'etre refuse au chargement.
+    """
+    stage = {"role": "learner", "training_config_overrides": overrides}
+    with pytest.raises(ValueError, match=attendu):
+        _validate_stage_hp_overrides("P1", stage, "<test>")
+
+
 def test_validate_hp_overrides_on_exploiter_rejected():
     stage = {
         "role": "exploiter",
