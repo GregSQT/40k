@@ -676,6 +676,20 @@ def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
     # 60 fins d'episode pour 2 updates : ce sont bien les updates qui cadencent, pas les episodes.
     assert t.ppo_capture_count == 2
 
+    # L'abscisse de chaque point doit etre episode_count (12), pas step_count (0).
+    # Verrou contre un remplacement accidentel de l'axe.
+    all_scalars = _dw(t).scalars
+    curve_steps = {step for k, _v, step in all_scalars if k == "00_critical/h_clip_fraction"}
+    assert curve_steps == {t.episode_count}, (
+        f"abscisse PPO health = {curve_steps}, attendu {{episode_count={t.episode_count}}}"
+    )
+
+    # Les seuils doivent partager la meme abscisse que les courbes qu'ils annotent.
+    threshold_steps = {step for k, _v, step in all_scalars if k == "thresholds/clip_fraction_min"}
+    assert curve_steps == threshold_steps, (
+        f"desalignement courbe/seuil : {curve_steps} vs {threshold_steps}"
+    )
+
 
 def test_les_courbes_de_jeu_gardent_leur_point_par_episode() -> None:
     """VERROU : la garde de cadence PPO ne doit PAS deborder sur les courbes d'episode.
@@ -690,6 +704,28 @@ def test_les_courbes_de_jeu_gardent_leur_point_par_episode() -> None:
     keys = [k for k, _, _ in _dw(t).scalars]
     assert keys.count("00_critical/d_win_rate") == 20
     assert keys.count("00_critical/e_episode_reward_smooth") == 20
+
+
+def test_aucun_seuil_emis_avant_la_premiere_capture_ppo() -> None:
+    """VERROU : `_log_thresholds` ne doit pas emettre de point orphelin au tout premier dashboard.
+
+    Au demarrage : ppo_capture_count=0, _last_ppo_health_capture=-1. Le premier appel a
+    `log_critical_dashboard` change ppo_capture_is_new=True, mais hyperparameter_tracking est vide.
+    Sans la garde `len(clip_fractions) >= 1`, les huit `thresholds/*` seraient emis sans qu'aucune
+    des cinq courbes qu'ils annotent ne soit presente — points orphelins sur les graphes Multiline.
+    """
+    t = _tracker_stub()
+    # Vider toutes les listes : simule le demarrage avant le premier update PPO.
+    for key in t.hyperparameter_tracking:
+        t.hyperparameter_tracking[key] = []
+
+    t.log_critical_dashboard()
+
+    keys = [k for k, _, _ in _dw(t).scalars]
+    threshold_keys = [k for k in keys if k.startswith("thresholds/")]
+    assert threshold_keys == [], (
+        f"seuils emis avant la premiere capture PPO : {threshold_keys}"
+    )
 
 
 def test_log_episode_end_rejects_invalid_controlled_player() -> None:
