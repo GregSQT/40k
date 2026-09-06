@@ -74,10 +74,10 @@
       }
     },
     "P2": {
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner EST le champion a l'episode 0 (init from:P1), donc il fait jeu egal avec le pool par construction et n'a rien a etre protege. Mesure du 2026-09-06 : sondes a 1k/2k/3k/4k/5k episodes = 0.453/0.557/0.487/0.420/0.443, moyenne 0.472 a 1.2 sigma de la parite. La rampe ne faisait que remplacer des parties de pool par des parties de bots deja gagnees a 92 %, sans signal correctif, pendant les 10 000 premiers episodes.",
       "role": "learner",
       "init": "from:P1",
       "warmup_episodes": 0,
-      "ramp_end_episodes": 10000,
       "ratio_start": 0.60,
       "ratio_end": 0.60,
       "pool": [
@@ -87,19 +87,18 @@
       "training_config_overrides": {
         "total_episodes": 250000,
         "agent_seat_p2_ratio": 0.6,
-        "callback_params": {"bot_eval_freq": 5000},
         "model_params": {
           "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.017692307692307695, "end": 0.01, "decay_fraction": 0.65}
+          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
         }
       }
     },
     "P3": {
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P2 (init from:P2) et P2 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
       "role": "learner",
       "init": "from:P2",
       "warmup_episodes": 0,
-      "ramp_end_episodes": 10000,
-      "ratio_start": 0.0,
+      "ratio_start": 0.70,
       "ratio_end": 0.70,
       "pool": [
         {"kind": "champion", "members": ["P2"], "weight": 0.40},
@@ -127,11 +126,11 @@
       ]
     },
     "P4": {
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P3 (init from:P3) et P3 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
       "role": "learner",
       "init": "from:P3",
       "warmup_episodes": 0,
-      "ramp_end_episodes": 10000,
-      "ratio_start": 0.0,
+      "ratio_start": 0.75,
       "ratio_end": 0.75,
       "pool": [
         {"kind": "champion", "members": ["P3"], "weight": 0.30},
@@ -148,11 +147,11 @@
       }
     },
     "P5": {
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P4 (init from:P4) et P4 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
       "role": "learner",
       "init": "from:P4",
       "warmup_episodes": 0,
-      "ramp_end_episodes": 10000,
-      "ratio_start": 0.0,
+      "ratio_start": 0.80,
       "ratio_end": 0.80,
       "pool": [
         {"kind": "champion", "members": ["P4"], "weight": 0.35},
@@ -181,11 +180,11 @@
       ]
     },
     "P6": {
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P5 (init from:P5) et P5 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
       "role": "learner",
       "init": "from:P5",
       "warmup_episodes": 0,
-      "ramp_end_episodes": 10000,
-      "ratio_start": 0.0,
+      "ratio_start": 0.80,
       "ratio_end": 0.80,
       "pool": [
         {"kind": "champion", "members": ["P5"], "weight": 0.30},
@@ -202,11 +201,11 @@
       }
     },
     "P7": {
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P6 (init from:P6) et P6 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
       "role": "learner",
       "init": "from:P6",
       "warmup_episodes": 0,
-      "ramp_end_episodes": 10000,
-      "ratio_start": 0.0,
+      "ratio_start": 0.85,
       "ratio_end": 0.85,
       "pool": [
         {"kind": "champion", "members": ["P6"], "weight": 0.30},
@@ -223,11 +222,11 @@
       }
     },
     "P8": {
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P7 (init from:P7) et P7 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
       "role": "learner",
       "init": "from:P7",
       "warmup_episodes": 0,
-      "ramp_end_episodes": 10000,
-      "ratio_start": 0.0,
+      "ratio_start": 0.85,
       "ratio_end": 0.85,
       "pool": [
         {"kind": "champion", "members": ["P7"], "weight": 0.25},
@@ -256,11 +255,11 @@
       ]
     },
     "P9": {
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P8 (init from:P8) et P8 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
       "role": "learner",
       "init": "from:P8",
       "warmup_episodes": 0,
-      "ramp_end_episodes": 10000,
-      "ratio_start": 0.0,
+      "ratio_start": 0.85,
       "ratio_end": 0.85,
       "pool": [
         {"kind": "champion", "members": ["P8"], "weight": 0.25},
