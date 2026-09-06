@@ -323,6 +323,18 @@ class PatchedMaskablePPO(MaskablePPO):
                 if _diag_grad_norms_mb0 is not None
                 else _nan,
             )
+        # PART du gradient qui revient a la POLITIQUE — la seule des trois tetes qui joue les
+        # parties, le critic n'etant appele qu'a l'entrainement. Publiee comme une part et non
+        # comme un rapport policy/value : bornee a [0, 1], elle se lit directement en pourcentage.
+        # Derivee des trois normes ci-dessus, donc aucun backward supplementaire.
+        # MESUREE a 0.235 le 2026-09-06 (vf_coef 0.5) ; attendue vers 0.38 a vf_coef 0.25.
+        # Somme nulle = aucun gradient sur les trois termes, cas ou la part n'est pas definie :
+        # NaN, comme les diagnostics voisins quand leur capture n'a pas eu lieu.
+        _grad_sum = sum(_diag_grad_norms_mb0.values()) if _diag_grad_norms_mb0 else 0.0
+        self.logger.record(
+            "diag/grad_share_policy_mb0",
+            _diag_grad_norms_mb0["policy"] / _grad_sum if _grad_sum > 0.0 else _nan,
+        )
         self.logger.record("diag/returns_mean", float(self.rollout_buffer.returns.mean()))
         self.logger.record("diag/old_values_mean", float(self.rollout_buffer.values.mean()))
         self.logger.record("diag/rewards_mean", float(self.rollout_buffer.rewards.mean()))
