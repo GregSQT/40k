@@ -2,6 +2,45 @@
 
 ---
 
+## 🔴 Régime d'entraînement révisé — P2 à relancer depuis P1 {#regime-2026-09-06}
+
+Deux changements livrés le 2026-09-06. **Ce qui reste à faire : relancer P2 depuis P1.** P1 n'est
+pas rejoué (décision du 2026-09-06 : le temps est déjà payé), sa config est seulement homogénéisée.
+
+**1. Le déploiement `auto` pose désormais les deux camps.** Il ne posait que le joueur contrôlé :
+l'agent était placé au hasard pendant que son adversaire — bot à doctrine, ou champion du pool
+jouant son réseau — se déployait avec sa politique apprise. `r_win_rate_deploy_auto` mesurait donc
+un handicap unilatéral et non l'adaptabilité qu'elle prétend mesurer. Mesure du run x1_long du
+2026-09-06 (~64 000 épisodes) : **0.304** de win-rate en `auto` contre **0.684** en `active`, avec
+un différentiel d'objectifs de **-0.76** contre **+0.19** — l'agent tenait trois quarts d'objectif
+de moins que son adversaire. La référence du 2026-08-12 (0.866 / 0.646, les deux différentiels
+positifs) avait été prise contre des bots à doctrine de pose fixe, bien moins capables d'exploiter
+une pose adverse médiocre.
+
+⚠️ **`r_win_rate_deploy_auto` et `q_obj_held_diff_deploy_auto` changent de définition** : leurs
+valeurs antérieures au 2026-09-06 ne se comparent pas aux suivantes. Attendu au prochain run : la
+courbe `auto` doit remonter vers 0.5 en P2, puisque l'agent EST le champion à l'épisode 0. Si elle
+reste basse, c'est qu'il reste autre chose à chercher.
+
+**2. La part de bots tombe à 30 % en P1, 20 % en P2, 15 % de P3 à P10.** Les six bots sont saturés
+— EndgameBot 0.99, DecapitationBot 0.95, RacerBot 0.94, AlphaStrikeBot 0.93, AttritionBot 0.92,
+ScorerBot 0.86, aucun sous 0.86 — quand le champion du pool est à 0.502 (parité) et P0 à 0.626.
+637 500 épisodes de la lignée partaient contre des adversaires dominés, soit 23 % du budget ; il
+en reste 455 000. Pas 15 % partout : la part de bots suit la **taille du pool**, pas la force de
+l'agent — à 15 %, P1 jouerait 85 % de ses parties contre son unique membre de pool, soit le régime
+d'un exploiteur alors qu'il est promu champion. La rampe d'adversité de P1 est supprimée au
+passage (elle le faisait démarrer à 100 % de bots), résidu du nettoyage qui avait retiré les neuf
+autres.
+
+**Mesure incidente, non élucidée.** Le run P1 a joué **31,3 %** contre P0 (25 063 épisodes sur
+80 075, `tensorboard/P1`), là où sa config annonçait 50 %. L'écart n'est pas expliqué par la rampe
+seule, qui s'achève en ~417 épisodes par env et ne pèse que 12 % du run. Non investigué : le run
+n'est pas rejoué. À retenir : un `ratio_end` n'est pas une mesure — la part réellement jouée se lit
+sur le rapport entre les points de `03_selfplay/<membre>` et ceux de `actions/share_deploy_slot`,
+à 500 près (la fenêtre de lissage).
+
+---
+
 ## ⚠️ Courbes de santé PPO — runs lancés avant le 2026-09-04 {#courbes-ppo-reprise}
 
 Trois défauts vivaient sur la capture des métriques PPO

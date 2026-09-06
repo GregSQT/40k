@@ -61,6 +61,17 @@ R2 (self-play) et R3 (récompense, si D.4 le justifie) séquentiellement — mes
 n'apporterait que la décomposition du gain par levier. Fermé sans dette.
 Détail : `Documentation/Chantiers/backlog/curriculum_adversaires_etalons.md`.
 
+**Régime d'entraînement révisé le 2026-09-06 — P2 est à relancer depuis P1.** Deux changements
+livrés ensemble, tous deux mesurés sur le run x1_long du 2026-09-06 (~64 000 épisodes) :
+le déploiement `auto` pose désormais **les deux camps** (il ne posait que l'agent, face à un
+adversaire qui se déployait avec sa politique — 0.304 de win-rate en `auto` contre 0.684 en
+`active`, différentiel d'objectifs -0.76 contre +0.19) ; et la part de bots passe à **30 % en P1,
+20 % en P2, 15 % de P3 à P10** (les six bots sont saturés entre 0.86 et 1.00, quand le champion du
+pool est à 0.502 et P0 à 0.626). P1 n'est PAS rejoué — sa config est homogénéisée et porte la
+mesure de ce qu'il a réellement joué. ⚠️ `r_win_rate_deploy_auto` **change de définition** : ses
+valeurs antérieures au 2026-09-06 ne se comparent pas aux suivantes.
+Détail : [training.md#regime-2026-09-06](training.md#regime-2026-09-06).
+
 ---
 
 ## J3 — Mesure de référence
