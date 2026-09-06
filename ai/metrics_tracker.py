@@ -2033,6 +2033,22 @@ class W40KMetricsTracker:
             self._push_window(self._selfplay_wins.setdefault(label, []), float(agent_won), self.PERF_WINDOW),
         )
 
+    def log_pool_probe(
+        self, label: str, raw_score: float, rolling_mean: Optional[float], step: int
+    ) -> None:
+        """Trace pool-early-stop : valeur brute + moyenne glissante sur 3 sondes.
+
+        Le gate early-stop reste sur la valeur brute (`consecutive_evals`) ; la moyenne
+        glissante (`_3ep`) permet de lire une tendance malgre le bruit binomial (~±10 pts
+        a 2 sigma sur 300 episodes deterministes). Elle n'est emise qu'a partir de la
+        deuxieme sonde : sur une sonde unique la moyenne est identique au brut, rien
+        a publier en plus.
+        """
+        tag = self._metric_slug(label)
+        self.writer.add_scalar(f"pool_eval/vs_{tag}", raw_score, step)
+        if rolling_mean is not None:
+            self.writer.add_scalar(f"pool_eval/vs_{tag}_3ep", rolling_mean, step)
+
     def log_faction_bot_win_rates(
         self,
         faction_bot_win_rates: Dict[str, Dict[str, float]],

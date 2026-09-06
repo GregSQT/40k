@@ -3071,6 +3071,9 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         self.intermediate_n_workers = intermediate_n_workers
 
         self._consecutive_above: int = 0
+        # Historique par label des dernieres sondes, pour la moyenne glissante (fenetre 3).
+        # Le gate early-stop reste sur la valeur BRUTE ; la moyenne sert uniquement a la trace.
+        self._probe_score_history: Dict[str, deque] = {}
         # En épisodes DE L'ÉTAPE (cf. `_EvalPoolOwnerMixin._set_stage_origin` / `_stage_episode`).
         self._next_probe_episode: int = eval_freq_episodes
         # Garde idempotente : SB3 appelle `_on_training_start` à chaque `learn()` (cf. le
@@ -3132,6 +3135,21 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         safe_print(f"📊 Pool baseline (warm start) : {score_str} @ep{current}")
         # _consecutive_above et _next_probe_episode inchangés : point de référence, pas d'éval.
 
+    def _log_probe_scores(self, scores: Dict[str, float], episode: int) -> None:
+        """Met a jour l'historique glissant et publie sonde brute + moyenne (3 sondes max).
+
+        Appelee apres validation (scores complets) et AVANT la decision du gate : l'historique
+        est toujours a jour quand on construit le score_str. La moyenne est None a la premiere
+        sonde (1 seul point = pas d'average utile) et ne produit pas de scalaire dans ce cas.
+        """
+        if self.metrics_tracker is None:
+            return
+        for lbl, raw in scores.items():
+            h = self._probe_score_history.setdefault(lbl, deque(maxlen=3))
+            h.append(raw)
+            rolling_mean: Optional[float] = float(np.mean(h)) if len(h) > 1 else None
+            self.metrics_tracker.log_pool_probe(lbl, raw, rolling_mean, episode)
+
     def _on_step(self) -> bool:
         # Pas et épisodes DE L'ÉTAPE : `min_steps` comme la cadence comptent depuis le début du
         # run, pas depuis la naissance de la lignée (cf. `_EvalPoolOwnerMixin._set_stage_origin`).
@@ -3155,8 +3173,19 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
             )
             return True
 
+        self._log_probe_scores(scores, current)
+
+        # Gate early-stop : valeur BRUTE. La moyenne glissante n'entre pas ici.
         all_above = all(scores[lbl] >= self.threshold for lbl in labels)
-        score_str = ", ".join(f"{lbl}={scores[lbl]:.3f}" for lbl in labels)
+        score_str = ", ".join(
+            f"{lbl}={scores[lbl]:.3f}"
+            + (
+                f"(→{float(np.mean(self._probe_score_history[lbl])):.3f})"
+                if len(self._probe_score_history.get(lbl, ())) > 1
+                else ""
+            )
+            for lbl in labels
+        )
         if all_above:
             self._consecutive_above += 1
             safe_print(
