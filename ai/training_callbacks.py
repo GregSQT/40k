@@ -3073,6 +3073,9 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         self._consecutive_above: int = 0
         # En épisodes DE L'ÉTAPE (cf. `_EvalPoolOwnerMixin._set_stage_origin` / `_stage_episode`).
         self._next_probe_episode: int = eval_freq_episodes
+        # Garde idempotente : SB3 appelle `_on_training_start` à chaque `learn()` (cf. le
+        # commentaire du mixin à la ligne ~2626) ; la baseline ne se tire qu'une seule fois.
+        self._baseline_done: bool = False
 
     def _probe(self) -> Dict[str, float]:
         """Sauvegarde le modèle courant et évalue contre tous les membres du pool."""
@@ -3106,6 +3109,28 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         finally:
             remove_model_with_companions(tmp_path)
         return {label: float(results[label]) for _, label in self.pool_archives if label in results}
+
+    def _on_training_start(self) -> None:
+        # Sonde de référence à l'épisode 0 de l'étape, uniquement en warm start.
+        # Sans ce point, la première sonde normale est lue sans baseline — cause directe de deux
+        # nuits d'investigation (2026-09-05/06) où 0,347 a été lu comme une chute depuis 0,472.
+        # Le flag idempotent est obligatoire : SB3 appelle _on_training_start à chaque learn().
+        if self._episode_origin == 0 or self._baseline_done:
+            return
+        self._baseline_done = True
+        current = self._current_episode()
+        scores = self._probe()
+        labels = [label for _, label in self.pool_archives]
+        missing = [lbl for lbl in labels if lbl not in scores]
+        if missing:
+            safe_print(
+                f"⚠️  PoolEarlyStoppingCallback : baseline scores manquants pour {missing} "
+                "— point de référence ignoré."
+            )
+            return
+        score_str = ", ".join(f"{lbl}={scores[lbl]:.3f}" for lbl in labels)
+        safe_print(f"📊 Pool baseline (warm start) : {score_str} @ep{current}")
+        # _consecutive_above et _next_probe_episode inchangés : point de référence, pas d'éval.
 
     def _on_step(self) -> bool:
         # Pas et épisodes DE L'ÉTAPE : `min_steps` comme la cadence comptent depuis le début du

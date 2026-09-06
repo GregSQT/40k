@@ -235,3 +235,84 @@ def test_stage_origin_refuses_an_archive_without_num_timesteps(tmp_path: Path):
     save_run_state(str(source), 1)
     with pytest.raises(ConfigurationError, match="num_timesteps"):
         stage_origin(str(canonical), {"init": "from:P3"})
+
+
+# ── PoolEarlyStoppingCallback : sonde baseline au démarrage en warm start ──────────────────────
+
+
+def test_pool_warm_start_fires_baseline_probe_at_stage_episode_zero():
+    """Warm start : _on_training_start déclenche UNE sonde baseline à _stage_episode() == 0.
+
+    Sans ce point, la première sonde normale (à eval_freq_episodes DE L'ÉTAPE) est lue sans
+    référence — cause directe des investigations 2026-09-05/06 (0,347 lu comme chute depuis 0,472).
+    """
+    episode_origin = P2_EPISODE_OFFSET
+    callback = _pool_callback(episode_origin=episode_origin, timesteps_origin=P1_NUM_TIMESTEPS)
+    tracker = _tracker(episode_origin)
+    callback.metrics_tracker = tracker
+
+    probe_calls: List[int] = []
+
+    def fake_probe() -> dict:
+        probe_calls.append(callback._stage_episode())
+        return {label: 0.8 for _, label in callback.pool_archives}
+
+    callback._probe = fake_probe  # type: ignore[method-assign]
+
+    callback._on_training_start()
+
+    assert probe_calls == [0], "la baseline doit sonder exactement à _stage_episode() == 0"
+    assert callback._consecutive_above == 0, "la baseline ne doit PAS incrémenter _consecutive_above"
+    assert callback._next_probe_episode == 10_000, "_next_probe_episode doit rester inchangé"
+
+
+def test_pool_warm_start_baseline_above_threshold_does_not_trigger_early_stop():
+    """Score baseline au-dessus du seuil : _consecutive_above reste 0, aucun arrêt."""
+    episode_origin = P2_EPISODE_OFFSET
+    callback = _pool_callback(
+        episode_origin=episode_origin, timesteps_origin=P1_NUM_TIMESTEPS, threshold=0.5
+    )
+    callback.metrics_tracker = _tracker(episode_origin)
+    callback._probe = lambda: {label: 0.9 for _, label in callback.pool_archives}  # type: ignore[method-assign]
+
+    callback._on_training_start()
+
+    assert callback._consecutive_above == 0
+    assert callback._next_probe_episode == 10_000
+
+
+def test_pool_fresh_run_does_not_fire_baseline_probe():
+    """Run neuf (episode_origin == 0) : _on_training_start ne sonde pas."""
+    callback = _pool_callback()
+    callback.metrics_tracker = _tracker(0)
+
+    probe_calls: List[int] = []
+    callback._probe = lambda: probe_calls.append(0) or {}  # type: ignore[method-assign]
+
+    callback._on_training_start()
+
+    assert probe_calls == [], "aucune sonde baseline sur un run neuf"
+
+
+def test_pool_warm_start_baseline_is_idempotent_across_multiple_learn_calls():
+    """SB3 appelle _on_training_start à chaque learn() : la baseline ne tire qu'une fois.
+
+    La boucle budgétée de train_with_scenario_rotation enchaîne un learn() par tranche de
+    quatre updates — sans flag idempotent, _probe() serait appelée des dizaines de fois.
+    """
+    episode_origin = P2_EPISODE_OFFSET
+    callback = _pool_callback(episode_origin=episode_origin, timesteps_origin=P1_NUM_TIMESTEPS)
+    callback.metrics_tracker = _tracker(episode_origin)
+
+    probe_calls: List[int] = []
+
+    def fake_probe() -> dict:
+        probe_calls.append(callback._stage_episode())
+        return {label: 0.5 for _, label in callback.pool_archives}
+
+    callback._probe = fake_probe  # type: ignore[method-assign]
+
+    for _ in range(5):
+        callback._on_training_start()
+
+    assert probe_calls == [0], "exactement une sonde baseline quel que soit le nombre de learn()"
