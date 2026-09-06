@@ -1447,7 +1447,7 @@ class W40KEngine(gym.Env):
         reponse est non, deplacerait ce que le step execute ensuite (cf. `MaskDecision` dans
         ai/env_wrappers.py).
         """
-        return bool(self._deployment_auto_episode) and self.game_state.get("phase") == "deployment"
+        return self._deployment_auto_episode and self.game_state.get("phase") == "deployment"
 
     def _pick_placement_action(self, action_mask: np.ndarray, context: str) -> int:
         """Tire une POSE parmi les slots de strategie ouverts. Jamais `ACTION_WAIT`.
@@ -2607,8 +2607,10 @@ class W40KEngine(gym.Env):
             )
 
         # Épisode `auto` : le moteur pose à la place du joueur courant, quel que soit le camp
-        # (ex-mode `fixed` de la rampe).
-        if self._should_auto_deploy_current_player(action_mask):
+        # (ex-mode `fixed` de la rampe). Les guards isinstance+size sont superflus ici : action_mask
+        # sort de `get_squad_action_mask_and_eligible_units` (toujours ndarray) et le masque vide a
+        # déjà été filtré plus haut.
+        if self.deployment_auto_owns_current_pose():
             pending = self._auto_deployment_pending_action
             self._auto_deployment_pending_action = None
             if pending is None:

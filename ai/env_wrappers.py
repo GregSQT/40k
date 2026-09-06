@@ -1206,8 +1206,12 @@ class BotControlledEnv(gym.Wrapper):
             auto_action = self.engine.auto_deployment_action(
                 self._opponent_action_mask(decision)
             )
-            if auto_action is not None:
-                return auto_action, decision
+            if auto_action is None:
+                raise RuntimeError(
+                    "auto_deployment_action returned None despite deployment_auto_owns_current_pose() "
+                    "== True — masque vide en phase de deploiement auto, etat moteur invalide"
+                )
+            return auto_action, decision
         if self._episode_uses_self_play_opponent:
             return self._get_self_play_opponent_action(decision=decision), None
         return self._get_bot_action(debug=debug, decision=decision), decision
@@ -2259,8 +2263,12 @@ class SelfPlayWrapper(gym.Wrapper):
                 )
             )
             auto_action = self.engine.auto_deployment_action(np.asarray(deploy_mask))
-            if auto_action is not None:
-                return auto_action
+            if auto_action is None:
+                raise RuntimeError(
+                    "auto_deployment_action returned None despite deployment_auto_owns_current_pose() "
+                    "== True — masque vide en phase de deploiement auto, etat moteur invalide"
+                )
+            return auto_action
         if self.frozen_model is None:
             action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(self.engine.game_state)
             # POINT DE CHOIX JOUEUR en attente : le pool est vide PAR CONSTRUCTION, mais
