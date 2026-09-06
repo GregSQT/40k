@@ -85,7 +85,7 @@ def test_blob_policy_envoye_aux_workers_ne_porte_pas_optimizer() -> None:
     )
 
     # Matérialise l'état d'Adam : c'est lui qui porte les tenseurs restés sur le device d'origine.
-    loss = sum(param.sum() for param in model.policy.parameters())
+    loss = torch.stack([param.sum() for param in model.policy.parameters()]).sum()
     loss.backward()
     model.policy.optimizer.step()
     assert model.policy.optimizer.state, "état Adam vide : le test ne prouverait rien"
