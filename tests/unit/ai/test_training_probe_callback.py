@@ -2,8 +2,9 @@
 de BotEvaluationCallback.
 
 Vérifie :
-- training_probe_every_n_evals=0 → sonde désactivée (run_training_probe toujours False)
-- training_probe_every_n_evals=N → run_training_probe True exactement au Nème eval
+- training_probe_every_n_evals=N → _evaluate_against_bots reçoit run_training_probe=True
+  exactement aux évaluations 3, 6 et 9 — argument RÉEL transmis par _on_step, jamais une
+  valeur recalculée par le test
 - Validation : valeur négative lève ValueError
 - Logging dans _apply_eval_results : add_scalar appelé iff le champ est présent
 - _evaluate_against_bots : log_eval_truncations NON appelé pour la sonde (pas holdout)
@@ -12,30 +13,61 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 
-def _compute_probe_flag(training_probe_every_n_evals: int, eval_count: int) -> bool:
-    """Réplique la logique de _on_step pour run_training_probe."""
-    return (
-        training_probe_every_n_evals > 0
-        and eval_count % training_probe_every_n_evals == 0
-    )
+class _NullTimer:
+    """Substitut du chronomètre de blocage : aucune éval réelle à mesurer ici."""
+
+    def __enter__(self) -> None:
+        return None
+
+    def __exit__(self, *_exc: object) -> bool:
+        return False
 
 
-class TestTrainingProbeFlag:
-    def test_disabled_never_sets_flag(self):
-        for n in range(1, 10):
-            assert _compute_probe_flag(0, n) is False
+class TestTrainingProbeFlagFromOnStep:
+    """run_training_probe vient du calcul RÉEL de _on_step, jamais d'une réplique.
 
-    def test_every_3_fires_at_3_6_9(self):
+    Inverser la condition en production (`!= 0` au lieu de `== 0`) doit faire rougir ce test.
+    """
+
+    def _make_callback(self):
+        from ai.training_callbacks import BotEvaluationCallback
+
+        cb = BotEvaluationCallback.__new__(BotEvaluationCallback)
+        cb.use_episode_freq = False
+        cb.eval_freq = 10
+        cb.eval_count = 0
+        cb.num_timesteps = 0
+        cb.async_eval_enabled = False
+        cb.early_stopping_patience = 0
+        cb.should_stop_early = False
+        cb.training_probe_every_n_evals = 3
+        return cb
+
+    def test_probe_fires_at_evals_3_6_9_and_nowhere_else(self):
+        """_on_step transmet run_training_probe=True à _evaluate_against_bots exactement
+        aux évaluations 3, 6 et 9 ; False partout ailleurs."""
+        cb = self._make_callback()
+        probe_flags: list = []
+
+        def _fake_eval(marker, run_training_probe: bool = False, **_):
+            probe_flags.append(run_training_probe)
+            return {}
+
+        cb._evaluate_against_bots = _fake_eval  # type: ignore[method-assign]
+        cb._apply_eval_results = lambda r, m: None  # type: ignore[method-assign]
+        cb._blocking_eval_timer = _NullTimer  # type: ignore[method-assign]
+
+        for step in range(1, 10):
+            cb.num_timesteps = step * 10
+            cb._on_step()
+
+        assert len(probe_flags) == 9, f"9 évals attendues, obtenues : {len(probe_flags)}"
         expected = {3: True, 6: True, 9: True}
-        for n in range(1, 12):
-            result = _compute_probe_flag(3, n)
-            assert result is expected.get(n, False), (
-                f"eval_count={n}: expected {expected.get(n, False)}, got {result}"
+        for i, flag in enumerate(probe_flags, start=1):
+            wanted = expected.get(i, False)
+            assert flag is wanted, (
+                f"eval {i}: run_training_probe attendu {wanted}, reçu {flag}"
             )
-
-    def test_every_1_fires_every_eval(self):
-        for n in range(1, 6):
-            assert _compute_probe_flag(1, n) is True
 
 
 class TestTrainingProbeValidation:
