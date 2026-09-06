@@ -270,7 +270,13 @@ un `x1_long` complet (~20 h) au premier optionnel retenu.
 **Symptôme (établi par lecture de la chaîne d'appels, puis verrouillé par test).** En épisode `auto`
 de la rampe `deployment_mode_schedule`, `W40KEngine.step` recevait l'action échantillonnée par la
 politique et lui **substituait** une pose tirée par le moteur (`_should_auto_deploy_for_agent` →
-`_pick_placement_action`). SB3 range dans son rollout l'action échantillonnée ET son `log_prob`,
+`_pick_placement_action`). ⚠️ Ce symbole s'appelle `_should_auto_deploy_current_player` depuis le
+2026-09-06, et la substitution n'est plus bornée au joueur-agent : elle vaut pour **les deux
+camps**, parce que poser le seul agent au hasard face à un adversaire qui se déploie avec sa
+politique faisait de `r_win_rate_deploy_auto` la mesure d'un handicap et non d'une adaptabilité
+(mesure : 0.304 en `auto` contre 0.684 en `active`, différentiel d'objectifs -0.76 contre +0.19).
+Le présent §0.71 décrit l'état du 2026-08-08 et n'est pas réécrit — l'absorption PPO qu'il corrige,
+elle, reste propre au joueur contrôlé : un tour d'adversaire n'alimente aucun rollout. SB3 range dans son rollout l'action échantillonnée ET son `log_prob`,
 alors que la transition observée vient d'un autre slot : PPO calculait son ratio sur une action
 jamais exécutée. Ordre de grandeur : ~10 steps de déploiement sur ~200 par épisode, sur ~70 % des
 épisodes en début de rampe (`active_ratio_start` 0.3).

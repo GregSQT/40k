@@ -80,10 +80,6 @@ EXPECTED_STAGES = {
                             "E1": 0.20 / 3, "E2": 0.20 / 3, "E3": 0.20 / 3}),
 }
 
-#: Part de bots attendue par etape, DERIVEE de `EXPECTED_STAGES` — c'est elle que le reglage
-#: du 2026-09-06 fixe, `ratio_end` n'en est que le complement.
-EXPECTED_BOT_SHARE = {name: 1.0 - spec[1] for name, spec in EXPECTED_STAGES.items()}
-
 #: n_envs du profil x1/x5 d'ArmageddonAgent. Le plus gros pool (P10, treize membres) doit y
 #: tenir : c'est la contrainte qui borne la taille des pools du curriculum.
 ARMAGEDDON_N_ENVS = 48
@@ -174,21 +170,6 @@ def test_learners_have_no_adversity_ramp(curriculum) -> None:
         assert float(stage["ratio_start"]) == pytest.approx(float(stage["ratio_end"])), name
         assert int(stage["warmup_episodes"]) == 0, name
         assert "ramp_end_episodes" not in stage, name
-
-
-@pytest.mark.parametrize("stage_name", sorted(EXPECTED_STAGES))
-def test_shipped_stage_plays_the_expected_share_of_bots(curriculum, stage_name: str) -> None:
-    """Part de bots par etape : 30 % en P1, 20 % en P2, 15 % de P3 a P10 (2026-09-06).
-
-    Epingle la grandeur que le reglage DECIDE, la ou `ratio_end` n'en est que le complement.
-    Les bots ne sont pas la pour le gradient — a ~92 % de victoires l'avantage est quasi
-    constant — mais parce qu'ils sont la seule adversite structurellement differente d'un pool
-    qui est une lignee chainee : tous ses membres descendent du meme modele, donc s'il derive,
-    aucun d'eux ne le signalera.
-    """
-    stage = require_stage(curriculum, stage_name)
-    bot_share = 1.0 - float(stage["ratio_end"])
-    assert bot_share == pytest.approx(EXPECTED_BOT_SHARE[stage_name]), stage_name
 
 
 def test_exploiters_resume_the_champion_they_only_ever_play(curriculum) -> None:
