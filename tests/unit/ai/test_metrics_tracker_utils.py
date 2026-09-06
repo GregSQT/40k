@@ -634,8 +634,10 @@ def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
     TensorBoard comptant des POINTS, il aurait fallu le regler sur ~1500 pour couvrir la fenetre
     de 20 updates de `_calculate_smoothed_metric`.
 
-    Les huit lignes `thresholds/*` sont sous la meme garde : elles n'existent que superposees a
-    ces courbes dans les graphes Multiline de `_setup_custom_scalars_layout`.
+    Les huit lignes `thresholds/*` sont sous la meme garde, mais gatees en plus par
+    `ppo_capture_count > 0` : elles ne s'emettent donc qu'a partir du DEUXIEME detection-event
+    (sentinel -1 consomme par le premier dashboard, vrai update au second). Les courbes elles
+    s'emettent des le premier dashboard car les listes sont pre-remplies dans ce test.
     """
     t = _tracker_stub()
     # Le stub laisse trois listes vides ; les remplir met les cinq courbes dans le meme etat,
@@ -644,51 +646,68 @@ def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
     t.hyperparameter_tracking["value_losses"] = [0.3] * 12
     t.hyperparameter_tracking["explained_variances"] = [0.4] * 12
 
-    tags = (
+    # Verrou discriminabilite : si ces deux valeurs convergent, les assertions d'axe deviennent
+    # muettes — le test doit echouer si le stub est modifie de facon a les egaliser.
+    assert t.episode_count != t.step_count, (
+        f"stub invalide : episode_count={t.episode_count} == step_count={t.step_count}"
+    )
+
+    curve_tags = (
         "00_critical/f_loss_mean",
         "00_critical/g_explained_variance",
         "00_critical/h_clip_fraction",
         "00_critical/i_approx_kl",
         "00_critical/j_entropy_loss",
-        "thresholds/clip_fraction_min",
-        "thresholds/kl_max",
     )
+    threshold_tags = (
+        "thresholds/clip_fraction_min",
+        "thresholds/clip_fraction_max",
+        "thresholds/kl_max",
+        "thresholds/explained_variance_min",
+    )
+    all_tags = curve_tags + threshold_tags
 
     def _counts() -> Dict[str, int]:
         keys = [k for k, _, _ in _dw(t).scalars]
-        return {tag: keys.count(tag) for tag in tags}
+        return {tag: keys.count(tag) for tag in all_tags}
 
-    # 20 fins d'episode, aucune capture entre elles : la valeur n'a pas change, un seul point.
+    # Premier cycle : ppo_capture_count=0, sentinel -1 → courbes emises (1 point), seuils NON
+    # (ppo_capture_count > 0 = False). C'est la seule asymetrie du test.
     for _ in range(20):
         t.log_critical_dashboard()
-    assert _counts() == {tag: 1 for tag in tags}
+    assert _counts() == {tag: 1 for tag in curve_tags} | {tag: 0 for tag in threshold_tags}
 
+    # Deuxieme cycle : apres le premier update PPO (count=1), seuils et courbes s'emettent.
     t.log_training_metrics(dict(_UPDATE_STATS))
     for _ in range(20):
         t.log_critical_dashboard()
-    assert _counts() == {tag: 2 for tag in tags}
+    assert _counts() == {tag: 2 for tag in curve_tags} | {tag: 1 for tag in threshold_tags}
 
+    # Troisieme cycle : second update PPO.
     t.log_training_metrics(dict(_UPDATE_STATS))
     for _ in range(20):
         t.log_critical_dashboard()
-    assert _counts() == {tag: 3 for tag in tags}
+    assert _counts() == {tag: 3 for tag in curve_tags} | {tag: 2 for tag in threshold_tags}
 
     # 60 fins d'episode pour 2 updates : ce sont bien les updates qui cadencent, pas les episodes.
     assert t.ppo_capture_count == 2
 
-    # L'abscisse de chaque point doit etre episode_count (12), pas step_count (0).
-    # Verrou contre un remplacement accidentel de l'axe.
+    # L'abscisse de CHAQUE courbe PPO doit etre episode_count (12), pas step_count (0).
+    # Verrou contre un remplacement accidentel de l'axe sur n'importe laquelle des cinq courbes.
     all_scalars = _dw(t).scalars
-    curve_steps = {step for k, _v, step in all_scalars if k == "00_critical/h_clip_fraction"}
-    assert curve_steps == {t.episode_count}, (
-        f"abscisse PPO health = {curve_steps}, attendu {{episode_count={t.episode_count}}}"
-    )
+    for tag in curve_tags:
+        steps = {step for k, _v, step in all_scalars if k == tag}
+        assert steps == {t.episode_count}, (
+            f"{tag} : abscisse = {steps}, attendu {{episode_count={t.episode_count}}}"
+        )
 
     # Les seuils doivent partager la meme abscisse que les courbes qu'ils annotent.
-    threshold_steps = {step for k, _v, step in all_scalars if k == "thresholds/clip_fraction_min"}
-    assert curve_steps == threshold_steps, (
-        f"desalignement courbe/seuil : {curve_steps} vs {threshold_steps}"
-    )
+    curve_step_set = {step for k, _v, step in all_scalars if k == "00_critical/h_clip_fraction"}
+    for tag in threshold_tags:
+        steps = {step for k, _v, step in all_scalars if k == tag}
+        assert steps == curve_step_set, (
+            f"desalignement {tag} : {steps} vs courbes {curve_step_set}"
+        )
 
 
 def test_les_courbes_de_jeu_gardent_leur_point_par_episode() -> None:
@@ -710,9 +729,10 @@ def test_aucun_seuil_emis_avant_la_premiere_capture_ppo() -> None:
     """VERROU : `_log_thresholds` ne doit pas emettre de point orphelin au tout premier dashboard.
 
     Au demarrage : ppo_capture_count=0, _last_ppo_health_capture=-1. Le premier appel a
-    `log_critical_dashboard` change ppo_capture_is_new=True, mais hyperparameter_tracking est vide.
-    Sans la garde `len(clip_fractions) >= 1`, les huit `thresholds/*` seraient emis sans qu'aucune
-    des cinq courbes qu'ils annotent ne soit presente — points orphelins sur les graphes Multiline.
+    `log_critical_dashboard` entre dans ppo_capture_is_new=True, mais aucun update PPO n'a eu lieu.
+    La garde `ppo_capture_count > 0` empeche l'emission des seuils. Les cinq courbes PPO sont elles
+    protegees par `len(liste) >= 1` (listes vides ici). Les deux jeux de garde doivent etre coherents :
+    ni seuils orphelins, ni courbes orphelines.
     """
     t = _tracker_stub()
     # Vider toutes les listes : simule le demarrage avant le premier update PPO.
@@ -725,6 +745,10 @@ def test_aucun_seuil_emis_avant_la_premiere_capture_ppo() -> None:
     threshold_keys = [k for k in keys if k.startswith("thresholds/")]
     assert threshold_keys == [], (
         f"seuils emis avant la premiere capture PPO : {threshold_keys}"
+    )
+    ppo_curve_keys = [k for k in keys if k.startswith("00_critical/") and k[12] in "fghij"]
+    assert ppo_curve_keys == [], (
+        f"courbes PPO emises avec listes vides : {ppo_curve_keys}"
     )
 
 

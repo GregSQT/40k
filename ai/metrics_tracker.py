@@ -487,9 +487,11 @@ class W40KMetricsTracker:
     def _log_thresholds(self, step: int) -> None:
         """Log constant threshold reference lines for 00_critical metrics.
 
-        Appelee sous la garde `ppo_capture_is_new and len(clip_fractions) >= 1` de
+        Appelee sous la garde `ppo_capture_is_new and ppo_capture_count > 0` de
         `log_critical_dashboard` : ces lignes n'ont de sens que superposees aux courbes de sante
         PPO, donc elles suivent leur cadence et ne sont emises qu'apres la premiere capture reelle.
+        La garde est sur `ppo_capture_count`, pas sur une liste specifique, pour rester valide
+        meme si un tag `train/*` particulier est absent d'un dump.
         """
         self.writer.add_scalar("thresholds/explained_variance_min", 0.30, step)
         self.writer.add_scalar("thresholds/clip_fraction_min", 0.10, step)
@@ -1705,9 +1707,9 @@ class W40KMetricsTracker:
                 self.writer.add_scalar('00_critical/f_loss_mean', loss_mean, self.episode_count)
 
             # Seuils : n'existent que pour etre superposes a `00_critical/{g,h,i,j}` dans les
-            # graphes Multiline de `_setup_custom_scalars_layout`. Garda par la non-vacuite de
-            # clip_fractions pour ne pas emettre un point orphelin avant la premiere capture PPO.
-            if len(self.hyperparameter_tracking['clip_fractions']) >= 1:
+            # graphes Multiline de `_setup_custom_scalars_layout`. Garda par ppo_capture_count > 0
+            # plutot que par une liste specifique : valide meme si un tag `train/*` est absent.
+            if self.ppo_capture_count > 0:
                 self._log_thresholds(self.episode_count)
 
         # ==========================================
