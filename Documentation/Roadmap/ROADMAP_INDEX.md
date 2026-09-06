@@ -70,8 +70,9 @@ adversaire qui se déployait avec sa politique — 0.304 de win-rate en `auto` c
 pool est à 0.502 et P0 à 0.626). P1 n'est PAS rejoué — sa config est homogénéisée et porte la
 mesure de ce qu'il a réellement joué. ⚠️ `r_win_rate_deploy_auto` **change de définition** : ses
 valeurs antérieures au 2026-09-06 ne se comparent pas aux suivantes. Enfin `bot_eval_intermediate`
-de `x1_long` **revient à 30** épisodes par bot : il avait dérivé à 100 sans note ni mesure, et
-l'évaluation intermédiaire du run à relancer retombe de 600 à 180 épisodes.
+de `x1_long` passe à **100** épisodes par bot pour la précision des points intermédiaires
+(erreur-type 9,1 → 5,0 points) ; l'évaluation intermédiaire du run à relancer monte donc de 180 à
+600 épisodes, coût horloge non rechronométré, et `x5_long` reste à 30.
 Détail : [training.md#regime-2026-09-06](training.md#regime-2026-09-06).
 
 ---

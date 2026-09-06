@@ -564,7 +564,7 @@ L'**entropie** s'arrête aux 40 % : passé ce point, la politique exploite ce qu
 
 **Le LR n'est PAS piloté par le schedule SB3.** `_make_learning_rate_schedule` ne sert qu'à donner sa valeur initiale à l'optimizer : le callback remplace `model.lr_schedule` par sa propre constante dès `on_training_start`.
 
-`bot_eval_freq` de `x1_long` vaut **10 000** (10 points de mesure sur 100 000 épisodes). `bot_eval_intermediate` vaut **30** épisodes par bot, aligné avec `x5_long`. `robust_window` vaut **3** (10 points → 8 positions de fenêtre).
+`bot_eval_freq` de `x1_long` vaut **10 000** (10 points de mesure sur 100 000 épisodes). `bot_eval_intermediate` vaut **100** épisodes par bot depuis le 2026-09-04 : à 30, l'erreur-type d'un point intermédiaire valait 9,1 points de win-rate, du même ordre que les écarts qu'on cherche à y lire ; à 100 elle tombe à 5,0. `x5_long` reste à 30 — les deux profils `_long` divergent sur cette clé, délibérément. `robust_window` vaut **3** (10 points → 8 positions de fenêtre).
 
 `x1` est passé à `save_best_robust: false` : 10 000 épisodes à `bot_eval_freq` 2000 donnent 5 points pour une fenêtre de 5, soit une seule position — sélection mécanique sur le dernier point.
 

@@ -328,9 +328,13 @@ REFERENCE_BOT_EVAL_FINAL = {"x1": 10, "x5_new": 100}
 #: redevient exact — mais il DÉPEND du nombre de bots, jamais du seul `bot_eval_final`.
 LONG_PROFILE_BOT_EVAL_FINAL = {"x1_long": 300, "x5_long": 300}
 
-#: `bot_eval_intermediate` ATTENDU de chaque profil `_long`. x1_long et x5_long : 30 (aligné
-#: depuis le 2026-08-30, avec 4 workers intermédiaires sur les deux profils).
-LONG_PROFILE_BOT_EVAL_INTERMEDIATE = {"x1_long": 30, "x5_long": 30}
+#: `bot_eval_intermediate` ATTENDU de chaque profil `_long`. Les deux ne sont PLUS alignés, et
+#: c'est délibéré : `x1_long` est passé à 100 le 2026-09-04 pour la PRÉCISION de ses points
+#: intermédiaires — l'erreur-type d'un win-rate autour de 0,5 vaut 0,5/√n, soit 9,1 points à 30
+#: et 5,0 à 100, et à 30 elle était du même ordre que les écarts qu'on cherche à lire d'un point
+#: au suivant. `x5_long` reste à 30. La contrepartie (600 épisodes par éval au lieu de 180, coût
+#: horloge non rechronométré) est dans `bot_eval_intermediate_normal` du JSON, seule source.
+LONG_PROFILE_BOT_EVAL_INTERMEDIATE = {"x1_long": 100, "x5_long": 30}
 
 #: `training_probe_every_n_evals` ATTENDU de chaque profil comparé ici. La sonde publie
 #: `bot_eval/training_combined` contre les scénarios d'ENTRAÎNEMENT — pas le holdout — pour
@@ -507,10 +511,9 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     assert ref_cb["bot_eval_task_timeout_seconds"] == 3600
     # `bot_eval_intermediate` est un nombre d'épisodes PAR BOT payé à CHAQUE éval intermédiaire :
     # son coût se rapporte à la durée du run, donc il en dépend au même titre que `bot_eval_freq`.
-    # x1_long : 5 évals × 30 ép./bot (100 → 25 par e07bdfd1 le 2026-08-16 en passant à 4 workers
-    # intermédiaires, puis 25 → 30 par feb4768f ; e6581218 l'a silencieusement remis à 100 le
-    # 2026-09-04 — une ligne, sans note ni mesure, contre la décomposition « 6 × 30 = 180 » que
-    # `bot_eval_freq_normal` porte dans le MÊME profil ; annulé), plus
+    # x1_long : 10 évals × 100 ép./bot (100 → 25 par e07bdfd1 le 2026-08-16 en passant à 4 workers
+    # intermédiaires, puis 25 → 30 par feb4768f, puis retour à 100 par e6581218 le 2026-09-04 pour
+    # regagner la précision perdue sur chaque point de mesure), plus
     # l'éval FINALE à 300 ép./bot (≈ 1 h 23, payée une fois). Les durées d'ÉVALUATION ci-dessus se
     # comptent en épisodes de bot et ne dépendent pas du régime d'entraînement ; la durée du RUN,
     # elle, est mesurée et jamais dérivée d'un taux (x1 : 4 h 01 pour ses 10 000 épisodes ;
@@ -519,7 +522,10 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     # d'avant la refonte d'observation V11 ; il en a été retiré le 2026-08-23, et le « ~17 min
     # d'entraînement » qui figurait ici en sortait. Sur le run x1 réellement mesuré, 5 évals à
     # 100 ép./bot coûteraient ~65 min, soit ~27 % de la durée du run — assez pour les réduire,
-    # pas les « QUATRE FOIS » qu'annonçait le régime périmé. À 10 ép./bot, ~7 min.
+    # pas les « QUATRE FOIS » qu'annonçait le régime périmé. À 10 ép./bot, ~7 min. Cet arbitrage
+    # coût/précision est celui de `x1`, profil BON MARCHÉ, et c'est pourquoi il y est tranché à 10 ;
+    # `x1_long` est le profil de MESURE et tranche l'inverse, à 100 — la même minute d'évaluation n'y
+    # achète pas la même chose.
     # Ces évals alimentent aussi `save_best_robust` (train.py:3623), mais plus sur x1 : ses 5
     # points de mesure ne laissaient qu'UNE position de fenêtre, donc rien à départager, et le
     # profil est passé à `save_best_robust: false` le 2026-08-11 — sa sortie est son modèle
