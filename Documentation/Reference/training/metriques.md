@@ -85,7 +85,7 @@ Les deux dernières colonnes donnent le **seuil de déclenchement** puis le **pa
 | **00_critical/ckpt_mean** | Croissant | **Décroissant** : l'agent courant régresse en moyenne sur l'ensemble des checkpoints figés | *(sans objet)* | Moyenne des win-rates contre tous les checkpoints figés — hors sélection et hors gate | Indicateur global de régression inter-runs |
 | **00_critical/d_win_rate** (+ doublon réactif) | >0.50 | **< 0.50** : lire d'abord `k_entropy_loss` (proche de 0 = politique figée → `ent_coef` ↑) et `i_clip_fraction` ; ensuite seulement les récompenses | **> 0.85** : l'adversaire d'entraînement est trop faible, l'écart avec `a_bot_eval_combined` va se creuser — `bot_training.ratios` vers `control` / `adaptive`, `random` ↓ | Win rate lissé sur `perf_window` (500 ép.) | Performance contre l'adversaire d'entraînement |
 | **00_critical/e_episode_reward_smooth** | Tendance croissante | **Plate ou décroissante** : récompenses intermédiaires trop faibles. Vérifier d'abord `p_reward_deploy_{active,auto}` : un agrégat plat sous deux séries croissantes, c'est la rampe de déploiement, pas un plafond | **Monte alors que `d_win_rate` stagne** : reward hacking — identifier la composante exploitée dans `01_VP/` et `02_combat/` avant de toucher aux coefficients | Reward d'épisode lissée sur `perf_window` | Signal d'apprentissage |
-| **00_critical/f_loss_mean** | Décroissante puis stable, sans oscillations | **Basse et stable** : convergence saine, aucune action | **Oscille** : `learning_rate` ÷2, `n_steps` ↓ ; **stagne haute** : `vf_coef` ↑ (1.0 → 1.5) | `\|policy_loss\| + \|value_loss\|`, moyenné sur les 20 derniers updates | Santé globale de l'apprentissage |
+| **00_critical/f_loss_mean** | Décroissante puis stable, sans oscillations | **Basse et stable** : convergence saine, aucune action | **Oscille** : `learning_rate` ÷2, `n_steps` ↓ ; **stagne haute** : `vf_coef` ↑ (1.0 → 1.5) — mais vérifier d'abord `g_grad_share_policy_mb0`, `vf_coef` ↑ prend de la capacité à la politique | `\|policy_loss\| + \|value_loss\|`, moyenné sur les 20 derniers updates | Santé globale de l'apprentissage |
 | **00_critical/g_grad_share_policy_mb0** | **Non calibrée** — 0.235 mesuré à `vf_coef` 0.5 (2026-09-06) | **< 0.25** : la politique est noyée par le critic — `vf_coef` ↓ (0.5 → 0.25 donne ~0.376 par le calcul), ou activer `clip_range_vf` (aujourd'hui `null` sur les six profils) | **Pas de plafond connu** : surveiller `h_explained_variance` — si elle passe sous 0.80, le critic est sous-entraîné et `vf_coef` est allé trop bas | Norme du gradient de `policy_loss` ÷ somme des trois normes (policy + `vf_coef`×value + `ent_coef`×entropy), minibatch 0 de chaque update, lissée sur 20 updates | Arbitrage policy / critic — réglage de `vf_coef` |
 | **00_critical/h_explained_variance** | >0.30 | **< 0.30** : `gamma` ↑ (0.99 → 0.98 si horizon trop long), `policy_kwargs.net_arch` ↑ (512×512 → 1024×512), `n_steps` ↑ | **> 0.95** : critic saturé — aucune action requise | Qualité du critic (R²) | Capacité du value network |
 | **00_critical/i_clip_fraction** | 0.10–0.30 **sur un run `--new` uniquement** ; une étape reprise à chaud tourne plus bas sans que ce soit un défaut (P1 à 0.070, P2-OLD à 0.081, tous deux sains) | **< 0.05** : politique figée → `ent_coef.start` ↑, `learning_rate.initial` ↑. **PAS `clip_range` ↑** : `clip_fraction` compte les ratios qui SORTENT de l'intervalle `±clip_range`, donc élargir l'intervalle la fait BAISSER (`ai/patched_ppo.py`, `mean(abs(ratio - 1) > clip_range)`) | **> 0.40** : LR trop élevé → `learning_rate.initial` ÷2, `clip_range` ↓ (0.2 → 0.15) | Part des updates de politique écrêtées | Réglage de `learning_rate` |
@@ -165,7 +165,12 @@ Ces métriques révèlent la santé de l'algorithme PPO lui-même.
 - **> 50 %** : Écrêtage excessif (politique essaie de trop changer)
 
 **Déclencheurs :**
-- Constamment < 10 % → Augmenter `clip_range` de 0.2 à 0.25
+- Constamment < 10 % → `ent_coef.start` ↑ ou `learning_rate.initial` ↑.
+  **PAS `clip_range` ↑** : `clip_fraction` compte les ratios qui SORTENT de l'intervalle
+  `±clip_range` (`mean(abs(ratio - 1) > clip_range)`, `ai/patched_ppo.py`), donc élargir
+  l'intervalle la fait **baisser**. Le conseil inverse figurait ici jusqu'au 2026-09-07.
+- Le seuil de 10 % vaut pour un run `--new`. Une étape reprise à chaud tourne plus bas sans
+  être malade : P1 à 0.070 et P2-OLD à 0.081, tous deux sains.
 - Constamment > 50 % → Réduire `learning_rate` et/ou `clip_range`
 
 ---
@@ -198,7 +203,48 @@ Ces métriques révèlent la santé de l'algorithme PPO lui-même.
 
 **Déclencheurs :**
 - Bloquée < 0.60 → Augmenter la taille du réseau : `net_arch` [128,128] → [256,256]
-- Bloquée < 0.70 en Phase 2+ → Augmenter `vf_coef` de 0.5 à 1.0
+- Bloquée < 0.70 en Phase 2+ → Augmenter `vf_coef` de 0.5 à 1.0. **Contrepartie mesurée** :
+  à `vf_coef 0.5` le critic capte déjà 75 % de la norme du gradient et la politique 23.5 %
+  (2026-09-06) — l'augmenter réduit d'autant la part qui revient à celle qui joue. Lire
+  `diag/grad_share_policy_mb0` avant, et ne le faire que si `explained_variance` est réellement
+  basse, pas pour « aider » un critic déjà à 0.87.
+
+---
+
+#### `diag/grad_share_policy_mb0` (+ `diag/grad_norm_{policy,value,entropy}_mb0`)
+**Ce que c'est :** Décomposition de la **norme du gradient** entre les trois termes de la loss
+(`policy_loss + vf_coef × value_loss + ent_coef × entropy_loss`), et part qui revient à la
+politique. Miroir lissé dans le dashboard : `00_critical/g_grad_share_policy_mb0`.
+
+Mesuré par trois `backward` séparés sur le minibatch 0 de chaque update (`ai/patched_ppo.py`),
+avec `clip_grad_norm_(max_norm=inf)` qui retourne la norme **sans écrêter** — donc ces courbes
+montrent le gradient **brut**, là où `training_diagnostic/gradient_norm` est lu *après* écrêtage
+et plafonne à `max_grad_norm`.
+
+**Pourquoi ces courbes existent :** les valeurs de loss ne répondent pas à la question.
+`train/policy_gradient_loss` vaut ~0.0001 parce que `normalize_advantage` centre les avantages
+et que le ratio vaut 1 au premier minibatch — cela ne dit **rien** de la force avec laquelle ce
+terme tire sur les poids. Deux runs ont été perdus en réglant `max_grad_norm` sans cette mesure.
+
+**Interprétation :**
+- La part policy dit **qui capte la capacité d'apprentissage**. Le critic n'est jamais appelé
+  hors entraînement : c'est la politique, et elle seule, qui joue les parties.
+- **0.235** mesuré le 2026-09-06 à `vf_coef 0.5` (value 1.035 = 75.2 %, policy 0.323 = 23.5 %,
+  entropy 0.018 = 1.3 %) — les trois quarts du gradient vont au critic, dont
+  `h_explained_variance` valait déjà 0.87.
+- **~0.376** attendu à `vf_coef 0.25`. L'effet est **arithmétique et immédiat**, visible dès les
+  premières updates : si la courbe ne bouge pas après un changement de `vf_coef`, le réglage n'a
+  pas pris et il est inutile d'attendre.
+- Cible non calibrée à ce jour : aucun run n'a encore tourné assez longtemps sous un régime
+  rééquilibré pour dire quelle part est optimale.
+
+**Déclencheurs :**
+- Part < 0.25 → `vf_coef` ↓ (0.5 → 0.25), ou activer `clip_range_vf` (`null` sur les six profils)
+- Après une baisse de `vf_coef`, surveiller `h_explained_variance` : **sous 0.80**, le critic est
+  sous-entraîné, les avantages deviennent bruités et `vf_coef` est allé trop bas
+- **L'écrêtage ne rééquilibre jamais rien** : `max_grad_norm` divise les trois termes par le même
+  facteur, il change la taille du pas et jamais sa direction. Relâcher le plafond pour corriger un
+  déséquilibre de répartition ne fait qu'accélérer la dérive.
 
 ---
 
@@ -206,9 +252,12 @@ Ces métriques révèlent la santé de l'algorithme PPO lui-même.
 **Ce que c'est :** Perte du gradient de politique (à quel point la politique s'améliore).
 
 **Interprétation :**
-- Doit **décroître dans le temps** (vers zéro)
+- **Sa valeur n'est pas une mesure de l'apprentissage** : avec `normalize_advantage: true`
+  (les six profils), les avantages sont centrés et le ratio vaut 1 au premier minibatch, donc
+  cette perte vaut structurellement ~0 — mesurée à 0.0001 le 2026-09-06 alors que le gradient de
+  ce terme valait 0.323 en norme. Pour juger la force du terme policy, lire
+  `diag/grad_norm_policy_mb0`, jamais cette courbe.
 - Grandes valeurs : la politique fait des mises à jour importantes
-- Proche de zéro : la politique a convergé ou est bloquée
 - Oscillante : apprentissage instable
 
 ---
@@ -939,7 +988,7 @@ Leçon : Phase 3 requiert LR plus bas pour la stabilité. `approx_kl` est le mei
 | clip_fraction > 50 % | Politique changeant trop vite | Réduire LR + clip range | `learning_rate` ÷2, `clip_range` 0.15 |
 | clip_fraction < 10 % | Mises à jour trop conservatives | Augmenter clip range | `clip_range` 0.25 |
 | Haute variance de reward | Politique instable | Augmenter batch size | `batch_size` ×2 |
-| value_loss ne décroît pas | Fonction de valeur défaillante | Augmenter VF coefficient | `vf_coef` 0.5 → 1.0 |
+| value_loss ne décroît pas | Fonction de valeur défaillante | Augmenter VF coefficient — au prix de la part policy, cf. `g_grad_share_policy_mb0` | `vf_coef` 0.5 → 1.0 |
 | Self-play bon, bot eval mauvais | Surapprentissage | Scénarios variés | Ajouter scénarios dans agent scenarios/ |
 | episode_length en hausse | Trop conservative | Réduire pénalité wait | `wait` −1.0 → −0.5 |
 | Entropy haute (< −1.5) tardivement | Trop d'exploration | Réduire ent_coef 50 % | `ent_coef` ÷2 |
