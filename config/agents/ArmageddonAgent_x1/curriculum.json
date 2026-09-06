@@ -276,11 +276,11 @@
       }
     },
     "P10": {
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P9 (init from:P9) et P9 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
       "role": "learner",
       "init": "from:P9",
       "warmup_episodes": 0,
-      "ramp_end_episodes": 10000,
-      "ratio_start": 0.0,
+      "ratio_start": 0.85,
       "ratio_end": 0.85,
       "pool": [
         {"kind": "champion", "members": ["P9"], "weight": 0.25},
