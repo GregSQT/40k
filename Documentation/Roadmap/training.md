@@ -4,8 +4,9 @@
 
 ## 🔴 Régime d'entraînement révisé — P2 à relancer depuis P1 {#regime-2026-09-06}
 
-Deux changements livrés le 2026-09-06. **Ce qui reste à faire : relancer P2 depuis P1.** P1 n'est
-pas rejoué (décision du 2026-09-06 : le temps est déjà payé), sa config est seulement homogénéisée.
+Deux changements livrés le 2026-09-06, plus un réglage d'évaluation du 2026-09-04 resté non déclaré
+jusqu'ici. **Ce qui reste à faire : relancer P2 depuis P1.** P1 n'est pas rejoué (décision du
+2026-09-06 : le temps est déjà payé), sa config est seulement homogénéisée.
 
 **1. Le déploiement `auto` pose désormais les deux camps.** Il ne posait que le joueur contrôlé :
 l'agent était placé au hasard pendant que son adversaire — bot à doctrine, ou champion du pool
