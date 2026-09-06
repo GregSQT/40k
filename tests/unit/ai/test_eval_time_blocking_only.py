@@ -66,7 +66,6 @@ def _bare_callback(gate_state: Optional[Dict[str, Any]]) -> BotEvaluationCallbac
     callback._pending_eval_snapshot_path = None
     callback.intermediate_n_workers = None
     callback.training_probe_every_n_evals = 0
-    callback._next_eval_run_training_probe = False
     return callback
 
 
@@ -174,7 +173,7 @@ def test_le_chemin_synchrone_compte_toute_la_duree_de_l_eval(monkeypatch):
     callback.eval_count = 0
     callback.should_stop_early = False
 
-    def _slow_eval(marker):
+    def _slow_eval(marker, **_):
         clock.advance(120.0)
         return {"win_rate": 0.5, "marker": marker}
 

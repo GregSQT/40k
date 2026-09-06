@@ -69,7 +69,6 @@ def _bare_callback(intermediate_n_workers=None) -> BotEvaluationCallback:
     cb.gate_display_state = None
     cb.metrics_tracker = None
     cb.intermediate_n_workers = intermediate_n_workers
-    cb._next_eval_run_training_probe = False
     return cb
 
 

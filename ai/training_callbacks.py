@@ -1497,9 +1497,6 @@ class BotEvaluationCallback(BaseCallback):
                 f"(got {training_probe_every_n_evals!r})"
             )
         self.training_probe_every_n_evals = training_probe_every_n_evals
-        # Capture-et-relai : posé AVANT la soumission du future, lu dans le thread d'éval.
-        # Sûr car un seul future peut être en vol (garde _pending_eval_future is not None).
-        self._next_eval_run_training_probe: bool = False
         self.early_stopping_patience = int(early_stopping_patience)
         self.save_best_min_episodes = int(save_best_min_episodes)
         # Signal d'early stopping : le `combined` de SELECTION (holdout exclu). Il remplace
@@ -2395,7 +2392,7 @@ class BotEvaluationCallback(BaseCallback):
             self._cleanup_pending_snapshot()
         self._apply_eval_results(results, eval_marker)
 
-    def _submit_async_eval(self, eval_marker: int) -> None:
+    def _submit_async_eval(self, eval_marker: int, run_training_probe: bool = False) -> None:
         """Submit async bot evaluation using a frozen model snapshot."""
         if self._async_eval_executor is None:
             self._async_eval_executor = ThreadPoolExecutor(
@@ -2415,6 +2412,7 @@ class BotEvaluationCallback(BaseCallback):
             self._evaluate_against_bots,
             int(eval_marker),
             snapshot_zip_path,
+            run_training_probe,
         )
 
     def _on_step(self) -> bool:
@@ -2441,7 +2439,7 @@ class BotEvaluationCallback(BaseCallback):
 
         if should_evaluate:
             self.eval_count += 1
-            self._next_eval_run_training_probe = (
+            run_training_probe = (
                 self.training_probe_every_n_evals > 0
                 and self.eval_count % self.training_probe_every_n_evals == 0
             )
@@ -2463,7 +2461,7 @@ class BotEvaluationCallback(BaseCallback):
                     (current - self.last_eval_episode) // self.eval_freq
                 )
             if self.async_eval_enabled:
-                self._submit_async_eval(eval_marker)
+                self._submit_async_eval(eval_marker, run_training_probe)
                 # When early stopping is active, wait for this eval immediately
                 # so the stopping decision is made before continuing training.
                 if self.early_stopping_patience > 0:
@@ -2472,7 +2470,7 @@ class BotEvaluationCallback(BaseCallback):
                 # Chemin synchrone : l'eval s'execute sur le thread d'entrainement, sa duree
                 # entiere est du temps bloque.
                 with self._blocking_eval_timer():
-                    results = self._evaluate_against_bots(eval_marker)
+                    results = self._evaluate_against_bots(eval_marker, run_training_probe=run_training_probe)
                 self._apply_eval_results(results, eval_marker)
 
         if self.should_stop_early:
@@ -2594,6 +2592,7 @@ class BotEvaluationCallback(BaseCallback):
         self,
         eval_marker: int,
         model_path: Optional[str] = None,
+        run_training_probe: bool = False,
     ) -> Dict[str, Any]:
         """Evaluate agent against bots using standalone function.
 
@@ -2642,7 +2641,7 @@ class BotEvaluationCallback(BaseCallback):
             self.metrics_tracker.log_eval_truncations(require_key(results, "truncations"))
         # Sonde d'apprentissage : meme modele, memes bots, meme n_episodes, mais sur les
         # scenarios d'ENTRAINEMENT. Court dans ce meme thread (async ou sync). Ne gate rien.
-        if self._next_eval_run_training_probe:
+        if run_training_probe:
             training_probe = evaluate_against_bots(
                 model=self.model,
                 training_config_name=self.training_config_name,
@@ -2655,10 +2654,6 @@ class BotEvaluationCallback(BaseCallback):
                 model_path=model_path,
                 n_workers_override=self.intermediate_n_workers,
             )
-            if self.metrics_tracker is not None:
-                self.metrics_tracker.log_eval_truncations(
-                    require_key(training_probe, "truncations")
-                )
             results["_training_probe_combined"] = float(
                 require_key(training_probe, "combined")
             )
