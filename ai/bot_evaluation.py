@@ -722,6 +722,14 @@ def _create_eval_env(
         debug_mode=debug_mode,
         # Evaluation : UN environnement, joue en serie (denominateur des rampes par-episode).
         training_n_envs=1,
+        # MESURE, pas entrainement : la rampe de deploiement est eteinte quel que soit le
+        # scenario joue. La cle `training_only` du profil ne suffit pas — elle prend le CHEMIN
+        # du scenario pour proxy du contexte, ce qui est faux des qu'on mesure SUR des scenarios
+        # d'entrainement (`scripts/bot_ranking.py --scenario-pool training` : ~70 % des episodes
+        # passaient en `auto`, donc le moteur posait a la place des deux bots et leur doctrine
+        # de pose ne jouait pas). Cette fonction ne sert QU'A mesurer — evaluation holdout,
+        # sondes, classement bot-contre-bot — jamais a entrainer.
+        training_deployment_ramp_enabled=False,
     )
     masked_env = ActionMasker(base_env, mask_fn)
     if checkpoint_zip is None:

@@ -474,16 +474,34 @@ class W40KEngine(gym.Env):
                 training_n_envs: Optional[int] = None,
                 training_episode_start_index: int = 0,
                 training_deploy_active_ratio_start: Optional[float] = None,
-                training_total_episodes: Optional[int] = None, **kwargs):
+                training_total_episodes: Optional[int] = None,
+                training_deployment_ramp_enabled: bool = True, **kwargs):
         """Initialize W40K engine with tour_de_jeu.md compliance - training system compatible.
 
         Args:
             scenario_file: Single scenario file path (used if scenario_files not provided)
             scenario_files: List of scenario file paths for random selection per episode
+            training_deployment_ramp_enabled: `False` éteint la rampe
+                `deployment_mode_schedule` pour CET environnement, quel que soit le scénario
+                joué. À poser par tout appelant qui MESURE au lieu d'entraîner.
+
+                POURQUOI la clé `training_only` du profil ne suffit pas : elle borne la rampe aux
+                scénarios du split `training`, donc elle utilise le CHEMIN DU SCÉNARIO comme
+                proxy du contexte. Le proxy tient pour l'évaluation holdout, mais il est faux dès
+                qu'on mesure SUR des scénarios d'entraînement — c'est le cas de
+                `scripts/bot_ranking.py --scenario-pool training`, qui classe les bots entre eux :
+                la rampe s'y activait, ~70 % des épisodes passaient en `auto` (progression nulle
+                sur ce script, donc `active_ratio_start` 0.3), et le moteur posait à la place des
+                deux bots. Leur doctrine de pose — une composante de leur force — ne jouait pas,
+                alors que le classement affirme mesurer le bot joué en évaluation. Le défaut
+                préexistait de façon asymétrique (seul le bot du côté agent était court-circuité)
+                et la symétrisation du 2026-09-06 l'a rendu visible des deux côtés.
         """
 
         # Store gym training mode for handler access
         self.gym_training_mode = gym_training_mode
+        # Rampe de déploiement éteinte par l'appelant : voir l'argument du même nom.
+        self._training_deployment_ramp_enabled = bool(training_deployment_ramp_enabled)
         self.debug_mode = debug_mode
         self.current_mode_code: Optional[str] = None
         # Report de la construction d'observation dans ``step`` (cf. ``_step_observation``).
@@ -1272,6 +1290,11 @@ class W40KEngine(gym.Env):
         contre UN terrain et tombaient sur des murs dès qu'un second entrait dans la rotation.
         'auto' joue une vraie phase de déploiement dont le MOTEUR décide les poses.
         """
+        # L'appelant MESURE au lieu d'entraîner : aucune rampe, quel que soit le scénario joué.
+        # Testé AVANT la lecture du bloc — un site de mesure n'a pas à porter un profil complet
+        # pour avoir le droit de refuser la rampe. Cf. `training_deployment_ramp_enabled`.
+        if not self._training_deployment_ramp_enabled:
+            return None
         if not isinstance(self.training_config, dict):
             return None
         cfg = self.training_config.get("deployment_mode_schedule")
