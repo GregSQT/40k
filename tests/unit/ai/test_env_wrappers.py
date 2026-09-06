@@ -478,6 +478,70 @@ def test_self_play_wrapper_get_frozen_model_action_uses_frozen_model_predict() -
     assert wrapper._get_frozen_model_action() == 6
 
 
+class _AutoDeployEngine(_DummyEngine):
+    """Moteur en épisode `auto` ET en phase de déploiement : le moteur y possède la pose."""
+
+    def __init__(self, decoder=None, pose: int = mi.DEPLOY_SLOT_BASE):
+        super().__init__(decoder=decoder)
+        self.game_state["phase"] = "deployment"
+        self._pose = pose
+        self.auto_deployment_calls = 0
+
+    def deployment_auto_owns_current_pose(self) -> bool:
+        return True
+
+    def auto_deployment_action(self, action_mask):
+        _ = action_mask
+        self.auto_deployment_calls += 1
+        return self._pose
+
+
+def test_self_play_wrapper_lets_the_engine_place_in_auto_mode() -> None:
+    """En mode `auto`, Player 2 est posé par le MOTEUR — son réseau n'est pas consulté.
+
+    Jumeau de `BotControlledEnv._get_opponent_action`, verrouillé par
+    `tests/unit/ai/test_auto_deployment_is_symmetric.py` côté bots. Sans cette branche le mode
+    `auto` resterait asymétrique sur le chemin self-play : l'agent posé au hasard face à un
+    adversaire qui se déploie avec sa politique (mesure du 2026-09-06 : 0.304 de win-rate en
+    `auto` contre 0.684 en `active`, différentiel d'objectifs -0.76 contre +0.19).
+
+    `received_masks` vide est la preuve du NON-APPEL : le stub enregistre chaque `predict`, donc
+    une branche qui laisserait passer le réseau se verrait ici même si elle rendait la bonne
+    action par coïncidence.
+    """
+    mask = [False] * 12
+    mask[mi.DEPLOY_SLOT_BASE] = True
+    mask[6] = True
+    decoder = _DummyActionDecoder(mask=mask, eligible=[{"id": "u1", "player": 2}])
+    model = _StubFrozenModel(action=6)
+    engine = _AutoDeployEngine(decoder=decoder)
+    wrapper = SelfPlayWrapper(engine, frozen_model=cast(Any, model))
+
+    assert wrapper._get_frozen_model_action() == mi.DEPLOY_SLOT_BASE
+    assert engine.auto_deployment_calls == 1, "le moteur n'a pas été sollicité pour la pose"
+    assert model.received_masks == [], (
+        "le réseau du snapshot a été interrogé alors que le moteur possède la pose : le mode "
+        "'auto' redevient asymétrique et r_win_rate_deploy_auto remesure un handicap"
+    )
+
+
+def test_self_play_wrapper_keeps_the_network_when_the_engine_declines_the_pose() -> None:
+    """Symétrique obligatoire : hors déploiement `auto`, le réseau reprend la main.
+
+    Une garde trop large éteindrait l'adversaire self-play sur TOUTE la partie, et le test
+    ci-dessus resterait vert.
+    """
+    mask = [False] * 12
+    mask[6] = True
+    decoder = _DummyActionDecoder(mask=mask, eligible=[{"id": "u1", "player": 2}])
+    model = _StubFrozenModel(action=6)
+    engine = _DummyEngine(decoder=decoder)  # phase 'move' : le moteur ne possède aucune pose
+    wrapper = SelfPlayWrapper(engine, frozen_model=cast(Any, model))
+
+    assert wrapper._get_frozen_model_action() == 6
+    assert model.received_masks, "le réseau n'a pas été consulté hors déploiement 'auto'"
+
+
 def test_self_play_wrapper_stats_helpers() -> None:
     wrapper = SelfPlayWrapper(_DummyEngine(), frozen_model=None, update_frequency=3)
     assert wrapper.should_update_frozen_model() is False

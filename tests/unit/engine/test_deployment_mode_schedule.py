@@ -115,6 +115,56 @@ def _collect_modes(env, n: int) -> list[str]:
     return modes
 
 
+def test_a_measuring_caller_can_switch_the_ramp_off_entirely():
+    """`training_deployment_ramp_enabled=False` éteint la rampe, scénario d'entraînement compris.
+
+    CE QUE CE TEST EMPÊCHE. `training_only` borne la rampe aux scénarios du split `training` :
+    elle prend donc le CHEMIN DU SCÉNARIO pour proxy du contexte. Le proxy tient pour
+    l'évaluation holdout, mais il est faux dès qu'on MESURE SUR des scénarios d'entraînement —
+    `scripts/bot_ranking.py --scenario-pool training` classe les bots entre eux et la rampe s'y
+    activait, mettant ~70 % des épisodes en `auto` (progression nulle, donc `active_ratio_start`
+    0.3). Le moteur posait alors à la place des DEUX bots et leur doctrine de pose ne jouait pas,
+    alors que le classement sert à calibrer le holdout.
+
+    Le cas est CONSTRUIT pour que la rampe s'appliquerait sans le drapeau : `training_only` est
+    à False et `active_ratio` à 0.0, donc tous les épisodes seraient `auto`. Sans ça le test
+    serait vert pour la mauvaise raison.
+    """
+    ramped = _make_env(0.0, 0.0, total_episodes=10)
+    assert _collect_modes(ramped, 3) == ["auto", "auto", "auto"], (
+        "le cas de référence ne produit pas d'épisode `auto` : le drapeau n'aurait rien à éteindre"
+    )
+
+    off = _make_env(0.0, 0.0, total_episodes=10)
+    off._training_deployment_ramp_enabled = False
+    for _ in range(3):
+        off.reset()
+        assert off.game_state["deployment_mode_schedule_mode"] is None, (
+            "la rampe a tiré un mode alors que l'appelant l'a éteinte"
+        )
+        assert off._deployment_auto_episode is False, (
+            "épisode marqué `auto` alors que la rampe est éteinte : le moteur va poser à la "
+            "place d'un bot dont on mesure justement la doctrine de pose"
+        )
+
+
+def test_evaluation_env_builder_switches_the_ramp_off():
+    """`ai/bot_evaluation._create_eval_env` éteint la rampe — elle ne sert QU'À mesurer.
+
+    Vérifié sur la SIGNATURE de l'appel plutôt qu'en construisant l'env : le faire exigerait un
+    roster, un bot et un scénario complets pour prouver le passage d'un seul argument.
+    """
+    import inspect
+
+    from ai import bot_evaluation
+
+    source = inspect.getsource(bot_evaluation._create_eval_env)
+    assert "training_deployment_ramp_enabled=False" in source, (
+        "_create_eval_env n'éteint plus la rampe de déploiement : toute mesure jouée sur un "
+        "scénario du split training verra le moteur poser à la place des bots"
+    )
+
+
 def test_ratio_zero_always_auto():
     """Borne basse : active_ratio 0.0 → 20/20 épisodes déployés par le moteur."""
     modes = _collect_modes(_make_env(0.0, 0.0, 100), 20)
