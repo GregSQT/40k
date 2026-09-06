@@ -32,6 +32,15 @@ d'un exploiteur alors qu'il est promu champion. La rampe d'adversité de P1 est 
 passage (elle le faisait démarrer à 100 % de bots), résidu du nettoyage qui avait retiré les neuf
 autres.
 
+**3. `bot_eval_intermediate` de `x1_long` revient à 30 épisodes par bot.** Il avait été porté à 100
+le 2026-09-04 par un commit d'une ligne, sans note ni mesure, contre la décomposition
+« 6 bots × 30 = 180 » que le profil documente lui-même dans la clé voisine et contre `x5_long`,
+resté à 30. L'écart n'était pas visible : le verrou de comparabilité des profils
+(`tests/unit/ai/test_schedule_decay_fraction.py`) était rouge depuis, en même temps que quatre
+autres tests. Effet sur le run à relancer : l'évaluation intermédiaire redescend de 600 à
+180 épisodes, soit le tiers de son coût. La sonde d'entraînement, elle, reste à 3 et garde son
++33 % — elle est désormais verrouillée nommément, profil par profil.
+
 **Mesure incidente, non élucidée.** Le run P1 a joué **31,3 %** contre P0 (25 063 épisodes sur
 80 075, `tensorboard/P1`), là où sa config annonçait 50 %. L'écart n'est pas expliqué par la rampe
 seule, qui s'achève en ~417 épisodes par env et ne pèse que 12 % du run. Non investigué : le run
