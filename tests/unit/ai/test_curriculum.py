@@ -41,35 +41,48 @@ from ai.curriculum import (
 #: Le curriculum LIVRE, epingle etape par etape : (warmup, ratio_end, champion, poids par membre).
 #: Table ecrite depuis la specification, PAS relue du JSON — c'est tout l'interet : elle
 #: constate ce que le fichier dit, elle ne le repete pas.
+#:
+#: `1 - ratio_end` est la PART DE BOTS : 30 % en P1, 20 % en P2, 15 % de P3 a P10 (2026-09-06,
+#: cf. `_doc_part_bots` du JSON). Elle suit la TAILLE du pool et non la force de l'agent — a
+#: 15 %, P1 jouerait 85 % de ses parties contre son unique membre de pool, soit le regime d'un
+#: exploiteur alors qu'il est promu champion.
+#:
+#: `warmup` vaut 0 PARTOUT : plus aucune etape ne rampe son adversite. La table portait encore
+#: 10000 sur neuf etapes et etait ROUGE sur chacune — la suppression des rampes de P2 a P10 ne
+#: l'avait pas mise a jour, celle de P1 l'acheve.
 EXPECTED_STAGES = {
-    "P00": (0,     0.00, None, {}),
-    "P0":  (0,     0.00, None, {}),
-    "P1":  (10000, 0.50, "P0", {"P0": 0.50}),
-    "P2":  (0,     0.60, "P1", {"P1": 0.40, "P0": 0.20}),
-    "P3":  (10000, 0.70, "P2", {"P2": 0.40, "P0": 0.15, "P1": 0.15}),
-    "E1":  (0,     1.00, "P3", {"P3": 1.00}),
-    "P4":  (10000, 0.75, "P3", {"P3": 0.30, "P0": 0.20 / 3, "P1": 0.20 / 3, "P2": 0.20 / 3,
-                                "E1": 0.25}),
-    "P5":  (10000, 0.80, "P4", {"P4": 0.35, "P0": 0.075, "P1": 0.075, "P2": 0.075, "P3": 0.075,
-                                "E1": 0.15}),
-    "E2":  (0,     1.00, "P5", {"P5": 1.00}),
-    "P6":  (10000, 0.80, "P5", {"P5": 0.30, "P0": 0.05, "P1": 0.05, "P2": 0.05, "P3": 0.05,
-                                "P4": 0.05, "E1": 0.125, "E2": 0.125}),
-    "P7":  (10000, 0.85, "P6", {"P6": 0.30, "P0": 0.35 / 6, "P1": 0.35 / 6, "P2": 0.35 / 6,
-                                "P3": 0.35 / 6, "P4": 0.35 / 6, "P5": 0.35 / 6,
-                                "E1": 0.10, "E2": 0.10}),
-    "P8":  (10000, 0.85, "P7", {"P7": 0.25, "P0": 0.40 / 7, "P1": 0.40 / 7, "P2": 0.40 / 7,
-                                "P3": 0.40 / 7, "P4": 0.40 / 7, "P5": 0.40 / 7, "P6": 0.40 / 7,
-                                "E1": 0.10, "E2": 0.10}),
-    "E3":  (0,     1.00, "P8", {"P8": 1.00}),
-    "P9":  (10000, 0.85, "P8", {"P8": 0.25, "P0": 0.35 / 8, "P1": 0.35 / 8, "P2": 0.35 / 8,
-                                "P3": 0.35 / 8, "P4": 0.35 / 8, "P5": 0.35 / 8, "P6": 0.35 / 8,
-                                "P7": 0.35 / 8, "E1": 0.25 / 3, "E2": 0.25 / 3, "E3": 0.25 / 3}),
-    "P10": (10000, 0.85, "P9", {"P9": 0.25, "P0": 0.40 / 9, "P1": 0.40 / 9, "P2": 0.40 / 9,
-                                "P3": 0.40 / 9, "P4": 0.40 / 9, "P5": 0.40 / 9, "P6": 0.40 / 9,
-                                "P7": 0.40 / 9, "P8": 0.40 / 9,
-                                "E1": 0.20 / 3, "E2": 0.20 / 3, "E3": 0.20 / 3}),
+    "P00": (0, 0.00, None, {}),
+    "P0":  (0, 0.00, None, {}),
+    "P1":  (0, 0.70, "P0", {"P0": 0.70}),
+    "P2":  (0, 0.80, "P1", {"P1": 0.55, "P0": 0.25}),
+    "P3":  (0, 0.85, "P2", {"P2": 0.50, "P0": 0.175, "P1": 0.175}),
+    "E1":  (0, 1.00, "P3", {"P3": 1.00}),
+    "P4":  (0, 0.85, "P3", {"P3": 0.35, "P0": 0.25 / 3, "P1": 0.25 / 3, "P2": 0.25 / 3,
+                            "E1": 0.25}),
+    "P5":  (0, 0.85, "P4", {"P4": 0.40, "P0": 0.075, "P1": 0.075, "P2": 0.075, "P3": 0.075,
+                            "E1": 0.15}),
+    "E2":  (0, 1.00, "P5", {"P5": 1.00}),
+    "P6":  (0, 0.85, "P5", {"P5": 0.35, "P0": 0.05, "P1": 0.05, "P2": 0.05, "P3": 0.05,
+                            "P4": 0.05, "E1": 0.125, "E2": 0.125}),
+    "P7":  (0, 0.85, "P6", {"P6": 0.30, "P0": 0.35 / 6, "P1": 0.35 / 6, "P2": 0.35 / 6,
+                            "P3": 0.35 / 6, "P4": 0.35 / 6, "P5": 0.35 / 6,
+                            "E1": 0.10, "E2": 0.10}),
+    "P8":  (0, 0.85, "P7", {"P7": 0.25, "P0": 0.40 / 7, "P1": 0.40 / 7, "P2": 0.40 / 7,
+                            "P3": 0.40 / 7, "P4": 0.40 / 7, "P5": 0.40 / 7, "P6": 0.40 / 7,
+                            "E1": 0.10, "E2": 0.10}),
+    "E3":  (0, 1.00, "P8", {"P8": 1.00}),
+    "P9":  (0, 0.85, "P8", {"P8": 0.25, "P0": 0.35 / 8, "P1": 0.35 / 8, "P2": 0.35 / 8,
+                            "P3": 0.35 / 8, "P4": 0.35 / 8, "P5": 0.35 / 8, "P6": 0.35 / 8,
+                            "P7": 0.35 / 8, "E1": 0.25 / 3, "E2": 0.25 / 3, "E3": 0.25 / 3}),
+    "P10": (0, 0.85, "P9", {"P9": 0.25, "P0": 0.40 / 9, "P1": 0.40 / 9, "P2": 0.40 / 9,
+                            "P3": 0.40 / 9, "P4": 0.40 / 9, "P5": 0.40 / 9, "P6": 0.40 / 9,
+                            "P7": 0.40 / 9, "P8": 0.40 / 9,
+                            "E1": 0.20 / 3, "E2": 0.20 / 3, "E3": 0.20 / 3}),
 }
+
+#: Part de bots attendue par etape, DERIVEE de `EXPECTED_STAGES` — c'est elle que le reglage
+#: du 2026-09-06 fixe, `ratio_end` n'en est que le complement.
+EXPECTED_BOT_SHARE = {name: 1.0 - spec[1] for name, spec in EXPECTED_STAGES.items()}
 
 #: n_envs du profil x1/x5 d'ArmageddonAgent. Le plus gros pool (P10, treize membres) doit y
 #: tenir : c'est la contrainte qui borne la taille des pools du curriculum.
@@ -143,11 +156,39 @@ def test_shipped_stage_matches_the_specification(curriculum, stage_name: str) ->
         assert weights[label] == pytest.approx(expected), f"{stage_name} / {label}"
 
 
-def test_learners_all_start_the_ramp_at_zero(curriculum) -> None:
+def test_learners_have_no_adversity_ramp(curriculum) -> None:
+    """Aucune etape ne rampe son adversite : `ratio_start == ratio_end`, sans exception.
+
+    REMPLACE `test_learners_all_start_the_ramp_at_zero`, qui exigeait `ratio_start == 0.0` et
+    etait rouge sur neuf etapes : les rampes de P2 a P10 avaient ete supprimees sans que le
+    verrou suive, et celle de P1 l'a ete le 2026-09-06. Un learner reprend les poids du champion
+    qui le precede et ce champion est dans son pool : il fait jeu egal par construction des
+    l'episode 0, donc la rampe ne faisait que substituer des parties de bots — gagnees a ~92 % —
+    aux parties de pool, sans signal correctif.
+
+    La cle `ramp_end_episodes` disparait avec les rampes : la laisser derriere ferait croire a
+    une interpolation que plus personne ne joue.
+    """
     for name in stage_order(curriculum):
         stage = require_stage(curriculum, name)
-        if stage["role"] == "learner":
-            assert float(stage["ratio_start"]) == 0.0, name
+        assert float(stage["ratio_start"]) == pytest.approx(float(stage["ratio_end"])), name
+        assert int(stage["warmup_episodes"]) == 0, name
+        assert "ramp_end_episodes" not in stage, name
+
+
+@pytest.mark.parametrize("stage_name", sorted(EXPECTED_STAGES))
+def test_shipped_stage_plays_the_expected_share_of_bots(curriculum, stage_name: str) -> None:
+    """Part de bots par etape : 30 % en P1, 20 % en P2, 15 % de P3 a P10 (2026-09-06).
+
+    Epingle la grandeur que le reglage DECIDE, la ou `ratio_end` n'en est que le complement.
+    Les bots ne sont pas la pour le gradient — a ~92 % de victoires l'avantage est quasi
+    constant — mais parce qu'ils sont la seule adversite structurellement differente d'un pool
+    qui est une lignee chainee : tous ses membres descendent du meme modele, donc s'il derive,
+    aucun d'eux ne le signalera.
+    """
+    stage = require_stage(curriculum, stage_name)
+    bot_share = 1.0 - float(stage["ratio_end"])
+    assert bot_share == pytest.approx(EXPECTED_BOT_SHARE[stage_name]), stage_name
 
 
 def test_exploiters_resume_the_champion_they_only_ever_play(curriculum) -> None:
