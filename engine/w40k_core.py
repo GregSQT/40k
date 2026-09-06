@@ -1375,28 +1375,56 @@ class W40KEngine(gym.Env):
         # zones respectees. Seul change QUI decide des poses — le moteur, pas la politique.
         return "active" if mode == "auto" else mode
 
-    def _should_auto_deploy_for_agent(self, action_mask: np.ndarray) -> bool:
-        """True quand le MOTEUR doit choisir la pose a la place du joueur-agent (episode `auto`).
+    def _should_auto_deploy_current_player(self, action_mask: np.ndarray) -> bool:
+        """True quand le MOTEUR doit choisir la pose du joueur courant (episode `auto`).
 
         C'est ce qui remplace l'ancien mode `fixed` de la rampe : au lieu de rejouer des positions
         ecrites dans le roster — hors zone de deploiement, et invalides des que le terrain change —
-        l'episode joue une VRAIE phase de deploiement dont l'agent ne decide simplement pas encore.
+        l'episode joue une VRAIE phase de deploiement dont personne ne decide encore la pose.
 
-        Strictement borne au joueur controle : l'adversaire a deja ses bots
-        (`BotControlledEnv._select_bot_deploy_action`), et deployer a sa place ici les
-        court-circuiterait en silence.
+        LES DEUX CAMPS, depuis le 2026-09-06, et c'est tout l'objet du changement. Cette methode
+        s'appelait `_should_auto_deploy_for_agent` et se bornait au joueur controle, au motif que
+        l'adversaire avait deja ses bots (`BotControlledEnv._select_bot_deploy_action`) ou son
+        reseau (`_get_self_play_opponent_action`). Cette borne rendait le mode `auto` ASYMETRIQUE :
+        l'agent etait pose au hasard pendant que le champion du pool se deployait avec sa politique
+        apprise, laquelle sait se placer (elle est entrainee a 90 % en mode `active`). La courbe de
+        controle `r_win_rate_deploy_auto` ne mesurait donc pas « ce que vaut l'agent depuis des
+        positions qu'il n'a pas choisies » mais « ce qu'il vaut handicape face a un adversaire qui
+        ne l'est pas ». MESURE du defaut, run x1_long du 2026-09-06 sur ~64 000 episodes :
+        0.304 de win-rate en `auto` contre 0.684 en `active`, et surtout un differentiel
+        d'objectifs de -0.76 en `auto` contre +0.19 en `active` — l'agent tenait TROIS QUARTS
+        d'objectif de MOINS que son adversaire. La reference du 2026-08-12, mesuree contre des bots
+        a doctrine de pose fixe (donc bien moins capables d'exploiter une pose adverse mediocre),
+        donnait 0.866 / 0.646, les deux differentiels positifs.
+
+        Court-circuiter la doctrine de pose des bots est donc VOULU, et non un effet de bord : la
+        symetrie du mode `auto` prime sur leur politique de placement, faute de quoi le regime de
+        la courbe dependrait de l'adversaire tire — or la part de pool passe de 20 % en P1 a 85 %
+        en P10, donc la courbe ne pourrait plus se comparer a elle-meme d'une etape a l'autre.
+        L'EVALUATION n'est pas concernee : `training_only` borne la rampe aux scenarios du split
+        training, et le holdout garde sa doctrine intacte la ou il sert de metre-etalon.
+
+        Chaque pose reste tiree INDEPENDAMMENT (`_pick_placement_action` est appele une fois par
+        figurine) : les deux camps recoivent donc des strategies differentes, et rien ne les
+        apparie.
         """
-        if not self._deployment_auto_episode:
-            return False
-        if self.game_state.get("phase") != "deployment":
+        if not self.deployment_auto_owns_current_pose():
             return False
         if not isinstance(action_mask, np.ndarray):
             raise TypeError(f"action_mask must be np.ndarray (got {type(action_mask).__name__})")
-        if action_mask.size <= 0:
-            return False
-        current_player = int(require_key(self.game_state, "current_player"))
-        controlled_player = int(require_key(self.config, "controlled_player"))
-        return current_player == controlled_player
+        return action_mask.size > 0
+
+    def deployment_auto_owns_current_pose(self) -> bool:
+        """L'episode et la phase font-ils du moteur le poseur, SANS avoir a construire le masque ?
+
+        Existe pour que les wrappers puissent poser la question avant de fabriquer un masque.
+        `get_squad_action_mask_and_eligible_units` n'est PAS pur — il tire le jet d'Advance au
+        premier appel d'une activation et memoise la carte de cellules que le decodage rejouera —
+        donc un appel supplementaire, fait juste pour repondre a cette question et jete quand la
+        reponse est non, deplacerait ce que le step execute ensuite (cf. `MaskDecision` dans
+        ai/env_wrappers.py).
+        """
+        return bool(self._deployment_auto_episode) and self.game_state.get("phase") == "deployment"
 
     def _pick_placement_action(self, action_mask: np.ndarray, context: str) -> int:
         """Tire une POSE parmi les slots de strategie ouverts. Jamais `ACTION_WAIT`.
@@ -1419,7 +1447,7 @@ class W40KEngine(gym.Env):
         return int(random.choice(placements))
 
     def auto_deployment_action(self, action_mask: np.ndarray) -> Optional[int]:
-        """La pose que le MOTEUR joue pour le joueur-agent sur cet etat, ou None s'il ne pose pas.
+        """La pose que le MOTEUR joue pour le joueur COURANT sur cet etat, ou None s'il ne pose pas.
 
         POINT D'ENTREE DE L'ABSORPTION. En episode `auto`, ces steps de deploiement ne sont PAS des
         decisions de la politique : la boucle d'entrainement les joue elle-meme
@@ -1428,12 +1456,17 @@ class W40KEngine(gym.Env):
         alors que `step` en executait une autre : PPO calculait son ratio sur une action jamais
         jouee (~10 steps de deploiement par episode, sur la part `auto` de la rampe).
 
+        L'ABSORPTION NE VAUT QUE POUR LE JOUEUR CONTROLE, et c'est la seule asymetrie qui subsiste
+        entre les deux camps : un tour d'adversaire n'alimente aucun rollout, donc il n'y a rien
+        a y absorber — le wrapper substitue simplement la pose au choix du bot ou du reseau
+        (`_get_opponent_action`). Le contrat d'armement, lui, est commun aux deux.
+
         L'action rendue est ARMEE : le `step` qui la recoit l'execute telle quelle au lieu d'en
         tirer une seconde. Un appelant qui ne passe pas par ici (moteur nu : tests, scripts) voit
         toujours son action remplacee par une pose dans `step` — la ou aucun apprentissage ne se
         fait, le remplacement est le comportement voulu.
         """
-        if not self._should_auto_deploy_for_agent(action_mask):
+        if not self._should_auto_deploy_current_player(action_mask):
             self._auto_deployment_pending_action = None
             return None
         action = self._pick_placement_action(action_mask, "deployment_mode_schedule 'auto'")
@@ -2550,8 +2583,9 @@ class W40KEngine(gym.Env):
                 observation, 0.0, terminated, False, info, out_mask, player_before_advance
             )
 
-        # Épisode `auto` : le moteur pose à la place du joueur-agent (ex-mode `fixed` de la rampe).
-        if self._should_auto_deploy_for_agent(action_mask):
+        # Épisode `auto` : le moteur pose à la place du joueur courant, quel que soit le camp
+        # (ex-mode `fixed` de la rampe).
+        if self._should_auto_deploy_current_player(action_mask):
             pending = self._auto_deployment_pending_action
             self._auto_deployment_pending_action = None
             if pending is None:

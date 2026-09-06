@@ -106,6 +106,11 @@ class _ScratchEngine(gym.Env):
         _ = action_mask
         return None
 
+    def deployment_auto_owns_current_pose(self) -> bool:
+        # Membre du contrat moteur : les wrappers le consultent avant de fabriquer un masque.
+        # Ce double n'a pas de phase de déploiement, le vrai moteur y répondrait False aussi.
+        return False
+
     def _step_observation(self, mask_and_eligible=None):
         if self.defer_observation:
             return None, mask_and_eligible

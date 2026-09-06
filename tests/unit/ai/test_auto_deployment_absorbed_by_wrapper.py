@@ -89,7 +89,7 @@ def _assert_learner_state_is_not_a_controlled_deployment(env, where: str) -> Non
     # Le masque servi à PPO est celui de cet état : si le moteur y possède la pose, la transition
     # que SB3 va enregistrer n'est pas celle qu'il croit avoir choisie.
     mask = env.action_masks()
-    owns_the_pose = env.engine._should_auto_deploy_for_agent(np.asarray(mask))
+    owns_the_pose = env.engine._should_auto_deploy_current_player(np.asarray(mask))
     assert not owns_the_pose, (
         f"{where} : l'apprenant reçoit un état de DÉPLOIEMENT dont le moteur choisit la pose "
         f"(mode={gs['deployment_mode_schedule_mode']!r}, current_player={gs['current_player']}, "

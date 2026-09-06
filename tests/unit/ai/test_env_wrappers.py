@@ -115,6 +115,16 @@ class _DummyEngine(gym.Env):
         _ = action_mask
         return None
 
+    def deployment_auto_owns_current_pose(self) -> bool:
+        """Le moteur possède-t-il la pose sur cet état, SANS construire de masque ?
+
+        Membre du contrat moteur (`ENGINE_CONTRACT_ATTRS`) : les wrappers la consultent AVANT de
+        fabriquer un masque, parce que `get_squad_action_mask_and_eligible_units` n'est pas pur.
+        `False` n'est pas un repli : ce double n'a pas de phase de déploiement (sa `phase` est
+        `move` ou `shoot`), donc le vrai moteur y répondrait `False` lui aussi.
+        """
+        return False
+
     def _step_observation(self, mask_and_eligible=None):
         # Rend `(observation, masque_utilise)`, comme le vrai `_step_observation`.
         if self.defer_observation:

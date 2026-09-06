@@ -243,6 +243,7 @@ ENGINE_CONTRACT_ATTRS = (
     "step_with_mask",
     "get_action_mask",
     "auto_deployment_action",
+    "deployment_auto_owns_current_pose",
     "_build_observation",
     "defer_observation",
     "_check_game_over",
@@ -1191,10 +1192,43 @@ class BotControlledEnv(gym.Wrapper):
         peut pas etre transmis au step suivant. Rendre l'invalidation ici la met dans la SIGNATURE
         de la fonction qui mute, au lieu de la confier a la memoire de l'appelant. Le banc
         d'entrainement ne couvre pas la branche self-play : une discipline y aurait ete non testee.
+
+        DEPLOIEMENT `auto` : le moteur pose pour l'adversaire AUSSI, et cette branche precede les
+        deux autres. Sans elle, le mode `auto` serait asymetrique — l'agent pose au hasard face a
+        un champion qui se deploie avec sa politique apprise (cf.
+        `W40KEngine._should_auto_deploy_current_player` pour la mesure qui l'impose). Elle
+        court-circuite volontairement `select_placement_action` des bots et le reseau du snapshot.
+        Aucune mutation d'etat ici — `auto_deployment_action` ne fait que lire le masque et tirer
+        un slot — donc la decision en main SURVIT et repart telle quelle au step, comme sur la
+        branche bot.
         """
+        if self.engine.deployment_auto_owns_current_pose():
+            auto_action = self.engine.auto_deployment_action(
+                self._opponent_action_mask(decision)
+            )
+            if auto_action is not None:
+                return auto_action, decision
         if self._episode_uses_self_play_opponent:
             return self._get_self_play_opponent_action(decision=decision), None
         return self._get_bot_action(debug=debug, decision=decision), decision
+
+    def _opponent_action_mask(self, decision: Optional[MaskDecision]) -> np.ndarray:
+        """Masque de l'etat courant, repris de `decision` quand l'appelant en tient un.
+
+        Le reconstruire alors qu'une decision est en main serait un SECOND appel a
+        `get_squad_action_mask_and_eligible_units` sur le meme etat : il n'est pas pur (il tire le
+        jet d'Advance au premier appel d'une activation et memoise la carte de cellules que le
+        decodage rejouera), donc le rejouer deplacerait ce que le step va executer. Cf.
+        `MaskDecision`. La construction n'a lieu que pour les appels directs, qui n'en tiennent pas.
+        """
+        if decision is not None:
+            return np.asarray(decision.action_mask)
+        action_mask, _eligible = (
+            self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
+                self.engine.game_state
+            )
+        )
+        return np.asarray(action_mask)
 
     def _play_bot_until_control_returns(
         self, debug_mode: bool, decision: Optional[MaskDecision] = None
@@ -2205,7 +2239,28 @@ class SelfPlayWrapper(gym.Wrapper):
     def _get_frozen_model_action(self) -> int:
         """
         Get action from frozen model for Player 2.
+
+        DEPLOIEMENT `auto` : le moteur pose pour Player 2 aussi. Jumeau exact de la branche de
+        `BotControlledEnv._get_opponent_action` — les deux camps sont poses au hasard, sinon le
+        mode `auto` opposerait un agent pose aleatoirement a un adversaire qui se deploie avec sa
+        politique (cf. `W40KEngine._should_auto_deploy_current_player`). Ce wrapper n'est pas le
+        chemin du curriculum (qui passe par `BotControlledEnv` des qu'il y a des bots, et il y en
+        a a toutes les etapes), mais il porte le MEME motif : l'y laisser en arriere aurait
+        reintroduit le defaut sur le chemin self-play pur.
+
+        La garde sans masque precede la construction : `get_squad_action_mask_and_eligible_units`
+        n'est pas pur, et un appel fait ici puis jete quand la reponse est non deplacerait le jet
+        d'Advance et la carte de cellules que le decodage rejoue (cf. `MaskDecision`).
         """
+        if self.engine.deployment_auto_owns_current_pose():
+            deploy_mask, _eligible = (
+                self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
+                    self.engine.game_state
+                )
+            )
+            auto_action = self.engine.auto_deployment_action(np.asarray(deploy_mask))
+            if auto_action is not None:
+                return auto_action
         if self.frozen_model is None:
             action_mask, eligible_units = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(self.engine.game_state)
             # POINT DE CHOIX JOUEUR en attente : le pool est vide PAR CONSTRUCTION, mais
