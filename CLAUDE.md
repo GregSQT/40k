@@ -51,19 +51,12 @@ Fichiers par sujet (tâches ouvertes uniquement) :
 - Documentation/Roadmap/doc.md — hygiène documentaire
 
 Rôle des sources :
-
 CODE : tranche ce qui est réellement implémenté ou non.
-
 ROADMAP_INDEX.md : tranche l'ordre/priorité des chantiers, y compris contre index_v11.md §0.
-
 Décision datée la plus récente : tranche l'approche retenue.
-
 Chantiers/v11/ : détail/spec du programme V11.
-
 Chantiers/backlog/ : contenu des chantiers ouverts (détail).
-
 Reference/ : références vivantes par domaine ; Archives/chantiers/ : journaux des chantiers livrés.
-
 Si aucune règle ci-dessus ne tranche : demander à l'utilisateur.
 
 Cycle chantier : voir blocs **Discipline** et **Exceptions actées** de ROADMAP_INDEX.md (source unique).
@@ -81,13 +74,9 @@ Toujours activer le venv avant Python :
 source /home/greg/40k/.venv/bin/activate
 
 Services :
-
 backend : cd /home/greg/40k && python3 services/api_server.py (api, port 5001)
-
 frontend : cd /home/greg/40k/frontend && npm run dev (app, port 5175)
-
 redémarrer : ap
-
 arrêter : stop
 
 REDÉMARRAGE — ACQUIS : l'utilisateur relance toujours backend + frontend lui-même avant chaque essai PvP.
@@ -104,11 +93,8 @@ python3 ai/train.py --agent ArmageddonAgent_x1 --training-config x<X> --scenario
 python3 ai/train.py --agent ArmageddonAgent_x1 --training-config x<X> --resolution <X> --test-only --step
 
 --test-only n'entraîne RIEN et laisse le modèle intact.
-
 --step écrit step.log.
-
 --new écarte le modèle existant.
-
 --append exige un modèle existant et le remplace par le résultat du run.
 
 Pour entraîner lorsqu'un modèle existe : ne jamais choisir entre --new et --append sans demander à l'utilisateur.
