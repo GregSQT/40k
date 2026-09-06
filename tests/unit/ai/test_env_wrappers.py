@@ -104,7 +104,7 @@ class _DummyEngine(gym.Env):
         )
         return mask
 
-    def auto_deployment_action(self, action_mask):
+    def auto_deployment_action(self, action_mask) -> Optional[int]:
         """Pose que le MOTEUR jouerait a la place de la politique, ou None s'il n'en joue pas.
 
         Membre du contrat moteur (`ENGINE_CONTRACT_ATTRS`) : `BotControlledEnv` l'interroge a
@@ -490,7 +490,7 @@ class _AutoDeployEngine(_DummyEngine):
     def deployment_auto_owns_current_pose(self) -> bool:
         return True
 
-    def auto_deployment_action(self, action_mask):
+    def auto_deployment_action(self, action_mask) -> Optional[int]:
         _ = action_mask
         self.auto_deployment_calls += 1
         return self._pose
