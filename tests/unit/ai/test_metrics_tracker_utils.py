@@ -613,6 +613,14 @@ def test_compliance_mapper_phase_and_training_metrics_paths() -> None:
     assert "00_critical/a_bot_eval_combined" in keys
 
 
+_PPO_CURVE_TAGS: tuple[str, ...] = (
+    "00_critical/f_loss_mean",
+    "00_critical/g_explained_variance",
+    "00_critical/h_clip_fraction",
+    "00_critical/i_approx_kl",
+    "00_critical/j_entropy_loss",
+)
+
 _UPDATE_STATS: Dict[str, float] = {
     "train/learning_rate": 3e-4,
     "train/policy_gradient_loss": -0.2,
@@ -652,13 +660,7 @@ def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
         f"stub invalide : episode_count={t.episode_count} == step_count={t.step_count}"
     )
 
-    curve_tags = (
-        "00_critical/f_loss_mean",
-        "00_critical/g_explained_variance",
-        "00_critical/h_clip_fraction",
-        "00_critical/i_approx_kl",
-        "00_critical/j_entropy_loss",
-    )
+    curve_tags = _PPO_CURVE_TAGS
     threshold_tags = (
         "thresholds/clip_fraction_min",
         "thresholds/clip_fraction_max",
@@ -702,11 +704,11 @@ def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
         )
 
     # Les seuils doivent partager la meme abscisse que les courbes qu'ils annotent.
-    curve_step_set = {step for k, _v, step in all_scalars if k == "00_critical/h_clip_fraction"}
+    # La boucle precedente a prouve que chaque courbe a steps == {t.episode_count}.
     for tag in threshold_tags:
         steps = {step for k, _v, step in all_scalars if k == tag}
-        assert steps == curve_step_set, (
-            f"desalignement {tag} : {steps} vs courbes {curve_step_set}"
+        assert steps == {t.episode_count}, (
+            f"desalignement {tag} : {steps}, attendu {{episode_count={t.episode_count}}}"
         )
 
 
@@ -746,7 +748,7 @@ def test_aucun_seuil_emis_avant_la_premiere_capture_ppo() -> None:
     assert threshold_keys == [], (
         f"seuils emis avant la premiere capture PPO : {threshold_keys}"
     )
-    ppo_curve_keys = [k for k in keys if k.startswith("00_critical/") and k[12] in "fghij"]
+    ppo_curve_keys = [k for k in keys if k in _PPO_CURVE_TAGS]
     assert ppo_curve_keys == [], (
         f"courbes PPO emises avec listes vides : {ppo_curve_keys}"
     )
