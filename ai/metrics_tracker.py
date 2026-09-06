@@ -487,8 +487,9 @@ class W40KMetricsTracker:
     def _log_thresholds(self, step: int) -> None:
         """Log constant threshold reference lines for 00_critical metrics.
 
-        Appelee sous la garde `ppo_capture_is_new` de `log_critical_dashboard` : ces lignes
-        n'ont de sens que superposees aux courbes de sante PPO, donc elles suivent leur cadence.
+        Appelee sous la garde `ppo_capture_is_new and len(clip_fractions) >= 1` de
+        `log_critical_dashboard` : ces lignes n'ont de sens que superposees aux courbes de sante
+        PPO, donc elles suivent leur cadence et ne sont emises qu'apres la premiere capture reelle.
         """
         self.writer.add_scalar("thresholds/explained_variance_min", 0.30, step)
         self.writer.add_scalar("thresholds/clip_fraction_min", 0.10, step)
@@ -509,9 +510,10 @@ class W40KMetricsTracker:
 
         Ce qu'un tableau de bord doit dire ici, c'est « ce nombre doit valoir 0 ». Emise
         seulement quand une troncature arrive, la courbe etait absente du cas nominal, donc
-        indiscernable d'une metrique jamais branchee. Elle porte un point par episode, comme
-        toutes les courbes `00_critical/` sauf les cinq de sante PPO, qui suivent la cadence de
-        l'update (cf. `log_critical_dashboard`).
+        indiscernable d'une metrique jamais branchee. Elle porte un point par episode ; les
+        exceptions a cette cadence dans `00_critical/` sont les cinq courbes de sante PPO et
+        leurs seuils (cadence update), l'evaluation bot a/b/c (cadence eval), et les tags
+        p-s ventiles par mode de deploiement (cf. `log_critical_dashboard`).
 
         Portee ENTRAINEMENT seule : l'abscisse est `episode_count`, qui ne compte que ces
         episodes-la. Le compte d'eval vit dans le bilan de fin de run, pas sur cet axe.
@@ -1651,7 +1653,7 @@ class W40KMetricsTracker:
         self._emit_windowed('00_critical/e_episode_reward_smooth', self.all_episode_rewards)
 
         # ==========================================
-        # PPO HEALTH (6 metrics)
+        # PPO HEALTH (5 metrics)
         # ==========================================
         # Ces cinq courbes et les lignes de seuil qu'elles portent ne bougent qu'a l'update PPO,
         # alors que ce dashboard tourne a CHAQUE fin d'episode — 74 par update sur x1_long.
@@ -1702,6 +1704,12 @@ class W40KMetricsTracker:
                 loss_mean = float(np.mean(combined_losses))
                 self.writer.add_scalar('00_critical/f_loss_mean', loss_mean, self.episode_count)
 
+            # Seuils : n'existent que pour etre superposes a `00_critical/{g,h,i,j}` dans les
+            # graphes Multiline de `_setup_custom_scalars_layout`. Garda par la non-vacuite de
+            # clip_fractions pour ne pas emettre un point orphelin avant la premiere capture PPO.
+            if len(self.hyperparameter_tracking['clip_fractions']) >= 1:
+                self._log_thresholds(self.episode_count)
+
         # ==========================================
         # HORS 00_critical : ecrit dans game_critical/ et game_detailed/
         # ==========================================
@@ -1730,13 +1738,6 @@ class W40KMetricsTracker:
         # les compteurs d'actions de l'episode passes par le callback. Le doublon qui occupait
         # cette place lisait un self.episode_tactical_data jamais alimente (voir la trace dans
         # __init__) et ecrasait la vraie courbe avec des zeros.
-
-        # Meme cadence que les courbes qu'elles annotent : ces huit constantes n'existent que
-        # pour etre superposees a `00_critical/{g,h,i,j}` dans les graphes Multiline de
-        # `_setup_custom_scalars_layout`. Emises par episode, elles pesaient a elles seules
-        # ~315 000 points pour huit valeurs qui ne changent jamais.
-        if ppo_capture_is_new:
-            self._log_thresholds(self.episode_count)
 
         # Phase 2: zone intent metrics (sliding window)
         self._log_zone_intent_metrics(self.episode_count)

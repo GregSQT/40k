@@ -54,7 +54,7 @@ sur le rapport entre les points de `03_selfplay/<membre>` et ceux de `actions/sh
 
 ---
 
-## ⚠️ Courbes de santé PPO — runs lancés avant le 2026-09-04 {#courbes-ppo-reprise}
+## ⚠️ Courbes de santé PPO — historique des défauts {#courbes-ppo-reprise}
 
 Trois défauts vivaient sur la capture des métriques PPO
 (`MetricsCollectionCallback._on_training_start`), corrigés le 2026-09-04. Ce qu'ils rendent
@@ -102,7 +102,7 @@ courbes `00_critical/f..j` et les huit lignes `thresholds/*` étaient republiée
 d'épisode** alors que leur source n'est alimentée qu'une fois par update : 39 430 points pour 529
 valeurs distinctes sur `run_20260906-123804`, soit 74,5 copies par valeur, contre 532 points et
 532 valeurs sur les jumelles `train/*` de SB3. Le curseur de lissage de TensorBoard comptant des
-points, il aurait fallu le régler sur ~1 500 pour couvrir la fenêtre EWMA de 20 updates. Aucune
+points, il aurait fallu le régler sur ~1 500 pour couvrir la fenêtre glissante de 20 updates. Aucune
 valeur n'était fausse — l'enveloppe de l'escalier est la bonne série — mais le curseur était
 inopérant et les runs de cadences d'update différentes n'étaient pas comparables point pour point.
 Ces treize tags portent désormais un point par update. Verrou :
