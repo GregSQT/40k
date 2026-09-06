@@ -89,8 +89,18 @@ STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS: frozenset = frozenset({
 })
 
 #: Sous-cles de `model_params` autorisees dans un override d'etape.
+#: Toutes decrivent l'OPTIMISATION, jamais le modele ni le retour : elles changent la facon dont
+#: le gradient est calcule et applique, pas ce que le reseau voit ni ce qu'il apprend a predire.
+#: C'est ce qui les distingue des cles refusees ici — `policy_kwargs`/`net_arch` (architecture),
+#: `n_steps`/`batch_size` (taille du rollout), `gamma`/`gae_lambda` (definition du retour) —, dont
+#: la variation d'une etape a l'autre rendrait les modeles de la lignee chainee incomparables.
+#: `max_grad_norm` ajoute le 2026-09-06 a ce titre, meme famille que `vf_coef` : il borne la norme
+#: du gradient avant l'application, ce qui n'affecte ni l'observation, ni l'action space, ni la
+#: cible du critic. Il est declarable parce qu'un run peut avoir a le relacher — mesure sur
+#: run_20260906-183917, 56 updates sur 60 avec un gradient ecrete au plafond, ce qui aplatit
+#: toutes les mises a jour a la meme norme (cf. le `_doc` de P2 dans le curriculum livre).
 STAGE_HP_OVERRIDES_ALLOWED_MODEL_PARAMS: frozenset = frozenset({
-    "learning_rate", "ent_coef", "n_epochs", "vf_coef",
+    "learning_rate", "ent_coef", "n_epochs", "vf_coef", "max_grad_norm",
 })
 
 #: Sous-cles de `callback_params` autorisees dans un override d'etape.
@@ -589,6 +599,13 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
             if not isinstance(v, (int, float)) or v <= 0:
                 raise ValueError(
                     f"{source}: stages[{name}].training_config_overrides.model_params.vf_coef "
+                    f"doit etre un nombre > 0 (got {v!r})"
+                )
+        if "max_grad_norm" in mp:
+            v = mp["max_grad_norm"]
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
+                raise ValueError(
+                    f"{source}: stages[{name}].training_config_overrides.model_params.max_grad_norm "
                     f"doit etre un nombre > 0 (got {v!r})"
                 )
         for _key, _allow_zero in (("learning_rate", False), ("ent_coef", True)):

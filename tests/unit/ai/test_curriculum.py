@@ -50,11 +50,19 @@ from ai.curriculum import (
 #: `warmup` vaut 0 PARTOUT : plus aucune etape ne rampe son adversite. La table portait encore
 #: 10000 sur neuf etapes et etait ROUGE sur chacune — la suppression des rampes de P2 a P10 ne
 #: l'avait pas mise a jour, celle de P1 l'acheve.
+#:
+#: P2 REPONDERE le 2026-09-06 (commit 4a4180b4) : champion P1 0.55 -> 0.50, ancien P0 0.25 -> 0.30,
+#: a part de bots constante (ratio_end 0.80). Le pool de P2 n'a que deux membres et P1 est le
+#: predecesseur DIRECT du learner (init from:P1), donc les parties contre P1 opposent deux
+#: politiques quasi identiques : c'est P0, plus lointain dans la lignee chainee, qui porte seul
+#: la diversite de style a cette etape. Deplacer 5 points vers lui achete cette diversite sans
+#: toucher aux bots. La table etait restee sur les anciens poids et rendait
+#: test_shipped_stage_matches_the_specification[P2] ROUGE.
 EXPECTED_STAGES = {
     "P00": (0, 0.00, None, {}),
     "P0":  (0, 0.00, None, {}),
     "P1":  (0, 0.70, "P0", {"P0": 0.70}),
-    "P2":  (0, 0.80, "P1", {"P1": 0.55, "P0": 0.25}),
+    "P2":  (0, 0.80, "P1", {"P1": 0.50, "P0": 0.30}),
     "P3":  (0, 0.85, "P2", {"P2": 0.50, "P0": 0.175, "P1": 0.175}),
     "E1":  (0, 1.00, "P3", {"P3": 1.00}),
     "P4":  (0, 0.85, "P3", {"P3": 0.35, "P0": 0.25 / 3, "P1": 0.25 / 3, "P2": 0.25 / 3,
@@ -134,6 +142,27 @@ def test_each_stage_ratios_sum_to_one(curriculum, stage_name: str) -> None:
     assert abs(total - 1.0) <= RATIO_SUM_TOLERANCE, (
         f"{stage_name}: bots {1.0 - float(stage['ratio_end'])} + pool {pool_weight} = {total}"
     )
+
+
+def test_max_grad_norm_override_stays_isolated_to_p2(curriculum) -> None:
+    """P2 est la SEULE etape a surcharger max_grad_norm, pour que sa mesure reste comparable.
+
+    Le reglage a ete pose le 2026-09-06 sur la mesure du run_20260906-183917 (56 updates sur 60
+    avec un gradient ecrete au plafond du profil, cf. le `_doc` de P2). Il est volontairement
+    local : toute autre etape qui le surchargerait ferait de la lignee chainee une suite de
+    regimes d'optimisation differents, et l'ecart mesure sur P2 ne serait plus attribuable.
+    La VALEUR n'est pas epinglee — elle est en cours de calibration et doit pouvoir bouger sans
+    rendre ce test rouge ; ce qui est epingle, c'est l'ISOLATION.
+    """
+    surcharges = {
+        name: stage["training_config_overrides"]["model_params"]["max_grad_norm"]
+        for name, stage in curriculum["stages"].items()
+        if "max_grad_norm" in stage.get("training_config_overrides", {}).get("model_params", {})
+    }
+    assert sorted(surcharges) == ["P2"], (
+        f"max_grad_norm doit rester surcharge par la seule etape P2, trouve : {sorted(surcharges)}"
+    )
+    assert surcharges["P2"] > 0
 
 
 @pytest.mark.parametrize("stage_name", sorted(EXPECTED_STAGES))

@@ -74,7 +74,7 @@
       }
     },
     "P2": {
-      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner EST le champion a l'episode 0 (init from:P1), donc il fait jeu egal avec le pool par construction et n'a rien a etre protege. Mesure du 2026-09-06 : sondes a 1k/2k/3k/4k/5k episodes = 0.453/0.557/0.487/0.420/0.443, moyenne 0.472 a 1.2 sigma de la parite. La rampe ne faisait que remplacer des parties de pool par des parties de bots deja gagnees a 92 %, sans signal correctif, pendant les 10 000 premiers episodes.",
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner EST le champion a l'episode 0 (init from:P1), donc il fait jeu egal avec le pool par construction et n'a rien a etre protege. Mesure du 2026-09-06 : sondes a 1k/2k/3k/4k/5k episodes = 0.453/0.557/0.487/0.420/0.443, moyenne 0.472 a 1.2 sigma de la parite. La rampe ne faisait que remplacer des parties de pool par des parties de bots deja gagnees a 92 %, sans signal correctif, pendant les 10 000 premiers episodes. max_grad_norm 2.0 (2026-09-06), SEULE etape a s'ecarter du 0.5 que portent les six profils de training_config : MESURE sur run_20260906-183917, 56 updates sur 60 affichent un gradient_norm a exactement 0.5000, soit le plafond lui-meme, pour un minimum de 0.4288 sur les 4 restantes. La courbe est lue APRES ecretage (ai/training_callbacks.py relit p.grad une fois le clip_grad_norm_ de ai/patched_ppo.py applique), donc ce plat signifie que le gradient BRUT depasse le plafond en permanence : toutes les mises a jour sortent avec la meme norme, l'amplitude du signal est detruite et PPO degenere en pas de taille fixe dans une direction bruitee — le mecanisme meme de la marche aleatoire observee sur P1 et P2 (approx_kl cumule ~6 nats sur P2-OLD pour une entropie et un win-rate inchanges). PREUVE DE L'EFFET par le levier voisin : doubler le learning rate (0.001 -> 0.002) n'a fait passer clip_fraction que de 0.070 (P1) a 0.085 (run du 2026-09-06), soit +21 % pour +100 % de lr, et le laisse sous le plancher 0.10 que le profil se donne (thresholds/clip_fraction_min). Le reglage reste ISOLE A P2 tant que sa contrepartie n'est pas mesuree : P1 et P3 a P10 gardent le 0.5 du profil, pour que la comparaison avec/sans soit lisible sur une seule etape (verrou tests/unit/ai/test_curriculum.py::test_max_grad_norm_override_stays_isolated_to_p2, qui epingle l'isolation et non la valeur, encore en calibration). Contrepartie a surveiller : un plafond plus haut laisse passer les pics de gradient, donc 00_critical/i_approx_kl peut franchir target_kl 0.015 et faire couper les epochs par PPO — si approx_kl s'installe au-dessus de 0.015, c'est 2.0 qu'il faut redescendre, pas target_kl qu'il faut monter.",
       "role": "learner",
       "init": "from:P1",
       "warmup_episodes": 0,
@@ -90,7 +90,8 @@
         "model_params": {
           "learning_rate": {"initial": 0.002, "final": 0.0005, "decay_fraction": 0.9},
           "ent_coef": {"start": 0.07, "end": 0.01, "decay_fraction": 0.65},
-          "n_epochs": 6
+          "n_epochs": 6,
+          "max_grad_norm": 2.0
         }
       }
     },
