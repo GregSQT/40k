@@ -88,20 +88,38 @@ STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS: frozenset = frozenset({
     "total_episodes", "model_params", "callback_params", "agent_seat_p2_ratio",
 })
 
-#: Sous-cles de `model_params` autorisees dans un override d'etape.
+class _ModelParamSpec(NamedTuple):
+    """Contrainte d'une sous-cle de `model_params` surchargeable par une etape."""
+
+    integer: bool  # entier strict : `5.0` est refuse
+    allow_zero: bool  # borne basse inclusive plutot que stricte
+    allow_schedule: bool  # un objet schedule est accepte a la place du scalaire
+
+
+#: Sous-cles de `model_params` autorisees dans un override d'etape, et contrainte de chacune.
 #: Toutes decrivent l'OPTIMISATION, jamais le modele ni le retour : elles changent la facon dont
 #: le gradient est calcule et applique, pas ce que le reseau voit ni ce qu'il apprend a predire.
 #: C'est ce qui les distingue des cles refusees ici — `policy_kwargs`/`net_arch` (architecture),
 #: `n_steps`/`batch_size` (taille du rollout), `gamma`/`gae_lambda` (definition du retour) —, dont
 #: la variation d'une etape a l'autre rendrait les modeles de la lignee chainee incomparables.
 #: `max_grad_norm` ajoute le 2026-09-06 a ce titre, meme famille que `vf_coef` : il borne la norme
-#: du gradient avant l'application, ce qui n'affecte ni l'observation, ni l'action space, ni la
-#: cible du critic. Il est declarable parce qu'un run peut avoir a le relacher — mesure sur
-#: run_20260906-183917, 56 updates sur 60 avec un gradient ecrete au plafond, ce qui aplatit
-#: toutes les mises a jour a la meme norme (cf. le `_doc` de P2 dans le curriculum livre).
-STAGE_HP_OVERRIDES_ALLOWED_MODEL_PARAMS: frozenset = frozenset({
-    "learning_rate", "ent_coef", "n_epochs", "vf_coef", "max_grad_norm",
-})
+#: du gradient avant l'application. La MESURE qui a motive sa valeur vit au `_doc` de P2.
+#:
+#: La contrainte est portee ICI et non par une branche du validateur, pour qu'ouvrir une cle et
+#: dire ce qu'elle accepte soient le MEME geste : les branches separees avaient laisse quatre
+#: orthographes du meme predicat, dont trois sans rejet des booleens (`vf_coef: true` etait
+#: accepte et arrivait au modele en 1.0).
+STAGE_HP_OVERRIDES_MODEL_PARAM_SPECS: Dict[str, _ModelParamSpec] = {
+    "learning_rate": _ModelParamSpec(integer=False, allow_zero=False, allow_schedule=True),
+    "ent_coef": _ModelParamSpec(integer=False, allow_zero=True, allow_schedule=True),
+    "n_epochs": _ModelParamSpec(integer=True, allow_zero=False, allow_schedule=False),
+    "vf_coef": _ModelParamSpec(integer=False, allow_zero=False, allow_schedule=False),
+    "max_grad_norm": _ModelParamSpec(integer=False, allow_zero=False, allow_schedule=False),
+}
+
+STAGE_HP_OVERRIDES_ALLOWED_MODEL_PARAMS: frozenset = frozenset(
+    STAGE_HP_OVERRIDES_MODEL_PARAM_SPECS
+)
 
 #: Sous-cles de `callback_params` autorisees dans un override d'etape.
 #: `bot_eval_freq` et `bot_eval_final` sont les seuls parametres d'evaluation qui dependent
@@ -587,36 +605,25 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
                 f"cles non autorisees : {unknown_mp}. Cles autorisees : "
                 f"{sorted(STAGE_HP_OVERRIDES_ALLOWED_MODEL_PARAMS)}"
             )
-        if "n_epochs" in mp:
-            n = mp["n_epochs"]
-            if not isinstance(n, int) or n <= 0:
+        for _key, _spec in STAGE_HP_OVERRIDES_MODEL_PARAM_SPECS.items():
+            if _key not in mp:
+                continue
+            v = mp[_key]
+            if _spec.allow_schedule and isinstance(v, dict):
+                continue
+            # `isinstance(True, int)` vaut vrai : sans ce rejet, `true` passerait pour 1 et
+            # s'appliquerait au modele comme un reglage silencieux.
+            _numeric = not isinstance(v, bool) and isinstance(
+                v, int if _spec.integer else (int, float)
+            )
+            if not (_numeric and (v >= 0 if _spec.allow_zero else v > 0)):
+                _kind = "un entier" if _spec.integer else "un nombre"
+                _op = ">= 0" if _spec.allow_zero else "> 0"
+                _sched = " ou un objet schedule" if _spec.allow_schedule else ""
                 raise ValueError(
-                    f"{source}: stages[{name}].training_config_overrides.model_params.n_epochs "
-                    f"doit etre un entier > 0 (got {n!r})"
+                    f"{source}: stages[{name}].training_config_overrides.model_params.{_key} "
+                    f"doit etre {_kind} {_op}{_sched} (got {v!r})"
                 )
-        if "vf_coef" in mp:
-            v = mp["vf_coef"]
-            if not isinstance(v, (int, float)) or v <= 0:
-                raise ValueError(
-                    f"{source}: stages[{name}].training_config_overrides.model_params.vf_coef "
-                    f"doit etre un nombre > 0 (got {v!r})"
-                )
-        if "max_grad_norm" in mp:
-            v = mp["max_grad_norm"]
-            if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
-                raise ValueError(
-                    f"{source}: stages[{name}].training_config_overrides.model_params.max_grad_norm "
-                    f"doit etre un nombre > 0 (got {v!r})"
-                )
-        for _key, _allow_zero in (("learning_rate", False), ("ent_coef", True)):
-            if _key in mp:
-                v = mp[_key]
-                _op = ">= 0" if _allow_zero else "> 0"
-                if not (isinstance(v, dict) or (isinstance(v, (int, float)) and (v >= 0 if _allow_zero else v > 0))):
-                    raise ValueError(
-                        f"{source}: stages[{name}].training_config_overrides.model_params.{_key} "
-                        f"doit etre un nombre {_op} ou un objet schedule (got {v!r})"
-                    )
     if "callback_params" in overrides:
         cp = overrides["callback_params"]
         if not isinstance(cp, dict):

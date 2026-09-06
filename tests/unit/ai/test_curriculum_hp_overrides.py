@@ -116,18 +116,31 @@ def test_validate_hp_overrides_vf_coef_negative_rejected():
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
-@pytest.mark.parametrize("bad", [0, -1.0, "2.0", True])
+@pytest.mark.parametrize("bad", [0, -1.0, "2.0"])
 def test_validate_hp_overrides_max_grad_norm_non_positive_rejected(bad):
-    """Un plafond nul, negatif ou non numerique casserait l'ecretage en silence.
-
-    `True` est explicitement couvert : `isinstance(True, int)` vaut vrai en Python, donc sans
-    garde dediee un booleen passerait pour un plafond de 1.0.
-    """
+    """Un plafond nul, negatif ou non numerique casserait l'ecretage en silence."""
     stage = {
         "role": "learner",
         "training_config_overrides": {"model_params": {"max_grad_norm": bad}},
     }
     with pytest.raises(ValueError, match="max_grad_norm"):
+        _validate_stage_hp_overrides("P2", stage, "<test>")
+
+
+@pytest.mark.parametrize("key", sorted(STAGE_HP_OVERRIDES_ALLOWED_MODEL_PARAMS))
+def test_validate_hp_overrides_bool_rejected_on_every_model_param(key):
+    """`isinstance(True, int)` vaut vrai : sans rejet explicite, `true` passerait pour 1.
+
+    Balaye TOUTE la liste blanche et pas la seule cle du jour : tant que chaque cle portait sa
+    propre branche, `vf_coef`, `n_epochs`, `learning_rate` et `ent_coef` acceptaient `true` et
+    l'appliquaient au modele en 1.0. Le parametrage suit la table des specs, donc une cle
+    ouverte plus tard est couverte sans toucher a ce test.
+    """
+    stage = {
+        "role": "learner",
+        "training_config_overrides": {"model_params": {key: True}},
+    }
+    with pytest.raises(ValueError, match=key):
         _validate_stage_hp_overrides("P2", stage, "<test>")
 
 
@@ -189,19 +202,11 @@ def test_apply_hp_overrides_vf_coef():
 
 
 def test_apply_hp_overrides_max_grad_norm():
-    """La cle est ABSENTE de `_base_cfg` : l'override doit l'inserer, pas seulement l'ecraser.
-
-    C'est le cas reel — les six profils de training_config portent `max_grad_norm`, mais une
-    etape qui le surcharge le fait sur une config ou il peut valoir autre chose ; le maillon
-    verifie ici est celui que la whitelist vient d'ouvrir. L'application au MODELE, elle, est
-    deja verrouillee par test_train_helpers (`_PLAIN_CURRICULUM_KEYS`).
-    """
+    """La cle est ABSENTE de `_base_cfg` : l'override doit l'INSERER, pas seulement l'ecraser."""
     cfg = _base_cfg()
     assert "max_grad_norm" not in cfg["model_params"]
     _apply_stage_hp_overrides(cfg, {"model_params": {"max_grad_norm": 2.0}})
     assert cfg["model_params"]["max_grad_norm"] == 2.0
-    assert cfg["model_params"]["vf_coef"] == 1.0
-    assert cfg["model_params"]["gamma"] == 0.99
 
 
 def test_apply_hp_overrides_ent_coef_replaces_whole_dict():

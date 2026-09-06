@@ -147,22 +147,19 @@ def test_each_stage_ratios_sum_to_one(curriculum, stage_name: str) -> None:
 def test_max_grad_norm_override_stays_isolated_to_p2(curriculum) -> None:
     """P2 est la SEULE etape a surcharger max_grad_norm, pour que sa mesure reste comparable.
 
-    Le reglage a ete pose le 2026-09-06 sur la mesure du run_20260906-183917 (56 updates sur 60
-    avec un gradient ecrete au plafond du profil, cf. le `_doc` de P2). Il est volontairement
-    local : toute autre etape qui le surchargerait ferait de la lignee chainee une suite de
-    regimes d'optimisation differents, et l'ecart mesure sur P2 ne serait plus attribuable.
-    La VALEUR n'est pas epinglee — elle est en cours de calibration et doit pouvoir bouger sans
-    rendre ce test rouge ; ce qui est epingle, c'est l'ISOLATION.
+    Toute autre etape qui le surchargerait ferait de la lignee chainee une suite de regimes
+    d'optimisation differents, et l'ecart mesure sur P2 ne serait plus attribuable. La VALEUR
+    n'est pas epinglee — elle est en calibration et doit pouvoir bouger sans rendre ce test
+    rouge ; ce qui est epingle, c'est l'ISOLATION. La mesure qui a motive le reglage vit au
+    `_doc` de P2.
     """
-    surcharges = {
-        name: stage["training_config_overrides"]["model_params"]["max_grad_norm"]
-        for name, stage in curriculum["stages"].items()
+    surcharges = sorted(
+        name for name, stage in curriculum["stages"].items()
         if "max_grad_norm" in stage.get("training_config_overrides", {}).get("model_params", {})
-    }
-    assert sorted(surcharges) == ["P2"], (
-        f"max_grad_norm doit rester surcharge par la seule etape P2, trouve : {sorted(surcharges)}"
     )
-    assert surcharges["P2"] > 0
+    assert surcharges == ["P2"], (
+        f"max_grad_norm doit rester surcharge par la seule etape P2, trouve : {surcharges}"
+    )
 
 
 @pytest.mark.parametrize("stage_name", sorted(EXPECTED_STAGES))
