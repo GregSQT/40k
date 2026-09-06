@@ -46,6 +46,23 @@ fausses jusqu'à sa fin. Verrou : `tests/unit/ai/test_metrics_dump_wrapper_idemp
 
 ---
 
+## Sonde win-rate scénarios d'entraînement {#training-probe}
+
+**Livré 2026-09-06.** `training_probe_every_n_evals` dans `BotEvaluationCallback` publie
+`bot_eval/training_combined` sur TensorBoard, calculé contre les scénarios d'ENTRAÎNEMENT (pas
+holdout), en mode déterministe, tous les N evals holdout.
+
+Motif : gap factor 2,5 mesuré le 2026-09-06 entre +13 pts sur les scénarios d'entraînement et
++5 pts holdout, invisible sur le dashboard existant. Les deux courbes permettent de distinguer :
+
+- courbe plate → **n'apprend pas** → correction : hyperparamètres, récompense, obs.
+- courbe haute / gap large → **n'généralise pas** → correction : pool de scénarios, régularisation.
+
+Ne gate rien. Activé à 3 (`x1_long` profile, `callback_params.training_probe_every_n_evals`).
+Coût : +33 % du budget eval distribué uniformément.
+
+---
+
 ## Critères pipeline du run en cours (ex-« run x1 de vérification ») {#run-verif}
 
 Un run `x1` de vérification dédié avait été décidé le 2026-08-11 pour prouver que le pipeline
