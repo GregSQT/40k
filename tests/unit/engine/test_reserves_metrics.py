@@ -69,6 +69,18 @@ _FIXTURE_RESERVES = str(ARMAGEDDON_SCENARIOS / "reserves_full_episode_fixture1.j
 
 _SEEDS = (0, 1, 2)
 
+#: Graine de l'épisode de RÉFÉRENCE de `test_the_engine_feeds_every_key_the_tracker_reads` :
+#: celui sur lequel les deux gardes métier du tracker doivent être OUVERTES. Prise dans
+#: `_SEEDS` pour partager le cache — ce fichier ne rejoue pas un quatrième épisode pour ça.
+#:
+#: 2 et non 0 depuis le 2026-09-06. Le déploiement auto des DEUX camps (`e95ea87e`) fait poser
+#: l'adversaire par le moteur au lieu du seul joueur contrôlé, ce qui écarte les armées sur ce
+#: fixture et supprime les occasions de tir de la graine 0. Mesuré sur les trois graines :
+#: 0 → 0 tir, 1 → 4, 2 → 16 ; les échantillons d'objectifs valent 4/4 sur les trois, donc c'est
+#: bien `shots_fired` seul qui départage. La 2 est retenue pour sa marge.
+#: Choisir la graine est le geste que prévoit la docstring du test ; retirer l'assertion, non.
+_REFERENCE_SEED = 2
+
 
 def _play(scenario_file: str, seed: int) -> Dict[str, Any]:
     """Joue un épisode complet en actions légales tirées au sort ; rend tactical_data."""
@@ -444,7 +456,7 @@ def test_the_engine_feeds_every_key_the_tracker_reads(tmp_path: Any) -> None:
     l'une devient rouge, c'est l'épisode de référence qu'il faut choisir autrement — pas
     l'assertion qu'il faut retirer.
     """
-    tactical = _cached_play(_SEEDS[0])
+    tactical = _cached_play(_REFERENCE_SEED)
 
     assert int(tactical["shots_fired"]) > 0, (
         "aucun tir sur cet épisode : `hits` n'est plus lu, la couverture a fondu sans rougir"

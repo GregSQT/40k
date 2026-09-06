@@ -332,6 +332,16 @@ LONG_PROFILE_BOT_EVAL_FINAL = {"x1_long": 300, "x5_long": 300}
 #: depuis le 2026-08-30, avec 4 workers intermédiaires sur les deux profils).
 LONG_PROFILE_BOT_EVAL_INTERMEDIATE = {"x1_long": 30, "x5_long": 30}
 
+#: `training_probe_every_n_evals` ATTENDU de chaque profil comparé ici. La sonde publie
+#: `bot_eval/training_combined` contre les scénarios d'ENTRAÎNEMENT — pas le holdout — pour
+#: séparer « n'apprend pas » de « ne généralise pas ». Elle ne gate rien et coûte +33 % du
+#: budget d'évaluation, donc elle est réservée aux profils de MESURE : `x1_long` seul la
+#: déclare, à 3 (livrée le 2026-09-06, Documentation/Roadmap/training.md#training-probe).
+#: Les autres l'omettent, et `train.py:4255` lit la clé par `.get(..., 0)` : 0 = sonde éteinte.
+#: La table est explicite parce que la clé est écartée de la comparaison en bloc — sans elle,
+#: l'activer sur un profil court, ou l'éteindre sur le profil de mesure, resterait vert.
+PROFILE_TRAINING_PROBE = {"x1": 0, "x1_long": 3, "x5_new": 0, "x5_long": 0}
+
 #: Fenêtre du score robuste de chaque profil `_long`. Elle DÉPEND de la longueur du run : la
 #: fenêtre glisse sur les points de mesure, donc `total // freq - window + 1` est le nombre de
 #: positions. À une seule position le « meilleur modèle » est mécaniquement le dernier. x1_long
@@ -497,7 +507,10 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
     assert ref_cb["bot_eval_task_timeout_seconds"] == 3600
     # `bot_eval_intermediate` est un nombre d'épisodes PAR BOT payé à CHAQUE éval intermédiaire :
     # son coût se rapporte à la durée du run, donc il en dépend au même titre que `bot_eval_freq`.
-    # x1_long : 5 évals × 30 ép./bot (réduit de 100 à 30 par commit e07bdfd1, 4 workers), plus
+    # x1_long : 5 évals × 30 ép./bot (100 → 25 par e07bdfd1 le 2026-08-16 en passant à 4 workers
+    # intermédiaires, puis 25 → 30 par feb4768f ; e6581218 l'a silencieusement remis à 100 le
+    # 2026-09-04 — une ligne, sans note ni mesure, contre la décomposition « 6 × 30 = 180 » que
+    # `bot_eval_freq_normal` porte dans le MÊME profil ; annulé), plus
     # l'éval FINALE à 300 ép./bot (≈ 1 h 23, payée une fois). Les durées d'ÉVALUATION ci-dessus se
     # comptent en épisodes de bot et ne dépendent pas du régime d'entraînement ; la durée du RUN,
     # elle, est mesurée et jamais dérivée d'un taux (x1 : 4 h 01 pour ses 10 000 épisodes ;
@@ -529,8 +542,15 @@ def test_long_profile_is_its_reference_recalibrated(ref_name: str, long_name: st
         # model_gating_enabled dépend de save_best_robust :
         # x1 (save_best_robust=false) n'active pas le gate, x1_long (true) si.
         "model_gating_enabled",
+        # training_probe_every_n_evals : instrument de mesure réservé aux runs de mesure,
+        # vérifié nommément juste en dessous (cf. PROFILE_TRAINING_PROBE).
+        "training_probe_every_n_evals",
     }
     assert _comparable(long_cb, overridden) == _comparable(ref_cb, overridden)
+    # Lu comme `train.py:4255` le lit — clé absente = 0 = sonde éteinte —, pas via
+    # `_resolved_cb` : la clé n'est pas dans `_training_common.json`, il n'y a aucun héritage.
+    assert long_cb.get("training_probe_every_n_evals", 0) == PROFILE_TRAINING_PROBE[long_name]
+    assert ref_cb.get("training_probe_every_n_evals", 0) == PROFILE_TRAINING_PROBE[ref_name]
     assert _resolved_cb(long_cb, "save_best_robust") is True, (
         "un run de mesure sélectionne son meilleur modèle"
     )
