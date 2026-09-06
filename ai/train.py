@@ -4252,13 +4252,13 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     from ai.bot_evaluation import validate_bot_eval_worker_params
 
     validate_bot_eval_worker_params(callback_params)
-    _raw_probe_every = callback_params.get("training_probe_every_n_evals", 0)
-    if isinstance(_raw_probe_every, bool) or not isinstance(_raw_probe_every, int) or _raw_probe_every < 0:
+    _raw_probe = callback_params.get("training_probe_every_n_evals", 0)
+    if isinstance(_raw_probe, bool) or not isinstance(_raw_probe, int) or _raw_probe < 0:
         raise ValueError(
             f"callback_params.training_probe_every_n_evals must be an integer >= 0 "
-            f"(got {_raw_probe_every!r})"
+            f"(got {_raw_probe!r})"
         )
-    training_probe_every_n_evals: int = int(_raw_probe_every)
+    training_probe_every_n_evals: int = int(_raw_probe)
     bot_eval_n_workers_intermediate: Optional[int] = callback_params.get("bot_eval_n_workers_intermediate")
     if bot_eval_n_workers_intermediate is not None:
         if (

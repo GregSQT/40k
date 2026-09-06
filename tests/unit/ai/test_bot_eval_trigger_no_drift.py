@@ -53,7 +53,7 @@ def _callback(eval_freq: int, initial_marker: int = 0) -> BotEvaluationCallback:
 def _run(callback: BotEvaluationCallback, episode_counts: List[int]) -> List[int]:
     """Rejoue une suite de compteurs d'épisodes et rend les marqueurs des évals déclenchées."""
     markers: List[int] = []
-    callback._evaluate_against_bots = lambda marker: markers.append(int(marker))  # type: ignore[method-assign]
+    callback._evaluate_against_bots = lambda marker, **_: markers.append(int(marker))  # type: ignore[method-assign]
     callback._apply_eval_results = lambda results, marker: None  # type: ignore[method-assign]
     callback._blocking_eval_timer = _NullTimer  # type: ignore[method-assign]
     for count in episode_counts:
