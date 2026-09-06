@@ -557,14 +557,14 @@ Règles:
 | Profil | `total_episodes` | `learning_rate` | `ent_coef` |
 |--------|------------------|-----------------|------------|
 | `x1` | 10 000 | 1.0 → fin du run | 1.0 → fin du run |
-| `x1_long` | 50 000 | **0.7** → 35 000 ép. | **0.4** → 20 000 ép. |
-| `x5_long` | 200 000 | **0.7** → 140 000 ép. | **0.4** → 80 000 ép. |
+| `x1_long` | 100 000 | **0.9** → 90 000 ép. | **0.4** → 40 000 ép. |
+| `x5_long` | 100 000 | **0.9** → 90 000 ép. | **0.4** → 40 000 ép. |
 
-L'**entropie** s'arrête aux 40 % : passé ce point, la politique exploite ce qu'elle a appris. Le **learning rate** descend jusqu'aux 70 % pour ne pas brider l'apprentissage trop tôt.
+L'**entropie** s'arrête aux 40 % : passé ce point, la politique exploite ce qu'elle a appris. Le **learning rate** descend jusqu'aux 90 % — le plancher atteint plus tôt figeait la politique alors qu'il restait du budget (mesuré le 2026-08-12, `run_20260812-033643`). Verrou : `tests/unit/ai/test_schedule_decay_fraction.py::test_long_profile_is_its_reference_recalibrated`, qui porte le détail chiffré.
 
 **Le LR n'est PAS piloté par le schedule SB3.** `_make_learning_rate_schedule` ne sert qu'à donner sa valeur initiale à l'optimizer : le callback remplace `model.lr_schedule` par sa propre constante dès `on_training_start`.
 
-`bot_eval_freq` de `x1_long` vaut **10 000** (5 points de mesure). `bot_eval_intermediate` reste à **100**. `robust_window` vaut **3** (5 points → 3 positions de fenêtre).
+`bot_eval_freq` de `x1_long` vaut **10 000** (10 points de mesure sur 100 000 épisodes). `bot_eval_intermediate` vaut **30** épisodes par bot, aligné avec `x5_long`. `robust_window` vaut **3** (10 points → 8 positions de fenêtre).
 
 `x1` est passé à `save_best_robust: false` : 10 000 épisodes à `bot_eval_freq` 2000 donnent 5 points pour une fenêtre de 5, soit une seule position — sélection mécanique sur le dernier point.
 
