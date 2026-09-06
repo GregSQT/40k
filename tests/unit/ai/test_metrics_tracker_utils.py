@@ -156,6 +156,8 @@ def _tracker_stub() -> W40KMetricsTracker:
         "approx_kls": [0.01] * 12,
         "explained_variances": [],
     }
+    t.ppo_capture_count = 0
+    t._last_ppo_health_capture = -1
     t.compliance_data = {
         "units_per_step": [],
         "phase_end_reasons": [],
@@ -609,6 +611,85 @@ def test_compliance_mapper_phase_and_training_metrics_paths() -> None:
     keys = [k for k, _, _ in _dw(t).scalars]
     assert "00_critical/b_worst_bot_score" in keys
     assert "00_critical/a_bot_eval_combined" in keys
+
+
+_UPDATE_STATS: Dict[str, float] = {
+    "train/learning_rate": 3e-4,
+    "train/policy_gradient_loss": -0.2,
+    "train/value_loss": 0.3,
+    "train/entropy_loss": 0.05,
+    "train/clip_fraction": 0.2,
+    "train/approx_kl": 0.01,
+    "train/explained_variance": 0.4,
+}
+
+
+def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
+    """VERROU : un point par UPDATE PPO, pas un par episode.
+
+    `hyperparameter_tracking` n'est alimente que par `log_training_metrics`, soit une fois par
+    update, alors que `log_critical_dashboard` tourne a CHAQUE fin d'episode — 74 par update sur
+    x1_long. Sans la garde `ppo_capture_is_new`, chaque valeur repartait 74 fois : mesure sur
+    run_20260906-123804, 39 430 points pour 529 valeurs distinctes. Le curseur de lissage de
+    TensorBoard comptant des POINTS, il aurait fallu le regler sur ~1500 pour couvrir la fenetre
+    de 20 updates de `_calculate_smoothed_metric`.
+
+    Les huit lignes `thresholds/*` sont sous la meme garde : elles n'existent que superposees a
+    ces courbes dans les graphes Multiline de `_setup_custom_scalars_layout`.
+    """
+    t = _tracker_stub()
+    # Le stub laisse trois listes vides ; les remplir met les cinq courbes dans le meme etat,
+    # sans quoi `f_loss_mean` et `g_explained_variance` compteraient un point de retard.
+    t.hyperparameter_tracking["policy_losses"] = [-0.2] * 12
+    t.hyperparameter_tracking["value_losses"] = [0.3] * 12
+    t.hyperparameter_tracking["explained_variances"] = [0.4] * 12
+
+    tags = (
+        "00_critical/f_loss_mean",
+        "00_critical/g_explained_variance",
+        "00_critical/h_clip_fraction",
+        "00_critical/i_approx_kl",
+        "00_critical/j_entropy_loss",
+        "thresholds/clip_fraction_min",
+        "thresholds/kl_max",
+    )
+
+    def _counts() -> Dict[str, int]:
+        keys = [k for k, _, _ in _dw(t).scalars]
+        return {tag: keys.count(tag) for tag in tags}
+
+    # 20 fins d'episode, aucune capture entre elles : la valeur n'a pas change, un seul point.
+    for _ in range(20):
+        t.log_critical_dashboard()
+    assert _counts() == {tag: 1 for tag in tags}
+
+    t.log_training_metrics(dict(_UPDATE_STATS))
+    for _ in range(20):
+        t.log_critical_dashboard()
+    assert _counts() == {tag: 2 for tag in tags}
+
+    t.log_training_metrics(dict(_UPDATE_STATS))
+    for _ in range(20):
+        t.log_critical_dashboard()
+    assert _counts() == {tag: 3 for tag in tags}
+
+    # 60 fins d'episode pour 2 updates : ce sont bien les updates qui cadencent, pas les episodes.
+    assert t.ppo_capture_count == 2
+
+
+def test_les_courbes_de_jeu_gardent_leur_point_par_episode() -> None:
+    """VERROU : la garde de cadence PPO ne doit PAS deborder sur les courbes d'episode.
+
+    `log_critical_dashboard` emet aussi `d_win_rate` et `e_episode_reward_smooth`, qui se lisent
+    par episode. Les passer sous la meme garde les figerait entre deux updates.
+    """
+    t = _tracker_stub()
+    for _ in range(20):
+        t.log_critical_dashboard()
+
+    keys = [k for k, _, _ in _dw(t).scalars]
+    assert keys.count("00_critical/d_win_rate") == 20
+    assert keys.count("00_critical/e_episode_reward_smooth") == 20
 
 
 def test_log_episode_end_rejects_invalid_controlled_player() -> None:

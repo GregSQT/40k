@@ -96,6 +96,19 @@ ce chemin et n'ont jamais été touchées.
 Le run P1 en cours au 2026-09-04 a chargé le code avant le correctif : ses courbes restent
 fausses jusqu'à sa fin. Verrou : `tests/unit/ai/test_metrics_dump_wrapper_idempotent.py`.
 
+**Quatrième défaut, distinct des trois précédents, corrigé le 2026-09-06** — celui-ci touchait
+**tous** les runs, neufs compris, et il est indépendant de l'empilement d'enveloppes. Les cinq
+courbes `00_critical/f..j` et les huit lignes `thresholds/*` étaient republiées à **chaque fin
+d'épisode** alors que leur source n'est alimentée qu'une fois par update : 39 430 points pour 529
+valeurs distinctes sur `run_20260906-123804`, soit 74,5 copies par valeur, contre 532 points et
+532 valeurs sur les jumelles `train/*` de SB3. Le curseur de lissage de TensorBoard comptant des
+points, il aurait fallu le régler sur ~1 500 pour couvrir la fenêtre EWMA de 20 updates. Aucune
+valeur n'était fausse — l'enveloppe de l'escalier est la bonne série — mais le curseur était
+inopérant et les runs de cadences d'update différentes n'étaient pas comparables point pour point.
+Ces treize tags portent désormais un point par update. Verrou :
+`tests/unit/ai/test_metrics_tracker_utils.py::test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update`.
+Les runs antérieurs au 2026-09-06 gardent l'escalier, à lire comme une suite de paliers.
+
 ---
 
 ## Sonde win-rate scénarios d'entraînement {#training-probe}

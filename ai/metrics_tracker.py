@@ -357,7 +357,14 @@ class W40KMetricsTracker:
             'approx_kls': [],
             'explained_variances': []  # For tuning dashboard
         }
-        
+
+        # Compteur de captures PPO, incremente par `log_training_metrics` — donc une fois par
+        # update, la ou `hyperparameter_tracking` est alimente. `step_count` ne peut PAS servir
+        # de signal de nouveaute : `training_callbacks` l'ecrase avec `num_timesteps` a la
+        # capture (861) ET a chaque fin d'episode (1184), il bouge donc a chaque episode.
+        self.ppo_capture_count = 0
+        self._last_ppo_health_capture = -1
+
         # NEW: Gradient norm tracking for 00_critical/ dashboard
         self.latest_gradient_norm = None
         
@@ -478,7 +485,11 @@ class W40KMetricsTracker:
         self.writer.add_custom_scalars(layout)
 
     def _log_thresholds(self, step: int) -> None:
-        """Log constant threshold reference lines for 00_critical metrics."""
+        """Log constant threshold reference lines for 00_critical metrics.
+
+        Appelee sous la garde `ppo_capture_is_new` de `log_critical_dashboard` : ces lignes
+        n'ont de sens que superposees aux courbes de sante PPO, donc elles suivent leur cadence.
+        """
         self.writer.add_scalar("thresholds/explained_variance_min", 0.30, step)
         self.writer.add_scalar("thresholds/clip_fraction_min", 0.10, step)
         self.writer.add_scalar("thresholds/clip_fraction_max", 0.30, step)
@@ -498,8 +509,9 @@ class W40KMetricsTracker:
 
         Ce qu'un tableau de bord doit dire ici, c'est « ce nombre doit valoir 0 ». Emise
         seulement quand une troncature arrive, la courbe etait absente du cas nominal, donc
-        indiscernable d'une metrique jamais branchee. Comme toutes les autres courbes
-        `00_critical/`, elle porte un point par episode.
+        indiscernable d'une metrique jamais branchee. Elle porte un point par episode, comme
+        toutes les courbes `00_critical/` sauf les cinq de sante PPO, qui suivent la cadence de
+        l'update (cf. `log_critical_dashboard`).
 
         Portee ENTRAINEMENT seule : l'abscisse est `episode_count`, qui ne compte que ces
         episodes-la. Le compte d'eval vit dans le bilan de fin de run, pas sur cet axe.
@@ -1567,6 +1579,7 @@ class W40KMetricsTracker:
         
         # Update step count for next logging
         self.step_count += 1
+        self.ppo_capture_count += 1
     
     def log_critical_dashboard(self):
         """
@@ -1580,7 +1593,11 @@ class W40KMetricsTracker:
         (le doublon a fenetre courte `_<perf_window_fast>ep` n'existe que si les deux
          fenetres du training config different ; elles sont egales par defaut)
 
-        SANTE PPO -- moyennes sur les 20 derniers updates :
+        SANTE PPO -- moyennes sur les 20 derniers updates, et emises A LA CADENCE DE L'UPDATE :
+        ces cinq-la sont les SEULES courbes `00_critical/` qui ne portent pas un point par
+        episode. Leur source n'etant alimentee qu'une fois par update, un point par episode
+        n'aurait republie que des copies. Meme garde pour les lignes `thresholds/*` qu'elles
+        portent (cf. `ppo_capture_is_new` plus bas).
         - 00_critical/f_loss_mean           - |policy_loss| + |value_loss|, sante globale
         - 00_critical/g_explained_variance  - >0.3 -> Value function working
         - 00_critical/h_clip_fraction       - [0.1-0.3] -> Tune learning_rate
@@ -1636,45 +1653,55 @@ class W40KMetricsTracker:
         # ==========================================
         # PPO HEALTH (6 metrics)
         # ==========================================
+        # Ces cinq courbes et les lignes de seuil qu'elles portent ne bougent qu'a l'update PPO,
+        # alors que ce dashboard tourne a CHAQUE fin d'episode — 74 par update sur x1_long.
+        # Republiees sans garde, elles posaient 74 copies de la meme valeur : le curseur de
+        # lissage de TensorBoard comptant des POINTS, il aurait fallu le regler sur ~1500 pour
+        # couvrir la fenetre de 20 updates de `_calculate_smoothed_metric`, et on lisait
+        # l'escalier brut. Mesure sur run_20260906-123804 : 39 430 points pour 529 valeurs
+        # distinctes, contre 532 points et 532 valeurs sur les jumelles `train/*` de SB3.
+        ppo_capture_is_new = self.ppo_capture_count != self._last_ppo_health_capture
+        if ppo_capture_is_new:
+            self._last_ppo_health_capture = self.ppo_capture_count
 
-        # 3. Clip Fraction - Policy update scale
-        if len(self.hyperparameter_tracking['clip_fractions']) >= 1:
-            clip_smooth = self._calculate_smoothed_metric(
-                self.hyperparameter_tracking['clip_fractions'], window_size=20
-            )
-            self.writer.add_scalar('00_critical/h_clip_fraction', clip_smooth, self.episode_count)
+            # 3. Clip Fraction - Policy update scale
+            if len(self.hyperparameter_tracking['clip_fractions']) >= 1:
+                clip_smooth = self._calculate_smoothed_metric(
+                    self.hyperparameter_tracking['clip_fractions'], window_size=20
+                )
+                self.writer.add_scalar('00_critical/h_clip_fraction', clip_smooth, self.episode_count)
 
-        # 4. Approx KL - Policy change magnitude
-        if len(self.hyperparameter_tracking['approx_kls']) >= 1:
-            kl_smooth = self._calculate_smoothed_metric(
-                self.hyperparameter_tracking['approx_kls'], window_size=20
-            )
-            self.writer.add_scalar('00_critical/i_approx_kl', kl_smooth, self.episode_count)
+            # 4. Approx KL - Policy change magnitude
+            if len(self.hyperparameter_tracking['approx_kls']) >= 1:
+                kl_smooth = self._calculate_smoothed_metric(
+                    self.hyperparameter_tracking['approx_kls'], window_size=20
+                )
+                self.writer.add_scalar('00_critical/i_approx_kl', kl_smooth, self.episode_count)
 
-        # 5. Explained Variance - Value function quality
-        if len(require_key(self.hyperparameter_tracking, 'explained_variances')) >= 1:
-            ev_smooth = self._calculate_smoothed_metric(
-                self.hyperparameter_tracking['explained_variances'], window_size=20
-            )
-            self.writer.add_scalar('00_critical/g_explained_variance', ev_smooth, self.episode_count)
+            # 5. Explained Variance - Value function quality
+            if len(require_key(self.hyperparameter_tracking, 'explained_variances')) >= 1:
+                ev_smooth = self._calculate_smoothed_metric(
+                    self.hyperparameter_tracking['explained_variances'], window_size=20
+                )
+                self.writer.add_scalar('00_critical/g_explained_variance', ev_smooth, self.episode_count)
 
-        # 6. Entropy Loss - Exploration health
-        if len(self.hyperparameter_tracking['entropy_losses']) >= 1:
-            entropy_smooth = self._calculate_smoothed_metric(
-                self.hyperparameter_tracking['entropy_losses'], window_size=20
-            )
-            self.writer.add_scalar('00_critical/j_entropy_loss', entropy_smooth, self.episode_count)
+            # 6. Entropy Loss - Exploration health
+            if len(self.hyperparameter_tracking['entropy_losses']) >= 1:
+                entropy_smooth = self._calculate_smoothed_metric(
+                    self.hyperparameter_tracking['entropy_losses'], window_size=20
+                )
+                self.writer.add_scalar('00_critical/j_entropy_loss', entropy_smooth, self.episode_count)
 
-        # 7. Loss Mean (combined policy + value loss) - Training stability
-        if (len(self.hyperparameter_tracking['policy_losses']) >= 1 and
-            len(self.hyperparameter_tracking['value_losses']) >= 1):
-            # Calculate combined loss
-            recent_policy = self.hyperparameter_tracking['policy_losses'][-20:]
-            recent_value = self.hyperparameter_tracking['value_losses'][-20:]
-            combined_losses = [abs(p) + abs(v) for p, v in zip(recent_policy, recent_value)]
-            loss_mean = float(np.mean(combined_losses))
-            self.writer.add_scalar('00_critical/f_loss_mean', loss_mean, self.episode_count)
-        
+            # 7. Loss Mean (combined policy + value loss) - Training stability
+            if (len(self.hyperparameter_tracking['policy_losses']) >= 1 and
+                len(self.hyperparameter_tracking['value_losses']) >= 1):
+                # Calculate combined loss
+                recent_policy = self.hyperparameter_tracking['policy_losses'][-20:]
+                recent_value = self.hyperparameter_tracking['value_losses'][-20:]
+                combined_losses = [abs(p) + abs(v) for p, v in zip(recent_policy, recent_value)]
+                loss_mean = float(np.mean(combined_losses))
+                self.writer.add_scalar('00_critical/f_loss_mean', loss_mean, self.episode_count)
+
         # ==========================================
         # HORS 00_critical : ecrit dans game_critical/ et game_detailed/
         # ==========================================
@@ -1704,7 +1731,12 @@ class W40KMetricsTracker:
         # cette place lisait un self.episode_tactical_data jamais alimente (voir la trace dans
         # __init__) et ecrasait la vraie courbe avec des zeros.
 
-        self._log_thresholds(self.episode_count)
+        # Meme cadence que les courbes qu'elles annotent : ces huit constantes n'existent que
+        # pour etre superposees a `00_critical/{g,h,i,j}` dans les graphes Multiline de
+        # `_setup_custom_scalars_layout`. Emises par episode, elles pesaient a elles seules
+        # ~315 000 points pour huit valeurs qui ne changent jamais.
+        if ppo_capture_is_new:
+            self._log_thresholds(self.episode_count)
 
         # Phase 2: zone intent metrics (sliding window)
         self._log_zone_intent_metrics(self.episode_count)
