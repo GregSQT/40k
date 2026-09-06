@@ -2302,14 +2302,14 @@ class W40KMetricsTracker:
 
     def _calculate_smoothed_metric(self, values: List[float], window_size: int = 20) -> float:
         """
-        Calculate exponentially weighted moving average (EWMA) for smooth trend visualization.
-        
+        Calculate rolling mean over the last `window_size` values for smooth trend visualization.
+
         Args:
             values: List of raw metric values
-            window_size: Window size for smoothing (default: 20 episodes)
-        
+            window_size: Number of most-recent values to average (default: 20)
+
         Returns:
-            Smoothed value using EWMA
+            Arithmetic mean of the last `window_size` values (or all values if fewer)
         """
         if not values:
             return 0.0
