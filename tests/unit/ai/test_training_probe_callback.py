@@ -43,23 +43,45 @@ class TestTrainingProbeFlagFromOnStep:
         cb.training_probe_every_n_evals = 3
         return cb
 
-    def test_probe_fires_at_evals_3_6_9_and_nowhere_else(self):
-        """_on_step transmet run_training_probe=True à _evaluate_against_bots exactement
-        aux évaluations 3, 6 et 9 ; False partout ailleurs."""
+    def _collect_probe_flags(self, n_evals: int = 3, steps: int = 9) -> list:
+        """Retourne les flags run_training_probe transmis par _on_step sur <steps> évaluations."""
         cb = self._make_callback()
-        probe_flags: list = []
+        cb.training_probe_every_n_evals = n_evals
+        flags: list = []
 
         def _fake_eval(marker, run_training_probe: bool = False, **_):
-            probe_flags.append(run_training_probe)
+            flags.append(run_training_probe)
             return {}
 
         cb._evaluate_against_bots = _fake_eval  # type: ignore[method-assign]
         cb._apply_eval_results = lambda r, m: None  # type: ignore[method-assign]
         cb._blocking_eval_timer = _NullTimer  # type: ignore[method-assign]
 
-        for step in range(1, 10):
+        for step in range(1, steps + 1):
             cb.num_timesteps = step * 10
             cb._on_step()
+        return flags
+
+    def test_probe_never_fires_when_n_is_zero(self):
+        """n=0 → sonde désactivée ; run_training_probe doit être False à chaque eval."""
+        flags = self._collect_probe_flags(n_evals=0, steps=9)
+        assert len(flags) == 9, f"9 évals attendues, obtenues : {len(flags)}"
+        assert not any(flags), (
+            f"run_training_probe=True inattendu avec n=0 : {flags}"
+        )
+
+    def test_probe_fires_at_every_eval_when_n_is_1(self):
+        """n=1 → sonde déclenchée à chaque eval (eval_count % 1 == 0 toujours vrai)."""
+        flags = self._collect_probe_flags(n_evals=1, steps=9)
+        assert len(flags) == 9, f"9 évals attendues, obtenues : {len(flags)}"
+        assert all(flags), (
+            f"run_training_probe=False inattendu avec n=1 : {flags}"
+        )
+
+    def test_probe_fires_at_evals_3_6_9_and_nowhere_else(self):
+        """_on_step transmet run_training_probe=True à _evaluate_against_bots exactement
+        aux évaluations 3, 6 et 9 ; False partout ailleurs."""
+        probe_flags = self._collect_probe_flags(n_evals=3, steps=9)
 
         assert len(probe_flags) == 9, f"9 évals attendues, obtenues : {len(probe_flags)}"
         expected = {3: True, 6: True, 9: True}
@@ -179,7 +201,7 @@ class TestTrainingProbeLogging:
         cb._apply_eval_results(_base_results(with_probe=False), eval_marker=5000)
 
         calls = cb.metrics_tracker.writer.add_scalar.call_args_list
-        matching = [c for c in calls if "training_combined" in c]
+        matching = [c for c in calls if "training_combined" in str(c)]
         assert not matching, (
             f"add_scalar('bot_eval/training_combined') appelé alors qu'il ne devrait pas. Appels: {calls}"
         )
