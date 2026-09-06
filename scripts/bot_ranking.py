@@ -39,6 +39,13 @@ CE QU'IL NE FAIT PAS
     (`BotControlledEnv._get_bot_action`, via `scripted_action_for_agent_side`) : le bot mesure
     ici est exactement le bot joue en evaluation. Une seconde implementation divergerait.
 
+    ⚠️ POOL TRAINING vs HOLDOUT : `--scenario-pool training` active `deployment_mode_schedule`
+    (~70 % des episodes en mode `auto`). Sur ces episodes, `_get_opponent_action` court-circuite
+    `_get_bot_action` pour LES DEUX camps (deploiement tire au hasard par le moteur). Le
+    classement reste valide pour la PHASE DE JEU, mais ne mesure pas la politique de deploiement
+    des bots. Le pool par defaut `holdout` n'a pas de rampe auto : le chemin de production y est
+    integralement exerce.
+
 USAGE
     python scripts/bot_ranking.py --agent ArmageddonAgent_x1 --training-config x1 --episodes 20
     python scripts/bot_ranking.py --bots control,tactical --episodes 50
