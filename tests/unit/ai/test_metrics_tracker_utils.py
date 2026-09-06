@@ -155,6 +155,7 @@ def _tracker_stub() -> W40KMetricsTracker:
         "clip_fractions": [0.2] * 12,
         "approx_kls": [0.01] * 12,
         "explained_variances": [],
+        "grad_share_policies": [],
     }
     t.ppo_capture_count = 0
     t._last_ppo_health_capture = -1
@@ -615,10 +616,11 @@ def test_compliance_mapper_phase_and_training_metrics_paths() -> None:
 
 _PPO_CURVE_TAGS: tuple[str, ...] = (
     "00_critical/f_loss_mean",
-    "00_critical/g_explained_variance",
-    "00_critical/h_clip_fraction",
-    "00_critical/i_approx_kl",
-    "00_critical/j_entropy_loss",
+    "00_critical/g_grad_share_policy_mb0",
+    "00_critical/h_explained_variance",
+    "00_critical/i_clip_fraction",
+    "00_critical/j_approx_kl",
+    "00_critical/k_entropy_loss",
 )
 
 _UPDATE_STATS: Dict[str, float] = {
@@ -629,6 +631,7 @@ _UPDATE_STATS: Dict[str, float] = {
     "train/clip_fraction": 0.2,
     "train/approx_kl": 0.01,
     "train/explained_variance": 0.4,
+    "diag/grad_share_policy_mb0": 0.235,
 }
 
 
@@ -648,11 +651,13 @@ def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
     s'emettent des le premier dashboard car les listes sont pre-remplies dans ce test.
     """
     t = _tracker_stub()
-    # Le stub laisse trois listes vides ; les remplir met les cinq courbes dans le meme etat,
-    # sans quoi `f_loss_mean` et `g_explained_variance` compteraient un point de retard.
+    # Le stub laisse quatre listes vides ; les remplir met les six courbes dans le meme etat,
+    # sans quoi `f_loss_mean`, `g_grad_share_policy_mb0` et `h_explained_variance` compteraient
+    # un point de retard.
     t.hyperparameter_tracking["policy_losses"] = [-0.2] * 12
     t.hyperparameter_tracking["value_losses"] = [0.3] * 12
     t.hyperparameter_tracking["explained_variances"] = [0.4] * 12
+    t.hyperparameter_tracking["grad_share_policies"] = [0.235] * 12
 
     # Verrou discriminabilite : si ces deux valeurs convergent, les assertions d'axe deviennent
     # muettes — le test doit echouer si le stub est modifie de facon a les egaliser.

@@ -355,7 +355,8 @@ class W40KMetricsTracker:
             'value_losses': [],
             'clip_fractions': [],
             'approx_kls': [],
-            'explained_variances': []  # For tuning dashboard
+            'explained_variances': [],  # For tuning dashboard
+            'grad_share_policies': []  # Part du gradient revenant a la politique
         }
 
         # Compteur de captures PPO, incremente par `log_training_metrics` — donc une fois par
@@ -457,23 +458,26 @@ class W40KMetricsTracker:
         """Register Custom Scalars dashboard layout in TensorBoard (called once at init)."""
         layout = {
             "00_critical + Seuils": {
-                "g_explained_variance": ["Multiline", [
-                    "00_critical/g_explained_variance",
+                "g_grad_share_policy_mb0": ["Multiline", [
+                    "00_critical/g_grad_share_policy_mb0",
+                ]],
+                "h_explained_variance": ["Multiline", [
+                    "00_critical/h_explained_variance",
                     "thresholds/explained_variance_min",
                 ]],
-                "h_clip_fraction": ["Multiline", [
-                    "00_critical/h_clip_fraction",
+                "i_clip_fraction": ["Multiline", [
+                    "00_critical/i_clip_fraction",
                     "thresholds/clip_fraction_min",
                     "thresholds/clip_fraction_max",
                     "thresholds/clip_fraction_warn",
                 ]],
-                "i_approx_kl": ["Multiline", [
-                    "00_critical/i_approx_kl",
+                "j_approx_kl": ["Multiline", [
+                    "00_critical/j_approx_kl",
                     "thresholds/kl_min",
                     "thresholds/kl_max",
                 ]],
-                "j_entropy_loss": ["Multiline", [
-                    "00_critical/j_entropy_loss",
+                "k_entropy_loss": ["Multiline", [
+                    "00_critical/k_entropy_loss",
                     "thresholds/entropy_target_min",
                     "thresholds/entropy_target_max",
                 ]],
@@ -1558,6 +1562,24 @@ class W40KMetricsTracker:
             approx_kl = model_stats['train/approx_kl']
             self.hyperparameter_tracking['approx_kls'].append(approx_kl)
             self.writer.add_scalar('training_critical/approx_kl', approx_kl, self.step_count)
+
+        # TRAINING CRITICAL: part du gradient revenant a la POLITIQUE. Publiee par
+        # `ai/patched_ppo.py` sous `diag/grad_share_policy_mb0`, d'ou elle remonte par
+        # `name_to_value` comme toute cle enregistree sur le logger SB3. Absente si le modele
+        # n'est pas le PPO patche : la courbe reste alors vide, elle n'est pas remplie d'une
+        # valeur par defaut qui masquerait le fait qu'aucune decomposition n'a eu lieu.
+        # Le NaN que `patched_ppo` publie quand la somme des trois normes est nulle est ECARTE
+        # ici, et non converti : `_calculate_smoothed_metric` fait une moyenne, donc un seul NaN
+        # accumule rendrait NaN toutes les valeurs lissees suivantes. L'ecarter laisse la courbe
+        # sans point pour cet update, ce qui est l'information exacte — la part n'existe pas
+        # quand il n'y a pas de gradient.
+        if 'diag/grad_share_policy_mb0' in model_stats:
+            grad_share_policy = float(model_stats['diag/grad_share_policy_mb0'])
+            if np.isfinite(grad_share_policy):
+                self.hyperparameter_tracking['grad_share_policies'].append(grad_share_policy)
+                self.writer.add_scalar(
+                    'training_critical/grad_share_policy', grad_share_policy, self.step_count
+                )
         
         # TRAINING CRITICAL: Explained variance (value function quality)
         if 'train/explained_variance' in model_stats:
@@ -1603,10 +1625,11 @@ class W40KMetricsTracker:
         n'aurait republie que des copies. Meme garde pour les lignes `thresholds/*` qu'elles
         portent (cf. `ppo_capture_is_new` plus bas).
         - 00_critical/f_loss_mean           - |policy_loss| + |value_loss|, sante globale
-        - 00_critical/g_explained_variance  - >0.3 -> Value function working
-        - 00_critical/h_clip_fraction       - [0.1-0.3] -> Tune learning_rate
-        - 00_critical/i_approx_kl           - <0.02 -> Policy stability
-        - 00_critical/j_entropy_loss        - Decroissant -> Tune ent_coef
+        - 00_critical/g_grad_share_policy_mb0 - Part du gradient a la policy -> Tune vf_coef
+        - 00_critical/h_explained_variance  - >0.3 -> Value function working
+        - 00_critical/i_clip_fraction       - [0.1-0.3] -> Tune learning_rate
+        - 00_critical/j_approx_kl           - <0.02 -> Policy stability
+        - 00_critical/k_entropy_loss        - Decroissant -> Tune ent_coef
         - 00_critical/m_immediate_reward_ratio_mean - ratio reward immediat/total (lisse, emis par training_callbacks)
 
         ECRIT PAR `_log_zone_intent_metrics`, appele en fin de cette methode (2 tags) :
@@ -1673,28 +1696,37 @@ class W40KMetricsTracker:
                 clip_smooth = self._calculate_smoothed_metric(
                     self.hyperparameter_tracking['clip_fractions'], window_size=20
                 )
-                self.writer.add_scalar('00_critical/h_clip_fraction', clip_smooth, self.episode_count)
+                self.writer.add_scalar('00_critical/i_clip_fraction', clip_smooth, self.episode_count)
 
             # 4. Approx KL - Policy change magnitude
             if len(self.hyperparameter_tracking['approx_kls']) >= 1:
                 kl_smooth = self._calculate_smoothed_metric(
                     self.hyperparameter_tracking['approx_kls'], window_size=20
                 )
-                self.writer.add_scalar('00_critical/i_approx_kl', kl_smooth, self.episode_count)
+                self.writer.add_scalar('00_critical/j_approx_kl', kl_smooth, self.episode_count)
 
             # 5. Explained Variance - Value function quality
             if len(require_key(self.hyperparameter_tracking, 'explained_variances')) >= 1:
                 ev_smooth = self._calculate_smoothed_metric(
                     self.hyperparameter_tracking['explained_variances'], window_size=20
                 )
-                self.writer.add_scalar('00_critical/g_explained_variance', ev_smooth, self.episode_count)
+                self.writer.add_scalar('00_critical/h_explained_variance', ev_smooth, self.episode_count)
 
             # 6. Entropy Loss - Exploration health
             if len(self.hyperparameter_tracking['entropy_losses']) >= 1:
                 entropy_smooth = self._calculate_smoothed_metric(
                     self.hyperparameter_tracking['entropy_losses'], window_size=20
                 )
-                self.writer.add_scalar('00_critical/j_entropy_loss', entropy_smooth, self.episode_count)
+                self.writer.add_scalar('00_critical/k_entropy_loss', entropy_smooth, self.episode_count)
+
+            # 6bis. Part du gradient revenant a la politique - arbitrage policy / critic
+            if len(require_key(self.hyperparameter_tracking, 'grad_share_policies')) >= 1:
+                grad_share_smooth = self._calculate_smoothed_metric(
+                    self.hyperparameter_tracking['grad_share_policies'], window_size=20
+                )
+                self.writer.add_scalar(
+                    '00_critical/g_grad_share_policy_mb0', grad_share_smooth, self.episode_count
+                )
 
             # 7. Loss Mean (combined policy + value loss) - Training stability
             if (len(self.hyperparameter_tracking['policy_losses']) >= 1 and
@@ -1706,7 +1738,7 @@ class W40KMetricsTracker:
                 loss_mean = float(np.mean(combined_losses))
                 self.writer.add_scalar('00_critical/f_loss_mean', loss_mean, self.episode_count)
 
-            # Seuils : n'existent que pour etre superposes a `00_critical/{g,h,i,j}` dans les
+            # Seuils : n'existent que pour etre superposes a `00_critical/{h,i,j,k}` dans les
             # graphes Multiline de `_setup_custom_scalars_layout`. Garda par ppo_capture_count > 0
             # plutot que par une liste specifique : valide meme si un tag `train/*` est absent.
             if self.ppo_capture_count > 0:
@@ -1716,7 +1748,7 @@ class W40KMetricsTracker:
         # HORS 00_critical : ecrit dans game_critical/ et game_detailed/
         # ==========================================
         # `k_gradient_norm` occupait cette place : retire du dashboard, redondant avec
-        # h_clip_fraction + i_approx_kl.
+        # i_clip_fraction + j_approx_kl.
 
         # Reward-Victory Gap (reward alignment: mean reward when won vs lost)
         # Gap > 20-30 = good alignment; Gap < 10 = reward may not correlate with victory

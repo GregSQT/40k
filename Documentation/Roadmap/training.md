@@ -63,7 +63,9 @@ illisible sur les runs antérieurs :
 **Sur les runs REPRIS uniquement** (`--resume-from`, donc toute étape de curriculum à
 `init: "from:..."`) — les quatre courbes de santé PPO de `00_critical` ne sont **pas lissées** et
 ne doivent pas être lues : `g_explained_variance`, `h_clip_fraction`, `i_approx_kl`,
-`j_entropy_loss`. L'enveloppe posée sur `logger.dump` n'était jamais retirée, et SB3 appaire
+`j_entropy_loss` — lettres d'AVANT le 2026-09-06, conservées ici parce que ce sont celles que
+portent réellement les fichiers `events` de ces runs ; depuis, l'insertion de
+`g_grad_share_policy_mb0` les a décalées en `h_`, `i_`, `j_` et `k_`. L'enveloppe posée sur `logger.dump` n'était jamais retirée, et SB3 appaire
 pourtant `on_training_start`/`on_training_end` autour de chaque `learn()`. Sur un run neuf le
 logger est reconstruit à chaque `learn()` et l'enveloppe morte partait avec lui ; en reprise
 `model.set_logger` le rend persistant et les couches s'accumulaient. Chaque update était alors
