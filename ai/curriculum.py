@@ -2,12 +2,15 @@
 
 Une ETAPE est un run complet d'`ai/train.py`. Elle declare comment le modele DEMARRE (`init`),
 contre QUI il joue (`ratio_start`/`ratio_end`/`warmup_episodes` + `pool`) et combien de temps
-(`total_episodes`). Elle ne declare PLUS ses hyperparametres depuis le 2026-09-07 : le bloc
-`lineage_regime` du curriculum les porte pour toute la lignee des qu'une etape reprend des poids
-(`init: from:`), et `--training-config` ne vaut plus que pour le seul depart a froid. La raison
-mesuree vit dans le `_doc` de ce bloc — une rampe s'exprime en fraction de la duree du RUN, donc
-chaque etape reprise reparcourait la sienne et rendait a un modele converge le regime
-d'exploration d'un demarrage.
+(`total_episodes`). Elle ne declare PLUS ses hyperparametres depuis le 2026-09-07 : le profil
+`x1_lineage` du fichier de profils de l'agent les porte pour toute la lignee des qu'une etape
+reprend des poids (`init: from:`). Le curriculum designe ces deux profils (depart a froid et
+lignee) dans son bloc `training_configs` ; les valeurs vivent dans le fichier de profils.
+`--training-config` ne sert plus qu'a choisir entre `x1_long` (depart a froid) et `x1_lineage`
+(reprise a chaud) — un mauvais choix est refuse au lancement. La raison mesuree vit dans le
+`_doc` de `training_configs` et dans le `_doc` du profil `x1_lineage` — une rampe s'exprime en
+fraction de la duree du RUN, donc chaque etape reprise reparcourait la sienne et rendait a un
+modele converge le regime d'exploration d'un demarrage.
 
 DEUX AXES ORTHOGONAUX, et c'est tout le point de ce module :
 
@@ -810,9 +813,9 @@ def _check_eval_coherence(source: str, name: str, total_episodes: int, bot_eval_
 def _check_model_param(value: Any, spec: _ModelParamSpec, context: str) -> None:
     """Applique la contrainte d'un `_ModelParamSpec` a une valeur. Leve si elle n'est pas tenue.
 
-    UN SEUL point d'application, partage par `training_config_overrides.model_params` (etape) et
-    par `lineage_regime.model_params` (lignee). Ecrire le predicat a deux endroits est exactement
-    ce qui avait laisse quatre orthographes du meme controle, dont trois sans rejet des booleens.
+    UN SEUL point d'application, aujourd'hui appele depuis `training_config_overrides.model_params`
+    (surcharges d'etape). Ecrire le predicat a deux endroits est exactement ce qui avait laisse
+    quatre orthographes du meme controle, dont trois sans rejet des booleens.
     """
     if spec.allow_schedule and isinstance(value, dict):
         return
