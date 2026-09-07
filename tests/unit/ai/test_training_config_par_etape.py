@@ -88,6 +88,26 @@ def test_the_exploiters_take_the_lineage_profile_like_the_learners(curriculum) -
         assert required_training_config(curriculum, stage) == "x1_lineage", name
 
 
+def test_exploiter_budget_cap_never_exceeds_lineage_profile_total_episodes(
+    curriculum, profil_lignee
+) -> None:
+    """Le profil de lignee doit pouvoir atteindre le budget_cap : total_episodes >= budget_cap.
+
+    Un profil trop court rend la branche '>budget_cap' inatteignable, et le marqueur de censure
+    n'est jamais emis. validate_exploiter_protocol le refuse avant le premier episode.
+    training_config_overrides etant interdit sur les exploiteurs, la seule correction valide
+    est de porter total_episodes dans le profil lui-meme.
+    """
+    total_ep = profil_lignee["total_episodes"]
+    for name in ("E1", "E2", "E3"):
+        stage = require_stage(curriculum, name)
+        budget_cap = stage["budget_cap"]
+        assert total_ep >= budget_cap, (
+            f"{name}: x1_lineage.total_episodes={total_ep} < budget_cap={budget_cap} — "
+            "augmenter total_episodes dans x1_lineage."
+        )
+
+
 # ── CE QUE LE PROFIL DE LIGNÉE CONTIENT ─────────────────────────────────────────────────────
 
 
@@ -129,12 +149,12 @@ def test_the_lineage_profile_inherits_everything_it_does_not_redeclare(
     Avant `extends`, deux profils voisins dupliquaient quinze clés — 15,1 Ko — que seul un test
     empêchait de diverger. Un septième profil écrit à plat aurait ajouté une septième copie.
     """
-    surcharge = {"model_params", "agent_seat_p2_ratio", "type", "_doc"}
+    surcharge = {"model_params", "agent_seat_p2_ratio", "type", "_doc", "total_episodes"}
     partagees = [
         cle for cle in profil_froid
         if cle not in surcharge and not cle.endswith(("_normal", "_detail"))
     ]
-    assert len(partagees) >= 12, f"trop peu de clés comparées : {partagees}"
+    assert len(partagees) >= 11, f"trop peu de clés comparées : {partagees}"
     divergentes = {
         cle: (profil_froid[cle], profil_lignee.get(cle))
         for cle in partagees
