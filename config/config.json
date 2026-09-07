@@ -28,7 +28,7 @@
     "MKL_NUM_THREADS": 1,
     "OPENBLAS_NUM_THREADS": 1,
     "NUMEXPR_NUM_THREADS": 1,
-    "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
+    "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
     "CUDA_LAUNCH_BLOCKING": "0",
     "TORCH_LOGS": "-dynamo"
   },

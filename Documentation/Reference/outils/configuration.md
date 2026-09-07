@@ -149,6 +149,33 @@ export const SPACE_MARINE_ARMORY: Record<string, Weapon> = {
 | `defaults.scenario` / `training_config` / `rewards_config` / `game_config` | string | Noms de config par défaut |
 | `defaults.test_board` | string | Board par défaut des modes test |
 | `defaults.agent_key` | string | **Identité de l'agent unique (mode single-agent)**. Source de vérité lue par `UnitRegistry._load_agent_key()` → `UnitRegistry.AGENT_KEY` (moteur : `get_model_key()`, rewards, handlers ; serveur PvP : `get_agents_from_scenario`) ET par `api_server._configured_agent_key()` pour les modes de test forçant un agent (PvE/pve_test/Endless_duty). Changer d'agent = éditer cette clé, jamais le code. No fallback : clé absente → `ConfigurationError`. |
+| `training_env.*` | string | Variables d'environnement posées AVANT l'import de numpy/torch (`ai/train.py`, `os.environ.setdefault` — un export du shell l'emporte donc sur ce fichier). Toute clé ajoutée ici devient une variable d'environnement : ce bloc n'accepte pas de clé de documentation. |
+
+### `training_env.PYTORCH_CUDA_ALLOC_CONF` — pourquoi `expandable_segments:False`
+
+`expandable_segments:True` est **inutilisable sur cette plateforme** (WSL2) et a été remis à `False`
+le 2026-09-07. Ce n'est pas une préférence : mesuré sur l'étape P2 du profil `x1_lineage`
+(RTX 4060 Laptop, 8,19 Go de VRAM).
+
+Ce mode remplace `cudaMalloc` par l'API **driver** de mémoire virtuelle (`cuMemCreate` / `cuMemMap`).
+Sous WSL2 ce chemin ne peut pas déborder en RAM hôte : arrivé au plafond de VRAM, le driver renvoie
+`CUDA_ERROR_NOT_READY`, que PyTorch relaie tel quel
+(`torch/include/c10/cuda/driver_api.h:19`) sous la forme
+`RuntimeError: CUDA driver error: device not ready`. Le message ne nomme ni la mémoire, ni le
+tenseur, ni `n_steps` : il tombe sur le premier `relu` venu, après plusieurs minutes de collecte.
+L'allocateur par défaut, lui, déborde en RAM hôte et le même run passe.
+
+Le mode ne tient donc que tant que le pic reste sous la VRAM, ce que la config ne garantit pas :
+
+| Configuration (rollout 32640, buffer GPU-résident 3,37 Go) | Pic alloué | `expandable_segments:True` |
+|---|---|---|
+| `batch_size` 4080 | 8,89 Go | ❌ `device not ready` |
+| `batch_size` 1020 | 4,77 Go | ✅ |
+
+Autrement dit il transforme un dépassement de VRAM en panne opaque au lieu d'un OOM explicite ou
+d'un débordement fonctionnel. Le garde-fou de `ai/train.py::apply_rollout_n_steps` ne rattrape rien
+ici : il dimensionne le buffer sur la **RAM hôte**, alors que `GpuMaskableDictRolloutBuffer`
+(`ai/gpu_rollout_buffer.py`) en uploade l'intégralité en **VRAM** pendant tout l'update.
 
 ### Example
 
