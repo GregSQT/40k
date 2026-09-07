@@ -29,6 +29,7 @@ import pytest
 from engine.phase_handlers.shared_utils import (
     build_units_cache,
     init_pending_intents,
+    squad_declare_shoot,
     squad_declare_shoot_model,
     squad_declare_shoot_weapon,
     squad_declare_shoot_weapon_qty,
@@ -486,3 +487,59 @@ class TestLastShootTargetIdPvP:
         squad_declare_shoot_model(gs, "1", "1#1", "3")
         unit = gs["unit_by_id"]["1"]
         assert unit.get("_last_shoot_target_id") == "2"  # première cible conservée
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Declaration AUTOMATIQUE (squad_declare_shoot) — un seul profil par arme physique
+# ─────────────────────────────────────────────────────────────────────────────
+class TestDeclareShootCombiProfiles:
+    """► Multiple Weapon Profiles (renvoi de 04.01) : les profils exclusifs d'un combi sont UNE
+    arme physique. Verrou du chemin de production `squad_shoot` (gym ET PvP mono-cible), jumeau
+    de celui que `test_split_fire_gym.py` pose sur le masque split-fire.
+
+    Sans ce verrou, une figurine declarait Frag ET Krak dans la MEME activation : mesure du
+    2026-09-07, 138 des 140 groupes activation-socle du step.log, 500 conflits comptes par la
+    section 1.2 de l'analyzer — donc une action illegale apprise comme legale.
+    """
+
+    def _gs(self, attacker_models, attacker_weapons):
+        atk = _unit(1, 1, attacker_models, attacker_weapons)
+        tgt = _unit(2, 2, [_m(5, 15, [STORM])], [STORM])
+        gs = _make_gs([atk, tgt])
+        _activate(gs, "1")
+        return gs
+
+    def test_combi_declares_a_single_profile(self):
+        gs = self._gs([_m(5, 5, [FRAG, KRAK])], [FRAG, KRAK])
+        intents = squad_declare_shoot(gs, "1", "2", ["2"])
+        assert len(intents) == 1
+
+    def test_combi_keeps_first_declarable_profile(self):
+        """Meme politique que `shoot_weapon_sel_open_slots` : le PREMIER profil du groupe."""
+        gs = self._gs([_m(5, 5, [FRAG, KRAK])], [FRAG, KRAK])
+        intents = squad_declare_shoot(gs, "1", "2", ["2"])
+        assert intents[0]["weapon_index"] == 0
+
+    def test_distinct_weapons_still_split(self):
+        """Non-regression : deux armes PHYSIQUES distinctes gardent leurs deux declarations
+        (04.01 « you can select one or more ranged weapons »). Le groupage ne doit pas
+        confondre « deux profils d'une arme » et « deux armes »."""
+        gs = self._gs([_m(5, 5, [STORM, FRAG])], [STORM, FRAG])
+        intents = squad_declare_shoot(gs, "1", "2", ["2"])
+        assert {i["weapon_index"] for i in intents} == {0, 1}
+
+    def test_grouping_is_per_model_not_per_squad(self):
+        """Grain par FIGURINE : deux porteurs du meme combi declarent chacun le leur — grouper
+        au niveau escouade priverait de tir tous les porteurs sauf le premier."""
+        gs = self._gs(
+            [_m(5, 5, [FRAG, KRAK]), _m(5, 6, [FRAG, KRAK])], [FRAG, KRAK]
+        )
+        intents = squad_declare_shoot(gs, "1", "2", ["2"])
+        assert {i["model_id"] for i in intents} == {"1#0", "1#1"}
+        assert len(intents) == 2
+
+    def test_solo_weapon_never_grouped_with_another(self):
+        """Deux armes sans COMBI_WEAPON ne partagent jamais de groupe, meme portees ensemble."""
+        gs = self._gs([_m(5, 5, [STORM, STORM])], [STORM, STORM])
+        intents = squad_declare_shoot(gs, "1", "2", ["2"])
+        assert len(intents) == 2

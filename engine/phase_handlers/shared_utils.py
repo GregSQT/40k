@@ -7485,6 +7485,23 @@ def squad_declare_shoot(
         if not usable:
             continue  # fig bloquee, ne tire pas
 
+        # ► Multiple Weapon Profiles (renvoi de 04.01) : deux profils d un meme combi sont UNE
+        # arme physique, donc en selectionner un consomme l arme entiere. Meme politique que le
+        # jumeau du masque split-fire (`shoot_weapon_sel_open_slots`) : on garde le PREMIER
+        # profil declarable du groupe. Groupe AVANT 24.07 ci-dessous, qui compte les armes que
+        # chaque famille place sur la cible : compter deux profils du meme combi comme deux
+        # armes y fausserait le comptage (aucun roster actuel ne le montre — tous les groupes
+        # combi sont homogenes en [CLOSE-QUARTERS] — mais cet ordre ne depend pas de ce fait).
+        seen_weapon_groups: Set[str] = set()
+        grouped: List[Tuple[int, str]] = []
+        for widx, target in usable:
+            group_key = _weapon_group_key(weapons, widx)
+            if group_key in seen_weapon_groups:
+                continue
+            seen_weapon_groups.add(group_key)
+            grouped.append((widx, target))
+        usable = grouped
+
         # 24.07 (SIDEARMS, PDF 04) : hors MONSTER/VEHICLE, une figurine choisit SOIT ses armes
         # [CLOSE-QUARTERS], SOIT ses autres armes de tir — jamais les deux. Defaut retenu : la
         # famille qui place le PLUS d armes sur une cible ; a egalite, les armes principales

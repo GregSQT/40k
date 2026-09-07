@@ -100,6 +100,11 @@ Le grain est la FIGURINE : le profil engage le socle qui tire, pas l'escouade. `
 `test_multi_bearer_group_each_violation_counted_per_bearer` tient les deux porteurs fautifs à
 2 conflits et 4 exercices, le seul test qui exerce la boucle avec N>1.
 
+Ces **500 erreurs n'étaient pas des faux positifs** : le moteur déclarait réellement les deux
+profils d'un même combi dans une seule activation. Cause corrigée le 2026-09-07 dans
+`squad_declare_shoot` (cf. `ROADMAP_INDEX.md`, correctifs hors chantier du jour) — comme tout bug
+moteur, **invisible sur un journal déjà écrit** : à re-mesurer au prochain run, attendu 0.
+
 **Ce que ce prédicat ne ferme pas, et pourquoi.** Les 7 lignes restantes ne dépendent pas d'un
 roster mais d'un ÉVÉNEMENT qui ne s'est pas produit : personne ne s'est replié PUIS n'a tiré
 (`PROJ.1.2.apres_repli`), n'a avancé PUIS chargé (`PROJ.1.3.apres_advance`), aucune unité n'est
