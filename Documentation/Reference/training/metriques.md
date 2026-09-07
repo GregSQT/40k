@@ -15,6 +15,7 @@ TensorBoard trie les groupes de tags par tri naturel *sensible à la casse* (chi
 | **`02_combat/`** | Attrition : kills, pertes, charges, value trade |
 | **`03_eval/`** | Win-rate par couple (scénario holdout, bot) — un tag par paire |
 | **`bot_eval/`** | Agrégats d'évaluation bot : `vs_random`, `vs_greedy`, `vs_defensive`, `combined` |
+| **`pool_eval/`** | Sonde de curriculum : win-rate contre chaque membre du pool (brut + moyenne 3 sondes) |
 | **`game_critical/`** | Métriques de jeu brutes (episode_reward, win_rate, episode_length, invalid_action_rate) |
 | **`game_tactical/`** | Participation par phase (movement_efficiency, shooting_participation, flee_rate) |
 | **`reserves/`** | Usage des réserves stratégiques (§20.01 / §20.04) |
@@ -364,6 +365,22 @@ Chaque ratio n'est émis **que si son dénominateur est > 0**.
 | **bot_eval/combined** | Moyenne pondérée de tous les bots de sélection | > 0.49 (BEST: 0.4857) → >0.55 (Phase 2) → >0.70 (Phase 3) | Métrique principale de succès |
 
 **`03_eval/`** : un tag par couple `(scénario, classe de bot)`. Le nom du scénario (`holdout_regular_bot_01`, etc.) est un fichier de matchup de rosters, pas un adversaire.
+
+---
+
+### Sonde de curriculum (`pool_eval/`)
+
+`PoolEarlyStoppingCallback` (`ai/training_callbacks.py`) évalue le modèle en cours contre chaque membre du pool tous les `bot_eval_freq` épisodes, sur `gate.eval_episodes` parties du split holdout. Deux tags par membre : `pool_eval/vs_<membre>` (valeur brute, celle que lit le gate) et `pool_eval/vs_<membre>_3ep` (moyenne glissante sur 3 sondes, lecture de tendance seulement).
+
+**La sonde est déterministe, et c'est le point le plus important pour la lire.** `base_seed` vaut 42 en dur (`ai/bot_evaluation.py`), les graines d'épisode en dérivent par fonction pure, les deux modèles jouent en argmax et la liste des scénarios est triée. Deux sondes successives d'un même run rejouent donc **exactement les mêmes parties** : le seul terme qui change entre elles est le modèle.
+
+Vérifié par exécution le 2026-09-07 — deux appels d'`evaluate_against_checkpoints` sur un modèle figé, arguments identiques : **16 victoires / 24 défaites / 0 nul les deux fois**, score 0,4000 au bit près.
+
+**Conséquence de lecture.** L'écart entre deux sondes voisines n'est pas du bruit d'échantillonnage : il n'y en a aucun entre deux appels. Mais il ne se lit pas non plus comme un gain de compétence de cette taille. À parties identiques, un petit déplacement de politique fait basculer d'un coup des blocs entiers de parties qui se jouaient sur le fil, si bien que la sonde **amplifie** les petits mouvements. Une amplitude de 10 à 15 points entre deux sondes voisines est attendue et ne signale ni une panne d'instrument, ni un progrès réel de 10 à 15 points. C'est la raison d'être de `_3ep`.
+
+Ce qui reste soumis à l'échantillonnage, c'est le **niveau absolu** : ces parties ne sont pas la population, et l'erreur-type vaut 2,9 points à 300 épisodes pour un taux proche de 0,5. Cette erreur est *commune* à toutes les sondes du run, puisqu'elles jouent les mêmes parties — elle décale le niveau en bloc sans séparer les sondes entre elles. Elle compte donc face au seuil `gate.min_score_vs_champion`, jamais dans une comparaison entre deux sondes.
+
+**Ce qu'une variation de graine mesurerait — et pourquoi ce n'est pas la bonne expérience.** Faire varier `base_seed` sur un agent figé donnerait la dispersion d'échantillonnage pure, proche des 2,9 points théoriques. C'est vrai, rassurant, et hors sujet : cette variation casse justement la corrélation qui produit les sauts observés. La question « ces 15 points sont-ils du bruit ? » se tranche par le test de déterminisme ci-dessus, pas par un écart-type sur graines variables.
 
 ---
 
