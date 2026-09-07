@@ -223,8 +223,9 @@ def test_a_ramp_inherited_by_the_lineage_profile_is_refused(cle: str) -> None:
     """
     from ai.train import _require_scalar_lineage_regime
 
-    herite = dict(get_config_loader().load_agent_training_config(AGENT, "x1_lineage")["model_params"])
-    herite[cle] = get_config_loader().load_agent_training_config(AGENT, "x1_long")["model_params"][cle]
+    loader = get_config_loader()
+    herite = dict(loader.load_agent_training_config(AGENT, "x1_lineage")["model_params"])
+    herite[cle] = loader.load_agent_training_config(AGENT, "x1_long")["model_params"][cle]
 
     with pytest.raises(ValueError, match=cle):
         _require_scalar_lineage_regime(herite, "x1_lineage", "P2")

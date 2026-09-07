@@ -92,6 +92,11 @@ registre jamais rempli.
 `COMBI` est une clé **synthétique** de ce registre, dérivée d'`unit_combi_by_weapon` — la table que
 lit le contrôle lui-même. Ce n'est pas un token d'armurerie, et c'est dit à sa déclaration.
 
+Ce contrôle était **MORT** jusqu'au 2026-09-07 : `unit_combi_by_weapon` est indexé par la datasheet
+qui PORTE l'arme, mais il était interrogé sous le type d'ESCOUADE, qui ne déclare pas le combi.
+Résolu depuis par les model-types de `[SHOOTER_MODELS:]` — **0 → 2004 exercices, 0 → 500 erreurs**.
+Le grain est la FIGURINE : le profil engage le socle qui tire, pas l'escouade.
+
 **Ce que ce prédicat ne ferme pas, et pourquoi.** Les 7 lignes restantes ne dépendent pas d'un
 roster mais d'un ÉVÉNEMENT qui ne s'est pas produit : personne ne s'est replié PUIS n'a tiré
 (`PROJ.1.2.apres_repli`), n'a avancé PUIS chargé (`PROJ.1.3.apres_advance`), aucune unité n'est

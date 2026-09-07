@@ -843,6 +843,7 @@ def check_links(doc_path: pathlib.Path) -> tuple[int, int, int, list[str]]:
     return checked, skipped, fragments, broken
 
 
+@functools.lru_cache(maxsize=1)
 def agent_profiles() -> dict[str, dict]:
     """Les profils d'entraînement de l'agent RÉSOLUS, source de vérité des nombres recopiés.
 

@@ -105,7 +105,7 @@ TRAINING_CONFIGS_KEY = "training_configs"
 #: les autres, learners chaines comme exploiteurs.
 TRAINING_CONFIG_ROLE_COLD_START = "cold_start"
 TRAINING_CONFIG_ROLE_LINEAGE = "lineage"
-_TRAINING_CONFIG_ROLES = (TRAINING_CONFIG_ROLE_COLD_START, TRAINING_CONFIG_ROLE_LINEAGE)
+_TRAINING_CONFIG_ROLES: frozenset = frozenset({TRAINING_CONFIG_ROLE_COLD_START, TRAINING_CONFIG_ROLE_LINEAGE})
 
 #: Cles autorisees au niveau racine de `training_config_overrides` d'une etape learner.
 #: Toute cle absente de cette liste est refusee a la validation du curriculum.
@@ -127,6 +127,12 @@ _TRAINING_CONFIG_ROLES = (TRAINING_CONFIG_ROLE_COLD_START, TRAINING_CONFIG_ROLE_
 #: dans les memes conditions quelle que soit l'etape.
 STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS: frozenset = frozenset({
     "total_episodes", "model_params", "callback_params", "agent_seat_p2_ratio",
+})
+
+#: Sous-ensemble de `STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS` que le PROFIL DE LIGNEE gouverne.
+#: Une etape reprise a chaud ne peut pas les declarer dans ses propres overrides.
+STAGE_HP_OVERRIDES_LINEAGE_GOVERNED_TOP_KEYS: frozenset = frozenset({
+    "model_params", "agent_seat_p2_ratio",
 })
 
 
@@ -527,13 +533,13 @@ def _validate_training_configs(curriculum: Dict[str, Any], source: str) -> None:
         raise TypeError(f"{source}: curriculum.{TRAINING_CONFIGS_KEY} doit etre un objet JSON.")
 
     declared = {k for k in block if not str(k).startswith("_")}
-    unknown = sorted(declared - set(_TRAINING_CONFIG_ROLES))
+    unknown = sorted(declared - _TRAINING_CONFIG_ROLES)
     if unknown:
         raise ValueError(
             f"{source}: {TRAINING_CONFIGS_KEY} contient des cles non autorisees : {unknown}. "
             f"Cles autorisees : {sorted(_TRAINING_CONFIG_ROLES)}"
         )
-    missing = sorted(set(_TRAINING_CONFIG_ROLES) - declared)
+    missing = sorted(_TRAINING_CONFIG_ROLES - declared)
     if missing:
         raise ConfigurationError(
             f"{source}: {TRAINING_CONFIGS_KEY} manque {missing}. Le bloc est COMPLET ou il ne "
@@ -577,7 +583,7 @@ def required_training_config(
         # (curriculum entierement a froid : il n'y a pas deux regimes a distinguer). Exiger le
         # bloc ici rendrait injouable un curriculum que le validateur vient d'accepter.
         return None
-    return str(require_key(block, role))
+    return require_key(block, role)
 
 
 def load_parity_check(curriculum: Dict[str, Any]) -> Tuple[float, float]:
@@ -855,7 +861,7 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
         # hyperparametres, le PROFIL de lignee les porte pour toute la lignee. Les laisser
         # declarables ici ferait coexister deux sources pour la meme valeur, dont une — le
         # profil — invisible depuis le curriculum.
-        governed = sorted(set(overrides) & {"model_params", "agent_seat_p2_ratio"})
+        governed = sorted(set(overrides) & STAGE_HP_OVERRIDES_LINEAGE_GOVERNED_TOP_KEYS)
         if governed:
             raise ValueError(
                 f"{source}: stages[{name}] reprend des poids (init={stage['init']!r}) et declare "
