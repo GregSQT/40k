@@ -1415,10 +1415,73 @@ def _interrupted_model_path(model_path: str) -> str:
     return f"{os.path.splitext(model_path)[0]}_interrupted.zip"
 
 
+def canonical_robust_meta_path(model_path: str) -> str:
+    """`model_<agent>_robust_meta.json` — le SEUIL de score robuste du modele canonique.
+
+    Jumeau de `BotEvaluationCallback._get_canonical_robust_meta_path`, qui le derive de
+    `best_model_save_path` et de la cle d'agent : les deux doivent nommer le meme fichier, et il
+    est lu comme un seuil (`_read_canonical_robust_score`) — un desaccord ferait ecrire un seuil
+    que personne ne relit, donc un canonique jamais mis a jour.
+    """
+    model_dir = os.path.dirname(model_path)
+    stem = os.path.splitext(os.path.basename(model_path))[0]
+    return os.path.join(model_dir, f"{stem}_robust_meta.json")
+
+
+def final_save_publishes_live_weights(
+    save_best_robust: bool, pool_stop_verdict: Optional[str]
+) -> bool:
+    """Le run doit-il ecrire ses poids COURANTS au chemin canonique en fin de boucle ?
+
+    Hors `save_best_robust`, toujours : il n'y a pas d'autre producteur du canonique.
+
+    Sous `save_best_robust`, normalement NON — le canonique appartient a l'instantane robuste,
+    publie par `BotEvaluationCallback` quand le score robuste progresse. L'EXCEPTION est le
+    verdict `promote` de l'early-stop, rendu sur les poids courants mesures contre tout le pool.
+    L'instantane robuste, lui, est choisi sur un AUTRE critere (le score contre les bots) et n'est
+    jamais degrade en cours de run : le gate de fin mesurait donc un modele que personne n'avait
+    juge, pouvait le refuser, et le run s'etait deja arrete — le budget non depense partait avec
+    l'etape, ce que l'arret anticipe existe precisement pour eviter (« le budget restant serait
+    paye pour rien »). Publier ici est l'exception que `save_best_robust` peut accepter : le
+    verdict EST une validation contre l'integralite du pool, la preuve que ce mode exige avant de
+    publier.
+
+    Le verdict `destroy` ne publie RIEN : il refuse l'etape, et `_close_curriculum_stage`
+    court-circuite le gate sans mesurer.
+    """
+    return not save_best_robust or pool_stop_verdict == POOL_VERDICT_PROMOTE
+
+
+def publish_canonical_model(model, model_path: str, episode_count: int, log=print) -> None:
+    """Ecrit les poids COURANTS au chemin canonique, avec ses compagnons, et INVALIDE le seuil.
+
+    `run_state` : sans lui la reprise suivante leve — et sans la levee, elle relancerait toutes
+    les rampes depuis leur valeur de depart. `_vec_normalize.pkl` : un zip sans ses stats est
+    injouable comme adversaire fige (V11 §0.35).
+
+    Le seuil de score robuste est SUPPRIME parce qu'il decrit le modele qu'on vient de remplacer.
+    Laisse en place il annonce un score que le canonique n'a pas, et il SURVIT a l'etape (seul
+    `--new` l'ecarte, cf. `archive_canonical_artifacts_for_new_run`) : il imposerait a l'etape
+    suivante de battre le score d'un modele disparu avant de pouvoir republier son propre
+    canonique — le defaut exact que V11 §0.36 a constate en production. Le supprimer rend l'etat
+    vrai : ce canonique n'a pas de score robuste connu.
+    """
+    model.save(model_path)
+    save_run_state(model_path, episode_count)
+    if save_vec_normalize(model.get_env(), model_path):
+        log("   VecNormalize stats saved")
+    meta_path = canonical_robust_meta_path(model_path)
+    if os.path.exists(meta_path):
+        os.remove(meta_path)
+        log(
+            "📦 Seuil de score robuste efface : le canonique porte les poids du run, pas "
+            "l'instantane robuste qu'il decrivait."
+        )
+
+
 def canonical_run_artifacts(model_path: str) -> list:
     """Chemins des artefacts a nom FIXE d'un run, pour `model_path` = le modele canonique."""
     model_dir = os.path.dirname(model_path)
-    stem = os.path.splitext(os.path.basename(model_path))[0]
 
     best_model = os.path.join(model_dir, "best_model.zip")
     interrupted = _interrupted_model_path(model_path)
@@ -1426,7 +1489,7 @@ def canonical_run_artifacts(model_path: str) -> list:
     return [
         model_path,                                              # model_<agent>.zip
         *model_companion_paths(model_path),                      # ..._vec_normalize.pkl, ..._run_state.json
-        os.path.join(model_dir, f"{stem}_robust_meta.json"),     # seuil du score robuste
+        canonical_robust_meta_path(model_path),                  # seuil du score robuste
         best_model,                                              # meilleur modele SB3 du run
         # `_save_model_with_vecnormalize` ecrit SYSTEMATIQUEMENT les stats a cote du best_model
         # (ai/training_callbacks.py). Oubliees ici, elles restaient en place pendant que leur zip
@@ -1739,6 +1802,7 @@ from engine.episode_schedule import episodes_per_env
 from ai.curriculum import (
     _ROBUST_WINDOW_MIN,
     POOL_VERDICT_DESTROY,
+    POOL_VERDICT_PROMOTE,
     append_curriculum_log,
     last_curriculum_log_entry,
     copy_tensorboard_run,
@@ -3820,16 +3884,22 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         callback_params = require_key(training_config, "callback_params")
         save_best_robust = bool(require_key(callback_params, "save_best_robust"))
 
-        # Final save unless robust mode owns canonical output.
-        if not save_best_robust:
+        pool_early_stop_callback = next(
+            (cb for cb in training_callbacks if isinstance(cb, PoolEarlyStoppingCallback)),
+            None
+        )
+        pool_stop_verdict = (
+            pool_early_stop_callback.stop_verdict if pool_early_stop_callback is not None else None
+        )
+
+        # Final save unless robust mode owns canonical output (cf. la regle, qui dit pourquoi un
+        # verdict `promote` fait exception).
+        if final_save_publishes_live_weights(save_best_robust, pool_stop_verdict):
             _debug_train_marker("before final model.save()")
-            model.save(model_path)
-            # Jumeau des stats VecNormalize : sans ce compteur, la prochaine reprise leve (et sans la
-            # levee, elle relancerait toutes les rampes depuis leur valeur de depart).
-            save_run_state(model_path, int(metrics_tracker.episode_count))
-            if save_vec_normalize(model.get_env(), model_path):
-                if not silent_chunk:
-                    print(f"   VecNormalize stats saved")
+            publish_canonical_model(
+                model, model_path, int(metrics_tracker.episode_count),
+                log=(lambda _m: None) if silent_chunk else print,
+            )
         elif not os.path.exists(model_path):
             bot_eval_callback = next(
                 (cb for cb in training_callbacks if cb.__class__.__name__ == "BotEvaluationCallback"),
@@ -4006,17 +4076,16 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             (cb for cb in training_callbacks if isinstance(cb, ExploiterProbeCallback)),
             None
         )
-        pool_early_stop_callback = next(
-            (cb for cb in training_callbacks if isinstance(cb, PoolEarlyStoppingCallback)),
-            None
-        )
+        # `pool_early_stop_callback` et `pool_stop_verdict` sont deja resolus plus haut, au bloc de
+        # sauvegarde finale : c'est ce verdict qui a decide si les poids vivants sont publies, et
+        # le journal doit citer exactement celui-la.
         if bot_eval_callback is not None or exploiter_probe_callback is not None:
             run_info["episodes_trained"] = int(episodes_trained)
         if pool_early_stop_callback is not None:
             # None quand le run est allé au bout de son budget : `_close_curriculum_stage`
             # journalise la distinction entre « l'étape a fini » et « l'étape s'est arrêtée ».
             run_info.update({
-                "pool_stop_verdict": pool_early_stop_callback.stop_verdict,
+                "pool_stop_verdict": pool_stop_verdict,
                 "pool_stop_reason": pool_early_stop_callback.stop_reason,
             })
         if bot_eval_callback is not None:
@@ -4572,13 +4641,14 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
         callback_params = require_key(training_config, "callback_params")
         save_best_robust = bool(require_key(callback_params, "save_best_robust"))
 
-        # Save final model unless robust mode owns canonical output.
-        if not save_best_robust:
+        # Save final model unless robust mode owns canonical output. Jumeau du bloc de
+        # `train_with_scenario_rotation`, et la MEME regle : ce chemin ne monte jamais
+        # `PoolEarlyStoppingCallback` (`setup_callbacks` ne l'ajoute pas, il n'arrive que par les
+        # `extra_callbacks` du curriculum), donc son verdict y vaut None — mais l'ecrire ici en
+        # dur ferait deux regles pour une seule question.
+        if final_save_publishes_live_weights(save_best_robust, None):
             os.makedirs(os.path.dirname(model_path), exist_ok=True)
-            model.save(model_path)
-            save_run_state(model_path, int(metrics_tracker.episode_count))
-            if save_vec_normalize(model.get_env(), model_path):
-                print(f"   VecNormalize stats saved")
+            publish_canonical_model(model, model_path, int(metrics_tracker.episode_count))
         
         # Clean up checkpoint files after successful training
         model_dir = os.path.dirname(model_path)

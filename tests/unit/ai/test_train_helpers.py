@@ -977,3 +977,105 @@ def test_both_published_summaries_read_the_same_source() -> None:
         assert "'_wins', '_losses', '_draws', '_episodes'" not in code, (
             f"selection par liste noire encore presente dans le resume « {where} »"
         )
+
+
+# ── PUBLICATION DU CANONIQUE : un verdict `promote` ecrit les poids VIVANTS ──────────────────
+
+
+class _FakeModel:
+    """Modele minimal : `save` ecrit un zip reconnaissable, `get_env` rend None."""
+
+    def __init__(self, marker: bytes = b"poids-vivants") -> None:
+        self.marker = marker
+        self.saved_to: list = []
+
+    def save(self, path: str) -> None:
+        self.saved_to.append(path)
+        with open(path, "wb") as handle:
+            handle.write(self.marker)
+
+    def get_env(self):
+        return None
+
+
+@pytest.mark.parametrize(
+    "save_best_robust, verdict, attendu",
+    [
+        (False, None, True),           # hors mode robuste : personne d'autre n'ecrit le canonique
+        (False, "promote", True),
+        (True, None, False),           # budget epuise : le canonique appartient a l'instantane
+        (True, "destroy", False),      # l'etape est refusee, rien a publier
+        (True, "promote", True),       # LE cas : les poids juges doivent etre ceux qu'on mesure
+    ],
+)
+def test_who_publishes_the_canonical_model(save_best_robust, verdict, attendu) -> None:
+    """Sous `save_best_robust`, SEUL un verdict `promote` fait ecrire les poids courants.
+
+    L'early-stop rend `promote` sur les poids vivants, mesures contre tout le pool ; l'instantane
+    robuste est choisi sur le score contre les BOTS et n'est jamais degrade en cours de run. Sans
+    cette publication, le gate de fin mesurait un autre modele que celui juge, pouvait le refuser,
+    et le budget non depense partait avec l'etape — l'inverse exact de ce que l'arret anticipe
+    annonce.
+    """
+    assert train.final_save_publishes_live_weights(save_best_robust, verdict) is attendu
+
+
+def test_publishing_the_canonical_writes_the_two_mandatory_companions(tmp_path) -> None:
+    """Le zip seul ne suffit pas : sans `run_state`, la reprise suivante leve."""
+    from ai.run_state import get_run_state_path, load_run_state
+
+    model_path = str(tmp_path / "model_Agent.zip")
+    train.publish_canonical_model(_FakeModel(), model_path, 123_456, log=lambda _m: None)
+
+    assert Path(model_path).read_bytes() == b"poids-vivants"
+    assert Path(get_run_state_path(model_path)).exists()
+    assert load_run_state(model_path) == 123_456
+
+
+def test_publishing_the_canonical_invalidates_the_robust_threshold(tmp_path) -> None:
+    """Le seuil de score robuste decrivait le modele REMPLACE : il doit disparaitre.
+
+    Il survit sinon a l'etape — seul `--new` l'ecarte — et imposerait a l'etape suivante de battre
+    le score d'un modele qui n'existe plus avant de republier son propre canonique. C'est le
+    defaut constate en production (V11 §0.36 : un run relance a du battre `0.457372` herite d'un
+    run mort).
+    """
+    model_path = str(tmp_path / "model_Agent.zip")
+    meta_path = Path(train.canonical_robust_meta_path(model_path))
+    meta_path.write_text(json.dumps({"robust_score": 0.457372}), encoding="utf-8")
+
+    train.publish_canonical_model(_FakeModel(), model_path, 1, log=lambda _m: None)
+
+    assert not meta_path.exists(), (
+        "le seuil herite ferait refuser la republication du canonique a l'etape suivante"
+    )
+
+
+def test_the_robust_threshold_path_is_the_one_the_callback_reads(tmp_path) -> None:
+    """JUMEAU : `train` et `BotEvaluationCallback` doivent nommer le MEME fichier.
+
+    Le callback derive le chemin de `best_model_save_path` + cle d'agent, `train` du chemin du
+    modele canonique. Un desaccord ferait effacer un fichier que personne ne lit, et laisserait le
+    vrai seuil en place — le test passerait, le defaut resterait.
+    """
+    from ai.training_callbacks import BotEvaluationCallback
+
+    model_path = str(tmp_path / "model_ArmageddonAgent_x1.zip")
+    callback = BotEvaluationCallback.__new__(BotEvaluationCallback)
+    callback.best_model_save_path = str(tmp_path)
+    callback._infer_agent_key = lambda: "ArmageddonAgent_x1"  # type: ignore[method-assign]
+
+    assert train.canonical_robust_meta_path(model_path) == (
+        callback._get_canonical_robust_meta_path()
+    )
+
+
+def test_the_final_save_block_delegates_to_the_two_helpers() -> None:
+    """La regle et l'ecriture vivent HORS de `train_with_scenario_rotation`.
+
+    Elles y etaient noyees au milieu de 700 lignes, donc intestables : le bloc qui publiait le
+    canonique n'avait aucun verrou, et c'est la que le modele juge se perdait.
+    """
+    code = _function_code(train.train_with_scenario_rotation)
+    assert "final_save_publishes_live_weights(save_best_robust, pool_stop_verdict)" in code
+    assert "publish_canonical_model(" in code
