@@ -200,7 +200,7 @@ elle se fait en dernier et **se saute si la décision A est prise entre-temps**.
 
 | # | Étape | Ancre | Statut |
 |---|---|---|---|
-| 2.1 | Rollout **résident GPU** : buffer custom qui garde obs+masques sur le GPU (fin des ~4-5 Go H2D re-transférés à chaque epoch) + masques en bool (float32 ×4 aujourd'hui) | `ai/gpu_rollout_buffer.py` (`GpuMaskableDictRolloutBuffer`) | ✅ |
+| 2.1 | Rollout **résident GPU** : buffer custom qui garde les champs compacts (masques compris, en bool au lieu de float32 ×4) sur le GPU. Les **observations en ont été retirées le 2026-09-07** : leur résidence coûtait 3,16 Gio de VRAM en double des tableaux numpy et faisait déborder la carte sur le profil de lignée, donc elles repartent par mini-lot (+3,24 s/update mesuré) — cf. le docstring du module | `ai/gpu_rollout_buffer.py` (`GpuMaskableDictRolloutBuffer`) | ✅ (obs réduites) |
 | 2.2 | Logging différé : accumuler les scalaires sur GPU et ne `.item()` qu'en fin d'update (~225 syncs/update) ; `writer.flush()` et norme de gradient tous les N épisodes | `ai/patched_ppo.py` (`train()`), `ai/metrics_tracker.py`, `ai/training_callbacks.py` | ✅ |
 | 2.3 | **Un seul RPC par step** : le masque voyage dans le retour de `step()` (infos) ; VecEnv custom ou surcharge de `collect_rollouts` — sautable si option A actée | `ai/maskable_subproc_vec_env.py` (`MaskableSubprocVecEnv`), `ai/patched_ppo.py` (`collect_rollouts`) | ✅ |
 | 2.4 | **Mesure de clôture** : `time/fps` run réel = **226–233 fps** (steps 33k–65k, run 20260826-171446, pre-rampe self-play) vs baseline 200 fps → **+13–16 %** ; non-régression env ✅ (bench_env_step 3×, médiane 29–31 ms) | — | ✅ |

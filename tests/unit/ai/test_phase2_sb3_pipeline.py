@@ -173,11 +173,9 @@ class TestGpuMaskableDictRolloutBuffer:
                 return sum(_resident_elems(v) for v in value.values())
             return 0
 
-        resident = sum(
-            _resident_elems(v)
-            for name, v in vars(gpu_buf).items()
-            if name.startswith("_gpu_")
-        )
+        # TOUS les attributs, sans filtre de nom : un upload en bloc réintroduit sous un autre
+        # nom que `_gpu_*` rendrait les 3,16 GiB à la VRAM sans que le verrou bronche.
+        resident = sum(_resident_elems(v) for v in vars(gpu_buf).values())
         obs_block = (256 + 128) * n_steps * n_envs
         assert resident < obs_block, (
             f"{resident} flottants résidents pour un bloc d'observations de {obs_block} : "

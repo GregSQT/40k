@@ -167,15 +167,21 @@ L'allocateur par défaut, lui, déborde en RAM hôte et le même run passe.
 
 Le mode ne tient donc que tant que le pic reste sous la VRAM, ce que la config ne garantit pas :
 
-| Configuration (rollout 32640, buffer GPU-résident 3,37 Go) | Pic alloué | `expandable_segments:True` |
+| Configuration (rollout 32640, observations alors résidentes en VRAM : 3,37 Go) | Pic alloué | `expandable_segments:True` |
 |---|---|---|
 | `batch_size` 4080 (profil de lignée jusqu'au 2026-09-07) | 8,89 Go | ❌ `device not ready` |
 | `batch_size` 1020 (valeur retenue) | 4,77 Go | ✅ |
 
 Autrement dit il transforme un dépassement de VRAM en panne opaque au lieu d'un OOM explicite ou
 d'un débordement fonctionnel. Le garde-fou de `ai/train.py::apply_rollout_n_steps` ne rattrape rien
-ici : il dimensionne le buffer sur la **RAM hôte**, alors que `GpuMaskableDictRolloutBuffer`
-(`ai/gpu_rollout_buffer.py`) en uploade l'intégralité en **VRAM** pendant tout l'update.
+ici : il dimensionne le buffer sur la seule **RAM hôte**, et ne voit rien de ce que le buffer tient
+sur la carte.
+
+Les deux pics du tableau datent du régime où `GpuMaskableDictRolloutBuffer`
+(`ai/gpu_rollout_buffer.py`) uploadait aussi les **observations** en bloc. Depuis le 2026-09-07 il
+n'y garde que les champs compacts, les observations partant mini-lot par mini-lot : la VRAM tenue
+par le buffer passe de 3,437 à 0,275 Gio (mesure `torch.cuda.memory_allocated` au rollout 32640),
+donc les deux lignes sont à relire comme un historique, pas comme le régime courant.
 
 Le `batch_size` du profil de lignée est depuis redescendu à 1020, donc le pic tient en VRAM et ce
 mode redeviendrait techniquement praticable ici. Il reste à `False` : il n'apporte qu'une moindre
