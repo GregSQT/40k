@@ -214,3 +214,81 @@ def test_every_profile_batch_size_divides_its_real_rollout() -> None:
             f"Plus grande valeur valide <= {batch_size} : "
             f"{max(d for d in range(1, batch_size + 1) if rollout % d == 0)}."
         )
+
+
+def test_a_batch_size_that_does_not_divide_the_real_rollout_is_refused() -> None:
+    """LE cas que le validateur du curriculum laissait passer : la troncature de `//`.
+
+    32640 / 4080 est un couple parfait sur le papier, et c'est a ce titre que
+    `_validate_lineage_regime` l'acceptait. A `n_envs=7` le rollout reel vaut
+    `(32640 // 7) * 7 = 32634`, que 4080 ne divise pas : reste 3114, soit un mini-lot tronque a
+    chaque epoch et des updates de poids inegaux. SB3 emet un avertissement, mais un avertissement
+    au demarrage d'un run de plusieurs heures ne se lit pas.
+    """
+    from ai.train import apply_rollout_n_steps
+
+    params: Dict[str, Any] = {"n_steps": 32640, "batch_size": 4080}
+    with pytest.raises(ValueError, match="ne divise pas le rollout REEL de 32634"):
+        apply_rollout_n_steps(params, 7, _space("box"))
+
+
+def test_a_batch_size_dividing_the_real_rollout_but_not_the_asked_total_is_accepted() -> None:
+    """L'ERREUR INVERSE : le controle sur `n_steps` nu refusait des configurations valides.
+
+    100 pas demandes sur 3 envs donnent un rollout reel de 99, que 33 divise exactement. Juger
+    `100 % 33` aurait refuse une configuration que SB3 decoupe sans le moindre reste.
+    """
+    from ai.train import apply_rollout_n_steps
+
+    params: Dict[str, Any] = {"n_steps": 100, "batch_size": 33}
+    assert apply_rollout_n_steps(params, 3, _space("box")) == 33
+
+
+def test_the_batch_size_check_is_skipped_when_none_is_configured() -> None:
+    """Pas de `batch_size` = aucun couple a verifier : SB3 prendra son propre defaut.
+
+    Le valider ici reviendrait a juger une valeur que personne n'a posee.
+    """
+    from ai.train import apply_rollout_n_steps
+
+    assert apply_rollout_n_steps({"n_steps": 8192}, 48, _space("box")) == 170
+
+
+def test_every_lineage_regime_batch_size_divides_its_real_rollout() -> None:
+    """Jumeau du controle des profils, cote curriculum.
+
+    `lineage_regime.model_params` ECRASE `n_steps` et `batch_size` du profil sur toute etape
+    `init: from:` — c'est-a-dire la quasi-totalite du curriculum. Le controle des profils ne voit
+    donc PAS les valeurs sous lesquelles ces etapes tournent reellement.
+    """
+    import json
+    import os
+
+    root = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
+    with open(
+        os.path.join(root, "config/agents/ArmageddonAgent_x1/curriculum.json"),
+        encoding="utf-8-sig",
+    ) as f:
+        lineage = json.load(f)["lineage_regime"]["model_params"]
+    with open(
+        os.path.join(
+            root, "config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json"
+        ),
+        encoding="utf-8-sig",
+    ) as f:
+        profiles = {
+            k: v for k, v in json.load(f).items() if isinstance(v, dict) and "n_envs" in v
+        }
+
+    assert profiles, "aucun profil lu : le controle ne regarderait rien"
+    n_steps, batch_size = lineage["n_steps"], lineage["batch_size"]
+    for name, profile in profiles.items():
+        n_envs = profile["n_envs"]
+        rollout = (n_steps // n_envs) * n_envs if n_envs > 1 else n_steps
+        assert rollout % batch_size == 0, (
+            f"lineage_regime sous le profil '{name}' (n_envs={n_envs}) : n_steps={n_steps} -> "
+            f"rollout reel {rollout}, que batch_size={batch_size} ne divise pas "
+            f"(reste {rollout % batch_size})."
+        )

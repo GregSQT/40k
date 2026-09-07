@@ -906,3 +906,40 @@ def test_log_selfplay_win_emet_fenetre_fast() -> None:
 
     keys = [k for k, _, _ in _dw(t).scalars]
     assert "03_selfplay/F1_3ep" in keys, "tag reactif absent apres remplissage de la fenetre fast"
+
+
+# ── SONDES DE POOL : LE TAG DOIT NOMMER LA FENETRE QU'IL PORTE ─────────────────────────────
+
+
+def test_log_pool_probe_names_the_window_it_carries() -> None:
+    """Le tag de la moyenne porte `probe_window`, qui est CONFIGURABLE.
+
+    Il valait `_3ep` en dur alors que `early_stop.probe_window` accepte toute valeur >= 2 : une
+    fenetre de 5 publiait sa moyenne sous un nom annoncant 3. Les commentaires qui designent cette
+    courbe comme la grandeur de decision (ai/curriculum.py, ai/training_callbacks.py) pointaient
+    alors un tag qui contredit ce qu'il contient, et deux runs a fenetres differentes
+    superposaient deux grandeurs distinctes sur une seule courbe.
+    """
+    t = _tracker_stub()
+    t.log_pool_probe("P1", 0.51, 0.53, 1000, 5)
+
+    keys = [k for k, _, _ in _dw(t).scalars]
+    assert "pool_eval/vs_p1_5ep" in keys, f"le tag doit nommer la fenetre 5 : {keys}"
+    assert "pool_eval/vs_p1_3ep" not in keys, "le 3 en dur ne doit plus apparaitre"
+    assert "pool_eval/vs_p1" in keys, "la brute reste publiee a cote"
+
+
+def test_log_pool_probe_omits_the_mean_on_a_single_probe() -> None:
+    """`rolling_mean` None : rien a publier, la moyenne serait identique a la brute."""
+    t = _tracker_stub()
+    t.log_pool_probe("P1", 0.51, None, 1000, 3)
+
+    keys = [k for k, _, _ in _dw(t).scalars]
+    assert keys == ["pool_eval/vs_p1"], f"seule la brute doit sortir : {keys}"
+
+
+def test_log_pool_probe_refuses_a_window_of_one() -> None:
+    """Une fenetre d'une sonde rend une moyenne identique au brut : le tag mentirait."""
+    t = _tracker_stub()
+    with pytest.raises(ValueError, match="au moins 2"):
+        t.log_pool_probe("P1", 0.51, 0.51, 1000, 1)

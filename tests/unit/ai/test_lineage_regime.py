@@ -103,48 +103,85 @@ class _Loader:
 # ── LECTURE DES SCALAIRES DU MODELE ────────────────────────────────────────────────────────
 
 
+#: Les deux fonctions que le chemin de production execute reellement. Elles ont REMPLACE
+#: `read_model_ent_coef` / `read_model_learning_rate` / `_read_model_scalar`, supprimees le
+#: 2026-09-07 : `announce_lineage_continuity` appelait le troisieme directement, les deux premiers
+#: n'avaient plus aucun appelant hors de ce fichier, et les tests portaient donc sur une surface
+#: qu'aucun run n'empruntait.
+
+
 def test_the_entropy_is_read_from_the_model_on_disk(tmp_path) -> None:
     """La valeur vient du zip, pas de la config."""
-    from ai.train import read_model_ent_coef
+    from ai.train import _model_scalar, _read_model_data
 
-    assert read_model_ent_coef(_model_zip(tmp_path, ent_coef=0.0177)) == pytest.approx(0.0177)
+    path = _model_zip(tmp_path, ent_coef=0.0177)
+    assert _model_scalar(_read_model_data(path), "ent_coef", path) == pytest.approx(0.0177)
 
 
 def test_the_learning_rate_is_read_from_the_model_on_disk(tmp_path) -> None:
     """Jumeau du precedent : le controle de continuite lit les deux."""
-    from ai.train import read_model_learning_rate
+    from ai.train import _model_scalar, _read_model_data
 
-    assert read_model_learning_rate(
-        _model_zip(tmp_path, learning_rate=0.0005)
-    ) == pytest.approx(0.0005)
+    path = _model_zip(tmp_path, learning_rate=0.0005)
+    assert _model_scalar(_read_model_data(path), "learning_rate", path) == pytest.approx(0.0005)
 
 
 @pytest.mark.parametrize("cle", ["ent_coef", "learning_rate"])
 def test_a_model_without_the_key_is_refused(tmp_path, cle: str) -> None:
     """Absente, la valeur ne se devine pas : le controle comparerait un chiffre invente."""
-    from ai.train import _read_model_scalar
+    from ai.train import _model_scalar, _read_model_data
 
+    path = _model_zip(tmp_path, omises=(cle,))
     with pytest.raises(KeyError, match=f"sans `{cle}`"):
-        _read_model_scalar(_model_zip(tmp_path, omises=(cle,)), cle)
+        _model_scalar(_read_model_data(path), cle, path)
 
 
 def test_a_non_numeric_scalar_is_refused(tmp_path) -> None:
-    from ai.train import read_model_ent_coef
+    from ai.train import _model_scalar, _read_model_data
 
+    path = _model_zip(tmp_path, ent_coef="0.02")
     with pytest.raises(TypeError, match="n'est pas un nombre"):
-        read_model_ent_coef(_model_zip(tmp_path, ent_coef="0.02"))
+        _model_scalar(_read_model_data(path), "ent_coef", path)
 
 
 def test_a_nan_scalar_is_refused(tmp_path) -> None:
     """NaN est un flottant en regle, et toute comparaison avec lui est fausse : il traverserait
     le controle d'ecart en silence."""
-    from ai.train import read_model_ent_coef
+    from ai.train import _model_scalar, _read_model_data
 
     path = str(tmp_path / "model.zip")
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr("data", '{"ent_coef": NaN, "learning_rate": 0.001}')
     with pytest.raises(ValueError, match="ni fini"):
-        read_model_ent_coef(path)
+        _model_scalar(_read_model_data(path), "ent_coef", path)
+
+
+def test_the_continuity_check_opens_the_archive_once(tmp_path) -> None:
+    """UNE ouverture de zip pour les DEUX cles, comme l'annonce le commentaire de l'appelant.
+
+    La boucle appelait une fonction « chemin -> valeur » par cle : l'archive etait rouverte, son
+    index reparcouru et son membre `data` redecompresse et reparse a chaque tour, deux fois par
+    ouverture d'etape, la ou une seule lecture suffit.
+    """
+    import ai.train as train_mod
+
+    path = _model_zip(tmp_path, ent_coef=0.0177, learning_rate=0.0005)
+    ouvertures: List[str] = []
+    vrai_lecteur = train_mod._read_model_data
+
+    def _compte(p: str):
+        ouvertures.append(p)
+        return vrai_lecteur(p)
+
+    train_mod._read_model_data = _compte  # type: ignore[assignment]
+    try:
+        train_mod.announce_lineage_continuity(
+            path, LINEAGE["model_params"], "P2", log=lambda *_a: None
+        )
+    finally:
+        train_mod._read_model_data = vrai_lecteur  # type: ignore[assignment]
+
+    assert ouvertures == [path], f"une seule lecture du zip attendue, obtenu {len(ouvertures)}"
 
 
 # ── CONTROLE DE CONTINUITE : IL ANNONCE, IL NE CORRIGE PAS ─────────────────────────────────

@@ -900,6 +900,31 @@ def apply_rollout_n_steps(model_params: Dict[str, Any], n_envs: int, observation
     else:
         effective_n_steps = base_n_steps
 
+    # SEUL endroit qui connaisse le rollout REEL et le `batch_size` qui le decoupera : les deux
+    # grandeurs viennent de sources differentes (`n_envs` du profil d'entrainement, `batch_size`
+    # des model_params, eventuellement ecrases par `lineage_regime`) et ne se rencontrent qu'ici.
+    # Le controle vivait dans le validateur du curriculum sur `n_steps` NU, ou il etait faux dans
+    # les deux sens : il laissait passer 32640/4080 a n_envs=7 (rollout reel 32634, mini-lot
+    # tronque de 3114) et aurait refuse 100/33 a n_envs=3 (rollout reel 99, parfaitement divisible).
+    # Absence de `batch_size` = aucun couple a verifier : SB3 prendra son propre defaut, et le
+    # valider ici reviendrait a juger une valeur que personne n'a configuree.
+    if "batch_size" in model_params:
+        batch_size = model_params["batch_size"]
+        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size <= 0:
+            raise ValueError(
+                f"model_params.batch_size must be a positive integer (got {batch_size!r})"
+            )
+        rollout = effective_n_steps * n_envs
+        if rollout % batch_size != 0:
+            raise ValueError(
+                f"batch_size ({batch_size}) ne divise pas le rollout REEL de {rollout} "
+                f"({effective_n_steps} pas x {n_envs} envs, pour n_steps={base_n_steps} demande) : "
+                f"reste {rollout % batch_size}. Le dernier minibatch de chaque epoch serait "
+                "tronque, donc les updates n'auraient pas tous le meme poids. Plus grande valeur "
+                f"valide <= {batch_size} : "
+                f"{max(d for d in range(1, batch_size + 1) if rollout % d == 0)}."
+            )
+
     floats_per_obs = _observation_floats(observation_space)
     buffer_bytes = floats_per_obs * 4 * effective_n_steps * n_envs
     available_bytes = _available_memory_bytes()
@@ -1699,6 +1724,7 @@ from ai.vec_normalize_utils import (
 from engine.episode_schedule import episodes_per_env
 from ai.curriculum import (
     _ROBUST_WINDOW_MIN,
+    POOL_VERDICT_DESTROY,
     append_curriculum_log,
     copy_tensorboard_run,
     evaluate_stage_gate,
@@ -4893,20 +4919,30 @@ def _pin_deployment_ramp_for_warm_start(cfg: Dict[str, Any]) -> None:
     schedule["active_ratio_start"] = end
 
 
-def _read_model_scalar(model_zip_path: str, key: str) -> float:
-    """Hyperparametre scalaire que porte un modele SB3 sur disque, lu dans le `data` du zip.
+def _read_model_data(model_zip_path: str) -> Dict[str, Any]:
+    """Le bloc `data` d'un modele SB3 sur disque, decompresse et parse UNE fois.
 
-    Lu la plutot qu'en chargeant le modele : la valeur est necessaire AVANT toute construction
+    Lu la plutot qu'en chargeant le modele : les valeurs sont necessaires AVANT toute construction
     d'environnement, et un `MaskablePPO.load` couterait ici plusieurs secondes et exigerait un
     espace d'observation deja resolu.
+
+    Separe de `_model_scalar` pour que l'appelant paie UNE ouverture de zip quel que soit le
+    nombre de cles qu'il lit : `announce_lineage_continuity` en lit deux, et les lire par une
+    fonction « chemin -> valeur » rouvrait l'archive, reparcourait son index et redecompressait
+    `data` a chaque cle.
+    """
+    with zipfile.ZipFile(model_zip_path) as archive:
+        return json.loads(archive.read("data"))
+
+
+def _model_scalar(data: Dict[str, Any], key: str, model_zip_path: str) -> float:
+    """Hyperparametre scalaire d'un `data` deja lu. `model_zip_path` ne sert qu'aux messages.
 
     `ent_coef` et `learning_rate` sont des flottants dans un PPO SB3 — ce sont
     `EntropyScheduleCallback` et `LearningRateScheduleCallback` qui les reecrivent au fil du run,
     pas des schedules serialises. Une valeur absente ou non numerique est une surprise sur
     laquelle il faut lever : le controle de continuite comparerait sinon un chiffre invente.
     """
-    with zipfile.ZipFile(model_zip_path) as archive:
-        data = json.loads(archive.read("data"))
     if key not in data:
         raise KeyError(
             f"Modele repris sans `{key}` : {model_zip_path}. Le controle de continuite de "
@@ -4926,16 +4962,6 @@ def _read_model_scalar(model_zip_path: str, key: str) -> float:
             "Le run qui l'a produit a diverge."
         )
     return float(value)
-
-
-def read_model_ent_coef(model_zip_path: str) -> float:
-    """Coefficient d'entropie que porte un modele SB3 sur disque."""
-    return _read_model_scalar(model_zip_path, "ent_coef")
-
-
-def read_model_learning_rate(model_zip_path: str) -> float:
-    """Learning rate que porte un modele SB3 sur disque. Jumeau de `read_model_ent_coef`."""
-    return _read_model_scalar(model_zip_path, "learning_rate")
 
 
 #: Cles du regime de lignee dont l'ecart avec le modele repris est ANNONCE a l'ouverture d'une
@@ -4964,9 +4990,10 @@ def announce_lineage_continuity(
     Rend `{cle: (valeur_du_modele, valeur_du_regime)}` pour les seules cles qui different.
     """
     deviations: Dict[str, Tuple[float, float]] = {}
+    model_data = _read_model_data(model_zip_path)
     for key in _LINEAGE_CONTINUITY_KEYS:
         regime_value = float(require_key(lineage_model_params, key))
-        model_value = _read_model_scalar(model_zip_path, key)
+        model_value = _model_scalar(model_data, key, model_zip_path)
         if not math.isclose(model_value, regime_value, rel_tol=1e-9):
             deviations[key] = (model_value, regime_value)
     if not deviations:
@@ -5277,8 +5304,8 @@ def _score_stage_against_pool(
     trois mesures etaient identiques au bit pres.
 
     C'est la MEME grandeur que celle sur laquelle l'early-stop decide en cours de run (la moyenne
-    glissante des sondes, `pool_eval/vs_<tag>_3ep`), pour que les deux verdicts se lisent sur la
-    meme echelle.
+    glissante des sondes, `pool_eval/vs_<tag>_<probe_window>ep`), pour que les deux verdicts se
+    lisent sur la meme echelle.
 
     `n_workers_gate` est passe comme `n_workers_override` : si present dans callback_params, le
     gate utilise ce compte de workers independamment de `bot_eval_n_workers` (BotEvaluationCallback).
@@ -5435,6 +5462,8 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
 
     ORDRE VOLONTAIRE : le journal est ecrit AVANT la promotion, et il l'est meme quand le gate
     refuse. Une etape recalee est precisement celle dont on veut relire les chiffres.
+
+    Un verdict `destroy` de l'early-stop court-circuite la mesure : cf. le bloc qui le traite.
     """
     if is_exploiter_stage(stage):
         return _close_exploiter_stage(args, curriculum, stage, run_info)
@@ -5451,19 +5480,6 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
     print(f"🎓 CLOTURE DE L'ETAPE {args.etape}")
     print("=" * 80)
 
-    _gate_training_config = config.load_agent_training_config(args.agent, args.training_config)
-    from ai.bot_evaluation import validate_bot_eval_worker_params as _vbwp
-    _gate_worker_params = _vbwp(require_key(_gate_training_config, "callback_params"))
-    scores_vs_pool = _score_stage_against_pool(
-        args, stage, canonical_model_path, eval_episodes, eval_repeats,
-        n_workers_gate=_gate_worker_params["n_workers_gate"],
-    )
-    for label, score in scores_vs_pool.items():
-        print(
-            f"  vs {label:6s}: {score:.3f}  (moyenne de {eval_repeats} x {eval_episodes} "
-            "episodes, graines tirees)"
-        )
-
     # Scores vs bots : ceux de la DERNIERE evaluation du run, pas une mesure de plus. Le journal
     # doit dire ou en etait l'agent face aux bots a la fin de l'etape, et le run vient de le
     # mesurer.
@@ -5475,9 +5491,41 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
 
     stage_members = stage_pool_members(stage)
     champion_label = next((m["label"] for m in stage_members if m["kind"] == "champion"), None)
-    accepted, gate_reason = evaluate_stage_gate(
-        args.etape, champion_label, scores_vs_pool, floor_champion, floor_others
-    )
+
+    # DESTRUCTION : le verdict de l'early-stop est SOUVERAIN, le gate ne le rejuge pas.
+    # Sans ce court-circuit, une etape arretee pour destruction pouvait etre PROMUE : sous
+    # `save_best_robust` (profils x1_long/x5_long, ceux des etapes de curriculum), le zip
+    # canonique est l'instantane robuste pris plus tot dans le run, et non les poids sur lesquels
+    # la moyenne glissante a rendu son verdict. Le gate mesurait donc un AUTRE modele que celui
+    # juge, pouvait l'accepter, et `curriculum.log` portait alors `pool_stop_verdict: "destroy"`
+    # a cote de `gate_accepted: true`.
+    # La mesure est SAUTEE, pas seulement ignoree : elle coute `eval_repeats` x `eval_episodes`
+    # episodes par membre du pool (des heures), pour un chiffre qui ne peut plus rien changer et
+    # qui decrirait un modele que personne n'a decide de promouvoir.
+    stop_verdict = run_info.get("pool_stop_verdict")
+    if stop_verdict == POOL_VERDICT_DESTROY:
+        scores_vs_pool: Dict[str, float] = {}
+        accepted = False
+        gate_reason = (
+            f"Etape {args.etape} DETRUITE en cours de run : "
+            f"{run_info.get('pool_stop_reason')} — gate non mesure, la decision est prise."
+        )
+    else:
+        _gate_training_config = config.load_agent_training_config(args.agent, args.training_config)
+        from ai.bot_evaluation import validate_bot_eval_worker_params as _vbwp
+        _gate_worker_params = _vbwp(require_key(_gate_training_config, "callback_params"))
+        scores_vs_pool = _score_stage_against_pool(
+            args, stage, canonical_model_path, eval_episodes, eval_repeats,
+            n_workers_gate=_gate_worker_params["n_workers_gate"],
+        )
+        for label, score in scores_vs_pool.items():
+            print(
+                f"  vs {label:6s}: {score:.3f}  (moyenne de {eval_repeats} x {eval_episodes} "
+                "episodes, graines tirees)"
+            )
+        accepted, gate_reason = evaluate_stage_gate(
+            args.etape, champion_label, scores_vs_pool, floor_champion, floor_others
+        )
 
     pool_labels = [member["label"] for member in stage_members]
     monotonicity = pool_monotonicity_diagnostic(
@@ -5508,7 +5556,7 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
         # Verdict du callback d'early-stop quand c'est LUI qui a arrete le run (promotion
         # anticipee ou destruction). None sur un run alle au bout de son budget : le journal doit
         # distinguer « l'etape a fini » de « l'etape s'est arretee, et pourquoi ».
-        "pool_stop_verdict": run_info.get("pool_stop_verdict"),
+        "pool_stop_verdict": stop_verdict,
         "pool_stop_reason": run_info.get("pool_stop_reason"),
         "monotonicity_diagnostic": monotonicity,
     })
@@ -6422,7 +6470,11 @@ def main():
                             timesteps_origin=_stage_start.timesteps,
                         )
                         _exploiter_extra_callbacks = [_pool_early_stop]
-                        _parity_low, _parity_high = load_parity_check(_curr)
+                        # Relu SUR LE CALLBACK, pas rappele a la config : c'est la paire qu'il
+                        # porte apres coercition qui pose le verrou, et l'annonce doit citer
+                        # exactement celle-la. Deux lectures independantes de la meme cle etaient
+                        # deux sources pour un chiffre qui doit rester unique.
+                        _parity_low, _parity_high = _pool_early_stop.parity_range
                         print(
                             "🎯 Pool early-stop activé (décisions sur la moyenne de "
                             f"{_pool_early_stop.probe_window} sondes) : promotion a "

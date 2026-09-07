@@ -242,3 +242,85 @@ def test_gate_accepte_run_state_canonique_existant_nest_pas_ecrase(tmp_path, mon
     assert load_run_state(str(promoted)) == 30000, (
         "l'etape promue doit porter le compte de l'instantane promu, pas celui de fin de run"
     )
+
+
+# ── UN VERDICT `destroy` EST SOUVERAIN : LE GATE NE LE REJUGE PAS ───────────────────────────
+
+
+def test_un_verdict_destroy_refuse_letape_meme_si_le_gate_laurait_acceptee(tmp_path, monkeypatch):
+    """LE cas du finding : sous `save_best_robust`, le gate ne mesure pas le modele juge.
+
+    L'early-stop a arrete le run parce que la moyenne glissante des sondes est tombee sous le
+    plancher de destruction. Mais le zip canonique est alors l'INSTANTANE ROBUSTE pris plus tot
+    dans le run — d'autres poids que ceux sur lesquels le verdict a ete rendu. Ici il mesure 0.65,
+    tres au-dessus du plancher de 0.55 : sans court-circuit, le gate acceptait, `promote_stage_model`
+    ecrivait `model_Stub_P4.zip`, le processus sortait a 0, et `curriculum.log` portait
+    `pool_stop_verdict: "destroy"` A COTE de `gate_accepted: true`. P4 devenait alors le champion
+    de P5.
+    """
+    canonical, args, config, curriculum, stage, run_info = _make_context(tmp_path)
+    run_info["pool_stop_verdict"] = curriculum_mod.POOL_VERDICT_DESTROY
+    run_info["pool_stop_reason"] = "P4 : moyenne 0.350 contre P3, sous 0.40. Run ARRETE."
+    log_path = _patch_common(monkeypatch, tmp_path, canonical, score=0.65)
+
+    tb_copied = []
+    monkeypatch.setattr(
+        train_mod, "copy_tensorboard_run",
+        lambda run_dir, etape: tb_copied.append((run_dir, etape)) or "/fake/tb",
+    )
+
+    exit_code = train_mod._close_curriculum_stage(args, config, curriculum, stage, run_info)
+
+    assert exit_code == 1, "un run detruit ne peut pas sortir en succes"
+    assert not (tmp_path / "model_Stub_P4.zip").exists(), "aucune promotion apres destruction"
+    assert not tb_copied, "aucun run TensorBoard promu apres destruction"
+
+    entry = [json.loads(line) for line in log_path.read_text().splitlines()][-1]
+    assert entry["gate_accepted"] is False
+    assert entry["pool_stop_verdict"] == curriculum_mod.POOL_VERDICT_DESTROY
+    assert "0.350" in entry["pool_stop_reason"], "le journal doit porter la raison de l'arret"
+
+
+def test_un_verdict_destroy_ne_paie_pas_la_mesure_du_gate(tmp_path, monkeypatch):
+    """La mesure est SAUTEE, pas seulement ignoree.
+
+    `_score_stage_against_pool` coute `eval_repeats` x `eval_episodes` episodes PAR MEMBRE du
+    pool — des heures sur un pool de fin de curriculum. Les payer pour un chiffre qui ne peut plus
+    rien changer, et qui decrirait un modele que personne n'a decide de promouvoir, est du
+    gaspillage pur.
+    """
+    canonical, args, config, curriculum, stage, run_info = _make_context(tmp_path)
+    run_info["pool_stop_verdict"] = curriculum_mod.POOL_VERDICT_DESTROY
+    run_info["pool_stop_reason"] = "detruite"
+    _patch_common(monkeypatch, tmp_path, canonical, score=0.65)
+
+    appels = []
+    monkeypatch.setattr(
+        train_mod, "_score_stage_against_pool",
+        lambda *a, **kw: appels.append(1) or {"P3": 0.65},
+    )
+    monkeypatch.setattr(train_mod, "copy_tensorboard_run", lambda *_a: "/fake/tb")
+
+    assert train_mod._close_curriculum_stage(args, config, curriculum, stage, run_info) == 1
+    assert appels == [], "le gate ne doit rien mesurer apres un verdict de destruction"
+
+
+def test_un_verdict_promote_laisse_le_gate_mesurer_et_promouvoir(tmp_path, monkeypatch):
+    """Contre-epreuve : SEUL `destroy` court-circuite.
+
+    Une promotion anticipee dit que l'etape a fini son travail — c'est precisement le cas ou le
+    gate doit mesurer et, s'il est franchi, promouvoir. Court-circuiter tout verdict d'arret
+    rendrait tout arret anticipe inutile.
+    """
+    canonical, args, config, curriculum, stage, run_info = _make_context(tmp_path)
+    run_info["pool_stop_verdict"] = curriculum_mod.POOL_VERDICT_PROMOTE
+    run_info["pool_stop_reason"] = "seuils de promotion franchis"
+    log_path = _patch_common(monkeypatch, tmp_path, canonical, score=0.65)
+    monkeypatch.setattr(train_mod, "copy_tensorboard_run", lambda *_a: "/fake/tb")
+
+    assert train_mod._close_curriculum_stage(args, config, curriculum, stage, run_info) == 0
+    assert (tmp_path / "model_Stub_P4.zip").exists(), "une promotion anticipee reste promouvable"
+
+    entry = [json.loads(line) for line in log_path.read_text().splitlines()][-1]
+    assert entry["gate_accepted"] is True
+    assert entry["scores_vs_pool"] == {"P3": 0.65}

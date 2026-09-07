@@ -3041,7 +3041,8 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
 
     Évalue tous les membres du pool en un seul appel à `evaluate_against_checkpoints`
     tous les `eval_freq_episodes` épisodes DE L'ÉTAPE, et lit les deux verdicts sur la MOYENNE
-    GLISSANTE des `probe_window` dernières sondes — celle que publie `pool_eval/vs_<tag>_3ep` —
+    GLISSANTE des `probe_window` dernières sondes — celle que publie
+    `pool_eval/vs_<tag>_<probe_window>ep` —
     et jamais sur la sonde brute. MESURE qui l'impose (2026-09-07) : deux appels de sonde sur un
     modèle figé rendent le même score au bit près, donc les sauts de ±5 points entre sondes
     voisines ne sont pas du bruit d'échantillonnage mais des blocs de parties corrélées qui
@@ -3191,7 +3192,18 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         # Sans ce point, la première sonde normale est lue sans baseline — cause directe de deux
         # nuits d'investigation (2026-09-05/06) où 0,347 a été lu comme une chute depuis 0,472.
         # Le flag idempotent est obligatoire : SB3 appelle _on_training_start à chaque learn().
-        if self._episode_origin == 0 or self._baseline_done:
+        #
+        # DEUX conditions distinctes, et la seconde n'est pas redondante :
+        #   `_episode_origin != 0`   → l'étape reprend des poids (`init: from:`), il y a donc une
+        #                              archive source contre laquelle une parité a un sens ;
+        #   `_stage_episode() == 0`  → on est bien AU DÉBUT de l'étape, donc le modèle EST encore
+        #                              cette archive.
+        # Après un `--resume-from <checkpoint>` de reprise sur crash, la première reste vraie (le
+        # compteur est ancré sur l'archive SOURCE, cf. `_EvalPoolOwnerMixin._set_stage_origin`)
+        # alors que le modèle a déjà joué des milliers d'épisodes et n'a plus aucune raison d'être
+        # à 0.50 contre elle. Ne tester que l'origine faisait donc ARRÊTER toute reprise de crash
+        # dont la politique avait progressé hors de la fenêtre de parité.
+        if self._episode_origin == 0 or self._stage_episode() != 0 or self._baseline_done:
             return
         self._baseline_done = True
         current = self._current_episode()
@@ -3262,7 +3274,9 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
             means[lbl] = float(np.mean(h))
             rolling_mean: Optional[float] = means[lbl] if len(h) > 1 else None
             if self.metrics_tracker is not None:
-                self.metrics_tracker.log_pool_probe(lbl, raw, rolling_mean, episode)
+                self.metrics_tracker.log_pool_probe(
+                    lbl, raw, rolling_mean, episode, self.probe_window
+                )
         return means
 
     def _on_step(self) -> bool:
@@ -3286,11 +3300,21 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         labels = [label for _, label in self.pool_archives]
         missing = [lbl for lbl in labels if lbl not in scores]
         if missing:
-            safe_print(
-                f"⚠️  PoolEarlyStoppingCallback : scores manquants pour {missing} "
-                "— éval ignorée, entraînement continue."
+            # LÈVE, comme la baseline d'ouverture et comme le gate de fin d'étape
+            # (`_score_stage_against_pool`) : les trois lisent le même pool, et une archive
+            # écartée y est le même défaut de contrat — fichier absent ou architecture
+            # incompatible. Aucun de ces deux états ne se répare en cours de run.
+            # L'ancien avertissement laissait le run CONTINUER sans jamais atteindre
+            # `_log_probe_scores` : l'historique restait vide, `evaluate_pool_decision` n'était
+            # jamais appelé, et l'étape brûlait tout son budget avec la promotion anticipée ET
+            # la détection de destruction silencieusement mortes — le seul indice étant une ligne
+            # ⚠️ par sonde, au milieu d'un journal d'entraînement.
+            raise RuntimeError(
+                f"PoolEarlyStoppingCallback : scores manquants pour {missing} à la sonde "
+                f"@ep{current} (étape {self.stage_name}). L'évaluation a écarté ces archives — "
+                "architecture incompatible, ou fichier absent. Sans elles, aucun verdict de "
+                "promotion ni de destruction ne peut plus être rendu."
             )
-            return True
 
         means = self._log_probe_scores(scores, current)
         score_str = ", ".join(f"{lbl}={scores[lbl]:.3f}(→{means[lbl]:.3f})" for lbl in labels)
@@ -3298,8 +3322,8 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         # DEUX POINTS AU MOINS, pour chaque membre. À une seule sonde, la « moyenne » EST la
         # sonde brute : décider dessus rendrait le verdict à l'amplitude des bascules de blocs de
         # parties corrélées, ce que cette fenêtre existe pour amortir. C'est aussi exactement le
-        # point où `pool_eval/vs_<tag>_3ep` commence à publier — le verdict se lit donc sur la
-        # même courbe que celle qu'on relit après coup.
+        # point où `pool_eval/vs_<tag>_<probe_window>ep` commence à publier — le verdict se lit
+        # donc sur la même courbe que celle qu'on relit après coup.
         if any(len(self._probe_score_history[lbl]) < 2 for lbl in labels):
             safe_print(
                 f"📊 Pool : {score_str} @ep{current} — première sonde de l'étape, pas encore de "
