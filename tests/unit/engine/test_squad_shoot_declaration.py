@@ -632,6 +632,26 @@ class TestDeclareManualCombiProfiles:
         intents = gs["pending_squad_shoot_intents"]["1"]
         assert sorted(i["weapon_index"] for i in intents) == [0, 1]
 
+    def test_a_rejected_weapon_assignment_leaves_the_intents_intact(self):
+        """Un appel qui leve ne detruit pas la ligne deja posee : Krak refuse sur une cible hors
+        de portee laisse la ligne Frag.
+
+        La cle de remplacement etant l'arme PHYSIQUE, purger avant de valider faisait disparaitre
+        le profil frere sur un echec — et l'appelant rend `cannot_shoot` SANS `declarations`,
+        donc le front gardait une ligne que le moteur avait effacee, et l'arme ne tirait pas au
+        verrouillage.
+        """
+        atk = _unit(1, 1, [_m(5, 5, [FRAG, KRAK])], [FRAG, KRAK])
+        near = _unit(2, 2, [_m(5, 15, [STORM])], [STORM])
+        far = _unit(3, 2, [_m(39, 29, [STORM])], [STORM])  # 41 hex > RNG 36 du Cyclone
+        gs = _make_gs([atk, near, far])
+        _activate(gs, "1")
+        squad_declare_shoot_weapon(gs, "1", 0, "2")
+        with pytest.raises(ValueError):
+            squad_declare_shoot_weapon(gs, "1", 1, "3")
+        intents = gs["pending_squad_shoot_intents"]["1"]
+        assert [(i["weapon_index"], i["target_unit_id"]) for i in intents] == [(0, "2")]
+
     def test_assigning_the_sibling_weapon_replaces_it_for_the_whole_squad(self):
         """Jumeau au niveau escouade : Frag puis Krak = une seule ligne, sur toutes les figs."""
         gs = self._gs()

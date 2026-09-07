@@ -7573,8 +7573,10 @@ def declare_attack_model(
     """Declaration MANUELLE d UNE figurine (flux PvP humain), tir OU combat.
 
     Moteur generique parametre par ctx (cf. DeclareAttackCtx). Le joueur assigne
-    explicitement la cible d UNE figurine. Re-appeler pour une figurine deja
-    declaree avec la MEME arme REMPLACE sa cible (split fire : cle (model, arme)).
+    explicitement la cible d UNE figurine. Re-appeler pour une figurine deja declaree avec la
+    meme ARME PHYSIQUE REMPLACE sa cible — cle (model, arme physique), donc declarer le profil
+    frere d un combi remplace le premier au lieu de s y ajouter (► Multiple Weapon Profiles,
+    renvoi de 04.01). Le split fire entre deux armes PHYSIQUES distinctes reste possible.
 
     Validation stricte (pas de valeur par défaut) :
       - activation demarree (pending initialise),
@@ -7613,20 +7615,10 @@ def declare_attack_model(
     weapon_idx = int(sel) if sel is not None else 0
 
     intents: List[Dict[str, Any]] = game_state[ctx.intents_key][attacker_squad_id]
-    # Remplace la declaration existante de cette figurine POUR CETTE ARME PHYSIQUE (split fire :
-    # une fig peut tirer plusieurs de ses armes sur des cibles differentes -> cle (model, arme)).
-    # ► Multiple Weapon Profiles (renvoi de 04.01) : la cle est l arme PHYSIQUE, pas l index de
-    # profil. Sur (model, index), declarer Frag puis Krak laissait les DEUX profils d un meme
-    # combi dans la meme activation — l illegalite fermee sur le chemin automatique restait
-    # ouverte ici, atteignable par toute declaration manuelle (front combat, API tir).
-    intents[:] = [
-        i for i in intents
-        if not (
-            str(i["model_id"]) == attacker_model_id
-            and _intent_shares_weapon_group(models_cache, ctx.weapons_key, i, weapon_idx)
-        )
-    ]
     weapons = m.get(ctx.weapons_key, [])  # get allowed
+    # Intent construit AVANT la purge : un appel qui leve doit laisser les declarations en place
+    # (jumeau de `declare_attack_weapon`, ou l ordre inverse detruisait la ligne du profil frere
+    # sur un refus d eligibilite).
     n_attacks_resolved = _resolve_intent_nb(
         weapons, weapon_idx, f"{ctx.phase_label}_declare_model_NB_{attacker_model_id}"
     )
@@ -7640,6 +7632,19 @@ def declare_attack_model(
         "target_squad_size_at_declaration": target_size,
         "n_attacks_resolved": n_attacks_resolved,
     }
+    # Remplace la declaration existante de cette figurine POUR CETTE ARME PHYSIQUE (split fire :
+    # une fig peut tirer plusieurs de ses armes sur des cibles differentes -> cle (model, arme)).
+    # ► Multiple Weapon Profiles (renvoi de 04.01) : la cle est l arme PHYSIQUE, pas l index de
+    # profil. Sur (model, index), declarer Frag puis Krak laissait les DEUX profils d un meme
+    # combi dans la meme activation — l illegalite fermee sur le chemin automatique restait
+    # ouverte ici, atteignable par toute declaration manuelle (front combat, API tir).
+    intents[:] = [
+        i for i in intents
+        if not (
+            str(i["model_id"]) == attacker_model_id
+            and _intent_shares_weapon_group(models_cache, ctx.weapons_key, i, weapon_idx)
+        )
+    ]
     intents.append(intent)
     return intent
 
@@ -7655,8 +7660,10 @@ def declare_attack_weapon(
 
     Moteur generique parametre par ctx. Pour CHAQUE figurine vivante de l escouade
     qui possede cette arme et peut viser la cible (ctx.can_target_with_weapon), cree
-    un intent (model_id, weapon_index) -> T. Re-appeler avec la meme arme REMPLACE
-    la cible (retire d abord tous les intents de cette arme, toutes figs confondues).
+    un intent (model_id, weapon_index) -> T. Re-appeler avec la meme ARME PHYSIQUE REMPLACE la
+    cible : les intents de cette arme (profils freres d un combi compris, toutes figs
+    confondues) sont retires, mais SEULEMENT une fois la nouvelle ligne construite et validee —
+    un appel qui leve laisse les declarations en place.
 
     Validation stricte (pas de valeur par defaut) :
       - activation demarree (pending initialise),
@@ -7680,18 +7687,14 @@ def declare_attack_weapon(
 
     intents: List[Dict[str, Any]] = game_state[ctx.intents_key][attacker_squad_id]
     widx = int(weapon_index)
-    # Remplace toute declaration existante de CETTE ARME PHYSIQUE (changement de cible), et pas
-    # du seul index de profil : sur (index) seul, assigner Frag puis Krak declarait les deux
-    # profils d un meme combi (► Multiple Weapon Profiles, renvoi de 04.01). Le groupe est
-    # evalue sur la liste d armes de CHAQUE figurine, l index d escouade ne designant pas la
-    # meme arme partout dans une escouade heterogene.
-    intents[:] = [
-        i for i in intents
-        if not _intent_shares_weapon_group(models_cache, ctx.weapons_key, i, widx)
-    ]
     target_size = sum(
         1 for mid in squad_models.get(target_squad_id, []) if mid in models_cache  # get allowed
     )
+    # Les intents sont construits AVANT toute mutation : un appel qui leve doit laisser les
+    # declarations en place. Purger d abord detruisait la ligne du profil frere sur un echec
+    # d eligibilite, et l appelant (`w40k_core`, action `..._assign_weapon`) rend alors
+    # `cannot_shoot` SANS `declarations` — le front gardait une ligne que le moteur avait
+    # effacee, et l arme ne tirait pas au verrouillage.
     created: List[Dict[str, Any]] = []
     for mid in squad_models.get(attacker_squad_id, []):  # get allowed
         m = models_cache.get(mid)
@@ -7703,20 +7706,28 @@ def declare_attack_weapon(
         n_attacks_resolved = _resolve_intent_nb(
             weapons, widx, f"{ctx.phase_label}_declare_weapon_NB_{mid}_{widx}"
         )
-        intent = {
+        created.append({
             "model_id": mid,
             "weapon_index": widx,
             "target_unit_id": target_squad_id,
             "target_squad_size_at_declaration": target_size,
             "n_attacks_resolved": n_attacks_resolved,
-        }
-        intents.append(intent)
-        created.append(intent)
+        })
     if not created:
         raise ValueError(
             f"Aucune figurine de {attacker_squad_id!r} ne peut viser l arme {widx} "
             f"sur {target_squad_id!r} ({ctx.phase_label}: hors portee/engagement ou pas de LoS)"
         )
+    # Remplace toute declaration existante de CETTE ARME PHYSIQUE (changement de cible), et pas
+    # du seul index de profil : sur (index) seul, assigner Frag puis Krak declarait les deux
+    # profils d un meme combi (► Multiple Weapon Profiles, renvoi de 04.01). Le groupe est
+    # evalue sur la liste d armes de CHAQUE figurine, l index d escouade ne designant pas la
+    # meme arme partout dans une escouade heterogene.
+    intents[:] = [
+        i for i in intents
+        if not _intent_shares_weapon_group(models_cache, ctx.weapons_key, i, widx)
+    ]
+    intents.extend(created)
     return created
 
 
