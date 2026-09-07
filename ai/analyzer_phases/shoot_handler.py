@@ -3,7 +3,7 @@ shoot_handler.py — gestion des actions SHOT, WAIT, SKIP, ADVANCED dans parse_s
 """
 
 import re
-from typing import TYPE_CHECKING, Any, Dict, NamedTuple, Optional
+from typing import TYPE_CHECKING, Any, Dict, NamedTuple, Optional, Tuple
 
 from shared.data_validation import require_key
 from ai.analyzer_rules import note_rule_usage, check_anti_x_threshold
@@ -493,23 +493,52 @@ def handle_shoot(
                                 f"log={rapid_fire_logged_value}, expected={rapid_fire_value}"
                             )
                         })
-                combi_key = None
-                if shooter_unit_type in config.unit_combi_by_weapon:
-                    combi_by_weapon = config.unit_combi_by_weapon[shooter_unit_type]
-                    if weapon_name_for_limits in combi_by_weapon:
-                        combi_key = combi_by_weapon[weapon_name_for_limits]
-                if combi_key is not None:
-                    if shooter_id not in state.combi_profile_usage:
-                        state.combi_profile_usage[shooter_id] = {}
-                    if combi_key not in state.combi_profile_usage[shooter_id]:
-                        state.combi_profile_usage[shooter_id][combi_key] = set()
-                    combi_profiles = state.combi_profile_usage[shooter_id][combi_key]
+                # Le combi se résout par le MODEL-TYPE, jamais par le type d'ESCOUADE.
+                # `COMBI_WEAPON` vit sur la datasheet qui PORTE l'arme : 1#4 est un
+                # `VanguardVeteranSquadJumpPackPlasma`, dont les deux profils de Plasma Pistol
+                # partagent la clé `plasma_pistol`, alors que l'entrée d'escouade
+                # `VanguardVeteranSquadJumpPack` ne déclare qu'un Heavy Bolt Pistol sans combi.
+                # Interrogé sous le type d'escouade, `unit_combi_by_weapon` rendait un
+                # dictionnaire VIDE : `combi_key` restait None et NI l'exercice NI le contrôle ne
+                # tournaient. Mesuré sur le step.log du 2026-09-07 : 114 lignes de Plasma Pistol
+                # des deux profils, 57 conflits réels, 0 exercice et 0 erreur au rapport.
+                #
+                # GRAIN PAR FIGURINE. Le profil engage le SOCLE qui tire, pas l'escouade : deux
+                # porteurs du même combi choisissent chacun le leur. Compter au niveau escouade
+                # inventerait une faute au deuxième porteur. Aucun roster joué n'aligne
+                # aujourd'hui deux porteurs d'un même combi (mesuré : 57 conflits aux DEUX
+                # grains), donc le grain se tranche sur la règle, pas sur le journal.
+                #
+                # REPLI EXPLICITE sur le type d'escouade, motif de `per_model_attack_cap` : un
+                # journal sans `[MODEL_TYPES:]`/`[SHOOTER_MODELS:]` reste analysable au niveau de
+                # précision qu'il permet, pas davantage.
+                _combi_shooters = parse_shooter_models_segment(action_desc)
+                _squad_fallback: str = shooter_unit_type
+                _combi_bearers: Tuple[Tuple[str, str], ...]
+                if _combi_shooters and state.model_types:
+                    _combi_bearers = tuple(
+                        (_mid, state.model_types.get(_mid, _squad_fallback))  # get allowed : socle hors [MODEL_TYPES:]
+                        for _mid in _combi_shooters
+                    )
+                else:
+                    _combi_bearers = ((shooter_id, _squad_fallback),)
+                for _bearer_id, _bearer_type in _combi_bearers:
+                    _combi_by_weapon = config.unit_combi_by_weapon.get(_bearer_type)  # get allowed : type hors registre
+                    if not _combi_by_weapon:
+                        continue
+                    combi_key = _combi_by_weapon.get(weapon_name_for_limits)  # get allowed : arme sans combi
+                    if combi_key is None:
+                        continue
+                    if _bearer_id not in state.combi_profile_usage:
+                        state.combi_profile_usage[_bearer_id] = {}
+                    if combi_key not in state.combi_profile_usage[_bearer_id]:
+                        state.combi_profile_usage[_bearer_id][combi_key] = set()
+                    combi_profiles = state.combi_profile_usage[_bearer_id][combi_key]
                     combi_profiles.add(weapon_name_for_limits)
-                    # Occasion jugée : le jeu de profils du combi vient d'être constitué et va
-                    # être confronté. Restera à 0 tant qu'aucun roster joué ne porte de combi —
-                    # « JAMAIS EXERCÉE » sera alors le verdict honnête.
+                    # Occasion jugée : le jeu de profils du combi de CE socle vient d'être
+                    # constitué et va être confronté.
                     note_rule_usage(stats, "PROJ.1.2.combi", require_key(state.unit_player, shooter_id))
-                    conflict_key = (state.current_episode_num, turn, shooter_id, combi_key)
+                    conflict_key = (state.current_episode_num, turn, _bearer_id, combi_key)
                     if len(combi_profiles) > 1 and conflict_key not in state.combi_conflicts_seen:
                         shooter_player_for_stats = require_key(state.unit_player, shooter_id)
                         stats['shoot_combi_profile_conflicts'][shooter_player_for_stats] += 1

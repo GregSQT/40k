@@ -241,6 +241,9 @@ class AnalyzerState:
     #: groupes (une escouade répartissant ses attaques entre deux cibles) était opposée au
     #: plafond d'un seul.
     last_fight_shooters: Tuple[str, ...] = ()
+    #: Profils d'un même combi déjà tirés, indexés PAR SOCLE (`1#4`) et non par unité : le choix
+    #: de profil engage la figurine qui tire, donc deux porteurs d'un même combi dans une escouade
+    #: choisissent chacun le leur. Vidé à chaque entrée en phase SHOOT (`analyzer_core`).
     combi_profile_usage: Dict = field(default_factory=dict)
     combi_conflicts_seen: Set = field(default_factory=set)
 
