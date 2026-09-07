@@ -3,8 +3,11 @@
 Quatre overrides, sans changer les maths :
 
 2.1 — _setup_model() : GpuMaskableDictRolloutBuffer pour les espaces Dict (masques en bool,
-      tenseurs résidents GPU — plus de H2D par epoch). Combiné avec recreate_rollout_buffer()
-      dans train.py pour les modèles chargés.
+      champs compacts résidents GPU — plus de H2D par epoch pour eux). Les OBSERVATIONS, elles,
+      restent en RAM et ne partent sur le device que par minibatch depuis le 2026-09-07 : leur
+      résidence coûtait 3,16 GiB de VRAM en double du numpy et faisait déborder le GPU en
+      mémoire système sous WSL2 — voir le docstring d'ai/gpu_rollout_buffer.py. Combiné avec
+      recreate_rollout_buffer() dans train.py pour les modèles chargés.
 
 2.2 — train() : accumule les losses comme tenseurs GPU et ne synchro (.item()) qu'une fois
       en fin d'update — supprime ~225 syncs GPU/CPU par cycle (5 epochs × 9 minibatches × 5

@@ -31,6 +31,16 @@ W40KEngine)))`, épisode tronqué) : 28 clés sur 28 identiques à l'obs post-re
 wrappers gym (`BotControlledEnv.step`, `SelfPlayWrapper.step`), une fois par épisode — 9,1 µs
 mesurés, le chemin subproc qui copie déjà côté worker n'en double rien de mesurable.
 Verrous `test_terminal_observation_dummyvecenv.py` (2 tests, rouges constatés).
+**Phase 2.1 réduite le 2026-09-07 — les observations sortent du buffer GPU.** Le profil de
+lignée quadruple le rollout (`n_steps` 32640) et le bloc d'observations, 3,16 Gio, était résident
+DEUX fois : en RAM numpy et en VRAM, `self.observations` n'étant jamais libéré après l'upload.
+Sur une carte de 8 Go dont ~1 Go est déjà pris au repos, le débordement ne lève pas d'OOM sous
+WSL2 — le driver bascule en mémoire système, la VM swappe et Windows la tue. Seuls les champs
+compacts restent résidents (masques compris, 181 Mo à ce rollout) ; les observations partent
+mini-lot par mini-lot. Mesuré par `torch.cuda.memory_allocated` aux dimensions de P2 : VRAM du
+buffer **3,437 → 0,275 Gio**, contre **+3,24 s par update** de transferts, dont 1,4 s
+d'indexation numpy qu'un tampon *pinned* ne rend pas (mesuré). Verrou
+`test_observations_are_never_uploaded_in_bulk` (rouge constaté sur réintroduction de l'upload).
 Goulots restants : aucun identifié de cette ampleur.
 
 → `Documentation/Chantiers/backlog/perf_entrainement.md`

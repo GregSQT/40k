@@ -100,6 +100,11 @@ chargement du curriculum.
 ⚠️ `base_seed` de `evaluate_against_checkpoints` est désormais **tiré au hasard** : un gate n'est
 plus reproductible à l'identique, et les scores de `curriculum.log` antérieurs portent un
 échantillon unique et figé.
+**Le rollout ×4 rendait la VRAM intenable — corrigé le 2026-09-07 hors chantier.** Les 3,16 Gio
+d'observations du rollout 32640 étaient résidents à la fois en RAM et sur la carte ; ils n'y
+partent plus que par mini-lot (3,437 → 0,275 Gio de VRAM mesurés, +3,24 s par update). Sans cela
+`n_steps` 32640 n'était pas tenable sur une carte de 8 Go, quel que soit le `batch_size`.
+Détail : [infra.md#perf-entrainement](infra.md#perf-entrainement).
 **Six défauts de cette livraison fermés le 2026-09-07**, dont un qui rendait la chaîne P3→P10
 impossible à démarrer : le LR scalaire du régime était sauvegardé dans le zip promu sous forme
 d'objet sérialisé, et l'étape suivante levait au contrôle de continuité.

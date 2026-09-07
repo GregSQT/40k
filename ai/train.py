@@ -962,8 +962,9 @@ def recreate_rollout_buffer(model, log=print) -> None:
     taille, en contradiction silencieuse avec la config du run.
 
     La classe depend de l'espace d'observation. Pour les espaces Dict (pipeline squad),
-    on utilise GpuMaskableDictRolloutBuffer (Phase 2.1) qui garde les tenseurs sur GPU
-    pendant toute la phase d'update — elimine les ~4-5 Go de re-transferts H2D par epoch.
+    on utilise GpuMaskableDictRolloutBuffer (Phase 2.1) qui garde les champs COMPACTS sur GPU
+    pendant toute la phase d'update — les observations, elles, y sont retournees par minibatch
+    depuis le 2026-09-07, leur residence saturant la VRAM (cf. son docstring).
     """
     import gymnasium as gym
     from sb3_contrib.common.maskable.buffers import MaskableRolloutBuffer
