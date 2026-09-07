@@ -758,7 +758,11 @@ class MetricsCollectionCallback(BaseCallback):
         # Add immediate reward ratio history for smoothing
         self.immediate_reward_ratio_history = []
         self.max_reward_ratio_history = 50  # Keep last 50 episodes
-        self.win_rate_window: deque = deque(maxlen=100)
+        # `win_rate_window` a ete retire avec la courbe `game_critical/win_rate_100ep` qu'elle
+        # alimentait : sa fenetre de 100 etait ECRITE EN DUR dans un reglage devenu configurable
+        # (`metrics_smoothing.perf_window_fast`), donc la courbe survivait au reglage cense
+        # l'eteindre. Le tracker publie la meme mesure sous le meme nom, sur l'axe des episodes
+        # et a la fenetre du config (cf. `_emit_windowed` dans ai/metrics_tracker.py).
         # `seat_aware_counts` a ete retire avec les cinq courbes `seat_aware/*` qu'il alimentait :
         # le tracker de metriques tient ses propres compteurs de siege et publie les memes tags.
         self.win_method_counts: Dict[str, int] = {
@@ -1262,7 +1266,6 @@ class MetricsCollectionCallback(BaseCallback):
             if winner is not None:
                 controlled_player = int(require_key(episode_data, 'controlled_player'))
                 agent_won = 1.0 if winner == controlled_player else 0.0
-                self.win_rate_window.append(agent_won)
                 if win_method is None:
                     raise ValueError("win_method is required when winner is not None")
 
@@ -1298,14 +1301,6 @@ class MetricsCollectionCallback(BaseCallback):
                     'game_critical/win_method_step_limit_rate',
                     float(self.win_method_counts['step_limit']) / win_method_total
                 )
-
-                # Fenetre PLEINE exigee, pas 10 episodes : sous la fenetre, la moyenne porte
-                # sur tout l'historique et converge en descendant depuis un echantillon de
-                # depart bruite. Cette descente n'est pas une degradation de l'agent, mais
-                # elle en a l'allure exacte (cf. PERF_WINDOW dans ai/metrics_tracker.py).
-                if len(self.win_rate_window) == self.win_rate_window.maxlen:
-                    rolling_win_rate = np.mean(self.win_rate_window)
-                    self.model.logger.record('game_critical/win_rate_100ep', rolling_win_rate)
 
             # Dump metrics to TensorBoard
             self.model.logger.dump(step=self.model.num_timesteps)
@@ -1935,11 +1930,11 @@ class BotEvaluationCallback(BaseCallback):
                             f"03_eval/{slug}/{display_name}",
                             float(require_key(stats, "win_rate"))
                         )
-            # `bot_split/*` n'est plus ecrit ici : `train.py` le publie deja via
-            # `metrics_tracker.log_scenario_split_scores`, depuis le MEME
-            # `results["scenario_split_scores"]`. Les deux ecrivains visant desormais le dossier
-            # du run, chaque cle y aurait recu deux points par evaluation, l'un sur l'axe des
-            # episodes et l'autre sur celui des pas.
+            # `bot_split/*` n'est plus ecrit ici : `_apply_eval_results` le ROUTE vers le
+            # tracker, au meme rang d'evaluation et sur l'abscisse `eval_marker` de ses courbes
+            # voisines. Le publier aussi ici lui donnerait deux points par evaluation dans le
+            # dossier desormais partage, l'un sur l'axe des episodes et l'autre sur celui des
+            # pas. La cadence est intacte : ce site et le routage ont le meme appelant.
             self.model.logger.dump(step=self.model.num_timesteps)
 
     @staticmethod

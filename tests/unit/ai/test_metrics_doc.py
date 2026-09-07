@@ -25,6 +25,7 @@ PREUVE PAR MUTATION :
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -102,13 +103,39 @@ def _bot_eval_vs_tags(ai_source: str) -> frozenset[str]:
     return frozenset(f"bot_eval/vs_{k}" for k in keys if k)
 
 
+def _windowed_doublon_tags(source: str) -> frozenset[str]:
+    """Tags ``X_<perf_window_fast>ep`` : le doublon réactif de chaque émetteur à deux fenêtres.
+
+    ``_emit_windowed`` publie ``X`` puis ``f"{tag}_{fast_window}ep"`` — ce second nom
+    n'apparaît dans AUCUN littéral, il est construit sur une variable. Le document, lui,
+    cite la courbe sous le nom que TensorBoard affiche, suffixe compris.
+
+    La fenêtre vient du config partagé et non du code : c'est elle qui nomme la courbe.
+    Une paire ``perf_window_fast == perf_window`` désactive le doublon, donc aucun tag.
+    """
+    smoothing = json.loads(
+        (REPO_ROOT / "config" / "agents" / "_training_common.json").read_text(
+            encoding="utf-8-sig"
+        )
+    )["metrics_smoothing"]
+    window = int(smoothing["perf_window"])
+    fast = int(smoothing["perf_window_fast"])
+    if fast >= window:
+        return frozenset()
+    bases = re.findall(
+        r"self\._emit_(?:windowed|game|ratio_of_means)\(\s*f?['\"]([^'\"]+)['\"]", source
+    )
+    return frozenset(f"{base}_{fast}ep" for base in bases)
+
+
 def _code_tags() -> frozenset[str]:
-    """Tags émis dans ai/*.py, via quatre populations.
+    """Tags émis dans ai/*.py, via cinq populations.
 
     1. Littéraux — toute chaîne quotée contenant un '/' (namespace/tag).
     2. Assemblés DEPLOY — DEPLOY_SPLIT_SERIES × DEPLOY_MODES.
     3. Assemblés reserves — ``reserves/{metric}_{side}`` depuis la double boucle.
     4. Assemblés bot_eval — ``bot_eval/vs_{key}`` depuis la template f-string.
+    5. Assemblés doublon réactif — ``X_<perf_window_fast>ep`` des émetteurs à deux fenêtres.
 
     Les préfixes nus (sans suffixe de mode) sont exclus pour ne pas polluer le résultat.
     """
@@ -124,6 +151,7 @@ def _code_tags() -> frozenset[str]:
         | assembled_deploy
         | _reserves_tags(source)
         | _bot_eval_vs_tags(source)
+        | _windowed_doublon_tags(source)
     )
 
 

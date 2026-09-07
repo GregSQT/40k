@@ -111,14 +111,14 @@ Les deux dernières colonnes donnent le **seuil de déclenchement** puis le **pa
 Réglées dans le training config de l'agent :
 
 ```json
-"metrics_smoothing": { "perf_window": 500, "perf_window_fast": 500 }
+"metrics_smoothing": { "perf_window": 500, "perf_window_fast": 100 }
 ```
 
 La section vit dans `config/agents/_training_common.json` et chaque profil la reprend par `"metrics_smoothing": null` (idiome d'héritage). Les deux clés sont **obligatoires** : une section absente ou incomplète lève au démarrage du run, jamais de repli silencieux.
 
 Chaque mesure des dashboards `00_critical/`, `01_VP/` et `02_combat/` peut sortir en **deux** exemplaires — le tag nu lissé sur `perf_window` (tendance de fond) et le même tag suffixé **`_<perf_window_fast>ep`** (évolution récente). Le suffixe désigne toujours la fenêtre réelle. Une fenêtre réactive plus longue que la fenêtre de fond lève.
 
-**Le doublon réactif est désactivé** (`perf_window_fast == perf_window`) : les 21 courbes `_250ep` doublaient les trois dashboards sans être lues. Le mécanisme reste disponible — descendre `perf_window_fast` sous `perf_window` le réactive. En dessous de ~4 updates PPO, la courbe bouge parce que l'échantillon change, pas la politique (250 épisodes ≈ 4 updates sur le profil x1).
+**Le doublon réactif est actif à 100 épisodes depuis le 2026-09-07.** Il avait été désactivé le 2026-07-31 (`perf_window_fast == perf_window`), les 21 courbes `_250ep` doublant les trois dashboards sans être lues — mais une courbe réactive y avait survécu sans passer par le réglage : `game_critical/win_rate_100ep`, écrite par `training_callbacks` sur une fenêtre codée en dur et sur l'axe des **pas**. Elle est rendue au tracker, donc à `perf_window_fast`, et le doublon revient sur les 21 autres. Avertissement de lecture inchangé : en dessous de ~4 updates PPO, la courbe bouge parce que l'échantillon change, pas la politique (100 épisodes ≈ 1,6 update sur le profil x1) — le `_100ep` sert à voir un décrochage tôt, jamais à trancher une tendance.
 
 **Aucun point n'est écrit tant que la fenêtre n'est pas pleine.** Une courbe de fond démarre à l'épisode 500. Sous la fenêtre, le lissage renvoyait la moyenne de tout l'historique — une moyenne cumulative qui converge **en descendant** depuis son échantillon de départ bruité, indiscernable d'un agent qui se dégrade.
 

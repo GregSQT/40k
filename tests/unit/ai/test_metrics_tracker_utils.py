@@ -41,9 +41,11 @@ def test_every_training_profile_carries_its_smoothing_windows() -> None:
     forme de verrou que tests/unit/engine/test_deployment_mode_schedule.py, et pour la meme
     raison — c'est deja par ce trou que deux profils avaient diverge en silence.
 
-    Le doublon reactif est DESACTIVE depuis 2026-07-31 (`perf_window_fast == perf_window`) :
-    les 21 courbes `_250ep` doublaient les dashboards 00_critical/01_VP/02_combat sans etre
-    lues. Le test verifie donc la coherence des deux fenetres, plus leur ecart.
+    Le doublon reactif a ete DESACTIVE le 2026-07-31 (`perf_window_fast == perf_window`, les 21
+    courbes `_250ep` doublant les dashboards sans etre lues), puis REACTIVE a 100 le 2026-09-07 :
+    la seule courbe reactive qui restait, `game_critical/win_rate_100ep`, etait ecrite en dur par
+    le callback, hors du reglage et sur l'axe des pas. La reactivation la rend au tracker.
+    Le test ne fige aucune des deux valeurs — c'est un reglage de run — seulement leur coherence.
     """
     # L'énumération doit couvrir le fichier, sinon ce test affiche « tout va bien » sur un
     # sous-ensemble : une liste vide, ou refigée en dur, passerait sans rien regarder.
