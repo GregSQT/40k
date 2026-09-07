@@ -150,6 +150,41 @@ def test_a_fresh_run_has_no_parity_to_hold(tmp_path) -> None:
     assert appels == [], "aucune sonde baseline sur un run neuf"
 
 
+# ── REPRISE DE CRASH : LE VERROU NE S'APPLIQUE QU'A L'EPISODE 0 DE L'ETAPE ──────────────────
+
+
+def test_a_mid_stage_resume_does_not_probe_a_parity_it_cannot_hold(tmp_path) -> None:
+    """`--resume-from <checkpoint>` : le modele a deja joue, il n'EST plus l'archive source.
+
+    L'origine du compteur reste celle de l'archive SOURCE (`_set_stage_origin`), donc
+    `episode_origin` vaut 80 000 comme sur un demarrage a froid — mais `_stage_episode()` vaut ici
+    150 000. Une politique qui a progresse pendant 150 000 episodes n'a AUCUNE raison d'etre a
+    0.50 contre celle dont elle est partie : la sonder serait mesurer une identite qui n'existe
+    plus, et le verrou arreterait une reprise de crash parfaitement saine.
+    """
+    callback = _warm_started_callback(tmp_path)
+    callback.metrics_tracker = _tracker(EPISODE_ORIGIN + 150_000)
+    appels = _fake_baseline(callback, {"P1": 0.63, "P0": 0.71})
+
+    callback._on_training_start()  # ne leve pas : 0.63 est hors [0.40, 0.60]
+
+    assert appels == [], "aucune sonde baseline hors de l'episode 0 de l'etape"
+
+
+def test_the_lock_still_fires_at_stage_episode_zero_after_the_resume_guard(tmp_path) -> None:
+    """Verrou du verrou : la garde de reprise ne doit pas desarmer le cas qu'elle encadre.
+
+    Meme callback, meme score aberrant, mais `_stage_episode()` vaut 0 — le demarrage a froid
+    d'une etape reprise a chaud, exactement ce que le verrou existe pour attraper.
+    """
+    callback = _warm_started_callback(tmp_path)
+    callback.metrics_tracker = _tracker(EPISODE_ORIGIN)
+    _fake_baseline(callback, {"P1": 0.63, "P0": 0.71})
+
+    with pytest.raises(RuntimeError, match="VIOL"):
+        callback._on_training_start()
+
+
 # ── CE QUE LE CONSTRUCTEUR REFUSE ──────────────────────────────────────────────────────────
 
 

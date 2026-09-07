@@ -412,6 +412,39 @@ def validate_early_stop_block(block: Any, context: str) -> None:
         )
 
 
+def _validate_early_stop_against_gate(early_stop: Any, gate: Any, context: str) -> None:
+    """Interdit un seuil de PROMOTION sous le plancher du GATE qui jugera la meme etape.
+
+    `_pool_score_shortfalls` est deja la source unique du CALCUL des deux decisions, mais rien ne
+    croisait leurs SEUILS : chaque bloc etait valide seul, et deux nombres coherents pris
+    separement pouvaient se contredire. Un `promote_score_vs_champion` de 0.50 sous un
+    `gate.min_score_vs_champion` de 0.55 laisse `evaluate_pool_decision` arreter le run a 0.51 en
+    annoncant que « le budget restant serait paye pour rien », puis `evaluate_stage_gate` refuser
+    l'etape a 0.55 et jeter le budget non depense avec elle — exactement ce que la docstring de
+    `_pool_score_shortfalls` affirme impossible.
+
+    L'egalite est TOLEREE : les deux decisions comparent avec `>=`, donc une moyenne qui promeut
+    atteint le plancher. Elle ne le franchit pas avec MARGE, et les deux mesures sont des
+    echantillons distincts (graines tirees) — le gate peut donc encore refuser par variance. Poser
+    une marge minimale au-dessus de l'erreur-type serait une decision de conception a prendre, pas
+    un invariant a supposer ici.
+    """
+    pairs = (
+        ("promote_score_vs_champion", "min_score_vs_champion"),
+        ("promote_score_vs_others", "min_score_vs_others"),
+    )
+    for promote_key, gate_key in pairs:
+        promote_value = float(require_key(early_stop, promote_key))
+        gate_value = float(require_key(gate, gate_key))
+        if promote_value < gate_value:
+            raise ValueError(
+                f"{context}.{promote_key} ({promote_value}) est SOUS gate.{gate_key} "
+                f"({gate_value}) : le run s'arreterait en se declarant promu sur un score que le "
+                "gate de fin d'etape refusera, et le budget non depense serait perdu avec "
+                "l'etape. Le seuil d'arret anticipe doit valoir au moins le plancher qui juge."
+            )
+
+
 def _validate_gate_block(block: Any, context: str) -> None:
     """Valide le bloc `gate`. Deux planchers, un nombre d'episodes, un nombre de blocs moyennes."""
     if not isinstance(block, dict):
@@ -501,14 +534,14 @@ def _validate_lineage_regime(curriculum: Dict[str, Any], source: str) -> None:
         _check_model_param(
             model_params[key], spec, f"{source}: {LINEAGE_REGIME_KEY}.model_params.{key}"
         )
-    n_steps = int(model_params["n_steps"])
-    batch_size = int(model_params["batch_size"])
-    if n_steps % batch_size != 0:
-        raise ValueError(
-            f"{source}: {LINEAGE_REGIME_KEY} — n_steps ({n_steps}) n'est pas un multiple de "
-            f"batch_size ({batch_size}) : le dernier minibatch de chaque epoch serait tronque, "
-            "donc les updates n'auraient pas tous le meme poids."
-        )
+    # PAS de controle `n_steps % batch_size` ici : il serait faux DANS LES DEUX SENS. `n_steps`
+    # est un TOTAL par update, qu'`apply_rollout_n_steps` divise par `n_envs` avec troncature —
+    # le rollout que SB3 decoupe vaut `(n_steps // n_envs) * n_envs`, pas `n_steps`. A n_envs=7,
+    # 32640/4080 passait ce controle alors que le vrai rollout (32634) laisse un mini-lot tronque
+    # de 3114 ; a l'inverse 100/33 sur 3 envs l'aurait refuse alors que le rollout reel (99) est
+    # bien divisible. `n_envs` vient du profil d'entrainement (`--training-config`), que le
+    # curriculum ne connait pas : le controle vit donc la ou les deux grandeurs se rencontrent,
+    # dans `apply_rollout_n_steps` (ai/train.py).
 
     ratio = require_key(block, "agent_seat_p2_ratio")
     if not isinstance(ratio, (int, float)) or isinstance(ratio, bool):
@@ -584,6 +617,9 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
 
     if "early_stop" in curriculum:
         validate_early_stop_block(curriculum["early_stop"], f"{source}: early_stop")
+        _validate_early_stop_against_gate(
+            curriculum["early_stop"], require_key(curriculum, "gate"), f"{source}: early_stop"
+        )
 
     for position, name in enumerate(order):
         stage = require_stage(curriculum, name)
@@ -678,6 +714,12 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
 
         if "early_stop" in stage:
             validate_early_stop_block(stage["early_stop"], f"{source}: stages[{name}].early_stop")
+            # Le gate est UNIQUE (racine) : un `early_stop` par etape le rencontrera lui aussi.
+            _validate_early_stop_against_gate(
+                stage["early_stop"],
+                require_key(curriculum, "gate"),
+                f"{source}: stages[{name}].early_stop",
+            )
 
     # Validation du bloc exploiter_config si present (obligatoire des qu'il existe au moins
     # une etape exploiteur dans le curriculum).

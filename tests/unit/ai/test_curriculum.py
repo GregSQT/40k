@@ -477,6 +477,71 @@ def test_early_stop_with_valid_block_is_accepted() -> None:
     validate_curriculum(ok)  # ne leve pas
 
 
+# ── LE SEUIL D'ARRET ANTICIPE NE PEUT PAS ETRE SOUS LE PLANCHER DU GATE ────────────────────
+
+
+@pytest.mark.parametrize(
+    "promote_key, gate_key, promote_value",
+    [
+        ("promote_score_vs_champion", "min_score_vs_champion", 0.50),
+        ("promote_score_vs_others", "min_score_vs_others", 0.45),
+    ],
+)
+def test_a_promotion_threshold_below_the_gate_floor_is_refused(
+    promote_key: str, gate_key: str, promote_value: float
+) -> None:
+    """Chaque bloc etait valide SEUL : leurs seuils ne se rencontraient jamais.
+
+    Avec `promote_score_vs_champion` a 0.50 sous un `gate.min_score_vs_champion` de 0.55, une
+    etape atteignant 0.51 s'arrete en annoncant que « le budget restant serait paye pour rien »,
+    puis le gate la refuse a 0.55 : le budget non depense est perdu AVEC l'etape. C'est exactement
+    ce que la docstring de `_pool_score_shortfalls` affirme impossible en mutualisant le CALCUL —
+    mais mutualiser le calcul ne croisait pas les VALEURS.
+    """
+    broken = _minimal_curriculum()
+    broken["early_stop"] = _early_stop_block(**{promote_key: promote_value})
+
+    with pytest.raises(ValueError, match=f"{promote_key}.*SOUS gate.{gate_key}"):
+        validate_curriculum(broken)
+
+
+def test_a_promotion_threshold_equal_to_the_gate_floor_is_accepted() -> None:
+    """L'egalite est le reglage LIVRE (0.55/0.55, 0.50/0.50) : la refuser casserait la prod.
+
+    Les deux decisions comparent avec `>=`, donc une moyenne qui promeut atteint le plancher. Elle
+    ne le franchit pas avec marge et les deux mesures sont des echantillons distincts — le gate
+    peut donc encore refuser par variance, mais c'est une decision de conception a prendre, pas
+    un invariant a supposer dans un validateur.
+    """
+    ok = _minimal_curriculum()
+    ok["early_stop"] = _early_stop_block(
+        promote_score_vs_champion=ok["gate"]["min_score_vs_champion"],
+        promote_score_vs_others=ok["gate"]["min_score_vs_others"],
+    )
+    validate_curriculum(ok)  # ne leve pas
+
+
+def test_a_per_stage_early_stop_is_crossed_with_the_gate_too() -> None:
+    """Le gate est UNIQUE (racine) : un `early_stop` pose sur une etape le rencontrera aussi.
+
+    Ne croiser que le bloc racine laisserait l'incoherence rentrer par la porte des etapes.
+    """
+    broken = _minimal_curriculum()
+    broken["stages"]["P1"]["early_stop"] = _early_stop_block(
+        promote_score_vs_champion=0.50
+    )
+    with pytest.raises(ValueError, match=r"stages\[P1\].early_stop.promote_score_vs_champion"):
+        validate_curriculum(broken)
+
+
+def test_the_shipped_curriculum_holds_the_promote_over_gate_invariant(curriculum) -> None:
+    """Verrou sur le fichier LIVRE, pas seulement sur des fixtures."""
+    gate = curriculum["gate"]
+    early = curriculum["early_stop"]
+    assert early["promote_score_vs_champion"] >= gate["min_score_vs_champion"]
+    assert early["promote_score_vs_others"] >= gate["min_score_vs_others"]
+
+
 def test_early_stop_window_of_one_is_refused() -> None:
     """Une fenetre d'un seul point n'est pas une moyenne, c'est la sonde brute."""
     broken = _minimal_curriculum()
@@ -557,12 +622,22 @@ def test_a_ramp_in_the_lineage_block_is_refused() -> None:
         validate_curriculum(broken)
 
 
-def test_a_batch_size_that_does_not_divide_n_steps_is_refused() -> None:
-    """Dernier minibatch tronque = updates de poids inegaux."""
-    broken = _minimal_curriculum_with_exploiter()
-    broken["lineage_regime"]["model_params"]["batch_size"] = 3000
-    with pytest.raises(ValueError, match="multiple de batch_size"):
-        validate_curriculum(broken)
+def test_the_validator_does_not_judge_batch_size_against_a_rollout_it_cannot_know() -> None:
+    """Le controle `n_steps % batch_size` a QUITTE ce validateur, et c'est volontaire.
+
+    `n_steps` est un TOTAL par update qu'`apply_rollout_n_steps` divise par `n_envs` avec
+    troncature : le rollout que SB3 decoupe vaut `(n_steps // n_envs) * n_envs`. Le juger ici sur
+    `n_steps` nu etait faux DANS LES DEUX SENS — 32640/4080 passait alors qu'a n_envs=7 le rollout
+    reel (32634) laisse un mini-lot tronque de 3114, et 100/33 aurait ete refuse alors qu'a
+    n_envs=3 le rollout reel (99) est parfaitement divisible.
+
+    `n_envs` vient du profil d'entrainement, choisi par `--training-config` au lancement : le
+    curriculum ne peut pas le connaitre. Le verrou reel vit dans `apply_rollout_n_steps`
+    (`tests/unit/ai/test_rollout_buffer_sizing.py`).
+    """
+    ok = _minimal_curriculum_with_exploiter()
+    ok["lineage_regime"]["model_params"]["batch_size"] = 3000
+    validate_curriculum(ok)  # ne leve plus : ce n'est pas a ce validateur d'en juger
 
 
 def test_a_parity_window_that_misses_parity_is_refused() -> None:

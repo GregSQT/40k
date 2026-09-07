@@ -50,8 +50,8 @@ def _step_at(cb, episode: int) -> bool:
 def test_first_probe_emits_no_rolling_mean_but_returns_one(tmp_path):
     """La première sonde ne PUBLIE pas de moyenne (identique au brut) mais en REND une.
 
-    La publication et la décision ont deux besoins différents : une courbe `_3ep` qui doublerait
-    la brute au premier point n'apprend rien, alors que la valeur rendue est ce que lit
+    La publication et la décision ont deux besoins différents : une courbe de moyenne qui
+    doublerait la brute au premier point n'apprend rien, alors que la valeur rendue est ce que lit
     `evaluate_pool_decision` — dont les paliers d'épisodes, eux, n'ouvrent qu'après deux sondes.
     """
     archive = tmp_path / "champ.zip"
@@ -60,7 +60,7 @@ def test_first_probe_emits_no_rolling_mean_but_returns_one(tmp_path):
 
     means = cb._log_probe_scores({"champion": 0.453}, episode=100)
 
-    tracker.log_pool_probe.assert_called_once_with("champion", 0.453, None, 100)
+    tracker.log_pool_probe.assert_called_once_with("champion", 0.453, None, 100, 3)
     assert means == {"champion": pytest.approx(0.453)}
 
 
@@ -76,7 +76,7 @@ def test_second_probe_emits_mean_of_two(tmp_path):
     means = cb._log_probe_scores({"champion": 0.557}, episode=200)
 
     expected_mean = pytest.approx((0.453 + 0.557) / 2)
-    tracker.log_pool_probe.assert_called_once_with("champion", 0.557, expected_mean, 200)
+    tracker.log_pool_probe.assert_called_once_with("champion", 0.557, expected_mean, 200, 3)
     assert means["champion"] == expected_mean
 
 
@@ -93,7 +93,7 @@ def test_window_slides_after_three_probes(tmp_path):
     # Quatrième appel : fenêtre = [0.557, 0.487, 0.420]
     expected_mean = pytest.approx((0.557 + 0.487 + 0.420) / 3)
     last_call = tracker.log_pool_probe.call_args_list[-1]
-    assert last_call == call("champion", 0.420, expected_mean, 400)
+    assert last_call == call("champion", 0.420, expected_mean, 400, 3)
 
 
 def test_the_window_length_comes_from_the_config(tmp_path):
@@ -139,8 +139,8 @@ def test_multiple_labels_tracked_independently(tmp_path):
 
     calls = tracker.log_pool_probe.call_args_list
     # Deuxième sonde : chaque label a sa moyenne indépendante
-    assert call("label_a", 0.6, pytest.approx((0.5 + 0.6) / 2), 200) in calls
-    assert call("label_b", 0.3, pytest.approx((0.4 + 0.3) / 2), 200) in calls
+    assert call("label_a", 0.6, pytest.approx((0.5 + 0.6) / 2), 200, 3) in calls
+    assert call("label_b", 0.3, pytest.approx((0.4 + 0.3) / 2), 200, 3) in calls
 
 
 def test_the_history_is_kept_without_a_metrics_tracker(tmp_path):
@@ -238,21 +238,59 @@ def test_nothing_is_decided_before_the_destruction_gate(tmp_path):
     assert len(cb._probe_score_history["champion"]) == 2
 
 
-def test_an_incomplete_probe_is_ignored_without_deciding(tmp_path):
-    """Score manquant en cours de run : l'éval est écartée, l'entraînement continue.
+def test_an_incomplete_probe_stops_the_run(tmp_path):
+    """Score manquant en cours de run : LÈVE, comme la baseline et comme le gate de fin d'étape.
 
-    Contrairement à la baseline d'ouverture, qui LÈVE : elle porte le verrou de parité, donc un
-    score manquant y rend le verrou incapable de refuser quoi que ce soit.
+    Ce test verrouillait l'inverse jusqu'au 2026-09-07 — « l'éval est écartée, l'entraînement
+    continue » — au motif que seule la baseline portait une décision. Ce n'est plus vrai : la
+    sonde périodique porte les DEUX verdicts. Une archive écartée à chaque sonde laissait donc
+    `_probe_score_history` vide, `evaluate_pool_decision` jamais appelé, et l'étape brûlait ses
+    300 000 épisodes avec promotion et destruction mortes, pour seule trace une ligne ⚠️ par sonde.
+
+    Une archive écartée est un défaut de contrat — fichier absent, architecture incompatible — et
+    aucun des deux ne se répare en cours de run.
     """
     archive = tmp_path / "champ.zip"
     archive.touch()
     cb, _ = _callback_with_tracker(archive)
 
     with patch.object(cb, "_probe", side_effect=lambda: {}):
-        assert _step_at(cb, 900) is True
+        with pytest.raises(RuntimeError, match="scores manquants"):
+            _step_at(cb, 900)
 
-    assert cb.stop_verdict is None
+    assert cb.stop_verdict is None, "l'arrêt vient de l'exception, pas d'un verdict de pool"
     assert cb._probe_score_history == {}
+
+
+def test_a_partially_complete_probe_stops_the_run_too(tmp_path):
+    """Un pool à deux membres dont UN seul répond : la moyenne du manquant n'existerait pas.
+
+    Le cas du finding : `evaluate_against_checkpoints` écarte une archive et rend les autres. Un
+    verdict pris sur le sous-ensemble survivant jugerait l'étape sur un pool qui n'est pas le sien.
+    """
+    from ai.training_callbacks import PoolEarlyStoppingCallback
+
+    archives = [(str(tmp_path / "a.zip"), "champion"), (str(tmp_path / "b.zip"), "E1")]
+    for path, _ in archives:
+        open(path, "wb").close()
+    cb = PoolEarlyStoppingCallback(
+        pool_archives=archives,
+        stage_name="P-test",
+        champion_label="champion",
+        early_stop_cfg=dict(POOL_EARLY_STOP_CFG),
+        eval_freq_episodes=100,
+        n_eval_episodes=10,
+        training_config_name="test",
+        rewards_config_name="test",
+        metrics_tracker=MagicMock(),
+        parity_label=None,
+        parity_range=(0.40, 0.60),
+    )
+    cb.model = MagicMock()
+
+    with patch.object(cb, "_probe", side_effect=lambda: {"champion": 0.52}):
+        with pytest.raises(RuntimeError, match=r"scores manquants pour \['E1'\]"):
+            _step_at(cb, 900)
 
 
 def test_the_verdict_is_the_one_the_curriculum_computes(tmp_path):

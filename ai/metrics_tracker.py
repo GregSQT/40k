@@ -2120,27 +2120,37 @@ class W40KMetricsTracker:
         )
 
     def log_pool_probe(
-        self, label: str, raw_score: float, rolling_mean: Optional[float], step: int
+        self, label: str, raw_score: float, rolling_mean: Optional[float], step: int, window: int
     ) -> None:
-        """Trace pool-early-stop : valeur brute + moyenne glissante sur 3 sondes.
+        """Trace pool-early-stop : valeur brute + moyenne glissante sur `window` sondes.
 
-        C'est la MOYENNE (`_3ep`) qui porte les decisions depuis le 2026-09-07 — promotion,
-        arret pour destruction et gate de fin d'etape (`ai/curriculum.py`) — et non la sonde
-        brute, publiee a cote pour rester lisible. MESURE qui l'impose : les sauts de ~±10 pts
-        entre sondes voisines ne sont PAS du bruit d'echantillonnage. `base_seed` valait alors
-        42 en dur (`ai/bot_evaluation.py`), donc deux sondes rejouaient les MEMES parties et deux
-        appels sur un modele fige rendaient le meme score (verifie le 2026-09-07, 16/24/0 aux
+        C'est la MOYENNE (`_<window>ep`) qui porte les decisions depuis le 2026-09-07 —
+        promotion, arret pour destruction et gate de fin d'etape (`ai/curriculum.py`) — et non la
+        sonde brute, publiee a cote pour rester lisible. MESURE qui l'impose : les sauts de
+        ~±10 pts entre sondes voisines ne sont PAS du bruit d'echantillonnage. `base_seed` valait
+        alors 42 en dur (`ai/bot_evaluation.py`), donc deux sondes rejouaient les MEMES parties et
+        deux appels sur un modele fige rendaient le meme score (verifie le 2026-09-07, 16/24/0 aux
         deux appels) : l'amplitude vient des blocs de parties correlees qui basculent ensemble
         quand la politique bouge. La graine est desormais TIREE AU HASARD a chaque evaluation,
         pour que la moyenne echantillonne des parties differentes et reduise vraiment l'erreur ;
         les scores publies avant cette date restent ceux d'un echantillon unique et fige.
         La moyenne n'est emise qu'a partir de la deuxieme sonde : sur une sonde unique elle est
         identique au brut, rien a publier en plus.
+
+        `window` est EXIGE et entre dans le nom du tag : il valait 3 en dur alors que
+        `early_stop.probe_window` est configurable, donc une fenetre de 5 publiait sa moyenne
+        sous `_3ep`. Deux runs a fenetres differentes superposaient alors deux grandeurs
+        distinctes sur une seule courbe, sous un nom qui contredisait les deux.
         """
+        if window < 2:
+            raise ValueError(
+                f"log_pool_probe : window doit valoir au moins 2 (got {window}) — une fenetre "
+                "d'une sonde rend une moyenne identique au brut, et le tag mentirait."
+            )
         tag = self._metric_slug(label)
         self.writer.add_scalar(f"pool_eval/vs_{tag}", raw_score, step)
         if rolling_mean is not None:
-            self.writer.add_scalar(f"pool_eval/vs_{tag}_3ep", rolling_mean, step)
+            self.writer.add_scalar(f"pool_eval/vs_{tag}_{window}ep", rolling_mean, step)
 
     def log_faction_bot_win_rates(
         self,
