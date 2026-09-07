@@ -566,13 +566,15 @@ L'**entropie** s'arrête aux 40 % : passé ce point, la politique exploite ce qu
 
 #### ⚠️ Ces rampes ne valent QUE pour un départ à froid (2026-09-07)
 
-Une étape de curriculum reprise à chaud (`init: "from:<étape>"`) **n'a plus de rampe du tout** : le bloc `lineage_regime` de `curriculum.json` lui impose des **scalaires**, identiques sur toute la lignée. Le tableau ci-dessus décrit donc le régime de la **seule étape `P0`** — et celui des runs lancés sans `--etape`.
+Une étape de curriculum reprise à chaud (`init: "from:<étape>"`) **n'a plus de rampe du tout** : elle tourne sous le profil **`x1_lineage`**, qui porte des **scalaires** identiques sur toute la lignée. Le tableau ci-dessus décrit donc le régime de la **seule étape `P0`** — et celui des runs lancés sans `--etape`.
+
+**Deux profils, un seul fichier.** `x1_lineage` déclare `"extends": "x1_long"` et ne redéclare que les six clés qui changent ; tout le reste — `n_epochs`, `gamma`, `clip_range`, `target_kl`, l'architecture, `n_envs`, les bots, les seuils — en est **hérité**, jamais recopié. Le curriculum, lui, ne porte que les deux **noms**, dans son bloc `training_configs` (`cold_start` / `lineage`), et `ai/train.py::_prepare_curriculum_stage` **refuse au lancement** un `--training-config` qui ne correspond pas à la nature de l'étape. Partage de responsabilité : le curriculum sait quelle étape reprend des poids, le fichier de profils sait ce que vaut un hyperparamètre.
 
 **Pourquoi.** Une rampe s'exprime en **fraction de la durée du run**. Chaque étape reprise reparcourait donc la sienne depuis le début, rendant à un modèle porteur de centaines de milliers d'épisodes le régime d'exploration d'un démarrage. Mesuré le 2026-09-04 : P1 s'était arrêtée à un `ent_coef` de ~0,018, P2 est repartie à 0,100, l'évaluation bots est tombée de 0,911 à 0,694 et le score contre P1 — garanti à 0,50 par construction puisque P2 **est** P1 à l'épisode 0 — est tombé à 0,118.
 
 Le correctif intermédiaire (`_pin_entropy_ramp_for_warm_start`, **supprimé**) faisait partir la rampe de la valeur *atteinte* par le modèle repris. Mesuré à son tour le 2026-09-05 : parti de 0,0177, le score de la sonde est resté **plat à 0,496** sur six mesures et 60 000 épisodes (χ² de 2,16 pour 5 ddl, indistinguable d'une constante) pendant que l'évaluation bots retombait sous celle du modèle de départ. Les deux régimes échouaient pour la même raison de fond : la valeur d'entropie était une **conséquence de l'histoire** du modèle, jamais une décision.
 
-Les sept clés du bloc, et ce qu'elles remplacent (vingt rampes `decay_fraction` plus les surcharges d'étape de `vf_coef` / `max_grad_norm`) :
+Ce que `x1_lineage` redéclare, et ce que cela remplace (vingt rampes `decay_fraction` plus les surcharges d'étape de `vf_coef` / `max_grad_norm`) :
 
 | Clé | Régime de lignée | Profil `x1_long` (P0 seul) |
 |-----|------------------|----------------------------|
@@ -581,14 +583,14 @@ Les sept clés du bloc, et ce qu'elles remplacent (vingt rampes `decay_fraction`
 | `n_steps` | **32640** | 8160 |
 | `batch_size` | **4080** | 1020 |
 | `vf_coef` | **0.15** | 0.5 |
-| `max_grad_norm` | **0.5** | 0.5 |
 | `agent_seat_p2_ratio` | **0.6** | 0.75 |
+| `max_grad_norm` | *hérité* — 0.5 | 0.5 |
 
 `vf_coef` 0.15 est le réglage **mesuré** : il porte la part du gradient revenant à la politique de 0,235 à 0,62, `explained_variance` intacte. À 0.5, les trois quarts de la capacité d'apprentissage allaient au critic — dont `explained_variance` valait déjà 0,87 — pendant que la politique, seule à jouer les parties, n'en recevait qu'un quart (décomposition sur 44 updates, `run_20260906-225839` : value 1.035 / policy 0.323 / entropy 0.018). L'écrêtage n'y changeait rien : il divise les trois termes par le **même** facteur, donc il réduit la taille du pas sans corriger sa direction. `n_steps` × 4 attaque l'autre moitié du problème — la variance d'un épisode de self-play à parité est maximale par construction. Lecture : `00_critical/g_grad_share_policy_mb0`.
 
-Une étape reprise **ne peut plus déclarer** `model_params` ni `agent_seat_p2_ratio` : `ai/curriculum.py::_validate_stage_hp_overrides` le refuse au chargement. Seul `total_episodes` lui reste. Verrous : `tests/unit/ai/test_curriculum.py::test_the_lineage_block_pins_the_seven_keys_of_the_regime` et `::test_no_warm_started_stage_declares_hyperparameters_of_its_own`, `tests/unit/ai/test_lineage_regime.py`.
+Une étape reprise **ne peut plus déclarer** `model_params` ni `agent_seat_p2_ratio` : `ai/curriculum.py::_validate_stage_hp_overrides` le refuse au chargement. Seul `total_episodes` lui reste. Verrous : `tests/unit/ai/test_training_config_par_etape.py` (le profil qu'une étape exige, et ce que `x1_lineage` contient), `tests/unit/ai/test_profile_extends.py` (le mécanisme d'héritage), `tests/unit/ai/test_lineage_profile.py` (le décorateur laisse le profil intact) et `tests/unit/ai/test_curriculum.py::test_no_warm_started_stage_declares_hyperparameters_of_its_own`.
 
-À l'ouverture d'une étape reprise, `ai/train.py::announce_lineage_continuity` lit `ent_coef` et `learning_rate` dans le zip repris et **annonce** tout écart avec le bloc. Il ne corrige rien : un écart est le changement de régime lui-même, et le journal doit le porter pour qu'une courbe qui bouge à l'ouverture soit attribuable sans rouvrir un zip.
+À l'ouverture d'une étape reprise, `ai/train.py::announce_lineage_continuity` lit `ent_coef` et `learning_rate` dans le zip repris et **annonce** tout écart avec le profil de lignée. Il ne corrige rien : un écart est le changement de régime lui-même, et le journal doit le porter pour qu'une courbe qui bouge à l'ouverture soit attribuable sans rouvrir un zip.
 
 `bot_eval_freq` de `x1_long` vaut **10 000** (10 points de mesure sur 100 000 épisodes). `bot_eval_intermediate` vaut **100** épisodes par bot depuis le 2026-09-04 : à 30, l'erreur-type d'un point intermédiaire valait 9,1 points de win-rate, du même ordre que les écarts qu'on cherche à y lire ; à 100 elle tombe à 5,0. `x5_long` reste à 30 — les deux profils `_long` divergent sur cette clé, délibérément. `robust_window` vaut **3** (10 points → 8 positions de fenêtre).
 
@@ -596,7 +598,9 @@ Une étape reprise **ne peut plus déclarer** `model_params` ni `agent_seat_p2_r
 
 `checkpoint_save_freq` est **aligné sur `x1`** : SB3 sauvegarde tous les `save_freq` **appels** (pas des épisodes).
 
-`batch_size: 1020` : à `n_steps: 8160` / `n_envs: 24`, le rollout vaut `(8160 // 24) × 24 = 8160 = 8 × 1020` — 8 mini-lots pleins, aucun tronqué. Le régime de lignée garde ce rapport : `32640 = 8 × 4080` (verrou `ai/curriculum.py::_validate_lineage_regime`, un dernier mini-lot tronqué donnerait des updates de poids inégaux).
+`batch_size: 1020` : à `n_steps: 8160` / `n_envs: 24`, le rollout vaut `(8160 // 24) × 24 = 8160 = 8 × 1020` — 8 mini-lots pleins, aucun tronqué. Le profil de lignée garde ce rapport : `32640 = 8 × 4080` (verrou `tests/unit/ai/test_rollout_buffer_sizing.py`, qui mesure les profils **résolus** — un dernier mini-lot tronqué donnerait des updates de poids inégaux).
+
+⚠️ **Coût mémoire du rollout ×4.** Le rollout entier est monté sur le GPU en une fois (`ai/gpu_rollout_buffer.py::get`) : les observations pèsent ~3,4 Go à `n_steps` 32640 contre ~0,85 Go à 8160. La garde de `ai/train.py::apply_rollout_n_steps` mesure la mémoire **système** et ne verra pas une saturation de la carte. Un échec surviendrait à la **première** update, soit ~300 épisodes ; il se corrige en `16320` / `2040`.
 
 ### Unit Rules Implementation Flags (`RULES_STATUS`)
 

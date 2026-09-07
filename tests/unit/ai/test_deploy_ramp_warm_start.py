@@ -117,12 +117,12 @@ def test_missing_ratio_key_raises():
 
 # ── _install_stage_config_overrides ─────────────────────────────────────────
 #
-# `lineage_regime=None` sur toutes les reprises a chaud de cette section : ce fichier verrouille
-# la rampe de DEPLOIEMENT, et le regime de lignee — verrouille par
-# tests/unit/ai/test_lineage_regime.py — exige un modele source sur disque pour y lire ce que le
-# controle de continuite annonce. Le fournir ici melerait les deux sujets dans les memes
-# assertions. La valeur par defaut du parametre est deja None ; il est ecrit explicitement pour
-# que ce choix se lise, comme le faisait `pin_entropy_ramp=False` qu'il remplace.
+# Ce fichier verrouille la rampe de DEPLOIEMENT, et rien d'autre. Le controle de continuite
+# de lignee, qui LIT le zip du modele source, a quitte ce decorateur le 2026-09-07 : il vit
+# desormais dans `_prepare_curriculum_stage`, seul endroit qui connaisse a la fois le modele
+# source et le profil. Une lecture de config ne depend donc plus d'un zip sur disque.
+# Ce qu'il annonce est verrouille par tests/unit/ai/test_lineage_profile.py.
+
 
 def test_warm_start_pins_the_ramp_on_every_reload():
     """La config est rechargee a plusieurs endroits : toutes doivent voir la meme rampe.
@@ -131,7 +131,7 @@ def test_warm_start_pins_the_ramp_on_every_reload():
     callbacks et `build_training_opponents` sur la rampe non figee, en silence.
     """
     stub = _StubConfig(0.3, 0.9)
-    _install_stage_config_overrides(stub, AGENT, None, {}, warm_start=True, lineage_regime=None)
+    _install_stage_config_overrides(stub, AGENT, None, {}, warm_start=True)
     for _ in range(3):
         cfg = stub.load_agent_training_config(AGENT)
         assert cfg["deployment_mode_schedule"]["active_ratio_start"] == 0.9
@@ -147,7 +147,7 @@ def test_cold_start_keeps_the_ramp_intact():
 
 def test_another_agent_is_not_touched():
     stub = _StubConfig(0.3, 0.9)
-    _install_stage_config_overrides(stub, AGENT, None, {}, warm_start=True, lineage_regime=None)
+    _install_stage_config_overrides(stub, AGENT, None, {}, warm_start=True)
     cfg = stub.load_agent_training_config("AutreAgent")
     assert cfg["deployment_mode_schedule"]["active_ratio_start"] == 0.3
 
@@ -159,7 +159,7 @@ def test_pinned_ramp_uses_the_profile_end_not_one():
     `r_win_rate_deploy_auto` continue de mesurer quelque chose ; figer a 1.0 la tuerait.
     """
     stub = _StubConfig(0.3, 0.8)
-    _install_stage_config_overrides(stub, AGENT, None, {}, warm_start=True, lineage_regime=None)
+    _install_stage_config_overrides(stub, AGENT, None, {}, warm_start=True)
     cfg = stub.load_agent_training_config(AGENT)
     assert cfg["deployment_mode_schedule"]["active_ratio_start"] == 0.8
 
@@ -167,7 +167,7 @@ def test_pinned_ramp_uses_the_profile_end_not_one():
 def test_hp_overrides_still_apply_alongside_the_pinning():
     stub = _StubConfig(0.3, 0.9)
     _install_stage_config_overrides(
-        stub, AGENT, None, {"total_episodes": 12345}, warm_start=True, lineage_regime=None
+        stub, AGENT, None, {"total_episodes": 12345}, warm_start=True
     )
     cfg = stub.load_agent_training_config(AGENT)
     assert cfg["total_episodes"] == 12345
@@ -195,7 +195,7 @@ def test_the_decorator_alone_does_not_cross_a_forkserver_boundary(restore_global
         pytest.skip("forkserver indisponible sur cette plateforme")
 
     loader = restore_global_loader
-    _install_stage_config_overrides(loader, AGENT, None, {}, warm_start=True, lineage_regime=None)
+    _install_stage_config_overrides(loader, AGENT, None, {}, warm_start=True)
     parent = loader.load_agent_training_config(AGENT, "x1_long")
     assert parent["deployment_mode_schedule"]["active_ratio_start"] == 0.9
 

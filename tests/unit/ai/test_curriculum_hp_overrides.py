@@ -167,7 +167,7 @@ def test_validate_hp_overrides_on_exploiter_rejected():
 
 @pytest.mark.parametrize("cle_gouvernee", ["model_params", "agent_seat_p2_ratio"])
 def test_a_resumed_stage_cannot_declare_a_lineage_governed_key(cle_gouvernee: str):
-    """`model_params` et `agent_seat_p2_ratio` appartiennent au bloc `lineage_regime`.
+    """`model_params` et `agent_seat_p2_ratio` appartiennent au PROFIL de lignee.
 
     Les laisser declarables par une etape reprise ferait coexister deux sources pour la meme
     valeur — et c'est la source PERDANTE qui aurait l'air de decider en relisant le JSON, puisque

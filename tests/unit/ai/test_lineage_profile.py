@@ -1,4 +1,4 @@
-"""Verrou — le REGIME DE LIGNEE gouverne toute etape reprise a chaud, et il n'a plus de rampe.
+"""Verrou — le PROFIL DE LIGNEE gouverne toute etape reprise a chaud, et il n'a plus de rampe.
 
 REMPLACE `tests/unit/ai/test_entropy_ramp_warm_start.py`, supprime le 2026-09-07 avec le
 mecanisme qu'il verrouillait (`_pin_entropy_ramp_for_warm_start`).
@@ -18,11 +18,22 @@ constante) pendant que l'evaluation bots retombait sous celle du modele de depar
 regimes echouaient pour la meme raison de fond : la valeur d'entropie etait une consequence de
 l'HISTOIRE du modele, jamais une decision.
 
-Le bloc `lineage_regime` pose des SCALAIRES, les memes a toutes les etapes reprises. Il n'y a
-donc plus de rampe a poser, plus de depart a choisir, et ce qui reste a verrouiller est : (1) le
-regime atteint bien TOUTE lecture de config, (2) il ne touche ni le fichier multi-profils ni un
-autre agent, (3) un demarrage a froid garde les rampes du profil, (4) le controle de continuite
-ANNONCE l'ecart avec le modele repris sans jamais le corriger.
+Le profil `x1_lineage` porte des SCALAIRES, les memes a toutes les etapes reprises. Il n'y a
+donc plus de rampe a poser, plus de depart a choisir.
+
+DEUXIEME REECRITURE, 2026-09-07 : le bloc `lineage_regime` du curriculum a lui-meme ete supprime
+au profit d'un PROFIL, `x1_lineage`, qui herite de `x1_long` par `extends`. Motif : le bloc
+dispersait les hyperparametres sur deux fichiers avec une regle de precedence a connaitre, la ou
+le depot exprime deja « un autre regime » par « un autre profil ». Le decorateur d'etape
+n'APPLIQUE donc plus rien — `--training-config` a deja charge le bon profil, et
+`_prepare_curriculum_stage` a refuse tout autre. Ce qui reste a verrouiller ici : (1) le
+decorateur laisse le profil INTACT, (2) il ne touche ni le fichier multi-profils ni un autre
+agent, (3) le controle de continuite ANNONCE l'ecart avec le modele repris sans jamais le
+corriger, une seule fois par run.
+
+Le mecanisme d'heritage et les valeurs du profil sont verrouilles ailleurs :
+`tests/unit/ai/test_profile_extends.py` pour `extends`, `test_training_config_par_etape.py` pour
+le profil qu'une etape exige et pour le contenu de `x1_lineage`.
 """
 
 from __future__ import annotations
@@ -33,18 +44,30 @@ from typing import Any, Dict, List
 
 import pytest
 
-#: Le bloc de lignee livre, recopie ici depuis la specification et non relu du JSON.
-LINEAGE = {
-    "model_params": {
-        "learning_rate": 0.001,
-        "ent_coef": 0.03,
-        "n_steps": 32640,
-        "batch_size": 4080,
-        "vf_coef": 0.15,
-        "max_grad_norm": 0.5,
-    },
-    "agent_seat_p2_ratio": 0.6,
-}
+def _cfg_lineage() -> Dict[str, Any]:
+    """Le profil de lignee RESOLU, tel qu'`extends` le rend au decorateur.
+
+    Recopie depuis la specification et non relu du JSON : c'est le contrat que le decorateur doit
+    laisser INTACT, pas une copie de la config du jour.
+    """
+    return {
+        "total_episodes": 100000,
+        "agent_seat_p2_ratio": 0.6,
+        "model_params": {
+            "ent_coef": 0.03,
+            "learning_rate": 0.001,
+            "n_steps": 32640,
+            "batch_size": 4080,
+            "n_epochs": 4,
+            "vf_coef": 0.15,
+            "max_grad_norm": 0.5,
+        },
+    }
+
+
+#: Ce que le controle de continuite compare au modele repris : les `model_params` du profil de
+#: lignee. Derive de `_cfg_lineage` et non recopie — deux tables divergeraient.
+LINEAGE = {"model_params": _cfg_lineage()["model_params"]}
 
 
 def _model_zip(
@@ -241,106 +264,61 @@ def test_continuity_never_changes_the_regime(tmp_path) -> None:
     assert regime == LINEAGE["model_params"]
 
 
-# ── POSE DU REGIME SUR LA CONFIG ───────────────────────────────────────────────────────────
+# ── LE DECORATEUR LAISSE LE PROFIL INTACT ──────────────────────────────────────────────────
 
 
-def test_a_warm_started_stage_gets_the_regime_on_every_read(tmp_path) -> None:
-    """Le decorateur pose le regime a CHAQUE lecture de config.
+def test_a_warm_started_stage_reads_the_lineage_profile_unchanged(tmp_path) -> None:
+    """Le decorateur ne touche PLUS aux hyperparametres : le profil est deja celui de la lignee.
 
-    La config est relue a plusieurs endroits — prologue, construction des adversaires, callbacks
-    — et n'en servir qu'une laisserait les autres sur les rampes du profil, en silence.
+    C'est le fond de la reecriture du 2026-09-07. Tant que le regime etait pose ici, il existait
+    deux sources pour `ent_coef` — le profil et le curriculum — et la perdante avait l'air de
+    decider quand on relisait le JSON. Une pose qui reviendrait rendrait cette ambiguite.
     """
     from ai.train import _install_stage_config_overrides
 
-    loader = _Loader(_cfg())
+    attendu = _cfg_lineage()
+    loader = _Loader(_cfg_lineage(), phase="x1_lineage")
     _install_stage_config_overrides(
         loader, "ArmageddonAgent_x1", None, {}, True, stage_label="P2",
-        warm_start_model_path=_model_zip(tmp_path), lineage_regime=LINEAGE,
     )
 
     for _ in range(3):
-        cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
-        assert cfg["model_params"]["ent_coef"] == pytest.approx(0.03)
-        assert cfg["model_params"]["learning_rate"] == pytest.approx(0.001)
-        assert cfg["model_params"]["n_steps"] == 32640
-        assert cfg["model_params"]["batch_size"] == 4080
-        assert cfg["model_params"]["vf_coef"] == pytest.approx(0.15)
-        assert cfg["model_params"]["max_grad_norm"] == pytest.approx(0.5)
+        cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_lineage")
+        assert cfg["model_params"] == attendu["model_params"]
         assert cfg["agent_seat_p2_ratio"] == pytest.approx(0.6)
 
 
-def test_the_posed_values_are_scalars_not_ramps(tmp_path) -> None:
+def test_the_lineage_values_reaching_the_run_are_scalars_not_ramps(tmp_path) -> None:
     """Un scalaire ne cree AUCUN callback de rampe : la valeur tient tout le run.
 
     `setup_callbacks` ne construit `EntropyScheduleCallback` / `LearningRateScheduleCallback` que
-    sur un dict `{start, end, decay_fraction}` / `{initial, final, decay_fraction}`. Laisser un
-    dict passer ici, c'est reintroduire la rampe que ce bloc supprime.
+    sur un dict `{start, end, decay_fraction}` / `{initial, final, decay_fraction}`. Un dict qui
+    arriverait ici reintroduirait la rampe que toute cette conception supprime.
     """
     from ai.train import _install_stage_config_overrides
 
-    loader = _Loader(_cfg())
+    loader = _Loader(_cfg_lineage(), phase="x1_lineage")
     _install_stage_config_overrides(
         loader, "ArmageddonAgent_x1", None, {}, True, stage_label="P2",
-        warm_start_model_path=_model_zip(tmp_path), lineage_regime=LINEAGE,
     )
 
-    cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
+    cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_lineage")
     for cle in ("ent_coef", "learning_rate"):
         valeur = cfg["model_params"][cle]
         assert isinstance(valeur, float), f"{cle} vaut {valeur!r} : une rampe, pas un scalaire"
 
 
-def test_the_regime_leaves_the_untouched_params_of_the_profile(tmp_path) -> None:
-    """`n_epochs` n'est pas dans le bloc : il reste celui du profil."""
-    from ai.train import _install_stage_config_overrides
-
-    loader = _Loader(_cfg())
-    _install_stage_config_overrides(
-        loader, "ArmageddonAgent_x1", None, {}, True, stage_label="P2",
-        warm_start_model_path=_model_zip(tmp_path), lineage_regime=LINEAGE,
-    )
-
-    cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
-    assert cfg["model_params"]["n_epochs"] == 4
-
-
-def test_the_regime_comes_after_the_stage_overrides(tmp_path) -> None:
-    """L'ORDRE : `_apply_stage_hp_overrides` d'abord, le regime ensuite.
-
-    Le curriculum interdit deja `model_params` a une etape reprise
-    (`_validate_stage_hp_overrides`), donc il n'y a normalement rien a ecraser. Cet ordre est ce
-    qui garantit qu'un futur assouplissement de ce refus ne ferait pas silencieusement gagner
-    l'etape contre la lignee — c'est-a-dire ne rouvrirait pas les surcharges par etape que le
-    bloc existe pour fermer.
-    """
-    from ai.train import _install_stage_config_overrides
-
-    loader = _Loader(_cfg())
-    _install_stage_config_overrides(
-        loader, "ArmageddonAgent_x1", None,
-        {"total_episodes": 250000, "model_params": {"vf_coef": 0.7, "n_epochs": 6}},
-        True, stage_label="P2",
-        warm_start_model_path=_model_zip(tmp_path), lineage_regime=LINEAGE,
-    )
-
-    cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
-    assert cfg["model_params"]["vf_coef"] == pytest.approx(0.15), "l'etape a gagne contre la lignee"
-    assert cfg["model_params"]["n_epochs"] == 6, "une cle hors regime a ete defaite"
-    assert cfg["total_episodes"] == 250000
-
-
 def test_a_cold_started_stage_keeps_the_profile_ramps(tmp_path) -> None:
-    """`init: "new"` n'est pas gouverne par la lignee : ses rampes sont legitimes.
+    """`init: "new"` prend l'autre profil, et ses rampes sont legitimes.
 
     Une politique naive doit explorer avant de converger, et son critic part de zero — d'ou le
-    `vf_coef` 0.5 du profil, que le regime abaisse ensuite a 0.15.
+    `vf_coef` 0.5 de `x1_long`, que le profil de lignee abaisse ensuite a 0.15.
     """
     from ai.train import _install_stage_config_overrides
 
     loader = _Loader(_cfg())
     _install_stage_config_overrides(
         loader, "ArmageddonAgent_x1", None, {}, False, stage_label="P0",
-        warm_start_model_path=None, lineage_regime=None,
     )
 
     cfg = loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
@@ -353,42 +331,47 @@ def test_the_whole_config_file_is_left_untouched(tmp_path) -> None:
     """Une lecture SANS phase rend le fichier multi-profils : il ne doit rien recevoir.
 
     `_require_training_config_phase` demande justement cette forme pour lister les profils
-    disponibles, et elle traverse le decorateur comme les autres. Y poser un regime ecrirait des
-    cles a cote des profils, que personne ne lit.
+    disponibles, et elle traverse le decorateur comme les autres. Y ecrire des cles les poserait
+    a cote des profils, ou personne ne les lit.
     """
     from ai.train import _install_stage_config_overrides
 
-    loader = _Loader(_cfg(), phase="x1_long")
+    loader = _Loader(_cfg_lineage(), phase="x1_lineage")
     _install_stage_config_overrides(
-        loader, "ArmageddonAgent_x1", None, {}, True, stage_label="P2",
-        warm_start_model_path=_model_zip(tmp_path), lineage_regime=LINEAGE,
+        loader, "ArmageddonAgent_x1", None, {"total_episodes": 250000}, True, stage_label="P2",
     )
 
     fichier = loader.load_agent_training_config("ArmageddonAgent_x1")
 
-    assert set(fichier) == {"x1_long"}, "le fichier a recu des cles de profil"
-    assert fichier["x1_long"]["model_params"]["ent_coef"] == {
-        "start": 0.1, "end": 0.01, "decay_fraction": 0.4
-    }, "le regime a ete pose sur le fichier entier au lieu d'un profil"
+    assert set(fichier) == {"x1_lineage"}, "le fichier a recu des cles de profil"
+    assert fichier["x1_lineage"]["total_episodes"] == 100000, (
+        "un override d'etape a ete pose sur le fichier entier au lieu d'un profil"
+    )
 
 
 def test_another_agent_is_not_decorated(tmp_path) -> None:
     """Le decorateur ne vaut que pour l'agent de l'etape."""
     from ai.train import _install_stage_config_overrides
 
-    loader = _Loader(_cfg())
+    loader = _Loader(_cfg_lineage(), phase="x1_lineage")
     _install_stage_config_overrides(
-        loader, "ArmageddonAgent_x1", None, {}, True, stage_label="P2",
-        warm_start_model_path=_model_zip(tmp_path), lineage_regime=LINEAGE,
+        loader, "ArmageddonAgent_x1", None, {"total_episodes": 250000}, True, stage_label="P2",
     )
 
-    cfg = loader.load_agent_training_config("UnAutreAgent", "x1_long")
-    assert cfg["model_params"]["ent_coef"] == {"start": 0.1, "end": 0.01, "decay_fraction": 0.4}
-    assert cfg["agent_seat_p2_ratio"] == pytest.approx(0.75)
+    cfg = loader.load_agent_training_config("UnAutreAgent", "x1_lineage")
+    assert cfg["total_episodes"] == 100000, "l'override d'etape a fuite sur un autre agent"
 
 
-def test_the_model_is_read_once_not_at_every_config_read(tmp_path) -> None:
-    """Le zip est ouvert une seule fois : la config, elle, est relue des dizaines de fois."""
+def test_reading_the_config_never_opens_the_model_archive(tmp_path) -> None:
+    """Le decorateur ne touche PLUS au zip du modele repris, a aucune lecture.
+
+    Le controle de continuite a quitte le decorateur le 2026-09-07 : il vit dans
+    `_prepare_curriculum_stage`, seul endroit qui connaisse a la fois le modele source et le
+    profil. Tant qu'il vivait ici, il fallait une garde d'idempotence pour ne pas rouvrir
+    l'archive aux dizaines de relectures de config d'un run ; l'invariant est desormais
+    STRUCTUREL, et c'est lui que ce test epingle. Une regression le ferait remonter dans le
+    decorateur avec sa garde, donc avec un zip exige a chaque lecture.
+    """
     import ai.train as train_module
     from ai.train import _install_stage_config_overrides
 
@@ -401,17 +384,19 @@ def test_the_model_is_read_once_not_at_every_config_read(tmp_path) -> None:
 
     train_module.announce_lineage_continuity = _compte  # type: ignore[assignment]
     try:
-        loader = _Loader(_cfg())
+        loader = _Loader(_cfg_lineage(), phase="x1_lineage")
         _install_stage_config_overrides(
             loader, "ArmageddonAgent_x1", None, {}, True, stage_label="P2",
-            warm_start_model_path=_model_zip(tmp_path), lineage_regime=LINEAGE,
         )
         for _ in range(5):
-            loader.load_agent_training_config("ArmageddonAgent_x1", "x1_long")
+            loader.load_agent_training_config("ArmageddonAgent_x1", "x1_lineage")
     finally:
         train_module.announce_lineage_continuity = vraie  # type: ignore[assignment]
 
-    assert len(lectures) == 1, f"{len(lectures)} ouvertures du zip pour 5 lectures de config"
+    assert lectures == [], (
+        f"{len(lectures)} ouverture(s) du zip depuis une lecture de config : le controle de "
+        "continuite est revenu dans le decorateur."
+    )
 
 
 # ── Le zip qu'une etape PROMEUT doit rester lisible par l'etape suivante ────────────────────

@@ -25,6 +25,31 @@ BOARD_DIR_BY_INCHES_TO_SUBHEX = {
 
 _AGENT_PHASE_RE = re.compile(r"_P\d+$")
 
+#: Clé par laquelle un profil d'entraînement déclare hériter d'un autre profil du MÊME fichier.
+#: Elle est consommée par `_resolve_profile_extends` et retirée du profil résolu : aucun
+#: consommateur en aval ne doit avoir à la connaître ni à la filtrer.
+TRAINING_PROFILE_EXTENDS_KEY = "extends"
+
+
+def _deep_merge_profile(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+    """`override` posé sur `base`, en descendant dans les dicts que les deux portent.
+
+    Deux dicts face à face fusionnent clé par clé ; dans tous les autres cas `override` gagne,
+    y compris quand il remplace un dict par un scalaire — c'est précisément ce qu'un profil de
+    lignée demande en substituant une valeur constante à une rampe.
+
+    Ne modifie ni l'un ni l'autre : les deux viennent du JSON chargé, que l'appelant relit à
+    chaque profil de la chaîne.
+    """
+    merged = dict(base)
+    for key, value in override.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_profile(current, value)
+        else:
+            merged[key] = value
+    return merged
+
 #: Sections de `config/game_config.json` que le moteur lit DANS SA PROPRE CONFIG, quel que soit
 #: le chemin de construction (branche d'entrainement de `W40KEngine.__init__`, les deux
 #: constructeurs de `services/api_server`, `main.load_config`). CONTRAT UNIQUE : cette liste et
@@ -410,12 +435,20 @@ class ConfigLoader:
                             f"Phase '{phase}' not found in {resolved_agent_key}_training_config.json. "
                             f"Available phases: {available_phases}"
                         )
-                    phase_config = config[phase]
-                    if not isinstance(phase_config, dict):
+                    if not isinstance(config[phase], dict):
                         raise TypeError(
                             f"Invalid phase config type in {agent_config_path}: "
-                            f"phase '{phase}' must be an object, got {type(phase_config).__name__}"
+                            f"phase '{phase}' must be an object, got "
+                            f"{type(config[phase]).__name__}"
                         )
+                    # AVANT la resolution des `null` : un profil herite des cles de son parent,
+                    # `null` compris, et c'est bien la valeur commune qui doit alors s'appliquer.
+                    # L'ordre inverse laisserait un `null` herite arriver non resolu jusqu'au run.
+                    phase_config = self._resolve_profile_extends(
+                        config=config,
+                        phase=phase,
+                        agent_config_path=agent_config_path,
+                    )
                     return self._resolve_training_common_references(
                         phase_config=phase_config,
                         agent_key=resolved_agent_key,
@@ -452,6 +485,96 @@ class ConfigLoader:
             )
         self._cache[cache_key] = common_config
         return common_config
+
+    def _resolve_profile_extends(
+        self,
+        config: Dict[str, Any],
+        phase: str,
+        agent_config_path: Path,
+    ) -> Dict[str, Any]:
+        """Fusionne un profil sur celui dont il declare heriter (`extends`).
+
+        RAISON D'ETRE : deux profils qui ne different que par leur REGIME d'optimisation
+        partageaient sinon quinze cles recopiees a l'identique — mesure du 2026-09-07 sur `x1` et
+        `x1_long`, 15 cles communes pour 4 differentes, soit 15,1 Ko dupliques par profil. Rien
+        n'empechait ces copies de diverger sauf un test, et c'est ainsi qu'une copie survit a la
+        correction de son jumeau.
+
+        FUSION PROFONDE, et non un remplacement de bloc : un profil de lignee ne surcharge que six
+        des quinze cles de `model_params`. Un remplacement lui ferait perdre `n_epochs`, `gamma`,
+        `clip_range`, la policy et son architecture — en silence, puisque le profil resterait un
+        dict valide. La profondeur ne s'applique qu'a deux dicts face a face : une valeur scalaire
+        de l'enfant ECRASE le dict du parent, ce qui est exactement ce qu'une rampe remplacee par
+        un scalaire demande.
+
+        Corollaire assume : un enfant ne peut pas VIDER un bloc du parent, seulement en surcharger
+        les cles. Aucun profil n'en a besoin, et l'inverse ferait d'une omission une suppression.
+
+        La cle `extends` est retiree du resultat : elle decrit la construction du profil, pas le
+        run. La laisser obligerait chaque consommateur — et chaque test qui compare deux profils —
+        a la connaitre pour l'ecarter.
+
+        Le fichier COMPLET (`phase=None`) n'est PAS resolu : il rend la carte des profils telle
+        qu'elle est ecrite. Ce que ses appelants en font varie — `ai/train.py` n'en lit que les
+        NOMS pour lister les profils disponibles, mais `services/api_server.py` le transmet au
+        moteur, qui y INDEXE un profil par son nom (`engine/w40k_core.py`). Ce second chemin
+        rendrait donc un profil heritier non resolu, c'est-a-dire ampute de tout ce qu'il ne
+        redeclare pas. Il est inerte aujourd'hui parce qu'`api_server` code en dur un profil qui
+        n'herite de rien ; le jour ou il en nommerait un heritier, c'est lui qu'il faudrait faire
+        passer par une lecture AVEC phase, et non elargir la resolution a la carte entiere — un
+        fichier de profils resolu ferait de chaque parent une copie complete dans chaque enfant,
+        ce que `extends` existe precisement pour supprimer.
+        """
+        chain: list = []
+        current = phase
+        while True:
+            if current in chain:
+                cycle = " -> ".join(chain + [current])
+                raise ValueError(
+                    f"Cycle d'heritage entre profils dans {agent_config_path} : {cycle}. "
+                    f"Un profil ne peut pas heriter de lui-meme, directement ou non."
+                )
+            chain.append(current)
+            node = config[current]
+            if TRAINING_PROFILE_EXTENDS_KEY not in node:
+                break
+            parent = node[TRAINING_PROFILE_EXTENDS_KEY]
+            if not isinstance(parent, str):
+                raise TypeError(
+                    f"Profil '{current}' de {agent_config_path} : "
+                    f"'{TRAINING_PROFILE_EXTENDS_KEY}' doit nommer un profil (chaine), "
+                    f"got {type(parent).__name__}."
+                )
+            if parent not in config:
+                available = sorted(
+                    k for k, v in config.items()
+                    if isinstance(v, dict) and not str(k).startswith("_")
+                )
+                # ValueError et non KeyError : `load_agent_training_config` leve deja un
+                # KeyError pour un PHASE inconnue, et ses appelants le lisent comme « profil
+                # inconnu ». Les confondre enverrait corriger la ligne de commande alors que le
+                # defaut est dans le fichier. `str()` d'un KeyError entoure en plus le message de
+                # guillemets et echappe ses caracteres, ce que les autres refus d'ici ne font pas.
+                raise ValueError(
+                    f"Profil '{current}' de {agent_config_path} herite de '{parent}', "
+                    f"qui n'existe pas. Profils disponibles : {available}"
+                )
+            if not isinstance(config[parent], dict):
+                raise TypeError(
+                    f"Profil '{current}' de {agent_config_path} herite de '{parent}', "
+                    f"qui n'est pas un objet JSON (got {type(config[parent]).__name__})."
+                )
+            current = parent
+
+        # Du plus ANCIEN ancetre vers l'enfant : chaque descendant ecrase ce qu'il redeclare.
+        resolved: Dict[str, Any] = {}
+        for name in reversed(chain):
+            layer = {
+                k: v for k, v in config[name].items()
+                if k != TRAINING_PROFILE_EXTENDS_KEY
+            }
+            resolved = _deep_merge_profile(resolved, layer)
+        return resolved
 
     def _resolve_training_common_references(
         self,

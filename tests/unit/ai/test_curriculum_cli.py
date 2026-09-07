@@ -21,13 +21,7 @@ from tests.unit.ai.test_resume_from_checkpoint import _FakeConfigLoader
 CURRICULUM = {
     "order": ["P0", "P1", "E1"],
     "opponent": {"snapshot_device": "cpu", "deterministic": False},
-    "lineage_regime": {
-        "model_params": {
-            "learning_rate": 0.001, "ent_coef": 0.03, "n_steps": 32640,
-            "batch_size": 4080, "vf_coef": 0.15, "max_grad_norm": 0.5,
-        },
-        "agent_seat_p2_ratio": 0.6,
-    },
+    "training_configs": {"cold_start": "x1_long", "lineage": "x1_lineage"},
     "parity_check": {"min_score": 0.40, "max_score": 0.60},
     "gate": {
         "min_score_vs_champion": 0.55,
@@ -72,15 +66,38 @@ def curriculum_agent(tmp_path, monkeypatch):
     config = _FakeConfigLoader(str(models_root))
     # `_FakeConfigLoader` n'expose que ce dont `--resume-from` a besoin ; l'etape, elle, decore
     # le chargement de la config d'entrainement.
-    config.load_agent_training_config = lambda agent_key, phase=None: cast(Dict[str, Any], {"n_envs": 4})
+    config.load_agent_training_config = lambda agent_key, phase=None: cast(Dict[str, Any], _profil_double())
     monkeypatch.setattr("ai.train.get_config_loader", lambda: config)
     return SimpleNamespace(config=config, models_root=models_root)
 
 
+def _profil_double() -> Dict[str, Any]:
+    """Profil minimal mais FIDELE : le controle de continuite d'une reprise lit `model_params`.
+
+    Des scalaires, comme le profil de lignee — c'est le seul profil qu'une etape reprise peut
+    exiger, `_prepare_curriculum_stage` refusant tout autre.
+    """
+    return {
+        "n_envs": 4,
+        "model_params": {"ent_coef": 0.03, "learning_rate": 0.001},
+    }
+
+
 def _args(etape: str) -> SimpleNamespace:
+    """Les arguments d'un lancement d'etape, avec le profil que CETTE etape exige.
+
+    Le profil n'est pas une constante depuis le 2026-09-07 : une etape qui reprend des poids
+    exige celui de la lignee, une etape qui demarre a froid celui du demarrage, et
+    `_prepare_curriculum_stage` refuse tout autre. Le deriver du curriculum de test plutot que
+    de l'ecrire en dur evite d'avoir a le corriger a chaque etape ajoutee ici.
+    """
+    role = (
+        "cold_start" if CURRICULUM["stages"][etape]["init"] == "new" else "lineage"
+    )
     return SimpleNamespace(
         agent="TestAgent", etape=etape, new=False, append=False, resume_from=None,
-        scenario="bot", training_config="x1", rewards_config="TestAgent",
+        scenario="bot", training_config=CURRICULUM["training_configs"][role],
+        rewards_config="TestAgent",
     )
 
 
@@ -141,11 +158,11 @@ def test_the_stage_pool_reaches_every_later_read_of_the_config(curriculum_agent)
     """
     _write_stage_model(curriculum_agent.models_root, "P0")
     config = curriculum_agent.config
-    config.load_agent_training_config = lambda agent_key, phase=None: cast(Dict[str, Any], {"n_envs": 4})
+    config.load_agent_training_config = lambda agent_key, phase=None: cast(Dict[str, Any], _profil_double())
 
     _prepare_curriculum_stage(_args("P1"), config)
 
-    mix = config.load_agent_training_config("TestAgent", "x1")["opponent_mix"]
+    mix = config.load_agent_training_config("TestAgent", "x1_long")["opponent_mix"]
     assert mix["enabled"] is True
     assert mix["self_play_ratio_start"] == 0.0
     assert mix["self_play_ratio_end"] == 0.4
@@ -156,17 +173,17 @@ def test_the_stage_pool_reaches_every_later_read_of_the_config(curriculum_agent)
         "weight": 0.4,
     }]
     # Un AUTRE agent ne doit pas heriter du pool de celui-ci.
-    assert "opponent_mix" not in config.load_agent_training_config("OtherAgent", "x1")
+    assert "opponent_mix" not in config.load_agent_training_config("OtherAgent", "x1_long")
 
 
 def test_a_stage_without_pool_leaves_the_config_untouched(curriculum_agent) -> None:
     """P0 s'entraine contre les bots seuls : `opponent_mix` doit etre ABSENT, pas desarme."""
     config = curriculum_agent.config
-    config.load_agent_training_config = lambda agent_key, phase=None: cast(Dict[str, Any], {"n_envs": 4})
+    config.load_agent_training_config = lambda agent_key, phase=None: cast(Dict[str, Any], _profil_double())
 
     _prepare_curriculum_stage(_args("P0"), config)
 
-    assert "opponent_mix" not in config.load_agent_training_config("TestAgent", "x1")
+    assert "opponent_mix" not in config.load_agent_training_config("TestAgent", "x1_long")
 
 
 def test_stage_opponent_mix_is_none_without_a_pool() -> None:
@@ -180,7 +197,13 @@ def _run_main(monkeypatch, argv: list) -> None:
     ai.train.main()
 
 
-BASE_ARGV = ["--agent", "TestAgent", "--training-config", "x1", "--scenario", "bot", "--etape", "P0"]
+#: P0 demarre a froid, donc son profil est celui du demarrage — le curriculum de test le nomme
+#: dans `training_configs`, et `_prepare_curriculum_stage` refuse desormais tout autre.
+BASE_ARGV = [
+    "--agent", "TestAgent",
+    "--training-config", CURRICULUM["training_configs"]["cold_start"],
+    "--scenario", "bot", "--etape", "P0",
+]
 
 
 @pytest.mark.parametrize("flag", ["--new", "--append"])

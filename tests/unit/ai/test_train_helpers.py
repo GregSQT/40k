@@ -281,7 +281,17 @@ def test_curriculum_covers_every_model_param(rollout_rebuilds) -> None:
     # (un BOM ne casserait donc que ce test) et resout les alias de cle d'agent.
     from config_loader import get_config_loader
 
-    profiles = get_config_loader().load_agent_training_config("ArmageddonAgent_x1")
+    loader = get_config_loader()
+    # Profils RESOLUS, un par un : un profil qui herite (`extends`) ne redeclare que ce qui
+    # change, donc son JSON brut ne porte qu'une fraction de ses `model_params`. C'est le profil
+    # resolu que `--append` applique au modele, et c'est donc lui que ce test doit parcourir.
+    noms = [
+        name for name, profile in loader.load_agent_training_config("ArmageddonAgent_x1").items()
+        if isinstance(profile, dict) and not str(name).startswith("_")
+    ]
+    profiles = {
+        name: loader.load_agent_training_config("ArmageddonAgent_x1", name) for name in noms
+    }
     with_params = {
         name: profile for name, profile in profiles.items()
         if isinstance(profile, dict) and "model_params" in profile
