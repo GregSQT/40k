@@ -204,3 +204,38 @@ def test_dead_before_all_shots_real_production_order_not_flagged(tmp_path):
     stats = _parse(tmp_path, DEAD_BEFORE_ALL_SHOTS_LOG)
     assert stats["shoot_at_dead_unit"][1] == 0
     assert stats["shoot_at_dead_unit"][2] == 0
+
+
+# Jumeau FIGHT de DEAD_BEFORE_ALL_SHOTS_LOG : même artefact d'ordonnancement (destroy_model écrit
+# DEAD pendant l'allocation de mêlée, AVANT les lignes FOUGHT de _finalize_manual_allocation).
+# Comme pour le tir, pending_removals_actor est None quand le handler DEAD s'exécute en phase
+# FIGHT → unit_kill_context[102] = (None, T1, FIGHT). Le handler FOUGHT propage l'acteur réel.
+# Sans le correctif dans fight_handler.py : fight_dead_unit_target[1] == 2 (faux positif sur les
+# deux lignes). Avec le correctif : 0.
+DEAD_BEFORE_ALL_FIGHTS_LOG = entete_step_log(
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [MODELS: 1#0@(50,50,z0)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(51,50) DEPLOYED from (-1,-1) to (51,50) [R:+0.0] [MODELS: 102#0@(51,50,z0)] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P2 FIGHT : Unit 102(51,50) DEAD model=102#0 reason=combat [SUCCESS]\n"
+    "[10:00:03] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 102(51,50) with [Close Combat Weapon] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@(50,50,z0)] [SUCCESS]\n"
+    "[10:00:04] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 102(51,50) with [Close Combat Weapon] - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@(50,50,z0)] [SUCCESS]\n",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50,z0)]\n"
+        "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (51,50), HP_MAX=2 base=round/6 [MODELS: 102#0@(51,50,z0)]\n"
+    ),
+    ez_vertical_inches=None,
+)
+
+
+def test_dead_before_all_fights_real_production_order_not_flagged(tmp_path):
+    """DEAD précède TOUTES les lignes FOUGHT de l'activation (ordre moteur réel) : pas de faux positif.
+
+    Jumeau FIGHT du test SHOOT ci-dessus. destroy_model écrit DEAD pendant l'allocation de mêlée,
+    _finalize_manual_allocation émet les FOUGHT après. pending_removals_actor est None quand le
+    handler DEAD s'exécute → unit_kill_context[102] = (None, T1, FIGHT). Le handler FOUGHT dans
+    fight_handler.py propage l'acteur réel avant le test same_activation_kill.
+    Mutation proof : sans le bloc `if _kill_ctx_fight[0] is None`, same_activation_kill serait
+    False pour les deux lignes → fight_dead_unit_target[1] == 2.
+    """
+    stats = _parse(tmp_path, DEAD_BEFORE_ALL_FIGHTS_LOG)
+    assert stats["fight_dead_unit_target"][1] == 0
+    assert stats["fight_dead_unit_target"][2] == 0
