@@ -523,7 +523,10 @@ def handle_shoot(
                 else:
                     _combi_bearers = ((shooter_id, _squad_fallback),)
                 for _bearer_id, _bearer_type in _combi_bearers:
-                    _combi_by_weapon = config.unit_combi_by_weapon.get(_bearer_type)  # get allowed : type hors registre
+                    # `unit_combi_by_weapon` couvre TOUT type du registre (analyzer_config:536), et
+                    # un type hors registre a déjà fait lever `analyzer_core:301` au resync. Le
+                    # dictionnaire VIDE est le seul « pas de combi » légitime.
+                    _combi_by_weapon = require_key(config.unit_combi_by_weapon, _bearer_type)
                     if not _combi_by_weapon:
                         continue
                     combi_key = _combi_by_weapon.get(weapon_name_for_limits)  # get allowed : arme sans combi

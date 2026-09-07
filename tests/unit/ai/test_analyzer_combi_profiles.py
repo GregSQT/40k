@@ -132,6 +132,9 @@ def test_the_same_model_may_change_profile_from_one_turn_to_the_next(tmp_path):
     assert stats["shoot_combi_profile_conflicts"][1] == 0, (
         stats["first_error_lines"]["shoot_combi_profile_conflicts"][1]
     )
+    assert stats["rule_usage"]["PROJ.1.2.combi"][1] == 2, (
+        "les deux tirs (tours distincts) doivent avoir atteint le bloc combi"
+    )
 
 
 def test_a_weapon_without_combi_never_arms_the_control(tmp_path):
@@ -140,3 +143,19 @@ def test_a_weapon_without_combi_never_arms_the_control(tmp_path):
     stats = _parse(tmp_path, body)
     assert stats["rule_usage"]["PROJ.1.2.combi"][1] == 0
     assert stats["shoot_combi_profile_conflicts"][1] == 0
+
+
+def test_multi_bearer_group_each_violation_counted_per_bearer(tmp_path):
+    """Boucle par-porteur avec N>1 : 2 porteurs qui changent de profil = 2 conflits distincts.
+
+    `[SHOOTER_MODELS: 1#1 1#2]` liste les deux socles sur chaque ligne du groupe.
+    Standard puis Supercharge par les DEUX → chaque socle viole la règle indépendamment.
+    """
+    body = _shot(STANDARD, "1#1 1#2") + _shot(SUPERCHARGE, "1#1 1#2")
+    stats = _parse(tmp_path, body)
+    assert stats["shoot_combi_profile_conflicts"][1] == 2, (
+        "un conflit par porteur (1#1 et 1#2 violent chacun la règle)"
+    )
+    assert stats["rule_usage"]["PROJ.1.2.combi"][1] == 4, (
+        "2 porteurs × 2 lignes = 4 occasions jugées"
+    )
