@@ -34,6 +34,12 @@ from engine.episode_schedule import ramp_progress
 from shared.data_validation import require_key, require_positive_int, require_present
 from shared.json_atomic import write_json_atomic
 from shared.progress_writer import ProgressWriter
+from ai.curriculum import (
+    POOL_VERDICT_CONTINUE,
+    POOL_VERDICT_DESTROY,
+    evaluate_pool_decision,
+    validate_early_stop_block,
+)
 from ai.model_artifacts import copy_model_with_companions, remove_model_with_companions
 from config_loader import get_config_loader
 
@@ -988,7 +994,7 @@ class MetricsCollectionCallback(BaseCallback):
         # `max_grad_norm` et le seuil 10 devient discriminant (mesuree ~1.2 en debut de run).
         # Baisser `max_grad_norm` ne la deplacerait pas : ce plafond borne le pas applique, pas la
         # norme publiee ici.
-        if hasattr(self.metrics_tracker, 'latest_gradient_norm') and self.metrics_tracker.latest_gradient_norm is not None and math.isfinite(self.metrics_tracker.latest_gradient_norm):
+        if self.metrics_tracker.latest_gradient_norm is not None:
             grad_norm = self.metrics_tracker.latest_gradient_norm
             grad_status = "✅" if grad_norm < 10 else "⚠️ "
             print(f"   Gradient Norm:      {grad_norm:.3f} {grad_status} (target: <10, raw)")
@@ -3079,8 +3085,6 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         episode_origin: int = 0,
         timesteps_origin: int = 0,
     ) -> None:
-        from ai.curriculum import validate_early_stop_block
-
         super().__init__(verbose)
         self._set_stage_origin(episode_origin, timesteps_origin)
         if not pool_archives:
@@ -3105,7 +3109,7 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
                 f"PoolEarlyStoppingCallback : n_eval_episodes doit être un entier > 0 "
                 f"(got {n_eval_episodes!r})"
             )
-        parity_min, parity_max = (float(parity_range[0]), float(parity_range[1]))
+        parity_min, parity_max = float(parity_range[0]), float(parity_range[1])
         if not parity_min < 0.5 < parity_max:
             raise ValueError(
                 f"PoolEarlyStoppingCallback : parity_range [{parity_min}, {parity_max}] doit "
@@ -3266,12 +3270,6 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         return means
 
     def _on_step(self) -> bool:
-        from ai.curriculum import (
-            POOL_VERDICT_CONTINUE,
-            POOL_VERDICT_DESTROY,
-            evaluate_pool_decision,
-        )
-
         # Épisodes DE L'ÉTAPE : la cadence compte depuis le début du run, pas depuis la naissance
         # de la lignée (cf. `_EvalPoolOwnerMixin._set_stage_origin`).
         stage_episode = self._stage_episode()
