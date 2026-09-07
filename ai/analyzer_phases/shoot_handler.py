@@ -342,6 +342,7 @@ def handle_shoot(
 
     if weapon_match:
         weapon_display_name = weapon_match.group(1)
+        _parsed_shooter_models = parse_shooter_models_segment(action_desc)
         # Résultat de touche 05.01 : la ligne dit le jet et le seuil, le verdict se lit à la
         # présence du segment `Wound`. Cf. ai/analyzer_hit.py.
         from ai.analyzer_hit import check_hit_result, check_indirect_fire_rule
@@ -355,7 +356,7 @@ def handle_shoot(
         from ai.analyzer_wound import check_wound_threshold, wound_bonus_applies
         check_wound_threshold(
             state, config, stats, line, action_desc, player, shooter_id, shooter_unit_type,
-            weapon_display_name, target_id, parse_shooter_models_segment(action_desc), is_melee=False,
+            weapon_display_name, target_id, _parsed_shooter_models, is_melee=False,
         )
         # 08.04 Oath of Moment : quand [OATH OF MOMENT] est dans le segment de blessure, la cible
         # DOIT être l'unité jurée. Erreur si target_id ≠ oath_target pour ce joueur.
@@ -391,7 +392,7 @@ def handle_shoot(
         # déclare pas. Cf. `weapon_profile_for_line` pour l'ordre de résolution et sa mesure.
         from ai.analyzer_perfig import weapon_profile_for_line
         weapon_info_matched, weapon_carrier_type, _ambiguous_carriers = weapon_profile_for_line(
-            parse_shooter_models_segment(action_desc), state.model_types, shooter_unit_type,
+            _parsed_shooter_models, state.model_types, shooter_unit_type,
             weapon_display_name, config.unit_weapons_cache, is_melee=False,
         )
         if weapon_info_matched is not None:
@@ -445,6 +446,7 @@ def handle_shoot(
             is_close_quarters = True
 
     if weapon_match and weapon_display_name is not None:
+        _parsed_shooter_models = parse_shooter_models_segment(action_desc)
         if shooter_unit_type:
             limits = require_key(config.unit_attack_limits, shooter_unit_type)
             rng_nb_by_weapon = require_key(limits, "rng_nb_by_weapon")
@@ -512,16 +514,16 @@ def handle_shoot(
                 # REPLI EXPLICITE sur le type d'escouade, motif de `per_model_attack_cap` : un
                 # journal sans `[MODEL_TYPES:]`/`[SHOOTER_MODELS:]` reste analysable au niveau de
                 # précision qu'il permet, pas davantage.
-                _combi_shooters = parse_shooter_models_segment(action_desc)
+                _combi_shooters = _parsed_shooter_models
                 _squad_fallback: str = shooter_unit_type
-                _combi_bearers: Tuple[Tuple[str, str], ...]
-                if _combi_shooters and state.model_types:
-                    _combi_bearers = tuple(
+                _combi_bearers: Tuple[Tuple[str, str], ...] = (
+                    tuple(
                         (_mid, state.model_types.get(_mid, _squad_fallback))  # get allowed : socle hors [MODEL_TYPES:]
                         for _mid in _combi_shooters
                     )
-                else:
-                    _combi_bearers = ((shooter_id, _squad_fallback),)
+                    if _combi_shooters and state.model_types
+                    else ((shooter_id, _squad_fallback),)
+                )
                 for _bearer_id, _bearer_type in _combi_bearers:
                     # `unit_combi_by_weapon` couvre TOUT type du registre (analyzer_config:536), et
                     # un type hors registre a déjà fait lever `analyzer_core:301` au resync. Le
@@ -594,7 +596,7 @@ def handle_shoot(
                 # E55 T3 P1 : les 8 Boyz tirent leurs 24 tirs réglementaires (8 × [NB 2 + RAPID
                 # FIRE 1]), puis 2#7 tire les 3 siens — comptés 25, 26, 27 contre un plafond de
                 # 3, soit 3 fausses erreurs. 320 au total sur 23 169 tirs.
-                shooter_models = parse_shooter_models_segment(action_desc)
+                shooter_models = _parsed_shooter_models
                 seq_key = (
                     state.current_episode_num, turn, shooter_id, weapon_name_for_limits,
                     shooter_models,

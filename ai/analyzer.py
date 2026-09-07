@@ -4183,7 +4183,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("-" * 80)
     log_print("PHASES")
     log_print("-" * 80)
-    def _section_summary_line(section: str, label: str, errors: int) -> str:
+    def _section_summary_line(section: str, label: str, errors: int, detail: str = "") -> str:
         """Ligne de résumé d'une section À CORPUS : erreurs ET règles jamais exercées.
 
         Le compte des « jamais exercées » ne vivait que sur la 1.1. Les autres sections rendaient
@@ -4203,7 +4203,7 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
         else:
             icon = "✅"
         suffix = f" (⚠️ {never} règles jamais exercées)" if never > 0 else ""
-        return f"{icon} {section} {label} : {errors}{suffix}"
+        return f"{icon} {section} {label} : {errors}{detail}{suffix}"
 
     log_print(_section_summary_line("1.1", "Erreurs en phase de move", move_errors))
     log_print(_section_summary_line("1.2", "Erreurs en phase de shooting", shooting_errors))
@@ -4305,19 +4305,15 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # 2.8 : une divergence non nulle invalide, pour l'episode concerne, tout controle mesurant
     # une distance ou une adjacence — elle est donc rendue au meme rang que les autres.
     _resync_total = sum(require_key(stats, 'state_resync').values())
-    # Même règle d'icône que les sections à corpus ci-dessus, le détail des quatre compteurs en
-    # plus : `_section_summary_line` rend « <icône> <section> <label> : <n> », et le détail entre
-    # parenthèses doit s'insérer AVANT le suffixe des règles jamais exercées.
-    _resync_line = _section_summary_line("2.8", "Etat reconstruit vs moteur", _resync_total)
-    _resync_head, _, _resync_tail = _resync_line.partition(f": {_resync_total}")
-    log_print(
-        f"{_resync_head}: {_resync_total} "
-        f"(fantomes={stats['state_resync']['dead_missed']}, "
-        f"tuees-a-tort={stats['state_resync']['alive_missed']}, "
-        f"positions={stats['state_resync']['pos_mismatch']}, "
-        f"figurine-allouee-inconnue={stats['state_resync']['alloc_model_unknown']})"
-        f"{_resync_tail}"
-    )
+    log_print(_section_summary_line(
+        "2.8", "Etat reconstruit vs moteur", _resync_total,
+        detail=(
+            f" (fantomes={stats['state_resync']['dead_missed']}, "
+            f"tuees-a-tort={stats['state_resync']['alive_missed']}, "
+            f"positions={stats['state_resync']['pos_mismatch']}, "
+            f"figurine-allouee-inconnue={stats['state_resync']['alloc_model_unknown']})"
+        ),
+    ))
 
     _non_verifiable_count = sum(
         1 for e in load_rules_corpus()
