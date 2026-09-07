@@ -829,19 +829,11 @@ class TestPatchedVsReferenceParity:
             model._update_learning_rate = MagicMock()
             return model
 
-        def capture(model, train_fn):
-            recorded: dict[str, Any] = {}
-            lm = MagicMock()
-            lm.record.side_effect = lambda k, v, **kw: recorded.__setitem__(k, v)
-            object.__setattr__(model, "_logger", lm)
-            train_fn(model)
-            return recorded
-
         # Reset call_count avant chaque run pour avoir des séquences identiques.
         call_count[0] = 0
-        ref_m = capture(make_shell(MaskablePPO, make_buf()), MaskablePPO.train)
+        ref_m = self._run_and_capture(make_shell(MaskablePPO, make_buf()), MaskablePPO.train)
         call_count[0] = 0
-        pat_m = capture(make_shell(PatchedMaskablePPO, make_buf()), PatchedMaskablePPO.train)
+        pat_m = self._run_and_capture(make_shell(PatchedMaskablePPO, make_buf()), PatchedMaskablePPO.train)
 
         ref_kl = float(ref_m.get("train/approx_kl", float("nan")))
         pat_kl = float(pat_m.get("train/approx_kl", float("nan")))

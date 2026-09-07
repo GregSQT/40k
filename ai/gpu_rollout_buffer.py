@@ -32,9 +32,8 @@ le mégaoctet — 18 fois moins que les observations, pour le même nombre de tr
 
 Verlock parité bit-à-bit :
 - bool→float32 : True→1.0, False→0.0 — identique aux 1.0/0.0 du buffer float32 original.
-- Indexation : les observations sont indexées côté numpy (comme le parent) et les champs
-  compacts côté GPU, avec LA MÊME permutation — `indices` est tiré une fois et tranché des
-  deux côtés, jamais retiré par famille de champs.
+- Indexation : la même permutation numpy sert aux deux familles — observations indexées côté
+  numpy, champs compacts convertis en tensor GPU par minibatch dans `_get_samples_gpu`.
 """
 from __future__ import annotations
 
@@ -82,12 +81,10 @@ class GpuMaskableDictRolloutBuffer(MaskableDictRolloutBuffer):
         self, batch_size: int | None = None
     ) -> Generator[MaskableDictRolloutBufferSamples, None, None]:
         assert self.full
-        # UNE permutation, tranchée des deux côtés : les observations s'indexent en numpy et
-        # les champs compacts sur GPU, mais un minibatch doit désigner les mêmes transitions
-        # dans les deux familles. Deux tirages indépendants apparieraient des observations
-        # avec les avantages d'autres transitions — un mélange que rien ne ferait lever.
-        indices = np.random.permutation(self.buffer_size * self.n_envs).astype(np.int64)
-        indices_gpu = th.from_numpy(indices).to(device=self.device)
+        # UNE permutation numpy partagée : observations indexées côté numpy, champs compacts
+        # convertis en tensor GPU par minibatch. Deux tirages indépendants apparieraient des
+        # observations avec les avantages d'autres transitions — un mélange indétectable.
+        indices = np.random.permutation(self.buffer_size * self.n_envs).astype(np.int64, copy=False)
 
         if not self.generator_ready:
             # Reshape (identique au parent).
@@ -116,17 +113,18 @@ class GpuMaskableDictRolloutBuffer(MaskableDictRolloutBuffer):
         start_idx = 0
         while start_idx < self.buffer_size * self.n_envs:
             batch = slice(start_idx, start_idx + batch_size)
-            yield self._get_samples_gpu(indices[batch], indices_gpu[batch])
+            yield self._get_samples_gpu(indices[batch])
             start_idx += batch_size
 
     def _get_samples_gpu(
-        self, batch_inds: np.ndarray, batch_inds_gpu: th.Tensor
+        self, batch_inds: np.ndarray
     ) -> MaskableDictRolloutBufferSamples:
         assert self._gpu_actions is not None, "get() doit être appelé avant _get_samples_gpu()"
         dev = self.device
+        # Indexation numpy PUIS transfert : `v[batch_inds]` rend déjà un bloc contigu de la
+        # taille du minibatch, donc seul ce bloc traverse le bus.
+        batch_inds_gpu = th.as_tensor(batch_inds, device=dev)
         return MaskableDictRolloutBufferSamples(
-            # Indexation numpy PUIS transfert : `v[batch_inds]` rend déjà un bloc contigu de la
-            # taille du minibatch, donc seul ce bloc traverse le bus.
             observations={
                 k: th.as_tensor(v[batch_inds], device=dev)
                 for k, v in self.observations.items()

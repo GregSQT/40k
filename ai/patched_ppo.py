@@ -114,14 +114,11 @@ def _grad_norm_stats(norms: list[th.Tensor], max_norm: float) -> tuple[float, fl
     """Moyenne des normes BRUTES et part des minibatches ou l'ecretage a mordu.
 
     `norms` porte les valeurs RETOURNEES par `clip_grad_norm_`, mesurees avant ecretage.
-    Un seul `.tolist()` pour les deux scalaires — meme doctrine de sync que `_mean_item`.
     """
     if not norms:
         return float("nan"), float("nan")
     stacked = th.stack(norms)
-    both = th.stack([stacked.mean(), (stacked >= max_norm).float().mean()])
-    mean, fraction = both.tolist()
-    return mean, fraction
+    return stacked.mean().item(), (stacked >= max_norm).float().mean().item()
 
 
 class PatchedMaskablePPO(MaskablePPO):
