@@ -154,8 +154,11 @@ def test_a_chain_of_two_levels_is_resolved_oldest_first(tmp_path) -> None:
 def test_the_whole_file_is_returned_unresolved(tmp_path) -> None:
     """Une lecture SANS phase rend la carte des profils telle qu'elle est écrite.
 
-    Ses deux appelants n'en lisent que les NOMS — liste des profils disponibles dans
-    `ai/train.py`, menus de `services/api_server.py`.
+    `ai/train.py` n'en lit que les NOMS (liste des profils disponibles).
+    `services/api_server.py` le transmet au moteur, qui y indexe un profil par son nom — un
+    profil héritier non résolu y serait donc tronqué. Ce second chemin est inerte tant qu'aucun
+    profil déclaré dans `training_config_name` ne porte `extends`. Cf. docstring de
+    `config_loader::_resolve_profile_extends`.
     """
     loader = _loader_sur(tmp_path, {"base": _PARENT, "enfant": {"extends": "base"}})
 
