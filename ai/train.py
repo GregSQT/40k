@@ -4521,7 +4521,12 @@ def setup_callbacks(config, model_path, training_config, training_config_name="d
     from ai.bot_evaluation import validate_bot_eval_worker_params
 
     validate_bot_eval_worker_params(callback_params)
-    _raw_probe = callback_params.get("training_probe_every_n_evals", 0)
+    # 0 n'est pas un repli anti-erreur : c'est la valeur METIER « pas de sonde ». La sonde
+    # d'apprentissage est un instrument reserve aux runs de mesure — `BotEvaluationCallback`
+    # la declare a 0 par defaut et ne l'arme que sur `training_probe_every_n_evals > 0`, et un
+    # test verrouille 0 comme valeur valide. Seul `ArmageddonAgent_x1` la declare (a 3) ;
+    # exiger la cle rendrait tout autre agent inentrainable pour un instrument optionnel.
+    _raw_probe = callback_params.get("training_probe_every_n_evals", 0)  # get allowed: sonde desactivee
     if isinstance(_raw_probe, bool) or not isinstance(_raw_probe, int) or _raw_probe < 0:
         raise ValueError(
             f"callback_params.training_probe_every_n_evals must be an integer >= 0 "
