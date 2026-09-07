@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import functools
 import io
+import os
 import shlex
 import sys
 from contextlib import ExitStack, redirect_stdout
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 RACINE = Path(__file__).resolve().parents[3]
 CLAUDE_MD = RACINE / "CLAUDE.md"
@@ -97,6 +100,14 @@ def _run_main(argv: list[str], extra_patches: dict | None = None) -> tuple[int, 
     from ai import train as train_module  # noqa: PLC0415
 
     old_argv = sys.argv
+    # `main()` pose `W40K_BOARD_PATH` (ai/train.py, dérivé de `--resolution`) dans
+    # l'environnement du PROCESSUS, et ne le retire jamais : c'est voulu pour un vrai run, où
+    # tout ce qui suit doit lire ce plateau. Ici, `main()` rend la main au worker pytest, donc
+    # sans restauration tous les tests suivants du même worker héritent du plateau x1 — le
+    # config-loader résout `geometry_is_hex` dessus, la géométrie passe en hex, et un test
+    # moteur qui n'a rien demandé change de métrique. Mesuré : `test_returned_models_placement`
+    # rougissait selon la répartition xdist. Même restauration que `sys.argv`, même raison.
+    old_board = os.environ.get("W40K_BOARD_PATH")
     buf = io.StringIO()
     result: int = 1
 
@@ -126,6 +137,10 @@ def _run_main(argv: list[str], extra_patches: dict | None = None) -> tuple[int, 
                     result = exc.code if isinstance(exc.code, int) else 0
     finally:
         sys.argv = old_argv
+        if old_board is None:
+            os.environ.pop("W40K_BOARD_PATH", None)
+        else:
+            os.environ["W40K_BOARD_PATH"] = old_board
 
     return (result if isinstance(result, int) else 1), buf.getvalue()
 
@@ -203,4 +218,39 @@ def test_valider_with_scenario_bot_fails_guard() -> None:
     )
     assert "bot is not allowed in --test-only mode" in output, (
         f"Message d'erreur attendu absent de la sortie.\nSortie : {output[-500:]}"
+    )
+
+
+@pytest.mark.parametrize("avant", [None, "board/44x60x5"])
+def test_main_ne_fuit_pas_le_plateau_dans_l_environnement(monkeypatch, avant) -> None:
+    """`main()` ne doit rien laisser de son plateau à ce qui tourne après lui.
+
+    `ai/train.py` pose `W40K_BOARD_PATH` (dérivé de `--resolution`) dans l'environnement du
+    PROCESSUS et ne le retire jamais — correct pour un run réel, où tout ce qui suit doit lire
+    ce plateau. Ici le processus est un worker pytest : la variable survit au test, le
+    config-loader y résout `geometry_is_hex`, et les tests moteur suivants du même worker
+    changent de géométrie sans l'avoir demandé. Défaut mesuré le 2026-09-07 :
+    `tests/unit/engine/test_returned_models_placement.py` rougissait selon la répartition xdist,
+    jamais lancé seul.
+
+    L'état d'entrée est POSÉ, jamais lu : les tests voisins de ce module appellent `main()` avant
+    celui-ci, donc lire `os.environ` à l'entrée revenait à comparer la fuite à elle-même — vert
+    même sans restauration (mesuré). Les deux valeurs posées sont les deux branches de la
+    restauration, et aucune n'est celle que `main()` écrit ici (`--resolution 1` → `44x60x1`).
+    """
+    if avant is None:
+        monkeypatch.delenv("W40K_BOARD_PATH", raising=False)
+    else:
+        monkeypatch.setenv("W40K_BOARD_PATH", avant)
+
+    argv = _get_command("Lancer")
+    code, _output = _run_main(
+        argv,
+        extra_patches={"ai.train.get_scenario_list_for_phase": SystemExit(0)},
+    )
+    assert code == 0, f"la commande 'Lancer' doit atteindre le garde (code={code})"
+    assert os.environ.get("W40K_BOARD_PATH") == avant, (
+        f"main() a laissé W40K_BOARD_PATH={os.environ.get('W40K_BOARD_PATH')!r} alors que le "
+        f"processus portait {avant!r} : tout test suivant du même worker hérite de cette "
+        "résolution de plateau."
     )
