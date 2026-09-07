@@ -187,7 +187,8 @@ def _fight_state(weapons):
     return {
         **initial_faction_ability_state(),
         "models_cache": {"A1": fig,
-                         "T1": {"id": "T1", "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7}},
+                         "T1": {"id": "T1", "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
+                                "HP_MAX": 2}},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "pending_squad_fight_intents": {"1": []},
         "pending_squad_shoot_intents": {},
@@ -283,9 +284,13 @@ def test_invul_save_absente_leve_au_tir(monkeypatch):
     assert "INVUL_SAVE" in str(exc.value)
 
 
-@pytest.mark.parametrize("cle", ["T", "ARMOR_SAVE", "INVUL_SAVE"])
+@pytest.mark.parametrize("cle", ["T", "ARMOR_SAVE", "INVUL_SAVE", "HP_MAX"])
 def test_caracteristique_defensive_absente_leve_en_melee(monkeypatch, cle):
-    """`squad_declare_fight` lisait T/Sv/InSv de la cible avec 4/7/7 par defaut."""
+    """`squad_declare_fight` lisait T/Sv/InSv de la cible avec 4/7/7 par defaut.
+
+    `HP_MAX` a rejoint l enumeration avec le plafond de degat utile
+    (`_useful_expected_damage`) : un defaut a 1 ou 2 y serait tout aussi plausible, donc tout
+    aussi invisible."""
     monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid, tid=None: ["A1"])
     gs = _fight_state([_ccw("Choppa", 3, [])])
     del gs["models_cache"]["T1"][cle]

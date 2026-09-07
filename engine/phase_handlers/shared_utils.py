@@ -8189,6 +8189,37 @@ def _intent_shares_weapon_group(
     return _weapon_group_key(weapons, i_widx) == _weapon_group_key(weapons, widx)
 
 
+def _useful_expected_damage(
+    weapon: Dict[str, Any], target_hp_max: int, context: str
+) -> float:
+    """Degats UTILES d une attaque de cette arme contre une figurine a `target_hp_max` PV.
+
+    DEFINITION UNIQUE du degat utile, partagee par le tir (`_ranged_profile_expected_damage`)
+    et par la melee (`_auto_select_cc_weapon_for_fig`) : deux copies du meme plafond auraient
+    diverge des qu une regle d arme s ajoute, et c est exactement l ecart qui a existe jusqu au
+    2026-09-07 (le tir plafonnait, la melee non).
+
+    L EXCES EST PERDU, dans les DEUX regimes de degats que le moteur modelise :
+    - degats normaux, 05.04 Resolve Damage : « the selected model loses a number of wounds
+      equal to that attack's D characteristic. If this reduces that model's remaining wounds to
+      0 or fewer, it is destroyed. » Aucune clause de report sur la figurine suivante.
+    - [DEVASTATING WOUNDS] 24.10 : « Mortal wounds inflicted by [DEVASTATING WOUNDS] weapons
+      can damage a maximum of one model for each critical wound; any remaining mortal wounds
+      inflicted by that attack are lost. » Le plafond y est donc explicite, alors meme que les
+      blessures mortelles ordinaires (06.02), elles, se reportent d une figurine a l autre.
+    Le meme plafond vaut donc pour les deux branches de `expected_damage_per_attack`, ou
+    `damage` est un facteur commun — il n y a pas de cas ou plafonner serait faux.
+
+    Le plafond est pris sur `HP_MAX` (caracteristique Wounds de la datasheet) et non sur les PV
+    courants : la figurine qui encaissera n est pas connue a la declaration, et HP_MAX est
+    stable sur toute l activation.
+    """
+    return min(
+        float(expected_dice_value(require_key(weapon, "DMG"), context)),
+        float(target_hp_max),
+    )
+
+
 def _ranged_profile_expected_damage(
     game_state: Dict[str, Any],
     weapon: Dict[str, Any],
@@ -8209,18 +8240,12 @@ def _ranged_profile_expected_damage(
     - [BLAST] 24.05 : des additionnels par tranche de 5 figurines cibles. Le nombre ajoute est
       EXACTEMENT celui que la resolution ajoutera, calcule sur la meme taille d escouade que
       l intent enregistre (`target_squad_size_at_declaration`).
-    - Degats perdus : les degats en exces sur une figurine sont perdus, donc une arme a D6
-      degats n en place qu un seul sur une figurine a 1 PV. Sans ce plafond, mesure du
-      2026-09-07 sur le Cyclone : Krak gagne sur les QUATRE cibles types, infanterie 1 PV
+    - Degats perdus : `_useful_expected_damage` plafonne le degat par les PV de la figurine
+      cible (05.04 / 24.10), le jumeau melee passant par le MEME socle. Sans ce plafond, mesure
+      du 2026-09-07 sur le Cyclone : Krak gagne sur les QUATRE cibles types, infanterie 1 PV
       comprise (3,89 contre 2,67) — le « choix » redeviendrait une constante, Frag remplacant
       simplement Krak comme profil mort. Avec le plafond : Frag 2,67 / Krak 1,11 sur
       l infanterie, Krak devant sur marines, terminators et vehicule.
-      Le jumeau melee ne porte PAS ce plafond, et ce n est pas un oubli : meme mesure, 7 unites
-      a plusieurs armes de melee x 4 cibles types = 0 choix modifie, donc rien a y corriger.
-
-    Le plafond est pris sur `HP_MAX` (caracteristique Wounds de la datasheet) et non sur les PV
-    courants : la figurine qui encaissera n est pas connue a la declaration, et HP_MAX est
-    stable sur toute l activation.
     """
     from engine.game_state import effective_invul_save  # cycle : cf. squad_declare_fight
     from engine.phase_handlers.attack_sequence import (
@@ -8248,8 +8273,9 @@ def _ranged_profile_expected_damage(
     blast_x = _blast_extra_dice_per_five(weapon)
     if blast_x is not None:
         n_attacks += blast_x * (int(target_size) // 5)
-    dmg = float(expected_dice_value(require_key(weapon, "DMG"), "pick_combi_profile_dmg"))
-    dmg = min(dmg, float(require_key(t_sample, "HP_MAX")))
+    dmg = _useful_expected_damage(
+        weapon, int(require_key(t_sample, "HP_MAX")), "pick_combi_profile_dmg"
+    )
     # Primitive A cote touche (suppression) : le seuil NOTE doit etre celui que le moteur
     # APPLIQUERA, clamp compris — meme raison qu en melee.
     hit_target, _, _ = resolve_hit_roll_modifiers(
@@ -12507,6 +12533,7 @@ def _extra_attacks_weapon_indices(attacker: Dict[str, Any]) -> List[int]:
 
 def _select_fight_weapon_indices_for_fig(
     attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int,
+    target_hp_max: int,
     target_unit: Optional[Dict[str, Any]] = None,
     *,
     melee_bonus: int = 0,
@@ -12536,7 +12563,7 @@ def _select_fight_weapon_indices_for_fig(
     # « one of that model's OTHER melee weapons » : le choix principal exclut les armes
     # EXTRA ATTACKS (elles sont deja toutes selectionnees).
     main = _auto_select_cc_weapon_for_fig(
-        attacker, target_t, target_sv, target_invul, target_unit,
+        attacker, target_t, target_sv, target_invul, target_hp_max, target_unit,
         excluded_indices=frozenset(extra),
         melee_bonus=melee_bonus, hit_bonus=hit_bonus, hit_malus=hit_malus, cap=cap,
         attacker_unit=attacker_unit, game_state=game_state,
@@ -12548,6 +12575,7 @@ def _select_fight_weapon_indices_for_fig(
 
 def _auto_select_cc_weapon_for_fig(
     attacker: Dict[str, Any], target_t: int, target_sv: int, target_invul: int,
+    target_hp_max: int,
     target_unit: Optional[Dict[str, Any]] = None,
     excluded_indices: frozenset = frozenset(),
     *,
@@ -12569,8 +12597,11 @@ def _auto_select_cc_weapon_for_fig(
     de resolution : une seule definition de l esperance de degats, aucune divergence possible.
 
     `target_unit` fournit les KEYWORDS de la cible, sans lesquels [ANTI-X] est ininterpretable
-    (24.03, union 19.03). `excluded_indices` : armes hors du choix (cf. [EXTRA ATTACKS] 24.11,
-    deja selectionnees). Tie-break : index d arme le plus bas. None si aucune arme.
+    (24.03, union 19.03). `target_hp_max` porte le plafond de degat utile du socle commun
+    (`_useful_expected_damage`) : il est REQUIS et sans defaut, parce que toute valeur par
+    defaut plausible (1, 2) aurait note les armes sur une cible imaginaire au lieu de lever.
+    `excluded_indices` : armes hors du choix (cf. [EXTRA ATTACKS] 24.11, deja selectionnees).
+    Tie-break : index d arme le plus bas. None si aucune arme.
     """
     from engine.phase_handlers.attack_sequence import (
         build_weapon_attack_profile,
@@ -12603,7 +12634,11 @@ def _auto_select_cc_weapon_for_fig(
         ap = int(require_key(w, "AP"))
         # Aucun repli silencieux : une valeur de DMG non resoluble est une donnee d arme
         # invalide, elle doit lever (l ancien try/except la remplacait par 1.0 en silence).
-        dmg = float(expected_dice_value(require_key(w, "DMG"), "auto_select_cc_dmg"))
+        # Plafond par les PV de la cible : cf. `_useful_expected_damage`, socle commun avec le
+        # tir. Sans lui, une arme a D6 degats etait creditee de 3,5 contre une figurine a 1 PV
+        # ou elle n en place qu un — le score aurait prefere la grosse arme a une arme a plus
+        # d attaques, que le moteur, lui, aurait fait mieux jouer.
+        dmg = _useful_expected_damage(w, target_hp_max, "auto_select_cc_dmg")
         n_attacks = float(expected_dice_value(require_key(w, "NB"), "auto_select_cc_nb")) + int(melee_bonus)
         profile = build_weapon_attack_profile(
             w, target_unit, attacker_unit=attacker_unit, game_state=game_state, is_melee=True,
@@ -12663,6 +12698,10 @@ def squad_declare_fight(
     target_unit_for_select = require_unit_by_id(game_state, str(target_squad_id))
     target_t = int(require_key(t_sample, "T"))
     target_sv = int(require_key(t_sample, "ARMOR_SAVE"))
+    # PV de la figurine cible : plafond du degat utile (`_useful_expected_damage`). Lu sur la
+    # MEME figurine echantillon que T / Sv / InSv, jamais sur l entree d escouade — un profil de
+    # figurine peut surcharger le HP_MAX de l unite (cf. `spec_hp_max` a la construction).
+    target_hp_max = int(require_key(t_sample, "HP_MAX"))
     # Waaagh! de la CIBLE : elle peut avoir une invulnerable 5+ absente de sa datasheet. Le
     # choix d arme se fait donc contre la sauvegarde REELLE — sinon l heuristique prefererait
     # une arme a forte penetration contre une invulnerable que l AP n entame pas.
@@ -12703,7 +12742,7 @@ def squad_declare_fight(
         # Select Weapons step (04.01) : arme principale + TOUTES les armes [EXTRA ATTACKS]
         # (24.11). Un intent par arme selectionnee -> une figurine peut produire 2 intents.
         selected_indices = _select_fight_weapon_indices_for_fig(
-            m, target_t, target_sv, target_invul, target_unit_for_select,
+            m, target_t, target_sv, target_invul, target_hp_max, target_unit_for_select,
             melee_bonus=melee_bonus, hit_bonus=_hit_bonus, hit_malus=_hit_malus, cap=_hit_cap,
             attacker_unit=attacker_unit_for_select, game_state=game_state,
             finest_hour_active=_fig_finest_hour_active,
