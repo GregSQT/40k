@@ -269,55 +269,50 @@ which is measured on the code and not on this list.
 
 ### How It Works
 
-**Agent does NOT choose weapons** - weapon selection is automatic.
+**L'agent ne choisit pas l'arme** — il choisit la CIBLE. L'arme est choisie par le moteur, à la
+**déclaration** et **par FIGURINE** (04.01 Multiple Weapon Profiles : « the weapons that model
+has »). Deux porteurs du même combi choisissent donc chacun le leur.
 
-**Decision Flow**:
-1. **Agent decides**: Which target to attack
-2. **System selects**: Best weapon for that target (automatic)
-3. **System executes**: Attack with selected weapon
+**Flux** :
+1. **Agent** : quelle escouade attaquer.
+2. **Moteur** : pour chaque figurine éligible, l'arme (et le profil) de meilleure espérance de
+   dégâts utile contre cette cible.
+3. **Moteur** : déclaration, puis allocation des pertes (05.03 / 05.04).
 
 ### Selection Algorithm
 
-**Location**: `engine/ai/weapon_selector.py`
+**Emplacement** : `engine/phase_handlers/shared_utils.py`.
 
-**Function**: `select_best_ranged_weapon()` / `select_best_melee_weapon()`
+| Voie | Fonction | Score |
+|---|---|---|
+| Mêlée | `def _auto_select_cc_weapon_for_fig` (appelée par `def squad_declare_fight`) | `expected_damage_per_attack` du profil réel de l'arme |
+| Tir | `def _ranged_profile_expected_damage` (appelée par `def squad_declare_shoot`) | idem, mémoïsé par (code d'arme, cible) |
+| Un profil par arme physique | `def _weapon_group_key` / `def _pick_one_profile_per_weapon_group` | argmax du score dans le groupe, égalité → index le plus bas |
 
-**Logic**:
-```python
-for each weapon in unit's weapons:
-    calculate kill_probability(weapon, target)
+Le score modélise l'arme **telle qu'elle sera jouée** : règles d'arme ([ANTI-X], [SUSTAINED
+HITS], [LETHAL HITS], [TWIN-LINKED], [DEVASTATING WOUNDS]…), modificateurs de touche, Waaagh! de
+l'attaquant, sauvegarde invulnérable réelle de la cible (Waaagh! défensif inclus). Les dégâts sont
+plafonnés par les PV de la figurine cible (`def _useful_expected_damage`) : l'excès est perdu
+(05.04, et 24.10 pour [DEVASTATING WOUNDS]).
 
-select weapon with highest kill_probability
-```
-
-### Kill Probability Cache
-
-Le cache `game_state["kill_probability_cache"]` est rempli **à la demande** (lazy) : à la première utilisation de `select_best_ranged_weapon()` ou `select_best_melee_weapon()` pour une paire (unité, arme, cible), la probabilité est calculée et stockée ; les appels suivants lisent le cache. Il n'est plus pré-rempli en début de phase shoot/fight.
-
-### Kill Probability Calculation
-
-**Formula**:
-```python
-p_kill = p_hit × p_wound × p_fail_save × (damage_dealt >= target.HP_CUR)
-
-Where:
-- p_hit = (7 - weapon.ATK) / 6
-- p_wound = Warhammer 40K wound table (STR vs T)
-- p_fail_save = (7 - effective_save) / 6
-- effective_save = max(target.ARMOR_SAVE, target.INVUL_SAVE) + weapon.AP
-```
+Les caractéristiques défensives (T / ARMOR_SAVE / INVUL_SAVE / HP_MAX) sont lues sur une figurine
+RÉELLE du `models_cache`, jamais sur l'entrée d'escouade — un profil de figurine peut surcharger
+le HP_MAX de l'unité.
 
 ### When Selection Happens
 
-**Shooting Phase**:
-- Agent selects target → System picks best ranged weapon → Shoots
+- **Tir** : `squad_declare_shoot` (gym) et les déclarations manuelles PvP
+  (`declare_attack_weapon_qty` / `models_status_for_target` / `toggle_attack_model_weapon`).
+- **Mêlée** : `squad_declare_fight`, appelée par le chemin auto (`_fight_v11_resolve_attacks`,
+  fight_handlers) comme par le chemin manuel.
 
-**Fight Phase**:
-- Agent selects target → System picks best melee weapon → Attacks
+### Historique — politique supprimée
 
-**Integration Points**:
-- `engine/phase_handlers/shooting_handlers.py` (lines ~1177-1193)
-- `engine/phase_handlers/fight_handlers.py` (lines ~1512-1526)
+Le module `engine/ai/weapon_selector.py` (choix d'arme par « kill probability », cache
+`game_state["kill_probability_cache"]`) a été **supprimé le 2026-09-07** : aucun appelant de
+production, aucun test, cache jamais peuplé. Il notait les armes par unité et ignorait la
+figurine, les règles d'arme et le plafond de PV. Sa règle vit désormais dans la déclaration
+ci-dessus.
 
 ---
 
@@ -451,15 +446,16 @@ has_melee_weapons(unit) → bool
 
 ### Weapon Selection
 
-**Module**: `engine/ai/weapon_selector.py`
+**Module**: `engine/phase_handlers/shared_utils.py` (choix à la déclaration, par figurine — cf.
+[AI Weapon Selection](#ai-weapon-selection))
 
 **Key Functions**:
 ```python
-calculate_kill_probability(unit, weapon, target, game_state) → float
+_auto_select_cc_weapon_for_fig(...) → int (index d'arme CC de la figurine)
 
-select_best_ranged_weapon(unit, target, game_state) → int (index)
+_ranged_profile_expected_damage(game_state, weapon, target_squad_id, attacker_unit) → float
 
-select_best_melee_weapon(unit, target, game_state) → int (index)
+_pick_one_profile_per_weapon_group(weapons, candidates, score) → List[(index, cible)]
 ```
 
 ---
