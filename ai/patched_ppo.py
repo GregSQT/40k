@@ -116,7 +116,7 @@ def _grad_norm_stats(norms: list[th.Tensor], max_norm: float) -> tuple[float, fl
     if not norms:
         return float("nan"), float("nan")
     stacked = th.stack(norms)
-    both = th.stack([stacked.mean(), (stacked > max_norm).float().mean()])
+    both = th.stack([stacked.mean(), (stacked >= max_norm).float().mean()])
     mean, fraction = both.tolist()
     return mean, fraction
 

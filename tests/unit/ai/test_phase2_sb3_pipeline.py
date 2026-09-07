@@ -2,7 +2,7 @@
 
 Couvre :
   2.1  GpuMaskableDictRolloutBuffer : bool masks, tenseurs GPU, équivalence vs parent.
-  2.2  PatchedMaskablePPO.train()   : gradient norm single-reduction, perte identique.
+  2.2  PatchedMaskablePPO.train()   : gradient_norm + grad_clip_fraction finis ; verrou pré-écrêtage → test_gradient_norm_is_pre_clip.py.
   2.3  collect_rollouts / inline masks : _get_maskable_subproc_vec_env, extraction depuis infos.
 
 Tous les tests tournent sur CPU (device="cpu") pour ne pas exiger de GPU en CI.
@@ -266,14 +266,15 @@ class TestPatchedTrainNumericalParity:
         # Policy fictive.
         from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
         policy_mock = MagicMock(spec=MaskableActorCriticPolicy)
-        policy_mock.parameters.return_value = iter([])
+        # Paramètre réel : clip_grad_norm_ retourne 0. avec iter([]), rendant isfinite vacueux.
+        _policy_param = torch.ones(1, requires_grad=True)
+        policy_mock.parameters.return_value = [_policy_param]
         # evaluate_actions retourne des valeurs avec grad_fn (nécessaire pour loss.backward()).
         n = 8
         def fake_evaluate_actions(obs, actions, action_masks=None):
-            w = torch.ones(1, requires_grad=True)
-            values = (torch.zeros(n) * w).flatten()
-            log_prob = torch.full((n,), -2.0) * w
-            entropy = torch.zeros(n) * w
+            values = (torch.zeros(n) * _policy_param).flatten()
+            log_prob = torch.full((n,), -2.0) * _policy_param
+            entropy = torch.zeros(n) * _policy_param
             return values, log_prob, entropy
         policy_mock.evaluate_actions.side_effect = fake_evaluate_actions
         policy_mock.optimizer = MagicMock()
@@ -330,6 +331,11 @@ class TestPatchedTrainNumericalParity:
             assert key in recorded, f"{key!r} non enregistré"
             val = recorded[key]
             assert math.isfinite(val), f"{key!r} = {val} (non fini)"
+        # gradient_norm doit être strictement positif (VERT VACANT : iter([]) rendait 0. toujours
+        # fini — le paramètre réel garantit une norme non nulle après backward).
+        assert recorded["train/gradient_norm"] > 0, (
+            f"gradient_norm = {recorded['train/gradient_norm']} : paramètre sans gradient ?"
+        )
 
     def test_n_updates_incremented_once_per_train_call(self):
         """_n_updates doit augmenter de 1 par appel à train(), peu importe n_epochs."""

@@ -172,9 +172,9 @@ def test_removal_targets_the_logger_that_was_wrapped() -> None:
 def test_end_of_episode_dumps_are_not_captured() -> None:
     """Un dump sans marqueur d'update ne declenche aucune capture.
 
-    `_handle_episode_end` appelle `logger.dump` a chaque fin d'episode. Le capturer recalculait la
-    norme du gradient sur tous les parametres pour un dump ne portant aucun update, et publiait un
-    point de plus sur `training_diagnostic/entropy_coef` et `gradient_norm` a chaque episode.
+    `_handle_episode_end` appelle `logger.dump` a chaque fin d'episode. Sans le filtre sur le
+    marqueur d'update, chaque dump declenchait une capture complete : `train/ent_coef` reinjecte et
+    les scalaires PPO du dernier `train()` republies pour un dump qui ne porte aucun update PPO.
     """
     model = _FakeModel()
     tracker = _CountingTracker()

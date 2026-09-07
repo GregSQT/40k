@@ -286,6 +286,10 @@ là-dessus.
   variable, **et donc informative**, avant tout autre réglage.
 - Pour savoir **quel terme** domine la norme, lire `diag/grad_norm_{policy,value,entropy}_mb0` :
   l'écrêtage divise les trois par le même facteur et ne corrige jamais un déséquilibre.
+  **Caveat :** ces courbes par terme sont mesurées au seul minibatch 0 de l'epoch 0, tandis que
+  `gradient_norm` est la moyenne sur **tous les minibatches de toutes les epochs** (`n_epochs=4`).
+  L'écart entre la somme des normes par terme et la norme globale reflète donc en partie des
+  ensembles d'échantillons différents, et pas seulement la non-colinéarité des gradients.
 
 ---
 

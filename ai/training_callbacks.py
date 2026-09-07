@@ -988,7 +988,7 @@ class MetricsCollectionCallback(BaseCallback):
         # `max_grad_norm` et le seuil 10 devient discriminant (mesuree ~1.2 en debut de run).
         # Baisser `max_grad_norm` ne la deplacerait pas : ce plafond borne le pas applique, pas la
         # norme publiee ici.
-        if hasattr(self.metrics_tracker, 'latest_gradient_norm') and self.metrics_tracker.latest_gradient_norm:
+        if hasattr(self.metrics_tracker, 'latest_gradient_norm') and self.metrics_tracker.latest_gradient_norm is not None and math.isfinite(self.metrics_tracker.latest_gradient_norm):
             grad_norm = self.metrics_tracker.latest_gradient_norm
             grad_status = "✅" if grad_norm < 10 else "⚠️ "
             print(f"   Gradient Norm:      {grad_norm:.3f} {grad_status} (target: <10, raw)")

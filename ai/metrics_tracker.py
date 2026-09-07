@@ -18,10 +18,10 @@ DUAL TIER SYSTEM (41 Total Metrics):
      - reward_decomposition (5), phase_performance (4),
        aiturn_compliance (3+)
 
-⚙️ TRAINING HEALTH SYSTEM (17 metrics)
-  🔥 training_critical/ (6) - Algorithm health indicators
+⚙️ TRAINING HEALTH SYSTEM (18 metrics)
+  🔥 training_critical/ (7) - Algorithm health indicators
      - policy_loss, value_loss, explained_variance,
-       clip_fraction, approx_kl, fps
+       clip_fraction, approx_kl, grad_share_policy, fps
 
   🔍 training_diagnostic/ (6) - Hyperparameter monitoring
      - learning_rate, entropy_coef, entropy_loss, n_updates, gradient_norm,
@@ -1598,18 +1598,24 @@ class W40KMetricsTracker:
         # Norme BRUTE publiee par `ai/patched_ppo.py` — retour de `clip_grad_norm_`, mesure avant
         # ecretage — donc NON bornee par `max_grad_norm`. La norme apres ecretage n'a pas de tag :
         # elle vaut min(cette valeur, max_grad_norm).
+        # Le NaN que `patched_ppo` publie quand PPO coupe les epochs avant le premier
+        # `loss.backward()` (early-stop KL) est ECARTE ici — meme doctrine que `grad_share_policy`
+        # ligne 1578. `latest_gradient_norm` reste a sa derniere valeur finie pour le rapport final.
         if 'train/gradient_norm' in model_stats:
-            grad_norm = model_stats['train/gradient_norm']
-            self.latest_gradient_norm = grad_norm  # Store for 00_critical/ dashboard
-            self.writer.add_scalar('training_diagnostic/gradient_norm', grad_norm, self.step_count)
+            grad_norm = float(model_stats['train/gradient_norm'])
+            if np.isfinite(grad_norm):
+                self.latest_gradient_norm = grad_norm
+                self.writer.add_scalar('training_diagnostic/gradient_norm', grad_norm, self.step_count)
 
         # TRAINING DIAGNOSTIC: part des minibatches ou l'ecretage a mordu. A 1.0 la courbe de
         # gradient_norm est plate au plafond et n'informe plus sur l'amplitude du pas.
+        # Meme garde isfinite que gradient_norm : NaN possible si PPO coupe avant loss.backward().
         if 'train/grad_clip_fraction' in model_stats:
-            grad_clip_fraction = model_stats['train/grad_clip_fraction']
-            self.writer.add_scalar(
-                'training_diagnostic/grad_clip_fraction', grad_clip_fraction, self.step_count
-            )
+            grad_clip_fraction = float(model_stats['train/grad_clip_fraction'])
+            if np.isfinite(grad_clip_fraction):
+                self.writer.add_scalar(
+                    'training_diagnostic/grad_clip_fraction', grad_clip_fraction, self.step_count
+                )
         
         # TRAINING CRITICAL: Frames per second (training efficiency)
         if 'time/fps' in model_stats:

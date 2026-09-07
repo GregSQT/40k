@@ -614,6 +614,55 @@ def test_compliance_mapper_phase_and_training_metrics_paths() -> None:
     assert "00_critical/a_bot_eval_combined" in keys
 
 
+def test_grad_clip_fraction_emis_dans_training_diagnostic() -> None:
+    """VERROU : `training_diagnostic/grad_clip_fraction` est publie quand present dans model_stats.
+
+    La branche 1608-1612 de `log_training_metrics` n'etait jamais exercee par les tests existants
+    (aucun ne passait `train/grad_clip_fraction`). Un typo dans la cle ou dans le tag passerait
+    inapercue.
+    """
+    t = _tracker_stub()
+    t.log_training_metrics(
+        {
+            "train/gradient_norm": 0.8,
+            "train/grad_clip_fraction": 0.15,
+        }
+    )
+    keys = [k for k, _, _ in _dw(t).scalars]
+    assert "training_diagnostic/grad_clip_fraction" in keys, (
+        "training_diagnostic/grad_clip_fraction absent alors que train/grad_clip_fraction fourni"
+    )
+    vals = [v for k, v, _ in _dw(t).scalars if k == "training_diagnostic/grad_clip_fraction"]
+    assert vals == [0.15], f"valeur attendue 0.15, obtenu {vals}"
+
+
+def test_gradient_norm_nan_est_ecarte() -> None:
+    """VERROU : un NaN dans `train/gradient_norm` ou `train/grad_clip_fraction` (early-stop KL)
+    ne pollue ni TensorBoard ni `latest_gradient_norm`.
+
+    `_grad_norm_stats` retourne (nan, nan) quand la liste de normes est vide — ce qui arrive si
+    PPO coupe les epochs avant le premier `loss.backward()`. Les deux NaN doivent etre filtres,
+    comme `diag/grad_share_policy_mb0`.
+    """
+    import math as _math
+    t = _tracker_stub()
+    t.latest_gradient_norm = 1.2  # valeur finie precedente
+    t.log_training_metrics({
+        "train/gradient_norm": float("nan"),
+        "train/grad_clip_fraction": float("nan"),
+    })
+    keys = [k for k, _, _ in _dw(t).scalars]
+    assert "training_diagnostic/gradient_norm" not in keys, (
+        "NaN publie sur training_diagnostic/gradient_norm — doit etre ecarte"
+    )
+    assert "training_diagnostic/grad_clip_fraction" not in keys, (
+        "NaN publie sur training_diagnostic/grad_clip_fraction — doit etre ecarte"
+    )
+    assert _math.isfinite(t.latest_gradient_norm), (
+        f"latest_gradient_norm ecrase par NaN : {t.latest_gradient_norm}"
+    )
+
+
 _PPO_CURVE_TAGS: tuple[str, ...] = (
     "00_critical/f_loss_mean",
     "00_critical/g_grad_share_policy_mb0",
