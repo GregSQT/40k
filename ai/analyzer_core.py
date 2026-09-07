@@ -14,7 +14,7 @@ from ai.analyzer_rules import note_rule_usage
 from ai.analyzer_perfig import MODEL_TOKEN_PATTERN, position_is_on_battlefield
 from ai.analyzer_state import AnalyzerState
 from ai.analyzer_config import AnalyzerConfig
-from ai.analyzer_phases import died_before_phase
+from ai.analyzer_phases import claim_kill_context, died_before_phase
 from ai.analyzer_phases.episode_handler import handle_episode_start
 from ai.analyzer_phases.shoot_handler import handle_shoot, handle_wait, handle_advance
 from ai.analyzer_phases.charge_handler import handle_charge
@@ -28,6 +28,10 @@ PLAYER_TWO_ID = 2
 # 07.02 — ordre canonique des phases d'un tour de joueur.
 _PHASE_ORDER = ['COMMAND', 'MOVE', 'SHOOT', 'CHARGE', 'FIGHT']
 _PHASE_RANK: Dict[str, int] = {p: i for i, p in enumerate(_PHASE_ORDER)}
+
+# Phases where kills are tracked (unit_deaths + unit_kill_context). COMMAND exclue :
+# aucune attaque ne peut y survenir et le contexte de tueur n'y a pas de sens.
+_LETHAL_PHASES = frozenset({'MOVE', 'SHOOT', 'CHARGE', 'FIGHT'})
 
 
 def _check_phase_seq(
@@ -513,7 +517,8 @@ def _apply_state_snapshot(state: AnalyzerState, config: AnalyzerConfig, payload:
         state.unit_models_alive[uid] = 0
         state.positions_by_model.pop(uid, None)
         state.dead_units_current_episode.add(uid)
-        if state.last_phase in {'MOVE', 'SHOOT', 'CHARGE', 'FIGHT'}:
+        # unit_kill_context n'est PAS écrit ici : une unité fantôme n'a pas d'attaquant identifiable.
+        if state.last_phase in _LETHAL_PHASES:
             state.unit_deaths.append((state.episode_turn, state.last_phase, uid, state.line_number))
 
 
@@ -1155,12 +1160,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 # unit_kill_context avec pending_removals_actor = None (aucun SHOT
                                 # vu encore). Ce SHOT-ci est potentiellement l'attaque fatale :
                                 # mettre à jour l'acteur pour que same_activation_kill soit correct.
-                                _kill_ctx = state.unit_kill_context.get(target_id)
-                                if _kill_ctx is not None and _kill_ctx[0] is None and _kill_ctx[1] == turn and _kill_ctx[2] == phase:
-                                    state.unit_kill_context[target_id] = (_dmg_actor_id, turn, phase)
-                                    same_activation_kill = True
-                                else:
-                                    same_activation_kill = _kill_ctx == (_dmg_actor_id, turn, phase)
+                                same_activation_kill = claim_kill_context(
+                                    state.unit_kill_context, target_id, _dmg_actor_id, turn, phase
+                                )
                                 if target_already_dead and died_earlier and not same_activation_kill:
                                     stats['shoot_at_dead_unit'][player] += 1
                                     if stats['first_error_lines']['shoot_at_dead_unit'][player] is None:
@@ -1421,7 +1423,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     # FIGHT : marqueur = ligne CONSOLIDATED (12.07 — une seule consolidation par unité
                     # et par phase). SHOOT : marqueur = première ligne SHOT d'un nouvel acteur
                     # (is_shoot_activation_start, 10.02 — livré le 2026-08-17).
-                    if phase in ('MOVE', 'SHOOT', 'CHARGE', 'FIGHT') and is_activation_marker:
+                    if phase in _LETHAL_PHASES and is_activation_marker:
                         if player is None:
                             raise ValueError("player is required for double-activation check")
                         # CLÉ DE PHASE. Pour FIGHT, `(tour, phase, joueur)` ne DÉSIGNE PAS une
@@ -1600,7 +1602,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # `None` dit « mort constatée, tueur à venir » ; la première ligne d'attaque
                         # du même turn/phase revendique la mort (branche `_kill_ctx[0] is None`
                         # côté SHOT comme côté FOUGHT).
-                        if phase in {'MOVE', 'SHOOT', 'CHARGE', 'FIGHT'}:
+                        if phase in _LETHAL_PHASES:
                             state.unit_deaths.append((turn, phase, _dead_uid, state.line_number))
                             state.unit_kill_context[_dead_uid] = (None, turn, phase)
                     _prm = state.pending_model_removals.get(_dead_uid)

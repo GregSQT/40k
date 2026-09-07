@@ -1,6 +1,28 @@
+from typing import Dict, Optional, Tuple
+
 from shared.data_validation import require_key
 
 PHASE_ORDER: dict[str, int] = {'MOVE': 1, 'SHOOT': 2, 'CHARGE': 3, 'FIGHT': 4}
+
+
+def claim_kill_context(
+    unit_kill_context: Dict[str, Tuple[Optional[str], int, str]],
+    target_id: str,
+    actor_id: Optional[str],
+    turn: int,
+    phase: str,
+) -> bool:
+    """Retourne True si actor_id est le tueur de la même activation que target_id.
+
+    Gère l'artefact DEAD-before-SHOT/FOUGHT : `unit_kill_context` est écrit avec actor=None
+    quand la ligne DEAD est vue (avant la ligne d'attaque qui l'a causée). La première ligne
+    d'attaque correspondante revendique la mort et met à jour le contexte.
+    """
+    ctx = unit_kill_context.get(target_id)
+    if ctx is not None and ctx[0] is None and ctx[1] == turn and ctx[2] == phase:
+        unit_kill_context[target_id] = (actor_id, turn, phase)
+        return True
+    return ctx == (actor_id, turn, phase)
 
 
 def died_before_phase(

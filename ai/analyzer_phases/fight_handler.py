@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Optional, Tuple
 
 from ai.analyzer_perfig import parse_shooter_models_segment
 from ai.analyzer_rules import check_anti_x_threshold, note_rule_usage
-from ai.analyzer_phases import died_before_phase
+from ai.analyzer_phases import claim_kill_context, died_before_phase
 from shared.data_validation import require_key
 
 if TYPE_CHECKING:
@@ -325,6 +325,7 @@ def handle_fight(
         if weapon_match:
             weapon_display_name = weapon_match.group(1).strip()
             fighter_unit_type = require_key(state.unit_types, fighter_id)
+            _parsed_shooter_models = parse_shooter_models_segment(action_desc)
             # Résultat de touche 05.01, JUMEAU du tir : même table, même fonction. Cf.
             # ai/analyzer_hit.py.
             from ai.analyzer_hit import check_hit_result, check_melee_hit_threshold
@@ -335,7 +336,7 @@ def handle_fight(
             check_melee_hit_threshold(
                 state, config, stats, line, action_desc, player, fighter_id,
                 fighter_unit_type, weapon_display_name,
-                parse_shooter_models_segment(action_desc),
+                _parsed_shooter_models,
             )
             # Primitive A : la règle a été JUGÉE sur cette ligne (le contrôle ci-dessus s'est
             # prononcé sur un seuil qui l'inclut), donc l'exercice se note ici et pas à l'entrée
@@ -355,7 +356,7 @@ def handle_fight(
             from ai.analyzer_wound import check_wound_threshold, wound_bonus_applies
             check_wound_threshold(
                 state, config, stats, line, action_desc, player, fighter_id, fighter_unit_type,
-                weapon_display_name, target_id, parse_shooter_models_segment(action_desc), is_melee=True,
+                weapon_display_name, target_id, _parsed_shooter_models, is_melee=True,
             )
             # 08.04 Oath of Moment — JUMEAU du tir : la règle joue aussi en mêlée.
             _oath_carriers = config.rule_to_units.get("oath_of_moment", set())
@@ -422,7 +423,7 @@ def handle_fight(
                     # Mesuré sur le run du 2026-08-08, ce plafond d'escouade produisait 20 fausses
                     # « Attacks over CC_NB » : 5 attaques d'un Ancient rattaché (NB=5) plafonnées
                     # au NB=3 de l'Intercessor porteur, 20 attaques de 10 Gretchin plafonnées à 10.
-                    _shooters = parse_shooter_models_segment(action_desc)
+                    _shooters = _parsed_shooter_models
                     # Le GROUPE de figurines qui frappe entre dans la clé, parce qu'il détermine
                     # le plafond. Sans lui, un compteur accumulé sur (phase, unité, arme) était
                     # comparé au plafond du DERNIER groupe : une escouade qui répartit ses
@@ -567,12 +568,9 @@ def handle_fight(
             # _finalize_manual_allocation. Le handler DEAD pose unit_kill_context avec
             # pending_removals_actor = None ; _apply_damage_and_handle_death retourne tôt (hp≤0)
             # sans le mettre à jour. Propager l'acteur réel ici avant le test.
-            _kill_ctx_fight = state.unit_kill_context.get(target_id)
-            if _kill_ctx_fight is not None and _kill_ctx_fight[0] is None and _kill_ctx_fight[1] == turn and _kill_ctx_fight[2] == phase:
-                state.unit_kill_context[target_id] = (fighter_id, turn, phase)
-                same_activation_kill = True
-            else:
-                same_activation_kill = _kill_ctx_fight == (fighter_id, turn, phase)
+            same_activation_kill = claim_kill_context(
+                state.unit_kill_context, target_id, fighter_id, turn, phase
+            )
             if target_died_before_fight and not same_activation_kill:
                 attacker_player = require_key(state.unit_player, fighter_id)
                 stats['fight_dead_unit_target'][attacker_player] += 1
