@@ -195,12 +195,21 @@ def test_every_profile_batch_size_divides_its_real_rollout() -> None:
     import json
     import os
 
+    from config_loader import get_config_loader
+
     config_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
         "config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json",
     )
     with open(config_path, encoding="utf-8-sig") as f:
-        profiles = {k: v for k, v in json.load(f).items() if isinstance(v, dict)}
+        noms = [k for k, v in json.load(f).items() if isinstance(v, dict)]
+    # Profils RESOLUS : un profil qui herite (`extends`) ne redeclare que ce qui change, donc son
+    # JSON brut n'a ni `n_envs` ni la moitie de ses `model_params`. C'est le profil resolu que le
+    # run dimensionne, et c'est donc lui qu'il faut mesurer.
+    loader = get_config_loader()
+    profiles = {
+        nom: loader.load_agent_training_config("ArmageddonAgent_x1", nom) for nom in noms
+    }
 
     assert profiles, "aucun profil lu : le controle ne regarderait rien"
     for name, profile in profiles.items():
@@ -220,7 +229,7 @@ def test_a_batch_size_that_does_not_divide_the_real_rollout_is_refused() -> None
     """LE cas que le validateur du curriculum laissait passer : la troncature de `//`.
 
     32640 / 4080 est un couple parfait sur le papier, et c'est a ce titre que
-    `_validate_lineage_regime` l'acceptait. A `n_envs=7` le rollout reel vaut
+    le validateur du curriculum l'acceptait. A `n_envs=7` le rollout reel vaut
     `(32640 // 7) * 7 = 32634`, que 4080 ne divise pas : reste 3114, soit un mini-lot tronque a
     chaque epoch et des updates de poids inegaux. SB3 emet un avertissement, mais un avertissement
     au demarrage d'un run de plusieurs heures ne se lit pas.
@@ -254,41 +263,10 @@ def test_the_batch_size_check_is_skipped_when_none_is_configured() -> None:
     assert apply_rollout_n_steps({"n_steps": 8192}, 48, _space("box")) == 170
 
 
-def test_every_lineage_regime_batch_size_divides_its_real_rollout() -> None:
-    """Jumeau du controle des profils, cote curriculum.
-
-    `lineage_regime.model_params` ECRASE `n_steps` et `batch_size` du profil sur toute etape
-    `init: from:` — c'est-a-dire la quasi-totalite du curriculum. Le controle des profils ne voit
-    donc PAS les valeurs sous lesquelles ces etapes tournent reellement.
-    """
-    import json
-    import os
-
-    root = os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    )
-    with open(
-        os.path.join(root, "config/agents/ArmageddonAgent_x1/curriculum.json"),
-        encoding="utf-8-sig",
-    ) as f:
-        lineage = json.load(f)["lineage_regime"]["model_params"]
-    with open(
-        os.path.join(
-            root, "config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json"
-        ),
-        encoding="utf-8-sig",
-    ) as f:
-        profiles = {
-            k: v for k, v in json.load(f).items() if isinstance(v, dict) and "n_envs" in v
-        }
-
-    assert profiles, "aucun profil lu : le controle ne regarderait rien"
-    n_steps, batch_size = lineage["n_steps"], lineage["batch_size"]
-    for name, profile in profiles.items():
-        n_envs = profile["n_envs"]
-        rollout = (n_steps // n_envs) * n_envs if n_envs > 1 else n_steps
-        assert rollout % batch_size == 0, (
-            f"lineage_regime sous le profil '{name}' (n_envs={n_envs}) : n_steps={n_steps} -> "
-            f"rollout reel {rollout}, que batch_size={batch_size} ne divise pas "
-            f"(reste {rollout % batch_size})."
-        )
+# Le jumeau `test_every_lineage_regime_batch_size_divides_its_real_rollout` a ete SUPPRIME le
+# 2026-09-07. Il existait parce que le regime de lignee vivait dans le curriculum : ses `n_steps`
+# et `batch_size` ecrasaient ceux de N'IMPORTE quel profil, donc il fallait les confronter au
+# `n_envs` de chacun. Depuis, la lignee EST un profil (`x1_lineage`, qui herite de `x1_long`) et
+# porte son propre `n_envs` : le controle ci-dessus, qui itere sur tous les profils resolus, le
+# couvre exactement. Le garder ferait deux tests pour un invariant, dont un sur une combinaison
+# qui n'existe plus.

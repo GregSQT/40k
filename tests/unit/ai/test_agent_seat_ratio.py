@@ -22,6 +22,7 @@ import pytest
 
 from ai.env_wrappers import BotControlledEnv
 from ai.train import build_training_opponents
+from config_loader import get_config_loader
 from shared.data_validation import ConfigurationError
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -32,6 +33,15 @@ AGENT_CONFIG = os.path.join(
 with open(AGENT_CONFIG, encoding="utf-8-sig") as _f:
     PROFILES = {k: v for k, v in json.load(_f).items() if isinstance(v, dict)}
 PROFILE_NAMES = sorted(PROFILES)
+
+#: Profils de LIGNEE : ils heritent d'un autre profil (`extends`) et decrivent le regime d'une
+#: etape reprise a chaud. Leur JSON brut ne montre que ce qu'ils redeclarent, d'ou `RESOLVED`.
+LINEAGE_PROFILES = {name for name, p in PROFILES.items() if "extends" in p}
+
+RESOLVED = {
+    name: get_config_loader().load_agent_training_config("ArmageddonAgent_x1", name)
+    for name in PROFILE_NAMES
+}
 
 
 def _silent(_message: str) -> None:
@@ -235,7 +245,7 @@ def test_every_profile_declares_a_usable_seat_ratio(profile_name: str) -> None:
     sur une distribution de sièges différente de celle des autres, et son win-rate cesse d'être
     comparable au leur.
     """
-    profile = PROFILES[profile_name]
+    profile = RESOLVED[profile_name]
     seat_mode = profile["agent_seat_mode"]
     if seat_mode != "random":
         assert "agent_seat_p2_ratio" not in profile, (
@@ -249,20 +259,33 @@ def test_every_profile_declares_a_usable_seat_ratio(profile_name: str) -> None:
 
 
 def test_the_profiles_do_not_silently_diverge_on_the_seat_ratio() -> None:
-    """Tous les profils partagent la MÊME valeur, `x1` faisant référence.
+    """Les profils de MÊME régime partagent la MÊME valeur, `x1` faisant référence.
 
-    Le ratio décrit un RÉGIME d'entraînement, pas une longueur de run : le laisser varier d'un
-    profil à l'autre rendrait un run de mise au point non représentatif du run de mesure qu'il est
-    censé préparer.
+    Le ratio décrit un RÉGIME d'entraînement, pas une longueur de run : le laisser varier entre
+    deux profils qui ne diffèrent que par leur durée rendrait un run de mise au point non
+    représentatif du run de mesure qu'il est censé préparer.
+
+    Les profils de LIGNÉE sont hors de cette famille, et c'est délibéré : ils ne sont pas une
+    version plus courte ou plus longue de `x1`, ils décrivent l'autre régime — celui d'un modèle
+    déjà entraîné. Sur-représenter le siège faible sert un modèle qui l'apprend encore, pas une
+    lignée qui doit rester comparable à elle-même d'une étape à la suivante. Leur valeur est
+    épinglée juste en dessous, pour qu'elle ne dérive pas non plus.
     """
-    reference = PROFILES["x1"]["agent_seat_p2_ratio"]
+    reference = RESOLVED["x1"]["agent_seat_p2_ratio"]
     diverging = {
         name: profile["agent_seat_p2_ratio"]
-        for name, profile in PROFILES.items()
-        if profile.get("agent_seat_mode") == "random"
+        for name, profile in RESOLVED.items()
+        if name not in LINEAGE_PROFILES
+        and profile.get("agent_seat_mode") == "random"
         and profile.get("agent_seat_p2_ratio") != reference
     }
     assert not diverging, f"profils divergents (référence x1={reference}) : {diverging}"
+
+
+def test_a_lineage_profile_pins_its_own_seat_ratio() -> None:
+    """La valeur du régime de lignée est épinglée, sinon l'exemption ci-dessus la laisserait libre."""
+    assert LINEAGE_PROFILES == {"x1_lineage"}, sorted(LINEAGE_PROFILES)
+    assert RESOLVED["x1_lineage"]["agent_seat_p2_ratio"] == pytest.approx(0.6)
 
 
 @pytest.mark.parametrize("fixed_mode", ["p1", "p2"])

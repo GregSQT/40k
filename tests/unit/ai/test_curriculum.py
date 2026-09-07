@@ -30,7 +30,7 @@ from ai.curriculum import (
     evaluate_pool_decision,
     evaluate_stage_gate,
     load_curriculum,
-    load_lineage_regime,
+    required_training_config,
     load_parity_check,
     pool_monotonicity_diagnostic,
     promote_stage_model,
@@ -154,32 +154,37 @@ def test_each_stage_ratios_sum_to_one(curriculum, stage_name: str) -> None:
     )
 
 
-#: Les SEPT cles du bloc de lignee, epinglees depuis la specification du 2026-09-07 et non
-#: relues du JSON. Elles ne sont pas « des valeurs par defaut » : elles remplacent vingt rampes
-#: `decay_fraction` et les surcharges d'etape de `vf_coef` / `max_grad_norm`, et c'est leur
-#: UNIFORMITE sur toute la lignee qui rend deux etapes comparables. Un reglage qui reviendrait
-#: se poser sur une seule etape rouvrirait exactement ce que ce bloc ferme.
-EXPECTED_LINEAGE_MODEL_PARAMS = {
-    "learning_rate": 0.001,
-    "ent_coef": 0.03,
-    "n_steps": 32640,
-    "batch_size": 4080,
-    "vf_coef": 0.15,
-    "max_grad_norm": 0.5,
-}
-EXPECTED_LINEAGE_SEAT_P2_RATIO = 0.6
+def test_the_curriculum_names_one_profile_per_nature_of_stage(curriculum) -> None:
+    """Le curriculum ne porte que des NOMS de profils ; les VALEURS vivent dans les profils.
+
+    C'est le partage de responsabilite decide le 2026-09-07 : le curriculum est le seul a savoir
+    quelle etape reprend des poids, le fichier de profils est le seul a savoir ce que vaut un
+    hyperparametre. Un premier jet avait mis les valeurs ici, sous le nom `lineage_regime` ; il
+    les dispersait alors sur deux fichiers, avec une regle de precedence a connaitre pour
+    repondre a « quel learning_rate utilise P5 ».
+    """
+    block = curriculum["training_configs"]
+    assert block["cold_start"] == "x1_long"
+    assert block["lineage"] == "x1_lineage"
+    for role in ("cold_start", "lineage"):
+        assert isinstance(block[role], str) and block[role]
 
 
-def test_the_lineage_block_pins_the_seven_keys_of_the_regime(curriculum) -> None:
-    """Le bloc de lignee porte EXACTEMENT ces sept cles, aux valeurs decidees le 2026-09-07."""
-    regime = load_lineage_regime(curriculum)
-    assert regime["model_params"] == pytest.approx(EXPECTED_LINEAGE_MODEL_PARAMS)
-    assert float(regime["agent_seat_p2_ratio"]) == pytest.approx(EXPECTED_LINEAGE_SEAT_P2_RATIO)
-    # Des SCALAIRES, jamais des rampes : une rampe s'exprime en fraction de la duree du RUN, donc
-    # chaque etape reprise reparcourrait la sienne et rendrait a un modele converge le regime
-    # d'exploration d'un demarrage (mesure du 2026-09-04, cf. le `_doc` du bloc).
-    for key, value in regime["model_params"].items():
-        assert isinstance(value, (int, float)) and not isinstance(value, bool), key
+def test_every_stage_that_resumes_weights_requires_the_lineage_profile(curriculum) -> None:
+    """Le critere est l'init, et lui seul : `new` prend le froid, tout le reste prend la lignee.
+
+    VERT VACANT evite : les deux natures sont representees et comparees a des noms DIFFERENTS,
+    donc un `required_training_config` qui rendrait une constante echouerait.
+    """
+    par_nature = {
+        name: required_training_config(curriculum, require_stage(curriculum, name))
+        for name in stage_order(curriculum)
+    }
+    froid = {n for n, p in par_nature.items() if p == "x1_long"}
+    lignee = {n for n, p in par_nature.items() if p == "x1_lineage"}
+    assert froid == {"P0"}, froid
+    assert lignee == set(stage_order(curriculum)) - {"P0"}
+    assert len(lignee) == 13, sorted(lignee)
 
 
 def test_no_warm_started_stage_declares_hyperparameters_of_its_own(curriculum) -> None:
@@ -384,13 +389,7 @@ def _minimal_curriculum_with_exploiter() -> dict:
             "eval_repeats": 3,
         },
         "parity_check": {"min_score": 0.40, "max_score": 0.60},
-        "lineage_regime": {
-            "model_params": {
-                "learning_rate": 0.001, "ent_coef": 0.03, "n_steps": 32640,
-                "batch_size": 4080, "vf_coef": 0.15, "max_grad_norm": 0.5,
-            },
-            "agent_seat_p2_ratio": 0.6,
-        },
+        "training_configs": {"cold_start": "x1_long", "lineage": "x1_lineage"},
         "exploiter_config": {
             "probe_every_episodes": 1000,
             "probe_cheap_n": 100,
@@ -576,7 +575,7 @@ def test_a_stage_that_resumes_weights_may_not_declare_model_params() -> None:
     broken["stages"]["E1"]["training_config_overrides"] = {
         "total_episodes": 1000, "model_params": {"ent_coef": 0.05},
     }
-    with pytest.raises(ValueError, match="lineage_regime"):
+    with pytest.raises(ValueError, match="training_configs"):
         validate_curriculum(broken)
 
 
@@ -584,7 +583,7 @@ def test_a_stage_that_resumes_weights_may_not_declare_the_seat_ratio() -> None:
     broken = _minimal_curriculum_with_exploiter()
     broken["stages"]["E1"]["role"] = "learner"
     broken["stages"]["E1"]["training_config_overrides"] = {"agent_seat_p2_ratio": 0.9}
-    with pytest.raises(ValueError, match="lineage_regime"):
+    with pytest.raises(ValueError, match="training_configs"):
         validate_curriculum(broken)
 
 
@@ -597,48 +596,52 @@ def test_a_cold_started_stage_may_still_declare_its_own_model_params() -> None:
     validate_curriculum(ok)  # ne leve pas
 
 
-def test_a_resumed_stage_without_a_lineage_block_is_refused() -> None:
-    """Sans regime, une etape reprise reparcourrait les rampes du profil depuis leur depart."""
+def test_a_resumed_stage_without_a_training_configs_block_is_refused() -> None:
+    """Sans contrainte, une etape reprise pourrait tourner sous le profil de demarrage a froid."""
     broken = _minimal_curriculum_with_exploiter()
-    del broken["lineage_regime"]
-    with pytest.raises(ConfigurationError, match="lineage_regime"):
+    del broken["training_configs"]
+    with pytest.raises(ConfigurationError, match="training_configs"):
         validate_curriculum(broken)
 
 
-def test_an_incomplete_lineage_block_is_refused() -> None:
-    """Le bloc est COMPLET ou il n'est pas un regime : une cle omise laisse le profil decider."""
+def test_a_cold_only_curriculum_needs_no_training_configs_block() -> None:
+    """Aucune etape ne reprend de poids : il n'y a pas deux regimes a distinguer."""
+    ok = _minimal_curriculum()
+    for stage in ok["stages"].values():
+        stage["init"] = "new"
+    assert "training_configs" not in ok, "le scenario perdrait son objet si le bloc etait la"
+    validate_curriculum(ok)  # ne leve pas
+
+
+def test_an_incomplete_training_configs_block_is_refused() -> None:
+    """Le bloc est COMPLET ou il ne contraint rien : une nature sans profil accepte tout."""
     broken = _minimal_curriculum_with_exploiter()
-    del broken["lineage_regime"]["model_params"]["vf_coef"]
-    with pytest.raises(ConfigurationError, match="vf_coef"):
+    del broken["training_configs"]["lineage"]
+    with pytest.raises(ConfigurationError, match="lineage"):
         validate_curriculum(broken)
 
 
-def test_a_ramp_in_the_lineage_block_is_refused() -> None:
-    """Un schedule y est refuse : c'est exactement ce que ce bloc existe pour supprimer."""
+def test_the_same_profile_for_both_natures_is_refused() -> None:
+    """Un profil unique ferait disparaitre en silence la distinction froid / chaud."""
     broken = _minimal_curriculum_with_exploiter()
-    broken["lineage_regime"]["model_params"]["ent_coef"] = {
-        "start": 0.1, "end": 0.01, "decay_fraction": 0.5,
-    }
-    with pytest.raises(ValueError, match="ent_coef"):
+    broken["training_configs"]["lineage"] = broken["training_configs"]["cold_start"]
+    with pytest.raises(ValueError, match="MEME profil"):
         validate_curriculum(broken)
 
 
-def test_the_validator_does_not_judge_batch_size_against_a_rollout_it_cannot_know() -> None:
-    """Le controle `n_steps % batch_size` a QUITTE ce validateur, et c'est volontaire.
+def test_an_unknown_role_in_training_configs_is_refused() -> None:
+    """Une cle inventee y serait ignoree en silence, donc sans effet et sans alerte."""
+    broken = _minimal_curriculum_with_exploiter()
+    broken["training_configs"]["exploiter"] = "x1_debug"
+    with pytest.raises(ValueError, match="exploiter"):
+        validate_curriculum(broken)
 
-    `n_steps` est un TOTAL par update qu'`apply_rollout_n_steps` divise par `n_envs` avec
-    troncature : le rollout que SB3 decoupe vaut `(n_steps // n_envs) * n_envs`. Le juger ici sur
-    `n_steps` nu etait faux DANS LES DEUX SENS — 32640/4080 passait alors qu'a n_envs=7 le rollout
-    reel (32634) laisse un mini-lot tronque de 3114, et 100/33 aurait ete refuse alors qu'a
-    n_envs=3 le rollout reel (99) est parfaitement divisible.
 
-    `n_envs` vient du profil d'entrainement, choisi par `--training-config` au lancement : le
-    curriculum ne peut pas le connaitre. Le verrou reel vit dans `apply_rollout_n_steps`
-    (`tests/unit/ai/test_rollout_buffer_sizing.py`).
-    """
-    ok = _minimal_curriculum_with_exploiter()
-    ok["lineage_regime"]["model_params"]["batch_size"] = 3000
-    validate_curriculum(ok)  # ne leve plus : ce n'est pas a ce validateur d'en juger
+def test_a_non_string_profile_name_is_refused() -> None:
+    broken = _minimal_curriculum_with_exploiter()
+    broken["training_configs"]["lineage"] = 4080
+    with pytest.raises(TypeError, match="lineage"):
+        validate_curriculum(broken)
 
 
 def test_a_parity_window_that_misses_parity_is_refused() -> None:

@@ -8,14 +8,24 @@
 faisant varier des hyperparamètres étape par étape ; l'option A supprime cette possibilité au lieu
 de chercher les bonnes valeurs pour chaque étape.
 
-**1. Un bloc `lineage_regime` en tête de `curriculum.json`, sept clés, appliqué à TOUTE étape
-`init: "from:"`** — les dix learners comme les trois exploiteurs. `learning_rate` 0.001 et
-`ent_coef` 0.03 **scalaires**, `n_steps` 32640, `batch_size` 4080, `vf_coef` 0.15,
-`max_grad_norm` 0.5, `agent_seat_p2_ratio` 0.6. Les vingt rampes `decay_fraction` des étapes
-disparaissent, ainsi que les surcharges de `vf_coef` / `max_grad_norm` de P2 et P3 ; une étape
-reprise ne déclare plus que `total_episodes`, et le validateur refuse le reste. Le profil
-`x1_long` garde ses rampes et son `vf_coef` 0.5 pour le seul départ à froid P0. Détail chiffré et
-mesures : `Documentation/Reference/training/entrainement.md`, section « Rampes ».
+**1. Un PROFIL de lignée, `x1_lineage`, appliqué à TOUTE étape `init: "from:"`** — les dix
+learners comme les trois exploiteurs. `learning_rate` 0.001 et `ent_coef` 0.03 **scalaires**,
+`n_steps` 32640, `batch_size` 4080, `vf_coef` 0.15, `agent_seat_p2_ratio` 0.6 ; tout le reste,
+`max_grad_norm` 0.5 compris, est **hérité** de `x1_long` par `"extends"`. Les vingt rampes
+`decay_fraction` des étapes disparaissent, ainsi que les surcharges de `vf_coef` /
+`max_grad_norm` de P2 et P3 ; une étape reprise ne déclare plus que `total_episodes`, et le
+validateur refuse le reste. `x1_long` garde ses rampes et son `vf_coef` 0.5 pour le seul départ à
+froid P0.
+
+**Deuxième version, le 2026-09-07 même.** Le premier jet portait ces valeurs dans un bloc
+`lineage_regime` du curriculum. Il les dispersait sur deux fichiers avec une règle de précédence à
+connaître pour répondre à « quel `learning_rate` utilise P5 », là où le dépôt exprime déjà « un
+autre régime » par « un autre profil » — six fois dans le même fichier. Le bloc est remplacé par
+un profil, et le curriculum ne porte plus que les deux **noms**, dans `training_configs`
+(`cold_start` / `lineage`). `ai/train.py::_prepare_curriculum_stage` **refuse au lancement** un
+`--training-config` qui ne correspond pas à la nature de l'étape ; le mécanisme d'héritage vit
+dans `config_loader::_resolve_profile_extends`. Détail chiffré et mesures :
+`Documentation/Reference/training/entrainement.md`, section « Rampes ».
 
 **2. `P00` supprimée, `P0` passe en `init: "new"`, E1/E2/E3 passent en `init: "from:P0"`.** La
 graine n'existait que pour éviter de repayer un warmup à chaque learner, ce que le chaînage a rendu

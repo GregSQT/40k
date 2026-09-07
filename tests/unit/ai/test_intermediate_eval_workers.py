@@ -43,8 +43,18 @@ AGENT_CONFIG = (
 
 
 def _profiles() -> Dict[str, Dict[str, Any]]:
+    """Les profils RESOLUS, `extends` applique.
+
+    Lire le JSON brut ne montrerait que ce qu'un profil heritier REDECLARE : la cle verrouillee
+    ici lui viendrait de son parent et le test la croirait absente. C'est le profil resolu que le
+    run applique.
+    """
+    from config_loader import get_config_loader
+
     with open(AGENT_CONFIG, encoding="utf-8-sig") as fh:
-        return {k: v for k, v in json.load(fh).items() if isinstance(v, dict)}
+        noms = [k for k, v in json.load(fh).items() if isinstance(v, dict)]
+    loader = get_config_loader()
+    return {nom: loader.load_agent_training_config("ArmageddonAgent_x1", nom) for nom in noms}
 
 
 PROFILE_NAMES = sorted(_profiles())

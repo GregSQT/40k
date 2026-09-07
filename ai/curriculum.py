@@ -94,8 +94,15 @@ _GATE_REQUIRED_KEYS = (
 #: Cles obligatoires du bloc `parity_check`.
 _PARITY_CHECK_REQUIRED_KEYS = ("min_score", "max_score")
 
-#: Cle du bloc de regime de lignee, applique a TOUTE etape reprise a chaud (`init: from:`).
-LINEAGE_REGIME_KEY = "lineage_regime"
+#: Cle du bloc qui nomme le profil d'entrainement exige par chaque NATURE d'etape.
+TRAINING_CONFIGS_KEY = "training_configs"
+
+#: Les deux natures d'etape, et l'unique critere qui les separe : reprendre des poids ou non.
+#: `cold_start` ne concerne que l'etape qui demarre en `init: "new"` ; `lineage` couvre toutes
+#: les autres, learners chaines comme exploiteurs.
+TRAINING_CONFIG_ROLE_COLD_START = "cold_start"
+TRAINING_CONFIG_ROLE_LINEAGE = "lineage"
+_TRAINING_CONFIG_ROLES = (TRAINING_CONFIG_ROLE_COLD_START, TRAINING_CONFIG_ROLE_LINEAGE)
 
 #: Cles autorisees au niveau racine de `training_config_overrides` d'une etape learner.
 #: Toute cle absente de cette liste est refusee a la validation du curriculum.
@@ -152,24 +159,6 @@ STAGE_HP_OVERRIDES_MODEL_PARAM_SPECS: Dict[str, _ModelParamSpec] = {
 STAGE_HP_OVERRIDES_ALLOWED_MODEL_PARAMS: frozenset = frozenset(
     STAGE_HP_OVERRIDES_MODEL_PARAM_SPECS
 )
-
-#: `model_params` que le bloc `lineage_regime` impose a toute etape reprise a chaud, et la
-#: contrainte de chacun. La liste est CLOSE : une cle de plus doit etre declaree ici avant de
-#: pouvoir etre ecrite dans le JSON, sans quoi un hyperparametre voyagerait jusqu'au modele sans
-#: qu'aucun controle ne l'ait lu.
-#:
-#: `allow_schedule=False` PARTOUT, et c'est le fond de la decision du 2026-09-07 : une rampe est
-#: exprimee en fraction de la duree du RUN, donc chaque etape reprise reparcourait la sienne
-#: depuis le debut et rendrait a un modele converge le regime d'exploration d'un demarrage. Le
-#: bloc de lignee n'accepte donc que des scalaires. La justification mesuree vit dans son `_doc`.
-LINEAGE_REGIME_MODEL_PARAM_SPECS: Dict[str, _ModelParamSpec] = {
-    "learning_rate": _ModelParamSpec(integer=False, allow_zero=False, allow_schedule=False),
-    "ent_coef": _ModelParamSpec(integer=False, allow_zero=True, allow_schedule=False),
-    "n_steps": _ModelParamSpec(integer=True, allow_zero=False, allow_schedule=False),
-    "batch_size": _ModelParamSpec(integer=True, allow_zero=False, allow_schedule=False),
-    "vf_coef": _ModelParamSpec(integer=False, allow_zero=False, allow_schedule=False),
-    "max_grad_norm": _ModelParamSpec(integer=False, allow_zero=False, allow_schedule=False),
-}
 
 #: Sous-cles de `callback_params` autorisees dans un override d'etape.
 #: `bot_eval_freq` et `bot_eval_final` sont les seuls parametres d'evaluation qui dependent
@@ -497,78 +486,95 @@ def _validate_parity_check_block(block: Any, context: str) -> None:
         )
 
 
-def _validate_lineage_regime(curriculum: Dict[str, Any], source: str) -> None:
-    """Valide le bloc `lineage_regime`, obligatoire des qu'une etape reprend des poids.
+def _validate_training_configs(curriculum: Dict[str, Any], source: str) -> None:
+    """Valide le bloc `training_configs`, obligatoire des qu'une etape reprend des poids.
 
-    Il vaut pour TOUTE etape `init: from:` — learners comme exploiteurs —, donc son absence ne
-    peut pas etre traitee comme « pas de regime » : ce serait rendre a chaque etape reprise les
-    rampes du profil, c'est-a-dire exactement le defaut mesure le 2026-09-04 (entropie multipliee
-    par cinq a la reprise, politique promue detruite en 10 000 episodes).
+    Il nomme le profil d'entrainement que chaque NATURE d'etape exige. Son absence ne peut pas
+    valoir « pas de contrainte » : ce serait laisser une etape reprise tourner sous le profil de
+    demarrage a froid, donc reparcourir ses rampes depuis le depart et rendre a un modele
+    converge le regime d'exploration d'un run neuf. Mesure du 2026-09-04 : P1 s'etait arretee a
+    un `ent_coef` de ~0,018, P2 est repartie a 0,100, l'evaluation bots est tombee de 0,911 a
+    0,694 et le score contre P1 — garanti a 0,50 par construction — est tombe a 0,118.
+
+    Le bloc ne porte que des NOMS. Les valeurs, elles, vivent dans le fichier de profils, ou
+    `x1_lineage` herite de `x1_long` par `extends` (`config_loader::_resolve_profile_extends`).
+    C'est le partage de responsabilite : le curriculum sait quelle etape reprend des poids, le
+    fichier de profils sait ce que vaut un hyperparametre. Le faire porter les valeurs au
+    curriculum les dispersait sur deux fichiers, avec une regle de precedence a connaitre.
+
+    L'EXISTENCE du profil nomme n'est PAS verifiee ici : le curriculum ne sait pas quel agent ni
+    quel fichier de profils lui seront passes, et `config_loader` leve deja, en nommant les
+    profils disponibles, quand `--training-config` designe un profil absent.
     """
     order = stage_order(curriculum)
     resumed = [
         name for name in order
         if stage_init_source(require_stage(curriculum, name)) is not None
     ]
-    if LINEAGE_REGIME_KEY not in curriculum:
+    if TRAINING_CONFIGS_KEY not in curriculum:
         if not resumed:
             return
         raise ConfigurationError(
-            f"{source}: bloc '{LINEAGE_REGIME_KEY}' absent alors que {resumed} reprennent des "
-            "poids. Sans lui, chaque etape reprise reparcourrait les rampes du profil depuis leur "
-            "depart et rendrait a un modele converge le regime d'exploration d'un demarrage."
+            f"{source}: bloc '{TRAINING_CONFIGS_KEY}' absent alors que {resumed} reprennent des "
+            "poids. Sans lui, rien n'empeche une etape reprise de tourner sous le profil de "
+            "demarrage a froid et d'en reparcourir les rampes depuis leur depart."
         )
-    block = curriculum[LINEAGE_REGIME_KEY]
+    block = curriculum[TRAINING_CONFIGS_KEY]
     if not isinstance(block, dict):
-        raise TypeError(f"{source}: curriculum.{LINEAGE_REGIME_KEY} doit etre un objet JSON.")
+        raise TypeError(f"{source}: curriculum.{TRAINING_CONFIGS_KEY} doit etre un objet JSON.")
 
-    model_params = require_key(block, "model_params")
-    if not isinstance(model_params, dict):
-        raise TypeError(f"{source}: {LINEAGE_REGIME_KEY}.model_params doit etre un objet.")
-    unknown = sorted(set(model_params) - set(LINEAGE_REGIME_MODEL_PARAM_SPECS))
+    declared = {k for k in block if not str(k).startswith("_")}
+    unknown = sorted(declared - set(_TRAINING_CONFIG_ROLES))
     if unknown:
         raise ValueError(
-            f"{source}: {LINEAGE_REGIME_KEY}.model_params contient des cles non autorisees : "
-            f"{unknown}. Cles autorisees : {sorted(LINEAGE_REGIME_MODEL_PARAM_SPECS)}"
+            f"{source}: {TRAINING_CONFIGS_KEY} contient des cles non autorisees : {unknown}. "
+            f"Cles autorisees : {sorted(_TRAINING_CONFIG_ROLES)}"
         )
-    missing = sorted(set(LINEAGE_REGIME_MODEL_PARAM_SPECS) - set(model_params))
+    missing = sorted(set(_TRAINING_CONFIG_ROLES) - declared)
     if missing:
         raise ConfigurationError(
-            f"{source}: {LINEAGE_REGIME_KEY}.model_params manque {missing}. Le bloc est COMPLET "
-            "ou il n'est pas un regime : une cle omise laisserait la valeur du profil s'appliquer "
-            "aux etapes reprises sans que rien ne le dise."
+            f"{source}: {TRAINING_CONFIGS_KEY} manque {missing}. Le bloc est COMPLET ou il ne "
+            "contraint rien : une nature d'etape sans profil declare accepterait n'importe quel "
+            "profil en ligne de commande, ce que ce bloc existe pour refuser."
         )
-    for key, spec in LINEAGE_REGIME_MODEL_PARAM_SPECS.items():
-        _check_model_param(
-            model_params[key], spec, f"{source}: {LINEAGE_REGIME_KEY}.model_params.{key}"
-        )
-    # PAS de controle `n_steps % batch_size` ici : il serait faux DANS LES DEUX SENS. `n_steps`
-    # est un TOTAL par update, qu'`apply_rollout_n_steps` divise par `n_envs` avec troncature —
-    # le rollout que SB3 decoupe vaut `(n_steps // n_envs) * n_envs`, pas `n_steps`. A n_envs=7,
-    # 32640/4080 passait ce controle alors que le vrai rollout (32634) laisse un mini-lot tronque
-    # de 3114 ; a l'inverse 100/33 sur 3 envs l'aurait refuse alors que le rollout reel (99) est
-    # bien divisible. `n_envs` vient du profil d'entrainement (`--training-config`), que le
-    # curriculum ne connait pas : le controle vit donc la ou les deux grandeurs se rencontrent,
-    # dans `apply_rollout_n_steps` (ai/train.py).
-
-    ratio = require_key(block, "agent_seat_p2_ratio")
-    if not isinstance(ratio, (int, float)) or isinstance(ratio, bool):
-        raise TypeError(
-            f"{source}: {LINEAGE_REGIME_KEY}.agent_seat_p2_ratio doit etre un nombre (got {ratio!r})"
-        )
-    if not 0.0 <= float(ratio) <= 1.0:
+    for role in _TRAINING_CONFIG_ROLES:
+        value = block[role]
+        if not isinstance(value, str) or not value:
+            raise TypeError(
+                f"{source}: {TRAINING_CONFIGS_KEY}.{role} doit nommer un profil "
+                f"d'entrainement (chaine non vide), got {value!r}"
+            )
+    if block[TRAINING_CONFIG_ROLE_COLD_START] == block[TRAINING_CONFIG_ROLE_LINEAGE]:
         raise ValueError(
-            f"{source}: {LINEAGE_REGIME_KEY}.agent_seat_p2_ratio doit etre dans [0.0, 1.0] "
-            f"(got {ratio!r}) : c'est une PART des episodes."
+            f"{source}: {TRAINING_CONFIGS_KEY} nomme le MEME profil "
+            f"({block[TRAINING_CONFIG_ROLE_COLD_START]!r}) pour le demarrage a froid et pour la "
+            "lignee. Les deux natures d'etape n'ont pas le meme regime d'optimisation — un "
+            "modele qui part de poids aleatoires doit explorer, un modele converge doit "
+            "continuer — et un profil unique ferait disparaitre cette distinction en silence."
         )
 
 
-def load_lineage_regime(curriculum: Dict[str, Any]) -> Dict[str, Any]:
-    """Le bloc `lineage_regime` du curriculum. Absent = erreur explicite, jamais un dict vide."""
-    block = require_key(curriculum, LINEAGE_REGIME_KEY)
-    if not isinstance(block, dict):
-        raise TypeError(f"curriculum.{LINEAGE_REGIME_KEY} doit etre un objet JSON.")
-    return block
+def required_training_config(
+    curriculum: Dict[str, Any], stage: Dict[str, Any]
+) -> Optional[str]:
+    """Nom du profil d'entrainement que CETTE etape exige, ou None si le curriculum n'en impose aucun.
+
+    Le critere est le seul qui compte : l'etape reprend-elle des poids. Une etape en
+    `init: "new"` part de zero et prend le profil de demarrage a froid ; toute autre reprend un
+    modele deja entraine et prend celui de la lignee, learner chaine comme exploiteur.
+    """
+    role = (
+        TRAINING_CONFIG_ROLE_COLD_START
+        if stage_init_source(stage) is None
+        else TRAINING_CONFIG_ROLE_LINEAGE
+    )
+    block = curriculum.get(TRAINING_CONFIGS_KEY)  # get allowed: bloc absent = aucune contrainte
+    if block is None:
+        # `_validate_training_configs` ACCEPTE son absence quand aucune etape ne reprend de poids
+        # (curriculum entierement a froid : il n'y a pas deux regimes a distinguer). Exiger le
+        # bloc ici rendrait injouable un curriculum que le validateur vient d'accepter.
+        return None
+    return str(require_key(block, role))
 
 
 def load_parity_check(curriculum: Dict[str, Any]) -> Tuple[float, float]:
@@ -781,10 +787,10 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
                 raise ValueError(f"{source}: stages[{name}].budget_cap doit etre > 0")
         _validate_stage_hp_overrides(name, stage, source)
 
-    # EN DERNIER : le regime de lignee lit les `init` de toutes les etapes, donc il suppose que
-    # « init nomme une etape ANTERIEURE » a deja ete tranche par la boucle ci-dessus. Le valider
-    # avant ferait tomber un refus de regime la ou le defaut reel est un ordre d'etapes casse.
-    _validate_lineage_regime(curriculum, source)
+    # EN DERNIER : la contrainte de profil lit les `init` de toutes les etapes, donc elle suppose
+    # que « init nomme une etape ANTERIEURE » a deja ete tranche par la boucle ci-dessus. La
+    # valider avant ferait tomber un refus de profil la ou le defaut reel est un ordre casse.
+    _validate_training_configs(curriculum, source)
 
 
 _ROBUST_WINDOW_MIN = 3
@@ -843,17 +849,17 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
         )
     if stage_init_source(stage) is not None:
         # REGIME DE LIGNEE (2026-09-07) : une etape reprise a chaud ne decide plus de ses
-        # hyperparametres, `lineage_regime` les porte pour toute la lignee. Les laisser
-        # declarables ferait coexister deux sources pour la meme valeur, et c'est la source
-        # perdante — les overrides d'etape sont appliques AVANT le regime — qui aurait l'air
-        # d'etre celle qui decide en relisant le JSON.
+        # hyperparametres, le PROFIL de lignee les porte pour toute la lignee. Les laisser
+        # declarables ici ferait coexister deux sources pour la meme valeur, dont une — le
+        # profil — invisible depuis le curriculum.
         governed = sorted(set(overrides) & {"model_params", "agent_seat_p2_ratio"})
         if governed:
             raise ValueError(
                 f"{source}: stages[{name}] reprend des poids (init={stage['init']!r}) et declare "
-                f"{governed} dans training_config_overrides. Ces cles appartiennent au bloc "
-                f"'{LINEAGE_REGIME_KEY}' du curriculum, qui vaut pour TOUTES les etapes reprises "
-                "a chaud. Une etape reprise ne declare que sa duree et son adversite."
+                f"{governed} dans training_config_overrides. Ces cles appartiennent au profil "
+                f"nomme par {TRAINING_CONFIGS_KEY}.{TRAINING_CONFIG_ROLE_LINEAGE}, qui vaut pour "
+                "TOUTES les etapes reprises a chaud. Une etape reprise ne declare que sa duree "
+                "et son adversite."
             )
     unknown_top = sorted(set(overrides) - STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS)
     if unknown_top:

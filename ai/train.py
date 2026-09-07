@@ -916,7 +916,8 @@ def apply_rollout_n_steps(model_params: Dict[str, Any], n_envs: int, observation
 
     # SEUL endroit qui connaisse le rollout REEL et le `batch_size` qui le decoupera : les deux
     # grandeurs viennent de sources differentes (`n_envs` du profil d'entrainement, `batch_size`
-    # des model_params, eventuellement ecrases par `lineage_regime`) et ne se rencontrent qu'ici.
+    # des model_params du profil, celui de lignee comme celui de demarrage) et ne se rencontrent
+    # qu'ici.
     # Le controle vivait dans le validateur du curriculum sur `n_steps` NU, ou il etait faux dans
     # les deux sens : il laissait passer 32640/4080 a n_envs=7 (rollout reel 32634, mini-lot
     # tronque de 3114) et aurait refuse 100/33 a n_envs=3 (rollout reel 99, parfaitement divisible).
@@ -1855,7 +1856,7 @@ from ai.curriculum import (
     is_exploiter_stage,
     load_curriculum,
     load_exploiter_config,
-    load_lineage_regime,
+    required_training_config,
     load_parity_check,
     pool_monotonicity_diagnostic,
     promote_stage_model,
@@ -5150,35 +5151,6 @@ def announce_lineage_continuity(
     return deviations
 
 
-def apply_lineage_regime(cfg: Dict[str, Any], lineage_regime: Dict[str, Any]) -> None:
-    """Impose le regime de lignee a la config chargee (mutation en place).
-
-    Pose des SCALAIRES par-dessus les rampes du profil, et c'est tout l'objet du bloc : une rampe
-    s'exprime en fraction de la duree du RUN (`setup_callbacks`), donc chaque etape reprise
-    reparcourrait la sienne depuis le depart et rendrait a un modele converge le regime
-    d'exploration d'un demarrage. Mesure du 2026-09-04 : P1 arretee a un `ent_coef` de ~0,018,
-    P2 repartie a 0,100, evaluation bots de 0,911 a 0,694 et score contre P1 — garanti a 0,50 par
-    construction — tombe a 0,118.
-
-    Un `ent_coef` ou un `learning_rate` scalaire ne cree AUCUN callback de rampe
-    (`setup_callbacks` ne construit `EntropyScheduleCallback` / `LearningRateScheduleCallback` que
-    sur un dict) : la valeur reste celle-la pour tout le run, ce qui est exactement l'intention.
-
-    Applique APRES `_apply_stage_hp_overrides` : une etape reprise n'a pas le droit de declarer
-    ces cles (`ai.curriculum._validate_stage_hp_overrides` le refuse), donc il n'y a rien a
-    ecraser — l'ordre garantit seulement qu'un futur assouplissement de ce refus ne ferait pas
-    silencieusement gagner l'etape contre la lignee.
-    """
-    model_params = require_key(cfg, "model_params")
-    if not isinstance(model_params, dict):
-        raise TypeError(
-            f"`model_params` doit etre un dict pour appliquer le regime de lignee "
-            f"(got {type(model_params).__name__})."
-        )
-    model_params.update(require_key(lineage_regime, "model_params"))
-    cfg["agent_seat_p2_ratio"] = require_key(lineage_regime, "agent_seat_p2_ratio")
-
-
 def parent_total_episodes(training_config: Dict[str, Any]) -> Optional[int]:
     """Budget d'episodes tel que le PARENT l'a decide — a passer aux workers.
 
@@ -5223,8 +5195,6 @@ def _is_phase_config(cfg: Dict[str, Any]) -> bool:
 def _install_stage_config_overrides(
     config, agent_key: str, opponent_mix: Optional[Dict[str, Any]],
     hp_overrides: Dict[str, Any], warm_start: bool, stage_label: str = "",
-    warm_start_model_path: Optional[str] = None,
-    lineage_regime: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Ce que l'etape impose a TOUTE lecture ulterieure de la config de cet agent.
 
@@ -5240,10 +5210,6 @@ def _install_stage_config_overrides(
       Sur une etape reprise a chaud, `total_episodes` est la SEULE cle que le curriculum y
       autorise encore (`ai.curriculum._validate_stage_hp_overrides`) — ignorees quand le dict est
       vide.
-    - `lineage_regime` : le bloc du curriculum, applique a toute etape reprise a chaud. Il pose
-      des scalaires par-dessus les rampes du profil et emporte `agent_seat_p2_ratio`. Il vaut
-      aussi pour les exploiteurs, auxquels `training_config_overrides` est interdit : le porter
-      en code et non en JSON est ce qui les couvre.
     - `warm_start` : quand l'etape reprend les poids d'une autre, la rampe de deploiement est
       figee a sa valeur terminale (cf. `_pin_deployment_ramp_for_warm_start`). C'est un
       COMPORTEMENT et non un override declarable : `deployment_mode_schedule` est exclu des cles
@@ -5262,24 +5228,6 @@ def _install_stage_config_overrides(
     original_load = config.load_agent_training_config
 
     # LE REGIME DE LIGNEE DECIDE, l'etape n'a plus voix au chapitre sur ces cles (2026-09-07).
-    # Le curriculum refuse desormais `model_params` et `agent_seat_p2_ratio` a toute etape
-    # reprise a chaud, precisement pour qu'il n'y ait qu'une source. Le controle de continuite
-    # ci-dessous ne corrige RIEN : il annonce l'ecart entre ce que le modele repris porte et ce
-    # que le regime lui impose, pour qu'une courbe qui bouge a l'ouverture soit attribuable.
-    #
-    # Lu UNE fois, ici : le decorateur est rappele a chaque lecture de config, et rouvrir le zip
-    # a chaque fois paierait la lecture pour rien.
-    if warm_start and lineage_regime is not None:
-        # PAS de repli sur None quand le chemin manque : une reprise a chaud sans modele source
-        # est un etat impossible en production — les deux branches d'`_apply_stage_init` posent
-        # `args.resume_from` — et l'accepter en silence rendrait le controle muet sur le chemin
-        # meme qu'il documente.
-        announce_lineage_continuity(
-            require_present(warm_start_model_path, "warm_start_model_path"),
-            require_key(lineage_regime, "model_params"),
-            stage_label,
-        )
-
     # UNE seule annonce par run, posee au premier passage du decorateur : la config est relue des
     # dizaines de fois. La lire ICI pour l'annonce ne marcherait pas — `original_load(agent_key,
     # None)` rend le FICHIER multi-profils entier (`config_loader`, branche `phase is None`), donc
@@ -5293,11 +5241,20 @@ def _install_stage_config_overrides(
 
     def _load_with_stage(loaded_agent_key: str, phase: Optional[str] = None) -> Dict[str, Any]:
         cfg = original_load(loaded_agent_key, phase)
-        if isinstance(cfg, dict) and loaded_agent_key == agent_key:
+        # `_is_phase_config` est evalue AVANT toute ecriture, et c'est ce qui le rend juste : il
+        # reconnait un profil a la presence de `total_episodes`, `model_params` ou
+        # `deployment_mode_schedule`, or `_apply_stage_hp_overrides` pose justement
+        # `total_episodes`. Applique au fichier multi-profils — la forme que rend une lecture sans
+        # phase, dont `_require_training_config_phase` se sert pour lister les profils — il y
+        # ecrivait une cle a cote des profils, PUIS la reconnaissait comme un profil et lui
+        # appliquait le traitement de reprise a chaud. Defaut prouve par
+        # `test_the_whole_config_file_is_left_untouched` des que l'etape porte un override.
+        est_un_profil = isinstance(cfg, dict) and _is_phase_config(cfg)
+        if isinstance(cfg, dict) and loaded_agent_key == agent_key and est_un_profil:
             if opponent_mix is not None:
                 cfg["opponent_mix"] = opponent_mix
             _apply_stage_hp_overrides(cfg, hp_overrides)
-            if warm_start and _is_phase_config(cfg):
+            if warm_start:
                 _sched = cfg.get("deployment_mode_schedule")  # get allowed: bloc optionnel
                 if isinstance(_sched, dict):
                     before = float(require_key(_sched, "active_ratio_start"))
@@ -5309,24 +5266,92 @@ def _install_stage_config_overrides(
                             "modele repris a deja parcouru la sienne."
                         ))
                 _pin_deployment_ramp_for_warm_start(cfg)
-                # APRES `_apply_stage_hp_overrides` : le regime de lignee est la source unique de
-                # ces cles, et il doit gagner meme si un override d'etape reussissait un jour a
-                # passer la validation du curriculum.
-                if lineage_regime is not None:
-                    apply_lineage_regime(cfg, lineage_regime)
-                    _announce_once("lineage", (
-                        f"🎓 Etape {stage_label} — regime de lignee applique : "
-                        + ", ".join(
-                            f"{key}={value:g}"
-                            for key, value in sorted(lineage_regime["model_params"].items())
-                        )
-                        + f", agent_seat_p2_ratio={float(lineage_regime['agent_seat_p2_ratio']):g}. "
-                        "Aucune rampe learning_rate ni entropie : des scalaires, constants sur "
-                        "tout le run et identiques a toutes les etapes de la lignee."
-                    ))
         return cfg
 
     config.load_agent_training_config = _load_with_stage
+
+
+#: Les deux cles dont une RAMPE, sur une etape reprise a chaud, a detruit une politique promue.
+#: Elles seules sont controlees : ce sont les seules dont la forme — schedule contre scalaire —
+#: change le comportement du run au lieu d'en changer un chiffre.
+_LINEAGE_SCALAR_KEYS = ("learning_rate", "ent_coef")
+
+
+def _require_scalar_lineage_regime(
+    model_params: Dict[str, Any], profile_name: str, stage_label: str
+) -> None:
+    """Refuse une RAMPE dans le profil d'une etape reprise a chaud.
+
+    Une rampe s'exprime en FRACTION de la duree du run (`setup_callbacks` ne construit
+    `EntropyScheduleCallback` / `LearningRateScheduleCallback` que sur un dict) : chaque etape
+    reprise la reparcourrait depuis son depart et rendrait a un modele converge le regime
+    d'exploration d'un demarrage. MESURE du 2026-09-04 : P1 s'etait arretee a un `ent_coef` de
+    ~0,018, P2 est repartie a 0,100, l'evaluation bots est tombee de 0,911 a 0,694 et le score
+    contre P1 — garanti a 0,50 par construction — est tombe a 0,118.
+
+    POURQUOI CE CONTROLE EXISTE ENCORE alors que le profil de lignee est pin par
+    `tests/unit/ai/test_training_config_par_etape.py` : un profil HERITE, et l'heritage se fait
+    en silence. Retirer `learning_rate` de `x1_lineage` ne laisse pas un trou, cela lui rend la
+    RAMPE de son parent — un run entier sous le regime que cette conception existe pour
+    supprimer, sans qu'aucune ligne ne manque nulle part. Le test epingle les valeurs du profil
+    livre ; ce controle protege le run de n'importe quel profil qu'on lui passera.
+
+    Les VALEURS ne sont pas jugees ici. Un `learning_rate` de 0,002 est un mauvais reglage, pas
+    un changement de nature : il se lit dans le journal et se corrige. Une rampe, elle, ne se
+    voit qu'apres coup, sur une courbe.
+    """
+    ramps = {
+        key: model_params[key]
+        for key in _LINEAGE_SCALAR_KEYS
+        if key in model_params and isinstance(model_params[key], dict)
+    }
+    if not ramps:
+        return
+    raise ValueError(
+        f"Etape {stage_label} : le profil '{profile_name}' declare une RAMPE pour "
+        f"{sorted(ramps)}, alors que l'etape reprend des poids. Une rampe s'exprime en fraction "
+        f"de la duree du run, donc l'etape la reparcourrait depuis son depart et rendrait a un "
+        f"modele deja entraine le regime d'exploration d'un demarrage — ce qui a detruit une "
+        f"politique promue le 2026-09-04. Un profil de lignee porte des SCALAIRES. Verifier "
+        f"qu'il ne s'est pas mis a heriter de ces cles au lieu de les declarer."
+    )
+
+
+def _require_stage_training_config(args, curriculum: Dict[str, Any], stage: Dict[str, Any]) -> None:
+    """Refuse un `--training-config` qui ne correspond pas a la NATURE de l'etape.
+
+    Un demarrage a froid et une reprise a chaud n'ont pas le meme regime d'optimisation — rampes
+    d'exploration pour une politique naive dont le critic part de zero, scalaires constants pour
+    un modele deja entraine. Se tromper de profil ne casse RIEN de visible : le run demarre,
+    tourne des heures, et rend un modele forme sous un regime que personne n'a voulu. C'est
+    litteralement ce qui s'est produit le 2026-09-04, ou une etape reprise a reparcouru la rampe
+    d'entropie du profil depuis son depart et a detruit la politique promue en 10 000 episodes.
+
+    DEUX APPELANTS, et c'est pourquoi le controle vit dans une fonction plutot qu'en ligne : le
+    lancement d'un run (`_prepare_curriculum_stage`) et la CLOTURE d'une etape, qui saute
+    deliberement le premier mais lit quand meme le profil pour les parametres d'evaluation du
+    gate. Un seul des deux couvert laissait `--close-stage` mesurer et promouvoir une etape sous
+    un profil de mise au point.
+
+    Un curriculum sans bloc `training_configs` n'impose rien, et `_validate_training_configs`
+    l'accepte tant qu'aucune etape ne reprend de poids : exiger le bloc ici rendrait injouable un
+    curriculum que le validateur vient d'accepter.
+    """
+    expected = required_training_config(curriculum, stage)
+    if expected is None or args.training_config == expected:
+        return
+    source = stage_init_source(stage)
+    init_desc = (
+        "demarre a froid (init 'new')" if source is None else f"reprend les poids de {source}"
+    )
+    raise ValueError(
+        f"Etape {args.etape} : elle {init_desc}, donc elle exige "
+        f"--training-config {expected}, et non {args.training_config!r}. "
+        f"Le profil decide du REGIME d'optimisation — rampes d'exploration pour un modele qui "
+        f"part de zero, scalaires constants pour un modele deja entraine — et se tromper ne leve "
+        f"nulle part ailleurs : le run tournerait entierement sous le mauvais regime. "
+        f"Le curriculum nomme les deux profils dans son bloc 'training_configs'."
+    )
 
 
 def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -5338,6 +5363,9 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
     """
     curriculum = load_curriculum(args.agent)
     stage = require_stage(curriculum, args.etape)
+
+    # AVANT tout le reste : refuser un profil qui ne correspond pas a la nature de l'etape.
+    _require_stage_training_config(args, curriculum, stage)
 
     models_root = config.get_models_root()
     canonical_model_path = build_agent_model_path(models_root, args.agent)
@@ -5396,12 +5424,34 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
     # explicitement pour relancer un run plante. C'est de CE modele que part la rampe.
     _install_stage_config_overrides(
         config, args.agent, opponent_mix, hp_overrides, warm_start, stage_label=args.etape,
-        warm_start_model_path=args.resume_from,
-        # Le regime de lignee vaut pour TOUTE etape reprise a chaud, exploiteurs compris : ils
-        # jouent contre un champion du meme niveau que les learners et n'ont aucune raison d'un
-        # autre pas d'apprentissage. Un demarrage a froid, lui, garde les rampes du profil.
-        lineage_regime=load_lineage_regime(curriculum) if warm_start else None,
     )
+    if warm_start:
+        _require_scalar_lineage_regime(
+            require_key(
+                config.load_agent_training_config(args.agent, args.training_config),
+                "model_params",
+            ),
+            args.training_config,
+            args.etape,
+        )
+        # ANNONCE, jamais une correction : le modele repris porte encore le `ent_coef` et le
+        # `learning_rate` de son propre run, et sur la premiere etape jouee sous ce profil ils
+        # differeront de ceux que la lignee impose. Le dire ici rend attribuable une courbe qui
+        # bouge a l'ouverture, sans avoir a rouvrir un zip.
+        #
+        # ICI et non dans le decorateur : c'est le seul endroit qui connaisse a la fois le
+        # modele source et le profil, et l'y mettre faisait dependre chaque LECTURE de config de
+        # la presence d'un zip sur disque. PAS de repli quand le chemin manque — une reprise a
+        # chaud sans modele source est un etat impossible, les deux branches d'`_apply_stage_init`
+        # posent `args.resume_from`.
+        announce_lineage_continuity(
+            require_present(args.resume_from, "args.resume_from"),
+            require_key(
+                config.load_agent_training_config(args.agent, args.training_config),
+                "model_params",
+            ),
+            args.etape,
+        )
     if hp_overrides:
         print(f"🎓 Etape {args.etape} — HP overrides : {list(hp_overrides)}")
     if opponent_mix is None:
@@ -5919,6 +5969,17 @@ def main():
                 )
             _close_stage_curriculum = load_curriculum(args.agent)
             _close_stage_cfg = require_stage(_close_stage_curriculum, args.etape)
+            # MEME contrainte de profil que sur un run, et il faut la reposer ici : ce chemin
+            # saute deliberement `_prepare_curriculum_stage`, ou elle vit. La cloture LIT le
+            # profil — `callback_params` pour les workers du gate, `eval_episodes` — donc un
+            # profil de mise au point y mesurerait et promouvrait l'etape sous des parametres
+            # d'evaluation qui ne sont pas les siens, sans qu'aucun refus ne tombe.
+            _require_stage_training_config(args, _close_stage_curriculum, _close_stage_cfg)
+            # MEME contrainte de profil que sur un run, et il faut la reposer ici : ce chemin
+            # saute deliberement `_prepare_curriculum_stage`, ou elle vit. La cloture LIT le
+            # profil — `callback_params` pour les workers du gate, `eval_episodes` — donc un
+            # profil de mise au point y mesurerait et promouvrait l'etape sous des parametres
+            # d'evaluation qui ne sont pas les siens, sans qu'aucun refus ne tombe.
             if is_exploiter_stage(_close_stage_cfg):
                 raise ValueError(
                     f"--close-stage : {args.etape} est une etape EXPLOITEUR. Sa cloture publie le "

@@ -78,11 +78,12 @@ Détail : [training.md#regime-2026-09-06](training.md#regime-2026-09-06).
 **✅ Régime de lignée livré le 2026-09-07 (option A) — P2 reste à lancer.** Trois runs P2
 successifs avaient échoué en faisant varier des hyperparamètres étape par étape ; l'option A
 supprime cette possibilité au lieu de chercher les bonnes valeurs pour chacune. Un bloc
-`lineage_regime` en tête de `curriculum.json` porte **sept clés** (`learning_rate` 0.001 et
-`ent_coef` 0.03 **scalaires**, `n_steps` 32640, `batch_size` 4080, `vf_coef` 0.15,
-`max_grad_norm` 0.5, `agent_seat_p2_ratio` 0.6) et s'applique à toute étape `init: "from:"` —
-learners comme exploiteurs ; les vingt rampes `decay_fraction` et les surcharges de P2/P3
-disparaissent, une étape reprise ne déclare plus que `total_episodes`. `P00` est supprimée (`P0`
+profil **`x1_lineage`** (`learning_rate` 0.001 et `ent_coef` 0.03 **scalaires**, `n_steps` 32640,
+`batch_size` 4080, `vf_coef` 0.15, `agent_seat_p2_ratio` 0.6, le reste **hérité** de `x1_long` par
+`"extends"`) s'applique à toute étape `init: "from:"` — learners comme exploiteurs ; les vingt
+rampes `decay_fraction` et les surcharges de P2/P3 disparaissent, une étape reprise ne déclare
+plus que `total_episodes`. Le curriculum ne porte que les deux **noms** (`training_configs`), et
+un `--training-config` qui ne correspond pas à la nature de l'étape est refusé au lancement. `P00` est supprimée (`P0`
 passe en `init: "new"`, E1/E2/E3 en `from:P0`). Un **verrou de parité** arrête le run quand la
 baseline d'ouverture contre l'archive reprise sort de `[0.40, 0.60]` — elle vaut 0.50 par
 identité, et deux nuits d'entraînement ont déjà été payées sur une baseline aberrante lue comme

@@ -227,6 +227,21 @@ with open(AGENT_CONFIG, encoding="utf-8-sig") as _f:
     PROFILES = {k: v for k, v in json.load(_f).items() if isinstance(v, dict)}
 PROFILE_NAMES = sorted(PROFILES)
 
+#: Profils qui HERITENT d'un autre (`extends`, cf. `config_loader::_resolve_profile_extends`).
+#: Lire leur JSON brut ne montre que ce qu'ils REDECLARENT ; ce que le run appliquera est le
+#: profil resolu, d'ou `RESOLVED` ci-dessous. La distinction porte un sens en plus de la
+#: mecanique : un profil qui herite est un profil de LIGNEE, applique a une etape reprise a
+#: chaud, et son regime est deliberement l'inverse de celui d'un demarrage a froid.
+LINEAGE_PROFILES = {name for name, p in PROFILES.items() if "extends" in p}
+
+#: Ce que le run applique reellement, `extends` resolu et `null` remplaces par
+#: `_training_common.json`. Meme doctrine que `_resolved_cb` plus bas : on relit la source du
+#: runtime, jamais une copie.
+RESOLVED = {
+    name: get_config_loader().load_agent_training_config("ArmageddonAgent_x1", name)
+    for name in PROFILE_NAMES
+}
+
 # `callback_params` est HÉRITABLE : une clé absente ou nulle retombe sur `_training_common.json`
 # (`_resolve_callback_value`, train.py:3444-3459). Lire le profil brut mesurerait donc autre chose
 # que ce que le run appliquera — et `_training_common.json` définit justement `save_best_robust`,
@@ -259,7 +274,7 @@ def _resolved_cb(callback_params: dict, key: str):
 # modèle est mécaniquement le dernier point évalué (`x1` depuis le 2026-08-11 : 5 points pour une
 # fenêtre de 5). Dans les deux cas la promesse était vide ; c'est le sens du `false`.
 PROMISES_BEST_MODEL = {
-    "x1": False, "x1_long": True, "x1_debug": False,
+    "x1": False, "x1_long": True, "x1_lineage": True, "x1_debug": False,
     "x5_new": False, "x5_long": True, "x5_debug": False,
 }
 
@@ -291,7 +306,19 @@ def test_every_profile_declares_decay_fraction(profile_name: str, ramp_key: str)
     Un profil qui l'omettrait ferait lever le run au démarrage — c'est voulu. Le silence
     (retomber sur une rampe étirée) est précisément le défaut que ce paramètre rend visible.
     """
-    ramp = PROFILES[profile_name]["model_params"][ramp_key]
+    ramp = RESOLVED[profile_name]["model_params"][ramp_key]
+    if profile_name in LINEAGE_PROFILES:
+        # INVERSE, et c'est le fond de la decision du 2026-09-07 : une rampe s'exprime en
+        # FRACTION de la duree du run, donc une etape reprise la reparcourrait depuis son depart
+        # et rendrait a un modele converge le regime d'exploration d'un demarrage. Mesure : P1
+        # arretee a un `ent_coef` de ~0,018, P2 repartie a 0,100, evaluation bots de 0,911 a
+        # 0,694, score contre P1 tombe a 0,118 alors qu'il vaut 0,50 par construction. Un profil
+        # de lignee DOIT donc porter un scalaire, et l'assertion vaut dans ce sens.
+        assert isinstance(ramp, (int, float)) and not isinstance(ramp, bool), (
+            f"profil de lignee '{profile_name}' : {ramp_key} vaut {ramp!r}, une rampe. "
+            "Chaque etape reprise la reparcourrait depuis son depart."
+        )
+        return
     assert isinstance(ramp, dict), f"{profile_name}.{ramp_key} n'est pas une rampe"
     assert "decay_fraction" in ramp, (
         f"profil '{profile_name}' : {ramp_key} sans decay_fraction — le run lèvera au démarrage."
@@ -385,6 +412,7 @@ LONG_PROFILE_MODEL_GATING_ENABLED: dict[str, bool] = {"x1_long": True, "x5_long"
 EXPECTED_BOT_EVAL_COUNT: dict[str, int] = {
     "x1": 6,
     "x1_long": 6,
+    "x1_lineage": 6,
     "x1_debug": 6,
     "x5_new": 6,
     "x5_long": 6,
@@ -415,7 +443,7 @@ def test_bot_eval_bot_count_is_pinned(profile_name: str) -> None:
     par `evaluate_against_bots` et n'y diffèrent que par `n_episodes`. Un ajout silencieux
     rallongerait un run de plusieurs heures sans qu'aucune autre assertion ne bouge.
     """
-    cb = PROFILES[profile_name]["callback_params"]
+    cb = RESOLVED[profile_name]["callback_params"]
     weights = cb["bot_eval_weights"]
     assert len(weights) == EXPECTED_BOT_EVAL_COUNT[profile_name], (
         f"{profile_name} : {len(weights)} bots dans bot_eval_weights "
@@ -603,7 +631,7 @@ def test_profile_promise_of_a_best_model_is_pinned(profile_name: str) -> None:
         f"profil '{profile_name}' non classé : décider s'il promet un best model et l'inscrire "
         "dans PROMISES_BEST_MODEL."
     )
-    resolved = _resolved_cb(PROFILES[profile_name]["callback_params"], "save_best_robust")
+    resolved = _resolved_cb(RESOLVED[profile_name]["callback_params"], "save_best_robust")
     assert bool(resolved) is PROMISES_BEST_MODEL[profile_name]
 
 
@@ -631,7 +659,7 @@ def test_profile_can_produce_the_best_model_it_promises(profile_name: str) -> No
     offset, donc aucun test lisant ce fichier ne peut trancher — l'invariant appartient à
     `setup_callbacks`, qui, lui, l'a sous la main.
     """
-    profile = PROFILES[profile_name]
+    profile = RESOLVED[profile_name]
     cb = profile["callback_params"]
     if not _resolved_cb(cb, "save_best_robust"):
         pytest.skip(f"{profile_name} ne promet aucun best robust model")

@@ -206,7 +206,8 @@ def _get_anchor_enforced() -> frozenset[str]:
     """Calcul paresseux de l'ensemble des basenames soumis à la passe 4."""
     return DEFAULT_DOC_NAMES | _impl_doc_basenames()
 
-AGENT_CONFIG = ROOT / "config" / "agents" / "ArmageddonAgent_x1" / "ArmageddonAgent_x1_training_config.json"
+AGENT_KEY = "ArmageddonAgent_x1"
+AGENT_CONFIG = ROOT / "config" / "agents" / AGENT_KEY / f"{AGENT_KEY}_training_config.json"
 COUVERTURE = DOCS / "analyzer_couverture.md"
 
 #: La RACINE de l'atteignabilité (passe 6). `ROADMAP_INDEX.md` se déclare source unique de l'ordre
@@ -843,9 +844,19 @@ def check_links(doc_path: pathlib.Path) -> tuple[int, int, int, list[str]]:
 
 
 def agent_profiles() -> dict[str, dict]:
-    """Les profils d'entraînement de l'agent, source de vérité des nombres recopiés."""
+    """Les profils d'entraînement de l'agent RÉSOLUS, source de vérité des nombres recopiés.
+
+    Résolus et non bruts : un profil peut hériter d'un autre (`extends`, cf.
+    `config_loader::_resolve_profile_extends`) et ne redéclarer que ce qui change. Son JSON brut
+    n'a alors ni `n_envs` ni `observation_params`, et les fonctions ci-dessous lèveraient un
+    `KeyError` sur un profil parfaitement valide — ce que le run, lui, résout sans broncher.
+    """
+    from config_loader import get_config_loader
+
     data = json.loads(AGENT_CONFIG.read_text(encoding="utf-8"))
-    return {key: value for key, value in data.items() if isinstance(value, dict)}
+    noms = [key for key, value in data.items() if isinstance(value, dict)]
+    loader = get_config_loader()
+    return {nom: loader.load_agent_training_config(AGENT_KEY, nom) for nom in noms}
 
 
 @functools.lru_cache(maxsize=1)

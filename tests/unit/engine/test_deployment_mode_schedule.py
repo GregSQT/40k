@@ -29,6 +29,8 @@ jamais collecté par la suite.
 from __future__ import annotations
 
 import json
+
+from config_loader import get_config_loader
 import os
 
 import pytest
@@ -489,8 +491,17 @@ def test_n_envs_missing_is_an_explicit_error() -> None:
 # Tous les profils actifs (x1, x1_long, x1_debug) portent le bloc ; l'évaluation impose TOUJOURS
 # une phase de déploiement. Aucun test ne lisait ce fichier avant ce verrou.
 
+# Profils RESOLUS : un profil qui herite (`extends`, cf.
+# `config_loader::_resolve_profile_extends`) ne redeclare que ce qui change, donc son JSON brut
+# n'a pas le bloc de deploiement — il en herite. Lire le brut ferait echouer un profil valide,
+# et surtout mesurerait autre chose que ce que le run applique.
 with open(AGENT_CONFIG, encoding="utf-8-sig") as _f:
-    PROFILES = {k: v for k, v in json.load(_f).items() if isinstance(v, dict)}
+    _PROFILE_NAMES = [k for k, v in json.load(_f).items() if isinstance(v, dict)]
+
+PROFILES = {
+    _nom: get_config_loader().load_agent_training_config("ArmageddonAgent_x1", _nom)
+    for _nom in _PROFILE_NAMES
+}
 
 # Contrat lu dans `W40KEngine._configure_deployment_mode_for_episode` : toutes ces clés y passent
 # par `require_key`, sans aucune valeur par défaut.
@@ -556,11 +567,13 @@ def test_all_profiles_share_the_same_ramp() -> None:
     `x1` est la référence (profil de production) : c'est lui qu'on ajuste, les autres suivent.
     Le compte est figé exprès : un profil ajouté sans son bloc de déploiement est le défaut que
     ce fichier existe pour attraper, et un `len` non contraint le laisserait passer.
-    Six profils actifs : `x1`/`x5_new` (runs courts de développement), `x1_long`/`x5_long`
-    (runs de mesure), `x1_debug`/`x5_debug` (smoke tests). Les préfixes x1/x5 désignent la
-    résolution du plateau, pas la longueur. `x1_selfplay` supprimé le 2026-08-17.
+    Sept profils actifs : `x1`/`x5_new` (runs courts de développement), `x1_long`/`x5_long`
+    (runs de mesure), `x1_debug`/`x5_debug` (smoke tests), et `x1_lineage` (étapes de curriculum
+    reprises à chaud, ajouté le 2026-09-07 — il hérite de `x1_long`, donc son bloc de déploiement
+    est celui de son parent et ne peut pas diverger). Les préfixes x1/x5 désignent la résolution
+    du plateau, pas la longueur. `x1_selfplay` supprimé le 2026-08-17.
     """
-    assert len(PROFILES) == 6, f"profils attendus : 6, trouvés {sorted(PROFILES)}"
+    assert len(PROFILES) == 7, f"profils attendus : 7, trouvés {sorted(PROFILES)}"
     reference = json.dumps(PROFILES["x1"]["deployment_mode_schedule"], sort_keys=True)
     diverged = {
         name: p.get("deployment_mode_schedule")
