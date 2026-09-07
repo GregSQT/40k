@@ -2502,12 +2502,10 @@ from ai.replay_converter import (
 
 
 
-# Global step logger instance
+# Global step logger instance. `enabled` porte A LUI SEUL « ce run doit produire step.log » :
+# le controle de fin (`main`) le lit directement plutot qu'un second drapeau, `--step` sur un
+# mode qui ne journalise pas etant refuse en amont (`reject_step_without_step_log`).
 step_logger = None
-# `--step` a-t-il ete demande dans un mode qui DOIT produire ce journal-ci ? Pose au meme
-# endroit que le logger (cf. `main`). `--convert-steplog` ne joue aucun episode et `--replay`
-# construit son propre logger (ai/replay_converter.py) : ni l'un ni l'autre n'alimente celui-la.
-_step_log_required = False
 # Episodes joues tels que le run les compte, quand il en publie un total. Message d'erreur
 # seulement — la sonde du controle est `StepLogger.episodes_written`.
 _run_episodes_played: Optional[int] = None
@@ -5870,18 +5868,21 @@ def main() -> int:
     erreur deja diagnostiquee. Ici, la condition est exacte : le run a reussi (code 0) et
     `--step` exigeait un journal.
     """
-    global _step_log_required, _run_episodes_played
+    global step_logger, _run_episodes_played
     # Remis a zero A CHAQUE run : `main()` est appelable plusieurs fois dans un meme processus
-    # (tests CLI), et un drapeau reste arme d'un run precedent ferait lever le controle sur un
+    # (tests CLI), et un logger reste arme d'un run precedent ferait lever le controle sur un
     # run qui n'a jamais demande `--step`.
-    _step_log_required = False
+    step_logger = None
     _run_episodes_played = None
 
     exit_code = _run_main()
-    if exit_code == 0 and _step_log_required:
-        assert_step_log_written(
-            require_present(step_logger, "step_logger"), _run_episodes_played
-        )
+    # `step_logger.enabled` EST la demande de journal, sans drapeau parallele a tenir en phase :
+    # `_run_main` construit le logger avec `enabled=args.step` et ne rend 0 par aucun chemin
+    # anterieur a cette construction, donc un run reussi qui a demande `--step` arrive ici avec
+    # un logger arme. Les modes qui ne branchent le logger nulle part n'y arrivent jamais :
+    # `reject_step_without_step_log` refuse la combinaison avant le prologue.
+    if exit_code == 0 and step_logger is not None and step_logger.enabled:
+        assert_step_log_written(step_logger, _run_episodes_played)
     return exit_code
 
 
@@ -6175,16 +6176,13 @@ def _run_main():
         tc = config.load_agent_training_config(args.agent, args.training_config)
         step_log_buffer_size = int(require_key(tc, "step_log_buffer_size"))
         # Initialize global step logger based on --step argument
-        global step_logger, _step_log_required, _run_episodes_played
+        global step_logger, _run_episodes_played
         step_logger = StepLogger(
             os.path.join(project_root, "step.log"),
             enabled=args.step,
             buffer_size=step_log_buffer_size,
             debug_mode=args.debug,
         )
-        # `reject_step_without_step_log` a deja ecarte les modes qui ne journalisent pas : ici,
-        # `--step` vaut demande de journal, sans exception.
-        _step_log_required = bool(args.step)
         
         # Sync configs to frontend automatically
         try:
