@@ -29,6 +29,7 @@ from ai.curriculum import (
     POOL_VERDICT_PROMOTE,
     evaluate_pool_decision,
     evaluate_stage_gate,
+    exploiter_stage_names,
     load_curriculum,
     required_training_config,
     load_parity_check,
@@ -252,10 +253,10 @@ def test_exploiters_play_their_target_but_start_from_the_seed(curriculum) -> Non
     suivantes doit contenir. `validate_exploiter_protocol` ne contraint pas `init` : ce verrou
     est le seul endroit ou le choix est ecrit.
     """
-    exploiters = [
-        name for name in stage_order(curriculum)
-        if require_stage(curriculum, name)["role"] == "exploiter"
-    ]
+    exploiters = exploiter_stage_names(curriculum)
+    # Liste LITTÉRALE, et volontairement : les verrous de protocole exploiteur dérivent la leur
+    # pour couvrir d'office une étape ajoutée plus tard, mais celui-ci fige la FORME décidée le
+    # 2026-09-07. La dériver ici laisserait une lignée que personne n'a décidée passer en silence.
     assert exploiters == ["E1", "E2", "E3"]
     for name in exploiters:
         stage = require_stage(curriculum, name)
