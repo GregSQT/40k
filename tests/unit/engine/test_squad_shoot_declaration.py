@@ -23,8 +23,12 @@ from typing import Any, Dict, List
 # game_rules reels : evite de dupliquer/deriver des seuils (cf. feedback_inches_to_subhex).
 _GAME_RULES = json.loads((Path(__file__).parents[3] / "config" / "game_config.json").read_text())["game_rules"]
 
+from unittest.mock import patch
+
 from engine.weapons import get_weapons
 import pytest
+
+from engine.phase_handlers import shared_utils
 
 from engine.phase_handlers.shared_utils import (
     build_units_cache,
@@ -40,6 +44,7 @@ from engine.phase_handlers.shared_utils import (
     squad_shoot_models_status,
     squad_undeclare_shoot_weapon_qty,
     squad_union_weapons,
+    _pick_one_profile_per_weapon_group,
     _weapon_group_key,
 )
 from tests._state_invariants import turn_state_invariants, unit_invariants
@@ -126,10 +131,10 @@ _HARD_MODEL: Dict[str, Any] = {
 }
 
 
-def _horde(col_start: int = 5, row: int = 15) -> List[Dict[str, Any]]:
+def _horde(row: int = 15) -> List[Dict[str, Any]]:
     """Dix figurines a 1 PV : la cible ou [BLAST] paie et ou les D6 degats sont perdus."""
     return [
-        {**_m(col_start + i, row, [STORM]), "T": 3, "ARMOR_SAVE": 5, "INVUL_SAVE": 7, "HP_MAX": 1}
+        {**_m(5 + i, row, [STORM]), "T": 3, "ARMOR_SAVE": 5, "INVUL_SAVE": 7, "HP_MAX": 1}
         for i in range(10)
     ]
 
@@ -560,7 +565,7 @@ class TestDeclareShootCombiProfiles:
         gs = self._gs(
             [{**_m(5, 5, [FRAG, KRAK]), "UNIT_KEYWORDS": [{"keywordId": "vehicle"}]}],
             [FRAG, KRAK],
-            target_models=_horde(col_start=5, row=6),
+            target_models=_horde(row=6),
         )
         intents = squad_declare_shoot(gs, "1", "2", ["2"])
         assert [i["weapon_index"] for i in intents] == [1]
@@ -588,6 +593,68 @@ class TestDeclareShootCombiProfiles:
         gs = self._gs([_m(5, 5, [STORM, STORM])], [STORM, STORM])
         intents = squad_declare_shoot(gs, "1", "2", ["2"])
         assert len(intents) == 2
+
+    def test_each_candidate_is_scored_against_its_own_target(self):
+        """Le scoreur est INJECTE et recoit (arme, cible du candidat), pas la seule arme.
+
+        Sans la cible, une figurine qui vise une horde et une autre qui vise un vehicule
+        seraient arbitrees sur le meme score.
+        """
+        scores = {("cyclone_missile_launcher_frag", "3"): 9.0,
+                  ("cyclone_missile_launcher_krak", "3"): 2.0,
+                  ("cyclone_missile_launcher_frag", "2"): 1.0,
+                  ("cyclone_missile_launcher_krak", "2"): 5.0}
+        pick = _pick_one_profile_per_weapon_group(
+            [FRAG, KRAK], [(0, "2"), (1, "2")], lambda w, t: scores[(w["code"], t)]
+        )
+        assert pick == [(1, "2")]
+        pick_other = _pick_one_profile_per_weapon_group(
+            [FRAG, KRAK], [(0, "3"), (1, "3")], lambda w, t: scores[(w["code"], t)]
+        )
+        assert pick_other == [(0, "3")]
+
+    def test_two_figs_of_a_squad_choose_different_profiles_for_different_targets(self):
+        """Le score est par (profil, CIBLE) : deux porteurs du meme combi qui tirent sur deux
+        escouades opposees ne retiennent pas le meme profil.
+
+        1#0 ne peut viser que la cible dure (Krak), 1#1 que la horde a 1 PV (Frag, [BLAST]) —
+        toutes deux hors de portee de l'autre figurine (41 hex separent les deux tireurs, la
+        portee du Cyclone est de 36).
+        """
+        atk = _unit(1, 1, [_m(5, 5, [FRAG, KRAK]), _m(39, 29, [FRAG, KRAK])], [FRAG, KRAK])
+        hard = _unit(2, 2, [{**_m(5, 8, [STORM]), "T": 9, "ARMOR_SAVE": 2, "HP_MAX": 8}], [STORM])
+        horde = _unit(3, 2, [
+            {**_m(36 + (i % 4), 26 + (i // 4), [STORM]),
+             "T": 3, "ARMOR_SAVE": 5, "HP_MAX": 1}
+            for i in range(10)
+        ], [STORM])
+        gs = _make_gs([atk, hard, horde])
+        _activate(gs, "1")
+        intents = squad_declare_shoot(gs, "1", "2", ["2", "3"])
+        assert {
+            (i["model_id"], i["weapon_index"], i["target_unit_id"]) for i in intents
+        } == {("1#0", 1, "2"), ("1#1", 0, "3")}
+
+    def test_the_score_is_computed_once_per_profile_for_the_whole_squad(self):
+        """Le score ne depend pas de la figurine qui tire : deux porteurs ne le paient qu'une fois.
+
+        Verrou du memo par activation — sans lui, une escouade de 5 porteurs recalculait 5 fois
+        le meme score (mesure : 764 us par activation contre 563 us).
+        """
+        gs = self._gs([_m(5, 5, [FRAG, KRAK]), _m(5, 6, [FRAG, KRAK])], [FRAG, KRAK])
+        calls: List[str] = []
+        real = shared_utils._ranged_profile_expected_damage
+
+        def _spy(game_state, weapon, target_squad_id, attacker_unit):
+            calls.append(f"{weapon['code']}->{target_squad_id}")
+            return real(game_state, weapon, target_squad_id, attacker_unit)
+
+        with patch.object(shared_utils, "_ranged_profile_expected_damage", _spy):
+            intents = squad_declare_shoot(gs, "1", "2", ["2"])
+        assert len(intents) == 2  # les deux figurines tirent
+        assert sorted(calls) == [
+            "cyclone_missile_launcher_frag->2", "cyclone_missile_launcher_krak->2",
+        ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

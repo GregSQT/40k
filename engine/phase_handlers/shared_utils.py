@@ -7448,6 +7448,23 @@ def squad_declare_shoot(
             1 for mid in squad_models.get(target_sid, []) if mid in models_cache  # get allowed
         )
 
+    # Score de profil combi, memoise pour l ACTIVATION : il ne depend que du profil d arme et de
+    # la cible (l attaquant y entre par son ESCOUADE), et les figurines d une meme escouade
+    # portent des copies du meme profil d armory. Sans memo, une escouade de 5 porteurs payait
+    # 5 fois le meme calcul — mesure du 2026-09-07 sur 5 Terminators Cyclone : 764 us par
+    # activation contre 563 us avec le memo, soit 26 % de toute la declaration en recalcul pur.
+    # Duree de vie = l appel : ni la taille de la cible ni les modificateurs de l attaquant ne
+    # bougent pendant une declaration, aucune peremption possible.
+    _profile_scores: Dict[Tuple[str, str], float] = {}
+
+    def _profile_score(weapon: Dict[str, Any], target_sid: str) -> float:
+        key = (str(require_key(weapon, "code")), str(target_sid))
+        if key not in _profile_scores:
+            _profile_scores[key] = _ranged_profile_expected_damage(
+                game_state, weapon, target_sid, attacker_unit
+            )
+        return _profile_scores[key]
+
     # 10.04-10.06 : type de tir applicable. Il commande QUELLES armes sont selectionnables
     # (volet « WHILE SHOOTING ») — cf. resolve_squad_shooting_type.
     shooting_type = resolve_squad_shooting_type(game_state, attacker_squad_id)
@@ -7499,9 +7516,7 @@ def squad_declare_shoot(
         # Un groupe combi HETEROGENE en [CLOSE-QUARTERS] rendrait les deux ordres fautifs (le
         # groupage pourrait retenir le profil qui perd ensuite l arbitrage de famille) ; aucun
         # n existe — mesure du 2026-09-07 : 14 groupes combi, 0 heterogene, 0 en melee.
-        usable = _pick_one_profile_per_weapon_group(
-            game_state, weapons, usable, attacker_unit, _target_size
-        )
+        usable = _pick_one_profile_per_weapon_group(weapons, usable, _profile_score)
 
         # 24.07 (SIDEARMS, PDF 04) : hors MONSTER/VEHICLE, une figurine choisit SOIT ses armes
         # [CLOSE-QUARTERS], SOIT ses autres armes de tir — jamais les deux. Defaut retenu : la
@@ -7745,6 +7760,47 @@ def _intent_weapon_code(
     return None
 
 
+def _intent_weapon_group_key(
+    models_cache: Dict[str, Any], intent: Dict[str, Any], weapons_key: str
+) -> Optional[str]:
+    """Cle de l ARME PHYSIQUE consommee par un intent — jumeau exact de `_intent_weapon_code`.
+
+    ► Multiple Weapon Profiles (renvoi de 04.01) : les profils exclusifs d un combi sont une
+    seule arme, donc « quelle arme cet intent consomme-t-il ? » se repond par groupe et non par
+    index. La cle est lue sur la liste d armes de LA figurine de l intent : un index d escouade
+    ne designe pas la meme arme d une figurine a l autre (escouade heterogene).
+
+    None si la figurine n est plus dans le cache : elle ne consomme plus rien (meme convention
+    que `_intent_weapon_code`, et meme effet chez les appelants, qui l ignorent).
+    """
+    m = models_cache.get(str(intent["model_id"]))
+    if m is None:
+        return None
+    return _weapon_group_key(m.get(weapons_key, []), int(intent["weapon_index"]))  # get allowed
+
+
+def _intent_shares_weapon_group(
+    models_cache: Dict[str, Any], weapons_key: str, intent: Dict[str, Any], widx: int
+) -> bool:
+    """L intent engage-t-il la MEME arme physique que l index `widx` de sa figurine ?
+
+    Grain de la declaration manuelle (tir ET melee) : une figurine ne declare qu un profil par
+    arme physique, donc re-declarer le profil frere REMPLACE le premier au lieu de s y ajouter.
+
+    `widx` hors de la liste de cette figurine : elle ne porte pas cette arme, donc aucun de ses
+    intents ne peut partager le groupe.
+    """
+    m = models_cache.get(str(intent["model_id"]))
+    if m is None:
+        return False
+    weapons = m.get(weapons_key, [])  # get allowed
+    if not (0 <= widx < len(weapons)):
+        return False
+    return _intent_weapon_group_key(models_cache, intent, weapons_key) == _weapon_group_key(
+        weapons, widx
+    )
+
+
 def _declare_qty_candidates(
     game_state: Dict[str, Any], ctx: DeclareAttackCtx,
     attacker_squad_id: str, weapon_code: str, target_squad_id: str,
@@ -7774,11 +7830,9 @@ def _declare_qty_candidates(
     ]
     consumed: Dict[str, set] = {}
     for i in remaining:
-        mid = str(i["model_id"]); m = models_cache.get(mid)
-        if m is None:
-            continue
-        w = m.get(ctx.weapons_key, [])  # get allowed
-        consumed.setdefault(mid, set()).add(_weapon_group_key(w, int(i["weapon_index"])))
+        gkey = _intent_weapon_group_key(models_cache, i, ctx.weapons_key)
+        if gkey is not None:
+            consumed.setdefault(str(i["model_id"]), set()).add(gkey)
 
     from engine.hex_utils import min_distance_between_sets
     tgt_uc = require_key(game_state, "units_cache")[str(target_squad_id)]
@@ -7987,11 +8041,9 @@ def models_status_for_target(
     intents = game_state[ctx.intents_key][attacker_squad_id]
     consumed_by_model: Dict[str, set] = {}
     for i in intents:
-        mid = str(i["model_id"]); m = models_cache.get(mid)
-        if m is None:
-            continue
-        w = m.get(ctx.weapons_key, [])  # get allowed
-        consumed_by_model.setdefault(mid, set()).add(_weapon_group_key(w, int(i["weapon_index"])))
+        gkey = _intent_weapon_group_key(models_cache, i, ctx.weapons_key)
+        if gkey is not None:
+            consumed_by_model.setdefault(str(i["model_id"]), set()).add(gkey)
     alive_target = target_squad_id in squad_models and any(
         mid in models_cache for mid in squad_models.get(target_squad_id, [])  # get allowed
     )
@@ -8164,37 +8216,11 @@ def _weapon_group_key(weapons: List[Any], widx: int) -> str:
     return str(key) if key else f"__solo_{widx}"
 
 
-def _intent_shares_weapon_group(
-    models_cache: Dict[str, Any], weapons_key: str, intent: Dict[str, Any], widx: int
-) -> bool:
-    """L intent engage-t-il la MEME arme physique que l index `widx` de sa figurine ?
-
-    Grain de la declaration manuelle (tir ET melee) : une figurine ne declare qu un profil par
-    arme physique, donc re-declarer le profil frere REMPLACE le premier au lieu de s y ajouter.
-    Les deux cles sont lues sur la liste d armes de LA figurine de l intent : `widx` est un
-    index d escouade cote `declare_attack_weapon`, et une escouade heterogene ne le fait pas
-    designer la meme arme d une figurine a l autre.
-
-    `widx` hors de la liste de cette figurine : elle ne porte pas cette arme, donc aucun de ses
-    intents ne peut partager le groupe (aucun intent ne serait construit sur un index invalide,
-    `_resolve_intent_nb` levant a la creation).
-    """
-    m = models_cache.get(str(intent["model_id"]))
-    if m is None:
-        return False
-    weapons = m.get(weapons_key, [])  # get allowed
-    i_widx = int(intent["weapon_index"])
-    if not (0 <= widx < len(weapons) and 0 <= i_widx < len(weapons)):
-        return False
-    return _weapon_group_key(weapons, i_widx) == _weapon_group_key(weapons, widx)
-
-
 def _ranged_profile_expected_damage(
     game_state: Dict[str, Any],
     weapon: Dict[str, Any],
     target_squad_id: str,
     attacker_unit: Dict[str, Any],
-    target_size: int,
 ) -> float:
     """Esperance de degats d UN profil de tir sur une escouade, telle que le moteur la jouera.
 
@@ -8207,8 +8233,9 @@ def _ranged_profile_expected_damage(
     l appelant de les appliquer — decident ici :
 
     - [BLAST] 24.05 : des additionnels par tranche de 5 figurines cibles. Le nombre ajoute est
-      EXACTEMENT celui que la resolution ajoutera, calcule sur la meme taille d escouade que
-      l intent enregistre (`target_squad_size_at_declaration`).
+      EXACTEMENT celui que la resolution ajoutera : la taille est comptee ici, sur les memes
+      figurines vivantes que `target_squad_size_at_declaration`, et non transmise par
+      l appelant — deux comptages pour une seule valeur pourraient diverger en silence.
     - Degats perdus : les degats en exces sur une figurine sont perdus, donc une arme a D6
       degats n en place qu un seul sur une figurine a 1 PV. Sans ce plafond, mesure du
       2026-09-07 sur le Cyclone : Krak gagne sur les QUATRE cibles types, infanterie 1 PV
@@ -8221,8 +8248,14 @@ def _ranged_profile_expected_damage(
     Le plafond est pris sur `HP_MAX` (caracteristique Wounds de la datasheet) et non sur les PV
     courants : la figurine qui encaissera n est pas connue a la declaration, et HP_MAX est
     stable sur toute l activation.
+
+    ⚠ [HAZARDOUS] n entre pas dans le score : il mesure les degats places SUR LA CIBLE, pas le
+    risque encouru par le tireur. Le profil Supercharge reste donc prefere a caracteristiques
+    superieures.
+
+    Ne depend PAS de la figurine qui tire (l attaquant entre par son escouade) : le resultat
+    est donc memoisable par (profil d arme, cible) sur toute l activation.
     """
-    from engine.game_state import effective_invul_save  # cycle : cf. squad_declare_fight
     from engine.phase_handlers.attack_sequence import (
         build_weapon_attack_profile,
         expected_damage_per_attack,
@@ -8237,17 +8270,14 @@ def _ranged_profile_expected_damage(
             "vivante — l eligibilite a la cible aurait du l ecarter"
         )
     # Caracteristiques defensives lues sur une FIGURINE reelle (elles vivent sur le
-    # models_cache, cf. `_auto_select_cc_weapon_for_fig`), invulnerable conferee comprise.
+    # models_cache, cf. `_auto_select_cc_weapon_for_fig`).
     t_sample = models_cache[alive[0]]
     target_unit = require_unit_by_id(game_state, str(target_squad_id))
-    target_invul = effective_invul_save(
-        game_state, target_unit, int(require_key(t_sample, "INVUL_SAVE"))
-    )
 
     n_attacks = float(expected_dice_value(require_key(weapon, "NB"), "pick_combi_profile_nb"))
     blast_x = _blast_extra_dice_per_five(weapon)
     if blast_x is not None:
-        n_attacks += blast_x * (int(target_size) // 5)
+        n_attacks += blast_x * (len(alive) // 5)
     dmg = float(expected_dice_value(require_key(weapon, "DMG"), "pick_combi_profile_dmg"))
     dmg = min(dmg, float(require_key(t_sample, "HP_MAX")))
     # Primitive A cote touche (suppression) : le seuil NOTE doit etre celui que le moteur
@@ -8258,25 +8288,27 @@ def _ranged_profile_expected_damage(
     profile = build_weapon_attack_profile(
         weapon, target_unit, attacker_unit=attacker_unit, game_state=game_state, is_melee=False
     )
+    # Sauvegarde EFFECTIVE (invulnerable conferee comprise) par le meme helper que les rollers
+    # manuels : composer `effective_invul_save` et `save_threshold` ici en ferait un troisieme
+    # site a tenir en phase. Le drapeau « le Waaagh! a ameliore » ne sert qu a l affichage.
+    save_th, _waaagh_improved = display_save_threshold_with_waaagh(
+        game_state, target_unit, t_sample, int(require_key(weapon, "AP"))
+    )
     return n_attacks * expected_damage_per_attack(
         profile,
         hit_target=hit_target,
         wound_target=wound_threshold(
             int(require_key(weapon, "STR")), int(require_key(t_sample, "T"))
         ),
-        save_threshold_value=save_threshold(
-            int(require_key(t_sample, "ARMOR_SAVE")), target_invul, int(require_key(weapon, "AP"))
-        ),
+        save_threshold_value=save_th,
         damage=dmg,
     )
 
 
 def _pick_one_profile_per_weapon_group(
-    game_state: Dict[str, Any],
     weapons: List[Any],
     candidates: List[Tuple[int, str]],
-    attacker_unit: Dict[str, Any],
-    target_size: Callable[[str], int],
+    score: Callable[[Dict[str, Any], str], float],
 ) -> List[Tuple[int, str]]:
     """UN profil par arme PHYSIQUE parmi des candidats `(index, cible)` d UNE figurine.
 
@@ -8285,17 +8317,15 @@ def _pick_one_profile_per_weapon_group(
     parle des armes « that model has » — et deux porteurs du meme combi choisissent donc
     chacun le leur.
 
-    Le profil retenu est celui de plus grande esperance de degats CONTRE SA CIBLE : garder
-    l index le plus bas revenait a laisser l ordre de declaration du roster decider, et donc
-    a condamner le Krak du Cyclone (Frag ecrit en premier) ou le profil sur du plasma pistol
-    du Captain (Supercharge [HAZARDOUS] ecrit en premier). Meme politique de choix que la
-    melee (`_auto_select_cc_weapon_for_fig`), meme depart d egalite : l index le plus bas.
-    L esperance est calculee UNIQUEMENT pour les groupes a plusieurs profils declarables —
-    une figurine sans combi ne paie rien.
+    Le profil retenu est celui de plus grand `score(arme, cible)` : garder l index le plus bas
+    revenait a laisser l ordre de declaration du roster decider, et donc a condamner le Krak du
+    Cyclone (Frag ecrit en premier) ou le profil sur du plasma pistol du Captain (Supercharge
+    [HAZARDOUS] ecrit en premier). Depart d egalite : l index le plus bas, comme en melee.
 
-    ⚠ [HAZARDOUS] n entre pas dans le score : le modele d esperance mesure les degats places
-    sur la cible, pas le risque encouru par le tireur. Le profil Supercharge reste donc
-    prefere a caracteristiques superieures.
+    `score` est INJECTE — la fonction ne fait que grouper et prendre l argmax, elle ne connait
+    ni le modele de degats ni sa memoisation (cf. `squad_declare_shoot`, qui met en cache par
+    (code d arme, cible)). Elle n est appelee que pour les groupes a plusieurs profils
+    declarables : une figurine sans combi ne paie rien.
     """
     groups: Dict[str, List[Tuple[int, str]]] = {}
     for widx, target in candidates:
@@ -8305,14 +8335,7 @@ def _pick_one_profile_per_weapon_group(
         if len(grp) == 1:
             out.append(grp[0])
             continue
-        out.append(
-            max(
-                grp,
-                key=lambda c: _ranged_profile_expected_damage(
-                    game_state, weapons[c[0]], c[1], attacker_unit, target_size(c[1])
-                ),
-            )
-        )
+        out.append(max(grp, key=lambda c: score(weapons[c[0]], c[1])))
     return out
 
 
