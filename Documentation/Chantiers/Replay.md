@@ -558,10 +558,15 @@ cercle vert en fight.
   drain (post-action) donnerait l'état d'après. Le chemin squad capturait déjà les pools V10 en
   pré-action (`_pre_action_fight_state`, `w40k_core.py` step()) — c'est LÀ qu'il faut poser
   `fight_eligible_units`, pas au point de log.
-- **Piège swallow.** `StepLogger.log_action` avale les exceptions du formateur (`print` puis rien).
-  Un premier jet qui logguait `fight_eligible_units` au mauvais endroit faisait **throw** le formateur
-  → **toutes les lignes FOUGHT disparaissaient silencieusement** (log avec pile_in/consolidation mais
-  0 combat). Vérifier `grep "Step logging error"` sur le run.
+- **Piège swallow — FERMÉ le 2026-09-07.** `StepLogger.log_action` avalait les exceptions du
+  formateur (`print` puis rien). Un premier jet qui logguait `fight_eligible_units` au mauvais
+  endroit faisait **throw** le formateur → **toutes les lignes FOUGHT disparaissaient
+  silencieusement** (log avec pile_in/consolidation mais 0 combat). Les cinq `except Exception`
+  du chemin d'écriture ont été retirés (T1) : une erreur de formatage ou d'écriture fait
+  désormais tomber le run. Il n'y a plus de `grep "Step logging error"` à faire — et un run
+  `--step` qui n'écrit AUCUN épisode lève en fin de run (`assert_step_log_written`,
+  `ai/step_logger.py`). Seules les écritures de `debug.log` sous `if self.debug_mode` restent
+  avalées : instrumentation, sans conséquence métier.
 
 **Implémenté :**
 1. `engine/w40k_core.py` — `_pre_action_fight_state` (step(), chemin squad V11 T6) : capture

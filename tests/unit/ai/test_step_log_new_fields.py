@@ -124,6 +124,7 @@ def _minimal_units() -> list:
             "row": 0,
             "player": 1,
             "HP_MAX": 1,
+            "unitType": "Intercessor",
             "DISPLAY_NAME": "U1",
             "BASE_SHAPE": "round",
             "BASE_SIZE": 1,
@@ -184,6 +185,7 @@ def test_l19_no_attached_no_header(tmp_path: Path) -> None:
     logger = StepLogger(**_base_log_kwargs(tmp_path / "step.log"))
     logger.log_episode_start(
         units_data=_minimal_units(), attached_info=None, board_config=_BOARD_CONFIG,
+        run_rules=_RUN_RULES,
     )
     content = _read_text(tmp_path / "step.log")
     assert "Attached:" not in content

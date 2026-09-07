@@ -1,8 +1,9 @@
 """La ligne `[HAZARDOUS]` (24.15) n'atteignait JAMAIS step.log.
 
 Symptôme visible pendant un entraînement : `⚠️ Step logging error: 'Hazardous action missing
-required unit_with_coords'`. Mais l'avertissement défile dans une barre de progression, et
-`log_action` avale l'exception : la ligne est perdue sans que rien ne s'arrête.
+required unit_with_coords'`. L'avertissement défilait dans une barre de progression, et
+`log_action` avalait alors l'exception : la ligne était perdue sans que rien ne s'arrête. Ce
+swallow a depuis été retiré (T1) — `log_action` laisse remonter.
 
 Mesuré sur un run de 12 épisodes : **zéro** ligne `HAZARD` dans le journal, alors que le type
 figure bien dans `_STEP_LOG_TYPE_MAP`. Deux verrous se cumulaient, tous deux côté PRODUCTEUR :

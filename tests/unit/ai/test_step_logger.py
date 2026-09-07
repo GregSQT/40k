@@ -11,6 +11,19 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+# `log_episode_start` EXIGE `board_config` et `run_rules` (l'analyzer refuse un journal sans
+# les lignes `Board:` et `Run rules:`). Les sites qui les omettaient ne passaient que parce que
+# le bloc d'ecriture avalait la levee — swallow retire (T1, test_step_log_fails_loud.py).
+_BOARD_CONFIG = {
+    "cols": 15, "rows": 13, "hex_radius": 1.0, "margin": 0.0, "inches_to_subhex": 2.0,
+}
+
+_RUN_RULES = {
+    "engagement_zone_subhex": 10, "metric.engagement": "hex", "metric.ranged": "euclidean",
+    "move.thru_ez": True, "move.thru_enemy": False, "move.thru_friendly": True,
+}
+
+
 def test_init_requires_buffer_size_when_enabled(tmp_path: Path) -> None:
     output_file = tmp_path / "step.log"
     with pytest.raises(ValueError, match=r"buffer_size is required"):
@@ -170,10 +183,10 @@ def test_log_action_increments_counters_and_flushes_on_threshold(tmp_path: Path)
     output_file = tmp_path / "step.log"
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=1)
     logger.log_episode_start(
-        run_rules={"engagement_zone_subhex": 10, "metric.engagement": "hex",
-                   "metric.ranged": "euclidean", "move.thru_ez": True,
-                   "move.thru_enemy": False, "move.thru_friendly": True},
-        units_data=[{**unit_invariants(), "id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1, "unitType": "Intercessor"}]
+        run_rules=_RUN_RULES,
+        units_data=[{**unit_invariants(), "id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1,
+          "unitType": "Intercessor", "BASE_SHAPE": "round", "BASE_SIZE": 1}],
+        board_config=_BOARD_CONFIG,
     )
     logger.log_action(
         unit_id=1,
@@ -196,10 +209,10 @@ def test_log_episode_end_flushes_buffer_and_logs_objective_control(tmp_path: Pat
     output_file = tmp_path / "step.log"
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=50)
     logger.log_episode_start(
-        run_rules={"engagement_zone_subhex": 10, "metric.engagement": "hex",
-                   "metric.ranged": "euclidean", "move.thru_ez": True,
-                   "move.thru_enemy": False, "move.thru_friendly": True},
-        units_data=[{**unit_invariants(), "id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1, "unitType": "Intercessor"}]
+        run_rules=_RUN_RULES,
+        units_data=[{**unit_invariants(), "id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1,
+          "unitType": "Intercessor", "BASE_SHAPE": "round", "BASE_SIZE": 1}],
+        board_config=_BOARD_CONFIG,
     )
     logger.log_action(
         unit_id=1,
@@ -379,6 +392,7 @@ def test_objective_control_snapshot_key_matches_objectives_line(tmp_path: Path) 
         objectives=_objectives(),
         primary_objective_config=None,
         board_config={"cols": 1, "rows": 1, "inches_to_subhex": 1, "hex_radius": 1, "margin": 1},
+        run_rules=_RUN_RULES,
     )
     logger.log_objective_control_snapshot(1, _objectives(), {}, {1: 0, 2: 0}, {1: 0, 2: 0})
     content = _read_text(output_file)
@@ -581,11 +595,14 @@ def test_step_timing_duration_not_unix_timestamp(tmp_path: Path, monkeypatch: py
         "move.thru_enemy": False,
         "move.thru_friendly": True,
     }
-    units = [{**unit_invariants(), "id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1, "unitType": "Intercessor"}]
+    units = [{**unit_invariants(), "id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1,
+          "unitType": "Intercessor", "BASE_SHAPE": "round", "BASE_SIZE": 1}]
     logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=50, debug_mode=True)
 
     for _episode in range(2):
-        logger.log_episode_start(run_rules=run_rules, units_data=units)
+        logger.log_episode_start(
+            run_rules=run_rules, units_data=units, board_config=_BOARD_CONFIG
+        )
         for _ in range(3):
             logger.log_action(
                 unit_id=1,

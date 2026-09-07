@@ -4007,8 +4007,8 @@ class W40KEngine(gym.Env):
         # Pas de try/except autour de ce bloc. Il y en avait un, `except Exception` -> console log,
         # cense « ne pas faire tomber la partie pour un defaut de journal ». Il ne tenait pas cette
         # promesse : ce qui peut legitimement echouer ici, c'est l'ecriture disque, et elle est deja
-        # protegee un cran plus bas — `StepLogger.log_action` enveloppe tout son formatage et son
-        # write dans son propre try/except (`ai/step_logger.py`, « Step logging error »).
+        # traitee un cran plus bas — `StepLogger.log_action` laisse desormais remonter toute
+        # erreur de formatage ou d'ecriture (`ai/step_logger.py`, T1 : plus aucun swallow).
         # Ce filet-ci n'attrapait donc QUE les `require_key` ci-dessous : une rupture d'etat du
         # game_state (`phase`/`turn`/`episode_number` manquants), qui n'est pas une panne de journal
         # et doit rester bruyante. Le depot a deja paye pour ce motif — un journal qui avale ses
@@ -6993,8 +6993,8 @@ class W40KEngine(gym.Env):
         if from_col is not None and from_row is not None:
             details["start_pos"] = (from_col, from_row)
         # [HAZARDOUS] 24.15 : le formateur exige ce champ, et le payload moteur le porte
-        # desormais. Sans cette traduction, la ligne leve et `log_action` avale l'exception —
-        # « ⚠️ Step logging error », journal muet, zero ligne HAZARD sur un run entier.
+        # desormais. Sans cette traduction, la ligne leve — et depuis que `log_action` n'avale
+        # plus rien, ce sont le run et l'episode qui tombent, plus le journal en silence.
         _hazard_mw = raw_log.get("hazardousMortalWounds")  # get allowed : types non-hasardeux
         if _hazard_mw is not None:
             details["hazardous_mortal_wounds"] = _hazard_mw
