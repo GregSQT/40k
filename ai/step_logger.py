@@ -155,9 +155,10 @@ def _anti_rule_token(details) -> str:
 
     Le DOMAINE du seuil (Y+ >= 2, 05.02) appartient a `attack_sequence.anti_threshold_of`, qui
     le refuse a l entree du moteur. Le controle ci-dessous n est donc plus le premier a voir une
-    armurerie fautive — il ne l aurait pas SIGNALEE : `log_action` avale toute exception du
-    formateur, et la ligne d attaque disparaissait au lieu de lever. Il reste ici parce qu il
-    verrouille le CONTRAT du token (ce fichier ne doit jamais ecrire `[ANTI-X:1+]`), pas la
+    armurerie fautive — et il ne l aurait pas SIGNALEE tant que `log_action` entourait l appel du
+    formateur d un `try/except` : la ligne d attaque disparaissait au lieu de lever. Ce
+    `try/except` a ete retire (T1) et l exception remonte desormais ; le controle reste ici parce
+    qu il verrouille le CONTRAT du token (ce fichier ne doit jamais ecrire `[ANTI-X:1+]`), pas la
     donnee.
     """
     anti_keyword = details.get("anti_keyword")
@@ -414,9 +415,11 @@ class StepLogger:
         s'intercalerait AVANT des actions encore bufferisees, et le replay lit ce journal dans
         l'ordre — l'instantane se retrouverait attache au mauvais point de la partie.
 
-        Pas de `try/except` ici, contrairement au reste du module : cette ligne est la source de
-        verite du replay. Une exception avalee produirait un flux d'instantanes tronque, donc un
-        controle affiche perime — exactement le defaut que cette ligne corrige.
+        Pas de `try/except` ici : cette ligne est la source de verite du replay. Une exception
+        avalee produirait un flux d'instantanes tronque, donc un controle affiche perime —
+        exactement le defaut que cette ligne corrige. Le module entier tient desormais cette
+        regle : les `try/except` avaleurs du chemin d'ecriture ont ete retires (T1) et seule
+        l'instrumentation `debug.log` reste avalee.
 
         L18 — champs optionnels (absents dans les journaux anterieurs au 2026-08-19) :
         - `control_method` : "secured" | "default" (14.02/14.03), commun a tous les objectifs.
