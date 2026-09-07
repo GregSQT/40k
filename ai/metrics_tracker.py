@@ -1645,7 +1645,7 @@ class W40KMetricsTracker:
         - 00_critical/d_win_rate             - Training opponent performance
         - 00_critical/e_episode_reward_smooth  - Learning progress
         (le doublon a fenetre courte `_<perf_window_fast>ep` n'existe que si les deux
-         fenetres du training config different ; elles sont egales par defaut)
+         fenetres du training config different ; depuis le 2026-09-07 fast=100, window=500)
 
         SANTE PPO -- moyennes sur les 20 derniers updates, et emises A LA CADENCE DE L'UPDATE :
         ces cinq-la sont les SEULES courbes `00_critical/` qui ne portent pas un point par
