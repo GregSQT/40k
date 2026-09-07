@@ -172,11 +172,15 @@ class ManualAllocCtx:
     # Tir : SHOOT_LEFT = 1 activation -> decrement de 1. Combat : ATTACK_LEFT = nombre
     # d attaques -> decrement du nombre d attaques de l intent (consomme tout).
     decrement_by_attacks: bool = False
-    # Hooks d application des degats specifiques a la phase (None = comportement tir pur).
-    # on_target_damaged(game_state, target_sid) : appele a chaque blessure infligee.
+    # Hook d application des degats specifique a la phase (None = comportement tir pur).
     # on_unit_destroyed(game_state, target_sid) : appele quand l unite cible est detruite.
+    # Le jumeau `on_target_damaged` (appele a chaque blessure) a ete SUPPRIME le 2026-09-07 avec
+    # `engine/ai/weapon_selector.py` : il n avait qu un seul setter, `_fight_on_target_damaged`,
+    # qui invalidait le `kill_probability_cache` de ce module. Ce n etait pas une couture de
+    # REGLE — les reactions par blessure de 40K (Feel No Pain, cf. `_get_feel_no_pain_threshold`)
+    # vivent dans la resolution de la blessure, pas dans ce ctx — et le champ ne survivait donc
+    # a la purge qu en annoncant un point d extension que personne n exercait.
     emit_unit_death_log: bool = False
-    on_target_damaged: Optional[Callable[[Dict[str, Any], str], None]] = None
     on_unit_destroyed: Optional[Callable[[Dict[str, Any], str], None]] = None
     # Mode mortal wounds (hazard 06.03) : pas d arme, pas de save, degat fixe, log dedie.
     mortal: bool = False
@@ -11144,10 +11148,8 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         summary["models_killed"] += 1
     else:
         update_model_hp(game_state, cur, new_hp)
-    # Hooks d application specifiques a la phase (fight : retrait des pools de combat).
+    # Hook d application specifique a la phase (fight : retrait des pools de combat).
     # destroy_model/update_model_hp resynchronisent deja units_cache (somme des figs).
-    if ctx.on_target_damaged is not None:
-        ctx.on_target_damaged(game_state, batch["target_sid"])
     if destroyed and ctx.on_unit_destroyed is not None:
         squad_models = require_key(game_state, "squad_models")
         if not [mm for mm in squad_models.get(batch["target_sid"], []) if mm in models_cache]:  # get allowed

@@ -183,10 +183,12 @@ pur). **Invariant** : toute nouvelle voie d'application de dégâts en mêlée d
 hook — appliquer des dégâts fight par le chemin tir nu laisserait des unités fantômes dans les
 pools V11.
 
-Le hook jumeau `on_target_damaged` invalidait le `kill_probability_cache` de la cible à chaque
-blessure ; il a été supprimé le 2026-09-07 avec `engine/ai/weapon_selector.py`, seul écrivain de
-ce cache et sans appelant de production (cf. `Documentation/Reference/jeu/armes.md`, § AI Weapon
-Selection).
+Le hook jumeau `on_target_damaged` (appelé à chaque blessure) invalidait le
+`kill_probability_cache` de la cible ; **le champ du ctx et son dispatch ont été supprimés le
+2026-09-07** avec `engine/ai/weapon_selector.py`, seul écrivain de ce cache et sans appelant de
+production (cf. `Documentation/Reference/jeu/armes.md`, § AI Weapon Selection). Ce n'était pas une
+couture de RÈGLE : les réactions par blessure (Feel No Pain, `def _get_feel_no_pain_threshold`)
+vivent dans la résolution de la blessure, pas dans le ctx.
 
 ---
 
