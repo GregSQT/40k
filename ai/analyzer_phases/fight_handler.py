@@ -566,14 +566,11 @@ def handle_fight(
             # pending_removals_actor = None ; _apply_damage_and_handle_death retourne tôt (hp≤0)
             # sans le mettre à jour. Propager l'acteur réel ici avant le test.
             _kill_ctx_fight = state.unit_kill_context.get(target_id)
-            if (
-                _kill_ctx_fight is not None
-                and _kill_ctx_fight[0] is None
-                and _kill_ctx_fight[1] == turn
-                and _kill_ctx_fight[2] == phase
-            ):
+            if _kill_ctx_fight is not None and _kill_ctx_fight[0] is None and _kill_ctx_fight[1] == turn and _kill_ctx_fight[2] == phase:
                 state.unit_kill_context[target_id] = (fighter_id, turn, phase)
-            same_activation_kill = state.unit_kill_context.get(target_id) == (fighter_id, turn, phase)
+                same_activation_kill = True
+            else:
+                same_activation_kill = _kill_ctx_fight == (fighter_id, turn, phase)
             if target_died_before_fight and not same_activation_kill:
                 attacker_player = require_key(state.unit_player, fighter_id)
                 stats['fight_dead_unit_target'][attacker_player] += 1
