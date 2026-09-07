@@ -116,6 +116,49 @@ SHOT_AT_CORPSE_LOG = entete_step_log(
 )
 
 
+# LE cas de production, que les trois fixtures ci-dessus manquaient toutes : une AUTRE unité a
+# tiré JUSTE AVANT l'activation qui tue. `state.pending_removals_actor` porte alors l'acteur de
+# cette activation précédente (« 1 »), pas celui de l'activation en cours (« 5 ») — le handler
+# DEAD en faisait le tueur, et `same_activation_kill` échouait sur CHAQUE activation qui détruit
+# sa cible. Mesuré sur un run de 600 épisodes : §2.1 passait de 0 à 4293 erreurs, toutes fausses.
+# Les fixtures existantes ne pouvaient pas le voir : DEAD_BEFORE_SHOT_LOG a le même attaquant des
+# deux côtés de la ligne DEAD, et DEAD_BEFORE_ALL_SHOTS_LOG n'a aucune activation antérieure.
+_UNITS_DEUX_ATTAQUANTS = (
+    "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50)]\n"
+    "[10:00:00] Unit 5 (SternguardVeteranBoltRifle) P1: Starting position (60,50), HP_MAX=2 base=round/6 [MODELS: 5#0@(60,50)]\n"
+    "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (80,50), HP_MAX=2 base=round/6 [MODELS: 102#0@(80,50)]\n"
+    "[10:00:00] Unit 103 (AssaultIntercessor) P2: Starting position (90,50), HP_MAX=2 base=round/6 [MODELS: 103#0@(90,50)]\n"
+)
+_DEPLOIEMENTS_DEUX_ATTAQUANTS = (
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 5(60,50) DEPLOYED from (-1,-1) to (60,50) [R:+0.0] [MODELS: 5#0@(60,50)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(80,50) DEPLOYED from (-1,-1) to (80,50) [R:+0.0] [MODELS: 102#0@(80,50)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 103(90,50) DEPLOYED from (-1,-1) to (90,50) [R:+0.0] [MODELS: 103#0@(90,50)] [SUCCESS]\n"
+)
+# Unit 1 blesse 103 sans la tuer (elle pose `pending_removals_actor`), puis 102 meurt sous les
+# tirs de Unit 5 — dont la ligne d'attaque, comme toujours, SUIT l'annonce de la mort.
+DEAD_APRES_ACTIVATION_D_UNE_AUTRE_UNITE_LOG = entete_step_log(
+    _DEPLOIEMENTS_DEUX_ATTAQUANTS
+    + "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 103(90,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 103#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 103#0] [SUCCESS]\n"
+    "[10:00:03] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
+    "[10:00:04] E1 T1 P1 SHOOT : Unit 5(60,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 5#0@(60,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
+    "[10:00:05] E1 T1 P1 SHOOT : Unit 5(60,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 5#0@(60,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
+    units=_UNITS_DEUX_ATTAQUANTS,
+    ez_vertical_inches=None,
+)
+# Même ouverture, mais c'est Unit 1 qui tire APRÈS que Unit 5 a revendiqué la mort : là, le
+# cadavre est visé par une unité tierce et la faute doit rester comptée.
+CADAVRE_VISE_PAR_UNE_TIERCE_UNITE_LOG = entete_step_log(
+    _DEPLOIEMENTS_DEUX_ATTAQUANTS
+    + "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 103(90,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 103#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 103#0] [SUCCESS]\n"
+    "[10:00:03] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
+    "[10:00:04] E1 T1 P1 SHOOT : Unit 5(60,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 5#0@(60,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
+    "[10:00:05] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
+    units=_UNITS_DEUX_ATTAQUANTS,
+    ez_vertical_inches=None,
+)
+
+
 def _parse(tmp_path, contenu: str):
     import ai.analyzer as an
 
@@ -160,6 +203,33 @@ def test_dead_line_written_before_its_own_shot_is_not_a_violation(tmp_path):
     stats = _parse(tmp_path, DEAD_BEFORE_SHOT_LOG)
     assert stats["shoot_at_dead_unit"][1] == 0
     assert stats["shoot_at_dead_unit"][2] == 0
+
+
+def test_une_activation_anterieure_d_une_autre_unite_ne_devient_pas_le_tueur(tmp_path):
+    """LE cas de production : Unit 5 tue, Unit 1 avait tiré juste avant.
+
+    Le handler DEAD prenait `pending_removals_actor` — l'acteur de la dernière ligne d'attaque
+    LUE, donc Unit 1 — pour le tueur de la cible de Unit 5. `same_activation_kill` échouait alors
+    sur chaque activation qui détruit sa cible, et le contrôle comptait les « excess attacks
+    lost » de l'attaquant comme des tirs sur cadavre : 4293 fausses erreurs §2.1 mesurées.
+    """
+    stats = _parse(tmp_path, DEAD_APRES_ACTIVATION_D_UNE_AUTRE_UNITE_LOG)
+    assert stats["shoot_at_dead_unit"][1] == 0, (
+        "les tirs de l'activation qui TUE sont comptés comme des tirs sur cadavre"
+    )
+    assert stats["shoot_at_dead_unit"][2] == 0
+
+
+def test_le_cadavre_vise_par_une_tierce_unite_reste_compte(tmp_path):
+    """Non-vacuité du correctif : seul le tueur est amnistié, pas l'unité suivante.
+
+    Sans cette garde, poser « tueur inconnu » reviendrait à amnistier le premier attaquant venu
+    et le contrôle deviendrait vacant — l'inverse exact du défaut qu'on corrige.
+    """
+    stats = _parse(tmp_path, CADAVRE_VISE_PAR_UNE_TIERCE_UNITE_LOG)
+    assert stats["shoot_at_dead_unit"][1] == 1, (
+        "un tir d'une unité tierce sur un cadavre déjà revendiqué doit rester une violation"
+    )
 
 
 def test_shot_at_a_unit_killed_on_an_earlier_turn_is_still_flagged(tmp_path):
@@ -224,6 +294,43 @@ DEAD_BEFORE_ALL_FIGHTS_LOG = entete_step_log(
     ),
     ez_vertical_inches=None,
 )
+
+
+# Jumeau FIGHT du cas de production : une AUTRE unité a frappé juste avant l'activation qui tue.
+# Le motif d'échec n°1 du dépôt est la correction faite d'un seul côté d'un miroir ; le défaut
+# `pending_removals_actor` vit dans le handler DEAD, donc il frappe les deux phases.
+DEAD_APRES_ACTIVATION_D_UNE_AUTRE_UNITE_FIGHT_LOG = entete_step_log(
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [MODELS: 1#0@(50,50,z0)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 5(52,50) DEPLOYED from (-1,-1) to (52,50) [R:+0.0] [MODELS: 5#0@(52,50,z0)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(51,50) DEPLOYED from (-1,-1) to (51,50) [R:+0.0] [MODELS: 102#0@(51,50,z0)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 103(53,50) DEPLOYED from (-1,-1) to (53,50) [R:+0.0] [MODELS: 103#0@(53,50,z0)] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 FIGHT : Unit 1(50,50) FOUGHT Unit 103(53,50) with [Close Combat Weapon] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 1#0@(50,50,z0)] [SUCCESS]\n"
+    "[10:00:03] E1 T1 P2 FIGHT : Unit 102(51,50) DEAD model=102#0 reason=combat [SUCCESS]\n"
+    "[10:00:04] E1 T1 P1 FIGHT : Unit 5(52,50) FOUGHT Unit 102(51,50) with [Close Combat Weapon] - Hit 4(3+) - Wound 5(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 5#0@(52,50,z0)] [SUCCESS]\n"
+    "[10:00:05] E1 T1 P1 FIGHT : Unit 5(52,50) FOUGHT Unit 102(51,50) with [Close Combat Weapon] - Hit 5(3+) - Wound 4(4+) - Save 2(3+) - Dmg:1HP [R:+0.0] [FIGHT_SUBPHASE:fight] [MODELS: 5#0@(52,50,z0)] [SUCCESS]\n",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50,z0)]\n"
+        "[10:00:00] Unit 5 (SternguardVeteranBoltRifle) P1: Starting position (52,50), HP_MAX=2 base=round/6 [MODELS: 5#0@(52,50,z0)]\n"
+        "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (51,50), HP_MAX=2 base=round/6 [MODELS: 102#0@(51,50,z0)]\n"
+        "[10:00:00] Unit 103 (AssaultIntercessor) P2: Starting position (53,50), HP_MAX=2 base=round/6 [MODELS: 103#0@(53,50,z0)]\n"
+    ),
+    ez_vertical_inches=None,
+)
+
+
+def test_fight_une_activation_anterieure_d_une_autre_unite_ne_devient_pas_le_tueur(tmp_path):
+    """Jumeau mêlée : Unit 5 tue, Unit 1 avait frappé juste avant.
+
+    Le défaut vit dans le handler DEAD, commun aux deux phases : `pending_removals_actor` y
+    désignait l'acteur de l'activation précédente. Corriger le seul côté tir aurait laissé la
+    mêlée compter les « excess attacks lost » de l'attaquant comme des attaques sur cadavre —
+    1500 des 4293 fausses erreurs mesurées venaient de là.
+    """
+    stats = _parse(tmp_path, DEAD_APRES_ACTIVATION_D_UNE_AUTRE_UNITE_FIGHT_LOG)
+    assert stats["fight_dead_unit_target"][1] == 0, (
+        "les attaques de l'activation qui TUE sont comptées comme des attaques sur cadavre"
+    )
+    assert stats["fight_dead_unit_target"][2] == 0
 
 
 def test_dead_before_all_fights_real_production_order_not_flagged(tmp_path):

@@ -1587,11 +1587,22 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # unit_kill_context (pour `same_activation_kill`) quand l'unité est tuée
                         # via l'artefact DEAD-before-SHOOT : _apply_damage_to_named_model retourne
                         # tôt (dead_model_ids_episode) sans jamais écrire ces deux champs.
+                        #
+                        # TUEUR INCONNU, et il faut l'écrire ainsi. `destroy_model` émet la ligne
+                        # DEAD *pendant* l'allocation, alors que `_finalize_manual_allocation`
+                        # n'émet les lignes d'attaque qu'à la fin de l'activation : à cet instant
+                        # l'attaque fatale n'est PAS encore dans le journal. `pending_removals_actor`
+                        # porte l'acteur de la dernière ligne d'attaque LUE, donc celui de
+                        # l'activation PRÉCÉDENTE — le prendre pour le tueur faisait échouer
+                        # `same_activation_kill` sur chaque activation qui tue, et le contrôle
+                        # comptait ses propres « excess attacks lost » comme des tirs sur cadavre.
+                        # Mesuré sur step.log : §2.1 passait de 0 à 4293 erreurs, toutes fausses.
+                        # `None` dit « mort constatée, tueur à venir » ; la première ligne d'attaque
+                        # du même turn/phase revendique la mort (branche `_kill_ctx[0] is None`
+                        # côté SHOT comme côté FOUGHT).
                         if phase in {'MOVE', 'SHOOT', 'CHARGE', 'FIGHT'}:
                             state.unit_deaths.append((turn, phase, _dead_uid, state.line_number))
-                            state.unit_kill_context[_dead_uid] = (
-                                state.pending_removals_actor, turn, phase
-                            )
+                            state.unit_kill_context[_dead_uid] = (None, turn, phase)
                     _prm = state.pending_model_removals.get(_dead_uid)
                     if _prm is not None:
                         _prm.discard(_dead_mid)

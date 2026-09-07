@@ -188,7 +188,10 @@ class AnalyzerState:
     # Sert à ne pas compter comme « attaque sur unité morte » les attaques restantes de
     # LA MÊME activation qui a détruit la cible (excess attacks lost, 05 Attack sequence),
     # tout en gardant le contrôle pour une unité tierce attaquant un vrai cadavre.
-    unit_kill_context: Dict[str, Tuple[str, int, str]] = field(default_factory=dict)
+    # L'attaquant est `None` quand la mort est constatée par une ligne DEAD, que le moteur écrit
+    # AVANT les lignes d'attaque de l'activation qui l'a causée : le tueur n'est alors pas encore
+    # journalisé, et la première ligne d'attaque du même turn/phase le renseigne.
+    unit_kill_context: Dict[str, Tuple[Optional[str], int, str]] = field(default_factory=dict)
     line_number: int = 0
     dead_units_current_episode: Set[str] = field(default_factory=set)
     revived_units_current_episode: Set[str] = field(default_factory=set)
