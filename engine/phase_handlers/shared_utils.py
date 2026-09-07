@@ -73,6 +73,7 @@ from engine.combat_utils import (
     calculate_hex_distance,
     get_hex_neighbors,
     expected_dice_value,
+    expected_capped_dice_value,
     resolve_dice_value,
     get_unit_by_id,
     require_unit_by_id,
@@ -8240,10 +8241,16 @@ def _useful_expected_damage(
     Le plafond est pris sur `HP_MAX` (caracteristique Wounds de la datasheet) et non sur les PV
     courants : la figurine qui encaissera n est pas connue a la declaration, et HP_MAX est
     stable sur toute l activation.
+
+    Il porte sur CHAQUE JET de degats et non sur leur moyenne — 05.04 plafonne attaque par
+    attaque (« the selected model loses a number of wounds equal to that attack's D
+    characteristic »), donc `E[min(de, PV)]` et jamais `min(E[de], PV)`. Les deux ne coincident
+    que si le de ne peut pas depasser le plafond, ou le depasse toujours : un D6 contre 3 PV
+    vaut 2,5 et non 3,0. `expected_capped_dice_value` porte ce comptage, parce qu il exige les
+    issues du de et que leur table vit avec les des.
     """
-    return min(
-        float(expected_dice_value(require_key(weapon, "DMG"), context)),
-        float(target_hp_max),
+    return expected_capped_dice_value(
+        require_key(weapon, "DMG"), int(target_hp_max), context
     )
 
 
