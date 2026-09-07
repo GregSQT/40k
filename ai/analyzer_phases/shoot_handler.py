@@ -669,6 +669,11 @@ def handle_shoot(
                     rng_nb_squad + blast_dice + rapid_fire_cap
                     + atk_bonus_squad + dakkablitz_bonus + od_bonus
                 )
+                # Occasion JUGÉE : le plafond vient d'être calculé et confronté au compte réel.
+                # Noté avant le verdict, comme 03.03 le fait avant son `continue` — sans quoi la
+                # règle n'affiche jamais que 0 exercice, et le rapport la déclare « JAMAIS
+                # EXERCÉE » au-dessus de son propre compteur d'erreurs.
+                note_rule_usage(stats, "PROJ.1.2.surcharge_atk", shooter_player_for_stats)
                 if state.shot_sequence_counts[seq_key] > max_allowed_shots:
                     stats['shoot_over_rng_nb'][shooter_player_for_stats] += 1
                     if stats['first_error_lines']['shoot_over_rng_nb'][shooter_player_for_stats] is None:

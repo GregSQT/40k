@@ -45,13 +45,52 @@ STEP_LOG = entete_step_log(
 )
 
 
-@pytest.fixture
-def stats(tmp_path):
+# Grammaire RÉELLE du moteur : la ligne `DEAD model=` est écrite PENDANT la résolution
+# (`destroy_model`), donc AVANT les lignes SHOT du groupe d'armes qui l'ont causée
+# (`_finalize_manual_allocation` ne les émet qu'après allocation complète). Le tir fatal, ici la
+# dernière ligne, SUIT donc l'annonce de la mort qu'il provoque.
+#
+# La fixture STEP_LOG ci-dessus ne porte AUCUNE ligne `DEAD model=` ni `[ALLOC_MODEL:]` : elle
+# n'exerçait pas cette inversion, et laissait passer 3156 faux positifs mesurés en production.
+DEAD_BEFORE_SHOT_LOG = entete_step_log(
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(80,50) DEPLOYED from (-1,-1) to (80,50) [R:+0.0] [MODELS: 102#0@(80,50)] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50)]\n"
+        "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (80,50), HP_MAX=2 base=round/6 [MODELS: 102#0@(80,50)]\n"
+    ),
+    ez_vertical_inches=None,
+)
+
+# Vraie violation : la cible meurt au tour 1, et une activation d'un tour ULTÉRIEUR la vise encore.
+# Garde la preuve que le contrôle n'est pas devenu vacant en neutralisant l'artefact ci-dessus.
+SHOT_AT_CORPSE_LOG = entete_step_log(
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(80,50) DEPLOYED from (-1,-1) to (80,50) [R:+0.0] [MODELS: 102#0@(80,50)] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:2HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
+    "[10:00:03] E1 T3 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50)]\n"
+        "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (80,50), HP_MAX=2 base=round/6 [MODELS: 102#0@(80,50)]\n"
+    ),
+    ez_vertical_inches=None,
+)
+
+
+def _parse(tmp_path, contenu: str):
     import ai.analyzer as an
 
     log = tmp_path / "step.log"
-    log.write_text(STEP_LOG)
+    log.write_text(contenu)
     return an.parse_step_log(str(log))
+
+
+@pytest.fixture
+def stats(tmp_path):
+    return _parse(tmp_path, STEP_LOG)
 
 
 def test_multi_model_squad_not_flagged_dead_prematurely(stats):
@@ -73,3 +112,21 @@ def test_squad_is_eventually_destroyed(stats):
     figure bien parmi les morts de l'épisode."""
     dead_ids = {uid for (_player, uid, _utype) in stats["current_episode_deaths"]}
     assert "101" in dead_ids
+
+
+def test_dead_line_written_before_its_own_shot_is_not_a_violation(tmp_path):
+    """Le tir qui CAUSE la mort suit la ligne `DEAD` au journal : ce n'est pas un tir sur cadavre.
+
+    Verrou de l'artefact d'ordonnancement : `unit_hp` seul date la mort de la ligne `DEAD`, donc
+    d'un point ANTÉRIEUR à l'attaque responsable. Le garde `died_before_phase` date la mort de la
+    ligne de dégâts elle-même.
+    """
+    stats = _parse(tmp_path, DEAD_BEFORE_SHOT_LOG)
+    assert stats["shoot_at_dead_unit"][1] == 0
+    assert stats["shoot_at_dead_unit"][2] == 0
+
+
+def test_shot_at_a_unit_killed_on_an_earlier_turn_is_still_flagged(tmp_path):
+    """Non-vacuité : une cible tuée au tour 1 et visée au tour 3 reste une violation."""
+    stats = _parse(tmp_path, SHOT_AT_CORPSE_LOG)
+    assert stats["shoot_at_dead_unit"][1] == 1

@@ -14,6 +14,7 @@ from ai.analyzer_rules import note_rule_usage
 from ai.analyzer_perfig import MODEL_TOKEN_PATTERN, position_is_on_battlefield
 from ai.analyzer_state import AnalyzerState
 from ai.analyzer_config import AnalyzerConfig
+from ai.analyzer_phases import died_before_phase
 from ai.analyzer_phases.episode_handler import handle_episode_start
 from ai.analyzer_phases.shoot_handler import handle_shoot, handle_wait, handle_advance
 from ai.analyzer_phases.charge_handler import handle_charge
@@ -1105,10 +1106,24 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # Exception 05 Attack sequence : les tirs restants de la MÊME
                             # activation qui a détruit la cible sont des « excess attacks lost »
                             # (même attaquant, même turn/phase) → pas une violation.
+                            #
+                            # `died_before_phase` et NON le seul `unit_hp` : le moteur écrit
+                            # l'événement DEAD pendant la résolution (destroy_model), donc AVANT
+                            # les lignes SHOT du groupe d'armes qui l'ont causé
+                            # (`_finalize_manual_allocation` ne les émet qu'après allocation
+                            # complète). Lire `unit_hp`, que le handler des lignes DEAD zéroe,
+                            # revenait à dater la mort d'une ligne antérieure à l'attaque
+                            # responsable : 3156 faux positifs mesurés sur un run de 600 épisodes,
+                            # zéro violation réelle. Les six contrôles jumeaux (move, charge,
+                            # shoot, fight) portent déjà ce garde et rapportent tous 0.
                             if damage > 0:
+                                note_rule_usage(stats, "PROJ.2.1.dead_shot_at", player)
                                 target_already_dead = target_id not in state.unit_hp or require_key(state.unit_hp, target_id) <= 0
+                                died_earlier = died_before_phase(
+                                    target_id, turn, phase, state.line_number, state.unit_deaths
+                                )
                                 same_activation_kill = state.unit_kill_context.get(target_id) == (_dmg_actor_id, turn, phase)
-                                if target_already_dead and not same_activation_kill:
+                                if target_already_dead and died_earlier and not same_activation_kill:
                                     stats['shoot_at_dead_unit'][player] += 1
                                     if stats['first_error_lines']['shoot_at_dead_unit'][player] is None:
                                         stats['first_error_lines']['shoot_at_dead_unit'][player] = {'episode': state.current_episode_num, 'line': line.strip()}

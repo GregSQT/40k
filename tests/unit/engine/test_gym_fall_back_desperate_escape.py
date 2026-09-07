@@ -168,23 +168,27 @@ def test_gym_fall_back_not_battleshocked_keeps_ordered_retreat() -> None:
     )
 
 
-def test_gym_desperate_escape_bridge_death_coherency_relaxed() -> None:
-    """Mort du pont en Desperate Escape → formation incohérente → execute_squad_move doit réussir.
+def test_gym_desperate_escape_bridge_death_keeps_the_unit_stationary() -> None:
+    """Mort du pont en Desperate Escape → formation rompue → l'unité NE se replie PAS.
 
     Scénario : escouade 3 figs A(20,20)–B(22,20)–C(24,20), ennemi en (25,20).
     Coh = 2 subhexes (ISH=1). B est le seul lien A–C (chacun à 2", limite de coh).
     Le mock simule un Desperate Escape qui tue B : A et C restent vivants, à 4 hexes l'un
-    de l'autre → incoherents.
+    de l'autre → incohérents.
 
-    Sans le fix (extra_constraints=_move_constraints absent de execute_squad_move) :
-    validate_move_plan avec require_coherency=True rejette le plan → ValueError.
+    Ce test verrouillait auparavant le comportement INVERSE — le mouvement était exécuté avec
+    `require_coherency=False` — sur une lecture erronée de 03.03. Le PDF tranche dans l'autre
+    sens : « A unit that contains more than one model must be set up and end ANY KIND OF MOVE in
+    coherency » (03.03), et 03.01 ENDING A MOVE : « If one or more of the above conditions are not
+    met, that unit cannot make that move and its models are returned to their positions at the
+    start of that move » — l'unité « could either attempt another set up or remain stationary
+    (09.04) ». REGAINING COHERENCY (End of Turn) retire des figurines pour réparer des PERTES ;
+    elle n'autorise pas à terminer un mouvement brisé.
 
-    Avec le fix : 03.03 enforce la coh en FIN de phase (end_of_turn_regain_coherency_all_squads,
-    déjà câblé) ; le move lui-même ne doit pas l'exiger pour un Desperate Escape.
+    Mesuré avant correction : 1 violation 03.03 sur un run de 600 épisodes (épisode 204).
 
-    Cycle rouge→vert : supprimer `extra_constraints=_move_constraints` dans l'appel
-    execute_squad_move de w40k_core._process_semantic_action déclenche un ValueError
-    « incohérence masque/exécution / require_coherency ».
+    L'issue est celle, déjà câblée, du décalage d'ancre : activation close en WAIT, et surtout
+    PAS `FLED` — aucun repli n'a eu lieu, donc aucun interdit 09.07 à porter.
     """
     eng = _engine_bridge_formation()
     gs = eng.game_state
@@ -216,12 +220,19 @@ def test_gym_desperate_escape_bridge_death_coherency_relaxed() -> None:
             {"action": "squad_fall_back", "squad_id": "1", "destCol": 16, "destRow": 20}
         )
 
-    assert ok, (
-        f"squad_fall_back post-mort-du-pont a échoué (incohérence masque/exécution non corrigée) : {result}"
-    )
+    assert ok, f"l'activation doit se clore proprement, pas lever : {result}"
     assert result.get("action") != "desperate_escape_died", (
         "A et C survivent → l'action ne doit pas être desperate_escape_died"
     )
+    assert result.get("action") == "fall_back_anchor_shifted", (
+        "formation rompue par le hazard → 03.01 « cannot make that move », l'unité reste "
+        f"stationnaire ; obtenu {result.get('action')!r}"
+    )
+    # Les survivants n'ont pas bougé : c'est le « returned to their positions » de 03.01.
+    assert gs["models_cache"]["1#0"]["col"] == 20
+    assert gs["models_cache"]["1#2"]["col"] == 24
+    move_logs = [e for e in gs.get("action_logs", []) if e.get("type") == "move"]
+    assert move_logs == [], f"aucune ligne de mouvement ne doit être journalisée : {move_logs}"
 
 
 def test_gym_fall_back_anchor_shifted_skips_move() -> None:

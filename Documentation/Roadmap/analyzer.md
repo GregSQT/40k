@@ -4,6 +4,34 @@ Découpage en 6 lots des trois sujets ci-dessous (ordre séquentiel imposé : to
 
 ---
 
+## Compteur d'exercices non câblé — les verdicts « JAMAIS EXERCÉE » sont du bruit {#compteur-exercices}
+
+`note_rule_usage` (`ai/analyzer_rules.py`) n'est appelé que pour **14** des **62 règles du corpus
+qui déclarent des `controls`**. Les **48 autres** ne peuvent afficher que `ERREURS` ou
+`JAMAIS EXERCÉE` — jamais `OK` : leur colonne `Exercices` est nulle par construction. Le rapport
+du 2026-09-07 affiche exactement 48 verdicts « JAMAIS EXERCÉE ».
+
+Conséquence directe : l'avertissement « ⚠️ Applicable(s) et jamais exercee(s) — la situation s'est
+presentee et aucun controle n'a rien juge » est du bruit pour la quasi-totalité de ses entrées,
+alors qu'il est **la** raison d'être du module (détecter le motif 17.01 : une règle que le moteur
+n'applique jamais ne produit aucune ligne fautive, donc aucun compteur ne bouge, donc le rapport
+affiche un vert franc — mesuré le 2026-08-10).
+
+Cinq règles ont été câblées le 2026-09-07 (celles dont les contrôles étaient corrigés le même
+jour) : `PROJ.2.1.dead_shot_at` (11232 exercices), `PROJ.1.2.surcharge_atk` (66956),
+`PROJ.1.3.budget` (1472), `PROJ.1.4.consolidation` (297), `PROJ.1.4.pile_in` (1525). Sans ce
+câblage, corriger leurs faux positifs les faisait passer de « ERREURS » à « JAMAIS EXERCÉE » —
+un second mensonge à la place du premier.
+
+**Reste à faire** : poser un `note_rule_usage` au site d'évaluation des 48 règles restantes, et
+verrouiller l'invariant par un test de corpus (toute règle `applicability.kind == "always"` avec
+des `controls` non vides doit avoir au moins un site d'incrément). Interdire aussi l'état
+incohérent `exercised == 0 and errors > 0` dans `coverage_rows`.
+
+⚡ Peut démarrer pendant un entraînement (ne touche ni `config/**/*.json` ni le moteur).
+
+---
+
 ## Faux positifs `shoot_over_rng_nb` {#faux-positifs-plafond-tir}
 
 **✅ LIVRÉ (2026-09-02)** — Run de 300 épisodes : **5187 → 2243 erreurs**, dont `surcharge_atk` 4879 → 1935.

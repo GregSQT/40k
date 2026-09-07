@@ -368,3 +368,63 @@ def test_objective_snapshot_reemitted_when_command_points_change():
     eng.game_state["command_points"][1] = 3
     eng._log_objective_control_snapshot_if_changed()
     assert [s["command_points"][1] for s in logger.snapshots] == [2, 3]
+
+
+def _combat_log_with_target(**overrides: Any) -> Dict[str, Any]:
+    """Entrée d'action_log « combat » minimale visant l'unité 9, avec un seul jet."""
+    return {
+        "type": "combat", "shooterId": "7", "targetId": "9", "player": 1, "phase": "fight",
+        "turn": 2, "weaponName": "Power Weapon", "shooterCol": 5, "shooterRow": 6,
+        "targetCol": 10, "targetRow": 11,
+        "shootDetails": [{
+            "shotNumber": 1, "attackRoll": 5, "hitResult": "HIT", "hitTarget": 3,
+            "strengthRoll": 4, "strengthResult": "SUCCESS", "woundTarget": 4,
+            "saveRoll": 2, "saveTarget": 3, "saveSuccess": False, "damageDealt": 1,
+        }],
+        **overrides,
+    }
+
+
+def test_target_models_segment_precapture_wins_over_live_positions():
+    """[TARGET_MODELS:] doit dater de l'ATTAQUE, pas du flush.
+
+    Le flush intervient après `_fight_v11_gym_settle`, donc après les pile-in et consolidations
+    du groupe. Lire les positions de la cible à cet instant les datait d'APRÈS son mouvement :
+    l'analyzer bâtissait ses bloqueurs de chemin avec des figurines déjà consolidées et déclarait
+    impossible une consolidation qui était légale quand elle a été jouée (1 faux positif
+    PROJ.1.4.consolidation sur un run de 600 épisodes).
+
+    Ici `units_cache` porte la position d'APRÈS (22,26) et le segment pré-capturé celle d'AVANT
+    (22,29) : c'est la seconde qui doit sortir.
+    """
+    logger = _FakeStepLogger()
+    logs = [_combat_log_with_target(
+        target_models_segment="[TARGET_MODELS: 9#0@(22,29,z0)]",
+    )]
+    eng = _engine_stub(logs, logger)
+    eng.game_state["units_cache"] = {
+        "9": {"occupied_hexes_by_model": {"9#0": (22, 26)}, "col": 22, "row": 26},
+    }
+    _drain(eng)
+
+    details = logger.calls[0]["action_details"]
+    assert details["target_models_segment"] == "[TARGET_MODELS: 9#0@(22,29,z0)]", (
+        "le segment PRÉ-CAPTURÉ à l'attaque doit primer sur les positions lues au flush ; "
+        f"obtenu {details['target_models_segment']!r}"
+    )
+
+
+def test_target_models_segment_falls_back_to_live_when_not_precaptured():
+    """Sans pré-capture (émetteurs qui ne la posent pas), la lecture live reste le chemin."""
+    logger = _FakeStepLogger()
+    eng = _engine_stub([_combat_log_with_target()], logger)
+    eng.game_state["units_cache"] = {
+        "9": {
+            "occupied_hexes_by_model": {"9#0": (22, 26)},
+            "floor_height_by_model": {"9#0": 0},
+            "col": 22, "row": 26,
+        },
+    }
+    _drain(eng)
+
+    assert "22,26" in logger.calls[0]["action_details"]["target_models_segment"]

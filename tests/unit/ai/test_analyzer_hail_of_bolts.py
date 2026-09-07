@@ -108,3 +108,50 @@ def test_9_tirs_bolt_rifle_declenche_erreur(tmp_path):
     assert stats["shoot_over_rng_nb"][1] == 1, (
         f"Attendu 1 erreur shoot_over_rng_nb P1, obtenu {stats['shoot_over_rng_nb'][1]}"
     )
+
+
+# --- 19.04 : le PORTEUR de la règle n'équipe pas l'arme que la règle nomme -------------------
+#
+# Situation mesurée en production (600 épisodes) : l'escouade Intercessor est réduite à deux
+# socles, un `IntercessorGrenadeLauncher` (qui porte Hail of Bolts mais pas de bolt rifle) et un
+# `Ancient` rattaché (qui porte le bolt rifle mais pas la règle). Le moteur accorde le +2A à
+# l'Ancient — 19.04 : « abilities/rules that affect a unit apply to every model in an attached
+# unit, until the source of that ability/rule is destroyed », et la source vit encore.
+# L'analyzer, lui, résolvait `weapon_code` sur les seules armes du porteur : entrée absente,
+# plafond retombé à NB=2, et 4 tirs légaux comptés 2 fois en trop.
+_UNITS_PORTEUR_SANS_ARME = (
+    "[10:00:00] Unit 1 (Intercessor) P1: Starting position (-1,-1), HP_MAX=2 base=round/6"
+    " [MODEL_TYPES: 1#0=IntercessorGrenadeLauncher 1#1=Ancient]\n"
+    "[10:00:00] Unit 101 (AssaultIntercessor) P2: Starting position (-1,-1), HP_MAX=2 base=round/6\n"
+)
+
+
+def _stats_porteur_sans_arme(tmp_path, n_shots: int) -> dict:
+    """Seul l'Ancient (1#1) tire ; le porteur de la règle (1#0) n'a pas de bolt rifle."""
+    import ai.analyzer as an
+
+    shots = "".join(_tir(i + 2, i + 1, "1#1") for i in range(n_shots))
+    log = tmp_path / "step.log"
+    log.write_text(
+        entete_step_log(
+            _SETUP + shots, units=_UNITS_PORTEUR_SANS_ARME, ez_vertical_inches=None
+        )
+    )
+    return an.parse_step_log(str(log))
+
+
+def test_bonus_19_04_quand_le_porteur_de_la_regle_n_equipe_pas_l_arme(tmp_path):
+    """4 tirs de l'Ancient = NB(2) + Hail of Bolts(2) porté par un socle voisin → 0 erreur."""
+    stats = _stats_porteur_sans_arme(tmp_path, 4)
+    assert stats["shoot_over_rng_nb"][1] == 0, (
+        "19.04 : le bonus d'unité s'applique au socle rattaché même si le porteur de la règle "
+        f"n'équipe pas l'arme ; obtenu {stats['shoot_over_rng_nb'][1]} erreur(s)"
+    )
+
+
+def test_bonus_19_04_ne_leve_pas_le_plafond_indefiniment(tmp_path):
+    """Témoin inverse : le 5e tir du même socle dépasse bien le plafond de 4."""
+    stats = _stats_porteur_sans_arme(tmp_path, 5)
+    assert stats["shoot_over_rng_nb"][1] == 1, (
+        f"Attendu 1 erreur shoot_over_rng_nb P1, obtenu {stats['shoot_over_rng_nb'][1]}"
+    )
