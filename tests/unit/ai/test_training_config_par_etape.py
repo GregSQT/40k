@@ -27,6 +27,7 @@ from typing import Any, Dict
 import pytest
 
 from ai.curriculum import (
+    is_exploiter_stage,
     load_curriculum,
     require_stage,
     required_training_config,
@@ -40,6 +41,22 @@ AGENT = "ArmageddonAgent_x1"
 @pytest.fixture(scope="module")
 def curriculum() -> Dict[str, Any]:
     return load_curriculum(AGENT)
+
+
+@pytest.fixture(scope="module")
+def noms_exploiteurs(curriculum) -> list:
+    """Les etapes exploiteur LUES du curriculum, jamais une liste ecrite ici.
+
+    Une liste en dur laisserait une etape ajoutee plus tard hors des verrous ci-dessous : le
+    fichier resterait VERT en ne mesurant rien d'elle, alors que `validate_exploiter_protocol`
+    la refuserait au lancement du run. C'est le curriculum qui dit qui sont les exploiteurs.
+    """
+    noms = [
+        name for name in stage_order(curriculum)
+        if is_exploiter_stage(require_stage(curriculum, name))
+    ]
+    assert noms, "curriculum sans etape exploiteur : les verrous exploiteur ne mesureraient rien"
+    return noms
 
 
 @pytest.fixture(scope="module")
@@ -76,20 +93,21 @@ def test_only_the_cold_started_stage_asks_for_the_cold_profile(curriculum) -> No
     assert len(par_profil["x1_lineage"]) == 13
 
 
-def test_the_exploiters_take_the_lineage_profile_like_the_learners(curriculum) -> None:
+def test_the_exploiters_take_the_lineage_profile_like_the_learners(
+    curriculum, noms_exploiteurs
+) -> None:
     """Un exploiteur reprend les poids de P0 : c'est une reprise à chaud comme une autre.
 
     Lui laisser les rampes du profil de démarrage rendrait à un modèle déjà entraîné le régime
     d'exploration d'un run neuf — la destruction mesurée le 2026-09-04.
     """
-    for name in ("E1", "E2", "E3"):
+    for name in noms_exploiteurs:
         stage = require_stage(curriculum, name)
-        assert stage["role"] == "exploiter", name
         assert required_training_config(curriculum, stage) == "x1_lineage", name
 
 
 def test_exploiter_budget_cap_never_exceeds_lineage_profile_total_episodes(
-    curriculum, profil_lignee
+    curriculum, profil_lignee, noms_exploiteurs
 ) -> None:
     """Le profil de lignee doit pouvoir atteindre le budget_cap : total_episodes >= budget_cap.
 
@@ -99,7 +117,7 @@ def test_exploiter_budget_cap_never_exceeds_lineage_profile_total_episodes(
     est de porter total_episodes dans le profil lui-meme.
     """
     total_ep = profil_lignee["total_episodes"]
-    for name in ("E1", "E2", "E3"):
+    for name in noms_exploiteurs:
         stage = require_stage(curriculum, name)
         budget_cap = stage["budget_cap"]
         assert total_ep >= budget_cap, (
