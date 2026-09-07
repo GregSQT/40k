@@ -113,6 +113,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv, DummyVecEnv, VecNorm
 from ai.patched_ppo import PatchedDummyVecEnv, PatchedMaskablePPO
 from ai.maskable_subproc_vec_env import MaskableSubprocVecEnv
 from stable_baselines3.common.utils import ConstantSchedule, FloatSchedule  # Convert float hyperparameters to callable schedules
+from stable_baselines3.common.logger import configure as configure_sb3_logger
 from stable_baselines3.common.type_aliases import GymEnv
 
 
@@ -2408,6 +2409,45 @@ def _resolve_tensorboard_run_dir(
     return experiment_dir, run_dir
 
 
+def attach_run_logger(model, events_dir: str) -> None:
+    """Pose le logger TensorBoard du run sur `events_dir` — l'UNIQUE dossier d'evenements.
+
+    A poser dans les DEUX branches (modele neuf et reprise), et pas seulement en reprise.
+    Sans logger explicite, `_custom_logger` reste faux et SB3 reconstruit son logger a chaque
+    `learn()` (`base_class._setup_learn`), dans un sous-dossier `<tb_log_name>_<n>` qu'il derive
+    lui-meme. Le tracker de metriques ecrivant ailleurs, un seul agent produisait DEUX dossiers
+    d'evenements sous le meme run, donc deux entrees TensorBoard — et les tags ecrits des deux
+    cotes restaient invisibles tant que la scission les separait.
+
+    Deux effets de bord du meme mecanisme disparaissent avec lui :
+      * un fichier d'evenements par `learn()`, la boucle budgetee en episodes en enchainant un
+        par tranche d'updates (651 fichiers mesures sur le run P0 du 2026-09-07, contre 1 attendu) ;
+      * l'asymetrie neuf/reprise que `MetricsCollectionCallback._on_training_start` documente :
+        l'enveloppe de capture posee sur `logger.dump` survivait en reprise et partait avec le
+        logger reconstruit sur un run neuf. Les deux chemins tiennent desormais le meme regime,
+        celui que le couple `_on_training_start` / `_on_training_end` gere explicitement.
+    """
+    os.makedirs(events_dir, exist_ok=True)
+    model.set_logger(configure_sb3_logger(events_dir, ["tensorboard"]))
+
+
+def run_events_dir(model) -> str:
+    """Dossier ou le run ecrit ses evenements : celui du logger du modele, et rien d'autre.
+
+    SOURCE UNIQUE partagee par SB3 et le tracker de metriques. Deriver le dossier du tracker
+    par une expression jumelle de celle du logger tiendrait tant que les deux restent en phase ;
+    le defaut corrige ici est precisement deux derivations qui ne l'etaient pas. Lire le logger
+    rend l'egalite structurelle : il n'existe plus qu'un endroit ou le dossier est decide.
+    """
+    events_dir = model.logger.get_dir()
+    if not events_dir:
+        raise ValueError(
+            "Le logger du modele n'a pas de dossier : attach_run_logger n'a pas ete appele "
+            "avant la construction du tracker de metriques."
+        )
+    return events_dir
+
+
 def _apply_torch_compile(model) -> None:
     """Wrap policy.forward to move action_masks to model device (GPU or CPU), then apply torch.compile on CUDA.
     CUDA graphs require all inputs on GPU; action_masks from env are numpy (CPU)."""
@@ -2926,25 +2966,32 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
     tb_log_name = f"{training_config_name}_{agent_key}"
     specific_log_dir = os.path.join(require_key(model_params, "tensorboard_log"), tb_log_name)
     os.makedirs(specific_log_dir, exist_ok=True)
+    # Dossier d'evenements du run, jumeau du site de `train_with_scenario_rotation` : le logger
+    # SB3 et le tracker de metriques y ecrivent tous les deux, ce qui fait UNE entree TensorBoard.
+    events_log_dir = agent_log_dir(specific_log_dir, agent_key)
 
     if new_model or not os.path.exists(model_path):
         print(f"🆕 Creating new model for {agent_key} on {device.upper()}...")
 
-        # Update model_params to use specific directory
         model_params_copy = model_params.copy()
-        model_params_copy["tensorboard_log"] = specific_log_dir
         if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
             model_params_copy["learning_rate"] = _make_constant_lr_schedule(model_params_copy["learning_rate"])
 
         model = PatchedMaskablePPO(env=env, **model_params_copy)
-        # Disable rollout logging for multi-agent models (suppress verbose rollout/ metrics)
-        if hasattr(model, 'logger') and model.logger:
-            _orig_record = model.logger.record
-            def _filtered_record(key, value, exclude=None):
-                if key.startswith('rollout/'):
-                    return
-                return _orig_record(key, value, exclude)
-            model.logger.record = _filtered_record
+        # `tensorboard_log` reste la RACINE, comme en reprise : c'est ce que lisent les modes
+        # d'evaluation, qui y appliquent `agent_log_dir` eux-memes. Le pointer sur le dossier de
+        # run ici le rendait dependant du drapeau — l'eval seule resolvait alors deux endroits
+        # differents selon que le modele venait d'un `--new` ou d'un `--append`. Le dossier du
+        # run ne voyage plus par cet attribut mais par le logger, pose juste en dessous.
+        attach_run_logger(model, events_log_dir)
+        # Le filtre qui supprimait les tags `rollout/` a ete retire ici. Il n'a JAMAIS tourne :
+        # il etait garde par `hasattr(model, 'logger')`, or `BaseAlgorithm._logger` n'est qu'une
+        # annotation de classe et n'existe qu'apres `set_logger` ou `learn()` — le garde etait
+        # donc toujours faux a cet endroit. `attach_run_logger`, juste au-dessus, pose desormais
+        # le logger : le laisser aurait ACTIVE une suppression jamais eprouvee, et fait
+        # disparaitre `rollout/ep_rew_mean` et `rollout/ep_len_mean` de ce seul chemin —
+        # `train_with_scenario_rotation`, qui porte l'entrainement reel, n'a aucun filtre
+        # equivalent et les publie.
     else:
         # SEULE alternative restante : `append_training` sur un modele existant. Les deux autres
         # etats possibles de la cascade sont refuses par `check_model_lifecycle`, en tete de
@@ -2960,13 +3007,8 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
         # CRITICAL FIX: Reinitialize logger after loading from checkpoint
         # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
         # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
-        from stable_baselines3.common.logger import configure
-
-        # Repertoire resolu en tete de fonction : format ./tensorboard/{config}_{agent}/{run},
-        # continu d'un run a l'autre au lieu d'un sous-dossier horodate par lancement.
-        new_logger = configure(specific_log_dir, ["tensorboard"])
-        model.set_logger(new_logger)
-        print(f"✅ Logger reinitialized for continuous TensorBoard: {specific_log_dir}")
+        attach_run_logger(model, events_log_dir)
+        print(f"✅ Logger reinitialized for continuous TensorBoard: {events_log_dir}")
     _apply_torch_compile(model)
     return model, env, training_config, model_path, _episode_offset
 
@@ -3627,8 +3669,13 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         new_model=new_model,
         append_training=append_training,
     )
+    # Dossier d'evenements du run : le logger SB3 et le tracker de metriques y ecrivent tous les
+    # deux, ce qui fait UNE entree TensorBoard pour l'agent. Jumeau du site de
+    # `create_multi_agent_model`.
+    events_log_dir = agent_log_dir(specific_log_dir, agent_key)
     chunk_log(f"📊 TensorBoard experiment: {experiment_log_dir}")
     chunk_log(f"📊 TensorBoard run: {specific_log_dir}")
+    chunk_log(f"📊 TensorBoard events: {events_log_dir}")
 
     policy_kwargs = require_key(model_params, "policy_kwargs")
     net_arch = require_key(policy_kwargs, "net_arch")
@@ -3654,12 +3701,15 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     if new_model or not os.path.exists(model_path):
         chunk_log(f"🆕 Creating new model: {model_path}")
         model_params_copy = model_params.copy()
-        model_params_copy["tensorboard_log"] = specific_log_dir
         if "learning_rate" in model_params_copy and isinstance(model_params_copy["learning_rate"], dict):
             lr_cfg = model_params_copy["learning_rate"]
             model_params_copy["learning_rate"] = _make_constant_lr_schedule(lr_cfg)
             chunk_log(f"✅ Learning rate: constant {lr_cfg['initial']} (decay → {lr_cfg['final']} via LearningRateScheduleCallback)")
         model = PatchedMaskablePPO(env=env, **model_params_copy)
+        # `tensorboard_log` reste la RACINE, comme en reprise : les modes d'evaluation lisent cet
+        # attribut et y appliquent `agent_log_dir`. Le dossier du run voyage par le logger.
+        attach_run_logger(model, events_log_dir)
+        chunk_log(f"✅ Logger TensorBoard du run : {events_log_dir}")
     else:
         # Jumeau du site ci-dessus : seul `append_training` sur un modele existant arrive ici,
         # `check_model_lifecycle` ayant refuse les deux autres etats en tete de prologue.
@@ -3676,10 +3726,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         # CRITICAL FIX: Reinitialize logger after loading from checkpoint
         # This ensures PPO training metrics (policy_loss, value_loss, etc.) are logged correctly
         # Without this, model.logger.name_to_value remains empty/stale from the checkpoint
-        from stable_baselines3.common.logger import configure
-        new_logger = configure(specific_log_dir, ["tensorboard"])
-        model.set_logger(new_logger)
-        chunk_log(f"✅ Logger reinitialized for TensorBoard run: {specific_log_dir}")
+        attach_run_logger(model, events_log_dir)
+        chunk_log(f"✅ Logger reinitialized for TensorBoard run: {events_log_dir}")
     _apply_torch_compile(model)
     # Import metrics tracker
     from ai.metrics_tracker import W40KMetricsTracker, resolve_perf_windows
@@ -3692,9 +3740,10 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
     # Bot ratios printed when building training_bots
 
-    # Keep tracker aligned with selected run directory.
-    model_tensorboard_dir = specific_log_dir
-    
+    # Le tracker ecrit LA ou ecrit le logger du modele, lu et non redérive : c'est ce qui rend
+    # l'entree TensorBoard unique par construction plutot que par accord entre deux expressions.
+    model_tensorboard_dir = run_events_dir(model)
+
     # Create metrics tracker for entire rotation training
     _perf_window, _perf_window_fast = resolve_perf_windows(training_config)
     metrics_tracker = W40KMetricsTracker(
@@ -4116,7 +4165,9 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
                                 f"bot_results.scenario_split_scores must be dict "
                                 f"(got {type(scenario_split_scores).__name__})"
                             )
-                        metrics_tracker.log_scenario_split_scores(scenario_split_scores)
+                        metrics_tracker.log_scenario_split_scores(
+                            scenario_split_scores, step=int(metrics_tracker.episode_count)
+                        )
 
                 # Print summary
                 print(f"\n{'='*80}")
@@ -4160,7 +4211,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
 
         # `tensorboard_run_dir` est rendu inconditionnellement : c'est le repertoire du run
         # qu'une etape de curriculum recopie en `tensorboard_<etape>`, et `model.tensorboard_log`
-        # a ete remis a la RACINE plus haut — il ne designe plus ce run.
+        # vaut la RACINE dans les deux branches — il ne designe plus ce run. Le dossier rendu est
+        # le PARENT du dossier d'evenements, pour que la copie d'etape emporte le run entier.
         run_info: Dict[str, Any] = {"tensorboard_run_dir": specific_log_dir}
         run_info["episode_count_total"] = int(metrics_tracker.episode_count)
         bot_eval_callback = next(
@@ -4649,17 +4701,13 @@ def train_model(model, training_config, callbacks, model_path, training_config_n
     if "_" in os.path.basename(model_path):
         agent_name = os.path.basename(model_path).replace('.zip', '').replace('model_', '')
     
-    # CRITICAL FIX: Use model's TensorBoard directory for metrics_tracker
-    # SB3 creates subdirectories like ./tensorboard/PPO_1/
-    # metrics_tracker MUST write to the SAME directory to appear in TensorBoard
-    # Access tensorboard_log from model parameters (logger not initialized until learn() is called)
-    if hasattr(model, 'tensorboard_log') and model.tensorboard_log:
-        model_tensorboard_dir = model.tensorboard_log
-        print(f"📊 Metrics will be logged to: {model_tensorboard_dir}")
-    else:
-        model_tensorboard_dir = "./tensorboard/"
-        print(f"⚠️  No tensorboard_log found, using default: {model_tensorboard_dir}")
-   
+    # Le tracker ecrit LA ou ecrit le logger du modele. Ce site lisait `model.tensorboard_log`,
+    # que `create_multi_agent_model` laissait au dossier de run en creation mais remettait a la
+    # racine en reprise : le tracker changeait donc d'emplacement selon `--new` / `--append`.
+    # Le repli `./tensorboard/` qui suivait masquait un logger non pose au lieu de le signaler.
+    model_tensorboard_dir = run_events_dir(model)
+    print(f"📊 Metrics will be logged to: {model_tensorboard_dir}")
+
     # Create metrics tracker using model's directory
     _perf_window, _perf_window_fast = resolve_perf_windows(training_config)
     metrics_tracker = W40KMetricsTracker(

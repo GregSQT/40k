@@ -319,10 +319,11 @@ def test_log_holdout_and_scenario_split_scores() -> None:
     assert "bot_eval/holdout_hard_mean" in keys
     assert "bot_eval/holdout_overall_mean" in keys
 
-    t.log_scenario_split_scores({"training_bot_1": 0.9, "hard_bot_1": 0.2})
-    keys2 = [k for k, _, _ in _dw(t).scalars]
-    assert "bot_split/training_bot_1" in keys2
-    assert "bot_split/hard_bot_1" in keys2
+    # `step` EXIGE : l'eval intermediaire (callback) et l'eval finale (ai/train.py) alimentent
+    # la meme courbe depuis deux instants differents, chacune sur SON abscisse.
+    t.log_scenario_split_scores({"training_bot_1": 0.9, "hard_bot_1": 0.2}, step=4200)
+    points = {k: s for k, _, s in _dw(t).scalars if k.startswith("bot_split/")}
+    assert points == {"bot_split/training_bot_1": 4200, "bot_split/hard_bot_1": 4200}
 
 
 def test_log_faction_bot_win_rates_publishes_the_bot_x_faction_cross() -> None:
@@ -478,7 +479,10 @@ def test_create_metrics_tracker_factory(monkeypatch: pytest.MonkeyPatch) -> None
         "metrics_smoothing": {"perf_window": 400, "perf_window_fast": 200},
     })
     assert created["agent_key"] == "CoreAgent"
-    assert created["log_dir"] == "/tmp/tb"
+    # La factory resout le dossier de l'agent ELLE-MEME : le config porte la racine TensorBoard,
+    # et le constructeur du tracker ne suffixe plus rien en silence — il ecrit exactement ou on
+    # lui dit (cf. tests/unit/ai/test_tensorboard_single_run_dir.py).
+    assert created["log_dir"] == os.path.join("/tmp/tb", "CoreAgent")
     assert created["windows"] == (400, 200), "les fenetres du config doivent etre transmises"
     assert isinstance(tracker, DummyTracker)
 

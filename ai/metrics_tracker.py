@@ -245,7 +245,16 @@ class W40KMetricsTracker:
             perf_window, perf_window_fast
         )
         self.agent_key = agent_key
-        self.log_dir = agent_log_dir(log_dir, agent_key)
+        # `log_dir` EST le dossier d'ecriture, sans transformation. Il portait un
+        # `agent_log_dir(log_dir, agent_key)` implicite, et les appelants n'etaient pas d'accord
+        # sur ce qu'ils passaient : l'entrainement donnait deja un dossier de run, l'eval seule
+        # donnait la racine. Un constructeur ne peut pas etre juste pour les deux, et le suffixe
+        # ajoutait a l'entrainement un sous-dossier que le logger SB3 n'avait aucune raison de
+        # deviner — d'ou DEUX dossiers d'evenements par run, donc deux entrees TensorBoard pour
+        # un seul agent. C'est l'appelant qui resout, avec `agent_log_dir` quand il part de la
+        # racine ; l'entrainement, lui, passe `model.logger.get_dir()`, ce qui rend l'egalite
+        # avec l'ecrivain de SB3 structurelle au lieu de reposer sur deux expressions jumelles.
+        self.log_dir = log_dir
         self.writer: MetricsWriter = SummaryWriter(self.log_dir)
         self._setup_custom_scalars_layout()
 
@@ -2359,14 +2368,17 @@ class W40KMetricsTracker:
                 self.episode_count
             )
 
-    def log_scenario_split_scores(self, split_scores: Dict[str, float]) -> None:
-        """Log per-scenario split scores under dedicated category."""
+    def log_scenario_split_scores(self, split_scores: Dict[str, float], *, step: int) -> None:
+        """Log per-scenario split scores under dedicated category.
+
+        `step` est EXIGE parce que les deux appelants ne mesurent pas au meme instant : le
+        callback d'evaluation publie a chaque eval INTERMEDIAIRE, sur l'abscisse `eval_marker`
+        qu'il partage avec ses courbes voisines, et `ai/train.py` publie l'eval FINALE. Lire
+        `self.episode_count` d'office aurait date le point intermediaire du compteur courant du
+        tracker plutot que du marqueur de l'evaluation qui l'a produit.
+        """
         for key, value in split_scores.items():
-            self.writer.add_scalar(
-                f'bot_split/{key}',
-                float(value),
-                self.episode_count
-            )
+            self.writer.add_scalar(f'bot_split/{key}', float(value), step)
 
     def _calculate_smoothed_metric(self, values: List[float], window_size: int = 20) -> float:
         """
@@ -2467,7 +2479,9 @@ class TrainingMonitor:
 # Integration function for existing training loop
 def create_metrics_tracker(agent_key: str, config: Dict[str, Any]) -> W40KMetricsTracker:
     """Factory function to create metrics tracker with config"""
-    log_dir = require_key(config, 'tensorboard_log')
+    # `agent_log_dir` EXPLICITE : le config porte la racine TensorBoard, pas un dossier de run,
+    # et le constructeur ne suffixe plus rien de lui-meme.
+    log_dir = agent_log_dir(require_key(config, 'tensorboard_log'), agent_key)
     perf_window, perf_window_fast = resolve_perf_windows(config)
     return W40KMetricsTracker(
         agent_key, log_dir, perf_window=perf_window, perf_window_fast=perf_window_fast

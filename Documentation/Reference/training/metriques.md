@@ -628,6 +628,9 @@ Pour distinguer : vérifier que `explained_variance` s'améliore (Scenario A) ou
 ### Monitoring quotidien (5 minutes)
 
 1. Ouvrir TensorBoard : `tensorboard --logdir ./tensorboard/` → http://localhost:6006
+
+**Une entrée par agent et par run**, depuis le 2026-09-07. Le run écrit tous ses événements dans `./tensorboard/<config>_<agent>/run_<horodatage>/<agent>/` : les courbes du tracker (axe des **épisodes**) et celles de PPO — `train/*`, `diag/*` — (axe des **pas**) y cohabitent, ce qui permet de superposer les deux familles sans changer d'entrée. Avant cette date, l'agent produisait **deux** entrées, PPO écrivant dans un sous-dossier `<config>_<agent>_1` que Stable-Baselines3 se dérivait lui-même ; sur un run antérieur, les deux moitiés du tableau de bord se sélectionnent donc séparément. Cette scission masquait aussi vingt courbes écrites en double (quatre courbes de jeu de `game_critical/`, les cinq de `seat_aware/`, celles de `bot_split/` et les onze de `diag/`) : elles ne portent plus qu'une série, celle de l'écrivain de leur axe. Sur un run antérieur au 2026-09-07, la version publiée dans l'entrée PPO de ces vingt courbes porte l'axe des pas et non celui des épisodes.
+
 2. Vérifier **`00_critical/`** — toutes les métriques en tendance correcte ?
 3. Vérifier `bot_eval/combined` — objectif primaire.
 4. Si drapeau rouge → suivre l'arbre de décision.
