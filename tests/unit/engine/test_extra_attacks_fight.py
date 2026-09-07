@@ -31,7 +31,7 @@ def _fig(weapons):
 def test_selection_ajoute_les_armes_extra_attacks():
     """Arme normale (index 0) + arme EXTRA ATTACKS (index 1) -> les DEUX sont selectionnees."""
     fig = _fig([_w("Choppa", []), _w("Syringe", ["EXTRA_ATTACKS"])])
-    assert _select_fight_weapon_indices_for_fig(fig, 4, 3, 7) == [0, 1]
+    assert _select_fight_weapon_indices_for_fig(fig, 4, 3, 7, 3) == [0, 1]
 
 
 def test_arme_principale_choisie_parmi_les_non_extra():
@@ -42,25 +42,25 @@ def test_arme_principale_choisie_parmi_les_non_extra():
         _w("Syringe", ["EXTRA_ATTACKS"], dmg=6),
         _w("Fort", [], dmg=3),
     ])
-    assert _select_fight_weapon_indices_for_fig(fig, 4, 3, 7) == [2, 1]
+    assert _select_fight_weapon_indices_for_fig(fig, 4, 3, 7, 3) == [2, 1]
 
 
 def test_toutes_les_armes_extra_sont_selectionnees():
     """« ALL of that model's [EXTRA ATTACKS] weapons » : deux armes EXTRA -> les deux."""
     fig = _fig([_w("Choppa", []), _w("E1", ["EXTRA_ATTACKS"]), _w("E2", ["EXTRA_ATTACKS"])])
-    assert _select_fight_weapon_indices_for_fig(fig, 4, 3, 7) == [0, 1, 2]
+    assert _select_fight_weapon_indices_for_fig(fig, 4, 3, 7, 3) == [0, 1, 2]
 
 
 def test_que_des_armes_extra_pas_d_arme_principale():
     """« if possible » : sans autre arme de melee, seules les armes EXTRA sont selectionnees."""
     fig = _fig([_w("E1", ["EXTRA_ATTACKS"])])
-    assert _select_fight_weapon_indices_for_fig(fig, 4, 3, 7) == [0]
+    assert _select_fight_weapon_indices_for_fig(fig, 4, 3, 7, 3) == [0]
 
 
 def test_sans_extra_attacks_une_seule_arme():
     """Contre-epreuve : comportement anterieur inchange sans la regle."""
     fig = _fig([_w("A", [], dmg=1), _w("B", [], dmg=3)])
-    assert _select_fight_weapon_indices_for_fig(fig, 4, 3, 7) == [1]
+    assert _select_fight_weapon_indices_for_fig(fig, 4, 3, 7, 3) == [1]
 
 
 def test_declaration_produit_un_intent_par_arme(monkeypatch):
@@ -68,7 +68,7 @@ def test_declaration_produit_un_intent_par_arme(monkeypatch):
     les attaques des deux armes (sinon la 2e arme ne se resout jamais)."""
     monkeypatch.setattr(shared_utils, "get_fighting_models", lambda gs, sid, tid=None: ["A1"])
     fig = _fig([_w("Choppa", [], nb=3), _w("Syringe", ["EXTRA_ATTACKS"], nb=1)])
-    target = {"id": "T1", "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7}
+    target = {"id": "T1", "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "HP_MAX": 3}
     gs = {
         # Socle d'etat de tour : `squad_declare_fight` lit l'etat des capacites de faction pour
         # scorer les armes (+1 S/A du Waaagh!). Une doublure qui l'omet decrit un game_state
@@ -100,7 +100,7 @@ def test_declaration_sans_extra_reste_a_un_intent(monkeypatch):
     fig = _fig([_w("Choppa", [], nb=3)])
     gs = {
         **turn_state_invariants(),
-        "models_cache": {"A1": fig, "T1": {"id": "T1", "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7}},
+        "models_cache": {"A1": fig, "T1": {"id": "T1", "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "HP_MAX": 3}},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
         "pending_squad_fight_intents": {"1": []},
         "pending_squad_shoot_intents": {},

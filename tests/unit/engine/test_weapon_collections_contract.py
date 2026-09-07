@@ -167,11 +167,11 @@ def test_selection_d_arme_de_melee_distingue_vide_et_absent():
     from engine.phase_handlers.shared_utils import _select_fight_weapon_indices_for_fig
 
     # Liste vide : etat valide -> aucune arme selectionnee, sans erreur.
-    assert _select_fight_weapon_indices_for_fig({"id": "A1", "CC_WEAPONS": []}, 4, 3, 7) == []
+    assert _select_fight_weapon_indices_for_fig({"id": "A1", "CC_WEAPONS": []}, 4, 3, 7, 3) == []
 
     # Cle absente : figurine mal construite -> erreur explicite.
     with pytest.raises(Exception) as exc:
-        _select_fight_weapon_indices_for_fig({"id": "A1"}, 4, 3, 7)
+        _select_fight_weapon_indices_for_fig({"id": "A1"}, 4, 3, 7, 3)
     assert "CC_WEAPONS" in str(exc.value)
 
 

@@ -425,8 +425,8 @@ def test_le_choix_d_arme_de_melee_note_les_armes_sur_le_seuil_REELLEMENT_joue():
     attacker = {"id": "A1", "CC_WEAPONS": [_w("Fine", 2, 2, 1), _w("Lourde", 4, 1, 3)]}
     target = {"id": "2", "UNIT_KEYWORDS": []}
 
-    sans = _auto_select_cc_weapon_for_fig(attacker, 4, 3, 7, target)
-    avec = _auto_select_cc_weapon_for_fig(attacker, 4, 3, 7, target, hit_bonus=1)
+    sans = _auto_select_cc_weapon_for_fig(attacker, 4, 3, 7, 3, target)
+    avec = _auto_select_cc_weapon_for_fig(attacker, 4, 3, 7, 3, target, hit_bonus=1)
 
     assert sans == 0, "sans bonus, l'arme fine touche plus souvent et l'emporte"
     assert avec == 1, "avec le +1, la lourde passe à 3+ et devient la meilleure — le score doit le voir"

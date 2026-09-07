@@ -240,9 +240,11 @@ def test_close_quarters_and_other_weapons_are_not_mixed() -> None:
 # ------------------------------------------------------------------ heuristique mêlée
 
 
-def _best_melee(weapons: List[Dict[str, Any]], target_unit: Dict[str, Any]) -> int:
+def _best_melee(
+    weapons: List[Dict[str, Any]], target_unit: Dict[str, Any], target_hp_max: int = 3
+) -> int:
     fig = {"id": "A1", "squad_id": "1", "player": 0, "T": 4, "CC_WEAPONS": weapons}
-    idx = shared_utils._auto_select_cc_weapon_for_fig(fig, 4, 3, 7, target_unit)
+    idx = shared_utils._auto_select_cc_weapon_for_fig(fig, 4, 3, 7, target_hp_max, target_unit)
     assert idx is not None
     return idx
 
@@ -284,6 +286,39 @@ def test_melee_heuristic_values_sustained_hits() -> None:
     weapons = [_melee("Plain"), _melee("Sustained", rules=["SUSTAINED_HITS:2"])]
     target = {"id": "2", "UNIT_KEYWORDS": []}
     assert _best_melee(weapons, target) == 1
+
+
+def test_melee_heuristic_caps_damage_by_target_wounds() -> None:
+    """05.04 : l'exces de degats sur une figurine est perdu, le score doit le voir.
+
+    « Resolve Damage : the selected model loses a number of wounds equal to that attack's D
+    characteristic. If this reduces that model's remaining wounds to 0 or fewer, it is
+    destroyed. » Aucun report sur la figurine suivante — une arme a 3 degats n'en place donc
+    qu'un seul sur une figurine a 1 PV.
+
+    Scenario construit pour que le verdict BASCULE : arme lourde a 2 attaques de 3 degats
+    contre arme legere a 3 attaques de 1 degat. Contre 3 PV la lourde gagne ; contre 1 PV son
+    degat utile tombe a 1 et son deficit d'attaques la condamne.
+    """
+    weapons = [_melee("Legere", NB=3, DMG=1), _melee("Lourde", NB=2, DMG=3)]
+    target = {"id": "2", "UNIT_KEYWORDS": []}
+    assert _best_melee(weapons, target, target_hp_max=3) == 1
+    assert _best_melee(weapons, target, target_hp_max=1) == 0
+
+
+def test_melee_heuristic_caps_devastating_wounds_damage_too() -> None:
+    """24.10 : les blessures mortelles de [DEVASTATING WOUNDS] sont plafonnees elles aussi.
+
+    « Mortal wounds inflicted by [DEVASTATING WOUNDS] weapons can damage a maximum of one model
+    for each critical wound; any remaining mortal wounds inflicted by that attack are lost. »
+    Le plafond ne connait donc pas d'exception selon la regle d'arme — contrairement aux
+    blessures mortelles ordinaires (06.02), qui se reportent d'une figurine a l'autre.
+    """
+    weapons = [_melee("Legere", NB=4, DMG=1),
+               _melee("Devastating", NB=2, DMG=3, rules=["DEVASTATING_WOUNDS"])]
+    target = {"id": "2", "UNIT_KEYWORDS": []}
+    assert _best_melee(weapons, target, target_hp_max=3) == 1
+    assert _best_melee(weapons, target, target_hp_max=1) == 0
 
 
 def test_melee_heuristic_raises_on_invalid_damage_instead_of_defaulting() -> None:
