@@ -1805,7 +1805,7 @@ from ai.env_wrappers import BotControlledEnv, SelfPlayWrapper
 
 
 # Step logger (extracted to ai/step_logger.py)
-from ai.step_logger import StepLogger
+from ai.step_logger import StepLogger, assert_step_log_written
 
 # Bot evaluation (extracted to ai/bot_evaluation.py)
 from ai.bot_evaluation import ROSTER_SIDES, evaluate_against_bots
@@ -2178,7 +2178,7 @@ def _commit_resume_promotion() -> None:
     les points d'entree d'entrainement : place juste avant `model.learn()`, il tombait avant
     `_setup_learn`, donc avant le premier `env.reset()` de SB3. Un scenario illisible ou une
     memoire insuffisante y levaient APRES le point de non-retour et sans qu'un seul pas ait
-    tourne : le `finally` de `main()` ne trouvait plus rien a defaire et laissait exactement
+    tourne : le `finally` de `_run_main()` ne trouvait plus rien a defaire et laissait exactement
     l'etat que la transaction existe pour empecher.
 
     Passe ce point en revanche, restaurer l'ancien modele effacerait du travail reel
@@ -2204,7 +2204,7 @@ class ResumePromotionCommitCallback(BaseCallback):
 def _rollback_resume_promotion_if_pending() -> None:
     """Annule la promotion `--resume-from` si l'entrainement n'a jamais demarre. Idempotent.
 
-    Appelee depuis le `finally` de `main()` : c'est le seul point qui voit TOUTES les sorties —
+    Appelee depuis le `finally` de `_run_main()` : c'est le seul point qui voit TOUTES les sorties —
     exception fatale, `return 1` anticipe, et interruption clavier, qui n'est pas une
     `Exception`. Une promotion non validee y est forcement une promotion dont l'entrainement n'a
     pas commence.
@@ -2260,7 +2260,7 @@ def _promote_checkpoint_for_resume(
     l'a produit ferait reculer les steps dans les courbes.
 
     La mise a l'ecart est TRANSACTIONNELLE : elle arme `_pending_resume_promotion`, que le
-    `finally` de `main()` defait si l'entrainement n'a jamais demarre (cf. `_ResumePromotion`).
+    `finally` de `_run_main()` defait si l'entrainement n'a jamais demarre (cf. `_ResumePromotion`).
     """
     if not agent_key:
         raise ValueError("--resume-from exige --agent (chemin du modele canonique inconnu sinon)")
@@ -2467,6 +2467,13 @@ from ai.replay_converter import (
 
 # Global step logger instance
 step_logger = None
+# `--step` a-t-il ete demande dans un mode qui DOIT produire ce journal-ci ? Pose au meme
+# endroit que le logger (cf. `main`). `--convert-steplog` ne joue aucun episode et `--replay`
+# construit son propre logger (ai/replay_converter.py) : ni l'un ni l'autre n'alimente celui-la.
+_step_log_required = False
+# Episodes joues tels que le run les compte, quand il en publie un total. Message d'erreur
+# seulement — la sonde du controle est `StepLogger.episodes_written`.
+_run_episodes_played: Optional[int] = None
 
 def _read_device_benchmark_cache(agent_key: str, training_config: str, rewards_config: str) -> Optional[Tuple[str, bool]]:
     """Read cached device recommendation from scripts/benchmark_device.py --save-result."""
@@ -5818,7 +5825,30 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
     return 0
 
 
-def main():
+def main() -> int:
+    """Point d'entree du run : `_run_main` fait le travail, ce niveau porte le controle de fin.
+
+    Le controle ne peut pas vivre dans `_run_main` : son corps sort par une vingtaine de
+    `return` et son `finally` s'execute AUSSI apres un echec — il y leverait par-dessus une
+    erreur deja diagnostiquee. Ici, la condition est exacte : le run a reussi (code 0) et
+    `--step` exigeait un journal.
+    """
+    global _step_log_required, _run_episodes_played
+    # Remis a zero A CHAQUE run : `main()` est appelable plusieurs fois dans un meme processus
+    # (tests CLI), et un drapeau reste arme d'un run precedent ferait lever le controle sur un
+    # run qui n'a jamais demande `--step`.
+    _step_log_required = False
+    _run_episodes_played = None
+
+    exit_code = _run_main()
+    if exit_code == 0 and _step_log_required:
+        assert_step_log_written(
+            require_present(step_logger, "step_logger"), _run_episodes_played
+        )
+    return exit_code
+
+
+def _run_main():
     """Main training function following AI_INSTRUCTIONS.md exactly."""
     parser = argparse.ArgumentParser(description="Train W40K AI (see Documentation/Reference/moteur/tour_de_jeu.md and architecture_moteur.md)")
     parser.add_argument("--training-config", default=None,
@@ -6104,13 +6134,14 @@ def main():
         tc = config.load_agent_training_config(args.agent, args.training_config)
         step_log_buffer_size = int(require_key(tc, "step_log_buffer_size"))
         # Initialize global step logger based on --step argument
-        global step_logger
+        global step_logger, _step_log_required, _run_episodes_played
         step_logger = StepLogger(
             os.path.join(project_root, "step.log"),
             enabled=args.step,
             buffer_size=step_log_buffer_size,
             debug_mode=args.debug,
         )
+        _step_log_required = bool(args.step and not args.convert_steplog and not args.replay)
         
         # Sync configs to frontend automatically
         try:
@@ -6399,6 +6430,9 @@ def main():
             if 'roster_gap' in results:
                 print(f"Écart Spacemarine - Ork: {float(results['roster_gap']) * 100:+.1f} pt")
             _joues = int(require_key(results, 'total_episodes_played'))
+            # Seul mode qui publie un total d'episodes joues : le controle de fin de run
+            # (`assert_step_log_written`) le cite quand `step.log` est reste vide.
+            _run_episodes_played = _joues
             _duree = float(require_key(results, 'eval_duration_seconds'))
             print(
                 f"Épisodes joués: {_joues} (hors abandons) en {_duree:.0f} s "
@@ -6814,7 +6848,7 @@ def main():
         return 1
 
     finally:
-        # Filet unique de TOUTES les sorties de main() — retour normal, `return 1` anticipe,
+        # Filet unique de TOUTES les sorties de _run_main() — retour normal, `return 1` anticipe,
         # exception levee au fond d'une phase de curriculum. Les fermetures nominales placees
         # plus haut ne couvrent que les chemins nominaux ; sans ce balayage, une exception
         # laissait les workers etre tues par signal, c'est-a-dire exactement la perte que ce

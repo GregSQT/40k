@@ -255,8 +255,8 @@ def _step_log_lines(tmp_path, gs, raw_log):
     marker = " FIGHT : " if melee else " SHOOT : "
     lines = [l for l in out.read_text().splitlines() if marker in l]
     assert len(lines) == len(shots), (
-        "le StepLogger n'a pas produit une ligne par jet — `log_action` avale ses exceptions, "
-        f"un champ requis manque probablement dans le mapping ({len(lines)}/{len(shots)})"
+        "le StepLogger n'a pas produit une ligne par jet — un champ requis manque "
+        f"probablement dans le mapping ({len(lines)}/{len(shots)})"
     )
     return lines
 
@@ -678,8 +678,8 @@ def _step_log_fight_line(tmp_path, gs, raw_log):
     logger._flush_buffer()
     lines = [l for l in out.read_text().splitlines() if " FOUGHT " in l]
     assert len(lines) == 1, (
-        "le StepLogger n'a pas produit de ligne FOUGHT — `log_action` avale ses exceptions, un "
-        f"champ requis manque probablement dans le mapping ({len(lines)} ligne(s))"
+        "le StepLogger n'a pas produit de ligne FOUGHT — un champ requis manque "
+        f"probablement dans le mapping ({len(lines)} ligne(s))"
     )
     return lines[0]
 

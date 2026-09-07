@@ -176,12 +176,13 @@ def test_le_prologue_commun_des_deux_points_d_entree_refuse(tmp_path, monkeypatc
 
 
 def _main_body() -> list:
+    """Le CORPS du run, `_run_main` : `main` n'est plus qu'un wrapper (contrôle de fin de run)."""
     tree = ast.parse(TRAIN_PY.read_text(encoding="utf-8"))
     main = next(
-        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main"), None
+        (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_run_main"), None
     )
     if main is None:
-        pytest.fail("aucune fonction `main` trouvée dans ai/train.py")
+        pytest.fail("aucune fonction `_run_main` trouvée dans ai/train.py")
     return main.body
 
 
@@ -208,12 +209,12 @@ def test_main_refuse_avant_tout_effet_de_bord() -> None:
         None,
     )
     assert guard is not None, (
-        "main() n'appelle plus check_model_lifecycle : l'invocation irréalisable ne serait plus "
+        "_run_main() n'appelle plus check_model_lifecycle : l'invocation irréalisable ne serait "
         "refusée qu'au prologue, après le StepLogger et la sync des configs frontend"
     )
     first_try = next((i for i, node in enumerate(body) if isinstance(node, ast.Try)), None)
-    assert first_try is not None, "le `try:` de main() a disparu, ce test ne repère plus rien"
+    assert first_try is not None, "le `try:` de _run_main() a disparu, ce test ne repère plus rien"
     assert guard < first_try, (
-        "la garde doit précéder le `try:` de main() : StepLogger, sync des configs frontend et "
+        "la garde doit précéder le `try:` de _run_main() : StepLogger, sync des configs frontend et "
         "construction d'environnement s'y trouvent"
     )

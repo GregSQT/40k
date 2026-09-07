@@ -17,7 +17,7 @@ from shared.data_validation import require_key, ConfigurationError, HAZARD_CONTE
 
 from ai.bot_registry import bot_display_name
 
-__all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION']
+__all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 
 
 #: Version de la GRAMMAIRE du journal, ecrite a l entete de chaque episode (`Log grammar:`).
@@ -359,6 +359,12 @@ class StepLogger:
         self.episode_step_count = 0
         self.episode_action_count = 0
         self.episode_number = 0  # Track episode number for logging
+        # Episodes REELLEMENT ecrits : incremente a la sortie du bloc `with open(...)` de
+        # `log_episode_start`, donc seulement quand l'en-tete d'episode a atteint le fichier.
+        # Sonde de `assert_step_log_written`. Ne JAMAIS lui substituer `episode_number` :
+        # `engine/w40k_core.py` le REECRIT a chaque reset (`step_logger.episode_number =
+        # self.episode_number - 1`), il compte donc les resets du moteur, pas les ecritures.
+        self.episodes_written = 0
         self.current_bot_name: Optional[str] = None  # Set externally for bot-evaluation logging
         self._last_step_wall = None  # Wall-clock of last step end (for STEP_TIMING → analyzer "Step Durations")
         # PERFORMANCE: Buffer logs to reduce I/O (buffer_size from training_config step_log_buffer_size)
@@ -594,89 +600,80 @@ class StepLogger:
                     pass
             self._last_step_wall = now
 
-        try:
-            timestamp = time.strftime("%H:%M:%S", time.localtime())
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
 
-            # Format message using gameLogUtils.ts style
-            message = self._format_replay_style_message(unit_id, action_type, action_details)
-            # Segment per-figurine [MODELS: <mid>@(c,r) ...] : positions par socle courantes,
-            # source de verite pour l'analyzer (raisonnement par socle, pas par ancre). Ajoute
-            # ICI, en un seul point, pour couvrir tous les types d'action. Absent/vide -> rien.
-            if action_details is not None:
-                _models_seg = action_details.get("models_segment")  # get allowed
-                if _models_seg:
-                    message = f"{message} {_models_seg}"
-                # Segment cible [TARGET_MODELS:] (survivants per-figurine de la cible post-pertes,
-                # tir/combat) : consomme UNIQUEMENT par le replay. Distinct de [MODELS:] pour ne
-                # pas perturber l'analyzer (son regex \[MODELS: ne matche pas [TARGET_MODELS:).
-                _target_models_seg = action_details.get("target_models_segment")  # get allowed
-                if _target_models_seg:
-                    message = f"{message} {_target_models_seg}"
-                # Segment [SHOOTER_MODELS:] : figs de l'unite qui agit ayant EFFECTIVEMENT tire/frappe
-                # dans cette action (sous-ensemble de [MODELS:]). Consomme UNIQUEMENT par le replay
-                # (cercle vert + cone LoS restreints aux figs tireuses). Distinct de [MODELS:] pour ne
-                # pas perturber l'analyzer (son regex \[MODELS: ne matche pas [SHOOTER_MODELS:).
-                _shooter_models_seg = action_details.get("shooter_models_segment")  # get allowed
-                if _shooter_models_seg:
-                    message = f"{message} {_shooter_models_seg}"
-                # Segment [ALLOC_MODEL: <mid>] : la figurine CIBLE a qui cette attaque a ete
-                # allouee (05, « Allocate Attack »). Une ligne = un jet — verifie sur 144 022
-                # lignes, aucune n'en porte deux — donc un seul socle par ligne, jamais une liste.
-                #
-                # Emis ICI, au meme point que les trois segments ci-dessus, et pour la meme
-                # raison : les deux branches du formateur (SHOT et FOUGHT) sont la paire ou ce
-                # depot diverge. Un token ecrit dans l'une et oublie dans l'autre laisserait la
-                # melee (19 157 lignes du run de reference) sans la donnee que le tir aurait.
-                #
-                # NOM : ni `[TARGET_MODEL:` (prefixe de `[TARGET_MODELS:`, segment qui a deja
-                # fausse deux verdicts de distance en s'y substituant), ni `[ALLOC:` (que l'oeil
-                # confond avec le `Save [NOT ALLOCATED]` du meme journal).
-                _alloc_model = action_details.get("target_model_id")  # get allowed
-                if _alloc_model:
-                    message = f"{message} [ALLOC_MODEL: {_alloc_model}]"
+        # Format message using gameLogUtils.ts style
+        message = self._format_replay_style_message(unit_id, action_type, action_details)
+        # Segment per-figurine [MODELS: <mid>@(c,r) ...] : positions par socle courantes,
+        # source de verite pour l'analyzer (raisonnement par socle, pas par ancre). Ajoute
+        # ICI, en un seul point, pour couvrir tous les types d'action. Absent/vide -> rien.
+        if action_details is not None:
+            _models_seg = action_details.get("models_segment")  # get allowed
+            if _models_seg:
+                message = f"{message} {_models_seg}"
+            # Segment cible [TARGET_MODELS:] (survivants per-figurine de la cible post-pertes,
+            # tir/combat) : consomme UNIQUEMENT par le replay. Distinct de [MODELS:] pour ne
+            # pas perturber l'analyzer (son regex \[MODELS: ne matche pas [TARGET_MODELS:).
+            _target_models_seg = action_details.get("target_models_segment")  # get allowed
+            if _target_models_seg:
+                message = f"{message} {_target_models_seg}"
+            # Segment [SHOOTER_MODELS:] : figs de l'unite qui agit ayant EFFECTIVEMENT tire/frappe
+            # dans cette action (sous-ensemble de [MODELS:]). Consomme UNIQUEMENT par le replay
+            # (cercle vert + cone LoS restreints aux figs tireuses). Distinct de [MODELS:] pour ne
+            # pas perturber l'analyzer (son regex \[MODELS: ne matche pas [SHOOTER_MODELS:).
+            _shooter_models_seg = action_details.get("shooter_models_segment")  # get allowed
+            if _shooter_models_seg:
+                message = f"{message} {_shooter_models_seg}"
+            # Segment [ALLOC_MODEL: <mid>] : la figurine CIBLE a qui cette attaque a ete
+            # allouee (05, « Allocate Attack »). Une ligne = un jet — verifie sur 144 022
+            # lignes, aucune n'en porte deux — donc un seul socle par ligne, jamais une liste.
+            #
+            # Emis ICI, au meme point que les trois segments ci-dessus, et pour la meme
+            # raison : les deux branches du formateur (SHOT et FOUGHT) sont la paire ou ce
+            # depot diverge. Un token ecrit dans l'une et oublie dans l'autre laisserait la
+            # melee (19 157 lignes du run de reference) sans la donnee que le tir aurait.
+            #
+            # NOM : ni `[TARGET_MODEL:` (prefixe de `[TARGET_MODELS:`, segment qui a deja
+            # fausse deux verdicts de distance en s'y substituant), ni `[ALLOC:` (que l'oeil
+            # confond avec le `Save [NOT ALLOCATED]` du meme journal).
+            _alloc_model = action_details.get("target_model_id")  # get allowed
+            if _alloc_model:
+                message = f"{message} [ALLOC_MODEL: {_alloc_model}]"
 
 
-            # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED]
-            success_status = "SUCCESS" if success else "FAILED"
-            phase_upper = phase.upper()
+        # Standard format: [timestamp] TX PX PHASE : Message [SUCCESS/FAILED]
+        success_status = "SUCCESS" if success else "FAILED"
+        phase_upper = phase.upper()
             
-            # Get turn and episode from SINGLE SOURCE OF TRUTH
-            if action_details is None:
-                raise ValueError("action_details is required to log current_turn")
-            turn_number = require_key(action_details, 'current_turn')
-            # Use self.episode_number which is updated in log_episode_start()
-            episode_number = self.episode_number
-            # Include episode in log line: [timestamp] E{episode} T{turn} P{player} PHASE : Message
-            log_line = f"[{timestamp}] E{episode_number} T{turn_number} P{player} {phase_upper} : {message} [{success_status}]\n"
-            # PERFORMANCE: Buffer logs and flush periodically to reduce I/O overhead
-            self.log_buffer.append(log_line)
-            if len(self.log_buffer) >= self.buffer_size:
-                self._flush_buffer()
+        # Get turn and episode from SINGLE SOURCE OF TRUTH
+        if action_details is None:
+            raise ValueError("action_details is required to log current_turn")
+        turn_number = require_key(action_details, 'current_turn')
+        # Use self.episode_number which is updated in log_episode_start()
+        episode_number = self.episode_number
+        # Include episode in log line: [timestamp] E{episode} T{turn} P{player} PHASE : Message
+        log_line = f"[{timestamp}] E{episode_number} T{turn_number} P{player} {phase_upper} : {message} [{success_status}]\n"
+        # PERFORMANCE: Buffer logs and flush periodically to reduce I/O overhead
+        self.log_buffer.append(log_line)
+        if len(self.log_buffer) >= self.buffer_size:
+            self._flush_buffer()
             
-            # LOG TEMPORAIRE: Log what was actually written to step.log (only if --debug)
-            if self.debug_mode and action_type == "move":
-                try:
-                    with open("debug.log", "a") as f_debug:
-                        f_debug.write(f"[STEP_LOGGER AFTER WRITE] ID={call_id} Unit {unit_id}: log_line written={log_line.strip()}\n")
-                except Exception:
-                    pass
-                
-        except ConfigurationError:
-            raise
-        except Exception as e:
-            print(f"⚠️ Step logging error: {e}")
+        # LOG TEMPORAIRE: Log what was actually written to step.log (only if --debug)
+        if self.debug_mode and action_type == "move":
+            try:
+                with open("debug.log", "a") as f_debug:
+                    f_debug.write(f"[STEP_LOGGER AFTER WRITE] ID={call_id} Unit {unit_id}: log_line written={log_line.strip()}\n")
+            except Exception:
+                pass
 
     def _flush_buffer(self):
         """Flush buffered logs to file"""
         if not self.enabled or not self.log_buffer:
             return
-        try:
-            # CRITICAL: Use builtins.open to ensure availability even if open is shadowed
-            with builtins.open(self.output_file, 'a') as f:
-                f.writelines(self.log_buffer)
-            self.log_buffer = []
-        except Exception as e:
-            print(f"⚠️ Step logging flush error: {e}")
+        # CRITICAL: Use builtins.open to ensure availability even if open is shadowed
+        with builtins.open(self.output_file, 'a') as f:
+            f.writelines(self.log_buffer)
+        self.log_buffer = []
     
     def log_episode_start(self, units_data, scenario_info=None, bot_name=None, walls=None, objectives=None, primary_objective_config=None, roster_info=None, board_config=None, scenario_path=None, run_rules=None, attached_info=None, deployment_pools=None):
         """Log episode start with all unit starting positions, walls, and objectives
@@ -710,181 +707,181 @@ class StepLogger:
 
         # Use bot_name parameter or fall back to current_bot_name attribute
         effective_bot_name = bot_name or getattr(self, 'current_bot_name', None)
-        # Nom LISIBLE resolu ICI, AVANT le `try` : ce bloc avale ses exceptions (il degrade en
-        # avertissement plutot que de casser un episode pour une ligne de journal), donc une cle
-        # hors registre y disparaitrait en silence — l'en-tete perdrait sa ligne `Opponent:` sans
-        # que rien ne le signale, exactement le mode d'echec que ce fichier a deja paye.
+        # Nom LISIBLE resolu ICI, hors du bloc d'ecriture. Le `try/except Exception` qui
+        # entourait celui-ci a ete retire (T1) : une journalisation demandee qui echoue leve
+        # desormais. La resolution reste en amont parce qu'elle ne touche pas le fichier — la
+        # separer garde l'echec de registre distinct de l'echec d'ecriture.
         opponent_display = bot_display_name(effective_bot_name) if effective_bot_name else None
 
-        try:
-            timestamp = time.strftime("%H:%M:%S", time.localtime())
-            episode_marker = f"\n[{timestamp}] === EPISODE {self.episode_number} START ===\n"
+        timestamp = time.strftime("%H:%M:%S", time.localtime())
+        episode_marker = f"\n[{timestamp}] === EPISODE {self.episode_number} START ===\n"
             
-            # Write to step.log: validate first (inside with open), then write so we never emit a partial header
-            with open(self.output_file, 'a') as f:
-                units_list = list(units_data)
-                for unit in units_list:
-                    if "id" not in unit:
-                        raise KeyError("Unit missing required 'id' field")
-                    if "col" not in unit:
-                        raise KeyError(f"Unit {unit['id']} missing required 'col' field")
-                    if "row" not in unit:
-                        raise KeyError(f"Unit {unit['id']} missing required 'row' field")
-                    if "player" not in unit:
-                        raise KeyError(f"Unit {unit['id']} missing required 'player' field")
-                    if "HP_MAX" not in unit:
-                        raise KeyError(f"Unit {unit['id']} missing required 'HP_MAX' field")
+        # Write to step.log: validate first (inside with open), then write so we never emit a partial header
+        with open(self.output_file, 'a') as f:
+            units_list = list(units_data)
+            for unit in units_list:
+                if "id" not in unit:
+                    raise KeyError("Unit missing required 'id' field")
+                if "col" not in unit:
+                    raise KeyError(f"Unit {unit['id']} missing required 'col' field")
+                if "row" not in unit:
+                    raise KeyError(f"Unit {unit['id']} missing required 'row' field")
+                if "player" not in unit:
+                    raise KeyError(f"Unit {unit['id']} missing required 'player' field")
+                if "HP_MAX" not in unit:
+                    raise KeyError(f"Unit {unit['id']} missing required 'HP_MAX' field")
 
-                f.write(episode_marker)
+            f.write(episode_marker)
 
-                if scenario_info:
-                    f.write(f"[{timestamp}] Scenario: {scenario_info}\n")
-                if scenario_path:
-                    f.write(f"[{timestamp}] Scenario file: {scenario_path}\n")
-                if roster_info:
-                    if not isinstance(roster_info, dict):
-                        raise ValueError(f"roster_info must be dict when provided, got {type(roster_info).__name__}")
-                    agent_roster_id = require_key(roster_info, "agent_roster_id")
-                    opponent_roster_id = require_key(roster_info, "opponent_roster_id")
-                    agent_roster_ref = require_key(roster_info, "agent_roster_ref")
-                    opponent_roster_ref = require_key(roster_info, "opponent_roster_ref")
-                    scale = require_key(roster_info, "scale")
-                    # SIÈGE de l'agent (`controlled_player`). Sans lui, tout consommateur du
-                    # journal suppose « agent == P1 » — ce que fait `ai/analyzer.py`, qui écrit
-                    # « Agent (P1) » / « Bot (P2) » en dur. Or `controlled_player_mode` accepte
-                    # `p2` et `random` (ai/train.py) : mesuré sur un run de 600 épisodes, l'agent
-                    # occupait le siège P2 dans 180 d'entre eux, et l'analyzer y comptait ses
-                    # victoires dans la colonne du bot — 33,3 % affichés pour 45,3 % réels.
-                    # `bot_evaluation` (donc le gating) attribuait déjà juste, en lisant
-                    # `controlled_player` ; c'est le seul consommateur qui n'avait pas la donnée.
-                    agent_player = require_key(roster_info, "agent_player")
-                    f.write(
-                        f"[{timestamp}] Rosters: scale={scale} AGENT_PLAYER={agent_player} "
-                        f"AGENT={agent_roster_id} ({agent_roster_ref}) "
-                        f"OPPONENT={opponent_roster_id} ({opponent_roster_ref})\n"
-                    )
+            if scenario_info:
+                f.write(f"[{timestamp}] Scenario: {scenario_info}\n")
+            if scenario_path:
+                f.write(f"[{timestamp}] Scenario file: {scenario_path}\n")
+            if roster_info:
+                if not isinstance(roster_info, dict):
+                    raise ValueError(f"roster_info must be dict when provided, got {type(roster_info).__name__}")
+                agent_roster_id = require_key(roster_info, "agent_roster_id")
+                opponent_roster_id = require_key(roster_info, "opponent_roster_id")
+                agent_roster_ref = require_key(roster_info, "agent_roster_ref")
+                opponent_roster_ref = require_key(roster_info, "opponent_roster_ref")
+                scale = require_key(roster_info, "scale")
+                # SIÈGE de l'agent (`controlled_player`). Sans lui, tout consommateur du
+                # journal suppose « agent == P1 » — ce que fait `ai/analyzer.py`, qui écrit
+                # « Agent (P1) » / « Bot (P2) » en dur. Or `controlled_player_mode` accepte
+                # `p2` et `random` (ai/train.py) : mesuré sur un run de 600 épisodes, l'agent
+                # occupait le siège P2 dans 180 d'entre eux, et l'analyzer y comptait ses
+                # victoires dans la colonne du bot — 33,3 % affichés pour 45,3 % réels.
+                # `bot_evaluation` (donc le gating) attribuait déjà juste, en lisant
+                # `controlled_player` ; c'est le seul consommateur qui n'avait pas la donnée.
+                agent_player = require_key(roster_info, "agent_player")
+                f.write(
+                    f"[{timestamp}] Rosters: scale={scale} AGENT_PLAYER={agent_player} "
+                    f"AGENT={agent_roster_id} ({agent_roster_ref}) "
+                    f"OPPONENT={opponent_roster_id} ({opponent_roster_ref})\n"
+                )
 
-                if opponent_display:
-                    # Nom lu dans le registre, jamais fabrique ici : `capitalize() + "Bot"` ne
-                    # tombait juste que sur les cles d'un seul mot et inventait `Value_tradeBot`
-                    # ou `AlphaBot` pour les autres (cf. `bot_display_name`).
-                    f.write(f"[{timestamp}] Opponent: {opponent_display}\n")
+            if opponent_display:
+                # Nom lu dans le registre, jamais fabrique ici : `capitalize() + "Bot"` ne
+                # tombait juste que sur les cles d'un seul mot et inventait `Value_tradeBot`
+                # ou `AlphaBot` pour les autres (cf. `bot_display_name`).
+                f.write(f"[{timestamp}] Opponent: {opponent_display}\n")
 
-                # Log walls/obstacles for replay
-                if walls:
-                    wall_coords = ";".join([f"({w['col']},{w['row']})" for w in walls])
-                    f.write(f"[{timestamp}] Walls: {wall_coords}\n")
-                else:
-                    f.write(f"[{timestamp}] Walls: none\n")
+            # Log walls/obstacles for replay
+            if walls:
+                wall_coords = ";".join([f"({w['col']},{w['row']})" for w in walls])
+                f.write(f"[{timestamp}] Walls: {wall_coords}\n")
+            else:
+                f.write(f"[{timestamp}] Walls: none\n")
 
-                # Log objectives for replay - format: name:(col,row);(col,row)|name2:(col,row);...
-                if objectives:
-                    obj_strs = []
-                    for obj in objectives:
-                        name = self._objective_display_name(obj)
-                        hexes = require_key(obj, "hexes")
-                        hex_coords = ";".join([f"({h[0]},{h[1]})" for h in hexes])
-                        obj_strs.append(f"{name}:{hex_coords}")
-                    f.write(f"[{timestamp}] Objectives: {'|'.join(obj_strs)}\n")
-                else:
-                    f.write(f"[{timestamp}] Objectives: none\n")
+            # Log objectives for replay - format: name:(col,row);(col,row)|name2:(col,row);...
+            if objectives:
+                obj_strs = []
+                for obj in objectives:
+                    name = self._objective_display_name(obj)
+                    hexes = require_key(obj, "hexes")
+                    hex_coords = ";".join([f"({h[0]},{h[1]})" for h in hexes])
+                    obj_strs.append(f"{name}:{hex_coords}")
+                f.write(f"[{timestamp}] Objectives: {'|'.join(obj_strs)}\n")
+            else:
+                f.write(f"[{timestamp}] Objectives: none\n")
 
-                rules_payload = {
-                    "primary_objective": primary_objective_config
-                }
-                f.write(f"[{timestamp}] Rules: {json.dumps(rules_payload, separators=(',', ':'))}\n")
+            rules_payload = {
+                "primary_objective": primary_objective_config
+            }
+            f.write(f"[{timestamp}] Rules: {json.dumps(rules_payload, separators=(',', ':'))}\n")
 
-                if board_config is None:
-                    raise ValueError("board_config is required for episode start logging")
-                cols = require_key(board_config, "cols")
-                rows = require_key(board_config, "rows")
-                inches_to_subhex = require_key(board_config, "inches_to_subhex")
-                hex_radius = require_key(board_config, "hex_radius")
-                margin = require_key(board_config, "margin")
-                f.write(f"[{timestamp}] Board: cols={cols} rows={rows} inches_to_subhex={inches_to_subhex} hex_radius={hex_radius} margin={margin}\n")
-                # Pas de `if ... is not None` : l'analyzer REFUSE tout journal sans cette ligne.
-                # La sauter en silence ferait tomber l'erreur des heures plus tard, chez le
-                # consommateur, au lieu d'ici où le producteur est identifiable. Même exigence
-                # que `board_config` juste au-dessus.
-                if not isinstance(run_rules, dict) or not run_rules:
-                    raise ValueError(
-                        "log_episode_start: `run_rules` requis et non vide — l'analyzer refuse "
-                        f"un journal sans entête `Run rules:` (reçu {run_rules!r})"
-                    )
-                _rules_txt = " ".join(f"{k}={v}" for k, v in sorted(run_rules.items()))
-                f.write(f"[{timestamp}] Run rules: {_rules_txt}\n")
-                # VERSION DE GRAMMAIRE — ce que le journal GARANTIT porter, pas ce qu'il porte
-                # peut-être. Sans elle, l'absence de `[ALLOC_MODEL:]` sur une ligne de dégâts
-                # serait indécidable : vieux journal, ou ligne que le moteur a oublié d'annoter ?
-                # Le lecteur devrait alors retomber en silence sur son ancienne devinette — le
-                # repli qui masque une panne, exactement ce que ce dépôt s'interdit.
-                # Déclarée ici, elle rend le token EXIGIBLE : sur un journal `log_grammar=2`,
-                # une ligne qui applique des dégâts sans nommer sa figurine est une ERREUR.
-                #   1 = grammaire d'avant le 2026-08-12 (aucune figurine allouée nommée)
-                #   2 = `[ALLOC_MODEL: <mid>]` sur toute attaque parvenue à l'allocation
-                f.write(f"[{timestamp}] Log grammar: {LOG_GRAMMAR_VERSION}\n")
-                # L19 — liens leader→bodyguard (règle 19 Attached Units).
-                # Une paire par ligne : l'analyzer reconstruit la taille de l'escouade
-                # effective (bodyguard + leaders) et les règles dérivées (19.04 reroll_charge).
-                if attached_info:
-                    for _lid, _bid in sorted(attached_info.items()):
-                        f.write(f"[{timestamp}] Attached: {_lid}→{_bid}\n")
+            if board_config is None:
+                raise ValueError("board_config is required for episode start logging")
+            cols = require_key(board_config, "cols")
+            rows = require_key(board_config, "rows")
+            inches_to_subhex = require_key(board_config, "inches_to_subhex")
+            hex_radius = require_key(board_config, "hex_radius")
+            margin = require_key(board_config, "margin")
+            f.write(f"[{timestamp}] Board: cols={cols} rows={rows} inches_to_subhex={inches_to_subhex} hex_radius={hex_radius} margin={margin}\n")
+            # Pas de `if ... is not None` : l'analyzer REFUSE tout journal sans cette ligne.
+            # La sauter en silence ferait tomber l'erreur des heures plus tard, chez le
+            # consommateur, au lieu d'ici où le producteur est identifiable. Même exigence
+            # que `board_config` juste au-dessus.
+            if not isinstance(run_rules, dict) or not run_rules:
+                raise ValueError(
+                    "log_episode_start: `run_rules` requis et non vide — l'analyzer refuse "
+                    f"un journal sans entête `Run rules:` (reçu {run_rules!r})"
+                )
+            _rules_txt = " ".join(f"{k}={v}" for k, v in sorted(run_rules.items()))
+            f.write(f"[{timestamp}] Run rules: {_rules_txt}\n")
+            # VERSION DE GRAMMAIRE — ce que le journal GARANTIT porter, pas ce qu'il porte
+            # peut-être. Sans elle, l'absence de `[ALLOC_MODEL:]` sur une ligne de dégâts
+            # serait indécidable : vieux journal, ou ligne que le moteur a oublié d'annoter ?
+            # Le lecteur devrait alors retomber en silence sur son ancienne devinette — le
+            # repli qui masque une panne, exactement ce que ce dépôt s'interdit.
+            # Déclarée ici, elle rend le token EXIGIBLE : sur un journal `log_grammar=2`,
+            # une ligne qui applique des dégâts sans nommer sa figurine est une ERREUR.
+            #   1 = grammaire d'avant le 2026-08-12 (aucune figurine allouée nommée)
+            #   2 = `[ALLOC_MODEL: <mid>]` sur toute attaque parvenue à l'allocation
+            f.write(f"[{timestamp}] Log grammar: {LOG_GRAMMAR_VERSION}\n")
+            # L19 — liens leader→bodyguard (règle 19 Attached Units).
+            # Une paire par ligne : l'analyzer reconstruit la taille de l'escouade
+            # effective (bodyguard + leaders) et les règles dérivées (19.04 reroll_charge).
+            if attached_info:
+                for _lid, _bid in sorted(attached_info.items()):
+                    f.write(f"[{timestamp}] Attached: {_lid}→{_bid}\n")
 
-                # L9 — zones de déploiement par joueur (03.02, 20.04, 24.09, 24.20, 24.31, 24.32).
-                # Format : P<n>=(min_col,min_row)-(max_col,max_row), boîte englobante de la zone.
-                # Absent si le scénario ne déclare pas de zones (défaut → contrôle impossible).
-                if deployment_pools:
-                    pool_parts = []
-                    for pid in sorted(deployment_pools.keys()):
-                        hexes = deployment_pools[pid]
-                        if not hexes:
-                            continue
-                        min_c = min(h[0] for h in hexes)
-                        max_c = max(h[0] for h in hexes)
-                        min_r = min(h[1] for h in hexes)
-                        max_r = max(h[1] for h in hexes)
-                        pool_parts.append(f"P{pid}=({min_c},{min_r})-({max_c},{max_r})")
-                    if pool_parts:
-                        f.write(f"[{timestamp}] Deployment: {' '.join(pool_parts)}\n")
+            # L9 — zones de déploiement par joueur (03.02, 20.04, 24.09, 24.20, 24.31, 24.32).
+            # Format : P<n>=(min_col,min_row)-(max_col,max_row), boîte englobante de la zone.
+            # Absent si le scénario ne déclare pas de zones (défaut → contrôle impossible).
+            if deployment_pools:
+                pool_parts = []
+                for pid in sorted(deployment_pools.keys()):
+                    hexes = deployment_pools[pid]
+                    if not hexes:
+                        continue
+                    min_c = min(h[0] for h in hexes)
+                    max_c = max(h[0] for h in hexes)
+                    min_r = min(h[1] for h in hexes)
+                    max_r = max(h[1] for h in hexes)
+                    pool_parts.append(f"P{pid}=({min_c},{min_r})-({max_c},{max_r})")
+                if pool_parts:
+                    f.write(f"[{timestamp}] Deployment: {' '.join(pool_parts)}\n")
 
-                # Log all unit starting positions (already validated above)
-                for unit in units_list:
-                    unit_type = require_key(unit, "unitType")
-                    display_name = unit.get("DISPLAY_NAME")
-                    display_suffix = f" [{display_name}]" if isinstance(display_name, str) and display_name.strip() else ""
-                    player_name = f"P{unit['player']}"
-                    hp_max = require_key(unit, "HP_MAX")
-                    base_shape = require_key(unit, "BASE_SHAPE")
-                    base_size = require_key(unit, "BASE_SIZE")
-                    base_info = f" base={base_shape}/{base_size}" if base_size != 1 else ""
-                    # Segment per-figurine initial [MODELS:] (positions de deploiement par socle) :
-                    # meme source de verite que les lignes d'action -> le replay affiche tous les
-                    # socles des le debut. Absent/vide -> rien (mono-fig sans cache exploitable).
-                    models_seg = unit.get("models_segment")  # get allowed
-                    models_suffix = f" {models_seg}" if models_seg else ""
-                    # DATASHEET PAR FIGURINE. Une escouade n'est pas homogène : la règle 19
-                    # (Attached units) y replie un personnage COMME figurine, et le roster y met
-                    # sergents et armes spéciales. Le type d'ESCOUADE ne décrit donc pas chaque
-                    # socle, et tout ce qui se calcule par figurine à partir de lui est faux.
-                    # Mesuré sur le run de 600 épisodes : « Attacks over CC_NB » remontait 20
-                    # lignes, dont 5 attaques d'un Ancient rattaché (arme NB=5, ATK=2 — le journal
-                    # affiche bien `Hit x(2+)`) plafonnées au NB=3 de l'Intercessor porteur, et
-                    # 20 attaques de 10 Gretchin plafonnées à 10. Le nom d'affichage de l'arme ne
-                    # suffit pas à trancher : cinq armes distinctes s'appellent « Close Combat
-                    # Weapon », de NB 2 à 6. Seul le type de la FIGURINE le fait.
-                    types_seg = unit.get("model_types_segment")  # get allowed
-                    types_suffix = f" {types_seg}" if types_seg else ""
-                    f.write(
-                        f"[{timestamp}] Unit {unit['id']} ({unit_type}){display_suffix} {player_name}: "
-                        f"Starting position ({unit['col']},{unit['row']}), HP_MAX={hp_max}{base_info}"
-                        f"{models_suffix}{types_suffix}\n"
-                    )
+            # Log all unit starting positions (already validated above)
+            for unit in units_list:
+                unit_type = require_key(unit, "unitType")
+                display_name = unit.get("DISPLAY_NAME")
+                display_suffix = f" [{display_name}]" if isinstance(display_name, str) and display_name.strip() else ""
+                player_name = f"P{unit['player']}"
+                hp_max = require_key(unit, "HP_MAX")
+                base_shape = require_key(unit, "BASE_SHAPE")
+                base_size = require_key(unit, "BASE_SIZE")
+                base_info = f" base={base_shape}/{base_size}" if base_size != 1 else ""
+                # Segment per-figurine initial [MODELS:] (positions de deploiement par socle) :
+                # meme source de verite que les lignes d'action -> le replay affiche tous les
+                # socles des le debut. Absent/vide -> rien (mono-fig sans cache exploitable).
+                models_seg = unit.get("models_segment")  # get allowed
+                models_suffix = f" {models_seg}" if models_seg else ""
+                # DATASHEET PAR FIGURINE. Une escouade n'est pas homogène : la règle 19
+                # (Attached units) y replie un personnage COMME figurine, et le roster y met
+                # sergents et armes spéciales. Le type d'ESCOUADE ne décrit donc pas chaque
+                # socle, et tout ce qui se calcule par figurine à partir de lui est faux.
+                # Mesuré sur le run de 600 épisodes : « Attacks over CC_NB » remontait 20
+                # lignes, dont 5 attaques d'un Ancient rattaché (arme NB=5, ATK=2 — le journal
+                # affiche bien `Hit x(2+)`) plafonnées au NB=3 de l'Intercessor porteur, et
+                # 20 attaques de 10 Gretchin plafonnées à 10. Le nom d'affichage de l'arme ne
+                # suffit pas à trancher : cinq armes distinctes s'appellent « Close Combat
+                # Weapon », de NB 2 à 6. Seul le type de la FIGURINE le fait.
+                types_seg = unit.get("model_types_segment")  # get allowed
+                types_suffix = f" {types_seg}" if types_seg else ""
+                f.write(
+                    f"[{timestamp}] Unit {unit['id']} ({unit_type}){display_suffix} {player_name}: "
+                    f"Starting position ({unit['col']},{unit['row']}), HP_MAX={hp_max}{base_info}"
+                    f"{models_suffix}{types_suffix}\n"
+                )
 
-                f.write(f"[{timestamp}] === ACTIONS START ===\n")
-            
-                
-        except Exception as e:
-            print(f"⚠️ Episode start logging error: {e}")
+            f.write(f"[{timestamp}] === ACTIONS START ===\n")
+
+        # APRES le `with` : le fichier est ferme, l'en-tete est sur le disque. Incremente ici et
+        # nulle part ailleurs — c'est ce qui fait de ce compteur une preuve d'ecriture et non un
+        # compteur d'appels.
+        self.episodes_written += 1
 
     def _format_display_name_suffix(self, details, field_name):
         """Format optional display name suffix for step log readability."""
@@ -1746,14 +1743,11 @@ class StepLogger:
         if not self.enabled:
             return
             
-        try:
-            with open(self.output_file, 'a') as f:
-                timestamp = time.strftime("%H:%M:%S", time.localtime())
-                # Clearer format: [timestamp] TX PX PHASE phase Start
-                phase_upper = to_phase.upper()
-                f.write(f"[{timestamp}] T{turn_number} P{player} {phase_upper} phase Start\n")
-        except Exception as e:
-            print(f"⚠️ Step logging error: {e}")
+        with open(self.output_file, 'a') as f:
+            timestamp = time.strftime("%H:%M:%S", time.localtime())
+            # Clearer format: [timestamp] TX PX PHASE phase Start
+            phase_upper = to_phase.upper()
+            f.write(f"[{timestamp}] T{turn_number} P{player} {phase_upper} phase Start\n")
     
     def log_episode_end(self, total_episodes_steps, winner, win_method, objective_control):
         """Log episode completion summary using replay-style format
@@ -1770,25 +1764,22 @@ class StepLogger:
         # PERFORMANCE: Flush any remaining buffered logs before episode end
         self._flush_buffer()
 
-        try:
-            duration_s = time.perf_counter() - getattr(self, '_episode_start_wall', time.perf_counter())
-            with open(self.output_file, 'a') as f:
-                timestamp = time.strftime("%H:%M:%S", time.localtime())
-                method_str = f", Method={win_method}" if win_method else ""
-                f.write(f"[{timestamp}] EPISODE END: Winner={winner}{method_str}, Actions={self.episode_action_count}, Steps={self.episode_step_count}, Total={total_episodes_steps}, Duration={duration_s:.3f}s\n")
-                if objective_control:
-                    objective_entries = []
-                    for obj_id, data in objective_control.items():
-                        player_1_oc = require_key(data, "player_1_oc")
-                        player_2_oc = require_key(data, "player_2_oc")
-                        controller = require_key(data, "controller")
-                        objective_entries.append(
-                            f"Obj{obj_id}:P1_OC={player_1_oc},P2_OC={player_2_oc},Ctrl={controller}"
-                        )
-                    f.write(f"[{timestamp}] OBJECTIVE CONTROL: {' | '.join(objective_entries)}\n")
-                f.write("=" * 80 + "\n")
-        except Exception as e:
-            print(f"⚠️ Step logging error: {e}")
+        duration_s = time.perf_counter() - getattr(self, '_episode_start_wall', time.perf_counter())
+        with open(self.output_file, 'a') as f:
+            timestamp = time.strftime("%H:%M:%S", time.localtime())
+            method_str = f", Method={win_method}" if win_method else ""
+            f.write(f"[{timestamp}] EPISODE END: Winner={winner}{method_str}, Actions={self.episode_action_count}, Steps={self.episode_step_count}, Total={total_episodes_steps}, Duration={duration_s:.3f}s\n")
+            if objective_control:
+                objective_entries = []
+                for obj_id, data in objective_control.items():
+                    player_1_oc = require_key(data, "player_1_oc")
+                    player_2_oc = require_key(data, "player_2_oc")
+                    controller = require_key(data, "controller")
+                    objective_entries.append(
+                        f"Obj{obj_id}:P1_OC={player_1_oc},P2_OC={player_2_oc},Ctrl={controller}"
+                    )
+                f.write(f"[{timestamp}] OBJECTIVE CONTROL: {' | '.join(objective_entries)}\n")
+            f.write("=" * 80 + "\n")
     
     def __del__(self):
         """Ensure buffer is flushed when logger is destroyed"""
@@ -1800,3 +1791,29 @@ class StepLogger:
             pass
 
 
+def assert_step_log_written(logger: StepLogger, episodes_played: Optional[int]) -> None:
+    """Leve si `--step` a ete demande et qu'AUCUN episode n'a atteint le journal.
+
+    Complement du chemin d'ecriture, qui leve desormais des qu'une ecriture echoue : ce
+    controle-ci couvre le cas OPPOSE, celui ou rien ne leve parce que rien n'est ecrit —
+    logger jamais branche sur le moteur (`base_env.step_logger`), `enabled` faux, env recree
+    apres la connexion. Le run rend alors des win/loss valides, sort en code 0, et laisse un
+    `step.log` reduit a l'en-tete du constructeur ; l'echec ne se revele qu'au lancement
+    suivant de `ai/analyzer.py`, des heures plus tard, sans cause reproductible.
+
+    `episodes_played` : episodes joues tels que le RUN les compte, `None` quand le mode
+    n'en publie aucun total. Message seulement — la sonde est `episodes_written`.
+    """
+    if logger.episodes_written > 0:
+        return
+    joues = (
+        f"{episodes_played} episode(s) joue(s) par le run"
+        if episodes_played is not None
+        else "le run n'a publie aucun total d'episodes"
+    )
+    raise RuntimeError(
+        f"--step demande mais aucun episode n'a ete ecrit dans {logger.output_file} "
+        f"({joues}). Le journal est reduit a son en-tete : ai/analyzer.py le refusera "
+        "(« aucune ligne d'entete Board: ... inches_to_subhex=N »). Verifier que le "
+        "StepLogger est bien branche sur le moteur REELLEMENT joue (base_env.step_logger)."
+    )

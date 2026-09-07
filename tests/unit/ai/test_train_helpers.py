@@ -702,7 +702,7 @@ def test_the_final_eval_scenario_is_resolved_between_the_early_returns_and_the_t
     (`--test-only --rule-checker`, `--test-only --scenario foo.json`) : exiger un dossier
     holdout les cassait, alors qu'ils marchaient avant.
     """
-    main_code = _function_code(train.main)
+    main_code = _function_code(train._run_main)
 
     # L'ancre est l'AFFECTATION, pas l'appel : `--test-only` appelle le meme resolveur plus
     # haut (resolveur unique, cf. test_the_two_holdout_paths_share_one_resolver), donc
@@ -829,7 +829,7 @@ def test_the_two_holdout_paths_share_one_resolver() -> None:
     propre message d'erreur — deux reponses selon la porte d'entree, et le `[0]` nu du split
     dur reproduit a deux endroits.
     """
-    main_code = _function_code(train.main)
+    main_code = _function_code(train._run_main)
     assert main_code.count("resolve_final_eval_scenarios(") >= 2, (
         "le bloc --test-only doit passer par le resolveur commun"
     )
@@ -932,7 +932,7 @@ def test_both_config_key_arguments_are_stripped() -> None:
             with pytest.raises(argparse.ArgumentTypeError, match="ne peut pas etre vide"):
                 parse(blank)
 
-    parser_source = _function_code(train.main)
+    parser_source = _function_code(train._run_main)
     rewards_decl = parser_source[parser_source.index("'--rewards-config'"):][:400]
     assert "_non_empty_key" in rewards_decl, (
         "--rewards-config declare sans validateur : le jumeau de --agent est reste ouvert"
@@ -970,7 +970,7 @@ def test_only_bots_get_a_versus_line() -> None:
 
 
 def test_both_published_summaries_read_the_same_source() -> None:
-    """JUMEAU : les DEUX resumes publies par `train.main` listent les bots par la meme fonction.
+    """JUMEAU : les DEUX resumes publies par `train._run_main` listent les bots par la meme fonction.
 
     Il y en a deux — fin d'entrainement et mode eval-only — et ils portaient le meme motif de
     liste noire, recopie. Le second ne produisait pas encore de fausse ligne, mais par
@@ -978,7 +978,7 @@ def test_both_published_summaries_read_the_same_source() -> None:
     """
     sources = {
         "fin d'entrainement": _function_code(train.train_with_scenario_rotation),
-        "eval-only": _function_code(train.main),
+        "eval-only": _function_code(train._run_main),
     }
     for where, code in sources.items():
         assert "iter_bot_score_rows(" in code, (
