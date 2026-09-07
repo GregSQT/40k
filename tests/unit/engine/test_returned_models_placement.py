@@ -35,6 +35,9 @@ from engine.phase_handlers.deployment_handlers import (
     RETURNED_PLACEMENT_INTENTS, _model_footprint, plan_returned_models_placement,
     returned_models_legal_cells,
 )
+from engine.phase_handlers.shared_utils import (
+    _build_enemy_adjacent_hexes_all_players, _recompute_squad_occupied_hexes,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +136,7 @@ def _state(
             for unit_type, value in profiles
         ]
     }
-    return {
+    game_state: Dict[str, Any] = {
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
         "destroyed_models": destroyed_models,
@@ -157,6 +160,12 @@ def _state(
         "action_log_seq": 0,
         "board_cols": 30,
         "board_rows": 30,
+        # Résolution portée par l'ÉTAT, comme en production (`w40k_core` la pose au même rang que
+        # `board_cols`/`board_rows`). Sans elle, `geometry_is_hex` retombe sur le config-loader
+        # global : la géométrie du test devenait celle du plateau ambiant, donc dépendante de
+        # l'ordre d'exécution — à x1 (hex), `explain_move_plan_rejection` exigeait un cache
+        # d'adjacence que le fixture ne posait pas, et le rouge n'apparaissait que sous `-n 16`.
+        "inches_to_subhex": 1,
         "wall_hexes": set(),
         "terrain_areas": [],
         "objectives": objectives or [],
@@ -185,6 +194,15 @@ def _state(
             "inches_to_subhex": 1,
         },
     }
+    # Empreintes d'escouade, par la MÊME primitive que la construction du cache moteur : c'est
+    # `occupied_hexes` que dilate `build_enemy_adjacent_hexes` juste en dessous.
+    for squad_id in units_cache:
+        _recompute_squad_occupied_hexes(game_state, squad_id)
+    # Ce que fait `command_phase_start` avant toute étape de la phase (08.xx) : les tests
+    # appellent les étapes directement, donc ils doivent poser le même pré-requis. En géométrie
+    # hex, `move_enemy_ez_forbidden_cells` lit ce cache et n'a aucune raison de le reconstruire.
+    _build_enemy_adjacent_hexes_all_players(game_state)
+    return game_state
 
 
 def _footprints(gs: Dict[str, Any], squad_id: str) -> List[set]:
