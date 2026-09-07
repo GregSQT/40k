@@ -17,13 +17,39 @@ from engine.game_utils import require_unit_by_id  # noqa: F401 – re-export for
 # ============================================================================
 
 DiceValue = Union[int, str]
-VALID_DICE_STRINGS: frozenset = frozenset({"D3", "D6", "2D6", "D6+1", "D6+2", "D6+3"})
-EXPECTED_D3 = 2.0
-EXPECTED_D6 = 3.5
-EXPECTED_2D6 = 7.0
-EXPECTED_D6_PLUS_1 = 4.5
-EXPECTED_D6_PLUS_2 = 5.5
-EXPECTED_D6_PLUS_3 = 6.5
+
+# Issues EQUIPROBABLES de chaque expression, ecrites sous la forme que `resolve_dice_value`
+# tire reellement : "D3" est un D6 replie ((d+1)//2), "2D6" est la somme de deux des, donc 36
+# issues de sommes INEGALEMENT probables (une seule vaut 2, six valent 7) et non 6 faces.
+# C'est "2D6" qui impose la table : sa loi ne s'ecrit pas en sixiemes. Table UNIQUE dont
+# derivent la validation d'expression, l'esperance et l'esperance plafonnee — une seconde
+# description du meme de aurait diverge, et c'est precisement ce qui rendait l'esperance
+# plafonnee fausse jusqu'au 2026-09-07 (elle plafonnait une moyenne fermee, faute de connaitre
+# les issues).
+DICE_OUTCOMES: Dict[str, Tuple[int, ...]] = {
+    "D3": tuple((d + 1) // 2 for d in range(1, 7)),
+    "D6": tuple(range(1, 7)),
+    "2D6": tuple(a + b for a in range(1, 7) for b in range(1, 7)),
+    "D6+1": tuple(d + 1 for d in range(1, 7)),
+    "D6+2": tuple(d + 2 for d in range(1, 7)),
+    "D6+3": tuple(d + 3 for d in range(1, 7)),
+}
+VALID_DICE_STRINGS: frozenset = frozenset(DICE_OUTCOMES)
+
+
+def _dice_outcomes(value: DiceValue, roll_context: str) -> Tuple[int, ...]:
+    """Issues equiprobables de `value`. Un entier est un de a une seule face.
+
+    Meme contrat d'erreur que `resolve_dice_value` — type invalide avant expression inconnue —
+    parce que les deux esperances qui en derivent doivent lever comme le tirage.
+    """
+    if isinstance(value, int):
+        return (value,)
+    if not isinstance(value, str):
+        raise TypeError(f"Invalid dice value type for {roll_context}: {type(value).__name__}")
+    if value not in DICE_OUTCOMES:
+        raise ValueError(f"Unsupported dice expression for {roll_context}: {value}")
+    return DICE_OUTCOMES[value]
 
 
 def resolve_dice_value(value: DiceValue, roll_context: str) -> int:
@@ -73,23 +99,24 @@ def expected_dice_value(value: DiceValue, roll_context: str) -> float:
     - D6+2 expected value: 5.5
     - D6+3 expected value: 6.5
     """
-    if isinstance(value, int):
-        return float(value)
-    if not isinstance(value, str):
-        raise TypeError(f"Invalid dice value type for {roll_context}: {type(value).__name__}")
-    if value == "D3":
-        return EXPECTED_D3
-    if value == "D6":
-        return EXPECTED_D6
-    if value == "2D6":
-        return EXPECTED_2D6
-    if value == "D6+1":
-        return EXPECTED_D6_PLUS_1
-    if value == "D6+2":
-        return EXPECTED_D6_PLUS_2
-    if value == "D6+3":
-        return EXPECTED_D6_PLUS_3
-    raise ValueError(f"Unsupported dice expression for {roll_context}: {value}")
+    outcomes = _dice_outcomes(value, roll_context)
+    return sum(outcomes) / len(outcomes)
+
+
+def expected_capped_dice_value(value: DiceValue, cap: int, roll_context: str) -> float:
+    """Esperance de `min(de, cap)` — le plafond porte sur CHAQUE ISSUE, jamais sur la moyenne.
+
+    `min(E[de], cap)` et `E[min(de, cap)]` sont deux valeurs DIFFERENTES des que le de peut
+    depasser le plafond sans le depasser toujours : un D6 plafonne a 3 vaut 2,5 (1,2,3,3,3,3)
+    et non 3,0. Plafonner la moyenne sur-credite donc l'arme de jusqu'a 20 % (D6 contre 3 PV,
+    D3 contre 2 PV), et c'est exactement le sur-credit que le plafond existe pour supprimer.
+
+    Le comptage se fait sur `DICE_OUTCOMES` et pas sur une formule fermee, pour la meme raison
+    que `attack_sequence.expected_damage_per_attack` compte ses faces : "2D6" n'a pas 6 issues
+    mais 36, de sommes inegalement probables, et toute formule en 1/6 y serait fausse.
+    """
+    outcomes = _dice_outcomes(value, roll_context)
+    return sum(min(o, cap) for o in outcomes) / len(outcomes)
 
 # ============================================================================
 # UNIT UTILITIES

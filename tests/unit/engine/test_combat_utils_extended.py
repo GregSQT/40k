@@ -1,9 +1,13 @@
+from itertools import product
+
 import pytest
 
 from engine.combat_utils import (
+    DICE_OUTCOMES,
     calculate_hex_distance,
     calculate_wound_target,
     check_los_cached,
+    expected_capped_dice_value,
     expected_dice_value,
     get_hex_neighbors,
     get_unit_by_id,
@@ -35,6 +39,71 @@ def test_expected_dice_value_known_mappings_and_invalid() -> None:
     assert expected_dice_value(9, "ctx") == 9.0
     with pytest.raises(ValueError, match=r"Unsupported dice expression"):
         expected_dice_value("3D6", "ctx")
+
+
+def test_dice_outcomes_matches_what_resolve_dice_value_can_roll(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """VERROU : la table des issues decrit le MEME de que le tirage reel.
+
+    `resolve_dice_value` garde ses branches en dur au lieu de tirer dans `DICE_OUTCOMES` : pour
+    "2D6" il consomme DEUX `random.randint`, et passer a un tirage unique parmi 36 issues
+    changerait la consommation de RNG, donc les parties rejouees a graine fixe. Les deux
+    descriptions du de coexistent donc volontairement, et c'est ce test qui interdit qu'elles
+    divergent — sans lui, une expression ajoutee d'un seul cote passerait inapercue.
+
+    Comparaison en MULTISET (`sorted`) et non en ensemble, parce que "2D6" tire ses 36 sommes a
+    des frequences INEGALES : un ensemble accepterait les 11 sommes distinctes et laisserait
+    passer une table qui les croirait equiprobables. Le repli de "D3", lui, reste uniforme —
+    y ecrire 1,2,3 ne changerait aucune esperance, le multiset y verrouille seulement que la
+    table demeure le reflet fidele du tirage.
+    """
+    for expr, table in DICE_OUTCOMES.items():
+        n_dice = 2 if expr == "2D6" else 1
+        rolled = []
+        for combo in product(range(1, 7), repeat=n_dice):
+            it = iter(combo)
+            monkeypatch.setattr("random.randint", lambda a, b, _it=it: next(_it))
+            rolled.append(resolve_dice_value(expr, "ctx"))
+        assert sorted(rolled) == sorted(table), expr
+
+
+def test_expected_capped_dice_value_caps_each_outcome_not_the_mean() -> None:
+    """05.04 : le plafond porte sur chaque jet, donc `E[min(de, PV)]`, pas `min(E[de], PV)`.
+
+    Les valeurs attendues sont ecrites en dur (et non recalculees depuis la table) pour que le
+    test echoue si la table ET la fonction derivaient ensemble.
+    """
+    # D6 contre 3 PV : 1,2,3,3,3,3 -> 2,5. `min(E, PV)` aurait rendu 3,0 (sur-credit de 20 %).
+    assert expected_capped_dice_value("D6", 3, "ctx") == pytest.approx(2.5)
+    # D3 contre 2 PV : 1,1,2,2,2,2 -> 5/3. `min(E, PV)` aurait rendu 2,0.
+    assert expected_capped_dice_value("D3", 2, "ctx") == pytest.approx(5 / 3)
+    assert expected_capped_dice_value("D6+1", 4, "ctx") == pytest.approx(3.5)
+
+
+def test_expected_capped_dice_value_weights_2d6_over_its_36_outcomes() -> None:
+    """"2D6" a 36 issues de sommes inegalement probables, pas 6 faces.
+
+    Toute formule en 1/6 rendrait ici 6,0 (le plafond) au lieu de 196/36 : c'est le cas que le
+    comptage par faces d'un D6 unique ne peut pas voir.
+    """
+    assert expected_capped_dice_value("2D6", 6, "ctx") == pytest.approx(196 / 36)
+    assert expected_capped_dice_value("2D6", 2, "ctx") == pytest.approx(2.0)
+
+
+def test_expected_capped_dice_value_degenerate_caps_and_int_and_invalid() -> None:
+    # Plafond hors d'atteinte du de : aucune issue rabotee, donc l'esperance nue.
+    assert expected_capped_dice_value("D6", 6, "ctx") == expected_dice_value("D6", "ctx")
+    assert expected_capped_dice_value("2D6", 12, "ctx") == expected_dice_value("2D6", "ctx")
+    # Plafond sous le minimum du de : toutes les issues rabotees, donc le plafond.
+    assert expected_capped_dice_value("D6+3", 2, "ctx") == 2.0
+    # Degat fixe : un de a une seule face.
+    assert expected_capped_dice_value(3, 2, "ctx") == 2.0
+    assert expected_capped_dice_value(3, 5, "ctx") == 3.0
+    with pytest.raises(ValueError, match=r"Unsupported dice expression"):
+        expected_capped_dice_value("3D6", 2, "ctx")
+    with pytest.raises(TypeError, match=r"Invalid dice value type"):
+        expected_capped_dice_value(None, 2, "ctx")  # type: ignore[arg-type]
 
 
 def test_get_unit_by_id_requires_index_and_looks_up_by_str_id() -> None:

@@ -321,6 +321,27 @@ def test_melee_heuristic_caps_devastating_wounds_damage_too() -> None:
     assert _best_melee(weapons, target, target_hp_max=1) == 0
 
 
+def test_melee_heuristic_caps_each_damage_roll_not_the_average() -> None:
+    """Un DMG ALEATOIRE se plafonne jet par jet : `E[min(de, PV)]`, pas `min(E[de], PV)`.
+
+    Les deux tests de plafond ci-dessus n'utilisent que des degats FIXES, ou les deux formules
+    coincident : ils restaient verts alors que le plafond sur-creditait toute arme a degats
+    variables. Ici l'arme a D6 degats contre 3 PV vaut 2,5 (1,2,3,3,3,3) et non 3,0.
+
+    Scenario construit pour que le verdict BASCULE sur ce seul ecart : 3 attaques a D6 degats
+    contre 4 attaques a 2 degats, memes ATK/STR/AP donc meme probabilite de blesser en facteur
+    commun. Avec le plafond sur la moyenne : 3x3,0 = 9 contre 4x2 = 8, la D6 gagne. Avec le
+    plafond par jet : 3x2,5 = 7,5 contre 8, la fixe gagne — et c'est elle que le moteur fait
+    reellement mieux jouer.
+    """
+    weapons = [_melee("Aleatoire", NB=3, DMG="D6"), _melee("Fixe", NB=4, DMG=2)]
+    target = {"id": "2", "UNIT_KEYWORDS": []}
+    assert _best_melee(weapons, target, target_hp_max=3) == 1
+    # Contre 6 PV le D6 ne depasse jamais les PV : le plafond ne mord plus, 3x3,5 = 10,5 > 8.
+    # Le fix ne condamne donc pas les grosses armes, il cesse seulement de les sur-crediter.
+    assert _best_melee(weapons, target, target_hp_max=6) == 0
+
+
 def test_melee_heuristic_raises_on_invalid_damage_instead_of_defaulting() -> None:
     """Plus de repli silencieux : un DMG non résoluble est une donnée invalide, il lève."""
     weapons = [_melee("Broken", DMG="D7")]
