@@ -92,8 +92,14 @@ rattrape désormais au prochain cran au lieu d'avancer d'un pas ; corrigé sur l
 dans le `run_info` du processus : la commande de reprise le reconstruit depuis les artefacts du
 disque, où il n'apparaît pas. Comme une étape détruite n'écrit aucun `model_<agent>_<etape>.zip`,
 le garde « déjà promue » ne voyait rien non plus, et la clôture remesurait l'instantané robuste —
-d'autres poids que ceux jugés, qui pouvaient franchir le gate. `_run_info_from_disk` relit
-désormais le verdict dans `curriculum.log`, filtré sur `written_by == ai/train.py`.
+d'autres poids que ceux jugés, qui pouvaient franchir le gate. Le verdict est désormais persisté
+en **sidecar du modèle canonique** (`pool_stop_path`), que `_run_info_from_disk` relit.
+Volontairement pas dans `curriculum.log` : ce journal est en append à la racine du projet, ses
+entrées ne portent **aucune clé d'agent**, et il conserve l'historique de toutes les *tentatives*
+d'une même étape — relire « la dernière ligne de P4 » aurait rendu le verdict d'une tentative
+précédente, ou celui d'un autre agent. Le sidecar entre dans `canonical_run_artifacts`, donc
+`--new` comme `--resume-from` l'écartent au démarrage : une étape rejouée après destruction
+repart sans verdict.
 
 **Un verdict `promote` publie désormais les poids VIVANTS** (décision du 2026-09-07, option A).
 L'early-stop rend ce verdict sur les poids courants, mesurés contre tout le pool ; sous
@@ -106,10 +112,11 @@ annonce (« le budget restant serait payé pour rien »). Publier est l'exceptio
 `save_best_robust` peut accepter : le verdict **est** une validation contre l'intégralité du pool.
 Le verdict `destroy`, lui, ne publie rien.
 ⚠️ **Le seuil de score robuste du canonique (`canonical_robust_meta_path`) est effacé à cette
-publication.** Il décrit le modèle remplacé, et il **survit à l'étape** (seul `--new` l'écarte,
-via `archive_canonical_artifacts_for_new_run`) : laissé en place, il
-imposerait à l'étape suivante de battre le score d'un modèle disparu avant de republier son propre
-canonique — le défaut constaté en production sous V11 §0.36.
+publication.** Il décrit le modèle remplacé. Il est bien écarté au **démarrage** d'un run, par
+`--new` comme par `--resume-from` (les deux passent par `canonical_set_aside_pairs`) ; ce
+qu'aucun des deux ne couvrait, c'est la **fin** de run traitée ici — le seuil serait resté en
+place jusqu'au démarrage suivant en annonçant un score que le canonique n'a pas, défaut de la
+même famille que V11 §0.36.
 
 **Cadence des sondes dédoublée** (décision du 2026-09-07, option B). Sonder le pool entier à
 chaque sonde faisait suivre le coût à la **taille** du pool, qui croît d'une étape à l'autre : à

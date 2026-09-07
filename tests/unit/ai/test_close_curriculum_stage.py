@@ -10,6 +10,7 @@ Tout le reste s'execute reellement.
 """
 
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -329,8 +330,8 @@ def test_un_verdict_promote_laisse_le_gate_mesurer_et_promouvoir(tmp_path, monke
 # ── `--close-stage` NE DOIT PAS ROUVRIR LA PROMOTION D'UNE ETAPE DETRUITE ───────────────────
 
 
-def _prepare_disk_artifacts(tmp_path, monkeypatch, canonical: str, curriculum: dict, log_path):
-    """Les artefacts que `_run_info_from_disk` relit a cote du modele canonique, plus le journal.
+def _prepare_disk_artifacts(tmp_path, monkeypatch, canonical: str, curriculum: dict):
+    """Les artefacts que `_run_info_from_disk` relit a cote du modele canonique.
 
     `init: from:P3` et non le `"P3"` nu de la fixture generale : c'est la forme que
     `stage_init_source` accepte, et l'archive source porte l'offset d'episodes de l'etape.
@@ -345,44 +346,23 @@ def _prepare_disk_artifacts(tmp_path, monkeypatch, canonical: str, curriculum: d
     save_run_state(canonical, 50_000)
     train_mod._write_tensorboard_run_meta(canonical, str(tmp_path / "tb_run"))
     monkeypatch.setattr(train_mod, "build_agent_model_path", lambda _root, _key: canonical)
-    monkeypatch.setattr(curriculum_mod, "curriculum_log_path", lambda: str(log_path))
 
 
-def _append_as_pipeline(entry: dict, log_path) -> None:
-    """Journalise en se faisant passer pour `ai/train.py`, comme le vrai run l'aurait fait.
-
-    `append_curriculum_log` derive `written_by` de `sys.argv[0]` : sous pytest la ligne serait
-    signee par le harnais, donc ecartee par le lecteur — ce que verifie le test dedie.
-    """
-    import os
-    import sys
-
-    original = sys.argv
-    sys.argv = [os.path.join(curriculum_mod._project_root(), "ai", "train.py")]
-    try:
-        curriculum_mod.append_curriculum_log(entry, str(log_path))
-    finally:
-        sys.argv = original
-
-
-def test_close_stage_relit_le_verdict_destroy_dans_le_journal(tmp_path, monkeypatch):
+def test_close_stage_relit_le_verdict_destroy_dans_son_sidecar(tmp_path, monkeypatch):
     """LE finding : le court-circuit de destruction survit a la commande de reprise.
 
-    Un run detruit atteint bien `_close_curriculum_stage` : le gate est court-circuite, le journal
-    porte le verdict, et AUCUN `model_<agent>_P4.zip` n'est ecrit. Le garde « etape deja promue »
-    de `_run_info_from_disk` ne voit donc rien, et `--close-stage` repartait sur un `run_info`
-    reconstruit ou le verdict n'existait pas : la mesure reprenait sur l'instantane robuste, et
-    l'etape que le run venait de detruire pouvait etre promue.
+    Un run detruit atteint bien `_close_curriculum_stage` : le gate est court-circuite et AUCUN
+    `model_<agent>_P4.zip` n'est ecrit. Le garde « etape deja promue » de `_run_info_from_disk` ne
+    voit donc rien, et `--close-stage` repartait sur un `run_info` reconstruit ou le verdict
+    n'existait pas : la mesure reprenait sur l'instantane robuste, et l'etape que le run venait de
+    detruire pouvait etre promue.
     """
     canonical, args, config, curriculum, stage, _ = _make_context(tmp_path)
-    log_path = tmp_path / "curriculum.log"
-    _prepare_disk_artifacts(tmp_path, monkeypatch, canonical, curriculum, log_path)
-    _append_as_pipeline({
-        "etape": "P4",
-        "gate_accepted": False,
-        "pool_stop_verdict": curriculum_mod.POOL_VERDICT_DESTROY,
-        "pool_stop_reason": "P4 : moyenne 0.350 contre P3, sous 0.40. Run ARRETE.",
-    }, log_path)
+    _prepare_disk_artifacts(tmp_path, monkeypatch, canonical, curriculum)
+    train_mod.save_pool_stop_verdict(
+        canonical, curriculum_mod.POOL_VERDICT_DESTROY,
+        "P4 : moyenne 0.350 contre P3, sous 0.40. Run ARRETE.",
+    )
 
     run_info = train_mod._run_info_from_disk(args, config, curriculum)
 
@@ -404,13 +384,13 @@ def test_close_stage_relit_le_verdict_destroy_dans_le_journal(tmp_path, monkeypa
 
 
 def test_close_stage_dun_run_jamais_clos_na_pas_de_verdict(tmp_path, monkeypatch):
-    """Contre-epreuve : un run tue au clavier n'a AUCUNE ligne de journal.
+    """Contre-epreuve : un run tue au clavier n'a ecrit AUCUN sidecar de verdict.
 
     C'est le cas nominal de `--close-stage`. Le verdict doit y rester None, sinon la commande
     refuserait la cloture qu'elle existe pour rendre possible.
     """
     canonical, args, config, curriculum, _stage, _ = _make_context(tmp_path)
-    _prepare_disk_artifacts(tmp_path, monkeypatch, canonical, curriculum, tmp_path / "curriculum.log")
+    _prepare_disk_artifacts(tmp_path, monkeypatch, canonical, curriculum)
 
     run_info = train_mod._run_info_from_disk(args, config, curriculum)
 
@@ -419,24 +399,43 @@ def test_close_stage_dun_run_jamais_clos_na_pas_de_verdict(tmp_path, monkeypatch
     assert run_info["episodes_trained"] == 30_000, "50 000 cumules moins les 20 000 de P3"
 
 
-def test_close_stage_ignore_une_ligne_ecrite_par_un_script(tmp_path, monkeypatch):
-    """Le journal est en append PUBLIC : seule une ligne du pipeline decide d'une cloture.
+def test_le_verdict_est_ecarte_au_demarrage_du_run_suivant(tmp_path, monkeypatch):
+    """Le sidecar suit le cycle de vie du RUN, et pas l'historique de l'etape.
 
-    `append_curriculum_log` estampille `written_by` depuis `sys.argv[0]` — sous pytest, ce n'est
-    pas `ai/train.py`. Une ligne posee par un script jetable ne doit pas pouvoir bloquer une
-    cloture legitime.
+    C'est ce qui interdit a une TENTATIVE precedente de decider. Rejouer P4 apres l'avoir
+    detruite, puis tuer ce run au clavier, ne doit pas faire refuser la nouvelle tentative avec le
+    verdict de l'ancienne — ce que ferait une relecture de `curriculum.log`, qui est en append,
+    conserve toutes les tentatives et ne porte AUCUNE cle d'agent.
+
+    `--new` comme `--resume-from` ecartent les artefacts canoniques par le meme
+    `canonical_set_aside_pairs` : il suffit donc que le sidecar y figure.
     """
-    canonical, args, config, curriculum, _stage, _ = _make_context(tmp_path)
-    log_path = tmp_path / "curriculum.log"
-    _prepare_disk_artifacts(tmp_path, monkeypatch, canonical, curriculum, log_path)
-    curriculum_mod.append_curriculum_log(
-        {"etape": "P4", "pool_stop_verdict": curriculum_mod.POOL_VERDICT_DESTROY},
-        str(log_path),
-    )
+    canonical, _args, _config, _curriculum, _stage, _ = _make_context(tmp_path)
+    train_mod.save_pool_stop_verdict(canonical, curriculum_mod.POOL_VERDICT_DESTROY, "detruite")
+    sidecar = train_mod.pool_stop_path(canonical)
+    assert os.path.exists(sidecar)
 
-    entree = curriculum_mod.last_curriculum_log_entry("P4", str(log_path))
-    assert entree is None, "la ligne n'est pas signee ai/train.py"
-    assert train_mod._run_info_from_disk(args, config, curriculum)["pool_stop_verdict"] is None
+    assert sidecar in [origin for origin, _ in train_mod.canonical_set_aside_pairs(
+        canonical, "pre_resume_20260907-120000"
+    )], "le verdict doit etre ecarte au demarrage, comme le seuil de score robuste"
+
+    train_mod.archive_canonical_artifacts_for_new_run(canonical, log_fn=lambda _m: None)
+
+    assert not os.path.exists(sidecar)
+    assert train_mod.load_pool_stop_verdict(canonical) == (None, None)
+
+
+def test_le_verdict_est_propre_a_chaque_agent(tmp_path, monkeypatch):
+    """Deux agents jouant la meme etape ne partagent pas leur verdict.
+
+    Le sidecar est derive du modele CANONIQUE, donc de l'agent. `curriculum.log` ne portant pas de
+    cle d'agent, une relecture par etape aurait confondu les deux.
+    """
+    autre = str(tmp_path / "model_AutreAgent.zip")
+    canonical, _args, _config, _curriculum, _stage, _ = _make_context(tmp_path)
+    train_mod.save_pool_stop_verdict(canonical, curriculum_mod.POOL_VERDICT_DESTROY, "detruite")
+
+    assert train_mod.load_pool_stop_verdict(autre) == (None, None)
 
 
 def test_close_stage_refuse_un_pool_a_deux_champions(tmp_path, monkeypatch):

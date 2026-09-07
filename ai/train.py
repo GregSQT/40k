@@ -1415,6 +1415,14 @@ def _interrupted_model_path(model_path: str) -> str:
     return f"{os.path.splitext(model_path)[0]}_interrupted.zip"
 
 
+#: Suffixes des sidecars de RUN derives du modele canonique. Volontairement HORS de
+#: `COMPANION_SUFFIXES` (ai/model_artifacts.py) : ces deux fichiers decrivent le run en cours, pas
+#: le modele. Les mettre dans les compagnons les ferait voyager avec chaque copie et chaque
+#: promotion d'etape, donc suivre un modele qu'ils ne decrivent plus.
+ROBUST_META_SUFFIX = "_robust_meta.json"
+POOL_STOP_SUFFIX = "_pool_stop.json"
+
+
 def canonical_robust_meta_path(model_path: str) -> str:
     """`model_<agent>_robust_meta.json` — le SEUIL de score robuste du modele canonique.
 
@@ -1423,9 +1431,45 @@ def canonical_robust_meta_path(model_path: str) -> str:
     est lu comme un seuil (`_read_canonical_robust_score`) — un desaccord ferait ecrire un seuil
     que personne ne relit, donc un canonique jamais mis a jour.
     """
-    model_dir = os.path.dirname(model_path)
-    stem = os.path.splitext(os.path.basename(model_path))[0]
-    return os.path.join(model_dir, f"{stem}_robust_meta.json")
+    return companion_path(model_path, ROBUST_META_SUFFIX)
+
+
+def pool_stop_path(model_path: str) -> str:
+    """`model_<agent>_pool_stop.json` — le VERDICT d'arret anticipe du run en cours.
+
+    POURQUOI UN SIDECAR ET PAS `curriculum.log`. Le verdict ne vit qu'en memoire du processus, et
+    `--close-stage` s'execute dans un AUTRE processus, apres la mort du run : il lui faut une
+    trace sur disque. Le journal ne convient pas — il est en append a la racine du projet, ses
+    entrees ne portent PAS de cle d'agent (verifie sur `curriculum.log`), et il conserve
+    l'historique de toutes les TENTATIVES d'une meme etape. Relire « la derniere ligne de P4 »
+    rendrait donc le verdict d'une tentative precedente, ou celui d'un autre agent.
+
+    Ici le cycle de vie est juste par CONSTRUCTION : le fichier est derive du modele canonique,
+    donc propre a l'agent, et il entre dans `canonical_run_artifacts` — donc `--new` comme
+    `--resume-from` l'ecartent au demarrage (`canonical_set_aside_pairs`). Une etape rejouee
+    apres une destruction repart sans verdict, ce qui est la lecture juste.
+    """
+    return companion_path(model_path, POOL_STOP_SUFFIX)
+
+
+def save_pool_stop_verdict(model_path: str, verdict: str, reason: Optional[str]) -> None:
+    """Persiste le verdict qui a arrete le run, pour une cloture differee (`--close-stage`)."""
+    write_json_atomic(pool_stop_path(model_path), {"verdict": verdict, "reason": reason})
+
+
+def load_pool_stop_verdict(model_path: str) -> Tuple[Optional[str], Optional[str]]:
+    """`(verdict, motif)` du sidecar, `(None, None)` s'il n'existe pas.
+
+    Absent = le run n'a pas ete arrete par l'early-stop (budget epuise, ou tue en vol). C'est la
+    bonne lecture, pas un repli : `_close_curriculum_stage` distingue « l'etape a fini » de
+    « l'etape s'est arretee, et pourquoi », et un fichier absent dit le premier.
+    """
+    path = pool_stop_path(model_path)
+    if not os.path.exists(path):
+        return None, None
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    return require_key(data, "verdict"), data.get("reason")
 
 
 def final_save_publishes_live_weights(
@@ -1460,11 +1504,11 @@ def publish_canonical_model(model, model_path: str, episode_count: int, log=prin
     injouable comme adversaire fige (V11 §0.35).
 
     Le seuil de score robuste est SUPPRIME parce qu'il decrit le modele qu'on vient de remplacer.
-    Laisse en place il annonce un score que le canonique n'a pas, et il SURVIT a l'etape (seul
-    `--new` l'ecarte, cf. `archive_canonical_artifacts_for_new_run`) : il imposerait a l'etape
-    suivante de battre le score d'un modele disparu avant de pouvoir republier son propre
-    canonique — le defaut exact que V11 §0.36 a constate en production. Le supprimer rend l'etat
-    vrai : ce canonique n'a pas de score robuste connu.
+    Il est bien ecarte au DEMARRAGE d'un run, par `--new` comme par `--resume-from` (les deux
+    passent par `canonical_set_aside_pairs`) ; ce qu'aucun des deux ne couvre, c'est la FIN de
+    run traitee ici — le seuil resterait alors en place jusqu'au demarrage suivant en annoncant
+    un score que le canonique n'a pas. Le supprimer rend l'etat vrai : ce canonique n'a pas de
+    score robuste connu.
     """
     model.save(model_path)
     save_run_state(model_path, episode_count)
@@ -1490,6 +1534,7 @@ def canonical_run_artifacts(model_path: str) -> list:
         model_path,                                              # model_<agent>.zip
         *model_companion_paths(model_path),                      # ..._vec_normalize.pkl, ..._run_state.json
         canonical_robust_meta_path(model_path),                  # seuil du score robuste
+        pool_stop_path(model_path),                              # verdict d'arret anticipe
         best_model,                                              # meilleur modele SB3 du run
         # `_save_model_with_vecnormalize` ecrit SYSTEMATIQUEMENT les stats a cote du best_model
         # (ai/training_callbacks.py). Oubliees ici, elles restaient en place pendant que leur zip
@@ -1804,7 +1849,6 @@ from ai.curriculum import (
     POOL_VERDICT_DESTROY,
     POOL_VERDICT_PROMOTE,
     append_curriculum_log,
-    last_curriculum_log_entry,
     copy_tensorboard_run,
     evaluate_stage_gate,
     get_stage_hp_overrides,
@@ -1825,6 +1869,7 @@ from ai.curriculum import (
     stage_pool_members,
     validate_exploiter_protocol,
 )
+from ai.companion_paths import companion_path
 from ai.model_artifacts import model_companion_paths, remove_model_with_companions
 from ai.run_state import get_run_state_path, load_run_state, save_run_state
 from ai.truncation_log import TruncationLog, agent_log_dir
@@ -3891,6 +3936,13 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         pool_stop_verdict = (
             pool_early_stop_callback.stop_verdict if pool_early_stop_callback is not None else None
         )
+        if pool_stop_verdict is not None:
+            # Sur DISQUE, parce que `--close-stage` clot l'etape depuis un autre processus et ne
+            # peut pas relire une variable : cf. `pool_stop_path`.
+            save_pool_stop_verdict(
+                model_path, pool_stop_verdict,
+                require_present(pool_early_stop_callback, "pool_early_stop_callback").stop_reason,
+            )
 
         # Final save unless robust mode owns canonical output (cf. la regle, qui dit pourquoi un
         # verdict `promote` fait exception).
@@ -5512,14 +5564,14 @@ def _run_info_from_disk(args, config, curriculum) -> Dict[str, Any]:
     de la derniere evaluation du run, et un run interrompu n'en a pas rendu. Les inventer depuis
     TensorBoard daterait le journal d'une mesure prise a un autre moment que le modele promu.
 
-    `pool_stop_verdict`, lui, est RELU dans `curriculum.log`, et cette relecture n'est pas un
-    confort. Un run arrete pour DESTRUCTION est alle jusqu'a `_close_curriculum_stage`, qui a
-    court-circuite le gate, journalise le verdict et refuse la promotion — donc sans ecrire de
+    `pool_stop_verdict` est RELU dans son sidecar (`pool_stop_path`), et cette relecture n'est pas
+    un confort. Un run arrete pour DESTRUCTION est alle jusqu'a `_close_curriculum_stage`, qui a
+    court-circuite le gate et refuse la promotion — donc sans ecrire de
     `model_<agent>_<etape>.zip`. Le garde d'etape deja promue ne le voit donc pas, et sans le
     verdict `run_info` decrivait une etape simplement interrompue : la cloture remesurait, sous
     `save_best_robust` sur un instantane robuste ANTERIEUR aux poids juges, et pouvait promouvoir
-    l'etape que le run venait de detruire. Une etape jamais close n'a aucune ligne : le verdict y
-    reste None, qui est la bonne lecture.
+    l'etape que le run venait de detruire. Un run que l'early-stop n'a pas arrete n'ecrit aucun
+    sidecar : le verdict y reste None, qui est la bonne lecture.
     """
     models_root = config.get_models_root()
     canonical_model_path = build_agent_model_path(models_root, args.agent)
@@ -5540,15 +5592,15 @@ def _run_info_from_disk(args, config, curriculum) -> Dict[str, Any]:
     # Même archive source que l'origine des sondes du run (`stage_origin`).
     _source_model = stage_source_model(canonical_model_path, require_stage(curriculum, args.etape))
     episode_offset = 0 if _source_model is None else load_run_state(_source_model)
-    _logged = last_curriculum_log_entry(args.etape) or {}
+    _stop_verdict, _stop_reason = load_pool_stop_verdict(canonical_model_path)
     return {
         "episode_count_total": episode_count_total,
         "tensorboard_run_dir": require_key(
             _read_tensorboard_run_meta(canonical_model_path), "run_dir"
         ),
         "episodes_trained": episode_count_total - episode_offset,
-        "pool_stop_verdict": _logged.get("pool_stop_verdict"),
-        "pool_stop_reason": _logged.get("pool_stop_reason"),
+        "pool_stop_verdict": _stop_verdict,
+        "pool_stop_reason": _stop_reason,
     }
 
 

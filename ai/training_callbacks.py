@@ -3073,10 +3073,19 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
     coûte qu'une fraction de ce que coûte l'arrêter à tort.
 
     CE QUI N'EST PAS DÉGRADÉ : le verdict lit toujours le pool ENTIER. Les moyennes des membres non
-    sondés au tour courant sont simplement leur DERNIÈRE valeur connue, au plus
-    `full_pool_probe_every` sondes en arrière. Ne passer que le champion à
+    sondés au tour courant sont simplement leur DERNIÈRE valeur connue. Ne passer que le champion à
     `evaluate_pool_decision` promouvrait sur son seul score — la régression même que le pool entier
     a été introduit pour fermer.
+
+    CE QUI EST DÉGRADÉ, ET C'EST LE PRIX ASSUMÉ : la fenêtre se compte en NOMBRE DE SONDES
+    (`deque(maxlen=probe_window)`), pas en épisodes. Le point le plus récent d'un non-champion a
+    donc au plus `full_pool_probe_every` sondes, mais sa MOYENNE s'étale sur
+    `probe_window * full_pool_probe_every` sondes — neuf tours, soit 90 000 épisodes à la cadence
+    livrée, contre trois tours pour le champion. Un membre ancien contre qui la politique vient de
+    régresser continue donc d'afficher une moyenne haute pendant plusieurs tours, et une promotion
+    peut passer sur cette inertie. C'est la contrepartie exacte de la décision : la promotion
+    réagit plus tard, là où la destruction — qui ne lit que le champion — garde sa cadence pleine.
+    Une fenêtre exprimée en ÉPISODES supprimerait cette asymétrie ; elle n'a pas été prise.
 
     Les deux verdicts se lisent sur la MOYENNE GLISSANTE des `probe_window` dernières sondes —
     celle que publie `pool_eval/vs_<tag>_<probe_window>ep` —
@@ -3193,9 +3202,6 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         # cadence rattrape (cf. `_next_probe_checkpoint`) et un modulo d'épisodes sauterait des
         # tours de pool entier de façon imprévisible.
         self._probe_count: int = 0
-        # Dernière moyenne connue de CHAQUE membre, y compris ceux non sondés au tour courant.
-        # C'est ce dictionnaire, et non les scores du tour, que lit `evaluate_pool_decision`.
-        self._last_known_means: Dict[str, float] = {}
 
     def _archives_for(self, full_pool: bool) -> List[Tuple[str, str]]:
         """Les archives à sonder ce tour : tout le pool, ou le seul champion."""
@@ -3372,10 +3378,14 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
                 "promotion ni de destruction ne peut plus être rendu."
             )
 
-        # Les moyennes du tour ECRASENT les valeurs connues, les autres membres gardent la leur :
-        # le verdict lit toujours le pool ENTIER, cf. la docstring de la classe.
-        self._last_known_means.update(self._log_probe_scores(scores, current))
-        means = dict(self._last_known_means)
+        # `means` porte TOUT le pool, pas seulement les membres sondés ce tour : l'historique
+        # garde la fenêtre de chacun, et la moyenne d'un membre non sondé est inchangée depuis
+        # son dernier tour. C'est ce dictionnaire complet que lit `evaluate_pool_decision` — cf.
+        # la docstring de la classe.
+        self._log_probe_scores(scores, current)
+        means = {
+            lbl: float(np.mean(hist)) for lbl, hist in self._probe_score_history.items()
+        }
         score_str = ", ".join(f"{lbl}={scores[lbl]:.3f}(→{means[lbl]:.3f})" for lbl in labels)
         if not full_pool:
             score_str += f" [champion seul, pool entier toutes les {self.full_pool_probe_every}]"

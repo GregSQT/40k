@@ -396,7 +396,9 @@ def test_the_verdict_still_reads_the_whole_pool_on_a_champion_only_round(tmp_pat
         assert _step_at(cb, episode) is True, "vieux_a sous son plancher : aucune promotion"
 
     assert cb.stop_verdict is None
-    assert cb._last_known_means["vieux_a"] == pytest.approx(0.20)
+    # `vieux_a` n'a ete sonde qu'aux deux premiers tours : sa fenetre est intacte, et c'est elle
+    # qui a retenu la promotion au tour ou il n'etait pas mesure.
+    assert list(cb._probe_score_history["vieux_a"]) == pytest.approx([0.20, 0.20])
 
 
 def test_destruction_still_fires_at_its_own_gate_with_a_degraded_cadence(tmp_path):

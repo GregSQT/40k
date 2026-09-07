@@ -1384,44 +1384,6 @@ def append_curriculum_log(entry: Dict[str, Any], log_path: Optional[str] = None)
     return path
 
 
-#: `written_by` du pipeline d'entrainement, le seul ecrivain dont une ligne fait autorite.
-PIPELINE_WRITER = os.path.join("ai", "train.py")
-
-
-def last_curriculum_log_entry(
-    etape: str, log_path: Optional[str] = None
-) -> Optional[Dict[str, Any]]:
-    """Derniere entree du journal ecrite par le PIPELINE pour cette etape. None s'il n'y en a pas.
-
-    Filtre sur `written_by` : le journal est en append public (cf. `append_curriculum_log`), et
-    une ligne posee par un script jetable ne doit pas pouvoir decider d'une cloture.
-
-    Lecteur EXIGE par `--close-stage`. Une etape arretee pour destruction a bien atteint
-    `_close_curriculum_stage`, qui a journalise son `pool_stop_verdict` et refuse la promotion
-    sans ecrire de zip d'etape. Rien d'autre ne garde ce verdict : `--close-stage` reconstruit son
-    `run_info` depuis les artefacts poses a cote du modele, ou il n'apparait pas. Sans cette
-    relecture, la commande de reprise remesurait l'etape detruite et pouvait la promouvoir.
-
-    Une ligne ILLISIBLE leve : un journal tronque en cours d'ecriture est un etat sur lequel il ne
-    faut pas decider en silence.
-    """
-    path = log_path if log_path is not None else curriculum_log_path()
-    if not os.path.exists(path):
-        return None
-    found: Optional[Dict[str, Any]] = None
-    with open(path, "r", encoding="utf-8") as handle:
-        for number, line in enumerate(handle, start=1):
-            if not line.strip():
-                continue
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"{path}:{number} illisible : {exc}") from exc
-            if entry.get("etape") == etape and entry.get(WRITTEN_BY_KEY) == PIPELINE_WRITER:
-                found = entry
-    return found
-
-
 def _writer_identity() -> str:
     """Point d'entree du processus, relatif a la racine du projet quand il y est contenu.
 

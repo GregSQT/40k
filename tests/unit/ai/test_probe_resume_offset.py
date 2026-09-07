@@ -4,20 +4,19 @@ Reproduit le run P2 du 2026-09-04 : reprise `from:P1` à 80 000 épisodes, `bot_
 `_next_probe_episode` partait de 10 000 alors que le tracker (cumulatif sur la lignée) démarrait
 à 80 000 : la sonde se déclenchait au premier pas, puis à CHAQUE pas suivant jusqu'à ce que le
 cap rattrape 80 000 — 8 sondes de 300 épisodes consécutives (8 × 18 min) avant le premier vrai
-épisode. `min_steps` (50 000) comparé aux 13,7 M de `num_timesteps` hérités de l'archive ne
-gardait plus rien. Le jumeau exploiteur portait le même défaut, en plus grave : un `budget_cap`
-comparé au compteur cumulé d'une lignée reprise `from:P3` aurait censuré le run au premier pas.
+épisode. Le garde de l'époque, exprimé en PAS, était comparé aux pas hérités de l'archive et ne
+gardait donc plus rien ; il a été supprimé avec les décisions en pas le 2026-09-07. Le jumeau
+exploiteur portait le même défaut, en plus grave : un `budget_cap` comparé au compteur cumulé
+d'une lignée reprise `from:P3` aurait censuré le run au premier pas.
 
 Les deux callbacks reçoivent désormais à la construction l'origine de l'étape, lue sur l'ARCHIVE
 SOURCE de l'étape par `ai.curriculum.stage_origin` — pas sur le modèle repris, qui après un
 `--resume-from` de crash est un checkpoint de milieu d'étape — et toutes leurs grandeurs
-(cadence, plafond de pas, budget, courbe) se comptent DEPUIS cette origine.
+(cadence, budget, courbe) se comptent DEPUIS cette origine, en ÉPISODES.
 """
 
 from __future__ import annotations
 
-import json
-import zipfile
 from pathlib import Path
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
@@ -27,16 +26,14 @@ import pytest
 from ai.curriculum import stage_model_path, stage_origin
 from ai.run_state import save_run_state
 from ai.training_callbacks import ExploiterProbeCallback, PoolEarlyStoppingCallback
-from shared.data_validation import ConfigurationError
 from tests.unit.ai._fabriques import (
     POOL_EARLY_STOP_CFG,
     exploiter_probe_callback,
     pool_early_stopping_callback,
 )
 
-# Valeurs du run mesuré : offset de reprise et `num_timesteps` relu dans model_ArmageddonAgent_x1_P1.zip.
+# Offset de reprise du run mesuré (P2 depuis P1).
 P2_EPISODE_OFFSET = 80_000
-P1_NUM_TIMESTEPS = 13_749_576
 
 
 def _tracker(episode_count: int) -> MagicMock:
@@ -54,11 +51,9 @@ def _pool_callback(**overrides: Any) -> PoolEarlyStoppingCallback:
     """
     if overrides.get("episode_origin") and "parity_label" not in overrides:
         overrides["parity_label"] = "champion"
-    callback = pool_early_stopping_callback(
+    return pool_early_stopping_callback(
         "/fake/P1.zip", eval_freq_episodes=10_000, n_eval_episodes=300, **overrides
     )
-    callback.num_timesteps = 0
-    return callback
 
 
 def _exploiter_callback(**overrides: Any) -> ExploiterProbeCallback:
@@ -98,7 +93,6 @@ def test_pool_resume_does_not_chain_probes_before_the_first_stage_interval():
     callback = _pool_callback(episode_origin=P2_EPISODE_OFFSET)
     tracker = _tracker(P2_EPISODE_OFFSET)
     callback.metrics_tracker = tracker
-    callback.num_timesteps = P1_NUM_TIMESTEPS + 24
     probed = _count_pool_probes(callback)
 
     # Les pas du run mesuré : premier pas à l'offset, puis quelques épisodes, puis juste sous le cap.
@@ -272,22 +266,20 @@ def test_stage_episode_is_counted_from_the_origin():
 # ── stage_origin : l'origine est celle de l'ARCHIVE SOURCE, pas du checkpoint repris ───────────
 
 
-def _write_sb3_like_zip(path: Path, num_timesteps: int) -> None:
-    with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr("data", json.dumps({"num_timesteps": num_timesteps, "ent_coef": 0.01}))
-
-
 def test_stage_origin_reads_the_source_archive_not_the_resumed_checkpoint(tmp_path: Path):
     """E1 `from:P3` repris par `--resume-from` après crash : l'origine reste celle de P3.
 
     Le canonique porte l'état du checkpoint (680 000 épisodes) ; `stage_origin` doit rendre celui
     de l'archive P3 (530 000), sinon `budget_cap` repartirait du point de crash.
+
+    Les zips sont VIDES : `stage_origin` ne les ouvre plus, il lit l'état de run compagnon et ne
+    demande au zip que d'exister.
     """
     canonical = tmp_path / "model_Agent.zip"
-    _write_sb3_like_zip(canonical, num_timesteps=20_000_000)
+    canonical.touch()
     save_run_state(str(canonical), 680_000)
     source = Path(stage_model_path(str(canonical), "P3"))
-    _write_sb3_like_zip(source, num_timesteps=P1_NUM_TIMESTEPS)
+    source.touch()
     save_run_state(str(source), 530_000)
 
     assert stage_origin(str(canonical), {"init": "from:P3"}) == 530_000

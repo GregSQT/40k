@@ -26,6 +26,9 @@ def _populate(model_dir) -> str:
     (model_dir / "model_TestAgent.zip").write_bytes(b"zip")
     (model_dir / "model_TestAgent_vec_normalize.pkl").write_bytes(b"pkl")
     (model_dir / "model_TestAgent_robust_meta.json").write_text(json.dumps({"robust_score": 0.45}))
+    (model_dir / "model_TestAgent_pool_stop.json").write_text(
+        json.dumps({"verdict": "destroy", "reason": "detruite"})
+    )
     (model_dir / "best_model.zip").write_bytes(b"best")
     # Historique : nom UNIQUE, doit survivre.
     (model_dir / "TestAgent_12345_robust_0.4574.zip").write_bytes(b"scored")
@@ -43,6 +46,9 @@ def test_canonical_artifacts_are_the_fixed_name_ones(tmp_path) -> None:
         # les rampes du run NEUF au compteur du run precedent (V11 §0.58).
         "model_TestAgent_run_state.json",
         "model_TestAgent_robust_meta.json",
+        # Verdict d'arret anticipe : c'est ce qui interdit a une TENTATIVE precedente de la meme
+        # etape de decider de la cloture de la suivante (cf. `pool_stop_path`).
+        "model_TestAgent_pool_stop.json",
         "best_model.zip",
         # Le best_model est sauve AVEC ses stats (`_save_model_with_vecnormalize`) : les laisser
         # en place pendant que leur zip part a l'archive, c'est les faire ecraser par le run
@@ -61,7 +67,7 @@ def test_new_run_archives_the_threshold_and_the_agent(tmp_path) -> None:
 
     moved = archive_canonical_artifacts_for_new_run(model_path, log_fn=lambda _m: None)
 
-    assert len(moved) == 4
+    assert len(moved) == 5
     for original in ("model_TestAgent.zip", "model_TestAgent_robust_meta.json", "best_model.zip"):
         assert not (tmp_path / original).exists(), f"{original} aurait été écrasé par le run neuf"
     # Le meta archivé garde son contenu : c'est une sauvegarde, pas une suppression.
@@ -177,7 +183,7 @@ def test_two_new_runs_one_second_apart_are_both_archivable(tmp_path, monkeypatch
     _populate(tmp_path)
     (tmp_path / "model_TestAgent.zip.tb_run.json").write_text(json.dumps({"run_dir": "/tb/run_B"}))
 
-    assert len(archive_canonical_artifacts_for_new_run(model_path, log_fn=lambda _m: None)) == 5
+    assert len(archive_canonical_artifacts_for_new_run(model_path, log_fn=lambda _m: None)) == 6
 
 
 def test_a_corrupt_sidecar_does_not_block_the_archiving(tmp_path) -> None:
@@ -257,7 +263,7 @@ def test_archiving_is_idempotent_and_tolerates_a_virgin_directory(tmp_path) -> N
     assert archive_canonical_artifacts_for_new_run(model_path, log_fn=lambda _m: None) == []
 
     _populate(tmp_path)
-    assert len(archive_canonical_artifacts_for_new_run(model_path, log_fn=lambda _m: None)) == 4
+    assert len(archive_canonical_artifacts_for_new_run(model_path, log_fn=lambda _m: None)) == 5
     assert archive_canonical_artifacts_for_new_run(model_path, log_fn=lambda _m: None) == []
 
 
