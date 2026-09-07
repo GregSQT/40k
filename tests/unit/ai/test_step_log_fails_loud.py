@@ -32,6 +32,7 @@ garde fait passer `test_la_garde_est_sur_le_vrai_chemin_avant_toute_ecriture` au
 from __future__ import annotations
 
 import builtins
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -39,6 +40,12 @@ import pytest
 
 from ai.step_logger import StepLogger, assert_step_log_written
 from tests._state_invariants import unit_invariants
+
+# Reutilise plutot que redeclare : cette helper pose `sys.argv` ET neutralise la cloture reelle
+# (`_close_curriculum_stage`, `_run_info_from_disk`). Un lancement de `main()` ecrit a la main
+# n'aurait pas la seconde moitie, et un test de `--close-stage` qui va au bout du dispatch joue
+# alors une VRAIE promotion dans `ai/models/`, que CLAUDE.md interdit d'ecrire.
+from .test_close_stage_manual import _run_main as _lance_train_main
 
 
 def _units() -> List[Dict[str, Any]]:
@@ -195,8 +202,8 @@ def test_main_appelle_le_controle_de_fin_de_run(tmp_path: Path, monkeypatch) -> 
     """Le contrôle est-il sur le VRAI chemin ? `main()` est le point d'entrée de `p ai/train.py`.
 
     `_run_main` est remplacé par un stub qui pose exactement ce qu'un run `--step` réussi pose
-    (drapeau armé, logger global, total d'épisodes publié) et rend 0 : sans l'appel dans le
-    wrapper, `main()` rendrait 0 en silence, comme le run du 2026-09-07.
+    (logger global armé, total d'épisodes publié) et rend 0 : sans l'appel dans le wrapper,
+    `main()` rendrait 0 en silence, comme le run du 2026-09-07.
     """
     import ai.train as train
 
@@ -204,7 +211,6 @@ def test_main_appelle_le_controle_de_fin_de_run(tmp_path: Path, monkeypatch) -> 
 
     def _stub_run_main() -> int:
         train.step_logger = logger
-        train._step_log_required = True
         train._run_episodes_played = 300
         return 0
 
@@ -223,7 +229,6 @@ def test_main_ne_controle_pas_un_run_en_echec(tmp_path: Path, monkeypatch) -> No
         train.step_logger = StepLogger(
             output_file=str(tmp_path / "step.log"), enabled=True, buffer_size=50
         )
-        train._step_log_required = True
         return 1
 
     monkeypatch.setattr(train, "_run_main", _stub_run_main)
@@ -233,50 +238,45 @@ def test_main_ne_controle_pas_un_run_en_echec(tmp_path: Path, monkeypatch) -> No
 
 # ── 4. le périmètre : `--step` sur un mode qui ne journalise pas est REFUSÉ ────
 
-def _args_step(**modes: bool):
-    """Namespace minimal pour `reject_step_without_step_log` : `--step` armé, un mode à la fois."""
+def _args_step(**overrides: bool):
+    """Namespace minimal pour `reject_step_without_step_log` : `--step` armé par défaut."""
     from types import SimpleNamespace
 
-    return SimpleNamespace(
-        step=True,
-        convert_steplog=modes.get("convert_steplog", False),
-        replay=modes.get("replay", False),
-        close_stage=modes.get("close_stage", False),
-        test_only=modes.get("test_only", False),
+    defauts = dict(
+        step=True, convert_steplog=False, replay=False, close_stage=False, test_only=False
     )
+    return SimpleNamespace(**{**defauts, **overrides})
 
 
-def test_close_stage_avec_step_est_refuse() -> None:
-    """`--close-stage --step` : la clôture ne branche le StepLogger nulle part.
+@pytest.mark.parametrize(
+    "champ, drapeau",
+    [
+        ("close_stage", "--close-stage"),
+        ("convert_steplog", "--convert-steplog"),
+        ("replay", "--replay"),
+    ],
+)
+def test_step_est_refuse_sur_les_modes_sans_journal(champ: str, drapeau: str) -> None:
+    """Aucun des trois ne branche le StepLogger : `--step` n'y a qu'un effet DESTRUCTEUR.
 
-    Elle mesure via `evaluate_against_checkpoints`, qui n'a aucun paramètre `step_logger`. Le
-    seul effet de `--step` est donc d'ÉCRASER `step.log` — celui du run interrompu qu'on est en
-    train de clore — par l'en-tête du constructeur.
+    `--close-stage` mesure via `evaluate_against_checkpoints`, qui n'a aucun paramètre
+    `step_logger` ; `--replay` construit son propre `temp_steplog_for_replay.log` ;
+    `--convert-steplog` relit un journal déjà écrit. Le constructeur ouvrant `step.log` en
+    `'w'`, `--step` y écrase le journal du run interrompu qu'on est en train de clore — ou, sur
+    `--convert-steplog step.log`, le fichier SOURCE de la conversion demandée.
     """
     from ai.train import reject_step_without_step_log
 
-    with pytest.raises(ValueError, match=r"--step n'a pas de sens avec --close-stage"):
-        reject_step_without_step_log(_args_step(close_stage=True))
-
-
-def test_convert_steplog_et_replay_avec_step_sont_refuses() -> None:
-    """Les deux autres modes qui RELISENT un journal au lieu d'en produire un.
-
-    `--convert-steplog step.log --step` détruirait le fichier SOURCE de la conversion demandée.
-    """
-    from ai.train import reject_step_without_step_log
-
-    with pytest.raises(ValueError, match=r"--convert-steplog"):
-        reject_step_without_step_log(_args_step(convert_steplog=True))
-    with pytest.raises(ValueError, match=r"--replay"):
-        reject_step_without_step_log(_args_step(replay=True))
+    with pytest.raises(ValueError, match=re.escape(drapeau)):
+        reject_step_without_step_log(_args_step(**{champ: True}))
 
 
 def test_entrainement_et_test_only_acceptent_step() -> None:
     """VERT VACANT écarté : les deux modes qui branchent le logger ne sont PAS refusés.
 
     `--test-only` n'entraîne rien et doit pourtant écrire — c'est la façon documentée
-    (CLAUDE.md) de produire un `step.log` pour `ai/analyzer.py`.
+    (CLAUDE.md) de produire un `step.log` pour `ai/analyzer.py`. L'appel avec `test_only=True`
+    rougirait le jour où quelqu'un ajouterait `--test-only` à la liste des modes refusés.
     """
     from ai.train import reject_step_without_step_log
 
@@ -288,9 +288,7 @@ def test_sans_step_aucun_refus() -> None:
     """Sans `--step`, aucun journal n'est demandé : la garde ne doit jamais tomber."""
     from ai.train import reject_step_without_step_log
 
-    args = _args_step(close_stage=True)
-    args.step = False
-    reject_step_without_step_log(args)
+    reject_step_without_step_log(_args_step(step=False, close_stage=True))
 
 
 def test_la_garde_est_sur_le_vrai_chemin_avant_toute_ecriture(tmp_path, monkeypatch) -> None:
@@ -307,22 +305,16 @@ def test_la_garde_est_sur_le_vrai_chemin_avant_toute_ecriture(tmp_path, monkeypa
     --training-config x1_lineage »), qui ne dit rien de `--step`. L'assertion sur le témoin est
     un garde-fou de non-écriture, pas la sonde du câblage.
     """
-    import sys
-
     import ai.train as train
 
     temoin = tmp_path / "step.log"
     temoin.write_text("journal du run interrompu\n", encoding="utf-8")
     monkeypatch.setattr(train, "project_root", str(tmp_path))
-    monkeypatch.setattr(
-        sys, "argv",
-        [
-            "ai/train.py", "--close-stage", "--step",
-            "--agent", "ArmageddonAgent_x1", "--training-config", "x1_long", "--etape", "P1",
-        ],
-    )
 
     with pytest.raises(ValueError, match=r"--step n'a pas de sens avec --close-stage"):
-        train.main()
+        _lance_train_main(monkeypatch, [
+            "--close-stage", "--step",
+            "--agent", "ArmageddonAgent_x1", "--training-config", "x1_long", "--etape", "P1",
+        ])
 
     assert temoin.read_text(encoding="utf-8") == "journal du run interrompu\n"
