@@ -177,7 +177,9 @@ def test_les_compteurs_a_deux_niveaux_sont_sommes_aussi(_empty_stats):
         stats['shoot_invalid'][player]['engaged_non_close_quarters'] = 1
         stats['charge_invalid'][player]['distance_over_roll'] = 1
         stats['charge_invalid'][player]['advanced'] = 1
-        stats['charge_invalid'][player]['fled'] = 1
+        # La charge après repli se compte dans `charge_after_flee`, un compteur PLAT : la
+        # sous-clé `charge_invalid['fled']` n'a jamais eu d'écrivain et a été retirée.
+        stats['charge_after_flee'][player] = 1
     totals = an.error_totals(stats)
     # `shoot_invalid` n'est PAS exposé comme bucket : il est déjà DANS 'shooting'. L'exposer
     # invitait un appelant à sommer les deux et à compter ces fautes deux fois.

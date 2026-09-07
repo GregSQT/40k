@@ -23,7 +23,7 @@ from engine.combat_utils import (
 )
 from shared.data_validation import require_key
 from ai.analyzer_perfig import position_is_on_battlefield
-from ai.analyzer_rules import coverage_gaps, coverage_rows, load_rules_corpus, new_rule_usage_counters, SECTION_TO_BUCKET, VERDICT_NEVER_EXERCISED, VERDICT_UNDECIDABLE
+from ai.analyzer_rules import coverage_gaps, coverage_rows, load_rules_corpus, new_rule_usage_counters, note_rule_usage, SECTION_TO_BUCKET, VERDICT_NEVER_EXERCISED, VERDICT_UNDECIDABLE
 
 
 def _weapon_rule_usage_pair_total(weapon_rule_usage: Dict[Any, Any], pair_key: Any) -> int:
@@ -448,6 +448,10 @@ def _apply_damage_and_handle_death(
     # et restaurerait unit_hp à une valeur positive — faussant les snapshots des tours suivants.
     if target_id in unit_hp and unit_hp[target_id] <= 0:
         return
+    # Occasion jugée : des dégâts non nuls vont être appliqués et la présence de l'unité dans
+    # l'état reconstruit va être confrontée. Les deux sorties au-dessus (dégâts nuls, garde
+    # DEAD-before-FIGHT) n'appliquent rien, donc n'exercent rien.
+    note_rule_usage(stats, "PROJ.2.3.dmg_missing", player)
     if target_id not in unit_hp:
         # Exception 05 Attack sequence : blessure de la MÊME activation qui a détruit la
         # cible (même attaquant, même turn/phase) = « excess wound lost », pas une anomalie.
@@ -632,6 +636,10 @@ def _apply_damage_to_named_model(
     c'est précisément ce que la section 2.8 existe pour dire.
     """
     per_model = require_key(unit_model_hp, target_id)
+    # Le moteur vient de nommer un socle et l'état reconstruit est chargé : le verdict tombe
+    # dans les deux sens (socle connu / inconnu). Le compteur d'erreurs §2.8 est scalaire, sans
+    # camp — le joueur choisi ici n'est jamais lu séparément, seule la somme l'est.
+    note_rule_usage(stats, "PROJ.2.8.alloc_inconnue", player)
     if alloc_model_id not in per_model:
         # Artifact d'ordonnancement : le moteur flush les lignes DEAD avant la ligne d'attaque
         # correspondante. _resync_living_models retire le socle (via [MODELS:] post-mort) avant
@@ -720,6 +728,13 @@ def _track_unit_reappearance(
         return
     if unit_id not in unit_hp:
         return
+    # Occasion jugée : l'unité figure parmi les morts de l'épisode et ses PV sont connus — la
+    # comparaison qui suit tranche dans les deux sens. Noté AVANT elle, sinon le compteur ne
+    # vaudrait jamais que le compteur d'erreurs et la règle ne pourrait jamais sortir « OK ».
+    # Garde sur `unit_player` : le bloc de `parse_errors` plus bas ne doit pas être hoisté,
+    # il changerait le comportement pour des unités mortes parfaitement cohérentes.
+    if unit_id in unit_player:
+        note_rule_usage(stats, "PROJ.2.1.revived", require_key(unit_player, unit_id))
     if require_key(unit_hp, unit_id) <= 0:
         return
     if unit_id not in unit_player:
@@ -1583,7 +1598,12 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             _pair('charge_from_adjacent')
             + stats['charge_invalid'][1]['distance_over_roll'] + stats['charge_invalid'][2]['distance_over_roll']
             + stats['charge_invalid'][1]['advanced'] + stats['charge_invalid'][2]['advanced']
-            + stats['charge_invalid'][1]['fled'] + stats['charge_invalid'][2]['fled']
+            # `charge_after_flee` et NON `charge_invalid[*]['fled']` : cette sous-clé n'a jamais
+            # eu d'écrivain (grep = 0 incrément), alors que le producteur de la faute écrit dans
+            # `charge_after_flee` (charge_handler.py). Le total de charge ignorait donc toutes
+            # les charges après repli, et la ligne « Charges after flee » du rapport affichait 0
+            # quoi qu'il arrive.
+            + _pair('charge_after_flee')
             + _pair('charge_impact_wrong_threshold')
             + _pair('charge_impact_wrong_damage')
             + _pair('charge_roll_out_of_range')
@@ -2024,9 +2044,12 @@ def parse_step_log(filepath: str) -> Dict:
             1: {'total': 0, 'out_of_range': 0, 'engaged_non_close_quarters': 0},
             2: {'total': 0, 'out_of_range': 0, 'engaged_non_close_quarters': 0}
         },
+        # Pas de sous-clé `fled` : elle n'a jamais eu d'écrivain, et un terme mort dans un total
+        # n'est pas neutre — il entretient l'idée qu'une règle est surveillée. La charge après
+        # repli se compte dans `charge_after_flee`, où le handler l'écrit réellement.
         'charge_invalid': {
-            1: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0},
-            2: {'total': 0, 'distance_over_roll': 0, 'advanced': 0, 'fled': 0}
+            1: {'total': 0, 'distance_over_roll': 0, 'advanced': 0},
+            2: {'total': 0, 'distance_over_roll': 0, 'advanced': 0}
         },
         # Pile-in (12.03) et consolidation (12.08) : MAXIMUM DISTANCE 3", mêmes obstacles que
         # le move (03). Ces deux déplacements n'étaient contrôlés par rien.
@@ -3657,8 +3680,8 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_charge_adj > 0 and stats['first_error_lines']['charge_from_adjacent'][2]:
         first_err = stats['first_error_lines']['charge_from_adjacent'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_charge_flee = stats['charge_invalid'][1]['fled']
-    bot_charge_flee = stats['charge_invalid'][2]['fled']
+    agent_charge_flee = stats['charge_after_flee'][1]
+    bot_charge_flee = stats['charge_after_flee'][2]
     _table_row("Charges after flee:", _fmt_count(agent_charge_flee), _fmt_count(bot_charge_flee))
     agent_charge_flee_rule_used = sum(
         phase_special_rule_usage[k][1] for k in phase_special_rule_usage if k[0] == "charge_after_flee"

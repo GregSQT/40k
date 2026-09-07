@@ -5,6 +5,7 @@ from typing import Dict, Optional
 import pytest
 
 import ai.analyzer as an
+from ai.analyzer_rules import new_rule_usage_counters
 from tests.unit.ai._fabriques import entete_step_log, pose_etat_du_run
 
 
@@ -24,6 +25,7 @@ def test_unit_hp_and_damage_helpers() -> None:
         "first_error_lines": {"damage_missing_unit_hp": {1: None, 2: None}},
         "wounded_enemies": {1: set(), 2: set()},
         "current_episode_deaths": [],
+        "rule_usage": new_rule_usage_counters(),
     }
     unit_hp = {"u1": 3, "u2": 1}
     unit_models_alive = {"u1": 1, "u2": 1}
@@ -108,6 +110,7 @@ def test_reappearance_and_movement_history_helpers() -> None:
         "parse_errors": [],
         "unit_revived": {1: 0, 2: 0},
         "first_error_lines": {"unit_revived": {1: None, 2: None}},
+        "rule_usage": new_rule_usage_counters(),
     }
     unit_hp = {"u1": 2}
     unit_player = {"u1": 1}

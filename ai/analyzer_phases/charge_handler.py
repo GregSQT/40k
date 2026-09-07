@@ -135,6 +135,11 @@ def handle_charge(
         if charge_unit_id in state.units_advanced:
             charge_unit_type = require_key(state.unit_types, charge_unit_id)
             unit_rules = require_key(config.unit_rules_by_type, charge_unit_type)
+            # Occasion jugée : le type et les règles de datasheet viennent d'être résolus, et
+            # le verdict à trois issues (Waaagh! 08.04 / capacité déclarée / faute) suit sans
+            # renoncement. Plus haut, on compterait des charges d'unités qui n'ont jamais
+            # avancé — des occasions sur lesquelles ce contrôle ne regarde rien.
+            note_rule_usage(stats, "PROJ.1.3.apres_advance", player)
             # Waaagh! (08.04) : DEUXIÈME source d'éligibilité à la charge après Advance, à côté
             # de la capacité de datasheet — et elle ne vit dans AUCUN `unit_rules` (capacité de
             # FACTION, cf. Documentation/Reference/jeu/regles_unites.md). Le seul témoin dans le journal est le
@@ -231,6 +236,9 @@ def handle_charge(
                 stats['position_log_mismatch']['charge']['anchor_absorbed'] += 1
 
         # RULE: Dead unit charging
+        # Chaque ligne CHARGED est une occasion jugée : `died_before_phase` tranche sur
+        # `state.unit_deaths`, qui rend toujours un verdict.
+        note_rule_usage(stats, "PROJ.2.1.dead_charge", player)
         charge_unit_dead = charge_unit_id not in state.unit_hp or require_key(state.unit_hp, charge_unit_id) <= 0
         if charge_unit_dead:
             if died_before_phase(charge_unit_id, turn, phase, state.line_number, state.unit_deaths):
@@ -246,6 +254,11 @@ def handle_charge(
 
         # RULE: Charge from adjacent
         if charge_unit_id not in state.units_advanced:
+            # Occasion jugée : la primitive d'engagement qui suit rend un booléen depuis la
+            # position de départ lue sur la ligne elle-même — aucune abstention ne peut
+            # s'intercaler entre elle et le verdict. Reste DANS le garde : une unité ayant
+            # avancé n'est pas regardée par ce contrôle.
+            note_rule_usage(stats, "PROJ.1.3.depuis_engage", player)
             if is_within_engine_engagement_zone(
                 charge_unit_id,
                 state.unit_player,
@@ -271,6 +284,9 @@ def handle_charge(
 
         # RULE: Charge after flee
         if charge_unit_id in state.units_fled:
+            # Occasion jugée : l'unité s'est bien repliée ce tour, le verdict à deux issues
+            # (capacité déclarée / faute 09.07) suit sans renoncement possible.
+            note_rule_usage(stats, "PROJ.1.3.apres_repli", player)
             charge_unit_type_for_flee = require_key(state.unit_types, charge_unit_id)
             charge_unit_rules_for_flee = require_key(config.unit_rules_by_type, charge_unit_type_for_flee)
             if "charge_after_flee" in charge_unit_rules_for_flee:
@@ -282,6 +298,10 @@ def handle_charge(
                     stats['first_error_lines']['charge_after_flee'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
         # RULE: Charge a dead unit
+        # Exercice porté par le camp du CHARGEUR, comme le compteur d'erreurs : la faute lui
+        # appartient. Le compter sur la cible mettrait exercices et erreurs dans deux colonnes
+        # opposées.
+        note_rule_usage(stats, "PROJ.2.1.dead_charged", player)
         target_is_dead = charge_target_id not in state.unit_hp or require_key(state.unit_hp, charge_target_id) <= 0
         if target_is_dead:
             if died_before_phase(charge_target_id, turn, phase, state.line_number, state.unit_deaths):

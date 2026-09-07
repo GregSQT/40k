@@ -33,6 +33,7 @@ from typing import Any, Dict, List
 import pytest
 
 import ai.analyzer as an
+from ai.analyzer_rules import new_rule_usage_counters
 import ai.analyzer_core as core
 from ai.analyzer_config import AnalyzerConfig
 from ai.analyzer_state import AnalyzerState
@@ -144,6 +145,7 @@ def _damage(state, amount: int) -> None:
         "wounded_enemies": {1: set(), 2: set()}, "current_episode_deaths": [],
         "parse_errors": [], "damage_missing_unit_hp": {1: 0, 2: 0},
         "first_error_lines": {"damage_missing_unit_hp": {1: None, 2: None}},
+        "rule_usage": new_rule_usage_counters(),
     }
     an._apply_damage_and_handle_death(
         target_id=SQUAD, attacker_id="1", damage=amount, player=1, turn=1, phase="fight",

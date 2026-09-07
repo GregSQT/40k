@@ -32,6 +32,7 @@ import re
 from typing import Any, Dict, Optional, Tuple
 
 from ai.analyzer_core import ACTION_ABILITY_TOKENS
+from ai.analyzer_rules import note_rule_usage
 from shared.data_validation import require_key
 
 #: `Wound 4(4+) [TOKEN…]` — le jet, le seuil appliqué, et les tokens ATTACHÉS à ce segment.
@@ -345,6 +346,11 @@ def check_wound_threshold(
     if expected is None:
         stats[f"{key}_unverifiable"][attacker_player] += 1
         return
+    # Les deux abstentions (seuil non imprimé, seuil attendu irrésolu) sont franchies : la
+    # comparaison va avoir lieu. L'identifiant suit la phase, comme la clé du compteur.
+    note_rule_usage(
+        stats, "PROJ.1.4.blessure" if is_melee else "PROJ.1.2.blessure", attacker_player
+    )
     if expected == logged:
         return
     stats[f"{key}_mismatch"][attacker_player] += 1

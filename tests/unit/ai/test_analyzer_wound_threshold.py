@@ -23,6 +23,7 @@ import pytest
 
 import ai.analyzer_wound as aw
 from ai.analyzer_config import AnalyzerConfig
+from ai.analyzer_rules import new_rule_usage_counters
 from tests.unit.ai._fabriques import analyzer_config
 
 
@@ -226,6 +227,9 @@ def _stats() -> Dict[str, Any]:
     for k in keys:
         stats[f"{k}_mismatch"] = {1: 0, 2: 0}
         stats[f"{k}_unverifiable"] = {1: 0, 2: 0}
+    # `check_wound_threshold` note désormais l'occasion jugée : sans les compteurs d'exercices,
+    # la fabrique lève au lieu de mesurer le seuil que ce fichier vérifie.
+    stats["rule_usage"] = new_rule_usage_counters()
     return stats
 
 

@@ -13,6 +13,7 @@ Fix : `_apply_damage_and_handle_death` retourne immédiatement si `unit_hp[targe
 from __future__ import annotations
 
 from ai.analyzer import _apply_damage_and_handle_death
+from ai.analyzer_rules import new_rule_usage_counters
 
 
 def _make_ordered_living(unit_model_hp: dict):
@@ -34,6 +35,7 @@ def _make_stats() -> dict:
         "damage_missing_unit_hp": {1: 0, 2: 0},
         "first_error_lines": {"damage_missing_unit_hp": {1: None, 2: None}},
         "current_episode_deaths": [],
+        "rule_usage": new_rule_usage_counters(),
     }
 
 
