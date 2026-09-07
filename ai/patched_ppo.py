@@ -363,7 +363,9 @@ class PatchedMaskablePPO(MaskablePPO):
         _grad_sum = sum(_diag_grad_norms_mb0.values()) if _diag_grad_norms_mb0 else 0.0
         self.logger.record(
             "diag/grad_share_policy_mb0",
-            _diag_grad_norms_mb0["policy"] / _grad_sum if _grad_sum > 0.0 else _nan,
+            _diag_grad_norms_mb0["policy"] / _grad_sum
+            if _diag_grad_norms_mb0 is not None and _grad_sum > 0.0
+            else _nan,
         )
         self.logger.record("diag/returns_mean", float(self.rollout_buffer.returns.mean()))
         self.logger.record("diag/old_values_mean", float(self.rollout_buffer.values.mean()))
