@@ -360,11 +360,11 @@ class PatchedMaskablePPO(MaskablePPO):
         # MESUREE a 0.235 le 2026-09-06 (vf_coef 0.5) ; attendue vers 0.38 a vf_coef 0.25.
         # Somme nulle = aucun gradient sur les trois termes, cas ou la part n'est pas definie :
         # NaN, comme les diagnostics voisins quand leur capture n'a pas eu lieu.
-        _grad_sum = sum(_diag_grad_norms_mb0.values()) if _diag_grad_norms_mb0 else 0.0
+        _grad_sum = sum(_diag_grad_norms_mb0.values()) if _diag_grad_norms_mb0 is not None else 0.0
         self.logger.record(
             "diag/grad_share_policy_mb0",
             _diag_grad_norms_mb0["policy"] / _grad_sum
-            if _diag_grad_norms_mb0 and _grad_sum > 0.0
+            if _diag_grad_norms_mb0 is not None and _grad_sum > 0.0
             else _nan,
         )
         self.logger.record("diag/returns_mean", float(self.rollout_buffer.returns.mean()))
