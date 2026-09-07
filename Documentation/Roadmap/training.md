@@ -32,13 +32,29 @@ l'archive dont il reprend les poids : son score contre elle vaut 0.50 par identi
 `PoolEarlyStoppingCallback` la mesure ; hors de `[0.40, 0.60]`, le run est refusé **avant le
 premier épisode**. Les 2026-09-04 et 2026-09-05 ont chacun produit des heures d'entraînement sur
 une baseline aberrante (0,477 puis 0,118) lue comme une mesure.
+Il ne se pose qu'à `_stage_episode() == 0`, et pas sur la seule origine du compteur : après un
+`--resume-from <checkpoint>` de reprise sur crash, l'origine reste celle de l'archive source alors
+que le modèle a joué des milliers d'épisodes — le tester là arrêtait toute reprise dont la
+politique avait progressé hors de la fenêtre.
 
-**5. Toutes les décisions passent sur la moyenne des 3 dernières sondes** (`pool_eval/vs_<tag>_3ep`,
-déjà publiée). Promotion et arrêt si ≥ 0.55 contre le champion **et** ≥ 0.50 contre chaque autre
-membre après 50 000 épisodes d'étape ; arrêt pour destruction si < 0.40 contre le champion après
-20 000. Le gate de fin applique les mêmes seuils sur une moyenne de 3 blocs d'évaluation. Le pool
-**entier** est sondé, plus seulement le champion : une étape pouvait être promue en battant son
-prédécesseur immédiat tout en ayant régressé contre tout le reste.
+**5. Toutes les décisions passent sur la moyenne des `probe_window` dernières sondes**
+(`pool_eval/vs_<tag>_<probe_window>ep` — 3 aujourd'hui ; le tag porte la fenêtre réelle, il
+annonçait `_3ep` quelle que soit la valeur configurée). Promotion et arrêt si ≥ 0.55 contre le
+champion **et** ≥ 0.50 contre chaque autre membre après 50 000 épisodes d'étape ; arrêt pour
+destruction si < 0.40 contre le champion après 20 000. Le gate de fin applique les mêmes seuils sur
+une moyenne de 3 blocs d'évaluation, et un seuil de promotion **sous** le plancher du gate est
+refusé au chargement (sinon le run s'arrête en se déclarant promu sur un score que le gate
+refusera, et jette le budget non dépensé avec l'étape). Le pool **entier** est sondé, plus
+seulement le champion : une étape pouvait être promue en battant son prédécesseur immédiat tout en
+ayant régressé contre tout le reste. Une archive du pool écartée par l'évaluation **arrête le
+run** au lieu d'être signalée : sans elle, ni promotion ni destruction ne peuvent plus être
+décidées, et l'étape brûlait son budget entier pour une ligne ⚠️ par sonde.
+
+**6. Un verdict `destroy` est souverain : le gate ne le rejuge pas.** L'étape est refusée sans
+mesure. Sous `save_best_robust` (les profils du curriculum), le zip canonique est l'instantané
+robuste pris plus tôt dans le run — **d'autres poids que ceux jugés** : le gate pouvait donc
+l'accepter et le promouvoir, et `curriculum.log` portait `pool_stop_verdict: "destroy"` à côté de
+`gate_accepted: true`. Un verdict `promote`, lui, laisse le gate mesurer normalement.
 
 ⚠️ **`base_seed` de `evaluate_against_checkpoints` est désormais TIRÉ AU HASARD.** Il valait 42 en
 dur, donc deux évaluations d'un même modèle rejouaient les mêmes parties et rendaient le même score

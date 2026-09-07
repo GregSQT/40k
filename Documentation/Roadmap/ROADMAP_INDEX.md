@@ -86,8 +86,15 @@ disparaissent, une étape reprise ne déclare plus que `total_episodes`. `P00` e
 passe en `init: "new"`, E1/E2/E3 en `from:P0`). Un **verrou de parité** arrête le run quand la
 baseline d'ouverture contre l'archive reprise sort de `[0.40, 0.60]` — elle vaut 0.50 par
 identité, et deux nuits d'entraînement ont déjà été payées sur une baseline aberrante lue comme
-une mesure. Toutes les décisions (promotion, arrêt pour destruction, gate de fin) passent sur la
-**moyenne des 3 dernières sondes** et sur le pool ENTIER, plus seulement le champion.
+une mesure. Il ne se pose qu'à l'**épisode 0 de l'étape** : après un `--resume-from` de reprise
+sur crash, le modèle a déjà progressé et n'est plus l'archive source. Toutes les décisions
+(promotion, arrêt pour destruction, gate de fin) passent sur la **moyenne des `probe_window`
+dernières sondes** (3 aujourd'hui ; le tag TensorBoard `pool_eval/vs_<tag>_<n>ep` porte la
+fenêtre réelle) et sur le pool ENTIER, plus seulement le champion. Un verdict **`destroy` est
+souverain** : l'étape est refusée sans que le gate la mesure — sous `save_best_robust` le zip
+canonique est un instantané antérieur, donc un autre modèle que celui jugé, et le gate pouvait
+l'accepter et le promouvoir. Un seuil de promotion **sous** le plancher du gate est refusé au
+chargement du curriculum.
 ⚠️ `base_seed` de `evaluate_against_checkpoints` est désormais **tiré au hasard** : un gate n'est
 plus reproductible à l'identique, et les scores de `curriculum.log` antérieurs portent un
 échantillon unique et figé.
