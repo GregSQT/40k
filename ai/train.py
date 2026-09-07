@@ -6514,6 +6514,8 @@ def main():
                             f"{float(_early_stop_cfg['destroy_score_vs_champion']):.2f} apres "
                             f"{int(_early_stop_cfg['destroy_min_episodes'])} ep. ; pool sonde "
                             f"{[_l for _, _l in _pool_archives]}, n_eval_episodes={_pool_n_episodes}"
+                            f" ; champion a chaque sonde, pool entier 1 tour sur "
+                            f"{_pool_early_stop.full_pool_probe_every}"
                         )
                         if _parity_label is not None:
                             print(

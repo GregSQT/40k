@@ -176,7 +176,7 @@ def test_a_single_high_probe_does_not_promote(tmp_path):
 
     probe_values = iter([0.42, 0.45, 0.90])
 
-    with patch.object(cb, "_probe", side_effect=lambda: {"champion": next(probe_values)}):
+    with patch.object(cb, "_probe", side_effect=lambda full_pool=True: {"champion": next(probe_values)}):
         for episode in (600, 700, 800):
             assert _step_at(cb, episode) is True
 
@@ -194,7 +194,7 @@ def test_the_mean_above_both_floors_promotes_and_stops(tmp_path):
 
     probe_values = iter([0.65, 0.75])
 
-    with patch.object(cb, "_probe", side_effect=lambda: {"champion": next(probe_values)}):
+    with patch.object(cb, "_probe", side_effect=lambda full_pool=True: {"champion": next(probe_values)}):
         assert _step_at(cb, 600) is True, "une seule sonde : la moyenne EST la brute, rien à décider"
         assert cb.stop_verdict is None
         assert _step_at(cb, 700) is False, "moyenne 0.70 au-dessus de 0.60 : promotion"
@@ -216,7 +216,7 @@ def test_a_collapsing_mean_stops_the_run_for_destruction(tmp_path):
 
     probe_values = iter([0.32, 0.28])
 
-    with patch.object(cb, "_probe", side_effect=lambda: {"champion": next(probe_values)}):
+    with patch.object(cb, "_probe", side_effect=lambda full_pool=True: {"champion": next(probe_values)}):
         assert _step_at(cb, 220) is True, "une seule sonde : pas encore de moyenne"
         assert _step_at(cb, 250) is False
 
@@ -230,7 +230,7 @@ def test_nothing_is_decided_before_the_destruction_gate(tmp_path):
     archive.touch()
     cb, _ = _callback_with_tracker(archive)
 
-    with patch.object(cb, "_probe", side_effect=lambda: {"champion": 0.05}):
+    with patch.object(cb, "_probe", side_effect=lambda full_pool=True: {"champion": 0.05}):
         assert _step_at(cb, 100) is True
         assert _step_at(cb, 199) is True, "moyenne complète à 0.05, mais le palier n'est pas ouvert"
 
@@ -254,7 +254,7 @@ def test_an_incomplete_probe_stops_the_run(tmp_path):
     archive.touch()
     cb, _ = _callback_with_tracker(archive)
 
-    with patch.object(cb, "_probe", side_effect=lambda: {}):
+    with patch.object(cb, "_probe", side_effect=lambda full_pool=True: {}):
         with pytest.raises(RuntimeError, match="scores manquants"):
             _step_at(cb, 900)
 
@@ -288,7 +288,7 @@ def test_a_partially_complete_probe_stops_the_run_too(tmp_path):
     )
     cb.model = MagicMock()
 
-    with patch.object(cb, "_probe", side_effect=lambda: {"champion": 0.52}):
+    with patch.object(cb, "_probe", side_effect=lambda full_pool=True: {"champion": 0.52}):
         with pytest.raises(RuntimeError, match=r"scores manquants pour \['E1'\]"):
             _step_at(cb, 900)
 
@@ -309,7 +309,7 @@ def test_the_verdict_is_the_one_the_curriculum_computes(tmp_path):
     archive.touch()
     cb, _ = _callback_with_tracker(archive)
 
-    with patch.object(cb, "_probe", side_effect=lambda: {"champion": 0.01}):
+    with patch.object(cb, "_probe", side_effect=lambda full_pool=True: {"champion": 0.01}):
         _step_at(cb, 90_000)  # première sonde : la règle n'est pas encore consultée
         with patch("ai.training_callbacks.evaluate_pool_decision") as fake:
             fake.return_value = MagicMock(verdict=POOL_VERDICT_CONTINUE, reason="doublure")
@@ -320,3 +320,106 @@ def test_the_verdict_is_the_one_the_curriculum_computes(tmp_path):
     assert (stage_name, champion_label, stage_episodes) == ("P-test", "champion", 100_000)
     assert means == {"champion": pytest.approx(0.01)}
     assert cfg is cb.early_stop_cfg
+
+
+# ── DEUX CADENCES : le champion à chaque sonde, le reste du pool tous les N ──────────────────
+
+
+def _multi_pool_callback(tmp_path, every: int):
+    """Pool de trois membres, cadence de pool entier configurable."""
+    from ai.training_callbacks import PoolEarlyStoppingCallback
+
+    archives = []
+    for label in ("champion", "vieux_a", "vieux_b"):
+        path = tmp_path / f"{label}.zip"
+        path.touch()
+        archives.append((str(path), label))
+    cb = PoolEarlyStoppingCallback(
+        pool_archives=archives,
+        stage_name="P-test",
+        champion_label="champion",
+        early_stop_cfg={**POOL_EARLY_STOP_CFG, "full_pool_probe_every": every},
+        eval_freq_episodes=100,
+        n_eval_episodes=10,
+        training_config_name="test",
+        rewards_config_name="test",
+        metrics_tracker=None,
+        parity_label=None,
+        parity_range=(0.40, 0.60),
+    )
+    cb.model = MagicMock()
+    return cb
+
+
+def _record_probes(cb, scores: dict) -> list:
+    """Doublure de `_probe` qui note les labels demandés à chaque tour."""
+    demandes: list = []
+
+    def _probe(full_pool: bool = True) -> dict:
+        labels = [label for _, label in cb._archives_for(full_pool)]
+        demandes.append(labels)
+        return {label: scores[label] for label in labels}
+
+    cb._probe = _probe  # type: ignore[method-assign]
+    return demandes
+
+
+def test_only_the_champion_is_probed_between_two_full_pool_rounds(tmp_path):
+    """Les deux premiers tours sont pleins, puis un sur trois ; entre eux, le champion seul.
+
+    C'est la décision de coût du 2026-09-07 : le prix d'une sonde suivait la taille du pool, qui
+    croît d'une étape à l'autre — 117 000 épisodes d'évaluation bloquants pour 300 000 entraînés à
+    la dernière étape.
+    """
+    cb = _multi_pool_callback(tmp_path, every=3)
+    demandes = _record_probes(cb, {"champion": 0.52, "vieux_a": 0.52, "vieux_b": 0.52})
+
+    for episode in (100, 200, 300, 400, 500, 600):
+        _step_at(cb, episode)
+
+    plein = ["champion", "vieux_a", "vieux_b"]
+    assert demandes == [plein, plein, ["champion"], plein, ["champion"], ["champion"]]
+
+
+def test_the_verdict_still_reads_the_whole_pool_on_a_champion_only_round(tmp_path):
+    """Un tour champion seul décide quand même sur TOUT le pool, avec les dernières valeurs connues.
+
+    Ne passer que le champion à `evaluate_pool_decision` promouvrait sur son seul score — la
+    régression exacte que le pool entier a été introduit pour fermer.
+    """
+    cb = _multi_pool_callback(tmp_path, every=3)
+    # Le champion est franchement au-dessus des deux planchers ; `vieux_a` est SOUS
+    # `promote_score_vs_others` (0.55) et n'est pas mesuré au tour où le verdict tombe.
+    _record_probes(cb, {"champion": 0.90, "vieux_a": 0.20, "vieux_b": 0.90})
+
+    for episode in (600, 700, 800):
+        assert _step_at(cb, episode) is True, "vieux_a sous son plancher : aucune promotion"
+
+    assert cb.stop_verdict is None
+    assert cb._last_known_means["vieux_a"] == pytest.approx(0.20)
+
+
+def test_destruction_still_fires_at_its_own_gate_with_a_degraded_cadence(tmp_path):
+    """La destruction reste servie au deuxième tour, comme à cadence pleine.
+
+    Elle ne lit que le champion et doit couper vite. Si un seul tour plein ouvrait la série, aucun
+    membre n'aurait deux points avant le retour du pool entier, et le verdict attendrait
+    2 × `destroy_min_episodes`.
+    """
+    cb = _multi_pool_callback(tmp_path, every=3)
+    _record_probes(cb, {"champion": 0.30, "vieux_a": 0.90, "vieux_b": 0.90})
+
+    assert _step_at(cb, 220) is True, "une seule sonde : pas encore de moyenne"
+    assert _step_at(cb, 250) is False, "deuxième tour : la destruction doit pouvoir tomber"
+    assert cb.stop_verdict == POOL_VERDICT_DESTROY
+
+
+def test_every_one_keeps_probing_the_whole_pool(tmp_path):
+    """`full_pool_probe_every: 1` rend exactement le comportement d'avant la décision."""
+    cb = _multi_pool_callback(tmp_path, every=1)
+    demandes = _record_probes(cb, {"champion": 0.52, "vieux_a": 0.52, "vieux_b": 0.52})
+
+    for episode in (100, 200, 300, 400):
+        _step_at(cb, episode)
+
+    assert demandes == [["champion", "vieux_a", "vieux_b"]] * 4

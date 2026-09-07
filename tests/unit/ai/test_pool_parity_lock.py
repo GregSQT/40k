@@ -63,7 +63,7 @@ def _fake_baseline(callback, scores: Dict[str, float]) -> List[int]:
     """Branche `_probe` sur des scores fixes et rend la liste des appels."""
     appels: List[int] = []
 
-    def _probe() -> Dict[str, float]:
+    def _probe(full_pool: bool = True) -> Dict[str, float]:
         appels.append(callback._stage_episode())
         return dict(scores)
 

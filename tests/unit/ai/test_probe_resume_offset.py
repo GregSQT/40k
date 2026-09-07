@@ -82,9 +82,9 @@ def _count_pool_probes(callback: PoolEarlyStoppingCallback, score: float = 0.3) 
     """
     probed: List[int] = []
 
-    def fake_probe() -> Dict[str, float]:
+    def fake_probe(full_pool: bool = True) -> Dict[str, float]:
         probed.append(callback._current_episode())
-        return {label: score for _, label in callback.pool_archives}
+        return {label: score for _, label in callback._archives_for(full_pool)}
 
     callback._probe = fake_probe  # type: ignore[method-assign]
     return probed
@@ -135,7 +135,9 @@ def test_pool_decision_gates_count_episodes_from_the_stage_start():
     tracker = _tracker(P2_EPISODE_OFFSET + 10_000)
     callback.metrics_tracker = tracker
     # Scores très au-dessus des seuils de promotion : seul le compteur d'épisodes peut retenir.
-    callback._probe = lambda: {label: 0.99 for _, label in callback.pool_archives}  # type: ignore[method-assign]
+    callback._probe = lambda full_pool=True: {  # type: ignore[method-assign]
+        label: 0.99 for _, label in callback._archives_for(full_pool)
+    }
 
     assert callback._on_step() is True, (
         "10 000 épisodes D'ÉTAPE : sous promote_min_episodes lu en cumul de lignée (90 000), "
@@ -316,7 +318,7 @@ def test_pool_warm_start_fires_baseline_probe_at_stage_episode_zero():
 
     probe_calls: List[int] = []
 
-    def fake_probe() -> dict:
+    def fake_probe(full_pool: bool = True) -> dict:
         probe_calls.append(callback._stage_episode())
         return {label: 0.50 for _, label in callback.pool_archives}
 
@@ -338,7 +340,9 @@ def test_pool_warm_start_baseline_above_threshold_does_not_trigger_early_stop():
     episode_origin = P2_EPISODE_OFFSET
     callback = _pool_callback(episode_origin=episode_origin)
     callback.metrics_tracker = _tracker(episode_origin)
-    callback._probe = lambda: {label: 0.60 for _, label in callback.pool_archives}  # type: ignore[method-assign]
+    callback._probe = lambda full_pool=True: {  # type: ignore[method-assign]
+        label: 0.60 for _, label in callback._archives_for(full_pool)
+    }
 
     callback._on_training_start()
 
@@ -353,7 +357,7 @@ def test_pool_fresh_run_does_not_fire_baseline_probe():
     callback.metrics_tracker = _tracker(0)
 
     probe_calls: List[int] = []
-    callback._probe = lambda: probe_calls.append(0) or {}  # type: ignore[method-assign]
+    callback._probe = lambda full_pool=True: probe_calls.append(0) or {}  # type: ignore[method-assign]
 
     callback._on_training_start()
 
@@ -372,7 +376,7 @@ def test_pool_warm_start_baseline_is_idempotent_across_multiple_learn_calls():
 
     probe_calls: List[int] = []
 
-    def fake_probe() -> dict:
+    def fake_probe(full_pool: bool = True) -> dict:
         probe_calls.append(callback._stage_episode())
         return {label: 0.5 for _, label in callback.pool_archives}
 

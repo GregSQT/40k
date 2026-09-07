@@ -54,7 +54,9 @@
     "promote_score_vs_others": 0.50,
     "promote_min_episodes": 50000,
     "destroy_score_vs_champion": 0.40,
-    "destroy_min_episodes": 20000
+    "destroy_min_episodes": 20000,
+    "_doc_full_pool_probe_every": "CADENCE DE COUT, pas un seuil (2026-09-07). Le champion est sonde a CHAQUE sonde, les autres membres du pool un tour sur trois. Sonder tout le pool a chaque fois fait suivre le cout de la sonde a la TAILLE du pool, qui croit d'une etape a l'autre : a P10 (13 membres, 300 000 episodes, bot_eval_freq 10 000, 300 episodes par membre) cela fait 117 000 episodes d'evaluation BLOQUANTS sur le fil d'entrainement pour 300 000 episodes entraines, la ou la sonde champion seul d'avant le 2026-09-07 en coutait 9 000. A 3, il en reste ~48 600, soit -58 %. POURQUOI CE DECOUPAGE ET PAS UNE CADENCE UNIQUE DEGRADEE : les deux verdicts n'ont pas le meme besoin de fraicheur. La DESTRUCTION ne lit que le champion et doit couper vite — chaque sonde retardee est du budget brule sur une politique deja defaite. La PROMOTION lit tout le pool mais ne s'ouvre qu'a promote_min_episodes, et arreter un run trop tard coute une fraction de ce que coute l'arreter a tort. CE QUI N'EST PAS DEGRADE : le verdict lit toujours le pool ENTIER — les membres non sondes au tour courant gardent leur derniere moyenne connue, au plus trois sondes en arriere. Les DEUX PREMIERS tours restent pleins quelle que soit cette valeur : aucun verdict n'est rendu tant qu'un membre n'a pas deux points, et sans eux la destruction attendrait 40 000 episodes au lieu des 20 000 que son seuil demande. 1 = tout le pool a chaque sonde (comportement d'avant).",
+    "full_pool_probe_every": 3
   },
 
   "stages": {

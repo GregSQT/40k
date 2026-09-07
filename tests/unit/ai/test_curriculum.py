@@ -447,6 +447,7 @@ def _early_stop_block(**overrides) -> dict:
         "promote_min_episodes": 50000,
         "destroy_score_vs_champion": 0.40,
         "destroy_min_episodes": 20000,
+        "full_pool_probe_every": 3,
     }
     block.update(overrides)
     return block
@@ -871,6 +872,7 @@ _ES = {
     "promote_min_episodes": 50000,
     "destroy_score_vs_champion": 0.40,
     "destroy_min_episodes": 20000,
+    "full_pool_probe_every": 3,
 }
 
 

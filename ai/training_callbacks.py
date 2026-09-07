@@ -3055,12 +3055,31 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
 
 
 class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
-    """Sonde le pool à cadence fixe, arrête le run sur PROMOTION ou sur DESTRUCTION.
+    """Sonde le pool, arrête le run sur PROMOTION ou sur DESTRUCTION.
 
-    Évalue tous les membres du pool en un seul appel à `evaluate_against_checkpoints`
-    tous les `eval_freq_episodes` épisodes DE L'ÉTAPE, et lit les deux verdicts sur la MOYENNE
-    GLISSANTE des `probe_window` dernières sondes — celle que publie
-    `pool_eval/vs_<tag>_<probe_window>ep` —
+    DEUX CADENCES, décidées le 2026-09-07. Le champion est mesuré à CHAQUE sonde
+    (`eval_freq_episodes` épisodes d'étape) ; les autres membres du pool tous les
+    `full_pool_probe_every` sondes seulement. Le coût d'une sonde suit sinon la taille du pool, qui
+    croît d'une étape à l'autre : à la dernière étape (13 membres, 300 000 épisodes, cadence
+    10 000, 300 épisodes par membre) sonder tout le pool à chaque fois coûte 117 000 épisodes
+    d'évaluation BLOQUANTS sur le fil d'entraînement, pour 300 000 épisodes entraînés — la sonde
+    champion seul d'avant le 2026-09-07 en coûtait 9 000.
+
+    POURQUOI CE DÉCOUPAGE-LÀ, et pas une cadence unique dégradée. Les deux verdicts n'ont pas les
+    mêmes besoins de fraîcheur. La DESTRUCTION ne lit que le champion et doit couper vite : elle
+    s'ouvre à `destroy_min_episodes`, et chaque sonde retardée est du budget brûlé sur une
+    politique déjà défaite. La PROMOTION lit tout le pool mais ne s'ouvre qu'à
+    `promote_min_episodes` (50 000 épisodes d'étape, cinq sondes), et arrêter un run trop tard ne
+    coûte qu'une fraction de ce que coûte l'arrêter à tort.
+
+    CE QUI N'EST PAS DÉGRADÉ : le verdict lit toujours le pool ENTIER. Les moyennes des membres non
+    sondés au tour courant sont simplement leur DERNIÈRE valeur connue, au plus
+    `full_pool_probe_every` sondes en arrière. Ne passer que le champion à
+    `evaluate_pool_decision` promouvrait sur son seul score — la régression même que le pool entier
+    a été introduit pour fermer.
+
+    Les deux verdicts se lisent sur la MOYENNE GLISSANTE des `probe_window` dernières sondes —
+    celle que publie `pool_eval/vs_<tag>_<probe_window>ep` —
     et jamais sur la sonde brute. MESURE qui l'impose (2026-09-07) : deux appels de sonde sur un
     modèle figé rendent le même score au bit près, donc les sauts de ±5 points entre sondes
     voisines ne sont pas du bruit d'échantillonnage mais des blocs de parties corrélées qui
@@ -3146,6 +3165,7 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         self.champion_label = champion_label
         self.early_stop_cfg = early_stop_cfg
         self.probe_window = int(early_stop_cfg["probe_window"])
+        self.full_pool_probe_every = int(early_stop_cfg["full_pool_probe_every"])
         self.eval_freq_episodes = eval_freq_episodes
         self.n_eval_episodes = n_eval_episodes
         self.training_config_name = training_config_name
@@ -3168,12 +3188,27 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         # Garde idempotente : SB3 appelle `_on_training_start` à chaque `learn()` (cf. le
         # commentaire du mixin à la ligne ~2626) ; la baseline ne se tire qu'une seule fois.
         self._baseline_done: bool = False
+        # Compte les sondes de décision RENDUES (la baseline d'ouverture n'en est pas une). Le
+        # modulo est pris sur ce compteur et non sur l'épisode : après une reprise sur crash, la
+        # cadence rattrape (cf. `_next_probe_checkpoint`) et un modulo d'épisodes sauterait des
+        # tours de pool entier de façon imprévisible.
+        self._probe_count: int = 0
+        # Dernière moyenne connue de CHAQUE membre, y compris ceux non sondés au tour courant.
+        # C'est ce dictionnaire, et non les scores du tour, que lit `evaluate_pool_decision`.
+        self._last_known_means: Dict[str, float] = {}
 
-    def _probe(self) -> Dict[str, float]:
-        """Sauvegarde le modèle courant et évalue contre tous les membres du pool."""
+    def _archives_for(self, full_pool: bool) -> List[Tuple[str, str]]:
+        """Les archives à sonder ce tour : tout le pool, ou le seul champion."""
+        if full_pool:
+            return self.pool_archives
+        return [(path, label) for path, label in self.pool_archives if label == self.champion_label]
+
+    def _probe(self, full_pool: bool = True) -> Dict[str, float]:
+        """Sauvegarde le modèle courant et l'évalue contre les archives du tour."""
         from ai.bot_evaluation import evaluate_against_checkpoints
         from ai.vec_normalize_utils import save_vec_normalize
 
+        archives = self._archives_for(full_pool)
         fd, tmp_path = tempfile.mkstemp(suffix=".zip")
         os.close(fd)
         try:
@@ -3183,7 +3218,7 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
             try:
                 results = evaluate_against_checkpoints(
                     model_path=tmp_path,
-                    checkpoint_archives=self.pool_archives,
+                    checkpoint_archives=archives,
                     training_config_name=self.training_config_name,
                     rewards_config_name=self.rewards_config_name,
                     n_episodes=self.n_eval_episodes,
@@ -3200,7 +3235,7 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
                 raise
         finally:
             remove_model_with_companions(tmp_path)
-        return {label: float(results[label]) for _, label in self.pool_archives if label in results}
+        return {label: float(results[label]) for _, label in archives if label in results}
 
     def _on_training_start(self) -> None:
         # Sonde de référence à l'épisode 0 de l'étape, uniquement en warm start.
@@ -3306,9 +3341,19 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         self._next_probe_episode = _next_probe_checkpoint(
             stage_episode, self.eval_freq_episodes
         )
-        scores = self._probe()
+        # Les DEUX PREMIERS tours portent sur le pool entier quelle que soit la cadence, puis un
+        # tour sur `full_pool_probe_every`. Les deux premiers ne sont pas négociables : aucun
+        # verdict n'est rendu tant qu'un membre n'a pas deux points, donc avec un seul tour plein
+        # au départ la DESTRUCTION — qui ne lit pourtant que le champion — attendrait le retour
+        # du pool entier, soit deux fois `destroy_min_episodes` avec la cadence livrée.
+        full_pool = (
+            self._probe_count < 2
+            or self._probe_count % self.full_pool_probe_every == 0
+        )
+        self._probe_count += 1
+        scores = self._probe(full_pool=full_pool)
 
-        labels = [label for _, label in self.pool_archives]
+        labels = [label for _, label in self._archives_for(full_pool)]
         missing = [lbl for lbl in labels if lbl not in scores]
         if missing:
             # LÈVE, comme la baseline d'ouverture et comme le gate de fin d'étape
@@ -3327,18 +3372,26 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
                 "promotion ni de destruction ne peut plus être rendu."
             )
 
-        means = self._log_probe_scores(scores, current)
+        # Les moyennes du tour ECRASENT les valeurs connues, les autres membres gardent la leur :
+        # le verdict lit toujours le pool ENTIER, cf. la docstring de la classe.
+        self._last_known_means.update(self._log_probe_scores(scores, current))
+        means = dict(self._last_known_means)
         score_str = ", ".join(f"{lbl}={scores[lbl]:.3f}(→{means[lbl]:.3f})" for lbl in labels)
+        if not full_pool:
+            score_str += f" [champion seul, pool entier toutes les {self.full_pool_probe_every}]"
 
         # DEUX POINTS AU MOINS, pour chaque membre. À une seule sonde, la « moyenne » EST la
         # sonde brute : décider dessus rendrait le verdict à l'amplitude des bascules de blocs de
         # parties corrélées, ce que cette fenêtre existe pour amortir. C'est aussi exactement le
         # point où `pool_eval/vs_<tag>_<probe_window>ep` commence à publier — le verdict se lit
         # donc sur la même courbe que celle qu'on relit après coup.
-        if any(len(self._probe_score_history[lbl]) < 2 for lbl in labels):
+        # Sur TOUT le pool, pas sur les seuls membres sondés ce tour : un membre encore à un seul
+        # point est un membre dont la moyenne n'en est pas une, qu'il ait été mesuré ou non.
+        pool_labels = [label for _, label in self.pool_archives]
+        if any(len(self._probe_score_history.get(lbl, ())) < 2 for lbl in pool_labels):
             safe_print(
-                f"📊 Pool : {score_str} @ep{current} — première sonde de l'étape, pas encore de "
-                "moyenne : aucune décision."
+                f"📊 Pool : {score_str} @ep{current} — pas encore deux sondes sur chaque membre : "
+                "aucune décision."
             )
             return True
 

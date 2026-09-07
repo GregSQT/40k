@@ -83,6 +83,7 @@ _EARLY_STOP_REQUIRED_KEYS = (
     "promote_min_episodes",
     "destroy_score_vs_champion",
     "destroy_min_episodes",
+    "full_pool_probe_every",
 )
 
 #: Cles obligatoires du bloc `gate`.
@@ -368,11 +369,16 @@ def validate_exploiter_protocol(
 def validate_early_stop_block(block: Any, context: str) -> None:
     """Valide un bloc `early_stop` (racine ou par etape). Leve si une cle est absente ou invalide.
 
-    Les six cles decrivent DEUX decisions opposees, toutes deux prises sur la moyenne glissante
-    des `probe_window` dernieres sondes : la PROMOTION (l'etape a fini son travail, le budget
-    restant serait paye pour rien) et la DESTRUCTION (l'etape a defait la politique qu'elle avait
-    recue). Le seuil de destruction doit rester SOUS celui de promotion, sinon les deux branches
-    peuvent etre vraies au meme instant et le verdict dependrait de l'ordre des tests.
+    Les cles de SEUIL decrivent DEUX decisions opposees, toutes deux prises sur la moyenne
+    glissante des `probe_window` dernieres sondes : la PROMOTION (l'etape a fini son travail, le
+    budget restant serait paye pour rien) et la DESTRUCTION (l'etape a defait la politique qu'elle
+    avait recue). Le seuil de destruction doit rester SOUS celui de promotion, sinon les deux
+    branches peuvent etre vraies au meme instant et le verdict dependrait de l'ordre des tests.
+
+    `full_pool_probe_every` est une cle de COUT et non de seuil : elle dit tous les combien de
+    sondes le pool ENTIER est mesure, le champion l'etant a chaque fois. 1 = tout le pool a chaque
+    sonde. Elle existe parce que le cout d'une sonde suit la taille du pool, qui croit d'une etape
+    a l'autre — cf. `PoolEarlyStoppingCallback`, ou le chiffre est justifie.
     """
     if not isinstance(block, dict):
         raise TypeError(f"{context} doit etre un objet JSON.")
@@ -393,6 +399,9 @@ def validate_early_stop_block(block: Any, context: str) -> None:
     )
     require_non_negative_int(
         require_key(block, "destroy_min_episodes"), f"{context}.destroy_min_episodes"
+    )
+    require_positive_int(
+        require_key(block, "full_pool_probe_every"), f"{context}.full_pool_probe_every"
     )
     scores = {}
     for key in (

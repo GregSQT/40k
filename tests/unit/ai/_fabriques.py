@@ -449,6 +449,7 @@ POOL_EARLY_STOP_CFG: Dict[str, Any] = {
     "promote_min_episodes": 500,
     "destroy_score_vs_champion": 0.40,
     "destroy_min_episodes": 200,
+    "full_pool_probe_every": 1,
 }
 
 
