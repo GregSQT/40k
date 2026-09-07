@@ -104,11 +104,10 @@ def test_the_window_length_comes_from_the_config(tmp_path):
         archive, early_stop_cfg={**POOL_EARLY_STOP_CFG, "probe_window": 2}
     )
 
-    means: dict[str, float] | None = None
+    means: dict[str, float] = {}
     for i, v in enumerate([0.10, 0.20, 0.90]):
         means = cb._log_probe_scores({"champion": v}, episode=(i + 1) * 100)
 
-    assert means is not None
     assert means["champion"] == pytest.approx((0.20 + 0.90) / 2)
 
 
