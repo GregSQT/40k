@@ -129,6 +129,13 @@ def test_sb3_cesse_de_reconstruire_son_logger_quand_on_en_pose_un() -> None:
 
 _TRACKER_CALL = r"\.writer\.add_scalar"
 _SB3_CALL = r"\.logger\.record"
+#: Emetteurs a DEUX fenetres du tracker : chacun publie `X` et `X_<perf_window_fast>ep`. Ce
+#: second tag n'apparait dans aucun litteral — il est construit par f-string sur une variable
+#: (`f"{tag}_{fast_window}ep"`) — donc un releve qui ne lit que les litteraux ne peut pas le
+#: voir. C'est exactement par la qu'un doublon a survecu au controle : le callback ecrivait
+#: `game_critical/win_rate_100ep` en dur pendant que le tracker derive le meme nom de
+#: `game_critical/win_rate` des que la fenetre reactive vaut 100.
+_TRACKER_WINDOWED_CALLS = r"self\._emit_(?:windowed|game|ratio_of_means)"
 
 
 def _normalise(tag: str) -> str:
@@ -138,7 +145,11 @@ def _normalise(tag: str) -> str:
     deux courbes differentes alors qu'ils produisent les MEMES tags a l'execution — c'etait le
     cas, les deux ecrivains parcourant le meme `scenario_split_scores`.
     """
-    return re.sub(r"\{[^}]*\}", "*", tag)
+    tag = re.sub(r"\{[^}]*\}", "*", tag)
+    # Suffixe de fenetre reactive ramene a son gabarit : `_100ep` et `_250ep` designent la MEME
+    # courbe a deux reglages de `metrics_smoothing.perf_window_fast`. Comparer les chiffres
+    # ferait dependre le verdict du config du jour, alors que le doublon, lui, est structurel.
+    return re.sub(r"_\d+ep$", "_*ep", tag)
 
 
 def _tags_par_ecrivain(pattern: str) -> Dict[str, List[str]]:
@@ -158,14 +169,35 @@ def _tags_par_ecrivain(pattern: str) -> Dict[str, List[str]]:
     return trouves
 
 
+def _tags_derives_du_tracker() -> Dict[str, List[str]]:
+    """Tags que le tracker publie EN PLUS de leur nom nu : le doublon `X_<N>ep`.
+
+    Releve les appels aux emetteurs a deux fenetres et ajoute leur tag suffixe. Sans lui, le
+    controle du couple d'ecrivains ne voit qu'une moitie de ce que le tracker ecrit.
+    """
+    return {
+        f"{tag}_*ep": sites
+        for tag, sites in _tags_par_ecrivain(_TRACKER_WINDOWED_CALLS).items()
+    }
+
+
 def test_aucune_courbe_n_est_ecrite_par_les_deux_ecrivains() -> None:
     """Aucun tag n'est ecrit a la fois par le tracker et par le logger de SB3.
 
     Les deux ecrivains partagent desormais le dossier du run : un tag present des deux cotes y
     recevrait deux points par episode, sur deux abscisses differentes. Le controle est generique
     et attrapera le prochain doublon, pas seulement les vingt qui existaient.
+
+    Les tags DERIVES comptent comme des ecritures du tracker : `_emit_windowed` publie `X` et
+    `X_<perf_window_fast>ep`, ce second nom n'existant nulle part en litteral. La version
+    precedente n'en tenait pas compte et laissait passer `game_critical/win_rate_100ep`, ecrit
+    en dur par le callback a cote du meme nom derive de `game_critical/win_rate`.
     """
     tracker = _tags_par_ecrivain(_TRACKER_CALL)
+    derives = _tags_derives_du_tracker()
+    assert derives, "aucun emetteur a deux fenetres trouve : le motif de lecture est casse"
+    for _tag, _sites in derives.items():
+        tracker.setdefault(_tag, []).extend(_sites)
     sb3 = _tags_par_ecrivain(_SB3_CALL)
     assert tracker, "aucune ecriture tracker trouvee : le motif de lecture est casse"
     assert sb3, "aucune ecriture logger trouvee : le motif de lecture est casse"

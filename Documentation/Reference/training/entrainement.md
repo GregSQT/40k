@@ -676,7 +676,7 @@ tensorboard --logdir=./tensorboard/
 
 **Primary Metrics to Check Daily:**
 - `00_critical/a_bot_eval_combined` — **objectif principal** (compétence vs tous les bots)
-- `00_critical/b_win_rate_100ep` — tendance récente sur 100 épisodes
+- `00_critical/d_win_rate_100ep` — tendance récente sur 100 épisodes (doublon réactif du tag nu, lissé sur `perf_window_fast`)
 - `00_critical/g_approx_kl` — stabilité de la politique (<0.02 = sain)
 - `00_critical/h_entropy_loss` — niveau d'exploration (doit décroître progressivement)
 - `00_critical/e_explained_variance` — qualité de la value function (cible : >0.70 tôt, >0.85 tard)
