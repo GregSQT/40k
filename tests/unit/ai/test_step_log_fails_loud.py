@@ -21,10 +21,13 @@ Cycle rouge→vert :
 Le troisième verrou tient l'EXCLUSION : les écritures dans `debug.log` sous `if
 self.debug_mode` sont de l'instrumentation, leur `pass` est justifié et doit le rester.
 
-Le quatrième tient le PÉRIMÈTRE du contrôle (`step_log_required`) : `--close-stage`,
-`--convert-steplog` et `--replay` ne branchent le logger nulle part, les exiger ferait lever
-un mode qui a réussi. Retirer `and not args.close_stage` fait passer
-`test_close_stage_nexige_pas_de_step_log` au rouge.
+Le quatrième tient le PÉRIMÈTRE (`reject_step_without_step_log`) : `--close-stage`,
+`--convert-steplog` et `--replay` ne branchent le StepLogger nulle part, et `--step` n'y a
+qu'un effet — ÉCRASER `step.log` par l'en-tête du constructeur, qui ouvre le fichier en `'w'`.
+La combinaison est REFUSÉE avant le prologue, plutôt qu'ignorée (elle détruirait le journal du
+run interrompu, ou le fichier source d'un `--convert-steplog step.log`) et plutôt qu'exigée
+(`assert_step_log_written` ferait lever une clôture qui a promu l'étape). Retirer l'appel de la
+garde fait passer `test_la_garde_est_sur_le_vrai_chemin_avant_toute_ecriture` au rouge.
 """
 from __future__ import annotations
 
@@ -228,10 +231,10 @@ def test_main_ne_controle_pas_un_run_en_echec(tmp_path: Path, monkeypatch) -> No
     assert train.main() == 1
 
 
-# ── 4. le périmètre du contrôle : quels modes doivent avoir écrit ─────────────
+# ── 4. le périmètre : `--step` sur un mode qui ne journalise pas est REFUSÉ ────
 
 def _args_step(**modes: bool):
-    """Namespace minimal pour `step_log_required` : `--step` armé, un seul mode à la fois."""
+    """Namespace minimal pour `reject_step_without_step_log` : `--step` armé, un mode à la fois."""
     from types import SimpleNamespace
 
     return SimpleNamespace(
@@ -243,42 +246,83 @@ def _args_step(**modes: bool):
     )
 
 
-def test_close_stage_nexige_pas_de_step_log() -> None:
+def test_close_stage_avec_step_est_refuse() -> None:
     """`--close-stage --step` : la clôture ne branche le StepLogger nulle part.
 
-    Elle mesure via `evaluate_against_checkpoints`, qui n'a aucun paramètre `step_logger`.
-    Exiger un journal ferait lever `main()` APRÈS une étape promue, `curriculum.log` écrit et
-    TensorBoard copié — et la relance serait refusée (« étape DEJA promue »).
+    Elle mesure via `evaluate_against_checkpoints`, qui n'a aucun paramètre `step_logger`. Le
+    seul effet de `--step` est donc d'ÉCRASER `step.log` — celui du run interrompu qu'on est en
+    train de clore — par l'en-tête du constructeur.
     """
-    from ai.train import step_log_required
+    from ai.train import reject_step_without_step_log
 
-    assert step_log_required(_args_step(close_stage=True)) is False
-
-
-def test_convert_steplog_et_replay_nexigent_pas_de_step_log() -> None:
-    """Les deux autres modes qui RELISENT un journal au lieu d'en produire un."""
-    from ai.train import step_log_required
-
-    assert step_log_required(_args_step(convert_steplog=True)) is False
-    assert step_log_required(_args_step(replay=True)) is False
+    with pytest.raises(ValueError, match=r"--step n'a pas de sens avec --close-stage"):
+        reject_step_without_step_log(_args_step(close_stage=True))
 
 
-def test_entrainement_et_test_only_exigent_le_step_log() -> None:
-    """VERT VACANT écarté : les deux modes qui branchent le logger restent contrôlés.
+def test_convert_steplog_et_replay_avec_step_sont_refuses() -> None:
+    """Les deux autres modes qui RELISENT un journal au lieu d'en produire un.
+
+    `--convert-steplog step.log --step` détruirait le fichier SOURCE de la conversion demandée.
+    """
+    from ai.train import reject_step_without_step_log
+
+    with pytest.raises(ValueError, match=r"--convert-steplog"):
+        reject_step_without_step_log(_args_step(convert_steplog=True))
+    with pytest.raises(ValueError, match=r"--replay"):
+        reject_step_without_step_log(_args_step(replay=True))
+
+
+def test_entrainement_et_test_only_acceptent_step() -> None:
+    """VERT VACANT écarté : les deux modes qui branchent le logger ne sont PAS refusés.
 
     `--test-only` n'entraîne rien et doit pourtant écrire — c'est la façon documentée
     (CLAUDE.md) de produire un `step.log` pour `ai/analyzer.py`.
     """
-    from ai.train import step_log_required
+    from ai.train import reject_step_without_step_log
 
-    assert step_log_required(_args_step()) is True
-    assert step_log_required(_args_step(test_only=True)) is True
+    reject_step_without_step_log(_args_step())
+    reject_step_without_step_log(_args_step(test_only=True))
 
 
-def test_sans_step_aucun_controle() -> None:
-    """Sans `--step`, aucun journal n'est demandé : le contrôle ne doit jamais s'armer."""
-    from ai.train import step_log_required
+def test_sans_step_aucun_refus() -> None:
+    """Sans `--step`, aucun journal n'est demandé : la garde ne doit jamais tomber."""
+    from ai.train import reject_step_without_step_log
 
-    args = _args_step()
+    args = _args_step(close_stage=True)
     args.step = False
-    assert step_log_required(args) is False
+    reject_step_without_step_log(args)
+
+
+def test_la_garde_est_sur_le_vrai_chemin_avant_toute_ecriture(tmp_path, monkeypatch) -> None:
+    """CÂBLAGE : le refus tombe depuis `main()`, et AVANT que `step.log` ne soit touché.
+
+    Une garde correcte jamais appelée ne protège rien. Un `step.log` témoin est posé là où le
+    logger l'écrirait : `train.project_root` — et NON le `cwd`, que `os.path.join(project_root,
+    "step.log")` ignore, ce qui rendrait le témoin inatteignable et l'assertion vacante.
+    `StepLogger.__init__` l'ouvrirait en `'w'`, donc son contenu intact prouve que le refus
+    précède la construction du logger.
+
+    Ce que la MUTATION prouve, exactement : appel de la garde retiré, le `pytest.raises` tombe
+    au rouge — le refus vient alors d'une validation d'étape en aval (« elle exige
+    --training-config x1_lineage »), qui ne dit rien de `--step`. L'assertion sur le témoin est
+    un garde-fou de non-écriture, pas la sonde du câblage.
+    """
+    import sys
+
+    import ai.train as train
+
+    temoin = tmp_path / "step.log"
+    temoin.write_text("journal du run interrompu\n", encoding="utf-8")
+    monkeypatch.setattr(train, "project_root", str(tmp_path))
+    monkeypatch.setattr(
+        sys, "argv",
+        [
+            "ai/train.py", "--close-stage", "--step",
+            "--agent", "ArmageddonAgent_x1", "--training-config", "x1_long", "--etape", "P1",
+        ],
+    )
+
+    with pytest.raises(ValueError, match=r"--step n'a pas de sens avec --close-stage"):
+        train.main()
+
+    assert temoin.read_text(encoding="utf-8") == "journal du run interrompu\n"

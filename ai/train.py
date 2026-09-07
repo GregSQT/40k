@@ -1720,27 +1720,41 @@ def is_training_invocation(args) -> bool:
     )
 
 
-def step_log_required(args) -> bool:
-    """`--step` exige-t-il qu'un episode ait atteint `step.log` a la fin du run ?
+def reject_step_without_step_log(args) -> None:
+    """`--step` sur un mode qui ne journalise RIEN : refus, jamais un no-op silencieux.
 
-    Sonde de `assert_step_log_written`, appelee depuis `main()`. La question n'est PAS « ce mode
-    entraine-t-il » (cf. `is_training_invocation`) mais « ce mode branche-t-il le StepLogger sur
-    un moteur qui joue » : `--test-only` n'entraine rien et doit pourtant ecrire — c'est meme sa
-    facon documentee de produire un `step.log` a donner a `ai/analyzer.py`.
+    Le drapeau n'y est pas seulement inutile, il est DESTRUCTEUR : `StepLogger.__init__` ouvre
+    `step.log` en `'w'` des que `enabled` est vrai, et son seul effet sur ces modes est donc
+    d'ecraser le journal par l'en-tete du constructeur. Sur `--close-stage`, c'est le journal du
+    run interrompu qu'on est precisement en train de clore ; sur `--convert-steplog step.log`,
+    c'est le fichier SOURCE de la conversion demandee.
 
-    Les trois modes exclus ne branchent le logger NULLE PART. `--convert-steplog` et `--replay`
-    relisent un journal existant. `--close-stage` mesure via `evaluate_against_checkpoints`, qui
-    n'a aucun parametre `step_logger` : ses episodes se jouent hors du logger global. Sans cette
-    exclusion, un `--close-stage --step` qui a promu l'etape, ecrit `curriculum.log` et copie
-    TensorBoard sortirait quand meme en code 1 avec un traceback — et la relance serait refusee
-    (« etape DEJA promue »), l'operation n'etant pas idempotente.
+    Aucun des trois ne branche le logger global sur un moteur : `--close-stage` mesure via
+    `evaluate_against_checkpoints`, qui n'a aucun parametre `step_logger` ; `--replay` construit
+    son propre `temp_steplog_for_replay.log` ; `--convert-steplog` relit un journal deja ecrit.
+    Les accepter en les ignorant laisserait une commande demander un journal que rien n'ecrira,
+    et `assert_step_log_written` ferait alors lever un mode qui a REUSSI — sur `--close-stage`,
+    apres promotion de l'etape, ecriture de `curriculum.log` et copie TensorBoard, pour une
+    operation que la relance refuse (« etape DEJA promue »).
+
+    `--test-only` n'est PAS dans la liste : il n'entraine rien mais branche bien le logger, et
+    c'est la facon documentee (CLAUDE.md) de produire un `step.log` pour `ai/analyzer.py`.
     """
-    return bool(
-        args.step
-        and not args.convert_steplog
-        and not args.replay
-        and not args.close_stage
-    )
+    if not args.step:
+        return
+    modes_sans_journal = [
+        name for name, active in (
+            ("--close-stage", bool(args.close_stage)),
+            ("--convert-steplog", bool(args.convert_steplog)),
+            ("--replay", bool(args.replay)),
+        ) if active
+    ]
+    if modes_sans_journal:
+        raise ValueError(
+            f"--step n'a pas de sens avec {', '.join(modes_sans_journal)} : ces modes ne "
+            "branchent le StepLogger nulle part, et --step ne ferait qu'ECRASER step.log par "
+            "l'en-tete du constructeur. Retirer --step."
+        )
 
 
 def check_model_lifecycle(
@@ -5959,6 +5973,10 @@ def _run_main():
             "precedent), --append continue le modele existant."
         )
 
+    # AVANT le prologue, donc avant la construction du StepLogger : le refus doit tomber pendant
+    # qu'aucun fichier n'a encore ete touche, `step.log` compris.
+    reject_step_without_step_log(args)
+
     # AVANT le traitement de `--resume-from` et avant `check_model_lifecycle` : c'est l'etape
     # qui DECIDE de `--new` ou de `--resume-from`, donc les controles en aval doivent voir son
     # choix et pas la ligne de commande nue.
@@ -6164,7 +6182,9 @@ def _run_main():
             buffer_size=step_log_buffer_size,
             debug_mode=args.debug,
         )
-        _step_log_required = step_log_required(args)
+        # `reject_step_without_step_log` a deja ecarte les modes qui ne journalisent pas : ici,
+        # `--step` vaut demande de journal, sans exception.
+        _step_log_required = bool(args.step)
         
         # Sync configs to frontend automatically
         try:
