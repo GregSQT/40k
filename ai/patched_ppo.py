@@ -303,6 +303,10 @@ class PatchedMaskablePPO(MaskablePPO):
         else:
             approx_kl_mean = float("nan")
 
+        # Publié uniquement si target_kl est actif (approx_kl_divs renseigné).
+        # approx_kl_max > 1.5 × target_kl  ⟺  le break a été déclenché cet update.
+        approx_kl_max = float(np.max(approx_kl_divs)) if approx_kl_divs else None
+
         explained_var = explained_variance(
             self.rollout_buffer.values.flatten(),
             self.rollout_buffer.returns.flatten(),
@@ -313,6 +317,8 @@ class PatchedMaskablePPO(MaskablePPO):
         self.logger.record("train/policy_gradient_loss", pg_loss_mean)
         self.logger.record("train/value_loss", value_loss_mean)
         self.logger.record("train/approx_kl", approx_kl_mean)
+        if approx_kl_max is not None:
+            self.logger.record("train/approx_kl_max", approx_kl_max)
         self.logger.record("train/clip_fraction", clip_frac_mean)
         # Norme BRUTE, moyennee sur les minibatches de l'update, et part de ces minibatches ou
         # elle depassait `max_grad_norm`. La norme APRES ecretage n'est pas republiee : elle vaut
