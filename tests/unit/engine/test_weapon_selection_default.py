@@ -114,6 +114,45 @@ def test_a_model_declares_all_of_its_usable_weapons() -> None:
     assert sorted(i["weapon_index"] for i in intents) == [0, 1, 2]
 
 
+def test_the_action_squad_shoot_declares_a_single_combi_profile() -> None:
+    """► Multiple Weapon Profiles (renvoi de 04.01), verifie sur le CHEMIN DE PRODUCTION.
+
+    Les profils exclusifs d'un combi sont une seule arme physique : en declarer deux dans la
+    meme activation est illegal. `test_squad_shoot_declaration.py` verrouille la regle sur
+    `squad_declare_shoot` ; ce test-ci verifie que l'ACTION `squad_shoot` du moteur atteint
+    bien ce groupage — le defaut d'origine etait invisible aux tests de fonction parce que
+    personne ne verifiait le cablage.
+
+    ROUGE avant le fix : [0, 1, 2] — les deux profils du combi declares.
+    """
+    eng = _engine([
+        _unit_cfg(1, 1, [(10, 10)], rng_weapons=[
+            _weapon("plasma_std", rng=30, COMBI_WEAPON="plasma_pistol"),
+            _weapon("plasma_sup", rng=30, COMBI_WEAPON="plasma_pistol"),
+            _weapon("bolter", rng=30),
+        ]),
+        _unit_cfg(2, 2, [(20, 10)]),
+    ])
+    locked: List[List[Dict[str, Any]]] = []
+    real_lock = shared_utils.squad_lock_shoot
+
+    def _spy(gs: Dict[str, Any], sid: str) -> List[Dict[str, Any]]:
+        out = real_lock(gs, sid)
+        locked.append([dict(i) for i in out])
+        return out
+
+    with patch.object(shared_utils, "squad_lock_shoot", _spy):
+        eng._process_squad_action({
+            "action": "squad_shoot", "squad_id": "1",
+            "target_slot": 0, "shooting_type": "normal",
+        })
+
+    assert locked, "squad_lock_shoot jamais atteint : l'action ne passe plus par la declaration"
+    declared = sorted(i["weapon_index"] for i in locked[0])
+    # L'arme solo (2) tire ; du combi, un SEUL profil — celui d'index le plus bas.
+    assert declared == [0, 2]
+
+
 def test_a_weapon_out_of_range_is_simply_not_declared() -> None:
     """Discrimination : seules les armes qui atteignent une cible sont déclarées."""
     eng = _engine([

@@ -97,6 +97,11 @@ qui PORTE l'arme, mais il était interrogé sous le type d'ESCOUADE, qui ne déc
 Résolu depuis par les model-types de `[SHOOTER_MODELS:]` — **0 → 2004 exercices, 0 → 500 erreurs**.
 Le grain est la FIGURINE : le profil engage le socle qui tire, pas l'escouade.
 
+Ces **500 erreurs n'étaient pas des faux positifs** : le moteur déclarait réellement les deux
+profils d'un même combi dans une seule activation. Cause corrigée le 2026-09-07 dans
+`squad_declare_shoot` (cf. `ROADMAP_INDEX.md`, correctifs hors chantier du jour) — comme tout bug
+moteur, **invisible sur un journal déjà écrit** : à re-mesurer au prochain run, attendu 0.
+
 **Ce que ce prédicat ne ferme pas, et pourquoi.** Les 7 lignes restantes ne dépendent pas d'un
 roster mais d'un ÉVÉNEMENT qui ne s'est pas produit : personne ne s'est replié PUIS n'a tiré
 (`PROJ.1.2.apres_repli`), n'a avancé PUIS chargé (`PROJ.1.3.apres_advance`), aucune unité n'est
