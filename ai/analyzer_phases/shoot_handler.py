@@ -234,6 +234,12 @@ def handle_shoot(
     )
 
     # RULE: Dead unit shooting
+    # Garde nécessaire : ici, HP inconnus font retomber `shooter_is_dead` sur False sans rien
+    # avoir mesuré (une unité repartie en réserve voit son entrée supprimée). C'est l'asymétrie
+    # assumée avec `wait`/`advance`, où l'absence de HP vaut « mort » puis se discrimine sur
+    # `unit_deaths` — là-bas il n'y a pas d'abstention silencieuse, donc pas de garde.
+    if shooter_id in state.unit_hp:
+        note_rule_usage(stats, "PROJ.2.1.dead_shoot", player)
     shooter_is_dead = shooter_id in state.unit_hp and require_key(state.unit_hp, shooter_id) <= 0
     if shooter_is_dead:
         is_false_positive = False
@@ -262,6 +268,9 @@ def handle_shoot(
 
     # RULE: Shoot after flee
     if str(shooter_id) in state.units_fled:
+        # Occasion jugée : l'unité s'est repliée ce tour, et les règles de sa datasheet vont
+        # trancher entre capacité déclarée et faute 09.07.
+        note_rule_usage(stats, "PROJ.1.2.apres_repli", player)
         shooter_unit_type_for_flee = require_key(state.unit_types, shooter_id)
         shooter_unit_rules_for_flee = require_key(config.unit_rules_by_type, shooter_unit_type_for_flee)
         if "shoot_after_flee" in shooter_unit_rules_for_flee:
@@ -290,6 +299,10 @@ def handle_shoot(
     shooter_actual_player_int = int(shooter_actual_player) if shooter_actual_player is not None else None
     target_player = state.unit_player.get(target_id) if target_id in state.unit_player else None
     target_player_int = int(target_player) if target_player is not None else None
+    # Le camp de la cible est la seule donnée qui peut manquer ; l'égalité qui suit ne fait que
+    # trier les fautifs. Exercice porté par le camp du TIREUR, comme le compteur d'erreurs.
+    if target_id in state.unit_player and shooter_actual_player_int is not None:
+        note_rule_usage(stats, "PROJ.1.2.allie", shooter_actual_player_int)
     if target_id in state.unit_player and shooter_actual_player_int is not None and target_player_int == shooter_actual_player_int:
         stats['shoot_at_friendly'][shooter_actual_player] += 1
         if stats['first_error_lines']['shoot_at_friendly'][shooter_actual_player] is None:
@@ -492,6 +505,10 @@ def handle_shoot(
                         state.combi_profile_usage[shooter_id][combi_key] = set()
                     combi_profiles = state.combi_profile_usage[shooter_id][combi_key]
                     combi_profiles.add(weapon_name_for_limits)
+                    # Occasion jugée : le jeu de profils du combi vient d'être constitué et va
+                    # être confronté. Restera à 0 tant qu'aucun roster joué ne porte de combi —
+                    # « JAMAIS EXERCÉE » sera alors le verdict honnête.
+                    note_rule_usage(stats, "PROJ.1.2.combi", require_key(state.unit_player, shooter_id))
                     conflict_key = (state.current_episode_num, turn, shooter_id, combi_key)
                     if len(combi_profiles) > 1 and conflict_key not in state.combi_conflicts_seen:
                         shooter_player_for_stats = require_key(state.unit_player, shooter_id)
@@ -614,6 +631,11 @@ def handle_shoot(
                     config.blast_by_weapon_global, n_shooter_models,
                     frozen_target.models_alive,
                 )
+                # `additive_rule_extra_dice` rend `(0, None)` quand le token est absent, ce qui
+                # est indistinguable d'un token valide sans dés : seule la PRÉSENCE du token
+                # prouve que le X journalisé a été confronté à celui du registre.
+                if re.search(r'\[BLAST:\d+\]', action_desc, re.IGNORECASE):
+                    note_rule_usage(stats, "PROJ.1.2.blast", shooter_player_for_stats)
                 if blast_error is not None:
                     stats['blast_x_mismatch'][shooter_player_for_stats] += 1
                     if stats['first_error_lines']['blast_x_mismatch'][shooter_player_for_stats] is None:
@@ -846,6 +868,11 @@ def handle_shoot(
         target_is_monster_or_vehicle=target_is_monster_or_vehicle,
         weapon_is_close_quarters=is_close_quarters,
     )
+    # `target_engaged` retombe silencieusement sur False quand la cible n'a ni position ni camp
+    # connus : `target_engagement_args` est exactement le témoin que la mesure d'engagement a
+    # bien eu lieu, et sans elle le verdict ne peut pas se déclencher.
+    if target_engagement_args is not None:
+        note_rule_usage(stats, "PROJ.1.2.engage_cible", player)
     if engagement_verdict.target_engaged_untargetable:
         stats['shoot_at_engaged_enemy'][player] += 1
         if stats['first_error_lines']['shoot_at_engaged_enemy'][player] is None:
@@ -881,6 +908,9 @@ def handle_shoot(
         # 144 faux positifs mesurés sur un run de 600 épisodes. Troisième occurrence de la famille
         # « ancre vs par-figurine », après le contrôle LoS et le fight non-adjacent.
         if is_close_quarters:
+            # Occasion jugée : arme [CLOSE-QUARTERS] reconnue, profil résolu et position de la
+            # cible connue (le gate ci-dessus), et l'engagement du tireur a été mesuré.
+            note_rule_usage(stats, "PROJ.1.2.cq_non_engage", player)
             if shooter_engaged_with_target:
                 stats['close_quarters_shots'][player]['engaged_target'] += 1
             else:
@@ -899,6 +929,9 @@ def handle_shoot(
             # 10.06 : un tireur MONSTER/VEHICLE engagé tire avec TOUTES ses armes sur l'unité
             # avec laquelle il est engagé — l'arme non-[CLOSE_QUARTERS] au contact est légale
             # pour lui (elle subit le -1, que le moteur applique déjà).
+            # Branche jumelle (arme non-CQ) du même gate : l'engagement du tireur a été mesuré
+            # plus haut, le verdict 10.06 tombe ici dans les deux sens.
+            note_rule_usage(stats, "PROJ.1.2.eng_non_cq", player)
             if engagement_verdict.engaged_with_non_close_quarters:
                 stats['engaged_shot_with_non_close_quarters_weapon'][player] += 1
                 stats['shoot_invalid'][player]['engaged_non_close_quarters'] += 1
@@ -971,9 +1004,17 @@ def handle_shoot(
                     # le plus proche rendrait peut-être le tir légal. Non vérifiable.
                     stats['shoot_range_unverifiable'][player] += 1
                 else:
+                    note_rule_usage(stats, "PROJ.1.2.portee", player)
                     stats['shoot_invalid'][player]['out_of_range'] += 1
                     if stats['first_error_lines']['shoot_invalid'][player] is None:
                         stats['first_error_lines']['shoot_invalid'][player] = {'episode': state.current_episode_num, 'line': line.strip()}
+            else:
+                # Cible dans la portée : verdict rendu, donc occasion jugée. Il est sain même
+                # sur un sous-ensemble de socles — un minimum pris sur moins de socles ne peut
+                # que majorer la distance, donc jamais transformer un tir illégal en légal.
+                # Les deux branches au-dessus sont les abstentions, comptées séparément par
+                # `shoot_range_unverifiable` (la ligne « ↳ portees non jugees » du rapport).
+                note_rule_usage(stats, "PROJ.1.2.portee", player)
 
     # Track shots after advance
     if shooter_id in state.units_advanced:
@@ -1070,6 +1111,9 @@ def handle_shoot(
         _torrent_m = re.search(r'\[TORRENT\]', action_desc, re.IGNORECASE)
         if _torrent_m:
             stats['weapon_rule_usage'][("TORRENT", weapon_key)][pl_int] += 1
+            # Sous le gate `weapon_found` : une ligne dont l'arme n'est pas résolue n'est jamais
+            # jugée, et le compteur d'erreurs a le même angle mort — les deux restent alignés.
+            note_rule_usage(stats, "PROJ.1.2.torrent", pl_int)
             from ai.analyzer_hit import HIT_SEGMENT_RE as _HIT_RE
             if _HIT_RE.search(action_desc):
                 stats['torrent_wrong_hit'][pl_int] += 1
@@ -1083,6 +1127,7 @@ def handle_shoot(
         _lethal_m = re.search(r'\[LETHAL HITS\]', action_desc, re.IGNORECASE)
         if _lethal_m:
             stats['weapon_rule_usage'][("LETHAL_HITS", weapon_key)][pl_int] += 1
+            note_rule_usage(stats, "PROJ.1.2.lethal_hits", pl_int)
             if re.search(r'\bWound\s+\d+\(\d+\+\)', action_desc):
                 stats['lethal_hits_wrong_wound'][pl_int] += 1
                 if stats['first_error_lines']['lethal_hits_wrong_wound'][pl_int] is None:
@@ -1160,6 +1205,9 @@ def handle_wait(
     wait_unit_match = re.search(r'Unit (\d+)', action_desc)
     if wait_unit_match:
         wait_unit_id = wait_unit_match.group(1)
+        # Le `if wait_unit_match` est l'abstention (ligne WAIT sans identifiant lisible) : à
+        # l'intérieur, la chronologie des morts est consultée et tranche.
+        note_rule_usage(stats, "PROJ.2.1.dead_wait", player)
         wait_unit_dead = wait_unit_id not in state.unit_hp or require_key(state.unit_hp, wait_unit_id) <= 0
         if wait_unit_dead:
             unit_died_before_wait = False
@@ -1454,6 +1502,9 @@ def handle_advance(
             stats['position_log_mismatch']['advance']['anchor_absorbed'] += 1
 
     # RULE: Dead unit advancing
+    # Le seul point d'abstention du handler (échec de parse) est plus haut et sort en `return` ;
+    # arrivé ici, la chronologie des morts est réellement confrontée.
+    note_rule_usage(stats, "PROJ.2.1.dead_advance", player)
     advance_unit_dead = advance_unit_id not in state.unit_hp or require_key(state.unit_hp, advance_unit_id) <= 0
     if advance_unit_dead:
         unit_died_before_advance = False
@@ -1530,6 +1581,9 @@ def handle_advance(
             advance_budget, advance_is_fly,
             state.wall_hexes, occupied_positions, enemy_adjacent_hexes,
         )
+        # Occasion jugée : budget M+D6 (moins le vol) calculé et confronté par figurine. La
+        # branche sans `[Roll:]` est l'abstention, et elle est en dehors de ce `else`.
+        note_rule_usage(stats, "PROJ.1.2.advance_budget", player)
         if adv_over:
             stats['move_distance_over_limit']['advance'][player] += 1
             if stats['first_error_lines']['move_distance_over_limit']['advance'][player] is None:
@@ -1537,6 +1591,13 @@ def handle_advance(
                     'episode': state.current_episode_num, 'line': line.strip()
                 }
 
+    # Ces deux règles ne gouvernent QUE la phase de tir : `units_advanced` et `units_shot` sont
+    # purgés à chaque changement de tour, donc un ADVANCE en phase de mouvement ne peut
+    # structurellement rien suivre. Compter ces lignes gonflerait les exercices d'occasions
+    # vides — même raisonnement que le garde `len(models) > 1` de 03.03.
+    if phase == 'SHOOT':
+        note_rule_usage(stats, "PROJ.1.2.double_advance", player)
+        note_rule_usage(stats, "PROJ.1.2.advance_post_tir", player)
     if phase == 'SHOOT' and advance_unit_id in state.units_advanced:
         stats['advance_twice_in_shoot_phase'][player] += 1
         if stats['first_error_lines']['advance_twice_in_shoot_phase'][player] is None:
@@ -1559,6 +1620,9 @@ def handle_advance(
     positions_at_advance_reconciled = dict(positions_at_advance)
 
     # RULE: Advance from adjacent
+    # La primitive d'engagement rend toujours un verdict (repli sur l'ancre quand les socles
+    # manquent) : chaque ADVANCE parsé est donc une occasion jugée.
+    note_rule_usage(stats, "PROJ.1.2.advance_engage", player)
     from ai.analyzer_perfig import surviving_start_models
     if is_within_engine_engagement_zone(
         advance_unit_id,

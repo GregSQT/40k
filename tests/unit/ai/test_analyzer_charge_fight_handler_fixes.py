@@ -199,14 +199,15 @@ def test_charge_after_flee_rule_not_double_counted(tmp_path):
 
 
 def test_charge_after_flee_with_rule_no_invalid_charge(tmp_path):
-    """VERROU F3b : unit avec charge_after_flee ne doit pas incrémenter charge_invalid.
+    """VERROU F3b : une unité qui PORTE charge_after_flee ne doit pas être comptée fautive.
 
-    Vérifie qu'après suppression du premier bloc, `charge_invalid['fled']` reste à 0
-    (la règle autorise la charge — il ne doit pas y avoir de comptage d'infraction).
+    Le compteur lu était `charge_invalid['fled']`, qui n'a jamais eu d'écrivain : l'assertion
+    était donc vraie quoi que fasse le code. Elle porte désormais sur `charge_after_flee`, où
+    le handler écrit réellement la faute — le test ne peut plus passer par construction.
     """
     stats = _f3_log(tmp_path)
-    fled_invalid = stats["charge_invalid"][1]["fled"]
+    fled_invalid = stats["charge_after_flee"][1]
     assert fled_invalid == 0, (
-        f"charge_invalid['fled'] doit être 0 pour un lieutenant avec charge_after_flee, "
+        f"charge_after_flee doit être 0 pour un lieutenant qui porte la capacité, "
         f"obtenu {fled_invalid}"
     )

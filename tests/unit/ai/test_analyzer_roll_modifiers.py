@@ -23,6 +23,7 @@ from typing import Any, Dict
 
 import ai.analyzer_hit as ah
 import ai.analyzer_wound as aw
+from ai.analyzer_rules import new_rule_usage_counters
 from ai.analyzer_state import AnalyzerState
 from tests.unit.ai._fabriques import analyzer_config
 
@@ -110,7 +111,11 @@ def _stats() -> Dict[str, Any]:
             "shoot_wound_threshold_mismatch": {1: None, 2: None},
             "charge_roll_out_of_range": {1: None, 2: None},
         },
-        "rule_usage": {"PROJ.1.3.charge_roll_bonus": {1: 0, 2: 0}},
+        # Compteurs d'exercices AU COMPLET, pas la seule règle que ce fichier interroge :
+        # `note_rule_usage` refuse un identifiant absent du corpus reconstruit, et les contrôles
+        # de seuil notent désormais le leur. Un dictionnaire réduit ferait lever la fabrique
+        # au lieu de mesurer ce que le test annonce.
+        "rule_usage": new_rule_usage_counters(),
     }
 
 

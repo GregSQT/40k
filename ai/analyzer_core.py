@@ -458,13 +458,26 @@ def _apply_state_snapshot(state: AnalyzerState, config: AnalyzerConfig, payload:
             continue
         seen_units.add(uid)
 
+        # Occasions jugées, grain UNITÉ pour ces deux règles — celui de leurs compteurs
+        # d'erreurs. `unit_player` peut manquer précisément dans le cas `alive_missed` (unité
+        # jamais vue en entête) : l'attribution de camp est alors abandonnée, sans perte, le
+        # compteur d'erreurs §2.8 étant un scalaire sans camp.
+        _resync_player = state.unit_player.get(uid)  # get allowed : unité jamais vue en entête
+        if _resync_player is not None:
+            note_rule_usage(stats, "PROJ.2.8.sur_tuee", _resync_player)
+            note_rule_usage(stats, "PROJ.2.8.fantome", _resync_player)
         if state.unit_hp.get(uid, 0) <= 0:  # get allowed : absente == inconnue == pas vivante
             stats['state_resync']['alive_missed'] += 1
         known = state.positions_by_model.get(uid)  # get allowed : unité jamais vue par socle
         if known:
             for mid, pos in models.items():
-                if mid in known and known[mid] != pos:
-                    stats['state_resync']['pos_mismatch'] += 1
+                # Grain FIGURINE : c'est celui du compteur d'erreurs. Le noter par unité
+                # rendrait le ratio erreurs/exercices ininterprétable.
+                if mid in known:
+                    if _resync_player is not None:
+                        note_rule_usage(stats, "PROJ.2.8.position", _resync_player)
+                    if known[mid] != pos:
+                        stats['state_resync']['pos_mismatch'] += 1
 
         state.positions_by_model[uid] = models
         state.heights_by_model[uid] = heights
@@ -485,6 +498,13 @@ def _apply_state_snapshot(state: AnalyzerState, config: AnalyzerConfig, payload:
         known_models = state.positions_by_model.get(uid)  # get allowed
         if not known_models or not any(position_is_on_battlefield(pos) for pos in known_models.values()):
             continue
+        # Second site de `PROJ.2.8.fantome` : une unité que l'instantané ne montre plus, après
+        # le `continue` qui écarte le hors-table. Le site jumeau au-dessus note le verdict
+        # inverse (« vue, donc pas fantôme ») — sans lui, exercices et erreurs seraient égaux
+        # et la règle ne pourrait jamais sortir « OK ».
+        _ghost_player = state.unit_player.get(uid)  # get allowed : unité jamais vue en entête
+        if _ghost_player is not None:
+            note_rule_usage(stats, "PROJ.2.8.fantome", _ghost_player)
         stats['state_resync']['dead_missed'] += 1
         state.unit_hp[uid] = 0
         state.unit_models_alive[uid] = 0
@@ -890,6 +910,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 if deploy_phase == 'DEPLOYMENT':
                     continue
                 # 20.03 — les réserves stratégiques ne peuvent arriver qu'à partir du round 2.
+                # Le `continue` ci-dessus a écarté les lignes de DÉPLOIEMENT : ce qui reste est
+                # une arrivée de réserves, et le round est connu — le verdict tombe des deux
+                # côtés.
+                note_rule_usage(stats, "PROJ.1.1.reserves_too_early", player)
                 if deploy_turn == 1:
                     stats['reserves_too_early'][player] += 1
                     if stats['first_error_lines']['reserves_too_early'][player] is None:
@@ -1438,6 +1462,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         _pile_in_seen = state.pile_in_seen.setdefault(
                             (_pile_in_phase_id, int(player)), set()
                         )
+                        # L'ensemble de la phase vient d'être résolu : le doublon est jugeable
+                        # dans les deux sens.
+                        note_rule_usage(stats, "PROJ.1.4.double_pile_in", int(player))
                         if actor_id in _pile_in_seen:
                             stats['fight_double_pile_in'][int(player)] += 1
                             _pile_in_first = require_key(
@@ -1967,7 +1994,17 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 for t in _all_unit_types
                             )
                             # `_all_unit_types` vide = données absentes du log ; pas de
-                            # faux positif dans ce cas, le contrôle ne peut pas aboutir.
+                            # faux positif dans ce cas, le contrôle ne peut pas aboutir. C'est
+                            # donc là que se situe l'abstention, et l'exercice se note juste
+                            # après — sur la règle de la phase courante, comme le compteur
+                            # d'erreurs choisit sa clé.
+                            if _all_unit_types:
+                                note_rule_usage(
+                                    stats,
+                                    "PROJ.1.4.hazardous" if phase.upper() == 'FIGHT'
+                                    else "PROJ.1.2.hazardous",
+                                    player,
+                                )
                             if _all_unit_types and not _has_hazardous:
                                 _hz_key = (
                                     'hazardous_no_hazardous_weapon_fight'

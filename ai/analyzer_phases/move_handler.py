@@ -444,6 +444,11 @@ def _handle_move(state, config, line, action_desc, player, turn, phase, move_mat
             stats['position_log_mismatch']['move']['anchor_absorbed'] += 1
 
     # RULE: Dead unit moving
+    # La boucle ci-dessous est la copie inline de `died_before_phase` : elle tranche toujours.
+    # L'abandon en `parse_errors` du bloc suivant est POSTÉRIEUR, donc le verdict de cette règle
+    # est déjà rendu quand il survient. Vaut aussi pour `MOVED AFTER SHOOTING`, qui passe par
+    # ce même handler — la règle couvre tout déplacement.
+    note_rule_usage(stats, "PROJ.2.1.dead_moving", player)
     move_unit_dead = move_unit_id not in state.unit_hp or require_key(state.unit_hp, move_unit_id) <= 0
     if move_unit_dead:
         unit_died_before_move = False

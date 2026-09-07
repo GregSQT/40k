@@ -526,9 +526,7 @@
       },
       "controls": [
         [
-          "charge_invalid",
-          "*",
-          "fled"
+          "charge_after_flee"
         ]
       ],
       "status": "COUVERT"

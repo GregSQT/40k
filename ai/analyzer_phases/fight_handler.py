@@ -177,6 +177,10 @@ def _note_melee_weapon_rule_usage(
     _torrent_m = re.search(r'\[TORRENT\]', action_desc, re.IGNORECASE)
     if _torrent_m:
         stats['weapon_rule_usage'][("TORRENT", weapon_key)][pl_int] += 1
+        # Occasion jugée : le token est là et l'arme est résolue — les trois abstentions
+        # au-dessus (type de porteur inconnu, porteur ambigu, arme absente de l'armurerie)
+        # sont franchies, le jet de touche va être examiné à la ligne suivante.
+        note_rule_usage(stats, "PROJ.1.4.torrent", pl_int)
         from ai.analyzer_hit import HIT_SEGMENT_RE as _HIT_RE
         if _HIT_RE.search(action_desc):
             stats['torrent_wrong_hit_fight'][pl_int] += 1
@@ -187,6 +191,7 @@ def _note_melee_weapon_rule_usage(
     _lethal_m = re.search(r'\[LETHAL HITS\]', action_desc, re.IGNORECASE)
     if _lethal_m:
         stats['weapon_rule_usage'][("LETHAL_HITS", weapon_key)][pl_int] += 1
+        note_rule_usage(stats, "PROJ.1.4.lethal_hits", pl_int)
         if re.search(r'\bWound\s+\d+\(\d+\+\)', action_desc):
             stats['lethal_hits_wrong_wound_fight'][pl_int] += 1
             if stats['first_error_lines']['lethal_hits_wrong_wound_fight'][pl_int] is None:
@@ -300,6 +305,13 @@ def handle_fight(
                     **state.engagement_3d_kwargs(),
                 ):
                     eligible_charged_units.append(charged_id)
+            # Occasion jugée : le vivier des unités chargées vient d'être balayé et tranché ;
+            # `if eligible_charged_units:` ne fait plus que retenir les fautifs. Noté ici, et
+            # pas dans les deux branches sœurs au-dessus — celles-ci ne consultent pas le
+            # vivier (unité elle-même chargée, ou exemptée par FIGHTS FIRST 24.13), les
+            # compter diluerait le total de lignes trivialement conformes. Grain : la ligne
+            # FOUGHT, le même que celui du compteur d'erreurs.
+            note_rule_usage(stats, "PROJ.1.4.alternance", attacker_player)
             if eligible_charged_units:
                 stats['fight_alternation_violations'][attacker_player] += 1
                 if stats['first_error_lines']['fight_alternation_violations'][attacker_player] is None:
@@ -444,6 +456,16 @@ def handle_fight(
                     # moteur l'écrit sans jet de touche et la marque explicitement.
                     if re.search(r'\[SUSTAINED(?: |_)?HITS\]', action_desc, re.IGNORECASE) is None:
                         state.fight_sequence_counts[seq_key] += 1
+                    # Occasion jugée : le plafond vient d'être calculé et confronté au compte
+                    # courant. La condition reproduit EXACTEMENT le renoncement ci-dessous —
+                    # un dépassement sans effectif moteur journalisé n'est pas jugeable
+                    # (`fight_over_cc_nb_unverifiable`), donc pas un exercice. Sans elle, les
+                    # vieux journaux sans [TARGET_DECL:N] gonfleraient le compteur d'occasions
+                    # que le contrôle a précisément refusé de trancher.
+                    if _alive_override is not None or state.fight_sequence_counts[seq_key] <= cc_nb:
+                        note_rule_usage(
+                            stats, "PROJ.1.4.surcharge_atk", require_key(state.unit_player, fighter_id)
+                        )
                     if state.fight_sequence_counts[seq_key] > cc_nb:
                         attacker_player = require_key(state.unit_player, fighter_id)
                         if _alive_override is None:
@@ -496,6 +518,10 @@ def handle_fight(
         # grand-socle hex≠euclidien à l'origine de ce faux positif).
 
         # RULE: Fight friendly
+        # Occasion jugée dès que le camp des DEUX unités est connu : c'est la seule donnée qui
+        # peut manquer, la comparaison d'égalité qui suit ne fait que trier les fautifs.
+        if target_id in state.unit_player and fighter_id in state.unit_player:
+            note_rule_usage(stats, "PROJ.1.4.allie", state.unit_player[fighter_id])
         if (target_id in state.unit_player and fighter_id in state.unit_player and
                 state.unit_player[target_id] == state.unit_player[fighter_id]):
             attacker_player = state.unit_player[fighter_id]
@@ -504,6 +530,13 @@ def handle_fight(
                 stats['first_error_lines']['fight_friendly'][attacker_player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
         # RULE: Dead unit Fighting (attacker is dead)
+        # L'absence de PV reconstruits est la vraie abstention : sans eux le contrôle ne peut
+        # rien dire. `hp <= 0` puis `died_before_phase` sont des filtres de faute, pas des
+        # renoncements — ils tranchent toujours.
+        if fighter_id in state.unit_hp:
+            note_rule_usage(
+                stats, "PROJ.2.1.dead_fight_atk", require_key(state.unit_player, fighter_id)
+            )
         attacker_is_dead = fighter_id in state.unit_hp and state.unit_hp[fighter_id] <= 0
         if attacker_is_dead:
             if died_before_phase(fighter_id, turn, phase, state.line_number, state.unit_deaths):
@@ -513,6 +546,13 @@ def handle_fight(
                     stats['first_error_lines']['fight_dead_unit_attacker'][attacker_player] = {'episode': state.current_episode_num, 'line': line.strip()}
 
         # RULE: Fight a dead unit (target is dead)
+        # Exercice porté par le camp de l'ATTAQUANT, comme le compteur d'erreurs plus bas : la
+        # faute lui appartient. Le compter sur la cible croiserait les deux joueurs et rendrait
+        # le ratio erreurs/exercices ininterprétable.
+        if target_id in state.unit_hp:
+            note_rule_usage(
+                stats, "PROJ.2.1.dead_fight_tgt", require_key(state.unit_player, fighter_id)
+            )
         target_is_dead = target_id in state.unit_hp and state.unit_hp[target_id] <= 0
         if target_is_dead:
             target_died_before_fight = died_before_phase(target_id, turn, phase, state.line_number, state.unit_deaths)

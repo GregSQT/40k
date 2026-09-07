@@ -48,6 +48,7 @@ from typing import Any, Dict, Optional, Tuple
 from engine.phase_handlers.attack_sequence import CRITICAL_HIT_ROLL, NATURAL_FAIL_ROLL
 
 from ai.analyzer_core import ACTION_ABILITY_TOKENS
+from ai.analyzer_rules import note_rule_usage
 
 #: Extrait le plancher du token `[INDIRECT FIRE:X+]` (10.07).
 _INDIRECT_FIRE_TOKEN_RE = re.compile(r'\[INDIRECT FIRE:(\d+)\+\]', re.IGNORECASE)
@@ -130,6 +131,9 @@ def check_indirect_fire_rule(
         return
 
     stats['indirect_fire_checked'][attacker_player] += 1
+    # Les trois abstentions (token absent, [IGNORES COVER], pas de jet) sont passées : ce site
+    # EST le compteur des lignes réellement jugées.
+    note_rule_usage(stats, "PROJ.1.2.indirect", attacker_player)
 
     if '[COVER]' in action_desc:
         return
@@ -247,6 +251,9 @@ def check_melee_hit_threshold(
         stats["fight_hit_threshold_unverifiable"][attacker_player] += 1
         return
     expected = expected_set.pop()
+    # Les trois renoncements (jet non parseable, WS/bonus irrésolus, seuils attendus non
+    # unanimes) sont franchis : le seuil attendu est unique et va être confronté au journal.
+    note_rule_usage(stats, "PROJ.1.4.seuil_touche", attacker_player)
     if expected == logged:
         return
     stats["fight_hit_threshold_mismatch"][attacker_player] += 1
@@ -282,6 +289,11 @@ def check_hit_result(
     m_indirect = _INDIRECT_FIRE_TOKEN_RE.search(action_desc)
     effective_target = max(target, int(m_indirect.group(1))) if m_indirect else target
     stats[f"{key}_checked"][attacker_player] += 1
+    # `_checked` porte déjà la sémantique voulue — les lignes réellement jugées, `parsed is
+    # None` étant la seule abstention. L'identifiant suit la phase, comme la clé du compteur.
+    note_rule_usage(
+        stats, "PROJ.1.4.touche" if is_melee else "PROJ.1.2.touche", attacker_player
+    )
     expected_success = expected_hit_success(roll, effective_target)
     if expected_success == bool(WOUND_SEGMENT_PRESENT_RE.search(action_desc)):
         return

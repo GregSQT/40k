@@ -216,6 +216,14 @@ def coverage_rows(stats: Dict[str, Any], section: Optional[str] = None) -> List[
         elif not applicable:
             verdict = VERDICT_OUT_OF_ROSTER
         elif errors > 0:
+            # `exercised == 0 and errors > 0` est arithmétiquement impossible — n fautes
+            # supposent n occasions jugées — et signale un site d'erreur dont le site d'exercice
+            # manque. Il est DÉLIBÉRÉMENT laissé en « ERREURS » plutôt que rendu sous un verdict
+            # d'instrumentation : ce serait masquer une faute réelle derrière un défaut d'outil,
+            # à rebours du principe posé juste au-dessus (une erreur est un FAIT, elle prime).
+            # Le défaut d'instrumentation se voit ailleurs, et plus tôt :
+            # `test_toute_regle_applicable_a_controles_est_instrumentee` refuse en CI toute règle
+            # « always » à contrôles sans site d'exercice.
             verdict = VERDICT_ERRORS
         elif exercised == 0:
             # LE signal du chantier : la situation s'est présentée, le contrôle n'a rien jugé.

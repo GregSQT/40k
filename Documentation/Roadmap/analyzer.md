@@ -4,31 +4,50 @@ Découpage en 6 lots des trois sujets ci-dessous (ordre séquentiel imposé : to
 
 ---
 
-## Compteur d'exercices non câblé — les verdicts « JAMAIS EXERCÉE » sont du bruit {#compteur-exercices}
+## ✅ Compteur d'exercices câblé — les verdicts « JAMAIS EXERCÉE » disent enfin quelque chose {#compteur-exercices}
 
-`note_rule_usage` (`ai/analyzer_rules.py`) n'est appelé que pour **14** des **62 règles du corpus
-qui déclarent des `controls`**. Les **48 autres** ne peuvent afficher que `ERREURS` ou
-`JAMAIS EXERCÉE` — jamais `OK` : leur colonne `Exercices` est nulle par construction. Le rapport
-du 2026-09-07 affiche exactement 48 verdicts « JAMAIS EXERCÉE ».
+**✅ LIVRÉ (2026-09-07)** — `note_rule_usage` n'était appelé que pour **14** des **62 règles du
+corpus qui déclarent des `controls`** ; les 48 autres ne pouvaient afficher que `ERREURS` ou
+`JAMAIS EXERCÉE`, jamais `OK`. Les **46 règles `always`** manquantes sont câblées : le rapport
+passe de **48 à 15 verdicts « JAMAIS EXERCÉE »**.
 
-Conséquence directe : l'avertissement « ⚠️ Applicable(s) et jamais exercee(s) — la situation s'est
-presentee et aucun controle n'a rien juge » est du bruit pour la quasi-totalité de ses entrées,
-alors qu'il est **la** raison d'être du module (détecter le motif 17.01 : une règle que le moteur
-n'applique jamais ne produit aucune ligne fautive, donc aucun compteur ne bouge, donc le rapport
-affiche un vert franc — mesuré le 2026-08-10).
+⚠️ **Deux des 46 câblages sont inopérants, et deux affirmations de cette section étaient fausses**
+— relevé par la revue du 2026-09-07, mesures à l'appui, non corrigé ici :
 
-Cinq règles ont été câblées le 2026-09-07 (celles dont les contrôles étaient corrigés le même
-jour) : `PROJ.2.1.dead_shot_at` (11232 exercices), `PROJ.1.2.surcharge_atk` (66956),
-`PROJ.1.3.budget` (1472), `PROJ.1.4.consolidation` (297), `PROJ.1.4.pile_in` (1525). Sans ce
-câblage, corriger leurs faux positifs les faisait passer de « ERREURS » à « JAMAIS EXERCÉE » —
-un second mensonge à la place du premier.
+1. `PROJ.1.2.double_advance` et `PROJ.1.2.advance_post_tir` sont gardés par `if phase == 'SHOOT'`
+   dans `shoot_handler.py`. Or l'Advance est un **type de mouvement de la phase MOVE** (09.02) —
+   la table `expected_phase_by_action` d'`ai/analyzer.py` documente précisément cette
+   correction (« advance etait attendu en SHOOT — FAUX »). Le garde est donc structurellement toujours faux : ces deux règles restent à
+   0 exercice **par construction**, ce que la première rédaction de cette section présentait à
+   tort comme un « zéro honnête ». Corollaire relevé : le contrôle `advance_twice_in_shoot_phase`
+   lui-même serait inatteignable.
+2. La justification écrite pour 10.02 / 12.07 (« leur verdict est calculé avant la branche qui le
+   lit ») est fausse quand leur compteur d'erreurs est non nul : `coverage_rows` force
+   `applicable = True` dès que `errors > 0`, puis rend `ERREURS` avec `exercised == 0`.
 
-**Reste à faire** : poser un `note_rule_usage` au site d'évaluation des 48 règles restantes, et
-verrouiller l'invariant par un test de corpus (toute règle `applicability.kind == "always"` avec
-des `controls` non vides doit avoir au moins un site d'incrément). Interdire aussi l'état
-incohérent `exercised == 0 and errors > 0` dans `coverage_rows`.
+Chaque appel est posé **au site où le contrôle regarde vraiment**, après ses renoncements, jamais
+à l'entrée du handler — la règle que pose le docstring de `note_rule_usage`. Preuve de placement :
+`PROJ.1.2.portee` rend **51509** exercices, soit exactement les 66956 lignes `SHOT` moins les
+15447 abstentions que le rapport comptait déjà séparément (`shoot_range_unverifiable`).
 
-⚡ Peut démarrer pendant un entraînement (ne touche ni `config/**/*.json` ni le moteur).
+**Défaut trouvé en chemin et corrigé** : `PROJ.1.3.apres_repli` pointait sur
+`charge_invalid['fled']`, une sous-clé **sans aucun écrivain**. La ligne « Charges after flee » du
+rapport affichait donc 0 quoi qu'il arrive, et le bucket `charge` ignorait ces fautes ; la vraie
+faute vit dans `charge_after_flee`. Câbler l'exercice sans réparer le compteur aurait produit un
+« OK » permanent, incapable de virer au rouge. Un test qui lisait la clé morte était vert par
+construction.
+
+**Décision** : l'état `exercised == 0 and errors > 0` reste rendu en `ERREURS`. Le nommer
+autrement masquerait une faute réelle derrière un défaut d'outil, à rebours du principe déjà acté
+dans `coverage_rows` — une erreur est un FAIT, elle prime sur la prédiction. Le défaut
+d'instrumentation se voit plus tôt, en CI, par le verrou ci-dessous. Un site d'erreur peut
+légitimement n'avoir pas son site d'exercice (`wall_collisions` a trois sites d'incrément pour un
+seul site d'exercice, cf. `test_the_fall_back_site_also_counts_an_exercise_of_03_01`).
+
+Verrous : `test_toute_regle_applicable_a_controles_est_instrumentee` et
+`test_aucun_identifiant_instrumente_n_est_inconnu_du_corpus` (`tests/unit/ai/test_analyzer_rules_corpus.py`),
+lecture par **AST** et non par regex — un site légitime choisit son identifiant selon la ligne
+traitée (`"PROJ.1.4.pile_in" if kind == "pile_in" else …`), qu'un regex déclarerait orphelin.
 
 ---
 

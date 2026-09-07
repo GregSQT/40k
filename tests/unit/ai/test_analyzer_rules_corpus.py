@@ -19,9 +19,13 @@ comptée dans le total de section mais portée par aucune règle.
 """
 from __future__ import annotations
 
+import ast
+import pathlib
+
 import pytest
 
 import ai.analyzer as an
+from shared.data_validation import require_key
 from tests.unit.ai._fabriques import entete_step_log
 from ai.analyzer_rules import (
     coverage_gaps,
@@ -323,7 +327,9 @@ def test_section_13_corpus_sum_matches_bucket(tmp_path):
     stats = _stats(tmp_path)
     stats['charge_from_adjacent'][1] = 1
     stats['charge_invalid'][1]['advanced'] = 1
-    stats['charge_invalid'][1]['fled'] = 1
+    # La charge après repli vit dans `charge_after_flee`, compteur PLAT : `charge_invalid['fled']`
+    # n'a jamais eu d'écrivain et a été retiré.
+    stats['charge_after_flee'][1] = 1
     stats['charge_invalid'][1]['distance_over_roll'] = 1
     assert an.error_totals(stats)['charge'] == 4, "le bucket ne voit pas les 4 compteurs §1.3"
     assert coverage_gaps(stats, "1.3") == []
@@ -469,4 +475,84 @@ def test_the_fall_back_site_also_counts_an_exercise_of_03_01(tmp_path):
     stats = _stats(tmp_path, body)
     assert _row(stats, "03.01")["exercised"] > 0, (
         "le site fall-back de wall_collisions ne note toujours pas d'exercice"
+    )
+
+
+# --- Le corpus et le code doivent rester d'accord sur QUI est instrumenté ------------------
+#
+# Sans ce verrou, une règle peut déclarer des `controls` sans qu'aucun site n'incrémente son
+# compteur d'exercices. Elle n'affiche alors JAMAIS « OK » : son verdict oscille entre ERREURS
+# et « JAMAIS EXERCÉE » selon qu'une faute est tombée, et cette seconde valeur ne prouve rien.
+# Mesuré le 2026-09-07 : 48 des 62 règles à contrôles étaient dans cet état, soit 48 des 48
+# verdicts « JAMAIS EXERCÉE » du rapport — l'avertissement que ce module existe pour produire
+# était donc intégralement du bruit.
+
+RACINE_PROJET = pathlib.Path(__file__).resolve().parents[3]
+
+
+def _valeurs_possibles(noeud: ast.expr) -> set:
+    """Chaînes que cette expression peut valoir, quand c'est décidable statiquement.
+
+    Ne descend PAS dans le test d'une expression conditionnelle : `"PROJ.1.4.pile_in" if
+    kind == "pile_in" else ...` porte la chaîne `"pile_in"` dans sa condition, qui n'est pas
+    un identifiant de règle. Un `ast.walk` naïf la remonterait et ferait échouer le contrôle
+    inverse sur un site pourtant correct.
+    """
+    if isinstance(noeud, ast.Constant):
+        return {noeud.value} if isinstance(noeud.value, str) else set()
+    if isinstance(noeud, ast.IfExp):
+        return _valeurs_possibles(noeud.body) | _valeurs_possibles(noeud.orelse)
+    return set()
+
+
+def _identifiants_instrumentes() -> set:
+    """Ids de règle apparaissant dans un appel `note_rule_usage`, forme conditionnelle comprise.
+
+    Lecture par AST et non par expression régulière : un site légitime choisit son identifiant
+    selon la ligne traitée, et un regex ancré sur un littéral en deuxième position le manquerait
+    — donc déclarerait orpheline une règle correctement câblée.
+    """
+    trouves: set = set()
+    for chemin in (RACINE_PROJET / "ai").rglob("*.py"):
+        arbre = ast.parse(chemin.read_text(encoding="utf-8"))
+        for noeud in ast.walk(arbre):
+            if not isinstance(noeud, ast.Call):
+                continue
+            fonction = noeud.func
+            nom = fonction.id if isinstance(fonction, ast.Name) else getattr(fonction, "attr", None)
+            if nom != "note_rule_usage":
+                continue
+            # Le 2e argument porte l'identifiant ; le 1er est `stats`, le 3e le joueur.
+            if len(noeud.args) >= 2:
+                trouves |= _valeurs_possibles(noeud.args[1])
+    return trouves
+
+
+def test_toute_regle_applicable_a_controles_est_instrumentee():
+    """Une règle « always » qui porte des contrôles DOIT avoir au moins un site d'exercice."""
+    instrumentees = _identifiants_instrumentes()
+    attendues = {
+        require_key(entry, "id")
+        for entry in load_rules_corpus()
+        if entry.get("controls")
+        and require_key(require_key(entry, "applicability"), "kind") == "always"
+    }
+    orphelines = sorted(attendues - instrumentees)
+    assert orphelines == [], (
+        f"{len(orphelines)} règle(s) déclarent des contrôles sans jamais noter d'exercice : leur "
+        f"colonne « Exercices » est nulle par construction et leur verdict « JAMAIS EXERCÉE » ne "
+        f"prouve rien — {orphelines}"
+    )
+
+
+def test_aucun_identifiant_instrumente_n_est_inconnu_du_corpus():
+    """Le sens inverse : un site qui note une règle absente du corpus lèverait à l'exécution.
+
+    `note_rule_usage` refuse déjà un id inconnu, mais seulement quand la ligne est atteinte —
+    une branche rare passerait la revue et casserait le rapport en production.
+    """
+    connus = {require_key(entry, "id") for entry in load_rules_corpus()}
+    inconnus = sorted(_identifiants_instrumentes() - connus)
+    assert inconnus == [], (
+        f"identifiant(s) notés par le code mais absents de config/rules_corpus.json : {inconnus}"
     )
