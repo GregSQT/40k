@@ -118,19 +118,26 @@ def test_exploiter_budget_cap_never_exceeds_lineage_profile_total_episodes(
 # ── CE QUE LE PROFIL DE LIGNÉE CONTIENT ─────────────────────────────────────────────────────
 
 
-def test_the_lineage_profile_pins_the_six_values_of_the_regime(profil_lignee) -> None:
+def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> None:
     """Les valeurs décidées le 2026-09-07, épinglées depuis la spécification.
 
     Ce ne sont pas « des valeurs par défaut » : elles remplacent vingt rampes `decay_fraction` et
     les surcharges d'étape de `vf_coef` / `max_grad_norm`, et c'est leur UNIFORMITÉ sur toute la
     lignée qui rend deux étapes comparables. Un réglage qui reviendrait se poser sur une seule
     étape rouvrirait exactement ce que cette conception ferme.
+
+    `batch_size` est lu ici alors qu'il n'est PLUS surchargé, et c'est le point : le profil le
+    rend à l'héritage de `x1_long` depuis le 2026-09-07, donc seule la valeur RÉSOLUE dit s'il
+    vaut encore 1020. Le 4080 qu'il portait a tué P2 à sa première update — le rollout de 32640
+    est monté ENTIER en VRAM (3,37 Go) et le pic atteignait 8,89 Go sur une carte de 8,19, d'où un
+    `CUDA driver error: device not ready` que rien dans le message ne rattachait à `batch_size`.
+    Aucun garde-fou ne rattrape ce cas : `apply_rollout_n_steps` dimensionne sur la RAM SYSTÈME.
     """
     mp = profil_lignee["model_params"]
     assert mp["learning_rate"] == pytest.approx(0.001)
     assert mp["ent_coef"] == pytest.approx(0.03)
     assert mp["n_steps"] == 32640
-    assert mp["batch_size"] == 4080
+    assert mp["batch_size"] == 1020
     assert mp["vf_coef"] == pytest.approx(0.15)
     assert profil_lignee["agent_seat_p2_ratio"] == pytest.approx(0.6)
 

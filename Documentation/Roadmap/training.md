@@ -10,8 +10,10 @@ de chercher les bonnes valeurs pour chaque étape.
 
 **1. Un PROFIL de lignée, `x1_lineage`, appliqué à TOUTE étape `init: "from:"`** — les dix
 learners comme les trois exploiteurs. `learning_rate` 0.001 et `ent_coef` 0.03 **scalaires**,
-`n_steps` 32640, `batch_size` 4080, `vf_coef` 0.15, `agent_seat_p2_ratio` 0.6 ; tout le reste,
-`max_grad_norm` 0.5 compris, est **hérité** de `x1_long` par `"extends"`. Les vingt rampes
+`n_steps` 32640, `vf_coef` 0.15, `agent_seat_p2_ratio` 0.6 ; tout le reste, `batch_size` 1020 et
+`max_grad_norm` 0.5 compris, est **hérité** de `x1_long` par `"extends"`. `batch_size` a d'abord
+été surchargé à 4080 pour garder huit mini-lots ; il est rendu à l'héritage le 2026-09-07, ce
+mini-lot ayant fait mourir P2 à sa première update par saturation de VRAM (pic 8,89 Go sur 8,19). Les vingt rampes
 `decay_fraction` des étapes disparaissent, ainsi que les surcharges de `vf_coef` /
 `max_grad_norm` de P2 et P3 ; une étape reprise ne déclare plus que `total_episodes`, et le
 validateur refuse le reste. `x1_long` garde ses rampes et son `vf_coef` 0.5 pour le seul départ à
