@@ -24,12 +24,20 @@ import pytest
 import ai.analyzer as an
 from ai.analyzer_core import _apply_state_snapshot
 from ai.analyzer_config import AnalyzerConfig
+from ai.analyzer_rules import new_rule_usage_counters
 from ai.analyzer_state import AnalyzerState
 from tests.unit.ai._fabriques import analyzer_config
 
 
 def _state() -> AnalyzerState:
-    stats: Dict[str, Any] = {"state_resync": {"dead_missed": 0, "alive_missed": 0, "pos_mismatch": 0}}
+    # `rule_usage` vient de la VRAIE fabrique : le recalage note désormais un exercice pour
+    # chaque unité de l'instantané, y compris celles dont le camp est inconnu — c'est précisément
+    # le cas que ces fixtures mettent en scène (`unit_player` vide). Un dict écrit à la main
+    # divergerait du corpus au premier ajout de règle.
+    stats: Dict[str, Any] = {
+        "state_resync": {"dead_missed": 0, "alive_missed": 0, "pos_mismatch": 0},
+        "rule_usage": new_rule_usage_counters(),
+    }
     st = AnalyzerState(stats=stats)
     st.unit_hp = {"1": 2, "101": 2}
     st.unit_models_alive = {"1": 2, "101": 1}

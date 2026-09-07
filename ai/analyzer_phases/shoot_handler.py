@@ -1591,22 +1591,22 @@ def handle_advance(
                     'episode': state.current_episode_num, 'line': line.strip()
                 }
 
-    # Ces deux règles ne gouvernent QUE la phase de tir : `units_advanced` et `units_shot` sont
-    # purgés à chaque changement de tour, donc un ADVANCE en phase de mouvement ne peut
-    # structurellement rien suivre. Compter ces lignes gonflerait les exercices d'occasions
-    # vides — même raisonnement que le garde `len(models) > 1` de 03.03.
-    if phase == 'SHOOT':
-        note_rule_usage(stats, "PROJ.1.2.double_advance", player)
-        note_rule_usage(stats, "PROJ.1.2.advance_post_tir", player)
-    if phase == 'SHOOT' and advance_unit_id in state.units_advanced:
-        stats['advance_twice_in_shoot_phase'][player] += 1
-        if stats['first_error_lines']['advance_twice_in_shoot_phase'][player] is None:
-            stats['first_error_lines']['advance_twice_in_shoot_phase'][player] = {
-                'episode': state.current_episode_num, 'line': line.strip()
-            }
+    # DEUX SÉLECTIONS DE MOUVEMENT DANS LA MÊME PHASE (09.02, « Select one friendly unit that
+    # has NOT been selected to move this phase ») : c'est `double_activation_by_phase['MOVE']`
+    # qui la mesure — ` ADVANCED ` est un marqueur d'activation (analyzer_core), et la faute
+    # tombe quel que soit le couple de types de mouvement (MOVED puis ADVANCED, ou ADVANCED deux
+    # fois). Le contrôle `advance_twice_in_shoot_phase` qui vivait ici était gardé par
+    # `phase == 'SHOOT'`, donc INATTEIGNABLE : l'Advance est un type de mouvement de la phase de
+    # MOUVEMENT (09.02, étape « Select Move Type ») et la phase de tir n'en porte aucun (10.02).
+    # Mesuré sur step.log : 10849 lignes ADVANCED, 10849 en phase MOVE, zéro en SHOOT.
     state.units_advanced.add(advance_unit_id)
 
     # RULE: Advance after shoot
+    # Occasion jugée : `units_shot` est constitué et le verdict tombe dans les deux sens. AUCUN
+    # garde de phase — le site d'erreur juste dessous n'en a pas non plus, et un exercice plus
+    # étroit que son erreur produit « Exercices 0 / Erreurs N », que la couverture rend en
+    # ERREURS sans pouvoir dire que c'est l'instrumentation qui manque.
+    note_rule_usage(stats, "PROJ.1.2.advance_post_tir", player)
     if advance_unit_id in state.units_shot:
         stats['advance_after_shoot'][player] += 1
         if stats['first_error_lines']['advance_after_shoot'][player] is None:

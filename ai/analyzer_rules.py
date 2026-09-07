@@ -176,6 +176,24 @@ def rule_is_applicable(stats: Dict[str, Any], entry: Dict[str, Any]) -> Optional
         rule_id = require_key(applicability, "rule_id")
         carriers = require_key(stats, "rule_to_units").get(rule_id, set())  # get allowed : règle inconnue du registre
         return bool(set(require_key(stats, "unit_types_seen")) & set(carriers))
+    if kind == "weapon_rule_in_roster":
+        # JUMEAU du précédent, côté ARMES, et dérivé de la même façon : aucun prédicat écrit à la
+        # main, juste le croisement de l'armurerie avec les types réellement vus dans le journal.
+        # Le `profile` est OBLIGATOIRE parce qu'un token ne vaut pas des deux côtés : mesuré le
+        # 2026-09-07, HAZARDOUS est porté par 21 armes de tir et zéro arme de mêlée, LETHAL_HITS
+        # par 3 de tir et 1 de mêlée. Sans lui, `PROJ.1.4.hazardous` (mêlée) serait déclarée
+        # applicable au motif qu'un pistolet plasma porte le token — un avertissement faux, celui
+        # que ce prédicat existe pour retirer.
+        rule_id = require_key(applicability, "rule_id")
+        profile = require_key(applicability, "profile")
+        if profile not in ("ranged", "melee"):
+            raise ValueError(
+                f"rules_corpus.json : profil d'arme {profile!r} inconnu pour la règle "
+                f"{entry.get('id')!r} — attendu 'ranged' ou 'melee'"  # get allowed : message d'erreur
+            )
+        by_profile = require_key(stats, "weapon_rule_to_units").get(rule_id, {})  # get allowed : token porté par aucune arme
+        carriers = by_profile.get(profile, set())  # get allowed : token absent de ce profil
+        return bool(set(require_key(stats, "unit_types_seen")) & set(carriers))
     if kind == "indecidable":
         # Règle non vérifiable depuis le journal : ni NON applicable, ni applicable sans preuve.
         # Verdict → INDÉCIDABLE (ni vert vacant ni hors roster). Utilisé pour les règles des
@@ -216,14 +234,20 @@ def coverage_rows(stats: Dict[str, Any], section: Optional[str] = None) -> List[
         elif not applicable:
             verdict = VERDICT_OUT_OF_ROSTER
         elif errors > 0:
-            # `exercised == 0 and errors > 0` est arithmétiquement impossible — n fautes
-            # supposent n occasions jugées — et signale un site d'erreur dont le site d'exercice
-            # manque. Il est DÉLIBÉRÉMENT laissé en « ERREURS » plutôt que rendu sous un verdict
+            # `exercised == 0 and errors > 0` n'est PAS impossible, contrairement à ce que cette
+            # note affirmait : il suffit qu'un site d'erreur soit atteignable là où le site
+            # d'exercice ne l'est pas. Trois chemins l'ont produit et sont fermés le 2026-09-07 —
+            # un garde de phase sur le seul exercice (`PROJ.1.2.advance_post_tir`), un garde
+            # `unit_player is not None` sur les seuls exercices §2.8, et les règles PDF de
+            # double-activation (10.02 / 12.07) qui n'avaient aucun site d'exercice.
+            # L'état reste DÉLIBÉRÉMENT rendu en « ERREURS » plutôt que sous un verdict
             # d'instrumentation : ce serait masquer une faute réelle derrière un défaut d'outil,
             # à rebours du principe posé juste au-dessus (une erreur est un FAIT, elle prime).
             # Le défaut d'instrumentation se voit ailleurs, et plus tôt :
             # `test_toute_regle_applicable_a_controles_est_instrumentee` refuse en CI toute règle
-            # « always » à contrôles sans site d'exercice.
+            # « always » à contrôles sans site d'exercice, et
+            # `test_aucun_site_note_rule_usage_n_a_d_identifiant_indechiffrable` refuse un site
+            # dont l'identifiant échappe à la lecture statique.
             verdict = VERDICT_ERRORS
         elif exercised == 0:
             # LE signal du chantier : la situation s'est présentée, le contrôle n'a rien jugé.

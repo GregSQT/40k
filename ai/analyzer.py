@@ -1577,7 +1577,6 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
             + _pair('shoot_at_engaged_enemy')
             + _pair('close_quarters_shot_at_unengaged_target')
             + _pair('advance_after_shoot')
-            + _pair('advance_twice_in_shoot_phase')
             + _pair('move_distance_over_limit', 'advance')
             + _pair('advance_from_adjacent')
             + _pair('shoot_hit_result_mismatch')
@@ -1839,6 +1838,9 @@ def parse_step_log(filepath: str) -> Dict:
         'rule_to_units': rule_to_units,  # rule_id -> set of unit_types (for validity)
         'squadmates_by_type': _cfg.squadmates_by_type,  # leader_type -> set of led unit_types
         'weapon_rule_to_weapons': weapon_rule_to_weapons,  # rule -> set of "weapon (unit)"
+        # rule -> {"ranged"|"melee" -> set of unit_types} : l'applicabilité des règles d'ARMES,
+        # jumeau de `rule_to_units` pour les capacités d'unité (cf. `rule_is_applicable`).
+        'weapon_rule_to_units': _cfg.weapon_rule_to_units,
         'weapon_rule_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (rule, weapon_key) -> {1,2}
         # NB : il n'existe plus de compteur d'usage INVALIDE. Le seul qui ait jamais existe
         # servait [HEAVY], et re-derivait sa validite depuis units_moved — un critere que le
@@ -2030,7 +2032,6 @@ def parse_step_log(filepath: str) -> Dict:
         },
         'double_activation_reactive_move': 0,
         'advance_after_shoot': {1: 0, 2: 0},
-        'advance_twice_in_shoot_phase': {1: 0, 2: 0},
         'position_log_mismatch': {
             'move': {'total': 0, 'mismatch': 0, 'missing': 0, 'anchor_absorbed': 0},
             'advance': {'total': 0, 'mismatch': 0, 'missing': 0, 'anchor_absorbed': 0},
@@ -2161,7 +2162,6 @@ def parse_step_log(filepath: str) -> Dict:
             },
             'double_activation_reactive_move': None,
             'advance_after_shoot': {1: None, 2: None},
-            'advance_twice_in_shoot_phase': {1: None, 2: None},
             'damage_missing_unit_hp': {1: None, 2: None},
             'unit_revived': {1: None, 2: None},
             'fled_action': {1: None, 2: None},
@@ -3605,19 +3605,11 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     if bot_advance_after_shoot > 0 and stats['first_error_lines']['advance_after_shoot'][2]:
         first_err = stats['first_error_lines']['advance_after_shoot'][2]
         log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    agent_advance_twice_shoot = stats['advance_twice_in_shoot_phase'][1]
-    bot_advance_twice_shoot = stats['advance_twice_in_shoot_phase'][2]
-    _table_row(
-        "Advance twice in SHOOT:",
-        _fmt_count(agent_advance_twice_shoot),
-        _fmt_count(bot_advance_twice_shoot),
-    )
-    if agent_advance_twice_shoot > 0 and stats['first_error_lines']['advance_twice_in_shoot_phase'][1]:
-        first_err = stats['first_error_lines']['advance_twice_in_shoot_phase'][1]
-        log_print(f"  First P1 occurrence (Episode {first_err['episode']}): {first_err['line']}")
-    if bot_advance_twice_shoot > 0 and stats['first_error_lines']['advance_twice_in_shoot_phase'][2]:
-        first_err = stats['first_error_lines']['advance_twice_in_shoot_phase'][2]
-        log_print(f"  First P2 occurrence (Episode {first_err['episode']}): {first_err['line']}")
+    # « Advance twice in SHOOT » a été retirée le 2026-09-07 avec son compteur : le contrôle qui
+    # l'alimentait était gardé par `phase == 'SHOOT'` alors que l'Advance est un type de mouvement
+    # de la phase de MOUVEMENT (09.02), et la ligne affichait donc 0 par construction. La double
+    # sélection de mouvement est mesurée par `double_activation_by_phase['MOVE']` (§1.6), désormais
+    # rattachée à la règle 09.02 du corpus.
     agent_adv_over = stats['move_distance_over_limit']['advance'][1]
     bot_adv_over = stats['move_distance_over_limit']['advance'][2]
     _table_row("Advance au-dela du budget:", _fmt_count(agent_adv_over), _fmt_count(bot_adv_over))
@@ -4191,20 +4183,32 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("-" * 80)
     log_print("PHASES")
     log_print("-" * 80)
-    _move_never_exercised = sum(
-        1 for r in coverage_rows(stats, "1.1") if r["verdict"] == VERDICT_NEVER_EXERCISED
-    )
-    if move_errors > 0:
-        _move_icon = "❌"
-    elif _move_never_exercised > 0:
-        _move_icon = "⚠️ "
-    else:
-        _move_icon = "✅"
-    _move_suffix = f" (⚠️ {_move_never_exercised} règles jamais exercées)" if _move_never_exercised > 0 else ""
-    log_print(f"{_move_icon} 1.1 Erreurs en phase de move : {move_errors}{_move_suffix}")
-    log_print(f"{summary_error_icon(shooting_errors > 0)} 1.2 Erreurs en phase de shooting : {shooting_errors}")
-    log_print(f"{summary_error_icon(charge_errors > 0)} 1.3 Erreurs en phase de charge : {charge_errors}")
-    log_print(f"{summary_error_icon(fight_errors > 0)} 1.4 Erreurs en phase de fight : {fight_errors}")
+    def _section_summary_line(section: str, label: str, errors: int) -> str:
+        """Ligne de résumé d'une section À CORPUS : erreurs ET règles jamais exercées.
+
+        Le compte des « jamais exercées » ne vivait que sur la 1.1. Les autres sections rendaient
+        un ✅ franc au-dessus de leurs propres avertissements — mesuré le 2026-09-07 :
+        « ✅ 1.2 Erreurs en phase de shooting : 0 » pendant que le détail de la 1.2 listait huit
+        règles applicables et jamais exercées. C'est le vert vacant, un cran plus bas que celui
+        que ce module a été écrit pour supprimer : le signal existait, il n'atteignait pas
+        l'endroit où le rapport se lit.
+        """
+        never = sum(
+            1 for r in coverage_rows(stats, section) if r["verdict"] == VERDICT_NEVER_EXERCISED
+        )
+        if errors > 0:
+            icon = "❌"
+        elif never > 0:
+            icon = "⚠️ "
+        else:
+            icon = "✅"
+        suffix = f" (⚠️ {never} règles jamais exercées)" if never > 0 else ""
+        return f"{icon} {section} {label} : {errors}{suffix}"
+
+    log_print(_section_summary_line("1.1", "Erreurs en phase de move", move_errors))
+    log_print(_section_summary_line("1.2", "Erreurs en phase de shooting", shooting_errors))
+    log_print(_section_summary_line("1.3", "Erreurs en phase de charge", charge_errors))
+    log_print(_section_summary_line("1.4", "Erreurs en phase de fight", fight_errors))
     wrong_phase_total = _totals['wrong_phase']
     log_print(f"{summary_error_icon(wrong_phase_total > 0)} 1.5 Actions occuring in the wrong phase : {wrong_phase_total}")
     # NOMBRE et ICÔNE tirés de la MÊME grandeur — celle qui entre dans le total. Afficher ici la
@@ -4264,9 +4268,10 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("-" * 80)
     log_print("INTEGRITY")
     log_print("-" * 80)
-    log_print(f"{summary_error_icon(dead_unit_interactions_total > 0)} 2.1 Dead units interactions : {dead_unit_interactions_total}")
+    log_print(_section_summary_line("2.1", "Dead units interactions", dead_unit_interactions_total))
+    # 2.2 n'a pas d'entrée de corpus : pas de compte de règles à propager, icône simple.
     log_print(f"{summary_error_icon(pos_mismatch_total > 0)} 2.2 Positions/logs incohérents : {pos_mismatch_total}")
-    log_print(f"{summary_error_icon(dmg_issues_total > 0)} 2.3 DMG issues : {dmg_issues_total}")
+    log_print(_section_summary_line("2.3", "DMG issues", dmg_issues_total))
     if max_duration_episode is not None and avg_duration is not None:
         durations_list = require_key(stats, 'episode_durations')
         min_duration_episode, min_duration = min(durations_list, key=lambda x: x[1])
@@ -4300,12 +4305,18 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     # 2.8 : une divergence non nulle invalide, pour l'episode concerne, tout controle mesurant
     # une distance ou une adjacence — elle est donc rendue au meme rang que les autres.
     _resync_total = sum(require_key(stats, 'state_resync').values())
+    # Même règle d'icône que les sections à corpus ci-dessus, le détail des quatre compteurs en
+    # plus : `_section_summary_line` rend « <icône> <section> <label> : <n> », et le détail entre
+    # parenthèses doit s'insérer AVANT le suffixe des règles jamais exercées.
+    _resync_line = _section_summary_line("2.8", "Etat reconstruit vs moteur", _resync_total)
+    _resync_head, _, _resync_tail = _resync_line.partition(f": {_resync_total}")
     log_print(
-        f"{summary_error_icon(_resync_total > 0)} 2.8 Etat reconstruit vs moteur : {_resync_total} "
+        f"{_resync_head}: {_resync_total} "
         f"(fantomes={stats['state_resync']['dead_missed']}, "
         f"tuees-a-tort={stats['state_resync']['alive_missed']}, "
         f"positions={stats['state_resync']['pos_mismatch']}, "
         f"figurine-allouee-inconnue={stats['state_resync']['alloc_model_unknown']})"
+        f"{_resync_tail}"
     )
 
     _non_verifiable_count = sum(

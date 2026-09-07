@@ -341,13 +341,15 @@ def handle_fight(
             # prononcé sur un seuil qui l'inclut), donc l'exercice se note ici et pas à l'entrée
             # du handler. `unit_effect_in_force` — pas `unit_rules_by_type[fighter_unit_type]` :
             # la capacité vient du LEADER attaché, jamais du type de l'escouade.
+            # Les deux identifiants sont écrits EN CLAIR, et non tirés d'une boucle sur un tuple :
+            # le verrou `_identifiants_instrumentes` lit ces appels par AST, et une variable de
+            # boucle lui rend un ensemble vide — une faute de frappe passait alors la CI pour ne
+            # lever qu'en production, dans `note_rule_usage`.
             from ai.analyzer_perfig import unit_effect_in_force
-            for _effect, _rule in (
-                ("hit_roll_bonus_fight", "PROJ.1.4.hit_roll_bonus_fight"),
-                ("wound_roll_bonus_fight", "PROJ.1.4.wound_roll_bonus_fight"),
-            ):
-                if unit_effect_in_force(state, config, fighter_id, _effect):
-                    note_rule_usage(stats, _rule, player)
+            if unit_effect_in_force(state, config, fighter_id, "hit_roll_bonus_fight"):
+                note_rule_usage(stats, "PROJ.1.4.hit_roll_bonus_fight", player)
+            if unit_effect_in_force(state, config, fighter_id, "wound_roll_bonus_fight"):
+                note_rule_usage(stats, "PROJ.1.4.wound_roll_bonus_fight", player)
             # Seuil de blessure 05.02, JUMEAU du tir : même contrôle, même fonction, avec le
             # +1 Force du Waaagh qui n'existe qu'ici (08.04). Cf. ai/analyzer_wound.py.
             from ai.analyzer_wound import check_wound_threshold, wound_bonus_applies

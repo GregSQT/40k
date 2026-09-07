@@ -354,7 +354,7 @@ portés par #14 et #24 ; « start an action » exige les lignes d'action (16.01)
 | 16 | `shoot_at_engaged_enemy` | `:617` | cible engagée (per-fig) ∧ arme non-CQ ∧ ¬exemption 17.03 ∧ ¬tireur engagé avec elle |
 | 17 | `close_quarters_shot_at_unengaged_target` | `:659` | tireur engagé non-M/V visant une unité avec laquelle il n'est PAS engagé (10.06) — **passé à l'engagement per-figurine le 2026-08-10** (`c1487fcb`), il mesurait `calculate_hex_distance(ancre,ancre)==1` : 144 faux positifs sur un run de 600 épisodes. **Puis à l'engagement d'AVANT les pertes le 2026-08-12** : la mesure se faisait après les dégâts de la ligne jugée, une cible tuée par le tir disparaissait de l'énumération (1 faux positif de plus, E422). Les cartes viennent désormais de `AnalyzerState.freeze_select_targets`, gelées au Select Targets step de l'activation — comme #16, et comme l'alternance 12.04 côté mêlée |
 | 18 | `advance_after_shoot` | `:1229` | `units_shot` puis `ADVANCED` |
-| 19 | `advance_twice_in_shoot_phase` | `:1220` | 2e `ADVANCED` en phase SHOOT |
+| 19 | ~~`advance_twice_in_shoot_phase`~~ | — | **compteur SUPPRIMÉ** (2026-09-07) : gardé par `phase == 'SHOOT'`, donc inatteignable (l'Advance est un mouvement, 09.02). La double sélection de mouvement est comptée par `double_activation_by_phase['MOVE']`, rattaché à la règle 09.02 |
 | 20 | `move_distance_over_limit['advance']` | `:1213` | BFS par socle, budget `M + D6×échelle` (−2" si `[FLY]`) |
 | 21 | `advance_from_adjacent` | `:1277` | engagement per-fig aux socles de départ |
 
@@ -364,9 +364,9 @@ portés par #14 et #24 ; « start an action » exige les lignes d'action (16.01)
 |---|---|---|---|
 | 22 | `charge_from_adjacent` | `charge_handler.py` | engagement per-fig aux socles de départ |
 | 23 | `charge_invalid.advanced` | `:81` | `units_advanced` ∧ ni `[WAAAGH!]` ni `charge_after_advance` |
-| 24 | `charge_invalid.fled` | `:91` | `units_fled` ∧ pas de `charge_after_flee` |
+| 24 | ~~`charge_invalid.fled`~~ | — | **sous-clé SUPPRIMÉE** (2026-09-07) : elle n'a jamais eu d'écrivain, la faute vit dans le #26 |
 | 25 | `charge_invalid.distance_over_roll` | `:132` | BFS par socle, budget `2D6×échelle` (−2" si `[FLY]`, obstacles ignorés si vol) |
-| 26 | `charge_after_flee` | `:227` | doublon du #24, compteur distinct |
+| 26 | `charge_after_flee` | `:227` | `units_fled` ∧ pas de `charge_after_flee` — SEUL site de la faute |
 
 ### §1.4 FIGHT ERRORS
 

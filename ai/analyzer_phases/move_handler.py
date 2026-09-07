@@ -109,7 +109,7 @@ def _check_fall_back_move(state, line, action_desc, player, move_unit_id,
       `analyzer._build_move_bfs_blockers`). Le [DESPERATE ESCAPE] est en revanche utilisé comme
       preuve d'engagement dans le volet ELIGIBLE IF (voir ci-dessous).
     - « AFTER MOVING: not eligible to shoot / declare a charge » est déjà porté par #14
-      (`shoot_after_flee`) et #24 (`charge_invalid.fled`) ; le volet « start an action » exige
+      (`shoot_after_flee`) et #26 (`charge_after_flee`) ; le volet « start an action » exige
       les lignes d'action (16.01), absentes du journal.
     """
     from ai.analyzer import (

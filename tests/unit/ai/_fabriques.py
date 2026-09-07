@@ -186,6 +186,8 @@ def analyzer_config(**overrides: Any) -> AnalyzerConfig:
         "effect_display_tokens": {},
         "rule_to_units": {},
         "weapon_rule_to_weapons": {},
+        # `token -> {"ranged"|"melee" -> types porteurs}` : l'applicabilité des règles d'armes.
+        "weapon_rule_to_units": {},
         "resolve_rule_id": _no_rule_resolution,
         # Échelle de référence du dépôt (`inches_to_subhex` de `config/board_config.json`) :
         # aucune des fixtures qui passent par ici ne mesure de distance, mais l'échelle n'a pas
