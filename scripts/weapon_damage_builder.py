@@ -62,7 +62,7 @@ def _compute_expected_damage(
     toughness: int, armor_save: int, invul_save: int,
 ) -> float:
     """
-    W40K expected damage formula (same as weapon_selector.calculate_kill_probability).
+    W40K expected damage formula (hit x wound x fail save x DMG, sans regle d'arme).
 
     Returns expected_damage_per_activation (float). Zero if weapon cannot damage.
     """

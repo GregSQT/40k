@@ -11144,7 +11144,7 @@ def _resolve_one_manual_wound(game_state: Dict[str, Any], alloc: Dict[str, Any],
         summary["models_killed"] += 1
     else:
         update_model_hp(game_state, cur, new_hp)
-    # Hooks d application specifiques a la phase (fight : invalidations de cache + pools).
+    # Hooks d application specifiques a la phase (fight : retrait des pools de combat).
     # destroy_model/update_model_hp resynchronisent deja units_cache (somme des figs).
     if ctx.on_target_damaged is not None:
         ctx.on_target_damaged(game_state, batch["target_sid"])

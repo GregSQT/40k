@@ -169,24 +169,24 @@ que s'il est humain ; sinon `auto_decider` tranche headless (§7).
 
 ## 6. Application des dégâts et caches — invariants fight (§D)
 
-Divergence structurelle identifiée en revue, toujours vraie, résolue par les hooks du ctx :
+Divergence structurelle identifiée en revue, toujours vraie, résolue par un hook du ctx :
 
 - `def destroy_model` (shared_utils) ne retire l'unité des pools d'activation que si
   c'est la DERNIÈRE figurine (via `def remove_from_units_cache` →
-  `def _remove_unit_from_all_activation_pools`) et **n'invalide jamais**
-  `kill_probability_cache` (cache de [weapon_selector.py](../../../engine/ai/weapon_selector.py),
-  rempli à la demande).
-- La mêlée exige en plus : invalidation du `kill_probability_cache` de la cible à chaque
-  blessure, et à la destruction de l'unité le retrait des pools de combat
-  (`def _remove_dead_unit_from_fight_pools`) + invalidation complète.
+  `def _remove_unit_from_all_activation_pools`).
+- La mêlée exige en plus, à la destruction de l'unité, le retrait des pools de combat
+  (`def _remove_dead_unit_from_fight_pools`).
 
-➡️ C'est le rôle des hooks `on_target_damaged` / `on_unit_destroyed` du `ManualAllocCtx` :
-`FIGHT_CTX` les branche sur `def _fight_on_target_damaged` (→
-`def invalidate_cache_for_target`) et `def _fight_on_unit_destroyed` (→
-`_remove_dead_unit_from_fight_pools` + `def invalidate_cache_for_unit`). `SHOOT_CTX` n'en
-a pas besoin (comportement tir pur). **Invariant** : toute nouvelle voie d'application de
-dégâts en mêlée doit passer par ces hooks — appliquer des dégâts fight par le chemin tir
-nu laisserait caches périmés et unités fantômes dans les pools V11.
+➡️ C'est le rôle du hook `on_unit_destroyed` du `ManualAllocCtx` : `FIGHT_CTX` le branche sur
+`def _fight_on_unit_destroyed` (fight_handlers). `SHOOT_CTX` n'en a pas besoin (comportement tir
+pur). **Invariant** : toute nouvelle voie d'application de dégâts en mêlée doit passer par ce
+hook — appliquer des dégâts fight par le chemin tir nu laisserait des unités fantômes dans les
+pools V11.
+
+Le hook jumeau `on_target_damaged` invalidait le `kill_probability_cache` de la cible à chaque
+blessure ; il a été supprimé le 2026-09-07 avec `engine/ai/weapon_selector.py`, seul écrivain de
+ce cache et sans appelant de production (cf. `Documentation/Reference/jeu/armes.md`, § AI Weapon
+Selection).
 
 ---
 
@@ -255,9 +255,9 @@ d'abord — `def is_fights_first`, un ordre d'**activation**, pas de cible) → 
   courant (`fight_eligible_units` → cercles verts), activation en 2 temps
   (`activate_unit` puis déclaration), puis allocation.
 - Chemin auto : `def _fight_v11_auto_step` → `def _fight_v11_resolve_attacks` —
-  sélection de cible auto (`def _ai_select_fight_target`, arme via
-  `def select_best_melee_weapon` de weapon_selector), puis MÊME moteur : déclaration
-  per-figurine (`def squad_declare_fight`, shared_utils) + allocation headless.
+  sélection de cible auto (`def _ai_select_fight_target`), puis MÊME moteur : déclaration
+  per-figurine (`def squad_declare_fight`, shared_utils — arme CC choisie par figurine,
+  04.01) + allocation headless.
 - Granularité spatiale : `def unit_entries_within_engagement_zone`
   ([spatial_relations.py](../../../engine/spatial_relations.py)) compare des empreintes
   d'unités ; l'éligibilité par-figurine descend au niveau figurine via les callbacks §3.

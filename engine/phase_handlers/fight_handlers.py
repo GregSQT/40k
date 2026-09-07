@@ -4961,19 +4961,26 @@ def _manual_roll_fight_intent(
     }
 
 
-def _fight_on_target_damaged(game_state: Dict[str, Any], target_sid: str) -> None:
-    """Hook fight : invalide le kill_probability_cache de la cible a chaque blessure (§D)."""
-    from engine.ai.weapon_selector import invalidate_cache_for_target
-    cache = game_state["kill_probability_cache"] if "kill_probability_cache" in game_state else {}
-    invalidate_cache_for_target(cache, str(target_sid))
-
-
 def _fight_on_unit_destroyed(game_state: Dict[str, Any], target_sid: str) -> None:
-    """Hook fight : unite cible detruite -> retrait des pools de combat + invalidation cache (§D)."""
+    """Hook fight : unite cible detruite -> retrait des pools de combat (§D)."""
     _remove_dead_unit_from_fight_pools(game_state, str(target_sid))
-    from engine.ai.weapon_selector import invalidate_cache_for_unit
-    cache = game_state["kill_probability_cache"] if "kill_probability_cache" in game_state else {}
-    invalidate_cache_for_unit(cache, str(target_sid))
+
+
+# 2026-09-07 — le module `engine/ai/weapon_selector.py` a ete SUPPRIME, et avec lui le hook
+# `_fight_on_target_damaged` qui n avait pas d autre corps que son appel. Ce module portait une
+# politique de choix d arme par probabilite de kill (`select_best_ranged_weapon`,
+# `select_best_melee_weapon`, `get_best_weapon_for_target`) qu AUCUN chemin de production
+# n atteignait : zero appelant hors du fichier, zero test. Son cache
+# `game_state["kill_probability_cache"]` n etait donc jamais peuple, et les deux seuls symboles
+# encore importes d ici (`invalidate_cache_for_target` / `invalidate_cache_for_unit`) balayaient
+# un dictionnaire toujours vide a chaque blessure et a chaque unite detruite en melee.
+#
+# CE N ETAIT PAS UNE FONCTIONNALITE JAMAIS BRANCHEE : le choix d arme existe, ailleurs, et au bon
+# grain. Il se fait a la DECLARATION et par FIGURINE (04.01 Multiple Weapon Profiles) —
+# `squad_declare_fight` en melee et `squad_declare_shoot` au tir (shared_utils), qui notent chaque
+# arme par esperance de degats utile contre T / Sv / InSv reels de la cible, puis `_weapon_group_key`
+# / `_pick_one_profile_per_weapon_group` qui n en gardent qu un profil par arme physique. Le
+# `kill_probability` supprime ignorait la figurine, les regles d arme et le plafond de PV.
 
 
 def _fight_auto_defender(game_state: Dict[str, Any], target_sid: str) -> bool:
@@ -4998,7 +5005,6 @@ FIGHT_CTX = ManualAllocCtx(
     hazard_origin="fight",
     decrement_by_attacks=True,
     emit_unit_death_log=True,
-    on_target_damaged=_fight_on_target_damaged,
     on_unit_destroyed=_fight_on_unit_destroyed,
     auto_decider=_fight_auto_defender,
 )

@@ -854,10 +854,6 @@ shooting_phase_start():
 └── Continue to STEP 2: UNIT_ACTIVABLE_CHECK
 ```
 
-**Cache kill probability :** `game_state["kill_probability_cache"]` n'est plus construit en
-début de phase — rempli à la demande (lazy) au premier appel de `select_best_ranged_weapon()` /
-`select_best_melee_weapon()` pour une paire (unité, cible). Voir `engine/ai/weapon_selector.py`.
-
 #### STEP 1: ELIGIBILITY CHECK (Pool Building Phase)
 
 **Sortie** : shoot_activation_pool (unités éligibles).

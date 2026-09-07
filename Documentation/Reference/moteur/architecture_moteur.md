@@ -9,7 +9,7 @@
 
 ## Règles de codage IA (CORE AI CODING RULES)
 
-Ces règles s'appliquent à tout code du projet ; les en-têtes de fichiers qui citent « architecture_moteur.md COMPLIANCE » (armories TS, `engine/weapons/`, `engine/ai/weapon_selector.py`, `ai/env_wrappers.py`) renvoient à ce bloc.
+Ces règles s'appliquent à tout code du projet ; les en-têtes de fichiers qui citent « architecture_moteur.md COMPLIANCE » (armories TS, `engine/weapons/`, `ai/env_wrappers.py`) renvoient à ce bloc.
 
 - **No implicit recovery** : échec immédiat sur donnée manquante ou invalide.
 - **No temporary/hacky solutions** : toujours la solution claire et minimale.
@@ -98,7 +98,6 @@ Validation fail-fast : toute arme référencée doit exister dans l'armory (`Key
 | `constants.py` | Constantes transverses (`DRAW_WINNER`). |
 | `pve_controller.py` | `class PvEController` : charge le modèle IA du joueur 2 en PvE, décision par MaskablePPO, choix de règle par valeur (`def select_rule_choice_with_policy`). Aucun fallback heuristique. |
 | `weapons/` | `parser.py` : `class ArmoryParser` (parse les armories TS, `get_weapon`/`get_weapons` fail-fast) ; `rules.py` : `class WeaponRulesRegistry` + `def validate_weapon_rules_field` (validation contre `config/weapon_rules.json`). |
-| `ai/weapon_selector.py` | Sélection d'arme par espérance (`def select_best_ranged_weapon`, `def select_best_melee_weapon`) ; remplit `kill_probability_cache` à la demande. |
 | `utils/` | `expected_damage.py` (espérance de dégâts contextualisée) ; `weapon_helpers.py` (accès aux données d'armes). |
 | `roster/` | Paquet de définitions par faction côté moteur (spaceMarine, tyranid). |
 | `engine_modules/` | Paquet vide (`__init__.py` seul). |
@@ -224,7 +223,6 @@ Toute donnée obligatoire absente lève immédiatement (`ConfigurationError` via
 | `units_cache` / `units_cache_prev` | `game_state` | Source unique position+HP des vivants ; cf. invariants ci-dessus. |
 | `unit["los_cache"]` / `unit["los_cover_cache"]` | unité active au tir | Construits par `def build_unit_los_cache` (`shooting_handlers.py`) **pour le tireur actif seulement** à `shooting_unit_activation_start` ; `shooting_phase_start` ne construit plus de cache global (il purge l'existant). Chaque cible est déléguée à `compute_unit_los` (obscuring-aware, règle 13.10) ; le couvert des cibles valides est lu du cache par `def build_cover_by_unit_id_for_valid_targets`, pas recalculé. Couvert = **−1 BS** au jet de touche (règle 13.08), pas un bonus de sauvegarde. |
 | `_move_los_preview_cache` | module `shooting_handlers.py` | Mémoïse les résultats de preview backend (`includeLosCells=False`) sous clé stricte : pid, épisode, tour, step, joueur, unité, destination, empreinte `units_cache`, `units_advanced`, `units_fled`, empreinte de targetabilité des armes. |
-| `kill_probability_cache` | `game_state`, rempli par `engine/ai/weapon_selector.py` | **Lazy** : rempli au premier usage (`select_best_ranged_weapon`/`select_best_melee_weapon`), plus jamais précalculé au début des phases (bloc O(unités×armes×ennemis) supprimé des transitions). |
 | Cache espérance de dégâts | `engine/weapon_damage_cache.py` | Par épisode, lookup O(1). |
 | `_mask_loop_cache` | module `movement_handlers.py` | LRU des boucles de masque monde, clé `(frozenset(footprint_zone), hex_radius, margin)`. |
 | Configs de plateau | `_board_config_cache` (`engine/game_state.py`) | Les `board_config.json` des plateaux source (`config/board/<LxHxR>/`) sont lus une fois. |
