@@ -218,9 +218,14 @@ Ces métriques révèlent la santé de l'algorithme PPO lui-même.
 politique. Miroir lissé dans le dashboard : `00_critical/g_grad_share_policy_mb0`.
 
 Mesuré par trois `backward` séparés sur le minibatch 0 de chaque update (`ai/patched_ppo.py`),
-avec `clip_grad_norm_(max_norm=inf)` qui retourne la norme **sans écrêter** — donc ces courbes
-montrent le gradient **brut**, là où `training_diagnostic/gradient_norm` est lu *après* écrêtage
-et plafonne à `max_grad_norm`.
+avec `clip_grad_norm_(max_norm=inf)` qui retourne la norme **sans écrêter**. Comme
+`training_diagnostic/gradient_norm`, ces courbes montrent donc le gradient **brut** ; elles s'en
+distinguent par la **décomposition** en trois termes, que le tag global ne donne pas.
+
+**Instrument permanent, et non mesure temporaire** : c'est lui qui a réglé `vf_coef`, et toute
+nouvelle lignée (x5) devra refaire ce réglage — il dépend de l'échelle des récompenses et de
+l'état du critic, pas seulement de l'architecture. **Coût** : trois `backward(retain_graph=True)`
+supplémentaires par **update** — minibatch 0 de l'epoch 0 seulement, jamais par minibatch.
 
 **Pourquoi ces courbes existent :** les valeurs de loss ne répondent pas à la question.
 `train/policy_gradient_loss` vaut ~0.0001 parce que `normalize_advantage` centre les avantages
@@ -246,6 +251,41 @@ terme tire sur les poids. Deux runs ont été perdus en réglant `max_grad_norm`
 - **L'écrêtage ne rééquilibre jamais rien** : `max_grad_norm` divise les trois termes par le même
   facteur, il change la taille du pas et jamais sa direction. Relâcher le plafond pour corriger un
   déséquilibre de répartition ne fait qu'accélérer la dérive.
+
+---
+
+#### `training_diagnostic/gradient_norm` (+ `training_diagnostic/grad_clip_fraction`)
+**Ce que c'est :** Norme L2 du gradient de la loss complète, **mesurée AVANT écrêtage** et
+moyennée sur les minibatches de l'update, plus la **part de ces minibatches où l'écrêtage a
+mordu**. Les deux sont publiées par `ai/patched_ppo.py` à partir de la valeur retournée par
+`clip_grad_norm_`, qui est la norme brute et que cet appel calcule de toute façon.
+
+**La norme APRÈS écrêtage n'a pas de tag, délibérément** : elle vaut
+`min(gradient_norm, max_grad_norm)`, donc elle se déduit de ces deux courbes et de la config.
+
+**Ce que ces courbes ont remplacé.** Jusqu'au 2026-09-07, `gradient_norm` était recalculée par
+`ai/training_callbacks.py` sur des `p.grad` **déjà écrêtés** : elle ne pouvait pas dépasser
+`max_grad_norm` et se collait au plafond dès que le gradient brut le franchissait — **56 updates
+sur 60 à exactement 0.5000** sur `run_20260906-183917`. Une courbe plate à la valeur du plafond
+ne disait rien de l'amplitude réelle du pas, et deux runs ont été perdus à régler `max_grad_norm`
+là-dessus.
+
+**Interprétation :**
+- **Norme brute mesurée ~1.18 en début de run et ~0.78 en fin** (relâchement du plafond,
+  `run_20260906-200401`) — le seuil d'alerte `< 10` est donc large et reste discriminant.
+- `grad_clip_fraction` **à 1.0** : le plafond mord en permanence, l'amplitude du pas est
+  constante par construction et `max_grad_norm` est devenu le vrai learning rate.
+- **Vers 0.0** : le plafond ne sert plus de garde-fou, il ne coupe plus aucun pic.
+- Les deux se lisent **ensemble** : une norme qui monte sans que la fraction bouge est un
+  gradient qui grossit sous le plafond ; les deux qui montent ensemble, une saturation.
+
+**Déclencheurs :**
+- `gradient_norm` > 10 → `learning_rate` ↓. **Baisser `max_grad_norm` ne déplace pas cette
+  courbe** : ce plafond borne le pas appliqué, pas la norme publiée ici.
+- `grad_clip_fraction` durablement à 1.0 → relever `max_grad_norm` pour rendre l'amplitude du pas
+  variable, **et donc informative**, avant tout autre réglage.
+- Pour savoir **quel terme** domine la norme, lire `diag/grad_norm_{policy,value,entropy}_mb0` :
+  l'écrêtage divise les trois par le même facteur et ne corrige jamais un déséquilibre.
 
 ---
 

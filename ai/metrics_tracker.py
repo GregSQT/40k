@@ -18,13 +18,14 @@ DUAL TIER SYSTEM (41 Total Metrics):
      - reward_decomposition (5), phase_performance (4),
        aiturn_compliance (3+)
 
-⚙️ TRAINING HEALTH SYSTEM (16 metrics)
+⚙️ TRAINING HEALTH SYSTEM (17 metrics)
   🔥 training_critical/ (6) - Algorithm health indicators
      - policy_loss, value_loss, explained_variance,
        clip_fraction, approx_kl, fps
-  
-  🔍 training_diagnostic/ (5) - Hyperparameter monitoring
-     - learning_rate, entropy_coef, entropy_loss, n_updates, gradient_norm
+
+  🔍 training_diagnostic/ (6) - Hyperparameter monitoring
+     - learning_rate, entropy_coef, entropy_loss, n_updates, gradient_norm,
+       grad_clip_fraction
   
   🔬 training_detailed/ (5+) - Deep algorithm diagnostics
      - advantage metrics, policy gradient details, value function analysis
@@ -1510,12 +1511,13 @@ class W40KMetricsTracker:
         - training_critical/approx_kl - KL divergence between old/new policy
         - training_critical/fps - Training speed
         
-        TRAINING DIAGNOSTIC METRICS (5):
+        TRAINING DIAGNOSTIC METRICS (6):
         - training_diagnostic/learning_rate - Current learning rate value
         - training_diagnostic/entropy_coef - Current entropy coefficient
         - training_diagnostic/entropy_loss - Entropy bonus loss
         - training_diagnostic/n_updates - Total policy updates count
-        - training_diagnostic/gradient_norm - Gradient magnitude (if available)
+        - training_diagnostic/gradient_norm - Raw gradient magnitude, before clipping
+        - training_diagnostic/grad_clip_fraction - Share of minibatches actually clipped
         
         Args:
             model_stats: Dictionary from stable-baselines3 logger (model.logger.name_to_value)
@@ -1592,11 +1594,22 @@ class W40KMetricsTracker:
             n_updates = model_stats['train/n_updates']
             self.writer.add_scalar('training_diagnostic/n_updates', n_updates, self.step_count)
         
-        # TRAINING DIAGNOSTIC: Gradient norm (gradient explosion/vanishing check)
+        # TRAINING DIAGNOSTIC: Gradient norm (gradient explosion/vanishing check).
+        # Norme BRUTE publiee par `ai/patched_ppo.py` — retour de `clip_grad_norm_`, mesure avant
+        # ecretage — donc NON bornee par `max_grad_norm`. La norme apres ecretage n'a pas de tag :
+        # elle vaut min(cette valeur, max_grad_norm).
         if 'train/gradient_norm' in model_stats:
             grad_norm = model_stats['train/gradient_norm']
             self.latest_gradient_norm = grad_norm  # Store for 00_critical/ dashboard
             self.writer.add_scalar('training_diagnostic/gradient_norm', grad_norm, self.step_count)
+
+        # TRAINING DIAGNOSTIC: part des minibatches ou l'ecretage a mordu. A 1.0 la courbe de
+        # gradient_norm est plate au plafond et n'informe plus sur l'amplitude du pas.
+        if 'train/grad_clip_fraction' in model_stats:
+            grad_clip_fraction = model_stats['train/grad_clip_fraction']
+            self.writer.add_scalar(
+                'training_diagnostic/grad_clip_fraction', grad_clip_fraction, self.step_count
+            )
         
         # TRAINING CRITICAL: Frames per second (training efficiency)
         if 'time/fps' in model_stats:
