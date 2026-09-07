@@ -23,12 +23,17 @@ import torch
 # ── helpers ──────────────────────────────────────────────────────────────────────────────────
 
 
-def _make_dict_obs_space():
-    """Espace d'observation Dict minimal (2 clés)."""
+def _make_dict_obs_space(dim_a: int = 4, dim_b: int = 3):
+    """Espace d'observation Dict minimal (2 clés).
+
+    Les dimensions sont paramétrables pour que
+    `test_observations_are_never_uploaded_in_bulk` puisse construire un bloc d'observations
+    plus lourd que les masques : c'est le rapport entre les deux qu'il mesure.
+    """
     from gymnasium import spaces
     return spaces.Dict({
-        "a": spaces.Box(low=-1.0, high=1.0, shape=(4,), dtype=np.float32),
-        "b": spaces.Box(low=0.0, high=1.0, shape=(3,), dtype=np.float32),
+        "a": spaces.Box(low=-1.0, high=1.0, shape=(dim_a,), dtype=np.float32),
+        "b": spaces.Box(low=0.0, high=1.0, shape=(dim_b,), dtype=np.float32),
     })
 
 
@@ -70,12 +75,12 @@ def _fill_buffer(buf, n_steps: int, n_envs: int, n_actions: int, rng: np.random.
 
 class TestGpuMaskableDictRolloutBuffer:
 
-    def _make_buffers(self, n_steps=4, n_envs=3, n_actions=8):
+    def _make_buffers(self, n_steps=4, n_envs=3, n_actions=8, dim_a=4, dim_b=3):
         """Retourne (gpu_buf, ref_buf) identiquement remplis."""
         from ai.gpu_rollout_buffer import GpuMaskableDictRolloutBuffer
         from sb3_contrib.common.maskable.buffers import MaskableDictRolloutBuffer
 
-        obs_space = _make_dict_obs_space()
+        obs_space = _make_dict_obs_space(dim_a, dim_b)
         act_space = _make_discrete_action_space(n_actions)
         kwargs = dict(
             buffer_size=n_steps, observation_space=obs_space, action_space=act_space,
@@ -129,12 +134,60 @@ class TestGpuMaskableDictRolloutBuffer:
         )
 
     def test_get_uploads_gpu_tensors(self):
-        """Après le premier appel de get(), _gpu_obs et _gpu_action_masks sont non-None."""
+        """Après le premier appel de get(), les champs compacts sont non-None."""
         gpu_buf, _ = self._make_buffers()
-        assert gpu_buf._gpu_obs is None, "avant get() : pas encore uploadé"
+        assert gpu_buf._gpu_action_masks is None, "avant get() : pas encore uploadé"
         _ = next(iter(gpu_buf.get(batch_size=4 * 3)))
-        assert gpu_buf._gpu_obs is not None, "après get() : tenseurs GPU créés"
-        assert gpu_buf._gpu_action_masks is not None
+        assert gpu_buf._gpu_action_masks is not None, "après get() : tenseurs GPU créés"
+        assert gpu_buf._gpu_advantages is not None
+
+    def test_observations_are_never_uploaded_in_bulk(self):
+        """Aucun tenseur résident ne porte le bloc d'observations — le poste qui saturait la VRAM.
+
+        Le run P2 du 2026-09-07 est mort de là : à n_steps 32640 et 26 007 flottants par
+        observation, l'upload en bloc réservait 3,16 GiB de VRAM en plus des 3,16 GiB de RAM
+        numpy déjà tenus par `self.observations`, sur un GPU qui n'en a que 8. Le contrôle
+        porte sur la RÉSIDENCE, pas sur le nom d'un attribut : il additionne tout ce que le
+        buffer garde sur le device après un epoch complet et le compare au bloc d'obs.
+
+        L'espace d'observation est volontairement plus large que celui des autres tests
+        (256 + 128 flottants contre 4 + 3) : à 7 flottants par observation, les masques à eux
+        seuls pèsent plus que le bloc entier et le seuil ne prouverait rien.
+        """
+        n_steps, n_envs, n_actions = 4, 3, 8
+        gpu_buf, _ = self._make_buffers(
+            n_steps=n_steps, n_envs=n_envs, n_actions=n_actions, dim_a=256, dim_b=128
+        )
+        _ = list(gpu_buf.get(batch_size=n_steps * n_envs))
+
+        def _resident_elems(value) -> int:
+            """Flottants tenus sur le device par un attribut, tenseur ou dict de tenseurs.
+
+            Le cas DICT n'est pas décoratif : l'upload en bloc des observations rangeait
+            justement un `dict[str, Tensor]`, et une version de ce test qui ne comptait que
+            les tenseurs nus le laissait passer vert avec le défaut réintroduit.
+            """
+            if isinstance(value, torch.Tensor):
+                return value.numel()
+            if isinstance(value, dict):
+                return sum(_resident_elems(v) for v in value.values())
+            return 0
+
+        resident = sum(
+            _resident_elems(v)
+            for name, v in vars(gpu_buf).items()
+            if name.startswith("_gpu_")
+        )
+        obs_block = (256 + 128) * n_steps * n_envs
+        assert resident < obs_block, (
+            f"{resident} flottants résidents pour un bloc d'observations de {obs_block} : "
+            "les observations sont uploadées en bloc, la VRAM repart au régime qui a tué le "
+            "run P2 du 2026-09-07"
+        )
+        # Et elles sont bien restées côté hôte, prêtes à être indexées minibatch par minibatch.
+        assert all(
+            isinstance(v, np.ndarray) for v in gpu_buf.observations.values()
+        ), "les observations doivent rester en numpy"
 
     def test_gpu_masks_dtype_float32(self):
         """Les masques GPU sont en float32 (pour la policy), même si stockés bool."""
@@ -182,23 +235,27 @@ class TestGpuMaskableDictRolloutBuffer:
             )
 
     def test_second_epoch_reuses_gpu_tensors(self):
-        """Le second appel de get() ne réalloue pas les tenseurs GPU (même objet)."""
+        """Le second appel de get() ne réalloue pas les champs compacts (même objet).
+
+        Les observations, elles, sont retransférées à chaque epoch depuis le 2026-09-07 :
+        c'est le prix assumé de leur non-résidence, cf. le docstring d'ai/gpu_rollout_buffer.py.
+        """
         gpu_buf, _ = self._make_buffers()
         _ = list(gpu_buf.get(batch_size=4 * 3))
-        assert gpu_buf._gpu_obs is not None
         assert gpu_buf._gpu_action_masks is not None
-        obs_ref = {k: v.data_ptr() for k, v in gpu_buf._gpu_obs.items()}
+        assert gpu_buf._gpu_advantages is not None
         masks_ref = gpu_buf._gpu_action_masks.data_ptr()
+        adv_ref = gpu_buf._gpu_advantages.data_ptr()
 
         # Deuxième epoch — generator_ready est True, upload ne doit pas se reproduire.
         _ = list(gpu_buf.get(batch_size=4 * 3))
-        assert gpu_buf._gpu_obs is not None
         assert gpu_buf._gpu_action_masks is not None
-        assert {k: v.data_ptr() for k, v in gpu_buf._gpu_obs.items()} == obs_ref, (
-            "deuxième epoch : tenseurs obs réalloués (H2D supplémentaire non voulu)"
-        )
+        assert gpu_buf._gpu_advantages is not None
         assert gpu_buf._gpu_action_masks.data_ptr() == masks_ref, (
             "deuxième epoch : tenseurs masks réalloués"
+        )
+        assert gpu_buf._gpu_advantages.data_ptr() == adv_ref, (
+            "deuxième epoch : advantages réalloués (H2D supplémentaire non voulu)"
         )
 
 
