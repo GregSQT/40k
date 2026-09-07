@@ -5432,12 +5432,22 @@ def _score_stage_against_pool(
     contre une archive figee », avec la normalisation propre de l'archive. Un second harnais
     aurait mesure la meme chose autrement.
 
-    MOYENNE DE `eval_repeats` BLOCS, et non une mesure unique (2026-09-07) : chaque appel tire sa
-    graine au hasard, donc les blocs echantillonnent des parties differentes et la moyenne divise
-    l'erreur-type par la racine du nombre de blocs. Sur un bloc de 300 episodes, un taux proche de
-    0.5 a une erreur-type de 2,9 points — l'ecart meme que le gate doit trancher entre 0.50 et
-    0.55. Repeter le meme bloc n'aurait rien apporte tant que `base_seed` valait 42 en dur : les
-    trois mesures etaient identiques au bit pres.
+    `eval_repeats` BLOCS MOYENNES, et non une mesure unique (2026-09-07). Ce qui reduit l'erreur
+    est le NOMBRE TOTAL d'episodes joues — `eval_repeats * eval_episodes`, soit 900 la ou une
+    mesure unique en jouait 300 : sur 300 episodes, un taux proche de 0.5 a une erreur-type de
+    2,9 points, l'ecart meme que le gate doit trancher entre 0.50 et 0.55 ; sur 900 elle tombe a
+    1,7. Repeter le bloc n'aurait rien apporte tant que `base_seed` valait 42 en dur — les trois
+    mesures etaient identiques au bit pres —, d'ou le tirage au hasard qui l'accompagne.
+
+    ⚠️ LE DECOUPAGE EN BLOCS N'APPORTE AUCUN GAIN STATISTIQUE PAR LUI-MEME, et l'affirmer serait
+    faux : `_episode_seed` etant `(base_seed + md5(bot:scenario:ep_idx)) % 2**31` et `n_episodes`
+    se repartissant par `// n_scenarios`, trois appels de 300 a graines tirees et un appel unique
+    de 900 produisent le meme nombre d'episodes independants par scenario, donc la MEME
+    erreur-type. Ce que les blocs achetent est la DISPERSION VISIBLE entre eux, imprimee bloc par
+    bloc ci-dessous : un gate a 0.56 dont les trois blocs valent 0.55/0.56/0.57 ne se lit pas
+    comme un gate a 0.56 dont les blocs valent 0.44/0.58/0.66. Un appel unique de 900 rendrait le
+    meme chiffre sans cette lecture, pour deux chargements d'archive et deux cycles de pool de
+    moins par membre. C'est le seul arbitrage ici, et il est tranche en faveur de la dispersion.
 
     C'est la MEME grandeur que celle sur laquelle l'early-stop decide en cours de run (la moyenne
     glissante des sondes, `pool_eval/vs_<tag>_<probe_window>ep`), pour que les deux verdicts se
