@@ -412,3 +412,51 @@ def test_the_model_is_read_once_not_at_every_config_read(tmp_path) -> None:
         train_module.announce_lineage_continuity = vraie  # type: ignore[assignment]
 
     assert len(lectures) == 1, f"{len(lectures)} ouvertures du zip pour 5 lectures de config"
+
+
+# ── Le zip qu'une etape PROMEUT doit rester lisible par l'etape suivante ────────────────────
+
+
+def test_a_promoted_model_is_readable_by_the_next_stage(tmp_path) -> None:
+    """Boucle complete sur un VRAI zip SB3 : regime applique -> sauvegarde -> relecture.
+
+    SB3 serialise `learning_rate` dans le membre `data` du zip (`lr_schedule` en est exclu), et
+    `data_to_json` encode par cloudpickle tout ce qui n'est pas un scalaire JSON. Un
+    `ConstantSchedule` pose sur `learning_rate` s'ecrit donc dans l'archive promue sous la forme
+    `{":type:": ..., ":serialized:": ...}`, la ou `_model_scalar` attend un nombre.
+
+    LE DEFAUT ETAIT MASQUE PAR LES RAMPES. Tant que `learning_rate` etait un dict,
+    `LearningRateScheduleCallback._apply` reecrivait un flottant a chaque episode. Le regime de
+    lignee posant un LR SCALAIRE, `setup_callbacks` ne monte plus ce callback : plus rien ne
+    remettait un nombre, et la premiere etape jouee sous ce regime promouvait un zip que la
+    suivante ne pouvait plus ouvrir.
+
+    Les autres tests de ce fichier ecrivent `data` a la main et ne peuvent donc pas voir ce que
+    `model.save()` fait reellement de `learning_rate`. C'est exactement l'angle mort par lequel le
+    defaut est passe : chaque etape `from:` relit le zip promu par la precedente.
+    """
+    import gymnasium as gym
+    from stable_baselines3 import PPO
+
+    from ai.train import _apply_curriculum_model_params, announce_lineage_continuity
+
+    model = PPO("MlpPolicy", gym.make("CartPole-v1"), n_steps=16, batch_size=8, device="cpu")
+    _apply_curriculum_model_params(
+        model,
+        {"learning_rate": 0.001, "ent_coef": 0.03, "n_steps": 16},
+        log=lambda _m: None,
+    )
+    path = str(tmp_path / "model_Agent_P2.zip")
+    model.save(path)
+
+    with zipfile.ZipFile(path) as archive:
+        data = json.loads(archive.read("data"))
+    assert isinstance(data["learning_rate"], (int, float)), (
+        f"le zip promu porte {data['learning_rate']!r} : l'etape suivante ne peut pas l'ouvrir"
+    )
+
+    # Le controle de continuite de l'etape suivante doit passer sans lever.
+    ecarts = announce_lineage_continuity(
+        path, LINEAGE["model_params"], "P3", log=lambda *_a, **_k: None
+    )
+    assert ecarts == {}, "les valeurs posees sont celles du regime : aucun ecart attendu"

@@ -24,7 +24,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ai.curriculum import StageOrigin, stage_model_path, stage_origin
+from ai.curriculum import stage_model_path, stage_origin
 from ai.run_state import save_run_state
 from ai.training_callbacks import ExploiterProbeCallback, PoolEarlyStoppingCallback
 from shared.data_validation import ConfigurationError
@@ -95,7 +95,7 @@ def _count_pool_probes(callback: PoolEarlyStoppingCallback, score: float = 0.3) 
 
 def test_pool_resume_does_not_chain_probes_before_the_first_stage_interval():
     """Reprise à 80 000 : aucune sonde avant 90 000, puis UNE par tranche de 10 000."""
-    callback = _pool_callback(episode_origin=P2_EPISODE_OFFSET, timesteps_origin=P1_NUM_TIMESTEPS)
+    callback = _pool_callback(episode_origin=P2_EPISODE_OFFSET)
     tracker = _tracker(P2_EPISODE_OFFSET)
     callback.metrics_tracker = tracker
     callback.num_timesteps = P1_NUM_TIMESTEPS + 24
@@ -128,7 +128,7 @@ def test_pool_decision_gates_count_episodes_from_the_stage_start():
     # 50 000 : au-DESSUS des 10 000 épisodes d'étape joués, au-DESSOUS des 90 000 du cumul de
     # lignée. C'est exactement l'écart qui distingue les deux lectures.
     callback = _pool_callback(
-        episode_origin=P2_EPISODE_OFFSET, timesteps_origin=P1_NUM_TIMESTEPS,
+        episode_origin=P2_EPISODE_OFFSET,
         early_stop_cfg={**POOL_EARLY_STOP_CFG, "promote_min_episodes": 50_000,
                         "destroy_min_episodes": 20_000},
     )
@@ -142,6 +142,60 @@ def test_pool_decision_gates_count_episodes_from_the_stage_start():
         "l'étape aurait été promue au premier pas"
     )
     assert callback.stop_verdict is None
+
+
+def test_pool_resume_from_crash_does_not_chain_the_missed_probes():
+    """`--resume-from` en MILIEU d'étape : une seule sonde, pas les treize crans manqués.
+
+    L'origine est ancrée sur l'archive SOURCE, donc `_stage_episode()` vaut d'emblée 130 000 alors
+    que `_next_probe_episode` part du premier cran (10 000). Avec une incrémentation, les crans
+    10 000 … 130 000 se déclenchaient sur treize pas CONSÉCUTIFS, sans une seule mise à jour de
+    politique entre eux ; à la deuxième, l'historique atteignait deux points et
+    `evaluate_pool_decision` rendait un verdict — sur deux mesures des mêmes poids, à un
+    `stage_episodes` (130 000) très au-dessus de `promote_min_episodes`. Le run de reprise
+    s'arrêtait donc avant d'avoir entraîné.
+    """
+    stage_episode_at_crash = 130_000
+    callback = _pool_callback(
+        episode_origin=P2_EPISODE_OFFSET,
+        early_stop_cfg={**POOL_EARLY_STOP_CFG, "promote_min_episodes": 50_000,
+                        "destroy_min_episodes": 20_000},
+    )
+    tracker = _tracker(P2_EPISODE_OFFSET + stage_episode_at_crash)
+    callback.metrics_tracker = tracker
+    # Scores au-dessus des seuils de promotion : si un deuxième point entrait dans l'historique,
+    # le verdict tomberait et le run s'arrêterait.
+    probed = _count_pool_probes(callback, score=0.99)
+
+    for _ in range(13):
+        assert callback._on_step() is True
+
+    assert probed == [P2_EPISODE_OFFSET + stage_episode_at_crash], (
+        "les crans manqués doivent être rattrapés d'un coup, pas rejoués un par un"
+    )
+    assert callback.stop_verdict is None
+    assert callback._next_probe_episode == 140_000
+
+    # La cadence reprend normalement au cran suivant.
+    tracker.episode_count = P2_EPISODE_OFFSET + 140_000
+    callback._on_step()
+    assert len(probed) == 2
+
+
+def test_exploiter_resume_from_crash_does_not_chain_the_missed_probes():
+    """Jumeau exploiteur : `_next_probe_episode` rattrape aussi la cadence."""
+    lineage_count = 530_000
+    callback = _exploiter_callback(episode_origin=lineage_count)
+    tracker = _tracker(lineage_count + 50_000)  # 25 crans de 2 000 manqués
+    callback.metrics_tracker = tracker
+    probes: List[str] = []
+    callback._probe = lambda n_episodes, label: probes.append(label) or 0.1  # type: ignore[method-assign]
+
+    for _ in range(25):
+        assert callback._on_step() is True
+
+    assert probes == ["bon-marche"], "une seule sonde, pas les 25 crans manqués"
+    assert callback._next_probe_episode == 52_000
 
 
 def test_pool_fresh_run_keeps_its_cadence():
@@ -163,7 +217,7 @@ def test_pool_fresh_run_keeps_its_cadence():
 def test_exploiter_resumed_lineage_is_not_censored_at_the_first_step():
     """E1 `from:P3` : le cumul de la lignée dépasse `budget_cap` dès le premier pas."""
     lineage_count = 530_000  # > budget_cap 200 000
-    callback = _exploiter_callback(episode_origin=lineage_count, timesteps_origin=P1_NUM_TIMESTEPS)
+    callback = _exploiter_callback(episode_origin=lineage_count)
     tracker = _tracker(lineage_count)
     callback.metrics_tracker = tracker
     callback._probe = lambda n_episodes, label: 0.1  # type: ignore[method-assign]
@@ -202,8 +256,8 @@ def test_exploiter_budget_and_curve_are_stage_relative():
 def test_constructors_reject_non_integer_or_negative_origins(bad: Any):
     with pytest.raises(ValueError, match="episode_origin"):
         _pool_callback(episode_origin=bad)
-    with pytest.raises(ValueError, match="timesteps_origin"):
-        _exploiter_callback(timesteps_origin=bad)
+    with pytest.raises(ValueError, match="episode_origin"):
+        _exploiter_callback(episode_origin=bad)
 
 
 def test_stage_episode_is_counted_from_the_origin():
@@ -224,9 +278,8 @@ def _write_sb3_like_zip(path: Path, num_timesteps: int) -> None:
 def test_stage_origin_reads_the_source_archive_not_the_resumed_checkpoint(tmp_path: Path):
     """E1 `from:P3` repris par `--resume-from` après crash : l'origine reste celle de P3.
 
-    Le canonique porte l'état du checkpoint (680 000 épisodes, plus de pas) ; `stage_origin`
-    doit rendre l'état de l'archive P3 (530 000 / 13 749 576), sinon `budget_cap` repartirait du
-    point de crash.
+    Le canonique porte l'état du checkpoint (680 000 épisodes) ; `stage_origin` doit rendre celui
+    de l'archive P3 (530 000), sinon `budget_cap` repartirait du point de crash.
     """
     canonical = tmp_path / "model_Agent.zip"
     _write_sb3_like_zip(canonical, num_timesteps=20_000_000)
@@ -235,28 +288,16 @@ def test_stage_origin_reads_the_source_archive_not_the_resumed_checkpoint(tmp_pa
     _write_sb3_like_zip(source, num_timesteps=P1_NUM_TIMESTEPS)
     save_run_state(str(source), 530_000)
 
-    origin = stage_origin(str(canonical), {"init": "from:P3"})
-
-    assert origin == StageOrigin(episodes=530_000, timesteps=P1_NUM_TIMESTEPS)
+    assert stage_origin(str(canonical), {"init": "from:P3"}) == 530_000
 
 
 def test_stage_origin_is_zero_for_a_new_stage(tmp_path: Path):
-    assert stage_origin(str(tmp_path / "model_Agent.zip"), {"init": "new"}) == StageOrigin(0, 0)
+    assert stage_origin(str(tmp_path / "model_Agent.zip"), {"init": "new"}) == 0
 
 
 def test_stage_origin_refuses_a_missing_source_archive(tmp_path: Path):
     with pytest.raises(FileNotFoundError, match="from:P3"):
         stage_origin(str(tmp_path / "model_Agent.zip"), {"init": "from:P3"})
-
-
-def test_stage_origin_refuses_an_archive_without_num_timesteps(tmp_path: Path):
-    canonical = tmp_path / "model_Agent.zip"
-    source = Path(stage_model_path(str(canonical), "P3"))
-    with zipfile.ZipFile(source, "w") as archive:
-        archive.writestr("data", json.dumps({"ent_coef": 0.01}))
-    save_run_state(str(source), 1)
-    with pytest.raises(ConfigurationError, match="num_timesteps"):
-        stage_origin(str(canonical), {"init": "from:P3"})
 
 
 # ── PoolEarlyStoppingCallback : sonde baseline au démarrage en warm start ──────────────────────
@@ -269,7 +310,7 @@ def test_pool_warm_start_fires_baseline_probe_at_stage_episode_zero():
     référence — cause directe des investigations 2026-09-05/06 (0,347 lu comme chute depuis 0,472).
     """
     episode_origin = P2_EPISODE_OFFSET
-    callback = _pool_callback(episode_origin=episode_origin, timesteps_origin=P1_NUM_TIMESTEPS)
+    callback = _pool_callback(episode_origin=episode_origin)
     tracker = _tracker(episode_origin)
     callback.metrics_tracker = tracker
 
@@ -295,9 +336,7 @@ def test_pool_warm_start_baseline_above_threshold_does_not_trigger_early_stop():
     promue sur la seule mesure de son propre modèle de départ, avant d'avoir joué un épisode.
     """
     episode_origin = P2_EPISODE_OFFSET
-    callback = _pool_callback(
-        episode_origin=episode_origin, timesteps_origin=P1_NUM_TIMESTEPS
-    )
+    callback = _pool_callback(episode_origin=episode_origin)
     callback.metrics_tracker = _tracker(episode_origin)
     callback._probe = lambda: {label: 0.60 for _, label in callback.pool_archives}  # type: ignore[method-assign]
 
@@ -328,7 +367,7 @@ def test_pool_warm_start_baseline_is_idempotent_across_multiple_learn_calls():
     quatre updates — sans flag idempotent, _probe() serait appelée des dizaines de fois.
     """
     episode_origin = P2_EPISODE_OFFSET
-    callback = _pool_callback(episode_origin=episode_origin, timesteps_origin=P1_NUM_TIMESTEPS)
+    callback = _pool_callback(episode_origin=episode_origin)
     callback.metrics_tracker = _tracker(episode_origin)
 
     probe_calls: List[int] = []
