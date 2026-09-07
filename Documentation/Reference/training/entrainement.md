@@ -581,9 +581,9 @@ Ce que `x1_lineage` redéclare, et ce que cela remplace (vingt rampes `decay_fra
 | `learning_rate` | **0.001** scalaire | 0.002 → 0.0005, `decay_fraction` 0.9 |
 | `ent_coef` | **0.03** scalaire | 0.1 → 0.01, `decay_fraction` 0.4 |
 | `n_steps` | **32640** | 8160 |
-| `batch_size` | **4080** | 1020 |
 | `vf_coef` | **0.15** | 0.5 |
 | `agent_seat_p2_ratio` | **0.6** | 0.75 |
+| `batch_size` | *hérité* — 1020 | 1020 |
 | `max_grad_norm` | *hérité* — 0.5 | 0.5 |
 
 `vf_coef` 0.15 est le réglage **mesuré** : il porte la part du gradient revenant à la politique de 0,235 à 0,62, `explained_variance` intacte. À 0.5, les trois quarts de la capacité d'apprentissage allaient au critic — dont `explained_variance` valait déjà 0,87 — pendant que la politique, seule à jouer les parties, n'en recevait qu'un quart (décomposition sur 44 updates, `run_20260906-225839` : value 1.035 / policy 0.323 / entropy 0.018). L'écrêtage n'y changeait rien : il divise les trois termes par le **même** facteur, donc il réduit la taille du pas sans corriger sa direction. `n_steps` × 4 attaque l'autre moitié du problème — la variance d'un épisode de self-play à parité est maximale par construction. Lecture : `00_critical/g_grad_share_policy_mb0`.
@@ -598,9 +598,18 @@ Une étape reprise **ne peut plus déclarer** `model_params` ni `agent_seat_p2_r
 
 `checkpoint_save_freq` est **aligné sur `x1`** : SB3 sauvegarde tous les `save_freq` **appels** (pas des épisodes).
 
-`batch_size: 1020` : à `n_steps: 8160` / `n_envs: 24`, le rollout vaut `(8160 // 24) × 24 = 8160 = 8 × 1020` — 8 mini-lots pleins, aucun tronqué. Le profil de lignée garde ce rapport : `32640 = 8 × 4080` (verrou `tests/unit/ai/test_rollout_buffer_sizing.py`, qui mesure les profils **résolus** — un dernier mini-lot tronqué donnerait des updates de poids inégaux).
+`batch_size: 1020` : à `n_steps: 8160` / `n_envs: 24`, le rollout vaut `(8160 // 24) × 24 = 8160 = 8 × 1020` — 8 mini-lots pleins, aucun tronqué. Le profil de lignée **hérite** cette valeur : `32640 = 32 × 1020`, toujours sans reste (verrou `tests/unit/ai/test_rollout_buffer_sizing.py`, qui mesure les profils **résolus** — un dernier mini-lot tronqué donnerait des updates de poids inégaux). Le nombre de mini-lots n'est donc plus constant entre les deux profils, et ce n'était pas un objectif : ce que la lignée veut est le **rollout**, pas le mini-lot.
 
-⚠️ **Coût mémoire du rollout ×4.** Le rollout entier est monté sur le GPU en une fois (`ai/gpu_rollout_buffer.py::get`) : les observations pèsent ~3,4 Go à `n_steps` 32640 contre ~0,85 Go à 8160. La garde de `ai/train.py::apply_rollout_n_steps` mesure la mémoire **système** et ne verra pas une saturation de la carte. Un échec surviendrait à la **première** update, soit ~300 épisodes ; il se corrige en `16320` / `2040`.
+⚠️ **Coût mémoire du rollout ×4 — l'avertissement s'est réalisé le 2026-09-07.** Le rollout entier est monté sur le GPU en une fois (`ai/gpu_rollout_buffer.py::get`) : les observations pèsent **3,37 Go** à `n_steps` 32640 contre ~0,85 Go à 8160. La garde de `ai/train.py::apply_rollout_n_steps` mesure la mémoire **système** et ne voit pas une saturation de la carte. Avec le `batch_size` 4080 que le profil portait alors, le pic atteignait **8,89 Go sur une carte de 8,19** et P2 est morte à sa première update (290 épisodes) sur un `RuntimeError: CUDA driver error: device not ready` — message d'allocateur, sans aucun lien apparent avec `batch_size`.
+
+Le remède que ce document prescrivait, `16320` / `2040`, a été **écarté** : il sacrifie la moitié du rollout, c'est-à-dire le seul levier que le profil de lignée existe pour porter. Retenu à la place, `batch_size` rendu à l'héritage (**1020**), rollout intact. Mesures à rollout et `n_epochs` constants, RTX 4060 Laptop 8,19 Go :
+
+| `batch_size` | Pic alloué | Temps par mini-lot | Temps par update (128 vs 32 mini-lots) |
+|---|---|---|---|
+| 4080 | 8,89 Go — déborde en RAM hôte | ~7,3 s | ~4 min |
+| **1020** | **4,77 Go — tient en VRAM** | **~0,134 s** | **~17 s** |
+
+Le bench du 2026-08-26 disait déjà la même chose (`Documentation/Chantiers/backlog/perf_entrainement.md` : 4080 à 2 769 éch/s, ×2,6 pire que 1020, VRAM saturée) et avait été manqué à la rédaction du profil. Effet sur l'apprentissage, à surveiller au premier run : quatre fois plus de pas de gradient par epoch, donc des mini-lots plus bruités et un `target_kl` (0.015, hérité) atteint plus tôt dans l'epoch.
 
 ### Unit Rules Implementation Flags (`RULES_STATUS`)
 

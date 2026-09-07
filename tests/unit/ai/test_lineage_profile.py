@@ -57,7 +57,7 @@ def _cfg_lineage() -> Dict[str, Any]:
             "ent_coef": 0.03,
             "learning_rate": 0.001,
             "n_steps": 32640,
-            "batch_size": 4080,
+            "batch_size": 1020,
             "n_epochs": 4,
             "vf_coef": 0.15,
             "max_grad_norm": 0.5,

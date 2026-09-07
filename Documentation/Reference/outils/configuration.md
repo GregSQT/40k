@@ -169,13 +169,19 @@ Le mode ne tient donc que tant que le pic reste sous la VRAM, ce que la config n
 
 | Configuration (rollout 32640, buffer GPU-résident 3,37 Go) | Pic alloué | `expandable_segments:True` |
 |---|---|---|
-| `batch_size` 4080 | 8,89 Go | ❌ `device not ready` |
-| `batch_size` 1020 | 4,77 Go | ✅ |
+| `batch_size` 4080 (profil de lignée jusqu'au 2026-09-07) | 8,89 Go | ❌ `device not ready` |
+| `batch_size` 1020 (valeur retenue) | 4,77 Go | ✅ |
 
 Autrement dit il transforme un dépassement de VRAM en panne opaque au lieu d'un OOM explicite ou
 d'un débordement fonctionnel. Le garde-fou de `ai/train.py::apply_rollout_n_steps` ne rattrape rien
 ici : il dimensionne le buffer sur la **RAM hôte**, alors que `GpuMaskableDictRolloutBuffer`
 (`ai/gpu_rollout_buffer.py`) en uploade l'intégralité en **VRAM** pendant tout l'update.
+
+Le `batch_size` du profil de lignée est depuis redescendu à 1020, donc le pic tient en VRAM et ce
+mode redeviendrait techniquement praticable ici. Il reste à `False` : il n'apporte qu'une moindre
+fragmentation, et il coûte la disparition du filet de débordement WSL **et** la lisibilité du
+diagnostic le jour où un réglage refranchit le plafond. Cf.
+`Documentation/Reference/training/entrainement.md`, section régime de lignée.
 
 ### Example
 
