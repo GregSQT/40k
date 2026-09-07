@@ -252,13 +252,25 @@ class AnalyzerConfig:
 
 
 def _rng_weapon_display_name(
-    rng_weapons: List[Any], weapon_code: str
-) -> Optional[str]:
-    """Display name du premier profil d'arme RNG dont le code correspond, ou None."""
-    for _w in rng_weapons:
-        if isinstance(_w, dict) and _w.get("code") == weapon_code:
-            return require_key(_w, "display_name")
-    return None
+    display_name_by_code: Dict[str, str], weapon_code: str, unit_type: str, rule_id: str
+) -> str:
+    """Display name du profil d'arme RNG que `weapon_code` désigne, dans TOUTE l'armurerie.
+
+    L'index est global et non limité aux armes du porteur : 19.04 fait porter une capacité
+    d'unité à chaque figurine de l'unité rattachée, y compris à celles que le porteur de la règle
+    n'équipe pas lui-même.
+
+    Un code introuvable est une config fausse, pas un cas métier : la règle cite une arme qui
+    n'existe nulle part. L'ancien repli sur `None` la laissait tomber en silence, et le plafond
+    d'attaques de l'analyzer s'en trouvait sous-évalué sans le moindre signal.
+    """
+    _dn = display_name_by_code.get(weapon_code)  # get allowed : absence = erreur levée juste après
+    if _dn is None:
+        raise ValueError(
+            f"Unit '{unit_type}' rule '{rule_id}' : rule_args.weapon_code={weapon_code!r} ne "
+            f"correspond à aucun profil d'arme RNG de l'armurerie"
+        )
+    return _dn
 
 
 def load_analyzer_config() -> AnalyzerConfig:
@@ -334,6 +346,32 @@ def load_analyzer_config() -> AnalyzerConfig:
         if normalized_rule_name not in display_rule_name_to_ids:
             display_rule_name_to_ids[normalized_rule_name] = set()
         display_rule_name_to_ids[normalized_rule_name].add(display_rule_id)
+
+    # Index GLOBAL `weapon_code` → `display_name`, bâti sur l'armurerie entière et non sur les
+    # armes du porteur de la règle. 19.04 : « abilities/rules that affect a unit apply to every
+    # model in an attached unit » — le porteur d'une capacité d'arme n'a donc AUCUNE raison de
+    # porter lui-même cette arme. Mesuré : `IntercessorGrenadeLauncher` porte Hail of Bolts
+    # (weapon_code `bolt_rifle`) sans porter de bolt rifle ; résolu localement, le bonus tombait
+    # dans le vide et le plafond de tir de l'Ancient rattaché perdait ses +2 attaques → 6 faux
+    # « Shots over RNG_NB » sur un run de 600 épisodes, dès que tous les Intercessors de base
+    # étaient morts. Mesuré aussi : 120 codes d'arme, ZÉRO collision de display_name — l'index
+    # est donc bien défini.
+    rng_weapon_display_name_global: Dict[str, str] = {}
+    for _armory_unit in unit_registry.units.values():
+        for _armory_weapon in require_key(_armory_unit, "RNG_WEAPONS"):
+            if not isinstance(_armory_weapon, dict):
+                continue
+            _code = _armory_weapon.get("code")  # get allowed : profil sans code = non adressable par règle
+            if not _code:
+                continue
+            _name = require_key(_armory_weapon, "display_name")
+            _known = rng_weapon_display_name_global.get(_code)  # get allowed : premier passage = absent
+            if _known is not None and _known != _name:
+                raise ValueError(
+                    f"armurerie : le code d'arme {_code!r} désigne deux profils différents "
+                    f"({_known!r} et {_name!r}) — une règle qui le cite serait ambiguë"
+                )
+            rng_weapon_display_name_global[_code] = _name
 
     for unit_type, unit_data in unit_registry.units.items():
         rng_weapons = require_key(unit_data, "RNG_WEAPONS")
@@ -613,9 +651,10 @@ def load_analyzer_config() -> AnalyzerConfig:
                         f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
                         f"rule_args.attacks_bonus for weapon_attacks_bonus_vs_designated_target"
                     )
-                _dn = _rng_weapon_display_name(rng_weapons, weapon_code)
-                if _dn is not None:
-                    atk_bonus_by_weapon[_dn] = int(attacks_bonus)
+                _dn = _rng_weapon_display_name(
+                    rng_weapon_display_name_global, weapon_code, unit_type, direct_rule_id
+                )
+                atk_bonus_by_weapon[_dn] = int(attacks_bonus)
             if "weapon_attacks_bonus_vs_keyword" in rule_effect_ids:
                 rule_args = rule.get("rule_args")
                 if not isinstance(rule_args, dict):
@@ -646,12 +685,13 @@ def load_analyzer_config() -> AnalyzerConfig:
                     str(k).strip().upper().replace(" ", "_").replace("-", "_")
                     for k in excluded_kws
                 ]
-                _dn = _rng_weapon_display_name(rng_weapons, weapon_code)
-                if _dn is not None:
-                    atk_bonus_vs_keyword_by_weapon[_dn] = {
-                        "attacks_bonus": int(attacks_bonus),
-                        "excluded_keywords": _excl_norm,
-                    }
+                _dn = _rng_weapon_display_name(
+                    rng_weapon_display_name_global, weapon_code, unit_type, direct_rule_id
+                )
+                atk_bonus_vs_keyword_by_weapon[_dn] = {
+                    "attacks_bonus": int(attacks_bonus),
+                    "excluded_keywords": _excl_norm,
+                }
             if "grant_weapon_rule_vs_designated_target" in rule_effect_ids:
                 rule_args = rule.get("rule_args")
                 if not isinstance(rule_args, dict):
@@ -665,9 +705,10 @@ def load_analyzer_config() -> AnalyzerConfig:
                         f"Unit '{unit_type}' rule '{direct_rule_id}' missing "
                         f"rule_args.weapon_code for grant_weapon_rule_vs_designated_target"
                     )
-                _dn = _rng_weapon_display_name(rng_weapons, weapon_code)
-                if _dn is not None:
-                    blast_per5_nonmv_weapons.add(_dn)
+                _dn = _rng_weapon_display_name(
+                    rng_weapon_display_name_global, weapon_code, unit_type, direct_rule_id
+                )
+                blast_per5_nonmv_weapons.add(_dn)
             if "toughness_bonus_while_waaagh" in rule_effect_ids:
                 rule_args = rule.get("rule_args")
                 if not isinstance(rule_args, dict):

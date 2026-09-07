@@ -598,6 +598,13 @@ def handle_fight_move(
             state.positions_by_model, state.unit_positions, state.unit_base,
             state.unit_player, state.unit_hp, unit_id,
         )
+        # Occasion JUGÉE, pour CELLE des deux règles que cette ligne exerce (12.03 pile-in ou
+        # 12.08 consolidation) : le budget va être mesuré par figurine juste en dessous.
+        note_rule_usage(
+            stats,
+            "PROJ.1.4.pile_in" if kind == "pile_in" else "PROJ.1.4.consolidation",
+            player,
+        )
         # Budget pris à la MÊME source que le moteur : 3" × résolution du run.
         if _per_model_move_violation(
             prev_models, new_models, anchor_from, anchor_to,

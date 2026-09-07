@@ -6739,8 +6739,14 @@ class W40KEngine(gym.Env):
         if include_target_models:
             target_id = raw_log.get("targetId")  # get allowed
             if target_id is not None:
-                details["target_models_segment"] = self._models_segment_for_unit(
-                    target_id, label="TARGET_MODELS"
+                # Segment PRÉ-CAPTURÉ par l'émetteur (`_emit_squad_shoot_log`), au même titre que
+                # `models_segment` ci-dessus : le flush intervient après `_fight_v11_gym_settle`,
+                # donc après les pile-in et consolidations du groupe, et lire les positions à cet
+                # instant les datait d'après le mouvement au lieu d'avant.
+                details["target_models_segment"] = (
+                    raw_log["target_models_segment"]
+                    if "target_models_segment" in raw_log
+                    else self._models_segment_for_unit(target_id, label="TARGET_MODELS")
                 )
         # L10 — type de tir EXPLICITE (10.02) ; None sur le combat (pas de shoot_type_choose).
         _shoot_type = raw_log.get("shootType")  # get allowed : absent sur les logs de combat
@@ -7644,11 +7650,30 @@ class W40KEngine(gym.Env):
                         "waiting_for_player": False,
                     }
                 elif _is_desp:
+                    from engine.phase_handlers.shared_utils import validate_squad_coherency
                     _anchor_after_de = require_unit_position(str(squad_id), self.game_state)
-                    if _anchor_after_de != _anchor_before_de:
-                        # Pertes de Desperate Escape ont décalé l'ancre : le pool (construit
-                        # depuis l'ancre d'avant) est périmé, la destination sélectionnée par
-                        # l'agent n'est plus atteignable depuis la nouvelle ancre. Skip du move.
+                    # Deux façons pour les pertes du hazard de périmer le plan, et une seule
+                    # issue légale pour les deux.
+                    #
+                    # (a) l'ANCRE a bougé : le pool a été construit depuis l'ancre d'avant, la
+                    #     destination choisie n'est plus atteignable depuis la nouvelle.
+                    # (b) la FORMATION des survivants est rompue : la figurine morte assurait la
+                    #     liaison. La translation rigide la conserve rompue, et 03.03 impose
+                    #     d'« end any kind of move in coherency ». L'ancre, elle, peut n'avoir pas
+                    #     bougé d'un pouce — c'est le cas quand le socle mort est au MILIEU de la
+                    #     chaîne : mesuré une fois sur un run de 600 épisodes (épisode 204,
+                    #     escouade 1 laissée à 4 hex d'écart pour une cohésion de 2).
+                    #
+                    # 03.01 ENDING A MOVE tranche l'issue : « If one or more of the above
+                    # conditions are not met, that unit cannot make that move and its models are
+                    # returned to their positions at the start of that move » — l'unité « could
+                    # either attempt another set up or remain stationary (09.04) ». D'où le même
+                    # `end_activation(WAIT)` dans les deux cas. REGAINING COHERENCY (End of Turn)
+                    # est un remède aux pertes, pas une licence à terminer un mouvement brisé.
+                    if (
+                        _anchor_after_de != _anchor_before_de
+                        or not validate_squad_coherency(self.game_state, str(squad_id))
+                    ):
                         clear_desperate_escape_state(self.game_state)
                         clear_squad_move_cell_map(self.game_state, str(squad_id))
                         self.game_state.get("_squad_advance_rolls", {}).pop(  # get allowed
@@ -7673,6 +7698,10 @@ class W40KEngine(gym.Env):
                         )
                         return True, {
                             **end_result,
+                            # Nom historique : il dit la première des deux causes (ancre décalée),
+                            # et couvre depuis la seconde (formation rompue). Gardé tel quel —
+                            # aucun lecteur hors des tests (grep engine/ai/services/frontend = 0),
+                            # et l'issue est la même : l'unité reste stationnaire.
                             "action": "fall_back_anchor_shifted",
                             "unitId": squad_id,
                             "squad_id": squad_id,
@@ -7680,14 +7709,13 @@ class W40KEngine(gym.Env):
                             "waiting_for_player": False,
                         }
 
-            # 03.03 : la cohérence est rétablie en FIN DE PHASE (end_of_turn_regain_coherency_all_squads),
-            # pas pendant le move lui-même. Si un Desperate Escape a tué des figurines qui assuraient
-            # la liaison (pertes entre construction du masque et exécution), la formation traduite
-            # rigidement est incoherente → validate_move_plan rejette à tort. On relaxe uniquement dans
-            # ce cas : pour un ordered retreat, la formation reste coherente (garanti par la translation
-            # rigide depuis un état coherent), donc require_coherency=True reste le filet de sécurité.
-            _move_constraints = {"require_coherency": False} if _is_desp else None
-
+            # `require_coherency` reste EXIGÉE, Desperate Escape compris — d'où l'absence de tout
+            # `extra_constraints` ci-dessous. Une formation rompue par le hazard est désormais
+            # interceptée au-dessus (l'unité reste stationnaire, 03.01) : arrivé ici, l'état de
+            # départ est cohérent, et la translation rigide le conserve. La relaxation qui vivait
+            # ici laissait terminer un mouvement hors cohérence, ce que 03.03 interdit — « must be
+            # set up and end any kind of move in coherency ».
+            #
             # Plus de dry-run de legalite ici, et plus de degradation silencieuse en `squad_wait` :
             # la destination VIENT du pool que le masque a lui-meme utilise (meme carte, cf.
             # `read_squad_move_cell_map`), donc elle est legale par construction. L'ancien
@@ -7697,7 +7725,6 @@ class W40KEngine(gym.Env):
             # -> erreur explicite.
             ok = execute_squad_move(
                 squad_id, dest_col, dest_row, move_type, self.game_state, advance_roll,
-                extra_constraints=_move_constraints,
             )
             if not ok:
                 # L'invariant viole doit NOMMER la contrainte qui l'a rejete : sans cela chaque
@@ -7718,7 +7745,6 @@ class W40KEngine(gym.Env):
                         self.game_state,
                         resolve_squad_move_constraints(
                             squad_id, self.game_state, move_type, advance_roll,
-                            _move_constraints,
                         ),
                     ) or "aucune contrainte violée au rejeu (état muté entre-temps)"
                 raise ValueError(

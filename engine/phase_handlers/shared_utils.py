@@ -6558,8 +6558,21 @@ def charge_build_valid_plan(
     # bump de _unit_move_version entre les appels — sans lui toutes les variantes retournent
     # le plan intent=0 et L10 charge placement est silencieusement non-fonctionnel.
     # Pas de guard _los_batch : charge_build_valid_plan n'est jamais appelée pendant un batch.
+    #
+    # `_cbvp_fly` est requis pour la même raison qu'`intent` : la déclaration « take to the skies »
+    # (21.03, « Subtract 2" from the maximum distance » — le PDF nomme explicitement le charge
+    # move) est posée par `apply_fly_declaration_decision` SANS bump de `_unit_move_version`.
+    # L'observation de la phase de charge appelle déjà cette fonction avec `CHARGE_MAX_ROLL`
+    # (observation_builder), donc un jet de 12 sur une unité volante trouvait au commit le plan
+    # bâti AVANT la déclaration, à budget plein : une figurine a parcouru 11" pour un budget de
+    # 10 (mesuré, run de 600 épisodes). Le cache de pool de move porte déjà ce discriminant
+    # (`_tts_bool` dans sa `_cheap_key`) ; celui-ci était le seul à ne pas l'avoir.
+    from engine.phase_handlers.charge_handlers import _charge_fly_declared
     _cbvp_version = game_state["_unit_move_version"]
-    _cbvp_key = (str(squad_id), tuple(str(t) for t in target_squad_ids), int(charge_roll), int(intent), _cbvp_version)
+    _cbvp_fly = _charge_fly_declared(
+        game_state, require_unit_by_id(game_state, squad_id), str(squad_id)
+    )
+    _cbvp_key = (str(squad_id), tuple(str(t) for t in target_squad_ids), int(charge_roll), int(intent), _cbvp_fly, _cbvp_version)
     _cbvp_cache = game_state.setdefault("_charge_plan_cache", {})
     _cbvp_hit = _cbvp_cache.get(_cbvp_key, _CBVP_MISS)
     if _cbvp_hit is not _CBVP_MISS:
@@ -9591,6 +9604,16 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
     # remonte : lâcher le segment ferait disparaître la couche per-figurine ENTIÈRE (cf.
     # w40k_core._models_segment_for_unit). Un journal muet vaut moins qu'une erreur visible.
     _pre_captured_models_seg = models_segment_for_unit(game_state, attacker_squad_id_str)
+    # Même pré-capture pour la CIBLE. Ici, les pertes de l'activation sont déjà retirées du cache
+    # (`_finalize_manual_allocation` n'émet qu'après allocation complète) — le segment porte donc
+    # bien les SURVIVANTS, ce dont le replay a besoin — mais les pile-in et consolidations du
+    # settle n'ont PAS encore eu lieu. Lu au flush, il portait leurs positions d'APRÈS : l'analyzer
+    # bâtissait alors ses bloqueurs de chemin avec des figurines ennemies déjà consolidées, et
+    # jugeait impossible une consolidation qui était légale au moment où elle a été jouée.
+    # Même défaut, même correctif que la pré-capture de `w40k_core._gym_commit_fight_move`.
+    _pre_captured_target_models_seg = models_segment_for_unit(
+        game_state, target_sid_g, label="TARGET_MODELS"
+    )
     append_action_log(game_state, {
         "type": ctx.log_type,
         "message": msg,
@@ -9730,6 +9753,7 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         # en cours d'activation ont déjà disparu du cache. Pré-capturé ici, ce segment reflète
         # l'état du tireur au moment où il tire, pas l'état post-mort.
         "models_segment": _pre_captured_models_seg,
+        "target_models_segment": _pre_captured_target_models_seg,
     })
 
 

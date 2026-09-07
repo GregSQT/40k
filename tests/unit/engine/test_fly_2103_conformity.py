@@ -485,6 +485,30 @@ def test_ai_charge_flight_ignores_vertical_distance_but_still_pays():
     assert charge_build_valid_plan(_charge_gs(fly=True, level=1, declared=True), "1", ["2"], 4) is None
 
 
+def test_the_charge_plan_cache_is_not_blind_to_a_late_fly_declaration():
+    """Le plan de charge mis en cache AVANT la déclaration de vol ne doit pas être resservi après.
+
+    `apply_fly_declaration_decision` pose la déclaration sans bumper `_unit_move_version`, et
+    l'observation de la phase de charge a déjà appelé `charge_build_valid_plan` avec
+    `CHARGE_MAX_ROLL` pour bâtir le masque. Sur un jet de 12, la clé de cache était donc
+    identique avant et après la déclaration : le commit resservait le plan à budget PLEIN, et une
+    figurine parcourait 11" pour un budget de 10 (mesuré sur un run de 600 épisodes, épisode 523).
+
+    Ici le jet 3 suffit au sol et pas en vol (cf. `test_ai_charge_flight_pays_the_two_inches_...`) :
+    le second appel, sur le MÊME `game_state`, doit refuser.
+    """
+    gs = _charge_gs(fly=True, declared=False)
+    assert charge_build_valid_plan(gs, "1", ["2"], 3) is not None, (
+        "au sol, un jet de 3 doit suffire — sinon le test ne mesure pas ce qu'il annonce"
+    )
+
+    gs["units_took_to_skies_charge"] = {"1"}
+    assert charge_build_valid_plan(gs, "1", ["2"], 3) is None, (
+        "21.03 retranche 2\" à la distance maximale : le plan bâti avant la déclaration ne doit "
+        "pas être resservi depuis le cache"
+    )
+
+
 def test_the_charge_declaration_range_carries_no_vertical_gate():
     """11.04 mesure une PORTEE, pas un engagement : le gate vertical de 03.04 (5") n'y entre pas.
 

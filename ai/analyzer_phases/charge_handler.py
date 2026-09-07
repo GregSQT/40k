@@ -196,6 +196,8 @@ def handle_charge(
                 state.wall_hexes, occupied_positions, enemy_adjacent_hexes,
             )
 
+            # Occasion JUGÉE : le budget de charge vient d'être mesuré par figurine.
+            note_rule_usage(stats, "PROJ.1.3.budget", player)
             if charge_over:
                 stats['charge_invalid'][player]['distance_over_roll'] += 1
                 if stats['first_error_lines']['charge_invalid'][player] is None:
