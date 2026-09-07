@@ -298,6 +298,12 @@ def test_the_verdict_is_the_one_the_curriculum_computes(tmp_path):
 
     La même fonction sert le gate de fin d'étape. Deux copies de la règle laisseraient un run
     s'arrêter sur un critère plus faible que celui qui le jugera ensuite.
+
+    La doublure vise `ai.training_callbacks.evaluate_pool_decision` et NON `ai.curriculum...` :
+    l'import a quitté le corps de `_on_step` pour la portée module (cd091ac1), donc le nom est
+    résolu une fois pour toutes dans le namespace du callback. Patcher le module d'origine ne
+    changeait plus rien — le vrai verdict s'exécutait, `_on_step` rendait False et le test
+    échouait sur la valeur de retour, sans jamais dire que sa doublure n'avait pas pris.
     """
     archive = tmp_path / "champ.zip"
     archive.touch()
@@ -305,7 +311,7 @@ def test_the_verdict_is_the_one_the_curriculum_computes(tmp_path):
 
     with patch.object(cb, "_probe", side_effect=lambda: {"champion": 0.01}):
         _step_at(cb, 90_000)  # première sonde : la règle n'est pas encore consultée
-        with patch("ai.curriculum.evaluate_pool_decision") as fake:
+        with patch("ai.training_callbacks.evaluate_pool_decision") as fake:
             fake.return_value = MagicMock(verdict=POOL_VERDICT_CONTINUE, reason="doublure")
             assert _step_at(cb, 100_000) is True
 
