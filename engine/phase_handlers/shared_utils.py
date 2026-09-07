@@ -7473,8 +7473,9 @@ def squad_declare_shoot(
             continue
         weapons = ranged_weapons(m)
         # 04.01 « You can select ONE OR MORE ranged weapons that model has » : on declare
-        # TOUTES les armes utilisables, pas la seule `selectedRngWeaponIndex` (qui vaut 0
-        # pendant toute la partie en gym — ce champ n est ecrit que par le flux PvP manuel).
+        # toutes les armes PHYSIQUES utilisables (un seul profil chacune, cf. le groupage plus
+        # bas), pas la seule `selectedRngWeaponIndex` (qui vaut 0 pendant toute la partie en
+        # gym — ce champ n est ecrit que par le flux PvP manuel).
         usable: List[Tuple[int, str]] = []
         for widx in squad_model_shootable_weapon_indices(
             game_state, attacker_squad_id, m, shooting_type
@@ -7486,21 +7487,21 @@ def squad_declare_shoot(
             continue  # fig bloquee, ne tire pas
 
         # ► Multiple Weapon Profiles (renvoi de 04.01) : deux profils d un meme combi sont UNE
-        # arme physique, donc en selectionner un consomme l arme entiere. Meme politique que le
-        # jumeau du masque split-fire (`shoot_weapon_sel_open_slots`) : on garde le PREMIER
-        # profil declarable du groupe. Groupe AVANT 24.07 ci-dessous, qui compte les armes que
-        # chaque famille place sur la cible : compter deux profils du meme combi comme deux
-        # armes y fausserait le comptage (aucun roster actuel ne le montre — tous les groupes
-        # combi sont homogenes en [CLOSE-QUARTERS] — mais cet ordre ne depend pas de ce fait).
-        seen_weapon_groups: Set[str] = set()
-        grouped: List[Tuple[int, str]] = []
-        for widx, target in usable:
-            group_key = _weapon_group_key(weapons, widx)
-            if group_key in seen_weapon_groups:
-                continue
-            seen_weapon_groups.add(group_key)
-            grouped.append((widx, target))
-        usable = grouped
+        # arme physique, donc en selectionner un consomme l arme entiere — un seul profil par
+        # arme physique ET PAR FIGURINE, celui de plus grande esperance de degats contre sa
+        # cible (cf. `_pick_one_profile_per_weapon_group`).
+        # Le masque split-fire (`shoot_weapon_sel_open_slots`) applique la meme regle a un
+        # grain PLUS GROS — un profil par arme physique et par ESCOUADE — parce que ses slots
+        # SHOOT_WEAPON_SEL sont des profils d escouade : c est une restriction de son encodage,
+        # jamais une autorisation, donc les deux chemins ne declarent aucune action illegale.
+        # Groupe AVANT 24.07 ci-dessous, qui compte les armes que chaque famille place sur la
+        # cible : compter deux profils du meme combi comme deux armes y fausserait le comptage.
+        # Un groupe combi HETEROGENE en [CLOSE-QUARTERS] rendrait les deux ordres fautifs (le
+        # groupage pourrait retenir le profil qui perd ensuite l arbitrage de famille) ; aucun
+        # n existe — mesure du 2026-09-07 : 14 groupes combi, 0 heterogene, 0 en melee.
+        usable = _pick_one_profile_per_weapon_group(
+            game_state, weapons, usable, attacker_unit, _target_size
+        )
 
         # 24.07 (SIDEARMS, PDF 04) : hors MONSTER/VEHICLE, une figurine choisit SOIT ses armes
         # [CLOSE-QUARTERS], SOIT ses autres armes de tir — jamais les deux. Defaut retenu : la
@@ -7572,8 +7573,10 @@ def declare_attack_model(
     """Declaration MANUELLE d UNE figurine (flux PvP humain), tir OU combat.
 
     Moteur generique parametre par ctx (cf. DeclareAttackCtx). Le joueur assigne
-    explicitement la cible d UNE figurine. Re-appeler pour une figurine deja
-    declaree avec la MEME arme REMPLACE sa cible (split fire : cle (model, arme)).
+    explicitement la cible d UNE figurine. Re-appeler pour une figurine deja declaree avec la
+    meme ARME PHYSIQUE REMPLACE sa cible — cle (model, arme physique), donc declarer le profil
+    frere d un combi remplace le premier au lieu de s y ajouter (► Multiple Weapon Profiles,
+    renvoi de 04.01). Le split fire entre deux armes PHYSIQUES distinctes reste possible.
 
     Validation stricte (pas de valeur par défaut) :
       - activation demarree (pending initialise),
@@ -7612,13 +7615,10 @@ def declare_attack_model(
     weapon_idx = int(sel) if sel is not None else 0
 
     intents: List[Dict[str, Any]] = game_state[ctx.intents_key][attacker_squad_id]
-    # Remplace la declaration existante de cette figurine POUR CETTE ARME (split fire :
-    # une fig peut tirer plusieurs de ses armes sur des cibles differentes -> cle (model, arme)).
-    intents[:] = [
-        i for i in intents
-        if not (i.get("model_id") == attacker_model_id and int(i.get("weapon_index", -1)) == weapon_idx)
-    ]
     weapons = m.get(ctx.weapons_key, [])  # get allowed
+    # Intent construit AVANT la purge : un appel qui leve doit laisser les declarations en place
+    # (jumeau de `declare_attack_weapon`, ou l ordre inverse detruisait la ligne du profil frere
+    # sur un refus d eligibilite).
     n_attacks_resolved = _resolve_intent_nb(
         weapons, weapon_idx, f"{ctx.phase_label}_declare_model_NB_{attacker_model_id}"
     )
@@ -7632,6 +7632,19 @@ def declare_attack_model(
         "target_squad_size_at_declaration": target_size,
         "n_attacks_resolved": n_attacks_resolved,
     }
+    # Remplace la declaration existante de cette figurine POUR CETTE ARME PHYSIQUE (split fire :
+    # une fig peut tirer plusieurs de ses armes sur des cibles differentes -> cle (model, arme)).
+    # ► Multiple Weapon Profiles (renvoi de 04.01) : la cle est l arme PHYSIQUE, pas l index de
+    # profil. Sur (model, index), declarer Frag puis Krak laissait les DEUX profils d un meme
+    # combi dans la meme activation — l illegalite fermee sur le chemin automatique restait
+    # ouverte ici, atteignable par toute declaration manuelle (front combat, API tir).
+    intents[:] = [
+        i for i in intents
+        if not (
+            str(i["model_id"]) == attacker_model_id
+            and _intent_shares_weapon_group(models_cache, ctx.weapons_key, i, weapon_idx)
+        )
+    ]
     intents.append(intent)
     return intent
 
@@ -7647,8 +7660,10 @@ def declare_attack_weapon(
 
     Moteur generique parametre par ctx. Pour CHAQUE figurine vivante de l escouade
     qui possede cette arme et peut viser la cible (ctx.can_target_with_weapon), cree
-    un intent (model_id, weapon_index) -> T. Re-appeler avec la meme arme REMPLACE
-    la cible (retire d abord tous les intents de cette arme, toutes figs confondues).
+    un intent (model_id, weapon_index) -> T. Re-appeler avec la meme ARME PHYSIQUE REMPLACE la
+    cible : les intents de cette arme (profils freres d un combi compris, toutes figs
+    confondues) sont retires, mais SEULEMENT une fois la nouvelle ligne construite et validee —
+    un appel qui leve laisse les declarations en place.
 
     Validation stricte (pas de valeur par defaut) :
       - activation demarree (pending initialise),
@@ -7672,11 +7687,14 @@ def declare_attack_weapon(
 
     intents: List[Dict[str, Any]] = game_state[ctx.intents_key][attacker_squad_id]
     widx = int(weapon_index)
-    # Remplace toute declaration existante de CETTE arme (changement de cible).
-    intents[:] = [i for i in intents if int(i.get("weapon_index", -1)) != widx]
     target_size = sum(
         1 for mid in squad_models.get(target_squad_id, []) if mid in models_cache  # get allowed
     )
+    # Les intents sont construits AVANT toute mutation : un appel qui leve doit laisser les
+    # declarations en place. Purger d abord detruisait la ligne du profil frere sur un echec
+    # d eligibilite, et l appelant (`w40k_core`, action `..._assign_weapon`) rend alors
+    # `cannot_shoot` SANS `declarations` — le front gardait une ligne que le moteur avait
+    # effacee, et l arme ne tirait pas au verrouillage.
     created: List[Dict[str, Any]] = []
     for mid in squad_models.get(attacker_squad_id, []):  # get allowed
         m = models_cache.get(mid)
@@ -7688,20 +7706,28 @@ def declare_attack_weapon(
         n_attacks_resolved = _resolve_intent_nb(
             weapons, widx, f"{ctx.phase_label}_declare_weapon_NB_{mid}_{widx}"
         )
-        intent = {
+        created.append({
             "model_id": mid,
             "weapon_index": widx,
             "target_unit_id": target_squad_id,
             "target_squad_size_at_declaration": target_size,
             "n_attacks_resolved": n_attacks_resolved,
-        }
-        intents.append(intent)
-        created.append(intent)
+        })
     if not created:
         raise ValueError(
             f"Aucune figurine de {attacker_squad_id!r} ne peut viser l arme {widx} "
             f"sur {target_squad_id!r} ({ctx.phase_label}: hors portee/engagement ou pas de LoS)"
         )
+    # Remplace toute declaration existante de CETTE ARME PHYSIQUE (changement de cible), et pas
+    # du seul index de profil : sur (index) seul, assigner Frag puis Krak declarait les deux
+    # profils d un meme combi (► Multiple Weapon Profiles, renvoi de 04.01). Le groupe est
+    # evalue sur la liste d armes de CHAQUE figurine, l index d escouade ne designant pas la
+    # meme arme partout dans une escouade heterogene.
+    intents[:] = [
+        i for i in intents
+        if not _intent_shares_weapon_group(models_cache, ctx.weapons_key, i, widx)
+    ]
+    intents.extend(created)
     return created
 
 
@@ -8136,6 +8162,158 @@ def _weapon_group_key(weapons: List[Any], widx: int) -> str:
     wp = weapons[widx]
     key = wp.get("COMBI_WEAPON") if isinstance(wp, dict) else None
     return str(key) if key else f"__solo_{widx}"
+
+
+def _intent_shares_weapon_group(
+    models_cache: Dict[str, Any], weapons_key: str, intent: Dict[str, Any], widx: int
+) -> bool:
+    """L intent engage-t-il la MEME arme physique que l index `widx` de sa figurine ?
+
+    Grain de la declaration manuelle (tir ET melee) : une figurine ne declare qu un profil par
+    arme physique, donc re-declarer le profil frere REMPLACE le premier au lieu de s y ajouter.
+    Les deux cles sont lues sur la liste d armes de LA figurine de l intent : `widx` est un
+    index d escouade cote `declare_attack_weapon`, et une escouade heterogene ne le fait pas
+    designer la meme arme d une figurine a l autre.
+
+    `widx` hors de la liste de cette figurine : elle ne porte pas cette arme, donc aucun de ses
+    intents ne peut partager le groupe (aucun intent ne serait construit sur un index invalide,
+    `_resolve_intent_nb` levant a la creation).
+    """
+    m = models_cache.get(str(intent["model_id"]))
+    if m is None:
+        return False
+    weapons = m.get(weapons_key, [])  # get allowed
+    i_widx = int(intent["weapon_index"])
+    if not (0 <= widx < len(weapons) and 0 <= i_widx < len(weapons)):
+        return False
+    return _weapon_group_key(weapons, i_widx) == _weapon_group_key(weapons, widx)
+
+
+def _ranged_profile_expected_damage(
+    game_state: Dict[str, Any],
+    weapon: Dict[str, Any],
+    target_squad_id: str,
+    attacker_unit: Dict[str, Any],
+    target_size: int,
+) -> float:
+    """Esperance de degats d UN profil de tir sur une escouade, telle que le moteur la jouera.
+
+    Meme modele que la boucle de resolution et que le choix d arme de melee
+    (`_auto_select_cc_weapon_for_fig`) : `attack_sequence.expected_damage_per_attack`, donc
+    [ANTI-X], [SUSTAINED HITS], [LETHAL HITS], [TWIN-LINKED] et [DEVASTATING WOUNDS] sont
+    comptes, et il n existe pas de seconde definition de l esperance qui puisse deriver.
+
+    Deux termes que le modele PAR ATTAQUE ne porte pas — il le dit lui-meme, et c est a
+    l appelant de les appliquer — decident ici :
+
+    - [BLAST] 24.05 : des additionnels par tranche de 5 figurines cibles. Le nombre ajoute est
+      EXACTEMENT celui que la resolution ajoutera, calcule sur la meme taille d escouade que
+      l intent enregistre (`target_squad_size_at_declaration`).
+    - Degats perdus : les degats en exces sur une figurine sont perdus, donc une arme a D6
+      degats n en place qu un seul sur une figurine a 1 PV. Sans ce plafond, mesure du
+      2026-09-07 sur le Cyclone : Krak gagne sur les QUATRE cibles types, infanterie 1 PV
+      comprise (3,89 contre 2,67) — le « choix » redeviendrait une constante, Frag remplacant
+      simplement Krak comme profil mort. Avec le plafond : Frag 2,67 / Krak 1,11 sur
+      l infanterie, Krak devant sur marines, terminators et vehicule.
+      Le jumeau melee ne porte PAS ce plafond, et ce n est pas un oubli : meme mesure, 7 unites
+      a plusieurs armes de melee x 4 cibles types = 0 choix modifie, donc rien a y corriger.
+
+    Le plafond est pris sur `HP_MAX` (caracteristique Wounds de la datasheet) et non sur les PV
+    courants : la figurine qui encaissera n est pas connue a la declaration, et HP_MAX est
+    stable sur toute l activation.
+    """
+    from engine.game_state import effective_invul_save  # cycle : cf. squad_declare_fight
+    from engine.phase_handlers.attack_sequence import (
+        build_weapon_attack_profile,
+        expected_damage_per_attack,
+    )
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    alive = [mid for mid in squad_models.get(str(target_squad_id), []) if mid in models_cache]  # get allowed
+    if not alive:
+        raise ValueError(
+            f"_ranged_profile_expected_damage: escouade cible {target_squad_id!r} sans figurine "
+            "vivante — l eligibilite a la cible aurait du l ecarter"
+        )
+    # Caracteristiques defensives lues sur une FIGURINE reelle (elles vivent sur le
+    # models_cache, cf. `_auto_select_cc_weapon_for_fig`), invulnerable conferee comprise.
+    t_sample = models_cache[alive[0]]
+    target_unit = require_unit_by_id(game_state, str(target_squad_id))
+    target_invul = effective_invul_save(
+        game_state, target_unit, int(require_key(t_sample, "INVUL_SAVE"))
+    )
+
+    n_attacks = float(expected_dice_value(require_key(weapon, "NB"), "pick_combi_profile_nb"))
+    blast_x = _blast_extra_dice_per_five(weapon)
+    if blast_x is not None:
+        n_attacks += blast_x * (int(target_size) // 5)
+    dmg = float(expected_dice_value(require_key(weapon, "DMG"), "pick_combi_profile_dmg"))
+    dmg = min(dmg, float(require_key(t_sample, "HP_MAX")))
+    # Primitive A cote touche (suppression) : le seuil NOTE doit etre celui que le moteur
+    # APPLIQUERA, clamp compris — meme raison qu en melee.
+    hit_target, _, _ = resolve_hit_roll_modifiers(
+        game_state, attacker_unit, int(require_key(weapon, "ATK")), is_melee=False
+    )
+    profile = build_weapon_attack_profile(
+        weapon, target_unit, attacker_unit=attacker_unit, game_state=game_state, is_melee=False
+    )
+    return n_attacks * expected_damage_per_attack(
+        profile,
+        hit_target=hit_target,
+        wound_target=wound_threshold(
+            int(require_key(weapon, "STR")), int(require_key(t_sample, "T"))
+        ),
+        save_threshold_value=save_threshold(
+            int(require_key(t_sample, "ARMOR_SAVE")), target_invul, int(require_key(weapon, "AP"))
+        ),
+        damage=dmg,
+    )
+
+
+def _pick_one_profile_per_weapon_group(
+    game_state: Dict[str, Any],
+    weapons: List[Any],
+    candidates: List[Tuple[int, str]],
+    attacker_unit: Dict[str, Any],
+    target_size: Callable[[str], int],
+) -> List[Tuple[int, str]]:
+    """UN profil par arme PHYSIQUE parmi des candidats `(index, cible)` d UNE figurine.
+
+    ► Multiple Weapon Profiles (renvoi de 04.01) : les profils exclusifs d un combi sont une
+    seule arme, en selectionner un consomme l arme entiere. Le grain est la FIGURINE — 04.01
+    parle des armes « that model has » — et deux porteurs du meme combi choisissent donc
+    chacun le leur.
+
+    Le profil retenu est celui de plus grande esperance de degats CONTRE SA CIBLE : garder
+    l index le plus bas revenait a laisser l ordre de declaration du roster decider, et donc
+    a condamner le Krak du Cyclone (Frag ecrit en premier) ou le profil sur du plasma pistol
+    du Captain (Supercharge [HAZARDOUS] ecrit en premier). Meme politique de choix que la
+    melee (`_auto_select_cc_weapon_for_fig`), meme depart d egalite : l index le plus bas.
+    L esperance est calculee UNIQUEMENT pour les groupes a plusieurs profils declarables —
+    une figurine sans combi ne paie rien.
+
+    ⚠ [HAZARDOUS] n entre pas dans le score : le modele d esperance mesure les degats places
+    sur la cible, pas le risque encouru par le tireur. Le profil Supercharge reste donc
+    prefere a caracteristiques superieures.
+    """
+    groups: Dict[str, List[Tuple[int, str]]] = {}
+    for widx, target in candidates:
+        groups.setdefault(_weapon_group_key(weapons, widx), []).append((widx, target))
+    out: List[Tuple[int, str]] = []
+    for grp in groups.values():
+        if len(grp) == 1:
+            out.append(grp[0])
+            continue
+        out.append(
+            max(
+                grp,
+                key=lambda c: _ranged_profile_expected_damage(
+                    game_state, weapons[c[0]], c[1], attacker_unit, target_size(c[1])
+                ),
+            )
+        )
+    return out
 
 
 def squad_shoot_los_overview(
