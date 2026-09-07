@@ -95,7 +95,10 @@ lit le contrôle lui-même. Ce n'est pas un token d'armurerie, et c'est dit à s
 Ce contrôle était **MORT** jusqu'au 2026-09-07 : `unit_combi_by_weapon` est indexé par la datasheet
 qui PORTE l'arme, mais il était interrogé sous le type d'ESCOUADE, qui ne déclare pas le combi.
 Résolu depuis par les model-types de `[SHOOTER_MODELS:]` — **0 → 2004 exercices, 0 → 500 erreurs**.
-Le grain est la FIGURINE : le profil engage le socle qui tire, pas l'escouade.
+Le grain est la FIGURINE : le profil engage le socle qui tire, pas l'escouade. `[SHOOTER_MODELS:]`
+étant un segment de GROUPE, ce grain se vérifie à plusieurs porteurs et non à un seul :
+`test_multi_bearer_group_each_violation_counted_per_bearer` tient les deux porteurs fautifs à
+2 conflits et 4 exercices, le seul test qui exerce la boucle avec N>1.
 
 **Ce que ce prédicat ne ferme pas, et pourquoi.** Les 7 lignes restantes ne dépendent pas d'un
 roster mais d'un ÉVÉNEMENT qui ne s'est pas produit : personne ne s'est replié PUIS n'a tiré
