@@ -150,6 +150,14 @@ def _state(
                 "centroid_row": 5,
             }
         },
+        # RÉSOLUTION DÉCLARÉE, et non héritée. `geometry_is_hex` lit cette clé au PREMIER niveau
+        # du game_state ; absente, elle se rabat sur le config-loader GLOBAL du processus — donc
+        # sur le plateau qu'un autre test a laissé dans `W40K_BOARD_PATH`. Ce test rougissait
+        # ainsi sous xdist (« clé enemy_adjacent_hexes_player_1 absente ») selon le voisin de
+        # worker, et jamais seul. x5 et pas x1 : deux tests posent `base_size=3`, socle qui couvre
+        # plusieurs subhexes — il n'existe qu'au-dessus de x1, où `_scale_socle` ramène tout à
+        # `("round", 1)`.
+        "inches_to_subhex": 5,
         "current_player": 1,
         "turn": 1,
         "phase": "command",
@@ -182,7 +190,9 @@ def _state(
             "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},
             "controlled_player": 1,
             "army_faction": {"1": "TYRANIDS", "2": "TYRANIDS"},
-            "inches_to_subhex": 1,
+            # Même résolution que la clé de premier niveau : le moteur écrit les deux depuis le
+            # même `_scale` (`w40k_core`), un état où elles divergent n'existe pas.
+            "inches_to_subhex": 5,
         },
     }
 
