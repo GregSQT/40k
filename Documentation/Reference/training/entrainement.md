@@ -564,13 +564,39 @@ L'**entropie** s'arrête aux 40 % : passé ce point, la politique exploite ce qu
 
 **Le LR n'est PAS piloté par le schedule SB3.** `_make_learning_rate_schedule` ne sert qu'à donner sa valeur initiale à l'optimizer : le callback remplace `model.lr_schedule` par sa propre constante dès `on_training_start`.
 
+#### ⚠️ Ces rampes ne valent QUE pour un départ à froid (2026-09-07)
+
+Une étape de curriculum reprise à chaud (`init: "from:<étape>"`) **n'a plus de rampe du tout** : le bloc `lineage_regime` de `curriculum.json` lui impose des **scalaires**, identiques sur toute la lignée. Le tableau ci-dessus décrit donc le régime de la **seule étape `P0`** — et celui des runs lancés sans `--etape`.
+
+**Pourquoi.** Une rampe s'exprime en **fraction de la durée du run**. Chaque étape reprise reparcourait donc la sienne depuis le début, rendant à un modèle porteur de centaines de milliers d'épisodes le régime d'exploration d'un démarrage. Mesuré le 2026-09-04 : P1 s'était arrêtée à un `ent_coef` de ~0,018, P2 est repartie à 0,100, l'évaluation bots est tombée de 0,911 à 0,694 et le score contre P1 — garanti à 0,50 par construction puisque P2 **est** P1 à l'épisode 0 — est tombé à 0,118.
+
+Le correctif intermédiaire (`_pin_entropy_ramp_for_warm_start`, **supprimé**) faisait partir la rampe de la valeur *atteinte* par le modèle repris. Mesuré à son tour le 2026-09-05 : parti de 0,0177, le score de la sonde est resté **plat à 0,496** sur six mesures et 60 000 épisodes (χ² de 2,16 pour 5 ddl, indistinguable d'une constante) pendant que l'évaluation bots retombait sous celle du modèle de départ. Les deux régimes échouaient pour la même raison de fond : la valeur d'entropie était une **conséquence de l'histoire** du modèle, jamais une décision.
+
+Les sept clés du bloc, et ce qu'elles remplacent (vingt rampes `decay_fraction` plus les surcharges d'étape de `vf_coef` / `max_grad_norm`) :
+
+| Clé | Régime de lignée | Profil `x1_long` (P0 seul) |
+|-----|------------------|----------------------------|
+| `learning_rate` | **0.001** scalaire | 0.002 → 0.0005, `decay_fraction` 0.9 |
+| `ent_coef` | **0.03** scalaire | 0.1 → 0.01, `decay_fraction` 0.4 |
+| `n_steps` | **32640** | 8160 |
+| `batch_size` | **4080** | 1020 |
+| `vf_coef` | **0.15** | 0.5 |
+| `max_grad_norm` | **0.5** | 0.5 |
+| `agent_seat_p2_ratio` | **0.6** | 0.75 |
+
+`vf_coef` 0.15 est le réglage **mesuré** : il porte la part du gradient revenant à la politique de 0,235 à 0,62, `explained_variance` intacte. À 0.5, les trois quarts de la capacité d'apprentissage allaient au critic — dont `explained_variance` valait déjà 0,87 — pendant que la politique, seule à jouer les parties, n'en recevait qu'un quart (décomposition sur 44 updates, `run_20260906-225839` : value 1.035 / policy 0.323 / entropy 0.018). L'écrêtage n'y changeait rien : il divise les trois termes par le **même** facteur, donc il réduit la taille du pas sans corriger sa direction. `n_steps` × 4 attaque l'autre moitié du problème — la variance d'un épisode de self-play à parité est maximale par construction. Lecture : `00_critical/g_grad_share_policy_mb0`.
+
+Une étape reprise **ne peut plus déclarer** `model_params` ni `agent_seat_p2_ratio` : `ai/curriculum.py::_validate_stage_hp_overrides` le refuse au chargement. Seul `total_episodes` lui reste. Verrous : `tests/unit/ai/test_curriculum.py::test_the_lineage_block_pins_the_seven_keys_of_the_regime` et `::test_no_warm_started_stage_declares_hyperparameters_of_its_own`, `tests/unit/ai/test_lineage_regime.py`.
+
+À l'ouverture d'une étape reprise, `ai/train.py::announce_lineage_continuity` lit `ent_coef` et `learning_rate` dans le zip repris et **annonce** tout écart avec le bloc. Il ne corrige rien : un écart est le changement de régime lui-même, et le journal doit le porter pour qu'une courbe qui bouge à l'ouverture soit attribuable sans rouvrir un zip.
+
 `bot_eval_freq` de `x1_long` vaut **10 000** (10 points de mesure sur 100 000 épisodes). `bot_eval_intermediate` vaut **100** épisodes par bot depuis le 2026-09-04 : à 30, l'erreur-type d'un point intermédiaire valait 9,1 points de win-rate, du même ordre que les écarts qu'on cherche à y lire ; à 100 elle tombe à 5,0. `x5_long` reste à 30 — les deux profils `_long` divergent sur cette clé, délibérément. `robust_window` vaut **3** (10 points → 8 positions de fenêtre).
 
 `x1` est passé à `save_best_robust: false` : 10 000 épisodes à `bot_eval_freq` 2000 donnent 5 points pour une fenêtre de 5, soit une seule position — sélection mécanique sur le dernier point.
 
 `checkpoint_save_freq` est **aligné sur `x1`** : SB3 sauvegarde tous les `save_freq` **appels** (pas des épisodes).
 
-`batch_size: 1020` : à `n_steps: 8160` / `n_envs: 24`, le rollout vaut `(8160 // 24) × 24 = 8160 = 8 × 1020` — 8 mini-lots pleins, aucun tronqué.
+`batch_size: 1020` : à `n_steps: 8160` / `n_envs: 24`, le rollout vaut `(8160 // 24) × 24 = 8160 = 8 × 1020` — 8 mini-lots pleins, aucun tronqué. Le régime de lignée garde ce rapport : `32640 = 8 × 4080` (verrou `ai/curriculum.py::_validate_lineage_regime`, un dernier mini-lot tronqué donnerait des updates de poids inégaux).
 
 ### Unit Rules Implementation Flags (`RULES_STATUS`)
 

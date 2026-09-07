@@ -1,12 +1,26 @@
- {
-  "_doc": "Curriculum par etapes. Une etape = UN run d'ai/train.py, lance avec --etape <nom>. --training-config reste la source des episodes et des hyperparametres ; ce fichier ne decrit QUE l'adversite. Les poids de 'pool' sont des parts du budget TOTAL d'episodes, pas des parts du pool : les bots prennent (1 - ratio_end), le pool prend ratio_end, et la somme des deux vaut 1.0 (verrou ai/curriculum.py::validate_curriculum). La rampe (warmup a ratio_start, puis interpolation lineaire jusqu'a ratio_end) pilote la seule frontiere bots/pool ; la composition INTERNE du pool est fixe et realisee par ENVIRONNEMENT, chaque env chargeant un unique adversaire fige une fois pour toutes.",
-  "_doc_part_bots": "PART DE BOTS PAR ETAPE, decidee le 2026-09-06 : P1 30 %, P2 20 %, P3 a P10 15 % (soit ratio_end 0.70 / 0.80 / 0.85). P00 et P0 restent a 100 % de bots, ils n'ont pas de pool. MESURE qui l'impose, run x1_long du 2026-09-06 sur ~64 000 episodes : les six bots d'evaluation sont satures — EndgameBot 0.99, DecapitationBot 0.95, RacerBot 0.94, AlphaStrikeBot 0.93, AttritionBot 0.92, ScorerBot 0.86, aucun sous 0.86 — tandis que le champion du pool est a 0.502 (parite exacte) et l'ancien P0 a 0.626. Le budget partait donc majoritairement sur des adversaires deja domines : 637 500 episodes contre bots sur les 2 750 000 de la lignee, soit 23 %. Le nouveau reglage en ramene 455 000, dont l'essentiel de l'economie vient de P1 et P2. POURQUOI PAS 15 % PARTOUT, qui aurait l'avantage d'une constante sur les dix etapes : la part de bots suit la TAILLE du pool, pas la force de l'agent. P1 n'a qu'UN membre de pool, P2 en a deux, P10 en a treize. A 15 % de bots, P1 jouerait 85 % de ses parties contre P0 et rien d'autre — le regime d'un exploiteur (role E1..E3, ratio 1.0 contre une cible unique), alors que P1 est promu champion et qu'un exploiteur ne l'est jamais. Les paliers de P1 et P2 achetent cette diversite pour 42 500 episodes, soit 1,5 % du budget de la lignee. Ce que les bots apportent n'est PAS du gradient (a 92 % de victoires l'avantage est quasi constant) mais la seule adversite STRUCTURELLEMENT differente du dispositif : le pool est une lignee chainee dont tous les membres descendent du meme modele, donc s'il derive, aucun membre ne le signalera. La MESURE, elle, n'est pas concernee : l'evaluation holdout construit ses propres environnements et ignore bot_training.ratios, et le plancher de gating porte sur le pire bot EN EVALUATION (seuil 0.25 pour un pire bot a 0.86). Verrou : tests/unit/ai/test_curriculum.py::EXPECTED_STAGES.",
-  "_doc_lignees": "P00..P10 = learners, la lignee des champions. Elle est CHAINEE depuis le 2026-09-04 : seul P00 demarre 'new', chaque learner suivant reprend les poids du learner qui le precede dans 'order' (P0 from:P00, P1 from:P0, ... P10 from:P9), les exploiteurs etant sautes puisqu'ils ne sont jamais promus. Deux champions consecutifs ne sont donc PAS des runs independants : le second EST le premier, plus de l'entrainement. Le design precedent — tous les learners 'new', runs independants — justifiait de ne lire la monotonie du pool que comme un diagnostic, une inversion pouvant venir de la seule variance entre deux runs separes ; ce n'est plus la raison valable, cf. la docstring de pool_monotonicity_diagnostic dans ai/curriculum.py. Verrou : tests/unit/ai/test_curriculum.py::test_learners_form_a_single_chain derive la chaine de 'order' et la confronte aux champs 'init'. E1..E3 = exploiteurs : ils reprennent les poids du champion qu'ils doivent exploiter et jouent 100% contre lui, sans bots — leur ratio_start vaut donc 1.0. Un exploiteur n'est jamais promu champion, il n'entre que dans les pools suivants. AUCUNE etape ne rampe plus son adversite : tout stage porte ratio_start == ratio_end, learners compris. La phrase « les learners partent tous de 0.0 » decrivait le design d'avant le chainage et etait devenue fausse sans que le verrou ne bronche — il exigeait encore ratio_start == 0.0 et etait rouge sur neuf etapes, cf. test_learners_have_no_adversity_ramp qui le remplace.",
+{
+  "_doc": "Curriculum par etapes. Une etape = UN run d'ai/train.py, lance avec --etape <nom>. --training-config reste la source des episodes et des hyperparametres du DEPART A FROID ; ce fichier decrit l'adversite ET, depuis le 2026-09-07, le REGIME D'OPTIMISATION de toute la lignee (bloc 'lineage_regime'). Les poids de 'pool' sont des parts du budget TOTAL d'episodes, pas des parts du pool : les bots prennent (1 - ratio_end), le pool prend ratio_end, et la somme des deux vaut 1.0 (verrou ai/curriculum.py::validate_curriculum). La rampe (warmup a ratio_start, puis interpolation lineaire jusqu'a ratio_end) pilote la seule frontiere bots/pool ; la composition INTERNE du pool est fixe et realisee par ENVIRONNEMENT, chaque env chargeant un unique adversaire fige une fois pour toutes.",
+  "_doc_part_bots": "PART DE BOTS PAR ETAPE, decidee le 2026-09-06 : P1 30 %, P2 20 %, P3 a P10 15 % (soit ratio_end 0.70 / 0.80 / 0.85). P0 reste a 100 % de bots, il n'a pas de pool. MESURE qui l'impose, run x1_long du 2026-09-06 sur ~64 000 episodes : les six bots d'evaluation sont satures — EndgameBot 0.99, DecapitationBot 0.95, RacerBot 0.94, AlphaStrikeBot 0.93, AttritionBot 0.92, ScorerBot 0.86, aucun sous 0.86 — tandis que le champion du pool est a 0.502 (parite exacte) et l'ancien P0 a 0.626. Le budget partait donc majoritairement sur des adversaires deja domines. POURQUOI PAS 15 % PARTOUT, qui aurait l'avantage d'une constante sur les dix etapes : la part de bots suit la TAILLE du pool, pas la force de l'agent. P1 n'a qu'UN membre de pool, P2 en a deux, P10 en a treize. A 15 % de bots, P1 jouerait 85 % de ses parties contre P0 et rien d'autre — le regime d'un exploiteur (role E1..E3, ratio 1.0 contre une cible unique), alors que P1 est promu champion et qu'un exploiteur ne l'est jamais. Ce que les bots apportent n'est PAS du gradient (a 92 % de victoires l'avantage est quasi constant) mais la seule adversite STRUCTURELLEMENT differente du dispositif : le pool est une lignee chainee dont tous les membres descendent du meme modele, donc s'il derive, aucun membre ne le signalera. La MESURE, elle, n'est pas concernee : l'evaluation holdout construit ses propres environnements et ignore bot_training.ratios, et le plancher de gating porte sur le pire bot EN EVALUATION (seuil 0.25 pour un pire bot a 0.86). Verrou : tests/unit/ai/test_curriculum.py::EXPECTED_STAGES.",
+  "_doc_lignees": "P0..P10 = learners, la lignee des champions. Elle est CHAINEE : seul P0 demarre 'new', chaque learner suivant reprend les poids du learner qui le precede dans 'order' (P1 from:P0, ... P10 from:P9), les exploiteurs etant sautes puisqu'ils ne sont jamais promus. Deux champions consecutifs ne sont donc PAS des runs independants : le second EST le premier, plus de l'entrainement. Verrou : tests/unit/ai/test_curriculum.py::test_learners_form_a_single_chain derive la chaine de 'order' et la confronte aux champs 'init'. L'etape-graine P00 est SUPPRIMEE le 2026-09-07 : elle n'existait que pour eviter de repayer un warmup de 25 000 episodes a chaque learner, ce que le chainage rend sans objet — un learner ne repart plus jamais de zero, donc un seul depart a froid suffit et c'est P0. E1..E3 = exploiteurs : ils jouent 100 % contre le champion qu'ils doivent exploiter, sans bots (leur ratio_start vaut donc 1.0), mais ils reprennent les poids de P0 et NON ceux de leur cible (decision du 2026-09-07). Partir de la cible faisait de l'exploiteur une copie du champion a laquelle on demandait de trouver sa propre faiblesse : il commencait a la parite par construction et ne pouvait s'en ecarter qu'en desapprenant. Partir de P0 en fait une politique reellement DIFFERENTE, entrainee contre la cible — ce que le pool des etapes suivantes doit contenir. Un exploiteur n'est jamais promu champion, il n'entre que dans les pools suivants. AUCUNE etape ne rampe plus son adversite : tout stage porte ratio_start == ratio_end, learners compris.",
   "_doc_ordre": "L'ordre ci-dessous est celui d'execution, et c'est lui qui definit 'etape anterieure' : ni 'init' ni 'pool' ne peuvent nommer une etape qui n'a pas encore tourne.",
-  "order": ["P00", "P0", "P1", "P2", "P3", "E1", "P4", "P5", "E2", "P6", "P7", "P8", "E3", "P9", "P10"],
+
+  "lineage_regime": {
+    "_doc": "REGIME D'OPTIMISATION DE LA LIGNEE, decide le 2026-09-07 (option A). SEPT CLES, appliquees par ai/train.py a TOUTE etape dont l'init vaut 'from:<etape>' — les dix learners P1..P10 comme les trois exploiteurs E1..E3, auxquels _validate_stage_hp_overrides interdit tout training_config_overrides. Une etape reprise a chaud ne declare donc plus aucun hyperparametre : elle ne declare que sa duree (total_episodes) et son adversite. CE QUE CE BLOC REMPLACE : vingt rampes decay_fraction, deux par etape (learning_rate 0.001 -> 0.0005 et ent_coef 0.03 -> 0.01), plus les surcharges ponctuelles de max_grad_norm et vf_coef posees sur P2 et P3. POURQUOI DES SCALAIRES ET NON DES RAMPES. Une rampe est exprimee en FRACTION de la duree du run (ai/train.py::setup_callbacks, LearningRateScheduleCallback / EntropyScheduleCallback) : chaque etape reparcourait donc la sienne du debut, et un modele qui porte deja des centaines de milliers d'episodes se voyait rendre a chaque reprise le regime d'exploration d'un debut de run. C'est la mesure du 2026-09-04 : P1 s'etait arretee a un ent_coef de ~0,018, P2 est repartie a 0,100, l'evaluation bots est tombee de 0,911 a 0,694 et le score contre P1 — garanti a 0,50 par construction puisque P2 EST P1 a l'episode 0 — est tombe a 0,118. Le correctif d'alors figeait le depart de la rampe sur la valeur atteinte par le modele repris ; il a lui-meme ete mesure le 2026-09-05 : parti de 0,0177, le score de la sonde est reste PLAT a 0,496 sur six mesures et 60 000 episodes (chi2 de 2,16 pour 5 degres de liberte, indistinguable d'une constante) pendant que l'evaluation bots retombait sous celle du modele de depart. Les deux regimes echouaient donc pour la meme raison de fond : la valeur de l'entropie etait une consequence de l'HISTOIRE du modele, jamais une decision. Un scalaire constant sur toute la lignee la rend decidable et comparable d'une etape a l'autre. VALEUR PAR VALEUR. ent_coef 0.03 : au-dessus du 0,018 ou la lignee s'etait figee, tres en dessous du 0,07 du run detruit du 2026-09-06. learning_rate 0.001 : la valeur qu'a effectivement portee P1, seule etape reussie de la lignee. n_steps 32640 et batch_size 4080 : quatre fois le rollout du profil (8160 / 1020), a nombre de minibatches constant (huit). Un rollout plus long est ce qui rend le gradient lisible quand l'adversaire est du meme niveau que l'agent — la variance d'un episode de self-play a parite est maximale par construction, et c'est elle, pas le pas d'apprentissage, qui dominait les updates. vf_coef 0.15 : reglage MESURE, part du gradient revenant a la politique 0,235 -> 0,62 avec un explained_variance intact. Il est dans CE bloc et non sur une etape parce que sans lui la suppression des surcharges de P2 et P3 ferait retomber toute la lignee sur le 0.5 du profil — celui qui envoyait 75,2 % du gradient au critic (decomposition au _doc de P2). max_grad_norm 0.5 et non le 2.0 essaye sur P2 : a une norme brute qui redescend vers 0,36 sous vf_coef 0.15, les deux plafonds sont identiques car aucun n'ecrete ; le 0.5 ne sert plus que de filet contre les pics, et c'est deja la valeur du profil, donc rien ne diverge entre depart a froid et reprise. agent_seat_p2_ratio 0.6 : part des episodes joues en second, le siege le plus faible ; 0.75 dans le profil, valeur d'un depart a froid ou il faut sur-representer le siege difficile. CE QUI RESTE AU PROFIL : n_epochs, gamma, gae_lambda, clip_range, target_kl et l'architecture. LE PROFIL x1_long GARDE SES RAMPES ET SON vf_coef 0.5 : ils ne servent plus qu'au seul depart a froid P0, ou ils sont legitimes — une politique naive doit explorer avant de converger, et son critic part de zero, donc il a besoin du budget de gradient que ce bloc lui retire ensuite.",
+    "model_params": {
+      "learning_rate": 0.001,
+      "ent_coef": 0.03,
+      "n_steps": 32640,
+      "batch_size": 4080,
+      "vf_coef": 0.15,
+      "max_grad_norm": 0.5
+    },
+    "agent_seat_p2_ratio": 0.6
+  },
+
+  "order": ["P0", "P1", "P2", "P3", "E1", "P4", "P5", "E2", "P6", "P7", "P8", "E3", "P9", "P10"],
 
   "exploiter_config": {
-    "_doc": "Parametres geles partages par toutes les etapes exploiteurs (E1..E3). probe_every_episodes/probe_cheap_n : sonde bon marche. probe_confirm_n : sonde de confirmation declenchee des que la sonde bon marche passe le seuil. win_rate_target : seuil de franchissement (0.70). budget_cap : defini par etape dans chaque bloc E, en episodes DE L'ETAPE — comme probe_every_episodes et le budget journalise ; le compteur cumule de la lignee reprise 'from:' ne compte pas (cf. ai/curriculum.py::stage_origin). La config d'entrainement est fixee via --training-config a la ligne de commande ; tous les runs E d'un meme curriculum doivent utiliser la meme valeur.",
+    "_doc": "Parametres geles partages par toutes les etapes exploiteurs (E1..E3). probe_every_episodes/probe_cheap_n : sonde bon marche. probe_confirm_n : sonde de confirmation declenchee des que la sonde bon marche passe le seuil. win_rate_target : seuil de franchissement (0.70). budget_cap : defini par etape dans chaque bloc E, en episodes DE L'ETAPE — comme probe_every_episodes et le budget journalise ; le compteur cumule de la lignee reprise 'from:' ne compte pas (cf. ai/curriculum.py::stage_origin). La config d'entrainement est fixee via --training-config a la ligne de commande ; tous les runs E d'un meme curriculum doivent utiliser la meme valeur, et le bloc lineage_regime s'y applique comme a n'importe quelle etape reprise a chaud.",
     "probe_every_episodes": 2000,
     "probe_cheap_n": 100,
     "probe_confirm_n": 500,
@@ -19,44 +33,42 @@
     "deterministic": false
   },
 
+  "parity_check": {
+    "_doc": "VERROU DE PARITE A L'OUVERTURE, pose le 2026-09-07. Une etape reprise a chaud part des poids d'un membre de son propre pool : a l'episode 0 elle EST cet adversaire, donc son score contre lui vaut 0.50 par construction — c'est une identite, pas une esperance. La sonde baseline de PoolEarlyStoppingCallback (ai/training_callbacks.py) la mesure au demarrage ; si elle sort de [min_score, max_score], quelque chose est faux AVANT le premier episode d'entrainement : mauvaise archive reprise, _vec_normalize.pkl absent ou desapparie, espace d'observation ou normalisation qui a change entre les deux etapes. Le run est alors ARRETE, pas seulement signale — laisser tourner produit des heures d'entrainement dont aucune mesure ne veut rien dire, et c'est exactement ce qui s'est passe les 2026-09-04 et 2026-09-05, ou une baseline a 0,477 puis a 0,118 avait ete lue comme un resultat au lieu d'une panne. Bornes larges (±0.10 autour de la parite) : la sonde est une mesure finie et le modele repris n'est jamais rejoue bit a bit (vec_normalize continue d'accumuler), donc un ecart de quelques points est normal ; 0.40 et 0.60 sont a plus de trois erreurs-types de 0.50 sur 300 episodes (2,9 points).",
+    "min_score": 0.40,
+    "max_score": 0.60
+  },
+
   "gate": {
-    "_doc": "Plancher DUR sur le score contre le champion le PLUS RECENT du pool, mesure en fin d'etape. Il remplace benchmark_floor, aveugle ici : les reference bots sont satures a 1.00, donc un plancher pose sur eux est franchi par n'importe quel modele. Sur 300 episodes l'erreur-type d'un taux proche de 0.5 vaut 2.9 points, d'ou l'ecart entre le plancher (0.55) et la cible affichee (0.60) : un run a 0.57 est accepte sans etre annonce comme atteignant la cible. P0 n'a pas de champion : le gate y est sans objet.",
+    "_doc": "Gate de fin d'etape : promotion ou refus, mesure APRES le run. Il porte sur une MOYENNE de eval_repeats blocs d'evaluation independants de eval_episodes episodes chacun, jamais sur un bloc unique — meme grandeur que la moyenne glissante des sondes sur laquelle l'early-stop decide (pool_eval/vs_<tag>_3ep), pour que les deux decisions se lisent sur la meme echelle. GRAINES TIREES AU HASARD, decide le 2026-09-07 : ai/bot_evaluation.py figeait base_seed a 42, donc deux evaluations d'un meme modele rejouaient les MEMES parties et rendaient le meme score (verifie le 2026-09-07 : 16/24/0 aux deux appels). Une moyenne de trois blocs identiques n'est pas une moyenne. Avec des graines tirees, les trois blocs echantillonnent des parties differentes et la moyenne divise l'erreur-type par racine de trois. Le prix est qu'un gate n'est plus reproductible a l'identique : c'est le bon prix, un score reproductible qui ne mesure que 300 parties choisies une fois pour toutes n'est pas plus fiable, il est seulement plus stable. DEUX PLANCHERS : min_score_vs_champion contre le champion le PLUS RECENT — celui dont l'etape reprend les poids, donc celui contre qui elle part a 0.50 — et min_score_vs_others contre chacun des autres membres du pool. Le second est a la parite et non au-dessus : un ancien ou un exploiteur qui tient encore l'agent en echec est une regression, mais l'agent n'a aucune raison de le DOMINER, il ne s'entraine contre lui qu'a une fraction de son budget. P0 n'a pas de champion : le gate y est sans objet.",
     "min_score_vs_champion": 0.55,
-    "target_score_vs_champion": 0.60,
-    "eval_episodes": 300
+    "min_score_vs_others": 0.50,
+    "eval_episodes": 300,
+    "eval_repeats": 3
   },
 
   "early_stop": {
-    "_doc": "Arret anticipe pendant l'entrainement : si l'agent depasse win_rate_threshold contre TOUS les membres du pool sur consecutive_evals evaluations consecutives apres min_steps steps DEPUIS LE DEBUT DE L'ETAPE, le run s'arrete. Pas et episodes se comptent depuis la reprise, jamais depuis la naissance de la lignee : le num_timesteps du modele repris 'from:' n'est pas remis a zero (13,7 M sur P1) et le compteur d'episodes est cumule (80 000 a l'ouverture de P2) ; compares en absolu, min_steps ne gardait rien et la cadence enchainait 8 sondes consecutives au premier pas (2026-09-04, cf. ai/curriculum.py::stage_origin et tests/unit/ai/test_probe_resume_offset.py). n_eval_episodes provient de gate.eval_episodes. Desactive si ce bloc est absent. Une etape peut surcharger ces valeurs avec son propre bloc 'early_stop'. Les etapes sans pool (P0) ou les exploiteurs l'ignorent automatiquement.",
-    "win_rate_threshold": 0.60,
-    "min_steps": 50000,
-    "consecutive_evals": 2
+    "_doc": "Decisions PENDANT le run, prises sur la moyenne glissante des probe_window dernieres sondes de PoolEarlyStoppingCallback — la grandeur deja publiee en pool_eval/vs_<tag>_3ep, et non la sonde brute. MESURE qui l'impose (2026-09-07) : deux appels de sonde sur un modele fige rendent le meme score au bit pres, donc les sauts de ±5 points entre sondes voisines ne sont PAS du bruit d'echantillonnage — ce sont des blocs de parties correlees qui basculent ensemble quand la politique bouge. Decider sur une sonde brute, c'est decider sur l'amplitude de ces bascules ; la moyenne les amortit sans rien lisser d'une vraie tendance. La moyenne est disponible des la DEUXIEME sonde (elle porte alors deux points), comme la courbe TensorBoard : exiger la fenetre pleine reporterait la premiere decision de destruction a 30 000 episodes alors que le seuil la veut a 20 000. DEUX DECISIONS, opposees. PROMOTION : moyenne >= promote_score_vs_champion contre le champion ET >= promote_score_vs_others contre chaque autre membre, apres promote_min_episodes episodes D'ETAPE — le run s'arrete, l'etape a fait ce qu'elle avait a faire et le budget restant serait paye pour rien. Les deux seuils sont ceux du gate de fin : une etape ne doit pas pouvoir s'arreter sur un critere plus faible que celui qui la jugera. DESTRUCTION : moyenne < destroy_score_vs_champion contre le champion apres destroy_min_episodes episodes d'etape — le run s'arrete aussi, mais parce que l'etape a DETRUIT la politique qu'elle avait recue. Une etape part a 0.50 contre son champion par construction ; tomber a 0.40 est un ecart de plus de trois erreurs-types dans le mauvais sens, et le run du 2026-09-04 a montre qu'une fois cette pente prise elle ne se retourne pas (0,477 a l'ouverture, 0,297 dix mille episodes plus tard). Les 20 000 episodes ne sont pas une tolerance mais le temps qu'il faut pour que deux sondes existent : avant, il n'y a pas de moyenne. Les etapes sans pool (P0) et les exploiteurs ignorent ce bloc. Une etape peut le surcharger avec son propre bloc 'early_stop'.",
+    "probe_window": 3,
+    "promote_score_vs_champion": 0.55,
+    "promote_score_vs_others": 0.50,
+    "promote_min_episodes": 50000,
+    "destroy_score_vs_champion": 0.40,
+    "destroy_min_episodes": 20000
   },
 
   "stages": {
-    "P00": {
-      "_doc": "Graine universelle : bots uniquement, arrete quand le win-rate bot atteint ~55-60 %. Sert de point de depart commun a tous les learners (P0-P10) pour eviter la repetition du warmup de 25 000 episodes a chaque etape. Budget calibre empiriquement ; la cible est la competence de base (connait les regles, pas sur-specialise bots). Pour le run courant, cette etape peut etre promue manuellement depuis un checkpoint de P0 extrait au bon moment (python3 ai/train.py ... --resume-from <checkpoint> puis promote).",
+    "P0": {
+      "_doc": "SEUL DEPART A FROID de la lignee (init 'new'), et la seule etape a laquelle les rampes du profil x1_long s'appliquent : learning_rate 0.002 -> 0.0005 et ent_coef 0.1 -> 0.01, legitimes pour une politique naive qui doit explorer avant de converger. Bots uniquement, aucun pool, aucun gate — il n'a pas de champion a battre. La duree vient du profil, l'etape ne surcharge rien. Remplace le couple P00 (graine 5 000 episodes) + P0 supprime le 2026-09-07 : la graine n'existait que pour eviter de repayer un warmup a chaque learner, ce que le chainage a rendu sans objet.",
       "role": "learner",
       "init": "new",
-      "warmup_episodes": 0,
-      "ratio_start": 0.0,
-      "ratio_end": 0.0,
-      "pool": [],
-      "training_config_overrides": {
-        "total_episodes": 5000
-      }
-    },
-    "P0": {
-      "_doc": "Premier champion : bots uniquement, aucun pool, aucun gate. Demarre depuis P00 (graine).",
-      "role": "learner",
-      "init": "from:P00",
       "warmup_episodes": 0,
       "ratio_start": 0.0,
       "ratio_end": 0.0,
       "pool": []
     },
     "P1": {
-      "_doc": "Chainage decide le 2026-09-04 : P1 reprend P0, tous les learners suivants reprendront leur predecesseur immediat. Le run du 2026-09-03 avait demarre de P00 directement (cf. training_x1_02-p01.log), mais la spec du chainage prime desormais sur l'historique. ⚠️ LE MODELE P1 EN SERVICE N'A PAS ETE ENTRAINE SOUS CE REGLAGE : sa config d'alors annoncait ratio_end 0.50 (50 % de bots) precede d'une rampe ramp_end_episodes 10000 qui le faisait DEMARRER a 100 % de bots. MESURE de ce qu'il a REELLEMENT joue (tensorboard/P1, 80 075 episodes) : 25 063 episodes contre P0, soit 31,3 % — donc pres de 69 % de bots, et non les 50 % annonces. L'ecart n'est pas explique par la rampe seule (elle s'acheve en ~417 episodes par env et ne pese que 12 % du run) ; il n'a PAS ete elucide, le run n'etant pas rejoue. Retenir de ce chiffre qu'un ratio_end n'est pas une mesure : la seule lecture fiable de la part reellement jouee est le rapport entre les points de 03_selfplay/<membre> et ceux de actions/share_deploy_slot, a 500 pres (la fenetre de lissage). La decision du 2026-09-06 est de ne PAS le rejouer — le temps est deja paye — mais d'homogeneiser sa config avec le reste de la lignee, pour qu'un futur rejeu parte du bon reglage et que le fichier ne decrive pas deux regimes differents. Ne pas lire les valeurs ci-dessous comme une description du modele P1 existant. Rampe supprimee pour la MEME raison que celles de P2 a P10 : P1 reprend P0 (init from:P0) et P0 est son unique adversaire de pool, donc il fait jeu egal par construction des l'episode 0 et n'a rien a etre protege ; la rampe ne faisait que substituer des parties de bots (gagnees a ~92 %) aux parties de pool, sans signal correctif. C'etait le residu du nettoyage qui avait deja retire les neuf autres. 30 % de bots et non 15 % : le pool de P1 n'a qu'UN membre, cf. _doc_part_bots.",
+      "_doc": "Premier champion issu du self-play : reprend P0 et l'affronte. Pas de rampe d'adversite (ratio_start == ratio_end) : le learner EST P0 a l'episode 0, il fait jeu egal par construction et n'a rien a etre protege ; une rampe ne ferait que substituer des parties de bots — gagnees a ~92 % — aux parties de pool, sans signal correctif. 30 % de bots et non 15 % : le pool de P1 n'a qu'UN membre, cf. _doc_part_bots. ⚠️ LE MODELE P1 EN SERVICE N'A PAS ETE ENTRAINE SOUS CE REGLAGE : sa config d'alors annoncait ratio_end 0.50 precede d'une rampe qui le faisait DEMARRER a 100 % de bots. MESURE de ce qu'il a REELLEMENT joue (tensorboard/P1, 80 075 episodes) : 25 063 episodes contre P0, soit 31,3 % — donc pres de 69 % de bots, et non les 50 % annonces. L'ecart n'a PAS ete elucide, le run n'etant pas rejoue. Retenir de ce chiffre qu'un ratio_end n'est pas une mesure : la seule lecture fiable de la part reellement jouee est le rapport entre les points de 03_selfplay/<membre> et ceux de actions/share_deploy_slot, a 500 pres (la fenetre de lissage). La decision du 2026-09-06 est de ne PAS le rejouer — le temps est deja paye — mais d'homogeneiser sa config avec le reste de la lignee. Ne pas lire les valeurs ci-dessous comme une description du modele P1 existant.",
       "role": "learner",
       "init": "from:P0",
       "warmup_episodes": 0,
@@ -66,15 +78,11 @@
         {"kind": "champion", "members": ["P0"], "weight": 0.70}
       ],
       "training_config_overrides": {
-        "total_episodes": 200000,
-        "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
-        }
+        "total_episodes": 200000
       }
     },
     "P2": {
-      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner EST le champion a l'episode 0 (init from:P1), donc il fait jeu egal avec le pool par construction et n'a rien a etre protege. Mesure du 2026-09-06 : sondes a 1k/2k/3k/4k/5k episodes = 0.453/0.557/0.487/0.420/0.443, moyenne 0.472 a 1.2 sigma de la parite. La rampe ne faisait que remplacer des parties de pool par des parties de bots deja gagnees a 92 %, sans signal correctif, pendant les 10 000 premiers episodes. max_grad_norm 2.0 (2026-09-06), SEULE etape a s'ecarter du 0.5 que portent les six profils de training_config : MESURE sur run_20260906-183917, 56 updates sur 60 affichent un gradient_norm a exactement 0.5000, soit le plafond lui-meme, pour un minimum de 0.4288 sur les 4 restantes. La courbe est lue APRES ecretage (ai/training_callbacks.py relit p.grad une fois le clip_grad_norm_ de ai/patched_ppo.py applique), donc ce plat signifiait que le gradient BRUT depassait le plafond en permanence, sans qu'on puisse savoir de combien. NORME BRUTE ENFIN MESUREE le 2026-09-06 en relachant le plafond (run_20260906-200401) : ~1.18 en debut de run, ~0.78 en fin, et la saturation tombe de 93 % a 6.7 % des updates. Le plafond 0.5 ecretait donc d'un facteur ~2.4 — pas dix. C'est la seule raison d'etre du 2.0 : rendre l'amplitude du pas VARIABLE et donc informative, la ou elle etait constante par construction. RUN D'ESSAI ECHOUE, a ne pas refaire : run_20260906-200401 portait QUATRE leviers ouverts a la fois (lr 0.002, ent_coef 0.07, n_epochs 6, plafond 2.0) et a detruit le modele — vs P1 tombe a 0.32 des le premier quart alors que la parite 0.50 est garantie par construction, vs P0 0.386 -> 0.339, et une entropie qui monte MONOTONEMENT (-1.34 -> -1.63) sans plateau, signature d'un ent_coef qui domine le gradient de performance. L'echec n'est attribuable a AUCUN des quatre : c'est pourquoi le reglage courant n'en garde qu'un seul ecarte du profil. LEcon retenue : ces valeurs etaient celles d'un run qui part de ZERO, appliquees a un modele qui porte deja ~75 000 episodes contre les bots et ~50 000 contre P0 ; sur des poids convergés elles desapprennent plus vite qu'elles n'apprennent. Le plancher thresholds/clip_fraction_min 0.10 est calibre pour la meme chose et ne vaut pas ici : un modele repris a chaud DOIT avoir un clip_fraction bas et une entropie stable, c'est la signature de la convergence et non d'une panne — l'avoir lu comme un symptome a coute un run. REGLAGE COURANT, decide le 2026-09-07 apres DECOMPOSITION du gradient : vf_coef 0.25, learning_rate 0.001 (celui de P1), ent_coef 0.03 et n_epochs non surcharge (4, herite du profil), plafond maintenu a 2.0. MESURE QUI L'IMPOSE (ai/patched_ppo.py, 44 updates, run_20260906-225839) : la norme du gradient se repartit en value 1.035 (75.2 %), policy 0.323 (23.5 %), entropy 0.018 (1.3 %). Les trois quarts de la capacite d'apprentissage vont donc au critic — dont explained_variance vaut deja 0.87 — pendant que la POLITIQUE, seule a jouer les parties (le critic n'est jamais appele hors entrainement), n'en recoit qu'un quart. L'ecretage n'y changeait rien : il divise les trois termes par le MEME facteur, donc il reduit la taille du pas sans jamais corriger sa direction — c'est pourquoi relacher le plafond avait accelere la derive au lieu de debloquer l'apprentissage. vf_coef 0.25 divise par deux la contribution du critic : part policy attendue 0.376, norme totale attendue ~0.54. VERROU DE LECTURE : 00_critical/g_grad_share_policy_mb0 (commit 71a43de8) publie cette part, elle doit monter de 0.235 a ~0.376 des les premieres updates — effet arithmetique immediat, pas un effet d'apprentissage ; si elle ne bouge pas, le reglage n'a pas pris et il est inutile d'attendre. LEARNING RATE A 0.001 ET NON 0.0015, delibere : a vf_coef 0.25 l'amplitude d'un pas vaut ~0.001 x 0.54 = 1.08 fois celle de P1 (0.001 x 0.5), donc la force de pas de la lignee est RETROUVEE et la seule chose qui change sur tout le run est la REPARTITION du gradient. C'est ce qui rend l'essai attribuable, ce qu'aucun des trois runs precedents ne permettait. PLAFOND MAINTENU A 2.0 alors que le regime vise est celui de P1 : a une norme de ~0.54 il n'ecrete plus rien, donc il n'est pas une variable de l'essai — il sert d'INSTRUMENT, training_diagnostic/gradient_norm etant lu APRES ecretage et resterait colle a 0.5 sinon. Contrepartie : la projection a 0.54 est une estimation et non une garantie, la somme des trois normes (1.38) n'etant pas la norme de leur somme (0.875) puisque les gradients ne sont pas colineaires. Si gradient_norm s'installe au-dessus de 0.7, le plafond redevient actif et doit etre redescendu. Le reglage reste ISOLE A P2 : P1 et P3 a P10 gardent le 0.5 du profil, pour que la comparaison avec/sans soit lisible sur une seule etape (verrou tests/unit/ai/test_curriculum.py::test_max_grad_norm_override_stays_isolated_to_p2, qui epingle l'isolation et non la valeur, encore en calibration). CRITERE D'ARRET, REVISE le 2026-09-06 : le seuil « entropy_loss en baisse de plus de 0.10 a 3 000 episodes » qui figurait ici est REFUTE, il declenchait sur le comportement NORMAL d'une etape P2. Mesure sur les 42 premiers updates de chaque etape : P1 (qui a reussi) derive de -0.002, mais P2-OLD — config d'origine, run sain — derive de -0.099, quasiment autant que le run juge suspect (-0.112). La derive d'entropie initiale d'un P2 est une signature d'ADAPTATION et non de destruction : P2 change de pool (P1+P0 au lieu de P0 seul) la ou P1 affrontait exactement l'adversaire dont il reprenait les poids, d'ou son entropie plate. Le bon critere est la STABILISATION et non la pente : P2-OLD s'est pose vers -1.27/-1.28 (quarts -1.2971/-1.2740/-1.2670/-1.2820 sur 44 000 episodes), donc surveiller que l'entropie plafonne dans cette zone et alerter seulement si elle passe sous -1.35 AU-DELA de 10 000 episodes. ATTENTION, aucun seuil n'est calibrable sur 03_selfplay/* ni sur 00_critical/d_win_rate : ces courbes N'EXISTENT NI dans P1 NI dans P2-OLD, elles sont recentes, et le seuil 0.42 pose ici le 2026-09-06 avait ete invente faute de precedent. La seule reference disponible pour un debut d'etape est l'entropie. Ce qui reste incontestable, en revanche, c'est la sonde holdout : baseline de warm start 0.477 a l'ouverture (P2 EST P1, parite garantie par construction) tombee a 0.297 en 10 000 episodes, soit ~5 sigma sur 300 episodes — une chute de cet ordre justifie l'arret, une stagnation vers 0.46 ne le justifie pas (P1 a mis 100 000 episodes pour atteindre 0.737 contre P0, en passant par 0.527 a 75 000). Contrepartie a surveiller : un plafond plus haut laisse passer les pics de gradient, donc 00_critical/i_approx_kl peut franchir 1.5 x target_kl = 0.0225 et faire couper les epochs par PPO (ai/patched_ppo.py:222) — c'etait le cas de 0.1 % des updates de P1 et 0.3 % de P2-OLD, donc marginal, mais si approx_kl s'installe au-dessus, c'est 2.0 qu'il faut redescendre, pas target_kl qu'il faut monter.",
+      "_doc": "Premiere etape a pool multiple : P1 (champion, poids 0.50) et P0 (ancien, 0.30). Le pool de P2 n'a que deux membres et P1 est le predecesseur DIRECT du learner, donc les parties contre P1 opposent deux politiques quasi identiques : c'est P0, plus lointain dans la lignee chainee, qui porte seul la diversite de style a cette etape — d'ou les 5 points deplaces vers lui le 2026-09-06, a part de bots constante. HISTORIQUE DES ESSAIS D'HYPERPARAMETRES SUR CETTE ETAPE, conserve parce qu'il justifie le bloc lineage_regime et qu'il coute trois runs. (1) Run du 2026-09-06 (run_20260906-200401), QUATRE leviers ouverts a la fois — lr 0.002, ent_coef 0.07, n_epochs 6, max_grad_norm 2.0 : modele DETRUIT, score contre P1 tombe a 0.32 des le premier quart alors que la parite 0.50 est garantie par construction, et entropie montant MONOTONEMENT (-1.34 -> -1.63) sans plateau, signature d'un ent_coef qui domine le gradient de performance. L'echec n'etait attribuable a aucun des quatre. Lecon : ces valeurs sont celles d'un run qui part de ZERO, appliquees a un modele qui porte deja ~75 000 episodes contre les bots et ~50 000 contre P0 ; sur des poids converges elles desapprennent plus vite qu'elles n'apprennent. (2) DECOMPOSITION DU GRADIENT, run_20260906-225839, 44 updates : la norme se repartit en value 1.035 (75,2 %), policy 0.323 (23,5 %), entropy 0.018 (1,3 %). Les trois quarts de la capacite d'apprentissage allaient au critic — dont explained_variance valait deja 0.87 — pendant que la POLITIQUE, seule a jouer les parties, n'en recevait qu'un quart. L'ecretage n'y changeait rien : il divise les trois termes par le MEME facteur, donc il reduit la taille du pas sans jamais corriger sa direction, ce qui explique que relacher max_grad_norm ait accelere la derive au lieu de debloquer l'apprentissage. La lecture se fait sur 00_critical/g_grad_share_policy_mb0. (3) REGLAGE RETENU : vf_coef 0.15, qui porte la part policy de 0,235 a 0,62 sans degrader explained_variance. Le 0.25 qui figurait ici du 2026-09-07 au matin est PERIME — il visait 0,376, une parite approximative entre policy et critic, alors que la mesure montre que le critic n'a pas besoin de ce budget pour rester juste. Ce reglage n'est plus une surcharge d'etape : il vit dans lineage_regime et vaut pour toutes les etapes reprises a chaud, parce qu'un reglage d'optimisation qui ne vaudrait que pour P2 rendrait la lignee incomparable a elle-meme. max_grad_norm redescend a 0.5, celui du profil : le 2.0 avait ete pose comme INSTRUMENT — training_diagnostic/gradient_norm est lu APRES ecretage et restait colle a 0.5 sinon — et il n'a plus d'objet une fois la norme brute ramenee vers 0,36 par vf_coef 0.15, ou aucun des deux plafonds n'ecrete. Le levier qui reste propre a la lignee est le rollout — n_steps 32640 — parce que le probleme mesure est un rapport signal/bruit, pas une direction de pas. CRITERE D'ARRET : le seuil « entropy_loss en baisse de plus de 0.10 a 3 000 episodes » qui figurait ici est REFUTE, il declenchait sur le comportement NORMAL d'une etape P2 (P2-OLD, run sain, derivait de -0,099 sur ses 42 premiers updates, quasiment autant que le run juge suspect a -0,112). Le bon critere est la STABILISATION et non la pente : P2-OLD s'est pose vers -1,27/-1,28 sur 44 000 episodes, donc surveiller que l'entropie plafonne dans cette zone et alerter seulement si elle passe sous -1,35 AU-DELA de 10 000 episodes. L'arret automatique, lui, est desormais porte par le bloc early_stop et non par une lecture de courbe.",
       "role": "learner",
       "init": "from:P1",
       "warmup_episodes": 0,
@@ -85,18 +93,11 @@
         {"kind": "ancients", "members": ["P0"], "weight": 0.30}
       ],
       "training_config_overrides": {
-        "total_episodes": 250000,
-        "agent_seat_p2_ratio": 0.6,
-        "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65},
-          "max_grad_norm": 2.0,
-          "vf_coef": 0.15
-        }
+        "total_episodes": 250000
       }
     },
     "P3": {
-      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P2 (init from:P2) et P2 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P2 (init from:P2) et P2 est dans le pool, donc il fait jeu egal par construction des l'episode 0.",
       "role": "learner",
       "init": "from:P2",
       "warmup_episodes": 0,
@@ -107,20 +108,13 @@
         {"kind": "ancients", "members": ["P0", "P1"], "weight": 0.35}
       ],
       "training_config_overrides": {
-        "total_episodes": 250000,
-        "agent_seat_p2_ratio": 0.6,
-        "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65},
-          "max_grad_norm": 2.0,
-          "vf_coef": 0.15
-        }
+        "total_episodes": 250000
       }
     },
     "E1": {
-      "_doc": "Exploiteur de P3 : reprend ses poids et ne joue que contre lui.",
+      "_doc": "Exploiteur de P3 : joue 100 % contre lui, mais part des poids de P0 (init from:P0) et non des siens — cf. _doc_lignees. Il mesure l'exploitabilite de P3 et entre ensuite dans les pools suivants ; il n'est jamais promu champion.",
       "role": "exploiter",
-      "init": "from:P3",
+      "init": "from:P0",
       "warmup_episodes": 0,
       "ratio_start": 1.0,
       "ratio_end": 1.0,
@@ -130,7 +124,7 @@
       ]
     },
     "P4": {
-      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P3 (init from:P3) et P3 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P3 (init from:P3) et P3 est dans le pool, donc il fait jeu egal par construction des l'episode 0.",
       "role": "learner",
       "init": "from:P3",
       "warmup_episodes": 0,
@@ -142,16 +136,11 @@
         {"kind": "exploiters", "members": ["E1"], "weight": 0.25}
       ],
       "training_config_overrides": {
-        "total_episodes": 250000,
-        "agent_seat_p2_ratio": 0.6,
-        "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
-        }
+        "total_episodes": 250000
       }
     },
     "P5": {
-      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P4 (init from:P4) et P4 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P4 (init from:P4) et P4 est dans le pool, donc il fait jeu egal par construction des l'episode 0.",
       "role": "learner",
       "init": "from:P4",
       "warmup_episodes": 0,
@@ -163,18 +152,13 @@
         {"kind": "exploiters", "members": ["E1"], "weight": 0.15}
       ],
       "training_config_overrides": {
-        "total_episodes": 300000,
-        "agent_seat_p2_ratio": 0.6,
-        "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
-        }
+        "total_episodes": 300000
       }
     },
     "E2": {
-      "_doc": "Exploiteur de P5 : reprend ses poids et ne joue que contre lui.",
+      "_doc": "Exploiteur de P5 : joue 100 % contre lui, mais part des poids de P0 (init from:P0) et non des siens — cf. _doc_lignees.",
       "role": "exploiter",
-      "init": "from:P5",
+      "init": "from:P0",
       "warmup_episodes": 0,
       "ratio_start": 1.0,
       "ratio_end": 1.0,
@@ -184,7 +168,7 @@
       ]
     },
     "P6": {
-      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P5 (init from:P5) et P5 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P5 (init from:P5) et P5 est dans le pool, donc il fait jeu egal par construction des l'episode 0.",
       "role": "learner",
       "init": "from:P5",
       "warmup_episodes": 0,
@@ -196,16 +180,11 @@
         {"kind": "exploiters", "members": ["E1", "E2"], "weight": 0.25}
       ],
       "training_config_overrides": {
-        "total_episodes": 300000,
-        "agent_seat_p2_ratio": 0.6,
-        "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
-        }
+        "total_episodes": 300000
       }
     },
     "P7": {
-      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P6 (init from:P6) et P6 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P6 (init from:P6) et P6 est dans le pool, donc il fait jeu egal par construction des l'episode 0.",
       "role": "learner",
       "init": "from:P6",
       "warmup_episodes": 0,
@@ -217,16 +196,11 @@
         {"kind": "exploiters", "members": ["E1", "E2"], "weight": 0.20}
       ],
       "training_config_overrides": {
-        "total_episodes": 300000,
-        "agent_seat_p2_ratio": 0.6,
-        "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
-        }
+        "total_episodes": 300000
       }
     },
     "P8": {
-      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P7 (init from:P7) et P7 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P7 (init from:P7) et P7 est dans le pool, donc il fait jeu egal par construction des l'episode 0.",
       "role": "learner",
       "init": "from:P7",
       "warmup_episodes": 0,
@@ -238,18 +212,13 @@
         {"kind": "exploiters", "members": ["E1", "E2"], "weight": 0.20}
       ],
       "training_config_overrides": {
-        "total_episodes": 300000,
-        "agent_seat_p2_ratio": 0.6,
-        "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
-        }
+        "total_episodes": 300000
       }
     },
     "E3": {
-      "_doc": "Exploiteur de P8 : reprend ses poids et ne joue que contre lui.",
+      "_doc": "Exploiteur de P8 : joue 100 % contre lui, mais part des poids de P0 (init from:P0) et non des siens — cf. _doc_lignees.",
       "role": "exploiter",
-      "init": "from:P8",
+      "init": "from:P0",
       "warmup_episodes": 0,
       "ratio_start": 1.0,
       "ratio_end": 1.0,
@@ -259,7 +228,7 @@
       ]
     },
     "P9": {
-      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P8 (init from:P8) et P8 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P8 (init from:P8) et P8 est dans le pool, donc il fait jeu egal par construction des l'episode 0.",
       "role": "learner",
       "init": "from:P8",
       "warmup_episodes": 0,
@@ -271,16 +240,11 @@
         {"kind": "exploiters", "members": ["E1", "E2", "E3"], "weight": 0.25}
       ],
       "training_config_overrides": {
-        "total_episodes": 300000,
-        "agent_seat_p2_ratio": 0.6,
-        "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
-        }
+        "total_episodes": 300000
       }
     },
     "P10": {
-      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P9 (init from:P9) et P9 est dans le pool, donc il fait jeu egal par construction des l'episode 0. La rampe ne faisait que substituer des parties de bots (gagnes a ~92 %) aux parties de pool, sans signal correctif.",
+      "_doc": "Pas de rampe d'adversite (ratio_start == ratio_end) : le learner reprend P9 (init from:P9) et P9 est dans le pool, donc il fait jeu egal par construction des l'episode 0.",
       "role": "learner",
       "init": "from:P9",
       "warmup_episodes": 0,
@@ -292,12 +256,7 @@
         {"kind": "exploiters", "members": ["E1", "E2", "E3"], "weight": 0.20}
       ],
       "training_config_overrides": {
-        "total_episodes": 300000,
-        "agent_seat_p2_ratio": 0.6,
-        "model_params": {
-          "learning_rate": {"initial": 0.001, "final": 0.0005, "decay_fraction": 0.9},
-          "ent_coef": {"start": 0.03, "end": 0.01, "decay_fraction": 0.65}
-        }
+        "total_episodes": 300000
       }
     }
   }

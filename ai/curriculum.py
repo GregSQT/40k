@@ -1,9 +1,13 @@
 """Curriculum d'entrainement par ETAPES : learners `P0..P10`, exploiteurs `E1..E3`.
 
 Une ETAPE est un run complet d'`ai/train.py`. Elle declare comment le modele DEMARRE (`init`),
-et contre QUI il joue (`ratio_start`/`ratio_end`/`warmup_episodes` + `pool`). Le nombre
-d'episodes et les hyperparametres restent la propriete de `--training-config` : une etape ne
-decrit QUE l'adversite.
+contre QUI il joue (`ratio_start`/`ratio_end`/`warmup_episodes` + `pool`) et combien de temps
+(`total_episodes`). Elle ne declare PLUS ses hyperparametres depuis le 2026-09-07 : le bloc
+`lineage_regime` du curriculum les porte pour toute la lignee des qu'une etape reprend des poids
+(`init: from:`), et `--training-config` ne vaut plus que pour le seul depart a froid. La raison
+mesuree vit dans le `_doc` de ce bloc — une rampe s'exprime en fraction de la duree du RUN, donc
+chaque etape reprise reparcourait la sienne et rendait a un modele converge le regime
+d'exploration d'un demarrage.
 
 DEUX AXES ORTHOGONAUX, et c'est tout le point de ce module :
 
@@ -36,7 +40,12 @@ import zipfile
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from ai.run_state import load_run_state
-from shared.data_validation import require_key, require_non_negative_int, require_positive_int
+from shared.data_validation import (
+    ConfigurationError,
+    require_key,
+    require_non_negative_int,
+    require_positive_int,
+)
 
 #: Tolerance des sommes de ratios. Les poids sont ecrits a deux decimales dans le JSON ; la
 #: somme flottante de treize d'entre eux ne retombe pas sur 1.0 au bit pres.
@@ -63,8 +72,30 @@ _EXPLOITER_CONFIG_REQUIRED_KEYS = (
     "win_rate_target",
 )
 
-#: Cles obligatoires du bloc `early_stop` (racine et surcharge par etape).
-_EARLY_STOP_REQUIRED_KEYS = ("win_rate_threshold", "min_steps", "consecutive_evals")
+#: Cles obligatoires du bloc `early_stop` (racine et surcharge par etape). Toutes les decisions
+#: se prennent sur la MOYENNE GLISSANTE des `probe_window` dernieres sondes, jamais sur une sonde
+#: brute : deux sondes d'un meme modele rendent le meme score (graines figees jusqu'au 2026-09-07),
+#: donc les sauts de ±5 points entre sondes voisines ne sont pas du bruit d'echantillonnage mais
+#: des bascules de blocs de parties correlees — decider dessus, c'est decider sur leur amplitude.
+_EARLY_STOP_REQUIRED_KEYS = (
+    "probe_window",
+    "promote_score_vs_champion",
+    "promote_score_vs_others",
+    "promote_min_episodes",
+    "destroy_score_vs_champion",
+    "destroy_min_episodes",
+)
+
+#: Cles obligatoires du bloc `gate`.
+_GATE_REQUIRED_KEYS = (
+    "min_score_vs_champion", "min_score_vs_others", "eval_episodes", "eval_repeats",
+)
+
+#: Cles obligatoires du bloc `parity_check`.
+_PARITY_CHECK_REQUIRED_KEYS = ("min_score", "max_score")
+
+#: Cle du bloc de regime de lignee, applique a TOUTE etape reprise a chaud (`init: from:`).
+LINEAGE_REGIME_KEY = "lineage_regime"
 
 #: Cles autorisees au niveau racine de `training_config_overrides` d'une etape learner.
 #: Toute cle absente de cette liste est refusee a la validation du curriculum.
@@ -121,6 +152,24 @@ STAGE_HP_OVERRIDES_MODEL_PARAM_SPECS: Dict[str, _ModelParamSpec] = {
 STAGE_HP_OVERRIDES_ALLOWED_MODEL_PARAMS: frozenset = frozenset(
     STAGE_HP_OVERRIDES_MODEL_PARAM_SPECS
 )
+
+#: `model_params` que le bloc `lineage_regime` impose a toute etape reprise a chaud, et la
+#: contrainte de chacun. La liste est CLOSE : une cle de plus doit etre declaree ici avant de
+#: pouvoir etre ecrite dans le JSON, sans quoi un hyperparametre voyagerait jusqu'au modele sans
+#: qu'aucun controle ne l'ait lu.
+#:
+#: `allow_schedule=False` PARTOUT, et c'est le fond de la decision du 2026-09-07 : une rampe est
+#: exprimee en fraction de la duree du RUN, donc chaque etape reprise reparcourait la sienne
+#: depuis le debut et rendrait a un modele converge le regime d'exploration d'un demarrage. Le
+#: bloc de lignee n'accepte donc que des scalaires. La justification mesuree vit dans son `_doc`.
+LINEAGE_REGIME_MODEL_PARAM_SPECS: Dict[str, _ModelParamSpec] = {
+    "learning_rate": _ModelParamSpec(integer=False, allow_zero=False, allow_schedule=False),
+    "ent_coef": _ModelParamSpec(integer=False, allow_zero=True, allow_schedule=False),
+    "n_steps": _ModelParamSpec(integer=True, allow_zero=False, allow_schedule=False),
+    "batch_size": _ModelParamSpec(integer=True, allow_zero=False, allow_schedule=False),
+    "vf_coef": _ModelParamSpec(integer=False, allow_zero=False, allow_schedule=False),
+    "max_grad_norm": _ModelParamSpec(integer=False, allow_zero=False, allow_schedule=False),
+}
 
 #: Sous-cles de `callback_params` autorisees dans un override d'etape.
 #: `bot_eval_freq` et `bot_eval_final` sont les seuls parametres d'evaluation qui dependent
@@ -317,15 +366,176 @@ def validate_exploiter_protocol(
             )
 
 
-def _validate_early_stop_block(block: Any, context: str) -> None:
-    """Valide un bloc `early_stop` (racine ou par etape). Leve si une cle est absente ou invalide."""
+def validate_early_stop_block(block: Any, context: str) -> None:
+    """Valide un bloc `early_stop` (racine ou par etape). Leve si une cle est absente ou invalide.
+
+    Les six cles decrivent DEUX decisions opposees, toutes deux prises sur la moyenne glissante
+    des `probe_window` dernieres sondes : la PROMOTION (l'etape a fini son travail, le budget
+    restant serait paye pour rien) et la DESTRUCTION (l'etape a defait la politique qu'elle avait
+    recue). Le seuil de destruction doit rester SOUS celui de promotion, sinon les deux branches
+    peuvent etre vraies au meme instant et le verdict dependrait de l'ordre des tests.
+    """
     if not isinstance(block, dict):
         raise TypeError(f"{context} doit etre un objet JSON.")
-    threshold = float(require_key(block, "win_rate_threshold"))
-    require_non_negative_int(require_key(block, "min_steps"), "min_steps")
-    require_positive_int(require_key(block, "consecutive_evals"), "consecutive_evals")
-    if not (0.0 < threshold <= 1.0):
-        raise ValueError(f"{context}.win_rate_threshold doit etre dans ]0,1] (got {threshold})")
+    for key in _EARLY_STOP_REQUIRED_KEYS:
+        if key not in block:
+            raise ConfigurationError(
+                f"{context} manque la cle '{key}'. Cles requises : {_EARLY_STOP_REQUIRED_KEYS}"
+            )
+    window = require_positive_int(require_key(block, "probe_window"), f"{context}.probe_window")
+    if window < 2:
+        raise ValueError(
+            f"{context}.probe_window doit valoir au moins 2 (got {window}) : une fenetre d'un "
+            "seul point n'est pas une moyenne, c'est la sonde brute — precisement ce que ces "
+            "decisions ne veulent plus lire."
+        )
+    require_non_negative_int(
+        require_key(block, "promote_min_episodes"), f"{context}.promote_min_episodes"
+    )
+    require_non_negative_int(
+        require_key(block, "destroy_min_episodes"), f"{context}.destroy_min_episodes"
+    )
+    scores = {}
+    for key in (
+        "promote_score_vs_champion", "promote_score_vs_others", "destroy_score_vs_champion",
+    ):
+        value = float(require_key(block, key))
+        if not (0.0 < value <= 1.0):
+            raise ValueError(f"{context}.{key} doit etre dans ]0,1] (got {value})")
+        scores[key] = value
+    if scores["destroy_score_vs_champion"] >= scores["promote_score_vs_champion"]:
+        raise ValueError(
+            f"{context}: destroy_score_vs_champion ({scores['destroy_score_vs_champion']}) doit "
+            f"etre STRICTEMENT sous promote_score_vs_champion "
+            f"({scores['promote_score_vs_champion']}) — sinon une meme moyenne declencherait a la "
+            "fois la promotion et l'arret pour destruction."
+        )
+
+
+def _validate_gate_block(block: Any, context: str) -> None:
+    """Valide le bloc `gate`. Deux planchers, un nombre d'episodes, un nombre de blocs moyennes."""
+    if not isinstance(block, dict):
+        raise TypeError(f"{context} doit etre un objet.")
+    for key in _GATE_REQUIRED_KEYS:
+        if key not in block:
+            raise ConfigurationError(
+                f"{context} manque la cle '{key}'. Cles requises : {_GATE_REQUIRED_KEYS}"
+            )
+    for key in ("min_score_vs_champion", "min_score_vs_others"):
+        value = float(require_key(block, key))
+        if not (0.0 <= value <= 1.0):
+            raise ValueError(f"{context}.{key} doit etre dans [0,1] (got {value})")
+    require_positive_int(require_key(block, "eval_episodes"), f"{context}.eval_episodes")
+    repeats = require_positive_int(require_key(block, "eval_repeats"), f"{context}.eval_repeats")
+    if repeats < 2:
+        raise ValueError(
+            f"{context}.eval_repeats doit valoir au moins 2 (got {repeats}) : le gate decide sur "
+            "une MOYENNE de blocs a graines tirees, un bloc unique n'en est pas une."
+        )
+
+
+def _validate_parity_check_block(block: Any, context: str) -> None:
+    """Valide le bloc `parity_check` : la fenetre ou doit tomber la baseline d'ouverture."""
+    if not isinstance(block, dict):
+        raise TypeError(f"{context} doit etre un objet.")
+    for key in _PARITY_CHECK_REQUIRED_KEYS:
+        if key not in block:
+            raise ConfigurationError(
+                f"{context} manque la cle '{key}'. Cles requises : {_PARITY_CHECK_REQUIRED_KEYS}"
+            )
+    low = float(require_key(block, "min_score"))
+    high = float(require_key(block, "max_score"))
+    for key, value in (("min_score", low), ("max_score", high)):
+        if not (0.0 <= value <= 1.0):
+            raise ValueError(f"{context}.{key} doit etre dans [0,1] (got {value})")
+    if not low < 0.5 < high:
+        raise ValueError(
+            f"{context}: la fenetre [{low}, {high}] doit ENCADRER la parite 0.5. Une etape reprise "
+            "a chaud part des poids d'un membre de son pool : son score contre lui vaut 0.5 par "
+            "identite, pas par esperance. Une fenetre qui ne la contient pas refuserait tout run."
+        )
+
+
+def _validate_lineage_regime(curriculum: Dict[str, Any], source: str) -> None:
+    """Valide le bloc `lineage_regime`, obligatoire des qu'une etape reprend des poids.
+
+    Il vaut pour TOUTE etape `init: from:` — learners comme exploiteurs —, donc son absence ne
+    peut pas etre traitee comme « pas de regime » : ce serait rendre a chaque etape reprise les
+    rampes du profil, c'est-a-dire exactement le defaut mesure le 2026-09-04 (entropie multipliee
+    par cinq a la reprise, politique promue detruite en 10 000 episodes).
+    """
+    order = stage_order(curriculum)
+    resumed = [
+        name for name in order
+        if stage_init_source(require_stage(curriculum, name)) is not None
+    ]
+    if LINEAGE_REGIME_KEY not in curriculum:
+        if not resumed:
+            return
+        raise ConfigurationError(
+            f"{source}: bloc '{LINEAGE_REGIME_KEY}' absent alors que {resumed} reprennent des "
+            "poids. Sans lui, chaque etape reprise reparcourrait les rampes du profil depuis leur "
+            "depart et rendrait a un modele converge le regime d'exploration d'un demarrage."
+        )
+    block = curriculum[LINEAGE_REGIME_KEY]
+    if not isinstance(block, dict):
+        raise TypeError(f"{source}: curriculum.{LINEAGE_REGIME_KEY} doit etre un objet JSON.")
+
+    model_params = require_key(block, "model_params")
+    if not isinstance(model_params, dict):
+        raise TypeError(f"{source}: {LINEAGE_REGIME_KEY}.model_params doit etre un objet.")
+    unknown = sorted(set(model_params) - set(LINEAGE_REGIME_MODEL_PARAM_SPECS))
+    if unknown:
+        raise ValueError(
+            f"{source}: {LINEAGE_REGIME_KEY}.model_params contient des cles non autorisees : "
+            f"{unknown}. Cles autorisees : {sorted(LINEAGE_REGIME_MODEL_PARAM_SPECS)}"
+        )
+    missing = sorted(set(LINEAGE_REGIME_MODEL_PARAM_SPECS) - set(model_params))
+    if missing:
+        raise ConfigurationError(
+            f"{source}: {LINEAGE_REGIME_KEY}.model_params manque {missing}. Le bloc est COMPLET "
+            "ou il n'est pas un regime : une cle omise laisserait la valeur du profil s'appliquer "
+            "aux etapes reprises sans que rien ne le dise."
+        )
+    for key, spec in LINEAGE_REGIME_MODEL_PARAM_SPECS.items():
+        _check_model_param(
+            model_params[key], spec, f"{source}: {LINEAGE_REGIME_KEY}.model_params.{key}"
+        )
+    n_steps = int(model_params["n_steps"])
+    batch_size = int(model_params["batch_size"])
+    if n_steps % batch_size != 0:
+        raise ValueError(
+            f"{source}: {LINEAGE_REGIME_KEY} — n_steps ({n_steps}) n'est pas un multiple de "
+            f"batch_size ({batch_size}) : le dernier minibatch de chaque epoch serait tronque, "
+            "donc les updates n'auraient pas tous le meme poids."
+        )
+
+    ratio = require_key(block, "agent_seat_p2_ratio")
+    if not isinstance(ratio, (int, float)) or isinstance(ratio, bool):
+        raise TypeError(
+            f"{source}: {LINEAGE_REGIME_KEY}.agent_seat_p2_ratio doit etre un nombre (got {ratio!r})"
+        )
+    if not 0.0 <= float(ratio) <= 1.0:
+        raise ValueError(
+            f"{source}: {LINEAGE_REGIME_KEY}.agent_seat_p2_ratio doit etre dans [0.0, 1.0] "
+            f"(got {ratio!r}) : c'est une PART des episodes."
+        )
+
+
+def load_lineage_regime(curriculum: Dict[str, Any]) -> Dict[str, Any]:
+    """Le bloc `lineage_regime` du curriculum. Absent = erreur explicite, jamais un dict vide."""
+    block = require_key(curriculum, LINEAGE_REGIME_KEY)
+    if not isinstance(block, dict):
+        raise TypeError(f"curriculum.{LINEAGE_REGIME_KEY} doit etre un objet JSON.")
+    return block
+
+
+def load_parity_check(curriculum: Dict[str, Any]) -> Tuple[float, float]:
+    """(min_score, max_score) du verrou de parite d'ouverture. Absent = erreur explicite."""
+    block = require_key(curriculum, "parity_check")
+    if not isinstance(block, dict):
+        raise TypeError("curriculum.parity_check doit etre un objet JSON.")
+    return float(require_key(block, "min_score")), float(require_key(block, "max_score"))
 
 
 def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>") -> None:
@@ -367,24 +577,13 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
     if not isinstance(require_key(opponent, "deterministic"), bool):
         raise TypeError(f"{source}: curriculum.opponent.deterministic doit etre un booleen.")
 
-    gate = require_key(curriculum, "gate")
-    if not isinstance(gate, dict):
-        raise TypeError(f"{source}: curriculum.gate doit etre un objet.")
-    floor = float(require_key(gate, "min_score_vs_champion"))
-    target = float(require_key(gate, "target_score_vs_champion"))
-    gate_episodes = int(require_key(gate, "eval_episodes"))
-    if not (0.0 <= floor <= 1.0):
-        raise ValueError(f"{source}: gate.min_score_vs_champion doit etre dans [0,1] (got {floor})")
-    if not (floor <= target <= 1.0):
-        raise ValueError(
-            f"{source}: gate.target_score_vs_champion doit etre dans [min_score_vs_champion,1] "
-            f"(got {target} pour un plancher de {floor})"
-        )
-    if gate_episodes <= 0:
-        raise ValueError(f"{source}: gate.eval_episodes doit etre > 0 (got {gate_episodes})")
+    _validate_gate_block(require_key(curriculum, "gate"), f"{source}: gate")
+    _validate_parity_check_block(
+        require_key(curriculum, "parity_check"), f"{source}: parity_check"
+    )
 
     if "early_stop" in curriculum:
-        _validate_early_stop_block(curriculum["early_stop"], f"{source}: early_stop")
+        validate_early_stop_block(curriculum["early_stop"], f"{source}: early_stop")
 
     for position, name in enumerate(order):
         stage = require_stage(curriculum, name)
@@ -478,7 +677,7 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
             )
 
         if "early_stop" in stage:
-            _validate_early_stop_block(stage["early_stop"], f"{source}: stages[{name}].early_stop")
+            validate_early_stop_block(stage["early_stop"], f"{source}: stages[{name}].early_stop")
 
     # Validation du bloc exploiter_config si present (obligatoire des qu'il existe au moins
     # une etape exploiteur dans le curriculum).
@@ -532,6 +731,11 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
                 raise ValueError(f"{source}: stages[{name}].budget_cap doit etre > 0")
         _validate_stage_hp_overrides(name, stage, source)
 
+    # EN DERNIER : le regime de lignee lit les `init` de toutes les etapes, donc il suppose que
+    # « init nomme une etape ANTERIEURE » a deja ete tranche par la boucle ci-dessus. Le valider
+    # avant ferait tomber un refus de regime la ou le defaut reel est un ordre d'etapes casse.
+    _validate_lineage_regime(curriculum, source)
+
 
 _ROBUST_WINDOW_MIN = 3
 
@@ -545,6 +749,28 @@ def _check_eval_coherence(source: str, name: str, total_episodes: int, bot_eval_
             f"robust_window_min ({_ROBUST_WINDOW_MIN}) = {bot_eval_freq * _ROBUST_WINDOW_MIN} : "
             "le modele robuste ne serait jamais selectionne (pas assez de points de mesure)."
         )
+
+
+def _check_model_param(value: Any, spec: _ModelParamSpec, context: str) -> None:
+    """Applique la contrainte d'un `_ModelParamSpec` a une valeur. Leve si elle n'est pas tenue.
+
+    UN SEUL point d'application, partage par `training_config_overrides.model_params` (etape) et
+    par `lineage_regime.model_params` (lignee). Ecrire le predicat a deux endroits est exactement
+    ce qui avait laisse quatre orthographes du meme controle, dont trois sans rejet des booleens.
+    """
+    if spec.allow_schedule and isinstance(value, dict):
+        return
+    # `isinstance(True, int)` vaut vrai : sans ce rejet, `true` passerait pour 1 et s'appliquerait
+    # au modele comme un reglage silencieux.
+    numeric = not isinstance(value, bool) and isinstance(
+        value, int if spec.integer else (int, float)
+    )
+    if numeric and (value >= 0 if spec.allow_zero else value > 0):
+        return
+    kind = "un entier" if spec.integer else "un nombre"
+    operator = ">= 0" if spec.allow_zero else "> 0"
+    schedule = " ou un objet schedule" if spec.allow_schedule else ""
+    raise ValueError(f"{context} doit etre {kind} {operator}{schedule} (got {value!r})")
 
 
 def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) -> None:
@@ -565,6 +791,20 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
             f"{source}: stages[{name}].training_config_overrides n'est pas autorise sur une "
             "etape exploiteur : la config est fixee via --training-config a la ligne de commande."
         )
+    if stage_init_source(stage) is not None:
+        # REGIME DE LIGNEE (2026-09-07) : une etape reprise a chaud ne decide plus de ses
+        # hyperparametres, `lineage_regime` les porte pour toute la lignee. Les laisser
+        # declarables ferait coexister deux sources pour la meme valeur, et c'est la source
+        # perdante — les overrides d'etape sont appliques AVANT le regime — qui aurait l'air
+        # d'etre celle qui decide en relisant le JSON.
+        governed = sorted(set(overrides) & {"model_params", "agent_seat_p2_ratio"})
+        if governed:
+            raise ValueError(
+                f"{source}: stages[{name}] reprend des poids (init={stage['init']!r}) et declare "
+                f"{governed} dans training_config_overrides. Ces cles appartiennent au bloc "
+                f"'{LINEAGE_REGIME_KEY}' du curriculum, qui vaut pour TOUTES les etapes reprises "
+                "a chaud. Une etape reprise ne declare que sa duree et son adversite."
+            )
     unknown_top = sorted(set(overrides) - STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS)
     if unknown_top:
         raise ValueError(
@@ -607,23 +847,10 @@ def _validate_stage_hp_overrides(name: str, stage: Dict[str, Any], source: str) 
                 f"{sorted(STAGE_HP_OVERRIDES_ALLOWED_MODEL_PARAMS)}"
             )
         for _key, _spec in STAGE_HP_OVERRIDES_MODEL_PARAM_SPECS.items():
-            if _key not in mp:
-                continue
-            v = mp[_key]
-            if _spec.allow_schedule and isinstance(v, dict):
-                continue
-            # `isinstance(True, int)` vaut vrai : sans ce rejet, `true` passerait pour 1 et
-            # s'appliquerait au modele comme un reglage silencieux.
-            _numeric = not isinstance(v, bool) and isinstance(
-                v, int if _spec.integer else (int, float)
-            )
-            if not (_numeric and (v >= 0 if _spec.allow_zero else v > 0)):
-                _kind = "un entier" if _spec.integer else "un nombre"
-                _op = ">= 0" if _spec.allow_zero else "> 0"
-                _sched = " ou un objet schedule" if _spec.allow_schedule else ""
-                raise ValueError(
-                    f"{source}: stages[{name}].training_config_overrides.model_params.{_key} "
-                    f"doit etre {_kind} {_op}{_sched} (got {v!r})"
+            if _key in mp:
+                _check_model_param(
+                    mp[_key], _spec,
+                    f"{source}: stages[{name}].training_config_overrides.model_params.{_key}",
                 )
     if "callback_params" in overrides:
         cp = overrides["callback_params"]
@@ -790,8 +1017,9 @@ class StageOrigin(NamedTuple):
 def stage_origin(canonical_model_path: str, stage: Dict[str, Any]) -> StageOrigin:
     """Origine d'une etape = l'etat de l'archive qu'elle reprend (`init: from:<etape>`) ; 0/0 si 'new'.
 
-    C'est l'origine des grandeurs D'ETAPE : cadence des sondes, `min_steps` de l'early-stop,
-    `budget_cap` et budget journalise de l'exploiteur, `episodes_trained` de curriculum.log.
+    C'est l'origine des grandeurs D'ETAPE : cadence des sondes, `promote_min_episodes` et
+    `destroy_min_episodes` de l'early-stop, `budget_cap` et budget journalise de l'exploiteur,
+    `episodes_trained` de curriculum.log.
     Elle se lit sur l'ARCHIVE SOURCE et non sur le modele repris : apres un crash,
     `--resume-from <checkpoint>` reprend au milieu de l'etape, et un compteur ancre sur ce
     checkpoint remettrait budget et cadence a zero — le budget d'un exploiteur s'allongerait en
@@ -872,39 +1100,154 @@ def copy_tensorboard_run(run_dir: str, stage_name: str) -> str:
 
 # ── GATE ET DIAGNOSTIC ─────────────────────────────────────────────────────────────────────
 
+#: Verdicts que rend `evaluate_pool_decision`. `continue` = rien a decider pour l'instant.
+POOL_VERDICT_CONTINUE = "continue"
+POOL_VERDICT_PROMOTE = "promote"
+POOL_VERDICT_DESTROY = "destroy"
+
+
+class PoolDecision(NamedTuple):
+    """Verdict d'une lecture des moyennes de sondes, et la phrase qui l'explique au journal."""
+
+    verdict: str
+    reason: str
+
+
+def _pool_score_shortfalls(
+    champion_label: str,
+    scores_vs_pool: Dict[str, float],
+    floor_champion: float,
+    floor_others: float,
+) -> List[str]:
+    """Membres du pool sous leur plancher, formates. Liste vide = tous les planchers sont tenus.
+
+    Source UNIQUE des deux decisions qui lisent les memes chiffres : la promotion en cours de run
+    (`evaluate_pool_decision`) et le gate de fin d'etape (`evaluate_stage_gate`). Les ecrire deux
+    fois laisserait une etape s'arreter sur un critere plus faible que celui qui la jugera.
+
+    LEVE quand le champion n'a pas ete mesure : un champion absent des scores ne peut pas etre
+    « accepte par defaut », c'est le seul etalon du gate.
+    """
+    if champion_label not in scores_vs_pool:
+        raise KeyError(
+            f"Aucun score mesure contre le champion {champion_label!r}. "
+            f"Scores disponibles : {sorted(scores_vs_pool)}"
+        )
+    shortfalls: List[str] = []
+    champion_score = float(scores_vs_pool[champion_label])
+    if champion_score < floor_champion:
+        shortfalls.append(
+            f"champion {champion_label}={champion_score:.3f} < {floor_champion:.2f}"
+        )
+    for label in sorted(scores_vs_pool):
+        if label == champion_label:
+            continue
+        score = float(scores_vs_pool[label])
+        if score < floor_others:
+            shortfalls.append(f"{label}={score:.3f} < {floor_others:.2f}")
+    return shortfalls
+
+
+def evaluate_pool_decision(
+    stage_name: str,
+    champion_label: Optional[str],
+    mean_scores_vs_pool: Dict[str, float],
+    stage_episodes: int,
+    early_stop_cfg: Dict[str, Any],
+) -> PoolDecision:
+    """Verdict d'arret pendant le run, lu sur les MOYENNES glissantes des sondes.
+
+    Deux branches opposees, et la DESTRUCTION est testee la premiere : elle ouvre plus tot
+    (`destroy_min_episodes` < `promote_min_episodes`) et son seuil est sous celui de la promotion
+    (verrou `validate_early_stop_block`), donc les deux ne peuvent pas etre vraies ensemble —
+    l'ordre est la pour que ca reste vrai si un jour les seuils se rapprochent.
+
+    Une etape sans champion (P0) n'a pas de pool : rien a decider.
+    """
+    if champion_label is None:
+        return PoolDecision(POOL_VERDICT_CONTINUE, f"{stage_name} : pas de pool, rien a decider.")
+    if champion_label not in mean_scores_vs_pool:
+        raise KeyError(
+            f"Decision de {stage_name} : aucune moyenne contre le champion {champion_label!r}. "
+            f"Moyennes disponibles : {sorted(mean_scores_vs_pool)}"
+        )
+
+    destroy_floor = float(require_key(early_stop_cfg, "destroy_score_vs_champion"))
+    destroy_after = int(require_key(early_stop_cfg, "destroy_min_episodes"))
+    champion_mean = float(mean_scores_vs_pool[champion_label])
+    if stage_episodes >= destroy_after and champion_mean < destroy_floor:
+        return PoolDecision(POOL_VERDICT_DESTROY, (
+            f"{stage_name} : moyenne {champion_mean:.3f} contre le champion {champion_label} "
+            f"a {stage_episodes} episodes d'etape — SOUS {destroy_floor:.2f}. L'etape part a 0.50 "
+            "contre lui par construction : elle detruit la politique qu'elle a recue. Run ARRETE."
+        ))
+
+    promote_after = int(require_key(early_stop_cfg, "promote_min_episodes"))
+    if stage_episodes < promote_after:
+        return PoolDecision(POOL_VERDICT_CONTINUE, (
+            f"{stage_name} : {stage_episodes} episodes d'etape, promotion ouverte a "
+            f"{promote_after}."
+        ))
+    shortfalls = _pool_score_shortfalls(
+        champion_label,
+        mean_scores_vs_pool,
+        float(require_key(early_stop_cfg, "promote_score_vs_champion")),
+        float(require_key(early_stop_cfg, "promote_score_vs_others")),
+    )
+    if shortfalls:
+        return PoolDecision(POOL_VERDICT_CONTINUE, (
+            f"{stage_name} : seuils de promotion non atteints — " + " ; ".join(shortfalls)
+        ))
+    return PoolDecision(POOL_VERDICT_PROMOTE, (
+        f"{stage_name} : tous les seuils de promotion tenus a {stage_episodes} episodes d'etape "
+        f"({', '.join(f'{lbl}={mean_scores_vs_pool[lbl]:.3f}' for lbl in sorted(mean_scores_vs_pool))}). "
+        "Le budget restant serait paye pour rien. Run ARRETE."
+    ))
+
+
 def evaluate_stage_gate(
     stage_name: str,
     champion_label: Optional[str],
-    scores_vs_pool: Dict[str, float],
-    floor: float,
-    target: float,
+    mean_scores_vs_pool: Dict[str, float],
+    floor_champion: float,
+    floor_others: float,
 ) -> Tuple[bool, str]:
-    """(accepte, motif) — plancher DUR sur le score contre le champion le PLUS RECENT.
+    """(accepte, motif) — deux planchers sur les MOYENNES de fin d'etape.
 
     Remplace `benchmark_floor`, aveugle ici : les bots de reference sont satures a 1.00, donc un
-    plancher pose dessus est franchi par n'importe quel modele et ne separe rien. Le champion
-    precedent, lui, est un adversaire dont la force suit celle de l'agent — c'est le seul etalon
-    qui reste discriminant d'une etape a l'autre.
+    plancher pose dessus est franchi par n'importe quel modele et ne separe rien. Les membres du
+    pool, eux, sont des adversaires dont la force suit celle de l'agent — les seuls etalons qui
+    restent discriminants d'une etape a l'autre.
+
+    DEUX PLANCHERS et non un : `floor_champion` contre le champion le plus recent, celui dont
+    l'etape reprend les poids et contre qui elle part donc a 0.50 ; `floor_others` contre chacun
+    des autres membres. Le second est a la parite et non au-dessus — un ancien qui tient encore
+    l'agent en echec est une regression, mais l'agent n'a aucune raison de le DOMINER, il ne
+    s'entraine contre lui qu'a une fraction de son budget. Le gate ne portait que sur le champion
+    jusqu'au 2026-09-07, et une etape pouvait donc etre promue en ayant regresse contre tout le
+    reste du pool sans que rien ne le refuse.
+
+    Les scores attendus sont des MOYENNES de `gate.eval_repeats` blocs a graines tirees, pas une
+    mesure unique — meme grandeur que celle sur laquelle l'early-stop decide.
 
     Une etape sans champion (P0) n'a rien a franchir : elle est acceptee, et le motif le dit.
     """
     if champion_label is None:
         return True, f"{stage_name} : pas de champion a battre (premiere etape), gate sans objet."
-    if champion_label not in scores_vs_pool:
-        raise KeyError(
-            f"Gate de {stage_name} : aucun score mesure contre le champion {champion_label!r}. "
-            f"Scores disponibles : {sorted(scores_vs_pool)}"
-        )
-    score = float(scores_vs_pool[champion_label])
-    if score < floor:
+    shortfalls = _pool_score_shortfalls(
+        champion_label, mean_scores_vs_pool, floor_champion, floor_others
+    )
+    detail = ", ".join(
+        f"{label}={mean_scores_vs_pool[label]:.3f}" for label in sorted(mean_scores_vs_pool)
+    )
+    if shortfalls:
         return False, (
-            f"{stage_name} : score {score:.3f} contre le champion {champion_label} — SOUS le "
-            f"plancher dur de {floor:.2f} (cible {target:.2f}). Etape REFUSEE, aucune promotion."
+            f"{stage_name} : {detail} — sous plancher : {' ; '.join(shortfalls)}. "
+            f"Etape REFUSEE, aucune promotion."
         )
-    verdict = "au-dessus de la cible" if score >= target else "au-dessus du plancher, sous la cible"
     return True, (
-        f"{stage_name} : score {score:.3f} contre le champion {champion_label} — {verdict} "
-        f"(plancher {floor:.2f}, cible {target:.2f})."
+        f"{stage_name} : {detail} — planchers tenus (champion >= {floor_champion:.2f}, "
+        f"autres >= {floor_others:.2f})."
     )
 
 
