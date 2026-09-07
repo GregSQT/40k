@@ -9,11 +9,21 @@ Découpage en 6 lots des trois sujets ci-dessous (ordre séquentiel imposé : to
 **✅ LIVRÉ (2026-09-07)** — `note_rule_usage` n'était appelé que pour **14** des **62 règles du
 corpus qui déclarent des `controls`** ; les 48 autres ne pouvaient afficher que `ERREURS` ou
 `JAMAIS EXERCÉE`, jamais `OK`. Les **46 règles `always`** manquantes sont câblées : le rapport
-passe de **48 à 15 verdicts « JAMAIS EXERCÉE »**, et les 15 restants sont vrais (aucune arme
-BLAST / COMBI / TORRENT / LETHAL HITS dans les rosters joués, et **0 ADVANCE en phase de tir sur
-10849** — vérifié sur le journal, donc `double_advance` et `advance_post_tir` sont honnêtement à
-zéro). Les 2 règles `indecidable` restantes (10.02, 12.07) n'ont pas besoin de compteur : leur
-verdict est calculé avant la branche qui le lit.
+passe de **48 à 15 verdicts « JAMAIS EXERCÉE »**.
+
+⚠️ **Deux des 46 câblages sont inopérants, et deux affirmations de cette section étaient fausses**
+— relevé par la revue du 2026-09-07, mesures à l'appui, non corrigé ici :
+
+1. `PROJ.1.2.double_advance` et `PROJ.1.2.advance_post_tir` sont gardés par `if phase == 'SHOOT'`
+   dans `shoot_handler.py`. Or l'Advance est un **type de mouvement de la phase MOVE** (09.02) —
+   la table `expected_phase_by_action` d'`ai/analyzer.py` documente précisément cette
+   correction (« advance etait attendu en SHOOT — FAUX »). Le garde est donc structurellement toujours faux : ces deux règles restent à
+   0 exercice **par construction**, ce que la première rédaction de cette section présentait à
+   tort comme un « zéro honnête ». Corollaire relevé : le contrôle `advance_twice_in_shoot_phase`
+   lui-même serait inatteignable.
+2. La justification écrite pour 10.02 / 12.07 (« leur verdict est calculé avant la branche qui le
+   lit ») est fausse quand leur compteur d'erreurs est non nul : `coverage_rows` force
+   `applicable = True` dès que `errors > 0`, puis rend `ERREURS` avec `exercised == 0`.
 
 Chaque appel est posé **au site où le contrôle regarde vraiment**, après ses renoncements, jamais
 à l'entrée du handler — la règle que pose le docstring de `note_rule_usage`. Preuve de placement :
