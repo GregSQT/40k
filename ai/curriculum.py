@@ -36,7 +36,6 @@ import os
 import shutil
 import sys
 import tempfile
-import zipfile
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from ai.run_state import load_run_state
@@ -1049,15 +1048,8 @@ def stage_source_model(canonical_model_path: str, stage: Dict[str, Any]) -> Opti
     return source_model
 
 
-class StageOrigin(NamedTuple):
-    """Point de depart d'une etape : etat de son ARCHIVE SOURCE, en episodes et en pas."""
-
-    episodes: int
-    timesteps: int
-
-
-def stage_origin(canonical_model_path: str, stage: Dict[str, Any]) -> StageOrigin:
-    """Origine d'une etape = l'etat de l'archive qu'elle reprend (`init: from:<etape>`) ; 0/0 si 'new'.
+def stage_origin(canonical_model_path: str, stage: Dict[str, Any]) -> int:
+    """Origine d'une etape = les episodes deja joues par l'archive qu'elle reprend ; 0 si 'new'.
 
     C'est l'origine des grandeurs D'ETAPE : cadence des sondes, `promote_min_episodes` et
     `destroy_min_episodes` de l'early-stop, `budget_cap` et budget journalise de l'exploiteur,
@@ -1067,19 +1059,15 @@ def stage_origin(canonical_model_path: str, stage: Dict[str, Any]) -> StageOrigi
     checkpoint remettrait budget et cadence a zero — le budget d'un exploiteur s'allongerait en
     silence du nombre d'episodes deja joues.
 
-    `num_timesteps` est lu dans le `data` du zip, comme `ent_coef` (ai/train.py) : la valeur
-    sert avant toute construction de modele. Le compteur d'episodes vient de l'etat de run
-    compagnon (`ai/run_state.py`), le zip SB3 ne persistant que les pas.
+    Le compte vient de l'etat de run compagnon (`ai/run_state.py`), le zip SB3 ne persistant que
+    les pas. Cette fonction rendait AUSSI le `num_timesteps` de l'archive, et ouvrait le zip pour
+    lui seul : plus aucune decision ne se prend en pas depuis la suppression du garde `min_steps`
+    le 2026-09-07.
     """
     source_model = stage_source_model(canonical_model_path, stage)
     if source_model is None:
-        return StageOrigin(episodes=0, timesteps=0)
-    with zipfile.ZipFile(source_model) as archive:
-        data = json.loads(archive.read("data"))
-    timesteps = require_non_negative_int(
-        require_key(data, "num_timesteps"), f"num_timesteps ({source_model})"
-    )
-    return StageOrigin(episodes=load_run_state(source_model), timesteps=timesteps)
+        return 0
+    return load_run_state(source_model)
 
 
 def promote_stage_model(canonical_model_path: str, stage_name: str) -> List[str]:
@@ -1310,10 +1298,11 @@ def pool_monotonicity_diagnostic(
 
     Reste un diagnostic malgre tout, pour une raison qui n'est plus celle-la : les scores viennent
     d'une evaluation FINIE (`gate.eval_episodes`, 300 episodes), ou l'erreur-type d'un taux proche
-    de 0.5 vaut 2,9 points — le meme chiffre qui separe deja le plancher du gate (0.55) de sa cible
-    (0.60). Une comparaison BRUTE de deux scores voisins refuserait donc des etapes saines sur du
-    bruit. En faire un gate demanderait une MARGE au-dessus de cette erreur-type, pas l'inegalite
-    stricte codee ici. Decision non prise : on journalise pour lire, pas pour trancher.
+    de 0.5 vaut 2,9 points — soit presque tout l'ecart que le gate lui-meme doit trancher entre
+    ses deux planchers (`min_score_vs_others` 0.50 et `min_score_vs_champion` 0.55). Une
+    comparaison BRUTE de deux scores voisins refuserait donc des etapes saines sur du bruit. En
+    faire un gate demanderait une MARGE au-dessus de cette erreur-type, pas l'inegalite stricte
+    codee ici. Decision non prise : on journalise pour lire, pas pour trancher.
     """
     ordered = [label for label in pool_order if label in scores_vs_pool]
     lines = [
@@ -1384,6 +1373,44 @@ def append_curriculum_log(entry: Dict[str, Any], log_path: Optional[str] = None)
     with open(path, "a", encoding="utf-8") as handle:
         handle.write(json.dumps(stamped, ensure_ascii=False, sort_keys=True) + "\n")
     return path
+
+
+#: `written_by` du pipeline d'entrainement, le seul ecrivain dont une ligne fait autorite.
+PIPELINE_WRITER = os.path.join("ai", "train.py")
+
+
+def last_curriculum_log_entry(
+    etape: str, log_path: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Derniere entree du journal ecrite par le PIPELINE pour cette etape. None s'il n'y en a pas.
+
+    Filtre sur `written_by` : le journal est en append public (cf. `append_curriculum_log`), et
+    une ligne posee par un script jetable ne doit pas pouvoir decider d'une cloture.
+
+    Lecteur EXIGE par `--close-stage`. Une etape arretee pour destruction a bien atteint
+    `_close_curriculum_stage`, qui a journalise son `pool_stop_verdict` et refuse la promotion
+    sans ecrire de zip d'etape. Rien d'autre ne garde ce verdict : `--close-stage` reconstruit son
+    `run_info` depuis les artefacts poses a cote du modele, ou il n'apparait pas. Sans cette
+    relecture, la commande de reprise remesurait l'etape detruite et pouvait la promouvoir.
+
+    Une ligne ILLISIBLE leve : un journal tronque en cours d'ecriture est un etat sur lequel il ne
+    faut pas decider en silence.
+    """
+    path = log_path if log_path is not None else curriculum_log_path()
+    if not os.path.exists(path):
+        return None
+    found: Optional[Dict[str, Any]] = None
+    with open(path, "r", encoding="utf-8") as handle:
+        for number, line in enumerate(handle, start=1):
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path}:{number} illisible : {exc}") from exc
+            if entry.get("etape") == etape and entry.get(WRITTEN_BY_KEY) == PIPELINE_WRITER:
+                found = entry
+    return found
 
 
 def _writer_identity() -> str:

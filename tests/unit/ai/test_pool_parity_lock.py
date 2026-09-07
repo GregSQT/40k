@@ -52,7 +52,6 @@ def _warm_started_callback(tmp_path, **overrides: Any):
         parity_label="P1",
         parity_range=(0.40, 0.60),
         episode_origin=EPISODE_ORIGIN,
-        timesteps_origin=13_749_576,
     )
     params.update(overrides)
     callback = pool_early_stopping_callback(archives[0][0], **params)

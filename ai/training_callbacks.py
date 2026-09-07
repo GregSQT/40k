@@ -2657,6 +2657,28 @@ class BotEvaluationCallback(BaseCallback):
         return results
 
 
+def _next_probe_checkpoint(stage_episode: int, every: int) -> int:
+    """Prochain multiple de `every` STRICTEMENT au-dessus de `stage_episode`.
+
+    RATTRAPE la cadence au lieu de l'avancer d'un cran. Une simple incrémentation suppose que la
+    sonde précédente a bien eu lieu au cran précédent — vrai sur un run nominal, faux dès que le
+    compteur d'étape démarre déjà haut. C'est le cas d'une reprise sur crash
+    (`--resume-from <checkpoint> --etape P5`) : l'origine étant ancrée sur l'archive SOURCE de
+    l'étape et non sur le checkpoint repris, `_stage_episode()` vaut d'emblée les 130 000 épisodes
+    déjà joués face à un premier cran à 10 000. Avec l'incrémentation, les treize crans manqués se
+    déclenchaient d'affilée sur treize pas consécutifs, sans une seule mise à jour de politique
+    entre eux : treize sondes du pool entier, et surtout un verdict rendu dès la deuxième sur deux
+    mesures des MÊMES poids — un run de reprise pouvait ainsi être promu ou déclaré détruit après
+    zéro épisode entraîné.
+
+    Même défaut que celui décrit sur `_episode_origin` (8 sondes consécutives mesurées le
+    2026-09-04) : l'ancrage sur l'archive source l'avait fermé pour le run nominal seulement.
+    """
+    if every <= 0:
+        raise ValueError(f"cadence de sonde invalide : {every!r} (attendu > 0)")
+    return (stage_episode // every + 1) * every
+
+
 class _EvalPoolOwnerMixin:
     """Pool de workers d'évaluation, créé à la PREMIÈRE sonde et fermé à la sortie de la boucle.
 
@@ -2692,9 +2714,6 @@ class _EvalPoolOwnerMixin:
     rewards_config_name: str
     intermediate_n_workers: Optional[int]
     metrics_tracker: Any
-    # Porte par `BaseCallback`, avec lequel ce mixin est toujours melange : declare ici parce que
-    # `_stage_timesteps` le lit, et que le contrat d'un mixin doit tenir dans le mixin.
-    num_timesteps: int
     # Valeurs de CLASSE, pas de simples annotations : un futur porteur du mixin qui oublierait de
     # les initialiser dans son `__init__` ferait lever `shutdown_probe_eval_pools` par
     # AttributeError, depuis le `finally` de la boucle — l'endroit exact où une exception en
@@ -2717,19 +2736,15 @@ class _EvalPoolOwnerMixin:
     # d'épisodes de l'early-stop à zéro, prolongeant en silence le budget d'un exploiteur du
     # nombre d'épisodes déjà joués.
     _episode_origin: int = 0
-    _timesteps_origin: int = 0
 
-    def _set_stage_origin(self, episode_origin: int, timesteps_origin: int) -> None:
-        """Fixe l'origine de l'étape. 0/0 = run neuf (étape `init: new`).
-
-        `episode_origin` : épisodes déjà joués par l'archive source (son état de run) ;
-        `timesteps_origin` : `num_timesteps` de cette archive.
-        """
-        for name, value in (("episode_origin", episode_origin), ("timesteps_origin", timesteps_origin)):
-            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                raise ValueError(f"{type(self).__name__} : {name} doit etre un entier >= 0 (got {value!r})")
+    def _set_stage_origin(self, episode_origin: int) -> None:
+        """Fixe l'origine de l'étape en épisodes. 0 = run neuf (étape `init: new`)."""
+        if isinstance(episode_origin, bool) or not isinstance(episode_origin, int) or episode_origin < 0:
+            raise ValueError(
+                f"{type(self).__name__} : episode_origin doit etre un entier >= 0 "
+                f"(got {episode_origin!r})"
+            )
         self._episode_origin = episode_origin
-        self._timesteps_origin = timesteps_origin
 
     def _current_episode(self) -> int:
         """Compteur CUMULATIF de la lignée (axe TensorBoard)."""
@@ -2740,10 +2755,6 @@ class _EvalPoolOwnerMixin:
     def _stage_episode(self) -> int:
         """Épisodes joués DANS CETTE ÉTAPE : c'est l'unité des cadences, plafonds et budgets."""
         return self._current_episode() - self._episode_origin
-
-    def _stage_timesteps(self) -> int:
-        """Pas d'entraînement DANS CETTE ÉTAPE (`num_timesteps` moins ceux hérités de l'archive)."""
-        return int(self.num_timesteps) - self._timesteps_origin
 
     def resolve_eval_pool_params(self) -> None:
         """Lit la config du pool et la mémorise. Idempotent, ne démarre AUCUN processus.
@@ -2896,10 +2907,9 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
         log_fn=print,
         verbose: int = 1,
         episode_origin: int = 0,
-        timesteps_origin: int = 0,
     ) -> None:
         super().__init__(verbose)
-        self._set_stage_origin(episode_origin, timesteps_origin)
+        self._set_stage_origin(episode_origin)
         if not isinstance(probe_every_episodes, int) or probe_every_episodes <= 0:
             raise ValueError(
                 f"probe_every_episodes doit etre un entier > 0 (got {probe_every_episodes!r})"
@@ -3006,7 +3016,9 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
         if current >= self._next_probe_episode:
             # Sonde bon marche — executee avant le test de plafond pour ne pas sauter la derniere
             # sonde quand budget_cap est multiple exact de probe_every_episodes.
-            self._next_probe_episode += self.probe_every_episodes
+            self._next_probe_episode = _next_probe_checkpoint(
+                current, self.probe_every_episodes
+            )
             wr = self._probe(self.probe_cheap_n, "bon-marche")
             self.win_rate_curve.append((current, wr))
 
@@ -3084,10 +3096,9 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         intermediate_n_workers: Optional[int] = None,
         verbose: int = 1,
         episode_origin: int = 0,
-        timesteps_origin: int = 0,
     ) -> None:
         super().__init__(verbose)
-        self._set_stage_origin(episode_origin, timesteps_origin)
+        self._set_stage_origin(episode_origin)
         if not pool_archives:
             raise ValueError("PoolEarlyStoppingCallback : pool_archives ne peut pas être vide")
         labels = [label for _, label in pool_archives]
@@ -3292,7 +3303,9 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
 
         # Affichage : compteur cumulatif, celui de l'axe TensorBoard et de la barre.
         current = self._current_episode()
-        self._next_probe_episode += self.eval_freq_episodes
+        self._next_probe_episode = _next_probe_checkpoint(
+            stage_episode, self.eval_freq_episodes
+        )
         scores = self._probe()
 
         labels = [label for _, label in self.pool_archives]

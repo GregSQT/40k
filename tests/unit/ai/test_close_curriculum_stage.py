@@ -324,3 +324,132 @@ def test_un_verdict_promote_laisse_le_gate_mesurer_et_promouvoir(tmp_path, monke
     entry = [json.loads(line) for line in log_path.read_text().splitlines()][-1]
     assert entry["gate_accepted"] is True
     assert entry["scores_vs_pool"] == {"P3": 0.65}
+
+
+# ── `--close-stage` NE DOIT PAS ROUVRIR LA PROMOTION D'UNE ETAPE DETRUITE ───────────────────
+
+
+def _prepare_disk_artifacts(tmp_path, monkeypatch, canonical: str, curriculum: dict, log_path):
+    """Les artefacts que `_run_info_from_disk` relit a cote du modele canonique, plus le journal.
+
+    `init: from:P3` et non le `"P3"` nu de la fixture generale : c'est la forme que
+    `stage_init_source` accepte, et l'archive source porte l'offset d'episodes de l'etape.
+    """
+    from ai.run_state import save_run_state
+
+    curriculum["stages"]["P4"]["init"] = "from:P3"
+    source = curriculum_mod.stage_model_path(canonical, "P3")
+    with open(source, "wb") as handle:
+        handle.write(b"fake-source")
+    save_run_state(source, 20_000)
+    save_run_state(canonical, 50_000)
+    train_mod._write_tensorboard_run_meta(canonical, str(tmp_path / "tb_run"))
+    monkeypatch.setattr(train_mod, "build_agent_model_path", lambda _root, _key: canonical)
+    monkeypatch.setattr(curriculum_mod, "curriculum_log_path", lambda: str(log_path))
+
+
+def _append_as_pipeline(entry: dict, log_path) -> None:
+    """Journalise en se faisant passer pour `ai/train.py`, comme le vrai run l'aurait fait.
+
+    `append_curriculum_log` derive `written_by` de `sys.argv[0]` : sous pytest la ligne serait
+    signee par le harnais, donc ecartee par le lecteur — ce que verifie le test dedie.
+    """
+    import os
+    import sys
+
+    original = sys.argv
+    sys.argv = [os.path.join(curriculum_mod._project_root(), "ai", "train.py")]
+    try:
+        curriculum_mod.append_curriculum_log(entry, str(log_path))
+    finally:
+        sys.argv = original
+
+
+def test_close_stage_relit_le_verdict_destroy_dans_le_journal(tmp_path, monkeypatch):
+    """LE finding : le court-circuit de destruction survit a la commande de reprise.
+
+    Un run detruit atteint bien `_close_curriculum_stage` : le gate est court-circuite, le journal
+    porte le verdict, et AUCUN `model_<agent>_P4.zip` n'est ecrit. Le garde « etape deja promue »
+    de `_run_info_from_disk` ne voit donc rien, et `--close-stage` repartait sur un `run_info`
+    reconstruit ou le verdict n'existait pas : la mesure reprenait sur l'instantane robuste, et
+    l'etape que le run venait de detruire pouvait etre promue.
+    """
+    canonical, args, config, curriculum, stage, _ = _make_context(tmp_path)
+    log_path = tmp_path / "curriculum.log"
+    _prepare_disk_artifacts(tmp_path, monkeypatch, canonical, curriculum, log_path)
+    _append_as_pipeline({
+        "etape": "P4",
+        "gate_accepted": False,
+        "pool_stop_verdict": curriculum_mod.POOL_VERDICT_DESTROY,
+        "pool_stop_reason": "P4 : moyenne 0.350 contre P3, sous 0.40. Run ARRETE.",
+    }, log_path)
+
+    run_info = train_mod._run_info_from_disk(args, config, curriculum)
+
+    assert run_info["pool_stop_verdict"] == curriculum_mod.POOL_VERDICT_DESTROY
+    assert "0.350" in run_info["pool_stop_reason"]
+
+    # Et le court-circuit s'applique : gate non mesure, exit 1, aucune promotion.
+    _patch_common(monkeypatch, tmp_path, canonical, score=0.65)
+    appels = []
+    monkeypatch.setattr(
+        train_mod, "_score_stage_against_pool",
+        lambda *a, **kw: appels.append(1) or {"P3": 0.65},
+    )
+    monkeypatch.setattr(train_mod, "copy_tensorboard_run", lambda *_a: "/fake/tb")
+
+    assert train_mod._close_curriculum_stage(args, config, curriculum, stage, run_info) == 1
+    assert appels == []
+    assert not (tmp_path / "model_Stub_P4.zip").exists()
+
+
+def test_close_stage_dun_run_jamais_clos_na_pas_de_verdict(tmp_path, monkeypatch):
+    """Contre-epreuve : un run tue au clavier n'a AUCUNE ligne de journal.
+
+    C'est le cas nominal de `--close-stage`. Le verdict doit y rester None, sinon la commande
+    refuserait la cloture qu'elle existe pour rendre possible.
+    """
+    canonical, args, config, curriculum, _stage, _ = _make_context(tmp_path)
+    _prepare_disk_artifacts(tmp_path, monkeypatch, canonical, curriculum, tmp_path / "curriculum.log")
+
+    run_info = train_mod._run_info_from_disk(args, config, curriculum)
+
+    assert run_info["pool_stop_verdict"] is None
+    assert run_info["pool_stop_reason"] is None
+    assert run_info["episodes_trained"] == 30_000, "50 000 cumules moins les 20 000 de P3"
+
+
+def test_close_stage_ignore_une_ligne_ecrite_par_un_script(tmp_path, monkeypatch):
+    """Le journal est en append PUBLIC : seule une ligne du pipeline decide d'une cloture.
+
+    `append_curriculum_log` estampille `written_by` depuis `sys.argv[0]` — sous pytest, ce n'est
+    pas `ai/train.py`. Une ligne posee par un script jetable ne doit pas pouvoir bloquer une
+    cloture legitime.
+    """
+    canonical, args, config, curriculum, _stage, _ = _make_context(tmp_path)
+    log_path = tmp_path / "curriculum.log"
+    _prepare_disk_artifacts(tmp_path, monkeypatch, canonical, curriculum, log_path)
+    curriculum_mod.append_curriculum_log(
+        {"etape": "P4", "pool_stop_verdict": curriculum_mod.POOL_VERDICT_DESTROY},
+        str(log_path),
+    )
+
+    entree = curriculum_mod.last_curriculum_log_entry("P4", str(log_path))
+    assert entree is None, "la ligne n'est pas signee ai/train.py"
+    assert train_mod._run_info_from_disk(args, config, curriculum)["pool_stop_verdict"] is None
+
+
+def test_close_stage_refuse_un_pool_a_deux_champions(tmp_path, monkeypatch):
+    """`validate_curriculum` n'exige qu'AU MOINS un champion ; la cloture doit refuser le reste.
+
+    Un run d'entrainement s'arrete deja sur ce pool (`stage_champion_label`). La cloture, elle,
+    prenait le premier venu et appliquait `min_score_vs_champion` a un etalon arbitraire, l'autre
+    champion tombant sous le plancher plus laxiste des `others`.
+    """
+    canonical, args, config, curriculum, stage, run_info = _make_context(tmp_path)
+    stage["pool"] = [{"kind": "champion", "members": ["P2", "P3"], "weight": 1.0}]
+    _patch_common(monkeypatch, tmp_path, canonical, score=0.65)
+    monkeypatch.setattr(train_mod, "copy_tensorboard_run", lambda *_a: "/fake/tb")
+
+    with pytest.raises(ValueError, match="qu'UN champion"):
+        train_mod._close_curriculum_stage(args, config, curriculum, stage, run_info)

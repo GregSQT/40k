@@ -415,7 +415,7 @@ def test_close_stage_does_not_prepare_the_stage_init(monkeypatch) -> None:
 # même episodes_trained = C - S.
 #
 # Chemin --close-stage  : _run_info_from_disk → load_run_state(source)  → offset = S.
-# Chemin run nominal    : stage_origin(canonical, stage).episodes        → offset = S.
+# Chemin run nominal    : stage_origin(canonical, stage)                 → offset = S.
 # La MÊME ancre doit être utilisée ; c'est ce que ce test verrouille.
 
 
@@ -465,7 +465,7 @@ def test_episodes_trained_anchor_identical_for_both_closure_paths_after_crash_re
     close_stage_trained = run_info["episodes_trained"]
 
     # Ancre du chemin run nominal (la valeur qui sera passée en stage_episode_origin).
-    nominal_origin = stage_origin(canonical, stage).episodes
+    nominal_origin = stage_origin(canonical, stage)
     nominal_trained = checkpoint_episodes - nominal_origin
 
     assert close_stage_trained == nominal_trained, (

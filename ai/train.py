@@ -210,23 +210,29 @@ def _model_params_with_ent_coef_frozen(model_params: dict, log=print) -> dict:
     return frozen
 
 
-def _make_constant_lr_schedule(lr_config):
-    """Valeur INITIALE du learning rate, sous la forme de callable qu'attend SB3.
+def _constant_lr_value(lr_config) -> float:
+    """Valeur INITIALE du learning rate, en flottant nu.
 
-    Rend une constante dans les deux cas : `float` (LR constant, aucun callback ne le pilote) et
-    `dict {"initial", "final", "decay_fraction"}` (constante a `initial`, la decroissance etant
-    pilotee par `LearningRateScheduleCallback`, PAR EPISODE).
+    Deux formes acceptees : `float` (LR constant, aucun callback ne le pilote) et
+    `dict {"initial", "final", "decay_fraction"}` (depart de la rampe pilotee PAR EPISODE par
+    `LearningRateScheduleCallback`).
+    """
+    if isinstance(lr_config, (int, float)):
+        return float(lr_config)
+    if isinstance(lr_config, dict):
+        return float(lr_config["initial"])
+    raise ValueError(f"learning_rate must be float or dict with initial/final, got {type(lr_config)}")
+
+
+def _make_constant_lr_schedule(lr_config):
+    """La meme valeur, sous la forme de callable qu'attend SB3 pour `lr_schedule`.
 
     Le nom dit « constant » parce qu'une rampe rendue ici serait inerte ET fausse : le seul usage
     du callable est `optimizer(lr=lr_schedule(1))`, et `learn()` etant appele par chunks,
     `progress_remaining` refait 1 -> 0 a chaque chunk. Demonstration complete dans
     Documentation/Reference/training/entrainement.md, section « Rampes learning_rate / ent_coef ».
     """
-    if isinstance(lr_config, (int, float)):
-        return ConstantSchedule(float(lr_config))
-    if isinstance(lr_config, dict):
-        return ConstantSchedule(float(lr_config["initial"]))
-    raise ValueError(f"learning_rate must be float or dict with initial/final, got {type(lr_config)}")
+    return ConstantSchedule(_constant_lr_value(lr_config))
 
 
 # `model_params` que `--append` ne reapplique PAS a un modele charge : `tensorboard_log`, `verbose`
@@ -282,8 +288,16 @@ def _apply_curriculum_model_params(model, model_params: dict, log=print) -> None
         )
 
     if "learning_rate" in model_params:
-        model.learning_rate = _make_constant_lr_schedule(model_params["learning_rate"])
-        model.lr_schedule = model.learning_rate
+        # `learning_rate` reste un FLOTTANT, `lr_schedule` porte seul le callable. C'est la
+        # repartition de `LearningRateScheduleCallback._apply`, et elle est OBLIGATOIRE : SB3
+        # serialise `learning_rate` dans le `data` du zip (`lr_schedule` en est exclu), donc y
+        # poser un `ConstantSchedule` ecrit un objet cloudpickle la ou toute relecture attend un
+        # nombre. Tant que le learning rate etait une rampe, le callback reecrivait le flottant a
+        # chaque episode et masquait le probleme ; sous un LR SCALAIRE aucun callback n'est monte,
+        # et le zip promu faisait lever `_model_scalar` a l'ouverture de l'etape suivante.
+        _lr_value = _constant_lr_value(model_params["learning_rate"])
+        model.learning_rate = _lr_value
+        model.lr_schedule = ConstantSchedule(_lr_value)
     if "clip_range" in model_params:
         model.clip_range = FloatSchedule(model_params["clip_range"])
     if "clip_range_vf" in model_params:
@@ -1726,6 +1740,7 @@ from ai.curriculum import (
     _ROBUST_WINDOW_MIN,
     POOL_VERDICT_DESTROY,
     append_curriculum_log,
+    last_curriculum_log_entry,
     copy_tensorboard_run,
     evaluate_stage_gate,
     get_stage_hp_overrides,
@@ -1742,7 +1757,6 @@ from ai.curriculum import (
     stage_model_path,
     stage_order,
     stage_origin,
-    StageOrigin,
     stage_source_model,
     stage_pool_members,
     validate_exploiter_protocol,
@@ -5427,6 +5441,15 @@ def _run_info_from_disk(args, config, curriculum) -> Dict[str, Any]:
     aucun score bot dans le journal. C'est la lecture juste — les scores publies doivent etre ceux
     de la derniere evaluation du run, et un run interrompu n'en a pas rendu. Les inventer depuis
     TensorBoard daterait le journal d'une mesure prise a un autre moment que le modele promu.
+
+    `pool_stop_verdict`, lui, est RELU dans `curriculum.log`, et cette relecture n'est pas un
+    confort. Un run arrete pour DESTRUCTION est alle jusqu'a `_close_curriculum_stage`, qui a
+    court-circuite le gate, journalise le verdict et refuse la promotion — donc sans ecrire de
+    `model_<agent>_<etape>.zip`. Le garde d'etape deja promue ne le voit donc pas, et sans le
+    verdict `run_info` decrivait une etape simplement interrompue : la cloture remesurait, sous
+    `save_best_robust` sur un instantane robuste ANTERIEUR aux poids juges, et pouvait promouvoir
+    l'etape que le run venait de detruire. Une etape jamais close n'a aucune ligne : le verdict y
+    reste None, qui est la bonne lecture.
     """
     models_root = config.get_models_root()
     canonical_model_path = build_agent_model_path(models_root, args.agent)
@@ -5444,16 +5467,18 @@ def _run_info_from_disk(args, config, curriculum) -> Dict[str, Any]:
             "l'artefact a la main si la re-cloture est bien l'intention."
         )
     episode_count_total = load_run_state(canonical_model_path)
-    # Même archive source que l'origine des sondes du run (`stage_origin`) ; seul le compte
-    # d'épisodes sert ici, pas les pas.
+    # Même archive source que l'origine des sondes du run (`stage_origin`).
     _source_model = stage_source_model(canonical_model_path, require_stage(curriculum, args.etape))
     episode_offset = 0 if _source_model is None else load_run_state(_source_model)
+    _logged = last_curriculum_log_entry(args.etape) or {}
     return {
         "episode_count_total": episode_count_total,
         "tensorboard_run_dir": require_key(
             _read_tensorboard_run_meta(canonical_model_path), "run_dir"
         ),
         "episodes_trained": episode_count_total - episode_offset,
+        "pool_stop_verdict": _logged.get("pool_stop_verdict"),
+        "pool_stop_reason": _logged.get("pool_stop_reason"),
     }
 
 
@@ -5490,7 +5515,12 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
     )
 
     stage_members = stage_pool_members(stage)
-    champion_label = next((m["label"] for m in stage_members if m["kind"] == "champion"), None)
+    # `stage_champion_label` et non un `next(...)` local : le helper REFUSE un pool a plusieurs
+    # champions, que `validate_curriculum` accepte (il n'en exige qu'un au moins). Le run
+    # d'entrainement l'appelle deja et s'arrete ; la cloture, elle, prenait le premier venu en
+    # silence et appliquait `min_score_vs_champion` a un etalon arbitraire, l'autre champion
+    # tombant sous le plancher plus laxiste des `others`.
+    champion_label = stage_champion_label(stage)
 
     # DESTRUCTION : le verdict de l'early-stop est SOUVERAIN, le gate ne le rejuge pas.
     # Sans ce court-circuit, une etape arretee pour destruction pouvait etre PROMUE : sous
@@ -6338,7 +6368,7 @@ def main():
                 # du run nominal : les deux doivent être ancrés sur la même archive source, y
                 # compris après un --resume-from de crash (le canonique est alors le checkpoint,
                 # pas l'archive source — stage_origin lit l'archive source directement).
-                _stage_start: Optional[StageOrigin] = None
+                _stage_start: Optional[int] = None
                 if curriculum_stage is not None:
                     _canonical_for_stage = build_agent_model_path(
                         get_config_loader().get_models_root(), args.agent
@@ -6390,8 +6420,7 @@ def main():
                         # Origine de l'ÉTAPE (archive source), pas du modèle repris : voir
                         # `stage_origin`. `budget_cap`, la cadence et le budget journalisé se
                         # comptent depuis elle, y compris après un `--resume-from` de crash.
-                        episode_origin=_stage_start.episodes,
-                        timesteps_origin=_stage_start.timesteps,
+                        episode_origin=_stage_start,
                     )
                     _exploiter_extra_callbacks = [_exploiter_probe]
                     _exploiter_async_eval_enabled = False
@@ -6466,8 +6495,7 @@ def main():
                             parity_range=load_parity_check(_curr),
                             intermediate_n_workers=_pool_n_workers,
                             # Origine de l'ÉTAPE (archive source) : cf. la sonde exploiteur.
-                            episode_origin=_stage_start.episodes,
-                            timesteps_origin=_stage_start.timesteps,
+                            episode_origin=_stage_start,
                         )
                         _exploiter_extra_callbacks = [_pool_early_stop]
                         # Relu SUR LE CALLBACK, pas rappele a la config : c'est la paire qu'il
@@ -6514,7 +6542,7 @@ def main():
                     freeze_opponent_pool=_exploiter_freeze_pool,
                     async_eval_enabled=_exploiter_async_eval_enabled,
                     extra_callbacks=_exploiter_extra_callbacks,
-                    stage_episode_origin=_stage_start.episodes if _stage_start is not None else None,
+                    stage_episode_origin=_stage_start,
                 )
 
                 if success and args.test_episodes > 0:

@@ -190,6 +190,9 @@ def test_curriculum_writes_the_values_it_is_given(rollout_rebuilds) -> None:
 
     `lr_schedule` en fait partie parce que c'est LUI que PPO lit pendant `train()` : ecrire
     `learning_rate` seul laissait `_setup_model` imposer le taux du checkpoint pour tout le run.
+    Le partage des roles entre les deux est verrouille par
+    `test_learning_rate_stays_a_number_on_the_model` : `learning_rate` porte le NOMBRE, parce que
+    SB3 le serialise dans le zip.
     """
     model = SimpleNamespace()
     lines: list[str] = []
@@ -206,8 +209,8 @@ def test_curriculum_writes_the_values_it_is_given(rollout_rebuilds) -> None:
     }
     train._apply_curriculum_model_params(model, params, log=lines.append)
 
-    assert model.learning_rate(1.0) == pytest.approx(0.002), "l'optimizer part de `initial`"
-    assert model.lr_schedule is model.learning_rate, "PPO ne lit QUE lr_schedule en train()"
+    assert model.learning_rate == pytest.approx(0.002), "l'optimizer part de `initial`"
+    assert model.lr_schedule(1.0) == pytest.approx(0.002), "PPO ne lit QUE lr_schedule en train()"
     assert model.clip_range(1.0) == pytest.approx(0.2)
     assert (model.ent_coef, model.gamma, model.gae_lambda) == (0.03, 0.99, 0.95)
     assert (model.batch_size, model.n_epochs) == (1020, 3)
