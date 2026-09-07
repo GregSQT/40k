@@ -1266,8 +1266,13 @@ def evaluate_stage_gate(
     jusqu'au 2026-09-07, et une etape pouvait donc etre promue en ayant regresse contre tout le
     reste du pool sans que rien ne le refuse.
 
-    Les scores attendus sont des MOYENNES de `gate.eval_repeats` blocs a graines tirees, pas une
-    mesure unique — meme grandeur que celle sur laquelle l'early-stop decide.
+    Les scores attendus sont des MOYENNES de `gate.eval_repeats` blocs a graines tirees, soit
+    `eval_repeats * eval_episodes` episodes au total — c'est ce TOTAL qui reduit l'erreur-type,
+    pas le decoupage en blocs. Ce n'est PAS la meme grandeur que la moyenne glissante sur
+    laquelle l'early-stop decide : celle-la moyenne des etats SUCCESSIFS du modele, celle-ci des
+    echantillons de parties a modele FIGE. Ce qui aligne les deux decisions est `floor_champion`
+    et `floor_others`, passes aux deux par `_pool_score_shortfalls` — pas une parente entre les
+    deux moyennes.
 
     Une etape sans champion (P0) n'a rien a franchir : elle est acceptee, et le motif le dit.
     """
