@@ -6743,11 +6743,7 @@ class W40KEngine(gym.Env):
                 # `models_segment` ci-dessus : le flush intervient après `_fight_v11_gym_settle`,
                 # donc après les pile-in et consolidations du groupe, et lire les positions à cet
                 # instant les datait d'après le mouvement au lieu d'avant.
-                details["target_models_segment"] = (
-                    raw_log["target_models_segment"]
-                    if "target_models_segment" in raw_log
-                    else self._models_segment_for_unit(target_id, label="TARGET_MODELS")
-                )
+                details["target_models_segment"] = require_key(raw_log, "target_models_segment")
         # L10 — type de tir EXPLICITE (10.02) ; None sur le combat (pas de shoot_type_choose).
         _shoot_type = raw_log.get("shootType")  # get allowed : absent sur les logs de combat
         if _shoot_type is not None:
@@ -7709,8 +7705,8 @@ class W40KEngine(gym.Env):
                             "waiting_for_player": False,
                         }
 
-            # `require_coherency` reste EXIGÉE, Desperate Escape compris — d'où l'absence de tout
-            # `extra_constraints` ci-dessous. Une formation rompue par le hazard est désormais
+            # `require_coherency` reste EXIGÉE, Desperate Escape compris. Une formation rompue par
+            # le hazard est désormais
             # interceptée au-dessus (l'unité reste stationnaire, 03.01) : arrivé ici, l'état de
             # départ est cohérent, et la translation rigide le conserve. La relaxation qui vivait
             # ici laissait terminer un mouvement hors cohérence, ce que 03.03 interdit — « must be

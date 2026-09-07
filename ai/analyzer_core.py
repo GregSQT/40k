@@ -1122,6 +1122,20 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 died_earlier = died_before_phase(
                                     target_id, turn, phase, state.line_number, state.unit_deaths
                                 )
+                                # Ordre moteur réel DEAD-before-SHOOT : la ligne DEAD est écrite
+                                # par destroy_model PENDANT l'allocation, donc AVANT les lignes SHOT
+                                # de _finalize_manual_allocation. Le handler DEAD pose
+                                # unit_kill_context avec pending_removals_actor = None (aucun SHOT
+                                # vu encore). Ce SHOT-ci est potentiellement l'attaque fatale :
+                                # mettre à jour l'acteur pour que same_activation_kill soit correct.
+                                _kill_ctx = state.unit_kill_context.get(target_id)
+                                if (
+                                    _kill_ctx is not None
+                                    and _kill_ctx[0] is None
+                                    and _kill_ctx[1] == turn
+                                    and _kill_ctx[2] == phase
+                                ):
+                                    state.unit_kill_context[target_id] = (_dmg_actor_id, turn, phase)
                                 same_activation_kill = state.unit_kill_context.get(target_id) == (_dmg_actor_id, turn, phase)
                                 if target_already_dead and died_earlier and not same_activation_kill:
                                     stats['shoot_at_dead_unit'][player] += 1
@@ -1521,11 +1535,25 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # Dernier socle retiré : unit_hp doit refléter la mort pour que
                             # _build_move_bfs_blockers ne traite pas l'ancre comme bloqueur fantôme.
                             state.unit_hp[_dead_uid] = 0
+                            # Enregistrer la mort dans unit_deaths (pour `died_before_phase`) et dans
+                            # unit_kill_context (pour `same_activation_kill`) quand l'unité est tuée
+                            # via l'artefact DEAD-before-SHOOT : _apply_damage_to_named_model retourne
+                            # tôt (dead_model_ids_episode) sans jamais écrire ces deux champs.
+                            if phase in {'MOVE', 'SHOOT', 'CHARGE', 'FIGHT'}:
+                                state.unit_deaths.append((turn, phase, _dead_uid, state.line_number))
+                                state.unit_kill_context[_dead_uid] = (
+                                    state.pending_removals_actor, turn, phase
+                                )
                     elif _models_left <= 0:
                         # positions_by_model absent (purgé par charge_handler, move_handler, etc.)
                         # avant ce DEAD : zéroer unit_hp pour que _build_move_bfs_blockers
                         # n'inclue plus l'ancre fantôme.
                         state.unit_hp[_dead_uid] = 0
+                        if phase in {'MOVE', 'SHOOT', 'CHARGE', 'FIGHT'}:
+                            state.unit_deaths.append((turn, phase, _dead_uid, state.line_number))
+                            state.unit_kill_context[_dead_uid] = (
+                                state.pending_removals_actor, turn, phase
+                            )
                     _prm = state.pending_model_removals.get(_dead_uid)
                     if _prm is not None:
                         _prm.discard(_dead_mid)

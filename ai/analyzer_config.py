@@ -252,7 +252,11 @@ class AnalyzerConfig:
 
 
 def _rng_weapon_display_name(
-    display_name_by_code: Dict[str, str], weapon_code: str, unit_type: str, rule_id: str
+    display_name_by_code: Dict[str, str],
+    weapon_code: str,
+    unit_type: str,
+    rule_id: str,
+    ambiguous_display_names: Set[str],
 ) -> str:
     """Display name du profil d'arme RNG que `weapon_code` désigne, dans TOUTE l'armurerie.
 
@@ -263,12 +267,20 @@ def _rng_weapon_display_name(
     Un code introuvable est une config fausse, pas un cas métier : la règle cite une arme qui
     n'existe nulle part. L'ancien repli sur `None` la laissait tomber en silence, et le plafond
     d'attaques de l'analyzer s'en trouvait sous-évalué sans le moindre signal.
+
+    Un display_name partagé par plusieurs codes est ambigu : les consommateurs indexent par
+    display_name, donc une règle pour un code contaminerait les modèles portant l'autre code.
     """
     _dn = display_name_by_code.get(weapon_code)  # get allowed : absence = erreur levée juste après
     if _dn is None:
         raise ValueError(
             f"Unit '{unit_type}' rule '{rule_id}' : rule_args.weapon_code={weapon_code!r} ne "
             f"correspond à aucun profil d'arme RNG de l'armurerie"
+        )
+    if _dn in ambiguous_display_names:
+        raise ValueError(
+            f"Unit '{unit_type}' rule '{rule_id}' : weapon_code={weapon_code!r} → display_name "
+            f"{_dn!r} est partagé par plusieurs codes — la règle serait ambiguë dans l'index global"
         )
     return _dn
 
@@ -354,9 +366,15 @@ def load_analyzer_config() -> AnalyzerConfig:
     # (weapon_code `bolt_rifle`) sans porter de bolt rifle ; résolu localement, le bonus tombait
     # dans le vide et le plafond de tir de l'Ancient rattaché perdait ses +2 attaques → 6 faux
     # « Shots over RNG_NB » sur un run de 600 épisodes, dès que tous les Intercessors de base
-    # étaient morts. Mesuré aussi : 120 codes d'arme, ZÉRO collision de display_name — l'index
-    # est donc bien défini.
+    # étaient morts.
+    #
+    # Garde de collision : la direction risquée est `display_name → codes` (les consommateurs
+    # indexent par display_name). Si deux codes différents partagent le même display_name, une
+    # règle citant l'un contaminerait les modèles portant l'autre. Ces codes sont exclus de
+    # l'index global (`ambiguous_display_names`) ; toute règle les citant lève à la résolution.
     rng_weapon_display_name_global: Dict[str, str] = {}
+    _display_name_to_first_code: Dict[str, str] = {}
+    _ambiguous_display_names: Set[str] = set()
     for _armory_unit in unit_registry.units.values():
         for _armory_weapon in require_key(_armory_unit, "RNG_WEAPONS"):
             if not isinstance(_armory_weapon, dict):
@@ -365,12 +383,11 @@ def load_analyzer_config() -> AnalyzerConfig:
             if not _code:
                 continue
             _name = require_key(_armory_weapon, "display_name")
-            _known = rng_weapon_display_name_global.get(_code)  # get allowed : premier passage = absent
-            if _known is not None and _known != _name:
-                raise ValueError(
-                    f"armurerie : le code d'arme {_code!r} désigne deux profils différents "
-                    f"({_known!r} et {_name!r}) — une règle qui le cite serait ambiguë"
-                )
+            _first_code = _display_name_to_first_code.get(_name)  # get allowed
+            if _first_code is None:
+                _display_name_to_first_code[_name] = _code
+            elif _first_code != _code:
+                _ambiguous_display_names.add(_name)
             rng_weapon_display_name_global[_code] = _name
 
     for unit_type, unit_data in unit_registry.units.items():
@@ -652,7 +669,8 @@ def load_analyzer_config() -> AnalyzerConfig:
                         f"rule_args.attacks_bonus for weapon_attacks_bonus_vs_designated_target"
                     )
                 _dn = _rng_weapon_display_name(
-                    rng_weapon_display_name_global, weapon_code, unit_type, direct_rule_id
+                    rng_weapon_display_name_global, weapon_code, unit_type, direct_rule_id,
+                    _ambiguous_display_names,
                 )
                 atk_bonus_by_weapon[_dn] = int(attacks_bonus)
             if "weapon_attacks_bonus_vs_keyword" in rule_effect_ids:
@@ -686,7 +704,8 @@ def load_analyzer_config() -> AnalyzerConfig:
                     for k in excluded_kws
                 ]
                 _dn = _rng_weapon_display_name(
-                    rng_weapon_display_name_global, weapon_code, unit_type, direct_rule_id
+                    rng_weapon_display_name_global, weapon_code, unit_type, direct_rule_id,
+                    _ambiguous_display_names,
                 )
                 atk_bonus_vs_keyword_by_weapon[_dn] = {
                     "attacks_bonus": int(attacks_bonus),
@@ -706,7 +725,8 @@ def load_analyzer_config() -> AnalyzerConfig:
                         f"rule_args.weapon_code for grant_weapon_rule_vs_designated_target"
                     )
                 _dn = _rng_weapon_display_name(
-                    rng_weapon_display_name_global, weapon_code, unit_type, direct_rule_id
+                    rng_weapon_display_name_global, weapon_code, unit_type, direct_rule_id,
+                    _ambiguous_display_names,
                 )
                 blast_per5_nonmv_weapons.add(_dn)
             if "toughness_bonus_while_waaagh" in rule_effect_ids:

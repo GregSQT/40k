@@ -2723,7 +2723,8 @@ def charge_build_valid_targets(game_state: Dict[str, Any], unit_id: str, max_dis
     unit = require_unit_by_id(game_state, unit_id)
     _bvt_cache = game_state.setdefault("_charge_build_valid_targets_cache", {})
     _move_version = game_state["_unit_move_version"]
-    _bvt_key = (unit_id, _move_version, max_distance)
+    _bvt_fly = _charge_fly_declared(game_state, unit, str(unit_id))
+    _bvt_key = (unit_id, _move_version, max_distance, _bvt_fly)
     if _bvt_key in _bvt_cache:
         if _perf and _t_bvt0 is not None:
             append_perf_timing_line(

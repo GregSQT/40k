@@ -539,6 +539,7 @@ def apply_fly_declaration_decision(
     game_state.setdefault(entry.resolved_key, set()).add(str(squad_id))
     if declared:
         game_state.setdefault(entry.declared_key, set()).add(str(squad_id))
+    game_state["_unit_move_version"] += 1
 
 
 def squad_move_pool_budget_subhex(game_state: Dict[str, Any], squad_id: str) -> int:

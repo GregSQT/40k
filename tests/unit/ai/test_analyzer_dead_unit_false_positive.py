@@ -65,6 +65,42 @@ DEAD_BEFORE_SHOT_LOG = entete_step_log(
     ez_vertical_inches=None,
 )
 
+# Variante cross-turn de DEAD_BEFORE_SHOT_LOG : la mort survient via l'artefact DEAD-before-SHOOT
+# (DEAD line avant la ligne SHOT mortelle), puis une activation d'un TOUR ULTÉRIEUR vise le cadavre.
+# Teste que le handler DEAD enregistre la mort dans unit_deaths/unit_kill_context afin que
+# `died_before_phase` puisse dater la mort même quand `_apply_damage_to_named_model` retourne tôt.
+# Ordre moteur réel : DEAD précède TOUTES les lignes SHOT de l'activation.
+# destroy_model écrit la ligne DEAD immédiatement (shared_utils.py:4185), puis
+# _finalize_manual_allocation émet les SHOT après l'allocation complète (line 10963).
+# Contrairement à DEAD_BEFORE_SHOT_LOG (SHOT_1 → DEAD → SHOT_2), ici aucun SHOT n'est
+# vu avant DEAD → state.pending_removals_actor est None → unit_kill_context[102] = (None, T, P).
+# Sans correctif : same_activation_kill = False sur SHOT_1 → faux positif.
+DEAD_BEFORE_ALL_SHOTS_LOG = entete_step_log(
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(80,50) DEPLOYED from (-1,-1) to (80,50) [R:+0.0] [MODELS: 102#0@(80,50)] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
+    "[10:00:03] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
+    "[10:00:04] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50)]\n"
+        "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (80,50), HP_MAX=2 base=round/6 [MODELS: 102#0@(80,50)]\n"
+    ),
+    ez_vertical_inches=None,
+)
+
+DEAD_BEFORE_SHOT_CROSS_TURN_LOG = entete_step_log(
+    "[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1(50,50) DEPLOYED from (-1,-1) to (50,50) [R:+0.0] [MODELS: 1#0@(50,50)] [SUCCESS]\n"
+    "[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 102(80,50) DEPLOYED from (-1,-1) to (80,50) [R:+0.0] [MODELS: 102#0@(80,50)] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 4(3+) - Wound 5(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n"
+    "[10:00:02] E1 T1 P2 SHOOT : Unit 102 DEAD model=102#0 reason=combat [SUCCESS]\n"
+    "[10:00:03] E1 T3 P1 SHOOT : Unit 1(50,50) SHOT Unit 102(80,50) with [Sternguard Bolt Rifle] - Hit 5(3+) - Wound 4(4+) - → 102#0 - Save 2(3+) - Dmg:1HP [R:+0.0] [MODELS: 1#0@(50,50)] [ALLOC_MODEL: 102#0] [SUCCESS]\n",
+    units=(
+        "[10:00:00] Unit 1 (SternguardVeteranBoltRifle) P1: Starting position (50,50), HP_MAX=2 base=round/6 [MODELS: 1#0@(50,50)]\n"
+        "[10:00:00] Unit 102 (AssaultIntercessor) P2: Starting position (80,50), HP_MAX=2 base=round/6 [MODELS: 102#0@(80,50)]\n"
+    ),
+    ez_vertical_inches=None,
+)
+
 # Vraie violation : la cible meurt au tour 1, et une activation d'un tour ULTÉRIEUR la vise encore.
 # Garde la preuve que le contrôle n'est pas devenu vacant en neutralisant l'artefact ci-dessus.
 SHOT_AT_CORPSE_LOG = entete_step_log(
@@ -130,3 +166,41 @@ def test_shot_at_a_unit_killed_on_an_earlier_turn_is_still_flagged(tmp_path):
     """Non-vacuité : une cible tuée au tour 1 et visée au tour 3 reste une violation."""
     stats = _parse(tmp_path, SHOT_AT_CORPSE_LOG)
     assert stats["shoot_at_dead_unit"][1] == 1
+
+
+def test_dead_before_shot_cross_turn_is_flagged(tmp_path):
+    """Chemin DEAD-before-SHOOT + tour ultérieur : la violation doit être détectée.
+
+    La cible meurt via l'artefact (DEAD line avant la ligne SHOT mortelle) au tour 1.
+    _apply_damage_to_named_model retourne tôt (dead_model_ids_episode), donc unit_deaths
+    n'est jamais rempli par ce chemin. Le handler DEAD doit le faire directement.
+    Un tir au tour 3 doit toujours être compté comme shoot_at_dead_unit.
+    """
+    stats = _parse(tmp_path, DEAD_BEFORE_SHOT_CROSS_TURN_LOG)
+    assert stats["shoot_at_dead_unit"][1] == 1
+
+
+def test_dead_before_shot_same_activation_not_flagged_after_fix(tmp_path):
+    """Le fix du handler DEAD ne crée pas de faux positif sur l'activation qui a tué la cible.
+
+    Le tir excédentaire dans la MÊME activation (même tour/phase que le DEAD) doit rester
+    à zéro : unit_kill_context est posé dans le handler DEAD pour que same_activation_kill
+    soit True.
+    """
+    stats = _parse(tmp_path, DEAD_BEFORE_SHOT_LOG)
+    assert stats["shoot_at_dead_unit"][1] == 0
+    assert stats["shoot_at_dead_unit"][2] == 0
+
+
+def test_dead_before_all_shots_real_production_order_not_flagged(tmp_path):
+    """DEAD précède TOUTES les lignes SHOT de l'activation (ordre moteur réel) : pas de faux positif.
+
+    Dans l'ordre réel (destroy_model écrit DEAD pendant l'allocation, _finalize_manual_allocation
+    émet les SHOT après), pending_removals_actor est None quand le handler DEAD s'exécute.
+    Sans correctif, unit_kill_context[102] = (None, T, P) → same_activation_kill = False sur
+    SHOT_1 → faux positif. Le handler SHOT doit propager l'acteur réel dans unit_kill_context
+    avant le test same_activation_kill.
+    """
+    stats = _parse(tmp_path, DEAD_BEFORE_ALL_SHOTS_LOG)
+    assert stats["shoot_at_dead_unit"][1] == 0
+    assert stats["shoot_at_dead_unit"][2] == 0

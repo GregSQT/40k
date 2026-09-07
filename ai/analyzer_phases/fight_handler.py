@@ -519,6 +519,20 @@ def handle_fight(
             # Exception 05 Attack sequence : les attaques restantes de la MÊME activation
             # (même attaquant, même turn/phase) qui a détruit la cible sont des « excess
             # attacks lost », pas une attaque sur cadavre → ne pas compter.
+            #
+            # JUMEAU SHOT : ordre moteur réel DEAD-before-FOUGHT — la ligne DEAD est écrite par
+            # destroy_model pendant l'allocation, AVANT les lignes d'attaque de
+            # _finalize_manual_allocation. Le handler DEAD pose unit_kill_context avec
+            # pending_removals_actor = None ; _apply_damage_and_handle_death retourne tôt (hp≤0)
+            # sans le mettre à jour. Propager l'acteur réel ici avant le test.
+            _kill_ctx_fight = state.unit_kill_context.get(target_id)
+            if (
+                _kill_ctx_fight is not None
+                and _kill_ctx_fight[0] is None
+                and _kill_ctx_fight[1] == turn
+                and _kill_ctx_fight[2] == phase
+            ):
+                state.unit_kill_context[target_id] = (fighter_id, turn, phase)
             same_activation_kill = state.unit_kill_context.get(target_id) == (fighter_id, turn, phase)
             if target_died_before_fight and not same_activation_kill:
                 attacker_player = require_key(state.unit_player, fighter_id)
