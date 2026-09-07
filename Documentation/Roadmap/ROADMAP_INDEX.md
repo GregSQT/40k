@@ -101,6 +101,12 @@ plus reproductible à l'identique, et les scores de `curriculum.log` antérieurs
 **Six défauts de cette livraison fermés le 2026-09-07**, dont un qui rendait la chaîne P3→P10
 impossible à démarrer : le LR scalaire du régime était sauvegardé dans le zip promu sous forme
 d'objet sérialisé, et l'étape suivante levait au contrôle de continuité.
+**Un verdict `promote` publie les poids VIVANTS** (option A) : l'early-stop juge les poids
+courants contre tout le pool, mais sous `save_best_robust` le canonique restait l'instantané
+robuste — choisi sur le score contre les bots, jamais dégradé — donc le gate mesurait un autre
+modèle et pouvait refuser une étape déjà arrêtée, budget perdu. Le seuil de score robuste est
+effacé au passage : il survivait à l'étape et aurait bloqué la republication du canonique par la
+suivante.
 **Cadence des sondes dédoublée** dans la foulée : le champion à chaque sonde, les autres membres
 un tour sur `full_pool_probe_every` (3). Sonder tout le pool à chaque fois coûtait 117 000
 épisodes d'évaluation bloquants à P10 pour 300 000 entraînés — il en reste ~48 600. Le verdict

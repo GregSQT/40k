@@ -95,6 +95,22 @@ le garde « déjà promue » ne voyait rien non plus, et la clôture remesurait 
 d'autres poids que ceux jugés, qui pouvaient franchir le gate. `_run_info_from_disk` relit
 désormais le verdict dans `curriculum.log`, filtré sur `written_by == ai/train.py`.
 
+**Un verdict `promote` publie désormais les poids VIVANTS** (décision du 2026-09-07, option A).
+L'early-stop rend ce verdict sur les poids courants, mesurés contre tout le pool ; sous
+`save_best_robust` le zip canonique était pourtant l'instantané robuste, choisi sur le score
+contre les **bots** et jamais dégradé en cours de run (la copie n'a lieu que si le score robuste
+progresse — `training_callbacks.py`, condition `robust_score > best_robust_score`). Le gate de fin
+mesurait donc un modèle que personne n'avait jugé, pouvait le refuser, et le run s'était déjà
+arrêté : le budget non dépensé partait avec l'étape — l'inverse exact de ce que l'arrêt anticipé
+annonce (« le budget restant serait payé pour rien »). Publier est l'exception que
+`save_best_robust` peut accepter : le verdict **est** une validation contre l'intégralité du pool.
+Le verdict `destroy`, lui, ne publie rien.
+⚠️ **Le seuil de score robuste du canonique (`canonical_robust_meta_path`) est effacé à cette
+publication.** Il décrit le modèle remplacé, et il **survit à l'étape** (seul `--new` l'écarte,
+via `archive_canonical_artifacts_for_new_run`) : laissé en place, il
+imposerait à l'étape suivante de battre le score d'un modèle disparu avant de republier son propre
+canonique — le défaut constaté en production sous V11 §0.36.
+
 **Cadence des sondes dédoublée** (décision du 2026-09-07, option B). Sonder le pool entier à
 chaque sonde faisait suivre le coût à la **taille** du pool, qui croît d'une étape à l'autre : à
 P10 (13 membres, 300 000 épisodes, cadence 10 000, 300 épisodes par membre) cela fait **117 000
