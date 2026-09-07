@@ -67,6 +67,41 @@ et les scores de `curriculum.log` antérieurs au 2026-09-07 portent un échantil
 Si elle ne bouge pas, le régime n'a pas pris et il est inutile d'attendre. `n_steps` × 4 quadruple
 la mémoire du rollout buffer : **coût horloge et mémoire non chronométrés** à ce volume.
 
+### Six défauts de la livraison, fermés le 2026-09-07
+
+**Le premier était bloquant pour toute la chaîne.** `_apply_curriculum_model_params` posait un
+`ConstantSchedule` sur `model.learning_rate`, que SB3 sérialise dans le `data` du zip — un objet
+cloudpickle là où `_model_scalar` attend un nombre. Tant que le LR était une **rampe**, le
+callback d'ordonnancement réécrivait un flottant à chaque épisode et masquait le défaut ; le
+régime posant un LR **scalaire**, aucun callback n'est monté. P2 (repris de P1, dont le zip porte
+encore un flottant) tournait, mais P3 aurait levé au contrôle de continuité — et avec lui P4…P10
+et E1…E3. `learning_rate` porte désormais le nombre, `lr_schedule` le callable, comme le fait déjà
+`LearningRateScheduleCallback._apply`.
+
+**Une reprise sur crash enchaînait les sondes manquées.** `_next_probe_episode` partait du premier
+cran alors que le compteur d'étape, ancré sur l'archive source, valait déjà des dizaines de
+milliers d'épisodes : les crans manqués se déclenchaient d'affilée sur des pas consécutifs, sans
+mise à jour de politique entre eux. À la deuxième, l'historique atteignait deux points et un
+verdict tombait — sur deux mesures des **mêmes** poids, au-dessus de `promote_min_episodes` : le
+run de reprise pouvait être promu ou déclaré détruit après **zéro épisode entraîné**. Même défaut
+que les 8 sondes consécutives mesurées le 2026-09-04, revenu par une autre porte. La cadence
+rattrape désormais au prochain cran au lieu d'avancer d'un pas ; corrigé sur les deux sondes
+(pool et exploiteur).
+
+**`--close-stage` rouvrait la promotion d'une étape détruite.** Le verdict `destroy` n'existait que
+dans le `run_info` du processus : la commande de reprise le reconstruit depuis les artefacts du
+disque, où il n'apparaît pas. Comme une étape détruite n'écrit aucun `model_<agent>_<etape>.zip`,
+le garde « déjà promue » ne voyait rien non plus, et la clôture remesurait l'instantané robuste —
+d'autres poids que ceux jugés, qui pouvaient franchir le gate. `_run_info_from_disk` relit
+désormais le verdict dans `curriculum.log`, filtré sur `written_by == ai/train.py`.
+
+**Trois fermetures plus petites.** La clôture dérivait le champion par un `next(...)` local là où
+`stage_champion_label` **refuse** un pool à plusieurs champions, que `validate_curriculum` accepte
+— elle prenait le premier venu en silence. Le plombage `timesteps_origin` était mort depuis la
+suppression du garde `min_steps` : `stage_origin` ouvrait le zip source pour cette seule valeur.
+Et la docstring de `pool_monotonicity_diagnostic` dimensionnait encore son bruit contre
+`gate.target_score_vs_champion` (0.60), clé supprimée par cette même livraison.
+
 ---
 
 ## 🔴 Régime d'entraînement révisé — P2 à relancer depuis P1 {#regime-2026-09-06}
