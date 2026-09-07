@@ -182,6 +182,36 @@ def test_summary_signals_never_exercised_rules(tmp_path):
     assert "⚠" in line_11, f"aucune icône ⚠️ sur la ligne 1.1 du SUMMARY : {line_11!r}"
 
 
+def test_summary_signale_les_regles_jamais_exercees_de_TOUTES_les_sections(tmp_path):
+    """Le compte ne vivait que sur la 1.1 : les autres sections rendaient un ✅ franc.
+
+    Mesuré le 2026-09-07 sur le step.log du dépôt : « ✅ 1.2 Erreurs en phase de shooting : 0 »
+    s'affichait au-dessus d'un détail §1.2 qui listait huit règles applicables et jamais
+    exercées. C'est le vert vacant d'un cran plus bas que celui que ce module supprime — le
+    signal existait, il n'atteignait pas l'endroit où le rapport se lit.
+
+    Le journal ne porte qu'un déplacement : toutes les sections d'action sauf §1.1 ont donc des
+    règles applicables et jamais exercées, et leur ligne de résumé doit le dire.
+    """
+    from ai.analyzer_rules import VERDICT_NEVER_EXERCISED, coverage_rows
+
+    stats = _stats(tmp_path, _A_NORMAL_MOVE)
+    rendered: list = []
+    an.print_statistics(stats, output_lines=rendered, emit_console=False)
+    summary_lines = rendered[next(i for i, l in enumerate(rendered) if l.strip() == "SUMMARY"):]
+
+    for section, motif in (("1.2", "shooting"), ("1.3", "charge"), ("1.4", "fight")):
+        attendu = sum(
+            1 for r in coverage_rows(stats, section) if r["verdict"] == VERDICT_NEVER_EXERCISED
+        )
+        assert attendu > 0, f"prémisse : §{section} doit avoir des règles jamais exercées"
+        ligne = next(l for l in summary_lines if section in l and motif in l.lower())
+        assert f"{attendu} règles jamais exercées" in ligne, (
+            f"le SUMMARY de §{section} n'annonce pas ses {attendu} règles jamais exercées : {ligne!r}"
+        )
+        assert "⚠" in ligne, f"aucune icône ⚠️ sur la ligne {section} du SUMMARY : {ligne!r}"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # L'invariant : la somme par règle retombe sur le total de section
 # ─────────────────────────────────────────────────────────────────────────────
@@ -282,7 +312,11 @@ def test_a_rule_that_was_exercised_is_never_reported_out_of_roster(tmp_path):
 
 
 def test_section_12_corpus_sum_matches_bucket(tmp_path):
-    """16 entrées §1.2 — la somme par règle retombe sur le bucket 'shooting'."""
+    """15 entrées §1.2 — la somme par règle retombe sur le bucket 'shooting'.
+
+    `advance_twice_in_shoot_phase` a quitté la section avec sa règle le 2026-09-07 : le compteur
+    était inatteignable (garde `phase == 'SHOOT'` sur un ADVANCE, qui est un mouvement, 09.02).
+    """
     stats = _stats(tmp_path)
     stats['shoot_invalid'][1]['out_of_range'] = 1
     stats['shoot_over_rng_nb'][1] = 1
@@ -293,7 +327,6 @@ def test_section_12_corpus_sum_matches_bucket(tmp_path):
     stats['shoot_invalid'][1]['engaged_non_close_quarters'] = 1
     stats['close_quarters_shot_at_unengaged_target'][1] = 1
     stats['advance_after_shoot'][1] = 1
-    stats['advance_twice_in_shoot_phase'][1] = 1
     stats['move_distance_over_limit']['advance'][1] = 1
     stats['advance_from_adjacent'][1] = 1
     stats['shoot_hit_result_mismatch'][1] = 1
@@ -303,7 +336,7 @@ def test_section_12_corpus_sum_matches_bucket(tmp_path):
     stats['torrent_wrong_hit'][1] = 1
     stats['lethal_hits_wrong_wound'][1] = 1
     stats['blast_x_mismatch'][1] = 1
-    assert an.error_totals(stats)['shooting'] == 19, "le bucket ne voit pas les 19 compteurs §1.2"
+    assert an.error_totals(stats)['shooting'] == 18, "le bucket ne voit pas les 18 compteurs §1.2"
     assert coverage_gaps(stats, "1.2") == []
 
 
@@ -505,14 +538,14 @@ def _valeurs_possibles(noeud: ast.expr) -> set:
     return set()
 
 
-def _identifiants_instrumentes() -> set:
-    """Ids de règle apparaissant dans un appel `note_rule_usage`, forme conditionnelle comprise.
+def _sites_note_rule_usage() -> list:
+    """Tous les appels `note_rule_usage` du paquet `ai`, en `(fichier, ligne, ids décodés)`.
 
     Lecture par AST et non par expression régulière : un site légitime choisit son identifiant
     selon la ligne traitée, et un regex ancré sur un littéral en deuxième position le manquerait
     — donc déclarerait orpheline une règle correctement câblée.
     """
-    trouves: set = set()
+    sites: list = []
     for chemin in (RACINE_PROJET / "ai").rglob("*.py"):
         arbre = ast.parse(chemin.read_text(encoding="utf-8"))
         for noeud in ast.walk(arbre):
@@ -524,8 +557,41 @@ def _identifiants_instrumentes() -> set:
                 continue
             # Le 2e argument porte l'identifiant ; le 1er est `stats`, le 3e le joueur.
             if len(noeud.args) >= 2:
-                trouves |= _valeurs_possibles(noeud.args[1])
+                sites.append((
+                    chemin.relative_to(RACINE_PROJET).as_posix(),
+                    noeud.lineno,
+                    _valeurs_possibles(noeud.args[1]),
+                ))
+    return sites
+
+
+def _identifiants_instrumentes() -> set:
+    """Union des ids décodés sur tous les sites."""
+    trouves: set = set()
+    for _fichier, _ligne, ids in _sites_note_rule_usage():
+        trouves |= ids
     return trouves
+
+
+def test_aucun_site_note_rule_usage_n_a_d_identifiant_indechiffrable():
+    """Un site dont l'identifiant échappe à la lecture statique est INVISIBLE aux deux verrous.
+
+    Mesuré le 2026-09-07 : `fight_handler.py` notait ses deux règles de Primitive A depuis une
+    variable de boucle (`for _effect, _rule in (...)`). `_valeurs_possibles` rend `set()` sur
+    cette forme, donc une faute de frappe dans l'identifiant passait la CI et n'aurait levé qu'en
+    production, dans `note_rule_usage` — exactement ce que
+    `test_aucun_identifiant_instrumente_n_est_inconnu_du_corpus` annonce empêcher. Et une règle
+    instrumentée UNIQUEMENT par cette forme serait déclarée orpheline à tort par l'autre verrou.
+
+    Le remède est du côté du SITE, pas du décodeur : écrire l'identifiant en clair (ou en
+    conditionnelle, forme que `_valeurs_possibles` sait lire) plutôt que d'apprendre au test à
+    interpréter des formes de plus en plus larges.
+    """
+    muets = [f"{f}:{ligne}" for f, ligne, ids in _sites_note_rule_usage() if not ids]
+    assert muets == [], (
+        f"{len(muets)} appel(s) note_rule_usage dont l'identifiant n'est pas lisible "
+        f"statiquement — écris-le en clair : {muets}"
+    )
 
 
 def test_toute_regle_applicable_a_controles_est_instrumentee():

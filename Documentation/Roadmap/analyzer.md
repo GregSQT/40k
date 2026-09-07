@@ -11,19 +11,30 @@ corpus qui déclarent des `controls`** ; les 48 autres ne pouvaient afficher que
 `JAMAIS EXERCÉE`, jamais `OK`. Les **46 règles `always`** manquantes sont câblées : le rapport
 passe de **48 à 15 verdicts « JAMAIS EXERCÉE »**.
 
-⚠️ **Deux des 46 câblages sont inopérants, et deux affirmations de cette section étaient fausses**
-— relevé par la revue du 2026-09-07, mesures à l'appui, non corrigé ici :
+✅ **Les deux câblages inopérants sont réparés le 2026-09-07** (suite de revue), et l'applicabilité
+des règles d'armes est désormais dérivée : **15 → 7 verdicts « JAMAIS EXERCÉE »** sur le même
+journal. Détail dans la section suivante.
 
-1. `PROJ.1.2.double_advance` et `PROJ.1.2.advance_post_tir` sont gardés par `if phase == 'SHOOT'`
-   dans `shoot_handler.py`. Or l'Advance est un **type de mouvement de la phase MOVE** (09.02) —
-   la table `expected_phase_by_action` d'`ai/analyzer.py` documente précisément cette
-   correction (« advance etait attendu en SHOOT — FAUX »). Le garde est donc structurellement toujours faux : ces deux règles restent à
-   0 exercice **par construction**, ce que la première rédaction de cette section présentait à
-   tort comme un « zéro honnête ». Corollaire relevé : le contrôle `advance_twice_in_shoot_phase`
-   lui-même serait inatteignable.
-2. La justification écrite pour 10.02 / 12.07 (« leur verdict est calculé avant la branche qui le
-   lit ») est fausse quand leur compteur d'erreurs est non nul : `coverage_rows` force
-   `applicable = True` dès que `errors > 0`, puis rend `ERREURS` avec `exercised == 0`.
+1. `PROJ.1.2.advance_post_tir` était gardé par `if phase == 'SHOOT'` dans `shoot_handler.py`. Or
+   l'Advance est un **type de mouvement de la phase MOVE** (09.02) — la table
+   `expected_phase_by_action` d'`ai/analyzer.py` documente précisément cette correction
+   (« advance etait attendu en SHOOT — FAUX »). Mesuré sur `step.log` : 10849 lignes `ADVANCED`,
+   10849 en phase MOVE, **zéro** en SHOOT. L'exercice est posé au site du contrôle, sans garde.
+2. `PROJ.1.2.double_advance` **est supprimée avec son compteur** `advance_twice_in_shoot_phase` :
+   inatteignable pour la même raison, et la faute qu'elle visait (deux sélections de mouvement
+   dans la même phase, 09.02) est déjà mesurée par `double_activation_by_phase['MOVE']` — mesuré,
+   un journal à double `ADVANCED` rend `double_activation_by_phase['MOVE'] == 1`. Ce compteur
+   n'appartenait à **aucune** règle du corpus : il est rattaché à `09.02`, et son jumeau de charge
+   à `11.02`.
+3. La justification écrite pour 10.02 / 12.07 (« leur verdict est calculé avant la branche qui le
+   lit ») était fausse quand leur compteur d'erreurs est non nul : `coverage_rows` force
+   `applicable = True` dès que `errors > 0`, puis rend `ERREURS` avec `exercised == 0`. Les quatre
+   règles PDF de double-activation ont maintenant leur site d'exercice, au bloc qui juge le
+   doublon.
+4. Même défaut, troisième forme : les trois règles `PROJ.2.8.*` du recalage notaient leur exercice
+   sous `unit_player is not None` alors que leurs compteurs d'erreurs s'incrémentent sans lui. Le
+   garde est retiré, le camp se replie sur P1 — §2.8 est scalaire, comme l'assume déjà
+   `PROJ.2.8.alloc_inconnue`.
 
 Chaque appel est posé **au site où le contrôle regarde vraiment**, après ses renoncements, jamais
 à l'entrée du handler — la règle que pose le docstring de `note_rule_usage`. Preuve de placement :
@@ -44,10 +55,50 @@ d'instrumentation se voit plus tôt, en CI, par le verrou ci-dessous. Un site d'
 légitimement n'avoir pas son site d'exercice (`wall_collisions` a trois sites d'incrément pour un
 seul site d'exercice, cf. `test_the_fall_back_site_also_counts_an_exercise_of_03_01`).
 
-Verrous : `test_toute_regle_applicable_a_controles_est_instrumentee` et
-`test_aucun_identifiant_instrumente_n_est_inconnu_du_corpus` (`tests/unit/ai/test_analyzer_rules_corpus.py`),
-lecture par **AST** et non par regex — un site légitime choisit son identifiant selon la ligne
-traitée (`"PROJ.1.4.pile_in" if kind == "pile_in" else …`), qu'un regex déclarerait orphelin.
+Verrous : `test_toute_regle_applicable_a_controles_est_instrumentee`,
+`test_aucun_identifiant_instrumente_n_est_inconnu_du_corpus` et
+`test_aucun_site_note_rule_usage_n_a_d_identifiant_indechiffrable`
+(`tests/unit/ai/test_analyzer_rules_corpus.py`), lecture par **AST** et non par regex — un site
+légitime choisit son identifiant selon la ligne traitée
+(`"PROJ.1.4.pile_in" if kind == "pile_in" else …`), qu'un regex déclarerait orphelin. Le troisième
+verrou est né d'un trou des deux premiers : `fight_handler.py` notait deux règles depuis une
+**variable de boucle**, forme que le décodeur AST rend vide — une faute de frappe y passait la CI
+et n'aurait levé qu'en production. Le remède est côté SITE (identifiant écrit en clair), pas côté
+décodeur : apprendre au test à interpréter des formes toujours plus larges déplace le trou sans
+le fermer.
+
+---
+
+## ✅ Applicabilité des règles d'armes — l'avertissement cesse de mentir {#applicabilite-armes}
+
+**✅ LIVRÉ (2026-09-07)** — Une règle conditionnée à un token d'arme était déclarée `always` dans
+le corpus. Le rapport la rendait alors sous « ⚠️ Applicable(s) et jamais exercee(s) — **la
+situation s'est presentee** et aucun controle n'a rien juge », alors que la situation ne s'était
+jamais présentée : aucune arme jouée ne porte TORRENT, BLAST ni INDIRECT FIRE. Cet avertissement
+est la raison d'être du module ; six lignes fausses sur quinze le rendaient illisible.
+
+Prédicat `weapon_rule_in_roster`, **jumeau exact** d'`unit_rule_in_roster` : le token croisé avec
+les types réellement vus dans le journal, dérivé de l'armurerie et de rien d'autre. Registre
+`AnalyzerConfig.weapon_rule_to_units` (`token -> profil -> types porteurs`).
+
+**Le profil (`ranged`/`melee`) n'est pas décoratif.** Mesuré sur l'armurerie : HAZARDOUS est porté
+par **21 armes de tir et zéro de mêlée**, LETHAL_HITS par **3 de tir et 1 de mêlée**. Un prédicat
+sans profil aurait déclaré `PROJ.1.4.hazardous` (mêlée) applicable parce qu'un pistolet plasma
+porte le token — le faux avertissement qu'on retire, réintroduit par la porte de derrière. Verrou :
+`test_le_profil_separe_le_tir_de_la_melee` et `test_le_registre_reel_porte_le_grain_des_deux_cotes`
+(`tests/unit/ai/test_analyzer_applicabilite_armes.py`), le second contre le vert vacant d'un
+registre jamais rempli.
+
+`COMBI` est une clé **synthétique** de ce registre, dérivée d'`unit_combi_by_weapon` — la table que
+lit le contrôle lui-même. Ce n'est pas un token d'armurerie, et c'est dit à sa déclaration.
+
+**Ce que ce prédicat ne ferme pas, et pourquoi.** Les 7 lignes restantes ne dépendent pas d'un
+roster mais d'un ÉVÉNEMENT qui ne s'est pas produit : personne ne s'est replié PUIS n'a tiré
+(`PROJ.1.2.apres_repli`), n'a avancé PUIS chargé (`PROJ.1.3.apres_advance`), aucune unité n'est
+ressuscitée, aucune réserve n'a été détruite au 3e round. Les dire honnêtement demanderait de
+compter les occasions OFFERTES en plus des occasions JUGÉES — un second point de comptage dans
+46 endroits, deux compteurs à tenir d'accord, c'est-à-dire le défaut V16 qu'on paie déjà ailleurs.
+Écarté sciemment.
 
 ---
 

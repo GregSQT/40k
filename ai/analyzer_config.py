@@ -198,6 +198,15 @@ class AnalyzerConfig:
     effect_display_tokens: Dict[str, Set[str]]
     rule_to_units: Dict[str, Set[str]]
     weapon_rule_to_weapons: Dict[str, Set[str]]
+    #: `token d'arme -> {"ranged": types porteurs, "melee": types porteurs}`. JUMEAU de
+    #: `rule_to_units` pour les armes, et pour le même usage : dire si une règle POUVAIT servir
+    #: dans la partie analysée. Le PROFIL est indispensable et non décoratif — mesuré sur
+    #: l'armurerie du 2026-09-07, LETHAL_HITS est porté par 3 armes de tir et 1 de mêlée,
+    #: HAZARDOUS par 21 armes de tir et AUCUNE de mêlée : sans lui, la règle de mêlée
+    #: `PROJ.1.4.hazardous` serait déclarée applicable parce qu'un pistolet plasma porte le token.
+    #: La clé synthétique `COMBI` (armes à profils multiples) est dérivée d'`unit_combi_by_weapon`,
+    #: la source même du contrôle : ce n'est pas un token d'armurerie.
+    weapon_rule_to_units: Dict[str, Dict[str, Set[str]]]
     resolve_rule_id: Callable  # closure over all_unit_rules_config
     inches_to_subhex: int
     # Cartes GLOBALES arme→NB/portée, agrégées sur TOUS les model-types du registre.
@@ -785,14 +794,31 @@ def load_analyzer_config() -> AnalyzerConfig:
             rule_to_units.setdefault(_rule_id, set()).update(_carriers)
 
     weapon_rule_to_weapons: Dict[str, Set[str]] = {}
+    # Même parcours, deuxième index : `token -> profil -> types porteurs`. Il répond à une
+    # question que `weapon_rule_to_weapons` ne peut pas trancher — « une arme de MÊLÉE d'un type
+    # joué porte-t-elle ce token ? » — parce que sa clé (« arme (type) ») ne dit pas le profil.
+    weapon_rule_to_units: Dict[str, Dict[str, Set[str]]] = {}
+
+    def _note_weapon_rule_carrier(rule_base: str, profile: str, unit_type: str) -> None:
+        weapon_rule_to_units.setdefault(rule_base, {"ranged": set(), "melee": set()})
+        weapon_rule_to_units[rule_base][profile].add(unit_type)
+
     for unit_type, weapons_list in unit_weapons_cache.items():
         for winfo in weapons_list:
             wname = require_key(winfo, "name")
             rules_list = require_key(winfo, "rules")
             weapon_key = f"{wname} ({unit_type})"
+            profile = "melee" if require_key(winfo, "is_melee") else "ranged"
             for r in rules_list:
                 rule_base = str(r).split(":")[0] if ":" in str(r) else str(r)
                 weapon_rule_to_weapons.setdefault(rule_base, set()).add(weapon_key)
+                _note_weapon_rule_carrier(rule_base, profile, unit_type)
+            # `COMBI` n'est pas un token d'armurerie : c'est la propriété « cette arme est l'un
+            # des profils d'un combi », lue dans la MÊME table que le contrôle
+            # `shoot_combi_profile_conflicts` (`unit_combi_by_weapon`). Sans elle, la règle
+            # PROJ.1.2.combi n'aurait aucun prédicat dérivable et resterait « always ».
+            if wname in unit_combi_by_weapon.get(unit_type, {}):  # get allowed : type sans combi
+                _note_weapon_rule_carrier("COMBI", profile, unit_type)
 
     # Cartes globales arme→NB/portée/STR/ATK (agrégation MAX sur tous les model-types).
     rng_nb_by_weapon_global: Dict[str, int] = {}
@@ -854,6 +880,7 @@ def load_analyzer_config() -> AnalyzerConfig:
         effect_display_tokens=effect_display_tokens,
         rule_to_units=rule_to_units,
         weapon_rule_to_weapons=weapon_rule_to_weapons,
+        weapon_rule_to_units=weapon_rule_to_units,
         resolve_rule_id=resolve_effect_rule_id_to_technical,
         inches_to_subhex=inches_to_subhex,
         rng_nb_by_weapon_global=rng_nb_by_weapon_global,

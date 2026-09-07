@@ -459,13 +459,16 @@ def _apply_state_snapshot(state: AnalyzerState, config: AnalyzerConfig, payload:
         seen_units.add(uid)
 
         # Occasions jugées, grain UNITÉ pour ces deux règles — celui de leurs compteurs
-        # d'erreurs. `unit_player` peut manquer précisément dans le cas `alive_missed` (unité
-        # jamais vue en entête) : l'attribution de camp est alors abandonnée, sans perte, le
-        # compteur d'erreurs §2.8 étant un scalaire sans camp.
-        _resync_player = state.unit_player.get(uid)  # get allowed : unité jamais vue en entête
-        if _resync_player is not None:
-            note_rule_usage(stats, "PROJ.2.8.sur_tuee", _resync_player)
-            note_rule_usage(stats, "PROJ.2.8.fantome", _resync_player)
+        # d'erreurs. `unit_player` manque précisément dans le cas `alive_missed` (unité jamais
+        # vue en entête), et les trois compteurs d'erreurs §2.8 s'incrémentent SANS lui : les
+        # noter sous un garde `is not None` rendait l'exercice plus étroit que l'erreur, donc
+        # « Exercices 0 / Erreurs N » sur un instantané dont aucune unité n'est connue. Le camp
+        # n'est jamais lu séparément en §2.8 (compteurs scalaires, cf. `_counter_value` et son
+        # marqueur `#`) : le repli sur P1 est le même arbitrage que `PROJ.2.8.alloc_inconnue`,
+        # qui note avec le joueur de la ligne d'attaque et non avec celui de l'unité touchée.
+        _resync_player = state.unit_player.get(uid, 1)  # get allowed : unité jamais vue en entête
+        note_rule_usage(stats, "PROJ.2.8.sur_tuee", _resync_player)
+        note_rule_usage(stats, "PROJ.2.8.fantome", _resync_player)
         if state.unit_hp.get(uid, 0) <= 0:  # get allowed : absente == inconnue == pas vivante
             stats['state_resync']['alive_missed'] += 1
         known = state.positions_by_model.get(uid)  # get allowed : unité jamais vue par socle
@@ -474,8 +477,7 @@ def _apply_state_snapshot(state: AnalyzerState, config: AnalyzerConfig, payload:
                 # Grain FIGURINE : c'est celui du compteur d'erreurs. Le noter par unité
                 # rendrait le ratio erreurs/exercices ininterprétable.
                 if mid in known:
-                    if _resync_player is not None:
-                        note_rule_usage(stats, "PROJ.2.8.position", _resync_player)
+                    note_rule_usage(stats, "PROJ.2.8.position", _resync_player)
                     if known[mid] != pos:
                         stats['state_resync']['pos_mismatch'] += 1
 
@@ -502,9 +504,10 @@ def _apply_state_snapshot(state: AnalyzerState, config: AnalyzerConfig, payload:
         # le `continue` qui écarte le hors-table. Le site jumeau au-dessus note le verdict
         # inverse (« vue, donc pas fantôme ») — sans lui, exercices et erreurs seraient égaux
         # et la règle ne pourrait jamais sortir « OK ».
-        _ghost_player = state.unit_player.get(uid)  # get allowed : unité jamais vue en entête
-        if _ghost_player is not None:
-            note_rule_usage(stats, "PROJ.2.8.fantome", _ghost_player)
+        # Même repli sur P1 que le site jumeau ci-dessus : `dead_missed` s'incrémente sans camp,
+        # l'exercice doit donc être noté sans camp lui aussi.
+        _ghost_player = state.unit_player.get(uid, 1)  # get allowed : unité jamais vue en entête
+        note_rule_usage(stats, "PROJ.2.8.fantome", _ghost_player)
         stats['state_resync']['dead_missed'] += 1
         state.unit_hp[uid] = 0
         state.unit_models_alive[uid] = 0
@@ -1450,6 +1453,21 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         else:
                             phase_key = (turn, phase, int(player))
                         seen_units = state.phase_activation_seen.setdefault(phase_key, set())
+                        # Occasion jugée, une par ligne d'activation : la phase est identifiée,
+                        # l'ensemble des unités déjà activées est constitué, et le verdict tombe
+                        # dans les deux sens. La règle suit la phase, comme la clé du compteur —
+                        # écrite en quatre littéraux et non par table indexée, pour rester
+                        # lisible par le verrou AST de tests/unit/ai/test_analyzer_rules_corpus.py.
+                        # Sans ces sites, 09.02/10.02/11.02/12.07 ne pouvaient afficher que
+                        # « JAMAIS EXERCÉE » (run propre) ou « ERREURS » avec zéro exercice.
+                        if phase == 'MOVE':
+                            note_rule_usage(stats, "09.02", int(player))
+                        elif phase == 'SHOOT':
+                            note_rule_usage(stats, "10.02", int(player))
+                        elif phase == 'CHARGE':
+                            note_rule_usage(stats, "11.02", int(player))
+                        elif phase == 'FIGHT':
+                            note_rule_usage(stats, "12.07", int(player))
                         if actor_id in seen_units:
                             double_activation_by_phase = require_key(stats, "double_activation_by_phase")
                             double_activation_by_phase[phase] += 1

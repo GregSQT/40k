@@ -224,7 +224,9 @@
       "section": "1.2",
       "label": "Profil COMBI — deux profils du même combi même tour",
       "applicability": {
-        "kind": "always"
+        "kind": "weapon_rule_in_roster",
+        "rule_id": "COMBI",
+        "profile": "ranged"
       },
       "controls": [
         [
@@ -320,20 +322,6 @@
       "status": "COUVERT"
     },
     {
-      "id": "PROJ.1.2.double_advance",
-      "section": "1.2",
-      "label": "Double avance en phase de tir",
-      "applicability": {
-        "kind": "always"
-      },
-      "controls": [
-        [
-          "advance_twice_in_shoot_phase"
-        ]
-      ],
-      "status": "COUVERT"
-    },
-    {
       "id": "PROJ.1.2.advance_budget",
       "section": "1.2",
       "label": "Avance — dépassement du budget M+D6",
@@ -381,7 +369,9 @@
       "section": "1.2",
       "label": "Tir indirect — détection (règle non implémentée)",
       "applicability": {
-        "kind": "always"
+        "kind": "weapon_rule_in_roster",
+        "rule_id": "INDIRECT_FIRE",
+        "profile": "ranged"
       },
       "controls": [
         [
@@ -409,7 +399,9 @@
       "section": "1.2",
       "label": "HAZARDOUS au tir — arme absente de l'armurerie",
       "applicability": {
-        "kind": "always"
+        "kind": "weapon_rule_in_roster",
+        "rule_id": "HAZARDOUS",
+        "profile": "ranged"
       },
       "controls": [
         [
@@ -450,7 +442,9 @@
       "section": "1.2",
       "label": "TORRENT 24.37 tir — jet de touche numérique inattendu",
       "applicability": {
-        "kind": "always"
+        "kind": "weapon_rule_in_roster",
+        "rule_id": "TORRENT",
+        "profile": "ranged"
       },
       "controls": [
         [
@@ -464,7 +458,9 @@
       "section": "1.2",
       "label": "LETHAL HITS 24.23 tir — blessure auto avec jet numérique",
       "applicability": {
-        "kind": "always"
+        "kind": "weapon_rule_in_roster",
+        "rule_id": "LETHAL_HITS",
+        "profile": "ranged"
       },
       "controls": [
         [
@@ -478,7 +474,9 @@
       "section": "1.2",
       "label": "BLAST 24.05 tir — valeur X du marqueur incorrecte",
       "applicability": {
-        "kind": "always"
+        "kind": "weapon_rule_in_roster",
+        "rule_id": "BLAST",
+        "profile": "ranged"
       },
       "controls": [
         [
@@ -775,7 +773,9 @@
       "section": "1.4",
       "label": "HAZARDOUS en mêlée — arme absente de l'armurerie",
       "applicability": {
-        "kind": "always"
+        "kind": "weapon_rule_in_roster",
+        "rule_id": "HAZARDOUS",
+        "profile": "melee"
       },
       "controls": [
         [
@@ -789,7 +789,9 @@
       "section": "1.4",
       "label": "TORRENT 24.37 mêlée — jet de touche numérique inattendu",
       "applicability": {
-        "kind": "always"
+        "kind": "weapon_rule_in_roster",
+        "rule_id": "TORRENT",
+        "profile": "melee"
       },
       "controls": [
         [
@@ -803,7 +805,9 @@
       "section": "1.4",
       "label": "LETHAL HITS 24.23 mêlée — blessure auto avec jet numérique",
       "applicability": {
-        "kind": "always"
+        "kind": "weapon_rule_in_roster",
+        "rule_id": "LETHAL_HITS",
+        "profile": "melee"
       },
       "controls": [
         [
@@ -1563,9 +1567,15 @@
       "applicability": {
         "kind": "indecidable"
       },
-      "controls": [],
+      "controls": [
+        [
+          "double_activation_by_phase",
+          "MOVE",
+          "#"
+        ]
+      ],
       "status": "PARTIEL",
-      "status_note": "Double-activation MOVE contrôlée via double_activation_by_phase. Le volet 'toutes les unités doivent être sélectionnées' est loggable et non contrôlé."
+      "status_note": "Double-sélection MOVE contrôlée via double_activation_by_phase — le compteur est rattaché ici depuis le 2026-09-07, il n'appartenait à AUCUNE règle. Elle remplace PROJ.1.2.double_advance, dont le compteur advance_twice_in_shoot_phase était gardé par phase == 'SHOOT' et donc inatteignable (l'Advance est un type de mouvement, 09.02). Le volet 'toutes les unités doivent être sélectionnées' est loggable et non contrôlé."
     },
     {
       "id": "09.03",
@@ -1635,7 +1645,7 @@
         ]
       ],
       "status": "COUVERT",
-      "status_note": "Double-sélection SHOOT détectée via shoot_last_activator dans is_activation_marker (double_activation_by_phase). Couvert depuis le 2026-08-17. Compteur d'exercice absent : verdict JAMAIS EXERCÉE quand le run est propre, ERREURS si violation."
+      "status_note": "Double-sélection SHOOT détectée via shoot_last_activator dans is_activation_marker (double_activation_by_phase). Couvert depuis le 2026-08-17, exercice noté depuis le 2026-09-07 (une occasion par ligne d'activation) : un run propre rend OK et non plus JAMAIS EXERCÉE."
     },
     {
       "id": "10.03",
@@ -1724,14 +1734,20 @@
       "applicability": {
         "kind": "indecidable"
       },
-      "controls": [],
+      "controls": [
+        [
+          "double_activation_by_phase",
+          "CHARGE",
+          "#"
+        ]
+      ],
       "status": "PARTIEL",
       "co_verified_by": [
         "PROJ.1.3.depuis_engage",
         "PROJ.1.3.apres_advance",
         "PROJ.1.3.apres_repli"
       ],
-      "status_note": "Engagement, advance et repli contrôlés. Condition '<12\" d'un ennemi' loggable et non contrôlée."
+      "status_note": "Engagement, advance et repli contrôlés ; double-déclaration de charge ('select one friendly unit that has not declared a charge this phase') rattachée ici depuis le 2026-09-07 — son compteur n'appartenait à aucune règle, comme celui de MOVE. Condition '<12\" d'un ennemi' loggable et non contrôlée."
     },
     {
       "id": "11.03",
@@ -1855,7 +1871,7 @@
         ]
       ],
       "status": "COUVERT",
-      "status_note": "Marqueur d'activation CONSOLIDATED dans is_activation_marker couvre la double-activation fight (double_activation_by_phase). Couvert depuis le 2026-08-09. Compteur d'exercice absent : verdict JAMAIS EXERCÉE quand le run est propre, ERREURS si violation."
+      "status_note": "Marqueur d'activation CONSOLIDATED dans is_activation_marker couvre la double-activation fight (double_activation_by_phase). Couvert depuis le 2026-08-09, exercice noté depuis le 2026-09-07 (une occasion par ligne d'activation) : un run propre rend OK et non plus JAMAIS EXERCÉE."
     },
     {
       "id": "12.08",

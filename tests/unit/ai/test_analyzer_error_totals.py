@@ -51,7 +51,10 @@ COUNTERS = {
         ('shoot_at_engaged_enemy',),
         ('close_quarters_shot_at_unengaged_target',),
         ('advance_after_shoot',),
-        ('advance_twice_in_shoot_phase',),
+        # `advance_twice_in_shoot_phase` a quitté cette liste avec le compteur lui-même le
+        # 2026-09-07 : son site était gardé par `phase == 'SHOOT'` alors que l'Advance est un
+        # type de mouvement (09.02), donc inatteignable. La double sélection de mouvement est
+        # comptée par `double_activation_by_phase['MOVE']`, rattachée à la règle 09.02.
         ('move_distance_over_limit', 'advance'),
         ('advance_from_adjacent',),
         ('shoot_hit_result_mismatch',),
@@ -61,6 +64,11 @@ COUNTERS = {
     ],
     'charge': [
         ('charge_from_adjacent',),
+        # `charge_after_flee` porte la faute que `charge_invalid['fled']` prétendait porter (cette
+        # sous-clé n'a jamais eu d'écrivain). Il était déjà vérifié plus bas, avec les compteurs
+        # à deux niveaux ; il entre ici parce que c'est CETTE table qui se présente comme le
+        # contrat d'exhaustivité, et qu'une table de contrat incomplète cesse d'en être un.
+        ('charge_after_flee',),
     ],
     'fight': [
         ('fight_friendly',),
