@@ -6,6 +6,8 @@ Trois invariants :
 3. _apply_stage_hp_overrides mute la config correctement (total_episodes, model_params.*, callback_params.*).
 """
 
+from typing import Any, Dict
+
 import pytest
 
 from ai.curriculum import (
@@ -19,6 +21,22 @@ from ai.curriculum import (
 from ai.train import _apply_stage_hp_overrides
 
 
+def _stage(overrides: Any, *, role: str = "learner", init: Any = "new") -> Dict[str, Any]:
+    """Etape MINIMALE mais COMPLETE au regard de ce que `_validate_stage_hp_overrides` lit.
+
+    La fonction lit TROIS cles : `training_config_overrides`, `role` (via `is_exploiter_stage`)
+    et `init` (via `stage_init_source`, pour le garde du regime de lignee). Les fixtures n'en
+    posaient que deux, ecrites a la main 28 fois ; le jour ou le garde `init` est arrive
+    (2026-09-07), les 28 ont leve `ConfigurationError: Required key 'init' is missing` AVANT
+    d'atteindre leur assertion — 41 tests rouges d'un coup, tous verts en apparence de code mais
+    ne verifiant plus rien.
+
+    Passer par une fabrique unique est ce qui empeche la repetition : une cle ajoutee au contrat
+    se pose ICI, pas dans 28 dictionnaires.
+    """
+    return {"role": role, "init": init, "training_config_overrides": overrides}
+
+
 # ── get_stage_hp_overrides ──────────────────────────────────────────────────
 
 def test_get_stage_hp_overrides_absent():
@@ -27,7 +45,7 @@ def test_get_stage_hp_overrides_absent():
 
 def test_get_stage_hp_overrides_present():
     overrides = {"total_episodes": 75000}
-    stage = {"role": "learner", "training_config_overrides": overrides}
+    stage = _stage(overrides)
     assert get_stage_hp_overrides(stage) == overrides
 
 
@@ -43,75 +61,51 @@ def test_validate_hp_overrides_absent_ok():
 
 
 def test_validate_hp_overrides_total_episodes_ok():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"total_episodes": 75000},
-    }
+    stage = _stage({"total_episodes": 75000})
     _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_model_params_ok():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {
-            "model_params": {"n_epochs": 5, "vf_coef": 0.5},
-        },
-    }
+    stage = _stage({
+        "model_params": {"n_epochs": 5, "vf_coef": 0.5},
+    })
     _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_unknown_top_key_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"obs_size": 9999},
-    }
+    stage = _stage({"obs_size": 9999})
     with pytest.raises(ValueError, match="cles non autorisees"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_deployment_mode_schedule_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"deployment_mode_schedule": {}},
-    }
+    stage = _stage({"deployment_mode_schedule": {}})
     with pytest.raises(ValueError, match="cles non autorisees"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_unknown_model_param_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {
-            "model_params": {"clip_range": 0.3},
-        },
-    }
+    stage = _stage({
+        "model_params": {"clip_range": 0.3},
+    })
     with pytest.raises(ValueError, match="cles non autorisees"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_total_episodes_zero_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"total_episodes": 0},
-    }
+    stage = _stage({"total_episodes": 0})
     with pytest.raises(ValueError, match="total_episodes"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_n_epochs_float_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"model_params": {"n_epochs": 5.0}},
-    }
+    stage = _stage({"model_params": {"n_epochs": 5.0}})
     with pytest.raises(ValueError, match="n_epochs"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_vf_coef_negative_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"model_params": {"vf_coef": -0.5}},
-    }
+    stage = _stage({"model_params": {"vf_coef": -0.5}})
     with pytest.raises(ValueError, match="vf_coef"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
@@ -119,10 +113,7 @@ def test_validate_hp_overrides_vf_coef_negative_rejected():
 @pytest.mark.parametrize("bad", [0, -1.0, "2.0"])
 def test_validate_hp_overrides_max_grad_norm_non_positive_rejected(bad):
     """Un plafond nul, negatif ou non numerique casserait l'ecretage en silence."""
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"model_params": {"max_grad_norm": bad}},
-    }
+    stage = _stage({"model_params": {"max_grad_norm": bad}})
     with pytest.raises(ValueError, match="max_grad_norm"):
         _validate_stage_hp_overrides("P2", stage, "<test>")
 
@@ -136,10 +127,7 @@ def test_validate_hp_overrides_bool_rejected_on_every_model_param(key):
     l'appliquaient au modele en 1.0. Le parametrage suit la table des specs, donc une cle
     ouverte plus tard est couverte sans toucher a ce test.
     """
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"model_params": {key: True}},
-    }
+    stage = _stage({"model_params": {key: True}})
     with pytest.raises(ValueError, match=key):
         _validate_stage_hp_overrides("P2", stage, "<test>")
 
@@ -158,18 +146,60 @@ def test_validate_hp_overrides_bool_rejected_on_integer_fields(overrides, attend
     Un `true` y passait aussi pour 1 : un curriculum declarant `total_episodes: true` lancait
     une etape d'UN episode au lieu d'etre refuse au chargement.
     """
-    stage = {"role": "learner", "training_config_overrides": overrides}
+    stage = _stage(overrides)
     with pytest.raises(ValueError, match=attendu):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_on_exploiter_rejected():
-    stage = {
-        "role": "exploiter",
-        "training_config_overrides": {"total_episodes": 50000},
-    }
+    stage = _stage({"total_episodes": 50000}, role="exploiter")
     with pytest.raises(ValueError, match="exploiteur"):
         _validate_stage_hp_overrides("E1", stage, "<test>")
+
+
+# ── GARDE DU REGIME DE LIGNEE : une etape reprise ne declare pas ses hyperparametres ────────
+#
+# Cette branche (`ai/curriculum.py`, `if stage_init_source(stage) is not None`) est arrivee avec
+# le regime de lignee le 2026-09-07 et n'avait AUCUN test — c'est pourtant elle qui exige la cle
+# `init` et qui a rendu 41 tests de ce fichier rouges d'un coup. Reparer les fixtures sans
+# verrouiller la regle qui les cassait laisserait le meme angle mort.
+
+
+@pytest.mark.parametrize("cle_gouvernee", ["model_params", "agent_seat_p2_ratio"])
+def test_a_resumed_stage_cannot_declare_a_lineage_governed_key(cle_gouvernee: str):
+    """`model_params` et `agent_seat_p2_ratio` appartiennent au bloc `lineage_regime`.
+
+    Les laisser declarables par une etape reprise ferait coexister deux sources pour la meme
+    valeur — et c'est la source PERDANTE qui aurait l'air de decider en relisant le JSON, puisque
+    les overrides d'etape sont appliques AVANT le regime.
+    """
+    valeurs = {"model_params": {"n_epochs": 5}, "agent_seat_p2_ratio": 0.6}
+    stage = _stage({cle_gouvernee: valeurs[cle_gouvernee]}, init="from:P1")
+
+    with pytest.raises(ValueError, match=cle_gouvernee):
+        _validate_stage_hp_overrides("P2", stage, "<test>")
+
+
+def test_a_resumed_stage_may_still_declare_its_duration():
+    """« Une etape reprise ne declare que sa duree et son adversite » : `total_episodes` reste permis.
+
+    Sans ce cas, un garde trop large passerait le test precedent tout en interdisant le seul
+    override qu'une etape reprise a le droit de porter.
+    """
+    stage = _stage({"total_episodes": 75000}, init="from:P1")
+
+    _validate_stage_hp_overrides("P2", stage, "<test>")  # ne leve pas
+
+
+def test_a_fresh_stage_may_declare_the_governed_keys():
+    """Le garde ne vaut QUE pour les etapes reprises : `init: new` garde ses overrides.
+
+    P0 part a froid et n'herite d'aucun regime — c'est la seule etape qui choisit encore ses
+    hyperparametres.
+    """
+    stage = _stage({"model_params": {"n_epochs": 5}}, init="new")
+
+    _validate_stage_hp_overrides("P0", stage, "<test>")  # ne leve pas
 
 
 # ── _apply_stage_hp_overrides ───────────────────────────────────────────────
@@ -265,75 +295,54 @@ def test_apply_hp_overrides_full_p1_bundle():
 # ── callback_params validation ──────────────────────────────────────────────
 
 def test_validate_hp_overrides_callback_params_ok():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {
-            "callback_params": {"bot_eval_freq": 15000, "bot_eval_final": 300},
-        },
-    }
+    stage = _stage({
+        "callback_params": {"bot_eval_freq": 15000, "bot_eval_final": 300},
+    })
     _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_callback_params_unknown_key_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {
-            "callback_params": {"bot_eval_freq": 10000, "checkpoint_save_freq": 5000},
-        },
-    }
+    stage = _stage({
+        "callback_params": {"bot_eval_freq": 10000, "checkpoint_save_freq": 5000},
+    })
     with pytest.raises(ValueError, match="cles non autorisees"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_callback_params_non_dict_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"callback_params": 10000},
-    }
+    stage = _stage({"callback_params": 10000})
     with pytest.raises(TypeError, match="callback_params"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_bot_eval_freq_zero_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"callback_params": {"bot_eval_freq": 0}},
-    }
+    stage = _stage({"callback_params": {"bot_eval_freq": 0}})
     with pytest.raises(ValueError, match="bot_eval_freq"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_bot_eval_freq_float_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"callback_params": {"bot_eval_freq": 10000.0}},
-    }
+    stage = _stage({"callback_params": {"bot_eval_freq": 10000.0}})
     with pytest.raises(ValueError, match="bot_eval_freq"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_coherence_total_episodes_too_small():
     """total_episodes < bot_eval_freq * 3 (robust_window_min) → rejet."""
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {
-            "total_episodes": 25000,
-            "callback_params": {"bot_eval_freq": 10000},
-        },
-    }
+    stage = _stage({
+        "total_episodes": 25000,
+        "callback_params": {"bot_eval_freq": 10000},
+    })
     with pytest.raises(ValueError, match="robust_window_min"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_coherence_ok():
     """total_episodes >= bot_eval_freq * 3 → accepte."""
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {
-            "total_episodes": 75000,
-            "callback_params": {"bot_eval_freq": 10000},
-        },
-    }
+    stage = _stage({
+        "total_episodes": 75000,
+        "callback_params": {"bot_eval_freq": 10000},
+    })
     _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
@@ -370,54 +379,36 @@ def test_real_curriculum_validates_with_overrides():
 # ── F2 : validation learning_rate / ent_coef ────────────────────────────────
 
 def test_validate_hp_overrides_learning_rate_zero_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"model_params": {"learning_rate": 0}},
-    }
+    stage = _stage({"model_params": {"learning_rate": 0}})
     with pytest.raises(ValueError, match="learning_rate"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_learning_rate_string_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"model_params": {"learning_rate": "bad"}},
-    }
+    stage = _stage({"model_params": {"learning_rate": "bad"}})
     with pytest.raises(ValueError, match="learning_rate"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_learning_rate_positive_float_ok():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"model_params": {"learning_rate": 0.001}},
-    }
+    stage = _stage({"model_params": {"learning_rate": 0.001}})
     _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_ent_coef_string_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"model_params": {"ent_coef": "bad"}},
-    }
+    stage = _stage({"model_params": {"ent_coef": "bad"}})
     with pytest.raises(ValueError, match="ent_coef"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_ent_coef_negative_rejected():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"model_params": {"ent_coef": -0.01}},
-    }
+    stage = _stage({"model_params": {"ent_coef": -0.01}})
     with pytest.raises(ValueError, match="ent_coef"):
         _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
 def test_validate_hp_overrides_ent_coef_zero_ok():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"model_params": {"ent_coef": 0}},
-    }
+    stage = _stage({"model_params": {"ent_coef": 0}})
     _validate_stage_hp_overrides("P1", stage, "<test>")
 
 
@@ -438,10 +429,7 @@ def test_apply_hp_overrides_missing_callback_params_raises():
 # ── F4 : non-dict override sur exploiteur → TypeError (type avant exploiteur) ──
 
 def test_validate_hp_overrides_non_dict_on_exploiter_raises_type_error():
-    stage = {
-        "role": "exploiter",
-        "training_config_overrides": 42,
-    }
+    stage = _stage(42, role="exploiter")
     with pytest.raises(TypeError, match="objet JSON"):
         _validate_stage_hp_overrides("E1", stage, "<test>")
 
@@ -478,10 +466,7 @@ def test_apply_hp_overrides_coherence_only_bot_eval_freq_ok():
 
 
 def test_agent_seat_p2_ratio_is_an_allowed_stage_override():
-    stage = {
-        "role": "learner",
-        "training_config_overrides": {"agent_seat_p2_ratio": 0.6},
-    }
+    stage = _stage({"agent_seat_p2_ratio": 0.6})
     _validate_stage_hp_overrides("P2", stage, "<test>")
     assert "agent_seat_p2_ratio" in STAGE_HP_OVERRIDES_ALLOWED_TOP_KEYS
 
@@ -489,7 +474,7 @@ def test_agent_seat_p2_ratio_is_an_allowed_stage_override():
 @pytest.mark.parametrize("ratio", [0.0, 0.5, 1.0])
 def test_agent_seat_p2_ratio_accepts_the_whole_range(ratio):
     """Les deux bornes sont des reglages valides : 0.0 = toujours premier, 1.0 = toujours second."""
-    stage = {"role": "learner", "training_config_overrides": {"agent_seat_p2_ratio": ratio}}
+    stage = _stage({"agent_seat_p2_ratio": ratio})
     _validate_stage_hp_overrides("P2", stage, "<test>")
 
 
@@ -500,7 +485,7 @@ def test_agent_seat_p2_ratio_outside_the_range_is_refused(ratio):
     Le refus vit dans la validation du curriculum et non au montage des environnements, pour
     qu'une etape fautive soit rejetee au chargement plutot que plusieurs minutes plus tard.
     """
-    stage = {"role": "learner", "training_config_overrides": {"agent_seat_p2_ratio": ratio}}
+    stage = _stage({"agent_seat_p2_ratio": ratio})
     with pytest.raises(ValueError, match="agent_seat_p2_ratio"):
         _validate_stage_hp_overrides("P2", stage, "<test>")
 
@@ -508,7 +493,7 @@ def test_agent_seat_p2_ratio_outside_the_range_is_refused(ratio):
 @pytest.mark.parametrize("ratio", ["0.6", None, True])
 def test_agent_seat_p2_ratio_non_numeric_is_refused(ratio):
     """`True` compris : un booleen est un entier en Python, et 1.0 n'est pas ce qu'on declare."""
-    stage = {"role": "learner", "training_config_overrides": {"agent_seat_p2_ratio": ratio}}
+    stage = _stage({"agent_seat_p2_ratio": ratio})
     with pytest.raises((TypeError, ValueError), match="agent_seat_p2_ratio"):
         _validate_stage_hp_overrides("P2", stage, "<test>")
 
