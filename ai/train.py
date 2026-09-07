@@ -1720,6 +1720,29 @@ def is_training_invocation(args) -> bool:
     )
 
 
+def step_log_required(args) -> bool:
+    """`--step` exige-t-il qu'un episode ait atteint `step.log` a la fin du run ?
+
+    Sonde de `assert_step_log_written`, appelee depuis `main()`. La question n'est PAS « ce mode
+    entraine-t-il » (cf. `is_training_invocation`) mais « ce mode branche-t-il le StepLogger sur
+    un moteur qui joue » : `--test-only` n'entraine rien et doit pourtant ecrire — c'est meme sa
+    facon documentee de produire un `step.log` a donner a `ai/analyzer.py`.
+
+    Les trois modes exclus ne branchent le logger NULLE PART. `--convert-steplog` et `--replay`
+    relisent un journal existant. `--close-stage` mesure via `evaluate_against_checkpoints`, qui
+    n'a aucun parametre `step_logger` : ses episodes se jouent hors du logger global. Sans cette
+    exclusion, un `--close-stage --step` qui a promu l'etape, ecrit `curriculum.log` et copie
+    TensorBoard sortirait quand meme en code 1 avec un traceback — et la relance serait refusee
+    (« etape DEJA promue »), l'operation n'etant pas idempotente.
+    """
+    return bool(
+        args.step
+        and not args.convert_steplog
+        and not args.replay
+        and not args.close_stage
+    )
+
+
 def check_model_lifecycle(
     model_path: str,
     new_model: bool,
@@ -6141,7 +6164,7 @@ def _run_main():
             buffer_size=step_log_buffer_size,
             debug_mode=args.debug,
         )
-        _step_log_required = bool(args.step and not args.convert_steplog and not args.replay)
+        _step_log_required = step_log_required(args)
         
         # Sync configs to frontend automatically
         try:
