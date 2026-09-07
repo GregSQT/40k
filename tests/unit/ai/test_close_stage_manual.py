@@ -300,7 +300,7 @@ def test_close_stage_refuses_an_exploiter_stage(monkeypatch) -> None:
     """
     with pytest.raises(ValueError, match="etape EXPLOITEUR"):
         _run_main(monkeypatch, [
-            "--close-stage", "--agent", "ArmageddonAgent_x1", "--training-config", "x1_long",
+            "--close-stage", "--agent", "ArmageddonAgent_x1", "--training-config", "x1_lineage",
             "--etape", "E1",
         ])
 
@@ -332,7 +332,7 @@ def test_close_stage_runs_after_the_shared_prologue(monkeypatch) -> None:
     monkeypatch.setattr(train_module, "_run_info_from_disk", lambda *a, **k: {})
 
     exit_code = _run_main(monkeypatch, [
-        "--close-stage", "--agent", "ArmageddonAgent_x1", "--training-config", "x1_long",
+        "--close-stage", "--agent", "ArmageddonAgent_x1", "--training-config", "x1_lineage",
         "--etape", "P1",
     ], neutralise_closure=False)
 
@@ -369,7 +369,7 @@ def test_close_stage_is_not_asked_for_a_model_lifecycle_intention(monkeypatch) -
     )
 
     exit_code = _run_main(monkeypatch, [
-        "--close-stage", "--agent", "ArmageddonAgent_x1", "--training-config", "x1_long",
+        "--close-stage", "--agent", "ArmageddonAgent_x1", "--training-config", "x1_lineage",
         "--etape", "P1",
     ])
 
@@ -397,7 +397,7 @@ def test_close_stage_does_not_prepare_the_stage_init(monkeypatch) -> None:
 
     monkeypatch.setattr(train_module, "_prepare_curriculum_stage", _forbidden)
     exit_code = _run_main(monkeypatch, [
-        "--close-stage", "--agent", "ArmageddonAgent_x1", "--training-config", "x1_long",
+        "--close-stage", "--agent", "ArmageddonAgent_x1", "--training-config", "x1_lineage",
         "--etape", "P1",
     ])
 

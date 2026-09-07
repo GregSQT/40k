@@ -23,6 +23,7 @@ from typing import Any, Dict, List
 import pytest
 
 from engine.w40k_core import W40KEngine
+from shared.data_validation import ConfigurationError
 
 
 class _FakeStepLogger:
@@ -156,6 +157,10 @@ def test_shoot_emits_one_log_action_per_shot():
         "type": "shoot", "shooterId": "7", "targetId": "9", "player": 1, "phase": "shoot",
         "turn": 2, "weaponName": "Bolt Rifle", "shooterCol": 5, "shooterRow": 6,
         "targetCol": 10, "targetRow": 11,
+        # `_emit_squad_shoot_log` pose TOUJOURS ce segment sur un log shoot/combat : une entrée
+        # partielle ferait lever `require_key` avant les assertions, qui mesureraient alors la
+        # garde et non ce que le test annonce (même raison que `move_type` dans `_move_log`).
+        "target_models_segment": "[TARGET_MODELS: 9#0@(10,11,z0)]",
         "shootDetails": [
             {"shotNumber": 1, "attackRoll": 2, "hitResult": "MISS", "hitTarget": 3},
             {"shotNumber": 2, "attackRoll": 5, "hitResult": "HIT", "hitTarget": 3,
@@ -189,10 +194,11 @@ def test_shoot_emits_one_log_action_per_shot():
 def test_save_success_true_maps_to_save():
     logger = _FakeStepLogger()
     logs = [{"type": "shoot", "shooterId": "1", "targetId": "2", "player": 1, "phase": "shoot",
-             "turn": 2, "shootDetails": [{"attackRoll": 6, "hitResult": "HIT", "hitTarget": 3,
-                                          "strengthRoll": 6, "strengthResult": "SUCCESS",
-                                          "woundTarget": 4, "saveRoll": 6, "saveTarget": 3,
-                                          "saveSuccess": True, "damageDealt": 0}]}]
+             "turn": 2, "target_models_segment": "[TARGET_MODELS: 2#0@(3,4,z0)]",
+             "shootDetails": [{"attackRoll": 6, "hitResult": "HIT", "hitTarget": 3,
+                               "strengthRoll": 6, "strengthResult": "SUCCESS",
+                               "woundTarget": 4, "saveRoll": 6, "saveTarget": 3,
+                               "saveSuccess": True, "damageDealt": 0}]}]
     eng = _engine_stub(logs, logger)
     _drain(eng)
     assert logger.calls[0]["action_details"]["save_result"] == "SAVE"
@@ -209,10 +215,11 @@ def test_combat_receives_pre_action_fight_state():
         "non_active_alternating_activation_pool": ["9"],
     }
     logs = [{"type": "combat", "shooterId": "1", "targetId": "9", "player": 1, "phase": "fight",
-             "turn": 2, "shootDetails": [{"attackRoll": 4, "hitResult": "HIT", "hitTarget": 3,
-                                          "strengthRoll": 5, "strengthResult": "SUCCESS",
-                                          "woundTarget": 4, "saveRoll": 1, "saveTarget": 4,
-                                          "saveSuccess": False, "damageDealt": 2}]}]
+             "turn": 2, "target_models_segment": "[TARGET_MODELS: 9#0@(3,4,z0)]",
+             "shootDetails": [{"attackRoll": 4, "hitResult": "HIT", "hitTarget": 3,
+                               "strengthRoll": 5, "strengthResult": "SUCCESS",
+                               "woundTarget": 4, "saveRoll": 1, "saveTarget": 4,
+                               "saveSuccess": False, "damageDealt": 2}]}]
     eng = _engine_stub(logs, logger)
     _drain(eng, fight_state=fight_state)
     details = logger.calls[0]["action_details"]
@@ -395,7 +402,8 @@ def test_target_models_segment_precapture_wins_over_live_positions():
     PROJ.1.4.consolidation sur un run de 600 épisodes).
 
     Ici `units_cache` porte la position d'APRÈS (22,26) et le segment pré-capturé celle d'AVANT
-    (22,29) : c'est la seconde qui doit sortir.
+    (22,29) : c'est la seconde qui doit sortir. Le cache divergent est le VERROU — il rendrait le
+    test rouge si quiconque rebranchait une lecture des positions au flush.
     """
     logger = _FakeStepLogger()
     logs = [_combat_log_with_target(
@@ -414,8 +422,15 @@ def test_target_models_segment_precapture_wins_over_live_positions():
     )
 
 
-def test_target_models_segment_falls_back_to_live_when_not_precaptured():
-    """Sans pré-capture (émetteurs qui ne la posent pas), la lecture live reste le chemin."""
+def test_shoot_without_target_models_segment_raises():
+    """Contrat `_emit_squad_shoot_log` rompu = erreur explicite, jamais un segment reconstruit.
+
+    Jumeau de `test_shoot_without_shoot_details_raises`. L'unique émetteur des logs shoot/combat
+    (`shared_utils._emit_squad_shoot_log`) pose ce segment INCONDITIONNELLEMENT : une entrée qui
+    en manque signale une chaîne rompue, pas un cas métier. Le relire depuis `units_cache` au
+    flush est précisément le défaut de datation que la pré-capture a corrigé — un `units_cache`
+    peuplé ci-dessous ne doit donc PAS servir de porte de sortie.
+    """
     logger = _FakeStepLogger()
     eng = _engine_stub([_combat_log_with_target()], logger)
     eng.game_state["units_cache"] = {
@@ -425,6 +440,5 @@ def test_target_models_segment_falls_back_to_live_when_not_precaptured():
             "col": 22, "row": 26,
         },
     }
-    _drain(eng)
-
-    assert "22,26" in logger.calls[0]["action_details"]["target_models_segment"]
+    with pytest.raises(ConfigurationError, match="target_models_segment"):
+        _drain(eng)
