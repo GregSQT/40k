@@ -47,6 +47,12 @@ def test_move_clearance_hex_geometry_uses_enemy_adjacent_hexes_membership() -> N
 
 
 def test_move_clearance_round_round_uses_euclidean_gap() -> None:
+    """Géométrie EUCLIDIENNE, résolution PORTÉE PAR L'ÉTAT comme chez le jumeau hex ci-dessus.
+
+    Un état vide laissait `geometry_is_hex` retomber sur le config-loader global, donc sur le
+    plateau ambiant : sous `W40K_BOARD_PATH=board/44x60x1` ce test partait dans la branche hex et
+    exigeait `enemy_adjacent_hexes_player_1`, absent — il ne testait plus son sujet.
+    """
     mover = {"id": "u1", "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5}
     enemy_entry = {
         "col": 10,
@@ -59,7 +65,7 @@ def test_move_clearance_round_round_uses_euclidean_gap() -> None:
     }
 
     assert move_anchor_violates_engagement_clearance(
-        {},
+        {"inches_to_subhex": 5},
         mover,
         10,
         10,
@@ -72,6 +78,7 @@ def test_move_clearance_round_round_uses_euclidean_gap() -> None:
 
 
 def test_move_clearance_round_round_rejects_exact_engagement_boundary(monkeypatch) -> None:
+    """Même épinglage de résolution que le test précédent : la branche euclidienne est le sujet."""
     mover = {"id": "u1", "player": 1, "BASE_SHAPE": "round", "BASE_SIZE": 2, "MODEL_HEIGHT": 2.5}
     enemy_entry = {
         "col": 10,
@@ -89,7 +96,7 @@ def test_move_clearance_round_round_rejects_exact_engagement_boundary(monkeypatc
     )
 
     assert move_anchor_violates_engagement_clearance(
-        {},
+        {"inches_to_subhex": 5},
         mover,
         20,
         10,
