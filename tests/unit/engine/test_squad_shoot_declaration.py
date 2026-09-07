@@ -119,6 +119,21 @@ def _m(col: int, row: int, weapons: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {"col": col, "row": row, "VALUE": 25, "RNG_WEAPONS": weapons, "selectedRngWeaponIndex": 0}
 
 
+# Cibles types du choix de profil combi. Les caracteristiques defensives sont posees PAR
+# FIGURINE (spec) : c'est la figurine qui encaisse, et c'est elle que lit le score.
+_HARD_MODEL: Dict[str, Any] = {
+    **_m(5, 15, [STORM]), "T": 9, "ARMOR_SAVE": 2, "INVUL_SAVE": 7, "HP_MAX": 8,
+}
+
+
+def _horde(col_start: int = 5, row: int = 15) -> List[Dict[str, Any]]:
+    """Dix figurines a 1 PV : la cible ou [BLAST] paie et ou les D6 degats sont perdus."""
+    return [
+        {**_m(col_start + i, row, [STORM]), "T": 3, "ARMOR_SAVE": 5, "INVUL_SAVE": 7, "HP_MAX": 1}
+        for i in range(10)
+    ]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Plomberie identite (code) + groupage combi
 # ─────────────────────────────────────────────────────────────────────────────
@@ -502,9 +517,9 @@ class TestDeclareShootCombiProfiles:
     section 1.2 de l'analyzer — donc une action illegale apprise comme legale.
     """
 
-    def _gs(self, attacker_models, attacker_weapons):
+    def _gs(self, attacker_models, attacker_weapons, target_models=None):
         atk = _unit(1, 1, attacker_models, attacker_weapons)
-        tgt = _unit(2, 2, [_m(5, 15, [STORM])], [STORM])
+        tgt = _unit(2, 2, target_models or [_m(5, 15, [STORM])], [STORM])
         gs = _make_gs([atk, tgt])
         _activate(gs, "1")
         return gs
@@ -514,11 +529,41 @@ class TestDeclareShootCombiProfiles:
         intents = squad_declare_shoot(gs, "1", "2", ["2"])
         assert len(intents) == 1
 
-    def test_combi_keeps_first_declarable_profile(self):
-        """Meme politique que `shoot_weapon_sel_open_slots` : le PREMIER profil du groupe."""
-        gs = self._gs([_m(5, 5, [FRAG, KRAK])], [FRAG, KRAK])
+    def test_combi_keeps_the_profile_with_the_best_expected_damage(self):
+        """Cible dure : Krak (S9, AP-2, D6) place plus de degats que Frag (S4, AP0, D1).
+
+        Garder l'index le plus bas laissait l'ORDRE DU ROSTER decider : Frag est declare en
+        premier sur `TerminatorCyclone`, donc le profil anti-char n'aurait jamais tire.
+        """
+        gs = self._gs([_m(5, 5, [FRAG, KRAK])], [FRAG, KRAK], target_models=[_HARD_MODEL])
         intents = squad_declare_shoot(gs, "1", "2", ["2"])
-        assert intents[0]["weapon_index"] == 0
+        assert [i["weapon_index"] for i in intents] == [1]
+
+    def test_the_chosen_profile_follows_the_target(self):
+        """Meme figurine, meme groupe, cible opposee : Frag reprend la main.
+
+        Verrou du fait que le choix est une DECISION et non une constante : dix figurines a
+        1 PV, ou [BLAST] ajoute deux des et ou les D6 degats du Krak sont perdus en exces
+        (2,67 contre 1,11 — mesure du 2026-09-07).
+        """
+        gs = self._gs([_m(5, 5, [FRAG, KRAK])], [FRAG, KRAK], target_models=_horde())
+        intents = squad_declare_shoot(gs, "1", "2", ["2"])
+        assert [i["weapon_index"] for i in intents] == [0]
+
+    def test_a_profile_that_cannot_be_declared_is_never_chosen(self):
+        """L'esperance n'arbitre qu'entre profils DECLARABLES.
+
+        Figurine VEHICLE engagee avec la cible : 10.06 lui laisse toutes ses armes MAIS
+        interdit [BLAST] contre l'unite qui l'engage. Frag est donc hors jeu alors meme que
+        l'esperance le prefere sur cette horde — c'est Krak qui doit partir.
+        """
+        gs = self._gs(
+            [{**_m(5, 5, [FRAG, KRAK]), "UNIT_KEYWORDS": [{"keywordId": "vehicle"}]}],
+            [FRAG, KRAK],
+            target_models=_horde(col_start=5, row=6),
+        )
+        intents = squad_declare_shoot(gs, "1", "2", ["2"])
+        assert [i["weapon_index"] for i in intents] == [1]
 
     def test_distinct_weapons_still_split(self):
         """Non-regression : deux armes PHYSIQUES distinctes gardent leurs deux declarations
@@ -543,3 +588,56 @@ class TestDeclareShootCombiProfiles:
         gs = self._gs([_m(5, 5, [STORM, STORM])], [STORM, STORM])
         intents = squad_declare_shoot(gs, "1", "2", ["2"])
         assert len(intents) == 2
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Declaration MANUELLE — la cle de remplacement est l'arme PHYSIQUE
+# ─────────────────────────────────────────────────────────────────────────────
+class TestDeclareManualCombiProfiles:
+    """Meme regle que la declaration automatique, sur les primitives du flux manuel.
+
+    `declare_attack_model` / `declare_attack_weapon` sont GENERIQUES (tir ET melee, via
+    DeclareAttackCtx) : le front combat les appelle (`squad_fight_assign`,
+    `squad_fight_assign_weapon`) et l'API les expose au tir. Leur cle de remplacement etait
+    l'index de PROFIL, donc declarer Frag puis Krak laissait les deux profils d'une meme arme
+    physique dans l'activation — l'illegalite fermee cote automatique restait ouverte ici.
+    """
+
+    def _gs(self):
+        atk = _unit(1, 1, [_m(5, 5, [FRAG, KRAK]), _m(6, 5, [FRAG, KRAK])], [FRAG, KRAK])
+        tgt = _unit(2, 2, [_m(5, 15, [STORM])], [STORM])
+        gs = _make_gs([atk, tgt])
+        _activate(gs, "1")
+        return gs
+
+    def test_declaring_the_sibling_profile_replaces_it(self):
+        gs = self._gs()
+        gs["models_cache"]["1#0"]["selectedRngWeaponIndex"] = 0
+        squad_declare_shoot_model(gs, "1", "1#0", "2")
+        gs["models_cache"]["1#0"]["selectedRngWeaponIndex"] = 1
+        squad_declare_shoot_model(gs, "1", "1#0", "2")
+        intents = gs["pending_squad_shoot_intents"]["1"]
+        assert [(i["model_id"], i["weapon_index"]) for i in intents] == [("1#0", 1)]
+
+    def test_two_distinct_weapons_of_a_fig_still_coexist(self):
+        """Non-regression du split fire : deux armes PHYSIQUES gardent leurs deux intents."""
+        atk = _unit(1, 1, [_m(5, 5, [STORM, FRAG])], [STORM, FRAG])
+        tgt = _unit(2, 2, [_m(5, 15, [STORM])], [STORM])
+        gs = _make_gs([atk, tgt])
+        _activate(gs, "1")
+        gs["models_cache"]["1#0"]["selectedRngWeaponIndex"] = 0
+        squad_declare_shoot_model(gs, "1", "1#0", "2")
+        gs["models_cache"]["1#0"]["selectedRngWeaponIndex"] = 1
+        squad_declare_shoot_model(gs, "1", "1#0", "2")
+        intents = gs["pending_squad_shoot_intents"]["1"]
+        assert sorted(i["weapon_index"] for i in intents) == [0, 1]
+
+    def test_assigning_the_sibling_weapon_replaces_it_for_the_whole_squad(self):
+        """Jumeau au niveau escouade : Frag puis Krak = une seule ligne, sur toutes les figs."""
+        gs = self._gs()
+        squad_declare_shoot_weapon(gs, "1", 0, "2")
+        squad_declare_shoot_weapon(gs, "1", 1, "2")
+        intents = gs["pending_squad_shoot_intents"]["1"]
+        assert sorted((i["model_id"], i["weapon_index"]) for i in intents) == [
+            ("1#0", 1), ("1#1", 1),
+        ]

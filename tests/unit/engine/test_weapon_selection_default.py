@@ -123,15 +123,20 @@ def test_the_action_squad_shoot_declares_a_single_combi_profile() -> None:
     bien ce groupage — le defaut d'origine etait invisible aux tests de fonction parce que
     personne ne verifiait le cablage.
 
+    Le profil retenu est celui de meilleure esperance de degats contre la cible, pas l'index
+    le plus bas : ici le second (STR 8, AP -2, DMG 2) contre le premier (STR 4, AP 0, DMG 1).
+
     ROUGE avant le fix : [0, 1, 2] — les deux profils du combi declares.
     """
     eng = _engine([
         _unit_cfg(1, 1, [(10, 10)], rng_weapons=[
             _weapon("plasma_std", rng=30, COMBI_WEAPON="plasma_pistol"),
-            _weapon("plasma_sup", rng=30, COMBI_WEAPON="plasma_pistol"),
+            _weapon("plasma_sup", rng=30, COMBI_WEAPON="plasma_pistol", STR=8, AP=-2, DMG=2),
             _weapon("bolter", rng=30),
         ]),
-        _unit_cfg(2, 2, [(20, 10)]),
+        # INVUL_SAVE 7 (= aucune invulnerable) : avec le 0 du gabarit, l'AP ne change plus rien
+        # au seuil de sauvegarde et le test ne verrait pas la difference entre les deux profils.
+        {**_unit_cfg(2, 2, [(20, 10)]), "INVUL_SAVE": 7},
     ])
     locked: List[List[Dict[str, Any]]] = []
     real_lock = shared_utils.squad_lock_shoot
@@ -149,8 +154,8 @@ def test_the_action_squad_shoot_declares_a_single_combi_profile() -> None:
 
     assert locked, "squad_lock_shoot jamais atteint : l'action ne passe plus par la declaration"
     declared = sorted(i["weapon_index"] for i in locked[0])
-    # L'arme solo (2) tire ; du combi, un SEUL profil — celui d'index le plus bas.
-    assert declared == [0, 2]
+    # L'arme solo (2) tire ; du combi, un SEUL profil — le meilleur contre cette cible.
+    assert declared == [1, 2]
 
 
 def test_a_weapon_out_of_range_is_simply_not_declared() -> None:
