@@ -78,9 +78,11 @@ def models_segment_for_unit(
     by_model = entry.get("occupied_hexes_by_model")  # get allowed
     if not isinstance(by_model, dict) or not by_model:
         return ""
-    floors = require_key(entry, "floor_height_by_model")
+    # `floor_height_by_model` est absent en mode 2D (pas de terrain hauteur) — valeur métier
+    # valide, pas une corruption. On retombe à 0.0 par socle (tout au ras du sol).
+    floors = entry.get("floor_height_by_model") or {}
     return format_models_segment(
-        ((mid, pos[0], pos[1], require_key(floors, mid)) for mid, pos in by_model.items()),
+        ((mid, pos[0], pos[1], floors.get(mid, 0.0)) for mid, pos in by_model.items()),
         label=label,
     )
 

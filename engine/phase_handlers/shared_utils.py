@@ -6042,7 +6042,6 @@ def resolve_squad_move_constraints(
     game_state: Dict[str, Any],
     move_type: str,
     advance_roll: Optional[int] = None,
-    extra_constraints: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """SOURCE UNIQUE des contraintes qu'un squad move applique — budget inclus.
 
@@ -6056,10 +6055,7 @@ def resolve_squad_move_constraints(
     # pool PvP. No-op tant que l'unité est au sol (l'IA directionnelle 2D ne monte pas) ou vole.
     from engine.phase_handlers.movement_handlers import squad_descent_penalty_subhex
     budget = max(0, budget - squad_descent_penalty_subhex(game_state, squad_id))
-    constraints: Dict[str, Any] = {"budget_per_model": budget}
-    if extra_constraints:
-        constraints.update(extra_constraints)
-    return constraints
+    return {"budget_per_model": budget}
 
 
 def execute_squad_move(
@@ -6069,7 +6065,6 @@ def execute_squad_move(
     move_type: str,
     game_state: Dict[str, Any],
     advance_roll: Optional[int] = None,
-    extra_constraints: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """Pipeline complet pour Normal/Advance/Fall Back: roll → plan → validate → commit.
 
@@ -6085,7 +6080,7 @@ def execute_squad_move(
     if plan is None:
         return False
     constraints = resolve_squad_move_constraints(
-        squad_id, game_state, move_type, advance_roll, extra_constraints
+        squad_id, game_state, move_type, advance_roll
     )
     if not validate_move_plan(plan, game_state, constraints):
         return False
@@ -6559,18 +6554,14 @@ def charge_build_valid_plan(
     # le plan intent=0 et L10 charge placement est silencieusement non-fonctionnel.
     # Pas de guard _los_batch : charge_build_valid_plan n'est jamais appelée pendant un batch.
     #
-    # `_cbvp_fly` est requis pour la même raison qu'`intent` : la déclaration « take to the skies »
-    # (21.03, « Subtract 2" from the maximum distance » — le PDF nomme explicitement le charge
-    # move) est posée par `apply_fly_declaration_decision` SANS bump de `_unit_move_version`.
-    # L'observation de la phase de charge appelle déjà cette fonction avec `CHARGE_MAX_ROLL`
-    # (observation_builder), donc un jet de 12 sur une unité volante trouvait au commit le plan
-    # bâti AVANT la déclaration, à budget plein : une figurine a parcouru 11" pour un budget de
-    # 10 (mesuré, run de 600 épisodes). Le cache de pool de move porte déjà ce discriminant
-    # (`_tts_bool` dans sa `_cheap_key`) ; celui-ci était le seul à ne pas l'avoir.
+    # `_cbvp_fly` : la déclaration « take to the skies » (21.03) bumpe désormais
+    # `_unit_move_version` (apply_fly_declaration_decision), ce qui invalide déjà la clé via
+    # `_cbvp_version`. `_cbvp_fly` est conservé comme défense en profondeur : il isole les plans
+    # pré/post-déclaration dans le même état versionnalisé, évitant toute collision résiduelle.
     from engine.phase_handlers.charge_handlers import _charge_fly_declared
     _cbvp_version = game_state["_unit_move_version"]
     _cbvp_fly = _charge_fly_declared(
-        game_state, require_unit_by_id(game_state, squad_id), str(squad_id)
+        game_state, require_unit_by_id(game_state, str(squad_id)), str(squad_id)
     )
     _cbvp_key = (str(squad_id), tuple(str(t) for t in target_squad_ids), int(charge_roll), int(intent), _cbvp_fly, _cbvp_version)
     _cbvp_cache = game_state.setdefault("_charge_plan_cache", {})
@@ -9600,9 +9591,8 @@ def _emit_squad_shoot_log(game_state: Dict[str, Any], g: Dict[str, Any], ctx: Ma
         f" - {attack_log}"
     )
     # Pré-capture AVANT effets hazardous/destroy_model (cf. commentaire plus bas sur
-    # "models_segment"). ConfigurationError (floor_height_by_model absent = corruption cache)
-    # remonte : lâcher le segment ferait disparaître la couche per-figurine ENTIÈRE (cf.
-    # w40k_core._models_segment_for_unit). Un journal muet vaut moins qu'une erreur visible.
+    # "models_segment"). `floor_height_by_model` peut être absent en mode 2D (métier valide) :
+    # `models_segment_for_unit` retombe alors à hauteur 0.0 par socle.
     _pre_captured_models_seg = models_segment_for_unit(game_state, attacker_squad_id_str)
     # Même pré-capture pour la CIBLE. Ici, les pertes de l'activation sont déjà retirées du cache
     # (`_finalize_manual_allocation` n'émet qu'après allocation complète) — le segment porte donc
@@ -13101,8 +13091,8 @@ def erode_move_pool_by_squad_block(
     ``build_move_blocked_cells_by_level`` (murs, occupation des autres escouades par niveau,
     ER ennemie) — aucune duplication, les deux côtés de l'invariant « masque ⊆ exécutable »
     ne peuvent pas diverger. ``constraints`` doit refléter celles que l'exécution appliquera
-    (défaut ``DEFAULT_MOVE_CONSTRAINTS``, ce que passe ``execute_squad_move`` sans
-    ``extra_constraints``) : les fournir plus permissives ici sur-filtrerait le masque.
+    (défaut ``DEFAULT_MOVE_CONSTRAINTS``, ce que passe ``execute_squad_move``) : les fournir
+    plus permissives ici sur-filtrerait le masque.
 
     ``budget_per_model`` (distance de CHEMIN, règle 03) est AUSSI érodé ici, au sol. La distance
     à vol d'oiseau (cube) est bien invariante par translation, mais PAS le trajet légal : une
