@@ -15,7 +15,7 @@ TensorBoard trie les groupes de tags par tri naturel *sensible à la casse* (chi
 | **`02_combat/`** | Attrition : kills, pertes, charges, value trade |
 | **`03_eval/`** | Win-rate par couple (scénario holdout, bot) — un tag par paire |
 | **`bot_eval/`** | Agrégats d'évaluation bot : `vs_random`, `vs_greedy`, `vs_defensive`, `combined` |
-| **`pool_eval/`** | Sonde de curriculum : win-rate contre chaque membre du pool (brut + moyenne 3 sondes) |
+| **`pool_eval/`** | Sonde de curriculum : win-rate contre les membres du pool (brut + moyenne glissante sur `early_stop.probe_window` sondes, celle qui décide) |
 | **`game_critical/`** | Métriques de jeu brutes (episode_reward, win_rate, episode_length, invalid_action_rate) |
 | **`game_tactical/`** | Participation par phase (movement_efficiency, shooting_participation, flee_rate) |
 | **`reserves/`** | Usage des réserves stratégiques (§20.01 / §20.04) |

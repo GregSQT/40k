@@ -5439,19 +5439,34 @@ def _score_stage_against_pool(
     1,7. Repeter le bloc n'aurait rien apporte tant que `base_seed` valait 42 en dur — les trois
     mesures etaient identiques au bit pres —, d'ou le tirage au hasard qui l'accompagne.
 
-    ⚠️ LE DECOUPAGE EN BLOCS N'APPORTE AUCUN GAIN STATISTIQUE PAR LUI-MEME, et l'affirmer serait
-    faux : `_episode_seed` etant `(base_seed + md5(bot:scenario:ep_idx)) % 2**31` et `n_episodes`
-    se repartissant par `// n_scenarios`, trois appels de 300 a graines tirees et un appel unique
-    de 900 produisent le meme nombre d'episodes independants par scenario, donc la MEME
-    erreur-type. Ce que les blocs achetent est la DISPERSION VISIBLE entre eux, imprimee bloc par
-    bloc ci-dessous : un gate a 0.56 dont les trois blocs valent 0.55/0.56/0.57 ne se lit pas
-    comme un gate a 0.56 dont les blocs valent 0.44/0.58/0.66. Un appel unique de 900 rendrait le
-    meme chiffre sans cette lecture, pour deux chargements d'archive et deux cycles de pool de
-    moins par membre. C'est le seul arbitrage ici, et il est tranche en faveur de la dispersion.
+    ⚠️ LE DECOUPAGE EN BLOCS N'APPORTE AUCUN GAIN STATISTIQUE PAR LUI-MEME, et n'en a jamais
+    apporte : `_episode_seed` etant `(base_seed + md5(bot:scenario:ep_idx)) % 2**31` et
+    `n_episodes` se repartissant par `// n_scenarios`, trois appels de 300 a graines tirees et un
+    appel unique de 900 produisent le meme nombre d'episodes independants par scenario, donc la
+    MEME erreur-type. Les blocs n'achetent rien de mesurable non plus : leur dispersion estime
+    une erreur-type qu'on connait analytiquement (2,9 points a 300), et `curriculum.log` porte
+    deja `gate_eval_episodes` et `gate_eval_repeats`, dont n = 900 et l'erreur-type se derivent.
+    Ils sont CONSERVES parce qu'ils ne coutent presque rien, pas parce qu'ils apportent quelque
+    chose — un etat a ne pas confondre avec une justification.
 
-    C'est la MEME grandeur que celle sur laquelle l'early-stop decide en cours de run (la moyenne
-    glissante des sondes, `pool_eval/vs_<tag>_<probe_window>ep`), pour que les deux verdicts se
-    lisent sur la meme echelle.
+    CE QU'ILS COUTENT, exactement : `evaluate_against_checkpoints` sonde la compatibilite de
+    chaque archive par un `MaskablePPO.load` cote PARENT, une fois par appel. Trois appels font
+    donc deux chargements de trop par membre du pool — quatre sur P2, vingt-six sur P10. Et rien
+    d'autre sur les quatre profils d'entrainement reels (`x1`, `x1_long`, `x5_new`, `x5_long`),
+    qui portent `bot_eval_n_workers_gate` = 1 : `use_subprocess and n_workers > 1` y est FAUX et
+    le gate s'execute SEQUENTIELLEMENT dans le parent — aucun pool de workers n'est monte, aucune
+    tranche n'est decoupee, et `bot_eval_task_timeout_seconds` ne s'applique pas. Seuls `x1_debug`
+    et `x5_debug` sont a 2 et prennent le chemin parallele, ou s'ajoute un cycle de pool par appel
+    — deux de trop, mais par APPEL et non par membre.
+
+    Une version anterieure de ce texte comptait des cycles de pool « par membre » sur le chemin
+    nominal : ils n'y existent pas, et l'unite etait fausse. Le corriger a demande de lire
+    `bot_eval_n_workers_gate`, pas de relire la phrase.
+
+    PAS la meme grandeur que la moyenne glissante des sondes de l'early-stop, malgre la
+    ressemblance de forme : celle-la moyenne trois etats SUCCESSIFS du modele, celle-ci trois
+    echantillons de parties a modele FIGE. Les deux se comparent aux memes planchers — c'est
+    `_pool_score_shortfalls` qui le garantit, pas une parente entre les deux moyennes.
 
     `n_workers_gate` est passe comme `n_workers_override` : si present dans callback_params, le
     gate utilise ce compte de workers independamment de `bot_eval_n_workers` (BotEvaluationCallback).
