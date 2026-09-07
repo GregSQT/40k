@@ -65,6 +65,7 @@ def test_only_the_cold_started_stage_asks_for_the_cold_profile(curriculum) -> No
     par_profil: Dict[str, list] = {}
     for name in stage_order(curriculum):
         profil = required_training_config(curriculum, require_stage(curriculum, name))
+        assert profil is not None, f"étape {name!r} sans profil d'entraînement requis"
         par_profil.setdefault(profil, []).append(name)
 
     assert par_profil["x1_long"] == ["P0"]
