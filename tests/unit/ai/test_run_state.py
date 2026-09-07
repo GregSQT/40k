@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -142,7 +143,12 @@ def test_train_model_seeds_its_tracker_with_the_resume_offset(monkeypatch) -> No
         pass
 
     class _FakeModel:
+        # `train_model` lit le dossier du run sur le LOGGER, et non plus sur `tensorboard_log` :
+        # cet attribut valait le dossier de run en creation et la racine en reprise, si bien que
+        # le tracker changeait d'emplacement selon le drapeau (cf.
+        # tests/unit/ai/test_tensorboard_single_run_dir.py).
         tensorboard_log = "./tensorboard/"
+        logger = SimpleNamespace(get_dir=lambda: "./tensorboard/x1_TestAgent/run_0/TestAgent")
 
     monkeypatch.setattr(metrics_tracker_module, "W40KMetricsTracker", _SpyTracker)
     monkeypatch.setattr(metrics_tracker_module, "resolve_perf_windows", lambda cfg: (100, 10))

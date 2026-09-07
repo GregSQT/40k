@@ -759,12 +759,8 @@ class MetricsCollectionCallback(BaseCallback):
         self.immediate_reward_ratio_history = []
         self.max_reward_ratio_history = 50  # Keep last 50 episodes
         self.win_rate_window: deque = deque(maxlen=100)
-        self.seat_aware_counts: Dict[str, Any] = {
-            'episodes_agent_p1': 0,
-            'episodes_agent_p2': 0,
-            'wins_agent_p1': 0.0,
-            'wins_agent_p2': 0.0,
-        }
+        # `seat_aware_counts` a ete retire avec les cinq courbes `seat_aware/*` qu'il alimentait :
+        # le tracker de metriques tient ses propres compteurs de siege et publie les memes tags.
         self.win_method_counts: Dict[str, int] = {
             'objectives': 0,
             'value_tiebreaker': 0,
@@ -854,13 +850,13 @@ class MetricsCollectionCallback(BaseCallback):
                 # `training_diagnostic/*` etaient decalees d'un dump sur l'axe des pas.
                 _tracker.step_count = cast(Any, _model).num_timesteps
                 _tracker.log_training_metrics(model_stats)
-                # diag/ keys logged by train() are not routed via log_training_metrics
-                # (which only processes train/ prefix) and _original_dump may have no TF writer.
-                # Write them explicitly to the MetricsTracker's TF writer.
-                if hasattr(_tracker, 'writer') and _tracker.writer is not None:
-                    for key, value in model_stats.items():
-                        if key.startswith("diag/") and isinstance(value, (int, float)):
-                            _tracker.writer.add_scalar(key, value, _tracker.step_count)
+                # La recopie des cles `diag/` vers le writer du tracker a ete retiree ici. Elle
+                # se justifiait par « _original_dump may have no TF writer » : le logger du
+                # modele pouvait ne rien ecrire, et les onze `diag/*` de `patched_ppo` seraient
+                # partis nulle part. `attach_run_logger` (ai/train.py) pose desormais un logger
+                # TensorBoard dans les DEUX branches, sur le dossier du run — celui-la meme ou
+                # ecrit le tracker. `_original_dump` juste en dessous les publie donc, une fois,
+                # a la meme abscisse de pas ; les recopier ici en ferait un second point.
             _original_dump(step)
 
         self._dump_logger = self.model.logger
@@ -1250,18 +1246,19 @@ class MetricsCollectionCallback(BaseCallback):
         self.metrics_tracker.log_tactical_metrics(self.episode_tactical_data)
         self.metrics_tracker.log_abilities_metrics(self.episode_tactical_data)
 
-        # CRITICAL FIX: Write game_critical metrics directly to model.logger
-        # This ensures metrics appear in same TensorBoard directory as train/ metrics
+        # Ce que ce bloc n'ecrit PLUS : `game_critical/episode_reward`, `episode_length`,
+        # `units_killed_vs_lost_ratio`, `invalid_action_rate` et les cinq `seat_aware/*`. Le
+        # tracker de metriques publie ces neuf courbes, sur l'axe des EPISODES et avec ses
+        # fenetres. La recopie datait du temps ou les deux ecrivains visaient deux dossiers
+        # distincts — son commentaire le disait : « ensures metrics appear in same TensorBoard
+        # directory as train/ metrics ». C'etait la scission des dossiers qu'il fallait corriger,
+        # pas la contourner en dupliquant : depuis que les deux ecrivains partagent le dossier du
+        # run, ces neuf tags recevraient deux points par episode, sur deux abscisses differentes.
+        # Restent ici les seuls tags que le tracker ne publie pas.
         if hasattr(self.model, 'logger') and self.model.logger:
-            total_reward = episode_data['total_reward']
-            episode_length = episode_data['episode_length']
             winner = episode_data['winner']
             win_method = episode_data['win_method']
-            
-            # Game critical metrics
-            self.model.logger.record('game_critical/episode_reward', total_reward)
-            self.model.logger.record('game_critical/episode_length', episode_length)
-            
+
             if winner is not None:
                 controlled_player = int(require_key(episode_data, 'controlled_player'))
                 agent_won = 1.0 if winner == controlled_player else 0.0
@@ -1274,51 +1271,11 @@ class MetricsCollectionCallback(BaseCallback):
                         info["self_play_snapshot_label"], agent_won
                     )
 
-                # SEAT-AWARE metrics for TensorBoard (global + per controlled side)
-                if controlled_player == 1:
-                    self.seat_aware_counts['episodes_agent_p1'] += 1
-                    self.seat_aware_counts['wins_agent_p1'] += agent_won
-                elif controlled_player == 2:
-                    self.seat_aware_counts['episodes_agent_p2'] += 1
-                    self.seat_aware_counts['wins_agent_p2'] += agent_won
-                else:
+                # Controle conserve alors que la ventilation par siege est partie avec les
+                # compteurs : un `controlled_player` hors {1, 2} est un etat corrompu, et c'est
+                # ici qu'il etait attrape. Le tracker tient desormais seul les compteurs de siege.
+                if controlled_player not in (1, 2):
                     raise ValueError(f"controlled_player must be 1 or 2 (got {controlled_player})")
-
-                total_seat_episodes = (
-                    self.seat_aware_counts['episodes_agent_p1'] + self.seat_aware_counts['episodes_agent_p2']
-                )
-                total_seat_wins = (
-                    self.seat_aware_counts['wins_agent_p1'] + self.seat_aware_counts['wins_agent_p2']
-                )
-                if total_seat_episodes > 0:
-                    self.model.logger.record(
-                        'seat_aware/winrate_global',
-                        float(total_seat_wins / total_seat_episodes)
-                    )
-                if self.seat_aware_counts['episodes_agent_p1'] > 0:
-                    self.model.logger.record(
-                        'seat_aware/winrate_agent_p1',
-                        float(
-                            self.seat_aware_counts['wins_agent_p1']
-                            / self.seat_aware_counts['episodes_agent_p1']
-                        )
-                    )
-                if self.seat_aware_counts['episodes_agent_p2'] > 0:
-                    self.model.logger.record(
-                        'seat_aware/winrate_agent_p2',
-                        float(
-                            self.seat_aware_counts['wins_agent_p2']
-                            / self.seat_aware_counts['episodes_agent_p2']
-                        )
-                    )
-                self.model.logger.record(
-                    'seat_aware/episodes_agent_p1',
-                    float(self.seat_aware_counts['episodes_agent_p1'])
-                )
-                self.model.logger.record(
-                    'seat_aware/episodes_agent_p2',
-                    float(self.seat_aware_counts['episodes_agent_p2'])
-                )
 
                 # Win-method diagnostics: helps identify objective/tiebreaker seat bias.
                 if win_method not in self.win_method_counts:
@@ -1349,19 +1306,6 @@ class MetricsCollectionCallback(BaseCallback):
                 if len(self.win_rate_window) == self.win_rate_window.maxlen:
                     rolling_win_rate = np.mean(self.win_rate_window)
                     self.model.logger.record('game_critical/win_rate_100ep', rolling_win_rate)
-            
-            # Tactical metrics (after update from info['tactical_data'], engine guarantees these keys)
-            units_killed = self.episode_tactical_data['units_killed']
-            units_lost = self.episode_tactical_data['units_lost']
-            if units_lost > 0:
-                kill_loss_ratio = units_killed / units_lost
-                self.model.logger.record('game_critical/units_killed_vs_lost_ratio', kill_loss_ratio)
-
-            # Invalid action rate
-            total_actions = self.episode_tactical_data['total_actions']
-            if total_actions > 0:
-                invalid_rate = self.episode_tactical_data['invalid_actions'] / total_actions
-                self.model.logger.record('game_critical/invalid_action_rate', invalid_rate)
 
             # Dump metrics to TensorBoard
             self.model.logger.dump(step=self.model.num_timesteps)
@@ -1991,18 +1935,11 @@ class BotEvaluationCallback(BaseCallback):
                             f"03_eval/{slug}/{display_name}",
                             float(require_key(stats, "win_rate"))
                         )
-            scenario_split_scores = results.get("scenario_split_scores")
-            if scenario_split_scores is not None:
-                if not isinstance(scenario_split_scores, dict):
-                    raise TypeError(
-                        f"scenario_split_scores must be dict "
-                        f"(got {type(scenario_split_scores).__name__})"
-                    )
-                for metric_key, score in scenario_split_scores.items():
-                    self.model.logger.record(
-                        f"bot_split/{metric_key}",
-                        float(score)
-                    )
+            # `bot_split/*` n'est plus ecrit ici : `train.py` le publie deja via
+            # `metrics_tracker.log_scenario_split_scores`, depuis le MEME
+            # `results["scenario_split_scores"]`. Les deux ecrivains visant desormais le dossier
+            # du run, chaque cle y aurait recu deux points par evaluation, l'un sur l'axe des
+            # episodes et l'autre sur celui des pas.
             self.model.logger.dump(step=self.model.num_timesteps)
 
     @staticmethod
@@ -2205,6 +2142,24 @@ class BotEvaluationCallback(BaseCallback):
                 "bot_eval/training_combined",
                 training_probe_combined,
                 int(eval_marker),
+            )
+
+        # `bot_split/*` de l'evaluation INTERMEDIAIRE. Ces points partaient au logger de SB3,
+        # donc dans l'autre dossier d'evenements et sur l'axe des pas, tandis que `ai/train.py`
+        # publiait les memes tags pour l'eval FINALE via le tracker, sur l'axe des episodes :
+        # une seule courbe, deux ecrivains, deux abscisses, et deux entrees TensorBoard pour la
+        # lire. Les deux moities couvrent des evaluations DISJOINTES — le bloc final de
+        # `train_with_scenario_rotation` ne passe pas par `_apply_eval_results` — donc router
+        # celle-ci vers le tracker les reunit en une serie continue au lieu d'en perdre une.
+        scenario_split_scores = results.get("scenario_split_scores")
+        if scenario_split_scores is not None and self.metrics_tracker is not None:
+            if not isinstance(scenario_split_scores, dict):
+                raise TypeError(
+                    f"scenario_split_scores must be dict "
+                    f"(got {type(scenario_split_scores).__name__})"
+                )
+            self.metrics_tracker.log_scenario_split_scores(
+                scenario_split_scores, step=int(eval_marker)
             )
 
         self._log_scenario_scores(results)
