@@ -366,26 +366,6 @@ def _can_unit_shoot_after_advance_with_weapon(unit: Dict[str, Any], weapon: Dict
     return _unit_has_rule(unit, "shoot_after_advance")
 
 
-
-
-def _get_combi_weapon_key(weapon: Dict[str, Any]) -> Optional[str]:
-    """Return COMBI_WEAPON key if present."""
-    if not weapon:
-        return None
-    return weapon.get("COMBI_WEAPON")
-
-
-def _is_combi_profile_blocked(unit: Dict[str, Any], weapon: Dict[str, Any], weapon_index: int) -> bool:
-    """Check if weapon is blocked by an existing COMBI_WEAPON choice."""
-    combi_key = _get_combi_weapon_key(weapon)
-    if not combi_key:
-        return False
-    if "_combi_weapon_choice" not in unit or unit["_combi_weapon_choice"] is None:
-        return False
-    combi_choice = unit["_combi_weapon_choice"]
-    return combi_key in combi_choice and combi_choice[combi_key] != weapon_index
-
-
 def _socle_from_entry(entry: Dict[str, Any]):
     """Construit un ``Socle`` (hex_utils) depuis une entrée units_cache.
 
@@ -603,19 +583,6 @@ def weapon_availability_check(
                 can_use = False
                 reason = "Weapon already used (weapon.shot = 1)"
 
-        # Check COMBI_WEAPON profile lock
-        if can_use and _is_combi_profile_blocked(unit, weapon, idx):
-            can_use = False
-            reason = "COMBI_WEAPON profile already selected"
-            from engine.game_utils import add_debug_log
-            combi_key = _get_combi_weapon_key(weapon)
-            combi_choice = require_key(unit, "_combi_weapon_choice")
-            add_debug_log(
-                game_state,
-                f"[COMBI_WEAPON] Unit {unit.get('id')} blocked weapon {idx} ({weapon_name}) "
-                f"combi_key={combi_key} chosen_index={combi_choice[combi_key]}"
-            )
-        
         # [CLOSE-QUARTERS] 24.07 (SIDEARMS) : « for each model in that unit (EXCLUDING
         # MONSTER/VEHICLE models), you can only select one of the following » — la restriction de
         # melange ne s applique donc PAS a une figurine MONSTER/VEHICLE. Sans cette exclusion, le
@@ -745,9 +712,19 @@ def weapon_availability_check(
 # CE N'ETAIT PAS UNE FONCTIONNALITE JAMAIS BRANCHEE : aucune de ses regles ne lui etait propre.
 # Ses cinq filtres (arme deja tiree `shot == 1`, ASSAULT apres advance, categorie
 # [CLOSE-QUARTERS], portee nulle, portee + LoS) sont TOUS couverts par
-# `weapon_availability_check` (ci-dessus), qui est un sur-ensemble strict : elle y ajoute le
-# verrou de profil COMBI_WEAPON, les deux volets de 10.06 (MONSTER/VEHICLE), la regle [BLAST]
-# sur unite engagee, le blocage par tir ami et le cache de precalcul ennemi.
+# `weapon_availability_check` (ci-dessus), qui est un sur-ensemble strict : elle y ajoute les
+# deux volets de 10.06 (MONSTER/VEHICLE), la regle [BLAST] sur unite engagee, le blocage par
+# tir ami et le cache de precalcul ennemi.
+#
+# 2026-09-07 — le « verrou de profil COMBI_WEAPON » qui figurait dans cette liste a ete
+# SUPPRIME de `weapon_availability_check` : `unit["_combi_weapon_choice"]` n'avait qu'une
+# ecriture (`= {}` a l'activation) et n'etait peuple nulle part, donc `_is_combi_profile_blocked`
+# rendait toujours False et la branche etait morte. Le verrou vivant est `_weapon_group_key` /
+# `_pick_one_profile_per_weapon_group` (shared_utils), applique a la DECLARATION (gym
+# `squad_declare_shoot`, manuel `declare_attack_weapon_qty` / `models_status_for_target` /
+# `toggle_attack_model_weapon`) et au bon grain : la FIGURINE (04.01 Multiple Weapon Profiles).
+# Ne pas repeupler `_combi_weapon_choice` : ce serait un second verrou au grain ESCOUADE,
+# contraire a la regle et doublon de celui qui fonctionne.
 #
 # La rebrancher aurait ete une REGRESSION de regles, pas un gain : son melange
 # [CLOSE-QUARTERS] ignorait l'exclusion MONSTER/VEHICLE de 24.07 (SIDEARMS) ; elle testait
@@ -2409,8 +2386,6 @@ def shooting_unit_activation_start(game_state: Dict[str, Any], unit_id: str) -> 
     rng_weapons = require_key(unit, "RNG_WEAPONS")
     for weapon in rng_weapons:
         weapon["shot"] = 0
-    # Reset COMBI_WEAPON choice for this activation
-    unit["_combi_weapon_choice"] = {}
     if game_state.get("debug_mode", False):
         from engine.game_utils import add_debug_file_log
         episode = game_state.get("episode_number", "?")
