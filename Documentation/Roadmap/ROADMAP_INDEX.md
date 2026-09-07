@@ -101,6 +101,10 @@ plus reproductible à l'identique, et les scores de `curriculum.log` antérieurs
 **Six défauts de cette livraison fermés le 2026-09-07**, dont un qui rendait la chaîne P3→P10
 impossible à démarrer : le LR scalaire du régime était sauvegardé dans le zip promu sous forme
 d'objet sérialisé, et l'étape suivante levait au contrôle de continuité.
+**Cadence des sondes dédoublée** dans la foulée : le champion à chaque sonde, les autres membres
+un tour sur `full_pool_probe_every` (3). Sonder tout le pool à chaque fois coûtait 117 000
+épisodes d'évaluation bloquants à P10 pour 300 000 entraînés — il en reste ~48 600. Le verdict
+lit toujours le pool entier, avec la dernière moyenne connue des membres non sondés.
 Détail : [training.md#regime-lignee-2026-09-07](training.md#regime-lignee-2026-09-07).
 
 ---

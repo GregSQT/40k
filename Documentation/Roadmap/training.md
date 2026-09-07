@@ -95,6 +95,20 @@ le garde « déjà promue » ne voyait rien non plus, et la clôture remesurait 
 d'autres poids que ceux jugés, qui pouvaient franchir le gate. `_run_info_from_disk` relit
 désormais le verdict dans `curriculum.log`, filtré sur `written_by == ai/train.py`.
 
+**Cadence des sondes dédoublée** (décision du 2026-09-07, option B). Sonder le pool entier à
+chaque sonde faisait suivre le coût à la **taille** du pool, qui croît d'une étape à l'autre : à
+P10 (13 membres, 300 000 épisodes, cadence 10 000, 300 épisodes par membre) cela fait **117 000
+épisodes d'évaluation bloquants** sur le fil d'entraînement pour 300 000 entraînés, là où la sonde
+champion seul d'avant en coûtait 9 000. Le champion est désormais mesuré à **chaque** sonde, les
+autres membres **un tour sur `full_pool_probe_every`** (3 dans la config livrée) : il reste
+~48 600 épisodes, soit **-58 %**. Les deux verdicts n'ont pas le même besoin de fraîcheur — la
+destruction ne lit que le champion et doit couper vite, la promotion lit tout le pool mais ne
+s'ouvre qu'à 50 000 épisodes d'étape. **Ce qui n'est pas dégradé** : le verdict lit toujours le
+pool entier, les membres non sondés au tour courant gardant leur dernière moyenne connue, au plus
+trois sondes en arrière. Les **deux premiers tours restent pleins** quelle que soit la valeur :
+aucun verdict n'est rendu tant qu'un membre n'a pas deux points, et sans eux la destruction
+attendrait 40 000 épisodes au lieu des 20 000 que son seuil demande.
+
 **Trois fermetures plus petites.** La clôture dérivait le champion par un `next(...)` local là où
 `stage_champion_label` **refuse** un pool à plusieurs champions, que `validate_curriculum` accepte
 — elle prenait le premier venu en silence. Le plombage `timesteps_origin` était mort depuis la
