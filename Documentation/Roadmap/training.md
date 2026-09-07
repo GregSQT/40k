@@ -2,6 +2,57 @@
 
 ---
 
+## 🔴 Régime de lignée — option A livrée, P2 à relancer depuis P1 {#regime-lignee-2026-09-07}
+
+**Livré le 2026-09-07. Ce qui reste à faire : lancer P2.** Trois runs P2 successifs ont échoué en
+faisant varier des hyperparamètres étape par étape ; l'option A supprime cette possibilité au lieu
+de chercher les bonnes valeurs pour chaque étape.
+
+**1. Un bloc `lineage_regime` en tête de `curriculum.json`, sept clés, appliqué à TOUTE étape
+`init: "from:"`** — les dix learners comme les trois exploiteurs. `learning_rate` 0.001 et
+`ent_coef` 0.03 **scalaires**, `n_steps` 32640, `batch_size` 4080, `vf_coef` 0.15,
+`max_grad_norm` 0.5, `agent_seat_p2_ratio` 0.6. Les vingt rampes `decay_fraction` des étapes
+disparaissent, ainsi que les surcharges de `vf_coef` / `max_grad_norm` de P2 et P3 ; une étape
+reprise ne déclare plus que `total_episodes`, et le validateur refuse le reste. Le profil
+`x1_long` garde ses rampes et son `vf_coef` 0.5 pour le seul départ à froid P0. Détail chiffré et
+mesures : `Documentation/Reference/training/entrainement.md`, section « Rampes ».
+
+**2. `P00` supprimée, `P0` passe en `init: "new"`, E1/E2/E3 passent en `init: "from:P0"`.** La
+graine n'existait que pour éviter de repayer un warmup à chaque learner, ce que le chaînage a rendu
+sans objet. Les exploiteurs ne partent plus des poids de leur cible : ils en étaient une copie à
+qui l'on demandait de trouver sa propre faiblesse, donc ils commençaient à la parité par
+construction et ne pouvaient s'en écarter qu'en désapprenant.
+
+**3. Contrôle de continuité à l'ouverture.** `_pin_entropy_ramp_for_warm_start` est supprimé avec
+les rampes qu'il corrigeait ; à sa place, `announce_lineage_continuity` lit `ent_coef` et
+`learning_rate` dans le zip repris et annonce tout écart avec le bloc. Il n'en corrige aucun.
+
+**4. Verrou de parité, qui ARRÊTE le run.** À l'épisode 0 d'une étape reprise, le modèle **est**
+l'archive dont il reprend les poids : son score contre elle vaut 0.50 par identité. La baseline de
+`PoolEarlyStoppingCallback` la mesure ; hors de `[0.40, 0.60]`, le run est refusé **avant le
+premier épisode**. Les 2026-09-04 et 2026-09-05 ont chacun produit des heures d'entraînement sur
+une baseline aberrante (0,477 puis 0,118) lue comme une mesure.
+
+**5. Toutes les décisions passent sur la moyenne des 3 dernières sondes** (`pool_eval/vs_<tag>_3ep`,
+déjà publiée). Promotion et arrêt si ≥ 0.55 contre le champion **et** ≥ 0.50 contre chaque autre
+membre après 50 000 épisodes d'étape ; arrêt pour destruction si < 0.40 contre le champion après
+20 000. Le gate de fin applique les mêmes seuils sur une moyenne de 3 blocs d'évaluation. Le pool
+**entier** est sondé, plus seulement le champion : une étape pouvait être promue en battant son
+prédécesseur immédiat tout en ayant régressé contre tout le reste.
+
+⚠️ **`base_seed` de `evaluate_against_checkpoints` est désormais TIRÉ AU HASARD.** Il valait 42 en
+dur, donc deux évaluations d'un même modèle rejouaient les mêmes parties et rendaient le même score
+au bit près (vérifié le 2026-09-07 : 16/24/0 aux deux appels) — moyenner trois blocs identiques
+n'est pas une moyenne. Conséquence à assumer : **un gate n'est plus reproductible à l'identique**,
+et les scores de `curriculum.log` antérieurs au 2026-09-07 portent un échantillon unique et figé.
+
+**À mesurer au prochain run** : `00_critical/g_grad_share_policy_mb0` doit monter de 0,235 vers
+~0,62 dès les premières updates — effet arithmétique de `vf_coef`, pas un effet d'apprentissage.
+Si elle ne bouge pas, le régime n'a pas pris et il est inutile d'attendre. `n_steps` × 4 quadruple
+la mémoire du rollout buffer : **coût horloge et mémoire non chronométrés** à ce volume.
+
+---
+
 ## 🔴 Régime d'entraînement révisé — P2 à relancer depuis P1 {#regime-2026-09-06}
 
 Deux changements livrés le 2026-09-06, plus un réglage d'évaluation du 2026-09-04 resté non déclaré

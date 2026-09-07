@@ -2205,6 +2205,7 @@ def evaluate_against_checkpoints(
     device: str = "cpu",
     n_workers_override: Optional[int] = None,
     pool: Optional[Any] = None,
+    base_seed: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Win-rate du modèle courant contre chaque archive checkpoint figée.
 
@@ -2224,6 +2225,13 @@ def evaluate_against_checkpoints(
     sur 16. Les épisodes d'un scénario sont donc répartis en tranches via `ep_offset`.
     `_episode_seed` étant une fonction pure de `(base_seed, bot_name, scenario_index, ep_idx)`,
     toute partition rend exactement les mêmes graines que la boucle séquentielle.
+
+    `base_seed` : None (défaut) tire la graine AU HASARD, une fois pour tout l'appel — donc le
+    découpage en tranches reste exact, seule change la famille de parties jouées d'un appel à
+    l'autre. C'est ce qui rend une moyenne de plusieurs évaluations plus précise qu'une seule,
+    et c'est sur des moyennes que le curriculum décide depuis le 2026-09-07. Passer un entier
+    rejoue une mesure à l'identique ; le faire pour un gate ou une sonde reviendrait à mesurer
+    trois fois le même échantillon.
 
     MURS DE RÉFÉRENCE : volontairement NON matérialisés ici, contrairement au constructeur de
     tâches des bots (`_materialize_eval_scenario_refs`, indexé par
@@ -2339,7 +2347,23 @@ def evaluate_against_checkpoints(
     base_eps = n_episodes // n_scenarios
     extra_eps = n_episodes % n_scenarios
     max_steps_per_episode = int(get_max_turns()) * 400
-    base_seed = 42
+    # GRAINE TIREE AU HASARD par defaut (2026-09-07), la ou elle valait 42 en dur. `_episode_seed`
+    # etant une fonction pure de (base_seed, bot_name, scenario_index, ep_idx), une graine figee
+    # faisait rejouer les MEMES parties a toutes les evaluations : deux appels sur un modele fige
+    # rendaient le meme score au bit pres (verifie le 2026-09-07, 16/24/0 aux deux appels), donc
+    # moyenner trois evaluations moyennait trois fois le meme echantillon et ne reduisait aucune
+    # erreur. Les decisions du curriculum — verdicts d'early-stop et gate de fin d'etape — se
+    # prennent desormais sur des MOYENNES, ce qui exige que les blocs echantillonnent des parties
+    # differentes. Le prix est qu'une evaluation n'est plus reproductible a l'identique ; c'est le
+    # bon prix, un score stable qui ne mesure que les memes 300 parties n'est pas plus fiable.
+    # Un appelant qui a besoin de rejouer une mesure passe `base_seed` explicitement.
+    if base_seed is None:
+        base_seed = int.from_bytes(os.urandom(4), "big") % (2**31)
+        logging.info("CHECKPOINT_EVAL base_seed tire au hasard : %d", base_seed)
+    elif isinstance(base_seed, bool) or not isinstance(base_seed, int) or base_seed < 0:
+        raise ValueError(
+            f"base_seed doit etre un entier >= 0 ou None (tirage au hasard), got {base_seed!r}"
+        )
 
     # Nombre de tranches par scénario : de quoi saturer les workers sans descendre sous un
     # amortissement raisonnable du coût fixe par tâche (construction de W40KEngine + reset

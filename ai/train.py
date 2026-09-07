@@ -1706,6 +1706,8 @@ from ai.curriculum import (
     is_exploiter_stage,
     load_curriculum,
     load_exploiter_config,
+    load_lineage_regime,
+    load_parity_check,
     pool_monotonicity_diagnostic,
     promote_stage_model,
     require_stage,
@@ -3964,8 +3966,19 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
             (cb for cb in training_callbacks if isinstance(cb, ExploiterProbeCallback)),
             None
         )
+        pool_early_stop_callback = next(
+            (cb for cb in training_callbacks if isinstance(cb, PoolEarlyStoppingCallback)),
+            None
+        )
         if bot_eval_callback is not None or exploiter_probe_callback is not None:
             run_info["episodes_trained"] = int(episodes_trained)
+        if pool_early_stop_callback is not None:
+            # None quand le run est allé au bout de son budget : `_close_curriculum_stage`
+            # journalise la distinction entre « l'étape a fini » et « l'étape s'est arrêtée ».
+            run_info.update({
+                "pool_stop_verdict": pool_early_stop_callback.stop_verdict,
+                "pool_stop_reason": pool_early_stop_callback.stop_reason,
+            })
         if bot_eval_callback is not None:
             run_info.update({
                 "last_bot_eval": bot_eval_callback.last_eval_results,
@@ -4880,107 +4893,127 @@ def _pin_deployment_ramp_for_warm_start(cfg: Dict[str, Any]) -> None:
     schedule["active_ratio_start"] = end
 
 
-def read_model_ent_coef(model_zip_path: str) -> float:
-    """Coefficient d'entropie que porte un modele SB3 sur disque.
+def _read_model_scalar(model_zip_path: str, key: str) -> float:
+    """Hyperparametre scalaire que porte un modele SB3 sur disque, lu dans le `data` du zip.
 
-    Lu dans le `data` du zip plutot qu'en chargeant le modele : la valeur est necessaire AVANT
-    toute construction d'environnement, pour poser la rampe, et un `MaskablePPO.load` couterait
-    ici plusieurs secondes et exigerait un espace d'observation deja resolu.
+    Lu la plutot qu'en chargeant le modele : la valeur est necessaire AVANT toute construction
+    d'environnement, et un `MaskablePPO.load` couterait ici plusieurs secondes et exigerait un
+    espace d'observation deja resolu.
 
-    `ent_coef` est un flottant dans un PPO SB3 — c'est `EntropyScheduleCallback` qui le reecrit
-    au fil du run, pas un schedule serialise. Une valeur absente ou non numerique est une
-    surprise sur laquelle il faut lever : la rampe partirait sinon d'un chiffre invente.
+    `ent_coef` et `learning_rate` sont des flottants dans un PPO SB3 — ce sont
+    `EntropyScheduleCallback` et `LearningRateScheduleCallback` qui les reecrivent au fil du run,
+    pas des schedules serialises. Une valeur absente ou non numerique est une surprise sur
+    laquelle il faut lever : le controle de continuite comparerait sinon un chiffre invente.
     """
     with zipfile.ZipFile(model_zip_path) as archive:
         data = json.loads(archive.read("data"))
-    if "ent_coef" not in data:
+    if key not in data:
         raise KeyError(
-            f"Modele repris sans `ent_coef` : {model_zip_path}. La rampe d'entropie d'une etape "
-            "reprise a chaud part de la valeur du modele, elle ne peut pas la deviner."
+            f"Modele repris sans `{key}` : {model_zip_path}. Le controle de continuite de "
+            "l'etape compare ce que le modele porte au regime de lignee ; il ne le devine pas."
         )
-    ent_coef = data["ent_coef"]
-    if not isinstance(ent_coef, (int, float)) or isinstance(ent_coef, bool):
+    value = data[key]
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
         raise TypeError(
-            f"`ent_coef` du modele repris n'est pas un nombre ({ent_coef!r}, {model_zip_path})."
+            f"`{key}` du modele repris n'est pas un nombre ({value!r}, {model_zip_path})."
         )
     # `isfinite` et pas seulement le type : un run dont l'optimiseur a diverge sauve un NaN, qui
-    # est un flottant en regle. Toute comparaison avec NaN etant fausse, il traverserait le
-    # controle de plancher plus bas, puis empoisonnerait la perte a chaque pas du run suivant.
-    if not math.isfinite(float(ent_coef)):
+    # est un flottant en regle. Toute comparaison avec NaN etant fausse, il traverserait tout
+    # controle d'ecart en silence.
+    if not math.isfinite(float(value)):
         raise ValueError(
-            f"`ent_coef` du modele repris vaut {ent_coef!r} ({model_zip_path}) : ni fini ni "
-            "utilisable comme depart de rampe. Le run qui l'a produit a diverge."
+            f"`{key}` du modele repris vaut {value!r} ({model_zip_path}) : ni fini ni comparable. "
+            "Le run qui l'a produit a diverge."
         )
-    return float(ent_coef)
+    return float(value)
 
 
-def _pin_entropy_ramp_for_warm_start(cfg: Dict[str, Any], model_ent_coef: float) -> None:
-    """Fait partir la rampe d'entropie du niveau ATTEINT par le modele repris.
+def read_model_ent_coef(model_zip_path: str) -> float:
+    """Coefficient d'entropie que porte un modele SB3 sur disque."""
+    return _read_model_scalar(model_zip_path, "ent_coef")
 
-    Jumeau exact de `_pin_deployment_ramp_for_warm_start`, meme defaut de fond : une etape qui
-    reprend des poids herite d'un modele ayant deja parcouru une rampe, et la redeclarer depuis
-    son `start` de config efface ce que le run precedent a converge.
 
-    MESURE qui l'impose, etape P2 du 2026-09-04 : P1 s'est arretee a un `ent_coef` d'environ
-    0,018 et P2 est repartie a 0,100, soit un facteur cinq. L'evaluation bots est tombee de 0,911
-    a 0,778 pendant les seuls 10 000 episodes de warmup — joues SANS pool, donc contre les memes
-    bots que P1 — puis a 0,694 ; le score contre P1, ou l'agent devait etre a 0,50 puisqu'il part
-    de ses propres poids, est tombe a 0,118. La politique promue avait ete detruite avant meme de
-    rencontrer son adversaire.
+def read_model_learning_rate(model_zip_path: str) -> float:
+    """Learning rate que porte un modele SB3 sur disque. Jumeau de `read_model_ent_coef`."""
+    return _read_model_scalar(model_zip_path, "learning_rate")
 
-    CONTINUITE STRICTE, et non un regain d'exploration au changement d'adversaire : la rampe du
-    pool (`warmup_episodes` puis interpolation) sert deja cette adaptation, progressivement. Un
-    regain, lui, ne peut que detruire — c'est ce qui vient d'etre mesure. Si un curriculum en veut
-    un un jour, il devra l'exprimer comme un multiplicateur borne de la valeur atteinte, jamais
-    comme une valeur absolue redeclaree.
 
-    NE VAUT QUE POUR LES LEARNERS. Un exploiteur reprend les poids du champion pour CHERCHER sa
-    faiblesse : le devier est sa raison d'etre, pas un accident, et le figer au plancher
-    d'entropie du champion lui retirerait le budget d'exploration qui le definit. Il n'a d'ailleurs
-    aucune echappatoire — `validate_exploiter_protocol` lui interdit tout
-    `training_config_overrides`, et `init: "new"` contredirait sa definition meme. L'appelant ne
-    lui applique donc pas cette fonction.
+#: Cles du regime de lignee dont l'ecart avec le modele repris est ANNONCE a l'ouverture d'une
+#: etape `init: from:`. Les deux que SB3 serialise dans le `data` du zip, et les deux que les
+#: rampes supprimees le 2026-09-07 faisaient varier en silence d'une etape a l'autre.
+_LINEAGE_CONTINUITY_KEYS = ("ent_coef", "learning_rate")
 
-    Le `start` du JSON n'est pas efface : il reste la valeur d'un demarrage a froid (`init:
-    "new"`), qui n'a aucun modele d'ou partir. Il devient seulement sans effet sur les etapes
-    reprises, comme `active_ratio_start` l'est deja pour le deploiement.
+
+def announce_lineage_continuity(
+    model_zip_path: str, lineage_model_params: Dict[str, Any], stage_label: str, log=print
+) -> Dict[str, Tuple[float, float]]:
+    """Compare le modele repris au regime de lignee et ANNONCE chaque ecart. Rend les ecarts.
+
+    REMPLACE `_pin_entropy_ramp_for_warm_start`, supprime le 2026-09-07 avec les rampes qu'il
+    corrigeait. Ce garde-fou faisait partir la rampe d'entropie de la valeur ATTEINTE par le
+    modele repris ; il n'a plus d'objet une fois que la lignee porte un `ent_coef` SCALAIRE, le
+    meme a toutes les etapes — il n'y a plus de rampe a poser, donc plus de depart a choisir.
+
+    Ce qui reste utile, en revanche, c'est de DIRE ce qui change. Une etape reprend un modele qui
+    porte encore les valeurs de son propre run : sur la premiere etape jouee sous ce regime, ce
+    seront celles d'une rampe achevee (P1 s'etait arretee vers 0,018 d'entropie pour 0,03 posee
+    ici), et sur les suivantes elles coincideront. Un ecart n'est donc PAS une erreur — c'est le
+    changement de regime lui-meme, et le journal doit le porter pour qu'une courbe qui bouge a
+    l'ouverture d'une etape soit attribuable sans rouvrir un zip.
+
+    Rend `{cle: (valeur_du_modele, valeur_du_regime)}` pour les seules cles qui different.
+    """
+    deviations: Dict[str, Tuple[float, float]] = {}
+    for key in _LINEAGE_CONTINUITY_KEYS:
+        regime_value = float(require_key(lineage_model_params, key))
+        model_value = _read_model_scalar(model_zip_path, key)
+        if not math.isclose(model_value, regime_value, rel_tol=1e-9):
+            deviations[key] = (model_value, regime_value)
+    if not deviations:
+        log(
+            f"🎓 Etape {stage_label} — continuite : le modele repris porte deja "
+            f"{', '.join(f'{k}={float(lineage_model_params[k]):g}' for k in _LINEAGE_CONTINUITY_KEYS)}, "
+            "identique au regime de lignee."
+        )
+        return deviations
+    detail = " ; ".join(
+        f"{key} {model:.6g} -> {regime:.6g}" for key, (model, regime) in sorted(deviations.items())
+    )
+    log(
+        f"🎓 Etape {stage_label} — continuite : le regime de lignee CHANGE ce que porte le modele "
+        f"repris ({detail}). Ce n'est pas une erreur, c'est le regime qui s'impose ; une courbe "
+        "qui bouge a l'ouverture vient de la."
+    )
+    return deviations
+
+
+def apply_lineage_regime(cfg: Dict[str, Any], lineage_regime: Dict[str, Any]) -> None:
+    """Impose le regime de lignee a la config chargee (mutation en place).
+
+    Pose des SCALAIRES par-dessus les rampes du profil, et c'est tout l'objet du bloc : une rampe
+    s'exprime en fraction de la duree du RUN (`setup_callbacks`), donc chaque etape reprise
+    reparcourrait la sienne depuis le depart et rendrait a un modele converge le regime
+    d'exploration d'un demarrage. Mesure du 2026-09-04 : P1 arretee a un `ent_coef` de ~0,018,
+    P2 repartie a 0,100, evaluation bots de 0,911 a 0,694 et score contre P1 — garanti a 0,50 par
+    construction — tombe a 0,118.
+
+    Un `ent_coef` ou un `learning_rate` scalaire ne cree AUCUN callback de rampe
+    (`setup_callbacks` ne construit `EntropyScheduleCallback` / `LearningRateScheduleCallback` que
+    sur un dict) : la valeur reste celle-la pour tout le run, ce qui est exactement l'intention.
+
+    Applique APRES `_apply_stage_hp_overrides` : une etape reprise n'a pas le droit de declarer
+    ces cles (`ai.curriculum._validate_stage_hp_overrides` le refuse), donc il n'y a rien a
+    ecraser — l'ordre garantit seulement qu'un futur assouplissement de ce refus ne ferait pas
+    silencieusement gagner l'etape contre la lignee.
     """
     model_params = require_key(cfg, "model_params")
     if not isinstance(model_params, dict):
         raise TypeError(
-            f"`model_params` doit etre un dict pour figer la rampe d'entropie "
+            f"`model_params` doit etre un dict pour appliquer le regime de lignee "
             f"(got {type(model_params).__name__})."
         )
-    ent_coef = require_key(model_params, "ent_coef")
-    if not isinstance(ent_coef, dict) or "start" not in ent_coef:
-        # Un `ent_coef` SCALAIRE n'est pas une rampe : `_apply_curriculum_model_params` le pose
-        # tel quel sur le modele et `setup_callbacks` ne cree aucun callback, donc la valeur est
-        # figee pour tout le run. Sur une reprise a chaud, c'est exactement le saut d'entropie
-        # que cette fonction existe pour empecher, en pire — il ne redescend jamais. Passer
-        # silencieusement rendrait le garde-fou inoperant sur ce profil sans que rien ne le dise.
-        raise TypeError(
-            f"`ent_coef` vaut {ent_coef!r} : une reprise a chaud exige une RAMPE "
-            "({'start', 'end', 'decay_fraction'}), pas un scalaire, qui figerait l'entropie a "
-            "cette valeur pour tout le run sans jamais redescendre."
-        )
-    end = float(require_key(ent_coef, "end"))
-    # `isclose` et non `<` nu : une rampe achevee rend `start + (end - start) * 1.0`, soit
-    # 0.009999999999999995 pour la rampe 0.1 -> 0.01 du profil. C'est le plancher a l'arrondi
-    # pres, et un test strict refuserait toute etape chainee apres une etape arrivee au bout de
-    # sa rampe — c'est-a-dire toute la chaine a partir de P4.
-    if model_ent_coef < end and not math.isclose(model_ent_coef, end, rel_tol=1e-9):
-        raise ValueError(
-            f"Modele repris a un `ent_coef` de {model_ent_coef!r}, SOUS le plancher {end!r} de la "
-            "rampe de l'etape. Partir du plancher REMONTERAIT l'entropie du modele, partir de sa "
-            "valeur ferait monter la rampe au lieu de la faire descendre : les deux trahissent "
-            "l'intention. Aligner `ent_coef.end` de l'etape sur celui de l'etape source, ou "
-            "declarer l'etape en `init: \"new\"`."
-        )
-    # Un dict NEUF, jamais une ecriture dans celui-ci : `get_stage_hp_overrides` rend le bloc
-    # `training_config_overrides` de l'etape PAR REFERENCE et `_apply_stage_hp_overrides` l'insere
-    # tel quel, si bien qu'ecrire ici modifierait le curriculum en memoire — l'objet que
-    # `_prepare_curriculum_stage` rend a `main()` cesserait de correspondre au fichier.
-    model_params["ent_coef"] = {**ent_coef, "start": max(model_ent_coef, end)}
+    model_params.update(require_key(lineage_regime, "model_params"))
+    cfg["agent_seat_p2_ratio"] = require_key(lineage_regime, "agent_seat_p2_ratio")
 
 
 def parent_total_episodes(training_config: Dict[str, Any]) -> Optional[int]:
@@ -5027,7 +5060,8 @@ def _is_phase_config(cfg: Dict[str, Any]) -> bool:
 def _install_stage_config_overrides(
     config, agent_key: str, opponent_mix: Optional[Dict[str, Any]],
     hp_overrides: Dict[str, Any], warm_start: bool, stage_label: str = "",
-    warm_start_model_path: Optional[str] = None, pin_entropy_ramp: bool = True,
+    warm_start_model_path: Optional[str] = None,
+    lineage_regime: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Ce que l'etape impose a TOUTE lecture ulterieure de la config de cet agent.
 
@@ -5036,11 +5070,17 @@ def _install_stage_config_overrides(
     laisserait les autres sans, en silence. Le decorateur s'installe PAR-DESSUS celui de
     `--param` quand les deux sont demandes : ils ne touchent pas les memes cles.
 
-    Trois effets :
+    Quatre effets :
 
     - `opponent_mix` : le pool de l'etape, quand elle en a un.
-    - `hp_overrides` : surcharges HP declarees dans `training_config_overrides` de l'etape
-      (total_episodes, model_params.*)  — ignorees quand le dict est vide.
+    - `hp_overrides` : surcharges HP declarees dans `training_config_overrides` de l'etape.
+      Sur une etape reprise a chaud, `total_episodes` est la SEULE cle que le curriculum y
+      autorise encore (`ai.curriculum._validate_stage_hp_overrides`) — ignorees quand le dict est
+      vide.
+    - `lineage_regime` : le bloc du curriculum, applique a toute etape reprise a chaud. Il pose
+      des scalaires par-dessus les rampes du profil et emporte `agent_seat_p2_ratio`. Il vaut
+      aussi pour les exploiteurs, auxquels `training_config_overrides` est interdit : le porter
+      en code et non en JSON est ce qui les couvre.
     - `warm_start` : quand l'etape reprend les poids d'une autre, la rampe de deploiement est
       figee a sa valeur terminale (cf. `_pin_deployment_ramp_for_warm_start`). C'est un
       COMPORTEMENT et non un override declarable : `deployment_mode_schedule` est exclu des cles
@@ -5058,35 +5098,23 @@ def _install_stage_config_overrides(
     """
     original_load = config.load_agent_training_config
 
-    # QUI DECLARE DECIDE. Une etape qui ecrit son propre `ent_coef` dans
-    # `training_config_overrides` a exprime une intention sur son regime d'exploration : la
-    # continuite depuis le modele repris ne doit pas la recouvrir. Elle ne sert de defaut que
-    # quand l'etape se TAIT — cas ou la valeur viendrait sinon du profil, dont le `start` de 0.1
-    # a detruit la politique de P2 le 2026-09-04 (evaluation bots de 0,911 a 0,694 en 10 000
-    # episodes de warmup, score contre P1 tombe a 0,118).
+    # LE REGIME DE LIGNEE DECIDE, l'etape n'a plus voix au chapitre sur ces cles (2026-09-07).
+    # Le curriculum refuse desormais `model_params` et `agent_seat_p2_ratio` a toute etape
+    # reprise a chaud, precisement pour qu'il n'y ait qu'une source. Le controle de continuite
+    # ci-dessous ne corrige RIEN : il annonce l'ecart entre ce que le modele repris porte et ce
+    # que le regime lui impose, pour qu'une courbe qui bouge a l'ouverture soit attribuable.
     #
-    # MESURE qui impose de rendre la main a l'etape, run P2 du 2026-09-05 : partie de la valeur
-    # atteinte par P1, soit 0,0177, la sonde du gate est restee PLATE a 0,496 sur six mesures et
-    # 60 000 episodes (chi2 de 2,16 pour 5 degres de liberte, donc indistinguable d'une
-    # constante), pendant que l'evaluation bots retombait de 0,917 a 0,856 — sous les 0,928 du
-    # modele de depart. La montee de la courbe d'entrainement, +6,1 points, suit l'entropie de la
-    # politique a -0,92 de correlation : l'agent durcissait sa politique au lieu d'en trouver une
-    # meilleure. Une etape qui affronte un adversaire de son PROPRE niveau a besoin de plus
-    # d'exploration que la valeur ou la precedente s'est arretee.
-    stage_declares_entropy = isinstance(
-        hp_overrides.get("model_params", {}).get("ent_coef"), dict
-    )
-
     # Lu UNE fois, ici : le decorateur est rappele a chaque lecture de config, et rouvrir le zip
     # a chaque fois paierait la lecture pour rien.
-    warm_start_ent_coef: Optional[float] = None
-    if warm_start and pin_entropy_ramp and not stage_declares_entropy:
+    if warm_start and lineage_regime is not None:
         # PAS de repli sur None quand le chemin manque : une reprise a chaud sans modele source
         # est un etat impossible en production — les deux branches d'`_apply_stage_init` posent
-        # `args.resume_from` — et l'accepter en silence rendrait le garde-fou inoperant sur le
-        # chemin meme qu'il protege.
-        warm_start_ent_coef = read_model_ent_coef(
-            require_present(warm_start_model_path, "warm_start_model_path")
+        # `args.resume_from` — et l'accepter en silence rendrait le controle muet sur le chemin
+        # meme qu'il documente.
+        announce_lineage_continuity(
+            require_present(warm_start_model_path, "warm_start_model_path"),
+            require_key(lineage_regime, "model_params"),
+            stage_label,
         )
 
     # UNE seule annonce par run, posee au premier passage du decorateur : la config est relue des
@@ -5118,29 +5146,20 @@ def _install_stage_config_overrides(
                             "modele repris a deja parcouru la sienne."
                         ))
                 _pin_deployment_ramp_for_warm_start(cfg)
-                # APRES `_apply_stage_hp_overrides` : c'est justement le `start` declare par
-                # l'etape qu'il faut remplacer, pas celui du profil.
-                if warm_start_ent_coef is not None:
-                    declared = float(require_key(
-                        require_key(require_key(cfg, "model_params"), "ent_coef"), "start"
-                    ))
-                    _pin_entropy_ramp_for_warm_start(cfg, warm_start_ent_coef)
-                    posed = float(cfg["model_params"]["ent_coef"]["start"])
-                    if declared != posed:
-                        _announce_once("entropy", (
-                            f"🎓 Etape {stage_label} — reprise a chaud : rampe d'entropie "
-                            f"demarree a {posed:.5f}, le niveau atteint par le modele repris "
-                            f"(au lieu du {declared:.5f} declare). Repartir au-dessus efface ce "
-                            "que le run precedent a converge."
-                        ))
-                elif stage_declares_entropy:
-                    # L'annonce vaut autant que l'autre : sans elle, rien ne distingue au journal
-                    # une etape qui a repris le niveau du modele d'une etape qui l'a refuse.
-                    _announce_once("entropy", (
-                        f"🎓 Etape {stage_label} — reprise a chaud : rampe d'entropie demarree a "
-                        f"{float(cfg['model_params']['ent_coef']['start']):.5f}, la valeur "
-                        "DECLAREE par l'etape. Le niveau atteint par le modele repris n'est pas "
-                        "repris — l'etape a exprime son propre regime d'exploration."
+                # APRES `_apply_stage_hp_overrides` : le regime de lignee est la source unique de
+                # ces cles, et il doit gagner meme si un override d'etape reussissait un jour a
+                # passer la validation du curriculum.
+                if lineage_regime is not None:
+                    apply_lineage_regime(cfg, lineage_regime)
+                    _announce_once("lineage", (
+                        f"🎓 Etape {stage_label} — regime de lignee applique : "
+                        + ", ".join(
+                            f"{key}={value:g}"
+                            for key, value in sorted(lineage_regime["model_params"].items())
+                        )
+                        + f", agent_seat_p2_ratio={float(lineage_regime['agent_seat_p2_ratio']):g}. "
+                        "Aucune rampe learning_rate ni entropie : des scalaires, constants sur "
+                        "tout le run et identiques a toutes les etapes de la lignee."
                     ))
         return cfg
 
@@ -5215,10 +5234,10 @@ def _prepare_curriculum_stage(args, config) -> Tuple[Dict[str, Any], Dict[str, A
     _install_stage_config_overrides(
         config, args.agent, opponent_mix, hp_overrides, warm_start, stage_label=args.etape,
         warm_start_model_path=args.resume_from,
-        # Un exploiteur reprend le champion pour CHERCHER sa faiblesse : le devier est sa raison
-        # d'etre. Le figer au plancher d'entropie du champion lui retirerait le budget
-        # d'exploration qui le definit, et il n'a aucune echappatoire — ni override, ni `new`.
-        pin_entropy_ramp=not is_exploiter_stage(stage),
+        # Le regime de lignee vaut pour TOUTE etape reprise a chaud, exploiteurs compris : ils
+        # jouent contre un champion du meme niveau que les learners et n'ont aucune raison d'un
+        # autre pas d'apprentissage. Un demarrage a froid, lui, garde les rampes du profil.
+        lineage_regime=load_lineage_regime(curriculum) if warm_start else None,
     )
     if hp_overrides:
         print(f"🎓 Etape {args.etape} — HP overrides : {list(hp_overrides)}")
@@ -5241,13 +5260,25 @@ def _score_stage_against_pool(
     stage: Dict[str, Any],
     canonical_model_path: str,
     eval_episodes: int,
+    eval_repeats: int,
     n_workers_gate: Optional[int] = None,
 ) -> Dict[str, float]:
-    """Win-rate du modele du run contre CHAQUE membre du pool, label par label.
+    """Win-rate MOYEN du modele du run contre CHAQUE membre du pool, label par label.
 
     Reutilise `evaluate_against_checkpoints` (R0b) : c'est deja la mesure « modele courant
     contre une archive figee », avec la normalisation propre de l'archive. Un second harnais
     aurait mesure la meme chose autrement.
+
+    MOYENNE DE `eval_repeats` BLOCS, et non une mesure unique (2026-09-07) : chaque appel tire sa
+    graine au hasard, donc les blocs echantillonnent des parties differentes et la moyenne divise
+    l'erreur-type par la racine du nombre de blocs. Sur un bloc de 300 episodes, un taux proche de
+    0.5 a une erreur-type de 2,9 points — l'ecart meme que le gate doit trancher entre 0.50 et
+    0.55. Repeter le meme bloc n'aurait rien apporte tant que `base_seed` valait 42 en dur : les
+    trois mesures etaient identiques au bit pres.
+
+    C'est la MEME grandeur que celle sur laquelle l'early-stop decide en cours de run (la moyenne
+    glissante des sondes, `pool_eval/vs_<tag>_3ep`), pour que les deux verdicts se lisent sur la
+    meme echelle.
 
     `n_workers_gate` est passe comme `n_workers_override` : si present dans callback_params, le
     gate utilise ce compte de workers independamment de `bot_eval_n_workers` (BotEvaluationCallback).
@@ -5261,30 +5292,40 @@ def _score_stage_against_pool(
         (stage_model_path(canonical_model_path, member["label"]), member["label"])
         for member in members
     ]
-    results = evaluate_against_checkpoints(
-        model_path=canonical_model_path,
-        checkpoint_archives=archives,
-        training_config_name=args.training_config,
-        rewards_config_name=args.rewards_config,
-        n_episodes=eval_episodes,
-        controlled_agent=args.rewards_config,
-        scenario_pool="holdout",
-        device="cpu",
-        n_workers_override=n_workers_gate,
-    )
-    scores = {
-        member["label"]: float(results[member["label"]])
-        for member in members
-        if member["label"] in results
-    }
-    missing = [member["label"] for member in members if member["label"] not in scores]
-    if missing:
-        raise RuntimeError(
-            f"Etape {args.etape} : aucun score mesure contre {missing}. "
-            "evaluate_against_checkpoints a ecarte ces archives (architecture incompatible ?) — "
-            "le gate et le journal seraient incomplets."
+    blocks: List[Dict[str, float]] = []
+    for repeat in range(eval_repeats):
+        results = evaluate_against_checkpoints(
+            model_path=canonical_model_path,
+            checkpoint_archives=archives,
+            training_config_name=args.training_config,
+            rewards_config_name=args.rewards_config,
+            n_episodes=eval_episodes,
+            controlled_agent=args.rewards_config,
+            scenario_pool="holdout",
+            device="cpu",
+            n_workers_override=n_workers_gate,
         )
-    return scores
+        block = {
+            member["label"]: float(results[member["label"]])
+            for member in members
+            if member["label"] in results
+        }
+        missing = [member["label"] for member in members if member["label"] not in block]
+        if missing:
+            raise RuntimeError(
+                f"Etape {args.etape} : aucun score mesure contre {missing} au bloc {repeat + 1}. "
+                "evaluate_against_checkpoints a ecarte ces archives (architecture incompatible ?) "
+                "— le gate et le journal seraient incomplets."
+            )
+        print(
+            f"  bloc {repeat + 1}/{eval_repeats} ({eval_episodes} episodes) : "
+            + ", ".join(f"{label}={block[label]:.3f}" for label in sorted(block))
+        )
+        blocks.append(block)
+    return {
+        member["label"]: sum(block[member["label"]] for block in blocks) / float(len(blocks))
+        for member in members
+    }
 
 
 def _close_exploiter_stage(args, curriculum, stage, run_info) -> int:
@@ -5401,9 +5442,10 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
     models_root = config.get_models_root()
     canonical_model_path = build_agent_model_path(models_root, args.agent)
     gate_cfg = require_key(curriculum, "gate")
-    floor = float(require_key(gate_cfg, "min_score_vs_champion"))
-    target = float(require_key(gate_cfg, "target_score_vs_champion"))
+    floor_champion = float(require_key(gate_cfg, "min_score_vs_champion"))
+    floor_others = float(require_key(gate_cfg, "min_score_vs_others"))
     eval_episodes = int(require_key(gate_cfg, "eval_episodes"))
+    eval_repeats = int(require_key(gate_cfg, "eval_repeats"))
 
     print("\n" + "=" * 80)
     print(f"🎓 CLOTURE DE L'ETAPE {args.etape}")
@@ -5413,11 +5455,14 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
     from ai.bot_evaluation import validate_bot_eval_worker_params as _vbwp
     _gate_worker_params = _vbwp(require_key(_gate_training_config, "callback_params"))
     scores_vs_pool = _score_stage_against_pool(
-        args, stage, canonical_model_path, eval_episodes,
+        args, stage, canonical_model_path, eval_episodes, eval_repeats,
         n_workers_gate=_gate_worker_params["n_workers_gate"],
     )
     for label, score in scores_vs_pool.items():
-        print(f"  vs {label:6s}: {score:.3f}  ({eval_episodes} episodes)")
+        print(
+            f"  vs {label:6s}: {score:.3f}  (moyenne de {eval_repeats} x {eval_episodes} "
+            "episodes, graines tirees)"
+        )
 
     # Scores vs bots : ceux de la DERNIERE evaluation du run, pas une mesure de plus. Le journal
     # doit dire ou en etait l'agent face aux bots a la fin de l'etape, et le run vient de le
@@ -5431,7 +5476,7 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
     stage_members = stage_pool_members(stage)
     champion_label = next((m["label"] for m in stage_members if m["kind"] == "champion"), None)
     accepted, gate_reason = evaluate_stage_gate(
-        args.etape, champion_label, scores_vs_pool, floor, target
+        args.etape, champion_label, scores_vs_pool, floor_champion, floor_others
     )
 
     pool_labels = [member["label"] for member in stage_members]
@@ -5452,13 +5497,19 @@ def _close_curriculum_stage(args, config, curriculum, stage, run_info) -> int:
         "warmup_episodes": int(require_key(stage, "warmup_episodes")),
         "pool_weights": {member["label"]: member["weight"] for member in stage_members},
         "gate_eval_episodes": eval_episodes,
+        "gate_eval_repeats": eval_repeats,
         "scores_vs_pool": scores_vs_pool,
         "scores_vs_bots": scores_vs_bots,
         "champion": champion_label,
-        "gate_floor": floor,
-        "gate_target": target,
+        "gate_floor_champion": floor_champion,
+        "gate_floor_others": floor_others,
         "gate_accepted": accepted,
         "gate_reason": gate_reason,
+        # Verdict du callback d'early-stop quand c'est LUI qui a arrete le run (promotion
+        # anticipee ou destruction). None sur un run alle au bout de son budget : le journal doit
+        # distinguer « l'etape a fini » de « l'etape s'est arretee, et pourquoi ».
+        "pool_stop_verdict": run_info.get("pool_stop_verdict"),
+        "pool_stop_reason": run_info.get("pool_stop_reason"),
         "monotonicity_diagnostic": monotonicity,
     })
     print(f"📝 curriculum.log : {log_path}")
@@ -6308,19 +6359,37 @@ def main():
                     _curr, _stg = curriculum_stage
                     # Priorité : early_stop de l'étape, puis early_stop global du curriculum.
                     _early_stop_cfg = _stg.get("early_stop") or _curr.get("early_stop")
-                    # Early stop uniquement vs le CHAMPION : les ancients ont un poids
-                    # d'entraînement plus faible, leur score converge plus lentement et
-                    # deviendrait le goulot d'étranglement sans rapport avec leur importance réelle.
+                    # TOUT le pool est sondé depuis le 2026-09-07, plus seulement le champion :
+                    # la promotion exige la parité contre chaque autre membre, donc chacun doit
+                    # être mesuré. Ce sont les SEUILS qui distinguent le champion des autres
+                    # (0.55 contre lui, 0.50 contre le reste), pas la liste des sondés — l'ancien
+                    # découpage laissait promouvoir une étape ayant régressé contre tout le pool.
                     _champion_label = stage_champion_label(_stg)
                     if _early_stop_cfg and _champion_label:
-                        _es_threshold = float(require_key(_early_stop_cfg, "win_rate_threshold"))
-                        _es_min_steps = int(require_key(_early_stop_cfg, "min_steps"))
-                        _es_consec = int(require_key(_early_stop_cfg, "consecutive_evals"))
                         _gate_cfg = require_key(_curr, "gate")
                         _pool_n_episodes = int(require_key(_gate_cfg, "eval_episodes"))
                         _models_root = get_config_loader().get_models_root()
                         _canonical = build_agent_model_path(_models_root, args.agent)
-                        _champion_archive = [(stage_model_path(_canonical, _champion_label), _champion_label)]
+                        _pool_archives = [
+                            (stage_model_path(_canonical, _member["label"]), _member["label"])
+                            for _member in stage_pool_members(_stg)
+                        ]
+                        # L'étape source de l'`init` porte le verrou de parité : à l'épisode 0 le
+                        # modèle EST cette archive. Elle DOIT être dans le pool sondé — sans elle,
+                        # rien ne mesure une identité qui vaut 0.50 par construction, et c'est le
+                        # seul contrôle capable de distinguer une panne d'appariement d'un mauvais
+                        # résultat AVANT de payer des heures d'entraînement.
+                        _parity_label = stage_init_source(_stg)
+                        if _parity_label is not None and _parity_label not in [
+                            _label for _, _label in _pool_archives
+                        ]:
+                            raise ValueError(
+                                f"Etape {args.etape} : init 'from:{_parity_label}' mais "
+                                f"{_parity_label} n'est pas dans son pool "
+                                f"{[_l for _, _l in _pool_archives]}. Le verrou de parite "
+                                "d'ouverture ne peut pas etre pose : ajouter l'etape source au "
+                                "pool, ou changer l'init."
+                            )
                         # Requise au demarrage pour la meme raison que chez la sonde exploiteur
                         # ci-dessus : cf. son commentaire.
                         _pool_n_workers = require_key(
@@ -6332,27 +6401,47 @@ def main():
                         ))
                         assert _stage_start is not None  # curriculum_stage is not None ici
                         _pool_early_stop = PoolEarlyStoppingCallback(
-                            pool_archives=_champion_archive,
-                            threshold=_es_threshold,
-                            min_timesteps=_es_min_steps,
-                            consecutive_evals=_es_consec,
+                            pool_archives=_pool_archives,
+                            # `require_present` et non `args.etape` nu : la branche n'est atteinte
+                            # que sous `curriculum_stage is not None`, mais l'attribut reste
+                            # optionnel pour le typage — et le nom de l'etape voyage jusqu'aux
+                            # messages d'arret, ou un `None` serait illisible.
+                            stage_name=require_present(args.etape, "args.etape"),
+                            champion_label=_champion_label,
+                            early_stop_cfg=_early_stop_cfg,
                             eval_freq_episodes=_pool_eval_freq,
                             n_eval_episodes=_pool_n_episodes,
                             training_config_name=args.training_config,
                             rewards_config_name=args.rewards_config or args.agent,
                             metrics_tracker=None,  # lie dans train_with_scenario_rotation
+                            parity_label=_parity_label,
+                            parity_range=load_parity_check(_curr),
                             intermediate_n_workers=_pool_n_workers,
                             # Origine de l'ÉTAPE (archive source) : cf. la sonde exploiteur.
                             episode_origin=_stage_start.episodes,
                             timesteps_origin=_stage_start.timesteps,
                         )
                         _exploiter_extra_callbacks = [_pool_early_stop]
+                        _parity_low, _parity_high = load_parity_check(_curr)
                         print(
-                            f"🎯 Pool early-stop activé : seuil={_es_threshold:.0%} vs champion={_champion_label}, "
-                            f"min_steps={_es_min_steps}, "
-                            f"consecutive_evals={_es_consec}, "
-                            f"n_eval_episodes={_pool_n_episodes}"
+                            "🎯 Pool early-stop activé (décisions sur la moyenne de "
+                            f"{_pool_early_stop.probe_window} sondes) : promotion a "
+                            f"{float(_early_stop_cfg['promote_score_vs_champion']):.2f} vs "
+                            f"{_champion_label} et "
+                            f"{float(_early_stop_cfg['promote_score_vs_others']):.2f} vs le reste "
+                            f"apres {int(_early_stop_cfg['promote_min_episodes'])} ep. d'etape ; "
+                            f"arret pour destruction sous "
+                            f"{float(_early_stop_cfg['destroy_score_vs_champion']):.2f} apres "
+                            f"{int(_early_stop_cfg['destroy_min_episodes'])} ep. ; pool sonde "
+                            f"{[_l for _, _l in _pool_archives]}, n_eval_episodes={_pool_n_episodes}"
                         )
+                        if _parity_label is not None:
+                            print(
+                                f"🔒 Verrou de parite d'ouverture : baseline contre "
+                                f"{_parity_label} exigee dans [{_parity_low:.2f}, "
+                                f"{_parity_high:.2f}], sinon le run est refuse avant le premier "
+                                "episode."
+                            )
 
                 # Always use scenario rotation path for self/bot/all modes,
                 # even when a single scenario is available.

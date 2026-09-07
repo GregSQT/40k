@@ -75,6 +75,24 @@ de `x1_long` passe à **100** épisodes par bot pour la précision des points in
 600 épisodes, coût horloge non rechronométré, et `x5_long` reste à 30.
 Détail : [training.md#regime-2026-09-06](training.md#regime-2026-09-06).
 
+**✅ Régime de lignée livré le 2026-09-07 (option A) — P2 reste à lancer.** Trois runs P2
+successifs avaient échoué en faisant varier des hyperparamètres étape par étape ; l'option A
+supprime cette possibilité au lieu de chercher les bonnes valeurs pour chacune. Un bloc
+`lineage_regime` en tête de `curriculum.json` porte **sept clés** (`learning_rate` 0.001 et
+`ent_coef` 0.03 **scalaires**, `n_steps` 32640, `batch_size` 4080, `vf_coef` 0.15,
+`max_grad_norm` 0.5, `agent_seat_p2_ratio` 0.6) et s'applique à toute étape `init: "from:"` —
+learners comme exploiteurs ; les vingt rampes `decay_fraction` et les surcharges de P2/P3
+disparaissent, une étape reprise ne déclare plus que `total_episodes`. `P00` est supprimée (`P0`
+passe en `init: "new"`, E1/E2/E3 en `from:P0`). Un **verrou de parité** arrête le run quand la
+baseline d'ouverture contre l'archive reprise sort de `[0.40, 0.60]` — elle vaut 0.50 par
+identité, et deux nuits d'entraînement ont déjà été payées sur une baseline aberrante lue comme
+une mesure. Toutes les décisions (promotion, arrêt pour destruction, gate de fin) passent sur la
+**moyenne des 3 dernières sondes** et sur le pool ENTIER, plus seulement le champion.
+⚠️ `base_seed` de `evaluate_against_checkpoints` est désormais **tiré au hasard** : un gate n'est
+plus reproductible à l'identique, et les scores de `curriculum.log` antérieurs portent un
+échantillon unique et figé.
+Détail : [training.md#regime-lignee-2026-09-07](training.md#regime-lignee-2026-09-07).
+
 ---
 
 ## J3 — Mesure de référence

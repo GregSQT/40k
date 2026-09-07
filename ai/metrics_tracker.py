@@ -2124,14 +2124,18 @@ class W40KMetricsTracker:
     ) -> None:
         """Trace pool-early-stop : valeur brute + moyenne glissante sur 3 sondes.
 
-        Le gate early-stop reste sur la valeur brute (`consecutive_evals`) ; la moyenne
-        glissante (`_3ep`) permet de lire une tendance malgre les sauts de la brute (~±10 pts
-        entre sondes voisines). Ces sauts ne sont PAS du bruit d'echantillonnage : `base_seed`
-        est fige a 42 (`ai/bot_evaluation.py`), donc deux sondes rejouent les MEMES parties et
-        deux appels sur un modele fige rendent le meme score (verifie le 2026-09-07, 16/24/0
-        aux deux appels) ; l'amplitude vient des blocs de parties correlees qui basculent
-        ensemble quand la politique bouge. Elle n'est emise qu'a partir de la deuxieme sonde :
-        sur une sonde unique la moyenne est identique au brut, rien a publier en plus.
+        C'est la MOYENNE (`_3ep`) qui porte les decisions depuis le 2026-09-07 — promotion,
+        arret pour destruction et gate de fin d'etape (`ai/curriculum.py`) — et non la sonde
+        brute, publiee a cote pour rester lisible. MESURE qui l'impose : les sauts de ~±10 pts
+        entre sondes voisines ne sont PAS du bruit d'echantillonnage. `base_seed` valait alors
+        42 en dur (`ai/bot_evaluation.py`), donc deux sondes rejouaient les MEMES parties et deux
+        appels sur un modele fige rendaient le meme score (verifie le 2026-09-07, 16/24/0 aux
+        deux appels) : l'amplitude vient des blocs de parties correlees qui basculent ensemble
+        quand la politique bouge. La graine est desormais TIREE AU HASARD a chaque evaluation,
+        pour que la moyenne echantillonne des parties differentes et reduise vraiment l'erreur ;
+        les scores publies avant cette date restent ceux d'un echantillon unique et fige.
+        La moyenne n'est emise qu'a partir de la deuxieme sonde : sur une sonde unique elle est
+        identique au brut, rien a publier en plus.
         """
         tag = self._metric_slug(label)
         self.writer.add_scalar(f"pool_eval/vs_{tag}", raw_score, step)

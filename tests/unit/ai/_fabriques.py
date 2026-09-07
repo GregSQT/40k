@@ -438,11 +438,30 @@ def exploiter_probe_callback(archive: Any, n_workers: int | None = 4, **override
     return probe
 
 
+#: Bloc `early_stop` VALIDE, seuils volontairement distincts les uns des autres : un test qui
+#: échangerait deux seuils dans le code de décision doit rougir. Les épisodes sont petits pour
+#: que les tests puissent franchir les deux paliers sans simuler des dizaines de milliers
+#: d'épisodes. La fenêtre vaut 3, comme le curriculum livré.
+POOL_EARLY_STOP_CFG: Dict[str, Any] = {
+    "probe_window": 3,
+    "promote_score_vs_champion": 0.60,
+    "promote_score_vs_others": 0.55,
+    "promote_min_episodes": 500,
+    "destroy_score_vs_champion": 0.40,
+    "destroy_min_episodes": 200,
+}
+
+
 def pool_early_stopping_callback(archive: Any, n_workers: int | None = 4, **overrides: Any) -> Any:
     """Jumeau de `exploiter_probe_callback` pour `PoolEarlyStoppingCallback`.
 
     Les deux callbacks partagent `_EvalPoolOwnerMixin`, donc tout test de cycle de vie du pool
     les exerce en paire — les fabriques vont par paire pour la même raison.
+
+    `parity_label` vaut None par défaut : la fabrique rend un callback de run NEUF
+    (`episode_origin=0`), qui n'a aucune parité d'ouverture à tenir. Un test de reprise à chaud
+    passe `episode_origin` ET `parity_label` — le constructeur refuse l'un sans l'autre, ce qui
+    est exactement le verrou voulu.
     """
     from unittest.mock import MagicMock
 
@@ -450,14 +469,16 @@ def pool_early_stopping_callback(archive: Any, n_workers: int | None = 4, **over
 
     params: Dict[str, Any] = dict(
         pool_archives=[(str(archive), "champion")],
-        threshold=0.6,
-        min_timesteps=0,
-        consecutive_evals=2,
+        stage_name="P-test",
+        champion_label="champion",
+        early_stop_cfg=dict(POOL_EARLY_STOP_CFG),
         eval_freq_episodes=100,
         n_eval_episodes=10,
         training_config_name=PROBE_TRAINING_CONFIG,
         rewards_config_name=PROBE_REWARDS_CONFIG,
         metrics_tracker=None,
+        parity_label=None,
+        parity_range=(0.40, 0.60),
         intermediate_n_workers=n_workers,
     )
     params.update(overrides)

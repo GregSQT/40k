@@ -47,9 +47,18 @@ def _make_config(models_root: str) -> SimpleNamespace:
 def _make_curriculum() -> dict:
     return {
         "order": ["P3", "P4"],
+        "lineage_regime": {
+            "model_params": {
+                "learning_rate": 0.001, "ent_coef": 0.03, "n_steps": 32640,
+                "batch_size": 4080, "vf_coef": 0.15, "max_grad_norm": 0.5,
+            },
+            "agent_seat_p2_ratio": 0.6,
+        },
+        "parity_check": {"min_score": 0.40, "max_score": 0.60},
         "gate": {
             "min_score_vs_champion": 0.55,
-            "target_score_vs_champion": 0.60,
+            "min_score_vs_others": 0.50,
+            "eval_repeats": 3,
             "eval_episodes": 10,
         },
         "stages": {

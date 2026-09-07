@@ -21,9 +21,18 @@ from tests.unit.ai.test_resume_from_checkpoint import _FakeConfigLoader
 CURRICULUM = {
     "order": ["P0", "P1", "E1"],
     "opponent": {"snapshot_device": "cpu", "deterministic": False},
+    "lineage_regime": {
+        "model_params": {
+            "learning_rate": 0.001, "ent_coef": 0.03, "n_steps": 32640,
+            "batch_size": 4080, "vf_coef": 0.15, "max_grad_norm": 0.5,
+        },
+        "agent_seat_p2_ratio": 0.6,
+    },
+    "parity_check": {"min_score": 0.40, "max_score": 0.60},
     "gate": {
         "min_score_vs_champion": 0.55,
-        "target_score_vs_champion": 0.60,
+        "min_score_vs_others": 0.50,
+        "eval_repeats": 3,
         "eval_episodes": 300,
     },
     "exploiter_config": {
@@ -75,12 +84,14 @@ def _args(etape: str) -> SimpleNamespace:
     )
 
 
-def _write_stage_model(models_root, stage: str, ent_coef: float = 0.0177) -> str:
+def _write_stage_model(
+    models_root, stage: str, ent_coef: float = 0.0177, learning_rate: float = 0.0005
+) -> str:
     """Un zip SB3 reduit a son membre `data`, et non un fichier de remplissage.
 
-    Depuis que la rampe d'entropie d'une etape reprise part du niveau ATTEINT par le modele
-    source (`_pin_entropy_ramp_for_warm_start`), `_prepare_curriculum_stage` ouvre ce zip et y
-    lit `ent_coef`. Des octets arbitraires y levaient `BadZipFile`.
+    Le controle de continuite d'une etape reprise (`announce_lineage_continuity`) ouvre ce zip et
+    y lit `ent_coef` ET `learning_rate` pour annoncer l'ecart avec le regime de lignee. Des octets
+    arbitraires y levaient `BadZipFile`.
     """
     import json
     import zipfile
@@ -88,7 +99,9 @@ def _write_stage_model(models_root, stage: str, ent_coef: float = 0.0177) -> str
     path = models_root / "TestAgent" / f"model_TestAgent_{stage}.zip"
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr("data", json.dumps({"ent_coef": ent_coef}))
+        archive.writestr(
+            "data", json.dumps({"ent_coef": ent_coef, "learning_rate": learning_rate})
+        )
     return str(path)
 
 
@@ -192,9 +205,9 @@ def test_etape_resume_from_on_from_stage_keeps_user_checkpoint(curriculum_agent,
 
     ckpt = tmp_path / "ppo_checkpoint_640000_steps.zip"
     # Zip SB3 reduit, pour la meme raison que `_write_stage_model` : c'est de CE checkpoint que
-    # la rampe d'entropie repart quand l'utilisateur en nomme un explicitement.
+    # le controle de continuite lit ce que le modele porte quand l'utilisateur en nomme un.
     with zipfile.ZipFile(ckpt, "w") as archive:
-        archive.writestr("data", json.dumps({"ent_coef": 0.0177}))
+        archive.writestr("data", json.dumps({"ent_coef": 0.0177, "learning_rate": 0.0005}))
     # Le modele P1 EXISTE aussi, pour s'assurer que stage_init_source n'est pas utilise.
     _write_stage_model(curriculum_agent.models_root, "P1")
     args = _args("E1")

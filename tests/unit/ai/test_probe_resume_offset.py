@@ -28,7 +28,11 @@ from ai.curriculum import StageOrigin, stage_model_path, stage_origin
 from ai.run_state import save_run_state
 from ai.training_callbacks import ExploiterProbeCallback, PoolEarlyStoppingCallback
 from shared.data_validation import ConfigurationError
-from tests.unit.ai._fabriques import exploiter_probe_callback, pool_early_stopping_callback
+from tests.unit.ai._fabriques import (
+    POOL_EARLY_STOP_CFG,
+    exploiter_probe_callback,
+    pool_early_stopping_callback,
+)
 
 # Valeurs du run mesuré : offset de reprise et `num_timesteps` relu dans model_ArmageddonAgent_x1_P1.zip.
 P2_EPISODE_OFFSET = 80_000
@@ -42,7 +46,14 @@ def _tracker(episode_count: int) -> MagicMock:
 
 
 def _pool_callback(**overrides: Any) -> PoolEarlyStoppingCallback:
-    """Cadence du run mesuré (10 000 épisodes, 300 par éval) posée sur la fabrique partagée."""
+    """Cadence du run mesuré (10 000 épisodes, 300 par éval) posée sur la fabrique partagée.
+
+    `parity_label` suit `episode_origin` : le constructeur refuse une reprise à chaud sans
+    étiquette de parité (cf. `test_pool_parity_lock.py`), et le label du pool de la fabrique est
+    « champion ».
+    """
+    if overrides.get("episode_origin") and "parity_label" not in overrides:
+        overrides["parity_label"] = "champion"
     callback = pool_early_stopping_callback(
         "/fake/P1.zip", eval_freq_episodes=10_000, n_eval_episodes=300, **overrides
     )
@@ -105,21 +116,32 @@ def test_pool_resume_does_not_chain_probes_before_the_first_stage_interval():
     assert probed == [90_000, 100_003]
 
 
-def test_pool_min_steps_counts_from_the_stage_start_not_from_the_archive():
-    """`min_steps` 50 000 face à 13,7 M de pas hérités : la garde doit compter depuis l'origine."""
+def test_pool_decision_gates_count_episodes_from_the_stage_start():
+    """Les deux paliers de décision comptent en épisodes D'ÉTAPE, jamais depuis la lignée.
+
+    Remplace `test_pool_min_steps_counts_from_the_stage_start_not_from_the_archive` : le garde
+    `min_steps`, exprimé en PAS, a été supprimé le 2026-09-07 avec les décisions en pas. Le
+    défaut qu'il protégeait est le même — un compteur cumulé sur la lignée (80 000 épisodes hérités
+    de P1) franchirait `promote_min_episodes` (500 dans la fabrique) dès le premier pas et
+    promouvrait l'étape avant qu'elle n'ait joué.
+    """
+    # 50 000 : au-DESSUS des 10 000 épisodes d'étape joués, au-DESSOUS des 90 000 du cumul de
+    # lignée. C'est exactement l'écart qui distingue les deux lectures.
     callback = _pool_callback(
-        min_timesteps=50_000, episode_origin=P2_EPISODE_OFFSET, timesteps_origin=P1_NUM_TIMESTEPS
+        episode_origin=P2_EPISODE_OFFSET, timesteps_origin=P1_NUM_TIMESTEPS,
+        early_stop_cfg={**POOL_EARLY_STOP_CFG, "promote_min_episodes": 50_000,
+                        "destroy_min_episodes": 20_000},
     )
-    callback.metrics_tracker = _tracker(95_000)  # cadence déjà due : seule la garde de pas retient
-    probed = _count_pool_probes(callback)
+    tracker = _tracker(P2_EPISODE_OFFSET + 10_000)
+    callback.metrics_tracker = tracker
+    # Scores très au-dessus des seuils de promotion : seul le compteur d'épisodes peut retenir.
+    callback._probe = lambda: {label: 0.99 for _, label in callback.pool_archives}  # type: ignore[method-assign]
 
-    callback.num_timesteps = P1_NUM_TIMESTEPS + 49_999
-    assert callback._on_step() is True
-    assert probed == [], "49 999 pas dans l'étape : sous min_steps, pas de sonde"
-
-    callback.num_timesteps = P1_NUM_TIMESTEPS + 50_000
-    callback._on_step()
-    assert probed == [95_000]
+    assert callback._on_step() is True, (
+        "10 000 épisodes D'ÉTAPE : sous promote_min_episodes lu en cumul de lignée (90 000), "
+        "l'étape aurait été promue au premier pas"
+    )
+    assert callback.stop_verdict is None
 
 
 def test_pool_fresh_run_keeps_its_cadence():
@@ -255,29 +277,34 @@ def test_pool_warm_start_fires_baseline_probe_at_stage_episode_zero():
 
     def fake_probe() -> dict:
         probe_calls.append(callback._stage_episode())
-        return {label: 0.8 for _, label in callback.pool_archives}
+        return {label: 0.50 for _, label in callback.pool_archives}
 
     callback._probe = fake_probe  # type: ignore[method-assign]
 
     callback._on_training_start()
 
     assert probe_calls == [0], "la baseline doit sonder exactement à _stage_episode() == 0"
-    assert callback._consecutive_above == 0, "la baseline ne doit PAS incrémenter _consecutive_above"
+    assert callback.stop_verdict is None, "la baseline ne prend AUCUNE décision d'arrêt"
     assert callback._next_probe_episode == 10_000, "_next_probe_episode doit rester inchangé"
 
 
 def test_pool_warm_start_baseline_above_threshold_does_not_trigger_early_stop():
-    """Score baseline au-dessus du seuil : _consecutive_above reste 0, aucun arrêt."""
+    """Baseline très au-dessus des seuils de promotion : c'est un point de référence, pas une éval.
+
+    Elle n'entre NI dans l'historique glissant NI dans un verdict — sans quoi une étape serait
+    promue sur la seule mesure de son propre modèle de départ, avant d'avoir joué un épisode.
+    """
     episode_origin = P2_EPISODE_OFFSET
     callback = _pool_callback(
-        episode_origin=episode_origin, timesteps_origin=P1_NUM_TIMESTEPS, threshold=0.5
+        episode_origin=episode_origin, timesteps_origin=P1_NUM_TIMESTEPS
     )
     callback.metrics_tracker = _tracker(episode_origin)
-    callback._probe = lambda: {label: 0.9 for _, label in callback.pool_archives}  # type: ignore[method-assign]
+    callback._probe = lambda: {label: 0.60 for _, label in callback.pool_archives}  # type: ignore[method-assign]
 
     callback._on_training_start()
 
-    assert callback._consecutive_above == 0
+    assert callback.stop_verdict is None
+    assert callback._probe_score_history == {}
     assert callback._next_probe_episode == 10_000
 
 

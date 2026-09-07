@@ -24,8 +24,14 @@ from ai.curriculum import (
     RATIO_SUM_TOLERANCE,
     assign_pool_members_to_envs,
     copy_tensorboard_run,
+    POOL_VERDICT_CONTINUE,
+    POOL_VERDICT_DESTROY,
+    POOL_VERDICT_PROMOTE,
+    evaluate_pool_decision,
     evaluate_stage_gate,
     load_curriculum,
+    load_lineage_regime,
+    load_parity_check,
     pool_monotonicity_diagnostic,
     promote_stage_model,
     ramped_ratio,
@@ -59,7 +65,6 @@ from ai.curriculum import (
 #: toucher aux bots. La table etait restee sur les anciens poids et rendait
 #: test_shipped_stage_matches_the_specification[P2] ROUGE.
 EXPECTED_STAGES = {
-    "P00": (0, 0.00, None, {}),
     "P0":  (0, 0.00, None, {}),
     "P1":  (0, 0.70, "P0", {"P0": 0.70}),
     "P2":  (0, 0.80, "P1", {"P1": 0.50, "P0": 0.30}),
@@ -105,9 +110,11 @@ def _minimal_curriculum() -> dict:
         "opponent": {"snapshot_device": "cpu", "deterministic": False},
         "gate": {
             "min_score_vs_champion": 0.55,
-            "target_score_vs_champion": 0.60,
+            "min_score_vs_others": 0.50,
             "eval_episodes": 300,
+            "eval_repeats": 3,
         },
+        "parity_check": {"min_score": 0.40, "max_score": 0.60},
         "stages": {
             "P0": {
                 "role": "learner", "init": "new", "warmup_episodes": 0,
@@ -124,12 +131,15 @@ def _minimal_curriculum() -> dict:
 
 # ── 1. SOMME DES RATIOS = 1.0 ──────────────────────────────────────────────────────────────
 
-def test_shipped_curriculum_declares_fifteen_stages(curriculum) -> None:
+def test_shipped_curriculum_declares_fourteen_stages(curriculum) -> None:
+    """P00 SUPPRIMEE le 2026-09-07 : la graine n'existait que pour eviter de repayer un warmup a
+    chaque learner, ce que le chainage de la lignee a rendu sans objet — un seul depart a froid
+    suffit, et c'est P0."""
     order = stage_order(curriculum)
     assert order == [
-        "P00", "P0", "P1", "P2", "P3", "E1", "P4", "P5", "E2", "P6", "P7", "P8", "E3", "P9", "P10"
+        "P0", "P1", "P2", "P3", "E1", "P4", "P5", "E2", "P6", "P7", "P8", "E3", "P9", "P10"
     ]
-    assert len(order) == 15
+    assert len(order) == 14
     assert sorted(order) == sorted(EXPECTED_STAGES)
 
 
@@ -144,22 +154,51 @@ def test_each_stage_ratios_sum_to_one(curriculum, stage_name: str) -> None:
     )
 
 
-def test_max_grad_norm_override_stays_isolated_to_p2(curriculum) -> None:
-    """P2 est la SEULE etape a surcharger max_grad_norm, pour que sa mesure reste comparable.
+#: Les SEPT cles du bloc de lignee, epinglees depuis la specification du 2026-09-07 et non
+#: relues du JSON. Elles ne sont pas « des valeurs par defaut » : elles remplacent vingt rampes
+#: `decay_fraction` et les surcharges d'etape de `vf_coef` / `max_grad_norm`, et c'est leur
+#: UNIFORMITE sur toute la lignee qui rend deux etapes comparables. Un reglage qui reviendrait
+#: se poser sur une seule etape rouvrirait exactement ce que ce bloc ferme.
+EXPECTED_LINEAGE_MODEL_PARAMS = {
+    "learning_rate": 0.001,
+    "ent_coef": 0.03,
+    "n_steps": 32640,
+    "batch_size": 4080,
+    "vf_coef": 0.15,
+    "max_grad_norm": 0.5,
+}
+EXPECTED_LINEAGE_SEAT_P2_RATIO = 0.6
 
-    Toute autre etape qui le surchargerait ferait de la lignee chainee une suite de regimes
-    d'optimisation differents, et l'ecart mesure sur P2 ne serait plus attribuable. La VALEUR
-    n'est pas epinglee — elle est en calibration et doit pouvoir bouger sans rendre ce test
-    rouge ; ce qui est epingle, c'est l'ISOLATION. La mesure qui a motive le reglage vit au
-    `_doc` de P2.
+
+def test_the_lineage_block_pins_the_seven_keys_of_the_regime(curriculum) -> None:
+    """Le bloc de lignee porte EXACTEMENT ces sept cles, aux valeurs decidees le 2026-09-07."""
+    regime = load_lineage_regime(curriculum)
+    assert regime["model_params"] == pytest.approx(EXPECTED_LINEAGE_MODEL_PARAMS)
+    assert float(regime["agent_seat_p2_ratio"]) == pytest.approx(EXPECTED_LINEAGE_SEAT_P2_RATIO)
+    # Des SCALAIRES, jamais des rampes : une rampe s'exprime en fraction de la duree du RUN, donc
+    # chaque etape reprise reparcourrait la sienne et rendrait a un modele converge le regime
+    # d'exploration d'un demarrage (mesure du 2026-09-04, cf. le `_doc` du bloc).
+    for key, value in regime["model_params"].items():
+        assert isinstance(value, (int, float)) and not isinstance(value, bool), key
+
+
+def test_no_warm_started_stage_declares_hyperparameters_of_its_own(curriculum) -> None:
+    """Une etape reprise a chaud ne declare que sa DUREE : le regime de lignee porte le reste.
+
+    Verrou de la decision du 2026-09-07. Une seule etape qui reposerait un `model_params` ou un
+    `agent_seat_p2_ratio` ferait coexister deux sources pour la meme valeur, et ce serait la
+    perdante — les overrides d'etape sont appliques AVANT le regime — qui aurait l'air de decider
+    en relisant le JSON. C'est ce que faisaient `vf_coef` et `max_grad_norm` sur P2 et P3.
     """
-    surcharges = sorted(
-        name for name, stage in curriculum["stages"].items()
-        if "max_grad_norm" in stage.get("training_config_overrides", {}).get("model_params", {})
-    )
-    assert surcharges == ["P2"], (
-        f"max_grad_norm doit rester surcharge par la seule etape P2, trouve : {surcharges}"
-    )
+    for name in stage_order(curriculum):
+        stage = require_stage(curriculum, name)
+        if stage_init_source(stage) is None:
+            continue  # depart a froid : les rampes du profil lui reviennent legitimement
+        overrides = stage.get("training_config_overrides", {})
+        assert set(overrides) <= {"total_episodes"}, (
+            f"{name} declare {sorted(set(overrides) - {'total_episodes'})} alors qu'elle reprend "
+            f"des poids ({stage['init']}) : ces cles appartiennent au bloc de lignee."
+        )
 
 
 @pytest.mark.parametrize("stage_name", sorted(EXPECTED_STAGES))
@@ -198,8 +237,16 @@ def test_learners_have_no_adversity_ramp(curriculum) -> None:
         assert "ramp_end_episodes" not in stage, name
 
 
-def test_exploiters_resume_the_champion_they_only_ever_play(curriculum) -> None:
-    """Un exploiteur reprend les poids de sa cible ET ne joue que contre elle (ratio 1.0)."""
+def test_exploiters_play_their_target_but_start_from_the_seed(curriculum) -> None:
+    """Un exploiteur ne joue QUE sa cible (ratio 1.0) mais part de P0, pas de cette cible.
+
+    Decision du 2026-09-07. Partir de la cible faisait de l'exploiteur une COPIE du champion a
+    laquelle on demandait de trouver sa propre faiblesse : il commencait a la parite par
+    construction et ne pouvait s'en ecarter qu'en desapprenant. Partir du depart a froid en fait
+    une politique reellement differente, entrainee contre la cible — ce que le pool des etapes
+    suivantes doit contenir. `validate_exploiter_protocol` ne contraint pas `init` : ce verrou
+    est le seul endroit ou le choix est ecrit.
+    """
     exploiters = [
         name for name in stage_order(curriculum)
         if require_stage(curriculum, name)["role"] == "exploiter"
@@ -207,24 +254,28 @@ def test_exploiters_resume_the_champion_they_only_ever_play(curriculum) -> None:
     assert exploiters == ["E1", "E2", "E3"]
     for name in exploiters:
         stage = require_stage(curriculum, name)
-        target = stage_init_source(stage)
+        target = stage_champion_label(stage)
         assert target is not None
-        assert stage_champion_label(stage) == target
+        assert target != stage_init_source(stage)
+        assert stage_init_source(stage) == "P0"
         assert [m["label"] for m in stage_pool_members(stage)] == [target]
         assert float(stage["ratio_start"]) == 1.0
         assert float(stage["ratio_end"]) == 1.0
 
 
 def test_seed_stage_is_new(curriculum) -> None:
-    """P00 est la seule etape learner qui demarre from scratch (pas de warm start)."""
-    stage = require_stage(curriculum, "P00")
-    assert stage_init_source(stage) is None
+    """P0 est la seule etape du curriculum qui demarre from scratch (pas de warm start)."""
+    from_scratch = [
+        name for name in stage_order(curriculum)
+        if stage_init_source(require_stage(curriculum, name)) is None
+    ]
+    assert from_scratch == ["P0"]
 
 
 def test_learners_form_a_single_chain(curriculum) -> None:
     """Chaque learner reprend le learner qui le PRECEDE dans `order` — une lignee chainee.
 
-    P00 mis a part (`test_seed_stage_is_new`), un learner ne repart jamais de zero ni d'une etape
+    P0 mis a part (`test_seed_stage_is_new`), un learner ne repart jamais de zero ni d'une etape
     quelconque : il reprend son predecesseur immediat, les exploiteurs etant sautes puisqu'ils ne
     sont jamais promus champions. La forme de la lignee ne se voit NULLE PART ailleurs — ni dans
     `EXPECTED_STAGES`, qui epingle warmup, ratio_end, champion et poids mais pas `init`, ni dans
@@ -242,7 +293,7 @@ def test_learners_form_a_single_chain(curriculum) -> None:
         name for name in stage_order(curriculum)
         if require_stage(curriculum, name)["role"] == "learner"
     ]
-    assert learners[0] == "P00", learners
+    assert learners[0] == "P0", learners
     for previous, name in zip(learners, learners[1:]):
         assert stage_init_source(require_stage(curriculum, name)) == previous, name
 
@@ -328,8 +379,17 @@ def _minimal_curriculum_with_exploiter() -> dict:
         "opponent": {"snapshot_device": "cpu", "deterministic": False},
         "gate": {
             "min_score_vs_champion": 0.55,
-            "target_score_vs_champion": 0.60,
+            "min_score_vs_others": 0.50,
             "eval_episodes": 300,
+            "eval_repeats": 3,
+        },
+        "parity_check": {"min_score": 0.40, "max_score": 0.60},
+        "lineage_regime": {
+            "model_params": {
+                "learning_rate": 0.001, "ent_coef": 0.03, "n_steps": 32640,
+                "batch_size": 4080, "vf_coef": 0.15, "max_grad_norm": 0.5,
+            },
+            "agent_seat_p2_ratio": 0.6,
         },
         "exploiter_config": {
             "probe_every_episodes": 1000,
@@ -378,36 +438,143 @@ def test_exploiter_with_non_unit_weight_pool_is_refused() -> None:
         validate_curriculum(broken)
 
 
+def _early_stop_block(**overrides) -> dict:
+    """Bloc `early_stop` valide, aux valeurs du curriculum livre."""
+    block = {
+        "probe_window": 3,
+        "promote_score_vs_champion": 0.55,
+        "promote_score_vs_others": 0.50,
+        "promote_min_episodes": 50000,
+        "destroy_score_vs_champion": 0.40,
+        "destroy_min_episodes": 20000,
+    }
+    block.update(overrides)
+    return block
+
+
 def test_early_stop_with_missing_key_is_refused() -> None:
     broken = _minimal_curriculum()
-    broken["early_stop"] = {"win_rate_threshold": 0.60, "min_steps": 1000}  # manque consecutive_evals
-    with pytest.raises(ConfigurationError, match="consecutive_evals"):
+    broken["early_stop"] = _early_stop_block()
+    del broken["early_stop"]["destroy_min_episodes"]
+    with pytest.raises(ConfigurationError, match="destroy_min_episodes"):
         validate_curriculum(broken)
 
 
 def test_early_stop_with_wrong_key_name_is_refused() -> None:
-    """Cle erronee (ex. 'win_rate_thresh') doit etre refusee."""
+    """Cle erronee (ex. l'ancien 'win_rate_threshold') doit etre refusee."""
     broken = _minimal_curriculum()
-    broken["early_stop"] = {"win_rate_thresh": 0.60, "min_steps": 1000, "consecutive_evals": 2}
-    with pytest.raises(ConfigurationError, match="win_rate_threshold"):
+    broken["early_stop"] = _early_stop_block()
+    broken["early_stop"]["win_rate_threshold"] = broken["early_stop"].pop(
+        "promote_score_vs_champion"
+    )
+    with pytest.raises(ConfigurationError, match="promote_score_vs_champion"):
         validate_curriculum(broken)
 
 
 def test_early_stop_with_valid_block_is_accepted() -> None:
     ok = _minimal_curriculum()
-    ok["early_stop"] = {"win_rate_threshold": 0.60, "min_steps": 50000, "consecutive_evals": 2}
+    ok["early_stop"] = _early_stop_block()
     validate_curriculum(ok)  # ne leve pas
+
+
+def test_early_stop_window_of_one_is_refused() -> None:
+    """Une fenetre d'un seul point n'est pas une moyenne, c'est la sonde brute."""
+    broken = _minimal_curriculum()
+    broken["early_stop"] = _early_stop_block(probe_window=1)
+    with pytest.raises(ValueError, match="probe_window"):
+        validate_curriculum(broken)
+
+
+def test_early_stop_destroy_threshold_above_promote_is_refused() -> None:
+    """Seuils croises : une meme moyenne declencherait promotion ET destruction."""
+    broken = _minimal_curriculum()
+    broken["early_stop"] = _early_stop_block(destroy_score_vs_champion=0.60)
+    with pytest.raises(ValueError, match="destroy_score_vs_champion"):
+        validate_curriculum(broken)
 
 
 def test_stage_early_stop_override_with_wrong_key_is_refused() -> None:
     broken = _minimal_curriculum()
-    broken["stages"]["P1"]["early_stop"] = {
-        "win_rate_thresh": 0.70,  # typo
-        "min_steps": 1000,
-        "consecutive_evals": 2,
-    }
-    with pytest.raises(ConfigurationError, match="win_rate_threshold"):
+    broken["stages"]["P1"]["early_stop"] = _early_stop_block()
+    del broken["stages"]["P1"]["early_stop"]["probe_window"]
+    with pytest.raises(ConfigurationError, match="probe_window"):
         validate_curriculum(broken)
+
+
+# ── REGIME DE LIGNEE : VALIDATION ──────────────────────────────────────────────────────────
+
+def test_a_stage_that_resumes_weights_may_not_declare_model_params() -> None:
+    """La cle appartient au bloc de lignee ; la declarer sur l'etape cree une seconde source."""
+    broken = _minimal_curriculum_with_exploiter()
+    broken["stages"]["E1"]["role"] = "learner"  # sinon c'est le refus exploiteur qui tombe
+    broken["stages"]["E1"]["training_config_overrides"] = {
+        "total_episodes": 1000, "model_params": {"ent_coef": 0.05},
+    }
+    with pytest.raises(ValueError, match="lineage_regime"):
+        validate_curriculum(broken)
+
+
+def test_a_stage_that_resumes_weights_may_not_declare_the_seat_ratio() -> None:
+    broken = _minimal_curriculum_with_exploiter()
+    broken["stages"]["E1"]["role"] = "learner"
+    broken["stages"]["E1"]["training_config_overrides"] = {"agent_seat_p2_ratio": 0.9}
+    with pytest.raises(ValueError, match="lineage_regime"):
+        validate_curriculum(broken)
+
+
+def test_a_cold_started_stage_may_still_declare_its_own_model_params() -> None:
+    """Le depart a froid n'est pas gouverne par la lignee : il garde le droit de se regler."""
+    ok = _minimal_curriculum()
+    ok["stages"]["P1"]["training_config_overrides"] = {
+        "total_episodes": 1000, "model_params": {"ent_coef": 0.05},
+    }
+    validate_curriculum(ok)  # ne leve pas
+
+
+def test_a_resumed_stage_without_a_lineage_block_is_refused() -> None:
+    """Sans regime, une etape reprise reparcourrait les rampes du profil depuis leur depart."""
+    broken = _minimal_curriculum_with_exploiter()
+    del broken["lineage_regime"]
+    with pytest.raises(ConfigurationError, match="lineage_regime"):
+        validate_curriculum(broken)
+
+
+def test_an_incomplete_lineage_block_is_refused() -> None:
+    """Le bloc est COMPLET ou il n'est pas un regime : une cle omise laisse le profil decider."""
+    broken = _minimal_curriculum_with_exploiter()
+    del broken["lineage_regime"]["model_params"]["vf_coef"]
+    with pytest.raises(ConfigurationError, match="vf_coef"):
+        validate_curriculum(broken)
+
+
+def test_a_ramp_in_the_lineage_block_is_refused() -> None:
+    """Un schedule y est refuse : c'est exactement ce que ce bloc existe pour supprimer."""
+    broken = _minimal_curriculum_with_exploiter()
+    broken["lineage_regime"]["model_params"]["ent_coef"] = {
+        "start": 0.1, "end": 0.01, "decay_fraction": 0.5,
+    }
+    with pytest.raises(ValueError, match="ent_coef"):
+        validate_curriculum(broken)
+
+
+def test_a_batch_size_that_does_not_divide_n_steps_is_refused() -> None:
+    """Dernier minibatch tronque = updates de poids inegaux."""
+    broken = _minimal_curriculum_with_exploiter()
+    broken["lineage_regime"]["model_params"]["batch_size"] = 3000
+    with pytest.raises(ValueError, match="multiple de batch_size"):
+        validate_curriculum(broken)
+
+
+def test_a_parity_window_that_misses_parity_is_refused() -> None:
+    """Une fenetre qui n'encadre pas 0.5 refuserait TOUT run : elle est fausse, pas stricte."""
+    broken = _minimal_curriculum()
+    broken["parity_check"] = {"min_score": 0.55, "max_score": 0.65}
+    with pytest.raises(ValueError, match="ENCADRER"):
+        validate_curriculum(broken)
+
+
+def test_the_shipped_parity_window_brackets_parity(curriculum) -> None:
+    assert load_parity_check(curriculum) == (0.40, 0.60)
 
 
 # ── 2. REPARTITION PAR ENVIRONNEMENT ───────────────────────────────────────────────────────
@@ -579,26 +746,37 @@ def test_env_wrapper_ramp_is_the_curriculum_ramp() -> None:
 
 # ── GATE ───────────────────────────────────────────────────────────────────────────────────
 
-def test_gate_refuses_below_the_hard_floor() -> None:
-    accepted, reason = evaluate_stage_gate("P4", "P3", {"P3": 0.54}, 0.55, 0.60)
+def test_gate_refuses_below_the_champion_floor() -> None:
+    accepted, reason = evaluate_stage_gate("P4", "P3", {"P3": 0.54}, 0.55, 0.50)
     assert accepted is False
     assert "REFUSEE" in reason
 
 
-def test_gate_accepts_between_floor_and_target_and_says_so() -> None:
-    accepted, reason = evaluate_stage_gate("P4", "P3", {"P3": 0.57}, 0.55, 0.60)
+def test_gate_accepts_when_both_floors_are_held() -> None:
+    accepted, reason = evaluate_stage_gate(
+        "P4", "P3", {"P3": 0.57, "P0": 0.62, "E1": 0.51}, 0.55, 0.50
+    )
     assert accepted is True
-    assert "sous la cible" in reason
+    assert "planchers tenus" in reason
 
 
-def test_gate_accepts_at_the_target() -> None:
-    accepted, reason = evaluate_stage_gate("P4", "P3", {"P3": 0.62}, 0.55, 0.60)
-    assert accepted is True
-    assert "au-dessus de la cible" in reason
+def test_gate_refuses_a_regression_against_a_non_champion_member() -> None:
+    """DEUXIEME PLANCHER, pose le 2026-09-07 : le champion seul ne suffit plus.
+
+    Avant, une etape pouvait etre promue en battant son predecesseur immediat tout en ayant
+    regresse contre tout le reste du pool — l'ancien gate ne regardait que le champion, et rien
+    dans le journal ne refusait cette etape. La regression contre un ancien est exactement ce
+    qu'une lignee chainee doit detecter : c'est la seule facon de voir qu'elle derive.
+    """
+    accepted, reason = evaluate_stage_gate(
+        "P4", "P3", {"P3": 0.70, "P0": 0.10, "P1": 0.10, "P2": 0.10, "E1": 0.10}, 0.55, 0.50
+    )
+    assert accepted is False
+    assert "P0=0.100 < 0.50" in reason
 
 
 def test_gate_does_not_apply_to_the_first_stage() -> None:
-    accepted, reason = evaluate_stage_gate("P0", None, {}, 0.55, 0.60)
+    accepted, reason = evaluate_stage_gate("P0", None, {}, 0.55, 0.50)
     assert accepted is True
     assert "sans objet" in reason
 
@@ -606,17 +784,85 @@ def test_gate_does_not_apply_to_the_first_stage() -> None:
 def test_gate_refuses_to_pass_when_the_champion_was_never_measured() -> None:
     """Un champion non mesure ne peut pas etre 'accepte par defaut' : le gate leve."""
     with pytest.raises(KeyError, match="P3"):
-        evaluate_stage_gate("P4", "P3", {"P0": 0.9}, 0.55, 0.60)
+        evaluate_stage_gate("P4", "P3", {"P0": 0.9}, 0.55, 0.50)
 
 
-def test_only_the_most_recent_champion_gates(curriculum) -> None:
-    """Un score ecrase contre un ANCIEN n'empeche pas l'etape : seul le champion compte."""
-    stage = require_stage(curriculum, "P4")
-    assert stage_champion_label(stage) == "P3"
-    accepted, _ = evaluate_stage_gate(
-        "P4", "P3", {"P3": 0.70, "P0": 0.10, "P1": 0.10, "P2": 0.10, "E1": 0.10}, 0.55, 0.60
+# ── DECISIONS EN COURS DE RUN, SUR LA MOYENNE DES SONDES ───────────────────────────────────
+
+_ES = {
+    "probe_window": 3,
+    "promote_score_vs_champion": 0.55,
+    "promote_score_vs_others": 0.50,
+    "promote_min_episodes": 50000,
+    "destroy_score_vs_champion": 0.40,
+    "destroy_min_episodes": 20000,
+}
+
+
+def test_decision_waits_for_the_promotion_floor_of_episodes() -> None:
+    """Meme au-dessus des deux seuils, rien ne se decide avant `promote_min_episodes`."""
+    decision = evaluate_pool_decision("P2", "P1", {"P1": 0.90, "P0": 0.90}, 49_999, _ES)
+    assert decision.verdict == POOL_VERDICT_CONTINUE
+    assert "50000" in decision.reason
+
+
+def test_decision_promotes_when_both_floors_are_held_after_the_episode_gate() -> None:
+    decision = evaluate_pool_decision("P2", "P1", {"P1": 0.56, "P0": 0.51}, 50_000, _ES)
+    assert decision.verdict == POOL_VERDICT_PROMOTE
+
+
+def test_decision_does_not_promote_on_the_champion_alone() -> None:
+    """0.56 contre le champion mais 0.49 contre un ancien : le second plancher retient."""
+    decision = evaluate_pool_decision("P2", "P1", {"P1": 0.56, "P0": 0.49}, 60_000, _ES)
+    assert decision.verdict == POOL_VERDICT_CONTINUE
+    assert "P0=0.490 < 0.50" in decision.reason
+
+
+def test_decision_stops_for_destruction_below_the_floor() -> None:
+    """Une etape part a 0.50 contre son champion par identite : 0.39 est une destruction."""
+    decision = evaluate_pool_decision("P2", "P1", {"P1": 0.39, "P0": 0.95}, 20_000, _ES)
+    assert decision.verdict == POOL_VERDICT_DESTROY
+    assert "0.390" in decision.reason
+
+
+def test_destruction_does_not_fire_before_its_own_episode_gate() -> None:
+    """Avant `destroy_min_episodes` il n'y a pas encore deux sondes : rien a moyenner."""
+    decision = evaluate_pool_decision("P2", "P1", {"P1": 0.20, "P0": 0.20}, 19_999, _ES)
+    assert decision.verdict == POOL_VERDICT_CONTINUE
+
+
+def test_destruction_wins_over_promotion_when_both_gates_are_open() -> None:
+    """Les seuils ne peuvent pas se croiser (verrou de validation), l'ORDRE le garantit quand meme."""
+    decision = evaluate_pool_decision("P2", "P1", {"P1": 0.30, "P0": 0.99}, 60_000, _ES)
+    assert decision.verdict == POOL_VERDICT_DESTROY
+
+
+def test_decision_is_a_noop_without_a_pool() -> None:
+    decision = evaluate_pool_decision("P0", None, {}, 1_000_000, _ES)
+    assert decision.verdict == POOL_VERDICT_CONTINUE
+
+
+def test_decision_refuses_to_read_a_champion_that_was_never_probed() -> None:
+    with pytest.raises(KeyError, match="P1"):
+        evaluate_pool_decision("P2", "P1", {"P0": 0.9}, 60_000, _ES)
+
+
+def test_promotion_and_gate_read_the_same_thresholds(curriculum) -> None:
+    """Une etape ne doit pas pouvoir s'arreter sur un critere plus faible que celui qui la jugera.
+
+    Les deux jeux de seuils vivent dans deux blocs du JSON (`early_stop` et `gate`) parce qu'ils
+    repondent a deux questions distinctes — quand s'arreter, et si l'etape est promue — mais ils
+    doivent porter les MEMES valeurs : un early-stop plus laxiste ferait s'arreter des runs que le
+    gate refuserait ensuite, apres avoir jete le budget restant.
+    """
+    gate = curriculum["gate"]
+    early_stop = curriculum["early_stop"]
+    assert float(early_stop["promote_score_vs_champion"]) == pytest.approx(
+        float(gate["min_score_vs_champion"])
     )
-    assert accepted is True
+    assert float(early_stop["promote_score_vs_others"]) == pytest.approx(
+        float(gate["min_score_vs_others"])
+    )
 
 
 # ── MONOTONIE : DIAGNOSTIC, PAS GATE ───────────────────────────────────────────────────────

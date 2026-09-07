@@ -2701,13 +2701,15 @@ class _EvalPoolOwnerMixin:
     # jamais remis à zéro. Les cadences, plafonds et budgets de ces callbacks sont pourtant des
     # grandeurs de l'ÉTAPE. Sans origine, un run P2 repris à 80 000 épisodes avec une cadence de
     # 10 000 enchaînait 8 sondes CONSÉCUTIVES (10 000, 20 000, … 80 000) avant son premier
-    # épisode — mesuré le 2026-09-04 : 8 × 18 min, barre muette — et `min_steps` comparé aux
-    # 13,7 M de pas hérités de l'archive ne gardait plus rien ; sur un exploiteur repris,
-    # `budget_cap` aurait été dépassé au premier pas (censure immédiate).
+    # épisode — mesuré le 2026-09-04 : 8 × 18 min, barre muette — et le garde de pas de l'époque
+    # (`min_steps`, supprimé le 2026-09-07 avec les décisions en pas) comparé aux 13,7 M de pas
+    # hérités de l'archive ne gardait plus rien ; sur un exploiteur repris, `budget_cap` aurait
+    # été dépassé au premier pas (censure immédiate).
     # L'origine est celle de l'ARCHIVE SOURCE de l'étape (`ai.curriculum.stage_origin`), pas
     # celle du modèle repris : après un crash, `--resume-from <checkpoint>` reprend au milieu de
-    # l'étape, et un compteur ancré sur ce checkpoint remettrait `budget_cap` et `min_steps` à
-    # zéro, prolongeant en silence le budget d'un exploiteur du nombre d'épisodes déjà joués.
+    # l'étape, et un compteur ancré sur ce checkpoint remettrait `budget_cap` et les seuils
+    # d'épisodes de l'early-stop à zéro, prolongeant en silence le budget d'un exploiteur du
+    # nombre d'épisodes déjà joués.
     _episode_origin: int = 0
     _timesteps_origin: int = 0
 
@@ -3035,11 +3037,24 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
 
 
 class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
-    """Arrêt anticipé si l'agent dépasse `threshold` vs TOUS les membres du pool.
+    """Sonde le pool à cadence fixe, arrête le run sur PROMOTION ou sur DESTRUCTION.
 
     Évalue tous les membres du pool en un seul appel à `evaluate_against_checkpoints`
-    tous les `eval_freq_episodes` épisodes, après `min_timesteps` steps.
-    Arrête l'entraînement si le seuil est dépassé sur `consecutive_evals` évals consécutives.
+    tous les `eval_freq_episodes` épisodes DE L'ÉTAPE, et lit les deux verdicts sur la MOYENNE
+    GLISSANTE des `probe_window` dernières sondes — celle que publie `pool_eval/vs_<tag>_3ep` —
+    et jamais sur la sonde brute. MESURE qui l'impose (2026-09-07) : deux appels de sonde sur un
+    modèle figé rendent le même score au bit près, donc les sauts de ±5 points entre sondes
+    voisines ne sont pas du bruit d'échantillonnage mais des blocs de parties corrélées qui
+    basculent ensemble ; décider sur une sonde brute revient à décider sur leur amplitude. La
+    règle elle-même vit dans `ai.curriculum.evaluate_pool_decision`, partagée avec le gate de fin
+    d'étape pour qu'un run ne puisse pas s'arrêter sur un critère plus faible que celui qui le
+    jugera.
+
+    VERROU DE PARITÉ à l'ouverture : une étape reprise à chaud part des poids d'un membre de son
+    propre pool, donc son score contre lui vaut 0.50 par IDENTITÉ. La sonde baseline le mesure et
+    le run est REFUSÉ s'il sort de `parity_range` — sans quoi une archive mauvaise, un
+    `_vec_normalize.pkl` désapparié ou un espace d'observation qui a changé produisent des heures
+    d'entraînement dont aucune mesure ne veut rien dire (2026-09-04 et 2026-09-05).
 
     Synchrone (même convention que ExploiterProbeCallback) : bloque le thread d'entraînement
     le temps de l'évaluation. Ne pas utiliser avec async_eval_enabled=True côté bot-eval
@@ -3049,37 +3064,37 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
     def __init__(
         self,
         pool_archives: List[Tuple[str, str]],
-        threshold: float,
-        min_timesteps: int,
-        consecutive_evals: int,
+        stage_name: str,
+        champion_label: str,
+        early_stop_cfg: Dict[str, Any],
         eval_freq_episodes: int,
         n_eval_episodes: int,
         training_config_name: str,
         rewards_config_name: str,
         metrics_tracker: Any,
+        parity_label: Optional[str],
+        parity_range: Tuple[float, float],
         intermediate_n_workers: Optional[int] = None,
         verbose: int = 1,
         episode_origin: int = 0,
         timesteps_origin: int = 0,
     ) -> None:
+        from ai.curriculum import validate_early_stop_block
+
         super().__init__(verbose)
         self._set_stage_origin(episode_origin, timesteps_origin)
         if not pool_archives:
             raise ValueError("PoolEarlyStoppingCallback : pool_archives ne peut pas être vide")
-        if not (0.0 < threshold <= 1.0):
+        labels = [label for _, label in pool_archives]
+        if champion_label not in labels:
             raise ValueError(
-                f"PoolEarlyStoppingCallback : threshold doit être dans ]0,1] (got {threshold!r})"
+                f"PoolEarlyStoppingCallback : champion_label {champion_label!r} absent du pool "
+                f"sondé {labels}. Le champion est l'étalon des deux verdicts, il doit être mesuré."
             )
-        if not isinstance(min_timesteps, int) or min_timesteps < 0:
-            raise ValueError(
-                f"PoolEarlyStoppingCallback : min_timesteps doit être un entier >= 0 "
-                f"(got {min_timesteps!r})"
-            )
-        if not isinstance(consecutive_evals, int) or consecutive_evals <= 0:
-            raise ValueError(
-                f"PoolEarlyStoppingCallback : consecutive_evals doit être un entier > 0 "
-                f"(got {consecutive_evals!r})"
-            )
+        # Le bloc vient du curriculum et y est déjà validé ; le revalider ici est ce qui protège
+        # les appels de test et tout futur appelant qui le construirait à la main — la règle lue
+        # par `evaluate_pool_decision` fait des `require_key` sur ces six clés au milieu du run.
+        validate_early_stop_block(early_stop_cfg, "PoolEarlyStoppingCallback : early_stop_cfg")
         if not isinstance(eval_freq_episodes, int) or eval_freq_episodes <= 0:
             raise ValueError(
                 f"PoolEarlyStoppingCallback : eval_freq_episodes doit être un entier > 0 "
@@ -3090,21 +3105,48 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
                 f"PoolEarlyStoppingCallback : n_eval_episodes doit être un entier > 0 "
                 f"(got {n_eval_episodes!r})"
             )
+        parity_min, parity_max = (float(parity_range[0]), float(parity_range[1]))
+        if not parity_min < 0.5 < parity_max:
+            raise ValueError(
+                f"PoolEarlyStoppingCallback : parity_range [{parity_min}, {parity_max}] doit "
+                "ENCADRER la parité 0.5 — une étape reprise part à 0.50 par identité."
+            )
+        if parity_label is not None and parity_label not in labels:
+            raise ValueError(
+                f"PoolEarlyStoppingCallback : parity_label {parity_label!r} absent du pool sondé "
+                f"{labels}. L'étape reprend ses poids de cette archive : sans elle dans le pool, "
+                "la parité d'ouverture n'est mesurée par rien."
+            )
+        if parity_label is None and episode_origin != 0:
+            # Un démarrage à froid n'a aucune parité à tenir ; une reprise à chaud en a une par
+            # construction. Laisser passer `None` ici rendrait le verrou silencieusement inopérant
+            # sur le seul chemin qu'il protège.
+            raise ValueError(
+                "PoolEarlyStoppingCallback : parity_label est obligatoire sur une étape reprise "
+                f"à chaud (episode_origin={episode_origin}). Passer l'étape source de son `init`."
+            )
         self.pool_archives = pool_archives
-        self.threshold = threshold
-        self.min_timesteps = min_timesteps
-        self.consecutive_evals = consecutive_evals
+        self.stage_name = stage_name
+        self.champion_label = champion_label
+        self.early_stop_cfg = early_stop_cfg
+        self.probe_window = int(early_stop_cfg["probe_window"])
         self.eval_freq_episodes = eval_freq_episodes
         self.n_eval_episodes = n_eval_episodes
         self.training_config_name = training_config_name
         self.rewards_config_name = rewards_config_name
         self.metrics_tracker = metrics_tracker
+        self.parity_label = parity_label
+        self.parity_range = (parity_min, parity_max)
         self.intermediate_n_workers = intermediate_n_workers
 
-        self._consecutive_above: int = 0
-        # Historique par label des dernieres sondes, pour la moyenne glissante (fenetre 3).
-        # Le gate early-stop reste sur la valeur BRUTE ; la moyenne sert uniquement a la trace.
+        # Historique par label des `probe_window` dernières sondes. Il porte la MOYENNE sur
+        # laquelle les deux verdicts se prennent : il est donc tenu à jour même sans
+        # `metrics_tracker`, contrairement à la publication TensorBoard qui, elle, en dépend.
         self._probe_score_history: Dict[str, deque] = {}
+        # Verdict qui a arrêté le run, relu par `train_with_scenario_rotation` pour le journal
+        # d'étape. None tant que le run n'a pas été arrêté par ce callback.
+        self.stop_verdict: Optional[str] = None
+        self.stop_reason: Optional[str] = None
         # En épisodes DE L'ÉTAPE (cf. `_EvalPoolOwnerMixin._set_stage_origin` / `_stage_episode`).
         self._next_probe_episode: int = eval_freq_episodes
         # Garde idempotente : SB3 appelle `_on_training_start` à chaque `learn()` (cf. le
@@ -3157,37 +3199,83 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
         labels = [label for _, label in self.pool_archives]
         missing = [lbl for lbl in labels if lbl not in scores]
         if missing:
-            safe_print(
-                f"⚠️  PoolEarlyStoppingCallback : baseline scores manquants pour {missing} "
-                "— point de référence ignoré."
+            # LEVE, là où l'ancien code se contentait d'un avertissement : cette baseline porte
+            # désormais le verrou de parité, et un score manquant est exactement l'état où il ne
+            # peut plus rien refuser. Continuer serait entraîner sans savoir d'où l'on part.
+            raise RuntimeError(
+                f"PoolEarlyStoppingCallback : baseline d'ouverture incomplète pour {missing} "
+                f"(étape {self.stage_name}). L'évaluation a écarté ces archives — architecture "
+                "incompatible, ou fichier absent. Le verrou de parité ne peut pas être posé."
             )
-            return
         score_str = ", ".join(f"{lbl}={scores[lbl]:.3f}" for lbl in labels)
         safe_print(f"📊 Pool baseline (warm start) : {score_str} @ep{current}")
-        # _consecutive_above et _next_probe_episode inchangés : point de référence, pas d'éval.
+        self._assert_opening_parity(scores)
+        # _next_probe_episode inchangé : point de référence, pas une éval de décision.
 
-    def _log_probe_scores(self, scores: Dict[str, float], episode: int) -> None:
-        """Met a jour l'historique glissant et publie sonde brute + moyenne (3 sondes max).
+    def _assert_opening_parity(self, baseline_scores: Dict[str, float]) -> None:
+        """Refuse le run si la baseline contre l'archive REPRISE n'est pas à la parité.
 
-        Appelee apres validation (scores complets) et AVANT la decision du gate : l'historique
-        est toujours a jour quand on construit le score_str. La moyenne est None a la premiere
-        sonde (1 seul point = pas d'average utile) et ne produit pas de scalaire dans ce cas.
+        À l'épisode 0 d'une étape `init: from:<source>`, le modèle EST celui de `<source>` : son
+        win-rate contre lui vaut 0.50 par identité, pas par espérance. Un écart hors fenêtre ne
+        peut donc pas être un résultat — c'est une panne d'appariement (mauvaise archive,
+        `_vec_normalize.pkl` absent ou désapparié, espace d'observation changé entre les deux
+        étapes), et elle est déjà là avant le premier épisode d'entraînement.
+
+        ARRÊTE le run au lieu de le signaler : les 2026-09-04 et 2026-09-05 ont chacun produit
+        des heures d'entraînement sur une baseline aberrante lue comme une mesure.
         """
-        if self.metrics_tracker is None:
+        if self.parity_label is None:
             return
+        score = float(baseline_scores[self.parity_label])
+        low, high = self.parity_range
+        if low <= score <= high:
+            safe_print(
+                f"🔒 Parité d'ouverture vérifiée : {score:.3f} contre {self.parity_label} "
+                f"(fenêtre [{low:.2f}, {high:.2f}])."
+            )
+            return
+        raise RuntimeError(
+            f"Étape {self.stage_name} : parité d'ouverture VIOLÉE — {score:.3f} contre "
+            f"{self.parity_label}, hors de [{low:.2f}, {high:.2f}]. L'étape reprend les poids de "
+            f"{self.parity_label} : à l'épisode 0 elle EST ce modèle, donc ce score vaut 0.50 par "
+            "identité. Un tel écart signale une archive reprise qui n'est pas celle attendue, un "
+            "`_vec_normalize.pkl` absent ou désapparié, ou un espace d'observation qui a changé "
+            "entre les deux étapes. Run ARRÊTÉ avant le premier épisode."
+        )
+
+    def _log_probe_scores(self, scores: Dict[str, float], episode: int) -> Dict[str, float]:
+        """Met a jour l'historique glissant, publie brut + moyenne, et REND les moyennes.
+
+        Appelee apres validation (scores complets) et AVANT les verdicts : ce sont les moyennes
+        rendues ici qui les portent. L'historique est tenu meme quand `metrics_tracker` est None —
+        seule la PUBLICATION en depend. L'inverse (l'ancien code sortait avant la mise a jour)
+        rendrait les verdicts dependants de la presence d'un tracker TensorBoard.
+
+        La moyenne publiee est None a la premiere sonde (1 seul point = identique au brut) ; la
+        valeur RENDUE, elle, existe des la premiere sonde, et c'est `evaluate_pool_decision` qui
+        decide de ce qu'elle en fait — ses deux seuils d'episodes n'ouvrent qu'apres deux sondes.
+        """
+        means: Dict[str, float] = {}
         for lbl, raw in scores.items():
-            h = self._probe_score_history.setdefault(lbl, deque(maxlen=3))
+            h = self._probe_score_history.setdefault(lbl, deque(maxlen=self.probe_window))
             h.append(raw)
-            rolling_mean: Optional[float] = float(np.mean(h)) if len(h) > 1 else None
-            self.metrics_tracker.log_pool_probe(lbl, raw, rolling_mean, episode)
+            means[lbl] = float(np.mean(h))
+            rolling_mean: Optional[float] = means[lbl] if len(h) > 1 else None
+            if self.metrics_tracker is not None:
+                self.metrics_tracker.log_pool_probe(lbl, raw, rolling_mean, episode)
+        return means
 
     def _on_step(self) -> bool:
-        # Pas et épisodes DE L'ÉTAPE : `min_steps` comme la cadence comptent depuis le début du
-        # run, pas depuis la naissance de la lignée (cf. `_EvalPoolOwnerMixin._set_stage_origin`).
-        if self._stage_timesteps() < self.min_timesteps:
-            return True
+        from ai.curriculum import (
+            POOL_VERDICT_CONTINUE,
+            POOL_VERDICT_DESTROY,
+            evaluate_pool_decision,
+        )
 
-        if self._stage_episode() < self._next_probe_episode:
+        # Épisodes DE L'ÉTAPE : la cadence compte depuis le début du run, pas depuis la naissance
+        # de la lignée (cf. `_EvalPoolOwnerMixin._set_stage_origin`).
+        stage_episode = self._stage_episode()
+        if stage_episode < self._next_probe_episode:
             return True
 
         # Affichage : compteur cumulatif, celui de l'axe TensorBoard et de la barre.
@@ -3204,40 +3292,31 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
             )
             return True
 
-        self._log_probe_scores(scores, current)
+        means = self._log_probe_scores(scores, current)
+        score_str = ", ".join(f"{lbl}={scores[lbl]:.3f}(→{means[lbl]:.3f})" for lbl in labels)
 
-        # Gate early-stop : valeur BRUTE. La moyenne glissante n'entre pas ici.
-        all_above = all(scores[lbl] >= self.threshold for lbl in labels)
-        score_str = ", ".join(
-            f"{lbl}={scores[lbl]:.3f}"
-            + (
-                f"(→{float(np.mean(self._probe_score_history[lbl])):.3f})"
-                if len(self._probe_score_history.get(lbl, ())) > 1
-                else ""
-            )
-            for lbl in labels
-        )
-        if all_above:
-            self._consecutive_above += 1
+        # DEUX POINTS AU MOINS, pour chaque membre. À une seule sonde, la « moyenne » EST la
+        # sonde brute : décider dessus rendrait le verdict à l'amplitude des bascules de blocs de
+        # parties corrélées, ce que cette fenêtre existe pour amortir. C'est aussi exactement le
+        # point où `pool_eval/vs_<tag>_3ep` commence à publier — le verdict se lit donc sur la
+        # même courbe que celle qu'on relit après coup.
+        if any(len(self._probe_score_history[lbl]) < 2 for lbl in labels):
             safe_print(
-                f"✅ Pool early-stop : {score_str} >= {self.threshold:.0%} "
-                f"({self._consecutive_above}/{self.consecutive_evals} évals consécutives) "
-                f"@ep{current}"
+                f"📊 Pool : {score_str} @ep{current} — première sonde de l'étape, pas encore de "
+                "moyenne : aucune décision."
             )
-            if self._consecutive_above >= self.consecutive_evals:
-                safe_print(
-                    f"🛑 Early stop déclenché : seuil {self.threshold:.0%} confirmé "
-                    f"{self.consecutive_evals}× consécutif(s) contre tous les membres du pool."
-                )
-                return False
-        else:
-            if self._consecutive_above > 0:
-                safe_print(
-                    f"↩️  Pool early-stop : seuil non atteint ({score_str}) "
-                    f"— compteur réinitialisé ({self._consecutive_above} → 0) @ep{current}"
-                )
-            else:
-                safe_print(f"📊 Pool early-stop : {score_str} (seuil {self.threshold:.0%}) @ep{current}")
-            self._consecutive_above = 0
+            return True
 
-        return True
+        decision = evaluate_pool_decision(
+            self.stage_name, self.champion_label, means, stage_episode, self.early_stop_cfg
+        )
+        if decision.verdict == POOL_VERDICT_CONTINUE:
+            safe_print(f"📊 Pool : {score_str} @ep{current} — {decision.reason}")
+            return True
+
+        self.stop_verdict = decision.verdict
+        self.stop_reason = decision.reason
+        marker = "🛑" if decision.verdict == POOL_VERDICT_DESTROY else "✅"
+        safe_print(f"{marker} Pool : {score_str} @ep{current}")
+        safe_print(f"{marker} {decision.reason}")
+        return False
