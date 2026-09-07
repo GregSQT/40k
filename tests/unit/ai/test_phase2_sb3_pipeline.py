@@ -202,60 +202,10 @@ class TestGpuMaskableDictRolloutBuffer:
         )
 
 
-# ══════════════════════════════════════════════════════════════════════════════════════════════
-# 2.2 — Gradient norm single reduction
-# ══════════════════════════════════════════════════════════════════════════════════════════════
-
-
-class TestGradientNormSingleReduction:
-
-    def _make_policy_with_grads(self, values: list[float]):
-        """Politique factice avec des gradients connus."""
-        params = []
-        for v in values:
-            p = torch.nn.Parameter(torch.zeros(1))
-            p.grad = torch.tensor([v])
-            params.append(p)
-
-        class FakePolicy:
-            def parameters(self):
-                return iter(params)
-
-        return FakePolicy()
-
-    def test_single_item_equals_manual_loop(self):
-        """La réduction GPU (torch.cat + norm) donne le même résultat que la boucle originale."""
-        grad_values = [3.0, 4.0]  # norme = 5.0
-        policy = self._make_policy_with_grads(grad_values)
-
-        # Méthode originale (boucle + N .item())
-        total_norm = 0.0
-        for p in policy.parameters():
-            if p.grad is not None:
-                total_norm += p.grad.data.norm(2).item() ** 2
-        original_norm = total_norm ** 0.5
-
-        # Méthode patchée (single .item())
-        grads = [p.grad.data.reshape(-1) for p in policy.parameters() if p.grad is not None]
-        patched_norm = torch.cat(grads).norm(2).item()
-
-        assert math.isclose(original_norm, patched_norm, rel_tol=1e-6), (
-            f"Normes divergent : {original_norm} vs {patched_norm}"
-        )
-        assert math.isclose(patched_norm, 5.0, rel_tol=1e-6), (
-            f"Norme attendue 5.0, got {patched_norm}"
-        )
-
-    def test_no_grad_returns_nothing(self):
-        """Sans gradient, la condition `if grads` est False — pas d'erreur."""
-        class FakePolicy:
-            def parameters(self):
-                p = torch.nn.Parameter(torch.zeros(1))
-                # p.grad reste None
-                return iter([p])
-
-        grads = [p.grad.data.reshape(-1) for p in FakePolicy().parameters() if p.grad is not None]
-        assert not grads, "pas de grad → liste vide attendue"
+# La section « 2.2 — Gradient norm single reduction » vivait ici. Elle réimplémentait le recalcul
+# de la norme sur `p.grad` que `ai/training_callbacks.py` faisait après l'écrêtage : ce recalcul a
+# été supprimé au profit du retour de `clip_grad_norm_`. Verrou de remplacement :
+# tests/unit/ai/test_gradient_norm_is_pre_clip.py.
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -375,7 +325,8 @@ class TestPatchedTrainNumericalParity:
 
         # Vérifier que les métriques finies sont enregistrées.
         for key in ("train/entropy_loss", "train/policy_gradient_loss",
-                    "train/value_loss", "train/approx_kl", "train/clip_fraction"):
+                    "train/value_loss", "train/approx_kl", "train/clip_fraction",
+                    "train/gradient_norm", "train/grad_clip_fraction"):
             assert key in recorded, f"{key!r} non enregistré"
             val = recorded[key]
             assert math.isfinite(val), f"{key!r} = {val} (non fini)"

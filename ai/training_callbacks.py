@@ -828,25 +828,13 @@ class MetricsCollectionCallback(BaseCallback):
             ntv = getattr(_model.logger, 'name_to_value', {})
             # Le marqueur d'update et NON `if ntv:` : `_handle_episode_end` appelle `logger.dump`
             # a CHAQUE fin d'episode avec les seules cles `game_critical/*`. Sans ce filtre, chaque
-            # episode declenchait une capture complete — norme du gradient recalculee sur tous les
-            # parametres (une synchronisation GPU) et `train/ent_coef` reinjecte — pour un dump
-            # qui ne porte AUCUN update PPO : les gradients y sont ceux laisses par le dernier
-            # `train()`. Mesure du run neuf du 2026-08-29, ou aucune enveloppe ne s'empilait :
+            # episode declenchait une capture complete — `train/ent_coef` reinjecte et les
+            # scalaires PPO du dernier `train()` republies — pour un dump qui ne porte AUCUN
+            # update PPO. Mesure du run neuf du 2026-08-29, ou aucune enveloppe ne s'empilait :
             # 101 415 points sur `training_diagnostic/entropy_coef` pour 100 000 episodes et
             # 1 063 updates — un point par EPISODE au lieu d'un par update.
             if _ppo_update_key in ntv:
                 model_stats: Dict[str, Any] = dict(ntv)
-                if hasattr(_model, 'policy') and hasattr(_model.policy, 'parameters'):
-                    # Réduction en une seule op GPU + un seul .item() au lieu de N syncs.
-                    grads = [
-                        p.grad.data.reshape(-1)
-                        for p in cast(Any, _model.policy).parameters()
-                        if p.grad is not None
-                    ]
-                    if grads:
-                        model_stats['train/gradient_norm'] = (
-                            torch.cat(grads).norm(2).item()
-                        )
                 if hasattr(_model, "ent_coef"):
                     ent_coef_value: Any = cast(Any, _model).ent_coef
                     if isinstance(ent_coef_value, torch.Tensor):
@@ -996,13 +984,16 @@ class MetricsCollectionCallback(BaseCallback):
             elif recent_entropy > 2.0:
                 print(f"      -> Decrease ent_coef (exploration too high)")
         
-        # Check gradient_norm
+        # Check gradient_norm — norme BRUTE, mesuree avant ecretage : elle n'est plus bornee par
+        # `max_grad_norm` et le seuil 10 devient discriminant (mesuree ~1.2 en debut de run).
+        # Baisser `max_grad_norm` ne la deplacerait pas : ce plafond borne le pas applique, pas la
+        # norme publiee ici.
         if hasattr(self.metrics_tracker, 'latest_gradient_norm') and self.metrics_tracker.latest_gradient_norm:
             grad_norm = self.metrics_tracker.latest_gradient_norm
             grad_status = "✅" if grad_norm < 10 else "⚠️ "
-            print(f"   Gradient Norm:      {grad_norm:.3f} {grad_status} (target: <10)")
+            print(f"   Gradient Norm:      {grad_norm:.3f} {grad_status} (target: <10, raw)")
             if grad_norm > 10:
-                print(f"      -> Reduce max_grad_norm or learning_rate")
+                print(f"      -> Reduce learning_rate (max_grad_norm clips the step, not this)")
         
         print(f"\n💡 TensorBoard: {self.metrics_tracker.log_dir}")
         print(f"   -> Focus on 00_critical/ namespace for hyperparameter tuning")

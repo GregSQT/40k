@@ -107,6 +107,20 @@ def _mean_item(tensors: list[th.Tensor]) -> float:
     return th.stack(tensors).mean().item() if tensors else float("nan")
 
 
+def _grad_norm_stats(norms: list[th.Tensor], max_norm: float) -> tuple[float, float]:
+    """Moyenne des normes BRUTES et part des minibatches ou l'ecretage a mordu.
+
+    `norms` porte les valeurs RETOURNEES par `clip_grad_norm_`, mesurees avant ecretage.
+    Un seul `.tolist()` pour les deux scalaires — meme doctrine de sync que `_mean_item`.
+    """
+    if not norms:
+        return float("nan"), float("nan")
+    stacked = th.stack(norms)
+    both = th.stack([stacked.mean(), (stacked > max_norm).float().mean()])
+    mean, fraction = both.tolist()
+    return mean, fraction
+
+
 class PatchedMaskablePPO(MaskablePPO):
     """MaskablePPO avec optimisations learner Phase 2 (GPU buffer, logging différé, single RPC)."""
 
@@ -141,6 +155,10 @@ class PatchedMaskablePPO(MaskablePPO):
         value_losses_t: list[th.Tensor] = []
         entropy_losses_t: list[th.Tensor] = []
         clip_fractions_t: list[th.Tensor] = []
+        # Norme du gradient AVANT ecretage, telle que `clip_grad_norm_` la retourne. Elle est
+        # deja calculee par l'appel qui ecrete : la recuperer ne coute rien, la recalculer sur
+        # `p.grad` apres coup ne peut donner que min(brute, max_grad_norm).
+        grad_norms_t: list[th.Tensor] = []
         # approx_kl : tenseurs si target_kl absent (pas de sync inter-minibatch) ;
         # floats si target_kl présent (early-stopping nécessite la valeur scalaire).
         approx_kl_divs_t: list[th.Tensor] = []
@@ -151,11 +169,15 @@ class PatchedMaskablePPO(MaskablePPO):
         _diag_drift_mean_mb0: th.Tensor | None = None
         _diag_logprob_drift_mb0: th.Tensor | None = None
         _diag_ratio_mb0: th.Tensor | None = None
-        # MESURE TEMPORAIRE (2026-09-06) : decomposition de la norme du gradient par terme.
-        # Repond a « le gradient est ecrete dans 93 % des updates a max_grad_norm 0.5 — quel
-        # terme le domine ». Les VALEURS de loss ne repondent pas : policy_loss vaut ~0.0001
-        # parce que normalize_advantage centre les avantages et que le ratio vaut 1 au premier
-        # minibatch, ce qui ne dit rien de son gradient. A RETIRER une fois la mesure exploitee.
+        # Decomposition de la norme du gradient par terme de la loss (2026-09-06). INSTRUMENT
+        # PERMANENT : c'est lui qui a regle vf_coef a 0.15, et toute nouvelle lignee (x5) devra
+        # refaire ce reglage, qui depend de l'echelle des recompenses et de l'etat du critic.
+        # Les VALEURS de loss ne repondent pas a la question : policy_loss vaut ~0.0001 parce que
+        # normalize_advantage centre les avantages et que le ratio vaut 1 au premier minibatch,
+        # ce qui ne dit rien de son gradient.
+        # COUT : trois `backward(retain_graph=True)` supplementaires par UPDATE — minibatch 0 de
+        # l'epoch 0 seulement, pas par minibatch — plus la retention du graphe de ce minibatch
+        # jusqu'au backward reel.
         _diag_grad_norms_mb0: dict[str, float] | None = None
         continue_training = True
         loss: th.Tensor = th.tensor(float("nan"))
@@ -218,8 +240,8 @@ class PatchedMaskablePPO(MaskablePPO):
 
                 loss = policy_loss + self.ent_coef * entropy_loss + self.vf_coef * value_loss
 
-                # MESURE TEMPORAIRE : norme du gradient de CHAQUE terme, pondere comme dans la
-                # loss. `clip_grad_norm_` avec max_norm=inf retourne la norme sans rien ecreter.
+                # Norme du gradient de CHAQUE terme, pondere comme dans la loss.
+                # `clip_grad_norm_` avec max_norm=inf retourne la norme sans rien ecreter.
                 # retain_graph=True : trois backward successifs sur le meme graphe, libere par le
                 # backward reel plus bas. Minibatch 0 / epoch 0 seulement, comme les diagnostics
                 # voisins — trois backward par UPDATE, pas par minibatch.
@@ -259,7 +281,9 @@ class PatchedMaskablePPO(MaskablePPO):
 
                 self.policy.optimizer.zero_grad()
                 loss.backward()
-                th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                grad_norms_t.append(
+                    th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
+                )
                 self.policy.optimizer.step()
 
             if not continue_training:
@@ -270,6 +294,7 @@ class PatchedMaskablePPO(MaskablePPO):
         clip_frac_mean = _mean_item(clip_fractions_t)
         value_loss_mean = _mean_item(value_losses_t)
         entropy_loss_mean = _mean_item(entropy_losses_t)
+        grad_norm_mean, grad_clip_fraction = _grad_norm_stats(grad_norms_t, self.max_grad_norm)
 
         if approx_kl_divs_t:
             approx_kl_mean = _mean_item(approx_kl_divs_t)
@@ -289,6 +314,11 @@ class PatchedMaskablePPO(MaskablePPO):
         self.logger.record("train/value_loss", value_loss_mean)
         self.logger.record("train/approx_kl", approx_kl_mean)
         self.logger.record("train/clip_fraction", clip_frac_mean)
+        # Norme BRUTE, moyennee sur les minibatches de l'update, et part de ces minibatches ou
+        # elle depassait `max_grad_norm`. La norme APRES ecretage n'est pas republiee : elle vaut
+        # min(brute, max_grad_norm), donc elle se deduit de ces deux scalaires et de la config.
+        self.logger.record("train/gradient_norm", grad_norm_mean)
+        self.logger.record("train/grad_clip_fraction", grad_clip_fraction)
         self.logger.record("train/loss", loss.item())
         self.logger.record("train/explained_variance", explained_var)
         self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
@@ -315,7 +345,7 @@ class PatchedMaskablePPO(MaskablePPO):
             "diag/ratio_mb0_mean",
             _diag_ratio_mb0.item() if _diag_ratio_mb0 is not None else _nan,
         )
-        # MESURE TEMPORAIRE : decomposition de la norme du gradient (cf. _diag_grad_norms_mb0).
+        # Decomposition de la norme du gradient par terme (cf. _diag_grad_norms_mb0).
         for _term_name in ("policy", "value", "entropy"):
             self.logger.record(
                 f"diag/grad_norm_{_term_name}_mb0",
