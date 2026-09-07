@@ -305,6 +305,19 @@ def is_exploiter_stage(stage: Dict[str, Any]) -> bool:
     return str(require_key(stage, "role")) == "exploiter"
 
 
+def exploiter_stage_names(curriculum: Dict[str, Any]) -> List[str]:
+    """Les etapes exploiteur, dans l'ordre d'execution declare.
+
+    « Qui sont les exploiteurs » est un fait du curriculum, au meme titre que `stage_order` ou
+    `stage_pool_members` : le lire ici est ce qui empeche un appelant d'en tenir sa propre liste,
+    ecrite en dur, qui resterait muette sur une etape ajoutee apres elle.
+    """
+    return [
+        name for name in stage_order(curriculum)
+        if is_exploiter_stage(require_stage(curriculum, name))
+    ]
+
+
 def load_exploiter_config(curriculum: Dict[str, Any]) -> Dict[str, Any]:
     """Le bloc `exploiter_config` du curriculum. Absent = erreur explicite."""
     cfg = require_key(curriculum, "exploiter_config")
@@ -746,9 +759,7 @@ def validate_curriculum(curriculum: Dict[str, Any], source: str = "<curriculum>"
 
     # Validation du bloc exploiter_config si present (obligatoire des qu'il existe au moins
     # une etape exploiteur dans le curriculum).
-    has_exploiter = any(
-        is_exploiter_stage(require_stage(curriculum, name)) for name in order
-    )
+    has_exploiter = bool(exploiter_stage_names(curriculum))
     if "exploiter_config" in curriculum:
         cfg = curriculum["exploiter_config"]
         if not isinstance(cfg, dict):
