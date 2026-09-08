@@ -1060,6 +1060,12 @@ def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
     cours de phase, le statut est maintenu par ``compute_hidden_status_for_unit`` sur la seule
     escouade touchée (cf. sa docstring).
     """
+    # Contrat du balayage COMPLET, inchangé par l'extraction : il travaille sur le terrain, donc
+    # un état sans `terrain_areas` est mal formé pour lui — exigé ICI et inconditionnellement,
+    # même si aucune unité n'est hideable. Le rafraîchissement ciblé, lui, ne lit la clé que s'il
+    # atteint la géométrie : l'exiger de son côté durcirait `destroy_model`, qui n'a pas ce
+    # contrat et tourne sur des états volontairement minimaux.
+    require_key(game_state, "terrain_areas")
     units_cache = require_key(game_state, "units_cache")
     for unit_id in list(units_cache.keys()):
         compute_hidden_status_for_unit(game_state, str(unit_id))

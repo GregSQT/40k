@@ -20,8 +20,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
+import pytest
+
+from shared.data_validation import ConfigurationError
+
 from engine.phase_handlers.shared_utils import destroy_model
 from engine.phase_handlers.shooting_handlers import (
+    compute_hidden_statuses,
     shooting_build_valid_target_pool,
     shooting_phase_start,
 )
@@ -127,6 +132,20 @@ def test_squad_becomes_hidden_mid_phase_and_leaves_the_target_pool() -> None:
     )
     # 13.09 : il ne reste que des figurines dans la zone obscurante → escouade cachée MAINTENANT.
     assert target["hidden"] is True, "13.09 : le statut doit suivre la perte, pas la fin de phase"
+
+
+def test_full_sweep_still_requires_terrain_areas() -> None:
+    """Le balayage complet exige ``terrain_areas``, même sans une seule unité hideable.
+
+    VERROU DE NON-RÉGRESSION de l'extraction. `compute_hidden_statuses` lisait la clé en tête de
+    fonction, donc TOUJOURS ; une fois le corps déplacé dans `compute_hidden_status_for_unit`,
+    la lecture s'est retrouvée derrière trois retours anticipés (non hideable, déjà tiré, unité
+    absente) et un état sans terrain ne levait plus. Le cache vide est le cas le plus
+    discriminant : la boucle n'itère sur rien, donc SEUL un contrat porté par la fonction
+    elle-même peut encore lever.
+    """
+    with pytest.raises(ConfigurationError):
+        compute_hidden_statuses({"units_cache": {}})
 
 
 def test_hidden_refresh_covers_every_death_cause() -> None:
