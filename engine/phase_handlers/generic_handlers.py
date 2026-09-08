@@ -148,11 +148,18 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         game_state["units_shot"].add(str(unit_id))
         # Rule 13.09, second membre : « that model's unit did not make one or more ranged attacks
         # during this turn ». La clause vient de tomber pour CETTE escouade, qui cesse d'être
-        # cachée à cet instant — pas au début de la phase de tir suivante. Sans ce rafraîchissement,
-        # une escouade qui tire depuis une zone obscurante restait marquée cachée jusqu'à la fin de
-        # la phase, donc protégée par la porte de detection range alors qu'elle vient de se révéler.
-        # `destroy_model` couvre le membre géométrique ; celui-ci n'a pas d'autre déclencheur, la
-        # ligne ci-dessus étant le SEUL site d'alimentation de `units_shot`.
+        # cachée à cet instant — pas au début de la phase de tir suivante. `destroy_model` couvre
+        # le membre géométrique ; celui-ci n'a pas d'autre déclencheur, la ligne ci-dessus étant le
+        # SEUL site d'alimentation de `units_shot`.
+        #
+        # PORTÉE EXACTE, à ne pas surestimer : dans le moteur actuel la valeur périmée n'est lue
+        # par AUCUN pool de cibles. `shooting_build_activation_pool` filtre sur `current_player`,
+        # donc seul le joueur actif tire pendant sa phase, et le statut de ses propres escouades
+        # est réécrit par le balayage complet au début de la phase de tir adverse (en PvP, à chaque
+        # sérialisation). Ce rafraîchissement rend donc l'ÉTAT exact entre-temps — ses quatre
+        # lecteurs et l'affichage PvP — plutôt qu'il ne corrige un ciblage aujourd'hui atteignable.
+        # Il ferme aussi la clause par avance pour tout tir hors de son propre tour.
+        # Fréquence mesurée du statut faux : 42 activations de tir sur 682 (20 épisodes).
         #
         # PAR la fonction de règle et non par un `unit["hidden"] = False` écrit ici : l'issue est
         # certes déterministe (l'escouade vient d'entrer dans `units_shot`, donc le recalcul prend

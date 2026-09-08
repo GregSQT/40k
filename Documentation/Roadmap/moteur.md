@@ -27,10 +27,17 @@ rédaction initiale n'en voyait qu'un, et s'y tenir fermait la règle à moitié
 2. **Membre « did not make one or more ranged attacks during this turn »** →
    `end_activation(arg3="SHOOTING")` (`generic_handlers.py`), seul site d'alimentation de
    `units_shot` et donc seul déclencheur possible de ce membre. Sans lui, une escouade qui tirait
-   depuis une zone obscurante restait marquée cachée jusqu'à la fin de la phase, donc protégée par
-   la porte de detection range alors qu'elle venait de se révéler. Le rafraîchissement passe par la
-   fonction de règle plutôt que par un `hidden = False` écrit sur place : l'issue y est
-   déterministe, mais la coder en dur ouvrirait un second endroit où vit 13.09.
+   depuis une zone obscurante restait marquée cachée jusqu'à la fin de la phase — 42 activations de
+   tir sur 682 sur 20 épisodes. Le rafraîchissement passe par la fonction de règle plutôt que par
+   un `hidden = False` écrit sur place : l'issue y est déterministe, mais la coder en dur ouvrirait
+   un second endroit où vit 13.09.
+
+   **Portée exacte de ce second déclencheur**, mesurée et non extrapolée : c'est un durcissement,
+   pas la correction d'un ciblage aujourd'hui atteignable. `shooting_build_activation_pool` filtre
+   sur `current_player`, donc seul le joueur actif tire pendant sa phase et le statut périmé de ses
+   propres escouades est réécrit par le balayage complet au début de la phase adverse. Ce que le
+   déclencheur apporte : un état exact entre-temps pour les quatre lecteurs de `unit['hidden']` et
+   pour l'affichage PvP, et la clause fermée par avance pour tout tir hors de son propre tour.
 
 **Contrat D1 étendu dans le temps** : `test_d1_survives_a_loss_mid_phase`
 (`test_squad_obs_hidden_enemies.py`) vérifie que l'observation et le pool basculent ensemble après
