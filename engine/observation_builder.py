@@ -1554,8 +1554,9 @@ class ObservationBuilder:
         )
         # Mots-clés de CATÉGORIE. La source est `unit_keywords_upper`, celle qu'exécute la
         # RÉSOLUTION de [ANTI-X], et non `compute_hideable` : les deux ne normalisent pas
-        # pareil (celle-ci joint aussi `FACTION_KEYWORDS` et remplace espaces et tirets), et
-        # `game_state._normalize_keyword` documente qu'une seconde normalisation concurrente a
+        # pareil — `unit_keywords_upper` joint aussi `FACTION_KEYWORDS` et remplace espaces et
+        # tirets par `_`, là où `compute_hideable` ne lit que `UNIT_KEYWORDS` en strip/lower —,
+        # et `game_state._normalize_keyword` documente qu'une seconde normalisation concurrente a
         # déjà pu faire diverger [ANTI] d'une clause interrogeant le même champ. Écrire l'obs
         # avec la fonction de la règle est ce qui rend les deux indissociables.
         #
