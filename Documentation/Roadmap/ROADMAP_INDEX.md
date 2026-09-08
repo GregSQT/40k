@@ -136,6 +136,7 @@ Détail : [training.md#regime-lignee-2026-09-07](training.md#regime-lignee-2026-
 |---|---|---|---|
 | training | 🟡 **Obs — canaux « zone obscurante » et « exposition »** (`GRID_CHANNELS` 9→11) — livré en worktree le 2026-09-08, **non mergé** : merge après le run en cours, `--new` obligatoire, à batcher avec « OC live + secured » | [training.md#canaux-obscurant-exposition](training.md#canaux-obscurant-exposition) | 🚫 |
 | training | ✅ **Obs — `hidden` 13.09 sur toutes les entités + porte de détection** — `los_can_see` = visible ET détectable ; mergé le 2026-09-08, `obs_size` inchangé (16811), aucun `--new` propre | [training.md#hidden-detection-obs](training.md#hidden-detection-obs) | 🚫 |
+| moteur | ✅ **13.06 — le move gym peut FINIR EN HAUTEUR** — déclaration de montée sur les `CHOICE_*` existants, niveau par figurine, coût vertical facturé à celle qui monte ; livré le 2026-09-09. `obs_size` 16811 → **16895** et `GRID_CHANNELS` 11 → **12** : **`--new` obligatoire**. Rendement mesuré : 0,8 % des cellules masquées | [moteur.md#verticalite-move-gym](moteur.md#verticalite-move-gym) | 🚫 |
 | moteur | ✅ **13.09 — statut « caché » rafraîchi à chaque perte ET à chaque tir** — option C livrée le 2026-09-08 aux deux choke-points, un par membre de la règle ; change les parties jouées, `--new` obligatoire pour tout modèle pré-diff | [moteur.md#hidden-fraicheur](moteur.md#hidden-fraicheur) | 🚫 |
 
 Autres tâches J4 archivées → `archives/doc.md#hygiene-correctifs-ponctuels`

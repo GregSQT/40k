@@ -99,9 +99,48 @@ Interruptions réactives pendant le tour adverse — cas le plus complexe du gym
 
 ---
 
+## ✅ 13.06 — le move gym peut finir en hauteur {#verticalite-move-gym}
+
+**Livré le 2026-09-09.** Le move d'escouade du pipeline gym atterrissait TOUJOURS au sol :
+`build_rigid_plan` écrivait `SQUAD_RIGID_MOVE_DESTINATION_LEVEL` pour toutes ses figurines et le
+pool d'ancre sortait avant son bloc multi-niveaux. Mesuré avant : 710 275 destinations sur 6
+épisodes, **aucune** à l'étage, alors que les deux terrains d'entraînement portent 8 étages chacun.
+
+Ce qui change : une escouade **déclare** (13.06, point de choix `ascent_declaration`, sur les
+emplacements `CHOICE_*` existants — zéro action nouvelle) qu'elle finira en hauteur, puis chaque
+figurine finit au niveau résolu à SA case d'arrivée. Une escouade à cheval sol/étage est un plan
+légal (03.03 tolère 5" de dénivelé), pas un cas limite. Le coût vertical est facturé **à la
+figurine qui monte**, dans son propre budget de trajet — jamais en forfait au bloc : la pénalité de
+descente n'en est pas le miroir (elle dépend du départ, la montée dépend de l'arrivée).
+
+**Sans déclaration, tout le pipeline est bit-à-bit celui d'avant** — c'est ce qui borne le lot.
+
+**Impose un retrain `--new`** : `obs_size` 16811 → 16895 (`max_floor_height`, `has_ground_model`,
+`elevated`) et `GRID_CHANNELS` 11 → 12 (`occupant_level`). Sans ces features la montée serait un
+état CACHÉ à effet sur la récompense (+1 BS de Plunging Fire 22.05, coût de descente au move
+suivant) — le motif d'aliasing qui a déjà coûté un run à ce projet.
+
+**Rendement mesuré, à connaître avant d'espérer** : sur 3 parties gym à x1, déclaration toujours
+acceptée, **62 cellules sur 7 408** offertes par le masque (0,8 %) mettent au moins une figurine à
+l'étage. La verticalité est désormais *jouable*, elle n'est pas *fréquente* : à x1 un socle ne tient
+que sur 34 des 72 cases d'étage de `terrain-mc1` (13.06 interdit tout débordement du bord), et la
+montée coûte 3" sur un MOVE de 6".
+
+Reste ouvert : la **charge**, le **pile-in** et la **consolidation** gardent leur destination au
+sol (`SQUAD_RIGID_MOVE_DESTINATION_LEVEL`), et **FLY + étages** reste hors périmètre — le pool
+d'ancre renvoie avant son bloc multi-niveaux quand la traversée est active, exclusion préexistante.
+
+---
+
 ## Phase B — Observation des niveaux {#phase-b}
 
-**Suspendu.** Après Phase A' validée ET vérification du chantier LoS 3D (`combat_utils`/WASM, câblage incomplet).
+**Partiellement levé le 2026-09-09** par le lot ci-dessus : l'observation porte désormais la
+hauteur des unités (`max_floor_height`, `has_ground_model`), le bit `elevated` par figurine et le
+canal de grille `occupant_level`. Ce qui restait de la Phase B — la LoS 3D côté `combat_utils`/WASM
+— est inchangé.
+
+**Suspendu pour le reste.** Après Phase A' validée ET vérification du chantier LoS 3D
+(`combat_utils`/WASM, câblage incomplet).
 
 → `Documentation/Chantiers/v11/tranches_et_ruptures.md`
 

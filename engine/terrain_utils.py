@@ -398,6 +398,56 @@ def resolve_model_floor_level(
     return 0
 
 
+_FLOOR_LEVEL_BY_CELL_CACHE: "Dict[Tuple[int, Any, str, Any, int], Mapping[Tuple[int, int], int]]" = {}
+_FLOOR_LEVEL_BY_CELL_CACHE_MAX = 16
+
+
+def floor_level_by_cell(
+    terrain_areas: List[Dict[str, Any]],
+    base_shape: str,
+    base_size: "int | list[int]",
+    orientation: int,
+) -> Mapping[Tuple[int, int], int]:
+    """Niveau EFFECTIF le plus haut où ce socle tient, pour chaque cellule d'étage — SOURCE UNIQUE.
+
+    Rend ``{(col, row): niveau}`` restreint aux cellules dont le niveau résolu est >= 1 : une
+    cellule absente vaut 0 (sol), qui est le cas de l'immense majorité du plateau. C'est le
+    pendant PRÉCALCULÉ de ``resolve_model_floor_level``, qui répond à la même question une
+    cellule à la fois : les deux doivent rendre le même niveau, et c'est cette fonction qui
+    appelle l'autre pour que la règle ne vive qu'à un endroit.
+
+    Existe parce que l'érosion du masque de move interroge ce niveau pour CHAQUE figurine et
+    CHAQUE candidate du pool (~2800 × 20) : résoudre à la volée y refait le test d'empreinte des
+    dizaines de milliers de fois par activation, alors que la réponse ne dépend que du terrain et
+    de la géométrie du socle. Le parcours ne visite que les hexes d'étage, jamais le plateau.
+
+    Niveaux parcourus du plus haut au plus bas : une figurine qui tient sur deux étages
+    superposés appartient au plus haut (13.06 ne connaît pas de position intermédiaire).
+    """
+    index = _floor_index(terrain_areas)
+    size_key = tuple(base_size) if isinstance(base_size, list) else base_size
+    key = (id(terrain_areas), _floor_signature(terrain_areas), str(base_shape), size_key, int(orientation))
+    with _FLOOR_INDEX_LOCK:
+        cached = _FLOOR_LEVEL_BY_CELL_CACHE.get(key)  # get allowed (géométrie pas encore vue)
+        if cached is not None:
+            return cached
+    resolved: Dict[Tuple[int, int], int] = {}
+    for level in reversed(index.levels):
+        for cell in index.hexes_by_level.get(level, frozenset()):  # get allowed (niveau sans plancher)
+            if cell in resolved:
+                continue
+            if resolve_model_floor_level(
+                int(cell[0]), int(cell[1]), base_shape, base_size, int(orientation),
+                int(level), terrain_areas,
+            ) == level:
+                resolved[cell] = int(level)
+    with _FLOOR_INDEX_LOCK:
+        _FLOOR_LEVEL_BY_CELL_CACHE[key] = resolved
+        if len(_FLOOR_LEVEL_BY_CELL_CACHE) > _FLOOR_LEVEL_BY_CELL_CACHE_MAX:
+            del _FLOOR_LEVEL_BY_CELL_CACHE[next(iter(_FLOOR_LEVEL_BY_CELL_CACHE))]
+    return resolved
+
+
 def resolved_floor_height_at(
     terrain_areas: List[Dict[str, Any]],
     col: int,

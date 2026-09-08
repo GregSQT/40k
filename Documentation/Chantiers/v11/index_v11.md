@@ -689,10 +689,17 @@ séparés d'autrefois entretenaient une fiction, celui qui affichait « distance
    le verbe et `from` — c'est la dérive de cette grammaire, écrite en cinq exemplaires, qui a
    produit le défaut le plus coûteux du lot.
 
-**Ce qui reste ouvert :** `build_rigid_plan` force le niveau 0 alors que
-`translate_squad_to_destination` n'écrit que col/row — une unité à l'étage est validée contre le
-sol. Défaut **préexistant et documenté** (`SQUAD_RIGID_MOVE_DESTINATION_LEVEL`, §0.34), partagé
-par move, charge, advance et pile-in : le move réactif y est désormais conforme, pas plus faux.
+**Ce qui reste ouvert — RÉDUIT le 2026-09-09.** `build_rigid_plan` forçait le niveau 0 alors que
+`translate_squad_to_destination` n'écrit que col/row : une unité à l'étage était validée contre le
+sol. Défaut **préexistant et documenté** (`SQUAD_RIGID_MOVE_DESTINATION_LEVEL`, §0.34), partagé par
+move, charge, advance et pile-in.
+
+Le **MOVE** en est sorti : sur déclaration de montée (13.06), le plan porte le niveau **par
+figurine**, l'érosion du masque le résout à la case d'arrivée et le coût vertical est facturé à la
+figurine qui monte. Sans déclaration le plan rend toujours le sol, donc le régime courant est
+inchangé. La **charge**, le **pile-in** et la **consolidation** gardent le niveau 0 : la constante
+reste leur réponse entière, et c'est désormais la seule portée qu'elle a.
+Voir `Documentation/Roadmap/moteur.md#verticalite-move-gym`.
 
 <a id="s0.61"></a>
 ### 0.61 Le garde ANTI-RUNAWAY était muet, et son compteur d'épisodes divergeait — ✅ CORRIGÉ (2026-08-03)

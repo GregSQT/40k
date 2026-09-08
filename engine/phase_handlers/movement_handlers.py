@@ -8,7 +8,8 @@ ZERO TOLERANCE for state storage or wrapper patterns
 """
 
 from typing import (
-    AbstractSet, Dict, FrozenSet, List, NamedTuple, Tuple, Set, Optional, Any, Sequence, cast
+    AbstractSet, Dict, FrozenSet, List, Mapping, NamedTuple, Tuple, Set, Optional, Any,
+    Sequence, cast
 )
 import math
 import numpy as np
@@ -45,7 +46,7 @@ from .shared_utils import (
     squad_move_is_fall_back,
     roll_advance_for_squad, unit_is_in_strategic_reserves,
     MovePlan, parse_model_plan_with_orientation, plan_entry_level, plan_entry_model_orientation,
-    resolve_model_effective_level,
+    resolve_model_effective_level, SQUAD_RIGID_MOVE_DESTINATION_LEVEL,
 )
 from engine.hex_utils import (
     _hex_center,
@@ -539,6 +540,251 @@ def apply_fly_declaration_decision(
     game_state.setdefault(entry.resolved_key, set()).add(str(squad_id))
     if declared:
         game_state.setdefault(entry.declared_key, set()).add(str(squad_id))
+    game_state["_unit_move_version"] += 1
+
+
+#: Sets 13.06 de la DÉCLARATION DE MONTÉE, pendants exacts des deux sets 21.03 ci-dessus et pour
+#: la même raison : « je ne monte pas » laisse le set de déclaration VIDE, donc indiscernable
+#: d'une question jamais posée — sans le second set le point de choix se reposerait à chaque
+#: construction de masque et l'escouade ne bougerait plus jamais.
+#:
+#: Phase `move` UNIQUEMENT. 13.06 autorise à finir sur un étage n'importe quel mouvement, mais la
+#: charge, le pile-in et la consolidation gardent leur destination au sol
+#: (`SQUAD_RIGID_MOVE_DESTINATION_LEVEL`) : leur ouvrir la verticalité est un autre périmètre, et
+#: une clé de phase en plus ici ne suffirait pas à la leur donner.
+ASCENT_DECLARED_KEY = "units_declared_ascent"
+ASCENT_RESOLVED_KEY = "units_ascent_declaration_resolved"
+
+
+def ascent_declaration_reset_state() -> Dict[str, Any]:
+    """Les sets 13.06 remis à zéro en début de tour — miroir de `fly_declaration_reset_state`.
+
+    La question « montes-tu ? » vaut pour le mouvement du tour : elle se repose au tour suivant.
+    Les oublier gèlerait la déclaration du tour 1 pour toute la partie, en silence.
+    """
+    return {ASCENT_DECLARED_KEY: set(), ASCENT_RESOLVED_KEY: set()}
+
+
+def squad_ascent_declared(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """L'escouade a-t-elle déclaré qu'elle finirait son move en hauteur (13.06) ?
+
+    SOURCE UNIQUE lue par les quatre consommateurs du niveau de destination : le plan rigide
+    (`build_rigid_plan`), l'érosion du masque (`erode_move_pool_by_squad_block`), le champ de
+    trajet par-figurine et le journal. Les désolidariser rouvrirait la classe « masque ⊆
+    exécutable » : le masque offrirait des cellules dont l'exécution refuserait le niveau.
+
+    Faux par défaut — et c'est le régime courant : sans déclaration, TOUT le pipeline de move est
+    exactement celui d'avant la verticalité (destination au sol, aucun champ multi-niveaux
+    construit, aucun surcoût).
+    """
+    return str(squad_id) in game_state.get(ASCENT_DECLARED_KEY, set())  # get allowed : absent = aucune déclaration
+
+
+def _squad_can_end_move_elevated(game_state: Dict[str, Any], unit: Dict[str, Any]) -> bool:
+    """L'escouade a-t-elle le droit de FINIR un move sur une surface hors sol (13.06) ?
+
+    Condition (a) de « SETTING UP OR ENDING A MOVE » : mot-clé INFANTRY/BEASTS/SWARM/FLY/MONSTER.
+    Déléguée à `unit_can_occupy_upper_floor`, la même que `validate_floor_placement` applique à
+    l'écriture — les deux ne peuvent donc pas diverger sur QUI a le droit de monter.
+    """
+    from engine.game_state import unit_can_occupy_upper_floor
+
+    return bool(unit_can_occupy_upper_floor(require_key(unit, "UNIT_KEYWORDS")))
+
+
+def squad_floor_level_map(
+    game_state: Dict[str, Any], model: Dict[str, Any]
+) -> Mapping[Tuple[int, int], int]:
+    """Carte `cellule -> niveau effectif` du socle de CETTE figurine (13.06), ou vide sans étage.
+
+    Enveloppe mémoïsée de `floor_level_by_cell` : la géométrie lue est celle de la FIGURINE (et
+    son orientation), pas celle de l'escouade — depuis le pivot par-figurine, `update_model_position`
+    écrit `model["orientation"]` sans resynchroniser celle de l'escouade, et mesurer l'empreinte
+    dans une autre orientation que la sienne déclarerait un plancher tenable qui ne l'est pas.
+    """
+    from engine.terrain_utils import floor_level_by_cell
+
+    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (scénario sans terrain)
+    if not terrain_areas:
+        return {}
+    return floor_level_by_cell(
+        terrain_areas,
+        require_key(model, "BASE_SHAPE"),
+        require_key(model, "BASE_SIZE"),
+        int(model.get("orientation", 0)),  # get allowed (socle rond non orienté)
+    )
+
+
+def model_move_destination_level(
+    game_state: Dict[str, Any], model: Dict[str, Any], col: int, row: int, ascent: bool
+) -> int:
+    """Niveau où CETTE figurine finit son move en `(col, row)` — 0 (sol) ou l'étage résolu.
+
+    SOURCE UNIQUE du niveau de destination d'un squad move. `ascent` est la déclaration de
+    l'escouade (`squad_ascent_declared`) : fausse, la réponse est le sol, quel que soit le
+    terrain — c'est ce qui rend le régime sans déclaration bit-à-bit identique à l'ancien.
+
+    Le niveau rendu reste un HINT au sens de `place_model_at_effective_level` : la même carte est
+    interrogée par l'érosion du masque et par le plan, donc les deux désignent le même étage,
+    et le commit revérifie l'empreinte avant d'écrire.
+    """
+    if not ascent:
+        return SQUAD_RIGID_MOVE_DESTINATION_LEVEL
+    return int(squad_floor_level_map(game_state, model).get((int(col), int(row)), 0))  # get allowed : hors étage = sol
+
+
+def _ascent_declaration_due_unit(
+    game_state: Dict[str, Any], squad_id: str
+) -> Optional[Dict[str, Any]]:
+    """L'escouade si la déclaration de montée (13.06) lui est encore DUE, sinon None.
+
+    Mêmes conditions de siège que 21.03 (`_fly_declaration_due_unit`) — phase concernée, unité
+    pilotée par le modèle, joueur dont c'est le tour, question pas déjà posée — plus trois qui
+    lui sont propres :
+
+      - le mot-clé de 13.06 (`_squad_can_end_move_elevated`) : sans lui il n'y a rien à demander ;
+      - PAS de vol déclaré. Le pool d'ancre renvoie avant son bloc multi-niveaux quand la
+        traversée FLY est active (« Fly+étages = étape ultérieure ») : demander la montée à une
+        unité volante poserait une question dont l'exécution ne saurait rien faire. Exclusion
+        PRÉEXISTANTE, ni créée ni élargie ici ;
+      - au moins une cellule d'étage TENABLE par son socle à portée de son budget. Sans ce
+        filtre, chaque escouade INFANTRY paierait un step de décision par activation sur un
+        plateau où aucun plancher n'est atteignable — c'est-à-dire partout hors des ruines.
+    """
+    if str(require_key(game_state, "phase")) != "move":
+        return None
+    unit = get_unit_by_id(game_state, str(squad_id))
+    if unit is None:
+        raise KeyError(f"_ascent_declaration_due_unit: escouade {squad_id} introuvable")
+    if not _squad_can_end_move_elevated(game_state, unit):
+        return None
+    if not _unit_is_ai_controlled(game_state, unit):
+        return None
+    if int(require_key(unit, "player")) != int(require_key(game_state, "current_player")):
+        return None
+    if str(squad_id) in game_state.get(ASCENT_RESOLVED_KEY, set()):  # get allowed : absent = jamais posée
+        return None
+    if _fly_traversal_active(game_state, unit, str(squad_id)):
+        return None
+    if not _squad_has_reachable_floor_cell(game_state, str(squad_id)):
+        return None
+    return unit
+
+
+def _squad_has_reachable_floor_cell(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """Une cellule d'étage tenable est-elle à portée du budget de move de l'escouade ?
+
+    Borne SUPÉRIEURE volontairement lâche (distance cube à vol d'oiseau depuis chaque figurine,
+    murs ignorés) : elle ne sert qu'à ne pas poser la question quand la réponse ne peut être que
+    « non ». La légalité réelle reste tranchée par l'érosion, qui borne le TRAJET. Une borne
+    lâche coûte un point de décision inutile ; une borne serrée qui se tromperait retirerait à
+    l'agent une montée légale — c'est le sens de l'inégalité.
+    """
+    from engine.combat_utils import calculate_hex_distance
+
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    budget = squad_move_pool_budget_subhex(game_state, str(squad_id))
+    for mid in squad_models.get(str(squad_id), []):  # get allowed (escouade sans figurine vivante)
+        model = models_cache.get(mid)  # get allowed (figurine morte)
+        if model is None:
+            continue
+        level_map = squad_floor_level_map(game_state, model)
+        if not level_map:
+            continue
+        mcol, mrow = int(model["col"]), int(model["row"])
+        for (fcol, frow) in level_map:
+            if calculate_hex_distance(mcol, mrow, fcol, frow) <= budget:
+                return True
+    return False
+
+
+def ascent_declaration_decision_is_due(game_state: Dict[str, Any], squad_id: str) -> bool:
+    """13.06 — cette escouade doit-elle encore déclarer (ou non) sa montée pour ce move ?
+
+    Lecture publique et sans effet de bord de la condition d'armement, pendant exact de
+    `fly_declaration_decision_is_due` : elle partage son corps avec l'armement, donc les deux ne
+    peuvent pas diverger.
+    """
+    return _ascent_declaration_due_unit(game_state, squad_id) is not None
+
+
+def arm_ascent_declaration_decision(
+    game_state: Dict[str, Any], squad_id: str
+) -> Optional[Dict[str, Any]]:
+    """Pose le point de choix « finir en hauteur » (13.06) de `squad_id`, s'il est dû.
+
+    Rend la décision POSÉE, ou None si elle n'était pas due — l'appelant qui en reçoit une rend la
+    main au décideur (masque exclusivement `CHOICE_*`), exactement comme la déclaration de vol.
+
+    ORDRE CONTRACTUEL des candidats : `CHOICE_0` = monter (les figurines dont la case d'arrivée
+    porte un plancher tenable y finissent, chacune payant SA distance verticale), `CHOICE_1` =
+    rester au sol. Aucun des deux n'accorde d'effet de datasheet : c'est `declines` qui les
+    distingue dans l'observation, jamais l'index.
+
+    POURQUOI une déclaration et pas une décision par figurine : le move gym translate le bloc
+    d'un vecteur unique, donc l'agent choisit UNE destination, pas douze. La déclaration est le
+    seul endroit où le choix « sol ou étage » peut être exprimé sans doubler la tête spatiale.
+    C'est un sous-ensemble des plans légaux (13.06 permettrait de panacher figurine par
+    figurine), assumé comme tel, et non une règle fausse.
+    """
+    unit = _ascent_declaration_due_unit(game_state, squad_id)
+    if unit is None:
+        return None
+    from engine.agent_decision import set_pending_agent_decision
+
+    return set_pending_agent_decision(
+        game_state,
+        decision_type="ascent_declaration",
+        player=int(require_key(unit, "player")),
+        unit_id=str(squad_id),
+        options=[
+            {
+                "label": "End the move elevated",
+                "effect_ids": (),
+                "declines": False,
+                "payload": {"declare": True},
+            },
+            {
+                "label": "Stay on ground level",
+                "effect_ids": (),
+                "declines": True,
+                "payload": {"declare": False},
+            },
+        ],
+    )
+
+
+def apply_ascent_declaration_decision(
+    game_state: Dict[str, Any], squad_id: str, declared: bool
+) -> None:
+    """Applique le candidat choisi pour `ascent_declaration`, et EFFACE la décision.
+
+    Écrivain UNIQUE du couple (set de déclaration, set de résolution) — pendant exact
+    d'`apply_fly_declaration_decision`, dont il partage le préambule et le contrôle de
+    propriétaire. « Ne pas monter » n'est pas un non-événement : il doit laisser la trace de
+    résolution, sans quoi la question se reposerait indéfiniment.
+
+    `_unit_move_version` est incrémenté comme pour le vol : la déclaration change le pool (les
+    cellules d'étage n'ont pas le même coût vertical), donc tout cache de masque clé sur cette
+    version doit être invalidé.
+    """
+    from engine.agent_decision import consume_pending_agent_decision
+
+    if str(require_key(game_state, "phase")) != "move":
+        raise RuntimeError(
+            f"apply_ascent_declaration_decision: la phase '{game_state.get('phase')}' ne resout "
+            "aucun move — la decision a survecu a sa phase."
+        )
+    consume_pending_agent_decision(
+        game_state,
+        decision_type="ascent_declaration",
+        player=int(require_key(game_state, "current_player")),
+        unit_id=str(squad_id),
+    )
+    game_state.setdefault(ASCENT_RESOLVED_KEY, set()).add(str(squad_id))
+    if declared:
+        game_state.setdefault(ASCENT_DECLARED_KEY, set()).add(str(squad_id))
     game_state["_unit_move_version"] += 1
 
 

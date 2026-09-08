@@ -323,6 +323,13 @@ class ObservationBuilder:
         self._full_obs_scratch: Optional[Dict[str, np.ndarray]] = None  # _obs_scratch + "grid" pré-alloué (jamais muté après init)
         self._unit_ent_cont = np.zeros(UNIT_CONT_SIZE, dtype=np.float32)
         self._unit_ent_bin = np.zeros(UNIT_BIN_SIZE, dtype=np.float32)
+        # Échelle de `max_floor_height` : le seuil de Plunging Fire (22.05), en POUCES — la même
+        # constante que lit la résolution du tir, jamais un facteur inventé ici. 1.0 dans
+        # l'observation = exactement la hauteur qui déclenche la règle. `require_key` en cascade :
+        # une config sans ce seuil ne peut pas résoudre un tir non plus, l'absence doit lever.
+        self._plunging_fire_height = float(
+            require_key(require_key(config, "game_rules"), "plunging_fire_height")
+        )
 
     # ============================================================================
     # ============================================================================
@@ -1499,6 +1506,21 @@ class ObservationBuilder:
         _c("moved_max", max(moved))
         _c("moved_sum", sum(moved))
 
+        # VERTICALITÉ (13.06 / 22.05) — les deux faces du tir plongeant, pour TOUTE entité.
+        # `floor_height_by_model` est posé par `build_units_cache` et resynchronisé à chaque
+        # déplacement (`_recompute_squad_cache`) : c'est la MÊME source que celle que lit la
+        # résolution de Plunging Fire, jamais un recalcul parallèle qui pourrait en diverger.
+        # Absent = plateau sans étage déclaré, donc tout le monde au sol — pas une donnée
+        # manquante : `floor_height_at` ne pose ce dict que lorsqu'un terrain porte des planchers.
+        _floor_heights = entry.get("floor_height_by_model")  # get allowed (terrain 2D = pas d'étage)
+        _alive_heights = [
+            float(_floor_heights[_mid]) for _mid in alive_mids if _mid in _floor_heights
+        ] if _floor_heights else []
+        _c("max_floor_height", (max(_alive_heights) / self._plunging_fire_height) if _alive_heights else 0.0)
+        # « la cible contient >= 1 figurine au sol » — vrai par défaut : sans hauteur connue,
+        # toutes les figurines sont au sol.
+        _b("has_ground_model", (not _alive_heights) or any(h == 0.0 for h in _alive_heights))
+
         _b("present", True)
         _b("is_ally", is_ally)
         _b("is_active", is_active)
@@ -2083,6 +2105,12 @@ class ObservationBuilder:
             sm_bin[k_idx] = (
                 1.0 if mid in fighting_set else 0.0,
                 1.0 if in_enemy_ez[mid] else 0.0,
+                # 13.06 : cette figurine est-elle en hauteur ? Lu sur le NIVEAU écrit dans
+                # `models_cache` — le fait, pas l'intention : `place_model_at_effective_level` a
+                # déjà revalidé l'empreinte, donc ce bit ne peut pas annoncer un étage que la
+                # figurine n'occupe pas. Une escouade pas encore posée est au sol par
+                # construction (niveau 0 à la sentinelle).
+                1.0 if int(m.get("level", 0)) > 0 else 0.0,  # get allowed (état sans niveau)
                 # Masque EXPLICITE (§0.32 T-H) : cette figurine peut n'avoir aucun drapeau et
                 # tomber pile sur le centroïde arrondi, donc une ligne entièrement nulle. Un
                 # masque déduit de la ligne la comptait absente, sans rien lever.
@@ -2348,6 +2376,7 @@ class ObservationBuilder:
             GRID_CH_MOVE_COST,
             GRID_CH_OBJECTIVE,
             GRID_CH_OBSCURING,
+            GRID_CH_OCCUPANT_LEVEL,
             GRID_CH_SELF,
             GRID_CH_WALL,
             GRID_SIZE,
@@ -2405,6 +2434,11 @@ class ObservationBuilder:
         self_hexes: List[Tuple[int, int]] = []
         ally_hexes: List[Tuple[int, int]] = []
         enemy_hexes: List[Tuple[int, int]] = []
+        # 13.06 — cases occupées PAR NIVEAU, tous camps confondus. Les trois canaux d'occupation
+        # ci-dessus peignent à plat : sans ce relevé, une figurine à l'étage y déclare bloquée une
+        # case dont le sol est libre. Regroupé par niveau plutôt que par camp parce que c'est la
+        # HAUTEUR qui manque aux trois autres plans, pas l'appartenance — elle, ils la portent déjà.
+        occupant_hexes_by_level: Dict[int, List[Tuple[int, int]]] = {}
         for sid, entry in entries_on_battlefield(units_cache):
             if str(sid) == str(active_squad_id):
                 sink = self_hexes
@@ -2417,6 +2451,11 @@ class ObservationBuilder:
                 if model is None:
                     continue
                 sink.append((int(model["col"]), int(model["row"])))
+                _mlv = int(model.get("level", 0))  # get allowed (état sans niveau = sol)
+                if _mlv > 0:
+                    occupant_hexes_by_level.setdefault(_mlv, []).append(
+                        (int(model["col"]), int(model["row"]))
+                    )
         _paint(GRID_CH_SELF, self_hexes)
         _paint(GRID_CH_ALLY, ally_hexes)
         _paint(GRID_CH_ENEMY, enemy_hexes)
@@ -2475,6 +2514,13 @@ class ObservationBuilder:
                     list(floor_hexes_at_level(terrain_areas, level)),
                     value=float(level) / max_level,
                 )
+            # --- Canal 11 : niveau des OCCUPANTS (13.06) ----------------------
+            # MÊME normalisation que le canal de terrain ci-dessus, et c'est délibéré : les deux
+            # se lisent ensemble (« il y a un plancher ici » / « quelqu'un s'y tient »), donc une
+            # échelle commune. Vide tant que personne n'est en hauteur — le cas courant, et le
+            # seul cas possible tant qu'aucune escouade ne déclare de montée.
+            for level, cells in occupant_hexes_by_level.items():
+                _paint(GRID_CH_OCCUPANT_LEVEL, cells, value=float(level) / max_level)
 
         # --- Canal 8 : cout geodesique du pool de move (V11 §0.32 T-K) --------
         # Ce cout etait deja calcule a chaque activation POUR LE MASQUE, puis jete — alors que
