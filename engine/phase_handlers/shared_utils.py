@@ -4148,6 +4148,18 @@ def destroy_model(game_state: Dict[str, Any], model_id: str, reason: str) -> Non
         squad_list.remove(model_id)
     # F2 fix (audit) : recalcule occupied_hexes apres retrait de la fig
     _recompute_squad_occupied_hexes(game_state, squad_id)
+    # Rule 13.09 : « a model is hidden WHILE all of the following apply » — état CONTINU, pas
+    # un instantané de début de phase. La mort d'une figurine change l'empreinte de l'escouade,
+    # donc peut la rendre cachée en pleine phase de tir (la dernière figurine hors zone
+    # obscurante tombe — et c'est le cas NOMINAL, `_select_allocation_model` allouant les pertes
+    # à la figurine la plus proche de l'ennemi, donc à l'exposée). Rafraîchi ICI, au choke-point
+    # de retrait, et pas sur les sites d'appel du tir : toutes les causes de mort passent par
+    # cette fonction (tir, mêlée, hazard, cohérence, déploiement, réserves 20.04).
+    # APRÈS `_recompute_squad_occupied_hexes` : le statut se calcule sur l'empreinte à jour.
+    # AVANT `_touch_unit_los` : ce dernier bumpe `_unit_move_version`, ce qui invalide le
+    # `_target_pool_cache` — le pool du tireur suivant est donc reconstruit et relit le statut.
+    from engine.phase_handlers.shooting_handlers import compute_hidden_status_for_unit
+    compute_hidden_status_for_unit(game_state, squad_id)
     # Choke-point LoS (constat 5) : la mort d'une figurine réduit le footprint du squad →
     # invalider ses paires. Id-based, valable même si l'ancre ne bouge pas / squad supprimé.
     _touch_unit_los(game_state, squad_id, old_col, old_row)

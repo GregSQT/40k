@@ -12,7 +12,10 @@ Ce que ces tests verrouillent, et pourquoi :
 `los_can_see` ne portait que 06.01 (`compute_unit_los`). La porte de detection ne vivait que dans
 l eligibilite du tir (`valid_target_pool_build`), donc l observation annoncait `los_can_see = 1` sur
 une cible que l action de tir refusait — l agent ne pouvait apprendre ni a entrer dans les 15", ni a
-se cacher au-dela. `test_los_can_see_zero_implies_pool_exclusion` est le contrat D1 correspondant.
+se cacher au-dela. `test_los_can_see_zero_implies_pool_exclusion` est le contrat D1 correspondant, et
+`test_d1_survives_a_loss_mid_phase` l etend dans le temps : l observation recalculant 13.09 a chaud
+quand le moteur lit un drapeau stocke, l accord des deux ne tient que si la PERTE d une figurine
+rafraichit ce drapeau (13.09 est un etat continu, cf. `destroy_model`).
 
 Contre-epreuves integrees :
 - `test_hidden_enemy_within_detection_is_visible` : meme escouade, meme terrain, seule la DISTANCE
@@ -47,6 +50,10 @@ _AREA_POLYGON = [[28, 18], [36, 18], [36, 22], [28, 22]]
 _DENSE_WALL = [[28, 18]]
 
 _ENEMY_POSITIONS = [(30, 20), (32, 20)]
+#: Ennemi A CHEVAL sur le bord est de la zone (colonnes 28..36) : une figurine dedans, une dehors.
+#: L escouade n est donc PAS cachee tant que l exposee vit — c est le seul etat depuis lequel une
+#: PERTE peut faire basculer 13.09 en cours de phase.
+_ENEMY_STRADDLING = [(36, 20), (38, 20)]
 #: Colonnes du tireur. La figurine ennemie la plus proche est en colonne 32 et
 #: ``detection_range`` vaut 15" (config/game_config.json), a 1 subhex par pouce dans ce fixture.
 _COL_BEYOND_DETECTION = 54   # ~22" de la figurine ennemie la plus proche -> hors detection
@@ -85,7 +92,9 @@ def _unit_cfg(
     }
 
 
-def _config(shooter_col: int) -> Dict[str, Any]:
+def _config(
+    shooter_col: int, enemy_positions: List[Tuple[int, int]] = _ENEMY_POSITIONS
+) -> Dict[str, Any]:
     obs_params = {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET}
     shooter_positions = [(shooter_col, 20), (shooter_col + 2, 20)]
     return {
@@ -115,15 +124,17 @@ def _config(shooter_col: int) -> Dict[str, Any]:
         "units": [
             # Unite 1 = MON tireur, hors zone de terrain. Unite 2 = l ennemi, dans la zone.
             _unit_cfg(1, 1, shooter_positions, ["INFANTRY"]),
-            _unit_cfg(2, 2, _ENEMY_POSITIONS, ["INFANTRY"]),
+            _unit_cfg(2, 2, enemy_positions, ["INFANTRY"]),
         ],
     }
 
 
-def _make_engine(shooter_col: int) -> W40KEngine:
+def _make_engine(
+    shooter_col: int, enemy_positions: List[Tuple[int, int]] = _ENEMY_POSITIONS
+) -> W40KEngine:
     with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
          patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
-        eng = W40KEngine(config=build_engine_config(_config(shooter_col)))
+        eng = W40KEngine(config=build_engine_config(_config(shooter_col, enemy_positions)))
     eng.reset()
     gs = eng.game_state
     gs["terrain_areas"] = [{
@@ -142,6 +153,26 @@ def _enemy_row(engine: W40KEngine):
     slots = [i for i, r in enumerate(obs["enemies_bin"]) if float(r[BIN_PRESENT]) == 1.0]
     assert len(slots) == 1, f"fixture : 1 seul ennemi attendu, {len(slots)} presents"
     return obs["enemies_bin"][slots[0]], obs["enemies_cont"][slots[0]]
+
+
+def _pool(engine: W40KEngine, *, refresh: bool = True) -> List[str]:
+    """Pool de cibles du tireur, par le chemin REEL de l action de tir.
+
+    ``refresh`` rejoue le balayage complet de debut de phase (``compute_hidden_statuses``, qui
+    pose le drapeau que lit la porte 13.09) puis ``build_unit_los_cache`` a l activation du
+    tireur. Le passer a ``False`` observe le moteur EN COURS de phase, ou ce balayage n a plus
+    lieu : seul le rafraichissement cible de ``destroy_model`` a pu mettre le statut a jour.
+    """
+    from engine.phase_handlers.shooting_handlers import (
+        build_unit_los_cache, compute_hidden_statuses, valid_target_pool_build,
+    )
+    from engine.game_utils import require_unit_by_id
+    if refresh:
+        compute_hidden_statuses(engine.game_state)
+    build_unit_los_cache(engine.game_state, "1")
+    return valid_target_pool_build(
+        engine.game_state, require_unit_by_id(engine.game_state, "1"), 0, 0, 0
+    )
 
 
 def _flags(engine: W40KEngine) -> Dict[str, float]:
@@ -210,21 +241,6 @@ def test_los_can_see_zero_implies_pool_exclusion():
     Anti-vacuite : le cas PROCHE doit rendre un pool NON VIDE. Sans cette assertion, un pool
     toujours vide (mauvaise phase, mauvais arguments) rendrait l implication trivialement vraie.
     """
-    from engine.phase_handlers.shooting_handlers import (
-        build_unit_los_cache, compute_hidden_statuses, valid_target_pool_build,
-    )
-    from engine.game_utils import require_unit_by_id
-
-    def _pool(engine: W40KEngine) -> List[str]:
-        # Sequence REELLE du moteur : `compute_hidden_statuses` au debut de la phase de tir (c est
-        # le drapeau que lit la porte 13.09 de `valid_target_pool_build`), puis
-        # `build_unit_los_cache` a l activation du tireur.
-        compute_hidden_statuses(engine.game_state)
-        build_unit_los_cache(engine.game_state, "1")
-        return valid_target_pool_build(
-            engine.game_state, require_unit_by_id(engine.game_state, "1"), 0, 0, 0
-        )
-
     near = _make_engine(_COL_WITHIN_DETECTION)
     near_pool = _pool(near)
     assert near_pool, "anti-vacuite : le pool proche doit etre NON VIDE"
@@ -234,3 +250,56 @@ def test_los_can_see_zero_implies_pool_exclusion():
     far = _make_engine(_COL_BEYOND_DETECTION)
     assert _flags(far)["los"] == 0.0
     assert "2" not in _pool(far), "13.09 : la cible cachee hors detection est refusee par le moteur"
+
+
+def test_d1_survives_a_loss_mid_phase():
+    """Contrat D1 en cours de phase : une PERTE ne desaccorde pas l observation et le moteur.
+
+    Le contrat D1 ci-dessus est verifie au debut de la phase de tir, quand le balayage complet
+    vient de poser le statut. Or l observation recalcule 13.09 a chaud a chaque step tandis que le
+    moteur lit un drapeau stocke : sans rafraichissement a la perte, les deux se separent des la
+    premiere figurine tuee, et c est le cas NOMINAL — les pertes vont d abord aux figurines les
+    plus exposees.
+
+    Ici l escouade ennemie est a cheval sur le bord de la zone obscurante, donc PAS cachee : les
+    deux tireurs la voient et peuvent la prendre pour cible malgre les 15" depassees. Tuer la
+    figurine exposee la rend cachee, donc intirable a cette distance. Le pool est relu SANS
+    rejouer le balayage de debut de phase (`refresh=False`), ce qui est la situation reelle d un
+    tireur qui s active apres la perte.
+
+    Discriminance : les deux figurines ennemies sont deja au-dela de la detection (16" et 18") et
+    en deca de la portee de l arme (24"). Ce n est donc pas la distance qui fait basculer
+    l eligibilite — elle reste du meme cote des deux seuils — mais le seul statut 13.09.
+    """
+    from engine.phase_handlers.shared_utils import destroy_model
+    from engine.game_utils import require_unit_by_id
+
+    eng = _make_engine(_COL_BEYOND_DETECTION, _ENEMY_STRADDLING)
+    gs = eng.game_state
+
+    # Avant la perte : une figurine hors zone => escouade non cachee => visible ET ciblable.
+    before = _flags(eng)
+    assert before["hidden"] == 0.0, "fixture : la figurine exposee doit empecher le statut cache"
+    assert 15.0 < before["edge"] <= _WEAPON_RANGE, (
+        f"fixture : distance {before['edge']} doit etre hors detection mais a portee"
+    )
+    assert before["los"] == 1.0
+    assert "2" in _pool(eng), "anti-vacuite : sans la cible au depart, la suite ne mesurerait rien"
+
+    exposed = next(
+        mid for mid in gs["squad_models"]["2"]
+        if (int(gs["models_cache"][mid]["col"]), int(gs["models_cache"][mid]["row"])) == (38, 20)
+    )
+    destroy_model(gs, exposed, reason="combat")
+
+    # Apres la perte, SANS balayage de debut de phase : les deux oracles doivent basculer ensemble.
+    after = _flags(eng)
+    assert after["hidden"] == 1.0, "13.09 : il ne reste que des figurines en zone obscurante"
+    assert 15.0 < after["edge"] <= _WEAPON_RANGE, (
+        f"fixture : distance {after['edge']} doit rester hors detection et a portee"
+    )
+    assert after["los"] == 0.0
+    assert "2" not in _pool(eng, refresh=False), (
+        "D1 : le moteur doit refuser la cible que l observation vient de declarer invisible"
+    )
+    assert require_unit_by_id(gs, "2")["hidden"] is True

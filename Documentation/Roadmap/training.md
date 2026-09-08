@@ -24,10 +24,11 @@ détection ; les émettre coûterait une seconde passe terrain pour une informat
 (`hideable`, `units_shot`) écartent 54 % des entités sans aucun scan. Total **0,596 ms/step, soit
 0,30 % du temps de step** et 2,8 % du temps d'observation.
 
-**Divergence connue, assumée, fermée par un autre chantier** : l'obs recalcule `hidden` à chaud, le
-moteur lit `unit['hidden']` figé au début de la phase de tir (`compute_hidden_statuses`, deux sites
-d'appel seulement). Une perte encaissée en cours de phase les fait diverger. Arbitrage tranché le
-2026-09-08 — option C, en chantier séparé : voir [moteur.md#hidden-fraicheur](moteur.md#hidden-fraicheur).
+**Divergence refermée le 2026-09-08** : l'obs recalcule `hidden` à chaud là où le moteur lit
+`unit['hidden']`, et une perte encaissée en cours de phase les faisait diverger. Le moteur suit
+désormais les pertes au choke-point de retrait de figurines, et le contrat D1 tient donc en cours de
+phase et plus seulement à son début : voir [moteur.md#hidden-fraicheur](moteur.md#hidden-fraicheur).
+Il reste périmé pendant le MOVE, ce qui justifie que l'obs continue de recalculer plutôt que de lire.
 
 ---
 

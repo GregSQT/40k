@@ -52,7 +52,16 @@ def _gs(*, with_deadly_demise: bool = True, target_col: int = 2, target_row: int
         "MODEL_HEIGHT": 2.0,
     }
 
+    # Couche `units` : elle porte `hideable`/`hidden`, que `destroy_model` rafraîchit (13.09,
+    # état continu). Toute escouade de `units_cache` en a une en production.
+    units = [
+        {"id": "SRC", "player": 1, "hideable": False, "hidden": False, "hidden_models": []},
+        {"id": "TGT", "player": 2, "hideable": False, "hidden": False, "hidden_models": []},
+    ]
+
     return {
+        "units": units,
+        "unit_by_id": {str(u["id"]): u for u in units},
         "models_cache": {"SRC#0": src_model},
         "squad_models": {"SRC": ["SRC#0"], "TGT": ["TGT#0"]},
         "units_cache": {"SRC": src_uc, "TGT": tgt_uc},
@@ -151,7 +160,15 @@ def _gs_multi(*, n_targets: int = 3):
             "MODEL_HEIGHT": 2.0,
         }
         squad_models[uid] = [f"{uid}#0"]
+    # Couche `units` : cf. `_gs` — `destroy_model` y rafraîchit le statut 13.09.
+    units = [
+        {"id": uid, "player": uc["player"], "hideable": False,
+         "hidden": False, "hidden_models": []}
+        for uid, uc in units_cache.items()
+    ]
     return {
+        "units": units,
+        "unit_by_id": {str(u["id"]): u for u in units},
         "models_cache": {"SRC#0": src_model},
         "squad_models": squad_models,
         "units_cache": units_cache,

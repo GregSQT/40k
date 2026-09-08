@@ -22,7 +22,7 @@ Mesuré après fix : 0 / 0.
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 import pytest
 
@@ -64,9 +64,21 @@ ENEMY_POS = (9, 10)
 EZ = 2  # engagement_zone DÉJÀ en sous-hexes (x1 : 2 subhex = 2")
 
 
+#: Couche `units` : elle porte `hideable`/`hidden`, que `destroy_model` rafraîchit (13.09 est un
+#: état continu). Toute escouade de `units_cache` en a une en production.
+def _units_layer(*specs: Tuple[str, int]) -> List[Dict[str, Any]]:
+    return [
+        {"id": uid, "player": player, "hideable": False, "hidden": False, "hidden_models": []}
+        for uid, player in specs
+    ]
+
+
 def _gs() -> Dict[str, Any]:
     """Etat de jeu minimal : escouade P1 à 3 figurines + ennemi P2 mono-figurine."""
+    _units = _units_layer((SQUAD_ID, 1), (ENEMY_ID, 2))
     return {
+        "units": _units,
+        "unit_by_id": {str(u["id"]): u for u in _units},
         "models_cache": {
             ANCHOR_MID: {
                 "col": ANCHOR_POS[0], "row": ANCHOR_POS[1], "level": 0,
@@ -279,7 +291,10 @@ _TARGET_ID = "105"
 
 def _gs_222() -> Dict[str, Any]:
     """État minimal : escouade 105 à 3 figurines + unité 1 mono-figurine."""
+    _units = _units_layer((_CHARGER_ID, 1), (_TARGET_ID, 2))
     return {
+        "units": _units,
+        "unit_by_id": {str(u["id"]): u for u in _units},
         "models_cache": {
             "1#0": {
                 "col": 22, "row": 25, "level": 0,

@@ -128,6 +128,10 @@ def test_both_players_are_processed():
     gs["models_cache"].update(gs2["models_cache"])
     gs["squad_models"].update(gs2["squad_models"])
     gs["units_cache"].update(gs2["units_cache"])
+    # `unit_by_id` suit les autres caches : une escouade présente dans `units_cache` mais absente
+    # de `unit_by_id` est une désync que le moteur refuse (elle fait lever le rafraîchissement
+    # 13.09 de `destroy_model`, comme tout autre lecteur d'unité).
+    gs["unit_by_id"].update(gs2["unit_by_id"])
     # current_player=1 : les deux escouades sont muetes → les deux resolues geometriquement.
     gs["current_player"] = 1
 
@@ -403,6 +407,11 @@ def test_opponent_non_mute_squads_resolved_geometrically():
         "col": sq2_positions[0][0], "row": sq2_positions[0][1], "player": 2,
         "HP_CUR": 3, "BASE_SHAPE": "round", "BASE_SIZE": 1,
         "orientation": 0, "occupied_hexes": set(), "occupied_hexes_by_model": {},
+    }
+    # `unit_by_id` suit `units_cache` : sans elle, l'escouade 2 serait en désync (cf. le
+    # rafraîchissement 13.09 de `destroy_model`, qui lit l'unité comme tout autre consommateur).
+    gs["unit_by_id"]["2"] = {
+        "id": "2", "player": 2, "HP_MAX": 2, "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
     }
 
     auto_removed = end_of_turn_regain_coherency_all_squads(gs)

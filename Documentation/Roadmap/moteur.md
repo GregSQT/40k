@@ -2,30 +2,32 @@
 
 ---
 
-## 🔴 13.09 — le statut « caché » est figé pour toute la phase de tir {#hidden-fraicheur}
+## ✅ 13.09 — le statut « caché » suit les pertes {#hidden-fraicheur}
 
-**Arbitrage tranché le 2026-09-08 : option C.** Ouvert, non commencé.
+**Livré le 2026-09-08 (option C).** Change les parties jouées : `--new` obligatoire pour tout modèle
+entraîné avant ce correctif.
 
-`compute_hidden_statuses` n'a que deux sites d'appel (`shooting_handlers.py:917` au début de la phase
-de tir, `api_server.py:1150` pour le PvP), et la porte 13.09 de `valid_target_pool_build`
-(`shooting_handlers.py:2934`) lit ce drapeau gelé. Or 13.09 décrit un état **continu** — « a model is
-hidden WHILE all of the following apply ». Une escouade dont la seule figurine exposée meurt en cours
-de phase devient cachée immédiatement, donc intirable au-delà de la portée de détection ; le moteur
-l'accepte encore.
+13.09 décrit un état **continu** — « a model is hidden WHILE all of the following apply » — mais le
+moteur ne posait le drapeau qu'au début de la phase de tir, et la porte 13.09 du pool de cibles
+lisait cette valeur gelée. Une escouade dont la dernière figurine exposée mourait en cours de phase
+restait ciblable au-delà de la portée de détection. Ce n'est pas un cas de bord : les pertes sont
+allouées en priorité à la figurine la plus proche de l'ennemi, donc à l'exposée.
 
-**Reproduction exécutée le 2026-09-08** (ennemi de 2 figurines, une en zone obscurante et une
-dehors, tireur à 24" avec une arme de 36", détection 15") : avant la perte, obs `hidden=0 / los=1` et
-pool `['2']` — cohérent ; après avoir tué la figurine exposée, obs `hidden=1 / los=0`, moteur
-`unit['hidden'] = False`, pool toujours `['2']`.
+Le statut est désormais rafraîchi dans `destroy_model`, **choke-point unique** de retrait de
+figurines — donc pour les huit causes de mort, mêlée comprise, et non par un appel ajouté sur le
+chemin du tir. `compute_hidden_status_for_unit` porte le calcul d'une escouade et
+`compute_hidden_statuses` n'en est plus que la boucle : une seule implémentation des gardes 13.09,
+aucun chemin parallèle. Le placement est contraint des deux côtés — après le recalcul de l'empreinte,
+avant l'invalidation LoS qui purge le cache du pool.
 
-**Conséquence sur l'observation** : le chantier [training.md#hidden-detection-obs](training.md#hidden-detection-obs)
-a fait de `los_can_see` un « visible ET détectable » recalculé à chaud. Tant que ce chantier-ci n'est
-pas livré, le contrat D1 n'est vrai qu'au début de la phase de tir. Le fermer permettra de faire
-passer `test_los_can_see_zero_implies_pool_exclusion` de l'implication à l'égalité.
+**Contrat D1 étendu dans le temps** : `test_d1_survives_a_loss_mid_phase`
+(`test_squad_obs_hidden_enemies.py`) vérifie que l'observation et le pool basculent ensemble après
+une perte, sans rejouer le balayage de début de phase. Le balayage complet reste en place au début
+de la phase de tir et à chaque sérialisation PvP.
 
-**Attention périmètre** : chercher le choke-point de retrait de figurines plutôt que d'ajouter un
-appel par site (motif « code testé mais jamais appelé » déjà rencontré ici), et vérifier le jumeau
-mêlée, qui retire aussi des figurines. Change les parties jouées → ré-entraînement.
+**Limite connue, hors périmètre** : aucun MOUVEMENT ne rafraîchit le drapeau — il reste périmé
+pendant le move et après un pile-in adverse. C'est la raison pour laquelle l'observation continue de
+recalculer 13.09 à chaud plutôt que de lire `unit['hidden']`.
 
 ---
 
