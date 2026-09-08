@@ -5,7 +5,7 @@ combat_utils.py - Pure utility functions for combat calculations
 
 import math
 import os
-from typing import Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Any, Union
+from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple, Any, Union
 
 # NOTE: Do not import is_unit_alive at top level — causes circular import
 # (combat_utils → shared_utils → phase_handlers → generic_handlers → combat_utils).
@@ -261,15 +261,16 @@ class HexIndexTable(NamedTuple):
             )
         return col * self.board_rows + row
 
-    def indices_in_bounds(self, cells: Iterable[Tuple[int, int]]) -> Set[int]:
-        """Index des cases de ``cells`` qui tombent DANS le plateau ; les autres sont ignorees.
+    def bitmap_in_bounds(self, cells: Iterable[Tuple[int, int]]) -> "BlockedBitmap":
+        """Carte d'occupation des cases de ``cells`` qui tombent DANS le plateau ; les autres sont
+        ignorees. Un octet par case, `1` = bloquee, indexe comme `cell_index()`.
 
         Miroir exact du filtre de bornes qu'un BFS centre-a-centre applique a ses voisins : une
         case hors plateau n'est de toute facon jamais atteinte, donc l'ecarter ici ne change
         aucun resultat — et c'est ce qui rend la collision d'index decrite dans `cell_index()`
         impossible sur les ensembles d'obstacles.
 
-        SEULE UNE COORDONNEE DE VALEUR ENTIERE est indexee, et c'est le point delicat : cette
+        SEULE UNE COORDONNEE DE VALEUR ENTIERE est marquee, et c'est le point delicat : cette
         methode remplace un `if cellule in obstacles` ou la case testee etait une paire d'entiers.
         Une paire de valeur entiere y etait EGALE quel qu'en soit le type (`(5, 3) == (5.0, 3.0)`,
         idem pour un entier numpy) et bloquait donc ; une paire de valeur fractionnaire n'y etait
@@ -277,24 +278,50 @@ class HexIndexTable(NamedTuple):
         cette regle : `62.7 * 300 + 80` vaut exactement `18890.0`, qui hache comme l'index de
         `(62, 290)` — un obstacle fractionnaire fermerait une case situee a 210 lignes de la.
 
-        La voie rapide (les deux coordonnees deja `int`) evite la conversion sur le chemin chaud ;
-        elle coute 2,4 % du temps de `geodesic_move_reach`, mesure du 2026-09-08.
+        La voie rapide (les deux coordonnees deja `int`) evite la conversion sur le chemin chaud.
+
+        POURQUOI UNE CARTE D'OCTETS et non un ensemble d'index : la structure rendue ici devient
+        le `seen` du BFS (`geodesic_move_reach`), qui la MUTE et l'interroge ~18 M de fois par run
+        de bench. La choisir pour le seul cout de sa construction laisserait ce second poste
+        intact. Mesure du 2026-09-08 sur les 601 appels reels du chemin de `bench_env_step`
+        (x1_long/bot, machine au repos) : ensemble d'index memoise 602 ms, carte d'octets memoisee
+        510 ms, contre 700 ms pour la reconstruction a chaque appel. Le `bytes` rendu est de plus
+        atomique pour `deepcopy` — le cache spatial du move est recopie a chaque capture de
+        snapshot (`services/game_snapshots.py`), ou un `set` de 2 000 entiers coute 288 us.
         """
         cols = self.board_cols
         rows = self.board_rows
-        out: Set[int] = set()
+        out = bytearray(cols * rows)
         for (c, r) in cells:
             if type(c) is int and type(r) is int:
                 if 0 <= c < cols and 0 <= r < rows:
-                    out.add(c * rows + r)
+                    out[c * rows + r] = 1
                 continue
             int_c = int(c)
             int_r = int(r)
             if int_c != c or int_r != r:
                 continue  # coordonnee fractionnaire : inerte, comme le test d'appartenance
             if 0 <= int_c < cols and 0 <= int_r < rows:
-                out.add(int_c * rows + int_r)
-        return out
+                out[int_c * rows + int_r] = 1
+        return BlockedBitmap(self, bytes(out))
+
+
+class BlockedBitmap(NamedTuple):
+    """Obstacles d'un BFS, sous la forme que `geodesic_move_reach` consomme : la carte d'octets
+    ET la table qui lui donne son sens.
+
+    Les deux voyagent ENSEMBLE parce qu'un index n'existe que relativement a un plateau : `18890`
+    designe `(62, 290)` a 220x300 et `(94, 10)` a 220x200. Separer la carte de sa table rendrait
+    un desappariement representable — et silencieux, les deux plateaux 220x300 et 300x220 donnant
+    la meme longueur de carte. `bitmap_in_bounds()` est le seul constructeur, et il ne peut poser
+    que la table dont il sort.
+
+    IMMUABLE : `data` est un `bytes`. Le consommateur en prend une `bytearray` avant de marcher —
+    oublier cette copie leve au premier marquage au lieu d'empoisonner un cache partage.
+    """
+
+    table: HexIndexTable
+    data: bytes
 
 
 _HEX_INDEX_TABLE_CACHE: Dict[Tuple[int, int], HexIndexTable] = {}

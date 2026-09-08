@@ -2,9 +2,15 @@
 
 `geodesic_move_reach` a été réécrit pour la performance (2026-09-08) : marche sur les index de
 `hex_index_table` au lieu de paires de coordonnées, expansion par couches au lieu d'une file de
-`(cellule, distance)`. Ces deux changements sont invisibles du dehors — c'est précisément ce que
-ce fichier vérifie, faute de quoi une optimisation aurait déplacé la frontière du jouable sans
-qu'aucun test ne s'en aperçoive.
+`(cellule, distance)`, puis obstacles reçus en CARTE D'OCTETS mémoïsée (`BlockedBitmap`) au lieu
+d'être réindexés à chaque appel. Ces trois changements sont invisibles du dehors — c'est
+précisément ce que ce fichier vérifie, faute de quoi une optimisation aurait déplacé la frontière
+du jouable sans qu'aucun test ne s'en aperçoive.
+
+Les obstacles arrivent désormais convertis : la conversion elle-même (paire fractionnaire inerte,
+paire de valeur entière bloquante quel qu'en soit le type, case hors plateau ignorée) est le
+`bitmap_in_bounds` de `HexIndexTable`, et les trois derniers tests de ce fichier la verrouillent
+à travers le champ — c'est-à-dire là où une régression se verrait vraiment.
 
 `_reference_geodesic_move_reach` est l'implémentation d'AVANT, recopiée verbatim. La comparaison
 porte sur DEUX égalités :
@@ -38,7 +44,7 @@ from typing import Dict, List, Set, Tuple, cast
 import pytest
 
 import engine.phase_handlers.shared_utils as su
-from engine.combat_utils import get_hex_neighbors
+from engine.combat_utils import BlockedBitmap, get_hex_neighbors, hex_index_table
 
 SCENARIO = "config/board/44x60x5/scenario/scenario_pvp_test.json"
 PROJECT_ROOT = os.path.dirname(
@@ -46,6 +52,31 @@ PROJECT_ROOT = os.path.dirname(
 )
 STEPS = 50
 BOARD_COLS, BOARD_ROWS = 220, 300
+
+
+def _blocked(cells) -> BlockedBitmap:
+    """Obstacles sous la forme attendue par le moteur, via le SEUL constructeur de production.
+
+    Jamais construite à la main ici : c'est `bitmap_in_bounds` qui porte le filtre (bornes,
+    coordonnée de valeur entière, coordonnée fractionnaire), donc le tester en le contournant
+    ne prouverait rien.
+    """
+    return hex_index_table(BOARD_COLS, BOARD_ROWS).bitmap_in_bounds(cells)
+
+
+def _blocked_pairs(blocked: BlockedBitmap) -> Set[Tuple[int, int]]:
+    """Carte d'octets -> paires, pour alimenter la référence, qui n'accepte qu'un `set`.
+
+    `bytes.find` saute d'un octet marqué au suivant en C : le coût suit le nombre d'obstacles
+    (~2 000), pas la taille du plateau (66 000 cases) — 0,23 ms par appel.
+    """
+    cells = blocked.table.cells
+    out: Set[Tuple[int, int]] = set()
+    pos = blocked.data.find(1)
+    while pos != -1:
+        out.add(cells[pos])
+        pos = blocked.data.find(1, pos + 1)
+    return out
 
 
 def _reference_geodesic_move_reach(
@@ -125,23 +156,23 @@ def test_field_matches_reference_over_real_steps(monkeypatch):
     calls: List[Tuple[Tuple[int, int], int, int, Tuple[int, int]]] = []
     cells_compared = 0
 
-    def shadowed(start_col, start_row, budget, transit_blocked, board_cols, board_rows):
+    def shadowed(start_col, start_row, budget, blocked: BlockedBitmap):
         nonlocal cells_compared
-        # Photo des obstacles : ils arrivent depuis un cache du moteur, réutilisé et muté entre
-        # deux appels. Comparer sur une copie figée interdit qu'une mutation survenue entre les
-        # deux exécutions fabrique une fausse divergence — ou masque une vraie. Chaque
-        # implémentation reçoit sa propre copie, de même contenu, parce que la référence est
-        # recopiée verbatim et n'accepte donc qu'un `set`.
-        blocked = frozenset(transit_blocked)
+        # La carte passée par le moteur est mémoïsée et partagée entre appels ; la référence,
+        # recopiée verbatim, n'accepte qu'un `set`. On DÉCODE donc la carte réellement reçue au
+        # lieu de reconstruire les obstacles autrement : c'est la seule façon de comparer les
+        # deux implémentations sur EXACTEMENT les mêmes obstacles, conversion comprise.
+        pairs = _blocked_pairs(blocked)
+        board_cols, board_rows = blocked.table.board_cols, blocked.table.board_rows
         call = (
             (int(start_col), int(start_row)),
             int(budget),
-            len(blocked),
+            len(pairs),
             (int(board_cols), int(board_rows)),
         )
-        produced = live(start_col, start_row, budget, set(blocked), board_cols, board_rows)
+        produced = live(start_col, start_row, budget, blocked)
         expected = _reference_geodesic_move_reach(
-            start_col, start_row, budget, set(blocked), board_cols, board_rows
+            start_col, start_row, budget, set(pairs), board_cols, board_rows
         )
         _assert_same_field(call, produced, expected)
         calls.append(call)
@@ -171,6 +202,66 @@ def test_field_matches_reference_over_real_steps(monkeypatch):
     assert max(blocked for _o, _bu, blocked, _d in calls) > 0, "aucun obstacle exercé"
 
 
+def test_memoized_bitmap_never_outlives_its_source_set(monkeypatch):
+    """La carte d'obstacles mémoïsée doit TOUJOURS valoir celle du transit courant.
+
+    POURQUOI CE TEST EXISTE À CÔTÉ DU PRÉCÉDENT. `test_field_matches_reference_over_real_steps`
+    ne peut PAS attraper une carte périmée : il décode la carte qu'on lui passe et la donne à la
+    référence, donc les deux implémentations voient les mêmes obstacles — fussent-ils faux.
+    Vérifié le 2026-09-08 en sortant la mémoïsation de `move_transit_blocked_forms` du holder
+    `_move_spatial_cache` : ce test-là restait VERT. Il verrouille l'ALGORITHME, pas l'ENTRÉE.
+
+    Le risque propre à la mémoïsation est ailleurs : la carte vit dans le même holder que
+    l'ensemble dont elle sort, donc le fingerprint qui jette l'un doit jeter l'autre. Ici on
+    compare, à chaque appel d'une vraie partie, la carte SERVIE à celle qu'on obtient en
+    re-dérivant depuis `build_move_transit_blocked` — la source unique. Une invalidation
+    décorrélée ferait diverger les deux et fermerait des cases que les figurines ont libérées.
+    """
+    live = su.move_transit_blocked_forms
+    checks = 0
+    distinct_maps = set()
+
+    def shadowed(game_state, squad_id, player, level):
+        nonlocal checks
+        pairs, blocked = live(game_state, squad_id, player, level)
+        # Source unique, relue MAINTENANT. `build_move_transit_blocked` est mémoïsé dans le même
+        # holder : s'il est frais et que la carte ne l'est pas, c'est l'invalidation de la carte
+        # qui a décroché.
+        source = su.build_move_transit_blocked(game_state, str(squad_id), int(player), int(level))
+        assert set(pairs) == set(source), (
+            f"les paires servies pour ({squad_id}, {player}, {level}) ne sont plus celles du "
+            f"transit courant : {len(set(pairs) ^ set(source))} cases d'écart"
+        )
+        expected = blocked.table.bitmap_in_bounds(source)
+        assert blocked.data == expected.data, (
+            f"la carte mémoïsée pour ({squad_id}, {player}, {level}) n'est plus celle du transit "
+            f"courant : {sum(a != b for a, b in zip(blocked.data, expected.data))} cases d'écart"
+        )
+        checks += 1
+        distinct_maps.add(blocked.data)
+        return pairs, blocked
+
+    monkeypatch.setattr(su, "move_transit_blocked_forms", shadowed)
+
+    env = _build_env()
+    rng = random.Random(42)
+    for _ in range(STEPS):
+        mask = env.get_action_mask()
+        valid = [i for i in range(len(mask)) if mask[i]]
+        if not valid:
+            break
+        _, _, terminated, truncated, _ = env.step(rng.choice(valid))
+        if terminated or truncated:
+            env.reset(seed=42)
+
+    # VERT VACANT : une partie qui n'appellerait jamais l'accesseur, ou qui ne verrait qu'une
+    # seule carte, rendrait ce test vert sans avoir exercé la moindre invalidation.
+    assert checks >= 20, f"seulement {checks} appels observés — le test n'a rien exercé"
+    assert len(distinct_maps) >= 2, (
+        f"une seule carte d'obstacles vue sur {checks} appels — aucune invalidation exercée"
+    )
+
+
 @pytest.mark.parametrize(
     "origin",
     [
@@ -190,7 +281,7 @@ def test_field_matches_reference_at_board_edges(origin):
     """Aux bords, un voisin hors plateau doit être ignoré — jamais replié sur une autre case."""
     col, row = origin
     blocked = {(col + 3, row), (col, row + 3), (col - 3, row), (col, row - 3)}
-    produced = su.geodesic_move_reach(col, row, 12, blocked, BOARD_COLS, BOARD_ROWS)
+    produced = su.geodesic_move_reach(col, row, 12, _blocked(blocked))
     expected = _reference_geodesic_move_reach(
         col, row, 12, blocked, BOARD_COLS, BOARD_ROWS
     )
@@ -203,7 +294,7 @@ def test_field_matches_reference_at_board_edges(origin):
 @pytest.mark.parametrize("budget", [0, -1, -7])
 def test_null_or_negative_budget_yields_only_the_origin(budget):
     """Budget épuisé : le champ se réduit à l'origine, à distance 0 — et surtout pas à un vide."""
-    produced = su.geodesic_move_reach(60, 80, budget, set(), BOARD_COLS, BOARD_ROWS)
+    produced = su.geodesic_move_reach(60, 80, budget, _blocked(set()))
     expected = _reference_geodesic_move_reach(
         60, 80, budget, set(), BOARD_COLS, BOARD_ROWS
     )
@@ -215,7 +306,7 @@ def test_enclosed_origin_yields_only_the_origin():
     """Origine murée par ses six voisins : elle figure au champ, seule, malgré un gros budget."""
     origin = (60, 80)
     blocked = set(get_hex_neighbors(*origin))
-    produced = su.geodesic_move_reach(*origin, 30, blocked, BOARD_COLS, BOARD_ROWS)
+    produced = su.geodesic_move_reach(*origin, 30, _blocked(blocked))
     expected = _reference_geodesic_move_reach(*origin, 30, blocked, BOARD_COLS, BOARD_ROWS)
     _assert_same_field((origin, 30, len(blocked), (BOARD_COLS, BOARD_ROWS)), produced, expected)
     assert produced == {origin: 0}
@@ -235,7 +326,7 @@ def test_fractional_blocked_coordinate_closes_no_cell_anywhere():
     # comportement dans ce cas-là qui est verrouillé ici.
     colliding = cast(Set[Tuple[int, int]], {(62.7, 80)})
     origin = (62, 285)
-    with_fractional = su.geodesic_move_reach(*origin, 20, colliding, BOARD_COLS, BOARD_ROWS)
+    with_fractional = su.geodesic_move_reach(*origin, 20, _blocked(colliding))
     reference = _reference_geodesic_move_reach(
         *origin, 20, colliding, BOARD_COLS, BOARD_ROWS
     )
@@ -246,7 +337,7 @@ def test_fractional_blocked_coordinate_closes_no_cell_anywhere():
 
     # Contrôle de dents : la MÊME case écrite en entiers ferme bien le passage, sinon le test
     # ci-dessus serait vert pour un moteur qui ignorerait tous les obstacles.
-    with_integral = su.geodesic_move_reach(*origin, 20, {(62, 290)}, BOARD_COLS, BOARD_ROWS)
+    with_integral = su.geodesic_move_reach(*origin, 20, _blocked({(62, 290)}))
     assert (62, 290) not in with_integral
 
 
@@ -266,7 +357,7 @@ def test_integer_valued_blocked_coordinates_block_whatever_their_type():
         cast(Set[Tuple[int, int]], {(np.int64(62), np.int64(80))}),
     ]
     fields = [
-        su.geodesic_move_reach(*origin, 8, blocked, BOARD_COLS, BOARD_ROWS)
+        su.geodesic_move_reach(*origin, 8, _blocked(blocked))
         for blocked in forms
     ]
     for blocked, field in zip(forms, fields):
@@ -282,7 +373,7 @@ def test_blocked_cell_outside_the_board_changes_nothing():
     filtre de bornes, cet obstacle-là fermerait une case située à l'autre bout du plateau.
     """
     inert = {(5, -1), (-1, 5), (BOARD_COLS, 5), (5, BOARD_ROWS)}
-    with_inert = su.geodesic_move_reach(4, 298, 20, inert, BOARD_COLS, BOARD_ROWS)
-    without = su.geodesic_move_reach(4, 298, 20, set(), BOARD_COLS, BOARD_ROWS)
+    with_inert = su.geodesic_move_reach(4, 298, 20, _blocked(inert))
+    without = su.geodesic_move_reach(4, 298, 20, _blocked(set()))
     assert with_inert == without
     assert list(with_inert.items()) == list(without.items())

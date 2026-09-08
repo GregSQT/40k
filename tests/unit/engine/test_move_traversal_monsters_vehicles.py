@@ -23,6 +23,7 @@ from typing import Iterable, Tuple
 
 import pytest
 
+from engine.combat_utils import hex_index_table
 from engine.phase_handlers.shared_utils import (
     build_move_traversal_blocked,
     build_move_transit_blocked,
@@ -106,7 +107,8 @@ def _enemy_blocked(gs):
 def _can_reach_beyond(gs) -> bool:
     """Le mobile atteint-il l'autre côté de l'écran, dans son budget, par un vrai chemin ?"""
     transit = build_move_transit_blocked(gs, "1", 1, 0)
-    field = geodesic_move_reach(*MOVER_ANCHOR, MOVE_SUBHEX, transit, 44, 60)
+    blocked = hex_index_table(44, 60).bitmap_in_bounds(transit)
+    field = geodesic_move_reach(*MOVER_ANCHOR, MOVE_SUBHEX, blocked)
     return BEYOND in field
 
 

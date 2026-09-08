@@ -68,6 +68,7 @@ from engine.spatial_relations import (  # noqa: F401  (ré-export)
     unit_entries_within_engagement_zone,
 )
 from engine.combat_utils import (
+    BlockedBitmap,
     get_unit_coordinates,
     normalize_coordinates,
     calculate_hex_distance,
@@ -4320,7 +4321,8 @@ def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
     )
     holder = game_state.get("_move_spatial_cache")  # get allowed (absent au 1er appel)
     if holder is None or holder["fp"] != fp:
-        holder = {"fp": fp, "blocked": {}, "transit": {}, "geo": {}, "eucl": {}}
+        holder = {"fp": fp, "blocked": {}, "transit": {},
+                  "transit_bm": {}, "geo": {}, "eucl": {}}
         game_state["_move_spatial_cache"] = holder
     return holder
 
@@ -4742,16 +4744,55 @@ def build_move_transit_blocked(
     return transit
 
 
+def move_transit_blocked_forms(
+    game_state: Dict[str, Any], squad_id: str, player: int, level: int
+) -> Tuple[AbstractSet[Tuple[int, int]], BlockedBitmap]:
+    """Obstacles de trajet sous LEURS DEUX FORMES : l'ensemble de paires et la carte d'octets.
+
+    Les deux sortent du MÊME appel et vivent dans le MÊME holder que l'ensemble source
+    (``_move_spatial_cache``, clé ``(squad_id, player, level)``) : la carte est DÉRIVÉE du retour
+    de ``build_move_transit_blocked``, jamais recalculée en parallèle. Elle ne peut donc pas être
+    plus vieille que lui — le fingerprint qui jette l'un jette l'autre, et l'invalidation n'est
+    pas un contrôle à écrire mais une propriété de construction.
+
+    POURQUOI LES DEUX ENSEMBLE, et non deux accesseurs. Le site du masque
+    (``build_squad_move_cell_map``) a besoin des PAIRES pour sa porte de proximité (bbox) et de la
+    CARTE pour le BFS ; ``geodesic_field_for_origin`` n'a besoin que de la carte. Deux accesseurs
+    feraient deux entrées dans ``_move_spatial_cache``, dont le fingerprint est relu et recalculé
+    à chaque accès — 258 us par appel, mesure du 2026-09-08 sur 80 steps de
+    `scripts/bench_env_step.py`. Un appel de plus par niveau au site du masque (43 sur ce run)
+    rendrait ~11 ms des ~210 ms que la mémoïsation fait gagner. Un seul appel rend les deux.
+
+    Lecture pure. Les DEUX formes sont renvoyées PAR RÉFÉRENCE : ne pas les muter. La carte est un
+    ``bytes``, donc une mutation lève ; l'ensemble, lui, garde le contrat de non-mutation des
+    autres entrées du cache.
+    """
+    _cache = _move_spatial_cache(game_state)["transit_bm"]
+    _ck = (str(squad_id), int(player), int(level))
+    _hit = _cache.get(_ck)
+    if _hit is not None:
+        return _hit
+    transit = build_move_transit_blocked(game_state, str(squad_id), int(player), int(level))
+    table = hex_index_table(
+        int(require_key(game_state, "board_cols")),
+        int(require_key(game_state, "board_rows")),
+    )
+    _forms = (transit, table.bitmap_in_bounds(transit))
+    _cache[_ck] = _forms
+    return _forms
+
+
 def geodesic_move_reach(
     start_col: int,
     start_row: int,
     budget: int,
-    transit_blocked: AbstractSet[Tuple[int, int]],
-    board_cols: int,
-    board_rows: int,
+    blocked: BlockedBitmap,
 ) -> Dict[Tuple[int, int], int]:
     """Champ géodésique HEX (distance de CHEMIN en pas) depuis ``(start_col, start_row)``,
-    borné à ``budget`` pas, ``transit_blocked`` (murs + obstacles de traversée) infranchissable.
+    borné à ``budget`` pas, ``blocked`` (murs + obstacles de traversée) infranchissable.
+
+    ``blocked`` porte SA table de plateau (``BlockedBitmap``) : la fonction ne reçoit plus de
+    dimensions à apparier avec la carte, donc un désappariement n'est pas représentable.
 
     BFS centre-à-centre, voisinage de ``get_hex_neighbors`` (parity-aware) — même voisinage et
     même traitement des murs que le pool d'ancre réactif (``if neighbor in blocked: continue``).
@@ -4772,9 +4813,19 @@ def geodesic_move_reach(
       empilée avec chaque cellule, ce qui supprime la file de paires `(cellule, distance)`.
 
     Temps cumulé dans la fonction sur le run ci-dessus : 2 382 -> 806 ms (8,0 % du wall).
+
+    TROISIÈME ÉTAPE (2026-09-08, même banc) : la carte d'obstacles n'est plus reconstruite à
+    chaque appel. Elle arrive mémoïsée de ``move_transit_blocked_forms`` — 601 appels pour 16
+    ensembles sources distincts, le même objet étant réindexé jusqu'à 76 fois de suite — et c'est
+    une CARTE D'OCTETS, pas un ensemble d'index : `seen` se copie alors par memcpy (11 ms sur le
+    run, contre 119 ms de réindexation) et le test d'appartenance de la boucle interne ne hache
+    plus. Cumulé dans la fonction : 837 -> 625 ms, soit 8,2 % -> 6,2 % du wall (une variante par
+    processus, 3 répétitions, machine au repos). Un ensemble d'index mémoïsé, lui, ne descendait
+    qu'à 7,1 % : il économisait la construction sans rien changer aux ~18 M de tests d'appartenance.
+
     L'ordre d'insertion du dictionnaire est celui du BFS d'origine, cellule par cellule.
     """
-    table = hex_index_table(board_cols, board_rows)
+    table = blocked.table
     start = (int(start_col), int(start_row))
     field: Dict[Tuple[int, int], int] = {start: 0}
     if budget <= 0:
@@ -4782,11 +4833,14 @@ def geodesic_move_reach(
     neighbors = table.neighbors
     cells = table.cells
     # `seen` porte les cellules bloquées ET les cellules déjà atteintes : le BFS d'origine
-    # testait les deux séparément à chaque voisin. Fusionner les deux ensembles est licite parce
-    # qu'aucune des deux appartenances n'autorise à re-visiter la cellule.
-    seen: Set[int] = table.indices_in_bounds(transit_blocked)
+    # testait les deux séparément à chaque voisin. Fusionner les deux marques est licite parce
+    # qu'aucune des deux n'autorise à re-visiter la cellule.
+    # COPIE OBLIGATOIRE : `blocked.data` est mémoïsé et partagé par tous les appels du même
+    # transit. Marcher dessus laisserait les cellules visitées d'un BFS bloquées pour tous les
+    # suivants — c'est un `bytes`, donc l'oubli lève ici au lieu de rétrécir l'atteignable.
+    seen = bytearray(blocked.data)
     start_index = table.cell_index(start[0], start[1])
-    seen.add(start_index)
+    seen[start_index] = 1
     frontier: List[int] = [start_index]
     distance = 0
     while frontier and distance < budget:
@@ -4794,9 +4848,9 @@ def geodesic_move_reach(
         next_frontier = []
         for cell_index in frontier:
             for neighbor_index in neighbors[cell_index]:
-                if neighbor_index in seen:
+                if seen[neighbor_index]:
                     continue
-                seen.add(neighbor_index)
+                seen[neighbor_index] = 1
                 field[cells[neighbor_index]] = distance
                 next_frontier.append(neighbor_index)
         frontier = next_frontier
@@ -5068,12 +5122,13 @@ def geodesic_field_for_origin(
     cached = fields.get(fkey)
     if cached is not None and cached[0] >= budget:
         return cached[1]
-    field = geodesic_move_reach(
-        o_col, o_row, budget,
-        build_move_transit_blocked(game_state, str(squad_id), int(player), int(level)),
-        int(require_key(game_state, "board_cols")),
-        int(require_key(game_state, "board_rows")),
+    # `_forms` rend l'ensemble ET la carte en UN appel ; seule la carte sert ici. Passer par
+    # `build_move_transit_blocked` puis indexer relirait le fingerprint du cache spatial une
+    # seconde fois (258 us), pour la moitie du gain de la memoisation.
+    _pairs, _blocked = move_transit_blocked_forms(
+        game_state, str(squad_id), int(player), int(level)
     )
+    field = geodesic_move_reach(o_col, o_row, budget, _blocked)
     fields[fkey] = (budget, field)
     return field
 
@@ -13578,10 +13633,13 @@ def erode_move_pool_by_squad_block(
         # Transit sol par niveau (murs + ennemis/amies/EZ selon toggles) — même prédicat de chemin
         # que `explain_move_plan_rejection`. Champ géodésique par ORIGINE de figurine, borné à
         # l'extent (budget max), réutilisé pour toutes les candidates.
-        _transit_by_level: Dict[int, Set[Tuple[int, int]]] = {}
+        # Les deux formes du meme transit, en UN appel par niveau : les PAIRES pour la porte de
+        # proximite ci-dessous (test bbox en O(|local|)), la CARTE D'OCTETS pour le BFS.
+        _transit_by_level: Dict[int, AbstractSet[Tuple[int, int]]] = {}
+        _blocked_by_level: Dict[int, BlockedBitmap] = {}
         for (_mid_g, _oc, _or_, lvl, _off) in models_geo:
             if lvl not in _transit_by_level:
-                _transit_by_level[lvl] = build_move_transit_blocked(
+                _transit_by_level[lvl], _blocked_by_level[lvl] = move_transit_blocked_forms(
                     game_state, str(squad_id), player, lvl
                 )
         # Gate (HEX seulement, cf. l'en-tête) : une figurine dont aucun obstacle de transit n'est
@@ -13623,7 +13681,7 @@ def erode_move_pool_by_squad_block(
                     # Champ hex conservé TEL QUEL (coûts entiers) : `Mapping[..., float]` est
                     # covariant, donc pas de dict recopié sur le chemin chaud du masque gym.
                     _field_by_origin[_fkey] = geodesic_move_reach(
-                        ocol, orow, _extent, _transit_by_level[lvl], board_cols, board_rows
+                        ocol, orow, _extent, _blocked_by_level[lvl]
                     )
         if not _geo_models:
             _geo_budget = False  # aucune figurine à contraindre → pool d'ancre déjà exact
