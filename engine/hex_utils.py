@@ -377,7 +377,19 @@ def hex_line_iter(
     x2, y2, z2 = offset_to_cube(col2, row2)
 
     n = max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
-    seen: Set[Tuple[int, int]] = set()
+    # Dédup par cellule PRÉCÉDENTE, pas par ensemble. Le `set` ne retirait JAMAIS rien : la
+    # i-ème cellule d'un cube-lerp est à distance cube `i` de la source, donc les `n+1` cellules
+    # sont deux à deux distinctes. Cette propriété n'est pas une supposition — c'est celle sur
+    # laquelle le chemin vectorisé (`_deployment_los_lines_vectorized`) se passe déjà de toute
+    # déduplication, et elle est corroborée ici par mesure (2026-09-08 : 60 916 lignes, balayage
+    # exhaustif 12x12 + 40 000 lignes longues en 220x300 + horizontales, zéro répétition).
+    # Le `set` payait donc un hachage et une insertion par cellule pour rien, sur le premier
+    # poste de temps propre du step. La comparaison scalaire est CONSERVÉE plutôt que retirée
+    # pour que la promesse de déduplication de `hex_line` reste vraie par construction et non
+    # par corollaire ; elle n'alloue rien et ne construit plus de tuple pour un doublon.
+    # Verrouillé par tests/unit/engine/test_hex_line_iter_contract.py.
+    last_col: Optional[int] = None
+    last_row: Optional[int] = None
 
     # Chemin chaud (~1,6 M d'itérations par preview de tir) : ``_lerp`` et ``cube_to_offset`` sont
     # inlinés et les bornes hissées hors boucle. L'EXPRESSION reste `a + (b - a) * t` avec
@@ -416,10 +428,12 @@ def hex_line_iter(
         else:
             rz = -rx - ry
 
-        cell = (rx, rz + ((rx - (rx & 1)) >> 1))
-        if cell not in seen:
-            seen.add(cell)
-            yield cell
+        col = rx
+        row = rz + ((rx - (rx & 1)) >> 1)
+        if col != last_col or row != last_row:
+            last_col = col
+            last_row = row
+            yield (col, row)
 
 
 def hex_line_iter_t(
@@ -442,7 +456,11 @@ def hex_line_iter_t(
     x2, y2, z2 = offset_to_cube(col2, row2)
 
     n = max(abs(x1 - x2), abs(y1 - y2), abs(z1 - z2))
-    seen: Set[Tuple[int, int]] = set()
+    # Dédup par cellule PRÉCÉDENTE : jumeau EXACT de `hex_line_iter`, même mesure, même
+    # raison — le cube-lerp ne produit aucune répétition, le `set` ne retirait rien.
+    # Cf. la note complète dans `hex_line_iter` et le test de contrat qui couvre les deux.
+    last_col: Optional[int] = None
+    last_row: Optional[int] = None
 
     ax = x1 + 1e-6
     ay = y1 + 1e-6
@@ -477,10 +495,12 @@ def hex_line_iter_t(
         else:
             rz = -rx - ry
 
-        cell = (rx, rz + ((rx - (rx & 1)) >> 1))
-        if cell not in seen:
-            seen.add(cell)
-            yield cell, t
+        col = rx
+        row = rz + ((rx - (rx & 1)) >> 1)
+        if col != last_col or row != last_row:
+            last_col = col
+            last_row = row
+            yield (col, row), t
 
 
 def hex_line(
