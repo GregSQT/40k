@@ -1262,6 +1262,33 @@ def test_verrou_l_ancre_d_observation_d_une_decision_d_armee_est_sur_la_table():
     assert ancre == "3", "l'ancre doit etre l'escouade sur la table, pas celle en reserve"
 
 
+def test_verrou_l_ancre_de_repli_de_l_observation_est_sur_la_table():
+    """L'ancre égocentrique de repli ignore les escouades en réserve — source UNIQUE.
+
+    Deux chemins de `_build_observation_and_mask` demandent « une escouade du joueur » faute de
+    contexte : la décision d'ARMÉE (`waaagh_call`, sans unité porteuse) et le repli du pool vide,
+    celui qu'emprunte la désignation d'Oath — elle n'est pas un `pending_agent_decision`, donc la
+    branche du dessus ne la voit pas. Les deux replis étaient écrits séparément et ont divergé :
+    la première correction n'avait atteint qu'un des deux (`/code-review`, 2026-09-08), et
+    l'ancre de l'Oath tombait sur `col = -1`.
+
+    Le contrôle porte sur `_first_squad_on_board`, ce qu'ils appellent maintenant tous les deux :
+    c'est l'unicité de la source qui empêche la prochaine divergence, pas deux tests jumeaux.
+    """
+    gs = _command_state(1, p1_faction=ASTARTES, p2_faction=ORKS)
+    gs["units_cache"] = {
+        "1": _uc(-1, -1, player=1),   # MOI, en reserve, EN TETE du cache
+        "3": _uc(4, 0, player=1),     # MOI, sur la table
+        "2": _uc(2, 0, player=2),
+    }
+    engine = _engine(gs)
+
+    assert engine._first_squad_on_board(1) == "3", "l'ancre doit sauter l'escouade en reserve"
+    # Toute la ligne : plus aucune ancre, et l'appelant répond par une observation nulle.
+    gs["units_cache"]["3"] = _uc(-1, -1, player=1)
+    assert engine._first_squad_on_board(1) is None
+
+
 def test_un_siege_ia_hors_gym_tranche_les_deux_decisions():
     """Aucune décision de 08.04 ne peut rester en attente sans décideur.
 

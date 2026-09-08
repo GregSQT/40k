@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   OATH_HEX_HIT_TOLERANCE,
+  type OathTargetCandidate,
   type OathUnitsCache,
+  filterOathTargets,
   pickOathTargetAtHex,
 } from "./oathTargetSelection";
 
@@ -12,6 +14,29 @@ const CACHE: OathUnitsCache = {
   "12": { occupied_hexes_by_model: { "12_1": [30, 10] } },
   "13": {},
 };
+
+const p1 = 1;
+const p2 = 2;
+const unit = (id: number, col: number, hp = 1): OathTargetCandidate => ({ id, player: p2, col, HP_CUR: hp });
+
+describe("filterOathTargets", () => {
+  it("inclut une unité adverse vivante sur la table", () => {
+    expect(filterOathTargets([unit(1, 5)], p1)).toHaveLength(1);
+  });
+
+  it("exclut les unités du joueur désignant", () => {
+    const own: OathTargetCandidate = { id: 2, player: p1, col: 5, HP_CUR: 3 };
+    expect(filterOathTargets([own], p1)).toHaveLength(0);
+  });
+
+  it("exclut les unités mortes (HP_CUR = 0)", () => {
+    expect(filterOathTargets([unit(1, 5, 0)], p1)).toHaveLength(0);
+  });
+
+  it("exclut les unités en réserves stratégiques (col = -1)", () => {
+    expect(filterOathTargets([unit(1, -1)], p1)).toHaveLength(0);
+  });
+});
 
 describe("pickOathTargetAtHex", () => {
   it("désigne l'unité dont une FIGURINE est sous le clic", () => {

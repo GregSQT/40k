@@ -22,6 +22,7 @@ import { useGameLog } from "../hooks/useGameLog";
 import { apiFetch, logoutSession } from "../services/apiFetch";
 import type { GamePhase, GameState, PlayerId, Unit } from "../types";
 import type { DeploymentState, UnitId } from "../types/game";
+import { filterOathTargets } from "../utils/oathTargetSelection";
 import {
   canDropUnitIntoReserves,
   canSelectReserveUnitForIngress,
@@ -2178,15 +2179,10 @@ export const BoardWithAPI: React.FC = () => {
     return pending && pending.type === "returned_models_profile" ? pending : null;
   })();
   const oathSelectionPlayer = apiProps.gameState?.pending_oath_selection ?? null;
-  // Les cibles légales : les MÊMES que celles du moteur (`oath_selectable_enemy_ids`) — unités
-  // adverses encore vivantes. Une liste plus large ferait proposer une désignation que
-  // `set_oath_target` refuserait.
   const oathTargets =
     oathSelectionPlayer === null
       ? []
-      : (apiProps.gameState?.units ?? []).filter(
-          (unit) => unit.player !== oathSelectionPlayer && (unit.HP_CUR ?? 0) > 0
-        );
+      : filterOathTargets(apiProps.gameState?.units ?? [], oathSelectionPlayer);
 
   // Waaagh! EN VIGUEUR (08.04) : le plateau se fissure de vert tant que le drapeau moteur tient,
   // c'est-à-dire jusqu'au début de la prochaine phase de commandement de l'Ork — tour adverse
