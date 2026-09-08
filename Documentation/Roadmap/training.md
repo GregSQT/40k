@@ -2,6 +2,36 @@
 
 ---
 
+## 🟡 Obs — canaux « zone obscurante » et « exposition à la vue ennemie » {#canaux-obscurant-exposition}
+
+**Livré en worktree le 2026-09-08, NON mergé** : le merge attend la fin du run en cours, et le
+lot impose un ré-entraînement `--new` (la forme d'entrée du CNN change), à batcher avec le
+chantier « OC live + secured ».
+
+`GRID_CHANNELS` passe de 9 à 11. `obs_size` ne bouge pas — la grille est fournie à part.
+
+- **`GRID_CH_OBSCURING`** — les zones obscurantes n'étaient pas distinguables des autres zones de
+  terrain : `_static_hex_arrays` empilait tout dans le canal « couvert » sans lire
+  `area["obscuring"]`. Le canal est **dilaté du rayon de socle**, comme son jumeau couvert, parce
+  que le moteur tranche 13.09 par chevauchement de socle. Ce qu'il ajoute au couvert : être
+  `hidden` ne dégrade pas un jet, il rend **intirable** au-delà de la portée de détection.
+- **`GRID_CH_LOS_EXPOSURE`** — part des escouades ennemies vivantes et posées qui voient la
+  cellule. **Non dérivable** des autres canaux : la branche spatiale est une pile de conv 3×3
+  stride 1, elle n'est pas capable de tracer un rayon. Écrit sur les **cellules du pool de move
+  uniquement**, à l'hexe que le décodeur y enverra — donc 0 hors phase de mouvement, même
+  doctrine que le coût géodésique, et **aucune seconde réponse cellule→hexe** à côté de celle du
+  décodeur (mesuré : elles divergent sur 26,7 % des cellules jouables).
+
+**Coût, protocole graine fixe, 450 steps de mouvement** : step de move 73,31 → 80,33 ms
+(**+9,6 %**, sous le seuil de 10 %) ; toutes phases 67,39 → 71,52 ms (+6,1 %). **Sans cache**, et
+c'est mesuré : une carte de visibilité plateau mémoïsée par hexe source rate 26 % du temps
+(l'ancre ennemie bouge à chaque déplacement ET à chaque perte de figurine), l'amorti retombe au
+coût de la version sans cache.
+
+**Reste à faire** : merge après le run, puis `--new`.
+
+---
+
 ## 🔴 Régime de lignée — option A livrée, P2 à relancer depuis P1 {#regime-lignee-2026-09-07}
 
 **Livré le 2026-09-07. Ce qui reste à faire : lancer P2.** Trois runs P2 successifs ont échoué en

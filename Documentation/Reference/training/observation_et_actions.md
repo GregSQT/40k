@@ -30,7 +30,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
 | `self_models_cont` / `_bin` | (20, 2) / (20, 3) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement, **bit de présence** |
-| `grid` | (9, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37). **Centre de la fenêtre** (`ObservationBuilder.squad_grid_anchor`) : l'escouade active — sauf si elle n'est **pas encore posée** (`deployed_on_turn is None`, phase de déploiement), auquel cas c'est un hex de **sa zone de déploiement** ; avant V11 §0.40 la fenêtre était centrée sur la sentinelle `(-1,-1)`, donc sur une autre région du plateau |
+| `grid` | (11, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37). **Centre de la fenêtre** (`ObservationBuilder.squad_grid_anchor`) : l'escouade active — sauf si elle n'est **pas encore posée** (`deployed_on_turn is None`, phase de déploiement), auquel cas c'est un hex de **sa zone de déploiement** ; avant V11 §0.40 la fenêtre était centrée sur la sentinelle `(-1,-1)`, donc sur une autre région du plateau. Deux canaux terminaux : **zones obscurantes** (13.10) — sous-ensemble des cases du couvert, **dilaté du même rayon de socle**, parce que le moteur tranche 13.09 par chevauchement de socle (`compute_models_in_obscuring_terrain` délègue au test disque↔polygone du couvert) ; il vaut ce que le couvert ne dit pas, à savoir où l'on peut devenir `hidden`, donc **intirable** au-delà de la portée de détection. Et **exposition à la vue ennemie** : part des escouades ennemies **vivantes et posées** qui voient la cellule, dans [0,1]. Écrite sur les **cellules du pool de move uniquement**, à l'hexe que le décodeur y enverra (`read_squad_move_cell_map`) — donc **0 hors phase de mouvement**, même doctrine que le coût géodésique, et **aucune seconde réponse cellule→hexe** à côté de celle du décodeur (mesuré : les deux divergent sur 26,7 % des cellules jouables). **Approximation assumée**, identique à celle de l'exposition de déploiement (§0.40 point 3) : la source est l'**ancre au sol** de l'escouade ennemie — pas ses figurines, pas son étage — et le `hidden` 13.09 n'est pas appliqué ; le tracé est `batch_ground_hex_can_see`, verrouillé équivalent à `compute_unit_los` sur les paires SOL. **Sans cache**, par mesure et non par oubli : une carte de visibilité plateau mémoïsée par hexe source rate 26 % du temps (l'ancre ennemie bouge à chaque déplacement ET à chaque perte de figurine) et ne rembourse rien |
 
 ### Vue d'ensemble
 
@@ -81,7 +81,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
 │  TOTAL vectoriel (= obs_size)                      16 811              │
-│  + grid  (9, 32, 32) = 9 216, fournie À PART (non comptée)             │
+│  + grid  (11, 32, 32) = 11 264, fournie À PART (non comptée)           │
 └────────────────────────────────────────────────────────────────────────┘
 
 Coût d'UNE entité = 19 + 20 (unité) + 8 + 4 (capacités/statuts) + 20 × (13 + 1 + 6) (armes)
@@ -559,7 +559,7 @@ D ennemis, E escouades amies). Ces blocs ont été matérialisés en **clés de 
 | **E** — escouades amies | `allies_[1..K-1]` | les alliés sont **agrégés** par le réseau, leur ordre n'a pas de sémantique |
 | *(transverse)* profils d'armes | `*_wpn_*` | même encodeur pour les deux camps ; 86 % du vecteur, seul bloc mémoïsé |
 | *(transverse)* règles d'unité | `*_ability_ids` (8 slots d'`obs_id`) | sur **toute** entité, amie comme ennemie ; ids lus par embedding, ajouter une capacité coûte **zéro scalaire** |
-| *(transverse)* terrain perçu | `grid` | **9** canaux égocentriques 32×32 |
+| *(transverse)* terrain perçu | `grid` | **11** canaux égocentriques 32×32 |
 
 ⚠️ Deux blocs sont **transverses** : les profils d'armes et les règles d'unité vivent DANS chaque
 entité par construction du schéma unifié. Chercher un « bloc armes » ou un « bloc règles » séparé
@@ -720,8 +720,9 @@ absents. L'agent ne percevait pas le terrain sur lequel il évoluait.
 ### Décision : obs spatiale égocentrique + tête spatiale
 
 **Observation** : ajout d'une **grille locale égocentrique 32×32** autour de l'escouade active,
-avec **9 canaux** : murs/obstacles, occupation alliée, occupation ennemie, zone d'engagement,
-objectifs, niveau, couvert, escouade active seule (T-L), coût géodésique du pool de move (T-K).
+avec **11 canaux** : murs/obstacles, occupation alliée, occupation ennemie, zone d'engagement,
+objectifs, niveau, couvert, escouade active seule (T-L), coût géodésique du pool de move (T-K),
+zones obscurantes et exposition à la vue ennemie.
 
 La demi-étendue de la grille = budget Advance **MAXIMAL** (`M + 6" × inches_to_subhex`), et **non**
 le budget du jet effectivement tiré. La géométrie de la grille doit être **identique entre l'obs,

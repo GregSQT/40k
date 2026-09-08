@@ -295,6 +295,90 @@ def test_cover_channel_paints_terrain_areas(engine):
     assert grid[GRID_CH_WALL, wy, wx] == 1.0
 
 
+def test_obscuring_channel_paints_only_obscuring_areas(engine):
+    """13.08 vs 13.10 : le couvert prend TOUTES les zones, l'obscurant seulement les obscurantes.
+
+    Contre-épreuve du défaut corrigé : `_static_hex_arrays` empilait toutes les zones dans le
+    seul ensemble « couvert » sans jamais lire `area["obscuring"]`. La grille ne distinguait
+    donc pas une zone où l'on peut devenir `hidden` (13.09 — intirable au-delà de la portée de
+    détection) d'une zone qui se contente de dégrader la BS de 1.
+    """
+    from engine.spatial_grid import GRID_CH_COVER, GRID_CH_OBSCURING
+
+    gs = engine.game_state
+    obscurante = (22, 20)
+    ordinaire = (22, 22)
+    gs["terrain_areas"] = [
+        {
+            "id": "obscurante", "obscuring": True,
+            "polygon_vertices": [[21, 19], [23, 19], [23, 21], [21, 21]],
+            "hexes": [list(obscurante)],
+        },
+        {
+            "id": "ordinaire", "obscuring": False,
+            "polygon_vertices": [[21, 21], [23, 21], [23, 23], [21, 23]],
+            "hexes": [list(ordinaire)],
+        },
+    ]
+    gs.pop("_grid_static_hex_arrays", None)  # les statiques sont memoises
+
+    grid = _grid(engine)
+    half_extent = grid_half_extent_subhex(gs, "1")
+
+    def _cell(hexe):
+        cell = hex_to_cell(hexe[0], hexe[1], ANCHOR_COL, ANCHOR_ROW, half_extent)
+        assert cell is not None, f"{hexe} doit tomber dans la grille"
+        return cell[1], cell[0]  # (gy, gx)
+
+    gy_o, gx_o = _cell(obscurante)
+    gy_n, gx_n = _cell(ordinaire)
+    assert (gy_o, gx_o) != (gy_n, gx_n), (
+        "fixture creuse : les deux zones tombent dans la MEME cellule, le test ne distingue rien"
+    )
+    # Le couvert prend les deux (13.08 « within a terrain area », sans condition d'obscurité).
+    assert grid[GRID_CH_COVER, gy_o, gx_o] == 1.0
+    assert grid[GRID_CH_COVER, gy_n, gx_n] == 1.0
+    # L'obscurant ne prend que la première.
+    assert grid[GRID_CH_OBSCURING, gy_o, gx_o] == 1.0
+    assert grid[GRID_CH_OBSCURING, gy_n, gx_n] == 0.0
+
+
+def test_obscuring_channel_is_dilated_like_its_cover_twin():
+    """13.09 se tranche par CHEVAUCHEMENT DE SOCLE, comme 13.08 — donc même dilatation.
+
+    Le moteur évalue « caché » via `compute_models_in_obscuring_terrain`, qui délègue à
+    `compute_models_within_terrain`, c'est-à-dire au même test disque↔polygone que le couvert.
+    Un canal obscurant brut à côté d'un couvert dilaté décrirait un prédicat que le moteur
+    n'applique nulle part, et ferait diverger deux canaux voisins sur leurs bords.
+    """
+    from engine.spatial_grid import GRID_CH_COVER, GRID_CH_OBSCURING, cover_dilation_cells
+
+    cfg = _config([], [{"id": "obj1", "name": "Alpha", "hexes": [[22, 22]]}])
+    for unit in cfg["units"]:
+        unit["BASE_SIZE"] = 16
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
+         patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
+        eng = W40KEngine(config=build_engine_config(cfg))
+    eng.reset()
+    gs = eng.game_state
+    gs["terrain_areas"] = [{
+        "id": "area1", "obscuring": True,
+        "polygon_vertices": [[21, 19], [23, 19], [23, 21], [21, 21]],
+        "hexes": [[22, 20]],
+    }]
+    gs.pop("_grid_static_hex_arrays", None)
+    half_extent = grid_half_extent_subhex(gs, "1")
+    assert cover_dilation_cells(16, half_extent) > 0, (
+        "fixture : sans dilatation attendue, le test ne prouve rien"
+    )
+
+    grid = eng.obs_builder.build_squad_grid(gs, "1")
+    obscurant = float(grid[GRID_CH_OBSCURING].sum())
+    assert obscurant > 1.0, "la couronne de socle doit être peinte, pas la seule case de la zone"
+    # Zone UNIQUE et obscurante : les deux canaux décrivent alors exactement le même ensemble.
+    assert np.array_equal(grid[GRID_CH_OBSCURING], grid[GRID_CH_COVER])
+
+
 def test_cover_channel_is_empty_without_terrain_areas(engine):
     """Sans terrain area, le canal couvert reste nul (aucun couvert n'est inventé)."""
     from engine.spatial_grid import GRID_CH_COVER

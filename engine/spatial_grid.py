@@ -36,10 +36,11 @@ import numpy as np
 
 from engine.hex_utils import _hex_center
 
-# --- Forme de la grille (spec §10.1 ; 7e canal : V11 §9.10 ; 8e/9e : V11 §0.32) ---
+# --- Forme de la grille (spec §10.1 ; 7e canal : V11 §9.10 ; 8e/9e : V11 §0.32 ;
+#     10e/11e : chantier « canaux obscurant et exposition ») ---
 GRID_SIZE = 32
 GRID_CELL_COUNT = GRID_SIZE * GRID_SIZE  # 1024 cellules = taille de la tete spatiale
-GRID_CHANNELS = 9
+GRID_CHANNELS = 11
 
 # Canaux (spec §10.1)
 GRID_CH_WALL = 0       # murs / obstacles infranchissables
@@ -77,6 +78,50 @@ GRID_CH_SELF = 7
 # ici) : une cellule a cout 0 est soit hors pool, soit l origine meme de l escouade.
 GRID_CH_MOVE_COST = 8
 
+# Cases des zones de terrain OBSCURANTES (13.10), dilatees du rayon de socle de l escouade active
+# — exactement comme `GRID_CH_COVER`, et pour la meme raison : la regle testee de part et d autre
+# est « the model is WITHIN a terrain area », que le moteur evalue par CHEVAUCHEMENT DE SOCLE
+# (`compute_models_in_obscuring_terrain` delegue a `compute_models_within_terrain`, donc au meme
+# test disque<->polygone que le couvert). Peindre les hexes bruts decrirait un predicat que le
+# moteur n applique nulle part.
+#
+# POURQUOI un canal SEPARE de `GRID_CH_COVER` plutot qu un couvert gradue (0,5 zone ordinaire /
+# 1,0 zone obscurante) : les deux regles ont des effets de signes potentiellement OPPOSES pour
+# l agent — le couvert 13.08 degrade la BS ennemie de 1, tandis qu etre `hidden` 13.09 rend
+# purement et simplement INTIRABLE au-dela de la portee de detection (exclusion du pool de cibles,
+# `shooting_handlers.py`). Un plan gradue unique force le premier conv a etre monotone en cette
+# valeur, donc lui interdit de leur donner des poids de signes contraires ; deux plans binaires ne
+# lui imposent rien.
+#
+# CE QUE LE CANAL NE DIT PAS : `hidden` exige que TOUTES les figurines vivantes de l escouade
+# soient dans la zone. Le canal est per-cellule, donc per-figurine comme son jumeau couvert : il
+# dit « une figurine posee ici serait dans une zone obscurante », pas « l escouade entiere serait
+# cachee ». Meme optimisme que `GRID_CH_COVER`, assume de la meme facon.
+GRID_CH_OBSCURING = 9
+
+# Part des escouades ennemies qui VOIENT la cellule, dans [0,1] : `n_vues / n_ennemies_sur_plateau`.
+#
+# POURQUOI CE CANAL NE PEUT PAS ETRE DERIVE DES AUTRES. La branche spatiale est une pile de conv
+# 3x3 stride 1 (`ai/spatial_extractor.py`) : elle agrege un VOISINAGE, elle ne trace pas de rayon.
+# Meme en lui donnant les murs et les zones obscurantes, aucune profondeur de conv ne rend « cette
+# case est-elle vue depuis la-bas », qui est une propriete de PAIRE sur un segment de longueur
+# arbitraire (13.10 : « if every line of sight drawn between two models crosses one or more
+# obscuring terrain areas »). L information doit donc etre ECRITE DANS LA CELLULE, comme
+# `GRID_CH_MOVE_COST`.
+#
+# 0 hors phase de mouvement et hors du pool — MEME doctrine que `GRID_CH_MOVE_COST`, pour la meme
+# raison : une cellule ne designe une destination que pendant une activation de mouvement, et
+# l exposition peinte est celle de l hexe que le DECODEUR y enverra (`read_squad_move_cell_map`),
+# pas celle d un hexe echantillon. C est ce qui evite d ouvrir une seconde verite cellule->hexe a
+# cote de celle du decodeur : mesure, elles divergent sur 26,7 % des cellules jouables.
+#
+# APPROXIMATION ASSUMEE, identique a celle de l exposition de deploiement (§0.40 point 3) : la
+# source est l ANCRE AU SOL de l escouade ennemie — pas ses figurines, pas son etage — et le
+# hidden 13.09 n est pas applique. Le tracé est `batch_ground_hex_can_see`, verrouille equivalent
+# a `compute_unit_los` sur les paires SOL par
+# `tests/unit/engine/test_deployment_los_vectorized_equivalence.py`.
+GRID_CH_LOS_EXPOSURE = 10
+
 #: Nom de chaque canal, DANS L ORDRE de ses index. Jumeau des `*_FIELDS` de
 #: `observation_entities.py` : tout outil qui RAPPORTE un canal par son nom (l audit
 #: `scripts/obs_channel_audit.py`, un futur diagnostic) doit lire cette liste et non recopier la
@@ -84,6 +129,7 @@ GRID_CH_MOVE_COST = 8
 #: controle bouge, et l outil enverrait corriger un canal sain.
 GRID_CHANNEL_NAMES = (
     "wall", "ally", "enemy", "ez", "objective", "level", "cover", "self", "move_cost",
+    "obscuring", "los_exposure",
 )
 
 if len(GRID_CHANNEL_NAMES) != GRID_CHANNELS:
