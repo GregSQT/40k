@@ -771,6 +771,16 @@ GLOBAL_CONT_FIELDS: Tuple[str, ...] = (
     # qu'il ne percevait pas.
     "objective_distance_0", "objective_distance_1", "objective_distance_2",
     "objective_distance_3", "objective_distance_4",
+    # OC LIVE par objectif (14.02, calculé sur les positions COURANTES) — sémantique DIFFÉRENTE de
+    # objective_control_{i} dans GLOBAL_BIN_FIELDS, qui est la vérité 14.02 de FRONTIÈRE (relue de
+    # objective_controllers, mis à jour à la fin de chaque phase/tour).
+    # Ici : « si la phase finissait maintenant », sans attendre la frontière. Utile en phase de
+    # move : l'agent voit l'OC évoluer à chaque déplacement. Valeurs brutes (VecNormalize).
+    # Objectif absent → 0.0 (bit objective_present_{i} = 0 l'indique déjà).
+    "objective_my_oc_0", "objective_my_oc_1", "objective_my_oc_2",
+    "objective_my_oc_3", "objective_my_oc_4",
+    "objective_enemy_oc_0", "objective_enemy_oc_1", "objective_enemy_oc_2",
+    "objective_enemy_oc_3", "objective_enemy_oc_4",
 )
 #: Phases du moteur, dans l'ordre FIGÉ du one-hot `phase_*` de `GLOBAL_BIN_FIELDS`. DOIT valoir
 #: `engine.action_decoder.GAME_PHASES` — verrouillé par test de contrat, comme
@@ -807,6 +817,14 @@ GLOBAL_BIN_FIELDS: Tuple[str, ...] = (
     "objective_dir_cos_2", "objective_dir_sin_2",
     "objective_dir_cos_3", "objective_dir_sin_3",
     "objective_dir_cos_4", "objective_dir_sin_4",
+    # Statut SECURED (14.03) par objectif — un objectif sécurisé reste tenu même sans OC présent,
+    # jusqu'à ce que l'adversaire ait STRICTEMENT plus d'OC à la fin d'une phase. Dans global_bin
+    # (et non global_cont) : VecNormalize ne normalise que global_cont ; des slots toujours 0/1
+    # y auraient variance ≈ 0 → clipping ±10. Ici les valeurs restent brutes.
+    "objective_secured_mine_0", "objective_secured_mine_1", "objective_secured_mine_2",
+    "objective_secured_mine_3", "objective_secured_mine_4",
+    "objective_secured_enemy_0", "objective_secured_enemy_1", "objective_secured_enemy_2",
+    "objective_secured_enemy_3", "objective_secured_enemy_4",
     # ---------------------------------------------------------------------------------------
     # CAPACITÉS DE FACTION (chantier 03) — Waaagh! et Oath of Moment
     # ---------------------------------------------------------------------------------------

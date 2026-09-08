@@ -1771,6 +1771,38 @@ class ObservationBuilder:
             g_bin[global_bin_index(f"objective_dir_cos_{i}")] = obj_cos[i]
             g_bin[global_bin_index(f"objective_dir_sin_{i}")] = obj_sin[i]
 
+        # OC LIVE + SECURED — deux sémantiques complémentaires à objective_control_{i} (frontière) :
+        # - objective_my_oc_{i} / objective_enemy_oc_{i} : somme LIVE des OC des figurines sur la
+        #   zone, « si la phase finissait maintenant » (sum_objective_control_oc_multi sur positions
+        #   courantes). Utile en phase de move : l'agent voit l'OC évoluer à chaque déplacement.
+        # - objective_secured_mine_{i} / objective_secured_enemy_{i} : statut SECURED (14.03) — un
+        #   objectif sécurisé reste tenu même sans OC présent, jusqu'à ce que l'adversaire ait
+        #   STRICTEMENT plus d'OC à la fin d'une phase.
+        from engine.game_state import objective_hex_sets, sum_objective_control_oc_multi
+        _oc_hex_sets = objective_hex_sets(game_state)
+        _oc_sums = sum_objective_control_oc_multi(game_state, _oc_hex_sets)
+        _objectives = require_key(game_state, "objectives")
+        _secured = game_state.get("secured_objectives", {})
+        _enemy_player_oc = 2 if active_player == 1 else 1
+        for i in range(self.SQUAD_N_OBJECTIVE_SLOTS):
+            if i < len(_objectives):
+                _p1_oc, _p2_oc = _oc_sums[i]
+                _my_oc = _p1_oc if active_player == 1 else _p2_oc
+                _enemy_oc = _p2_oc if active_player == 1 else _p1_oc
+                _obj_key = str(require_key(_objectives[i], "id"))
+                _sec_by = _secured.get(_obj_key)
+                _sec_mine = 1.0 if _sec_by is not None and int(_sec_by) == active_player else 0.0
+                _sec_enemy = 1.0 if _sec_by is not None and int(_sec_by) == _enemy_player_oc else 0.0
+            else:
+                _my_oc = 0
+                _enemy_oc = 0
+                _sec_mine = 0.0
+                _sec_enemy = 0.0
+            g_cont[global_cont_index(f"objective_my_oc_{i}")] = float(_my_oc)
+            g_cont[global_cont_index(f"objective_enemy_oc_{i}")] = float(_enemy_oc)
+            g_bin[global_bin_index(f"objective_secured_mine_{i}")] = _sec_mine
+            g_bin[global_bin_index(f"objective_secured_enemy_{i}")] = _sec_enemy
+
         # === CAPACITÉS DE FACTION (chantier 03) ===
         # Waaagh! et Oath sont des faits d'ARMÉE, pas d'unité — d'où leur place ici. Les quatre
         # bits du Waaagh! sont émis pour les DEUX camps : sa durée enjambe le tour adverse, donc
