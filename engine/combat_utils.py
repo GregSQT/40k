@@ -346,7 +346,9 @@ def hex_index_table(board_cols: int, board_rows: int) -> HexIndexTable:
     x1_long/bot, une variante par processus, 3 repetitions) : 2 382 ms -> 806 ms de temps
     cumule dans la fonction, soit 20,4 % -> 8,0 % du wall du meme run. Les deux tiers du gain
     viennent de l'index entier (plus de hachage de paires), le tiers restant du filtre de
-    bornes precalcule.
+    bornes precalcule. Ces 8,0 % sont l'etat de CETTE etape (2026-09-08), pas l'etat courant :
+    la memoisation de la carte d'obstacles (`bitmap_in_bounds`) les a ensuite ramenes a 5,2 %,
+    et 7,0 % pour le perimetre complet obstacles + BFS.
     """
     key = (int(board_cols), int(board_rows))
     cached = _HEX_INDEX_TABLE_CACHE.get(key)
