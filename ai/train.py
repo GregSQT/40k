@@ -1885,6 +1885,7 @@ from ai.vec_normalize_utils import (
 
 from engine.episode_schedule import episodes_per_env
 from ai.curriculum import (
+    _EARLY_STOP_REQUIRED_KEYS,
     _ROBUST_WINDOW_MIN,
     POOL_VERDICT_DESTROY,
     POOL_VERDICT_PROMOTE,
@@ -6773,6 +6774,18 @@ def _run_main():
                     _curr, _stg = curriculum_stage
                     # Priorité : early_stop de l'étape, puis early_stop global du curriculum.
                     _early_stop_cfg = _stg.get("early_stop") or _curr.get("early_stop")
+                    # Surcharge depuis le profil d'entrainement : clés individuelles seulement,
+                    # validées contre la liste des clés connues avant fusion.
+                    _tc_early_stop = training_config.get("early_stop")
+                    if _early_stop_cfg is not None and _tc_early_stop:
+                        _invalid_es = set(_tc_early_stop) - set(_EARLY_STOP_REQUIRED_KEYS)
+                        if _invalid_es:
+                            raise ValueError(
+                                f"early_stop dans le profil d'entrainement '{args.training_config}' : "
+                                f"cles inconnues {sorted(_invalid_es)}. "
+                                f"Cles autorisees : {sorted(_EARLY_STOP_REQUIRED_KEYS)}."
+                            )
+                        _early_stop_cfg = {**_early_stop_cfg, **_tc_early_stop}
                     # TOUT le pool est sondé depuis le 2026-09-07, plus seulement le champion :
                     # la promotion exige la parité contre chaque autre membre, donc chacun doit
                     # être mesuré. Ce sont les SEUILS qui distinguent le champion des autres
