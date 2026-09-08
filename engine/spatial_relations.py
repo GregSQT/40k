@@ -1,6 +1,6 @@
 """Shared spatial relation helpers for footprint contact and engagement checks."""
 
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import AbstractSet, Any, Dict, Iterator, List, Optional, Set, Tuple
 
 from engine.hex_utils import (
     _hex_center,
@@ -851,7 +851,7 @@ def move_anchor_violates_engagement_clearance(
     center_row: int,
     candidate_fp: Set[Tuple[int, int]],
     units_cache: Dict[str, Any],
-    enemy_adjacent_hexes: Optional[Set[Tuple[int, int]]],
+    enemy_adjacent_hexes: Optional[AbstractSet[Tuple[int, int]]],
     *,
     enemy_cache_items: Optional[List[Tuple[Any, Any]]],
     engagement_zone_ez: int,
@@ -872,7 +872,7 @@ def move_anchor_violates_engagement_clearance(
     if metric == "hex":
         if enemy_adjacent_hexes is None:
             ck = f"enemy_adjacent_hexes_player_{mover_player}"
-            adjacent_hexes: Set[Tuple[int, int]] = require_key(game_state, ck)
+            adjacent_hexes: AbstractSet[Tuple[int, int]] = require_key(game_state, ck)
         else:
             adjacent_hexes = enemy_adjacent_hexes
         for c, r in candidate_fp:
