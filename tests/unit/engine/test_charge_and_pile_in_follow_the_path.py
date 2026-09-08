@@ -23,7 +23,7 @@ from unittest.mock import patch
 
 import pytest
 
-from engine.combat_utils import calculate_hex_distance
+from engine.combat_utils import calculate_hex_distance, hex_index_table
 from engine.phase_handlers.shared_utils import (
     build_units_cache,
     charge_build_valid_plan,
@@ -92,7 +92,8 @@ TARGET = (34, 20)
 
 def _straight_and_path(start: Tuple[int, int], dest: Tuple[int, int], budget: int,
                        walls: Sequence[Tuple[int, int]]) -> Tuple[int, bool]:
-    field = geodesic_move_reach(start[0], start[1], budget, set(walls), 60, 60)
+    blocked = hex_index_table(60, 60).bitmap_in_bounds(set(walls))
+    field = geodesic_move_reach(start[0], start[1], budget, blocked)
     return calculate_hex_distance(*start, *dest), dest in field
 
 
