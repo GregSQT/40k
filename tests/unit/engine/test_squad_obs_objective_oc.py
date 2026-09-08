@@ -13,6 +13,7 @@ from unittest.mock import patch
 import pytest
 
 from engine.observation_builder import ObservationBuilder
+from shared.data_validation import ConfigurationError
 from engine.observation_entities import global_bin_index, global_cont_index
 from engine.w40k_core import W40KEngine
 from tests.unit.engine._config_helpers import build_engine_config
@@ -182,3 +183,15 @@ def test_secured_enemy(engine):
     obs = _obs(engine, "1")
     assert obs["global_bin"][global_bin_index("objective_secured_mine_0")] == pytest.approx(0.0)
     assert obs["global_bin"][global_bin_index("objective_secured_enemy_0")] == pytest.approx(1.0)
+
+
+def test_secured_objectives_absent_leve(engine):
+    """`secured_objectives` absent de game_state → ConfigurationError, aucun repli silencieux.
+
+    La clé est initialisée à chaque reset d'épisode (w40k_core) et lue en accès direct par
+    calculate_objective_control ; son absence est une corruption d'état, pas un « pas encore
+    de secured » — un repli `{}` publierait un statut secured faux au lieu de lever.
+    """
+    del engine.game_state["secured_objectives"]
+    with pytest.raises(ConfigurationError, match="secured_objectives"):
+        _obs(engine, "1")
