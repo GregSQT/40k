@@ -188,3 +188,27 @@ def test_sharing_the_memo_across_intents_changes_no_plan():
         f"mémo au plus rempli à {max(memo_sizes) if memo_sizes else 0} entrées — "
         f"le partage n'a rien à partager, le test ne prouve rien"
     )
+
+
+def test_the_memo_is_purged_on_episode_reset():
+    """Le mémo ne survit PAS à un reset d'épisode.
+
+    Sa clé contient ``_unit_move_version``, qui repart à 0 au reset : une tranche survivante
+    serait relue par le nouvel épisode dès qu'un appel retombe sur la même version avec les
+    mêmes identifiants d'escouade, jet et vol. Les verdicts lus viendraient alors des positions
+    de l'épisode PRÉCÉDENT — des cellules candidates écartées à tort, donc une charge légale
+    refusée sans le moindre bruit.
+
+    ``game_state.update()`` ne recrée pas le dictionnaire : c'est pourquoi les quatre autres
+    caches indexés sur cette version sont purgés explicitement au reset, et pourquoi celui-ci
+    doit l'être avec eux.
+    """
+    env = _build_env()
+    gs = env.game_state
+    sentinel = (("SENTINELLE",), {("m", 0, 0): True})
+    gs["_charge_engage_memo"] = sentinel
+    env.reset(seed=42)
+    assert env.game_state.get("_charge_engage_memo") is not sentinel, (
+        "le mémo d'engagement a survécu au reset alors que `_unit_move_version` repart à 0"
+    )
+    assert env.game_state["_unit_move_version"] == 0, "précondition : la version repart bien à 0"
