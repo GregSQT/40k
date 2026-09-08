@@ -1798,6 +1798,7 @@ class W40KEngine(gym.Env):
             # à 0 et game_state.update() ne recrée pas le dict (les entrées survivraient).
             "_squad_move_pool_cache": {},
             "_charge_plan_cache": {},
+            "_charge_engage_memo": None,
             "_edge_distance_cache": {},
             "_shoot_pass_cache": None,
             "last_move_event_id": 0,
