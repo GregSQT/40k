@@ -1868,7 +1868,7 @@ class ObservationBuilder:
         _oc_hex_sets = objective_hex_sets(game_state)
         _oc_sums = sum_objective_control_oc_multi(game_state, _oc_hex_sets)
         _objectives = require_key(game_state, "objectives")
-        _secured = game_state.get("secured_objectives", {})
+        _secured = require_key(game_state, "secured_objectives")
         _enemy_player_oc = 2 if active_player == 1 else 1
         for i in range(self.SQUAD_N_OBJECTIVE_SLOTS):
             if i < len(_objectives):
