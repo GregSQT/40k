@@ -91,12 +91,16 @@ def _load(units: List[Dict[str, Any]]) -> W40KEngine:
     return load_engine_from_scenario(attached_scenario(units), training_n_envs=1)
 
 
+_BY_OBS_ID: Dict[int, str] = {}
+
+
 def _rule_ids(obs, family: str, row: int) -> set:
     """Capacites en vigueur sur un slot d'entite, relues depuis les `obs_id` ecrits."""
-    by_obs_id = {obs_id: rule_id for rule_id, obs_id in unit_ability_obs_ids().items()}
+    if not _BY_OBS_ID:
+        _BY_OBS_ID.update({obs_id: rule_id for rule_id, obs_id in unit_ability_obs_ids().items()})
     row_vals = obs[f"{family}_ability_ids"][row]
     try:
-        return {by_obs_id[k] for v in row_vals if (k := int(v)) != 0}
+        return {_BY_OBS_ID[k] for v in row_vals if (k := int(v)) != 0}
     except KeyError as exc:
         raise KeyError(
             f"obs_id {exc} absent de unit_ability_obs_ids (family={family!r}, row={row})"
@@ -456,6 +460,26 @@ def test_ability_slots_hold_on_every_datasheet():
     )
 
 
+def _max_effets_in_engine(scen_path: Path, label: str, registry: Any) -> tuple[int, str]:
+    """Lance le moteur sur `scen_path` et retourne (max_effets, detail) pour cette partie."""
+    from engine.phase_handlers.shared_utils import unit_has_rule_effect
+
+    eng = W40KEngine(
+        rewards_config="ArmageddonAgent_x1", training_config_name="x1",
+        controlled_agent="ArmageddonAgent_x1", scenario_file=str(scen_path),
+        unit_registry=registry, quiet=True, gym_training_mode=True, training_n_envs=1,
+    )
+    eng.reset()
+    pire = 0
+    detail = ""
+    for unit in eng.game_state["units"]:
+        effets = [r for r in UNIT_RULE_EFFECT_IDS if unit_has_rule_effect(unit, r)]
+        if len(effets) > pire:
+            pire = len(effets)
+            detail = f"{label} / unite {unit['id']} : {sorted(effets)}"
+    return pire, detail
+
+
 def test_ability_slots_hold_on_the_real_training_rosters():
     """MESURE (pas projection) : les unions 19.04 des rosters d'entrainement tiennent en 8 slots.
 
@@ -469,8 +493,6 @@ def test_ability_slots_hold_on_the_real_training_rosters():
     """
     import json
     import tempfile
-
-    from engine.phase_handlers.shared_utils import unit_has_rule_effect
 
     rosters_dir = Path(PROJECT_ROOT) / "config/agents/ArmageddonAgent_x1/rosters/500pts/training"
     p2_dir = Path(PROJECT_ROOT) / "config/agents/_p2_rosters/500pts/training"
@@ -501,18 +523,9 @@ def test_ability_slots_hold_on_the_real_training_rosters():
             scenario["opponent_roster_ref"] = f"training/{opponent.name}"
             scen_path = scen_dir / f"{agent_roster.stem}.json"
             scen_path.write_text(json.dumps(scenario), encoding="utf-8")
-
-            eng = W40KEngine(
-                rewards_config="ArmageddonAgent_x1", training_config_name="x1",
-                controlled_agent="ArmageddonAgent_x1", scenario_file=str(scen_path),
-                unit_registry=registry, quiet=True, gym_training_mode=True, training_n_envs=1,
-            )
-            eng.reset()
-            for unit in eng.game_state["units"]:
-                effets = [r for r in UNIT_RULE_EFFECT_IDS if unit_has_rule_effect(unit, r)]
-                if len(effets) > pire:
-                    pire = len(effets)
-                    detail = f"{agent_roster.name} / unite {unit['id']} : {sorted(effets)}"
+            n, d = _max_effets_in_engine(scen_path, agent_roster.name, registry)
+            if n > pire:
+                pire, detail = n, d
 
     # Holdout scenarios : refs explicites, pas de tempdir necessaire.
     holdout_scen_dir = (
@@ -521,17 +534,9 @@ def test_ability_slots_hold_on_the_real_training_rosters():
     holdout_scens = sorted(holdout_scen_dir.glob("scenario_bot-*.json"))
     assert holdout_scens, f"aucun scenario holdout sous {holdout_scen_dir}"
     for holdout_scen in holdout_scens:
-        eng = W40KEngine(
-            rewards_config="ArmageddonAgent_x1", training_config_name="x1",
-            controlled_agent="ArmageddonAgent_x1", scenario_file=str(holdout_scen),
-            unit_registry=registry, quiet=True, gym_training_mode=True, training_n_envs=1,
-        )
-        eng.reset()
-        for unit in eng.game_state["units"]:
-            effets = [r for r in UNIT_RULE_EFFECT_IDS if unit_has_rule_effect(unit, r)]
-            if len(effets) > pire:
-                pire = len(effets)
-                detail = f"{holdout_scen.name} / unite {unit['id']} : {sorted(effets)}"
+        n, d = _max_effets_in_engine(holdout_scen, holdout_scen.name, registry)
+        if n > pire:
+            pire, detail = n, d
 
     # VERT VACANT : une escouade sans aucune capacite tiendrait trivialement dans 8 slots.
     assert pire >= 2, f"mesure vide ou degeneree (max={pire}) : le fold 19.04 n'a rien produit"
