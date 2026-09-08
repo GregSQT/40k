@@ -22,6 +22,7 @@ from shared.data_validation import ConfigurationError
 
 from ai.curriculum import (
     RATIO_SUM_TOLERANCE,
+    _validate_early_stop_against_gate,
     assign_pool_members_to_envs,
     copy_tensorboard_run,
     POOL_VERDICT_CONTINUE,
@@ -565,6 +566,41 @@ def test_stage_early_stop_override_with_wrong_key_is_refused() -> None:
     del broken["stages"]["P1"]["early_stop"]["probe_window"]
     with pytest.raises(ConfigurationError, match="probe_window"):
         validate_curriculum(broken)
+
+
+# ── SURCHARGE PROFIL D'ENTRAINEMENT : VALIDATION APRES MERGE ──────────────────────────────
+
+
+def _gate_block(**overrides) -> dict:
+    block = {"min_score_vs_champion": 0.55, "min_score_vs_others": 0.50, "eval_episodes": 10, "eval_blocks": 2}
+    block.update(overrides)
+    return block
+
+
+def test_merged_early_stop_below_gate_champion_is_refused() -> None:
+    """Un override training_config peut faire descendre promote sous le plancher du gate.
+
+    `validate_curriculum` valide AVANT la surcharge ; `_validate_early_stop_against_gate`
+    doit etre appelé APRES le merge pour attraper cette violation.
+    """
+    merged = _early_stop_block(promote_score_vs_champion=0.50)  # sous gate.min=0.55
+    gate = _gate_block()
+    with pytest.raises(ValueError, match="promote_score_vs_champion.*SOUS gate.min_score_vs_champion"):
+        _validate_early_stop_against_gate(merged, gate, "profil 'x1_lineage' surcharge / etape P1")
+
+
+def test_merged_early_stop_below_gate_others_is_refused() -> None:
+    merged = _early_stop_block(promote_score_vs_others=0.45)  # sous gate.min=0.50
+    gate = _gate_block()
+    with pytest.raises(ValueError, match="promote_score_vs_others.*SOUS gate.min_score_vs_others"):
+        _validate_early_stop_against_gate(merged, gate, "profil 'x1_lineage' surcharge / etape P1")
+
+
+def test_merged_early_stop_equal_to_gate_floor_is_accepted() -> None:
+    """Egalite tolérée : la condition est >=, pas >."""
+    merged = _early_stop_block(promote_score_vs_champion=0.55, promote_score_vs_others=0.50)
+    gate = _gate_block()
+    _validate_early_stop_against_gate(merged, gate, "test")  # ne leve pas
 
 
 # ── REGIME DE LIGNEE : VALIDATION ──────────────────────────────────────────────────────────

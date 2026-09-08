@@ -1887,6 +1887,7 @@ from engine.episode_schedule import episodes_per_env
 from ai.curriculum import (
     _EARLY_STOP_REQUIRED_KEYS,
     _ROBUST_WINDOW_MIN,
+    _validate_early_stop_against_gate,
     POOL_VERDICT_DESTROY,
     POOL_VERDICT_PROMOTE,
     append_curriculum_log,
@@ -6777,7 +6778,14 @@ def _run_main():
                     # Surcharge depuis le profil d'entrainement : clés individuelles seulement,
                     # validées contre la liste des clés connues avant fusion.
                     _tc_early_stop = training_config.get("early_stop")
-                    if _early_stop_cfg is not None and _tc_early_stop:
+                    if _tc_early_stop:
+                        if _early_stop_cfg is None:
+                            raise ValueError(
+                                f"early_stop dans le profil d'entrainement '{args.training_config}' : "
+                                "aucun bloc early_stop dans le curriculum ni l'etape courante — "
+                                "la surcharge n'a pas d'effet. Ajouter early_stop au curriculum ou "
+                                "retirer la cle du profil d'entrainement."
+                            )
                         _invalid_es = set(_tc_early_stop) - set(_EARLY_STOP_REQUIRED_KEYS)
                         if _invalid_es:
                             raise ValueError(
@@ -6794,6 +6802,13 @@ def _run_main():
                     _champion_label = stage_champion_label(_stg)
                     if _early_stop_cfg and _champion_label:
                         _gate_cfg = require_key(_curr, "gate")
+                        if _tc_early_stop:
+                            _validate_early_stop_against_gate(
+                                _early_stop_cfg,
+                                _gate_cfg,
+                                f"profil '{args.training_config}' early_stop (surcharge) "
+                                f"/ etape {args.etape}",
+                            )
                         _pool_n_episodes = int(require_key(_gate_cfg, "eval_episodes"))
                         _models_root = get_config_loader().get_models_root()
                         _canonical = build_agent_model_path(_models_root, args.agent)
