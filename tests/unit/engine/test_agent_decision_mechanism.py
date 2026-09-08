@@ -105,6 +105,12 @@ def _unit(uid: int, player: int, col: int, row: int, rules: List[Dict[str, Any]]
         # L'autre moitie de la declaration de `_config()` : la garde anti-coquille d'
         # `army_faction` refuse une faction que personne ne porte (cf. NEUTRAL_TEST_FACTION).
         "FACTION_KEYWORDS": [NEUTRAL_TEST_FACTION],
+        # Jumeau de `FACTION_KEYWORDS` ci-dessus, et la clé est OBLIGATOIRE : l'observation lit
+        # les mots-clés de catégorie de chaque entité (`kw_infantry`… dans `UNIT_BIN_FIELDS`) et
+        # refuse une unité qui n'en déclare aucune liste. Vide, comme l'unité de `_gs_choice()`
+        # plus bas : ces `TestUnit` n'exercent aucune règle de catégorie, et une liste vide dit
+        # « aucun mot-clé déclaré » sans rien masquer.
+        "UNIT_KEYWORDS": [],
         "OC": 1,
         "BASE_SIZE": 1,
         "MODEL_HEIGHT": 2.5,

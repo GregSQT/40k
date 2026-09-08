@@ -43,6 +43,12 @@ def _unit(uid: int, value: int, hp_max: int, models: List[Dict[str, Any]] | None
         # L'autre moitie de la declaration `army_faction` de la config : la garde anti-coquille
         # refuse une faction que personne ne porte (cf. NEUTRAL_TEST_FACTION).
         "FACTION_KEYWORDS": [NEUTRAL_TEST_FACTION],
+        # Jumeau de `FACTION_KEYWORDS` ci-dessus, et la clé est OBLIGATOIRE : l'observation lit
+        # les mots-clés de catégorie de chaque entité (`kw_infantry`… dans `UNIT_BIN_FIELDS`) et
+        # refuse une unité qui n'en déclare aucune liste. Vide : ces unités minimales n'exercent
+        # aucune règle de catégorie, et une liste vide dit « aucun mot-clé déclaré » — c'est la
+        # convention déjà portée par la config d'entrée de `test_state_manager.py`.
+        "UNIT_KEYWORDS": [],
         "OC": 1,
         "T": 4,
         "ARMOR_SAVE": 3,
