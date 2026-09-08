@@ -4,7 +4,7 @@ engine/phase_handlers/shared_utils.py - Shared utility functions for phase handl
 Functions used across multiple phase handlers to avoid duplication.
 """
 
-from typing import AbstractSet, Dict, Iterator, List, Tuple, Set, Optional, Any, Union, Callable, Sequence, Mapping, cast, TYPE_CHECKING
+from typing import AbstractSet, Dict, FrozenSet, Iterator, List, Tuple, Set, Optional, Any, Union, Callable, Sequence, Mapping, cast, TYPE_CHECKING
 from dataclasses import dataclass
 import copy
 import inspect
@@ -593,7 +593,7 @@ def is_footprint_placement_valid(
     candidate_hexes: Set[Tuple[int, int]],
     game_state: Dict[str, Any],
     occupied_positions: Set[Tuple[int, int]],
-    enemy_adjacent_hexes: Optional[Set[Tuple[int, int]]] = None,
+    enemy_adjacent_hexes: Optional[AbstractSet[Tuple[int, int]]] = None,
     *,
     anchor: Tuple[int, int],
     socle: Mapping[str, Any],
@@ -682,7 +682,7 @@ def is_placement_valid_with_clearance(
     row: int,
     orientation: int,
     exclude_unit_id: Optional[str] = None,
-    enemy_adjacent_hexes: Optional[Set[Tuple[int, int]]] = None,
+    enemy_adjacent_hexes: Optional[AbstractSet[Tuple[int, int]]] = None,
 ) -> bool:
     """Placement légal = bornes + murs ET aucun chevauchement de socle.
 
@@ -2076,10 +2076,14 @@ def get_max_base_size_hex(game_state: Dict[str, Any]) -> int:
     return int(require_key(game_rules, "max_base_size_hex"))
 
 
-def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[Tuple[int, int]]:
+def build_enemy_adjacent_hexes(
+    game_state: Dict[str, Any], player: int
+) -> FrozenSet[Tuple[int, int]]:
     """Pre-compute all hexes within engagement_zone of enemy units.
 
-    Returns a set of (col, row) that are in the engagement zone of at least one enemy.
+    Returns a frozenset of (col, row) that are in the engagement zone of at least one enemy.
+    IMMUABLE a dessein : voir `_hex_set_content_hash` — c'est ce qui rend l'empreinte de cet
+    ensemble incapable d'etre perimee dans le fingerprint de `_move_spatial_cache`.
     For legacy boards (engagement_zone=1): equivalent to adjacent hexes.
     For Board ×10 (engagement_zone=10): dilated multi-hex zone (§9.0).
 
@@ -2109,7 +2113,7 @@ def build_enemy_adjacent_hexes(game_state: Dict[str, Any], player: int) -> Set[T
 
 def _compute_enemy_adjacent_cache_for_player_from_units_cache(
     game_state: Dict[str, Any], player: int
-) -> Tuple[Dict[Tuple[int, int], int], Set[Tuple[int, int]]]:
+) -> Tuple[Dict[Tuple[int, int], int], FrozenSet[Tuple[int, int]]]:
     """Compute per-player engagement-zone counters and set from current units_cache.
 
     For each enemy unit, dilates its occupied_hexes by the engagement zone distance
@@ -2143,7 +2147,13 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
 
     counts: Dict[Tuple[int, int], int] = {h: 1 for h in zone_hexes}
 
-    return counts, zone_hexes
+    # FROZENSET, et pas `set` : cet ensemble est PUBLIE sous `enemy_adjacent_hexes_player_N`, que
+    # le fingerprint de `_move_spatial_cache` relit a chaque acces. Un frozenset porte son hash en
+    # cache (mesure : 0,03 us contre 26 us pour `hash(frozenset(set))` sur 3 000 elements), et le
+    # hash reste DERIVE DU CONTENU — ce n'est pas un compteur de version : un ensemble immuable ne
+    # peut pas changer de contenu sans devenir un autre objet, donc aucun chemin d'ecriture ne peut
+    # rendre l'empreinte perimee. C'est plus fort que l'ancienne relecture, pas plus faible (§0.18).
+    return counts, frozenset(zone_hexes)
 
 
 def _get_players_present_from_units_cache(game_state: Dict[str, Any]) -> Set[int]:
@@ -2695,7 +2705,7 @@ def _build_reactive_move_destinations_pool(
                 "Cache must be initialized at phase start."
             )
         enemy_adjacent_hexes = require_key(game_state, cache_key)
-        if not isinstance(enemy_adjacent_hexes, set):
+        if not isinstance(enemy_adjacent_hexes, (set, frozenset)):
             raise ValueError(
                 f"Invalid adjacency cache type for '{cache_key}': "
                 f"{type(enemy_adjacent_hexes).__name__}"
@@ -2960,7 +2970,7 @@ def refresh_all_positional_caches_after_reactive_move(
                     f"Adjacency override for player {player_int} must be set, got {type(override_set).__name__}"
                 )
             game_state[f"enemy_adjacent_counts_player_{player_int}"] = dict(override_counts)
-            game_state[f"enemy_adjacent_hexes_player_{player_int}"] = set(override_set)
+            game_state[f"enemy_adjacent_hexes_player_{player_int}"] = frozenset(override_set)
         return
 
     # Direct recompute path for external callers: recompute from units_cache snapshot.
@@ -3130,7 +3140,7 @@ def maybe_resolve_reactive_move(
     # celui passé en override au pool et que `refresh_all_positional_caches_after_reactive_move`
     # réécrit après chaque déplacement — pas une seconde vérité.
     for _p_int, _p_set in reactive_adjacent_sets_by_player.items():
-        game_state[f"enemy_adjacent_hexes_player_{_p_int}"] = set(_p_set)
+        game_state[f"enemy_adjacent_hexes_player_{_p_int}"] = frozenset(_p_set)
     for _p_int, _p_counts in reactive_adjacent_counts_by_player.items():
         game_state[f"enemy_adjacent_counts_player_{_p_int}"] = dict(_p_counts)
 
@@ -4260,6 +4270,22 @@ DEFAULT_MOVE_CONSTRAINTS: Dict[str, Any] = {
 }
 
 
+def _hex_set_content_hash(hexes: AbstractSet[Tuple[int, int]]) -> int:
+    """Empreinte DU CONTENU d'un ensemble d'hexes, pour un fingerprint d'etat.
+
+    Un `frozenset` porte deja son hash, calcule par CPython depuis son contenu et mis en cache sur
+    l'objet : le relire coute 0,03 us la ou reconstruire un `frozenset` en coute 26 (mesure sur
+    3 000 elements). L'empreinte reste donc DERIVEE DU CONTENU, jamais d'un compteur de version —
+    et elle est plus sure que la reconstruction, parce qu'un ensemble immuable ne peut pas changer
+    de contenu sans devenir un autre objet : aucun chemin d'ecriture ne peut la rendre perimee.
+
+    La branche `frozenset(hexes)` garde le comportement d'avant, mot pour mot, pour un ensemble
+    MUTABLE : une save anterieure au gel, ou un test qui pose la cle en `set` nu, garde une
+    empreinte relue de son contenu a chaque appel. La correction ne depend d'aucun ecrivain.
+    """
+    return hash(hexes) if isinstance(hexes, frozenset) else hash(frozenset(hexes))
+
+
 def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
     """Cache par-etat des ensembles spatiaux du move (cellules interdites, transit, champs
     geodesiques), partage par les DEUX cotes de l'invariant « masque ⊆ executable ».
@@ -4275,8 +4301,10 @@ def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
     ces ensembles dependent :
       - position ET niveau de CHAQUE figurine vivante (occupation amie/ennemie, transit) ;
       - phase (le cache `enemy_adjacent` est par-phase) ;
-      - contenu des zones d'engagement ennemies (elles derivent des positions, mais le chemin
-        d'override reactif les reecrit hors de ce derive — on les lit donc directement) ;
+      - contenu des zones d'engagement ennemies, lu via `_hex_set_content_hash` — elles sont
+        publiees en `frozenset`, donc leur empreinte est portee par l'objet lui-meme et ne peut
+        pas survivre a un changement de contenu ; elles derivent des positions, mais le chemin
+        d'override reactif les reecrit hors de ce derive — on les lit donc directement ;
       - drapeau `battle_shocked` de chaque escouade : l'exemption Desperate Escape (09.07) retire
         les figurines ennemies du transit, et ce drapeau bascule SANS qu'une figurine bouge
         (`force_battle_shock`, test de commandement 01.07). Sans lui, le transit memoise restait
@@ -4288,10 +4316,16 @@ def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
     partie. Les ensembles sont renvoyes PAR REFERENCE : ne pas les muter (meme contrat qu'avant).
     """
     models_cache = require_key(game_state, "models_cache")
+    # Balayage de PREFIXE puis tri des seules cles retenues : `sorted(game_state.items())` triait
+    # les 167 cles de l'etat pour en garder deux (mesure : 25,5 us par appel, 14 % du fingerprint),
+    # et levait sur un etat a cles de types melanges. Le tri des deux cles retenues suffit a rendre
+    # l'ordre du tuple deterministe, seule propriete dont le fingerprint a besoin.
     ez_fp = tuple(
-        (_k, hash(frozenset(_v)))
-        for _k, _v in sorted(game_state.items())
-        if isinstance(_k, str) and _k.startswith("enemy_adjacent_hexes_player_")
+        (_k, _hex_set_content_hash(game_state[_k]))
+        for _k in sorted(
+            _key for _key in game_state
+            if isinstance(_key, str) and _key.startswith("enemy_adjacent_hexes_player_")
+        )
     )
     fp = (
         str(game_state.get("phase", "")),  # get allowed (phase absente = etat non initialise)

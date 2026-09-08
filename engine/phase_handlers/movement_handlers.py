@@ -621,7 +621,7 @@ def _movement_engagement_violates(
     center_row: int,
     candidate_fp: Set[Tuple[int, int]],
     units_cache: Dict[str, Any],
-    enemy_adjacent_hexes: Optional[Set[Tuple[int, int]]] = None,
+    enemy_adjacent_hexes: Optional[AbstractSet[Tuple[int, int]]] = None,
     *,
     enemy_cache_items: Optional[List[Tuple[Any, Any]]] = None,
     engagement_zone_ez: Optional[int] = None,
@@ -1659,7 +1659,7 @@ def _is_in_enemy_engagement_zone(game_state: Dict[str, Any], unit: Dict[str, Any
         unit_row,
         unit_fp,
         units_cache,
-        enemy_adj if isinstance(enemy_adj, set) else None,
+        enemy_adj if isinstance(enemy_adj, (set, frozenset)) else None,
     )
     
     # Log adjacency check result
@@ -2267,7 +2267,7 @@ def _build_multi_hex_vectorized(
     enemy_transit_blocked: Set[Tuple[int, int]],
     friendly_transit_blocked: Set[Tuple[int, int]],
     occupied_set: Set[Tuple[int, int]],
-    enemy_adjacent_hexes: Set[Tuple[int, int]],
+    enemy_adjacent_hexes: AbstractSet[Tuple[int, int]],
     enemy_items: Optional[List[Tuple[Any, Any]]],
     ez: int,
     thru_ez: bool,
@@ -2357,7 +2357,7 @@ def _build_multi_hex_vectorized(
     ) -> "np.ndarray":
         return spread_by_kernel(src, kernel, board_cols, board_rows, bbox=bbox)
 
-    def _mask_from_cells(cells: Set[Tuple[int, int]]) -> "np.ndarray":
+    def _mask_from_cells(cells: AbstractSet[Tuple[int, int]]) -> "np.ndarray":
         m = np.zeros((board_cols, board_rows), dtype=bool)
         if not cells:
             return m
@@ -2746,7 +2746,7 @@ def _euclidean_ground_anchor_multihex(
     occupied: Set[Tuple[int, int]],
     enemy_transit_blocked: Set[Tuple[int, int]],
     friendly_transit_blocked: Set[Tuple[int, int]],
-    enemy_adjacent_hexes: Set[Tuple[int, int]],
+    enemy_adjacent_hexes: AbstractSet[Tuple[int, int]],
     enemy_items: Optional[List[Tuple[Any, Any]]],
     ez: int,
     thru_ez: bool,
@@ -2766,7 +2766,7 @@ def _euclidean_ground_anchor_multihex(
             game_state, unit, enemy_items, ez, board_cols, board_rows
         )
         _ec, _er = np.where(_ez_mask)
-        ez_forbidden: Set[Tuple[int, int]] = {(int(c), int(r)) for c, r in zip(_ec, _er)}
+        ez_forbidden: AbstractSet[Tuple[int, int]] = {(int(c), int(r)) for c, r in zip(_ec, _er)}
         # Murs retirés de `dest_blocked_fp` : ancres interdites au SOCLE, testées sur l'ancre
         # comme l'EZ. Les laisser ici les mesurerait comme des POINTS dilatés par l'empreinte,
         # soit plus laxiste que le commit — masque ⊄ exécutable.
