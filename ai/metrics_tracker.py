@@ -493,12 +493,9 @@ class W40KMetricsTracker:
                 ]],
                 "l_approx_kl_max": ["Multiline", [
                     "00_critical/l_approx_kl_max",
-                    "thresholds/kl_min",
-                    "thresholds/kl_max",
                 ]],
                 "m_explained_var": ["Multiline", [
                     "00_critical/m_explained_var",
-                    "thresholds/explained_variance_min",
                 ]],
                 "n_immediate_reward_ratio_mean": ["Multiline", [
                     "00_critical/n_immediate_reward_ratio_mean",
