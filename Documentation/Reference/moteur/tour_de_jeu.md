@@ -99,7 +99,7 @@ end_activation (Arg1, Arg2, Arg3, Arg4, Arg5, Arg6)
 │   ├── CASE Arg3 = 0 → Do not mark the unit
 │   ├── CASE Arg3 = MOVE → Mark as units_moved
 │   ├── CASE Arg3 = FLED → Mark as units_moved AND Mark as units_fled
-│   ├── CASE Arg3 = SHOOTING → Mark as units_shot
+│   ├── CASE Arg3 = SHOOTING → Mark as units_shot AND refresh rule 13.09 hidden status
 │   ├── CASE Arg3 = ADVANCE → Mark as units_advanced
 │   ├── CASE Arg3 = CHARGE → Mark as units_charged
 │   └── CASE Arg3 = FIGHT → Mark as units_fought
