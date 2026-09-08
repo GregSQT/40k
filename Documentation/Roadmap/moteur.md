@@ -2,6 +2,33 @@
 
 ---
 
+## 🔴 13.09 — le statut « caché » est figé pour toute la phase de tir {#hidden-fraicheur}
+
+**Arbitrage tranché le 2026-09-08 : option C.** Ouvert, non commencé.
+
+`compute_hidden_statuses` n'a que deux sites d'appel (`shooting_handlers.py:917` au début de la phase
+de tir, `api_server.py:1150` pour le PvP), et la porte 13.09 de `valid_target_pool_build`
+(`shooting_handlers.py:2934`) lit ce drapeau gelé. Or 13.09 décrit un état **continu** — « a model is
+hidden WHILE all of the following apply ». Une escouade dont la seule figurine exposée meurt en cours
+de phase devient cachée immédiatement, donc intirable au-delà de la portée de détection ; le moteur
+l'accepte encore.
+
+**Reproduction exécutée le 2026-09-08** (ennemi de 2 figurines, une en zone obscurante et une
+dehors, tireur à 24" avec une arme de 36", détection 15") : avant la perte, obs `hidden=0 / los=1` et
+pool `['2']` — cohérent ; après avoir tué la figurine exposée, obs `hidden=1 / los=0`, moteur
+`unit['hidden'] = False`, pool toujours `['2']`.
+
+**Conséquence sur l'observation** : le chantier [training.md#hidden-detection-obs](training.md#hidden-detection-obs)
+a fait de `los_can_see` un « visible ET détectable » recalculé à chaud. Tant que ce chantier-ci n'est
+pas livré, le contrat D1 n'est vrai qu'au début de la phase de tir. Le fermer permettra de faire
+passer `test_los_can_see_zero_implies_pool_exclusion` de l'implication à l'égalité.
+
+**Attention périmètre** : chercher le choke-point de retrait de figurines plutôt que d'ajouter un
+appel par site (motif « code testé mais jamais appelé » déjà rencontré ici), et vérifier le jumeau
+mêlée, qui retire aussi des figurines. Change les parties jouées → ré-entraînement.
+
+---
+
 ## P3-0 — Retrait pour cohérence 03.03 {#p3-0}
 
 ✅ **Livré 2026-08-23.** TOTAL_ACTION_SIZE 1359 → 1379 (+20 slots COHERENCY). Queue multi-escouade, sièges muets auto-résolus, tête pointeur `coherency_query_net` sur `self_models`. 32 tests verts. Run `--new` requis.

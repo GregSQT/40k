@@ -2,6 +2,35 @@
 
 ---
 
+## ✅ Obs — `hidden` 13.09 sur toutes les entités et porte de détection {#hidden-detection-obs}
+
+**Livré et mergé le 2026-09-08.** `obs_size` inchangé (16811), donc ce lot n'impose **par lui-même**
+aucun `--new` ; il tombe dans celui que « canaux obscurant / exposition » rend déjà obligatoire.
+
+`los_can_see` ne portait que 06.01. La porte des 15" de 13.09 ne vivait que dans l'éligibilité du
+tir (`valid_target_pool_build`), donc l'observation annonçait `1` sur une cible que le moteur
+refusait : l'agent ne pouvait apprendre ni à entrer dans la portée de détection, ni à se cacher
+au-delà. Le bit vaut désormais **visible ET détectable**, via les mêmes oracles que le moteur
+(`compute_unit_los` + `hidden_enemy_out_of_detection`) — aucune réimplémentation.
+
+`hidden` est donc émis pour **toute entité posée** et non plus pour la seule unité active : c'est lui
+qui conditionne la visibilité. `_squad_terrain_flags` prend un mode `hidden_only` plutôt qu'un second
+chemin — une seule implémentation de 13.09. `gone_to_ground` / `in_cover` restent actif-seul : pour un
+ennemi, `cover_vs_observer` porte déjà 13.08 EXACT et le −3" de 13.5 est plié dans la porte de
+détection ; les émettre coûterait une seconde passe terrain pour une information redondante.
+
+**Coût mesuré** (`scripts/bench_env_step.py`, 400 steps, x1_long/bot/résolution 1, sous contention) :
+`hidden` seul 61,8 µs/entité contre 122,0 µs pour les trois drapeaux, et les gardes gratuites
+(`hideable`, `units_shot`) écartent 54 % des entités sans aucun scan. Total **0,596 ms/step, soit
+0,30 % du temps de step** et 2,8 % du temps d'observation.
+
+**Divergence connue, assumée, fermée par un autre chantier** : l'obs recalcule `hidden` à chaud, le
+moteur lit `unit['hidden']` figé au début de la phase de tir (`compute_hidden_statuses`, deux sites
+d'appel seulement). Une perte encaissée en cours de phase les fait diverger. Arbitrage tranché le
+2026-09-08 — option C, en chantier séparé : voir [moteur.md#hidden-fraicheur](moteur.md#hidden-fraicheur).
+
+---
+
 ## 🟡 Obs — canaux « zone obscurante » et « exposition à la vue ennemie » {#canaux-obscurant-exposition}
 
 **Livré en worktree le 2026-09-08, NON mergé** : le merge attend la fin du run en cours, et le

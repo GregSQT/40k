@@ -135,6 +135,8 @@ Détail : [training.md#regime-lignee-2026-09-07](training.md#regime-lignee-2026-
 | Sujets | Chantier | Fichier | ⚡/🚫 |
 |---|---|---|---|
 | training | 🟡 **Obs — canaux « zone obscurante » et « exposition »** (`GRID_CHANNELS` 9→11) — livré en worktree le 2026-09-08, **non mergé** : merge après le run en cours, `--new` obligatoire, à batcher avec « OC live + secured » | [training.md#canaux-obscurant-exposition](training.md#canaux-obscurant-exposition) | 🚫 |
+| training | ✅ **Obs — `hidden` 13.09 sur toutes les entités + porte de détection** — `los_can_see` = visible ET détectable ; mergé le 2026-09-08, `obs_size` inchangé (16811), aucun `--new` propre | [training.md#hidden-detection-obs](training.md#hidden-detection-obs) | 🚫 |
+| moteur | 🔴 **13.09 — statut « caché » figé pour toute la phase de tir** — arbitrage tranché (option C), non commencé ; divergence obs/moteur reproduite le 2026-09-08 | [moteur.md#hidden-fraicheur](moteur.md#hidden-fraicheur) | 🚫 |
 
 Autres tâches J4 archivées → `archives/doc.md#hygiene-correctifs-ponctuels`
 
