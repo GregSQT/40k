@@ -194,11 +194,11 @@ def _scale_socle(
 
 
 # Keywords granting the "hideable" property (Benefit of Cover / Hidden rules 13.08-13.09).
-_HIDEABLE_KEYWORDS = ("infantry", "beast", "swarm")
+_HIDEABLE_KEYWORDS = ("infantry", "beasts", "swarm")
 
 
 # Mots-clés autorisant une figurine à finir un move sur une surface hors rez-de-chaussée
-# (règle 13.06). Étend _HIDEABLE_KEYWORDS (infantry/beast/swarm) avec fly/monster : même
+# (règle 13.06). Étend _HIDEABLE_KEYWORDS (infantry/beasts/swarm) avec fly/monster : même
 # convention de lecture (keywordId, lower/strip) que compute_hideable, donc aligné sur la donnée.
 _FLOOR_CAPABLE_KEYWORDS = _HIDEABLE_KEYWORDS + ("fly", "monster")
 

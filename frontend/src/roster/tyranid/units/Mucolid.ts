@@ -24,7 +24,7 @@ export class Mucolid extends EliteMeleeElite {
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [
-    { keywordId: "beast" },
+    { keywordId: "beasts" },
     { keywordId: "fly" },
     { keywordId: "great devourer" },
     { keywordId: "mucolid" },
