@@ -23,9 +23,15 @@
 # regarde la mauvaise chose est pire qu'un contrôle en retard.
 #
 # PARTAGE DES RÔLES, à respecter si ce hook évolue :
-#   - le hook garde la FORME (présence d'une section, disposition, nature des chemins) ;
-#   - CLAUDE.md garde la SUBSTANCE (ce que LU doit contenir, pourquoi JUMEAU existe, quand PROMPTS
-#     est dû). Rien de tout ça n'est mécaniquement vérifiable, donc rien de tout ça n'entre ici.
+#   - le hook garde la FORME (présence d'une section, disposition, nature des chemins) et la
+#     TRACE (ce que le tour a réellement ouvert, cf. `suite_faults`) ;
+#   - CLAUDE.md garde le JUGEMENT (ce que LU doit contenir, pourquoi JUMEAU existe, si une
+#     proposition est pertinente). Rien de tout ça n'est mécaniquement vérifiable, donc rien de
+#     tout ça n'entre ici.
+# La trace est entrée dans ce fichier le 2026-09-09, et la frontière mérite d'être dite : le hook
+# ne juge PAS qu'une proposition est bonne — il constate qu'elle cite du code que le tour n'a
+# jamais ouvert. Ce constat-là est décidable, et c'est le seul du lot qui ne puisse pas être
+# satisfait en écrivant : le rapport se rédige, la liste des outils appelés non.
 #
 # LA CONFIGURATION N'EST PAS ÉCRITE ICI — les sections exigées et les fichiers qui comptent comme
 # du code sont LUS dans les deux lignes déclaratives de CLAUDE.md (puce « FORME DU RAPPORT »).
@@ -46,6 +52,13 @@ import shlex
 import sys
 
 EDIT_TOOLS = {"Edit", "Write", "NotebookEdit", "MultiEdit"}
+# Outils par lesquels un fichier est OUVERT dans un tour. `Bash` en fait partie : `sed -n`, `cat`
+# et `grep` y lisent autant que `Read`, et sa commande entière est conservée — le chemin y est
+# noyé dans une ligne de shell, donc on cherchera par inclusion et non par égalité.
+READ_TOOLS = {"Read", "Grep", "Glob", "NotebookRead"}
+
+# Une entrée de la section SUITE : la flèche, puis le marqueur de catégorie.
+ENTREE_SUITE = re.compile(r"^\s*→\s*(🔴|🕳|💡|📋)")
 
 # Ce que `/code-review` et `/simplify` acceptent en plus des chemins : niveaux d'effort et options.
 # Un numéro de PR est reconnu à part (chiffres seuls). Tout le reste est un chemin, donc à vérifier.
@@ -216,30 +229,47 @@ def entrees(path):
 
 
 def read_turns(path):
-    """Découpe le transcript en tours : [(fichiers modifiés, dernier texte assistant), ...].
+    """Découpe le transcript en tours : [(fichiers modifiés, fichiers ouverts, dernier texte), ...].
 
     Le DERNIER texte et non le premier : les textes intermédiaires d'un tour ne sont pas son
     rapport, et c'est en les confondant avec lui qu'un contrôle branché sur Stop se trompe.
+
+    Les fichiers OUVERTS sont relevés au même titre que les modifiés parce qu'ils sont la seule
+    chose du tour que l'agent ne rédige pas. Un rapport peut affirmer n'importe quoi ; la liste
+    des outils qu'il a réellement appelés, non. C'est ce qui permet de juger une proposition sur
+    le travail fait plutôt que sur ce qu'elle prétend — sans rien exiger de plus dans le texte.
     """
-    turns, edited, last_text = [], [], ""
+    turns, edited, opened, last_text = [], [], set(), ""
     for entry in entrees(path):
         if is_real_user_prompt(entry):
-            turns.append((edited, last_text))
-            edited, last_text = [], ""
+            turns.append((edited, opened, last_text))
+            edited, opened, last_text = [], set(), ""
             continue
         for b in blocks(entry):
-            if b.get("type") == "tool_use" and b.get("name") in EDIT_TOOLS:
-                # `NotebookEdit` nomme son argument `notebook_path` : ne lire que `file_path`
-                # laissait un tour qui n'édite qu'un notebook passer pour un tour sans modification.
+            if b.get("type") == "tool_use":
                 entree = b.get("input") or {}
-                path_arg = entree.get("file_path") or entree.get("notebook_path") or ""
-                if path_arg:
-                    edited.append(path_arg)
+                nom = b.get("name")
+                if nom in EDIT_TOOLS:
+                    # `NotebookEdit` nomme son argument `notebook_path` : ne lire que `file_path`
+                    # laissait un tour qui n'édite qu'un notebook passer pour non modifié.
+                    path_arg = entree.get("file_path") or entree.get("notebook_path") or ""
+                    if path_arg:
+                        edited.append(path_arg)
+                elif nom in READ_TOOLS or nom == "Bash":
+                    # Toutes les formes sous lesquelles un chemin arrive à un outil de lecture :
+                    # l'argument de `Read`, le `path` ou le `pattern` de `Grep`/`Glob`, et la
+                    # commande de `Bash` en entier. Un fichier ÉDITÉ compte aussi comme ouvert :
+                    # `Edit` exige sa lecture préalable, et `Write` en fait un fichier connu.
+                    for cle in ("file_path", "notebook_path", "path", "pattern", "command"):
+                        valeur = entree.get(cle)
+                        if isinstance(valeur, str) and valeur:
+                            opened.add(valeur)
             elif b.get("type") == "text" and entry.get("type") == "assistant":
                 text = b.get("text") or ""
                 if text.strip():
                     last_text = text
-    turns.append((edited, last_text))
+        opened.update(edited)
+    turns.append((edited, opened, last_text))
     return turns[1:]  # le premier segment précède tout prompt : ce n'est pas un tour
 
 
@@ -380,11 +410,107 @@ def relire_faults(lines):
     return faults
 
 
+def motif_ancre(cfg):
+    """Motif d'un chemin de fichier de CODE, construit sur la liste déclarée dans CLAUDE.md.
+
+    Construit et non écrit : la liste des suffixes vit déjà dans CLAUDE.md, et en recopier un
+    deuxième exemplaire ici est exactement le défaut du 2026-08-12 que `config()` a fermé — deux
+    listes divergent, et c'est la moins à jour qui commande. Les fichiers qui ne sont pas du code
+    (une doc, un JSON de configuration) ne sont donc pas des ancres : le reste du hook ne gate déjà
+    que sur du code, et réclamer l'ouverture d'un `.md` cité en passant serait un faux positif.
+    """
+    branches = []
+    if cfg["code_suffixes"]:
+        branches.append(
+            r"[\w.-]+\.(?:" + "|".join(re.escape(s.lstrip(".")) for s in cfg["code_suffixes"]) + ")"
+        )
+    if cfg["code_basenames"]:
+        branches.append("|".join(re.escape(n) for n in cfg["code_basenames"]))
+    if not branches:
+        # Une alternative VIDE (`(?:a|)`) matche la chaîne vide, donc toute entrée se serait
+        # créditée elle-même et le contrôle se serait éteint sans un mot — le garde-fou muet que
+        # ce fichier refuse (T1). `config()` interdit déjà la liste vide ; on le redit ici, parce
+        # que c'est ici que le silence se produirait.
+        raise ValueError("aucun fichier déclaré comme code : plus aucune ancre n'est reconnaissable")
+    return re.compile(
+        r"(?<![\w/.-])((?:[\w.-]+/)*(?:" + "|".join(branches) + r"))(?::\d+)?"
+    )
+
+
+def entrees_suite(lines):
+    """Entrées de la section SUITE : [(marqueur, corps), ...], corps borné à l'entrée suivante.
+
+    La DERNIÈRE entrée court jusqu'à la fin du message. Le borner à la section suivante a été
+    écarté : une entrée SUITE porte un prompt copiable qui commence volontiers par un champ de
+    gabarit en majuscules (`Observation :`, `Objectif :`), donc toute borne par étiquette coupe
+    l'entrée en plein milieu et lui retire les ancres qu'elle cite plus bas. Le corps trop large
+    ne peut produire qu'un FAUX NÉGATIF — une ancre de plus à créditer — et ce hook se tait
+    plutôt que de réclamer à tort.
+    """
+    reperes = [i for i, ln in enumerate(lines) if ENTREE_SUITE.match(ln)]
+    return [
+        (
+            ENTREE_SUITE.match(lines[i]).group(1),
+            "\n".join(lines[i:reperes[n + 1] if n + 1 < len(reperes) else len(lines)]),
+        )
+        for n, i in enumerate(reperes)
+    ]
+
+
+def suite_faults(entrees_de_suite, ouverts, cfg):
+    """Entrées SUITE proposées sans avoir ouvert le code qu'elles citent. Liste vide = conforme.
+
+    C'est le SEUL contrôle de ce fichier qui ne regarde pas le rapport mais le travail : les
+    gabarits SUITE de CLAUDE.md exigent tous une référence au code (`Fichier:ligne`, `Fichiers
+    concernés`, `Périmètre`), et une référence que le tour n'a jamais ouverte est un souvenir, pas
+    une vérification. Mesuré sur les 1786 transcripts du projet le 2026-09-09 : 614 entrées SUITE
+    rendues, dont 106 ne citaient aucun fichier et 127 un fichier jamais ouvert du tour.
+
+    Le contrôle porte sur la TRACE et non sur le texte, et c'est ce qui le rend non contournable :
+    l'agent rédige son rapport, il ne rédige pas la liste des outils qu'il a appelés. Corollaire
+    assumé : il n'ajoute rien au rapport. Ce qu'il coûte, il le coûte en travail — donc en
+    propositions retirées, ce qui RACCOURCIT la sortie au lieu de l'allonger.
+
+    Conservateur par construction : UNE ancre ouverte suffit à créditer l'entrée. Un 🕳 Trou cite
+    à la fois le bloc fautif et le fichier de test à écrire, qui lui n'existe pas encore ;
+    exiger toutes les ancres réclamerait l'ouverture d'un fichier qui n'a pas à exister.
+    """
+    ancre = motif_ancre(cfg)
+    blob = " ".join(ouverts)
+    faults = []
+    for marqueur, corps in entrees_de_suite:
+        citees = ancre.findall(corps)
+        if not citees:
+            faults.append(
+                f"l'entrée SUITE {marqueur} ne cite aucun fichier de code — son gabarit en exige "
+                "un (`Fichier:ligne`, `Fichiers concernés`, `Périmètre`) : nomme-le, ou passe le "
+                "constat en LU"
+            )
+            continue
+        # Par inclusion, et le nom seul suffit : un chemin arrive ici sous la forme qu'a écrite le
+        # rapport (relative, absolue, noyée dans une commande shell), et rien ne garantit qu'elle
+        # soit celle passée à l'outil. Comparer strictement réclamerait sur une simple différence
+        # d'écriture — un faux positif, sur un fichier réellement ouvert.
+        if not any(c in blob or os.path.basename(c) in blob for c in citees):
+            faults.append(
+                f"l'entrée SUITE {marqueur} cite {citees[0]}, qui n'a été ouvert à aucun moment de "
+                "ce tour : ouvre-le et vérifie avant de le proposer, ou passe le constat en LU "
+                "(gates de CLAUDE.md — une ancre non relue est un souvenir, pas une vérification)"
+            )
+    return faults
+
+
 def faults_of(turn, cfg):
     """Défauts de forme du rapport d'un tour. Liste vide = rien à redire."""
-    edited, report = turn
-    if not edited:
-        return []  # tour de lecture, d'analyse ou de discussion : aucun rapport n'est dû
+    edited, ouverts, report = turn
+    lignes = report.splitlines()
+    # Une entrée SUITE engage le contrôle même sans édition. Le tour qui ARBITRE sans rien écrire
+    # est précisément celui où une proposition non payée passait inaperçue : le rapport du
+    # 2026-09-08 en portait une, et rien ne l'a regardée. Cherchée sur le texte BRUT, avant tout
+    # filtrage, pour qu'une fence orpheline soit DITE plus bas au lieu de faire taire le hook (T1).
+    propose = any(ENTREE_SUITE.match(ln) for ln in lignes)
+    if not edited and not propose:
+        return []  # tour de lecture, d'analyse ou de discussion sans proposition : rien n'est dû
     # `est_du_code` porte les DEUX conditions (dans le dépôt, et déclaré comme code) et sert aussi
     # au hook voisin : un script de sonde jetable du scratchpad est du `.py` mais ne sera pas livré,
     # et sans cette condition RELIRE était réclamée pour un fichier que l'autre hook n'inscrit
@@ -392,7 +518,7 @@ def faults_of(turn, cfg):
     du_code = any(est_du_code(f, cfg) for f in edited)
     # Les sections se cherchent HORS des blocs ```, comme les commandes du bloc RELIRE : un prompt
     # copiable qui cite `LU :` satisfaisait l'exigence sans que le rapport la porte.
-    visibles, bloc_ouvert = hors_bloc_de_code(report.splitlines())
+    visibles, bloc_ouvert = hors_bloc_de_code(lignes)
     if bloc_ouvert is not None:
         # DÉCISION : une fence jamais refermée rend le message MALFORMÉ, et c'est CE défaut qu'on
         # rend — seul, et sans regarder plus loin. Les deux autres lectures ont été écartées :
@@ -407,7 +533,9 @@ def faults_of(turn, cfg):
             "n'est pas analysable (RELIRE comprise) : referme-le et rends le rapport en entier"
         ]
     faults = []
-    for name, portee in cfg["sections"]:
+    # Les sections ne sont dues que d'un tour qui a MODIFIÉ quelque chose : sur un tour d'analyse,
+    # seule la proposition qu'il porte est jugée, pas la forme d'un rapport qui n'est pas dû.
+    for name, portee in cfg["sections"] if edited else []:
         if portee == "code" and not du_code:
             continue
         if name == "RELIRE":
@@ -424,7 +552,7 @@ def faults_of(turn, cfg):
                 else "due dès qu'un fichier de code a bougé"
             )
             faults.append(f"la ligne {name} est absente ({due})")
-    return faults
+    return faults + suite_faults(entrees_suite(visibles), ouverts, cfg)
 
 
 def emit(context):
@@ -469,7 +597,7 @@ def main():
 
     # Le prompt qui vient d'être soumis peut déjà figurer au transcript et ouvrir un tour vide :
     # le tour à juger est le dernier qui porte réellement quelque chose.
-    while turns and not turns[-1][0] and not turns[-1][1]:
+    while turns and not turns[-1][0] and not turns[-1][2]:
         turns.pop()
     if not turns:
         sys.exit(0)
@@ -487,13 +615,26 @@ def main():
 
     faults = faults_of(turns[-1], cfg)
     if faults:
-        emit(
-            "Ton tour PRÉCÉDENT a modifié des fichiers sans rapport de clôture conforme — "
-            + " ; ".join(faults)
-            + ". Rends ce rapport maintenant, en tête de ta réponse, AVANT de traiter la "
+        # Deux motifs, donc deux consignes : un rapport mal formé se REND (le travail est fait, il
+        # s'agit d'en rendre compte), tandis qu'une entrée SUITE non payée demande d'ouvrir le
+        # fichier ou de retirer l'entrée — c'est du travail, pas de la mise en forme. Les
+        # confondre sous « ne relance aucun travail » ferait retirer l'entrée à chaque fois,
+        # y compris quand elle est juste et qu'il suffisait de la vérifier.
+        du_travail = any(f.startswith("l'entrée SUITE") for f in faults)
+        entete = (
+            "Ton tour PRÉCÉDENT a proposé une suite qu'il n'a pas vérifiée"
+            if du_travail and not turns[-1][0]
+            else "Ton tour PRÉCÉDENT n'a pas rendu un rapport de clôture conforme"
+        )
+        consigne = (
+            "Traite ces points EN TÊTE de ta réponse, avant la nouvelle demande : ouvre ce que tu "
+            "cites et vérifie-le, ou retire l'entrée et passe le constat en LU."
+            if du_travail
+            else "Rends ce rapport maintenant, en tête de ta réponse, AVANT de traiter la "
             "nouvelle demande. Ne relance aucun travail : il s'agit seulement de rendre compte "
             "de ce qui a déjà été fait."
         )
+        emit(entete + " — " + " ; ".join(faults) + ". " + consigne)
     sys.exit(0)
 
 
