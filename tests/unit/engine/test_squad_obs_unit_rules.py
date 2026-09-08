@@ -412,9 +412,10 @@ def test_every_registered_obs_id_is_in_the_vocabulary():
 
     registry = get_config_loader().load_unit_rules_config()
     with_obs_id = {rule_id for rule_id, entry in registry.items() if "obs_id" in entry}
-    # VERT VACANT : un registre sans aucun `obs_id` satisferait l'assertion suivante.
     assert len(with_obs_id) >= len(UNIT_RULE_EFFECT_IDS)
     orphelins = sorted(with_obs_id - set(UNIT_RULE_EFFECT_IDS))
+    # VERT VACANT : un registre sans aucun `obs_id` laisserait `orphelins` vide et cette
+    # assertion passerait sans rien verifier — la garde `>=` ci-dessus l'empeche.
     assert not orphelins, (
         f"regles portant un obs_id sans etre observees : {orphelins} — soit elles entrent dans "
         f"UNIT_RULE_EFFECT_IDS (cout : zero scalaire), soit leur obs_id doit disparaitre du "
@@ -423,6 +424,36 @@ def test_every_registered_obs_id_is_in_the_vocabulary():
     # Reciproque, deja garantie par `unit_ability_obs_ids` (KeyError au chargement) : ancree ici
     # pour que le contrat se lise dans les DEUX sens au meme endroit.
     assert set(unit_ability_obs_ids()) == set(UNIT_RULE_EFFECT_IDS)
+
+
+def test_ability_slots_hold_on_every_datasheet():
+    """MESURE (sans moteur) : aucun model_type individuel n'excede UNIT_ABILITY_SLOTS effets.
+
+    Complement leger de `test_ability_slots_hold_on_the_real_training_rosters` : celui-ci couvre
+    les compositions reelles apres fold 19.04 (attachements), celui-la couvre TOUS les model_types
+    du depot — y compris ceux absents des rosters courants. Un nouveau datasheet avec trop de
+    regles serait detecte ici AVANT d'apparaitre dans un roster.
+
+    VERT VACANT : un type sans aucune capacite observable tiendrait trivialement dans 8 slots.
+    """
+    registry = UnitRegistry()
+    pire = 0
+    detail = ""
+    for ut, data in registry.units.items():
+        effets = [
+            r["ruleId"] for r in data.get("UNIT_RULES", [])
+            if r.get("ruleId") in UNIT_RULE_EFFECT_IDS
+        ]
+        if len(effets) > pire:
+            pire = len(effets)
+            detail = f"{ut}: {sorted(effets)}"
+
+    assert pire >= 1, (
+        f"mesure degeneree (max={pire}) : aucun datasheet ne porte de capacite observable"
+    )
+    assert pire <= UNIT_ABILITY_SLOTS, (
+        f"UNIT_ABILITY_SLOTS={UNIT_ABILITY_SLOTS} deborde sur le datasheet {detail}"
+    )
 
 
 def test_ability_slots_hold_on_the_real_training_rosters():
@@ -483,10 +514,29 @@ def test_ability_slots_hold_on_the_real_training_rosters():
                     pire = len(effets)
                     detail = f"{agent_roster.name} / unite {unit['id']} : {sorted(effets)}"
 
+    # Holdout scenarios : refs explicites, pas de tempdir necessaire.
+    holdout_scen_dir = (
+        Path(PROJECT_ROOT) / "config/agents/ArmageddonAgent_x1/scenarios/holdout_regular"
+    )
+    holdout_scens = sorted(holdout_scen_dir.glob("scenario_bot-*.json"))
+    assert holdout_scens, f"aucun scenario holdout sous {holdout_scen_dir}"
+    for holdout_scen in holdout_scens:
+        eng = W40KEngine(
+            rewards_config="ArmageddonAgent_x1", training_config_name="x1",
+            controlled_agent="ArmageddonAgent_x1", scenario_file=str(holdout_scen),
+            unit_registry=registry, quiet=True, gym_training_mode=True, training_n_envs=1,
+        )
+        eng.reset()
+        for unit in eng.game_state["units"]:
+            effets = [r for r in UNIT_RULE_EFFECT_IDS if unit_has_rule_effect(unit, r)]
+            if len(effets) > pire:
+                pire = len(effets)
+                detail = f"{holdout_scen.name} / unite {unit['id']} : {sorted(effets)}"
+
     # VERT VACANT : une escouade sans aucune capacite tiendrait trivialement dans 8 slots.
     assert pire >= 2, f"mesure vide ou degeneree (max={pire}) : le fold 19.04 n'a rien produit"
     assert pire <= UNIT_ABILITY_SLOTS, (
-        f"UNIT_ABILITY_SLOTS={UNIT_ABILITY_SLOTS} deborde sur les rosters d'entrainement : {detail}"
+        f"UNIT_ABILITY_SLOTS={UNIT_ABILITY_SLOTS} deborde sur les rosters training+holdout : {detail}"
     )
 
 
