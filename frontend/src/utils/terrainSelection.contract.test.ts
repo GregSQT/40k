@@ -4,9 +4,9 @@
 // (mode, terrain) déclaré dans le vrai terrain_list.json.
 // Aucun mock — les deux côtés partent de la même source de données.
 
-import { readFileSync } from "fs";
-import { dirname, resolve } from "path";
-import { fileURLToPath } from "url";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { type TerrainEntry, terrainSuffix } from "./terrainSelection";
 
@@ -48,8 +48,8 @@ function buildBackendSuffixTable(entries: TerrainEntry[]): Record<string, Record
 
   // Cas spécial pve_test (api_server.py:306-307) : mc2 désigne le scénario de
   // base sans décor même quand il n'est pas dans les modes UI de pve_test.
-  if ("pve_test" in suffixTable && !("mc2" in suffixTable["pve_test"])) {
-    suffixTable["pve_test"]["mc2"] = "";
+  if ("pve_test" in suffixTable && !("mc2" in suffixTable.pve_test)) {
+    suffixTable.pve_test.mc2 = "";
   }
 
   return suffixTable;
