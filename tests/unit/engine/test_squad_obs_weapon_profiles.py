@@ -389,6 +389,31 @@ def test_donner_un_id_a_indirect_fire_ne_change_pas_la_taille_de_l_observation()
     )
 
 
+def test_every_weapon_rule_with_obs_id_is_in_the_vocabulary():
+    """Reciproque de `test_every_observed_rule_has_a_unique_obs_id` : tout obs_id declare dans
+    `config/weapon_rules.json` appartient a `WEAPON_RULE_OBS_VOCABULARY`.
+
+    `weapon_rule_obs_ids()` est deja filtre au vocabulaire — il ne peut pas detecter un obs_id
+    orphelin (une regle qui le porte sans etre dans le vocabulaire). Ce test lit le registre BRUT
+    et leve si une telle regle existe. Cout d'entree dans le vocabulaire : zero scalaire.
+
+    Miroir exact de `test_every_registered_obs_id_is_in_the_vocabulary` pour `unit_rules.json`.
+    """
+    from config_loader import get_config_loader
+
+    registry = get_config_loader().load_weapon_rules_config()
+    with_obs_id = {rule_id for rule_id, entry in registry.items() if "obs_id" in entry}
+    assert len(with_obs_id) >= len(WEAPON_RULE_OBS_VOCABULARY)
+    orphelins = sorted(with_obs_id - set(WEAPON_RULE_OBS_VOCABULARY))
+    # VERT VACANT : un registre sans aucun obs_id laisserait `orphelins` vide et cette
+    # assertion passerait sans rien verifier — la garde `>=` ci-dessus l'empeche.
+    assert not orphelins, (
+        f"regles d'armes portant un obs_id sans etre observees : {orphelins} — "
+        f"soit elles entrent dans WEAPON_RULE_OBS_VOCABULARY (cout : zero scalaire), "
+        f"soit leur obs_id doit disparaitre de config/weapon_rules.json"
+    )
+
+
 # ---------------------------------------------------------------- ennemis
 
 
