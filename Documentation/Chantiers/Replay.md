@@ -506,11 +506,19 @@ et l'échec ne survit pas au changement d'unité.
   Construit **uniquement** par `SnapshotRewind.saveDisplayName`, depuis `turn`/`player`/`phase`/
   `episode_steps`. Le backend ne renvoie plus de champ `label` : il en existait un, transmis et
   typé côté front, que rien n'affichait (retiré le 2026-08-04).
-- **Format de fichier** : en-tête magique `W40KTL03`. `TL01` (sans empreinte de scénario) et
-  `TL02` (sans les points de commandement de la règle 08.02) sont **refusés explicitement** au
-  chargement : leur état ne peut pas être restauré dans le moteur courant — TL02 rendrait un
-  `game_state` sans `command_points`, qui planterait à la phase de commandement suivante. Le
-  refus nomme le format et invite à rejouer la partie ; il n'y a pas de migration.
+- **Format de fichier** : en-tête magique `W40KTL04`. `TL01` (sans empreinte de scénario),
+  `TL02` (sans les points de commandement de la règle 08.02) et `TL03` (sans les neuf clés
+  ajoutées au reset d'épisode entre le 2026-08-04 et le 2026-08-31 : réserves stratégiques,
+  ingress, suppression, `secured_objectives`) sont **refusés explicitement** au chargement :
+  leur état ne peut pas être restauré dans le moteur courant — un état ne capture que le
+  mutable, donc une row d'un format antérieur rendrait un `game_state` privé de ces clés, et le
+  premier lecteur lèverait après que le chargement a déjà écrasé la partie en cours. Le refus
+  nomme le format et invite à rejouer la partie ; il n'y a pas de migration.
+- **Le bump de magic est verrouillé par un test** : `tests/unit/services/test_save_format_key_contract.py`
+  épingle, par magic, l'ensemble des clés mutables publiées par le reset d'épisode. Ajouter une
+  clé obligatoire au reset sans bumper `game_saves._MAGIC` rend ce test rouge. Il ne couvre que
+  les clés posées par le reset : une clé obligatoire créée paresseusement en cours de partie, ou
+  une clé dont la forme change à nom constant, lui échappent encore.
 
 ## 4. Registre d'état des chantiers replay
 
