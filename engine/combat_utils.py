@@ -285,9 +285,13 @@ class HexIndexTable(NamedTuple):
         de bench. La choisir pour le seul cout de sa construction laisserait ce second poste
         intact. Mesure du 2026-09-08 sur les 601 appels reels du chemin de `bench_env_step`
         (x1_long/bot, machine au repos) : ensemble d'index memoise 602 ms, carte d'octets memoisee
-        510 ms, contre 700 ms pour la reconstruction a chaque appel. Le `bytes` rendu est de plus
-        atomique pour `deepcopy` — le cache spatial du move est recopie a chaque capture de
-        snapshot (`services/game_snapshots.py`), ou un `set` de 2 000 entiers coute 288 us.
+        510 ms, contre 700 ms pour la reconstruction a chaque appel.
+
+        Le `.data` rendu est atomique pour `deepcopy` (meme objet, 0 octet) la ou un `set` de
+        2 000 entiers coute 288 us par copie — ce qui compte parce que le cache spatial du move
+        est recopie a chaque capture de snapshot. Le `BlockedBitmap` COMPLET, lui, porte la table
+        et ne doit JAMAIS entrer dans `game_state` : c'est `.data` seul qu'on y memoise, cf.
+        `move_transit_blocked_forms`.
         """
         cols = self.board_cols
         rows = self.board_rows
@@ -318,6 +322,12 @@ class BlockedBitmap(NamedTuple):
 
     IMMUABLE : `data` est un `bytes`. Le consommateur en prend une `bytearray` avant de marcher —
     oublier cette copie leve au premier marquage au lieu d'empoisonner un cache partage.
+
+    OBJET DE PASSAGE, PAS DE STOCKAGE : il traine la table entiere (66 000 tuples de voisins a
+    220x300), donc il ne va pas dans `game_state`, qui est deepcopie a chaque capture de phase et
+    pickle dans les saves — `services/game_saves._safe_loads` refuserait d'ailleurs la classe. Ce
+    qui se memoise est `.data`, et le couple se reconstruit au point d'usage : `hex_index_table`
+    etant memoisee par dimensions, cela coute une lecture de dict.
     """
 
     table: HexIndexTable

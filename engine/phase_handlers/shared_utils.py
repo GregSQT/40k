@@ -4763,23 +4763,33 @@ def move_transit_blocked_forms(
     `scripts/bench_env_step.py`. Un appel de plus par niveau au site du masque (43 sur ce run)
     rendrait ~11 ms des ~210 ms que la mémoïsation fait gagner. Un seul appel rend les deux.
 
+    SEULS LES OCTETS SONT MÉMOÏSÉS DANS L'ÉTAT, jamais le ``BlockedBitmap`` lui-même : il porte
+    la ``HexIndexTable``, et ``_move_spatial_cache`` n'est pas une clé statique de
+    ``services/game_snapshots.py`` — donc tout ce qu'il contient est deepcopié à CHAQUE capture de
+    phase et picklé dans les saves. Y laisser la table coûtait 66 000 tuples de voisins par
+    capture (``capture_live_state`` 287 -> 381 ms, pickle 4,26 -> 5,04 Mo) et surtout rendait la
+    save ILLISIBLE : ``_safe_loads`` refuse toute classe hors liste blanche, donc une partie
+    sauvegardée après une phase de move ne se rechargeait plus. La table est mémoïsée par
+    dimensions dans ``hex_index_table`` — la re-résoudre ici est une lecture de dict.
+
     Lecture pure. Les DEUX formes sont renvoyées PAR RÉFÉRENCE : ne pas les muter. La carte est un
     ``bytes``, donc une mutation lève ; l'ensemble, lui, garde le contrat de non-mutation des
     autres entrées du cache.
     """
     _cache = _move_spatial_cache(game_state)["transit_bm"]
     _ck = (str(squad_id), int(player), int(level))
-    _hit = _cache.get(_ck)
-    if _hit is not None:
-        return _hit
-    transit = build_move_transit_blocked(game_state, str(squad_id), int(player), int(level))
     table = hex_index_table(
         int(require_key(game_state, "board_cols")),
         int(require_key(game_state, "board_rows")),
     )
-    _forms = (transit, table.bitmap_in_bounds(transit))
-    _cache[_ck] = _forms
-    return _forms
+    _hit = _cache.get(_ck)
+    if _hit is not None:
+        _transit, _data = _hit
+        return (_transit, BlockedBitmap(table, _data))
+    transit = build_move_transit_blocked(game_state, str(squad_id), int(player), int(level))
+    blocked = table.bitmap_in_bounds(transit)
+    _cache[_ck] = (transit, blocked.data)
+    return (transit, blocked)
 
 
 def geodesic_move_reach(
