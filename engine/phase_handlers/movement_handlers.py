@@ -674,16 +674,37 @@ def _ascent_declaration_due_unit(
 def _squad_has_reachable_floor_cell(game_state: Dict[str, Any], squad_id: str) -> bool:
     """Une cellule d'étage tenable est-elle à portée du budget de move de l'escouade ?
 
-    Borne SUPÉRIEURE volontairement lâche (distance cube à vol d'oiseau depuis chaque figurine,
-    murs ignorés) : elle ne sert qu'à ne pas poser la question quand la réponse ne peut être que
-    « non ». La légalité réelle reste tranchée par l'érosion, qui borne le TRAJET. Une borne
-    lâche coûte un point de décision inutile ; une borne serrée qui se tromperait retirerait à
-    l'agent une montée légale — c'est le sens de l'inégalité.
+    CONDITION NÉCESSAIRE, jamais suffisante. 13.06 ajoute la distance verticale à la distance
+    parcourue : une figurine qui finit sur la case `f` paie `trajet(origine, f) + montée`, et le
+    trajet contourne murs et figurines, donc il est TOUJOURS >= la distance à vol d'oiseau. Exiger
+    `distance + montée <= budget` ne peut donc écarter que des questions dont la réponse ne
+    pouvait être que « non » — jamais une montée que la règle autorise. C'est ce sens de
+    l'inégalité qui rend le resserrement sûr, et l'inverser volerait silencieusement à l'agent un
+    choix que 13.06 lui donne.
+
+    La légalité réelle reste tranchée par l'érosion, qui borne le TRAJET.
+
+    POURQUOI RESSERRER. Sans le terme de montée, mesuré sur 3 parties gym à x1 : 52 points de
+    décision armés pour 572 steps joués, soit 9,1 % du budget d'épisode dépensé sur une question
+    dont la réponse n'est actionnable que sur 0,8 % des cellules du masque. Avec, 35 — le reste
+    n'avait pas le budget de monter. Une borne fondée sur le POOL de move réel a été mesurée
+    aussi et écartée : elle en garde 50 sur 52, parce que le pool de sol est vaste et qu'atteindre
+    un plancher n'est pas la contrainte — avoir encore le budget d'y monter l'est.
+
+    Le coût de montée est lu PAR CELLULE (`floor_height_at`) et non par niveau : deux ruines
+    peuvent porter un étage au même niveau à des hauteurs différentes. Il est arrondi à
+    l'INFÉRIEUR en sous-hexes — sous-estimer le coût élargit la borne, donc va dans le sens sûr ;
+    l'arrondir au supérieur pourrait écarter une montée d'un sous-hexe.
     """
+    import math
+
     from engine.combat_utils import calculate_hex_distance
+    from engine.terrain_utils import floor_height_at
 
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
+    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (scénario sans terrain)
+    inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
     budget = squad_move_pool_budget_subhex(game_state, str(squad_id))
     for mid in squad_models.get(str(squad_id), []):  # get allowed (escouade sans figurine vivante)
         model = models_cache.get(mid)  # get allowed (figurine morte)
@@ -693,8 +714,15 @@ def _squad_has_reachable_floor_cell(game_state: Dict[str, Any], squad_id: str) -
         if not level_map:
             continue
         mcol, mrow = int(model["col"]), int(model["row"])
-        for (fcol, frow) in level_map:
-            if calculate_hex_distance(mcol, mrow, fcol, frow) <= budget:
+        # Hauteur de DÉPART : une figurine déjà en hauteur ne repaie pas ce qu'elle a monté
+        # (§13.06). Même source que le champ multi-niveaux, jamais une valeur recalculée ici.
+        origin_height = floor_height_at(
+            terrain_areas, mcol, mrow, int(require_key(model, "level"))
+        )
+        for (fcol, frow), flevel in level_map.items():
+            climb_inches = floor_height_at(terrain_areas, fcol, frow, int(flevel)) - origin_height
+            climb = math.floor(max(0.0, climb_inches) * inches_to_subhex)
+            if calculate_hex_distance(mcol, mrow, fcol, frow) + climb <= budget:
                 return True
     return False
 

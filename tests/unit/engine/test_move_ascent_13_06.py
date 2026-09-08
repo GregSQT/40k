@@ -419,3 +419,129 @@ def test_the_agent_observes_that_its_models_are_elevated(board_x1):
         "hauteur : les canaux d'occupation restent à plat et annoncent bloquée une case dont "
         "le sol est libre"
     )
+
+
+def _climb_subhex(game_state, model, col, row, level):
+    """Coût vertical (sous-hexes) que paierait `model` en finissant en `(col, row, level)`.
+
+    Recalculé ICI depuis `floor_height_at` plutôt qu'emprunté à la borne testée : un oracle qui
+    appellerait la fonction sous test ne prouverait rien. La forme (hauteur d'arrivée moins
+    hauteur de départ, convertie en sous-hexes) est celle de 13.06.
+    """
+    import math
+
+    from engine.terrain_utils import floor_height_at
+
+    terrain_areas = game_state.get("terrain_areas", [])  # get allowed (scénario sans terrain)
+    inches_to_subhex = int(game_state["inches_to_subhex"])
+    origin = floor_height_at(
+        terrain_areas, int(model["col"]), int(model["row"]), int(model["level"])
+    )
+    return math.floor(
+        max(0.0, floor_height_at(terrain_areas, col, row, int(level)) - origin) * inches_to_subhex
+    )
+
+
+def test_the_arming_bound_never_steals_a_legal_ascent(board_x1):
+    """La borne d'armement écarte des questions stériles, jamais une montée que la règle autorise.
+
+    `_squad_has_reachable_floor_cell` refuse de poser la question quand `distance + montée` dépasse
+    le budget. C'est une condition NÉCESSAIRE — le trajet réel contourne murs et figurines, donc il
+    est toujours >= la distance à vol d'oiseau — mais une erreur de signe, un maximum au lieu d'un
+    minimum ou un arrondi au supérieur la rendraient trop serrée, et l'agent perdrait en silence
+    un choix que 13.06 lui donne. C'est la seule façon dont ce resserrement peut nuire.
+
+    Le contrôle porte exactement sur l'écart entre les deux bornes : les activations où un plancher
+    tenable est à portée de la distance SEULE (l'ancienne borne) mais où la question n'est pas
+    posée. Pour chacune, on vérifie contre un ORACLE INDÉPENDANT de la borne — le pool d'ancre du
+    masque, en lecture seule, translaté en bloc — qu'aucune cellule n'aurait pu poser une figurine
+    sur un plancher. Le pool est un sur-ensemble de l'exécutable : s'il n'offre rien, rien n'était
+    perdu.
+    """
+    from engine.combat_utils import calculate_hex_distance
+    from engine.hex_utils import cube_to_offset, offset_to_cube
+    from engine.phase_handlers.movement_handlers import (
+        _squad_has_reachable_floor_cell,
+        movement_build_valid_destinations_pool,
+        squad_floor_level_map,
+        squad_move_pool_budget_subhex,
+    )
+
+    inspected = 0
+    stolen = []
+    for seed, scenario in SEEDS:
+        engine = _engine(seed, scenario)
+        rng = random.Random(seed)
+        for _ in range(MAX_STEPS):
+            mask = engine.get_action_mask()
+            gs = engine.game_state
+            live = _live_cell_map(engine)
+            if live is not None:
+                squad_id, _cell_map = live
+                alive = [m for m in gs["squad_models"].get(squad_id, []) if m in gs["models_cache"]]
+                maps = {mid: squad_floor_level_map(gs, gs["models_cache"][mid]) for mid in alive}
+                budget = squad_move_pool_budget_subhex(gs, squad_id)
+                near = any(
+                    calculate_hex_distance(
+                        int(gs["models_cache"][mid]["col"]),
+                        int(gs["models_cache"][mid]["row"]),
+                        fcol, frow,
+                    ) <= budget
+                    for mid in alive for (fcol, frow) in maps[mid]
+                )
+                # L'écart entre l'ancienne borne (distance seule) et la nouvelle. On interroge
+                # LA BORNE et non `ascent_declaration_decision_is_due` : cette dernière refuse
+                # aussi pour des raisons étrangères au resserrement — question déjà posée ce tour,
+                # vol déclaré, mauvais joueur — et les compter ici noierait le signal (mesuré :
+                # 41 faux positifs, tous des escouades déjà interrogées).
+                if near and not _squad_has_reachable_floor_cell(gs, squad_id):
+                    inspected += 1
+                    costs = {}
+                    # `read_only=True` : aucune écriture d'état, aucun cache de carte de cellules
+                    # touché. Une sonde qui rejoue `roll_advance_for_squad` empoisonne au contraire
+                    # le cache que le décodeur relit, et fait lever le moteur au step suivant.
+                    movement_build_valid_destinations_pool(
+                        gs, squad_id, read_only=True, move_budget_override=budget,
+                        out_costs=costs, destination_level=0,
+                    )
+                    anchor = gs["models_cache"][alive[0]]
+                    ax, ay, az = offset_to_cube(int(anchor["col"]), int(anchor["row"]))
+                    for (ccol, crow), cost in costs.items():
+                        bx, by, bz = offset_to_cube(ccol, crow)
+                        delta = (bx - ax, by - ay, bz - az)
+                        hit = None
+                        for mid in alive:
+                            m = gs["models_cache"][mid]
+                            mx, my, mz = offset_to_cube(int(m["col"]), int(m["row"]))
+                            ncol, nrow = cube_to_offset(
+                                mx + delta[0], my + delta[1], mz + delta[2]
+                            )
+                            if (ncol, nrow) not in maps[mid]:
+                                continue
+                            # 13.06 : le coût de la cellule est HORIZONTAL. La montée s'y AJOUTE,
+                            # donc une cellule du pool n'héberge une montée que si le total tient
+                            # dans le budget. Sans ce terme, l'oracle déclare volée une montée qui
+                            # n'a jamais été légale — mesuré, 82 faux positifs sur 87.
+                            climb = _climb_subhex(gs, m, ncol, nrow, maps[mid][(ncol, nrow)])
+                            if cost + climb <= budget:
+                                hit = (mid, ncol, nrow, cost, climb)
+                                break
+                        if hit is not None:
+                            stolen.append((squad_id, (ccol, crow), hit, budget))
+                            break
+            valid = [i for i in range(len(mask)) if mask[i]]
+            if not valid:
+                break
+            _, _, terminated, truncated, _ = engine.step(rng.choice(valid))
+            if terminated or truncated:
+                break
+
+    assert inspected > 0, (
+        "aucune activation ne sépare l'ancienne borne de la nouvelle : le test n'exerce rien, "
+        "donc il ne prouve rien du resserrement"
+    )
+    assert not stolen, (
+        f"{len(stolen)}/{inspected} activations où la question n'est PAS posée alors que le pool "
+        f"offre une cellule posant une figurine sur un plancher — la borne est trop serrée et "
+        f"retire une montée légale. 3 premières : {stolen[:3]}"
+    )
