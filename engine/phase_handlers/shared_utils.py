@@ -72,6 +72,7 @@ from engine.combat_utils import (
     normalize_coordinates,
     calculate_hex_distance,
     get_hex_neighbors,
+    hex_index_table,
     expected_dice_value,
     expected_capped_dice_value,
     resolve_dice_value,
@@ -4745,41 +4746,60 @@ def geodesic_move_reach(
     start_col: int,
     start_row: int,
     budget: int,
-    transit_blocked: Set[Tuple[int, int]],
+    transit_blocked: AbstractSet[Tuple[int, int]],
     board_cols: int,
     board_rows: int,
 ) -> Dict[Tuple[int, int], int]:
     """Champ géodésique HEX (distance de CHEMIN en pas) depuis ``(start_col, start_row)``,
     borné à ``budget`` pas, ``transit_blocked`` (murs + obstacles de traversée) infranchissable.
 
-    BFS centre-à-centre, ``get_hex_neighbors`` (parity-aware) — même voisinage et même
-    traitement des murs que le pool d'ancre réactif (``if neighbor in blocked: continue``).
+    BFS centre-à-centre, voisinage de ``get_hex_neighbors`` (parity-aware) — même voisinage et
+    même traitement des murs que le pool d'ancre réactif (``if neighbor in blocked: continue``).
     Retourne ``{(col, row): distance}`` pour toute cellule atteignable en ``<= budget`` pas
     (la case de départ y figure à distance 0). Une cellule absente = injoignable dans le budget.
     Lecture pure.
-    """
-    from collections import deque
 
+    PREMIER POSTE CPU DU STEP D'ENTRAÎNEMENT (mesure du 2026-09-08 sur 80 steps du chemin de
+    `scripts/bench_env_step.py`, x1_long/bot : 601 appels, champ moyen 5 105 cellules, 20,4 %
+    du wall). Le coût était par VOISIN — quatre comparaisons de bornes puis reconstruction et
+    hachage d'une paire, six fois par cellule. D'où les deux choix ci-dessous, qui ne changent
+    rien au champ rendu :
+
+    - la marche se fait sur les INDEX de `hex_index_table` (`col * board_rows + row`), donc sur
+      des entiers ; les paires ne sont reconstruites que pour les cellules réellement retenues,
+      via `table.cells`. Le filtre de bornes est payé une fois par plateau, pas par voisin ;
+    - l'expansion est PAR COUCHES : la distance est portée par le tour de boucle au lieu d'être
+      empilée avec chaque cellule, ce qui supprime la file de paires `(cellule, distance)`.
+
+    Temps cumulé dans la fonction sur le run ci-dessus : 2 382 -> 806 ms (8,0 % du wall).
+    L'ordre d'insertion du dictionnaire est celui du BFS d'origine, cellule par cellule.
+    """
+    table = hex_index_table(board_cols, board_rows)
     start = (int(start_col), int(start_row))
     field: Dict[Tuple[int, int], int] = {start: 0}
     if budget <= 0:
         return field
-    queue: "deque[Tuple[Tuple[int, int], int]]" = deque([(start, 0)])
-    while queue:
-        (cc, cr), cd = queue.popleft()
-        if cd >= budget:
-            continue
-        nd = cd + 1
-        for nc, nr in get_hex_neighbors(cc, cr):
-            if nc < 0 or nr < 0 or nc >= board_cols or nr >= board_rows:
-                continue
-            nb = (nc, nr)
-            if nb in field:
-                continue
-            if nb in transit_blocked:
-                continue
-            field[nb] = nd
-            queue.append((nb, nd))
+    neighbors = table.neighbors
+    cells = table.cells
+    # `seen` porte les cellules bloquées ET les cellules déjà atteintes : le BFS d'origine
+    # testait les deux séparément à chaque voisin. Fusionner les deux ensembles est licite parce
+    # qu'aucune des deux appartenances n'autorise à re-visiter la cellule.
+    seen: Set[int] = table.indices_in_bounds(transit_blocked)
+    start_index = table.cell_index(start[0], start[1])
+    seen.add(start_index)
+    frontier: List[int] = [start_index]
+    distance = 0
+    while frontier and distance < budget:
+        distance += 1
+        next_frontier: List[int] = []
+        for cell_index in frontier:
+            for neighbor_index in neighbors[cell_index]:
+                if neighbor_index in seen:
+                    continue
+                seen.add(neighbor_index)
+                field[cells[neighbor_index]] = distance
+                next_frontier.append(neighbor_index)
+        frontier = next_frontier
     return field
 
 

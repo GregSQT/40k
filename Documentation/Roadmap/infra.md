@@ -51,6 +51,8 @@ Goulots restants : aucun identifié de cette ampleur.
 
 **Lourd, EN PAUSE** (décision 2026-08-16 : non lancé). Le pool de déplacement (`build_squad_move_cell_map` → `erode_move_pool_by_squad_block` → `geodesic_move_reach`) pèse **29 % d'une partie d'évaluation** — calcul dérivé, optimisable sous verrou d'empreinte `step.log`.
 
+Depuis le 2026-09-08, `geodesic_move_reach` est passé de **20,4 % à 8,0 %** du step en Python pur (index entiers de `hex_index_table` + expansion par couches, mesuré 3 fois, une variante par processus). Le noyau natif garde donc `erode_move_pool_by_squad_block` et `hex_line_iter` comme cibles principales, plus le BFS déjà allégé.
+
 → `Documentation/Chantiers/backlog/perf_noyau_natif_et_gzip.md` §2
 
 ---
