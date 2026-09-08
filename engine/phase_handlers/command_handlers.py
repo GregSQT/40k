@@ -370,19 +370,19 @@ def player_has_squads_on_board(game_state: Dict[str, Any], player: int) -> bool:
     doit quand même désigner une cible. Le prédicat et le besoin de l'observateur sont donc la
     même chose, pour les deux capacités.
 
-    D'où `entry_is_on_battlefield`, et pas la seule présence au cache : une escouade en réserves
+    D'où « sur la table », et pas la seule présence au cache : une escouade en réserves
     stratégiques y reste vivante mais porte la sentinelle (-1,-1). L'observation égocentrique
     ancrée sur elle décrit une position qui n'existe pas — c'est le MÊME défaut que le pool vide,
     simplement silencieux au lieu d'être bruyant. Mesuré : le prédicat rendait `True` pour un
     joueur entièrement en réserve, armant Waaagh! ET Oath sur une ancre hors table.
-    """
-    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
 
-    player_int = int(player)
-    return any(
-        int(require_key(entry, "player")) == player_int and entry_is_on_battlefield(entry)
-        for entry in require_key(game_state, "units_cache").values()
-    )
+    Dérivé de `deployed_friendly_squad_ids`, qui EST déjà « mes escouades sur la table » et que
+    l'observation utilise pour peupler ses lignes alliées : recopier le prédicat au lieu de
+    l'appeler est exactement ce qui a produit la divergence corrigée ici.
+    """
+    from engine.phase_handlers.shared_utils import deployed_friendly_squad_ids
+
+    return bool(deployed_friendly_squad_ids(game_state, int(player)))
 
 
 def arm_oath_selection(game_state: Dict[str, Any], player: int) -> None:
@@ -419,8 +419,8 @@ def oath_selectable_enemy_ids(game_state: Dict[str, Any], player: int) -> List[s
     le décodeur pour traduire le slot joué, la politique bot pour choisir. Trois lecteurs, une
     définition — sans quoi le masque pourrait ouvrir un slot que le décodeur refuserait.
 
-    Le prédicat est celui par lequel `_refresh_enemy_slot_mapping` attribue un slot (même cache,
-    même filtre de camp et de table) et c'est ce qui le rend correct : la désignation n'est
+    `enemy_entries_on_battlefield` est le prédicat par lequel `_refresh_enemy_slot_mapping`
+    attribue un slot, et c'est ce qui rend cette liste correcte : la désignation n'est
     exprimable que par un `OATH_SLOT`, et ce
     mapping n'accorde de slot qu'aux escouades SUR LA TABLE. « Vivante » seule ne suffisait donc
     pas — une escouade en réserves stratégiques (20.01) reste vivante dans `units_cache` mais
@@ -431,14 +431,13 @@ def oath_selectable_enemy_ids(game_state: Dict[str, Any], player: int) -> List[s
     table ne peut être ni ciblée ni chargée (`entry_is_on_battlefield`), donc aucun effet d'Oath
     ne pourrait la viser tant qu'elle n'a pas fait son ingress move.
     """
-    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+    from engine.spatial_relations import enemy_entries_on_battlefield
 
-    player_int = int(player)
     return [
         str(squad_id)
-        for squad_id, entry in require_key(game_state, "units_cache").items()
-        if int(require_key(entry, "player")) != player_int
-        and entry_is_on_battlefield(entry)
+        for squad_id, _entry in enemy_entries_on_battlefield(
+            require_key(game_state, "units_cache"), int(player)
+        )
     ]
 
 
