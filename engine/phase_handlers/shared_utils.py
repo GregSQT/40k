@@ -4791,7 +4791,7 @@ def geodesic_move_reach(
     distance = 0
     while frontier and distance < budget:
         distance += 1
-        next_frontier: List[int] = []
+        next_frontier = []
         for cell_index in frontier:
             for neighbor_index in neighbors[cell_index]:
                 if neighbor_index in seen:
