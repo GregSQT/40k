@@ -62,6 +62,8 @@ ASTARTES = [{"keywordId": "ADEPTUS ASTARTES"}]
 #: différence entre « la Faction d'Armée est déclarée » et « le mot-clé est présent quelque part ».
 TYRANIDS = [{"keywordId": "TYRANIDS"}]
 
+_DECODER = ActionDecoder({"board": {"default": {"hex_radius": 1.0, "margin": 0.0}}})
+
 
 def _seq(monkeypatch, rolls):
     """Dés SCRIPTÉS : épuisement = erreur explicite, dé en trop = liste non vide en fin de test.
@@ -411,7 +413,7 @@ def test_verrou_l_oath_n_est_pas_arme_pour_un_joueur_sans_escouade():
     command_handlers.command_step_command_abilities(gs)
 
     assert gs["pending_oath_selection"] is None
-    decoder = ActionDecoder({"board": {"default": {"hex_radius": 1.0, "margin": 0.0}}})
+    decoder = _DECODER
     mask, eligible = decoder.get_squad_action_mask_and_eligible_units(gs)
     assert not eligible
     assert not any(mask[i] for i in range(OATH_SLOT_BASE, OATH_SLOT_BASE + 8)), (
@@ -440,7 +442,7 @@ def test_verrou_l_oath_n_est_pas_armee_quand_tout_l_ennemi_est_en_reserve():
     command_handlers.command_step_command_abilities(gs)
 
     assert gs["pending_oath_selection"] is None
-    decoder = ActionDecoder({"board": {"default": {"hex_radius": 1.0, "margin": 0.0}}})
+    decoder = _DECODER
     # Le contrôle porte sur le masque : c'est LUI qui levait.
     mask, _eligible = decoder.get_squad_action_mask_and_eligible_units(gs)
     assert not any(mask[i] for i in range(OATH_SLOT_BASE, OATH_SLOT_BASE + 8))
@@ -462,12 +464,12 @@ def test_une_escouade_en_reserve_est_ecartee_mais_pas_celles_qui_tiennent_la_tab
     command_handlers.command_step_command_abilities(gs)
     assert gs["pending_oath_selection"] == 1
 
-    decoder = ActionDecoder({"board": {"default": {"hex_radius": 1.0, "margin": 0.0}}})
+    decoder = _DECODER
     assert sorted(decoder.oath_selection_slots(gs).values()) == ["3"]
 
 
-@pytest.mark.parametrize("faction, cle", [(ASTARTES, "oath"), (ORKS, "waaagh")])
-def test_verrou_aucune_capacite_de_08_04_n_est_armee_depuis_les_reserves(faction, cle):
+@pytest.mark.parametrize("faction, p2_faction", [(ASTARTES, ORKS), (ORKS, ASTARTES)])
+def test_verrou_aucune_capacite_de_08_04_n_est_armee_depuis_les_reserves(faction, p2_faction):
     """JUMEAU côté DÉCLARANT : les deux capacités lisent le même prédicat.
 
     `player_has_squads_on_board` dit « sur la table », pas « dans le cache » : l'observation d'une
@@ -477,7 +479,7 @@ def test_verrou_aucune_capacite_de_08_04_n_est_armee_depuis_les_reserves(faction
     Paramétré parce que les deux capacités partagent la garde : traiter l'une sans l'autre est
     le motif d'échec n°1 du dépôt.
     """
-    gs = _command_state(1, p1_faction=faction, p2_faction=ORKS if cle == "oath" else ASTARTES)
+    gs = _command_state(1, p1_faction=faction, p2_faction=p2_faction)
     gs["units_cache"]["1"] = _uc(-1, -1, player=1)
 
     assert not command_handlers.player_has_squads_on_board(gs, 1)
@@ -501,7 +503,7 @@ def test_verrou_une_fois_par_partie_l_action_sort_du_masque():
     rappeler son Waaagh! — le `raise` de `call_waaagh` ne le rattraperait qu'en plein épisode.
     """
     gs = _command_state(1, p1_faction=ORKS, p2_faction=ASTARTES)
-    decoder = ActionDecoder({"board": {"default": {"hex_radius": 1.0, "margin": 0.0}}})
+    decoder = _DECODER
 
     command_handlers.command_step_command_abilities(gs)
     mask, _ = decoder.get_squad_action_mask_and_eligible_units(gs)
@@ -538,7 +540,7 @@ def test_passer_ne_consomme_pas_le_once_per_battle():
 def test_l_oath_est_obligatoire_et_n_offre_aucun_candidat_vide():
     """« select one unit from your opponent's army » : le masque n'ouvre QUE des cibles."""
     gs = _command_state(1, p1_faction=ASTARTES, p2_faction=ORKS)
-    decoder = ActionDecoder({"board": {"default": {"hex_radius": 1.0, "margin": 0.0}}})
+    decoder = _DECODER
 
     command_handlers.command_step_command_abilities(gs)
     assert gs["pending_oath_selection"] == 1
@@ -578,7 +580,7 @@ def test_verrou_invariant_d1_le_slot_oath_designe_la_ligne_du_tenseur_ennemi():
         }
 
     command_handlers.command_step_command_abilities(gs)
-    decoder = ActionDecoder({"board": {"default": {"hex_radius": 1.0, "margin": 0.0}}})
+    decoder = _DECODER
     slots = decoder.oath_selection_slots(gs)
     mapping = get_enemy_slot_mapping(gs, 1)
 
@@ -600,7 +602,7 @@ def test_un_slot_oath_ferme_est_refuse_par_le_decodeur():
     """Contre-épreuve du masque : un slot sans escouade vivante n'est pas jouable."""
     gs = _command_state(1, p1_faction=ASTARTES, p2_faction=ORKS)
     command_handlers.command_step_command_abilities(gs)
-    decoder = ActionDecoder({"board": {"default": {"hex_radius": 1.0, "margin": 0.0}}})
+    decoder = _DECODER
     slots = decoder.oath_selection_slots(gs)
     assert slots is not None, "une designation est en attente : le decodeur doit rendre des slots"
     ferme = next(i for i in range(OATH_SLOT_BASE, OATH_SLOT_BASE + 20) if i not in slots)
