@@ -1888,6 +1888,7 @@ from ai.curriculum import (
     _EARLY_STOP_REQUIRED_KEYS,
     _ROBUST_WINDOW_MIN,
     _validate_early_stop_against_gate,
+    validate_early_stop_block,
     POOL_VERDICT_DESTROY,
     POOL_VERDICT_PROMOTE,
     append_curriculum_log,
@@ -6794,6 +6795,10 @@ def _run_main():
                                 f"Cles autorisees : {sorted(_EARLY_STOP_REQUIRED_KEYS)}."
                             )
                         _early_stop_cfg = {**_early_stop_cfg, **_tc_early_stop}
+                        validate_early_stop_block(
+                            _early_stop_cfg,
+                            f"profil '{args.training_config}' early_stop (apres surcharge)",
+                        )
                     # TOUT le pool est sondé depuis le 2026-09-07, plus seulement le champion :
                     # la promotion exige la parité contre chaque autre membre, donc chacun doit
                     # être mesuré. Ce sont les SEUILS qui distinguent le champion des autres

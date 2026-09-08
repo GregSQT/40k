@@ -23,6 +23,7 @@ from shared.data_validation import ConfigurationError
 from ai.curriculum import (
     RATIO_SUM_TOLERANCE,
     _validate_early_stop_against_gate,
+    validate_early_stop_block,
     assign_pool_members_to_envs,
     copy_tensorboard_run,
     POOL_VERDICT_CONTINUE,
@@ -572,9 +573,20 @@ def test_stage_early_stop_override_with_wrong_key_is_refused() -> None:
 
 
 def _gate_block(**overrides) -> dict:
-    block = {"min_score_vs_champion": 0.55, "min_score_vs_others": 0.50, "eval_episodes": 10, "eval_blocks": 2}
+    block = {"min_score_vs_champion": 0.55, "min_score_vs_others": 0.50, "eval_episodes": 10, "eval_repeats": 2}
     block.update(overrides)
     return block
+
+
+def test_merged_early_stop_inverted_destroy_promote_is_refused() -> None:
+    """Un override training_config peut inverser destroy > promote apres merge.
+
+    `validate_curriculum` valide le bloc curriculum AVANT la surcharge ; validate_early_stop_block
+    doit etre appelé APRES le merge pour attraper que destroy_score >= promote_score.
+    """
+    merged = _early_stop_block(promote_score_vs_champion=0.38, destroy_score_vs_champion=0.40)
+    with pytest.raises(ValueError, match="destroy_score_vs_champion"):
+        validate_early_stop_block(merged, "test surcharge inversee")
 
 
 def test_merged_early_stop_below_gate_champion_is_refused() -> None:
