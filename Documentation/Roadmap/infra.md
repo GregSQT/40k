@@ -53,6 +53,13 @@ Goulots restants : aucun identifié de cette ampleur.
 
 Depuis le 2026-09-08, `geodesic_move_reach` est passé de **20,4 % à 8,0 %** du step en Python pur (index entiers de `hex_index_table` + expansion par couches, mesuré 3 fois, une variante par processus). Le noyau natif garde donc `erode_move_pool_by_squad_block` et `hex_line_iter` comme cibles principales, plus le BFS déjà allégé.
 
+**Attention à l'instrument (2026-09-08)** : cProfile déforme ce banc d'un facteur **2,5** (240,9 s de `total_tt` contre 94,98 s de wall réel sur 600 steps) et gonfle spécifiquement les fonctions à très fort nombre d'appels. Deux « postes chauds » qu'il désignait sont des artefacts — `_model_fp` 7,5 % → **1,38 %** en échantillonnage, `generate_compact_formation` 3,9 % → **0,79 %** — tandis qu'il sous-estimait `hex_line_iter` (4,6 % → **9,22 %**). Conclure au `py-spy` ou au wall-clock, jamais au cProfile.
+
+Répartition réelle du step (sans profileur, 600 steps, machine au repos) : move **44,2 %** (142 ms/step), shoot **35,0 %** (212 ms/step), charge **12,6 %** — mais à **731 ms/step**, la phase la plus chère du jeu —, command 3,0 %, fight 2,7 %, deployment 2,5 %. Les resets ne pèsent que 8,2 %.
+
+- `hex_line_iter` : **gain Python facile déjà pris** le 2026-09-08 (dédup par cellule précédente au lieu d'un `set` qui ne retirait jamais rien — la i-ème cellule d'un cube-lerp est à distance cube `i`, donc toutes distinctes). **10,1 %** sur la boucle seule, mesuré sur corpus fixe, deux variantes alternées dans le même processus, 7 reps ; soit ~1 % du step, que la variance du banc complet (33-43 ms/step) ne résout pas. La fonction reste à **9,22 %** de temps propre : elle demeure une cible de noyau natif, pas un sujet clos.
+- `arm_charge_placement_decision` (`charge_handlers.py`) : **13,08 %** du wall en échantillonnage, premier bloc identifié. Investigué le 2026-09-08, **aucune réécriture contenue n'est justifiée** — le coût est le VOLUME de la recherche (341 000 tests d'engagement de cellules candidates pour 200 steps), pas une primitive naïve. Les deux leviers évidents sont déjà pris : le cache `_EZ_PAIR_CACHE` exclut délibérément ces sondes (`memoise=False`, critère posé en quatre passes — les mémoïser fait tomber le taux de touche de 83 % à 29 %), et `euclidean_edge_distance` élague déjà par disque englobant avant de construire le moindre contour, y compris pour une paire 1×1. Le réduire demande de diminuer le nombre de cellules explorées : changement d'algorithme, à cadrer avant d'écrire.
+
 → `Documentation/Chantiers/backlog/perf_noyau_natif_et_gzip.md` §2
 
 ---
