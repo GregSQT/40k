@@ -43,6 +43,11 @@ from engine.agent_decision import read_pending_agent_decision
 # l'importer ici ne crée pas de cycle, et c'est la seule façon d'aligner l'index de slot du bloc
 # candidat sur l'action qu'il décrit sans recopier un littéral.
 from engine.macro_intents import DEPLOY_SLOT_BASE
+# `attack_sequence` est une FEUILLE côté moteur (elle n'importe jamais `shared_utils`, ce sont les
+# rollers qui l'importent) : aucun cycle. C'est la source AUTORITATIVE des mots-clés d'unité —
+# la même que la résolution de [ANTI-X] 24.03 — et l'observation doit lire par la fonction que la
+# règle exécute, jamais par une seconde normalisation.
+from engine.phase_handlers.attack_sequence import unit_keywords_upper
 from engine.observation_entities import (
     AGENT_DECISION_TYPE_IDS,
     DECISION_CTX_BIN_SIZE,
@@ -1525,6 +1530,25 @@ class ObservationBuilder:
             "deployed_this_turn",
             deployed_on_turn is not None and int(deployed_on_turn) == ctx["current_turn"],
         )
+        # Mots-clés de CATÉGORIE. La source est `unit_keywords_upper`, celle qu'exécute la
+        # RÉSOLUTION de [ANTI-X], et non `compute_hideable` : les deux ne normalisent pas
+        # pareil (celle-ci joint aussi `FACTION_KEYWORDS` et remplace espaces et tirets), et
+        # `game_state._normalize_keyword` documente qu'une seconde normalisation concurrente a
+        # déjà pu faire diverger [ANTI] d'une clause interrogeant le même champ. Écrire l'obs
+        # avec la fonction de la règle est ce qui rend les deux indissociables.
+        #
+        # `require_key` AVANT l'appel, et il n'est pas redondant : `unit_keywords_upper` rend
+        # sciemment un ensemble VIDE sur une unité sans la clé — comportement juste pour [ANTI],
+        # où « aucun mot-clé » signifie « la règle ne s'applique pas », mais masquant ici, où il
+        # écrirait cinq bits à 0, soit « cette unité n'appartient à aucune catégorie », sans que
+        # rien ne lève. L'union 19.03 est déjà portée par `UNIT_KEYWORDS` (`_build_enhanced_unit`).
+        require_key(unit, "UNIT_KEYWORDS")
+        entity_keywords = unit_keywords_upper(unit)
+        _b("kw_infantry", "INFANTRY" in entity_keywords)
+        _b("kw_vehicle", "VEHICLE" in entity_keywords)
+        _b("kw_monster", "MONSTER" in entity_keywords)
+        _b("kw_fly", "FLY" in entity_keywords)
+        _b("kw_psyker", "PSYKER" in entity_keywords)
         # Capacités EN VIGUEUR (19.04 : union escouade + characters attachés encore vivants),
         # écrites en `obs_id` TRIÉS CROISSANT puis paddées à 0 (chantier 01).
         #

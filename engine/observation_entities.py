@@ -281,6 +281,35 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     "deploy_pre_battle",
     "deploy_in_battle",
     "deployed_this_turn",  # clause 2 de [HEAVY] 24.16
+    # Mots-clés de CATÉGORIE de la datasheet (PDF 02 Datasheets), valables pour TOUTE entité —
+    # alliée, ennemie ou active. Ils décrivent l'entité seule, jamais une paire, donc leur masque
+    # est `present` et rien d'autre.
+    #
+    # POURQUOI DES BITS POSITIONNELS, et non un troisième registre d'`obs_id` comme les capacités
+    # et les statuts : le chantier 01 a sorti les 13 bits `rule_*` parce que leur vocabulaire
+    # croît avec CHAQUE DATASHEET — 17 capacités pour Armageddon, autant à chaque faction
+    # ajoutée — donc `obs_size` bougeait sans fin. Les mots-clés de catégorie sont fixés par le
+    # LIVRE DE RÈGLES DE BASE : ajouter une faction entière n'en crée aucun. La cause qui
+    # justifiait les identifiants est donc absente ici, et un `EmbeddingBag` n'aurait rien à
+    # compresser sur un vocabulaire de 5 — il ajouterait une indirection (démêler une somme de
+    # vecteurs) et un mode de défaillance (débordement de slots) que des bits n'ont pas.
+    # Mesuré avant de trancher : 4 slots d'ids auraient coûté 128 scalaires contre 160 pour ces
+    # bits, soit 0,19 % de l'observation — l'écart ne décide de rien.
+    #
+    # LA LISTE EST CLOSE PAR LA CONSOMMATION DU MOTEUR, pas par le livre : un mot-clé que rien
+    # ne lit n'entre pas, sous peine d'un canal constant que le réseau ne peut relier à aucune
+    # conséquence. Chacun cite ici le site qui le consomme, et c'est la condition d'entrée.
+    #
+    # N'y sont donc PAS : CHARACTER — l'allocation 19.02/19.04 lit le RÔLE de la figurine
+    # (`_is_character_role`, shared_utils) et non le mot-clé, et les rôles sont déjà observés par
+    # `MODEL_TYPE_BIN_FIELDS` ; BEASTS/SWARM — aucune datasheet des rosters d'entraînement n'en
+    # porte, et sur ce périmètre le bit vaudrait exactement `kw_infantry` ; BATTLELINE, WALKER,
+    # MOUNTED, GRENADES — présents sur les datasheets, lus par aucune règle du moteur.
+    "kw_infantry",   # 13.06/13.08/13.09 via `_HIDEABLE_KEYWORDS` (game_state) + [ANTI-INFANTRY]
+    "kw_vehicle",    # volet MONSTER/VEHICLE de 10.06 (shooting_handlers) + [ANTI-VEHICLE]
+    "kw_monster",    # volet MONSTER/VEHICLE de 10.06 + 13.06 via `_FLOOR_CAPABLE_KEYWORDS`
+    "kw_fly",        # 13.06 via `_FLOOR_CAPABLE_KEYWORDS` + [ANTI-FLY]
+    "kw_psyker",     # [ANTI-PSYKER] — `ANTI_RULE_IDS` (attack_sequence), `config/weapon_rules.json`
     # ⚠ Entités ENNEMIES uniquement (masque = `present` ET NON `is_ally`) : ces deux bits
     # décrivent une PAIRE (l'unité observatrice → cette entité), pas l'entité seule. Ils n'ont
     # aucun sens pour une alliée, et pour l'unité active la question n'est pas définie (contre
