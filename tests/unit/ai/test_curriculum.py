@@ -572,12 +572,6 @@ def test_stage_early_stop_override_with_wrong_key_is_refused() -> None:
 # ── SURCHARGE PROFIL D'ENTRAINEMENT : VALIDATION APRES MERGE ──────────────────────────────
 
 
-def _gate_block(**overrides) -> dict:
-    block = {"min_score_vs_champion": 0.55, "min_score_vs_others": 0.50, "eval_episodes": 10, "eval_repeats": 2}
-    block.update(overrides)
-    return block
-
-
 def test_merged_early_stop_inverted_destroy_promote_is_refused() -> None:
     """Un override training_config peut inverser destroy > promote apres merge.
 
@@ -589,29 +583,31 @@ def test_merged_early_stop_inverted_destroy_promote_is_refused() -> None:
         validate_early_stop_block(merged, "test surcharge inversee")
 
 
-def test_merged_early_stop_below_gate_champion_is_refused() -> None:
+@pytest.mark.parametrize(
+    "promote_key, promote_value, gate_key",
+    [
+        ("promote_score_vs_champion", 0.50, "min_score_vs_champion"),
+        ("promote_score_vs_others", 0.45, "min_score_vs_others"),
+    ],
+)
+def test_merged_early_stop_below_gate_is_refused(
+    promote_key: str, promote_value: float, gate_key: str
+) -> None:
     """Un override training_config peut faire descendre promote sous le plancher du gate.
 
     `validate_curriculum` valide AVANT la surcharge ; `_validate_early_stop_against_gate`
     doit etre appelé APRES le merge pour attraper cette violation.
     """
-    merged = _early_stop_block(promote_score_vs_champion=0.50)  # sous gate.min=0.55
-    gate = _gate_block()
-    with pytest.raises(ValueError, match="promote_score_vs_champion.*SOUS gate.min_score_vs_champion"):
-        _validate_early_stop_against_gate(merged, gate, "profil 'x1_lineage' surcharge / etape P1")
-
-
-def test_merged_early_stop_below_gate_others_is_refused() -> None:
-    merged = _early_stop_block(promote_score_vs_others=0.45)  # sous gate.min=0.50
-    gate = _gate_block()
-    with pytest.raises(ValueError, match="promote_score_vs_others.*SOUS gate.min_score_vs_others"):
+    merged = _early_stop_block(**{promote_key: promote_value})
+    gate = _minimal_curriculum()["gate"]
+    with pytest.raises(ValueError, match=f"{promote_key}.*SOUS gate.{gate_key}"):
         _validate_early_stop_against_gate(merged, gate, "profil 'x1_lineage' surcharge / etape P1")
 
 
 def test_merged_early_stop_equal_to_gate_floor_is_accepted() -> None:
     """Egalite tolérée : la condition est >=, pas >."""
     merged = _early_stop_block(promote_score_vs_champion=0.55, promote_score_vs_others=0.50)
-    gate = _gate_block()
+    gate = _minimal_curriculum()["gate"]
     _validate_early_stop_against_gate(merged, gate, "test")  # ne leve pas
 
 
