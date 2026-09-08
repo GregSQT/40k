@@ -1041,8 +1041,13 @@ le modèle + LoS 3D est le vrai chantier.
       > et l'**overrun** à `_fight_overrun_pile_in_plan` (shared_utils, plan par-figurine en 4-uplets
       > `(mid,col,row,level)` — la limite « un overrun ne peut pas finir en hauteur » est levée).
       > `_fight_apply_pile_in_move`, `_fight_v11_auto_overrun_pile_in` et `_fight_v11_pile_in_present`
-      > n'existent plus ; `pile_in_move_destinations_12_03` et `_ai_select_pile_in_destination` subsistent
-      > (palier WHILE de référence + tests). Le texte d'origine suit, pour l'historique.
+      > n'existent plus. **Mise à jour 2026-09-08** : `pile_in_move_destinations_12_03` a été
+      > SUPPRIMÉ à son tour (plus aucun appelant de production, le modèle par-ancre étant condamné
+      > depuis le 2026-07-16) ; le palier WHILE de référence est désormais
+      > `_fight_pile_in_closest_tier_ids`, et la clause AFTER par-figurine de 12.03 est couverte sur
+      > le flux vivant par `tests/unit/engine/test_pile_in_after_unit_engaged.py`.
+      > `_ai_select_pile_in_destination` subsiste, mais sans appelant de production non plus.
+      > Le texte d'origine suit, pour l'historique.
 
       Le pile-in avait **deux moteurs de destinations à granularités distinctes** (patron identique au move :
       pool squad rigide RL/IA vs pool par-figurine PvP). Ils ne tournaient **jamais en même temps** — le choix
@@ -1530,11 +1535,11 @@ que le hex central). Base ronde inchangée (collision par disque euclidien, `fp`
   finir sous un plancher trop bas pour elle. — **✓ Validé runtime PvP.**
 
 ### 7.5 Connu / à faire
-- **Flux pile-in unit-level (V10 / IA)** ([fight_handlers.py](../../../engine/phase_handlers/fight_handlers.py),
-  `pile_in_move_destinations_12_03`) : mêmes défauts **non corrigés à cette date** (`enemy_occupied`
-  tous-niveaux + blocker `fp={hex central}`). *(Depuis : le pile-in auto délègue au plan par-figurine
-  `fight_pile_in_plan` — cf. mise à jour du point 8 « DEUX MOTEURS » ; `pile_in_move_destinations_12_03`
-  subsiste comme référence du palier WHILE.)*
+- ~~**Flux pile-in unit-level (V10 / IA)**~~ — **CLOS le 2026-09-08 par suppression.** Le pile-in auto
+  délègue au plan par-figurine `fight_pile_in_plan` (cf. mise à jour du point 8 « DEUX MOTEURS »), et
+  `pile_in_move_destinations_12_03` n'avait plus aucun appelant de production : il a été supprimé avec
+  ses deux helpers exclusifs. Ses défauts d'époque (`enemy_occupied` tous-niveaux + blocker
+  `fp={hex central}`) disparaissent donc avec lui, sans correction à porter.
 - **Pool par niveau propre** : le pile-in/consolidation calcule **toutes** les figs au `view_level`
   global. Une escouade répartie sur plusieurs étages (§2.5) doit être pilée en **basculant la vue par
   niveau** (paradigme mono-niveau, miroir move). Amélioration possible : calculer chaque fig à son niveau
