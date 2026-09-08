@@ -79,7 +79,9 @@ from engine.macro_intents import (
 from engine.agent_decision import read_pending_agent_decision
 # 21.03 « take to the skies » (V11 §0.48 `L6`) : le point de choix s'ouvre AVANT le pool, puisque
 # la declaration en change le budget et la traversee. Importe ici, module de la table de phase.
-from engine.phase_handlers.movement_handlers import arm_fly_declaration_decision
+from engine.phase_handlers.movement_handlers import (
+    arm_ascent_declaration_decision, arm_fly_declaration_decision,
+)
 
 # Game phases - single source of truth for phase count
 GAME_PHASES = ["deployment", "command", "move", "shoot", "charge", "fight"]
@@ -650,6 +652,19 @@ class ActionDecoder:
         armed_decision = arm_fly_declaration_decision(game_state, squad_id)
         if armed_decision is not None:
             return self._agent_decision_mask(armed_decision), []
+
+        # ─── 3bis. FINIR EN HAUTEUR (13.06) ───
+        # Même raison d'être ici que la déclaration de vol : le niveau de destination change le
+        # COÛT de chaque figurine qui monte, donc le pool que la section 4 construit. La poser
+        # après serait la poser trop tard.
+        #
+        # ⚠️ APRÈS le vol, et l'ordre porte du sens : `_ascent_declaration_due_unit` refuse la
+        # question à une escouade dont la traversée FLY est active (le pool d'ancre renvoie avant
+        # son bloc multi-niveaux). Interroger la montée d'abord poserait la question à une unité
+        # qui n'a pas encore dit si elle vole — donc à un état qui n'est pas encore décidé.
+        armed_ascent = arm_ascent_declaration_decision(game_state, squad_id)
+        if armed_ascent is not None:
+            return self._agent_decision_mask(armed_ascent), []
 
         # ─── 4. Carte de cellules + masque d'activation ordinaire ───
         advance_roll: Optional[int] = None

@@ -819,6 +819,16 @@ def test_squad_obs_size_target_matches_the_schema():
     MONSTER/VEHICLE de 10.06 et les gates de terrain 13.06/13.08/13.09 sur les entités
     ennemies. Impose un retrain `--new`.
 
+    `2026-09-09` — 16971 -> 17055. Verticalité du move gym (13.06) : l'agent peut désormais finir
+    un move en hauteur, donc l'observation doit porter la hauteur, sans quoi la montée serait un
+    état CACHÉ à effet sur la récompense (+1 BS de Plunging Fire 22.05, coût de descente au move
+    suivant). Trois entrées : ``max_floor_height`` dans ``UNIT_CONT_FIELDS`` et
+    ``has_ground_model`` dans ``UNIT_BIN_FIELDS`` (1 scalaire × 32 entités chacun = +64),
+    ``elevated`` dans ``SELF_MODEL_BIN_FIELDS`` (1 bit × 20 figurines = +20). Total : +84.
+    S'y ajoute, HORS de ce compteur, le canal de grille ``occupant_level``
+    (``GRID_CHANNELS`` 11 -> 12) : la grille est fournie à part et n'entre pas dans `obs_size`,
+    mais elle change elle aussi la forme d'entrée du réseau. Impose un retrain `--new`.
+
     Ce verrou valait 20768 tant que le point 3 restait ouvert : les quatre autres points ne
     touchent QUE le contenu de l'observation de déploiement, jamais sa taille — donc aucun modèle
     n'était invalidé par eux. Le point 3 ajoute le bloc « candidats de déploiement »
@@ -834,7 +844,7 @@ def test_squad_obs_size_target_matches_the_schema():
     # seul, c'est de forcer un humain à CONSTATER qu'une taille a bougé — donc qu'aucun modèle
     # existant n'est réutilisable. Il était NU (`assert a == b`) : il annonçait que deux nombres
     # diffèrent sans dire lequel était le nouveau, ni quoi en faire.
-    _ACKNOWLEDGED_OBS_SIZE = 16971
+    _ACKNOWLEDGED_OBS_SIZE = 17055
     assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == _ACKNOWLEDGED_OBS_SIZE, (
         f"obs_size a changé : {_ACKNOWLEDGED_OBS_SIZE} -> "
         f"{ObservationBuilder.SQUAD_OBS_SIZE_TARGET}. Tout modèle entraîné est invalidé par "

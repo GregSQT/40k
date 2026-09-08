@@ -4356,7 +4356,7 @@ def _move_spatial_cache(game_state: Dict[str, Any]) -> Dict[str, Any]:
     holder = game_state.get("_move_spatial_cache")  # get allowed (absent au 1er appel)
     if holder is None or holder["fp"] != fp:
         holder = {"fp": fp, "blocked": {}, "transit": {},
-                  "transit_bm": {}, "geo": {}, "eucl": {}}
+                  "transit_bm": {}, "geo": {}, "eucl": {}, "climb": {}}
         game_state["_move_spatial_cache"] = holder
     return holder
 
@@ -4901,14 +4901,22 @@ def geodesic_move_reach(
     return field
 
 
-# Le squad move rigide du gym atterrit TOUJOURS au SOL : en `read_only` le pool d'ancre
-# retourne avant son bloc multi-niveaux (`movement_build_valid_destinations_pool`), donc toutes ses
-# destinations sont des cases de niveau 0, et le coût vertical d'une figurine partant d'un étage est
-# facturé au budget par `squad_descent_penalty_subhex` (§13.06). Les consommateurs du plan (pool,
-# érosion, validation, mesure, commit) doivent donc raisonner sur CE niveau, pas sur le niveau
-# d'ORIGINE des figurines. Sans cela (§0.34) : la figurine descendue restait marquée à l'étage
-# (`floor_height_at` lève « hors empreinte de plancher ») et sa destination était testée contre
-# l'occupation d'un AUTRE étage que celui où elle atterrit.
+# Niveau d'arrivée d'un mouvement rigide qui n'ouvre PAS la verticalité : le SOL.
+#
+# Il reste la réponse entière pour la CHARGE, le pile-in et la consolidation, dont la destination
+# est au sol par construction. Pour le MOVE il n'est plus qu'un défaut : depuis la déclaration de
+# montée (13.06, `movement_handlers.squad_ascent_declared`), une escouade qui a déclaré finit
+# figurine par figurine au niveau que `model_move_destination_level` résout à SA case d'arrivée.
+# Sans déclaration — le régime courant — le move rend exactement cette constante, donc le pipeline
+# est bit-à-bit celui d'avant.
+#
+# Ce que ce niveau reste pour TOUS les consommateurs (pool, érosion, validation, mesure, commit) :
+# le niveau d'ARRIVÉE, jamais celui d'ORIGINE. Sans cela (§0.34) la figurine descendue restait
+# marquée à l'étage (`floor_height_at` lève « hors empreinte de plancher ») et sa destination était
+# testée contre l'occupation d'un AUTRE étage que celui où elle atterrit. Le coût vertical d'une
+# figurine qui PART d'un étage reste facturé par `squad_descent_penalty_subhex` ; celui d'une
+# figurine qui MONTE ne peut pas l'être de la même façon (il dépend de la case d'arrivée, pas de la
+# case de départ) et vit dans le champ de trajet par-figurine de l'érosion.
 SQUAD_RIGID_MOVE_DESTINATION_LEVEL = 0
 
 
@@ -5006,14 +5014,28 @@ def build_rigid_plan(
     translation a dx impair change la parite de colonne de chaque figurine et DEFORME le
     bloc (deux figs a distance 2 se retrouvent a distance 1).
 
-    Returns list[(model_id, new_col, new_row, niveau_sol)] ou None si squad sans figurine vivante.
-    Le 4e element est TOUJOURS `SQUAD_RIGID_MOVE_DESTINATION_LEVEL` : ce move atterrit au sol (cf.
-    la constante). L'omettre laissait `commit_move` conserver le niveau d'origine (« absence = garder
-    le niveau courant ») et une figurine partie d'un etage restait marquee a l'etage hors de toute
-    empreinte de plancher (§0.34).
+    Returns list[(model_id, new_col, new_row, niveau)] ou None si squad sans figurine vivante.
+    Le 4e element est OBLIGATOIRE : l'omettre laissait `commit_move` conserver le niveau d'origine
+    (« absence = garder le niveau courant ») et une figurine partie d'un etage restait marquee a
+    l'etage hors de toute empreinte de plancher (§0.34).
+
+    NIVEAU PAR FIGURINE (13.06). Sans declaration de montee il vaut
+    `SQUAD_RIGID_MOVE_DESTINATION_LEVEL` pour toutes — le cas courant, identique a l'ancien plan.
+    Avec declaration, chaque figurine recoit le niveau que `model_move_destination_level` resout a
+    SA case d'arrivee : la regle enonce la condition « can end a move on any surface » par
+    FIGURINE, et la coherency tolere 5" de denivele (03.03), donc une escouade a cheval sol/etage
+    est un plan legal, pas un cas limite. Le niveau reste un HINT : `place_model_at_effective_level`
+    le revalide contre l'empreinte avant d'ecrire.
+
+    C'est la MEME carte que celle interrogee par `erode_move_pool_by_squad_block` : masque et plan
+    designent donc le meme etage pour la meme cellule, ce qui est la condition de « masque ⊆
+    executable » des lors que le niveau change le predicat d'occupation.
     AUCUNE validation ici — voir validate_move_plan.
     """
     from engine.hex_utils import offset_to_cube, cube_to_offset
+    from engine.phase_handlers.movement_handlers import (
+        model_move_destination_level, squad_ascent_declared,
+    )
 
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
@@ -5028,12 +5050,16 @@ def build_rigid_plan(
     ax, ay, az = offset_to_cube(anchor_origin_col, anchor_origin_row)
     bx, by, bz = offset_to_cube(dest_col, dest_row)
     dcx, dcy, dcz = bx - ax, by - ay, bz - az
+    ascent = squad_ascent_declared(game_state, str(squad_id))
     plan: List[Tuple[str, int, int, int]] = []
     for mid in alive_mids:
         m = models_cache[mid]
         mx, my, mz = offset_to_cube(int(m["col"]), int(m["row"]))
         new_col, new_row = cube_to_offset(mx + dcx, my + dcy, mz + dcz)
-        plan.append((mid, int(new_col), int(new_row), SQUAD_RIGID_MOVE_DESTINATION_LEVEL))
+        plan.append((
+            mid, int(new_col), int(new_row),
+            model_move_destination_level(game_state, m, int(new_col), int(new_row), ascent),
+        ))
     return plan
 
 
@@ -5177,6 +5203,77 @@ def geodesic_field_for_origin(
     return field
 
 
+def ascent_field_for_model(
+    game_state: Dict[str, Any],
+    squad_id: str,
+    player: int,
+    model: Dict[str, Any],
+    level: int,
+    budget: int,
+) -> Mapping[Tuple[int, int], int]:
+    """Cases de l'etage `level` atteignables par CETTE figurine, cout vertical §13.06 compris.
+
+    SOURCE UNIQUE de l'atteignable en MONTEE, partagee par les deux cotes de l'invariant
+    « masque ⊆ executable » : l'erosion du masque (`erode_move_pool_by_squad_block`) et la
+    validation d'un plan (`model_reach_predicate`). Les desolidariser ferait offrir au masque une
+    montee que `explain_move_plan_rejection` refuse — le ValueError en plein run que §0.34
+    pourchasse.
+
+    POURQUOI un champ separe de `geodesic_field_for_origin` : celui-ci chemine A UN niveau donne,
+    parmi les obstacles de CE niveau. Une figurine qui monte part du SOL et arrive a l'etage ; son
+    trajet traverse les deux, et sa distance inclut la montee (13.06 « add the distance moved
+    vertically up ... to any other distance that model has moved »). Interroger le champ du sol
+    ignorerait la montee, celui de l'etage ferait partir la figurine d'une case ou elle n'est pas.
+    Le champ multi-niveaux (`_model_multilevel_reachable_field`) est le seul qui reponde a la
+    bonne question, et il est deja en production cote PvP et melee.
+
+    La DESCENTE n'y passe pas : elle est facturee par `squad_descent_penalty_subhex` sur le budget
+    et chemine au sol, comportement anterieur et teste. Ce champ ne traite QUE la montee.
+
+    GEOMETRIE — a savoir, pas a decouvrir : `reachable_multilevel_field` developpe chaque niveau
+    par le champ ANY-ANGLE, quand le move de plain-pied du gym est mesure en PAS d'hexagone. Le
+    pas any-angle vaut 1,0 sous-hexe vers l'est mais ~1,155 vers le sud, donc la montee est mesuree
+    un peu PLUS CHER que le sol, jamais moins : l'ecart retire a l'agent quelques montees que la
+    regle autoriserait, il n'en fabrique aucune d'illegale. C'est le sens acceptable de
+    l'inegalite, et les deux cotes de l'invariant lisent de toute facon CE champ.
+
+    UNITE : le cout rendu est en SOUS-HEXES (la source divise par `ENGAGEMENT_NORM_HEX_WIDTH`),
+    directement comparable au budget de move — jamais a un budget deja mis a l'echelle
+    `_hex_center`.
+
+    Memoise dans le cache spatial par-etat, meme contrat que `geodesic_field_for_origin` : un champ
+    calcule pour un budget plus large repond pour tout budget inferieur, on compare le COUT.
+    """
+    from engine.phase_handlers.movement_handlers import _model_multilevel_reachable_field
+
+    budget = int(budget)
+    fields = _move_spatial_cache(game_state)["climb"]
+    # Cle par ORIGINE + GEOMETRIE + niveaux, jamais par identite de figurine : le champ ne depend
+    # que de cela, et `models_cache` ne porte pas d'`id` (l'identifiant est la CLE du dict, pas un
+    # champ de l'entree). Deux figurines de meme socle partant de la meme case partagent donc leur
+    # champ — c'est le cas courant d'une escouade homogene.
+    fkey = (
+        str(squad_id), int(player),
+        int(model["col"]), int(model["row"]), int(require_key(model, "level")),
+        move_geom_key(model), int(level),
+    )
+    cached = fields.get(fkey)  # get allowed (figurine pas encore interrogee)
+    if cached is not None and cached[0] >= budget:
+        return cached[1]
+    unit = require_unit_by_id(game_state, str(squad_id))
+    # Obstacles de SOL = la definition PARTAGEE du trajet legal, la meme que celle du champ
+    # geodesique de plain-pied : les deux doivent contourner exactement les memes cases.
+    _pairs, _bm = move_transit_blocked_forms(game_state, str(squad_id), int(player), 0)
+    field = _model_multilevel_reachable_field(
+        game_state, unit, str(squad_id), model,
+        (int(model["col"]), int(model["row"])), budget, {int(level)},
+        set(_pairs), game_state.get("terrain_areas", []),  # get allowed (scenario sans terrain)
+        start_level=int(require_key(model, "level")),
+    ).get(int(level), {})  # get allowed (niveau inatteignable = aucune case)
+    fields[fkey] = (budget, field)
+    return field
+
+
 def _euclidean_move_field_for_model(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -5296,6 +5393,22 @@ def model_reach_predicate(
     o_col, o_row = int(model["col"]), int(model["row"])
     budget = int(budget)
     mode = move_plan_distance_mode(game_state, str(squad_id), metric)
+
+    # MONTEE (13.06) : la figurine finit PLUS HAUT qu'elle n'est partie. Son trajet traverse les
+    # niveaux et sa distance inclut la montee — aucun champ a niveau fixe ne repond a cela (cf.
+    # `ascent_field_for_model`). Teste AVANT les geometries parce que la question n'est pas
+    # « quelle metrique » mais « quel espace » : c'est un changement de niveau, pas de mesure.
+    # La descente ne passe pas ici (elle chemine au sol, budget deja ampute) : seul le strictement
+    # superieur bascule, donc tout ce qui existait avant garde son chemin exact.
+    if int(level) > int(require_key(model, "level")):
+        _climb = ascent_field_for_model(
+            game_state, str(squad_id), int(player), model, int(level), budget
+        )
+
+        def _by_climb(nc: int, nr: int) -> bool:
+            _d = _climb.get((nc, nr))  # get allowed (case hors atteignable)
+            return _d is not None and _d <= budget
+        return _by_climb
 
     if mode == "cube":
         def _straight(nc: int, nr: int) -> bool:
@@ -13578,11 +13691,26 @@ def erode_move_pool_by_squad_block(
     Lecture pure. Retourne un nouveau dict (sous-ensemble de ``costs``).
     """
     from engine.hex_utils import offset_to_cube, cube_to_offset
+    from engine.phase_handlers.movement_handlers import (
+        squad_ascent_declared, squad_floor_level_map,
+    )
 
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
     alive_mids = [m for m in squad_models.get(squad_id, []) if m in models_cache]  # get allowed
-    if len(alive_mids) <= 1 and _mono_model_matches_pool_socle(game_state, squad_id, alive_mids):
+    # MONTÉE DÉCLARÉE (13.06) : lue AVANT le court-circuit mono-figurine, parce qu'elle en casse
+    # la condition. Ce court-circuit repose sur l'égalité « coût de pool == budget exécutable » ;
+    # la montée ajoute une distance verticale que le pool d'ancre, construit au sol, ne connaît
+    # pas. Mesuré : escouade 103 (mono-figurine), cellules à coût 12-14 offertes pour un budget de
+    # 14, refusées par `explain_move_plan_rejection` parce que le trajet réel vaut coût + 3 de
+    # montée. Le court-circuit reste actif dans TOUS les autres cas — c'est-à-dire partout où rien
+    # n'est déclaré.
+    _ascent = squad_ascent_declared(game_state, str(squad_id))
+    if (
+        not _ascent
+        and len(alive_mids) <= 1
+        and _mono_model_matches_pool_socle(game_state, squad_id, alive_mids)
+    ):
         # Mono-figurine : l'ancre EST le bloc (offset nul), et son coût de pool borne déjà son
         # trajet par le budget que l'exécution appliquera — depuis §0.34 la frontière
         # normal/advance du masque est le budget EXÉCUTABLE (`squad_normal_move_frontier_subhex`,
@@ -13612,14 +13740,22 @@ def erode_move_pool_by_squad_block(
     # (origine_col, origine_row, niveau, offset_cube) par figurine — pour l'érosion par budget
     # géodésique (chaque figurine part de SON origine, pas de l'ancre).
     models_geo: List[Tuple[str, int, int, int, Tuple[int, int, int]]] = []
+    # MONTÉE DÉCLARÉE (13.06) : le niveau d'arrivée d'une figurine dépend alors de SA case
+    # d'arrivée, donc d'une candidate — il ne peut plus la classer une fois pour toutes dans
+    # `offsets_by_level_geom`. On garde ce pré-groupement (il porte le chemin chaud, sans
+    # déclaration) et on lui adjoint la liste par-figurine que la boucle de candidates parcourt à
+    # la place quand la montée est déclarée. Les DEUX voies lisent les mêmes `blocked_by_level_geom`.
+    # (geom_key, offset_cube, carte cellule -> niveau) par figurine ; vide sans déclaration.
+    models_ascent: List[Tuple[MoveGeomKey, Tuple[int, int, int], Mapping[Tuple[int, int], int]]] = []
+    _levels_seen_by_geom: Dict[MoveGeomKey, Set[int]] = {}
     for mid in alive_mids:
         m = models_cache[mid]
         mx, my, mz = offset_to_cube(int(m["col"]), int(m["row"]))
         off = (mx - ax, my - ay, mz - az)
-        # Niveau d'ARRIVÉE (sol) et non d'origine : c'est là que la figurine atterrit, donc c'est
-        # cette occupation-là qui la bloque et ce transit-là qu'elle emprunte — miroir de
-        # `build_rigid_plan` / `validate_move_plan` / du pool d'ancre (§0.34). Identique au niveau
-        # d'origine pour toute escouade déjà au sol, c'est-à-dire partout ailleurs.
+        # Niveau d'ARRIVÉE et non d'origine : c'est là que la figurine atterrit, donc c'est cette
+        # occupation-là qui la bloque et ce transit-là qu'elle emprunte — miroir de
+        # `build_rigid_plan` / `validate_move_plan` / du pool d'ancre (§0.34). Sans déclaration de
+        # montée c'est le sol, identique au niveau d'origine pour toute escouade déjà au sol.
         lvl = SQUAD_RIGID_MOVE_DESTINATION_LEVEL
         _shape = require_key(m, "BASE_SHAPE")
         _size = require_key(m, "BASE_SIZE")
@@ -13630,6 +13766,14 @@ def erode_move_pool_by_squad_block(
         geom_of_key[_gk] = (_shape, _size, _orient)
         offsets_by_level_geom.setdefault((lvl, _gk), []).append(off)
         models_geo.append((str(mid), int(m["col"]), int(m["row"]), lvl, off))
+        _levels_seen_by_geom.setdefault(_gk, set()).add(lvl)
+        if _ascent:
+            _lmap = squad_floor_level_map(game_state, m)
+            models_ascent.append((_gk, off, _lmap))
+            # Tous les niveaux que cette géométrie peut atteindre doivent avoir leurs cellules
+            # interdites pré-calculées : les résoudre à la demande dans la boucle de candidates
+            # rendrait le coût du masque proportionnel au pool.
+            _levels_seen_by_geom[_gk].update(int(_lv) for _lv in _lmap.values())
 
     board_cols = int(require_key(game_state, "board_cols"))
     board_rows = int(require_key(game_state, "board_rows"))
@@ -13646,7 +13790,11 @@ def erode_move_pool_by_squad_block(
     # helper : c'est l'arbitrage du consommateur, `validate_move_plan` fait l'inverse.
     blocked_by_level_geom: Dict[Tuple[int, MoveGeomKey], Set[Tuple[int, int]]] = {}
     for _gk, (_shape, _size, _orient) in geom_of_key.items():
-        _levels_for_geom = {lv for (lv, gk) in offsets_by_level_geom if gk == _gk}
+        # Les niveaux VUS par cette géométrie — le sol, plus ceux qu'une montée déclarée ouvre.
+        # Dérivés de `_levels_seen_by_geom` et non plus des seules clés du pré-groupement : sous
+        # déclaration, une figurine peut atterrir à un niveau qui n'y figure pas encore, et son
+        # ensemble de cellules interdites manquerait au moment de la tester.
+        _levels_for_geom = _levels_seen_by_geom.get(_gk, {SQUAD_RIGID_MOVE_DESTINATION_LEVEL})  # get allowed
         _sets_by_level = build_move_blocked_cells_by_level(
             game_state, squad_id, player, _levels_for_geom, c, _shape, _size, _orient
         )
@@ -13682,6 +13830,22 @@ def erode_move_pool_by_squad_block(
     # chaque figurine (une fois par fingerprint d'état, cf. le cache de `build_squad_move_cell_map`).
     _geo_budget = False
     _field_by_origin: Dict[Tuple[str, int, int, int], Mapping[Tuple[int, int], float]] = {}
+    # Montée (13.06) : atteignable par (figurine, niveau), et carte `cellule -> niveau` par
+    # figurine. Vides sans déclaration — le chemin courant ne les touche pas.
+    _climb_by_model_level: Dict[Tuple[str, int], Mapping[Tuple[int, int], int]] = {}
+    _level_map_by_model: Dict[str, Mapping[Tuple[int, int], int]] = {}
+    _ascent_levels_by_model: Dict[str, Set[int]] = {}
+    _origin_level_by_model: Dict[str, int] = {}
+    if _ascent:
+        for _mid_a in alive_mids:
+            _m_a = models_cache[_mid_a]
+            _lm_a = squad_floor_level_map(game_state, _m_a)
+            _level_map_by_model[str(_mid_a)] = _lm_a
+            _origin_level_by_model[str(_mid_a)] = int(require_key(_m_a, "level"))
+            _ascent_levels_by_model[str(_mid_a)] = {
+                int(_lv) for _lv in _lm_a.values()
+                if int(_lv) > int(require_key(_m_a, "level"))
+            }
     _geo_models: List[Tuple[str, int, int, int, Tuple[int, int, int]]] = []
     _classifier_normal = 0
     _normal_exec = 0
@@ -13762,7 +13926,11 @@ def erode_move_pool_by_squad_block(
         for (mid_g, ocol, orow, lvl, off) in models_geo:
             # Le court-circuit cube n'est valide que si le budget d'exécution égale le budget
             # classifieur (sinon M - descente < M et le cube n'est plus garanti par le pool).
-            if _descent == 0 and _mode != "euclidean":
+            # `not _ascent` : le court-circuit dit « sans obstacle dans le rayon, le trajet EST le
+            # cube, donc déjà borné par le pool d'ancre ». Une figurine qui MONTE ajoute sa
+            # distance verticale (13.06) à ce trajet : le cube ne la borne plus, et la sauter
+            # offrirait au masque une montée hors budget que la validation refuse.
+            if _descent == 0 and _mode != "euclidean" and not _ascent:
                 _local = _local_transit_by_level.get(lvl, ())
                 if not any(
                     abs(tc - ocol) <= _extent and abs(tr - orow) <= _extent
@@ -13785,6 +13953,19 @@ def erode_move_pool_by_squad_block(
                     _field_by_origin[_fkey] = geodesic_move_reach(
                         ocol, orow, _extent, _blocked_by_level[lvl]
                     )
+            # Champs de MONTÉE (13.06), un par (figurine, niveau atteignable) : le trajet d'une
+            # figurine qui monte traverse les niveaux et paie la distance verticale, donc aucun
+            # champ à niveau fixe ne le borne. MÊME source que la validation
+            # (`ascent_field_for_model`), sans quoi le masque offrirait une montée que
+            # `explain_move_plan_rejection` refuse.
+            if _ascent:
+                for _lv_up in sorted(_ascent_levels_by_model.get(mid_g, ())):  # get allowed
+                    _ck = (mid_g, _lv_up)
+                    if _ck not in _climb_by_model_level:
+                        _climb_by_model_level[_ck] = ascent_field_for_model(
+                            game_state, str(squad_id), player, models_cache[mid_g],
+                            _lv_up, _extent,
+                        )
         if not _geo_models:
             _geo_budget = False  # aucune figurine à contraindre → pool d'ancre déjà exact
 
@@ -13792,18 +13973,32 @@ def erode_move_pool_by_squad_block(
     for (cc, rr), cost in costs.items():
         bx, by, bz = offset_to_cube(int(cc), int(rr))
         ok = True
-        for (lv, _gk), offs in offsets_by_level_geom.items():
-            blocked = blocked_by_level_geom[(lv, _gk)]
-            for (ox, oy, oz) in offs:
+        if _ascent:
+            # Voie MONTÉE : le niveau se résout à la case d'arrivée, donc figurine par figurine
+            # et candidate par candidate. Mêmes ensembles interdits que la voie groupée — c'est
+            # l'INDEX de niveau qui change, pas le prédicat.
+            for (_gk, (ox, oy, oz), _lmap) in models_ascent:
                 ncol, nrow = cube_to_offset(bx + ox, by + oy, bz + oz)
                 if not (0 <= ncol < board_cols and 0 <= nrow < board_rows):
                     ok = False
                     break
-                if (ncol, nrow) in blocked:
+                _lv_eff = int(_lmap.get((ncol, nrow), SQUAD_RIGID_MOVE_DESTINATION_LEVEL))  # get allowed
+                if (ncol, nrow) in blocked_by_level_geom[(_lv_eff, _gk)]:
                     ok = False
                     break
-            if not ok:
-                break
+        else:
+            for (lv, _gk), offs in offsets_by_level_geom.items():
+                blocked = blocked_by_level_geom[(lv, _gk)]
+                for (ox, oy, oz) in offs:
+                    ncol, nrow = cube_to_offset(bx + ox, by + oy, bz + oz)
+                    if not (0 <= ncol < board_cols and 0 <= nrow < board_rows):
+                        ok = False
+                        break
+                    if (ncol, nrow) in blocked:
+                        ok = False
+                        break
+                if not ok:
+                    break
         if ok and _geo_budget:
             # Budget effectif de CETTE candidate = celui que l'exécution appliquera, déduit du type
             # de move (classify_squad_move_type sur le coût d'ancre) : normal/fall_back → M,
@@ -13823,9 +14018,27 @@ def erode_move_pool_by_squad_block(
             _exec_d = _exec_b * _dist_scale
             for (mid_g, ocol, orow, lvl, (ox, oy, oz)) in _geo_models:
                 ncol, nrow = cube_to_offset(bx + ox, by + oy, bz + oz)
-                _fk = (mid_g if _mode == "euclidean" else "", ocol, orow, lvl)
-                _d = _field_by_origin[_fk].get((ncol, nrow))
-                if _d is None or _d > _exec_d:
+                # Figurine qui MONTE sur cette candidate : son atteignable est le champ
+                # multi-niveaux, pas le champ de plain-pied — c'est le seul qui facture sa
+                # distance verticale. Le comparateur reste le même budget d'exécution : 13.06
+                # ajoute la montée À la distance parcourue, il n'accorde pas de budget en plus.
+                _lv_eff = (
+                    int(_level_map_by_model[mid_g].get((ncol, nrow), lvl))  # get allowed
+                    if _ascent else lvl
+                )
+                if _ascent and _lv_eff > _origin_level_by_model[mid_g]:
+                    _d = _climb_by_model_level[(mid_g, _lv_eff)].get((ncol, nrow))  # get allowed
+                    # Le champ de montée rend des SOUS-HEXES (il divise déjà par
+                    # `ENGAGEMENT_NORM_HEX_WIDTH`), pas des unités `_hex_center` : on le compare au
+                    # budget BRUT, jamais à `_exec_d`. Appliquer `_dist_scale` ici rendrait
+                    # l'érosion 1,5x trop permissive en euclidien — le masque offrirait des montées
+                    # que `model_reach_predicate` (qui compare au budget brut) refuse.
+                    _bound = _exec_b
+                else:
+                    _fk = (mid_g if _mode == "euclidean" else "", ocol, orow, lvl)
+                    _d = _field_by_origin[_fk].get((ncol, nrow))
+                    _bound = _exec_d
+                if _d is None or _d > _bound:
                     ok = False
                     break
         if ok:

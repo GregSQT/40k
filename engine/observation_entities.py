@@ -79,6 +79,17 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
     # Source : max(RNG × inches_to_subhex) sur les armes de tir de l'unité active.
     # 0 pour une unité corps-à-corps uniquement.
     "effective_range",
+    # VERTICALITÉ (13.06) — émis pour TOUTE entité posée, alliée comme ennemie, et c'est ce qui
+    # les distingue des drapeaux de terrain voisins : la hauteur d'une figurine est LUE dans
+    # `units_cache["floor_height_by_model"]`, déjà calculée par le moteur pour Plunging Fire, et
+    # ne coûte donc aucun test d'empreinte par entité.
+    #
+    # Hauteur (en pouces) de la figurine la PLUS HAUTE de l'unité, normalisée par le seuil de
+    # Plunging Fire (22.05) : 1.0 = exactement à la hauteur qui déclenche la règle. Ce n'est pas
+    # une échelle arbitraire — c'est le seul seuil que la hauteur franchit dans les règles, et le
+    # normaliser par lui rend la feature directement lisible comme « suis-je / est-il en position
+    # de tir plongeant ». 0.0 = tout le monde au sol, le cas courant.
+    "max_floor_height",
 )
 
 #: Règles d'UNITÉ (`config/unit_rules.json`) exposées à l'agent.
@@ -348,6 +359,17 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     # L'oracle est `charge_build_valid_plan`, la fonction MOTEUR qu'exécute le commit : une
     # réimplémentation annoncerait une atteignabilité que la résolution ne produirait pas.
     "charge_reachable_max_roll",
+    # VERTICALITÉ (13.06 / 22.05) — émis pour TOUTE entité posée. C'est le PRÉDICAT EXACT que
+    # Plunging Fire interroge sur la CIBLE (« la cible contient >= 1 figurine au sol »), et non un
+    # « niveau » générique : une unité peut être à cheval sur deux étages (03.03 tolère 5" de
+    # dénivelé), donc un scalaire de niveau perdrait justement l'information dont la règle a
+    # besoin. Avec `max_floor_height` ci-dessus, l'agent voit les DEUX faces de 22.05 : sa propre
+    # hauteur de tir, et l'éligibilité de la cible.
+    #
+    # 1 par défaut au sens propre : une unité entièrement au sol contient bien >= 1 figurine au
+    # sol. 0 signifie « toute l'unité est en hauteur », ce qui la met hors d'atteinte du tir
+    # plongeant.
+    "has_ground_model",
     "present",             # masque d'entité (0 = slot vide / unité morte) — DERNIER, cf. ci-dessus
 )
 
@@ -498,7 +520,13 @@ SELF_MODEL_CONT_FIELDS: Tuple[str, ...] = ("col_rel", "row_rel")
 #: erreur, dans l'agrégation comme dans le dénominateur de `EntityRunningNorm`. Il est en DERNIÈRE
 #: position, comme les masques des registres d'armes et de types (`[..., -1]`).
 SELF_MODEL_BIN_FIELDS: Tuple[str, ...] = (
-    "fight_eligible", "in_enemy_ez", "present",
+    # `elevated` : CETTE figurine finit-elle en hauteur (13.06, niveau >= 1) ? Irréductiblement
+    # individuel, comme les deux bits qui le précèdent — depuis la déclaration de montée, une
+    # escouade peut être à cheval sur le sol et un étage (03.03 tolère 5" de dénivelé), et
+    # l'agrégat d'unité (`max_floor_height`, `has_ground_model`) ne dit pas LAQUELLE est en haut.
+    # C'est pourtant ce qui décide, figurine par figurine, du +1 BS de 22.05 au tir suivant et du
+    # coût de descente (13.06) au move suivant.
+    "fight_eligible", "in_enemy_ez", "elevated", "present",
 )
 SELF_MODEL_CONT_SIZE = len(SELF_MODEL_CONT_FIELDS)
 SELF_MODEL_BIN_SIZE = len(SELF_MODEL_BIN_FIELDS)
@@ -559,7 +587,7 @@ def self_model_bin_index(field: str) -> int:
 #: aucune datasheet — c'est le mot-clé FLY qui l'ouvre et 21.03 qui en fixe le prix —, donc ses
 #: deux candidats portent eux aussi un `effect_ids` VIDE. C'est `declines` qui les sépare :
 #: `CHOICE_1` renonce au vol, et le renoncement est précisément « ne rien faire ».
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile")
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots

@@ -1791,6 +1791,9 @@ class W40KEngine(gym.Env):
             # laisse le set de declaration vide et doit malgre tout laisser une trace). Cles
             # DERIVEES de `_TAKE_TO_THE_SKIES_BY_PHASE`, comme au reset de tour.
             **movement_handlers.fly_declaration_reset_state(),
+            # 13.06 : declaration de montee, meme couple (declare / question posee) et meme cycle
+            # de vie que le vol ci-dessus.
+            **movement_handlers.ascent_declaration_reset_state(),
             "units_reacted_this_enemy_turn": set(),
             "reaction_window_active": False,
             "_unit_move_version": 0,
@@ -4232,6 +4235,27 @@ class W40KEngine(gym.Env):
                 "player": int(require_key(decision, "player")),
                 "option_index": option_index,
                 "tookToSkies": declared,
+                "success": True,
+            }
+
+        if decision_type == "ascent_declaration":
+            # 13.06 « ending a move » (verticalite du move gym) : decision d'ESCOUADE, par move.
+            # Jumeau exact de `fly_declaration` ci-dessus — meme forme de candidats, meme absence
+            # d'`effect_ids`, meme reprise implicite de l'activation au step suivant.
+            declared = bool(require_key(require_key(selected_option, "payload"), "declare"))
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            # `apply_ascent_declaration_decision` efface la decision elle-meme (ecrivain unique).
+            movement_handlers.apply_ascent_declaration_decision(
+                self.game_state, decision_squad_id, declared
+            )
+            return True, {
+                "action": "agent_decision",
+                "waiting_for_player": False,
+                "decision_type": decision_type,
+                "unitId": decision_squad_id,
+                "player": int(require_key(decision, "player")),
+                "option_index": option_index,
+                "endsElevated": declared,
                 "success": True,
             }
 

@@ -40,7 +40,7 @@ from engine.hex_utils import _hex_center
 #     10e/11e : chantier « canaux obscurant et exposition ») ---
 GRID_SIZE = 32
 GRID_CELL_COUNT = GRID_SIZE * GRID_SIZE  # 1024 cellules = taille de la tete spatiale
-GRID_CHANNELS = 11
+GRID_CHANNELS = 12
 
 # Canaux (spec §10.1)
 GRID_CH_WALL = 0       # murs / obstacles infranchissables
@@ -122,6 +122,21 @@ GRID_CH_OBSCURING = 9
 # `tests/unit/engine/test_deployment_los_vectorized_equivalence.py`.
 GRID_CH_LOS_EXPOSURE = 10
 
+# Niveau (13.06) des OCCUPANTS de la cellule, normalise par le niveau maximal declare par le
+# terrain : 0 = personne, ou occupant au sol ; 1 = occupant a l etage le plus haut.
+#
+# POURQUOI IL NE PEUT PAS ETRE DERIVE DE `GRID_CH_LEVEL`. Ce dernier decrit le TERRAIN — ou il y a
+# un plancher — et pas qui se tient dessus. Des lors qu une figurine peut finir en hauteur, les
+# canaux d occupation (`GRID_CH_ALLY`, `GRID_CH_ENEMY`, `GRID_CH_SELF`) deviennent AMBIGUS : ils
+# peignent a plat une figurine a l etage sur une case dont le SOL reste libre, donc ils annoncent
+# un blocage qui n existe pas. Ce canal est ce qui desambiguise les trois autres ; ce n est pas un
+# supplement d information, c est la correction d une observation devenue fausse.
+#
+# Un canal SEPARE plutot qu une graduation des canaux d occupation : graduer `GRID_CH_ALLY` a 0,5
+# au sol et 1,0 a l etage melerait « qui est la » et « a quelle hauteur » dans le meme plan, et le
+# reseau a deja appris 1,0 = occupe. La separation garde chaque plan sur une seule question.
+GRID_CH_OCCUPANT_LEVEL = 11
+
 #: Nom de chaque canal, DANS L ORDRE de ses index. Jumeau des `*_FIELDS` de
 #: `observation_entities.py` : tout outil qui RAPPORTE un canal par son nom (l audit
 #: `scripts/obs_channel_audit.py`, un futur diagnostic) doit lire cette liste et non recopier la
@@ -129,7 +144,7 @@ GRID_CH_LOS_EXPOSURE = 10
 #: controle bouge, et l outil enverrait corriger un canal sain.
 GRID_CHANNEL_NAMES = (
     "wall", "ally", "enemy", "ez", "objective", "level", "cover", "self", "move_cost",
-    "obscuring", "los_exposure",
+    "obscuring", "los_exposure", "occupant_level",
 )
 
 if len(GRID_CHANNEL_NAMES) != GRID_CHANNELS:

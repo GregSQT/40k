@@ -194,9 +194,14 @@ def command_step_start_of_phase(game_state: Dict[str, Any]) -> None:
     # MÊME cycle de vie (la question vaut pour le mouvement du tour, elle se repose au tour
     # suivant). Les clés sont DÉRIVÉES de `_TAKE_TO_THE_SKIES_BY_PHASE` : les réénumérer ici
     # ferait de tout ajout de phase un oubli silencieux (une escouade plus jamais interrogée).
-    from engine.phase_handlers.movement_handlers import fly_declaration_reset_state
+    from engine.phase_handlers.movement_handlers import (
+        ascent_declaration_reset_state, fly_declaration_reset_state,
+    )
 
     game_state.update(fly_declaration_reset_state())
+    # 13.06 — déclarations de montée, MÊME cycle de vie que celles de vol : la question « finis-tu
+    # en hauteur ? » vaut pour le move du tour et se repose au suivant.
+    game_state.update(ascent_declaration_reset_state())
     game_state["units_reacted_this_enemy_turn"] = set()
 
     game_state["reactive_macro_order_current_window"] = []
