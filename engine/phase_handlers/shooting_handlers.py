@@ -1029,13 +1029,12 @@ def compute_hidden_status_for_unit(game_state: Dict[str, Any], unit_id: str) -> 
     if entry is None:
         return
     unit = require_unit_by_id(game_state, unit_id_str)
-    if not is_unit_alive(unit_id_str, game_state) or not bool(unit.get("hideable")):
-        unit["hidden"] = False
-        unit["hidden_models"] = []
-        return
     shot_ids = {str(x) for x in game_state.get("units_shot", set())}
     shot_prev_ids = {str(x) for x in game_state.get("units_shot_previous_turn", set())}
-    if unit_id_str in shot_ids or unit_id_str in shot_prev_ids:
+    if (not is_unit_alive(unit_id_str, game_state)
+            or not bool(unit.get("hideable"))
+            or unit_id_str in shot_ids
+            or unit_id_str in shot_prev_ids):
         unit["hidden"] = False
         unit["hidden_models"] = []
         return
@@ -1067,7 +1066,7 @@ def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
     # contrat et tourne sur des états volontairement minimaux.
     require_key(game_state, "terrain_areas")
     units_cache = require_key(game_state, "units_cache")
-    for unit_id in list(units_cache.keys()):
+    for unit_id in units_cache:
         compute_hidden_status_for_unit(game_state, str(unit_id))
 
 
