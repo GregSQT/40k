@@ -533,7 +533,7 @@ class W40KMetricsTracker:
         Ce qu'un tableau de bord doit dire ici, c'est « ce nombre doit valoir 0 ». Emise
         seulement quand une troncature arrive, la courbe etait absente du cas nominal, donc
         indiscernable d'une metrique jamais branchee. Elle porte un point par episode ; les
-        exceptions a cette cadence dans `00_critical/` sont les cinq courbes de sante PPO et
+        exceptions a cette cadence dans `00_critical/` sont les six courbes de sante PPO et
         leurs seuils (cadence update), l'evaluation bot a/b/c (cadence eval), et les tags
         p-s ventiles par mode de deploiement (cf. `log_critical_dashboard`).
 
@@ -1716,9 +1716,9 @@ class W40KMetricsTracker:
             return  # Not enough data yet
         
         # ==========================================
-        # PPO HEALTH (5 metrics)
+        # PPO HEALTH (6 metrics)
         # ==========================================
-        # Ces cinq courbes et les lignes de seuil qu'elles portent ne bougent qu'a l'update PPO,
+        # Ces six courbes et les lignes de seuil qu'elles portent ne bougent qu'a l'update PPO,
         # alors que ce dashboard tourne a CHAQUE fin d'episode — 74 par update sur x1_long.
         # Republiees sans garde, elles posaient 74 copies de la meme valeur : le curseur de
         # lissage de TensorBoard comptant des POINTS, il aurait fallu le regler sur ~1500 pour

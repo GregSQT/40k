@@ -404,6 +404,9 @@
             "ent_coef": 0.01,
             "n_steps": 8160,
             "vf_coef": 0.17
+        },
+        "early_stop": {
+            "promote_min_episodes": 30000
         }
     },
     "x1_debug": {

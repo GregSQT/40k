@@ -4404,9 +4404,7 @@ def set_oath_target(game_state: Dict[str, Any], player: int, unit_id: str) -> No
     player_int = int(player)
     target_id = str(unit_id)
     from engine.game_utils import get_unit_by_id
-    from engine.phase_handlers.shared_utils import (
-        entry_is_on_battlefield, is_unit_alive, require_unit_from_cache,
-    )
+    from engine.phase_handlers.shared_utils import entry_is_on_battlefield, is_unit_alive
 
     # `get_unit_by_id` et pas une boucle : l'index `unit_by_id` est la convention du dépôt pour
     # « id -> unité » (O(1), même normalisation `str`). Le jour où sa clé change, ce site suit.
@@ -4420,8 +4418,7 @@ def set_oath_target(game_state: Dict[str, Any], player: int, unit_id: str) -> No
         )
     if not is_unit_alive(target_id, game_state):
         raise ValueError(f"set_oath_target: l'unite {target_id!r} est detruite")
-    target_entry = require_unit_from_cache(target_id, game_state, "set_oath_target")
-    if not entry_is_on_battlefield(target_entry):
+    if not entry_is_on_battlefield(game_state["units_cache"][target_id]):
         raise ValueError(
             f"set_oath_target: l'unite {target_id!r} n'est pas sur le champ de bataille "
             f"(reserves strategiques) — le masque n'ouvre pas son slot."
