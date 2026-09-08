@@ -419,6 +419,80 @@ def test_verrou_l_oath_n_est_pas_arme_pour_un_joueur_sans_escouade():
     )
 
 
+def test_verrou_l_oath_n_est_pas_armee_quand_tout_l_ennemi_est_en_reserve():
+    """« Vivante » ne suffit pas : la désignation exige une cible SUR LA TABLE.
+
+    Une escouade en réserves stratégiques (20.01) reste vivante dans `units_cache` mais porte la
+    sentinelle (-1,-1) ; `_refresh_enemy_slot_mapping` lui refuse tout slot. L'armement passait
+    quand même, et le masque suivant LEVAIT « aucun slot ouvert » — plantant le worker de
+    rollout en pleine collecte (P1 du 2026-09-08).
+
+    Le cas est atteignable sans rien forcer : l'adversaire garde ≤50 % de sa liste en réserve
+    (20.01), on détruit ce qu'il a déployé, et sa command phase suivante trouve une armée
+    entièrement hors table.
+    """
+    gs = _command_state(1, p1_faction=ASTARTES, p2_faction=ORKS)
+    gs["units_cache"]["2"] = _uc(-1, -1, player=2)
+
+    assert command_handlers.oath_selectable_enemy_ids(gs, 1) == [], (
+        "une escouade hors table n'a pas de slot : elle n'est pas designable"
+    )
+    command_handlers.command_step_command_abilities(gs)
+
+    assert gs["pending_oath_selection"] is None
+    decoder = ActionDecoder({"board": {"default": {"hex_radius": 1.0, "margin": 0.0}}})
+    # Le contrôle porte sur le masque : c'est LUI qui levait.
+    mask, _eligible = decoder.get_squad_action_mask_and_eligible_units(gs)
+    assert not any(mask[i] for i in range(OATH_SLOT_BASE, OATH_SLOT_BASE + 8))
+
+
+def test_une_escouade_en_reserve_est_ecartee_mais_pas_celles_qui_tiennent_la_table():
+    """Contre-épreuve du verrou ci-dessus : le filtre écarte la réserve, PAS l'armée entière.
+
+    Sans cette moitié, fermer `oath_selectable_enemy_ids` à tout l'ennemi passerait le test
+    précédent tout en supprimant l'Oath de la partie.
+    """
+    gs = _command_state(1, p1_faction=ASTARTES, p2_faction=ORKS)
+    gs["units"].append(_unit("3", 2, ORKS))
+    gs["unit_by_id"]["3"] = gs["units"][-1]
+    gs["units_cache"]["2"] = _uc(-1, -1, player=2)   # en reserve
+    gs["units_cache"]["3"] = _uc(6, 0, player=2)     # sur la table
+
+    assert command_handlers.oath_selectable_enemy_ids(gs, 1) == ["3"]
+    command_handlers.command_step_command_abilities(gs)
+    assert gs["pending_oath_selection"] == 1
+
+    decoder = ActionDecoder({"board": {"default": {"hex_radius": 1.0, "margin": 0.0}}})
+    assert sorted(decoder.oath_selection_slots(gs).values()) == ["3"]
+
+
+@pytest.mark.parametrize("faction, cle", [(ASTARTES, "oath"), (ORKS, "waaagh")])
+def test_verrou_aucune_capacite_de_08_04_n_est_armee_depuis_les_reserves(faction, cle):
+    """JUMEAU côté DÉCLARANT : les deux capacités lisent le même prédicat.
+
+    `player_has_squads_on_board` dit « sur la table », pas « dans le cache » : l'observation d'une
+    décision de 08.04 s'ancre sur une escouade du décideur, et une ancre en réserve décrit une
+    position qui n'existe pas. Silencieux, contrairement au crash de l'Oath — d'où ce verrou.
+
+    Paramétré parce que les deux capacités partagent la garde : traiter l'une sans l'autre est
+    le motif d'échec n°1 du dépôt.
+    """
+    gs = _command_state(1, p1_faction=faction, p2_faction=ORKS if cle == "oath" else ASTARTES)
+    gs["units_cache"]["1"] = _uc(-1, -1, player=1)
+
+    assert not command_handlers.player_has_squads_on_board(gs, 1)
+    command_handlers.command_step_command_abilities(gs)
+
+    assert gs["pending_oath_selection"] is None
+    assert read_pending_agent_decision(gs) is None
+    # Le joueur revient par un ingress move (20.04) : la capacite se represente telle quelle.
+    gs["units_cache"]["1"] = _uc(3, 0, player=1)
+    gs["turn"] = 2
+    command_handlers.command_step_command_abilities(gs)
+    arme = gs["pending_oath_selection"] is not None or read_pending_agent_decision(gs) is not None
+    assert arme, "de retour sur la table, le joueur doit retrouver sa capacite de faction"
+
+
 def test_verrou_une_fois_par_partie_l_action_sort_du_masque():
     """VERROU 1×/PARTIE : après l'appel, plus aucune action CHOICE n'est ouverte.
 
@@ -543,6 +617,20 @@ def test_designer_une_unite_a_soi_ou_morte_est_refuse():
         set_oath_target(gs, 1, "1")
     with pytest.raises(KeyError, match="introuvable"):
         set_oath_target(gs, 1, "999")
+
+
+def test_designer_une_unite_en_reserve_est_refuse_par_l_ecrivain_unique():
+    """L'écrivain unique dit la MÊME chose que le masque, sinon la garde ne garde rien.
+
+    Le gym ne peut plus produire cette désignation (le masque n'ouvre pas le slot), mais le PvP
+    et les fixtures écrivent par cette porte-là : sans la clause, ils poseraient une cible d'Oath
+    que la partie ne peut ni viser ni relancer.
+    """
+    gs = _command_state(1, p1_faction=ASTARTES, p2_faction=ORKS)
+    gs["units_cache"]["2"] = _uc(-1, -1, player=2)
+
+    with pytest.raises(ValueError, match="champ de bataille"):
+        set_oath_target(gs, 1, "2")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1145,6 +1233,33 @@ def _engine(gs):
     gs["gym_training_mode"] = False
     gs["player_types"] = {"1": "ai", "2": "ai"}
     return engine
+
+
+def test_verrou_l_ancre_d_observation_d_une_decision_d_armee_est_sur_la_table():
+    """L'ancre égocentrique d'une décision d'ARMÉE ne peut pas être une escouade en réserve.
+
+    `waaagh_call` ne porte sur aucune unité : l'observation prend la PREMIÈRE escouade du
+    décideur comme repère. « Première » se lisait dans `units_cache`, où une escouade en réserve
+    figure comme les autres — l'ancre tombait alors sur la sentinelle (-1,-1) et l'observation
+    décrivait une position qui n'existe pas, sans que rien ne lève.
+
+    La fixture met délibérément la réserve EN TÊTE du cache : c'est le seul ordre où un
+    sélecteur non filtré se trompe, donc le seul qui verrouille quelque chose.
+    """
+    gs = _command_state(1, p1_faction=ORKS, p2_faction=ASTARTES)
+    gs["units_cache"] = {
+        "1": _uc(-1, -1, player=1),   # en reserve, EN TETE
+        "3": _uc(4, 0, player=1),     # sur la table
+        "2": _uc(2, 0, player=2),
+    }
+    engine = _engine(gs)
+
+    command_handlers.command_step_command_abilities(gs)
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None and decision["type"] == "waaagh_call"
+
+    ancre = engine._observer_squad_for_pending_decision(decision)
+    assert ancre == "3", "l'ancre doit etre l'escouade sur la table, pas celle en reserve"
 
 
 def test_un_siege_ia_hors_gym_tranche_les_deux_decisions():

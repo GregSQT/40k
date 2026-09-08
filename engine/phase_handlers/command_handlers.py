@@ -358,7 +358,7 @@ def _command_abilities_after_returns(game_state: Dict[str, Any], current_player:
 
 
 def player_has_squads_on_board(game_state: Dict[str, Any], player: int) -> bool:
-    """True si `player` a encore au moins une escouade dans `units_cache`.
+    """True si `player` a encore au moins une escouade vivante SUR LA TABLE.
 
     Lit le cache, et PAS `game_state["units"]` filtré par PV : c'est exactement la ressource dont
     l'observation a besoin pour décrire une décision de 08.04 quand le pool d'activation est vide.
@@ -369,10 +369,18 @@ def player_has_squads_on_board(game_state: Dict[str, Any], player: int) -> bool:
     échoue de l'autre façon : l'observation tombe à ZÉRO faute d'escouade à décrire, et l'agent
     doit quand même désigner une cible. Le prédicat et le besoin de l'observateur sont donc la
     même chose, pour les deux capacités.
+
+    D'où `entry_is_on_battlefield`, et pas la seule présence au cache : une escouade en réserves
+    stratégiques y reste vivante mais porte la sentinelle (-1,-1). L'observation égocentrique
+    ancrée sur elle décrit une position qui n'existe pas — c'est le MÊME défaut que le pool vide,
+    simplement silencieux au lieu d'être bruyant. Mesuré : le prédicat rendait `True` pour un
+    joueur entièrement en réserve, armant Waaagh! ET Oath sur une ancre hors table.
     """
+    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
+
     player_int = int(player)
     return any(
-        int(require_key(entry, "player")) == player_int
+        int(require_key(entry, "player")) == player_int and entry_is_on_battlefield(entry)
         for entry in require_key(game_state, "units_cache").values()
     )
 
@@ -405,20 +413,32 @@ def arm_oath_selection(game_state: Dict[str, Any], player: int) -> None:
 
 
 def oath_selectable_enemy_ids(game_state: Dict[str, Any], player: int) -> List[str]:
-    """Unités ennemies VIVANTES désignables par l'Oath of Moment de `player`.
+    """Unités ennemies vivantes ET SUR LA TABLE désignables par l'Oath of Moment de `player`.
 
     SOURCE UNIQUE de la désignation : le masque d'action l'utilise pour ouvrir les `OATH_SLOTS`,
     le décodeur pour traduire le slot joué, la politique bot pour choisir. Trois lecteurs, une
     définition — sans quoi le masque pourrait ouvrir un slot que le décodeur refuserait.
+
+    Le prédicat est celui par lequel `_refresh_enemy_slot_mapping` attribue un slot (même cache,
+    même filtre de camp et de table) et c'est ce qui le rend correct : la désignation n'est
+    exprimable que par un `OATH_SLOT`, et ce
+    mapping n'accorde de slot qu'aux escouades SUR LA TABLE. « Vivante » seule ne suffisait donc
+    pas — une escouade en réserves stratégiques (20.01) reste vivante dans `units_cache` mais
+    n'a ni position ni slot. Mesuré : l'armement passait, le masque n'ouvrait plus rien, et
+    `get_squad_action_mask_and_eligible_units` levait « aucun slot ouvert » en plein rollout.
+
+    L'écart avec « select one unit from your opponent's army » est assumé : une escouade hors
+    table ne peut être ni ciblée ni chargée (`entry_is_on_battlefield`), donc aucun effet d'Oath
+    ne pourrait la viser tant qu'elle n'a pas fait son ingress move.
     """
-    from engine.phase_handlers.shared_utils import is_unit_alive
+    from engine.phase_handlers.shared_utils import entry_is_on_battlefield
 
     player_int = int(player)
     return [
-        str(require_key(unit, "id"))
-        for unit in require_key(game_state, "units")
-        if int(require_key(unit, "player")) != player_int
-        and is_unit_alive(str(require_key(unit, "id")), game_state)
+        str(squad_id)
+        for squad_id, entry in require_key(game_state, "units_cache").items()
+        if int(require_key(entry, "player")) != player_int
+        and entry_is_on_battlefield(entry)
     ]
 
 

@@ -4630,7 +4630,7 @@ class W40KEngine(gym.Env):
         return False
 
     def _select_ai_oath_target(self, player: int) -> str:
-        """Politique du siège IA hors gym pour la cible d'Oath : l'ennemi vivant le plus coûteux.
+        """Politique du siège IA hors gym pour la cible d'Oath : l'ennemi le plus coûteux.
 
         « select ONE unit » est obligatoire : cette fonction ne peut pas rendre « aucune », et
         elle lève si le pool est vide — un état que `command_step_command_abilities` ne produit
@@ -4639,8 +4639,8 @@ class W40KEngine(gym.Env):
         candidates = command_handlers.oath_selectable_enemy_ids(self.game_state, int(player))
         if not candidates:
             raise RuntimeError(
-                f"_select_ai_oath_target: aucune unite ennemie vivante pour le joueur {player} — "
-                f"la designation n'aurait pas du etre posee."
+                f"_select_ai_oath_target: aucune unite ennemie sur la table pour le joueur "
+                f"{player} — la designation n'aurait pas du etre posee."
             )
         # `_get_unit_by_id` (index `unit_by_id`) plutôt qu'un second index reconstruit ici : la
         # classe l'utilise déjà partout ailleurs, et l'index existe depuis le reset.
@@ -9197,11 +9197,20 @@ class W40KEngine(gym.Env):
 
         Cas d'ARMÉE (`waaagh_call`) : la décision ne porte sur AUCUNE unité, son `unit_id`
         identifie le point de choix (`player_<n>`). Ce que le candidat accorde est global — les
-        drapeaux Waaagh! de `global_bin` — donc n'importe laquelle de MES escouades vivantes est
-        un repère égocentrique valable ; la première du joueur décideur, pour que le choix soit
-        reproductible. Le contrôle strict reste entier pour les autres types : une décision dont
-        l'unité a disparu décrit un état incohérent, et doit lever.
+        drapeaux Waaagh! de `global_bin` — donc n'importe laquelle de mes escouades SUR LA TABLE
+        est un repère égocentrique valable ; la première du joueur décideur, pour que le choix
+        soit reproductible. Le contrôle strict reste entier pour les autres types : une décision
+        dont l'unité a disparu décrit un état incohérent, et doit lever.
+
+        « Sur la table » et pas « vivante » : une escouade en réserves stratégiques est vivante
+        dans `units_cache` mais porte la sentinelle (-1,-1). L'ancre égocentrique tombait alors
+        sur une position qui n'existe pas — mesuré, et SILENCIEUSEMENT : rien ne levait. Le
+        prédicat est ici le jumeau exact de `player_has_squads_on_board`, la garde qui autorise
+        08.04 à poser la décision ; les désolidariser rendrait la garde fausse, puisqu'elle
+        promettrait une escouade que ce sélecteur-ci n'irait pas chercher.
         """
+        from engine.spatial_relations import entry_is_on_battlefield
+
         decision_unit_id = str(require_key(decision, "unit_id"))
         units_cache = require_key(self.game_state, "units_cache")
         if decision_unit_id in units_cache:
@@ -9216,13 +9225,15 @@ class W40KEngine(gym.Env):
             (
                 str(sid) for sid, entry in units_cache.items()
                 if int(require_key(entry, "player")) == decision_player
+                and entry_is_on_battlefield(entry)
             ),
             None,
         )
         if observer_id is None:
             raise KeyError(
                 f"_build_observation: decision 'waaagh_call' du joueur {decision_player} "
-                "alors qu'il n'a plus aucune escouade — 08.04 n'aurait pas du la poser."
+                "alors qu'il n'a plus aucune escouade sur la table — 08.04 n'aurait pas du "
+                "la poser."
             )
         return observer_id
 
