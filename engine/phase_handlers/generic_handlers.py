@@ -146,6 +146,27 @@ def end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],
         if "units_shot" not in game_state:
             game_state["units_shot"] = set()
         game_state["units_shot"].add(str(unit_id))
+        # Rule 13.09, second membre : « that model's unit did not make one or more ranged attacks
+        # during this turn ». La clause vient de tomber pour CETTE escouade, qui cesse d'être
+        # cachée à cet instant — pas au début de la phase de tir suivante. Sans ce rafraîchissement,
+        # une escouade qui tire depuis une zone obscurante restait marquée cachée jusqu'à la fin de
+        # la phase, donc protégée par la porte de detection range alors qu'elle vient de se révéler.
+        # `destroy_model` couvre le membre géométrique ; celui-ci n'a pas d'autre déclencheur, la
+        # ligne ci-dessus étant le SEUL site d'alimentation de `units_shot`.
+        #
+        # PAR la fonction de règle et non par un `unit["hidden"] = False` écrit ici : l'issue est
+        # certes déterministe (l'escouade vient d'entrer dans `units_shot`, donc le recalcul prend
+        # forcément son retour anticipé), mais la coder sur place ouvrirait un second endroit où
+        # vit 13.09 — une exception à la clause y deviendrait un bug silencieux.
+        #
+        # Garde : `compute_hidden_status_for_unit` exige `units_cache`, que les game_states
+        # « moteur nu » des fixtures de cette fonction ne portent pas. Son absence ne décrit pas un
+        # état dégradé rattrapé en silence, mais un état sans escouade à rafraîchir — même lecture
+        # que le `entry is None` de la fonction appelée.
+        # Import local : `shooting_handlers` importe ce module, un import en tête serait circulaire.
+        if (game_state.get("units_cache") or {}).get(str(unit_id)) is not None:  # get allowed
+            from engine.phase_handlers.shooting_handlers import compute_hidden_status_for_unit
+            compute_hidden_status_for_unit(game_state, str(unit_id))
     elif arg3 == "CHARGE":
         if "units_charged" not in game_state:
             game_state["units_charged"] = set()

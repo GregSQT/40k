@@ -2,7 +2,7 @@
 
 ---
 
-## ✅ 13.09 — le statut « caché » suit les pertes {#hidden-fraicheur}
+## ✅ 13.09 — le statut « caché » suit les pertes et les tirs {#hidden-fraicheur}
 
 **Livré le 2026-09-08 (option C).** Change les parties jouées : `--new` obligatoire pour tout modèle
 entraîné avant ce correctif.
@@ -20,10 +20,25 @@ chemin du tir. `compute_hidden_status_for_unit` porte le calcul d'une escouade e
 aucun chemin parallèle. Le placement est contraint des deux côtés — après le recalcul de l'empreinte,
 avant l'invalidation LoS qui purge le cache du pool.
 
+**DEUX déclencheurs, un par membre de la règle** — correction de périmètre du 2026-09-08 : la
+rédaction initiale n'en voyait qu'un, et s'y tenir fermait la règle à moitié.
+
+1. **Membre géométrique** (les figurines vivantes) → `destroy_model`, décrit ci-dessus.
+2. **Membre « did not make one or more ranged attacks during this turn »** →
+   `end_activation(arg3="SHOOTING")` (`generic_handlers.py`), seul site d'alimentation de
+   `units_shot` et donc seul déclencheur possible de ce membre. Sans lui, une escouade qui tirait
+   depuis une zone obscurante restait marquée cachée jusqu'à la fin de la phase, donc protégée par
+   la porte de detection range alors qu'elle venait de se révéler. Le rafraîchissement passe par la
+   fonction de règle plutôt que par un `hidden = False` écrit sur place : l'issue y est
+   déterministe, mais la coder en dur ouvrirait un second endroit où vit 13.09.
+
 **Contrat D1 étendu dans le temps** : `test_d1_survives_a_loss_mid_phase`
 (`test_squad_obs_hidden_enemies.py`) vérifie que l'observation et le pool basculent ensemble après
-une perte, sans rejouer le balayage de début de phase. Le balayage complet reste en place au début
-de la phase de tir et à chaque sérialisation PvP.
+une perte, sans rejouer le balayage de début de phase. Le membre « a tiré » a son propre couple
+rouge/vert dans `test_hidden_1309_previous_turn.py` — `test_shooting_breaks_hidden_at_once` et sa
+contre-épreuve `test_charging_does_not_break_hidden`, qui interdit un rafraîchissement posé sur
+toute fin d'activation. Le balayage complet reste en place au début de la phase de tir et à chaque
+sérialisation PvP.
 
 **Limite connue, hors périmètre** : aucun MOUVEMENT ne rafraîchit le drapeau — il reste périmé
 pendant le move et après un pile-in adverse. C'est la raison pour laquelle l'observation continue de

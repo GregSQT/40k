@@ -23,6 +23,7 @@ from typing import Any, Dict, List
 
 import pytest
 
+from engine.phase_handlers.generic_handlers import end_activation
 from engine.phase_handlers.shared_utils import build_units_cache
 from engine.phase_handlers.shooting_handlers import (
     compute_hidden_statuses,
@@ -120,6 +121,44 @@ def test_shot_previous_turn_breaks_hidden(gs: Dict[str, Any]) -> None:
     assert gs["units_shot"] == set(), "le tir de CE tour ne doit pas être en cause ici"
     assert gs["unit_by_id"]["1"]["hidden"] is False
     assert gs["unit_by_id"]["1"]["hidden_models"] == []
+
+
+def test_shooting_breaks_hidden_at_once(gs: Dict[str, Any]) -> None:
+    """hidden_1309_now : tirer decache l'escouade A L'INSTANT du tir, pas a la phase suivante.
+
+    Jumeau temporel du rafraichissement pose sur ``destroy_model`` : celui-la couvre le membre
+    GEOMETRIQUE de 13.09 (les figurines vivantes), celui-ci le membre « did not make one or more
+    ranged attacks during this turn ». Sans lui, une escouade qui tire depuis une zone obscurante
+    restait marquee cachee jusqu'a la fin de la phase, donc protegee par la porte de detection
+    range alors qu'elle venait de se reveler — ``unit['hidden']`` est lu par le pool de cibles et
+    par la resolution par figurine.
+
+    Le chemin exerce est ``end_activation(arg3="SHOOTING")``, seul site d'alimentation de
+    ``units_shot``, et non un appel direct au recalcul : c'est la difference entre « la regle est
+    implementee » et « la regle est appliquee la ou le jeu se joue ».
+    """
+    compute_hidden_statuses(gs)
+    assert gs["unit_by_id"]["1"]["hidden"] is True, "anti-vacuite : cachee avant de tirer"
+
+    end_activation(gs, gs["unit_by_id"]["1"], "NO", 0, "SHOOTING", "NOT_REMOVED", 0)
+
+    assert "1" in gs["units_shot"], "fixture : l'activation doit avoir marque le tir"
+    assert gs["unit_by_id"]["1"]["hidden"] is False
+    assert gs["unit_by_id"]["1"]["hidden_models"] == []
+
+
+def test_charging_does_not_break_hidden(gs: Dict[str, Any]) -> None:
+    """Contre-epreuve : 13.09 ne parle que des attaques A DISTANCE.
+
+    Sans elle, un rafraichissement pose sur toute fin d'activation passerait le test precedent
+    tout en decachant une escouade qui n'a fait que charger.
+    """
+    compute_hidden_statuses(gs)
+    assert gs["unit_by_id"]["1"]["hidden"] is True
+
+    end_activation(gs, gs["unit_by_id"]["1"], "NO", 0, "CHARGE", "NOT_REMOVED", 0)
+
+    assert gs["unit_by_id"]["1"]["hidden"] is True, "charger ne revele pas la position (13.09)"
 
 
 def test_shot_previous_turn_breaks_hidden_preview(gs: Dict[str, Any]) -> None:
