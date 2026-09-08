@@ -16,6 +16,7 @@ from engine.game_utils import get_unit_by_id, require_unit_by_id
 from engine.hex_utils import _hex_center
 from engine.phase_handlers.shared_utils import (
     entries_on_battlefield,
+    enemy_entries_on_battlefield,
     unit_has_rule_effect,
     # PR4 4a: nouveau pipeline d observation squad
     get_fighting_models,
@@ -1073,15 +1074,30 @@ class ObservationBuilder:
         # que celui peint en `cover_cells` par la preview de tir du moteur : une figurine
         # hideable qui s y tient est « within a terrain area ». Statique comme les murs et les
         # objectifs.
+        #
+        # Cases des zones OBSCURANTES (13.10) : sous-ensemble strict du precedent, `obscuring`
+        # etant un drapeau PAR ZONE pose au chargement du terrain (`game_state.py`). Le couvert
+        # 13.08 s'applique « within a terrain area », toutes zones confondues ; le hidden 13.09
+        # et l'occultation 13.10 ne regardent QUE les zones obscurantes. Les deux ensembles sont
+        # donc construits ici cote a cote, sur la meme boucle et le meme cache.
         cover_hexes: List[Tuple[int, int]] = []
+        obscuring_hexes: List[Tuple[int, int]] = []
         for area in game_state.get("terrain_areas", []):  # get allowed (scenario sans terrain)
+            # `get` MEME accessor que les deux sites de REGLE qui tranchent 13.09/13.10
+            # (`terrain_utils.hexes_in_obscuring_terrain` et `compute_models_within_terrain`) :
+            # exiger la cle ici rendrait l'observation plus stricte que la regle elle-meme, donc
+            # ferait lever sur un terrain que le moteur accepte et joue.
+            sinks = (cover_hexes, obscuring_hexes) if area.get("obscuring") else (cover_hexes,)
             for hex_entry in require_key(area, "hexes"):
-                cover_hexes.append((int(hex_entry[0]), int(hex_entry[1])))
+                cell = (int(hex_entry[0]), int(hex_entry[1]))
+                for sink in sinks:
+                    sink.append(cell)
 
         static = {
             "walls": _to_arrays(game_state.get("wall_hexes", set())),  # get allowed (board sans mur)
             "objectives": _to_arrays(objective_hexes),
             "cover": _to_arrays(cover_hexes),
+            "obscuring": _to_arrays(obscuring_hexes),
         }
         game_state["_grid_static_hex_arrays"] = static
         return static
@@ -2232,7 +2248,8 @@ class ObservationBuilder:
 
         Canaux (spec §10.1 + V11 §9.10 + V11 §0.32) : murs, occupation alliee, occupation
         ennemie, EZ ennemie, objectifs, niveau (etages), couvert, SELF (l'escouade active seule,
-        §0.32 T-L) et COUT GEODESIQUE normalise des cellules du pool de move (§0.32 T-K).
+        §0.32 T-L), COUT GEODESIQUE normalise des cellules du pool de move (§0.32 T-K), ZONES
+        OBSCURANTES (13.09/13.10) et EXPOSITION a la vue ennemie des cellules du pool.
 
         Geometrie deleguee a `engine/spatial_grid` — source UNIQUE partagee avec le masque (T2)
         et le decoder (T3). Layout (C,H,W) = convention CNN de sb3 (`NatureCNN`).
@@ -2249,8 +2266,10 @@ class ObservationBuilder:
             GRID_CH_ENEMY,
             GRID_CH_EZ,
             GRID_CH_LEVEL,
+            GRID_CH_LOS_EXPOSURE,
             GRID_CH_MOVE_COST,
             GRID_CH_OBJECTIVE,
+            GRID_CH_OBSCURING,
             GRID_CH_SELF,
             GRID_CH_WALL,
             GRID_SIZE,
@@ -2343,11 +2362,23 @@ class ObservationBuilder:
         # voyait ces cases a 0 alors qu elles couvrent (ecart ~2 cellules pour un socle
         # d infanterie de 16 subhex sur le board x5). Dilatation en espace grille : exacte au
         # grain de la grille et de cout negligeable.
+        dilation_cells = cover_dilation_cells(require_key(active_entry, "BASE_SIZE"), half_extent)
         _paint_arrays(GRID_CH_COVER, *static["cover"])
-        grid[GRID_CH_COVER] = dilate_channel(
-            grid[GRID_CH_COVER],
-            cover_dilation_cells(require_key(active_entry, "BASE_SIZE"), half_extent),
-        )
+        grid[GRID_CH_COVER] = dilate_channel(grid[GRID_CH_COVER], dilation_cells)
+
+        # --- Canal 9 : zones obscurantes ---------------------------------------
+        # Sous-ensemble des cases du couvert, dilate du MEME rayon et pour la MEME raison : le
+        # moteur tranche 13.09 par chevauchement de socle (`compute_models_in_obscuring_terrain`
+        # delegue a `compute_models_within_terrain`, le test disque<->polygone du couvert). Peindre
+        # les hexes bruts a cote d'un couvert dilate ferait diverger deux canaux voisins sur leurs
+        # bords pour une raison qui tient a notre rasterisation, pas au jeu.
+        #
+        # CE QUE CE CANAL AJOUTE AU COUVERT : etre `hidden` (13.09) ne degrade pas un jet, il rend
+        # INTIRABLE au-dela de la portee de detection — l'ennemi cache est ecarte du pool de cibles
+        # (`shooting_handlers`). Sans ce canal la grille ne distinguait pas une zone ou l'on peut
+        # disparaitre d'une zone qui se contente de donner le couvert.
+        _paint_arrays(GRID_CH_OBSCURING, *static["obscuring"])
+        grid[GRID_CH_OBSCURING] = dilate_channel(grid[GRID_CH_OBSCURING], dilation_cells)
 
         # --- Canal 5 : niveau (etages) ----------------------------------------
         # Vaut 0 partout tant qu'aucun etage n'est declare : le sol EST le niveau 0, ce n'est
@@ -2435,6 +2466,56 @@ class ObservationBuilder:
                         engaged=_squad_is_in_enemy_er(game_state, active_squad_id),
                     )
                 )
+
+                # --- Canal 10 : exposition a la vue ennemie ------------------
+                # DANS LE MEME BLOC que le cout, et sur la MEME carte de cellules : la valeur
+                # peinte en (gx,gy) est l'exposition de l'hexe ou le DECODEUR enverra l'ancre si
+                # l'agent joue cette cellule. Prendre a la place un hexe echantillon (le plus
+                # proche du centre de la cellule) ouvrirait une seconde reponse cellule->hexe a
+                # cote de celle du decodeur, et les deux divergent : 26,7 % des cellules jouables
+                # mesurees. Le module `spatial_grid` existe precisement pour qu'il n'y ait qu'une
+                # reponse.
+                #
+                # PAS DE CACHE, et c'est un resultat de MESURE, pas un oubli.
+                #
+                # 1. Le cout ne le justifie pas. Protocole graine fixe, meme suite d'actions des
+                #    deux cotes, 450 steps de mouvement sur `scenario_training_armageddon1` :
+                #    step de move 73,31 ms AVANT, 80,33 ms APRES, soit +9,6 % — sous le seuil de
+                #    10 % au-dela duquel une memoisation aurait ete exigee. Toutes phases
+                #    confondues, 67,39 -> 71,52 ms (+6,1 %).
+                # 2. Et il ne rembourserait rien. Une carte de visibilite plateau entier memoisee
+                #    par hexe source a ete instrumentee : 238 constructions pour 914 steps peints,
+                #    soit 26 % de rates — l'ancre d'une escouade ennemie bouge a chaque
+                #    deplacement ET a chaque perte de figurine. A 76 ms la construction, l'amorti
+                #    retombe a 19,8 ms/step, soit le cout de la version sans cache : elle calcule
+                #    66 000 hexes pour n'en servir que ~150.
+                #
+                # `tests/unit/engine/test_squad_grid_los_exposure.py` verrouille le fait que
+                # deplacer un ennemi change le canal — c'est le garde-fou de ce rejet.
+                from engine.phase_handlers.shooting_handlers import batch_ground_hex_can_see
+
+                # `enemy_entries_on_battlefield` : filtre STRUCTUREL des escouades vivantes ET
+                # posees. Un `raise` explicite sur « ancre invalide » serait du code mort — une
+                # entree hors table (sentinelle (-1,-1), reserves 20.01, deploiement en attente)
+                # ne sort jamais de cet iterateur.
+                enemy_entries = [
+                    entry
+                    for _sid, entry in enemy_entries_on_battlefield(units_cache, active_player)
+                ]
+                if enemy_entries:
+                    dests = np.fromiter(
+                        (c for dest, _cost in cell_map.values() for c in dest),
+                        dtype=np.int64,
+                        count=2 * len(cell_map),
+                    ).reshape(-1, 2)
+                    seen = np.zeros(len(dests), dtype=np.float32)
+                    for entry in enemy_entries:
+                        seen += batch_ground_hex_can_see(
+                            game_state, (int(entry["col"]), int(entry["row"])), dests
+                        )
+                    grid[GRID_CH_LOS_EXPOSURE, cell_idxs // GRID_SIZE, cell_idxs % GRID_SIZE] = (
+                        seen / len(enemy_entries)
+                    )
 
         return grid
 

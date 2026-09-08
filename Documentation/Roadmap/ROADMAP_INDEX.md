@@ -132,7 +132,11 @@ Détail : [training.md#regime-lignee-2026-09-07](training.md#regime-lignee-2026-
 
 ## J4 — Capacités
 
-Tâches J4 archivées → `archives/doc.md#hygiene-correctifs-ponctuels`
+| Sujets | Chantier | Fichier | ⚡/🚫 |
+|---|---|---|---|
+| training | 🟡 **Obs — canaux « zone obscurante » et « exposition »** (`GRID_CHANNELS` 9→11) — livré en worktree le 2026-09-08, **non mergé** : merge après le run en cours, `--new` obligatoire, à batcher avec « OC live + secured » | [training.md#canaux-obscurant-exposition](training.md#canaux-obscurant-exposition) | 🚫 |
+
+Autres tâches J4 archivées → `archives/doc.md#hygiene-correctifs-ponctuels`
 
 ---
 
