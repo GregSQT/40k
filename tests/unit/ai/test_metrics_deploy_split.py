@@ -96,10 +96,10 @@ def test_reward_and_win_are_routed_to_the_series_of_their_own_mode() -> None:
     _episode(tracker, mode="auto", reward=90.0, won=False)
     _episode(tracker, mode="active", reward=10.0, won=True)
 
-    assert _values(recording, "00_critical/p_reward_deploy_active") == [10.0, 10.0]
-    assert _values(recording, "00_critical/p_reward_deploy_auto") == [90.0]
-    assert _values(recording, "00_critical/r_win_rate_deploy_active") == [1.0, 1.0]
-    assert _values(recording, "00_critical/r_win_rate_deploy_auto") == [0.0]
+    assert _values(recording, "00_critical/q_reward_deploy_active") == [10.0, 10.0]
+    assert _values(recording, "00_critical/q_reward_deploy_auto") == [90.0]
+    assert _values(recording, "00_critical/s_win_rate_deploy_active") == [1.0, 1.0]
+    assert _values(recording, "00_critical/s_win_rate_deploy_auto") == [0.0]
 
 
 def test_an_episode_without_mode_feeds_no_series_at_all() -> None:
@@ -131,7 +131,7 @@ def test_active_share_tracks_the_real_proportion_of_active_episodes() -> None:
     for mode in ("active", "auto", "active", "active"):
         _episode(tracker, mode=mode, reward=1.0, won=True)
 
-    assert _values(recording, "00_critical/s_deploy_active_share") == [0.75]
+    assert _values(recording, "00_critical/t_deploy_active_share") == [0.75]
 
 
 def test_objectives_held_diff_is_ventilated_through_emit_game() -> None:
@@ -147,8 +147,8 @@ def test_objectives_held_diff_is_ventilated_through_emit_game() -> None:
     _episode(tracker, mode="auto", reward=1.0, won=True)
     tracker._emit_game("01_VP/d_objectives_held_diff", "objectives_held_diff", -3.0)
 
-    assert _values(recording, "00_critical/q_obj_held_diff_deploy_active") == [2.0]
-    assert _values(recording, "00_critical/q_obj_held_diff_deploy_auto") == [-3.0]
+    assert _values(recording, "00_critical/r_obj_held_diff_deploy_active") == [2.0]
+    assert _values(recording, "00_critical/r_obj_held_diff_deploy_auto") == [-3.0]
     # La courbe agregee reste emise a l'identique : la ventilation s'ajoute, ne remplace pas.
     assert _values(recording, "01_VP/d_objectives_held_diff") == [2.0, -3.0]
 

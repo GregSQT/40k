@@ -4,7 +4,7 @@ CE QUE CE FICHIER EMPÊCHE. La rampe `deployment_mode_schedule` tire une part d'
 `auto`, où le MOTEUR choisit les poses. Jusqu'au 2026-09-06 cette substitution était bornée au
 joueur contrôlé : l'agent était posé au hasard pendant que son adversaire — bot à doctrine, ou
 champion du pool jouant son réseau — se déployait avec sa propre politique. Le mode `auto` était
-donc un HANDICAP unilatéral, et la courbe de contrôle `r_win_rate_deploy_auto` ne mesurait pas ce
+donc un HANDICAP unilatéral, et la courbe de contrôle `s_win_rate_deploy_auto` ne mesurait pas ce
 qu'elle prétend : « ce que vaut l'agent depuis des positions qu'il n'a pas choisies ».
 
 MESURE du défaut (run x1_long du 2026-09-06, ~64 000 épisodes) : 0.304 de win-rate en `auto`
@@ -131,7 +131,7 @@ def test_auto_mode_never_asks_the_opponent_for_a_pose():
     assert spy.placement_calls == [], (
         f"l'adversaire a été interrogé {len(spy.placement_calls)} fois pour une pose alors que "
         "l'épisode est en mode 'auto' : le moteur doit poser pour LES DEUX camps, sinon l'agent "
-        "est seul handicapé et r_win_rate_deploy_auto mesure ce handicap, pas son adaptabilité"
+        "est seul handicapé et s_win_rate_deploy_auto mesure ce handicap, pas son adaptabilité"
     )
 
 

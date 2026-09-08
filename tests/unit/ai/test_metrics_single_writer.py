@@ -96,20 +96,25 @@ def test_no_point_is_emitted_before_the_window_is_full(tmp_path: Any) -> None:
     une degradation de l'agent. Aucune donnee ne la contredisait, puisque toutes les courbes
     du dashboard portaient le meme artefact.
 
-    Le montage discrimine les deux formules : rewards 0, 0, 0, 30, 30 avec une fenetre de 3.
-      - moyenne de la fenetre (attendu)  : 10.0 puis 20.0 — et RIEN sur les deux premiers
-      - moyenne cumulative (le defaut)   : 0.0, 0.0, 0.0, 7.5, 12.0 — cinq points, tous faux
+    Le montage discrimine les deux formules : defaites, defaites, defaite, victoire, victoire
+    avec une fenetre de 3.
+      - moyenne de la fenetre (attendu)  : 0.0, 1/3, 2/3 — et RIEN sur les deux premiers
+      - moyenne cumulative (le defaut)   : 0.0, 0.0, 0.0, 0.25, 0.4 — cinq points, tous faux
+
+    La sonde est `game_critical/win_rate` : c'est la seule courbe de performance que
+    `log_episode_end` fait encore passer par `_emit_windowed` depuis le retrait de
+    `00_critical/{d_win_rate,e_episode_reward_smooth}`.
     """
     tracker, recording = _tracker(tmp_path, window=3)
-    for reward in (0.0, 0.0, 0.0, 30.0, 30.0):
+    for winner in (0, 0, 0, 1, 1):
         tracker.log_episode_end({
-            "total_reward": reward, "episode_length": 100, "winner": 1, "controlled_player": 1,
-            "deployment_mode": None,
+            "total_reward": 10.0, "episode_length": 100, "winner": winner,
+            "controlled_player": 1, "deployment_mode": None,
         })
 
     emitted = [
         (value, step) for key, value, step in recording.scalars
-        if key == "00_critical/e_episode_reward_smooth"
+        if key == "game_critical/win_rate"
     ]
     # `_tracker` demarre a episode_count=1 et log_episode_end incremente AVANT d'ecrire :
     # les cinq episodes portent les steps 2 a 6, dont seuls les trois derniers sont emis.
@@ -117,7 +122,7 @@ def test_no_point_is_emitted_before_the_window_is_full(tmp_path: Any) -> None:
         "un point par episode a partir du troisieme, aucun avant"
     )
     assert [value for value, _step in emitted] == [
-        pytest.approx(0.0), pytest.approx(10.0), pytest.approx(20.0)
+        pytest.approx(0.0), pytest.approx(1 / 3), pytest.approx(2 / 3)
     ]
 
 
@@ -134,8 +139,7 @@ def test_each_perf_curve_is_doubled_by_a_reactive_window(tmp_path: Any) -> None:
 
     keys = {key for key, _value, _step in recording.scalars}
     for tag in (
-        "00_critical/e_episode_reward_smooth",   # historique complet
-        "00_critical/d_win_rate",                # historique complet
+        "game_critical/win_rate",                # historique complet
         "01_VP/c_vp_bot",                        # _emit_game
         "02_combat/e_value_killed_ratio",        # _emit_ratio
         "02_combat/a_value_trade_ratio",         # rapport de deux moyennes

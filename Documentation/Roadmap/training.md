@@ -161,7 +161,7 @@ jusqu'ici. **Ce qui reste à faire : relancer P2 depuis P1.** P1 n'est pas rejou
 
 **1. Le déploiement `auto` pose désormais les deux camps.** Il ne posait que le joueur contrôlé :
 l'agent était placé au hasard pendant que son adversaire — bot à doctrine, ou champion du pool
-jouant son réseau — se déployait avec sa politique apprise. `r_win_rate_deploy_auto` mesurait donc
+jouant son réseau — se déployait avec sa politique apprise. `s_win_rate_deploy_auto` mesurait donc
 un handicap unilatéral et non l'adaptabilité qu'elle prétend mesurer. Mesure du run x1_long du
 2026-09-06 (~64 000 épisodes) : **0.304** de win-rate en `auto` contre **0.684** en `active`, avec
 un différentiel d'objectifs de **-0.76** contre **+0.19** — l'agent tenait trois quarts d'objectif
@@ -169,7 +169,7 @@ de moins que son adversaire. La référence du 2026-08-12 (0.866 / 0.646, les de
 positifs) avait été prise contre des bots à doctrine de pose fixe, bien moins capables d'exploiter
 une pose adverse médiocre.
 
-⚠️ **`r_win_rate_deploy_auto` et `q_obj_held_diff_deploy_auto` changent de définition** : leurs
+⚠️ **`s_win_rate_deploy_auto` et `r_obj_held_diff_deploy_auto` changent de définition** : leurs
 valeurs antérieures au 2026-09-06 ne se comparent pas aux suivantes. Attendu au prochain run : la
 courbe `auto` doit remonter vers 0.5 en P2, puisque l'agent EST le champion à l'épisode 0. Si elle
 reste basse, c'est qu'il reste autre chose à chercher.
@@ -243,8 +243,9 @@ exactes ; sur un run repris elles sont répétées, et les copies d'un même upd
 la **même** abscisse plutôt que de former un escalier — la courbe reste donc lisible, à condition
 de la lire comme une suite de paliers et non comme un signal bruité.
 
-Les courbes de jeu (`d_win_rate`, `e_episode_reward_smooth`, `03_selfplay/*`) ne passent pas par
-ce chemin et n'ont jamais été touchées.
+Les courbes de jeu (`game_critical/win_rate`, `game_critical/episode_reward`, `03_selfplay/*`) ne
+passent pas par ce chemin et n'ont jamais été touchées. Elles portaient alors aussi les tags
+`00_critical/{d_win_rate,e_episode_reward_smooth}`, depuis retirés du namespace critique.
 
 Le run P1 en cours au 2026-09-04 a chargé le code avant le correctif : ses courbes restent
 fausses jusqu'à sa fin. Verrou : `tests/unit/ai/test_metrics_dump_wrapper_idempotent.py`.

@@ -1,6 +1,6 @@
 """
-Verrous des metriques zone-intent (`00_critical/n_intent_zone_steps`,
-`00_critical/o_intent_control_dependency`, `combat/intent_*`).
+Verrous des metriques zone-intent (`00_critical/o_intent_zone_steps`,
+`00_critical/p_intent_control_dependency`, `combat/intent_*`).
 
 Quatre defauts sont verrouilles ici :
   1. la fenetre etait remise a zero a CHAQUE fin d'episode, donc le diviseur valait toujours 1
@@ -74,14 +74,14 @@ def test_window_averages_over_multiple_episodes() -> None:
     t, writer = _tracker()
 
     _feed_episode(t, [(0, 0.0)] * 10, step_index=1)
-    assert writer.latest("00_critical/n_intent_zone_steps") == 10.0
+    assert writer.latest("00_critical/o_intent_zone_steps") == 10.0
 
     _feed_episode(t, [], step_index=2)
-    assert writer.latest("00_critical/n_intent_zone_steps") == 5.0
+    assert writer.latest("00_critical/o_intent_zone_steps") == 5.0
 
     for episode in range(3, 11):
         _feed_episode(t, [], step_index=episode)
-    assert writer.latest("00_critical/n_intent_zone_steps") == 1.0
+    assert writer.latest("00_critical/o_intent_zone_steps") == 1.0
 
 
 def test_window_is_sliding_and_bounded() -> None:
@@ -93,14 +93,14 @@ def test_window_is_sliding_and_bounded() -> None:
 
     for episode in range(ZONE_INTENT_WINDOW_EPISODES):
         _feed_episode(t, [(0, 0.0)] * 4, step_index=episode)
-    assert writer.latest("00_critical/n_intent_zone_steps") == 4.0
-    assert writer.count("00_critical/n_intent_zone_steps") == ZONE_INTENT_WINDOW_EPISODES
+    assert writer.latest("00_critical/o_intent_zone_steps") == 4.0
+    assert writer.count("00_critical/o_intent_zone_steps") == ZONE_INTENT_WINDOW_EPISODES
 
     # Les episodes muets chassent progressivement les anciens : a fenetre pleine de zeros, 0.0.
     for episode in range(ZONE_INTENT_WINDOW_EPISODES):
         _feed_episode(t, [], step_index=ZONE_INTENT_WINDOW_EPISODES + episode)
-    assert writer.latest("00_critical/n_intent_zone_steps") == 0.0
-    assert writer.count("00_critical/n_intent_zone_steps") == 2 * ZONE_INTENT_WINDOW_EPISODES
+    assert writer.latest("00_critical/o_intent_zone_steps") == 0.0
+    assert writer.count("00_critical/o_intent_zone_steps") == 2 * ZONE_INTENT_WINDOW_EPISODES
 
 
 def test_free_steps_are_counted_across_interleaved_envs() -> None:
@@ -116,7 +116,7 @@ def test_free_steps_are_counted_across_interleaved_envs() -> None:
     for episode in range(8):
         t._log_zone_intent_metrics(episode)
 
-    assert writer.latest("00_critical/n_intent_zone_steps") == 3.0
+    assert writer.latest("00_critical/o_intent_zone_steps") == 3.0
 
 
 def test_dependency_is_not_emitted_when_the_board_offers_no_contrast() -> None:
@@ -134,7 +134,7 @@ def test_dependency_is_not_emitted_when_the_board_offers_no_contrast() -> None:
 
     assert writer.latest("combat/intent_control_entropy_bits") == pytest.approx(0.0)
     assert writer.latest("combat/intent_mutual_info_bits") == pytest.approx(0.0)
-    assert writer.count("00_critical/o_intent_control_dependency") == 0, (
+    assert writer.count("00_critical/p_intent_control_dependency") == 0, (
         "un plateau sans contraste ne doit pas etre impute a la politique"
     )
     # Les ratios marginaux, eux, restent mesurables : ils ne dependent pas du controle.
@@ -156,7 +156,7 @@ def test_dependency_saturates_regardless_of_control_entropy() -> None:
     entropy = writer.latest("combat/intent_control_entropy_bits")
     assert entropy == pytest.approx(0.4690, abs=1e-3)
     assert writer.latest("combat/intent_mutual_info_bits") == pytest.approx(entropy)
-    assert writer.latest("00_critical/o_intent_control_dependency") == pytest.approx(1.0)
+    assert writer.latest("00_critical/p_intent_control_dependency") == pytest.approx(1.0)
 
 
 def test_dependency_is_zero_when_intent_ignores_a_contrasted_board() -> None:
@@ -170,7 +170,7 @@ def test_dependency_is_zero_when_intent_ignores_a_contrasted_board() -> None:
     _feed_episode(t, steps, step_index=1)
 
     assert writer.latest("combat/intent_control_entropy_bits") == pytest.approx(1.0)
-    assert writer.latest("00_critical/o_intent_control_dependency") == pytest.approx(0.0, abs=1e-12)
+    assert writer.latest("00_critical/p_intent_control_dependency") == pytest.approx(0.0, abs=1e-12)
 
 
 def test_aligned_baseline_is_what_a_blind_policy_would_score() -> None:
@@ -248,7 +248,7 @@ def test_mutual_info_is_maximal_when_intent_is_determined_by_control() -> None:
 
     assert writer.latest("combat/intent_control_entropy_bits") == pytest.approx(math.log2(3))
     assert writer.latest("combat/intent_mutual_info_bits") == pytest.approx(math.log2(3))
-    assert writer.latest("00_critical/o_intent_control_dependency") == pytest.approx(1.0)
+    assert writer.latest("00_critical/p_intent_control_dependency") == pytest.approx(1.0)
     assert writer.latest("combat/intent_invade_ratio") == pytest.approx(1 / 3)
     assert writer.latest("combat/intent_defend_ratio") == pytest.approx(1 / 3)
     assert writer.latest("combat/intent_attack_ratio") == pytest.approx(1 / 3)
@@ -267,11 +267,11 @@ def test_aligned_ratio_follows_shaping_definition() -> None:
     t, writer = _tracker()
     # Politique systematiquement INVERSE du shaping : dependance saturee (elle conditionne
     # parfaitement) mais alignement nul. C'est le cas qui interdit de lire
-    # `o_intent_control_dependency` comme une mesure de qualite — elle mesure le
+    # `p_intent_control_dependency` comme une mesure de qualite — elle mesure le
     # conditionnement, pas son sens.
     _feed_episode(t, [(0, 1.0), (1, -1.0), (2, 0.0)], step_index=1)
     assert writer.latest("combat/intent_shaping_aligned_ratio") == pytest.approx(0.0)
-    assert writer.latest("00_critical/o_intent_control_dependency") == pytest.approx(1.0)
+    assert writer.latest("00_critical/p_intent_control_dependency") == pytest.approx(1.0)
     assert (
         writer.latest("combat/intent_shaping_aligned_ratio")
         < writer.latest("combat/intent_shaping_aligned_baseline")
@@ -281,7 +281,7 @@ def test_aligned_ratio_follows_shaping_definition() -> None:
 def test_empty_window_emits_nothing_rather_than_zeros() -> None:
     """
     Sans aucun free step, emettre 0.0 se lirait comme "uniforme, MI nulle" — soit le diagnostic
-    recherche. On n'emet donc ni MI ni ratios (n_intent_zone_steps reste emis : 0 y est une
+    recherche. On n'emet donc ni MI ni ratios (o_intent_zone_steps reste emis : 0 y est une
     information exacte).
     """
     t, writer = _tracker()
@@ -289,10 +289,10 @@ def test_empty_window_emits_nothing_rather_than_zeros() -> None:
     for episode in range(5):
         _feed_episode(t, [], step_index=episode)
 
-    assert writer.latest("00_critical/n_intent_zone_steps") == 0.0
+    assert writer.latest("00_critical/o_intent_zone_steps") == 0.0
     assert writer.count("combat/intent_mutual_info_bits") == 0
     assert writer.count("combat/intent_control_entropy_bits") == 0
-    assert writer.count("00_critical/o_intent_control_dependency") == 0
+    assert writer.count("00_critical/p_intent_control_dependency") == 0
     assert writer.count("combat/intent_invade_ratio") == 0
     assert writer.count("combat/intent_shaping_aligned_ratio") == 0
     assert writer.count("combat/intent_shaping_aligned_baseline") == 0

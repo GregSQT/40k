@@ -678,10 +678,11 @@ tensorboard --logdir=./tensorboard/
 
 **Primary Metrics to Check Daily:**
 - `00_critical/a_bot_eval_combined` — **objectif principal** (compétence vs tous les bots)
-- `00_critical/d_win_rate_100ep` — tendance récente sur 100 épisodes (doublon réactif du tag nu, lissé sur `perf_window_fast`)
-- `00_critical/g_approx_kl` — stabilité de la politique (<0.02 = sain)
-- `00_critical/h_entropy_loss` — niveau d'exploration (doit décroître progressivement)
-- `00_critical/e_explained_variance` — qualité de la value function (cible : >0.70 tôt, >0.85 tard)
+- `game_critical/win_rate_<perf_window_fast>ep` — tendance récente (doublon réactif du tag nu, lissé sur `perf_window_fast`) ; le namespace `00_critical/` ne porte plus de win-rate d'entraînement
+- `00_critical/j_approx_kl` — stabilité de la politique (<0.02 = sain)
+- `00_critical/l_approx_kl_max` — KL **maximale** de l'update : au-dessus de 0.0225, PPO a coupé ses epochs
+- `00_critical/k_entropy_loss` — niveau d'exploration (doit décroître progressivement)
+- `00_critical/h_explained_variance` — qualité de la value function (cible : >0.70 tôt, >0.85 tard)
 
 #### Other Key Metrics
 

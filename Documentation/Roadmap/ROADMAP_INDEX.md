@@ -68,7 +68,7 @@ adversaire qui se déployait avec sa politique — 0.304 de win-rate en `auto` c
 `active`, différentiel d'objectifs -0.76 contre +0.19) ; et la part de bots passe à **30 % en P1,
 20 % en P2, 15 % de P3 à P10** (les six bots sont saturés entre 0.86 et 1.00, quand le champion du
 pool est à 0.502 et P0 à 0.626). P1 n'est PAS rejoué — sa config est homogénéisée et porte la
-mesure de ce qu'il a réellement joué. ⚠️ `r_win_rate_deploy_auto` **change de définition** : ses
+mesure de ce qu'il a réellement joué. ⚠️ `s_win_rate_deploy_auto` **change de définition** : ses
 valeurs antérieures au 2026-09-06 ne se comparent pas aux suivantes. Enfin `bot_eval_intermediate`
 de `x1_long` passe à **100** épisodes par bot pour la précision des points intermédiaires
 (erreur-type 9,1 → 5,0 points) ; l'évaluation intermédiaire du run à relancer monte donc de 180 à

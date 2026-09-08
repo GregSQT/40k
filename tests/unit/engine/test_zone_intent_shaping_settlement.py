@@ -10,7 +10,7 @@ declarer DEFEND sur une zone deja tenue rapportait +0.2 que l'agent la defende O
 Le terme recompensait donc la DESCRIPTION de l'etat, pas sa TRANSFORMATION. Sa politique
 optimale consistait a recopier `objective_controllers` en intents sans changer une seule action
 tactique — et cette politique creuse produit exactement la signature qu'une bonne politique
-produirait sur `00_critical/o_intent_control_dependency`. Le reward rendait donc la metrique
+produirait sur `00_critical/p_intent_control_dependency`. Le reward rendait donc la metrique
 inexploitable, pas l'inverse.
 
 SECOND DEFAUT, meme fonction : la boucle parcourait les MAX_OBJECTIVES entrees de
