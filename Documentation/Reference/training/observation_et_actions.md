@@ -301,7 +301,7 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
                                                     #   le monde au sol. Emis pour TOUTE entite.
 ```
 
-#### `allies_bin[s]` / `enemies_bin[s]` — une unite, 26 drapeaux  ·  jamais normalise
+#### `allies_bin[s]` / `enemies_bin[s]` — une unite, 27 drapeaux  ·  jamais normalise
 
 ```python
 [s][0]     = is_ally                                # 0.0 / 1.0
