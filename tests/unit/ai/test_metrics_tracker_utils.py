@@ -642,6 +642,41 @@ def test_grad_clip_fraction_emis_dans_training_diagnostic() -> None:
     assert vals == [0.15], f"valeur attendue 0.15, obtenu {vals}"
 
 
+def test_les_deux_courbes_ppo_brutes_de_00_critical_sont_emises() -> None:
+    """VERROU : `l_approx_kl_max` et `m_explained_var` portent la valeur BRUTE de l'update.
+
+    Les deux existent parce qu'un lissage les rendrait muettes sur ce qu'on leur demande :
+    `l` est la KL qui declenche l'early-stop de PPO (un pic sur un seul update), et `m` est la
+    jumelle non lissee de `h_explained_variance`. Les faire passer par
+    `_calculate_smoothed_metric` reproduirait donc les courbes qui existent deja.
+    """
+    t = _tracker_stub()
+    t.log_training_metrics({
+        "train/approx_kl": 0.01,
+        "train/approx_kl_max": 0.034,
+        "train/explained_variance": 0.42,
+    })
+
+    scalars = _dw(t).scalars
+    assert [v for k, v, _ in scalars if k == "00_critical/l_approx_kl_max"] == [0.034]
+    assert [v for k, v, _ in scalars if k == "00_critical/m_explained_var"] == [0.42]
+
+
+def test_l_approx_kl_max_reste_muette_sans_ppo_patche() -> None:
+    """VERROU : pas de `train/approx_kl_max` -> pas de courbe, PAS une valeur de repli.
+
+    Seul `ai/patched_ppo.py` publie ce tag. Retomber sur `train/approx_kl` (la MOYENNE) ou sur
+    un 0.0 ferait lire une KL maximale la ou aucune n'a ete mesuree — le dashboard annoncerait
+    une marge d'early-stop confortable sur un run qui n'en sait rien.
+    """
+    t = _tracker_stub()
+    t.log_training_metrics({"train/approx_kl": 0.01, "train/explained_variance": 0.42})
+
+    keys = [k for k, _, _ in _dw(t).scalars]
+    assert "00_critical/l_approx_kl_max" not in keys
+    assert "00_critical/m_explained_var" in keys, "m ne depend pas du PPO patche"
+
+
 def test_gradient_norm_nan_est_ecarte() -> None:
     """VERROU : un NaN dans `train/gradient_norm` ou `train/grad_clip_fraction` (early-stop KL)
     ne pollue ni TensorBoard ni `latest_gradient_norm`.
@@ -775,16 +810,19 @@ def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
 def test_les_courbes_de_jeu_gardent_leur_point_par_episode() -> None:
     """VERROU : la garde de cadence PPO ne doit PAS deborder sur les courbes d'episode.
 
-    `log_critical_dashboard` emet aussi `d_win_rate` et `e_episode_reward_smooth`, qui se lisent
-    par episode. Les passer sous la meme garde les figerait entre deux updates.
+    `log_critical_dashboard` appelle `_log_zone_intent_metrics` HORS de la garde
+    `ppo_capture_is_new`, donc `o_intent_zone_steps` se lit par episode. L'aspirer sous la
+    garde le figerait entre deux updates — 74 episodes sans point sur x1_long.
+
+    C'est la derniere courbe par-episode ecrite par cette methode : `d_win_rate` et
+    `e_episode_reward_smooth`, qui tenaient ce role, ont ete retirees du namespace.
     """
     t = _tracker_stub()
     for _ in range(20):
         t.log_critical_dashboard()
 
     keys = [k for k, _, _ in _dw(t).scalars]
-    assert keys.count("00_critical/d_win_rate") == 20
-    assert keys.count("00_critical/e_episode_reward_smooth") == 20
+    assert keys.count("00_critical/o_intent_zone_steps") == 20
 
 
 def test_aucun_seuil_emis_avant_la_premiere_capture_ppo() -> None:

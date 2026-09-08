@@ -156,7 +156,7 @@ def test_pinned_ramp_uses_the_profile_end_not_one():
     """Fige sur `end`, jamais sur 1.0.
 
     Un profil garde deliberement une part d'episodes en 'auto' pour que la courbe de controle
-    `r_win_rate_deploy_auto` continue de mesurer quelque chose ; figer a 1.0 la tuerait.
+    `s_win_rate_deploy_auto` continue de mesurer quelque chose ; figer a 1.0 la tuerait.
     """
     stub = _StubConfig(0.3, 0.8)
     _install_stage_config_overrides(stub, AGENT, None, {}, warm_start=True)

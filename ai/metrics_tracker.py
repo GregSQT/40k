@@ -216,9 +216,9 @@ class W40KMetricsTracker:
     #: categorie la rend illisible. `vp_diff` et `value_trade_ratio` sont ecartees comme
     #: largement redondantes avec la difference d'objectifs et la recompense.
     DEPLOY_SPLIT_SERIES = {
-        'reward': '00_critical/p_reward_deploy',
-        'obj_held_diff': '00_critical/q_obj_held_diff_deploy',
-        'win': '00_critical/r_win_rate_deploy',
+        'reward': '00_critical/q_reward_deploy',
+        'obj_held_diff': '00_critical/r_obj_held_diff_deploy',
+        'win': '00_critical/s_win_rate_deploy',
     }
 
     #: Cle d'historique `_game_history` -> serie ventilee. Le branchement se fait dans
@@ -491,8 +491,17 @@ class W40KMetricsTracker:
                     "thresholds/entropy_target_min",
                     "thresholds/entropy_target_max",
                 ]],
-                "m_immediate_reward_ratio_mean": ["Multiline", [
-                    "00_critical/m_immediate_reward_ratio_mean",
+                "l_approx_kl_max": ["Multiline", [
+                    "00_critical/l_approx_kl_max",
+                    "thresholds/kl_min",
+                    "thresholds/kl_max",
+                ]],
+                "m_explained_var": ["Multiline", [
+                    "00_critical/m_explained_var",
+                    "thresholds/explained_variance_min",
+                ]],
+                "n_immediate_reward_ratio_mean": ["Multiline", [
+                    "00_critical/n_immediate_reward_ratio_mean",
                 ]],
             }
         }
@@ -522,7 +531,7 @@ class W40KMetricsTracker:
         return self.truncation_log.counts
 
     def _emit_truncation_curve(self) -> None:
-        """Courbe `00_critical/t_truncated_episodes` — emise a CHAQUE fin d'episode.
+        """Courbe `00_critical/u_truncated_episodes` — emise a CHAQUE fin d'episode.
 
         Ce qu'un tableau de bord doit dire ici, c'est « ce nombre doit valoir 0 ». Emise
         seulement quand une troncature arrive, la courbe etait absente du cas nominal, donc
@@ -539,14 +548,14 @@ class W40KMetricsTracker:
         `truncations.jsonl`, dont chaque ligne porte son `run`.
         """
         self.writer.add_scalar(
-            '00_critical/t_truncated_episodes',
+            '00_critical/u_truncated_episodes',
             sum(self.truncation_counts["training"].values()),
             self.episode_count,
         )
 
     def log_immediate_reward_ratio_mean(self, ratio_mean: float) -> None:
-        """Courbe `00_critical/m_immediate_reward_ratio_mean` — emise par training_callbacks apres log_episode_end."""
-        self.writer.add_scalar('00_critical/m_immediate_reward_ratio_mean', ratio_mean, self.episode_count)
+        """Courbe `00_critical/n_immediate_reward_ratio_mean` — emise par training_callbacks apres log_episode_end."""
+        self.writer.add_scalar('00_critical/n_immediate_reward_ratio_mean', ratio_mean, self.episode_count)
 
     def log_truncated_episode(self, reason: str, payload: Dict[str, Any]) -> None:
         """Episode d'ENTRAINEMENT coupe par le garde anti-runaway (cf. ai/truncation_log.py).
@@ -605,7 +614,7 @@ class W40KMetricsTracker:
             if len(self._deploy_active_flags) > self.PERF_WINDOW:
                 self._deploy_active_flags.pop(0)
             self._emit_windowed(
-                '00_critical/s_deploy_active_share', self._deploy_active_flags
+                '00_critical/t_deploy_active_share', self._deploy_active_flags
             )
 
         # GAME CRITICAL: Episode reward - Individual episode rewards
@@ -1574,6 +1583,17 @@ class W40KMetricsTracker:
             self.hyperparameter_tracking['approx_kls'].append(approx_kl)
             self.writer.add_scalar('training_critical/approx_kl', approx_kl, self.step_count)
 
+        # 00_critical: KL MAXIMALE de l'update, publiee par `ai/patched_ppo.py`. Valeur BRUTE,
+        # non lissee : c'est elle qui declenche l'early-stop de PPO (> 1.5 x target_kl), donc
+        # une moyenne sur 20 updates masquerait exactement le pic qu'on cherche a voir.
+        # Absente si le modele n'est pas le PPO patche — la courbe reste alors vide.
+        if 'train/approx_kl_max' in model_stats:
+            self.writer.add_scalar(
+                '00_critical/l_approx_kl_max',
+                float(model_stats['train/approx_kl_max']),
+                self.step_count,
+            )
+
         # TRAINING CRITICAL: part du gradient revenant a la POLITIQUE. Publiee par
         # `ai/patched_ppo.py` sous `diag/grad_share_policy_mb0`, d'ou elle remonte par
         # `name_to_value` comme toute cle enregistree sur le logger SB3. Absente si le modele
@@ -1593,10 +1613,14 @@ class W40KMetricsTracker:
                 )
         
         # TRAINING CRITICAL: Explained variance (value function quality)
+        # Le tag 00_critical porte la valeur BRUTE de l'update ; `h_explained_variance` porte la
+        # meme source lissee sur 20 updates. Les deux repondent a des questions differentes :
+        # la tendance du critic, et ce qu'un update donne a pris.
         if 'train/explained_variance' in model_stats:
             explained_var = model_stats['train/explained_variance']
             self.hyperparameter_tracking['explained_variances'].append(explained_var)
             self.writer.add_scalar('training_critical/explained_variance', explained_var, self.step_count)
+            self.writer.add_scalar('00_critical/m_explained_var', explained_var, self.step_count)
         
         # TRAINING DIAGNOSTIC: Total policy updates count
         if 'train/n_updates' in model_stats:
@@ -1639,17 +1663,11 @@ class W40KMetricsTracker:
         """
         🎯 CRITICAL DASHBOARD - metriques essentielles au tuning des hyperparametres PPO.
 
-        ECRIT ICI (8 tags) :
-
-        PERFORMANCE D'EPISODE -- lissees sur `perf_window` :
-        - 00_critical/d_win_rate             - Training opponent performance
-        - 00_critical/e_episode_reward_smooth  - Learning progress
-        (le doublon a fenetre courte `_<perf_window_fast>ep` n'existe que si les deux
-         fenetres du training config different ; depuis le 2026-09-07 fast=100, window=500)
+        ECRIT ICI (6 tags) :
 
         SANTE PPO -- moyennes sur les 20 derniers updates, et emises A LA CADENCE DE L'UPDATE :
-        ces cinq-la sont les SEULES courbes `00_critical/` qui ne portent pas un point par
-        episode. Leur source n'etant alimentee qu'une fois par update, un point par episode
+        ces six-la sont les SEULES courbes `00_critical/` ecrites ici qui ne portent pas un point
+        par episode. Leur source n'etant alimentee qu'une fois par update, un point par episode
         n'aurait republie que des copies. Meme garde pour les lignes `thresholds/*` qu'elles
         portent (cf. `ppo_capture_is_new` plus bas).
         - 00_critical/f_loss_mean           - |policy_loss| + |value_loss|, sante globale
@@ -1658,34 +1676,41 @@ class W40KMetricsTracker:
         - 00_critical/i_clip_fraction       - [0.1-0.3] -> Tune learning_rate
         - 00_critical/j_approx_kl           - <0.02 -> Policy stability
         - 00_critical/k_entropy_loss        - Decroissant -> Tune ent_coef
-        - 00_critical/m_immediate_reward_ratio_mean - ratio reward immediat/total (lisse, emis par training_callbacks)
 
         ECRIT PAR `_log_zone_intent_metrics`, appele en fin de cette methode (2 tags) :
-        - 00_critical/n_intent_zone_steps          - free steps zone-intent par episode
-        - 00_critical/o_intent_control_dependency  - I(intent;controle)/H(controle), non emis
+        - 00_critical/o_intent_zone_steps          - free steps zone-intent par episode
+        - 00_critical/p_intent_control_dependency  - I(intent;controle)/H(controle), non emis
                                                      quand H(controle) == 0
 
         ECRIT AILLEURS, volontairement -- inventaire complet du namespace :
         - `log_bot_evaluations`, au moment de l'evaluation (attendre l'episode suivant
           publierait une valeur perimee) : 0_gap_sm-ork, a_bot_eval_combined,
           b_worst_bot_score, c_holdout_hard_mean.
+        - `log_ppo_update`, a la capture meme des stats SB3, en valeurs BRUTES :
+          l_approx_kl_max (la KL qui declenche l'early-stop, qu'un lissage effacerait) et
+          m_explained_var (jumelle non lissee de h_explained_variance).
         - `training_callbacks` (BotEvaluationCallback), qui seul connait ces deux etats :
           0_eval_timeout_episodes (emis UNIQUEMENT si une eval a ete tronquee ; ce point
           d'eval n'alimente alors aucun autre signal) et o_robust_current_score.
+        - `log_immediate_reward_ratio_mean`, appele par training_callbacks apres
+          log_episode_end : n_immediate_reward_ratio_mean.
         - `_emit_deploy_split`, appele au moment ou chaque valeur est calculee : les emettre
           ici les decalerait d'un episode (ce dashboard tourne AVANT log_tactical_metrics).
           Cf. DEPLOY_SPLIT_SERIES pour le pourquoi de la ventilation.
-          p_reward_deploy_{active,fixed}, q_obj_held_diff_deploy_{active,fixed},
-          r_win_rate_deploy_{active,fixed}, s_deploy_active_share.
-        - `_emit_truncation_curve` : t_truncated_episodes, cumul des episodes coupes par le
+          q_reward_deploy_{active,fixed}, r_obj_held_diff_deploy_{active,fixed},
+          s_win_rate_deploy_{active,fixed}, t_deploy_active_share.
+        - `_emit_truncation_curve` : u_truncated_episodes, cumul des episodes coupes par le
           garde anti-runaway du moteur. Emis a part, sur les DEUX fins d'episode : un episode
           tronque ne passe pas par ce dashboard (il n'alimente aucune courbe de jeu), et un
           episode normal doit quand meme poser son point, sans quoi la courbe n'existe pas
           dans le cas nominal. Doit valoir 0 (V11 §0.61).
 
         NOTE: position_score a ete supprime (voir la trace dans __init__), pas deplace.
-        `k_gradient_norm` a ete retire du dashboard (redondant avec h + i, cf. plus bas) ;
-        la lettre `l` n'a jamais ete attribuee dans ce namespace.
+        `k_gradient_norm` a ete retire du dashboard (redondant avec h + i, cf. plus bas).
+        Les lettres `d` et `e` ont porte win_rate et episode_reward_smooth, retirees du
+        namespace critique. `game_critical/win_rate` est la jumelle EXACTE de d (meme source,
+        meme fenetre) ; le lissage de e n'a pas de jumelle, `game_critical/episode_reward`
+        portant la valeur brute de chaque episode.
         """
         
         # Minimum data requirement (lowered to 1 for immediate feedback)
@@ -1693,18 +1718,6 @@ class W40KMetricsTracker:
         if len(self.all_episode_rewards) < min_episodes:
             return  # Not enough data yet
         
-        # ==========================================
-        # GAME PERFORMANCE (2 metrics)
-        # ==========================================
-        
-        # 1. Win Rate - SORTS FIRST alphabetically
-        # Le tag suffixe `_100ep` portait jusqu'ici une fenetre de 500 : son nom mentait. Il
-        # designe desormais la fenetre qu'il annonce, et la fenetre de fond prend le nom nu.
-        self._emit_windowed('00_critical/d_win_rate', self.all_episode_wins)
-
-        # 2. Episode Reward (smoothed) - Training signal strength
-        self._emit_windowed('00_critical/e_episode_reward_smooth', self.all_episode_rewards)
-
         # ==========================================
         # PPO HEALTH (5 metrics)
         # ==========================================
@@ -1844,7 +1857,7 @@ class W40KMetricsTracker:
         self._intent_contingency_since_episode_end = [0] * (ZONE_CONTROL_CARDINALITY * INTENT_CARDINALITY)
 
         n_steps_per_ep = sum(self._zone_steps_window) / len(self._zone_steps_window)
-        self.writer.add_scalar("00_critical/n_intent_zone_steps", n_steps_per_ep, step)
+        self.writer.add_scalar("00_critical/o_intent_zone_steps", n_steps_per_ep, step)
 
         table = [0] * (ZONE_CONTROL_CARDINALITY * INTENT_CARDINALITY)
         for episode_table in self._intent_contingency_window:
@@ -1877,7 +1890,7 @@ class W40KMetricsTracker:
             # rien a apprendre. On normalise donc : U = I / H(controle) est la FRACTION de
             # l'incertitude d'intent expliquee par l'etat, 1.0 = intent entierement determine.
             self.writer.add_scalar(
-                "00_critical/o_intent_control_dependency", mutual_info / control_entropy, step
+                "00_critical/p_intent_control_dependency", mutual_info / control_entropy, step
             )
         # H(controle) == 0 : aucun contraste d'etat sur la fenetre, la question n'a pas de sens.
         # Emettre 0.0 la designerait a tort la politique.

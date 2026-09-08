@@ -163,9 +163,9 @@ def test_the_curve_exists_even_when_nothing_is_truncated(tmp_path) -> None:
 
     points = [
         s for s in _stub_writer(tracker).scalars
-        if s[0] == "00_critical/t_truncated_episodes"
+        if s[0] == "00_critical/u_truncated_episodes"
     ]
-    assert points == [("00_critical/t_truncated_episodes", 0, 1)], (
+    assert points == [("00_critical/u_truncated_episodes", 0, 1)], (
         "un episode NORMAL doit poser un point a 0 : sans lui la courbe n'existe pas"
     )
 
@@ -184,9 +184,9 @@ def test_the_curve_counts_training_only_and_restarts_with_the_run(tmp_path) -> N
 
     points = [
         s for s in _stub_writer(tracker).scalars
-        if s[0] == "00_critical/t_truncated_episodes"
+        if s[0] == "00_critical/u_truncated_episodes"
     ]
-    assert points == [("00_critical/t_truncated_episodes", 1, 200_001)], (
+    assert points == [("00_critical/u_truncated_episodes", 1, 200_001)], (
         "l'eval ne doit pas peser sur la courbe, et le cumul repart de 0 a l'offset repris"
     )
 
@@ -224,7 +224,7 @@ def test_a_truncated_episode_stays_out_of_the_reward_curves(tmp_path) -> None:
     assert tracker.all_episode_lengths == []
     assert tracker.all_episode_wins == []
     tags = {tag for tag, _v, _s in _stub_writer(tracker).scalars}
-    assert tags == {"00_critical/t_truncated_episodes"}
+    assert tags == {"00_critical/u_truncated_episodes"}
 
 
 def test_the_callback_routes_a_truncated_info_to_the_tracker(tmp_path) -> None:

@@ -351,7 +351,7 @@ def test_linear_ramp_increases_active_share():
 # --- Vectorisation : la rampe se rapporte aux épisodes joués PAR ENVIRONNEMENT ----------------
 #
 # Défaut trouvé le 2026-08-02 sur le run x1_long (n_envs=48, total_episodes=200000) :
-# `s_deploy_active_share` valait 0.3040 à 78 477 épisodes GLOBAUX, soit `active_ratio_start`,
+# `t_deploy_active_share` valait 0.3040 à 78 477 épisodes GLOBAUX, soit `active_ratio_start`,
 # là où la rampe 0.3→0.8 attendait 0.496. Cause : le moteur divisait son compteur d'épisodes
 # LOCAL (un par worker `SubprocVecEnv`) par le total GLOBAL — la rampe avançait 48 fois trop
 # lentement et restait figée à sa valeur de départ sur toute la durée du run.
@@ -635,7 +635,7 @@ def test_parent_ratio_argument_overrides_the_profile_json(board_x5) -> None:
     pinned = tc_pinned["deployment_mode_schedule"]
     assert pinned["active_ratio_start"] == 0.9
     # Figer, c'est aligner le départ sur l'arrivée — jamais déplacer l'arrivée : un profil garde
-    # délibérément une part d'épisodes en 'auto' pour que `r_win_rate_deploy_auto` mesure encore.
+    # délibérément une part d'épisodes en 'auto' pour que `s_win_rate_deploy_auto` mesure encore.
     assert pinned["active_ratio_end"] == 0.9
 
 

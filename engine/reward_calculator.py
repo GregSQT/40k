@@ -1465,7 +1465,7 @@ class RewardCalculator:
         Ce terme recompensait donc la DESCRIPTION de l'etat, pas sa TRANSFORMATION : la
         politique qui le maximise recopie ``objective_controllers`` en intents sans changer une
         seule action tactique. Pire, cette politique creuse produit exactement la signature
-        qu'une bonne politique produirait sur ``00_critical/o_intent_control_dependency`` — un
+        qu'une bonne politique produirait sur ``00_critical/p_intent_control_dependency`` — un
         conditionnement parfait entre intent et controle, pour un comportement vide.
 
         L'intent est donc paye sur son RESULTAT : la zone a-t-elle fini le tour dans l'etat que
@@ -1486,7 +1486,7 @@ class RewardCalculator:
         # (`combat/intent_shaping_aligned_ratio` et son `_baseline`, metrics_tracker). L'agent
         # est reste SOUS cette reference dans 95 % des fenetres des 10 000 derniers episodes,
         # tout en conditionnant de mieux en mieux son intent sur l'etat
-        # (`00_critical/o_intent_control_dependency` 0.004 -> 0.104) : il a donc appris a lire le
+        # (`00_critical/p_intent_control_dependency` 0.004 -> 0.104) : il a donc appris a lire le
         # plateau et a en tirer l'intention que ce bareme ne paie PAS, et il gagne (96,9 % de
         # combined) en encaissant la penalite a chaque tour. Un terme dense anti-correle au
         # comportement gagnant est du bruit dans le gradient.

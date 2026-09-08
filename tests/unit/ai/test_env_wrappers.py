@@ -521,7 +521,7 @@ def test_self_play_wrapper_lets_the_engine_place_in_auto_mode() -> None:
     assert engine.auto_deployment_calls == 1, "le moteur n'a pas été sollicité pour la pose"
     assert model.received_masks == [], (
         "le réseau du snapshot a été interrogé alors que le moteur possède la pose : le mode "
-        "'auto' redevient asymétrique et r_win_rate_deploy_auto remesure un handicap"
+        "'auto' redevient asymétrique et s_win_rate_deploy_auto remesure un handicap"
     )
 
 
