@@ -92,7 +92,8 @@ Discipline, exceptions actées et outillage (checker + porte de fusion) : préfa
 - [backlog/](Chantiers/backlog/) — chantiers ouverts jamais commencés, tous atteignables depuis
   l'index roadmap (vérifié par le checker, passe 6). Noms d'objet depuis la consolidation
   2026-08-28 : `endless_duty.md` (spec + état mesuré fusionnés), `migration_postgresql.md`,
-  `mcts_adversaire.md`, `perf_entrainement.md`, `perf_noyau_natif_et_gzip.md`,
+  `mcts.md` (fait foi depuis le 2026-09-08 ; `mcts_adversaire.md` conservé sous bandeau pour
+  l'historique), `perf_entrainement.md`, `perf_noyau_natif_et_gzip.md`,
   `preview_tir_position_virtuelle.md`, `reactive_stratagems_overwatch_hi.md`,
   `curriculum_adversaires_etalons.md`, `panel_bots.md`, `refonte_documentation.md` ;
   le chantier 06 Armageddon vit en §À faire de

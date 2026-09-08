@@ -65,8 +65,17 @@ Goulots restants : aucun identifié de cette ampleur.
 
 ## MCTS adversaire d'entraînement {#mcts}
 
-**Lourd.** Plusieurs semaines (P0+P1 ≈ 1-2 sem.). Après stabilité obs/masques.
+**Suspendu — re-spécifié le 2026-09-08.** La spec `mcts_adversaire.md` (rollouts de bots,
+espace macro, `GameAdapter`) est remplacée par `mcts.md` : un seul module de recherche guidé
+par la policy (priors + tête de valeur du réseau, dés tirés, espace micro réel), en trois
+sièges ordonnés par la mesure — inférence de l'agent (S1, gate G1), distillation Expert
+Iteration dans PPO (S2), puis seulement champion + recherche dans le pool (S3). L'usage
+« adversaire indépendant » de l'ancienne spec est rejeté sur mesure (pas moteur 57 ms, clone
+745 ms avant tri des caches). Prérequis S0 : un clone d'état rapide côté moteur (nouveau module, spécifié
+dans `mcts.md` §3.4), jumeau de `services/game_snapshots.py`. Ne s'ouvre qu'après J3 (`ROADMAP_INDEX.md`).
 
-Distinct du MCTS à l'inférence ([bot.md#mcts-inference](bot.md#mcts-inference)).
+Même sujet que le MCTS à l'inférence ([bot.md#mcts-inference](bot.md#mcts-inference)) : un
+seul document désormais.
 
-→ `Documentation/Chantiers/backlog/mcts_adversaire.md`
+→ `Documentation/Chantiers/backlog/mcts.md` (fait foi) ;
+`Documentation/Chantiers/backlog/mcts_adversaire.md` (historique, bandeau)

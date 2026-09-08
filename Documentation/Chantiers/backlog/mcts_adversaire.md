@@ -1,5 +1,12 @@
 # MCTS comme adversaire d’entraînement — spécification finale
 
+> ⚠️ **REMPLACÉ le 2026-09-08 par [`mcts.md`](mcts.md)** — spécification écrite sur mesures du
+> dépôt (coût du pas moteur, du clone d'état, du forward, branchement réel). Ce fichier est
+> conservé pour l'historique ; il ne fait plus foi. `mcts.md` §2 dit point par point ce qui
+> est repris (moteur source de vérité, pas de fallback, A/B à budget égal) et ce qui est
+> rejeté (rollouts de bots, espace macro, `GameAdapter`, état abstrait, UCT pur).
+
+
 > **Fichier** : `Documentation/Chantiers/backlog/mcts_adversaire.md` (ex-MCTS/MCTS_bot_final.md)  
 > **Statut** : **référence unique** pour la conception et l’implémentation d’un adversaire MCTS **hors policy PPO**. En cas de divergence avec toute version antérieure, **ce document fait foi** jusqu’à révision explicite.  
 > **Contexte** : projet Warhammer 40K — moteur tactique Python, agent **PPO / MaskablePPO**, observation canonique `Documentation/Reference/training/observation_et_actions.md`, pipeline `Documentation/Reference/training/entrainement.md`.

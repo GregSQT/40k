@@ -295,6 +295,11 @@ profond, ou limité aux seules décisions critiques, suffirait probablement.
 **À ne PAS anticiper** : plan B après mesure. Rien ne sert de décider avant de savoir si le PPO
 spécialisé suffit.
 
+*2026-09-08* : les deux usages sont désormais spécifiés dans UN document,
+`Documentation/Chantiers/backlog/mcts.md` (qui remplace `mcts_adversaire.md`) — verdict,
+mesures et ordre S1 (inférence) → S2 (distillation) → S3 (champion + recherche). Le « à ne PAS
+anticiper » reste : rien ne s'ouvre avant J3.
+
 ---
 
 ## Correspondance des sources

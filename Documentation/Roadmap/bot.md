@@ -192,9 +192,15 @@ Même sort que `standoff` (amplitude 0,05, supprimé le 2026-08-11). Décision d
 
 **Suspendu** — plan B anti-coups-absurdes, « à ne PAS anticiper » avant la mesure de référence (J3) ; ne s'ouvre que si la démo l'exige. Risque identifié : latence en démo.
 
-Distinct du MCTS adversaire d'entraînement ([infra.md#mcts](infra.md#mcts)).
+**Spécifié le 2026-09-08** dans `Documentation/Chantiers/backlog/mcts.md` : c'est le siège A
+(S1) du module de recherche unique — Gumbel + Sequential Halving sur les logits de la policy,
+feuille = tête de valeur, profondeur 1, mesuré en A/B appairé sur holdout (gate G1, +4 points).
+Latence mesurée à anticiper : ~100 ms par simulation intra-phase, ~1,5 s par simulation qui
+traverse le tour adverse (pas moteur 57 ms). Même document que le MCTS adversaire
+([infra.md#mcts](infra.md#mcts)).
 
-→ `Documentation/Chantiers/v11/strategie_evaluation.md` §10.7
+→ `Documentation/Chantiers/backlog/mcts.md` ; contexte :
+`Documentation/Chantiers/v11/strategie_evaluation.md` §10.7
 
 ---
 
