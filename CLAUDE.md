@@ -295,7 +295,7 @@ Gates obligatoires — avant d'écrire toute entrée SUITE, répondre à la ques
   💡 Amélioration : « Ai-je une mesure (temps, mémoire, token) ou un invariant prouvé sous-optimal — pas une préférence de style ? » → non = LU uniquement.
   📋 Sous-tâche : « Est-ce strictement impossible T2-C (dépendance externe ou décision utilisateur manquante) — pas simplement long ou hors chemin critique ? » → non = traiter maintenant (T2), jamais externaliser.
 Une gate non franchie interdit l'entrée SUITE correspondante ; le constat va en LU.
-Auto-critique obligatoire après chaque gate franchie : « Si l'utilisateur me demande si ce prompt est optimal et nécessaire, puis-je défendre oui sans hésitation ? » → non = supprimer l'entrée, déplacer le constat en LU.
+Ancrage payé dans le tour : toute entrée SUITE cite un fichier de code, et ce fichier doit avoir été OUVERT pendant le tour qui la propose (Read, Grep, ou une commande de lecture). Une ancre non rouverte est un souvenir, pas une vérification → le constat va en LU. Contrôlé par .claude/hooks/rapport-cloture.sh, qui lit la trace des outils du tour et non le texte du rapport : un refus se lève en ouvrant le fichier ou en retirant l'entrée, jamais en ajoutant des mots au rapport. Une gate ne se franchit pas en se la posant à soi-même — mesuré le 2026-09-09 sur 614 entrées SUITE rendues, 106 ne citaient aucun fichier et 127 un fichier jamais ouvert du tour.
 
 Gabarits SUITE — seulement si des entrées SUITE sont présentes : chaque prompt doit être autonome, lisible sans le contexte de la conversation, copiable-collable directement comme prochain prompt. Jamais une phrase vague ; toujours les références exactes.
 

@@ -85,6 +85,30 @@ def _edit(path: str, *, sidechain: bool = False, nom: str = "Edit", cle: str = "
     return entry
 
 
+def _read(valeur: str, *, nom: str = "Read", cle: str = "file_path") -> dict:
+    """Entrée de transcript pour une LECTURE — le seul témoin du travail qui ne soit pas rédigé.
+
+    `nom`/`cle` couvrent les formes sous lesquelles un chemin atteint un outil de lecture :
+    `Read(file_path)`, `Grep(path|pattern)`, et la commande entière d'un `Bash`.
+    """
+    return {
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "name": nom, "input": {cle: valeur}}],
+        },
+    }
+
+
+def _rapport_conforme(suite: str) -> str:
+    """Rapport dont TOUTES les sections sont là — seule la ligne SUITE varie d'un test à l'autre."""
+    return (
+        "MODIFICATIONS :\nengine/x.py — corrige.\n\nLU : engine/x.py\n\nJUMEAU : grep → 0 hit\n\n"
+        "🟢 COUVERTURE : aucun trou vu\n\n🟢 RELIRE : 1 fichier\n/code-review /abs/engine/x.py\n"
+        "/simplify /abs/engine/x.py\n\nÉTAT CHANTIER : Tests ✅\n\n" + suite
+    )
+
+
 def _say(text: str) -> dict:
     return {
         "type": "assistant",
@@ -1386,3 +1410,173 @@ def test_ordre_des_deux_lignes_declaratives_est_indifferent(tmp_path: Path) -> N
     assert cfg["code_suffixes"] == [".py"] and cfg["code_basenames"] == ["CLAUDE.md"]
 
 
+
+
+# ------------------------------------------- entrées SUITE : la trace du tour, pas son texte
+#
+# Le hook ne juge pas la pertinence d'une proposition — il constate qu'elle cite du code que le
+# tour n'a jamais ouvert. Mesuré sur les 1786 transcripts du projet le 2026-09-09 : sur 614
+# entrées SUITE rendues, 106 ne citaient aucun fichier et 127 un fichier jamais ouvert du tour.
+
+
+def test_entree_suite_sur_un_fichier_ouvert_ne_reclame_rien(tmp_path: Path) -> None:
+    """Le cas conforme : l'entrée cite ce que le tour a réellement lu."""
+    assert (
+        _rapport(
+            tmp_path,
+            _user("corrige"),
+            _edit("engine/x.py"),
+            _read("ai/analyzer.py"),
+            _say(_rapport_conforme("SUITE :\n→ 🔴 Bug : compte faux — `\"corrige ai/analyzer.py:42\"`")),
+        )
+        is None
+    )
+
+
+def test_entree_suite_sur_un_fichier_jamais_ouvert_est_reclamee(tmp_path: Path) -> None:
+    """Le défaut mesuré : proposer une correction sur un fichier qu'on n'a pas rouvert du tour."""
+    contexte = _rapport(
+        tmp_path,
+        _user("corrige"),
+        _edit("engine/x.py"),
+        _say(_rapport_conforme("SUITE :\n→ 🔴 Bug : compte faux — `\"corrige ai/analyzer.py:42\"`")),
+    )
+    assert contexte is not None
+    assert "ai/analyzer.py" in contexte
+    assert "n'a été ouvert à aucun moment de ce tour" in contexte
+
+
+def test_entree_suite_sans_aucune_ancre_est_reclamee(tmp_path: Path) -> None:
+    """Les quatre gabarits SUITE exigent une référence au code ; 106 entrées mesurées n'en ont pas."""
+    contexte = _rapport(
+        tmp_path,
+        _user("corrige"),
+        _edit("engine/x.py"),
+        _say(_rapport_conforme("SUITE :\n→ 📋 Sous-tâche : finir le panel — `\"finis le panel de bots\"`")),
+    )
+    assert contexte is not None
+    assert "ne cite aucun fichier de code" in contexte
+
+
+def test_tour_sans_edition_qui_propose_est_controle(tmp_path: Path) -> None:
+    """Le cas qui a motivé le contrôle : un tour d'ARBITRAGE, sans une seule écriture.
+
+    `faults_of` rendait `[]` dès qu'un tour n'éditait rien, donc la proposition d'un tour d'analyse
+    n'était regardée par personne — c'est exactement ce qu'était le rapport du 2026-09-08.
+    """
+    contexte = _rapport(
+        tmp_path,
+        _user("analyse"),
+        _say("LU : rien\n\nJUMEAU : grep → 0 hit\n\nSUITE :\n→ 💡 Amélioration : lent — `\"optimise engine/combat.py\"`"),
+    )
+    assert contexte is not None
+    assert "engine/combat.py" in contexte
+    assert "proposé une suite qu'il n'a pas vérifiée" in contexte
+
+
+def test_tour_sans_edition_ni_proposition_reste_muet(tmp_path: Path) -> None:
+    """La portée étendue ne doit PAS transformer toute discussion en tour contrôlé."""
+    assert _rapport(tmp_path, _user("explique"), _read("engine/x.py"), _say("voilà.")) is None
+
+
+def test_sections_ne_sont_pas_reclamees_a_un_tour_qui_n_edite_pas(tmp_path: Path) -> None:
+    """Seule la proposition est jugée : un tour d'analyse ne doit aucun rapport de clôture."""
+    contexte = _rapport(
+        tmp_path,
+        _user("analyse"),
+        _read("engine/combat.py"),
+        _say("SUITE :\n→ 💡 Amélioration : lent — `\"optimise engine/combat.py\"`"),
+    )
+    assert contexte is None
+
+
+@pytest.mark.parametrize(
+    "lecture",
+    [
+        _read("sed -n 40,60p ai/analyzer.py", nom="Bash", cle="command"),
+        _read("ai/analyzer.py", nom="Grep", cle="path"),
+        _read("/home/greg/40k/ai/analyzer.py"),
+        _edit("ai/analyzer.py"),
+    ],
+    ids=["bash", "grep", "chemin-absolu", "edite"],
+)
+def test_toutes_les_facons_d_ouvrir_un_fichier_creditent_l_entree(
+    tmp_path: Path, lecture: dict
+) -> None:
+    """Un fichier lu par `sed`, greppé, cité en absolu ou ÉDITÉ a bien été ouvert dans le tour.
+
+    N'en reconnaître qu'une forme réclamerait sur un fichier réellement vu — un faux positif, donc
+    une incitation à contourner le contrôle plutôt qu'à faire le travail.
+    """
+    assert (
+        _rapport(
+            tmp_path,
+            _user("corrige"),
+            _edit("engine/x.py"),
+            lecture,
+            _say(_rapport_conforme("SUITE :\n→ 🔴 Bug : faux — `\"corrige ai/analyzer.py:42\"`")),
+        )
+        is None
+    )
+
+
+def test_une_seule_ancre_ouverte_suffit(tmp_path: Path) -> None:
+    """Un 🕳 Trou cite le bloc fautif ET le test à écrire, qui n'existe pas encore.
+
+    Exiger TOUTES les ancres réclamerait l'ouverture d'un fichier qui n'a pas à exister — le hook
+    se tait plutôt que de réclamer à tort.
+    """
+    assert (
+        _rapport(
+            tmp_path,
+            _user("corrige"),
+            _edit("engine/x.py"),
+            _read("engine/combat.py"),
+            _say(_rapport_conforme(
+                "SUITE :\n→ 🕳 Trou : cas non couvert — `\"engine/combat.py:88 ; "
+                "test à écrire dans tests/unit/engine/test_pas_encore.py\"`"
+            )),
+        )
+        is None
+    )
+
+
+def test_entree_suite_fencee_n_est_pas_celle_du_rapport(tmp_path: Path) -> None:
+    """Un prompt copiable cite volontiers une entrée SUITE : fencée, elle n'est pas le rapport.
+
+    Même raison que pour les sections et les chemins de RELIRE — le filtrage des blocs ``` vaut
+    pour ce contrôle aussi, sinon un prompt qui s'auto-cite se ferait réclamer.
+    """
+    assert (
+        _rapport(
+            tmp_path,
+            _user("corrige"),
+            _edit("engine/x.py"),
+            _say(_rapport_conforme(
+                "SUITE : 🟢 Tout est terminé\n\n```\n→ 🔴 Bug : ancien — `\"corrige ai/jamais_lu.py:1\"`\n```"
+            )),
+        )
+        is None
+    )
+
+
+def test_le_motif_d_ancre_suit_la_liste_de_claude_md(tmp_path: Path) -> None:
+    """Le motif est CONSTRUIT sur `code_suffixes` : un deuxième exemplaire de la liste divergerait.
+
+    C'est le défaut du 2026-08-12 (deux listes de sections, la moins à jour commandait) transposé
+    aux suffixes. Sur un CLAUDE.md où seul `.ts` est du code, une ancre `.py` n'en est plus une.
+    """
+    hook = _hook_isole(
+        tmp_path,
+        "FICHIERS COMPTÉS COMME CODE : `.ts`\nSECTIONS EXIGÉES : `LU`=toujours\n",
+    )
+    def diagnostic(cite: str, *lectures: dict) -> str:
+        suite = f"SUITE :\n→ 🔴 Bug : faux — `\"corrige {cite}\"`"
+        return _rapport(tmp_path, _user("a"), *lectures, _say("LU : x\n\n" + suite), hook=hook) or ""
+
+    # `.ts` EST une ancre sous cette config : non ouvert il est réclamé comme tel, ouvert il passe.
+    assert "n'a été ouvert à aucun moment" in diagnostic("front/src/a.ts:42")
+    assert diagnostic("front/src/a.ts:42", _read("front/src/a.ts")) == ""
+    # `.py` n'en est plus une : le diagnostic bascule sur l'absence d'ancre, il ne parle plus
+    # d'ouverture. C'est la liste de CLAUDE.md qui commande, et elle seule.
+    assert "ne cite aucun fichier de code" in diagnostic("ai/analyzer.py:42")
