@@ -161,7 +161,14 @@ def test_the_lock_covers_the_keys_that_slipped_through(
 
 
 def test_a_previous_format_is_refused_at_load(tmp_path: Any) -> None:
-    """Une save au format précédent est refusée AVANT d'écraser la partie en cours."""
+    """Une save au format précédent est refusée AVANT d'écraser la partie en cours.
+
+    L'assertion porte sur « écrite avant … », pas sur le nom du format : `_reject_legacy` a DEUX
+    branches, et celle du format inconnu interpole l'en-tête lu, donc elle contient elle aussi
+    `W40KTL03`. Chercher ce seul nom rendait le verrou vert quoi qu'il arrive — vérifié : sans
+    TL03 dans `_LEGACY_MAGICS`, le refus dégénère en « format de fichier inconnu », indiscernable
+    d'un fichier corrompu, et l'ancienne assertion passait quand même.
+    """
     import struct
 
     from services.game_saves import SaveStore
@@ -181,5 +188,5 @@ def test_a_previous_format_is_refused_at_load(tmp_path: Any) -> None:
         f.write(length.pack(len(state_bytes)) + state_bytes)
     store.set_current("partie_tl03")
 
-    with pytest.raises(ValueError, match="W40KTL03"):
+    with pytest.raises(ValueError, match=f"écrite avant {_MAGIC.decode()}"):
         store.point("20260101-000000")
