@@ -120,6 +120,15 @@ descente n'en est pas le miroir (elle dépend du départ, la montée dépend de 
 état CACHÉ à effet sur la récompense (+1 BS de Plunging Fire 22.05, coût de descente au move
 suivant) — le motif d'aliasing qui a déjà coûté un run à ce projet.
 
+**Coût du point de choix, mesuré et resserré (2026-09-09)** : la question « montes-tu ? »
+consomme un step d'épisode. Armée sur la seule distance à vol d'oiseau, elle prenait **9,1 % des
+steps** (52 sur 572 joués). La borne d'armement déduit désormais le coût de montée — condition
+NÉCESSAIRE, puisque le trajet réel est toujours >= la distance à vol d'oiseau, donc elle ne peut
+écarter que des questions dont la réponse ne pouvait être que « non » : **5,3 %** (30 sur 561),
+à rendement de montée inchangé (0,8 %). Une borne fondée sur le pool de move réel a été mesurée
+et écartée : elle n'en retire que 2 sur 52, le pool de sol étant vaste — ce qui mord, c'est le
+budget vertical, pas l'accès au plancher.
+
 **Rendement mesuré, à connaître avant d'espérer** : sur 3 parties gym à x1, déclaration toujours
 acceptée, **62 cellules sur 7 408** offertes par le masque (0,8 %) mettent au moins une figurine à
 l'étage. La verticalité est désormais *jouable*, elle n'est pas *fréquente* : à x1 un socle ne tient
