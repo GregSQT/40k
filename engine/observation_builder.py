@@ -655,9 +655,20 @@ class ObservationBuilder:
         return out
 
     def _squad_terrain_flags(
-        self, game_state: Dict[str, Any], active_squad_id: str, active_unit: Dict[str, Any]
+        self,
+        game_state: Dict[str, Any],
+        active_squad_id: str,
+        active_unit: Dict[str, Any],
+        *,
+        hidden_only: bool = False,
     ) -> Tuple[float, float, float]:
         """(hidden, gone_to_ground_ready, in_cover) de l escouade — regles 13.09, 13.5, 13.08.
+
+        ``hidden_only`` ne rend que **hidden**, les deux autres a 0. C est le mode des entites
+        NON actives, pour qui 13.09 est desormais emis (il conditionne ``los_can_see``) alors que
+        13.5 et 13.08 restent propres a l unite observee. Il n existe PAS de second calcul de
+        13.09 : c est la meme fonction, les memes gardes et la meme geometrie — un chemin
+        parallele aurait donne deux jeux de gardes libres de diverger.
 
         Les trois sont calcules ICI, a l instant de l observation, et non lus sur
         ``unit['hidden']`` : ce champ n est rafraichi qu au DEBUT de la phase de tir
@@ -692,24 +703,39 @@ class ObservationBuilder:
             return 0.0, 0.0, 0.0
         terrain_areas = require_key(game_state, "terrain_areas")
 
-        in_any_terrain = compute_models_within_terrain(
-            entry, by_model, game_state, terrain_areas, obscuring_only=False
-        )
-        all_in_terrain = len(in_any_terrain) == len(by_model)
-        # Les passes suivantes sont conditionnees : une zone obscurante EST une zone de terrain,
-        # donc « toutes dans une zone obscurante » implique « toutes dans une zone ». Si le
-        # couvert est deja faux, hidden l est aussi — inutile de rescanner (le test
-        # figurine<->polygone est le poste dominant de cette fonction).
+        # Volet « n a pas tire ce tour ni au precedent » de 13.09 : deux lectures d ensemble,
+        # aucune geometrie. Teste AVANT tout scan parce qu il suffit a trancher hidden — mesure
+        # sur le chemin d entrainement : il l ecarte sur 1078 entites sur 4175, auxquelles
+        # s ajoutent 1167 non hideable, soit 54 % des entites resolues sans aucun scan. L ordre
+        # etait indifferent tant que seule l unite active etait calculee ; il porte maintenant le
+        # cout du mode `hidden_only`, appele pour chaque entite posee a chaque step.
         shot_now = str(active_squad_id) in {str(x) for x in game_state.get("units_shot", set())}
         shot_prev = str(active_squad_id) in {
             str(x) for x in game_state.get("units_shot_previous_turn", set())
         }
-        hidden = False
-        if all_in_terrain and not shot_now and not shot_prev:
+        may_hide = not shot_now and not shot_prev
+
+        def _all_models_in_obscuring() -> bool:
             in_obscuring = compute_models_within_terrain(
                 entry, by_model, game_state, terrain_areas, obscuring_only=True
             )
-            hidden = len(in_obscuring) == len(by_model)
+            return len(in_obscuring) == len(by_model)
+
+        if hidden_only:
+            # UNE passe, et seulement si les gardes gratuites laissent hidden possible. La passe
+            # « toute zone de terrain » ci-dessous ne sert que `in_cover` et de court-circuit :
+            # ici elle serait un second scan pour un drapeau qui n est pas demande.
+            return (1.0 if (may_hide and _all_models_in_obscuring()) else 0.0), 0.0, 0.0
+
+        in_any_terrain = compute_models_within_terrain(
+            entry, by_model, game_state, terrain_areas, obscuring_only=False
+        )
+        all_in_terrain = len(in_any_terrain) == len(by_model)
+        # Passe obscurante conditionnee : une zone obscurante EST une zone de terrain, donc
+        # « toutes dans une zone obscurante » implique « toutes dans une zone ». Si le couvert est
+        # deja faux, hidden l est aussi — inutile de rescanner (le test figurine<->polygone est le
+        # poste dominant de cette fonction).
+        hidden = all_in_terrain and may_hide and _all_models_in_obscuring()
 
         gtg_ready = False
         if hidden:
@@ -1532,6 +1558,31 @@ class ObservationBuilder:
             squad_id=squad_id,
         )
 
+        # État terrain (13.09 / 13.5 / 13.08) recalculé à chaud : le champ `unit['hidden']` du
+        # moteur n'est posé qu'au début de la phase de tir (`compute_hidden_statuses`, un seul
+        # site d'appel), donc périmé pendant le move — exactement le moment où l'agent décide
+        # d'aller se cacher — et après un pile-in ou une consolidation adverses.
+        #
+        # `hidden` est émis pour TOUTE entité, les deux autres pour la seule unité active. C'est
+        # 13.09 qui décide de la VISIBILITÉ (« while a model is hidden, it can only be visible to
+        # enemy models that are within its detection range ») : sans ce drapeau, `los_can_see`
+        # ci-dessous ne pourrait pas dire ce que l'action de tir fera. 13.5 et 13.08 n'ont pas ce
+        # rôle — pour une entité ENNEMIE, `cover_vs_observer` porte déjà 13.08 EXACT par paire, et
+        # 13.5 n'agit que par la réduction de −3" déjà pliée dans `hidden_enemy_out_of_detection`.
+        # Les émettre en plus coûterait une seconde passe terrain par entité pour une information
+        # soit redondante, soit strictement plus faible.
+        #
+        # §0.40 point 5 : une entité PAS ENCORE POSÉE n'a pas d'état de terrain — ses figurines
+        # sont toutes à la sentinelle (-1,-1). Le scan y répondait 0 par accident, la sentinelle
+        # tombant hors des polygones ; la garde le rend contractuel et supprime un scan par entité
+        # non posée à chaque step de déploiement, comme la même garde le fait pour `los_can_see`.
+        hidden_flag = gtg_flag = cover_flag = 0.0
+        if entity_deployed:
+            hidden_flag, gtg_flag, cover_flag = self._squad_terrain_flags(
+                game_state, squad_id, unit, hidden_only=not is_active
+            )
+        binv[unit_bin_index("hidden")] = hidden_flag
+
         if not is_ally:
             # Couvert et visibilité de cette entité ENNEMIE vus depuis l'unité observatrice.
             # `cover` est la valeur EXACTE de 13.08 (ses DEUX conditions alternatives, dont
@@ -1542,8 +1593,12 @@ class ObservationBuilder:
             # à 24″, donc la cible tirable est souvent hors de la grille.
             #
             # `los_can_see` accompagne obligatoirement `cover_vs_observer` : sans lui, un couvert
-            # à 0 serait ambigu (cible invisible OU visible sans couvert) — `cover` implique
-            # `can_see` dans `compute_unit_los`.
+            # à 0 serait ambigu (cible invisible OU visible sans couvert).
+            #
+            # ⚠️ `cover` n'implique PLUS `can_see` depuis que 13.09 entre dans `los_can_see` : le
+            # couple (`los_can_see=0`, `cover_vs_observer=1`) est atteignable et PORTEUR — « je ne
+            # peux pas la prendre pour cible d'ici, et si je m'approche à portée de détection elle
+            # aura le couvert ». `cover` reste 13.08 EXACT, inchangé.
             #
             # Coût : appel PAIR-CACHÉ (`_unit_los_pair_cache`), invalidé de façon ciblée par le
             # choke-point `_touch_unit_los` à chaque écriture de position ou perte de figurine —
@@ -1557,10 +1612,30 @@ class ObservationBuilder:
             # depuis elle). Les deux bits restent à 0 et `deploy_not_on_board` porte la raison ;
             # c'est aussi 28 appels LoS fantômes économisés par step de déploiement.
             if not ctx["active_not_deployed"] and entity_deployed:
-                from engine.phase_handlers.shooting_handlers import compute_unit_los
+                from engine.phase_handlers.shooting_handlers import (
+                    compute_unit_los,
+                    hidden_enemy_out_of_detection,
+                )
 
                 los = compute_unit_los(game_state, ctx["active_unit"], unit)
-                _b("los_can_see", bool(los["can_see"]))
+                # 13.09 fait partie de la VISIBILITÉ, pas d'un filtre posé après elle : « while a
+                # model is hidden, it can only be visible to enemy models that are within its
+                # detection range » (13 Terrain.pdf). `compute_unit_los` ne répond que 06.01 —
+                # la porte de détection ne vivait que dans l'éligibilité du tir
+                # (`valid_target_pool_build`), donc l'observation annonçait `los_can_see = 1` sur
+                # une cible que l'action de tir refusait. Principe D1 : l'obs décrit ce que
+                # l'action fera.
+                #
+                # MÊMES fonctions que le moteur (`hidden_enemy_out_of_detection`, per-figurine,
+                # avec le −3" gone to ground de 13.5) : aucune réimplémentation, donc aucune
+                # métrique libre de diverger. Le `hidden_flag` est celui calculé plus haut pour
+                # cette entité — un seul scan terrain alimente le bit ET cette porte.
+                can_see = bool(los["can_see"])
+                if can_see and hidden_flag > 0.0 and hidden_enemy_out_of_detection(
+                    game_state, ctx["active_unit"], unit, ctx["detection_range_subhex"]
+                ):
+                    can_see = False
+                _b("los_can_see", can_see)
                 _b("cover_vs_observer", bool(los["cover"]))
 
             # Combien de MES figurines peuvent frapper CETTE cible (04.02) — support du choix de
@@ -1625,14 +1700,8 @@ class ObservationBuilder:
                 )
 
         if is_active:
-            # État terrain (13.09 / 13.5 / 13.08) recalculé à chaud : le champ unit['hidden'] du
-            # moteur n'est rafraîchi qu'au début de la phase de tir, le lire ici renverrait un
-            # état périmé pendant le move — exactement le moment où l'agent décide d'aller se
-            # cacher.
-            hidden_flag, gtg_flag, cover_flag = self._squad_terrain_flags(
-                game_state, squad_id, unit
-            )
-            binv[unit_bin_index("hidden")] = hidden_flag
+            # 13.5 et 13.08 restent propres à l'unité observée (cf. le calcul plus haut, qui les
+            # a déjà produits dans la même passe que `hidden`).
             binv[unit_bin_index("gone_to_ground")] = gtg_flag
             binv[unit_bin_index("in_cover")] = cover_flag
             _c("n_fight_eligible", ctx["n_fight_eligible"])
@@ -2039,6 +2108,13 @@ class ObservationBuilder:
         from engine.utils.weapon_helpers import get_max_ranged_range
         _active_max_ranged_range = float(get_max_ranged_range(active_unit))
 
+        # Detection range 13.09, en subhexes — MÊME lecture que le moteur
+        # (`build_hidden_too_far_by_unit_id`, `valid_target_pool_build`). Résolue UNE fois pour
+        # les 28 entités : c'est une constante de règle, pas une grandeur de paire.
+        _detection_range_subhex = float(
+            require_key(require_key(require_key(game_state, "config"), "game_rules"), "detection_range")
+        ) * int(require_key(game_state, "inches_to_subhex"))
+
         ctx: Dict[str, Any] = {
             "active_squad_id": active_squad_id,
             # Requis par les bits de PAIRE (couvert/visibilité vus depuis l'observateur).
@@ -2105,6 +2181,7 @@ class ObservationBuilder:
             "engagement_zone": ez_zone,
             # V11 §9.5 P4 — portée MAXIMALE en subhexes des armes de tir de l'unité active.
             "active_max_ranged_range": _active_max_ranged_range,
+            "detection_range_subhex": _detection_range_subhex,
         }
 
         def _write_entity(prefix: str, row: int, sid: str, *, is_ally: bool, is_active: bool) -> None:

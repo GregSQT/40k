@@ -23,7 +23,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 
 | Clé | Forme | Contenu |
 |---|---|---|
-| `global_cont` / `global_bin` | (23,) / (93,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs**, **OC live et statut secured (14.02/14.03) par objectif** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur, clause du +1 Wound d'Oath ouverte — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
+| `global_cont` / `global_bin` | (23,) / (93,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs**, **OC live et statut secured (14.02/14.03) par objectif** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur, clause du +1 Wound d'Oath ouverte — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `hidden`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
 | `allies_cont` / `allies_bin` | (12, 20) / (12, 21) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent, pour les ennemis seulement, `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
 | `allies_ability_ids` / `allies_status_ids` | (8, 8) / (8, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../../../config/unit_rules.json) et [`config/unit_statuses.json`](../../../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
 | `allies_wpn_cont` / `_bin` / `_rule_ids` | (8, 20, 13) / (8, 20, 1) / (8, 20, 6) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants, params de règles, et les règles booléennes en **ids** (3ᵉ `EmbeddingBag`, cf. `*_wpn_rule_ids`) |
@@ -310,14 +310,24 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
 [s][7]     = charged                                # 0.0 / 1.0 — a fait une charge move ce tour (§15.11 HI)
 [s][8]     = coherent                               # 0.0 / 1.0 (03.03)
 [s][9]     = engaged                                # 0.0 / 1.0 (03.04)
-[s][10]    = hidden                                 # 0.0 / 1.0 (13.09) [ACTIVE seule]
+[s][10]    = hidden                                 # 0.0 / 1.0 (13.09) [TOUTE entite POSEE]
+                                                    #   Recalcule a chaud : unit['hidden'] du moteur
+                                                    #   n'est pose qu'au debut de la phase de tir.
+                                                    #   Conditionne los_can_see ci-dessous.
 [s][11]    = gone_to_ground                         # 0.0 / 1.0 (13.5) [ACTIVE seule]
 [s][12]    = in_cover                               # 0.0 / 1.0 (13.08 branche intrinseque) [ACTIVE seule]
 [s][13]    = deploy_not_on_board                    # 0.0 / 1.0 — one-hot mise en place
 [s][14]    = deploy_pre_battle                      # 0.0 / 1.0
 [s][15]    = deploy_in_battle                       # 0.0 / 1.0
 [s][16]    = deployed_this_turn                     # 0.0 / 1.0 (clause 2 de [HEAVY] 24.16)
-[s][17]    = los_can_see                            # 0.0 / 1.0 (06.01) [ENNEMIS seuls]
+[s][17]    = los_can_see                            # 0.0 / 1.0 (06.01 ET 13.09) [ENNEMIS seuls]
+                                                    #   VISIBLE **ET** DETECTABLE : une cible hidden
+                                                    #   au-dela de la detection range (15") n'est pas
+                                                    #   visible et le moteur la REFUSE. Oracles :
+                                                    #   compute_unit_los + hidden_enemy_out_of_detection.
+                                                    #   A 0 les trois causes (masque / hors detection /
+                                                    #   pas pose) se separent via hidden + edge_distance.
+                                                    #   /!\ cover_vs_observer n'implique PLUS ce bit.
 [s][18]    = cover_vs_observer                      # 0.0 / 1.0 (13.08 EXACT, 2 branches) [ENNEMIS seuls]
 [s][19]    = charge_reachable_max_roll              # 0.0 / 1.0 — un plan de charge legal existe au jet
                                                     #   MAXIMAL (11.02, 2D6 -> 12) [ENNEMIS seuls, phase

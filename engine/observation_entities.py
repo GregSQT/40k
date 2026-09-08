@@ -268,7 +268,12 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     "charged",           # a fait une charge move ce tour (requis pour HI §15.11 Leap to Defend)
     "coherent",
     "engaged",             # dans la zone d'engagement d'une unité ADVERSE de cette unité
-    "hidden",              # ⚠ unité ACTIVE uniquement (13.09)
+    # 13.09, émis pour TOUTE entité posée (masque = `present` ET NON `deploy_not_on_board`).
+    # Ce n'est pas une propriété décorative : 13.09 conditionne la VISIBILITÉ elle-même, donc
+    # `los_can_see` ci-dessous. Le lire sur `unit['hidden']` est INTERDIT — le moteur ne pose ce
+    # champ qu'au début de la phase de tir, il est périmé pendant le move et après un pile-in
+    # adverse ; l'observation le recalcule à chaud (`_squad_terrain_flags`, mode `hidden_only`).
+    "hidden",
     "gone_to_ground",      # ⚠ unité ACTIVE uniquement (13.5)
     "in_cover",            # ⚠ unité ACTIVE uniquement (13.08)
     "deploy_not_on_board",  # one-hot mise en place (source `deployed_on_turn`)
@@ -285,7 +290,18 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     # Ne PAS réimplémenter ici la branche « toutes mes figurines dans une terrain area » de
     # 13.08 : elle ne couvre qu'une des deux conditions alternatives, donc un bit à 0 voudrait
     # dire « indéterminé » au lieu de « pas de couvert ».
-    "los_can_see",          # 06.01 : ≥ 1 figurine de la cible visible depuis l'observateur
+    # VISIBLE **ET** DÉTECTABLE — 06.01 ET 13.09, pas 06.01 seul. 13.09 dit « while a model is
+    # hidden, it can only be visible to enemy models that are within its detection range » : une
+    # cible cachée au-delà de la detection range n'est pas visible, et le moteur la REFUSE
+    # (`valid_target_pool_build`). Tant que ce bit ne portait que la géométrie, l'observation
+    # annonçait `1` sur une cible que l'action de tir rejetait — l'agent ne pouvait pas apprendre
+    # à entrer dans les 15" ni à se cacher au-delà. Oracles moteur, non réimplémentés :
+    # `compute_unit_los` pour 06.01, `hidden_enemy_out_of_detection` pour 13.09/13.5.
+    #
+    # ⚠️ À 0, ce bit ne distingue pas ses trois causes (masqué, hors détection, pas encore posé).
+    # C'est voulu et sans perte : `hidden` (émis pour toute entité) et `edge_distance` les
+    # séparent, pour ZÉRO scalaire de plus.
+    "los_can_see",
     "cover_vs_observer",    # 13.08 EXACT : la cible a le bénéfice du couvert contre mon tir
     # ⚠ Entité ENNEMIE et phase de CHARGE uniquement (masque = `phase_charge` du contexte
     # global). V11 §9 P3-2 a fait de la cible de charge une décision de l'agent ; la tête
