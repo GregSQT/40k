@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  filterOathTargets,
   OATH_HEX_HIT_TOLERANCE,
   type OathTargetCandidate,
   type OathUnitsCache,
-  filterOathTargets,
   pickOathTargetAtHex,
 } from "./oathTargetSelection";
 
@@ -17,7 +17,12 @@ const CACHE: OathUnitsCache = {
 
 const p1 = 1;
 const p2 = 2;
-const unit = (id: number, col: number, hp = 1): OathTargetCandidate => ({ id, player: p2, col, HP_CUR: hp });
+const unit = (id: number, col: number, hp = 1): OathTargetCandidate => ({
+  id,
+  player: p2,
+  col,
+  HP_CUR: hp,
+});
 
 describe("filterOathTargets", () => {
   it("inclut une unité adverse vivante sur la table", () => {

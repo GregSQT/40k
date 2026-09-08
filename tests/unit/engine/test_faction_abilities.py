@@ -465,7 +465,9 @@ def test_une_escouade_en_reserve_est_ecartee_mais_pas_celles_qui_tiennent_la_tab
     assert gs["pending_oath_selection"] == 1
 
     decoder = _DECODER
-    assert sorted(decoder.oath_selection_slots(gs).values()) == ["3"]
+    slots = decoder.oath_selection_slots(gs)
+    assert slots is not None, "une designation est en attente : le decodeur doit rendre des slots"
+    assert sorted(slots.values()) == ["3"]
 
 
 @pytest.mark.parametrize("faction, p2_faction", [(ASTARTES, ORKS), (ORKS, ASTARTES)])

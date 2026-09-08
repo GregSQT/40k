@@ -34,10 +34,10 @@ export interface OathTargetCandidate {
  */
 export function filterOathTargets(
   units: ReadonlyArray<OathTargetCandidate>,
-  selectionPlayer: number,
+  selectionPlayer: number
 ): OathTargetCandidate[] {
   return units.filter(
-    (unit) => unit.player !== selectionPlayer && (unit.HP_CUR ?? 0) > 0 && unit.col >= 0,
+    (unit) => unit.player !== selectionPlayer && (unit.HP_CUR ?? 0) > 0 && unit.col >= 0
   );
 }
 
