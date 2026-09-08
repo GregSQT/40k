@@ -119,12 +119,17 @@ def test_exploiter_budget_cap_never_exceeds_lineage_profile_total_episodes(
 
 
 def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> None:
-    """Les valeurs décidées le 2026-09-07, épinglées depuis la spécification.
+    """Les valeurs du régime de lignée, épinglées depuis le `_doc` du profil (révision 2026-09-08).
 
     Ce ne sont pas « des valeurs par défaut » : elles remplacent vingt rampes `decay_fraction` et
     les surcharges d'étape de `vf_coef` / `max_grad_norm`, et c'est leur UNIFORMITÉ sur toute la
     lignée qui rend deux étapes comparables. Un réglage qui reviendrait se poser sur une seule
     étape rouvrirait exactement ce que cette conception ferme.
+
+    Trois valeurs ont été redécidées le 2026-09-08, chacune sur une mesure inscrite dans le `_doc` :
+    `n_steps` 32640 → 8160 (les 55 updates du run P2 du 2026-09-07 ont TOUTES été coupées par
+    l'early-stop `target_kl`, soit une epoch sur quatre : le rollout quadruplé divisait par quatre
+    l'apprentissage par épisode), `ent_coef` 0.03 → 0.01 et `vf_coef` 0.15 → 0.17.
 
     `batch_size` est lu ici alors qu'il n'est PLUS surchargé, et c'est le point : le profil le
     rend à l'héritage de `x1_long` depuis le 2026-09-07, donc seule la valeur RÉSOLUE dit s'il
@@ -135,10 +140,10 @@ def test_the_lineage_profile_pins_the_values_of_the_regime(profil_lignee) -> Non
     """
     mp = profil_lignee["model_params"]
     assert mp["learning_rate"] == pytest.approx(0.001)
-    assert mp["ent_coef"] == pytest.approx(0.03)
-    assert mp["n_steps"] == 32640
+    assert mp["ent_coef"] == pytest.approx(0.01)
+    assert mp["n_steps"] == 8160
     assert mp["batch_size"] == 1020
-    assert mp["vf_coef"] == pytest.approx(0.15)
+    assert mp["vf_coef"] == pytest.approx(0.17)
     assert profil_lignee["agent_seat_p2_ratio"] == pytest.approx(0.6)
 
 
@@ -182,10 +187,16 @@ def test_the_lineage_profile_inherits_everything_it_does_not_redeclare(
 
 
 def test_the_cold_profile_keeps_its_ramps(profil_froid) -> None:
-    """VERT VACANT évité : sans cette assertion, les deux profils pourraient être identiques."""
+    """VERT VACANT évité : sans ces assertions, les deux profils pourraient être identiques.
+
+    Ce qui SÉPARE encore les deux profils : le froid exprime `ent_coef` et `learning_rate` en
+    RAMPES là où la lignée pose des scalaires, et il sur-représente le siège faible (0.75 contre
+    0.6). `vf_coef` ne les sépare plus — le 0.17 mesuré le 2026-09-08 a été porté dans `x1`,
+    `x1_long` ET la lignée le même jour, la surcharge de la lignée n'étant plus qu'un rappel.
+    """
     assert isinstance(profil_froid["model_params"]["ent_coef"], dict)
     assert isinstance(profil_froid["model_params"]["learning_rate"], dict)
-    assert profil_froid["model_params"]["vf_coef"] == pytest.approx(0.5)
+    assert profil_froid["model_params"]["vf_coef"] == pytest.approx(0.17)
     assert profil_froid["agent_seat_p2_ratio"] == pytest.approx(0.75)
 
 

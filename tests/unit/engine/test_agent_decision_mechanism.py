@@ -48,6 +48,7 @@ from tests.unit.engine._config_helpers import (
     NEUTRAL_TEST_ARMY_FACTION,
     NEUTRAL_TEST_FACTION,
     build_engine_config,
+    build_game_rules,
     build_move_rules,
 )
 from tests._state_invariants import turn_state_invariants, unit_invariants
@@ -71,13 +72,16 @@ CHOICE_RULE = {
 
 def _config() -> Dict[str, Any]:
     return {
-        "game_rules": {
-            "max_turns": 5,
-            "engagement_zone": 1,
-            "engagement_zone_vertical": 5,
-            "max_base_size_hex": 35,
-            "cover_ratio": 0.0,
-        },
+        # Regles REELLES + les seules valeurs auxquelles ces tests sont sensibles. Un
+        # sous-ensemble recopie a la main fige les regles au jour ou il a ete ecrit : c'est
+        # ainsi que `detection_range`, requis par l'observation depuis 2b71ef00, manquait ici.
+        "game_rules": build_game_rules(
+            max_turns=5,
+            engagement_zone=1,
+            engagement_zone_vertical=5,
+            max_base_size_hex=35,
+            cover_ratio=0.0,
+        ),
         "move": build_move_rules(),
         "charge": {"charge_max_distance": 12},
         "board": {"default": {"hex_radius": 1.0, "margin": 0.0}},

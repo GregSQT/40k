@@ -14,6 +14,8 @@ Stratégie commune :
 
 from __future__ import annotations
 
+import os
+import sys
 from typing import Any, Dict
 
 import pytest
@@ -85,17 +87,24 @@ def test_verrou_game_state_spatial_relations(monkeypatch: pytest.MonkeyPatch) ->
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. engine/observation_builder.py — call-site ligne 1802
+# 2. engine/observation_builder.py — les deux call-sites du bloc ENGAGEMENT
 # ─────────────────────────────────────────────────────────────────────────────
 
 def test_verrou_game_state_observation_builder(monkeypatch: pytest.MonkeyPatch) -> None:
-    """build_squad_observation passe game_state à unit_entries_within_engagement_zone (ligne 1802).
+    """build_squad_observation passe game_state à unit_entries_within_engagement_zone.
 
     Setup minimal pour atteindre le bloc ENGAGEMENT :
     - deux escouades déployées (deployed_on_turn=0 ≠ None → on_battlefield)
     - méthodes lourdes d'encodage d'entités mockées (objectives, pending, deployment)
-    - spy sur la primitive : si game_state= est supprimé ligne 1802, le spy reçoit None
-      et l'assertion échoue.
+    - spy sur la primitive : si game_state= est supprimé d'un des deux call-sites,
+      celui-ci reçoit None et l'assertion échoue.
+
+    Le spy N'ACCEPTE QUE les appels ORIGINAIRES de `engine/observation_builder.py`, et c'est
+    indispensable : `build_squad_observation` déclenche aussi `_squads_are_engaged`
+    (shared_utils), qui appelle la même primitive AVEC le game_state. Sans ce filtre, mesuré
+    le 2026-09-08, retirer `game_state=` des DEUX call-sites visés laissait le test VERT — il
+    lisait l'appel du voisin. Aucun numéro de ligne n'est cité : ils dérivent à chaque édition
+    du fichier (les « 1802 / 1851 » de la version précédente valaient 2000 / 2049).
     """
     from tests.unit.engine._config_helpers import build_game_rules
     from tests.unit.engine._state_builders import synthetic_state, synthetic_unit
@@ -114,12 +123,18 @@ def test_verrou_game_state_observation_builder(monkeypatch: pytest.MonkeyPatch) 
         inches_to_subhex=1,
         # victory_points n'est pas posé par synthetic_state — ajouté via overrides ci-dessous
         victory_points={1: 0, 2: 0},
+        # Scénario SANS objectif (14.01) : le bloc « OC live + secured » lit
+        # `game_state["objectives"]` en require_key, en amont du bloc ENGAGEMENT visé ici, et les
+        # deux encodages d'objectif sont mockés plus bas. La liste vide est la valeur métier d'un
+        # scénario qui n'en pose aucun, pas un remplissage anti-erreur.
+        objectives=[],
     )
     gs["config"]["army_faction"] = {"1": "TYRANIDS", "2": "TYRANIDS"}
     # value_at_start est posé par build_units_cache (appelé dans synthetic_state). ✓
     # command_points est posé par turn_state_invariants(). ✓
 
-    gs_received: list = []
+    #: (game_state reçu, fichier appelant, ligne appelante) pour chaque appel à la primitive.
+    appels: list = []
 
     real_uewz = unit_entries_within_engagement_zone
 
@@ -133,7 +148,8 @@ def test_verrou_game_state_observation_builder(monkeypatch: pytest.MonkeyPatch) 
         game_state: Any = None,
         memoise: bool = True,
     ) -> bool:
-        gs_received.append(game_state)
+        appelant = sys._getframe(1)
+        appels.append((game_state, appelant.f_code.co_filename, appelant.f_lineno))
         return real_uewz(
             first_entry, second_entry, engagement_zone,
             metric=metric, vertical_zone_inches=vertical_zone_inches,
@@ -159,14 +175,28 @@ def test_verrou_game_state_observation_builder(monkeypatch: pytest.MonkeyPatch) 
 
     # Appel réel — peut lever après le bloc ENGAGEMENT (entity encoding non mocké), ce qui
     # est acceptable : le spy est invoqué EN AMONT de ce qui pourrait lever.
+    erreur: Exception | None = None
     try:
         builder.build_squad_observation(gs, "u1")
-    except Exception:
-        pass  # échec APRÈS le bloc EZ (entity encoding) — le spy a déjà été appelé
+    except Exception as exc:
+        erreur = exc  # échec APRÈS le bloc EZ (entity encoding) — le spy a déjà été appelé
 
-    assert gs_received and any(g is gs for g in gs_received), (
+    depuis_obs = [
+        (recu, ligne) for recu, fichier, ligne in appels
+        if fichier.endswith(os.path.join("engine", "observation_builder.py"))
+    ]
+
+    # L'exception est REPORTÉE dans le message : avalée en silence, une clé nouvellement requise
+    # EN AMONT du bloc EZ (c'est arrivé avec `objectives`) fait échouer le verrou en accusant la
+    # propagation de `game_state`, alors que la ligne visée n'a jamais été atteinte.
+    assert depuis_obs, (
+        "le bloc ENGAGEMENT de build_squad_observation n'a pas été atteint : le verrou ne mesure "
+        f"rien. Exception levée pendant l'appel : {erreur!r}"
+    )
+    manquants = [ligne for recu, ligne in depuis_obs if recu is not gs]
+    assert not manquants, (
         "build_squad_observation n'a pas propagé game_state à unit_entries_within_engagement_zone "
-        "(ligne 1802 ou 1851). La métrique lirait la config disque au lieu du game_state courant."
+        f"(lignes {manquants}). La métrique lirait la config disque au lieu du game_state courant."
     )
 
 
