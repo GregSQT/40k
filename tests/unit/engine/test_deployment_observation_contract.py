@@ -805,6 +805,13 @@ def test_squad_obs_size_target_matches_the_schema():
     ``GLOBAL_CONT_FIELDS`` (+16), ``reserved_mission_bin_0..31`` dans ``GLOBAL_BIN_FIELDS``
     (+32). Total : +56. Impose un retrain `--new`.
 
+    `2026-09-08` — 16791 -> 16811. OC live + `secured` par objectif (14.02/14.03) :
+    ``objective_my_oc_0..4`` et ``objective_enemy_oc_0..4`` dans ``GLOBAL_CONT_FIELDS``,
+    ``objective_secured_mine_0..4`` et ``objective_secured_enemy_0..4`` dans
+    ``GLOBAL_BIN_FIELDS``. Contribution : +20 — les champs GLOBAUX comptent UNE fois, pas par
+    entité, contrairement aux entrées de ``UNIT_*_FIELDS`` ci-dessus qui sont multipliées par 32.
+    Impose un retrain `--new`.
+
     Ce verrou valait 20768 tant que le point 3 restait ouvert : les quatre autres points ne
     touchent QUE le contenu de l'observation de déploiement, jamais sa taille — donc aucun modèle
     n'était invalidé par eux. Le point 3 ajoute le bloc « candidats de déploiement »
@@ -815,7 +822,19 @@ def test_squad_obs_size_target_matches_the_schema():
         DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
     )
 
-    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 16791
+    # Garde-fou d'ACQUITTEMENT, pas contrôle de cohérence : `w40k_core` vérifie déjà que la config
+    # d'agent suit la valeur calculée et lève au démarrage sinon. Ce que ce littéral ajoute, et lui
+    # seul, c'est de forcer un humain à CONSTATER qu'une taille a bougé — donc qu'aucun modèle
+    # existant n'est réutilisable. Il était NU (`assert a == b`) : il annonçait que deux nombres
+    # diffèrent sans dire lequel était le nouveau, ni quoi en faire.
+    _ACKNOWLEDGED_OBS_SIZE = 16811
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == _ACKNOWLEDGED_OBS_SIZE, (
+        f"obs_size a changé : {_ACKNOWLEDGED_OBS_SIZE} -> "
+        f"{ObservationBuilder.SQUAD_OBS_SIZE_TARGET}. Tout modèle entraîné est invalidé par "
+        f"construction — retrain `--new` (dizaines d'heures en x1, centaines en x5). "
+        f"Acquitter ici, aligner `obs_size` dans les profils de la config d'agent, et ajouter "
+        f"la ligne correspondante à la lignée de cette docstring."
+    )
     assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 96, (
         "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
         "7 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"
