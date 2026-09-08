@@ -27,6 +27,13 @@ TROIS CHOIX DE CONSTRUCTION, chacun imposé par une mesure et non par une préf�
    de la case désignée. Elle balaie donc tout le pool — 340 cases sur les trois unités, toutes
    validables en code réel.
 
+LES DEUX PORTES SONT COUVERTES, et il en fallait deux. ``geodesic_field_for_origin`` mémoïse son
+champ dans ``_move_spatial_cache`` : un ``preview_move_plan`` le calcule, et le ``commit_move_plan``
+qui suit le relit sans jamais appeler ``geodesic_move_reach``. Mesure du 2026-09-09, unité 1005,
+case injoignable (15, 44) : commit APRÈS preview — refusé, 0 appel au BFS ; commit SANS preview —
+refusé, 1 appel. Un test qui ne commit qu'après un preview ne dit donc rien du commit lui-même,
+d'où ``test_le_commit_refuse_seul_une_case_injoignable_sans_preview``.
+
 Le budget et les murs se dérivent du PAYLOAD, jamais du moteur : ``game_state['wall_hexes']`` est
 filtré de la réponse HTTP (seul ``dense_wall_hexes`` en sort) et ``get_squad_move_budget`` exige
 l'état interne. ``MOVE × inches_to_subhex`` a été vérifié égal au budget moteur sur les trois
@@ -179,6 +186,42 @@ class TestGeodesicMoveReachIsWiredToPvp:
         assert not refusees, (
             f"unité {unit_id} : {len(refusees)} case(s) offertes par son propre pool sont "
             f"refusées par la validation — masque ⊄ exécutable — {refusees[:5]}"
+        )
+
+    def test_le_commit_refuse_seul_une_case_injoignable_sans_preview(self, game_x1, unit_id):
+        """``commit_move_plan`` mesure le trajet LUI-MÊME, sans dépendre d'un preview préalable.
+
+        AUCUN ``preview_move_plan`` NE DOIT PRÉCÉDER LE COMMIT DANS CE TEST, et ce n'est pas une
+        économie d'appel : c'est tout le sujet. ``geodesic_field_for_origin`` mémoïse son champ
+        dans ``_move_spatial_cache``, donc un preview le calcule et le commit qui suit le relit
+        sans jamais appeler ``geodesic_move_reach``. Mesure du 2026-09-09 sur l'unité 1005, case
+        injoignable (15, 44) : commit APRÈS preview — refusé, 0 appel au BFS ; commit SANS
+        preview — refusé, 1 appel. Seul le second prouve que le commit sait refuser seul. Y
+        ajouter un preview « par symétrie » avec le test suivant rendrait celui-ci aveugle.
+
+        ``move_model_destinations`` peut être appelé sans risque : le pool a son propre BFS
+        inline et ne peuple pas le cache géodésique — vérifié par le compteur ci-dessus.
+
+        Enjeu de règle : sans ce contrôle côté commit, un client qui saute le preview (script,
+        rejeu, front modifié) téléporterait une figurine derrière un mur en violation de 09.05.
+        """
+        model_id = game_x1.models_of(unit_id)[0]
+        game_x1.act("activate_unit", unitId=unit_id)
+        origin = _model_origin(game_x1, model_id)
+        _pool, candidates = _detour_candidates(game_x1, unit_id, model_id)
+        assert candidates, f"unité {unit_id} : aucune case injoignable à portée (VERT VACANT)"
+
+        target = min(candidates)
+        accepted, _body = game_x1.try_act(
+            "commit_move_plan", unitId=unit_id, plan=[[model_id, target[0], target[1], 0]]
+        )
+        assert not accepted, (
+            f"unité {unit_id} : commit accepté vers {target}, injoignable en "
+            f"{_move_budget(game_x1, unit_id)} pas — 09.05 violée sans passer par le preview"
+        )
+        assert _model_origin(game_x1, model_id) == origin, (
+            f"unité {unit_id} : figurine déplacée en {_model_origin(game_x1, model_id)} alors que "
+            f"le commit a été refusé"
         )
 
     def test_le_plan_d_un_pas_est_previewe_puis_committe_a_la_case_prevue(self, game_x1, unit_id):
