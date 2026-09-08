@@ -812,6 +812,13 @@ def test_squad_obs_size_target_matches_the_schema():
     entité, contrairement aux entrées de ``UNIT_*_FIELDS`` ci-dessus qui sont multipliées par 32.
     Impose un retrain `--new`.
 
+    `2026-09-09` — 16811 -> 16971. Mots-clés de CATÉGORIE par entité : ``kw_infantry``,
+    ``kw_vehicle``, ``kw_monster``, ``kw_fly``, ``kw_psyker`` dans ``UNIT_BIN_FIELDS``.
+    Contribution : 5 bits × 32 entités = +160. L'observation portait le mot-clé VISÉ par
+    [ANTI-X] côté arme sans jamais dire si la cible le portait ; même trou pour le volet
+    MONSTER/VEHICLE de 10.06 et les gates de terrain 13.06/13.08/13.09 sur les entités
+    ennemies. Impose un retrain `--new`.
+
     Ce verrou valait 20768 tant que le point 3 restait ouvert : les quatre autres points ne
     touchent QUE le contenu de l'observation de déploiement, jamais sa taille — donc aucun modèle
     n'était invalidé par eux. Le point 3 ajoute le bloc « candidats de déploiement »
@@ -827,7 +834,7 @@ def test_squad_obs_size_target_matches_the_schema():
     # seul, c'est de forcer un humain à CONSTATER qu'une taille a bougé — donc qu'aucun modèle
     # existant n'est réutilisable. Il était NU (`assert a == b`) : il annonçait que deux nombres
     # diffèrent sans dire lequel était le nouveau, ni quoi en faire.
-    _ACKNOWLEDGED_OBS_SIZE = 16811
+    _ACKNOWLEDGED_OBS_SIZE = 16971
     assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == _ACKNOWLEDGED_OBS_SIZE, (
         f"obs_size a changé : {_ACKNOWLEDGED_OBS_SIZE} -> "
         f"{ObservationBuilder.SQUAD_OBS_SIZE_TARGET}. Tout modèle entraîné est invalidé par "
