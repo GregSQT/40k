@@ -43,10 +43,18 @@ _log = logging.getLogger(__name__)
 # commandement suivante lèverait au fond du moteur — un refus explicite ici vaut mieux qu'un
 # crash obscur au premier tour, et injecter une dotation de départ inventerait des CP que la
 # partie sauvegardée n'avait pas.
+# TL04 = TL03 + les neuf clés obligatoires ajoutées au reset d'épisode depuis TL03 (réserves
+# stratégiques, ingress, suppression, `secured_objectives`) : un état ne capture que le MUTABLE,
+# donc une row TL03 rendrait un game_state privé de ces clés et le premier lecteur lèverait au fond
+# du moteur — après que le chargement a déjà écrasé la partie en cours. Même arbitrage qu'en TL03 :
+# refus explicite au chargement plutôt que réinjection d'une valeur que la save n'avait pas.
 # Les formats antérieurs (TL01, single-pickle) n'ont en plus aucune empreinte : leur état ne peut
 # pas être restauré sans risque de plateau incompatible → REFUSÉS aussi (cf. _reject_legacy).
-_MAGIC = b"W40KTL03"
-_LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02"})
+# AJOUTER UNE CLÉ OBLIGATOIRE AU RESET D'ÉPISODE OBLIGE À BUMPER CETTE MAGIC. Le verrou est
+# tests/unit/services/test_save_format_key_contract.py : il épingle l'empreinte des clés mutables
+# posées par le reset et reste ROUGE tant que la magic n'a pas suivi.
+_MAGIC = b"W40KTL04"
+_LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02", b"W40KTL03"})
 _LEN = struct.Struct(">Q")  # préfixe de longueur : entier 64 bits big-endian
 
 # Rows exclues du menu Select (trop nombreuses) mais présentes dans le playback ⏮⏭.
@@ -145,7 +153,8 @@ def _reject_legacy(name: str, head: bytes) -> None:
         raise ValueError(
             f"partie {name!r} au format {head.decode()} : écrite avant {_MAGIC.decode()}, donc "
             f"illisible (TL01 : sans empreinte de scénario ; TL02 : sans les points de "
-            f"commandement de la règle 08.02). Supprime-la ou rejoue la partie."
+            f"commandement de la règle 08.02 ; TL03 : sans les clés de réserves stratégiques, "
+            f"d'ingress, de suppression, ni `secured_objectives`). Supprime-la ou rejoue la partie."
         )
     raise ValueError(f"partie {name!r} : format de fichier inconnu (en-tête {head!r})")
 

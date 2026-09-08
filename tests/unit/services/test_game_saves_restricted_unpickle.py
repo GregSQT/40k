@@ -14,7 +14,7 @@ import struct
 
 import pytest
 
-from services.game_saves import SaveStore, _pack_record, _safe_loads
+from services.game_saves import _MAGIC, SaveStore, _pack_record, _safe_loads
 
 
 class _RceGadget:
@@ -111,7 +111,7 @@ class TestStoreReadPathIsGuarded:
         forged_state = pickle.dumps(_RceGadget())
         length = struct.Struct(">Q")
         with open(os.path.join(store._dir, "partie_piegee.pkl"), "wb") as f:
-            f.write(b"W40KTL03")
+            f.write(_MAGIC)
             f.write(length.pack(len(meta_bytes)) + meta_bytes)
             f.write(length.pack(len(forged_state)) + forged_state)
         store.set_current("partie_piegee")
@@ -128,7 +128,7 @@ class TestStoreReadPathIsGuarded:
             "state": {"game_state": {"occupation_map": {(1, 2): "u1"}}, "engine_attrs": {}},
         }
         with open(os.path.join(store._dir, "partie_saine.pkl"), "wb") as f:
-            f.write(b"W40KTL03")
+            f.write(_MAGIC)
             f.write(_pack_record(row))
         store.set_current("partie_saine")
 
