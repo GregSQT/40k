@@ -6605,6 +6605,28 @@ def charge_target_edge_distance_subhex(
     return None if distance > int(max_distance) else int(round(distance))
 
 
+def charge_engage_memo(
+    game_state: Dict[str, Any], key: Tuple[Any, ...]
+) -> Dict[Tuple[str, int, int], bool]:
+    """Tranche de mémo d'engagement pour UN plan de charge, partagée par ses cinq intentions.
+
+    Une seule tranche est conservée à la fois : `arm_charge_placement_decision` enchaîne ses cinq
+    appels sur le même état, et une entrée par (figurine, cellule) se compterait en milliers si on
+    empilait les versions successives. Changer de clé jette donc la précédente.
+
+    Fonction de MODULE et non bloc en ligne : c'est la couture par laquelle le test de contrat
+    (``test_charge_intent_memo_contract.py``) substitue un mémo qui ne retient rien, et obtient
+    ainsi le comportement d'AVANT la mémoïsation comme référence de comparaison. Sans elle, un
+    mémo faux de façon cohérente resterait invisible — vérifié : une clé mutilée en
+    ``(figurine, colonne)`` passait le test tant que les deux branches comparées mémoïsaient.
+    """
+    slot = game_state.get("_charge_engage_memo")  # get allowed : mémo optionnel, créé au besoin
+    if slot is None or slot[0] != key:
+        slot = (key, {})
+        game_state["_charge_engage_memo"] = slot
+    return slot[1]
+
+
 def charge_build_valid_plan(
     game_state: Dict[str, Any],
     squad_id: str,
@@ -6670,6 +6692,33 @@ def charge_build_valid_plan(
     _cbvp_hit = _cbvp_cache.get(_cbvp_key, _CBVP_MISS)
     if _cbvp_hit is not _CBVP_MISS:
         return _cbvp_hit
+    # Mémo d'engagement PARTAGÉ ENTRE LES 5 INTENTS — sa clé est celle du plan MOINS `intent`.
+    #
+    # `arm_charge_placement_decision` (L10) appelle cette fonction cinq fois de suite sur le même
+    # état, une par intention. Or `intent` ne pilote QUE `_engaged_sort_key` : l'énumération des
+    # candidats et le test « cette cellule engage-t-elle une cible ? » sont identiques d'une
+    # intention à l'autre. Mesuré le 2026-09-08 sur 200 steps : `charge_build_valid_plan` produit
+    # 303 979 calculs d'engagement, soit 97,5 % de TOUT le calcul d'engagement du step, dont
+    # 69,6 % sous les intentions 1 à 4.
+    #
+    # GAIN RÉELLEMENT OBTENU, compté avec et sans mémo sur le même run de 200 steps :
+    # 348 613 -> 284 631 calculs, soit **18,4 % supprimés**. Et non les ~70 % que la part des
+    # intentions 1-4 laisse espérer : le mémo ne dédoublonne que les couples (figurine, cellule)
+    # réellement redemandés, or `occupied_after` diverge dès la première figurine posée et les
+    # gardes d'atteignabilité et de légalité éliminent la plupart des cellules AVANT ce test.
+    # Le wall du banc ne résout pas ce gain (~3 % attendu contre une variance inter-reps de
+    # 33-46 s sur 400 steps) : c'est le compte, déterministe, qui fait foi.
+    #
+    # Ce mémo n'infirme PAS le critère `memoise=False` d'`entries_in_engagement_zone` (posé en
+    # quatre passes, cf. engine/spatial_relations.py) : celui-ci reste juste, une cellule candidate
+    # n'étant jamais redemandée À TRAVERS LA PARTIE, et l'y laisser entrer chasserait du cache les
+    # paires unité↔unité. Elle l'est en revanche À L'INTÉRIEUR d'une décision de placement, cas que
+    # ce critère est antérieur à connaître. D'où un mémo LOCAL au plan, jamais le cache global.
+    #
+    # Une seule tranche est gardée (pas un dict de dicts) : les cinq appels se suivent, et une
+    # entrée par (figurine, cellule) se compterait en milliers si on empilait les versions.
+    _eng_key = (str(squad_id), tuple(str(t) for t in target_squad_ids), int(charge_roll), _cbvp_fly, _cbvp_version)
+    _eng_memo = charge_engage_memo(game_state, _eng_key)
     if not charge_check_eligibility(game_state, squad_id, target_squad_ids):
         _cbvp_cache[_cbvp_key] = None
         return None
@@ -6907,12 +6956,21 @@ def charge_build_valid_plan(
                 nc, nr, game_state, squad_id, m, _non_target_enemies, _occupied_by_others
             ):
                 continue
-            synth = _synth_model_entry(game_state, str(squad_id), m, nc, nr)
-            # `memoise=False` : même cellule candidate de BFS que ci-dessus.
-            if not any(
-                unit_entries_within_engagement_zone(synth, te, ez, game_state=game_state, memoise=False)
-                for te in target_entries
-            ):
+            # Verdict INVARIANT PAR INTENTION : il ne dépend que de (figurine, cellule) et de
+            # `target_entries`, tous deux fixés pour ce plan — jamais de `occupied_after`, qui
+            # est la seule chose qui diverge d'une intention à l'autre. Sur un coup de mémo on
+            # économise aussi `_synth_model_entry`, qui n'existe que pour ce test.
+            _eng_k = (mid, nc, nr)
+            _eng_v = _eng_memo.get(_eng_k)  # get allowed : absent = pas encore calculé
+            if _eng_v is None:
+                synth = _synth_model_entry(game_state, str(squad_id), m, nc, nr)
+                # `memoise=False` : même cellule candidate de BFS que ci-dessus.
+                _eng_v = any(
+                    unit_entries_within_engagement_zone(synth, te, ez, game_state=game_state, memoise=False)
+                    for te in target_entries
+                )
+                _eng_memo[_eng_k] = _eng_v
+            if not _eng_v:
                 continue
             engaged_candidates.append(
                 (_engaged_sort_key(nc, nr, d_orig, _formation_gap(nc, nr)), nc, nr)
