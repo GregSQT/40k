@@ -371,13 +371,14 @@ ATTACHED_BODYGUARD_RULE = "charge_impact"
 #: directement (test_attached_units_abilities_19_04.py). Écrite ici et pas dans le test : c'est
 #: la datasheet qui la fixe, et la prochaine capacité ajoutée au Chaplain doit avoir un seul
 #: endroit à toucher.
+#: Les tests qui inspectent `unit["UNIT_RULES"]` (test_attached_units_abilities_19_04.py) ET ceux
+#: qui relisent l'observation (test_squad_obs_unit_rules.py) lisent la MÊME constante : depuis le
+#: 2026-09-08, toute règle portant un `obs_id` est dans `UNIT_RULE_EFFECT_IDS`
+#: (`test_every_registered_obs_id_is_in_the_vocabulary`), donc l'union en vigueur et ce que
+#: l'observation en montre ne peuvent plus diverger. `ATTACHED_LEADER_RULES_OBS`, qui portait
+#: l'écart du temps où `mortal_wounds_on_fight_activation` avait un `obs_id` sans être observée,
+#: n'a plus d'objet.
 ATTACHED_LEADER_RULES = frozenset({"deep_strike", "wound_roll_bonus_fight", "mortal_wounds_on_fight_activation"})
-
-#: Sous-ensemble de `ATTACHED_LEADER_RULES` présent dans `UNIT_RULE_EFFECT_IDS`, donc visible
-#: dans l'observation. `mortal_wounds_on_fight_activation` a un obs_id dans unit_rules.json
-#: mais n'est pas encore dans le vocabulaire d'obs : l'observation ne peut pas la voir.
-#: À lire dans les tests qui lisent l'observation (test_squad_obs_unit_rules.py).
-ATTACHED_LEADER_RULES_OBS = frozenset({"deep_strike", "wound_roll_bonus_fight"})
 
 #: Escouade de 3 figurines : l'unité attachée en comptera 4 (le Chaplain replié).
 ATTACHED_BODYGUARD: Dict[str, Any] = {

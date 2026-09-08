@@ -61,7 +61,6 @@ from tests.unit.engine._config_helpers import (
     ATTACHED_LEADER,
     ATTACHED_LEADER_RULE,
     ATTACHED_LEADER_RULES,
-    ATTACHED_LEADER_RULES_OBS,
     attached_scenario,
     load_engine_from_scenario,
 )
@@ -156,7 +155,7 @@ def test_attached_squad_rule_is_observed_then_extinguished_with_its_source():
     assert ATTACHED_BODYGUARD_RULE in union, "l'escouade a perdu sa propre regle au fold"
 
     before = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
-    assert before == {ATTACHED_BODYGUARD_RULE, *ATTACHED_LEADER_RULES_OBS}, (
+    assert before == {ATTACHED_BODYGUARD_RULE, *ATTACHED_LEADER_RULES}, (
         "l'observation doit porter les DEUX sources de l'union 19.04 — celle de l'escouade et "
         "celle du leader attache"
     )
@@ -188,7 +187,7 @@ def test_attached_squad_rule_is_observed_then_extinguished_with_its_source():
     # Le leader vit encore : l'unite existe, et c'est bien la SOURCE morte qui a disparu.
     assert eng.game_state["squad_models"]["101"], "le Chaplain attache doit survivre"
     after = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
-    assert after == set(ATTACHED_LEADER_RULES_OBS), (
+    assert after == set(ATTACHED_LEADER_RULES), (
         "la regle du bodyguard mort doit disparaitre, celle du Chaplain VIVANT doit rester — "
         "un bloc entierement vide prouverait un zerotage, pas 19.04"
     )
@@ -244,10 +243,17 @@ def test_composite_datasheet_abilities_are_captured_through_their_effects():
         # Primitive A (chantier 06, passe 1) : les trois porteurs des modificateurs de jet. Le
         # Chaplain en porte DEUX effets avec Deep Strike, ce qui est aussi la contre-epreuve que
         # le bloc suit bien une UNION et non un premier hit.
-        "ChaplainJumpPack": {"deep_strike", "wound_roll_bonus_fight"},
-        "Warboss": {"hit_roll_bonus_fight"},
-        "Bigboss": {"charge_roll_bonus"},
-        "VanguardVeteranSquadJumpPack": {"deep_strike"},
+        #
+        # Les seconds effets du Chaplain, du Warboss, du Bigboss et du Vanguard sont entres dans
+        # le vocabulaire le 2026-09-08 (les 14 regles qui portaient un `obs_id` sans y figurer).
+        # Ils SONT la contre-epreuve de cette livraison : ils etaient appliques par le moteur et
+        # absents de `got` tant que le tuple ne les nommait pas.
+        "ChaplainJumpPack": {
+            "deep_strike", "wound_roll_bonus_fight", "mortal_wounds_on_fight_activation",
+        },
+        "Warboss": {"hit_roll_bonus_fight", "melee_attacks_bonus_while_waaagh"},
+        "Bigboss": {"charge_roll_bonus", "grant_weapon_rule_melee"},
+        "VanguardVeteranSquadJumpPack": {"deep_strike", "grant_weapon_rule_melee_after_charge"},
         "LandSpeederOnslaughtGatlingCannon": {"deep_strike", "move_after_shooting"},
         "Gargoyle": {"move_after_shooting"},
         "Termagant": {"reactive_move"},
@@ -334,6 +340,154 @@ def test_real_training_roster_writes_the_expected_id():
     # Contre-epreuve, DANS LE MEME BLOC : une regle qu'aucun roster de training ne porte n'est
     # jamais ecrite. `reactive_move` appartient aux Tyranides (Termagant, FenrisianWolf).
     assert np.all(ennemis != obs_ids["reactive_move"])
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-08 — les 14 regles qui portaient un `obs_id` sans entrer dans le vocabulaire
+# ---------------------------------------------------------------------------
+
+
+def test_datasheets_of_the_last_uncovered_effects_write_their_ids():
+    """Deux datasheets REELLES des rosters d'entrainement ecrivent leurs nouveaux ids.
+
+    `deadly_demise` (WeirdBoy, §24.08) et `oc_bonus` (Ancient, Relic Banner) portaient un
+    `obs_id` dans `config/unit_rules.json` et etaient appliquees par le moteur — le premier
+    dans `destroy_model`, le second dans `unit_effective_oc`, source UNIQUE de l'OC du controle
+    d'objectif — sans figurer dans `UNIT_RULE_EFFECT_IDS` : `unit_ability_obs_ids` ne construit
+    sa table QUE sur ce tuple, donc aucun slot ne pouvait les porter.
+
+    Le WeirdBoy est ORK et l'Ancient ADEPTUS ASTARTES : `army_faction` est declare par camp, la
+    valeur par defaut du scenario partage ne vaudrait pas pour le camp orke (08.04 refuse de la
+    deduire des unites).
+
+    L'Ancient est un SUPPORT attache (19.01) : son `oc_bonus` n'est pas une regle de l'escouade
+    Intercessor mais de l'union en vigueur — c'est le meme chemin 19.04 que les autres tests de
+    ce fichier, applique a un effet qui n'etait pas observable jusqu'ici.
+    """
+    scenario = attached_scenario([
+        {"id": 1, "unit_type": "WeirdBoy", "player": 1, "col": 5, "row": 5},
+        {"id": 101, "unit_type": "Intercessor", "player": 2, "col": 12, "row": 10,
+         "models": [{"col": 12, "row": 10}, {"col": 13, "row": 10}, {"col": 14, "row": 10}]},
+        {"id": 102, "unit_type": "Ancient", "player": 2, "attached_squad": 101,
+         "col": 15, "row": 10},
+    ])
+    scenario["army_faction"] = {"1": "ORKS", "2": "ADEPTUS ASTARTES"}
+    eng = load_engine_from_scenario(scenario, training_n_envs=1)
+
+    weirdboy = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "1"), "allies", 0)
+    assert "deadly_demise" in weirdboy, (
+        "le WeirdBoy applique Deadly Demise (destroy_model) sans l'ecrire dans ses ability_ids"
+    )
+    # Seconde capacite de la MEME datasheet, entree par la meme livraison : sa presence prouve
+    # que le bloc suit une UNION et non un premier hit.
+    assert "weapon_profile_scaling_by_model_count" in weirdboy
+
+    intercessor = _rule_ids(
+        eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0
+    )
+    assert "oc_bonus" in intercessor, (
+        "l'Ancient attache modifie l'OC de l'escouade (unit_effective_oc) sans l'ecrire"
+    )
+    assert {"feel_no_pain_near_objective", "secure_objective_on_control"} <= intercessor
+
+    # Contre-epreuve : le WeirdBoy ne porte AUCUN des effets de l'escouade adverse, et
+    # reciproquement — un bloc qui recopierait tout serait vert sur les assertions ci-dessus.
+    assert not (weirdboy & intercessor)
+
+
+def test_every_registered_obs_id_is_in_the_vocabulary():
+    """CONTRAT : un `obs_id` declare est un id OBSERVE. Aucune exception aujourd'hui.
+
+    C'est la moitie manquante du critere du tuple (« seules les regles a effet reel »). Le
+    chargeur exige deja qu'une regle du vocabulaire ait un `obs_id` ; rien n'exigeait l'inverse,
+    et 14 regles vives ont vecu avec un `obs_id` qu'aucun slot ne pouvait porter — l'agent les
+    subissait sans les percevoir.
+
+    Une regle INERTE reste hors vocabulaire : elle doit alors n'avoir AUCUN `obs_id`, pas un id
+    declare et ignore. Le cout d'une entree de plus etant de zero scalaire
+    (`test_adding_an_observed_capability_costs_zero_scalar`), il n'y a aucune raison de rouvrir
+    un ecart ici : c'est pourquoi ce test n'a pas de liste d'exceptions.
+    """
+    from config_loader import get_config_loader
+
+    registry = get_config_loader().load_unit_rules_config()
+    with_obs_id = {rule_id for rule_id, entry in registry.items() if "obs_id" in entry}
+    # VERT VACANT : un registre sans aucun `obs_id` satisferait l'assertion suivante.
+    assert len(with_obs_id) >= len(UNIT_RULE_EFFECT_IDS)
+    orphelins = sorted(with_obs_id - set(UNIT_RULE_EFFECT_IDS))
+    assert not orphelins, (
+        f"regles portant un obs_id sans etre observees : {orphelins} — soit elles entrent dans "
+        f"UNIT_RULE_EFFECT_IDS (cout : zero scalaire), soit leur obs_id doit disparaitre du "
+        f"registre config/unit_rules.json"
+    )
+    # Reciproque, deja garantie par `unit_ability_obs_ids` (KeyError au chargement) : ancree ici
+    # pour que le contrat se lise dans les DEUX sens au meme endroit.
+    assert set(unit_ability_obs_ids()) == set(UNIT_RULE_EFFECT_IDS)
+
+
+def test_ability_slots_hold_on_the_real_training_rosters():
+    """MESURE (pas projection) : les unions 19.04 des rosters d'entrainement tiennent en 8 slots.
+
+    Le debordement est un `raise` (`_fill_id_slots`), donc la marge doit se lire sur les rosters
+    reellement joues, avec le vocabulaire du jour. Chaque roster est charge par le CHEMIN DU
+    MOTEUR (`agent_roster_ref` -> `_expand_compact_roster_to_basic_units` -> fold 19.04) : rien
+    n'est reconstitue ici, sinon la mesure porterait sur une copie du fold, pas sur le fold.
+
+    L'union lue au reset est l'union MAXIMALE de la partie : 19.04 ne fait ensuite qu'en retirer
+    des sources a mesure que les figurines meurent.
+    """
+    import json
+    import tempfile
+
+    from engine.phase_handlers.shared_utils import unit_has_rule_effect
+
+    rosters_dir = Path(PROJECT_ROOT) / "config/agents/ArmageddonAgent_x1/rosters/500pts/training"
+    p2_dir = Path(PROJECT_ROOT) / "config/agents/_p2_rosters/500pts/training"
+    agent_rosters = sorted(rosters_dir.glob("agent_*.json"))
+    assert agent_rosters, f"aucun roster d'entrainement sous {rosters_dir}"
+
+    base_scenario = json.loads(
+        (Path(PROJECT_ROOT)
+         / "config/agents/ArmageddonAgent_x1/scenarios/training/scenario_training_armageddon1.json"
+         ).read_text(encoding="utf-8")
+    )
+    registry = UnitRegistry()
+    pire = 0
+    detail = ""
+    with tempfile.TemporaryDirectory() as tmp:
+        # Le moteur derive l'agent_key et le split du CHEMIN du scenario ; les rosters, eux, sont
+        # lus dans le depot. Un scenario jetable a cette forme suffit donc a cibler un roster
+        # PRECIS, la ou `scenario_training_armageddon1` en tire un au hasard a chaque episode.
+        scen_dir = Path(tmp) / "agents" / "ArmageddonAgent_x1" / "scenarios" / "training"
+        scen_dir.mkdir(parents=True)
+        for agent_roster in agent_rosters:
+            opponent = p2_dir / agent_roster.name.replace("agent_", "opponent_", 1)
+            assert opponent.exists(), (
+                f"pas de roster adverse jumeau pour {agent_roster.name} : {opponent}"
+            )
+            scenario = dict(base_scenario)
+            scenario["agent_roster_ref"] = f"training/{agent_roster.name}"
+            scenario["opponent_roster_ref"] = f"training/{opponent.name}"
+            scen_path = scen_dir / f"{agent_roster.stem}.json"
+            scen_path.write_text(json.dumps(scenario), encoding="utf-8")
+
+            eng = W40KEngine(
+                rewards_config="ArmageddonAgent_x1", training_config_name="x1",
+                controlled_agent="ArmageddonAgent_x1", scenario_file=str(scen_path),
+                unit_registry=registry, quiet=True, gym_training_mode=True, training_n_envs=1,
+            )
+            eng.reset()
+            for unit in eng.game_state["units"]:
+                effets = [r for r in UNIT_RULE_EFFECT_IDS if unit_has_rule_effect(unit, r)]
+                if len(effets) > pire:
+                    pire = len(effets)
+                    detail = f"{agent_roster.name} / unite {unit['id']} : {sorted(effets)}"
+
+    # VERT VACANT : une escouade sans aucune capacite tiendrait trivialement dans 8 slots.
+    assert pire >= 2, f"mesure vide ou degeneree (max={pire}) : le fold 19.04 n'a rien produit"
+    assert pire <= UNIT_ABILITY_SLOTS, (
+        f"UNIT_ABILITY_SLOTS={UNIT_ABILITY_SLOTS} deborde sur les rosters d'entrainement : {detail}"
+    )
 
 
 # ---------------------------------------------------------------------------

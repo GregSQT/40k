@@ -167,6 +167,56 @@ UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     "suppress_target_on_shooting",
     "return_destroyed_models",
     "once_per_battle_melee_buff",
+    # Reste du chantier 06 (2026-09-08) : les 14 règles qui portaient un `obs_id` dans
+    # `config/unit_rules.json` sans figurer ici. Leur `obs_id` existait donc, mais
+    # `unit_ability_obs_ids` ne construit sa table QUE sur ce tuple : elles étaient appliquées
+    # par le moteur et invisibles à l'agent — le trou même que V11 §0.30 a fermé pour les armes,
+    # et `deep_strike` pour les réserves. Chacune est vive, vérifiée par LECTURE du site qui
+    # l'applique (pas de sa seule déclaration) le 2026-09-08 :
+    #   deadly_demise                             `shared_utils.destroy_model` (§24.08, D6 puis MW
+    #                                             dans les 6") — WeirdBoy
+    #   grant_weapon_rule_melee                   `attack_sequence.build_weapon_attack_profile`
+    #                                             (SUSTAINED HITS 1) — Bigboss
+    #   grant_weapon_rule_melee_after_charge      idem (LETHAL HITS au tour de charge) — Vanguard
+    #   grant_weapon_rule_vs_designated_target    `shared_utils._manual_roll_intent` (BLAST 1
+    #                                             hors MONSTER/VEHICLE) — Eradicator
+    #   weapon_attacks_bonus_vs_keyword           idem (+A hors keywords exclus) — BigMekDakkarig
+    #   weapon_attacks_bonus_vs_designated_target idem (+A sur la cible) — Intercessor
+    #   weapon_profile_scaling_by_model_count     idem (+F/+D par tranche de figurines) — WeirdBoy
+    #   melee_attacks_bonus_while_waaagh          `fight_handlers._manual_roll_fight_intent`
+    #                                             (+A pendant le Waaagh!) — Warboss
+    #   feel_no_pain_vs_psychic                   `shared_utils._collect_fnp_thresholds_mortal`
+    #                                             (seuil FNP si source PSYCHIC) — Librarian
+    #   feel_no_pain_near_objective               idem (seuil FNP près d'un objectif) — Ancient
+    #   mortal_wounds_on_critical_wound           `fight_handlers._manual_roll_fight_intent`
+    #                                             (D6 MW, séquence terminée) — PainBoy
+    #   mortal_wounds_on_fight_activation         `w40k_core._check_and_trigger_exhortation_de_rage`
+    #                                             (D6 ≥ 4 → MW à l'activation) — ChaplainJumpPack
+    #   secure_objective_on_control               `game_state.apply_secure_objective_on_control`
+    #                                             (14.03, fin de phase de commandement) — Boyz,
+    #                                             Intercessor
+    #   oc_bonus                                  `game_state.unit_effective_oc`, source UNIQUE de
+    #                                             l'OC pour le contrôle (14.02) — Ancient
+    #
+    # Restent DEHORS, sans `obs_id`, pour la même raison qu'avant : les capacités SOURCES
+    # (`adaptable_predators`, `cunning_hunters`, `target_priority`, `targeted_intercession`,
+    # `oath_of_moment`, `waaagh`, `adrenalised_onslaught`) — exposées par leurs effets — et les
+    # marqueurs de RÔLE. Le verrou qui interdit qu'un `obs_id` soit à nouveau déclaré sans être
+    # observé est `test_every_registered_obs_id_is_in_the_vocabulary`.
+    "deadly_demise",
+    "grant_weapon_rule_melee",
+    "grant_weapon_rule_melee_after_charge",
+    "grant_weapon_rule_vs_designated_target",
+    "weapon_attacks_bonus_vs_keyword",
+    "weapon_attacks_bonus_vs_designated_target",
+    "weapon_profile_scaling_by_model_count",
+    "melee_attacks_bonus_while_waaagh",
+    "feel_no_pain_vs_psychic",
+    "feel_no_pain_near_objective",
+    "mortal_wounds_on_critical_wound",
+    "mortal_wounds_on_fight_activation",
+    "secure_objective_on_control",
+    "oc_bonus",
 )
 
 #: Effets qu'un CANDIDAT DE DÉCISION peut accorder — sous-ensemble STRICT de
