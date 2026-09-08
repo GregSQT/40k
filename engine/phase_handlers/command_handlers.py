@@ -12,7 +12,10 @@ from enum import Enum
 from typing import Dict, List, Sequence, Tuple, Set, Optional, Any
 from shared.data_validation import require_key
 from engine.action_log_utils import append_action_log
-from .shared_utils import _build_enemy_adjacent_hexes_all_players, _squad_mode_level
+from .shared_utils import (
+    _build_enemy_adjacent_hexes_all_players, _enemy_squad_ids, _squad_mode_level,
+    deployed_friendly_squad_ids,
+)
 from engine.game_state import (
     CORE_CP_GAIN_PER_COMMAND_PHASE, GameStateManager, gain_command_points,
     WAAAGH_FACTION_KEYWORD,
@@ -380,8 +383,6 @@ def player_has_squads_on_board(game_state: Dict[str, Any], player: int) -> bool:
     l'observation utilise pour peupler ses lignes alliées : recopier le prédicat au lieu de
     l'appeler est exactement ce qui a produit la divergence corrigée ici.
     """
-    from engine.phase_handlers.shared_utils import deployed_friendly_squad_ids
-
     return bool(deployed_friendly_squad_ids(game_state, int(player)))
 
 
@@ -431,14 +432,7 @@ def oath_selectable_enemy_ids(game_state: Dict[str, Any], player: int) -> List[s
     table ne peut être ni ciblée ni chargée (`entry_is_on_battlefield`), donc aucun effet d'Oath
     ne pourrait la viser tant qu'elle n'a pas fait son ingress move.
     """
-    from engine.spatial_relations import enemy_entries_on_battlefield
-
-    return [
-        str(squad_id)
-        for squad_id, _entry in enemy_entries_on_battlefield(
-            require_key(game_state, "units_cache"), int(player)
-        )
-    ]
+    return _enemy_squad_ids(game_state, int(player))
 
 
 #: Types de `pending_agent_decision` qui appartiennent au cycle de vie de 08.04 — c'est-à-dire
