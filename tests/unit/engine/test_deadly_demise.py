@@ -17,6 +17,7 @@ import random
 import pytest
 
 from engine.phase_handlers.shared_utils import destroy_model
+from tests._state_invariants import unit_invariants
 
 
 # ── game_state minimal pour destroy_model ────────────────────────────────────
@@ -53,10 +54,11 @@ def _gs(*, with_deadly_demise: bool = True, target_col: int = 2, target_row: int
     }
 
     # Couche `units` : elle porte `hideable`/`hidden`, que `destroy_model` rafraîchit (13.09,
-    # état continu). Toute escouade de `units_cache` en a une en production.
+    # état continu). Toute escouade de `units_cache` en a une en production. `hideable` dérive
+    # de UNIT_KEYWORDS, donc hors socle : posé ici, False (aucun mot-clé hideable).
     units = [
-        {"id": "SRC", "player": 1, "hideable": False, "hidden": False, "hidden_models": []},
-        {"id": "TGT", "player": 2, "hideable": False, "hidden": False, "hidden_models": []},
+        {**unit_invariants(), "id": "SRC", "player": 1, "hideable": False},
+        {**unit_invariants(), "id": "TGT", "player": 2, "hideable": False},
     ]
 
     return {
@@ -162,8 +164,7 @@ def _gs_multi(*, n_targets: int = 3):
         squad_models[uid] = [f"{uid}#0"]
     # Couche `units` : cf. `_gs` — `destroy_model` y rafraîchit le statut 13.09.
     units = [
-        {"id": uid, "player": uc["player"], "hideable": False,
-         "hidden": False, "hidden_models": []}
+        {**unit_invariants(), "id": uid, "player": uc["player"], "hideable": False}
         for uid, uc in units_cache.items()
     ]
     return {

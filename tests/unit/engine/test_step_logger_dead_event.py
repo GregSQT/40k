@@ -8,6 +8,7 @@ from typing import Any, Dict
 import pytest
 
 from engine.phase_handlers.shared_utils import destroy_model
+from tests._state_invariants import unit_invariants
 
 
 def _minimal_gs(n_models: int = 2) -> Dict[str, Any]:
@@ -22,8 +23,10 @@ def _minimal_gs(n_models: int = 2) -> Dict[str, Any]:
     # Couche `units` : toute escouade de `units_cache` en a une en production (c'est elle qui
     # porte `hideable`/`hidden`, cf. GameStateManager). `destroy_model` y rafraîchit le statut
     # 13.09, qui est continu ; sans elle la fixture décrirait un état impossible.
+    # `hideable` n'est PAS dans le socle : il dérive de UNIT_KEYWORDS, donc la fixture le pose
+    # elle-même — False ici, l'escouade n'ayant aucun mot-clé INFANTRY/BEASTS/SWARM.
     unit_obj: Dict[str, Any] = {
-        "id": squad_id, "player": 1, "hideable": False, "hidden": False, "hidden_models": [],
+        **unit_invariants(), "id": squad_id, "player": 1, "hideable": False,
     }
     gs: Dict[str, Any] = {
         "units": [unit_obj],

@@ -28,6 +28,7 @@ from engine.phase_handlers.shared_utils import (
     destroy_model,
     explain_move_plan_rejection,
 )
+from tests._state_invariants import unit_invariants
 
 SQUAD, ENEMY_PLAYER = "102", 2
 MOVER, MOVER_PLAYER = "3", 1
@@ -53,12 +54,11 @@ def _gs():
     models_cache = {mid: _model(c, r, ENEMY_PLAYER, SQUAD) for mid, (c, r) in enemy_models.items()}
     models_cache[f"{MOVER}#0"] = _model(20, 37, MOVER_PLAYER, MOVER)
     # Couche `units` : elle porte `hideable`/`hidden`, que `destroy_model` rafraîchit (13.09 est
-    # un état continu). Toute escouade de `units_cache` en a une en production.
+    # un état continu). Toute escouade de `units_cache` en a une en production. `hideable` dérive
+    # de UNIT_KEYWORDS, donc hors socle : posé ici, False (aucun mot-clé hideable).
     units = [
-        {"id": SQUAD, "player": ENEMY_PLAYER, "hideable": False,
-         "hidden": False, "hidden_models": []},
-        {"id": MOVER, "player": MOVER_PLAYER, "hideable": False,
-         "hidden": False, "hidden_models": []},
+        {**unit_invariants(), "id": SQUAD, "player": ENEMY_PLAYER, "hideable": False},
+        {**unit_invariants(), "id": MOVER, "player": MOVER_PLAYER, "hideable": False},
     ]
     gs = {
         "units": units,

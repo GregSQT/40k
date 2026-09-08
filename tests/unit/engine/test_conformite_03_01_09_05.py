@@ -31,6 +31,7 @@ from engine.phase_handlers.shared_utils import (
     build_occupied_positions_set,
     destroy_model,
 )
+from tests._state_invariants import unit_invariants
 
 # ---------------------------------------------------------------------------
 # Scénario minimal
@@ -65,10 +66,11 @@ EZ = 2  # engagement_zone DÉJÀ en sous-hexes (x1 : 2 subhex = 2")
 
 
 #: Couche `units` : elle porte `hideable`/`hidden`, que `destroy_model` rafraîchit (13.09 est un
-#: état continu). Toute escouade de `units_cache` en a une en production.
+#: état continu). Toute escouade de `units_cache` en a une en production. `hideable` est le seul
+#: champ posé hors socle : il dérive de UNIT_KEYWORDS, donc `unit_invariants` l'exclut à dessein.
 def _units_layer(*specs: Tuple[str, int]) -> List[Dict[str, Any]]:
     return [
-        {"id": uid, "player": player, "hideable": False, "hidden": False, "hidden_models": []}
+        {**unit_invariants(), "id": uid, "player": player, "hideable": False}
         for uid, player in specs
     ]
 

@@ -24,7 +24,10 @@ import pytest
 
 from shared.data_validation import ConfigurationError
 
-from engine.phase_handlers.shared_utils import destroy_model
+from engine.phase_handlers.shared_utils import (
+    _attacker_model_can_reach_squad,
+    destroy_model,
+)
 from engine.phase_handlers.shooting_handlers import (
     compute_hidden_statuses,
     shooting_build_valid_target_pool,
@@ -132,6 +135,44 @@ def test_squad_becomes_hidden_mid_phase_and_leaves_the_target_pool() -> None:
     )
     # 13.09 : il ne reste que des figurines dans la zone obscurante → escouade cachée MAINTENANT.
     assert target["hidden"] is True, "13.09 : le statut doit suivre la perte, pas la fin de phase"
+
+
+def test_per_model_reach_follows_the_refreshed_status() -> None:
+    """Le chemin PAR FIGURINE suit lui aussi le statut rafraîchi — pas seulement le pool.
+
+    `unit['hidden']` a DEUX lecteurs : la porte du pool d'escouade et
+    `_attacker_model_can_reach_squad`, qui décide par figurine et sert aussi bien la déclaration
+    d'attaque que la visibilité [PRECISION] (24.28). Verrouiller le seul pool laisserait ce
+    second chemin libre de diverger.
+
+    Conséquence assumée sur 24.28, vérifiée au PDF : la règle évalue la visibilité « at the
+    start of the Allocation Order step (05.03) », donc UNE fois par lot d'attaques — et le
+    moteur l'applique bien une fois par lot (garde `batch['precision_applied']`). Un lot ouvert
+    APRÈS que la cible est devenue cachée voit donc ses CHARACTER hors de portée de détection,
+    et [PRECISION] ne s'y applique pas. C'est 13.09 qui le dit : « while a model is hidden, it
+    can only be visible to enemy models that are within its detection range ».
+    """
+    eng = _make_engine(_config_two_shooters())
+    gs = _enter_shooting_phase(eng)
+    shooter_model = gs["models_cache"][gs["squad_models"][SHOOTER_B_ID][0]]
+    weapon_range = 24
+
+    def _can_reach() -> bool:
+        return _attacker_model_can_reach_squad(
+            gs, shooter_model, int(shooter_model["col"]), int(shooter_model["row"]),
+            TARGET_ID, weapon_range,
+        )
+
+    assert _can_reach(), (
+        "VERT VACANT : la cible doit être atteignable tant qu'une figurine dépasse de la zone"
+    )
+
+    destroy_model(gs, _model_id_at(gs, TARGET_ID, EXPOSED_MODEL_HEX), reason="combat")
+
+    assert not _can_reach(), (
+        "13.09 : cachée et à 22\", la cible n'est plus visible pour ce tireur — ni pour le tir, "
+        "ni pour la visibilité [PRECISION]"
+    )
 
 
 def test_full_sweep_still_requires_terrain_areas() -> None:

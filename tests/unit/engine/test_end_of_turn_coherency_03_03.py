@@ -27,6 +27,7 @@ from engine.phase_handlers.shared_utils import (
     validate_squad_coherency,
 )
 from shared.data_validation import ConfigurationError
+from tests._state_invariants import unit_invariants
 
 
 def _gs(positions, squad_id="1", player=1):
@@ -81,9 +82,13 @@ def _gs(positions, squad_id="1", player=1):
         # _coherency_alive lit HP_MAX/T/ARMOR_SAVE/INVUL_SAVE via get_unit_by_id (unit_by_id).
         # HP_MAX=2 correspond à celui des modèles dans models_cache : squad_defence=(2,4,3,7)
         # fait passer les figurines de base par le branch `1` de _squad_models_for_observation.
+        # Socle `unit_invariants` : les champs constants que TOUTE unité de production porte,
+        # dont `hidden`/`hidden_models` que `destroy_model` rafraîchit (13.09, état continu).
+        # `hideable` en est exclu à dessein (il dérive de UNIT_KEYWORDS) : posé ici, False.
         "unit_by_id": {
             squad_id: {
-                "id": squad_id, "player": player,
+                **unit_invariants(),
+                "id": squad_id, "player": player, "hideable": False,
                 "HP_MAX": 2, "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
             }
         },
@@ -411,7 +416,9 @@ def test_opponent_non_mute_squads_resolved_geometrically():
     # `unit_by_id` suit `units_cache` : sans elle, l'escouade 2 serait en désync (cf. le
     # rafraîchissement 13.09 de `destroy_model`, qui lit l'unité comme tout autre consommateur).
     gs["unit_by_id"]["2"] = {
-        "id": "2", "player": 2, "HP_MAX": 2, "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
+        **unit_invariants(),
+        "id": "2", "player": 2, "hideable": False,
+        "HP_MAX": 2, "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
     }
 
     auto_removed = end_of_turn_regain_coherency_all_squads(gs)
