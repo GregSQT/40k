@@ -416,7 +416,7 @@ Les trois porteurs sont ancrés dans `test_composite_datasheet_abilities_are_cap
 
 > 🔴 **Chantier OUVERT.** L'état d'avancement (passes livrées, prérequis, jalon) fait foi dans [Roadmap/capacites.md](../../Roadmap/archives/capacites.md), jamais ici. Tout ce qui suit est la CONCEPTION et le PLAN D'EXÉCUTION du chantier : 6 primitives moteur pour les 25 capacités d'unités des rosters Armageddon.
 >
-> ⚠️ Risque d'exécution : `UNIT_ABILITY_SLOTS = 8` est une projection non mesurée (voir [§1](#dimensionnement-des-slots--mesure-vs-projection)) — si une entité dépasse 8 capacités en vigueur, le moteur lève. Ce chantier est ce qui rend le chiffre mesurable ; le recalcul de la projection se fait AVANT la passe 1.
+> ⚠️ Risque d'exécution : si une entité dépasse 8 capacités en vigueur, le moteur lève. Ce n'est plus une projection depuis le 2026-09-08 — mesure sur les quatre rosters d'entraînement chargés par le chemin du moteur : **6 au maximum**, marge 2 slots, rejouée par `def test_ability_slots_hold_on_the_real_training_rosters` (voir [§1](#dimensionnement-des-slots--mesure-vs-projection)). Ce chantier est ce qui rend le chiffre mesurable ; le recalcul de la projection se fait AVANT la passe 1.
 
 ## Sources règles
 
@@ -430,7 +430,7 @@ Les PDF font foi. Toute divergence avec ce document se tranche en leur faveur.
 
 Les premières analyses annonçaient « 17 capacités ». Le chiffre a monté à **25** parce que les chantiers 03 et 04 ont débloqué ce qui était classé non codable : Waaagh! et ses effets dérivés, Deep Strike, Da Jump. Rien n'a été ajouté au périmètre — des capacités en sont sorties de la catégorie « impossible ».
 
-Conséquence sur le socle : la projection « 6 capacités en vigueur au maximum sur une entité », qui justifie `UNIT_ABILITY_SLOTS = 8`, a été calculée sur les 17 — elle n'a pas été recalculée sur les 25. **Recalculée le 2026-08-30, avant la passe 1** : mesure sur les 179 datasheets du registre après câblage de la passe 1 → **2 capacités observables au maximum par datasheet**, donc au plus 6 sur une entité attachée (escouade + 1 leader + 1 support, contrainte 19.01). `UNIT_ABILITY_SLOTS = 8` tient, marge 2 slots ; aucun ajustement n'a été nécessaire.
+Conséquence sur le socle : la projection « 6 capacités en vigueur au maximum sur une entité », qui justifie `UNIT_ABILITY_SLOTS = 8`, a été calculée sur les 17 — elle n'a pas été recalculée sur les 25. **Recalculée le 2026-08-30, avant la passe 1** : mesure sur les 179 datasheets du registre après câblage de la passe 1 → **2 capacités observables au maximum par datasheet**, donc au plus 6 sur une entité attachée (escouade + 1 leader + 1 support, contrainte 19.01). `UNIT_ABILITY_SLOTS = 8` tient, marge 2 slots ; aucun ajustement n'a été nécessaire. **Confirmé par la mesure du 2026-09-08**, une fois les 25 capacités livrées ET observables : toujours 6 au maximum, même marge.
 
 ## Vocabulaire
 
