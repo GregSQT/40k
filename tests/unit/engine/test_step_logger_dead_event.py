@@ -19,7 +19,15 @@ def _minimal_gs(n_models: int = 2) -> Dict[str, Any]:
                            "BASE_SHAPE": "round", "BASE_SIZE": 1, "orientation": 0}
                    for i, mid in enumerate(model_ids)}
     occupied = {mid: (10 + i, 10) for i, mid in enumerate(model_ids)}
+    # Couche `units` : toute escouade de `units_cache` en a une en production (c'est elle qui
+    # porte `hideable`/`hidden`, cf. GameStateManager). `destroy_model` y rafraîchit le statut
+    # 13.09, qui est continu ; sans elle la fixture décrirait un état impossible.
+    unit_obj: Dict[str, Any] = {
+        "id": squad_id, "player": 1, "hideable": False, "hidden": False, "hidden_models": [],
+    }
     gs: Dict[str, Any] = {
+        "units": [unit_obj],
+        "unit_by_id": {squad_id: unit_obj},
         "models_cache": models_cache,
         "squad_models": {squad_id: list(model_ids)},
         "units_cache": {

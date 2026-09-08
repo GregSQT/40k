@@ -270,9 +270,10 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     "engaged",             # dans la zone d'engagement d'une unité ADVERSE de cette unité
     # 13.09, émis pour TOUTE entité posée (masque = `present` ET NON `deploy_not_on_board`).
     # Ce n'est pas une propriété décorative : 13.09 conditionne la VISIBILITÉ elle-même, donc
-    # `los_can_see` ci-dessous. Le lire sur `unit['hidden']` est INTERDIT — le moteur ne pose ce
-    # champ qu'au début de la phase de tir, il est périmé pendant le move et après un pile-in
-    # adverse ; l'observation le recalcule à chaud (`_squad_terrain_flags`, mode `hidden_only`).
+    # `los_can_see` ci-dessous. Le lire sur `unit['hidden']` est INTERDIT — le moteur suit les
+    # pertes (`destroy_model`) mais aucun mouvement, ce champ est donc périmé pendant le move et
+    # après un pile-in adverse ; l'observation le recalcule à chaud (`_squad_terrain_flags`,
+    # mode `hidden_only`).
     "hidden",
     "gone_to_ground",      # ⚠ unité ACTIVE uniquement (13.5)
     "in_cover",            # ⚠ unité ACTIVE uniquement (13.08)

@@ -671,10 +671,11 @@ class ObservationBuilder:
         parallele aurait donne deux jeux de gardes libres de diverger.
 
         Les trois sont calcules ICI, a l instant de l observation, et non lus sur
-        ``unit['hidden']`` : ce champ n est rafraichi qu au DEBUT de la phase de tir
-        (``compute_hidden_statuses``), donc il est perime pendant le move — exactement le moment
-        ou l agent decide d aller se cacher. Meme geometrie que le moteur
-        (``compute_models_within_terrain``), aucune duplication de regle.
+        ``unit['hidden']`` : ce champ est rafraichi au DEBUT de la phase de tir
+        (``compute_hidden_statuses``) et a chaque perte de figurine (``destroy_model``, 13.09
+        etant un etat continu), mais AUCUN mouvement ne le met a jour — il reste donc perime
+        pendant le move, exactement le moment ou l agent decide d aller se cacher. Meme
+        geometrie que le moteur (``compute_models_within_terrain``), aucune duplication de regle.
 
         - **hidden (13.09)** : hideable (INFANTRY/BEASTS/SWARM) ET toutes les figurines vivantes
           dans une zone obscurante ET l unite n a tire ni ce tour ni au tour precedent.
@@ -1559,9 +1560,9 @@ class ObservationBuilder:
         )
 
         # État terrain (13.09 / 13.5 / 13.08) recalculé à chaud : le champ `unit['hidden']` du
-        # moteur n'est posé qu'au début de la phase de tir (`compute_hidden_statuses`, un seul
-        # site d'appel), donc périmé pendant le move — exactement le moment où l'agent décide
-        # d'aller se cacher — et après un pile-in ou une consolidation adverses.
+        # moteur suit les PERTES (choke-point `destroy_model`) mais aucun MOUVEMENT, donc il
+        # reste périmé pendant le move — exactement le moment où l'agent décide d'aller se
+        # cacher — et après un pile-in ou une consolidation adverses.
         #
         # `hidden` est émis pour TOUTE entité, les deux autres pour la seule unité active. C'est
         # 13.09 qui décide de la VISIBILITÉ (« while a model is hidden, it can only be visible to

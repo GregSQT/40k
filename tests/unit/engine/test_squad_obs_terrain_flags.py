@@ -14,7 +14,8 @@ Règles lues (Documentation/40k_rules/13 Terrain.pdf, 13-5 gone to ground.jpg) :
 
 Contre-épreuves intégrées :
 - `test_flags_are_fresh_during_move` : les drapeaux sont recalculés à chaud. Lire
-  `unit['hidden']` (rafraîchi seulement au début de la phase de tir) donnerait 0 ici.
+  `unit['hidden']` donnerait 0 ici — ce champ suit le début de la phase de tir et les pertes de
+  figurines (`destroy_model`), mais aucun MOUVEMENT ne le met à jour.
 - `test_cover_requires_every_model_in_terrain` : une seule figurine hors zone annule le couvert
   (règle « every model in that unit »).
 - `test_hidden_lost_after_shooting` : le volet « n'a pas tiré ce tour ou au précédent ».
@@ -143,7 +144,8 @@ def test_flags_are_fresh_during_move():
     """Escouade INFANTRY entierement dans une zone obscurante Solid : hidden + GtG + couvert.
 
     Contre-epreuve de fraicheur : on est en phase move, `unit['hidden']` n'a jamais ete calcule
-    (il ne l'est qu'au debut de la phase de tir) — le lire au lieu de recalculer donnerait 0.
+    (le moteur ne l'ecrit qu'au debut de la phase de tir et a chaque perte de figurine, jamais
+    sur un mouvement) — le lire au lieu de recalculer donnerait 0.
     """
     eng = _make_engine(_config([(30, 20), (32, 20)], [(80, 20)], ["INFANTRY"]))
     assert not eng.game_state["units"][0].get("hidden"), "fixture : le champ moteur n'est pas encore pose"

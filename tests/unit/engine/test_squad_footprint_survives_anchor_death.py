@@ -52,7 +52,17 @@ def _gs():
     enemy_models = {ANCHOR_MODEL: ANCHOR_POS, **OTHERS}
     models_cache = {mid: _model(c, r, ENEMY_PLAYER, SQUAD) for mid, (c, r) in enemy_models.items()}
     models_cache[f"{MOVER}#0"] = _model(20, 37, MOVER_PLAYER, MOVER)
+    # Couche `units` : elle porte `hideable`/`hidden`, que `destroy_model` rafraîchit (13.09 est
+    # un état continu). Toute escouade de `units_cache` en a une en production.
+    units = [
+        {"id": SQUAD, "player": ENEMY_PLAYER, "hideable": False,
+         "hidden": False, "hidden_models": []},
+        {"id": MOVER, "player": MOVER_PLAYER, "hideable": False,
+         "hidden": False, "hidden_models": []},
+    ]
     gs = {
+        "units": units,
+        "unit_by_id": {str(u["id"]): u for u in units},
         "models_cache": models_cache,
         "squad_models": {SQUAD: list(enemy_models), MOVER: [f"{MOVER}#0"]},
         "units_cache": {

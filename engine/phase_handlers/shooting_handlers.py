@@ -1005,34 +1005,64 @@ def compute_models_within_terrain(
     return model_ids
 
 
+def compute_hidden_status_for_unit(game_state: Dict[str, Any], unit_id: str) -> None:
+    """Set ``unit['hidden']`` / ``unit['hidden_models']`` for ONE unit (rule 13.09 Hidden).
+
+    SOURCE UNIQUE du statut : ``compute_hidden_statuses`` n'est que la boucle sur cette
+    fonction. Le statut d'une escouade ne dépend QUE d'elle-même — son empreinte par figurine,
+    son mot-clé hideable et ses propres tirs — jamais d'une autre unité. C'est ce qui rend le
+    rafraîchissement CIBLÉ exact et non une approximation : quand une escouade perd une
+    figurine, elle est la seule dont le statut puisse changer.
+
+    13.09 est un état CONTINU (« a model is hidden WHILE all of the following apply »), d'où
+    l'appel au choke-point de retrait de figurines (``destroy_model``) en plus du début de
+    phase de tir : une escouade dont la dernière figurine exposée meurt devient cachée
+    immédiatement, donc intirable au-delà de la detection range par les tireurs suivants.
+
+    Sans effet si l'escouade est absente de ``units_cache`` — elle est alors DÉTRUITE et son
+    statut n'a plus d'objet. Même cas métier, et même traitement, que
+    ``_recompute_squad_occupied_hexes`` (appelée juste avant sur ce chemin).
+    """
+    units_cache = require_key(game_state, "units_cache")
+    unit_id_str = str(unit_id)
+    entry = units_cache.get(unit_id_str)  # get allowed (escouade détruite = rien à rafraîchir)
+    if entry is None:
+        return
+    unit = require_unit_by_id(game_state, unit_id_str)
+    if not is_unit_alive(unit_id_str, game_state) or not bool(unit.get("hideable")):
+        unit["hidden"] = False
+        unit["hidden_models"] = []
+        return
+    shot_ids = {str(x) for x in game_state.get("units_shot", set())}
+    shot_prev_ids = {str(x) for x in game_state.get("units_shot_previous_turn", set())}
+    if unit_id_str in shot_ids or unit_id_str in shot_prev_ids:
+        unit["hidden"] = False
+        unit["hidden_models"] = []
+        return
+    terrain_areas = require_key(game_state, "terrain_areas")
+    by_model = require_key(entry, "occupied_hexes_by_model")
+    hidden_model_ids = compute_models_in_obscuring_terrain(unit, by_model, game_state, terrain_areas)
+    unit["hidden_models"] = hidden_model_ids
+    unit["hidden"] = len(hidden_model_ids) == len(by_model) and len(by_model) > 0
+
+
 def compute_hidden_statuses(game_state: Dict[str, Any]) -> None:
     """Set ``unit['hidden']`` and ``unit['hidden_models']`` for every unit (rule 13.09 Hidden).
 
     A model is hidden while it is hideable (INFANTRY/BEASTS/SWARM), its footprint touches
     an obscuring terrain area, and its unit made no ranged attack this turn nor the previous
-    turn. Computed per model at shooting phase start.
+    turn.
 
     unit['hidden_models']: list of model_ids whose footprint touches obscuring terrain.
     unit['hidden']: True only if ALL alive models are hidden.
+
+    Balayage COMPLET, au début de la phase de tir et à chaque sérialisation d'état PvP. En
+    cours de phase, le statut est maintenu par ``compute_hidden_status_for_unit`` sur la seule
+    escouade touchée (cf. sa docstring).
     """
-    terrain_areas = require_key(game_state, "terrain_areas")
-    shot_ids = {str(x) for x in game_state.get("units_shot", set())}
-    shot_prev_ids = {str(x) for x in game_state.get("units_shot_previous_turn", set())}
     units_cache = require_key(game_state, "units_cache")
-    for unit_id in units_cache.keys():
-        unit = require_unit_by_id(game_state, str(unit_id))
-        if not is_unit_alive(str(unit_id), game_state) or not bool(unit.get("hideable")):
-            unit["hidden"] = False
-            unit["hidden_models"] = []
-            continue
-        if str(unit_id) in shot_ids or str(unit_id) in shot_prev_ids:
-            unit["hidden"] = False
-            unit["hidden_models"] = []
-            continue
-        by_model = require_key(units_cache[str(unit_id)], "occupied_hexes_by_model")
-        hidden_model_ids = compute_models_in_obscuring_terrain(unit, by_model, game_state, terrain_areas)
-        unit["hidden_models"] = hidden_model_ids
-        unit["hidden"] = len(hidden_model_ids) == len(by_model) and len(by_model) > 0
+    for unit_id in list(units_cache.keys()):
+        compute_hidden_status_for_unit(game_state, str(unit_id))
 
 
 def preview_hidden_models_from_position(
