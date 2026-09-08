@@ -441,7 +441,8 @@ class ActionDecoder:
                 raise ValueError(
                     "Oath of Moment : designation en attente mais aucun slot ouvert — le masque "
                     "serait tout-faux, donc injouable. `command_step_command_abilities` ne pose "
-                    "la designation que s'il existe une unite ennemie vivante."
+                    "la designation que s'il existe une unite ennemie SUR LA TABLE, le seul "
+                    "predicat auquel le mapping de slots ennemis accorde un slot."
                 )
             for action_int in oath_selection_slots:
                 mask[action_int] = True

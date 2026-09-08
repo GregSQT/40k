@@ -1,10 +1,10 @@
 // frontend/src/utils/oathTargetSelection.ts
 //
-// Oath of Moment (08.04) — résolution du clic plateau en unité désignée.
+// Oath of Moment (08.04) — légalité des cibles et résolution du clic plateau.
 //
-// La LÉGALITÉ des cibles n'est pas jouée ici : `targetUnitIds` vient du même filtre que le moteur
-// (`oath_selectable_enemy_ids`), côté BoardWithAPI. Ce module ne fait que dire QUELLE de ces
-// unités le joueur a visée.
+// Deux responsabilités :
+//  1. `filterOathTargets` — les cibles LÉGALES (les MÊMES que le moteur : `oath_selectable_enemy_ids`).
+//  2. `pickOathTargetAtHex` — laquelle de ces unités le clic désigne.
 
 import { cubeDistance, offsetToCube } from "./gameHelpers";
 
@@ -15,6 +15,31 @@ export type OathUnitsCache = Record<
   string,
   { occupied_hexes_by_model?: Record<string, [number, number]> } | undefined
 >;
+
+/** Forme minimale d'une unité pour `filterOathTargets`. */
+export interface OathTargetCandidate {
+  id: number;
+  player: number;
+  HP_CUR?: number | null;
+  /** Colonne d'ancre : -1 si l'unité est en réserves stratégiques (20.01). */
+  col: number;
+}
+
+/**
+ * Unités adverses désignables par l'Oath of Moment : ennemies, vivantes, et SUR LA TABLE.
+ *
+ * Alignées sur `oath_selectable_enemy_ids` (engine/phase_handlers/command_handlers.py) et sur
+ * `entry_is_on_battlefield` (engine/spatial_relations.py) : `col >= 0`. `set_oath_target` lève
+ * depuis le 2026-09-08 pour une unité hors table — toute liste plus large bloquerait la phase.
+ */
+export function filterOathTargets(
+  units: ReadonlyArray<OathTargetCandidate>,
+  selectionPlayer: number,
+): OathTargetCandidate[] {
+  return units.filter(
+    (unit) => unit.player !== selectionPlayer && (unit.HP_CUR ?? 0) > 0 && unit.col >= 0,
+  );
+}
 
 /**
  * Unité désignable la plus proche de l'hex cliqué, ou `null` si le clic ne vise rien.

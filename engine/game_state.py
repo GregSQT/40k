@@ -4389,16 +4389,24 @@ def _clear_pending_oath_if_owner(game_state: Dict[str, Any], player_int: int) ->
 
 
 def set_oath_target(game_state: Dict[str, Any], player: int, unit_id: str) -> None:
-    """ÉCRIVAIN UNIQUE de la cible d'Oath. Exige une unité ENNEMIE VIVANTE — sinon LÈVE.
+    """ÉCRIVAIN UNIQUE de la cible d'Oath. Exige une unité ENNEMIE, VIVANTE, SUR LA TABLE.
 
     « select one unit from your opponent's army » : désigner une unité à soi, ou une unité morte,
     n'est pas un choix légal. Le masque ne les ouvre pas ; la garde est là pour que le PvP et les
     fixtures ne puissent pas produire un état que le gym ne produirait jamais.
+
+    Troisième clause pour cette raison exacte : le masque n'ouvre un `OATH_SLOT` que pour une
+    escouade SUR LA TABLE (`oath_selectable_enemy_ids`, aligné sur le mapping de slots). Sans
+    elle, le PvP et les fixtures pourraient désigner une escouade en réserves stratégiques — une
+    cible que le gym ne peut pas produire, et qu'aucune attaque ne pourrait viser tant qu'elle
+    n'a pas fait son ingress move.
     """
     player_int = int(player)
     target_id = str(unit_id)
     from engine.game_utils import get_unit_by_id
-    from engine.phase_handlers.shared_utils import is_unit_alive
+    from engine.phase_handlers.shared_utils import (
+        entry_is_on_battlefield, is_unit_alive, require_unit_from_cache,
+    )
 
     # `get_unit_by_id` et pas une boucle : l'index `unit_by_id` est la convention du dépôt pour
     # « id -> unité » (O(1), même normalisation `str`). Le jour où sa clé change, ce site suit.
@@ -4412,6 +4420,12 @@ def set_oath_target(game_state: Dict[str, Any], player: int, unit_id: str) -> No
         )
     if not is_unit_alive(target_id, game_state):
         raise ValueError(f"set_oath_target: l'unite {target_id!r} est detruite")
+    target_entry = require_unit_from_cache(target_id, game_state, "set_oath_target")
+    if not entry_is_on_battlefield(target_entry):
+        raise ValueError(
+            f"set_oath_target: l'unite {target_id!r} n'est pas sur le champ de bataille "
+            f"(reserves strategiques) — le masque n'ouvre pas son slot."
+        )
     _player_flag_map(game_state, "oath_target")[player_int] = target_id
     _clear_pending_oath_if_owner(game_state, player_int)
     from engine.game_utils import add_console_log

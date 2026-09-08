@@ -4630,7 +4630,7 @@ class W40KEngine(gym.Env):
         return False
 
     def _select_ai_oath_target(self, player: int) -> str:
-        """Politique du siège IA hors gym pour la cible d'Oath : l'ennemi vivant le plus coûteux.
+        """Politique du siège IA hors gym pour la cible d'Oath : l'ennemi le plus coûteux.
 
         « select ONE unit » est obligatoire : cette fonction ne peut pas rendre « aucune », et
         elle lève si le pool est vide — un état que `command_step_command_abilities` ne produit
@@ -4639,8 +4639,8 @@ class W40KEngine(gym.Env):
         candidates = command_handlers.oath_selectable_enemy_ids(self.game_state, int(player))
         if not candidates:
             raise RuntimeError(
-                f"_select_ai_oath_target: aucune unite ennemie vivante pour le joueur {player} — "
-                f"la designation n'aurait pas du etre posee."
+                f"_select_ai_oath_target: aucune unite ennemie sur la table pour le joueur "
+                f"{player} — la designation n'aurait pas du etre posee."
             )
         # `_get_unit_by_id` (index `unit_by_id`) plutôt qu'un second index reconstruit ici : la
         # classe l'utilise déjà partout ailleurs, et l'index existe depuis le reset.
@@ -9182,6 +9182,33 @@ class W40KEngine(gym.Env):
             tensor=tensor, mask_and_eligible=mask_and_eligible
         )[0]
 
+    def _first_squad_on_board(self, player: int) -> Optional[str]:
+        """Première escouade de `player` SUR LA TABLE — ANCRE ÉGOCENTRIQUE DE REPLI, source unique.
+
+        `_build_observation_and_mask` a besoin d'un repère d'observation dans deux situations où
+        AUCUNE escouade n'est désignée par le contexte : une décision d'ARMÉE (`waaagh_call`, qui
+        ne porte sur aucune unité) et le repli du pool d'éligibles vide — celui qu'emprunte la
+        désignation d'Oath, qui n'est pas un `pending_agent_decision`. Les deux prenaient « la
+        première du joueur » chacun de son côté, et les deux copies ont divergé : la correction
+        du 2026-09-08 n'avait atteint que la première (`/code-review`). D'où cette fonction.
+
+        « Sur la table » et pas « vivante » : une escouade en réserves stratégiques (20.01) est
+        vivante dans `units_cache` mais porte la sentinelle (-1,-1). Une ancre posée sur elle
+        décrit une position qui n'existe pas, SILENCIEUSEMENT — rien ne lève. Le prédicat est le
+        jumeau de `player_has_squads_on_board`, la garde qui autorise 08.04 à poser la décision ;
+        les désolidariser rendrait la garde fausse, puisqu'elle promettrait une escouade que ce
+        sélecteur-ci n'irait pas chercher.
+
+        Dérivé de `deployed_friendly_squad_ids`, la source unique de « mes escouades sur la
+        table » — celle-là même dont l'observation peuple ses lignes alliées. « Première » y est
+        au sens de l'ordre des identifiants : arbitraire mais REPRODUCTIBLE quel que soit l'ordre
+        d'insertion du cache, ce qui est tout ce qu'on demande à un repère quand le choix observé
+        est global.
+        """
+        from engine.phase_handlers.shared_utils import deployed_friendly_squad_ids
+
+        return next(iter(deployed_friendly_squad_ids(self.game_state, int(player))), None)
+
     def _observer_squad_for_pending_decision(self, decision: Dict[str, Any]) -> str:
         """Escouade DEPUIS LAQUELLE observer une décision en attente — RÈGLE UNIQUE.
 
@@ -9197,10 +9224,13 @@ class W40KEngine(gym.Env):
 
         Cas d'ARMÉE (`waaagh_call`) : la décision ne porte sur AUCUNE unité, son `unit_id`
         identifie le point de choix (`player_<n>`). Ce que le candidat accorde est global — les
-        drapeaux Waaagh! de `global_bin` — donc n'importe laquelle de MES escouades vivantes est
-        un repère égocentrique valable ; la première du joueur décideur, pour que le choix soit
-        reproductible. Le contrôle strict reste entier pour les autres types : une décision dont
-        l'unité a disparu décrit un état incohérent, et doit lever.
+        drapeaux Waaagh! de `global_bin` — donc n'importe laquelle de mes escouades SUR LA TABLE
+        est un repère égocentrique valable ; la première du joueur décideur, pour que le choix
+        soit reproductible. Le contrôle strict reste entier pour les autres types : une décision
+        dont l'unité a disparu décrit un état incohérent, et doit lever.
+
+        Le repère de repli vient de `_first_squad_on_board` — la MÊME source que le repli du pool
+        vide, plus bas dans `_build_observation_and_mask`.
         """
         decision_unit_id = str(require_key(decision, "unit_id"))
         units_cache = require_key(self.game_state, "units_cache")
@@ -9212,17 +9242,12 @@ class W40KEngine(gym.Env):
                 "absente de units_cache — la decision survit a son unite."
             )
         decision_player = int(require_key(decision, "player"))
-        observer_id = next(
-            (
-                str(sid) for sid, entry in units_cache.items()
-                if int(require_key(entry, "player")) == decision_player
-            ),
-            None,
-        )
+        observer_id = self._first_squad_on_board(decision_player)
         if observer_id is None:
             raise KeyError(
                 f"_build_observation: decision 'waaagh_call' du joueur {decision_player} "
-                "alors qu'il n'a plus aucune escouade — 08.04 n'aurait pas du la poser."
+                "alors qu'il n'a plus aucune escouade sur la table — 08.04 n'aurait pas du "
+                "la poser."
             )
         return observer_id
 
@@ -9398,11 +9423,14 @@ class W40KEngine(gym.Env):
         elif armed_decision is not None:
             active_squad_id = self._observer_squad_for_pending_decision(armed_decision)
         else:
-            uc = self.game_state.get("units_cache", {})  # get allowed
-            current_player = int(self.game_state.get("current_player", 1))
-            active_squad_id = next(
-                (str(sid) for sid, e in uc.items() if int(e.get("player", -1)) == current_player),
-                None,
+            # MÊME source que la branche du dessus (`_first_squad_on_board`) : c'est ce chemin-ci
+            # que prend la désignation d'Oath — elle n'est pas un `pending_agent_decision`, donc
+            # `armed_decision` est None et son masque exclusif vide le pool. Les deux replis
+            # écrits séparément avaient divergé, l'ancre tombant ici sur une escouade en réserves.
+            # Aucune escouade sur la table : l'observation nulle est la bonne réponse — c'est
+            # déjà ce que fait la branche d'entrée.
+            active_squad_id = self._first_squad_on_board(
+                int(self.game_state.get("current_player", 1))  # get allowed
             )
             if active_squad_id is None:
                 return _zero_obs(), (action_mask, eligible_units)
