@@ -20,8 +20,12 @@ TROIS CHOIX DE CONSTRUCTION, chacun imposé par une mesure et non par une préf�
    pour cause de trajet, les autres tombant sur l'engagement ennemi. C'est en exigeant
    qu'AUCUNE ne passe qu'une seule case redevenue joignable fait tomber le test.
 
-3. UN TÉMOIN. Sans lui, un refus global — budget nul, unité non activée, plan malformé —
-   satisferait l'assertion universelle sans que rien ne soit mesuré.
+3. UNE CONTRE-ÉPREUVE SUR LE POOL ENTIER. Sans elle, un refus global — budget nul, unité non
+   activée, plan malformé — satisferait l'assertion universelle sans que rien ne soit mesuré.
+   Elle a d'abord porté sur une seule case (``min(pool)``) : mesure du 2026-09-09, cette forme
+   ne détectait la perte du contournement que sur une unité sur trois, parce qu'elle dépendait
+   de la case désignée. Elle balaie donc tout le pool — 340 cases sur les trois unités, toutes
+   validables en code réel.
 
 Le budget et les murs se dérivent du PAYLOAD, jamais du moteur : ``game_state['wall_hexes']`` est
 filtré de la réponse HTTP (seul ``dense_wall_hexes`` en sort) et ``get_squad_move_budget`` exige
@@ -130,7 +134,7 @@ class TestGeodesicMoveReachIsWiredToPvp:
         """09.05 : la distance parcourue est celle du CHEMIN, pas celle du vol d'oiseau."""
         model_id = game_x1.models_of(unit_id)[0]
         game_x1.act("activate_unit", unitId=unit_id)
-        pool, candidates = _detour_candidates(game_x1, unit_id, model_id)
+        _pool, candidates = _detour_candidates(game_x1, unit_id, model_id)
 
         assert candidates, (
             f"unité {unit_id} : aucune case à portée hex hors du pool — le test ne mesurerait "
@@ -144,12 +148,37 @@ class TestGeodesicMoveReachIsWiredToPvp:
             f"{_move_budget(game_x1, unit_id)} pas n'y mène — {validables[:5]}"
         )
 
-        # TÉMOIN : une case du pool reste acceptée. Sans elle, un refus global (budget nul,
-        # unité non activée) rendrait l'assertion ci-dessus vraie sans rien prouver.
-        witness = min(pool - {_model_origin(game_x1, model_id)})
-        assert _can_validate(game_x1, unit_id, model_id, witness), (
-            f"unité {unit_id} : la case {witness}, offerte par son propre pool, est refusée par "
-            f"la validation — masque ⊄ exécutable"
+    def test_tout_le_pool_par_figurine_est_validable(self, game_x1, unit_id):
+        """« masque ⊆ exécutable » : chaque case offerte par le pool passe la validation.
+
+        CONTRE-ÉPREUVE de l'assertion ci-dessus, et pas seulement : sans elle, un refus global
+        — budget nul, unité non activée, plan malformé — laisserait « aucune case hors budget
+        n'est validable » vraie sans que rien ne soit mesuré.
+
+        POURQUOI TOUT LE POOL et non un témoin. Le pool par-figurine a son PROPRE BFS hex inline
+        (``movement_build_model_destinations_pool``), distinct du géodésique qu'emploie la
+        validation : deux implémentations du même atteignable, que rien ne tient en phase par
+        construction. Mesure du 2026-09-09 — le BFS inline remplacé par un disque hex à filtres
+        de destination identiques laisse VERTS les 116 tests des dix fichiers unitaires qui
+        touchent ce pool ; seul un témoin unique tombait, et sur une seule des trois unités,
+        parce qu'il dépendait de la case que ``min(pool)`` désigne. Balayer le pool entier rend
+        la détection indépendante de ce hasard.
+
+        Coût assumé : 340 previews pour les trois unités, mesurées toutes validables en code
+        réel (177 + 70 + 93, zéro écart). Une seule case refusée ici est un défaut moteur —
+        le masque proposerait au joueur une destination que le commit refuserait.
+        """
+        model_id = game_x1.models_of(unit_id)[0]
+        game_x1.act("activate_unit", unitId=unit_id)
+        pool = _model_pool(game_x1, model_id) - {_model_origin(game_x1, model_id)}
+
+        assert pool, f"unité {unit_id} : pool de move vide, le test ne mesurerait rien"
+        refusees = sorted(
+            cell for cell in pool if not _can_validate(game_x1, unit_id, model_id, cell)
+        )
+        assert not refusees, (
+            f"unité {unit_id} : {len(refusees)} case(s) offertes par son propre pool sont "
+            f"refusées par la validation — masque ⊄ exécutable — {refusees[:5]}"
         )
 
     def test_le_plan_d_un_pas_est_previewe_puis_committe_a_la_case_prevue(self, game_x1, unit_id):
