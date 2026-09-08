@@ -1,0 +1,172 @@
+"""Le BFS géodésique hex du move, exercé par le VRAI flux PvP (plateau x1).
+
+Ce que ce fichier verrouille et qu'aucun autre test d'intégration n'atteignait : à
+``inches_to_subhex = 1`` la géométrie du move est hex (``geometry_is_hex``), donc la validation
+d'un plan mesure la distance de CHEMIN — ``geodesic_move_reach`` via ``geodesic_field_for_origin``
+et ``model_reach_predicate``. Toute la suite ``tests/integration/pvp/`` joue le plateau x5, où la
+métrique est euclidienne : mesure du 2026-09-08 sur le flux complet, ``geodesic_move_reach`` 0
+appel, ``move_transit_blocked_forms`` 0, ``_euclidean_move_field_for_model`` 15. Le chemin hex
+n'était couvert que par des tests pilotant le moteur hors HTTP.
+
+TROIS CHOIX DE CONSTRUCTION, chacun imposé par une mesure et non par une préférence :
+
+1. UNE UNITÉ MONO-FIGURINE. Sur une escouade, la cohésion 06.02 et les zones d'engagement
+   ennemies refusent les cases bien avant le trajet : balayage de 2 641 cases de pool sur
+   l'unité 204 (12 figurines) — 0 case dont le verdict dépende du BFS. Une figurine seule n'a
+   ni cohésion à tenir ni sœur à contourner : le trajet devient le seul juge.
+
+2. UNE ASSERTION UNIVERSELLE, pas existentielle. « Il existe une case refusée » resterait VERTE
+   avec le BFS cassé : sur l'unité 201, 18 candidates sont refusées mais 4 seulement le sont
+   pour cause de trajet, les autres tombant sur l'engagement ennemi. C'est en exigeant
+   qu'AUCUNE ne passe qu'une seule case redevenue joignable fait tomber le test.
+
+3. UN TÉMOIN. Sans lui, un refus global — budget nul, unité non activée, plan malformé —
+   satisferait l'assertion universelle sans que rien ne soit mesuré.
+
+Le budget et les murs se dérivent du PAYLOAD, jamais du moteur : ``game_state['wall_hexes']`` est
+filtré de la réponse HTTP (seul ``dense_wall_hexes`` en sort) et ``get_squad_move_budget`` exige
+l'état interne. ``MOVE × inches_to_subhex`` a été vérifié égal au budget moteur sur les trois
+unités de ``_MONO_MODEL_UNITS`` (8/8, 6/6, 6/6).
+
+Preuve de mordant (2026-09-08) : ``geodesic_move_reach`` remplacé par un disque hex — toute
+cellule non bloquée à ``hex_distance <= budget`` — fait passer 11, 11 et 4 candidates de refusées
+à acceptées sur les trois unités, le témoin restant accepté dans les deux régimes.
+"""
+
+from __future__ import annotations
+
+from typing import Set, Tuple
+
+import pytest
+
+from engine.hex_utils import hex_distance
+
+pytestmark = pytest.mark.integration
+
+# Unités MONO-FIGURINE du scénario figé présentes dans le pool de move du tour 1, dont la mesure
+# a montré que le verdict du BFS y est discriminant (candidates refusées qui basculent sous
+# mutation : 11/21, 11/42, 4/10). Nommées et non découvertes au vol : une unité tirée du pool
+# pourrait être multi-figurines ou sans obstacle à portée, et le test ne mesurerait plus rien.
+_MONO_MODEL_UNITS = ("1005", "1002", "3")
+
+
+def _ground_cells(entries) -> Set[Tuple[int, int]]:
+    """Cases de niveau SOL d'un pool ``[[col, row, level], ...]``."""
+    return {(int(e[0]), int(e[1])) for e in entries if int(e[2]) == 0}
+
+
+def _model_pool(game, model_id: str) -> Set[Tuple[int, int]]:
+    body = game.act("move_model_destinations", model_id=model_id, provisional_plan={})
+    return _ground_cells(body["result"]["destinations"])
+
+
+def _model_origin(game, model_id: str) -> Tuple[int, int]:
+    model = game.state["models_cache"][model_id]
+    return int(model["col"]), int(model["row"])
+
+
+def _move_budget(game, unit_id: str) -> int:
+    """Budget de move en subhex, dérivé du PAYLOAD seul (cf. docstring du module)."""
+    return int(game.unit(unit_id)["MOVE"]) * int(game.state["inches_to_subhex"])
+
+
+def _occupied_ground(game) -> Set[Tuple[int, int]]:
+    return {
+        (int(m["col"]), int(m["row"]))
+        for m in game.state["models_cache"].values()
+        if int(m["level"]) == 0
+    }
+
+
+def _can_validate(game, unit_id: str, model_id: str, cell: Tuple[int, int]) -> bool:
+    """Verdict de la VALIDATION pour cette figurine posée sur ``cell`` — le seul chemin qui
+    exerce le trajet. ``explain_move_plan_rejection`` appelée directement ne le ferait pas :
+    ``DEFAULT_MOVE_CONSTRAINTS`` porte ``budget_per_model = None``, donc aucun contrôle de
+    distance, donc aucun appel au BFS et toute case acceptée."""
+    accepted, body = game.try_act(
+        "preview_move_plan", unitId=unit_id, plan=[[model_id, cell[0], cell[1], 0]]
+    )
+    if not accepted:
+        return False
+    result = body["result"]
+    return bool(result["can_validate"]) and bool(result["per_model"][model_id])
+
+
+def _detour_candidates(
+    game, unit_id: str, model_id: str
+) -> Tuple[Set[Tuple[int, int]], Set[Tuple[int, int]]]:
+    """(pool, candidates) — candidates = cases que SEUL un détour sépare de l'origine.
+
+    À portée hex du budget, absentes du pool, et libres de tout ce qui interdirait la case
+    elle-même : mur, figurine. Ce qui reste ne peut être refusé que par la longueur du chemin.
+    """
+    pool = _model_pool(game, model_id)
+    origin = _model_origin(game, model_id)
+    budget = _move_budget(game, unit_id)
+    walls = {(int(w[0]), int(w[1])) for w in game.state["dense_wall_hexes"]}
+    blocked = walls | _occupied_ground(game)
+    candidates = {
+        (col, row)
+        for col in range(int(game.state["board_cols"]))
+        for row in range(int(game.state["board_rows"]))
+        if (col, row) != origin
+        and hex_distance(origin[0], origin[1], col, row) <= budget
+        and (col, row) not in pool
+        and (col, row) not in blocked
+    }
+    return pool, candidates
+
+
+@pytest.mark.parametrize("unit_id", _MONO_MODEL_UNITS)
+class TestGeodesicMoveReachIsWiredToPvp:
+    def test_le_plateau_x1_mesure_le_move_en_hex(self, game_x1, unit_id):
+        """Garde de la fixture : sans géométrie hex, tout le fichier mesurerait l'euclidien."""
+        assert int(game_x1.state["inches_to_subhex"]) == 1
+        assert (int(game_x1.state["board_cols"]), int(game_x1.state["board_rows"])) == (44, 60)
+        assert unit_id in game_x1.pool("move_activation_pool")
+        assert len(game_x1.models_of(unit_id)) == 1, "unité attendue mono-figurine (cf. docstring)"
+
+    def test_aucune_case_derriere_un_detour_hors_budget_n_est_validable(self, game_x1, unit_id):
+        """09.05 : la distance parcourue est celle du CHEMIN, pas celle du vol d'oiseau."""
+        model_id = game_x1.models_of(unit_id)[0]
+        game_x1.act("activate_unit", unitId=unit_id)
+        pool, candidates = _detour_candidates(game_x1, unit_id, model_id)
+
+        assert candidates, (
+            f"unité {unit_id} : aucune case à portée hex hors du pool — le test ne mesurerait "
+            f"rien (VERT VACANT)"
+        )
+        validables = sorted(
+            cell for cell in candidates if _can_validate(game_x1, unit_id, model_id, cell)
+        )
+        assert not validables, (
+            f"unité {unit_id} : {len(validables)} case(s) validées alors qu'aucun chemin de "
+            f"{_move_budget(game_x1, unit_id)} pas n'y mène — {validables[:5]}"
+        )
+
+        # TÉMOIN : une case du pool reste acceptée. Sans elle, un refus global (budget nul,
+        # unité non activée) rendrait l'assertion ci-dessus vraie sans rien prouver.
+        witness = min(pool - {_model_origin(game_x1, model_id)})
+        assert _can_validate(game_x1, unit_id, model_id, witness), (
+            f"unité {unit_id} : la case {witness}, offerte par son propre pool, est refusée par "
+            f"la validation — masque ⊄ exécutable"
+        )
+
+    def test_le_plan_d_un_pas_est_previewe_puis_committe_a_la_case_prevue(self, game_x1, unit_id):
+        """Le flux nominal complet sur le même plateau : ce que le front joue."""
+        model_id = game_x1.models_of(unit_id)[0]
+        game_x1.act("activate_unit", unitId=unit_id)
+        origin = _model_origin(game_x1, model_id)
+        pool = _model_pool(game_x1, model_id)
+        destination = min(
+            pool - {origin},
+            key=lambda cell: hex_distance(origin[0], origin[1], cell[0], cell[1]) or 99,
+        )
+        plan = [[model_id, destination[0], destination[1], 0]]
+
+        preview = game_x1.act("preview_move_plan", unitId=unit_id, plan=plan)["result"]
+        assert preview["can_validate"] is True
+        assert preview["per_model"][model_id] is True
+
+        game_x1.act("commit_move_plan", unitId=unit_id, plan=plan)
+        assert _model_origin(game_x1, model_id) == destination

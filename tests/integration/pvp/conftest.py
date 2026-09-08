@@ -106,3 +106,40 @@ def game_unchecked(api_isolated):
         client = GameClient(flask_client)
         client.start()
         yield client
+
+
+@pytest.fixture
+def game_x1(api_isolated, monkeypatch):
+    """Même partie, même scénario figé, mais jouée sur le plateau ``44x60x1``.
+
+    POURQUOI UN SECOND PLATEAU. À ``inches_to_subhex = 5``, ``geometry_is_hex`` est faux et
+    ``distance_metric["move"]`` vaut ``euclidean`` : le move de la fixture ``game`` chemine par
+    ``_euclidean_move_field_for_model`` et n'atteint JAMAIS le BFS géodésique hex. Mesure du
+    2026-09-08 sur le flux complet (activation, destinations par figurine, preview, commit) :
+    ``geodesic_move_reach`` 0 appel, ``move_transit_blocked_forms`` 0, champ euclidien 15. À x1,
+    ``geometry_is_hex`` force la métrique hex quoi qu'en disent la config et la phase
+    (``resolve_gym_split_metric``), et le même flux appelle le BFS — uniquement sous
+    ``preview_move_plan``, jamais sous ``move_model_destinations`` (qui a son propre BFS inline)
+    ni sous ``commit_move_plan``.
+
+    POURQUOI ``W40K_BOARD_PATH`` ET NON ``board_path="x1"``. Le mode ``pvp_test`` honore bien
+    ``board_path``, mais il RÉÉCRIT le ``scenario_file`` du client (``api_server`` : le chemin est
+    recomposé depuis ``TEST_SCENARIO_BOARD_MAP``) et impose donc ``scenario_pvp_test.json`` — le
+    bac à sable jouable, modifié 63 fois en six mois, quand ``scenario_pvp_integration.json`` l'a
+    été 2 fois et porte « Ne PAS retoucher pour jouer ». Ancrer un test d'intégration sur le
+    premier, c'est reproduire la panne du commit 02454a34. Le mode ``pvp``, lui, garde le scénario
+    demandé et lit le plateau dans l'environnement : c'est le même geste que ``pvp_test`` fait en
+    interne, sur un scénario stable.
+
+    ``monkeypatch.setenv`` et non un ``os.environ`` posé à la main : la variable est globale au
+    process et pytest doit garantir sa restauration, sinon les tests x5 qui suivent dans le même
+    worker joueraient un plateau x1.
+    """
+    from tests.integration.pvp.invariants import assert_state_invariants
+
+    monkeypatch.setenv("W40K_BOARD_PATH", "board/44x60x1")
+    with app.test_client() as flask_client:
+        client = GameClient(flask_client, check=assert_state_invariants)
+        client.start(mode_code="pvp", scenario_file=INTEGRATION_SCENARIO)
+        client.drain_to("move")
+        yield client
