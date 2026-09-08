@@ -5,7 +5,7 @@ combat_utils.py - Pure utility functions for combat calculations
 
 import math
 import os
-from typing import Dict, List, Tuple, Any, Optional, Union
+from typing import Dict, Iterable, List, NamedTuple, Optional, Set, Tuple, Any, Union
 
 # NOTE: Do not import is_unit_alive at top level — causes circular import
 # (combat_utils → shared_utils → phase_handlers → generic_handlers → combat_utils).
@@ -191,13 +191,24 @@ def get_hex_neighbors(col: Any, row: Any) -> Tuple[Tuple[int, int], ...]:
     cached = _HEX_NEIGHBORS_CACHE.get(key)
     if cached is not None:
         return cached
-    col_int, row_int = key
+    neighbors = _hex_neighbors_uncached(*key)
+    _HEX_NEIGHBORS_CACHE[key] = neighbors
+    return neighbors
 
+
+def _hex_neighbors_uncached(col_int: int, row_int: int) -> Tuple[Tuple[int, int], ...]:
+    """Les six voisins de `(col_int, row_int)`, SANS memoisation, sur des entiers deja normalises.
+
+    Source unique du voisinage parity-aware : `get_hex_neighbors` la memoise pour les appels
+    unitaires, `hex_index_table` l'appelle directement. La table balaie TOUT le plateau ; passer
+    par le cache y ajouterait 66 000 entrees d'un coup a 220x300 (35 Mo) dont la plupart pour des
+    cases que personne n'interrogera jamais unitairement.
+    """
     # Determine if column is even or odd
     parity = col_int & 1  # 0 for even, 1 for odd
 
     if parity == 0:  # Even column
-        neighbors = (
+        return (
             (int(col_int), int(row_int - 1)),      # N
             (int(col_int + 1), int(row_int - 1)),  # NE
             (int(col_int + 1), int(row_int)),      # SE
@@ -205,18 +216,136 @@ def get_hex_neighbors(col: Any, row: Any) -> Tuple[Tuple[int, int], ...]:
             (int(col_int - 1), int(row_int)),      # SW
             (int(col_int - 1), int(row_int - 1))   # NW
         )
-    else:  # Odd column
-        neighbors = (
-            (int(col_int), int(row_int - 1)),      # N
-            (int(col_int + 1), int(row_int)),      # NE
-            (int(col_int + 1), int(row_int + 1)),  # SE
-            (int(col_int), int(row_int + 1)),      # S
-            (int(col_int - 1), int(row_int + 1)),  # SW
-            (int(col_int - 1), int(row_int))       # NW
-        )
+    # Odd column
+    return (
+        (int(col_int), int(row_int - 1)),      # N
+        (int(col_int + 1), int(row_int)),      # NE
+        (int(col_int + 1), int(row_int + 1)),  # SE
+        (int(col_int), int(row_int + 1)),      # S
+        (int(col_int - 1), int(row_int + 1)),  # SW
+        (int(col_int - 1), int(row_int))       # NW
+    )
 
-    _HEX_NEIGHBORS_CACHE[key] = neighbors
-    return neighbors
+
+class HexIndexTable(NamedTuple):
+    """Plateau indexe : chaque case porte un entier ``index = col * board_rows + row``.
+
+    SEUL endroit qui connait cette formule. Les BFS qui utilisent la table circulent sur des
+    entiers et ne rehachent plus de paires : `neighbors[i]` donne directement les voisins DANS
+    le plateau (le filtre de bornes est deja paye a la construction), `cells[j]` rend la paire
+    `(col, row)` pour reconstruire un resultat en coordonnees.
+
+    IMMUABLE et PARTAGEE entre appelants, comme le tuple de `get_hex_neighbors` : la table est
+    memoisee par dimensions, donc la muter contaminerait tous les appels suivants.
+    """
+
+    neighbors: Tuple[Tuple[int, ...], ...]
+    cells: Tuple[Tuple[int, int], ...]
+    board_cols: int
+    board_rows: int
+
+    def cell_index(self, col: int, row: int) -> int:
+        """Index de la case ``(col, row)``, qui DOIT etre dans le plateau.
+
+        Pas `index` : `HexIndexTable` est un `NamedTuple`, donc un `tuple`, dont `index` cherche
+        deja la position d'une valeur dans le n-uplet.
+
+        Hors bornes, `col * board_rows + row` collisionnerait avec une case valide
+        (a 220x300, `(5, -1)` donne l'index de `(4, 299)`) : une case bloquee hors plateau
+        bloquerait silencieusement une case joignable. On leve donc au lieu de replier.
+        """
+        if not (0 <= col < self.board_cols and 0 <= row < self.board_rows):
+            raise ValueError(
+                f"cell_index() hors plateau : ({col}, {row}) pour "
+                f"{self.board_cols}x{self.board_rows}"
+            )
+        return col * self.board_rows + row
+
+    def indices_in_bounds(self, cells: Iterable[Tuple[int, int]]) -> Set[int]:
+        """Index des cases de ``cells`` qui tombent DANS le plateau ; les autres sont ignorees.
+
+        Miroir exact du filtre de bornes qu'un BFS centre-a-centre applique a ses voisins : une
+        case hors plateau n'est de toute facon jamais atteinte, donc l'ecarter ici ne change
+        aucun resultat — et c'est ce qui rend la collision d'index decrite dans `cell_index()`
+        impossible sur les ensembles d'obstacles.
+
+        SEULE UNE COORDONNEE DE VALEUR ENTIERE est indexee, et c'est le point delicat : cette
+        methode remplace un `if cellule in obstacles` ou la case testee etait une paire d'entiers.
+        Une paire de valeur entiere y etait EGALE quel qu'en soit le type (`(5, 3) == (5.0, 3.0)`,
+        idem pour un entier numpy) et bloquait donc ; une paire de valeur fractionnaire n'y etait
+        jamais egale et restait inerte. Multiplier sans ce controle detruirait les deux moities de
+        cette regle : `62.7 * 300 + 80` vaut exactement `18890.0`, qui hache comme l'index de
+        `(62, 290)` — un obstacle fractionnaire fermerait une case situee a 210 lignes de la.
+
+        La voie rapide (les deux coordonnees deja `int`) evite la conversion sur le chemin chaud ;
+        elle coute 2,4 % du temps de `geodesic_move_reach`, mesure du 2026-09-08.
+        """
+        cols = self.board_cols
+        rows = self.board_rows
+        out: Set[int] = set()
+        for (c, r) in cells:
+            if type(c) is int and type(r) is int:
+                if 0 <= c < cols and 0 <= r < rows:
+                    out.add(c * rows + r)
+                continue
+            int_c = int(c)
+            int_r = int(r)
+            if int_c != c or int_r != r:
+                continue  # coordonnee fractionnaire : inerte, comme le test d'appartenance
+            if 0 <= int_c < cols and 0 <= int_r < rows:
+                out.add(int_c * rows + int_r)
+        return out
+
+
+_HEX_INDEX_TABLE_CACHE: Dict[Tuple[int, int], HexIndexTable] = {}
+
+
+def hex_index_table(board_cols: int, board_rows: int) -> HexIndexTable:
+    """Table de voisinage hex INDEXEE, memoisee par dimensions de plateau.
+
+    Construite via `_hex_neighbors_uncached`, la source unique dont `get_hex_neighbors` est la
+    forme memoisee — meme parite, meme voisinage a six cases que tous les BFS du moteur ; la
+    table ne fait que precalculer, une fois par plateau, le filtre de bornes que la boucle
+    interne payait a chaque voisin de chaque case. Elle NE PASSE PAS par le cache unitaire :
+    balayer le plateau y injecterait 66 000 entrees (35 Mo) pour des cases jamais interrogees
+    une a une.
+
+    COUT MESURE a 220x300 (66 000 cases, board/44x60x5), 2026-09-08 : 68 ms et 12,8 Mo
+    residents par processus, une seule fois (5 ms a 44x60, 180 ms a 360x312). Le cache est borne par le nombre de plateaux
+    configures (`config/board/44x60x{1,5,10}` : 2 640, 66 000 et 112 320 cases), pas par le
+    nombre d'appels.
+
+    GAIN MESURE sur `geodesic_move_reach` (80 steps du chemin de `scripts/bench_env_step.py`,
+    x1_long/bot, une variante par processus, 3 repetitions) : 2 382 ms -> 806 ms de temps
+    cumule dans la fonction, soit 20,4 % -> 8,0 % du wall du meme run. Les deux tiers du gain
+    viennent de l'index entier (plus de hachage de paires), le tiers restant du filtre de
+    bornes precalcule.
+    """
+    key = (int(board_cols), int(board_rows))
+    cached = _HEX_INDEX_TABLE_CACHE.get(key)
+    if cached is not None:
+        return cached
+    cols, rows = key
+    if cols <= 0 or rows <= 0:
+        raise ValueError(f"hex_index_table: dimensions de plateau invalides {cols}x{rows}")
+    # L'ordre de cette comprehension EST celui des index : `(c, r)` y tombe en position
+    # `c * rows + r`.
+    cells: List[Tuple[int, int]] = [(c, r) for c in range(cols) for r in range(rows)]
+    # Les index voisins sont pris dans `pool`, donc le MEME objet `int` partout. Sans ce
+    # partage, chaque case detiendrait ses six voisins en entiers distincts : ~400 000 objets
+    # `int` de plus par plateau, pour 11 Mo.
+    pool = {i: i for i in range(len(cells))}
+    neighbors: List[Tuple[int, ...]] = [
+        tuple(
+            pool[nc * rows + nr]
+            for (nc, nr) in _hex_neighbors_uncached(c, r)
+            if 0 <= nc < cols and 0 <= nr < rows
+        )
+        for (c, r) in cells
+    ]
+    table = HexIndexTable(tuple(neighbors), tuple(cells), cols, rows)
+    _HEX_INDEX_TABLE_CACHE[key] = table
+    return table
 
 
 # ============================================================================
