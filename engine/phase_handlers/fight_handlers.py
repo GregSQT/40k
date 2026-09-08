@@ -631,82 +631,6 @@ def _fight_synth_cache_entries_at_footprint(
     return list(by_base.values())
 
 
-def _fight_model_start_engagements(
-    game_state: Dict[str, Any], unit: Dict[str, Any]
-) -> Dict[str, List[Tuple[str, Dict[str, Any]]]]:
-    """Unités ennemies avec lesquelles CHAQUE figurine est engagée à sa position courante.
-
-    12.03 / 12.08 AFTER : « each model that started this move engaged with an enemy unit must still
-    be engaged with **that** enemy unit ». La clause est par FIGURINE et par UNITÉ ENNEMIE — un
-    verdict d'unité (« l'escouade reste engagée avec X ») laisse passer un move où la figurine qui
-    tenait X s'en va pendant qu'une autre s'en approche.
-
-    Les figurines qui ne partent engagées avec personne sont ABSENTES du dictionnaire : elles n'ont
-    rien à conserver, et les interroger par ancre coûterait sans rien décider.
-    """
-    from engine.spatial_relations import unit_entries_within_engagement_zone, get_engagement_zone, engagement_distance_metric
-    from .shared_utils import _synth_model_entry
-
-    ez = int(get_engagement_zone(game_state))
-    metric = engagement_distance_metric(game_state)
-    models_cache = require_key(game_state, "models_cache")
-    squad_models = require_key(game_state, "squad_models")
-    units_cache = require_key(game_state, "units_cache")
-    uid = str(require_key(unit, "id"))
-    player = int(require_key(unit, "player"))
-    enemies = list(enemy_entries_on_battlefield(units_cache, player, exclude_id=uid))
-    out: Dict[str, List[Tuple[str, Dict[str, Any]]]] = {}
-    for mid in squad_models.get(uid, []):  # get allowed (escouade sans figurine = rien à conserver)
-        m = models_cache.get(str(mid))
-        if m is None:
-            continue
-        synth = _synth_model_entry(
-            game_state, uid, m, int(m["col"]), int(m["row"]),
-            level=int(require_key(m, "level")),
-        )
-        # (id, entrée) et non l'entrée seule : les entrées `units_cache` ne portent pas toutes un
-        # champ `id`, et un engagement à conserver doit rester NOMMABLE (messages, journaux).
-        held = [
-            (str(eid), ce) for eid, ce in enemies
-            if unit_entries_within_engagement_zone(synth, ce, ez, metric=metric)
-        ]
-        if held:
-            out[str(mid)] = held
-    return out
-
-
-def _fight_models_keep_start_engagements(
-    game_state: Dict[str, Any],
-    squad_id: str,
-    start_engagements: Mapping[str, List[Tuple[str, Dict[str, Any]]]],
-    placements: Mapping[str, Tuple[int, int, int]],
-    engagement_zone: int,
-) -> bool:
-    """True si CHAQUE figurine conserve, à sa position d'arrivée, TOUS ses engagements de départ.
-
-    Miroir exact du contrôle du flux par-figurine (``_fight_pile_in_preview_plan``), appliqué ici à
-    une configuration d'ancre (translation rigide du bloc).
-    """
-    from engine.spatial_relations import unit_entries_within_engagement_zone, engagement_distance_metric
-    from .shared_utils import _synth_model_entry
-
-    metric = engagement_distance_metric(game_state)
-    models_cache = require_key(game_state, "models_cache")
-    for mid, held in start_engagements.items():
-        placement = placements.get(str(mid))
-        if placement is None:
-            continue  # figurine absente de la configuration candidate (morte entre-temps)
-        c, r, lv = placement
-        m = models_cache.get(str(mid))
-        if m is None:
-            continue
-        synth = _synth_model_entry(game_state, squad_id, m, int(c), int(r), level=int(lv))
-        for _eid, ce in held:
-            if not unit_entries_within_engagement_zone(synth, ce, engagement_zone, metric=metric):
-                return False
-    return True
-
-
 def _fight_entries_in_engagement_with_any_enemy(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -2322,7 +2246,7 @@ def _fight_pile_in_build_model_pool(
     traverser murs ni figs (ennemies, alliées, coéquipières). ``provisional_plan``
     ({model_id: (col, row[, level])}) remplace les positions des coéquipières déjà posées dans le
     plan UI (recompute temps réel). ``closest_tier_ids`` = unité(s) ennemie(s) la/les plus proche(s)
-    de l'ESCOUADE (palier WHILE commun à toutes les figs, cf. ``pile_in_move_destinations_12_03``).
+    de l'ESCOUADE (palier WHILE commun à toutes les figs, cf. ``_fight_pile_in_closest_tier_ids``).
 
     ``view_level`` (étages, §13.06) : niveau de VUE UI. 0 = plan sol (comportement historique
     inchangé). >= 1 = destinations sur le plancher de ce niveau, atteignables avec le coût vertical
@@ -2556,7 +2480,7 @@ def _fight_pile_in_closest_tier_ids(
     game_state: Dict[str, Any], unit: Dict[str, Any], target_ids: List[str]
 ) -> List[str]:
     """Sous-ensemble de ``target_ids`` au palier de distance minimale de l'empreinte de l'unité —
-    palier WHILE commun à toutes les figs (cf. ``pile_in_move_destinations_12_03``).
+    palier WHILE commun à toutes les figs.
 
     CONTRAT DE SORTIE, identique à ``_fight_pile_in_closest_enemy_snapshot`` : les ids rendus sont
     tous présents dans ``units_cache`` (ils y ont été lus). Les consommateurs du palier lèvent donc
@@ -2588,89 +2512,6 @@ def _fight_pile_in_closest_tier_ids(
         elif d == d_min:
             tier.append(str(tid))
     return tier
-
-
-def pile_in_move_destinations_12_03(
-    game_state: Dict[str, Any],
-    unit: Dict[str, Any],
-    target_ids: List[str],
-) -> Set[Tuple[int, int]]:
-    """Pool d'ancres valides pour le pile-in AUTO (12.03 WHILE + AFTER par-figurine).
-
-    Génère les positions d'ancre d'escouade dans le budget de 3" par TRANSLATION RIGIDE,
-    filtrées par :
-      - WHILE (12.03) : empreinte de l'unité STRICTEMENT plus proche du palier le plus proche
-        parmi ``target_ids`` qu'à son départ (mesure par-unité, pas par-figurine) ;
-      - AFTER (12.03) : chaque figurine qui partait engagée avec une unité ennemie reste
-        engagée avec CETTE unité après la translation (contrôle par-figurine, pas par-unité).
-
-    ``target_ids`` = unités ennemies déclarées comme cibles du pile-in. Lecture pure.
-    """
-    from collections import deque
-    from engine.hex_utils import min_distance_between_sets
-    from .shared_utils import get_engagement_zone
-
-    uid = str(require_key(unit, "id"))
-    units_cache = require_key(game_state, "units_cache")
-    entry = units_cache.get(uid)
-    if entry is None:
-        return set()
-
-    closest_tier = _fight_pile_in_closest_tier_ids(game_state, unit, target_ids)
-    if not closest_tier:
-        return set()
-
-    tier_fps: List[Set[Tuple[int, int]]] = [
-        set(entry_footprint(require_unit_from_cache(str(tid), game_state, "pile_in_move_destinations_12_03")))
-        for tid in closest_tier
-    ]
-
-    start_fp = set(entry_footprint(entry))
-    start_d_min = min(min_distance_between_sets(start_fp, tfp) for tfp in tier_fps)
-    if start_d_min <= 0:
-        return set()
-
-    start_engagements = _fight_model_start_engagements(game_state, unit)
-    ez = int(get_engagement_zone(game_state))
-
-    budget = 3 * int(require_key(game_state, "inches_to_subhex"))
-    board_cols = int(require_key(game_state, "board_cols"))
-    board_rows = int(require_key(game_state, "board_rows"))
-
-    anchor_col = int(require_key(entry, "col"))
-    anchor_row = int(require_key(entry, "row"))
-
-    visited: Set[Tuple[int, int]] = {(anchor_col, anchor_row)}
-    queue: deque = deque([(anchor_col, anchor_row, 0)])
-    valid: Set[Tuple[int, int]] = set()
-
-    while queue:
-        col, row, dist = queue.popleft()
-
-        if (col, row) != (anchor_col, anchor_row):
-            placements = _fight_rigid_model_placements(game_state, uid, col, row)
-            cand_synths = _fight_synth_cache_entries_at_footprint(
-                unit, game_state, col, row, model_placements=placements
-            )
-            cand_fp: Set[Tuple[int, int]] = set()
-            for s in cand_synths:
-                cand_fp |= set(entry_footprint(s))
-
-            if cand_fp:
-                d_cand = min(min_distance_between_sets(cand_fp, tfp) for tfp in tier_fps)
-                if d_cand < start_d_min:
-                    if not start_engagements or _fight_models_keep_start_engagements(
-                        game_state, uid, start_engagements, placements, ez
-                    ):
-                        valid.add((col, row))
-
-        if dist < budget:
-            for nc, nr in get_hex_neighbors(col, row):
-                if (nc, nr) not in visited and 0 <= nc < board_cols and 0 <= nr < board_rows:
-                    visited.add((nc, nr))
-                    queue.append((nc, nr, dist + 1))
-
-    return valid
 
 
 def _fight_pile_in_preview_plan(

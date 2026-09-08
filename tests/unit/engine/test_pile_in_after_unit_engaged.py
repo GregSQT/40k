@@ -88,3 +88,50 @@ def test_staying_in_contact_is_engaged():
     gs = _gs()
     plan = [(mid, c, r, 0) for mid, (c, r) in zip(gs["squad_models"]["1"], SQUAD)]
     assert _fight_pile_in_preview_plan(gs, "1", plan, ["2"])["unit_engaged"] is True
+
+
+# --- Second membre de 12.03 AFTER : la clause PAR FIGURINE -------------------
+# « each model that started engaged must still be engaged with THAT enemy unit ». Les deux
+# tests ci-dessus ne jugent que le membre PAR UNITÉ (``unit_engaged``), qui répond « oui » dès
+# qu'UNE figurine quelconque touche un ennemi : il laisse donc passer un plan où la figurine qui
+# tenait l'engagement le perd pendant qu'une autre en gagne un. ``kept_engagements`` est le seul
+# verdict qui sépare ces deux situations — d'où la contre-épreuve : dans les DEUX cas ci-dessous
+# ``unit_engaged`` vaut True, seul ``kept_engagements`` bascule.
+#
+# Cette paire reprend le cas discriminant que portait
+# ``test_pile_in_auto_kept_engagements_par_figurine.py`` sur ``pile_in_move_destinations_12_03``
+# (pool par-ancre, supprimé faute d'appelant) et le rejoue sur le flux par-figurine VIVANT.
+#
+# Géométrie MESURÉE (ez=1, métrique hex, ennemi en (12,20)) — cases engagées : (11,19), (11,20),
+# (12,19), (12,20), (12,21), (13,19), (13,20). Donc 1#0 part ENGAGÉ de (11,20), 1#1 part LIBRE
+# de (11,21).
+
+ENGAGED_START = (11, 20)   # 1#0 y est engagé avec l'ennemi
+FREE_CELL = (11, 21)       # 1#1 y est libre — et 1#0 y perdrait son engagement
+ENGAGED_OTHER = (12, 21)   # autre case engagée, où 1#1 peut en gagner un
+
+
+def test_a_model_that_started_engaged_may_not_break_off():
+    """La figurine qui partait engagée perd son ennemi, une autre en gagne un : REFUSÉ.
+
+    Cas discriminant : l'escouade reste engagée (``unit_engaged`` True), donc un contrôle
+    par-unité validerait ce plan. La règle 12.03 l'écrit par figurine.
+    """
+    gs = _gs()
+    plan = [("1#0", *FREE_CELL, 0), ("1#1", *ENGAGED_OTHER, 0)]
+    out = _fight_pile_in_preview_plan(gs, "1", plan, ["2"])
+    assert out["unit_engaged"] is True, "précondition : le membre par-unité reste satisfait"
+    assert out["kept_engagements"] is False
+    assert out["can_validate"] is False
+
+
+def test_keeping_the_starting_engagement_is_accepted():
+    """Contre-épreuve : 1#0 conserve son engagement, 1#1 en gagne un — ACCEPTÉ.
+
+    Sans elle, le test précédent passerait aussi avec un contrôle qui répond toujours « non ».
+    """
+    gs = _gs()
+    plan = [("1#0", *ENGAGED_START, 0), ("1#1", *ENGAGED_OTHER, 0)]
+    out = _fight_pile_in_preview_plan(gs, "1", plan, ["2"])
+    assert out["unit_engaged"] is True
+    assert out["kept_engagements"] is True
