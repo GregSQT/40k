@@ -1930,6 +1930,12 @@ class ObservationBuilder:
         g_bin[global_bin_index("is_my_turn")] = (
             1.0 if int(require_key(game_state, "current_player")) == active_player else 0.0
         )
+        # Siège de l'OBSERVATEUR, jamais de `current_player` : aux points d'arrêt joués pendant le
+        # tour adverse (allocation de pertes, retrait de cohérence), `active_player` est celui à
+        # qui la décision est demandée, et c'est son ordre de jeu qu'interroge « l'adversaire
+        # rejoue-t-il après moi dans ce round ? ». P1 ouvrant toujours le round (`w40k_core`), le
+        # siège EST l'identité du joueur — c'est la seule chose que cette égalité encode.
+        g_bin[global_bin_index("i_play_first")] = 1.0 if active_player == 1 else 0.0
         # Phase en ONE-HOT (§0.32 T-J) : l'encodage ordinal donnait la MÊME valeur à `deployment`
         # et `command`, alors que les ids d'action 4–8 y désignent l'un un slot de déploiement,
         # l'autre une cellule de move. Aucun repli : une phase hors schéma LÈVE — un `.get(…, 0.0)`

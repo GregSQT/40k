@@ -1196,6 +1196,30 @@ GLOBAL_BIN_MISSION_SLOTS = 48
 
 GLOBAL_BIN_FIELDS: Tuple[str, ...] = (
     "is_my_turn",
+    # SIÈGE — 1 ssi l'observateur joue PREMIER dans le battle round. `is_my_turn`, juste au-dessus,
+    # dit qui a la main MAINTENANT ; il ne dit pas si l'adversaire rejoue APRÈS moi dans ce round.
+    # Rien d'autre ne le disait : les onze registres d'observation sont égocentriques (`my_` /
+    # `enemy_`, `ally` / `enemy`, positions relatives), aucun ne nomme le joueur.
+    #
+    # CE QUE LA RÈGLE EN FAIT DÉPENDRE. `turn` est le BATTLE ROUND et non le tour de joueur
+    # (`_fight_end_progression_v10` ne l'incrémente qu'après le tour de P2) et P1 ouvre toujours
+    # le round (`w40k_core` pose `current_player: 1`). Or le primaire se marque à la command phase
+    # pour le premier joueur et à la FIGHT phase pour le second au round 5
+    # (`round5_second_player_phase`, `config/primary_objective/Objectives_Control.json`) : au
+    # round 5, le premier joueur a DÉJÀ marqué et son dernier tour ne lui rapporte plus de
+    # primaire, le second joue le sien après. Deux états identiques à l'écran n'ont donc pas la
+    # même valeur selon le siège, et l'agent ne pouvait pas les distinguer.
+    #
+    # LE SEUL SIGNAL EXISTANT ÉTAIT UN PROXY, ET IL SE DÉGRADE LÀ OÙ ÇA COMPTE : les zones de
+    # déploiement sont attachées au joueur (`dz_p1` / `dz_p2` des mission cards) et
+    # `objective_dir_cos/sin` sont calculés dans le repère ABSOLU du board
+    # (`_squad_objective_geometry`), donc le réseau pouvait inférer son côté de carte tant que ses
+    # unités restaient près de leur zone — partout SAUF au round 5, quand elles l'ont traversée.
+    #
+    # Dans global_bin et non global_cont pour la raison de tout ce bloc : `VecNormalize` ne
+    # normalise que `global_cont` (`ai/train._vec_norm_obs_keys`), et recentrer un drapeau 0/1 par
+    # des statistiques glissantes détruirait sa sémantique.
+    "i_play_first",
 ) + tuple(f"phase_{phase}" for phase in OBS_PHASE_IDS) + (
     "objective_control_0", "objective_control_1", "objective_control_2",
     "objective_control_3", "objective_control_4",
