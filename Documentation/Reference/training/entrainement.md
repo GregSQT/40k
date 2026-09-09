@@ -92,13 +92,23 @@ lisent aucun des deux drapeaux et n'en exigent aucun.
 Le prologue pose une **seconde** question, après « que fait-on du modèle en place ? » : *ce modèle
 a-t-il appris sur le même sens des grandeurs qu'on s'apprête à lui redonner ?*
 
-Trois contrôles existaient et aucun ne voit ce cas. `check_model_lifecycle` regarde la commande,
-pas le modèle. Le verrou de parité de pool attrape une reprise désappariée, mais **après** la
-première sonde — donc après des épisodes joués. Stable-Baselines3 compare `observation_space` et
-`action_space` au chargement, donc ne voit que les changements de **dimension**. Reste la dérive à
-taille **constante** : un canal de grille permuté, une clé de récompense retirée. Les tenseurs
-gardent leur forme, rien ne lève, et le modèle repris apprend sur des grandeurs qui ont changé de
-sens — des dizaines d'heures rendues fausses sans une ligne rouge.
+Trois contrôles existaient. `check_model_lifecycle` regarde la commande, pas le modèle. Le verrou
+de parité de pool attrape une reprise désappariée, mais **après** la première sonde — donc après
+des épisodes joués. Stable-Baselines3 compare `observation_space` et `action_space` au chargement,
+donc ne voit que les changements de **dimension**. Reste la dérive à taille **constante** : un
+canal de grille permuté, une clé de récompense retirée. Les tenseurs gardent leur forme, rien ne
+lève, et le modèle repris apprend sur des grandeurs qui ont changé de sens.
+
+**Ce que ce garde-fou apporte n'est pas le même selon la famille** — mesuré le 2026-09-09 sur
+l'historique git, et le message d'arrêt le dit désormais famille par famille :
+
+| Famille | Fréquence | Ce que ce garde-fou apporte |
+|---|---|---|
+| Clés de récompense | 7 commits / 90 j retirent une clé | **Seul contrôle qui la voit.** Ni SB3 (qui ignore les récompenses) ni le verrou de parité ne regardent là. |
+| Observation / actions | 13 commits / 30 j touchent un registre, dont **12** changent la dimension | SB3 lève déjà pour ces 12 — mais **plus tard**, une fois le run engagé. L'apport est l'arrêt précoce, plus le renommage à taille constante (aucun cas sur ces 30 jours). |
+
+Autrement dit : la justification solide est la **table de récompense**. Sur l'observation, ce
+contrôle double SB3 en s'arrêtant plus tôt, et ne prétend plus être seul à voir.
 
 `ai/training_contract.py` écrit donc, à côté de chaque modèle, un `training_contract.json` qui
 porte **les noms, dans leur ordre** : registres d'observation (`*_FIELDS` de
