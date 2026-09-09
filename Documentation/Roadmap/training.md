@@ -32,13 +32,15 @@ Il reste périmé pendant le MOVE, ce qui justifie que l'obs continue de recalcu
 
 ---
 
-## 🟡 Obs — canaux « zone obscurante » et « exposition à la vue ennemie » {#canaux-obscurant-exposition}
+## ✅ Obs — canaux « zone obscurante » et « exposition à la vue ennemie » {#canaux-obscurant-exposition}
 
-**Livré en worktree le 2026-09-08, NON mergé** : le merge attend la fin du run en cours, et le
-lot impose un ré-entraînement `--new` (la forme d'entrée du CNN change), à batcher avec le
-chantier « OC live + secured ».
+**Livré et mergé le 2026-09-08** (`dd8a24be`). Le lot impose un ré-entraînement `--new` : la
+forme d'entrée du CNN change, et le chantier « OC live + secured », mergé le même jour, bouge en
+plus `obs_size`.
 
-`GRID_CHANNELS` passe de 9 à 11. `obs_size` ne bouge pas — la grille est fournie à part.
+`GRID_CHANNELS` passe de 9 à 11 ; la verticalité du move gym l'a depuis porté à **12**
+(`occupant_level`, cf. [`moteur.md#verticalite-move-gym`](moteur.md#verticalite-move-gym)).
+`obs_size` ne bouge pas — la grille est fournie à part.
 
 - **`GRID_CH_OBSCURING`** — les zones obscurantes n'étaient pas distinguables des autres zones de
   terrain : `_static_hex_arrays` empilait tout dans le canal « couvert » sans lire
@@ -58,7 +60,7 @@ c'est mesuré : une carte de visibilité plateau mémoïsée par hexe source rat
 (l'ancre ennemie bouge à chaque déplacement ET à chaque perte de figurine), l'amorti retombe au
 coût de la version sans cache.
 
-**Reste à faire** : merge après le run, puis `--new`.
+**Reste à faire** : le ré-entraînement `--new`, commun à tous les lots d'observation du 2026-09-08 et du 2026-09-09. Tout modèle antérieur est incompatible par construction.
 
 ---
 
