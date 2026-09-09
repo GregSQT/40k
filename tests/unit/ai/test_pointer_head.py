@@ -57,6 +57,7 @@ from engine.macro_intents import (
     SHOOT_WEAPON_SEL_SLOT_COUNT,
     TOTAL_ACTION_SIZE,
 )
+from engine.macro_intents import FIGHT_WEAPON_SLOT_BASE, SHOOT_WEAPON_SEL_SLOT_BASE
 from engine.observation_entities import (
     decision_option_bin_index,
     deploy_cand_bin_index,
@@ -64,12 +65,21 @@ from engine.observation_entities import (
     global_bin_index,
     unit_bin_index,
 )
+from engine.observation_weapon_profiles import profile_bin_index
 from engine.spatial_grid import GRID_SIZE, cell_from_index, cell_index
 from tests.unit.ai._fabriques import squad_obs_space
 
 _UNIT_PRESENT = unit_bin_index("present")
 _OPTION_PRESENT = decision_option_bin_index("present")
 _CAND_PRESENT = deploy_cand_bin_index("present")
+_PROFILE_PRESENT = profile_bin_index("present")
+
+#: Emplacements d'arme ARMÉS dans l'observation jouet : deux profils de tir (bloc 0..K_R-1) et
+#: deux de mêlée (bloc K_R..). Sans eux le bloc d'armes serait tout à zéro, donc tous les
+#: embeddings nuls, donc les deux requêtes d'arme recevraient un gradient EXACTEMENT nul et leurs
+#: logits seraient égaux quoi qu'il arrive — un vert vacant sur les deux familles.
+_RANGED_SLOTS = (0, 1)
+_MELEE_SLOTS = (SHOOT_WEAPON_SEL_SLOT_COUNT, SHOOT_WEAPON_SEL_SLOT_COUNT + 1)
 
 
 _space = squad_obs_space
@@ -122,6 +132,12 @@ def _zero_obs(batch: int = 2, phase: str = "move") -> Dict[str, np.ndarray]:
     # La phase est un ONE-HOT (§0.32 T-J) : une observation sans aucun bit posé n'existe pas dans
     # le moteur, et c'est ELLE qui décide si les ids 4-11 sont des cellules ou des slots de pose.
     obs["global_bin"][:, global_bin_index(f"phase_{phase}")] = 1.0
+    # Armement de l'unité ACTIVE (ligne 0 du bloc allié) : deux profils de tir, deux de mêlée,
+    # aux caractéristiques DISTINCTES — deux emplacements portant la même ligne rendraient un
+    # échange de profils invisible.
+    for rank, slot in enumerate(_RANGED_SLOTS + _MELEE_SLOTS):
+        obs["allies_wpn_bin"][:, 0, slot, _PROFILE_PRESENT] = 1.0
+        obs["allies_wpn_cont"][:, 0, slot, :] = float(rank + 1)
     return obs
 
 
@@ -203,14 +219,24 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     )
     # L9 (2026-08-20) : tête dense pour les paires de charge, entre charge unique et mêlée.
     charge_pair_dense = policy.charge_pair_net(latent_pi)
-    # §0.69 : tête dense pour l'arme CC, en fin d'espace.
-    fight_weapon_dense = policy.fight_weapon_net(latent_pi)
+    # §0.69 : pointeur sur les EMPLACEMENTS de mêlée de l'unité active. Échelle propre au bloc
+    # d'armes — ses embeddings sortent de l'encodeur d'ARMES, plus étroit que celui d'entités.
+    weapon_scale = policy.weapon_dim ** 0.5
+    fight_weapon_pointer = torch.einsum(
+        "bd,bkd->bk",
+        policy.fight_weapon_query_net(latent_pi),
+        feats.weapons[:, SHOOT_WEAPON_SEL_SLOT_COUNT:],
+    ) / weapon_scale
     # P3-0 : sixième requête, embeddings SELF_MODELS -> logits de retrait cohérence.
     coherency_pointer = torch.einsum(
         "bd,bkd->bk", policy.coherency_query_net(latent_pi), feats.self_models
     ) / scale
-    # P3-8 : tête dense pour la sélection d'arme de tir (split-fire).
-    shoot_weapon_sel_dense = policy.shoot_weapon_sel_net(latent_pi)
+    # P3-8 : pointeur sur les EMPLACEMENTS de tir (split-fire), premier bloc du tenseur d'armes.
+    shoot_weapon_sel_pointer = torch.einsum(
+        "bd,bkd->bk",
+        policy.shoot_weapon_sel_query_net(latent_pi),
+        feats.weapons[:, :SHOOT_WEAPON_SEL_SLOT_COUNT],
+    ) / weapon_scale
     expected = torch.cat(
         [
             move,
@@ -223,9 +249,9 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
             choice,
             oath_pointer,
             activate_pointer,      # V11 §0.48 `L2`
-            fight_weapon_dense,    # §0.69 : arme CC (dense)
+            fight_weapon_pointer,  # §0.69 : arme CC (emplacements de mêlée)
             coherency_pointer,     # P3-0 : retrait cohérence (self_models)
-            shoot_weapon_sel_dense, # P3-8 : sélection arme tir (dense)
+            shoot_weapon_sel_pointer,  # P3-8 : sélection arme tir (emplacements de tir)
         ],
         dim=1,
     )
@@ -408,17 +434,132 @@ def test_learning_step_runs_end_to_end(model):
         "la requete de DEPLOIEMENT recoit un gradient NUL : ses logits ne sont selectionnes "
         "dans aucun etat du rollout (§0.44)"
     )
-    # P3-8 : même garde que les têtes move — une tête dense mal branchée réussirait les
-    # tests de forme sans jamais apprendre.
-    fight_weapon_grad = model.policy.fight_weapon_net.weight.grad
-    assert fight_weapon_grad is not None and torch.isfinite(fight_weapon_grad).all(), (
-        "fight_weapon_net ne recoit PAS de gradient : la tete dense de selection "
-        "d'arme CC n'est pas dans le graphe (§0.69)"
+    # Emplacements d'arme (§0.69, P3-8) : même garde que la tête de déploiement, gradient NON
+    # NUL exigé. Un gradient nul est ici le mode d'échec RÉEL et non théorique — une requête
+    # pointeur branchée sur des embeddings tous nuls (bloc d'armes vide dans l'observation) reste
+    # dans le graphe, rend `.grad` non `None`, et n'apprend rien. C'est l'armement de
+    # `_zero_obs` qui rend ces deux contrôles non vacants.
+    for name in ("fight_weapon_query_net", "shoot_weapon_sel_query_net"):
+        grad = getattr(model.policy, name).weight.grad
+        assert grad is not None and torch.isfinite(grad).all(), (
+            f"{name} ne recoit PAS de gradient : la tete d'emplacement d'arme n'est pas "
+            "dans le graphe"
+        )
+        assert float(grad.abs().sum()) > 0.0, (
+            f"{name} recoit un gradient NUL : ses embeddings d'emplacement sont tous nuls, "
+            "elle score des armes qu'aucune observation ne decrit"
+        )
+
+
+def _swap_weapon_slots(obs, first: int, second: int):
+    """Copie de `obs` où les deux emplacements d'arme de l'unité active sont ÉCHANGÉS.
+
+    Reproduit ce que fait le moteur sans qu'aucune action soit jouée : `collect_weapon_profiles`
+    trie les profils par nombre de PORTEURS VIVANTS décroissant, donc une perte suffit à faire
+    passer l'arme de l'emplacement 0 à l'emplacement 1 et réciproquement. Les trois registres du
+    profil sont échangés ensemble — un seul d'entre eux laissé en place décrirait une arme qui
+    n'existe pas.
+    """
+    swapped = {key: value.copy() for key, value in obs.items()}
+    for key in ("allies_wpn_cont", "allies_wpn_bin", "allies_wpn_rule_ids"):
+        swapped[key][:, 0, first] = obs[key][:, 0, second]
+        swapped[key][:, 0, second] = obs[key][:, 0, first]
+    return swapped
+
+
+@pytest.mark.parametrize(
+    "query_name, block, slots",
+    [
+        (
+            "shoot_weapon_sel_query_net",
+            slice(0, SHOOT_WEAPON_SEL_SLOT_COUNT),
+            _RANGED_SLOTS,
+        ),
+        (
+            "fight_weapon_query_net",
+            slice(SHOOT_WEAPON_SEL_SLOT_COUNT, None),
+            _MELEE_SLOTS,
+        ),
+    ],
+    ids=["tir", "melee"],
+)
+def test_a_weapon_logit_follows_the_profile_that_occupies_the_slot(
+    model, query_name, block, slots
+):
+    """Le logit d'un emplacement d'arme suit l'ARME qui l'occupe, pas son rang.
+
+    C'est LE verrou du chantier, et il ne peut pas être obtenu par une tête dense : à latent
+    GELÉ, échanger deux profils entre leurs emplacements doit échanger leurs logits. Une ligne de
+    poids indexée par le rang rendrait exactement les mêmes deux logits avant et après l'échange
+    — l'agent continuerait de préférer « l'emplacement 0 » alors que l'arme qui s'y trouve a
+    changé, ce qui arrive à chaque perte de figurine.
+
+    Le latent est celui de l'observation de RÉFÉRENCE, pour les deux mesures : le tronc voit
+    l'agrégation des profils d'arme (via `e_own`), donc sans ce gel les deux côtés de l'égalité
+    bougeraient ensemble et l'échange ne serait plus observable.
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    first, second = slots
+    obs = _zero_obs(1)
+    reference = _tensors(obs)
+    permuted = _tensors(_swap_weapon_slots(obs, first, second))
+
+    with torch.no_grad():
+        feats_ref = policy._split_features(reference)
+        feats_perm = policy._split_features(permuted)
+        latent_pi = policy.mlp_extractor.forward_actor(feats_ref.trunk)
+        query = getattr(policy, query_name)
+        logits_ref = policy._point(query, latent_pi, feats_ref.weapons[:, block])
+        logits_perm = policy._point(query, latent_pi, feats_perm.weapons[:, block])
+
+    # Les deux emplacements portent des profils DISTINCTS : sans cela l'échange serait
+    # indétectable et le test vert par construction.
+    assert not torch.allclose(logits_ref[:, 0], logits_ref[:, 1], atol=1e-6), (
+        "les deux emplacements produisent le meme logit : la tete ne distingue pas les profils"
     )
-    shoot_weapon_sel_grad = model.policy.shoot_weapon_sel_net.weight.grad
-    assert shoot_weapon_sel_grad is not None and torch.isfinite(shoot_weapon_sel_grad).all(), (
-        "shoot_weapon_sel_net ne recoit PAS de gradient : la tete dense de selection "
-        "d'arme tir n'est pas dans le graphe (P3-8)"
+    assert torch.allclose(logits_perm[:, 0], logits_ref[:, 1], atol=1e-6), (
+        "le logit de l'emplacement 0 n'a pas suivi le profil qui y est arrive : la tete score "
+        "un RANG et non une arme"
+    )
+    assert torch.allclose(logits_perm[:, 1], logits_ref[:, 0], atol=1e-6), (
+        "le logit de l'emplacement 1 n'a pas suivi le profil qui y est arrive : la tete score "
+        "un RANG et non une arme"
+    )
+
+
+def test_weapon_slots_are_assembled_at_their_action_ids(model):
+    """Les deux familles d'emplacements d'arme occupent bien LEURS colonnes de l'espace d'action.
+
+    Un bloc assemblé à la mauvaise place ferait choisir à l'agent une arme en jouant l'id d'une
+    autre famille, sans qu'aucune forme ne change.
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    obs = _tensors(_zero_obs())
+    with torch.no_grad():
+        feats = policy._split_features(obs)
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        logits = policy._action_logits(latent_pi, feats)
+        melee = policy._point(
+            policy.fight_weapon_query_net,
+            latent_pi,
+            feats.weapons[:, SHOOT_WEAPON_SEL_SLOT_COUNT:],
+        )
+        ranged = policy._point(
+            policy.shoot_weapon_sel_query_net,
+            latent_pi,
+            feats.weapons[:, :SHOOT_WEAPON_SEL_SLOT_COUNT],
+        )
+    assert torch.allclose(
+        logits[:, FIGHT_WEAPON_SLOT_BASE:FIGHT_WEAPON_SLOT_BASE + melee.shape[1]],
+        melee,
+        atol=1e-6,
+    )
+    assert torch.allclose(
+        logits[:, SHOOT_WEAPON_SEL_SLOT_BASE:SHOOT_WEAPON_SEL_SLOT_BASE + ranged.shape[1]],
+        ranged,
+        atol=1e-6,
     )
 
 
