@@ -5137,8 +5137,14 @@ def arm_move_after_shooting_decision(
     from engine.agent_decision import set_pending_agent_decision
     from engine.observation_entities import decision_option_cont_row
 
-    enemy_distances = _move_after_shooting_enemy_distances(game_state, unit, destinations)
-    objective_distances = _move_after_shooting_objective_distances(game_state, destinations)
+    # La case OCCUPÉE est scorée AVEC les destinations, dans le même appel : c'est elle qui décrit
+    # le candidat « Rester » plus bas. Un second appel par grandeur refaisait l'énumération des
+    # ennemis et le `min` sur tout le pool pour cette unique case (11 % du coût de l'armement,
+    # mesuré), et obligeait à garder deux `None` que le cache non muté ne peut pas produire.
+    unit_position = require_unit_position(unit, game_state)
+    scored_cells = [*destinations, unit_position]
+    enemy_distances = _move_after_shooting_enemy_distances(game_state, unit, scored_cells)
+    objective_distances = _move_after_shooting_objective_distances(game_state, scored_cells)
 
     intent_destinations: List[Tuple[int, Tuple[int, int]]] = []
     if enemy_distances is not None:
@@ -5168,18 +5174,22 @@ def arm_move_after_shooting_decision(
         1,
     )
 
+    def cont_row(cell: Tuple[int, int]) -> List[float]:
+        """Ligne continue d'un candidat, décrit par la case qu'il désigne.
+
+        Un seul producteur pour les candidats de déplacement ET pour « Rester » : une colonne
+        ajoutée demain n'a qu'un endroit où l'être.
+        """
+        cont_values: Dict[str, float] = {}
+        if enemy_distances is not None:
+            cont_values["dist_enemy_norm"] = min(enemy_distances[cell] / board_diagonal, 1.0)
+        if objective_distances is not None:
+            cont_values["obj_dist_norm"] = min(objective_distances[cell] / board_diagonal, 1.0)
+        return decision_option_cont_row(cont_values)
+
     options: List[Dict[str, Any]] = []
     options_cont: List[List[float]] = []
     for intent_index, destination in retained:
-        cont_values: Dict[str, float] = {}
-        if enemy_distances is not None:
-            cont_values["dist_enemy_norm"] = min(
-                enemy_distances[destination] / board_diagonal, 1.0
-            )
-        if objective_distances is not None:
-            cont_values["obj_dist_norm"] = min(
-                objective_distances[destination] / board_diagonal, 1.0
-            )
         options.append(
             {
                 "label": _MOVE_AFTER_SHOOTING_INTENT_LABELS[intent_index],
@@ -5188,30 +5198,12 @@ def arm_move_after_shooting_decision(
                 "payload": {"destCol": int(destination[0]), "destRow": int(destination[1])},
             }
         )
-        options_cont.append(decision_option_cont_row(cont_values))
+        options_cont.append(cont_row(destination))
 
     # Rester sur place est un choix de la règle, pas un repli : le PvP l'offre par
     # `can_skip_move_after_shooting`, et `declines` est ce qui le rend discernable pour l'agent.
     # Ses distances sont celles de la position ACTUELLE, la seule grandeur qui décrive « ne pas
     # bouger » — les laisser à zéro décrirait une case collée à l'ennemi et à l'objectif.
-    unit_position = require_unit_position(unit, game_state)
-    stay_cont: Dict[str, float] = {}
-    if enemy_distances is not None:
-        stay_enemy = _move_after_shooting_enemy_distances(game_state, unit, [unit_position])
-        if stay_enemy is None:
-            raise RuntimeError(
-                "arm_move_after_shooting_decision: les ennemis ont disparu entre deux lectures "
-                f"du même cache pour l'escouade {require_key(unit, 'id')}"
-            )
-        stay_cont["dist_enemy_norm"] = min(stay_enemy[unit_position] / board_diagonal, 1.0)
-    if objective_distances is not None:
-        stay_objective = _move_after_shooting_objective_distances(game_state, [unit_position])
-        if stay_objective is None:
-            raise RuntimeError(
-                "arm_move_after_shooting_decision: les objectifs ont disparu entre deux lectures "
-                f"du même plateau pour l'escouade {require_key(unit, 'id')}"
-            )
-        stay_cont["obj_dist_norm"] = min(stay_objective[unit_position] / board_diagonal, 1.0)
     options.append(
         {
             "label": "Rester (aucun déplacement)",
@@ -5220,7 +5212,7 @@ def arm_move_after_shooting_decision(
             "payload": {"skip_move_after_shooting": True},
         }
     )
-    options_cont.append(decision_option_cont_row(stay_cont))
+    options_cont.append(cont_row(unit_position))
 
     unit["_pending_move_after_shooting"] = True
     unit["_move_after_shooting_destinations"] = destinations

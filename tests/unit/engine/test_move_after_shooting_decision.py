@@ -246,6 +246,19 @@ def test_le_candidat_rester_est_decrit_par_la_position_actuelle():
     assert stay_row[fields.index("dist_enemy_norm")] > 0.0
     assert stay_row[fields.index("obj_dist_norm")] > 0.0
 
+    # `> 0.0` ne distingue pas la case OCCUPÉE d'une destination quelconque : la ligne de
+    # « Rester » et celles des candidats sortent du même producteur, et une case passée à tort
+    # resterait strictement positive. Encadrer suffit à trancher — « Pression » est par
+    # construction plus proche de l'ennemi que rester, « Retrait » plus loin.
+    enemy = fields.index("dist_enemy_norm")
+    assert decision["options"][0]["label"].startswith("Pression")
+    assert decision["options"][1]["label"].startswith("Retrait")
+    assert (
+        decision["options_cont"][0][enemy]
+        < stay_row[enemy]
+        < decision["options_cont"][1][enemy]
+    )
+
 
 def test_l_intention_objectif_rapproche_du_marqueur_et_le_retrait_eloigne_de_l_ennemi():
     """Les intentions font ce que leur nom dit — sinon le choix offert est décoratif."""
