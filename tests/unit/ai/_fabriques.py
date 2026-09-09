@@ -498,7 +498,15 @@ def table_de_recompense(agent_key: str = "TestAgent", **overrides: Any) -> Dict[
     tests du prologue ne s'intéressent pas au contenu de cette table : ils ont juste besoin d'une
     table VALIDE, et six d'entre eux la construiraient à l'identique.
 
+    VALIDE veut dire NON VIDE. La sous-table rendue était `{}`, ce que la production refuse
+    (`RewardCalculator` exige `base_actions`, engine/reward_calculator.py:820) : l'empreinte du
+    contrat en sortait vide, donc le contrat écrit au premier appel était refusé à la relecture
+    par le second (`section `reward_keys` vide`). Elle porte donc `base_actions`, la seule section
+    que la production exige nommément — les VALEURS, elles, n'entrent jamais dans le contrat.
+
     Les `overrides` peuplent la sous-table de l'agent, pas la racine : c'est le seul niveau que le
     contrat regarde, donc le seul qu'un test ait une raison de faire varier.
     """
-    return {agent_key: dict(overrides)}
+    sous_table: Dict[str, Any] = {"base_actions": {"charge_fail": -1.0}}
+    sous_table.update(overrides)
+    return {agent_key: sous_table}

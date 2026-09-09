@@ -18,6 +18,12 @@ import tempfile
 from pathlib import Path
 
 
+# ADVERSAIRE OBLIGATOIRE — cf. `test_attached_units_legality_19_01._OPPONENT` : l'observation
+# construite par `reset()` exige `value_at_start` non nul pour LES DEUX joueurs, un scénario
+# mono-joueur est une donnée invalide. Id dans [1..], la plage du joueur 1.
+_OPPONENT = {"id": 1, "unit_type": "Intercessor", "player": 1, "col": 3, "row": 3}
+
+
 def _scenario(units: list) -> dict:
     return {
         "board_ref": "44x60x5",
@@ -29,7 +35,7 @@ def _scenario(units: list) -> dict:
         # Corollaire OBLIGATOIRE d'une armée ADEPTUS ASTARTES : la clause du +1 Wound d'Oath
         # en dépend, et l'observation la lit à chaque construction.
         "uses_codex_detachment": {"1": True, "2": True},
-        "units": units,
+        "units": [dict(_OPPONENT)] + units,
     }
 
 

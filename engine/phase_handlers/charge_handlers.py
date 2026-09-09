@@ -3260,18 +3260,23 @@ def _is_valid_charge_destination(game_state: Dict[str, Any], col: int, row: int,
 
 def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
                             full_occupied_positions: Optional[Set[Tuple[int, int]]] = None) -> bool:
-    """
-    Check if unit has at least one valid charge target.
+    """L'unité est-elle éligible à DÉCLARER une charge (11.02.1) ?
 
-    tour_de_jeu.md Line 495: "Enemies exist within charge_max_distance hexes?"
-    tour_de_jeu.md Line 562: "Enemy units within charge_max_distance hexes (via pathfinding)"
+    DEUX conditions, dans cet ordre, et la première est commune aux deux métriques :
 
-    CRITICAL: Must use BFS pathfinding distance, not straight-line distance.
-    Build reachable hexes within max charge distance and check if any enemy
-    is adjacent to those hexes.
-    
-    NOTE: Target can be at distance 13 because charge of 12 can reach adjacent to target at 13.
-    
+    1. « It is not within 12" of one or more enemy units » (PDF 11) — mesure bord-à-bord en ligne
+       droite, `charge_target_within_max_distance` bornée par `charge_max_distance`. C'est la
+       condition de la RÈGLE, et la seule en géométrie euclidienne.
+    2. Gym/hex uniquement : au moins une destination de charge légale dans un budget de 12"
+       (BFS, `charge_build_valid_destinations_pool`). Filtre HISTORIQUE, plus strict que la règle
+       (11.02.3 laisse déclarer puis rater), conservé pour ce chemin.
+
+    Ce qui a changé : la condition 1 ne s'appliquait qu'en euclidien, et le chemin hex — celui de
+    l'entraînement — n'avait que la 2. Or un BFS de 12" qui finit en zone d'engagement atteint un
+    ennemi situé au-delà de 12" (l'ancienne note de cette docstring l'écrivait : « target can be at
+    distance 13 »). L'escouade déclarait donc une charge sans aucun ennemi déclarable, et la mesure
+    de déclaration (`charge_record_declaration`, bornée à 12" elle aussi) figeait None.
+
     Args:
         full_occupied_positions: Optional pre-computed set of all unit positions (from get_eligible_units).
     """
@@ -3293,52 +3298,44 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     game_rules = require_key(require_key(game_state, "config"), "game_rules")
     CHARGE_MAX_DISTANCE = require_key(require_key(game_state["config"], "charge"), "charge_max_distance")
 
-    # Étape 5 — pré-gate d'éligibilité 11.02.1 (« within 12" of one or more enemy units »).
-    # En euclidien : distance bord-à-bord **en LIGNE DROITE** (pas de pathfinding/géodésique), O(ennemis).
-    # Fly-agnostique (un fly déclaré en cours de phase ne change pas une mesure en ligne droite) et sans
-    # le coût géodésique qui plombait l'init de phase. Le pathfinding ne gouverne que l'aboutissement du
-    # charge move (post-jet, 11.04), jamais l'éligibilité à déclarer. Le -2" fly (21.03) borne le move,
-    # pas ce gate. Gym/hex : comportement pathfinding historique inchangé (branche ci-dessous).
-    if _charge_distance_metric(game_state) == "euclidean":
-        from engine.combat_utils import ranged_in_range, socle_from_cache_entry
-        units_cache = require_key(game_state, "units_cache")
-        _charger_socle = socle_from_cache_entry(require_key(units_cache, str(unit["id"])))
-        _unit_player = int(unit["player"])
-        _elig = any(
-            ranged_in_range(_charger_socle, socle_from_cache_entry(e), int(CHARGE_MAX_DISTANCE), "euclidean")
-            for _eid, e in enemy_entries_on_battlefield(units_cache, _unit_player)
-        )
-        _hvt_cache[_hvt_key] = _elig
-        return _elig
-
-    # Fast precheck: skip BFS if all enemies are beyond max reachable distance.
-    # La distance de charge se mesure **bord à bord** (fig la plus proche → fig ennemie la plus proche),
-    # PAS centre à centre : un gros socle (ex. Dreadnought) a son centre loin alors que son bord est à
-    # portée. On borne donc par ``hex_distance(centres) - rayon_chargeur - rayon_ennemi`` via les rayons
-    # d'empreinte (distance max ancre → case d'empreinte). Borne conservatrice : surestime le rayon côté
-    # opposé, donc n'élargit le seuil que dans le bon sens → jamais de faux rejet.
+    # 11.02.1 — GATE D'ÉLIGIBILITÉ, LES DEUX MÉTRIQUES : « A unit is eligible to declare a charge
+    # [...] It is not within 12" of one or more enemy units » (PDF 11 Charge phase). Mesure
+    # bord-à-bord **en LIGNE DROITE** (pas de pathfinding/géodésique), O(ennemis). Fly-agnostique
+    # (un fly déclaré en cours de phase ne change pas une mesure en ligne droite) et sans le coût
+    # géodésique qui plombait l'init de phase. Le pathfinding ne gouverne que l'aboutissement du
+    # charge move (post-jet, 11.04), jamais l'éligibilité à déclarer. Le -2" fly (21.03) borne le
+    # move, pas ce gate.
+    #
+    # IL EST COMMUN AUX DEUX MÉTRIQUES depuis ce chantier. Il ne s'appliquait qu'en euclidien, et
+    # le chemin hex/gym — celui de l'entraînement — n'avait pour éligibilité que le BFS ci-dessous,
+    # c'est-à-dire « existe-t-il une destination dans un budget de 12" d'où je finis engagé ? ».
+    # Une escouade dont l'ennemi le plus proche est à plus de 12" y était donc déclarée éligible
+    # (mesuré : ennemi à 12,13" et à 12,89", scénario mêlée de `smoke_t5_bare`), activait, et
+    # `charge_record_declaration` — qui borne sa mesure à la portée de DÉCLARATION — figeait un
+    # `nearest_subhex` à None. La ligne `charge_fail` `roll_too_short` du chemin gym portait alors
+    # `charge_nearest_enemy_inches: None` : une charge déclarée sans qu'aucun ennemi ne soit
+    # déclarable.
+    #
+    # `charge_target_within_max_distance` et non une seconde mesure écrite ici : c'est la SOURCE
+    # UNIQUE de cette borne (cf. sa docstring) ET la primitive dont `charge_target_edge_distance_subhex`
+    # est la version chiffrée. Gate vrai ⟺ distance de déclaration non nulle — l'invariant du
+    # journal devient structurel, il ne dépend plus d'un accord entre deux implémentations.
     units_cache = require_key(game_state, "units_cache")
     _charger_entry = require_key(units_cache, str(unit["id"]))
-    unit_col, unit_row = int(require_key(_charger_entry, "col")), int(require_key(_charger_entry, "row"))
-    unit_player = int(unit["player"])
-    _charger_occ = entry_footprint(_charger_entry)
-    _charger_radius = max(
-        _hex_distance(unit_col, unit_row, int(_c), int(_r)) for _c, _r in _charger_occ
-    )
-
-    def _enemy_radius(_e: Dict[str, Any], _ec: int, _er: int) -> int:
-        _occ = entry_footprint(_e)
-        return max(_hex_distance(_ec, _er, int(_c), int(_r)) for _c, _r in _occ)
-
-    _any_enemy_in_range = any(
-        _hex_distance(unit_col, unit_row, _ec, _er)
-        <= CHARGE_MAX_DISTANCE + 1 + _charger_radius + _enemy_radius(e, _ec, _er)
-        for _eid, e in enemy_entries_on_battlefield(units_cache, unit_player)
-        for _ec, _er in (((int(e["col"]), int(e["row"])),))
-    )
-    if not _any_enemy_in_range:
+    _unit_player = int(unit["player"])
+    if not any(
+        charge_target_within_max_distance(_charger_entry, e, int(CHARGE_MAX_DISTANCE))
+        for _eid, e in enemy_entries_on_battlefield(units_cache, _unit_player)
+    ):
         _hvt_cache[_hvt_key] = False
         return False
+    if _charge_distance_metric(game_state) == "euclidean":
+        _hvt_cache[_hvt_key] = True
+        return True
+
+    # Le pré-filtre par ancre ± rayons d'empreinte qui se trouvait ici est retiré : le gate 11.02.1
+    # ci-dessus est exact et STRICTEMENT plus serré (distance bord-à-bord <= 12" implique
+    # distance d'ancres <= 12" + 1 + rayons), donc il ne pouvait plus rien rejeter.
 
     # BFS with early exit: any hex in charge_build_valid_destinations_pool already satisfies
     # engagement + placement rules (same as the old nested loop). Aucune capture d'exception :
