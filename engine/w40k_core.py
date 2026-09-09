@@ -157,6 +157,7 @@ from engine.macro_intents import (
 )
 from engine.agent_decision import (
     clear_pending_agent_decision,
+    consume_pending_agent_decision,
     initialize_agent_decision_state,
     read_pending_agent_decision,
     set_pending_agent_decision,
@@ -4215,7 +4216,6 @@ class W40KEngine(gym.Env):
             # allocation : tir / combat / hazard). Consommer la décision AVANT `apply_manual_shoot_allocation`
             # garantit qu'aucune décision « en attente » ne bloque le gestionnaire si la résolution
             # en pose une nouvelle (lot suivant).
-            from engine.agent_decision import consume_pending_agent_decision
             from engine.phase_handlers.shared_utils import (
                 SHOOT_CTX, HAZARD_CTX, apply_manual_shoot_allocation
             )
@@ -4290,6 +4290,36 @@ class W40KEngine(gym.Env):
                 option_index=option_index,
                 decision_player=decision_player,
             )
+
+        if decision_type == "move_after_shooting":
+            # J2 — repositionnement post-tir (Purgation Run, Gargoyle) : CHOICE_k = intention de
+            # déplacement, ou le candidat `declines` qui reste sur place. Le payload EST une
+            # action de joueur, donc la réponse traverse le handler du PvP : une seule
+            # implémentation du déplacement et de la fin d'activation pour les deux sièges.
+            #
+            # `player` vient de l'ÉTAT, jamais de la décision (règle d'appel de
+            # `consume_pending_agent_decision`). L'unité, elle, est contrôlée en aval : le
+            # handler refuse toute escouade qui ne porte pas `_pending_move_after_shooting`,
+            # posé par l'armement — c'est cette garde-là qui barre une réponse mal adressée.
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            decision_player = int(require_key(self.game_state, "current_player"))
+            payload = require_key(selected_option, "payload")
+            consume_pending_agent_decision(
+                self.game_state,
+                decision_type="move_after_shooting",
+                player=decision_player,
+            )
+            success, result = shooting_handlers.apply_move_after_shooting_decision(
+                self.game_state,
+                require_unit_by_id(self.game_state, decision_squad_id),
+                payload,
+            )
+            return success, {
+                **result,
+                "decision_type": decision_type,
+                "player": decision_player,
+                "option_index": option_index,
+            }
 
         if decision_type == "mortal_wounds_target":
             # Exhortation de Rage (chantier 06 Passe 4) : l agent choisit l ennemi engage cible

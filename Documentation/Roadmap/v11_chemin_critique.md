@@ -21,7 +21,13 @@ Dans la direction de l'index : lignes 1–4 = jalon J2, lignes 5–6 = J3, ligne
 
 ## P3-6 — Move-after-shooting + reactive move {#p3-6}
 
-✅ **Constaté implémenté le 2026-08-19** (antérieur à P3-5) — `move_after_shooting` et `reactive_move` présents dans `UNIT_RULE_EFFECT_IDS`, handlers actifs dans `shooting_handlers.py` et `shared_utils.py`, actions reconnues par le gym. Aucune livraison distincte à dater.
+🟡 **Move-after-shooting livré le 2026-09-09 ; reactive_move reste heuristique.**
+
+🔴 Le « constaté implémenté le 2026-08-19 » qui tenait cette place était FAUX : il constatait les effets dans `UNIT_RULE_EFFECT_IDS` et des handlers actifs — soit que la RÈGLE est jouée —, pas que la DÉCISION est rendue à l'agent. `_select_move_after_shooting_destination_for_ai` tranchait encore, et le mode `"auto"` de `reactive_move` tranche toujours.
+
+🟢 **Move-after-shooting (2026-09-09, worktree `move-after-shooting-agent-decision`)** : type `move_after_shooting` dans `AGENT_DECISION_TYPE_IDS` (slot réservé — `obs_size` et `TOTAL_ACTION_SIZE` inchangés, mesuré). L'heuristique est supprimée ; gym et bot PvE reçoivent 3 intentions scorées (Pression = historique en `CHOICE_0`, Retrait, Objectif) plus `declines`, et la réponse passe par le handler du PvP. 16 tests rouge→vert. ⚠️ Le contrat d'entraînement (`training_contract.json`) compare `AGENT_DECISION_TYPE_IDS` : une reprise `--append` sur un modèle antérieur sera refusée, l'ajout étant en fin de vocabulaire et inoffensif pour les ids existants.
+
+🔴 **reactive_move** : `reactive_decision_mode` figé à `"auto"` (`w40k_core.py`, 2 sites), jamais `"state"` hors tests ; le mode auto ne décline jamais et choisit la case la plus proche de l'ennemi qui vient de bouger. Écarté sur MESURE : ses porteurs (`Termagant`, `FenrisianWolf`) sont absents du régime d'entraînement actif (500 pts, `ArmageddonAgent_x1`) — le brancher coûterait un type et ses tests pour zéro gradient. À rouvrir si un roster d'entraînement en porte un.
 
 → `Documentation/Chantiers/v11/decisions_du_joueur.md` §9.4 pt 6
 
