@@ -22,17 +22,25 @@ Trois défauts sont verrouillés ici :
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+import ast
+import json
+import pathlib
+from typing import Any, Dict, List, Set, Tuple
 from unittest.mock import patch
 
 import pytest
 
 from ai.unit_registry import UnitRegistry
+from engine.game_state import _FLOOR_CAPABLE_KEYWORDS, _HIDEABLE_KEYWORDS
 from engine.observation_builder import ObservationBuilder
 from engine.observation_entities import UNIT_BIN_FIELDS, unit_bin_index
+from engine.phase_handlers.attack_sequence import ANTI_RULE_IDS, ANTI_RULE_PREFIX
+from engine.phase_handlers.shared_utils import _MONSTER_OR_VEHICLE_KEYWORDS
 from engine.w40k_core import W40KEngine
 from shared.data_validation import ConfigurationError
 from tests.unit.engine._config_helpers import build_engine_config
+
+ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 #: bit d'observation → mot-clé de datasheet qui doit l'allumer.
 BIT_TO_KEYWORD = {
@@ -42,6 +50,113 @@ BIT_TO_KEYWORD = {
     "kw_fly": "FLY",
     "kw_psyker": "PSYKER",
 }
+
+#: Mots-clés que le moteur consomme SANS bit d'observation — exclusions ACTÉES, pas oubliées.
+#:
+#: `BEASTS` et `SWARM` ouvrent les mêmes portes que `INFANTRY` (13.06 via
+#: `_FLOOR_CAPABLE_KEYWORDS`, 13.08/13.09 via `_HIDEABLE_KEYWORDS`) mais aucune datasheet JOUÉE
+#: n'en porte : MESURÉ le 2026-09-09 sur les 42 unités résolues depuis
+#: `config/agents/*/rosters/**` ET `config/agents/_p2_rosters/**` (agents et adversaires), zéro
+#: porteur, et zéro écart entre « peut se cacher » et `INFANTRY` sur ces 42. Sur ce périmètre un
+#: bit dédié vaudrait colonne pour colonne la copie de `kw_infantry` : 32 scalaires de plus
+#: (K_ALLY_SLOTS + K_ENEMY_SLOTS) et un retrain `--new` pour zéro information apprenable.
+#:
+#: Ce n'est PAS une dette reportée : c'est `test_no_played_roster_unit_carries_an_excluded_keyword`
+#: qui tient l'exclusion. Le jour où un roster joué porte l'un de ces mots-clés, il tombe — et ce
+#: roster étant lui-même nouveau, le bit se paie alors dans un retrain que ce changement rend de
+#: toute façon nécessaire.
+KEYWORDS_WITHOUT_BIT = frozenset({"BEASTS", "SWARM"})
+
+
+def _keywords_passed_to_unit_has_keyword() -> Set[str]:
+    """Littéraux passés à `movement_handlers._unit_has_keyword` dans tout `engine/`.
+
+    CINQUIÈME source, et la plus peuplée : six sites (`movement_handlers` ×4,
+    `charge_handlers` ×2) demandent `fly` par cette fonction, en MINUSCULES et sans passer par
+    aucune constante. Une constante ne peut pas les représenter — l'argument est écrit sur place
+    à chaque appel — donc on lit les appels eux-mêmes, par AST et non par expression régulière :
+    un `grep` ne distingue pas un argument d'une mention en commentaire.
+
+    Portée assumée : seuls les littéraux DIRECTS sont vus. Un appel construisant son argument
+    (`_unit_has_keyword(u, kw)`) échapperait, comme les comparaisons de chaînes écrites hors de
+    cette fonction (`shared_utils.py:5805` et `:11137`, `fight_handlers.py:4706`, qui lisent
+    `monster`/`vehicle`, tous deux munis de leur bit). Ce test ne prétend donc pas à
+    l'exhaustivité sur le moteur entier : il couvre les sources NOMMÉES et cet appelant unique.
+    """
+    keywords: Set[str] = set()
+    seen_call = False
+    for path in sorted((ROOT / "engine").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name != "_unit_has_keyword" or len(node.args) < 2:
+                continue
+            seen_call = True
+            argument = node.args[1]
+            if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+                keywords.add(argument.value.strip().upper())
+    # VERT VACANT : une fonction renommée ferait rendre un ensemble vide, donc un test qui passe
+    # en ne regardant plus rien. C'est l'appel qu'on exige de trouver, pas seulement un mot-clé.
+    assert seen_call, "aucun appel à _unit_has_keyword trouvé — la source a été renommée ?"
+    return keywords
+
+
+def _engine_category_keywords() -> Set[str]:
+    """Les mots-clés de catégorie que le MOTEUR consomme, dérivés de ses sources déclarées.
+
+    Dérivés et non recopiés : `BIT_TO_KEYWORD` est une table de test, donc un mot-clé ajouté
+    côté moteur ne s'y inscrirait jamais tout seul. Une source n'est vue ici que si elle est une
+    constante NOMMÉE ou l'argument littéral d'un appelant unique — c'est pourquoi
+    `_MONSTER_OR_VEHICLE_KEYWORDS` a été extraite du littéral qu'elle était.
+    """
+    keywords = {kw.strip().upper() for kw in _HIDEABLE_KEYWORDS}          # 13.08 / 13.09
+    keywords |= {kw.strip().upper() for kw in _FLOOR_CAPABLE_KEYWORDS}    # 13.06
+    keywords |= {kw.strip().upper() for kw in _MONSTER_OR_VEHICLE_KEYWORDS}  # 10.06
+    keywords |= _keywords_passed_to_unit_has_keyword()                    # 21.03 et move/charge
+    # [ANTI-X] 24.03 : découpe INCONDITIONNELLE, la même qu'`attack_sequence.py:203`. Filtrer sur
+    # `startswith` sauterait en silence une entrée mal orthographiée que le moteur, lui,
+    # découperait quand même — la dérivation serait lâche là où elle doit être exhaustive.
+    for rule_id in ANTI_RULE_IDS:
+        assert rule_id.startswith(ANTI_RULE_PREFIX), (
+            f"{rule_id!r} ne porte pas le préfixe {ANTI_RULE_PREFIX!r} : "
+            f"attack_sequence.py:203 le tronquerait quand même"
+        )
+        keywords.add(rule_id[len(ANTI_RULE_PREFIX):].strip().upper())
+    return keywords
+
+
+def _roster_unit_names() -> Set[str]:
+    """Datasheets citées par les rosters JOUÉS — ceux des agents ET ceux des adversaires.
+
+    `config/agents/_p2_rosters/**` en fait partie et n'a pas de segment `rosters` dans son
+    chemin (`ai/train.py:748`) : un glob `*/rosters/**` le manquerait entièrement, alors que les
+    bits de catégorie sont écrits pour les 20 slots ENNEMIS autant que pour les alliés — une
+    unité adverse au mot-clé exclu laisserait l'agent aveugle, verrou au vert.
+
+    Une entrée de `models` est soit un nom, soit un objet de placement portant son `unit_type`
+    (112 des 404 entrées) : `str()` sur le second rendrait la repr d'un dict, jamais résolue
+    dans le registre, donc silencieusement ignorée.
+    """
+    names: Set[str] = set()
+    paths = sorted((ROOT / "config" / "agents").glob("*/rosters/**/*.json"))
+    paths += sorted((ROOT / "config" / "agents" / "_p2_rosters").glob("**/*.json"))
+    for path in paths:
+        composition = json.loads(path.read_text(encoding="utf-8")).get("composition", [])
+        for entry in composition:
+            unit_type = entry.get("unit_type")
+            if unit_type is not None:
+                names.add(str(unit_type))
+            for model in entry.get("models", []):
+                if isinstance(model, dict):
+                    nested = model.get("unit_type")
+                    if nested is not None:
+                        names.add(str(nested))
+                else:
+                    names.add(str(model))
+    return names
 
 
 def _weapon_cfg() -> Dict[str, Any]:
@@ -185,3 +300,74 @@ def test_registry_datasheets_light_their_bit(bit: str, keyword: str) -> None:
 def test_present_stays_the_last_field() -> None:
     """Convention §0.37 : `present` est le DERNIER champ, les bits insérés ne l'ont pas bougé."""
     assert UNIT_BIN_FIELDS[-1] == "present"
+
+
+# ---------------------------------------------------------------------------
+# Contrat MOTEUR → OBSERVATION (2026-09-09)
+# ---------------------------------------------------------------------------
+#
+# Les tests ci-dessus parcourent tous `BIT_TO_KEYWORD`, une table RECOPIÉE dans ce fichier : ils
+# prouvent que chaque bit DÉCLARÉ s'allume, jamais que chaque mot-clé CONSOMMÉ par le moteur
+# possède un bit. Un mot-clé ajouté côté moteur n'aurait donc fait échouer aucun test, et l'agent
+# aurait subi une catégorie qu'il ne perçoit pas — le motif exact fermé côté règles d'unité par
+# `test_every_registered_obs_id_is_in_the_vocabulary` (`test_squad_obs_unit_rules.py`).
+#
+# Les deux tests suivants ferment les deux moitiés : (a) tout mot-clé consommé a un bit ou une
+# exclusion actée, (b) aucune unité réellement jouée ne porte un mot-clé exclu.
+
+
+def test_every_engine_category_keyword_has_a_bit_or_an_acknowledged_exclusion() -> None:
+    """(a) Sens MOTEUR → OBSERVATION : rien de consommé ne reste invisible par accident."""
+    consommes = _engine_category_keywords()
+    # VERT VACANT : une dérivation qui rendrait un ensemble vide passerait sans rien vérifier.
+    assert len(consommes) >= 5, f"dérivation suspecte, seulement {sorted(consommes)}"
+
+    avec_bit = set(BIT_TO_KEYWORD.values())
+    orphelins = sorted(consommes - avec_bit - KEYWORDS_WITHOUT_BIT)
+
+    assert orphelins == [], (
+        f"mots-clés lus par le moteur sans bit d'observation ni exclusion actée : {orphelins}. "
+        f"Soit leur ajouter un bit dans UNIT_BIN_FIELDS (coût : 32 scalaires chacun et un "
+        f"retrain --new), soit les inscrire dans KEYWORDS_WITHOUT_BIT en disant POURQUOI."
+    )
+
+    # Contre-épreuve : une exclusion ne survit que tant que le moteur lit vraiment le mot-clé.
+    # Sans elle, une exclusion resterait après le retrait de sa source et masquerait un bit mort.
+    obsoletes = sorted(KEYWORDS_WITHOUT_BIT - consommes)
+    assert obsoletes == [], (
+        f"exclusions devenues sans objet — le moteur ne lit plus {obsoletes}, "
+        f"les retirer de KEYWORDS_WITHOUT_BIT"
+    )
+
+
+def test_no_played_roster_unit_carries_an_excluded_keyword() -> None:
+    """(b) Ce qui DATE l'exclusion : elle ne vaut que tant qu'aucune unité jouée n'est concernée.
+
+    Périmètre : les rosters JOUÉS — agents et adversaires —, pas `UnitRegistry` entier. Le
+    catalogue compte trois porteurs (`FenrisianWolf`, `Mucolid`, `RipperSwarm`) qu'aucun roster
+    ne convoque ; les confondre rendrait ce test rouge sans que rien ne soit cassé.
+    """
+    registry = UnitRegistry().units
+    joues = {name: registry[name] for name in _roster_unit_names() if name in registry}
+    # VERT VACANT : une lecture de roster qui ne résoudrait aucune datasheet passerait à vide.
+    assert len(joues) >= 20, f"seulement {len(joues)} datasheets résolues depuis les rosters"
+
+    porteurs = {
+        name: sorted(
+            str(entry["keywordId"]).strip().upper()
+            for entry in unit["UNIT_KEYWORDS"]
+            if str(entry["keywordId"]).strip().upper() in KEYWORDS_WITHOUT_BIT
+        )
+        for name, unit in joues.items()
+        if any(
+            str(entry["keywordId"]).strip().upper() in KEYWORDS_WITHOUT_BIT
+            for entry in unit["UNIT_KEYWORDS"]
+        )
+    }
+
+    assert porteurs == {}, (
+        f"un roster joué porte désormais un mot-clé exclu : {porteurs}. L'exclusion de "
+        f"KEYWORDS_WITHOUT_BIT ne tient plus — soit lui ajouter son bit dans UNIT_BIN_FIELDS "
+        f"(32 scalaires, retrain --new, à payer dans celui que ce roster impose déjà), soit "
+        f"retirer du roster l'unité qui l'a fait entrer. Le choix est à faire, pas à deviner."
+    )

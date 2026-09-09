@@ -8811,6 +8811,26 @@ SHOOTING_TYPE_CLOSE_QUARTERS = "close_quarters"
 SHOOTING_TYPE_INDIRECT = "indirect"
 
 
+#: Mots-cles de la categorie MONSTER/VEHICLE lue par 10.06 (« MONSTER and VEHICLE Models: you
+#: can select any target »), dans la convention de lecture de `keywordId` (strip/upper).
+#:
+#: Nommee et non ecrite en litteral pour la MEME raison que `_HIDEABLE_KEYWORDS` et
+#: `_FLOOR_CAPABLE_KEYWORDS` (`engine/game_state.py`) et `ANTI_RULE_IDS`
+#: (`engine/phase_handlers/attack_sequence.py`) : le verrou qui exige un bit d observation par
+#: mot-cle consomme (`tests/unit/engine/test_squad_obs_category_keywords.py`) DERIVE les sources
+#: NOMMEES, et un litteral y est invisible — un mot-cle ajoute ici n aurait allume aucun bit et
+#: n aurait fait echouer aucun test, ce qui est exactement le trou que ce verrou ferme.
+#:
+#: ⚠️ Le verrou ne balaie PAS le moteur entier, et il ne faut pas le croire exhaustif : il lit
+#: les constantes nommees ci-dessus plus les litteraux passes a `_unit_has_keyword`
+#: (`movement_handlers`, 6 sites, tous « fly »). Restent hors de sa portee trois comparaisons
+#: ecrites sur place — `shared_utils.py` (~5805 et ~11137) et `fight_handlers.py` (~4706) —, qui
+#: lisent « monster » et « vehicle », deux mots-cles qui ont deja leur bit. Une categorie NOUVELLE
+#: introduite a l un de ces trois endroits echapperait au verrou : l y ajouter demande de la
+#: declarer ici, ou de passer par `_unit_has_keyword`.
+_MONSTER_OR_VEHICLE_KEYWORDS = ("MONSTER", "VEHICLE")
+
+
 def _model_is_monster_or_vehicle(model: Dict[str, Any]) -> bool:
     """Keywords MONSTER/VEHICLE de la FIGURINE (pas de l unite).
 
@@ -8826,7 +8846,7 @@ def _model_is_monster_or_vehicle(model: Dict[str, Any]) -> bool:
         )
     for entry in keywords:
         kid = entry.get("keywordId") if isinstance(entry, dict) else entry  # get allowed
-        if str(kid).strip().upper() in ("MONSTER", "VEHICLE"):
+        if str(kid).strip().upper() in _MONSTER_OR_VEHICLE_KEYWORDS:
             return True
     return False
 
