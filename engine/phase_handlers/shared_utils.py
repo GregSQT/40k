@@ -13835,16 +13835,23 @@ def erode_move_pool_by_squad_block(
     _climb_by_model_level: Dict[Tuple[str, int], Mapping[Tuple[int, int], int]] = {}
     _level_map_by_model: Dict[str, Mapping[Tuple[int, int], int]] = {}
     _ascent_levels_by_model: Dict[str, Set[int]] = {}
+    # Niveaux d'arrivée qui ne sont PAS une montée (sol, ou étage conservé) : ils passent par un
+    # champ de plain-pied, mais à LEUR niveau, pas au niveau 0.
+    _flat_levels_by_model: Dict[str, Set[int]] = {}
     _origin_level_by_model: Dict[str, int] = {}
     if _ascent:
         for _mid_a in alive_mids:
             _m_a = models_cache[_mid_a]
             _lm_a = squad_floor_level_map(game_state, _m_a)
+            _origin_a = int(require_key(_m_a, "level"))
             _level_map_by_model[str(_mid_a)] = _lm_a
-            _origin_level_by_model[str(_mid_a)] = int(require_key(_m_a, "level"))
+            _origin_level_by_model[str(_mid_a)] = _origin_a
             _ascent_levels_by_model[str(_mid_a)] = {
+                int(_lv) for _lv in _lm_a.values() if int(_lv) > _origin_a
+            }
+            _flat_levels_by_model[str(_mid_a)] = {
                 int(_lv) for _lv in _lm_a.values()
-                if int(_lv) > int(require_key(_m_a, "level"))
+                if int(_lv) <= _origin_a and int(_lv) != SQUAD_RIGID_MOVE_DESTINATION_LEVEL
             }
     _geo_models: List[Tuple[str, int, int, int, Tuple[int, int, int]]] = []
     _classifier_normal = 0
@@ -13966,6 +13973,34 @@ def erode_move_pool_by_squad_block(
                             game_state, str(squad_id), player, models_cache[mid_g],
                             _lv_up, _extent,
                         )
+                # Niveaux d'arrivée qui ne sont PAS une montée : le sol, et l'étage d'une
+                # figurine qui PART en hauteur et y RESTE. Celle-ci ne monte pas, donc elle
+                # n'emprunte pas le champ multi-niveaux ; mais elle ne chemine pas non plus parmi
+                # les obstacles du SOL — `explain_move_plan_rejection` la borne au niveau de son
+                # PLAN, donc parmi les figurines de SON étage. Sans ces champs-là, l'érosion
+                # interrogeait le niveau 0 pendant que la validation interrogeait le niveau 1 :
+                # une figurine ennemie postée à l'étage était invisible du masque et faisait
+                # rejeter le plan à l'exécution, et une ennemie au SOL retirait au masque des
+                # destinations légales. Les deux côtés lisent désormais le même niveau.
+                for _lv_flat in sorted(_flat_levels_by_model.get(mid_g, ())):  # get allowed
+                    _fk_flat = (mid_g if _mode == "euclidean" else "", ocol, orow, _lv_flat)
+                    if _fk_flat in _field_by_origin:
+                        continue
+                    if _mode == "euclidean":
+                        _field_by_origin[_fk_flat] = _euclidean_move_field_for_model(
+                            game_state, str(squad_id), player, models_cache[mid_g],
+                            _lv_flat, _extent,
+                        )
+                    else:
+                        if _lv_flat not in _blocked_by_level:
+                            _transit_by_level[_lv_flat], _blocked_by_level[_lv_flat] = (
+                                move_transit_blocked_forms(
+                                    game_state, str(squad_id), player, _lv_flat
+                                )
+                            )
+                        _field_by_origin[_fk_flat] = geodesic_move_reach(
+                            ocol, orow, _extent, _blocked_by_level[_lv_flat]
+                        )
         if not _geo_models:
             _geo_budget = False  # aucune figurine à contraindre → pool d'ancre déjà exact
 
@@ -14035,7 +14070,11 @@ def erode_move_pool_by_squad_block(
                     # que `model_reach_predicate` (qui compare au budget brut) refuse.
                     _bound = _exec_b
                 else:
-                    _fk = (mid_g if _mode == "euclidean" else "", ocol, orow, lvl)
+                    # Niveau RÉSOLU et non `lvl` : une figurine qui reste à son étage chemine
+                    # parmi les figurines de CET étage, exactement comme la borne que
+                    # `model_reach_predicate` applique au plan. `_lv_eff` vaut `lvl` partout
+                    # ailleurs — sans déclaration de montée, la clé est donc inchangée.
+                    _fk = (mid_g if _mode == "euclidean" else "", ocol, orow, _lv_eff)
                     _d = _field_by_origin[_fk].get((ncol, nrow))
                     _bound = _exec_d
                 if _d is None or _d > _bound:

@@ -135,6 +135,14 @@ l'étage. La verticalité est désormais *jouable*, elle n'est pas *fréquente* 
 que sur 34 des 72 cases d'étage de `terrain-mc1` (13.06 interdit tout débordement du bord), et la
 montée coûte 3" sur un MOVE de 6".
 
+**Correctifs de revue (2026-09-09)** : deux défauts de ce lot, corrigés avant tout retrain.
+L'érosion du masque bornait au niveau 0 une figurine qui PART d'un étage et y RESTE, quand la
+validation la borne au niveau de son plan — une figurine ennemie postée à l'étage était donc
+invisible du masque, et une ennemie au sol lui retirait des destinations légales. Les deux côtés
+lisent désormais le même niveau. Et le mémo `floor_level_by_cell`, clé par `id(terrain_areas)`,
+ne retenait pas la liste : une adresse recyclée à signature de forme identique aurait servi la
+carte de niveaux d'un autre terrain, en silence.
+
 Reste ouvert : la **charge**, le **pile-in** et la **consolidation** gardent leur destination au
 sol (`SQUAD_RIGID_MOVE_DESTINATION_LEVEL`), et **FLY + étages** reste hors périmètre — le pool
 d'ancre renvoie avant son bloc multi-niveaux quand la traversée est active, exclusion préexistante.
