@@ -24,7 +24,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 | Clé | Forme | Contenu |
 |---|---|---|
 | `global_cont` / `global_bin` | (23,) / (94,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs**, **OC live et statut secured (14.02/14.03) par objectif** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur, clause du +1 Wound d'Oath ouverte — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `hidden`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
-| `allies_cont` / `allies_bin` | (12, 22) / (12, 28) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent les **mots-clés de catégorie** (`kw_infantry`, `kw_vehicle`, `kw_monster`, `kw_fly`, `kw_psyker`), portés par TOUTE entité, et — pour les ennemis seulement — `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
+| `allies_cont` / `allies_bin` | (12, 21) / (12, 38) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent les **mots-clés de catégorie** (`kw_infantry`, `kw_vehicle`, `kw_monster`, `kw_fly`, `kw_psyker`), portés par TOUTE entité, et — pour les ennemis seulement — `los_can_see`, `cover_vs_observer`, `charge_reachable_max_roll` et les dix `split_assigned_w<i>` |
 | `allies_ability_ids` / `allies_status_ids` | (12, 8) / (12, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../../../config/unit_rules.json) et [`config/unit_statuses.json`](../../../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
 | `allies_wpn_cont` / `_bin` / `_rule_ids` | (12, 20, 13) / (12, 20, 2) / (12, 20, 6) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants, params de règles, et les règles booléennes en **ids** (3ᵉ `EmbeddingBag`, cf. `*_wpn_rule_ids`) |
 | `allies_types_cont` / `_bin` | (12, 6, 5) / (12, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
@@ -39,15 +39,15 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (17 916 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (18 204 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (23,)                =      23               │
 │    global_bin             (94,)                =      94               │
 │                                                                        │
 │  MES ESCOUADES — ordre = slots d'activation       K_ALLY_SLOTS = 12    │
-│    allies_cont            (12, 22)             =     264               │
-│    allies_bin             (12, 28)             =     336               │
+│    allies_cont            (12, 21)             =     252               │
+│    allies_bin             (12, 38)             =     456               │
 │    allies_ability_ids     (12, 8)              =      96               │
 │    allies_status_ids      (12, 4)              =      48               │
 │    allies_wpn_cont        (12, 20, 13)         =   3 120               │
@@ -57,8 +57,8 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    allies_types_bin       (12, 6, 5)           =     360               │
 │                                                                        │
 │  ESCOUADES ENNEMIES — ordre = slots d'action     K_ENEMY_SLOTS = 20    │
-│    enemies_cont           (20, 22)             =     440               │
-│    enemies_bin            (20, 28)             =     560               │
+│    enemies_cont           (20, 21)             =     420               │
+│    enemies_bin            (20, 38)             =     760               │
 │    enemies_ability_ids    (20, 8)              =     160               │
 │    enemies_status_ids     (20, 4)              =      80               │
 │    enemies_wpn_cont       (20, 20, 13)         =   5 200               │
@@ -80,13 +80,13 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_cont       (8, 8)               =      64               │
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      17 916              │
+│  TOTAL vectoriel (= obs_size)                      18 204              │
 │  + grid  (12, 32, 32) = 12 288, fournie À PART (non comptée)           │
 └────────────────────────────────────────────────────────────────────────┘
 
-Coût d'UNE entité = 22 + 28 (unité) + 8 + 4 (capacités/statuts) + 20 × (13 + 2 + 6) (armes)
-   + 6 × (5 + 5) (types) = 542
-   → le bloc ARMES fait 78 % du vecteur. C'est le seul bloc mémoïsé.
+Coût d'UNE entité = 21 + 38 (unité) + 8 + 4 (capacités/statuts) + 20 × (13 + 2 + 6) (armes)
+   + 6 × (5 + 5) (types) = 551
+   → le bloc ARMES fait 76 % du vecteur. C'est le seul bloc mémoïsé.
 ```
 
 ### Description des tenseurs
@@ -296,25 +296,13 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
                                                     #   tous les slots, directement comparable
                                                     #   a edge_distance (V11 §9.5 P4).
                                                     #   0 pour une unite corps-a-corps pure.
-[s][20]    = n_weapons_assigned                     # brut [ENNEMIS seuls, activation de tir
-                                                    #   FRACTIONNE seule] — combien de MES profils
-                                                    #   d'armes sont deja assignes a cette cible
-                                                    #   pendant l'activation en cours (P3-8).
-                                                    #   La resolution n'a lieu qu'une fois toutes
-                                                    #   les armes assignees : sans ce comptage,
-                                                    #   l'agent empilait plusieurs armes sur la
-                                                    #   meme cible sans le voir (mesure du
-                                                    #   2026-09-09 : 10 activations sur 12).
-                                                    #   Comptage BRUT, jamais une esperance de
-                                                    #   degats — les features calculees ont ete
-                                                    #   supprimees en §9.1.
-[s][21]    = max_floor_height                       # hauteur de la figurine la plus haute / seuil
+[s][20]    = max_floor_height                       # hauteur de la figurine la plus haute / seuil
                                                     #   de Plunging Fire (22.05) — 1.0 = pile a la
                                                     #   hauteur qui declenche la regle, 0.0 = tout
                                                     #   le monde au sol. Emis pour TOUTE entite.
 ```
 
-#### `allies_bin[s]` / `enemies_bin[s]` — une unite, 27 drapeaux  ·  jamais normalise
+#### `allies_bin[s]` / `enemies_bin[s]` — une unite, 37 drapeaux  ·  jamais normalise
 
 ```python
 [s][0]     = is_ally                                # 0.0 / 1.0
@@ -370,7 +358,34 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
 [s][26]    = has_ground_model                       # 0.0 / 1.0 — l'unite contient >= 1 figurine AU SOL.
                                                     #   Predicat EXACT que Plunging Fire (22.05)
                                                     #   interroge sur la CIBLE. Emis pour TOUTE entite.
-[s][27]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
+[s][27]    = split_assigned_w0                      # 0.0 / 1.0 — l'arme du slot de profil RNG 0 est DEJA
+                                                    #   assignee a CETTE escouade pendant le split-fire
+                                                    #   (P3-8) [ENNEMIS seuls, split-fire seul]. Les dix
+                                                    #   bits sont la transposee de `assignments` : sur la
+                                                    #   ligne de la cible, quelles de mes armes la visent
+                                                    #   deja. Poses aux DEUX sous-etats — celui qui
+                                                    #   demande l'arme suivante et celui qui demande sa
+                                                    #   cible. Sans eux, apres un premier couple commite,
+                                                    #   deux cibles deja assignees donnaient la MEME
+                                                    #   observation (0 cle sur 28, mesure du 2026-09-09),
+                                                    #   et le masque ne le disait pas non plus (une cible
+                                                    #   prise reste eligible). Dix bits et non un seul
+                                                    #   « deja ciblee » : 04.03 cumule les des des armes
+                                                    #   faisant des attaques IDENTIQUES sur une meme
+                                                    #   cible, donc la consequence de regle depend de
+                                                    #   QUELLE arme y est deja — et 55 % des escouades
+                                                    #   Armageddon portent >= 3 profils de tir
+                                                    #   (75 % de celles capables de split-fire).
+[s][28]    = split_assigned_w1                      # idem, slot de profil RNG 1
+[s][29]    = split_assigned_w2                      # idem, slot de profil RNG 2
+[s][30]    = split_assigned_w3                      # idem, slot de profil RNG 3
+[s][31]    = split_assigned_w4                      # idem, slot de profil RNG 4
+[s][32]    = split_assigned_w5                      # idem, slot de profil RNG 5
+[s][33]    = split_assigned_w6                      # idem, slot de profil RNG 6
+[s][34]    = split_assigned_w7                      # idem, slot de profil RNG 7
+[s][35]    = split_assigned_w8                      # idem, slot de profil RNG 8
+[s][36]    = split_assigned_w9                      # idem, slot de profil RNG 9
+[s][37]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
 ```
 
 #### `*_ability_ids[s]` / `*_status_ids[s]` — ENSEMBLES D'IDENTIFIANTS  ·  jamais normalise
@@ -780,6 +795,22 @@ qu'un personnage attaché et une figurine de base sortaient des scores égaux. M
 une ligne `self_models_bin` IDENTIQUE, et l'observation d'une escouade avec et sans
 `pending_coherency_removal` armé était strictement identique — écart 0.0 sur toutes les clés, sur
 les 8 points d'arrêt rencontrés).
+→ **18204** (couples arme→cible déjà commités du split-fire, 2026-09-09 : `split_assigned_w0..9`
+dans `UNIT_BIN_FIELDS`, 10 bits × 32 entités +320, **en remplacement** de `n_weapons_assigned`
+retiré de `UNIT_CONT_FIELDS` −32. Le comptage du maillon 17795 était une PROJECTION de ces
+couples — `popcount` des dix bits, l'égalité étant garantie par l'injectivité `code d'arme →
+slot de profil` (vérifiée sur les 179 datasheets et les 33 escouades des `config/armies/` ; les
+armes à profils multiples portent des codes distincts, `plasma_pistol_standard` /
+`_supercharge`) — et il perdait l'APPARIEMENT : quelle de mes armes vise déjà cette cible. 04.03
+« Gather Attack Dice » cumule les dés des armes faisant des attaques identiques sur une même
+cible, donc la conséquence de règle dépend de QUELLE arme y est déjà, et 55 % des escouades
+Armageddon portent >= 3 profils de tir — 75 % de celles capables de split-fire, jusqu'à 6
+profils (mesuré le 2026-09-09 sur les 11 escouades SM+Orks). Coût réseau mesuré : extracteur
+245 392 → 246 544 paramètres, +1 152. Le trou lui-même est inchangé et re-mesuré : les dix bits
+mis à 0, deux états ne différant que par la cible déjà assignée rendent des observations
+IDENTIQUES sur les 28 clés, aux DEUX sous-états — celui qui demande l'arme suivante comme celui
+qui demande sa cible. Le masque ne le disait pas non plus, une cible déjà prise restant
+éligible).
 
 **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
 Depuis le chantier 01, une capacité, un statut ou une faction entière n'est qu'un `obs_id` de

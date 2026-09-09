@@ -16,7 +16,7 @@
 >
 > | | Valeur en vigueur | Source de vérité (à relire, jamais à recopier) |
 > |---|---|---|
-> | `obs_size` | **17 916** (2026-09-09 — rôle et PV par figurine pour le retrait de cohérence 03.03 : `hp_ratio` +20, one-hot de rôle et `wounded` +100, `coherency_removal_pending` +1) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) — **aucune config ne le déclare**. Lignée complète : [observation_et_actions.md#historique-de-obs_size](observation_et_actions.md#historique-de-obs_size), domicile unique. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
+> | `obs_size` | **18 204** (2026-09-09 — couples arme→cible déjà commités du split-fire : `split_assigned_w0..9` par entité +320, en remplacement du comptage `n_weapons_assigned` −32) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) — **aucune config ne le déclare**. Lignée complète : [observation_et_actions.md#historique-de-obs_size](observation_et_actions.md#historique-de-obs_size), domicile unique. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
 > | espace d'action | **1 389** (1 024 cellules grille + 1 wait + 20 tir + 20 charge mono-cible + 190 charge multi-cibles + 20 mêlée + 1 fight sans cible + 20 tir indirect + 15 zone intents + 6 `CHOICE_i` + 20 Oath + 12 activation + 10 arme mêlée + 20 cohérence + 10 sélection arme tir + 9 slots passe 2 chantier 06) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`) |
 >
 > - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque

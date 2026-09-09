@@ -79,29 +79,6 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
     # Source : max(RNG × inches_to_subhex) sur les armes de tir de l'unité active.
     # 0 pour une unité corps-à-corps uniquement.
     "effective_range",
-    # ⚠ Entité ENNEMIE et ACTIVATION DE TIR FRACTIONNÉ uniquement (P3-8) — grandeur de PAIRE,
-    # comme `n_models_engaging` : combien de MES profils d'armes sont DÉJÀ assignés à cette
-    # escouade pendant l'activation en cours (`pending_shoot_weapon_split["assignments"]`).
-    # 0 hors activation, et 0 sur une alliée.
-    #
-    # POURQUOI. Le tir fractionné assigne les armes une par une et ne résout qu'à la fin : aucune
-    # perte n'est appliquée entre deux assignations, donc l'état des cibles ne bouge pas et rien
-    # d'autre ne dit ce qui est déjà parti sur elles. MESURÉ le 2026-09-09 (10 épisodes gym du
-    # pool `training`, 1963 steps) : 39 des 70 points d'arrêt de CIBLE et 39 points d'arrêt
-    # d'ARME portaient des assignations invisibles, 12 activations sur 21 assignent au moins deux
-    # armes, et 10 d'entre elles ont envoyé plusieurs armes sur la MÊME cible — un sur-tir que
-    # l'agent ne pouvait pas percevoir. Deux états ne différant que par la cible d'une assignation
-    # passée rendaient des observations identiques (0 clé différente sur 28).
-    #
-    # UN COMPTAGE BRUT, et non une espérance de dégâts déjà engagés : les features CALCULÉES ont
-    # été supprimées en V11 §9.1, et le registre d'armes expose des caractéristiques brutes dont
-    # le réseau tire lui-même le volume de feu. Le comptage est de la même famille que
-    # `n_models_engaging` (des figurines) et que `carriers` (des porteurs).
-    #
-    # Ce champ ne dit pas QUELLE arme est partie sur la cible. C'est assumé : l'identité coûterait
-    # un bit par (profil × entité), soit un bloc de paires que le schéma d'entités n'a pas, pour
-    # répondre à une question moins décisive que « combien ai-je déjà engagé ici ».
-    "n_weapons_assigned",
     # VERTICALITÉ (13.06) — émis pour TOUTE entité posée, alliée comme ennemie, et c'est ce qui
     # les distingue des drapeaux de terrain voisins : la hauteur d'une figurine est LUE dans
     # `units_cache["floor_height_by_model"]`, déjà calculée par le moteur pour Plunging Fire, et
@@ -429,8 +406,63 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     # sol. 0 signifie « toute l'unité est en hauteur », ce qui la met hors d'atteinte du tir
     # plongeant.
     "has_ground_model",
+    # ⚠ Entités ENNEMIES et split-fire en cours uniquement (P3-8). Le bit `i` vaut 1 ssi l'arme
+    # du slot de profil RNG `i` est DÉJÀ assignée à cette escouade. C'est la transposée exacte
+    # de la table `assignments` : sur la ligne de la cible, quelles de mes armes la visent déjà.
+    #
+    # Rien d'autre ne le disait, MESURÉ le 2026-09-09 sur le chemin de production
+    # (`_process_squad_action` puis `_build_observation_and_mask`) : après un premier couple
+    # arme→cible commité, deux états ne différant que par CETTE cible produisaient des
+    # observations identiques — 0 clé sur 28 — et aux DEUX sous-états, celui qui demande l'arme
+    # suivante comme celui qui demande sa cible. Le masque ne le disait pas non plus : une cible
+    # déjà prise reste éligible pour l'arme suivante (`shoot_weapon_eligible_target_slots`).
+    #
+    # POURQUOI 10 BITS ET NON UN SEUL « déjà ciblée » : 04.03 « Gather Attack Dice » cumule les
+    # dés des armes faisant des IDENTICAL ATTACKS sur une même cible, donc la conséquence de
+    # règle dépend de QUELLE arme y est déjà, pas du seul fait qu'une y soit. Un bit unique
+    # suffirait à deux armes et perdrait l'appariement au-delà — or 55 % des escouades Armageddon
+    # portent >= 3 profils de tir distincts, jusqu'à 6, soit 75 % de celles qui peuvent seulement
+    # fractionner leur tir (mesuré le 2026-09-09 sur les 11 escouades SM+Orks des `config/armies/`,
+    # attachements 19.04 compris). Le joueur humain, lui, voit toutes ses déclarations : 04.02 les
+    # demande toutes AVANT la moindre résolution.
+    #
+    # POURQUOI SUR L'ENTITÉ et non dans un bloc dédié (10 x 20) : c'est la tête pointeur qui
+    # score les lignes ennemies pour choisir la cible. L'information est ainsi portée par la
+    # ligne même que la tête évalue, au lieu d'exiger une jointure avec un bloc séparé — et le
+    # schéma d'entité est déjà lu génériquement par `ai/spatial_extractor` (`_UNIT_FAMILIES`),
+    # donc aucun encodeur nouveau. Coût 10 x 32 = 320 scalaires.
+    #
+    # Le slot vient de `assignments[code]["weapon_slot"]`, RECOPIÉ du `pending_weapon_slot` du
+    # moteur : le re-dériver du code d'arme ici ferait diverger l'obs et le commit (invariant D1).
+    #
+    # ⚠️ Leur NOMBRE est verrouillé sur `K_WEAPONS_RANGED` par un test
+    # (`test_split_assigned_bits_cover_every_ranged_slot`), pas par ce commentaire : ces noms
+    # sont littéraux parce que `K_WEAPONS_RANGED` est défini plus bas dans ce module, et un
+    # littéral figé se périmerait en silence le jour où la cardinalité bouge.
+    "split_assigned_w0",
+    "split_assigned_w1",
+    "split_assigned_w2",
+    "split_assigned_w3",
+    "split_assigned_w4",
+    "split_assigned_w5",
+    "split_assigned_w6",
+    "split_assigned_w7",
+    "split_assigned_w8",
+    "split_assigned_w9",
     "present",             # masque d'entité (0 = slot vide / unité morte) — DERNIER, cf. ci-dessus
 )
+
+#: Nom du bit portant « l'arme du slot RNG `slot` est déjà assignée à cette escouade » (P3-8).
+#: SOURCE UNIQUE du nom, partagée par l'observation et ses tests : deux constructions du même
+#: nom écrites séparément divergeraient au premier renommage.
+def split_assigned_field(slot: int) -> str:
+    """Champ `split_assigned_w<slot>`. Slot hors des profils de tir -> IndexError explicite."""
+    if not 0 <= int(slot) < K_WEAPONS_RANGED:
+        raise IndexError(
+            f"split_assigned_field: slot {slot!r} hors des {K_WEAPONS_RANGED} slots "
+            f"de profils de tir"
+        )
+    return f"split_assigned_w{int(slot)}"
 
 UNIT_CONT_SIZE = len(UNIT_CONT_FIELDS)
 UNIT_BIN_SIZE = len(UNIT_BIN_FIELDS)

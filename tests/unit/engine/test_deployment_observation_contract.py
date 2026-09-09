@@ -775,7 +775,7 @@ def test_squad_obs_size_target_matches_the_schema():
     # seul, c'est de forcer un humain à CONSTATER qu'une taille a bougé — donc qu'aucun modèle
     # existant n'est réutilisable. Il était NU (`assert a == b`) : il annonçait que deux nombres
     # diffèrent sans dire lequel était le nouveau, ni quoi en faire.
-    _ACKNOWLEDGED_OBS_SIZE = 17916
+    _ACKNOWLEDGED_OBS_SIZE = 18204
     assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == _ACKNOWLEDGED_OBS_SIZE, (
         f"obs_size a changé : {_ACKNOWLEDGED_OBS_SIZE} -> "
         f"{ObservationBuilder.SQUAD_OBS_SIZE_TARGET}. Tout modèle entraîné est invalidé par "

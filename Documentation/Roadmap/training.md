@@ -134,15 +134,62 @@ mêlée, 8 sur 11 ≥ 2 armes de tir ; mesuré en jeu, 5 épisodes gym du pool `
   vivantes) : écrit dedans, il serait resté allumé après la fin du point d'arrêt ;
 - un test vérifie que les trois canaux **atteignent le réseau** — c'est exactement ce qui manquait
   à `decision_options_cont`, rempli par le moteur et lu par personne ;
-- `n_weapons_assigned` (`UNIT_CONT_FIELDS`, +32) compte, par escouade ennemie, les profils d'armes
-  déjà assignés pendant l'activation de tir en cours. Le tir fractionné ne résout qu'une fois
-  toutes les armes assignées : entre deux assignations aucune perte n'est appliquée, donc rien
-  d'autre ne dit ce qui est déjà parti. Mesuré sur 10 épisodes gym du pool `training` (1963 steps)
-  — 39 des 70 points d'arrêt de cible et 39 points d'arrêt d'arme portaient des assignations
-  invisibles, et **10 activations sur 12** ont envoyé plusieurs armes sur la MÊME cible. Un
-  COMPTAGE, pas un bit : un bit aurait dit la même chose de la première et de la troisième arme
-  empilée. Et un comptage BRUT, pas une espérance de dégâts — les features calculées ont été
-  supprimées en §9.1.
+- `n_weapons_assigned` (`UNIT_CONT_FIELDS`, +32) comptait, par escouade ennemie, les profils
+  d'armes déjà assignés pendant l'activation de tir en cours. **Ce champ n'existe plus** : il a
+  cédé la place le même jour aux dix bits `split_assigned_w<i>`, qui portent le même comptage
+  (`popcount`) ET l'appariement arme → cible que le comptage perdait — voir
+  [Obs — couples arme→cible du tir fractionné](#couples-arme-cible-split-fire).
+
+---
+
+## ✅ Obs — couples arme→cible du tir fractionné {#couples-arme-cible-split-fire}
+
+**Livré le 2026-09-09.** `obs_size` 17916 → **18204** : ré-entraînement `--new` obligatoire —
+déjà exigé par les lots du même jour, et aucun artefact du disque n'était compatible (P0, P1 et
+le dernier run sauvegardé étaient à 16791, `best_model.zip` à 17055 — mesuré dans les `.zip`).
+
+Deuxième temps du maillon précédent, qui n'avait couvert que la PREMIÈRE arme du split-fire. Une
+fois un couple arme → cible commité, l'agent choisit l'arme suivante puis sa cible sans rien voir
+de ce qu'il a déjà envoyé et sur qui.
+
+**Mesuré :** les dix bits mis à 0, deux états ne différant que par la cible déjà assignée rendent
+des observations **identiques sur les 28 clés**, aux DEUX sous-états — celui qui demande l'arme
+suivante comme celui qui demande sa cible. Le masque ne le disait pas non plus : une cible déjà
+prise reste éligible pour l'arme suivante.
+
+**Ce qui a été livré :**
+
+- `split_assigned_w0..9` (`UNIT_BIN_FIELDS`, 10 bits × 32 entités = +320) : le bit `i` vaut 1 ssi
+  l'arme du slot de profil RNG `i` est déjà assignée à cette escouade. Transposée exacte de
+  `assignments` — sur la ligne de la cible, quelles de mes armes la visent déjà ;
+- `n_weapons_assigned` **retiré** (−32) : il était la projection `popcount` de ces bits.
+  L'égalité est garantie par l'injectivité `code d'arme → slot de profil`, vérifiée sur les 179
+  datasheets et les 33 escouades des `config/armies/` — les armes à profils multiples portent des
+  codes distincts (`plasma_pistol_standard` / `_supercharge`), `COMBI_WEAPON` marquant l'arme
+  physique partagée. Garder les deux, c'était deux encodages du même fait ;
+- **dix bits et non un seul « déjà ciblée »** : 04.03 « Gather Attack Dice » cumule les dés des
+  armes faisant des attaques identiques sur une même cible, donc la conséquence de règle dépend de
+  QUELLE arme y est déjà. Mesuré sur les 11 escouades Armageddon (SM+Orks) : 55 % portent ≥ 3
+  profils de tir, jusqu'à 6 — soit 75 % de celles capables de split-fire, pour qui un bit unique
+  perdrait l'appariement ;
+- le slot vient de `assignments[code]["weapon_slot"]`, **RECOPIÉ** du `pending_weapon_slot` du
+  moteur au moment du commit de la cible, jamais re-dérivé du code par l'observation (invariant
+  D1). C'est ce qui fait passer les valeurs d'`assignments` de `str` à
+  `{target_id, weapon_slot}` ; le seul autre lecteur de la table (le précheck de quantité d'armes)
+  suit le même couple ;
+- un seul lecteur d'activation, `read_pending_shoot_split` : les deux lecteurs de sous-état en
+  dérivent, et le doublon apparu en parallèle a été supprimé plutôt que conservé ;
+- **coût réseau mesuré**, pas estimé : extracteur 245 392 → 246 544 paramètres (+1 152, +0,47 %),
+  l'encodeur d'entité étant partagé entre les deux camps ;
+- verrous : marquage sur la ligne de la cible et sur elle seule, deux armes sur la MÊME cible →
+  deux bits, clôture de la liste sur `K_WEAPONS_RANGED`, absence hors split-fire et dans
+  l'observation d'une autre escouade, slot hors bloc d'armes → erreur, et un test réseau qui exige
+  que **deux slots assignés différents donnent deux embeddings différents** — sans quoi le bloc de
+  bits ne vaudrait pas mieux qu'un comptage.
+
+**Ce qui n'est PAS prouvé :** que la politique s'en serve mieux. L'information existe, elle n'est
+nulle part ailleurs, et le comptage en perdait l'appariement — mais le gain d'apprentissage se
+mesure sur un run, pas ici.
 
 ---
 
