@@ -90,6 +90,27 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
     # normaliser par lui rend la feature directement lisible comme « suis-je / est-il en position
     # de tir plongeant ». 0.0 = tout le monde au sol, le cas courant.
     "max_floor_height",
+    # Seuil de commandement EN VIGUEUR de l'escouade (01.06) : le Ld le PLUS BAS de ses figurines
+    # VIVANTES, donc celui contre lequel 08.03 la fait tester. Source `unit_effective_leadership`
+    # (`shared_utils`), l'oracle qu'appelle le jet lui-même : un `min` recopié ici sur les figurines
+    # déjà chargées épargnerait une boucle et ferait diverger l'observation du jet le jour où
+    # l'extinction 19.04 changerait de règle.
+    #
+    # Émis pour TOUTE entité PRÉSENTE, réserve comprise (le seuil d'une escouade qui n'est pas
+    # encore posée est déjà celui de sa composition) : le seuil de l'ennemi décide de ce que vaut une réduction sous
+    # demi-effectif (2D6 < Ld, soit 17 % à Ld 5+ et 58 % à Ld 8+ — les quatre valeurs portées par
+    # les rosters joués), celui de mes escouades de ce que je risque à en exposer une.
+    #
+    # ⚠️ DÉRIVABLE, et non invisible — c'est assumé, contrairement aux champs voisins qui, eux,
+    # comblaient un écart d'observation mesuré à 0.0. Mesuré le 2026-09-09 sur TOUS les rosters de
+    # `config/agents/` — agent, adversaire et benchmarks, 31 compositions d'escouade distinctes,
+    # 26 signatures une fois retirés les agrégats de points/PV/OC : aucune paire ne partage sa
+    # signature observée (stats d'unité + multiset des types) avec un Ld effectif différent, et le
+    # Ld effectif n'a varié dans AUCUNE des 66 escouades suivies pas à pas sur 6 épisodes gym. Ce
+    # champ n'achète donc rien sur ce corpus : il achète que la valeur reste juste sur un roster
+    # jamais vu, là où la table « profil → Ld », mémorisable en 26 lignes, se périme à la première
+    # faction ajoutée.
+    "leadership",
 )
 
 #: Règles d'UNITÉ (`config/unit_rules.json`) exposées à l'agent.
@@ -518,6 +539,22 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     "split_assigned_w7",
     "split_assigned_w8",
     "split_assigned_w9",
+    # L'unité fera-t-elle un test de Battle-shock au prochain 08.03 ? PRÉDICAT EXACT du moteur
+    # (`command_handlers.command_step_battle_shock`) : `battle_shocked` OU
+    # `is_unit_at_or_below_half_strength`. Le premier terme ne double PAS le statut `battle_shock` —
+    # il porte la clause de sortie de 08.03 : une unité choquée reteste à chaque phase de
+    # commandement et peut cesser de l'être, donc « choquée » et « va tester » ne sont pas le même
+    # fait.
+    #
+    # Ce qu'il ajoute à `model_count_ratio` n'est PAS la clause de parité de l'appendice 25 :
+    # mesuré par mutation le 2026-09-09, `restant / départ <= 0,5` lui est ÉQUIVALENT sur un
+    # effectif en figurines — la parité ne peut jouer que là où `2 × restant == départ` est
+    # arithmétiquement impossible. Ce qu'il ajoute, c'est la BASCULE DE MESURE : à force de départ
+    # 1, l'appendice 25 compte les POINTS DE VIE, et un Warboss à 3 PV sur 6 doit tester alors
+    # qu'`alive_models` et `model_count_ratio` valent exactement ce qu'ils valaient intact. Le bit
+    # porte donc le prédicat ENTIER — union des deux mesures et clause de retest — au lieu d'un
+    # branchement que le réseau aurait à reconstruire sur `alive_models`.
+    "battle_shock_test_due",
     "present",             # masque d'entité (0 = slot vide / unité morte) — DERNIER, cf. ci-dessus
 )
 

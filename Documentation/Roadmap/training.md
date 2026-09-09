@@ -142,6 +142,64 @@ mêlée, 8 sur 11 ≥ 2 armes de tir ; mesuré en jeu, 5 épisodes gym du pool `
 
 ---
 
+## ✅ Obs — seuil et déclenchement du Battle-shock {#leadership-battle-shock}
+
+**Livré le 2026-09-09.** `obs_size` 18205 → **18269** : ré-entraînement `--new` obligatoire —
+déjà exigé par les lots du même jour.
+
+**Maillon À PART des précédents, et il faut le dire d'entrée : il ne comble AUCUN écart
+d'observation.** Les maillons du même jour tenaient tous sur la même preuve — deux états ne
+différant que par le fait manquant rendaient des observations identiques, écart 0.0. Ici la
+mesure dit l'inverse, et elle a été faite AVANT de coder.
+
+**Mesuré le 2026-09-09 :**
+
+- sur les **31 compositions d'escouade** de TOUS les rosters de `config/agents/` — agent,
+  adversaire (`_p2_rosters`) et benchmarks, variants de réserves compris, soit 26 signatures une
+  fois retirés les agrégats —, **aucune paire** ne partage sa signature observée — stats d'unité +
+  multiset des types `(role, hp_max, toughness, armor_save, invul_save)` — avec un Ld effectif
+  différent. Le Ld est donc une fonction exacte de ce qui était déjà émis, y compris en retirant
+  les agrégats `value_alive` / `hp_total` / `oc_total` qui le rendraient distinguable pour de
+  mauvaises raisons ;
+- sur **6 épisodes gym** (2 scénarios × 3 graines, actions masquées aléatoires), le Ld effectif
+  n'a varié dans **aucune des 66 escouades** suivies pas à pas : 19.02 fait tomber le personnage
+  attaché en dernier, donc le `min` sur les figurines vivantes est en pratique une constante de
+  composition ;
+- la règle, elle, n'est pas inerte : **11 jets de Battle-shock, 3 échecs**, Ld rencontrés 5 à 8
+  — soit 17 % à 58 % de probabilité d'échec selon la cible.
+
+**Ce que les deux champs achètent, alors :** la validité **hors corpus**. La table « profil → Ld »
+tient en 26 lignes et se mémorise ; elle se périme à la première faction ajoutée. Et le prédicat
+de 08.03 demande un branchement que `model_count_ratio` seul ne porte pas — à force de départ 1,
+l'appendice 25 mesure les **points de vie**.
+
+**Ce qui a été livré :**
+
+- `leadership` (`UNIT_CONT_FIELDS`, 1 × 32 entités = +32) : le Ld le plus BAS des figurines
+  vivantes, lu par `unit_effective_leadership` — l'oracle qu'appelle `roll_battle_shock`, jamais
+  un `min` recopié sur les figurines déjà chargées ;
+- `battle_shock_test_due` (`UNIT_BIN_FIELDS`, 1 bit × 32 entités = +32) : le prédicat EXACT de
+  `command_step_battle_shock`, `battle_shocked` **OU** `is_unit_at_or_below_half_strength`. Le
+  premier terme n'est pas redondant avec le statut `battle_shock` — il porte la clause de retest
+  de 08.03, une unité choquée pouvant cesser de l'être ;
+- **ce que le bit ajoute n'est PAS la clause de parité de l'appendice 25** : mesuré par mutation,
+  `restant / départ <= 0,5` lui est équivalent sur un effectif en figurines, la parité ne pouvant
+  jouer que là où `2 × restant == départ` est arithmétiquement impossible. C'est la bascule de
+  mesure mono-figurine qui les sépare, et c'est ce cas-là que le test verrouille ;
+- une fixture de test corrigée (`test_model_value_per_figurine.py`) : elle construisait des unités
+  sans `LD`, ce que l'observation ne tolère plus — la caractéristique est obligatoire sur toute
+  datasheet, et `unit_effective_leadership` refuse de l'inventer ;
+- carte des index d'`observation_et_actions.md` mise à jour, dont l'en-tête du bloc de drapeaux qui
+  annonçait 37 pour 38 index réels.
+
+**Ce qui n'est PAS prouvé :** que la politique joue mieux. Sur les rosters actuels, la mesure dit
+même l'inverse — l'information y était déjà dérivable. Le gain attendu est la robustesse à un
+roster jamais vu, et il ne se mesurera que le jour où l'entraînement quittera ces deux armées.
+Décision prise par l'utilisateur au moment de la livraison, contre la recommandation de ne rien
+ajouter.
+
+---
+
 ## ✅ Obs — couples arme→cible du tir fractionné {#couples-arme-cible-split-fire}
 
 **Livré le 2026-09-09.** `obs_size` 17916 → **18204** : ré-entraînement `--new` obligatoire —

@@ -1528,6 +1528,30 @@ class ObservationBuilder:
         from engine.game_state import effective_invul_save
 
         _c("invul_save", effective_invul_save(game_state, unit, require_key(unit, "INVUL_SAVE")))
+        # Seuil de commandement (01.06) et déclenchement du test (08.03) — les DEUX oracles du
+        # moteur, jamais un `min` ni un seuil d'effectif recopiés : `unit_effective_leadership` est
+        # la fonction qu'appelle `roll_battle_shock`, `is_unit_at_or_below_half_strength` celle que
+        # lit `command_step_battle_shock`.
+        #
+        # `is_unit_at_or_below_half_strength` ne peut pas lever ici : `alive_mids` est garanti non
+        # vide plus haut et `model_count_at_start` y est déjà exigé. `unit_effective_leadership`, si
+        # — une figurine vivante sans `LD` la fait lever, et c'est VOULU : `build_model_specs` ne
+        # pose la clé que si la datasheet la porte, et un seuil de commandement inventé ferait rater
+        # ou réussir un jet en silence (T1). Les trois chemins de construction d'unité la portent
+        # tous ; ce qui change ici, c'est que le consommateur n'est plus le seul jet 08.03 du joueur
+        # actif mais les 32 entités de CHAQUE observation — une fixture de test qui l'omettait a dû
+        # être corrigée pour cette raison.
+        from engine.phase_handlers.shared_utils import (
+            is_unit_at_or_below_half_strength,
+            unit_effective_leadership,
+        )
+
+        _c("leadership", unit_effective_leadership(str(squad_id), game_state))
+        _b(
+            "battle_shock_test_due",
+            bool(require_key(unit, "battle_shocked"))
+            or is_unit_at_or_below_half_strength(str(squad_id), game_state),
+        )
         # Distance PARCOURUE ce tour, en subhex GÉODÉSIQUES (le coût réel du chemin, pas l'écart
         # départ↔arrivée). Le max porte la clause 3 de [HEAVY] 24.16, la somme dit si toute
         # l'escouade a bougé ou une seule figurine.

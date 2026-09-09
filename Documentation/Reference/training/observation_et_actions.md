@@ -24,7 +24,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 | Clé | Forme | Contenu |
 |---|---|---|
 | `global_cont` / `global_bin` | (23,) / (95,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs**, **OC live et statut secured (14.02/14.03) par objectif** ; mon tour, **si j'ouvre le battle round (`i_play_first`)**, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur, clause du +1 Wound d'Oath ouverte — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `hidden`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
-| `allies_cont` / `allies_bin` | (12, 21) / (12, 38) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent les **mots-clés de catégorie** (`kw_infantry`, `kw_vehicle`, `kw_monster`, `kw_fly`, `kw_psyker`), portés par TOUTE entité, et — pour les ennemis seulement — `los_can_see`, `cover_vs_observer`, `charge_reachable_max_roll` et les dix `split_assigned_w<i>` |
+| `allies_cont` / `allies_bin` | (12, 22) / (12, 39) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent les **mots-clés de catégorie** (`kw_infantry`, `kw_vehicle`, `kw_monster`, `kw_fly`, `kw_psyker`), portés par TOUTE entité, et — pour les ennemis seulement — `los_can_see`, `cover_vs_observer`, `charge_reachable_max_roll` et les dix `split_assigned_w<i>` |
 | `allies_ability_ids` / `allies_status_ids` | (12, 8) / (12, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../../../config/unit_rules.json) et [`config/unit_statuses.json`](../../../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
 | `allies_wpn_cont` / `_bin` / `_rule_ids` | (12, 20, 13) / (12, 20, 2) / (12, 20, 6) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants, params de règles, et les règles booléennes en **ids** (3ᵉ `EmbeddingBag`, cf. `*_wpn_rule_ids`) |
 | `allies_types_cont` / `_bin` | (12, 6, 5) / (12, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
@@ -39,15 +39,15 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (18 205 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (18 269 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (23,)                =      23               │
 │    global_bin             (95,)                =      95               │
 │                                                                        │
 │  MES ESCOUADES — ordre = slots d'activation       K_ALLY_SLOTS = 12    │
-│    allies_cont            (12, 21)             =     252               │
-│    allies_bin             (12, 38)             =     456               │
+│    allies_cont            (12, 22)             =     264               │
+│    allies_bin             (12, 39)             =     468               │
 │    allies_ability_ids     (12, 8)              =      96               │
 │    allies_status_ids      (12, 4)              =      48               │
 │    allies_wpn_cont        (12, 20, 13)         =   3 120               │
@@ -57,8 +57,8 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    allies_types_bin       (12, 6, 5)           =     360               │
 │                                                                        │
 │  ESCOUADES ENNEMIES — ordre = slots d'action     K_ENEMY_SLOTS = 20    │
-│    enemies_cont           (20, 21)             =     420               │
-│    enemies_bin            (20, 38)             =     760               │
+│    enemies_cont           (20, 22)             =     440               │
+│    enemies_bin            (20, 39)             =     780               │
 │    enemies_ability_ids    (20, 8)              =     160               │
 │    enemies_status_ids     (20, 4)              =      80               │
 │    enemies_wpn_cont       (20, 20, 13)         =   5 200               │
@@ -80,12 +80,12 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_cont       (8, 8)               =      64               │
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      18 205              │
+│  TOTAL vectoriel (= obs_size)                      18 269              │
 │  + grid  (12, 32, 32) = 12 288, fournie À PART (non comptée)           │
 └────────────────────────────────────────────────────────────────────────┘
 
-Coût d'UNE entité = 21 + 38 (unité) + 8 + 4 (capacités/statuts) + 20 × (13 + 2 + 6) (armes)
-   + 6 × (5 + 5) (types) = 551
+Coût d'UNE entité = 22 + 39 (unité) + 8 + 4 (capacités/statuts) + 20 × (13 + 2 + 6) (armes)
+   + 6 × (5 + 5) (types) = 553
    → le bloc ARMES fait 76 % du vecteur. C'est le seul bloc mémoïsé.
 ```
 
@@ -263,7 +263,7 @@ deux phases où les ids d'action 4–8 signifient l'un « slot de déploiement �
 move » — le seul indice restant était indirect. Une phase hors des 6 **lève** ; il n'y a plus de
 `.get(…, 0.0)`.
 
-#### `allies_cont[s]` / `enemies_cont[s]` — une unite, 21 features  ·  EntityRunningNorm
+#### `allies_cont[s]` / `enemies_cont[s]` — une unite, 22 features  ·  EntityRunningNorm
 
 ```python
 [s][0]     = alive_models                           # brut (figurines vivantes)
@@ -301,9 +301,20 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
                                                     #   de Plunging Fire (22.05) — 1.0 = pile a la
                                                     #   hauteur qui declenche la regle, 0.0 = tout
                                                     #   le monde au sol. Emis pour TOUTE entite.
+[s][21]    = leadership                             # brut (Ld le plus BAS des figurines VIVANTES,
+                                                    #   01.06) — le seuil contre lequel 08.03 fait
+                                                    #   tester. Source unit_effective_leadership,
+                                                    #   l'oracle qu'appelle le jet : une escouade
+                                                    #   menee par un character porte SON Ld et le
+                                                    #   reperd a sa mort (19.04). Emis pour TOUTE
+                                                    #   entite. DERIVABLE des types observes sur
+                                                    #   les rosters actuels (31 compositions, 0
+                                                    #   collision, mesure du 2026-09-09) : ce champ
+                                                    #   achete la validite sur un roster jamais vu,
+                                                    #   pas un ecart d'observation.
 ```
 
-#### `allies_bin[s]` / `enemies_bin[s]` — une unite, 37 drapeaux  ·  jamais normalise
+#### `allies_bin[s]` / `enemies_bin[s]` — une unite, 39 drapeaux  ·  jamais normalise
 
 ```python
 [s][0]     = is_ally                                # 0.0 / 1.0
@@ -386,7 +397,20 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
 [s][34]    = split_assigned_w7                      # idem, slot de profil RNG 7
 [s][35]    = split_assigned_w8                      # idem, slot de profil RNG 8
 [s][36]    = split_assigned_w9                      # idem, slot de profil RNG 9
-[s][37]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
+[s][37]    = battle_shock_test_due                  # 0.0 / 1.0 — l'unite fera un test de Battle-shock
+                                                    #   au prochain 08.03. Predicat EXACT du moteur :
+                                                    #   battle_shocked (clause de RETEST, une unite
+                                                    #   choquee peut cesser de l'etre) OU
+                                                    #   is_unit_at_or_below_half_strength. Emis pour
+                                                    #   TOUTE entite. Ce qu'il ajoute a
+                                                    #   model_count_ratio n'est PAS la parite de
+                                                    #   l'appendice 25 (equivalente au seuil naif sur
+                                                    #   des entiers, mesure par mutation) mais la
+                                                    #   BASCULE DE MESURE : a force de depart 1, 25
+                                                    #   compte les POINTS DE VIE, et un Warboss a 3 PV
+                                                    #   sur 6 doit tester alors qu'alive_models vaut
+                                                    #   ce qu'il valait intact.
+[s][38]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
 ```
 
 #### `*_ability_ids[s]` / `*_status_ids[s]` — ENSEMBLES D'IDENTIFIANTS  ·  jamais normalise
@@ -826,6 +850,20 @@ Retrain `--new` de toute façon acquis — aucun `.zip` de `ai/models/Armageddon
 recharge avec le code courant (`best_model.zip` : `decision_encoder` [64, 9] contre [64, 11] ;
 grille (9, 32, 32) contre (12, 32, 32) attendue) — donc le bit prend sa place LOGIQUE en tête de
 `global_bin` au lieu de consommer un `reserved_mission_bin_*`, qui restent tous les 48 pour J4).
+→ **18269** (seuil et déclenchement du Battle-shock, 2026-09-09 : `leadership` dans
+`UNIT_CONT_FIELDS` et `battle_shock_test_due` dans `UNIT_BIN_FIELDS`, 1 × 32 entités chacun +64.
+Maillon À PART dans cette liste : il ne comble AUCUN écart d'observation. Mesuré avant de le poser
+— sur les 31 compositions d'escouade de TOUS les rosters de `config/agents/` (agent, adversaire,
+benchmarks ; 26 signatures hors agrégats de points/PV/OC), aucune paire ne partage sa signature
+observée (stats d'unité + multiset des types) avec un Ld effectif différent, et le Ld effectif n'a
+varié dans aucune des 66 escouades suivies sur 6 épisodes gym (1,8 jet de Battle-shock
+par épisode, Ld rencontrés 5 à 8, soit 17 % à 58 % d'échec). Ce que les deux champs achètent est la
+VALIDITÉ HORS CORPUS : la table « profil → Ld » que le réseau peut mémoriser en 26 lignes se périme
+à la première faction ajoutée, et le prédicat de 08.03 exige un branchement sur `alive_models` que
+`model_count_ratio` seul ne porte pas — à force de départ 1, l'appendice 25 mesure les PV. La
+clause de parité de 25, elle, n'y est pour rien : mesuré par mutation, `restant / départ <= 0,5`
+lui est équivalent sur un effectif en figurines. Au passage, l'en-tête du bloc de drapeaux
+annonçait 37 pour 38 index réels ; il est rétabli à 39).
 
 **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
 Depuis le chantier 01, une capacité, un statut ou une faction entière n'est qu'un `obs_id` de

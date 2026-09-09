@@ -16,7 +16,7 @@
 >
 > | | Valeur en vigueur | Source de vérité (à relire, jamais à recopier) |
 > |---|---|---|
-> | `obs_size` | **18 205** (2026-09-09 — siège de l'observateur : `i_play_first` dans `GLOBAL_BIN_FIELDS` +1, le drapeau qui dit si l'adversaire rejoue APRÈS moi dans ce battle round) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) — **aucune config ne le déclare**. Lignée complète : [observation_et_actions.md#historique-de-obs_size](observation_et_actions.md#historique-de-obs_size), domicile unique. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
+> | `obs_size` | **18 269** (2026-09-09 — seuil et déclenchement du Battle-shock : `leadership` et `battle_shock_test_due` par entité, +64, sur les 18 205 du siège de l'observateur) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) — **aucune config ne le déclare**. Lignée complète : [observation_et_actions.md#historique-de-obs_size](observation_et_actions.md#historique-de-obs_size), domicile unique. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
 > | espace d'action | **1 389** (1 024 cellules grille + 1 wait + 20 tir + 20 charge mono-cible + 190 charge multi-cibles + 20 mêlée + 1 fight sans cible + 20 tir indirect + 15 zone intents + 6 `CHOICE_i` + 20 Oath + 12 activation + 10 arme mêlée + 20 cohérence + 10 sélection arme tir + 9 slots passe 2 chantier 06) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`) |
 >
 > - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque

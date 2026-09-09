@@ -50,6 +50,12 @@ def _unit(uid: int, value: int, hp_max: int, models: List[Dict[str, Any]] | None
         # convention déjà portée par la config d'entrée de `test_state_manager.py`.
         "UNIT_KEYWORDS": [],
         "OC": 1,
+        # Ld : caracteristique de datasheet OBLIGATOIRE, exactement comme `UNIT_KEYWORDS`
+        # ci-dessus. L'observation la lit pour chaque entite (`leadership` dans
+        # `UNIT_CONT_FIELDS`, seuil de 01.06/08.03) via `unit_effective_leadership`, qui refuse
+        # une figurine sans Ld : une escouade qui n'en declare aucun ne peut pas faire de jet de
+        # commandement, et l'inventer serait un seuil faux servi en silence.
+        "LD": 6,
         "T": 4,
         "ARMOR_SAVE": 3,
         "INVUL_SAVE": 7,
