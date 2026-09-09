@@ -25,10 +25,14 @@ familles ne valent pas la meme chose, et le message d'arret ne doit pas les conf
 
 - TABLE DE RECOMPENSE — 7 commits sur 90 jours retirent au moins une cle d'un
   `config/agents/*/*_rewards_config.json`. Personne d'autre ne regarde les recompenses : ni SB3,
-  ni le verrou de parite. C'est la que ce fichier est SEUL, et c'est sa justification ;
-- OBSERVATION / ACTIONS — 13 commits sur 30 jours touchent une entree de registre, mais 12
-  changent la DIMENSION, donc `check_for_correct_spaces` les attrape deja au chargement. L'apport
-  n'y est pas la detection : c'est de s'arreter AVANT d'engager le run, et de couvrir le
+  ni le verrou de parite. Ce fichier est SEUL ;
+- VOCABULAIRES D'IDS (`*_IDS`) — 21 commits sur 90 jours. `SQUAD_OBS_SIZE_TARGET` ne les compte
+  pas (6 des 17 registres empreintes n'entrent pas dans son calcul, verifie le 2026-09-09) :
+  « le vocabulaire s'allonge pour zero scalaire » (observation_builder.py:135). Une insertion y
+  decale le sens de tous les ids suivants a dimension CONSTANTE. Ce fichier est SEUL, la aussi ;
+- CHAMPS D'OBSERVATION / ACTIONS — 13 commits sur 30 jours touchent une entree de registre, mais
+  12 changent la DIMENSION, donc `check_for_correct_spaces` les attrape deja au chargement.
+  L'apport n'y est pas la detection : c'est de s'arreter AVANT d'engager le run, et de couvrir le
   renommage a taille constante — reel, mais rare (aucun cas sur ces 30 jours).
 
 CE QUI EST COMPARE, ET CE QUI NE L'EST PAS
@@ -240,6 +244,39 @@ def contract_missing(model_path: str, agent_key: str) -> ValueError:
 #: meme pas vu. Y prometre une detection unique serait faux douze fois sur treize.
 FAMILLES_INVISIBLES_AILLEURS = ("reward_keys",)
 
+#: Suffixe des registres de VOCABULAIRE : `UNIT_RULE_EFFECT_IDS`, `OBS_PHASE_IDS`,
+#: `AGENT_DECISION_TYPE_IDS`, `DECISION_GRANTABLE_EFFECT_IDS`.
+#:
+#: Ces registres-la ne portent pas des CASES de l'observation, mais le sens des VALEURS qu'elle
+#: transporte : l'indice d'une entree y est l'`obs_id` emis. « Le vocabulaire s'allonge pour zero
+#: scalaire » — engine/observation_builder.py:135, verbatim. `SQUAD_OBS_SIZE_TARGET` ne les compte
+#: donc pas (verifie le 2026-09-09 : 6 des 17 registres empreintes n'entrent pas dans son calcul),
+#: et une INSERTION ou un REORDONNANCEMENT y decale le sens de tous les ids suivants sans changer
+#: la moindre dimension. `check_for_correct_spaces` ne peut rien y voir, le verrou de parite non
+#: plus : ce contrat est seul, exactement comme sur la table de recompense.
+#:
+#: FREQUENCE mesuree : 21 commits sur 90 jours touchent un de ces registres.
+#:
+#: Limite assumee : un ajout en FIN de vocabulaire ne decale aucun id existant et serait donc
+#: inoffensif pour un modele deja entraine — la comparaison de listes ordonnees le signale quand
+#: meme. Distinguer les deux demanderait de savoir si le prefixe commun est intact ; le cout d'un
+#: arret de trop est une commande, celui d'un arret manquant des dizaines d'heures.
+SUFFIXE_VOCABULAIRE = "_IDS"
+
+
+def _est_invisible_ailleurs(ecart: str) -> bool:
+    """Cet ecart-ci echappe-t-il a TOUS les autres controles du depot ?
+
+    Deux cas, mesures : la table de recompense (que personne d'autre ne regarde) et les registres
+    de vocabulaire (dont la taille ne bouge jamais, cf. `SUFFIXE_VOCABULAIRE`).
+    """
+    if ecart.startswith(FAMILLES_INVISIBLES_AILLEURS):
+        return True
+    if not ecart.startswith("observation."):
+        return False
+    registre = ecart.split(" ", 1)[0].split(".", 1)[1]
+    return registre.endswith(SUFFIXE_VOCABULAIRE)
+
 
 def _pourquoi_l_arret_vaut(ecarts: List[str]) -> str:
     """Ce que cet ecart-CI doit a ce garde-fou — pas une generalite sur tous les ecarts.
@@ -247,15 +284,21 @@ def _pourquoi_l_arret_vaut(ecarts: List[str]) -> str:
     Un motif d'arret qui sonne faux est un motif qu'on apprend a ignorer, puis a contourner. La
     phrase est donc construite sur les familles REELLEMENT presentes.
     """
-    invisibles = [e for e in ecarts if e.startswith(FAMILLES_INVISIBLES_AILLEURS)]
+    invisibles = [e for e in ecarts if _est_invisible_ailleurs(e)]
     autres = [e for e in ecarts if e not in invisibles]
     phrases = []
     if invisibles:
+        quoi = (
+            "la table de recompense ou un vocabulaire d'ids"
+            if any(e.startswith("observation.") for e in invisibles)
+            else "la table de recompense"
+        )
         phrases.append(
-            "L'ecart sur la table de recompense n'est vu par AUCUN autre controle : ni "
-            "Stable-Baselines3, qui ne compare que les espaces d'observation et d'action, ni le "
-            "verrou de parite de pool. Sans cet arret, le run apprendrait sous une table dont une "
-            "entree a disparu, et rien ne le dirait."
+            f"L'ecart sur {quoi} n'est vu par AUCUN autre controle : ni Stable-Baselines3, qui ne "
+            "compare que les DIMENSIONS des espaces, ni le verrou de parite de pool. Un "
+            "vocabulaire s'allonge pour zero scalaire, et une table de recompense n'entre dans "
+            "aucun espace : sans cet arret, le run apprendrait sur des grandeurs qui ont change "
+            "de sens, et rien ne le dirait."
         )
     if autres:
         phrases.append(
