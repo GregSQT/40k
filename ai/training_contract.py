@@ -154,12 +154,90 @@ def write_contract(model_path: str, contrat: Mapping[str, Any]) -> str:
     return chemin
 
 
+#: Les sections d'un contrat de FORMAT COURANT, et le type que chacune doit avoir.
+#:
+#: `build_contract` les ecrit toutes, sans condition : un contrat enregistre auquel il en manque
+#: une n'est pas un contrat « different », c'est un fichier abime.
+SECTIONS_ATTENDUES: Dict[str, type] = {
+    "observation_fields": dict,
+    "grid_channels": list,
+    "action_families": list,
+    "reward_keys": list,
+}
+
+
+def _exige_version(contrat: Mapping[str, Any], origine: str) -> int:
+    """La version de format d'un contrat, jamais devinee.
+
+    Sans version, la suite ne sait pas si les sections sont comparables : le fichier est abime,
+    pas d'un autre format.
+
+    Le TYPE compte autant que la presence. Un `"1"` textuel n'egale aucun entier : il ferait
+    sauter le controle des sections ici, puis sortir plus loin « version de contrat 1 != 1 » —
+    un message qui se contredit lui-meme et qui masque la section reellement manquante.
+    """
+    if "version" not in contrat:
+        raise ValueError(f"Contrat d'entrainement illisible ({origine}) : cle `version` absente.")
+    version = contrat["version"]
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise ValueError(
+            f"Contrat d'entrainement illisible ({origine}) : version de type "
+            f"{type(version).__name__}, int attendu ({version!r})."
+        )
+    return version
+
+
+def _exige_sections(contrat: Mapping[str, Any], origine: str) -> None:
+    """Refuse un contrat de format courant dont une section manque ou n'a pas le type attendu.
+
+    Lire une section absente comme vide produirait une comparaison qui ne leve pas et un diff
+    FAUX : tous les registres du code seraient annonces « nouveaux » alors que c'est le fichier
+    qui est tronque. Qui lit ce message comprend « le contrat a change » et repart en `--new`,
+    jetant un modele que rien n'obligeait a reentrainer.
+
+    Une section PRESENTE mais VIDE produit exactement le meme faux diff, et `build_contract` ne
+    peut pas en ecrire une : les trois premieres sont lues du code (introspection des registres,
+    canaux de grille, familles d'actions) et la quatrieme d'une table de recompense dont
+    `RewardCalculator` exige deja la section `base_actions` (reward_calculator.py:826). Vide,
+    c'est donc un fichier abime, jamais un etat metier.
+    """
+    for section, attendu in SECTIONS_ATTENDUES.items():
+        if section not in contrat:
+            raise ValueError(
+                f"Contrat d'entrainement illisible ({origine}) : section `{section}` absente."
+            )
+        valeur = contrat[section]
+        if not isinstance(valeur, attendu):
+            raise ValueError(
+                f"Contrat d'entrainement illisible ({origine}) : section `{section}` de type "
+                f"{type(valeur).__name__}, {attendu.__name__} attendu."
+            )
+        if not valeur:
+            raise ValueError(
+                f"Contrat d'entrainement illisible ({origine}) : section `{section}` vide."
+            )
+    for registre, noms in contrat["observation_fields"].items():
+        if not isinstance(noms, list):
+            raise ValueError(
+                f"Contrat d'entrainement illisible ({origine}) : registre d'observation "
+                f"`{registre}` de type {type(noms).__name__}, list attendu."
+            )
+        if not noms:
+            raise ValueError(
+                f"Contrat d'entrainement illisible ({origine}) : registre d'observation "
+                f"`{registre}` vide — `_registres_nommes` n'en ecrit jamais."
+            )
+
+
 def read_contract(model_path: str) -> Optional[Dict[str, Any]]:
     """Le contrat enregistre, ou `None` s'il n'y en a pas.
 
     Un fichier PRESENT mais illisible n'est pas rendu comme absent : il leve. Les deux situations
     appellent des reponses opposees — initialiser d'un cote, reparer de l'autre — et les confondre
     ferait ecraser en silence un contrat corrompu.
+
+    « Illisible » couvre la FORME autant que la syntaxe : un objet JSON valide auquel il manque
+    une section du format courant ne se compare pas, il se repare (cf. `_exige_sections`).
     """
     chemin = contract_path(model_path)
     if not os.path.exists(chemin):
@@ -168,6 +246,8 @@ def read_contract(model_path: str) -> Optional[Dict[str, Any]]:
         contenu = json.load(flux)
     if not isinstance(contenu, dict):
         raise ValueError(f"Contrat d'entrainement illisible ({chemin}) : un objet JSON est attendu.")
+    if _exige_version(contenu, chemin) == CONTRACT_VERSION:
+        _exige_sections(contenu, chemin)
     return contenu
 
 
@@ -188,18 +268,25 @@ def _compare_listes(nom: str, ancienne: List[str], courante: List[str]) -> List[
 
 
 def diff_contracts(ancien: Mapping[str, Any], courant: Mapping[str, Any]) -> List[str]:
-    """Les divergences entre le contrat du modele et celui du code, une phrase chacune."""
+    """Les divergences entre le contrat du modele et celui du code, une phrase chacune.
+
+    Une divergence est un CONTENU qui a bouge. Un contrat abime, lui, n'est pas une divergence :
+    il leve (`_exige_version`, `_exige_sections`), parce qu'il ne dit rien de ce que le modele a
+    appris et que le confondre avec un ecart enverrait reentrainer pour rien.
+    """
     ecarts: List[str] = []
-    if ancien.get("version") != courant.get("version"):
+    version_ancienne = _exige_version(ancien, "contrat du modele")
+    version_courante = _exige_version(courant, "contrat du code")
+    if version_ancienne != version_courante:
         return [
-            f"version de contrat {ancien.get('version')} != {courant.get('version')} : le format "
+            f"version de contrat {version_ancienne} != {version_courante} : le format "
             "a change, le contenu n'est pas comparable."
         ]
+    _exige_sections(ancien, "contrat du modele")
+    _exige_sections(courant, "contrat du code")
 
-    anciens_champs = ancien.get("observation_fields", {})
-    courants_champs = courant.get("observation_fields", {})
-    if not isinstance(anciens_champs, dict):
-        return [f"observation_fields illisible dans le contrat enregistre ({type(anciens_champs)})"]
+    anciens_champs = ancien["observation_fields"]
+    courants_champs = courant["observation_fields"]
     for registre in sorted(set(anciens_champs) | set(courants_champs)):
         if registre not in anciens_champs:
             ecarts.append(f"observation : nouveau registre `{registre}`")
@@ -212,7 +299,7 @@ def diff_contracts(ancien: Mapping[str, Any], courant: Mapping[str, Any]) -> Lis
         )
 
     for cle in ("grid_channels", "action_families", "reward_keys"):
-        ecarts.extend(_compare_listes(cle, list(ancien.get(cle, [])), list(courant.get(cle, []))))
+        ecarts.extend(_compare_listes(cle, ancien[cle], courant[cle]))
     return ecarts
 
 
