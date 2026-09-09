@@ -32,7 +32,12 @@ import numpy as np
 import pytest
 
 from engine.observation_builder import ObservationBuilder
-from engine.observation_entities import unit_bin_index
+from engine.observation_entities import (
+    K_WEAPONS_RANGED,
+    UNIT_BIN_FIELDS,
+    split_assigned_field,
+    unit_bin_index,
+)
 from engine.observation_weapon_profiles import profile_bin_index
 from engine.w40k_core import W40KEngine
 from tests.unit.engine._config_helpers import build_engine_config
@@ -335,4 +340,126 @@ def test_armed_weapon_slot_without_profile_raises():
     eng.game_state[PENDING_SHOOT_WEAPON_SEL_KEY]["pending_weapon_slot"] = 9
 
     with pytest.raises(RuntimeError, match="ne porte aucun profil"):
+        eng.obs_builder.build_squad_observation(eng.game_state, "1")
+
+
+# ── Volet tir, 2e temps : les couples arme→cible DÉJÀ commités ────────────────
+#
+# Le volet ci-dessus ne couvrait que la PREMIÈRE arme du split-fire, quand `assignments` est
+# encore vide. Trou mesuré le 2026-09-09 une fois un premier couple commité : deux états ne
+# différant que par la cible déjà assignée rendaient des observations identiques (0 clé sur 28),
+# et aux DEUX sous-états. 04.02 demande toutes les cibles avant la moindre résolution et 04.03
+# cumule les dés des armes faisant des attaques identiques sur une même cible : l'agent choisit
+# donc son 2e couple sans voir ce que le 1er a déjà engagé.
+
+
+def _assign_target(engine: W40KEngine, target_id: str) -> None:
+    """Joue le VRAI `squad_shoot_split_target` : le couple arme→cible est commité."""
+    slot = _enemy_slot_of(engine, "1", target_id)
+    ok, result = engine._process_squad_action(
+        {"action": "squad_shoot_split_target", "squad_id": "1", "target_slot": slot}
+    )
+    assert ok is True, f"squad_shoot_split_target refusé : {result!r}"
+    assert result.get("waiting_for_next_weapon_sel") is True, (
+        f"le split-fire ne rend pas la main pour l'arme suivante : {result!r}"
+    )
+
+
+def _bits_of(obs: Dict[str, np.ndarray], slot: int) -> List[int]:
+    """Slots d'armes marqués `split_assigned_w<i>` sur la ligne ennemie `slot`."""
+    return [
+        widx for widx in range(ObservationBuilder.K_WEAPONS_RANGED)
+        if float(obs["enemies_bin"][slot][unit_bin_index(split_assigned_field(widx))]) == 1.0
+    ]
+
+
+def test_split_assigned_bits_cover_every_ranged_slot():
+    """Clôture de la liste : un bit par slot de profil de tir, ni plus ni moins.
+
+    Les noms sont littéraux dans `UNIT_BIN_FIELDS` (la cardinalité est définie plus bas dans ce
+    module-là). Sans ce verrou, changer `K_WEAPONS_RANGED` laisserait des slots d'armes sans bit
+    — donc des assignations muettes — sans qu'aucun test ne tombe.
+    """
+    declared = [f for f in UNIT_BIN_FIELDS if f.startswith("split_assigned_w")]
+    assert declared == [split_assigned_field(i) for i in range(K_WEAPONS_RANGED)]
+    assert UNIT_BIN_FIELDS[-1] == "present", "le masque d'entité doit rester le DERNIER champ"
+
+
+def test_assigned_weapon_lands_on_its_target_row_only():
+    """Le bit du slot d'arme assigné tombe sur la ligne de SA cible, et sur elle seule."""
+    for weapon_slot in (0, 1):
+        for target_id in ("2", "3"):
+            eng = _split_fire_engine()
+            _arm_shoot_weapon(eng, weapon_slot)
+            _assign_target(eng, target_id)
+            obs = _obs_copy(eng)
+
+            marked = {
+                slot: _bits_of(obs, slot)
+                for slot in range(ObservationBuilder.K_ENEMY_SLOTS)
+                if _bits_of(obs, slot)
+            }
+            assert marked == {_enemy_slot_of(eng, "1", target_id): [weapon_slot]}, (
+                f"arme {weapon_slot} -> cible {target_id} : marquage {marked}"
+            )
+
+
+def test_the_second_choice_no_longer_sees_the_same_observation():
+    """LE défaut mesuré : après un 1er couple commité, la cible déjà prise était invisible.
+
+    Contre-épreuve aux DEUX sous-états — celui qui demande l'arme suivante ET celui qui demande
+    sa cible. Sans les bits, les deux passes rendent des tenseurs identiques clé par clé.
+    """
+    obs_weapon_stop: Dict[str, Dict[str, np.ndarray]] = {}
+    obs_target_stop: Dict[str, Dict[str, np.ndarray]] = {}
+    for first_target in ("2", "3"):
+        eng = _split_fire_engine()
+        _arm_shoot_weapon(eng, 0)
+        _assign_target(eng, first_target)
+        obs_weapon_stop[first_target] = _obs_copy(eng)   # sous-état ARME
+        _arm_shoot_weapon(eng, 1)
+        obs_target_stop[first_target] = _obs_copy(eng)   # sous-état CIBLE
+
+    for label, obs_by_target in (("ARME", obs_weapon_stop), ("CIBLE", obs_target_stop)):
+        differing = [
+            key for key in obs_by_target["2"]
+            if not np.array_equal(obs_by_target["2"][key], obs_by_target["3"][key])
+        ]
+        assert differing == ["enemies_bin"], (
+            f"sous-état {label} : clés distinguant les deux cibles déjà assignées {differing} "
+            f"(attendu : enemies_bin seule)"
+        )
+
+
+def test_no_enemy_carries_a_split_bit_outside_split_fire():
+    """Hors split-fire, aucune entité ne porte ces bits — ce qui les rend auto-porteurs."""
+    eng = _split_fire_engine()
+    obs = _obs_copy(eng)
+    for widx in range(ObservationBuilder.K_WEAPONS_RANGED):
+        idx = unit_bin_index(split_assigned_field(widx))
+        assert not obs["enemies_bin"][:, idx].any(), f"slot {widx} marqué hors split-fire"
+        assert not obs["allies_bin"][:, idx].any(), f"slot {widx} marqué sur une alliée"
+
+
+def test_split_bits_are_absent_from_another_squad_observation():
+    """L'observation d'une AUTRE escouade ne désigne personne : le split-fire n'est pas le sien."""
+    eng = _split_fire_engine()
+    _arm_shoot_weapon(eng, 0)
+    _assign_target(eng, "2")
+    obs = eng.obs_builder.build_squad_observation(eng.game_state, "3")
+    for widx in range(ObservationBuilder.K_WEAPONS_RANGED):
+        idx = unit_bin_index(split_assigned_field(widx))
+        assert not obs["enemies_bin"][:, idx].any(), f"slot {widx} marqué chez une autre escouade"
+
+
+def test_assigned_weapon_slot_out_of_range_raises():
+    """Slot assigné hors du bloc d'armes -> erreur explicite, jamais un bit posé ailleurs."""
+    from engine.action_decoder import PENDING_SHOOT_WEAPON_SEL_KEY
+
+    eng = _split_fire_engine()
+    code = _arm_shoot_weapon(eng, 0)
+    _assign_target(eng, "2")
+    eng.game_state[PENDING_SHOOT_WEAPON_SEL_KEY]["assignments"][code]["weapon_slot"] = 10
+
+    with pytest.raises(RuntimeError, match="hors des .* slots de profils de tir"):
         eng.obs_builder.build_squad_observation(eng.game_state, "1")

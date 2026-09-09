@@ -111,11 +111,15 @@ PENDING_FIGHT_TARGET_KEY = "pending_fight_target_select"
 #: Clé du `game_state` portant l'état de split-fire en cours (P3-8). Valeur :
 #: `{"squad_id": str, "shooting_type": str, "pending_weapon": Optional[str],
 #:  "pending_weapon_slot": Optional[int],  # slot de profil de `pending_weapon` (obs + masque)
-#:  "assignments": Dict[str, str],      # weapon_code -> target_id
+#:  "assignments": Dict[str, Dict[str, Any]],  # weapon_code -> {target_id, weapon_slot}
 #:  "remaining_weapon_slots": Dict[int, str],  # slot_j -> weapon_code (non encore assignés)
 #:  "eligible_target_slots": List[int]}` # slots SHOOT ennemis éligibles pour pending_weapon.
 #: `pending_weapon` et `pending_weapon_slot` sont armés et désarmés ENSEMBLE : l'un nomme l'arme
 #: pour le commit, l'autre la désigne dans le bloc d'armes de l'observation (invariant D1).
+#: Chaque entrée d'`assignments` porte le MÊME couple, figé au moment du commit de la cible :
+#: `target_id` sert la résolution (04.03) et `weapon_slot` sert l'observation, qui pose
+#: `split_assigned_w<slot>` sur la ligne de la cible. Le slot y est RECOPIÉ depuis
+#: `pending_weapon_slot` et jamais re-dérivé du code — voir `squad_shoot_split_target`.
 #: Absente tant qu'aucun split-fire n'est en cours.
 PENDING_SHOOT_WEAPON_SEL_KEY = "pending_shoot_weapon_split"
 #: Clé du `game_state` portant le retrait pour cohérence (P3-0, 03.03). Valeur :
@@ -192,6 +196,22 @@ def read_pending_shoot_split_target(game_state: Dict[str, Any]) -> Any:
     """
     sw = game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
     return sw if sw is not None and sw.get("pending_weapon") is not None else None  # get allowed
+
+
+def read_pending_shoot_split_state(game_state: Dict[str, Any]) -> Any:
+    """Split-fire (P3-8) en cours, DANS L'UN OU L'AUTRE de ses deux sous-états.
+
+    PUBLIQUE, et volontairement indifférente à `pending_weapon` : l'observation pose les bits
+    `split_assigned_w<i>` à partir des couples arme→cible DÉJÀ commités, et ceux-là comptent
+    autant quand l'agent choisit l'arme suivante que quand il choisit sa cible. Mesuré le
+    2026-09-09 : sans eux, les deux sous-états rendaient une observation identique (0 clé sur
+    28) selon la cible déjà assignée.
+
+    Les deux lecteurs par sous-état (`_read_pending_shoot_weapon_sel`,
+    `read_pending_shoot_split_target`) restent la SOURCE UNIQUE du sous-état lui-même : celui-ci
+    ne dit rien de plus que « un split-fire est ouvert ».
+    """
+    return game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
 
 
 class PlayerChoiceMechanism(NamedTuple):

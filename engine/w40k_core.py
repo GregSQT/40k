@@ -8342,7 +8342,14 @@ class W40KEngine(gym.Env):
                 )
             _tsid2 = str(_tsid2)
 
-            _pending_sw2["assignments"][sw2_weapon_code] = _tsid2
+            # Le SLOT de l'arme accompagne sa cible. L'observation en a besoin pour poser
+            # `split_assigned_w<i>` sur la ligne de la cible, et il ne se re-dérive JAMAIS du
+            # code : c'est la règle déjà posée sur `pending_weapon_slot` ci-dessus, et deux
+            # dérivations du même slot divergeraient. Capturé AVANT le désarmement qui suit.
+            _pending_sw2["assignments"][sw2_weapon_code] = {
+                "target_id": _tsid2,
+                "weapon_slot": int(require_key(_pending_sw2, "pending_weapon_slot")),
+            }
             _pending_sw2["pending_weapon"] = None
             _pending_sw2["pending_weapon_slot"] = None
 
@@ -8364,7 +8371,8 @@ class W40KEngine(gym.Env):
                 # pour éviter qu'une déclaration précédente consomme le groupe d'arme
                 # d'une arme suivante (ex. bolt_pistol consomme le slot du même modèle).
                 _precheck: List[Tuple[str, str, int]] = []
-                for _wcode2, _tgt2 in _pending_sw2["assignments"].items():
+                for _wcode2, _assign2 in _pending_sw2["assignments"].items():
+                    _tgt2 = str(require_key(_assign2, "target_id"))
                     _maxq = squad_shoot_weapon_qty_max(
                         self.game_state, sw2_squad_id, _wcode2, _tgt2
                     )

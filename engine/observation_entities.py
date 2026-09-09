@@ -406,8 +406,62 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     # sol. 0 signifie « toute l'unité est en hauteur », ce qui la met hors d'atteinte du tir
     # plongeant.
     "has_ground_model",
+    # ⚠ Entités ENNEMIES et split-fire en cours uniquement (P3-8). Le bit `i` vaut 1 ssi l'arme
+    # du slot de profil RNG `i` est DÉJÀ assignée à cette escouade. C'est la transposée exacte
+    # de la table `assignments` : sur la ligne de la cible, quelles de mes armes la visent déjà.
+    #
+    # Rien d'autre ne le disait, MESURÉ le 2026-09-09 sur le chemin de production
+    # (`_process_squad_action` puis `_build_observation_and_mask`) : après un premier couple
+    # arme→cible commité, deux états ne différant que par CETTE cible produisaient des
+    # observations identiques — 0 clé sur 28 — et aux DEUX sous-états, celui qui demande l'arme
+    # suivante comme celui qui demande sa cible. Le masque ne le disait pas non plus : une cible
+    # déjà prise reste éligible pour l'arme suivante (`shoot_weapon_eligible_target_slots`).
+    #
+    # POURQUOI 10 BITS ET NON UN SEUL « déjà ciblée » : 04.03 « Gather Attack Dice » cumule les
+    # dés des armes faisant des IDENTICAL ATTACKS sur une même cible, donc la conséquence de
+    # règle dépend de QUELLE arme y est déjà, pas du seul fait qu'une y soit. Un bit unique
+    # suffirait à deux armes et perdrait l'appariement au-delà — or 57 % des escouades des
+    # scénarios joués portent >= 3 profils de tir distincts (mesuré le 2026-09-09 sur 69
+    # escouades, jusqu'à 6 profils). Le joueur humain, lui, voit toutes ses déclarations : 04.02
+    # les demande toutes AVANT la moindre résolution.
+    #
+    # POURQUOI SUR L'ENTITÉ et non dans un bloc dédié (10 x 20) : c'est la tête pointeur qui
+    # score les lignes ennemies pour choisir la cible. L'information est ainsi portée par la
+    # ligne même que la tête évalue, au lieu d'exiger une jointure avec un bloc séparé — et le
+    # schéma d'entité est déjà lu génériquement par `ai/spatial_extractor` (`_UNIT_FAMILIES`),
+    # donc aucun encodeur nouveau. Coût 10 x 32 = 320 scalaires.
+    #
+    # Le slot vient de `assignments[code]["weapon_slot"]`, RECOPIÉ du `pending_weapon_slot` du
+    # moteur : le re-dériver du code d'arme ici ferait diverger l'obs et le commit (invariant D1).
+    #
+    # ⚠️ Leur NOMBRE est verrouillé sur `K_WEAPONS_RANGED` par un test
+    # (`test_split_assigned_bits_cover_every_ranged_slot`), pas par ce commentaire : ces noms
+    # sont littéraux parce que `K_WEAPONS_RANGED` est défini plus bas dans ce module, et un
+    # littéral figé se périmerait en silence le jour où la cardinalité bouge.
+    "split_assigned_w0",
+    "split_assigned_w1",
+    "split_assigned_w2",
+    "split_assigned_w3",
+    "split_assigned_w4",
+    "split_assigned_w5",
+    "split_assigned_w6",
+    "split_assigned_w7",
+    "split_assigned_w8",
+    "split_assigned_w9",
     "present",             # masque d'entité (0 = slot vide / unité morte) — DERNIER, cf. ci-dessus
 )
+
+#: Nom du bit portant « l'arme du slot RNG `slot` est déjà assignée à cette escouade » (P3-8).
+#: SOURCE UNIQUE du nom, partagée par l'observation et ses tests : deux constructions du même
+#: nom écrites séparément divergeraient au premier renommage.
+def split_assigned_field(slot: int) -> str:
+    """Champ `split_assigned_w<slot>`. Slot hors des profils de tir -> IndexError explicite."""
+    if not 0 <= int(slot) < K_WEAPONS_RANGED:
+        raise IndexError(
+            f"split_assigned_field: slot {slot!r} hors des {K_WEAPONS_RANGED} slots "
+            f"de profils de tir"
+        )
+    return f"split_assigned_w{int(slot)}"
 
 UNIT_CONT_SIZE = len(UNIT_CONT_FIELDS)
 UNIT_BIN_SIZE = len(UNIT_BIN_FIELDS)
