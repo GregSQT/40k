@@ -57,6 +57,12 @@ Le pooling rend l'ordre indifférent au réseau, mais **pas au debug**. Les ids 
 
 Si une unité porte plus de capacités que de slots, le moteur **lève** (`observation_builder`), en nommant l'unité et les capacités en excès. Tronquer silencieusement ferait subir à l'agent des règles qu'il ne perçoit pas — exactement le trou que V11 §0.30 avait fermé.
 
+### Capacités 1×/partie : écrites tant qu'elles sont EN VIGUEUR
+
+Un `obs_id` décrit une capacité **en vigueur**, pas une capacité imprimée sur la datasheet : une capacité 1×/partie déjà épuisée disparaît des `ability_ids` de son escouade. Le registre est `ONCE_PER_BATTLE_SPENT_STATE_KEYS` (`engine/observation_entities.py`), qui associe à chaque effet la clé de `game_state` où le moteur inscrit les escouades l'ayant dépensé — `finest_hour_used` pour Finest Hour, `return_destroyed_models_used` pour Grot Orderly. Le builder ne nomme **aucune** règle : un effet 1×/partie ajouté au vocabulaire est filtré du seul fait d'être déclaré là. Avant le 2026-09-09 le filtre testait `once_per_battle_melee_buff` en dur, et l'`obs_id` de Grot Orderly restait donc écrit pour le reste de la partie après restitution.
+
+**Dépensée n'est pas éteinte.** Finest Hour consomme son usage à la première activation mais accorde `[DEVASTATING WOUNDS]` jusqu'à la **fin de cette phase de combat** : le prédicat du moteur (`shared_utils`, `attack_sequence`) lit deux ensembles, `finest_hour_used` **moins** `finest_hour_active_this_phase`. L'observation lit les mêmes deux ensembles, sous garde de phase — `finest_hour_active_this_phase` n'est purgé qu'à l'entrée de la fight phase suivante, et le moteur ne s'en aperçoit pas parce qu'il ne le lit qu'en combat, alors que l'observation est construite à chaque step. Verrous : `def test_once_per_battle_capability_disappears_once_spent` et `def test_once_per_battle_capability_stays_visible_while_still_in_effect` (`tests/unit/engine/test_squad_obs_unit_rules.py`).
+
 ## Registres des identifiants
 
 `config/unit_rules.json` est le registre des règles ; chaque règle observable y porte un champ `obs_id` : entier **stable et jamais réattribué** dans `[OBS_ID_MIN, OBS_ID_MAX]`. `0` est réservé au padding (un slot vide doit contribuer exactement zéro au pooling). `config/unit_statuses.json` suit la même convention pour les statuts — les trois statuts (`battle_shock`, `oath_target`, `suppressed`) y ont été **déclarés avant leurs chantiers respectifs** (02, 03, 06) : c'est ce qui garantit qu'aucun d'eux ne retouche `obs_size`.

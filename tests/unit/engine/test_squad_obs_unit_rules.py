@@ -36,6 +36,7 @@ Ce que ces tests verrouillent :
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import types
@@ -43,11 +44,13 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import numpy as np
+import pytest
 
 from ai.unit_registry import UnitRegistry
 from engine.observation_builder import ObservationBuilder
 from engine.observation_builder import unit_ability_obs_ids
 from engine.observation_entities import (
+    ONCE_PER_BATTLE_SPENT_STATE_KEYS,
     UNIT_ABILITY_SLOTS,
     UNIT_RULE_EFFECT_IDS,
     UNIT_STATUS_SLOTS,
@@ -865,4 +868,176 @@ def test_adding_an_observed_capability_costs_zero_scalar():
         f"({measured - frozen:+d} scalaires), donc impose un retrain `--new`. Le vocabulaire "
         "observe ne doit dimensionner AUCUN bloc : le registre positionnel des candidats de "
         "decision est `DECISION_GRANTABLE_EFFECT_IDS`."
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Capacites 1x/PARTIE : effacees de l'observation une fois DEPENSEES
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Trou ferme ici (constat verifie le 2026-09-09). `once_per_battle_melee_buff` etait efface par
+# une lecture de `finest_hour_used` ecrite EN DUR dans le contexte d'observation ; le seul autre
+# effet 1x/partie du vocabulaire, `return_destroyed_models` (Grot Orderly), ne l'etait par rien.
+# Son `obs_id` restait donc ecrit dans les `ability_ids` d'une escouade qui avait deja restitue
+# ses figurines, et l'agent percevait un avantage eteint pour le reste de la partie. Le filtre
+# lit desormais `ONCE_PER_BATTLE_SPENT_STATE_KEYS` et ne nomme plus aucune regle.
+
+#: Une escouade PORTEUSE par effet 1x/partie : la capacite arrive par le LEADER (19.04), seule
+#: source de ces deux effets dans les rosters. La cle d'etat est indexee sur l'ID D'ESCOUADE —
+#: c'est bien celui-la que le moteur y inscrit (`command_handlers` balaye `game_state["units"]`).
+_ONCE_PER_BATTLE_FIXTURES: Dict[str, Any] = {
+    "once_per_battle_melee_buff": (
+        "ADEPTUS ASTARTES",
+        [
+            {"id": 101, "unit_type": "Intercessor", "player": 2, "col": 12, "row": 10,
+             "models": [{"col": 12, "row": 10}, {"col": 13, "row": 10}]},
+            {"id": 102, "unit_type": "CaptainRelicShield", "player": 2,
+             "attached_squad": 101, "col": 15, "row": 10},
+            {"id": 1, "unit_type": "Intercessor", "player": 1, "col": 3, "row": 3},
+        ],
+    ),
+    "return_destroyed_models": (
+        "ORKS",
+        [
+            {"id": 101, "unit_type": "Boyz", "player": 2, "col": 12, "row": 10,
+             "models": [{"col": 12, "row": 10}, {"col": 13, "row": 10}]},
+            {"id": 102, "unit_type": "PainBoy", "player": 2,
+             "attached_squad": 101, "col": 15, "row": 10},
+            {"id": 1, "unit_type": "Boyz", "player": 1, "col": 3, "row": 3},
+        ],
+    ),
+}
+
+
+def _once_per_battle_scenario(faction: str, units: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """`attached_scenario`, mais la Faction d'Armee est celle du roster teste.
+
+    08.04 exige la faction DECLAREE et refuse de la deduire des unites : le couple PainBoy/Boyz
+    ne peut donc pas passer par la fixture ADEPTUS ASTARTES partagee.
+    """
+    scenario = attached_scenario(units)
+    scenario["army_faction"] = {"1": faction, "2": faction}
+    return scenario
+
+
+@pytest.mark.parametrize("rule_id", sorted(ONCE_PER_BATTLE_SPENT_STATE_KEYS))
+def test_once_per_battle_capability_disappears_once_spent(rule_id: str):
+    """Chaque effet 1x/partie du registre disparait des `ability_ids` quand il est depense.
+
+    ROUGE avant le fix pour `return_destroyed_models` : le filtre testait le nom
+    `once_per_battle_melee_buff` en dur, donc l'`obs_id` du Grot Orderly restait ecrit.
+    """
+    faction, units = _ONCE_PER_BATTLE_FIXTURES[rule_id]
+    eng = load_engine_from_scenario(_once_per_battle_scenario(faction, units), training_n_envs=1)
+
+    avant = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
+    assert rule_id in avant, (
+        f"VERT VACANT : l'escouade porteuse n'expose meme pas {rule_id!r} avant depense "
+        f"(vu : {sorted(avant)}) — la fixture ne met en scene aucune capacite a effacer"
+    )
+
+    # Ce que le moteur ecrit quand la capacite est CONSOMMEE, a la cle que le registre designe.
+    eng.game_state[ONCE_PER_BATTLE_SPENT_STATE_KEYS[rule_id].spent_key] = {"101"}
+
+    apres = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
+    assert rule_id not in apres, (
+        f"{rule_id!r} est 1x/partie et deja depense, mais reste ecrit dans les ability_ids : "
+        "l'agent percoit un avantage qu'il ne peut plus employer"
+    )
+    assert avant - {rule_id} == apres, (
+        f"la depense de {rule_id!r} a change d'autres capacites : {sorted(avant ^ apres)}"
+    )
+
+
+#: Effets du registre qui restent EN VIGUEUR apres avoir ete depenses — le temps d'une phase.
+_STILL_IN_EFFECT_RULES = sorted(
+    rule_id for rule_id, spec in ONCE_PER_BATTLE_SPENT_STATE_KEYS.items()
+    if spec.still_in_effect_key is not None
+)
+
+
+@pytest.mark.parametrize("rule_id", _STILL_IN_EFFECT_RULES)
+def test_once_per_battle_capability_stays_visible_while_still_in_effect(rule_id: str):
+    """Depense n'est pas eteinte : la capacite reste observee tant que le moteur l'applique.
+
+    Finest Hour consomme son usage a la premiere activation (`finest_hour_used`) mais accorde
+    [DEVASTATING WOUNDS] jusqu'a la fin de CETTE phase de combat
+    (`finest_hour_active_this_phase`, lu par `shared_utils` et `attack_sequence`). L'effacer des
+    l'usage disait a l'agent que l'avantage avait disparu alors que chaque attaque de melee de
+    l'escouade en beneficiait encore.
+
+    La garde de PHASE compte autant : `finest_hour_active_this_phase` n'est purge qu'a l'entree
+    de la fight phase SUIVANTE, donc il reste peuple pendant les phases intermediaires — sans
+    elle, la capacite reapparaitrait hors du combat ou elle agit.
+    """
+    spec = ONCE_PER_BATTLE_SPENT_STATE_KEYS[rule_id]
+    assert spec.still_in_effect_key and spec.still_in_effect_phase
+    faction, units = _ONCE_PER_BATTLE_FIXTURES[rule_id]
+    eng = load_engine_from_scenario(_once_per_battle_scenario(faction, units), training_n_envs=1)
+
+    eng.game_state[spec.spent_key] = {"101"}
+    eng.game_state[spec.still_in_effect_key] = {"101"}
+
+    eng.game_state["phase"] = spec.still_in_effect_phase
+    pendant = _rule_ids(eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0)
+    assert rule_id in pendant, (
+        f"{rule_id!r} est encore applique par le moteur dans la phase {spec.still_in_effect_phase!r} "
+        f"(escouade dans {spec.still_in_effect_key!r}) mais l'observation l'a deja efface"
+    )
+
+    # Meme etat, phase suivante : l'ensemble n'a PAS ete purge, la capacite ne doit pas revenir.
+    eng.game_state["phase"] = "move"
+    hors_phase = _rule_ids(
+        eng.obs_builder.build_squad_observation(eng.game_state, "101"), "allies", 0
+    )
+    assert rule_id not in hors_phase, (
+        f"{rule_id!r} reapparait hors de la phase {spec.still_in_effect_phase!r} : "
+        f"{spec.still_in_effect_key!r} n'est purge qu'a l'entree de la phase suivante, "
+        "la garde de phase est donc obligatoire"
+    )
+
+
+#: Formulations « une seule fois par bataille » des descriptions de `config/unit_rules.json`, FR
+#: comme EN. Le registre ne se relit pas dans la config (les cles d'etat sont un detail MOTEUR,
+#: pas une donnee de regle 40K) : c'est ce verrou qui interdit la derive, celle-la meme qui avait
+#: laisse `return_destroyed_models` observable apres usage. La tolerance de la regex n'est pas
+#: cosmetique — un tuple de sous-chaines ratait « une SEULE fois par bataille ».
+_ONCE_PER_BATTLE_WORDING_RE = re.compile(
+    r"1\s*[x×]\s*/\s*(partie|bataille)"
+    r"|une\s+(seule\s+)?fois\s+par\s+(bataille|partie)"
+    r"|once\s+per\s+battle",
+    re.IGNORECASE,
+)
+
+
+def test_once_per_battle_wording_detection_catches_the_canonical_phrasings():
+    """VERT VACANT : la detection doit attraper les formulations qu'elle pretend couvrir."""
+    for description in (
+        "Primitive F : 1x/partie, en phase de commandement, retourne D3 figurines.",
+        "Une seule fois par bataille, cette unite gagne +2 A.",
+        "une fois par bataille en phase de corps a corps, les armes gagnent +A.",
+        "Faction ability : once per battle, you can call a Waaagh!.",
+    ):
+        assert _ONCE_PER_BATTLE_WORDING_RE.search(description), description
+    assert not _ONCE_PER_BATTLE_WORDING_RE.search(
+        "Cette unite relance ses jets de charge a chaque tour."
+    ), "la detection accepte une description qui ne parle pas d'usage unique"
+
+
+def test_every_once_per_battle_rule_is_in_the_spent_registry():
+    """Toute regle du vocabulaire annoncee 1x/partie doit avoir ses cles d'etat."""
+    from config_loader import get_config_loader
+
+    rules = get_config_loader().load_unit_rules_config()
+    annoncees = {
+        rule_id for rule_id in UNIT_RULE_EFFECT_IDS
+        if _ONCE_PER_BATTLE_WORDING_RE.search(str(rules[rule_id].get("description", "")))
+    }
+    assert annoncees, (
+        "VERT VACANT : aucune description ne porte la mention 1x/partie — le balayage lit le "
+        "mauvais champ, il ne prouve plus rien"
+    )
+    manquantes = annoncees - set(ONCE_PER_BATTLE_SPENT_STATE_KEYS)
+    assert not manquantes, (
+        f"capacites 1x/partie sans cle d'etat depense, donc observees a vie : {sorted(manquantes)}"
     )

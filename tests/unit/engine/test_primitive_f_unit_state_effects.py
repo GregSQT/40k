@@ -468,46 +468,14 @@ def test_return_destroyed_models_met_a_jour_hp_cur() -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # once_per_battle_melee_buff — observation masquée quand dépensée
 # ─────────────────────────────────────────────────────────────────────────────
-
-def test_once_per_battle_spent_squad_ids_dans_ctx() -> None:
-    """finest_hour_used → once_per_battle_spent_squad_ids construit correctement."""
-    unit = _unit("cap", 1, unit_rules=[_rule("once_per_battle_melee_buff")])
-    gs = _base_state([unit])
-    gs["finest_hour_used"] = {"cap", "other"}
-
-    spent = frozenset(str(sid) for sid in gs.get("finest_hour_used", set()))
-    assert "cap" in spent
-    assert "other" in spent
-    assert "42" not in spent
-
-
-def test_once_per_battle_melee_buff_exclu_obs_si_depense() -> None:
-    """Quand la squad est dans once_per_battle_spent_squad_ids, le buff n'est pas dans ability_ids."""
-    from engine.observation_entities import UNIT_RULE_EFFECT_IDS
-    from engine.observation_builder import unit_ability_obs_ids
-
-    # Simule la logique d'exclusion de l'observation builder
-    rule_id = "once_per_battle_melee_buff"
-    assert rule_id in UNIT_RULE_EFFECT_IDS, "La règle doit être dans UNIT_RULE_EFFECT_IDS"
-
-    unit = _unit("cap", 1, unit_rules=[_rule("once_per_battle_melee_buff")])
-    spent = frozenset(["cap"])
-
-    from engine.phase_handlers.shared_utils import unit_has_rule_effect
-    obs_ids = unit_ability_obs_ids()
-
-    ids_normal = [
-        obs_ids[r] for r in UNIT_RULE_EFFECT_IDS
-        if unit_has_rule_effect(unit, r)
-    ]
-    ids_spent = [
-        obs_ids[r] for r in UNIT_RULE_EFFECT_IDS
-        if unit_has_rule_effect(unit, r)
-        and not (r == "once_per_battle_melee_buff" and "cap" in spent)
-    ]
-
-    assert obs_ids[rule_id] in ids_normal, "Buff doit être visible avant dépense"
-    assert obs_ids[rule_id] not in ids_spent, "Buff ne doit pas être visible après dépense"
+#
+# Les deux tests qui vivaient ici RECOPIAIENT la compréhension du builder, `rule_id ==
+# "once_per_battle_melee_buff"` compris, au lieu d'appeler l'observation. Ils sont restés verts
+# pendant tout le temps où le filtre laissait `return_destroyed_models` visible après le Grot
+# Orderly, et le seraient restés si le filtre avait disparu. Le verrou est désormais
+# `test_squad_obs_unit_rules.py::test_once_per_battle_capability_disappears_once_spent`, qui lit
+# les `ability_ids` d'une observation réelle, pour CHAQUE effet de
+# `ONCE_PER_BATTLE_SPENT_STATE_KEYS`.
 
 
 # ─────────────────────────────────────────────────────────────────────────────

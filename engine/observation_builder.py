@@ -86,6 +86,7 @@ from engine.observation_entities import (
     SELF_MODEL_CONT_SIZE,
     OBS_ID_MAX,
     OBS_ID_MIN,
+    ONCE_PER_BATTLE_SPENT_STATE_KEYS,
     UNIT_ABILITY_SLOTS,
     UNIT_BIN_SIZE,
     UNIT_CONT_SIZE,
@@ -1617,14 +1618,17 @@ class ObservationBuilder:
         # nommée confère un effet technique), donc ce qui est écrit décrit ce que le moteur
         # applique — et le jeu produit est identique à celui d'avant le chantier.
         ability_obs_ids = unit_ability_obs_ids()
-        _spent_squad_ids = ctx["once_per_battle_spent_squad_ids"]
+        _ended_squad_ids = ctx["once_per_battle_ended_squad_ids"]
         ability_ids = _fill_id_slots(
             [
                 ability_obs_ids[rule_id]
                 for rule_id in UNIT_RULE_EFFECT_IDS
                 if unit_has_rule_effect(unit, rule_id)
-                # once_per_battle_melee_buff (chantier 06) : invisible quand déjà dépensé.
-                and not (rule_id == "once_per_battle_melee_buff" and squad_id in _spent_squad_ids)
+                # Capacité 1×/partie que CETTE escouade a épuisée : invisible. Le test porte sur
+                # le registre `ONCE_PER_BATTLE_SPENT_STATE_KEYS`, jamais sur un `rule_id` écrit
+                # ici — un effet absent du registre n'est simplement pas 1×/partie. « Épuisée »
+                # et non « dépensée » : le ctx a déjà retiré celles qui agissent encore.
+                and squad_id not in _ended_squad_ids.get(rule_id, frozenset())
             ],
             UNIT_ABILITY_SLOTS,
             registry=ability_obs_ids,
@@ -2285,6 +2289,11 @@ class ObservationBuilder:
             require_key(require_key(require_key(game_state, "config"), "game_rules"), "detection_range")
         ) * int(require_key(game_state, "inches_to_subhex"))
 
+        # Phase COURANTE, telle que `enter_phase` l'écrit. Lue une fois : la garde des capacités
+        # 1×/partie encore en vigueur en dépend, et `is_charge_phase` plus bas pose la même
+        # question sur une autre valeur.
+        _obs_phase = str(require_key(game_state, "phase")).lower()
+
         ctx: Dict[str, Any] = {
             "active_squad_id": active_squad_id,
             # Requis par les bits de PAIRE (couvert/visibilité vus depuis l'observateur).
@@ -2321,12 +2330,35 @@ class ObservationBuilder:
             "suppressed_squad_ids": frozenset(
                 str(sid) for sid in game_state.get("suppressed_squads", {})  # get allowed
             ),
-            # once_per_battle_melee_buff (chantier 06, passe 6) : le buff est DÉJÀ DÉPENSÉ pour
-            # les escouades de cet ensemble — l'obs l'efface de leurs ability_ids pour que
-            # l'agent ne perçoive pas un avantage qui n'est plus disponible.
-            "once_per_battle_spent_squad_ids": frozenset(
-                str(sid) for sid in game_state.get("finest_hour_used", set())  # get allowed
-            ),
+            # Capacités 1×/PARTIE qui ne sont PLUS EN VIGUEUR, par effet :
+            # `{rule_id -> ids d'escouade}`. L'obs les efface des `ability_ids` de ces escouades
+            # pour que l'agent ne perçoive pas un avantage qu'il n'a plus. La table des clés
+            # d'état vit dans `observation_entities` : ce site n'en nomme aucune, et une capacité
+            # 1×/partie ajoutée au vocabulaire est filtrée du seul fait d'y être déclarée —
+            # c'est ce qui avait manqué à `return_destroyed_models`, dont l'`obs_id` survivait au
+            # Grot Orderly.
+            #
+            # « Dépensée » n'est pas « éteinte » : Finest Hour consomme son usage à la première
+            # activation mais accorde [DEVASTATING WOUNDS] jusqu'à la fin de CETTE phase de
+            # combat, exactement ce que dit le prédicat de `shared_utils`. La soustraction ici
+            # est ce qui garde l'observation et la résolution d'accord ; la garde de phase est
+            # obligatoire parce que `finest_hour_active_this_phase` n'est purgé qu'à l'entrée de
+            # la fight phase suivante — sans elle, la capacité réapparaîtrait pendant les phases
+            # intermédiaires du tour suivant.
+            "once_per_battle_ended_squad_ids": {
+                rule_id: frozenset(
+                    str(sid) for sid in game_state.get(spec.spent_key, set())  # get allowed
+                ) - (
+                    frozenset(
+                        str(sid)
+                        for sid in game_state.get(spec.still_in_effect_key, set())  # get allowed
+                    )
+                    if spec.still_in_effect_key is not None
+                    and _obs_phase == spec.still_in_effect_phase
+                    else frozenset()
+                )
+                for rule_id, spec in ONCE_PER_BATTLE_SPENT_STATE_KEYS.items()
+            },
             "engaged_squads": engaged_squads,
             "moved_by_model": require_key(game_state, "moved_distance_by_model"),
             "ranged_metric": _ranged_distance_metric(game_state),
@@ -2356,7 +2388,7 @@ class ObservationBuilder:
             "split_assigned_slots_by_target": _split_assigned_slots_by_target,
             # V11 §9 P3-2 — garde de phase du bit `charge_reachable_max_roll` : hors charge, la
             # question n'a pas de sens et le plan (coûteux) n'est pas construit.
-            "is_charge_phase": str(require_key(game_state, "phase")).lower() == "charge",
+            "is_charge_phase": _obs_phase == "charge",
             # Empreintes par figurine, réutilisées telles quelles pour le comptage 04.02.
             "synth_by_mid": synth_by_mid,
             "engagement_zone": ez_zone,
