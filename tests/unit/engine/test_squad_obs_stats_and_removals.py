@@ -132,22 +132,26 @@ def test_wounded_model_hp_is_observed(engine):
 
 
 def test_block_sizes_after_removals(engine):
-    """Bloc figurine : uniquement l'individuel (position), le profil étant au niveau TYPE."""
-    assert SELF_MODEL_CONT_SIZE == 2  # col_rel, row_rel
+    """Bloc figurine : uniquement l'individuel, le profil restant au niveau TYPE.
+
+    `hp_ratio` s'y est ajouté avec P3-0 : les PV COURANTS d'une figurine sont irréductiblement
+    individuels (le bloc TYPES ne porte que `hp_max`, par type), et `COHERENCY_SLOT_i` demande
+    de choisir LAQUELLE détruire. Le profil (hp_max, T, save, invulnérable), lui, reste au TYPE.
+    """
+    assert SELF_MODEL_CONT_SIZE == 3  # col_rel, row_rel, hp_ratio
     obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
     assert obs["allies_cont"].shape == (ObservationBuilder.K_ALLY_SLOTS, UNIT_CONT_SIZE)
 
 
-def test_model_block_holds_only_positions(engine):
-    """Bloc figurines : seules les positions relatives restent (PV et index d'arme supprimés).
+def test_model_block_ignores_the_selected_weapon_index(engine):
+    """Bloc figurines : l'index d'arme sélectionnée reste HORS du bloc (feature calculée, §9.1).
 
-    Contre-épreuve : on blesse une figurine et on change son arme CC sélectionnée — le bloc
-    figurines ne doit PAS bouger (sous l'ancien layout, deux de ses dimensions changeaient).
+    Contre-épreuve : changer l'arme CC sélectionnée d'une figurine ne doit rien bouger. Les PV
+    courants, eux, y sont revenus avec P3-0 — cas couvert par le test suivant.
     """
     gs = engine.game_state
     before = engine.obs_builder.build_squad_observation(gs, "1")["self_models_cont"].tolist()
 
-    gs["models_cache"]["1#0"]["HP_CUR"] = 1  # PV COURANTS : plus observés par figurine
     gs["models_cache"]["1#0"]["selectedCcWeaponIndex"] = 1
     after = engine.obs_builder.build_squad_observation(gs, "1")["self_models_cont"].tolist()
     assert before == after
