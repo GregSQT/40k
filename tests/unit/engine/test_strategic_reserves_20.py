@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
 
+import numpy as np
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -711,6 +712,138 @@ def test_reserve_unit_controls_no_objective():
 # ---------------------------------------------------------------------------
 # 20.04 — mise en place, verrou de mouvement, destruction
 # ---------------------------------------------------------------------------
+
+
+def test_ingress_exposure_is_the_engine_rule_and_not_a_placeholder():
+    """L'exposition portée par un candidat d'ingress est CELLE DU MOTEUR, recalculée à part.
+
+    Le défaut que ce test verrouille : le scoring d'ingress a longtemps sauté les deux colonnes
+    d'exposition de ligne de vue, au motif d'un coût de 2,98 s sur le pool entier. Deux
+    conséquences, dont la seconde est la panne : le tri des stratégies d'ingress divergeait de
+    celui du déploiement, et les deux clés manquaient au dict de candidat — or
+    `_encode_deployment_candidates` les lit par `require_key`, donc l'observation LÈVE dès qu'on
+    lui demande de décrire une arrivée de réserves.
+
+    Ce test ne compare pas deux appels du même code : il refait l'exposition par la primitive
+    du moteur (`deployment_los`, la règle de tir vectorisée), depuis les ennemis réellement
+    posés. Remettre une valeur de remplissage — zéro, ou une colonne non calculée — le fait
+    tomber, ce qu'une simple présence de clé ne verrait pas.
+    """
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["turn"] = 2
+    gs["current_player"] = 1
+    squad_id = _reserve_squad(eng, deep_strike=False)
+
+    candidates = eng.action_decoder.ingress_slot_candidates(gs, squad_id)
+    assert len(candidates) == 7, (
+        f"les 7 stratégies doivent être offertes sur ce pool, {len(candidates)} le sont"
+    )
+
+    hexes = np.array([c["hex"] for c in candidates.values()], dtype=np.int64)
+    enemies = [
+        (int(u["col"]), int(u["row"])) for u in gs["units"]
+        if int(u["player"]) != 1 and int(u["col"]) >= 0
+    ]
+    assert enemies, "aucun ennemi posé — l'exposition serait nulle par vacuité"
+    expected = np.zeros(len(hexes), dtype=np.int64)
+    for enemy_hex in enemies:
+        expected += eng.action_decoder.deployment_los(gs, enemy_hex, hexes)
+
+    got = [int(c["los_exposure"]) for c in candidates.values()]
+    assert got == expected.tolist(), (
+        f"exposition des candidats d'ingress {got} ≠ règle du moteur {expected.tolist()}"
+    )
+    for action_int, candidate in candidates.items():
+        assert int(candidate["potential_los_exposure"]) >= 0, (
+            f"slot {action_int} : exposition potentielle non calculée"
+        )
+
+
+def test_the_observation_describes_the_ingress_slots_the_mask_opens():
+    """L'agent VOIT ce que chaque slot d'arrivée poserait — bout en bout, vrai épisode.
+
+    Le défaut : le bloc `deploy_cand_*` sortait dès que la phase n'était pas « deployment »,
+    alors que le masque ouvre les mêmes ids 4-10 à une escouade en réserves pendant la phase de
+    MOUVEMENT (20.04). L'agent choisissait entre sept boîtes noires — ni position, ni distance
+    aux objectifs, ni couvert, ni exposition — exactement le défaut que §0.40 point 3 avait fermé
+    pour le déploiement, resté ouvert pour l'arrivée de réserves.
+
+    On joue la partie jusqu'à cet état plutôt que de le fabriquer : ce qui est vérifié, c'est que
+    le CHEMIN DE PRODUCTION y arrive (masque construit avant l'observation, marqueur posé par la
+    branche d'ingress, observation qui le relit).
+    """
+    from engine.macro_intents import ACTION_WAIT
+    from engine.observation_entities import deploy_cand_bin_index
+
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    squad_id = _reserve_squad(eng, deep_strike=False)
+
+    for _ in range(4000):
+        mask = eng.get_action_mask()
+        _obs, mask_and_eligible = eng._build_observation_and_mask()
+        eligible = mask_and_eligible[1] if mask_and_eligible else []
+        open_slots = [a for a in range(4, 12) if mask[a]]
+        if (
+            str(gs.get("phase")).lower() == "move"
+            and eligible
+            and str(eligible[0]["id"]) == str(squad_id)
+            and open_slots
+        ):
+            break
+        legal = [int(a) for a in np.flatnonzero(mask)]
+        assert legal and not gs.get("game_over"), "partie finie avant l'ingress"
+        eng.step(int(ACTION_WAIT) if mask[ACTION_WAIT] else legal[0])
+    else:
+        pytest.fail("l'escouade en réserves n'a jamais été activée en phase de mouvement")
+
+    obs = eng._build_observation()
+    present = obs["deploy_cand_bin"][:, deploy_cand_bin_index("present")]
+    described = [4 + slot for slot, bit in enumerate(present.tolist()) if bit]
+    assert described == open_slots, (
+        f"le masque ouvre {open_slots} mais l'observation décrit {described}"
+    )
+
+    candidates = eng.action_decoder.ingress_slot_candidates(gs, squad_id)
+    for action_int, candidate in candidates.items():
+        slot = action_int - 4
+        assert obs["deploy_cand_cont"][slot].any(), (
+            f"slot {action_int} ouvert sur l'hexe {candidate['hex']} mais décrit par une ligne "
+            f"de zéros — l'agent choisit une boîte noire"
+        )
+
+
+def test_ingress_candidates_carry_the_same_keys_as_deployment_candidates():
+    """Le contrat de clés est celui du déploiement — c'est ce que l'observation lit.
+
+    `_encode_deployment_candidates` lit chaque grandeur par `require_key`. Une clé manquante ne
+    dégrade pas l'observation : elle la fait LEVER. Ce test est donc le verrou du jumelage
+    revendiqué par la docstring d'`ingress_slot_candidates`, et non un doublon de style.
+    """
+    eng = _engine()
+    _drive_deployment(eng)
+    gs = eng.game_state
+    gs["turn"] = 2
+    gs["current_player"] = 1
+    squad_id = _reserve_squad(eng, deep_strike=False)
+
+    ingress = eng.action_decoder.ingress_slot_candidates(gs, squad_id)
+    assert ingress, "aucun candidat d'ingress — test sans portée"
+    expected = {
+        "hex", "plan", "nearest_enemy_distance", "nearest_objective_distance",
+        "nearest_ally_distance", "has_deployed_ally", "los_exposure",
+        "potential_los_exposure", "ally_col_count",
+    }
+    for action_int, candidate in ingress.items():
+        assert set(candidate) == expected, (
+            f"slot {action_int} : clés {sorted(set(candidate) ^ expected)} en écart avec le "
+            f"contrat de `deployment_slot_candidates`"
+        )
+        assert candidate["los_exposure"] >= 0
+        assert candidate["potential_los_exposure"] >= 0
 
 
 def test_ingress_places_every_model_and_locks_further_moves():

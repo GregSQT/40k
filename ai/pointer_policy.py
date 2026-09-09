@@ -36,8 +36,8 @@ les slots de pose : ils tombent dans la plage des cellules (`MOVE_CELL_BASE = 0`
 `TOTAL_ACTION_SIZE` insensible au nombre de slots. Le masque le sait — il n'ouvre jamais les deux
 familles dans le même état — mais la policy l'ignorait, et ces logits sortaient donc de la conv
 1x1, sur des cellules sans rapport avec les hexes candidats. `deploy_query_net` les produit
-désormais par pointeur, et le routage lit le bit `phase_deployment` de `global_bin`, PAR
-ÉCHANTILLON : un lot mélange les phases des `n_envs`.
+désormais par pointeur, et le routage lit le bit `present` des candidats de pose
+(`deploy_cand_bin[..., -1]`), PAR ÉCHANTILLON : un lot mélange les phases des `n_envs`.
 
 ⚠️ **ZONE À RISQUE, identifiée avant écriture** : une tête d'action custom sous `MaskablePPO`
 échoue EN SILENCE si `log_prob`, l'entropie ou le masquage sont faux — l'entraînement tourne et
@@ -141,7 +141,8 @@ class PolicyFeatures(NamedTuple):
     deploy: torch.Tensor
     #: (B, K_a, d) — MES escouades par slot : quelle activer (V11 §0.48 `L2`). Ligne 0 COMPRISE.
     allies: torch.Tensor
-    #: (B,) — bit `phase_deployment` : 1.0 si les ids 4-11 sont des slots de pose.
+    #: (B,) — 1.0 si les ids 4-11 sont des slots de pose sur cet échantillon, c'est-à-dire si au
+    #: moins un candidat est `present` (déploiement ou ingress move 20.04).
     is_deploy: torch.Tensor
     #: (B, N_sm, d) — figurines de l'unité active par slot : quelle retirer hors cohérence (P3-0).
     self_models: torch.Tensor
@@ -296,7 +297,6 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         self.deploy_slice = extractor.deploy_embeddings_slice()
         self.ally_slice = extractor.ally_embeddings_slice()
         self.self_model_slice = extractor.self_model_embeddings_slice()
-        self.deploy_phase_index = extractor.deployment_phase_flag_index()
         self.mlp_extractor = MlpExtractor(
             self.trunk_dim,
             net_arch=self.net_arch,
@@ -457,12 +457,25 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         self_model_emb = features[:, self.self_model_slice].reshape(
             batch, self.n_self_models, self.entity_dim
         )
-        # Bit `phase_deployment` du one-hot de phase, recopié tel quel par l'extracteur. Il ne
-        # peut valoir QUE 0 ou 1 : sa clé (`global_bin`) est hors `norm_obs_keys`, précisément
-        # pour que les valeurs discrètes gardent leur sémantique. S'il cessait de l'être — une
-        # clé ajoutée à `VecNormalize`, un index décalé d'un champ — le routage des ids 4-11
-        # deviendrait arbitraire et l'agent jouerait des cellules de move pour des poses, sans
-        # que rien ne lève. Le contrôle est là pour que ça lève.
+        # Y A-T-IL DES SLOTS DE POSE OUVERTS ? Lu sur le bit `present` des candidats — le MÊME
+        # que l'extracteur prend pour masque (`deploy_cand_bin[..., -1]`), donc la question posée
+        # ici et l'entité encodée là-bas ne peuvent pas diverger.
+        #
+        # C'ÉTAIT le bit `phase_deployment`, et c'était trop étroit : les ids 4-11 portent des
+        # slots de pose dans DEUX situations, la phase de déploiement et l'ingress move d'une
+        # escouade en réserves (20.04), qui est une mise en place et non un mouvement (03.02).
+        # Router sur la phase laissait la seconde aux mains de la conv 1x1 des cellules de move,
+        # aux cellules (0, 4..11) de la fenêtre égocentrique — des cellules sans aucun rapport
+        # avec les hexes candidats, c'est-à-dire le défaut même que §0.44 avait corrigé pour le
+        # déploiement seul. Le bit `present`, lui, dit exactement ce que le routage demande :
+        # « le masque ouvre-t-il ici des slots de pose ? », sans nommer la phase qui les ouvre.
+        #
+        # Il ne peut valoir QUE 0 ou 1 : sa clé (`deploy_cand_bin`) est hors `norm_obs_keys`
+        # (`ai/train._vec_norm_obs_keys` ne normalise que `global_cont`), précisément pour que
+        # les valeurs discrètes gardent leur sémantique. S'il cessait de l'être — une clé ajoutée
+        # à `VecNormalize`, un index décalé d'un champ — le routage des ids 4-11 deviendrait
+        # arbitraire et l'agent jouerait des cellules de move pour des poses, sans que rien ne
+        # lève. Le contrôle est là pour que ça lève.
         #
         # SON COÛT EST CONNU ET ASSUMÉ — ne pas le « nettoyer » sur la foi d'un avertissement.
         # Le `bool()` force une synchronisation GPU→CPU, et sous `torch.compile` (actif via
@@ -478,15 +491,15 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # ni le réduire au premier batch (le scénario nommé plus haut, une clé ajoutée à
         # `VecNormalize`, dérive EN COURS de run et passerait un contrôle initial), ni activer
         # `capture_scalar_outputs` globalement pour un gain de cet ordre.
-        is_deploy = features[:, self.deploy_phase_index]
-        if not bool(torch.all((is_deploy == 0.0) | (is_deploy == 1.0))):
+        deploy_present = obs["deploy_cand_bin"][..., -1]
+        if not bool(torch.all((deploy_present == 0.0) | (deploy_present == 1.0))):
             raise RuntimeError(
-                "Le drapeau `phase_deployment` lu a l'index "
-                f"{self.deploy_phase_index} du vecteur de features n'est pas binaire "
-                f"(valeurs {torch.unique(is_deploy).tolist()[:5]}) : le routage des ids "
-                f"{DEPLOY_SLOT_BASE}-{DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT - 1} entre la tete de "
-                "deploiement et la conv de move ne repose plus sur rien."
+                "Le bit `present` des candidats de pose (`deploy_cand_bin[..., -1]`) n'est pas "
+                f"binaire (valeurs {torch.unique(deploy_present).tolist()[:5]}) : le routage des "
+                f"ids {DEPLOY_SLOT_BASE}-{DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT - 1} entre la tete "
+                "de pose et la conv de move ne repose plus sur rien."
             )
+        is_deploy = deploy_present.amax(dim=-1)
         return PolicyFeatures(
             trunk, embeddings, move_map, decision_emb, deploy_emb, ally_emb, is_deploy,
             self_model_emb,
@@ -525,21 +538,23 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     def _deploy_logits(
         self, latent_pi: torch.Tensor, move: torch.Tensor, feats: PolicyFeatures
     ) -> torch.Tensor:
-        """Remplace, EN PHASE DE DÉPLOIEMENT SEULEMENT, les colonnes 4-11 des cellules de move.
+        """Remplace, QUAND LES IDS 4-11 SONT DES SLOTS DE POSE, les colonnes de cellules de move.
 
-        Les ids 4-11 portent deux significations selon la phase : cellule de la grille
-        égocentrique, ou slot de pose. Le masque le sait déjà (il n'ouvre jamais les deux
-        familles dans le même état) ; la policy, elle, l'ignorait — ces logits sortaient donc de
-        la conv 1x1, sur des cellules sans rapport avec les hexes candidats (§0.44).
+        Les ids 4-11 portent deux significations : cellule de la grille égocentrique, ou slot de
+        pose. Le masque le sait déjà (il n'ouvre jamais les deux familles dans le même état) ; la
+        policy, elle, l'ignorait — ces logits sortaient donc de la conv 1x1, sur des cellules sans
+        rapport avec les hexes candidats (§0.44).
 
-        Le routage se fait sur le SEUL bit `phase_deployment`, et par `torch.where` — pas par une
-        branche `if` : le batch mélange des observations de phases différentes (n_envs) et une
-        branche scalaire trancherait pour tout le lot d'après un seul échantillon.
+        Le routage se fait sur la PRÉSENCE DE CANDIDATS et non sur la phase, et par `torch.where`
+        — pas par une branche `if` : le batch mélange des observations d'états différents (n_envs)
+        et une branche scalaire trancherait pour tout le lot d'après un seul échantillon. Router
+        sur la phase de déploiement laissait dehors l'ingress move d'une escouade en réserves
+        (20.04), qui est une mise en place et ouvre les mêmes slots en phase de MOUVEMENT.
 
-        ⚠️ Hors phase de déploiement, ces colonnes DOIVENT rester celles de la conv. Le bloc
-        `deploy_cand_*` y est nul par contrat (§0.40) : router quand même donnerait 8 logits
-        rigoureusement identiques (produit scalaire contre des embeddings nuls), donc un choix
-        uniforme sur 8 cellules parfaitement jouables en phase de mouvement.
+        ⚠️ Quand aucun candidat n'est présent, ces colonnes DOIVENT rester celles de la conv : le
+        bloc `deploy_cand_*` est alors nul, et router quand même donnerait 8 logits rigoureusement
+        identiques (produit scalaire contre des embeddings nuls), donc un choix uniforme sur 8
+        cellules parfaitement jouables en phase de mouvement.
         """
         pointer = self._point(self.deploy_query_net, latent_pi, feats.deploy)
         low, high = DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT
@@ -672,8 +687,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         Les quatre blocs pointés sont des tranches NON contiguës du vecteur de features ; les
         `reshape` de `_split_features` en font donc des copies réelles — la seule carte de move
         pèse `move_map_channels x 1024` par échantillon — pour des tenseurs qu'aucune tête ne
-        lirait ici. Le contrôle du drapeau `phase_deployment` reste sur le chemin ACTEUR, le
-        seul qui route sur lui.
+        lirait ici. Le contrôle du bit `present` des candidats de pose reste sur le chemin
+        ACTEUR, le seul qui route sur lui.
         """
         features = self._trunk_features(obs)
         return self.value_net(self.mlp_extractor.forward_critic(features))

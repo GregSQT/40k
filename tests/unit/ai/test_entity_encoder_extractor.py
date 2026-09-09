@@ -33,9 +33,7 @@ from ai.spatial_extractor import (
     positional_channels,
 )
 from engine.observation_entities import (
-    OBS_PHASE_IDS,
     deploy_cand_bin_index,
-    global_bin_index,
     unit_bin_index,
 )
 from engine.spatial_grid import (
@@ -107,25 +105,25 @@ def test_features_layout_exposes_the_enemy_embeddings(extractor):
     assert self_models.stop == extractor.features_dim
 
 
-def test_the_phase_flag_index_points_at_the_deployment_bit(extractor):
-    """§0.44 (L1) — l'index publié désigne bien `phase_deployment`, et lui seul.
+def test_the_placement_present_flag_survives_the_trunk(extractor):
+    """Le signal de routage des ids 4-11 traverse l'extracteur SANS être altéré.
 
-    C'est le contrat de routage de `ai/pointer_policy.py` : les ids 4-11 sont des slots de pose
-    ou des cellules de move selon ce SEUL bit. Un index décalé d'un champ (`is_my_turn` d'un
-    côté, `phase_command` de l'autre) ne change aucune forme et ne lève rien — il ferait
-    simplement jouer la mauvaise tête. On le vérifie donc phase par phase, sur le vecteur de
-    features RÉEL, jamais en recalculant l'offset (ce serait la même formule des deux côtés).
+    Ce n'est plus un index du tronc depuis que le routage lit `deploy_cand_bin[..., -1]` — le bit
+    `present` des candidats, celui-là même que l'extracteur prend pour masque d'encodage. Ce qui
+    doit rester vrai, et que ce test tient : un slot ABSENT produit un embedding nul, un slot
+    PRÉSENT non. Sans quoi la tête pointeur scorerait des candidats fermés comme des ouverts.
     """
-    index = extractor.deployment_phase_flag_index()
-    assert index < extractor.trunk_dim, "le drapeau doit vivre dans la partie tronc"
-    for phase in OBS_PHASE_IDS:
-        obs = _zero_batch(_space(), batch=1)
-        obs["global_bin"][:, global_bin_index(f"phase_{phase}")] = 1.0
-        obs["global_bin"][:, global_bin_index("is_my_turn")] = 1.0
-        with torch.no_grad():
-            flag = float(extractor(obs)[0, index])
-        assert flag == pytest.approx(1.0 if phase == "deployment" else 0.0), (
-            f"phase {phase} : drapeau lu {flag}"
+    obs = _zero_batch(_space(), batch=1)
+    obs["deploy_cand_bin"][:, 0, -1] = 1.0
+    with torch.no_grad():
+        features = extractor(obs)
+    deploy = features[:, extractor.deploy_embeddings_slice()].reshape(
+        1, extractor.n_deploy_slots, extractor.entity_dim
+    )
+    assert float(deploy[0, 0].abs().sum()) > 0.0, "slot présent : embedding nul"
+    for slot in range(1, extractor.n_deploy_slots):
+        assert float(deploy[0, slot].abs().sum()) == pytest.approx(0.0), (
+            f"slot {slot} absent : embedding non nul, il serait scoré comme un candidat ouvert"
         )
 
 

@@ -964,45 +964,65 @@ class ObservationBuilder:
         *,
         active_not_deployed: bool,
     ) -> None:
-        """Remplit le bloc « candidats de déploiement » (V11 §0.40 point 3).
+        """Remplit le bloc « candidats de mise en place » (V11 §0.40 point 3, et 20.04).
 
-        Le bloc reste NUL hors phase de déploiement — GARDE DE PHASE obligatoire, même patron que
-        `is_charge_phase` pour `charge_reachable_max_roll` : hors déploiement la question n'a pas
-        de sens ET le calcul (5 tris sur toute la zone + 5 formations validées) ne doit pas être
-        payé. Il reste nul aussi quand l'escouade décrite n'est PAS celle sur laquelle le masque
-        ouvre les slots 4-8 : décrire à une escouade des candidats qu'aucune de ses actions ne
-        pose serait le défaut du point 1, une couche plus loin.
+        DEUX mises en place le remplissent, parce que les ids 4-10 en portent deux :
+        le DÉPLOIEMENT, et l'INGRESS MOVE d'une escouade en réserves (20.04), qui est une mise en
+        place et non un mouvement (03.02). Hors de ces deux cas le bloc reste NUL — même patron
+        que `is_charge_phase` pour `charge_reachable_max_roll` : la question n'a pas de sens, et
+        le calcul (7 tris sur toute l'aire + 7 formations validées) ne doit pas être payé.
 
-        Un slot FERMÉ (moins de 5 hexes valides) reste une ligne de zéros, `present` compris —
-        jamais un candidat plausible.
+        Il reste nul aussi quand l'escouade décrite n'est PAS celle sur laquelle le masque ouvre
+        ces slots : décrire à une escouade des candidats qu'aucune de ses actions ne pose serait
+        le défaut du point 1, une couche plus loin. C'est la raison d'être du marqueur
+        `INGRESS_OPEN_SLOTS_KEY` — le masque seul sait qu'il vient d'en ouvrir, et l'obs le relit
+        au lieu de rejouer sa cascade de branches.
+
+        Un slot FERMÉ (moins d'hexes valides que de stratégies) reste une ligne de zéros,
+        `present` compris — jamais un candidat plausible.
         """
-        # DEUX conditions, et la seconde n'est pas une précaution : une escouade DÉJÀ POSÉE ne
-        # choisit pas où se déployer, même pendant la phase de déploiement — elle n'a aucun
-        # candidat, par la règle et non par prudence. C'est la même source
-        # (`deployed_on_turn`) que le bit `deploy_not_on_board`, déjà lue par l'appelant.
-        # Elle rend la garde plus STRICTE, pas plus laxiste : l'unité que le masque déploie
-        # n'est jamais posée (verrouillé par le point 1), donc rien n'est perdu — et l'appel au
-        # décodeur est évité pour toutes les escouades déjà sur le plateau.
-        if str(require_key(game_state, "phase")).lower() != "deployment":
-            return
-        if not active_not_deployed:
-            return
+        from engine.action_decoder import INGRESS_OPEN_SLOTS_KEY
+
         decoder = self.action_decoder
+        # get allowed : la clé n'existe qu'une fois un masque construit — une observation
+        # demandée avant tout masque (fixture moteur nu) n'a donc aucun ingress ouvert.
+        ingress_squad = game_state.get(INGRESS_OPEN_SLOTS_KEY)
+        is_ingress = ingress_squad is not None and str(ingress_squad) == str(active_squad_id)
+
+        # DEUX conditions pour le déploiement, et la seconde n'est pas une précaution : une
+        # escouade DÉJÀ POSÉE ne choisit pas où se déployer, même pendant la phase de
+        # déploiement — elle n'a aucun candidat, par la règle et non par prudence. C'est la même
+        # source (`deployed_on_turn`) que le bit `deploy_not_on_board`, déjà lue par l'appelant.
+        # Elle rend la garde plus STRICTE, pas plus laxiste : l'unité que le masque déploie n'est
+        # jamais posée (verrouillé par le point 1), donc rien n'est perdu — et l'appel au
+        # décodeur est évité pour toutes les escouades déjà sur le plateau.
+        if not is_ingress:
+            if str(require_key(game_state, "phase")).lower() != "deployment":
+                return
+            if not active_not_deployed:
+                return
         if decoder is None:
             raise RuntimeError(
                 "ObservationBuilder.action_decoder n'est pas câblé : le bloc « candidats de "
-                "déploiement » (§0.40 point 3) LIT le décodeur, seule source du couple "
+                "mise en place » (§0.40 point 3) LIT le décodeur, seule source du couple "
                 "slot -> hexe. W40KEngine le pose à l'init ; un ObservationBuilder construit à "
-                "la main doit faire de même avant d'observer une phase de déploiement."
+                "la main doit faire de même avant d'observer une mise en place."
             )
-        active_unit = decoder.get_deployment_active_unit(game_state)
-        if str(require_key(active_unit, "id")) != str(active_squad_id):
-            return
+        if is_ingress:
+            # MÊME dictionnaire que celui sur lequel le masque vient d'ouvrir ses slots : il est
+            # mémoïsé par (escouade, tour, état des unités posées), donc cette lecture ne relance
+            # aucun scoring. Décrire les candidats depuis un second calcul laisserait l'agent
+            # choisir un slot d'après un hexe que le commit ne poserait pas (motif D1).
+            candidates = decoder.ingress_slot_candidates(game_state, str(active_squad_id))
+        else:
+            active_unit = decoder.get_deployment_active_unit(game_state)
+            if str(require_key(active_unit, "id")) != str(active_squad_id):
+                return
 
-        current_deployer = decoder._get_current_deployer(game_state)
-        candidates = decoder.deployment_slot_candidates(
-            game_state, current_deployer, str(active_squad_id)
-        )
+            current_deployer = decoder._get_current_deployer(game_state)
+            candidates = decoder.deployment_slot_candidates(
+                game_state, current_deployer, str(active_squad_id)
+            )
 
         static = self._static_hex_arrays(game_state)
         objective_cols, objective_rows = static["objectives"]

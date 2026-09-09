@@ -61,7 +61,6 @@ from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from engine.observation_entities import (
     OBS_ID_PADDING,
     OBS_ID_VOCAB_SIZE,
-    global_bin_index,
     self_model_bin_index,
     unit_bin_index,
 )
@@ -407,16 +406,6 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             ),
         )
         self.trunk_dim = trunk_dim
-        # Index ABSOLU du bit `phase_deployment` dans le vecteur de features (§0.44 / L1). Il
-        # tombe dans la partie tronc, où `global_bin` est recopié TEL QUEL : la clé est hors
-        # `norm_obs_keys` (ai/train._vec_norm_obs_keys), donc le bit y vaut exactement 0.0 ou 1.0.
-        # C'est LUI qui dit à la policy si les ids 4-11 sont des slots de déploiement ou des
-        # cellules de move — les deux familles partagent ces ids et seule la phase les sépare.
-        # Calculé ici, à côté de la composition du tronc, et JAMAIS recopié dans la policy : un
-        # décalage d'un champ y ferait router sur `is_my_turn` sans que rien ne lève.
-        self._deploy_phase_index = (
-            cnn_features + _shape("global_cont")[0] + global_bin_index("phase_deployment")
-        )
         self.entity_dim = entity_dim
         self.move_map_channels = move_map_channels
 
@@ -611,15 +600,6 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         """
         start = self.ally_embeddings_slice().stop
         return slice(start, start + self.n_self_models * self.entity_dim)
-
-    def deployment_phase_flag_index(self) -> int:
-        """Index du bit `phase_deployment` dans le vecteur de features (§0.44, élément L1).
-
-        La policy le lit pour router les ids 4-11 vers la tête de déploiement plutôt que vers la
-        conv 1x1 des cellules de move. Contrat, comme les tranches : il est CALCULÉ à partir de
-        la composition réelle du tronc, jamais réécrit côté policy.
-        """
-        return self._deploy_phase_index
 
     def _encode_units(self, obs: Dict[str, torch.Tensor], family: str) -> torch.Tensor:
         """Embeddings (B, K, entity_dim) d'une famille d'unités, encodeurs PARTAGÉS."""

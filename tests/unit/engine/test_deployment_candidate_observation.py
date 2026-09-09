@@ -408,12 +408,17 @@ def test_a_closed_slot_is_absent_not_a_plausible_candidate(monkeypatch):
 # ============================================================================
 
 
-def test_the_block_is_null_outside_the_deployment_phase():
-    """Hors déploiement, le bloc entier est NUL — et son calcul n'est pas payé.
+def test_the_block_is_null_when_no_placement_is_open():
+    """Sans mise en place ouverte, le bloc entier est NUL — et son calcul n'est pas payé.
 
     Même patron que `is_charge_phase` pour `charge_reachable_max_roll` : la question n'a pas de
-    sens hors de la phase qui l'ouvre, et le calcul (un tri par stratégie sur toute la zone, plus
+    sens hors des états qui l'ouvrent, et le calcul (un tri par stratégie sur toute l'aire, plus
     une formation validée par slot) ne doit pas grever chaque step de la partie.
+
+    « Hors phase de déploiement » ne serait PAS le bon énoncé : l'ingress move d'une escouade en
+    réserves (20.04) est une mise en place, et il remplit ce bloc en phase de MOUVEMENT. Ce que
+    ce test tient, c'est qu'aucune escouade POSÉE ne porte de candidat — aucune de ses actions
+    n'en poserait. Le scénario chargé ici ne déclare pas de réserves.
     """
     eng = _load()
     gs = eng.game_state
@@ -421,14 +426,22 @@ def test_the_block_is_null_outside_the_deployment_phase():
     for _steps, _mask, _eligible in _deployment_steps(eng):
         pass
 
+    from engine.phase_handlers.shared_utils import unit_is_in_strategic_reserves
+
+    checked = 0
     for sid in list(gs["units_cache"].keys())[:4]:
+        # VERT VACANT : une escouade en réserves aurait, elle, des candidats légitimes.
+        if unit_is_in_strategic_reserves(gs, str(sid)):
+            continue
         obs = eng.obs_builder.build_squad_observation(gs, str(sid))
         assert not obs["deploy_cand_cont"].any(), (
-            f"phase {gs['phase']} : le bloc candidat de déploiement porte des valeurs"
+            f"phase {gs['phase']} : le bloc candidat de mise en place porte des valeurs"
         )
         assert not obs["deploy_cand_bin"].any(), (
-            f"phase {gs['phase']} : le bloc candidat de déploiement porte des drapeaux"
+            f"phase {gs['phase']} : le bloc candidat de mise en place porte des drapeaux"
         )
+        checked += 1
+    assert checked, "aucune escouade posée examinée — le test ne prouverait rien"
 
 
 def test_an_already_placed_squad_never_queries_the_deployment_decoder(monkeypatch):
@@ -555,49 +568,31 @@ def test_the_vectorised_hex_distance_is_the_engine_one():
 
 
 def test_the_real_deployment_observation_raises_the_routing_flag():
-    """Le bit qui bascule les ids 4-11 vers la tête de pose est POSÉ par le vrai moteur.
+    """Le signal qui bascule les ids 4-11 vers la tête de pose est POSÉ par le vrai moteur.
 
     Les tests de la tête (`tests/unit/ai/test_pointer_head.py`) construisent l'observation à la
-    main : ils prouvent le routage, pas que la production l'atteint. Ici on lit le drapeau à
-    l'index que l'extracteur PUBLIE, sur une observation issue d'un vrai épisode — en phase de
-    déploiement il vaut 1, et il retombe à 0 dès qu'on en sort (sans quoi l'agent scorerait des
+    main : ils prouvent le routage, pas que la production l'atteint. Ici on lit le signal sur une
+    observation issue d'un vrai épisode — en phase de déploiement au moins un candidat est
+    `present`, et plus aucun ne l'est dès qu'on en sort (sans quoi l'agent scorerait des
     candidats nuls à la place de cellules de move parfaitement jouables).
+
+    Ce signal est le bit `present` du bloc de candidats, et non plus le bit de phase : les ids
+    4-11 sont aussi des slots de pose pendant la phase de MOUVEMENT, quand une escouade en
+    réserves arrive (20.04).
     """
-    import gymnasium as gym
-    import torch
 
-    from ai.spatial_extractor import SpatialCombinedExtractor
-    from engine.observation_builder import ObservationBuilder
-    from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
-
-    spaces: dict[str, gym.spaces.Space] = {
-        key: gym.spaces.Box(low=-np.inf, high=np.inf, shape=shape, dtype=np.float32)
-        for key, shape in ObservationBuilder.squad_obs_shapes().items()
-    }
-    spaces["grid"] = gym.spaces.Box(
-        low=0.0, high=1.0, shape=(GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32
-    )
-    extractor = SpatialCombinedExtractor(gym.spaces.Dict(spaces), cnn_features=8)
-    extractor.eval()
-    index = extractor.deployment_phase_flag_index()
-
-    def _flag(observation) -> float:
-        batched = {
-            key: torch.as_tensor(value, dtype=torch.float32).unsqueeze(0)
-            for key, value in observation.items()
-        }
-        with torch.no_grad():
-            return float(extractor(batched)[0, index])
+    def _routes(observation) -> bool:
+        return bool(observation["deploy_cand_bin"][:, -1].any())
 
     eng = _load()
     gs = eng.game_state
-    assert _flag(eng._build_observation()) == 1.0, (
-        "phase de déploiement réelle : le drapeau de routage est à 0, les slots 4-11 seraient "
+    assert _routes(eng._build_observation()), (
+        "phase de déploiement réelle : aucun candidat présent, les slots 4-11 seraient "
         "scorés par la conv des cellules de move"
     )
 
     for _steps, _mask, _eligible in _deployment_steps(eng):
         pass
-    assert _flag(eng._build_observation()) == 0.0, (
-        f"phase {gs.get('phase')} : le drapeau de routage est resté à 1"
+    assert not _routes(eng._build_observation()), (
+        f"phase {gs.get('phase')} : des candidats de pose sont encore présents"
     )

@@ -820,15 +820,16 @@ def test_deploy_logits_come_from_the_deploy_pointer_in_deployment_phase(model):
 
 @pytest.mark.parametrize("phase", ["move", "command", "shoot", "charge", "fight"])
 def test_outside_deployment_the_same_ids_stay_move_cells(model, phase):
-    """⚠️ MOITIÉ INVERSE DU VERROU. Hors déploiement, les ids 4-11 restent des CELLULES.
+    """⚠️ MOITIÉ INVERSE DU VERROU. Sans candidat de pose, les ids 4-11 restent des CELLULES.
 
-    Router hors phase de déploiement serait pire que ne pas router du tout : le bloc
-    `deploy_cand_*` est nul par contrat hors de cette phase, donc le produit scalaire rendrait
-    8 logits rigoureusement égaux — un choix uniforme sur 8 cellules parfaitement jouables.
+    Router alors serait pire que ne pas router du tout : le bloc `deploy_cand_*` est nul quand
+    aucune mise en place n'est ouverte, donc le produit scalaire rendrait 8 logits rigoureusement
+    égaux — un choix uniforme sur 8 cellules parfaitement jouables.
 
-    `command` est là pour l'alignement de l'INDEX du drapeau : c'est le bit VOISIN de
-    `phase_deployment` dans `global_bin`. Un index décalé d'un cran routerait ici (le décalage
-    dans l'autre sens, lui, est attrapé par le test de phase de déploiement ci-dessus).
+    Les cinq phases sont rejouées parce que le routage ne les nomme plus : il lit la présence de
+    candidats. Aucune de ces observations n'en porte, donc aucune ne doit router — y compris
+    `move`, la phase où un ingress, LUI, en porterait (cf. le test de mise en place hors
+    déploiement plus bas).
     """
     policy = model.policy
     policy.set_training_mode(False)
@@ -1013,19 +1014,58 @@ def test_activate_head_costs_nothing_per_slot(model):
             )
 
 
-def test_a_non_binary_phase_flag_raises(model):
-    """Le drapeau de phase doit rester 0/1 : normalisé, il ferait router au hasard.
+def test_a_non_binary_present_flag_raises(model):
+    """Le bit `present` des candidats doit rester 0/1 : normalisé, il ferait router au hasard.
 
-    `global_bin` est hors `norm_obs_keys` (ai/train._vec_norm_obs_keys) précisément pour ça. Si
-    cette exclusion tombait, le routage des ids 4-11 ne reposerait plus sur rien — et le seul
-    symptôme serait un agent qui déploie mal.
+    `deploy_cand_bin` est hors `norm_obs_keys` (ai/train._vec_norm_obs_keys, qui ne normalise que
+    `global_cont`) précisément pour ça. Si cette exclusion tombait, le routage des ids 4-11 ne
+    reposerait plus sur rien — et le seul symptôme serait un agent qui pose mal.
     """
     policy = model.policy
     policy.set_training_mode(False)
     obs = _tensors(_deploy_obs(batch=1))
-    obs["global_bin"][:, global_bin_index("phase_deployment")] = 0.7
-    with pytest.raises(RuntimeError, match="phase_deployment"):
+    obs["deploy_cand_bin"][:, 0, _CAND_PRESENT] = 0.7
+    with pytest.raises(RuntimeError, match="present"):
         policy._split_features(obs)
+
+
+def test_placement_slots_route_to_the_pointer_outside_the_deployment_phase(model):
+    """Une MISE EN PLACE hors phase de déploiement route aussi vers la tête pointeur.
+
+    C'est le cas de l'ingress move (20.04) : une escouade en réserves arrive pendant la phase de
+    MOUVEMENT, et le masque lui ouvre les mêmes ids 4-10 — ce sont des slots de pose, pas des
+    cellules de la grille égocentrique. Le routage lisait le bit `phase_deployment`, donc il
+    laissait ces logits à la conv 1x1, aux cellules (0, 4..11) de la fenêtre : des cellules sans
+    aucun rapport avec les hexes candidats, c'est-à-dire le défaut §0.44 lui-même, resté ouvert
+    pour la seule arrivée de réserves.
+
+    Le verrou porte sur la PRÉSENCE de candidats, pas sur le nom de la phase : c'est exactement
+    ce que le masque ouvre.
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    # Candidats de pose présents, mais phase de MOUVEMENT : la situation d'un ingress.
+    obs = _zero_obs(batch=1, phase="move")
+    obs["deploy_cand_bin"][:, :3, _CAND_PRESENT] = 1.0
+    for slot in range(3):
+        obs["deploy_cand_cont"][:, slot, deploy_cand_cont_index("enemy_distance")] = 4.0 + slot
+        obs["deploy_cand_cont"][:, slot, deploy_cand_cont_index("col_rel")] = 1.0 - slot
+    tensors = _tensors(obs)
+    with torch.no_grad():
+        feats = policy._split_features(tensors)
+        latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
+        produced = policy._action_logits(latent_pi, feats)
+        move = policy._move_logits(latent_pi, feats.move_map)
+
+    low, high = DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_SLOT_COUNT
+    assert not torch.allclose(produced[:, low:high], move[:, low:high], atol=1e-6), (
+        "phase move avec des candidats de pose présents : les ids 4-11 sortent encore de la "
+        "conv des cellules de move au lieu de la tête pointeur"
+    )
+    # VERT VACANT écarté : hors de la plage de pose, rien ne doit avoir bougé.
+    assert torch.allclose(produced[:, :low], move[:, :low], atol=1e-6), (
+        "les cellules hors plage de pose ont été modifiées"
+    )
 
 
 def test_pointer_requires_the_entity_extractor():

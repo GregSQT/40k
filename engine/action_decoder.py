@@ -117,6 +117,18 @@ PENDING_SHOOT_WEAPON_SEL_KEY = "pending_shoot_weapon_split"
 #: décrivent des aires légales différentes.
 INGRESS_SLOT_CANDIDATES_CACHE_KEY = "_ingress_slot_candidates"
 
+#: Escouade pour laquelle le masque du step COURANT ouvre des slots de mise en place hors
+#: déploiement (ingress 20.04), ou ``None``. Écrit à un seul endroit — la construction du
+#: masque — et relu par l'observation, qui décrit alors les candidats de ces slots au lieu de
+#: laisser l'agent choisir entre sept boîtes noires (§0.40 point 3, étendu à 20.04).
+#:
+#: POURQUOI un marqueur plutôt qu'une condition recopiée : l'observation ne peut pas redemander
+#: « le masque ouvrirait-il un ingress ? » sans rejouer la cascade de branches qui l'établit
+#: (choix d'activation prioritaire, réserves, déclaration de vol). Recopier ce prédicat, c'est
+#: le laisser diverger — le défaut D1 obs ↔ action. Même patron que la carte de cellules de move
+#: (`store_squad_move_cell_map` / `read_squad_move_cell_map`) : le masque écrit, l'obs relit.
+INGRESS_OPEN_SLOTS_KEY = "_ingress_open_slots"
+
 
 def _record_ingress_offer(
     game_state: Dict[str, Any], player: int, squad_id: Any, has_slot: bool
@@ -422,6 +434,13 @@ class ActionDecoder:
         Advance roll : rollé ici une seule fois par activation, stocké dans game_state.
         """
         mask = np.zeros(self.total_action_size, dtype=bool)
+        # Sur QUELLE escouade ce masque ouvre-t-il des slots de MISE EN PLACE hors déploiement
+        # (ingress 20.04) ? Effacé ici et posé au seul endroit qui le sait — la branche 2
+        # ci-dessous. Un seul point d'écriture par construction de masque, donc aucune rémanence
+        # possible : l'observation qui le relit (`_encode_deployment_candidates`) ne peut pas
+        # décrire des candidats sur un step où le masque ouvre autre chose, par exemple un choix
+        # d'activation dont la tête de pool se trouve être en réserves.
+        game_state[INGRESS_OPEN_SLOTS_KEY] = None
 
         # Décision agent en attente (V11 §9.3 P2) : elle est EXCLUSIVE. Tant qu'elle n'est pas
         # jouée, le moteur est arrêté sur un point de choix — exactement comme le PvP l'est sur
@@ -633,6 +652,11 @@ class ActionDecoder:
             for action_int in self.ingress_slot_candidates(game_state, squad_id):
                 mask[action_int] = True
             mask[SQUAD_ACTION_WAIT] = True
+            # C'est ICI, et nulle part ailleurs, qu'on sait que les ids 4-10 sont des slots de
+            # POSE pour cette escouade — les branches précédentes en ont fait autre chose, la
+            # suivante en fera des cellules de move. L'observation le relit pour décrire ce que
+            # chaque slot poserait (cf. `INGRESS_OPEN_SLOTS_KEY`).
+            game_state[INGRESS_OPEN_SLOTS_KEY] = str(squad_id)
             return mask, eligible_units
 
         # ─── 3. TAKE TO THE SKIES (21.03, V11 §0.48 élément `L6`) ───
@@ -2444,7 +2468,6 @@ class ActionDecoder:
         current_deployer: int,
         valid_hexes: List[tuple[int, int]],
         scoring_cache: Optional[Dict[str, Any]] = None,
-        with_los: bool = True,
     ) -> Dict[str, Any]:
         """Ingrédients de score, calculés UNE fois pour les 7 stratégies.
 
@@ -2480,23 +2503,19 @@ class ActionDecoder:
         center_row = (int(rows.min()) + int(rows.max())) // 2
 
         n = len(valid_hexes)
-        # `with_los=False` (ingress 20.04) : les deux colonnes d'exposition ne sont PAS calculées
-        # et valent None — pas zéro. Un zéro serait une valeur par défaut indiscernable d'une
-        # exposition réelle nulle ; None fait lever tout lecteur qui les attendrait.
-        los = np.empty(n, dtype=np.int64) if with_los else None
-        potential_los = np.empty(n, dtype=np.int64) if with_los else None
+        los = np.empty(n, dtype=np.int64)
+        potential_los = np.empty(n, dtype=np.int64)
         cluster = np.empty(n, dtype=np.int64)
         for i, h in enumerate(valid_hexes):
             key = (int(h[0]), int(h[1]))
-            if with_los:
-                if key not in los_exposure_by_hex:
-                    raise KeyError(f"Missing los_exposure cache entry for hex ({key[0]},{key[1]})")
-                if key not in potential_los_exposure_by_hex:
-                    raise KeyError(
-                        f"Missing potential_los_exposure cache entry for hex ({key[0]},{key[1]})"
-                    )
-                los[i] = los_exposure_by_hex[key]  # type: ignore[index]
-                potential_los[i] = potential_los_exposure_by_hex[key]  # type: ignore[index]
+            if key not in los_exposure_by_hex:
+                raise KeyError(f"Missing los_exposure cache entry for hex ({key[0]},{key[1]})")
+            if key not in potential_los_exposure_by_hex:
+                raise KeyError(
+                    f"Missing potential_los_exposure cache entry for hex ({key[0]},{key[1]})"
+                )
+            los[i] = los_exposure_by_hex[key]
+            potential_los[i] = potential_los_exposure_by_hex[key]
             cluster[i] = ally_col_counts[key[0]] if key[0] in ally_col_counts else 0
 
         nearest_enemy = self._nearest_hex_distance_vec(cols, rows, enemy_reference_hexes)
@@ -2689,93 +2708,6 @@ class ActionDecoder:
         }
         return candidates
 
-    def _build_ingress_scoring_cache(
-        self, game_state: Dict[str, Any], player: int
-    ) -> Dict[str, Any]:
-        """Ingrédients de score d'un ingress move — SANS exposition de ligne de vue.
-
-        POURQUOI cette variante existe, et pourquoi elle n'est pas une dégradation cachée :
-        `_build_deployment_scoring_cache` calcule, pour CHAQUE case candidate, combien d'unités
-        ennemies la voient. C'est une LoS par (ennemi × case). La zone de déploiement fait
-        ~16 000 cases et n'est scorée qu'une fois par pose ; le pool d'un ingress Deep Strike
-        (24.09) fait TOUT le plateau — **57 538 cases mesurées** sur le board 44x60x5 — et doit
-        être re-scoré à chaque round (les ennemis ont bougé). Mesure : **2,98 s** pour la seule
-        exposition, contre 0,16 s pour tout le reste (colonnes + tri + validation du plan).
-        À ce prix, une escouade en réserves coûterait plus cher qu'un épisode entier.
-
-        Ce qui est perdu, exactement : les colonnes `los` / `potential_los` ne servaient QU'À
-        départager les candidats d'un slot. L'agent ne les voit pas pour un ingress —
-        `_encode_deployment_candidates` n'émet le registre de candidats qu'en PHASE DE
-        DÉPLOIEMENT — donc aucune feature d'observation ne devient fausse. L'ordre des slots
-        d'ingress est celui de `_ingress_slot_order`, qui n'en dépend pas.
-        """
-        deployed_snapshot = self._build_deployed_snapshot(game_state)
-        ally_col_counts: Dict[int, int] = {}
-        ally_deployed_hexes: List[tuple[int, int]] = []
-        for unit_player, col, row in deployed_snapshot.values():
-            if unit_player != int(player):
-                continue
-            ally_deployed_hexes.append((col, row))
-            ally_col_counts[col] = ally_col_counts.get(col, 0) + 1  # get allowed (compteur)
-        return {
-            "current_deployer": int(player),
-            "deployed_snapshot": deployed_snapshot,
-            "deployed_snapshot_version": self._build_deployed_snapshot_version(deployed_snapshot),
-            "ally_col_counts": ally_col_counts,
-            "ally_deployed_hexes": ally_deployed_hexes,
-            # Absentes VOLONTAIREMENT (cf. docstring) : tout lecteur qui les attendrait lèvera.
-            "los_exposure_by_hex": None,
-            "potential_los_exposure_by_hex": None,
-        }
-
-    @staticmethod
-    def _ingress_slot_order(columns: Dict[str, Any], action_int: int) -> "np.ndarray":
-        """Ordre de préférence de la stratégie ``action_int`` pour un INGRESS MOVE (20.04).
-
-        Jumeau de `_deployment_slot_order` — mêmes 7 intentions, même tri lexicographique, même
-        départage final par proximité au centre — PRIVÉ des deux clés d'exposition de ligne de
-        vue, que le scoring d'ingress ne calcule pas (cf. `_build_ingress_scoring_cache`).
-        Les intentions restent distinctes : 4 = front agressif, 5 = pression sur objectif,
-        6 = sûr (loin des ennemis, près des alliés), 7 = flanc gauche, 8 = flanc droit,
-        9 = centre hub, 10 = ancre arrière.
-        """
-        nearest_enemy = columns["nearest_enemy"]
-        nearest_objective = columns["nearest_objective"]
-        nearest_ally = columns["nearest_ally"]
-        cluster = columns["cluster"]
-        progress = columns["progress"]
-        center_distance = columns["center_distance"]
-        cols = columns["cols"]
-        rows = columns["rows"]
-
-        tail = (
-            -np.abs(cols - columns["center_col"]),
-            -np.abs(rows - columns["center_row"]),
-        )
-        if action_int == DEPLOY_SLOT_BASE + 0:
-            keys = (progress, -nearest_enemy, -nearest_objective, -cluster, -center_distance) + tail
-        elif action_int == DEPLOY_SLOT_BASE + 1:
-            keys = (-nearest_objective, progress, -nearest_enemy, -cluster, -center_distance) + tail
-        elif action_int == DEPLOY_SLOT_BASE + 2:
-            keys = (nearest_enemy, -nearest_objective, -nearest_ally, -cluster, -center_distance) + tail
-        elif action_int == DEPLOY_SLOT_BASE + 3:
-            keys = (-cols, -nearest_objective, nearest_enemy, -cluster) + tail
-        elif action_int == DEPLOY_SLOT_BASE + 4:
-            keys = (cols, -nearest_objective, nearest_enemy, -cluster) + tail
-        elif action_int == DEPLOY_SLOT_BASE + 5:
-            # centre_hub : jumeau de _deployment_slot_order +5, sans los/potential_los.
-            keys = (-center_distance, -nearest_objective,
-                    progress, -cluster) + tail
-        elif action_int == DEPLOY_SLOT_BASE + 6:
-            # safe_rear : jumeau de _deployment_slot_order +6, sans los/potential_los.
-            keys = (nearest_enemy, -nearest_objective, -nearest_ally,
-                    -cluster, -center_distance) + tail
-        else:
-            raise ValueError(f"Invalid ingress action: {action_int}")
-
-        index = np.arange(len(cols), dtype=np.int64)
-        return np.lexsort((index,) + tuple(-key for key in reversed(keys)))
-
     def ingress_slot_candidates(
         self, game_state: Dict[str, Any], squad_id: str
     ) -> Dict[int, Dict[str, Any]]:
@@ -2823,9 +2755,25 @@ class ActionDecoder:
         # Ordre STABLE et déterministe : les stratégies trient ces hexes, et `np.lexsort`
         # départage les ex æquo par l'index d'apparition (cf. `_deployment_slot_order`).
         valid_hexes: List[tuple[int, int]] = sorted(pool)
-        scoring_cache = self._build_ingress_scoring_cache(game_state, player)
+        # MÊME cache de scoring que le déploiement, sur les hexes du pool d'ingress. Une variante
+        # allégée a existé ici, SANS les deux colonnes d'exposition de ligne de vue, au motif
+        # qu'elles coûtaient 2,98 s sur les 57 538 cases du pool. Deux raisons de l'avoir retirée,
+        # et la première est une panne, pas une préférence :
+        #   1. `_deployment_slot_order` ne distingue « sûr » (slot 6) d'« arrière-garde »
+        #      (slot 10) QUE par `-los, -potential_los`. Privées de ces deux clés, les deux
+        #      stratégies devenaient le même tri, donc le même hexe : l'agent recevait sept
+        #      slots dont deux rigoureusement redondants, sur les deux terrains.
+        #   2. Le coût qui justifiait la variante est périmé. Mesuré après la vectorisation
+        #      batch de §0.64 : 0,120 s pour les 17 609 cases d'un pool de bord et 0,471 s pour
+        #      les 59 050 cases d'un pool Deep Strike, à 9 sources — 6 fois moins que le chiffre
+        #      qui avait fondé la divergence, sur un pool pourtant plus grand. Le résultat est
+        #      mémoïsé juste au-dessus, donc payé une fois par escouade et par round.
+        # L'ingress redevient ainsi le JUMEAU EXACT du déploiement que cette docstring annonce :
+        # mêmes colonnes, même tri, mêmes clés de candidat — et c'est ce dernier point que
+        # l'observation lit, par `require_key` (`_encode_deployment_candidates`).
+        scoring_cache = self._build_deployment_scoring_cache(game_state, player, valid_hexes)
         columns = self._deployment_score_columns(
-            game_state, player, valid_hexes, scoring_cache, with_los=False
+            game_state, player, valid_hexes, scoring_cache
         )
         cols = columns["cols"]
         rows = columns["rows"]
@@ -2833,7 +2781,7 @@ class ActionDecoder:
         candidates: Dict[int, Dict[str, Any]] = {}
         for slot in range(open_deploy_slot_count(len(valid_hexes))):
             action_int = DEPLOY_SLOT_BASE + slot
-            order = self._ingress_slot_order(columns, action_int)
+            order = self._deployment_slot_order(columns, action_int)
             for idx in order:
                 i = int(idx)
                 plan = build_validated_deployment_plan(
@@ -2848,6 +2796,8 @@ class ActionDecoder:
                     "nearest_objective_distance": int(columns["nearest_objective"][i]),
                     "nearest_ally_distance": int(columns["nearest_ally"][i]),
                     "has_deployed_ally": columns["has_deployed_ally"],
+                    "los_exposure": int(columns["los"][i]),
+                    "potential_los_exposure": int(columns["potential_los"][i]),
                     "ally_col_count": int(columns["cluster"][i]),
                 }
                 break
