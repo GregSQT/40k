@@ -28,7 +28,7 @@ pourquoi, avec les mesures.
 |---|---|---|
 | A — intégration PvP | 3 min 31 (`-n 6 --dist load`, mesuré 2026-08-05) | déjà dans la vérification large |
 | B — vitest | **4,0 s** — 36 fichiers, 430 tests | **ajoutée le 2026-09-09** |
-| C — Playwright | **34 s** — 14 tests : **12 verts**, 1 skippé, 1 première baseline (mesuré 2026-09-09 sur un harnais assaini) | **candidate** : voir ci-dessous |
+| C — Playwright | **27 s** — 14 tests : 11 verts, **2 rouges** (parité front/back), 1 skippé (mesuré 2026-09-09) | **dehors** : les deux invariants ne vérifiaient rien, voir ci-dessous |
 
 **Ce que la mesure a trouvé, et qui rendait la couche B rouge par construction.** Avant ce jour,
 `npx vitest run` rendait `Test Files 1 failed | 36 passed (37)` quel que soit l'état du code : le
@@ -40,15 +40,26 @@ La frontière entre les deux harnais est désormais déclarée dans `frontend/vi
 `tests/unit/scripts/test_vitest_collect_scope.py`, qui applique le motif AU DISQUE dans les deux
 sens : aucun spec Playwright collecté par vitest, et aucun test de `src/` laissé hors périmètre.
 
-**La couche C, remise en état le 2026-09-09.** Sur ses 14 tests : **12 passent**, 1 est skippé, et
-1 écrit sa baseline de régression visuelle (échec attendu au premier run d'une machine, cf. plus
-bas). Le mur est de **34 s** — pas 6 min 42 : ce chiffre-là venait de runs pollués, voir le défaut
-n° 4.
+**La couche C, remise en état le 2026-09-09.** Sur ses 14 tests : **11 passent**, 1 est skippé, et
+**2 échouent** — les deux invariants de parité front/back, pour la raison expliquée juste après.
+Le mur est de **27 s** ; le « 6 min 42 » publié plus tôt le même jour venait de runs pollués par un
+serveur fantôme (défaut n° 4).
 
-Les deux invariants qui font l'intérêt de cette couche **passent** : `greenCircleUnitIds ⊆
-move_activation_pool` (T12-4) et `movePreviewHexes ⊆ valid_move_destinations_pool` (T12-6). C'est la
-seule vérification automatisée que ce que le navigateur affiche correspond à ce que le moteur
-autorise.
+⚠️ **Les deux invariants de parité front/back étaient des VERTS VACANTS** — et le rester aurait été
+pire que leur absence, puisqu'on les croyait protecteurs. `greenCircleUnitIds ⊆
+move_activation_pool` (T12-4) et `movePreviewHexes ⊆ valid_move_destinations_pool` (T12-6)
+passaient sans jamais comparer, pour trois raisons cumulées :
+
+1. l'appel à `/api/game/state` omettait l'en-tête anti-CSRF et recevait **401** ;
+2. un `if (status !== 200) return;` faisait **sortir le test sans assertion**, donc au vert ;
+3. le pool était lu au niveau racine, alors que l'API l'enveloppe dans `game_state` : `undefined`,
+   puis `?? []`, donc une inclusion vraie **par construction** (∅ ⊆ tout).
+
+Les trois sont corrigés, et les six abandons muets du fichier sont devenus des assertions. Il reste
+un quatrième défaut, de **conception** : ces tests s'intitulent « en phase move » et ne font jamais
+avancer la partie jusqu'à cette phase — la partie servie est en phase `command`, tour 1, avec un
+`move_activation_pool` légitimement vide. **Ils sont donc rouges**, et c'est l'état honnête : la
+parité front/back n'a jamais été vérifiée par personne.
 
 Que le fichier n'ait jamais fonctionné est daté, pas supposé : `frontend/package.json` déclare
 `"type": "module"` depuis le **2025-09-07** (`16937e82`), et `global-setup.ts` a été écrit avec
@@ -100,15 +111,18 @@ direct avec le cookie de session mais **sans** l'en-tête `X-W40K-Client`, qu'ex
 authentifiée par cookie. Il recevait 401, hors du `[200, 404]` attendu. Corrigé — c'est la même
 erreur que celle qui m'avait fait suspecter l'authentification pendant le diagnostic.
 
-**Les deux échecs qui restent, et pourquoi ils ne sont pas des défauts.** Le test *skippé* l'est par
-le spec lui-même ; le test de *régression visuelle* écrit sa baseline au premier run puis échoue une
-fois — comportement normal de `toHaveScreenshot`. Ces baselines ne sont **pas versionnées** : une
-image de 810 Ko qui fige le rendu d'une machine (polices, GPU headless) échouerait sur une autre.
-Conséquence assumée : ce test compare au rendu précédent de LA machine où il tourne, et non à une
-référence commune. Le versionner reste un choix ouvert.
+**Le test skippé et la régression visuelle.** Le *skip* vient du spec lui-même, quand le hook
+`window.__W40K_TEST__` n'est pas exposé. Le test de *régression visuelle* écrit sa baseline au
+premier run d'une machine puis échoue une fois — comportement normal de `toHaveScreenshot`. Ces
+baselines ne sont **pas versionnées** : une image de 810 Ko qui fige le rendu d'une machine
+(polices, GPU headless) échouerait sur une autre. Conséquence assumée : ce test compare au rendu
+précédent de LA machine où il tourne, et non à une référence commune. Le versionner reste un choix
+ouvert.
 
-Une fois ces quatre points réglés, son mur sera à re-mesurer sur des tests qui passent : 7 min de
-timeouts ne dit rien du coût réel de la couche.
+**Bilan.** Sept défauts trouvés en exécutant cette couche pour la première fois ; six corrigés. Le
+septième — les invariants de parité qui ne construisent pas la phase move qu'ils prétendent
+vérifier — reste ouvert, et les deux tests concernés sont **rouges**. C'est délibéré : un rouge qui
+dit la vérité vaut mieux que le vert vide qu'il remplace.
 
 ### Pourquoi `--dist worksteal` (mesuré 2026-07-26)
 
