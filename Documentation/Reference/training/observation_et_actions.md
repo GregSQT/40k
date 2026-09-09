@@ -23,13 +23,13 @@ lecture, jamais une copie de chiffres qui dériverait.
 
 | Clé | Forme | Contenu |
 |---|---|---|
-| `global_cont` / `global_bin` | (23,) / (93,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs**, **OC live et statut secured (14.02/14.03) par objectif** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur, clause du +1 Wound d'Oath ouverte — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `hidden`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
+| `global_cont` / `global_bin` | (23,) / (94,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs**, **OC live et statut secured (14.02/14.03) par objectif** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur, clause du +1 Wound d'Oath ouverte — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `hidden`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
 | `allies_cont` / `allies_bin` | (12, 22) / (12, 28) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent les **mots-clés de catégorie** (`kw_infantry`, `kw_vehicle`, `kw_monster`, `kw_fly`, `kw_psyker`), portés par TOUTE entité, et — pour les ennemis seulement — `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
 | `allies_ability_ids` / `allies_status_ids` | (12, 8) / (12, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../../../config/unit_rules.json) et [`config/unit_statuses.json`](../../../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
 | `allies_wpn_cont` / `_bin` / `_rule_ids` | (12, 20, 13) / (12, 20, 2) / (12, 20, 6) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants, params de règles, et les règles booléennes en **ids** (3ᵉ `EmbeddingBag`, cf. `*_wpn_rule_ids`) |
 | `allies_types_cont` / `_bin` | (12, 6, 5) / (12, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
-| `self_models_cont` / `_bin` | (20, 2) / (20, 4) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement, **bit de présence** |
+| `self_models_cont` / `_bin` | (20, 3) / (20, 9) | ce qui est irréductiblement individuel : position relative, **PV courants (`hp_ratio` + bit `wounded`)**, **rôle d'allocation en one-hot (règle 19)**, éligibilité au combat, engagement, hauteur, **bit de présence**. Les PV et le rôle y sont revenus avec P3-0 : `COHERENCY_SLOT_i` désigne la LIGNE `i` de ce bloc et la tête pointeur la score sur son seul embedding, sans biais de slot — sans eux, un personnage attaché et une figurine de base sortaient des logits égaux |
 | `grid` | (12, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37). **Centre de la fenêtre** (`ObservationBuilder.squad_grid_anchor`) : l'escouade active — sauf si elle n'est **pas encore posée** (`deployed_on_turn is None`, phase de déploiement), auquel cas c'est un hex de **sa zone de déploiement** ; avant V11 §0.40 la fenêtre était centrée sur la sentinelle `(-1,-1)`, donc sur une autre région du plateau. Deux canaux terminaux : **zones obscurantes** (13.10) — sous-ensemble des cases du couvert, **dilaté du même rayon de socle**, parce que le moteur tranche 13.09 par chevauchement de socle (`compute_models_in_obscuring_terrain` délègue au test disque↔polygone du couvert) ; il vaut ce que le couvert ne dit pas, à savoir où l'on peut devenir `hidden`, donc **intirable** au-delà de la portée de détection. Et **exposition à la vue ennemie** : part des escouades ennemies **vivantes et posées** qui voient la cellule, dans [0,1]. Écrite sur les **cellules du pool de move uniquement**, à l'hexe que le décodeur y enverra (`read_squad_move_cell_map`) — donc **0 hors phase de mouvement**, même doctrine que le coût géodésique, et **aucune seconde réponse cellule→hexe** à côté de celle du décodeur (mesuré : les deux divergent sur 26,7 % des cellules jouables). **Approximation assumée**, identique à celle de l'exposition de déploiement (§0.40 point 3) : la source est l'**ancre au sol** de l'escouade ennemie — pas ses figurines, pas son étage — et le `hidden` 13.09 n'est pas appliqué ; le tracé est `batch_ground_hex_can_see`, verrouillé équivalent à `compute_unit_los` sur les paires SOL. **Sans cache**, par mesure et non par oubli : une carte de visibilité plateau mémoïsée par hexe source rate 26 % du temps (l'ancre ennemie bouge à chaque déplacement ET à chaque perte de figurine) et ne rembourse rien |
 
 ### Vue d'ensemble
@@ -39,11 +39,11 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (17 795 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (17 916 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (23,)                =      23               │
-│    global_bin             (93,)                =      93               │
+│    global_bin             (94,)                =      94               │
 │                                                                        │
 │  MES ESCOUADES — ordre = slots d'activation       K_ALLY_SLOTS = 12    │
 │    allies_cont            (12, 22)             =     264               │
@@ -68,8 +68,8 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    enemies_types_bin      (20, 6, 5)           =     600               │
 │                                                                        │
 │  MES FIGURINES (individuel)                        SQUAD_TOP_K = 20    │
-│    self_models_cont       (20, 2)              =      40               │
-│    self_models_bin        (20, 4)              =      80               │
+│    self_models_cont       (20, 3)              =      60               │
+│    self_models_bin        (20, 9)              =     180               │
 │                                                                        │
 │  DÉCISION AGENT — candidats de CHOICE_i        MAX_DECISION_OPTIONS = 6│
 │    decision_ctx_bin       (17,)                =      17               │
@@ -80,7 +80,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_cont       (8, 8)               =      64               │
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      17 795              │
+│  TOTAL vectoriel (= obs_size)                      17 916              │
 │  + grid  (12, 32, 32) = 12 288, fournie À PART (non comptée)           │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -188,58 +188,59 @@ global_bin[41]     = my_oath_target_selected                # 0.0 / 1.0 — une 
 global_bin[42]     = enemy_oath_target_selected             # 0.0 / 1.0 — idem cote adverse
 global_bin[43]     = my_oath_wound_bonus_active             # 0.0 / 1.0 — clause du +1 Wound d'Oath ouverte pour MON armee
 global_bin[44]     = enemy_oath_wound_bonus_active          # 0.0 / 1.0 — idem cote adverse
+global_bin[45]     = coherency_removal_pending              # 0.0 / 1.0 — 03.03 : l'escouade OBSERVEE doit designer une figurine a detruire
 # RÉSERVÉ — missions primaires (J4). Dans global_bin et non global_cont : VecNormalize ne
 # normalise que global_cont ; des slots toujours nuls y auraient variance ≈ 0 → clipping ±10
 # au --append. Ici les valeurs restent brutes. Implémentation prévue : type mission (one-hot
 # ~5 bits), triggers par round (~5), flags objectif (~10), VP primaire quantifié (~12).
-global_bin[45]     = reserved_mission_bin_0                 # réservé J4 — voir ci-dessus
-global_bin[46]     = reserved_mission_bin_1                 # réservé J4
-global_bin[47]     = reserved_mission_bin_2                 # réservé J4
-global_bin[48]     = reserved_mission_bin_3                 # réservé J4
-global_bin[49]     = reserved_mission_bin_4                 # réservé J4
-global_bin[50]     = reserved_mission_bin_5                 # réservé J4
-global_bin[51]     = reserved_mission_bin_6                 # réservé J4
-global_bin[52]     = reserved_mission_bin_7                 # réservé J4
-global_bin[53]     = reserved_mission_bin_8                 # réservé J4
-global_bin[54]     = reserved_mission_bin_9                 # réservé J4
-global_bin[55]     = reserved_mission_bin_10                # réservé J4
-global_bin[56]     = reserved_mission_bin_11                # réservé J4
-global_bin[57]     = reserved_mission_bin_12                # réservé J4
-global_bin[58]     = reserved_mission_bin_13                # réservé J4
-global_bin[59]     = reserved_mission_bin_14                # réservé J4
-global_bin[60]     = reserved_mission_bin_15                # réservé J4
-global_bin[61]     = reserved_mission_bin_16                # réservé J4
-global_bin[62]     = reserved_mission_bin_17                # réservé J4
-global_bin[63]     = reserved_mission_bin_18                # réservé J4
-global_bin[64]     = reserved_mission_bin_19                # réservé J4
-global_bin[65]     = reserved_mission_bin_20                # réservé J4
-global_bin[66]     = reserved_mission_bin_21                # réservé J4
-global_bin[67]     = reserved_mission_bin_22                # réservé J4
-global_bin[68]     = reserved_mission_bin_23                # réservé J4
-global_bin[69]     = reserved_mission_bin_24                # réservé J4
-global_bin[70]     = reserved_mission_bin_25                # réservé J4
-global_bin[71]     = reserved_mission_bin_26                # réservé J4
-global_bin[72]     = reserved_mission_bin_27                # réservé J4
-global_bin[73]     = reserved_mission_bin_28                # réservé J4
-global_bin[74]     = reserved_mission_bin_29                # réservé J4
-global_bin[75]     = reserved_mission_bin_30                # réservé J4
-global_bin[76]     = reserved_mission_bin_31                # réservé J4
-global_bin[77]     = reserved_mission_bin_32                # réservé J4
-global_bin[78]     = reserved_mission_bin_33                # réservé J4
-global_bin[79]     = reserved_mission_bin_34                # réservé J4
-global_bin[80]     = reserved_mission_bin_35                # réservé J4
-global_bin[81]     = reserved_mission_bin_36                # réservé J4
-global_bin[82]     = reserved_mission_bin_37                # réservé J4
-global_bin[83]     = reserved_mission_bin_38                # réservé J4
-global_bin[84]     = reserved_mission_bin_39                # réservé J4
-global_bin[85]     = reserved_mission_bin_40                # réservé J4
-global_bin[86]     = reserved_mission_bin_41                # réservé J4
-global_bin[87]     = reserved_mission_bin_42                # réservé J4
-global_bin[88]     = reserved_mission_bin_43                # réservé J4
-global_bin[89]     = reserved_mission_bin_44                # réservé J4
-global_bin[90]     = reserved_mission_bin_45                # réservé J4
-global_bin[91]     = reserved_mission_bin_46                # réservé J4
-global_bin[92]     = reserved_mission_bin_47                # réservé J4
+global_bin[46]     = reserved_mission_bin_0                 # réservé J4 — voir ci-dessus
+global_bin[47]     = reserved_mission_bin_1                 # réservé J4
+global_bin[48]     = reserved_mission_bin_2                 # réservé J4
+global_bin[49]     = reserved_mission_bin_3                 # réservé J4
+global_bin[50]     = reserved_mission_bin_4                 # réservé J4
+global_bin[51]     = reserved_mission_bin_5                 # réservé J4
+global_bin[52]     = reserved_mission_bin_6                 # réservé J4
+global_bin[53]     = reserved_mission_bin_7                 # réservé J4
+global_bin[54]     = reserved_mission_bin_8                 # réservé J4
+global_bin[55]     = reserved_mission_bin_9                 # réservé J4
+global_bin[56]     = reserved_mission_bin_10                # réservé J4
+global_bin[57]     = reserved_mission_bin_11                # réservé J4
+global_bin[58]     = reserved_mission_bin_12                # réservé J4
+global_bin[59]     = reserved_mission_bin_13                # réservé J4
+global_bin[60]     = reserved_mission_bin_14                # réservé J4
+global_bin[61]     = reserved_mission_bin_15                # réservé J4
+global_bin[62]     = reserved_mission_bin_16                # réservé J4
+global_bin[63]     = reserved_mission_bin_17                # réservé J4
+global_bin[64]     = reserved_mission_bin_18                # réservé J4
+global_bin[65]     = reserved_mission_bin_19                # réservé J4
+global_bin[66]     = reserved_mission_bin_20                # réservé J4
+global_bin[67]     = reserved_mission_bin_21                # réservé J4
+global_bin[68]     = reserved_mission_bin_22                # réservé J4
+global_bin[69]     = reserved_mission_bin_23                # réservé J4
+global_bin[70]     = reserved_mission_bin_24                # réservé J4
+global_bin[71]     = reserved_mission_bin_25                # réservé J4
+global_bin[72]     = reserved_mission_bin_26                # réservé J4
+global_bin[73]     = reserved_mission_bin_27                # réservé J4
+global_bin[74]     = reserved_mission_bin_28                # réservé J4
+global_bin[75]     = reserved_mission_bin_29                # réservé J4
+global_bin[76]     = reserved_mission_bin_30                # réservé J4
+global_bin[77]     = reserved_mission_bin_31                # réservé J4
+global_bin[78]     = reserved_mission_bin_32                # réservé J4
+global_bin[79]     = reserved_mission_bin_33                # réservé J4
+global_bin[80]     = reserved_mission_bin_34                # réservé J4
+global_bin[81]     = reserved_mission_bin_35                # réservé J4
+global_bin[82]     = reserved_mission_bin_36                # réservé J4
+global_bin[83]     = reserved_mission_bin_37                # réservé J4
+global_bin[84]     = reserved_mission_bin_38                # réservé J4
+global_bin[85]     = reserved_mission_bin_39                # réservé J4
+global_bin[86]     = reserved_mission_bin_40                # réservé J4
+global_bin[87]     = reserved_mission_bin_41                # réservé J4
+global_bin[88]     = reserved_mission_bin_42                # réservé J4
+global_bin[89]     = reserved_mission_bin_43                # réservé J4
+global_bin[90]     = reserved_mission_bin_44                # réservé J4
+global_bin[91]     = reserved_mission_bin_45                # réservé J4
+global_bin[92]     = reserved_mission_bin_46                # réservé J4
+global_bin[93]     = reserved_mission_bin_47                # réservé J4
 ```
 
 Les huit derniers bits sont les **capacites de FACTION** (chantier 03) : globales par construction,
@@ -480,11 +481,29 @@ jamais troncature ; maximum MESURE sur les 4 armureries = 4.
 ```python
 cont[m][0]     = col_rel                                # projection _hex_center SIGNEE (vs centroide arrondi)
 cont[m][1]     = row_rel                                # projection _hex_center SIGNEE (vs centroide arrondi)
+cont[m][2]     = hp_ratio                               # HP_CUR / HP_MAX de CETTE figurine (P3-0)
 bin[m][0]      = fight_eligible                         # 0.0 / 1.0
 bin[m][1]      = in_enemy_ez                            # 0.0 / 1.0
 bin[m][2]      = elevated                               # 0.0 / 1.0 — CETTE figurine finit en hauteur (13.06)
-bin[m][3]      = present                                # 0.0 / 1.0 — masque du bloc (0 = slot vide)
+bin[m][3]      = role_special_weapon                    # 0.0 / 1.0 — one-hot regle 19, MEME ordre que le bloc TYPES
+bin[m][4]      = role_sergeant                          # 0.0 / 1.0
+bin[m][5]      = role_support                           # 0.0 / 1.0
+bin[m][6]      = role_leader                            # 0.0 / 1.0 — aucun bit = figurine de base
+bin[m][7]      = wounded                                # 0.0 / 1.0 — HP_CUR < HP_MAX (version robuste de hp_ratio)
+bin[m][8]      = present                                # 0.0 / 1.0 — masque du bloc (0 = slot vide)
 ```
+
+**`hp_ratio`, `wounded` et le one-hot de rôle sont là pour P3-0** (retrait pour cohérence 03.03).
+`COHERENCY_SLOT_i` désigne la **ligne `i` de ce bloc** et `pointer_policy._point` la score par un
+produit scalaire nu sur son seul embedding, **sans biais de slot** : le rôle porté par le bloc
+TYPES (agrégé PAR TYPE) et le rang du tri de `_squad_models_for_observation` n'étaient
+**atteignables par aucune tête**. Mesuré le 2026-09-09 sur 16 épisodes gym du pool `training`,
+8 points d'arrêt de cohérence : **67 paires de figurines de valeur différente sur 67** avaient une
+ligne `self_models_bin` **identique**, seule leur position les séparant — alors que 4 des 8 pools
+mélangeaient un personnage attaché et des figurines de base. Le bit `wounded` double `hp_ratio`
+volontairement : les continus de ce bloc passent par `EntityRunningNorm`, dont la variance est
+minuscule sur une colonne quasi constante, donc `hp_ratio` y sature à ±10 — le FAIT « entamée »
+doit survivre à cette saturation, le DEGRÉ reste porté par `hp_ratio`.
 
 **Le masque de ce bloc est le bit `present`**, comme pour les registres d'armes et de types
 (§0.32 T-H, 2026-07-28). Il était auparavant **déduit** de la ligne entière
@@ -627,7 +646,7 @@ D ennemis, E escouades amies). Ces blocs ont été matérialisés en **clés de 
 | **A** — contexte général | `global_cont` / `global_bin` | y compris les objectifs : contrôle, présence, distance + direction |
 | **B** — mon escouade | `allies_cont[0]` / `allies_bin[0]` | l'unité active est la **ligne 0** du bloc amis (contrat) ; les features « actif seulement » y sont, ailleurs à zéro |
 | **C1** — types de figurines | `allies_types_*` / `enemies_types_*` | profil défensif + rôle d'allocation + effectif du type |
-| **C2** — mes figurines | `self_models_*` | seulement l'irréductiblement individuel : position relative, éligibilité au combat, engagement |
+| **C2** — mes figurines | `self_models_*` | seulement l'irréductiblement individuel : position relative, PV courants, rôle d'allocation, éligibilité au combat, engagement |
 | **D** — ennemis | `enemies_*` | **ordre contractuel = slots d'action de tir** ; porte `los_can_see` + `cover_vs_observer` + `charge_reachable_max_roll` |
 | **E** — escouades amies | `allies_[1..K-1]` | les alliés sont **agrégés** par le réseau, leur ordre n'a pas de sémantique |
 | *(transverse)* profils d'armes | `*_wpn_*` | même encodeur pour les deux camps ; 86 % du vecteur, seul bloc mémoïsé |
@@ -750,6 +769,17 @@ gym du pool `training` — 39 des 70 points d'arrêt de cible et 39 points d'arr
 des assignations invisibles, et 10 activations sur 12 ont envoyé plusieurs armes sur la MÊME
 cible. Un COMPTAGE et non un bit : un bit « déjà visée » aurait dit la même chose de la première
 et de la troisième arme empilée).
+→ **17916** (rôle et PV par figurine pour le retrait de cohérence, 2026-09-09 : `hp_ratio` dans
+`SELF_MODEL_CONT_FIELDS`, 1 × 20 figurines +20 ; le one-hot de rôle (4 bits) et `wounded` dans
+`SELF_MODEL_BIN_FIELDS`, 5 bits × 20 figurines +100 ; `coherency_removal_pending` dans
+`GLOBAL_BIN_FIELDS` +1. `COHERENCY_SLOT_i` (P3-0) désigne la ligne `i` de `self_models_*`, que la
+tête pointeur score par un produit scalaire nu **sans biais de slot** : le rôle n'existait
+qu'AGRÉGÉ PAR TYPE et les PV courants n'étaient plus observés par figurine depuis §9.4, si bien
+qu'un personnage attaché et une figurine de base sortaient des scores égaux. Mesuré sur
+16 épisodes gym du pool `training` : 67 paires de figurines de valeur différente sur 67 portaient
+une ligne `self_models_bin` IDENTIQUE, et l'observation d'une escouade avec et sans
+`pending_coherency_removal` armé était strictement identique — écart 0.0 sur toutes les clés, sur
+les 8 points d'arrêt rencontrés).
 
 **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
 Depuis le chantier 01, une capacité, un statut ou une faction entière n'est qu'un `obs_id` de

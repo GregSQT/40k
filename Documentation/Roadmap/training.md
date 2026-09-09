@@ -54,6 +54,51 @@ Il reste périmé pendant le MOVE, ce qui justifie que l'obs continue de recalcu
 
 ---
 
+## ✅ Obs — rôle et PV par figurine (retrait de cohérence 03.03) {#role-pv-figurine}
+
+**Livré le 2026-09-09.** `obs_size` 17795 → **17916** : ré-entraînement `--new` obligatoire — il
+l'était déjà pour les lots du même jour, ce lot n'en ajoute aucun.
+
+`COHERENCY_SLOT_i` (P3-0) demande à l'agent quelle figurine **détruire** pour regagner la
+cohérence. Il désigne la ligne `i` de `self_models_*`, que `pointer_policy._point` score par un
+produit scalaire nu **sans biais de slot**, sur un embedding calculé **ligne par ligne**
+(`self_model_encoder`, aucune interaction entre slots). Or la ligne ne portait que
+`col_rel, row_rel, fight_eligible, in_enemy_ez, elevated, present` : le rôle d'allocation
+existait bien dans l'observation, mais **agrégé par TYPE**, et les PV courants n'étaient plus
+observés par figurine depuis §9.4. Le tri de `_squad_models_for_observation` place pourtant les
+personnages en tête — un rang qu'**aucune tête ne lit**.
+
+**Mesuré avant correction** (16 épisodes gym du pool `training`, actions masquées aléatoires,
+3 250 pas) : 8 points d'arrêt de cohérence, dont 4 mêlaient un personnage attaché et des figurines
+de base et 5 des figurines de PV différents ; **67 paires de figurines de valeur différente sur
+67** portaient une ligne `self_models_bin` **identique**, seule leur position les séparant. Le
+choix était donc un tirage au sort entre le Warboss et un Boy. Même mesure sur l'état :
+l'observation d'une escouade **avec et sans** `pending_coherency_removal` armé est strictement
+identique (écart 0.0 sur toutes les clés), alors que le masque, lui, n'ouvre que les slots
+COHERENCY — la politique ne pouvait pas se tromper d'action, mais la **valeur** de l'état ignorait
+qu'une figurine était perdue d'office.
+
+**Ce qui a été livré :**
+
+- one-hot de rôle (4 bits) + `wounded` dans `SELF_MODEL_BIN_FIELDS` (+100) et `hp_ratio` dans
+  `SELF_MODEL_CONT_FIELDS` (+20) — `present` reste **dernier** (§0.37) ;
+- `MODEL_ROLES` devient la **source unique** des deux registres qui portent ce one-hot (bloc TYPES
+  et bloc figurines) : deux tuples écrits à la main auraient pu diverger sans rien lever ;
+- `wounded` double `hp_ratio` **volontairement** : les continus de ce bloc passent par
+  `EntityRunningNorm`, dont la variance est minuscule sur une colonne quasi constante (une figurine
+  à 1 PV max n'est jamais entamée), donc `hp_ratio` y sature à ±10 — le FAIT survit à la
+  saturation, le DEGRÉ reste porté par `hp_ratio` ;
+- `coherency_removal_pending` dans `GLOBAL_BIN_FIELDS` (+1), posé sur l'escouade **observée** et
+  non « un retrait quelque part » : pendant l'arrêt, l'observateur EST l'escouade en attente ;
+- deux verrous, l'un côté moteur (`tests/unit/engine/test_squad_obs_model_value_p3_0.py`), l'autre
+  côté réseau (`tests/unit/ai/test_self_model_value_encoding.py`) : c'est exactement ce qui
+  manquait à `decision_options_cont`, rempli par le moteur et lu par personne.
+
+`ai/spatial_extractor.py` n'a **pas** été touché : ses largeurs d'encodeur sont dérivées des formes
+de l'espace d'observation, donc les colonnes ajoutées entrent d'elles-mêmes — vérifié par test.
+
+---
+
 ## ✅ Obs — CONTEXTE des points d'arrêt à deux temps {#contexte-points-arret-obs}
 
 **Livré le 2026-09-09.** `obs_size` 17091 → **17795** : ré-entraînement `--new` obligatoire.

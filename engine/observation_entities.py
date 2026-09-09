@@ -556,10 +556,16 @@ def unit_bin_index(field: str) -> int:
 MODEL_TYPE_CONT_FIELDS: Tuple[str, ...] = (
     "hp_max", "toughness", "armor_save", "invul_save", "alive_count",
 )
+#: Rôles d'allocation (règle 19), ordre FIGÉ du one-hot. SOURCE UNIQUE des DEUX registres qui les
+#: portent — le bloc TYPES ci-dessous et le bloc « mes figurines » (`SELF_MODEL_BIN_FIELDS`) : deux
+#: tuples écrits à la main auraient pu diverger d'un rôle ou d'un ordre, et rien ne l'aurait dit.
+#: Ce sont les valeurs du champ `role` d'une figurine, donc les clés de `ROLE_TIER`
+#: (`phase_handlers/shared_utils`), verrouillé par test.
+MODEL_ROLES: Tuple[str, ...] = ("special_weapon", "sergeant", "support", "leader")
 #: 4 rôles d'allocation (règle 19) en one-hot + le masque de slot. Aucun bit = figurine de base.
-MODEL_TYPE_BIN_FIELDS: Tuple[str, ...] = (
-    "role_special_weapon", "role_sergeant", "role_support", "role_leader", "present",
-)
+MODEL_TYPE_BIN_FIELDS: Tuple[str, ...] = tuple(
+    f"role_{role}" for role in MODEL_ROLES
+) + ("present",)
 MODEL_TYPE_CONT_SIZE = len(MODEL_TYPE_CONT_FIELDS)
 MODEL_TYPE_BIN_SIZE = len(MODEL_TYPE_BIN_FIELDS)
 
@@ -572,7 +578,12 @@ MODEL_TYPE_BIN_SIZE = len(MODEL_TYPE_BIN_FIELDS)
 #: grille égocentrique et que les directions d'objectif (V11 §0.32 T-I). Ce ne sont PAS des
 #: différences de coordonnées offset : en offset, deux voisins hexagonaux de parités de ligne
 #: différentes n'ont pas la même norme, et l'observation portait alors deux géométries.
-SELF_MODEL_CONT_FIELDS: Tuple[str, ...] = ("col_rel", "row_rel")
+#: `hp_ratio` : `HP_CUR / HP_MAX` de CETTE figurine. Le retrait pour cohérence (03.03) DÉTRUIT la
+#: figurine désignée : sacrifier une figurine déjà entamée coûte moins que d'en sacrifier une
+#: intacte, et rien d'autre dans l'observation ne le dit — le bloc TYPES ne porte que `hp_max`, par
+#: type et non par figurine. Continu et non binaire parce qu'un Warboss à 5/6 et à 1/6 n'a pas la
+#: même valeur restante ; le bit `wounded` ci-dessous en garde la version robuste (cf. son commentaire).
+SELF_MODEL_CONT_FIELDS: Tuple[str, ...] = ("col_rel", "row_rel", "hp_ratio")
 #: `present` est le masque de ce bloc, et il est EXPLICITE (V11 §0.32 T-H) : une figurine posée
 #: sur le centroïde arrondi et sans aucun drapeau a une ligne entièrement nulle, donc un masque
 #: déduit de la ligne (`(|cont| + |bin|) > 0`) la comptait ABSENTE — effectif faux servi sans
@@ -585,7 +596,28 @@ SELF_MODEL_BIN_FIELDS: Tuple[str, ...] = (
     # l'agrégat d'unité (`max_floor_height`, `has_ground_model`) ne dit pas LAQUELLE est en haut.
     # C'est pourtant ce qui décide, figurine par figurine, du +1 BS de 22.05 au tir suivant et du
     # coût de descente (13.06) au move suivant.
-    "fight_eligible", "in_enemy_ez", "elevated", "present",
+    "fight_eligible", "in_enemy_ez", "elevated",
+) + tuple(
+    # Rôle d'allocation (règle 19) de CETTE figurine, MÊME one-hot que le bloc TYPES. Il y était
+    # déjà, mais AGRÉGÉ PAR TYPE : rien ne reliait le type « leader » à une ligne de ce bloc-ci.
+    # Or `COHERENCY_SLOT_i` (P3-0) désigne la LIGNE i, et `pointer_policy._point` la score par un
+    # produit scalaire nu sur son seul embedding, sans biais de slot : deux figurines de valeur
+    # très différente sortaient des logits égaux. MESURÉ le 2026-09-09 (16 épisodes gym du pool
+    # `training`, 8 points d'arrêt de cohérence) : 67 paires de figurines de valeur différente
+    # sur 67 avaient une ligne `self_models_bin` IDENTIQUE — seule leur position les séparait,
+    # alors que 4 des 8 pools mélangeaient un personnage attaché et des figurines de base.
+    #
+    # ⚠️ Le TRI de `_squad_models_for_observation` place déjà les rôles en tête, mais la tête
+    # pointeur ne lit aucun index de slot : un rang non lu n'est pas une information observée.
+    f"role_{role}" for role in MODEL_ROLES
+) + (
+    # `wounded` : `HP_CUR < HP_MAX`. Redondant avec `hp_ratio` par construction, et gardé quand
+    # même : les continus de ce bloc passent par `EntityRunningNorm`, dont la variance est
+    # minuscule sur une colonne quasi constante (la plupart des figurines sont intactes, et une
+    # figurine à 1 PV max n'est jamais entamée), donc `hp_ratio` y sature vite à ±10. Le fait
+    # « entamée » doit survivre à cette saturation ; le degré, lui, reste porté par `hp_ratio`.
+    "wounded",
+    "present",
 )
 SELF_MODEL_CONT_SIZE = len(SELF_MODEL_CONT_FIELDS)
 SELF_MODEL_BIN_SIZE = len(SELF_MODEL_BIN_FIELDS)
@@ -1123,6 +1155,20 @@ GLOBAL_BIN_FIELDS: Tuple[str, ...] = (
     # Côté ENNEMI pour la même raison que le Waaagh! : savoir que l'adversaire blesse mieux ma
     # cible désignée change ce que je dois protéger. Aucun des deux ne se déduit de l'autre.
     "my_oath_wound_bonus_active", "enemy_oath_wound_bonus_active",
+    # -----------------------------------------------------------------------
+    # RETRAIT POUR COHÉRENCE 03.03 (P3-0) — un point d'arrêt EN COURS
+    # -----------------------------------------------------------------------
+    # « L'escouade observée doit désigner une figurine à DÉTRUIRE, maintenant. » MESURÉ le
+    # 2026-09-09 sur les 8 points d'arrêt rencontrés : l'observation de la même escouade, avec et
+    # sans `pending_coherency_removal` armé, est STRICTEMENT identique (écart 0.0 sur toutes les
+    # clés). Le masque, lui, n'ouvre que les slots COHERENCY (vérifié au même endroit), donc la
+    # POLITIQUE ne peut pas se tromper d'action ; c'est la VALEUR de l'état qui était fausse — un
+    # état où une figurine est perdue d'office valait autant que le même état sans retrait.
+    #
+    # Un seul bit, et il concerne l'escouade OBSERVÉE : pendant un retrait, l'observateur EST
+    # l'escouade en attente (`PLAYER_CHOICE_MECHANISMS`, `observer_squad_key="squad_id"`), donc un
+    # bit « un retrait est en attente quelque part » aurait dit autre chose que ce qu'il nomme.
+    "coherency_removal_pending",
     # -----------------------------------------------------------------------
     # RÉSERVÉ — missions primaires (J4). global_bin est délibérément choisi
     # (et non global_cont) : VecNormalize normalise UNIQUEMENT global_cont ;
