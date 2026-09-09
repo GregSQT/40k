@@ -23,12 +23,19 @@ toutes dans le périmètre couvert.
 Corollaire pour l'auteur d'un changement : quand ce test devient rouge, la correction est
 d'ajouter une entrée sous une NOUVELLE magic et de bumper `_MAGIC` — pas d'élargir l'entrée
 existante, qui décrit un format déjà écrit sur le disque des joueurs.
+
+Cet interdit était une CONSIGNE et il est désormais un CONTRÔLE : `_FROZEN_FINGERPRINTS` épingle
+le compte et l'empreinte de chaque entrée qui n'est plus la magic courante. Écrire les entrées en
+littéral, sans objet partagé, empêche qu'une clé déposée dans l'entrée figée remonte dans la
+courante ; l'empreinte, elle, refuse en plus que cette réécriture passe INAPERÇUE — la
+comparaison au reset ne lit que l'entrée courante et ne verra jamais rien de l'autre.
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
-from typing import Any, Dict, FrozenSet
+from typing import Any, Dict, FrozenSet, Iterable, Tuple
 
 import pytest
 
@@ -46,9 +53,11 @@ SCENARIO = os.path.join(
 
 #: Clés mutables publiées par le reset, PAR FORMAT DE SAVE. Une entrée décrit un format figé sur
 #: le disque des joueurs : elle ne s'élargit jamais après coup, on en ajoute une nouvelle.
-#: Les trois clés que le reset publie en plus depuis TL04 : le couple de déclaration de montée
-#: 13.06 (`ascent_declaration_reset_state`, `engine/phase_handlers/movement_handlers.py`) et le
-#: mémo de charge, tous trois posés par le dict de reset de `W40KEngine.reset`.
+#: Les deux entrées sont écrites en LITTÉRAL et ne partagent aucun objet — TL05 dérivée de TL04
+#: aurait fait remonter dans l'entrée courante toute clé glissée dans l'entrée figée.
+#: TL05 = TL04 + le couple de déclaration de montée 13.06 (`ascent_declaration_reset_state`,
+#: `engine/phase_handlers/movement_handlers.py`) et le mémo de charge, tous trois posés par le
+#: dict de reset de `W40KEngine.reset`.
 _TL04_KEYS: FrozenSet[str] = frozenset({
         '_best_weapon_cache', '_charge_declaration_current', '_charge_initial_rolls',
         '_charge_plan_cache', '_deployment_scoring_cache', '_deployment_slot_candidates',
@@ -136,6 +145,23 @@ MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
     b"W40KTL05": _TL05_KEYS,
 }
 
+
+def _fingerprint(keys: Iterable[str]) -> str:
+    """Empreinte d'un ensemble de clés, indépendante de l'ordre d'écriture du littéral."""
+    return hashlib.sha256("\n".join(sorted(keys)).encode("utf-8")).hexdigest()[:16]
+
+
+#: Empreinte des entrées FIGÉES ci-dessus — toutes sauf celle de la magic courante. Écrire TL05
+#: en littéral empêche qu'une clé déposée dans `_TL04_KEYS` remonte dans l'entrée courante,
+#: mais ne dit toujours RIEN de cette clé : l'entrée figée décrit un format déjà écrit sur le
+#: disque des joueurs, et rien ne la compare à quoi que ce soit — la réécrire reste muet.
+#: `test_reset_keys_match_the_current_save_format` ne peut pas le voir, il ne lit que l'entrée
+#: COURANTE ; d'où ce contrôle séparé. Valeurs RECALCULABLES et non tombées du ciel :
+#: `_fingerprint` est trois lignes plus haut et le compte se lit sur le littéral.
+_FROZEN_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
+    b"W40KTL04": (128, "4f1bc5601c046cb5"),
+}
+
 #: Les neuf clés dont l'ajout n'a PAS été suivi d'un bump entre TL03 et TL04. Elles sont dans le
 #: périmètre du verrou : c'est ce qui prouve qu'il aurait attrapé la dérive au lieu de la subir.
 KEYS_ADDED_SINCE_TL03 = (
@@ -169,6 +195,42 @@ def test_the_reset_really_publishes_mutable_keys(reset_mutable_keys: FrozenSet[s
     assert len(reset_mutable_keys) > 100, (
         f"seulement {len(reset_mutable_keys)} clés mutables après reset — le moteur n'a pas "
         "réellement initialisé un épisode, la comparaison qui suit ne prouverait rien"
+    )
+
+
+def test_frozen_format_entries_are_untouched() -> None:
+    """Une entrée qui n'est plus la magic courante ne se réécrit pas — c'est un fait historique.
+
+    ROUGE dès qu'une clé est ajoutée, retirée ou renommée dans `_TL04_KEYS`. Rien d'autre ne le
+    voit : le verrou de format ne lit que l'entrée courante, et depuis que TL05 est écrite en
+    littéral, TL04 n'est plus lue par aucun autre contrôle.
+    """
+    assert _FROZEN_FINGERPRINTS, (
+        "VERT VACANT : aucune entrée épinglée, la boucle ci-dessous ne prouverait rien"
+    )
+    for magic, (count, digest) in _FROZEN_FINGERPRINTS.items():
+        keys = MUTABLE_KEYS_BY_MAGIC[magic]
+        assert (len(keys), _fingerprint(keys)) == (count, digest), (
+            f"l'entrée {magic.decode()} de MUTABLE_KEYS_BY_MAGIC a changé "
+            f"({len(keys)} clés / {_fingerprint(keys)} contre {count} / {digest} épinglés). "
+            f"Elle décrit un format déjà écrit sur le disque des joueurs : elle ne se corrige "
+            f"pas, on ajoute une NOUVELLE entrée sous une nouvelle magic. Si la réécriture est "
+            f"malgré tout voulue, c'est l'empreinte qu'il faut changer ICI, sciemment."
+        )
+
+
+def test_every_frozen_entry_is_pinned() -> None:
+    """Toute entrée sauf la courante doit être épinglée — sinon le bump suivant laisse un trou.
+
+    Au bump de TL05 → TL06, TL05 devient un fait historique à son tour ; sans ce contrôle, elle
+    resterait librement réécrivable et le défaut ci-dessus se rouvrirait sous un autre nom.
+    """
+    figees = {m for m in MUTABLE_KEYS_BY_MAGIC if m != _MAGIC}
+    manquantes = sorted(m.decode() for m in figees - set(_FROZEN_FINGERPRINTS))
+    orphelines = sorted(m.decode() for m in set(_FROZEN_FINGERPRINTS) - figees)
+    assert figees == set(_FROZEN_FINGERPRINTS), (
+        f"entrées figées sans empreinte : {manquantes} ; empreintes sans entrée figée : "
+        f"{orphelines}. Épingle une entrée dans le même geste que le bump qui la fige."
     )
 
 
