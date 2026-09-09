@@ -292,6 +292,37 @@ def test_un_contrat_present_mais_corrompu_leve(tmp_path) -> None:
         read_contract(model_path)
 
 
+class _NonSerialisable:
+    """Une valeur qui fait lever `json.dump` APRÈS qu'il a déjà écrit une partie du contrat."""
+
+
+def test_une_ecriture_interrompue_laisse_le_contrat_precedent_intact(tmp_path) -> None:
+    """Le contrat précédent survit à une écriture qui casse en cours de route.
+
+    Le verrou de forme (`tests/unit/shared/test_json_atomic.py`) dit que ce site N'OUVRE PAS sa
+    destination ; il ne dit pas ce qui reste sur le disque quand l'écriture casse. C'est
+    précisément le moment qui compte : `json.dump` écrit EN FLUX, donc une valeur non
+    sérialisable rencontrée au milieu du contrat laisse déjà des octets derrière elle. Avec une
+    ouverture en "w", ces octets remplaçaient un contrat valide par un fragment, et la reprise
+    suivante s'arrêtait sur « contrat illisible » au lieu de comparer.
+
+    `sort_keys=True` fait passer `aaa` avant `zzz` : le début est écrit, la fin lève.
+    """
+    model_path = _model(tmp_path, existant=True)
+    valide = build_contract(_rewards(), AGENT)
+    write_contract(model_path, valide)
+
+    with pytest.raises(TypeError):
+        write_contract(model_path, {"aaa": "x" * 4096, "zzz": _NonSerialisable()})
+
+    assert read_contract(model_path) == valide, (
+        "l'écriture cassée a laissé un fragment à la place du contrat précédent"
+    )
+    residus = [n for n in os.listdir(os.path.dirname(contract_path(model_path)))
+               if n.startswith(CONTRACT_FILENAME) and n != CONTRACT_FILENAME]
+    assert not residus, f"brouillon laissé derrière l'écriture cassée : {residus}"
+
+
 # --------------------------------------------------------------------- câblage dans le prologue
 
 
