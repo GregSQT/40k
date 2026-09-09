@@ -109,7 +109,12 @@ l'agent.
 - `--new` **écrit** le contrat (après l'archivage : écrit avant, il partirait avec le run précédent) ;
 - toute **reprise** le compare et **s'arrête** au moindre écart, en nommant le champ divergent ;
 - le contrat suit le modèle à l'archivage, comme ses stats VecNormalize — une archive sans contrat
-  serait irreprenable.
+  serait irreprenable — mais **seulement quand un modèle part avec lui** : un contrat seul ne décrit
+  rien, et l'écarter faisait entrer en collision deux `--new` de la même seconde ;
+- `--resume-from` **repose** le contrat écarté sur le checkpoint promu : il sort du même
+  entraînement, donc il a appris sous ce contrat-là ;
+- la table empreintée est celle **du run** (`--rewards-config`, qui porte le suffixe de phase), pas
+  celle de `--agent` — même distinction que dans `test_trained_model`.
 
 **Ce qui n'est PAS comparé : les valeurs de récompense.** Régler un poids est le mode d'emploi
 normal de cette table ; un garde-fou qui s'y déclencherait serait contourné le jour même. Seule la

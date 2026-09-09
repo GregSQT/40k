@@ -267,3 +267,47 @@ def test_le_pycache_est_purge_autour_de_chaque_mutation(tmp_path, monkeypatch) -
     mc.evalue(mutant, ["test_m.py"], timeout=120)
 
     assert not (cache / "m.cpython-312.pyc").exists(), "le .pyc du mutant a survecu"
+
+
+def test_la_purge_s_arrete_aux_dependances(tmp_path, monkeypatch) -> None:
+    """`.venv` ne contient aucun mutant, et le balayer coute plus cher que tout le reste.
+
+    Mesure du 2026-09-09 : 539 `__pycache__` dans `.venv` contre 35 dans le depot. Les purger
+    faisait recompiler torch, SB3 et numpy DEUX fois par mutant — devant chacun des quarante
+    pytest — et laissait le venv nu a la fin du run.
+    """
+    monkeypatch.setattr(mc, "RACINE", tmp_path)
+    depot = tmp_path / "engine" / "__pycache__"
+    depot.mkdir(parents=True)
+    (depot / "a.pyc").write_bytes(b"x")
+    for abri in mc.HORS_PURGE:
+        cache = tmp_path / abri / "paquet" / "__pycache__"
+        cache.mkdir(parents=True)
+        (cache / "b.pyc").write_bytes(b"x")
+
+    mc.purge_pycache(tmp_path)
+
+    assert not depot.exists(), "le cache du depot n'a pas ete purge"
+    for abri in mc.HORS_PURGE:
+        assert (tmp_path / abri / "paquet" / "__pycache__" / "b.pyc").exists(), (
+            f"{abri} a ete purge : recompilation inutile devant chaque mutant"
+        )
+
+
+def test_un_depassement_de_delai_compte_le_mutant_comme_tue(tmp_path, monkeypatch) -> None:
+    """Muter une comparaison peut rendre une boucle infinie — c'est meme un defaut recherche.
+
+    Sans capture, `subprocess.TimeoutExpired` sortait du script en traceback : plus de
+    recapitulatif, et aucun verdict pour les mutants suivants. Un rapport entier perdu a cause
+    d'un mutant qui, lui, est correctement detecte.
+    """
+    monkeypatch.setattr(mc, "RACINE", tmp_path)
+
+    def _expire(*args, **kwargs):
+        raise mc.subprocess.TimeoutExpired(cmd="pytest", timeout=1)
+
+    monkeypatch.setattr(mc.subprocess, "run", _expire)
+
+    assert mc.joue_les_tests(["test_m.py"], timeout=1) is False, (
+        "un depassement doit compter comme un mutant TUE, pas interrompre la campagne"
+    )

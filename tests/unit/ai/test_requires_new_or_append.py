@@ -170,12 +170,14 @@ def test_le_prologue_commun_des_deux_points_d_entree_refuse(tmp_path, monkeypatc
 
     with pytest.raises(ValueError):
         prepare_run_artifacts(str(models_root), "TestAgent", False, False, 1,
-                              table_de_recompense("TestAgent"), log_fn=lambda _m: None)
+                              table_de_recompense("TestAgent"), "TestAgent",
+                              log_fn=lambda _m: None)
 
     (models_root / "TestAgent" / "model_TestAgent.zip").unlink()
     with pytest.raises(ValueError):
         prepare_run_artifacts(str(models_root), "TestAgent", False, True, 1,
-                              table_de_recompense("TestAgent"), log_fn=lambda _m: None)
+                              table_de_recompense("TestAgent"), "TestAgent",
+                              log_fn=lambda _m: None)
 
 
 def _main_body() -> list:

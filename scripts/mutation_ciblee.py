@@ -221,20 +221,46 @@ def tests_candidats(fichier: str, tests_du_diff: Sequence[str]) -> List[str]:
 # --------------------------------------------------------------------------- execution
 
 
+#: Repertoires dont les `__pycache__` ne sont JAMAIS purges : ils ne contiennent aucun mutant, et
+#: les balayer coute plus cher que tout le reste du run.
+HORS_PURGE = (".venv", "node_modules", ".git", "__pypackages__")
+
+
 def purge_pycache(racine: Path) -> None:
-    """Supprime les `__pycache__` : cf. l'entete, un `.pyc` du mutant survivrait a la restauration."""
+    """Supprime les `__pycache__` DU DEPOT : cf. l'entete, un `.pyc` du mutant se rejouerait.
+
+    Le balayage s'arrete aux dependances. Mesure du 2026-09-09 : `.venv` porte 539 `__pycache__`
+    contre 35 pour le depot ; les purger faisait recompiler torch, SB3 et numpy DEUX FOIS par
+    mutant — devant chacun des quarante pytest — et laissait le venv nu a la fin du run. Aucun de
+    ces caches ne peut contenir un mutant : le script ne mute que `engine/`, `ai/`, `services/`
+    et `shared/`.
+    """
     for cache in racine.rglob("__pycache__"):
+        if any(partie in HORS_PURGE for partie in cache.relative_to(racine).parts):
+            continue
         shutil.rmtree(cache, ignore_errors=True)
 
 
 def joue_les_tests(tests: Sequence[str], timeout: int) -> bool:
-    """Vrai si la suite passe (donc si le mutant SURVIT)."""
+    """Vrai si la suite passe (donc si le mutant SURVIT).
+
+    Un DEPASSEMENT de delai compte comme un mutant TUE, et non comme une erreur qui interrompt la
+    campagne : muter une comparaison peut rendre une boucle infinie, c'est meme un des defauts que
+    l'on cherche. Le harnais s'arreterait alors sur le premier d'entre eux, sans recapitulatif ni
+    verdict pour les mutants suivants — le rapport entier serait perdu pour un mutant qui, lui,
+    est bien detecte.
+    """
     if not tests:
         return True
-    resultat = subprocess.run(
-        [sys.executable, "-m", "pytest", *tests, "-x", "-q", "--no-header", "-p", "no:cacheprovider"],
-        cwd=RACINE, capture_output=True, text=True, timeout=timeout,
-    )
+    try:
+        resultat = subprocess.run(
+            [sys.executable, "-m", "pytest", *tests, "-x", "-q", "--no-header",
+             "-p", "no:cacheprovider"],
+            cwd=RACINE, capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"      ⏱️  depassement de {timeout} s : mutant compte comme TUE")
+        return False
     return resultat.returncode == 0
 
 

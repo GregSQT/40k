@@ -296,6 +296,7 @@ def test_a_new_run_never_inherits_the_previous_offset(tmp_path) -> None:
     model_path, offset, start_index = prepare_run_artifacts(
         models_root, "ArmageddonAgent_x1", new_model=False, append_training=False, n_envs=4,
         rewards_config=table_de_recompense("ArmageddonAgent_x1"),
+        rewards_key="ArmageddonAgent_x1",
         log_fn=lambda _m: None,
     )
     open(model_path, "wb").close()
@@ -305,6 +306,7 @@ def test_a_new_run_never_inherits_the_previous_offset(tmp_path) -> None:
     _, offset, start_index = prepare_run_artifacts(
         models_root, "ArmageddonAgent_x1", new_model=False, append_training=True, n_envs=4,
         rewards_config=table_de_recompense("ArmageddonAgent_x1"),
+        rewards_key="ArmageddonAgent_x1",
         log_fn=lambda _m: None,
     )
     assert (offset, start_index) == (200_000, 50_000)
@@ -313,6 +315,7 @@ def test_a_new_run_never_inherits_the_previous_offset(tmp_path) -> None:
     _, offset, start_index = prepare_run_artifacts(
         models_root, "ArmageddonAgent_x1", new_model=True, append_training=True, n_envs=4,
         rewards_config=table_de_recompense("ArmageddonAgent_x1"),
+        rewards_key="ArmageddonAgent_x1",
         log_fn=lambda _m: None,
     )
     assert (offset, start_index) == (0, 0), (
@@ -337,6 +340,7 @@ def test_a_new_run_ignores_the_offset_even_without_archiving(tmp_path, monkeypat
     model_path, _, _ = train.prepare_run_artifacts(
         models_root, "ArmageddonAgent_x1", new_model=False, append_training=False, n_envs=1,
         rewards_config=table_de_recompense("ArmageddonAgent_x1"),
+        rewards_key="ArmageddonAgent_x1",
         log_fn=lambda _m: None,
     )
     open(model_path, "wb").close()
@@ -346,6 +350,7 @@ def test_a_new_run_ignores_the_offset_even_without_archiving(tmp_path, monkeypat
     _, offset, start_index = train.prepare_run_artifacts(
         models_root, "ArmageddonAgent_x1", new_model=True, append_training=True, n_envs=4,
         rewards_config=table_de_recompense("ArmageddonAgent_x1"),
+        rewards_key="ArmageddonAgent_x1",
         log_fn=lambda _m: None,
     )
 
@@ -364,6 +369,7 @@ def test_the_prologue_creates_the_model_directory_on_every_path(tmp_path) -> Non
     model_path, _, _ = prepare_run_artifacts(
         models_root, "ArmageddonAgent_x1", new_model=False, append_training=False, n_envs=1,
         rewards_config=table_de_recompense("ArmageddonAgent_x1"),
+        rewards_key="ArmageddonAgent_x1",
         log_fn=lambda _m: None,
     )
     assert os.path.isdir(os.path.dirname(model_path))
