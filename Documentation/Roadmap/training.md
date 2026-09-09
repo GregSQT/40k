@@ -32,6 +32,55 @@ Il reste périmé pendant le MOVE, ce qui justifie que l'obs continue de recalcu
 
 ---
 
+## ✅ Obs — candidats de décision DISCERNABLES {#candidats-decision-discernables}
+
+**Livré et mergé le 2026-09-09** (`0049f9ab`). `obs_size` 17055 → **17091** : ré-entraînement
+`--new` obligatoire, décidé par l'utilisateur au moment de la livraison.
+
+Le bloc `decision_options_cont` était rempli par le moteur depuis P3-4 mais **n'atteignait aucun
+réseau** : `SpatialCombinedExtractor` ne le listait pas dans ses clés attendues, son
+`decision_encoder` était dimensionné sur le seul bloc binaire, et la clé n'apparaissait dans aucun
+de ses accès d'observation. Cinq types de décision sur neuf posent des candidats qui n'accordent
+aucun effet et ne renoncent à rien — `allocation_model` (à chaque blessure non sauvegardée),
+`charge_placement` (à chaque charge réussie), `mortal_wounds_target` et les deux décisions de Grot
+Orderly : leurs lignes d'observation étaient **strictement identiques**.
+
+Mesuré avant correction, deux candidats aux traits continus opposés sortaient à un écart
+d'embedding de **exactement 0.0** ; `pointer_policy._point` scorant chaque candidat par un produit
+scalaire nu, sans biais par slot, les logits étaient égaux. `CHOICE_i` était un pile-ou-face que
+PPO ne pouvait pas apprendre. Après câblage, le même cas sort à 0,4544.
+
+Les quatre autres types restaient apprenables par un autre canal, et le restent : `rule_choice`
+par le one-hot de l'effet accordé, `waaagh_call`, `fly_declaration` et `ascent_declaration` par le
+bit `declines`.
+
+**Ce qui a été livré :**
+
+- l'encodeur de candidat lit ses **deux** blocs, et la construction lève si leurs cardinalités
+  divergent — un désaccord ne levait nulle part ailleurs et aurait mélangé les traits d'un
+  candidat avec les drapeaux d'un autre ;
+- `DECISION_OPTION_CONT_FIELDS` passe de 2 à **8 colonnes nommées**, une grandeur par colonne :
+  deux types qui décrivent la même grandeur partagent la colonne (`dist_enemy_norm` sert à
+  l'allocation comme au placement rendu), deux grandeurs différentes n'en partagent jamais. Les
+  lignes se bâtissent par `decision_option_cont_row`, qui lève sur un champ inconnu ou hors
+  [0, 1] — aucun producteur n'écrit de zéro positionnel ;
+- le bloc ne passe par **aucune** `EntityRunningNorm` : ses statistiques glissantes excluent les
+  candidats absents mais pas les colonnes muettes d'un type, et mélangeraient « sans objet » et
+  vraies valeurs. Les colonnes sont donc normalisées à la source ;
+- les cinq types sont alimentés. Pour le placement des figurines rendues, ce sont les **distances
+  du plan** — jumeau exact du placement de charge — et non un one-hot d'intention : les distances
+  disent ce que l'étiquette vaut sur CE plateau, et généralisent à une intention ajoutée sans
+  colonne de plus.
+
+**Défaut de fond trouvé en vérifiant, et corrigé :** `_precompute_nearest_enemy_dist` énumérait
+`models_cache` sans filtrer les unités hors table. Une escouade en réserves stratégiques (20.01)
+est vivante dans le cache mais posée sur la sentinelle (-1,-1) : elle devenait l'ennemi « le plus
+proche » de toutes les figurines. Mesuré, `dist_enemy_norm` passait de `{0,48 ; 0,46}` à
+`{0,06 ; 0,08}`, et l'heuristique défensive du bot (`_select_allocation_model`, critère 3) était
+faussée avec elle. Les deux sites énumèrent désormais par `enemy_entries_on_battlefield`.
+
+---
+
 ## ✅ Obs — canaux « zone obscurante » et « exposition à la vue ennemie » {#canaux-obscurant-exposition}
 
 **Livré et mergé le 2026-09-08** (`dd8a24be`). Le lot impose un ré-entraînement `--new` : la
