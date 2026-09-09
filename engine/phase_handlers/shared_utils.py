@@ -9764,12 +9764,21 @@ def _precompute_nearest_enemy_dist(
     a chaque allocation (cf. `_allocate_damage_to_squad`).
 
     ⚠️ Les ennemis HORS TABLE sont exclus (`enemy_entries_on_battlefield`). Une escouade en
-    reserves strategiques (20.01) est VIVANTE dans le cache mais posee sur la sentinelle (-1,-1) :
-    sans ce filtre elle devenait l ennemi « le plus proche » de toutes les figurines, ce qui
-    faussait a la fois l heuristique defensive (`_select_allocation_model`, critere 3) et la colonne
-    `dist_enemy_norm` presentee a l agent. Le jumeau `_returned_placement_cont` porte le meme
-    filtre — le registre d observation promet la MEME grandeur aux deux, il faut donc la meme
-    enumeration.
+    reserves strategiques (20.01) est VIVANTE dans le cache, ses figurines sont dans
+    `models_cache`, et elles y portent la sentinelle (-1,-1) : sans ce filtre, l enumeration
+    injectait donc une position qui n existe pas sur la table.
+
+    AMPLEUR MESUREE, et elle est faible : sur 1 337 appels de cette fonction en bot-contre-bot
+    (pool `training`, 2 scenarios x 20 episodes, 2026-09-09), 14 avaient un ennemi hors table et
+    AUCUN ne changeait de resultat. La raison tient au `min` : la sentinelle est un COIN du
+    plateau, donc elle ne l emporte que sur une figurine plus proche de ce coin que de tout ennemi
+    reel. Les deux classements bot-contre-bot avant/après correction sont identiques bit a bit
+    (2 400 episodes sur `holdout`, 1 200 sur `training`).
+
+    Le filtre reste juste — une position inexistante n a rien a faire dans une mesure de distance —
+    et il aligne cette fonction sur son jumeau `_returned_placement_cont`, que le registre
+    d observation oblige a decrire la MEME grandeur. Mais il ne faut pas lui attribuer un effet
+    sur les parties jouees : il n en a pas d observable.
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")

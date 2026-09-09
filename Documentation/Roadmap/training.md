@@ -74,10 +74,23 @@ bit `declines`.
 
 **Défaut de fond trouvé en vérifiant, et corrigé :** `_precompute_nearest_enemy_dist` énumérait
 `models_cache` sans filtrer les unités hors table. Une escouade en réserves stratégiques (20.01)
-est vivante dans le cache mais posée sur la sentinelle (-1,-1) : elle devenait l'ennemi « le plus
-proche » de toutes les figurines. Mesuré, `dist_enemy_norm` passait de `{0,48 ; 0,46}` à
-`{0,06 ; 0,08}`, et l'heuristique défensive du bot (`_select_allocation_model`, critère 3) était
-faussée avec elle. Les deux sites énumèrent désormais par `enemy_entries_on_battlefield`.
+est vivante dans le cache, ses figurines y portent la sentinelle (-1,-1), et l'énumération
+injectait donc une position qui n'existe pas sur la table. Les deux sites énumèrent désormais par
+`enemy_entries_on_battlefield`.
+
+**Son ampleur a été MESURÉE le 2026-09-09, et elle est nulle — la première rédaction de ce
+paragraphe surestimait le défaut.** Sur 1 337 appels en bot-contre-bot (pool `training`,
+2 scénarios × 20 épisodes), 14 avaient un ennemi hors table et **aucun** ne changeait de
+résultat : la sentinelle est un COIN du plateau, donc le `min` ne la retient que pour une
+figurine plus proche de ce coin que de tout ennemi réel — cas jamais atteint sur ce volume. Les
+classements bot-contre-bot avant/après correction sont **identiques bit à bit** : 2 400 épisodes
+sur `holdout`, 1 200 sur `training`, même graine, même protocole.
+
+Conséquence pratique, contre ce qui avait été annoncé ici : **la ligne de base des bots reste
+comparable**, et le run `--new` n'a pas besoin d'une re-mesure préalable du panel. Les chiffres
+`{0,48 ; 0,46}` → `{0,06 ; 0,08}` cités auparavant venaient du test de non-régression, dont
+l'état est construit pour que la sentinelle domine — ils prouvent le verrou, pas une fréquence de
+jeu.
 
 ---
 
