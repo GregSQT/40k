@@ -28,7 +28,7 @@ pourquoi, avec les mesures.
 |---|---|---|
 | A — intégration PvP | 3 min 31 (`-n 6 --dist load`, mesuré 2026-08-05) | déjà dans la vérification large |
 | B — vitest | **4,0 s** — 36 fichiers, 430 tests | **ajoutée le 2026-09-09** |
-| C — Playwright | non mesuré | **inexécutable en l'état** (voir ci-dessous) |
+| C — Playwright | **~7 min** — 14 tests, **13 rouges** (mesuré 2026-09-09) | **dehors** : rendue exécutable, mais rouge (voir ci-dessous) |
 
 **Ce que la mesure a trouvé, et qui rendait la couche B rouge par construction.** Avant ce jour,
 `npx vitest run` rendait `Test Files 1 failed | 36 passed (37)` quel que soit l'état du code : le
@@ -40,20 +40,40 @@ La frontière entre les deux harnais est désormais déclarée dans `frontend/vi
 `tests/unit/scripts/test_vitest_collect_scope.py`, qui applique le motif AU DISQUE dans les deux
 sens : aucun spec Playwright collecté par vitest, et aucun test de `src/` laissé hors périmètre.
 
-**Pourquoi la couche C reste dehors.** `@playwright/test` est déclaré en `devDependencies`
-(`^1.62.1`) mais **absent de `frontend/node_modules`**, et aucun navigateur n'est installé
-(`~/.cache/ms-playwright` vide). La couche C ne peut pas s'exécuter tant que ces deux commandes
-n'ont pas été jouées — elles téléchargent plusieurs centaines de Mo, c'est une action
-d'environnement, pas une modification du dépôt :
+**Pourquoi la couche C reste dehors — exécutée pour la première fois le 2026-09-09.** Elle est
+**rouge : 13 tests sur 14 échouent**, et le mur est de ~7 min (les échecs sont des timeouts de 30 s).
+Elle ne peut donc pas rejoindre la vérification large tant qu'elle n'est pas remise en état.
+
+Prérequis d'environnement (plusieurs centaines de Mo, action machine et non modification du dépôt) :
 
 ```bash
 npm --prefix frontend install
 npx --prefix frontend playwright install chromium
 ```
 
-Une fois installée, la couche C se lance seule par `bash scripts/front_test_all.sh --skip-a --skip-b`.
-Son mur est à mesurer avant de décider si elle rejoint la vérification large : elle démarre deux
-serveurs et pilote un navigateur, son coût n'a rien de commun avec les 4 s de la couche B.
+Elle exige en plus une **session valide** dans `config/users.db` — `global-setup.ts` lit le dernier
+jeton non expiré pour construire le `storageState`. Ce fichier n'étant pas versionné, la couche C ne
+tourne pas dans un worktree neuf sans qu'on y copie la base, et jamais sur une machine où personne
+ne s'est connecté au front.
+
+**Quatre défauts trouvés en la lançant, dont trois corrigés ici.** Aucun n'était visible tant qu'elle
+ne s'exécutait pas — c'est la démonstration la plus nette de ce que vaut un dispositif de test qu'on
+n'exécute jamais :
+
+1. `global-setup.ts` utilisait `__dirname`, **indéfini en module ES** (`frontend/package.json`
+   déclare `"type": "module"`). Le setup mourait avant le premier test. **Corrigé** ;
+2. le proxy `/api` de `vite.config.ts` pointait en dur vers `localhost:5001`, alors que
+   `front_test_all.sh` démarre son backend sur **5098** : la page tapait un port où rien n'écoute,
+   et tous les tests tombaient sur `ECONNREFUSED`. `PW_BASE_URL` ne corrigeait rien, il ne gouverne
+   que les requêtes émises par Playwright lui-même. **Corrigé** par `VITE_API_TARGET` ;
+3. `playwright-report/`, `test-results/` et `.auth/` n'étaient pas ignorés — le dernier porte le
+   **cookie de session** d'un vrai compte. **Corrigé** ;
+4. il reste : la page rend `Impossible de charger la liste des terrains : terrain-list: HTTP 500`,
+   donc le canvas PIXI n'apparaît jamais et les 13 tests expirent en l'attendant. **Non corrigé** —
+   c'est un chantier de remise en état, distinct de l'exécutabilité traitée ici.
+
+Une fois ces quatre points réglés, son mur sera à re-mesurer sur des tests qui passent : 7 min de
+timeouts ne dit rien du coût réel de la couche.
 
 ### Pourquoi `--dist worksteal` (mesuré 2026-07-26)
 

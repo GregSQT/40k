@@ -36,6 +36,7 @@
 # guillemets (`pytest "tests/x.py"`) et les `--ignore=tests/x.py`, que les regex confondaient
 # avec une cible.
 import json
+import os
 import re
 import shlex
 import sys
@@ -47,7 +48,11 @@ REPERTOIRE_DE_TESTS = re.compile(r"^\.?/?tests(/[A-Za-z0-9_-]+)*/?$")
 # ferait passer un run complet pour un run ciblé.
 OPTIONS_A_VALEUR = {"-n", "-k", "-m", "-p", "-c", "-o", "-r", "--dist", "--rootdir", "--deselect",
                     "--ignore", "--ignore-glob", "--maxfail", "--junitxml", "-W",
-                    "--project", "--outDir", "--config-file"}
+                    "--project", "--outDir", "--config-file",
+                    # Front : sans `--prefix`, `npm --prefix frontend run test:run` ferait de
+                    # `frontend` le mot suivant et `run` ne serait jamais reconnu. `--config`,
+                    # `--reporter` et `--workers` sont ceux de vitest et de Playwright.
+                    "--prefix", "--config", "--reporter", "--workers"}
 # `--cov` et `--tb` n'y sont PAS : leur valeur s'écrit collée (`--cov=engine`), donc les compter
 # comme mangeurs faisait disparaître la cible de `pytest --cov tests/unit/engine/test_x.py`.
 
@@ -79,6 +84,21 @@ PREFIXES = {"npx", "npm", "pnpm", "yarn", "uv", "uvx", "poetry", "pipenv", "sudo
 # Shells : eux seuls prennent une COMMANDE en argument cité. Un `git commit -m "run pytest"` porte
 # du texte, pas une commande — le distinguer évite de refuser les messages de commit du dépôt.
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh", "busybox"}
+
+# Un shell LANCE aussi ce qu'on lui passe en argument NON cité : `bash scripts/front_test_all.sh`
+# exécute ce script aussi sûrement que `./scripts/front_test_all.sh`. Sans cette ligne, `bash`
+# occupait la place d'exécutable et le script derrière lui n'était plus jamais examiné.
+LANCEURS |= SHELLS
+
+# Gestionnaires de paquets : ils exécutent un script du `package.json` dont le NOM ne dit rien de
+# l'ampleur — `npm run test:run` lance TOUTE la suite vitest sans jamais écrire son nom. Le
+# CONTENU du script, lui, le dit : d'où la lecture de `frontend/package.json` (cf.
+# `scripts_front_larges`), plutôt qu'une liste de noms figée ici qui se périmerait au premier
+# script ajouté — c'est-à-dire au premier contournement.
+GESTIONNAIRES = {"npm", "pnpm", "yarn"}
+
+# Racine du dépôt : ce fichier vit dans `<racine>/.claude/hooks/`.
+RACINE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def deshabille(ligne):
@@ -230,6 +250,55 @@ def occurrences(mots, outil):
     return trouvees
 
 
+def scripts_npm(mots):
+    """Les noms de scripts `package.json` que ce segment EXÉCUTE.
+
+    `npm` est un PRÉFIXE (cf. `PREFIXES`) : `occurrences()` ne le rend donc jamais comme
+    exécutable, et le nom du script qu'il lance n'apparaît nulle part ailleurs. Cette fonction
+    est le seul endroit qui le voit. `npm test` et `npm t` sont des raccourcis du script `test`.
+    """
+    trouves = []
+    for i, mot in enumerate(mots):
+        if mot.split("/")[-1] not in GESTIONNAIRES:
+            continue
+        j, saute = i + 1, False
+        while j < len(mots):
+            if saute:
+                saute = False
+            elif mots[j].startswith("-"):
+                saute = mots[j] in OPTIONS_A_VALEUR
+            else:
+                break
+            j += 1
+        if j >= len(mots):
+            continue
+        if mots[j] in ("test", "t"):
+            trouves.append("test")
+        elif mots[j] == "run" and j + 1 < len(mots):
+            trouves.append(mots[j + 1])
+    return trouves
+
+
+def scripts_front_larges():
+    """Les scripts de `frontend/package.json` qui lancent une suite front entière.
+
+    Lit le CONTENU des scripts plutôt que de figer leurs noms ici : une liste écrite en dur se
+    périmerait au premier script ajouté, c'est-à-dire au premier contournement. Le hook lit déjà
+    le dépôt ailleurs (`rapport-cloture.sh` lit `CLAUDE.md`), et le coût a été MESURÉ le
+    2026-09-09 : sous le bruit, à condition de n'ajouter aucun import — une esquisse avec
+    `import pathlib` coûtait +4,11 ms sur les ~15 ms du hook, seize fois la lecture elle-même.
+
+    Rend `None` si le fichier est illisible : l'appelant en fait un REFUS, jamais un laissez-passer.
+    """
+    try:
+        with open(os.path.join(RACINE, "frontend", "package.json"), "r", encoding="utf-8") as flux:
+            scripts = json.load(flux).get("scripts", {})
+    except Exception:
+        return None
+    return {nom for nom, commande in scripts.items()
+            if isinstance(commande, str) and re.search(r"\b(vitest|playwright)\b", commande)}
+
+
 def raisons(mots, profondeur=0):
     """Ce que cette commande lance de trop large — vide si elle est ciblée."""
     if not mots or lecture_seule(mots):
@@ -266,6 +335,49 @@ def raisons(mots, profondeur=0):
     # `pytest tests/unit/ai/test_hidden_action_finder.py` ne LANCENT ni l'un ni l'autre.
     if occurrences(mots, "hidden_action_finder.py") or occurrences(mots, "check_ai_rules.py"):
         trouve.append("lance un script de conformité qui balaye tout le dépôt")
+
+    # vitest : `vitest` nu comme `vitest run` lancent TOUTE la suite front (36 fichiers, 430
+    # tests). Seuls des fichiers de test NOMMÉS restent ciblés — d'où le suffixe `.test.ts`, et
+    # non `.ts` : un module source passé à vitest n'est pas une cible de test.
+    # `vitest list` ÉNUMÈRE sans exécuter : c'est une lecture, elle reste libre.
+    for i in occurrences(mots, "vitest"):
+        vises = cibles(mots, "vitest", i)
+        if vises and vises[0] == "list":
+            continue
+        if not any(precise(c, (".test.ts", ".test.tsx")) for c in vises):
+            trouve.append("lance toute la suite vitest du frontend")
+
+    # playwright : seule la sous-commande `test` exécute quelque chose. `install`, `show-report`
+    # et `codegen` n'en lancent aucun — les refuser empêcherait d'INSTALLER la couche C, qui ne
+    # l'est pas encore sur toutes les machines (cf. Documentation/Reference/outils/tests.md).
+    for i in occurrences(mots, "playwright"):
+        vises = cibles(mots, "playwright", i)
+        if not vises or vises[0] != "test":
+            continue
+        if not any(precise(c, (".spec.ts", ".spec.tsx")) for c in vises):
+            trouve.append("lance toute la suite E2E Playwright")
+
+    # L'orchestrateur des trois couches : c'est la vérification large du frontend, en un mot.
+    if occurrences(mots, "front_test_all.sh"):
+        trouve.append("lance les trois couches de tests frontend d'un coup")
+
+    # Scripts npm : `npm run test:run` lance la suite vitest entière sans jamais écrire son nom.
+    # Une protection qui ne verrait que le mot `vitest` serait donc contournable par une ligne.
+    lances = scripts_npm(mots)
+    if lances:
+        larges = scripts_front_larges()
+        if larges is None:
+            # ILLISIBLE ≠ VIDE. Rendre une liste vide ici ouvrirait la porte que ce bloc ferme,
+            # et le ferait en silence — même règle que la liste de sections de
+            # `rapport-cloture.sh`, qui SIGNALE son illisibilité au lieu de l'ignorer.
+            trouve.append(
+                "lance un script npm alors que frontend/package.json est illisible (impossible "
+                "de savoir ce qu'il lance)"
+            )
+        else:
+            for nom in lances:
+                if nom in larges:
+                    trouve.append(f"lance le script npm `{nom}`, qui exécute une suite front entière")
 
     # Sous-commande CITÉE (`bash -c "python3 -m pytest tests/"`) : shlex en fait un seul token,
     # donc elle échapperait à tout. Elle se juge comme une ligne à part entière — mais SEULEMENT
