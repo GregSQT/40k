@@ -32,6 +32,42 @@ Il reste périmé pendant le MOVE, ce qui justifie que l'obs continue de recalcu
 
 ---
 
+## ✅ Obs — CONTEXTE des points d'arrêt à deux temps {#contexte-points-arret-obs}
+
+**Livré le 2026-09-09.** `obs_size` 17091 → **17763** : ré-entraînement `--new` obligatoire.
+
+Deux mécanismes demandent un choix dont la moitié est déjà fixée — la sélection d'arme de mêlée
+(§0.69 : la cible est désignée, l'arme reste à choisir) et le sous-état CIBLE du tir fractionné
+(P3-8 : l'arme est armée, la cible reste à choisir). Ni l'une ni l'autre moitié n'était observée.
+
+**Mesuré avant correction :** dans les deux cas, deux états ne différant que par la moitié déjà
+fixée produisaient des observations **strictement identiques** — 28 clés comparées, écart maximal
+0,0. La politique n'étant pas récurrente (`MaskablePPO`), elle ne se souvient pas de l'action jouée
+au step précédent : l'arme se choisissait sans voir la cible, la cible sans voir l'arme. Cause
+commune : l'observation n'encodait qu'un seul des sept points d'arrêt de `PLAYER_CHOICE_MECHANISMS`,
+la décision d'agent. Fréquence sur les rosters joués : 5 escouades sur 11 portent ≥ 2 armes de
+mêlée, 8 sur 11 ≥ 2 armes de tir ; mesuré en jeu, 5 épisodes gym du pool `training` traversent
+36 points d'arrêt de tir fractionné et 2 sélections d'arme de mêlée.
+
+**Ce qui a été livré :**
+
+- `fight_target_selected` (`UNIT_BIN_FIELDS`, +32 scalaires) marque la ligne ennemie de la cible
+  désignée. Aucun bit de contexte global ne l'accompagne : la cible occupe toujours un slot ennemi
+  observé (`_continue_squad_fight` lève sinon, et `FIGHT_SLOT_COUNT` vaut `K_ENEMY_SLOTS`), donc le
+  bit est auto-porteur. L'observation lève si la cible n'y figure pas — jamais un bit muet ;
+- `shoot_weapon_selected` (`PROFILE_BIN_FIELDS`, +640) marque le profil de l'arme armée. Le registre
+  des profils n'avait qu'un champ, le masque : `present` reste **dernier** (§0.37), lu
+  positionnellement par `ai/spatial_extractor` ;
+- le slot du profil armé est **écrit par le moteur** (`pending_weapon_slot`, posé et effacé avec
+  `pending_weapon`) et relu par l'observation, au lieu d'être re-dérivé du code d'arme — deux
+  dérivations d'un même fait divergent ;
+- le drapeau d'arme est posé **hors du cache de profils** (mémoïsé par escouade et figurines
+  vivantes) : écrit dedans, il serait resté allumé après la fin du point d'arrêt ;
+- un test vérifie que les deux drapeaux **atteignent le réseau** — c'est exactement ce qui manquait
+  à `decision_options_cont`, rempli par le moteur et lu par personne.
+
+---
+
 ## ✅ Obs — candidats de décision DISCERNABLES {#candidats-decision-discernables}
 
 **Livré et mergé le 2026-09-09** (`0049f9ab`). `obs_size` 17055 → **17091** : ré-entraînement
