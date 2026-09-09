@@ -328,13 +328,6 @@ class ObservationBuilder:
         self._full_obs_scratch: Optional[Dict[str, np.ndarray]] = None  # _obs_scratch + "grid" pré-alloué (jamais muté après init)
         self._unit_ent_cont = np.zeros(UNIT_CONT_SIZE, dtype=np.float32)
         self._unit_ent_bin = np.zeros(UNIT_BIN_SIZE, dtype=np.float32)
-        # Échelle de `max_floor_height` : le seuil de Plunging Fire (22.05), en POUCES — la même
-        # constante que lit la résolution du tir, jamais un facteur inventé ici. 1.0 dans
-        # l'observation = exactement la hauteur qui déclenche la règle. `require_key` en cascade :
-        # une config sans ce seuil ne peut pas résoudre un tir non plus, l'absence doit lever.
-        self._plunging_fire_height = float(
-            require_key(require_key(config, "game_rules"), "plunging_fire_height")
-        )
 
     # ============================================================================
     # ============================================================================
@@ -1521,7 +1514,18 @@ class ObservationBuilder:
         _alive_heights = [
             float(_floor_heights[_mid]) for _mid in alive_mids if _mid in _floor_heights
         ] if _floor_heights else []
-        _c("max_floor_height", (max(_alive_heights) / self._plunging_fire_height) if _alive_heights else 0.0)
+        # Échelle : le seuil de Plunging Fire (22.05), en POUCES — la MÊME constante que lit la
+        # résolution du tir (`shared_utils`, jumeau), sur la MÊME config, jamais un facteur inventé
+        # ici. 1.0 dans l'observation = exactement la hauteur qui déclenche la règle. Lue au point
+        # d'usage et seulement quand une hauteur existe : un plateau sans étage n'a pas de seuil à
+        # exiger, comme le court-circuit du jumeau.
+        if _alive_heights:
+            _pf_height = float(
+                require_key(require_key(require_key(game_state, "config"), "game_rules"), "plunging_fire_height")
+            )
+            _c("max_floor_height", max(_alive_heights) / _pf_height)
+        else:
+            _c("max_floor_height", 0.0)
         # « la cible contient >= 1 figurine au sol » — vrai par défaut : sans hauteur connue,
         # toutes les figurines sont au sol.
         _b("has_ground_model", (not _alive_heights) or any(h == 0.0 for h in _alive_heights))
