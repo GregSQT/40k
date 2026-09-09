@@ -5139,8 +5139,9 @@ def arm_move_after_shooting_decision(
 
     # La case OCCUPÉE est scorée AVEC les destinations, dans le même appel : c'est elle qui décrit
     # le candidat « Rester » plus bas. Un second appel par grandeur refaisait l'énumération des
-    # ennemis et le `min` sur tout le pool pour cette unique case (11 % du coût de l'armement,
-    # mesuré), et obligeait à garder deux `None` que le cache non muté ne peut pas produire.
+    # ennemis et le `min` sur tout le pool pour cette unique case — 15 % du coût de l'armement,
+    # mesuré sur 36 destinations et 15 escouades ennemies —, et obligeait à garder deux `None`
+    # que le cache non muté ne peut pas produire.
     unit_position = require_unit_position(unit, game_state)
     scored_cells = [*destinations, unit_position]
     enemy_distances = _move_after_shooting_enemy_distances(game_state, unit, scored_cells)
