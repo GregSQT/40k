@@ -21,6 +21,7 @@ from __future__ import annotations
 import shutil
 import socket
 import subprocess
+import sys
 import textwrap
 import time
 from pathlib import Path
@@ -127,3 +128,71 @@ def test_la_garde_refuse_un_port_occupe_et_laisse_passer_un_port_libre(tmp_path)
     assert sortie.split() == ["REFUSE", "LIBRE"], (
         f"la garde n'a pas distingué le port occupé du port libre : {sortie!r}"
     )
+
+
+# --------------------------------------------------------------------- pré-vol de la couche C
+
+
+def test_les_prerequis_de_la_couche_c_sont_verifies_avant_de_juger(source: str) -> None:
+    """« Je ne peux pas juger » n'est pas « c'est cassé ».
+
+    La couche C exige trois choses que le dépôt ne porte pas : `@playwright/test`, un navigateur
+    téléchargé, et une session valide dans `config/users.db` — que `global-setup.ts` lit pour son
+    `storageState`, et qui n'existe que si quelqu'un s'est connecté au front. Aucune n'est une
+    régression du code. Sans cette distinction, faire entrer la couche dans la vérification large
+    produirait un ROUGE permanent sur toute machine neuve, c'est-à-dire un rouge qu'on apprend à
+    ignorer — exactement ce que ce dépôt a vécu avec la couche B, rouge par construction.
+    """
+    assert "prerequis_couche_c" in source, "le pré-vol de la couche C a disparu"
+    for prerequis in ["@playwright/test", "ms-playwright", "users.db"]:
+        assert prerequis in source, f"le pré-vol ne vérifie plus : {prerequis}"
+    assert "PRÉREQUIS ABSENT" in source, (
+        "un prérequis manquant doit avoir son propre statut, distinct de ❌ FAIL"
+    )
+
+
+def test_un_prerequis_manquant_ne_compte_pas_comme_un_echec(source: str) -> None:
+    """Le pré-vol garde la couche C hors du verdict, il ne la fait pas échouer.
+
+    `if [ "$SKIP_C" = false ] && prerequis_couche_c` : la couche ne s'exécute que si les deux
+    conditions tiennent, et `EXIT_CODE` n'est touché que par un vrai run de tests.
+    """
+    assert 'if [ "$SKIP_C" = false ] && prerequis_couche_c; then' in source, (
+        "le pré-vol n'est plus la condition d'entrée de la couche C"
+    )
+    # La ligne qui pose le statut « prérequis » ne doit jamais toucher au code de sortie.
+    bloc = source.split("prerequis_couche_c() {")[1].split("\n}")[0]
+    assert "EXIT_CODE" not in bloc, (
+        "le pré-vol modifie EXIT_CODE : un prérequis absent ferait échouer la vérification large"
+    )
+
+
+def test_le_prevol_refuse_quand_un_prerequis_manque(tmp_path) -> None:
+    """Le pré-vol EXERCÉ, pas seulement lu.
+
+    Les trois tests ci-dessus cherchent des chaînes dans le script : une mutation qui remplace la
+    condition par `if false` les laisse tous verts (vérifié). Celui-ci extrait la fonction et la
+    lance dans un faux arbre où `@playwright/test` est absent — elle doit rendre 1.
+    """
+    lignes = SCRIPT.read_text(encoding="utf-8").splitlines()
+    debut = next(i for i, l in enumerate(lignes) if l.startswith("prerequis_couche_c()"))
+    fin = next(i for i in range(debut, len(lignes)) if lignes[i] == "}")
+    fonction = "\n".join(lignes[debut:fin + 1])
+
+    faux_front = tmp_path / "frontend"
+    faux_front.mkdir()
+    (tmp_path / "config").mkdir()
+    essai = tmp_path / "essai.sh"
+    essai.write_text(
+        f'FRONTEND_DIR="{faux_front}"\nREPO="{tmp_path}"\nVENV="{sys.executable}"\n'
+        f'RESULT_C=""\n{fonction}\n'
+        'prerequis_couche_c && echo PASSE || echo REFUSE\n',
+        encoding="utf-8",
+    )
+
+    sortie = subprocess.run(["bash", str(essai)], capture_output=True, text=True).stdout
+
+    assert "REFUSE" in sortie, (
+        f"le pré-vol a laissé passer une couche C sans @playwright/test : {sortie!r}"
+    )
+    assert "NON JUGÉE" in sortie, "le message doit dire que la couche n'a pas été jugée"

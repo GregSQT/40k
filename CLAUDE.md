@@ -21,7 +21,7 @@ Aucun fallback/workaround/default anti-erreur → T1
 TESTS — QUI LANCE QUOI
 
 VÉRIFICATION LARGE = utilisateur uniquement :
-python3 -m pytest tests/unit/ -q -n 16 --dist worksteal ; python3 -m pytest tests/integration/pvp/ -q -n 6 --dist load ; pyright ; p ai/hidden_action_finder.py ; p scripts/check_ai_rules.py ; npx biome check frontend/src ; (cd frontend && npx tsc --noEmit -p tsconfig.app.json) ; (cd frontend && npx vitest run)
+python3 -m pytest tests/unit/ -q -n 16 --dist worksteal ; python3 -m pytest tests/integration/pvp/ -q -n 6 --dist load ; pyright ; p ai/hidden_action_finder.py ; p scripts/check_ai_rules.py ; npx biome check frontend/src ; (cd frontend && npx tsc --noEmit -p tsconfig.app.json) ; (cd frontend && npx vitest run) ; bash scripts/front_test_all.sh --skip-a --skip-b
 
 L'agent ne la lance JAMAIS, ni en totalité, ni par recomposition/contournement. .claude/hooks/deny-verif-large.sh juge chaque segment séparé par ;, &&, |; le contourner ou le désactiver est interdit.
 L'agent vérifie CE QU'IL A TOUCHÉ, rien d'autre, et DOIT lancer les fichiers de test ciblés qu'il vient d'écrire/toucher :
