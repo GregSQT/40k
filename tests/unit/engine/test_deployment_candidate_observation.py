@@ -31,6 +31,7 @@ from tests.unit.engine._config_helpers import (
     assert_deployment_phase,
     bank_training_scenarios,
     pin_active_deployment,
+    settle_reserves_declarations,
 )
 from engine.action_decoder import (
     DEPLOY_SLOT_CANDIDATES_CACHE_KEY,
@@ -88,6 +89,11 @@ def _load():
     pin_active_deployment(eng)
     eng.reset(seed=0)
     assert_deployment_phase(eng)  # sinon ce fichier ne teste rien
+    # L'étape Declare Battle Formations (20.01) précède la mise en place. Ce fichier décrit les
+    # CANDIDATS DE POSE : les questions de réserves sont réglées ici, en déclinant, pour que le
+    # pilotage retrouve l'état qu'il décrit — un masque de pose à chaque step.
+    settle_reserves_declarations(eng)
+    assert_deployment_phase(eng)
     return eng
 
 

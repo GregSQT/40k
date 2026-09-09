@@ -83,17 +83,25 @@ def _engine(training_config_name: str = "x1_debug", seed: int = 0):
 
 def _drive_deployment(eng, reserve_first_unit: bool = False) -> str:
     """Déroule le déploiement. Retourne l'id de l'escouade mise en réserves ('' si aucune)."""
-    from engine.macro_intents import ACTION_WAIT
+    from engine.agent_decision import read_pending_agent_decision
+    from engine.macro_intents import CHOICE_SLOTS
 
     gs = eng.game_state
     reserved = ""
     steps = 0
     while gs.get("phase") == "deployment" and steps < 1000:
         mask = eng.get_action_mask()
-        if reserve_first_unit and not reserved and mask[ACTION_WAIT]:
-            active = eng.action_decoder.get_deployment_active_unit(gs)
-            reserved = str(active["id"])
-            eng.step(int(ACTION_WAIT))
+        # ÉTAPE DECLARE BATTLE FORMATIONS (20.01) — elle précède TOUTE mise en place, donc elle
+        # est traitée en premier ici comme dans le moteur. `SQUAD_ACTION_WAIT` ne met plus rien en
+        # réserves : la question passe par une décision agent répondue par `CHOICE_i`.
+        pending = read_pending_agent_decision(gs)
+        if pending is not None:
+            assert pending["type"] == "reserves_declaration", pending["type"]
+            declare = bool(reserve_first_unit and not reserved)
+            if declare:
+                reserved = str(pending["unit_id"])
+            # CHOICE_0 = déclarer en réserves, CHOICE_1 = garder pour le déploiement.
+            eng.step(int(CHOICE_SLOTS.start + (0 if declare else 1)))
         else:
             deploy_actions = [a for a in range(4, 9) if mask[a]]
             assert deploy_actions, f"aucune action de déploiement au step {steps}"
@@ -1359,18 +1367,28 @@ def test_strategic_reserves_deposit_is_refused_outside_the_deployment_phase():
     squad_id = next(sid for sid, e in gs["units_cache"].items() if int(e["player"]) == 1)
 
     def _rearm_deployment() -> None:
+        from engine.phase_handlers.deployment_handlers import (
+            RESERVES_DECLARATION_CLOSED_KEY, RESERVES_DECLARATION_QUEUE_KEY,
+        )
+
         gs["phase"] = "deployment"
         gs["current_player"] = 1
         gs["deployment_state"]["deployment_complete"] = False
         gs["deployment_state"]["current_deployer"] = 1
         gs["deployment_state"]["deployable_units"][1] = [squad_id]
+        # L'étape Declare Battle Formations est ROUVERTE avec elle : le dépôt 20.01 n'existe que
+        # pendant cette étape, la file est donc ce qui le rend possible.
+        gs["deployment_state"][RESERVES_DECLARATION_QUEUE_KEY] = [[1, squad_id]]
+        gs["deployment_state"][RESERVES_DECLARATION_CLOSED_KEY] = False
         _unit(gs, squad_id)["deployed_on_turn"] = None
         _unit(gs, squad_id)["in_strategic_reserves"] = False
 
     # VERT VACANT : le dépôt ABOUTIT dans sa phase. Sans ce contrôle, les refus ci-dessous
     # passeraient même si l'action n'existait pas du tout.
     _rearm_deployment()
-    eng.execute_semantic_action({"action": "deploy_strategic_reserves", "unitId": squad_id})
+    eng.execute_semantic_action(
+        {"action": "deploy_strategic_reserves", "unitId": squad_id, "declare": True}
+    )
     assert _unit(gs, squad_id)["in_strategic_reserves"] is True, (
         "le dépôt doit aboutir DANS la phase de déploiement"
     )
@@ -1378,7 +1396,9 @@ def test_strategic_reserves_deposit_is_refused_outside_the_deployment_phase():
     for phase in ("command", "move", "shoot", "charge", "fight"):
         _rearm_deployment()
         gs["phase"] = phase
-        eng.execute_semantic_action({"action": "deploy_strategic_reserves", "unitId": squad_id})
+        eng.execute_semantic_action(
+            {"action": "deploy_strategic_reserves", "unitId": squad_id, "declare": True}
+        )
         assert _unit(gs, squad_id)["in_strategic_reserves"] is False, (
             f"20.01 : une unité a été mise en réserves depuis la phase {phase}"
         )

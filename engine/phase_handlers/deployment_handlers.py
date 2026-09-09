@@ -42,6 +42,17 @@ def _get_deployment_pool(deployment_pools: Dict[Any, Any], player: int) -> List[
     raise KeyError(f"deployment_pools missing player {player}")
 
 
+def deployable_units_of(deployment_state: Dict[str, Any], player: int) -> list:
+    """Alias PUBLIC de `_get_deployable_remaining` — la convention de clés int-ou-str, une fois.
+
+    Existe parce que trois modules hors de ce fichier (le résumé API, la clôture de phase, le
+    poseur automatique) posent la MÊME question et la résolvaient chacun à leur façon
+    (`.get(player, .get(str(player)))` recopié). Une 5e copie divergerait le jour où les clés
+    seront normalisées.
+    """
+    return _get_deployable_remaining(deployment_state, player)
+
+
 def _get_deployable_remaining(deployment_state: Dict[str, Any], player: int) -> list:
     """Get remaining deployable units for player. Raises KeyError if player key missing."""
     deployable_units = require_key(deployment_state, "deployable_units")
@@ -1758,9 +1769,15 @@ def deployment_commit_plan(
     """Valide (bouton Valider) puis commit le déploiement d'une escouade.
 
     ``plan`` doit couvrir TOUTES les figurines vivantes de l'escouade.
+
+    REFUSE tant que l'étape Declare Battle Formations n'est pas épuisée : 20.01 place la mise en
+    réserves AVANT le déploiement, et poser une seule figurine avant la fin des déclarations
+    donnerait au déclarant suivant une information que la règle ne lui accorde pas.
     """
     squad_id = str(require_key(action, "unitId"))
     deployment_state = require_key(game_state, "deployment_state")
+    if reserves_declaration_step_is_open(game_state):
+        return False, {"error": "reserves_declaration_still_open", "unitId": squad_id}
     current_deployer = int(require_key(deployment_state, "current_deployer"))
 
     deployable_units = require_key(deployment_state, "deployable_units")
@@ -1855,76 +1872,381 @@ def unit_can_be_placed_in_strategic_reserves(game_state: Dict[str, Any], unit_id
     )
 
 
-def deployment_place_in_strategic_reserves(
-    game_state: Dict[str, Any], action: Dict[str, Any]
-) -> Tuple[bool, Dict[str, Any]]:
-    """20.01 — place l'unité en réserves stratégiques AU LIEU de la déployer.
+#: Clé de `deployment_state` portant la FILE des unités à qui l'étape Declare Battle Formations
+#: doit encore poser la question 20.01. Chaque entrée est un couple ``[joueur, id d'escouade]``.
+#:
+#: POURQUOI UNE FILE, ET POURQUOI ELLE EST BÂTIE AVANT TOUTE MISE EN PLACE. 20.01 situe la
+#: déclaration « Before the battle, in the Declare Battle Formations step » — une étape qui
+#: PRÉCÈDE le déploiement (`25 Rules appendix.pdf` : Declare Battle Formations, puis Pre-battle
+#: Abilities, puis Begin the Battle). Tant que la question était posée au fil du déploiement, le
+#: joueur 2 déclarait ses réserves en voyant les unités adverses déjà posées : mesuré, quatre
+#: unités du joueur 1 sur la table au moment où le slot restait ouvert. La file fige donc l'ordre
+#: des questions au reset, et l'étape entière se résout avant la première pose.
+RESERVES_DECLARATION_QUEUE_KEY = "reserves_declaration_queue"
 
-    Jumeau exact de ``deployment_commit_plan`` du point de vue de la PROGRESSION du déploiement
-    (l'unité sort de ``deployable_units``, le déployeur alterne, la phase se termine quand plus
-    personne n'a d'unité à poser) ; la seule différence est qu'aucune figurine n'est posée :
-    l'unité reste hors table (`deployed_on_turn` nul) avec `in_strategic_reserves` vrai, et elle
-    arrivera par un ingress move (20.04).
+#: Clé de `deployment_state` marquant l'étape 20.01 CLOSE. Une file vide ne suffit pas à la
+#: remplacer : la clôture rend la main au premier déployeur, et ce transfert doit se produire UNE
+#: fois. Rejoué à chaque construction de masque — ce que ferait un test « la file est vide » — il
+#: ramènerait `current_deployer` au joueur 1 après CHAQUE pose et détruirait l'alternance du
+#: déploiement.
+RESERVES_DECLARATION_CLOSED_KEY = "reserves_declaration_closed"
+
+
+def build_reserves_declaration_queue(
+    deployable_units: Dict[Any, Any]
+) -> List[List[Any]]:
+    """File d'interrogation 20.01, ALTERNÉE, figée avant toute mise en place.
+
+    L'alternance (joueur 1, joueur 2, joueur 1, …) est celle du déploiement lui-même
+    (`_resolve_next_deployer_after_success`) : la réutiliser plutôt qu'en inventer une seconde
+    évite deux ordres de tour concurrents dans la même phase. Elle n'ouvre aucune information —
+    une escouade hors table n'a AUCUNE ligne d'entité dans l'observation
+    (`deployed_friendly_squad_ids`, `_refresh_enemy_slot_mapping`), donc la déclaration adverse
+    reste invisible quel que soit l'ordre.
+
+    L'ordre à l'intérieur d'un joueur est celui de `deployable_units`, la MÊME source que le pool
+    de pose : deux ordres divergents feraient poser la question sur une unité et la pose sur une
+    autre.
     """
-    squad_id = str(require_key(action, "unitId"))
-    deployment_state = require_key(game_state, "deployment_state")
-    current_deployer = int(require_key(deployment_state, "current_deployer"))
+    per_player = {
+        player: [
+            str(uid)
+            for uid in (
+                deployable_units.get(player, deployable_units.get(str(player)))  # get allowed
+                or []
+            )
+        ]
+        for player in (1, 2)
+    }
+    queue: List[List[Any]] = []
+    for index in range(max(len(per_player[1]), len(per_player[2]))):
+        for player in (1, 2):
+            if index < len(per_player[player]):
+                queue.append([player, per_player[player][index]])
+    return queue
 
-    deployable_units = require_key(deployment_state, "deployable_units")
-    deployable_list = deployable_units.get(
-        current_deployer, deployable_units.get(str(current_deployer))
+
+def reserves_declaration_step_is_open(game_state: Dict[str, Any]) -> bool:
+    """True tant que l'étape Declare Battle Formations n'est pas épuisée.
+
+    Prédicat PARTAGÉ : le masque gym s'en sert pour poser la question avant d'ouvrir le moindre
+    slot de pose, et `deployment_commit_plan` refuse tant qu'il est vrai. Deux dérivations
+    feraient diverger « la question est-elle encore due ? » de « la pose est-elle encore
+    interdite ? », et c'est précisément l'écart qui laissait déclarer après avoir vu le
+    déploiement adverse.
+
+    `deployment_recommit_plan` n'a PAS de garde équivalent, et n'en a pas besoin : il repositionne
+    une escouade DÉJÀ POSÉE, ce qui suppose qu'une pose a eu lieu, donc que l'étape est close.
+    Lui en ajouter un serait un contrôle qui ne peut jamais se déclencher.
+
+    Une entrée dont l'unité ne PEUT PAS aller en réserves (FORTIFICATION, ou plafond de 50 %
+    atteint) ne rend pas l'étape ouverte : il n'y a pas de question à lui poser, et un candidat
+    unique n'est pas une décision (`agent_decision._validate_options`).
+    """
+    deployment_state = game_state.get("deployment_state")  # get allowed : absent hors déploiement
+    if deployment_state is None:
+        return False
+    if require_key(deployment_state, RESERVES_DECLARATION_CLOSED_KEY):
+        return False
+    queue = deployment_state.get(RESERVES_DECLARATION_QUEUE_KEY)  # get allowed : contrôlé ci-dessous
+    if queue is None:
+        raise KeyError(
+            f"deployment_state sans '{RESERVES_DECLARATION_QUEUE_KEY}' : l'etape Declare Battle "
+            "Formations 20.01 n'a pas ete initialisee au reset. Sans elle la declaration se "
+            "ferait au fil du deploiement, donc apres avoir vu les poses adverses."
+        )
+    return any(
+        unit_can_be_placed_in_strategic_reserves(game_state, str(squad_id))
+        for _player, squad_id in queue
     )
-    if deployable_list is None:
-        raise KeyError(f"deployable_units missing player {current_deployer}")
-    if squad_id not in [str(uid) for uid in deployable_list]:
-        return False, {"error": "unit_not_deployable", "unitId": squad_id}
 
-    unit = get_unit_by_id(game_state, squad_id)
+
+def next_reserves_declaration_entry(
+    game_state: Dict[str, Any]
+) -> Optional[Tuple[int, str]]:
+    """Tête de file 20.01 réellement interrogeable — ``(joueur, escouade)`` — ou ``None``.
+
+    Les entrées en tête dont l'unité ne peut plus aller en réserves sont RETIRÉES au passage :
+    la question ne se posera jamais pour elles, et les laisser ferait boucler l'appelant.
+    """
+    deployment_state = require_key(game_state, "deployment_state")
+    queue = require_key(deployment_state, RESERVES_DECLARATION_QUEUE_KEY)
+    while queue:
+        player, squad_id = int(queue[0][0]), str(queue[0][1])
+        if unit_can_be_placed_in_strategic_reserves(game_state, squad_id):
+            return player, squad_id
+        queue.pop(0)
+    return None
+
+
+def reserves_declaration_decline_slot(
+    game_state: Dict[str, Any], action_mask: Any
+) -> Optional[int]:
+    """Le `CHOICE_i` qui REFUSE la déclaration 20.01 en attente, ou ``None`` s'il n'y en a pas.
+
+    SOURCE UNIQUE de la doctrine « 20.01 est une décision de LISTE, jamais une décision de
+    doctrine » pour les deux poseurs automatiques : les bots d'évaluation
+    (`ai.env_wrappers.bot_action_for_pending_choice`) et le déploiement `auto` du moteur
+    (`W40KEngine._pick_placement_action`). Écrite deux fois, elle divergerait — et l'adversaire de
+    référence se mettrait à réserver dans l'un des deux régimes seulement, ce qui déplacerait la
+    baseline de win-rate sans que rien ne le signale.
+
+    Le candidat est retrouvé par son drapeau `declines`, jamais par son index : c'est lui qui
+    porte « ne rien faire » (`DECISION_OPTION_BIN_FIELDS`), et un index en dur deviendrait faux le
+    jour où l'ordre des candidats changerait.
+    """
+    from engine.agent_decision import read_pending_agent_decision
+    from engine.macro_intents import CHOICE_BASE
+
+    decision = read_pending_agent_decision(game_state)
+    if decision is None or str(require_key(decision, "type")) != "reserves_declaration":
+        return None
+    options = require_key(decision, "options")
+    declining = [i for i, option in enumerate(options) if require_key(option, "declines")]
+    if len(declining) != 1:
+        raise RuntimeError(
+            f"reserves_declaration_decline_slot: {len(declining)} candidats `declines` — il en "
+            "faut exactement un pour que le refus soit sans ambiguite."
+        )
+    slot = int(CHOICE_BASE + declining[0])
+    if not bool(action_mask[slot]):
+        raise RuntimeError(
+            f"reserves_declaration_decline_slot: CHOICE_{declining[0]} ferme alors qu'une "
+            "declaration 20.01 est en attente — masque incoherent."
+        )
+    return slot
+
+
+def close_reserves_declaration_step_if_done(game_state: Dict[str, Any]) -> bool:
+    """Ferme l'étape Declare Battle Formations si plus aucune question 20.01 n'est due.
+
+    Rend ``True`` seulement au passage ouvert -> fermé. POINT DE FERMETURE UNIQUE des deux
+    sièges : le siège piloté par le modèle y arrive par `arm_reserves_declaration_decision`, le
+    siège humain par `deployment_place_in_strategic_reserves`. Deux fermetures séparées feraient
+    dépendre du siège l'ordre dans lequel la mise en place reprend.
+    """
+    deployment_state = require_key(game_state, "deployment_state")
+    if require_key(deployment_state, RESERVES_DECLARATION_CLOSED_KEY):
+        return False
+    if next_reserves_declaration_entry(game_state) is not None:
+        return False
+    deployment_state[RESERVES_DECLARATION_CLOSED_KEY] = True
+    restore_deployer_after_reserves_declaration(game_state)
+    return True
+
+
+def restore_deployer_after_reserves_declaration(game_state: Dict[str, Any]) -> None:
+    """Rend la main au PREMIER déployeur une fois l'étape Declare Battle Formations épuisée.
+
+    Les questions 20.01 déplacent `current_deployer` au fil de la file ; la mise en place, elle,
+    commence par le joueur 1 — la MÊME règle que le reset (`W40KEngine.reset` : joueur 1, ou
+    joueur 2 s'il est le seul à avoir encore une unité à poser). La recopier ici plutôt que de
+    laisser `current_deployer` sur le dernier interrogé évite que l'ordre du déploiement dépende
+    de la parité du nombre de déclarations.
+
+    Idempotent : appelé à chaque construction de masque une fois la file vide.
+    """
+    deployment_state = require_key(game_state, "deployment_state")
+    first = 1 if _get_deployable_remaining(deployment_state, 1) else 2
+    deployment_state["current_deployer"] = first
+    game_state["current_player"] = first
+
+
+def arm_reserves_declaration_decision(
+    game_state: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Pose la question 20.01 de la tête de file, ou ``None`` si l'étape est finie.
+
+    Miroir exact d'`arm_fly_declaration_decision` (21.03) : l'appelant qui reçoit une décision
+    rend la main au décideur (masque exclusivement `CHOICE_*`), et la mise en place reprendra au
+    step suivant.
+
+    ORDRE CONTRACTUEL des candidats (§9.6) : `CHOICE_0` = déclarer l'unité en réserves,
+    `CHOICE_1` = la garder pour le déploiement. Aucun des deux n'accorde d'effet de datasheet,
+    c'est `declines` qui les sépare — sans lui les deux lignes sortiraient identiques et le choix
+    serait un pile-ou-face que PPO ne peut pas apprendre (défaut mesuré sur `waaagh_call`).
+
+    `current_deployer` suit la question : c'est lui que `W40KEngine` recopie dans
+    `current_player`, et `consume_pending_agent_decision` refuse une décision qui ne serait pas
+    celle du siège courant.
+    """
+    deployment_state = require_key(game_state, "deployment_state")
+    close_reserves_declaration_step_if_done(game_state)
+    if require_key(deployment_state, RESERVES_DECLARATION_CLOSED_KEY):
+        return None
+    entry = next_reserves_declaration_entry(game_state)
+    if entry is None:
+        raise RuntimeError(
+            "arm_reserves_declaration_decision: etape 20.01 declaree ouverte sans question due "
+            "— `close_reserves_declaration_step_if_done` vient pourtant de la laisser ouverte."
+        )
+    player, squad_id = entry
+    deployment_state["current_deployer"] = player
+    game_state["current_player"] = player
+
+    from engine.agent_decision import set_pending_agent_decision
+
+    return set_pending_agent_decision(
+        game_state,
+        decision_type="reserves_declaration",
+        player=player,
+        unit_id=squad_id,
+        options=[
+            {
+                "label": "Place in strategic reserves",
+                "effect_ids": (),
+                "declines": False,
+                "payload": {"declare": True},
+            },
+            {
+                "label": "Deploy normally",
+                "effect_ids": (),
+                "declines": True,
+                "payload": {"declare": False},
+            },
+        ],
+    )
+
+
+def apply_reserves_declaration_decision(
+    game_state: Dict[str, Any], squad_id: str, declared: bool
+) -> None:
+    """Applique le candidat choisi pour `reserves_declaration`, et EFFACE la décision.
+
+    « Ne pas déclarer » n'est PAS un non-événement : c'est le second candidat, et il doit retirer
+    l'unité de la file, sans quoi la question se reposerait indéfiniment — le même piège que le
+    set de résolution de la déclaration de vol.
+
+    Le joueur passé au vérificateur vient de l'ÉTAT (`current_player`), donc d'une source
+    INDÉPENDANTE de la décision : ce contrôle-là mord, il refuse une réponse qui ne vient pas du
+    siège interrogé. `unit_id` est l'escouade SUR LAQUELLE on écrit ; il barre un futur appelant
+    qui appliquerait la déclaration à une autre.
+    """
+    from engine.agent_decision import consume_pending_agent_decision
+
+    deployment_state = require_key(game_state, "deployment_state")
+    queue = require_key(deployment_state, RESERVES_DECLARATION_QUEUE_KEY)
+    if not queue or str(queue[0][1]) != str(squad_id):
+        raise RuntimeError(
+            f"apply_reserves_declaration_decision: la reponse porte sur {squad_id}, or la tete de "
+            f"file 20.01 est {None if not queue else queue[0][1]!r} — la file et la decision ont "
+            "diverge."
+        )
+    consume_pending_agent_decision(
+        game_state,
+        decision_type="reserves_declaration",
+        player=int(require_key(game_state, "current_player")),
+        unit_id=str(squad_id),
+    )
+    queue.pop(0)
+    if declared:
+        commit_strategic_reserves(game_state, str(squad_id))
+    close_reserves_declaration_step_if_done(game_state)
+
+
+def commit_strategic_reserves(game_state: Dict[str, Any], squad_id: str) -> None:
+    """Écrit la mise en réserves 20.01 d'une unité — ÉCRIVAIN UNIQUE, les deux sièges y passent.
+
+    Le siège piloté par le modèle y arrive par `apply_reserves_declaration_decision`, le siège
+    humain par `deployment_place_in_strategic_reserves` : la mutation elle-même ne peut pas
+    différer entre les deux, sinon la comptabilité du plafond (`_reserves_placed`) et le pool de
+    pose divergeraient selon qui joue.
+
+    L'unité sort du POOL À POSER, mais n'entre PAS dans `deployed_units` : elle n'est pas sur le
+    champ de bataille, et `deployment_recommit_plan` (repositionnement pendant la phase de
+    déploiement) ne doit pas pouvoir la poser après coup — elle n'arrive que par 20.04.
+    """
+    unit = get_unit_by_id(game_state, str(squad_id))
     if not unit:
         raise KeyError(f"Unit {squad_id} missing from game_state['units']")
-    if int(require_key(unit, "player")) != current_deployer:
-        return False, {"error": "unit_not_current_deployer", "unitId": squad_id}
-    if not unit_can_be_placed_in_strategic_reserves(game_state, squad_id):
-        return False, {"error": "strategic_reserves_not_allowed", "unitId": squad_id}
-
+    player = int(require_key(unit, "player"))
     unit["in_strategic_reserves"] = True
     # Compté POUR LES DEUX CAMPS, sans filtre sur le joueur contrôlé : c'est ce filtre qui
     # rendait la mise en réserve du bot invisible. Le siège de l'agent n'est connu qu'à la
     # terminaison (`agent_seat_mode: random`), la projection s'y fait.
-    require_key(game_state, "_reserves_placed")[int(current_deployer)] += 1
+    require_key(game_state, "_reserves_placed")[player] += 1
     # _reserves_placed est AUSSI initialisé au reset par le compte des unités pré-déclarées
     # en réserve dans le roster (strategic_reserves: true). Ce hook ne couvre que les unités
-    # placées EN PLUS pendant la phase de déploiement active (20.01).
-    # L'unité sort du POOL À POSER, mais n'entre PAS dans `deployed_units` : elle n'est pas sur
-    # le champ de bataille, et `deployment_recommit_plan` (repositionnement pendant la phase de
-    # déploiement) ne doit pas pouvoir la poser après coup — elle n'arrive que par 20.04.
-    if current_deployer in deployable_units:
-        deployable_units[current_deployer] = [
-            uid for uid in deployable_units[current_deployer] if str(uid) != squad_id
-        ]
-    else:
-        deployable_units[str(current_deployer)] = [
-            uid for uid in deployable_units[str(current_deployer)] if str(uid) != squad_id
-        ]
+    # déclarées EN PLUS pendant l'étape Declare Battle Formations (20.01).
+    deployment_state = require_key(game_state, "deployment_state")
+    deployable_units = require_key(deployment_state, "deployable_units")
+    key = player if player in deployable_units else str(player)
+    if key not in deployable_units:
+        raise KeyError(f"deployable_units missing player {player}")
+    deployable_units[key] = [
+        uid for uid in deployable_units[key] if str(uid) != str(squad_id)
+    ]
 
     from engine.game_utils import add_console_log
     add_console_log(game_state, f"STRATEGIC RESERVES (20.01): unit {squad_id} held in reserves")
 
-    next_deployer = _resolve_next_deployer_after_success(deployment_state, current_deployer)
-    if next_deployer is None:
-        deployment_state["deployment_complete"] = True
-    else:
-        deployment_state["current_deployer"] = next_deployer
-        game_state["current_player"] = next_deployer
+
+def deployment_place_in_strategic_reserves(
+    game_state: Dict[str, Any], action: Dict[str, Any]
+) -> Tuple[bool, Dict[str, Any]]:
+    """20.01 — réponse du SIÈGE HUMAIN à la question de l'étape Declare Battle Formations.
+
+    Pendant de `apply_reserves_declaration_decision`, qui porte la réponse du siège piloté par le
+    modèle : même file, même écrivain de la mutation (`commit_strategic_reserves`), même ordre
+    d'interrogation. Les deux sièges ne peuvent donc pas jouer deux règles différentes — c'est
+    l'invariant que la version précédente ne tenait pas, où le gym passait par `SQUAD_ACTION_WAIT`
+    au fil du déploiement et l'humain par un panneau libre.
+
+    ``action["declare"]`` est REQUIS : « garder l'unité pour le déploiement » est le second
+    candidat de la décision, pas l'absence de réponse. Le déduire de l'appel ferait de l'un des
+    deux choix un défaut silencieux.
+
+    Aucune alternance ici, et c'est le fond de la correction : la déclaration N'EST PAS un tour de
+    déploiement. L'ordre des questions est celui de la file, figée au reset, et la mise en place
+    ne commence qu'une fois la file vide.
+    """
+    squad_id = str(require_key(action, "unitId"))
+    declare = require_key(action, "declare")
+    if not isinstance(declare, bool):
+        raise TypeError(
+            f"deployment_place_in_strategic_reserves: 'declare' doit etre un booleen, "
+            f"recu {declare!r}"
+        )
+    deployment_state = require_key(game_state, "deployment_state")
+
+    entry = next_reserves_declaration_entry(game_state)
+    if entry is None:
+        return False, {"error": "reserves_declaration_step_closed", "unitId": squad_id}
+    expected_player, expected_squad_id = entry
+    if squad_id != expected_squad_id:
+        return False, {
+            "error": "not_the_pending_reserves_declaration",
+            "unitId": squad_id,
+            "expectedUnitId": expected_squad_id,
+        }
+
+    require_key(deployment_state, RESERVES_DECLARATION_QUEUE_KEY).pop(0)
+    if declare:
+        commit_strategic_reserves(game_state, squad_id)
+    close_reserves_declaration_step_if_done(game_state)
 
     result: Dict[str, Any] = {
         "action": "deploy_strategic_reserves",
         "unitId": squad_id,
-        "deployment_complete": deployment_state.get("deployment_complete", False),  # get allowed
+        "player": expected_player,
+        "declared": declare,
+        "reserves_declaration_open": reserves_declaration_step_is_open(game_state),
     }
-    if deployment_state.get("deployment_complete", False):  # get allowed
+    # PLUS RIEN À POSER : cas limite RÉEL — un roster dont la valeur totale tient sous le plafond
+    # de 50 % peut partir ENTIÈREMENT en réserves. Sans cette clôture, la phase de déploiement
+    # resterait ouverte avec deux pools vides et la partie serait figée pour le siège humain,
+    # là où le siège gym s'en sort par `_complete_deployment_if_nothing_to_place`. C'est
+    # exactement le `phase_complete` que `deployment_commit_plan` rend dans le même état : les
+    # deux sorties de la phase de déploiement doivent le signaler de la même façon.
+    if not any(
+        deployable_units_of(deployment_state, player) for player in (1, 2)
+    ):
+        deployment_state["deployment_complete"] = True
         game_state["current_player"] = 1
         result.update({"phase_complete": True, "next_phase": "command"})
+    result["deployment_complete"] = deployment_state.get(  # get allowed (posé ci-dessus)
+        "deployment_complete", False
+    )
     return True, result
 
 

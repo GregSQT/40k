@@ -1404,14 +1404,24 @@ class W40KEngine(gym.Env):
         return self._deployment_auto_episode and self.game_state.get("phase") == "deployment"
 
     def _pick_placement_action(self, action_mask: np.ndarray, context: str) -> int:
-        """Tire une POSE parmi les slots de strategie ouverts. Jamais `ACTION_WAIT`.
+        """Tire une POSE parmi les slots de strategie ouverts, ou REFUSE la declaration 20.01.
 
-        Source unique du filtre : `macro_intents.open_placement_slots` — la meme que celle des
-        bots. Ce que ce detour achete est concret : `ACTION_WAIT` est ouvert au deploiement et n'y
-        est PAS une attente, il met l'unite en RESERVES STRATEGIQUES (20.01). Un tirage uniforme
-        sur le masque brut envoie donc des unites en reserves au hasard, ce que personne n'a
-        demande — c'est le defaut mesure du chantier 04c, cote bots.
+        Source unique du filtre de pose : `macro_intents.open_placement_slots` — la meme que celle
+        des bots. Ce que ce detour achete est concret : un tirage uniforme sur le masque brut
+        enverrait des unites en reserves au hasard, ce que personne n'a demande — c'est le defaut
+        mesure du chantier 04c, cote bots.
+
+        L'etape Declare Battle Formations (20.01) precede la mise en place et arrete le moteur sur
+        une decision par unite declarable : le poseur automatique doit y REPONDRE, sinon il ne
+        voit qu'un masque sans slot de pose et leve. Il decline toujours, la MEME doctrine que les
+        bots et par le MEME code (`reserves_declaration_decline_slot`) : 20.01 est une decision de
+        liste, pas une decision de doctrine.
         """
+        decline_slot = deployment_handlers.reserves_declaration_decline_slot(
+            self.game_state, action_mask
+        )
+        if decline_slot is not None:
+            return decline_slot
         open_actions = [int(i) for i, value in enumerate(action_mask) if bool(value)]
         placements = open_placement_slots(open_actions)
         if not placements:
@@ -2089,16 +2099,18 @@ class W40KEngine(gym.Env):
                 "current_deployer": 1,
                 "deployable_units": deployable_units,
                 "deployed_units": set(),
-                "deployment_complete": False
+                "deployment_complete": False,
+                # 20.01 — l'etape Declare Battle Formations PRECEDE le deploiement : la file des
+                # questions est figee ICI, avant qu'une seule figurine ne soit posee. La batir
+                # plus tard reviendrait a la batir sur un plateau deja partiellement deploye,
+                # c'est-a-dire a rendre au declarant l'information que la regle lui refuse.
+                deployment_handlers.RESERVES_DECLARATION_QUEUE_KEY:
+                    deployment_handlers.build_reserves_declaration_queue(deployable_units),
+                deployment_handlers.RESERVES_DECLARATION_CLOSED_KEY: False,
             }
             if not deployable_units[1] and deployable_units[2]:
                 self.game_state["deployment_state"]["current_deployer"] = 2
-            if not deployable_units[1] and not deployable_units[2]:
-                self.game_state["deployment_state"]["deployment_complete"] = True
-                cmd_result = self.start_command_phase()
-                if not (cmd_result and cmd_result.get("phase_complete") is False):
-                    movement_handlers.movement_phase_start(self.game_state)
-            else:
+            if not self._complete_deployment_if_nothing_to_place():
                 deployment_handlers.deployment_phase_start(self.game_state)
         else:
             # Initialize command phase for game start using handler delegation
@@ -4131,6 +4143,34 @@ class W40KEngine(gym.Env):
                 }
             )
 
+        if decision_type == "reserves_declaration":
+            # 20.01 « Declare Battle Formations » : décision d'ESCOUADE prise AVANT toute mise en
+            # place. Même forme que `fly_declaration` — aucun `effect_ids`, c'est `declines` qui
+            # sépare les candidats et le payload qui rend le sens explicite côté moteur.
+            declared = bool(require_key(require_key(selected_option, "payload"), "declare"))
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            # `apply_reserves_declaration_decision` efface la decision elle-meme (ecrivain unique)
+            # et ferme l'etape des que la file est epuisee.
+            deployment_handlers.apply_reserves_declaration_decision(
+                self.game_state, decision_squad_id, declared
+            )
+            result: Dict[str, Any] = {
+                "action": "agent_decision",
+                "waiting_for_player": False,
+                "decision_type": decision_type,
+                "unitId": decision_squad_id,
+                "player": int(require_key(decision, "player")),
+                "option_index": option_index,
+                "declaredInReserves": declared,
+                "success": True,
+            }
+            # Cas limite REEL et non hypothetique : un roster dont la valeur totale tient sous le
+            # plafond de 50 % peut partir ENTIEREMENT en reserves, et il ne reste alors rien a
+            # poser. La transition est celle du reset, appelee par le MEME helper : deux copies
+            # divergeraient sur la cascade command -> move.
+            result.update(self._complete_deployment_if_nothing_to_place())
+            return True, result
+
         if decision_type == "fly_declaration":
             # 21.03 « take to the skies » (V11 §0.48 `L6`) : décision d'ESCOUADE, par mouvement,
             # sans file de prompts. Comme pour le Waaagh!, c'est l'ORDRE des candidats qui porte
@@ -4356,6 +4396,30 @@ class W40KEngine(gym.Env):
     #   - gym            → le siège passe par le MASQUE (agent ou bot), le moteur rend la main ;
     #   - humain (PvP)   → `waiting_for_player`, résolu par une action explicite de l'API ;
     #   - IA hors gym    → tranché immédiatement par la politique ci-dessous.
+
+    def _complete_deployment_if_nothing_to_place(self) -> Dict[str, Any]:
+        """Clôt la phase de déploiement quand PLUS AUCUNE unité n'est à poser. ``{}`` sinon.
+
+        DEUX appelants, et c'est la raison d'être de ce helper : le reset, où les deux camps
+        peuvent n'avoir aucune unité posable (rosters entièrement pré-déclarés en réserves), et la
+        fin de l'étape Declare Battle Formations 20.01, où l'agent peut avoir déclaré tout ce que
+        le plafond de 50 % autorise. Les deux états sont le MÊME état, et la transition
+        `command` -> `move` y est la même ; écrite deux fois, elle divergerait sur la cascade.
+
+        Le retour de `start_command_phase` est RESPECTÉ : `phase_complete` faux signifie que la
+        phase de commandement attend une réponse de joueur, et enchaîner sur le mouvement la
+        perdrait.
+        """
+        deployment_state = require_key(self.game_state, "deployment_state")
+        for player in (1, 2):
+            if deployment_handlers.deployable_units_of(deployment_state, player):
+                return {}
+        deployment_state["deployment_complete"] = True
+        self.game_state["current_player"] = 1
+        cmd_result = self.start_command_phase()
+        if not (cmd_result and cmd_result.get("phase_complete") is False):
+            movement_handlers.movement_phase_start(self.game_state)
+        return {"deployment_complete": True}
 
     def start_command_phase(self) -> Dict[str, Any]:
         """Ouvre la phase de commandement — POINT D'ENTRÉE UNIQUE, moteur ET services.

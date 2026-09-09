@@ -482,6 +482,38 @@ def assert_deployment_phase(engine: Any) -> None:
         )
 
 
+def settle_reserves_declarations(engine: Any, *, limit: int = 100) -> int:
+    """Répond « garder pour le déploiement » à TOUTE question 20.01 en attente. Rend le nombre
+    de réponses jouées.
+
+    L'étape Declare Battle Formations (20.01) précède désormais toute mise en place : entre le
+    ``reset()`` et la première pose, le moteur s'arrête sur une décision agent par unité
+    déclarable. Un test qui déroule le déploiement en supposant que chaque step est une pose
+    tombe donc sur un pool d'éligibles VIDE — l'état normal d'un point d'arrêt joueur.
+
+    POLITIQUE : `CHOICE_1`, le candidat `declines`. C'est ce qui reproduit le comportement
+    d'avant l'étape — aucune unité n'y partait en réserves, `SQUAD_ACTION_WAIT` (id 1024) ne
+    pouvant jamais être la première action légale d'un masque de déploiement (slots 4-8). Un test
+    qui veut des réserves doit répondre `CHOICE_0` lui-même : le repli ne choisit pas à sa place.
+    """
+    from engine.agent_decision import read_pending_agent_decision
+    from engine.macro_intents import CHOICE_SLOTS
+
+    game_state = engine.game_state
+    answered = 0
+    while str(game_state["phase"]) == "deployment" and answered < limit:
+        engine.get_action_mask()  # c'est la construction du masque qui POSE la question
+        pending = read_pending_agent_decision(game_state)
+        if pending is None:
+            break
+        assert str(pending["type"]) == "reserves_declaration", (
+            f"decision {pending['type']!r} en phase de deploiement : seul 20.01 y arrete le moteur"
+        )
+        engine.step(int(CHOICE_SLOTS.start + 1))
+        answered += 1
+    return answered
+
+
 def play_out_deployment(engine: Any, *, limit: int = 1000) -> int:
     """Joue la phase de déploiement jusqu'à sa fin et rend le nombre de steps joués.
 
@@ -492,22 +524,27 @@ def play_out_deployment(engine: Any, *, limit: int = 1000) -> int:
     un ``reset()`` rend désormais un plateau VIDE, donc tout test qui observe des figurines
     posées doit d'abord dérouler la phase.
 
-    POLITIQUE DE CHOIX : la PREMIÈRE action légale du masque. Elle n'est pas neutre et c'est
-    pourquoi elle est nommée ici plutôt que recopiée — dans le masque de déploiement,
-    ``ACTION_WAIT`` met l'escouade en RÉSERVES stratégiques (20.01) au lieu de la poser (cf.
-    ``test_strategic_reserves_20``). Un test qui exige que TOUTES les unités soient sur la table
-    ne peut donc pas se contenter de ce helper : il doit restreindre lui-même son pool d'actions.
+    POLITIQUE DE CHOIX : la PREMIÈRE action légale du masque, SAUF pendant l'étape Declare
+    Battle Formations (20.01), déléguée à ``settle_reserves_declarations``. La distinction n'est
+    pas cosmétique : dans un masque de pose la première action légale est un slot de déploiement
+    (4-8), tandis que pendant l'étape de déclaration ce serait ``CHOICE_0`` — c'est-à-dire
+    « mets cette unité en réserves ». Prendre aveuglément la première action légale viderait donc
+    le plateau au lieu de le remplir, silencieusement.
 
     Aucune pose n'est écrite à la main : chaque step passe par le VRAI chemin moteur, donc les
     figurines atterrissent là où le moteur les accepte, sous les mêmes invariants qu'en production.
     """
     import numpy as np
+    from engine.agent_decision import read_pending_agent_decision
 
     game_state = engine.game_state
     steps = 0
     while str(game_state["phase"]) == "deployment" and steps < limit:
         legal = np.flatnonzero(engine.get_action_mask())
         assert legal.size, f"masque vide en déploiement (step {steps})"
+        if read_pending_agent_decision(game_state) is not None:
+            steps += settle_reserves_declarations(engine)
+            continue
         engine.step(int(legal[0]))
         steps += 1
     assert str(game_state["phase"]) != "deployment", (

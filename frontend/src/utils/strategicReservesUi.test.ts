@@ -1,19 +1,24 @@
 import { describe, expect, it } from "vitest";
-import type { StrategicReservesPlayerSummary } from "../types/game";
+import type {
+  StrategicReservesPendingDeclaration,
+  StrategicReservesPlayerSummary,
+} from "../types/game";
 import {
-  canDropUnitIntoReserves,
   canSelectReserveUnitForIngress,
   formatStrategicReservesRatio,
+  isReservesDeclarationPendingFor,
+  isReservesDeclarationStepOpen,
   shouldWarnReservesLastRound,
 } from "./strategicReservesUi";
 
-/** 120 pts engagés sur un plafond de 250 : il reste 130 pts. L'unité 7 (130 pts) tient encore,
- *  l'unité 8 (131 pts) non — c'est le MOTEUR qui a tranché, la liste ne contient que 7. */
+/** 120 pts engagés sur un plafond de 250 : le ratio affiché du conteneur. */
 const SUMMARY_120_OF_250: StrategicReservesPlayerSummary = {
   used_points: 120,
   cap_points: 250,
-  placeable_unit_ids: ["7"],
 };
+
+/** La question 20.01 que le moteur pose : l'unité 7 du joueur 1, et elle seule. */
+const PENDING_ON_7: StrategicReservesPendingDeclaration = { player: 1, unitId: "7" };
 
 describe("formatStrategicReservesRatio", () => {
   it("affiche le ratio du moteur, jamais un calcul local", () => {
@@ -26,35 +31,43 @@ describe("formatStrategicReservesRatio", () => {
   });
 });
 
-describe("canDropUnitIntoReserves — 20.01", () => {
-  const base = {
-    phase: "deployment" as string | undefined,
-    summary: SUMMARY_120_OF_250,
-  };
+describe("isReservesDeclarationPendingFor — 20.01", () => {
+  const base = { phase: "deployment" as string | undefined, pending: PENDING_ON_7 };
 
-  it("BORNE du plafond : 130 pts passe, 131 pts ne passe pas", () => {
-    // La borne elle-même est verrouillée côté moteur/API
-    // (test_strategic_reserves_summary_only_offers_units_the_engine_would_accept) ; ici on
-    // vérifie que l'UI SUIT cette liste au lieu de refaire la soustraction.
-    expect(canDropUnitIntoReserves({ ...base, selectedUnitId: 7 })).toBe(true);
-    expect(canDropUnitIntoReserves({ ...base, selectedUnitId: 8 })).toBe(false);
+  it("la question porte sur UNE escouade, celle que le moteur désigne", () => {
+    // L'éligibilité (plafond de 50 %, FORTIFICATION) est tranchée côté moteur
+    // (test_strategic_reserves_summary_asks_only_about_a_unit_the_engine_would_accept) : le
+    // client n'en refait rien, il compare l'identifiant que le moteur lui a donné.
+    expect(isReservesDeclarationPendingFor({ ...base, unitId: 7 })).toBe(true);
+    expect(isReservesDeclarationPendingFor({ ...base, unitId: 8 })).toBe(false);
   });
 
-  it("le dépôt n'existe QU'EN phase de déploiement", () => {
+  it("l'identifiant est comparé en CHAÎNE, comme le moteur le publie", () => {
+    // Les lignes du panneau portent des ids numériques, `pending_declaration.unitId` est une
+    // chaîne : une comparaison stricte sans conversion ne matcherait jamais, et la question
+    // resterait invisible — donc le déploiement bloqué sans que rien ne l'explique.
+    expect(isReservesDeclarationPendingFor({ ...base, unitId: "7" })).toBe(true);
+  });
+
+  it("la déclaration n'existe QU'EN phase de déploiement", () => {
     for (const phase of ["command", "move", "shoot", "charge", "fight", undefined]) {
-      expect(canDropUnitIntoReserves({ ...base, phase, selectedUnitId: 7 })).toBe(false);
+      expect(isReservesDeclarationPendingFor({ ...base, phase, unitId: 7 })).toBe(false);
     }
   });
 
-  it("sans unité sélectionnée, le conteneur n'est pas une cible", () => {
-    expect(canDropUnitIntoReserves({ ...base, selectedUnitId: null })).toBe(false);
+  it("étape close : plus aucune question, donc plus aucun bouton", () => {
+    for (const pending of [null, undefined]) {
+      expect(isReservesDeclarationStepOpen({ phase: "deployment", pending })).toBe(false);
+      expect(isReservesDeclarationPendingFor({ ...base, pending, unitId: 7 })).toBe(false);
+    }
   });
 
-  it("un conteneur dont le résumé ne liste rien n'accepte aucun dépôt", () => {
-    // Conteneur du joueur adverse : son résumé porte SES `placeable_unit_ids`, donc l'unité
-    // sélectionnée par l'autre joueur n'y figure pas. C'est le moteur qui borne, pas le client.
-    const other = { used_points: 0, cap_points: 250, placeable_unit_ids: [] };
-    expect(canDropUnitIntoReserves({ ...base, summary: other, selectedUnitId: 7 })).toBe(false);
+  it("étape ouverte dès qu'une question existe, quelle que soit l'escouade visée", () => {
+    // C'est ce prédicat-là qui gèle la liste de pose : tant qu'une question est en attente, le
+    // moteur refuse `deploy_commit` pour les DEUX joueurs, pas seulement pour l'interrogé.
+    expect(isReservesDeclarationStepOpen({ phase: "deployment", pending: PENDING_ON_7 })).toBe(
+      true
+    );
   });
 });
 

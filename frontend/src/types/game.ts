@@ -233,9 +233,16 @@ export interface StrategicReservesPlayerSummary {
   used_points: number;
   /** Plafond de 50 % de la taille de bataille (dénominateur). */
   cap_points: number;
-  /** Unités que le moteur accepterait MAINTENANT en réserves (plafond + FORTIFICATION + à poser).
-   * Le conteneur ne propose le dépôt que pour ces ids. */
-  placeable_unit_ids: string[];
+}
+
+/** 20.01 — la question de l'étape Declare Battle Formations que le moteur pose MAINTENANT.
+ *
+ * Une seule à la fois, dans un ordre figé au reset. Le client l'affiche, il ne choisit pas quelle
+ * unité proposer : la déclaration précède TOUT déploiement, et une sélection libre laisserait le
+ * joueur déclarer après avoir vu les poses adverses. */
+export interface StrategicReservesPendingDeclaration {
+  player: number;
+  unitId: string;
 }
 
 /** ``strategic_reserves`` du game_state : un résumé par joueur + le round de destruction (20.04). */
@@ -244,6 +251,8 @@ export interface StrategicReservesSummary {
   "2"?: StrategicReservesPlayerSummary;
   /** Round au bout duquel les réserves non arrivées sont détruites (20.04). */
   last_round?: number;
+  /** Question 20.01 en attente, ou ``null`` quand l'étape est close. */
+  pending_declaration?: StrategicReservesPendingDeclaration | null;
 }
 
 /** Detection range effective d'une unité cachée vis-à-vis du tireur actif (règle 13.09 + 13.5). */
