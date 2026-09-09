@@ -28,7 +28,7 @@ pourquoi, avec les mesures.
 |---|---|---|
 | A — intégration PvP | 3 min 31 (`-n 6 --dist load`, mesuré 2026-08-05) | déjà dans la vérification large |
 | B — vitest | **4,0 s** — 36 fichiers, 430 tests | **ajoutée le 2026-09-09** |
-| C — Playwright | **37 s** — 14 tests : **13 verts**, 1 skippé, 0 rouge (mesuré 2026-09-09) | **candidate** : voir ci-dessous |
+| C — Playwright | **36 s** — 14 tests : **13 verts, 0 skippé** (+ la baseline visuelle au 1er run d'une machine) | **candidate** : voir ci-dessous |
 
 **Ce que la mesure a trouvé, et qui rendait la couche B rouge par construction.** Avant ce jour,
 `npx vitest run` rendait `Test Files 1 failed | 36 passed (37)` quel que soit l'état du code : le
@@ -40,9 +40,10 @@ La frontière entre les deux harnais est désormais déclarée dans `frontend/vi
 `tests/unit/scripts/test_vitest_collect_scope.py`, qui applique le motif AU DISQUE dans les deux
 sens : aucun spec Playwright collecté par vitest, et aucun test de `src/` laissé hors périmètre.
 
-**La couche C, remise en état le 2026-09-09.** Sur ses 14 tests : **13 passent**, 1 est skippé,
-**aucun n'échoue**. Le mur est de **37 s** ; le « 6 min 42 » publié plus tôt le même jour venait de
-runs pollués par un serveur fantôme (défaut n° 4).
+**La couche C, remise en état le 2026-09-09.** Ses 14 tests s'exécutent tous — **13 passent, plus
+aucun ne se skippe** — en **36 s**. Le seul non-vert est la régression visuelle, qui écrit sa
+baseline au premier run d'une machine. Le « 6 min 42 » publié plus tôt le même jour venait de runs
+pollués par un serveur fantôme (défaut n° 4).
 
 ⚠️ **Les deux invariants de parité front/back étaient des VERTS VACANTS** — et le rester aurait été
 pire que leur absence, puisqu'on les croyait protecteurs. `greenCircleUnitIds ⊆
@@ -124,15 +125,19 @@ direct avec le cookie de session mais **sans** l'en-tête `X-W40K-Client`, qu'ex
 authentifiée par cookie. Il recevait 401, hors du `[200, 404]` attendu. Corrigé — c'est la même
 erreur que celle qui m'avait fait suspecter l'authentification pendant le diagnostic.
 
-**Le test skippé et la régression visuelle.** Le *skip* vient du spec lui-même, quand le hook
-`window.__W40K_TEST__` n'est pas exposé. Le test de *régression visuelle* écrit sa baseline au
+**Le dernier skip, et la régression visuelle.** Un test se skippait à CHAQUE run : celui qui
+vérifie la présence de `window.__W40K_TEST__`. Il était le seul du fichier à ne pas appeler
+`page.goto` — il interrogeait donc l'`about:blank` d'avant navigation, où le hook n'a jamais été
+posé, pendant que ses voisins le lisaient avec succès. Il navigue désormais, et **n'a plus de
+`test.skip`** : ce test a le hook pour SUJET, se skipper quand son sujet est absent revient à ne
+jamais rien vérifier. Le test de *régression visuelle* écrit sa baseline au
 premier run d'une machine puis échoue une fois — comportement normal de `toHaveScreenshot`. Ces
 baselines ne sont **pas versionnées** : une image de 810 Ko qui fige le rendu d'une machine
 (polices, GPU headless) échouerait sur une autre. Conséquence assumée : ce test compare au rendu
 précédent de LA machine où il tourne, et non à une référence commune. Le versionner reste un choix
 ouvert.
 
-**Bilan.** **Huit défauts** trouvés en exécutant cette couche pour la première fois, **tous
+**Bilan.** **Neuf défauts** trouvés en exécutant cette couche pour la première fois, **tous
 corrigés** — trois d'environnement, deux dans le harnais, trois dans les tests eux-mêmes. Aucun
 n'était visible tant qu'on ne l'exécutait pas ; trois faisaient passer pour verts des tests qui ne
 comparaient rien. La parité entre l'affichage et le moteur est désormais vérifiée pour de bon.

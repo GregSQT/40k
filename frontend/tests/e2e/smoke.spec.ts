@@ -203,22 +203,27 @@ test.describe("T12-3 — Hook de test (VITE_TEST_HOOKS=1)", () => {
   test("window.__W40K_TEST__ est défini si le front est lancé avec VITE_TEST_HOOKS=1", async ({
     page,
   }) => {
-    // Ce test passe seulement si le serveur front a été démarré avec VITE_TEST_HOOKS=1.
-    // En CI (scripts/front_test_all.sh), c'est garanti ; en dev local sans la variable,
-    // le test est skippé proprement.
-    const isHookEnabled = await page.evaluate(() => {
-      return typeof (window as Record<string, unknown>).__W40K_TEST__ !== "undefined";
-    });
+    // NAVIGUER D'ABORD. Ce test interrogeait `window` SANS avoir chargé la moindre page : il
+    // lisait donc l'`about:blank` d'avant navigation, où le hook n'a évidemment jamais été posé.
+    // Sa garde le faisait alors se skipper — à chaque exécution, depuis toujours (mesuré le
+    // 2026-09-09 : bilan systématique « 13 passed, 1 skipped »). Il était le seul test du fichier
+    // à ne pas appeler `page.goto`, pendant que ses voisins lisaient ce même hook avec succès.
+    await page.goto(GAME_URL);
+    await page.locator("canvas").first().waitFor({ timeout: 30_000 });
 
-    if (!isHookEnabled) {
-      test.skip(true, "VITE_TEST_HOOKS=1 non activé — relancer via scripts/front_test_all.sh");
-    }
-
+    // Et pas de `test.skip` ici, contrairement aux autres tests du fichier. Celui-ci a le hook
+    // POUR SUJET : se skipper quand son sujet est absent, c'est ne jamais rien vérifier. L'en-tête
+    // de ce fichier pose `VITE_TEST_HOOKS=1` comme prérequis ; son absence est donc une panne du
+    // harnais, et une panne se signale.
     const hookExists = await page.evaluate(() => {
       const hook = (window as Record<string, unknown>).__W40K_TEST__;
       return hook !== null && typeof hook === "object";
     });
-    expect(hookExists).toBe(true);
+    expect(
+      hookExists,
+      "window.__W40K_TEST__ absent : le front n'a pas été démarré avec VITE_TEST_HOOKS=1, " +
+        "et les tests qui lisent ce hook vont tous se skipper en cascade"
+    ).toBe(true);
   });
 
   test("greenCircleUnitIds est un Set exposé par le hook", async ({ page }) => {
