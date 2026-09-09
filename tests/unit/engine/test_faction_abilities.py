@@ -50,6 +50,7 @@ from engine.phase_handlers.shared_utils import (
 )
 from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from engine.phase_handlers import shooting_handlers
+from engine import w40k_core
 from engine.w40k_core import W40KEngine
 from tests._state_invariants import turn_state_invariants, unit_invariants
 from tests.unit.engine._roll_helpers import roll_fight_intent
@@ -326,9 +327,6 @@ def _command_state(current_player, *, p1_faction, p2_faction, alive=("1", "2")):
         "action_log_seq": 0,
         "console_logs": [],
         "objectives": [],
-        # Posé par `command_phase_resume` en production ; la fixture appelle 08.04 en isolation,
-        # et le masque de la phase de commandement le lit sans défaut.
-        "zone_intent_free_steps_remaining": 0,
         # Lu par `command_phase_end` (trace de transition) — posé par `command_build_activation_pool`
         # en production, que la fixture court-circuite en appelant 08.04 seul.
         "command_activation_pool": [],
@@ -1530,7 +1528,7 @@ def test_le_cycle_pvp_complet_s_arrete_puis_repart(tmp_path) -> None:
     assert gs["move_activation_pool"], "phase de mouvement demarree sans pool d'activation"
 
 
-def test_le_waaagh_passe_aussi_par_le_chemin_de_l_ui() -> None:
+def test_le_waaagh_passe_aussi_par_le_chemin_de_l_ui(monkeypatch) -> None:
     """JUMEAU du cycle PvP, côté Waaagh! : `execute_semantic_action` doit router `agent_decision`.
 
     Les deux actions ont été ajoutées ensemble et oubliées ensemble sur le chemin humain. Tester
@@ -1542,11 +1540,18 @@ def test_le_waaagh_passe_aussi_par_le_chemin_de_l_ui() -> None:
     engine = _engine(gs)
     gs["player_types"] = {"1": "human", "2": "human"}
     engine.gym_training_mode = True  # le siège ne doit pas être tranché par la politique interne
-    # Siège d'agent : la phase de commandement ne se TERMINE pas ici (elle garde ses free steps
-    # de zone intent). Ce qui est mesuré est le ROUTAGE du verbe, pas la sortie de phase — et
-    # depuis que le retour de la reprise est honoré, une sortie DÉMARRE la phase de mouvement,
-    # qu'un état de fixture ne peut pas construire (plateau, `game_rules`, caches). La sortie,
-    # elle, est verrouillée sur un `W40KEngine` réel par `test_le_cycle_pvp_complet_...`.
+    # Ce qui est mesuré est le ROUTAGE du verbe, pas la sortie de phase. La phase se TERMINE
+    # désormais dans la foulée, quel que soit le siège : le retrait des intentions de zone
+    # (2026-09-09) a supprimé les free steps sur lesquels ce test s'appuyait pour rester en phase
+    # de commandement. La sortie DÉMARRE alors la phase de mouvement, qu'un état de fixture ne
+    # peut pas construire (plateau, zone d'engagement, caches d'adjacence — la cascade de clés
+    # requises a été suivie et ne s'arrête pas). On neutralise donc CE SEUL appel : le démarrage
+    # du mouvement est verrouillé sur un `W40KEngine` réel par `test_le_cycle_pvp_complet_...`.
+    started: list[bool] = []
+    monkeypatch.setattr(
+        w40k_core.movement_handlers, "movement_phase_start",
+        lambda _gs: started.append(True),
+    )
     gs["gym_training_mode"] = True
     gs["config"]["controlled_player"] = 1
     command_handlers.command_step_command_abilities(gs)
@@ -1557,6 +1562,10 @@ def test_le_waaagh_passe_aussi_par_le_chemin_de_l_ui() -> None:
     assert ok, "`agent_decision` n'est pas routee sur le chemin du frontend"
     assert waaagh_is_active(gs, 1) is True
     assert read_pending_agent_decision(gs) is None
+    # La phase de commandement se termine dans la foulée et enchaîne — VERT VACANT sinon : sans
+    # cette assertion, un `movement_phase_start` jamais atteint (phase restée ouverte) passerait
+    # pour un succès, et c'est exactement l'état d'avant le 2026-09-09.
+    assert started == [True], "la sortie de phase n'a pas démarré le mouvement"
 
 
 def test_l_expiration_purge_aussi_un_waaagh_reste_en_attente() -> None:
@@ -1658,39 +1667,33 @@ def test_verrou_l_arret_de_08_04_est_opposable_a_toute_autre_action(tmp_path) ->
 
 
 def test_verrou_la_phase_de_commandement_refuse_les_verbes_hors_vocabulaire() -> None:
-    """Hors décision en attente, la command phase n'accepte que `zone_intent` et `skip`.
+    """Hors décision en attente, la command phase n'accepte que `skip`.
 
     Tout autre verbe était traité comme une « sortie volontaire des free steps » et terminait la
     phase en rendant `success: True` : un verbe inexistant, ou un `activate_unit` sur une unité
-    ADVERSE, faisaient basculer la partie vers le mouvement. Le refus doit être INERTE — ni
-    solde de la déclaration du tour précédent, ni consommation des free steps.
-    """
-    from engine.macro_intents import MAX_OBJECTIVES
+    ADVERSE, faisaient basculer la partie vers le mouvement. Le refus doit être INERTE — la phase
+    ne bouge pas.
 
+    `zone_intent` était le second verbe accepté ; il est parti le 2026-09-09 avec la famille
+    d'actions, et il est vérifié REFUSÉ ci-dessous au même titre qu'un verbe inexistant.
+    """
     # Aucune des deux armées ne porte de mot-clé de faction : rien n'est en attente, c'est bien
     # le vocabulaire qui est mesuré ici et pas le garde de 08.04.
     gs = _command_state(1, p1_faction=[{"keywordId": "NECRONS"}], p2_faction=[{"keywordId": "NECRONS"}])
     engine = _engine(gs)
-    gs["zone_intent_free_steps_remaining"] = MAX_OBJECTIVES
-    # Sans ce champ, le solde de la déclaration lèverait : le refus serait « rouge » pour une
-    # raison qui n'est pas celle qu'on mesure. Vide = aucune déclaration en attente.
-    gs["_zone_intent_declarations"] = {}
 
     for action in (
         {"action": "action_qui_nexiste_pas"},
         {"action": "activate_unit", "unitId": "2"},
         {"action": "move", "destCol": 5, "destRow": 5},
+        {"action": "zone_intent", "zone_idx": 0, "intent_value": 0},
     ):
         ok, out = engine._process_command_phase(dict(action))
         assert not ok, f"{action['action']!r} accepte : la phase de commandement se termine"
         assert out["error"] == "invalid_action_for_phase"
         assert gs["phase"] == "command"
-        assert gs["zone_intent_free_steps_remaining"] == MAX_OBJECTIVES, (
-            "refus non inerte : les free steps ont ete consommes"
-        )
 
     # Le verbe de sortie, lui, reste accepté.
-    gs["zone_intent_free_steps_remaining"] = 0
     ok, out = engine._process_command_phase({"action": "skip"})
     assert ok and out["phase_complete"] is True
 

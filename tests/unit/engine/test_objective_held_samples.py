@@ -136,9 +136,9 @@ def _stub_rewards(monkeypatch: pytest.MonkeyPatch) -> None:
     l'ancienne implementation ne pouvait pas faire.
     """
     monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 0.0)
-    # settle_zone_intent_declaration est appele DIRECTEMENT par la phase command (hors
-    # calculate_reward) et exige une config d'agent complete : encore de la recompense.
-    monkeypatch.setattr(RewardCalculator, "settle_zone_intent_declaration", lambda self, *a, **kw: 0.0)
+    # `settle_zone_intent_declaration` etait neutralise ici en plus : appele DIRECTEMENT par la
+    # phase command (hors `calculate_reward`), il exigeait une config d'agent complete. Il a
+    # disparu le 2026-09-09 avec les intentions de zone, et avec lui ce second stub.
     monkeypatch.setattr(
         W40KEngine, "_build_observation",
         lambda self, *_a, **_k: np.zeros(ObservationBuilder.SQUAD_OBS_SIZE_TARGET),

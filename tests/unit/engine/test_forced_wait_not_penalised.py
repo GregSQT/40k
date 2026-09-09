@@ -200,11 +200,9 @@ def test_chosen_wait_is_still_penalised():
 def test_info_still_describes_the_agent_action():
     """`info` decrit l'action de l'AGENT, pas l'attente que le moteur s'est jouee.
 
-    `ai/env_wrappers.AGENT_STEP_INFO_KEYS` (`action`, `success`, `phase`, `intent_value`,
-    `zone_control`, `charge_succeeded`, `is_controlled_action`) est preleve APRES le retour du
-    moteur : si l'auto-jeu ecrasait `info`, la DERNIERE action reelle de chaque phase deviendrait
-    invisible aux metriques — dont le `zone_intent` qui, en mettant
-    `zone_intent_free_steps_remaining` a 0, produit justement un masque de sortie reduit a `wait`.
+    `ai/env_wrappers.AGENT_STEP_INFO_KEYS` (`action`, `success`, `phase`, `charge_succeeded`,
+    `is_controlled_action`) est preleve APRES le retour du moteur : si l'auto-jeu ecrasait `info`,
+    la DERNIERE action reelle de chaque phase deviendrait invisible aux metriques.
     """
     engine = _make_engine(ENEMY_FAR, ally_positions=(ALLY, ALLY_2))
     _obs, _r, _term, _trunc, info = engine.step(ACTIVATE_SLOT_BASE)

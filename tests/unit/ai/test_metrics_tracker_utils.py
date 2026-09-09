@@ -224,10 +224,9 @@ def _tracker_stub() -> W40KMetricsTracker:
         'counts': defaultdict(int),
         'exposures': defaultdict(int),
     }
-    # Etat zone-intent pose par sa PROPRE methode, comme __init__ le fait : c'est la seule
-    # forme qui reste juste quand une fenetre y est ajoutee. Meme geste que le stub de
-    # tests/unit/ai/test_zone_intent_metrics.py.
-    W40KMetricsTracker._reset_zone_intent_state(t)
+    # `W40KMetricsTracker._reset_zone_intent_state(t)` etait appele ici, pour poser l'etat
+    # zone-intent par sa propre methode comme `__init__` le fait. Retire le 2026-09-09 : l'etat
+    # et la methode sont partis avec les neuf courbes d'intention.
     return t
 
 
@@ -810,19 +809,26 @@ def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
 def test_les_courbes_de_jeu_gardent_leur_point_par_episode() -> None:
     """VERROU : la garde de cadence PPO ne doit PAS deborder sur les courbes d'episode.
 
-    `log_critical_dashboard` appelle `_log_zone_intent_metrics` HORS de la garde
-    `ppo_capture_is_new`, donc `o_intent_zone_steps` se lit par episode. L'aspirer sous la
-    garde le figerait entre deux updates — 74 episodes sans point sur x1_long.
+    `log_critical_dashboard` ecrit le bloc `game_critical/reward_when_*` HORS de la garde
+    `ppo_capture_is_new`, donc il se lit par episode. L'aspirer sous la garde le figerait entre
+    deux updates — 74 episodes sans point sur x1_long.
 
-    C'est la derniere courbe par-episode ecrite par cette methode : `d_win_rate` et
-    `e_episode_reward_smooth`, qui tenaient ce role, ont ete retirees du namespace.
+    ANCRAGE, troisieme fois : ce test a suivi les courbes par-episode que cette methode ecrit.
+    `d_win_rate` et `e_episode_reward_smooth` d'abord, puis `o_intent_zone_steps` (suite 18), et
+    maintenant `reward_when_won` — les metriques d'intention sont parties le 2026-09-09 avec la
+    famille d'actions. Contrairement aux precedentes, celle-ci est CONDITIONNEE (>= 20 paires
+    dont >= 5 de chaque issue), d'ou l'amorce ci-dessous : sans elle le test serait VERT VACANT,
+    a compter zero point sur zero point.
     """
     t = _tracker_stub()
+    for i in range(20):
+        t.episode_reward_winner_pairs.append((10.0 if i % 2 else -5.0, i % 2))
+
     for _ in range(20):
         t.log_critical_dashboard()
 
     keys = [k for k, _, _ in _dw(t).scalars]
-    assert keys.count("00_critical/o_intent_zone_steps") == 20
+    assert keys.count("game_critical/reward_when_won") == 20
 
 
 def test_aucun_seuil_emis_avant_la_premiere_capture_ppo() -> None:

@@ -49,7 +49,10 @@ def test_chaque_famille_est_atteinte_par_au_moins_un_id():
         action_family(mi.CHARGE_PAIR_SLOT_BASE, "charge"),
         action_family(mi.FIGHT_SLOT_BASE, "fight"),
         action_family(mi.ACTION_FIGHT_NO_TARGET, "fight"),
-        action_family(mi.BASE_ZONE_INTENT, "move"),
+        # `action_family(mi.BASE_ZONE_INTENT, "move")` occupait cette place et rendait
+        # « zone_intent ». La famille est partie le 2026-09-09 et sa plage d'ids est RESERVEE :
+        # l'y appeler LEVE desormais (verrouille par `test_action_family_raises_on_a_reserved_id`,
+        # tests/unit/engine/test_action_space_mirror.py).
         action_family(mi.CHOICE_BASE, "move"),
         action_family(mi.OATH_SLOT_BASE, "move"),
         # V11 §0.48 `L2` — comme les CHOICE et Oath, la phase ne desambigue rien : le masque est
@@ -58,6 +61,13 @@ def test_chaque_famille_est_atteinte_par_au_moins_un_id():
         action_family(mi.DEPLOY_SLOT_BASE, "deployment"),
         action_family(mi.SHOOT_INDIRECT_SLOT_BASE, "shoot"),
         action_family(mi.FIGHT_WEAPON_SLOT_BASE, "fight"),
+        # Ces deux-la MANQUAIENT a l'enumeration, et c'est ce qui a laisse le defaut vivre :
+        # leurs familles (P3-0, P3-8) n'avaient aucune branche dans `action_family`, donc leurs
+        # ids tombaient dans le fourre-tout `return "zone_intent"` et etaient comptes comme des
+        # intentions. Ce test ne pouvait pas le voir : il verifiait que chaque famille DECLAREE
+        # est atteinte, or ni l'une ni l'autre n'etait declaree dans `ACTION_FAMILIES`.
+        action_family(mi.COHERENCY_SLOT_BASE, "fight"),
+        action_family(mi.SHOOT_WEAPON_SEL_SLOT_BASE, "shoot"),
     }
     assert reached == set(ACTION_FAMILIES)
 

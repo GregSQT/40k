@@ -60,8 +60,8 @@ _log = logging.getLogger(__name__)
 # AJOUTER UNE CLÉ OBLIGATOIRE AU RESET D'ÉPISODE OBLIGE À BUMPER CETTE MAGIC. Le verrou est
 # tests/unit/services/test_save_format_key_contract.py : il épingle l'empreinte des clés mutables
 # posées par le reset et reste ROUGE tant que la magic n'a pas suivi.
-_MAGIC = b"W40KTL05"
-_LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04"})
+_MAGIC = b"W40KTL06"
+_LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04", b"W40KTL05"})
 _LEN = struct.Struct(">Q")  # préfixe de longueur : entier 64 bits big-endian
 
 # Rows exclues du menu Select (trop nombreuses) mais présentes dans le playback ⏮⏭.
@@ -162,7 +162,9 @@ def _reject_legacy(name: str, head: bytes) -> None:
             f"illisible (TL01 : sans empreinte de scénario ; TL02 : sans les points de "
             f"commandement de la règle 08.02 ; TL03 : sans les clés de réserves stratégiques, "
             f"d'ingress, de suppression, ni `secured_objectives` ; TL04 : sans la déclaration de "
-            f"montée 13.06 ni le mémo de charge). Supprime-la ou rejoue la partie."
+            f"montée 13.06 ni le mémo de charge ; TL05 : AVEC les cinq clés des intentions de "
+            f"zone, retirées du moteur le 2026-09-09 — une save TL05 restaurerait un état que "
+            f"plus aucun lecteur n'attend). Supprime-la ou rejoue la partie."
         )
     raise ValueError(f"partie {name!r} : format de fichier inconnu (en-tête {head!r})")
 

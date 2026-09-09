@@ -4,8 +4,9 @@ command_handlers.py - Command Phase Implementation
 Pure stateless functions implementing command phase specification
 
 The command phase handles all administrative tasks (reset marks, clear caches, etc.)
-before the movement phase. In Phase 2, the agent may take zone intent free steps
-(up to MAX_OBJECTIVES) before transitioning to move.
+before the movement phase. Elle n'offre AUCUNE action à l'agent depuis le retrait des
+intentions de zone (2026-09-09) : seules les décisions en attente (Waaagh! 08.04, Oath,
+restitution Grot Orderly) l'interrompent, et le masque n'y ouvre que `wait`.
 """
 
 from enum import Enum
@@ -29,9 +30,11 @@ _GROT_ORDERLY_SKIPPED: str = "_grot_orderly_skipped_this_phase"
 
 def command_phase_start(game_state: Dict[str, Any]) -> None:
     """
-    Initialize command phase - do all maintenance/resets, then either:
-    - Stay in command if zone intent free steps are available (Phase 2), or
-    - Auto-advance to move (no free steps or bot player).
+    Initialise la phase de commandement : maintenance, resets, puis les cinq étapes du PDF.
+
+    Depuis le retrait des intentions de zone (2026-09-09), la phase n'offre plus AUCUNE action
+    à l'agent hors décision en attente : le masque n'y ouvre que `wait` (`action_decoder`), et
+    le moteur enchaîne sur le mouvement.
 
     LES CINQ ÉTAPES DE LA PHASE (PDF 08) — l'ordre est celui du PDF, et c'est un contrat :
       08.01 `command_step_start_of_phase`     — début de phase (remises à zéro, caches)
@@ -42,14 +45,7 @@ def command_phase_start(game_state: Dict[str, Any]) -> None:
     Elles sont découpées en fonctions nommées parce que plusieurs capacités se déclenchent à une
     étape PRÉCISE (Waaagh! et Oath au début, Get da Good Bitz en fin) : sans les étapes, il n'y a
     aucun endroit où les accrocher, et elles finiraient au petit bonheur dans le corps de la phase.
-
-    Phase 2 changes:
-    - Initializes zone_intent_free_steps_remaining = MAX_OBJECTIVES
-    - Populates unit_zone_assignments (one per alive friendly unit)
-    - Returns without phase_complete if free steps > 0 (agent will issue zone intent actions)
     """
-    from engine.macro_intents import INTENT_INVADE, MAX_OBJECTIVES, get_nearest_objective_zone
-
     _build_enemy_adjacent_hexes_all_players(game_state)
 
     command_step_start_of_phase(game_state)   # 08.01
@@ -77,18 +73,11 @@ def command_phase_start(game_state: Dict[str, Any]) -> None:
     state_manager = GameStateManager(require_key(game_state, "config"))
     state_manager.apply_primary_objective_scoring(game_state, "command")
 
-    # Populate unit_zone_assignments for ALL alive units (both players)
-    from engine.phase_handlers.shared_utils import is_unit_alive
-    assignments = {}
-    for unit in game_state["units"]:
-        if not is_unit_alive(str(unit["id"]), game_state):
-            continue
-        if unit.get("col", -1) >= 0 and unit.get("row", -1) >= 0:
-            zone_idx = get_nearest_objective_zone(unit, game_state)
-        else:
-            zone_idx = 0
-        assignments[str(unit["id"])] = zone_idx
-    game_state["unit_zone_assignments"] = assignments
+    # `unit_zone_assignments` était peuplé ici, une entrée par unité vivante des DEUX camps, par
+    # `get_nearest_objective_zone`. Retiré avec les intentions de zone : mesuré avant retrait,
+    # AUCUN lecteur dans tout le dépôt — ni moteur, ni observation, ni reward, ni bot, ni API.
+    # Il coûtait un balayage de toutes les unités et une recherche d'objectif le plus proche par
+    # unité, à chaque phase de commandement, pour un dictionnaire que personne n'ouvrait.
 
     # NE REND PAS la main sur la suite : c'est `W40KEngine.start_command_phase` qui enchaîne
     # (résolution des sièges sans masque, puis `command_phase_resume`). Rendre `resume` ici
@@ -106,30 +95,17 @@ def command_phase_resume(game_state: Dict[str, Any]) -> Dict[str, Any]:
     `waiting_for_player` PvP. Le décideur (agent via le masque, bot, ou humain) rappelle ensuite
     cette fonction, qui reprend là où la phase s'était interrompue.
 
-    IDEMPOTENTE : rejouée après chaque décision. Elle ne fait que (re)poser le compteur de free
-    steps et trancher entre « rester en command » et « passer au move ». Aucun intent ne peut
-    avoir été joué entre-temps — le masque est EXCLUSIF tant qu'une décision est en attente.
+    IDEMPOTENTE : rejouée après chaque décision. Elle ne fait plus que trancher entre « rester
+    en command » (décision non soldée) et « passer au move ».
+
+    ⚠️ ELLE NE DISTINGUE PLUS L'AGENT DU BOT, et c'est le cœur du retrait des intentions de zone
+    (2026-09-09). Elle posait `zone_intent_free_steps_remaining` à `MAX_OBJECTIVES` sur le tour
+    de l'agent et rendait `phase_complete: False` pour qu'il vienne jouer ses intents ; l'agent
+    dépensait donc des steps en phase de commandement, et un `wait` de plus pour en sortir. Les
+    intents partis, il n'y a plus rien à y jouer : la phase avance pour les deux camps, exactement
+    comme elle le faisait déjà pour le bot.
     """
-    from engine.macro_intents import MAX_OBJECTIVES
-
-    gym_training_mode = game_state.get("gym_training_mode", False)
     current_player = require_key(game_state, "current_player")
-    config = game_state["config"]
-    controlled_player = config.get("controlled_player")
-
-    is_agent_turn = (
-        gym_training_mode
-        and controlled_player is not None
-        and current_player == controlled_player
-    )
-
-    # Reset zone_intent_free_steps_remaining to MAX_OBJECTIVES.
-    # Cette valeur PLEINE est aussi le signal qu'aucun intent n'a encore ete joue ce tour :
-    # `W40KEngine._process_command_phase` s'en sert pour solder la declaration du tour
-    # precedent exactement une fois (cf. `settle_pending_zone_intent_declaration`).
-    # Posée AVANT le test de décision en attente : le masque de la phase de commandement la lit
-    # sans défaut, y compris sur le step où la décision est jouée.
-    game_state["zone_intent_free_steps_remaining"] = MAX_OBJECTIVES if is_agent_turn else 0
 
     # 08.04 non soldé : le moteur reste en phase de commandement et n'avance PAS. Sans cet arrêt,
     # la phase enchaînerait sur le move et la décision serait perdue — l'agent n'appellerait
@@ -140,11 +116,6 @@ def command_phase_resume(game_state: Dict[str, Any]) -> Dict[str, Any]:
     if faction_decision_is_pending(game_state, current_player):
         return {"phase_complete": False, "phase": "command"}
 
-    if is_agent_turn:
-        # Stay in command phase — agent will issue zone intent actions
-        return {"phase_complete": False, "phase": "command"}
-
-    # Bot player or non-training: skip free steps, auto-advance to move
     return command_phase_end(game_state)
 
 

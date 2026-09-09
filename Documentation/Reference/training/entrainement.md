@@ -28,8 +28,10 @@
 > - Espace d'action = **0-1023** cellules de la grille égocentrique, **1024** wait,
 >   **1025-1044** tir (20 slots), **1045-1064** charge mono-cible (20 slots, P3-2),
 >   **1065-1254** charge multi-cibles (190 slots C(20,2)+20, P3-8), **1255-1274** mêlée (20 slots,
->   P3-1), **1275** fight sans cible, **1276-1295** tir indirect (20 slots), **1296-1310** zone
->   intents (15 slots), **1311-1316** `CHOICE_i` (EXCLUSIVES — quand une décision est en attente,
+>   P3-1), **1275** fight sans cible, **1276-1295** tir indirect (20 slots), **1296-1310** RÉSERVÉS
+>   (15 slots — ex-intentions de zone, retirées le 2026-09-09 ; aucun masque ne les ouvre,
+>   gardés pour un futur stratagème de phase de commandement, cf. 15.02 / 15.04),
+>   **1311-1316** `CHOICE_i` (EXCLUSIVES — quand une décision est en attente,
 >   le masque n'expose qu'elles), **1317-1336** Oath of Moment (20 slots), **1337-1348** activation
 >   escouade (12 slots, §0.48 L2), **1349-1358** arme mêlée (10 slots), **1359-1378** cohérence
 >   (20 slots), **1379-1388** sélection arme tir (10 slots, P3-8 split-fire).
@@ -315,7 +317,7 @@ La ventilation `last_reward_breakdown` expose `base_actions`, `result_bonuses`, 
 
 6. **Pénalité de réserve gaspillée** (`RewardCalculator.wasted_reserve_penalty`, **−25.0 par escouade**) : facturée quand une escouade du joueur contrôlé est détruite par 20.04 **après avoir refusé au moins une arrivée possible**. Une escouade sans destination légale (pool d'ingress vide) n'est PAS facturée.
 
-7. **Zone-intent — DÉBRANCHÉ** (`zone_intent_shaping.enabled: false`). Le code et les quatre montants restent ; un `true` rebranche tout.
+7. **Zone-intent — SUPPRIMÉ** (2026-09-09). Le barème était débranché depuis le 2026-08-11 (mesuré anti-corrélé au comportement gagnant) ; la famille d'actions elle-même est partie, avec son bloc de configuration, ses neuf courbes et les cinq clés de `game_state` qu'elle publiait au reset — d'où le bump du format de save TL05 → TL06.
 
 ### Configuration (seat)
 
@@ -356,9 +358,10 @@ python ai/train.py --agent CoreAgent --eval --param agent_seat_mode p2 --test-ep
 
 ## Macro Training — SUPPRIMÉ
 
-**Il n'y a plus d'agent macro. `--agent MacroController` n'existe plus.** L'intention de zone est
-portée par l'agent micro unifié. Le code correspondant a été retiré de `ai/train.py`. Il n'y a
-aucun chantier macro ouvert : relancer le sujet demande une décision produit, pas une reprise de code.
+**Il n'y a plus d'agent macro. `--agent MacroController` n'existe plus.** L'intention de zone
+avait ensuite été portée par l'agent micro unifié, puis RETIRÉE le 2026-09-09 : elle n'avait
+plus aucun effet sur la partie. Il n'y a aucun chantier macro ouvert : relancer le sujet
+demande une décision produit, pas une reprise de code.
 
 ---
 

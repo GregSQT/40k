@@ -1072,20 +1072,9 @@ class MetricsCollectionCallback(BaseCallback):
                     # les compteurs du callback avant toute lecture. Un compteur unique nourri
                     # par 48 environnements n'aurait de toute facon rien mesure.
 
-                    # Track zone intent steps (SubprocVecEnv-safe: read from info dict).
-                    # ECRIVAIN UNIQUE de ces compteurs : le moteur ne compte plus lui-meme (son
-                    # `_metrics_tracker` n'etait arme qu'a n_envs==1, donc `--step` comptait
-                    # double). Les deux cles sont posees ensemble par la branche zone_intent de
-                    # w40k_core : leur absence est un defaut de cablage, pas un cas nominal.
-                    if (
-                        info.get('action') == 'zone_intent'
-                        and bool(info.get('is_controlled_action', False))
-                        and self.metrics_tracker is not None
-                    ):
-                        self.metrics_tracker.log_zone_intent_step(
-                            int(require_key(info, 'intent_value')),
-                            float(require_key(info, 'zone_control')),
-                        )
+                    # Le comptage des free steps zone-intent vivait ici (ECRIVAIN UNIQUE, lu de
+                    # `info['intent_value']` / `info['zone_control']`). Retire le 2026-09-09 avec
+                    # la famille d'actions : plus aucun step ne porte ces cles.
 
                     # `if 'totalDamage' in info: episode_tactical_data['damage_dealt'] += ...`
                     # occupait cette place. Aucun producteur : `totalDamage` n'est ecrit nulle

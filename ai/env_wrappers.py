@@ -213,10 +213,11 @@ ENGINE_CONTRACT_ATTRS = (
 #: Ce qui n'est PAS ici et n'y a pas sa place : tout ce qui decrit l'ETAT DE SORTIE du step gym
 #: (`episode`, `tactical_data`, `winner`, `action_logs`) — c'est bien le dernier step moteur qui
 #: fait foi pour ceux-la.
+#: `intent_value` et `zone_control` en sont SORTIES le 2026-09-09 avec les intentions de zone :
+#: plus aucun step ne les pose, et les garder aurait laisse deux cles que le remplacement en bloc
+#: ci-dessous devait effacer sans qu'aucune ne puisse jamais apparaitre.
 AGENT_STEP_INFO_KEYS = (
     "action",
-    "intent_value",
-    "zone_control",
     "is_controlled_action",
     "phase",
     "success",
@@ -747,13 +748,11 @@ class BotControlledEnv(gym.Wrapper):
             if iteration_count > MAX_ENSURE_ITERATIONS:
                 phase = self.engine.game_state.get("phase", "?")
                 cp = self.engine.game_state.get("current_player", "?")
-                free = self.engine.game_state.get("zone_intent_free_steps_remaining", "?")
                 raise RuntimeError(
                     f"_ensure_actionable_controlled_turn infinite loop detected: "
                     f"env_rank={self._env_rank} iterations={iteration_count} "
                     f"phase={phase} current_player={cp} decision_owner={decision_owner} "
-                    f"has_valid_actions={has_valid_actions} eligible_count={eligible_count} "
-                    f"free_steps={free}"
+                    f"has_valid_actions={has_valid_actions} eligible_count={eligible_count}"
                 )
             if decision is None:
                 decision = self._get_decision_owner_from_mask()

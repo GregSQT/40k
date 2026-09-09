@@ -147,12 +147,8 @@ from engine.game_state import (
 from engine.macro_intents import (
     ACTION_FAMILIES,
     DEPLOY_STRATEGY_SLOTS,
-    INTENT_INVADE,
     MAX_OBJECTIVES,
     action_family,
-    get_nearest_objective_zone,
-    get_objective_control,
-    get_objective_control_for_player,
     open_placement_slots,
 )
 from engine.agent_decision import (
@@ -281,7 +277,7 @@ def _reserves_game_state_defaults() -> Dict[str, Any]:
         # Escouades du joueur CONTRÔLÉ détruites par 20.04 après avoir décliné au moins une
         # arrivée possible, en attente de facturation. Un COMPTE, pas un montant : le handler
         # qui détruit ne connaît pas le barème, et le calculateur de récompense ne connaît pas
-        # le moment. Versé et remis à zéro au step suivant, comme `_pending_zone_shaping`.
+        # le moment. Versé et remis à zéro au step suivant (`_drain_pending_reserves`).
         "_pending_reserves_wasted": 0,
     }
 
@@ -932,19 +928,12 @@ class W40KEngine(gym.Env):
             # reecrit pas — c'est la neutralisation explicite en tete de reset qui s'en charge,
             # avant le tirage.
             "deployment_mode_schedule_mode": None,
-            "zone_intents": [INTENT_INVADE] * MAX_OBJECTIVES,
-            "zone_intent_free_steps_remaining": 0,
-            "unit_zone_assignments": {},
-            # Declarations d'intents en attente de solde, par joueur. REMISE A ZERO ICI parce
-            # que `reset` fait un `update()` de game_state, pas une recreation : une declaration
-            # non soldee (l'adversaire, ou l'agent sur un episode tronque) serait sinon soldee au
-            # tour 1 de l'episode SUIVANT, contre un plateau sans aucun rapport.
-            "_zone_intent_declarations": {},
-            # Meme raison pour le solde DEJA CALCULE mais pas encore verse : il n'est poppe que
-            # par une action non-zone-intent, et plusieurs chemins n'y arrivent jamais (fin de
-            # partie pendant les free steps, sortie anticipee turn-limit, auto-advance). Il
-            # atterrirait alors sur la premiere action de l'episode suivant.
-            "_pending_zone_shaping": 0.0,
+            # Les cinq cles des INTENTIONS DE ZONE ont ete retirees ici le 2026-09-09 —
+            # `zone_intents`, `zone_intent_free_steps_remaining`, `unit_zone_assignments`,
+            # `_zone_intent_declarations` et `_pending_zone_shaping`. Leur depart change le jeu
+            # de cles publie par le reset, donc le FORMAT DE SAVE : `services/game_saves._MAGIC`
+            # est passe a TL06 dans le meme geste (contrat verrouille par
+            # `tests/unit/services/test_save_format_key_contract.py`).
 
             # tour_de_jeu.md required tracking sets
             "units_moved": set(),
@@ -1706,19 +1695,12 @@ class W40KEngine(gym.Env):
             # ci-dessus, plus declares ici (cf. `engine.game_utils`).
             "controlled_objective_samples_scoring_turns": [],
             "opponent_objective_samples_scoring_turns": [],
-            "zone_intents": [INTENT_INVADE] * MAX_OBJECTIVES,
-            "zone_intent_free_steps_remaining": 0,
-            "unit_zone_assignments": {},
-            # Declarations d'intents en attente de solde, par joueur. REMISE A ZERO ICI parce
-            # que `reset` fait un `update()` de game_state, pas une recreation : une declaration
-            # non soldee (l'adversaire, ou l'agent sur un episode tronque) serait sinon soldee au
-            # tour 1 de l'episode SUIVANT, contre un plateau sans aucun rapport.
-            "_zone_intent_declarations": {},
-            # Meme raison pour le solde DEJA CALCULE mais pas encore verse : il n'est poppe que
-            # par une action non-zone-intent, et plusieurs chemins n'y arrivent jamais (fin de
-            # partie pendant les free steps, sortie anticipee turn-limit, auto-advance). Il
-            # atterrirait alors sur la premiere action de l'episode suivant.
-            "_pending_zone_shaping": 0.0,
+            # Les cinq cles des INTENTIONS DE ZONE ont ete retirees ici le 2026-09-09 —
+            # `zone_intents`, `zone_intent_free_steps_remaining`, `unit_zone_assignments`,
+            # `_zone_intent_declarations` et `_pending_zone_shaping`. Leur depart change le jeu
+            # de cles publie par le reset, donc le FORMAT DE SAVE : `services/game_saves._MAGIC`
+            # est passe a TL06 dans le meme geste (contrat verrouille par
+            # `tests/unit/services/test_save_format_key_contract.py`).
             "units_moved": set(),
             "moved_distance_by_model": {},
             "units_fled": set(),
@@ -2210,16 +2192,9 @@ class W40KEngine(gym.Env):
             deployment_state = self.game_state.get("deployment_state")
             if deployment_state is not None:
                 self.game_state["current_player"] = int(require_key(deployment_state, "current_deployer"))
-        # Initialise unit_zone_assignments avant le premier obs build (command phase pas encore atteinte).
-        # Couvre le cas déploiement (command_phase_start pas encore appelé) et le tour bot en reset.
-        if not self.game_state.get("unit_zone_assignments"):
-            assignments = {}
-            for unit in self.game_state["units"]:
-                if unit.get("col", -1) >= 0 and unit.get("row", -1) >= 0:
-                    assignments[str(unit["id"])] = get_nearest_objective_zone(unit, self.game_state)
-                else:
-                    assignments[str(unit["id"])] = 0  # Unité non déployée : zone 0 par défaut
-            self.game_state["unit_zone_assignments"] = assignments
+        # `unit_zone_assignments` était pré-initialisé ici, avant le premier build d'observation,
+        # pour couvrir le déploiement et le tour bot au reset. Retiré avec les intentions de zone
+        # (2026-09-09) : rien ne l'a jamais lu, et l'observation ne l'a jamais porté.
         observation = self._build_observation()
         info = {"phase": self.game_state["phase"]}
         
@@ -2311,8 +2286,10 @@ class W40KEngine(gym.Env):
         `actor` BORNE LA CHAINE AU JOUEUR QUI VIENT D'AGIR. Sans lui, une chaine franchissant la
         frontiere de tour ferait jouer par le moteur les attentes de L'ADVERSAIRE a l'interieur du
         step de l'agent, et `info` rendrait son `acting_player` / `is_controlled_action`.
-        Atteignable : `command_phase_start` pose `zone_intent_free_steps_remaining = 0` sur un tour
-        non-agent, ce qui reduit a `wait` le masque de commandement du bot.
+        Atteignable : un pool de phase vide reduit le masque a `wait`. Ce n'est PLUS le masque de
+        la phase de commandement qui l'illustre — depuis le retrait des intentions de zone
+        (2026-09-09) elle n'est plus rendue a l'agent du tout, et `REQUIRED_PHASES` a du perdre
+        `command` pour cette raison meme (test_agent_interface_contract).
 
         CUMUL DE LA RECOMPENSE, et ce n'est pas cosmetique : la branche `squad_wait` ajoute
         `objective_turn_reward` APRES la penalite, donc une attente forcee peut porter une
@@ -2359,10 +2336,8 @@ class W40KEngine(gym.Env):
             reward += chain_reward
             # `info` DECRIT L'ACTION DE L'APPELANT, il ne doit pas devenir celle de l'attente que le
             # moteur s'est jouee a lui-meme : `ai/env_wrappers.AGENT_STEP_INFO_KEYS` (action,
-            # success, phase, intent_value, zone_control, charge_succeeded, is_controlled_action)
-            # est preleve APRES le retour du moteur. L'ecraser ferait disparaitre la DERNIERE action
-            # reelle de chaque phase — dont le `zone_intent` qui, en mettant
-            # `zone_intent_free_steps_remaining` a 0, produit justement un masque reduit a `wait`.
+            # success, phase, charge_succeeded, is_controlled_action) est preleve APRES le retour
+            # du moteur. L'ecraser ferait disparaitre la DERNIERE action reelle de chaque phase.
             # Seules les cles de FIN D'EPISODE sont reprises de la chaine : elles decrivent l'etat
             # final, pas l'action.
             for key in TERMINAL_INFO_KEYS:
@@ -2409,7 +2384,7 @@ class W40KEngine(gym.Env):
         dans ``game_state`` (``last_reward_breakdown``, ``_pile_in_toCol/Row``, et les familles
         ``objective_rewarded_turns`` / ``coherency_penalized_turns`` du registre
         ``_once_claims``) n'est lu par la construction du masque — verifie par grep sur
-        ``action_decoder``, ``phase_handlers`` et ``spatial_grid``. ``_pending_zone_shaping`` est poppe ici, pas par le calcul de recompense.
+        ``action_decoder``, ``phase_handlers`` et ``spatial_grid``. ``_pending_reserves_wasted`` est vide ici, pas par le calcul de recompense.
 
         ATTENTES FORCEES — les deux sorties non terminales passent par ``_drain_forced_waits`` : un
         etat qui n'ouvre que ``wait`` est joue par le moteur au lieu d'etre rendu a l'agent. Un step
@@ -2459,11 +2434,7 @@ class W40KEngine(gym.Env):
                 self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
             
             reward = self.reward_calculator.calculate_reward(True, {"action": "turn_limit_reached"}, self.game_state)
-            _shaping, _reserves = self._drain_pending_shaping_and_reserves()
-            reward += _shaping + _reserves
-            reward += self.settle_pending_zone_intent_declaration(
-                int(require_key(self.config, "controlled_player"))
-            )
+            reward += self._drain_pending_reserves()
             return observation, reward, True, False, info, out_mask
 
         # Check for game termination before action
@@ -2765,54 +2736,23 @@ class W40KEngine(gym.Env):
             observation, out_mask = self._step_observation(mask_and_eligible=(action_mask, eligible_units))
         _step_t4 = time.perf_counter() if _step_t0 is not None else None
         # Calculate reward (independent of step_logger)
-        # Shaping zone-intent verse a ce step, cumule pour la VENTILATION : il n'est pas produit
-        # par `calculate_reward`, donc il n'apparait pas dans `last_reward_breakdown`. Sans le
-        # rattacher, il gonflait le retour de l'episode sans entrer dans aucune categorie — les
-        # cinq `reward/*_total` ne sommaient plus le retour, et `reward/objective_share`, la
-        # metrique meme que ce shaping doit eclairer, ignorait un flux d'objectif reellement percu.
-        zone_shaping_paid = 0.0
-        # Meme raison pour la penalite de reserve gaspillee : elle ne sort pas de
-        # `calculate_reward`, donc sans ce cumul elle alourdirait le retour de l'episode sans
-        # entrer dans aucune des cinq categories ventilees.
+        # Penalite de reserve gaspillee versee a ce step, cumulee pour la VENTILATION : elle ne
+        # sort pas de `calculate_reward`, donc sans ce cumul elle alourdirait le retour de
+        # l'episode sans entrer dans aucune des cinq categories ventilees.
         reserves_penalty_paid = 0.0
-        # Zone intent free step: reward is always 0.0 (agent learns via deferred rewards)
-        if isinstance(result, dict) and result.get("action") == "zone_intent":
-            reward = 0.0
-        else:
-            reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
-            # Shaping zone-intent : solde d'une declaration d'un tour PRECEDENT, pose a
-            # l'ouverture de la command phase du declarant (cf. _process_command_phase).
-            # La cle est posee a l'init ET au reset : sa lecture est stricte, et le versement
-            # la remet a 0.0 au lieu de la supprimer — un `pop` avec defaut masquerait une
-            # desynchronisation du cycle declaration/solde.
-            # RESERVES GASPILLEES (20.04) : facture au premier step qui suit la destruction, par
-            # le meme chemin que le shaping ci-dessus et pour la meme raison — le handler qui
-            # detruit n'a ni le bareme ni la main sur la recompense. Le compte est pose par
-            # `fight_handlers` et n'inclut QUE les escouades qui avaient une arrivee possible.
-            _shaping, _reserves = self._drain_pending_shaping_and_reserves()
-            reward += _shaping + _reserves
-            zone_shaping_paid += _shaping
-            reserves_penalty_paid += _reserves
+        reward = self.reward_calculator.calculate_reward(success, result, self.game_state)
+        # RESERVES GASPILLEES (20.04) : facture au premier step qui suit la destruction, parce
+        # que le handler qui detruit n'a ni le bareme ni la main sur la recompense. Le compte est
+        # pose par `fight_handlers` et n'inclut QUE les escouades qui avaient une arrivee possible.
+        #
+        # Ce drain versait aussi le solde des INTENTIONS DE ZONE, retirees le 2026-09-09 : la
+        # branche « step zone_intent -> reward 0.0 » qui encadrait ce bloc est partie avec elles,
+        # et `calculate_reward` est desormais appele sur TOUS les chemins.
+        _reserves = self._drain_pending_reserves()
+        reward += _reserves
+        reserves_penalty_paid += _reserves
         _step_t5 = time.perf_counter() if _step_t0 is not None else None
         terminated = self.game_state["game_over"]
-        if terminated:
-            # SOLDE TERMINAL. La declaration du dernier tour n'atteindra jamais la command phase
-            # suivante : sans ce rattrapage, le dernier tour de CHAQUE episode ne serait jamais
-            # paye — un tour sur N systematiquement muet, et justement celui qui decide la
-            # partie.
-            #
-            # On solde celle du JOUEUR CONTROLE, pas celle de l'auteur du dernier step : la
-            # partie se termine le plus souvent pendant le tour de l'adversaire, et l'agent n'a
-            # alors plus aucun step pour porter son solde. Verser ici reste correct — les
-            # wrappers d'adversaire cumulent les recompenses des steps du bot dans celle rendue
-            # a l'agent (`cumulative_reward`, ai/env_wrappers.py). La declaration eventuelle de
-            # l'adversaire n'est jamais soldee : sa recompense n'entraine rien, et `reset` la
-            # jette avec le reste de `game_state`.
-            terminal_shaping = self.settle_pending_zone_intent_declaration(
-                int(require_key(self.config, "controlled_player"))
-            )
-            reward += terminal_shaping
-            zone_shaping_paid += terminal_shaping
         truncated = False
         info = result.copy() if isinstance(result, dict) else {}
         info["success"] = success
@@ -2880,15 +2820,6 @@ class W40KEngine(gym.Env):
                 totals[key] += value
                 if key in DENSE_REWARD_BREAKDOWN_COMPONENTS:
                     totals[f'{key}_positive'] += max(0.0, value)
-
-        if zone_shaping_paid != 0.0:
-            # Categorie `objective` : le shaping paie la prise et la conservation d'objectifs.
-            # Accumule ici et non dans `last_reward_breakdown` — celui-ci n'existe pas sur tous
-            # les chemins qui versent (un solde terminal peut tomber sur un step zone-intent,
-            # ou `calculate_reward` n'est pas appele).
-            totals = self.episode_tactical_data['reward_breakdown']
-            totals['objective'] += zone_shaping_paid
-            totals['objective_positive'] += max(0.0, zone_shaping_paid)
 
         if reserves_penalty_paid != 0.0:
             # Categorie `penalties`, comme tout ce qui coute sans etre le resultat d'une action
@@ -3689,7 +3620,7 @@ class W40KEngine(gym.Env):
 
             # Execute through the SQUAD dispatcher : la decision vient de la politique squad,
             # donc sa semantique est celle de `convert_squad_action` (squad_normal_move,
-            # squad_shoot, zone_intent...). `_process_semantic_action` ne connait pas ce
+            # squad_shoot, command_wait...). `_process_semantic_action` ne connait pas ce
             # vocabulaire — c'est `_process_squad_action` qui l'execute, en appelant les MEMES
             # handlers de phase que le joueur humain.
             result = self._process_squad_action(ai_semantic_action)
@@ -7496,10 +7427,6 @@ class W40KEngine(gym.Env):
             # Pas de `end_activation` ici : `movement_handlers` l'a déjà faite, comme pour tout
             # autre type de mouvement. La refaire retirerait une SECONDE unité du pool.
 
-        # ── zone_intent : command phase ───────────────────────────────────────
-        elif action_name == "zone_intent":
-            success, result = self._process_command_phase(semantic)
-
         # ── command_wait : passer la phase command sans action ────────────────
         elif action_name == "command_wait":
             success, result = self._process_command_phase({"action": "skip"})
@@ -8672,71 +8599,38 @@ class W40KEngine(gym.Env):
         else:
             return True, handler_response
 
-    def _record_zone_intent_declaration(self) -> None:
-        """Fige les intents declares CE tour et le controle d'objectif au moment du choix.
+    def _drain_pending_reserves(self) -> float:
+        """Vide `_pending_reserves_wasted` et rend la penalite due, 0.0 s'il n'y en a pas.
 
-        Le controle est memorise ici et non relu au solde : le shaping compare l'etat VISE a
-        l'etat OBTENU, et l'etat vise n'existe plus une fois le tour joue. Une declaration par
-        joueur — les deux camps traversent ce code en self-play, et solder celle du mauvais
-        joueur verserait le shaping de l'adversaire dans la recompense de l'agent.
+        Rendait AUSSI le solde des intentions de zone (`_pending_zone_shaping`), d'ou son ancien
+        nom `_drain_pending_shaping_and_reserves` et son couple de retour. Les intentions sont
+        parties le 2026-09-09 ; le nom et la signature suivent, sans quoi les deux appelants
+        continueraient de deballer un tuple dont la premiere valeur serait toujours 0.0.
         """
-        current_player = int(require_key(self.game_state, "current_player"))
-        zone_intents = require_key(self.game_state, "zone_intents")
-        declarations = require_key(self.game_state, "_zone_intent_declarations")
-        declarations[current_player] = {
-            "turn": self.game_state["turn"],
-            "intents": list(zone_intents),
-            "control": [
-                get_objective_control_for_player(zone_idx, self.game_state, current_player)
-                for zone_idx in range(len(zone_intents))
-            ],
-        }
-
-    def _drain_pending_shaping_and_reserves(self) -> Tuple[float, float]:
-        """Vide _pending_zone_shaping et _pending_reserves_wasted, retourne (zone_shaping, reserves_penalty)."""
-        zone_shaping = require_key(self.game_state, "_pending_zone_shaping")
-        self.game_state["_pending_zone_shaping"] = 0.0
         wasted = require_key(self.game_state, "_pending_reserves_wasted")
-        reserves_penalty = 0.0
-        if wasted:
-            self.game_state["_pending_reserves_wasted"] = 0
-            reserves_penalty = self.reward_calculator.wasted_reserve_penalty(wasted)
-        return zone_shaping, reserves_penalty
-
-    def settle_pending_zone_intent_declaration(self, player: int) -> float:
-        """Solde la declaration de `player` et rend le shaping du, 0.0 s'il n'y en a pas.
-
-        Appelee a l'OUVERTURE de la command phase du joueur (command_handlers), donc apres que
-        la frontiere de tour a rafraichi ``objective_controllers`` (14.02) : le controle lu est
-        bien celui OBTENU pendant le tour ecoule. C'est aussi le seul instant ou l'on est sur
-        que la prochaine action jouee sera celle du declarant, donc que le shaping ira dans SA
-        recompense — un solde a la frontiere de tour elle-meme tomberait sur le step de
-        l'adversaire.
-
-        Point de solde independant de la declaration : un joueur qui ne joue aucun free step un
-        tour laisse quand meme sa declaration precedente se solder ici.
-        """
-        declarations = require_key(self.game_state, "_zone_intent_declarations")
-        declaration = declarations.pop(int(player), None)
-        if declaration is None:
+        if not wasted:
             return 0.0
-        return self.reward_calculator.settle_zone_intent_declaration(
-            self.game_state, declaration, int(player)
-        )
+        self.game_state["_pending_reserves_wasted"] = 0
+        return self.reward_calculator.wasted_reserve_penalty(wasted)
 
-    #: Verbes que la phase de commandement accepte, et les SEULS. `zone_intent` joue un free
-    #: step (gym), `skip` sort de la phase — c'est ce que `command_wait` envoie, et le seul
-    #: chemin de sortie qui atteigne ce handler (`advance_phase` est intercepté en amont, dans
-    #: les deux points d'entrée). Tout autre verbe était traité comme une « sortie volontaire »
-    #: et terminait la phase : un `activate_unit` sur une unité ADVERSE, ou un verbe hors
-    #: vocabulaire, la faisaient basculer vers le move en rendant `success: True`.
-    COMMAND_PHASE_ACTIONS = frozenset({"zone_intent", "skip"})
+    #: Verbe que la phase de commandement accepte, et le SEUL. `skip` sort de la phase — c'est ce
+    #: que `command_wait` envoie, et le seul chemin de sortie qui atteigne ce handler
+    #: (`advance_phase` est intercepté en amont, dans les deux points d'entrée). Tout autre verbe
+    #: était traité comme une « sortie volontaire » et terminait la phase : un `activate_unit`
+    #: sur une unité ADVERSE, ou un verbe hors vocabulaire, la faisaient basculer vers le move en
+    #: rendant `success: True`.
+    #: `zone_intent` en est SORTI le 2026-09-09 avec la famille d'actions.
+    COMMAND_PHASE_ACTIONS = frozenset({"skip"})
 
     def _process_command_phase(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        """Process command phase actions."""
-        # Vocabulaire validé AVANT le solde et avant la consommation des free steps : un refus
-        # doit être inerte, et le solde de la déclaration du tour précédent n'a pas à être
-        # déclenché par une action que la phase n'accepte pas.
+        """Process command phase actions — `skip` et rien d'autre (cf. COMMAND_PHASE_ACTIONS).
+
+        Cette fonction portait tout le cycle des intentions de zone : solde de la declaration du
+        tour precedent, consommation d'un free step, enregistrement de la declaration a
+        l'epuisement du cap, et fermeture du cap sur une action non-intent. Le tout est parti le
+        2026-09-09 avec la famille d'actions.
+        """
+        # Un refus doit être inerte : rien n'est modifié avant que le verbe soit reconnu.
         action_name = action.get("action")
         if action_name not in self.COMMAND_PHASE_ACTIONS:
             return False, {
@@ -8744,80 +8638,6 @@ class W40KEngine(gym.Env):
                 "action": action_name,
                 "phase": "command",
             }
-
-        # SOLDE de la declaration du tour precedent, avant tout traitement d'action.
-        #
-        # Ici et pas a la frontiere de tour : a cet instant le controle d'objectif a deja ete
-        # rafraichi par la frontiere (14.02), et l'action en cours est celle du declarant — donc
-        # `_pending_zone_shaping` ira dans SA recompense. Solder a la frontiere elle-meme le
-        # ferait tomber sur le step de l'adversaire.
-        #
-        # `zone_intent_free_steps_remaining` PLEIN est le marqueur d'un tour dont aucun intent
-        # n'a encore ete joue (command_phase_start vient de le remettre a MAX_OBJECTIVES) : le
-        # solde a donc lieu exactement une fois par command phase, que l'agent enchaine des free
-        # steps ou sorte immediatement, et meme s'il n'en joue aucun.
-        if self.game_state["zone_intent_free_steps_remaining"] == MAX_OBJECTIVES:
-            pending = self.settle_pending_zone_intent_declaration(
-                int(require_key(self.game_state, "current_player"))
-            )
-            if pending != 0.0:
-                self.game_state["_pending_zone_shaping"] = (
-                    require_key(self.game_state, "_pending_zone_shaping") + pending
-                )
-
-        # Phase 2: handle zone intent free step actions
-        if action.get("action") == "zone_intent":
-            zone_idx = action["zone_idx"]
-            intent_value = action["intent_value"]
-
-            free_steps = self.game_state["zone_intent_free_steps_remaining"]
-            if free_steps <= 0:
-                # Guard: mask should have prevented this, but be explicit
-                return False, {
-                    "action": "invalid",
-                    "error": "zone_intent_action_but_no_free_steps_remaining",
-                    "zone_idx": zone_idx,
-                    "intent_value": intent_value,
-                }
-
-            zone_intents = self.game_state["zone_intents"]
-            if zone_idx >= len(zone_intents):
-                return False, {
-                    "action": "invalid",
-                    "error": f"zone_idx {zone_idx} out of range (len={len(zone_intents)})",
-                }
-
-            # Etat de controle de l'objectif AU MOMENT du choix : c'est l'axe que
-            # `settle_zone_intent_declaration` recompense, donc le seul axe sur lequel mesurer si la
-            # tete zone-intent conditionne sa decision. Publie dans l'info, jamais compte ici :
-            # les metriques ont un ecrivain unique, le callback d'entrainement.
-            zone_control = get_objective_control(zone_idx, self.game_state)
-
-            zone_intents[zone_idx] = intent_value
-            self.game_state["zone_intent_free_steps_remaining"] = free_steps - 1
-
-            if self.game_state["zone_intent_free_steps_remaining"] == 0:
-                # Cap epuise : la declaration est close, on l'enregistre. Elle sera SOLDEE au
-                # tour suivant du meme joueur, contre le controle obtenu entre-temps.
-                self._record_zone_intent_declaration()
-
-            # Return without phase_complete — env re-demande une action (free step)
-            return True, {
-                "action": "zone_intent",
-                "zone_idx": zone_idx,
-                "intent_value": intent_value,
-                "zone_control": zone_control,
-                "zone_intent_free_steps_remaining": self.game_state["zone_intent_free_steps_remaining"],
-            }
-
-        # Non-zone-intent action in command phase: exit free steps
-        free_steps = self.game_state["zone_intent_free_steps_remaining"]
-        if free_steps > 0:
-            # Sortie volontaire : n'enregistrer une declaration que si un intent a ete joue.
-            intents_played = MAX_OBJECTIVES - free_steps
-            if intents_played > 0:
-                self._record_zone_intent_declaration()
-            self.game_state["zone_intent_free_steps_remaining"] = 0
 
         unit_id = action.get("unitId")
         current_unit = None

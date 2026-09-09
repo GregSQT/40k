@@ -204,75 +204,9 @@ def test_a_key_absent_from_the_agent_step_does_not_survive_from_the_opponent() -
     assert info["phase"] == "shoot"
 
 
-def test_zone_intent_keys_travel_together_through_the_wrapper() -> None:
-    """
-    `intent_value` et `zone_control` decrivent LE MEME free step : le contrat de survie doit
-    les porter ensemble.
-
-    Ne transporter que `intent_value` casse de deux facons, et les deux sont silencieuses au
-    niveau du wrapper :
-      * le callback lit `zone_control` avec `require_key` -> KeyError, entrainement interrompu ;
-      * si l'ADVERSAIRE a joue un zone-intent, son `zone_control` survivrait a cote de
-        l'`intent_value` de l'agent, sous `is_controlled_action=True` — un couple hybride qui
-        fausserait I(intent ; controle) sans jamais lever.
-    """
-    agent_zone_intent = {
-        "action": "zone_intent",
-        "is_controlled_action": True,
-        "phase": "command",
-        "success": True,
-        "intent_value": 1,
-        "zone_control": 1.0,
-    }
-    opponent_zone_intent = {
-        "action": "zone_intent",
-        "is_controlled_action": False,
-        "phase": "command",
-        "success": True,
-        "intent_value": 2,
-        "zone_control": -1.0,
-    }
-    engine = _ScriptedEngine([
-        {"info": agent_zone_intent, "next_player": 2},
-        {"info": opponent_zone_intent, "next_player": 1},
-    ])
-    wrapper = BotControlledEnv(engine, bot=_DummyBot(action=4), agent_seat_mode="p1")
-
-    _obs, _reward, _terminated, _truncated, info = wrapper.step(4)
-
-    assert info["intent_value"] == 1
-    assert info["zone_control"] == 1.0, (
-        "le zone_control de l'adversaire a survecu sous le drapeau de l'agent"
-    )
-
-
-def test_zone_control_does_not_survive_when_the_agent_played_no_zone_intent() -> None:
-    """
-    Cle OPTIONNELLE : l'agent tire, l'adversaire joue un zone-intent derriere. Aucune des deux
-    cles zone-intent ne doit subsister — sinon le tracker compterait un free step fantome.
-    """
-    agent_shoots = {
-        "action": "shoot",
-        "is_controlled_action": True,
-        "phase": "shoot",
-        "success": True,
-    }
-    opponent_zone_intent = {
-        "action": "zone_intent",
-        "is_controlled_action": False,
-        "phase": "command",
-        "success": True,
-        "intent_value": 0,
-        "zone_control": -1.0,
-    }
-    engine = _ScriptedEngine([
-        {"info": agent_shoots, "next_player": 2},
-        {"info": opponent_zone_intent, "next_player": 1},
-    ])
-    wrapper = BotControlledEnv(engine, bot=_DummyBot(action=4), agent_seat_mode="p1")
-
-    _obs, _reward, _terminated, _truncated, info = wrapper.step(4)
-
-    assert info["action"] == "shoot"
-    assert "zone_control" not in info
-    assert "intent_value" not in info
+# Les deux tests des cles `intent_value` / `zone_control` vivaient ici. Ils sont partis le
+# 2026-09-09 avec les intentions de zone : plus aucun step ne pose ces cles, et l'invariant
+# qu'ils partageaient — une cle optionnelle posee par l'ADVERSAIRE ne survit pas sous le
+# drapeau de l'agent — reste verrouille juste au-dessus par
+# `test_a_key_absent_from_the_agent_step_does_not_survive_from_the_opponent`, sur
+# `charge_succeeded`.

@@ -48,24 +48,11 @@ from engine.w40k_core import CHARGE_DISTANCE_MEASURES
 from config_loader import get_config_loader
 
 
-#: Largeur de la fenetre glissante des metriques zone-intent, en EPISODES.
-#:
-#: Le nombre de free steps par episode a un ecart-type de ~18,5 sur un run de reference, ce qui
-#: rend la valeur brute illisible. Moyenner sur 100 episodes ramene l'ecart-type des moyennes a
-#: ~0,94 ; 200 episodes ne descendent qu'a ~0,87 et 830 (un rollout) qu'a ~0,78 : le gain est
-#: epuise bien avant. Constante FIXE et non derivee de n_steps/n_envs, pour que la courbe reste
-#: comparable entre configurations d'entrainement.
-#:
-#: La largeur porte aussi I(intent ; controle) : ~2000 free steps pour 9 cellules, soit un biais
-#: positif de la mesure empirique de ~0,001 bit. Reduire cette constante degraderait ce biais.
-ZONE_INTENT_WINDOW_EPISODES = 100
-
-#: Etats de controle d'un objectif renvoyes par `engine.macro_intents.get_objective_control`
-#: (-1.0 adversaire, 0.0 neutre/conteste, 1.0 joueur courant), remappes en index 0..2.
-ZONE_CONTROL_CARDINALITY = 3
-
-#: INTENT_INVADE / INTENT_DEFEND / INTENT_ATTACK.
-INTENT_CARDINALITY = 3
+# Les trois constantes des metriques zone-intent — `ZONE_INTENT_WINDOW_EPISODES`,
+# `ZONE_CONTROL_CARDINALITY` et `INTENT_CARDINALITY` — ont ete retirees le 2026-09-09 avec les
+# neuf courbes qu'elles dimensionnaient (`00_critical/o_intent_zone_steps`,
+# `00_critical/p_intent_control_dependency`, `combat/intent_*`) et la famille d'actions qu'elles
+# mesuraient.
 
 
 def validate_perf_windows(perf_window: int, perf_window_fast: int) -> tuple[int, int]:
@@ -381,20 +368,6 @@ class W40KMetricsTracker:
         
         # NEW: Bot evaluation combined score for 00_critical/ dashboard
         self.bot_eval_combined = None
-
-        # Phase 2 : metriques zone-intent, fenetre GLISSANTE de ZONE_INTENT_WINDOW_EPISODES
-        # episodes, loggee a CHAQUE fin d'episode comme toutes les autres courbes 00_critical.
-        #
-        # `_zone_steps_since_episode_end` accumule les free steps ecoulés entre deux fins
-        # d'episode, toutes instances d'environnement confondues. C'est volontaire : le tracker
-        # est unique et recoit n_envs episodes entrelaces, donc AUCUN free step n'est
-        # attribuable a un episode precis. Seul le ratio steps/episodes sur une fenetre a un
-        # sens ; une lecture point-par-point de cette courbe n'en a jamais eu.
-        #
-        # La table de contingence controle x intent suit la meme fenetre, une entree par episode
-        # ecoule. Elle sert a I(intent ; controle) : 0 bit = le choix d'intent est independant de
-        # l'etat du plateau, donc la tete zone-intent n'a rien appris.
-        self._reset_zone_intent_state()
 
         # Unit-rule forcing instrumentation (episode exposure + bot-eval impact)
         self.forcing_tracking = {
@@ -1674,10 +1647,11 @@ class W40KMetricsTracker:
         - 00_critical/j_approx_kl           - <0.02 -> Policy stability
         - 00_critical/k_entropy_loss        - Decroissant -> Tune ent_coef
 
-        ECRIT PAR `_log_zone_intent_metrics`, appele en fin de cette methode (2 tags) :
-        - 00_critical/o_intent_zone_steps          - free steps zone-intent par episode
-        - 00_critical/p_intent_control_dependency  - I(intent;controle)/H(controle), non emis
-                                                     quand H(controle) == 0
+        RETIRES le 2026-09-09 avec la famille d'actions qu'ils mesuraient :
+        `o_intent_zone_steps` et `p_intent_control_dependency`, plus les sept `combat/intent_*`.
+        Les lettres des courbes SURVIVANTES ne sont PAS redecalees — `o_robust_current_score`
+        garde la sienne — pour que les runs archives restent comparables, comme la suite 18
+        l'avait deja acte pour la collision de prefixe entre ces deux `o_`.
 
         ECRIT AILLEURS, volontairement -- inventaire complet du namespace :
         - `log_bot_evaluations`, au moment de l'evaluation (attendre l'episode suivant
@@ -1810,177 +1784,6 @@ class W40KMetricsTracker:
         # les compteurs d'actions de l'episode passes par le callback. Le doublon qui occupait
         # cette place lisait un self.episode_tactical_data jamais alimente (voir la trace dans
         # __init__) et ecrasait la vraie courbe avec des zeros.
-
-        # Phase 2: zone intent metrics (sliding window)
-        self._log_zone_intent_metrics(self.episode_count)
-
-    def _reset_zone_intent_state(self) -> None:
-        """Initialise l'etat zone-intent (fenetre glissante + accumulateurs de l'episode courant)."""
-        self._zone_steps_since_episode_end: int = 0
-        self._zone_steps_window: Deque[int] = deque(maxlen=ZONE_INTENT_WINDOW_EPISODES)
-        self._intent_contingency_window: Deque[List[int]] = deque(maxlen=ZONE_INTENT_WINDOW_EPISODES)
-        self._intent_contingency_since_episode_end: List[int] = [0] * (
-            ZONE_CONTROL_CARDINALITY * INTENT_CARDINALITY
-        )
-
-    def log_zone_intent_step(self, intent_value: int, zone_control: float) -> None:
-        """
-        Compte un free step zone-intent. ECRIVAIN UNIQUE : le callback d'entrainement, qui lit
-        `info['intent_value']` et `info['zone_control']` (voir training_callbacks). Le moteur a
-        longtemps compte EN PLUS via un `_metrics_tracker` pose sur l'env ; ce chemin n'etait
-        arme qu'a n_envs==1, donc `--step` comptait double et l'entrainement multi-env non.
-
-        Args:
-            intent_value: 0=INVADE, 1=DEFEND, 2=ATTACK
-            zone_control: -1.0 objectif adverse, 0.0 neutre/conteste, 1.0 controle par l'agent
-        """
-        if intent_value not in (0, 1, 2):
-            raise ValueError(f"Invalid intent_value for zone intent step: {intent_value}")
-        if zone_control not in (-1.0, 0.0, 1.0):
-            raise ValueError(f"Invalid zone_control for zone intent step: {zone_control}")
-
-        self._zone_steps_since_episode_end += 1
-        control_idx = int(zone_control) + 1  # -1/0/1 -> 0/1/2
-        self._intent_contingency_since_episode_end[control_idx * INTENT_CARDINALITY + intent_value] += 1
-
-    def _log_zone_intent_metrics(self, step: int) -> None:
-        """
-        Emet les metriques zone-intent sur la fenetre glissante et fait avancer celle-ci d'un
-        episode. Appelee a chaque `log_episode_end` via `log_critical_dashboard`.
-        """
-        self._zone_steps_window.append(self._zone_steps_since_episode_end)
-        self._zone_steps_since_episode_end = 0
-        self._intent_contingency_window.append(self._intent_contingency_since_episode_end)
-        self._intent_contingency_since_episode_end = [0] * (ZONE_CONTROL_CARDINALITY * INTENT_CARDINALITY)
-
-        n_steps_per_ep = sum(self._zone_steps_window) / len(self._zone_steps_window)
-        self.writer.add_scalar("00_critical/o_intent_zone_steps", n_steps_per_ep, step)
-
-        table = [0] * (ZONE_CONTROL_CARDINALITY * INTENT_CARDINALITY)
-        for episode_table in self._intent_contingency_window:
-            for cell, count in enumerate(episode_table):
-                table[cell] += count
-        total_intents = sum(table)
-
-        if total_intents == 0:
-            # Aucun free step sur la fenetre : les ratios et l'information mutuelle n'ont pas
-            # d'echantillon. Ne rien emettre plutot que des zeros, qui se liraient comme
-            # "distribution uniforme, MI nulle" — soit exactement le diagnostic recherche.
-            return
-
-        _control_marginal, intent_marginal = self._marginals(table)
-        self.writer.add_scalar("combat/intent_invade_ratio", intent_marginal[0], step)
-        self.writer.add_scalar("combat/intent_defend_ratio", intent_marginal[1], step)
-        self.writer.add_scalar("combat/intent_attack_ratio", intent_marginal[2], step)
-
-        # Ingredients de la mesure, emis pour eux-memes : l'entropie du CONTROLE dit si le
-        # plateau offrait seulement de quoi conditionner un choix.
-        mutual_info = self._intent_control_mutual_info(table)
-        control_entropy = self._control_entropy(table)
-        self.writer.add_scalar("combat/intent_mutual_info_bits", mutual_info, step)
-        self.writer.add_scalar("combat/intent_control_entropy_bits", control_entropy, step)
-
-        if control_entropy > 0.0:
-            # I est bornee par H(controle), PAS par log2(3) : sur un plateau ou tous les
-            # objectifs sont neutres au moment des free steps, H = 0 et I = 0 quelle que soit la
-            # politique. Emettre I seule ferait lire "la tete n'a rien appris" la ou il n'y avait
-            # rien a apprendre. On normalise donc : U = I / H(controle) est la FRACTION de
-            # l'incertitude d'intent expliquee par l'etat, 1.0 = intent entierement determine.
-            self.writer.add_scalar(
-                "00_critical/p_intent_control_dependency", mutual_info / control_entropy, step
-            )
-        # H(controle) == 0 : aucun contraste d'etat sur la fenetre, la question n'a pas de sens.
-        # Emettre 0.0 la designerait a tort la politique.
-
-        aligned, aligned_baseline = self._intent_shaping_alignment(table)
-        self.writer.add_scalar("combat/intent_shaping_aligned_ratio", aligned, step)
-        self.writer.add_scalar("combat/intent_shaping_aligned_baseline", aligned_baseline, step)
-
-    @staticmethod
-    def _marginals(table: Sequence[int]) -> Tuple[List[float], List[float]]:
-        """Distributions marginales (controle, intent) de la table de contingence 3x3."""
-        total = sum(table)
-        if total == 0:
-            raise ValueError("Zone intent marginals require a non-empty contingency table")
-        control = [
-            sum(table[c * INTENT_CARDINALITY + i] for i in range(INTENT_CARDINALITY)) / total
-            for c in range(ZONE_CONTROL_CARDINALITY)
-        ]
-        intent = [
-            sum(table[c * INTENT_CARDINALITY + i] for c in range(ZONE_CONTROL_CARDINALITY)) / total
-            for i in range(INTENT_CARDINALITY)
-        ]
-        return control, intent
-
-    @classmethod
-    def _control_entropy(cls, table: Sequence[int]) -> float:
-        """
-        H(controle) en BITS : le contraste d'etat que le plateau a REELLEMENT offert aux free
-        steps de la fenetre.
-
-        C'est le plafond de I(intent ; controle). Mesure faite sur le vrai moteur : en jeu
-        aleatoire les figurines quittent les objectifs et les free steps, joues en command phase
-        avant tout mouvement du tour, ne voient plus que du neutre — H tombe a 0 et aucune
-        politique, si bonne soit-elle, ne peut produire une I non nulle. D'ou la publication de
-        H a cote du diagnostic : sans elle, "rien appris" et "rien a apprendre" se confondent.
-        """
-        control, _intent = cls._marginals(table)
-        return float(-sum(p * np.log2(p) for p in control if p > 0.0))
-
-    @classmethod
-    def _intent_control_mutual_info(cls, table: Sequence[int]) -> float:
-        """
-        I(intent ; controle) en BITS a partir de la table de contingence 3x3.
-
-        0 bit = le choix d'intent est statistiquement independant de l'etat de l'objectif : la
-        tete zone-intent joue la meme distribution quel que soit le plateau, donc elle n'a rien
-        appris. Une valeur > 0 prouve le conditionnement mais PAS son sens — un agent qui ferait
-        systematiquement l'inverse du shaping obtiendrait une MI elevee. C'est
-        `_intent_shaping_alignment` qui donne le sens.
-
-        A NE PAS LIRE SEULE : bornee par H(controle) (cf. `_control_entropy`), pas par log2(3).
-        Le diagnostic publie en 00_critical est le rapport I / H(controle).
-        """
-        total = sum(table)
-        control, intent = cls._marginals(table)
-
-        mutual_info = 0.0
-        for c in range(ZONE_CONTROL_CARDINALITY):
-            for i in range(INTENT_CARDINALITY):
-                joint = table[c * INTENT_CARDINALITY + i]
-                if joint == 0:
-                    continue  # 0 * log(0) = 0, terme nul et non defini
-                p_joint = joint / total
-                mutual_info += p_joint * np.log2(p_joint / (control[c] * intent[i]))
-        return float(mutual_info)
-
-    @classmethod
-    def _intent_shaping_alignment(cls, table: Sequence[int]) -> Tuple[float, float]:
-        """
-        Part des free steps dont le couple (controle, intent) est paye par
-        `RewardCalculator.settle_zone_intent_declaration` — DEFEND sur objectif tenu, INVADE sur
-        objectif adverse, INVADE sur objectif neutre — ET la valeur de reference a laquelle la
-        comparer.
-
-        La reference est ce que la MEME politique obtiendrait si elle choisissait son intent
-        sans regarder le plateau (produit des marginales observees). Elle n'est pas constante :
-        elle depend de la frequence des trois etats de controle, qui varie d'une fenetre a
-        l'autre. Publier le ratio seul le rendrait illisible — "0.42, c'est bien ou pas ?" n'a
-        de reponse qu'en regard de cette ligne.
-        """
-        control, intent = cls._marginals(table)
-        total = sum(table)
-
-        control_owned, control_neutral, control_enemy = 2, 1, 0  # controle 1.0 / 0.0 / -1.0
-        intent_invade, intent_defend = 0, 1
-        paid = (
-            (control_owned, intent_defend),
-            (control_enemy, intent_invade),
-            (control_neutral, intent_invade),
-        )
-        aligned = sum(table[c * INTENT_CARDINALITY + i] for c, i in paid) / total
-        baseline = sum(control[c] * intent[i] for c, i in paid)
-        return aligned, baseline
 
     def log_bot_eval_cost(
         self, duration_seconds: float, episodes_played: int, step: int

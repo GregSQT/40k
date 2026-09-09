@@ -251,7 +251,7 @@ class PvEController:
         # Aucune reecriture de l'identite de l'unite ici : la semantique squad porte deja
         # `squad_id` (ou `unitId` pour deploy_unit), pose par `convert_squad_action` depuis le
         # MEME pool que le masque. Forcer `unitId` ecrasait la cible d'actions qui n'en ont pas
-        # (zone_intent, command_wait).
+        # (command_wait).
         return semantic_action
 
     def _evaluate_rule_choice_option_value(
