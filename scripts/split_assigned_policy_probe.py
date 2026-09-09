@@ -20,10 +20,13 @@ POURQUOI DEUX TÉMOINS, sans quoi le nombre ne veut rien dire :
 
   PLANCHER  — la même observation contre elle-même. Doit valoir EXACTEMENT 0. Un plancher non nul
               dénoncerait du non-déterminisme dans la sonde, et tout le reste serait du bruit.
-  RÉFÉRENCE — la même mesure pour une perturbation dont on SAIT que le choix de cible dépend : les
-              PV restants de la cible. Elle donne l'ordre de grandeur d'« un champ que la politique
-              utilise » sur ces mêmes états. Sans elle, un TVD de 0,004 est illisible : proche du
-              plancher, ou déjà l'ampleur d'un champ décisif ?
+  RÉFÉRENCE — la même mesure quand les deux escouades ennemies ÉCHANGENT leurs caractéristiques
+              (ligne continue et drapeaux, les dix bits exceptés). Le choix de cible en dépend par
+              construction du jeu, et l'échange garde deux unités RÉELLES du même état : aucune
+              valeur contradictoire, donc aucun étalon gonflé par une observation impossible. Elle
+              donne l'ordre de grandeur d'« un champ que la politique utilise » sur ces mêmes
+              états. Sans elle, un TVD de 0,004 est illisible : proche du plancher, ou déjà
+              l'ampleur d'un champ décisif ?
 
 LECTURE DU VERDICT :
   TVD_split ≈ plancher                      -> câblés mais INEXPLOITÉS.
@@ -60,7 +63,6 @@ from engine.observation_entities import (
     K_WEAPONS_RANGED,
     split_assigned_field,
     unit_bin_index,
-    unit_cont_index,
 )
 from shared.data_validation import require_key
 
@@ -68,11 +70,6 @@ from shared.data_validation import require_key
 SPLIT_BIT_IDX: Tuple[int, ...] = tuple(
     unit_bin_index(split_assigned_field(i)) for i in range(K_WEAPONS_RANGED)
 )
-#: Champ de RÉFÉRENCE : les PV restants d'une escouade ennemie. Choisi parce que le choix de cible
-#: en dépend par construction du jeu (achever une unité entamée, 05.02 met d'ailleurs le groupe
-#: blessé en tête de l'ordre d'allocation), et parce qu'il vit dans le MÊME bloc d'entités que les
-#: bits — donc il traverse le même encodeur, et l'ordre de grandeur reste comparable.
-REF_CONT_IDX: int = unit_cont_index("hp_total")
 
 
 def _tvd(p: np.ndarray, q: np.ndarray) -> float:
@@ -153,14 +150,24 @@ class _Policy:
         return probs.cpu().numpy()[0].astype(np.float64)
 
 
-def _other_eligible_target(pending: Dict[str, Any], assigned_target: str,
+def _other_eligible_target(game_state: Dict[str, Any], squad_id: str, weapon_slot: int,
+                           assigned_target: str,
                            enemy_slot_ids: List[Optional[str]]) -> Optional[str]:
-    """Une AUTRE escouade ennemie sur la table, pour reloger le couple déjà commité.
+    """Une autre cible que le moteur aurait RÉELLEMENT pu donner à CETTE arme.
 
-    On ne prend pas n'importe quel id : il doit occuper un slot ennemi observé, sinon
-    l'observation refuserait de poser le bit et la contrefactuelle ne mesurerait rien.
+    L'éligibilité est recalculée par la fonction du moteur pour le slot d'arme du couple déjà
+    commité — et non empruntée à `pending["eligible_target_slots"]`, qui décrit l'arme ENCORE en
+    attente, une autre arme donc une autre portée. Prendre le premier ennemi venu fabriquerait un
+    état que le moteur ne peut pas produire (cible hors de portée de cette arme-là), et le TVD
+    serait alors mesuré hors distribution : le réseau réagirait à une situation impossible.
     """
-    for tsid in enemy_slot_ids:
+    from engine.phase_handlers.shared_utils import shoot_weapon_eligible_target_slots
+
+    _code, eligible = shoot_weapon_eligible_target_slots(
+        game_state, squad_id, int(weapon_slot), enemy_slot_ids
+    )
+    for slot_i in eligible:
+        tsid = enemy_slot_ids[slot_i]
         if tsid is not None and str(tsid) != str(assigned_target):
             return str(tsid)
     return None
@@ -256,39 +263,61 @@ def _measure(eng: Any, policy: _Policy, pending: Dict[str, Any], mask: np.ndarra
     wcode = sorted(require_key(pending, "assignments"))[0]
     assign = require_key(require_key(pending, "assignments"), wcode)
     assigned = str(require_key(assign, "target_id"))
-    other = _other_eligible_target(pending, assigned, enemy_slots)
+    other = _other_eligible_target(
+        eng.game_state, squad_id, int(require_key(assign, "weapon_slot")), assigned, enemy_slots
+    )
     if other is None:
-        return None
+        return {"sans_autre_cible": 1.0}
 
     obs_a = _observation(eng, squad_id)
     assign["target_id"] = other
     obs_b = _observation(eng, squad_id)
     assign["target_id"] = assigned  # état RENDU tel quel : la sonde ne joue pas la partie
 
+    # Deux observations IDENTIQUES ne sont pas une contrefactuelle pure : c'est une régression de
+    # câblage (les bits ne suivent plus la cible). Sans ce refus, `tvd_split` vaudrait 0 partout
+    # et le rapport se lirait « câblés mais INEXPLOITÉS » — le verdict le plus grave, rendu par
+    # une panne de la sonde plutôt que par la politique.
+    if not _keys_differing(obs_a, obs_b):
+        raise RuntimeError(
+            f"les bits ne suivent plus la cible sur {squad_id!r} : déplacer le couple de "
+            f"{assigned!r} vers {other!r} laisse l'observation INCHANGÉE"
+        )
     if not _bits_only(obs_a, obs_b):
         if strict:
             raise RuntimeError(
                 f"contrefactuelle impure sur {squad_id!r} : clés différentes "
                 f"{_keys_differing(obs_a, obs_b)} — le TVD mesurerait autre chose que les bits"
             )
-        return None
+        return {"impure": 1.0}
 
-    # RÉFÉRENCE : mêmes états, PV totaux de la cible déjà assignée ramenés à 0. On prend toute la
-    # PLAGE du champ, et non un incrément : un bit parcourt 0 -> 1, soit son maximum, alors qu'un
-    # « +1 PV » sur une grandeur qui vaut couramment 10 à 40 serait une perturbation
-    # incomparablement plus petite — la référence sortirait alors minuscule pour une raison
-    # d'échelle, et non parce que la politique ignore les PV.
+    # RÉFÉRENCE : les deux escouades ennemies ÉCHANGENT leurs caractéristiques — toute la ligne
+    # continue ET la ligne de drapeaux, les dix bits exceptés. Un échange, et non une valeur
+    # forcée : mettre `hp_total` à 0 en laissant `alive_models`, `hp_max` et `present` intacts
+    # fabriquerait une escouade contradictoire, que le réseau n'a jamais vue à l'entraînement —
+    # l'étalon sortirait gonflé et ferait passer les bits pour inertes par comparaison. Ici les
+    # deux lignes restent des unités RÉELLES du même état, seule leur place change.
     obs_ref = {k: np.array(v, copy=True) for k, v in obs_a.items()}
     row = next(
         (i for i, tsid in enumerate(enemy_slots) if tsid is not None and str(tsid) == assigned),
         None,
     )
-    if row is None:
+    row_other = next(
+        (i for i, tsid in enumerate(enemy_slots) if tsid is not None and str(tsid) == other),
+        None,
+    )
+    if row is None or row_other is None:
         raise RuntimeError(
-            f"cible assignée {assigned!r} absente du mapping de slots ennemis de {squad_id!r} — "
-            f"l'observation ne pourrait pas porter son bit, la contrefactuelle est incohérente"
+            f"cible {assigned!r} ou {other!r} absente du mapping de slots ennemis de "
+            f"{squad_id!r} — l'observation ne pourrait pas porter son bit"
         )
-    obs_ref["enemies_cont"][row, REF_CONT_IDX] = 0.0
+    keep = [c for c in range(obs_ref["enemies_bin"].shape[1]) if c not in set(SPLIT_BIT_IDX)]
+    for key, cols in (("enemies_cont", None), ("enemies_bin", keep)):
+        block = obs_ref[key]
+        sel = slice(None) if cols is None else cols
+        a_row = block[row, sel].copy()
+        block[row, sel] = block[row_other, sel]
+        block[row_other, sel] = a_row
 
     # SATURATION : tout le bloc continu ennemi mis à zéro. Aucune signification tactique — c'est
     # un contrôle d'INSTRUMENT. Si même cette perturbation-là ne bouge pas la distribution, la
@@ -328,18 +357,28 @@ def main() -> int:
         for seed in range(1, args.seeds + 1):
             records.extend(collect(eng, policy, seed, args.strict))
 
-    degeneres = [r for r in records if "degenere" in r]
-    records = [r for r in records if "degenere" not in r]
-    print(f"points d'arrêt rencontrés : {len(records) + len(degeneres)}  "
-          f"(dont {len(degeneres)} à une seule action légale, écartés : sans information)")
-    print(f"points d'arrêt mesurés    : {len(records)}")
+    # Chaque motif d'écart est COMPTÉ et affiché. Un point d'arrêt silencieusement absent du
+    # rapport, c'est un dénominateur faux : « SPLIT moyen sur 10 points » ne se lit pas pareil
+    # selon qu'il y en avait 12 ou 300.
+    motifs = (
+        ("degenere", "une seule action légale — aucune perturbation ne peut rien y changer"),
+        ("sans_autre_cible", "aucune AUTRE cible éligible pour l'arme déjà assignée"),
+        ("impure", "contrefactuelle impure (une autre clé bouge) — relancer avec --strict"),
+    )
+    ecartes = {k: [r for r in records if k in r] for k, _ in motifs}
+    mesures = [r for r in records if not any(k in r for k, _ in motifs)]
+    print(f"points d'arrêt rencontrés : {len(records)}")
+    for key, why in motifs:
+        print(f"   écartés — {why:62s} : {len(ecartes[key])}")
+    print(f"points d'arrêt mesurés    : {len(mesures)}")
+    records = mesures
     if not records:
         print("AUCUN point d'arrêt informatif — rien à conclure.")
         return 1
     stat: Dict[str, np.ndarray] = {}
     for key, label in (("tvd_plancher", "PLANCHER   (obs contre elle-même)"),
                        ("tvd_split", "SPLIT      (cible déjà assignée changée)"),
-                       ("tvd_reference", "RÉFÉRENCE  (PV d'une cible changés)"),
+                       ("tvd_reference", "RÉFÉRENCE  (les deux cibles échangent leurs caractéristiques)"),
                        ("tvd_saturation", "SATURATION (bloc ennemi continu à zéro)")):
         vals = np.array([r[key] for r in records])
         stat[key] = vals
