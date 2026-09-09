@@ -200,6 +200,12 @@ Move réactif : une escouade hors cohérence ne pouvait pas faire ce mouvement (
 
 ---
 
+## fix-reactive-move-engagement — ✅ livré 2026-09-09 {#reactive-move-engagement}
+
+Move réactif : la datasheet conditionne la capacité à « if this unit is not within Engagement Range of one or more enemy units », condition qu'aucun des six filtres d'éligibilité ne portait. Le pool BFS n'écarte que les cases d'ARRIVÉE adjacentes à un ennemi, jamais la position de DÉPART : un porteur au contact réagissait et quittait le corps à corps par un mouvement gratuit, sans les contraintes du Fall Back. Mesuré avant correctif — réactif engagé en (10,10) à distance 1, déplacé en (12,9) à distance 2, `applied=1`. Fix : `unit_within_engagement_zone_footprints` (primitive canonique EZ, celle des jumeaux fight/charge) après le filtre de rayon dans `maybe_resolve_reactive_move`. Rouge→vert par retrait de la porte, plus un contrôle jumeau hors zone qui distingue la porte de la scène. Livré avec le retrait de `reactive_move` au `FenrisianWolf`, qui ne porte pas cette règle — le Termagant en est le seul porteur. **Le volet REFUS n'est pas livré** : `reactive_decision_mode` vaut toujours `"auto"` en dur, la branche `"state"` et `decline_reactive_move` restent sans producteur.
+
+---
+
 ## Replis `unit_by_id` {#unit-by-id}
 
 **T0 livré le 2026-08-19** — `require_unit_by_id(game_state, unit_id)` dans `engine/game_utils.py`, re-exportée depuis `combat_utils`. Signature canonique `(game_state, unit_id)` alignée sur le pattern moteur.

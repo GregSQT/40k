@@ -409,7 +409,9 @@ Champs requis: `units_reacted_this_enemy_turn: set[str]`, `reaction_window_activ
 
 ### Detection d eligibilite
 
-Une unite reactionnaire est eligible si: vivante; camp oppose a l unite qui vient de bouger; possede `reactive_move` (direct ou via `grants_rule_ids`); pas deja dans `units_reacted_this_enemy_turn`; distance hex <= 9 depuis `to_col`, `to_row` de l unite ennemie; au moins une destination legale de mouvement reactif. Si aucune unite eligible: fin immediate du flux reactif.
+Une unite reactionnaire est eligible si: vivante; camp oppose a l unite qui vient de bouger; presente sur le champ de bataille; possede `reactive_move` (direct ou via `grants_rule_ids`); pas deja dans `units_reacted_this_enemy_turn`; distance hex <= 9 pouces convertis depuis `to_col`, `to_row` de l unite ennemie; **pas elle-meme dans la zone d engagement d un ennemi** (datasheet: « if this unit is not within Engagement Range of one or more enemy units »); au moins une destination legale de mouvement reactif. Si aucune unite eligible: fin immediate du flux reactif.
+
+La porte d engagement porte sur la position de DEPART. Le pool de destinations n ecarte que les cases d ARRIVEE adjacentes a un ennemi: sans elle, un porteur au contact quittait le corps a corps par un mouvement gratuit, sans les contraintes du Fall Back.
 
 ### Politique training
 
@@ -417,7 +419,7 @@ En training/gym: choix explicite `decline_reactive_move` ou `reactive_move(unit_
 
 ### Resolution du reactive move
 
-Sequence: 1) gardes (move_cause, reaction_window_active); 2) reaction_window_active = True; 3) selection unite eligible; 4) decision (decline ou move); 5) si move: roll D6, destinations legales, appliquer deplacement; 6) si move: units_reacted_this_enemy_turn.add(unit_id_str); 7) last_move_cause = "reactive_move" si move applique; 8) refresh_all_positional_caches_after_reactive_move(game_state) si move applique; 9) reaction_window_active = False (garanti par `finally`); 10) retour flux normal.
+Sequence: 1) gardes (move_cause, reaction_window_active); 2) reaction_window_active = True; 3) selection unite eligible; 3bis) escouade hors coherence: `reactive_move_declined` avec `reason=formation_incoherente`, unite suivante; 4) decision (decline ou move); 5) si move: roll D6, destinations legales, appliquer deplacement; 6) si move: units_reacted_this_enemy_turn.add(unit_id_str); 7) last_move_cause = "reactive_move" si move applique; 8) refresh_all_positional_caches_after_reactive_move(game_state) si move applique; 9) reaction_window_active = False (garanti par `finally`); 10) retour flux normal.
 
 ### Strategie cache
 

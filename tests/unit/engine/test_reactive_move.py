@@ -138,6 +138,36 @@ class TestMaybeResolveReactiveMoveNoTrigger:
         result = maybe_resolve_reactive_move(gs, "1", 4, 10, 5, 10, "move", "normal")
         assert result["triggered"] is False
 
+    def test_unit_within_engagement_range_no_trigger(self, monkeypatch):
+        """reactive_engaged : porteur DÉJÀ au contact d'un ennemi → non éligible → triggered=False.
+
+        Datasheet : « ... if this unit is not within Engagement Range of one or more enemy units,
+        it can make a Normal move of up to D6" ». Le pool BFS n'écarte que les cases d'ARRIVÉE
+        adjacentes à un ennemi : sans porte sur la position de DÉPART, le porteur quittait le
+        corps à corps par un mouvement gratuit, sans les contraintes du Fall Back.
+        """
+        monkeypatch.setattr("random.randint", lambda a, b: 3)
+        # 3 (joueur 1) colle le porteur 2 (joueur 2) ; 1 (joueur 1) bouge à 2 hexes de lui.
+        units = [_unit(1, 1, 4, 10), _unit_with_reactive(2, 2, 6, 10), _unit(3, 1, 7, 10)]
+        gs = _make_game_state(units)
+        result = maybe_resolve_reactive_move(gs, "1", 3, 10, 4, 10, "move", "normal")
+        assert result["triggered"] is False
+        assert (units[1]["col"], units[1]["row"]) == (6, 10)
+
+    def test_unit_out_of_engagement_range_still_triggers(self, monkeypatch):
+        """Contrôle du test précédent : SEUL l'engagement change le verdict.
+
+        Même scène, l'ennemi statique reculé hors zone d'engagement → le porteur redevient
+        éligible. Sans ce contrôle, le `triggered=False` ci-dessus pourrait venir de la scène
+        elle-même plutôt que de la porte, et resterait vert si la porte devenait inerte.
+        """
+        monkeypatch.setattr("random.randint", lambda a, b: 3)
+        units = [_unit(1, 1, 4, 10), _unit_with_reactive(2, 2, 6, 10), _unit(3, 1, 10, 10)]
+        gs = _make_game_state(units)
+        result = maybe_resolve_reactive_move(gs, "1", 3, 10, 4, 10, "move", "normal")
+        assert result["triggered"] is True
+        assert result["reactive_moves_applied"] == 1
+
     def test_reentrance_raises_runtime_error(self):
         """reactive_reentrant : reaction_window_active=True → RuntimeError."""
         units = [_unit(1, 1, 5, 10), _unit_with_reactive(2, 2, 6, 10)]

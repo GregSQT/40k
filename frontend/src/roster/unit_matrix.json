@@ -565,7 +565,7 @@
       "value": 8,
       "melee_weapons": ["fenrisian_wolf_teeth_and_claws"],
       "ranged_weapons": [],
-      "special_rules": ["Predator Instinct"]
+      "special_rules": []
     },
     {
       "army": "SpaceMarine",
