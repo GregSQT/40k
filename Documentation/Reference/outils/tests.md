@@ -28,7 +28,7 @@ pourquoi, avec les mesures.
 |---|---|---|
 | A — intégration PvP | 3 min 31 (`-n 6 --dist load`, mesuré 2026-08-05) | déjà dans la vérification large |
 | B — vitest | **4,0 s** — 36 fichiers, 430 tests | **ajoutée le 2026-09-09** |
-| C — Playwright | **27 s** — 14 tests : 11 verts, **2 rouges** (parité front/back), 1 skippé (mesuré 2026-09-09) | **dehors** : les deux invariants ne vérifiaient rien, voir ci-dessous |
+| C — Playwright | **37 s** — 14 tests : **13 verts**, 1 skippé, 0 rouge (mesuré 2026-09-09) | **candidate** : voir ci-dessous |
 
 **Ce que la mesure a trouvé, et qui rendait la couche B rouge par construction.** Avant ce jour,
 `npx vitest run` rendait `Test Files 1 failed | 36 passed (37)` quel que soit l'état du code : le
@@ -40,10 +40,9 @@ La frontière entre les deux harnais est désormais déclarée dans `frontend/vi
 `tests/unit/scripts/test_vitest_collect_scope.py`, qui applique le motif AU DISQUE dans les deux
 sens : aucun spec Playwright collecté par vitest, et aucun test de `src/` laissé hors périmètre.
 
-**La couche C, remise en état le 2026-09-09.** Sur ses 14 tests : **11 passent**, 1 est skippé, et
-**2 échouent** — les deux invariants de parité front/back, pour la raison expliquée juste après.
-Le mur est de **27 s** ; le « 6 min 42 » publié plus tôt le même jour venait de runs pollués par un
-serveur fantôme (défaut n° 4).
+**La couche C, remise en état le 2026-09-09.** Sur ses 14 tests : **13 passent**, 1 est skippé,
+**aucun n'échoue**. Le mur est de **37 s** ; le « 6 min 42 » publié plus tôt le même jour venait de
+runs pollués par un serveur fantôme (défaut n° 4).
 
 ⚠️ **Les deux invariants de parité front/back étaient des VERTS VACANTS** — et le rester aurait été
 pire que leur absence, puisqu'on les croyait protecteurs. `greenCircleUnitIds ⊆
@@ -55,11 +54,25 @@ passaient sans jamais comparer, pour trois raisons cumulées :
 3. le pool était lu au niveau racine, alors que l'API l'enveloppe dans `game_state` : `undefined`,
    puis `?? []`, donc une inclusion vraie **par construction** (∅ ⊆ tout).
 
-Les trois sont corrigés, et les six abandons muets du fichier sont devenus des assertions. Il reste
-un quatrième défaut, de **conception** : ces tests s'intitulent « en phase move » et ne font jamais
-avancer la partie jusqu'à cette phase — la partie servie est en phase `command`, tour 1, avec un
-`move_activation_pool` légitimement vide. **Ils sont donc rouges**, et c'est l'état honnête : la
-parité front/back n'a jamais été vérifiée par personne.
+Les trois sont corrigés, et les six abandons muets du fichier sont devenus des assertions.
+
+Un quatrième défaut suivait, de **conception** : ces tests s'intitulent « en phase move » et ne
+faisaient rien pour y arriver — la partie servie est en phase `command`, avec un
+`move_activation_pool` légitimement vide. `amenerEnPhaseMove()` la fait donc avancer **par
+l'interface** (bouton « End Phase »), et non par un appel d'API : ces tests existent pour vérifier
+que l'affichage correspond au moteur, y arriver en cliquant teste au passage que ce chemin-là
+fonctionne.
+
+Restait un dernier obstacle, que Playwright nommait depuis deux runs sans qu'on l'écoute —
+`<div role="presentation"> … intercepts pointer events`. La capture d'échec l'a montré d'un coup :
+**le jeu ouvre deux modales au démarrage**, la décision Waaagh! de la phase command (08.04, ORKS) et
+le dialogue d'enregistrement du replay. Leur fond intercepte tous les clics. Y répondre fait partie
+du parcours utilisateur — une partie ne quitte pas la phase command tant que la décision de faction
+n'est pas prise — d'où `fermerLesDecisionsEnAttente()`, qui choisit les réponses **neutres**
+(« Skip », « Cancel ») pour ne rien changer à ce que les tests mesurent.
+
+**Les deux invariants comparent désormais des ensembles non vides**, et l'assertion
+`pool.length > 0` qui les faisait échouer est satisfaite, pas retirée.
 
 Que le fichier n'ait jamais fonctionné est daté, pas supposé : `frontend/package.json` déclare
 `"type": "module"` depuis le **2025-09-07** (`16937e82`), et `global-setup.ts` a été écrit avec
@@ -77,9 +90,9 @@ jeton non expiré pour construire le `storageState`. Ce fichier n'étant pas ver
 tourne pas dans un worktree neuf sans qu'on y copie la base, et jamais sur une machine où personne
 ne s'est connecté au front.
 
-**Quatre défauts trouvés en la lançant, dont trois corrigés ici.** Aucun n'était visible tant qu'elle
-ne s'exécutait pas — c'est la démonstration la plus nette de ce que vaut un dispositif de test qu'on
-n'exécute jamais :
+**Les défauts d'environnement et de harnais, tous corrigés.** Aucun n'était visible tant que la
+couche ne s'exécutait pas — c'est la démonstration la plus nette de ce que vaut un dispositif de
+test qu'on n'exécute jamais :
 
 1. `global-setup.ts` utilisait `__dirname`, **indéfini en module ES** (`frontend/package.json`
    déclare `"type": "module"`). Le setup mourait avant le premier test. **Corrigé** ;
@@ -119,10 +132,10 @@ baselines ne sont **pas versionnées** : une image de 810 Ko qui fige le rendu d
 précédent de LA machine où il tourne, et non à une référence commune. Le versionner reste un choix
 ouvert.
 
-**Bilan.** Sept défauts trouvés en exécutant cette couche pour la première fois ; six corrigés. Le
-septième — les invariants de parité qui ne construisent pas la phase move qu'ils prétendent
-vérifier — reste ouvert, et les deux tests concernés sont **rouges**. C'est délibéré : un rouge qui
-dit la vérité vaut mieux que le vert vide qu'il remplace.
+**Bilan.** **Huit défauts** trouvés en exécutant cette couche pour la première fois, **tous
+corrigés** — trois d'environnement, deux dans le harnais, trois dans les tests eux-mêmes. Aucun
+n'était visible tant qu'on ne l'exécutait pas ; trois faisaient passer pour verts des tests qui ne
+comparaient rien. La parité entre l'affichage et le moteur est désormais vérifiée pour de bon.
 
 ### Pourquoi `--dist worksteal` (mesuré 2026-07-26)
 

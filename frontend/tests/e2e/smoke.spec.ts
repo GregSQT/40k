@@ -58,6 +58,61 @@ async function lireEtatDePartie(
   return etat!;
 }
 
+/**
+ * Amène la partie jusqu'à la phase `move`, PAR L'INTERFACE.
+ *
+ * POURQUOI CE HELPER EXISTE (mesuré le 2026-09-09). Les deux tests de parité front/back
+ * s'intitulent « en phase move » et ne faisaient rien pour y arriver : la partie servie démarre en
+ * phase `command`, où `move_activation_pool` est VIDE — légitimement. Ils comparaient donc l'ensemble
+ * vide, ce qui est vrai par construction, et passaient sans rien vérifier.
+ *
+ * PAR L'INTERFACE et non par l'API : ces tests sont la seule vérification automatisée que
+ * l'affichage correspond à ce que le moteur autorise. Y arriver en cliquant « End Phase » teste au
+ * passage que ce chemin-là fonctionne ; y arriver par un appel direct testerait la parité d'un état
+ * que l'utilisateur n'a peut-être aucun moyen d'atteindre.
+ *
+ * La boucle est BORNÉE et son épuisement est un échec : une phase qui n'avance pas est une panne,
+ * pas une raison de comparer des ensembles vides.
+ */
+async function fermerLesDecisionsEnAttente(page: import("@playwright/test").Page): Promise<void> {
+  // Le jeu OUVRE des modales au démarrage, et leur fond intercepte tous les clics — Playwright
+  // le disait sans qu'on l'écoute : « <div role="presentation"> … intercepts pointer events ».
+  // La capture d'échec du 2026-09-09 les montre : la décision Waaagh! de la phase command (08.04,
+  // ORKS, boutons « Skip » / « Call the Waaagh! ») et le dialogue d'enregistrement du replay
+  // (« Le replay nécessite l'enregistrement de la partie, qui n'est pas activé », Cancel/Activate).
+  //
+  // Y répondre fait PARTIE du parcours utilisateur : une partie ne quitte pas la phase command
+  // tant que la décision de faction n'est pas prise. On choisit les réponses NEUTRES — passer la
+  // Waaagh!, ne pas activer l'enregistrement — pour ne rien changer à ce que les tests mesurent.
+  for (const libelle of ["Skip", "Cancel"]) {
+    const bouton = page.getByRole("button", { name: libelle, exact: true });
+    if (await bouton.isVisible().catch(() => false)) {
+      await bouton.click();
+      await page.waitForTimeout(300);
+    }
+  }
+}
+
+async function amenerEnPhaseMove(page: import("@playwright/test").Page): Promise<void> {
+  const finDePhase = page.locator('[data-testid="end-phase-btn"]');
+  await finDePhase.waitFor({ timeout: 30_000 });
+
+  for (let essai = 0; essai < 4; essai += 1) {
+    await fermerLesDecisionsEnAttente(page);
+    const etat = await lireEtatDePartie(page);
+    if (etat.phase === "move") return;
+    await finDePhase.click();
+    // Laisser l'aller-retour serveur puis le rendu PIXI se faire avant de relire la phase.
+    await page.waitForTimeout(600);
+  }
+
+  const etatFinal = await lireEtatDePartie(page);
+  expect(
+    etatFinal.phase,
+    "la phase n'atteint pas `move` après 4 clics sur « End Phase » : le bouton ou le moteur est en panne"
+  ).toBe("move");
+}
+
 // ---------------------------------------------------------------------------
 // T12-1 — Smoke : board affiché, canvas non vide
 // ---------------------------------------------------------------------------
@@ -219,8 +274,10 @@ test.describe("T12-4 — Cercles verts == pool backend", () => {
     await page.goto(GAME_URL);
     await page.locator("canvas").first().waitFor({ timeout: 30_000 });
 
-    // Attendre la phase move et les boutons
+    // Attendre les boutons du tracker, PUIS amener réellement la partie en phase move : la
+    // présence du bouton `phase-btn-move` ne dit pas qu'on Y EST, seulement qu'il est affiché.
     await page.locator('[data-testid="phase-btn-move"]').waitFor({ timeout: 30_000 });
+    await amenerEnPhaseMove(page);
 
     const isHookEnabled = await page.evaluate(() => {
       return typeof (window as Record<string, unknown>).__W40K_TEST__ !== "undefined";
@@ -314,6 +371,10 @@ test.describe("T12-6 — Preview move hexes via hook", () => {
     if (!isHookEnabled) {
       test.skip(true, "VITE_TEST_HOOKS=1 non activé");
     }
+
+    // Sans cette étape, la partie est en phase `command` : aucune unité n'est activable, donc
+    // aucune prévisualisation à comparer (cf. `amenerEnPhaseMove`).
+    await amenerEnPhaseMove(page);
 
     // Chaque abandon silencieux de ce test était un vert vacant : il sortait sans assertion et
     // comptait comme réussi. Une précondition non remplie est désormais un ÉCHEC — soit le
