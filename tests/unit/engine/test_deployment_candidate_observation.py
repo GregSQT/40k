@@ -38,7 +38,11 @@ from engine.action_decoder import (
 )
 from engine.combat_utils import calculate_hex_distance
 from engine.hex_utils import _hex_center
-from engine.macro_intents import DEPLOY_SLOT_BASE, DEPLOY_SLOT_COUNT
+from engine.macro_intents import (
+    DEPLOY_SLOT_BASE,
+    DEPLOY_SLOT_COUNT,
+    DEPLOY_STRATEGY_COUNT,
+)
 from engine.observation_entities import (
     DEPLOY_CAND_BIN_FIELDS,
     N_DEPLOY_SLOTS,
@@ -144,6 +148,53 @@ def test_the_observation_describes_exactly_one_candidate_per_deployment_action()
     assert DEPLOY_CAND_BIN_FIELDS[-1] == "present", (
         "le masque `present` doit être le DERNIER champ du registre (convention §0.37) : "
         "l'extracteur le lit en `[..., -1]`"
+    )
+
+
+def test_no_two_strategies_rank_the_real_zone_identically():
+    """Sur une VRAIE zone, deux stratégies ne classent jamais les hexes dans le même ordre.
+
+    Le pendant du verrou en isolation (`test_deployment_slot_order_strategies.py`), qui compare
+    deux tuples de clés nommées ; ici c'est le classement des ~15 000 hexes réels de la zone qui
+    est comparé, donc y compris les clés qu'une carte donnée rend constantes.
+
+    Le défaut mesuré avant correction : « sûr » (6) et « arrière-garde » (10) rendaient l'ORDRE
+    ENTIER identique et posaient donc le même hexe — (216, 296) sur un scénario, (11, 295) sur
+    l'autre. L'agent avait sept boutons dont deux indiscernables.
+
+    ⚠️ CE QUI N'EST PAS EXIGÉ, et pourquoi : que les sept PREMIERS choix soient distincts. Deux
+    intentions différentes peuvent légitimement désigner le même hexe si la géométrie s'y prête —
+    mesuré sur `scenario_training_armageddon2`, « pression sur objectif » (5) et « centre hub »
+    (9) y convergent sur (109, 215), l'hexe le plus proche d'un objectif étant aussi le plus
+    central, alors que leurs ordres complets diffèrent. Exiger sept hexes distincts ferait
+    dépendre le verrou du dessin de la carte au lieu de la conception des stratégies.
+    """
+    eng = _load()
+    gs = eng.game_state
+    decoder = eng.action_decoder
+    deployer = decoder._get_current_deployer(gs)
+    unit = decoder.get_deployment_active_unit(gs)
+    valid_hexes = decoder._get_valid_deployment_hexes(gs, deployer, str(unit["id"]))
+    assert len(valid_hexes) > 100, (
+        f"zone de {len(valid_hexes)} hexes — trop petite pour que deux ordres puissent différer"
+    )
+
+    columns = decoder._deployment_score_columns(gs, deployer, valid_hexes)
+    orders = {
+        DEPLOY_SLOT_BASE + offset: decoder._deployment_slot_order(
+            columns, DEPLOY_SLOT_BASE + offset
+        ).tolist()
+        for offset in range(DEPLOY_STRATEGY_COUNT)
+    }
+    duplicates = [
+        (a, b)
+        for i, a in enumerate(sorted(orders))
+        for b in sorted(orders)[i + 1:]
+        if orders[a] == orders[b]
+    ]
+    assert not duplicates, (
+        f"stratégies au classement rigoureusement identique : {duplicates} — ce sont des "
+        f"actions redondantes, quel que soit l'hexe qu'elles finissent par poser"
     )
 
 

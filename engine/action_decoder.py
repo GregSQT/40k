@@ -2597,8 +2597,27 @@ class ActionDecoder:
             keys = (-center_distance, -nearest_objective, -los, -potential_los,
                     progress, -cluster) + tail
         elif action_int == DEPLOY_SLOT_BASE + 6:
-            # safe_rear : rester loin des ennemis (arrière-garde), tout en gardant un objectif proche.
-            keys = (nearest_enemy, -nearest_objective, -nearest_ally,
+            # safe_rear : TENIR UN OBJECTIF DEPUIS L'ARRIÈRE — l'objectif d'abord, le recul
+            # ensuite. C'est ce que la ligne d'à côté promettait déjà en mots (« loin des
+            # ennemis, tout en gardant un objectif proche ») sans que l'ordre des clés le rende.
+            #
+            # POURQUOI L'OBJECTIF PASSE DEVANT `nearest_enemy` : mené par l'éloignement aux
+            # ennemis, ce tri était le MÊME que celui de « sûr » (+2) — les deux ne différaient
+            # que par `-los, -potential_los` en tête du second, et ces deux colonnes valent zéro
+            # partout tant qu'aucun ennemi n'est posé, comme `nearest_ally` tant qu'aucun allié
+            # ne l'est (cf. `_deployment_score_columns`). Deux slots d'action distincts posaient
+            # donc systématiquement le même hexe : mesuré (216, 296) au déploiement et
+            # (219, 299) à l'ingress, aux graines 0/1/2 et sur les deux terrains. L'agent avait
+            # sept boutons dont deux identiques, sans que rien ne lève.
+            #
+            # `-progress` a été essayé d'abord et MESURÉ INSUFFISANT : sur une zone de
+            # déploiement, l'hexe le plus reculé est aussi le plus éloigné des ennemis, donc les
+            # deux tris désignaient encore (216, 296). Il faut un critère qui ne soit pas
+            # colinéaire à l'éloignement, et l'objectif est le seul du registre à l'être — c'est
+            # aussi ce qui distingue une arrière-garde d'un simple retrait : elle TIENT quelque
+            # chose. Le recul reste en second, sinon ce slot doublerait « pression sur objectif »
+            # (+1), qui trie le même objectif par progression AVANT.
+            keys = (-nearest_objective, -progress, nearest_enemy, -nearest_ally,
                     -cluster, -center_distance) + tail
         else:
             raise ValueError(f"Invalid deployment action: {action_int}")

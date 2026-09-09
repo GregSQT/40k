@@ -2,11 +2,16 @@
 
 Pas de moteur complet : la méthode est statique et ne dépend que de numpy.
 Préférences vérifiées par mesure (scripts/_probe_slot_order.py) :
-  progress : max (+0,+1,+5)  — absent de +2,+3,+4,+6
+  progress : max (+0,+1,+5), min (+6)  — absent de +2,+3,+4
   nearest_enemy : min (+0,+1), max (+2,+3,+4,+6)  — absent de +5
   nearest_objective : toujours min
   los : toujours min
   center_distance : toujours min
+
+`+6` (arrière-garde) trie par objectif PUIS par recul, et non par éloignement aux ennemis :
+mené par l'éloignement, son tri était identique à celui de `+2` (« sûr ») dès que `los`,
+`potential_los` et `nearest_ally` étaient constants — c'est-à-dire à chaque premier déploiement.
+Voir `TestStrategiesStayDistinct`, qui verrouille la cause plutôt qu'un jeu de valeurs.
 """
 
 import numpy as np
@@ -180,23 +185,118 @@ class TestSlot5CentreHub:
 
 
 # ---------------------------------------------------------------------------
-# +6 : safe_rear — primary = nearest_enemy max (loin des ennemis)
+# +6 : safe_rear — primary = nearest_objective min ; puis progress min (recul)
 # ---------------------------------------------------------------------------
 class TestSlot6SafeRear:
-    def test_nearest_enemy_prime_max(self):
-        # hex 0 le plus loin des ennemis
+    def test_objective_prime_min(self):
+        # hex 1 le plus proche d'un objectif, même s'il n'est ni le plus reculé ni le plus loin
+        # des ennemis : une arrière-garde TIENT quelque chose.
         kw = _neutral(3)
-        kw["nearest_enemy"] = [10.0, 3.0, 1.0]
-        order = _order(_cols(**kw), 6)
-        assert order[0] == 0  # nearest_enemy max = 10
-
-    def test_objective_tiebreak_min(self):
-        # nearest_enemy égal, nearest_objective min wins
-        kw = _neutral(3)
-        kw["nearest_enemy"] = [5.0, 5.0, 5.0]
         kw["nearest_objective"] = [8.0, 1.0, 4.0]
+        kw["nearest_enemy"] = [10.0, 3.0, 5.0]
+        kw["progress"] = [-9.0, 2.0, -4.0]
         order = _order(_cols(**kw), 6)
         assert order[0] == 1  # nearest_objective min = 1
+
+    def test_progress_tiebreak_min(self):
+        # objectif égal : le plus RECULÉ gagne — c'est ce qui sépare ce slot de « pression sur
+        # objectif » (+1), qui trie le même objectif par progression maximale.
+        kw = _neutral(3)
+        kw["nearest_objective"] = [5.0, 5.0, 5.0]
+        kw["progress"] = [2.0, -7.0, 1.0]
+        order = _order(_cols(**kw), 6)
+        assert order[0] == 1  # progress min = -7
+
+    def test_nearest_enemy_breaks_ties_after_objective_and_progress(self):
+        # objectif ET recul égaux : l'éloignement aux ennemis départage, comme avant.
+        kw = _neutral(3)
+        kw["nearest_objective"] = [5.0, 5.0, 5.0]
+        kw["progress"] = [-3.0, -3.0, -3.0]
+        kw["nearest_enemy"] = [4.0, 9.0, 1.0]
+        order = _order(_cols(**kw), 6)
+        assert order[0] == 1  # nearest_enemy max = 9
+
+    def test_does_not_shadow_objective_pressure(self):
+        """+1 et +6 partagent l'objectif comme premier critère, jamais le même hexe.
+
+        Les deux visent l'objectif ; ce qui les sépare est le SENS de la progression — avancer
+        pour la pression (+1), reculer pour l'arrière-garde (+6). Sans ce second critère opposé,
+        le correctif de la collision +2/+6 en aurait simplement créé une autre.
+        """
+        kw = _neutral(4)
+        kw["nearest_objective"] = [2.0, 2.0, 9.0, 9.0]
+        kw["progress"] = [6.0, -6.0, 1.0, -1.0]
+        assert int(_order(_cols(**kw), 1)[0]) == 0  # objectif proche ET avancé
+        assert int(_order(_cols(**kw), 6)[0]) == 1  # objectif proche ET reculé
+
+
+# ---------------------------------------------------------------------------
+# Deux stratégies ne peuvent pas désigner le même hexe
+# ---------------------------------------------------------------------------
+class TestStrategiesStayDistinct:
+    """« Sûr » (+2) et « arrière-garde » (+6) ne désignent pas le même hexe.
+
+    LE CAS RÉEL, et non un jeu de données choisi pour tomber juste : au premier déploiement,
+    aucun ennemi ni allié n'est encore posé, donc `los`, `potential_los` et `nearest_ally` sont
+    CONSTANTS sur toute la zone (`_deployment_score_columns` met `nearest_ally` à zéro partout
+    quand aucun allié n'est déployé). Les deux tuples de tri ne différaient alors que par des
+    clés constantes, donc ils coïncidaient : mesuré sur le scénario `reserves_20_fixture1`,
+    les slots 6 et 10 posaient tous deux (216, 296) au déploiement et (219, 299) à l'ingress,
+    aux trois graines et sur les deux terrains.
+
+    L'agent disposait de sept actions dont deux rigoureusement redondantes, sans que rien ne
+    lève — masque valide et plan exécutable des deux côtés.
+    """
+
+    def test_safe_and_safe_rear_differ_when_los_and_ally_are_constant(self):
+        kw = _neutral(6)
+        # Ce qui est CONSTANT dans un premier déploiement — c'est là toute la cause.
+        kw["los"] = [0.0] * 6
+        kw["potential_los"] = [0.0] * 6
+        kw["nearest_ally"] = [0.0] * 6
+        # Ce qui varie : un fond de zone loin des ennemis, et un hexe sur objectif un peu moins
+        # reculé. « Sûr » doit prendre le premier, « arrière-garde » le second.
+        kw["nearest_enemy"] = [10.0, 9.0, 4.0, 3.0, 2.0, 1.0]
+        kw["nearest_objective"] = [7.0, 0.0, 5.0, 6.0, 8.0, 9.0]
+        kw["progress"] = [-9.0, -7.0, -3.0, -1.0, 2.0, 5.0]
+        kw["cols"] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+        kw["rows"] = [9.0, 7.0, 3.0, 1.0, 2.0, 5.0]
+
+        safe = int(_order(_cols(**kw), 2)[0])
+        safe_rear = int(_order(_cols(**kw), 6)[0])
+        assert safe != safe_rear, (
+            f"« sûr » et « arrière-garde » désignent le même hexe (index {safe}) : deux des sept "
+            f"actions de pose sont redondantes"
+        )
+
+    def test_the_two_tuples_are_not_equal_modulo_constant_keys(self):
+        """La cause STRUCTURELLE, indépendamment des données : les deux tris ne coïncident pas.
+
+        Le test ci-dessus prouve la séparation sur un jeu de valeurs ; celui-ci prouve qu'elle
+        ne tient pas à ce jeu. On annule TOUTES les clés que le premier déploiement rend
+        constantes, et on compare les ordres complets sur des valeurs aléatoires : deux tris qui
+        ne diffèrent que par des clés neutralisées rendent la même permutation.
+        """
+        rng = np.random.default_rng(20260909)
+        for _ in range(20):
+            n = 12
+            kw = _neutral(n)
+            kw["los"] = [0.0] * n
+            kw["potential_los"] = [0.0] * n
+            kw["nearest_ally"] = [0.0] * n
+            kw["nearest_enemy"] = rng.integers(0, 20, n).astype(float).tolist()
+            kw["nearest_objective"] = rng.integers(0, 20, n).astype(float).tolist()
+            kw["progress"] = rng.integers(-20, 20, n).astype(float).tolist()
+            kw["cluster"] = rng.integers(0, 4, n).astype(float).tolist()
+            kw["center_distance"] = rng.integers(0, 12, n).astype(float).tolist()
+            kw["cols"] = rng.integers(0, 12, n).astype(float).tolist()
+            kw["rows"] = rng.integers(0, 12, n).astype(float).tolist()
+            safe = _order(_cols(**kw), 2).tolist()
+            safe_rear = _order(_cols(**kw), 6).tolist()
+            assert safe != safe_rear, (
+                "« sûr » et « arrière-garde » produisent l'ORDRE ENTIER identique : leurs tuples "
+                "de tri ne diffèrent que par des clés que le premier déploiement met à zéro"
+            )
 
 
 # ---------------------------------------------------------------------------
