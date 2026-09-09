@@ -10,7 +10,14 @@
 import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
+
+// `frontend/package.json` déclare `"type": "module"` : ce fichier est un module ES, où `__dirname`
+// N'EXISTE PAS. Mesuré le 2026-09-09, à la première exécution réelle de cette couche : le
+// global-setup mourait sur `ReferenceError: __dirname is not defined in ES module scope` AVANT le
+// premier test, donc la couche C entière n'avait jamais pu s'exécuter depuis sa livraison.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const ROOT = path.resolve(__dirname, "../../..");
 const STORAGE_STATE = path.resolve(__dirname, "../../.auth/session.json");

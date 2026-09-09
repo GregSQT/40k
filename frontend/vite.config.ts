@@ -17,7 +17,15 @@ export default defineConfig({
     open: false, // Ne pas ouvrir automatiquement le navigateur
     proxy: {
       "/api": {
-        target: "http://localhost:5001",
+        // Cible PARAMÉTRABLE, défaut inchangé pour le développement (`npm run dev` → 5001).
+        //
+        // Mesuré le 2026-09-09, à la première exécution réelle de la couche C : le script
+        // `scripts/front_test_all.sh` démarre un backend de test sur 5098 et un Vite sur 5198,
+        // mais le navigateur passait par CE proxy, donc tapait 5001 — un port où rien n'écoute
+        // pendant les tests. Tous les tests E2E échouaient sur `ECONNREFUSED 127.0.0.1:5001`,
+        // quel que soit l'état de l'application. `PW_BASE_URL` ne corrigeait rien : il ne sert
+        // qu'aux appels que Playwright émet lui-même, jamais à ceux de la page.
+        target: process.env.VITE_API_TARGET ?? "http://localhost:5001",
         changeOrigin: true,
       },
     },

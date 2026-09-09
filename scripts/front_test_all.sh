@@ -160,8 +160,15 @@ if [ "$SKIP_C" = false ]; then
 
   cd "$FRONTEND_DIR"
 
-  # Démarrer le frontend Vite avec le hook de test activé
-  VITE_TEST_HOOKS=1 VITE_PORT=$FRONT_C npx vite --port "$FRONT_C" &
+  # Démarrer le frontend Vite avec le hook de test activé.
+  #
+  # `VITE_API_TARGET` fait pointer le proxy `/api` vers le backend de CETTE couche (port 5098) au
+  # lieu du 5001 de développement. Sans lui, le navigateur tapait un port où rien n'écoute pendant
+  # les tests : tous les scénarios échouaient sur `ECONNREFUSED 127.0.0.1:5001`, quel que soit
+  # l'état de l'application (mesuré le 2026-09-09, première exécution réelle de cette couche).
+  # `PW_BASE_URL` ne suffit pas : il ne gouverne que les requêtes émises par Playwright lui-même.
+  VITE_TEST_HOOKS=1 VITE_PORT=$FRONT_C VITE_API_TARGET="http://127.0.0.1:$PORT_C" \
+    npx vite --port "$FRONT_C" &
   VITE_PID=$!
   PIDS_TO_KILL+=("$VITE_PID")
   wait_for_http "http://localhost:$FRONT_C" 60
