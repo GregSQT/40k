@@ -105,7 +105,13 @@ def fresh_policy_keys(checkpoint_policy_kwargs):
 # Le test se met en SKIP (pas FAIL) tant que REFERENCE_MODEL n'est pas régénéré avec ces modules.
 # À vider manuellement une fois le checkpoint régénéré (aucun signal automatique).
 _MODULES_EN_ATTENTE = frozenset(
-    {"coherency_query_net", "fight_weapon_query_net", "shoot_weapon_sel_query_net"}
+    {
+        "coherency_query_net",
+        "fight_weapon_query_net",
+        "shoot_weapon_sel_query_net",
+        "fight_weapon_target_net",
+        "shoot_weapon_target_net",
+    }
 )
 
 
