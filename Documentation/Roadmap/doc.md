@@ -56,5 +56,7 @@ Le solde du 2026-08-25 (sept symboles corrigés dans 4 docs) est archivé dans
 
 **Convention** : citer `def <symbole>` ou un `grep` reproductible, jamais un numéro de ligne. La passe 5, `def check_symbol_kinds` (`scripts/check_doc_references.py`), vérifie le genre déclaré ; la passe 2, `def check_links` (`scripts/check_doc_references.py`), contrôle les liens morts.
 
+**Exécution du script** (corrigé le 2026-09-09, `88817be7`) : `check_doc_references.py` sortait en code 1 sur `ModuleNotFoundError: No module named config_loader` quand on le lançait par son chemin, comme CLAUDE.md le décrit — Python met `scripts/` en tête de `sys.path`, pas la racine où vit `config_loader`. L'échec arrivait APRÈS l'affichage de tous les contrôles, donc la sortie ressemblait à un succès jusqu'à sa dernière ligne. `def agent_profiles` applique désormais le patron d'insertion/retrait de ROOT déjà utilisé par `def expected_obs_size`. Aucun test ne l'attrapait : tous chargent le module par `charger_script`, qui a déjà la racine sur le chemin ; deux verrous en sous-processus ont été ajoutés.
+
 **Couverture du script** : `check_doc_references.py` passe 4 (ANCRES) couvre `Documentation/Roadmap/`, les contrats permanents, le corpus chantiers (`Documentation/Chantiers/` + `Documentation/Archives/chantiers/`) et désormais `Documentation/Reference/` (P2 livré le 2026-08-27). Passe LIENS sur tout le corpus vivant également active depuis P2.
 
