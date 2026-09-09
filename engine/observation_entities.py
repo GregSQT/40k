@@ -27,7 +27,7 @@ porte déjà en partie.
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 #: Clé du cache des sous-tenseurs d'armes dans le `game_state`
 #: (posée par `ObservationBuilder._encode_entity_weapons`, vidée par `build_units_cache`).
@@ -252,6 +252,75 @@ UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     "secure_objective_on_control",
     "oc_bonus",
 )
+
+class OncePerBattleSpent(NamedTuple):
+    """Où lire, dans `game_state`, qu'un effet 1×/partie n'est PLUS EN VIGUEUR.
+
+    `spent_key` porte les escouades qui l'ont dépensé. `still_in_effect_key` est l'exception :
+    une capacité peut être dépensée ET continuer d'agir — Finest Hour consomme son usage à la
+    première activation, mais accorde [DEVASTATING WOUNDS] jusqu'à la fin de cette phase de
+    combat. Le prédicat du moteur (`shared_utils`, `attack_sequence`) est donc à DEUX ensembles,
+    et l'observation ne peut pas n'en lire qu'un sans mentir pendant toute une phase.
+
+    `still_in_effect_phase` est obligatoire dès qu'il y a une seconde clé, et n'est pas une
+    précaution : `finest_hour_active_this_phase` n'est purgé qu'à l'ENTRÉE de la fight phase
+    suivante (`fight_handlers.fight_v11_start`), donc il reste peuplé pendant les phases de
+    commandement, mouvement et tir intermédiaires. Le moteur ne s'en aperçoit pas — il ne le lit
+    qu'en combat, où la purge a déjà eu lieu ; l'observation, elle, est construite à CHAQUE step.
+    """
+
+    spent_key: str
+    still_in_effect_key: Optional[str] = None
+    still_in_effect_phase: Optional[str] = None
+
+
+#: Effets 1×/PARTIE, et les clés de `game_state` qui disent s'ils sont encore en vigueur.
+#: Registre du filtre d'observation : tant qu'un effet n'y figure pas, sa capacité reste écrite
+#: dans les `ability_ids` d'une escouade qui ne peut plus l'employer, et l'agent perçoit un
+#: avantage éteint.
+#:
+#: Le trou était là : `once_per_battle_melee_buff` était effacé par une lecture de
+#: `finest_hour_used` écrite EN DUR dans le contexte d'observation, alors que
+#: `return_destroyed_models` (Grot Orderly, même mention « 1×/partie » dans
+#: `config/unit_rules.json`) ne l'était par rien — son `obs_id` restait visible après
+#: restitution. Cette table remplace ce cas particulier : le filtre ne connaît plus aucune règle
+#: par son nom.
+#:
+#: N'entre en `spent_key` qu'un ensemble d'`id` d'ESCOUADE DÉFINITIF pour la partie. Un ensemble
+#: vidé en cours de partie — `_grot_orderly_skipped_this_phase`, remis à zéro à chaque début de
+#: phase de commandement — décrit un renoncement temporaire, pas une dépense : l'inscrire
+#: rendrait la capacité invisible un tour puis la ferait réapparaître.
+ONCE_PER_BATTLE_SPENT_STATE_KEYS: Dict[str, OncePerBattleSpent] = {
+    # Finest Hour (CaptainRelicShield) — les DEUX ensembles sont posés par `fight_handlers` à la
+    # première activation, et c'est le second qui maintient [DEVASTATING WOUNDS] jusqu'à la fin
+    # de la phase.
+    "once_per_battle_melee_buff": OncePerBattleSpent(
+        "finest_hour_used", "finest_hour_active_this_phase", "fight"
+    ),
+    # Grot Orderly (PainBoy) — posé par `command_handlers.apply_returned_models_placement`, et
+    # relu par le balayage de la phase de commandement pour ne jamais reproposer la capacité.
+    # Aucune rémanence : la restitution est instantanée, la capacité s'éteint avec son usage.
+    "return_destroyed_models": OncePerBattleSpent("return_destroyed_models_used"),
+}
+
+_extra_once_per_battle = set(ONCE_PER_BATTLE_SPENT_STATE_KEYS) - set(UNIT_RULE_EFFECT_IDS)
+if _extra_once_per_battle:
+    raise ValueError(
+        f"ONCE_PER_BATTLE_SPENT_STATE_KEYS reference des effets absents de "
+        f"UNIT_RULE_EFFECT_IDS (rien ne les observerait, donc rien a effacer) : "
+        f"{sorted(_extra_once_per_battle)}"
+    )
+
+_phaseless_still_in_effect = sorted(
+    rule_id for rule_id, spec in ONCE_PER_BATTLE_SPENT_STATE_KEYS.items()
+    if (spec.still_in_effect_key is None) != (spec.still_in_effect_phase is None)
+)
+if _phaseless_still_in_effect:
+    raise ValueError(
+        f"ONCE_PER_BATTLE_SPENT_STATE_KEYS : `still_in_effect_key` et `still_in_effect_phase` "
+        f"vont par paire — sans la phase, un ensemble non purge ferait reapparaitre la capacite "
+        f"hors de la phase ou elle agit : {_phaseless_still_in_effect}"
+    )
 
 #: Effets qu'un CANDIDAT DE DÉCISION peut accorder — sous-ensemble STRICT de
 #: `UNIT_RULE_EFFECT_IDS`, et registre PROPRE du bloc `decision_options_bin`.
