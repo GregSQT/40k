@@ -88,6 +88,50 @@ wait_for_http() {
   done
 }
 
+prerequis_couche_c() {
+  # « JE NE PEUX PAS JUGER » N'EST PAS « C'EST CASSÉ ».
+  #
+  # La couche C exige trois choses que le dépôt ne porte pas : le paquet `@playwright/test`, un
+  # navigateur téléchargé, et une SESSION VALIDE dans `config/users.db` — que `global-setup.ts`
+  # lit pour construire son `storageState`, et qui n'existe que si quelqu'un s'est connecté au
+  # front. Aucune des trois n'est une régression du code.
+  #
+  # Sans cette distinction, la couche entrait dans la vérification large en rendant un ROUGE sur
+  # toute machine neuve : un rouge permanent qu'on apprend à ignorer, puis à contourner. C'est
+  # exactement ce que ce dépôt a déjà vécu avec la couche B, rouge par construction pendant des
+  # semaines. Un prérequis manquant se DIT, bruyamment, et n'échoue pas.
+  local manquant=""
+  [ -d "$FRONTEND_DIR/node_modules/@playwright/test" ] || manquant="@playwright/test"
+  if [ -z "$manquant" ] && ! ls "$HOME/.cache/ms-playwright"/chromium* >/dev/null 2>&1; then
+    manquant="le navigateur Chromium"
+  fi
+  if [ -z "$manquant" ] && ! "$VENV" -c "
+import sqlite3, sys, time
+try:
+    c = sqlite3.connect('$REPO/config/users.db')
+    n = c.execute('SELECT COUNT(*) FROM sessions WHERE expires_at > ?', (int(time.time()),)).fetchone()[0]
+except Exception:
+    n = 0
+sys.exit(0 if n else 1)
+" 2>/dev/null; then
+    manquant="une session valide dans config/users.db"
+  fi
+
+  if [ -n "$manquant" ]; then
+    RESULT_C="🟠 PRÉREQUIS ABSENT ($manquant)"
+    echo ""
+    echo "════════════════════════════════════════════════════════"
+    echo "  Couche C — NON JUGÉE : $manquant"
+    echo "════════════════════════════════════════════════════════"
+    echo "  Ce n'est PAS un échec de test : la couche n'a pas pu s'exécuter."
+    echo "    npm --prefix frontend install"
+    echo "    npx --prefix frontend playwright install chromium"
+    echo "    se connecter une fois au front pour créer une session"
+    return 1
+  fi
+  return 0
+}
+
 spawn_backend() {
   local port="$1"
   port_libre_ou_echoue "$port" "backend" || return 1
@@ -177,7 +221,7 @@ fi
 # Couche C — Playwright (backend 5098, frontend Vite 5198, VITE_TEST_HOOKS=1)
 # ---------------------------------------------------------------------------
 
-if [ "$SKIP_C" = false ]; then
+if [ "$SKIP_C" = false ] && prerequis_couche_c; then
   echo ""
   echo "════════════════════════════════════════════════════════"
   echo "  Couche C — playwright test"

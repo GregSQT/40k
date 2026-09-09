@@ -21,14 +21,14 @@ npx vitest run
 
 `scripts/front_test_all.sh` orchestre trois couches : **A** `pytest tests/integration/pvp/`,
 **B** `npx vitest run` (jsdom, sans backend), **C** `npx playwright test` (backend 5098 + Vite 5198,
-`VITE_TEST_HOOKS=1`). Seules A et B entrent dans la vérification large de `CLAUDE.md` ; voici
-pourquoi, avec les mesures.
+`VITE_TEST_HOOKS=1`). **Les trois entrent dans la vérification large de `CLAUDE.md`** depuis le
+2026-09-09 ; voici pourquoi, avec les mesures.
 
 | Couche | Mur | Statut |
 |---|---|---|
 | A — intégration PvP | 3 min 31 (`-n 6 --dist load`, mesuré 2026-08-05) | déjà dans la vérification large |
 | B — vitest | **4,0 s** — 36 fichiers, 430 tests | **ajoutée le 2026-09-09** |
-| C — Playwright | **40 s** — **14 verts sur 14** au régime établi (le 1er run d'une machine écrit la baseline visuelle et échoue une fois) | **candidate** : voir ci-dessous |
+| C — Playwright | **45 s** — **14 verts sur 14** | **ajoutée le 2026-09-09**, avec un pré-vol de prérequis |
 
 **Ce que la mesure a trouvé, et qui rendait la couche B rouge par construction.** Avant ce jour,
 `npx vitest run` rendait `Test Files 1 failed | 36 passed (37)` quel que soit l'état du code : le
@@ -91,6 +91,30 @@ jeton non expiré pour construire le `storageState`. Ce fichier n'étant pas ver
 tourne pas dans un worktree neuf sans qu'on y copie la base, et jamais sur une machine où personne
 ne s'est connecté au front.
 
+### Pourquoi la couche C entre malgré ces prérequis — et le pré-vol qui le permet
+
+Trois décisions prises le 2026-09-09, une fois la couche verte et stable :
+
+**1. Elle entre dans la vérification large.** 45 s pour la seule vérification automatisée que
+l'affichage correspond à ce que le moteur autorise : c'est le meilleur rapport de tout le dépôt sur
+le risque « la démo ne marche plus ». La laisser dehors, c'est ce qui lui a permis de rester cassée
+onze mois sans que personne le sache.
+
+**2. Un prérequis absent n'est pas un échec.** `prerequis_couche_c()` vérifie `@playwright/test`, le
+navigateur et la session avant de lancer quoi que ce soit ; s'il en manque un, la couche est
+annoncée **🟠 PRÉREQUIS ABSENT** avec la commande à jouer, et ne touche pas au code de sortie.
+Sans cette distinction, la couche rendrait un rouge permanent sur toute machine neuve — un rouge
+qu'on apprend à ignorer, puis à contourner. C'est précisément ce que ce dépôt a vécu avec la
+couche B, rouge par construction pendant des semaines. Verrouillé par
+`tests/unit/scripts/test_front_test_all_garde_fous.py`, dont un test EXERCE le pré-vol dans un faux
+arbre plutôt que de lire le script.
+
+**3. La baseline de régression visuelle est versionnée.** Elle pèse 810 Ko et fige le rendu d'une
+machine — mais sans référence commune, `toHaveScreenshot` ne compare qu'au rendu précédent de la
+machine où il tourne, c'est-à-dire à rien de partagé, et échoue une fois sur toute machine neuve.
+Le jour où un autre poste rendra une image différente, ce sera une information à traiter, pas du
+bruit à ignorer.
+
 **Les défauts d'environnement et de harnais, tous corrigés.** Aucun n'était visible tant que la
 couche ne s'exécutait pas — c'est la démonstration la plus nette de ce que vaut un dispositif de
 test qu'on n'exécute jamais :
@@ -125,17 +149,12 @@ direct avec le cookie de session mais **sans** l'en-tête `X-W40K-Client`, qu'ex
 authentifiée par cookie. Il recevait 401, hors du `[200, 404]` attendu. Corrigé — c'est la même
 erreur que celle qui m'avait fait suspecter l'authentification pendant le diagnostic.
 
-**Le dernier skip, et la régression visuelle.** Un test se skippait à CHAQUE run : celui qui
+**Le dernier skip.** Un test se skippait à CHAQUE run : celui qui
 vérifie la présence de `window.__W40K_TEST__`. Il était le seul du fichier à ne pas appeler
 `page.goto` — il interrogeait donc l'`about:blank` d'avant navigation, où le hook n'a jamais été
 posé, pendant que ses voisins le lisaient avec succès. Il navigue désormais, et **n'a plus de
 `test.skip`** : ce test a le hook pour SUJET, se skipper quand son sujet est absent revient à ne
-jamais rien vérifier. Le test de *régression visuelle* écrit sa baseline au
-premier run d'une machine puis échoue une fois — comportement normal de `toHaveScreenshot`. Ces
-baselines ne sont **pas versionnées** : une image de 810 Ko qui fige le rendu d'une machine
-(polices, GPU headless) échouerait sur une autre. Conséquence assumée : ce test compare au rendu
-précédent de LA machine où il tourne, et non à une référence commune. Le versionner reste un choix
-ouvert.
+jamais rien vérifier.
 
 **Bilan.** **Onze défauts** trouvés en exécutant cette couche pour la première fois, **tous
 corrigés** — trois d'environnement, deux dans le harnais, trois dans les tests eux-mêmes. Aucun

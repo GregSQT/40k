@@ -15,7 +15,7 @@ du code. Frontière déclarée dans `frontend/vite.config.ts` et verrouillée pa
 `tests/unit/scripts/test_vitest_collect_scope.py`. La couche B (**4,0 s**, 36 fichiers, 430 tests)
 entre dans la vérification large de CLAUDE.md.
 
-## 🟢 Couche C — remise en état le 2026-09-09 : **14 verts sur 14** {#couche-c}
+## ✅ Couche C — remise en état ET intégrée le 2026-09-09 : **14 verts sur 14** {#couche-c}
 
 Playwright installé (paquet + Chromium) et **onze défauts corrigés**, la couche C est verte :
 ses 14 tests s'exécutent tous, plus aucun ne se skippe, et **les 14 passent** — vérifié sur deux
@@ -39,8 +39,12 @@ le terrain.
 ⚠️ Le bilan « 13 rouges, 6 min 42 » publié plus tôt le même jour était **faux** : il venait de runs
 que polluait un Vite orphelin (défaut n° 4 ci-dessous).
 
-**Son entrée dans la vérification large reste à trancher** : 34 s est un coût acceptable, mais la
-couche exige deux serveurs, un navigateur, et une **session valide** dans `config/users.db`.
+**✅ Elle entre dans la vérification large** (décision du 2026-09-09) : 45 s pour la seule
+vérification automatisée de la démo PvP navigateur. Ses prérequis lourds — deux serveurs, un
+navigateur, une **session valide** dans `config/users.db` — sont contrôlés par un **pré-vol** qui
+annonce 🟠 PRÉREQUIS ABSENT sans toucher au code de sortie : « je ne peux pas juger » n'est pas
+« c'est cassé ». La baseline de régression visuelle est désormais **versionnée**. Détail et motifs :
+`Documentation/Reference/outils/tests.md`.
 
 Quatre défauts, dont **trois corrigés** dans `worktree-playwright-couche-c-et-hook` : `__dirname`
 indéfini en module ES dans `global-setup.ts` (le setup mourait avant le premier test) ; le proxy
