@@ -117,8 +117,8 @@ def agent_reward_table(rewards_config: Mapping[str, Any], agent_key: str) -> Map
        (config_loader.py:645). Une empreinte prise a la racine changerait donc avec le MODE, sans
        qu'aucune recompense n'ait bouge — et un garde-fou qui crie a tort finit contourne.
 
-    La sous-table doit etre un objet portant `base_actions`, et non pas seulement un objet non
-    vide. C'est la SEULE section que la production exige nommement, a chaque action d'unite
+    La sous-table doit etre un objet portant une section `base_actions` NON VIDE, et non pas
+    seulement un objet non vide. C'est la SEULE section que la production exige nommement, a chaque action d'unite
     (`RewardCalculator._get_unit_reward_config`, engine/reward_calculator.py:820) : une table qui
     ne l'a pas est une table sur laquelle aucun run ne peut tourner. Le cas frequent n'est pas la
     table vide, c'est le RETRAIT d'une cle — 7 commits sur 90 jours en retirent au moins une. Une
@@ -148,6 +148,14 @@ def agent_reward_table(rewards_config: Mapping[str, Any], agent_key: str) -> Map
             f"({detail}) : `RewardCalculator` l'exige a chaque action d'unite "
             f"(engine/reward_calculator.py:820), le contrat ne peut pas etre etabli sur une table "
             f"que la production ne sait pas lire."
+        )
+    base_actions = table["base_actions"]
+    if not isinstance(base_actions, Mapping) or not base_actions:
+        raise ValueError(
+            f"Table de recompense de l'agent '{agent_key}' : section `base_actions` vide ou d'un "
+            f"type inattendu ({type(base_actions).__name__}), objet non vide attendu. "
+            f"`ai/reward_mapper.py:80` y lit `ranged_attack` des le premier tir : une section "
+            f"creuse tue le run au premier episode, le contrat ne s'ecrit donc pas dessus."
         )
     return table
 
@@ -225,7 +233,8 @@ def _exige_sections(contrat: Mapping[str, Any], origine: str) -> None:
     Une section PRESENTE mais VIDE produit exactement le meme faux diff, et `build_contract` ne
     peut pas en ecrire une : les trois premieres sont lues du code (introspection des registres,
     canaux de grille, familles d'actions), et la quatrieme d'une sous-table de recompense
-    qu'`agent_reward_table` refuse sans `base_actions` — d'ou au moins un chemin de cle. Cette
+    qu'`agent_reward_table` refuse sans une section `base_actions` non vide — d'ou au moins un
+    chemin de cle. Cette
     garantie a longtemps ete ARGUMENTEE ici (« `RewardCalculator` exige deja `base_actions` ») sans
     etre TENUE par le code : une sous-table amputee de cette section passait a l'ecriture, et le
     defaut ne se voyait qu'en cours d'episode, un run plus tard. Elle est desormais verifiee a la

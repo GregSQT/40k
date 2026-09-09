@@ -129,6 +129,18 @@ def test_une_sous_table_sans_base_actions_est_refusee_a_l_ECRITURE() -> None:
         build_contract({AGENT: {"description": "note de roster", "win": 10.0}}, AGENT)
 
 
+@pytest.mark.parametrize("section", [{}, [], "wait", 3.0, None])
+def test_une_section_base_actions_vide_est_refusee_a_l_ECRITURE(section: Any) -> None:
+    """Présente mais creuse, la section ne vaut pas mieux qu'absente — et le contrat, lui, passait.
+
+    `_chemins_de_cles({"base_actions": {}})` rend un chemin : l'empreinte n'est pas vide, donc rien
+    n'arrêtait l'écriture. La production, elle, lit `base_actions["ranged_attack"]` au premier tir
+    (ai/reward_mapper.py:80) et lève. Même asymétrie que pour la section absente, un cran plus bas.
+    """
+    with pytest.raises(ValueError, match="base_actions"):
+        build_contract({AGENT: {"base_actions": section, "win": 10.0}}, AGENT)
+
+
 def test_l_ecriture_du_contrat_ne_produit_jamais_ce_que_la_relecture_refuse(tmp_path) -> None:
     """Bout en bout, sur les deux appels réels : `--new` écrit, la reprise relit.
 
