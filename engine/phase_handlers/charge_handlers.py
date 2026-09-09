@@ -6464,6 +6464,7 @@ def arm_charge_placement_decision(
     """
     from engine.phase_handlers.shared_utils import charge_build_valid_plan
     from engine.agent_decision import set_pending_agent_decision
+    from engine.observation_entities import decision_option_cont_row
 
     plans: List[List[Tuple[str, int, int, int]]] = [plan_0]
     for _k in range(1, CHARGE_PLACEMENT_INTENT_COUNT):
@@ -6502,10 +6503,10 @@ def arm_charge_placement_decision(
             min(_calculate_hex_distance(_cc, _cr, _ec, _er) for _ec, _er in _nontgt_positions)
             if _nontgt_positions else _board_diag
         )
-        options_cont.append([
-            min(_obj_d / _board_diag, 1.0),
-            min(_nt_d / _board_diag, 1.0),
-        ])
+        options_cont.append(decision_option_cont_row({
+            "obj_dist_norm": min(_obj_d / _board_diag, 1.0),
+            "nontgt_dist_norm": min(_nt_d / _board_diag, 1.0),
+        }))
 
     game_state[CHARGE_PLACEMENT_PENDING_KEY] = {
         "squad_id": str(squad_id),

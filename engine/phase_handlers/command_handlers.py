@@ -644,6 +644,7 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
     """
     from engine.agent_decision import set_pending_agent_decision
     from engine.combat_utils import resolve_dice_value
+    from engine.observation_entities import decision_option_cont_row
     from engine.phase_handlers.shared_utils import unit_has_rule_effect, is_unit_alive
 
     squad_cache = require_key(game_state, "squad_cache")
@@ -698,6 +699,21 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
                 "d3": int(d3),
                 "destroyed": int(destroyed),
             }
+            _profile_values = {
+                profile: int(require_key(archived[indices[0]], "VALUE"))
+                for profile, indices in profiles.items()
+            }
+            # Borne de normalisation INTRINSEQUE au choix : la VALUE d'une figurine n'a pas de
+            # maximum reglementaire, et en inventer un figerait l'echelle sur le roster du jour.
+            # Rapportee au profil le plus cher PROPOSE, la colonne dit exactement ce que l'agent
+            # arbitre — « celui-ci vaut la moitie de celui-la ».
+            _max_value = max(_profile_values.values())
+            if _max_value <= 0:
+                raise ValueError(
+                    f"returned_models_profile: escouade {unit_id} — VALUE nulle ou negative sur "
+                    f"tous les profils detruits ({_profile_values}). La VALUE vient du roster ; "
+                    f"une figurine sans valeur ne peut pas etre arbitree."
+                )
             set_pending_agent_decision(
                 game_state,
                 decision_type="returned_models_profile",
@@ -713,10 +729,21 @@ def _apply_return_destroyed_models(game_state: Dict[str, Any], current_player: i
                         "declines": False,
                         "payload": {
                             "profile": profile,
-                            "value": int(require_key(archived[indices[0]], "VALUE")),
+                            "value": _profile_values[profile],
                             "count": len(indices),
                         },
                     }
+                    for profile, indices in profiles.items()
+                ],
+                # Les MEMES deux grandeurs, cote observation. Sans elles les candidats sortaient
+                # tous a `present=1` et rien d'autre : l'agent tirait le profil au sort.
+                options_cont=[
+                    decision_option_cont_row({
+                        "profile_value_norm": _profile_values[profile] / _max_value,
+                        # Borne au quota : au-dela de `to_restore`, un profil de plus ne change
+                        # rien a ce qui revient sur la table.
+                        "profile_count_norm": min(len(indices) / to_restore, 1.0),
+                    })
                     for profile, indices in profiles.items()
                 ],
             )
@@ -837,6 +864,7 @@ def _arm_returned_placement(
             "d3": int(d3),
             "destroyed": int(destroyed),
         }
+        _offered = [intent for intent in RETURNED_PLACEMENT_INTENTS if intent in plans]
         set_pending_agent_decision(
             game_state,
             decision_type="returned_models_placement",
@@ -849,8 +877,13 @@ def _arm_returned_placement(
                     "declines": False,
                     "payload": {"intent": intent},
                 }
-                for intent in RETURNED_PLACEMENT_INTENTS
-                if intent in plans
+                for intent in _offered
+            ],
+            # Sans ces traits, les trois intentions sortaient a `present=1` et rien d'autre :
+            # l'etiquette « toward_enemy » n'est ecrite dans AUCUN scalaire d'observation.
+            options_cont=[
+                _returned_placement_cont(game_state, current_player, plans[intent])
+                for intent in _offered
             ],
         )
         return PlacementResult.PENDING
@@ -859,6 +892,74 @@ def _arm_returned_placement(
         game_state, squad_id, next(iter(distinct)), selected, d3, destroyed
     )
     return PlacementResult.APPLIED
+
+
+def _returned_placement_cont(
+    game_state: Dict[str, Any], player: int, cells: Sequence[Tuple[int, int]]
+) -> List[float]:
+    """Traits continus d'UN plan de placement rendu : distances de son centroïde, normalisées.
+
+    JUMEAU de `arm_charge_placement_decision` (L10), et volontairement : les deux décisions
+    posent la même question — « où poser ces figurines » — et une intention n'est PAS ce qui la
+    distingue pour l'agent. Un one-hot de `RETURNED_PLACEMENT_INTENTS` lui aurait fait apprendre
+    trois étiquettes ; les distances lui disent ce que les étiquettes valent SUR CE PLATEAU, et
+    généralisent à une intention ajoutée sans colonne de plus.
+
+    `dist_enemy_norm` est la colonne de `allocation_model` : même grandeur (distance du candidat à
+    l'ennemi le plus proche), même normalisation, donc même colonne — c'est la règle du registre.
+    """
+    from engine.game_state import objective_hex_sets
+    from engine.combat_utils import calculate_hex_distance
+    from engine.observation_entities import decision_option_cont_row
+    from engine.spatial_relations import enemy_entries_on_battlefield
+
+    if not cells:
+        raise ValueError(
+            "_returned_placement_cont: plan de placement vide — `_returned_placement_plans` "
+            "n'expose que des plans effectivement posables."
+        )
+    board_diag = max(
+        int(require_key(game_state, "board_cols")) + int(require_key(game_state, "board_rows")), 1
+    )
+    centroid_c = sum(int(c) for c, _ in cells) / len(cells)
+    centroid_r = sum(int(r) for _, r in cells) / len(cells)
+    cc, cr = int(round(centroid_c)), int(round(centroid_r))
+
+    objectives = [h for zone in objective_hex_sets(game_state) for h in zone]
+    # Filtre HORS TABLE obligatoire (`enemy_entries_on_battlefield`) : une escouade en réserves
+    # stratégiques (20.01) est VIVANTE dans le cache mais posée sur la sentinelle (-1,-1). Sans
+    # ce filtre elle devient l'ennemi « le plus proche » de tous les plans et INVERSE l'ordre
+    # des intentions — mesuré sur le fixture de `test_returned_models_placement` : les distances
+    # passent de {toward 0.1667, objective 0.2, away 0.2333} à {0.15, 0.1667, 0.1167}, si bien
+    # que « s'éloigner de l'ennemi » se décrit comme le plan le PLUS proche de lui.
+    #
+    # Le jumeau `arm_charge_placement_decision` y échappe sans le savoir : il lit
+    # `occupied_hexes`, vide hors table. Ici la lecture part des figurines, donc le filtre doit
+    # être explicite — et il l'est au niveau de l'ESCOUADE, seul endroit où le moteur porte
+    # `deployed_on_turn`.
+    units_cache = require_key(game_state, "units_cache")
+    models_cache = require_key(game_state, "models_cache")
+    squad_models = require_key(game_state, "squad_models")
+    enemies = [
+        (int(models_cache[mid]["col"]), int(models_cache[mid]["row"]))
+        for sid, _entry in enemy_entries_on_battlefield(units_cache, int(player))
+        for mid in squad_models.get(str(sid), [])  # get allowed : escouade sans figurine vivante
+        if mid in models_cache
+    ]
+    # Plateau sans objectif ou adversaire déjà anéanti : la distance vaut la borne, donc 1.0 après
+    # normalisation — « aussi loin que le plateau permet ». Ce n'est pas un défaut masqué, c'est
+    # la réponse juste à « à quelle distance du plus proche » quand il n'y en a aucun, et c'est
+    # déjà la convention du placement de charge.
+    obj_d = min(
+        (calculate_hex_distance(cc, cr, oc, orr) for oc, orr in objectives), default=board_diag
+    )
+    enemy_d = min(
+        (calculate_hex_distance(cc, cr, ec, er) for ec, er in enemies), default=board_diag
+    )
+    return decision_option_cont_row({
+        "obj_dist_norm": min(obj_d / board_diag, 1.0),
+        "dist_enemy_norm": min(enemy_d / board_diag, 1.0),
+    })
 
 
 def _returned_base_extent(model: Dict[str, Any]) -> float:

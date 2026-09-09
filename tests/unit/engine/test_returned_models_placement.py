@@ -852,3 +852,125 @@ def test_mono_profile_no_cells_added_to_phase_skip_set() -> None:
     assert _SQUAD not in gs.get("return_destroyed_models_used", set()), (
         "le 'once per battle' ne doit pas être consommé"
     )
+
+
+# ---------------------------------------------------------------------------
+# Candidats DISCERNABLES (Grot Orderly : quel profil, puis où)
+# ---------------------------------------------------------------------------
+
+
+def test_profile_candidates_carry_distinct_traits() -> None:
+    """Deux profils détruits -> deux lignes continues DIFFÉRENTES.
+
+    ROUGE avant le câblage de `decision_options_cont` : les candidats de
+    `returned_models_profile` ne portaient ni effet accordable ni `declines`, donc des lignes
+    d'observation strictement identiques. `value` et `count` vivaient dans le `payload`, que
+    l'observation ne lit pas — l'agent choisissait entre un Warboss et deux Boyz à pile ou face.
+    """
+    from engine.observation_entities import decision_option_cont_index
+
+    gs = _state(n_alive=3, n_destroyed=3, enemy_at=None,
+                destroyed_profiles=[("Boyz", 8), ("Boyz", 8), ("Warboss", 85)])
+    _apply_return_destroyed_models(gs, 1)
+
+    decision = gs["pending_agent_decision"]
+    assert str(decision["type"]) == "returned_models_profile"
+    cont = decision.get("options_cont")
+    assert cont is not None, "les profils proposés doivent porter des traits continus"
+    assert len(cont) == len(decision["options"])
+    assert cont[0] != cont[1], f"deux profils indiscernables : {cont}"
+
+    value_i = decision_option_cont_index("profile_value_norm")
+    by_profile = {
+        str(opt["payload"]["profile"]): row for opt, row in zip(decision["options"], cont)
+    }
+    # Rapportée au profil le plus cher PROPOSÉ : le Warboss vaut 1.0, un Boy 8/85.
+    assert by_profile["Warboss"][value_i] == pytest.approx(1.0)
+    assert by_profile["Boyz"][value_i] == pytest.approx(8.0 / 85.0)
+    # Toutes les colonnes des autres familles de décision restent muettes.
+    count_i = decision_option_cont_index("profile_count_norm")
+    for row in cont:
+        others = [v for i, v in enumerate(row) if i not in (value_i, count_i)]
+        assert others == [0.0] * len(others), f"colonnes étrangères remplies : {row}"
+
+
+def test_placement_candidates_carry_distinct_traits() -> None:
+    """Deux intentions de pose -> deux lignes continues DIFFÉRENTES.
+
+    ROUGE avant le câblage : l'étiquette « toward_enemy » n'est écrite dans AUCUN scalaire
+    d'observation, et les intentions sortaient toutes à `present=1`. Ce sont les distances du
+    plan — objectif et ennemi le plus proche — qui disent ce que l'intention vaut sur CE plateau.
+    """
+    from engine.observation_entities import decision_option_cont_index
+
+    # Un objectif RÉEL sur la table : sans lui `obj_dist_norm` vaut la borne partout, et deux
+    # intentions peuvent coïncider sur la seule colonne restante. Une partie a toujours des
+    # objectifs (14.01), donc c'est le fixture sans objectif qui serait le cas exotique — et
+    # c'est exactement ce qu'un test « deux lignes diffèrent » aurait laissé passer.
+    gs = _state(
+        n_alive=3, n_destroyed=3,
+        objectives=[{"id": "obj1", "hexes": [[6, 12], [7, 12], [6, 13], [7, 13]]}],
+    )
+    _apply_return_destroyed_models(gs, 1)
+
+    decision = gs["pending_agent_decision"]
+    assert str(decision["type"]) == "returned_models_placement"
+    cont = decision.get("options_cont")
+    assert cont is not None, "les intentions proposées doivent porter des traits continus"
+    assert len(cont) == len(decision["options"]) >= 2
+    assert len({tuple(row) for row in cont}) == len(cont), (
+        f"chaque intention proposée doit avoir sa propre ligne, obtenu {cont}"
+    )
+
+    enemy_i = decision_option_cont_index("dist_enemy_norm")
+    by_intent = {
+        str(opt["payload"]["intent"]): row for opt, row in zip(decision["options"], cont)
+    }
+    # L'ennemi du fixture est en (18,5), l'escouade autour de (6,5) : « vers l'ennemi » doit
+    # poser plus près que « loin de l'ennemi ». C'est le SENS de la colonne qui est verrouillé
+    # ici, pas seulement le fait que deux lignes diffèrent.
+    assert {"toward_enemy", "away_from_enemy"} <= set(by_intent), (
+        f"le fixture doit offrir les deux intentions opposées, obtenu {sorted(by_intent)}"
+    )
+    assert by_intent["toward_enemy"][enemy_i] < by_intent["away_from_enemy"][enemy_i], (
+        f"« vers l'ennemi » doit réduire dist_enemy_norm, obtenu {by_intent}"
+    )
+
+
+def test_placement_traits_ignore_an_enemy_in_reserves() -> None:
+    """Une escouade ennemie en RÉSERVES ne change aucune distance de plan.
+
+    ROUGE avec l'énumération naïve de `models_cache` : une unité en réserves stratégiques (20.01)
+    est vivante dans le cache mais posée sur la sentinelle (-1,-1). Elle devient alors l'ennemi
+    « le plus proche » de TOUS les plans, et l'ordre des intentions s'inverse — « s'éloigner de
+    l'ennemi » se décrit comme le plan le plus proche de lui. Mesuré : {0.1667, 0.2, 0.2333}
+    devenait {0.15, 0.1667, 0.1167}.
+    """
+    from engine.observation_entities import decision_option_cont_index
+
+    objectives = [{"id": "obj1", "hexes": [[6, 12], [7, 12], [6, 13], [7, 13]]}]
+
+    reference = _state(n_alive=3, n_destroyed=3, objectives=objectives)
+    _apply_return_destroyed_models(reference, 1)
+    ref_cont = reference["pending_agent_decision"]["options_cont"]
+
+    with_reserve = _state(n_alive=3, n_destroyed=3, objectives=objectives)
+    # Escouade ennemie EN RÉSERVES : la sentinelle (-1,-1) est le prédicat moteur de « hors
+    # table » (`entry_is_on_battlefield`), jumelle de `deployed_on_turn is None`.
+    with_reserve["units_cache"]["RESERVE"] = {
+        "player": 2, "col": -1, "row": -1, "HP_CUR": 3, "OC_TOTAL": 1,
+        "orientation": 0, "BASE_SHAPE": "round", "BASE_SIZE": 1,
+        "deployed_on_turn": None, "MODEL_HEIGHT": 1.0,
+    }
+    with_reserve["models_cache"]["RESERVE#0"] = dict(
+        with_reserve["models_cache"][f"{_SQUAD}#0"], player=2, col=-1, row=-1
+    )
+    with_reserve["squad_models"]["RESERVE"] = ["RESERVE#0"]
+    _apply_return_destroyed_models(with_reserve, 1)
+    res_cont = with_reserve["pending_agent_decision"]["options_cont"]
+
+    enemy_i = decision_option_cont_index("dist_enemy_norm")
+    assert [row[enemy_i] for row in res_cont] == [row[enemy_i] for row in ref_cont], (
+        "une unité hors table ne doit peser sur aucune distance : "
+        f"{[r[enemy_i] for r in res_cont]} contre {[r[enemy_i] for r in ref_cont]}"
+    )

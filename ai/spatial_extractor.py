@@ -312,7 +312,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
             )
         expected_keys = [
             "global_cont", "global_bin", "self_models_cont", "self_models_bin", "grid",
-            "decision_ctx_bin", "decision_options_bin",
+            "decision_ctx_bin", "decision_options_bin", "decision_options_cont",
             "deploy_cand_cont", "deploy_cand_bin",
         ]
         for family in _UNIT_FAMILIES:
@@ -361,6 +361,17 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         global_dim = _shape("global_cont")[0] + _shape("global_bin")[0]
         self.decision_ctx_dim = _shape("decision_ctx_bin")[0]
         self.n_decision_options, self.decision_option_dim = _shape("decision_options_bin")
+        _decision_cont_slots, self.decision_option_cont_dim = _shape("decision_options_cont")
+        # Les deux blocs decrivent LES MEMES candidats : le slot i de l'un est le slot i de
+        # l'autre, et c'est ce que `CHOICE_BASE + i` joue. Un desaccord de cardinalite ne leverait
+        # nulle part ailleurs (les deux tenseurs restent des rangs valides) et melangerait les
+        # traits d'un candidat avec les drapeaux d'un autre.
+        if _decision_cont_slots != self.n_decision_options:
+            raise ValueError(
+                f"SpatialCombinedExtractor : {self.n_decision_options} slots de candidat en "
+                f"'decision_options_bin' contre {_decision_cont_slots} en "
+                f"'decision_options_cont' — les deux blocs decrivent les memes candidats."
+            )
         self.n_deploy_slots, self.deploy_cand_cont_dim = _shape("deploy_cand_cont")
         self.deploy_cand_bin_dim = _shape("deploy_cand_bin")[1]
 
@@ -540,9 +551,17 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # n'a aucune sémantique de position (l'option 0 d'un prompt n'a rien à voir avec l'option 0
         # d'un autre) : des poids par slot n'auraient RIEN à généraliser. Il sort en `entity_dim`
         # pour que la tête pointeur le score exactement comme un slot ennemi.
-        # Aucune `EntityRunningNorm` : le registre de candidat est entièrement DISCRET (§0.32 T-J
-        # — une valeur discrète n'est jamais normalisée).
-        self.decision_encoder = _mlp([self.decision_option_dim, entity_dim, entity_dim])
+        # Le candidat entre par ses DEUX blocs. Sans le continu, les cinq types dont les
+        # candidats n'accordent aucun effet (`allocation_model`, `charge_placement`,
+        # `mortal_wounds_target`, `returned_models_*`) presentaient des lignes identiques : ecart
+        # d'embedding mesure a 0.0, donc logits egaux sous le produit scalaire de `_point`, donc
+        # un choix que PPO ne pouvait pas apprendre. Le bloc continu ne passe PAS par une
+        # `EntityRunningNorm` : ses colonnes sont normalisees a la source et six sur huit sont
+        # muettes selon le type, si bien que des statistiques glissantes melangeraient
+        # « sans objet » et vraies valeurs (cf. `DECISION_OPTION_CONT_FIELDS`).
+        self.decision_encoder = _mlp(
+            [self.decision_option_dim + self.decision_option_cont_dim, entity_dim, entity_dim]
+        )
         # Encodeur de CANDIDAT DE DÉPLOIEMENT (§0.40 point 3) : un seul module pour les 5 slots.
         # Ses features continues sont des distances et des comptages BRUTS (subhex, nombre
         # d'ennemis) : elles passent par une `EntityRunningNorm` à statistiques COMMUNES aux
@@ -708,7 +727,12 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # jamais déduit de la ligne — un candidat sans effet observé aurait une ligne nulle.
         decision_options = observations["decision_options_bin"]
         decision_mask = decision_options[..., -1]
-        decision_emb = _encode_masked(self.decision_encoder, decision_mask, decision_options)
+        decision_emb = _encode_masked(
+            self.decision_encoder,
+            decision_mask,
+            observations["decision_options_cont"],
+            decision_options,
+        )
         decision_agg = _masked_mean_max(decision_emb, decision_mask)
 
         # Candidats de déploiement : masque LU sur le bit `present` (dernier champ), jamais

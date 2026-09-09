@@ -12,6 +12,9 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
+from engine.observation_entities import (
+    DECISION_OPTION_CONT_SIZE, decision_option_cont_index,
+)
 from engine.phase_handlers.charge_handlers import (
     CHARGE_PLACEMENT_INTENT_COUNT,
     CHARGE_PLACEMENT_PENDING_KEY,
@@ -297,16 +300,64 @@ class TestArmChargePlacementDecision:
         assert len(options) == CHARGE_PLACEMENT_INTENT_COUNT == 5
 
     def test_options_cont_shape(self) -> None:
-        """options_cont a la forme (5, 2) : 2 scalaires normalisés [0,1] par intention."""
+        """Une ligne par intention, à la taille du registre, ses DEUX colonnes remplies dans [0,1].
+
+        La charge écrit `obj_dist_norm` et `nontgt_dist_norm` ; les colonnes des autres familles
+        de décision restent à zéro. Le contrôle porte sur les colonnes NOMMÉES et non sur un
+        décompte positionnel : le registre grandit quand un type de décision s'instrumente, la
+        paire de la charge, elle, ne bouge pas.
+        """
         gs = self._gs()
         arm_charge_placement_decision(gs, "att", ["tgt"], 8, self._plan_0(gs), context=_ctx())
         opts_cont = gs["pending_agent_decision"].get("options_cont")
         assert opts_cont is not None, "options_cont doit être présent"
         assert len(opts_cont) == 5
         for row in opts_cont:
-            assert len(row) == 2, f"chaque ligne doit avoir 2 scalaires, got {len(row)}"
+            assert len(row) == DECISION_OPTION_CONT_SIZE, (
+                f"la ligne doit couvrir le registre ({DECISION_OPTION_CONT_SIZE}), got {len(row)}"
+            )
             for v in row:
                 assert 0.0 <= v <= 1.0, f"scalaire hors [0,1] : {v}"
+            other = [
+                v for i, v in enumerate(row)
+                if i not in (
+                    decision_option_cont_index("obj_dist_norm"),
+                    decision_option_cont_index("nontgt_dist_norm"),
+                )
+            ]
+            assert other == [0.0] * len(other), (
+                f"la charge ne remplit que ses deux colonnes, got {row}"
+            )
+
+    def test_distinct_plans_get_distinct_continuous_rows(self) -> None:
+        """AUTANT de lignes continues distinctes que de plans distincts — ni plus, ni moins.
+
+        L'invariant n'est PAS « les cinq intentions diffèrent » : plusieurs intentions replient
+        légitimement sur `plan_0` quand l'espace est contraint (charge_handlers.py, boucle des
+        intents), et deux plans identiques DOIVENT alors produire deux lignes identiques — c'est
+        une description juste, pas un défaut. Ce qui serait un défaut, c'est l'inverse : deux
+        plans qui posent les figurines à des endroits différents et que l'agent voit pareils.
+
+        Mesuré sur ce fixture : sans objectif, les cinq lignes sont identiques parce que les deux
+        colonnes valent leur borne (aucun objectif, aucun ennemi hors cible) alors que deux plans
+        diffèrent — c'est pourquoi le test place un objectif RÉEL, comme toute partie en a (14.01).
+        """
+        gs = self._gs()
+        gs["objectives"] = [{"id": "obj1", "hexes": [[10, 10], [11, 10], [10, 11], [11, 11]]}]
+        arm_charge_placement_decision(gs, "att", ["tgt"], 8, self._plan_0(gs), context=_ctx())
+
+        opts_cont = gs["pending_agent_decision"]["options_cont"]
+        plans = gs[CHARGE_PLACEMENT_PENDING_KEY]["plans"]
+        n_plans = len({tuple(sorted(plan)) for plan in plans})
+        n_rows = len({tuple(row) for row in opts_cont})
+
+        assert n_plans > 1, (
+            "vérification de non-vacuité : le fixture doit produire au moins deux plans distincts"
+        )
+        assert n_rows == n_plans, (
+            f"{n_plans} plans distincts décrits par {n_rows} lignes distinctes — deux poses "
+            f"différentes que l'agent voit identiques sont un tirage au sort : {opts_cont}"
+        )
 
     def test_pending_key_stored_with_5_plans(self) -> None:
         """_charge_placement_pending contient 5 plans (un par intention)."""

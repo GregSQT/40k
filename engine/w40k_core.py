@@ -6094,6 +6094,33 @@ class W40KEngine(gym.Env):
         self._fight_v11_gym_settle()
         return True, result
 
+    def _mortal_wounds_target_metrics(self, target_squad_id: str) -> Tuple[float, float]:
+        """(santé de la figurine la plus entamée, VALUE vivante) d'une cible de 1-3 MW.
+
+        La première grandeur est celle de `wounded_hp_ratio` (`UNIT_CONT_FIELDS`), lue à
+        l'identique : en 40K les pertes s'allouent une figurine à la fois, donc au plus une est
+        partiellement blessée et le `min` est une lecture exacte, pas un repli. Proche de 0, les
+        blessures mortelles achèvent quelqu'un ; à 1.0, elles entament seulement.
+
+        La seconde reste BRUTE — c'est l'appelant qui la rapporte à la cible la plus chère
+        proposée, parce que la borne de normalisation n'existe qu'à l'échelle du choix.
+        """
+        models_cache = require_key(self.game_state, "models_cache")
+        squad_models = require_key(self.game_state, "squad_models")
+        alive = [m for m in squad_models.get(str(target_squad_id), []) if m in models_cache]  # get allowed
+        if not alive:
+            raise KeyError(
+                f"_mortal_wounds_target_metrics: escouade {target_squad_id!r} sans figurine "
+                f"vivante — le pool de cibles engagees ne doit contenir que des unites vivantes."
+            )
+        wounded = min(
+            int(require_key(models_cache[m], "HP_CUR"))
+            / float(int(require_key(models_cache[m], "HP_MAX")))
+            for m in alive
+        )
+        value = float(sum(int(require_key(models_cache[m], "VALUE")) for m in alive))
+        return wounded, value
+
     def _apply_exhortation_de_rage(
         self, squad_id: str, target_eid: str, mw_count: int, d6: int,
         target_slot: Optional[int], auto: bool = False,
@@ -6143,7 +6170,9 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers.fight_handlers import (
             _unit_has_rule, _fight_build_valid_target_pool,
         )
-        from engine.observation_entities import MAX_DECISION_OPTIONS
+        from engine.observation_entities import (
+            MAX_DECISION_OPTIONS, decision_option_cont_row,
+        )
         if not _unit_has_rule(unit, "mortal_wounds_on_fight_activation"):
             return None
         engaged = [str(t) for t in _fight_build_valid_target_pool(self.game_state, unit)]
@@ -6163,9 +6192,28 @@ class W40KEngine(gym.Env):
             "d6_roll": d6,
         }
         player = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
+        _offered = engaged[:MAX_DECISION_OPTIONS]
         options = [
             {"label": eid, "effect_ids": (), "declines": False, "payload": {"target_eid": eid}}
-            for eid in engaged[:MAX_DECISION_OPTIONS]
+            for eid in _offered
+        ]
+        # Les candidats sont des ESCOUADES ennemies, toutes engagees : la distance ne les separe
+        # pas (elles sont toutes adjacentes) et leur `effect_ids` est vide. Ce qui decide de 1 a 3
+        # blessures mortelles, c'est ce qu'elles achevent et ce qu'elles valent.
+        _mw_metrics = {eid: self._mortal_wounds_target_metrics(eid) for eid in _offered}
+        _max_value = max(v for _, v in _mw_metrics.values())
+        if _max_value <= 0.0:
+            raise ValueError(
+                f"mortal_wounds_target: escouade {squad_id} — VALUE vivante nulle sur toutes les "
+                f"cibles engagees {_offered}. La VALUE vient du roster ; une cible sans valeur "
+                f"ne peut pas etre arbitree."
+            )
+        options_cont = [
+            decision_option_cont_row({
+                "target_wounded_hp_norm": _mw_metrics[eid][0],
+                "target_value_norm": _mw_metrics[eid][1] / _max_value,
+            })
+            for eid in _offered
         ]
         set_pending_agent_decision(
             self.game_state,
@@ -6173,6 +6221,7 @@ class W40KEngine(gym.Env):
             player=player,
             unit_id=squad_id,
             options=options,
+            options_cont=options_cont,
         )
         return True, {
             "action": "squad_fight",

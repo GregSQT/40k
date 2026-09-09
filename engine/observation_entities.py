@@ -27,7 +27,7 @@ porte déjà en partie.
 
 from __future__ import annotations
 
-from typing import Dict, Tuple
+from typing import Dict, List, Tuple
 
 #: Clé du cache des sous-tenseurs d'armes dans le `game_state`
 #: (posée par `ObservationBuilder._encode_entity_weapons`, vidée par `build_units_cache`).
@@ -702,15 +702,63 @@ DECISION_OPTION_BIN_FIELDS: Tuple[str, ...] = tuple(
 DECISION_CTX_BIN_SIZE = len(DECISION_CTX_BIN_FIELDS)
 DECISION_OPTION_BIN_SIZE = len(DECISION_OPTION_BIN_FIELDS)
 
-#: Champs CONTINUS par candidat — ouverts par P3-4 (allocation des pertes défenseur, §9.4 pt 4).
-#: `role_tier_norm` : ROLE_TIER de la figurine divisé par 4 (max du tier = 4, pour "leader"),
-#: normalisé sur [0, 1]. Distingue base < special_weapon < sergeant < support < leader.
-#: `dist_enemy_norm` : distance (hex) à l'ennemi le plus proche, divisée par (board_cols +
-#: board_rows) — borne conservative de la diagonale. Toujours dans [0, 1].
-#: Ces deux traits suffisent à reproduire l'heuristique de `_select_allocation_model` et laissent
-#: l'agent dévier de façon apprenante. Les candidats blessés ne parviennent JAMAIS ici (la règle
-#: 05.04 les force avant), donc HP_CUR = HP_MAX pour tous — inutile de le coder.
-DECISION_OPTION_CONT_FIELDS: Tuple[str, ...] = ("role_tier_norm", "dist_enemy_norm")
+#: Champs CONTINUS par candidat — ouverts par P3-4 (allocation des pertes défenseur, §9.4 pt 4),
+#: élargis quand les cinq types dont les candidats n'accordent AUCUN effet ont dû devenir
+#: discernables (mesuré : deux candidats à ligne binaire identique sortaient de
+#: `SpatialCombinedExtractor` à un écart d'embedding de 0.0, et la tête pointeur les score par un
+#: produit scalaire nu — logits égaux, donc pile-ou-face inapprenable).
+#:
+#: ⚠️ UNE COLONNE = UNE GRANDEUR, jamais « la première valeur de ce type-là ». Deux types qui
+#: décrivent la MÊME grandeur écrivent dans la MÊME colonne (`dist_enemy_norm` sert à l'allocation
+#: comme au placement des figurines rendues) ; deux grandeurs différentes ne partagent jamais une
+#: colonne, même si aucun type ne les remplit ensemble. C'est ce qui rend légitime l'encodeur de
+#: candidat PARTAGÉ (§3.3) : il ne voit pas le type de décision, seulement la ligne, et une
+#: colonne au sens variable lui demanderait de deviner laquelle on lui présente.
+#:
+#: Les colonnes qu'un type ne remplit pas restent à zéro — même convention que les bits
+#: `grants_*` d'un candidat qui n'accorde rien, et non une valeur par défaut inventée : c'est le
+#: motif des colonnes remplies qui identifie la famille.
+#:
+#: ⚠️ TOUTES sont normalisées dans [0, 1] À LA SOURCE, et ce n'est pas une préférence de style :
+#: le bloc N'EST PAS passé à une `EntityRunningNorm`. Ses statistiques glissantes excluent les
+#: candidats absents (masque `present`) mais PAS les colonnes muettes d'un type ; avec six
+#: colonnes à zéro sur huit, elles mélangeraient « sans objet » et vraies valeurs et fausseraient
+#: l'échelle des deux. Un producteur qui émettrait une grandeur brute casserait donc l'échelle de
+#: tout le bloc.
+#:
+#: `role_tier_norm` : ROLE_TIER de la figurine divisé par 4 (max du tier = 4, pour "leader").
+#: Distingue base < special_weapon < sergeant < support < leader. (`allocation_model`)
+#: `dist_enemy_norm` : distance (hex) du candidat à l'ennemi le plus proche, divisée par
+#: (board_cols + board_rows) — borne conservative de la diagonale. Le « candidat » est la figurine
+#: pour `allocation_model`, le centroïde du plan pour `returned_models_placement` : même grandeur,
+#: même colonne. Les candidats blessés ne parviennent JAMAIS à l'allocation (05.04 les force
+#: avant), donc HP_CUR = HP_MAX pour tous — inutile de le coder là.
+#: `obj_dist_norm` : distance du centroïde du plan à l'objectif le plus proche, même borne.
+#: (`charge_placement`, `returned_models_placement`)
+#: `nontgt_dist_norm` : distance du centroïde du plan à l'ennemi NON déclaré comme cible de la
+#: charge, même borne. Propre à `charge_placement` : hors d'une charge, « ennemi non ciblé » n'a
+#: pas de référent, et le confondre avec `dist_enemy_norm` donnerait deux sens à une colonne.
+#: `profile_value_norm` : VALUE d'une figurine du profil rendu, divisée par la plus forte VALUE
+#: parmi les profils proposés — 1.0 = le profil le plus cher. (`returned_models_profile`)
+#: `profile_count_norm` : nombre de figurines détruites de ce profil, divisé par le quota à
+#: rendre, borné à 1.0 — 1.0 = ce profil peut remplir le quota à lui seul.
+#: (`returned_models_profile`)
+#: `target_wounded_hp_norm` : PV de la figurine la plus entamée de la cible divisés par son
+#: HP_MAX (1.0 si aucune n'est entamée) — même grandeur que `wounded_hp_ratio` d'une unité, ici
+#: portée par le candidat. Proche de 0 = les blessures mortelles achèvent une figurine.
+#: (`mortal_wounds_target`)
+#: `target_value_norm` : VALUE vivante de l'escouade cible, divisée par la plus forte parmi les
+#: cibles proposées — 1.0 = la cible la plus précieuse. (`mortal_wounds_target`)
+DECISION_OPTION_CONT_FIELDS: Tuple[str, ...] = (
+    "role_tier_norm",
+    "dist_enemy_norm",
+    "obj_dist_norm",
+    "nontgt_dist_norm",
+    "profile_value_norm",
+    "profile_count_norm",
+    "target_wounded_hp_norm",
+    "target_value_norm",
+)
 DECISION_OPTION_CONT_SIZE = len(DECISION_OPTION_CONT_FIELDS)
 
 _DECISION_CTX_BIN_INDEX: Dict[str, int] = {
@@ -752,6 +800,34 @@ def decision_option_cont_index(field: str) -> int:
             f"Champs : {DECISION_OPTION_CONT_FIELDS}"
         )
     return _DECISION_OPTION_CONT_INDEX[field]
+
+
+def decision_option_cont_row(values: Dict[str, float]) -> List[float]:
+    """Ligne continue d'UN candidat, bâtie depuis des champs NOMMÉS.
+
+    Le producteur nomme les grandeurs qu'il connaît ; les colonnes des autres familles restent à
+    zéro. C'est le seul point où l'ordre de `DECISION_OPTION_CONT_FIELDS` est matérialisé : sans
+    lui, chaque producteur recopierait une liste positionnelle de la longueur du registre, six
+    zéros compris, et l'ajout d'une colonne demanderait de retoucher les cinq producteurs — le
+    genre de recopie qui diverge en silence, puisqu'une ligne de la bonne longueur mais aux
+    valeurs décalées passe toutes les validations.
+
+    Un nom inconnu LÈVE (`decision_option_cont_index`) : une faute de frappe ne doit pas devenir
+    une colonne muette, qui rendrait deux candidats à nouveau indiscernables sans rien casser.
+    Une valeur hors [0, 1] LÈVE aussi — le bloc n'est pas normalisé en aval (cf. le registre),
+    donc une grandeur brute casserait l'échelle de toutes les autres colonnes.
+    """
+    row = [0.0] * DECISION_OPTION_CONT_SIZE
+    for field, value in values.items():
+        val = float(value)
+        if not 0.0 <= val <= 1.0:
+            raise ValueError(
+                f"decision_option_cont_row: {field!r} vaut {val}, hors [0, 1]. Les champs "
+                f"continus de candidat sont normalisés À LA SOURCE — aucune normalisation "
+                f"n'intervient en aval."
+            )
+        row[decision_option_cont_index(field)] = val
+    return row
 
 
 # ---------------------------------------------------------------------------
