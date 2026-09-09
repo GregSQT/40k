@@ -266,6 +266,27 @@ def test_l_intention_objectif_rapproche_du_marqueur_et_le_retrait_eloigne_de_l_e
     assert by_label["Pression"]["destRow"] > _SHOOTER[1]
 
 
+def test_le_premier_candidat_est_la_destination_de_pression():
+    """`options[0]` porte la case la PLUS PROCHE de l'ennemi le plus proche.
+
+    Ce n'est pas une préférence d'ordre : c'est la seule destination que rendait
+    `_select_move_after_shooting_destination_for_ai` avant J2, donc la baseline du bot adverse.
+    `env_wrappers.bot_action_for_pending_choice` répond `CHOICE_0` à cette décision pour que
+    l'adversaire de référence ne se remette pas à bouger au hasard sous l'agent qu'on mesure ;
+    ce test est ce sur quoi ce choix repose.
+    """
+    gs = _gs()
+    _end_shooting_activation(gs)
+    decision = read_pending_agent_decision(gs)
+    assert decision is not None
+
+    assert decision["options"][0]["label"].startswith("Pression")
+
+    enemy_column = DECISION_OPTION_CONT_FIELDS.index("dist_enemy_norm")
+    distances = [row[enemy_column] for row in decision["options_cont"]]
+    assert distances[0] == min(distances)
+
+
 def test_sans_ennemi_sur_la_table_seules_les_intentions_constructibles_sont_offertes():
     """Aucun ennemi (détruits, ou tous en réserves 20.01) : pas d'intention scorée sur du vide."""
     gs = _gs(with_enemy=False)
@@ -276,6 +297,11 @@ def test_sans_ennemi_sur_la_table_seules_les_intentions_constructibles_sont_offe
     labels = [option["label"] for option in decision["options"]]
     assert not any(label.startswith(("Pression", "Retrait")) for label in labels)
     assert any(label.startswith("Objectif") for label in labels)
+    # `CHOICE_0` n'est donc PAS « Pression » dans ce cas, et la baseline du bot
+    # (`env_wrappers.bot_action_for_pending_choice`) joue « Objectif ». Ce n'est pas une
+    # divergence : l'heuristique supprimée rendait ici `destinations[0]`, départage arbitraire du
+    # pool BFS. Ce qui est verrouillé est que le premier candidat reste DÉTERMINISTE.
+    assert labels[0].startswith("Objectif")
 
 
 def test_ni_ennemi_ni_objectif_ne_pose_aucune_decision():

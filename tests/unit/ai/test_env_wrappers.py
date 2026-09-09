@@ -852,10 +852,14 @@ def test_carried_mask_is_reused_within_a_state_and_dropped_after_each_engine_ste
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _decision_state(player: int) -> dict:
-    """`game_state` portant une décision en attente, appartenant à `player`."""
+def _decision_state(player: int, decision_type: str = "rule_choice") -> dict:
+    """`game_state` portant une décision en attente, appartenant à `player`.
+
+    `decision_type` : le tirage est la réponse par défaut du bot, mais elle dépend du TYPE — voir
+    `test_le_bot_repositionne_apres_tir_par_sa_baseline_et_non_au_hasard`.
+    """
     return {
-        "type": "rule_choice",
+        "type": decision_type,
         "player": player,
         "unit_id": "u9",
         "options": [
@@ -904,6 +908,27 @@ def test_bot_plays_its_own_decision_instead_of_waiting() -> None:
         assert action in (mi.CHOICE_BASE, mi.CHOICE_BASE + 1), (
             "le bot doit jouer un CANDIDAT, pas une action de phase"
         )
+
+
+def test_le_bot_repositionne_apres_tir_par_sa_baseline_et_non_au_hasard() -> None:
+    """`move_after_shooting` : le bot joue `CHOICE_0`, jamais un tirage.
+
+    Le moteur CALCULAIT ce repositionnement pour lui — la case la plus proche de l'ennemi le plus
+    proche — jusqu'à ce que J2 en fasse une décision d'agent. Tombé dans le tirage générique, le
+    LandSpeeder du roster adverse (`_p2_rosters/500pts/training/…_space_marines.json`, seule
+    escouade SM à porter la règle) se repliait ou restait immobile au hasard : l'adversaire de
+    référence bougeait en même temps que l'agent mesuré, et aucun win-rate n'était plus
+    comparable d'un run à l'autre.
+    """
+    decoder = _DummyActionDecoder(mask=_decision_mask(), eligible=[], normalized_action=None)
+    engine = _DummyEngine(decoder=decoder)
+    engine.game_state["pending_agent_decision"] = _decision_state(
+        player=2, decision_type="move_after_shooting"
+    )
+    wrapper = BotControlledEnv(engine, bot=_DummyBot())
+
+    for _ in range(30):
+        assert wrapper._get_bot_action() == mi.CHOICE_BASE
 
 
 def test_self_play_opponent_plays_its_own_decision() -> None:

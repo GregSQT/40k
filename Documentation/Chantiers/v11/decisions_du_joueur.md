@@ -1030,6 +1030,19 @@ Ordre par valeur tactique :
    `TOTAL_ACTION_SIZE` inchangés (slot réservé, mesuré). 16 tests rouge→vert,
    `tests/unit/engine/test_move_after_shooting_decision.py`.
 
+   ⚠️ **La décision est armée pour les DEUX camps, pas pour le seul siège de l'agent** :
+   `is_gym_training` se lit sur le drapeau global, et le moteur n'a aucun moyen de savoir quel
+   siège la politique occupe (en self-play il y a deux modèles, et `scripted_action_for_agent_side`
+   fait jouer un bot au siège de l'agent). C'est architecturalement juste — la décision appartient
+   à qui contrôle l'escouade —, mais le contrôleur du BOT y répondait par le tirage générique de
+   `random_action_for_pending_choice`, alors que le moteur lui CALCULAIT cette destination
+   auparavant. Le LandSpeeder de `_p2_rosters/500pts/training/…_space_marines.json` se repliait
+   donc au hasard : la baseline adverse bougeait en même temps que l'agent mesuré. Corrigé le
+   2026-09-09 par `env_wrappers.bot_action_for_pending_choice`, qui répond `CHOICE_0` — la
+   destination historique — pour ce seul type et laisse les six autres mécanismes sur leur tirage.
+   **Leçon générale** : rendre une décision à l'agent oblige à se demander qui répond pour
+   l'adversaire, faute de quoi la référence de mesure change en même temps que le sujet mesuré.
+
    🔴 **reactive_move — TOUJOURS HEURISTIQUE.** `reactive_decision_mode` vaut `"auto"` en dur
    (`w40k_core.py`, deux sites) et n'est mis à `"state"` nulle part hors tests : le mode auto ne
    décline JAMAIS — alors que `decline_reactive_move` est formalisé et sans producteur — et prend
