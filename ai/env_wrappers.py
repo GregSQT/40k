@@ -127,6 +127,38 @@ def random_action_for_pending_choice(
     return None
 
 
+def bot_action_for_pending_choice(
+    game_state: Dict[str, Any], action_mask: Any, wrapper: str
+) -> Optional[int]:
+    """La réponse du BOT au point de choix en attente, ou ``None`` s'il n'y en a pas.
+
+    Le tirage ci-dessus reste la règle — « le bot joue par tirage tout choix qu'il ne modélise
+    pas ». `move_after_shooting` fait exception parce qu'il n'est PAS un choix non modélisé : le
+    moteur le CALCULAIT pour le bot (`_select_move_after_shooting_destination_for_ai`, supprimé
+    le 2026-09-09 quand le repositionnement post-tir est devenu une décision d'agent), à la
+    destination la plus proche de l'ennemi le plus proche. Le laisser tomber dans le tirage fait
+    reculer ou immobiliser l'adversaire de référence au hasard : la baseline bougerait en même
+    temps que l'agent, et plus aucun win-rate ne serait comparable d'un run à l'autre.
+
+    `CHOICE_0` porte « Pression », donc EXACTEMENT cette destination, TANT QU'UN ENNEMI EST SUR
+    LA TABLE : l'ordre de `_MOVE_AFTER_SHOOTING_INTENT_LABELS` est contractuel et place cette
+    intention en tête (verrouillé par `test_le_premier_candidat_est_la_destination_de_pression`).
+    Sans ennemi — dernière cible détruite, ou reste de l'armée en réserves 20.01 — les deux
+    intentions qui s'orientent sur l'ennemi ne sont pas construites et `CHOICE_0` devient
+    « Objectif ». Ce n'est pas une divergence de baseline : l'heuristique supprimée rendait dans
+    ce cas `destinations[0]`, la première case du pool BFS, un départage arbitraire que rien n'a
+    jamais mesuré. Ce qui compte ici est que la réponse reste DÉTERMINISTE, et elle l'est.
+    """
+    decision = read_pending_agent_decision(game_state)
+    if decision is not None and require_key(decision, "type") == "move_after_shooting":
+        if not bool(action_mask[mi.CHOICE_BASE]):
+            raise RuntimeError(
+                f"{wrapper}: decision move_after_shooting en attente sans CHOICE_0 ouvert."
+            )
+        return int(mi.CHOICE_BASE)
+    return random_action_for_pending_choice(game_state, action_mask, wrapper)
+
+
 class MaskDecision(NamedTuple):
     """Qui decide, et le masque SUR LEQUEL cette reponse a ete etablie.
 
@@ -1811,7 +1843,7 @@ class BotControlledEnv(gym.Wrapper):
         # dans cet état, et le masque n'y ouvre AUCUN `ACTION_WAIT` (une désignation d'Oath n'est
         # pas optionnelle : « select one unit from your opponent's army »). Sans cette branche, le
         # repli « pool vide -> WAIT » ci-dessous renvoie une action HORS MASQUE et le décodeur lève.
-        pending_choice_action = random_action_for_pending_choice(
+        pending_choice_action = bot_action_for_pending_choice(
             game_state, action_mask, "BotControlledEnv"
         )
         if pending_choice_action is not None:
