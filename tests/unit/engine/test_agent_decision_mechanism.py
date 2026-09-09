@@ -112,6 +112,12 @@ def _unit(uid: int, player: int, col: int, row: int, rules: List[Dict[str, Any]]
         # « aucun mot-clé déclaré » sans rien masquer.
         "UNIT_KEYWORDS": [],
         "OC": 1,
+        # Ld : caracteristique de datasheet OBLIGATOIRE, comme `OC` juste au-dessus et `T` plus
+        # bas. L'observation la lit pour chaque entite (`leadership`, seuil de 01.06/08.03) via
+        # `unit_effective_leadership`, qui refuse une figurine sans Ld : une unite qui n'en
+        # declare aucun ne peut pas faire de jet de commandement, et l'inventer servirait un
+        # seuil faux en silence. Meme valeur que la fixture d'unite de `_full_engine_config()`.
+        "LD": 7,
         "BASE_SIZE": 1,
         "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "round",
