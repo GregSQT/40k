@@ -5,6 +5,12 @@ Deux mécanismes demandent à l'agent un choix dont la moitié est DÉJÀ fixée
 - sélection d'arme CC (V11 §0.69) — la cible est désignée, l'arme reste à choisir ;
 - tir fractionné (P3-8), sous-état CIBLE — l'arme est armée, la cible reste à choisir.
 
+S'y ajoute ce que le tir fractionné a DÉJÀ décidé : les couples arme -> cible de l'activation
+en cours (`split_assigned_w0..9`, un bit par slot de profil de tir). Ils existent dans les DEUX
+sous-états et ne changent l'état d'aucune cible, la résolution n'ayant lieu qu'une fois toutes
+les armes assignées — mesuré le 2026-09-09 : ces bits mis à 0, deux états ne différant que par
+la cible déjà assignée rendent des observations IDENTIQUES sur les 28 clés.
+
 Trou fermé ici, MESURÉ le 2026-09-09 avant correction : dans les deux cas, deux états ne
 différant que par la moitié déjà fixée produisaient des observations STRICTEMENT IDENTIQUES
 (28 clés comparées, écart maximal 0,0). L'observation n'encodait qu'un seul des sept points
@@ -244,13 +250,19 @@ def test_target_outside_the_enemy_slots_raises():
 # ── Volet tir : l'arme armée pendant le sous-état CIBLE du split-fire ─────────
 
 
-def _split_fire_engine() -> W40KEngine:
-    """Escouade 1 avec DEUX profils de tir distincts, deux ennemis à portée."""
+def _split_fire_engine(*, third_weapon: bool = False) -> W40KEngine:
+    """Escouade 1 avec DEUX profils de tir distincts (trois sur demande), deux ennemis à portée.
+
+    `third_weapon` : une arme de plus, donc une assignation de plus AVANT la résolution — le seul
+    moyen d'observer une activation qui a déjà assigné deux armes.
+    """
+    positions = [(30, 20), (31, 20)]
+    weapons = [_weapon_cfg("test_bolter", 24, 4), _weapon_cfg("test_melta", 12, 9)]
+    if third_weapon:
+        positions.append((32, 20))
+        weapons.append(_weapon_cfg("test_plasma", 18, 7))
     eng = _make_engine([
-        _unit_cfg(
-            1, 1, [(30, 20), (31, 20)],
-            ranged=[_weapon_cfg("test_bolter", 24, 4), _weapon_cfg("test_melta", 12, 9)],
-        ),
+        _unit_cfg(1, 1, positions, ranged=weapons),
         _unit_cfg(2, 2, [(30, 28)]),
         _unit_cfg(3, 2, [(33, 28)]),
     ])
@@ -463,3 +475,23 @@ def test_assigned_weapon_slot_out_of_range_raises():
 
     with pytest.raises(RuntimeError, match="hors des .* slots de profils de tir"):
         eng.obs_builder.build_squad_observation(eng.game_state, "1")
+
+
+def test_two_weapons_on_the_same_target_mark_two_bits():
+    """Deux armes sur la MÊME cible -> DEUX bits sur sa ligne : c'est le sur-tir rendu visible.
+
+    Un bit unique « déjà visée » aurait rendu la même valeur qu'avec une seule arme, et l'agent
+    aurait continué d'empiler. Trois profils sont nécessaires : à la DERNIÈRE assignation, le
+    moteur résout l'activation et l'état disparaît — il n'y a alors plus de choix à éclairer.
+    """
+    eng = _split_fire_engine(third_weapon=True)
+    _arm_shoot_weapon(eng, 0)
+    _assign_target(eng, "2")
+    _arm_shoot_weapon(eng, 1)
+    _assign_target(eng, "2")
+    obs = _obs_copy(eng)
+
+    target_slot = _enemy_slot_of(eng, "1", "2")
+    assert float(obs["enemies_bin"][target_slot][BIN_PRESENT]) == 1.0
+    assert _bits_of(obs, target_slot) == [0, 1], "les deux armes assignées doivent être lisibles"
+    assert _bits_of(obs, _enemy_slot_of(eng, "1", "3")) == []

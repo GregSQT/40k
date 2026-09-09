@@ -878,6 +878,27 @@ def test_tour_vide_du_prompt_qui_vient_d_arriver_est_ecarte(tmp_path: Path) -> N
         "pyright  # engine/x.py",
         # Guillemet non fermé : le découpage dégradé REFUSE, il n'autorise pas.
         'pytest "tests/unit/engine/test_x.py',
+        # ---------------------------------------------------------------- front (2026-09-09)
+        # `npx vitest run` est entré dans la vérification large de CLAUDE.md : 36 fichiers,
+        # 430 tests. Il se protège comme les sept autres briques.
+        "npx vitest run",
+        "vitest",
+        "(cd frontend && npx vitest run)",
+        # Un module SOURCE n'est pas une cible de test : `.ts` ne suffit pas, il faut `.test.ts`.
+        "npx vitest run src/utils/gameHelpers.ts",
+        # La suite E2E entière : elle démarre deux serveurs et pilote un navigateur.
+        "npx playwright test",
+        "npx playwright test --workers 4",
+        # L'orchestrateur des trois couches, sous ses deux formes d'invocation.
+        "bash scripts/front_test_all.sh",
+        "bash scripts/front_test_all.sh --skip-a --skip-b",
+        "./scripts/front_test_all.sh",
+        # Les scripts npm : ils lancent vitest ou playwright SANS jamais écrire leur nom. Une
+        # protection qui ne verrait que le mot `vitest` serait contournable par une ligne.
+        "npm --prefix frontend run test:run",
+        "npm run test:coverage",
+        "npm run test:e2e",
+        "npm test",
     ],
 )
 def test_verification_large_refusee(command: str) -> None:
@@ -921,6 +942,24 @@ def test_verification_large_refusee(command: str) -> None:
         "git status ;# npx biome check frontend/src",
         # Le node id paramétré est la cible la plus fine du dépôt : son `[` n'est pas un glob.
         "pytest tests/unit/scripts/test_hooks_garde_fous.py::test_verification_large_refusee[pyright]",
+        # ---------------------------------------------------------------- front (2026-09-09)
+        # Un fichier de test NOMMÉ reste ciblé, comme pour pytest.
+        "npx vitest run src/utils/gameHelpers.test.ts",
+        "cd frontend && npx vitest run src/components/GameLog.test.tsx",
+        # `vitest list` ÉNUMÈRE sans exécuter : c'est une lecture.
+        "npx vitest list",
+        # INSTALLER Playwright n'est pas lancer ses tests — et l'interdire empêcherait de rendre
+        # la couche C exécutable sur une machine neuve.
+        "npx playwright install chromium",
+        "npx playwright show-report",
+        # Un spec E2E nommé reste ciblé.
+        "npx playwright test tests/e2e/smoke.spec.ts",
+        # Les scripts npm qui ne lancent aucune suite de tests.
+        "npm run dev",
+        "npm --prefix frontend install",
+        # NOMMER l'outil n'est pas le lancer.
+        "grep -rn vitest frontend/",
+        "git add scripts/front_test_all.sh",
     ],
 )
 def test_verification_ciblee_passe(command: str) -> None:

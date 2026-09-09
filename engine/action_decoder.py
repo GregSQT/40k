@@ -181,9 +181,26 @@ def _read_pending_fight_target_select(game_state: Dict[str, Any]) -> Any:
     return game_state.get(PENDING_FIGHT_TARGET_KEY)  # get allowed : None = aucune
 
 
+def read_pending_shoot_split(game_state: Dict[str, Any]) -> Any:
+    """Split-fire (P3-8) en cours, QUEL QUE SOIT le sous-état : ``None`` si aucun.
+
+    Les deux lecteurs de sous-état ci-dessous en dérivent : la partition ARME / CIBLE ne se
+    décide qu'à partir d'ici. Le masque et le décodeur, eux, relisent la clé en direct pour
+    d'autres besoins (slots ouverts, conversion d'action) — ce lecteur ne prétend pas les
+    remplacer.
+
+    PUBLIQUE, et volontairement indifférente à `pending_weapon` : l'observation pose les bits
+    `split_assigned_w<i>` à partir des couples arme→cible DÉJÀ commités, et ceux-là comptent
+    autant quand l'agent choisit l'arme suivante que quand il choisit sa cible. Mesuré le
+    2026-09-09 : les dix bits mis à 0, deux états ne différant que par la cible déjà assignée
+    rendaient des observations IDENTIQUES sur les 28 clés, aux DEUX sous-états.
+    """
+    return game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
+
+
 def _read_pending_shoot_weapon_sel(game_state: Dict[str, Any]) -> Any:
     """Split-fire (P3-8), sous-état ARME : le groupe d'arme suivant reste à choisir."""
-    sw = game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
+    sw = read_pending_shoot_split(game_state)
     return sw if sw is not None and sw.get("pending_weapon") is None else None  # get allowed
 
 
@@ -194,24 +211,8 @@ def read_pending_shoot_split_target(game_state: Dict[str, Any]) -> Any:
     pour poser `shoot_weapon_selected` sur le profil armé. Le sous-état (`pending_weapon` armé
     ou non) se décide ICI et nulle part ailleurs.
     """
-    sw = game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
+    sw = read_pending_shoot_split(game_state)
     return sw if sw is not None and sw.get("pending_weapon") is not None else None  # get allowed
-
-
-def read_pending_shoot_split_state(game_state: Dict[str, Any]) -> Any:
-    """Split-fire (P3-8) en cours, DANS L'UN OU L'AUTRE de ses deux sous-états.
-
-    PUBLIQUE, et volontairement indifférente à `pending_weapon` : l'observation pose les bits
-    `split_assigned_w<i>` à partir des couples arme→cible DÉJÀ commités, et ceux-là comptent
-    autant quand l'agent choisit l'arme suivante que quand il choisit sa cible. Mesuré le
-    2026-09-09 : sans eux, les deux sous-états rendaient une observation identique (0 clé sur
-    28) selon la cible déjà assignée.
-
-    Les deux lecteurs par sous-état (`_read_pending_shoot_weapon_sel`,
-    `read_pending_shoot_split_target`) restent la SOURCE UNIQUE du sous-état lui-même : celui-ci
-    ne dit rien de plus que « un split-fire est ouvert ».
-    """
-    return game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
 
 
 class PlayerChoiceMechanism(NamedTuple):

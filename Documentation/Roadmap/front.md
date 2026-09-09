@@ -15,11 +15,24 @@ du code. Frontière déclarée dans `frontend/vite.config.ts` et verrouillée pa
 `tests/unit/scripts/test_vitest_collect_scope.py`. La couche B (**4,0 s**, 36 fichiers, 430 tests)
 entre dans la vérification large de CLAUDE.md.
 
-⚠️ **La couche C n'a jamais pu s'exécuter sur cette machine** : `@playwright/test` est déclaré en
-`devDependencies` mais absent de `frontend/node_modules`, et `~/.cache/ms-playwright` est vide. Son
-mur reste **non mesuré**, donc son entrée dans la vérification large n'est pas tranchée. À jouer une
-fois avant de décider : `npm --prefix frontend install` puis
-`npx --prefix frontend playwright install chromium`, et `bash scripts/front_test_all.sh --skip-a --skip-b`.
+## 🔴 Couche C — exécutée pour la première fois le 2026-09-09, **13 tests rouges sur 14** {#couche-c}
+
+Playwright installé (paquet + Chromium), la couche C a enfin tourné : **~7 min, 13 échecs sur 14**.
+Elle **n'entre pas** dans la vérification large tant qu'elle est rouge.
+
+Quatre défauts, dont **trois corrigés** dans `worktree-playwright-couche-c-et-hook` : `__dirname`
+indéfini en module ES dans `global-setup.ts` (le setup mourait avant le premier test) ; le proxy
+`/api` de `vite.config.ts` figé sur `localhost:5001` quand le script sert le backend sur 5098 (tous
+les tests tombaient sur `ECONNREFUSED` — `PW_BASE_URL` ne gouverne que les requêtes de Playwright,
+pas celles de la page) ; et `playwright-report/`, `test-results/`, `.auth/` non ignorés, ce dernier
+portant le **cookie de session** d'un vrai compte.
+
+**Reste à traiter** : la page rend `Impossible de charger la liste des terrains : terrain-list: HTTP 500`,
+donc le canvas PIXI n'apparaît jamais et les 13 tests expirent en l'attendant. La couche exige par
+ailleurs une **session valide** dans `config/users.db`, non versionné : elle ne tourne ni dans un
+worktree neuf, ni sur une machine où personne ne s'est connecté au front.
+
+Détail et commandes : `Documentation/Reference/outils/tests.md`.
 
 ---
 

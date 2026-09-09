@@ -461,7 +461,15 @@ def test_self_models_have_no_position_before_placement():
     gs = eng.game_state
     uid = str(eng.action_decoder.get_deployment_active_unit(gs)["id"])
     obs = eng.obs_builder.build_squad_observation(gs, uid)
-    assert not np.any(obs["self_models_cont"]), (
+    # Colonnes de POSITION seulement : depuis P3-0, le bloc porte aussi `hp_ratio`, qui vaut 1.0
+    # avant la pose — les figurines existent et sont intactes. Un `np.any` sur le bloc entier
+    # confondrait cette valeur JUSTE avec une position inventée.
+    from engine.observation_entities import self_model_cont_index
+
+    positions = obs["self_models_cont"][
+        :, [self_model_cont_index("col_rel"), self_model_cont_index("row_rel")]
+    ]
+    assert not np.any(positions), (
         "l'escouade pas encore posée porte des positions de figurines non nulles"
     )
 
@@ -767,7 +775,7 @@ def test_squad_obs_size_target_matches_the_schema():
     # seul, c'est de forcer un humain à CONSTATER qu'une taille a bougé — donc qu'aucun modèle
     # existant n'est réutilisable. Il était NU (`assert a == b`) : il annonçait que deux nombres
     # diffèrent sans dire lequel était le nouveau, ni quoi en faire.
-    _ACKNOWLEDGED_OBS_SIZE = 18083
+    _ACKNOWLEDGED_OBS_SIZE = 18204
     assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == _ACKNOWLEDGED_OBS_SIZE, (
         f"obs_size a changé : {_ACKNOWLEDGED_OBS_SIZE} -> "
         f"{ObservationBuilder.SQUAD_OBS_SIZE_TARGET}. Tout modèle entraîné est invalidé par "

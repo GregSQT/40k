@@ -29,6 +29,7 @@ import pytest
 from ai.training_contract import (
     CONTRACT_FILENAME,
     build_contract,
+    contract_mismatch,
     contract_path,
     diff_contracts,
     enforce_training_contract,
@@ -219,6 +220,67 @@ def test_une_reprise_divergente_s_arrete_en_nommant_l_ecart(tmp_path) -> None:
     message = str(excinfo.value)
     assert "kill" in message, f"l'écart doit être nommé, pas résumé : {message}"
     assert "--new" in message, "le message doit dire par quoi sortir de l'impasse"
+    assert "AUCUN autre controle" in message, (
+        "un écart de récompense est le seul que rien d'autre ne voit — le message doit le dire, "
+        "c'est ce qui justifie l'arrêt"
+    )
+
+
+def test_le_motif_de_l_arret_depend_de_la_famille_de_l_ecart() -> None:
+    """Le message ne doit pas promettre une détection unique là où SB3 lève déjà.
+
+    Mesuré le 2026-09-09 : sur 30 jours, 13 commits touchent une entrée de registre
+    d'observation, dont 12 changent la DIMENSION — `check_for_correct_spaces` (SB3
+    base_class.py:717) les attrape au chargement. Le message d'origine affirmait pour TOUS les
+    écarts que « ni Stable-Baselines3 ni le verrou de parité ne l'auraient dit » : faux douze fois
+    sur treize. Un motif d'arrêt qui sonne faux est un motif qu'on apprend à ignorer.
+    """
+    obs_seul = str(contract_mismatch("/m/model_A.zip", ["observation.GLOBAL_CONT_FIELDS : ajoute(s) ['x']"]))
+    recompense_seule = str(contract_mismatch("/m/model_A.zip", ["reward_keys : retire(s) ['kill']"]))
+
+    assert "AUCUN autre controle" not in obs_seul, (
+        f"un écart d'observation ne doit pas se prétendre invisible ailleurs : {obs_seul}"
+    )
+    assert "Stable-Baselines3" in obs_seul and "avant le moindre effet de bord" in obs_seul, (
+        f"il doit dire ce qu'il apporte VRAIMENT — s'arrêter plus tôt : {obs_seul}"
+    )
+    assert "AUCUN autre controle" in recompense_seule, recompense_seule
+
+
+def test_un_vocabulaire_d_ids_est_invisible_partout_ailleurs() -> None:
+    """Un registre `*_IDS` porte le SENS des valeurs, pas des cases : sa taille ne bouge jamais.
+
+    « Le vocabulaire s'allonge pour zéro scalaire » (engine/observation_builder.py:135, verbatim).
+    Vérifié le 2026-09-09 : 6 des 17 registres empreintés n'entrent pas dans le calcul de
+    `SQUAD_OBS_SIZE_TARGET`, dont les quatre `*_IDS`. Une insertion y décale le sens de tous les
+    ids suivants **sans changer une seule dimension** : ni `check_for_correct_spaces` ni le verrou
+    de parité ne peuvent le voir. 21 commits sur 90 jours touchent un de ces registres.
+    """
+    vocabulaire = str(contract_mismatch(
+        "/m/model_A.zip", ["observation.UNIT_RULE_EFFECT_IDS : ajoute(s) ['fnp_6']"]
+    ))
+    champs = str(contract_mismatch(
+        "/m/model_A.zip", ["observation.GLOBAL_CONT_FIELDS : ajoute(s) ['fog']"]
+    ))
+
+    assert "AUCUN autre controle" in vocabulaire, (
+        f"un vocabulaire d'ids est le cas où ce contrat est seul — le message doit le dire : "
+        f"{vocabulaire}"
+    )
+    assert "AUCUN autre controle" not in champs, (
+        "un champ d'observation, lui, change la dimension et fait lever SB3 : ne pas confondre "
+        "les deux familles"
+    )
+
+
+def test_un_ecart_mixte_dit_les_deux_motifs() -> None:
+    """Les deux familles à la fois : chacune garde son motif, aucune n'écrase l'autre."""
+    message = str(contract_mismatch(
+        "/m/model_A.zip",
+        ["reward_keys : retire(s) ['kill']", "grid_channels : ajoute(s) ['fog']"],
+    ))
+
+    assert "AUCUN autre controle" in message and "Stable-Baselines3" in message, message
 
 
 def test_un_contrat_present_mais_corrompu_leve(tmp_path) -> None:
@@ -256,7 +318,7 @@ def test_le_prologue_refuse_avant_tout_effet_de_bord(tmp_path, monkeypatch) -> N
 
     with pytest.raises(ValueError, match="kill"):
         train.prepare_run_artifacts(
-            str(models_root), AGENT, False, True, 1, _rewards(win=1.0),
+            str(models_root), AGENT, False, True, 1, _rewards(win=1.0), AGENT,
             log_fn=lambda _m: None,
         )
 
@@ -281,9 +343,121 @@ def test_le_contrat_neuf_survit_a_l_archivage(tmp_path, monkeypatch) -> None:
     (models_root / AGENT / f"model_{AGENT}.zip").write_bytes(b"PK\x03\x04")
 
     train.prepare_run_artifacts(
-        str(models_root), AGENT, True, False, 1, _rewards(), log_fn=lambda _m: None
+        str(models_root), AGENT, True, False, 1, _rewards(), AGENT, log_fn=lambda _m: None
     )
 
     contrat = models_root / AGENT / CONTRACT_FILENAME
     assert contrat.exists(), "le contrat neuf a été archivé avec le run précédent"
     assert json.loads(contrat.read_text(encoding="utf-8")) == build_contract(_rewards(), AGENT)
+
+
+# --------------------------------------------------------------------- revue (2026-09-09)
+
+
+def test_un_contrat_seul_n_est_pas_archive_sans_son_modele(tmp_path) -> None:
+    """Deux `--new` dans la MÊME SECONDE ne doivent pas lever `FileExistsError`.
+
+    Le premier `--new` écrit le contrat tout de suite, alors que le modèle n'arrivera qu'à la fin
+    du run. Ce contrat-là n'accompagne donc aucun modèle : l'écarter faisait viser au second
+    `--new` le nom d'archive que le premier venait de prendre — exactement la collision que la
+    dérogation « sidecar vide » existe pour empêcher.
+    """
+    from ai.train import canonical_run_artifacts
+
+    model_path = str(tmp_path / f"model_{AGENT}.zip")
+    write_contract(model_path, build_contract(_rewards(), AGENT))
+
+    noms = {os.path.basename(p) for p in canonical_run_artifacts(model_path)}
+
+    assert CONTRACT_FILENAME not in noms, "un contrat sans modèle n'a rien à accompagner"
+
+
+def test_deux_new_dans_la_meme_seconde_ne_levent_pas(tmp_path, monkeypatch) -> None:
+    """Le scénario complet du cas ci-dessus, sur le vrai prologue."""
+    from ai import train
+
+    class _Loader:
+        def _resolve_agent_config_key(self, agent_key: str) -> str:
+            return agent_key
+
+    monkeypatch.setattr("ai.train.get_config_loader", lambda: _Loader())
+    models_root = tmp_path / "models"
+    (models_root / AGENT).mkdir(parents=True)
+    (models_root / AGENT / f"model_{AGENT}.zip").write_bytes(b"PK\x03\x04")
+
+    for _ in range(2):
+        train.prepare_run_artifacts(
+            str(models_root), AGENT, True, False, 1, _rewards(), AGENT, log_fn=lambda _m: None
+        )
+
+    assert (models_root / AGENT / CONTRACT_FILENAME).exists()
+
+
+def test_resume_from_conserve_le_contrat_du_modele(tmp_path, monkeypatch) -> None:
+    """`--resume-from` ne doit pas laisser le modèle promu sans contrat.
+
+    La promotion écarte les artefacts canoniques du modèle en place — contrat compris. Or le
+    checkpoint promu sort du MÊME entraînement : il a appris sous ce contrat-là. Sans remise en
+    place, la reprise s'arrêtait aussitôt sur « aucun contrat d'entrainement », en réclamant une
+    initialisation manuelle pour un contrat qui était juste à côté.
+    """
+    from ai import train
+
+    class _Loader:
+        def get_models_root(self) -> str:
+            return str(tmp_path / "models")
+
+        def _resolve_agent_config_key(self, agent_key: str) -> str:
+            return agent_key
+
+    # `build_agent_model_path` passe par le loader GLOBAL pour résoudre la clé d'agent, pas par
+    # celui qu'on donne à la promotion : sans ce patch, le test irait chercher un vrai dossier
+    # `config/agents/TestAgent/`.
+    monkeypatch.setattr("ai.train.get_config_loader", lambda: _Loader())
+    dossier = tmp_path / "models" / AGENT
+    dossier.mkdir(parents=True)
+    model_path = dossier / f"model_{AGENT}.zip"
+    model_path.write_bytes(b"PK\x03\x04 canonique")
+    contrat = build_contract(_rewards(win=3.0), AGENT)
+    write_contract(str(model_path), contrat)
+
+    checkpoint = dossier / "ppo_checkpoint_1000_steps.zip"
+    checkpoint.write_bytes(b"PK\x03\x04 checkpoint")
+    for compagnon in train.model_companion_paths(str(checkpoint)):
+        Path(compagnon).write_bytes(b"compagnon")
+
+    monkeypatch.setattr(train, "_pending_resume_promotion", None, raising=False)
+    promu = train._promote_checkpoint_for_resume(
+        str(checkpoint), AGENT, _Loader(), log_fn=lambda _m: None
+    )
+
+    assert read_contract(promu) == contrat, (
+        "le modèle promu n'a plus de contrat : toute reprise --resume-from s'arrêterait"
+    )
+
+
+def test_la_cle_de_recompense_du_contrat_est_celle_du_run(tmp_path, monkeypatch) -> None:
+    """`--agent A --rewards-config B` : c'est la table de B que le run optimise.
+
+    Empreinter celle de A surveillerait une section que le run n'utilise pas, et laisserait
+    passer une clé retirée de celle qu'il utilise. Même distinction que dans `test_trained_model`.
+    """
+    from ai import train
+
+    class _Loader:
+        def _resolve_agent_config_key(self, agent_key: str) -> str:
+            return agent_key
+
+    monkeypatch.setattr("ai.train.get_config_loader", lambda: _Loader())
+    models_root = tmp_path / "models"
+    (models_root / AGENT).mkdir(parents=True)
+    table = {"description": "x", AGENT: {"win": 1.0}, "PhaseB": {"win": 1.0, "kill": 2.0}}
+
+    train.prepare_run_artifacts(
+        str(models_root), AGENT, True, False, 1, table, "PhaseB", log_fn=lambda _m: None
+    )
+
+    ecrit = json.loads((models_root / AGENT / CONTRACT_FILENAME).read_text(encoding="utf-8"))
+    assert "kill" in ecrit["reward_keys"], (
+        "le contrat a empreinté la table de --agent au lieu de celle du run"
+    )

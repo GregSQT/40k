@@ -163,7 +163,13 @@ def test_model_on_centroid_is_present():
         sm_bin[k][SM_FIGHT] == 0.0
         and sm_bin[k][SM_IN_EZ] == 0.0
     ), "fixture invalide : cette figurine doit n'avoir AUCUN drapeau (cas pathologique T-H)"
-    assert float(sm_cont[k].sum()) == 0.0, "fixture invalide : ses continues doivent etre nulles"
+    # POSITIONS nulles : c'est la moitie continue du cas pathologique. Depuis P3-0, la ligne
+    # porte aussi `hp_ratio` (1.0 sur une figurine intacte), donc elle n'est plus JAMAIS
+    # entierement nulle — mais un slot de PADDING, lui, l'est toujours, et c'est ce que le
+    # masque deduit confondait avec cette figurine-ci.
+    assert float(sm_cont[k][SM_COL]) == 0.0 and float(sm_cont[k][SM_ROW]) == 0.0, (
+        "fixture invalide : ses positions doivent etre nulles"
+    )
 
 
 def test_presence_bit_counts_exactly_the_alive_models():

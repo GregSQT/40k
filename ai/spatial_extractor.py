@@ -235,34 +235,59 @@ def _masked_mean_max(emb: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return torch.cat([mean, maxed.masked_fill(~keep.any(dim=1, keepdim=True), 0.0)], dim=1)
 
 
-def _encode_masked(
-    encoder: nn.Module, mask: torch.Tensor, *parts: torch.Tensor
-) -> torch.Tensor:
-    """Encode `cat(parts)` puis ANNULE les entités absentes : (B, K, …) -> (B, K, D).
+def _zero_absent(emb: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """ANNULE les lignes absentes d'un rang d'embeddings : `emb` (…, K, D), `mask` (…, K).
 
     La remise à zéro est la moitié qu'on oublie en recopiant ce motif. Sans elle un slot vide
     sort le BIAIS de l'encodeur — un vecteur constant non nul, donc indistinguable d'une entité
     réelle pour les têtes pointeur qui lisent ces embeddings slot par slot.
+
+    Écrite ICI et pas deux fois : elle sert aux entités (`_encode_masked`, juste en dessous) et
+    aux SOUS-entités exposées par slot (les emplacements d'arme de l'unité active, cf. `forward`).
     """
-    return encoder(torch.cat(parts, dim=-1)) * (mask > 0).to(mask.dtype).unsqueeze(-1)
+    return emb * (mask > 0).to(emb.dtype).unsqueeze(-1)
+
+
+def _encode_masked(
+    encoder: nn.Module, mask: torch.Tensor, *parts: torch.Tensor
+) -> torch.Tensor:
+    """Encode `cat(parts)` puis ANNULE les entités absentes : (B, K, …) -> (B, K, D)."""
+    return _zero_absent(encoder(torch.cat(parts, dim=-1)), mask)
 
 
 def _aggregate_subentities(
     encoder: nn.Module, sub_in: torch.Tensor, mask: torch.Tensor
-) -> torch.Tensor:
-    """Encode puis AGRÈGE un rang de sous-entités par unité : (B, K, S, F) -> (B, K, 2·D).
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Encode puis AGRÈGE un rang de sous-entités par unité : (B, K, S, F) -> embeddings PAR
+    SLOT (B, K, S, D) et agrégat (B, K, 2·D).
 
     `_masked_mean_max` raisonne sur (lot, ensemble, D) : les deux premières dimensions sont
     aplaties le temps de l'agrégation, puis restaurées. Écrit une fois — cette gymnastique de
     `reshape` est exactement ce qui se recopie de travers d'un rang de sous-entités à l'autre,
     et un axe échangé y donnerait des formes valides pour des agrégations fausses.
+
+    Les embeddings PAR SLOT sont rendus en plus de l'agrégat parce qu'une action peut désigner
+    une sous-entité : les emplacements d'arme de l'unité active sont adressés par
+    `SHOOT_WEAPON_SEL_SLOT_j` et `FIGHT_WEAPON_SLOT_j`. Les jeter ici obligeait leurs têtes à
+    scorer un RANG, alors que le contenu d'un emplacement bouge en cours de partie
+    (`collect_weapon_profiles` trie par porteurs vivants décroissants).
+
+    Les embeddings sont rendus BRUTS, sans annulation des slots absents, et c'est délibéré : un
+    slot vide sort le BIAIS de l'encodeur, mais l'agrégat n'en voit rien (`_masked_mean_max`
+    masque déjà la moyenne et le max) et le seul consommateur par slot est la ligne ACTIVE du
+    bloc allié. Annuler ici couvrirait les quatre rangs — armes et types, les deux camps — soit
+    384 Mo d'activations retenues en plus à `batch_size 4080` (mesuré sur les formes réelles :
+    12+20 entités × 20 profils × 32, et 12+20 × 6 types × 16) contre 10 Mo pour la seule ligne
+    exposée. `forward` annule donc APRÈS avoir pris cette ligne, par `_zero_absent`, avec le
+    masque que cette fonction a elle-même utilisé — jamais un second masque re-dérivé.
     """
     emb = encoder(sub_in)
     b, k = emb.shape[0], emb.shape[1]
-    return _masked_mean_max(
+    agg = _masked_mean_max(
         emb.reshape(b * k, emb.shape[2], emb.shape[3]),
         mask.reshape(b * k, mask.shape[2]),
     ).reshape(b, k, -1)
+    return emb, agg
 
 
 class SpatialCombinedExtractor(BaseFeaturesExtractor):
@@ -274,7 +299,10 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         | embeddings ennemis PAR SLOT (K_e × entity_dim)          -> tête pointeur de TIR (T-E)
         | carte de move NON aplatie (move_map_channels × 32 × 32) -> tête 1x1 de MOVE (T-G)
         | embeddings de CANDIDATS de décision (K_d × entity_dim)  -> tête pointeur CHOICE (§9.3)
-        | embeddings de SLOTS de déploiement (K_p × entity_dim)   -> tête pointeur DEPLOY (§0.44) ]
+        | embeddings de SLOTS de déploiement (K_p × entity_dim)   -> tête pointeur DEPLOY (§0.44)
+        | embeddings d'escouades ALLIÉES (K_a × entity_dim)       -> tête pointeur ACTIVATE (§0.48)
+        | embeddings de MES figurines (N_sm × entity_dim)         -> tête pointeur COHERENCY (P3-0)
+        | embeddings d'ARMES de l'unité active (K_w × weapon_dim) -> têtes pointeur d'ARME ]
 
     `cnn_features` : dimension de la sortie CNN. OBLIGATOIRE, sans défaut — la valeur vient de
     la config JSON de l'agent (`model_params.policy_kwargs.features_extractor_kwargs`).
@@ -414,10 +442,15 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 + self.n_ally_slots * entity_dim
                 # Figurines DE L'UNITÉ ACTIVE par slot (P3-0) : lues par `coherency_query_net`.
                 + self.n_self_models * entity_dim
+                # EMPLACEMENTS D'ARME de l'unité active : lus par les deux têtes de choix d'arme.
+                # Les embeddings existent déjà (`weapon_encoder`, appliqué à toutes les entités) —
+                # seule leur VOIE de lecture est ajoutée, aucun paramètre.
+                + self.n_weapons * weapon_dim
             ),
         )
         self.trunk_dim = trunk_dim
         self.entity_dim = entity_dim
+        self.weapon_dim = weapon_dim
         self.move_map_channels = move_map_channels
 
         # --- CNN : un STEM commun à pleine résolution, puis deux branches (V11 §0.32 T-G) ---
@@ -620,8 +653,43 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         start = self.ally_embeddings_slice().stop
         return slice(start, start + self.n_self_models * self.entity_dim)
 
-    def _encode_units(self, obs: Dict[str, torch.Tensor], family: str) -> torch.Tensor:
-        """Embeddings (B, K, entity_dim) d'une famille d'unités, encodeurs PARTAGÉS."""
+    def active_weapon_embeddings_slice(self) -> slice:
+        """Tranche des embeddings de PROFILS D'ARME de l'unité ACTIVE, PAR EMPLACEMENT.
+
+        Placée en DERNIER, derrière les figurines propres, pour la même raison que toutes les
+        précédentes : les tranches existantes gardent leurs bornes, un ajout en tête les
+        décalerait toutes en silence. C'est la tranche que lisent `shoot_weapon_sel_query_net`
+        et `fight_weapon_query_net`.
+
+        Elle porte les `K_WEAPONS` emplacements de la LIGNE 0 du bloc allié — l'unité active
+        (contrat de l'observation) — dans l'ordre d'émission de `encode_squad_weapon_profiles` :
+        les profils de TIR d'abord, puis ceux de MÊLÉE. Emplacement j = profil j de
+        `collect_weapon_profiles`, donc exactement ce que jouent `SHOOT_WEAPON_SEL_SLOT_j` et
+        `FIGHT_WEAPON_SLOT_j` (invariant D1 appliqué aux armes).
+
+        Sa largeur est `weapon_dim` et NON `entity_dim` : ce sont les embeddings de l'encodeur
+        d'armes PARTAGÉ, les mêmes qui décrivent l'armement de toutes les entités, amies comme
+        ennemies. Les re-projeter en `entity_dim` ajouterait des poids pour ne rien dire de
+        plus ; `_point` lit la dimension sur l'embedding qu'on lui donne.
+        """
+        start = self.self_model_embeddings_slice().stop
+        return slice(start, start + self.n_weapons * self.weapon_dim)
+
+    def _encode_units(
+        self, obs: Dict[str, torch.Tensor], family: str
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Embeddings d'une famille d'unités, encodeurs PARTAGÉS.
+
+        Rend `(unités (B, K, entity_dim), profils d'arme (B, K, K_w, weapon_dim), masque de
+        profil (B, K, K_w))`. Les deux derniers servent au seul bloc ALLIÉ, dont la ligne 0 —
+        l'unité active — porte les emplacements que les actions de choix d'arme désignent ; ils
+        sont calculés de toute façon (`wpn_agg` en dépend), les rendre ne coûte rien.
+
+        Le MASQUE est rendu avec les embeddings et non re-dérivé par l'appelant : c'est celui-là
+        même qui a servi à l'encodage, donc les deux ne peuvent pas diverger. Une seconde lecture
+        de `wpn_bin[..., -1]` ailleurs serait exactement le motif d'échec contre lequel tout ce
+        fichier est écrit.
+        """
         unit_cont = obs[f"{family}_cont"]
         unit_bin = obs[f"{family}_bin"]
         present = unit_bin[..., _UNIT_PRESENT_IDX]  # lu du schéma (dernier champ, §0.37)
@@ -632,7 +700,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         # Un slot vide vaut `padding_idx` et ne contribue rien ; un profil vide n'a que des slots
         # vides, donc un embedding nul — cohérent avec son mask.
         wpn_rule_emb = _pool_ids(self.weapon_rule_embedding, obs[f"{family}_wpn_rule_ids"])
-        wpn_agg = _aggregate_subentities(
+        wpn_emb, wpn_agg = _aggregate_subentities(
             self.weapon_encoder,
             torch.cat(
                 [
@@ -647,7 +715,7 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
 
         typ_bin = obs[f"{family}_types_bin"]
         typ_mask = typ_bin[..., -1]  # MODEL_TYPE_BIN_FIELDS[-1] == "present"
-        typ_agg = _aggregate_subentities(
+        _, typ_agg = _aggregate_subentities(
             self.type_encoder,
             torch.cat(
                 [self.type_norm(obs[f"{family}_types_cont"], typ_mask), typ_bin], dim=-1
@@ -660,15 +728,19 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         ability_emb = _pool_ids(self.ability_embedding, obs[f"{family}_ability_ids"])
         status_emb = _pool_ids(self.status_embedding, obs[f"{family}_status_ids"])
 
-        return _encode_masked(
-            self.unit_encoder,
-            present,
-            self.unit_norm(unit_cont, present),
-            unit_bin,
-            ability_emb,
-            status_emb,
-            wpn_agg,
-            typ_agg,
+        return (
+            _encode_masked(
+                self.unit_encoder,
+                present,
+                self.unit_norm(unit_cont, present),
+                unit_bin,
+                ability_emb,
+                status_emb,
+                wpn_agg,
+                typ_agg,
+            ),
+            wpn_emb,
+            wpn_mask,
         )
 
     def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -679,8 +751,15 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
         pos = self.pos_channels.expand(grid.shape[0], -1, -1, -1)
         move_map = torch.cat([self.map_net(torch.cat([stem, pos], dim=1)), pos], dim=1)
 
-        ally_emb = self._encode_units(observations, "allies")
-        enemy_emb = self._encode_units(observations, "enemies")
+        ally_emb, ally_wpn_emb, ally_wpn_mask = self._encode_units(observations, "allies")
+        # Les profils d'arme ENNEMIS n'ont pas d'emplacement adressable : aucune action ne
+        # désigne l'arme d'un adversaire. Ils restent lus par le tronc, à travers l'agrégation
+        # que `unit_encoder` a déjà consommée.
+        enemy_emb, _, _ = self._encode_units(observations, "enemies")
+        # Emplacements d'arme de l'unité ACTIVE (ligne 0 du bloc allié, contrat de l'observation),
+        # ANNULÉS sur les slots vides : ce sont les seuls embeddings de sous-entité qu'une tête
+        # lise slot par slot, donc les seuls où le biais de l'encodeur serait pris pour une arme.
+        active_wpn_emb = _zero_absent(ally_wpn_emb[:, 0], ally_wpn_mask[:, 0])
         ally_present = observations["allies_bin"][..., _UNIT_PRESENT_IDX]
         enemy_present = observations["enemies_bin"][..., _UNIT_PRESENT_IDX]
 
@@ -761,6 +840,10 @@ class SpatialCombinedExtractor(BaseFeaturesExtractor):
                 # Figurines de l'unité active par slot (P3-0) : `coherency_query_net` les score
                 # pour choisir quelle figurine retirer. Slot i = ligne i de l'obs.
                 sm_emb.reshape(sm_emb.shape[0], -1),
+                # EMPLACEMENTS D'ARME de l'unité active. Tir d'abord, mêlée ensuite
+                # (`encode_squad_weapon_profiles`) : les deux têtes de choix d'arme y prennent
+                # leur bloc.
+                active_wpn_emb.reshape(active_wpn_emb.shape[0], -1),
             ],
             dim=1,
         )

@@ -16,7 +16,7 @@
 >
 > | | Valeur en vigueur | Source de vérité (à relire, jamais à recopier) |
 > |---|---|---|
-> | `obs_size` | **18 083** (2026-09-09 — couples arme→cible déjà commités du split-fire : `split_assigned_w0..9` par entité +320) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) — **aucune config ne le déclare**. Lignée complète : [observation_et_actions.md#historique-de-obs_size](observation_et_actions.md#historique-de-obs_size), domicile unique. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
+> | `obs_size` | **18 204** (2026-09-09 — couples arme→cible déjà commités du split-fire : `split_assigned_w0..9` par entité +320, en remplacement du comptage `n_weapons_assigned` −32) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) — **aucune config ne le déclare**. Lignée complète : [observation_et_actions.md#historique-de-obs_size](observation_et_actions.md#historique-de-obs_size), domicile unique. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
 > | espace d'action | **1 389** (1 024 cellules grille + 1 wait + 20 tir + 20 charge mono-cible + 190 charge multi-cibles + 20 mêlée + 1 fight sans cible + 20 tir indirect + 15 zone intents + 6 `CHOICE_i` + 20 Oath + 12 activation + 10 arme mêlée + 20 cohérence + 10 sélection arme tir + 9 slots passe 2 chantier 06) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`) |
 >
 > - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque
@@ -92,13 +92,28 @@ lisent aucun des deux drapeaux et n'en exigent aucun.
 Le prologue pose une **seconde** question, après « que fait-on du modèle en place ? » : *ce modèle
 a-t-il appris sur le même sens des grandeurs qu'on s'apprête à lui redonner ?*
 
-Trois contrôles existaient et aucun ne voit ce cas. `check_model_lifecycle` regarde la commande,
-pas le modèle. Le verrou de parité de pool attrape une reprise désappariée, mais **après** la
-première sonde — donc après des épisodes joués. Stable-Baselines3 compare `observation_space` et
-`action_space` au chargement, donc ne voit que les changements de **dimension**. Reste la dérive à
-taille **constante** : un canal de grille permuté, une clé de récompense retirée. Les tenseurs
-gardent leur forme, rien ne lève, et le modèle repris apprend sur des grandeurs qui ont changé de
-sens — des dizaines d'heures rendues fausses sans une ligne rouge.
+Trois contrôles existaient. `check_model_lifecycle` regarde la commande, pas le modèle. Le verrou
+de parité de pool attrape une reprise désappariée, mais **après** la première sonde — donc après
+des épisodes joués. Stable-Baselines3 compare `observation_space` et `action_space` au chargement,
+donc ne voit que les changements de **dimension**. Reste la dérive à taille **constante** : un
+canal de grille permuté, une clé de récompense retirée. Les tenseurs gardent leur forme, rien ne
+lève, et le modèle repris apprend sur des grandeurs qui ont changé de sens.
+
+**Ce que ce garde-fou apporte n'est pas le même selon la famille** — mesuré le 2026-09-09 sur
+l'historique git, et le message d'arrêt le dit désormais famille par famille :
+
+| Famille | Fréquence | Ce que ce garde-fou apporte |
+|---|---|---|
+| Clés de récompense | 7 commits / 90 j retirent une clé | **Seul contrôle qui la voit.** Ni SB3 (qui ignore les récompenses) ni le verrou de parité ne regardent là. |
+| Vocabulaires d'ids (`*_IDS`) | 21 commits / 90 j | **Seul contrôle qui les voit.** Ces registres portent le sens des **valeurs**, pas des cases : « le vocabulaire s'allonge pour zéro scalaire » (`observation_builder.py:135`). `SQUAD_OBS_SIZE_TARGET` ne les compte pas — 6 des 17 registres empreintés n'entrent pas dans son calcul — donc une insertion décale tous les ids suivants **à dimension constante**, invisible pour SB3. |
+| Champs d'observation / actions | 13 commits / 30 j touchent un registre, dont **12** changent la dimension | SB3 lève déjà pour ces 12 — mais **plus tard**, une fois le run engagé. L'apport est l'arrêt précoce, plus le renommage à taille constante (aucun cas sur ces 30 jours). |
+
+Autrement dit : ce contrôle est **seul** sur les récompenses et sur les vocabulaires d'ids ; sur les
+champs d'observation, il double SB3 en s'arrêtant plus tôt, et ne prétend pas être seul à voir.
+
+*Limite assumée* : un ajout en **fin** de vocabulaire ne décale aucun id existant et serait
+inoffensif pour un modèle déjà entraîné — la comparaison de listes ordonnées le signale quand même.
+Un arrêt de trop coûte une commande ; un arrêt manquant, des dizaines d'heures.
 
 `ai/training_contract.py` écrit donc, à côté de chaque modèle, un `training_contract.json` qui
 porte **les noms, dans leur ordre** : registres d'observation (`*_FIELDS` de
@@ -109,7 +124,12 @@ l'agent.
 - `--new` **écrit** le contrat (après l'archivage : écrit avant, il partirait avec le run précédent) ;
 - toute **reprise** le compare et **s'arrête** au moindre écart, en nommant le champ divergent ;
 - le contrat suit le modèle à l'archivage, comme ses stats VecNormalize — une archive sans contrat
-  serait irreprenable.
+  serait irreprenable — mais **seulement quand un modèle part avec lui** : un contrat seul ne décrit
+  rien, et l'écarter faisait entrer en collision deux `--new` de la même seconde ;
+- `--resume-from` **repose** le contrat écarté sur le checkpoint promu : il sort du même
+  entraînement, donc il a appris sous ce contrat-là ;
+- la table empreintée est celle **du run** (`--rewards-config`, qui porte le suffixe de phase), pas
+  celle de `--agent` — même distinction que dans `test_trained_model`.
 
 **Ce qui n'est PAS comparé : les valeurs de récompense.** Régler un poids est le mode d'emploi
 normal de cette table ; un garde-fou qui s'y déclencherait serait contourné le jour même. Seule la

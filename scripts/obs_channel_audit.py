@@ -58,6 +58,7 @@ def field_names() -> Dict[str, List[str]]:
     from engine.observation_entities import (
         DECISION_CTX_BIN_FIELDS,
         DECISION_OPTION_BIN_FIELDS,
+        DECISION_OPTION_CONT_FIELDS,
         DEPLOY_CAND_BIN_FIELDS,
         DEPLOY_CAND_CONT_FIELDS,
         GLOBAL_BIN_FIELDS,
@@ -103,6 +104,11 @@ def field_names() -> Dict[str, List[str]]:
         "self_models_bin": list(SELF_MODEL_BIN_FIELDS),
         "decision_ctx_bin": list(DECISION_CTX_BIN_FIELDS),
         "decision_options_bin": list(DECISION_OPTION_BIN_FIELDS),
+        # Ouvert le 2026-09-09 avec le cablage du bloc continu des candidats : sans ces
+        # libelles, `_labels` LEVE et l'audit s'arrete au milieu de la liste alphabetique —
+        # toutes les cles suivantes (deploy_cand, enemies, global, grid, self_models) sortaient
+        # donc du rapport sans que rien ne le dise.
+        "decision_options_cont": list(DECISION_OPTION_CONT_FIELDS),
         "deploy_cand_cont": list(DEPLOY_CAND_CONT_FIELDS),
         "deploy_cand_bin": list(DEPLOY_CAND_BIN_FIELDS),
         # LUS depuis `spatial_grid`, jamais recopiés : le seul livrable de cet audit est de NOMMER

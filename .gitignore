@@ -237,3 +237,14 @@ frontend/wasm-los/target/
 # `--rule-checker` (leur nombre est le carre du nombre de types retenus). Cf.
 # shared/rule_checker_scenarios.py.
 config/rule_checker/
+
+# Artefacts de la couche C (Playwright) : rapport HTML, traces et screenshots d'echec, regeneres a
+# chaque `scripts/front_test_all.sh`. Mesure du 2026-09-09 : sans ces lignes, la premiere execution
+# reelle de cette couche laissait deux repertoires non suivis dans `git status`.
+frontend/playwright-report/
+frontend/test-results/
+
+# `storageState` de Playwright : il porte le COOKIE DE SESSION d'un vrai compte, lu de
+# `config/users.db` par `frontend/tests/e2e/global-setup.ts`. Un jeton d'authentification n'entre
+# jamais dans le depot, meme expire.
+frontend/.auth/

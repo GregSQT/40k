@@ -54,13 +54,60 @@ Il reste périmé pendant le MOVE, ce qui justifie que l'obs continue de recalcu
 
 ---
 
+## ✅ Obs — rôle et PV par figurine (retrait de cohérence 03.03) {#role-pv-figurine}
+
+**Livré le 2026-09-09.** `obs_size` 17795 → **17916** : ré-entraînement `--new` obligatoire — il
+l'était déjà pour les lots du même jour, ce lot n'en ajoute aucun.
+
+`COHERENCY_SLOT_i` (P3-0) demande à l'agent quelle figurine **détruire** pour regagner la
+cohérence. Il désigne la ligne `i` de `self_models_*`, que `pointer_policy._point` score par un
+produit scalaire nu **sans biais de slot**, sur un embedding calculé **ligne par ligne**
+(`self_model_encoder`, aucune interaction entre slots). Or la ligne ne portait que
+`col_rel, row_rel, fight_eligible, in_enemy_ez, elevated, present` : le rôle d'allocation
+existait bien dans l'observation, mais **agrégé par TYPE**, et les PV courants n'étaient plus
+observés par figurine depuis §9.4. Le tri de `_squad_models_for_observation` place pourtant les
+personnages en tête — un rang qu'**aucune tête ne lit**.
+
+**Mesuré avant correction** (16 épisodes gym du pool `training`, actions masquées aléatoires,
+3 250 pas) : 8 points d'arrêt de cohérence, dont 4 mêlaient un personnage attaché et des figurines
+de base et 5 des figurines de PV différents ; **67 paires de figurines de valeur différente sur
+67** portaient une ligne `self_models_bin` **identique**, seule leur position les séparant. Le
+choix était donc un tirage au sort entre le Warboss et un Boy. Même mesure sur l'état :
+l'observation d'une escouade **avec et sans** `pending_coherency_removal` armé est strictement
+identique (écart 0.0 sur toutes les clés), alors que le masque, lui, n'ouvre que les slots
+COHERENCY — la politique ne pouvait pas se tromper d'action, mais la **valeur** de l'état ignorait
+qu'une figurine était perdue d'office.
+
+**Ce qui a été livré :**
+
+- one-hot de rôle (4 bits) + `wounded` dans `SELF_MODEL_BIN_FIELDS` (+100) et `hp_ratio` dans
+  `SELF_MODEL_CONT_FIELDS` (+20) — `present` reste **dernier** (§0.37) ;
+- `MODEL_ROLES` devient la **source unique** des deux registres qui portent ce one-hot (bloc TYPES
+  et bloc figurines) : deux tuples écrits à la main auraient pu diverger sans rien lever ;
+- `wounded` double `hp_ratio` **volontairement** : les continus de ce bloc passent par
+  `EntityRunningNorm`, dont la variance est minuscule sur une colonne quasi constante (une figurine
+  à 1 PV max n'est jamais entamée), donc `hp_ratio` y sature à ±10 — le FAIT survit à la
+  saturation, le DEGRÉ reste porté par `hp_ratio` ;
+- `coherency_removal_pending` dans `GLOBAL_BIN_FIELDS` (+1), posé sur l'escouade **observée** et
+  non « un retrait quelque part » : pendant l'arrêt, l'observateur EST l'escouade en attente ;
+- deux verrous, l'un côté moteur (`tests/unit/engine/test_squad_obs_model_value_p3_0.py`), l'autre
+  côté réseau (`tests/unit/ai/test_self_model_value_encoding.py`) : c'est exactement ce qui
+  manquait à `decision_options_cont`, rempli par le moteur et lu par personne.
+
+`ai/spatial_extractor.py` n'a **pas** été touché : ses largeurs d'encodeur sont dérivées des formes
+de l'espace d'observation, donc les colonnes ajoutées entrent d'elles-mêmes — vérifié par test.
+
+---
+
 ## ✅ Obs — CONTEXTE des points d'arrêt à deux temps {#contexte-points-arret-obs}
 
-**Livré le 2026-09-09.** `obs_size` 17091 → **17763** : ré-entraînement `--new` obligatoire.
+**Livré le 2026-09-09.** `obs_size` 17091 → **17795** : ré-entraînement `--new` obligatoire.
 
 Deux mécanismes demandent un choix dont la moitié est déjà fixée — la sélection d'arme de mêlée
 (§0.69 : la cible est désignée, l'arme reste à choisir) et le sous-état CIBLE du tir fractionné
 (P3-8 : l'arme est armée, la cible reste à choisir). Ni l'une ni l'autre moitié n'était observée.
+S'y ajoute, trouvée en revue puis mesurée, ce que le tir fractionné a déjà DÉCIDÉ : ses
+assignations arme → cible, invisibles elles aussi.
 
 **Mesuré avant correction :** dans les deux cas, deux états ne différant que par la moitié déjà
 fixée produisaient des observations **strictement identiques** — 28 clés comparées, écart maximal
@@ -85,8 +132,64 @@ mêlée, 8 sur 11 ≥ 2 armes de tir ; mesuré en jeu, 5 épisodes gym du pool `
   dérivations d'un même fait divergent ;
 - le drapeau d'arme est posé **hors du cache de profils** (mémoïsé par escouade et figurines
   vivantes) : écrit dedans, il serait resté allumé après la fin du point d'arrêt ;
-- un test vérifie que les deux drapeaux **atteignent le réseau** — c'est exactement ce qui manquait
-  à `decision_options_cont`, rempli par le moteur et lu par personne.
+- un test vérifie que les trois canaux **atteignent le réseau** — c'est exactement ce qui manquait
+  à `decision_options_cont`, rempli par le moteur et lu par personne ;
+- `n_weapons_assigned` (`UNIT_CONT_FIELDS`, +32) comptait, par escouade ennemie, les profils
+  d'armes déjà assignés pendant l'activation de tir en cours. **Ce champ n'existe plus** : il a
+  cédé la place le même jour aux dix bits `split_assigned_w<i>`, qui portent le même comptage
+  (`popcount`) ET l'appariement arme → cible que le comptage perdait — voir
+  [Obs — couples arme→cible du tir fractionné](#couples-arme-cible-split-fire).
+
+---
+
+## ✅ Obs — couples arme→cible du tir fractionné {#couples-arme-cible-split-fire}
+
+**Livré le 2026-09-09.** `obs_size` 17916 → **18204** : ré-entraînement `--new` obligatoire —
+déjà exigé par les lots du même jour, et aucun artefact du disque n'était compatible (P0, P1 et
+le dernier run sauvegardé étaient à 16791, `best_model.zip` à 17055 — mesuré dans les `.zip`).
+
+Deuxième temps du maillon précédent, qui n'avait couvert que la PREMIÈRE arme du split-fire. Une
+fois un couple arme → cible commité, l'agent choisit l'arme suivante puis sa cible sans rien voir
+de ce qu'il a déjà envoyé et sur qui.
+
+**Mesuré :** les dix bits mis à 0, deux états ne différant que par la cible déjà assignée rendent
+des observations **identiques sur les 28 clés**, aux DEUX sous-états — celui qui demande l'arme
+suivante comme celui qui demande sa cible. Le masque ne le disait pas non plus : une cible déjà
+prise reste éligible pour l'arme suivante.
+
+**Ce qui a été livré :**
+
+- `split_assigned_w0..9` (`UNIT_BIN_FIELDS`, 10 bits × 32 entités = +320) : le bit `i` vaut 1 ssi
+  l'arme du slot de profil RNG `i` est déjà assignée à cette escouade. Transposée exacte de
+  `assignments` — sur la ligne de la cible, quelles de mes armes la visent déjà ;
+- `n_weapons_assigned` **retiré** (−32) : il était la projection `popcount` de ces bits.
+  L'égalité est garantie par l'injectivité `code d'arme → slot de profil`, vérifiée sur les 179
+  datasheets et les 33 escouades des `config/armies/` — les armes à profils multiples portent des
+  codes distincts (`plasma_pistol_standard` / `_supercharge`), `COMBI_WEAPON` marquant l'arme
+  physique partagée. Garder les deux, c'était deux encodages du même fait ;
+- **dix bits et non un seul « déjà ciblée »** : 04.03 « Gather Attack Dice » cumule les dés des
+  armes faisant des attaques identiques sur une même cible, donc la conséquence de règle dépend de
+  QUELLE arme y est déjà. Mesuré sur les 11 escouades Armageddon (SM+Orks) : 55 % portent ≥ 3
+  profils de tir, jusqu'à 6 — soit 75 % de celles capables de split-fire, pour qui un bit unique
+  perdrait l'appariement ;
+- le slot vient de `assignments[code]["weapon_slot"]`, **RECOPIÉ** du `pending_weapon_slot` du
+  moteur au moment du commit de la cible, jamais re-dérivé du code par l'observation (invariant
+  D1). C'est ce qui fait passer les valeurs d'`assignments` de `str` à
+  `{target_id, weapon_slot}` ; le seul autre lecteur de la table (le précheck de quantité d'armes)
+  suit le même couple ;
+- un seul lecteur d'activation, `read_pending_shoot_split` : les deux lecteurs de sous-état en
+  dérivent, et le doublon apparu en parallèle a été supprimé plutôt que conservé ;
+- **coût réseau mesuré**, pas estimé : extracteur 245 392 → 246 544 paramètres (+1 152, +0,47 %),
+  l'encodeur d'entité étant partagé entre les deux camps ;
+- verrous : marquage sur la ligne de la cible et sur elle seule, deux armes sur la MÊME cible →
+  deux bits, clôture de la liste sur `K_WEAPONS_RANGED`, absence hors split-fire et dans
+  l'observation d'une autre escouade, slot hors bloc d'armes → erreur, et un test réseau qui exige
+  que **deux slots assignés différents donnent deux embeddings différents** — sans quoi le bloc de
+  bits ne vaudrait pas mieux qu'un comptage.
+
+**Ce qui n'est PAS prouvé :** que la politique s'en serve mieux. L'information existe, elle n'est
+nulle part ailleurs, et le comptage en perdait l'appariement — mais le gain d'apprentissage se
+mesure sur un run, pas ici.
 
 ---
 
