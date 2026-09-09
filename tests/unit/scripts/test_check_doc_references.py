@@ -1794,3 +1794,4 @@ def test_symbol_kinds_inside_fenced_code_block_are_ignored(tmp_path: pathlib.Pat
     )
     _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert not broken, broken
+

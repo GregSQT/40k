@@ -13847,11 +13847,11 @@ def erode_move_pool_by_squad_block(
             _level_map_by_model[str(_mid_a)] = _lm_a
             _origin_level_by_model[str(_mid_a)] = _origin_a
             _ascent_levels_by_model[str(_mid_a)] = {
-                int(_lv) for _lv in _lm_a.values() if int(_lv) > _origin_a
+                _lv for _lv in _lm_a.values() if _lv > _origin_a
             }
             _flat_levels_by_model[str(_mid_a)] = {
-                int(_lv) for _lv in _lm_a.values()
-                if int(_lv) <= _origin_a and int(_lv) != SQUAD_RIGID_MOVE_DESTINATION_LEVEL
+                _lv for _lv in _lm_a.values()
+                if _lv <= _origin_a and _lv != SQUAD_RIGID_MOVE_DESTINATION_LEVEL
             }
     _geo_models: List[Tuple[str, int, int, int, Tuple[int, int, int]]] = []
     _classifier_normal = 0
@@ -13915,24 +13915,6 @@ def erode_move_pool_by_squad_block(
                 _transit_by_level[lvl], _blocked_by_level[lvl] = move_transit_blocked_forms(
                     game_state, str(squad_id), player, lvl
                 )
-        # MONTÉE DEPUIS NIVEAU > 0 : quand une figurine déjà à l'étage redéclare l'ascent et
-        # que la candidate arrive au même niveau ou à un niveau intermédiaire (branche else du
-        # filtre ci-dessous), le BFS doit utiliser les obstacles DE CE NIVEAU D'ARRIVÉE — pas
-        # ceux du sol. `models_geo` ne stocke que le sol (SQUAD_RIGID_MOVE_DESTINATION_LEVEL) ;
-        # on pré-calcule donc ici les niveaux manquants 0 < lv <= origin.
-        if _ascent:
-            for _mid_a, _orig_lv in _origin_level_by_model.items():
-                if _orig_lv > SQUAD_RIGID_MOVE_DESTINATION_LEVEL:
-                    for _lv_else in {
-                        int(v) for v in _level_map_by_model[_mid_a].values()
-                        if 0 < int(v) <= _orig_lv
-                    }:
-                        if _lv_else not in _transit_by_level:
-                            _transit_by_level[_lv_else], _blocked_by_level[_lv_else] = (
-                                move_transit_blocked_forms(
-                                    game_state, str(squad_id), player, _lv_else
-                                )
-                            )
         # Gate (HEX seulement, cf. l'en-tête) : une figurine dont aucun obstacle de transit n'est
         # à <= extent (bbox) a chemin == cube partout dans son budget → borne déjà assurée par le
         # pool. Seules les figurines au contact d'un obstacle exigent un BFS. ``_local_transit`` =
@@ -13984,7 +13966,7 @@ def erode_move_pool_by_squad_block(
             # (`ascent_field_for_model`), sans quoi le masque offrirait une montée que
             # `explain_move_plan_rejection` refuse.
             if _ascent:
-                for _lv_up in sorted(_ascent_levels_by_model.get(mid_g, ())):  # get allowed
+                for _lv_up in _ascent_levels_by_model.get(mid_g, ()):  # get allowed
                     _ck = (mid_g, _lv_up)
                     if _ck not in _climb_by_model_level:
                         _climb_by_model_level[_ck] = ascent_field_for_model(
@@ -14000,7 +13982,7 @@ def erode_move_pool_by_squad_block(
                 # une figurine ennemie postée à l'étage était invisible du masque et faisait
                 # rejeter le plan à l'exécution, et une ennemie au SOL retirait au masque des
                 # destinations légales. Les deux côtés lisent désormais le même niveau.
-                for _lv_flat in sorted(_flat_levels_by_model.get(mid_g, ())):  # get allowed
+                for _lv_flat in _flat_levels_by_model.get(mid_g, ()):  # get allowed
                     _fk_flat = (mid_g if _mode == "euclidean" else "", ocol, orow, _lv_flat)
                     if _fk_flat in _field_by_origin:
                         continue

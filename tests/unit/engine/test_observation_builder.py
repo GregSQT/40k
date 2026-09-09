@@ -12,16 +12,15 @@ import numpy as np
 import pytest
 
 from engine.observation_builder import ObservationBuilder
-from tests.unit.engine._config_helpers import build_game_rules
 
 
 def _make_builder(obs_params: dict | None = None) -> ObservationBuilder:
-    """Instance minimale. Les VRAIES `game_rules`, jamais un dict bricolé.
+    """Instance minimale : le builder n'exige plus aucun paramètre d'observation.
 
     `obs_params` sert aux contre-épreuves ci-dessous : il permet de poser un
     `observation_params` VOLONTAIREMENT périmé et de vérifier qu'il ne change rien.
     """
-    config: dict = {"game_rules": build_game_rules()}
+    config: dict = {}
     if obs_params is not None:
         config["observation_params"] = obs_params
     return ObservationBuilder(config)

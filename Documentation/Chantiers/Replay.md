@@ -521,6 +521,10 @@ et l'échec ne survit pas au changement d'unité.
   clé obligatoire au reset sans bumper `game_saves._MAGIC` rend ce test rouge. Il ne couvre que
   les clés posées par le reset : une clé obligatoire créée paresseusement en cours de partie, ou
   une clé dont la forme change à nom constant, lui échappent encore.
+- **Les entrées des formats ANCIENS sont épinglées** (2026-09-09) : le verrou ci-dessus ne lit
+  que l'entrée de la magic COURANTE, donc réécrire l'entrée d'un format déjà distribué ne lui
+  faisait rien voir. Un second contrôle fige le compte et l'empreinte de chaque entrée qui
+  n'est plus la magic courante, et exige qu'un bump épingle celle qu'il fige.
 
 ## 4. Registre d'état des chantiers replay
 
