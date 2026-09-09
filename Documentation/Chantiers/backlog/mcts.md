@@ -68,7 +68,7 @@ paramètres, `PointerMaskablePolicy`). Scripts jetables, non conservés.
 |---|---|---|
 | `W40KEngine.step` (action légale aléatoire, obs comprise) | **médiane 57 ms**, p90 232 ms, max 446 ms | le pas moteur domine tout budget de simulation |
 | `copy.deepcopy(game_state)` (187 clés) | **745 ms** | inutilisable tel quel |
-| `capture_live_state` / `apply_live_state` (`services/game_snapshots.py`, clés statiques exclues) | **1 075 ms / 722 ms** | le rewind PvP n'est pas un clone de recherche |
+| `capture_live_state` / `apply_live_state` (`services/game_snapshots.py` — chemin **save/load**, pas le magasin de rewind `GameSnapshotStore.maybe_capture`) | **1 075 ms / 722 ms** | aucun clone existant ne peut servir de primitive de recherche |
 | masque + observation (`get_squad_action_mask_and_eligible_units` + `_build_observation`) | 4,9 ms ; 28 tenseurs, 26 007 flottants | négligeable |
 | forward CPU policy + valeur, batch 1 (1 thread) | **8,7 ms** ; 4 threads : 8,8 ms | un forward par nœud est abordable ; le multithread n'apporte rien à batch 1 |
 | forward CPU batch 32 (4 threads) | 26,7 ms | évaluer les feuilles par lot divise le coût par ~10 |
@@ -150,11 +150,32 @@ Trois conclusions, et elles pèsent plus que le reste du document :
 partout. À profondeur 1, elle **est** un « argmax de Q à un coup sur les k meilleurs candidats
 du prior », le prior ne servant qu'à choisir les candidats. C'est défendable et c'est bon marché,
 mais il faut le dire : le gain attendu est celui d'un regard à un coup d'avance, pas celui d'une
-recherche profonde, et il est **entièrement gouverné par la calibration du critic**
-(`explained_variance`, 0,85 au dernier relevé de lignée).
+recherche profonde, et il est **entièrement gouverné par la calibration du critic**.
+⚠️ Le seul chiffre d'`explained_variance` disponible dans la doc du projet, **0,85**, vient de la
+validation du fix d'aliasing sur le run `--etape P2` (`Documentation/Roadmap/training.md`,
+section « Courbes de santé PPO ») : c'est une étape PRÉCOCE de la lignée, pas le
+champion. Il ne dit donc rien de la calibration du modèle sur lequel S1 mesurera. **La valeur du
+champion de P10 est à relever en tête de S1**, avant toute décision.
 
 **Échantillon** : 11 états, un scénario, un checkpoint intermédiaire
 (`robust_0.8689`, pas le champion final). À refaire sur le champion de P10 en tête de S1.
+
+**Fidélité du restore pendant la mesure — fait constaté, cause NON isolée.** Le harnais restaure
+depuis un même état capturé vingt fois de suite pour rejouer des actions différentes, ce qui n'est
+le régime d'aucun appelant de production : `capture_live_state` / `apply_live_state` servent le
+**save/load** d'une partie (un restore, puis on repart), et `GameSnapshotStore` sert le rewind par
+phase. Sous ce régime, un état sur sept a été rejeté par le contrôle de fidélité, et une reprise
+menée SANS contrôle a fait lever `get_squad_action_mask_and_eligible_units` sur « Oath of Moment :
+designation en attente mais aucun slot ouvert ». Ce qui est vérifié : `apply_live_state` ne
+restaure que `game_state` et les attributs **plain** de l'engine (`_ENGINE_PLAIN_TYPES`) — les
+objets (managers, décodeur, registre) sont délibérément laissés vivants. Ce qui n'est PAS établi :
+si la dérive vient de ces objets, du harnais, ou d'ailleurs. Deux tests d'intégration couvrent
+déjà l'égalité stricte des champs après reprise
+(`tests/integration/pvp/test_snapshots_saves.py::test_snapshot_strict_field_equality_after_many_actions`
+et `::test_save_strict_field_equality_after_resume`) : le régime « restores répétés depuis un même
+état » n'y est pas, mais rien ne prouve encore qu'il révèle un défaut de production. **Conséquence
+pour S0** : le contrôle de fidélité (masque, pool éligible, observation identiques après restore)
+est une exigence du livrable, et l'isolement de cette dérive fait partie de son investigation.
 
 ### 1.5 Faits de structure dont la conception dépend
 
@@ -211,6 +232,24 @@ recherche profonde, et il est **entièrement gouverné par la calibration du cri
   de recherche se lit contre ce chiffre.
 - **Résolution x5** : pas moteur 3,4× plus lent qu'en x1 (`entrainement.md`, section
   performance). Tous les budgets ci-dessous sont des chiffres x1 ; en x5 ils se divisent d'autant.
+
+---
+
+### 1.6 Ce qui n'est PAS mesuré — à lever avant d'engager le budget
+
+Tout le reste de ce document est bâti sur §1.1–§1.5. Les quantités ci-dessous sont **déduites ou
+supposées**, et chacune commande un chiffre qui apparaît ailleurs comme s'il était acquis.
+
+| Quantité | Statut | Ce qu'elle commande | Comment la lever |
+|---|---|---|---|
+| **~100 ms par simulation** (restore + `step` + forward) | **supposé** : chaîne sur l'objectif S0 de 30 ms, jamais atteint ni mesuré | le +30 % de S2, le ×10 de S3, la latence de démo | mesure de sortie de S0, puis un banc de `decide()` en tête de S1 |
+| **~125 décisions par épisode** | **déduit** de 200 pas/s ÷ 96 épisodes/min (`perf_entrainement.md`), jamais compté | tous les coûts par épisode | compteur sur un épisode complet, S0 |
+| **~25 pas moteur pour traverser le tour adverse** (§3.3) | **supposé** ; l'ordre de grandeur « quelques dizaines » est cohérent avec les 120 pas mesurés couvrant trois tours des deux camps | la latence des décisions de fin de phase, donc le risque de démo | histogramme des pas entre deux décisions racine, S0 |
+| **Gain attendu** : +2 à +6 points (siège A), +1 à +4 (siège B) | **jugement**, pas mesure | le dimensionnement du chantier | c'est G1 lui-même (§5.2) |
+| **Le classement de la valeur est meilleur que celui de la policy** | **non établi** — §1.4 prouve seulement qu'il DIFFÈRE | tout le chantier | G1 |
+| **Gumbel + Sequential Halving est le bon algorithme ici** | **littérature**, non confronté à ce projet | §3.2 | comparer à un simple argmax de Q à un coup, en tête de S1 — si l'écart est nul, garder le plus simple |
+
+Aucune de ces lignes n'invalide la conception ; toutes bornent ce qu'on peut en promettre.
 
 ---
 
@@ -331,8 +370,9 @@ Deux primitives, dans `engine/state_clone.py` :
 **Jumeaux T2 de S0** : `services/game_snapshots.py` (`_GS_STATIC_KEYS`, `capture_live_state`,
 `apply_live_state`) et `engine/mask_verification.py` (`_recompute_supplied_mask`,
 `_recompute_move_cell_map`) doivent consommer la même table — deux listes de clés statiques
-divergeraient en silence. Le rewind PvP garde sa sémantique (il capture aussi les caches sûrs
-qu'il déclare) mais lit la classification au même endroit.
+divergeraient en silence. Les deux chemins de `game_snapshots.py` — le save/load
+(`capture_live_state`) et le magasin de rewind par phase (`GameSnapshotStore.maybe_capture`) —
+gardent chacun leur sémantique, mais lisent la classification au même endroit.
 
 **Isolement RNG** : autour de chaque simulation, `state = random.getstate()` ;
 `random.seed(seed_simulation)` avec `seed_simulation = hash(search_seed, index_candidat,
@@ -413,15 +453,28 @@ hérité par `extends` comme le reste :
   une clé manquante à la première décision).
 - `opponent_model` : `"self"` (le réseau qui cherche) ou `"learner"` (siège C, poids gelés du
   learner du worker) ; toute autre valeur lève.
-- `time_budget_ms` : `null` en entraînement et en évaluation (le budget est `n_simulations`,
-  la mesure doit être comparable) ; un entier en démo. Budget temps atteint avec moins de
+- `time_budget_ms` : **`null` partout — entraînement, évaluation ET démo** (décision du
+  2026-09-09, cf. ci-dessous). Le budget est `n_simulations`, et lui seul. La clé reste au schéma
+  pour un usage délibéré hors démo : si un entier y est posé, un budget atteint avec moins de
   `min_completed_simulations` simulations → **erreur explicite**, jamais « première action
-  légale ». Atteint après → l'action est prise sur les simulations faites et le cas est compté
-  dans `search/time_budget_hits`.
+  légale » ; atteint après → l'action est prise sur les simulations faites, cas compté dans
+  `search/time_budget_hits`.
 - `distill.fraction` ∈ [0, 1] ; `distill.coef` ≥ 0 ; `distill.enabled: true` exige
   `enabled: true`.
 - Démo : bloc `inference.search` de même schéma sans `distill`, chargé par
-  `services/api_server.py` via le loader, avec `time_budget_ms` obligatoire non nul.
+  `services/api_server.py` via le loader, avec **exactement le même `n_simulations` et le même
+  `root_candidates` que la mesure G1**.
+  **DÉCISION DU 2026-09-09 — la démo montre l'état réel, elle ne l'arrange pas.** Ni budget de
+  temps, ni repli, ni restriction de la recherche à certaines décisions. Raison, et elle est
+  technique autant qu'éthique : toute clause qui fait diverger la démo de l'évaluation fait que
+  le chiffre annoncé au public ne décrit plus le système qu'il regarde. Une recherche restreinte
+  aux décisions bon marché serait un AUTRE système que celui que G1 a mesuré. Le seul cadran
+  admis est `n_simulations`, identique partout et annoncé : s'il est trop lent, on le baisse
+  GLOBALEMENT et on remesure. La lenteur des décisions de fin de phase est une propriété du jeu
+  et du matériel, elle se dit, elle ne se contourne pas.
+  ⚠️ Restreindre la recherche aux décisions bornées reste une option de COÛT pour
+  l'ENTRAÎNEMENT (S2/S3), où il n'y a pas de public et où seul le rendement compte ; elle s'y
+  tranche par mesure, jamais par principe, et ne remonte jamais à la démo.
 - Curriculum : `kind: "champion_search"` accepté par `stage_pool_members` avec la même forme
   qu'un `champion` ; une étape qui l'utilise doit tourner sur un profil dont `search.enabled`
   est vrai, sinon refus au chargement (`validate_curriculum`). Une étape de distillation est un
@@ -514,11 +567,14 @@ métriques §4.1 ; `scripts/pvp_smoke_test.py` joue une partie avec `inference.s
 `root_candidates` 8. **Ordre de test imposé par §1.4** : d'abord la recherche limitée aux
 décisions de DÉPLOIEMENT (aucun dé, signal maximal, désaccord systématique, ~10 décisions par
 partie donc latence négligeable) ; c'est le cas le plus favorable connu, et un échec là rend
-inutile de mesurer les autres phases. **Seuil** : Δcombined ≥ **+4 points** (≈ 2,4 erreurs-types) sans
-dégradation du pire bot au-delà de −2 points, à latence p95 intra-phase ≤ 2 s. Trois issues,
-toutes écrites ici :
-- G1 franchi → S2 s'ouvre ; la démo peut activer `inference.search` avec `time_budget_ms`
-  fixé à la latence p95 mesurée.
+inutile de mesurer les autres phases — c'est un ORDRE DE TEST, pas une restriction de produit
+(§3.7). **Seuil** : Δcombined ≥ **+4 points** (≈ 2,4 erreurs-types) sans dégradation du pire bot
+au-delà de −2 points. La latence n'est **pas** au seuil : elle est MESURÉE et publiée par classe
+(§4.1), et c'est elle qui fixe ensuite `n_simulations` — un gain réel obtenu lentement est un
+gain, la réponse est de baisser le budget, pas de refuser la mesure. Trois issues, toutes écrites
+ici :
+- G1 franchi → S2 s'ouvre ; la démo active `inference.search` avec le `n_simulations` de la
+  mesure, et la latence par classe est annoncée avec le résultat.
 - G1 non franchi avec `argmax_disagreement` < 0,05 → la recherche ne change rien : refaire G1
   avec `root_candidates` 16 avant de conclure. **Issue jugée improbable** : la mesure §1.4 donne
   un désaccord de 10/11 sur un checkpoint intermédiaire.
