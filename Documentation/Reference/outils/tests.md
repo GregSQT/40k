@@ -28,7 +28,7 @@ pourquoi, avec les mesures.
 |---|---|---|
 | A — intégration PvP | 3 min 31 (`-n 6 --dist load`, mesuré 2026-08-05) | déjà dans la vérification large |
 | B — vitest | **4,0 s** — 36 fichiers, 430 tests | **ajoutée le 2026-09-09** |
-| C — Playwright | **~7 min** — 14 tests, **13 rouges** (mesuré 2026-09-09) | **dehors** : rendue exécutable, mais rouge (voir ci-dessous) |
+| C — Playwright | **6 min 42** — 14 tests : **13 rouges, 1 skippé, aucun vert** (mesuré 2026-09-09) | **dehors** : rendue exécutable, mais rouge (voir ci-dessous) |
 
 **Ce que la mesure a trouvé, et qui rendait la couche B rouge par construction.** Avant ce jour,
 `npx vitest run` rendait `Test Files 1 failed | 36 passed (37)` quel que soit l'état du code : le
@@ -40,9 +40,15 @@ La frontière entre les deux harnais est désormais déclarée dans `frontend/vi
 `tests/unit/scripts/test_vitest_collect_scope.py`, qui applique le motif AU DISQUE dans les deux
 sens : aucun spec Playwright collecté par vitest, et aucun test de `src/` laissé hors périmètre.
 
-**Pourquoi la couche C reste dehors — exécutée pour la première fois le 2026-09-09.** Elle est
-**rouge : 13 tests sur 14 échouent**, et le mur est de ~7 min (les échecs sont des timeouts de 30 s).
-Elle ne peut donc pas rejoindre la vérification large tant qu'elle n'est pas remise en état.
+**Pourquoi la couche C reste dehors — exécutée pour la première fois le 2026-09-09.** Sur ses 14
+tests, **13 échouent et 1 est skippé : aucun ne passe.** Le mur mesuré est de **6 min 42**, et il ne
+dit rien du coût réel de la couche — c'est presque entièrement du timeout (13 × 30 s d'attente d'un
+canvas qui n'arrive jamais). Elle ne peut pas rejoindre la vérification large tant qu'elle n'est pas
+remise en état.
+
+Que le fichier n'ait jamais fonctionné est daté, pas supposé : `frontend/package.json` déclare
+`"type": "module"` depuis le **2025-09-07** (`16937e82`), et `global-setup.ts` a été écrit avec
+`__dirname` le **2026-08-19** (`0fecb555`) — dans un projet déjà en ESM depuis onze mois.
 
 Prérequis d'environnement (plusieurs centaines de Mo, action machine et non modification du dépôt) :
 
@@ -68,9 +74,22 @@ n'exécute jamais :
    que les requêtes émises par Playwright lui-même. **Corrigé** par `VITE_API_TARGET` ;
 3. `playwright-report/`, `test-results/` et `.auth/` n'étaient pas ignorés — le dernier porte le
    **cookie de session** d'un vrai compte. **Corrigé** ;
-4. il reste : la page rend `Impossible de charger la liste des terrains : terrain-list: HTTP 500`,
-   donc le canvas PIXI n'apparaît jamais et les 13 tests expirent en l'attendant. **Non corrigé** —
-   c'est un chantier de remise en état, distinct de l'exécutabilité traitée ici.
+4. le `HTTP 500` sur la liste des terrains n'était **pas** un défaut de l'API : `npx vite` n'est
+   qu'un lanceur, et le `node …/vite` qu'il crée **ne mourait pas** avec le script. Chaque
+   exécution laissait un serveur vivant — un Vite d'un worktree déjà supprimé écoutait encore.
+   Le run suivant voyait « Port 5198 is already in use », son propre Vite mourait, **et le script
+   continuait** : Playwright pilotait alors le serveur de l'autre run, avec son ancien proxy vers
+   5001. Les tests ne mesuraient plus l'arbre de travail. **Corrigé** : `setsid` + kill de groupe,
+   et un refus explicite si le port est déjà pris (`port_libre_ou_echoue`), verrouillés par
+   `tests/unit/scripts/test_front_test_all_garde_fous.py`.
+
+Vérifié en reproduisant l'appel à la main : `/api/config/terrain-list` rend **200** sur le backend
+de test, avec le cookie de session **et** l'en-tête anti-CSRF `X-W40K-Client` qu'exige toute requête
+authentifiée par cookie. Un appel sans cet en-tête rend 401 — c'est ce qui m'avait fait suspecter à
+tort l'authentification.
+
+C'est le pire mode de panne pour un harnais : il ne s'arrête pas, **il ment**. Un port occupé n'y
+est donc plus une condition à contourner, mais un motif d'arrêt.
 
 Une fois ces quatre points réglés, son mur sera à re-mesurer sur des tests qui passent : 7 min de
 timeouts ne dit rien du coût réel de la couche.

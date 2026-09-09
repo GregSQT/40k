@@ -15,10 +15,12 @@ du code. Frontière déclarée dans `frontend/vite.config.ts` et verrouillée pa
 `tests/unit/scripts/test_vitest_collect_scope.py`. La couche B (**4,0 s**, 36 fichiers, 430 tests)
 entre dans la vérification large de CLAUDE.md.
 
-## 🔴 Couche C — exécutée pour la première fois le 2026-09-09, **13 tests rouges sur 14** {#couche-c}
+## 🔴 Couche C — exécutée pour la première fois le 2026-09-09, **aucun test vert** {#couche-c}
 
-Playwright installé (paquet + Chromium), la couche C a enfin tourné : **~7 min, 13 échecs sur 14**.
-Elle **n'entre pas** dans la vérification large tant qu'elle est rouge.
+Playwright installé (paquet + Chromium), la couche C a enfin tourné : **6 min 42, 13 échecs et
+1 test skippé sur 14 — aucun ne passe**. Elle **n'entre pas** dans la vérification large. Le mur
+mesuré est presque entièrement du timeout (13 × 30 s d'attente d'un canvas qui n'arrive jamais) : il
+ne dit rien du coût réel de la couche, à re-mesurer sur des tests verts.
 
 Quatre défauts, dont **trois corrigés** dans `worktree-playwright-couche-c-et-hook` : `__dirname`
 indéfini en module ES dans `global-setup.ts` (le setup mourait avant le premier test) ; le proxy
@@ -27,10 +29,17 @@ les tests tombaient sur `ECONNREFUSED` — `PW_BASE_URL` ne gouverne que les req
 pas celles de la page) ; et `playwright-report/`, `test-results/`, `.auth/` non ignorés, ce dernier
 portant le **cookie de session** d'un vrai compte.
 
-**Reste à traiter** : la page rend `Impossible de charger la liste des terrains : terrain-list: HTTP 500`,
-donc le canvas PIXI n'apparaît jamais et les 13 tests expirent en l'attendant. La couche exige par
-ailleurs une **session valide** dans `config/users.db`, non versionné : elle ne tourne ni dans un
-worktree neuf, ni sur une machine où personne ne s'est connecté au front.
+**Le `HTTP 500` sur la liste des terrains était un serveur FANTÔME, pas un défaut de l'API.**
+`npx vite` n'est qu'un lanceur : le `node …/vite` qu'il crée survivait au script, et le run suivant
+— voyant son port pris — laissait Playwright piloter le serveur du run précédent, avec son ancien
+proxy. Corrigé (`setsid`, kill de groupe, refus explicite sur port occupé) et verrouillé par
+`tests/unit/scripts/test_front_test_all_garde_fous.py`. Reproduit à la main :
+`/api/config/terrain-list` rend **200** avec le cookie et l'en-tête `X-W40K-Client`.
+
+**Reste à traiter** : la couche C n'a pas été re-jouée après ce correctif, donc son bilan réel
+(13 rouges / 1 skippé) est celui de runs faussés par le fantôme — **il est à refaire**. Elle exige
+par ailleurs une **session valide** dans `config/users.db`, non versionné : elle ne tourne ni dans
+un worktree neuf, ni sur une machine où personne ne s'est connecté au front.
 
 Détail et commandes : `Documentation/Reference/outils/tests.md`.
 
