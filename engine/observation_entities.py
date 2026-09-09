@@ -79,6 +79,29 @@ UNIT_CONT_FIELDS: Tuple[str, ...] = (
     # Source : max(RNG × inches_to_subhex) sur les armes de tir de l'unité active.
     # 0 pour une unité corps-à-corps uniquement.
     "effective_range",
+    # ⚠ Entité ENNEMIE et ACTIVATION DE TIR FRACTIONNÉ uniquement (P3-8) — grandeur de PAIRE,
+    # comme `n_models_engaging` : combien de MES profils d'armes sont DÉJÀ assignés à cette
+    # escouade pendant l'activation en cours (`pending_shoot_weapon_split["assignments"]`).
+    # 0 hors activation, et 0 sur une alliée.
+    #
+    # POURQUOI. Le tir fractionné assigne les armes une par une et ne résout qu'à la fin : aucune
+    # perte n'est appliquée entre deux assignations, donc l'état des cibles ne bouge pas et rien
+    # d'autre ne dit ce qui est déjà parti sur elles. MESURÉ le 2026-09-09 (10 épisodes gym du
+    # pool `training`, 1963 steps) : 39 des 70 points d'arrêt de CIBLE et 39 points d'arrêt
+    # d'ARME portaient des assignations invisibles, 12 activations sur 21 assignent au moins deux
+    # armes, et 10 d'entre elles ont envoyé plusieurs armes sur la MÊME cible — un sur-tir que
+    # l'agent ne pouvait pas percevoir. Deux états ne différant que par la cible d'une assignation
+    # passée rendaient des observations identiques (0 clé différente sur 28).
+    #
+    # UN COMPTAGE BRUT, et non une espérance de dégâts déjà engagés : les features CALCULÉES ont
+    # été supprimées en V11 §9.1, et le registre d'armes expose des caractéristiques brutes dont
+    # le réseau tire lui-même le volume de feu. Le comptage est de la même famille que
+    # `n_models_engaging` (des figurines) et que `carriers` (des porteurs).
+    #
+    # Ce champ ne dit pas QUELLE arme est partie sur la cible. C'est assumé : l'identité coûterait
+    # un bit par (profil × entité), soit un bloc de paires que le schéma d'entités n'a pas, pour
+    # répondre à une question moins décisive que « combien ai-je déjà engagé ici ».
+    "n_weapons_assigned",
     # VERTICALITÉ (13.06) — émis pour TOUTE entité posée, alliée comme ennemie, et c'est ce qui
     # les distingue des drapeaux de terrain voisins : la hauteur d'une figurine est LUE dans
     # `units_cache["floor_height_by_model"]`, déjà calculée par le moteur pour Plunging Fire, et

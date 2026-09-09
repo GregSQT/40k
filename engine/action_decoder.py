@@ -177,9 +177,23 @@ def _read_pending_fight_target_select(game_state: Dict[str, Any]) -> Any:
     return game_state.get(PENDING_FIGHT_TARGET_KEY)  # get allowed : None = aucune
 
 
+def read_pending_shoot_split(game_state: Dict[str, Any]) -> Any:
+    """Split-fire (P3-8) en cours, QUEL QUE SOIT le sous-état : ``None`` si aucun.
+
+    Les deux lecteurs de sous-état ci-dessous en dérivent — le fait « une activation de tir
+    fractionné est ouverte » ne se teste qu'ici. PUBLIQUE parce que l'observation lit les
+    ASSIGNATIONS déjà faites (`n_weapons_assigned`), qui existent dans les DEUX sous-états :
+    l'agent choisit sa prochaine arme, puis sa cible, sans que rien ne lui dise ce qu'il a déjà
+    envoyé et sur qui (mesuré le 2026-09-09 : 39 des 70 points d'arrêt de cible rencontrés en
+    10 épisodes portaient des assignations invisibles, et 10 activations sur 12 ont envoyé
+    plusieurs armes sur la MÊME cible).
+    """
+    return game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
+
+
 def _read_pending_shoot_weapon_sel(game_state: Dict[str, Any]) -> Any:
     """Split-fire (P3-8), sous-état ARME : le groupe d'arme suivant reste à choisir."""
-    sw = game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
+    sw = read_pending_shoot_split(game_state)
     return sw if sw is not None and sw.get("pending_weapon") is None else None  # get allowed
 
 
@@ -190,7 +204,7 @@ def read_pending_shoot_split_target(game_state: Dict[str, Any]) -> Any:
     pour poser `shoot_weapon_selected` sur le profil armé. Le sous-état (`pending_weapon` armé
     ou non) se décide ICI et nulle part ailleurs.
     """
-    sw = game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
+    sw = read_pending_shoot_split(game_state)
     return sw if sw is not None and sw.get("pending_weapon") is not None else None  # get allowed
 
 

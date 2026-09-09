@@ -45,6 +45,7 @@ from engine.agent_decision import read_pending_agent_decision
 # moteur au lieu de re-tester le sous-état à sa façon.
 from engine.action_decoder import (
     read_pending_fight_weapon_select,
+    read_pending_shoot_split,
     read_pending_shoot_split_target,
 )
 # `macro_intents` est une FEUILLE (constantes de l'espace d'action, aucune dépendance moteur) :
@@ -1780,6 +1781,14 @@ class ObservationBuilder:
             # ne porte l'identifiant que pour l'escouade qui frappe (cf. `fight_weapon_target_id`).
             _b("fight_target_selected", squad_id == ctx["fight_weapon_target_id"])
 
+            # V11 P3-8 — ce que j'ai DÉJÀ envoyé sur cette cible pendant l'activation courante.
+            # `get` : une cible sans assignation vaut 0, ce qui est la lecture exacte — zéro arme
+            # assignée, et non une valeur manquante.
+            _c(
+                "n_weapons_assigned",
+                ctx["weapons_assigned_by_target"].get(squad_id, 0),  # get allowed
+            )
+
         if is_active:
             # 13.5 et 13.08 restent propres à l'unité observée (cf. le calcul plus haut, qui les
             # a déjà produits dans la même passe que `hidden`).
@@ -2197,6 +2206,22 @@ class ObservationBuilder:
             else None
         )
 
+        # V11 P3-8 — armes DÉJÀ assignées, par escouade ennemie, pendant l'activation de tir
+        # fractionné en cours. Compté ici une fois pour les 20 slots, au lieu d'une relecture par
+        # entité. Les DEUX sous-états portent des assignations, d'où le lecteur d'ACTIVATION et
+        # non l'un des deux lecteurs de sous-état.
+        # Garde d'observateur, comme pour la cible de mêlée : une activation de tir n'a de sens
+        # que dans l'observation de l'escouade qui tire.
+        _pending_split = read_pending_shoot_split(game_state)
+        _weapons_assigned_by_target: Dict[str, int] = {}
+        if _pending_split is not None and str(
+            require_key(_pending_split, "squad_id")
+        ) == str(active_squad_id):
+            for _target_id in require_key(_pending_split, "assignments").values():
+                _key = str(_target_id)
+                # get allowed : accumulateur, absence = première arme assignée à cette cible.
+                _weapons_assigned_by_target[_key] = _weapons_assigned_by_target.get(_key, 0) + 1
+
         # Portée MAXIMALE des armes de tir de l'unité active, en subhexes (V11 §9.5 P4).
         # w["RNG"] est déjà en subhexes (_build_enhanced_unit scale avant le reset).
         # Même échelle que `edge_distance` : directement comparable par la tête pointeur.
@@ -2279,6 +2304,9 @@ class ObservationBuilder:
             # frappe. Construire l'obs d'une autre escouade pendant ce point d'arrêt (PvP, replay)
             # ne doit désigner personne.
             "fight_weapon_target_id": _fight_weapon_target_id,
+            # V11 P3-8 — `{id d'escouade ennemie: nombre de mes profils d'armes déjà assignés}`,
+            # vide hors activation de tir fractionné de l'observatrice.
+            "weapons_assigned_by_target": _weapons_assigned_by_target,
             # V11 §9 P3-2 — garde de phase du bit `charge_reachable_max_roll` : hors charge, la
             # question n'a pas de sens et le plan (coûteux) n'est pas construit.
             "is_charge_phase": str(require_key(game_state, "phase")).lower() == "charge",

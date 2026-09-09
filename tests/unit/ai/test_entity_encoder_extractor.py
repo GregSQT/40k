@@ -683,12 +683,14 @@ def test_maskable_policy_builds_and_forwards():
 def test_the_pending_choice_flags_reach_the_network(extractor):
     """Les drapeaux de contexte des points d'arret a deux temps changent bien un embedding.
 
-    `fight_target_selected` (entite) et `shoot_weapon_selected` (profil d'arme) ne servent a rien
+    `fight_target_selected`, `n_weapons_assigned` (entite) et `shoot_weapon_selected` (profil
+    d'arme) ne servent a rien
     si l'extracteur ne les lit pas — c'est exactement ce qui etait arrive a `decision_options_cont`,
     rempli par le moteur et lu par AUCUN reseau, ecart d'embedding mesure 0.0. On exige donc que
     l'embedding de l'entite qualifiee BOUGE quand le drapeau s'allume.
     """
     from engine.observation_entities import unit_bin_index as _ubi
+    from engine.observation_entities import unit_cont_index as _uci
     from engine.observation_weapon_profiles import profile_bin_index as _pbi
 
     space = _space()
@@ -705,6 +707,9 @@ def test_the_pending_choice_flags_reach_the_network(extractor):
         obs["enemies_bin"][:, 0, _ubi("fight_target_selected")] = 1.0
         enemy_after = extractor._encode_units(obs, "enemies")[:, 0]
 
+        obs["enemies_cont"][:, 0, _uci("n_weapons_assigned")] = 2.0
+        enemy_assigned = extractor._encode_units(obs, "enemies")[:, 0]
+
         obs["allies_wpn_bin"][:, 0, 0, _pbi("shoot_weapon_selected")] = 1.0
         ally_after = extractor._encode_units(obs, "allies")[:, 0]
 
@@ -713,4 +718,7 @@ def test_the_pending_choice_flags_reach_the_network(extractor):
     )
     assert not torch.allclose(ally_before, ally_after, atol=1e-6), (
         "shoot_weapon_selected n'atteint pas le reseau : l'arme armee reste invisible"
+    )
+    assert not torch.allclose(enemy_after, enemy_assigned, atol=1e-6), (
+        "n_weapons_assigned n'atteint pas le reseau : le sur-tir reste invisible"
     )

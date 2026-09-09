@@ -5,6 +5,13 @@ Deux mécanismes demandent à l'agent un choix dont la moitié est DÉJÀ fixée
 - sélection d'arme CC (V11 §0.69) — la cible est désignée, l'arme reste à choisir ;
 - tir fractionné (P3-8), sous-état CIBLE — l'arme est armée, la cible reste à choisir.
 
+S'y ajoute ce que le tir fractionné a DÉJÀ décidé : les assignations arme -> cible de
+l'activation en cours (`n_weapons_assigned`). Elles existent dans les DEUX sous-états et ne
+changent l'état d'aucune cible, la résolution n'ayant lieu qu'une fois toutes les armes
+assignées — mesuré le 2026-09-09 sur 10 épisodes gym : 39 des 70 points d'arrêt de cible
+portaient des assignations invisibles, et 10 activations sur 12 ont envoyé plusieurs armes sur
+la MÊME cible sans que l'agent puisse le voir.
+
 Trou fermé ici, MESURÉ le 2026-09-09 avant correction : dans les deux cas, deux états ne
 différant que par la moitié déjà fixée produisaient des observations STRICTEMENT IDENTIQUES
 (28 clés comparées, écart maximal 0,0). L'observation n'encodait qu'un seul des sept points
@@ -32,12 +39,13 @@ import numpy as np
 import pytest
 
 from engine.observation_builder import ObservationBuilder
-from engine.observation_entities import unit_bin_index
+from engine.observation_entities import unit_bin_index, unit_cont_index
 from engine.observation_weapon_profiles import profile_bin_index
 from engine.w40k_core import W40KEngine
 from tests.unit.engine._config_helpers import build_engine_config
 
 BIN_FIGHT_TARGET = unit_bin_index("fight_target_selected")
+CONT_WEAPONS_ASSIGNED = unit_cont_index("n_weapons_assigned")
 BIN_PRESENT = unit_bin_index("present")
 PROFILE_SELECTED = profile_bin_index("shoot_weapon_selected")
 PROFILE_PRESENT = profile_bin_index("present")
@@ -239,13 +247,19 @@ def test_target_outside_the_enemy_slots_raises():
 # ── Volet tir : l'arme armée pendant le sous-état CIBLE du split-fire ─────────
 
 
-def _split_fire_engine() -> W40KEngine:
-    """Escouade 1 avec DEUX profils de tir distincts, deux ennemis à portée."""
+def _split_fire_engine(*, third_weapon: bool = False) -> W40KEngine:
+    """Escouade 1 avec DEUX profils de tir distincts (trois sur demande), deux ennemis à portée.
+
+    `third_weapon` : une arme de plus, donc une assignation de plus AVANT la résolution — le seul
+    moyen d'observer une activation qui a déjà assigné deux armes.
+    """
+    positions = [(30, 20), (31, 20)]
+    weapons = [_weapon_cfg("test_bolter", 24, 4), _weapon_cfg("test_melta", 12, 9)]
+    if third_weapon:
+        positions.append((32, 20))
+        weapons.append(_weapon_cfg("test_plasma", 18, 7))
     eng = _make_engine([
-        _unit_cfg(
-            1, 1, [(30, 20), (31, 20)],
-            ranged=[_weapon_cfg("test_bolter", 24, 4), _weapon_cfg("test_melta", 12, 9)],
-        ),
+        _unit_cfg(1, 1, positions, ranged=weapons),
         _unit_cfg(2, 2, [(30, 28)]),
         _unit_cfg(3, 2, [(33, 28)]),
     ])
@@ -336,3 +350,93 @@ def test_armed_weapon_slot_without_profile_raises():
 
     with pytest.raises(RuntimeError, match="ne porte aucun profil"):
         eng.obs_builder.build_squad_observation(eng.game_state, "1")
+
+
+# ── Volet assignations : ce que le tir fractionné a déjà décidé ───────────────
+
+
+def _assign_weapon(engine: W40KEngine, weapon_slot: int, target_id: str) -> None:
+    """Arme le profil `weapon_slot` puis lui assigne `target_id` — deux actions réelles."""
+    _arm_shoot_weapon(engine, weapon_slot)
+    slot = _enemy_slot_of(engine, "1", target_id)
+    ok, result = engine._process_squad_action(
+        {"action": "squad_shoot_split_target", "squad_id": "1", "target_slot": slot}
+    )
+    assert ok is True, f"squad_shoot_split_target refusé : {result!r}"
+
+
+def _assigned_counts(engine: W40KEngine) -> Dict[str, float]:
+    """`n_weapons_assigned` par escouade ennemie, lu au SLOT que l'action de tir désigne."""
+    obs = _obs_copy(engine)
+    out: Dict[str, float] = {}
+    for target_id in ("2", "3"):
+        slot = _enemy_slot_of(engine, "1", target_id)
+        assert float(obs["enemies_bin"][slot][BIN_PRESENT]) == 1.0
+        out[target_id] = float(obs["enemies_cont"][slot][CONT_WEAPONS_ASSIGNED])
+    return out
+
+
+def test_the_assigned_weapon_is_counted_on_its_target():
+    """Une arme assignée à « 2 » compte sur « 2 », pas sur « 3 »."""
+    eng = _split_fire_engine()
+    _assign_weapon(eng, 0, "2")
+    _arm_shoot_weapon(eng, 1)  # sous-état CIBLE de l'arme suivante
+    assert _assigned_counts(eng) == {"2": 1.0, "3": 0.0}
+
+
+def test_two_past_assignments_no_longer_give_the_same_observation():
+    """LE défaut mesuré : la cible d'une assignation passée ne changeait rien à l'observation."""
+    obs_by_first_target = {}
+    for first_target in ("2", "3"):
+        eng = _split_fire_engine()
+        _assign_weapon(eng, 0, first_target)
+        _arm_shoot_weapon(eng, 1)
+        obs_by_first_target[first_target] = _obs_copy(eng)
+
+    differing = [
+        key for key in obs_by_first_target["2"]
+        if not np.array_equal(obs_by_first_target["2"][key], obs_by_first_target["3"][key])
+    ]
+    assert "enemies_cont" in differing, (
+        f"l'assignation passée ne distingue pas les deux observations (clés : {differing})"
+    )
+
+
+def test_the_count_accumulates_on_the_same_target():
+    """Deux armes sur la même cible -> 2 : c'est le sur-tir que le comptage doit rendre visible.
+
+    Un bit « déjà visée » aurait rendu 1 dans les deux cas, et l'agent aurait continué d'empiler.
+    Trois profils sont nécessaires : à la DERNIÈRE assignation, le moteur résout l'activation et
+    l'état disparaît — il n'y a alors plus de choix à éclairer, donc plus rien à observer.
+    """
+    eng = _split_fire_engine(third_weapon=True)
+    _assign_weapon(eng, 0, "2")
+    _assign_weapon(eng, 1, "2")
+    assert _assigned_counts(eng)["2"] == 2.0
+
+
+def test_the_count_is_visible_in_the_weapon_substate_too():
+    """Le sous-état ARME porte les mêmes assignations : l'agent choisit son arme en les voyant."""
+    from engine.action_decoder import PENDING_SHOOT_WEAPON_SEL_KEY
+
+    eng = _split_fire_engine()
+    _assign_weapon(eng, 0, "3")
+    pending = eng.game_state[PENDING_SHOOT_WEAPON_SEL_KEY]
+    assert pending["pending_weapon"] is None, "précondition : sous-état ARME"
+    assert _assigned_counts(eng) == {"2": 0.0, "3": 1.0}
+
+
+def test_no_entity_carries_a_count_outside_a_shooting_activation():
+    """Hors activation, personne ne porte de comptage — ni les ennemis ni les alliés."""
+    eng = _split_fire_engine()
+    obs = _obs_copy(eng)
+    assert not obs["enemies_cont"][:, CONT_WEAPONS_ASSIGNED].any()
+    assert not obs["allies_cont"][:, CONT_WEAPONS_ASSIGNED].any()
+
+
+def test_the_count_is_not_written_in_another_squad_observation():
+    """L'activation d'une escouade ne compte rien dans l'observation d'une autre."""
+    eng = _split_fire_engine()
+    _assign_weapon(eng, 0, "2")
+    obs = eng.obs_builder.build_squad_observation(eng.game_state, "2")
+    assert not obs["enemies_cont"][:, CONT_WEAPONS_ASSIGNED].any()

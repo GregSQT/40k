@@ -34,11 +34,13 @@ Il reste périmé pendant le MOVE, ce qui justifie que l'obs continue de recalcu
 
 ## ✅ Obs — CONTEXTE des points d'arrêt à deux temps {#contexte-points-arret-obs}
 
-**Livré le 2026-09-09.** `obs_size` 17091 → **17763** : ré-entraînement `--new` obligatoire.
+**Livré le 2026-09-09.** `obs_size` 17091 → **17795** : ré-entraînement `--new` obligatoire.
 
 Deux mécanismes demandent un choix dont la moitié est déjà fixée — la sélection d'arme de mêlée
 (§0.69 : la cible est désignée, l'arme reste à choisir) et le sous-état CIBLE du tir fractionné
 (P3-8 : l'arme est armée, la cible reste à choisir). Ni l'une ni l'autre moitié n'était observée.
+S'y ajoute, trouvée en revue puis mesurée, ce que le tir fractionné a déjà DÉCIDÉ : ses
+assignations arme → cible, invisibles elles aussi.
 
 **Mesuré avant correction :** dans les deux cas, deux états ne différant que par la moitié déjà
 fixée produisaient des observations **strictement identiques** — 28 clés comparées, écart maximal
@@ -63,8 +65,17 @@ mêlée, 8 sur 11 ≥ 2 armes de tir ; mesuré en jeu, 5 épisodes gym du pool `
   dérivations d'un même fait divergent ;
 - le drapeau d'arme est posé **hors du cache de profils** (mémoïsé par escouade et figurines
   vivantes) : écrit dedans, il serait resté allumé après la fin du point d'arrêt ;
-- un test vérifie que les deux drapeaux **atteignent le réseau** — c'est exactement ce qui manquait
-  à `decision_options_cont`, rempli par le moteur et lu par personne.
+- un test vérifie que les trois canaux **atteignent le réseau** — c'est exactement ce qui manquait
+  à `decision_options_cont`, rempli par le moteur et lu par personne ;
+- `n_weapons_assigned` (`UNIT_CONT_FIELDS`, +32) compte, par escouade ennemie, les profils d'armes
+  déjà assignés pendant l'activation de tir en cours. Le tir fractionné ne résout qu'une fois
+  toutes les armes assignées : entre deux assignations aucune perte n'est appliquée, donc rien
+  d'autre ne dit ce qui est déjà parti. Mesuré sur 10 épisodes gym du pool `training` (1963 steps)
+  — 39 des 70 points d'arrêt de cible et 39 points d'arrêt d'arme portaient des assignations
+  invisibles, et **10 activations sur 12** ont envoyé plusieurs armes sur la MÊME cible. Un
+  COMPTAGE, pas un bit : un bit aurait dit la même chose de la première et de la troisième arme
+  empilée. Et un comptage BRUT, pas une espérance de dégâts — les features calculées ont été
+  supprimées en §9.1.
 
 ---
 
