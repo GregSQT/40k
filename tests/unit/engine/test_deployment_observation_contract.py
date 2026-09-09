@@ -719,121 +719,44 @@ def test_deployed_units_still_report_engagement_after_deployment():
 
 
 def test_squad_obs_size_target_matches_the_schema():
-    """Les points 1, 2, 4 et 5 ne changent PAS `obs_size` ; le point 3, lui, l'a changé.
+    """Garde-fou d'ACQUITTEMENT : une taille d'observation ne bouge pas sans qu'un humain le voie.
 
-    Il valait 20828 jusqu'au 2026-08-04 : la suppression de la clause « buddy » (04.02 WHILE
-    FIGHTING — seule une figurine ENGAGÉE frappe ; le relais par une alliée au contact venait
-    d'une édition antérieure) emporte les deux champs qui la décrivaient, `ez_relayed_by_ally`
-    (self_models_bin) et `n_relayed_ez` (unit_cont) — d'où 20780.
+    Ce n'est PAS un contrôle de cohérence. La cohérence est établie ailleurs, et mieux : SB3
+    refuse au chargement un `.zip` dont l'espace d'observation ne correspond plus
+    (`check_for_correct_spaces`), en comparant le Dict ENTIER — donc aussi une DISPOSITION
+    changée à taille égale, ce qu'un total scalaire ne voyait pas.
 
-    Puis le chantier 01 (2026-08-04) a remplacé les 13 bits `rule_<id>` par 8 slots d'ids de
-    capacité + 4 slots d'ids de statut : 13 bits x 28 entités remplacés par 12 entiers x 28,
-    d'où 20780 -> 20752.
+    Ce que ce littéral ajoute, et lui seul, c'est de forcer un humain à CONSTATER qu'une taille a
+    bougé, donc qu'aucun modèle existant n'est réutilisable et qu'un retrain `--new` coûtant des
+    dizaines d'heures en x1 (des centaines en x5) vient d'être engagé. SB3 protège la MACHINE
+    contre un modèle incompatible ; ce test protège l'HUMAIN contre un retrain qu'il n'avait pas
+    prévu.
 
-    Le chantier 01 avait aussi la charge de déclarer les DEUX emplacements de CP attendus par le
-    chantier 02 (`global_cont`, règle 08.02) — il ne l'a pas fait. L'oubli est réparé au début du
-    chantier 02 : `my_command_points` / `enemy_command_points`, d'où 20752 -> 20754. Le retrain
-    `--new` reste unique (celui du chantier 01, du même jour, invalidait déjà les `.zip`).
+    ⚠️ Depuis le 2026-09-09, c'est le SEUL point d'acquittement. La config d'agent portait un
+    `observation_params.obs_size` recopié à la main : l'éditer était jusque-là ce qui obligeait à
+    voir le changement. Cette clé a été supprimée — elle était confrontée à
+    `SQUAD_OBS_SIZE_TARGET`, celle-là même qui la déterminait, donc elle ne pouvait rien établir
+    et n'avait d'autre issue que de retarder sur sa source. Il n'y a plus de config à aligner :
+    si ce test tombe, les deux seuls gestes sont d'acquitter la valeur ci-dessous et d'ajouter le
+    maillon correspondant à la chaîne « Historique de `obs_size` » de
+    `Documentation/Reference/training/observation_et_actions.md`.
 
-    Toujours le chantier 02 : le registre du bloc `decision_options_bin` a été DÉCOUPLÉ du
-    vocabulaire observé (`DECISION_GRANTABLE_EFFECT_IDS`). Il portait un bit `grants_*` par effet
-    OBSERVABLE, alors que 6 des 13 ne sont accordables par aucun roster — 36 scalaires qui ne
-    pouvaient jamais valoir 1, et 6 de plus à chaque capacité ajoutée à l'observation. D'où
-    20754 -> 20718, et surtout : allonger le vocabulaire observé ne bouge PLUS `obs_size`, ce
-    que le gel du chantier 01 promettait sans le tenir.
+    LA LIGNÉE N'EST PAS RECOPIÉE ICI. Elle a un domicile unique, ce document, dont le dernier
+    maillon est confronté à la source calculée par `scripts/check_doc_references.py`. Elle vivait
+    auparavant à trois endroits — la `justification` de la config, cette docstring et ce
+    document — dont aucun sous contrôle : les trois ont dérivé, et le document s'était arrêté
+    deux maillons plus tôt que la valeur qu'il annonçait vingt lignes au-dessus.
 
-    Le chantier 03 (2026-08-05) a trouvé le MÊME oubli que le chantier 02, et deux fois : le
-    chantier 01 annonce que les capacités de FACTION vont dans `global_bin` (« voir chantier
-    03 ») mais n'y a déclaré aucun emplacement, et il n'a pas non plus déclaré le type de
-    décision du Waaagh!. Réparé ici : 6 drapeaux de `GLOBAL_BIN_FIELDS`
-    (`my`/`enemy_waaagh_available`, `my`/`enemy_waaagh_active`,
-    `my`/`enemy_oath_target_selected`) et une entrée de plus dans `AGENT_DECISION_TYPE_IDS`
-    (`waaagh_call`, +1 bit de `decision_ctx_bin`), d'où 20718 -> 20725. Le retrain `--new` reste
-    UNIQUE : les `.zip` existants datent d'avant le gel du 2026-08-04 et étaient déjà invalidés.
-
-    QUATRE bits pour le Waaagh! et non deux : sa durée court « until the start of your next
-    Command phase », donc elle enjambe le tour adverse. L'identité de la cible d'Oath, elle,
-    n'est PAS ici : elle est portée par le statut `oath_target` de l'entité visée — coût zéro.
-
-    Socle du lot V11 §0.48 (2026-08-07) : 20727 -> 14609. Les règles booléennes d'armes passent
-    des drapeaux positionnels aux ids (17 dimensions par profil remplacées par 6 slots, soit
-    -6 160 scalaires), le one-hot de type de décision est pré-dimensionné à 8 colonnes (+6), et
-    `N_DEPLOY_SLOTS` passe de 5 à 8 slots dont 3 RÉSERVÉS (+36). Objectif : plus aucune règle,
-    aucun type de décision et aucune stratégie de déploiement ne coûtera de retrain.
-
-    Le chantier 03 (2026-08-06) ajoute enfin `my_oath_wound_bonus_active` /
-    `enemy_oath_wound_bonus_active`, d'où 20725 -> 20727. Les deux bits précédents disent qu'une
-    désignation est EN VIGUEUR, jamais quelle règle elle ouvre : le +1 au jet de blessure est
-    subordonné au détachement Codex ET à l'absence d'unité BLOOD ANGELS / DARK ANGELS /
-    DEATHWATCH / SPACE WOLVES, là où la relance de touche ne dépend d'aucune des deux moitiés.
-    Cette clause dépend du ROSTER, qu'aucune autre feature ne porte — les mots-clés de
-    sous-faction des unités ALLIÉES ne sont pas observés, et la clause compte les unités MORTES.
-
-    ⚠️ « DERNIER changement de la séquence » était vrai du SOCLE, pas du LOT : `L1`, `L2` et `L6`
-    étaient déjà inventoriés comme cassant les contrats (§0.48). Les deux entrées ci-dessous le
-    prouvent. Les chantiers 04 à 06 n'utilisent, eux, que des dimensions déjà déclarées.
-
-    `L1` (2026-08-07) — un drapeau `declines` s'ajoute au registre de candidat de décision, d'où
-    14609 -> 14615 (1 bit x 6 slots). Ce n'est pas un enrichissement : les DEUX candidats de
-    `waaagh_call` sortaient la MÊME ligne `[0…0, present=1]` — effets de faction, donc aucun bit
-    `grants_*` de part et d'autre. Encodeur de candidat partagé et tête pointeur sans biais par
-    slot : logits égaux, gradients égaux, l'appel du Waaagh! était un pile-ou-face que PPO ne
-    pouvait pas apprendre.
-
-    `L2` (2026-08-07) — 14615 -> 16659. `K_ALLY_SLOTS` passe de 8 à 12 (+2 044 = 4 lignes x 511)
-    parce que la constante ne borne plus une marge d'observation mais le NOMBRE DE CANDIDATS
-    D'ACTIVATION adressables : depuis `L2`, l'action `ACTIVATE_SLOT_i` désigne la ligne alliée `i`.
-    Coût en paramètres : ZÉRO (encodeur d'entités partagé, §0.32).
-
-    Le retrain `--new` du lot §0.48 absorbe les deux.
-
-    `P3-4` — 16659 -> 16671. `DECISION_OPTION_CONT_SIZE = 2` s'ajoute aux candidats de décision
-    (champs ``role_tier_norm`` + ``dist_enemy_norm``). Contribution : 6 slots × 2 scalaires = +12.
-    Impose un retrain `--new`.
-
-    `§9.5 P4` — 16671 -> 16703. ``effective_range`` (portée max de tir de l'unité active,
-    en subhexes) ajouté à ``UNIT_CONT_FIELDS``. Contribution : 1 scalaire × 32 entités = +32.
-    Impose un retrain `--new`.
-
-    `2026-08-24` — 16703 -> 16735. ``charged`` ajouté à ``UNIT_BIN_FIELDS`` (slot réservé
-    pour les stratagèmes réactifs §15.08/§15.11). Contribution : 1 bit × 32 entités = +32.
-    Impose un retrain `--new`.
-
-    `2026-08-31` — 16735 -> 16791. Réservations J4/J5 pour éviter un --new lors de leur
-    implémentation (coût x1 : dizaines d'heures ; coût x5 : centaines d'heures). Trois blocs :
-    ``AGENT_DECISION_TYPE_SLOTS`` 8 -> 16 (+8), ``reserved_mission_cont_0..15`` dans
-    ``GLOBAL_CONT_FIELDS`` (+16), ``reserved_mission_bin_0..31`` dans ``GLOBAL_BIN_FIELDS``
-    (+32). Total : +56. Impose un retrain `--new`.
-
-    `2026-09-08` — 16791 -> 16811. OC live + `secured` par objectif (14.02/14.03) :
-    ``objective_my_oc_0..4`` et ``objective_enemy_oc_0..4`` dans ``GLOBAL_CONT_FIELDS``,
-    ``objective_secured_mine_0..4`` et ``objective_secured_enemy_0..4`` dans
-    ``GLOBAL_BIN_FIELDS``. Contribution : +20 — les champs GLOBAUX comptent UNE fois, pas par
-    entité, contrairement aux entrées de ``UNIT_*_FIELDS`` ci-dessus qui sont multipliées par 32.
-    Impose un retrain `--new`.
-
-    `2026-09-09` — 16811 -> 16971. Mots-clés de CATÉGORIE par entité : ``kw_infantry``,
-    ``kw_vehicle``, ``kw_monster``, ``kw_fly``, ``kw_psyker`` dans ``UNIT_BIN_FIELDS``.
-    Contribution : 5 bits × 32 entités = +160. L'observation portait le mot-clé VISÉ par
-    [ANTI-X] côté arme sans jamais dire si la cible le portait ; même trou pour le volet
-    MONSTER/VEHICLE de 10.06 et les gates de terrain 13.06/13.08/13.09 sur les entités
-    ennemies. Impose un retrain `--new`.
-
-    `2026-09-09` — 16971 -> 17055. Verticalité du move gym (13.06) : l'agent peut désormais finir
-    un move en hauteur, donc l'observation doit porter la hauteur, sans quoi la montée serait un
-    état CACHÉ à effet sur la récompense (+1 BS de Plunging Fire 22.05, coût de descente au move
-    suivant). Trois entrées : ``max_floor_height`` dans ``UNIT_CONT_FIELDS`` et
-    ``has_ground_model`` dans ``UNIT_BIN_FIELDS`` (1 scalaire × 32 entités chacun = +64),
-    ``elevated`` dans ``SELF_MODEL_BIN_FIELDS`` (1 bit × 20 figurines = +20). Total : +84.
-    S'y ajoute, HORS de ce compteur, le canal de grille ``occupant_level``
-    (``GRID_CHANNELS`` 11 -> 12) : la grille est fournie à part et n'entre pas dans `obs_size`,
-    mais elle change elle aussi la forme d'entrée du réseau. Impose un retrain `--new`.
-
-    Ce verrou valait 20768 tant que le point 3 restait ouvert : les quatre autres points ne
-    touchent QUE le contenu de l'observation de déploiement, jamais sa taille — donc aucun modèle
-    n'était invalidé par eux. Le point 3 ajoute le bloc « candidats de déploiement »
-    (5 slots x 12 scalaires) et impose, par construction, un retrain `--new`.
+    Ce qui NE bouge pas cette valeur, et doit le rester : ajouter une capacité, un statut, une
+    faction ou une règle d'arme (ce sont des `obs_id` dans un registre, lus par embedding), ni
+    ouvrir un type de décision ou une stratégie de déploiement tant qu'un slot réservé reste
+    libre. Ce qui la bouge : un champ de plus dans `UNIT_*_FIELDS`, `GLOBAL_*_FIELDS`,
+    `SELF_MODEL_*_FIELDS` ou un bloc de candidats. La grille égocentrique, elle, est fournie à
+    part et n'entre PAS dans ce compteur — mais elle change tout autant la forme d'entrée du
+    réseau, donc un `GRID_CHANNELS` modifié impose lui aussi un `--new` sans faire bouger d'un
+    scalaire l'assertion ci-dessous.
     """
+
     from engine.observation_builder import ObservationBuilder
     from engine.observation_entities import (
         DEPLOY_CAND_BIN_SIZE, DEPLOY_CAND_CONT_SIZE, N_DEPLOY_SLOTS,
@@ -849,10 +772,13 @@ def test_squad_obs_size_target_matches_the_schema():
         f"obs_size a changé : {_ACKNOWLEDGED_OBS_SIZE} -> "
         f"{ObservationBuilder.SQUAD_OBS_SIZE_TARGET}. Tout modèle entraîné est invalidé par "
         f"construction — retrain `--new` (dizaines d'heures en x1, centaines en x5). "
-        f"Acquitter ici, aligner `obs_size` dans les profils de la config d'agent, et ajouter "
-        f"la ligne correspondante à la lignée de cette docstring."
+        f"AUCUNE CONFIG N'EST À ÉDITER : la taille est calculée, plus personne ne la déclare. "
+        f"Deux gestes, et deux seulement : acquitter la nouvelle valeur ici, et ajouter le "
+        f"maillon correspondant à la chaîne « Historique de `obs_size` » de "
+        f"Documentation/Reference/training/observation_et_actions.md, son domicile unique "
+        f"(scripts/check_doc_references.py confronte son dernier maillon à la source calculée)."
     )
     assert N_DEPLOY_SLOTS * (DEPLOY_CAND_CONT_SIZE + DEPLOY_CAND_BIN_SIZE) == 96, (
-        "le bloc candidat de déploiement a changé de taille : mettre à jour `obs_size` dans les "
-        "7 profils de la config d'agent, et l'historique d'AI_OBSERVATION.md"
+        "le bloc candidat de déploiement a changé de taille : acquitter la nouvelle valeur "
+        "d'`obs_size` ci-dessus et ajouter son maillon à l'historique d'observation_et_actions.md"
     )

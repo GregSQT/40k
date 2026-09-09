@@ -291,8 +291,8 @@ désactivait la rampe **en silence**, ce qui a laissé deux profils (`x5_append`
 perdre entièrement et deux autres (`x5_new`, `x5_debug`) finir à `0.0`. Ces profils entraînaient
 un agent qui ne se déploie jamais, puis le **notaient sur des parties à déployer** :
 l'évaluation, elle, impose toujours une phase de déploiement. Sur les chemins API/PvP, qui ne
-fournissent qu'un fragment de config (`observation_params`) et n'ont pas d'épisodes à ramper,
-l'absence reste légitime et ne lève pas.
+chargent qu'une phase du profil et n'ont pas d'épisodes à ramper, l'absence reste légitime et
+ne lève pas.
 
 Réglage de référence des six profils `ArmageddonAgent` (2026-08-02) : `0.3 → 0.8`, `linear`,
 `freeze_after_progress: 1.0`. **Aucun gel** : la rampe se déroule sur tout le run et
@@ -302,8 +302,7 @@ mi-run (`0.5`, plafond effectif `start + (end − start) × freeze` = 0.55, rég
 est **abandonné le 2026-08-02**, en même temps que la correction du dénominateur de la rampe
 (V11 §0.57) : le compteur d'épisodes du moteur est LOCAL à un environnement et il était divisé
 par le total GLOBAL, donc à `n_envs=48` la rampe n'avançait pas et le gel n'avait aucun objet.
-Chaque bloc porte un champ `justification` (même
-convention que `observation_params.justification`). Verrou :
+Chaque bloc porte un champ `justification`, convention du fichier. Verrou :
 `tests/unit/engine/test_deployment_mode_schedule.py` dérive la référence du profil `x1`, exige que
 les cinq autres l'égalent, et vérifie que le plafond effectif reste ≥ 0.5.
 

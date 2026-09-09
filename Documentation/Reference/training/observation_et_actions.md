@@ -644,10 +644,27 @@ trop longtemps ne lève rien, il décrit un état périmé. L'inventaire est ver
 
 ### Historique de `obs_size`
 
-**`obs_size`** (config d'agent, `observation_params.obs_size`) = nombre TOTAL de scalaires,
-grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Toute évolution du
-schéma change cette valeur et rend les `.zip` existants incompatibles : le retrain `--new` est
-obligatoire.
+**`obs_size`** = nombre TOTAL de scalaires, grille exclue — **calculé** par
+`ObservationBuilder.SQUAD_OBS_SIZE_TARGET` depuis le schéma d'entités
+(`engine/observation_entities.py`). Il ne se déclare **nulle part** : la config d'agent en
+portait une copie sous `observation_params.obs_size`, que le moteur confrontait ensuite à la
+valeur calculée — une boucle fermée dont la seule issue possible était de retarder sur sa
+propre source. La clé a été supprimée le 2026-09-09.
+
+Toute évolution du schéma change cette valeur et rend les `.zip` existants incompatibles : le
+retrain `--new` est obligatoire. Deux mécanismes distincts le disent, et aucun ne remplace
+l'autre :
+
+- **la MACHINE** — SB3 compare l'espace d'observation ENTIER au chargement d'un modèle
+  (`check_for_correct_spaces`), donc il voit aussi un changement de disposition à taille
+  égale, ce qu'un total scalaire ne savait pas faire ;
+- **l'HUMAIN** — `tests/unit/engine/test_deployment_observation_contract.py`
+  (`test_squad_obs_size_target_matches_the_schema`) tombe rouge en nommant l'ancienne valeur,
+  la nouvelle et le coût du retrain. C'est le seul point d'acquittement : rien d'autre
+  n'oblige plus personne à CONSTATER qu'une taille a bougé.
+
+**Cette chaîne est le domicile UNIQUE de la lignée**, et son dernier maillon est confronté à
+la source calculée par `scripts/check_doc_references.py` : y oublier un maillon est rouge.
 
 **Historique** : 108 (T6) → 199 → 1011 (profils d'armes et règles) → 5729 (tenseurs d'entités,
 T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10, T-F) → 20166 → 20181 → 20545
@@ -655,9 +672,19 @@ T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10, T-F) → 20166 �
 (chantier 02) → 20725 (chantier 03) → 20727 → **14609** (socle §0.48 : règles d'armes en ids)
 → 14615 (drapeau `declines`) → 14659 + 16653 (`L2`, `K_ALLY_SLOTS` 8 → 12) → 16671
 → 16703 (`effective_range`) → 16735 (`charged`, 2026-08-24)
-→ **16791** (réservations J4/J5, 2026-08-31 : `AGENT_DECISION_TYPE_SLOTS` 8→16 +8,
+→ 16791 (réservations J4/J5, 2026-08-31 : `AGENT_DECISION_TYPE_SLOTS` 8→16 +8,
 `reserved_mission_cont_0..15` dans `GLOBAL_CONT_FIELDS` +16,
-`reserved_mission_bin_0..31` dans `GLOBAL_BIN_FIELDS` +32).
+`reserved_mission_bin_0..31` dans `GLOBAL_BIN_FIELDS` +32)
+→ 16811 (OC live et `secured` par objectif, 14.02/14.03, 2026-09-08 :
+`objective_my_oc_0..4` et `objective_enemy_oc_0..4` dans `GLOBAL_CONT_FIELDS` +10,
+`objective_secured_mine_0..4` et `objective_secured_enemy_0..4` dans `GLOBAL_BIN_FIELDS` +10
+— les champs GLOBAUX comptent UNE fois, pas par entité)
+→ 16971 (mots-clés de catégorie par entité, 2026-09-09 : `kw_infantry`, `kw_vehicle`,
+`kw_monster`, `kw_fly`, `kw_psyker` dans `UNIT_BIN_FIELDS`, 5 bits × 32 entités +160)
+→ **17055** (verticalité du move gym 13.06, 2026-09-09 : `max_floor_height` dans
+`UNIT_CONT_FIELDS` et `has_ground_model` dans `UNIT_BIN_FIELDS`, 1 × 32 entités chacun +64,
+`elevated` dans `SELF_MODEL_BIN_FIELDS`, 1 bit × 20 figurines +20 ; le canal de grille
+`occupant_level` s'y ajoute HORS de ce compteur, la grille étant fournie à part).
 
 **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
 Depuis le chantier 01, une capacité, un statut ou une faction entière n'est qu'un `obs_id` de

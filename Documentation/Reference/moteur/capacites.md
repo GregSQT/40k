@@ -119,7 +119,7 @@ Le chantier 01 était **le seul** de la série capacités (01→06) autorisé à
 
 Le gel a été rompu **hors série**, sciemment, par le lot V11 §0.48 (élément L2, choix de l'escouade à activer, 2026-08-07) : une famille d'actions entière qui n'existait sous aucune forme, inventoriée d'avance comme cassant les deux contrats, retrain unique avec le reste du lot. Le gel ne couvrait pas ce cas et ne prétendait pas le couvrir.
 
-Valeurs courantes : `obs_size` se lit dans la clé `obs_size` de `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` (dont la `justification` attenante tient la lignée des changements de schéma) ; `TOTAL_ACTION_SIZE` dans `engine/macro_intents.py`.
+Valeurs courantes : `obs_size` est **calculé** par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` (`engine/observation_builder.py`) depuis le schéma d'entités — aucune config ne le déclare, et la lignée des changements de schéma vit dans [observation_et_actions.md](../training/observation_et_actions.md), section « Historique de `obs_size` » (domicile unique de la lignée) ; `TOTAL_ACTION_SIZE` dans `engine/macro_intents.py`.
 
 ---
 
@@ -748,4 +748,4 @@ Conséquence pour la passe 1 : rien à solder avant de commencer. Le témoin de 
 - **Chantier 05** (purge du placeholder `reroll_charge`) : livré le 2026-08-10 — son legs pour le 06 est en §5.
 - **Chantier 06** : ouvert — état dans [Roadmap/capacites.md](../../Roadmap/archives/capacites.md) ; recomptage du bandeau le 2026-08-10 (seul `hit_any_fail` était posé) ; Deadly Demise câblée hors passe le 2026-08-25.
 - **Gel rompu hors série** par V11 §0.48 L2 (2026-08-07) — cf. [ROADMAP_INDEX.md](../../Roadmap/ROADMAP_INDEX.md).
-- Chiffres volatils : `obs_size` → clé `obs_size` + `justification` de `config/agents/ArmageddonAgent/ArmageddonAgent_training_config.json` (lignée complète) ; `TOTAL_ACTION_SIZE` et la carte des familles d'actions → `engine/macro_intents.py` ; `obs_id` occupés → `config/unit_rules.json` + `config/unit_statuses.json` ; schéma d'observation → `engine/observation_entities.py` et [observation_et_actions.md](../training/observation_et_actions.md).
+- Chiffres volatils : `obs_size` → `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` (`engine/observation_builder.py`), lignée dans [observation_et_actions.md](../training/observation_et_actions.md), section « Historique de `obs_size` » (domicile unique de la lignée) ; `TOTAL_ACTION_SIZE` et la carte des familles d'actions → `engine/macro_intents.py` ; `obs_id` occupés → `config/unit_rules.json` + `config/unit_statuses.json` ; schéma d'observation → `engine/observation_entities.py` et [observation_et_actions.md](../training/observation_et_actions.md).

@@ -2619,9 +2619,12 @@ def initialize_engine(scenario_file: Optional[str] = None):
                     f"  - config/agents/{agent_key}/{agent_key}_training_config.json"
                 )
         
-        # Use first agent's training config for observation params (all agents should match)
         first_agent = list(agent_keys)[0]
-        training_config_default = config_loader.load_agent_training_config(first_agent, "x5_new")
+        # La phase que `W40KEngine` va selectionner doit EXISTER : `load_agent_training_config`
+        # leve en nommant les phases disponibles, la ou le moteur retomberait sur un dict vide
+        # sans le dire. Appel pour son CONTROLE, pas pour sa valeur — la taille de
+        # l'observation, elle, ne vient plus d'ici : elle est calculee.
+        config_loader.load_agent_training_config(first_agent, "x5_new")
         
         # Add configs to main config
         config["rewards_configs"] = all_rewards_configs  # Multi-agent support
@@ -2630,18 +2633,6 @@ def initialize_engine(scenario_file: Optional[str] = None):
         config["controlled_agent"] = first_agent  # Required for reward mapping in handlers
         config["controlled_agent"] = first_agent  # Required for reward mapping in handlers
         
-        # CRITICAL FIX: Add observation_params from training_config "default" phase
-        obs_params = training_config_default.get("observation_params", {})
-        
-        # Validation stricte: obs_size DOIT être présent
-        if "obs_size" not in obs_params:
-            raise KeyError(
-                f"training_config missing required 'obs_size' in observation_params. "
-                f"Must be defined in training_config.json 'default' phase. "
-                f"Config: {first_agent}"
-            )
-        
-        config["observation_params"] = obs_params  # Inclut obs_size validé
 
         # Create engine with proper parameters
         engine = W40KEngine(
@@ -2726,9 +2717,8 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
             try:
                 shared_rewards = config_loader.load_agent_rewards_config(resolved_forced_agent_key)
                 shared_training_full = config_loader.load_agent_training_config(resolved_forced_agent_key)
-                training_config_default = config_loader.load_agent_training_config(
-                    resolved_forced_agent_key, "x5_new"
-                )
+                # Meme controle de phase que la branche ci-dessous, sur l'agent force.
+                config_loader.load_agent_training_config(resolved_forced_agent_key, "x5_new")
             except FileNotFoundError as e:
                 raise FileNotFoundError(
                     f"Missing config for forced mono-agent '{resolved_forced_agent_key}'.\n{e}\n"
@@ -2762,9 +2752,12 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
                         f"  - config/agents/{agent_key}/{agent_key}_training_config.json"
                     )
 
-            # Use first agent's training config for observation params
             first_agent = list(agent_keys)[0]
-            training_config_default = config_loader.load_agent_training_config(first_agent, "x5_new")
+            # La phase que `W40KEngine` va selectionner doit EXISTER : `load_agent_training_config`
+            # leve en nommant les phases disponibles, la ou le moteur retomberait sur un dict vide
+            # sans le dire. Appel pour son CONTROLE, pas pour sa valeur — la taille de
+            # l'observation, elle, ne vient plus d'ici : elle est calculee.
+            config_loader.load_agent_training_config(first_agent, "x5_new")
         
         # PvE mode configuration
         config["pve_mode"] = True
@@ -2773,18 +2766,6 @@ def initialize_test_engine(scenario_file: Optional[str] = None, forced_agent_key
         config["agent_keys"] = list(agent_keys)  # Track which agents are active
         config["controlled_agent"] = first_agent  # Required for reward mapping in handlers
         
-        # CRITICAL FIX: Add observation_params from training_config "default" phase
-        obs_params = training_config_default.get("observation_params", {})
-        
-        # Validation stricte: obs_size DOIT être présent
-        if "obs_size" not in obs_params:
-            raise KeyError(
-                f"training_config missing required 'obs_size' in observation_params. "
-                f"Must be defined in training_config.json 'default' phase. "
-                f"Config: {first_agent}"
-            )
-        
-        config["observation_params"] = obs_params  # Inclut obs_size validé
         
         engine = W40KEngine(
             config=config,

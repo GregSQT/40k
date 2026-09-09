@@ -308,18 +308,12 @@ class ObservationBuilder:
         # décodeur porterait ses propres caches de zone et pourrait décrire un autre hexe que
         # celui que le moteur pose. Absent au moment où le bloc en a besoin -> erreur explicite.
         self.action_decoder: Optional[Any] = None
-        
-        obs_params = config.get("observation_params")
-        if not obs_params:
-            raise KeyError("Config missing required 'observation_params' field - check w40k_core.py config dict creation")  # ✓ CHANGE 3: Enforce required config
-        
-        # CRITIQUE: obs_size depuis config, NO DEFAULT - raise error si manquant
-        if "obs_size" not in obs_params:
-            raise KeyError(
-                f"Config missing required 'obs_size' in observation_params. "
-                f"Must be defined in training_config.json. Current obs_params: {obs_params}"
-            )
-        self.obs_size = obs_params["obs_size"]  # Source unique de vérité
+
+        # La taille de l'observation n'est PAS un paramètre de config : c'est
+        # `SQUAD_OBS_SIZE_TARGET`, calculée depuis le schéma d'entités. Ce constructeur exigeait
+        # un `observation_params.obs_size` recopié à la main, qu'il ne servait qu'à ranger dans
+        # `self.obs_size` pour que `w40k_core` le confronte à la valeur calculée — une boucle
+        # fermée dont la seule issue possible était de retarder sur la source.
         # Buffers de travail réutilisés entre appels (item 1.7 perf_entrainement) — ~27 np.zeros
         # par build supprimés. Initialisés ici (tailles constantes), remis à zéro avant chaque
         # usage. L'appelant reçoit une RÉFÉRENCE au buffer : il doit le copier (affectation numpy)
@@ -427,10 +421,12 @@ class ObservationBuilder:
     #: les bits à zéro : c'est le cas majoritaire, il n'a pas besoin d'un bit dédié.
     SQUAD_MODEL_ROLES = ("special_weapon", "sergeant", "support", "leader")
 
-    #: Nombre TOTAL de scalaires de l'observation vectorielle (grille exclue). C'est cette
-    #: valeur que la config d'agent porte dans `observation_params.obs_size` et qui route le
-    #: dispatch (w40k_core._build_observation) : elle change à chaque évolution du schéma, ce
-    #: qui rend un modèle existant explicitement incompatible (retrain `--new`).
+    #: Nombre TOTAL de scalaires de l'observation vectorielle (grille exclue). SOURCE UNIQUE :
+    #: la taille ne se déclare nulle part, elle se calcule ici. Elle change à chaque évolution du
+    #: schéma, ce qui rend un modèle existant incompatible (retrain `--new`) — SB3 le refuse au
+    #: chargement, et l'acquittement HUMAIN vit dans
+    #: `tests/unit/engine/test_deployment_observation_contract.py`. Lignée des changements :
+    #: `Documentation/Reference/training/observation_et_actions.md`, « Historique de `obs_size` ».
     SQUAD_OBS_SIZE_TARGET = (
         GLOBAL_CONT_SIZE
         + GLOBAL_BIN_SIZE

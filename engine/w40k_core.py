@@ -600,7 +600,7 @@ class W40KEngine(gym.Env):
             # PROFIL d'entraînement chargé depuis config/agents/<agent>/<agent>_training_config.json :
             # le contrat complet des schedulers y est EXIGÉ (cf.
             # _configure_deployment_mode_for_episode). Les autres chemins de construction (API/PvP)
-            # ne fournissent qu'un fragment (observation_params) et n'ont pas d'épisodes à ramper.
+            # ne fournissent qu'une phase du profil et n'ont pas d'épisodes à ramper.
             self._training_config_is_agent_profile = True
             # Le nom de phase n'était posé que sur le chemin API : sans lui, tout message d'erreur
             # portant sur le profil chargé ne peut pas dire DE QUEL profil il parle.
@@ -631,10 +631,6 @@ class W40KEngine(gym.Env):
             # PvE mode in API: pve_mode=True (load AI model for Player 1)
             pve_mode_value = False  # Training uses SelfPlayWrapper, not pve_mode
 
-            # Extract observation_params for module access - NO DEFAULTS
-            if "observation_params" not in self.training_config:
-                raise KeyError(f"observation_params missing from {controlled_agent} training config phase {training_config_name}")
-            obs_params = self.training_config["observation_params"]
 
             # Load scenario data (units + optional terrain)
             scenario_result = self._load_units_from_scenario(scenario_file, unit_registry)
@@ -710,7 +706,6 @@ class W40KEngine(gym.Env):
                 "rewards_config_name": self.rewards_config_name,
                 "training_config_name": training_config_name,
                 "training_config": self.training_config,
-                "observation_params": obs_params,  # ✓ CHANGE 1: Add to config root for ObservationBuilder
                 "controlled_agent": controlled_agent,
                 "active_agents": active_agents,
                 "quiet": quiet,
@@ -773,7 +768,7 @@ class W40KEngine(gym.Env):
             self._scenario_points_limit = self.config.get("points_limit")
             self._scenario_loaded_for_controlled_player = int(require_key(self.config, "controlled_player"))
             
-            # CRITICAL: Extract training_config from config dict for observation_params access
+            # Extract training_config from config dict — schedulers, budgets d'épisode, etc.
             # API server provides training_configs dict with agent keys, or training_config_name to select phase
             # Ce chemin ne charge PAS un profil d'entraînement complet (cf. l'autre branche) :
             # les schedulers par épisode n'y sont pas exigibles.
@@ -794,15 +789,7 @@ class W40KEngine(gym.Env):
                 self.training_config = config["training_config"]
                 self.training_config_name = training_config_name if training_config_name else "default"
             else:
-                # Try to construct from observation_params if available
-                if "observation_params" in config:
-                    # Create minimal training_config structure for observation_params access
-                    self.training_config = {
-                        "observation_params": config["observation_params"]
-                    }
-                    self.training_config_name = training_config_name if training_config_name else "default"
-                else:
-                    self.training_config = None
+                self.training_config = None
 
             # Scenario provided via config (API path). Objectifs : source unique = terrains
             # "objective": true, déjà résolus en {id, name, hexes} par le loader et passés via
@@ -1098,95 +1085,54 @@ class W40KEngine(gym.Env):
         self.action_space = gym.spaces.Discrete(_total_action_size)
         self._current_valid_actions = list(range(_total_action_size))  # Will be masked dynamically
         
-        # Observation space: Asymmetric egocentric perception with R=25 radius
-        # Size is now configurable via training_config.json observation_params.obs_size
-        # Default was 300 floats = 15 global (incl. objectives) + 8 unit + 32 terrain + 72 allies + 138 enemies + 35 targets
-        # New size: 313 floats = 15 global + 22 unit capabilities + 32 terrain + 72 allies + 132 enemies + 40 targets
-        
-        # Load perception parameters from training config if available
-        if hasattr(self, 'training_config') and self.training_config:
-            obs_params = self.training_config["observation_params"] if "observation_params" in self.training_config else {}
-            
-            # Validation stricte: obs_size DOIT être présent
-            if "obs_size" not in obs_params:
-                raise KeyError(
-                    f"training_config missing required 'obs_size' in observation_params. "
-                    f"Must be defined in training_config.json. "
-                    f"Config: {self.training_config_name if hasattr(self, 'training_config_name') else 'unknown'}"
-                )
-            
-            obs_size = obs_params["obs_size"]  # NO DEFAULT - raise error si manquant
-            # `observation_params` ne porte plus que `obs_size` : les anciens parametres de
-            # perception (perception_radius / max_nearby_units / max_valid_targets) etaient
-            # propres au pipeline mono-figurine et ont ete supprimes avec lui (2026-07-28).
-            # L'etendue percue par l'agent est desormais celle de la grille egocentrique
-            # (`engine/spatial_grid.py`), qui est aussi celle du masque et du decodeur.
-        else:
-            # Pas de config = erreur (pas de valeur par défaut)
-            raise ValueError(
-                "W40KEngine requires training_config with observation_params.obs_size. "
-                "No default value allowed."
-            )
-
-        # `obs_size` doit designer le layout squad EN VIGUEUR. Une valeur perimee construisait
-        # auparavant un Box(obs_size) que RIEN ne sait remplir, et l'incoherence n'apparaissait
-        # qu'a la 1re observation — alors que la cause reelle est « la config porte une taille
-        # perimee ». C'est exactement le repli masquant que la convention projet interdit : le
-        # layout squad change a chaque evolution du schema d'entites, donc ce cas se produit
-        # VRAIMENT (rencontre le 2026-07-26 en portant le bloc figurines de 6 a 20 slots).
-        _squad_obs_size = self.obs_builder.SQUAD_OBS_SIZE_TARGET
-        if obs_size != _squad_obs_size:
-            raise ValueError(
-                f"observation_params.obs_size={obs_size} ne correspond pas au pipeline "
-                f"d'observation : attendu {_squad_obs_size} (pipeline squad, taille calculee "
-                f"par ObservationBuilder.SQUAD_OBS_SIZE_TARGET depuis le schema d'entites). "
-                f"Si le layout squad vient de changer, mettre obs_size a {_squad_obs_size} dans "
-                f"la config d'agent — et relancer un entrainement `--new` : les modeles existants "
-                f"sont incompatibles par construction."
-            )
-
-        # Pipeline squad : obs Dict de TENSEURS D'ENTITES (V11 §0.30 T-D) + la grille
+        # Espace d'observation : obs Dict de TENSEURS D'ENTITES (V11 §0.30 T-D) + la grille
         # egocentrique (perception du terrain, spec §4.1), branche sur la policy via
-        # MultiInputPolicy. Pipeline mono-fig legacy : Box inchange.
+        # MultiInputPolicy.
         #
-        # Les formes viennent de ObservationBuilder.squad_obs_shapes() — source UNIQUE, jamais
-        # recopiee ici. Bornes : les cles "_cont" portent des grandeurs BRUTES (une borne 0..1
-        # mentirait sur des PV ou des subhex), les cles "_bin" des valeurs discretes dans
-        # [-1, 1] (drapeaux, phase, controle d objectif).
-        if obs_size == self.obs_builder.SQUAD_OBS_SIZE_TARGET:
-            from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
+        # La TAILLE ne se declare nulle part : elle est CALCULEE. Les formes viennent de
+        # ObservationBuilder.squad_obs_shapes() — source UNIQUE, jamais recopiee ici. La config
+        # d'agent portait un `observation_params.obs_size` que le moteur confrontait ensuite a
+        # `SQUAD_OBS_SIZE_TARGET` : une valeur recopiee a la main, verifiee contre celle-la meme
+        # qui la determinait. Une telle boucle ne peut rien apprendre — sa seule issue etait de
+        # rester en retard, ce qui est arrive deux livraisons de suite sur la prose qui
+        # l'accompagnait. Le desaccord modele/environnement, lui, reste attrape a la source par
+        # SB3 (`check_for_correct_spaces` compare le Dict ENTIER au chargement de
+        # `PatchedMaskablePPO`), ce qu'un total scalaire ne savait pas faire : il voit aussi un
+        # changement de DISPOSITION a taille egale. L'acquittement HUMAIN d'un retrain, lui, vit
+        # dans `tests/unit/engine/test_deployment_observation_contract.py`.
+        #
+        # Bornes : les cles "_cont" portent des grandeurs BRUTES (une borne 0..1 mentirait sur
+        # des PV ou des subhex), les cles "_bin" des valeurs discretes dans [-1, 1] (drapeaux,
+        # phase, controle d objectif).
+        from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
 
-            spaces_dict = {}
-            for key, shape in self.obs_builder.squad_obs_shapes().items():
-                if key.endswith("_bin"):
-                    spaces_dict[key] = gym.spaces.Box(
-                        low=-1.0, high=1.0, shape=shape, dtype=np.float32
-                    )
-                elif key.endswith("_ids"):
-                    # Ensembles d'ids de capacites/statuts (chantier 01) : des INDEX de ligne
-                    # d'embedding, bornes par le registre. Le Box DECLARE ce domaine (il decrit
-                    # l'espace, pour SB3 et pour qui lit la config) ; il ne le FAIT PAS RESPECTER
-                    # — rien ne valide jamais une observation contre son espace sur le chemin
-                    # d'entrainement. C'est `observation_builder._fill_id_slots` qui leve, au site
-                    # d'ecriture, ou l'erreur peut encore nommer l'escouade fautive.
-                    from engine.observation_entities import OBS_ID_MAX
+        spaces_dict = {}
+        for key, shape in self.obs_builder.squad_obs_shapes().items():
+            if key.endswith("_bin"):
+                spaces_dict[key] = gym.spaces.Box(
+                    low=-1.0, high=1.0, shape=shape, dtype=np.float32
+                )
+            elif key.endswith("_ids"):
+                # Ensembles d'ids de capacites/statuts (chantier 01) : des INDEX de ligne
+                # d'embedding, bornes par le registre. Le Box DECLARE ce domaine (il decrit
+                # l'espace, pour SB3 et pour qui lit la config) ; il ne le FAIT PAS RESPECTER
+                # — rien ne valide jamais une observation contre son espace sur le chemin
+                # d'entrainement. C'est `observation_builder._fill_id_slots` qui leve, au site
+                # d'ecriture, ou l'erreur peut encore nommer l'escouade fautive.
+                from engine.observation_entities import OBS_ID_MAX
 
-                    spaces_dict[key] = gym.spaces.Box(
-                        low=0.0, high=float(OBS_ID_MAX), shape=shape, dtype=np.float32
-                    )
-                else:
-                    spaces_dict[key] = gym.spaces.Box(
-                        low=-np.inf, high=np.inf, shape=shape, dtype=np.float32
-                    )
-            spaces_dict["grid"] = gym.spaces.Box(
-                low=0.0, high=1.0,
-                shape=(GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32,
-            )
-            self.observation_space = gym.spaces.Dict(spaces_dict)
-        else:
-            self.observation_space = gym.spaces.Box(
-                low=0.0, high=1.0, shape=(obs_size,), dtype=np.float32
-            )
+                spaces_dict[key] = gym.spaces.Box(
+                    low=0.0, high=float(OBS_ID_MAX), shape=shape, dtype=np.float32
+                )
+            else:
+                spaces_dict[key] = gym.spaces.Box(
+                    low=-np.inf, high=np.inf, shape=shape, dtype=np.float32
+                )
+        spaces_dict["grid"] = gym.spaces.Box(
+            low=0.0, high=1.0,
+            shape=(GRID_CHANNELS, GRID_SIZE, GRID_SIZE), dtype=np.float32,
+        )
+        self.observation_space = gym.spaces.Dict(spaces_dict)
         
         # NOTE: last_unit_positions removed - now using game_state["units_cache_prev"] for movement_direction
         
