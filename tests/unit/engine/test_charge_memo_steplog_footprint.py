@@ -12,7 +12,7 @@ partie). Un plan identique qui produirait malgré tout une trace différente —
 aurait touché un état partagé, par exemple — n'est visible qu'ici.
 
 POURQUOI PAS `--test-only --step` : le modèle entraîné est incompatible avec l'espace
-d'observation courant (`global_bin` 83 contre 94, `global_cont` 13 contre 23, `grid` 9 canaux
+d'observation courant (`global_bin` 83 contre 95, `global_cont` 13 contre 23, `grid` 9 canaux
 contre 12 — l'écart se creuse à chaque lot d'observation), donc `ai/train.py --test-only`
 s'arrête avant d'écrire quoi que ce soit. Le verrou n'a de toute façon pas besoin d'une policy entraînée : il porte sur le MOTEUR.
 Une politique aléatoire MASQUÉE et ensemencée suffit, et ne dépend d'aucun artefact qui dérive.

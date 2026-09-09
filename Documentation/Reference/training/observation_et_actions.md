@@ -23,7 +23,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 
 | Clé | Forme | Contenu |
 |---|---|---|
-| `global_cont` / `global_bin` | (23,) / (94,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs**, **OC live et statut secured (14.02/14.03) par objectif** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur, clause du +1 Wound d'Oath ouverte — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `hidden`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
+| `global_cont` / `global_bin` | (23,) / (95,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs**, **OC live et statut secured (14.02/14.03) par objectif** ; mon tour, **si j'ouvre le battle round (`i_play_first`)**, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur, clause du +1 Wound d'Oath ouverte — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `hidden`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
 | `allies_cont` / `allies_bin` | (12, 21) / (12, 38) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent les **mots-clés de catégorie** (`kw_infantry`, `kw_vehicle`, `kw_monster`, `kw_fly`, `kw_psyker`), portés par TOUTE entité, et — pour les ennemis seulement — `los_can_see`, `cover_vs_observer`, `charge_reachable_max_roll` et les dix `split_assigned_w<i>` |
 | `allies_ability_ids` / `allies_status_ids` | (12, 8) / (12, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../../../config/unit_rules.json) et [`config/unit_statuses.json`](../../../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
 | `allies_wpn_cont` / `_bin` / `_rule_ids` | (12, 20, 13) / (12, 20, 2) / (12, 20, 6) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants, params de règles, et les règles booléennes en **ids** (3ᵉ `EmbeddingBag`, cf. `*_wpn_rule_ids`) |
@@ -39,11 +39,11 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (18 204 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (18 205 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (23,)                =      23               │
-│    global_bin             (94,)                =      94               │
+│    global_bin             (95,)                =      95               │
 │                                                                        │
 │  MES ESCOUADES — ordre = slots d'activation       K_ALLY_SLOTS = 12    │
 │    allies_cont            (12, 21)             =     252               │
@@ -80,7 +80,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_cont       (8, 8)               =      64               │
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      18 204              │
+│  TOTAL vectoriel (= obs_size)                      18 205              │
 │  + grid  (12, 32, 32) = 12 288, fournie À PART (non comptée)           │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -141,106 +141,107 @@ global_cont[22]    = objective_enemy_oc_4                   # brut (somme OC fig
 
 ```python
 global_bin[0]      = is_my_turn                             # 0.0 / 1.0
-global_bin[1]      = phase_deployment                       # 0.0 / 1.0 — ONE-HOT de phase (6 bits, ordre GAME_PHASES)
-global_bin[2]      = phase_command                          # 0.0 / 1.0
-global_bin[3]      = phase_move                             # 0.0 / 1.0
-global_bin[4]      = phase_shoot                            # 0.0 / 1.0
-global_bin[5]      = phase_charge                           # 0.0 / 1.0
-global_bin[6]      = phase_fight                            # 0.0 / 1.0
-global_bin[7]      = objective_control_0                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
-global_bin[8]      = objective_control_1                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
-global_bin[9]      = objective_control_2                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
-global_bin[10]     = objective_control_3                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
-global_bin[11]     = objective_control_4                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
-global_bin[12]     = objective_present_0                    # 0.0 / 1.0 (objectif present au scenario)
-global_bin[13]     = objective_present_1                    # 0.0 / 1.0 (objectif present au scenario)
-global_bin[14]     = objective_present_2                    # 0.0 / 1.0 (objectif present au scenario)
-global_bin[15]     = objective_present_3                    # 0.0 / 1.0 (objectif present au scenario)
-global_bin[16]     = objective_present_4                    # 0.0 / 1.0 (objectif present au scenario)
-global_bin[17]     = objective_dir_cos_0                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
-global_bin[18]     = objective_dir_sin_0                    # -1.0..1.0
-global_bin[19]     = objective_dir_cos_1                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
-global_bin[20]     = objective_dir_sin_1                    # -1.0..1.0
-global_bin[21]     = objective_dir_cos_2                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
-global_bin[22]     = objective_dir_sin_2                    # -1.0..1.0
-global_bin[23]     = objective_dir_cos_3                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
-global_bin[24]     = objective_dir_sin_3                    # -1.0..1.0
-global_bin[25]     = objective_dir_cos_4                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
-global_bin[26]     = objective_dir_sin_4                    # -1.0..1.0
+global_bin[1]      = i_play_first                           # 0.0 / 1.0 — 1 = j'ouvre le battle round (P1), l'adversaire rejoue APRES moi
+global_bin[2]      = phase_deployment                       # 0.0 / 1.0 — ONE-HOT de phase (6 bits, ordre GAME_PHASES)
+global_bin[3]      = phase_command                          # 0.0 / 1.0
+global_bin[4]      = phase_move                             # 0.0 / 1.0
+global_bin[5]      = phase_shoot                            # 0.0 / 1.0
+global_bin[6]      = phase_charge                           # 0.0 / 1.0
+global_bin[7]      = phase_fight                            # 0.0 / 1.0
+global_bin[8]      = objective_control_0                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[9]      = objective_control_1                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[10]     = objective_control_2                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[11]     = objective_control_3                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[12]     = objective_control_4                    # -1.0 / 0.0 / +1.0 (ennemi / conteste-vide / moi)
+global_bin[13]     = objective_present_0                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[14]     = objective_present_1                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[15]     = objective_present_2                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[16]     = objective_present_3                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[17]     = objective_present_4                    # 0.0 / 1.0 (objectif present au scenario)
+global_bin[18]     = objective_dir_cos_0                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[19]     = objective_dir_sin_0                    # -1.0..1.0
+global_bin[20]     = objective_dir_cos_1                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[21]     = objective_dir_sin_1                    # -1.0..1.0
+global_bin[22]     = objective_dir_cos_2                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[23]     = objective_dir_sin_2                    # -1.0..1.0
+global_bin[24]     = objective_dir_cos_3                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[25]     = objective_dir_sin_3                    # -1.0..1.0
+global_bin[26]     = objective_dir_cos_4                    # -1.0..1.0 (vecteur unitaire vers l'objectif)
+global_bin[27]     = objective_dir_sin_4                    # -1.0..1.0
 # Statut SECURED (14.03) par objectif — un objectif sécurisé reste tenu même sans OC présent,
 # jusqu'à ce que l'adversaire ait STRICTEMENT plus d'OC à la fin d'une phase. Dans global_bin
 # (et non global_cont) pour éviter le clipping VecNormalize sur variance ≈ 0 (chantier OC live).
-global_bin[27]     = objective_secured_mine_0               # 0.0 / 1.0 — objectif 0 sécurisé pour moi (14.03)
-global_bin[28]     = objective_secured_mine_1               # 0.0 / 1.0 — objectif 1 sécurisé pour moi
-global_bin[29]     = objective_secured_mine_2               # 0.0 / 1.0 — objectif 2 sécurisé pour moi
-global_bin[30]     = objective_secured_mine_3               # 0.0 / 1.0 — objectif 3 sécurisé pour moi
-global_bin[31]     = objective_secured_mine_4               # 0.0 / 1.0 — objectif 4 sécurisé pour moi
-global_bin[32]     = objective_secured_enemy_0              # 0.0 / 1.0 — objectif 0 sécurisé pour l'ennemi
-global_bin[33]     = objective_secured_enemy_1              # 0.0 / 1.0 — objectif 1 sécurisé pour l'ennemi
-global_bin[34]     = objective_secured_enemy_2              # 0.0 / 1.0 — objectif 2 sécurisé pour l'ennemi
-global_bin[35]     = objective_secured_enemy_3              # 0.0 / 1.0 — objectif 3 sécurisé pour l'ennemi
-global_bin[36]     = objective_secured_enemy_4              # 0.0 / 1.0 — objectif 4 sécurisé pour l'ennemi
-global_bin[37]     = my_waaagh_available                    # 0.0 / 1.0 — Waaagh! pas encore appele (1x/partie)
-global_bin[38]     = my_waaagh_active                       # 0.0 / 1.0 — Waaagh! en vigueur pour MON armee
-global_bin[39]     = enemy_waaagh_available                 # 0.0 / 1.0 — l'adversaire peut encore l'appeler
-global_bin[40]     = enemy_waaagh_active                    # 0.0 / 1.0 — Waaagh! adverse en vigueur (enjambe mon tour)
-global_bin[41]     = my_oath_target_selected                # 0.0 / 1.0 — une designation Oath est en vigueur pour moi
-global_bin[42]     = enemy_oath_target_selected             # 0.0 / 1.0 — idem cote adverse
-global_bin[43]     = my_oath_wound_bonus_active             # 0.0 / 1.0 — clause du +1 Wound d'Oath ouverte pour MON armee
-global_bin[44]     = enemy_oath_wound_bonus_active          # 0.0 / 1.0 — idem cote adverse
-global_bin[45]     = coherency_removal_pending              # 0.0 / 1.0 — 03.03 : l'escouade OBSERVEE doit designer une figurine a detruire
+global_bin[28]     = objective_secured_mine_0               # 0.0 / 1.0 — objectif 0 sécurisé pour moi (14.03)
+global_bin[29]     = objective_secured_mine_1               # 0.0 / 1.0 — objectif 1 sécurisé pour moi
+global_bin[30]     = objective_secured_mine_2               # 0.0 / 1.0 — objectif 2 sécurisé pour moi
+global_bin[31]     = objective_secured_mine_3               # 0.0 / 1.0 — objectif 3 sécurisé pour moi
+global_bin[32]     = objective_secured_mine_4               # 0.0 / 1.0 — objectif 4 sécurisé pour moi
+global_bin[33]     = objective_secured_enemy_0              # 0.0 / 1.0 — objectif 0 sécurisé pour l'ennemi
+global_bin[34]     = objective_secured_enemy_1              # 0.0 / 1.0 — objectif 1 sécurisé pour l'ennemi
+global_bin[35]     = objective_secured_enemy_2              # 0.0 / 1.0 — objectif 2 sécurisé pour l'ennemi
+global_bin[36]     = objective_secured_enemy_3              # 0.0 / 1.0 — objectif 3 sécurisé pour l'ennemi
+global_bin[37]     = objective_secured_enemy_4              # 0.0 / 1.0 — objectif 4 sécurisé pour l'ennemi
+global_bin[38]     = my_waaagh_available                    # 0.0 / 1.0 — Waaagh! pas encore appele (1x/partie)
+global_bin[39]     = my_waaagh_active                       # 0.0 / 1.0 — Waaagh! en vigueur pour MON armee
+global_bin[40]     = enemy_waaagh_available                 # 0.0 / 1.0 — l'adversaire peut encore l'appeler
+global_bin[41]     = enemy_waaagh_active                    # 0.0 / 1.0 — Waaagh! adverse en vigueur (enjambe mon tour)
+global_bin[42]     = my_oath_target_selected                # 0.0 / 1.0 — une designation Oath est en vigueur pour moi
+global_bin[43]     = enemy_oath_target_selected             # 0.0 / 1.0 — idem cote adverse
+global_bin[44]     = my_oath_wound_bonus_active             # 0.0 / 1.0 — clause du +1 Wound d'Oath ouverte pour MON armee
+global_bin[45]     = enemy_oath_wound_bonus_active          # 0.0 / 1.0 — idem cote adverse
+global_bin[46]     = coherency_removal_pending              # 0.0 / 1.0 — 03.03 : l'escouade OBSERVEE doit designer une figurine a detruire
 # RÉSERVÉ — missions primaires (J4). Dans global_bin et non global_cont : VecNormalize ne
 # normalise que global_cont ; des slots toujours nuls y auraient variance ≈ 0 → clipping ±10
 # au --append. Ici les valeurs restent brutes. Implémentation prévue : type mission (one-hot
 # ~5 bits), triggers par round (~5), flags objectif (~10), VP primaire quantifié (~12).
-global_bin[46]     = reserved_mission_bin_0                 # réservé J4 — voir ci-dessus
-global_bin[47]     = reserved_mission_bin_1                 # réservé J4
-global_bin[48]     = reserved_mission_bin_2                 # réservé J4
-global_bin[49]     = reserved_mission_bin_3                 # réservé J4
-global_bin[50]     = reserved_mission_bin_4                 # réservé J4
-global_bin[51]     = reserved_mission_bin_5                 # réservé J4
-global_bin[52]     = reserved_mission_bin_6                 # réservé J4
-global_bin[53]     = reserved_mission_bin_7                 # réservé J4
-global_bin[54]     = reserved_mission_bin_8                 # réservé J4
-global_bin[55]     = reserved_mission_bin_9                 # réservé J4
-global_bin[56]     = reserved_mission_bin_10                # réservé J4
-global_bin[57]     = reserved_mission_bin_11                # réservé J4
-global_bin[58]     = reserved_mission_bin_12                # réservé J4
-global_bin[59]     = reserved_mission_bin_13                # réservé J4
-global_bin[60]     = reserved_mission_bin_14                # réservé J4
-global_bin[61]     = reserved_mission_bin_15                # réservé J4
-global_bin[62]     = reserved_mission_bin_16                # réservé J4
-global_bin[63]     = reserved_mission_bin_17                # réservé J4
-global_bin[64]     = reserved_mission_bin_18                # réservé J4
-global_bin[65]     = reserved_mission_bin_19                # réservé J4
-global_bin[66]     = reserved_mission_bin_20                # réservé J4
-global_bin[67]     = reserved_mission_bin_21                # réservé J4
-global_bin[68]     = reserved_mission_bin_22                # réservé J4
-global_bin[69]     = reserved_mission_bin_23                # réservé J4
-global_bin[70]     = reserved_mission_bin_24                # réservé J4
-global_bin[71]     = reserved_mission_bin_25                # réservé J4
-global_bin[72]     = reserved_mission_bin_26                # réservé J4
-global_bin[73]     = reserved_mission_bin_27                # réservé J4
-global_bin[74]     = reserved_mission_bin_28                # réservé J4
-global_bin[75]     = reserved_mission_bin_29                # réservé J4
-global_bin[76]     = reserved_mission_bin_30                # réservé J4
-global_bin[77]     = reserved_mission_bin_31                # réservé J4
-global_bin[78]     = reserved_mission_bin_32                # réservé J4
-global_bin[79]     = reserved_mission_bin_33                # réservé J4
-global_bin[80]     = reserved_mission_bin_34                # réservé J4
-global_bin[81]     = reserved_mission_bin_35                # réservé J4
-global_bin[82]     = reserved_mission_bin_36                # réservé J4
-global_bin[83]     = reserved_mission_bin_37                # réservé J4
-global_bin[84]     = reserved_mission_bin_38                # réservé J4
-global_bin[85]     = reserved_mission_bin_39                # réservé J4
-global_bin[86]     = reserved_mission_bin_40                # réservé J4
-global_bin[87]     = reserved_mission_bin_41                # réservé J4
-global_bin[88]     = reserved_mission_bin_42                # réservé J4
-global_bin[89]     = reserved_mission_bin_43                # réservé J4
-global_bin[90]     = reserved_mission_bin_44                # réservé J4
-global_bin[91]     = reserved_mission_bin_45                # réservé J4
-global_bin[92]     = reserved_mission_bin_46                # réservé J4
-global_bin[93]     = reserved_mission_bin_47                # réservé J4
+global_bin[47]     = reserved_mission_bin_0                 # réservé J4 — voir ci-dessus
+global_bin[48]     = reserved_mission_bin_1                 # réservé J4
+global_bin[49]     = reserved_mission_bin_2                 # réservé J4
+global_bin[50]     = reserved_mission_bin_3                 # réservé J4
+global_bin[51]     = reserved_mission_bin_4                 # réservé J4
+global_bin[52]     = reserved_mission_bin_5                 # réservé J4
+global_bin[53]     = reserved_mission_bin_6                 # réservé J4
+global_bin[54]     = reserved_mission_bin_7                 # réservé J4
+global_bin[55]     = reserved_mission_bin_8                 # réservé J4
+global_bin[56]     = reserved_mission_bin_9                 # réservé J4
+global_bin[57]     = reserved_mission_bin_10                # réservé J4
+global_bin[58]     = reserved_mission_bin_11                # réservé J4
+global_bin[59]     = reserved_mission_bin_12                # réservé J4
+global_bin[60]     = reserved_mission_bin_13                # réservé J4
+global_bin[61]     = reserved_mission_bin_14                # réservé J4
+global_bin[62]     = reserved_mission_bin_15                # réservé J4
+global_bin[63]     = reserved_mission_bin_16                # réservé J4
+global_bin[64]     = reserved_mission_bin_17                # réservé J4
+global_bin[65]     = reserved_mission_bin_18                # réservé J4
+global_bin[66]     = reserved_mission_bin_19                # réservé J4
+global_bin[67]     = reserved_mission_bin_20                # réservé J4
+global_bin[68]     = reserved_mission_bin_21                # réservé J4
+global_bin[69]     = reserved_mission_bin_22                # réservé J4
+global_bin[70]     = reserved_mission_bin_23                # réservé J4
+global_bin[71]     = reserved_mission_bin_24                # réservé J4
+global_bin[72]     = reserved_mission_bin_25                # réservé J4
+global_bin[73]     = reserved_mission_bin_26                # réservé J4
+global_bin[74]     = reserved_mission_bin_27                # réservé J4
+global_bin[75]     = reserved_mission_bin_28                # réservé J4
+global_bin[76]     = reserved_mission_bin_29                # réservé J4
+global_bin[77]     = reserved_mission_bin_30                # réservé J4
+global_bin[78]     = reserved_mission_bin_31                # réservé J4
+global_bin[79]     = reserved_mission_bin_32                # réservé J4
+global_bin[80]     = reserved_mission_bin_33                # réservé J4
+global_bin[81]     = reserved_mission_bin_34                # réservé J4
+global_bin[82]     = reserved_mission_bin_35                # réservé J4
+global_bin[83]     = reserved_mission_bin_36                # réservé J4
+global_bin[84]     = reserved_mission_bin_37                # réservé J4
+global_bin[85]     = reserved_mission_bin_38                # réservé J4
+global_bin[86]     = reserved_mission_bin_39                # réservé J4
+global_bin[87]     = reserved_mission_bin_40                # réservé J4
+global_bin[88]     = reserved_mission_bin_41                # réservé J4
+global_bin[89]     = reserved_mission_bin_42                # réservé J4
+global_bin[90]     = reserved_mission_bin_43                # réservé J4
+global_bin[91]     = reserved_mission_bin_44                # réservé J4
+global_bin[92]     = reserved_mission_bin_45                # réservé J4
+global_bin[93]     = reserved_mission_bin_46                # réservé J4
+global_bin[94]     = reserved_mission_bin_47                # réservé J4
 ```
 
 Les huit derniers bits sont les **capacites de FACTION** (chantier 03) : globales par construction,
@@ -811,6 +812,20 @@ mis à 0, deux états ne différant que par la cible déjà assignée rendent de
 IDENTIQUES sur les 28 clés, aux DEUX sous-états — celui qui demande l'arme suivante comme celui
 qui demande sa cible. Le masque ne le disait pas non plus, une cible déjà prise restant
 éligible).
+→ **18205** (siège de l'observateur, 2026-09-09 : `i_play_first` dans `GLOBAL_BIN_FIELDS` +1.
+`is_my_turn` disait qui a la main, jamais si l'adversaire rejoue APRÈS moi dans ce round. Le
+primaire se marque à la command phase pour le premier joueur et à la **fight** phase pour le
+second au round 5 (`round5_second_player_phase`), donc au round 5 le premier joueur a déjà marqué
+et son dernier tour ne lui rapporte plus de primaire : deux états identiques à l'écran n'ont pas
+la même valeur selon le siège. Aucun des onze registres ne nommait le joueur — tous sont
+égocentriques — et le seul signal restant était un PROXY géométrique (zones `dz_p1`/`dz_p2`
+attachées au joueur, `objective_dir_cos/sin` dans le repère absolu du board), qui se dégrade quand
+les unités ont traversé la carte, c'est-à-dire précisément au round 5. Écart de siège mesuré sur
+le run x1_long du 2026-08-12 : 0,707 de win-rate en jouant premier contre 0,586 en second.
+Retrain `--new` de toute façon acquis — aucun `.zip` de `ai/models/ArmageddonAgent_x1/` ne se
+recharge avec le code courant (`best_model.zip` : `decision_encoder` [64, 9] contre [64, 11] ;
+grille (9, 32, 32) contre (12, 32, 32) attendue) — donc le bit prend sa place LOGIQUE en tête de
+`global_bin` au lieu de consommer un `reserved_mission_bin_*`, qui restent tous les 48 pour J4).
 
 **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
 Depuis le chantier 01, une capacité, un statut ou une faction entière n'est qu'un `obs_id` de

@@ -193,6 +193,45 @@ mesure sur un run, pas ici.
 
 ---
 
+## ✅ Obs — siège premier / second joueur {#siege-premier-joueur-obs}
+
+**Livré le 2026-09-09.** `obs_size` 18204 → **18205** : ré-entraînement `--new` obligatoire — déjà
+acquis avant ce lot, aucun `.zip` de `ai/models/ArmageddonAgent_x1/` ne se rechargeant avec le code
+courant (`best_model.zip` : `decision_encoder` [64, 9] contre [64, 11] ; les autres : grille
+(9, 32, 32) contre (12, 32, 32) attendue — mesuré par chargement réel).
+
+`is_my_turn` disait qui a la main **maintenant**, jamais si l'adversaire rejoue **après moi** dans
+ce battle round. Or `turn` est le round et non le tour de joueur, P1 l'ouvre toujours, et le
+primaire se marque à la command phase pour le premier joueur mais à la **fight** phase pour le
+second au round 5 (`round5_second_player_phase`) : au round 5, le premier joueur a déjà marqué et
+son dernier tour ne lui rapporte plus de primaire. Deux états identiques à l'écran n'ont donc pas
+la même valeur selon le siège.
+
+**Vérifié :** aucun des onze registres d'observation ne nommait le joueur — tous sont égocentriques
+(`my_` / `enemy_`, `ally` / `enemy`, positions relatives). Le seul signal restant était un PROXY
+géométrique (zones `dz_p1` / `dz_p2` attachées au joueur, `objective_dir_cos/sin` calculés dans le
+repère **absolu** du board), qui se dégrade quand les unités ont traversé la carte — précisément au
+round 5. Écart de siège mesuré sur le run x1_long du 2026-08-12 : 0,707 de win-rate en jouant
+premier contre 0,586 en second, ce que `agent_seat_p2_ratio` ne fait que sur-échantillonner.
+
+**Ce qui a été livré :**
+
+- `i_play_first` dans `GLOBAL_BIN_FIELDS`, en **deuxième position**, à côté de `is_my_turn` : le
+  retrain étant acquis, le bit prend sa place logique au lieu de consommer un
+  `reserved_mission_bin_*` — les 48 slots réservés restent entiers pour J4 ;
+- le bit est posé depuis l'**observateur** (`active_player`) et non depuis `current_player` : aux
+  points d'arrêt joués pendant le tour adverse, c'est l'ordre de jeu de celui à qui la décision est
+  demandée qui compte. `tests/unit/engine/test_squad_obs_seat_bit.py` verrouille cette distinction
+  — la mutation « câblé sur `current_player` » met 4 tests sur 5 au rouge ;
+- chemin de production sondé : 217 points d'arrêt encodés par `_build_observation_and_mask` sur un
+  épisode Armageddon (122 observateur P1, 95 observateur P2, 37 contextes round/joueur/phase
+  distincts), **zéro** désaccord entre le bit et le siège de l'observateur.
+
+**Non prouvé, et à mesurer par un run :** que le bit réduise l'écart de siège. Le contenu du canal
+est vérifié, son effet sur la politique ne l'est pas.
+
+---
+
 ## ✅ Obs — candidats de décision DISCERNABLES {#candidats-decision-discernables}
 
 **Livré et mergé le 2026-09-09** (`0049f9ab`). `obs_size` 17055 → **17091** : ré-entraînement
