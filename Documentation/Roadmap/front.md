@@ -15,18 +15,18 @@ du code. Frontière déclarée dans `frontend/vite.config.ts` et verrouillée pa
 `tests/unit/scripts/test_vitest_collect_scope.py`. La couche B (**4,0 s**, 36 fichiers, 430 tests)
 entre dans la vérification large de CLAUDE.md.
 
-## 🟡 Couche C — remise en état le 2026-09-09 : **11 verts, 2 rouges, en 27 s** {#couche-c}
+## 🟢 Couche C — remise en état le 2026-09-09 : **13 verts sur 14, en 37 s** {#couche-c}
 
-Playwright installé (paquet + Chromium) et **six défauts corrigés**, la couche C s'exécute :
-**11 tests passent**, 1 est skippé par le spec, et **2 échouent**.
+Playwright installé (paquet + Chromium) et **huit défauts corrigés**, la couche C est verte :
+**13 tests passent**, 1 est skippé par le spec, aucun n'échoue.
 
-⚠️ Ces 2 rouges sont les **invariants de parité front/back** — `greenCircleUnitIds ⊆
-move_activation_pool` et `movePreviewHexes ⊆ valid_move_destinations_pool` — c'est-à-dire la seule
-vérification automatisée que l'affichage correspond à ce que le moteur autorise. Ils **passaient
-sans jamais comparer** (401 silencieux, sortie sans assertion, lecture au mauvais niveau de
-l'enveloppe JSON). Les trois causes sont corrigées ; reste qu'ils ne font jamais avancer la partie
-jusqu'à la phase move qu'ils prétendent vérifier — la partie servie est en phase `command`, pool
-vide. Le rouge est donc l'état honnête.
+Les **invariants de parité front/back** — `greenCircleUnitIds ⊆ move_activation_pool` et
+`movePreviewHexes ⊆ valid_move_destinations_pool` — vérifient enfin quelque chose. Ils **passaient
+sans jamais comparer** : 401 silencieux faute d'en-tête CSRF, `return` sans assertion, pool lu hors
+de l'enveloppe `game_state` (∅ ⊆ tout), et surtout aucun passage en phase move — la partie restait
+en `command`, pool vide. Le test l'y amène désormais **par l'interface**, en répondant d'abord aux
+deux modales que le jeu ouvre au démarrage (décision Waaagh! 08.04 et dialogue d'enregistrement du
+replay), dont le fond interceptait tous les clics.
 
 ⚠️ Le bilan « 13 rouges, 6 min 42 » publié plus tôt le même jour était **faux** : il venait de runs
 que polluait un Vite orphelin (défaut n° 4 ci-dessous).
