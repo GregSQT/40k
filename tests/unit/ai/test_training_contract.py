@@ -41,8 +41,15 @@ AGENT = "TestAgent"
 
 
 def _rewards(**bloc: Any) -> Dict[str, Any]:
-    """Une table de récompense d'agent, dans la forme réelle `{agent_key: {...}}`."""
-    return {"description": "table de test", AGENT: bloc or {"win": 10.0, "kill": {"ranged": 1.0}}}
+    """Une table de récompense d'agent, dans la forme réelle `{agent_key: {...}}`.
+
+    La sous-table porte TOUJOURS `base_actions` : c'est la seule section que `RewardCalculator`
+    exige nommément à chaque épisode (engine/reward_calculator.py:820), donc une table de test qui
+    s'en passe n'est pas une table que la production accepterait.
+    """
+    sous_table: Dict[str, Any] = {"base_actions": {"charge_fail": -1.0}}
+    sous_table.update(bloc or {"win": 10.0, "kill": {"ranged": 1.0}})
+    return {"description": "table de test", AGENT: sous_table}
 
 
 def _model(tmp_path: Path, *, existant: bool) -> str:
@@ -108,6 +115,30 @@ def test_une_sous_table_vide_est_refusee_a_l_ECRITURE(sous_table: Any) -> None:
     """
     with pytest.raises(ValueError, match="base_actions"):
         build_contract({AGENT: sous_table}, AGENT)
+
+
+def test_une_sous_table_sans_base_actions_est_refusee_a_l_ECRITURE() -> None:
+    """Le cas FRÉQUENT, et non la table vide : une clé retirée d'un fichier de récompense.
+
+    `RewardCalculator._get_unit_reward_config` lève dès la première action d'unité si la section
+    `base_actions` manque (engine/reward_calculator.py:820). Sans ce refus, le prologue écrivait
+    un contrat sur une table que la production ne sait pas lire, et le run mourait en cours
+    d'épisode — des minutes plus tard, avec un message qui ne parle plus de la table.
+    """
+    with pytest.raises(ValueError, match="base_actions"):
+        build_contract({AGENT: {"description": "note de roster", "win": 10.0}}, AGENT)
+
+
+@pytest.mark.parametrize("section", [{}, [], "wait", 3.0, None])
+def test_une_section_base_actions_vide_est_refusee_a_l_ECRITURE(section: Any) -> None:
+    """Présente mais creuse, la section ne vaut pas mieux qu'absente — et le contrat, lui, passait.
+
+    `_chemins_de_cles({"base_actions": {}})` rend un chemin : l'empreinte n'est pas vide, donc rien
+    n'arrêtait l'écriture. La production, elle, lit `base_actions["ranged_attack"]` au premier tir
+    (ai/reward_mapper.py:80) et lève. Même asymétrie que pour la section absente, un cran plus bas.
+    """
+    with pytest.raises(ValueError, match="base_actions"):
+        build_contract({AGENT: {"base_actions": section, "win": 10.0}}, AGENT)
 
 
 def test_l_ecriture_du_contrat_ne_produit_jamais_ce_que_la_relecture_refuse(tmp_path) -> None:
@@ -650,7 +681,12 @@ def test_la_cle_de_recompense_du_contrat_est_celle_du_run(tmp_path, monkeypatch)
     monkeypatch.setattr("ai.train.get_config_loader", lambda: _Loader())
     models_root = tmp_path / "models"
     (models_root / AGENT).mkdir(parents=True)
-    table = {"description": "x", AGENT: {"win": 1.0}, "PhaseB": {"win": 1.0, "kill": 2.0}}
+    socle = {"base_actions": {"charge_fail": -1.0}}
+    table = {
+        "description": "x",
+        AGENT: {**socle, "win": 1.0},
+        "PhaseB": {**socle, "win": 1.0, "kill": 2.0},
+    }
 
     train.prepare_run_artifacts(
         str(models_root), AGENT, True, False, 1, table, "PhaseB", log_fn=lambda _m: None
