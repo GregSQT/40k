@@ -10,7 +10,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 """
 
 import gymnasium as gym
-from typing import Callable, Dict, List, NamedTuple, Optional, Any, Tuple, TYPE_CHECKING, cast
+from typing import Dict, List, NamedTuple, Optional, Any, TYPE_CHECKING, cast
 import random
 import os
 import time
@@ -20,7 +20,7 @@ from shared.data_validation import require_key, require_positive_int, require_pr
 from ai.curriculum import ramped_ratio
 from ai.vec_normalize_frozen import copy_obs_dict
 from shared.torch_safe_globals import register_torch_safe_globals
-from engine.action_decoder import ActionValidationError
+from engine.action_decoder import ActionValidationError, PLAYER_CHOICE_MECHANISMS
 from engine.debug_trace import CH_BOT_LOOP, channel_enabled, trace
 
 # Avant tout `MaskablePPO.load` de ce module : torch >= 2.6 charge en `weights_only=True`.
@@ -71,66 +71,16 @@ def _detach_terminal_obs(obs: Any) -> Any:
     )
 
 
-def _read_pending_oath_selection(game_state: Dict[str, Any]) -> Any:
-    """Lecteur du mécanisme Oath, à la forme des autres : ``None`` = aucune désignation en attente."""
-    return game_state.get("pending_oath_selection")  # get allowed : None = aucune
-
-
-def _read_pending_coherency_removal(game_state: Dict[str, Any]) -> Any:
-    """Lecteur du mécanisme retrait cohérence (03.03) : ``None`` = aucune suppression en attente."""
-    return game_state.get("pending_coherency_removal")  # get allowed : None = aucun
-
-
-def _read_pending_fight_weapon_select(game_state: Dict[str, Any]) -> Any:
-    """Lecteur du mécanisme sélection arme CC (§0.69) : ``None`` = aucune sélection en attente."""
-    return game_state.get("pending_fight_weapon_select")  # get allowed : None = aucune
-
-
-def _read_pending_fight_target_select(game_state: Dict[str, Any]) -> Any:
-    """Lecteur de la re-sélection de cible CC : ``None`` = aucune re-sélection en attente.
-
-    Armé quand l'Exhortation de Rage tue la cible désignée et que le pile-in overrun 12.06 en
-    rend plusieurs autres frappables : la cible est rejouée par un `FIGHT_SLOT`.
-    """
-    return game_state.get("pending_fight_target_select")  # get allowed : None = aucune
-
-
-def _read_pending_shoot_weapon_sel(game_state: Dict[str, Any]) -> Any:
-    """Lecteur du split-fire tir (P3-8) — SHOOT_WEAPON_SEL : arme à sélectionner (pending_weapon None)."""
-    sw = game_state.get("pending_shoot_weapon_split")  # get allowed : None = aucun split-fire
-    return sw if sw is not None and sw.get("pending_weapon") is None else None  # get allowed
-
-
-def _read_pending_shoot_split_target(game_state: Dict[str, Any]) -> Any:
-    """Lecteur du split-fire tir (P3-8) — SHOOT_SLOT : cible à sélectionner (pending_weapon armé)."""
-    sw = game_state.get("pending_shoot_weapon_split")  # get allowed : None = aucun split-fire
-    return sw if sw is not None and sw.get("pending_weapon") is not None else None  # get allowed
-
-
-#: LES POINTS DE CHOIX JOUEUR sur lesquels le moteur s'ARRÊTE, chacun avec la famille de slots qui
-#: y répond et le libellé de son message d'erreur. UNE table, DEUX consommateurs — le prédicat
-#: `engine_is_paused_on_player_choice` (sites à modèle) et le tirage
-#: `random_action_for_pending_choice` (sites bot).
-#:
-#: POURQUOI UNE TABLE. Ces mécanismes étaient énumérés à la main sur chaque site. Quand l'Oath est
-#: arrivé après les replis, les quatre sites testaient encore `pending_agent_decision` SEUL : ils
-#: ont dû être corrigés d'un coup, et le crash mesuré (`convert_squad_action ... action 1024`)
-#: était la facture. Un troisième mécanisme n'ajoute désormais qu'une LIGNE ici, et les deux
-#: consommateurs le voient ensemble — ils ne peuvent plus diverger l'un de l'autre.
-#:
-#: L'ORDRE EST LE CONTRAT : décision agent d'abord, Oath ensuite, comme sur les sites d'origine.
-_PLAYER_CHOICE_MECHANISMS: Tuple[
-    Tuple[Callable[[Dict[str, Any]], Any], range, str], ...
-] = (
-    # (lecteur d'état, famille de slots qui répond, libellé du mécanisme)
-    (read_pending_agent_decision, mi.CHOICE_SLOTS, "decision agent"),
-    (_read_pending_oath_selection, mi.OATH_SLOTS, "designation d'Oath"),
-    (_read_pending_coherency_removal, mi.COHERENCY_SLOTS, "retrait coherence"),
-    (_read_pending_fight_weapon_select, mi.FIGHT_WEAPON_SLOTS, "arme CC"),
-    (_read_pending_fight_target_select, mi.FIGHT_SLOTS, "re-selection cible CC"),
-    (_read_pending_shoot_weapon_sel, mi.SHOOT_WEAPON_SEL_SLOTS, "split-fire arme TIR"),
-    (_read_pending_shoot_split_target, mi.SHOOT_SLOTS, "split-fire cible TIR"),
-)
+#: LES POINTS DE CHOIX JOUEUR sur lesquels le moteur s'ARRÊTE, chacun avec son lecteur d'état, la
+#: famille de slots qui y répond et le libellé de son message d'erreur. La table VIVAIT ICI ; elle
+#: a été déplacée dans `engine/action_decoder.py` le 2026-09-09, sans rien changer à son ordre ni
+#: à ses lecteurs, parce que le MOTEUR en a besoin lui aussi — pour choisir l'escouade que
+#: l'observation décrit pendant l'arrêt. Ici, le moteur ne pouvait pas l'importer (`engine` ne
+#: dépend pas de `ai`) : il gardait donc SA liste, écrite à la main, et elle avait divergé de
+#: celle-ci sur les deux sous-états du split-fire. Les deux consommateurs de ce module
+#: (`engine_is_paused_on_player_choice`, `random_action_for_pending_choice`) lisent désormais la
+#: même table que l'observation.
+_PLAYER_CHOICE_MECHANISMS = PLAYER_CHOICE_MECHANISMS
 
 
 def engine_is_paused_on_player_choice(game_state: Dict[str, Any]) -> bool:
@@ -148,7 +98,8 @@ def engine_is_paused_on_player_choice(game_state: Dict[str, Any]) -> bool:
         OPTIONNELLE — le masque n'ouvre donc ni WAIT ni zone intent.
     """
     return any(
-        read(game_state) is not None for read, _slots, _label in _PLAYER_CHOICE_MECHANISMS
+        mechanism.reader(game_state) is not None
+        for mechanism in _PLAYER_CHOICE_MECHANISMS
     )
 
 
@@ -164,13 +115,13 @@ def random_action_for_pending_choice(
     Lève si le mécanisme est en attente mais qu'aucun de ses slots n'est ouvert : c'est un état
     incohérent du masque, pas un cas à absorber par un repli.
     """
-    for read, slots, label in _PLAYER_CHOICE_MECHANISMS:
-        if read(game_state) is None:
+    for mechanism in _PLAYER_CHOICE_MECHANISMS:
+        if mechanism.reader(game_state) is None:
             continue
-        legal = [index for index in slots if bool(action_mask[index])]
+        legal = [index for index in mechanism.slots if bool(action_mask[index])]
         if not legal:
             raise RuntimeError(
-                f"{wrapper}: {label} en attente sans aucun slot autorise par le masque."
+                f"{wrapper}: {mechanism.label} en attente sans aucun slot autorise par le masque."
             )
         return int(random.choice(legal))
     return None
