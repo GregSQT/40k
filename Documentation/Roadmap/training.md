@@ -2,6 +2,28 @@
 
 ---
 
+## ⚠️ À FAIRE UNE FOIS — initialiser le contrat des modèles existants {#contrat-init}
+
+**Livré le 2026-09-09** (`ai/training_contract.py`). Le prologue d'un run vérifie désormais que le
+modèle repris a appris sur le **même sens** des grandeurs : registres d'observation, canaux de
+grille, familles d'actions, **clés** de la table de récompense. C'est le trou que ni
+`check_model_lifecycle` (qui regarde la commande), ni le verrou de parité de pool (qui parle après
+la première sonde), ni `check_for_correct_spaces` de SB3 (qui ne voit que les dimensions) ne
+couvrent : la dérive à taille **constante**.
+
+**Conséquence immédiate** : un modèle antérieur à cette livraison n'a pas de contrat, donc sa
+première reprise (`--append`, `--resume-from`) **s'arrête**. Après avoir vérifié que le contrat
+courant est bien celui sur lequel ce modèle a appris :
+
+```bash
+python3 -m ai.training_contract --init --agent ArmageddonAgent_x1
+```
+
+Un `--new` n'a rien à faire : il écrit le contrat lui-même. Les **valeurs** de récompense ne sont
+pas comparées — régler un poids reste libre, seule la disparition d'une clé arrête un run.
+
+---
+
 ## ✅ Obs — `hidden` 13.09 sur toutes les entités et porte de détection {#hidden-detection-obs}
 
 **Livré et mergé le 2026-09-08.** `obs_size` inchangé (16811), donc ce lot n'impose **par lui-même**

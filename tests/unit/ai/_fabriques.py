@@ -488,3 +488,17 @@ def pool_early_stopping_callback(archive: Any, n_workers: int | None = 4, **over
     callback = PoolEarlyStoppingCallback(**params)
     callback.model = MagicMock()
     return callback
+
+
+def table_de_recompense(agent_key: str = "TestAgent", **overrides: Any) -> Dict[str, Any]:
+    """Une table de récompense minimale, telle que `prepare_run_artifacts` l'exige.
+
+    Le prologue d'un run établit le CONTRAT du modèle (`ai/training_contract.py`), qui lit la
+    sous-table de l'agent — et lève si elle manque, comme `RewardCalculator` en production. Les
+    tests du prologue ne s'intéressent pas au contenu de cette table : ils ont juste besoin d'une
+    table VALIDE, et six d'entre eux la construiraient à l'identique.
+
+    Les `overrides` peuplent la sous-table de l'agent, pas la racine : c'est le seul niveau que le
+    contrat regarde, donc le seul qu'un test ait une raison de faire varier.
+    """
+    return {agent_key: dict(overrides)}

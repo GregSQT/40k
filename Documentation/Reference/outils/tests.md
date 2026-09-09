@@ -17,6 +17,44 @@ pytest tests/integration/pvp/ -q -n 6 --dist load
 npx vitest run
 ```
 
+### Les trois couches frontend, et laquelle entre dans la vérification large (mesuré 2026-09-09)
+
+`scripts/front_test_all.sh` orchestre trois couches : **A** `pytest tests/integration/pvp/`,
+**B** `npx vitest run` (jsdom, sans backend), **C** `npx playwright test` (backend 5098 + Vite 5198,
+`VITE_TEST_HOOKS=1`). Seules A et B entrent dans la vérification large de `CLAUDE.md` ; voici
+pourquoi, avec les mesures.
+
+| Couche | Mur | Statut |
+|---|---|---|
+| A — intégration PvP | 3 min 31 (`-n 6 --dist load`, mesuré 2026-08-05) | déjà dans la vérification large |
+| B — vitest | **4,0 s** — 36 fichiers, 430 tests | **ajoutée le 2026-09-09** |
+| C — Playwright | non mesuré | **inexécutable en l'état** (voir ci-dessous) |
+
+**Ce que la mesure a trouvé, et qui rendait la couche B rouge par construction.** Avant ce jour,
+`npx vitest run` rendait `Test Files 1 failed | 36 passed (37)` quel que soit l'état du code : le
+motif de collecte par défaut de Vitest ramasse tout `**/*.{test,spec}.?(c|m)[jt]s?(x)`, donc aussi
+`frontend/tests/e2e/smoke.spec.ts`, un fichier **Playwright** dont le premier import est
+`@playwright/test`. `scripts/front_test_all.sh` ne pouvait donc jamais rendre PASS sur sa couche B.
+La frontière entre les deux harnais est désormais déclarée dans `frontend/vite.config.ts`
+(`test.include` ancré sur `src/`, `test.exclude` sur `tests/`) et verrouillée par
+`tests/unit/scripts/test_vitest_collect_scope.py`, qui applique le motif AU DISQUE dans les deux
+sens : aucun spec Playwright collecté par vitest, et aucun test de `src/` laissé hors périmètre.
+
+**Pourquoi la couche C reste dehors.** `@playwright/test` est déclaré en `devDependencies`
+(`^1.62.1`) mais **absent de `frontend/node_modules`**, et aucun navigateur n'est installé
+(`~/.cache/ms-playwright` vide). La couche C ne peut pas s'exécuter tant que ces deux commandes
+n'ont pas été jouées — elles téléchargent plusieurs centaines de Mo, c'est une action
+d'environnement, pas une modification du dépôt :
+
+```bash
+npm --prefix frontend install
+npx --prefix frontend playwright install chromium
+```
+
+Une fois installée, la couche C se lance seule par `bash scripts/front_test_all.sh --skip-a --skip-b`.
+Son mur est à mesurer avant de décider si elle rejoint la vérification large : elle démarre deux
+serveurs et pilote un navigateur, son coût n'a rien de commun avec les 4 s de la couche B.
+
 ### Pourquoi `--dist worksteal` (mesuré 2026-07-26)
 
 `--dist load` (défaut de `pytest-xdist`) envoie à chaque worker un **gros lot initial pris dans
@@ -271,9 +309,12 @@ n'est pas testable.
 | `tests/unit/scripts/test_roster_matchup_eval_loop.py` | 18 | Boucle d'évaluation de `roster_matchup_stats.py`, exercée avec un faux env (obs `Dict` + masque) et un faux modèle qui enregistre ce qu'il reçoit : obs `Dict` servie non aplatie, chemin legacy `Box` converti en float32/batch, masque venant de `engine.get_action_mask` (voie legacy jamais lue), arrêt exact au plafond de pas, épisode tronqué compté `failed` et jamais en partie, vainqueur et siège lus dans `info` (absence → erreur explicite), les deux générateurs aléatoires graînés, normalizer délégué à `ai/bot_evaluation.py`, `--agent-seat-mode` transmis dans les modes bot **et** agent |
 | `tests/unit/scripts/test_roster_matchup_scenario_contract.py` | 5 | Contrat V11 des scénarios écrits par `roster_matchup_stats.py` : aucune clé legacy (`objectives_ref`, `wall_ref`, `deployment_zone`), `board_ref`/`terrain_ref` présents, défauts CLI lus sur le parseur réel et pointant des fichiers existants, terrain par défaut porteur d'aires `objective: true` et de `deployment_zones` |
 
-### Frontend — `frontend/src/utils/`
+### Frontend — `frontend/src/`
 
-**68 tests**
+**36 fichiers, 430 tests, 4,0 s** (relevé 2026-09-09 sur `npx vitest run`). Le tableau ci-dessous
+n'énumère que les modules de `utils/` et n'a pas suivi la croissance de la suite : les tests de
+`hooks/` et de `components/` (jsdom) n'y figurent pas. Le chiffre qui fait foi est celui de la
+commande, pas celui du tableau.
 
 | Fichier | Tests | Ce qui est couvert |
 |---|---|---|
@@ -388,17 +429,63 @@ Vérifier : `npx vitest run src/utils/<module>.test.ts`
 
 ---
 
-## CI
+## Est-ce que les tests MORDENT encore ? — `scripts/mutation_ciblee.py`
 
-```yaml
-# Python
-pytest tests/unit/ -q
-pytest tests/unit/engine/ -q --cov=engine --cov-fail-under=70
-pytest tests/unit/shared/ -q --cov=shared --cov-fail-under=80
+La **Definition of Done** ci-dessous exige un test de non-régression par bugfix, et CLAUDE.md (T4)
+exige d'en prouver la morsure : remettre le défaut, constater le rouge, rétablir le fix. Cette
+preuve se fait **une fois**, à la main, au moment du correctif. Rien ne la rejoue. Un test qui
+cesse de mordre — fixture qui a dérivé, assertion devenue tautologique, code déplacé hors du
+chemin exercé — reste vert indéfiniment, et sa verdure se lit comme une garantie.
 
-# Frontend
-npm --prefix frontend run test:run
+```bash
+# mutants sur les lignes NON COMMITÉES, tests déduits du diff et du nommage
+python3 scripts/mutation_ciblee.py
+
+# contre une base, avec les tests explicitement nommés
+python3 scripts/mutation_ciblee.py --base main --tests tests/unit/engine/test_move_execution.py
 ```
+
+Le script mute **les seules lignes du diff** dans `engine/`, `ai/`, `services/`, `shared/` —
+comparaisons, booléens — puis joue les tests candidats. Il **tokenise** la source plutôt que de
+substituer au motif : un `==` dans une chaîne ou un `and` dans un commentaire produirait un mutant
+increvable, donc un faux survivant. Le fichier est restauré dans un `finally`, sa restauration est
+**vérifiée**, et `__pycache__` est purgé à chaque mutation — un `.pyc` compilé depuis un mutant de
+même longueur survit à la restauration et se rejoue en silence.
+
+**Lire un survivant.** « Aucun des tests joués ne distingue ce code de ce code-là. » Trois causes,
+trois réponses différentes : la ligne n'est **couverte par aucun test** (écrire le test) ; elle est
+couverte mais **l'assertion ne regarde pas** ce que la mutation change (renforcer l'assertion) ; la
+mutation est **sémantiquement neutre** (une borne inatteignable, deux chemins équivalents) — faux
+positif légitime, qui se constate et ne se corrige pas. Le script ne tranche pas : il rend le
+mutant, sa ligne et les tests joués.
+
+Un exemple des trois est dans le dépôt : `ai/train.py`, dans la branche `--new` de
+`prepare_run_artifacts`, porte un survivant **neutre** commenté sur place — l'archivage vient de
+renommer le modèle, donc les deux valeurs du drapeau mènent au même écrit. Le commentaire existe
+pour que le prochain lancement ne rouvre pas l'enquête.
+
+Le plafond `--max-mutants` (40 par défaut) est un garde-fou de **livraison**, pas de performance :
+au-delà, le diff est trop gros pour ce contrôle et c'est le découpage qu'il faut revoir.
+
+---
+
+## CI — il n'y en a pas, et c'est la vérification utilisateur qui en tient lieu
+
+Cette section publiait jusqu'au 2026-09-09 un bloc YAML avec `--cov-fail-under=70` / `80`, présenté
+comme la CI du dépôt. **Ce bloc n'a jamais été exécuté.** Constaté ce jour : `.github/` ne contient
+que `copilot-instructions.md` et `instructions/`, il n'existe aucun workflow, aucun `.coverage` ni
+`htmlcov/` à la racine, et `addopts` de `pytest.ini` ne porte pas `--cov`. Un seuil de couverture
+écrit dans une doc que rien ne lit n'est pas un garde-fou, c'est une croyance — et la
+**Definition of Done** ci-dessous s'y adossait.
+
+Ce qui joue réellement ce rôle : la **vérification large**, lancée par l'utilisateur (voir
+`CLAUDE.md`, section TESTS). Elle enchaîne les tests unitaires, l'intégration PvP, `pyright`,
+`hidden_action_finder`, `check_ai_rules`, `biome`, `tsc`, et depuis le 2026-09-09 `vitest`.
+
+La couverture n'est donc **pas mesurée** aujourd'hui. `pytest-cov` est installé et disponible : une
+mesure ponctuelle reste possible sur un périmètre nommé, mais aucun seuil n'est appliqué nulle part.
+Poser un seuil suppose de mesurer d'abord — l'écrire avant serait remettre exactement ce qui vient
+d'être retiré.
 
 ---
 

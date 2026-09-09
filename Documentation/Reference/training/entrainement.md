@@ -87,6 +87,42 @@ n'existe est refusé aussi. Pour un **premier** entraînement : `--new`.
 Les modes qui ne s'entraînent pas — `--test-only` / `--eval`, `--convert-steplog`, `--replay` — ne
 lisent aucun des deux drapeaux et n'en exigent aucun.
 
+### Le CONTRAT du modèle : ce sur quoi il a appris doit encore vouloir dire la même chose
+
+Le prologue pose une **seconde** question, après « que fait-on du modèle en place ? » : *ce modèle
+a-t-il appris sur le même sens des grandeurs qu'on s'apprête à lui redonner ?*
+
+Trois contrôles existaient et aucun ne voit ce cas. `check_model_lifecycle` regarde la commande,
+pas le modèle. Le verrou de parité de pool attrape une reprise désappariée, mais **après** la
+première sonde — donc après des épisodes joués. Stable-Baselines3 compare `observation_space` et
+`action_space` au chargement, donc ne voit que les changements de **dimension**. Reste la dérive à
+taille **constante** : un canal de grille permuté, une clé de récompense retirée. Les tenseurs
+gardent leur forme, rien ne lève, et le modèle repris apprend sur des grandeurs qui ont changé de
+sens — des dizaines d'heures rendues fausses sans une ligne rouge.
+
+`ai/training_contract.py` écrit donc, à côté de chaque modèle, un `training_contract.json` qui
+porte **les noms, dans leur ordre** : registres d'observation (`*_FIELDS` de
+`engine/observation_entities.py`, découverts par introspection), canaux de
+`GRID_CHANNEL_NAMES`, `ACTION_FAMILIES`, et les **chemins de clés** de la table de récompense de
+l'agent.
+
+- `--new` **écrit** le contrat (après l'archivage : écrit avant, il partirait avec le run précédent) ;
+- toute **reprise** le compare et **s'arrête** au moindre écart, en nommant le champ divergent ;
+- le contrat suit le modèle à l'archivage, comme ses stats VecNormalize — une archive sans contrat
+  serait irreprenable.
+
+**Ce qui n'est PAS comparé : les valeurs de récompense.** Régler un poids est le mode d'emploi
+normal de cette table ; un garde-fou qui s'y déclencherait serait contourné le jour même. Seule la
+**structure** est surveillée : une clé disparue est un événement qui ne rapporte plus rien.
+
+Un modèle antérieur à ce garde-fou n'a pas de contrat : sa première reprise s'arrête et donne la
+commande à jouer une fois, après avoir vérifié que le contrat courant est bien le sien —
+
+```bash
+python3 -m ai.training_contract --init --agent <agent_key>
+# sans --init : compare et affiche les écarts, sans rien écrire
+```
+
 ### Reprendre depuis un checkpoint périodique
 ```bash
 python ai/train.py --agent <agent_key> --training-config default --scenario bot \

@@ -51,6 +51,7 @@ from ai.train import (
 # Sans le second, le test dependrait de l'arborescence reelle `config/agents/<agent>/` et
 # casserait au premier renommage d'agent, pour une raison sans rapport avec ce qu'il verrouille.
 from .test_resume_from_checkpoint import _FakeConfigLoader
+from ._fabriques import table_de_recompense
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 TRAIN_PY = PROJECT_ROOT / "ai" / "train.py"
@@ -168,11 +169,13 @@ def test_le_prologue_commun_des_deux_points_d_entree_refuse(tmp_path, monkeypatc
     (models_root / "TestAgent" / "model_TestAgent.zip").write_bytes(b"PK\x03\x04")
 
     with pytest.raises(ValueError):
-        prepare_run_artifacts(str(models_root), "TestAgent", False, False, 1, log_fn=lambda _m: None)
+        prepare_run_artifacts(str(models_root), "TestAgent", False, False, 1,
+                              table_de_recompense("TestAgent"), log_fn=lambda _m: None)
 
     (models_root / "TestAgent" / "model_TestAgent.zip").unlink()
     with pytest.raises(ValueError):
-        prepare_run_artifacts(str(models_root), "TestAgent", False, True, 1, log_fn=lambda _m: None)
+        prepare_run_artifacts(str(models_root), "TestAgent", False, True, 1,
+                              table_de_recompense("TestAgent"), log_fn=lambda _m: None)
 
 
 def _main_body() -> list:
