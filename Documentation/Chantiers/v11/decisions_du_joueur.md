@@ -1052,11 +1052,14 @@ Ordre par valeur tactique :
    décline JAMAIS — alors que `decline_reactive_move` est formalisé et sans producteur — et prend
    la case la plus proche de l'ennemi qui vient de bouger (`_select_reactive_destination`,
    shared_utils). Écarté de la livraison du 2026-09-09 **sur mesure, pas par manque de temps** :
-   ses deux seuls porteurs sont `Termagant` et `FenrisianWolf` ; le premier n'apparaît que dans
-   les rosters 150 pts de `CoreAgent` et `_p2_rosters/150pts`, le second dans aucune config, et le
-   régime d'entraînement actif est `ArmageddonAgent_x1` en 500 pts. Le brancher aujourd'hui
-   coûterait un type de décision et ses tests pour zéro gradient. À rouvrir si un roster
-   d'entraînement porte l'un des deux.
+   son SEUL porteur est `Termagant`, qui n'apparaît que dans les rosters 150 pts de `CoreAgent` et
+   `_p2_rosters/150pts`, alors que le régime d'entraînement actif est `ArmageddonAgent_x1` en
+   500 pts. Le brancher aujourd'hui coûterait un type de décision et ses tests pour zéro gradient.
+   À rouvrir si un roster d'entraînement le porte. *(Rectifié le 2026-09-09, suite 40 : le
+   `FenrisianWolf` était compté comme second porteur à tort — l'utilisateur confirme que l'unité
+   n'a pas cette règle, et `reactive_move` lui a été retiré. Le coût réel du branchement a par
+   ailleurs été chiffré depuis : une modale PvP est à créer, aucune UI réactive n'existant hors
+   replay.)*
 7. ✅ **LIVRÉ le 2026-08-07** (élément `L6` du lot, worktree `L6-fly-decision` — détail →
    [§0.67](index_v11.md#s0.67)). **FLY / Take to the skies (21.03) est une DÉCISION
    D'AGENT** : le type `fly_declaration` est déclaré dans `AGENT_DECISION_TYPE_IDS`

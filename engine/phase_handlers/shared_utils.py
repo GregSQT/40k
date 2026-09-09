@@ -66,6 +66,7 @@ from engine.spatial_relations import (  # noqa: F401  (ré-export)
     entry_is_on_battlefield,
     require_entry_on_battlefield,
     unit_entries_within_engagement_zone,
+    unit_within_engagement_zone_footprints,
 )
 from engine.combat_utils import (
     BlockedBitmap,
@@ -3115,6 +3116,17 @@ def maybe_resolve_reactive_move(
         # se declenchait quasiment plus des qu'on quittait le board x1.
         _trigger_radius = _REACTIVE_TRIGGER_RANGE_INCHES * int(require_key(game_state, "inches_to_subhex"))
         if calculate_hex_distance(unit_col, unit_row, to_col_int, to_row_int) > _trigger_radius:
+            continue
+
+        # « IF THIS UNIT IS NOT WITHIN ENGAGEMENT RANGE of one or more enemy units » : condition
+        # d'ELIGIBILITE de la capacite, pas de legalite de la destination. Le pool BFS n'ecarte que
+        # les cases d'ARRIVEE adjacentes a un ennemi, jamais la position de DEPART : sans cette
+        # porte, une unite au contact reagissait et quittait le corps a corps par un mouvement
+        # gratuit, sans les contraintes du Fall Back. Mesure avant correctif : reactif engage en
+        # (10,10) a distance 1 d'un ennemi, deplace en (12,9) a distance 2, `applied=1`.
+        if unit_within_engagement_zone_footprints(
+            game_state, unit, engagement_zone=get_engagement_zone(game_state), max_distance=None
+        ):
             continue
 
         eligible_units.append(unit)

@@ -24,14 +24,7 @@ export class FenrisianWolf extends SwarmMeleeSwarm {
   static CC_WEAPONS = getWeapons(FenrisianWolf.CC_WEAPON_CODES);
 
   // UNIT RULES
-  static UNIT_RULES = [
-    {
-      ruleId: "reactive_move",
-      displayName: "Predator Instinct",
-    },
-  ];
-  // RULE IMPLEMENTATION STATUS (0=NOT_IMPLEMENTED, 1=NOT_IMPLEMENTABLE_YET, 2=IMPLEMENTED)
-  static RULES_STATUS = { reactive_move: 2 };
+  static UNIT_RULES = [];
 
   // UNIT KEYWORDS
   static UNIT_KEYWORDS = [

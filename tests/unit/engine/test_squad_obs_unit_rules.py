@@ -345,7 +345,7 @@ def test_real_training_roster_writes_the_expected_id():
     assert int((ennemis != 0).sum()) > 0, "bloc de capacites ennemi vide : rien n'est observe"
 
     # Contre-epreuve, DANS LE MEME BLOC : une regle qu'aucun roster de training ne porte n'est
-    # jamais ecrite. `reactive_move` appartient aux Tyranides (Termagant, FenrisianWolf).
+    # jamais ecrite. `reactive_move` n'a qu'un porteur, le Termagant (Tyranides).
     assert np.all(ennemis != obs_ids["reactive_move"])
 
 
