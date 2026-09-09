@@ -44,11 +44,31 @@ PIDS_TO_KILL=()
 cleanup() {
   for pid in "${PIDS_TO_KILL[@]:-}"; do
     if kill -0 "$pid" 2>/dev/null; then
-      kill "$pid" 2>/dev/null || true
+      # Le GROUPE, pas le seul PID. `npx vite` lance un enfant `node .../vite` qui NE MEURT PAS
+      # avec son parent : mesuré le 2026-09-09, un `node .../vite --port 5198` d'un worktree
+      # depuis longtemps supprimé squattait encore le port. Le run suivant voyait alors
+      # « Port 5198 is already in use », son propre Vite mourait, et Playwright pilotait le
+      # serveur de l'AUTRE run — avec l'ancienne configuration de proxy. Les tests mesuraient
+      # un serveur fantôme, et rendaient « terrain-list: HTTP 500 » alors que l'API va bien.
+      kill -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null || true
     fi
   done
 }
 trap cleanup EXIT
+
+port_libre_ou_echoue() {
+  # Un port occupé n'est JAMAIS une condition à contourner ici : le squatteur répondrait aux
+  # tests à la place du serveur qu'on voulait mesurer, et le run entier serait faux sans le dire.
+  local port="$1"
+  local quoi="$2"
+  if curl -sf -o /dev/null --max-time 2 "http://127.0.0.1:$port" \
+     || curl -sf -o /dev/null --max-time 2 "http://127.0.0.1:$port/api/health"; then
+    echo "ERROR: le port $port ($quoi) est déjà pris. Un run précédent a laissé un serveur :" >&2
+    echo "       pkill -f 'vite --port $port' ; pkill -f 'port=$port'" >&2
+    return 1
+  fi
+  return 0
+}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -70,6 +90,14 @@ wait_for_http() {
 
 spawn_backend() {
   local port="$1"
+  port_libre_ou_echoue "$port" "backend" || return 1
+  if [ ! -x "$VENV" ]; then
+    # Diagnostic IMMÉDIAT plutôt que 30 s d'attente d'un serveur qui n'a jamais démarré : c'est
+    # le cas dans un worktree, qui n'a pas de `.venv` (mesuré le 2026-09-09).
+    echo "ERROR: interpréteur introuvable : $VENV" >&2
+    echo "       Ce script se lance depuis la racine du dépôt, pas depuis un worktree." >&2
+    return 1
+  fi
   "$VENV" -c "
 from services.api_server import app
 app.run(host='127.0.0.1', port=$port, debug=False, use_reloader=False)
@@ -167,8 +195,11 @@ if [ "$SKIP_C" = false ]; then
   # les tests : tous les scénarios échouaient sur `ECONNREFUSED 127.0.0.1:5001`, quel que soit
   # l'état de l'application (mesuré le 2026-09-09, première exécution réelle de cette couche).
   # `PW_BASE_URL` ne suffit pas : il ne gouverne que les requêtes émises par Playwright lui-même.
+  port_libre_ou_echoue "$FRONT_C" "frontend Vite" || exit 1
+  # `setsid` place Vite dans son PROPRE groupe de processus, que `cleanup` sait tuer en entier :
+  # `npx` n'est qu'un lanceur, et le `node .../vite` qu'il crée survivait à la mort de son parent.
   VITE_TEST_HOOKS=1 VITE_PORT=$FRONT_C VITE_API_TARGET="http://127.0.0.1:$PORT_C" \
-    npx vite --port "$FRONT_C" &
+    setsid npx vite --port "$FRONT_C" &
   VITE_PID=$!
   PIDS_TO_KILL+=("$VITE_PID")
   wait_for_http "http://localhost:$FRONT_C" 60

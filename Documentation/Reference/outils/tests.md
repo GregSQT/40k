@@ -74,9 +74,22 @@ n'exécute jamais :
    que les requêtes émises par Playwright lui-même. **Corrigé** par `VITE_API_TARGET` ;
 3. `playwright-report/`, `test-results/` et `.auth/` n'étaient pas ignorés — le dernier porte le
    **cookie de session** d'un vrai compte. **Corrigé** ;
-4. il reste : la page rend `Impossible de charger la liste des terrains : terrain-list: HTTP 500`,
-   donc le canvas PIXI n'apparaît jamais et les 13 tests expirent en l'attendant. **Non corrigé** —
-   c'est un chantier de remise en état, distinct de l'exécutabilité traitée ici.
+4. le `HTTP 500` sur la liste des terrains n'était **pas** un défaut de l'API : `npx vite` n'est
+   qu'un lanceur, et le `node …/vite` qu'il crée **ne mourait pas** avec le script. Chaque
+   exécution laissait un serveur vivant — un Vite d'un worktree déjà supprimé écoutait encore.
+   Le run suivant voyait « Port 5198 is already in use », son propre Vite mourait, **et le script
+   continuait** : Playwright pilotait alors le serveur de l'autre run, avec son ancien proxy vers
+   5001. Les tests ne mesuraient plus l'arbre de travail. **Corrigé** : `setsid` + kill de groupe,
+   et un refus explicite si le port est déjà pris (`port_libre_ou_echoue`), verrouillés par
+   `tests/unit/scripts/test_front_test_all_garde_fous.py`.
+
+Vérifié en reproduisant l'appel à la main : `/api/config/terrain-list` rend **200** sur le backend
+de test, avec le cookie de session **et** l'en-tête anti-CSRF `X-W40K-Client` qu'exige toute requête
+authentifiée par cookie. Un appel sans cet en-tête rend 401 — c'est ce qui m'avait fait suspecter à
+tort l'authentification.
+
+C'est le pire mode de panne pour un harnais : il ne s'arrête pas, **il ment**. Un port occupé n'y
+est donc plus une condition à contourner, mais un motif d'arrêt.
 
 Une fois ces quatre points réglés, son mur sera à re-mesurer sur des tests qui passent : 7 min de
 timeouts ne dit rien du coût réel de la couche.
