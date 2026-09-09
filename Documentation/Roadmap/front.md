@@ -15,10 +15,11 @@ du code. Frontière déclarée dans `frontend/vite.config.ts` et verrouillée pa
 `tests/unit/scripts/test_vitest_collect_scope.py`. La couche B (**4,0 s**, 36 fichiers, 430 tests)
 entre dans la vérification large de CLAUDE.md.
 
-## 🟢 Couche C — remise en état le 2026-09-09 : **13 verts sur 14, en 37 s** {#couche-c}
+## 🟢 Couche C — remise en état le 2026-09-09 : **13 verts, 0 skippé, en 36 s** {#couche-c}
 
-Playwright installé (paquet + Chromium) et **huit défauts corrigés**, la couche C est verte :
-**13 tests passent**, 1 est skippé par le spec, aucun n'échoue.
+Playwright installé (paquet + Chromium) et **neuf défauts corrigés**, la couche C est verte :
+ses 14 tests s'exécutent tous, **13 passent et plus aucun ne se skippe** ; le seul non-vert est la
+régression visuelle, qui écrit sa baseline au premier run d'une machine.
 
 Les **invariants de parité front/back** — `greenCircleUnitIds ⊆ move_activation_pool` et
 `movePreviewHexes ⊆ valid_move_destinations_pool` — vérifient enfin quelque chose. Ils **passaient
