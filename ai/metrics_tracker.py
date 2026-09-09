@@ -35,7 +35,7 @@ import numpy as np
 from collections import Counter, defaultdict, deque
 from torch.utils.tensorboard.writer import SummaryWriter
 import os
-from typing import Any, Deque, Dict, List, Optional, Protocol, Sequence, Tuple, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Sequence
 from shared.data_validation import require_key
 # SOURCE UNIQUE des noms de bots (cf. l'en-tete de `ai/bot_registry.py`) : ce module portait la
 # QUATRIEME table du depot, ecrite a la main et restee sur le panel d'origine.
