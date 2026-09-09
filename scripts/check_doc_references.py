@@ -892,13 +892,35 @@ def agent_profiles() -> dict[str, dict]:
     `config_loader::_resolve_profile_extends`) et ne redéclarer que ce qui change. Son JSON brut
     n'a alors pas de `n_envs`, et les fonctions ci-dessous lèveraient un `KeyError` sur un profil
     parfaitement valide — ce que le run, lui, résout sans broncher.
-    """
-    from config_loader import get_config_loader
 
-    data = json.loads(AGENT_CONFIG.read_text(encoding="utf-8"))
-    noms = [key for key, value in data.items() if isinstance(value, dict)]
-    loader = get_config_loader()
-    return {nom: loader.load_agent_training_config(AGENT_KEY, nom) for nom in noms}
+    ROOT doit être dans `sys.path` : `config_loader` vit à la RACINE du dépôt, alors que Python
+    place en tête du chemin le dossier du SCRIPT — `scripts/`. Lancé comme le décrit CLAUDE.md
+    (`python3 scripts/check_doc_references.py`), l'import échouait donc, et il échouait TARD :
+    après l'affichage de tous les contrôles, si bien que la sortie ressemblait à un succès
+    jusqu'à sa dernière ligne.
+
+    Insertion CONDITIONNELLE puis retrait dans un `finally`, exactement comme `expected_obs_size`
+    et `expected_action_size` : ce module est aussi importé par des tests, où polluer durablement
+    le `sys.path` du processus ferait résoudre autrement des imports qui n'ont rien à voir. Le
+    corps entier est dans le `try` — le loader résout ses propres imports paresseusement, et les
+    laisser hors du bloc rejouerait le même défaut une couche plus loin.
+    """
+    import sys as _sys
+
+    root_str = str(ROOT)
+    already = root_str in _sys.path
+    if not already:
+        _sys.path.insert(0, root_str)
+    try:
+        from config_loader import get_config_loader
+
+        data = json.loads(AGENT_CONFIG.read_text(encoding="utf-8"))
+        noms = [key for key, value in data.items() if isinstance(value, dict)]
+        loader = get_config_loader()
+        return {nom: loader.load_agent_training_config(AGENT_KEY, nom) for nom in noms}
+    finally:
+        if not already and root_str in _sys.path:
+            _sys.path.remove(root_str)
 
 
 @functools.lru_cache(maxsize=1)

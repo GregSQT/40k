@@ -1883,3 +1883,71 @@ def test_symbol_kinds_inside_fenced_code_block_are_ignored(tmp_path: pathlib.Pat
     _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert not broken, broken
 
+
+
+def test_the_script_runs_to_completion_when_launched_by_path() -> None:
+    """Lancé comme CLAUDE.md le décrit, le script va au bout et sort en 0 sur un corpus sain.
+
+    C'EST LE SEUL TEST QUI EXÉCUTE LE SCRIPT COMME UN HUMAIN LE LANCE. Tous les autres passent
+    par `charger_script`, qui importe le module en ayant déjà ROOT sur le chemin : ils ne peuvent
+    donc pas voir un défaut d'import propre à la ligne de commande.
+
+    Le défaut fermé ici : `agent_profiles()` importait `config_loader`, qui vit à la RACINE, alors
+    que Python place en tête de `sys.path` le dossier du SCRIPT (`scripts/`). Le script sortait en
+    code 1 sur un `ModuleNotFoundError` — mais TARD, après avoir affiché tous ses contrôles avec
+    leurs ✅, si bien que la sortie ressemblait à un succès jusqu'à sa dernière ligne. Un contrôle
+    qui échoue en ayant l'air de réussir est pire qu'un contrôle absent.
+
+    Le test contrôle le CODE DE SORTIE et l'absence de trace, pas le contenu du rapport : ce
+    dernier est le sujet des autres tests du fichier, et le corpus vivant change à chaque
+    livraison. Si la documentation devient réellement périmée, ce test tombe aussi — c'est
+    voulu : c'est exactement ce que le script est là pour dire.
+    """
+    done = subprocess.run(
+        [sys.executable, "scripts/check_doc_references.py"],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+    )
+    combined = done.stdout + done.stderr
+    assert "ModuleNotFoundError" not in combined, (
+        "le script ne résout pas ses imports depuis la racine — ROOT doit être dans sys.path "
+        f"le temps de l'import\n{done.stderr[-2000:]}"
+    )
+    assert "Traceback" not in combined, (
+        f"le script s'est interrompu sur une exception\n{done.stderr[-2000:]}"
+    )
+    assert done.returncode == 0, (
+        f"le contrôle documentaire sort en {done.returncode} — soit la documentation est "
+        f"réellement périmée, soit le script lui-même est cassé\n{done.stdout[-3000:]}"
+    )
+
+
+def test_the_script_does_not_leak_the_repository_root_into_sys_path() -> None:
+    """`agent_profiles()` retire ROOT du chemin qu'elle a emprunté.
+
+    Ce module est importé par les tests : y laisser la racine durablement ferait résoudre
+    autrement des imports sans rapport, dans le processus pytest. Le retrait conditionnel est la
+    moitié du patron que `expected_obs_size` et `expected_action_size` appliquent déjà — la
+    moitié qu'on oublie en recopiant.
+
+    Le test s'exécute dans un sous-processus dont le chemin ne contient PAS la racine au départ,
+    sans quoi il serait vacant : avec ROOT déjà présent, la fonction n'insère rien et n'a rien à
+    retirer.
+    """
+    program = (
+        "import importlib.util, sys, pathlib;"
+        f"root=r'{ROOT}';"
+        "sys.path[:] = [p for p in sys.path if pathlib.Path(p or '.').resolve() != pathlib.Path(root)];"
+        "assert root not in sys.path, 'depart vacant : ROOT deja sur le chemin';"
+        f"s=importlib.util.spec_from_file_location('cdr', r'{ROOT}/scripts/check_doc_references.py');"
+        "m=importlib.util.module_from_spec(s);s.loader.exec_module(m);"
+        "n=len(m.agent_profiles());"
+        "print(n > 0, root in sys.path)"
+    )
+    done = subprocess.run(
+        [sys.executable, "-c", program],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8",
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    assert done.stdout.strip() == "True False", (
+        f"attendu « profils chargés, racine retirée », obtenu {done.stdout.strip()!r}"
+    )
