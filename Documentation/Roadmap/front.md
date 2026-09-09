@@ -15,10 +15,12 @@ du code. Frontière déclarée dans `frontend/vite.config.ts` et verrouillée pa
 `tests/unit/scripts/test_vitest_collect_scope.py`. La couche B (**4,0 s**, 36 fichiers, 430 tests)
 entre dans la vérification large de CLAUDE.md.
 
-## 🔴 Couche C — exécutée pour la première fois le 2026-09-09, **13 tests rouges sur 14** {#couche-c}
+## 🔴 Couche C — exécutée pour la première fois le 2026-09-09, **aucun test vert** {#couche-c}
 
-Playwright installé (paquet + Chromium), la couche C a enfin tourné : **~7 min, 13 échecs sur 14**.
-Elle **n'entre pas** dans la vérification large tant qu'elle est rouge.
+Playwright installé (paquet + Chromium), la couche C a enfin tourné : **6 min 42, 13 échecs et
+1 test skippé sur 14 — aucun ne passe**. Elle **n'entre pas** dans la vérification large. Le mur
+mesuré est presque entièrement du timeout (13 × 30 s d'attente d'un canvas qui n'arrive jamais) : il
+ne dit rien du coût réel de la couche, à re-mesurer sur des tests verts.
 
 Quatre défauts, dont **trois corrigés** dans `worktree-playwright-couche-c-et-hook` : `__dirname`
 indéfini en module ES dans `global-setup.ts` (le setup mourait avant le premier test) ; le proxy
