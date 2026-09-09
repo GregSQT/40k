@@ -180,8 +180,10 @@ def _read_pending_fight_target_select(game_state: Dict[str, Any]) -> Any:
 def read_pending_shoot_split(game_state: Dict[str, Any]) -> Any:
     """Split-fire (P3-8) en cours, QUEL QUE SOIT le sous-état : ``None`` si aucun.
 
-    Les deux lecteurs de sous-état ci-dessous en dérivent — le fait « une activation de tir
-    fractionné est ouverte » ne se teste qu'ici. PUBLIQUE parce que l'observation lit les
+    Les deux lecteurs de sous-état ci-dessous en dérivent : la partition ARME / CIBLE ne se
+    décide qu'à partir d'ici. Le masque et le décodeur, eux, relisent la clé en direct pour
+    d'autres besoins (slots ouverts, conversion d'action) — ce lecteur ne prétend pas les
+    remplacer. PUBLIQUE parce que l'observation lit les
     ASSIGNATIONS déjà faites (`n_weapons_assigned`), qui existent dans les DEUX sous-états :
     l'agent choisit sa prochaine arme, puis sa cible, sans que rien ne lui dise ce qu'il a déjà
     envoyé et sur qui (mesuré le 2026-09-09 : 39 des 70 points d'arrêt de cible rencontrés en
