@@ -247,15 +247,9 @@ def test_obs_scratch_buffer_is_zeroed_before_reuse() -> None:
     et la cause lisible sans trace de stack moteur.
     """
     from engine.observation_builder import ObservationBuilder
-    from tests.unit.engine._config_helpers import build_game_rules
 
-    # `game_rules` est exigé par `__init__` (`plunging_fire_height`, tir plongeant) : les VRAIES
-    # règles, pour que l'ajout d'une clé requise ne rende pas ce verrou rouge sans rapport.
     builder = ObservationBuilder(
-        {
-            "observation_params": {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET},
-            "game_rules": build_game_rules(),
-        }
+        {"observation_params": {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET}}
     )
 
     # Premier appel : initialise _obs_scratch
