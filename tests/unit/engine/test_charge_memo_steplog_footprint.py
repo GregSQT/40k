@@ -52,6 +52,7 @@ import pytest
 
 import engine.phase_handlers.shared_utils as su
 from ai.step_logger import StepLogger
+from engine.w40k_core import W40KEngine
 
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -87,7 +88,17 @@ def _trace(path: str, *, with_memo: bool) -> List[str]:
     try:
         _seed_randomness(SEED)
         env = _build_env()
-        env.unwrapped.step_logger = StepLogger(path, enabled=True, buffer_size=BUFFER_SIZE)
+        # `_build_env` empile Monitor(BotControlledEnv(ActionMasker(W40KEngine))) et `.unwrapped`
+        # n'est typé que par l'interface Gym, qui ne connaît pas `step_logger`. Le contrôle n'est
+        # pas là que pour le typage : si un wrapper cessait d'en être un, l'enregistreur serait
+        # posé à côté du moteur, la trace resterait vide et les bornes anti-vert-vacant plus bas
+        # ne diraient plus laquelle des deux causes a échoué.
+        moteur = env.unwrapped
+        assert isinstance(moteur, W40KEngine), (
+            f"`.unwrapped` ne rend plus le moteur mais {type(moteur).__name__} : la pile de "
+            "wrappers de `_build_env` a changé, l'enregistreur ne serait branché sur rien"
+        )
+        moteur.step_logger = StepLogger(path, enabled=True, buffer_size=BUFFER_SIZE)
         env.reset()
         _run_steps(env, STEPS, np.random.default_rng(SEED))
         env.close()
