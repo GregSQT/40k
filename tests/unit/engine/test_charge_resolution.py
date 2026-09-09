@@ -137,6 +137,42 @@ class TestChargeResolution:
         assert len(dest_to_2) > 0, "enemy2 à (15,10) doit être une cible atteignable"
         assert len(dest_to_3) == 0, "enemy3 à (25,10) doit être hors de portée"
 
+    def test_gym_hex_enemy_beyond_12_is_not_declarable_even_if_bfs_reaches_it(self):
+        """11.02.1 en GYM/HEX : un ennemi à 13 hex n'ouvre PAS la déclaration, BFS ou pas.
+
+        « A unit is eligible to declare a charge [...] It is not within 12" of one or more enemy
+        units » (PDF 11 Charge phase). Le BFS, lui, répond à une autre question : un budget de 12"
+        mène à une case ADJACENTE d'un ennemi à 13, donc « atteignable » et « déclarable » ne
+        coïncident pas — c'est exactement l'écart d'un hex que ce test verrouille.
+
+        Ce que ça cassait quand la condition 11.02.1 ne s'appliquait qu'en euclidien : l'escouade
+        s'activait, `charge_record_declaration` bornait sa mesure à 12" et figeait None, et la
+        ligne `charge_fail` du chemin gym portait `charge_nearest_enemy_inches: None`.
+
+        Contrôle positif à 12 hex dans le même test : sans lui, un gate qui refuserait TOUT
+        passerait pour un verrou.
+        """
+        charger = _unit("1", 1, 5, 10)
+        at_12 = [charger, _unit("2", 2, 17, 10)]
+        at_13 = [charger, _unit("2", 2, 18, 10)]
+
+        gs_12 = _make_game_state(at_12)
+        gs_12["gym_training_mode"] = True
+        gs_13 = _make_game_state(at_13)
+        gs_13["gym_training_mode"] = True
+
+        assert _has_valid_charge_target(gs_12, charger) is True, (
+            "12 hex = la borne de déclaration elle-même : déclarable"
+        )
+        # Prémisse : le BFS, lui, atteint bien l'ennemi à 13 — sans quoi le test ne prouverait
+        # rien sur le gate, il constaterait seulement un pool vide.
+        assert len(charge_build_valid_destinations_pool(gs_13, "1", 12, target_id="2")) > 0, (
+            "prémisse : une charge de 12 finit adjacente à un ennemi à 13"
+        )
+        assert _has_valid_charge_target(gs_13, charger) is False, (
+            "13 hex : hors des 12\" de 11.02.1, aucune déclaration possible"
+        )
+
 
 class TestChargeBfsMaxDistanceCacheMiss:
     """Un miss d'``units_cache`` dans ``_charge_bfs_max_distance`` doit LEVER, pas rendre le jet nu.

@@ -21,7 +21,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tests.unit.engine._config_helpers import pin_active_deployment
+from engine.macro_intents import DEPLOY_SLOT_BASE, DEPLOY_STRATEGY_COUNT
+from tests.unit.engine._config_helpers import (
+    pin_active_deployment,
+    settle_reserves_declarations,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 BANK_DIR = PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent_x1" / "scenarios" / "training"
@@ -55,10 +59,21 @@ def _drive_deployment_clustered(eng, *, assert_parity: bool):
     dec = eng.action_decoder
     checked = 0
     steps = 0
+    # L'étape Declare Battle Formations (20.01) précède TOUTE mise en place : entre le `reset()`
+    # et la première pose, le moteur s'arrête sur une décision agent par unité déclarable, et son
+    # masque ne porte alors que des `CHOICE_*`. La solder d'abord — en gardant chaque unité pour
+    # le déploiement — rétablit exactement la pression de clearance que ce fichier mesure : toutes
+    # les unités restent à poser, aucune ne part en réserves.
+    settle_reserves_declarations(eng)
     while gs.get("phase") == "deployment" and steps < 1000:
         mask = eng.get_action_mask()
         assert mask.any(), f"masque vide en déploiement (step {steps})"
-        deploy_actions = [a for a in range(4, 9) if mask[a]]
+        # TOUTE la plage des slots de pose, bornée par les stratégies DÉFINIES : écrite `range(4, 9)`
+        # elle laissait les deux dernières (`centre_hub`, `safe_rear`) hors de la vérification de
+        # parité, alors que le masque les ouvre.
+        deploy_actions = [
+            a for a in range(DEPLOY_SLOT_BASE, DEPLOY_SLOT_BASE + DEPLOY_STRATEGY_COUNT) if mask[a]
+        ]
         assert deploy_actions, f"aucune action de déploiement dans le masque (step {steps})"
 
         if assert_parity:

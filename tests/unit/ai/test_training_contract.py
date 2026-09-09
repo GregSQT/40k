@@ -97,6 +97,40 @@ def test_une_table_sans_entree_pour_l_agent_est_refusee() -> None:
         build_contract(_rewards(), "AutreAgent")
 
 
+@pytest.mark.parametrize("sous_table", [{}, [], 3.0, "base_actions", None])
+def test_une_sous_table_vide_est_refusee_a_l_ECRITURE(sous_table: Any) -> None:
+    """L'écriture refuse ce que la relecture refuse : le contrat ne s'écrit pas sans empreinte.
+
+    Une sous-table vide donnait `reward_keys: []`, écrit sans un mot. Le run suivant, lui, tombait
+    dans `_exige_sections` — « section `reward_keys` vide » — en accusant le fichier de contrat
+    alors que le coupable est la table de récompense. Le défaut se voit donc là où il naît, et non
+    un run plus tard.
+    """
+    with pytest.raises(ValueError, match="base_actions"):
+        build_contract({AGENT: sous_table}, AGENT)
+
+
+def test_l_ecriture_du_contrat_ne_produit_jamais_ce_que_la_relecture_refuse(tmp_path) -> None:
+    """Bout en bout, sur les deux appels réels : `--new` écrit, la reprise relit.
+
+    C'est la séquence exacte du prologue d'entraînement (`prepare_run_artifacts`), et c'est elle
+    qui rendait l'asymétrie visible : le premier appel passait, le second levait.
+    """
+    model_path = _model(tmp_path, existant=False)
+    enforce_training_contract(
+        model_path, AGENT, _rewards(), new_model=False, log_fn=lambda _m: None
+    )
+    open(model_path, "wb").close()
+
+    action, ecarts = enforce_training_contract(
+        model_path, AGENT, _rewards(), new_model=False, log_fn=lambda _m: None
+    )
+
+    assert (action, ecarts) == ("verified", [])
+    contrat = read_contract(model_path)
+    assert contrat is not None and contrat["reward_keys"], "empreinte vide écrite sur disque"
+
+
 # --------------------------------------------------------------------- comparaison
 
 

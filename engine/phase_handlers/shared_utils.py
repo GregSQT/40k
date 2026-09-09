@@ -6685,6 +6685,12 @@ def charge_target_within_max_distance(
     cette borne : le pool gym (`charge_build_valid_plan`), l'offre PvP
     (`charge_build_valid_targets`), la declaration PvP et la validation du plan la lisent ici.
 
+    LA BORNE EST UN PARAMETRE, pas le jet : `_has_valid_charge_target` appelle la meme primitive
+    avec `charge_max_distance` pour le gate d'ELIGIBILITE 11.02.1 (« within 12" of one or more
+    enemy units »), qui precede le jet. Meme question — « la cible est-elle a portee ? » — mesuree
+    de la meme facon ; seule la borne change. Une seconde implementation pour 11.02.1 aurait pu
+    diverger de celle qui chiffre la distance journalisee (`charge_target_edge_distance_subhex`).
+
     C'est une question de PORTEE, pas d'engagement : mesure bord-a-bord par `ranged_in_range`,
     la primitive du tir, et NON `unit_entries_within_engagement_zone`. Les deux rendent le meme
     verdict horizontal (le facteur 1,5 de la norme est le meme des deux cotes), mais la primitive

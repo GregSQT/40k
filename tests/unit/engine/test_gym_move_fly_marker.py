@@ -73,25 +73,43 @@ def _engine(keywords: List[Dict[str, str]]) -> W40KEngine:
     return eng
 
 
-def _declare_flight(eng: W40KEngine, squad_id: str = "1") -> None:
+def _declare_flight(eng: W40KEngine, squad_id: str = "1", *, declare: bool = True) -> None:
     """Joue la DÉCLARATION 21.03 par le chemin de production (`L6`), si elle est due.
 
     Depuis `L6` le vol n'est plus une politique moteur : l'escouade volante doit répondre
-    `CHOICE_0` avant de bouger. On joue donc la MÊME séquence que la production —
-    `arm_fly_declaration_decision` (ce que fait le masque), puis le décodage de `CHOICE_0` et son
-    application par le moteur — plutôt qu'une écriture directe dans `units_took_to_skies`, qui
-    court-circuiterait exactement ce que ce fichier prétend observer : le chemin réel.
-    Une escouade sans FLY n'est jamais interrogée : rien à jouer.
+    `CHOICE_0` avant de bouger. On joue donc la MÊME séquence que la production — le décodage de
+    `CHOICE_k` puis son application par le moteur — plutôt qu'une écriture directe dans
+    `units_took_to_skies`, qui court-circuiterait exactement ce que ce fichier prétend observer :
+    le chemin réel.
 
-    (Le masque lui-même est verrouillé par `test_fly_declaration_decision.py` ; ici les fixtures
-    posent la phase à la main et n'ont donc pas de pool d'activation à offrir au masque.)
+    DEUX entrées possibles, et une seule décision posée dans les deux cas — `set_pending_agent_decision`
+    REFUSE d'en empiler une seconde, et ce garde-fou est l'invariant, pas un obstacle :
+      - une décision est DÉJÀ en attente : c'est le MOTEUR qui l'a posée (`_engine` appelle
+        `reset()`, qui construit l'observation, dont le masque pose le point de choix 21.03 de la
+        phase de move). Il n'y a alors rien à armer : on joue celle-là ;
+      - aucune décision n'est en attente : la fixture a posé la phase à la main (cas de la charge)
+        et n'a donc pas de pool d'activation à offrir au masque. C'est au test d'armer, exactement
+        comme le masque le ferait.
+
+    Une escouade sans FLY n'est jamais interrogée : rien n'est armé, rien à jouer.
+    `declare=False` joue `CHOICE_1` (« Stay grounded ») : il RÉSOUT la question sans déclarer,
+    ce dont `_charge_engine` a besoin pour solder la déclaration de la phase de move avant de
+    passer à la charge — deux mouvements distincts, deux déclarations distinctes (21.03).
     """
+    from engine.agent_decision import read_pending_agent_decision
     from engine.macro_intents import CHOICE_BASE
     from engine.phase_handlers.movement_handlers import arm_fly_declaration_decision
 
-    if arm_fly_declaration_decision(eng.game_state, squad_id) is None:
-        return
-    semantic = eng.action_decoder.convert_squad_action(CHOICE_BASE, eng.game_state)
+    decision = read_pending_agent_decision(eng.game_state)
+    if decision is None:
+        decision = arm_fly_declaration_decision(eng.game_state, squad_id)
+        if decision is None:
+            return
+    assert decision["type"] == "fly_declaration", decision
+    assert str(decision["unit_id"]) == squad_id, decision
+    semantic = eng.action_decoder.convert_squad_action(
+        CHOICE_BASE + (0 if declare else 1), eng.game_state
+    )
     ok, _ = eng._process_squad_action(semantic)
     assert ok, "la déclaration de vol a échoué"
 
@@ -150,6 +168,11 @@ def test_gym_move_log_reaches_the_step_log_formatter_with_the_marker() -> None:
 
 def _charge_engine(keywords: List[Dict[str, str]]) -> W40KEngine:
     eng = _engine(keywords)
+    # SOLDE la declaration de la phase de move que `reset()` a fait poser au moteur : 21.03 pose
+    # UNE question par mouvement, et la fixture n'en joue aucun ici. La laisser en attente ferait
+    # jouer, sous la phase de charge, une decision armee pour le move — la reponse tomberait dans
+    # le mauvais set (`units_took_to_skies` vs `units_took_to_skies_charge`).
+    _declare_flight(eng, declare=False)
     # Cible a 6 cases : declarable (< 12") et atteignable avec un jet de 12, meme ampute des 2"
     # que 21.03 fait payer au vol.
     eng.game_state["unit_by_id"]["2"]["col"] = 26
