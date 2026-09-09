@@ -13908,6 +13908,24 @@ def erode_move_pool_by_squad_block(
                 _transit_by_level[lvl], _blocked_by_level[lvl] = move_transit_blocked_forms(
                     game_state, str(squad_id), player, lvl
                 )
+        # MONTÉE DEPUIS NIVEAU > 0 : quand une figurine déjà à l'étage redéclare l'ascent et
+        # que la candidate arrive au même niveau ou à un niveau intermédiaire (branche else du
+        # filtre ci-dessous), le BFS doit utiliser les obstacles DE CE NIVEAU D'ARRIVÉE — pas
+        # ceux du sol. `models_geo` ne stocke que le sol (SQUAD_RIGID_MOVE_DESTINATION_LEVEL) ;
+        # on pré-calcule donc ici les niveaux manquants 0 < lv <= origin.
+        if _ascent:
+            for _mid_a, _orig_lv in _origin_level_by_model.items():
+                if _orig_lv > SQUAD_RIGID_MOVE_DESTINATION_LEVEL:
+                    for _lv_else in {
+                        int(v) for v in _level_map_by_model[_mid_a].values()
+                        if 0 < int(v) <= _orig_lv
+                    }:
+                        if _lv_else not in _transit_by_level:
+                            _transit_by_level[_lv_else], _blocked_by_level[_lv_else] = (
+                                move_transit_blocked_forms(
+                                    game_state, str(squad_id), player, _lv_else
+                                )
+                            )
         # Gate (HEX seulement, cf. l'en-tête) : une figurine dont aucun obstacle de transit n'est
         # à <= extent (bbox) a chemin == cube partout dans son budget → borne déjà assurée par le
         # pool. Seules les figurines au contact d'un obstacle exigent un BFS. ``_local_transit`` =
@@ -13966,6 +13984,25 @@ def erode_move_pool_by_squad_block(
                             game_state, str(squad_id), player, models_cache[mid_g],
                             _lv_up, _extent,
                         )
+                # Champs géodésiques au niveau d'arrivée pour les candidates qui ne montent pas
+                # (branche else) quand la figurine part déjà d'un étage : les obstacles de transit
+                # à ces niveaux ont été calculés juste avant la gate ci-dessus.
+                if _origin_level_by_model.get(mid_g, 0) > SQUAD_RIGID_MOVE_DESTINATION_LEVEL:
+                    for _lv_else in {
+                        int(v) for v in _level_map_by_model[mid_g].values()
+                        if 0 < int(v) <= _origin_level_by_model[mid_g]
+                    }:
+                        _fkey_lv = (mid_g if _mode == "euclidean" else "", ocol, orow, _lv_else)
+                        if _fkey_lv not in _field_by_origin:
+                            if _mode == "euclidean":
+                                _field_by_origin[_fkey_lv] = _euclidean_move_field_for_model(
+                                    game_state, str(squad_id), player, models_cache[mid_g],
+                                    _lv_else, _extent,
+                                )
+                            else:
+                                _field_by_origin[_fkey_lv] = geodesic_move_reach(
+                                    ocol, orow, _extent, _blocked_by_level[_lv_else]
+                                )
         if not _geo_models:
             _geo_budget = False  # aucune figurine à contraindre → pool d'ancre déjà exact
 
@@ -14035,7 +14072,12 @@ def erode_move_pool_by_squad_block(
                     # que `model_reach_predicate` (qui compare au budget brut) refuse.
                     _bound = _exec_b
                 else:
-                    _fk = (mid_g if _mode == "euclidean" else "", ocol, orow, lvl)
+                    # Niveau d'arrivée effectif : quand la figurine est déjà à l'étage et que la
+                    # candidate reste à ce niveau (ou à un niveau intermédiaire > 0), les obstacles
+                    # de transit sont ceux DU NIVEAU D'ARRIVÉE, pas du sol — même contrat que le
+                    # branch climb. `lvl` (toujours 0 dans models_geo) serait faux ici.
+                    _lv_fk = _lv_eff if (_ascent and _lv_eff > SQUAD_RIGID_MOVE_DESTINATION_LEVEL) else lvl
+                    _fk = (mid_g if _mode == "euclidean" else "", ocol, orow, _lv_fk)
                     _d = _field_by_origin[_fk].get((ncol, nrow))
                     _bound = _exec_d
                 if _d is None or _d > _bound:

@@ -398,7 +398,7 @@ def resolve_model_floor_level(
     return 0
 
 
-_FLOOR_LEVEL_BY_CELL_CACHE: "Dict[Tuple[int, Any, str, Any, int], Mapping[Tuple[int, int], int]]" = {}
+_FLOOR_LEVEL_BY_CELL_CACHE: "Dict[Tuple[int, Any, str, Any, int], Tuple[List[Dict[str, Any]], Mapping[Tuple[int, int], int]]]" = {}
 _FLOOR_LEVEL_BY_CELL_CACHE_MAX = 16
 
 
@@ -430,7 +430,7 @@ def floor_level_by_cell(
     with _FLOOR_INDEX_LOCK:
         cached = _FLOOR_LEVEL_BY_CELL_CACHE.get(key)  # get allowed (géométrie pas encore vue)
         if cached is not None:
-            return cached
+            return cached[1]
     resolved: Dict[Tuple[int, int], int] = {}
     for level in reversed(index.levels):
         for cell in index.hexes_by_level.get(level, frozenset()):  # get allowed (niveau sans plancher)
@@ -442,7 +442,7 @@ def floor_level_by_cell(
             ) == level:
                 resolved[cell] = int(level)
     with _FLOOR_INDEX_LOCK:
-        _FLOOR_LEVEL_BY_CELL_CACHE[key] = resolved
+        _FLOOR_LEVEL_BY_CELL_CACHE[key] = (terrain_areas, resolved)
         if len(_FLOOR_LEVEL_BY_CELL_CACHE) > _FLOOR_LEVEL_BY_CELL_CACHE_MAX:
             del _FLOOR_LEVEL_BY_CELL_CACHE[next(iter(_FLOOR_LEVEL_BY_CELL_CACHE))]
     return resolved
