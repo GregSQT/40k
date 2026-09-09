@@ -1742,3 +1742,95 @@ def test_symbol_kinds_inside_fenced_code_block_are_ignored(tmp_path: pathlib.Pat
     )
     _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert not broken, broken
+
+
+def _profiles_with(justification: str, obs_size: int) -> dict[str, dict]:
+    """Un profil résolu minimal, tel que `agent_profiles` le rend au contrôle."""
+    return {"faux": {"observation_params": {"justification": justification, "obs_size": obs_size}}}
+
+
+def _real_grid() -> str:
+    from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
+
+    return f"{GRID_SIZE}x{GRID_SIZE}x{GRID_CHANNELS}"
+
+
+def _coherent_justification(obs_size: int) -> str:
+    return (
+        f"VALEUR COURANTE : {obs_size} (date), lignee verifiee 16659 -> 16791 -> {obs_size} ; "
+        f"la grille {_real_grid()} (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part."
+    )
+
+
+def test_config_justification_contradiction_is_detected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Le cas vécu : l'en-tête annonçait 16971 pendant que `obs_size` du même bloc valait 17055.
+
+    Trois livraisons d'observation ont franchi cette contradiction sans qu'aucun contrôle la voie.
+    """
+    justification = _coherent_justification(16971)
+    monkeypatch.setattr(cdr, "agent_profiles", lambda: _profiles_with(justification, 17055))
+    _verified, broken = cdr.check_config_justification()
+    assert any(
+        "CONTRADICTION INTERNE" in entry
+        and "annonce 16971 en valeur courante" in entry
+        and "obs_size = 17055" in entry
+        for entry in broken
+    ), broken
+
+
+def test_config_justification_stale_lineage_tail_is_detected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La lignée doit FINIR sur `obs_size` : s'arrêter au maillon précédent est une contradiction."""
+    justification = (
+        "VALEUR COURANTE : 17055 (date), lignee verifiee 16659 -> 16791 -> 16971 ; "
+        f"la grille {_real_grid()} (GRID_CHANNELS, engine/spatial_grid.py) restant fournie."
+    )
+    monkeypatch.setattr(cdr, "agent_profiles", lambda: _profiles_with(justification, 17055))
+    _verified, broken = cdr.check_config_justification()
+    assert any(
+        "annonce 16971 en dernier maillon de la lignée" in entry for entry in broken
+    ), broken
+
+
+def test_config_justification_stale_grid_is_detected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`32x32x11` a survécu au passage de `GRID_CHANNELS` à 12 dans la phrase qui l'annonçait."""
+    justification = (
+        "VALEUR COURANTE : 17055 (date), lignee verifiee 16791 -> 17055 ; "
+        "la grille 32x32x11 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part."
+    )
+    monkeypatch.setattr(cdr, "agent_profiles", lambda: _profiles_with(justification, 17055))
+    _verified, broken = cdr.check_config_justification()
+    assert any(
+        "annonce 32x32x11 en grille" in entry and _real_grid() in entry for entry in broken
+    ), broken
+
+
+def test_config_justification_orphan_assertion_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Anti-vert-vacant : reformuler la justification ne doit pas désarmer le contrôle."""
+    monkeypatch.setattr(
+        cdr, "agent_profiles", lambda: _profiles_with("plus aucune des formules surveillees", 17055)
+    )
+    verified, broken = cdr.check_config_justification()
+    assert verified == 0
+    assert len(broken) == len(cdr._JUSTIFICATION_CLAIMS) + 1
+    assert all("ASSERTION ORPHELINE" in entry for entry in broken), broken
+
+
+def test_config_justification_empty_profiles_is_not_a_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """VERT VACANT : « 0 contradiction » sur une énumération vide ne prouve rien."""
+    monkeypatch.setattr(cdr, "agent_profiles", dict)
+    with pytest.raises(cdr.SourceUnavailable):
+        cdr.check_config_justification()
+
+
+def test_config_justification_matches_the_real_config() -> None:
+    """Bout en bout, sur la config réelle : chaque profil dit ce que son propre bloc déclare."""
+    verified, broken = cdr.check_config_justification()
+    assert not broken, broken
+    expected = len(cdr.agent_profiles()) * (len(cdr._JUSTIFICATION_CLAIMS) + 1)
+    assert verified == expected, f"{verified} confirmées pour {expected} attendues"
