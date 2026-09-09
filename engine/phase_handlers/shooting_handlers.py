@@ -5020,32 +5020,54 @@ def _build_move_after_shooting_destinations(
     ]
 
 
-def _select_move_after_shooting_destination_for_ai(
+#: Intentions de repositionnement post-tir exposées à l'agent. §9.0bis réserve 2 : une décision
+#: SPATIALE se paramètre en intentions scorées, jamais en top-K d'hex — le pool d'un D6" dépasse
+#: `MAX_DECISION_OPTIONS` dès la résolution x1, et un top-K figé tronquerait l'optimum.
+#:
+#: L'ordre est CONTRACTUEL : `CHOICE_0` reproduit le comportement historique — la destination la
+#: plus proche de l'ennemi le plus proche, ce que rendait
+#: `_select_move_after_shooting_destination_for_ai` — exactement comme `charge_placement` fait de
+#: « Serré » son slot 0.
+_MOVE_AFTER_SHOOTING_INTENT_LABELS: Tuple[str, ...] = (
+    "Pression (au plus près de l'ennemi le plus proche)",
+    "Retrait (au plus loin de l'ennemi le plus proche)",
+    "Objectif (au plus près d'un marqueur)",
+)
+
+
+def _move_after_shooting_enemy_distances(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
     destinations: List[Tuple[int, int]],
-) -> Tuple[int, int]:
-    """Select one post-shoot move destination for gym/PvE automation."""
-    units_cache = require_key(game_state, "units_cache")
-    unit_player = int(require_key(unit, "player"))
-    # Hors table (réserves 20.01) écarté par l'énumérateur : sans ce filtre,
-    # `socle_from_cache_entry` placerait l'ennemi sur la sentinelle (-1,-1) et le « plus proche
-    # ennemi » serait un fantôme. C'était le quatrième correctif par-site du chantier 04c.
-    enemies = [
-        enemy_id
-        for enemy_id, _cache_entry in enemy_entries_on_battlefield(units_cache, unit_player)
-    ]
-    if not enemies:
-        return destinations[0]
+) -> Optional[Dict[Tuple[int, int], float]]:
+    """Distance de chaque destination à l'ennemi le plus proche de l'unité, ou ``None``.
 
-    # Portée/positionnement post-tir en euclidien bord-à-bord (sélecteur `ranged`).
+    ``None`` quand aucun ennemi n'est SUR LA TABLE — tous détruits, ou tous en réserves (20.01).
+    Les deux intentions qui s'orientent sur l'ennemi sont alors retirées des candidats plutôt que
+    scorées sur une distance inventée.
+
+    Portée/positionnement post-tir en euclidien bord-à-bord (sélecteur `ranged`), la métrique
+    qu'employait déjà la sélection automatique. Hors table écarté par l'énumérateur : sans ce
+    filtre, `socle_from_cache_entry` placerait l'ennemi sur la sentinelle (-1,-1) et le « plus
+    proche ennemi » serait un fantôme (quatrième correctif par-site du chantier 04c).
+    """
     from engine.combat_utils import (
         ranged_edge_distance,
         ranged_edge_distance_to_cell,
         socle_from_cache_entry,
     )
+
+    units_cache = require_key(game_state, "units_cache")
+    unit_player = int(require_key(unit, "player"))
+    enemies = [
+        enemy_id
+        for enemy_id, _cache_entry in enemy_entries_on_battlefield(units_cache, unit_player)
+    ]
+    if not enemies:
+        return None
+
     metric = _ranged_distance_metric(game_state)
-    unit_socle = socle_from_cache_entry(units_cache[str(unit["id"])])
+    unit_socle = socle_from_cache_entry(units_cache[str(require_key(unit, "id"))])
     nearest_enemy_id = min(
         enemies,
         key=lambda enemy_id: ranged_edge_distance(
@@ -5054,16 +5076,179 @@ def _select_move_after_shooting_destination_for_ai(
     )
     nearest_enemy_socle = socle_from_cache_entry(units_cache[str(nearest_enemy_id)])
     nearest_enemy_col, nearest_enemy_row = require_unit_position(nearest_enemy_id, game_state)
-    return min(
-        destinations,
-        key=lambda destination: ranged_edge_distance_to_cell(
+    return {
+        (int(col), int(row)): ranged_edge_distance_to_cell(
             nearest_enemy_socle,
             nearest_enemy_col,
             nearest_enemy_row,
-            int(destination[0]),
-            int(destination[1]),
+            int(col),
+            int(row),
             metric,
-        ),
+        )
+        for (col, row) in destinations
+    }
+
+
+def _move_after_shooting_objective_distances(
+    game_state: Dict[str, Any],
+    destinations: List[Tuple[int, int]],
+) -> Optional[Dict[Tuple[int, int], float]]:
+    """Distance de chaque destination à l'AIRE d'objectif la plus proche (14.02), ou ``None``.
+
+    ``None`` quand le plateau ne porte aucun objectif : l'intention correspondante est retirée.
+
+    Par les cartes de `objective_distance`, pas par une double boucle destinations × hexes : les
+    aires d'un scénario 500 pts en comptent plusieurs milliers, et un armement paie autant de
+    destinations qu'un D6" en ouvre. Mesuré à 0,494 s par armement avec la double boucle, contre
+    une lecture de tableau ici — et la carte, elle, est cachée par contenu d'un épisode à l'autre.
+    """
+    from engine.objective_distance import objective_distance_maps
+
+    distance_maps = objective_distance_maps(game_state)
+    if not distance_maps:
+        return None
+    return {
+        (int(col), int(row)): float(
+            min(int(distance_map[int(col), int(row)]) for distance_map in distance_maps)
+        )
+        for (col, row) in destinations
+    }
+
+
+def arm_move_after_shooting_decision(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    destinations: List[Tuple[int, int]],
+    move_distance: int,
+) -> Optional[Dict[str, Any]]:
+    """Pose le point de choix `move_after_shooting` pour l'escouade qui vient de tirer.
+
+    Rend la décision posée, ou ``None`` si AUCUNE intention n'est constructible (ni ennemi ni
+    objectif sur la table) : il n'y a alors rien à arbitrer, et poser une décision à candidat
+    unique demanderait à l'agent un choix qui n'en est pas un.
+
+    L'état d'attente est celui du PvP — `_pending_move_after_shooting` et ses deux compagnons —
+    parce que la réponse est appliquée par le MÊME handler (`_handle_move_after_shooting_action`)
+    dans les deux sièges : le payload d'un candidat porte les clés que ce handler lit dans
+    l'action du joueur. C'est la règle projet « le gym copie le PvP », et c'est aussi ce qui rend
+    ce flag effectif comme garde : une réponse `CHOICE_k` visant une autre escouade tombe sur son
+    absence et est refusée.
+    """
+    from engine.agent_decision import set_pending_agent_decision
+    from engine.observation_entities import decision_option_cont_row
+
+    enemy_distances = _move_after_shooting_enemy_distances(game_state, unit, destinations)
+    objective_distances = _move_after_shooting_objective_distances(game_state, destinations)
+
+    intent_destinations: List[Tuple[int, Tuple[int, int]]] = []
+    if enemy_distances is not None:
+        intent_destinations.append((0, min(destinations, key=lambda d: enemy_distances[d])))
+        intent_destinations.append((1, max(destinations, key=lambda d: enemy_distances[d])))
+    if objective_distances is not None:
+        intent_destinations.append((2, min(destinations, key=lambda d: objective_distances[d])))
+
+    # Deux intentions peuvent désigner la MÊME case (se rapprocher de l'ennemi EST se rapprocher
+    # de l'objectif quand il le garde). Les garder toutes deux poserait deux candidats aux
+    # `options_cont` identiques, donc aux logits égaux et aux gradients égaux — la symétrie
+    # incassable qui rendait `waaagh_call` inapprenable. La première intention de l'ordre
+    # contractuel garde la case.
+    seen: Set[Tuple[int, int]] = set()
+    retained: List[Tuple[int, Tuple[int, int]]] = []
+    for intent_index, destination in intent_destinations:
+        if destination in seen:
+            continue
+        seen.add(destination)
+        retained.append((intent_index, destination))
+
+    if not retained:
+        return None
+
+    board_diagonal = max(
+        int(require_key(game_state, "board_cols")) + int(require_key(game_state, "board_rows")),
+        1,
+    )
+
+    options: List[Dict[str, Any]] = []
+    options_cont: List[List[float]] = []
+    for intent_index, destination in retained:
+        cont_values: Dict[str, float] = {}
+        if enemy_distances is not None:
+            cont_values["dist_enemy_norm"] = min(
+                enemy_distances[destination] / board_diagonal, 1.0
+            )
+        if objective_distances is not None:
+            cont_values["obj_dist_norm"] = min(
+                objective_distances[destination] / board_diagonal, 1.0
+            )
+        options.append(
+            {
+                "label": _MOVE_AFTER_SHOOTING_INTENT_LABELS[intent_index],
+                "effect_ids": (),
+                "declines": False,
+                "payload": {"destCol": int(destination[0]), "destRow": int(destination[1])},
+            }
+        )
+        options_cont.append(decision_option_cont_row(cont_values))
+
+    # Rester sur place est un choix de la règle, pas un repli : le PvP l'offre par
+    # `can_skip_move_after_shooting`, et `declines` est ce qui le rend discernable pour l'agent.
+    # Ses distances sont celles de la position ACTUELLE, la seule grandeur qui décrive « ne pas
+    # bouger » — les laisser à zéro décrirait une case collée à l'ennemi et à l'objectif.
+    unit_position = require_unit_position(unit, game_state)
+    stay_cont: Dict[str, float] = {}
+    if enemy_distances is not None:
+        stay_enemy = _move_after_shooting_enemy_distances(game_state, unit, [unit_position])
+        if stay_enemy is None:
+            raise RuntimeError(
+                "arm_move_after_shooting_decision: les ennemis ont disparu entre deux lectures "
+                f"du même cache pour l'escouade {require_key(unit, 'id')}"
+            )
+        stay_cont["dist_enemy_norm"] = min(stay_enemy[unit_position] / board_diagonal, 1.0)
+    if objective_distances is not None:
+        stay_objective = _move_after_shooting_objective_distances(game_state, [unit_position])
+        if stay_objective is None:
+            raise RuntimeError(
+                "arm_move_after_shooting_decision: les objectifs ont disparu entre deux lectures "
+                f"du même plateau pour l'escouade {require_key(unit, 'id')}"
+            )
+        stay_cont["obj_dist_norm"] = min(stay_objective[unit_position] / board_diagonal, 1.0)
+    options.append(
+        {
+            "label": "Rester (aucun déplacement)",
+            "effect_ids": (),
+            "declines": True,
+            "payload": {"skip_move_after_shooting": True},
+        }
+    )
+    options_cont.append(decision_option_cont_row(stay_cont))
+
+    unit["_pending_move_after_shooting"] = True
+    unit["_move_after_shooting_destinations"] = destinations
+    unit["_move_after_shooting_distance"] = move_distance
+
+    return set_pending_agent_decision(
+        game_state,
+        decision_type="move_after_shooting",
+        player=int(require_key(unit, "player")),
+        unit_id=str(require_key(unit, "id")),
+        options=options,
+        options_cont=options_cont,
+    )
+
+
+def apply_move_after_shooting_decision(
+    game_state: Dict[str, Any],
+    unit: Dict[str, Any],
+    payload: Dict[str, Any],
+) -> Tuple[bool, Dict[str, Any]]:
+    """Applique le candidat `move_after_shooting` choisi par l'agent, puis finit l'activation.
+
+    Le payload d'un candidat EST une action de joueur (`destCol`/`destRow`, ou
+    `skip_move_after_shooting`) : la réponse de l'agent traverse donc le handler du PvP, sans
+    seconde implémentation du déplacement ni de la fin d'activation.
+    """
+    return _handle_move_after_shooting_action(
+        game_state, unit, dict(payload), require_key(game_state, "config")
     )
 
 
@@ -5231,18 +5416,22 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
                 is_gym_training = bool(cfg.get("gym_training_mode", False) or game_state.get("gym_training_mode", False))
                 is_pve_ai = bool(cfg.get("pve_mode", False)) and int(require_key(unit, "player")) == 2
                 if is_gym_training or is_pve_ai:
-                    chosen_destination = _select_move_after_shooting_destination_for_ai(
-                        game_state, unit, destinations
-                    )
-                    move_result = _apply_move_after_shooting(
-                        game_state,
-                        unit,
-                        int(chosen_destination[0]),
-                        int(chosen_destination[1]),
-                        move_after_shooting_distance,
-                    )
-                    unit["_move_after_shooting_resolved"] = True
-                    game_state["last_move_after_shooting"] = move_result
+                    # J2 — le repositionnement post-tir est une DÉCISION, pas un calcul : c'est
+                    # l'agent qui la prend, par intentions scorées (§9.0bis réserve 2). La fin
+                    # d'activation est différée jusqu'à sa réponse `CHOICE_k`, exactement comme
+                    # le siège humain la diffère jusqu'au clic — le même handler la reprend.
+                    # `None` = aucune intention constructible (ni ennemi ni objectif sur la
+                    # table) : il n'y a rien à décider, l'unité reste et l'activation se termine.
+                    if arm_move_after_shooting_decision(
+                        game_state, unit, destinations, move_after_shooting_distance
+                    ) is not None:
+                        return True, {
+                            "action": "waiting_for_agent_decision",
+                            "waiting_for_player": True,
+                            "decision_type": "move_after_shooting",
+                            "unitId": require_key(unit, "id"),
+                            "player": int(require_key(unit, "player")),
+                        }
                 else:
                     unit["_pending_move_after_shooting"] = True
                     unit["_move_after_shooting_destinations"] = destinations
@@ -5333,11 +5522,10 @@ def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, 
                 if "waiting_for_player" not in result:
                     result["waiting_for_player"] = False
 
-    move_after_shooting_result = game_state.get("last_move_after_shooting")
-    if isinstance(move_after_shooting_result, dict):
-        result.update(move_after_shooting_result)
-        del game_state["last_move_after_shooting"]
-    
+    # `last_move_after_shooting` n'a plus d'écrivain : ce relais existait pour le SEUL chemin où
+    # le moteur déplaçait l'unité lui-même, au milieu de cette fonction, et devait remonter le
+    # payload jusqu'ici. Les deux sièges passent désormais par
+    # `_handle_move_after_shooting_action`, qui fusionne ce payload dans son propre résultat.
     return True, result
 
 def _handle_move_after_shooting_action(

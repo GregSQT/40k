@@ -1008,11 +1008,38 @@ Ordre par valeur tactique :
    Consolidation* obligatoire. Le gym ne consolide donc **jamais** vers un objectif, alors que les
    objectifs décident la partie. Le flux PvP (fight_handlers) a la cascade complète. À combler
    quand cette tranche s'ouvre : c'est une règle manquante, pas une divergence d'interface.
-6. ✅ **Constaté implémenté le 2026-08-19** (cf. [v11_chemin_critique.md#p3-6](../../Roadmap/v11_chemin_critique.md#p3-6)). **Move-after-shooting** (destination — remplace
-   `def _select_move_after_shooting_destination_for_ai`, shooting_handlers) et
-   **reactive_move** (accepter/décliner + destination — protocole `decline_reactive_move`
-   déjà formalisé, shared_utils). NB : les deux sont des **capacités d'unité**
-   (`config/unit_rules.json`), pas des règles de base — leur valeur dépend du roster.
+6. 🟡 **Move-after-shooting LIVRÉ le 2026-09-09, reactive_move NON.** NB : les deux sont des
+   **capacités d'unité** (`config/unit_rules.json`), pas des règles de base — leur valeur dépend
+   du roster.
+
+   🔴 **Le « constaté implémenté le 2026-08-19 » de cette ligne était FAUX pour les deux, et l'est
+   resté trois semaines.** Ce qui avait été constaté — effets présents dans `UNIT_RULE_EFFECT_IDS`,
+   handlers actifs, actions reconnues par le gym — dit que la RÈGLE est jouée, pas que la DÉCISION
+   est rendue. `_select_move_after_shooting_destination_for_ai` existait toujours, et cette ligne
+   annonçait pourtant l'avoir remplacé. Constater une implémentation par la présence de ses
+   symboles ne prouve jamais qu'une heuristique a cessé de trancher : seul le site d'appel le dit.
+
+   🟢 **Move-after-shooting (destination) — LIVRÉ le 2026-09-09** (worktree
+   `move-after-shooting-agent-decision`). Type `move_after_shooting` dans
+   `AGENT_DECISION_TYPE_IDS` ; `arm_move_after_shooting_decision` remplace l'heuristique côté gym
+   ET côté bot PvE, `apply_move_after_shooting_decision` fait passer la réponse par le handler du
+   PvP (`_handle_move_after_shooting_action`) — une seule implémentation du déplacement pour les
+   deux sièges. Candidats = 3 intentions scorées (Pression = comportement historique en `CHOICE_0`,
+   Retrait, Objectif) plus `declines` = rester, dédupliquées par destination ; une intention sans
+   repère sur la table (aucun ennemi, aucun objectif) n'est pas offerte. `obs_size` et
+   `TOTAL_ACTION_SIZE` inchangés (slot réservé, mesuré). 16 tests rouge→vert,
+   `tests/unit/engine/test_move_after_shooting_decision.py`.
+
+   🔴 **reactive_move — TOUJOURS HEURISTIQUE.** `reactive_decision_mode` vaut `"auto"` en dur
+   (`w40k_core.py`, deux sites) et n'est mis à `"state"` nulle part hors tests : le mode auto ne
+   décline JAMAIS — alors que `decline_reactive_move` est formalisé et sans producteur — et prend
+   la case la plus proche de l'ennemi qui vient de bouger (`_select_reactive_destination`,
+   shared_utils). Écarté de la livraison du 2026-09-09 **sur mesure, pas par manque de temps** :
+   ses deux seuls porteurs sont `Termagant` et `FenrisianWolf` ; le premier n'apparaît que dans
+   les rosters 150 pts de `CoreAgent` et `_p2_rosters/150pts`, le second dans aucune config, et le
+   régime d'entraînement actif est `ArmageddonAgent_x1` en 500 pts. Le brancher aujourd'hui
+   coûterait un type de décision et ses tests pour zéro gradient. À rouvrir si un roster
+   d'entraînement porte l'un des deux.
 7. ✅ **LIVRÉ le 2026-08-07** (élément `L6` du lot, worktree `L6-fly-decision` — détail →
    [§0.67](index_v11.md#s0.67)). **FLY / Take to the skies (21.03) est une DÉCISION
    D'AGENT** : le type `fly_declaration` est déclaré dans `AGENT_DECISION_TYPE_IDS`
