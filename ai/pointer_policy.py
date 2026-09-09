@@ -100,7 +100,8 @@ MOVE_HEAD_HIDDEN = 32
 #: tir indirect (20 slots, même compte D1 que le pointeur SHOOT) et les 15 intents de zone. Tout le
 #: reste vient d'une tête à poids partagés (conv 1x1 pour les
 #: cellules, pointeurs pour les slots de tir, de charge, de mêlée, d'Oath, de déploiement, les
-#: candidats de décision et les escouades à ACTIVER). Les paires de charge ont LEUR propre tête
+#: candidats de décision, les escouades à ACTIVER, les figurines à retirer et les EMPLACEMENTS
+#: D'ARME). Les paires de charge ont LEUR propre tête
 #: dense (`charge_pair_net`), décomptée ici pour ne pas décaler `action_net`.
 #: Calculé, jamais écrit en dur : ajouter une famille pointée/dense sans le décompter ici
 #: décalerait TOUS les logits qui la suivent.
@@ -114,9 +115,9 @@ DENSE_LOGIT_COUNT = (
     - CHOICE_COUNT
     - OATH_SLOT_COUNT
     - ACTIVATE_SLOT_COUNT
-    - FIGHT_WEAPON_SLOT_COUNT        # §0.69 : arme CC — tête dense séparée (charge_pair_net pattern)
+    - FIGHT_WEAPON_SLOT_COUNT        # §0.69 : arme CC — tête pointeur sur les profils de mêlée
     - COHERENCY_SLOT_COUNT           # P3-0 : retrait cohérence — tête pointeur sur figurines actives
-    - SHOOT_WEAPON_SEL_SLOT_COUNT    # P3-8 : split-fire tir — tête dense, slot j = obs tir slot j
+    - SHOOT_WEAPON_SEL_SLOT_COUNT    # P3-8 : split-fire tir — tête pointeur sur les profils de tir
 )
 
 
@@ -146,13 +147,17 @@ class PolicyFeatures(NamedTuple):
     is_deploy: torch.Tensor
     #: (B, N_sm, d) — figurines de l'unité active par slot : quelle retirer hors cohérence (P3-0).
     self_models: torch.Tensor
+    #: (B, K_w, d_w) — EMPLACEMENTS d'arme de l'unité active : tir d'abord, mêlée ensuite.
+    #: Largeur `weapon_dim`, celle de l'encodeur d'armes partagé — pas `entity_dim`.
+    weapons: torch.Tensor
 
 
 class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     """Policy MaskablePPO dont les logits de tir viennent d'un produit scalaire sur les embeddings.
 
     L'extracteur (`SpatialCombinedExtractor`) sort `[tronc | embeddings ennemis par slot | carte
-    de move 32x32 | candidats de décision | candidats de déploiement]`. Cette policy :
+    de move 32x32 | candidats de décision | candidats de déploiement | escouades alliées | mes
+    figurines | emplacements d'arme de l'unité active]`. Cette policy :
     - n'alimente le tronc MLP qu'avec la partie `tronc` (ni les embeddings ni la carte n'y
       entrent : ils y seraient de nouveau aplatis, exactement ce que le chantier supprime) ;
     - produit les logits de tir, de charge ET de combat par `q · e_i` (trois requêtes, mêmes
@@ -291,12 +296,28 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 f"{COHERENCY_SLOT_BASE}-{COHERENCY_SLOT_BASE + COHERENCY_SLOT_COUNT - 1}."
             )
         self.n_self_models = extractor.n_self_models
+        # Même invariant D1, appliqué aux EMPLACEMENTS D'ARME de l'unité active : le bloc d'armes
+        # observé porte un emplacement par action de choix d'arme, les profils de TIR d'abord
+        # (`SHOOT_WEAPON_SEL_SLOT_j`) puis ceux de MÊLÉE (`FIGHT_WEAPON_SLOT_j`) — c'est l'ordre
+        # d'émission de `encode_squad_weapon_profiles`, et c'est lui que les deux têtes découpent
+        # ci-dessous. Les désolidariser ferait scorer le profil `j` pour déclarer le profil `k`,
+        # et rien ne lèverait : les deux blocs resteraient des rangs de formes valides.
+        _weapon_slot_total = SHOOT_WEAPON_SEL_SLOT_COUNT + FIGHT_WEAPON_SLOT_COUNT
+        if extractor.n_weapons != _weapon_slot_total:
+            raise ValueError(
+                f"Desalignement observation/action : {extractor.n_weapons} emplacements d'arme "
+                f"observes contre {SHOOT_WEAPON_SEL_SLOT_COUNT} actions de choix d'arme de tir "
+                f"+ {FIGHT_WEAPON_SLOT_COUNT} de melee ({_weapon_slot_total})."
+            )
+        self.n_weapons = extractor.n_weapons
+        self.weapon_dim = extractor.weapon_dim
         self.enemy_slice = extractor.enemy_embeddings_slice()
         self.move_map_slice = extractor.move_map_slice()
         self.decision_slice = extractor.decision_embeddings_slice()
         self.deploy_slice = extractor.deploy_embeddings_slice()
         self.ally_slice = extractor.ally_embeddings_slice()
         self.self_model_slice = extractor.self_model_embeddings_slice()
+        self.active_weapon_slice = extractor.active_weapon_embeddings_slice()
         self.mlp_extractor = MlpExtractor(
             self.trunk_dim,
             net_arch=self.net_arch,
@@ -320,16 +341,33 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         # Une paire encode DEUX lignes du tenseur ennemi — impossible pour un produit scalaire
         # unique. La tête dense reçoit le même latent que les autres.
         self.charge_pair_net = nn.Linear(self.mlp_extractor.latent_dim_pi, CHARGE_PAIR_SLOT_COUNT)
-        # Tête DENSE pour l'arme CC (V11 §0.69) : K_WEAPONS_MELEE = 10 logits.
-        # L'arme n'est pas une entité-ligne du tenseur ennemi — un produit scalaire serait mal
-        # fondé. Même patron que charge_pair_net : dense sur le latent commun. Slot j correspond
-        # à l'obs melee slot j (collect_weapon_profiles order, invariant D1 armes).
-        self.fight_weapon_net = nn.Linear(self.mlp_extractor.latent_dim_pi, FIGHT_WEAPON_SLOT_COUNT)
-        # Tête DENSE pour le split-fire tir (P3-8) : K_WEAPONS_RANGED = 10 logits.
-        # Même patron que fight_weapon_net : les groupes d'armes RNG ne sont pas des entités-lignes
-        # du tenseur ennemi. Slot j = obs tir slot j (collect_weapon_profiles order, invariant D1).
-        self.shoot_weapon_sel_net = nn.Linear(
-            self.mlp_extractor.latent_dim_pi, SHOOT_WEAPON_SEL_SLOT_COUNT
+        # Requêtes DISTINCTES pour les EMPLACEMENTS D'ARME de l'unité active, mêlée et tir.
+        #
+        # Elles REMPLACENT deux têtes denses (`fight_weapon_net`, `shoot_weapon_sel_net`), qui
+        # tenaient une prémisse fausse : « l'arme n'est pas une entité-ligne du tenseur ennemi,
+        # un produit scalaire serait mal fondé ». Elle ne l'est pas du tenseur ENNEMI, mais elle
+        # est une entité-ligne du bloc d'armes de l'unité ACTIVE — le même encodeur partagé
+        # (`weapon_encoder`) la décrit des deux côtés du plateau, et l'extracteur expose désormais
+        # ces lignes par emplacement (`active_weapon_embeddings_slice`).
+        #
+        # CE QUE LA TÊTE DENSE NE POUVAIT PAS APPRENDRE : l'ordre des emplacements n'est pas
+        # stable. `collect_weapon_profiles` trie par nombre de PORTEURS VIVANTS décroissant, donc
+        # une perte suffit à échanger deux emplacements sans qu'aucune action ait été jouée
+        # (mesuré : 3 bolters + 2 lascannons donnent `[bolter, lascannon]` à effectif plein et
+        # `[lascannon, bolter]` après deux pertes de bolter). Une ligne de poids indexée par le
+        # rang apprenait donc une position dont le contenu bouge — et d'autant plus mal que les
+        # pertes s'accumulent en fin de partie. Le produit scalaire, lui, score l'ARME qui occupe
+        # l'emplacement : le score suit le profil quand il change de rang.
+        #
+        # Deux requêtes et non une, même doctrine que tir/charge/mêlée sur les ennemis : « avec
+        # quelle arme frapper » (l'ennemi est déjà désigné, seule la table de blessure compte) et
+        # « quel groupe d'armes envoyer, et sur qui » ne sont pas la même question. Coût :
+        # `weapon_dim x latent_dim` chacune, et ZÉRO par emplacement.
+        self.fight_weapon_query_net = nn.Linear(
+            self.mlp_extractor.latent_dim_pi, self.weapon_dim
+        )
+        self.shoot_weapon_sel_query_net = nn.Linear(
+            self.mlp_extractor.latent_dim_pi, self.weapon_dim
         )
         # Requête DISTINCTE pour les candidats de décision (§9.3 P2) : « quel ennemi frapper » et
         # « quelle option choisir » sont deux questions différentes posées au même latent, et
@@ -457,6 +495,11 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         self_model_emb = features[:, self.self_model_slice].reshape(
             batch, self.n_self_models, self.entity_dim
         )
+        # Emplacements d'arme de l'unité active. Largeur `weapon_dim` : c'est l'encodeur d'armes
+        # partagé qui les produit, pas l'encodeur d'entités.
+        weapon_emb = features[:, self.active_weapon_slice].reshape(
+            batch, self.n_weapons, self.weapon_dim
+        )
         # Y A-T-IL DES SLOTS DE POSE OUVERTS ? Lu sur le bit `present` des candidats — le MÊME
         # que l'extracteur prend pour masque (`deploy_cand_bin[..., -1]`), donc la question posée
         # ici et l'entité encodée là-bas ne peuvent pas diverger.
@@ -502,7 +545,7 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         is_deploy = deploy_present.amax(dim=-1)
         return PolicyFeatures(
             trunk, embeddings, move_map, decision_emb, deploy_emb, ally_emb, is_deploy,
-            self_model_emb,
+            self_model_emb, weapon_emb,
         )
 
     def _move_logits(self, latent_pi: torch.Tensor, move_map: torch.Tensor) -> torch.Tensor:
@@ -529,11 +572,16 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         qui passerait inaperçu : les logits restent finis, la politique devient juste quasi
         déterministe sur cette famille-là et sur elle seule.
 
+        `d` est LU sur les embeddings et non pris sur `entity_dim` : les emplacements d'arme sont
+        pointés sur leurs embeddings d'encodeur d'ARMES, plus étroits (`weapon_dim`). Les six
+        familles d'entités, elles, sortent en `entity_dim` — pour elles la valeur est la même
+        qu'avant, au bit près.
+
         Les requêtes restent des modules DISTINCTS (cf. leurs déclarations) : ce qui est partagé
         ici est la formule, pas les poids.
         """
         query = query_net(latent_pi).unsqueeze(1)  # (B, 1, d)
-        return (query * embeddings).sum(dim=-1) / self.entity_dim ** 0.5
+        return (query * embeddings).sum(dim=-1) / embeddings.shape[-1] ** 0.5
 
     def _deploy_logits(
         self, latent_pi: torch.Tensor, move: torch.Tensor, feats: PolicyFeatures
@@ -566,11 +614,13 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     def _action_logits(self, latent_pi: torch.Tensor, feats: PolicyFeatures) -> torch.Tensor:
         """Logits complets, assemblés dans l'ordre des ids d'action.
 
-        Huit têtes à poids partagés — conv 1x1 (cellules), pointeurs de tir, de charge (§9 P3-2),
+        Onze têtes à poids partagés — conv 1x1 (cellules), pointeurs de tir, de charge (§9 P3-2),
         de mêlée (§9 P3-1) et d'Oath of Moment (chantier 01 : quatre requêtes, MÊMES embeddings
         d'ennemis), pointeur de décision (candidats `CHOICE_i`, §9.3 P2), pointeur de
-        DÉPLOIEMENT (§0.44, qui écrase les colonnes 4-11 des cellules en phase de déploiement) et
-        pointeur d'ACTIVATION (V11 §0.48 `L2`, sur les embeddings ALLIÉS) — et UNE tête dense
+        DÉPLOIEMENT (§0.44, qui écrase les colonnes 4-11 des cellules en phase de déploiement),
+        pointeur d'ACTIVATION (V11 §0.48 `L2`, sur les embeddings ALLIÉS), pointeur de retrait de
+        COHÉRENCE (P3-0, sur mes figurines) et les deux pointeurs d'EMPLACEMENT D'ARME (mêlée
+        §0.69, tir P3-8, sur les profils de l'unité active) — et UNE tête dense
         réduite à ses colonnes réellement lues (`DENSE_LOGIT_COUNT` = 37) : wait,
         fight-sans-cible, 20 slots de tir indirect et 15 intents de zone.
 
@@ -599,12 +649,21 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 self._point(self.oath_query_net, latent_pi, enemies),      # Oath
                 # Activation : MES escouades par slot (V11 §0.48 `L2`).
                 self._point(self.activate_query_net, latent_pi, feats.allies),
-                # Arme CC : tête dense (V11 §0.69), slot j = obs melee slot j.
-                self.fight_weapon_net(latent_pi),
+                # Arme CC (V11 §0.69) : emplacements de MÊLÉE de l'unité active, second bloc
+                # du tenseur d'armes — les profils de tir occupent le premier.
+                self._point(
+                    self.fight_weapon_query_net,
+                    latent_pi,
+                    feats.weapons[:, SHOOT_WEAPON_SEL_SLOT_COUNT:],
+                ),
                 # Retrait cohérence : figurines de l'unité active par slot (P3-0).
                 self._point(self.coherency_query_net, latent_pi, feats.self_models),
-                # Split-fire tir : tête dense (P3-8), slot j = obs tir slot j.
-                self.shoot_weapon_sel_net(latent_pi),
+                # Split-fire tir (P3-8) : emplacements de TIR, premier bloc du tenseur d'armes.
+                self._point(
+                    self.shoot_weapon_sel_query_net,
+                    latent_pi,
+                    feats.weapons[:, :SHOOT_WEAPON_SEL_SLOT_COUNT],
+                ),
             ],
             dim=1,
         )

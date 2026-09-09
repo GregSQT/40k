@@ -98,11 +98,17 @@ def test_features_layout_exposes_the_enemy_embeddings(extractor):
     assert allies.start == deploy.stop
     assert (allies.stop - allies.start) == extractor.n_ally_slots * extractor.entity_dim
 
-    # P3-0 : figurines de l'unité active (self_models) ferment le vecteur, derrière les alliés.
+    # P3-0 : figurines de l'unité active (self_models), derrière les alliés.
     self_models = extractor.self_model_embeddings_slice()
     assert self_models.start == allies.stop
     assert (self_models.stop - self_models.start) == extractor.n_self_models * extractor.entity_dim
-    assert self_models.stop == extractor.features_dim
+
+    # Emplacements d'ARME de l'unité active : ils ferment le vecteur, derrière les figurines.
+    # Leur largeur est `weapon_dim` — l'encodeur d'ARMES partagé, pas celui d'entités.
+    weapons = extractor.active_weapon_embeddings_slice()
+    assert weapons.start == self_models.stop
+    assert (weapons.stop - weapons.start) == extractor.n_weapons * extractor.weapon_dim
+    assert weapons.stop == extractor.features_dim
 
 
 def test_the_placement_present_flag_survives_the_trunk(extractor):
@@ -156,8 +162,8 @@ def test_the_same_weapon_encoder_serves_both_sides(extractor):
 
     extractor.eval()
     with torch.no_grad():
-        ally = extractor._encode_units(obs, "allies")[:, 0]
-        enemy = extractor._encode_units(obs, "enemies")[:, 0]
+        ally = extractor._encode_units(obs, "allies")[0][:, 0]
+        enemy = extractor._encode_units(obs, "enemies")[0][:, 0]
     assert torch.allclose(ally, enemy, atol=1e-6), (
         "schema unifie : la meme unite doit produire le meme embedding des deux cotes"
     )
@@ -166,8 +172,8 @@ def test_the_same_weapon_encoder_serves_both_sides(extractor):
         first_layer = extractor.weapon_encoder[0]
         assert isinstance(first_layer, torch.nn.Linear)
         first_layer.weight.add_(1.0)
-        ally_after = extractor._encode_units(obs, "allies")[:, 0]
-        enemy_after = extractor._encode_units(obs, "enemies")[:, 0]
+        ally_after = extractor._encode_units(obs, "allies")[0][:, 0]
+        enemy_after = extractor._encode_units(obs, "enemies")[0][:, 0]
     assert not torch.allclose(ally, ally_after, atol=1e-6), "l'encodeur ami n'a pas bouge"
     assert not torch.allclose(enemy, enemy_after, atol=1e-6), (
         "l'encodeur ennemi n'a PAS bouge : les deux camps n'utilisent pas le meme module"
@@ -245,13 +251,13 @@ def test_ability_ids_reach_the_entity_embedding_on_both_sides(extractor):
     obs = _present_obs(extractor)
     extractor.eval()
     with torch.no_grad():
-        before_ally = extractor._encode_units(obs, "allies")[:, 0].clone()
-        before_enemy = extractor._encode_units(obs, "enemies")[:, 0].clone()
+        before_ally = extractor._encode_units(obs, "allies")[0][:, 0].clone()
+        before_enemy = extractor._encode_units(obs, "enemies")[0][:, 0].clone()
     for family in ("allies", "enemies"):
         obs[f"{family}_ability_ids"][:, 0, 0] = 5.0
     with torch.no_grad():
-        after_ally = extractor._encode_units(obs, "allies")[:, 0]
-        after_enemy = extractor._encode_units(obs, "enemies")[:, 0]
+        after_ally = extractor._encode_units(obs, "allies")[0][:, 0]
+        after_enemy = extractor._encode_units(obs, "enemies")[0][:, 0]
 
     assert not torch.allclose(before_ally, after_ally, atol=1e-6), (
         "l'id de capacite n'atteint pas l'embedding d'entite (allie)"
@@ -277,16 +283,16 @@ def test_status_ids_use_a_SECOND_table_distinct_from_abilities(extractor):
     obs_status = _present_obs(extractor)
     obs_status["allies_status_ids"][:, 0, 0] = 3.0
     with torch.no_grad():
-        as_ability = extractor._encode_units(obs_ability, "allies")[:, 0].clone()
-        as_status = extractor._encode_units(obs_status, "allies")[:, 0].clone()
+        as_ability = extractor._encode_units(obs_ability, "allies")[0][:, 0].clone()
+        as_status = extractor._encode_units(obs_status, "allies")[0][:, 0].clone()
     assert not torch.allclose(as_ability, as_status, atol=1e-6), (
         "capacite 3 et statut 3 produisent le meme vecteur : une seule table est utilisee"
     )
 
     with torch.no_grad():
         extractor.status_embedding.weight.add_(1.0)
-        as_ability_after = extractor._encode_units(obs_ability, "allies")[:, 0]
-        as_status_after = extractor._encode_units(obs_status, "allies")[:, 0]
+        as_ability_after = extractor._encode_units(obs_ability, "allies")[0][:, 0]
+        as_status_after = extractor._encode_units(obs_status, "allies")[0][:, 0]
     assert torch.allclose(as_ability, as_ability_after, atol=1e-6), (
         "perturber la table de STATUTS a deplace une capacite : les deux tables sont confondues"
     )
@@ -311,9 +317,9 @@ def test_ability_pooling_is_permutation_invariant_and_padding_is_neutral(extract
     c["allies_ability_ids"][:, 0, 3] = 9.0
     c["allies_ability_ids"][:, 0, 7] = 2.0
     with torch.no_grad():
-        ea = extractor._encode_units(a, "allies")[:, 0]
-        eb = extractor._encode_units(b, "allies")[:, 0]
-        ec = extractor._encode_units(c, "allies")[:, 0]
+        ea = extractor._encode_units(a, "allies")[0][:, 0]
+        eb = extractor._encode_units(b, "allies")[0][:, 0]
+        ec = extractor._encode_units(c, "allies")[0][:, 0]
     assert torch.allclose(ea, eb, atol=1e-6), "le pooling n'est pas invariant par permutation"
     assert torch.allclose(ea, ec, atol=1e-6), "les slots vides contribuent au pooling"
 
@@ -321,7 +327,7 @@ def test_ability_pooling_is_permutation_invariant_and_padding_is_neutral(extract
     single = _present_obs(extractor)
     single["allies_ability_ids"][:, 0, 0] = 2.0
     with torch.no_grad():
-        e_single = extractor._encode_units(single, "allies")[:, 0]
+        e_single = extractor._encode_units(single, "allies")[0][:, 0]
     assert not torch.allclose(ea, e_single, atol=1e-6)
 
 
@@ -354,7 +360,7 @@ def test_absent_entities_do_not_leak_into_the_aggregation(extractor):
     obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
     extractor.eval()
     with torch.no_grad():
-        emb = extractor._encode_units(obs, "enemies")
+        emb = extractor._encode_units(obs, "enemies")[0]
     assert torch.count_nonzero(emb) == 0
 
 
@@ -433,6 +439,71 @@ def test_absent_self_model_slots_are_zero_in_features(extractor):
     assert torch.all(absent == 0.0), (
         "des slots sm absents ont une embedding non nulle : `encoder(zeros)` n'est pas "
         "multiplié par le masque — les biais de l'encodeur fuient dans `coherency_query_net`"
+    )
+
+
+def test_absent_weapon_slots_are_zero_in_features(extractor):
+    """Un emplacement d'arme VIDE sort zéro dans le vecteur de features.
+
+    `_aggregate_subentities` encodait puis jetait ces embeddings : personne ne les lisait, donc
+    le biais de l'encodeur sur un slot vide n'avait aucune conséquence (`_masked_mean_max` masque
+    déjà mean et max). Depuis qu'ils sont exposés par emplacement, le biais serait un vecteur
+    constant NON nul, indistinguable d'une arme réelle pour les deux têtes de choix d'arme.
+
+    Et il est bien non nul si on ne masque pas : la vérification ci-dessous exige aussi que
+    l'emplacement OCCUPÉ, lui, soit non nul — sans quoi un extracteur qui rendrait zéro partout
+    passerait ce test sans rien porter.
+    """
+    from engine.observation_weapon_profiles import profile_bin_index
+
+    present_idx = profile_bin_index("present")
+    extractor.eval()
+    obs = _zero_batch(_space(), batch=1)
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
+    # Un seul profil armé sur l'unité active ; tous les autres emplacements restent vides.
+    obs["allies_wpn_bin"][:, 0, 0, present_idx] = 1.0
+
+    with torch.no_grad():
+        features = extractor(obs)
+
+    weapons = features[:, extractor.active_weapon_embeddings_slice()].reshape(
+        1, extractor.n_weapons, extractor.weapon_dim
+    )
+    assert float(weapons[0, 0].abs().sum()) > 0.0, (
+        "emplacement occupe : embedding nul, la tete pointeur ne verrait aucune arme"
+    )
+    assert torch.all(weapons[:, 1:, :] == 0.0), (
+        "des emplacements d'arme VIDES ont un embedding non nul : `encoder(zeros)` n'est pas "
+        "multiplie par le masque de profil — le biais de l'encodeur d'armes fuit dans les "
+        "requetes de choix d'arme"
+    )
+
+
+def test_the_active_weapon_slice_is_the_active_unit_row(extractor):
+    """La tranche exposée est celle de la LIGNE 0 du bloc allié — l'unité active.
+
+    Armer le bloc d'une AUTRE escouade alliée ne doit rien y écrire : les actions de choix
+    d'arme ne désignent que les profils de l'unité qui joue. Lire la mauvaise ligne ferait
+    choisir une arme que l'escouade active ne porte pas, sans qu'aucune forme ne change.
+    """
+    from engine.observation_weapon_profiles import profile_bin_index
+
+    present_idx = profile_bin_index("present")
+    extractor.eval()
+    obs = _zero_batch(_space(), batch=1)
+    obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0
+    obs["allies_bin"][:, 1, _UNIT_PRESENT] = 1.0
+    # Armement porté par la SECONDE escouade alliée uniquement.
+    obs["allies_wpn_bin"][:, 1, :, present_idx] = 1.0
+    obs["allies_wpn_cont"][:, 1, :, :] = 3.0
+
+    with torch.no_grad():
+        features = extractor(obs)
+
+    weapons = features[:, extractor.active_weapon_embeddings_slice()]
+    assert torch.all(weapons == 0.0), (
+        "la tranche d'armes porte l'armement d'une escouade NON active : les actions de choix "
+        "d'arme scoreraient les profils d'une autre unite"
     )
 
 
@@ -701,17 +772,17 @@ def test_the_pending_choice_flags_reach_the_network(extractor):
 
     extractor.eval()
     with torch.no_grad():
-        enemy_before = extractor._encode_units(obs, "enemies")[:, 0]
-        ally_before = extractor._encode_units(obs, "allies")[:, 0]
+        enemy_before = extractor._encode_units(obs, "enemies")[0][:, 0]
+        ally_before = extractor._encode_units(obs, "allies")[0][:, 0]
 
         obs["enemies_bin"][:, 0, _ubi("fight_target_selected")] = 1.0
-        enemy_after = extractor._encode_units(obs, "enemies")[:, 0]
+        enemy_after = extractor._encode_units(obs, "enemies")[0][:, 0]
 
         obs["enemies_cont"][:, 0, _uci("n_weapons_assigned")] = 2.0
-        enemy_assigned = extractor._encode_units(obs, "enemies")[:, 0]
+        enemy_assigned = extractor._encode_units(obs, "enemies")[0][:, 0]
 
         obs["allies_wpn_bin"][:, 0, 0, _pbi("shoot_weapon_selected")] = 1.0
-        ally_after = extractor._encode_units(obs, "allies")[:, 0]
+        ally_after = extractor._encode_units(obs, "allies")[0][:, 0]
 
     assert not torch.allclose(enemy_before, enemy_after, atol=1e-6), (
         "fight_target_selected n'atteint pas le reseau : la cible designee reste invisible"

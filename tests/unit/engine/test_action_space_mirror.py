@@ -125,6 +125,61 @@ def test_activate_slots_mirror_the_ally_slot_mapping():
     assert ObservationBuilder.squad_obs_shapes()["allies_cont"][0] == mi.ACTIVATE_SLOT_COUNT
 
 
+def test_weapon_slots_mirror_the_observed_weapon_block():
+    """Les deux familles de choix d'ARME sont le miroir du bloc d'armes de l'observation.
+
+    Invariant D1 appliqué aux armes : `SHOOT_WEAPON_SEL_SLOT_j` et `FIGHT_WEAPON_SLOT_j` jouent
+    le profil `j` de `collect_weapon_profiles`, donc la ligne `j` du bloc d'armes de l'unité
+    active. C'est cet alignement que la tête pointeur d'emplacement exploite : elle score la
+    ligne `j` pour produire le logit `j`. Le désolidariser ferait scorer une arme pour en
+    déclarer une autre, et rien ne lèverait — les deux blocs resteraient des rangs valides.
+
+    L'ORDRE compte autant que les comptes : `encode_squad_weapon_profiles` émet les profils de
+    TIR d'abord, puis ceux de MÊLÉE, et `ai/pointer_policy` découpe le tenseur sur cette
+    convention. Une inversion des deux registres ferait choisir une arme de mêlée avec la
+    requête de tir.
+    """
+    from engine.observation_builder import ObservationBuilder
+    from engine.observation_entities import K_WEAPONS_MELEE, K_WEAPONS_RANGED
+
+    assert mi.SHOOT_WEAPON_SEL_SLOT_COUNT == K_WEAPONS_RANGED
+    assert mi.FIGHT_WEAPON_SLOT_COUNT == K_WEAPONS_MELEE
+    assert su.SQUAD_ACTION_SHOOT_WEAPON_SEL_SLOT_COUNT == mi.SHOOT_WEAPON_SEL_SLOT_COUNT
+    assert su.SQUAD_ACTION_FIGHT_WEAPON_SLOT_COUNT == mi.FIGHT_WEAPON_SLOT_COUNT
+    # La cardinalite REELLE du tenseur, pas seulement les constantes : c'est elle que
+    # `SpatialCombinedExtractor` lit pour dimensionner la tranche d'emplacements.
+    shapes = ObservationBuilder.squad_obs_shapes()
+    assert shapes["allies_wpn_cont"][1] == K_WEAPONS_RANGED + K_WEAPONS_MELEE
+    assert shapes["enemies_wpn_cont"][1] == shapes["allies_wpn_cont"][1]
+    # Ordre d'emission : tir d'abord, melee ensuite. Verifie sur l'EMETTEUR, pas sur une
+    # constante — c'est lui qui decide, et c'est lui qui pourrait changer.
+    from engine.observation_weapon_profiles import MELEE_KEY, RANGED_KEY, PROFILE_BIN_SIZE
+    import engine.observation_weapon_profiles as owp
+
+    emitted: list[str] = []
+    cont: list[float] = []
+    binv: list[float] = []
+    rules: list[list[str]] = []
+    original = owp.collect_weapon_profiles
+
+    def _tracer(models, weapons_key):
+        emitted.append(weapons_key)
+        return []
+
+    owp.collect_weapon_profiles = _tracer
+    try:
+        owp.encode_squad_weapon_profiles(
+            cont, binv, rules, [], K_WEAPONS_RANGED, K_WEAPONS_MELEE
+        )
+    finally:
+        owp.collect_weapon_profiles = original
+    assert emitted == [RANGED_KEY, MELEE_KEY], (
+        "l'ordre d'emission des registres d'armes a change : la tete d'emplacement decoupe "
+        "le tenseur sur [tir | melee]"
+    )
+    assert len(binv) == (K_WEAPONS_RANGED + K_WEAPONS_MELEE) * PROFILE_BIN_SIZE
+
+
 def test_total_action_size():
     """L'action space se termine par les slots de COHERENCE (P3-0 : retrait pour 03.03).
 

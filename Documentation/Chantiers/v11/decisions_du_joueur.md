@@ -1051,7 +1051,7 @@ Ordre par valeur tactique :
 
    🟢 **LIVRÉ le 2026-08-24** — Placement final de charge (`charge_placement`) : `AGENT_DECISION_TYPE_IDS` étendu, 5 intentions (Serré/Objectif/Isolation/Pénétration/Étalé), CHOICE_0 = Serré = comportement historique. `obs_size` et `TOTAL_ACTION_SIZE` inchangés (slot réservé). 20 tests rouge→vert.
 
-   🟢 **LIVRÉ le 2026-08-24** — Split-fire : 10 `SHOOT_WEAPON_SEL_SLOTS` (1379-1388), `TOTAL_ACTION_SIZE` 1379→1389. Flux 2-step : sélection arme → assignation cible. Tête dense `shoot_weapon_sel_net`. Requiert `--new`.
+   🟢 **LIVRÉ le 2026-08-24** — Split-fire : 10 `SHOOT_WEAPON_SEL_SLOTS` (1379-1388), `TOTAL_ACTION_SIZE` 1379→1389. Flux 2-step : sélection arme → assignation cible. Tête dense `shoot_weapon_sel_net`, **remplacée le 2026-09-09 par la tête pointeur `shoot_weapon_sel_query_net`**. Requiert `--new`.
 
 Hors scope A' (reste auto, conforme règles car « un placement légal parmi d'autres ») :
 placement par-figurine du move rigide, pivot. Montée d'étage = Phase C.
