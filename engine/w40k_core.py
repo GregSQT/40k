@@ -929,12 +929,29 @@ class W40KEngine(gym.Env):
             # reecrit pas — c'est la neutralisation explicite en tete de reset qui s'en charge,
             # avant le tirage.
             "deployment_mode_schedule_mode": None,
-            # Les cinq cles des INTENTIONS DE ZONE ont ete retirees ici le 2026-09-09 —
-            # `zone_intents`, `zone_intent_free_steps_remaining`, `unit_zone_assignments`,
-            # `_zone_intent_declarations` et `_pending_zone_shaping`. Leur depart change le jeu
-            # de cles publie par le reset, donc le FORMAT DE SAVE : `services/game_saves._MAGIC`
-            # est passe a TL06 dans le meme geste (contrat verrouille par
-            # `tests/unit/services/test_save_format_key_contract.py`).
+            # CINQ CLES RESERVEES, INERTES depuis la fermeture des intentions de zone
+            # (2026-09-09). Plus rien ne les ecrit ni ne les lit — la famille d'actions, le
+            # shaping et le peuplement des affectations sont partis le meme jour.
+            #
+            # ELLES RESTENT PUBLIEES PAR LE RESET, et ce n'est pas un oubli : elles
+            # APPARTIENNENT AU FORMAT DE SAUVEGARDE `W40KTL05`. Les retirer rend
+            # `tests/unit/services/test_save_format_key_contract.py` rouge, et sa correction
+            # prescrite est un bump de magic qui REFUSE toutes les parties deja enregistrees
+            # (`services/game_saves._reject_legacy`). Or la doctrine du bump vise l'AJOUT d'une
+            # cle — une save privee d'une cle que le moteur lira ensuite. Sur un RETRAIT, une row
+            # TL05 restauree rend simplement cinq cles en trop, que personne ne lit : le refus ne
+            # protege de rien et coute les sauvegardes des joueurs.
+            #
+            # Meme arbitrage que pour les 15 ids d'action reserves de `engine.macro_intents` :
+            # on condamne, on ne supprime pas, pour ne pas invalider ce qui est deja ecrit
+            # ailleurs — les checkpoints d'un cote, les sauvegardes de l'autre.
+            # `0` et non `INTENT_INVADE` : la constante est partie avec la famille. La valeur ne
+            # designe plus une intention, elle remplit une case de format que personne ne relit.
+            "zone_intents": [0] * MAX_OBJECTIVES,
+            "zone_intent_free_steps_remaining": 0,
+            "unit_zone_assignments": {},
+            "_zone_intent_declarations": {},
+            "_pending_zone_shaping": 0.0,
 
             # tour_de_jeu.md required tracking sets
             "units_moved": set(),
@@ -1696,12 +1713,29 @@ class W40KEngine(gym.Env):
             # ci-dessus, plus declares ici (cf. `engine.game_utils`).
             "controlled_objective_samples_scoring_turns": [],
             "opponent_objective_samples_scoring_turns": [],
-            # Les cinq cles des INTENTIONS DE ZONE ont ete retirees ici le 2026-09-09 —
-            # `zone_intents`, `zone_intent_free_steps_remaining`, `unit_zone_assignments`,
-            # `_zone_intent_declarations` et `_pending_zone_shaping`. Leur depart change le jeu
-            # de cles publie par le reset, donc le FORMAT DE SAVE : `services/game_saves._MAGIC`
-            # est passe a TL06 dans le meme geste (contrat verrouille par
-            # `tests/unit/services/test_save_format_key_contract.py`).
+            # CINQ CLES RESERVEES, INERTES depuis la fermeture des intentions de zone
+            # (2026-09-09). Plus rien ne les ecrit ni ne les lit — la famille d'actions, le
+            # shaping et le peuplement des affectations sont partis le meme jour.
+            #
+            # ELLES RESTENT PUBLIEES PAR LE RESET, et ce n'est pas un oubli : elles
+            # APPARTIENNENT AU FORMAT DE SAUVEGARDE `W40KTL05`. Les retirer rend
+            # `tests/unit/services/test_save_format_key_contract.py` rouge, et sa correction
+            # prescrite est un bump de magic qui REFUSE toutes les parties deja enregistrees
+            # (`services/game_saves._reject_legacy`). Or la doctrine du bump vise l'AJOUT d'une
+            # cle — une save privee d'une cle que le moteur lira ensuite. Sur un RETRAIT, une row
+            # TL05 restauree rend simplement cinq cles en trop, que personne ne lit : le refus ne
+            # protege de rien et coute les sauvegardes des joueurs.
+            #
+            # Meme arbitrage que pour les 15 ids d'action reserves de `engine.macro_intents` :
+            # on condamne, on ne supprime pas, pour ne pas invalider ce qui est deja ecrit
+            # ailleurs — les checkpoints d'un cote, les sauvegardes de l'autre.
+            # `0` et non `INTENT_INVADE` : la constante est partie avec la famille. La valeur ne
+            # designe plus une intention, elle remplit une case de format que personne ne relit.
+            "zone_intents": [0] * MAX_OBJECTIVES,
+            "zone_intent_free_steps_remaining": 0,
+            "unit_zone_assignments": {},
+            "_zone_intent_declarations": {},
+            "_pending_zone_shaping": 0.0,
             "units_moved": set(),
             "moved_distance_by_model": {},
             "units_fled": set(),

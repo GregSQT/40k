@@ -20,9 +20,17 @@ cours de partie ; une clé obligatoire créée hors reset lui échapperait. Il n
 une clé dont la FORME change à contenu de nom constant. Les neuf clés de la dérive observée sont
 toutes dans le périmètre couvert.
 
-Corollaire pour l'auteur d'un changement : quand ce test devient rouge, la correction est
-d'ajouter une entrée sous une NOUVELLE magic et de bumper `_MAGIC` — pas d'élargir l'entrée
-existante, qui décrit un format déjà écrit sur le disque des joueurs.
+Corollaire pour l'auteur d'un changement : quand ce test devient rouge par une clé AJOUTÉE, la
+correction est d'ajouter une entrée sous une NOUVELLE magic et de bumper `_MAGIC` — pas d'élargir
+l'entrée existante, qui décrit un format déjà écrit sur le disque des joueurs.
+
+⚠️ UNE CLÉ RETIRÉE NE SE CORRIGE PAS PAREIL, et ce test l'a fait croire une fois : la fermeture
+des intentions de zone (2026-09-09) a bumpé TL06 sur la foi du message d'échec ci-dessous, rendant
+illisibles les parties enregistrées pour rien, avant d'être annulée le même jour. Le danger que la
+magic écarte est un état AMPUTÉ, pas un état qui porte une clé de trop. Le critère est dans
+`services/game_saves._MAGIC` : si plus AUCUN lecteur ne consulte la clé, la laisser publiée par le
+reset, inerte, coûte moins que le refus. Si un lecteur subsiste — clé devenue STATIQUE, ou créée
+paresseusement et lue en cours de partie — la row la réinjecterait avec une valeur périmée : bump.
 
 Cet interdit était une CONSIGNE et il est désormais un CONTRÔLE : `_FROZEN_FINGERPRINTS` épingle
 le compte et l'empreinte de chaque entrée qui n'est plus la magic courante. Écrire les entrées en
@@ -53,15 +61,17 @@ SCENARIO = os.path.join(
 
 #: Clés mutables publiées par le reset, PAR FORMAT DE SAVE. Une entrée décrit un format figé sur
 #: le disque des joueurs : elle ne s'élargit jamais après coup, on en ajoute une nouvelle.
-#: Les trois entrées sont écrites en LITTÉRAL et ne partagent aucun objet — une entrée dérivée
+#: Les deux entrées sont écrites en LITTÉRAL et ne partagent aucun objet — une entrée dérivée
 #: de la précédente aurait fait remonter dans l'entrée courante toute clé glissée dans une entrée
 #: figée.
 #: TL05 = TL04 + le couple de déclaration de montée 13.06 (`ascent_declaration_reset_state`,
 #: `engine/phase_handlers/movement_handlers.py`) et le mémo de charge, tous trois posés par le
 #: dict de reset de `W40KEngine.reset`.
-#: TL06 = TL05 − les cinq clés des intentions de zone (2026-09-09). C'est le PREMIER bump causé
-#: par un RETRAIT et non par un ajout : une save TL05 porterait cinq clés que plus aucun lecteur
-#: n'attend, et `apply_live_state` les réinjecterait dans le game_state sans que rien ne lève.
+#: ⚠️ PAS DE TL06 : la fermeture des intentions de zone (2026-09-09) a d'abord bumpé le format
+#: parce que cinq clés quittaient le reset. Le bump a été ANNULÉ le même jour, et les cinq clés
+#: sont restées publiées. La raison est dans `services/game_saves._MAGIC` : le refus protège d'un
+#: état AMPUTÉ, pas d'un état qui porte une clé de trop — une save TL05 relue rendait cinq clés
+#: que personne ne lit, et le bump ne coûtait que les parties enregistrées des joueurs.
 _TL04_KEYS: FrozenSet[str] = frozenset({
         '_best_weapon_cache', '_charge_declaration_current', '_charge_initial_rolls',
         '_charge_plan_cache', '_deployment_scoring_cache', '_deployment_slot_candidates',
@@ -144,57 +154,9 @@ _TL05_KEYS: FrozenSet[str] = frozenset({
         'waaagh_called', 'winner', 'zone_intent_free_steps_remaining', 'zone_intents',
 })
 
-#: TL06 = TL05 moins les CINQ cles des intentions de zone, retirees du reset le
-#: 2026-09-09 (`zone_intents`, `zone_intent_free_steps_remaining`,
-#: `unit_zone_assignments`, `_zone_intent_declarations`, `_pending_zone_shaping`).
-#: Ecrite en LITTERAL et ne partageant aucun objet avec TL05, comme l'exige l'en-tete.
-_TL06_KEYS: FrozenSet[str] = frozenset({
-    '_best_weapon_cache', '_charge_declaration_current', '_charge_engage_memo',
-    '_charge_initial_rolls', '_charge_plan_cache', '_deployment_scoring_cache',
-    '_deployment_slot_candidates', '_edge_distance_cache', '_entity_types_cache',
-    '_grid_deployment_zone_anchor', '_grid_static_hex_arrays', '_ingress_arrived',
-    '_ingress_no_destination', '_ingress_offered', '_objective_control_last_boundary',
-    '_objective_hex_zones_cache', '_obs_objective_hex_arrays', '_obs_weapon_profiles_cache',
-    '_obscuring_area_sets_cache', '_pending_reserves_wasted', '_pile_in_toCol',
-    '_pile_in_toRow', '_reserves_deployed', '_reserves_destroyed_turn3', '_reserves_placed',
-    '_restored_model_counter', '_shoot_pass_cache', '_socle_wall_blocked_cache',
-    '_squad_move_pool_cache', '_unit_move_version', '_wall_set_cache', 'action_log_seq',
-    'action_logs', 'active_movement_unit', 'active_rule_choice_prompt', 'advance_rolls',
-    'charge_activation_pool', 'charge_range_rolls', 'choice_timing_index',
-    'command_activation_pool', 'command_points', 'console_logs',
-    'controlled_objective_samples_scoring_turns', 'current_player', 'debug_mode',
-    'deployment_mode_schedule_mode', 'deployment_state', 'deployment_type',
-    'deployment_type_by_player', 'deployment_zone', 'destroyed_models',
-    'enemy_adjacent_counts_player_1', 'enemy_adjacent_counts_player_2',
-    'enemy_adjacent_hexes_player_1', 'enemy_adjacent_hexes_player_2', 'enemy_slot_mapping_p1',
-    'episode_number', 'episode_steps', 'fight_subphase', 'game_over', 'gym_distance_metric',
-    'gym_training_mode', 'last_move_cause', 'last_move_event_id', 'log_delta',
-    'macro_target_objective_id', 'macro_target_objective_index',
-    'model_count_at_start_by_player', 'models_cache', 'move_activation_pool',
-    'move_preview_footprint_span', 'moved_distance_by_model', 'oath_target',
-    'objective_controllers', 'occupation_map', 'opponent_objective_samples_scoring_turns',
-    'pending_agent_decision', 'pending_oath_selection', 'pending_rule_choice_queue',
-    'pending_shooting_phase_init', 'pending_squad_fight_intents',
-    'pending_squad_shoot_intents', 'phase', 'player_names', 'player_types', 'points_limit',
-    'preview_hexes', 'reaction_window_active', 'reactive_decision_mode',
-    'reactive_decision_payload', 'reactive_macro_order_current_window', 'reactive_mode',
-    'secured_objectives', 'shoot_activation_pool', 'squad_cache', 'squad_models',
-    'suppressed_squads', 'training_config_name', 'turn', 'turn_limit_reached',
-    'unit_activation_count', 'unit_by_id', 'units', 'units_advanced',
-    'units_ascent_declaration_resolved', 'units_cache', 'units_cache_prev',
-    'units_cannot_charge', 'units_charged', 'units_declared_ascent', 'units_fled',
-    'units_fly_declaration_resolved', 'units_fly_declaration_resolved_charge', 'units_moved',
-    'units_reacted_this_enemy_turn', 'units_shot', 'units_shot_previous_turn',
-    'units_took_to_skies', 'units_took_to_skies_charge', 'unlimited_turns',
-    'valid_move_destinations_pool', 'value_at_start', 'victory_points', 'waaagh_active',
-    'waaagh_called', 'winner',
-})
-
-
 MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
     b"W40KTL04": _TL04_KEYS,
     b"W40KTL05": _TL05_KEYS,
-    b"W40KTL06": _TL06_KEYS,
 }
 
 
@@ -212,7 +174,6 @@ def _fingerprint(keys: Iterable[str]) -> str:
 #: `_fingerprint` est trois lignes plus haut et le compte se lit sur le littéral.
 _FROZEN_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     b"W40KTL04": (128, "4f1bc5601c046cb5"),
-    b"W40KTL05": (131, "bc1d5f0c7f07dc36"),
 }
 
 #: Les neuf clés dont l'ajout n'a PAS été suivi d'un bump entre TL03 et TL04. Elles sont dans le
@@ -275,7 +236,7 @@ def test_frozen_format_entries_are_untouched() -> None:
 def test_every_frozen_entry_is_pinned() -> None:
     """Toute entrée sauf la courante doit être épinglée — sinon le bump suivant laisse un trou.
 
-    Au bump de TL05 → TL06, TL05 devient un fait historique à son tour ; sans ce contrôle, elle
+    Au prochain bump, TL05 deviendra un fait historique à son tour ; sans ce contrôle, elle
     resterait librement réécrivable et le défaut ci-dessus se rouvrirait sous un autre nom.
     """
     figees = {m for m in MUTABLE_KEYS_BY_MAGIC if m != _MAGIC}
@@ -296,16 +257,29 @@ def test_the_current_magic_declares_its_key_set() -> None:
 
 
 def test_reset_keys_match_the_current_save_format(reset_mutable_keys: FrozenSet[str]) -> None:
-    """Toute clé mutable ajoutée ou retirée au reset oblige à bumper la magic du format de save."""
+    """Le jeu de clés publié par le reset doit décrire le format de save courant.
+
+    DEUX RÉPONSES SELON LE SENS, et les confondre a déjà coûté les parties enregistrées une fois
+    (bump TL06 du 2026-09-09, annulé le jour même) : un AJOUT impose le bump, un RETRAIT ne
+    l'impose que si un lecteur consulte encore la clé. Le message ci-dessous dit les deux.
+    """
     expected = MUTABLE_KEYS_BY_MAGIC[_MAGIC]
     added = sorted(reset_mutable_keys - expected)
     removed = sorted(expected - reset_mutable_keys)
     assert not added and not removed, (
         f"le reset d'épisode ne publie plus les mêmes clés mutables que le format "
-        f"{_MAGIC.decode()} (ajoutées: {added} ; retirées: {removed}). Une save écrite au format "
-        f"courant rendrait un game_state incompatible avec le moteur. Bumpe services/game_saves."
-        f"_MAGIC, ajoute l'ancienne magic à _LEGACY_MAGICS avec son motif dans _reject_legacy, et "
-        f"ajoute une NOUVELLE entrée dans MUTABLE_KEYS_BY_MAGIC — n'élargis pas l'entrée existante."
+        f"{_MAGIC.decode()} (ajoutées: {added} ; retirées: {removed}).\n"
+        f"AJOUTÉES : une save au format courant rendrait un game_state AMPUTÉ de ces clés, et "
+        f"leur premier lecteur lèverait au fond du moteur — après que le chargement a déjà écrasé "
+        f"la partie en cours. Bumpe services/game_saves._MAGIC, ajoute l'ancienne magic à "
+        f"_LEGACY_MAGICS avec son motif dans _reject_legacy, et ajoute une NOUVELLE entrée dans "
+        f"MUTABLE_KEYS_BY_MAGIC — n'élargis pas l'entrée existante.\n"
+        f"RETIRÉES : NE BUMPE PAS par réflexe. Si plus aucun lecteur ne consulte la clé, laisse-la "
+        f"publiée par le reset, inerte et commentée comme telle : une row qui porte une clé de "
+        f"trop n'a jamais fait lever personne, alors que le bump refuse toutes les parties "
+        f"enregistrées. Bumpe SEULEMENT si un lecteur subsiste — clé devenue STATIQUE (la row "
+        f"écraserait la valeur vivante via game_snapshots.rebuild_game_state) ou créée "
+        f"paresseusement et lue en cours de partie."
     )
 
 
