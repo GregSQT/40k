@@ -57,7 +57,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from engine.phase_handlers.movement_handlers import fly_declaration_reset_state
+from engine.phase_handlers.movement_handlers import (
+    ascent_declaration_reset_state,
+    fly_declaration_reset_state,
+)
 
 
 def turn_state_invariants() -> Dict[str, Any]:
@@ -104,6 +107,11 @@ def turn_state_invariants() -> Dict[str, Any]:
         # rien ne lève — les fixtures liraient alors ces sets en `.get(clé, set())`, donc
         # « personne n'a jamais été interrogé », et resteraient VERTES sur un état inexistant.
         **fly_declaration_reset_state(),
+        # 13.06 `L6` — déclaration de MONTÉE, même couple (« je monte » / « la question a été
+        # posée ») et même cycle de vie que le vol ci-dessus, posé aux mêmes deux sites de reset.
+        # Importée et non recopiée, pour la même raison : le couple de clés vit dans
+        # `movement_handlers`, et le réénumérer ici le ferait diverger en silence.
+        **ascent_declaration_reset_state(),
         "units_reacted_this_enemy_turn": set(),
         "reaction_window_active": False,
         "last_move_event_id": 0,

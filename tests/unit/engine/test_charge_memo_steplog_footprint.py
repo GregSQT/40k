@@ -18,9 +18,20 @@ ce soit. Le verrou n'a de toute façon pas besoin d'une policy entraînée : il 
 Une politique aléatoire MASQUÉE et ensemencée suffit, et ne dépend d'aucun artefact qui dérive.
 
 DÉTERMINISME — vérifié avant d'écrire ce fichier : deux runs identiques de 150 pas produisent
-402 lignes chacun, dont UNE SEULE diffère, et c'est `Duration=<n>s`, du temps de mur. C'est la
-seule chose que `_normalise` retire, avec l'horodatage de début de ligne. Sans cette mesure
-préalable, le verrou aurait été rouge en permanence et donc inutile.
+le même nombre de lignes, et les seules qui diffèrent portent `Duration=<n>s`, du temps de mur.
+C'est la seule chose que `_normalise` retire, avec l'horodatage de début de ligne. Sans cette
+mesure préalable, le verrou aurait été rouge en permanence et donc inutile.
+
+LA GRAINE EST UN PARAMÈTRE DE MESURE, PAS UNE CONSTANTE DU VERROU. Une politique aléatoire
+masquée n'a aucune raison de rejouer la même partie après un changement de moteur : la graine 42
+d'origine (402 lignes, 2 charges committées) ne produisait plus AUCUNE charge après l'ouverture
+de la verticalité au move (13.06), qui ajoute un point de décision et décale donc tout le tirage.
+Re-mesuré le 2026-09-09 sur huit graines, à 150 pas : 42 → 0 charge committée, 1 → 0, 2 → 0,
+7 → 0, 13 → 0 (10 tentatives, toutes ratées au dé), 3 → 1, 11 → 2, **0 → 3**. La 0 est retenue
+pour sa marge. Zéro charge committée sur une graine ne dit rien du moteur — c'est le résultat
+d'un jet de dés ; ce qui compte est qu'il EXISTE des graines qui en produisent, et il y en a
+trois sur huit. Choisir la graine est le geste que prévoit ce commentaire ; retirer l'assertion
+« aucune charge dans la trace », non.
 """
 
 from __future__ import annotations
@@ -40,7 +51,7 @@ PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )
 STEPS = 150
-SEED = 42
+SEED = 0  # graine de mesure — voir « LA GRAINE EST UN PARAMÈTRE DE MESURE » en tête de fichier
 BUFFER_SIZE = 200
 
 _TIMESTAMP = re.compile(r"^\[\d\d:\d\d:\d\d\]\s*")
@@ -88,8 +99,8 @@ def test_the_charge_memo_leaves_the_step_log_footprint_identical(tmp_path):
     without_memo = _trace(str(tmp_path / "without_memo.log"), with_memo=False)
 
     # VERT VACANT — une trace vide, ou sans charge, ou sans positions par figurine, rendrait
-    # ce verrou vert sans rien garder. Les trois bornes viennent d'une mesure : 402 lignes,
-    # 2 charges et 302 segments `[MODELS:]` sur 150 pas ensemencés à SEED=42.
+    # ce verrou vert sans rien garder. Les trois bornes viennent d'une mesure : 323 lignes,
+    # 3 charges committées et 229 segments `[MODELS:]` sur 150 pas ensemencés à SEED=0.
     assert len(with_memo) > 100, f"trace trop courte ({len(with_memo)} lignes) — rien n'est gardé"
     charges = [ln for ln in with_memo if "CHARGED" in ln]
     assert charges, "aucune charge dans la trace — le verrou ne couvre pas ce qu'il vise"

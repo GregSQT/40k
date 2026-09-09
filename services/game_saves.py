@@ -48,13 +48,20 @@ _log = logging.getLogger(__name__)
 # donc une row TL03 rendrait un game_state privé de ces clés et le premier lecteur lèverait au fond
 # du moteur — après que le chargement a déjà écrasé la partie en cours. Même arbitrage qu'en TL03 :
 # refus explicite au chargement plutôt que réinjection d'une valeur que la save n'avait pas.
+# TL05 = TL04 + les trois clés ajoutées au reset d'épisode depuis TL04 : le couple de déclaration
+# de montée 13.06 (`units_declared_ascent`, `units_ascent_declaration_resolved`) et le mémo de
+# charge (`_charge_engage_memo`). Aucune exception n'est faite pour des clés dont les lecteurs
+# d'aujourd'hui tolèrent l'absence (`.get`) : le contrat porte sur l'ENSEMBLE des clés publiées par
+# le reset, pas sur la sévérité du lecteur courant — un lecteur qui passe à `require_key` ne
+# réécrirait pas ce format, et la row restaurée lèverait alors au fond du moteur, après que le
+# chargement a déjà écrasé la partie en cours.
 # Les formats antérieurs (TL01, single-pickle) n'ont en plus aucune empreinte : leur état ne peut
 # pas être restauré sans risque de plateau incompatible → REFUSÉS aussi (cf. _reject_legacy).
 # AJOUTER UNE CLÉ OBLIGATOIRE AU RESET D'ÉPISODE OBLIGE À BUMPER CETTE MAGIC. Le verrou est
 # tests/unit/services/test_save_format_key_contract.py : il épingle l'empreinte des clés mutables
 # posées par le reset et reste ROUGE tant que la magic n'a pas suivi.
-_MAGIC = b"W40KTL04"
-_LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02", b"W40KTL03"})
+_MAGIC = b"W40KTL05"
+_LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04"})
 _LEN = struct.Struct(">Q")  # préfixe de longueur : entier 64 bits big-endian
 
 # Rows exclues du menu Select (trop nombreuses) mais présentes dans le playback ⏮⏭.
@@ -154,7 +161,8 @@ def _reject_legacy(name: str, head: bytes) -> None:
             f"partie {name!r} au format {head.decode()} : écrite avant {_MAGIC.decode()}, donc "
             f"illisible (TL01 : sans empreinte de scénario ; TL02 : sans les points de "
             f"commandement de la règle 08.02 ; TL03 : sans les clés de réserves stratégiques, "
-            f"d'ingress, de suppression, ni `secured_objectives`). Supprime-la ou rejoue la partie."
+            f"d'ingress, de suppression, ni `secured_objectives` ; TL04 : sans la déclaration de "
+            f"montée 13.06 ni le mémo de charge). Supprime-la ou rejoue la partie."
         )
     raise ValueError(f"partie {name!r} : format de fichier inconnu (en-tête {head!r})")
 

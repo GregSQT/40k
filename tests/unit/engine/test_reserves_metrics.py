@@ -73,13 +73,15 @@ _SEEDS = (0, 1, 2)
 #: celui sur lequel les deux gardes métier du tracker doivent être OUVERTES. Prise dans
 #: `_SEEDS` pour partager le cache — ce fichier ne rejoue pas un quatrième épisode pour ça.
 #:
-#: 2 et non 0 depuis le 2026-09-06. Le déploiement auto des DEUX camps (`e95ea87e`) fait poser
-#: l'adversaire par le moteur au lieu du seul joueur contrôlé, ce qui écarte les armées sur ce
-#: fixture et supprime les occasions de tir de la graine 0. Mesuré sur les trois graines :
-#: 0 → 0 tir, 1 → 4, 2 → 16 ; les échantillons d'objectifs valent 4/4 sur les trois, donc c'est
-#: bien `shots_fired` seul qui départage. La 2 est retenue pour sa marge.
+#: 0 et non 2 depuis le 2026-09-09. Ce choix se re-mesure à chaque fois que le moteur change le
+#: nombre de points de décision : la partie est jouée en actions légales tirées au sort, donc un
+#: point de choix ajouté décale tout le tirage et redistribue les occasions de tir entre graines.
+#: L'ouverture de la verticalité au move (13.06) ajoute exactement un tel point, et elle a inversé
+#: le classement du 2026-09-06 (0 → 0 tir, 1 → 4, 2 → 16). Re-mesuré sur les trois graines :
+#: 0 → 22 tirs, 1 → 0, 2 → 0 ; les échantillons d'objectifs valent 4/4 sur les trois, donc c'est
+#: bien `shots_fired` seul qui départage. La 0 est retenue, seule à ouvrir la garde.
 #: Choisir la graine est le geste que prévoit la docstring du test ; retirer l'assertion, non.
-_REFERENCE_SEED = 2
+_REFERENCE_SEED = 0
 
 
 def _play(scenario_file: str, seed: int) -> Dict[str, Any]:

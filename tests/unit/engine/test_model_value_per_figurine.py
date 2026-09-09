@@ -19,7 +19,11 @@ from typing import Any, Dict, List
 
 import pytest
 
-from tests.unit.engine._config_helpers import NEUTRAL_TEST_ARMY_FACTION, NEUTRAL_TEST_FACTION
+from tests.unit.engine._config_helpers import (
+    NEUTRAL_TEST_ARMY_FACTION,
+    NEUTRAL_TEST_FACTION,
+    build_game_rules,
+)
 from engine.phase_handlers.shared_utils import build_units_cache
 from shared.data_validation import ConfigurationError
 from engine.reward_calculator import RewardCalculator
@@ -290,10 +294,13 @@ class TestObservationEnemySquadValue:
             "moved_distance_by_model": {},
         }
         build_units_cache(gs)
+        # `game_rules` : `ObservationBuilder.__init__` lit `plunging_fire_height` (tir plongeant)
+        # sans repli. Les VRAIES règles via `build_game_rules()`, aucun dict partiel.
         builder = ObservationBuilder({
             "observation_params": {
                 "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET,
-            }
+            },
+            "game_rules": build_game_rules(),
         })
         gs["victory_points"] = {1: 0, 2: 0}
         from engine.observation_entities import unit_cont_index

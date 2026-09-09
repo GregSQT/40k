@@ -52,6 +52,7 @@ from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from engine.phase_handlers import shooting_handlers
 from engine.w40k_core import W40KEngine
 from tests._state_invariants import turn_state_invariants, unit_invariants
+from tests.unit.engine._config_helpers import build_game_rules
 from tests.unit.engine._roll_helpers import roll_fight_intent
 from tests.unit.engine._state_builders import units_cache_entry as _uc
 
@@ -189,7 +190,11 @@ def _shoot_state(
             "1": _declared_faction(attacker_faction),
             "2": _declared_faction(defender_faction),
         },
-        "game_rules": {"bonus_malus_cap": 0},
+        # Les VRAIES `game_rules` (config/game_config.json), et `bonus_malus_cap=0` en seul
+        # override : c'est le reglage que ces tests veulent (aucun plafond de modificateurs).
+        # Un dict partiel decrivait une config impossible — le moteur exige d'autres cles,
+        # dont `plunging_fire_height` lu par `ObservationBuilder.__init__`.
+        "game_rules": build_game_rules(bonus_malus_cap=0),
     }
     if uses_codex_detachment != {}:
         config["uses_codex_detachment"] = uses_codex_detachment or {"1": True, "2": True}
@@ -253,7 +258,11 @@ def _fight_state(
                 "1": _declared_faction(attacker_faction),
                 "2": _declared_faction(defender_faction),
             },
-            "game_rules": {"bonus_malus_cap": 0},
+            # Les VRAIES `game_rules` (config/game_config.json), et `bonus_malus_cap=0` en seul
+            # override : c'est le reglage que ces tests veulent (aucun plafond de modificateurs).
+            # Un dict partiel decrivait une config impossible — le moteur exige d'autres cles,
+            # dont `plunging_fire_height` lu par `ObservationBuilder.__init__`.
+            "game_rules": build_game_rules(bonus_malus_cap=0),
         },
         "models_cache": {"A1": attacker, "T1": target_model},
         "squad_models": {"1": ["A1"], "2": ["T1"]},
@@ -306,7 +315,11 @@ def _command_state(current_player, *, p1_faction, p2_faction, alive=("1", "2")):
                 "2": _declared_faction(p2_faction),
             },
             "gym_training_mode": True,
-            "game_rules": {"bonus_malus_cap": 0},
+            # Les VRAIES `game_rules` (config/game_config.json), et `bonus_malus_cap=0` en seul
+            # override : c'est le reglage que ces tests veulent (aucun plafond de modificateurs).
+            # Un dict partiel decrivait une config impossible — le moteur exige d'autres cles,
+            # dont `plunging_fire_height` lu par `ObservationBuilder.__init__`.
+            "game_rules": build_game_rules(bonus_malus_cap=0),
         },
         "gym_training_mode": True,
         "units": units,

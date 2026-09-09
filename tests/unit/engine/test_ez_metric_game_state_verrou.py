@@ -171,7 +171,12 @@ def test_verrou_game_state_observation_builder(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(ObservationBuilder, "_encode_pending_decision", lambda *_a, **_kw: None)
     monkeypatch.setattr(ObservationBuilder, "_encode_deployment_candidates", lambda *_a, **_kw: None)
 
-    builder = ObservationBuilder({"observation_params": {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET}})
+    # Mêmes `game_rules` que celles passées à `synthetic_state` plus haut : `__init__` exige
+    # `plunging_fire_height` (tir plongeant) sans repli.
+    builder = ObservationBuilder({
+        "observation_params": {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET},
+        "game_rules": build_game_rules(),
+    })
 
     # Appel réel — peut lever après le bloc ENGAGEMENT (entity encoding non mocké), ce qui
     # est acceptable : le spy est invoqué EN AMONT de ce qui pourrait lever.
