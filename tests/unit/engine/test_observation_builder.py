@@ -11,14 +11,21 @@ from __future__ import annotations
 import pytest
 
 from engine.observation_builder import ObservationBuilder
+from tests.unit.engine._config_helpers import build_game_rules
 
 
 def _make_builder() -> ObservationBuilder:
-    """Instance minimale avec config obligatoire."""
+    """Instance minimale avec config obligatoire.
+
+    `game_rules` en fait partie : `__init__` lit `plunging_fire_height` (règle du tir plongeant)
+    sans repli. Les VRAIES règles via `build_game_rules()` plutôt qu'un dict bricolé, pour que
+    l'ajout d'une nouvelle clé requise ne rende pas ce test rouge à nouveau.
+    """
     config = {
         "observation_params": {
             "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET,
-        }
+        },
+        "game_rules": build_game_rules(),
     }
     return ObservationBuilder(config)
 

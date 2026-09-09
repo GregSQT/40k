@@ -46,8 +46,14 @@ SCENARIO = os.path.join(
 
 #: Clés mutables publiées par le reset, PAR FORMAT DE SAVE. Une entrée décrit un format figé sur
 #: le disque des joueurs : elle ne s'élargit jamais après coup, on en ajoute une nouvelle.
-MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
-    b"W40KTL04": frozenset({
+#: Les trois clés que le reset publie en plus depuis TL04 : le couple de déclaration de montée
+#: 13.06 (`ascent_declaration_reset_state`, `engine/phase_handlers/movement_handlers.py`) et le
+#: mémo de charge, tous trois posés par le dict de reset de `W40KEngine.reset`.
+_KEYS_ADDED_IN_TL05 = frozenset({
+    "units_declared_ascent", "units_ascent_declaration_resolved", "_charge_engage_memo",
+})
+
+_TL04_KEYS: FrozenSet[str] = frozenset({
         '_best_weapon_cache', '_charge_declaration_current', '_charge_initial_rolls',
         '_charge_plan_cache', '_deployment_scoring_cache', '_deployment_slot_candidates',
         '_edge_distance_cache', '_entity_types_cache', '_grid_deployment_zone_anchor',
@@ -85,7 +91,15 @@ MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
         'units_took_to_skies', 'units_took_to_skies_charge', 'unlimited_turns',
         'valid_move_destinations_pool', 'value_at_start', 'victory_points', 'waaagh_active',
         'waaagh_called', 'winner', 'zone_intent_free_steps_remaining', 'zone_intents',
-    }),
+})
+
+MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
+    b"W40KTL04": _TL04_KEYS,
+    # TL05 est ÉCRIT comme une union, et c'est le point : la ligne dit ce que le format ajoute,
+    # au lieu de noyer trois clés dans une seconde copie de cent-vingt. `_TL04_KEYS` est un
+    # frozenset — l'entrée TL04 ne peut donc pas être élargie par ce partage, ce qui est
+    # exactement l'interdit rappelé plus haut.
+    b"W40KTL05": _TL04_KEYS | _KEYS_ADDED_IN_TL05,
 }
 
 #: Les neuf clés dont l'ajout n'a PAS été suivi d'un bump entre TL03 et TL04. Elles sont dans le

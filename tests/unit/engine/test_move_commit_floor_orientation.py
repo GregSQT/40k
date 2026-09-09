@@ -39,6 +39,14 @@ def _unit(uid: str, player: int, models: Sequence[Tuple[int, int]]) -> Dict[str,
         "ARMOR_SAVE": 3, "INVUL_SAVE": 7, "SHOOT_LEFT": 1, "ATTACK_LEFT": 1,
         "RNG_WEAPONS": [], "CC_WEAPONS": [], "BASE_SIZE": [4, 2], "MODEL_HEIGHT": 2.5,
         "BASE_SHAPE": "oval", "MOVE": 6, "UNIT_RULES": [],
+        # Jumeau de `UNIT_RULES` ci-dessus, et la clé est OBLIGATOIRE : le pool d'étages
+        # (`movement_handlers._model_multilevel_reachable_field`) la passe à
+        # `validate_floor_placement`, qui refuse un niveau >= 1 à une unité sans mot-clé
+        # 13.06. INFANTRY et non une liste vide : c'est ce que DÉCRIT cette fixture — un socle
+        # oval de figurine à pied qui monte sur un plancher de ruine — et une unité sans ce
+        # mot-clé ne pourrait pas finir son move à l'étage, si bien que le test ne mesurerait
+        # plus l'orientation qu'il vise.
+        "UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}],
         "models": [
             {"col": c, "row": r, "VALUE": 10, "orientation": _UNPIVOTED} for c, r in models
         ],
