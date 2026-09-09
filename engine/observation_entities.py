@@ -420,10 +420,11 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     # POURQUOI 10 BITS ET NON UN SEUL « déjà ciblée » : 04.03 « Gather Attack Dice » cumule les
     # dés des armes faisant des IDENTICAL ATTACKS sur une même cible, donc la conséquence de
     # règle dépend de QUELLE arme y est déjà, pas du seul fait qu'une y soit. Un bit unique
-    # suffirait à deux armes et perdrait l'appariement au-delà — or 57 % des escouades des
-    # scénarios joués portent >= 3 profils de tir distincts (mesuré le 2026-09-09 sur 69
-    # escouades, jusqu'à 6 profils). Le joueur humain, lui, voit toutes ses déclarations : 04.02
-    # les demande toutes AVANT la moindre résolution.
+    # suffirait à deux armes et perdrait l'appariement au-delà — or 55 % des escouades Armageddon
+    # portent >= 3 profils de tir distincts, jusqu'à 6, soit 75 % de celles qui peuvent seulement
+    # fractionner leur tir (mesuré le 2026-09-09 sur les 11 escouades SM+Orks des `config/armies/`,
+    # attachements 19.04 compris). Le joueur humain, lui, voit toutes ses déclarations : 04.02 les
+    # demande toutes AVANT la moindre résolution.
     #
     # POURQUOI SUR L'ENTITÉ et non dans un bloc dédié (10 x 20) : c'est la tête pointeur qui
     # score les lignes ennemies pour choisir la cible. L'information est ainsi portée par la

@@ -373,8 +373,9 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
                                                     #   « deja ciblee » : 04.03 cumule les des des armes
                                                     #   faisant des attaques IDENTIQUES sur une meme
                                                     #   cible, donc la consequence de regle depend de
-                                                    #   QUELLE arme y est deja — et 57 % des escouades
-                                                    #   jouees portent >= 3 profils de tir.
+                                                    #   QUELLE arme y est deja — et 55 % des escouades
+                                                    #   Armageddon portent >= 3 profils de tir
+                                                    #   (75 % de celles capables de split-fire).
 [s][28]    = split_assigned_w1                      # idem, slot de profil RNG 1
 [s][29]    = split_assigned_w2                      # idem, slot de profil RNG 2
 [s][30]    = split_assigned_w3                      # idem, slot de profil RNG 3

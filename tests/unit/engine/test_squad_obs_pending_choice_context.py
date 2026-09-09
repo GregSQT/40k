@@ -250,22 +250,30 @@ def test_target_outside_the_enemy_slots_raises():
 # ── Volet tir : l'arme armée pendant le sous-état CIBLE du split-fire ─────────
 
 
-def _split_fire_engine(*, third_weapon: bool = False) -> W40KEngine:
+def _split_fire_engine(*, third_weapon: bool = False, ally_squad: bool = False) -> W40KEngine:
     """Escouade 1 avec DEUX profils de tir distincts (trois sur demande), deux ennemis à portée.
 
     `third_weapon` : une arme de plus, donc une assignation de plus AVANT la résolution — le seul
     moyen d'observer une activation qui a déjà assigné deux armes.
+
+    `ally_squad` : une SECONDE escouade du joueur 1. Elle seule met la garde d'observateur à
+    l'épreuve : ses slots ennemis contiennent « 2 » et « 3 », donc un bit fuiterait chez elle si
+    la garde tombait. Observer une escouade du camp d'en face ne prouve rien — les cibles du
+    split-fire n'y figurent pas du tout.
     """
     positions = [(30, 20), (31, 20)]
     weapons = [_weapon_cfg("test_bolter", 24, 4), _weapon_cfg("test_melta", 12, 9)]
     if third_weapon:
         positions.append((32, 20))
         weapons.append(_weapon_cfg("test_plasma", 18, 7))
-    eng = _make_engine([
+    units = [
         _unit_cfg(1, 1, positions, ranged=weapons),
         _unit_cfg(2, 2, [(30, 28)]),
         _unit_cfg(3, 2, [(33, 28)]),
-    ])
+    ]
+    if ally_squad:
+        units.append(_unit_cfg(4, 1, [(20, 20)], ranged=weapons))
+    eng = _make_engine(units)
     gs = eng.game_state
     gs["phase"] = "shoot"
     gs["current_player"] = 1
@@ -453,12 +461,24 @@ def test_no_enemy_carries_a_split_bit_outside_split_fire():
         assert not obs["allies_bin"][:, idx].any(), f"slot {widx} marqué sur une alliée"
 
 
-def test_split_bits_are_absent_from_another_squad_observation():
-    """L'observation d'une AUTRE escouade ne désigne personne : le split-fire n'est pas le sien."""
-    eng = _split_fire_engine()
+def test_split_bits_are_absent_from_an_allied_squad_observation():
+    """L'observation d'une AUTRE escouade ne désigne personne : le split-fire n'est pas le sien.
+
+    L'observatrice est une ALLIÉE de la tireuse, et c'est la seule version portante du test : chez
+    une escouade du camp d'en face, les cibles du split-fire ne figurent pas dans les slots
+    ennemis, si bien que l'assertion passerait même sans garde d'observateur. La précondition
+    ci-dessous refuse ce vert vacant.
+    """
+    eng = _split_fire_engine(ally_squad=True)
     _arm_shoot_weapon(eng, 0)
     _assign_target(eng, "2")
-    obs = eng.obs_builder.build_squad_observation(eng.game_state, "3")
+    obs = eng.obs_builder.build_squad_observation(eng.game_state, "4")
+
+    target_slot = _enemy_slot_of(eng, "4", "2")
+    assert float(obs["enemies_bin"][target_slot][BIN_PRESENT]) == 1.0, (
+        "précondition : la cible assignée doit occuper un slot ennemi de l'observatrice, sinon "
+        "l'assertion suivante ne prouve rien"
+    )
     for widx in range(ObservationBuilder.K_WEAPONS_RANGED):
         idx = unit_bin_index(split_assigned_field(widx))
         assert not obs["enemies_bin"][:, idx].any(), f"slot {widx} marqué chez une autre escouade"
