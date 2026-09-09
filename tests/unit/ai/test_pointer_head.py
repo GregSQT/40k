@@ -57,7 +57,11 @@ from engine.macro_intents import (
     SHOOT_WEAPON_SEL_SLOT_COUNT,
     TOTAL_ACTION_SIZE,
 )
-from engine.macro_intents import FIGHT_WEAPON_SLOT_BASE, SHOOT_WEAPON_SEL_SLOT_BASE
+from engine.macro_intents import (
+    FIGHT_WEAPON_SLOT_BASE,
+    FIGHT_WEAPON_SLOT_COUNT,
+    SHOOT_WEAPON_SEL_SLOT_BASE,
+)
 from engine.observation_entities import (
     decision_option_bin_index,
     deploy_cand_bin_index,
@@ -73,6 +77,7 @@ _UNIT_PRESENT = unit_bin_index("present")
 _OPTION_PRESENT = decision_option_bin_index("present")
 _CAND_PRESENT = deploy_cand_bin_index("present")
 _PROFILE_PRESENT = profile_bin_index("present")
+_FIGHT_TARGET = unit_bin_index("fight_target_selected")
 
 #: Emplacements d'arme ARMÉS dans l'observation jouet : deux profils de tir (bloc 0..K_R-1) et
 #: deux de mêlée (bloc K_R..). Sans eux le bloc d'armes serait tout à zéro, donc tous les
@@ -125,6 +130,9 @@ def _zero_obs(batch: int = 2, phase: str = "move") -> Dict[str, np.ndarray]:
     obs["allies_bin"][:, 0, _UNIT_PRESENT] = 1.0        # unité active présente
     obs["enemies_bin"][:, :3, _UNIT_PRESENT] = 1.0      # trois ennemis présents
     obs["enemies_cont"][:, :3, 0] = 5.0
+    # Cible de mêlée DÉJÀ désignée (§0.69), et pas sur la première ligne : une tête qui lirait
+    # `enemies[:, 0]` au lieu de la ligne marquée passerait un test posé sur le slot 0.
+    obs["enemies_bin"][:, 1, _FIGHT_TARGET] = 1.0
     # Deux candidats de decision presents (§9.3 P2) : le jumeau exact des slots ennemis.
     obs["decision_options_bin"][:, :2, _OPTION_PRESENT] = 1.0
     obs["decision_options_bin"][:, 0, 0] = 1.0
@@ -222,21 +230,37 @@ def _manual_logits(policy, obs: Dict[str, torch.Tensor]):
     # §0.69 : pointeur sur les EMPLACEMENTS de mêlée de l'unité active. Échelle propre au bloc
     # d'armes — ses embeddings sortent de l'encodeur d'ARMES, plus étroit que celui d'entités.
     weapon_scale = policy.weapon_dim ** 0.5
+    melee_w = feats.weapons[:, SHOOT_WEAPON_SEL_SLOT_COUNT:]
     fight_weapon_pointer = torch.einsum(
-        "bd,bkd->bk",
-        policy.fight_weapon_query_net(latent_pi),
-        feats.weapons[:, SHOOT_WEAPON_SEL_SLOT_COUNT:],
+        "bd,bkd->bk", policy.fight_weapon_query_net(latent_pi), melee_w
     ) / weapon_scale
+    # Compatibilité arme x cible DÉSIGNÉE : la ligne marquée par `fight_target_selected` est
+    # extraite par la somme pondérée, jamais indexée en dur.
+    fight_compat = torch.einsum(
+        "bjd,bid->bji", melee_w, policy.fight_weapon_target_net(embeddings)
+    ) / weapon_scale
+    fight_weapon_pointer = fight_weapon_pointer + (
+        fight_compat * (feats.fight_target > 0).to(fight_compat.dtype).unsqueeze(1)
+    ).sum(dim=2)
     # P3-0 : sixième requête, embeddings SELF_MODELS -> logits de retrait cohérence.
     coherency_pointer = torch.einsum(
         "bd,bkd->bk", policy.coherency_query_net(latent_pi), feats.self_models
     ) / scale
     # P3-8 : pointeur sur les EMPLACEMENTS de tir (split-fire), premier bloc du tenseur d'armes.
+    ranged_w = feats.weapons[:, :SHOOT_WEAPON_SEL_SLOT_COUNT]
     shoot_weapon_sel_pointer = torch.einsum(
-        "bd,bkd->bk",
-        policy.shoot_weapon_sel_query_net(latent_pi),
-        feats.weapons[:, :SHOOT_WEAPON_SEL_SLOT_COUNT],
+        "bd,bkd->bk", policy.shoot_weapon_sel_query_net(latent_pi), ranged_w
     ) / weapon_scale
+    # Aucune cible n'est désignée au moment du choix d'arme de tir : la compatibilité est réduite
+    # par un MAX sur les seuls ennemis présents.
+    shoot_compat = torch.einsum(
+        "bjd,bid->bji", ranged_w, policy.shoot_weapon_target_net(embeddings)
+    ) / weapon_scale
+    _keep = (feats.enemies_present > 0).unsqueeze(1)
+    _best = shoot_compat.masked_fill(~_keep, torch.finfo(shoot_compat.dtype).min).max(dim=2).values
+    shoot_weapon_sel_pointer = shoot_weapon_sel_pointer + _best.masked_fill(
+        ~(feats.enemies_present > 0).any(dim=1, keepdim=True), 0.0
+    )
     expected = torch.cat(
         [
             move,
@@ -365,13 +389,43 @@ def test_pointer_logit_is_slot_local(model):
         perturbed[:, 1] += 1.0
         after = policy._action_logits(latent_pi, feats._replace(enemies=perturbed))
     diff = (after - before).abs()[0]
-    changed = torch.nonzero(diff > 1e-6).flatten().tolist()
+    changed = set(torch.nonzero(diff > 1e-6).flatten().tolist())
     # Le slot 1 pilote QUATRE logits depuis le chantier 01 : « tirer sur lui », « le charger »,
     # « le frapper » et « lui jurer Oath ». Les quatre sortent du MEME embedding, par quatre
     # requetes distinctes — c'est le partage recherche.
-    assert changed == [
+    per_slot = {
         SHOOT_SLOT_BASE + 1, CHARGE_SLOT_BASE + 1, FIGHT_SLOT_BASE + 1, OATH_SLOT_BASE + 1
-    ], f"logits deplaces : {changed[:5]}"
+    }
+    # Les DEUX blocs de choix d'arme lisent eux aussi les embeddings d'ennemis, par la
+    # compatibilité arme x cible : c'est un couplage VOULU, et il n'est pas indexé par slot (une
+    # arme n'est pas un ennemi). Il ne relâche donc pas la localité ci-dessus, qui reste exacte
+    # sur les quatre familles indexées par slot ennemi.
+    weapon_blocks = set(
+        range(FIGHT_WEAPON_SLOT_BASE, FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT)
+    ) | set(
+        range(
+            SHOOT_WEAPON_SEL_SLOT_BASE,
+            SHOOT_WEAPON_SEL_SLOT_BASE + SHOOT_WEAPON_SEL_SLOT_COUNT,
+        )
+    )
+    assert changed - weapon_blocks == per_slot, (
+        f"logits deplaces hors des blocs d'arme : {sorted(changed - weapon_blocks)[:5]}"
+    )
+    # Le slot 1 est la cible DÉSIGNÉE du choix d'arme de mêlée (`_zero_obs`) : les emplacements
+    # de mêlée ARMÉS doivent bouger, et EUX SEULS. Un emplacement vide a un embedding nul, donc
+    # une compatibilité nulle quelle que soit la cible — il ne doit pas bouger, sans quoi le
+    # biais de l'encodeur d'armes serait revenu dans la compatibilité.
+    armed = {FIGHT_WEAPON_SLOT_BASE, FIGHT_WEAPON_SLOT_BASE + 1}
+    empty = set(
+        range(FIGHT_WEAPON_SLOT_BASE + 2, FIGHT_WEAPON_SLOT_BASE + FIGHT_WEAPON_SLOT_COUNT)
+    )
+    assert armed <= changed, (
+        "les emplacements de melee ARMES n'ont pas bouge alors que la cible DESIGNEE a change : "
+        "la compatibilite arme x cible n'atteint pas les logits"
+    )
+    assert not (empty & changed), (
+        f"des emplacements de melee VIDES ont bouge : {sorted(empty & changed)[:3]}"
+    )
 
 
 def test_evaluate_actions_returns_values_log_prob_entropy(model):
@@ -439,15 +493,23 @@ def test_learning_step_runs_end_to_end(model):
     # pointeur branchée sur des embeddings tous nuls (bloc d'armes vide dans l'observation) reste
     # dans le graphe, rend `.grad` non `None`, et n'apprend rien. C'est l'armement de
     # `_zero_obs` qui rend ces deux contrôles non vacants.
-    for name in ("fight_weapon_query_net", "shoot_weapon_sel_query_net"):
+    # Les deux PROJECTIONS de cible entrent dans la même garde : elles ne sont dans le graphe
+    # que par un produit avec les embeddings d'arme, donc un branchement à côté (bloc d'armes
+    # vide, cible jamais marquée) les laisserait à gradient nul sans rien casser d'autre.
+    for name in (
+        "fight_weapon_query_net",
+        "shoot_weapon_sel_query_net",
+        "fight_weapon_target_net",
+        "shoot_weapon_target_net",
+    ):
         grad = getattr(model.policy, name).weight.grad
         assert grad is not None and torch.isfinite(grad).all(), (
             f"{name} ne recoit PAS de gradient : la tete d'emplacement d'arme n'est pas "
             "dans le graphe"
         )
         assert float(grad.abs().sum()) > 0.0, (
-            f"{name} recoit un gradient NUL : ses embeddings d'emplacement sont tous nuls, "
-            "elle score des armes qu'aucune observation ne decrit"
+            f"{name} recoit un gradient NUL : ses embeddings d'emplacement ou de cible sont "
+            "tous nuls, elle score des armes ou des ennemis qu'aucune observation ne decrit"
         )
 
 
@@ -541,15 +603,22 @@ def test_weapon_slots_are_assembled_at_their_action_ids(model):
         feats = policy._split_features(obs)
         latent_pi = policy.mlp_extractor.forward_actor(feats.trunk)
         logits = policy._action_logits(latent_pi, feats)
+        melee_w = feats.weapons[:, SHOOT_WEAPON_SEL_SLOT_COUNT:]
+        ranged_w = feats.weapons[:, :SHOOT_WEAPON_SEL_SLOT_COUNT]
+        # Ce test-ci ne juge QUE le placement des blocs ; leur VALEUR est recalculée
+        # indépendamment par `_manual_logits`. Réutiliser les helpers est donc légitime ici, et
+        # ce serait une référence creuse là-bas.
         melee = policy._point(
-            policy.fight_weapon_query_net,
-            latent_pi,
-            feats.weapons[:, SHOOT_WEAPON_SEL_SLOT_COUNT:],
+            policy.fight_weapon_query_net, latent_pi, melee_w
+        ) + policy._weapon_target_bonus(
+            policy.fight_weapon_target_net, melee_w, feats.enemies, feats.fight_target,
+            reduce_max=False,
         )
         ranged = policy._point(
-            policy.shoot_weapon_sel_query_net,
-            latent_pi,
-            feats.weapons[:, :SHOOT_WEAPON_SEL_SLOT_COUNT],
+            policy.shoot_weapon_sel_query_net, latent_pi, ranged_w
+        ) + policy._weapon_target_bonus(
+            policy.shoot_weapon_target_net, ranged_w, feats.enemies, feats.enemies_present,
+            reduce_max=True,
         )
     assert torch.allclose(
         logits[:, FIGHT_WEAPON_SLOT_BASE:FIGHT_WEAPON_SLOT_BASE + melee.shape[1]],
@@ -560,6 +629,119 @@ def test_weapon_slots_are_assembled_at_their_action_ids(model):
         logits[:, SHOOT_WEAPON_SEL_SLOT_BASE:SHOOT_WEAPON_SEL_SLOT_BASE + ranged.shape[1]],
         ranged,
         atol=1e-6,
+    )
+
+
+def test_the_weapon_target_bonus_reduces_only_over_selected_enemies(model):
+    """Les deux réductions de la compatibilité arme x cible ne lisent QUE les colonnes désignées.
+
+    Cas construit à la main, sans dépendre de l'initialisation : la projection est l'identité, la
+    seule arme vaut `1` partout, le slot ennemi 1 vaut `-1` (compatibilité négative) et le slot 0
+    vaut `+1` alors qu'il est déclaré NON désigné.
+
+    - `max` (tir) : sans le masque, le `max` prendrait la colonne non désignée et rendrait
+      `+sqrt(d)` ; avec, il rend `-sqrt(d)`. C'est le cas qui mord sur un slot ABSENT : son
+      embedding est nul, mais la projection RÉELLE a un biais, donc sa compatibilité n'est pas
+      nulle — le dernier contrôle ci-dessous le mesure plutôt que de le supposer.
+    - somme pondérée (mêlée) : elle extrait la ligne marquée, pas la première ni la meilleure.
+    - aucune colonne désignée : zéro des deux côtés, jamais la valeur de remplissage.
+    """
+    policy = model.policy
+    dim = policy.weapon_dim
+    identity = torch.nn.Identity()
+    weapons = torch.ones(1, 1, dim)
+    enemies = torch.stack([torch.ones(dim), -torch.ones(dim)]).unsqueeze(0)  # (1, 2, dim)
+    select = torch.tensor([[0.0, 1.0]])  # SEUL le slot 1 est désigné
+    expected = -(dim ** 0.5)
+
+    with torch.no_grad():
+        best = policy._weapon_target_bonus(
+            identity, weapons, enemies, select, reduce_max=True
+        )
+        picked = policy._weapon_target_bonus(
+            identity, weapons, enemies, select, reduce_max=False
+        )
+        none_max = policy._weapon_target_bonus(
+            identity, weapons, enemies, torch.zeros(1, 2), reduce_max=True
+        )
+        none_sum = policy._weapon_target_bonus(
+            identity, weapons, enemies, torch.zeros(1, 2), reduce_max=False
+        )
+    assert float(best[0, 0]) == pytest.approx(expected, abs=1e-4), (
+        "le max a lu une colonne NON designee : un slot absent ou une cible fermee plafonnerait "
+        "la compatibilite a zero"
+    )
+    assert float(picked[0, 0]) == pytest.approx(expected, abs=1e-4), (
+        "la somme ponderee n'a pas extrait la ligne marquee"
+    )
+    assert float(none_max[0, 0]) == 0.0, "aucun ennemi designe : le max doit rendre zero"
+    assert float(none_sum[0, 0]) == 0.0, "aucune cible designee : la somme doit rendre zero"
+
+    # PRÉMISSE du masque, mesurée et non supposée : la projection réelle porte un biais, donc un
+    # slot ennemi ABSENT — embedding nul — ne produit PAS une compatibilité nulle. C'est ce qui
+    # rend le masque nécessaire plutôt que cosmétique.
+    with torch.no_grad():
+        bias_out = policy.shoot_weapon_target_net(torch.zeros(1, 1, policy.entity_dim))
+    assert float(bias_out.abs().sum()) > 0.0, (
+        "la projection de cible rend zero sur une entree nulle : la justification du masque du "
+        "`max` ne tient plus, il faut la reecrire"
+    )
+
+
+def test_the_melee_weapon_logit_depends_on_the_designated_target(model):
+    """Le choix d'arme de mêlée voit la cible DÉJÀ désignée, et elle seule.
+
+    Choisir une arme de mêlée, c'est confronter S/PA/D à E/Sv/PV : sans la cible, la décision se
+    prend à l'aveugle. Le latent du tronc ne porte les ennemis qu'agrégés (`enemies_agg`), donc
+    déplacer la désignation d'un ennemi à un autre doit déplacer les logits d'arme À LATENT GELÉ —
+    ce qu'une tête conditionnée par le seul latent ne peut pas produire.
+
+    Le troisième cas est l'autre moitié du verrou : hors du point d'arrêt, AUCUNE ligne n'est
+    marquée et le terme doit valoir exactement zéro. Sans cette moitié, un terme branché en
+    permanence passerait le premier contrôle.
+    """
+    policy = model.policy
+    policy.set_training_mode(False)
+    base = _zero_obs(1)
+    # Deux ennemis aux lignes DISTINCTES : sans cela, changer de cible ne changerait rien et le
+    # test serait vert par construction.
+    base["enemies_cont"][:, 1, 1] = 3.0
+    base["enemies_cont"][:, 2, 1] = -4.0
+
+    on_first = {k: v.copy() for k, v in base.items()}          # `_zero_obs` marque déjà le slot 1
+    on_second = {k: v.copy() for k, v in base.items()}
+    on_second["enemies_bin"][:, 1, _FIGHT_TARGET] = 0.0
+    on_second["enemies_bin"][:, 2, _FIGHT_TARGET] = 1.0
+    no_target = {k: v.copy() for k, v in base.items()}
+    no_target["enemies_bin"][:, :, _FIGHT_TARGET] = 0.0
+
+    with torch.no_grad():
+        feats_first = policy._split_features(_tensors(on_first))
+        feats_second = policy._split_features(_tensors(on_second))
+        feats_none = policy._split_features(_tensors(no_target))
+        latent_pi = policy.mlp_extractor.forward_actor(feats_first.trunk)
+
+        def _melee(feats):
+            weapons = feats.weapons[:, SHOOT_WEAPON_SEL_SLOT_COUNT:]
+            return policy._point(
+                policy.fight_weapon_query_net, latent_pi, weapons
+            ) + policy._weapon_target_bonus(
+                policy.fight_weapon_target_net, weapons, feats.enemies, feats.fight_target,
+                reduce_max=False,
+            ), policy._point(policy.fight_weapon_query_net, latent_pi, weapons)
+
+        first, _ = _melee(feats_first)
+        second, _ = _melee(feats_second)
+        none_logits, none_query_only = _melee(feats_none)
+
+    # Les emplacements ARMÉS (0 et 1 du bloc de mêlée) doivent bouger avec la cible.
+    assert not torch.allclose(first[:, :2], second[:, :2], atol=1e-6), (
+        "changer la cible DESIGNEE ne deplace pas les logits d'arme de melee : le choix d'arme "
+        "se fait sans voir contre qui"
+    )
+    assert torch.allclose(none_logits, none_query_only, atol=1e-7), (
+        "hors du point d'arret, le terme de cible n'est pas nul : il s'ajoute a des logits que "
+        "le masque ouvre dans d'autres etats"
     )
 
 

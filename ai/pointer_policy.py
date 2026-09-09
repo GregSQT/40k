@@ -91,7 +91,14 @@ from engine.macro_intents import (
     SHOOT_WEAPON_SEL_SLOT_COUNT,
     TOTAL_ACTION_SIZE,
 )
+from engine.observation_entities import unit_bin_index
 from engine.spatial_grid import GRID_CELL_COUNT, GRID_SIZE
+
+#: Index LUS sur le schéma d'entité, jamais recopiés (convention §0.37 : `present` est le dernier
+#: champ). `fight_target_selected` n'est écrit QUE sur les entités ENNEMIES
+#: (`observation_builder`, branche `if not is_ally`), donc il ne se lit que là.
+_ENEMY_PRESENT_IDX = unit_bin_index("present")
+_FIGHT_TARGET_IDX = unit_bin_index("fight_target_selected")
 
 #: Largeur de la couche cachée de la tête de move, par colonne de cellule.
 MOVE_HEAD_HIDDEN = 32
@@ -150,6 +157,15 @@ class PolicyFeatures(NamedTuple):
     #: (B, K_w, d_w) — EMPLACEMENTS d'arme de l'unité active : tir d'abord, mêlée ensuite.
     #: Largeur `weapon_dim`, celle de l'encodeur d'armes partagé — pas `entity_dim`.
     weapons: torch.Tensor
+    #: (B, K_e) — bit `present` des slots ennemis, LU sur le schéma. Il borne le `max` de la
+    #: compatibilité arme x cible : un slot absent a un embedding NUL, mais la projection qui le
+    #: lit a un BIAIS, donc sa compatibilité vaut `(w_j · b) / sqrt(d_w)` — une valeur arbitraire,
+    #: pas zéro, qui remporterait le `max` aussi souvent que le hasard le veut.
+    enemies_present: torch.Tensor
+    #: (B, K_e) — bit `fight_target_selected` : la cible DÉJÀ désignée du choix d'arme de mêlée.
+    #: Exactement une ligne à 1 pendant `pending_fight_weapon_select` (le moteur lève si la cible
+    #: n'occupe aucun slot observé), zéro ligne partout ailleurs.
+    fight_target: torch.Tensor
 
 
 class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
@@ -369,6 +385,22 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         self.shoot_weapon_sel_query_net = nn.Linear(
             self.mlp_extractor.latent_dim_pi, self.weapon_dim
         )
+        # PROJECTIONS ennemi -> espace des armes : elles portent la COMPATIBILITÉ arme x cible,
+        # c'est-à-dire la question que le choix d'arme pose vraiment. Choisir une arme, c'est
+        # confronter S/PA/D à E/Sv/PV (04.01/05.02/05.04) : sans la cible, la requête ne dispose
+        # que du latent, où les 20 ennemis arrivent noyés dans une moyenne et un max
+        # (`enemies_agg`). Le réseau devrait y ré-extraire une ligne parmi vingt — exactement le
+        # travail que l'architecture pointeur existe pour lui épargner.
+        #
+        # Deux projections et non une, pour la raison qui sépare déjà les requêtes : les deux
+        # points d'arrêt ne savent PAS la même chose de la cible (cf. `_weapon_target_bonus`).
+        #
+        # Le terme est ADDITIF sur le logit et vaut algébriquement une requête conditionnée :
+        # `(P e) · w_j` est le second terme de `(W_q l + P e) · w_j`. L'écrire comme une matrice
+        # arme x ennemi est ce qui permet au tir, qui n'a pas de cible désignée, de réduire par un
+        # `max` là où la mêlée réduit par la ligne marquée.
+        self.fight_weapon_target_net = nn.Linear(self.entity_dim, self.weapon_dim)
+        self.shoot_weapon_target_net = nn.Linear(self.entity_dim, self.weapon_dim)
         # Requête DISTINCTE pour les candidats de décision (§9.3 P2) : « quel ennemi frapper » et
         # « quelle option choisir » sont deux questions différentes posées au même latent, et
         # elles ne lisent même pas les mêmes embeddings (ennemis vs candidats).
@@ -474,6 +506,16 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
     def _split_features(self, obs: PyTorchObs) -> PolicyFeatures:
         """Découpe le vecteur de l'extracteur — contrat de `SpatialCombinedExtractor`, dont les
         tranches ont été lues au build (jamais recalculées ici)."""
+        # L'assemblage lit des CLÉS de l'observation en plus des features (bits de présence, de
+        # cible désignée, de candidats de pose). Contrôlé AVANT l'extraction, sans quoi le
+        # message ne serait jamais émis : `preprocess_obs` (SB3) tombe d'abord sur un `assert`,
+        # qui disparaît sous `python -O` — et l'échec ressortirait alors trois appels plus loin,
+        # en indexation de tenseur par une chaîne.
+        if not isinstance(obs, dict):
+            raise TypeError(
+                "PointerMaskablePolicy lit des cles de l'observation et exige donc un espace "
+                f"Dict (recu {type(obs).__name__})."
+            )
         features = self._extract(obs)
         batch = features.shape[0]
         trunk = features[:, : self.trunk_dim]
@@ -543,9 +585,19 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 "de pose et la conv de move ne repose plus sur rien."
             )
         is_deploy = deploy_present.amax(dim=-1)
+        # Deux bits LUS sur le tenseur ennemi, à leur index de schéma. Ils ne sont pas contrôlés
+        # binaires comme l'est celui des candidats de pose : celui-là ROUTE (il choisit laquelle
+        # de deux têtes alimente huit colonnes), et son contrôle coûte une synchronisation
+        # GPU->hôte par forward. Ceux-ci PONDÈRENT, exactement comme les masques de présence que
+        # l'extracteur applique déjà sans contrôle sur les six familles d'entités ; en ajouter
+        # deux ici paierait deux synchronisations de plus par forward pour un mode de défaillance
+        # que le reste du réseau ne surveille pas non plus.
+        enemies_bin = obs["enemies_bin"]
+        enemies_present = enemies_bin[..., _ENEMY_PRESENT_IDX]
+        fight_target = enemies_bin[..., _FIGHT_TARGET_IDX]
         return PolicyFeatures(
             trunk, embeddings, move_map, decision_emb, deploy_emb, ally_emb, is_deploy,
-            self_model_emb, weapon_emb,
+            self_model_emb, weapon_emb, enemies_present, fight_target,
         )
 
     def _move_logits(self, latent_pi: torch.Tensor, move_map: torch.Tensor) -> torch.Tensor:
@@ -580,8 +632,63 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         Les requêtes restent des modules DISTINCTS (cf. leurs déclarations) : ce qui est partagé
         ici est la formule, pas les poids.
         """
-        query = query_net(latent_pi).unsqueeze(1)  # (B, 1, d)
-        return (query * embeddings).sum(dim=-1) / embeddings.shape[-1] ** 0.5
+        return self._score(query_net(latent_pi), embeddings)
+
+    @staticmethod
+    def _score(query: torch.Tensor, embeddings: torch.Tensor) -> torch.Tensor:
+        """`(q · e_i) / sqrt(d)` pour une requête DÉJÀ composée : (B, d) x (B, K, d) -> (B, K).
+
+        Séparée de `_point` pour que la compatibilité arme x cible passe par le MÊME diviseur :
+        le terme additif de `_weapon_target_bonus` est homogène à un logit de pointeur, et lui
+        donner sa propre échelle rendrait le poids relatif des deux termes arbitraire.
+        """
+        return (query.unsqueeze(1) * embeddings).sum(dim=-1) / embeddings.shape[-1] ** 0.5
+
+    def _weapon_target_bonus(
+        self,
+        proj_net: nn.Module,
+        weapons: torch.Tensor,
+        enemies: torch.Tensor,
+        select: torch.Tensor,
+        reduce_max: bool,
+    ) -> torch.Tensor:
+        """Terme de COMPATIBILITÉ arme x cible ajouté aux logits d'emplacement : (B, K_w).
+
+        `compat[j, i] = (w_j · P e_i) / sqrt(d_w)` — la même forme et le même diviseur qu'un
+        logit de pointeur, puisque c'en est le second terme (cf. la déclaration des projections).
+        `select` (B, K_e) désigne les colonnes admissibles ; la réduction diffère selon ce que
+        l'état SAIT de la cible, et c'est le seul point où les deux familles divergent :
+
+        - **mêlée (`reduce_max=False`)** : la cible est DÉJÀ désignée (`squad_fight` a joué le
+          `FIGHT_SLOT` avant d'armer `pending_fight_weapon_select`). `select` est le bit
+          `fight_target_selected`, à 1 sur exactement une ligne, et la somme pondérée EXTRAIT
+          cette ligne. Hors de ce point d'arrêt aucune ligne n'est marquée : le terme vaut zéro et
+          le logit se réduit à la requête, sans branche ni garde de phase.
+        - **tir (`reduce_max=True`)** : le split-fire choisit l'ARME AVANT la cible
+          (`pending_weapon` est `None` quand le masque ouvre ces slots), donc aucune cible n'est
+          désignée. La question devient « cette arme a-t-elle une bonne cible disponible ? », et
+          c'est un `max` sur les ennemis PRÉSENTS. Le masque n'est pas décoratif : un slot absent
+          a bien un embedding nul (`_encode_masked`), mais `proj_net` a un BIAIS — mesuré non nul
+          à l'initialisation — donc sa compatibilité vaut `(w_j · b) / sqrt(d_w)`, une valeur
+          arbitraire et non zéro. Sans le masque, des slots vides disputeraient le `max` aux
+          vraies cibles.
+
+        Ce que ce terme apporte et que le latent ne porte pas : le tronc ne voit les ennemis
+        qu'agrégés (`enemies_agg`, moyenne + max sur 20 slots). Une compatibilité par PAIRE
+        (arme, ennemi) n'est pas reconstructible depuis cette agrégation.
+        """
+        compat = torch.einsum(
+            "bjd,bid->bji", weapons, proj_net(enemies)
+        ) / weapons.shape[-1] ** 0.5
+        keep = select > 0
+        if not reduce_max:
+            return (compat * keep.to(compat.dtype).unsqueeze(1)).sum(dim=2)
+        best = compat.masked_fill(
+            ~keep.unsqueeze(1), torch.finfo(compat.dtype).min
+        ).max(dim=2).values
+        # Aucun ennemi présent : le `max` rendrait la valeur de remplissage. Zéro est ici la
+        # lecture exacte — « aucune cible ne recommande cette arme » —, et non un repli d'erreur.
+        return best.masked_fill(~keep.any(dim=1, keepdim=True), 0.0)
 
     def _deploy_logits(
         self, latent_pi: torch.Tensor, move: torch.Tensor, feats: PolicyFeatures
@@ -620,7 +727,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         DÉPLOIEMENT (§0.44, qui écrase les colonnes 4-11 des cellules en phase de déploiement),
         pointeur d'ACTIVATION (V11 §0.48 `L2`, sur les embeddings ALLIÉS), pointeur de retrait de
         COHÉRENCE (P3-0, sur mes figurines) et les deux pointeurs d'EMPLACEMENT D'ARME (mêlée
-        §0.69, tir P3-8, sur les profils de l'unité active) — et UNE tête dense
+        §0.69, tir P3-8, sur les profils de l'unité active, chacun augmenté de sa compatibilité
+        arme x cible — cf. `_weapon_target_bonus`) — et UNE tête dense
         réduite à ses colonnes réellement lues (`DENSE_LOGIT_COUNT` = 37) : wait,
         fight-sans-cible, 20 slots de tir indirect et 15 intents de zone.
 
@@ -632,6 +740,8 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
         celle qu'il évalue, sans que rien ne lève — verrouillé par test.
         """
         enemies = feats.enemies
+        ranged_weapons = feats.weapons[:, :SHOOT_WEAPON_SEL_SLOT_COUNT]
+        melee_weapons = feats.weapons[:, SHOOT_WEAPON_SEL_SLOT_COUNT:]
         base = self.action_net(latent_pi)
         move = self._deploy_logits(
             latent_pi, self._move_logits(latent_pi, feats.move_map), feats
@@ -650,19 +760,30 @@ class PointerMaskablePolicy(MaskableMultiInputActorCriticPolicy):
                 # Activation : MES escouades par slot (V11 §0.48 `L2`).
                 self._point(self.activate_query_net, latent_pi, feats.allies),
                 # Arme CC (V11 §0.69) : emplacements de MÊLÉE de l'unité active, second bloc
-                # du tenseur d'armes — les profils de tir occupent le premier.
+                # du tenseur d'armes — les profils de tir occupent le premier. Le second terme
+                # confronte chaque arme à la cible DÉJÀ désignée.
                 self._point(
-                    self.fight_weapon_query_net,
-                    latent_pi,
-                    feats.weapons[:, SHOOT_WEAPON_SEL_SLOT_COUNT:],
+                    self.fight_weapon_query_net, latent_pi, melee_weapons
+                ) + self._weapon_target_bonus(
+                    self.fight_weapon_target_net,
+                    melee_weapons,
+                    enemies,
+                    feats.fight_target,
+                    reduce_max=False,
                 ),
                 # Retrait cohérence : figurines de l'unité active par slot (P3-0).
                 self._point(self.coherency_query_net, latent_pi, feats.self_models),
                 # Split-fire tir (P3-8) : emplacements de TIR, premier bloc du tenseur d'armes.
+                # Le second terme confronte chaque arme à la MEILLEURE cible encore présente —
+                # aucune n'est désignée à ce point d'arrêt.
                 self._point(
-                    self.shoot_weapon_sel_query_net,
-                    latent_pi,
-                    feats.weapons[:, :SHOOT_WEAPON_SEL_SLOT_COUNT],
+                    self.shoot_weapon_sel_query_net, latent_pi, ranged_weapons
+                ) + self._weapon_target_bonus(
+                    self.shoot_weapon_target_net,
+                    ranged_weapons,
+                    enemies,
+                    feats.enemies_present,
+                    reduce_max=True,
                 ),
             ],
             dim=1,
