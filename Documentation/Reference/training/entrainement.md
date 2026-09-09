@@ -105,10 +105,15 @@ l'historique git, et le message d'arrêt le dit désormais famille par famille :
 | Famille | Fréquence | Ce que ce garde-fou apporte |
 |---|---|---|
 | Clés de récompense | 7 commits / 90 j retirent une clé | **Seul contrôle qui la voit.** Ni SB3 (qui ignore les récompenses) ni le verrou de parité ne regardent là. |
-| Observation / actions | 13 commits / 30 j touchent un registre, dont **12** changent la dimension | SB3 lève déjà pour ces 12 — mais **plus tard**, une fois le run engagé. L'apport est l'arrêt précoce, plus le renommage à taille constante (aucun cas sur ces 30 jours). |
+| Vocabulaires d'ids (`*_IDS`) | 21 commits / 90 j | **Seul contrôle qui les voit.** Ces registres portent le sens des **valeurs**, pas des cases : « le vocabulaire s'allonge pour zéro scalaire » (`observation_builder.py:135`). `SQUAD_OBS_SIZE_TARGET` ne les compte pas — 6 des 17 registres empreintés n'entrent pas dans son calcul — donc une insertion décale tous les ids suivants **à dimension constante**, invisible pour SB3. |
+| Champs d'observation / actions | 13 commits / 30 j touchent un registre, dont **12** changent la dimension | SB3 lève déjà pour ces 12 — mais **plus tard**, une fois le run engagé. L'apport est l'arrêt précoce, plus le renommage à taille constante (aucun cas sur ces 30 jours). |
 
-Autrement dit : la justification solide est la **table de récompense**. Sur l'observation, ce
-contrôle double SB3 en s'arrêtant plus tôt, et ne prétend plus être seul à voir.
+Autrement dit : ce contrôle est **seul** sur les récompenses et sur les vocabulaires d'ids ; sur les
+champs d'observation, il double SB3 en s'arrêtant plus tôt, et ne prétend pas être seul à voir.
+
+*Limite assumée* : un ajout en **fin** de vocabulaire ne décale aucun id existant et serait
+inoffensif pour un modèle déjà entraîné — la comparaison de listes ordonnées le signale quand même.
+Un arrêt de trop coûte une commande ; un arrêt manquant, des dizaines d'heures.
 
 `ai/training_contract.py` écrit donc, à côté de chaque modèle, un `training_contract.json` qui
 porte **les noms, dans leur ordre** : registres d'observation (`*_FIELDS` de

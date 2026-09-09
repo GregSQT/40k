@@ -247,6 +247,32 @@ def test_le_motif_de_l_arret_depend_de_la_famille_de_l_ecart() -> None:
     assert "AUCUN autre controle" in recompense_seule, recompense_seule
 
 
+def test_un_vocabulaire_d_ids_est_invisible_partout_ailleurs() -> None:
+    """Un registre `*_IDS` porte le SENS des valeurs, pas des cases : sa taille ne bouge jamais.
+
+    « Le vocabulaire s'allonge pour zéro scalaire » (engine/observation_builder.py:135, verbatim).
+    Vérifié le 2026-09-09 : 6 des 17 registres empreintés n'entrent pas dans le calcul de
+    `SQUAD_OBS_SIZE_TARGET`, dont les quatre `*_IDS`. Une insertion y décale le sens de tous les
+    ids suivants **sans changer une seule dimension** : ni `check_for_correct_spaces` ni le verrou
+    de parité ne peuvent le voir. 21 commits sur 90 jours touchent un de ces registres.
+    """
+    vocabulaire = str(contract_mismatch(
+        "/m/model_A.zip", ["observation.UNIT_RULE_EFFECT_IDS : ajoute(s) ['fnp_6']"]
+    ))
+    champs = str(contract_mismatch(
+        "/m/model_A.zip", ["observation.GLOBAL_CONT_FIELDS : ajoute(s) ['fog']"]
+    ))
+
+    assert "AUCUN autre controle" in vocabulaire, (
+        f"un vocabulaire d'ids est le cas où ce contrat est seul — le message doit le dire : "
+        f"{vocabulaire}"
+    )
+    assert "AUCUN autre controle" not in champs, (
+        "un champ d'observation, lui, change la dimension et fait lever SB3 : ne pas confondre "
+        "les deux familles"
+    )
+
+
 def test_un_ecart_mixte_dit_les_deux_motifs() -> None:
     """Les deux familles à la fois : chacune garde son motif, aucune n'écrase l'autre."""
     message = str(contract_mismatch(
