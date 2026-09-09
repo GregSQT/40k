@@ -8,7 +8,7 @@ import hashlib
 import os
 import pickle
 import time
-from typing import Dict, List, Any, Optional, Set, Tuple
+from typing import Callable, Dict, List, Any, NamedTuple, Optional, Set, Tuple
 from shared.data_validation import require_key
 from engine.debug_trace import CH_DEPLOY_CACHE, channel_enabled, trace
 from engine.game_utils import get_unit_by_id, require_unit_by_id
@@ -57,14 +57,17 @@ from engine.macro_intents import (
     ACTIVATE_SLOTS,
     BASE_ZONE_INTENT,
     CHOICE_BASE,
+    CHOICE_SLOTS,
     COHERENCY_SLOT_BASE,
     COHERENCY_SLOT_COUNT,
     COHERENCY_SLOTS,
     DEPLOY_SLOT_BASE,
     DEPLOY_SLOTS,
     DEPLOY_STRATEGY_COUNT,
+    FIGHT_SLOTS,
     FIGHT_WEAPON_SLOT_BASE,
     FIGHT_WEAPON_SLOTS,
+    SHOOT_SLOTS,
     SHOOT_WEAPON_SEL_SLOT_BASE,
     SHOOT_WEAPON_SEL_SLOTS,
     TOTAL_ACTION_SIZE,
@@ -112,6 +115,15 @@ PENDING_FIGHT_TARGET_KEY = "pending_fight_target_select"
 #:  "eligible_target_slots": List[int]}` # slots SHOOT ennemis éligibles pour pending_weapon.
 #: Absente tant qu'aucun split-fire n'est en cours.
 PENDING_SHOOT_WEAPON_SEL_KEY = "pending_shoot_weapon_split"
+#: Clé du `game_state` portant le retrait pour cohérence (P3-0, 03.03). Valeur :
+#: `{"squad_id": str, …}`. Nommée ici — et non laissée en littéral — parce que le registre
+#: `PLAYER_CHOICE_MECHANISMS` ci-dessous la lit : un point d'arrêt du registre doit désigner sa
+#: clé par la MÊME constante que le masque et le moteur.
+PENDING_COHERENCY_REMOVAL_KEY = "pending_coherency_removal"
+#: Clé du `game_state` portant la désignation d'Oath of Moment (chantier 03). Valeur : le NUMÉRO
+#: du joueur qui doit désigner — et non un dictionnaire d'escouade, d'où son absence d'observateur
+#: dans le registre ci-dessous.
+PENDING_OATH_SELECTION_KEY = "pending_oath_selection"
 #: Jumeau du précédent pour l'ingress move (20.04) — clé DISTINCTE : les deux mises en place
 #: coexistent dans un même épisode (déploiement au tour 0, ingress à partir du round 2) et
 #: décrivent des aires légales différentes.
@@ -128,6 +140,136 @@ INGRESS_SLOT_CANDIDATES_CACHE_KEY = "_ingress_slot_candidates"
 #: le laisser diverger — le défaut D1 obs ↔ action. Même patron que la carte de cellules de move
 #: (`store_squad_move_cell_map` / `read_squad_move_cell_map`) : le masque écrit, l'obs relit.
 INGRESS_OPEN_SLOTS_KEY = "_ingress_open_slots"
+
+
+# ---------------------------------------------------------------------------
+# POINTS D'ARRÊT JOUEUR — registre unique
+# ---------------------------------------------------------------------------
+def _read_pending_oath_selection(game_state: Dict[str, Any]) -> Any:
+    """Désignation d'Oath (chantier 03) : ``None`` = aucune désignation en attente."""
+    return game_state.get(PENDING_OATH_SELECTION_KEY)  # get allowed : None = aucune
+
+
+def _read_pending_coherency_removal(game_state: Dict[str, Any]) -> Any:
+    """Retrait pour cohérence (03.03) : ``None`` = aucune suppression en attente."""
+    return game_state.get(PENDING_COHERENCY_REMOVAL_KEY)  # get allowed : None = aucun
+
+
+def _read_pending_fight_weapon_select(game_state: Dict[str, Any]) -> Any:
+    """Sélection d'arme CC (§0.69) : ``None`` = aucune sélection en attente."""
+    return game_state.get(PENDING_FIGHT_WEAPON_KEY)  # get allowed : None = aucune
+
+
+def _read_pending_fight_target_select(game_state: Dict[str, Any]) -> Any:
+    """Re-sélection de cible CC : ``None`` = aucune re-sélection en attente.
+
+    Armé quand l'Exhortation de Rage tue la cible désignée et que le pile-in overrun 12.06 en
+    rend plusieurs autres frappables : la cible est rejouée par un `FIGHT_SLOT`.
+    """
+    return game_state.get(PENDING_FIGHT_TARGET_KEY)  # get allowed : None = aucune
+
+
+def _read_pending_shoot_weapon_sel(game_state: Dict[str, Any]) -> Any:
+    """Split-fire (P3-8), sous-état ARME : le groupe d'arme suivant reste à choisir."""
+    sw = game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
+    return sw if sw is not None and sw.get("pending_weapon") is None else None  # get allowed
+
+
+def _read_pending_shoot_split_target(game_state: Dict[str, Any]) -> Any:
+    """Split-fire (P3-8), sous-état CIBLE : une arme est armée et attend sa cible."""
+    sw = game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
+    return sw if sw is not None and sw.get("pending_weapon") is not None else None  # get allowed
+
+
+class PlayerChoiceMechanism(NamedTuple):
+    """UN point d'arrêt joueur : comment le lire, qui y répond, et qui l'OBSERVE.
+
+    `observer_squad_key` — clé du dictionnaire d'état portant l'escouade que l'observation doit
+    décrire pendant cet arrêt. ``None`` a DEUX causes, toutes deux volontaires, et aucune n'est
+    un oubli :
+      - désignation d'Oath : elle ne porte sur aucune escouade AMIE (sa valeur est un numéro de
+        joueur), et son observateur est délibérément le repli `_first_squad_on_board` ;
+      - décision agent : son observateur suit une règle propre
+        (`W40KEngine._observer_squad_for_pending_decision`, qui gère le cas d'armée `waaagh_call`),
+        appliquée juste après ce registre dans `_build_observation_and_mask`.
+    """
+
+    reader: "Callable[[Dict[str, Any]], Any]"
+    slots: range
+    label: str
+    observer_squad_key: Optional[str]
+
+
+#: LES POINTS DE CHOIX JOUEUR sur lesquels le moteur s'ARRÊTE — source unique, TROIS consommateurs :
+#: le prédicat `engine_is_paused_on_player_choice` et le tirage `random_action_for_pending_choice`
+#: (`ai/env_wrappers.py`), et la SÉLECTION DE L'OBSERVATEUR de l'observation
+#: (`W40KEngine._build_observation_and_mask`, via `pending_choice_observer_squad_id`).
+#:
+#: POURQUOI UNE TABLE, et pourquoi ICI. Ces mécanismes étaient énumérés à la main sur chaque site.
+#: Quand l'Oath est arrivé après les replis, les quatre sites d'`env_wrappers` testaient encore
+#: `pending_agent_decision` SEUL, et la facture a été un crash mesuré
+#: (`convert_squad_action ... action 1024`). La table posée alors vivait dans `ai/env_wrappers.py`,
+#: que le moteur ne peut pas importer : le moteur a donc gardé SA liste, écrite à la main — et
+#: elle a divergé aussitôt. MESURÉ le 2026-09-09 : pendant un split-fire, l'observation rendue à
+#: l'agent décrit une AUTRE escouade que celle qui tire (identique scalaire pour scalaire à celle
+#: de l'escouade d'identifiant le plus bas), parce que les deux sous-états du split-fire
+#: manquaient à la liste du moteur alors qu'ils étaient dans celle d'`env_wrappers`. La table vit
+#: donc dans `engine`, que les deux couches importent déjà.
+#:
+#: L'ORDRE EST LE CONTRAT : décision agent d'abord, Oath ensuite, comme sur les sites d'origine.
+PLAYER_CHOICE_MECHANISMS: Tuple[PlayerChoiceMechanism, ...] = (
+    PlayerChoiceMechanism(read_pending_agent_decision, CHOICE_SLOTS, "decision agent", None),
+    PlayerChoiceMechanism(_read_pending_oath_selection, OATH_SLOTS, "designation d'Oath", None),
+    PlayerChoiceMechanism(
+        _read_pending_coherency_removal, COHERENCY_SLOTS, "retrait coherence", "squad_id"
+    ),
+    PlayerChoiceMechanism(
+        _read_pending_fight_weapon_select, FIGHT_WEAPON_SLOTS, "arme CC", "squad_id"
+    ),
+    PlayerChoiceMechanism(
+        _read_pending_fight_target_select, FIGHT_SLOTS, "re-selection cible CC", "squad_id"
+    ),
+    PlayerChoiceMechanism(
+        _read_pending_shoot_weapon_sel, SHOOT_WEAPON_SEL_SLOTS, "split-fire arme TIR", "squad_id"
+    ),
+    PlayerChoiceMechanism(
+        _read_pending_shoot_split_target, SHOOT_SLOTS, "split-fire cible TIR", "squad_id"
+    ),
+)
+
+
+def pending_choice_observer_squad_id(game_state: Dict[str, Any]) -> Optional[str]:
+    """Escouade que l'observation DOIT décrire pendant un point d'arrêt joueur, ou ``None``.
+
+    Pendant ces arrêts le pool d'éligibles est VIDE (le masque n'ouvre que la famille de slots qui
+    répond au choix) : sans cette dérivation, l'observation tombe sur un repli qui rend l'escouade
+    d'identifiant le plus bas, et l'agent décrit A pendant qu'il joue pour B.
+
+    L'ordre du registre n'est PAS lu comme une priorité : ces arrêts sont mutuellement exclusifs,
+    et deux d'entre eux désignant des escouades DIFFÉRENTES décrivent un état incohérent — d'où le
+    `RuntimeError`, qui rend vraie l'exclusivité que les trois branches d'origine se contentaient
+    d'affirmer en commentaire. Deux mécanismes sur la MÊME escouade ne lèvent pas : les deux
+    sous-états du split-fire sont exclusifs par construction, mais rien n'oblige un futur
+    mécanisme à l'être, et l'observateur serait alors le même de toute façon.
+    """
+    found: Dict[str, str] = {}
+    for mechanism in PLAYER_CHOICE_MECHANISMS:
+        if mechanism.observer_squad_key is None:
+            continue
+        pending = mechanism.reader(game_state)
+        if pending is None:
+            continue
+        found[mechanism.label] = str(require_key(pending, mechanism.observer_squad_key))
+    if not found:
+        return None
+    squad_ids = set(found.values())
+    if len(squad_ids) > 1:
+        raise RuntimeError(
+            "pending_choice_observer_squad_id: points d'arret joueur simultanes sur des escouades "
+            f"differentes — {found}. L'observation ne peut decrire qu'une escouade, et le masque "
+            "n'ouvre les slots que d'un seul de ces mecanismes."
+        )
+    return next(iter(squad_ids))
 
 
 def _record_ingress_offer(

@@ -607,3 +607,176 @@ def test_remaining_eligible_slots_skips_off_battlefield():
     remaining = shoot_weapon_remaining_eligible_slots(gs, "1", enemy_slots, except_slot=99)
     # L'arme slot 0 doit apparaître dans remaining (la cible sur table la rend éligible)
     assert 0 in remaining, f"slot 0 (STORM) attendu dans remaining, reçu {remaining}"
+
+
+# ─── Observateur de l'observation pendant le split-fire (P3-8) ────────────────
+#
+# Ces deux tests montent un VRAI moteur : le défaut qu'ils verrouillent ne vit pas dans les
+# helpers ci-dessus mais dans le choix de l'escouade que l'observation DÉCRIT, qui n'existe
+# qu'au niveau de `W40KEngine._build_observation_and_mask`.
+
+def _obs_engine_two_allied_squads():
+    """Moteur en phase de tir : DEUX escouades alliées, la tireuse portant l'identifiant le PLUS
+    HAUT, et deux ennemis à portée.
+
+    L'identifiant compte : l'observateur de repli est `_first_squad_on_board`, qui rend
+    l'escouade d'identifiant le plus BAS. Une tireuse d'identifiant 1 ferait tomber ce repli
+    juste par hasard et rendrait ces tests verts SANS rien verrouiller.
+    """
+    from unittest.mock import patch
+
+    from engine.observation_builder import ObservationBuilder
+    from engine.reward_calculator import RewardCalculator
+    from engine.w40k_core import W40KEngine
+    from engine.phase_handlers import shooting_handlers
+    from tests.unit.engine._config_helpers import build_engine_config
+
+    def _rng(code: str, rng: int, strength: int, ap: int, dmg: int) -> Dict[str, Any]:
+        return {"ATK": 2, "STR": strength, "AP": ap, "DMG": dmg, "NB": 1, "RNG": rng,
+                "WEAPON_RULES": [], "code": code, "display_name": code}
+
+    def _cc() -> Dict[str, Any]:
+        return {"ATK": 3, "STR": 4, "AP": 0, "DMG": 1, "NB": 1,
+                "WEAPON_RULES": [], "code": "obs_blade", "display_name": "Blade"}
+
+    def _cfg_unit(uid, player, positions, weapons_per_model) -> Dict[str, Any]:
+        specs = [
+            {"col": c, "row": r, "HP_CUR": 2, "HP_MAX": 2, "VALUE": 10,
+             "RNG_WEAPONS": weapons, "CC_WEAPONS": [_cc()]}
+            for (c, r), weapons in zip(positions, weapons_per_model)
+        ]
+        return {
+            "id": uid, "player": player, "col": positions[0][0], "row": positions[0][1],
+            "unitType": "TestUnit", "DISPLAY_NAME": f"Unit {uid}",
+            "HP_CUR": 2 * len(specs), "HP_MAX": 2, "MOVE": 6, "T": 4,
+            "ARMOR_SAVE": 4, "INVUL_SAVE": 0,
+            "RNG_WEAPONS": [w for group in weapons_per_model for w in group],
+            "CC_WEAPONS": [_cc()],
+            "UNIT_RULES": [], "UNIT_KEYWORDS": [{"keywordId": "INFANTRY"}],
+            "LD": 7, "OC": 2, "VALUE": 10 * len(specs),
+            "ICON": "test", "ICON_SCALE": 1.0, "ILLUSTRATION_RATIO": 1.0,
+            "BASE_SHAPE": "round", "BASE_SIZE": 1, "MODEL_HEIGHT": 2.5,
+            "models": specs,
+        }
+
+    bolter = _rng("obs_bolter", 24, 4, 0, 1)
+    lascannon = _rng("obs_lascannon", 48, 12, 3, 6)
+    obs_params = {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET}
+    cfg = {
+        "board": {"default": {"cols": 80, "rows": 40, "hex_radius": 1.0, "margin": 0.0,
+                              "wall_hexes": [], "inches_to_subhex": 1}},
+        "game_rules": {"engagement_zone": 1, "engagement_zone_vertical": 5,
+                       "max_base_size_hex": 35, "unit_model_cohesion_range": 2,
+                       "unit_global_cohesion_range": 9, "squad_min_neighbors": 1,
+                       "cohesion_distance_mode": "euclidean"},
+        "charge": {"charge_max_distance": 12},
+        "move": {"can_move_through_enemy_engagement_zone": True,
+                 "can_move_through_enemy_model": False,
+                 "can_move_through_friendly_model": True},
+        "pve_mode": False, "scenario_objectives": [],
+        "observation_params": obs_params,
+        "training_config": {"observation_params": obs_params, "max_turns_per_episode": 3},
+        "units": [
+            _cfg_unit(1, 1, [(5, 5)], [[bolter]]),                            # alliée, NE tire pas
+            _cfg_unit(2, 1, [(10, 20), (11, 20)], [[bolter], [lascannon]]),   # la TIREUSE
+            _cfg_unit(3, 2, [(20, 20)], [[bolter]]),
+            _cfg_unit(4, 2, [(30, 20)], [[bolter]]),
+        ],
+    }
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
+         patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
+        engine = W40KEngine(config=build_engine_config(cfg))
+    engine.reset()
+    engine.game_state["phase"] = "shoot"
+    engine.game_state["current_player"] = 1
+    shooting_handlers.shooting_phase_start(engine.game_state)
+    # La récompense n'est pas le sujet et cette fixture ne porte aucune config de récompense.
+    patcher = patch.object(RewardCalculator, "calculate_reward", return_value=0.0)
+    patcher.start()
+    return engine, patcher
+
+
+def _obs_snapshot(observation: Dict[str, Any]) -> Dict[str, Any]:
+    """Copie PROFONDE : `build_squad_observation` remplit un scratch PARTAGÉ, et comparer deux
+    références au même tampon rendrait n'importe quelle observation « identique »."""
+    import numpy as np
+
+    return {key: np.array(value, copy=True) for key, value in observation.items()}
+
+
+def _obs_of(engine, squad_id: str) -> Dict[str, Any]:
+    return _obs_snapshot(engine.obs_builder.build_squad_observation(engine.game_state, squad_id))
+
+
+def _same_obs(left: Dict[str, Any], right: Dict[str, Any]) -> bool:
+    import numpy as np
+
+    return all(np.array_equal(left[key], right[key]) for key in right)
+
+
+def _start_split_fire(engine) -> Dict[str, Any]:
+    """Active la tireuse (identifiant 2) puis joue le premier SHOOT_WEAPON_SEL ouvert."""
+    from engine.macro_intents import ACTIVATE_SLOT_BASE, SHOOT_WEAPON_SEL_SLOT_BASE
+    from engine.phase_handlers.shared_utils import get_ally_slot_mapping
+
+    ally_slots = get_ally_slot_mapping(engine.game_state, 1, "1")
+    shooter_slot = ally_slots.index("2")
+    engine.step_with_mask(int(ACTIVATE_SLOT_BASE + shooter_slot))
+    mask, _pool = engine.action_decoder.get_squad_action_mask_and_eligible_units(engine.game_state)
+    weapon_actions = [
+        index for index, opened in enumerate(mask)
+        if opened and index >= SHOOT_WEAPON_SEL_SLOT_BASE
+    ]
+    assert weapon_actions, "aucun SHOOT_WEAPON_SEL ouvert pour la tireuse"
+    observation, _r, _t, _tr, _i, _m = engine.step_with_mask(int(weapon_actions[0]))
+    return _obs_snapshot(observation)
+
+
+def test_split_fire_weapon_armed_observes_the_shooting_squad():
+    """Sous-état CIBLE (une arme est armée) : l'observation décrit la TIREUSE, pas une autre.
+
+    Défaut mesuré le 2026-09-09 : le masque n'ouvre que les slots de cible et rend un pool VIDE ;
+    l'observation tombait alors sur `_first_squad_on_board`, donc sur l'escouade 1, qui ne tire pas.
+    """
+    engine, patcher = _obs_engine_two_allied_squads()
+    try:
+        observation = _start_split_fire(engine)
+        pending = engine.game_state["pending_shoot_weapon_split"]
+        assert pending["squad_id"] == "2", f"tireuse attendue 2, reçue {pending['squad_id']}"
+        assert pending["pending_weapon"] is not None, "sous-état CIBLE attendu (arme armée)"
+        assert _same_obs(observation, _obs_of(engine, "2")), (
+            "l'observation rendue pendant le split-fire doit être celle de l'escouade qui tire"
+        )
+        assert not _same_obs(observation, _obs_of(engine, "1")), (
+            "l'observation décrit l'escouade 1, qui ne tire pas"
+        )
+    finally:
+        patcher.stop()
+
+
+def test_split_fire_next_weapon_observes_the_shooting_squad():
+    """Sous-état ARME (une assignation posée, une arme reste à choisir) : même verrou.
+
+    Sous-état DISTINCT du précédent : `pending_weapon` y vaut None et le masque ouvre les
+    SHOOT_WEAPON_SEL restants au lieu des slots de cible.
+    """
+    from engine.macro_intents import SHOOT_SLOT_BASE
+
+    engine, patcher = _obs_engine_two_allied_squads()
+    try:
+        _start_split_fire(engine)
+        pending = engine.game_state["pending_shoot_weapon_split"]
+        target_action = SHOOT_SLOT_BASE + pending["eligible_target_slots"][0]
+        observation, _r, _t, _tr, _i, _m = engine.step_with_mask(int(target_action))
+        observation = _obs_snapshot(observation)
+        pending = engine.game_state["pending_shoot_weapon_split"]
+        assert pending["pending_weapon"] is None, "sous-état ARME attendu"
+        assert pending["remaining_weapon_slots"], "une arme doit rester à assigner"
+        assert _same_obs(observation, _obs_of(engine, "2")), (
+            "l'observation du choix de l'arme suivante doit être celle de l'escouade qui tire"
+        )
+        assert not _same_obs(observation, _obs_of(engine, "1")), (
+            "l'observation décrit l'escouade 1, qui ne tire pas"
+        )
+    finally:
+        patcher.stop()

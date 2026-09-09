@@ -137,6 +137,7 @@ from engine.action_decoder import (
     PENDING_FIGHT_WEAPON_KEY,
     PENDING_SHOOT_WEAPON_SEL_KEY,
     ActionDecoder,
+    pending_choice_observer_squad_id,
 )
 from engine.debug_trace import CH_STEP, trace
 from engine.reward_calculator import RewardCalculator
@@ -2324,11 +2325,14 @@ class W40KEngine(gym.Env):
             return observation, reward, terminated, truncated, info, out_mask
         if out_mask is None:
             # Masque de sortie non construit : on ne draine pas, et on ne le RECONSTRUIT pas. Les
-            # six etats concernes (`_build_observation_and_mask`) sont : retrait de coherence en
-            # attente (pending_coherency_removal), selection d'arme CC (PENDING_FIGHT_WEAPON_KEY),
-            # re-selection de cible CC (PENDING_FIGHT_TARGET_KEY),
-            # decision d'agent en attente — masque reduit aux `CHOICE_i` —, la phase de deploiement
-            # — au moins un slot de pose ouvert, `wait` n'y etant jamais seul —, et `game_over`.
+            # huit etats concernes (`_build_observation_and_mask`) sont : les CINQ points d'arret
+            # a observateur direct de `action_decoder.PLAYER_CHOICE_MECHANISMS` — retrait de
+            # coherence (pending_coherency_removal), selection d'arme CC
+            # (PENDING_FIGHT_WEAPON_KEY), re-selection de cible CC (PENDING_FIGHT_TARGET_KEY) et
+            # les DEUX sous-etats du split-fire (PENDING_SHOOT_WEAPON_SEL_KEY : arme a choisir,
+            # puis cible a choisir) —, la decision d'agent en attente — masque reduit aux
+            # `CHOICE_i` —, la phase de deploiement — au moins un slot de pose ouvert, `wait`
+            # n'y etant jamais seul —, et `game_over`.
             # Aucun ne peut produire un masque reduit a `wait` : la reponse du test est connue
             # d'avance, la payer serait un build de masque complet par step de deploiement, et ce
             # serait en prime une seconde route vers l'etat de sortie, a cote de la source unique
@@ -9353,28 +9357,22 @@ class W40KEngine(gym.Env):
             self.obs_builder.build_squad_grid(self.game_state, squad_id, out=full["grid"])
             return full
 
-        # Retrait pour cohérence (P3-0, 03.03) : l'observateur est l'escouade concernée par le
-        # pending. Ses self_models_cont/bin décrivent les figurines parmi lesquelles choisir.
-        # Placé AVANT pending_agent_decision : les deux ne coexistent jamais (exclusion mutuelle
-        # garantie par le masque), mais on lève explicitement si jamais c'était le cas.
-        pending_cr = self.game_state.get("pending_coherency_removal")
-        if pending_cr is not None:
-            return _build_for_squad(str(pending_cr["squad_id"])), None
-
-        # Sélection d'arme CC (V11 §0.69) : même doctrine que pending_cr ci-dessus. Quand
-        # PENDING_FIGHT_WEAPON_KEY est armé, le masque retourne (fw_slots, []) — le pool est vide
-        # (squad_fight l'a retiré avant de poser la clé). Sans ce early-return, eligible_units=[]
-        # et armed_decision=None feraient tomber dans le else-branch ligne ~8610 qui prend la
-        # première escouade du cache : l'agent décrirait A et choisirait l'arme de B.
-        pending_fw = self.game_state.get(PENDING_FIGHT_WEAPON_KEY)
-        if pending_fw is not None:
-            return _build_for_squad(str(pending_fw["squad_id"])), None
-
-        # Re-sélection de cible CC : même doctrine et même raison que le pending d'arme
-        # ci-dessus — pool vide, l'observateur DOIT rester l'escouade qui rejoue son FIGHT_SLOT.
-        pending_ft = self.game_state.get(PENDING_FIGHT_TARGET_KEY)
-        if pending_ft is not None:
-            return _build_for_squad(str(pending_ft["squad_id"])), None
+        # Point d'arrêt joueur à observateur DIRECT (retrait pour cohérence 03.03, sélection
+        # d'arme CC §0.69, re-sélection de cible CC, et les DEUX sous-états du split-fire P3-8).
+        # Pendant ces arrêts le masque n'ouvre que la famille de slots qui répond au choix et rend
+        # un pool VIDE : sans ce retour anticipé, `eligible_units=[]` et `armed_decision=None`
+        # tombent sur le repli `_first_squad_on_board` plus bas, qui rend l'escouade d'identifiant
+        # le plus bas — l'agent décrirait A et jouerait pour B.
+        #
+        # La LISTE de ces mécanismes n'est plus écrite ici : elle vit dans
+        # `action_decoder.PLAYER_CHOICE_MECHANISMS`, partagée avec `ai/env_wrappers.py`. Écrite
+        # deux fois, elle avait divergé — les deux sous-états du split-fire y étaient depuis leur
+        # livraison et manquaient ici, et l'observation du tir fractionné décrivait bien une autre
+        # escouade (mesuré le 2026-09-09). PRÉCÈDE `pending_agent_decision`, comme le faisait le
+        # retrait pour cohérence ; les deux ne coexistent jamais.
+        pending_observer_id = pending_choice_observer_squad_id(self.game_state)
+        if pending_observer_id is not None:
+            return _build_for_squad(pending_observer_id), None
 
         # Décision agent en attente (V11 §9.3 P2) : l'observateur est l'unité SUR LAQUELLE porte
         # la décision — c'est elle que les candidats concernent. La prendre ailleurs décrirait un
