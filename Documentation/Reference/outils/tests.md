@@ -28,7 +28,7 @@ pourquoi, avec les mesures.
 |---|---|---|
 | A — intégration PvP | 3 min 31 (`-n 6 --dist load`, mesuré 2026-08-05) | déjà dans la vérification large |
 | B — vitest | **4,0 s** — 36 fichiers, 430 tests | **ajoutée le 2026-09-09** |
-| C — Playwright | **6 min 42** — 14 tests : **13 rouges, 1 skippé, aucun vert** (mesuré 2026-09-09) | **dehors** : rendue exécutable, mais rouge (voir ci-dessous) |
+| C — Playwright | **34 s** — 14 tests : **12 verts**, 1 skippé, 1 première baseline (mesuré 2026-09-09 sur un harnais assaini) | **candidate** : voir ci-dessous |
 
 **Ce que la mesure a trouvé, et qui rendait la couche B rouge par construction.** Avant ce jour,
 `npx vitest run` rendait `Test Files 1 failed | 36 passed (37)` quel que soit l'état du code : le
@@ -40,11 +40,15 @@ La frontière entre les deux harnais est désormais déclarée dans `frontend/vi
 `tests/unit/scripts/test_vitest_collect_scope.py`, qui applique le motif AU DISQUE dans les deux
 sens : aucun spec Playwright collecté par vitest, et aucun test de `src/` laissé hors périmètre.
 
-**Pourquoi la couche C reste dehors — exécutée pour la première fois le 2026-09-09.** Sur ses 14
-tests, **13 échouent et 1 est skippé : aucun ne passe.** Le mur mesuré est de **6 min 42**, et il ne
-dit rien du coût réel de la couche — c'est presque entièrement du timeout (13 × 30 s d'attente d'un
-canvas qui n'arrive jamais). Elle ne peut pas rejoindre la vérification large tant qu'elle n'est pas
-remise en état.
+**La couche C, remise en état le 2026-09-09.** Sur ses 14 tests : **12 passent**, 1 est skippé, et
+1 écrit sa baseline de régression visuelle (échec attendu au premier run d'une machine, cf. plus
+bas). Le mur est de **34 s** — pas 6 min 42 : ce chiffre-là venait de runs pollués, voir le défaut
+n° 4.
+
+Les deux invariants qui font l'intérêt de cette couche **passent** : `greenCircleUnitIds ⊆
+move_activation_pool` (T12-4) et `movePreviewHexes ⊆ valid_move_destinations_pool` (T12-6). C'est la
+seule vérification automatisée que ce que le navigateur affiche correspond à ce que le moteur
+autorise.
 
 Que le fichier n'ait jamais fonctionné est daté, pas supposé : `frontend/package.json` déclare
 `"type": "module"` depuis le **2025-09-07** (`16937e82`), et `global-setup.ts` a été écrit avec
@@ -90,6 +94,18 @@ tort l'authentification.
 
 C'est le pire mode de panne pour un harnais : il ne s'arrête pas, **il ment**. Un port occupé n'y
 est donc plus une condition à contourner, mais un motif d'arrêt.
+
+**Un cinquième défaut, dans le test lui-même** : `smoke.spec.ts` appelait `/api/game/state` en
+direct avec le cookie de session mais **sans** l'en-tête `X-W40K-Client`, qu'exige toute requête
+authentifiée par cookie. Il recevait 401, hors du `[200, 404]` attendu. Corrigé — c'est la même
+erreur que celle qui m'avait fait suspecter l'authentification pendant le diagnostic.
+
+**Les deux échecs qui restent, et pourquoi ils ne sont pas des défauts.** Le test *skippé* l'est par
+le spec lui-même ; le test de *régression visuelle* écrit sa baseline au premier run puis échoue une
+fois — comportement normal de `toHaveScreenshot`. Ces baselines ne sont **pas versionnées** : une
+image de 810 Ko qui fige le rendu d'une machine (polices, GPU headless) échouerait sur une autre.
+Conséquence assumée : ce test compare au rendu précédent de LA machine où il tourne, et non à une
+référence commune. Le versionner reste un choix ouvert.
 
 Une fois ces quatre points réglés, son mur sera à re-mesurer sur des tests qui passent : 7 min de
 timeouts ne dit rien du coût réel de la couche.

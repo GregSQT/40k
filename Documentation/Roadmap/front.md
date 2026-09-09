@@ -15,12 +15,19 @@ du code. Frontière déclarée dans `frontend/vite.config.ts` et verrouillée pa
 `tests/unit/scripts/test_vitest_collect_scope.py`. La couche B (**4,0 s**, 36 fichiers, 430 tests)
 entre dans la vérification large de CLAUDE.md.
 
-## 🔴 Couche C — exécutée pour la première fois le 2026-09-09, **aucun test vert** {#couche-c}
+## 🟢 Couche C — remise en état le 2026-09-09 : **12 verts sur 14, en 34 s** {#couche-c}
 
-Playwright installé (paquet + Chromium), la couche C a enfin tourné : **6 min 42, 13 échecs et
-1 test skippé sur 14 — aucun ne passe**. Elle **n'entre pas** dans la vérification large. Le mur
-mesuré est presque entièrement du timeout (13 × 30 s d'attente d'un canvas qui n'arrive jamais) : il
-ne dit rien du coût réel de la couche, à re-mesurer sur des tests verts.
+Playwright installé (paquet + Chromium) et cinq défauts corrigés, la couche C fonctionne :
+**12 tests passent**, 1 est skippé par le spec, 1 écrit sa baseline de régression visuelle (échec
+attendu au premier run d'une machine). **Les deux invariants de parité front/back passent** —
+`greenCircleUnitIds ⊆ move_activation_pool` et `movePreviewHexes ⊆ valid_move_destinations_pool` :
+c'est la seule vérification automatisée que l'affichage correspond à ce que le moteur autorise.
+
+⚠️ Le bilan « 13 rouges, 6 min 42 » publié plus tôt le même jour était **faux** : il venait de runs
+que polluait un Vite orphelin (défaut n° 4 ci-dessous).
+
+**Son entrée dans la vérification large reste à trancher** : 34 s est un coût acceptable, mais la
+couche exige deux serveurs, un navigateur, et une **session valide** dans `config/users.db`.
 
 Quatre défauts, dont **trois corrigés** dans `worktree-playwright-couche-c-et-hook` : `__dirname`
 indéfini en module ES dans `global-setup.ts` (le setup mourait avant le premier test) ; le proxy
@@ -36,10 +43,11 @@ proxy. Corrigé (`setsid`, kill de groupe, refus explicite sur port occupé) et 
 `tests/unit/scripts/test_front_test_all_garde_fous.py`. Reproduit à la main :
 `/api/config/terrain-list` rend **200** avec le cookie et l'en-tête `X-W40K-Client`.
 
-**Reste à traiter** : la couche C n'a pas été re-jouée après ce correctif, donc son bilan réel
-(13 rouges / 1 skippé) est celui de runs faussés par le fantôme — **il est à refaire**. Elle exige
-par ailleurs une **session valide** dans `config/users.db`, non versionné : elle ne tourne ni dans
-un worktree neuf, ni sur une machine où personne ne s'est connecté au front.
+**Prérequis qui restent** : la couche exige une **session valide** dans `config/users.db`, non
+versionné — elle ne tourne ni dans un worktree neuf sans qu'on y copie la base, ni sur une machine
+où personne ne s'est connecté au front. Et les baselines de régression visuelle ne sont pas
+versionnées : le test de screenshot écrit la sienne au premier run de chaque machine, en échouant
+une fois.
 
 Détail et commandes : `Documentation/Reference/outils/tests.md`.
 

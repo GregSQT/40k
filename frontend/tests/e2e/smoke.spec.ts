@@ -52,7 +52,16 @@ test.describe("T12-1 — Smoke test PvP", () => {
     expect(sessionCookie).toBeDefined();
 
     const resp = await request.get(`${BACKEND}/api/game/state`, {
-      headers: { Cookie: `w40k_session=${sessionCookie!.value}` },
+      headers: {
+        Cookie: `w40k_session=${sessionCookie!.value}`,
+        // Le backend EXIGE cet en-tête sur toute requête authentifiée par cookie
+        // (`CSRF_HEADER_NAME` dans services/api_server.py) : sans lui, il répond 401 avec
+        // « Missing X-W40K-Client header on cookie-authenticated request ». Le front le pose
+        // dans `apiFetch`, mais ce test-ci parle au backend en direct, hors du client.
+        // Mesuré le 2026-09-09, à la première exécution réelle de cette couche : c'est le
+        // 401 qui faisait échouer ce test, pas l'état de la partie.
+        "X-W40K-Client": "playwright",
+      },
     });
     // La partie peut ne pas encore être démarrée (404) ou déjà active (200)
     expect([200, 404]).toContain(resp.status());
