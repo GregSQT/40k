@@ -574,17 +574,18 @@ decision_ctx_bin[6]      = decision_type_mortal_wounds_target      # 0.0 / 1.0 �
 decision_ctx_bin[7]      = decision_type_returned_models_placement # 0.0 / 1.0 — placement des figurines rendues (Grot Orderly)
 decision_ctx_bin[8]      = decision_type_returned_models_profile   # 0.0 / 1.0 — profil des figurines rendues (Grot Orderly)
 decision_ctx_bin[9]      = decision_type_ascent_declaration        # 0.0 / 1.0 — « finir le move en hauteur » 13.06
+decision_ctx_bin[10]     = decision_type_move_after_shooting        # 0.0 / 1.0 — repositionnement post-tir
+decision_ctx_bin[11]     = decision_type_reserves_declaration       # 0.0 / 1.0 — Declare Battle Formations 20.01
 # RÉSERVÉ J4 — AGENT_DECISION_TYPE_SLOTS 8→16 ; slots restants nuls jusqu'à implémentation.
 # Candidats prévus : decision_type_fire_overwatch (§15.08), decision_type_heroic_intervention
-# (§15.11), decision_type_da_jump_target (Da Jump WeirdBoy). 4 slots de marge supplémentaires
-# (un des huit réservés a été consommé par `ascent_declaration`, 13.06).
-decision_ctx_bin[10]     = decision_type_reserved_0    # réservé J4 (ex. fire_overwatch §15.08)
-decision_ctx_bin[11]     = decision_type_reserved_1    # réservé J4 (ex. heroic_intervention §15.11)
-decision_ctx_bin[12]     = decision_type_reserved_2    # réservé J4 (ex. da_jump_target)
-decision_ctx_bin[13]     = decision_type_reserved_3    # réservé J4
-decision_ctx_bin[14]     = decision_type_reserved_4    # réservé J4
-decision_ctx_bin[15]     = decision_type_reserved_5    # réservé J4
-decision_ctx_bin[16]     = decision_type_reserved_6    # réservé J4
+# (§15.11), decision_type_da_jump_target (Da Jump WeirdBoy). 2 slots de marge supplémentaires
+# (trois des huit réservés ont été consommés par `ascent_declaration` 13.06,
+# `move_after_shooting` et `reserves_declaration` 20.01).
+decision_ctx_bin[12]     = decision_type_reserved_0    # réservé J4 (ex. fire_overwatch §15.08)
+decision_ctx_bin[13]     = decision_type_reserved_1    # réservé J4 (ex. heroic_intervention §15.11)
+decision_ctx_bin[14]     = decision_type_reserved_2    # réservé J4 (ex. da_jump_target)
+decision_ctx_bin[15]     = decision_type_reserved_3    # réservé J4
+decision_ctx_bin[16]     = decision_type_reserved_4    # réservé J4
 
 # UNE COLONNE = UNE GRANDEUR, jamais « la première valeur de ce type-là ». Deux types qui décrivent
 # la MÊME grandeur partagent la colonne ; les colonnes qu'un type ne remplit pas restent à zéro, et

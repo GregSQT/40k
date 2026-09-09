@@ -156,6 +156,21 @@ def bot_action_for_pending_choice(
                 f"{wrapper}: decision move_after_shooting en attente sans CHOICE_0 ouvert."
             )
         return int(mi.CHOICE_BASE)
+    # SECONDE exception, et pour un motif de REGLE, pas de baseline : « 20.01 est une decision de
+    # LISTE, jamais une decision de bot ». Le bot ne declare donc jamais de reserves de sa propre
+    # initiative — invariant que portait auparavant le retrait de `SQUAD_ACTION_WAIT` du pool
+    # transmis au bot (`_select_bot_deploy_action`), et qui doit suivre la question la ou elle est
+    # desormais posee. Le laisser tomber dans le tirage ferait reserver l'adversaire de reference
+    # une fois sur deux, donc bouger la baseline de win-rate.
+    #
+    # Le refus vient du MOTEUR (`reserves_declaration_decline_slot`), pas d'une copie locale : le
+    # deploiement `auto` du moteur applique la meme doctrine, et deux implementations feraient
+    # reserver l'adversaire dans un seul des deux regimes.
+    from engine.phase_handlers.deployment_handlers import reserves_declaration_decline_slot
+
+    decline_slot = reserves_declaration_decline_slot(game_state, action_mask)
+    if decline_slot is not None:
+        return decline_slot
     return random_action_for_pending_choice(game_state, action_mask, wrapper)
 
 
@@ -1646,16 +1661,18 @@ class BotControlledEnv(gym.Wrapper):
         MISES EN PLACE, et c'est ici, au point de traduction masque -> pool jouable, que le pool se
         nettoie. UNE fois, pour tous les bots, au lieu d'une fois par bot.
 
-        ⚠️ Le masque ouvre `ACTION_WAIT` au deploiement, et ce slot n'y est PAS une attente : le
-        jouer met l'unite en RESERVES STRATEGIQUES (20.01,
-        `ActionDecoder.get_squad_action_mask_and_eligible_units`). C'est une decision de LISTE,
-        jamais de doctrine. La surcharge d'id est volontaire (`TOTAL_ACTION_SIZE` gele depuis le
-        chantier 01), donc l'invariant ne peut pas descendre dans le decodeur : il vit ICI. MESURE
-        de ce qu'il coutait quand chaque bot le portait lui-meme (chantier 04c) : TacticalBot — le
-        HOLDOUT — mettait 400 deploiements sur 400 en reserves, et cinq bots ponderes 1 a 3 % des
-        leurs via leur clause d'exploration evaluee AVANT leur branche `deployment`. Un point de
-        passage unique rend la correction independante de l'ordre des clauses de chaque bot, et
-        d'un 8e bot qu'on ajouterait demain sans y penser.
+        ⚠️ HISTORIQUE, et il explique pourquoi ce nettoyage RESTE : le masque de deploiement a
+        longtemps ouvert `ACTION_WAIT`, ou ce slot n'etait PAS une attente — le jouer mettait
+        l'unite en RESERVES STRATEGIQUES (20.01). MESURE de ce que cela coutait quand chaque bot
+        portait l'invariant lui-meme (chantier 04c) : TacticalBot — le HOLDOUT — mettait 400
+        deploiements sur 400 en reserves, et cinq bots ponderes 1 a 3 % des leurs via leur clause
+        d'exploration evaluee AVANT leur branche `deployment`.
+
+        Depuis que 20.01 est sortie du tour de deploiement pour l'etape Declare Battle Formations
+        qui le precede, le masque de deploiement n'ouvre plus `ACTION_WAIT` du tout, et la reponse
+        du bot a la declaration vit dans `bot_action_for_pending_choice` (il DECLINE toujours).
+        Ce filtre garde donc un role de garde structurel : il rend impossible qu'un slot autre
+        qu'une pose soit transmis au bot, quel que soit ce que le masque ouvrira demain.
         """
         placement_actions = self._open_placement_slots(valid_actions)
         if not placement_actions:

@@ -8,35 +8,26 @@ import { type RosterRowUnitsCache, UnitRosterRow } from "./UnitRosterRow";
 /** Contour ORANGE du conteneur de réserves — le distingue des lignes d'unités normales. */
 export const RESERVES_BORDER_COLOR = "#ff8c00";
 
-/**
- * 20.01 — le bouton qui met l'escouade SÉLECTIONNÉE en réserves au lieu de la déployer.
- *
- * Vert quand le moteur accepterait le dépôt, gris sinon. La couleur n'est pas décorative : elle
- * est l'unique réponse rendue au joueur sur « cette escouade tient-elle sous le plafond de 50 % ».
- * Elle vient donc de `placeable_unit_ids` (le calcul qui décide vraiment), jamais d'une
- * arithmétique refaite ici.
- */
-export function StrategicReserveButton({
-  canDrop,
-  onDrop,
-}: {
-  canDrop: boolean;
-  onDrop: () => void;
-}): ReactElement {
+function _declarationButton(
+  testId: string,
+  label: string,
+  background: string,
+  onClick: () => void
+): ReactElement {
   return (
     <button
       type="button"
-      data-testid="strategic-reserves-drop"
-      disabled={!canDrop}
+      key={testId}
+      data-testid={testId}
       onClick={(e: MouseEvent<HTMLButtonElement>) => {
-        // La ligne entière est cliquable (sélection) : sans cet arrêt, le dépôt rejouerait
-        // aussi la sélection de l'escouade qu'il vient de retirer de la liste.
+        // La ligne entière est cliquable (sélection) : sans cet arrêt, la réponse rejouerait
+        // aussi la sélection de l'escouade dont elle vient de retirer la question.
         e.stopPropagation();
-        onDrop();
+        onClick();
       }}
       style={{
         flex: "0 0 auto",
-        background: canDrop ? "var(--ui-green-validate)" : "var(--ui-gray-cancel)",
+        background,
         color: "#fff",
         border: "1px solid rgba(0, 0, 0, 0.35)",
         borderRadius: "4px",
@@ -44,11 +35,45 @@ export function StrategicReserveButton({
         fontWeight: 700,
         padding: "3px 8px",
         whiteSpace: "nowrap",
-        cursor: canDrop ? "pointer" : "not-allowed",
+        cursor: "pointer",
       }}
     >
-      Strategic Reserve
+      {label}
     </button>
+  );
+}
+
+/**
+ * 20.01 — les DEUX réponses à la question de l'étape Declare Battle Formations.
+ *
+ * Ce n'était qu'un bouton, activé ou grisé selon que le moteur accepterait un dépôt : la
+ * déclaration était alors un geste facultatif pris au tour de déploiement de l'escouade. La règle
+ * en fait une étape ANTÉRIEURE au déploiement, où chaque escouade déclarable reçoit une question
+ * fermée — d'où deux boutons, tous deux actifs. Un bouton grisé dirait « tu peux ne pas
+ * répondre », ce qui est faux : tant que la réponse manque, aucune pose n'est possible et le
+ * moteur repose la même question.
+ *
+ * Le composant n'apparaît QUE sur l'escouade que le moteur interroge (`pending_declaration`), donc
+ * il n'a aucune éligibilité à évaluer : le plafond de 50 % et la clause FORTIFICATION ont déjà
+ * décidé côté moteur qu'il y avait une question à poser.
+ */
+export function ReservesDeclarationPrompt({
+  onDeclare,
+  onKeep,
+}: {
+  onDeclare: () => void;
+  onKeep: () => void;
+}): ReactElement {
+  return (
+    <div style={{ display: "flex", flex: "0 0 auto", gap: "4px" }}>
+      {_declarationButton(
+        "strategic-reserves-declare",
+        "Reserve",
+        "var(--ui-green-validate)",
+        onDeclare
+      )}
+      {_declarationButton("strategic-reserves-keep", "Deploy", "var(--ui-gray-cancel)", onKeep)}
+    </div>
   );
 }
 
@@ -98,9 +123,10 @@ export function ResetPlacementButton({ onReset }: { onReset: () => void }): Reac
  * côtés (« place them to one side » : les réserves sont déclarées ouvertement), mais cliquable
  * seulement pour son propriétaire et seulement en phase de mouvement, où l'arrivée existe.
  *
- * Le DÉPÔT ne se fait pas ici : il se fait par le bouton `StrategicReserveButton` porté par la
- * ligne de l'escouade dans la liste des unités à déployer. Une escouade qu'on n'a pas encore
- * choisi de déployer n'a rien à faire dans ce conteneur, et le geste reste là où est la décision.
+ * La DÉCLARATION ne se fait pas ici : elle se fait par `ReservesDeclarationPrompt`, porté par la
+ * ligne de l'escouade que le moteur interroge dans la liste des unités à déployer. Une escouade
+ * qu'on n'a pas encore choisi de déployer n'a rien à faire dans ce conteneur, et le geste reste
+ * là où est la décision.
  *
  * Les lignes sont au FORMAT COMMUN (`UnitRosterRow`), celui de la liste à déployer : même
  * escouade, même tête, qu'elle attende son déploiement ou son arrivée.

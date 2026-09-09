@@ -816,7 +816,13 @@ def self_model_bin_index(field: str) -> int:
 #: aucune datasheet — c'est le mot-clé FLY qui l'ouvre et 21.03 qui en fixe le prix —, donc ses
 #: deux candidats portent eux aussi un `effect_ids` VIDE. C'est `declines` qui les sépare :
 #: `CHOICE_1` renonce au vol, et le renoncement est précisément « ne rien faire ».
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting")
+#: ⚠️ `reserves_declaration` (20.01) est le TROISIÈME type dont les deux candidats portent un
+#: `effect_ids` vide, pour la même raison que les deux précédents : « place in strategic
+#: reserves » n'est accordé par aucune datasheet, c'est l'étape Declare Battle Formations qui
+#: l'ouvre et le plafond de 50 % qui la borne. C'est `declines` qui sépare les deux lignes —
+#: `CHOICE_1` garde l'unité pour le déploiement, et ne rien déclarer est précisément « ne rien
+#: faire ».
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting", "reserves_declaration")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots

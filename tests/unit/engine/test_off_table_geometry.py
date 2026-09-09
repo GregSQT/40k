@@ -146,8 +146,16 @@ def _engine(seed: int = 0):
 
 
 def _drive_deployment(eng) -> None:
+    """Pose toute l'armée. L'étape Declare Battle Formations (20.01) est déclinée d'abord.
+
+    Ce fichier construit lui-même ses unités hors table (`_force_into_reserves`) : une unité
+    déclarée en réserves par le pilotage fausserait la géométrie qu'il mesure.
+    """
+    from tests.unit.engine._config_helpers import settle_reserves_declarations
+
     gs = eng.game_state
     steps = 0
+    settle_reserves_declarations(eng)
     while gs.get("phase") == "deployment" and steps < 1000:
         mask = eng.get_action_mask()
         deploy_actions = [a for a in range(4, 9) if mask[a]]

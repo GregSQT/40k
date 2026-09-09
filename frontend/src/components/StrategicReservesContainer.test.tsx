@@ -2,9 +2,9 @@
 /**
  * 20.01/20.04 — le siège des réserves après la refonte :
  *
- *   - le DÉPÔT est un bouton porté par la ligne de l'escouade dans la liste à déployer
- *     (`StrategicReserveButton`) : vert quand le moteur accepte, gris sinon, et un bouton gris
- *     n'appelle rien — c'est la seule réponse rendue au joueur sur le plafond de 50 % ;
+ *   - la DÉCLARATION est une question FERMÉE portée par la ligne de l'escouade que le moteur
+ *     interroge (`ReservesDeclarationPrompt`, deux boutons tous deux actifs) : 20.01 en fait une
+ *     étape antérieure au déploiement, où « ne pas répondre » n'existe pas ;
  *   - le CONTENEUR ne dépose plus rien : il montre les escouades hors table du joueur, au format
  *     commun `UnitRosterRow` (figurines, nom, points, nb de figurines, id) ;
  *   - `UnitStatusTable` ne le porte plus du tout — il vit SOUS elle, rendu par `BoardWithAPI`.
@@ -13,8 +13,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StrategicReservesPlayerSummary, Unit } from "../types/game";
 import {
+  ReservesDeclarationPrompt,
   ResetPlacementButton,
-  StrategicReserveButton,
   StrategicReservesContainer,
 } from "./StrategicReservesContainer";
 import { UnitRosterRow } from "./UnitRosterRow";
@@ -25,7 +25,6 @@ afterEach(cleanup);
 const SUMMARY: StrategicReservesPlayerSummary = {
   used_points: 120,
   cap_points: 500,
-  placeable_unit_ids: ["7"],
 };
 
 /** Escouade sur le plateau (pas en réserves) : HP_MAX requis par UnitRow. */
@@ -72,26 +71,44 @@ const CONTAINER_PROPS = {
   phase: "move",
 };
 
-describe("StrategicReserveButton", () => {
-  it("dépose au clic quand le moteur accepte", () => {
-    const onDrop = vi.fn();
-    render(<StrategicReserveButton canDrop={true} onDrop={onDrop} />);
-    const button = screen.getByTestId("strategic-reserves-drop") as HTMLButtonElement;
-    expect(button.disabled).toBe(false);
-    // Vert = le dépôt tient sous le plafond ; la couleur EST la réponse rendue au joueur.
-    expect(button.style.background).toContain("--ui-green-validate");
-    fireEvent.click(button);
-    expect(onDrop).toHaveBeenCalledTimes(1);
+describe("ReservesDeclarationPrompt — 20.01", () => {
+  it("porte les DEUX réponses, toutes deux actives", () => {
+    // Le composant n'apparaît que sur l'escouade que le moteur INTERROGE : l'éligibilité est déjà
+    // tranchée, il n'y a donc rien à griser. Un bouton désactivé dirait « tu peux ne pas
+    // répondre » — faux : sans réponse, aucune pose n'est possible et la question revient.
+    const onDeclare = vi.fn();
+    const onKeep = vi.fn();
+    render(<ReservesDeclarationPrompt onDeclare={onDeclare} onKeep={onKeep} />);
+
+    const declare = screen.getByTestId("strategic-reserves-declare") as HTMLButtonElement;
+    const keep = screen.getByTestId("strategic-reserves-keep") as HTMLButtonElement;
+    expect(declare.disabled).toBe(false);
+    expect(keep.disabled).toBe(false);
+
+    fireEvent.click(declare);
+    expect(onDeclare).toHaveBeenCalledTimes(1);
+    expect(onKeep).not.toHaveBeenCalled();
+
+    fireEvent.click(keep);
+    expect(onKeep).toHaveBeenCalledTimes(1);
+    expect(onDeclare).toHaveBeenCalledTimes(1);
   });
 
-  it("est gris et inerte quand le moteur refuse", () => {
-    const onDrop = vi.fn();
-    render(<StrategicReserveButton canDrop={false} onDrop={onDrop} />);
-    const button = screen.getByTestId("strategic-reserves-drop") as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(button.style.background).toContain("--ui-gray-cancel");
-    fireEvent.click(button);
-    expect(onDrop).not.toHaveBeenCalled();
+  it("le clic ne remonte pas à la ligne, qui est elle-même cliquable", () => {
+    // Sans `stopPropagation`, répondre rejouerait aussi la sélection de l'escouade dont la
+    // question vient de disparaître.
+    const onRowClick = vi.fn();
+    // Le guetteur est un écouteur NATIF posé au-dessus de la racine React : c'est exactement ce
+    // que la ligne cliquable du panneau verrait remonter. Un `<div onClick>` de doublure aurait
+    // été un élément statique rendu interactif — ce que le lint refuse, à raison.
+    render(<ReservesDeclarationPrompt onDeclare={vi.fn()} onKeep={vi.fn()} />);
+    document.body.addEventListener("click", onRowClick);
+    try {
+      fireEvent.click(screen.getByTestId("strategic-reserves-declare"));
+      expect(onRowClick).not.toHaveBeenCalled();
+    } finally {
+      document.body.removeEventListener("click", onRowClick);
+    }
   });
 });
 
@@ -111,7 +128,7 @@ describe("StrategicReservesContainer", () => {
     expect(screen.getByTestId("roster-row-points-7").textContent).toBe("120 pts");
   });
 
-  it("ne porte plus aucun bouton de dépôt — le dépôt vit dans la liste à déployer", () => {
+  it("ne porte aucune réponse 20.01 — la question vit dans la liste à déployer", () => {
     render(
       <StrategicReservesContainer
         {...CONTAINER_PROPS}
@@ -120,7 +137,8 @@ describe("StrategicReservesContainer", () => {
         canSelectReserveUnit={false}
       />
     );
-    expect(screen.queryByTestId("strategic-reserves-drop")).toBeNull();
+    expect(screen.queryByTestId("strategic-reserves-declare")).toBeNull();
+    expect(screen.queryByTestId("strategic-reserves-keep")).toBeNull();
   });
 
   it("demande l'aire d'arrivée au clic quand la phase l'autorise (20.04)", () => {

@@ -1100,6 +1100,17 @@ Ordre par valeur tactique :
 
    🟢 **LIVRÉ le 2026-08-24** — Split-fire : 10 `SHOOT_WEAPON_SEL_SLOTS` (1379-1388), `TOTAL_ACTION_SIZE` 1379→1389. Flux 2-step : sélection arme → assignation cible. Tête dense `shoot_weapon_sel_net`, **remplacée le 2026-09-09 par la tête pointeur `shoot_weapon_sel_query_net`**. Requiert `--new`.
 
+   🟢 **LIVRÉ le 2026-09-09** — Declare Battle Formations 20.01 (`reserves_declaration`) : la mise
+   en réserves passe de `SQUAD_ACTION_WAIT`, joué au tour de déploiement de l'unité, à une file de
+   décisions figée au reset et résolue AVANT toute pose. Motif de règle et non d'ergonomie —
+   mesuré sur `scenario_training_armageddon1.json`, le joueur 2 gardait le slot ouvert avec quatre
+   unités adverses déjà posées, donc déclarait en voyant le déploiement adverse. `obs_size` et
+   `TOTAL_ACTION_SIZE` INCHANGÉS (slot de type réservé, réponse par `CHOICE_i`) : pas de `--new`
+   imposé par la taille, mais la POLITIQUE de déploiement change et les épisodes gagnent une
+   décision par unité déclarable — les win-rates d'avant ne sont plus comparables. Bots et
+   déploiement `auto` déclinent (`reserves_declaration_decline_slot`, source unique).
+   `tests/unit/engine/test_reserves_declaration_step_2001.py`, 18 tests rouge→vert.
+
 Hors scope A' (reste auto, conforme règles car « un placement légal parmi d'autres ») :
 placement par-figurine du move rigide, pivot. Montée d'étage = Phase C.
 

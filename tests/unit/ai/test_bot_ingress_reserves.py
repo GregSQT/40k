@@ -575,6 +575,7 @@ def test_bot_deployment_never_reserves_on_the_real_path(monkeypatch) -> None:
 
     from ai.bot_evaluation import _create_eval_env
     from ai.env_wrappers import BotControlledEnv
+    from engine.agent_decision import read_pending_agent_decision
     from engine.w40k_core import W40KEngine
 
     # (1) Deploiement ACTIF impose : sans cela il n'y a pas de phase de deploiement a observer.
@@ -582,21 +583,22 @@ def test_bot_deployment_never_reserves_on_the_real_path(monkeypatch) -> None:
         W40KEngine, "_configure_deployment_mode_for_episode", lambda self: "active"
     )
 
-    wait_was_open = 0
+    # L'occasion de se tromper N'EST PLUS `SQUAD_ACTION_WAIT` : 20.01 est sortie du tour de
+    # deploiement pour l'etape Declare Battle Formations qui le precede, et la question est
+    # desormais une decision agent repondue par `CHOICE_i`. Ce que ce compteur doit mesurer, c'est
+    # donc « le bot a-t-il ete INTERROGE », pas « WAIT etait-il ouvert » — sinon le garde-fou
+    # vert-vacant compte un evenement qui ne se produit plus, et le test se declare non concluant
+    # alors que l'invariant tient.
+    was_asked = 0
     original = BotControlledEnv._get_bot_action
 
     def spy(self, debug=False, decision=None, bot=None):
-        nonlocal wait_was_open
+        nonlocal was_asked
         game_state = self.engine.game_state
         if game_state["phase"] == "deployment":
-            if decision is not None:
-                mask = decision.action_mask
-            else:
-                mask, _ = self.engine.action_decoder.get_squad_action_mask_and_eligible_units(
-                    game_state
-                )
-            if bool(np.asarray(mask, dtype=bool)[WAIT_ACTION]):
-                wait_was_open += 1
+            pending = read_pending_agent_decision(game_state)
+            if pending is not None and str(pending["type"]) == "reserves_declaration":
+                was_asked += 1
         return original(self, debug=debug, decision=decision, bot=bot)
 
     monkeypatch.setattr(BotControlledEnv, "_get_bot_action", spy)
@@ -646,11 +648,11 @@ def test_bot_deployment_never_reserves_on_the_real_path(monkeypatch) -> None:
             if terminated or truncated:
                 break
 
-        # (2) VERT VACANT : sans WAIT ouvert au moins une fois, le bot n'a jamais eu l'occasion
-        # de se tromper et l'assertion finale ne prouverait rien.
-        assert wait_was_open > 0, (
-            "WAIT (= mise en reserves 20.01) n'a jamais ete ouvert dans un masque de "
-            "deploiement du bot : le test ne prouve rien"
+        # (2) VERT VACANT : sans avoir ete interroge au moins une fois sur 20.01, le bot n'a
+        # jamais eu l'occasion de se tromper et l'assertion finale ne prouverait rien.
+        assert was_asked > 0, (
+            "le bot n'a jamais ete interroge sur la declaration 20.01 (Declare Battle "
+            "Formations) : le test ne prouve rien"
         )
         reserved = [
             str(u["id"])

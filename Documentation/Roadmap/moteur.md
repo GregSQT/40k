@@ -99,6 +99,54 @@ Interruptions réactives pendant le tour adverse — cas le plus complexe du gym
 
 ---
 
+## ✅ 20.01 — la déclaration de réserves passe avant le déploiement {#declaration-reserves-2001}
+
+**Livré le 2026-09-10.** La mise en réserves était portée par `SQUAD_ACTION_WAIT`, ouvert PENDANT
+le tour de déploiement de chaque unité. Mesuré avant, sur `scenario_training_armageddon1.json` en
+déploiement actif :
+
+```
+step 1: deployer=2 mes_posees=0 ennemies_posees=1 WAIT_ouvert=True
+step 7: deployer=2 mes_posees=3 ennemies_posees=4 WAIT_ouvert=True
+```
+
+Le joueur 2 déclarait donc ses réserves en voyant **quatre unités adverses déjà posées**. 20.01 le
+lui refuse : « Before the battle, in the Declare Battle Formations step […] Instead of setting up
+these units on the battlefield during deployment » — une étape ANTÉRIEURE au déploiement
+(`25 Rules appendix.pdf` : Declare Battle Formations, puis Pre-battle Abilities, puis Begin the
+Battle). La politique apprenait une décision qui n'est pas jouable dans une partie légale, et
+l'écart n'était visible dans aucune métrique.
+
+Ce qui change : au `reset`, le moteur fige une file alternée de questions (une par unité à poser,
+joueur 1 d'abord) et n'ouvre aucun slot de pose tant qu'elle n'est pas épuisée —
+`deployment_commit_plan` refuse par `reserves_declaration_still_open`, refus MOTEUR et non simple
+absence de bouton côté client. Chaque question est un point d'arrêt du mécanisme générique
+« décision agent » (type `reserves_declaration`, `CHOICE_0` = réserves, `CHOICE_1` = déploiement).
+Une unité que la règle refuse (FORTIFICATION, plafond de 50 % atteint) n'est pas interrogée : un
+candidat unique n'est pas une décision.
+
+**Aucun `--new` imposé par la taille** : le type entre dans les colonnes pré-dimensionnées
+d'`AGENT_DECISION_TYPE_SLOTS`, donc `obs_size` et `TOTAL_ACTION_SIZE` ne bougent pas. Mais la
+politique de déploiement change et chaque épisode gagne une décision par unité déclarable : **les
+win-rates mesurés avant ce lot ne sont plus comparables**.
+
+Bots d'évaluation et déploiement `auto` DÉCLINENT toujours, par la même fonction
+(`reserves_declaration_decline_slot`) : 20.01 est une décision de LISTE, jamais de doctrine — deux
+implémentations feraient réserver l'adversaire de référence dans un seul des deux régimes et
+déplaceraient la baseline sans que rien ne le signale.
+
+Siège humain : la question fermée remplace le panneau à sélection libre ; l'API publie
+`strategic_reserves.pending_declaration` et le client n'a plus aucune liste de candidats à
+filtrer.
+
+Verrous : `tests/unit/engine/test_reserves_declaration_step_2001.py` (20 tests, défaut réintroduit
+puis constaté rouge sur les 4 invariants centraux), `tests/integration/pvp/test_deploy.py`
+(`TestDeclareBattleFormations`, 6 tests). Les deux findings de `/code-review` — clôture de phase
+côté siège humain quand tout part en réserves, et file non reconstruite par `change_roster` — sont
+corrigés et couverts.
+
+---
+
 ## ✅ 13.06 — le move gym peut finir en hauteur {#verticalite-move-gym}
 
 **Livré le 2026-09-09.** Le move d'escouade du pipeline gym atterrissait TOUJOURS au sol :
