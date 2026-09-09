@@ -72,27 +72,29 @@ def field_names() -> Dict[str, List[str]]:
         UNIT_STATUS_SLOTS,
     )
     from engine.observation_weapon_profiles import (
-        PROFILE_BIN_SIZE,
+        PROFILE_BIN_FIELDS,
         PROFILE_CONT_SIZE,
         WEAPON_RULE_ID_SLOTS,
         WEAPON_RULE_PARAMS,
     )
     from engine.spatial_grid import GRID_CHANNEL_NAMES
 
-    # Le registre d'armes n'exporte pas de tuple de NOMS (son layout est décrit en commentaire
-    # de `PROFILE_STAT_CONT`) : on le reconstruit ici depuis les constantes réelles, et on
-    # vérifie la longueur — un layout qui bougerait ferait lever, pas dériver les libellés.
+    # Les drapeaux de profil sont LUS (`PROFILE_BIN_FIELDS`), jamais recopiés — le seul livrable
+    # de cet audit est de NOMMER le canal mort. Les libelles CONTINUS, eux, n'ont pas de tuple
+    # dans le registre (leur layout est décrit en commentaire de `PROFILE_STAT_CONT`) : on les
+    # reconstruit depuis les constantes réelles et on vérifie la longueur — un layout qui
+    # bougerait ferait lever, pas dériver les libellés.
     profile_cont = (
         ["nb", "atk", "str", "ap", "dmg", "range", "carriers"]
         + [f"param_{name.lower()}" for name, _default in WEAPON_RULE_PARAMS]
         + ["anti_threshold"]
     )
-    if len(profile_cont) != PROFILE_CONT_SIZE or PROFILE_BIN_SIZE != 1:
+    if len(profile_cont) != PROFILE_CONT_SIZE:
         raise ValueError(
             f"Layout de profil d'arme inattendu : {len(profile_cont)} libelles pour "
-            f"PROFILE_CONT_SIZE={PROFILE_CONT_SIZE}, PROFILE_BIN_SIZE={PROFILE_BIN_SIZE}"
+            f"PROFILE_CONT_SIZE={PROFILE_CONT_SIZE}"
         )
-    profile_bin = ["present"]
+    profile_bin = list(PROFILE_BIN_FIELDS)
 
     names: Dict[str, List[str]] = {
         "global_cont": list(GLOBAL_CONT_FIELDS),

@@ -110,9 +110,12 @@ PENDING_FIGHT_WEAPON_KEY = "pending_fight_weapon_select"
 PENDING_FIGHT_TARGET_KEY = "pending_fight_target_select"
 #: Clé du `game_state` portant l'état de split-fire en cours (P3-8). Valeur :
 #: `{"squad_id": str, "shooting_type": str, "pending_weapon": Optional[str],
+#:  "pending_weapon_slot": Optional[int],  # slot de profil de `pending_weapon` (obs + masque)
 #:  "assignments": Dict[str, str],      # weapon_code -> target_id
 #:  "remaining_weapon_slots": Dict[int, str],  # slot_j -> weapon_code (non encore assignés)
 #:  "eligible_target_slots": List[int]}` # slots SHOOT ennemis éligibles pour pending_weapon.
+#: `pending_weapon` et `pending_weapon_slot` sont armés et désarmés ENSEMBLE : l'un nomme l'arme
+#: pour le commit, l'autre la désigne dans le bloc d'armes de l'observation (invariant D1).
 #: Absente tant qu'aucun split-fire n'est en cours.
 PENDING_SHOOT_WEAPON_SEL_KEY = "pending_shoot_weapon_split"
 #: Clé du `game_state` portant le retrait pour cohérence (P3-0, 03.03). Valeur :
@@ -155,8 +158,13 @@ def _read_pending_coherency_removal(game_state: Dict[str, Any]) -> Any:
     return game_state.get(PENDING_COHERENCY_REMOVAL_KEY)  # get allowed : None = aucun
 
 
-def _read_pending_fight_weapon_select(game_state: Dict[str, Any]) -> Any:
-    """Sélection d'arme CC (§0.69) : ``None`` = aucune sélection en attente."""
+def read_pending_fight_weapon_select(game_state: Dict[str, Any]) -> Any:
+    """Sélection d'arme CC (§0.69) : ``None`` = aucune sélection en attente.
+
+    PUBLIQUE parce que l'OBSERVATION la lit aussi : le bit `fight_target_selected` marque la
+    cible déjà fixée de ce point d'arrêt. Une seconde lecture écrite sur place aurait porté sa
+    propre idée du sous-état — le motif jumeau du dépôt.
+    """
     return game_state.get(PENDING_FIGHT_WEAPON_KEY)  # get allowed : None = aucune
 
 
@@ -175,8 +183,13 @@ def _read_pending_shoot_weapon_sel(game_state: Dict[str, Any]) -> Any:
     return sw if sw is not None and sw.get("pending_weapon") is None else None  # get allowed
 
 
-def _read_pending_shoot_split_target(game_state: Dict[str, Any]) -> Any:
-    """Split-fire (P3-8), sous-état CIBLE : une arme est armée et attend sa cible."""
+def read_pending_shoot_split_target(game_state: Dict[str, Any]) -> Any:
+    """Split-fire (P3-8), sous-état CIBLE : une arme est armée et attend sa cible.
+
+    PUBLIQUE pour la même raison que `read_pending_fight_weapon_select` : l'observation la lit
+    pour poser `shoot_weapon_selected` sur le profil armé. Le sous-état (`pending_weapon` armé
+    ou non) se décide ICI et nulle part ailleurs.
+    """
     sw = game_state.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
     return sw if sw is not None and sw.get("pending_weapon") is not None else None  # get allowed
 
@@ -224,7 +237,7 @@ PLAYER_CHOICE_MECHANISMS: Tuple[PlayerChoiceMechanism, ...] = (
         _read_pending_coherency_removal, COHERENCY_SLOTS, "retrait coherence", "squad_id"
     ),
     PlayerChoiceMechanism(
-        _read_pending_fight_weapon_select, FIGHT_WEAPON_SLOTS, "arme CC", "squad_id"
+        read_pending_fight_weapon_select, FIGHT_WEAPON_SLOTS, "arme CC", "squad_id"
     ),
     PlayerChoiceMechanism(
         _read_pending_fight_target_select, FIGHT_SLOTS, "re-selection cible CC", "squad_id"
@@ -233,7 +246,7 @@ PLAYER_CHOICE_MECHANISMS: Tuple[PlayerChoiceMechanism, ...] = (
         _read_pending_shoot_weapon_sel, SHOOT_WEAPON_SEL_SLOTS, "split-fire arme TIR", "squad_id"
     ),
     PlayerChoiceMechanism(
-        _read_pending_shoot_split_target, SHOOT_SLOTS, "split-fire cible TIR", "squad_id"
+        read_pending_shoot_split_target, SHOOT_SLOTS, "split-fire cible TIR", "squad_id"
     ),
 )
 

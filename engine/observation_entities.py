@@ -376,6 +376,25 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     # L'oracle est `charge_build_valid_plan`, la fonction MOTEUR qu'exécute le commit : une
     # réimplémentation annoncerait une atteignabilité que la résolution ne produirait pas.
     "charge_reachable_max_roll",
+    # ⚠ Entité ENNEMIE et point d'arrêt de SÉLECTION D'ARME CC uniquement (V11 §0.69).
+    # 1 = c'est cette escouade que le combat en cours va frapper. La cible est DÉJÀ fixée
+    # (`pending_fight_weapon_select`, posé par `_fight_resolve_with_target`), et le choix demandé
+    # à l'agent porte sur l'ARME — donc sur un jugement qui dépend entièrement de l'endurance, de
+    # la sauvegarde et de l'effectif d'en face.
+    #
+    # Rien d'autre ne le disait, MESURÉ le 2026-09-09 : deux états ne différant que par la cible
+    # désignée produisaient des observations IDENTIQUES au moment du `FIGHT_WEAPON_SLOT` (28 clés
+    # comparées, écart maximal 0,0). La politique n'est pas récurrente (MaskablePPO) : elle ne se
+    # souvient pas du `FIGHT_SLOT` joué au step précédent, l'observation doit donc porter le
+    # contexte du point d'arrêt elle-même. Jumeau côté tir : `shoot_weapon_selected`
+    # (`observation_weapon_profiles`), qui marque l'arme armée quand c'est la cible qui reste à
+    # choisir.
+    #
+    # AUCUN bit de contexte global ne l'accompagne, et c'est délibéré : quand la sélection d'arme
+    # est armée, la cible occupe TOUJOURS un slot ennemi observé — `_continue_squad_fight` lève
+    # sinon (« cible(s) infrappable(s) ») et `FIGHT_SLOT_COUNT` vaut `K_ENEMY_SLOTS`. Le bit est
+    # donc auto-porteur : hors de ce point d'arrêt, aucune entité ne le porte.
+    "fight_target_selected",
     # VERTICALITÉ (13.06 / 22.05) — émis pour TOUTE entité posée. C'est le PRÉDICAT EXACT que
     # Plunging Fire interroge sur la CIBLE (« la cible contient >= 1 figurine au sol »), et non un
     # « niveau » générique : une unité peut être à cheval sur deux étages (03.03 tolère 5" de
