@@ -15,13 +15,18 @@ du code. Frontière déclarée dans `frontend/vite.config.ts` et verrouillée pa
 `tests/unit/scripts/test_vitest_collect_scope.py`. La couche B (**4,0 s**, 36 fichiers, 430 tests)
 entre dans la vérification large de CLAUDE.md.
 
-## 🟢 Couche C — remise en état le 2026-09-09 : **12 verts sur 14, en 34 s** {#couche-c}
+## 🟡 Couche C — remise en état le 2026-09-09 : **11 verts, 2 rouges, en 27 s** {#couche-c}
 
-Playwright installé (paquet + Chromium) et cinq défauts corrigés, la couche C fonctionne :
-**12 tests passent**, 1 est skippé par le spec, 1 écrit sa baseline de régression visuelle (échec
-attendu au premier run d'une machine). **Les deux invariants de parité front/back passent** —
-`greenCircleUnitIds ⊆ move_activation_pool` et `movePreviewHexes ⊆ valid_move_destinations_pool` :
-c'est la seule vérification automatisée que l'affichage correspond à ce que le moteur autorise.
+Playwright installé (paquet + Chromium) et **six défauts corrigés**, la couche C s'exécute :
+**11 tests passent**, 1 est skippé par le spec, et **2 échouent**.
+
+⚠️ Ces 2 rouges sont les **invariants de parité front/back** — `greenCircleUnitIds ⊆
+move_activation_pool` et `movePreviewHexes ⊆ valid_move_destinations_pool` — c'est-à-dire la seule
+vérification automatisée que l'affichage correspond à ce que le moteur autorise. Ils **passaient
+sans jamais comparer** (401 silencieux, sortie sans assertion, lecture au mauvais niveau de
+l'enveloppe JSON). Les trois causes sont corrigées ; reste qu'ils ne font jamais avancer la partie
+jusqu'à la phase move qu'ils prétendent vérifier — la partie servie est en phase `command`, pool
+vide. Le rouge est donc l'état honnête.
 
 ⚠️ Le bilan « 13 rouges, 6 min 42 » publié plus tôt le même jour était **faux** : il venait de runs
 que polluait un Vite orphelin (défaut n° 4 ci-dessous).

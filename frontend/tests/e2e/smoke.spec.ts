@@ -14,6 +14,50 @@ import { expect, test } from "@playwright/test";
 const BACKEND = process.env.PW_BASE_URL ?? "http://localhost:5001";
 const GAME_URL = "/game?mode=pvp_test";
 
+/**
+ * Lit l'état de partie côté backend, en direct, AVEC les deux en-têtes qu'il exige.
+ *
+ * POURQUOI CE HELPER EXISTE (mesuré le 2026-09-09). Trois appels de ce fichier posaient le cookie
+ * de session sans l'en-tête anti-CSRF `X-W40K-Client`, qu'exige toute requête authentifiée par
+ * cookie (`CSRF_HEADER_NAME` dans services/api_server.py). Ils recevaient donc 401 — et les tests
+ * enchaînaient sur un `if (status !== 200) return;` qui les faisait passer POUR VERTS sans avoir
+ * rien vérifié. Les deux invariants de parité front/back de ce fichier, ceux qui justifient à eux
+ * seuls l'existence de la couche E2E, n'avaient jamais comparé quoi que ce soit.
+ *
+ * Le statut est ASSERTÉ ici plutôt que rendu à l'appelant : un état de partie illisible est une
+ * panne du harnais, jamais une raison de rendre un test vert.
+ */
+async function lireEtatDePartie(
+  page: import("@playwright/test").Page
+): Promise<Record<string, unknown>> {
+  const cookies = await page.context().cookies();
+  const sessionCookie = cookies.find((c) => c.name === "w40k_session");
+  expect(sessionCookie, "aucun cookie de session : le global-setup n'a pas fait son travail")
+    .toBeDefined();
+
+  const resp = await page.request.get(`${BACKEND}/api/game/state`, {
+    headers: {
+      Cookie: `w40k_session=${sessionCookie!.value}`,
+      "X-W40K-Client": "playwright",
+    },
+  });
+  expect(
+    resp.status(),
+    `/api/game/state a répondu ${resp.status()} : sans état de partie, ce test ne peut RIEN vérifier`
+  ).toBe(200);
+
+  // La réponse est ENVELOPPÉE : `{ success, game_state: {...}, game_log_history: [...] }`.
+  // Les tests lisaient `state.move_activation_pool` au niveau RACINE, où cette clé n'existe pas :
+  // ils obtenaient `undefined`, le `?? []` en faisait un pool vide, et la comparaison
+  // « les cercles verts sont un sous-ensemble du pool » devenait vraie par construction —
+  // tout ensemble contient l'ensemble vide. Combiné au 401 silencieux, cela faisait DEUX raisons
+  // indépendantes pour ces tests de passer sans rien vérifier.
+  const enveloppe = (await resp.json()) as Record<string, unknown>;
+  const etat = enveloppe.game_state as Record<string, unknown> | undefined;
+  expect(etat, "la réponse ne porte pas de `game_state` : contrat d'API changé ?").toBeDefined();
+  return etat!;
+}
+
 // ---------------------------------------------------------------------------
 // T12-1 — Smoke : board affiché, canvas non vide
 // ---------------------------------------------------------------------------
@@ -147,6 +191,27 @@ test.describe("T12-3 — Hook de test (VITE_TEST_HOOKS=1)", () => {
 // T12-4 — Cohérence cercles verts vs pool backend
 // ---------------------------------------------------------------------------
 
+/**
+ * ⚠️ CES DEUX TESTS (T12-4 et T12-6) SONT ROUGES, ET C'EST UN PROGRÈS.
+ *
+ * Ils passaient depuis leur écriture sans jamais rien comparer — pour trois raisons cumulées,
+ * toutes mesurées le 2026-09-09 :
+ *   1. l'appel à `/api/game/state` omettait l'en-tête anti-CSRF et recevait 401 ;
+ *   2. un `if (status !== 200) return;` faisait alors SORTIR le test sans assertion, donc vert ;
+ *   3. le pool était lu au niveau racine, alors que l'API l'enveloppe dans `game_state` — d'où un
+ *      `undefined`, un `?? []`, et une inclusion vraie par construction (∅ ⊆ tout).
+ *
+ * Les trois sont corrigés. Reste le quatrième, qui n'est pas un accident technique mais un défaut
+ * de CONCEPTION : le test s'intitule « en phase move » et ne fait jamais avancer la partie
+ * jusqu'à cette phase. Mesuré : la partie servie est en phase `command`, tour 1, avec 11 unités
+ * et un `move_activation_pool` VIDE — légitimement vide, puisqu'on n'est pas en phase de
+ * mouvement. La comparaison n'a donc rien à comparer.
+ *
+ * Le rendre vert demande de décider COMMENT amener la partie en phase move — par l'interface
+ * (cliquer, ce qui teste aussi le chemin utilisateur) ou par l'API (plus direct, mais le test ne
+ * prouve alors plus rien sur l'UI. Cette décision n'est pas prise ici : un rouge qui dit la
+ * vérité vaut mieux que le vert vide qu'il remplace.
+ */
 test.describe("T12-4 — Cercles verts == pool backend", () => {
   test("en phase move, les unitIds cerclés sont un sous-ensemble du move_activation_pool", async ({
     page,
@@ -173,28 +238,18 @@ test.describe("T12-4 — Cercles verts == pool backend", () => {
       return [...(hook.greenCircleUnitIds as Set<string>)].map(Number);
     });
 
-    // Lire le pool move backend via l'état exposé par le hook API
-    // Le board prend quelques frames pour rendre les cercles après réception de l'état
-    const cookies = await page.context().cookies();
-    const sessionCookie = cookies.find((c) => c.name === "w40k_session");
+    // Lire le pool move backend. Le statut est asserté dans le helper : un 401 silencieux
+    // faisait passer ce test sans qu'il compare quoi que ce soit.
+    const state = await lireEtatDePartie(page);
+    const pool: number[] = ((state.move_activation_pool as unknown[]) ?? []).map(Number);
 
-    const stateResp = await page.request.get(`${BACKEND}/api/game/state`, {
-      headers: { Cookie: `w40k_session=${sessionCookie!.value}` },
-    });
-
-    if (stateResp.status() !== 200) {
-      // Partie pas encore démarrée — le test ne peut pas vérifier
-      return;
-    }
-
-    const state = await stateResp.json();
-    const pool: number[] = (state.move_activation_pool ?? []).map(Number);
-
-    if (pool.length === 0) {
-      // Phase move sans unités éligibles : pas de cercles à vérifier
-      expect(greenIds).toHaveLength(0);
-      return;
-    }
+    // Un pool VIDE rendrait l'inclusion vraie par construction — tout ensemble contient
+    // l'ensemble vide. Le scénario de test doit donc offrir au moins une unité éligible, sinon
+    // ce test est un vert vacant : il passerait quel que soit l'état des cercles.
+    expect(
+      pool.length,
+      "aucune unité éligible en phase move : ce test ne prouverait rien (∅ ⊆ tout)"
+    ).toBeGreaterThan(0);
 
     // Chaque ID cerclé doit être dans le pool
     for (const id of greenIds) {
@@ -260,23 +315,20 @@ test.describe("T12-6 — Preview move hexes via hook", () => {
       test.skip(true, "VITE_TEST_HOOKS=1 non activé");
     }
 
-    const cookies = await page.context().cookies();
-    const sessionCookie = cookies.find((c) => c.name === "w40k_session");
-    if (!sessionCookie) return;
-
-    const stateResp = await page.request.get(`${BACKEND}/api/game/state`, {
-      headers: { Cookie: `w40k_session=${sessionCookie.value}` },
-    });
-    if (stateResp.status() !== 200) return;
-
-    const state = await stateResp.json();
-    const pool: string[] = state.move_activation_pool ?? [];
-    if (pool.length === 0) return;
+    // Chaque abandon silencieux de ce test était un vert vacant : il sortait sans assertion et
+    // comptait comme réussi. Une précondition non remplie est désormais un ÉCHEC — soit le
+    // harnais est en panne, soit le scénario ne met pas en scène ce que ce test prétend vérifier.
+    const state = await lireEtatDePartie(page);
+    const pool: string[] = (state.move_activation_pool as string[]) ?? [];
+    expect(pool.length, "aucune unité éligible : rien à activer, donc rien à prévisualiser")
+      .toBeGreaterThan(0);
 
     // Prendre la première unité du pool et récupérer sa position
-    const units: Array<{ id: number; col: number; row: number }> = state.units ?? [];
+    const units: Array<{ id: number; col: number; row: number }> =
+      (state.units as Array<{ id: number; col: number; row: number }>) ?? [];
     const firstEligible = units.find((u) => pool.includes(String(u.id)));
-    if (!firstEligible) return;
+    expect(firstEligible, "le pool nomme une unité absente de `units` : états incohérents")
+      .toBeDefined();
 
     // Cliquer sur l'unité via hexToScreenCoords (col/row passés depuis Node, pas besoin de __W40K_UNITS__)
     const coords = await page.evaluate(
@@ -290,28 +342,34 @@ test.describe("T12-6 — Preview move hexes via hook", () => {
           row
         );
       },
-      { col: firstEligible.col, row: firstEligible.row }
+      { col: firstEligible!.col, row: firstEligible!.row }
     );
 
-    if (!coords || (coords.x === 0 && coords.y === 0)) {
-      // hexToScreenCoords not available or canvas not yet sized — skip gracefully
-      return;
-    }
+    // Sans coordonnées, il n'y a pas de clic — donc pas de prévisualisation à comparer. C'était
+    // le troisième abandon muet de ce test ; c'est désormais un échec, car un canvas non
+    // dimensionné est une panne du rendu, pas une dispense de vérifier.
+    expect(coords, "hexToScreenCoords n'a rien rendu : le hook ou le canvas est en panne")
+      .not.toBeNull();
+    expect(
+      coords!.x !== 0 || coords!.y !== 0,
+      "hexToScreenCoords rend (0,0) : le canvas n'est pas encore dimensionné"
+    ).toBe(true);
 
-    await page.mouse.click(coords.x, coords.y);
+    await page.mouse.click(coords!.x, coords!.y);
     // Attendre que le hook mette à jour movePreviewHexes (rendu PIXI + useEffect)
     await page.waitForTimeout(800);
 
-    // Lire l'état API après activation
-    const stateAfterResp = await page.request.get(`${BACKEND}/api/game/state`, {
-      headers: { Cookie: `w40k_session=${sessionCookie.value}` },
-    });
-    if (stateAfterResp.status() !== 200) return;
-    const stateAfter = await stateAfterResp.json();
+    const stateAfter = await lireEtatDePartie(page);
     const apiPool: Array<{ col: number; row: number }> =
-      stateAfter.valid_move_destinations_pool ?? [];
+      (stateAfter.valid_move_destinations_pool as Array<{ col: number; row: number }>) ?? [];
 
-    if (apiPool.length === 0) return;
+    // Dernier abandon muet du fichier. Un pool de destinations vide après activation d'une unité
+    // ÉLIGIBLE est une anomalie du moteur — et il rendrait de toute façon la comparaison vide,
+    // donc vraie sans rien prouver.
+    expect(
+      apiPool.length,
+      "aucune destination valide après activation : le moteur n'a rien proposé, la comparaison serait vide"
+    ).toBeGreaterThan(0);
 
     const apiHexKeys = new Set(apiPool.map((h) => `${h.col},${h.row}`));
 
