@@ -70,14 +70,22 @@ _log = logging.getLogger(__name__)
 # enregistrées. Retour à TL05, et les cinq clés restent publiées par le reset (`W40KEngine`, deux
 # dicts) plutôt que d'être retirées du format.
 #
-# ⚠️⚠️ CETTE EXCEPTION NE COUVRE QUE LA CLÉ MORTE, et deux retraits en sortent — les deux BUMPENT :
-#   • la clé qui devient STATIQUE. `game_snapshots.rebuild_game_state` ré-attache les statiques du
-#     live PUIS fait `rebuilt.update(captured["game_state"])` : la valeur PÉRIMÉE de la row écrase
-#     la valeur vivante. Le lecteur ne lève pas, il lit une valeur d'une autre partie.
+# ⚠️⚠️ CETTE EXCEPTION NE COUVRE QUE LA CLÉ MORTE, et UN retrait en sort — il BUMPE :
 #   • la clé qui quitte le reset mais reste CRÉÉE PARESSEUSEMENT et lue en cours de partie. La row
 #     la réinjecte avec sa valeur d'alors, avant que le code vivant ne la pose.
 # La question à se poser n'est donc pas « ajout ou retrait ? » mais « un lecteur consulte-t-il
 # encore cette clé, sous quelque forme que ce soit ? ». Si oui : bump.
+#
+# LA CLÉ QUI DEVIENT STATIQUE NE BUMPE PLUS (2026-09-09). Elle le devait tant que
+# `game_snapshots.rebuild_game_state` ré-attachait les statiques du live PUIS faisait
+# `update(captured["game_state"])` : la valeur PÉRIMÉE de la row écrasait la valeur vivante, et le
+# lecteur ne levait pas, il lisait une valeur d'une autre partie. Ce geste manuel n'était garanti
+# par rien — le seul contrôle qui voyait la migration, `test_save_format_key_contract`, ne couvre
+# que les clés posées par le RESET, et une clé peut devenir statique sans jamais y être passée :
+# `_deploy_pool_set_cache` et `_los_blocking_grids_cache` naissent paresseusement (`W40KEngine`
+# ne fait que les purger), donc hors de sa portée. La règle est désormais DANS le code : une clé
+# statique vient toujours de l'engine vivant, la row ne peut plus la remettre. Verrou :
+# tests/unit/services/test_game_snapshots_static_keys.py.
 _MAGIC = b"W40KTL05"
 _LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04"})
 _LEN = struct.Struct(">Q")  # préfixe de longueur : entier 64 bits big-endian

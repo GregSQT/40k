@@ -103,3 +103,90 @@ def test_an_old_snapshot_without_the_root_key_still_restores_the_zones(engine):
     assert rebuilt["deployment_pools"] == live_pools, (
         "les zones reconstruites ne sont pas celles de l'engine vivant"
     )
+
+
+# --- Le symétrique : une row qui porte une clé AUJOURD'HUI statique ------------------------
+# Le test ci-dessus couvre la row AMPUTÉE (clé absente, reprise du live). Celui-ci couvre la row
+# EN TROP : une save écrite quand la clé était encore mutable, relue après sa migration vers
+# `_GS_STATIC_KEYS`. `rebuild_game_state` ré-attachait les statiques du live PUIS faisait
+# `update(captured["game_state"])` : la valeur périmée gagnait, silencieusement. Personne ne
+# levait — le lecteur ne voyait pas une clé manquante, il lisait la valeur d'une AUTRE partie.
+# Aucune clé n'a encore migré, donc aucune save réelle ne déclenche le cas : il se CONSTRUIT.
+
+
+def _captured_with_static_key(engine, key: str, value):
+    """État capturé par le code courant, puis rétro-daté : on y REMET une clé statique.
+
+    C'est exactement ce que contient une row écrite avant que `key` ne rejoigne
+    `_GS_STATIC_KEYS` — à l'époque, `capture_live_state` la copiait comme n'importe quel mutable.
+    """
+    from services.game_snapshots import _GS_STATIC_KEYS, capture_live_state
+
+    assert key in _GS_STATIC_KEYS, (
+        f"{key!r} n'est pas déclarée statique — le test ne reproduit pas le cas visé"
+    )
+    captured = capture_live_state(engine)
+    assert key not in captured["game_state"], (
+        f"{key!r} est copiée par capture_live_state : elle n'est pas traitée comme statique, "
+        "le rétro-datage ci-dessous ne prouverait rien"
+    )
+    captured["game_state"][key] = value
+    return captured
+
+
+def test_a_row_carrying_a_now_static_key_does_not_overwrite_the_live_value(engine):
+    """La valeur VIVANTE gagne sur celle de la row pour toute clé statique.
+
+    `deployment_pools` sert de porteur : statique, présente au live, et une valeur bidon y est
+    immédiatement reconnaissable.
+    """
+    from services.game_snapshots import rebuild_game_state
+
+    live_pools = engine.game_state["deployment_pools"]
+    captured = _captured_with_static_key(engine, "deployment_pools", {"1": ["ROW PERIMEE"]})
+
+    rebuilt = rebuild_game_state(engine, captured)
+    assert rebuilt["deployment_pools"] == live_pools, (
+        "la row a écrasé la valeur vivante d'une clé statique : le moteur jouerait avec les zones "
+        "de déploiement d'une AUTRE partie, sans que rien ne lève"
+    )
+
+
+def test_the_snapshot_store_shares_that_rule(engine):
+    """Le jumeau en mémoire suit la même règle — les deux chemins ne doivent pas diverger."""
+    from services.game_snapshots import GameSnapshotStore
+
+    store = GameSnapshotStore()
+    gs = engine.game_state
+    live_pools = gs["deployment_pools"]
+    assert store.maybe_capture(engine), "aucun snapshot capturé"
+    key = (int(gs["turn"]), int(gs["current_player"]), str(gs["phase"]))
+    store._get(*key)["game_state"]["deployment_pools"] = {"1": ["ROW PERIMEE"]}
+
+    rebuilt = store.build_game_state(engine, *key)
+    assert rebuilt["deployment_pools"] == live_pools, (
+        "build_game_state laisse la valeur du snapshot écraser la valeur vivante d'une clé statique"
+    )
+
+
+def test_a_lazy_static_key_absent_from_the_live_is_not_resurrected_by_the_row(engine):
+    """Un cache statique que le live n'a pas encore ne se réhydrate PAS depuis la row.
+
+    Le cas dangereux : `hex_los_cache` & co naissent paresseusement. Une row d'avant leur
+    migration en porterait un, calculé sur une AUTRE partie ; le réinjecter donnerait des réponses
+    de LoS fausses là où un cache absent se serait simplement recalculé.
+    """
+    from services.game_snapshots import rebuild_game_state
+
+    absent = object()
+    saved = engine.game_state.pop("hex_los_cache", absent)
+    try:
+        captured = _captured_with_static_key(engine, "hex_los_cache", {"BIDON": True})
+        rebuilt = rebuild_game_state(engine, captured)
+    finally:
+        if saved is not absent:  # fixture de module : l'état vivant est rendu intact
+            engine.game_state["hex_los_cache"] = saved
+    assert "hex_los_cache" not in rebuilt, (
+        "un cache statique périmé a été réinjecté depuis la row alors que le live ne l'avait pas : "
+        "le moteur répondrait des LoS calculées sur une autre partie"
+    )

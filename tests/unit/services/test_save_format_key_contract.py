@@ -29,8 +29,10 @@ des intentions de zone (2026-09-09) a bumpé TL06 sur la foi du message d'échec
 illisibles les parties enregistrées pour rien, avant d'être annulée le même jour. Le danger que la
 magic écarte est un état AMPUTÉ, pas un état qui porte une clé de trop. Le critère est dans
 `services/game_saves._MAGIC` : si plus AUCUN lecteur ne consulte la clé, la laisser publiée par le
-reset, inerte, coûte moins que le refus. Si un lecteur subsiste — clé devenue STATIQUE, ou créée
-paresseusement et lue en cours de partie — la row la réinjecterait avec une valeur périmée : bump.
+reset, inerte, coûte moins que le refus. Si un lecteur subsiste — clé créée paresseusement et lue
+en cours de partie — la row la réinjecterait avec une valeur périmée : bump. La clé devenue
+STATIQUE faisait un troisième cas jusqu'au 2026-09-09 ; elle n'en fait plus un, `rebuild_game_state`
+laissant désormais le live gagner (tests/unit/services/test_game_snapshots_static_keys.py).
 
 Cet interdit était une CONSIGNE et il est désormais un CONTRÔLE : `_FROZEN_FINGERPRINTS` épingle
 le compte et l'empreinte de chaque entrée qui n'est plus la magic courante. Écrire les entrées en
@@ -277,9 +279,11 @@ def test_reset_keys_match_the_current_save_format(reset_mutable_keys: FrozenSet[
         f"RETIRÉES : NE BUMPE PAS par réflexe. Si plus aucun lecteur ne consulte la clé, laisse-la "
         f"publiée par le reset, inerte et commentée comme telle : une row qui porte une clé de "
         f"trop n'a jamais fait lever personne, alors que le bump refuse toutes les parties "
-        f"enregistrées. Bumpe SEULEMENT si un lecteur subsiste — clé devenue STATIQUE (la row "
-        f"écraserait la valeur vivante via game_snapshots.rebuild_game_state) ou créée "
-        f"paresseusement et lue en cours de partie."
+        f"enregistrées. Bumpe SEULEMENT si un lecteur subsiste, c'est-à-dire si la clé est créée "
+        f"paresseusement et lue en cours de partie : la row la réinjecterait avec sa valeur "
+        f"d'alors, avant que le code vivant ne la pose. Une clé qui rejoint _GS_STATIC_KEYS ne "
+        f"bumpe PAS — game_snapshots.rebuild_game_state fait gagner la valeur vivante sur celle "
+        f"de la row."
     )
 
 
