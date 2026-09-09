@@ -92,3 +92,56 @@ def test_in_place_terrain_mutation_invalidates_the_memo():
     # Un étage AJOUTÉ à une aire déjà indexée compte aussi.
     terrain[0]["floors"].append({"level": 2, "height_inches": 7.0, "hexes": [[10, 10]]})
     assert floor_levels_present(terrain) == (1, 2)
+
+
+def test_the_level_by_cell_memo_keeps_its_terrain_alive():
+    """`floor_level_by_cell` garde une référence forte au terrain qu'il indexe.
+
+    Le mémo est clé par `id(terrain_areas)`, comme son jumeau `_floor_index`. Une clé d'adresse
+    n'est sûre que si l'entrée EMPÊCHE la liste d'être libérée : sinon une liste morte rend son
+    adresse à une autre, et la signature de forme (`_floor_signature`, qui ne compte que niveau,
+    hauteur et nombre d'hexes) ne suffit pas à les distinguer — la carte de niveaux d'un terrain
+    serait servie pour un autre, en silence et sans qu'aucun contrôle ne bouge.
+
+    C'est le seul mode de défaillance de ce cache, et il est invisible par construction : on
+    vérifie donc la référence elle-même, pas un symptôme qui n'apparaîtrait qu'au recyclage
+    d'adresse.
+    """
+    from engine.terrain_utils import _FLOOR_LEVEL_BY_CELL_CACHE, floor_level_by_cell
+
+    # Terrain AVEC polygones : un socle rond est confiné par le bord continu de l'étage (13.06),
+    # donc `floor_level_by_cell` en a besoin — c'est la forme que le chargeur produit toujours.
+    terrain = _terrain_with_polys()
+    mapping = floor_level_by_cell(terrain, "round", 1, 0)
+    assert mapping, "aucune cellule d'étage résolue : le test ne prouverait rien"
+
+    entries = [v for v in _FLOOR_LEVEL_BY_CELL_CACHE.values() if v[1] is mapping]
+    assert entries, "la carte rendue n'est pas celle qui a été mémoïsée"
+    assert entries[0][0] is terrain, (
+        "l'entrée du mémo ne retient pas la liste `terrain_areas` : sa clé d'adresse peut "
+        "désigner un autre terrain après recyclage"
+    )
+    assert floor_level_by_cell(terrain, "round", 1, 0) is mapping, "second appel non mémoïsé"
+
+
+def test_the_level_by_cell_memo_follows_an_in_place_mutation():
+    """Muté en place, le terrain ne doit pas continuer à servir la carte de son état précédent.
+
+    Même invariant que son jumeau `_floor_index` ci-dessus, et pour la même raison : la signature
+    de forme est relue à CHAQUE accès, donc un étage ajouté change la clé.
+    """
+    from engine.terrain_utils import floor_level_by_cell
+
+    terrain = _terrain_with_polys()
+    before = dict(floor_level_by_cell(terrain, "round", 1, 0))
+    assert set(before.values()) == {1}, "l'état de départ ne porte pas le seul niveau 1"
+    # Un étage AJOUTÉ au-dessus : les mêmes cellules appartiennent désormais au niveau le plus
+    # haut où le socle tient (13.06 ne connaît pas de position intermédiaire).
+    terrain[0]["floors"].append({
+        "level": 2, "height_inches": 7.0, "hexes": [[10, 10], [11, 10]],
+        "polygon_vertices": [[10, 10], [12, 10], [12, 12], [10, 12]],
+    })
+    after = floor_level_by_cell(terrain, "round", 1, 0)
+    assert set(after.values()) == {2}, (
+        f"la carte mémoïsée décrit un terrain qui n'existe plus : {dict(after)}"
+    )

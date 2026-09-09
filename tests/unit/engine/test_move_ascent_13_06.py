@@ -545,3 +545,80 @@ def test_the_arming_bound_never_steals_a_legal_ascent(board_x1):
         f"offre une cellule posant une figurine sur un plancher — la borne est trop serrée et "
         f"retire une montée légale. 3 premières : {stolen[:3]}"
     )
+
+
+def test_a_squad_already_elevated_keeps_a_mask_that_stays_executable(board_x1):
+    """« Masque ⊆ exécutable » vaut aussi au SECOND tour d'une montée, pas seulement au premier.
+
+    Une figurine qui PART d'un étage et y RESTE ne monte pas : son niveau d'arrivée égale son
+    niveau d'origine. Elle n'emprunte donc ni le champ de montée ni, comme au sol, le champ de
+    plain-pied — elle chemine parmi les obstacles de SON étage, c'est-à-dire à l'intérieur du
+    plancher, hors duquel il n'y a rien à fouler. `explain_move_plan_rejection` la borne bien
+    ainsi (`model_reach_predicate` reçoit le niveau du plan) ; l'érosion du masque, elle, doit
+    interroger le MÊME niveau, sans quoi elle offre le plateau entier à une figurine confinée à
+    une ruine et le moteur lève à l'exécution.
+
+    Le premier tour d'une montée ne montre rien de ce défaut : tout le monde part du sol. C'est
+    la deuxième déclaration consécutive qui l'expose, et c'est ce que ce test met en scène.
+    """
+    from engine.macro_intents import CHOICE_BASE
+    from engine.phase_handlers.shared_utils import (
+        build_rigid_plan, explain_move_plan_rejection,
+    )
+    from tests.unit.engine.test_move_mask_is_executable import _budget_for
+
+    checked = 0
+    failures = []
+    for seed, scenario in SEEDS:
+        # La montée est jouée DÉLIBÉRÉMENT : sous actions aléatoires elle n'arrive que sur 0,8 %
+        # des cellules, donc le cas « déjà en hauteur » ne se présenterait jamais et le test
+        # serait vert à vide.
+        outcome = _play_until_ascent(seed, scenario, declare=True)
+        if outcome is None:
+            continue
+        engine = outcome[0]
+        gs = engine.game_state
+        rng = random.Random(seed)
+        for _ in range(MAX_STEPS):
+            mask = engine.get_action_mask()
+            pending = gs.get("pending_agent_decision")
+            if pending is not None and str(pending.get("type")) == "ascent_declaration":
+                engine.step(CHOICE_BASE)
+                continue
+            live = _live_cell_map(engine)
+            if live is not None:
+                squad_id, cell_map = live
+                alive = [m for m in gs["squad_models"].get(squad_id, []) if m in gs["models_cache"]]
+                # Le cas visé : l'escouade active a DÉJÀ au moins une figurine en hauteur.
+                if any(int(gs["models_cache"][mid]["level"]) > 0 for mid in alive):
+                    for cell_idx, (cell, cost) in cell_map.items():
+                        if not mask[cell_idx]:
+                            continue
+                        budget = _budget_for(gs, squad_id, cost)
+                        if budget is None:
+                            continue
+                        plan = build_rigid_plan(cell[0], cell[1], squad_id, gs)
+                        if plan is None:
+                            continue
+                        checked += 1
+                        reason = explain_move_plan_rejection(
+                            plan, gs, {"budget_per_model": budget}
+                        )
+                        if reason is not None:
+                            failures.append((squad_id, cell, reason))
+            valid = [i for i in range(len(mask)) if mask[i]]
+            if not valid:
+                break
+            _, _, terminated, truncated, _ = engine.step(rng.choice(valid))
+            if terminated or truncated:
+                break
+
+    assert checked > 0, (
+        "aucune activation d'escouade déjà en hauteur : le test n'exerce rien. Sans elle il ne "
+        "prouve pas que le second tour d'une montée reste exécutable."
+    )
+    assert not failures, (
+        f"{len(failures)}/{checked} cellules offertes à une escouade DÉJÀ en hauteur sont refusées "
+        f"par la validation — l'érosion et la validation ne bornent pas au même niveau. "
+        f"3 premières : {failures[:3]}"
+    )
