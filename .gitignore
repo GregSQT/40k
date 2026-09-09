@@ -248,3 +248,10 @@ frontend/test-results/
 # `config/users.db` par `frontend/tests/e2e/global-setup.ts`. Un jeton d'authentification n'entre
 # jamais dans le depot, meme expire.
 frontend/.auth/
+
+# Baselines de regression visuelle Playwright (`toHaveScreenshot`). NON versionnees pour l'instant :
+# une baseline depend du rendu de la machine qui l'a produite (polices, GPU headless), et celle
+# generee le 2026-09-09 pese 810 Ko. Consequence assumee et documentee dans
+# Documentation/Reference/outils/tests.md : au PREMIER run d'une machine, le test ecrit sa baseline
+# et echoue une fois ; il compare ensuite au rendu precedent de CETTE machine.
+frontend/tests/e2e/*-snapshots/
