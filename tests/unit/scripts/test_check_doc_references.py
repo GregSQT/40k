@@ -82,6 +82,94 @@ def test_a_bare_neighbour_resolves_to_the_document_directory(tmp_path: pathlib.P
     assert not broken
 
 
+def _tracked() -> list[str]:
+    """Les fichiers SUIVIS, depuis la même source que le contrôle lui-même."""
+    return [f for f in cdr._git_raw_listing().split("\0") if f]
+
+
+def _directory_of(path: str) -> str:
+    return path.rsplit("/", 1)[0] if "/" in path else ""
+
+
+def test_a_bare_name_outside_the_declared_directories_resolves() -> None:
+    """Un fichier SUIVI au basename unique se résout, même si son dossier n'est pas déclaré.
+
+    `SEARCH_DIRS` énumère à la main les dossiers où chercher un nom NU. Mesuré le 2026-09-09 :
+    **44 dossiers** porteurs de `.py`/`.ts`, soit **435 fichiers**, en étaient absents — tout
+    `frontend/src/`, `tests/unit/scripts`, `tests/unit/services`, `tests/integration/pvp`. Un
+    renvoi nu vers l'un d'eux sortait FICHIER INTROUVABLE sur un fichier qui EXISTE, et c'est le
+    DOCUMENT qui se faisait corriger pour satisfaire le contrôle — c'est arrivé à
+    `ROADMAP_INDEX.md` sur `test_parity_harness.py`.
+
+    Le dépôt sait où vivent ses fichiers ; l'énumération manuelle ne peut que retarder sur lui.
+    Même doctrine que `tracked_suffixes`, dont la liste écrite à la main ignorait `.rs`, `.sql`,
+    `.html` et `.css`.
+
+    UN fichier par dossier non déclaré, pas les 435 : le contrat est « le dossier n'a pas à être
+    déclaré », il se prouve une fois par dossier, et la borne garde le test rapide même sur le
+    chemin lent d'avant le correctif.
+    """
+    counts = cdr.tracked_basenames()
+    declared = set(cdr.SEARCH_DIRS)
+    par_dossier: dict[str, str] = {}
+    for tracked in _tracked():
+        directory = _directory_of(tracked)
+        if directory in declared or not tracked.endswith((".py", ".ts", ".tsx")):
+            continue
+        if counts[tracked.rsplit("/", 1)[-1]] != 1:
+            continue  # un homonyme ne prouverait pas la résolution, il prouverait l'arbitrage
+        par_dossier.setdefault(directory, tracked)
+    assert par_dossier, (
+        "aucun fichier de code hors des dossiers déclarés : l'énumération est vide et le test "
+        "ne prouverait rien (garde anti-vert-vacant)"
+    )
+    for directory, tracked in sorted(par_dossier.items()):
+        name = tracked.rsplit("/", 1)[-1]
+        assert cdr.resolve(name, cdr.DOCS) == ROOT / tracked, (
+            f"`{name}` vit dans `{directory}`, absent de SEARCH_DIRS, et ne se résout pas"
+        )
+
+
+def test_declared_directories_keep_priority_over_the_repository_index() -> None:
+    """Sur un HOMONYME, c'est le dossier DÉCLARÉ qui gagne, pas l'ordre du dépôt.
+
+    72 basenames du dépôt désignent plusieurs fichiers. `SEARCH_DIRS` porte l'ordre de
+    préférence entre eux, et cet ordre est un CHOIX — le remettre au hasard du listing
+    changerait silencieusement le fichier interrogé par la confrontation des symboles. La
+    recherche par index est donc un DERNIER RECOURS : elle ajoute des résolutions, elle n'en
+    déplace aucune.
+    """
+    counts = cdr.tracked_basenames()
+    declared = list(cdr.SEARCH_DIRS)
+    par_nom: dict[str, list[str]] = {}
+    for tracked in _tracked():
+        par_nom.setdefault(tracked.rsplit("/", 1)[-1], []).append(tracked)
+    cas: list[tuple[str, str]] = []
+    for name, paths in par_nom.items():
+        if counts[name] <= 1:
+            continue
+        chez_declares = [p for p in paths if _directory_of(p) in declared]
+        if len(chez_declares) == 1:
+            cas.append((name, chez_declares[0]))
+    assert cas, (
+        "aucun homonyme dont une seule occurrence vit dans un dossier déclaré : le test ne "
+        "prouverait rien (garde anti-vert-vacant)"
+    )
+    for name, attendu in sorted(cas):
+        assert cdr.resolve(name, cdr.DOCS) == ROOT / attendu, (
+            f"`{name}` doit se résoudre dans le dossier déclaré `{_directory_of(attendu)}`"
+        )
+
+
+def test_a_bare_name_absent_from_the_repository_stays_unresolved() -> None:
+    """Chercher plus large ne veut pas dire trouver toujours : l'inexistant reste cassé.
+
+    Contrepartie du test précédent — un index qui rendrait un chemin pour un nom que le dépôt ne
+    porte pas transformerait le contrôle en tampon.
+    """
+    assert cdr.resolve("un_fichier_que_le_depot_ne_porte_pas_9f3c.py", cdr.DOCS) is None
+
+
 def test_link_inside_fenced_block_is_not_checked(tmp_path: pathlib.Path) -> None:
     """Un lien dans un bloc fencé ne doit pas être contrôlé — il n'est pas un renvoi réel."""
     doc = write(tmp_path, "note.md", "```\n[fake](nonexistent.md)\n```\n")
