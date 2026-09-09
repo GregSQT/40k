@@ -37,8 +37,16 @@ from engine.observation_weapon_profiles import (
     WEAPON_RULE_ID_SLOTS,
     WEAPON_RULE_OBS_VOCABULARY,
     encode_squad_weapon_profiles,
+    profile_bin_index,
 )
 from engine.agent_decision import read_pending_agent_decision
+# Lecteurs des points d'arrêt joueur — MÊME source que le masque et le commit. L'obs doit
+# décrire le choix qu'on demande à l'agent (invariant D1), donc elle relit l'état posé par le
+# moteur au lieu de re-tester le sous-état à sa façon.
+from engine.action_decoder import (
+    read_pending_fight_weapon_select,
+    read_pending_shoot_split_target,
+)
 # `macro_intents` est une FEUILLE (constantes de l'espace d'action, aucune dépendance moteur) :
 # l'importer ici ne crée pas de cycle, et c'est la seule façon d'aligner l'index de slot du bloc
 # candidat sur l'action qu'il décrit sans recopier un littéral.
@@ -1767,6 +1775,11 @@ class ObservationBuilder:
                     is not None,
                 )
 
+            # V11 §0.69 — support du choix d'ARME de mêlée : la cible, elle, est déjà désignée.
+            # Aucune garde de phase : le point d'arrêt N'EXISTE qu'en phase de combat, et le ctx
+            # ne porte l'identifiant que pour l'escouade qui frappe (cf. `fight_weapon_target_id`).
+            _b("fight_target_selected", squad_id == ctx["fight_weapon_target_id"])
+
         if is_active:
             # 13.5 et 13.08 restent propres à l'unité observée (cf. le calcul plus haut, qui les
             # a déjà produits dans la même passe que `hidden`).
@@ -2173,6 +2186,17 @@ class ObservationBuilder:
             str(t) for t in _fight_build_valid_target_pool(game_state, active_unit)
         }
 
+        # V11 §0.69 — cible déjà fixée du point d'arrêt de SÉLECTION D'ARME CC. La lecture du
+        # sous-état vit dans `action_decoder` (registre des points d'arrêt joueur), pas ici : une
+        # seconde lecture écrite sur place aurait porté sa propre idée de « sélection en cours ».
+        _pending_fw = read_pending_fight_weapon_select(game_state)
+        _fight_weapon_target_id: Optional[str] = (
+            str(require_key(_pending_fw, "target_id"))
+            if _pending_fw is not None
+            and str(require_key(_pending_fw, "squad_id")) == str(active_squad_id)
+            else None
+        )
+
         # Portée MAXIMALE des armes de tir de l'unité active, en subhexes (V11 §9.5 P4).
         # w["RNG"] est déjà en subhexes (_build_enhanced_unit scale avant le reset).
         # Même échelle que `edge_distance` : directement comparable par la tête pointeur.
@@ -2247,6 +2271,14 @@ class ObservationBuilder:
             # l'escouade entière, qui contient celle de chaque figurine). Il sert donc de garde :
             # hors pool -> 0 sans boucler. Le coût par-figurine n'est payé qu'en mêlée réelle.
             "fight_target_pool": fight_target_pool,
+            # V11 §0.69 — cible DÉJÀ fixée pendant la sélection d'arme CC, ou None hors de ce
+            # point d'arrêt. Lue de la MÊME source que le masque et le commit
+            # (`pending_fight_weapon_select`), jamais re-dérivée : l'obs décrit le choix qu'on
+            # demande à l'agent, et ce choix porte sur l'arme contre CETTE escouade.
+            # Garde d'observateur : la cible n'a de sens que dans l'observation de l'escouade qui
+            # frappe. Construire l'obs d'une autre escouade pendant ce point d'arrêt (PvP, replay)
+            # ne doit désigner personne.
+            "fight_weapon_target_id": _fight_weapon_target_id,
             # V11 §9 P3-2 — garde de phase du bit `charge_reachable_max_roll` : hors charge, la
             # question n'a pas de sens et le plan (coûteux) n'est pas construit.
             "is_charge_phase": str(require_key(game_state, "phase")).lower() == "charge",
@@ -2299,6 +2331,46 @@ class ObservationBuilder:
                 continue  # slot vide/mort : ligne de zéros, le bit `present` porte l'information
             _write_entity("enemies", slot_i, str(esid), is_ally=False, is_active=False)
             _entities_n += 1
+
+        # V11 §0.69 — CONTRÔLE DE SORTIE du bit `fight_target_selected` : pendant la sélection
+        # d'arme CC, la cible désignée occupe forcément un slot ennemi observé — le moteur lève
+        # déjà quand aucun slot ne la mappe (`_continue_squad_fight`, « cible(s) infrappable(s) »)
+        # et `FIGHT_SLOT_COUNT` vaut `K_ENEMY_SLOTS`. Si elle n'y était pas, l'agent choisirait son
+        # arme contre une escouade absente de son observation : erreur explicite, jamais un bit
+        # muet qui laisserait le choix se faire à l'aveugle.
+        if _fight_weapon_target_id is not None and not obs["enemies_bin"][
+            :, unit_bin_index("fight_target_selected")
+        ].any():
+            raise RuntimeError(
+                f"build_squad_observation: cible {_fight_weapon_target_id!r} de "
+                f"`pending_fight_weapon_select` absente des {self.K_ENEMY_SLOTS} slots ennemis "
+                f"de {active_squad_id!r} — l'obs ne peut pas décrire le choix d'arme demandé"
+            )
+
+        # V11 P3-8 — arme ARMÉE du split-fire, quand le point d'arrêt suivant demande sa CIBLE.
+        # Posé ICI, sur le tenseur d'observation, et non dans `encode_weapon_profile` : cet
+        # encodage est mis en cache par (escouade, figurines vivantes), or le point d'arrêt change
+        # sans que la composition bouge — l'écrire dans le cache le rendrait faux au step suivant.
+        # Le slot vient du moteur (`pending_weapon_slot`), jamais re-dérivé du code d'arme.
+        _pending_st = read_pending_shoot_split_target(game_state)
+        if _pending_st is not None and str(require_key(_pending_st, "squad_id")) == str(
+            active_squad_id
+        ):
+            _wslot = require_key(_pending_st, "pending_weapon_slot")
+            if _wslot is None or not (0 <= int(_wslot) < self.K_WEAPONS_RANGED):
+                raise RuntimeError(
+                    f"build_squad_observation: `pending_weapon_slot`={_wslot!r} hors des "
+                    f"{self.K_WEAPONS_RANGED} slots de profils de tir pour {active_squad_id!r} — "
+                    f"rupture entre l'arme armée et le bloc d'armes de l'observation"
+                )
+            _active_wpn_bin = obs["allies_wpn_bin"][0]
+            if float(_active_wpn_bin[int(_wslot)][profile_bin_index("present")]) != 1.0:
+                raise RuntimeError(
+                    f"build_squad_observation: le slot d'arme {int(_wslot)} armé pour "
+                    f"{active_squad_id!r} ne porte aucun profil (slot vide) — l'arme choisie "
+                    f"n'est pas celle que l'observation décrit"
+                )
+            _active_wpn_bin[int(_wslot)][profile_bin_index("shoot_weapon_selected")] = 1.0
 
         if _perf and _t0 is not None:
             _total_s = time.perf_counter() - _t0

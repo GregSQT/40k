@@ -109,11 +109,47 @@ WEAPON_RULE_ID_SLOTS = 6
 # Layout d'UN profil (l'ordre ci-dessous EST l'ordre d'émission).
 #   cont     : NB, ATK, STR, AP, DMG, portée, porteurs vivants, puis les paramètres de règles,
 #              puis le seuil Y+ de [ANTI-X] (0 = aucune règle ANTI).
-#   bin      : le mask du slot, et lui seul.
+#   bin      : cf. `PROFILE_BIN_FIELDS` ci-dessous.
 #   rule_ids : l'ensemble des `obs_id` de règles du profil, trié et paddé à 0.
 PROFILE_STAT_CONT = 7
 PROFILE_CONT_SIZE = PROFILE_STAT_CONT + len(WEAPON_RULE_PARAMS) + 1
-PROFILE_BIN_SIZE = 1
+
+#: Drapeaux d'UN profil d'arme, dans l'ordre d'émission.
+#:
+#: `shoot_weapon_selected` — 1 sur le profil que l'agent VIENT de choisir pendant le split-fire
+#: (P3-8), quand le point d'arrêt suivant lui demande la CIBLE de cette arme
+#: (`pending_shoot_weapon_split` avec `pending_weapon` armé). Rien d'autre ne le disait, MESURÉ le
+#: 2026-09-09 : deux états ne différant que par l'arme armée produisaient des observations
+#: IDENTIQUES au moment du `SHOOT_SLOT`. La politique n'est pas récurrente (MaskablePPO), donc
+#: elle ne se souvient pas du `SHOOT_WEAPON_SEL_SLOT` joué au step précédent : sans ce drapeau,
+#: la cible se choisit sans savoir si l'arme qui va tirer est un fuseur ou un bolter. Jumeau
+#: côté mêlée : `fight_target_selected` (`observation_entities`), qui marque la cible déjà fixée
+#: quand c'est l'arme qui reste à choisir.
+#:
+#: ⚠️ Il n'est PAS écrit par cet encodeur, dont la sortie est MISE EN CACHE par (escouade,
+#: figurines vivantes) — le point d'arrêt, lui, change sans que la composition bouge. C'est
+#: `ObservationBuilder.build_squad_observation` qui le pose sur le tenseur d'observation, après
+#: la copie hors cache, et uniquement sur la ligne de l'escouade OBSERVATRICE : sur toute autre
+#: entité, alliée comme ennemie, la question n'a pas de référent et le drapeau reste à 0.
+#:
+#: `present` reste le DERNIER champ (convention uniforme §0.37) : `ai/spatial_extractor` lit le
+#: masque de profil positionnellement (`wpn_bin[..., -1]`), et un ajout en tête le laisse juste.
+PROFILE_BIN_FIELDS: Tuple[str, ...] = (
+    "shoot_weapon_selected",
+    "present",
+)
+PROFILE_BIN_SIZE = len(PROFILE_BIN_FIELDS)
+
+_PROFILE_BIN_INDEX: Dict[str, int] = {name: i for i, name in enumerate(PROFILE_BIN_FIELDS)}
+
+
+def profile_bin_index(field: str) -> int:
+    """Index d'un drapeau de profil d'arme. Nom inconnu -> KeyError explicite."""
+    if field not in _PROFILE_BIN_INDEX:
+        raise KeyError(
+            f"Drapeau de profil d'arme inconnu : {field!r}. Champs : {PROFILE_BIN_FIELDS}"
+        )
+    return _PROFILE_BIN_INDEX[field]
 
 # Clés d'accès aux listes d'armes, par registre.
 RANGED_KEY = "RNG_WEAPONS"
@@ -253,7 +289,12 @@ def encode_weapon_profile(
     anti_threshold, anti_keyword = anti_rule_of(weapon)
     cont.append(float(anti_threshold))
 
-    binv.append(1.0)  # slot occupé — seul drapeau positionnel restant du profil
+    # Drapeaux du profil : seul `present` se déduit d'ici. `shoot_weapon_selected` dépend du
+    # point d'arrêt courant et NON de la composition de l'escouade — il est posé par
+    # `ObservationBuilder`, hors du cache de profils (cf. `PROFILE_BIN_FIELDS`).
+    slot_bin = [0.0] * PROFILE_BIN_SIZE
+    slot_bin[profile_bin_index("present")] = 1.0  # slot occupé
+    binv.extend(slot_bin)
 
     names = [rule_id for rule_id in WEAPON_RULE_BITS if weapon_has_rule(weapon, rule_id)]
     if anti_keyword is not None:

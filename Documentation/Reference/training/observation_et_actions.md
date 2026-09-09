@@ -24,10 +24,10 @@ lecture, jamais une copie de chiffres qui dériverait.
 | Clé | Forme | Contenu |
 |---|---|---|
 | `global_cont` / `global_bin` | (23,) / (93,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs**, **OC live et statut secured (14.02/14.03) par objectif** ; mon tour, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur, clause du +1 Wound d'Oath ouverte — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `hidden`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
-| `allies_cont` / `allies_bin` | (12, 21) / (12, 27) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent les **mots-clés de catégorie** (`kw_infantry`, `kw_vehicle`, `kw_monster`, `kw_fly`, `kw_psyker`), portés par TOUTE entité, et — pour les ennemis seulement — `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
-| `allies_ability_ids` / `allies_status_ids` | (8, 8) / (8, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../../../config/unit_rules.json) et [`config/unit_statuses.json`](../../../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
-| `allies_wpn_cont` / `_bin` / `_rule_ids` | (8, 20, 13) / (8, 20, 1) / (8, 20, 6) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants, params de règles, et les règles booléennes en **ids** (3ᵉ `EmbeddingBag`, cf. `*_wpn_rule_ids`) |
-| `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
+| `allies_cont` / `allies_bin` | (12, 21) / (12, 28) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent les **mots-clés de catégorie** (`kw_infantry`, `kw_vehicle`, `kw_monster`, `kw_fly`, `kw_psyker`), portés par TOUTE entité, et — pour les ennemis seulement — `los_can_see`, `cover_vs_observer` et `charge_reachable_max_roll` |
+| `allies_ability_ids` / `allies_status_ids` | (12, 8) / (12, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../../../config/unit_rules.json) et [`config/unit_statuses.json`](../../../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
+| `allies_wpn_cont` / `_bin` / `_rule_ids` | (12, 20, 13) / (12, 20, 2) / (12, 20, 6) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants, params de règles, et les règles booléennes en **ids** (3ᵉ `EmbeddingBag`, cf. `*_wpn_rule_ids`) |
+| `allies_types_cont` / `_bin` | (12, 6, 5) / (12, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
 | `self_models_cont` / `_bin` | (20, 2) / (20, 4) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement, **bit de présence** |
 | `grid` | (12, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37). **Centre de la fenêtre** (`ObservationBuilder.squad_grid_anchor`) : l'escouade active — sauf si elle n'est **pas encore posée** (`deployed_on_turn is None`, phase de déploiement), auquel cas c'est un hex de **sa zone de déploiement** ; avant V11 §0.40 la fenêtre était centrée sur la sentinelle `(-1,-1)`, donc sur une autre région du plateau. Deux canaux terminaux : **zones obscurantes** (13.10) — sous-ensemble des cases du couvert, **dilaté du même rayon de socle**, parce que le moteur tranche 13.09 par chevauchement de socle (`compute_models_in_obscuring_terrain` délègue au test disque↔polygone du couvert) ; il vaut ce que le couvert ne dit pas, à savoir où l'on peut devenir `hidden`, donc **intirable** au-delà de la portée de détection. Et **exposition à la vue ennemie** : part des escouades ennemies **vivantes et posées** qui voient la cellule, dans [0,1]. Écrite sur les **cellules du pool de move uniquement**, à l'hexe que le décodeur y enverra (`read_squad_move_cell_map`) — donc **0 hors phase de mouvement**, même doctrine que le coût géodésique, et **aucune seconde réponse cellule→hexe** à côté de celle du décodeur (mesuré : les deux divergent sur 26,7 % des cellules jouables). **Approximation assumée**, identique à celle de l'exposition de déploiement (§0.40 point 3) : la source est l'**ancre au sol** de l'escouade ennemie — pas ses figurines, pas son étage — et le `hidden` 13.09 n'est pas appliqué ; le tracé est `batch_ground_hex_can_see`, verrouillé équivalent à `compute_unit_los` sur les paires SOL. **Sans cache**, par mesure et non par oubli : une carte de visibilité plateau mémoïsée par hexe source rate 26 % du temps (l'ancre ennemie bouge à chaque déplacement ET à chaque perte de figurine) et ne rembourse rien |
@@ -39,7 +39,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (17 091 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (17 763 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (23,)                =      23               │
@@ -47,22 +47,22 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │                                                                        │
 │  MES ESCOUADES — ordre = slots d'activation       K_ALLY_SLOTS = 12    │
 │    allies_cont            (12, 21)             =     252               │
-│    allies_bin             (12, 27)             =     324               │
+│    allies_bin             (12, 28)             =     336               │
 │    allies_ability_ids     (12, 8)              =      96               │
 │    allies_status_ids      (12, 4)              =      48               │
 │    allies_wpn_cont        (12, 20, 13)         =   3 120               │
-│    allies_wpn_bin         (12, 20, 1)          =     240               │
+│    allies_wpn_bin         (12, 20, 2)          =     480               │
 │    allies_wpn_rule_ids    (12, 20, 6)          =   1 440               │
 │    allies_types_cont      (12, 6, 5)           =     360               │
 │    allies_types_bin       (12, 6, 5)           =     360               │
 │                                                                        │
 │  ESCOUADES ENNEMIES — ordre = slots d'action     K_ENEMY_SLOTS = 20    │
 │    enemies_cont           (20, 21)             =     420               │
-│    enemies_bin            (20, 27)             =     540               │
+│    enemies_bin            (20, 28)             =     560               │
 │    enemies_ability_ids    (20, 8)              =     160               │
 │    enemies_status_ids     (20, 4)              =      80               │
 │    enemies_wpn_cont       (20, 20, 13)         =   5 200               │
-│    enemies_wpn_bin        (20, 20, 1)          =     400               │
+│    enemies_wpn_bin        (20, 20, 2)          =     800               │
 │    enemies_wpn_rule_ids   (20, 20, 6)          =   2 400               │
 │    enemies_types_cont     (20, 6, 5)           =     600               │
 │    enemies_types_bin      (20, 6, 5)           =     600               │
@@ -80,12 +80,12 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │    deploy_cand_cont       (8, 8)               =      64               │
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      17 091              │
+│  TOTAL vectoriel (= obs_size)                      17 763              │
 │  + grid  (12, 32, 32) = 12 288, fournie À PART (non comptée)           │
 └────────────────────────────────────────────────────────────────────────┘
 
-Coût d'UNE entité = 21 + 27 (unité) + 8 + 4 (capacités/statuts) + 20 × (13 + 1 + 6) (armes)
-   + 6 × (5 + 5) (types) = 520
+Coût d'UNE entité = 21 + 28 (unité) + 8 + 4 (capacités/statuts) + 20 × (13 + 2 + 6) (armes)
+   + 6 × (5 + 5) (types) = 541
    → le bloc ARMES fait 78 % du vecteur. C'est le seul bloc mémoïsé.
 ```
 
@@ -347,10 +347,17 @@ move » — le seul indice restant était indirect. Une phase hors des 6 **lève
 [s][24]    = charge_reachable_max_roll              # 0.0 / 1.0 — un plan de charge legal existe au jet
                                                     #   MAXIMAL (11.02, 2D6 -> 12) [ENNEMIS seuls, phase
                                                     #   CHARGE seule ; masque = phase_charge]
-[s][25]    = has_ground_model                       # 0.0 / 1.0 — l'unite contient >= 1 figurine AU SOL.
+[s][25]    = fight_target_selected                  # 0.0 / 1.0 — cible DEJA designee du point d'arret
+                                                    #   de selection d'arme CC (§0.69) [ENNEMIS seuls,
+                                                    #   point d'arret seul]. Le choix demande porte sur
+                                                    #   l'ARME : sans ce bit, deux cibles donnaient la
+                                                    #   MEME observation (mesure du 2026-09-09).
+                                                    #   Auto-porteur : aucun bit de contexte global, la
+                                                    #   cible occupe toujours un slot ennemi observe.
+[s][26]    = has_ground_model                       # 0.0 / 1.0 — l'unite contient >= 1 figurine AU SOL.
                                                     #   Predicat EXACT que Plunging Fire (22.05)
                                                     #   interroge sur la CIBLE. Emis pour TOUTE entite.
-[s][26]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
+[s][27]    = present                                # 0.0 / 1.0 — masque d'entite (0 = slot vide ou morte), DERNIER comme dans tous les registres (§0.37)
 ```
 
 #### `*_ability_ids[s]` / `*_status_ids[s]` — ENSEMBLES D'IDENTIFIANTS  ·  jamais normalise
@@ -401,10 +408,17 @@ zero information, alors que le reseau les reconstitue depuis deux informations G
 [s][w][12]    = anti_threshold                         # brut (Y+ de [ANTI-X], 0 = aucune)
 ```
 
-#### `*_wpn_bin[s][w]` — un profil d'arme, 1 drapeau  ·  jamais normalise
+#### `*_wpn_bin[s][w]` — un profil d'arme, 2 drapeaux  ·  jamais normalise
 
 ```python
-[s][w][0]     = mask                                   # 0.0 / 1.0 — 0 = slot d'arme vide
+[s][w][0]     = shoot_weapon_selected                  # 0.0 / 1.0 — arme ARMEE du tir fractionne (P3-8),
+                                                       #   quand le point d'arret suivant demande sa CIBLE
+                                                       #   [ligne 0 des allies seule, point d'arret seul].
+                                                       #   Jumeau tir de fight_target_selected : sans lui,
+                                                       #   deux armes armees donnaient la MEME observation
+                                                       #   (mesure du 2026-09-09). Pose hors du cache de
+                                                       #   profils, qui ne depend que de la composition.
+[s][w][1]     = mask                                   # 0.0 / 1.0 — 0 = slot d'arme vide, DERNIER (§0.37)
 ```
 
 #### `*_wpn_rule_ids[s][w]` — les REGLES d'un profil, 6 slots d'ids  ·  jamais normalise
@@ -702,13 +716,20 @@ T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10, T-F) → 20166 �
 `UNIT_CONT_FIELDS` et `has_ground_model` dans `UNIT_BIN_FIELDS`, 1 × 32 entités chacun +64,
 `elevated` dans `SELF_MODEL_BIN_FIELDS`, 1 bit × 20 figurines +20 ; le canal de grille
 `occupant_level` s'y ajoute HORS de ce compteur, la grille étant fournie à part)
-→ **17091** (candidats de décision discernables, 2026-09-09 : `DECISION_OPTION_CONT_FIELDS` passe
+→ 17091 (candidats de décision discernables, 2026-09-09 : `DECISION_OPTION_CONT_FIELDS` passe
 de 2 à 8 colonnes, soit 6 colonnes de plus × 6 slots de candidat +36 ; le bloc existait depuis
 P3-4 mais n'atteignait aucun réseau — `SpatialCombinedExtractor` ne lisait que
 `decision_options_bin` —, si bien que cinq types de décision sur neuf présentaient des candidats à
 embedding identique, écart mesuré 0.0, donc des logits égaux sous la tête pointeur ; le câblage
 change la largeur d'entrée de `decision_encoder` et imposerait un `--new` même à taille
 d'observation constante).
+→ **17763** (contexte des points d'arrêt à deux temps, 2026-09-09 : `fight_target_selected` dans
+`UNIT_BIN_FIELDS`, 1 bit × 32 entités +32, et `shoot_weapon_selected` dans `PROFILE_BIN_FIELDS`,
+1 bit × 20 profils × 32 entités +640. Les deux moitiés d'un même trou, mesuré : au moment du
+`FIGHT_WEAPON_SLOT` comme du `SHOOT_SLOT` de split-fire, deux états ne différant que par la moitié
+déjà fixée du choix — la cible pour l'un, l'arme pour l'autre — produisaient des observations
+IDENTIQUES, écart maximal 0.0 sur les 28 clés. La politique n'étant pas récurrente, l'arme se
+choisissait sans voir la cible et la cible sans voir l'arme).
 
 **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
 Depuis le chantier 01, une capacité, un statut ou une faction entière n'est qu'un `obs_id` de

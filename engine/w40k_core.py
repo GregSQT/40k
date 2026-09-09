@@ -8259,6 +8259,11 @@ class W40KEngine(gym.Env):
                     "squad_id": sw_squad_id,
                     "shooting_type": _stype,
                     "pending_weapon": None,
+                    # Slot de PROFIL de l'arme armée (index de `collect_weapon_profiles`
+                    # "RNG_WEAPONS", donc du bloc d'armes de l'obs — invariant D1). Écrit ici,
+                    # relu par l'observation pour poser `shoot_weapon_selected` : le code seul
+                    # obligerait l'obs à re-dériver le slot, deux dérivations qui divergeraient.
+                    "pending_weapon_slot": None,
                     "assignments": {},
                     "remaining_weapon_slots": _remaining,
                     "eligible_target_slots": [],
@@ -8286,6 +8291,7 @@ class W40KEngine(gym.Env):
                 )
 
             _pending_sw["pending_weapon"] = _sel_code
+            _pending_sw["pending_weapon_slot"] = weapon_slot
             _pending_sw["eligible_target_slots"] = _elig_ts
             self.game_state[PENDING_SHOOT_WEAPON_SEL_KEY] = _pending_sw
 
@@ -8338,6 +8344,7 @@ class W40KEngine(gym.Env):
 
             _pending_sw2["assignments"][sw2_weapon_code] = _tsid2
             _pending_sw2["pending_weapon"] = None
+            _pending_sw2["pending_weapon_slot"] = None
 
             if _pending_sw2["remaining_weapon_slots"]:
                 # D'autres groupes d'armes restent à assigner.
