@@ -8,19 +8,27 @@ méthodes n'existent plus. La table de blessure vive est celle des handlers
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from engine.observation_builder import ObservationBuilder
 
 
-def _make_builder() -> ObservationBuilder:
-    """Instance minimale avec config obligatoire."""
-    config = {
-        "observation_params": {
-            "obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET,
-        }
-    }
+def _make_builder(obs_params: dict | None = None) -> ObservationBuilder:
+    """Instance minimale : le builder n'exige plus aucun paramètre d'observation.
+
+    `obs_params` sert aux contre-épreuves ci-dessous : il permet de poser un
+    `observation_params` VOLONTAIREMENT périmé et de vérifier qu'il ne change rien.
+    """
+    config: dict = {}
+    if obs_params is not None:
+        config["observation_params"] = obs_params
     return ObservationBuilder(config)
+
+
+def _declared_scalars(builder: ObservationBuilder) -> int:
+    """Somme des scalaires DÉCLARÉS par les formes — la taille réellement produite."""
+    return sum(int(np.prod(shape)) for shape in builder.squad_obs_shapes().values())
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -28,26 +36,31 @@ def _make_builder() -> ObservationBuilder:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestObsBuilderInit:
-    def test_missing_observation_params_raises(self):
-        """obs_init_missing : config sans observation_params → KeyError."""
-        with pytest.raises(KeyError):
-            ObservationBuilder(config={})
+    def test_obs_size_is_derived_from_the_schema_not_the_config(self):
+        """La taille de l'observation vient du schéma d'entités, pas de la config.
 
-    def test_missing_obs_size_raises(self):
-        """obs_init_no_size : observation_params non vide mais sans obs_size → KeyError.
+        Remplace `obs_init_missing` et `obs_init_no_size`, qui vérifiaient que le builder EXIGEAIT
+        un `observation_params.obs_size`. C'était une seconde source de vérité pour un fait que le
+        schéma détermine seul : `w40k_core` confrontait ensuite la valeur recopiée à
+        `SQUAD_OBS_SIZE_TARGET`, qui la déterminait déjà — une boucle fermée, incapable de rien
+        établir, dont la seule issue possible était de retarder sur sa source. La clé n'est plus
+        lue, et ce test le prouve avec une valeur DÉLIBÉRÉMENT périmée : la taille produite ne
+        bouge pas d'un scalaire.
 
-        Le dict doit être NON VIDE : un dict vide échouerait sur le contrôle précédent
-        (`observation_params` absent) et ne prouverait pas que `obs_size` est exigé.
+        Le désaccord modèle/environnement, lui, reste attrapé par SB3 au chargement du `.zip`
+        (`check_for_correct_spaces`), qui compare le Dict ENTIER — donc aussi une DISPOSITION
+        changée à taille égale, ce que le total scalaire ne voyait pas.
         """
-        with pytest.raises(KeyError, match="obs_size"):
-            ObservationBuilder(config={"observation_params": {"unused": 1}})
+        perime = {"obs_size": ObservationBuilder.SQUAD_OBS_SIZE_TARGET - 70}
+        assert _declared_scalars(_make_builder(obs_params=perime)) == (
+            ObservationBuilder.SQUAD_OBS_SIZE_TARGET
+        ), "un obs_size périmé en config a déplacé la taille produite — la clé est encore lue"
 
-    def test_valid_config_initializes(self):
-        """obs_init_ok : config minimale valide → instance créée.
+    def test_config_without_observation_params_initializes(self):
+        """obs_init_ok : plus aucun paramètre d'observation n'est exigé.
 
-        `obs_size` est le SEUL paramètre d'observation restant : les anciens
-        `perception_radius` / `max_nearby_units` / `max_valid_targets` ne servaient qu'au
-        pipeline mono-figurine et ont été supprimés avec lui.
+        La contre-épreuve du test précédent : sans la clé du tout, le builder se construit et
+        produit exactement la même taille. C'est ce que voit la production depuis que la config
+        d'agent ne porte plus `observation_params`.
         """
-        b = _make_builder()
-        assert b.obs_size == ObservationBuilder.SQUAD_OBS_SIZE_TARGET
+        assert _declared_scalars(_make_builder()) == ObservationBuilder.SQUAD_OBS_SIZE_TARGET

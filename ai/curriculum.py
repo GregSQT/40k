@@ -109,9 +109,11 @@ _TRAINING_CONFIG_ROLES: frozenset = frozenset({TRAINING_CONFIG_ROLE_COLD_START, 
 
 #: Cles autorisees au niveau racine de `training_config_overrides` d'une etape learner.
 #: Toute cle absente de cette liste est refusee a la validation du curriculum.
-#: Les cles structurelles (deployment_mode_schedule, obs_size, vec_normalize, n_envs, seed)
-#: ne sont PAS autorisees : elles doivent rester identiques entre toutes les etapes pour
-#: que les modeles soient comparables et que les tests de profil ne divergent pas.
+#: Les cles structurelles (deployment_mode_schedule, vec_normalize, n_envs, seed) ne sont PAS
+#: autorisees : elles doivent rester identiques entre toutes les etapes pour que les modeles
+#: soient comparables et que les tests de profil ne divergent pas. `obs_size` figurait dans cette
+#: liste ; la clé n'existe plus nulle part depuis le 2026-09-09 — la taille de l'observation est
+#: calculee depuis le schema d'entites, donc identique entre etapes par construction.
 #: `deployment_mode_schedule` reste donc hors de cette liste, MAIS sa rampe est figee a sa
 #: valeur terminale pour toute etape reprise a chaud — c'est un comportement porte par
 #: `ai/train.py::_pin_deployment_ramp_for_warm_start`, pas une cle declarable. Le faire en code

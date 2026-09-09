@@ -1421,6 +1421,58 @@ def test_a_short_bold_number_is_not_an_obs_size() -> None:
     assert cdr.claim_obs_size("| `obs_size` | **8** slots | source |") == []
 
 
+# ── Historique d'`obs_size` : domicile UNIQUE de la lignée, donc sous contrôle ───────────────
+
+_HISTORIQUE = """### Historique de `obs_size`
+
+**`obs_size`** = nombre TOTAL de scalaires, grille exclue.
+
+**Historique** : 108 (T6) -> 16735 (`charged`, 2026-08-24)
+-> 16791 (reservations J4/J5 : `AGENT_DECISION_TYPE_SLOTS` 8->16 +8, +160 ailleurs)
+-> **17055** (verticalite du move gym 13.06).
+"""
+
+
+def test_the_history_claims_its_last_link() -> None:
+    """La valeur COURANTE est le dernier maillon EN GRAS, pas le premier ni un nombre de slots.
+
+    Les `8->16` et `+160` des parenthèses explicatives sont des deltas, jamais des tailles : le
+    motif les écarte parce qu'il exige le gras ET quatre chiffres.
+    """
+    assert cdr.claim_obs_size_history(_HISTORIQUE) == [
+        ("dernier maillon de l'historique : **17055**", 17055)
+    ]
+
+
+def test_the_history_is_read_even_when_it_ends_the_document() -> None:
+    """Une chaîne qui termine le fichier reste lue — sans ligne vide finale ni titre suivant.
+
+    Borner la chaîne sur la seule ligne vide qui la SUIT rendait `[]`, que `check_values`
+    traduisait en « ASSERTION ORPHELINE — la phrase a été reformulée, déplacée ou supprimée »
+    alors que la section était intacte : le contrôle accusait le document d'avoir bougé quand
+    c'est lui qui ne savait plus le lire. Un extracteur qui échoue doit désigner le document
+    FAUTIF, jamais un document sain.
+    """
+    sans_fin = _HISTORIQUE.rstrip("\n")
+    assert cdr.claim_obs_size_history(sans_fin) == [
+        ("dernier maillon de l'historique : **17055**", 17055)
+    ]
+    suivi_dun_titre = _HISTORIQUE.rstrip("\n") + "\n#### Suite immédiate\n"
+    assert cdr.claim_obs_size_history(suivi_dun_titre) == [
+        ("dernier maillon de l'historique : **17055**", 17055)
+    ]
+
+
+def test_a_missing_history_section_fails_the_check() -> None:
+    """Section supprimée ou renommée → rien rendu, donc contrôle ROUGE.
+
+    C'est la règle du module (« une assertion qui ne retrouve plus sa cible est une erreur, pas
+    un silence ») appliquée au domicile unique de la lignée : le supprimer ne doit pas rendre le
+    contrôle vert.
+    """
+    assert cdr.claim_obs_size_history("## Autre chose\n\n**Historique** : 108 -> **17055**.\n") == []
+
+
 def test_value_only_documents_are_clean_and_stay_out_of_the_entry_corpus() -> None:
     """Les documents à valeurs seules EXISTENT, passent la passe 3, et n'entrent pas ailleurs.
 
@@ -1743,94 +1795,3 @@ def test_symbol_kinds_inside_fenced_code_block_are_ignored(tmp_path: pathlib.Pat
     _checked, _unverifiable, broken, _notes = cdr.check_symbol_kinds(doc)
     assert not broken, broken
 
-
-def _profiles_with(justification: str, obs_size: int) -> dict[str, dict]:
-    """Un profil résolu minimal, tel que `agent_profiles` le rend au contrôle."""
-    return {"faux": {"observation_params": {"justification": justification, "obs_size": obs_size}}}
-
-
-def _real_grid() -> str:
-    from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
-
-    return f"{GRID_SIZE}x{GRID_SIZE}x{GRID_CHANNELS}"
-
-
-def _coherent_justification(obs_size: int) -> str:
-    return (
-        f"VALEUR COURANTE : {obs_size} (date), lignee verifiee 16659 -> 16791 -> {obs_size} ; "
-        f"la grille {_real_grid()} (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part."
-    )
-
-
-def test_config_justification_contradiction_is_detected(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Le cas vécu : l'en-tête annonçait 16971 pendant que `obs_size` du même bloc valait 17055.
-
-    Trois livraisons d'observation ont franchi cette contradiction sans qu'aucun contrôle la voie.
-    """
-    justification = _coherent_justification(16971)
-    monkeypatch.setattr(cdr, "agent_profiles", lambda: _profiles_with(justification, 17055))
-    _verified, broken = cdr.check_config_justification()
-    assert any(
-        "CONTRADICTION INTERNE" in entry
-        and "annonce 16971 en valeur courante" in entry
-        and "obs_size = 17055" in entry
-        for entry in broken
-    ), broken
-
-
-def test_config_justification_stale_lineage_tail_is_detected(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """La lignée doit FINIR sur `obs_size` : s'arrêter au maillon précédent est une contradiction."""
-    justification = (
-        "VALEUR COURANTE : 17055 (date), lignee verifiee 16659 -> 16791 -> 16971 ; "
-        f"la grille {_real_grid()} (GRID_CHANNELS, engine/spatial_grid.py) restant fournie."
-    )
-    monkeypatch.setattr(cdr, "agent_profiles", lambda: _profiles_with(justification, 17055))
-    _verified, broken = cdr.check_config_justification()
-    assert any(
-        "annonce 16971 en dernier maillon de la lignée" in entry for entry in broken
-    ), broken
-
-
-def test_config_justification_stale_grid_is_detected(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`32x32x11` a survécu au passage de `GRID_CHANNELS` à 12 dans la phrase qui l'annonçait."""
-    justification = (
-        "VALEUR COURANTE : 17055 (date), lignee verifiee 16791 -> 17055 ; "
-        "la grille 32x32x11 (GRID_CHANNELS, engine/spatial_grid.py) restant fournie a part."
-    )
-    monkeypatch.setattr(cdr, "agent_profiles", lambda: _profiles_with(justification, 17055))
-    _verified, broken = cdr.check_config_justification()
-    assert any(
-        "annonce 32x32x11 en grille" in entry and _real_grid() in entry for entry in broken
-    ), broken
-
-
-def test_config_justification_orphan_assertion_is_reported(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Anti-vert-vacant : reformuler la justification ne doit pas désarmer le contrôle."""
-    monkeypatch.setattr(
-        cdr, "agent_profiles", lambda: _profiles_with("plus aucune des formules surveillees", 17055)
-    )
-    verified, broken = cdr.check_config_justification()
-    assert verified == 0
-    assert len(broken) == len(cdr._JUSTIFICATION_CLAIMS) + 1
-    assert all("ASSERTION ORPHELINE" in entry for entry in broken), broken
-
-
-def test_config_justification_empty_profiles_is_not_a_pass(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """VERT VACANT : « 0 contradiction » sur une énumération vide ne prouve rien."""
-    monkeypatch.setattr(cdr, "agent_profiles", dict)
-    with pytest.raises(cdr.SourceUnavailable):
-        cdr.check_config_justification()
-
-
-def test_config_justification_matches_the_real_config() -> None:
-    """Bout en bout, sur la config réelle : chaque profil dit ce que son propre bloc déclare."""
-    verified, broken = cdr.check_config_justification()
-    assert not broken, broken
-    expected = len(cdr.agent_profiles()) * (len(cdr._JUSTIFICATION_CLAIMS) + 1)
-    assert verified == expected, f"{verified} confirmées pour {expected} attendues"

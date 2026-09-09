@@ -10,12 +10,13 @@
 
 ## ⚠️ Interface agent
 
-> Les mentions **`obs_size: 355`** (et `323`, `313`, `150`) qui subsistent dans des docs ou configs
-> **historiques** décrivent des layouts périmés. L'interface réelle est celle-ci :
+> Les mentions **`obs_size: 355`** (et `323`, `313`, `150`) qui subsistent dans des docs
+> **historiques** décrivent des layouts périmés. Aucune config n'en porte plus : `obs_size` est
+> calculé, jamais déclaré. L'interface réelle est celle-ci :
 >
 > | | Valeur en vigueur | Source de vérité (à relire, jamais à recopier) |
 > |---|---|---|
-> | `obs_size` | **17 055** (2026-09-09 — verticalité du move gym 13.06 : l'agent peut finir un move en hauteur, donc l'observation porte la hauteur — `max_floor_height` dans `UNIT_CONT_FIELDS` et `has_ground_model` dans `UNIT_BIN_FIELDS` (+64 = 2 × 32 entités), `elevated` dans `SELF_MODEL_BIN_FIELDS` (+20 = 1 bit × 20 figurines) = +84 ; s'y ajoute HORS `obs_size` le canal de grille `occupant_level`, `GRID_CHANNELS` 11 → 12, la grille étant fournie à part ; 16 971 avant, 2026-09-09 — mots-clés de catégorie (`kw_infantry`, `kw_vehicle`, `kw_monster`, `kw_fly`, `kw_psyker` dans `UNIT_BIN_FIELDS`, +160) ; 16 811 avant, 2026-09-08 — chantier OC live + secured : `objective_my_oc_{0..4}` / `objective_enemy_oc_{0..4}` dans `GLOBAL_CONT_FIELDS` (OC live 14.02 sur positions courantes) + `objective_secured_mine_{0..4}` / `objective_secured_enemy_{0..4}` dans `GLOBAL_BIN_FIELDS` (statut secured 14.03) = +10 cont + +10 bin = +20 scalaires ; 16 791 avant, 2026-08-31 — réservations J4/J5 : `AGENT_DECISION_TYPE_SLOTS` 8→16 +8, `reserved_mission_cont_0..15` dans `GLOBAL_CONT_FIELDS` +16, `reserved_mission_bin_0..31` dans `GLOBAL_BIN_FIELDS` +32 = +56 total ; 16 735 avant, 2026-08-24 — `charged` ajouté à `UNIT_BIN_FIELDS`, slot réservé §15.08/§15.11, +32 = 1 bit × 32 entités ; 16 703 avant, 2026-08-19 — V11 §9.5 P4 : `effective_range`, la portée max de tir de l'unité active en subhexes, entre dans `UNIT_CONT_FIELDS`, soit +32 = 1 scalaire × 32 entités ; 16 671 avant, V11 §9.4 P3-4 : `decision_options_cont`, 6 candidats × 2 scalaires ; 16 659 avant lui, V11 §0.48 `L2` : `K_ALLY_SLOTS` 8 → 12, une ligne alliée par action d'activation, +2 044 scalaires et **0 paramètre**) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) ; porté par `config/agents/<agent>/<agent>_training_config.json` → `observation_params`. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
+> | `obs_size` | **17 055** (2026-09-09 — verticalité du move gym 13.06 : `max_floor_height` et `has_ground_model` par entité +64, `elevated` par figurine +20 ; le canal de grille `occupant_level` s'y ajoute HORS de ce compteur) | `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, **calculé** depuis le schéma d'entités (`engine/observation_entities.py`) — **aucune config ne le déclare**. Lignée complète : [observation_et_actions.md#historique-de-obs_size](observation_et_actions.md#historique-de-obs_size), domicile unique. Confronté à la source par `scripts/check_doc_references.py` (passe valeurs) |
 > | espace d'action | **1 389** (1 024 cellules grille + 1 wait + 20 tir + 20 charge mono-cible + 190 charge multi-cibles + 20 mêlée + 1 fight sans cible + 20 tir indirect + 15 zone intents + 6 `CHOICE_i` + 20 Oath + 12 activation + 10 arme mêlée + 20 cohérence + 10 sélection arme tir + 9 slots passe 2 chantier 06) | `engine/macro_intents.py` (`TOTAL_ACTION_SIZE`) |
 >
 > - **L'observation n'est plus un vecteur** : c'est un `Dict` de **tenseurs d'entités** (chaque
@@ -36,9 +37,14 @@
 >   `ai/` est un bug de revue (rupture R5).
 > - `action_space_size` **n'est plus configuré** : la taille est DÉRIVÉE du moteur. Le recopier en
 >   config créait une seconde source de vérité qui ne pouvait qu'avoir tort.
+> - `obs_size` **n'est plus configuré** non plus, et pour la même raison : la taille est calculée
+>   depuis le schéma d'entités. La config la recopiait, le moteur confrontait la copie à la
+>   valeur qui la déterminait — une boucle qui ne pouvait que retarder. Clé supprimée le
+>   2026-09-09.
 > - **Aucun modèle antérieur n'est réutilisable** (layout obs + stats VecNormalize) : tout run se
->   fait avec `--new`. Un `obs_size` périmé en config **lève désormais à l'init du moteur**, en
->   citant la valeur attendue.
+>   fait avec `--new`. Un modèle dont l'observation ne correspond plus **est refusé au
+>   chargement** par SB3 (`check_for_correct_spaces`), et l'acquittement HUMAIN du retrain vit
+>   dans `tests/unit/engine/test_deployment_observation_contract.py`.
 >
 > Source : `Documentation/Chantiers/v11/index_v11.md` (rupture R8, hygiène T6) et
 > `observation_et_actions.md` (§0.30, tranches T-A→T-F).
@@ -506,10 +512,6 @@ Règles:
       "model_gating_min_combined": 0.55,
       "model_gating_min_worst_bot": 0.45,
       "model_gating_min_worst_scenario_combined": 0.45
-    },
-
-    "observation_params": {
-      "obs_size": 17055
     },
 
     "model_params": {
@@ -1015,9 +1017,10 @@ scp -r remote:tensorboard/x5_new_* ./tensorboard/
 
 ### Common Errors
 
-**Error**: `Observation size mismatch`
-- **Cause**: modèle entraîné avec un layout obs différent
-- **Fix**: entraîner un nouveau modèle avec le `obs_size` cible (`--new`)
+**Error**: `Observation spaces do not match` (SB3, au chargement du `.zip`)
+- **Cause**: modèle entraîné avec un layout obs différent — rien à corriger en config,
+  `obs_size` n'y est plus déclaré
+- **Fix**: entraîner un nouveau modèle (`--new`)
 
 **Error**: `Reward key not found: SpaceMarineXXX`
 - **Cause**: archétype d'unité absent du rewards config agent

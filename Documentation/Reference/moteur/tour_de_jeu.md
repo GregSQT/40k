@@ -55,8 +55,9 @@ Round N :
   phase (pool d'activation vide).
 - **Pipeline d'exécution gym** : `_process_squad_action` (`engine/w40k_core.py`).
   Tailles d'espaces — ne jamais les recopier : lire `TOTAL_ACTION_SIZE` dans
-  `engine/macro_intents.py`, et `observation_params.obs_size` dans la training config de l'agent
-  (`config/agents/<agent>/<agent>_training_config.json`, exigée sans défaut par `W40KEngine`).
+  `engine/macro_intents.py`, et `obs_size` dans
+  `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` (`engine/observation_builder.py`), qui le CALCULE
+  depuis le schéma d'entités. Aucune config ne le déclare.
 
 ### Conventions de nommage des champs (Field Naming Logic)
 

@@ -30,7 +30,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 | `allies_types_cont` / `_bin` | (8, 6, 5) / (8, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
 | `self_models_cont` / `_bin` | (20, 2) / (20, 4) | ce qui est irréductiblement individuel : position relative, éligibilité au combat, engagement, **bit de présence** |
-| `grid` | (12, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37). **Centre de la fenêtre** (`ObservationBuilder.squad_grid_anchor`) : l'escouade active — sauf si elle n'est **pas encore posée** (`deployed_on_turn is None`, phase de déploiement), auquel cas c'est un hex de **sa zone de déploiement** ; avant V11 §0.40 la fenêtre était centrée sur la sentinelle `(-1,-1)`, donc sur une autre région du plateau. Trois canaux terminaux : **zones obscurantes** (13.10) — sous-ensemble des cases du couvert, **dilaté du même rayon de socle**, parce que le moteur tranche 13.09 par chevauchement de socle (`compute_models_in_obscuring_terrain` délègue au test disque↔polygone du couvert) ; il vaut ce que le couvert ne dit pas, à savoir où l'on peut devenir `hidden`, donc **intirable** au-delà de la portée de détection. Et **exposition à la vue ennemie** : part des escouades ennemies **vivantes et posées** qui voient la cellule, dans [0,1]. Écrite sur les **cellules du pool de move uniquement**, à l'hexe que le décodeur y enverra (`read_squad_move_cell_map`) — donc **0 hors phase de mouvement**, même doctrine que le coût géodésique, et **aucune seconde réponse cellule→hexe** à côté de celle du décodeur (mesuré : les deux divergent sur 26,7 % des cellules jouables). **Approximation assumée**, identique à celle de l'exposition de déploiement (§0.40 point 3) : la source est l'**ancre au sol** de l'escouade ennemie — pas ses figurines, pas son étage — et le `hidden` 13.09 n'est pas appliqué ; le tracé est `batch_ground_hex_can_see`, verrouillé équivalent à `compute_unit_los` sur les paires SOL. **Sans cache**, par mesure et non par oubli : une carte de visibilité plateau mémoïsée par hexe source rate 26 % du temps (l'ancre ennemie bouge à chaque déplacement ET à chaque perte de figurine) et ne rembourse rien. Enfin **niveau des occupants** (13.06) : l'étage de qui se tient sur la cellule, normalisé par le niveau maximal déclaré par le terrain — **même échelle que le canal de niveau**, les deux se lisant ensemble (« il y a un plancher ici » / « quelqu'un s'y tient »). **Non dérivable** de ce canal de niveau, qui décrit le TERRAIN et non ses occupants : dès qu'une figurine peut finir en hauteur (13.06, verticalité du move gym), les trois canaux d'occupation deviennent **ambigus** — ils peignent à plat une figurine à l'étage sur une case dont le SOL reste libre, donc annoncent un blocage qui n'existe pas. Ce canal est ce qui les désambiguïse ; ce n'est pas un supplément d'information, c'est la correction d'une observation devenue fausse. Canal **séparé** plutôt qu'une graduation des canaux d'occupation, qui mêlerait « qui est là » et « à quelle hauteur » dans le même plan. **0 partout** tant que le terrain ne déclare aucun étage ou que personne n'est en hauteur |
+| `grid` | (12, 32, 32) | grille égocentrique : murs, **autres** escouades amies, ennemis, EZ, objectifs, niveau, couvert, **l'escouade active seule** (§0.32 T-L), **coût géodésique du pool de move** — encodé avec la frontière normal/advance à **0,5 exactement** (§0.32 T-K) ; escouade **engagée** : tout move est un Fall Back qui coûte le tir → toutes les cellules peintes sont **au-dessus de 0,5** (§0.37). **Centre de la fenêtre** (`ObservationBuilder.squad_grid_anchor`) : l'escouade active — sauf si elle n'est **pas encore posée** (`deployed_on_turn is None`, phase de déploiement), auquel cas c'est un hex de **sa zone de déploiement** ; avant V11 §0.40 la fenêtre était centrée sur la sentinelle `(-1,-1)`, donc sur une autre région du plateau. Deux canaux terminaux : **zones obscurantes** (13.10) — sous-ensemble des cases du couvert, **dilaté du même rayon de socle**, parce que le moteur tranche 13.09 par chevauchement de socle (`compute_models_in_obscuring_terrain` délègue au test disque↔polygone du couvert) ; il vaut ce que le couvert ne dit pas, à savoir où l'on peut devenir `hidden`, donc **intirable** au-delà de la portée de détection. Et **exposition à la vue ennemie** : part des escouades ennemies **vivantes et posées** qui voient la cellule, dans [0,1]. Écrite sur les **cellules du pool de move uniquement**, à l'hexe que le décodeur y enverra (`read_squad_move_cell_map`) — donc **0 hors phase de mouvement**, même doctrine que le coût géodésique, et **aucune seconde réponse cellule→hexe** à côté de celle du décodeur (mesuré : les deux divergent sur 26,7 % des cellules jouables). **Approximation assumée**, identique à celle de l'exposition de déploiement (§0.40 point 3) : la source est l'**ancre au sol** de l'escouade ennemie — pas ses figurines, pas son étage — et le `hidden` 13.09 n'est pas appliqué ; le tracé est `batch_ground_hex_can_see`, verrouillé équivalent à `compute_unit_los` sur les paires SOL. **Sans cache**, par mesure et non par oubli : une carte de visibilité plateau mémoïsée par hexe source rate 26 % du temps (l'ancre ennemie bouge à chaque déplacement ET à chaque perte de figurine) et ne rembourse rien |
 
 ### Vue d'ensemble
 
@@ -644,10 +644,27 @@ trop longtemps ne lève rien, il décrit un état périmé. L'inventaire est ver
 
 ### Historique de `obs_size`
 
-**`obs_size`** (config d'agent, `observation_params.obs_size`) = nombre TOTAL de scalaires,
-grille exclue — calculé par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET`. Toute évolution du
-schéma change cette valeur et rend les `.zip` existants incompatibles : le retrain `--new` est
-obligatoire.
+**`obs_size`** = nombre TOTAL de scalaires, grille exclue — **calculé** par
+`ObservationBuilder.SQUAD_OBS_SIZE_TARGET` depuis le schéma d'entités
+(`engine/observation_entities.py`). Il ne se déclare **nulle part** : la config d'agent en
+portait une copie sous `observation_params.obs_size`, que le moteur confrontait ensuite à la
+valeur calculée — une boucle fermée dont la seule issue possible était de retarder sur sa
+propre source. La clé a été supprimée le 2026-09-09.
+
+Toute évolution du schéma change cette valeur et rend les `.zip` existants incompatibles : le
+retrain `--new` est obligatoire. Deux mécanismes distincts le disent, et aucun ne remplace
+l'autre :
+
+- **la MACHINE** — SB3 compare l'espace d'observation ENTIER au chargement d'un modèle
+  (`check_for_correct_spaces`), donc il voit aussi un changement de disposition à taille
+  égale, ce qu'un total scalaire ne savait pas faire ;
+- **l'HUMAIN** — `tests/unit/engine/test_deployment_observation_contract.py`
+  (`test_squad_obs_size_target_matches_the_schema`) tombe rouge en nommant l'ancienne valeur,
+  la nouvelle et le coût du retrain. C'est le seul point d'acquittement : rien d'autre
+  n'oblige plus personne à CONSTATER qu'une taille a bougé.
+
+**Cette chaîne est le domicile UNIQUE de la lignée**, et son dernier maillon est confronté à
+la source calculée par `scripts/check_doc_references.py` : y oublier un maillon est rouge.
 
 **Historique** : 108 (T6) → 199 → 1011 (profils d'armes et règles) → 5729 (tenseurs d'entités,
 T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10, T-F) → 20166 → 20181 → 20545
@@ -658,14 +675,16 @@ T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10, T-F) → 20166 �
 → 16791 (réservations J4/J5, 2026-08-31 : `AGENT_DECISION_TYPE_SLOTS` 8→16 +8,
 `reserved_mission_cont_0..15` dans `GLOBAL_CONT_FIELDS` +16,
 `reserved_mission_bin_0..31` dans `GLOBAL_BIN_FIELDS` +32)
-→ 16811 (OC live + secured, 2026-09-08 : `objective_my_oc_{0..4}` et
-`objective_enemy_oc_{0..4}` dans `GLOBAL_CONT_FIELDS` +10,
-`objective_secured_mine_{0..4}` / `objective_secured_enemy_{0..4}` dans `GLOBAL_BIN_FIELDS` +10)
-→ 16971 (mots-clés de catégorie, 2026-09-09 : `kw_infantry`, `kw_vehicle`, `kw_monster`,
-`kw_fly`, `kw_psyker` dans `UNIT_BIN_FIELDS`, 5 bits × 32 entités +160)
+→ 16811 (OC live et `secured` par objectif, 14.02/14.03, 2026-09-08 :
+`objective_my_oc_0..4` et `objective_enemy_oc_0..4` dans `GLOBAL_CONT_FIELDS` +10,
+`objective_secured_mine_0..4` et `objective_secured_enemy_0..4` dans `GLOBAL_BIN_FIELDS` +10
+— les champs GLOBAUX comptent UNE fois, pas par entité)
+→ 16971 (mots-clés de catégorie par entité, 2026-09-09 : `kw_infantry`, `kw_vehicle`,
+`kw_monster`, `kw_fly`, `kw_psyker` dans `UNIT_BIN_FIELDS`, 5 bits × 32 entités +160)
 → **17055** (verticalité du move gym 13.06, 2026-09-09 : `max_floor_height` dans
-`UNIT_CONT_FIELDS` et `has_ground_model` dans `UNIT_BIN_FIELDS` +64 = 2 × 32 entités,
-`elevated` dans `SELF_MODEL_BIN_FIELDS` +20 = 1 bit × 20 figurines).
+`UNIT_CONT_FIELDS` et `has_ground_model` dans `UNIT_BIN_FIELDS`, 1 × 32 entités chacun +64,
+`elevated` dans `SELF_MODEL_BIN_FIELDS`, 1 bit × 20 figurines +20 ; le canal de grille
+`occupant_level` s'y ajoute HORS de ce compteur, la grille étant fournie à part).
 
 **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
 Depuis le chantier 01, une capacité, un statut ou une faction entière n'est qu'un `obs_id` de

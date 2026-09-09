@@ -849,8 +849,8 @@ def agent_profiles() -> dict[str, dict]:
 
     Résolus et non bruts : un profil peut hériter d'un autre (`extends`, cf.
     `config_loader::_resolve_profile_extends`) et ne redéclarer que ce qui change. Son JSON brut
-    n'a alors ni `n_envs` ni `observation_params`, et les fonctions ci-dessous lèveraient un
-    `KeyError` sur un profil parfaitement valide — ce que le run, lui, résout sans broncher.
+    n'a alors pas de `n_envs`, et les fonctions ci-dessous lèveraient un `KeyError` sur un profil
+    parfaitement valide — ce que le run, lui, résout sans broncher.
     """
     from config_loader import get_config_loader
 
@@ -918,6 +918,42 @@ def claim_obs_size(text: str) -> list[tuple[str, int]]:
     found += [(m.group(0).strip(), int(m.group(1)))
               for m in re.finditer(r'`"obs_size":\s*(\d+)`', text)]
     return found
+
+
+def claim_obs_size_history(text: str) -> list[tuple[str, int]]:
+    """La valeur COURANTE annoncée par la chaîne « Historique de `obs_size` ».
+
+    La lignée d'`obs_size` vivait recopiée à trois endroits — la `justification` de la config
+    d'agent, la docstring du garde-fou d'acquittement, et cette section. Aucune n'était sous
+    contrôle : ce script ne vérifiait que la valeur EN GRAS de la ligne de tableau
+    d'`entrainement.md`, jamais la chaîne. Les trois ont dérivé, et cette section s'est arrêtée
+    à 16791 pendant que le même document annonçait 17 055 vingt lignes plus haut.
+
+    La lignée n'a plus qu'un domicile, celui-ci, et son dernier maillon est désormais confronté
+    à la source calculée : oublier d'ajouter un maillon devient rouge.
+
+    Le dernier maillon est repéré par son GRAS, convention déjà tenue par la section (la valeur
+    courante y est en gras, les maillons dépassés non). Le motif refuse les nombres courts, ce
+    qui écarte les `8→16` et `+160` des parenthèses explicatives.
+
+    La chaîne se termine sur une ligne vide, un titre OU la fin du fichier. Borner sur la seule
+    ligne vide rendait `[]` — donc « ASSERTION ORPHELINE, la phrase a été reformulée » — pour une
+    section parfaitement intacte qui se trouvait terminer le document : un contrôle qui accuse le
+    document d'avoir bougé quand c'est lui qui ne sait plus lire.
+    """
+    section = re.search(r"^### Historique de `obs_size`.*?(?=^#{1,6} |\Z)", text, re.S | re.M)
+    if section is None:
+        return []
+    chaine = re.search(r"\*\*Historique\*\* :.*?(?=\n\s*\n|\n#{1,6} |\Z)",
+                       section.group(0), re.S)
+    if chaine is None:
+        return []
+    maillons = list(re.finditer(rf"\*\*{_BOLD_INTEGER}\*\*", chaine.group(0)))
+    if not maillons:
+        return []
+    dernier = maillons[-1]
+    return [(f"dernier maillon de l'historique : {dernier.group(0)}",
+             integers_in(dernier.group(1))[0])]
 
 
 def claim_profile_table(text: str) -> list[tuple[str, int]]:
@@ -1002,10 +1038,48 @@ def expected_n_envs() -> object:
 
 
 def expected_obs_size() -> object:
-    values = {profile["observation_params"]["obs_size"] for profile in agent_profiles().values()}
-    if len(values) != 1:
-        raise LookupError(f"les profils ne partagent pas un même obs_size : {sorted(values)}")
-    return values.pop()
+    """`ObservationBuilder.SQUAD_OBS_SIZE_TARGET`, chargé avec ROOT dans sys.path.
+
+    Cette fonction lisait `observation_params.obs_size` dans les profils d'agent. Elle
+    confrontait donc les documents à une valeur RECOPIÉE À LA MAIN, jamais à celle que le code
+    calcule : deux documents pouvaient s'accorder sur un chiffre faux sans que rien ne le voie,
+    et c'est arrivé — la prose qui accompagnait la clé est restée en retard deux livraisons de
+    suite. La clé n'existe plus : la taille est calculée depuis le schéma d'entités, et c'est
+    elle que les documents doivent annoncer.
+
+    `observation_builder.py` importe numpy et le reste du moteur — ROOT doit être dans sys.path,
+    comme pour `macro_intents.py`.
+    """
+    import sys as _sys
+
+    root_str = str(ROOT)
+    already = root_str in _sys.path
+    if not already:
+        _sys.path.insert(0, root_str)
+    try:
+        path = ROOT / "engine" / "observation_builder.py"
+        spec = importlib.util.spec_from_file_location("_obs_builder_for_docs", path)
+        if spec is None or spec.loader is None:
+            raise SourceUnavailable(f"{path} : module illisible")
+        module = importlib.util.module_from_spec(spec)
+        _sys.modules[spec.name] = module
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        builder = getattr(module, "ObservationBuilder", None)
+        if builder is None or not hasattr(builder, "SQUAD_OBS_SIZE_TARGET"):
+            raise SourceUnavailable(
+                "ObservationBuilder.SQUAD_OBS_SIZE_TARGET absent de engine/observation_builder.py"
+            )
+        return int(builder.SQUAD_OBS_SIZE_TARGET)
+    except SourceUnavailable:
+        raise
+    except Exception as error:
+        raise SourceUnavailable(
+            f"engine/observation_builder.py ne se charge pas : {error}"
+        ) from error
+    finally:
+        _sys.modules.pop("_obs_builder_for_docs", None)
+        if not already and root_str in _sys.path:
+            _sys.path.remove(root_str)
 
 
 def expected_profile_field(key: str) -> object:
@@ -1153,6 +1227,9 @@ VALUE_CHECKS: dict[str, dict[str, ValueCheck[Any]]] = {
     },
     "observation_et_actions.md": {
         "dimensions allies_cont/allies_bin": (claim_allies_dims, expected_allies_dims),
+        "dernier maillon de l'historique d'obs_size": (
+            claim_obs_size_history, lambda _claim: expected_obs_size(),
+        ),
     },
 }
 
@@ -1729,102 +1806,6 @@ def report_accumulation() -> tuple[bool, list[str]]:
     return broken, lines
 
 
-#: Ce que `observation_params.justification` ANNONCE, et qui est confrontable au bloc qui la porte.
-#: Motifs ancrés sur la FORMULE et non sur une position : la justification est un paragraphe libre,
-#: et un contrôle qui compterait des positions se déroberait à la première reformulation.
-_JUSTIFICATION_CLAIMS: tuple[tuple[str, str], ...] = (
-    ("valeur courante", r"VALEUR COURANTE\s*:\s*(\d{4,})"),
-    ("dernier maillon de la lignée", r"lignee verifiee\s+(?:\d{4,}\s*->\s*)*(\d{4,})"),
-)
-
-#: La grille, annoncée dans la même phrase que l'encodeur partagé.
-_JUSTIFICATION_GRID = r"la grille (\d+x\d+x\d+)"
-
-
-def check_config_justification() -> tuple[int, list[str]]:
-    """Passe config — la justification d'un bloc dit-elle ce que le bloc lui-même déclare ?
-
-    POURQUOI. Les passes précédentes confrontent des DOCUMENTS à la source. Aucune ne regarde à
-    l'intérieur d'un bloc de config, et `VALUE_CHECKS` ne surveille `obs_size` que sur
-    `entrainement.md`. La justification d'un profil pouvait donc annoncer une valeur pendant que
-    l'`obs_size` du MÊME bloc en portait une autre, sous un contrôle vert. Mesuré le 2026-09-09 :
-    l'en-tête disait « VALEUR COURANTE : 16971 » et la lignée s'arrêtait au même nombre alors que
-    `obs_size` valait 17055 — la contradiction était lisible à l'œil nu, et trois livraisons
-    d'observation l'ont franchie. La grille part du même mouvement : `32x32x11` a survécu au
-    passage de `GRID_CHANNELS` à 12 dans la phrase même qui annonçait « GRID_CHANNELS 11 -> 12 ».
-
-    CE QU'IL N'ÉTABLIT PAS : que la justification soit JUSTE. Il ne compare que ce qu'elle affirme
-    d'un nombre dont la source est calculable — pas ses deltas, pas son récit.
-
-    VERT VACANT : un motif qui ne retrouve plus sa phrase est une ASSERTION ORPHELINE, jamais un
-    succès ; sans cette garde, reformuler la justification désarmerait la passe pour toujours.
-    """
-    try:
-        from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
-    except ImportError as error:  # PYTHONPATH absent, module renommé
-        raise SourceUnavailable(f"engine.spatial_grid illisible : {error}") from error
-    profiles = agent_profiles()
-    if not profiles:
-        raise SourceUnavailable(f"aucun profil d'entraînement énuméré dans {AGENT_CONFIG}")
-    expected_grid = f"{GRID_SIZE}x{GRID_SIZE}x{GRID_CHANNELS}"
-    verified = 0
-    broken: list[str] = []
-    def orphan(name: str, label: str) -> str:
-        return (
-            f"{AGENT_CONFIG.name}  ASSERTION ORPHELINE  {name}.observation_params : "
-            f"« {label} » ne se retrouve plus dans la justification"
-        )
-
-    def contradiction(name: str, label: str, claimed: str, origin: str) -> str:
-        return (
-            f"{AGENT_CONFIG.name}  CONTRADICTION INTERNE  {name}.observation_params : "
-            f"la justification annonce {claimed} en {label}, {origin}"
-        )
-
-    for name, profile in sorted(profiles.items()):
-        params = profile["observation_params"]
-        justification = params["justification"]
-        obs_size = params["obs_size"]
-        for label, pattern in _JUSTIFICATION_CLAIMS:
-            found = re.search(pattern, justification)
-            if found is None:
-                broken.append(orphan(name, label))
-            elif int(found.group(1)) != obs_size:
-                broken.append(
-                    contradiction(
-                        name, label, found.group(1), f"le bloc déclare obs_size = {obs_size}"
-                    )
-                )
-            else:
-                verified += 1
-        found_grid = re.search(_JUSTIFICATION_GRID, justification)
-        if found_grid is None:
-            broken.append(orphan(name, "grille"))
-        elif found_grid.group(1) != expected_grid:
-            broken.append(
-                contradiction(
-                    name,
-                    "grille",
-                    found_grid.group(1),
-                    f"engine/spatial_grid.py donne {expected_grid}",
-                )
-            )
-        else:
-            verified += 1
-    return verified, broken
-
-
-def report_config_justification() -> tuple[bool, list[str]]:
-    verified, broken = check_config_justification()
-    lines = [
-        f"{'❌' if broken else '✅'} {AGENT_CONFIG.relative_to(ROOT).as_posix()}  "
-        f"(justification ↔ bloc)",
-        f"   valeurs  : {verified} confirmées, {len(broken)} contredites ou orphelines",
-    ]
-    lines += [f"   {entry}" for entry in broken]
-    return bool(broken), lines
-
-
 def main(argv: list[str]) -> int:
     docs: Iterable[str] = argv[1:] or [*DEFAULT_DOCS, *VALUE_ONLY_DOCS]
     failed = False
@@ -1893,17 +1874,6 @@ def main(argv: list[str]) -> int:
         else:
             print("\n".join(lines))
             failed = failed or has_accum
-        try:
-            has_contradiction, lines = report_config_justification()
-        except (SourceUnavailable, OSError, KeyError) as error:
-            print(
-                f"❌ justification ↔ bloc\n   CONTRÔLE IMPOSSIBLE — "
-                f"{type(error).__name__} : {error}"
-            )
-            failed = True
-        else:
-            print("\n".join(lines))
-            failed = failed or has_contradiction
     print(
         "\nNON VÉRIFIABLE, et assumé : le nombre de « contrôles analyzer vivants ». Le code n'en "
         "porte aucune énumération ; le compter depuis un tableau de document mesurerait autre "

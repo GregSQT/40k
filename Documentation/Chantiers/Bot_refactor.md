@@ -885,6 +885,9 @@ ai/models/ArmageddonAgent/league/
   "created_at": "2026-…",                // horodatage, jamais dérivé du mtime
   "model_md5": "…",                      // ce que `bot_zone_direct.py` a appris a coûté cher
   "obs_size": 16659,                      // refus de chargement si l'observation a changé de taille
+                                         // (RELEVÉ à la promotion depuis
+                                         //  ObservationBuilder.SQUAD_OBS_SIZE_TARGET — aucune
+                                         //  config ne porte cette clé depuis le 2026-09-09)
   "results_at_promotion": {
     "bots":       { "racer": 0.63, … , "combined": 0.74, "worst": 0.63 },
     "benchmarks": { "reference_balanced": …, "…denial": …, "…reactive": …, "floor": … },
@@ -897,7 +900,10 @@ ai/models/ArmageddonAgent/league/
 Écriture par `shared/json_atomic.py` — brouillon publié par `os.replace`, pour la même raison que
 `bot_zone_direct.py --json-out` : un run interrompu ne doit pas détruire le relevé précédent.
 
-⚠️ **`obs_size` et `model_md5` ne sont pas décoratifs.** Un champion figé devient inchargeable dès
+⚠️ **`obs_size` et `model_md5` ne sont pas décoratifs.** Ce n'est PAS une redéclaration de la
+taille courante — celle-là est calculée et ne se recopie nulle part : c'est le relevé daté de
+ce avec quoi CE `.zip` a été entraîné, et tout son intérêt est de **diverger** de la valeur du
+jour. Un champion figé devient inchargeable dès
 qu'une tranche V11 change la taille de l'observation — c'est arrivé (199 → 1011, puis 16659) et
 c'est annoncé pour les tranches P3-4/P3-5/P3-6 du chemin critique. Sans ce champ, la league se
 remplirait de modèles morts qu'on ne découvrirait qu'au chargement, en plein run. Le contrôle est

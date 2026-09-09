@@ -697,19 +697,15 @@ with a PDF, the PDF wins (user ruling, 2026-07-26).
 
 ### Training Config
 
-**Observation size must be updated** — ⚠️ l'exemple ci-dessous est HISTORIQUE (2026-07-26) :
-`obs_size` ne se choisit pas à la main, il est **calculé** par
-`ObservationBuilder.SQUAD_OBS_SIZE_TARGET` depuis le schéma d'entités
-(`engine/observation_entities.py`) et vaut **20 626** au 2026-07-28 (V11 §0.32 T-H/T-J). La config doit recopier cette
-valeur, et un écart **lève à l'init du moteur** en citant la valeur attendue.
-
-```json
-{
-  "observation_params": {
-    "obs_size": 313  // exemple historique — valeur réelle : ObservationBuilder.SQUAD_OBS_SIZE_TARGET
-  }
-}
-```
+**Rien à mettre à jour en config.** `obs_size` ne se choisit pas à la main et ne se déclare
+nulle part : il est **calculé** par `ObservationBuilder.SQUAD_OBS_SIZE_TARGET` depuis le
+schéma d'entités (`engine/observation_entities.py`). Un exemple de config portant
+`observation_params.obs_size` figurait ici ; la clé a été supprimée le 2026-09-09, parce
+qu'une valeur recopiée puis confrontée à celle qui la détermine ne peut que retarder.
+Ce qui reste vrai : ajouter un profil d'arme change la taille, donc impose un retrain
+`--new`. Lignée des changements de schéma :
+[observation_et_actions.md](../training/observation_et_actions.md), section
+« Historique de `obs_size` ».
 
 ---
 
