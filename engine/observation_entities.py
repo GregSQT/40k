@@ -312,22 +312,27 @@ UNIT_BIN_FIELDS: Tuple[str, ...] = (
     # conséquence. Chacun cite ici le site qui le consomme, et c'est la condition d'entrée.
     #
     # ⚠️ CETTE CLÔTURE EST TENUE PAR UN TEST, pas par ce commentaire (2026-09-09) :
-    # `test_squad_obs_category_keywords.py` dérive les mots-clés consommés des QUATRE sources
-    # nommées du moteur — `_HIDEABLE_KEYWORDS` et `_FLOOR_CAPABLE_KEYWORDS` (`game_state`),
-    # `_MONSTER_OR_VEHICLE_KEYWORDS` (`shared_utils`) et `ANTI_RULE_IDS` (`attack_sequence`) —
-    # et exige de chacun un bit ci-dessous ou une exclusion actée. Tant que rien ne le dérivait,
-    # la liste ne pouvait que se périmer en silence : les tests parcouraient une table recopiée
-    # dans le test, donc un mot-clé ajouté côté moteur n'en faisait échouer aucun.
+    # `test_squad_obs_category_keywords.py` dérive les mots-clés consommés des sources DÉCLARÉES
+    # du moteur — `_HIDEABLE_KEYWORDS` et `_FLOOR_CAPABLE_KEYWORDS` (`game_state`),
+    # `_MONSTER_OR_VEHICLE_KEYWORDS` (`shared_utils`), `ANTI_RULE_IDS` (`attack_sequence`) et les
+    # littéraux passés à `_unit_has_keyword` (`movement_handlers`) — et exige de chacun un bit
+    # ci-dessous ou une exclusion actée. Tant que rien ne le dérivait, la liste ne pouvait que se
+    # périmer en silence : les tests parcouraient une table recopiée dans le test, donc un
+    # mot-clé ajouté côté moteur n'en faisait échouer aucun.
+    #
+    # Sa portée est DÉCLARÉE et non totale : trois comparaisons écrites sur place lui échappent
+    # (`shared_utils` ~5805 et ~11137, `fight_handlers` ~4706), toutes sur `monster`/`vehicle`,
+    # qui ont leur bit. Le docstring du test en porte la liste à jour.
     #
     # N'y sont donc PAS : CHARACTER — l'allocation 19.02/19.04 lit le RÔLE de la figurine
     # (`_is_character_role`, shared_utils) et non le mot-clé, et les rôles sont déjà observés par
-    # `MODEL_TYPE_BIN_FIELDS` ; BEASTS/SWARM — aucune datasheet des rosters d'AGENT n'en porte
-    # (mesuré le 2026-09-09 : 33 unités, zéro porteur, et zéro écart entre `hideable` et
-    # `INFANTRY` sur ce périmètre), si bien que le bit vaudrait colonne pour colonne la copie de
-    # `kw_infantry` pour 32 scalaires et un retrain `--new` ; cette exclusion-là est DATÉE, pas
-    # définitive — `test_no_agent_roster_unit_carries_an_excluded_keyword` tombe le jour où un
-    # roster d'agent en porte un ; BATTLELINE, WALKER, MOUNTED, GRENADES — présents sur les
-    # datasheets, lus par aucune règle du moteur.
+    # `MODEL_TYPE_BIN_FIELDS` ; BEASTS/SWARM — aucune datasheet JOUÉE n'en porte (mesuré le
+    # 2026-09-09 : 42 unités des rosters d'agent ET d'adversaire, zéro porteur, et zéro écart
+    # entre `hideable` et `INFANTRY` sur ce périmètre), si bien que le bit vaudrait colonne pour
+    # colonne la copie de `kw_infantry` pour 32 scalaires et un retrain `--new` ; cette
+    # exclusion-là est DATÉE, pas définitive — `test_no_played_roster_unit_carries_an_excluded_keyword`
+    # tombe le jour où un roster joué en porte un ; BATTLELINE, WALKER, MOUNTED, GRENADES —
+    # présents sur les datasheets, lus par aucune règle du moteur.
     "kw_infantry",   # 13.06/13.08/13.09 via `_HIDEABLE_KEYWORDS` (game_state) + [ANTI-INFANTRY]
     "kw_vehicle",    # volet MONSTER/VEHICLE de 10.06 (shooting_handlers) + [ANTI-VEHICLE]
     "kw_monster",    # volet MONSTER/VEHICLE de 10.06 + 13.06 via `_FLOOR_CAPABLE_KEYWORDS`
