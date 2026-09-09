@@ -696,6 +696,16 @@ def _obs_engine_two_allied_squads():
     return engine, patcher
 
 
+#: `step_with_mask` ne rend `None` QUE sous `defer_observation`, où l'appelant s'engage à
+#: construire l'observation lui-même (w40k_core.py:2390). Aucun test d'ici ne l'arme, donc une
+#: observation absente ne serait pas un cas à couvrir : ce serait le contrat de retour qui aurait
+#: changé, et l'assertion le dit à l'endroit exact plutôt que de laisser tomber un `TypeError`
+#: dans la copie profonde.
+_OBSERVATION_ABSENTE = (
+    "step_with_mask a rendu une observation absente alors que `defer_observation` n'est pas armé"
+)
+
+
 def _obs_snapshot(observation: Dict[str, Any]) -> Dict[str, Any]:
     """Copie PROFONDE : `build_squad_observation` remplit un scratch PARTAGÉ, et comparer deux
     références au même tampon rendrait n'importe quelle observation « identique »."""
@@ -729,6 +739,7 @@ def _start_split_fire(engine) -> Dict[str, Any]:
     ]
     assert weapon_actions, "aucun SHOOT_WEAPON_SEL ouvert pour la tireuse"
     observation, _r, _t, _tr, _i, _m = engine.step_with_mask(int(weapon_actions[0]))
+    assert observation is not None, _OBSERVATION_ABSENTE
     return _obs_snapshot(observation)
 
 
@@ -768,6 +779,7 @@ def test_split_fire_next_weapon_observes_the_shooting_squad():
         pending = engine.game_state["pending_shoot_weapon_split"]
         target_action = SHOOT_SLOT_BASE + pending["eligible_target_slots"][0]
         observation, _r, _t, _tr, _i, _m = engine.step_with_mask(int(target_action))
+        assert observation is not None, _OBSERVATION_ABSENTE
         observation = _obs_snapshot(observation)
         pending = engine.game_state["pending_shoot_weapon_split"]
         assert pending["pending_weapon"] is None, "sous-état ARME attendu"
