@@ -292,6 +292,140 @@ def test_un_contrat_present_mais_corrompu_leve(tmp_path) -> None:
         read_contract(model_path)
 
 
+def test_un_contrat_ampute_d_une_section_leve_au_lieu_de_la_lire_vide(tmp_path) -> None:
+    """Un fichier tronqué n'est pas un écart de contrat : c'est un fichier à réparer.
+
+    Section lue comme vide, la comparaison ne levait pas et produisait un diff FAUX — tous les
+    registres du code annoncés « nouveaux » alors que rien n'avait bougé dans le code. Le message
+    disait « le contrat a changé », et la sortie affichée pour ce message est `--new` : un modèle
+    de plusieurs dizaines d'heures jeté sur un fichier abîmé.
+    """
+    model_path = _model(tmp_path, existant=True)
+    ampute = build_contract(_rewards(), AGENT)
+    del ampute["reward_keys"]
+    Path(contract_path(model_path)).write_text(json.dumps(ampute), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="reward_keys"):
+        read_contract(model_path)
+
+
+def test_une_reprise_sur_contrat_ampute_s_arrete_sans_annoncer_un_faux_ecart(tmp_path) -> None:
+    """Le chemin de production complet : le run s'arrête, et pas sur un motif inventé."""
+    model_path = _model(tmp_path, existant=True)
+    ampute = build_contract(_rewards(), AGENT)
+    del ampute["observation_fields"]
+    Path(contract_path(model_path)).write_text(json.dumps(ampute), encoding="utf-8")
+
+    with pytest.raises(ValueError) as excinfo:
+        enforce_training_contract(
+            model_path, AGENT, _rewards(), new_model=False, log_fn=lambda _m: None
+        )
+
+    message = str(excinfo.value)
+    assert "illisible" in message and "observation_fields" in message, message
+    assert "nouveau registre" not in message, (
+        "un fichier tronqué s'est présenté comme une divergence du code : "
+        f"{message}"
+    )
+
+
+def test_une_section_du_mauvais_type_leve(tmp_path) -> None:
+    """Une liste de noms devenue autre chose se comparerait caractère par caractère."""
+    model_path = _model(tmp_path, existant=True)
+    tordu = build_contract(_rewards(), AGENT)
+    tordu["grid_channels"] = "wall"
+    Path(contract_path(model_path)).write_text(json.dumps(tordu), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="grid_channels"):
+        read_contract(model_path)
+
+
+def test_un_registre_d_observation_du_mauvais_type_leve(tmp_path) -> None:
+    """Même règle un niveau plus bas : `observation_fields` est un dict de LISTES."""
+    model_path = _model(tmp_path, existant=True)
+    tordu = build_contract(_rewards(), AGENT)
+    tordu["observation_fields"]["GLOBAL_CONT_FIELDS"] = "phase"
+    Path(contract_path(model_path)).write_text(json.dumps(tordu), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="GLOBAL_CONT_FIELDS"):
+        read_contract(model_path)
+
+
+def test_un_contrat_sans_version_leve_au_lieu_de_se_dire_d_un_autre_format(tmp_path) -> None:
+    """`None != 1` faisait passer un fichier sans version pour un format différent.
+
+    Les deux se soignent autrement : un autre format se relit avec le code qui l'écrit, un
+    fichier sans version se réécrit. Le confondre envoyait chercher une migration inexistante.
+    """
+    model_path = _model(tmp_path, existant=True)
+    sans_version = build_contract(_rewards(), AGENT)
+    del sans_version["version"]
+    Path(contract_path(model_path)).write_text(json.dumps(sans_version), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="version"):
+        read_contract(model_path)
+
+
+def test_une_version_non_entiere_leve_au_lieu_de_sauter_le_controle_des_sections(tmp_path) -> None:
+    """`"1"` textuel n'égale aucun entier : il faisait passer le fichier pour un autre format.
+
+    Conséquence mesurée : le contrôle des sections était sauté, et un contrat amputé de
+    `reward_keys` ressortait en « version de contrat 1 != 1 » — un message qui se contredit et
+    qui cache la section manquante, avec `--new` pour sortie affichée.
+    """
+    model_path = _model(tmp_path, existant=True)
+    tordu = build_contract(_rewards(), AGENT)
+    tordu["version"] = str(tordu["version"])
+    del tordu["reward_keys"]
+    Path(contract_path(model_path)).write_text(json.dumps(tordu), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="version"):
+        read_contract(model_path)
+
+
+def test_une_section_vide_leve_comme_une_section_absente(tmp_path) -> None:
+    """Vide ou absente, c'est le même faux diff — et `build_contract` n'écrit ni l'un ni l'autre.
+
+    Les trois premières sections sont lues du code ; la quatrième d'une table de récompense dont
+    `RewardCalculator` exige déjà `base_actions`. Une section vide est donc un fichier abîmé.
+    """
+    model_path = _model(tmp_path, existant=True)
+    vide = build_contract(_rewards(), AGENT)
+    vide["grid_channels"] = []
+    Path(contract_path(model_path)).write_text(json.dumps(vide), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="grid_channels"):
+        read_contract(model_path)
+
+
+def test_un_registre_d_observation_vide_leve(tmp_path) -> None:
+    """`_registres_nommes` n'empreinte que des tuples NON VIDES : un registre vide est abîmé."""
+    model_path = _model(tmp_path, existant=True)
+    vide = build_contract(_rewards(), AGENT)
+    vide["observation_fields"]["GLOBAL_CONT_FIELDS"] = []
+    Path(contract_path(model_path)).write_text(json.dumps(vide), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="GLOBAL_CONT_FIELDS"):
+        read_contract(model_path)
+
+
+def test_un_contrat_d_un_autre_format_ne_declenche_pas_le_controle_de_sections(tmp_path) -> None:
+    """Le format futur définit ses propres sections : les exiger ici bloquerait sa lecture.
+
+    C'est `diff_contracts` qui dit « format différent, contenu non comparable » — encore
+    faut-il pouvoir lire le fichier pour le lui passer.
+    """
+    model_path = _model(tmp_path, existant=True)
+    autre_format = {"version": 99, "ce_que_dira_le_format_suivant": []}
+    Path(contract_path(model_path)).write_text(json.dumps(autre_format), encoding="utf-8")
+
+    lu = read_contract(model_path)
+
+    assert lu is not None and lu == autre_format
+    ecarts = diff_contracts(lu, build_contract(_rewards(), AGENT))
+    assert len(ecarts) == 1 and "format" in ecarts[0], ecarts
+
+
 class _NonSerialisable:
     """Une valeur qui fait lever `json.dump` APRÈS qu'il a déjà écrit une partie du contrat."""
 
