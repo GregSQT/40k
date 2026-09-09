@@ -931,6 +931,79 @@ def test_le_bot_repositionne_apres_tir_par_sa_baseline_et_non_au_hasard() -> Non
         assert wrapper._get_bot_action() == mi.CHOICE_BASE
 
 
+def test_le_repositionnement_du_bot_traverse_le_chemin_reel() -> None:
+    """Le test précédent s'arrête au wrapper ; celui-ci traverse la chaîne de PRODUCTION.
+
+    Un `_DummyActionDecoder` rend le masque qu'on lui a écrit : il prouve que `_get_bot_action`
+    répond `CHOICE_0` à une décision de ce type, pas que le moteur pose cette décision, ni que
+    le vrai décodeur n'ouvre que ces slots, ni que la réponse déplace l'escouade. « Code testé
+    mais jamais appelé = correction non prouvée » — ce test ferme les trois.
+
+    Tout est réel sauf le contenu du plateau : moteur `W40KEngine` construit sur un scénario
+    d'entraînement, son `ActionDecoder`, un bot de doctrine, et l'application par le dispatcher
+    de décision. Le `game_state` vient de la fixture du moteur, qui met en scène le seul cas
+    utile — une escouade du JOUEUR 2 porteuse de `move_after_shooting`, hors zone d'engagement,
+    avec un ennemi et un objectif sur des axes distincts.
+    """
+    from ai.bot_doctrines import AttritionBot
+    from ai.unit_registry import UnitRegistry
+    from engine.agent_decision import read_pending_agent_decision
+    from engine.w40k_core import W40KEngine
+    from tests.unit.engine.test_move_after_shooting_decision import (
+        _end_shooting_activation,
+        _gs,
+    )
+
+    engine = W40KEngine(
+        rewards_config="ArmageddonAgent_x1",
+        training_config_name="x1",
+        controlled_agent="ArmageddonAgent_x1",
+        scenario_file=(
+            "config/agents/ArmageddonAgent_x1/scenarios/training/"
+            "scenario_training_armageddon1.json"
+        ),
+        unit_registry=UnitRegistry(),
+        quiet=True,
+        gym_training_mode=True,
+        training_n_envs=1,
+    )
+    game_state = _gs(shooter_player=2)
+    game_state["current_player"] = 2
+    engine.game_state = game_state
+
+    _end_shooting_activation(game_state)
+
+    decision = read_pending_agent_decision(game_state)
+    assert decision is not None, "le moteur n'a pas posé la décision sur le chemin de production"
+    assert decision["type"] == "move_after_shooting"
+    assert decision["player"] == 2
+    pression = decision["options"][0]["payload"]
+
+    # Le VRAI décodeur, pas un masque écrit à la main : il n'ouvre que les candidats, et
+    # `ACTION_WAIT` reste fermé — c'est ce qui rend le tirage fatal si le bot y retombait.
+    action_mask, eligible_units = (
+        engine.action_decoder.get_squad_action_mask_and_eligible_units(game_state)
+    )
+    assert eligible_units == []
+    assert [index for index, open_slot in enumerate(action_mask) if open_slot] == [
+        mi.CHOICE_BASE + offset for offset in range(len(decision["options"]))
+    ]
+
+    wrapper = BotControlledEnv(engine, AttritionBot(), UnitRegistry(), agent_seat_mode="p1")
+    for _ in range(30):
+        assert wrapper._get_bot_action() == mi.CHOICE_BASE
+
+    success, _result = engine._handle_agent_decision_action({"option_index": 0})
+    shooter = game_state["unit_by_id"]["1"]
+
+    assert success is True
+    assert (int(shooter["col"]), int(shooter["row"])) == (
+        pression["destCol"],
+        pression["destRow"],
+    )
+    assert read_pending_agent_decision(game_state) is None
+
+
 def test_self_play_opponent_plays_its_own_decision() -> None:
     """Symétrique du bot : sans `frozen_model`, l'adversaire self-play joue un CHOICE.
 

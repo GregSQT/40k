@@ -1040,6 +1040,10 @@ Ordre par valeur tactique :
    donc au hasard : la baseline adverse bougeait en même temps que l'agent mesuré. Corrigé le
    2026-09-09 par `env_wrappers.bot_action_for_pending_choice`, qui répond `CHOICE_0` — la
    destination historique — pour ce seul type et laisse les six autres mécanismes sur leur tirage.
+   Verrouillé sur le chemin de PRODUCTION par
+   `test_le_repositionnement_du_bot_traverse_le_chemin_reel` (`tests/unit/ai/test_env_wrappers.py`) :
+   vrai `W40KEngine`, vrai `ActionDecoder`, vrai bot de doctrine, application par le dispatcher —
+   le verrou jumeau à doubles de test ne prouvait que la réponse du wrapper.
    **Leçon générale** : rendre une décision à l'agent oblige à se demander qui répond pour
    l'adversaire, faute de quoi la référence de mesure change en même temps que le sujet mesuré.
 
