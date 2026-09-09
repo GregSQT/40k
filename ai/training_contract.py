@@ -17,6 +17,20 @@ renomme ou permute, un champ d'observation dont le sens change, une cle de recom
 Les tenseurs gardent leur forme, SB3 ne dit rien, et le modele repris continue de lire a l'indice
 17 une grandeur qui n'est plus celle sur laquelle il a appris. Le run ne casse pas : il derive.
 
+CE QUE CE GARDE-FOU APPORTE VRAIMENT, PAR FAMILLE
+-------------------------------------------------
+Mesure du 2026-09-09 sur l'historique git, a REFAIRE plutot qu'a recopier de memoire. Les deux
+familles ne valent pas la meme chose, et le message d'arret ne doit pas les confondre (cf.
+`FAMILLES_INVISIBLES_AILLEURS`) :
+
+- TABLE DE RECOMPENSE — 7 commits sur 90 jours retirent au moins une cle d'un
+  `config/agents/*/*_rewards_config.json`. Personne d'autre ne regarde les recompenses : ni SB3,
+  ni le verrou de parite. C'est la que ce fichier est SEUL, et c'est sa justification ;
+- OBSERVATION / ACTIONS — 13 commits sur 30 jours touchent une entree de registre, mais 12
+  changent la DIMENSION, donc `check_for_correct_spaces` les attrape deja au chargement. L'apport
+  n'y est pas la detection : c'est de s'arreter AVANT d'engager le run, et de couvrir le
+  renommage a taille constante — reel, mais rare (aucun cas sur ces 30 jours).
+
 CE QUI EST COMPARE, ET CE QUI NE L'EST PAS
 ------------------------------------------
 Comparé : les NOMS, dans leur ORDRE — registres d'observation (`*_FIELDS` de
@@ -212,14 +226,55 @@ def contract_missing(model_path: str, agent_key: str) -> ValueError:
     )
 
 
+#: Familles d'ecarts qu'AUCUN autre controle du depot ne voit, jamais.
+#:
+#: MESURE du 2026-09-09, sur l'historique git — a refaire avant de modifier cette liste, pas a
+#: recopier de memoire. Sur 90 jours, 7 commits retirent au moins une cle d'un
+#: `config/agents/*/*_rewards_config.json` : ni Stable-Baselines3 (qui ne compare que les espaces
+#: d'observation et d'action) ni le verrou de parite de pool ne regardent les recompenses.
+#:
+#: Les autres familles ne sont PAS dans ce cas, et le message ne doit pas le laisser croire. Sur
+#: 30 jours, 13 commits modifient une entree d'un registre de `engine/observation_entities.py` :
+#: 12 changent le NOMBRE d'entrees, donc la dimension, que `check_for_correct_spaces` attrape deja
+#: au chargement ; le 13e (2b71ef00) ne touchait que des commentaires, donc ce contrat ne l'aurait
+#: meme pas vu. Y prometre une detection unique serait faux douze fois sur treize.
+FAMILLES_INVISIBLES_AILLEURS = ("reward_keys",)
+
+
+def _pourquoi_l_arret_vaut(ecarts: List[str]) -> str:
+    """Ce que cet ecart-CI doit a ce garde-fou — pas une generalite sur tous les ecarts.
+
+    Un motif d'arret qui sonne faux est un motif qu'on apprend a ignorer, puis a contourner. La
+    phrase est donc construite sur les familles REELLEMENT presentes.
+    """
+    invisibles = [e for e in ecarts if e.startswith(FAMILLES_INVISIBLES_AILLEURS)]
+    autres = [e for e in ecarts if e not in invisibles]
+    phrases = []
+    if invisibles:
+        phrases.append(
+            "L'ecart sur la table de recompense n'est vu par AUCUN autre controle : ni "
+            "Stable-Baselines3, qui ne compare que les espaces d'observation et d'action, ni le "
+            "verrou de parite de pool. Sans cet arret, le run apprendrait sous une table dont une "
+            "entree a disparu, et rien ne le dirait."
+        )
+    if autres:
+        phrases.append(
+            "L'ecart sur l'observation ou les actions ferait AUSSI lever Stable-Baselines3 au "
+            "chargement, MAIS seulement si la taille des tenseurs a change, et seulement une fois "
+            "le run engage. Ici l'arret arrive avant le moindre effet de bord — et il couvre en "
+            "plus le renommage ou la permutation a taille constante, que SB3 ne voit pas."
+        )
+    return " ".join(phrases)
+
+
 def contract_mismatch(model_path: str, ecarts: List[str]) -> ValueError:
     """L'erreur de « le contrat a bouge depuis que ce modele a appris »."""
     detail = "\n".join(f"    - {e}" for e in ecarts)
     return ValueError(
-        "Le contrat d'entrainement a change depuis que ce modele a appris — les tenseurs ont "
-        "gardé leur forme, donc ni Stable-Baselines3 ni le verrou de parite ne l'auraient dit.\n"
+        "Le contrat d'entrainement a change depuis que ce modele a appris.\n"
         f"{detail}\n"
         f"  contrat du modele : {contract_path(model_path)}\n"
+        f"  {_pourquoi_l_arret_vaut(ecarts)}\n"
         "  Reprendre ce modele ferait apprendre sur des grandeurs qui ont change de sens. "
         "Soit repartir de zero (--new), soit — si le changement est neutre pour ce modele — "
         f"reecrire sciemment le contrat : python3 -m ai.training_contract --init --agent <agent>"

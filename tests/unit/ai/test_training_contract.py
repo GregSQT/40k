@@ -29,6 +29,7 @@ import pytest
 from ai.training_contract import (
     CONTRACT_FILENAME,
     build_contract,
+    contract_mismatch,
     contract_path,
     diff_contracts,
     enforce_training_contract,
@@ -219,6 +220,41 @@ def test_une_reprise_divergente_s_arrete_en_nommant_l_ecart(tmp_path) -> None:
     message = str(excinfo.value)
     assert "kill" in message, f"l'écart doit être nommé, pas résumé : {message}"
     assert "--new" in message, "le message doit dire par quoi sortir de l'impasse"
+    assert "AUCUN autre controle" in message, (
+        "un écart de récompense est le seul que rien d'autre ne voit — le message doit le dire, "
+        "c'est ce qui justifie l'arrêt"
+    )
+
+
+def test_le_motif_de_l_arret_depend_de_la_famille_de_l_ecart() -> None:
+    """Le message ne doit pas promettre une détection unique là où SB3 lève déjà.
+
+    Mesuré le 2026-09-09 : sur 30 jours, 13 commits touchent une entrée de registre
+    d'observation, dont 12 changent la DIMENSION — `check_for_correct_spaces` (SB3
+    base_class.py:717) les attrape au chargement. Le message d'origine affirmait pour TOUS les
+    écarts que « ni Stable-Baselines3 ni le verrou de parité ne l'auraient dit » : faux douze fois
+    sur treize. Un motif d'arrêt qui sonne faux est un motif qu'on apprend à ignorer.
+    """
+    obs_seul = str(contract_mismatch("/m/model_A.zip", ["observation.GLOBAL_CONT_FIELDS : ajoute(s) ['x']"]))
+    recompense_seule = str(contract_mismatch("/m/model_A.zip", ["reward_keys : retire(s) ['kill']"]))
+
+    assert "AUCUN autre controle" not in obs_seul, (
+        f"un écart d'observation ne doit pas se prétendre invisible ailleurs : {obs_seul}"
+    )
+    assert "Stable-Baselines3" in obs_seul and "avant le moindre effet de bord" in obs_seul, (
+        f"il doit dire ce qu'il apporte VRAIMENT — s'arrêter plus tôt : {obs_seul}"
+    )
+    assert "AUCUN autre controle" in recompense_seule, recompense_seule
+
+
+def test_un_ecart_mixte_dit_les_deux_motifs() -> None:
+    """Les deux familles à la fois : chacune garde son motif, aucune n'écrase l'autre."""
+    message = str(contract_mismatch(
+        "/m/model_A.zip",
+        ["reward_keys : retire(s) ['kill']", "grid_channels : ajoute(s) ['fog']"],
+    ))
+
+    assert "AUCUN autre controle" in message and "Stable-Baselines3" in message, message
 
 
 def test_un_contrat_present_mais_corrompu_leve(tmp_path) -> None:
