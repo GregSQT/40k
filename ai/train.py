@@ -1557,7 +1557,14 @@ def canonical_run_artifacts(model_path: str) -> list:
         # le run neuf l'ecrase. Meme raison que les stats VecNormalize du best_model, deux lignes
         # plus haut — un modele archive sans son contrat est irreprenable : sa reprise s'arreterait
         # sur un « contrat absent » qui ne dit plus rien de ce sur quoi il a appris.
-        contract_path(model_path),
+        #
+        # SEULEMENT s'il y a un modele a accompagner. Un contrat SEUL ne decrit rien : c'est le
+        # cas apres un premier `--new`, qui ecrit le contrat immediatement alors que le modele
+        # n'arrivera qu'a la fin du run. L'ecarter quand meme faisait lever `FileExistsError` a
+        # deux `--new` dans la MEME SECONDE — le second visait le nom d'archive que le premier
+        # venait de prendre — exactement la collision que la derogation « sidecar vide » plus bas
+        # existe pour empecher.
+        *([contract_path(model_path)] if os.path.exists(model_path) else []),
     ]
 
 
@@ -1803,6 +1810,7 @@ def prepare_run_artifacts(
     append_training: bool,
     n_envs: int,
     rewards_config: Mapping[str, Any],
+    rewards_key: str,
     log_fn=print,
 ) -> Tuple[str, int, int]:
     """Prologue commun des chemins d'entrainement : ou ecrit ce run, et d'ou il repart.
@@ -1835,7 +1843,7 @@ def prepare_run_artifacts(
     # l'archivage — ecrit avant, le contrat neuf partirait avec le run precedent.
     if not new_model:
         enforce_training_contract(
-            model_path, str(agent_key), rewards_config, new_model=False, log_fn=log_fn
+            model_path, rewards_key, rewards_config, new_model=False, log_fn=log_fn
         )
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     if new_model:
@@ -1848,7 +1856,7 @@ def prepare_run_artifacts(
         # est garde parce qu'il dit l'INTENTION au lecteur, et parce qu'il fait passer les deux cas
         # par le meme point d'entree. Ne pas re-enqueter sur ce survivant.
         enforce_training_contract(
-            model_path, str(agent_key), rewards_config, new_model=True, log_fn=log_fn
+            model_path, rewards_key, rewards_config, new_model=True, log_fn=log_fn
         )
         # Le sidecar part avec le run archive : sans cette remise a neuf, l'agent n'en aurait plus
         # du tout, et un `--append` ultérieur mourrait dans `_read_tensorboard_run_meta` en
@@ -2403,6 +2411,14 @@ def _promote_checkpoint_for_resume(
     shutil.copy2(checkpoint_path, model_path)
     shutil.copy2(checkpoint_vec_path, get_vec_normalize_path(model_path))
     shutil.copy2(checkpoint_run_state, get_run_state_path(model_path))
+    # Le CONTRAT vient d'etre ecarte avec le modele canonique — or le checkpoint promu sort du
+    # MEME entrainement, donc il a appris sous ce contrat-la. Sans cette remise en place, toute
+    # reprise `--resume-from` s'arreterait aussitot sur « aucun contrat d'entrainement », en
+    # demandant une initialisation manuelle pour un modele dont le contrat est juste a cote.
+    # Copie et non deplacement : l'archive reste complete, comme pour les stats du checkpoint.
+    archived_contract = dict(promotion.set_aside_pairs).get(contract_path(model_path))
+    if archived_contract and os.path.exists(archived_contract):
+        shutil.copy2(archived_contract, contract_path(model_path))
 
     _write_tensorboard_run_meta(model_path, "")
     log_fn(f"♻️  --resume-from : {os.path.basename(checkpoint_path)} installe en {model_path}")
@@ -2856,9 +2872,14 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
     # pool plus large que le nombre d'environnements est refuse nommement par
     # `assign_pool_members_to_envs`, pas en silence.
 
+    # La table de recompense du contrat est celle sous laquelle l'entrainement TOURNE, donc
+    # `effective_agent_key` — la cle de recompenses, qui porte le suffixe de phase — et non
+    # `--agent`. Meme distinction, et meme piege, qu'en `test_trained_model` : sur un
+    # `--agent A --rewards-config B`, empreinter la table de A surveillerait une section que le
+    # run n'utilise pas, et laisserait passer une cle retiree de celle qu'il utilise.
     model_path, _episode_offset, episode_start_index = prepare_run_artifacts(
         config.get_models_root(), agent_key, new_model, append_training, n_envs,
-        config.load_agent_rewards_config(agent_key),
+        config.load_agent_rewards_config(effective_agent_key), effective_agent_key,
     )
 
     if n_envs > 1:
@@ -3566,9 +3587,13 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     avg_steps_per_episode = max_turns * max_steps * 0.6  # Estimate: 60% of max
     
     # Base de TOUTES les rampes par-episode : cf. ai/run_state.py.
+    # Cf. le jumeau dans `create_multi_agent_model` : la cle de RECOMPENSES, pas `--agent`. Elle
+    # est recalculee ici parce que `effective_agent_key` n'est etabli que plus bas dans cette
+    # fonction, apres ce prologue.
+    _rewards_key = rewards_config_name if rewards_config_name else agent_key
     model_path, episode_offset, episode_start_index = prepare_run_artifacts(
         config.get_models_root(), agent_key, new_model, append_training, n_envs,
-        config.load_agent_rewards_config(agent_key), chunk_log,
+        config.load_agent_rewards_config(_rewards_key), _rewards_key, chunk_log,
     )
 
     # Create initial model with first scenario (or load if append_training)

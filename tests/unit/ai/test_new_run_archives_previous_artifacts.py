@@ -39,6 +39,10 @@ def _populate(model_dir) -> str:
 
 def test_canonical_artifacts_are_the_fixed_name_ones(tmp_path) -> None:
     model_path = str(tmp_path / "model_TestAgent.zip")
+    # Le modèle EXISTE : c'est la condition d'entrée du contrat dans cette liste (cf. le test
+    # jumeau ci-dessous). Les autres artefacts, eux, y figurent qu'ils soient présents ou non —
+    # c'est `canonical_set_aside_pairs` qui filtre ensuite sur l'existence.
+    (tmp_path / "model_TestAgent.zip").write_bytes(b"zip")
     names = {os.path.basename(p) for p in canonical_run_artifacts(model_path)}
     assert names == {
         "model_TestAgent.zip",
@@ -155,7 +159,7 @@ def test_new_run_leaves_an_EMPTY_sidecar_behind_the_archived_one(tmp_path, monke
 
     prepare_run_artifacts(str(models_root), "TestAgent", new_model=True, append_training=False,
                           n_envs=1, rewards_config=table_de_recompense("TestAgent"),
-                          log_fn=lambda _m: None)
+                          rewards_key="TestAgent", log_fn=lambda _m: None)
 
     assert json.loads(open(f"{model_path}.tb_run.json").read())["run_dir"] == ""
 

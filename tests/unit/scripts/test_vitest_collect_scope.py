@@ -115,8 +115,13 @@ def test_tous_les_tests_front_du_disque_sont_dans_le_perimetre() -> None:
     Un `include` trop étroit ne casse rien et ne se voit pas — la suite reste verte, elle regarde
     simplement moins de choses. C'est le mode de disparition que ce test ferme.
     """
-    sur_disque = {p.resolve() for p in (FRONT / "src").rglob("*.test.ts")}
-    sur_disque |= {p.resolve() for p in (FRONT / "src").rglob("*.test.tsx")}
+    # Les DEUX conventions que Vitest collectait par défaut, `*.test.*` ET `*.spec.*` : poser un
+    # `include` a restreint la collecte, donc un fichier écrit sous l'ancienne convention n'est
+    # plus exécuté par personne. N'énumérer ici que les extensions de l'`include` rendrait ce
+    # test tautologique — il ne pourrait plus trouver d'orphelin par construction.
+    sur_disque: set = set()
+    for motif in ("*.test.ts", "*.test.tsx", "*.spec.ts", "*.spec.tsx"):
+        sur_disque |= {p.resolve() for p in (FRONT / "src").rglob(motif)}
     assert sur_disque, "aucun test vitest sous frontend/src/ — périmètre introuvable."
     collectes = {p.resolve() for m in _tableau("include") for p in _fichiers(m)}
     orphelins = sorted(str(p.relative_to(FRONT)) for p in sur_disque - collectes)

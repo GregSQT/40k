@@ -256,7 +256,7 @@ def test_le_prologue_refuse_avant_tout_effet_de_bord(tmp_path, monkeypatch) -> N
 
     with pytest.raises(ValueError, match="kill"):
         train.prepare_run_artifacts(
-            str(models_root), AGENT, False, True, 1, _rewards(win=1.0),
+            str(models_root), AGENT, False, True, 1, _rewards(win=1.0), AGENT,
             log_fn=lambda _m: None,
         )
 
@@ -281,9 +281,121 @@ def test_le_contrat_neuf_survit_a_l_archivage(tmp_path, monkeypatch) -> None:
     (models_root / AGENT / f"model_{AGENT}.zip").write_bytes(b"PK\x03\x04")
 
     train.prepare_run_artifacts(
-        str(models_root), AGENT, True, False, 1, _rewards(), log_fn=lambda _m: None
+        str(models_root), AGENT, True, False, 1, _rewards(), AGENT, log_fn=lambda _m: None
     )
 
     contrat = models_root / AGENT / CONTRACT_FILENAME
     assert contrat.exists(), "le contrat neuf a été archivé avec le run précédent"
     assert json.loads(contrat.read_text(encoding="utf-8")) == build_contract(_rewards(), AGENT)
+
+
+# --------------------------------------------------------------------- revue (2026-09-09)
+
+
+def test_un_contrat_seul_n_est_pas_archive_sans_son_modele(tmp_path) -> None:
+    """Deux `--new` dans la MÊME SECONDE ne doivent pas lever `FileExistsError`.
+
+    Le premier `--new` écrit le contrat tout de suite, alors que le modèle n'arrivera qu'à la fin
+    du run. Ce contrat-là n'accompagne donc aucun modèle : l'écarter faisait viser au second
+    `--new` le nom d'archive que le premier venait de prendre — exactement la collision que la
+    dérogation « sidecar vide » existe pour empêcher.
+    """
+    from ai.train import canonical_run_artifacts
+
+    model_path = str(tmp_path / f"model_{AGENT}.zip")
+    write_contract(model_path, build_contract(_rewards(), AGENT))
+
+    noms = {os.path.basename(p) for p in canonical_run_artifacts(model_path)}
+
+    assert CONTRACT_FILENAME not in noms, "un contrat sans modèle n'a rien à accompagner"
+
+
+def test_deux_new_dans_la_meme_seconde_ne_levent_pas(tmp_path, monkeypatch) -> None:
+    """Le scénario complet du cas ci-dessus, sur le vrai prologue."""
+    from ai import train
+
+    class _Loader:
+        def _resolve_agent_config_key(self, agent_key: str) -> str:
+            return agent_key
+
+    monkeypatch.setattr("ai.train.get_config_loader", lambda: _Loader())
+    models_root = tmp_path / "models"
+    (models_root / AGENT).mkdir(parents=True)
+    (models_root / AGENT / f"model_{AGENT}.zip").write_bytes(b"PK\x03\x04")
+
+    for _ in range(2):
+        train.prepare_run_artifacts(
+            str(models_root), AGENT, True, False, 1, _rewards(), AGENT, log_fn=lambda _m: None
+        )
+
+    assert (models_root / AGENT / CONTRACT_FILENAME).exists()
+
+
+def test_resume_from_conserve_le_contrat_du_modele(tmp_path, monkeypatch) -> None:
+    """`--resume-from` ne doit pas laisser le modèle promu sans contrat.
+
+    La promotion écarte les artefacts canoniques du modèle en place — contrat compris. Or le
+    checkpoint promu sort du MÊME entraînement : il a appris sous ce contrat-là. Sans remise en
+    place, la reprise s'arrêtait aussitôt sur « aucun contrat d'entrainement », en réclamant une
+    initialisation manuelle pour un contrat qui était juste à côté.
+    """
+    from ai import train
+
+    class _Loader:
+        def get_models_root(self) -> str:
+            return str(tmp_path / "models")
+
+        def _resolve_agent_config_key(self, agent_key: str) -> str:
+            return agent_key
+
+    # `build_agent_model_path` passe par le loader GLOBAL pour résoudre la clé d'agent, pas par
+    # celui qu'on donne à la promotion : sans ce patch, le test irait chercher un vrai dossier
+    # `config/agents/TestAgent/`.
+    monkeypatch.setattr("ai.train.get_config_loader", lambda: _Loader())
+    dossier = tmp_path / "models" / AGENT
+    dossier.mkdir(parents=True)
+    model_path = dossier / f"model_{AGENT}.zip"
+    model_path.write_bytes(b"PK\x03\x04 canonique")
+    contrat = build_contract(_rewards(win=3.0), AGENT)
+    write_contract(str(model_path), contrat)
+
+    checkpoint = dossier / "ppo_checkpoint_1000_steps.zip"
+    checkpoint.write_bytes(b"PK\x03\x04 checkpoint")
+    for compagnon in train.model_companion_paths(str(checkpoint)):
+        Path(compagnon).write_bytes(b"compagnon")
+
+    monkeypatch.setattr(train, "_pending_resume_promotion", None, raising=False)
+    promu = train._promote_checkpoint_for_resume(
+        str(checkpoint), AGENT, _Loader(), log_fn=lambda _m: None
+    )
+
+    assert read_contract(promu) == contrat, (
+        "le modèle promu n'a plus de contrat : toute reprise --resume-from s'arrêterait"
+    )
+
+
+def test_la_cle_de_recompense_du_contrat_est_celle_du_run(tmp_path, monkeypatch) -> None:
+    """`--agent A --rewards-config B` : c'est la table de B que le run optimise.
+
+    Empreinter celle de A surveillerait une section que le run n'utilise pas, et laisserait
+    passer une clé retirée de celle qu'il utilise. Même distinction que dans `test_trained_model`.
+    """
+    from ai import train
+
+    class _Loader:
+        def _resolve_agent_config_key(self, agent_key: str) -> str:
+            return agent_key
+
+    monkeypatch.setattr("ai.train.get_config_loader", lambda: _Loader())
+    models_root = tmp_path / "models"
+    (models_root / AGENT).mkdir(parents=True)
+    table = {"description": "x", AGENT: {"win": 1.0}, "PhaseB": {"win": 1.0, "kill": 2.0}}
+
+    train.prepare_run_artifacts(
+        str(models_root), AGENT, True, False, 1, table, "PhaseB", log_fn=lambda _m: None
+    )
+
+    ecrit = json.loads((models_root / AGENT / CONTRACT_FILENAME).read_text(encoding="utf-8"))
+    assert "kill" in ecrit["reward_keys"], (
+        "le contrat a empreinté la table de --agent au lieu de celle du run"
+    )
