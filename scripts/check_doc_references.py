@@ -229,8 +229,14 @@ A_FAIRE = DOCS / "backlog"
 LIVE_TREES = (ROOT / "Documentation" / "Roadmap", A_FAIRE)
 ARCHIVES = ROOT / "Documentation" / "Roadmap" / "archives"
 
-#: Répertoires où un nom de fichier NU est cherché. `scripts/` en fait partie : son absence a
-#: produit une fausse alerte sur `check_ai_rules.py` au premier passage.
+#: Répertoires où un nom de fichier NU est cherché D'ABORD. `scripts/` en fait partie : son
+#: absence a produit une fausse alerte sur `check_ai_rules.py` au premier passage.
+#:
+#: Table de PRIORITÉ, et non liste des lieux où un fichier peut vivre : ce qui n'y figure pas
+#: reste résolvable par la passe d'index de `resolve` (dernier recours, dérivée du dépôt). Cette
+#: liste ne sert donc plus qu'à départager les 72 basenames que plusieurs fichiers portent — un
+#: dossier oublié ici ne peut plus produire de FICHIER INTROUVABLE sur un fichier existant, ce
+#: qu'il a fait pour 44 dossiers et 435 fichiers jusqu'au 2026-09-09.
 SEARCH_DIRS = [
     "", "ai", "ai/analyzer_phases", "engine", "engine/phase_handlers", "engine/utils",
     "shared", "scripts", "services", "config", "tests/unit/ai", "tests/unit/engine",
@@ -429,12 +435,28 @@ def resolve(name: str, doc_dir: pathlib.Path) -> pathlib.Path | None:
         found = next(tree.rglob(name), None)
         if found is not None:
             return found
+    # DERNIER RECOURS : le dépôt lui-même. `SEARCH_DIRS` et les trois arbres ci-dessus sont des
+    # tables de PRIORITÉ — ils disent où regarder D'ABORD, et cet ordre départage les 72 basenames
+    # que plusieurs fichiers portent. Ils ne peuvent pas, en revanche, dire où un fichier a le
+    # DROIT de vivre : mesuré le 2026-09-09, 44 dossiers porteurs de `.py`/`.ts` — 435 fichiers,
+    # tout `frontend/src/`, `tests/unit/scripts`, `tests/unit/services`, `tests/integration/pvp` —
+    # n'y figuraient pas, et un renvoi nu vers l'un d'eux sortait FICHIER INTROUVABLE sur un
+    # fichier EXISTANT. C'est le document qui se faisait alors corriger pour satisfaire le
+    # contrôle (`ROADMAP_INDEX.md` sur `test_parity_harness.py`), donc le contrôle mentait.
+    #
+    # Cette passe est strictement ADDITIVE, placée après toutes les autres : elle ne peut que
+    # transformer un « introuvable » en trouvé, jamais déplacer une résolution existante — les
+    # verdicts d'hier sont inchangés par construction. Elle ne voit que les fichiers SUIVIS, donc
+    # elle n'invente rien : un nom que le dépôt ne porte pas reste cassé.
+    tracked = tracked_paths_by_basename().get(name)
+    if tracked:
+        return ROOT / tracked[0]
     return None
 
 
 @functools.lru_cache(maxsize=1)
-def tracked_basenames() -> collections.Counter[str]:
-    """Combien de fichiers SUIVIS portent chaque nom. Une seule invocation de git par run.
+def tracked_paths_by_basename() -> dict[str, list[str]]:
+    """Nom de fichier -> chemins SUIVIS qui le portent. Une seule invocation de git par run.
 
     `-z` n'est pas un détail : sans lui, git échappe les octets non-ASCII et ENTOURE le chemin de
     guillemets (les chemins accentués de `Memoire_RNCP/`, et 73 chemins au moment de la mesure,
@@ -442,9 +464,28 @@ def tracked_basenames() -> collections.Counter[str]:
     en sortait avec son guillemet collé, sous une clé que personne n'interroge — l'ambiguïté de ces
     fichiers-là n'aurait jamais été vue. Même piège que `core.quotePath` dans
     `scripts/check_roadmap_declared.py`, qui l'a payé le 2026-08-11.
+
+    L'ordre des chemins d'un même nom est celui du listing, donc trié et DÉTERMINISTE : deux runs
+    sur le même arbre résolvent le même fichier. Il ne vaut pas identification pour autant — c'est
+    `is_ambiguous` qui refuse de confronter un symbole sur un nom porté plusieurs fois.
+    """
+    index: dict[str, list[str]] = {}
+    for path in _git_raw_listing().split("\0"):
+        if path:
+            index.setdefault(path.rsplit("/", 1)[-1], []).append(path)
+    return index
+
+
+@functools.lru_cache(maxsize=1)
+def tracked_basenames() -> collections.Counter[str]:
+    """Combien de fichiers SUIVIS portent chaque nom.
+
+    Dérivé de `tracked_paths_by_basename` et non recompté depuis le listing : deux passes sur la
+    même sortie de git auraient pu diverger sur le découpage des chemins, exactement là où la
+    docstring voisine explique que ce découpage est piégeux.
     """
     return collections.Counter(
-        f.rsplit("/", 1)[-1] for f in _git_raw_listing().split("\0") if f
+        {name: len(paths) for name, paths in tracked_paths_by_basename().items()}
     )
 
 
