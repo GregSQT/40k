@@ -15,6 +15,7 @@ from types import SimpleNamespace
 import pytest
 
 from shared.data_validation import ConfigurationError
+from tests.unit.ai._fabriques import table_de_recompense
 from ai.run_state import (
     get_run_state_path,
     load_run_state,
@@ -294,6 +295,7 @@ def test_a_new_run_never_inherits_the_previous_offset(tmp_path) -> None:
     models_root = str(tmp_path / "models")
     model_path, offset, start_index = prepare_run_artifacts(
         models_root, "ArmageddonAgent_x1", new_model=False, append_training=False, n_envs=4,
+        rewards_config=table_de_recompense("ArmageddonAgent_x1"),
         log_fn=lambda _m: None,
     )
     open(model_path, "wb").close()
@@ -302,6 +304,7 @@ def test_a_new_run_never_inherits_the_previous_offset(tmp_path) -> None:
     # Reprise nominale : l'offset remonte, converti en index PAR ENVIRONNEMENT.
     _, offset, start_index = prepare_run_artifacts(
         models_root, "ArmageddonAgent_x1", new_model=False, append_training=True, n_envs=4,
+        rewards_config=table_de_recompense("ArmageddonAgent_x1"),
         log_fn=lambda _m: None,
     )
     assert (offset, start_index) == (200_000, 50_000)
@@ -309,6 +312,7 @@ def test_a_new_run_never_inherits_the_previous_offset(tmp_path) -> None:
     # `--new --append` : le compte de l'ancien ne doit PAS suivre, et l'ancien doit être archivé.
     _, offset, start_index = prepare_run_artifacts(
         models_root, "ArmageddonAgent_x1", new_model=True, append_training=True, n_envs=4,
+        rewards_config=table_de_recompense("ArmageddonAgent_x1"),
         log_fn=lambda _m: None,
     )
     assert (offset, start_index) == (0, 0), (
@@ -332,6 +336,7 @@ def test_a_new_run_ignores_the_offset_even_without_archiving(tmp_path, monkeypat
     models_root = str(tmp_path / "models")
     model_path, _, _ = train.prepare_run_artifacts(
         models_root, "ArmageddonAgent_x1", new_model=False, append_training=False, n_envs=1,
+        rewards_config=table_de_recompense("ArmageddonAgent_x1"),
         log_fn=lambda _m: None,
     )
     open(model_path, "wb").close()
@@ -340,6 +345,7 @@ def test_a_new_run_ignores_the_offset_even_without_archiving(tmp_path, monkeypat
     monkeypatch.setattr(train, "archive_canonical_artifacts_for_new_run", lambda *_a, **_k: [])
     _, offset, start_index = train.prepare_run_artifacts(
         models_root, "ArmageddonAgent_x1", new_model=True, append_training=True, n_envs=4,
+        rewards_config=table_de_recompense("ArmageddonAgent_x1"),
         log_fn=lambda _m: None,
     )
 
@@ -357,6 +363,7 @@ def test_the_prologue_creates_the_model_directory_on_every_path(tmp_path) -> Non
     models_root = str(tmp_path / "models")
     model_path, _, _ = prepare_run_artifacts(
         models_root, "ArmageddonAgent_x1", new_model=False, append_training=False, n_envs=1,
+        rewards_config=table_de_recompense("ArmageddonAgent_x1"),
         log_fn=lambda _m: None,
     )
     assert os.path.isdir(os.path.dirname(model_path))

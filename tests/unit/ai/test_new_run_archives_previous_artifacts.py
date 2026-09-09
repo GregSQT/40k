@@ -19,6 +19,7 @@ import os
 import pytest
 
 from ai.train import archive_canonical_artifacts_for_new_run, canonical_run_artifacts
+from tests.unit.ai._fabriques import table_de_recompense
 
 
 def _populate(model_dir) -> str:
@@ -59,6 +60,10 @@ def test_canonical_artifacts_are_the_fixed_name_ones(tmp_path) -> None:
         "model_TestAgent_interrupted.zip",
         "model_TestAgent_interrupted_vec_normalize.pkl",
         "model_TestAgent_interrupted_run_state.json",
+        # Le contrat du run (observation, familles d'actions, clés de récompense) : nom FIXE, donc
+        # écrasé par le run neuf. Un modèle archivé sans son contrat est irreprenable — sa reprise
+        # s'arrêterait sur un « contrat absent », exactement comme un zip sans ses stats.
+        "training_contract.json",
     }
 
 
@@ -149,14 +154,23 @@ def test_new_run_leaves_an_EMPTY_sidecar_behind_the_archived_one(tmp_path, monke
     )
 
     prepare_run_artifacts(str(models_root), "TestAgent", new_model=True, append_training=False,
-                          n_envs=1, log_fn=lambda _m: None)
+                          n_envs=1, rewards_config=table_de_recompense("TestAgent"),
+                          log_fn=lambda _m: None)
 
     assert json.loads(open(f"{model_path}.tb_run.json").read())["run_dir"] == ""
 
     # Et ce sidecar VIDE ne bloque pas le `--new` suivant : il ne porte rien a sauver, donc rien
     # a ecarter. L'archiver quand meme faisait lever `FileExistsError` a deux `--new` dans la
     # meme minute — un run relance apres 20 s sur une config fausse.
-    assert archive_canonical_artifacts_for_new_run(model_path, log_fn=lambda _m: None) == []
+    #
+    # L'assertion porte sur le SIDECAR nommement, et non plus sur une liste vide : depuis que le
+    # contrat d'entrainement est un artefact canonique, le `--new` precedent en a laisse un, et
+    # c'est un vrai artefact — il s'ecarte comme le modele. Ce que ce test verrouille est que le
+    # sidecar vide, lui, n'est pas de la partie.
+    ecartes = archive_canonical_artifacts_for_new_run(model_path, log_fn=lambda _m: None)
+    assert not [p for p in ecartes if "tb_run" in os.path.basename(p)], (
+        f"le sidecar VIDE a ete archive : {ecartes}"
+    )
 
 
 def test_two_new_runs_one_second_apart_are_both_archivable(tmp_path, monkeypatch) -> None:

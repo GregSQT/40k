@@ -8,6 +8,19 @@
 
 → `Documentation/Reference/outils/tests_front.md`
 
+**Rectification 2026-09-09.** L'orchestrateur livré ne pouvait pas passer : sa **couche B**
+(`npx vitest run`) collectait aussi `frontend/tests/e2e/smoke.spec.ts` — un fichier Playwright dont
+le premier import n'existe pas pour vitest — et rendait `1 failed | 36 passed` quel que soit l'état
+du code. Frontière déclarée dans `frontend/vite.config.ts` et verrouillée par
+`tests/unit/scripts/test_vitest_collect_scope.py`. La couche B (**4,0 s**, 36 fichiers, 430 tests)
+entre dans la vérification large de CLAUDE.md.
+
+⚠️ **La couche C n'a jamais pu s'exécuter sur cette machine** : `@playwright/test` est déclaré en
+`devDependencies` mais absent de `frontend/node_modules`, et `~/.cache/ms-playwright` est vide. Son
+mur reste **non mesuré**, donc son entrée dans la vérification large n'est pas tranchée. À jouer une
+fois avant de décider : `npm --prefix frontend install` puis
+`npx --prefix frontend playwright install chromium`, et `bash scripts/front_test_all.sh --skip-a --skip-b`.
+
 ---
 
 ## Validations navigateur en attente {#validations-nav}

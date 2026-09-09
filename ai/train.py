@@ -79,7 +79,7 @@ import glob
 import shutil
 import random
 from pathlib import Path
-from typing import Callable, Dict, List, Literal, Tuple, Any, Optional, Set, Union, cast, overload
+from typing import Callable, Dict, List, Literal, Mapping, Tuple, Any, Optional, Set, Union, cast, overload
 
 # Fix import paths - Add both script dir and project root
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -87,6 +87,9 @@ project_root = os.path.dirname(script_dir)
 sys.path.insert(0, script_dir)
 sys.path.insert(0, project_root)
 from ai.unit_registry import UnitRegistry
+# Garde-fou d'ouverture de run : verifie que le modele repris a appris sur le MEME sens des
+# grandeurs (observation, familles d'actions, cles de recompense). Cf. ai/training_contract.py.
+from ai.training_contract import contract_path, enforce_training_contract
 from shared.json_atomic import write_json_atomic
 sys.path.insert(0, project_root)
 
@@ -1550,6 +1553,11 @@ def canonical_run_artifacts(model_path: str) -> list:
         # au premier accident du run suivant.
         interrupted,
         *model_companion_paths(interrupted),
+        # Le CONTRAT du run (ai/training_contract.py) : nom FIXE dans le dossier du modele, donc
+        # le run neuf l'ecrase. Meme raison que les stats VecNormalize du best_model, deux lignes
+        # plus haut — un modele archive sans son contrat est irreprenable : sa reprise s'arreterait
+        # sur un « contrat absent » qui ne dit plus rien de ce sur quoi il a appris.
+        contract_path(model_path),
     ]
 
 
@@ -1794,6 +1802,7 @@ def prepare_run_artifacts(
     new_model: bool,
     append_training: bool,
     n_envs: int,
+    rewards_config: Mapping[str, Any],
     log_fn=print,
 ) -> Tuple[str, int, int]:
     """Prologue commun des chemins d'entrainement : ou ecrit ce run, et d'ou il repart.
@@ -1818,9 +1827,29 @@ def prepare_run_artifacts(
     # ici. `main()` porte la MEME regle plus tot encore, avant le StepLogger et la sync des
     # configs ; ici, `--resume-from` a deja installe son checkpoint, donc plus aucune tolerance.
     check_model_lifecycle(model_path, new_model, append_training)
+    # CONTRAT D'ENTRAINEMENT — la seconde question du prologue. `check_model_lifecycle` demande
+    # ce que la commande fait du modele ; celle-ci demande si le modele a appris sur le MEME sens
+    # des grandeurs qu'on s'apprete a lui redonner. Sur une REPRISE, elle leve ICI, avant le
+    # moindre effet de bord : un run qui doit s'arreter ne doit pas avoir cree de dossier, ecarte
+    # un artefact ni ouvert un run TensorBoard. Le cas `--new` est traite plus bas, apres
+    # l'archivage — ecrit avant, le contrat neuf partirait avec le run precedent.
+    if not new_model:
+        enforce_training_contract(
+            model_path, str(agent_key), rewards_config, new_model=False, log_fn=log_fn
+        )
     os.makedirs(os.path.dirname(model_path), exist_ok=True)
     if new_model:
         archive_canonical_artifacts_for_new_run(model_path, log_fn)
+        # `new_model=True` est REDONDANT ici et le reste sciemment : l'archivage vient de renommer
+        # `model_path`, donc `enforce_training_contract` prendrait de toute facon sa branche
+        # « modele absent » et ecrirait le meme contrat. Mesure de `scripts/mutation_ciblee.py`
+        # (2026-09-09) : le mutant `True -> False` SURVIT a cet endroit, et c'est un faux positif
+        # legitime — aucun test ne peut distinguer deux chemins qui font la meme chose. Le drapeau
+        # est garde parce qu'il dit l'INTENTION au lecteur, et parce qu'il fait passer les deux cas
+        # par le meme point d'entree. Ne pas re-enqueter sur ce survivant.
+        enforce_training_contract(
+            model_path, str(agent_key), rewards_config, new_model=True, log_fn=log_fn
+        )
         # Le sidecar part avec le run archive : sans cette remise a neuf, l'agent n'en aurait plus
         # du tout, et un `--append` ultérieur mourrait dans `_read_tensorboard_run_meta` en
         # conseillant un `--new` qui vient justement d'etre fait. Le remettre A VIDE et non le
@@ -2828,7 +2857,8 @@ def create_multi_agent_model(config, training_config_name, rewards_config_name, 
     # `assign_pool_members_to_envs`, pas en silence.
 
     model_path, _episode_offset, episode_start_index = prepare_run_artifacts(
-        config.get_models_root(), agent_key, new_model, append_training, n_envs
+        config.get_models_root(), agent_key, new_model, append_training, n_envs,
+        config.load_agent_rewards_config(agent_key),
     )
 
     if n_envs > 1:
@@ -3537,7 +3567,8 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
     
     # Base de TOUTES les rampes par-episode : cf. ai/run_state.py.
     model_path, episode_offset, episode_start_index = prepare_run_artifacts(
-        config.get_models_root(), agent_key, new_model, append_training, n_envs, chunk_log
+        config.get_models_root(), agent_key, new_model, append_training, n_envs,
+        config.load_agent_rewards_config(agent_key), chunk_log,
     )
 
     # Create initial model with first scenario (or load if append_training)
