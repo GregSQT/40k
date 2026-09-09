@@ -105,7 +105,7 @@ l'historique git, et le message d'arrêt le dit désormais famille par famille :
 | Famille | Fréquence | Ce que ce garde-fou apporte |
 |---|---|---|
 | Clés de récompense | 7 commits / 90 j retirent une clé | **Seul contrôle qui la voit.** Ni SB3 (qui ignore les récompenses) ni le verrou de parité ne regardent là. |
-| Vocabulaires d'ids (`*_IDS`) | 21 commits / 90 j | **Seul contrôle qui les voit.** Ces registres portent le sens des **valeurs**, pas des cases : « le vocabulaire s'allonge pour zéro scalaire » (`observation_builder.py:135`). `SQUAD_OBS_SIZE_TARGET` ne les compte pas — 6 des 17 registres empreintés n'entrent pas dans son calcul — donc une insertion décale tous les ids suivants **à dimension constante**, invisible pour SB3. |
+| Vocabulaires d'ids (`*_IDS`) | 21 commits / 90 j | **Seul contrôle qui les voit.** Ces registres portent le sens des **valeurs**, pas des cases : « le vocabulaire s'allonge pour zéro scalaire » (docstring de `unit_ability_obs_ids`, `engine/observation_builder.py`). `SQUAD_OBS_SIZE_TARGET` ne les compte pas — 6 des 17 registres empreintés n'entrent pas dans son calcul — donc une insertion décale tous les ids suivants **à dimension constante**, invisible pour SB3. |
 | Champs d'observation / actions | 13 commits / 30 j touchent un registre, dont **12** changent la dimension | SB3 lève déjà pour ces 12 — mais **plus tard**, une fois le run engagé. L'apport est l'arrêt précoce, plus le renommage à taille constante (aucun cas sur ces 30 jours). |
 
 Autrement dit : ce contrôle est **seul** sur les récompenses et sur les vocabulaires d'ids ; sur les
