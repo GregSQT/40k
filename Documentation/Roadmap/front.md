@@ -15,11 +15,11 @@ du code. Frontière déclarée dans `frontend/vite.config.ts` et verrouillée pa
 `tests/unit/scripts/test_vitest_collect_scope.py`. La couche B (**4,0 s**, 36 fichiers, 430 tests)
 entre dans la vérification large de CLAUDE.md.
 
-## 🟢 Couche C — remise en état le 2026-09-09 : **13 verts, 0 skippé, en 36 s** {#couche-c}
+## 🟢 Couche C — remise en état le 2026-09-09 : **14 verts sur 14** {#couche-c}
 
-Playwright installé (paquet + Chromium) et **neuf défauts corrigés**, la couche C est verte :
-ses 14 tests s'exécutent tous, **13 passent et plus aucun ne se skippe** ; le seul non-vert est la
-régression visuelle, qui écrit sa baseline au premier run d'une machine.
+Playwright installé (paquet + Chromium) et **onze défauts corrigés**, la couche C est verte :
+ses 14 tests s'exécutent tous, plus aucun ne se skippe, et **les 14 passent** — vérifié sur deux
+runs consécutifs (le premier écrit la baseline visuelle et rend 13 verts, le second 14 en 45 s).
 
 Les **invariants de parité front/back** — `greenCircleUnitIds ⊆ move_activation_pool` et
 `movePreviewHexes ⊆ valid_move_destinations_pool` — vérifient enfin quelque chose. Ils **passaient
@@ -28,6 +28,13 @@ de l'enveloppe `game_state` (∅ ⊆ tout), et surtout aucun passage en phase mo
 en `command`, pool vide. Le test l'y amène désormais **par l'interface**, en répondant d'abord aux
 deux modales que le jeu ouvre au démarrage (décision Waaagh! 08.04 et dialogue d'enregistrement du
 replay), dont le fond interceptait tous les clics.
+
+Deux gardes de plus, posées après coup : les ensembles du **front** (`greenCircleUnitIds`,
+`movePreviewHexes`) sont eux aussi assertés **non vides** — sans quoi un affichage qui ne peint rien
+ferait passer le test, la boucle de comparaison n'itérant pas. Et T12-6 **essaie les unités
+éligibles jusqu'à en trouver une qui peut bouger** : prendre la première rendait le test instable
+(il passait à un run, échouait au suivant), une unité éligible pouvant être encerclée ou bloquée par
+le terrain.
 
 ⚠️ Le bilan « 13 rouges, 6 min 42 » publié plus tôt le même jour était **faux** : il venait de runs
 que polluait un Vite orphelin (défaut n° 4 ci-dessous).

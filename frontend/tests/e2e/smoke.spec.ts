@@ -313,6 +313,16 @@ test.describe("T12-4 — Cercles verts == pool backend", () => {
       "aucune unité éligible en phase move : ce test ne prouverait rien (∅ ⊆ tout)"
     ).toBeGreaterThan(0);
 
+    // L'AUTRE moitié du vert vacant, et c'est celle qui compte. Asserter que le POOL est non vide
+    // ne protège que le côté moteur ; si le front ne peint AUCUN cercle — hook cassé, régression
+    // de rendu, board non initialisé — la boucle ci-dessous ne fait aucune itération et le test
+    // passe. Or son sujet est précisément ce que le front AFFICHE.
+    expect(
+      greenIds.length,
+      "le front n'a peint aucun cercle vert alors que le moteur offre des unités éligibles : " +
+        "sans cette assertion, l'inclusion serait vraie sans rien prouver (∅ ⊆ pool)"
+    ).toBeGreaterThan(0);
+
     // Chaque ID cerclé doit être dans le pool
     for (const id of greenIds) {
       expect(pool).toContain(id);
@@ -389,52 +399,63 @@ test.describe("T12-6 — Preview move hexes via hook", () => {
     expect(pool.length, "aucune unité éligible : rien à activer, donc rien à prévisualiser")
       .toBeGreaterThan(0);
 
-    // Prendre la première unité du pool et récupérer sa position
+    // ESSAYER LES UNITÉS ÉLIGIBLES JUSQU'À EN TROUVER UNE QUI PEUT BOUGER.
+    //
+    // Prendre la PREMIÈRE du pool rendait ce test instable, et c'est mesuré : il passait à un run
+    // et échouait au suivant sur « aucune destination valide après activation », selon l'unité que
+    // le tirage de partie plaçait en tête. Une unité éligible à l'activation n'a pas forcément de
+    // destination — encerclée, bloquée par le terrain. Ce n'est pas une anomalie du moteur, c'est
+    // une situation de jeu, et un test ne doit pas dépendre de laquelle sort en premier.
     const units: Array<{ id: number; col: number; row: number }> =
       (state.units as Array<{ id: number; col: number; row: number }>) ?? [];
-    const firstEligible = units.find((u) => pool.includes(String(u.id)));
-    expect(firstEligible, "le pool nomme une unité absente de `units` : états incohérents")
-      .toBeDefined();
+    const eligibles = units.filter((u) => pool.includes(String(u.id)));
+    expect(eligibles.length, "le pool ne nomme aucune unité de `units` : états incohérents")
+      .toBeGreaterThan(0);
 
-    // Cliquer sur l'unité via hexToScreenCoords (col/row passés depuis Node, pas besoin de __W40K_UNITS__)
-    const coords = await page.evaluate(
-      ({ col, row }: { col: number; row: number }) => {
-        const hook = (window as Record<string, unknown>).__W40K_TEST__ as
-          | Record<string, unknown>
-          | undefined;
-        if (!hook) return null;
-        return (hook.hexToScreenCoords as (col: number, row: number) => { x: number; y: number })(
-          col,
-          row
-        );
-      },
-      { col: firstEligible!.col, row: firstEligible!.row }
-    );
+    let apiPool: Array<{ col: number; row: number }> = [];
+    let unitesEssayees = 0;
 
-    // Sans coordonnées, il n'y a pas de clic — donc pas de prévisualisation à comparer. C'était
-    // le troisième abandon muet de ce test ; c'est désormais un échec, car un canvas non
-    // dimensionné est une panne du rendu, pas une dispense de vérifier.
-    expect(coords, "hexToScreenCoords n'a rien rendu : le hook ou le canvas est en panne")
-      .not.toBeNull();
-    expect(
-      coords!.x !== 0 || coords!.y !== 0,
-      "hexToScreenCoords rend (0,0) : le canvas n'est pas encore dimensionné"
-    ).toBe(true);
+    for (const unite of eligibles) {
+      const coords = await page.evaluate(
+        ({ col, row }: { col: number; row: number }) => {
+          const hook = (window as Record<string, unknown>).__W40K_TEST__ as
+            | Record<string, unknown>
+            | undefined;
+          if (!hook) return null;
+          return (hook.hexToScreenCoords as (col: number, row: number) => { x: number; y: number })(
+            col,
+            row
+          );
+        },
+        { col: unite.col, row: unite.row }
+      );
 
-    await page.mouse.click(coords!.x, coords!.y);
-    // Attendre que le hook mette à jour movePreviewHexes (rendu PIXI + useEffect)
-    await page.waitForTimeout(800);
+      // Un canvas non dimensionné est une panne du rendu, pas une dispense de vérifier : on
+      // n'essaie pas l'unité suivante, on le dit.
+      expect(coords, "hexToScreenCoords n'a rien rendu : le hook ou le canvas est en panne")
+        .not.toBeNull();
+      expect(
+        coords!.x !== 0 || coords!.y !== 0,
+        "hexToScreenCoords rend (0,0) : le canvas n'est pas encore dimensionné"
+      ).toBe(true);
 
-    const stateAfter = await lireEtatDePartie(page);
-    const apiPool: Array<{ col: number; row: number }> =
-      (stateAfter.valid_move_destinations_pool as Array<{ col: number; row: number }>) ?? [];
+      await page.mouse.click(coords!.x, coords!.y);
+      // Attendre que le hook mette à jour movePreviewHexes (rendu PIXI + useEffect)
+      await page.waitForTimeout(800);
+      unitesEssayees += 1;
 
-    // Dernier abandon muet du fichier. Un pool de destinations vide après activation d'une unité
-    // ÉLIGIBLE est une anomalie du moteur — et il rendrait de toute façon la comparaison vide,
-    // donc vraie sans rien prouver.
+      const stateAfter = await lireEtatDePartie(page);
+      apiPool =
+        (stateAfter.valid_move_destinations_pool as Array<{ col: number; row: number }>) ?? [];
+      if (apiPool.length > 0) break;
+    }
+
+    // Qu'AUCUNE unité éligible n'ait de destination reste une anomalie — et rendrait de toute
+    // façon la comparaison vide, donc vraie sans rien prouver.
     expect(
       apiPool.length,
-      "aucune destination valide après activation : le moteur n'a rien proposé, la comparaison serait vide"
+      `aucune des ${unitesEssayees} unités éligibles essayées n'a de destination valide : ` +
+        "le moteur n'a rien proposé, la comparaison serait vide"
     ).toBeGreaterThan(0);
 
     const apiHexKeys = new Set(apiPool.map((h) => `${h.col},${h.row}`));
@@ -447,6 +468,15 @@ test.describe("T12-6 — Preview move hexes via hook", () => {
       if (!hook) return [];
       return [...(hook.movePreviewHexes as Set<string>)];
     });
+
+    // Même garde que dans T12-4 : sans elle, un front qui ne peint AUCUN hex de prévisualisation
+    // ferait passer ce test, puisque la boucle ci-dessous n'itérerait pas. C'est pourtant
+    // exactement la régression que ce test existe pour attraper.
+    expect(
+      hookHexes.length,
+      "le front n'a peint aucun hex de prévisualisation après activation d'une unité éligible, " +
+        "alors que le moteur propose des destinations : la comparaison serait vide"
+    ).toBeGreaterThan(0);
 
     // Chaque hex peint par le front doit être dans le pool API
     for (const hk of hookHexes) {

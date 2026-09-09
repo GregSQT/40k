@@ -28,7 +28,7 @@ pourquoi, avec les mesures.
 |---|---|---|
 | A — intégration PvP | 3 min 31 (`-n 6 --dist load`, mesuré 2026-08-05) | déjà dans la vérification large |
 | B — vitest | **4,0 s** — 36 fichiers, 430 tests | **ajoutée le 2026-09-09** |
-| C — Playwright | **36 s** — 14 tests : **13 verts, 0 skippé** (+ la baseline visuelle au 1er run d'une machine) | **candidate** : voir ci-dessous |
+| C — Playwright | **40 s** — **14 verts sur 14** au régime établi (le 1er run d'une machine écrit la baseline visuelle et échoue une fois) | **candidate** : voir ci-dessous |
 
 **Ce que la mesure a trouvé, et qui rendait la couche B rouge par construction.** Avant ce jour,
 `npx vitest run` rendait `Test Files 1 failed | 36 passed (37)` quel que soit l'état du code : le
@@ -40,10 +40,10 @@ La frontière entre les deux harnais est désormais déclarée dans `frontend/vi
 `tests/unit/scripts/test_vitest_collect_scope.py`, qui applique le motif AU DISQUE dans les deux
 sens : aucun spec Playwright collecté par vitest, et aucun test de `src/` laissé hors périmètre.
 
-**La couche C, remise en état le 2026-09-09.** Ses 14 tests s'exécutent tous — **13 passent, plus
-aucun ne se skippe** — en **36 s**. Le seul non-vert est la régression visuelle, qui écrit sa
-baseline au premier run d'une machine. Le « 6 min 42 » publié plus tôt le même jour venait de runs
-pollués par un serveur fantôme (défaut n° 4).
+**La couche C, remise en état le 2026-09-09.** Ses 14 tests s'exécutent tous, plus aucun ne se
+skippe, et **les 14 passent** — vérifié sur deux runs consécutifs : le premier rend 13 verts et
+écrit la baseline visuelle, le second **14 verts en 45 s**. Le « 6 min 42 » publié plus tôt le même
+jour venait de runs pollués par un serveur fantôme (défaut n° 4).
 
 ⚠️ **Les deux invariants de parité front/back étaient des VERTS VACANTS** — et le rester aurait été
 pire que leur absence, puisqu'on les croyait protecteurs. `greenCircleUnitIds ⊆
@@ -137,7 +137,7 @@ baselines ne sont **pas versionnées** : une image de 810 Ko qui fige le rendu d
 précédent de LA machine où il tourne, et non à une référence commune. Le versionner reste un choix
 ouvert.
 
-**Bilan.** **Neuf défauts** trouvés en exécutant cette couche pour la première fois, **tous
+**Bilan.** **Onze défauts** trouvés en exécutant cette couche pour la première fois, **tous
 corrigés** — trois d'environnement, deux dans le harnais, trois dans les tests eux-mêmes. Aucun
 n'était visible tant qu'on ne l'exécutait pas ; trois faisaient passer pour verts des tests qui ne
 comparaient rien. La parité entre l'affichage et le moteur est désormais vérifiée pour de bon.
