@@ -1729,6 +1729,102 @@ def report_accumulation() -> tuple[bool, list[str]]:
     return broken, lines
 
 
+#: Ce que `observation_params.justification` ANNONCE, et qui est confrontable au bloc qui la porte.
+#: Motifs ancrés sur la FORMULE et non sur une position : la justification est un paragraphe libre,
+#: et un contrôle qui compterait des positions se déroberait à la première reformulation.
+_JUSTIFICATION_CLAIMS: tuple[tuple[str, str], ...] = (
+    ("valeur courante", r"VALEUR COURANTE\s*:\s*(\d{4,})"),
+    ("dernier maillon de la lignée", r"lignee verifiee\s+(?:\d{4,}\s*->\s*)*(\d{4,})"),
+)
+
+#: La grille, annoncée dans la même phrase que l'encodeur partagé.
+_JUSTIFICATION_GRID = r"la grille (\d+x\d+x\d+)"
+
+
+def check_config_justification() -> tuple[int, list[str]]:
+    """Passe config — la justification d'un bloc dit-elle ce que le bloc lui-même déclare ?
+
+    POURQUOI. Les passes précédentes confrontent des DOCUMENTS à la source. Aucune ne regarde à
+    l'intérieur d'un bloc de config, et `VALUE_CHECKS` ne surveille `obs_size` que sur
+    `entrainement.md`. La justification d'un profil pouvait donc annoncer une valeur pendant que
+    l'`obs_size` du MÊME bloc en portait une autre, sous un contrôle vert. Mesuré le 2026-09-09 :
+    l'en-tête disait « VALEUR COURANTE : 16971 » et la lignée s'arrêtait au même nombre alors que
+    `obs_size` valait 17055 — la contradiction était lisible à l'œil nu, et trois livraisons
+    d'observation l'ont franchie. La grille part du même mouvement : `32x32x11` a survécu au
+    passage de `GRID_CHANNELS` à 12 dans la phrase même qui annonçait « GRID_CHANNELS 11 -> 12 ».
+
+    CE QU'IL N'ÉTABLIT PAS : que la justification soit JUSTE. Il ne compare que ce qu'elle affirme
+    d'un nombre dont la source est calculable — pas ses deltas, pas son récit.
+
+    VERT VACANT : un motif qui ne retrouve plus sa phrase est une ASSERTION ORPHELINE, jamais un
+    succès ; sans cette garde, reformuler la justification désarmerait la passe pour toujours.
+    """
+    try:
+        from engine.spatial_grid import GRID_CHANNELS, GRID_SIZE
+    except ImportError as error:  # PYTHONPATH absent, module renommé
+        raise SourceUnavailable(f"engine.spatial_grid illisible : {error}") from error
+    profiles = agent_profiles()
+    if not profiles:
+        raise SourceUnavailable(f"aucun profil d'entraînement énuméré dans {AGENT_CONFIG}")
+    expected_grid = f"{GRID_SIZE}x{GRID_SIZE}x{GRID_CHANNELS}"
+    verified = 0
+    broken: list[str] = []
+    def orphan(name: str, label: str) -> str:
+        return (
+            f"{AGENT_CONFIG.name}  ASSERTION ORPHELINE  {name}.observation_params : "
+            f"« {label} » ne se retrouve plus dans la justification"
+        )
+
+    def contradiction(name: str, label: str, claimed: str, origin: str) -> str:
+        return (
+            f"{AGENT_CONFIG.name}  CONTRADICTION INTERNE  {name}.observation_params : "
+            f"la justification annonce {claimed} en {label}, {origin}"
+        )
+
+    for name, profile in sorted(profiles.items()):
+        params = profile["observation_params"]
+        justification = params["justification"]
+        obs_size = params["obs_size"]
+        for label, pattern in _JUSTIFICATION_CLAIMS:
+            found = re.search(pattern, justification)
+            if found is None:
+                broken.append(orphan(name, label))
+            elif int(found.group(1)) != obs_size:
+                broken.append(
+                    contradiction(
+                        name, label, found.group(1), f"le bloc déclare obs_size = {obs_size}"
+                    )
+                )
+            else:
+                verified += 1
+        found_grid = re.search(_JUSTIFICATION_GRID, justification)
+        if found_grid is None:
+            broken.append(orphan(name, "grille"))
+        elif found_grid.group(1) != expected_grid:
+            broken.append(
+                contradiction(
+                    name,
+                    "grille",
+                    found_grid.group(1),
+                    f"engine/spatial_grid.py donne {expected_grid}",
+                )
+            )
+        else:
+            verified += 1
+    return verified, broken
+
+
+def report_config_justification() -> tuple[bool, list[str]]:
+    verified, broken = check_config_justification()
+    lines = [
+        f"{'❌' if broken else '✅'} {AGENT_CONFIG.relative_to(ROOT).as_posix()}  "
+        f"(justification ↔ bloc)",
+        f"   valeurs  : {verified} confirmées, {len(broken)} contredites ou orphelines",
+    ]
+    lines += [f"   {entry}" for entry in broken]
+    return bool(broken), lines
+
+
 def main(argv: list[str]) -> int:
     docs: Iterable[str] = argv[1:] or [*DEFAULT_DOCS, *VALUE_ONLY_DOCS]
     failed = False
@@ -1797,6 +1893,17 @@ def main(argv: list[str]) -> int:
         else:
             print("\n".join(lines))
             failed = failed or has_accum
+        try:
+            has_contradiction, lines = report_config_justification()
+        except (SourceUnavailable, OSError, KeyError) as error:
+            print(
+                f"❌ justification ↔ bloc\n   CONTRÔLE IMPOSSIBLE — "
+                f"{type(error).__name__} : {error}"
+            )
+            failed = True
+        else:
+            print("\n".join(lines))
+            failed = failed or has_contradiction
     print(
         "\nNON VÉRIFIABLE, et assumé : le nombre de « contrôles analyzer vivants ». Le code n'en "
         "porte aucune énumération ; le compter depuis un tableau de document mesurerait autre "

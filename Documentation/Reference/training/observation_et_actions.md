@@ -655,9 +655,16 @@ T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10, T-F) → 20166 �
 (chantier 02) → 20725 (chantier 03) → 20727 → **14609** (socle §0.48 : règles d'armes en ids)
 → 14615 (drapeau `declines`) → 14659 + 16653 (`L2`, `K_ALLY_SLOTS` 8 → 12) → 16671
 → 16703 (`effective_range`) → 16735 (`charged`, 2026-08-24)
-→ **16791** (réservations J4/J5, 2026-08-31 : `AGENT_DECISION_TYPE_SLOTS` 8→16 +8,
+→ 16791 (réservations J4/J5, 2026-08-31 : `AGENT_DECISION_TYPE_SLOTS` 8→16 +8,
 `reserved_mission_cont_0..15` dans `GLOBAL_CONT_FIELDS` +16,
-`reserved_mission_bin_0..31` dans `GLOBAL_BIN_FIELDS` +32).
+`reserved_mission_bin_0..31` dans `GLOBAL_BIN_FIELDS` +32)
+→ 16811 (OC live + secured, 2026-09-08 : `objective_my_oc_{0..4}` dans `GLOBAL_CONT_FIELDS` +10,
+`objective_secured_mine_{0..4}` / `objective_secured_enemy_{0..4}` dans `GLOBAL_BIN_FIELDS` +10)
+→ 16971 (mots-clés de catégorie, 2026-09-09 : `kw_infantry`, `kw_vehicle`, `kw_monster`,
+`kw_fly`, `kw_psyker` dans `UNIT_BIN_FIELDS`, 5 bits × 32 entités +160)
+→ **17055** (verticalité du move gym 13.06, 2026-09-09 : `max_floor_height` dans
+`UNIT_CONT_FIELDS` et `has_ground_model` dans `UNIT_BIN_FIELDS` +64 = 2 × 32 entités,
+`elevated` dans `SELF_MODEL_BIN_FIELDS` +20 = 1 bit × 20 figurines).
 
 **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
 Depuis le chantier 01, une capacité, un statut ou une faction entière n'est qu'un `obs_id` de

@@ -509,7 +509,7 @@ Règles:
     },
 
     "observation_params": {
-      "obs_size": 16791
+      "obs_size": 17055
     },
 
     "model_params": {
