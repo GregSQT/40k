@@ -202,8 +202,9 @@ n'etait que conventionnel : `advance_phase` est intercepte AVANT le dispatch de 
 terminait la phase de commandement avec la designation encore posee — purgee sans avoir servi a
 l'ouverture de la phase suivante (`expire_faction_abilities_for_player`), donc plus aucune
 relance de touche du tour, et pas un message. Hors decision en attente, la phase de commandement
-n'accepte que `zone_intent` et `skip` (`W40KEngine.COMMAND_PHASE_ACTIONS`) : tout autre verbe y
-etait traite comme une sortie volontaire et la terminait en rendant `success: True`.
+n'accepte que `skip` (`W40KEngine.COMMAND_PHASE_ACTIONS`) : tout autre verbe y etait traite comme
+une sortie volontaire et la terminait en rendant `success: True`. Elle acceptait aussi
+`zone_intent` jusqu'au retrait des intentions de zone, le 2026-09-09.
 
 **La reprise DEMARRE la phase suivante**, elle ne se contente pas de l'annoncer
 (`_resume_command_phase_after_faction_decision` : `phase_complete` -> `movement_phase_start`, le

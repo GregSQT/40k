@@ -79,9 +79,14 @@ _SEEDS = (0, 1, 2)
 #: L'ouverture de la verticalité au move (13.06) ajoute exactement un tel point, et elle a inversé
 #: le classement du 2026-09-06 (0 → 0 tir, 1 → 4, 2 → 16). Re-mesuré sur les trois graines :
 #: 0 → 22 tirs, 1 → 0, 2 → 0 ; les échantillons d'objectifs valent 4/4 sur les trois, donc c'est
-#: bien `shots_fired` seul qui départage. La 0 est retenue, seule à ouvrir la garde.
+#: bien `shots_fired` seul qui départage.
 #: Choisir la graine est le geste que prévoit la docstring du test ; retirer l'assertion, non.
-_REFERENCE_SEED = 0
+#:
+#: RE-MESURÉ le 2026-09-09, après le retrait des intentions de zone : la phase de commandement ne
+#: consomme plus de step, donc le tirage se décale à nouveau et la graine 0 est retombée à 0 tir.
+#: Six graines mesurées — 0 → 0, 1 → 0, 2 → 37, 3 → 41, 4 → 0, 5 → 69 ; les échantillons
+#: d'objectifs sont ouverts sur les six. La 2 est retenue, première à rouvrir la garde de tir.
+_REFERENCE_SEED = 2
 
 
 def _play(scenario_file: str, seed: int) -> Dict[str, Any]:
@@ -321,9 +326,9 @@ def test_the_shipped_config_declares_the_reserves_penalty() -> None:
 def test_a_declined_and_destroyed_reserve_is_actually_charged() -> None:
     """La pénalité ATTEINT la récompense de l'épisode, elle ne reste pas en attente.
 
-    Le compte est posé par `fight_handlers` à la destruction (20.04) et facturé au step suivant,
-    par le même chemin que le shaping zone-intent. S'il n'était jamais poppé — cas vécu sur
-    `_pending_zone_shaping` — rien ne rougirait côté compteurs : ils sont, eux, corrects.
+    Le compte est posé par `fight_handlers` à la destruction (20.04) et facturé au step suivant
+    (`_drain_pending_reserves`). S'il n'était jamais vidé, rien ne rougirait côté compteurs : ils
+    sont, eux, corrects.
 
     Le seuil est un MAJORANT (`<=`) : `penalties` porte aussi les coûts d'action ordinaires, tous
     négatifs. Ce qui est vérifié, c'est qu'il y a au moins de quoi payer les escouades gaspillées.

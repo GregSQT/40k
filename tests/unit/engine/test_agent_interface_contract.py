@@ -43,7 +43,7 @@ Table verrouillée (entier → intention) :
 | `CHARGE_SLOT_BASE + k`                    | `squad_charge`, `target_slot == k`              |
 | `FIGHT_SLOT_BASE + k`                     | `squad_fight`, `target_slot == k`               |
 | `ACTION_FIGHT_NO_TARGET`                  | `squad_fight` SANS `target_slot`                |
-| `BASE_ZONE_INTENT + 3*zone + intent`      | `zone_intent(zone, intent)`                     |
+| `BASE_ZONE_INTENT + k` (plage réservée)   | LÈVE — aucun masque ne l'ouvre                  |
 | `CHOICE_BASE + i`                         | `agent_decision`, `option_index == i`           |
 | `DEPLOY_SLOT_BASE + s`, phase deployment  | `deploy_unit` sur l'hex de la stratégie `s`     |
 | `4..8` HORS déploiement                   | cellule de move — PAS `deploy_unit`             |
@@ -103,9 +103,9 @@ from engine.macro_intents import (
     FIGHT_SLOT_COUNT,
     FIGHT_WEAPON_SLOT_BASE,
     FIGHT_WEAPON_SLOT_COUNT,
-    MAX_OBJECTIVES,
     OATH_SLOT_BASE,
     OATH_SLOT_COUNT,
+    RESERVED_COMMAND_SLOT_COUNT,
     MOVE_CELL_BASE,
     MOVE_CELL_COUNT,
     SHOOT_SLOT_BASE,
@@ -166,7 +166,14 @@ DRIVE_STEPS = 400
 
 #: Phases dont la parité masque↔décodeur DOIT être mesurée. Si l'une cesse d'être atteinte, le
 #: test de parité se viderait en silence — d'où la garde `test_parity_covers_the_real_phases`.
-REQUIRED_PHASES = ("deployment", "command", "move", "shoot")
+#:
+#: ⚠️ `command` en est SORTIE le 2026-09-09, et c'est une CONSÉQUENCE MESURÉE du retrait des
+#: intentions de zone, pas un assouplissement : la phase de commandement ne rend plus jamais la
+#: main à l'agent hors décision en attente (`command_phase_resume` enchaîne sur le mouvement pour
+#: les deux camps), donc aucun step masqué ne s'y produit et l'exiger ici échouait sur un
+#: `KeyError: 'command'`. Les décisions qui l'interrompent encore (Waaagh! 08.04, Oath,
+#: restitution Grot Orderly) sont capturées sous `PLAYER_CHOICE_KEY`, où leur parité est mesurée.
+REQUIRED_PHASES = ("deployment", "move", "shoot")
 
 #: Clé du régime « choix d'activation » (V11 §0.48 `L2`) dans `driven["by_phase"]`. Ce n'est pas une
 #: phase : c'est un masque EXCLUSIF qui peut apparaître dans move/shoot/charge/fight. Il a sa propre
@@ -475,34 +482,25 @@ def test_fight_without_target_is_a_distinct_intent(phase_state):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(
-    "zone_idx, intent_value", [(0, 0), (0, 2), (1, 1), (MAX_OBJECTIVES - 1, 2)]
-)
-def test_zone_intent_routes_to_that_zone_and_intent(phase_state, zone_idx, intent_value):
-    """`BASE_ZONE_INTENT + 3*zone + intent` → `zone_intent(zone, intent)`.
+@pytest.mark.parametrize("offset", [0, 1, RESERVED_COMMAND_SLOT_COUNT - 1])
+@pytest.mark.parametrize("phase", ["command", "move"])
+def test_a_reserved_id_never_decodes_to_an_action(phase_state, phase, offset):
+    """La plage RESERVEE (ex-intentions de zone) LÈVE au décodage, dans TOUTE phase.
 
-    Le dernier cas (`zone 4, intent 2`) est `CHOICE_BASE - 1` : la frontière avec les actions de
-    choix. Il doit rester un zone intent.
+    Ces quinze ids décodaient en `zone_intent(zone, intent)` en phase de commandement et
+    levaient ailleurs. Depuis le retrait du 2026-09-09, aucun masque ne les ouvre : les voir
+    arriver ici est une rupture masque/décodeur, jamais un choix de joueur — y compris en phase
+    de commandement, où ils avaient un sens auparavant.
+
+    Le dernier cas (`RESERVED_COMMAND_SLOT_COUNT - 1`) est `CHOICE_BASE - 1` : la frontière avec
+    les actions de choix, qui, elle, doit rester décodable (test suivant).
     """
-    decoder, game_state, squad_id = phase_state("command")
-    result = decoder.convert_squad_action(
-        BASE_ZONE_INTENT + zone_idx * 3 + intent_value,
-        game_state,
-        eligible_units=_eligible(game_state, squad_id),
-    )
-    assert result == {
-        "action": "zone_intent",
-        "zone_idx": zone_idx,
-        "intent_value": intent_value,
-    }
-
-
-def test_zone_intent_outside_command_phase_raises(phase_state):
-    """Hors command, un zone intent LÈVE — pas de repli silencieux sur une action de phase."""
-    decoder, game_state, squad_id = phase_state("move")
-    with pytest.raises(ValueError, match="zone_intent"):
+    decoder, game_state, squad_id = phase_state(phase)
+    with pytest.raises(ValueError, match="RESERVEE"):
         decoder.convert_squad_action(
-            BASE_ZONE_INTENT, game_state, eligible_units=_eligible(game_state, squad_id)
+            BASE_ZONE_INTENT + offset,
+            game_state,
+            eligible_units=_eligible(game_state, squad_id),
         )
 
 

@@ -5,12 +5,7 @@ reward_calculator.py - Reward calculation system
 
 from typing import Dict, List, Any, Optional
 from engine.constants import DRAW_WINNER
-from engine.macro_intents import (
-    INTENT_DEFEND,
-    INTENT_INVADE,
-    get_objective_control,
-    get_objective_control_for_player,
-)
+from engine.macro_intents import get_objective_control
 from engine.combat_utils import expected_dice_value
 from engine.phase_handlers.shared_utils import is_unit_alive
 from engine.game_utils import get_unit_by_id, require_unit_by_id, once_claim, once_claimed
@@ -1101,12 +1096,13 @@ class RewardCalculator:
         
         # LECTURE PURE de l'etat 14.02, jumeau exact de `_compute_objective_hold_reward` (~l.963,
         # meme raisonnement, meme piege) : recalculer le controle le REECRIRAIT
-        # (`calculate_objective_control`). Ce chemin est un chemin de RECOMPENSE, appele au step
-        # TERMINAL — et `w40k_core.settle_pending_zone_intent_declaration` relit ces controleurs
-        # juste apres pour solder le shaping d'intention. Recalculer ici, hors des frontieres ou
-        # 14.02 l'autorise, faisait donc dependre le solde final d'une reecriture faite par la
-        # recompense elle-meme. Le compteur ci-dessous lit les controleurs DEJA figes, ceux du
-        # dernier checkpoint — un seul comptage, celui de la regle.
+        # (`calculate_objective_control`), hors des frontieres de phase et de tour ou 14.02
+        # l'autorise. Le compteur ci-dessous lit les controleurs DEJA figes, ceux du dernier
+        # checkpoint — un seul comptage, celui de la regle.
+        #
+        # Le second lecteur qui rendait ce piege couteux — le solde des intentions de zone, qui
+        # relisait ces memes controleurs juste apres au step terminal — a disparu le 2026-09-09
+        # avec les intentions. Le raisonnement, lui, tient sans lui.
         controlled_player = int(require_key(self.config, "controlled_player"))
         objective_controllers = require_key(game_state, "objective_controllers")
         controlled_objectives = sum(
@@ -1448,108 +1444,4 @@ class RewardCalculator:
             )
         return float(penalty) * int(wasted_count)
 
-    def settle_zone_intent_declaration(
-        self, game_state: Dict[str, Any], declaration: Dict[str, Any], player: int
-    ) -> float:
-        """
-        Solde une declaration d'intents contre le controle d'objectif OBTENU.
-
-        POURQUOI CE N'EST PLUS EVALUE A LA DECLARATION. La version precedente
-        (``compute_zone_intent_shaping``) lisait ``get_objective_control`` en COMMAND PHASE,
-        c'est-a-dire au moment meme ou l'agent declarait ses intents — donc avant qu'il ait joue
-        son tour, et sur un controle fige a la fin du tour PRECEDENT (regle 14.02 : le controle
-        n'est reevalue qu'aux frontieres de phase/tour). Le versement etait entierement
-        determine par l'etat herite : declarer DEFEND sur une zone deja tenue rapportait le
-        bonus que l'agent la defende ou l'abandonne ensuite.
-
-        Ce terme recompensait donc la DESCRIPTION de l'etat, pas sa TRANSFORMATION : la
-        politique qui le maximise recopie ``objective_controllers`` en intents sans changer une
-        seule action tactique. Pire, cette politique creuse produit exactement la signature
-        qu'une bonne politique produirait sur ``00_critical/p_intent_control_dependency`` — un
-        conditionnement parfait entre intent et controle, pour un comportement vide.
-
-        L'intent est donc paye sur son RESULTAT : la zone a-t-elle fini le tour dans l'etat que
-        l'intent visait ? Les quatre montants de config gardent leurs valeurs, seule leur
-        condition de declenchement change.
-
-        Args:
-            declaration: intents declares et controle AU MOMENT de la declaration, tel que pose
-                par ``W40KEngine`` a la cloture des free steps.
-        """
-        agent_key = require_key(self.config, "controlled_agent")
-        zone_intent_cfg = self.rewards_config[agent_key]["zone_intent_shaping"]
-
-        # DEBRANCHEMENT MESURE, pas desactivation par commodite. Sur le run du 2026-08-11, la
-        # part des free steps dont le couple (controle, intent) est PAYE par cette fonction
-        # valait 0.269 pour une reference de 0.355 — la reference etant ce que la MEME politique
-        # obtiendrait en tirant son intent sans regarder le plateau
-        # (`combat/intent_shaping_aligned_ratio` et son `_baseline`, metrics_tracker). L'agent
-        # est reste SOUS cette reference dans 95 % des fenetres des 10 000 derniers episodes,
-        # tout en conditionnant de mieux en mieux son intent sur l'etat
-        # (`00_critical/p_intent_control_dependency` 0.004 -> 0.104) : il a donc appris a lire le
-        # plateau et a en tirer l'intention que ce bareme ne paie PAS, et il gagne (96,9 % de
-        # combined) en encaissant la penalite a chaque tour. Un terme dense anti-correle au
-        # comportement gagnant est du bruit dans le gradient.
-        #
-        # `enabled` est LU PAR require_key, sans defaut : une config qui l'omet fait lever, elle
-        # ne retombe pas en silence sur un shaping actif. Le code et les quatre montants restent
-        # en place, et les courbes `combat/intent_*` continuent d'etre emises — on garde la
-        # MESURE de ce que l'agent declare, on retire seulement la prime.
-        enabled = require_key(zone_intent_cfg, "enabled")
-        if not isinstance(enabled, bool):
-            raise TypeError(
-                f"zone_intent_shaping.enabled doit etre un booleen "
-                f"(got {type(enabled).__name__}: {enabled!r})"
-            )
-        if not enabled:
-            return 0.0
-
-        defend_bonus = zone_intent_cfg["defend_held_bonus"]
-        invade_success_bonus = zone_intent_cfg["invade_success_bonus"]
-        invade_neutral_bonus = zone_intent_cfg["invade_neutral_bonus"]
-        invade_own_penalty = zone_intent_cfg["invade_lost_penalty"]
-
-        intents = require_key(declaration, "intents")
-        control_at_declaration = require_key(declaration, "control")
-
-        # BORNE SUR LES OBJECTIFS REELS. `zone_intents` compte MAX_OBJECTIVES entrees quel que
-        # soit le scenario, et `get_objective_control` rend 0.0 pour un zone_idx hors liste. La
-        # version precedente parcourait donc les zones INEXISTANTES, qui tombaient dans sa
-        # branche "INVADE sur neutre" et versaient `invade_neutral_bonus` a chaque tour,
-        # gratuitement et sans action possible de l'agent (+0.2/tour sur un scenario a 3
-        # objectifs pour MAX_OBJECTIVES=5, l'intent par defaut etant INVADE).
-        #
-        # Ce revenu passif a disparu avec l'evaluation sur resultat — une zone inexistante n'est
-        # jamais "prise", donc plus rien ne se declenche pour elle. La borne ci-dessous ne
-        # corrige donc aucun symptome subsistant : elle empeche d'en recreer un si une regle
-        # future se declenchait sans exiger `obtained == 1.0` (c'est deja le cas de la penalite
-        # d'incoherence). Aucun test ne peut la rendre rouge seule, et c'est normal.
-        num_zones = len(require_key(game_state, "objectives"))
-
-        shaping = 0.0
-        for zone_idx in range(num_zones):
-            intent = intents[zone_idx]
-            declared = control_at_declaration[zone_idx]
-            # POINT DE VUE EXPLICITE, jamais `get_objective_control` : ce helper est relatif a
-            # `current_player`, or le solde terminal porte sur le joueur controle alors que la
-            # partie se termine pendant le tour de l'adversaire (mesure : 6 terminaisons sur 6).
-            # Le signe de TOUS les objectifs s'en trouvait inverse, et le bonus DEFEND paye
-            # exactement quand la zone avait ete perdue.
-            obtained = get_objective_control_for_player(zone_idx, game_state, player)
-
-            if intent == INTENT_DEFEND:
-                # Tenue au moment de la declaration ET conservee : l'intention est realisee.
-                if declared == 1.0 and obtained == 1.0:
-                    shaping += defend_bonus
-            elif intent == INTENT_INVADE:
-                if declared == 1.0:
-                    # Declarer une invasion sur sa PROPRE zone reste une incoherence de
-                    # declaration : elle se juge sans attendre le resultat.
-                    shaping += invade_own_penalty
-                elif obtained == 1.0:
-                    # Zone prise : bonus selon la difficulte de ce qui a ete pris.
-                    shaping += (
-                        invade_success_bonus if declared == -1.0 else invade_neutral_bonus
-                    )
-        return shaping
 

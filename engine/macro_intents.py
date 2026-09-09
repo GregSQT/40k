@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""engine/macro_intents.py - Zone intent system Phase 2."""
+"""engine/macro_intents.py - Layout de l'espace d'action (source unique des ids).
+
+Ce module a porté la couche « intentions de zone » (Phase 2) : trois intentions déclarables par
+objectif, en phase de commandement. Elle a été RETIRÉE le 2026-09-09 — voir la plage réservée
+`BASE_ZONE_INTENT` ci-dessous, qui en garde les ids.
+"""
 
 from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE, K_WEAPONS_RANGED, SQUAD_TOP_K
 from shared.data_validation import require_key
-
-INTENT_INVADE = 0
-INTENT_DEFEND = 1
-INTENT_ATTACK = 2
 
 MAX_OBJECTIVES = 5
 # Refonte spatiale du move (move_action_space_spatial_rework.md §6.2) : une action de mouvement
@@ -91,7 +92,32 @@ DEPLOY_SLOT_COUNT = 8       # deployment slots 0-7 -> 4-11
 # ⚠️ `DEPLOY_STRATEGY_COUNT <= DEPLOY_SLOT_COUNT` — l'inverse ouvrirait une action sans strategie.
 DEPLOY_STRATEGY_COUNT = 7  # +2 : centre_hub (action 9) + safe_rear (action 10)
 
+# PLAGE RESERVEE (15 ids) — ex-INTENTIONS DE ZONE, retirees le 2026-09-09.
+#
+# Elle a porte 5 objectifs x 3 intentions declarables en phase de commandement. Le masque ne
+# l'ouvre plus JAMAIS (`action_decoder`, branche `command`), et rien ne la decode : jouer un de
+# ces ids est desormais impossible, pas seulement inutile.
+#
+# POURQUOI RETIREE : ces 15 actions n'avaient plus aucun effet. Leur unique consequence etait une
+# prime de reward (`zone_intent_shaping`), debranchee le 2026-08-11 sur mesure — la part des
+# declarations payees valait 0.269 contre 0.355 pour la meme politique tirant au hasard. Elles
+# coutaient 1,6 a 5,2 steps sans effet par episode (mesure TensorBoard `o_intent_zone_steps`,
+# runs P1 et x1_long du 2026-09-09), soit autant de bruit dans le gradient.
+#
+# POURQUOI LES IDS RESTENT RESERVES, et ce n'est pas de la prudence : la phase de commandement
+# PORTE une decision joueur reelle que le moteur n'implemente pas encore. `15 Stratagems.pdf` la
+# nomme — INSANE BRAVERY 15.04, « WHEN: Battle-shock step of your Command phase, just before you
+# make a battle-shock roll » — et COMMAND RE-ROLL 15.02 se joue dans n'importe quelle phase. Les
+# CP existent deja (08.02, `gain_command_points`) et sont observes ; il leur manque un puits.
+# Recycler ces 15 ids pour autre chose obligerait a les reprendre au premier stratagemme livre,
+# donc a un retrain de plus. Les garder ici coute EXACTEMENT ZERO : `TOTAL_ACTION_SIZE` est
+# inchange, le masque ne les ouvre pas, et `action_net` produit deja leurs colonnes
+# (`DENSE_LOGIT_COUNT`), qui restent masquees a chaque step.
+#
+# ⚠️ Le nom est conserve tel quel : 35 sites le referencent et il BORNE la derivation de
+# `CHOICE_BASE`. Le renommer serait un renommage pur, sans changement de comportement.
 BASE_ZONE_INTENT = SHOOT_INDIRECT_SLOT_BASE + SHOOT_INDIRECT_SLOT_COUNT  # 1296
+RESERVED_COMMAND_SLOT_COUNT = MAX_OBJECTIVES * 3               # 15 -> 1296-1310, jamais ouverts
 # ⚠️ Le macro se DECALE de 20 avec l ajout des slots de tir indirect (2026-08-16). Les ids
 # macro ne sont pas un contrat externe — ils sont derives, et le retrain impose par le
 # changement de dimension est de toute facon acte. Ce qui compte est que la derivation
@@ -103,7 +129,7 @@ BASE_ZONE_INTENT = SHOOT_INDIRECT_SLOT_BASE + SHOOT_INDIRECT_SLOT_COUNT  # 1296
 # ⚠️ Elles ne concernent QUE les decisions dont les candidats ne sont PAS des entites deja
 # observees : une decision « quelle escouade ennemie » se parametre en dimension d'action +
 # pointeur (§9 P3-1, les slots de combat ci-dessus), pas en CHOICE_k.
-CHOICE_BASE = BASE_ZONE_INTENT + MAX_OBJECTIVES * 3            # 1311
+CHOICE_BASE = BASE_ZONE_INTENT + RESERVED_COMMAND_SLOT_COUNT   # 1311
 CHOICE_COUNT = MAX_DECISION_OPTIONS                            # 6
 # Oath of Moment (chantier 03) : « select one unit from your opponent's army ». Les candidats
 # sont des ENTITES DEJA OBSERVEES, donc la decision se parametre en DIMENSION D'ACTION + pointeur
@@ -186,10 +212,13 @@ SHOOT_WEAPON_SEL_SLOTS = range(
 )  # 1379-1388
 
 
-def is_zone_intent_action(action: int) -> bool:
-    # Borne haute = CHOICE_BASE, PAS TOTAL_ACTION_SIZE : depuis P2 (§9.3) l'action space se
-    # termine par les CHOICE_i, qui ne sont pas des zone intents. La borne `TOTAL_ACTION_SIZE`
-    # les aurait avalés en silence et `decode_zone_intent_action` aurait rendu une zone 5.
+def is_reserved_command_action(action: int) -> bool:
+    """True si `action` tombe dans la plage RESERVEE des ex-intentions de zone (cf. sa definition).
+
+    Aucun masque ne l'ouvre et aucun decodeur ne la traduit : ce predicat existe pour que les
+    lecteurs d'ids (instrumentation, tests de layout) nomment la plage au lieu de la reconnaitre
+    par ses bornes recopiees.
+    """
     return BASE_ZONE_INTENT <= action < CHOICE_BASE
 
 
@@ -208,32 +237,6 @@ def decode_agent_decision_action(action: int) -> int:
     return action - CHOICE_BASE
 
 
-def decode_zone_intent_action(action: int):
-    offset = action - BASE_ZONE_INTENT
-    zone_idx = offset // 3
-    intent_value = offset % 3
-    return zone_idx, intent_value
-
-
-def get_nearest_objective_zone(active_unit: dict, game_state: dict) -> int:
-    """Index de l'objectif dont l'AIRE est la plus proche de `active_unit` (14.02).
-
-    ⚠️ La distance se mesure à l'AIRE, pas au centre. Un objectif de terrain fait plusieurs
-    milliers d'hexes (2030 à 3000 sur le scénario PvE) : mesurée au centroïde, une unité posée
-    sur le bord d'un objectif — donc dedans, donc en train de le contrôler — ressortait à une
-    trentaine d'hexes de « son » objectif, et l'agent pouvait recevoir une zone d'intention qui
-    n'était pas celle qu'il occupait. Le centroïde était juste tant qu'un objectif faisait 7
-    hexes ; il ne l'est plus depuis que la zone EST le terrain (cf. `engine.objective_distance`).
-    """
-    from engine.objective_distance import nearest_objective_zone
-
-    if not game_state["objectives"]:
-        return 0
-    return nearest_objective_zone(
-        game_state, int(active_unit["col"]), int(active_unit["row"])
-    )
-
-
 # V11 §0.43 — les heuristiques de menace par `damage_ratio` (`get_best_enemy_global`,
 # `get_best_enemy_score`, `get_best_enemy_score_for_unit`) ont ete SUPPRIMEES : elles
 # tranchaient la cible (de charge, de melee) a la place de l'agent. Depuis §9 P3-1/P3-2, la
@@ -247,11 +250,12 @@ def get_objective_control_for_player(zone_idx: int, game_state: dict, player: in
     1.0 s'il le controle, -1.0 si l'adversaire le controle, 0.0 si neutre/conteste.
 
     Version explicite, a utiliser des que le point de vue n'est PAS celui du joueur dont c'est
-    le tour. Cas vecu : le solde terminal des zone-intents porte sur le joueur controle, alors
-    que la partie se termine pendant le tour du bot — mesure sur le harnais moteur : 6
-    terminaisons sur 6 avec `current_player=2` pour `controlled_player=1`. Passer par la version
-    relative y inversait le signe de TOUS les objectifs, donc payait le bonus DEFEND quand
-    l'agent avait PERDU la zone.
+    le tour. Le cas qui l'a fait naitre — le solde terminal des intentions de zone, qui portait
+    sur le joueur controle alors que la partie se termine pendant le tour du bot (mesure : 6
+    terminaisons sur 6 avec `current_player=2` pour `controlled_player=1`) — a disparu avec les
+    intentions le 2026-09-09. La distinction reste JUSTE et la fonction reste appelee par
+    `get_objective_control` ci-dessous : tout lecteur qui n'est pas le joueur actif doit passer
+    par ici, sous peine d'inverser le signe de TOUS les objectifs.
     """
     objectives = game_state["objectives"]
     if zone_idx >= len(objectives):
@@ -279,10 +283,19 @@ def get_objective_control(zone_idx: int, game_state: dict) -> float:
 #: Familles d'actions, pour l'instrumentation d'USAGE (quelle DECISION l'agent exerce).
 #: Vit ici parce que la decoupe DERIVE du layout : la recopier ailleurs la desynchroniserait
 #: au premier slot ajoute.
+#: `zone_intent` en est SORTI le 2026-09-09 avec la famille d'actions elle-meme : la garder
+#: aurait laisse une courbe d'usage a zero permanent, indiscernable d'une famille que l'agent
+#: n'exerce jamais.
+#:
+#: `coherency_slot` et `shoot_weapon_sel_slot` y sont ENTREES le meme jour, et c'est un
+#: CORRECTIF : leurs familles existaient depuis P3-0 et P3-8, mais ni ce tuple ni `action_family`
+#: ne les connaissaient, si bien que leurs actions etaient comptees en `zone_intent` par le
+#: fourre-tout terminal (cf. la branche correspondante).
 ACTION_FAMILIES = (
     "deploy_slot", "move_cell", "wait", "shoot_slot", "charge_slot", "charge_pair_slot",
-    "fight_slot", "fight_no_target", "shoot_indirect_slot", "zone_intent", "choice",
-    "oath_slot", "activate_slot", "fight_weapon_slot",
+    "fight_slot", "fight_no_target", "shoot_indirect_slot", "choice",
+    "oath_slot", "activate_slot", "fight_weapon_slot", "coherency_slot",
+    "shoot_weapon_sel_slot",
 )
 
 
@@ -326,19 +339,30 @@ def action_family(action_int: int, phase: str, *, setting_up: bool = False) -> s
     if a in CHOICE_SLOTS:
         return "choice"
     # Oath slots : APRES les CHOICE et AVANT la branche deployment, comme elles — Oath se declare
-    # au debut du tour de son controleur, pas dans une phase de mouvement. Sans cette branche,
-    # ces ids tomberaient dans le `return "zone_intent"` terminal, qui est un fourre-tout : ils
-    # seraient comptes comme des intentions de zone sans que rien ne leve.
+    # au debut du tour de son controleur, pas dans une phase de mouvement. L'ordre importait
+    # d'autant plus quand cette fonction finissait par un fourre-tout `return "zone_intent"` :
+    # ces ids y tombaient et etaient comptes comme des intentions. Le fourre-tout est parti avec
+    # les intentions (le terminal LEVE desormais), mais l'ordre reste le bon.
     if a in OATH_SLOTS:
         return "oath_slot"
     # Slots d'activation : meme rang que les CHOICE et Oath, et pour la meme raison — le masque
-    # est EXCLUSIF quand le choix est pose, donc l'id ne depend pas de la phase. Les tester ici
-    # et non plus bas : sans cette branche ils tomberaient dans le `return "zone_intent"` final,
-    # qui est un fourre-tout, et seraient comptes comme des intentions de zone sans que rien ne leve.
+    # est EXCLUSIF quand le choix est pose, donc l'id ne depend pas de la phase.
     if a in ACTIVATE_SLOTS:
         return "activate_slot"
     if a in FIGHT_WEAPON_SLOTS:
         return "fight_weapon_slot"
+    # ⚠️ CES DEUX BRANCHES ONT MANQUE depuis la livraison de leurs familles (P3-0 pour le retrait
+    # de coherence, P3-8 pour la selection de groupe d'arme au tir), et RIEN ne l'a signale : le
+    # fourre-tout `return "zone_intent"` en fin de fonction les avalait, si bien que chaque
+    # retrait de coherence et chaque selection d'arme de tir etait comptee comme une INTENTION DE
+    # ZONE dans `action_family_counts`. Le retrait des intentions (2026-09-09) a remplace ce
+    # fourre-tout par un `raise`, qui a fait tomber l'action 1379 des le premier episode joue.
+    # Meme rang que `fight_weapon_slot` ci-dessus, et pour la meme raison : le masque est EXCLUSIF
+    # quand ces points d'arret sont poses, donc l'id ne depend pas de la phase.
+    if a in COHERENCY_SLOTS:
+        return "coherency_slot"
+    if a in SHOOT_WEAPON_SEL_SLOTS:
+        return "shoot_weapon_sel_slot"
     if phase == "deployment":
         if a in DEPLOY_SLOTS:
             return "deploy_slot"
@@ -372,7 +396,23 @@ def action_family(action_int: int, phase: str, *, setting_up: bool = False) -> s
         return "fight_no_target"
     if a in SHOOT_INDIRECT_SLOTS:
         return "shoot_indirect_slot"
-    return "zone_intent"
+    # LEVE, la ou cette fonction rendait « zone_intent ». Ce dernier `return` etait un
+    # FOURRE-TOUT : tout id qu'aucune branche ne reconnaissait — un slot d'une famille ajoutee
+    # sans sa branche, un id de la plage reservee — ressortait comme une intention de zone et
+    # etait compte comme telle dans `action_family_counts`, sans que rien ne leve. Deux branches
+    # (Oath, activation) n'existent que parce que ce defaut avait ete constate. Les intentions
+    # parties, le fourre-tout n'a plus de nom ou se cacher : un id non classe est une rupture
+    # entre le layout et cette fonction, et doit se voir.
+    if is_reserved_command_action(a):
+        raise ValueError(
+            f"action {a} dans la plage RESERVEE {BASE_ZONE_INTENT}-{CHOICE_BASE - 1} "
+            f"(ex-intentions de zone, retirees le 2026-09-09) : aucun masque ne l'ouvre, "
+            f"donc elle n'a pas pu etre jouee. Un masque qui l'ouvre est un bug de masque."
+        )
+    raise ValueError(
+        f"action {a} d'aucune famille connue en phase {phase!r} (setting_up={setting_up}) — "
+        f"une famille de slots a ete ajoutee au layout sans sa branche ici."
+    )
 
 
 def charge_pair_encode(slot_i: int, slot_j: int, n: int = CHARGE_SLOT_COUNT) -> int:

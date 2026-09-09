@@ -119,9 +119,9 @@ def build_engine_config(config: Dict[str, Any]) -> Dict[str, Any]:
     faisaient déjà ``build_game_rules`` / ``build_move_rules``, généralisé à la config entière.
 
     ⚠️ Avant ce helper, 44 fichiers omettaient ``objective_control_check`` : le checkpoint 14.02
-    y sortait à sa première ligne. Deux d'entre eux (``test_objective_held_samples``,
-    ``test_zone_intent_control_axis``) PRÉTENDAIENT mesurer l'axe de contrôle d'objectif alors
-    qu'aucun contrôle n'était jamais établi.
+    y sortait à sa première ligne. Deux d'entre eux PRÉTENDAIENT mesurer l'axe de contrôle
+    d'objectif alors qu'aucun contrôle n'était jamais établi — ``test_objective_held_samples``,
+    et un second supprimé le 2026-09-09 avec les intentions de zone.
     """
     merged = require_engine_game_config_sections(_read_game_config())
     # Déclaration de scénario, posée AVANT l'override : cf. `DEFAULT_TEST_ARMY_FACTION`.

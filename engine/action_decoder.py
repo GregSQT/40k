@@ -71,13 +71,11 @@ from engine.macro_intents import (
     SHOOT_WEAPON_SEL_SLOT_BASE,
     SHOOT_WEAPON_SEL_SLOTS,
     TOTAL_ACTION_SIZE,
-    MAX_OBJECTIVES,
     OATH_SLOT_BASE,
     OATH_SLOTS,
     decode_agent_decision_action,
     is_agent_decision_action,
-    is_zone_intent_action,
-    decode_zone_intent_action,
+    is_reserved_command_action,
 )
 from engine.agent_decision import read_pending_agent_decision
 # 21.03 « take to the skies » (V11 §0.48 `L6`) : le point de choix s'ouvre AVANT le pool, puisque
@@ -605,7 +603,8 @@ class ActionDecoder:
         """Build 41-element squad mask + eligible units for the squad pipeline.
 
         Deployment : actions 4-8 (deploy hexes, logique legacy préservée).
-        Command    : wait (18) + zone intents (26-40).
+        Command    : `SQUAD_ACTION_WAIT` et rien d'autre (les intentions de zone y ouvraient
+                     15 slots jusqu'au 2026-09-09 ; leur plage d'ids reste RESERVEE).
         Move/Shoot/Charge/Fight : build_squad_action_mask (0-25) pour le squad actif.
         Advance roll : rollé ici une seule fois par activation, stocké dans game_state.
         """
@@ -681,18 +680,21 @@ class ActionDecoder:
             return mask, eligible_units
 
         if current_phase == "command":
-            # SQUAD_ACTION_WAIT, jamais un litteral : il valait 18, il vaut 1024 depuis la refonte
-            # spatiale. Ecrit en dur, ce site masquait une CELLULE DE MOVE en phase command.
+            # SEULE action de la phase de commandement depuis le retrait des intentions de zone
+            # (2026-09-09). `SQUAD_ACTION_WAIT`, jamais un litteral : il valait 18, il vaut 1024
+            # depuis la refonte spatiale. Ecrit en dur, ce site masquait une CELLULE DE MOVE.
+            #
+            # Les cinq etapes de la phase (`08 Command phase.pdf` : start, gain core CP,
+            # battle-shock, command abilities, end) sont resolues par le MOTEUR
+            # (`command_handlers.command_phase_start`) et n'appellent l'agent que par un
+            # `pending_agent_decision` — Waaagh! 08.04, Oath, restitution Grot Orderly —, traite
+            # par les branches exclusives plus haut. Il ne reste donc rien a decider ici.
+            #
+            # ⚠️ Ce « rien » est DATE, pas definitif : 15.04 INSANE BRAVERY se joue « just before
+            # you make a battle-shock roll » et 15.02 COMMAND RE-ROLL dans n'importe quelle phase.
+            # Le jour ou un stratagemme est livre, c'est ICI que son slot s'ouvrira, sur la plage
+            # reservee `BASE_ZONE_INTENT` (cf. `macro_intents`).
             mask[SQUAD_ACTION_WAIT] = True
-            free_steps = game_state["zone_intent_free_steps_remaining"]
-            if free_steps > 0:
-                objectives = game_state["objectives"]
-                num_zones = min(len(objectives), MAX_OBJECTIVES)
-                for zone_idx in range(num_zones):
-                    for intent_val in range(3):
-                        action_idx = BASE_ZONE_INTENT + zone_idx * 3 + intent_val
-                        if action_idx < self.total_action_size:
-                            mask[action_idx] = True
             return mask, eligible_units
 
         # ─── 1b. RETRAIT POUR COHERENCE (P3-0, 03.03) ───
@@ -1469,15 +1471,16 @@ class ActionDecoder:
                 ),
             }
 
-        # Zone intents (26-40) : command uniquement
-        if is_zone_intent_action(action_int):
-            if current_phase != "command":
-                raise ValueError(
-                    f"convert_squad_action: zone_intent action {action_int} "
-                    f"interdit en phase '{current_phase}'"
-                )
-            zone_idx, intent_value = decode_zone_intent_action(action_int)
-            return {"action": "zone_intent", "zone_idx": zone_idx, "intent_value": intent_value}
+        # Plage RESERVEE (ex-intentions de zone, retirees le 2026-09-09) : aucun masque ne
+        # l'ouvre, donc y arriver signale une rupture masque/decodeur — jamais un choix de
+        # joueur. Erreur explicite plutot que la chute dans les branches suivantes, ou ces ids
+        # (1296-1310) seraient interpretes comme autre chose sans que rien ne leve.
+        if is_reserved_command_action(action_int):
+            raise ValueError(
+                f"convert_squad_action: action {action_int} dans la plage RESERVEE "
+                f"{BASE_ZONE_INTENT}-{CHOICE_BASE - 1} (ex-intentions de zone). Le masque ne "
+                f"l'ouvre jamais : un masque qui l'ouvre est un bug de masque."
+            )
 
         # Deployment : actions 4-8 → deploy_unit (logique existante préservée)
         if current_phase == "deployment":

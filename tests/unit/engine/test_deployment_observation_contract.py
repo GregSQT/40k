@@ -355,7 +355,8 @@ def test_objective_distances_are_measured_from_the_deployment_zone():
 
     Mesuré avant correctif : l'agent voyait l'objectif 0 à 38,3 (le plus proche) alors qu'il est
     à 178,9 de sa zone, et ne voyait pas l'objectif 4 à 11,3 — l'ORDRE des objectifs était
-    inversé. Les trois actions `zone_intent` s'appuient sur ces nombres.
+    inversé, et l'agent navigue vers un objectif hors de sa fenêtre égocentrique par ces
+    seuls nombres.
     """
     import engine.observation_entities as oe
 

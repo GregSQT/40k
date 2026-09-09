@@ -67,7 +67,6 @@ def _build_gs(units: List[Dict[str, Any]], phase: str, current_player: int = 1) 
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
         "config": _base_config(),
-        "zone_intent_free_steps_remaining": 0,
         "objectives": [],
         "inches_to_subhex": 1,
     }
@@ -401,8 +400,7 @@ class TestConvertSquadActionShootingType:
             "units": [attacker, enemy],
             "unit_by_id": {"1": attacker, "2": enemy},
             "config": _base_config(),
-            "zone_intent_free_steps_remaining": 0,
-            "objectives": [],
+                "objectives": [],
             "inches_to_subhex": 1,
         }
         if squad_advanced:

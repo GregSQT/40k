@@ -5,6 +5,8 @@ exact »), mais RIEN ne le vérifiait : une désynchronisation ferait viser aux 
 différente de celle que le moteur masque. Ce test ferme le trou.
 """
 
+import pytest
+
 from engine import macro_intents as mi
 from engine.phase_handlers import shared_utils as su
 from engine.spatial_grid import GRID_CELL_COUNT
@@ -89,8 +91,8 @@ def test_named_actions_mirror():
     assert mi.ACTION_FIGHT_NO_TARGET == su.SQUAD_ACTION_FIGHT_NO_TARGET
 
 
-def test_zone_intent_starts_right_after_the_micro_actions():
-    """Aucun trou ni recouvrement entre micro (0..SIZE-1) et macro zone_intent."""
+def test_the_reserved_range_starts_right_after_the_micro_actions():
+    """Aucun trou ni recouvrement entre micro (0..SIZE-1) et la plage RESERVEE."""
     assert mi.BASE_ZONE_INTENT == su.SQUAD_ACTION_SIZE
 
 
@@ -219,10 +221,10 @@ def test_choice_then_oath_then_activate_slots_close_the_action_space():
     assert list(mi.COHERENCY_SLOTS) == list(range(mi.COHERENCY_SLOT_BASE, mi.SHOOT_WEAPON_SEL_SLOT_BASE))
     # P3-8 : SHOOT_WEAPON_SEL ferme l'espace après COHERENCY
     assert list(mi.SHOOT_WEAPON_SEL_SLOTS) == list(range(mi.SHOOT_WEAPON_SEL_SLOT_BASE, mi.TOTAL_ACTION_SIZE))
-    assert not mi.is_zone_intent_action(mi.CHOICE_BASE)
-    assert not mi.is_zone_intent_action(mi.OATH_SLOT_BASE)
-    assert not mi.is_zone_intent_action(mi.ACTIVATE_SLOT_BASE)
-    assert mi.is_zone_intent_action(mi.CHOICE_BASE - 1)
+    assert not mi.is_reserved_command_action(mi.CHOICE_BASE)
+    assert not mi.is_reserved_command_action(mi.OATH_SLOT_BASE)
+    assert not mi.is_reserved_command_action(mi.ACTIVATE_SLOT_BASE)
+    assert mi.is_reserved_command_action(mi.CHOICE_BASE - 1)
     for offset in range(mi.CHOICE_COUNT):
         assert mi.is_agent_decision_action(mi.CHOICE_BASE + offset)
         assert mi.decode_agent_decision_action(mi.CHOICE_BASE + offset) == offset
@@ -253,15 +255,21 @@ def test_micro_action_ids_are_contiguous_and_unique():
     assert sorted(ids) == list(range(su.SQUAD_ACTION_SIZE)), "les ids micro ne pavent pas [0, SIZE)"
 
 
-def test_zone_intent_decoding_roundtrip():
-    for zone_idx in range(mi.MAX_OBJECTIVES):
-        for intent in range(3):
-            action = mi.BASE_ZONE_INTENT + zone_idx * 3 + intent
-            assert mi.is_zone_intent_action(action)
-            assert mi.decode_zone_intent_action(action) == (zone_idx, intent)
+def test_the_reserved_range_covers_exactly_the_ex_zone_intent_ids():
+    """Les 15 ids des ex-intentions de zone restent RESERVES, ni recycles ni rendus.
+
+    Ce test remplace le round-trip de decodage des intentions : le retrait du 2026-09-09 garde
+    la plage pour un futur stratagemme (15.02 / 15.04, cf. `macro_intents`), et c'est cette
+    conservation qui rend `TOTAL_ACTION_SIZE` insensible au retrait.
+    """
+    assert mi.RESERVED_COMMAND_SLOT_COUNT == 15
+    reserved = range(mi.BASE_ZONE_INTENT, mi.BASE_ZONE_INTENT + mi.RESERVED_COMMAND_SLOT_COUNT)
+    assert list(reserved) == list(range(mi.BASE_ZONE_INTENT, mi.CHOICE_BASE))
+    for action in reserved:
+        assert mi.is_reserved_command_action(action)
 
 
-def test_micro_actions_are_not_zone_intents():
+def test_micro_actions_are_not_in_the_reserved_range():
     for action in (
         mi.MOVE_CELL_BASE,
         mi.ACTION_WAIT,
@@ -270,4 +278,21 @@ def test_micro_actions_are_not_zone_intents():
         mi.ACTION_FIGHT_NO_TARGET,
         mi.SHOOT_INDIRECT_SLOT_BASE,
     ):
-        assert not mi.is_zone_intent_action(action)
+        assert not mi.is_reserved_command_action(action)
+
+
+def test_action_family_raises_on_a_reserved_id():
+    """Un id reserve ne peut pas etre joue : `action_family` LEVE au lieu de le classer.
+
+    Ce dernier `return` etait un FOURRE-TOUT rendant « zone_intent » : tout id qu'aucune branche
+    ne reconnaissait y tombait et etait compte comme une intention. Le retrait de la famille lui
+    retire son nom de couverture, et l'erreur doit remonter.
+    """
+    for action in (mi.BASE_ZONE_INTENT, mi.CHOICE_BASE - 1):
+        with pytest.raises(ValueError, match="RESERVEE"):
+            mi.action_family(action, "command")
+
+
+def test_zone_intent_is_no_longer_an_action_family():
+    """La courbe d'usage de la famille disparait avec la famille — pas un zero permanent."""
+    assert "zone_intent" not in mi.ACTION_FAMILIES
