@@ -58,6 +58,7 @@ import os
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from engine import macro_intents, observation_entities, spatial_grid
+from shared.json_atomic import json_draft
 
 #: Nom du fichier voisin du modele. Volontairement pas un `.zip` : `ai/models/**/*.zip` ne se
 #: modifie jamais automatiquement (CLAUDE.md), et le contrat doit pouvoir s'ecrire et se relire
@@ -144,7 +145,10 @@ def write_contract(model_path: str, contrat: Mapping[str, Any]) -> str:
     """Ecrit le contrat a cote du modele et rend son chemin."""
     chemin = contract_path(model_path)
     os.makedirs(os.path.dirname(chemin), exist_ok=True)
-    with open(chemin, "w", encoding="utf-8") as flux:
+    # `json_draft` et non `write_json_atomic` : la forme du contrat lui est propre (`sort_keys`,
+    # pour que deux contrats successifs se comparent ligne a ligne dans un diff), et le format du
+    # depot ne trie pas.
+    with json_draft(chemin) as flux:
         json.dump(contrat, flux, indent=2, ensure_ascii=False, sort_keys=True)
         flux.write("\n")
     return chemin
