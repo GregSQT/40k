@@ -151,12 +151,12 @@ class GameSnapshotStore:
 
     # ---- Reconstruction d'un game_state complet ------------------------------------------
     def build_game_state(self, engine: Any, turn: int, player: int, phase: str) -> Dict[str, Any]:
-        """game_state complet = clés statiques de l'engine vivant + partie mutable du snapshot."""
-        snap = self._get(turn, player, phase)
-        live = engine.game_state
-        rebuilt = {k: live[k] for k in live if k in _GS_STATIC_KEYS}
-        rebuilt.update(copy.deepcopy(snap["game_state"]))
-        return rebuilt
+        """game_state complet = clés statiques de l'engine vivant + partie mutable du snapshot.
+
+        Délègue à ``rebuild_game_state`` : un snapshot en mémoire et un état capturé sur disque ont
+        la MÊME structure et la même règle de reconstruction. Deux exemplaires du corps laissaient
+        la règle diverger — ils ont porté la même faute d'ordre jusqu'au 2026-09-09."""
+        return rebuild_game_state(engine, self._get(turn, player, phase))
 
     def engine_attrs(self, turn: int, player: int, phase: str) -> Dict[str, Any]:
         return copy.deepcopy(self._get(turn, player, phase)["engine_attrs"])
@@ -268,10 +268,24 @@ def _sync_derived_engine_attrs(engine: Any) -> None:
 def rebuild_game_state(engine: Any, captured: Dict[str, Any]) -> Dict[str, Any]:
     """Reconstruit un game_state complet (clés statiques du live + mutable capturé) SANS muter l'engine.
 
-    Utilisé pour le mode 'view' (aperçu non destructif) : swap temporaire de engine.game_state."""
+    Utilisé pour le mode 'view' (aperçu non destructif) : swap temporaire de engine.game_state.
+
+    LE LIVE GAGNE SUR LA ROW pour toute clé statique. Un état capturé par le code COURANT n'en porte
+    aucune (``capture_live_state`` les filtre), mais une row écrite AVANT qu'une clé ne devienne
+    statique en porte une : sans ce filtre, ``update`` réinjectait la valeur d'une AUTRE partie
+    par-dessus la valeur vivante sans que rien ne lève — le lecteur ne voyait pas une clé manquante,
+    il lisait une mauvaise valeur. Le filtre restitue la règle annoncée en tête de module : une clé
+    statique vient TOUJOURS de l'engine vivant. Une clé statique que le live n'a pas encore (cache
+    paresseux) reste absente et sera recréée à la demande — seul comportement juste pour un cache.
+    L'exception assumée est la clause de roster (``uses_codex_detachment``, ``army_faction``),
+    capturée hors ``game_state`` par ``capture_live_state`` et réécrite par ``apply_live_state``."""
     live = engine.game_state
     rebuilt = {k: live[k] for k in live if k in _GS_STATIC_KEYS}
-    rebuilt.update(copy.deepcopy(captured["game_state"]))
+    rebuilt.update({
+        k: copy.deepcopy(v)
+        for k, v in captured["game_state"].items()
+        if k not in _GS_STATIC_KEYS
+    })
     return rebuilt
 
 
