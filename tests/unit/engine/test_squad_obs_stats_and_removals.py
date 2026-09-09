@@ -147,7 +147,8 @@ def test_model_block_ignores_the_selected_weapon_index(engine):
     """Bloc figurines : l'index d'arme sélectionnée reste HORS du bloc (feature calculée, §9.1).
 
     Contre-épreuve : changer l'arme CC sélectionnée d'une figurine ne doit rien bouger. Les PV
-    courants, eux, y sont revenus avec P3-0 — cas couvert par le test suivant.
+    courants, eux, y sont revenus avec P3-0 — cas couvert par
+    `test_squad_obs_model_value_p3_0.py::test_wounded_model_carries_its_own_hp`, et non ici.
     """
     gs = engine.game_state
     before = engine.obs_builder.build_squad_observation(gs, "1")["self_models_cont"].tolist()
