@@ -54,7 +54,7 @@ from engine.constants import (
 from engine.spatial_grid import GRID_CELL_COUNT
 # `observation_entities` est une FEUILLE (aucun import moteur) : l'importer au niveau module ne
 # cree pas de cycle. `K_ALLY_SLOTS` y vit parce que l'espace d'action en derive (V11 §0.48 L2).
-from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE, K_WEAPONS_RANGED
+from engine.observation_entities import K_ALLY_SLOTS, MAX_DECISION_OPTIONS, K_WEAPONS_MELEE, K_WEAPONS_RANGED, decision_option_cont_row
 from engine.agent_decision import set_pending_agent_decision
 # Primitives « hors table » : définies dans la couche BASSE (`spatial_relations` ne dépend que de
 # `hex_utils`) parce que les primitives de MESURE en dépendent elles-mêmes. Ré-exportées ici, où
@@ -9762,6 +9762,14 @@ def _precompute_nearest_enemy_dist(
 
     Positions fixes pendant la resolution d une salve -> calcule une fois, reutilise
     a chaque allocation (cf. `_allocate_damage_to_squad`).
+
+    ⚠️ Les ennemis HORS TABLE sont exclus (`enemy_entries_on_battlefield`). Une escouade en
+    reserves strategiques (20.01) est VIVANTE dans le cache mais posee sur la sentinelle (-1,-1) :
+    sans ce filtre elle devenait l ennemi « le plus proche » de toutes les figurines, ce qui
+    faussait a la fois l heuristique defensive (`_select_allocation_model`, critere 3) et la colonne
+    `dist_enemy_norm` presentee a l agent. Le jumeau `_returned_placement_cont` porte le meme
+    filtre — le registre d observation promet la MEME grandeur aux deux, il faut donc la meme
+    enumeration.
     """
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
@@ -9774,9 +9782,10 @@ def _precompute_nearest_enemy_dist(
     else:
         defender_player = int(models_cache[alive[0]]["player"])
     enemy_pos = [
-        (int(e["col"]), int(e["row"]))
-        for e in models_cache.values()
-        if int(e["player"]) != defender_player
+        (int(models_cache[mid]["col"]), int(models_cache[mid]["row"]))
+        for sid, _entry in enemy_entries_on_battlefield(units_cache, defender_player)
+        for mid in squad_models.get(str(sid), [])  # get allowed : escouade sans figurine vivante
+        if mid in models_cache
     ]
     dist: Dict[str, int] = {}
     for mid in alive:
@@ -9838,7 +9847,11 @@ def _arm_allocation_model_decision(
     Appelé depuis `_manual_allocation_step` quand `gym_training_mode` est vrai et que
     tous les modèles du groupe courant sont sains (les blessés sont forcés avant, règle 05.04).
     Les traits continus `role_tier_norm` et `dist_enemy_norm` distinguent les candidats qui
-    auraient autrement des vecteurs binaires identiques (aucun effet accordable).
+    auraient autrement des vecteurs binaires identiques (aucun effet accordable). Cette phrase a
+    ete FAUSSE de P3-4 jusqu'au cablage de `decision_options_cont` dans
+    `SpatialCombinedExtractor` : le moteur remplissait le bloc, aucun reseau ne le lisait, et les
+    six candidats sortaient a un ecart d'embedding de 0.0 — un tirage au sort a chaque blessure
+    non sauvegardee.
     """
     models_cache = require_key(game_state, "models_cache")
     dist_cache = _precompute_nearest_enemy_dist(game_state, target_squad_id)
@@ -9876,7 +9889,10 @@ def _arm_allocation_model_decision(
             "declines": False,
             "payload": {"model_id": mid, "alloc_ctx_key": ctx.alloc_key},
         })
-        options_cont.append([tier / 4.0, d / max_dist])
+        options_cont.append(decision_option_cont_row({
+            "role_tier_norm": tier / 4.0,
+            "dist_enemy_norm": d / max_dist,
+        }))
 
     return set_pending_agent_decision(
         game_state,

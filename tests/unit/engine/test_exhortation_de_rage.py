@@ -45,10 +45,27 @@ def _unit_without_rule():
     }
 
 
+#: Deux cibles ENGAGÉES qui ne se ressemblent pas : ENEMY1 est intacte et bon marché, ENEMY2
+#: porte une figurine à 1 PV sur 4 et vaut plus cher. C'est exactement l'arbitrage que 1 à 3
+#: blessures mortelles posent — achever ou entamer —, et sans traits continus par candidat les
+#: deux lignes d'observation sortaient identiques.
+_MW_MODELS = {
+    "e1a": {"player": 0, "HP_CUR": 2, "HP_MAX": 2, "VALUE": 10, "col": 5, "row": 5},
+    "e1b": {"player": 0, "HP_CUR": 2, "HP_MAX": 2, "VALUE": 10, "col": 6, "row": 5},
+    "e2a": {"player": 0, "HP_CUR": 1, "HP_MAX": 4, "VALUE": 30, "col": 7, "row": 5},
+}
+
+
 def _gs():
     chap_unit = {"player": 1, "HP_CUR": 4}
     return {
-        "units_cache": {"CHAP": chap_unit},
+        "units_cache": {
+            "CHAP": chap_unit,
+            "ENEMY1": {"player": 0, "HP_CUR": 4},
+            "ENEMY2": {"player": 0, "HP_CUR": 1},
+        },
+        "models_cache": {k: dict(v) for k, v in _MW_MODELS.items()},
+        "squad_models": {"ENEMY1": ["e1a", "e1b"], "ENEMY2": ["e2a"]},
         "action_logs": [],
         "action_log_seq": 0,
         "turn": 1,
@@ -62,6 +79,7 @@ class _FakeEngine:
     _apply_exhortation_de_rage = wcore.W40KEngine._apply_exhortation_de_rage
     _continue_squad_fight_after_selection: Any = wcore.W40KEngine._continue_squad_fight_after_selection
     _fight_v11_gym_settle = wcore.W40KEngine._fight_v11_gym_settle
+    _mortal_wounds_target_metrics = wcore.W40KEngine._mortal_wounds_target_metrics
 
     def __init__(self, gs):
         self.game_state = gs
@@ -255,3 +273,38 @@ def test_attaquant_detruit_par_deadly_demise_pas_de_crash(monkeypatch):
     assert payload.get("squad_id") == "CHAP"
     assert payload.get("target_squad_id") is None
     assert len(settle_called) == 1, "_fight_v11_gym_settle doit être appelé une fois"
+
+
+# ---------------------------------------------------------------------------
+# Candidats DISCERNABLES (les blessures mortelles se choisissent une cible)
+# ---------------------------------------------------------------------------
+
+def test_candidats_mw_portent_des_traits_distincts(monkeypatch):
+    """Deux cibles engagées -> deux lignes continues DIFFÉRENTES.
+
+    ROUGE avant le câblage de `decision_options_cont` : les candidats ne portaient que
+    `effect_ids=()` et `declines=False`, donc des lignes d'observation identiques — la tête
+    pointeur les scorait à égalité et le choix était un tirage au sort.
+    """
+    from engine.observation_entities import decision_option_cont_index
+
+    posed = []
+    monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY1", "ENEMY2"])
+    monkeypatch.setattr(random, "randint", lambda a, b: 6)
+    monkeypatch.setattr(wcore, "set_pending_agent_decision", lambda gs, **kw: posed.append(kw))
+    engine = _FakeEngine(_gs())
+    engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None)
+
+    cont = posed[0].get("options_cont")
+    assert cont is not None, "les candidats MW doivent porter des traits continus"
+    assert len(cont) == 2
+    assert cont[0] != cont[1], f"deux cibles indiscernables : {cont}"
+
+    hp_i = decision_option_cont_index("target_wounded_hp_norm")
+    val_i = decision_option_cont_index("target_value_norm")
+    # ENEMY1 : aucune figurine entamée -> 1.0 ; ENEMY2 : 1 PV sur 4 -> 0.25.
+    assert cont[0][hp_i] == pytest.approx(1.0)
+    assert cont[1][hp_i] == pytest.approx(0.25)
+    # VALUE vivante : 20 pour ENEMY1, 30 pour ENEMY2 -> la plus chère vaut 1.0.
+    assert cont[0][val_i] == pytest.approx(20.0 / 30.0)
+    assert cont[1][val_i] == pytest.approx(1.0)

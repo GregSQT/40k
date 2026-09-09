@@ -135,9 +135,14 @@ def set_pending_agent_decision(
 ) -> Dict[str, Any]:
     """Pose LA décision en attente. Retourne la décision normalisée telle que stockée.
 
-    `options_cont` — liste PARALLÈLE à `options` de vecteurs continus par candidat
-    (P3-4 `DECISION_OPTION_CONT_FIELDS`). Absent pour les types qui n'ont pas de traits
-    continus (rule_choice, waaagh_call, fly_declaration).
+    `options_cont` — liste PARALLÈLE à `options` de lignes continues par candidat, bâties par
+    `observation_entities.decision_option_cont_row` depuis des champs NOMMÉS ; la longueur d'une
+    ligne est celle de `DECISION_OPTION_CONT_FIELDS`, contrôlée à l'encodage.
+
+    Absent SEULEMENT pour les quatre types dont les candidats se distinguent par un autre canal :
+    `rule_choice` par le one-hot de l'effet accordé, `waaagh_call`, `fly_declaration` et
+    `ascent_declaration` par le bit `declines`. Pour les cinq autres, l'omettre rend les candidats
+    strictement identiques dans l'observation — le défaut mesuré à un écart d'embedding de 0.0.
     """
     if decision_type not in AGENT_DECISION_TYPE_IDS:
         raise KeyError(

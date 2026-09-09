@@ -40,6 +40,7 @@ from engine.observation_entities import (
     DECISION_OPTION_CONT_SIZE,
     MAX_DECISION_OPTIONS,
     decision_option_cont_index,
+    decision_option_cont_row,
 )
 from engine.phase_handlers.shared_utils import (
     SHOOT_CTX,
@@ -181,12 +182,33 @@ def test_allocation_model_type_in_registry():
 
 
 def test_decision_option_cont_fields():
-    assert DECISION_OPTION_CONT_FIELDS == ("role_tier_norm", "dist_enemy_norm")
-    assert DECISION_OPTION_CONT_SIZE == 2
+    """Le registre est un ensemble de colonnes NOMMÉES, sans doublon, indexées par leur nom.
+
+    Les deux colonnes de P3-4 ouvrent toujours le registre : `allocation_model` les remplit par
+    nom, mais un producteur qui recopierait un index le ferait sur ces deux-là.
+    """
+    assert DECISION_OPTION_CONT_FIELDS[:2] == ("role_tier_norm", "dist_enemy_norm")
+    assert DECISION_OPTION_CONT_SIZE == len(DECISION_OPTION_CONT_FIELDS)
+    assert len(set(DECISION_OPTION_CONT_FIELDS)) == DECISION_OPTION_CONT_SIZE
+    for i, field in enumerate(DECISION_OPTION_CONT_FIELDS):
+        assert decision_option_cont_index(field) == i
+
+
+def test_decision_option_cont_row_names_are_positional_truth():
+    """La ligne se bâtit par NOM : colonnes non citées à zéro, nom inconnu et hors [0,1] lèvent."""
+    row = decision_option_cont_row({"target_value_norm": 1.0, "obj_dist_norm": 0.25})
+    assert len(row) == DECISION_OPTION_CONT_SIZE
+    assert row[decision_option_cont_index("target_value_norm")] == pytest.approx(1.0)
+    assert row[decision_option_cont_index("obj_dist_norm")] == pytest.approx(0.25)
+    assert sum(1 for v in row if v != 0.0) == 2
+    with pytest.raises(KeyError):
+        decision_option_cont_row({"colonne_inexistante": 0.5})
+    with pytest.raises(ValueError):
+        decision_option_cont_row({"obj_dist_norm": 1.5})
 
 
 def test_obs_size_includes_cont_block():
-    """obs_size = ancienne valeur + MAX_DECISION_OPTIONS * DECISION_OPTION_CONT_SIZE (6*2=12)."""
+    """Le bloc continu par candidat entre dans le total calculé, à la taille du registre."""
     shapes = ObservationBuilder.squad_obs_shapes()
     cont_shape = shapes["decision_options_cont"]
     assert cont_shape == (MAX_DECISION_OPTIONS, DECISION_OPTION_CONT_SIZE)
@@ -337,7 +359,10 @@ def test_encode_pending_decision_fills_cont_block():
             {"label": "e0", "effect_ids": (), "declines": False, "payload": {"model_id": "e0", "alloc_ctx_key": "k"}},
             {"label": "e1", "effect_ids": (), "declines": False, "payload": {"model_id": "e1", "alloc_ctx_key": "k"}},
         ],
-        options_cont=[[0.25, 0.4], [0.75, 0.1]],
+        options_cont=[
+            decision_option_cont_row({"role_tier_norm": 0.25, "dist_enemy_norm": 0.4}),
+            decision_option_cont_row({"role_tier_norm": 0.75, "dist_enemy_norm": 0.1}),
+        ],
     )
     obs = {k: np.zeros(s, dtype=np.float32) for k, s in ObservationBuilder.squad_obs_shapes().items()}
 
@@ -478,3 +503,47 @@ def test_precompute_nearest_enemy_dist_uses_units_cache_player():
     assert all(v >= 0 for v in dist.values()), "distances doivent être non négatives"
     # Vérification principale : units_cache donne player=0, donc m_att (player=1) est ennemi.
     assert len(dist) > 0
+
+
+def test_dist_enemy_norm_ignores_an_enemy_in_reserves():
+    """Une escouade ennemie en RÉSERVES ne rapproche aucune figurine.
+
+    ROUGE avec l'énumération naïve de `models_cache` : une unité en réserves stratégiques (20.01)
+    est vivante dans le cache mais posée sur la sentinelle (-1,-1), donc à distance ~0 de tout le
+    monde. Elle écrasait `dist_enemy_norm` pour TOUTES les figurines — et, par le critère 3 de
+    `_select_allocation_model`, l'heuristique défensive du bot avec.
+
+    Le registre d'observation promet la MÊME grandeur à `allocation_model` et à
+    `returned_models_placement` : les deux doivent donc énumérer les ennemis de la même façon.
+    """
+    models = [_mk_model("r0", col=1, row=1), _mk_model("r1", col=2, row=2)]
+
+    reference = _synthetic_alloc_state(models, gym=True)
+    _arm_allocation_model_decision(reference, "sq_def", ["r0", "r1"], SHOOT_CTX)
+    ref_decision = read_pending_agent_decision(reference)
+    assert ref_decision is not None
+    ref_cont = ref_decision["options_cont"]
+
+    with_reserve = _synthetic_alloc_state(models, gym=True)
+    # Sentinelle (-1,-1) : prédicat moteur de « hors table » (`entry_is_on_battlefield`).
+    with_reserve["units_cache"]["sq_reserve"] = {
+        **with_reserve["units_cache"]["sq_att"], "col": -1, "row": -1,
+        "deployed_on_turn": None,
+    }
+    with_reserve["models_cache"]["m_reserve"] = {
+        **with_reserve["models_cache"]["m_att"], "modelId": "m_reserve", "col": -1, "row": -1,
+    }
+    with_reserve["squad_models"]["sq_reserve"] = ["m_reserve"]
+    _arm_allocation_model_decision(with_reserve, "sq_def", ["r0", "r1"], SHOOT_CTX)
+    res_decision = read_pending_agent_decision(with_reserve)
+    assert res_decision is not None
+    res_cont = res_decision["options_cont"]
+
+    i = decision_option_cont_index("dist_enemy_norm")
+    assert [row[i] for row in res_cont] == [row[i] for row in ref_cont], (
+        "une unité hors table ne doit peser sur aucune distance : "
+        f"{[r[i] for r in res_cont]} contre {[r[i] for r in ref_cont]}"
+    )
+    assert all(row[i] > 0.0 for row in ref_cont), (
+        "vérification de non-vacuité : sans réserve, les distances sont strictement positives"
+    )

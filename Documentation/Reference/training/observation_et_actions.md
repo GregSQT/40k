@@ -39,7 +39,7 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (17 055 scalaires)    │
+│  OBSERVATION SQUAD — Dict de TENSEURS D'ENTITÉS  (17 091 scalaires)    │
 ├────────────────────────────────────────────────────────────────────────┤
 │  CONTEXTE GLOBAL                                                       │
 │    global_cont            (23,)                =      23               │
@@ -74,13 +74,13 @@ Tailles **calculées, pas recopiées** : la somme des clés vaut `obs_size`, et
 │  DÉCISION AGENT — candidats de CHOICE_i        MAX_DECISION_OPTIONS = 6│
 │    decision_ctx_bin       (17,)                =      17               │
 │    decision_options_bin   (6, 9)               =      54               │
-│    decision_options_cont  (6, 2)               =      12               │
+│    decision_options_cont  (6, 8)               =      48               │
 │                                                                        │
 │  DÉPLOIEMENT — candidats des actions 4-11        N_DEPLOY_SLOTS = 8    │
 │    deploy_cand_cont       (8, 8)               =      64               │
 │    deploy_cand_bin        (8, 4)               =      32               │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL vectoriel (= obs_size)                      17 055              │
+│  TOTAL vectoriel (= obs_size)                      17 091              │
 │  + grid  (12, 32, 32) = 12 288, fournie À PART (non comptée)           │
 └────────────────────────────────────────────────────────────────────────┘
 
@@ -501,10 +501,27 @@ decision_ctx_bin[14]     = decision_type_reserved_4    # réservé J4
 decision_ctx_bin[15]     = decision_type_reserved_5    # réservé J4
 decision_ctx_bin[16]     = decision_type_reserved_6    # réservé J4
 
-decision_options_cont[c][0] = role_tier_norm                 # [0, 1] — ROLE_TIER / 4 (base=0, leader=1)
-decision_options_cont[c][1] = dist_enemy_norm                # [0, 1] — distance ennemi / (cols+rows) du plateau
-                                                             # Rempli seulement pour `allocation_model` ;
-                                                             # zéro pour tous les autres types (no options_cont).
+# UNE COLONNE = UNE GRANDEUR, jamais « la première valeur de ce type-là ». Deux types qui décrivent
+# la MÊME grandeur partagent la colonne ; les colonnes qu'un type ne remplit pas restent à zéro, et
+# c'est le MOTIF des colonnes remplies qui identifie la famille. Toutes sont normalisées dans [0, 1]
+# À LA SOURCE : le bloc ne passe par AUCUNE normalisation en aval (une `EntityRunningNorm`
+# mélangerait « sans objet » et vraies valeurs sur les colonnes muettes).
+decision_options_cont[c][0] = role_tier_norm         # [0,1] ROLE_TIER / 4 (base=0, leader=1)          — allocation_model
+decision_options_cont[c][1] = dist_enemy_norm        # [0,1] distance du candidat à l'ennemi le plus   — allocation_model,
+                                                     #       proche / (cols+rows)                        returned_models_placement
+decision_options_cont[c][2] = obj_dist_norm          # [0,1] distance du plan à l'objectif le plus     — charge_placement,
+                                                     #       proche / (cols+rows)                        returned_models_placement
+decision_options_cont[c][3] = nontgt_dist_norm       # [0,1] distance du plan à l'ennemi NON ciblé     — charge_placement
+                                                     #       par la charge / (cols+rows)
+decision_options_cont[c][4] = profile_value_norm     # [0,1] VALUE du profil / VALUE du profil le      — returned_models_profile
+                                                     #       plus cher proposé
+decision_options_cont[c][5] = profile_count_norm     # [0,1] figurines de ce profil / quota à rendre   — returned_models_profile
+decision_options_cont[c][6] = target_wounded_hp_norm # [0,1] PV de la figurine la plus entamée de la   — mortal_wounds_target
+                                                     #       cible / son HP_MAX (1.0 si aucune)
+decision_options_cont[c][7] = target_value_norm      # [0,1] VALUE vivante de la cible / la plus forte — mortal_wounds_target
+                                                     #       parmi les cibles proposées
+# Bloc NUL pour `rule_choice`, `waaagh_call`, `fly_declaration` et `ascent_declaration` : leurs
+# candidats se distinguent par le one-hot de l'effet accordé ou par le bit `declines`.
 
 decision_options_bin[c][ 0] = grants_charge_after_flee                     # 0.0 / 1.0
 decision_options_bin[c][ 1] = grants_reroll_1_save_fight                   # 0.0 / 1.0
@@ -684,7 +701,14 @@ T-D) → 12284 (20 slots ennemis, T-E) → 20096 (K armes = 10, T-F) → 20166 �
 → **17055** (verticalité du move gym 13.06, 2026-09-09 : `max_floor_height` dans
 `UNIT_CONT_FIELDS` et `has_ground_model` dans `UNIT_BIN_FIELDS`, 1 × 32 entités chacun +64,
 `elevated` dans `SELF_MODEL_BIN_FIELDS`, 1 bit × 20 figurines +20 ; le canal de grille
-`occupant_level` s'y ajoute HORS de ce compteur, la grille étant fournie à part).
+`occupant_level` s'y ajoute HORS de ce compteur, la grille étant fournie à part)
+→ **17091** (candidats de décision discernables, 2026-09-09 : `DECISION_OPTION_CONT_FIELDS` passe
+de 2 à 8 colonnes, soit 6 colonnes de plus × 6 slots de candidat +36 ; le bloc existait depuis
+P3-4 mais n'atteignait aucun réseau — `SpatialCombinedExtractor` ne lisait que
+`decision_options_bin` —, si bien que cinq types de décision sur neuf présentaient des candidats à
+embedding identique, écart mesuré 0.0, donc des logits égaux sous la tête pointeur ; le câblage
+change la largeur d'entrée de `decision_encoder` et imposerait un `--new` même à taille
+d'observation constante).
 
 **C'est la DERNIÈRE valeur de cette liste que le passage aux ids fait bouger pour une capacité.**
 Depuis le chantier 01, une capacité, un statut ou une faction entière n'est qu'un `obs_id` de
