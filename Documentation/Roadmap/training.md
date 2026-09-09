@@ -22,6 +22,13 @@ python3 -m ai.training_contract --init --agent ArmageddonAgent_x1
 Un `--new` n'a rien à faire : il écrit le contrat lui-même. Les **valeurs** de récompense ne sont
 pas comparées — régler un poids reste libre, seule la disparition d'une clé arrête un run.
 
+**Correctif du 2026-09-09** : un contrat enregistré **abîmé** (section absente, vide, du mauvais
+type, version non entière) **lève** au lieu d'être lu comme vide. Lu comme vide, il produisait un
+diff faux — les 17 registres du code annoncés « nouveaux » sous le titre « le contrat a changé »,
+avec `--new` pour seule sortie affichée, donc un modèle de plusieurs dizaines d'heures jeté sur un
+fichier tronqué. Réparer le fichier et reprendre le run sont deux réponses opposées : le message
+dit maintenant laquelle.
+
 ---
 
 ## ✅ Obs — `hidden` 13.09 sur toutes les entités et porte de détection {#hidden-detection-obs}
