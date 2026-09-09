@@ -13847,11 +13847,11 @@ def erode_move_pool_by_squad_block(
             _level_map_by_model[str(_mid_a)] = _lm_a
             _origin_level_by_model[str(_mid_a)] = _origin_a
             _ascent_levels_by_model[str(_mid_a)] = {
-                int(_lv) for _lv in _lm_a.values() if int(_lv) > _origin_a
+                _lv for _lv in _lm_a.values() if _lv > _origin_a
             }
             _flat_levels_by_model[str(_mid_a)] = {
-                int(_lv) for _lv in _lm_a.values()
-                if int(_lv) <= _origin_a and int(_lv) != SQUAD_RIGID_MOVE_DESTINATION_LEVEL
+                _lv for _lv in _lm_a.values()
+                if _lv <= _origin_a and _lv != SQUAD_RIGID_MOVE_DESTINATION_LEVEL
             }
     _geo_models: List[Tuple[str, int, int, int, Tuple[int, int, int]]] = []
     _classifier_normal = 0
@@ -13966,7 +13966,7 @@ def erode_move_pool_by_squad_block(
             # (`ascent_field_for_model`), sans quoi le masque offrirait une montée que
             # `explain_move_plan_rejection` refuse.
             if _ascent:
-                for _lv_up in sorted(_ascent_levels_by_model.get(mid_g, ())):  # get allowed
+                for _lv_up in _ascent_levels_by_model.get(mid_g, ()):  # get allowed
                     _ck = (mid_g, _lv_up)
                     if _ck not in _climb_by_model_level:
                         _climb_by_model_level[_ck] = ascent_field_for_model(
@@ -13982,7 +13982,7 @@ def erode_move_pool_by_squad_block(
                 # une figurine ennemie postée à l'étage était invisible du masque et faisait
                 # rejeter le plan à l'exécution, et une ennemie au SOL retirait au masque des
                 # destinations légales. Les deux côtés lisent désormais le même niveau.
-                for _lv_flat in sorted(_flat_levels_by_model.get(mid_g, ())):  # get allowed
+                for _lv_flat in _flat_levels_by_model.get(mid_g, ()):  # get allowed
                     _fk_flat = (mid_g if _mode == "euclidean" else "", ocol, orow, _lv_flat)
                     if _fk_flat in _field_by_origin:
                         continue
