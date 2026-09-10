@@ -79,15 +79,24 @@ export function isReservesDeclarationStepOpen(o: {
  * (`change_roster_locked_after_reserves_declaration`). Poser la question avant le démarrage
  * mettait les deux gestes dans la MÊME fenêtre : répondre y coûtait le droit de changer d'armée,
  * dans le seul écran où ce droit existe.
+ *
+ * ET SEULEMENT À UN SIÈGE HUMAIN. 20.01 dit « **you** can select one or more friendly units » :
+ * la question d'un camp appartient à son siège. En PvE, celle du bot est répondue par le modèle
+ * (`apply_reserves_declaration_decision`) et le moteur refuse désormais la route humaine
+ * (`reserves_declaration_seat_is_not_human`) — sans ce filtre, le client offrirait le temps d'un
+ * aller-retour d'état deux boutons qui ne peuvent que revenir en erreur. Le type de joueur vient
+ * du moteur, jamais d'un numéro : même lecture que `shouldWarnReservesLastRound`.
  */
 export function isReservesDeclarationPendingFor(o: {
   phase: string | undefined;
   unitId: number | string;
   pending: StrategicReservesPendingDeclaration | null | undefined;
   deploymentStarted: boolean;
+  playerTypes: Record<string, "human" | "ai"> | undefined;
 }): boolean {
   if (!o.deploymentStarted) return false;
   if (!isReservesDeclarationStepOpen({ phase: o.phase, pending: o.pending })) return false;
+  if (o.playerTypes?.[String(o.pending!.player)] !== "human") return false;
   return o.pending!.unitId === String(o.unitId);
 }
 

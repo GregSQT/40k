@@ -2,6 +2,7 @@
 
 | Date | Chantier | Détail |
 |---|---|---|
+| 2026-09-10 | ✅ **20.01 — la déclaration de réserves passe AVANT le déploiement** | `SQUAD_ACTION_WAIT` portait la mise en réserves pendant le tour de déploiement de chaque unité : mesuré en déploiement actif, le joueur 2 gardait le slot ouvert avec quatre unités adverses déjà posées, alors que 20.01 situe la déclaration à l'étape Declare Battle Formations. File alternée figée au reset, une question par unité déclarable, `reserves_declaration` répondu par `CHOICE_i`, `deploy_commit` refusé tant que l'étape est ouverte. `obs_size` et `TOTAL_ACTION_SIZE` inchangés, mais la politique de déploiement change : les win-rates d'avant ne sont plus comparables. Suite livrée le même jour : le siège suit la question (§ `siege-question-2001`). moteur · — |
 | 2026-08-18 | Pile-in/Overrun 12.06 par-figurine | Migration par-figurine, purge du modèle par-ancre (commit `babc3234`) ; prérequis de P3-5 levé ; → `Documentation/Archives/chantiers/pile_in_overrun_par_figurine_2026-08-18.md` |
 | 2026-08-17 | INDIRECT FIRE 24.19 | 7 pièces ; `TOTAL_ACTION_SIZE` 1139→1159 ; gym+PvP+journal+analyzer ; 8 tests analyzer |
 | 2026-08-17 | Root cause 03.01/09.05 + fix renforcé | `_recompute_squad_occupied_hexes` ; 6 tests, 4 mutations ROUGE ; commits `640cdb53`, `8c2a85f2` |

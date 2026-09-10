@@ -582,6 +582,43 @@ class TestDeclareBattleFormations:
         # VERT VACANT : une file VIDE passerait les deux contrôles ci-dessus.
         assert queue, "file 20.01 vide après changement de roster"
 
+    def test_change_roster_leaves_the_seat_on_the_rebuilt_question(self, declaration_game):
+        """La file rebâtie peut changer de camp en tête : le siège doit l'y suivre.
+
+        `change_roster` restaure le déployeur d'avant le remplacement, mais la file, elle, est
+        rebâtie sur un autre roster — et les unités inéligibles (FORTIFICATION, plafond de 50 %)
+        en sont retirées sans réponse. La tête peut donc passer au camp d'en face, et le siège
+        resté en arrière rendrait à nouveau la question d'un joueur depuis celui d'en face — en
+        PvE, sans qu'aucun tour IA ne parte.
+
+        INSTRUMENT : l'éligibilité du joueur 1 est fermée pendant le remplacement, ce qui met le
+        joueur 2 en tête de file. Sans lui les deux camps sont symétriques dans cette fixture, la
+        tête reste au joueur 1, et le test ne distinguerait pas un siège qui suit d'un siège figé.
+        """
+        from unittest.mock import patch
+
+        import engine.phase_handlers.deployment_handlers as dh
+
+        real_predicate = dh.unit_can_be_placed_in_strategic_reserves
+
+        def _only_player_two(game_state, unit_id):
+            unit = game_state["unit_by_id"][str(unit_id)]
+            if int(unit["player"]) == 1:
+                return False
+            return bool(real_predicate(game_state, unit_id))
+
+        with patch.object(dh, "unit_can_be_placed_in_strategic_reserves", _only_player_two):
+            declaration_game.act(
+                "change_roster", player=1, army_file="armageddon_space_marines.json"
+            )
+            pending = _pending_declaration(declaration_game)
+
+        assert pending and int(pending["player"]) == 2, (
+            "la tête de file n'est pas passée au joueur 2 : le test n'observe pas le cas visé"
+        )
+        assert int(_dep_state(declaration_game)["current_deployer"]) == 2
+        assert int(declaration_game.state["current_player"]) == 2
+
     def test_change_roster_is_refused_once_a_declaration_has_been_answered(
         self, declaration_game
     ):

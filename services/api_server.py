@@ -4758,6 +4758,14 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
         for uid, entry in units_cache.items()
     }
 
+    # 20.01 — LE SIÈGE SUIT LA QUESTION, ici comme au reset : la file vient d'être rebâtie sur un
+    # autre roster, et sa tête n'est pas forcément du même camp qu'avant (les unités inéligibles —
+    # FORTIFICATION, plafond de 50 % — sont retirées sans réponse). Laisser le siège sur le
+    # déployeur restauré juste au-dessus rendrait à nouveau la question d'un camp depuis celui d'en
+    # face, et en PvE aucun tour IA ne partirait. APRÈS `build_units_cache` : l'éligibilité lit les
+    # unités reconstruites.
+    deployment_handlers.move_seat_to_pending_reserves_declaration(game_state)
+
     # If AI player roster changed, reload micro models so PvE AI can act with new unit types.
     ai_enabled = bool(getattr(engine_instance, "is_pve_mode", False))
     if ai_enabled and target_deployer == 2:
