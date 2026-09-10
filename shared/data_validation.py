@@ -74,6 +74,24 @@ def require_positive_int(value: Any, name: str) -> int:
 # toute divergence silencieuse entre l'émetteur et le lecteur du tag [DESPERATE ESCAPE].
 HAZARD_CONTEXT_DESPERATE_ESCAPE = "Desperate Escape"
 
+# Blessures mortelles infligées par une CAPACITÉ de datasheet (06.02), pas par un jet de hasard
+# (24.15 / 09.07). Elles empruntent la ligne `SUFFERS N Mortal Wounds <tag>` — c'est déjà la
+# ligne générique des blessures mortelles, Desperate Escape n'étant pas non plus une arme
+# [HAZARDOUS] — mais leur tag doit rester DISTINCT : l'analyzer ne déclenche le contrôle
+# d'armurerie [HAZARDOUS] que sur le tag de 24.15, et compter ces blessures là fausserait §1.8.
+HAZARD_CONTEXT_HOLD_STILL = "Hold Still and Say Aargh"
+HAZARD_CONTEXT_EXHORTATION = "Exhortation de Rage"
+
+#: `hazardContext` -> tag écrit dans step.log. Table UNIQUE : l'émetteur (moteur) pose le
+#: contexte, le formateur (step_logger) y lit le tag et l'analyzer y lit la liste des tags
+#: qu'il doit reconnaître, si bien qu'aucun des trois ne peut en ignorer un que les autres
+#: connaissent. Un contexte hors table est une erreur, jamais un tag par défaut.
+HAZARD_CONTEXT_TAGS = {
+    HAZARD_CONTEXT_DESPERATE_ESCAPE: "[DESPERATE ESCAPE]",
+    HAZARD_CONTEXT_HOLD_STILL: "[HOLD STILL AND SAY AARGH]",
+    HAZARD_CONTEXT_EXHORTATION: "[EXHORTATION DE RAGE]",
+}
+
 
 
 

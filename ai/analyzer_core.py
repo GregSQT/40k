@@ -8,7 +8,10 @@ from functools import lru_cache
 from typing import Any, Dict, Optional, Tuple, cast
 
 from engine.constants import DRAW_WINNER
-from shared.data_validation import require_key, require_present
+from shared.data_validation import (
+    require_key, require_present,
+    HAZARD_CONTEXT_EXHORTATION, HAZARD_CONTEXT_HOLD_STILL, HAZARD_CONTEXT_TAGS,
+)
 from ai.analyzer_rules import note_rule_usage
 
 from ai.analyzer_perfig import MODEL_TOKEN_PATTERN, position_is_on_battlefield
@@ -183,6 +186,19 @@ _EFFECTS_PLAYER_RE = re.compile(r'P(\d+)\s+([^|]*)')
 _RT_UNIT_ID_RE = re.compile(r'Unit\s+(\d+)')
 _HAZARDOUS_TAG_RE = re.compile(r'\[HAZARDOUS(?::\d+)?\]')
 _HAZARDOUS_SUFFERS_RE = re.compile(r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[HAZARDOUS(?::\d+)?\]')
+#: 06.02 par CAPACITÉ de datasheet. Le tag vient de `HAZARD_CONTEXT_TAGS`, table partagée avec
+#: l'émetteur : ajouter une capacité au moteur l'ajoute ici sans qu'on puisse l'oublier, et une
+#: ligne portant un tag que cette table ne connaît pas ne peut pas être prise pour une autre.
+_MW_ABILITY_RULE_IDS = {
+    HAZARD_CONTEXT_TAGS[HAZARD_CONTEXT_HOLD_STILL]: "mortal_wounds_on_critical_wound",
+    HAZARD_CONTEXT_TAGS[HAZARD_CONTEXT_EXHORTATION]: "mortal_wounds_on_fight_activation",
+}
+#: Groupe 1 = nombre de blessures mortelles, groupe 2 = tag de la capacité.
+_MW_ABILITY_SUFFERS_RE = re.compile(
+    r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+('
+    + '|'.join(re.escape(_t) for _t in _MW_ABILITY_RULE_IDS)
+    + r')'
+)
 #: V11 §9.3 P2 — releve d'une decision d'agent resolue (step.log grammaire >= 8) :
 #: « Unit <id> DECISION [<decision_type>] CHOICE_<i> [<libelle>] », suivi de « [DECLINED] »
 #: quand le candidat joue est celui qui PASSE. Le libelle n'est pas capture : c'est du texte
@@ -2206,6 +2222,59 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 'error': "ligne DESPERATE ESCAPE : format inattendu (attendu : "
                                          "'SUFFERS N Mortal Wounds [DESPERATE ESCAPE]')",
                             })
+                elif " SUFFERS " in action_desc and (
+                    _mwa_match := _MW_ABILITY_SUFFERS_RE.search(action_desc)
+                ) is not None:
+                        # 06.02 par CAPACITÉ de datasheet (Hold Still and Say Aargh, Exhortation
+                        # de Rage). Tag distinct de [HAZARDOUS] 24.15 et de [DESPERATE ESCAPE]
+                        # 09.07, et pour la même raison qu'eux : ces blessures ne doivent
+                        # déclencher ni le contrôle d'armurerie HAZARDOUS, ni son compteur.
+                        # Différence de fond avec les deux autres : elles viennent d'un
+                        # ADVERSAIRE, pas de l'unité elle-même — d'où `[FROM:<unité>]`, sans
+                        # lequel la victime serait créditée de ses propres morts.
+                        action_type = 'mortal_wounds_ability'
+                        _mwa_mw = int(_mwa_match.group(1))
+                        if "[ALL FNP SAVED]" in action_desc:
+                            _mwa_mw = 0
+                        _mwa_unit_id = _dmg_actor_id
+                        _mwa_src_match = re.search(r'\[FROM:([^\]]+)\]', action_desc)
+                        if _mwa_unit_id is None or _mwa_src_match is None:
+                            stats['parse_errors'].append({
+                                'episode': state.current_episode_num,
+                                'turn': turn,
+                                'phase': phase,
+                                'line': line.strip(),
+                                'error': "ligne blessures mortelles de capacité : unité ou "
+                                         "source introuvable (attendu : 'Unit N(' en tête "
+                                         "d'action et '[FROM:<unité>]')",
+                            })
+                        else:
+                            _mwa_rule = _MW_ABILITY_RULE_IDS[_mwa_match.group(2)]
+                            _mwa_src = _mwa_src_match.group(1)
+                            # §1.7 : l'usage se compte sur l'unité SOURCE et son camp. Type ou
+                            # camp inconnus = unité jamais vue en en-tête (journal tronqué) :
+                            # on s'abstient, comme le fait le contrôle d'armurerie HAZARDOUS
+                            # au-dessus, plutôt que d'inventer un porteur.
+                            _mwa_src_type = state.unit_types.get(_mwa_src)  # get allowed
+                            _mwa_player = state.unit_player.get(_mwa_src)  # get allowed
+                            if _mwa_src_type and _mwa_player is not None:
+                                stats['special_rule_usage'][
+                                    (_mwa_rule, _mwa_src_type)][int(_mwa_player)] += 1
+                            if _mwa_mw > 0:
+                                _apply_damage_and_handle_death(
+                                    _mwa_unit_id, _mwa_src, _mwa_mw,
+                                    player, turn, phase, state.line_number, state.current_episode_num,
+                                    line, state.dead_units_current_episode, state.unit_hp,
+                                    state.unit_models_alive, state.unit_model_hp,
+                                    lambda _u: _ordered_living_mids(state, config, _u),
+                                    state.unit_hp_squad_max, state.unit_types, state.unit_positions,
+                                    state.unit_deaths, state.unit_kill_context, stats,
+                                    positions_by_model=state.positions_by_model,
+                                    models_invalidated=state.models_invalidated,
+                                    alloc_model_id=_alloc_model_from_line(state, action_desc, line) if state.log_grammar >= 6 else None,
+                                    pending_model_removals=None,
+                                    dead_model_ids_episode=state.dead_model_ids_episode,
+                                )
                 elif "[DEADLY DEMISE]" in action_desc:
                         # §24.08 DEADLY DEMISE — blessures mortelles après destruction d'une figurine.
                         # Une entrée par unité dans le rayon (d6 partagé) ; la ligne dit si c'est effectif

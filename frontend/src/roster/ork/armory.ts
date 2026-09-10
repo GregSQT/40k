@@ -46,7 +46,10 @@ export const ORK_ARMORY: Record<string, Weapon> = {
   kustom_choppa: { display_name: "Kustom Choppa", NB: 6, ATK: 2, STR: 8, AP: -2, DMG: 2, WEAPON_RULES: ["CLEAVE:1"] },
   stompy_feet: { display_name: "Stompy Feet", NB: 4, ATK: 3, STR: 6, AP: -1, DMG: 1, WEAPON_RULES: [] },
   two_handed_big_choppa: { display_name: "Two-Handed Big Choppa", NB: 5, ATK: 3, STR: 7, AP: -1, DMG: 2, WEAPON_RULES: ["CLEAVE:1"] },
-  urty_syringe: { display_name: "'urty Syringe", NB: 1, ATK: 3, STR: 2, AP: 0, DMG: 1, WEAPON_RULES: ["ANTI_INFANTRY:2", "EXTRA_ATTACKS", "PRECISION"] },
+  // ANTI-INFANTRY 4+ : seuil de la datasheet PAINBOY (Datasheets - Orks.pdf, p4). La valeur 2
+  // rendait critique tout jet de blessure de 2+ contre de l'INFANTERIE, soit presque toutes —
+  // et avec elle Hold Still and Say Aargh se déclenchait à chaque attaque ou presque.
+  urty_syringe: { display_name: "'urty Syringe", NB: 1, ATK: 3, STR: 2, AP: 0, DMG: 1, WEAPON_RULES: ["ANTI_INFANTRY:4", "EXTRA_ATTACKS", "PRECISION"] },
   waaagh_staff: { display_name: "'Waaagh! Staff", NB: 3, ATK: 3, STR: 8, AP: -1, DMG: D3, WEAPON_RULES: ["PSYCHIC"] },
 };
 

@@ -17,7 +17,7 @@ function sanitizeGameLogMessage(message: string): string {
  * réhydratation du replay (``game_log_history``). Gère les alias camel/snake et la reconstruction de
  * ``shootDetails`` depuis les champs plats (phase tir) ou depuis ``shootDetails`` (phase fight).
  */
-function baseEntryFromLogData(logData: Record<string, unknown>): Record<string, unknown> {
+export function baseEntryFromLogData(logData: Record<string, unknown>): Record<string, unknown> {
   const details = logData.shootDetails;
   const shot =
     Array.isArray(details) && details.length > 0
@@ -32,9 +32,11 @@ function baseEntryFromLogData(logData: Record<string, unknown>): Record<string, 
 
   let shootDetails = details;
   if (!shootDetails && hitRoll) {
-    const saveSkipped =
-      (logData.saveSkipped ?? logData.save_skipped) === true &&
-      (logData.saveSkipReason ?? logData.save_skip_reason) === "DEVASTATING_WOUNDS";
+    // Une sauvegarde SAUTÉE l'est quel que soit le motif : n'accepter que
+    // `DEVASTATING_WOUNDS` faisait retomber tout autre motif sur le calcul normal ci-dessous,
+    // qui dérive alors `saveSuccess` d'un `saveRoll` ne décidant de rien. Le moteur, lui, pose
+    // toujours les deux champs ensemble.
+    const saveSkipped = (logData.saveSkipped ?? logData.save_skipped) === true;
     // Build shootDetails from flat fields (shooting phase format)
     shootDetails = [
       {

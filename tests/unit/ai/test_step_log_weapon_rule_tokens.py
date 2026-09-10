@@ -1090,6 +1090,31 @@ def test_une_attaque_non_allouee_ne_fabrique_pas_de_sauvegarde(tmp_path):
     assert _save_segments(allocated, damage=2, save_result="FAIL") == ["Save 4(3+)", "Dmg:2HP"]
 
 
+def test_un_motif_de_saut_inconnu_leve_au_lieu_de_se_deguiser():
+    """T1 — une sauvegarde SAUTÉE pour une cause que le formateur ignore ne doit pas retomber
+    sur `Save [NOT ALLOCATED]`.
+
+    C'est exactement ce qui est arrivé : le moteur posait `HOLD_STILL_AND_SAY_AARGH`, aucun
+    formateur ne le consommait, et la ligne annonçait « excess attacks lost » sur une attaque
+    qui avait porté. Le silence du formateur a masqué une règle mal implémentée au lieu de la
+    faire tomber au premier journal.
+    """
+    import pytest as _pytest
+
+    from ai.step_logger import _save_segments
+
+    inconnu = {"save_target": None, "save_roll": 4,
+               "save_skipped": True, "save_skip_reason": "MOTIF_INCONNU"}
+    with _pytest.raises(ValueError, match="motif inconnu"):
+        _save_segments(inconnu, damage=2, save_result=None)
+
+    devastating = {"save_target": None, "save_roll": None,
+                   "save_skipped": True, "save_skip_reason": "DEVASTATING_WOUNDS"}
+    assert _save_segments(devastating, damage=2, save_result="FAIL") == [
+        "Save [DEVASTATING WOUNDS]", "Dmg:2HP",
+    ]
+
+
 @pytest.mark.parametrize("melee", [False, True], ids=["tir", "melee"])
 def test_la_ligne_nomme_la_figurine_allouee(monkeypatch, tmp_path, melee):
     """La chaîne `[ALLOC_MODEL:]` : record moteur → mapping → ligne (2026-08-12).

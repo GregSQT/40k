@@ -1344,6 +1344,11 @@ export function parse_log_file_from_text(text: string): ReplayData {
       const hitMatch = trimmed.match(/Hit\s+(\d+)\((\d+)\+\)/);
       const woundMatch = trimmed.match(/Wound\s+(\d+)\((\d+)\+\)/);
       const saveMatch = trimmed.match(/Save\s+(\d+)\((\d+)\+(?:->(\d+)\+)?\)(?:\s+\[COVER\])?/);
+      // JUMEAU de la branche SHOT : 24.10 écrit `Save [DEVASTATING WOUNDS]` au lieu d'un jet,
+      // et la mêlée en produit (relic_greataxe, thunder_hammer_terminator). Sans cette
+      // reconnaissance, `saveMatch` reste nul et la blessure — pourtant réussie, et suivie de
+      // ses dégâts — est marquée FAIL plus bas.
+      const saveSkippedMatch = trimmed.match(/Save\s+\[DEVASTATING WOUNDS\]/);
       const dmgMatch = trimmed.match(/Dmg:(\d+)HP/);
 
       const action: ReplayAction = {
@@ -1383,6 +1388,11 @@ export function parse_log_file_from_text(text: string): ReplayData {
         action.save_target = parseInt(saveMatch[2], 10);
         action.save_result = "SAVED";
       }
+      if (saveSkippedMatch) {
+        action.save_skipped = true;
+        action.save_skip_reason = "DEVASTATING_WOUNDS";
+        action.devastating_wounds_applied = true;
+      }
 
       // FIGHT logs don't have Dmg:XHP format - infer damage from combat results
       // Damage is dealt if: hit succeeded AND wound succeeded AND save failed
@@ -1395,7 +1405,10 @@ export function parse_log_file_from_text(text: string): ReplayData {
       if (hitMatch && !woundMatch) {
         action.hit_result = "MISS";
       }
-      if (woundMatch && !saveMatch) {
+      // Une sauvegarde SAUTÉE (24.10) n'est pas une sauvegarde absente : la blessure a réussi,
+      // et l'attaque inflige ses dégâts. Ne l'exclure de ce test que par `saveMatch` marquait
+      // FAIL une blessure critique dont les dégâts étaient appliqués deux lignes plus haut.
+      if (woundMatch && !saveMatch && !saveSkippedMatch) {
         action.wound_result = "FAIL";
       }
       if (saveMatch) {

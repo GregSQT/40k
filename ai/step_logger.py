@@ -13,7 +13,7 @@ import builtins
 import json
 from typing import Any, Dict, List, Optional, Tuple
 
-from shared.data_validation import require_key, ConfigurationError, HAZARD_CONTEXT_DESPERATE_ESCAPE
+from shared.data_validation import require_key, ConfigurationError, HAZARD_CONTEXT_TAGS
 
 from ai.bot_registry import bot_display_name
 
@@ -241,7 +241,20 @@ def _save_segments(
     Absent sur `Save [DEVASTATING WOUNDS]` (pas de sauvegarde faite) et `Save [NOT ALLOCATED]`.
     """
     save_skipped = bool(details.get("save_skipped", False))
-    if save_skipped and details.get("save_skip_reason") == "DEVASTATING_WOUNDS":
+    if save_skipped:
+        # Un seul motif de saut existe (24.10). Tout autre motif doit LEVER et non retomber
+        # sur `[NOT ALLOCATED]` deux lignes plus bas : une sauvegarde sautée pour une cause que
+        # le formateur ignore s'y déguisait en attaque jamais allouée, et le journal disait
+        # « excess attacks lost » sur une attaque qui avait bel et bien porté. C'est ce qui est
+        # arrivé au motif `HOLD_STILL_AND_SAY_AARGH`, posé par le moteur et consommé par
+        # personne — le silence du formateur a masqué pendant tout ce temps une règle mal
+        # implémentée, au lieu de la faire tomber au premier journal.
+        _reason = details.get("save_skip_reason")
+        if _reason != "DEVASTATING_WOUNDS":
+            raise ValueError(
+                f"save_skipped=True avec un motif inconnu du formateur : {_reason!r} — "
+                "attendu 'DEVASTATING_WOUNDS'"
+            )
         prefix = [f"→ {alloc_model_id}"] if alloc_model_id else []
         return prefix + ["Save [DEVASTATING WOUNDS]", f"Dmg:{damage}HP"]
     if details.get("save_target") is None:
@@ -1332,8 +1345,12 @@ class StepLogger:
                 raise KeyError("Hazardous action missing required unit_with_coords")
             hazardous_mortal_wounds = require_key(details, "hazardous_mortal_wounds")
             hazard_context = details.get("hazard_context", "Hazardous")
-            if hazard_context == HAZARD_CONTEXT_DESPERATE_ESCAPE:
-                tag = "[DESPERATE ESCAPE]"
+            if hazard_context in HAZARD_CONTEXT_TAGS:
+                # 09.07 [DESPERATE ESCAPE] et les capacites de datasheet qui infligent des
+                # blessures mortelles (06.02) : le tag vient de la table PARTAGEE avec le
+                # moteur et l'analyzer, si bien qu'aucun des trois ne peut en ignorer un que
+                # les autres connaissent. Seul 24.15 garde son tag parametre ci-dessous.
+                tag = HAZARD_CONTEXT_TAGS[hazard_context]
             else:
                 # L15 — 24.15 : [HAZARDOUS:<n>] quand le compte d'armes est connu.
                 _hwc = details.get("hazardous_weapon_count")
@@ -1341,6 +1358,19 @@ class StepLogger:
             _hdice = details.get("hazardous_dice_rolls")
             # L15 — jets individuels des dés HAZARDOUS (24.15), absents pour Desperate Escape.
             dice_suffix = f" Roll:{','.join(str(r) for r in _hdice)}" if _hdice else ""
+            # 06.02 — D6 ayant produit le nombre de blessures mortelles d'une capacité (un par
+            # blessure critique pour Hold Still). Segment SÉPARÉ de `Roll:` : celui-ci porte des
+            # jets de hasard qu'on compare à un seuil, celui-là des quantités qu'on somme.
+            _mwdice = details.get("mortal_wound_dice")
+            if _mwdice:
+                dice_suffix += f" MW:{','.join(str(r) for r in _mwdice)}"
+            # `[FROM:<unité>]` — 06.02 par capacité ADVERSE. [HAZARDOUS] et [DESPERATE ESCAPE]
+            # sont auto-infligées et n'ont donc pas de source à nommer ; sans ce segment,
+            # l'analyzer crédite la victime de ses propres morts (`_apply_damage_and_handle_death`
+            # prend l'attaquant en second argument).
+            _mwsrc = details.get("mortal_wound_source_id")
+            if _mwsrc is not None:
+                dice_suffix += f" [FROM:{_mwsrc}]"
             # L12 — FNP mortal wounds : suffixe si au moins une blessure sauvée.
             _fnp_saves_mortal = details.get("fnp_saves_mortal")  # get allowed
             _fnp_suffix = f" [FNP:{_fnp_saves_mortal}]" if _fnp_saves_mortal else ""

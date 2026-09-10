@@ -15,7 +15,7 @@ import time
 from collections import deque
 from typing import Dict, List, Tuple, Set, Optional, Any, Mapping
 from .generic_handlers import end_activation
-from shared.data_validation import require_key
+from shared.data_validation import require_key, HAZARD_CONTEXT_HOLD_STILL
 from engine.utils.weapon_helpers import melee_weapons, get_max_melee_damage
 from engine.action_log_utils import append_action_log
 from engine.constants import PENDING_FIGHT_ALLOCATION_KEY
@@ -83,7 +83,6 @@ from .shared_utils import (
     update_enemy_adjacent_caches_after_unit_move,
     ManualAllocCtx,
     _build_manual_allocation,
-    allocate_mortal_wounds,
     apply_manual_shoot_declare_order,
     apply_manual_shoot_allocation,
     manual_allocation_waiting_payload,
@@ -4692,11 +4691,24 @@ def _manual_roll_fight_intent(
         for _rec in rolled["shot_records"]:
             _rec["waaaghMelee"] = True
     # Hold Still and Say Aargh (mortal_wounds_on_critical_wound, chantier 06 Passe 4).
-    # « Each time a model in this unit makes a melee attack with 'urty syringe, on a critical
-    # wound, that attack inflicts D6 mortal wounds on the target and the attack sequence ends. »
-    # Resolution AUTO (auto_resolve=True toujours). Non VEHICLE uniquement. Sequence terminee :
-    # les records critiques consommes sont retires de pending_wounds et ne font pas de degats
-    # supplementaires via l allocation normale.
+    # Datasheet PAINBOY (Documentation/40k_rules/Armageddon/Datasheets - Orks.pdf, p4) :
+    # « When this model scores a critical wound with its 'urty syringe against a non-VEHICLE
+    # unit, it ALSO inflicts D6 mortal wounds to that unit. »
+    #
+    # Le mot est « also », et le texte ne contient AUCUNE clause « the attack sequence ends » :
+    # la blessure critique n est pas consommee. Elle suit 05.03/05.04 comme n importe quelle
+    # blessure — sauvegarde comprise, ce n est PAS [DEVASTATING WOUNDS] 24.10 — et la cible
+    # subit EN PLUS D6 blessures mortelles par crit. Le code posait l inverse (retrait de
+    # `pending_wounds`, `counts["wounds"]` decremente, save marquee sautee) sur la foi d un
+    # commentaire qui citait le wording de DEVASTATING, pas celui de la datasheet : la
+    # blessure normale etait perdue, et step.log rendait `Save [NOT ALLOCATED]`.
+    #
+    # Le D6 est tire ICI, au crit, pour que l ordre des des reste celui de la sequence, et il
+    # est pose PAR RECORD : c est la granularite du jet, la seule qui ne puisse pas se
+    # desynchroniser du crit qu elle decrit. Son APPLICATION est en revanche differee a la fin
+    # du lot par `_build_manual_allocation` — 06.02, « MORTAL WOUNDS AND NORMAL DAMAGE » :
+    # « resolve all of the normal damage first, then resolve all of the mortal wounds ».
+    _hs_pending: Optional[Dict[str, Any]] = None
     _hs_args = _unit_get_primitive_b_rule_args(attacker, "mortal_wounds_on_critical_wound")
     if _hs_args is not None:
         _req_weapon_code = _hs_args.get("weapon")  # get allowed : absent -> None -> skip
@@ -4704,44 +4716,26 @@ def _manual_roll_fight_intent(
         if _req_weapon_code is not None and _this_weapon_code == _req_weapon_code:
             _tgt_keywords = [k.upper() for k in target.get("keywords", [])]  # get allowed
             if "VEHICLE" not in _tgt_keywords:
-                _hs_mw_total = 0
-                _hs_count = 0
+                _hs_dice: List[int] = []
                 for _hs_rec in rolled["shot_records"]:
-                    if _hs_rec.get("criticalWound") and not _hs_rec.get("devastating"):  # get allowed
-                        _hs_mw_total += random.randint(1, 6)
-                        _hs_rec["holdStillMW"] = True
-                        _hs_rec["saveSkipped"] = True
-                        _hs_rec["saveSkipReason"] = "HOLD_STILL_AND_SAY_AARGH"
-                        _hs_count += 1
-                if _hs_mw_total > 0:
-                    _hs_details: List[Dict[str, Any]] = []
-                    append_action_log(game_state, {
-                        "type": "hold_still_mortal_wounds",
-                        "message": (
-                            f"[HOLD STILL AND SAY AARGH] {attacker_mid} -> {target_sid}: "
-                            f"{_hs_count} crit(s) -> {_hs_mw_total} MW"
-                        ),
-                        "turn": game_state.get("turn", 0),  # get allowed
-                        "phase": "fight",
-                        "unitId": str(attacker["squad_id"]),
-                        "targetId": target_sid,
-                        "player": int(attacker.get("player", 0)),  # get allowed
-                        "holdStillCrits": _hs_count,
-                        "holdStillMortalWounds": _hs_mw_total,
-                        "holdStillDetails": _hs_details,
-                    })
-                    allocate_mortal_wounds(game_state, target_sid, _hs_mw_total, True, _hs_details)
-                    # Les crits consommés par Hold Still ne sont pas des blessures normales :
-                    # allocate_mortal_wounds les a déjà journalisés séparément. Soustraire ici évite le
-                    # double-comptage dans summary["wounds"] de _build_manual_allocation.
-                    rolled["counts"]["wounds"] -= _hs_count
-                    if is_unit_alive(target_sid, game_state):
-                        rolled["pending_wounds"] = [
-                            pw for pw in rolled["pending_wounds"] if not pw["rec"].get("holdStillMW")
-                        ]
-                    else:
-                        rolled["pending_wounds"] = []
+                    # TOUT critical wound, [DEVASTATING WOUNDS] compris : la datasheet n en
+                    # excepte aucun. Aucune arme de l armurerie ne porte les deux regles, donc
+                    # ce cas reste theorique — mais l ecrire ainsi est ce que dit le texte.
+                    if _hs_rec.get("criticalWound"):  # get allowed
+                        _hs_mw = random.randint(1, 6)
+                        _hs_rec["holdStillMW"] = _hs_mw
+                        _hs_dice.append(_hs_mw)
+                if _hs_dice:
+                    _hs_pending = {
+                        "ability": HAZARD_CONTEXT_HOLD_STILL,
+                        "dice": _hs_dice,
+                    }
     return {
+        # Blessures mortelles DUES par cet intent, non encore infligees (06.02). Ecrite meme
+        # a None : c est au producteur d affirmer qu aucune ne l est, pas au lecteur de le
+        # deviner d une cle absente. `_build_manual_allocation` les agrege par lot et les
+        # applique apres les degats normaux.
+        "pending_mortal_wounds": _hs_pending,
         "attacker_mid": attacker_mid, "attacker": attacker, "target_sid": target_sid,
         "weapon_name": weapon_name, "bs": ws, "ap": ap, "dmg_raw": dmg_raw,
         # [MELTA] 24.25 est indexee sur la demi-portee d une arme de TIR : aucune arme de melee
