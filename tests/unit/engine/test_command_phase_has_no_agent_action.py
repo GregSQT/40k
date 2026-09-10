@@ -108,7 +108,7 @@ def test_the_command_phase_mask_opens_wait_and_nothing_else() -> None:
     from tests.unit.engine.test_action_decoder import _build_gs, _make_decoder, _unit
 
     decoder = _make_decoder()
-    gs = _build_gs([_unit("1", 1, 5, 5), _unit("2", 2, 20, 15)], "command")
+    gs = _build_gs([_unit(1, 1, 5, 5), _unit(2, 2, 20, 15)], "command")
 
     mask, _eligible = decoder.get_squad_action_mask_and_eligible_units(gs)
 
@@ -123,7 +123,7 @@ def test_no_reserved_id_is_ever_opened_by_the_command_mask() -> None:
     from tests.unit.engine.test_action_decoder import _build_gs, _make_decoder, _unit
 
     decoder = _make_decoder()
-    gs = _build_gs([_unit("1", 1, 5, 5), _unit("2", 2, 20, 15)], "command")
+    gs = _build_gs([_unit(1, 1, 5, 5), _unit(2, 2, 20, 15)], "command")
 
     mask, _eligible = decoder.get_squad_action_mask_and_eligible_units(gs)
 

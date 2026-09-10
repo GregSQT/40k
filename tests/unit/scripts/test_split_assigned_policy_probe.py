@@ -73,3 +73,39 @@ def test_les_dix_bits_sont_lus_du_registre():
     assert SPLIT_BIT_IDX == tuple(
         unit_bin_index(split_assigned_field(i)) for i in range(K_WEAPONS_RANGED)
     )
+
+
+def test_les_probabilites_par_action_sortent_de_la_distribution_categorielle():
+    """Le cas nominal : une distribution catégorielle masquée rend un vecteur par action."""
+    import torch
+    from sb3_contrib.common.maskable.distributions import MaskableCategoricalDistribution
+
+    from scripts.split_assigned_policy_probe import _action_probs
+
+    dist = MaskableCategoricalDistribution(3).proba_distribution(
+        torch.tensor([[2.0, 0.0, -1.0]])
+    )
+
+    probs = _action_probs(dist)
+
+    assert probs.shape == (3,)
+    assert probs.sum() == pytest.approx(1.0)
+    assert probs[0] > probs[1] > probs[2]
+
+
+def test_une_distribution_non_categorielle_est_refusee_au_lieu_d_etre_mesuree():
+    """Une distribution multi-catégorielle porte une LISTE de facteurs, pas des probabilités par
+    action : la sonde doit le dire, sans quoi elle mesurerait un TVD sur autre chose."""
+    import torch
+    from sb3_contrib.common.maskable.distributions import (
+        MaskableMultiCategoricalDistribution,
+    )
+
+    from scripts.split_assigned_policy_probe import _action_probs
+
+    dist = MaskableMultiCategoricalDistribution([2, 2]).proba_distribution(
+        torch.tensor([[1.0, 0.0, 0.5, -0.5]])
+    )
+
+    with pytest.raises(TypeError, match="catégorielle masquée"):
+        _action_probs(dist)

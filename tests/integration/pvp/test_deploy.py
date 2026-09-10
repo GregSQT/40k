@@ -518,6 +518,7 @@ class TestDeclareBattleFormations:
     def test_declaring_holds_the_unit_off_table(self, declaration_game):
         """`declare: true` met l'escouade en réserves et la sort du pool à poser."""
         pending = _pending_declaration(declaration_game)
+        assert pending, "aucune question 20.01 publiée : le test n'a rien à déclarer"
         unit_id = str(pending["unitId"])
         player = int(pending["player"])
 
@@ -531,6 +532,7 @@ class TestDeclareBattleFormations:
     def test_declining_leaves_the_unit_to_deploy(self, declaration_game):
         """`declare: false` retire la QUESTION, pas l'escouade — et la question ne revient pas."""
         pending = _pending_declaration(declaration_game)
+        assert pending, "aucune question 20.01 publiée : le test n'a rien à décliner"
         unit_id = str(pending["unitId"])
         player = int(pending["player"])
 
