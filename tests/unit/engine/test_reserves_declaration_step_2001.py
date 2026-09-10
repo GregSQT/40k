@@ -451,3 +451,116 @@ def test_an_unaskable_entry_dropped_from_the_queue_does_not_start_the_step():
         "la file n'a pas été amputée : le test n'observe pas le cas visé"
     )
     assert reserves_declaration_step_has_started(gs["deployment_state"]) is False
+
+
+# ===========================================================================
+# LE SIÈGE SUIT LA QUESTION — 20.01 se répond depuis le camp interrogé
+# ===========================================================================
+
+
+def test_the_seat_follows_the_next_question_after_a_human_answer():
+    """Répondre déplace le siège sur le camp de la question SUIVANTE.
+
+    La file alterne les deux camps ; le siège, lui, ne bougeait que sur le chemin gym
+    (`arm_reserves_declaration_decision`). Une partie servie par l'API restait donc sur le joueur
+    1 pendant toute l'étape : en PvE, la question du bot était rendue au client alors que le
+    déclencheur de tour IA (`BoardWithAPI`) lit `current_deployer` et qu'`execute_ai_turn` refuse
+    hors `current_player == 2`. Personne n'aurait pu y répondre depuis le bon siège.
+    """
+    from engine.phase_handlers.deployment_handlers import (
+        deployment_place_in_strategic_reserves,
+    )
+
+    eng = _engine()
+    gs = eng.game_state
+    first = next_reserves_declaration_entry(gs)
+    assert first is not None
+
+    ok, result = deployment_place_in_strategic_reserves(
+        gs, {"unitId": first[1], "declare": False}
+    )
+    assert ok, result
+
+    second = next_reserves_declaration_entry(gs)
+    assert second is not None, "file épuisée : le test n'observe pas le déplacement du siège"
+    assert second[0] != first[0], (
+        "les deux questions portent sur le même camp : la file n'alterne pas, le test ne "
+        "distingue pas un siège qui suit d'un siège figé"
+    )
+    assert gs["deployment_state"]["current_deployer"] == second[0]
+    assert gs["current_player"] == second[0]
+
+
+def test_the_seat_follows_the_first_question_at_reset():
+    """Le siège est POSÉ sur la première question dès le reset, même si ce n'est pas le joueur 1.
+
+    Les entrées inéligibles (FORTIFICATION, plafond de 50 %) sont retirées de la file sans
+    réponse : l'étape peut donc s'ouvrir sur le camp d'en face alors que le reset place le
+    déployeur sur le joueur 1. Ici, plus aucune unité du joueur 1 n'est déclarable, la première
+    question est celle du joueur 2, et c'est là que le siège doit être.
+    """
+    from unittest.mock import patch
+
+    import engine.phase_handlers.deployment_handlers as dh
+    from engine.game_utils import get_unit_by_id
+
+    eng = _engine()
+    real_predicate = dh.unit_can_be_placed_in_strategic_reserves
+
+    def _only_player_two(game_state: Dict[str, Any], unit_id: str) -> bool:
+        unit = get_unit_by_id(game_state, str(unit_id))
+        assert unit is not None
+        if int(unit["player"]) == 1:
+            return False
+        return bool(real_predicate(game_state, unit_id))
+
+    with patch.object(dh, "unit_can_be_placed_in_strategic_reserves", _only_player_two):
+        eng.reset(seed=0)
+        gs = eng.game_state
+        entry = next_reserves_declaration_entry(gs)
+        assert entry is not None and entry[0] == 2, (
+            "la première question n'est pas celle du joueur 2 : le test n'observe pas le cas visé"
+        )
+        assert gs["deployment_state"]["current_deployer"] == 2
+        assert gs["current_player"] == 2
+
+
+def test_the_human_route_refuses_a_question_asked_to_a_model_seat():
+    """20.01 se déclare depuis SON siège : la route humaine refuse la question du bot.
+
+    « **you** can select one or more friendly units » (20.01) — la liste d'un camp est décidée par
+    ce camp. En PvE le siège 2 est piloté par le modèle et répond par
+    `apply_reserves_declaration_decision` ; laisser la route humaine y répondre, c'est laisser
+    l'adversaire choisir la liste du bot.
+
+    VERT VACANT : la MÊME route, sur la question du siège humain, est acceptée juste avant — le
+    refus ne vient donc pas d'une route cassée pour tout le monde.
+    """
+    from engine.phase_handlers.deployment_handlers import (
+        deployment_place_in_strategic_reserves,
+    )
+
+    eng = _engine()
+    gs = eng.game_state
+    gs["player_types"]["2"] = "ai"
+
+    human_entry = next_reserves_declaration_entry(gs)
+    assert human_entry is not None and human_entry[0] == 1
+    ok, result = deployment_place_in_strategic_reserves(
+        gs, {"unitId": human_entry[1], "declare": False}
+    )
+    assert ok, result
+
+    model_entry = next_reserves_declaration_entry(gs)
+    assert model_entry is not None and model_entry[0] == 2, (
+        "aucune question pour le siège modèle : le test n'observe pas le cas visé"
+    )
+    ok, result = deployment_place_in_strategic_reserves(
+        gs, {"unitId": model_entry[1], "declare": True}
+    )
+
+    assert not ok
+    assert result["error"] == "reserves_declaration_seat_is_not_human", result
+    assert result["player"] == 2
+    # La question n'a pas été consommée : elle attend toujours son siège.
+    assert next_reserves_declaration_entry(gs) == model_entry

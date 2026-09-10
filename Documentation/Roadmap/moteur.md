@@ -147,6 +147,39 @@ corrigés et couverts.
 
 ---
 
+## ✅ 20.01 — le siège suit la question, et le bot répond pour lui-même {#siege-question-2001}
+
+**Livré le 2026-09-10.** Le déplacement du siège vers le camp interrogé n'existait que sur le
+chemin gym (`arm_reserves_declaration_decision`, appelé par le seul constructeur de masque). Aucune
+route HTTP ne construit de masque — `grep get_squad_action_mask_and_eligible_units services/` : zéro
+hit — donc dans une partie servie par l'API, `current_deployer` restait sur le joueur 1 pendant
+toute l'étape pendant que la file, elle, alternait les deux camps.
+
+Conséquence en PvE : la question du bot était rendue au client sur la ligne de roster de son
+escouade, sans aucun filtre de siège, et le tour IA ne partait jamais — le déclencheur de
+`BoardWithAPI` lit `current_deployer`, et `execute_ai_turn` refuse hors `current_player == 2`.
+L'humain répondait donc à la place du bot, ou la partie n'avançait plus. 20.01 dit « **you** can
+select one or more friendly units » : la liste d'un camp se décide depuis son siège.
+
+Ce qui change, sur les deux routes et par une seule écriture
+(`move_seat_to_pending_reserves_declaration`) : le siège suit la question au reset, puis après
+chaque réponse ; la route humaine REFUSE une question posée à un siège piloté par le modèle
+(`reserves_declaration_seat_is_not_human`) ; le client ne rend plus les deux boutons que sur un
+siège humain, par la même lecture de `player_types` que l'avertissement 20.04.
+
+Le recalage au reset n'est pas décoratif : la tête de file n'est pas toujours le joueur 1, ses
+unités inéligibles (FORTIFICATION, plafond de 50 %) étant retirées sans réponse.
+
+**Aucune clé de save nouvelle**, donc aucun bump de format : seuls `current_deployer` et
+`current_player` — déjà sauvegardés — changent de valeur.
+
+Verrous : `tests/unit/engine/test_reserves_declaration_step_2001.py` (3 tests ajoutés, chaque
+défaut réintroduit et constaté rouge), `frontend/src/utils/strategicReservesUi.test.ts` (siège du
+camp interrogé) et `frontend/src/components/BoardWithAPI.test.tsx` (le CÂBLAGE du composant, que le
+prédicat seul ne prouvait pas).
+
+---
+
 ## ✅ 13.06 — le move gym peut finir en hauteur {#verticalite-move-gym}
 
 **Livré le 2026-09-09.** Le move d'escouade du pipeline gym atterrissait TOUJOURS au sol :

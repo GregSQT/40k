@@ -2206,6 +2206,15 @@ class W40KEngine(gym.Env):
                 placed_by_player[int(require_key(u, "player"))] += 1
         self.game_state["_reserves_placed"] = placed_by_player
 
+        # 20.01 — LE SIÈGE SUIT LA PREMIÈRE QUESTION, ici et pas plus tôt : `_reserves_placed` et
+        # les pools viennent d'être posés, et c'est d'eux que dépend l'éligibilité qui ampute la
+        # file. La tête de file n'est pas toujours le joueur 1 : ses unités inéligibles (plafond,
+        # FORTIFICATION) sont retirées sans réponse, et la question peut donc s'ouvrir sur le
+        # camp d'en face. Sans ce recalage, une partie servie par l'API ouvrirait l'étape avec le
+        # siège d'un joueur et la question d'un autre — en PvE, la question du bot sans tour IA.
+        if str(self.game_state["phase"]) == "deployment" and "deployment_state" in self.game_state:
+            deployment_handlers.move_seat_to_pending_reserves_declaration(self.game_state)
+
         # Log episode start with all unit positions, walls, and objectives
         if self.step_logger and self.step_logger.enabled:
             # Extract scenario name: prefer config "name", otherwise use filename pattern

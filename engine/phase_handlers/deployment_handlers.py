@@ -2093,6 +2093,33 @@ def restore_deployer_after_reserves_declaration(game_state: Dict[str, Any]) -> N
     game_state["current_player"] = first
 
 
+def move_seat_to_pending_reserves_declaration(
+    game_state: Dict[str, Any]
+) -> Optional[Tuple[int, str]]:
+    """Place le siège courant sur le joueur que 20.01 interroge — ``(joueur, escouade)`` ou ``None``.
+
+    ÉCRIVAIN UNIQUE du siège pendant l'étape Declare Battle Formations, pour les deux routes : le
+    masque gym y arrive par `arm_reserves_declaration_decision`, la route de jeu par
+    `deployment_place_in_strategic_reserves`. Seul le gym le faisait, et le siège restait donc
+    figé sur le joueur 1 en partie servie par l'API : en PvE, la question du bot était rendue au
+    client sans que le tour IA ne parte jamais — le déclencheur du client lit `current_deployer`
+    (`BoardWithAPI`) et `execute_ai_turn` refuse hors `current_player == 2`. 20.01 dit « **you**
+    can select one or more friendly units », donc la question d'un camp se répond depuis son
+    siège, pas depuis celui d'en face.
+
+    Aucune fermeture ici : la file vide est le domaine de `close_reserves_declaration_step_if_done`,
+    qui rend la main au premier déployeur.
+    """
+    entry = next_reserves_declaration_entry(game_state)
+    if entry is None:
+        return None
+    player, squad_id = entry
+    deployment_state = require_key(game_state, "deployment_state")
+    deployment_state["current_deployer"] = player
+    game_state["current_player"] = player
+    return player, squad_id
+
+
 def arm_reserves_declaration_decision(
     game_state: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
@@ -2115,15 +2142,13 @@ def arm_reserves_declaration_decision(
     close_reserves_declaration_step_if_done(game_state)
     if require_key(deployment_state, RESERVES_DECLARATION_CLOSED_KEY):
         return None
-    entry = next_reserves_declaration_entry(game_state)
+    entry = move_seat_to_pending_reserves_declaration(game_state)
     if entry is None:
         raise RuntimeError(
             "arm_reserves_declaration_decision: etape 20.01 declaree ouverte sans question due "
             "— `close_reserves_declaration_step_if_done` vient pourtant de la laisser ouverte."
         )
     player, squad_id = entry
-    deployment_state["current_deployer"] = player
-    game_state["current_player"] = player
 
     from engine.agent_decision import set_pending_agent_decision
 
@@ -2240,6 +2265,9 @@ def deployment_place_in_strategic_reserves(
     Aucune alternance ici, et c'est le fond de la correction : la déclaration N'EST PAS un tour de
     déploiement. L'ordre des questions est celui de la file, figée au reset, et la mise en place
     ne commence qu'une fois la file vide.
+
+    SIÈGE HUMAIN, littéralement : une question posée à un siège piloté par le modèle est REFUSÉE
+    ici, et le siège suit la question suivante pour que ce soit ce modèle qui y réponde.
     """
     squad_id = str(require_key(action, "unitId"))
     declare = require_key(action, "declare")
@@ -2260,11 +2288,28 @@ def deployment_place_in_strategic_reserves(
             "unitId": squad_id,
             "expectedUnitId": expected_squad_id,
         }
+    # 20.01 : « **you** can select one or more friendly units » — la question d'un camp appartient
+    # à SON siège. Cette route est celle du siège humain ; le siège piloté par le modèle répond
+    # par `apply_reserves_declaration_decision`. Sans ce refus, en PvE le client rend la question
+    # du bot sur sa ligne de roster (aucun filtre de siège avant ce lot) et l'humain choisissait
+    # la liste de son adversaire.
+    seat = require_key(require_key(game_state, "player_types"), str(expected_player))
+    if seat != "human":
+        return False, {
+            "error": "reserves_declaration_seat_is_not_human",
+            "unitId": squad_id,
+            "player": expected_player,
+            "seat": seat,
+        }
 
     consume_reserves_declaration_entry(deployment_state)
     if declare:
         commit_strategic_reserves(game_state, squad_id)
-    close_reserves_declaration_step_if_done(game_state)
+    # Le siège SUIT la question suivante, sinon il resterait sur le répondant : le tour IA du
+    # client ne partirait jamais pour la question du bot (`BoardWithAPI` lit `current_deployer`).
+    # La file épuisée est le domaine de la clôture, qui rend la main au premier déployeur.
+    if not close_reserves_declaration_step_if_done(game_state):
+        move_seat_to_pending_reserves_declaration(game_state)
 
     result: Dict[str, Any] = {
         "action": "deploy_strategic_reserves",

@@ -17,7 +17,7 @@
  * d'état et y répondrait à sa place. Les deux cas sont testés ensemble — le cas humain est ce qui
  * empêche un panneau muet pour une autre raison de rendre le cas IA vert pour rien.
  */
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { MemoryRouter } from "react-router-dom";
@@ -262,5 +262,167 @@ describe("BoardWithAPI — panneau de mouvement réactif", () => {
     for (const option of REACTIVE_MOVE_DECISION.options) {
       expect(screen.getByRole("button", { name: option.label })).toBeTruthy();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T_BoardWithAPI_ReservesDeclaration — 20.01, la question et le siège
+// ---------------------------------------------------------------------------
+
+/** Unité au format que `useEngineAPI.convertUnits` EXIGE — il lève sur chaque champ manquant. */
+function makeUnit(id: number, player: 1 | 2) {
+  return {
+    id,
+    player,
+    unitType: `Squad${id}`,
+    DISPLAY_NAME: `Squad ${id}`,
+    col: -1,
+    row: -1,
+    MOVE: 6,
+    HP_MAX: 10,
+    HP_CUR: 10,
+    T: 4,
+    ARMOR_SAVE: 3,
+    VALUE: 100,
+    ICON: "/icons/test-unit.webp",
+    BASE_SIZE: 32,
+    BASE_SHAPE: "circular",
+    ICON_SCALE: 1,
+    ILLUSTRATION_RATIO: 1,
+    SHOOT_LEFT: 0,
+    ATTACK_LEFT: 0,
+    RNG_WEAPONS: [],
+    CC_WEAPONS: [],
+    UNIT_RULES: [],
+    UNIT_KEYWORDS: [],
+  };
+}
+
+/** État de déploiement ACTIF portant la question 20.01 sur `pendingUnitId`, du camp `pendingPlayer`. */
+function makeDeclarationState(o: {
+  pendingPlayer: 1 | 2;
+  pendingUnitId: string;
+  seat2: "human" | "ai";
+}) {
+  return makeGameState({
+    phase: "deployment",
+    deployment_type: "active",
+    player_types: { "1": "human", "2": o.seat2 },
+    units: [makeUnit(7, 1), makeUnit(11, 2)],
+    units_cache: { "7": {}, "11": {} },
+    deployment_state: {
+      current_deployer: o.pendingPlayer,
+      deployable_units: { "1": ["7"], "2": ["11"] },
+      deployed_units: [],
+      deployment_complete: false,
+    },
+    strategic_reserves: {
+      last_round: 3,
+      pending_declaration: { player: o.pendingPlayer, unitId: o.pendingUnitId },
+      "1": { used_points: 0, cap_points: 500 },
+      "2": { used_points: 0, cap_points: 500 },
+    },
+  });
+}
+
+describe("BoardWithAPI — question 20.01 (Declare Battle Formations)", () => {
+  /** Rend une partie arrêtée sur la question 20.01, écran de préparation encore ouvert. */
+  async function renderDeclaration(o: {
+    mode: "pvp" | "pve";
+    pendingPlayer: 1 | 2;
+    pendingUnitId: string;
+    seat2: "human" | "ai";
+  }) {
+    if (o.mode === "pve") {
+      localStorage.setItem("w40k_auth_session_v2", FAKE_SESSION_PVE);
+      window.history.replaceState({}, "", "/game?mode=pve");
+    }
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({
+          success: true,
+          game_state: makeDeclarationState(o),
+        })
+      )
+    );
+    renderBoard(o.mode === "pve" ? "/game?mode=pve" : "/");
+    // Point d'ancrage : la LIGNE de l'escouade interrogée est montée. Sans elle, toute assertion
+    // d'absence ci-dessous serait vraie parce que rien n'est rendu, pas parce que la question
+    // n'est pas posée.
+    await waitFor(
+      () => {
+        expect(screen.getByTestId(`roster-row-select-${o.pendingUnitId}`)).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+  }
+
+  it("écran de préparation : la question n'est pas posée, elle l'est au démarrage", async () => {
+    // `deploymentStarted` est CÂBLÉ ici, pas seulement testé dans le prédicat : l'écran de
+    // préparation est la seule fenêtre où le joueur peut encore changer d'armée, et le moteur
+    // refuse ce changement dès la première réponse 20.01.
+    await renderDeclaration({
+      mode: "pvp",
+      pendingPlayer: 1,
+      pendingUnitId: "7",
+      seat2: "human",
+    });
+
+    expect(screen.queryByTestId("strategic-reserves-declare")).toBeNull();
+    expect(screen.queryByTestId("strategic-reserves-keep")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start Deployment" }));
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("strategic-reserves-declare")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    expect(screen.getByTestId("strategic-reserves-keep")).toBeTruthy();
+  });
+
+  it("siège piloté par le modèle : la question du bot n'est jamais offerte à l'humain", async () => {
+    // 20.01 : « you can select one or more friendly units » — c'est le camp interrogé qui décide.
+    // Le moteur refuse d'ailleurs cette route pour un siège non humain
+    // (`reserves_declaration_seat_is_not_human`) : les deux boutons ne pourraient que revenir en
+    // erreur.
+    await renderDeclaration({
+      mode: "pve",
+      pendingPlayer: 2,
+      pendingUnitId: "11",
+      seat2: "ai",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Start Deployment" }));
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("roster-row-select-11")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    expect(screen.queryByTestId("strategic-reserves-declare")).toBeNull();
+    expect(screen.queryByTestId("strategic-reserves-keep")).toBeNull();
+  });
+
+  it("siège humain sur la même escouade : la question EST posée", async () => {
+    // VERT VACANT du test précédent : sans ce cas, un panneau muet pour une tout autre raison
+    // rendrait l'absence verte pour rien. Même escouade, même camp, seul le siège change.
+    await renderDeclaration({
+      mode: "pvp",
+      pendingPlayer: 2,
+      pendingUnitId: "11",
+      seat2: "human",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Start Deployment" }));
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("strategic-reserves-declare")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
   });
 });

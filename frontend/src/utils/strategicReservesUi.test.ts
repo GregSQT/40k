@@ -36,6 +36,7 @@ describe("isReservesDeclarationPendingFor — 20.01", () => {
     phase: "deployment" as string | undefined,
     pending: PENDING_ON_7,
     deploymentStarted: true,
+    playerTypes: { "1": "human", "2": "ai" } as Record<string, "human" | "ai"> | undefined,
   };
 
   it("la question porte sur UNE escouade, celle que le moteur désigne", () => {
@@ -77,6 +78,35 @@ describe("isReservesDeclarationPendingFor — 20.01", () => {
     // VERT VACANT : la même question, déploiement démarré, est bien posée.
     expect(isReservesDeclarationPendingFor({ ...base, deploymentStarted: true, unitId: 7 })).toBe(
       true
+    );
+  });
+
+  it("la question d'un siège piloté par le modèle n'est jamais rendue au client", () => {
+    // 20.01 : « you can select one or more friendly units » — la liste d'un camp se décide depuis
+    // son siège. En PvE le moteur refuse la route humaine sur cette question
+    // (`reserves_declaration_seat_is_not_human`) : les deux boutons ne pourraient que revenir en
+    // erreur, et le temps d'un aller-retour d'état l'humain choisirait la liste de son adversaire.
+    const pendingOnBot: StrategicReservesPendingDeclaration = { player: 2, unitId: "11" };
+    expect(isReservesDeclarationPendingFor({ ...base, pending: pendingOnBot, unitId: 11 })).toBe(
+      false
+    );
+    // VERT VACANT : la MÊME question, sur un siège humain, est bien posée — l'absence ci-dessus
+    // vient du siège, pas de l'unité ni du joueur 2 en tant que numéro.
+    expect(
+      isReservesDeclarationPendingFor({
+        ...base,
+        pending: pendingOnBot,
+        unitId: 11,
+        playerTypes: { "1": "human", "2": "human" },
+      })
+    ).toBe(true);
+  });
+
+  it("aucun type de joueur connu : aucune question, jamais un siège déduit d'un numéro", () => {
+    // Même doctrine que `shouldWarnReservesLastRound` : le type de joueur vient du moteur. Sans
+    // lui, offrir la réponse reviendrait à parier que le siège interrogé est humain.
+    expect(isReservesDeclarationPendingFor({ ...base, playerTypes: undefined, unitId: 7 })).toBe(
+      false
     );
   });
 
