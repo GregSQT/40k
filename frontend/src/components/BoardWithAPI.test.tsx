@@ -453,6 +453,11 @@ function makeDeclarationState(o: {
     player_types: { "1": "human", "2": o.seat2 },
     units: [makeUnit(7, 1), makeUnit(11, 2)],
     units_cache: { "7": {}, "11": {} },
+    // `current_player` ET `current_deployer` : le moteur écrit TOUJOURS les deux ensemble pendant
+    // 20.01 (`move_seat_to_pending_reserves_declaration`), et un état qui n'en porterait qu'un
+    // n'existe dans aucune partie. Le poser seul rendait l'orchestration du tour IA inatteignable
+    // depuis ce fichier — elle lit `current_player` —, donc verte par-dessus n'importe quoi.
+    current_player: o.pendingPlayer,
     deployment_state: {
       current_deployer: o.pendingPlayer,
       deployable_units: { "1": ["7"], "2": ["11"] },
@@ -469,24 +474,43 @@ function makeDeclarationState(o: {
 }
 
 describe("BoardWithAPI — question 20.01 (Declare Battle Formations)", () => {
-  /** Rend une partie arrêtée sur la question 20.01, écran de préparation encore ouvert. */
+  /** Délai du `setTimeout` qui lance le tour IA dans BoardWithAPI, plus une marge. */
+  const AI_TURN_DELAY_MS = 1500;
+  const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /** Rend une partie arrêtée sur la question 20.01, écran de préparation encore ouvert.
+   *
+   *  Rend le compteur d'appels à `/api/game/ai-turn` : c'est le seul canal par lequel le bot peut
+   *  répondre à 20.01, donc la mesure directe de « le bot a-t-il joué ? ». */
   async function renderDeclaration(o: {
     mode: "pvp" | "pve";
     pendingPlayer: 1 | 2;
     pendingUnitId: string;
     seat2: "human" | "ai";
-  }) {
+  }): Promise<{ aiTurnCalls: () => number }> {
     if (o.mode === "pve") {
       localStorage.setItem("w40k_auth_session_v2", FAKE_SESSION_PVE);
       window.history.replaceState({}, "", "/game?mode=pve");
     }
+    let aiTurnCalls = 0;
     server.use(
       http.post("/api/game/start", () =>
         HttpResponse.json({
           success: true,
           game_state: makeDeclarationState(o),
         })
-      )
+      ),
+      http.post("/api/game/ai-turn", () => {
+        aiTurnCalls += 1;
+        // `ai_turn_skipped` arrête la boucle d'activation du hook après UN appel : ce fichier
+        // compte les départs de tour IA, il ne rejoue pas une phase de déploiement.
+        return HttpResponse.json({
+          success: true,
+          result: { action: "ai_turn_skipped", reason: "test" },
+          game_state: makeDeclarationState(o),
+          action_logs: [],
+        });
+      })
     );
     renderBoard(o.mode === "pve" ? "/game?mode=pve" : "/");
     // Point d'ancrage : la LIGNE de l'escouade interrogée est montée. Sans elle, toute assertion
@@ -498,6 +522,7 @@ describe("BoardWithAPI — question 20.01 (Declare Battle Formations)", () => {
       },
       { timeout: 5000 }
     );
+    return { aiTurnCalls: () => aiTurnCalls };
   }
 
   it("écran de préparation : la question n'est pas posée, elle l'est au démarrage", async () => {
@@ -568,6 +593,34 @@ describe("BoardWithAPI — question 20.01 (Declare Battle Formations)", () => {
       { timeout: 5000 }
     );
   });
+
+  it("écran de préparation, siège du bot : aucun tour IA ne part avant Start Deployment", async () => {
+    // Le siège suit la question 20.01 dès le reset : `current_player` vaut 2 avant même que
+    // l'humain ait démarré, dès que la première question due est celle du bot (file amputée des
+    // unités du joueur 1 inéligibles). Sans garde, le bot répond à 20.01 pendant que l'écran de
+    // préparation est encore affiché — le moteur refuse alors `change_roster`
+    // (`change_roster_locked_after_reserves_declaration`) sur le SEUL écran où l'humain peut
+    // encore choisir son armée.
+    const { aiTurnCalls } = await renderDeclaration({
+      mode: "pve",
+      pendingPlayer: 2,
+      pendingUnitId: "11",
+      seat2: "ai",
+    });
+
+    await wait(AI_TURN_DELAY_MS + 500);
+    expect(aiTurnCalls()).toBe(0);
+
+    // VERT VACANT : le MÊME état, écran fermé, doit faire partir le tour IA. Sans ce second
+    // temps, un tour IA cassé pour toute autre raison rendrait l'assertion ci-dessus verte.
+    fireEvent.click(screen.getByRole("button", { name: "Start Deployment" }));
+    await waitFor(
+      () => {
+        expect(aiTurnCalls()).toBeGreaterThan(0);
+      },
+      { timeout: 5000 }
+    );
+  }, 15000);
 });
 
 // ---------------------------------------------------------------------------

@@ -175,10 +175,30 @@ que le déployeur d'avant le remplacement est restauré tel quel.
 **Aucune clé de save nouvelle**, donc aucun bump de format : seuls `current_deployer` et
 `current_player` — déjà sauvegardés — changent de valeur.
 
-Verrous : `tests/unit/engine/test_reserves_declaration_step_2001.py` (3 tests ajoutés, chaque
-défaut réintroduit et constaté rouge), `frontend/src/utils/strategicReservesUi.test.ts` (siège du
-camp interrogé) et `frontend/src/components/BoardWithAPI.test.tsx` (le CÂBLAGE du composant, que le
-prédicat seul ne prouvait pas).
+**Complément du 2026-09-10, même chantier.** Une seule des deux routes de réponse déplaçait le
+siège : `apply_reserves_declaration_decision` (siège du modèle) fermait l'étape sans le faire
+suivre. Mesuré sur le chemin de l'API — le modèle répond à la question du joueur 2, le siège RESTE
+à 2, le client relance un tour IA, le garde `current_player == 2` d'`execute_ai_turn` (lu AVANT le
+build de masque) passe, et c'est ce build qui arme la question du JOUEUR 1 pour le modèle :
+l'unité 2 du joueur 1 partait en réserves sur décision du bot. Les deux routes passent désormais
+par un écrivain unique, `resolve_reserves_declaration_answer` — file amputée, mise en réserves,
+siège de la question suivante.
+
+Côté client, ce même recalage peut poser `current_player = 2` dès le reset alors que l'écran de
+préparation est encore ouvert (première question due appartenant au bot, file amputée des unités
+inéligibles du joueur 1). L'orchestration du tour IA de `BoardWithAPI` n'était gardée par aucun
+`deploymentStarted` : le bot répondait à 20.01 avant « Start Deployment », et `change_roster`
+était ensuite refusé sur le seul écran où l'humain peut encore choisir son armée. Le déclencheur
+lit maintenant `isPopupVisible`, miroir du filtre humain `isReservesDeclarationPendingFor`. Le
+départ différé du tour IA est de plus annulé au démontage du composant — sans quoi le timer
+survivait à la sortie de partie et lançait un tour sur un composant mort.
+
+Verrous : `tests/unit/engine/test_reserves_declaration_step_2001.py` (4 tests ajoutés, chaque
+défaut réintroduit et constaté rouge ; celui de la route modèle passe par `_process_squad_action`,
+le chemin de l'API — le step gym reconstruit le masque et masquerait le défaut),
+`frontend/src/utils/strategicReservesUi.test.ts` (siège du camp interrogé) et
+`frontend/src/components/BoardWithAPI.test.tsx` (le CÂBLAGE du composant, que le prédicat seul ne
+prouvait pas : aucun `POST /api/game/ai-turn` avant « Start Deployment », un après).
 
 ---
 
