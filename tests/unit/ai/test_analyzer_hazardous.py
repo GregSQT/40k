@@ -630,3 +630,38 @@ def test_hazardous_count_tag_incrémente_mortal_wounds(tmp_path, monkeypatch):
     )
     assert stats["hazardous_mortal_wounds"][2] == 0
 
+
+# ── FNP partiels — HAZARDOUS et DESPERATE ESCAPE ─────────────────────────────
+# Unit 1 (HP_MAX=3) subit 3 BM mais sauve 2 via FNP → 1 BM nette → survit.
+# ROUGE sans le fix : l'analyzer appliquait le total pré-FNP (3) → mort fausse.
+_HAZARDOUS_3MW_FNP2 = (
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1(20,20) SUFFERS 3 Mortal Wounds [HAZARDOUS] "
+    "[FNP:2] [ALLOC_MODEL: 1_m0] [R:+0.0] [SUCCESS]\n"
+)
+_DESPERATE_ESCAPE_3MW_FNP2 = (
+    "[10:00:02] E1 T1 P1 MOVE : Unit 1(20,20) SUFFERS 3 Mortal Wounds [DESPERATE ESCAPE] "
+    "[FNP:2] [ALLOC_MODEL: 1_m0] [R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_fnp_partiel_hazardous_soustrait_des_blessures(tmp_path, monkeypatch):
+    """ROUGE sans le fix : 3 BM totales appliquées → Unit 1 (HP=3) mourait.
+    VERT avec le fix : [FNP:2] soustrait 2 → 1 BM nette → Unit 1 survit."""
+    stats = _parse(tmp_path, monkeypatch, _HAZARDOUS_3MW_FNP2, weapons_cache={})
+    assert not stats["parse_errors"], f"aucune erreur attendue, got {stats['parse_errors']}"
+    deaths = stats["current_episode_deaths"]
+    assert not any(d[1] == "1" for d in deaths), (
+        f"Unit 1 (HP=3) doit survivre à 1 BM nette (3−2 FNP), got deaths={deaths}"
+    )
+
+
+def test_fnp_partiel_desperate_escape_soustrait_des_blessures(tmp_path, monkeypatch):
+    """ROUGE sans le fix : 3 BM totales appliquées → Unit 1 (HP=3) mourait.
+    VERT avec le fix : [FNP:2] soustrait 2 → 1 BM nette → Unit 1 survit."""
+    stats = _parse(tmp_path, monkeypatch, _DESPERATE_ESCAPE_3MW_FNP2, weapons_cache={})
+    assert not stats["parse_errors"], f"aucune erreur attendue, got {stats['parse_errors']}"
+    deaths = stats["current_episode_deaths"]
+    assert not any(d[1] == "1" for d in deaths), (
+        f"Unit 1 (HP=3) doit survivre à 1 BM nette (3−2 FNP), got deaths={deaths}"
+    )
+
