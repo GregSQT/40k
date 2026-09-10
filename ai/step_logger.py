@@ -582,9 +582,11 @@ class StepLogger:
         journalisation.
         """
         # LOG TEMPORAIRE: Log when log_action is called for move actions (only if --debug)
-        import time
-        call_id = f"{time.time():.6f}_{id(self)}_{self.action_count}"
-        if self.debug_mode and action_type == "move" and action_details:
+        # Correle les deux lignes debug.log d'un meme appel (CALLED / AFTER WRITE) : calcule
+        # AVANT l'increment de `action_count` pour que les deux portent le meme identifiant.
+        _debug_move = self.debug_mode and action_type == "move"
+        call_id = f"{time.time():.6f}_{id(self)}_{self.action_count}" if _debug_move else ""
+        if _debug_move and action_details:
             try:
                 with open("debug.log", "a") as f:
                     f.write(f"[STEP_LOGGER log_action CALLED] ID={call_id} Unit {unit_id}: enabled={self.enabled} unit_with_coords={action_details.get('unit_with_coords')} end_pos={action_details.get('end_pos')} col={action_details.get('col')} row={action_details.get('row')}\n")
@@ -671,7 +673,7 @@ class StepLogger:
             self._flush_buffer()
             
         # LOG TEMPORAIRE: Log what was actually written to step.log (only if --debug)
-        if self.debug_mode and action_type == "move":
+        if _debug_move:
             try:
                 with open("debug.log", "a") as f_debug:
                     f_debug.write(f"[STEP_LOGGER AFTER WRITE] ID={call_id} Unit {unit_id}: log_line written={log_line.strip()}\n")
@@ -1363,24 +1365,6 @@ class StepLogger:
                 f"Unit {tgt_id}({tgt_col},{tgt_row}) SUFFERS {x_wounds} MW [DEADLY DEMISE]"
             )
 
-        elif action_type == "shoot_summary":
-            # Summary of multi-shot sequence
-            if "target_id" not in details:
-                raise KeyError("Shoot summary missing required target_id")
-            if "total_shots" not in details or "total_damage" not in details:
-                raise KeyError("Shoot summary missing required total_shots or total_damage")
-                
-            target_id = details["target_id"]
-            total_shots = details["total_shots"]
-            total_damage = details["total_damage"]
-            hits = details.get("hits")
-            wounds = details.get("wounds")
-            failed_saves = details.get("failed_saves")
-            
-            target_coords = details.get("target_coords")
-            target_coords_str = f"({target_coords[0]},{target_coords[1]})" if target_coords else ""
-            return f"Unit {unit_id}{unit_coords} SHOOTING COMPLETE at Unit {target_id}{target_coords_str} - {total_shots} shots, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
-            
         elif action_type == "charge" and details:
             if "target_id" in details:
                 target_id = details["target_id"]
@@ -1533,16 +1517,18 @@ class StepLogger:
             return base_msg
 
         elif action_type == "combat":
+            # JUMEAU EXACT du tir : meme contrat de cles, donc meme reaction a leur absence.
+            # Les deux replis qui vivaient ici (« FOUGHT (no target data) » et « (dice data
+            # incomplete) ») rendaient une ligne SANS `[FIGHT_SUBPHASE:]`, que le replay exige,
+            # et masquaient le bug du producteur — T1.
             if "target_id" not in details:
-                return f"Unit {unit_id}{unit_coords} FOUGHT (no target data)"
-            
-            target_id = details["target_id"]
-            
-            # Check if all required dice data is present - if not, return simple message
+                raise KeyError("Combat action missing required target_id")
             required_fields = ["hit_roll", "wound_roll", "save_roll", "damage_dealt", "hit_result", "wound_result", "save_result", "hit_target", "wound_target", "save_target"]
-            if not all(field in details for field in required_fields):
-                return f"Unit {unit_id}{unit_coords} FOUGHT Unit {target_id} (dice data incomplete)"
-            
+            for _field in required_fields:
+                if _field not in details:
+                    raise KeyError(f"Combat action missing required {_field}")
+
+            target_id = details["target_id"]
             # All dice data present - format detailed message
             hit_roll = details["hit_roll"]
             wound_roll = details["wound_roll"]
@@ -1715,22 +1701,6 @@ class StepLogger:
                 raise KeyError("Rule_choice action missing required selected_rule_name")
             return f"{unit_label} chose [{selected_rule_name.strip().upper()}]"
             
-        elif action_type == "combat_summary":
-            # Summary of multi-attack sequence
-            if "target_id" not in details:
-                raise KeyError("Combat summary missing required target_id")
-            if "total_attacks" not in details or "total_damage" not in details:
-                raise KeyError("Combat summary missing required total_attacks or total_damage")
-                
-            target_id = details["target_id"]
-            total_attacks = details["total_attacks"]
-            total_damage = details["total_damage"]
-            hits = details.get("hits")
-            wounds = details.get("wounds")
-            failed_saves = details.get("failed_saves")
-            
-            return f"Unit {unit_id}{unit_coords} COMBAT COMPLETE at Unit {target_id} - {total_attacks} attacks, {hits} hits, {wounds} wounds, {failed_saves} failed saves, {total_damage} total damage"
-            
         elif action_type in ("pile_in", "overrun_pile_in", "consolidation") and details:
             # Déplacements de la phase fight (12.02 pile-in / 12.06 overrun / 12.07 consolidation),
             # format miroir du move : « Unit X(c,r) PILED IN/OVERRUN PILED IN/CONSOLIDATED from
@@ -1799,7 +1769,17 @@ class StepLogger:
         # PERFORMANCE: Flush any remaining buffered logs before episode end
         self._flush_buffer()
 
-        duration_s = time.perf_counter() - getattr(self, '_episode_start_wall', time.perf_counter())
+        # Le defaut de `getattr` valait `time.perf_counter()`, EVALUE ICI : sans
+        # `log_episode_start`, la soustraction rendait Duration=0.000s — une duree fabriquee,
+        # indiscernable d'un episode instantane. L'en-tete d'episode manquant est un bug du
+        # producteur, pas un etat metier (T1).
+        _start_wall = getattr(self, '_episode_start_wall', None)
+        if _start_wall is None:
+            raise ConfigurationError(
+                "log_episode_end appele sans log_episode_start prealable : `_episode_start_wall` "
+                "absent, la duree de l'episode n'est pas mesurable."
+            )
+        duration_s = time.perf_counter() - _start_wall
         with open(self.output_file, 'a') as f:
             timestamp = time.strftime("%H:%M:%S", time.localtime())
             method_str = f", Method={win_method}" if win_method else ""

@@ -200,10 +200,13 @@ l'écriture directe de `rule_choice`) :
 | `wait` | `Unit N(c,r) WAIT` | — |
 | `rule_choice` | `Unit N(c,r) chose [<NOM DE RÈGLE>]` | nom d'affichage |
 
-**Formateurs sans producteur** (code mort côté moteur) : `skip`, `shoot_summary`, `combat_summary`.
+**Formateurs sans producteur** (code mort côté moteur) : `skip`.
 Conséquence directe : le contrôle §2.1 « Dead unit skipping » et tout `handle_skip`
 (`shoot_handler.py`) sont inatteignables. Vérifié le 2026-08-10 sur
 `w40k_core._STEP_LOG_TYPE_MAP` (`:5211-5238`) : `skip` n'y figure pas.
+`shoot_summary` et `combat_summary` étaient dans cette liste : leurs branches ont été
+supprimées le 2026-09-10 (aucun producteur ni consommateur dans le dépôt), et ces deux
+types tombent désormais dans le `else` qui lève `Unknown action_type`.
 
 **Deux rectifications de format (2026-08-10), toutes deux prouvées par un commit du moteur :**
 
