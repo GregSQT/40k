@@ -7840,7 +7840,18 @@ def squad_declare_shoot(
         # cible : compter deux profils du meme combi comme deux armes y fausserait le comptage.
         # Un groupe combi HETEROGENE en [CLOSE-QUARTERS] rendrait les deux ordres fautifs (le
         # groupage pourrait retenir le profil qui perd ensuite l arbitrage de famille) ; aucun
-        # n existe — mesure du 2026-09-07 : 14 groupes combi, 0 heterogene, 0 en melee.
+        # n existe — re-mesure du 2026-09-10 sur les 6 armureries (231 armes) : 14 groupes
+        # combi a >= 2 profils, 0 heterogene en [CLOSE-QUARTERS], 0 en melee.
+        # PORTEE DE CETTE MESURE : [CLOSE-QUARTERS] SEUL, et non toutes les regles qui gatent
+        # l eligibilite. `_shoot_engagement_blocks_target` est appele avec [CLOSE-QUARTERS] ET
+        # [BLAST], et [BLAST] est HETEROGENE sur 2 des 14 groupes (meme re-mesure du
+        # 2026-09-10) : `ballistus_missile_launcher` et `cyclone_missile_launcher`, dont le
+        # profil Frag porte [BLAST] la ou le Krak ne le porte pas. Les deux profils d un combi
+        # ne sont donc PAS toujours egalement eligibles : contre une cible engagee, le Frag est
+        # refuse la ou le Krak passe. Sans effet sur le groupage ci-dessous, qui ne voit que
+        # `usable` — deja filtre arme par arme et cible par cible par ce meme gate, donc un
+        # profil [BLAST] refuse n y entre jamais — mais toute regle ajoutee a ce gate devra
+        # etre re-mesuree pour elle-meme, l homogeneite [CLOSE-QUARTERS] ne la couvrant pas.
         usable = _pick_one_profile_per_weapon_group(weapons, usable, _profile_score)
 
         # 24.07 (SIDEARMS, PDF 04) : hors MONSTER/VEHICLE, une figurine choisit SOIT ses armes
