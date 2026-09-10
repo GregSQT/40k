@@ -277,8 +277,13 @@ class _FakeSnapshotLogger:
         self.snapshots: List[Dict[str, Any]] = []
 
     def log_objective_control_snapshot(
-        self, turn, objectives, controllers, victory_points, command_points, **kwargs
+        self, turn, objectives, controllers, victory_points, command_points,
+        control_method=None, oc_sums=None,
     ) -> None:
+        # `control_method` / `oc_sums` NOMMES et non avales par `**kwargs` : ce sont les deux
+        # champs de la ligne L18 (14.02/14.03), et un double qui les jette laisse leur calcul
+        # sans aucun lecteur — c'est ce qui a permis a l'instantane d'exiger `models_cache`
+        # sans qu'un test dise ce qu'il en fait.
         self.snapshots.append(
             {
                 "turn": turn,
@@ -286,6 +291,8 @@ class _FakeSnapshotLogger:
                 "controllers": dict(controllers),
                 "victory_points": dict(victory_points),
                 "command_points": dict(command_points),
+                "control_method": control_method,
+                "oc_sums": oc_sums,
             }
         )
 
@@ -304,12 +311,74 @@ def _snapshot_engine(
         # 08.02 : les CP entrent dans l'instantané ET dans sa clé de déduplication.
         "command_points": dict(cp) if cp is not None else {1: 0, 2: 0},
         "turn": 2,
+        # Aucune figurine sur la table : les deux caches sont VIDES, pas absents. Depuis que
+        # l'instantané porte l'OC par objectif (14.02/14.03), il passe par
+        # `objective_control_contributions`, qui lit `models_cache` en `require_key` — l'OC est
+        # une caractéristique PAR FIGURINE, et un cache manquant y est un état corrompu, pas une
+        # partie sans figurine. Un `game_state` de production porte toujours les deux ; les
+        # omettre ici faisait lever la garde avant l'assertion, et le test mesurait la garde au
+        # lieu de la déduplication qu'il annonce.
         "units_cache": {},
+        "models_cache": {},
         "units": [],
     }
     eng.step_logger = logger
     return eng
 
+
+def _snapshot_engine_with_two_models(logger: Any) -> W40KEngine:
+    """Meme instantane, mais avec DEUX figurines dans la zone de l'objectif.
+
+    Contrat de fixture repris de `objective_control_contributions` : l'OC est une caracteristique
+    PAR FIGURINE (02.02), lue dans `models_cache`, et l'appartenance a la zone se juge sur
+    l'empreinte de socle (14.02) — d'ou `BASE_SHAPE` / `BASE_SIZE`. `battle_shocked` annule l'OC
+    de toute l'escouade (01.07), donc il doit etre pose meme a False.
+    """
+    eng = object.__new__(W40KEngine)
+    eng.game_state = {
+        "objectives": [{"id": 1, "name": "Alpha", "hexes": [[5, 5]]}],
+        "objective_controllers": {"1": 1},
+        "victory_points": {1: 3, 2: 0},
+        "command_points": {1: 0, 2: 0},
+        "turn": 2,
+        "units": [
+            {"id": "1", "player": 1, "OC": 4, "battle_shocked": False, "UNIT_RULES": []},
+            {"id": "101", "player": 2, "OC": 2, "battle_shocked": False, "UNIT_RULES": []},
+        ],
+        "units_cache": {
+            "1": {"player": 1, "col": 5, "row": 5, "orientation": 0},
+            "101": {"player": 2, "col": 5, "row": 5, "orientation": 0},
+        },
+        "models_cache": {
+            "1#0": {"col": 5, "row": 5, "HP_CUR": 6, "BASE_SHAPE": "round", "BASE_SIZE": 1,
+                    "OC": 4},
+            "101#0": {"col": 5, "row": 5, "HP_CUR": 6, "BASE_SHAPE": "round", "BASE_SIZE": 1,
+                      "OC": 2},
+        },
+        "squad_models": {"1": ["1#0"], "101": ["101#0"]},
+    }
+    eng.step_logger = logger
+    return eng
+
+
+def test_objective_snapshot_carries_the_oc_it_computed():
+    """La ligne L18 transporte l'OC PAR OBJECTIF, et il vient du calcul moteur (14.02).
+
+    Ce champ etait le seul motif pour lequel l'instantane lit `models_cache` — et aucun test ne
+    le regardait : le double du logger l'avalait dans `**kwargs`. Deux figurines de camps opposes
+    sur la case de l'objectif : la somme attendue est (4, 2), donc ni un zero de complaisance ni
+    l'OC d'escouade (`unit["OC"]`, que le controle ne lit plus).
+    """
+    logger = _FakeSnapshotLogger()
+    eng = _snapshot_engine_with_two_models(logger)
+
+    eng._log_objective_control_snapshot_if_changed()
+
+    assert len(logger.snapshots) == 1
+    assert logger.snapshots[0]["oc_sums"] == [(4, 2)], (
+        "l'OC journalise n'est pas celui que `sum_objective_control_oc_multi` calcule : "
+        f"{logger.snapshots[0]['oc_sums']}"
+    )
 
 def test_objective_snapshot_noop_without_logger():
     eng = _snapshot_engine(None, {"1": 1}, {1: 0, 2: 0})
