@@ -32,7 +32,7 @@ Les chiffres volatils (obs_size, tailles d'espaces d'action, valeurs de reward) 
 
 - `col`/`row` : position de l'ancre.
 - `HP_CUR` : somme des HP des figurines vivantes, maintenue par `destroy_model` / `update_model_hp`.
-- `OC_TOTAL` : somme des OC des figurines vivantes, **miroir** de `squad_cache["oc_total"]` (PR1 1d) — recalculé par `_recompute_squad_cache` ; l'observation et la logique d'objectifs le lisent ici.
+- `OC_TOTAL` : somme des OC des figurines vivantes, **miroir** de `squad_cache["oc_total"]` (PR1 1d) — recalculé par `_recompute_squad_cache` ; lu par l'observation (colonne `oc_total`) et par le tri de menace `_enemy_threat_order`. ⚠️ **Pas** par le contrôle d'objectif 14.02 : `def objective_control_contributions` relit l'OC sur `models_cache[mid]["OC"]` figurine par figurine, parce qu'il ne compte que les figurines DANS la zone et applique en plus `oc_bonus` (unité) et le battle-shock (01.07), qu'`OC_TOTAL` ignore.
 - `occupied_hexes` : union des **empreintes** (footprints de socles) de toutes les figurines vivantes — recalculée par `_recompute_squad_occupied_hexes`.
 - `occupied_hexes_by_model` : dict `{model_id: (col, row)}` — source de vérité par-modèle consommée par le frontend (PR4 4e-i), synchronisée à chaque mutation de position.
 - `level_by_model`, `floor_height_by_model`, `MODEL_HEIGHT` : verticalité par figurine (engagement 3D §03.04).

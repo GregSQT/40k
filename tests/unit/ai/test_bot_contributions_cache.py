@@ -43,7 +43,9 @@ def _state(
         model_id = f"{squad_id}#0"
         squad_models[squad_id] = [model_id]
         models_cache[model_id] = {
-            "col": col, "row": row, "HP_CUR": 6, "BASE_SHAPE": "round", "BASE_SIZE": 1,
+            # OC PAR FIGURINE (02.02) : c'est la caractéristique que 14.02 additionne.
+            "col": col, "row": row, "HP_CUR": 6, "OC": oc,
+            "BASE_SHAPE": "round", "BASE_SIZE": 1,
         }
     return {
         "objectives": [

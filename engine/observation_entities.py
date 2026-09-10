@@ -227,8 +227,10 @@ UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     #   secure_objective_on_control               `game_state.apply_secure_objective_on_control`
     #                                             (14.03, fin de phase de commandement) — Boyz,
     #                                             Intercessor
-    #   oc_bonus                                  `game_state.unit_effective_oc`, source UNIQUE de
-    #                                             l'OC pour le contrôle (14.02) — Ancient
+    #   oc_bonus                                  `game_state.unit_oc_bonus`, ajouté à l'OC de
+    #                                             CHAQUE figurine par
+    #                                             `objective_control_contributions` (14.02)
+    #                                             — Ancient
     #
     # Restent DEHORS, sans `obs_id`, pour la même raison qu'avant : les capacités SOURCES
     # (`adaptable_predators`, `cunning_hunters`, `target_priority`, `targeted_intercession`,
