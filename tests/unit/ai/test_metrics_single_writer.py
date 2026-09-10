@@ -165,6 +165,35 @@ def test_le_win_rate_dentrainement_a_sa_jumelle_00_critical(tmp_path: Any) -> No
     )
 
 
+def test_la_reward_lissee_du_dashboard_critique_couvre_tous_les_episodes(tmp_path: Any) -> None:
+    """`00_critical/e_episode_reward_smooth` = moyenne glissante de TOUTES les rewards.
+
+    Contrairement a `d_win_rate`, cette courbe n'a AUCUNE jumelle dans un autre namespace :
+    `game_critical/episode_reward` porte la valeur BRUTE d'un episode, jamais son lissage. Son
+    retrait du 2026-09-08 avait donc supprime la mesure elle-meme, et pas seulement un nom.
+
+    CE QUE LE CAS DISCRIMINE, deux fois. L'episode sans vainqueur DOIT porter un point ici —
+    sa reward est acquise quelle que soit l'issue —, ce qui interdit de brancher cette emission
+    sous la garde `winner is not None` de sa voisine. Et les valeurs attendues separent la
+    moyenne de FENETRE de la moyenne cumulative : sur (10, 20, 30, 40), fenetre 3, le dernier
+    point vaut 30.0 et non 25.0.
+    """
+    tracker, recording = _tracker(tmp_path, window=3)
+    for reward, winner in ((10.0, 0), (20.0, 1), (30.0, None), (40.0, 1)):
+        tracker.log_episode_end({
+            "total_reward": reward, "episode_length": 100, "winner": winner,
+            "controlled_player": 1, "deployment_mode": None,
+        })
+
+    emis = [
+        (value, step) for key, value, step in recording.scalars
+        if key == "00_critical/e_episode_reward_smooth"
+    ]
+    assert emis == [(pytest.approx(20.0), 4), (pytest.approx(30.0), 5)], (
+        "un point des la fenetre pleine, sur CHAQUE episode — l'episode sans vainqueur compris"
+    )
+
+
 def test_each_perf_curve_is_doubled_by_a_reactive_window(tmp_path: Any) -> None:
     """Chaque courbe de performance sort en DEUX exemplaires : fenetre de fond et `_Nep`.
 
