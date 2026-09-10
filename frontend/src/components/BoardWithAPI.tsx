@@ -2091,6 +2091,7 @@ export const BoardWithAPI: React.FC = () => {
                       unitId: unit.id,
                       pending: reservesPendingDeclaration,
                       deploymentStarted: testDeploymentStarted,
+                      playerTypes: apiProps.gameState?.player_types,
                     });
                     return (
                       <UnitRosterRow
