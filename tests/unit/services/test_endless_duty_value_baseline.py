@@ -17,6 +17,9 @@ from engine.phase_handlers.shared_utils import build_units_cache, destroy_model
 from services.endless_duty_runtime import _replace_units_for_player
 from tests._state_invariants import turn_state_invariants, unit_invariants
 
+# Ce module ne parle pas à l'API : la fixture d'auth du conftest serait du travail jeté.
+from tests.unit.services._auth_neutre import authenticated_api_client  # noqa: F401
+
 _GAME_RULES = {
     "engagement_zone": 1,
     "engagement_zone_vertical": 5,

@@ -1,6 +1,9 @@
 """Tests for services/wsgi.py helpers."""
 import pytest
 
+# Ce module ne parle pas à l'API : la fixture d'auth du conftest serait du travail jeté.
+from tests.unit.services._auth_neutre import authenticated_api_client  # noqa: F401
+
 
 class TestResolveWaitressTrustedProxy:
     """_resolve_waitress_trusted_proxy reads W40K_TRUSTED_PROXIES for waitress."""

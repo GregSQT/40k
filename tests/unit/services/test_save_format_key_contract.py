@@ -47,12 +47,16 @@ en cours de partie — la row la réinjecterait avec une valeur périmée : bump
 STATIQUE faisait un troisième cas jusqu'au 2026-09-09 ; elle n'en fait plus un, `rebuild_game_state`
 laissant désormais le live gagner (tests/unit/services/test_game_snapshots_static_keys.py).
 
-Cet interdit était une CONSIGNE et il est désormais un CONTRÔLE : `_FROZEN_FINGERPRINTS` épingle
-le compte et l'empreinte de chaque entrée qui n'est plus la magic courante, et refuse donc qu'une
-réécriture d'entrée figée passe INAPERÇUE — la comparaison au reset, elle, ne lit que l'entrée
-courante et ne verra jamais rien de l'autre. C'est l'empreinte, et non la recopie du littéral, qui
-tient cet interdit : les formats qui n'ont rien bougé au premier niveau partagent l'objet du
-précédent, et éditer ce littéral partagé fait rougir toutes leurs empreintes d'un coup.
+UN SEUL LITTÉRAL, celui de la magic COURANTE (2026-09-10). Le fichier a porté jusqu'à cinq jeux
+de 131 clés, un par format, dont quatre strictement identiques : ils n'étaient lus par aucun
+contrôle qui ne fût pas lui-même chargé de les garder, et par aucun code de production. Les
+formats passés vivent désormais dans `_FORMAT_FINGERPRINTS` / `_FORMAT_SUBKEY_FINGERPRINTS`,
+une ligne (compte, empreinte) chacun. Ce registre est croyable parce que chaque ligne a été
+confrontée à son littéral tant que sa magic était courante — c'est
+`test_the_current_format_matches_its_recorded_fingerprint` — et parce qu'il est comparé à
+`_LEGACY_MAGICS`, la liste de PRODUCTION des formats refusés, par
+`test_every_legacy_magic_keeps_its_fingerprint`. Ce que le retrait coûte, dit franchement : le
+CONTENU d'un format ancien ne se lit plus dans le fichier, seul l'historique le rend.
 """
 
 from __future__ import annotations
@@ -63,8 +67,11 @@ from typing import Any, Dict, FrozenSet, Iterable, Tuple
 
 import pytest
 
-from services.game_saves import _MAGIC, SaveStore, _pack_record
+from services.game_saves import _LEGACY_MAGICS, _MAGIC, SaveStore, _pack_record
 from services.game_snapshots import _GS_STATIC_KEYS
+
+# Ce module ne parle pas à l'API : la fixture d'auth du conftest serait du travail jeté.
+from tests.unit.services._auth_neutre import authenticated_api_client  # noqa: F401
 
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -75,64 +82,33 @@ SCENARIO = os.path.join(
     PROJECT_ROOT, "config/agents/ArmageddonAgent_x1/scenarios/holdout_regular/scenario_bot-01.json"
 )
 
-#: Clés mutables publiées par le reset, PAR FORMAT DE SAVE. Une entrée décrit un format figé sur
-#: le disque des joueurs : elle ne s'élargit jamais après coup, on en ajoute une nouvelle.
-#: Un littéral par jeu de clés RÉELLEMENT distinct, les formats qui n'ont rien bougé au premier
-#: niveau étant des alias du précédent — la raison, qui est un verrou et non une économie, est
-#: écrite au-dessus de `_TL06_KEYS`.
-#: TL05 = TL04 + le couple de déclaration de montée 13.06 (`ascent_declaration_reset_state`,
-#: `engine/phase_handlers/movement_handlers.py`) et le mémo de charge, tous trois posés par le
-#: dict de reset de `W40KEngine.reset`.
+#: Clés mutables publiées par le reset pour la magic COURANTE, et elle seule. Les formats déjà
+#: écrits sur le disque des joueurs ne vivent plus ici en littéral : ils sont réduits à leur
+#: couple (nombre de clés, empreinte) dans `_FORMAT_FINGERPRINTS`. Jusqu'au 2026-09-10 le fichier
+#: portait un littéral par format — cinq jeux de 131 clés dont quatre strictement identiques —
+#: gardés par un contrôle qui ne servait qu'à empêcher leur réécriture. Ils n'étaient lus par
+#: RIEN d'autre : aucun code de production ne nomme la table (vérifié sur `services/`, `engine/`,
+#: `ai/` et `scripts/`), et le refus de `game_saves._reject_legacy` énumère ses clauses en prose
+#: littérale, sans jamais la consulter. L'empreinte garde ce que le littéral prouvait — qu'un
+#: format passé n'a pas bougé — pour une ligne au lieu de quarante.
+#:
+#: LE RITUEL DE BUMP tient en deux gestes, et `test_every_legacy_magic_keeps_its_fingerprint`
+#: rougit si le second manque : renommer le littéral ci-dessous à la nouvelle magic (en y ajoutant
+#: la clé qui a motivé le bump), et inscrire le couple SORTANT dans `_FORMAT_FINGERPRINTS` —
+#: `_fingerprint` et le compte se lisent sur le littéral avant de le renommer.
 #: ⚠️ LE PREMIER TL06 N'A JAMAIS EXISTÉ : la fermeture des intentions de zone (2026-09-09) a
 #: d'abord bumpé le format parce que cinq clés quittaient le reset, et le bump a été ANNULÉ le
-#: même jour — les cinq clés sont restées publiées, et elles sont toujours dans TL05 ci-dessus.
+#: même jour — les cinq clés sont restées publiées, et elles sont encore dans le littéral.
 #: La raison est dans `services/game_saves._MAGIC` : le refus protège d'un état AMPUTÉ, pas d'un
 #: état qui porte une clé de trop. Le TL06 du 2026-09-10 est un autre bump, motivé par un AJOUT
 #: (étape 20.01), et il a d'abord REPRIS le numéro annulé — un fichier écrit entre 20:58 et 22:40
 #: le 2026-09-09 porte pourtant bien cet en-tête sur un état sans les clés 20.01. C'est ce qui a
 #: coûté le bump suivant : TL07 brûle le numéro ambigu et TL06 part en legacy. UN NUMÉRO ÉMIS NE
 #: SE REPREND PAS, même annulé le jour même.
-_TL04_KEYS: FrozenSet[str] = frozenset({
-        '_best_weapon_cache', '_charge_declaration_current', '_charge_initial_rolls',
-        '_charge_plan_cache', '_deployment_scoring_cache', '_deployment_slot_candidates',
-        '_edge_distance_cache', '_entity_types_cache', '_grid_deployment_zone_anchor',
-        '_grid_static_hex_arrays', '_ingress_arrived', '_ingress_no_destination', '_ingress_offered',
-        '_objective_control_last_boundary', '_objective_hex_zones_cache', '_obs_objective_hex_arrays',
-        '_obs_weapon_profiles_cache', '_obscuring_area_sets_cache', '_pending_reserves_wasted',
-        '_pending_zone_shaping', '_pile_in_toCol', '_pile_in_toRow', '_reserves_deployed',
-        '_reserves_destroyed_turn3', '_reserves_placed', '_restored_model_counter',
-        '_shoot_pass_cache', '_socle_wall_blocked_cache', '_squad_move_pool_cache',
-        '_unit_move_version', '_wall_set_cache', '_zone_intent_declarations', 'action_log_seq',
-        'action_logs', 'active_movement_unit', 'active_rule_choice_prompt', 'advance_rolls',
-        'charge_activation_pool', 'charge_range_rolls', 'choice_timing_index',
-        'command_activation_pool', 'command_points', 'console_logs',
-        'controlled_objective_samples_scoring_turns', 'current_player', 'debug_mode',
-        'deployment_mode_schedule_mode', 'deployment_state', 'deployment_type',
-        'deployment_type_by_player', 'deployment_zone', 'destroyed_models',
-        'enemy_adjacent_counts_player_1', 'enemy_adjacent_counts_player_2',
-        'enemy_adjacent_hexes_player_1', 'enemy_adjacent_hexes_player_2', 'enemy_slot_mapping_p1',
-        'episode_number', 'episode_steps', 'fight_subphase', 'game_over', 'gym_distance_metric',
-        'gym_training_mode', 'last_move_cause', 'last_move_event_id', 'log_delta',
-        'macro_target_objective_id', 'macro_target_objective_index', 'model_count_at_start_by_player',
-        'models_cache', 'move_activation_pool', 'move_preview_footprint_span',
-        'moved_distance_by_model', 'oath_target', 'objective_controllers', 'occupation_map',
-        'opponent_objective_samples_scoring_turns', 'pending_agent_decision',
-        'pending_oath_selection', 'pending_rule_choice_queue', 'pending_shooting_phase_init',
-        'pending_squad_fight_intents', 'pending_squad_shoot_intents', 'phase', 'player_names',
-        'player_types', 'points_limit', 'preview_hexes', 'reaction_window_active',
-        'reactive_decision_mode', 'reactive_decision_payload', 'reactive_macro_order_current_window',
-        'reactive_mode', 'secured_objectives', 'shoot_activation_pool', 'squad_cache', 'squad_models',
-        'suppressed_squads', 'training_config_name', 'turn', 'turn_limit_reached',
-        'unit_activation_count', 'unit_by_id', 'unit_zone_assignments', 'units', 'units_advanced',
-        'units_cache', 'units_cache_prev', 'units_cannot_charge', 'units_charged', 'units_fled',
-        'units_fly_declaration_resolved', 'units_fly_declaration_resolved_charge', 'units_moved',
-        'units_reacted_this_enemy_turn', 'units_shot', 'units_shot_previous_turn',
-        'units_took_to_skies', 'units_took_to_skies_charge', 'unlimited_turns',
-        'valid_move_destinations_pool', 'value_at_start', 'victory_points', 'waaagh_active',
-        'waaagh_called', 'winner', 'zone_intent_free_steps_remaining', 'zone_intents',
-})
-
-_TL05_KEYS: FrozenSet[str] = frozenset({
+#: TL08 = TL07 à la clé de PREMIER niveau près : le bump vient d'une sous-clé de
+#: `deployment_state` (`reserves_declaration_started`), donc de la table du second niveau — d'où
+#: deux formats de suite au même compte (131) et à la même empreinte, fait mesuré et non doublon.
+_TL08_KEYS: FrozenSet[str] = frozenset({
         '_best_weapon_cache', '_charge_declaration_current', '_charge_engage_memo',
         '_charge_initial_rolls', '_charge_plan_cache', '_deployment_scoring_cache',
         '_deployment_slot_candidates', '_edge_distance_cache', '_entity_types_cache',
@@ -174,32 +150,10 @@ _TL05_KEYS: FrozenSet[str] = frozenset({
         'waaagh_called', 'winner', 'zone_intent_free_steps_remaining', 'zone_intents',
 })
 
-#: TL06, TL07 et TL08 = TL05 pour les clés de PREMIER NIVEAU, et c'est MESURÉ, pas supposé :
-#: `_FROZEN_FINGERPRINTS` donne la même paire (131 clés, `bc1d5f0c7f07dc36`) aux trois entrées
-#: figées. Les trois bumps sont motivés par des clés que cette table NE VOIT PAS — TL06 :
-#: `reserves_declaration_queue` et `reserves_declaration_closed`, posées par le reset DANS
-#: `deployment_state`, donc au deuxième niveau ; TL07 : un NUMÉRO ambigu à brûler (`W40KTL06` a
-#: désigné deux formats, cf. `game_saves._MAGIC`) ; TL08 : `reserves_declaration_started`, encore
-#: une sous-clé. C'est `MUTABLE_SUBKEYS_BY_MAGIC`, plus bas, qui couvre ce niveau-là.
-#:
-#: ALIAS, ET NON QUATRE LITTÉRAUX. La crainte écrite contre l'alias — « il ferait muter l'entrée
-#: figée en même temps que la courante au prochain ajout de clé » — ne tient pas : un `frozenset`
-#: ne mute pas, un ajout de clé s'écrit sous un nouveau nom avec sa magic
-#: (`_TL09_KEYS = _TL08_KEYS | {...}`), et quiconque éditerait le littéral PARTAGÉ ferait rougir
-#: TROIS empreintes figées d'un coup. Ce que l'alias NE FAIT PAS, et il ne faut pas le lui
-#: prêter : empêcher d'élargir l'entrée COURANTE sans bump — la seule que `_FROZEN_FINGERPRINTS`
-#: n'épingle pas, hier en éditant son littéral, aujourd'hui en écrivant `_TL05_KEYS | {...}`.
-#: C'est `test_reset_keys_match_the_current_save_format`, et le commentaire de tête, qui tiennent
-#: cet interdit-là.
-_TL06_KEYS: FrozenSet[str] = _TL05_KEYS
-_TL07_KEYS: FrozenSet[str] = _TL05_KEYS
-_TL08_KEYS: FrozenSet[str] = _TL05_KEYS
-
+#: La table reste indexée par la magic — c'est ce qui rend le premier geste du bump vérifiable :
+#: renommer le littéral sans re-tagger la clé laisserait `_MAGIC` sans entrée, et
+#: `test_the_current_magic_declares_its_key_set` rougit.
 MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
-    b"W40KTL04": _TL04_KEYS,
-    b"W40KTL05": _TL05_KEYS,
-    b"W40KTL06": _TL06_KEYS,
-    b"W40KTL07": _TL07_KEYS,
     b"W40KTL08": _TL08_KEYS,
 }
 
@@ -214,15 +168,20 @@ MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
 #: joueur, `candidates` par slot), qu'aucun chemin statique ne peut nommer. Les dicts à schéma
 #: plus profonds (`_deployment_scoring_cache[joueur]`) vivent eux aussi sous un niveau de donnée.
 #:
-#: Une entrée décrit un format figé sur le disque des joueurs : elle ne s'élargit jamais après
-#: coup, on en ajoute une nouvelle sous une nouvelle magic — comme pour le premier niveau.
-_TL06_SUBKEYS: Dict[str, FrozenSet[str]] = {
-    # Comptabilité MUTABLE de la phase de déploiement. Les deux dernières sont les clés 20.01
-    # (`deployment_handlers.RESERVES_DECLARATION_QUEUE_KEY` / `_CLOSED_KEY`) dont l'ajout a
-    # motivé le bump TL06 sans qu'aucun test ne rougisse.
+#: Une entrée décrit le format COURANT et lui seul, comme au premier niveau : elle ne s'élargit
+#: jamais après coup, on la renomme à la nouvelle magic en inscrivant le couple sortant dans
+#: `_FORMAT_SUBKEY_FINGERPRINTS`.
+#: TL08 = TL07 + `reserves_declaration_started` dans `deployment_state` : le marqueur « une
+#: réponse 20.01 a été donnée », lu par `_execute_change_roster_action` pour refuser le
+#: remplacement d'armée une fois l'étape commencée. Une row TL07 restitue `deployment_state` en
+#: bloc, donc sans lui, et ce lecteur lève.
+_TL08_SUBKEYS: Dict[str, FrozenSet[str]] = {
+    # Comptabilité MUTABLE de la phase de déploiement. Les trois dernières sont les clés 20.01
+    # (`deployment_handlers.RESERVES_DECLARATION_QUEUE_KEY` / `_CLOSED_KEY` / `_STARTED_KEY`).
     "deployment_state": frozenset({
         "current_deployer", "deployable_units", "deployed_units", "deployment_complete",
         "reserves_declaration_queue", "reserves_declaration_closed",
+        "reserves_declaration_started",
     }),
     "_deployment_slot_candidates": frozenset({"key", "candidates"}),
     "_grid_static_hex_arrays": frozenset({"walls", "objectives", "cover", "obscuring"}),
@@ -255,28 +214,7 @@ _TL06_SUBKEYS: Dict[str, FrozenSet[str]] = {
     "unit_zone_assignments": frozenset(),
 }
 
-#: TL07 = TL06 à la sous-clé près : le bump ne touche à aucun jeu de clés, il brûle un NUMÉRO
-#: ambigu (`game_saves._MAGIC`). L'égalité est MESURÉE et épinglée — `_FROZEN_SUBKEY_FINGERPRINTS`
-#: donne la même paire (24 dicts, `f5d15abb41f83555`) aux deux entrées —, donc alias : voir au
-#: premier niveau pourquoi l'alias verrouille plus qu'un second littéral.
-_TL07_SUBKEYS: Dict[str, FrozenSet[str]] = _TL06_SUBKEYS
-
-#: TL08 = TL07 + `reserves_declaration_started` dans `deployment_state` : le marqueur « une
-#: réponse 20.01 a été donnée », lu par `_execute_change_roster_action` pour refuser le
-#: remplacement d'armée une fois l'étape commencée. Une row TL07 restitue `deployment_state` en
-#: bloc, donc sans lui, et ce lecteur lève.
-#: LE DELTA EST CALCULÉ, pas recopié : la phrase ci-dessus était la seule trace de « une sous-clé
-#: de plus, dans ce parent-là », et rien ne rougissait le jour où elle devenait fausse. La
-#: sous-clé est écrite en LITTÉRAL et non prise sur la constante du moteur : ce fichier est un
-#: contrat de format, un renommage côté moteur doit y être ROUGE, pas suivi en silence.
-_TL08_SUBKEYS: Dict[str, FrozenSet[str]] = {
-    **_TL06_SUBKEYS,
-    "deployment_state": _TL06_SUBKEYS["deployment_state"] | {"reserves_declaration_started"},
-}
-
 MUTABLE_SUBKEYS_BY_MAGIC: Dict[bytes, Dict[str, FrozenSet[str]]] = {
-    b"W40KTL06": _TL06_SUBKEYS,
-    b"W40KTL07": _TL07_SUBKEYS,
     b"W40KTL08": _TL08_SUBKEYS,
 }
 
@@ -311,34 +249,43 @@ def _subkey_fingerprint(table: Dict[str, FrozenSet[str]]) -> str:
     return _fingerprint(f"{parent}\t{'|'.join(sorted(sub))}" for parent, sub in table.items())
 
 
-#: Empreinte des entrées FIGÉES ci-dessus — toutes sauf celle de la magic courante. Écrire TL05
-#: en littéral empêche qu'une clé déposée dans `_TL04_KEYS` remonte dans l'entrée courante,
-#: mais ne dit toujours RIEN de cette clé : l'entrée figée décrit un format déjà écrit sur le
-#: disque des joueurs, et rien ne la compare à quoi que ce soit — la réécrire reste muet.
-#: `test_reset_keys_match_the_current_save_format` ne peut pas le voir, il ne lit que l'entrée
-#: COURANTE ; d'où ce contrôle séparé. Valeurs RECALCULABLES et non tombées du ciel :
-#: `_fingerprint` est trois lignes plus haut et le compte se lit sur le littéral.
-_FROZEN_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
+#: REGISTRE DES FORMATS : une ligne par magic depuis TL04, la courante COMPRISE. C'est tout ce
+#: qui reste des formats passés, dont le littéral a été retiré le 2026-09-10 — il n'était lu par
+#: aucun contrôle qui ne fût pas lui-même chargé de le garder.
+#:
+#: Chaque ligne a été vérifiée CONTRE SON LITTÉRAL pendant que sa magic était courante
+#: (`test_the_current_format_matches_its_recorded_fingerprint`), et elle ne bouge plus ensuite :
+#: c'est ce qui la rend croyable une fois le littéral parti. Valeurs recalculables et non tombées
+#: du ciel : `_fingerprint` est juste au-dessus et le compte se lit sur le littéral.
+_FORMAT_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     b"W40KTL04": (128, "4f1bc5601c046cb5"),
     b"W40KTL05": (131, "bc1d5f0c7f07dc36"),
     # Même empreinte que TL05 : le bump TL06 portait sur deux clés du DEUXIÈME niveau, hors de
-    # portée de ce contrat — d'où l'alias, et non un littéral à corriger.
+    # portée de ce contrat. L'égalité est un fait mesuré, pas un copier-coller à corriger.
     b"W40KTL06": (131, "bc1d5f0c7f07dc36"),
     # Même empreinte encore : TL07 ne brûlait qu'un numéro d'en-tête, et TL08 vient d'une
-    # sous-clé. Deux bumps de suite sans mouvement au premier niveau — trois entrées, un objet.
+    # sous-clé. Deux bumps de suite sans mouvement au premier niveau — fait mesuré.
     b"W40KTL07": (131, "bc1d5f0c7f07dc36"),
+    #: COURANTE — vérifiée contre `_TL08_KEYS` à chaque exécution.
+    b"W40KTL08": (131, "bc1d5f0c7f07dc36"),
 }
 
-#: Même épingle pour la table de SOUS-CLÉS. Elle est née sous TL06 et le bump TL07 — qui brûle un
-#: numéro d'en-tête ambigu sans rien changer aux clés — en a fait un fait historique le jour
-#: même : `test_every_frozen_entry_is_pinned` rougit sur toute entrée figée sans empreinte, dans
-#: l'une comme dans l'autre table.
-_FROZEN_SUBKEY_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
+#: Même registre pour le SECOND niveau, né sous TL06 : les magics antérieures n'y figurent pas,
+#: le fichier n'a jamais relevé leurs sous-clés.
+_FORMAT_SUBKEY_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     b"W40KTL06": (24, "f5d15abb41f83555"),
-    # TL07 n'ajoutait aucune sous-clé (numéro brûlé), d'où l'égalité avec TL06 ; TL08 en ajoute
-    # une et sort donc de cette table, où elle entrera au bump suivant.
+    # TL07 n'ajoutait aucune sous-clé (numéro brûlé), d'où l'égalité avec TL06.
     b"W40KTL07": (24, "f5d15abb41f83555"),
+    #: COURANTE — vérifiée contre `_TL08_SUBKEYS` à chaque exécution ; `reserves_declaration_started`
+    #: est la sous-clé qui sépare cette empreinte de celle de TL07.
+    b"W40KTL08": (24, "982bf7cde624e5aa"),
 }
+
+#: Première magic relevée par chacun des deux registres. Avant elles, le fichier n'a jamais décrit
+#: le contenu d'un format : TL01 à TL03 sont refusées par `game_saves._reject_legacy` sans qu'on
+#: sache autrement que par l'historique ce qu'elles portaient.
+_PREMIERE_MAGIC_RELEVEE = b"W40KTL04"
+_PREMIERE_MAGIC_SOUS_CLES_RELEVEE = b"W40KTL06"
 
 #: Les neuf clés dont l'ajout n'a PAS été suivi d'un bump entre TL03 et TL04. Elles sont dans le
 #: périmètre du verrou : c'est ce qui prouve qu'il aurait attrapé la dérive au lieu de la subir.
@@ -392,52 +339,57 @@ def test_the_reset_really_publishes_mutable_keys(reset_mutable_keys: FrozenSet[s
     )
 
 
-def test_frozen_format_entries_are_untouched() -> None:
-    """Une entrée qui n'est plus la magic courante ne se réécrit pas — c'est un fait historique.
+def test_the_current_format_matches_its_recorded_fingerprint() -> None:
+    """Le littéral courant doit valoir son couple (compte, empreinte) au registre.
 
-    ROUGE dès qu'une clé est ajoutée, retirée ou renommée dans `_TL04_KEYS`. Rien d'autre ne le
-    voit : le verrou de format ne lit que l'entrée courante, donc ni TL04 ni TL05, écrites
-    en littéral, ne sont lues par un autre contrôle.
+    C'est ce contrôle qui rend le registre CROYABLE : chaque ligne a été confrontée à son
+    littéral tant que sa magic était courante, et c'est tout ce qui reste d'elle une fois le
+    littéral retiré au bump suivant. Sans lui, un format sortant emporterait une empreinte que
+    rien n'a jamais vérifiée, et le registre ne serait plus qu'une suite de chiffres.
+
+    ROUGE si le littéral change sans que le couple suive — y compris pour un ajout légitime, où
+    la marche à suivre est d'écrire ICI la nouvelle valeur, sciemment.
     """
-    assert _FROZEN_FINGERPRINTS, (
-        "VERT VACANT : aucune entrée épinglée, la boucle ci-dessous ne prouverait rien"
+    couple = _FORMAT_FINGERPRINTS[_MAGIC]
+    assert (len(_TL08_KEYS), _fingerprint(_TL08_KEYS)) == couple, (
+        f"le littéral de {_MAGIC.decode()} vaut {len(_TL08_KEYS)} clés / "
+        f"{_fingerprint(_TL08_KEYS)}, le registre dit {couple[0]} / {couple[1]}."
     )
-    for magic, (count, digest) in _FROZEN_FINGERPRINTS.items():
-        keys = MUTABLE_KEYS_BY_MAGIC[magic]
-        assert (len(keys), _fingerprint(keys)) == (count, digest), (
-            f"l'entrée {magic.decode()} de MUTABLE_KEYS_BY_MAGIC a changé "
-            f"({len(keys)} clés / {_fingerprint(keys)} contre {count} / {digest} épinglés). "
-            f"Elle décrit un format déjà écrit sur le disque des joueurs : elle ne se corrige "
-            f"pas, on ajoute une NOUVELLE entrée sous une nouvelle magic. Si la réécriture est "
-            f"malgré tout voulue, c'est l'empreinte qu'il faut changer ICI, sciemment."
-        )
-    for magic, (count, digest) in _FROZEN_SUBKEY_FINGERPRINTS.items():
-        table = MUTABLE_SUBKEYS_BY_MAGIC[magic]
-        assert (len(table), _subkey_fingerprint(table)) == (count, digest), (
-            f"l'entrée {magic.decode()} de MUTABLE_SUBKEYS_BY_MAGIC a changé "
-            f"({len(table)} dicts / {_subkey_fingerprint(table)} contre {count} / {digest} "
-            f"épinglés). Même règle qu'au premier niveau : une entrée figée décrit un format "
-            f"déjà écrit sur le disque des joueurs, on en ajoute une nouvelle."
-        )
+    couple = _FORMAT_SUBKEY_FINGERPRINTS[_MAGIC]
+    assert (len(_TL08_SUBKEYS), _subkey_fingerprint(_TL08_SUBKEYS)) == couple, (
+        f"la table de sous-clés de {_MAGIC.decode()} vaut {len(_TL08_SUBKEYS)} dicts / "
+        f"{_subkey_fingerprint(_TL08_SUBKEYS)}, le registre dit {couple[0]} / {couple[1]}."
+    )
 
 
-def test_every_frozen_entry_is_pinned() -> None:
-    """Toute entrée sauf la courante doit être épinglée — sinon le bump suivant laisse un trou.
+def test_every_legacy_magic_keeps_its_fingerprint() -> None:
+    """Un format qui cesse d'être courant laisse son empreinte au registre — sinon il disparaît.
 
-    Au prochain bump, TL06 deviendra un fait historique à son tour ; sans ce contrôle, elle
-    resterait librement réécrivable et le défaut ci-dessus se rouvrirait sous un autre nom.
+    C'est le SECOND geste du bump, et le seul que rien d'autre ne rattrape : le premier (renommer
+    le littéral à la nouvelle magic) fait rougir `test_the_current_magic_declares_its_key_set`,
+    celui-ci fait rougir l'oubli de la ligne SORTANTE. Depuis le retrait des littéraux passés
+    (2026-09-10), cette ligne est la seule trace de ce que portait un format déjà écrit.
+
+    Le registre est comparé à `_LEGACY_MAGICS`, la liste de PRODUCTION des formats refusés : les
+    deux ne peuvent pas diverger sans que ce test le dise.
     """
-    for nom, table, epingles in (
-        ("MUTABLE_KEYS_BY_MAGIC", set(MUTABLE_KEYS_BY_MAGIC), _FROZEN_FINGERPRINTS),
-        ("MUTABLE_SUBKEYS_BY_MAGIC", set(MUTABLE_SUBKEYS_BY_MAGIC), _FROZEN_SUBKEY_FINGERPRINTS),
+    for nom, registre, premiere in (
+        ("_FORMAT_FINGERPRINTS", _FORMAT_FINGERPRINTS, _PREMIERE_MAGIC_RELEVEE),
+        ("_FORMAT_SUBKEY_FINGERPRINTS", _FORMAT_SUBKEY_FINGERPRINTS, _PREMIERE_MAGIC_SOUS_CLES_RELEVEE),
     ):
-        figees = {m for m in table if m != _MAGIC}
-        manquantes = sorted(m.decode() for m in figees - set(epingles))
-        orphelines = sorted(m.decode() for m in set(epingles) - figees)
-        assert figees == set(epingles), (
-            f"{nom} — entrées figées sans empreinte : {manquantes} ; empreintes sans entrée "
-            f"figée : {orphelines}. Épingle une entrée dans le même geste que le bump qui la fige."
+        attendues = {m for m in _LEGACY_MAGICS if m >= premiere} | {_MAGIC}
+        assert len(attendues) > 1, (
+            f"VERT VACANT : {nom} n'aurait que la magic courante à couvrir, la comparaison "
+            f"ci-dessous ne prouverait rien"
         )
+        manquantes = sorted(m.decode() for m in attendues - set(registre))
+        orphelines = sorted(m.decode() for m in set(registre) - attendues)
+        assert set(registre) == attendues, (
+            f"{nom} — formats sans empreinte : {manquantes} ; empreintes sans format : "
+            f"{orphelines}. Inscris la ligne SORTANTE dans le même geste que le bump : son "
+            f"compte et son empreinte se lisent sur le littéral avant de le renommer."
+        )
+
 
 
 def test_the_current_magic_declares_its_key_set() -> None:
