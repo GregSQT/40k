@@ -412,8 +412,18 @@ class _SondeParFonction(ast.NodeVisitor):
         `applique = self._dispatch_agent_decision_action` puis `applique(action)` applique une
         décision sans son relevé et n'apparaît dans AUCUN `ast.Call` visant le symbole — mutation
         appliquée, la sonde par appel restait VERTE.
+
+        Le prédicat couvre AUSSI les fonctions d'écriture, et c'est le dernier chemin d'accès au
+        constructeur dédié : `from engine import action_log_utils` puis
+        `action_log_utils.append_agent_decision_log(gs, ...)` ne nomme aucun `Name` gardé et
+        n'importe aucun symbole gardé — mesuré sur la sonde d'avant, 0 relevé sur les cinq clés.
+
+        C'est le NOM DE L'ATTRIBUT qui est gardé, jamais le module qui le porte : interdire le
+        handle du seul `engine.action_log_utils` laisserait ouvert
+        `engine.w40k_core.append_agent_decision_log`, que le module réexporte (vérifié par import
+        réel : les deux références rendent le même objet fonction).
         """
-        if node.attr in _SYMBOLES_GARDES:
+        if node.attr in _SYMBOLES_GARDES or node.attr in _SITES_D_ECRITURE:
             self._releve(node.attr)
         self.generic_visit(node)
 
@@ -645,4 +655,113 @@ def test_le_constructeur_dedie_pose_exactement_les_clefs_attendues(tmp_path):
                                       "[Garder pour la mise en place] [DECLINED]")
     assert "models_segment" not in entree, (
         "le segment de socles est une propriete du TYPE : le poser ici en ferait un jumeau"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NON-CONTOURNEMENT — ce que la sonde statique ne peut PAS nommer, l'exécution le compte
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_une_entree_de_decision_ecrite_hors_encadrement_fait_lever_le_drainage(tmp_path):
+    """Le drainage confronte les entrées transférées aux décisions RÉELLEMENT résolues.
+
+    CE QUE CE TEST FERME, et qu'aucune sonde AST ne peut fermer : un accès dont le nom n'est
+    écrit nulle part — `getattr(module, "append_" + "agent_decision_log")` — ou un type posé par
+    affectation. Toutes ces formes finissent au MÊME endroit : une entrée de plus dans
+    `action_logs`, sans que l'encadrement ait résolu quoi que ce soit. L'entrée est BIEN formée,
+    donc invisible à tout contrôle de champs ; c'est le COMPTE qui la trahit, et il la trahit
+    avant que `ai/analyzer.py` ne compte un choix que l'agent n'a jamais joué.
+
+    L'entrée est écrite ici par le constructeur dédié, appelé hors de
+    `W40KEngine._handle_agent_decision_action` : exactement ce que ferait la branche pirate.
+    """
+    from engine.action_log_utils import append_agent_decision_log
+    from engine.macro_intents import CHOICE_SLOTS
+
+    eng = _engine(tmp_path)
+    eng.get_action_mask()
+    unit_id = require_pending_unit(eng)
+    append_agent_decision_log(
+        eng.game_state,
+        decision_type="reserves_declaration",
+        player=1,
+        unit_id=unit_id,
+        option_index=0,
+        option_label="Declarer en reserves",
+        declines=False,
+    )
+    with pytest.raises(ValueError, match="agent_decision"):
+        eng.step(int(CHOICE_SLOTS.start + 1))
+
+
+def test_le_compteur_de_decisions_ne_survit_pas_a_un_episode(tmp_path):
+    """Le compteur est purgé par `reset`, comme le curseur de drainage dont il est le jumeau.
+
+    `reset` fait `game_state.update()` : le dict SURVIT d'un épisode à l'autre, et c'est pour
+    cela que le curseur y est explicitement `pop`é. Le compteur est monté à la main ici, parce
+    qu'un épisode qui le laisse non nul suppose une décision résolue sans drainage — le cas PvE
+    hors StepLogger, qu'un test gym ne peut pas jouer. Ce qui est verrouillé est la conséquence :
+    `reset` vide `action_logs`, donc un compteur survivant ferait lever le PREMIER drainage de
+    l'épisode suivant, pour une divergence dont cet épisode n'est pas l'auteur.
+    """
+    from engine.w40k_core import W40KEngine
+
+    eng = _engine(tmp_path)
+    eng.game_state[W40KEngine.AGENT_DECISION_RESOLVED_KEY] = 3
+    eng.reset(seed=1)
+    assert W40KEngine.AGENT_DECISION_RESOLVED_KEY not in eng.game_state, (
+        "le compteur de decisions resolues survit a `reset` : le premier drainage de l'episode "
+        "suivant leverait sur une divergence heritee"
+    )
+    # Contre-épreuve : l'épisode suivant se déroule entièrement, donc le drainage ne lève pas.
+    assert _drive_deployment(eng, declare_first=True)
+
+
+def test_le_compte_tient_quand_une_fenetre_de_drainage_porte_plusieurs_decisions(tmp_path):
+    """Versant PERMISSIF de l'invariant : deux décisions dans la MÊME fenêtre ne lèvent pas.
+
+    ÉTAT MONTÉ À LA MAIN, et il le faut : mesuré sur un déploiement complet, l'histogramme des
+    entrées `agent_decision` par fenêtre de drainage vaut `{1: 6, 0: 9}` — jamais 2. Le chemin
+    gym résout UNE décision par step, et le seul producteur d'une rafale,
+    `W40KEngine._resolve_reactive_move_decision_for_ai_seats`, sort immédiatement sous
+    `gym_training_mode` — que branchent TOUS les chemins installant un StepLogger. Le cas ≥ 2 est
+    donc inatteignable en gym, et un test qui se contenterait d'un déroulé réel serait VERT
+    VACANT : il ne verrouillerait rien.
+
+    L'état est monté exactement comme l'encadrement le monte — une entrée et une décision comptée
+    par décision — parce que c'est la FORMULE qui est verrouillée ici. Sans ce test, revenir à
+    « une action égale une entrée » ne ferait rougir personne, et cette formule-là fait lever une
+    fenêtre réactive PvE parfaitement légitime.
+    """
+    from engine.action_log_utils import append_agent_decision_log
+    from engine.w40k_core import W40KEngine
+
+    eng = _engine(tmp_path)
+    eng.get_action_mask()
+    unit_id = require_pending_unit(eng)
+    assert eng.game_state.get(W40KEngine.AGENT_DECISION_RESOLVED_KEY, 0) == 0, (
+        "compteur deja non nul avant la mise en scene : ce test ne prouverait pas son cas"
+    )
+    for option_index in (0, 1):
+        append_agent_decision_log(
+            eng.game_state,
+            decision_type="reserves_declaration",
+            player=1,
+            unit_id=unit_id,
+            option_index=option_index,
+            option_label="Declarer en reserves" if option_index == 0 else "Garder",
+            declines=bool(option_index),
+        )
+    eng.game_state[W40KEngine.AGENT_DECISION_RESOLVED_KEY] = 2
+
+    eng._flush_squad_action_logs_to_step_logger(eng.game_state["turn"])
+
+    lignes = [row for row, _ in _decision_lines(eng)]
+    assert len(lignes) == 2, (
+        f"la fenetre devait transferer les DEUX entrees, step.log en porte {len(lignes)}"
+    )
+    assert eng.game_state[W40KEngine.AGENT_DECISION_RESOLVED_KEY] == 0, (
+        "le compteur n'est pas remis a zero par le drainage : la fenetre suivante compterait a "
+        "nouveau ces deux decisions et leverait a tort"
     )
