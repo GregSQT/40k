@@ -9,9 +9,16 @@ ORIGINE. Ce littéral vivait dans `scripts/smoke_t5_bare.py`, supprimé le 2026-
 volets exécutables étaient morts — le volet A cherchait `scenario_training_bot-01..03.json`
 dans une banque retirée en juillet, et le volet B construisait le moteur sur l'agent
 `CoreAgent`, dont la config a disparu le 2026-07-19 (`config_loader` lève dessus). Ce que le
-smoke prouvait — mêlée réelle, éligibilité de charge d'un socle ovale — est couvert par les
-tests qui importent ce scénario, et un test rejouable vaut mieux qu'un script à lancer à la
-main (T4). Seule la DONNÉE avait donc une valeur permanente, et elle vit ici.
+smoke prouvait est déjà porté par des tests rejouables, ce qui vaut mieux qu'un script à lancer
+à la main (T4) : `test_t5_bare_loop.py` est le portage pytest de ses deux volets (invariant R7
+`mask.any() or game_over`, terminaison, pertes de mêlée par FIGHT_CTX, sur trois graines), et
+R6 — l'éligibilité de charge d'un socle ovale — est verrouillé sur ses deux sites par
+`test_charge_oval_base_reverse_bfs.py`. Seule la DONNÉE avait donc une valeur permanente.
+
+⚠️ `test_t5_bare_loop.py` porte sa PROPRE copie de ce scénario (`_SCENARIO`, mêmes quatre
+unités aux mêmes positions, sans `uses_codex_detachment`). La duplication est antérieure à ce
+fichier — elle existait entre le smoke et ce test — et n'est pas résorbée ici : fusionner
+changerait l'entrée d'un test d'invariant sans nécessité causale.
 """
 
 from __future__ import annotations

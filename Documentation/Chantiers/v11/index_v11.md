@@ -2605,7 +2605,9 @@ et ces gabarits sont **matérialisés en fichiers réels**
 ([:930-954](../../../scripts/roster_matchup_stats.py), plus un second site
 [:416-424](../../../scripts/roster_matchup_stats.py)). `objectives_ref` est une clé que le
 moteur **rejette** : elle figure dans `LEGACY_KEYS`
-([`scripts/migrate_scenario_bank_v11.py`](../../../scripts/migrate_scenario_bank_v11.py)).
+([`tests/unit/ai/test_scenario_bank_migration_v11.py`](../../../tests/unit/ai/test_scenario_bank_migration_v11.py)
+— le script de migration T4 qui portait l'original a été supprimé le 2026-09-10, sa liste vit
+désormais dans ce verrou de banque).
 Les **trois autres outils** de l'inventaire T4 sont propres — p. ex.
 [`scripts/build_holdout_benchmark.py`](../../../scripts/build_holdout_benchmark.py)
 émet bien `board_ref`/`terrain_ref`.
