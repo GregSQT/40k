@@ -465,6 +465,7 @@ def test_the_arming_bound_never_steals_a_legal_ascent(board_x1):
         squad_floor_level_map,
     )
     from engine.phase_handlers.shared_utils import get_squad_move_budget
+    from engine.spatial_grid import MAX_ADVANCE_ROLL_INCHES
 
     gates_fired = 0  # borne a dit OUI au moins une fois (test non-trivial)
     inspected = 0    # borne a dit NON → oracle vérifié
@@ -480,9 +481,11 @@ def test_the_arming_bound_never_steals_a_legal_ascent(board_x1):
                 squad_id, _cell_map = live
                 alive = [m for m in gs["squad_models"].get(squad_id, []) if m in gs["models_cache"]]
                 maps = {mid: squad_floor_level_map(gs, gs["models_cache"][mid]) for mid in alive}
-                # Budget Advance max (jet=6) : même référence que la borne depuis la correction
-                # F5 (section 3bis du masque tire le jet en section 4, trop tard pour la borne).
-                budget = get_squad_move_budget(str(squad_id), gs, "advance", advance_roll=6)
+                # Budget Advance max : la CONSTANTE que la borne emploie, pas un 6 recopié —
+                # sinon le jour où elle bouge, l'oracle valide l'ancienne borne en restant vert.
+                budget = get_squad_move_budget(
+                    str(squad_id), gs, "advance", advance_roll=MAX_ADVANCE_ROLL_INCHES
+                )
                 near = any(
                     calculate_hex_distance(
                         int(gs["models_cache"][mid]["col"]),

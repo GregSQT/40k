@@ -55,3 +55,6 @@ def test_un_nul_de_methode_hors_bareme_est_signale(tmp_path: Path) -> None:
     erreurs = [e for e in stats["parse_errors"] if "Method=step_limit" in e["error"]]
     assert len(erreurs) == 1, stats["parse_errors"]
     assert "EPISODE END" in erreurs[0]["line"]
+    # La ligne EPISODE END ne porte NI tour NI phase : les renseigner rendrait ceux de la ligne
+    # précédente, c'est-à-dire une localisation fausse dans le rapport.
+    assert (erreurs[0]["turn"], erreurs[0]["phase"]) == (None, None), erreurs[0]

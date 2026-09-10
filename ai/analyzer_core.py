@@ -88,12 +88,25 @@ ACTION_ABILITY_TOKENS = r'(?:\s+\[[^\]]+\])*'
 # figée, adjacences suivantes mesurées contre un fantôme. Le prochain token n'aura qu'un
 # endroit à toucher.
 @lru_cache(maxsize=None)
-def move_line_re(verb: str, *, with_positions: bool = True) -> "re.Pattern[str]":
+def move_line_re(
+    verb: str, *, with_positions: bool = True, with_unit_prefix: bool = True
+) -> "re.Pattern[str]":
     # `ACTION_ABILITY_TOKENS` et non une copie : ce site écrivait `?` (UN token au plus) là où la
     # grammaire d'attaque écrit `*`. Une ligne de move portant deux tokens (`[FLY] [WAAAGH!]` —
     # le second vient d'être ajouté) n'était donc aiguillée nulle part, en silence. Mémoïsé :
     # `analyzer_core.run` appelle ces constructeurs par LIGNE, sur ~90 000 lignes.
-    head = r'Unit (\d+)\((\d+),\s*(\d+)\)\s+' + verb + ACTION_ABILITY_TOKENS + r'\s+from'
+    #
+    # `with_unit_prefix=False` sert l'AIGUILLAGE, qui ne demande que « ce verbe introduit-il un
+    # `from` ? » et ne doit pas exiger le préfixe `Unit N(c,r)` avant de brancher la ligne. Il est
+    # ici et non dans un motif à part pour la raison qui vaut depuis le début sur ce constructeur :
+    # une deuxième écriture de la grammaire de move finit par diverger de celle-ci, et c'est
+    # exactement ce qui s'est produit — l'aiguillage a vécu avec `?` pendant que ce site passait
+    # à `*`.
+    head = verb + ACTION_ABILITY_TOKENS + r'\s+from'
+    if with_unit_prefix:
+        head = r'Unit (\d+)\((\d+),\s*(\d+)\)\s+' + head
+    else:
+        head = r'\b' + head
     if not with_positions:
         return re.compile(head)
     return re.compile(head + r'\s+\((\d+),\s*(\d+)\)\s+to\s+\((\d+),\s*(\d+)\)')
@@ -135,15 +148,17 @@ def attack_verb_present(action_desc: str, verbs: str = r"ATTACKED|FOUGHT") -> bo
 
 
 def move_verb_present(verb: str, action_desc: str) -> bool:
-    """Le verbe de mouvement `verb` introduit-il un `from` sur cette ligne ?
-    Aiguillage : même grammaire que `move_line_re`, sans les positions.
+    """Le verbe de mouvement `verb` introduit-il un `from` sur cette ligne ? (aiguillage)
 
-    `ACTION_ABILITY_TOKENS` et non une copie : ce site écrivait `?` (UN token au plus) là où
-    `move_line_re` écrit `*`. L'aiguillage et le raffinage lisaient donc deux grammaires
-    différentes, et une ligne de move portant deux tokens n'aurait été branchée nulle part —
-    en silence, exactement le défaut que l'unification du constructeur venait de fermer.
+    Dérivé du MÊME constructeur que le raffinage, comme `attack_verb_present` : ce site portait
+    une TROISIÈME écriture de la grammaire, avec `?` là où `move_line_re` écrit `*` — les deux
+    lecteurs d'une même ligne répondaient donc différemment dès le deuxième token. Passer par le
+    constructeur mémoïsé supprime aussi la reconstruction du motif à chaque ligne : `run` appelle
+    cet aiguillage jusqu'à deux fois par ligne, sur ~90 000 lignes.
     """
-    return re.search(r'\b' + verb + ACTION_ABILITY_TOKENS + r'\s+from', action_desc) is not None
+    return move_line_re(
+        verb, with_positions=False, with_unit_prefix=False
+    ).search(action_desc) is not None
 
 
 _STATE_UNIT_RE = re.compile(r'(\d+)\[([^\]]*)\]')
@@ -192,6 +207,29 @@ _EFFECTS_PLAYER_RE = re.compile(r'P(\d+)\s+([^|]*)')
 _RT_UNIT_ID_RE = re.compile(r'Unit\s+(\d+)')
 _HAZARDOUS_TAG_RE = re.compile(r'\[HAZARDOUS(?::\d+)?\]')
 _HAZARDOUS_SUFFERS_RE = re.compile(r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[HAZARDOUS(?::\d+)?\]')
+#: 24.12 Feel No Pain sur les blessures MORTELLES. Le journal porte le total BRUT ; le tag dit
+#: combien de blessures la sauvegarde a annulées. Attention, ce n'est PAS le même tag que celui
+#: des dégâts d'attaque (`[FNP:{saves}/{seuil}+ ×{tentatives}]`, `step_logger.py:280`), qui est
+#: purement informatif parce que `Dmg:` y est déjà net.
+_FNP_SAVED_RE = re.compile(r'\[FNP:(\d+)\]')
+
+
+def net_mortal_wounds(brut: int, action_desc: str) -> int:
+    """Blessures mortelles RÉELLEMENT subies : total du journal moins les sauvegardes FNP.
+
+    UN SEUL lecteur du tag pour les TROIS lignes qui le portent — `[HAZARDOUS]` (24.15),
+    `[DESPERATE ESCAPE]` (09.07) et les capacités de datasheet (06.02) — parce que les trois
+    l'avaient déjà écrit chacune de leur côté et que deux d'entre elles ont vécu sans la
+    soustraction : l'analyzer appliquait alors le total pré-FNP et tuait une unité que le moteur
+    avait laissée vivante, en silence. Le prochain tag de blessures mortelles n'aura qu'un
+    endroit à appeler.
+    """
+    if "[ALL FNP SAVED]" in action_desc:
+        return 0
+    saved = _FNP_SAVED_RE.search(action_desc)
+    if saved:
+        return max(0, brut - int(saved.group(1)))
+    return brut
 #: 06.02 par CAPACITÉ de datasheet. Le tag vient de `HAZARD_CONTEXT_TAGS`, table partagée avec
 #: l'émetteur : ajouter une capacité au moteur l'ajoute ici sans qu'on puisse l'oublier, et une
 #: ligne portant un tag que cette table ne connaît pas ne peut pas être prise pour une autre.
@@ -608,6 +646,26 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
         parse_target_models_segment,
         surviving_start_models,
     )
+
+    def _parse_error(message: str, *, situe: bool = True) -> None:
+        """Enregistre une ligne que l'analyzer ne sait pas lire.
+
+        UNE écriture de l'enveloppe pour les onze sites de cette fonction, qui la recopiaient
+        chacun : `episode` et `line` s'en déduisent toujours de la même façon, seule l'erreur
+        change — la forme d'un enregistrement devient modifiable en un point au lieu de onze
+        éditions dont aucune n'est vérifiée par un type. Même idiome que
+        `analyzer_phases/shoot_handler.py`, qui l'avait déjà adopté pour la même raison.
+
+        `situe=False` pour la ligne `EPISODE END`, qui ne porte NI tour NI phase : les lire
+        rendrait ceux de la ligne précédente, c'est-à-dire une localisation fausse.
+        """
+        stats['parse_errors'].append({
+            'episode': state.current_episode_num,
+            'turn': turn if situe else None,
+            'phase': phase if situe else None,
+            'line': line.strip(),
+            'error': message,
+        })
 
     with open(filepath, 'r', encoding='utf-8') as f:
         for line in f:
@@ -1053,14 +1111,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # une que ce barème ignore — `step_limit`, sur la troncature — et
                             # elle ne rejoint le journal qu'à la première fin d'épisode qui la
                             # portera. Le désaccord moteur/analyzer se voit au lieu de se ranger.
-                            stats['parse_errors'].append({
-                                'episode': state.current_episode_num,
-                                'turn': None,
-                                'phase': None,
-                                'line': line.strip(),
-                                'error': f"EPISODE END : Method={win_method} inconnu du barème de "
-                                         f"Winner={winner} — méthode de victoire non comptée",
-                            })
+                            _parse_error(
+                                f"EPISODE END : Method={win_method} inconnu du barème de "
+                                f"Winner={winner} — méthode de victoire non comptée",
+                                situe=False,
+                            )
                     else:
                         stats['episodes_without_method'].append({
                             'winner': winner,
@@ -1344,16 +1399,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     'episode': state.current_episode_num,
                                     'line': line.strip()
                                 }
-                            stats['parse_errors'].append({
-                                'episode': state.current_episode_num,
-                                'turn': turn,
-                                'phase': phase,
-                                'line': line.strip(),
-                                'error': (
-                                    f"Rule choice label '{chosen_rule_label}' is "
-                                    f"{'unknown' if len(display_rule_ids) == 0 else 'ambiguous'}"
-                                )
-                            })
+                            _parse_error(
+                                f"Rule choice label '{chosen_rule_label}' is "
+                                f"{'unknown' if len(display_rule_ids) == 0 else 'ambiguous'}"
+                            )
                         else:
                             selected_display_rule_id = next(iter(display_rule_ids))
                             selected_technical_rule_id = config.resolve_rule_id(
@@ -1373,16 +1422,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                         'episode': state.current_episode_num,
                                         'line': line.strip()
                                     }
-                                stats['parse_errors'].append({
-                                    'episode': state.current_episode_num,
-                                    'turn': turn,
-                                    'phase': phase,
-                                    'line': line.strip(),
-                                    'error': (
+                                _parse_error(
+                                    (
                                         f"Rule choice '{selected_technical_rule_id}' does not belong to "
                                         f"any choice source for unit type {chosen_unit_type}"
                                     )
-                                })
+                                )
                             else:
                                 if chosen_unit_id not in state.selected_choice_by_unit_source:
                                     state.selected_choice_by_unit_source[chosen_unit_id] = {}
@@ -1856,13 +1901,9 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         _position_cache_set(state.unit_positions, reactive_unit_id, from_col, from_row)
 
                     if reactive_unit_id not in state.unit_hp:
-                        stats['parse_errors'].append({
-                            'episode': state.current_episode_num,
-                            'turn': turn,
-                            'phase': phase,
-                            'line': line.strip(),
-                            'error': f"Reactive move for unknown unit_id (missing in state.unit_hp): {reactive_unit_id}"
-                        })
+                        _parse_error(
+                            f"Reactive move for unknown unit_id (missing in state.unit_hp): {reactive_unit_id}"
+                        )
                     else:
                         unit_hp_at_reactive = dict(state.unit_hp)
                         positions_at_reactive = dict(state.unit_positions)
@@ -1909,15 +1950,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 # d'une règle que rien n'avait jugée — une faute de move inventée
                                 # à chaque ligne réactive de grammaire incomplète. Le journal
                                 # illisible est signalé pour ce qu'il est.
-                                stats['parse_errors'].append({
-                                    'episode': state.current_episode_num,
-                                    'turn': turn,
-                                    'phase': phase,
-                                    'line': line.strip(),
-                                    'error': "ligne REACTIVE MOVED sans segment '[Roll: N]' : le "
-                                             "budget du move réactif est illisible, aucun contrôle "
-                                             "de distance n'a pu être fait",
-                                })
+                                _parse_error(
+                                    "ligne REACTIVE MOVED sans segment '[Roll: N]' : le budget du "
+                                    "move réactif est illisible, aucun contrôle de distance n'a "
+                                    "pu être fait"
+                                )
 
                             positions_for_adjacency_check = dict(positions_at_reactive)
                             positions_for_adjacency_check[reactive_unit_id] = (to_col, to_row)
@@ -2011,15 +2048,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # journalisera les skips, cette ligne apparaîtra en §2.7 et il faudra
                         # ré-écrire les contrôles, pas les deviner.
                         action_type = 'other'
-                        stats['parse_errors'].append({
-                            'episode': state.current_episode_num,
-                            'turn': turn,
-                            'phase': phase,
-                            'line': line.strip(),
-                            'error': "ligne SKIP inattendue : le moteur ne journalise pas ce "
-                                     "type d'action (_STEP_LOG_TYPE_MAP). Les contrôles de skip "
-                                     "ont été supprimés le 2026-08-10 comme inatteignables."
-                        })
+                        _parse_error(
+                            "ligne SKIP inattendue : le moteur ne journalise pas ce type "
+                            "d'action (_STEP_LOG_TYPE_MAP). Les contrôles de skip ont été "
+                            "supprimés le 2026-08-10 comme inatteignables."
+                        )
                 # Le token optionnel `[FLY]` (21.03) s'insère entre le verbe et `from` sur les
                 # trois types de move. Un aiguillage sur la chaîne littérale `"<VERBE> from"`
                 # laissait ces lignes SANS branche : l'action n'était pas traitée, la position
@@ -2067,13 +2100,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             r'COHERENCY REMOVED\s+(.+?)\s+\(03\.03\)', action_desc
                         )
                         if not _removed:
-                            stats['parse_errors'].append({
-                                'episode': state.current_episode_num,
-                                'turn': turn,
-                                'phase': phase,
-                                'line': line.strip(),
-                                'error': "ligne COHERENCY REMOVED sans liste de figurines",
-                            })
+                            _parse_error("ligne COHERENCY REMOVED sans liste de figurines")
                         else:
                             stats['coherency_removals'][player] += len(_removed.group(1).split())
                             note_rule_usage(stats, "03.03", player)
@@ -2114,13 +2141,7 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # appliquait les dégâts à une AUTRE unité — l'attribution fausse que ce
                         # site venait de fermer, rouverte sur le chemin de la ligne malformée.
                         if _hz_match and _dmg_actor_id is not None:
-                            _hz_mw = int(_hz_match.group(1))
-                            if "[ALL FNP SAVED]" in action_desc:
-                                _hz_mw = 0
-                            else:
-                                _hz_fnp_m = re.search(r'\[FNP:(\d+)\]', action_desc)
-                                if _hz_fnp_m:
-                                    _hz_mw = max(0, _hz_mw - int(_hz_fnp_m.group(1)))
+                            _hz_mw = net_mortal_wounds(int(_hz_match.group(1)), action_desc)
                             # Cible = acteur, nommé par le préfixe de la ligne (cf. garde ci-dessus).
                             _hz_unit_id = _dmg_actor_id
                             # Vérifier que l'unité porte effectivement une arme HAZARDOUS.
@@ -2200,19 +2221,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     dead_model_ids_episode=state.dead_model_ids_episode,
                                 )
                         else:
-                            stats['parse_errors'].append({
-                                'episode': state.current_episode_num,
-                                'turn': turn,
-                                'phase': phase,
-                                'line': line.strip(),
-                                'error': (
-                                    "ligne HAZARDOUS : préfixe 'Unit N(' absent, l'unité qui subit "
-                                    "les blessures mortelles n'est pas identifiable"
-                                    if _hz_match else
-                                    "ligne HAZARDOUS : format inattendu (attendu : "
-                                    "'SUFFERS N Mortal Wounds [HAZARDOUS]' ou '[HAZARDOUS:K]')"
-                                ),
-                            })
+                            _parse_error(
+                                "ligne HAZARDOUS : préfixe 'Unit N(' absent, l'unité qui subit "
+                                "les blessures mortelles n'est pas identifiable"
+                                if _hz_match else
+                                "ligne HAZARDOUS : format inattendu (attendu : "
+                                "'SUFFERS N Mortal Wounds [HAZARDOUS]' ou '[HAZARDOUS:K]')"
+                            )
                 elif " SUFFERS " in action_desc and "[DESPERATE ESCAPE]" in action_desc:
                         # 09.07 [DESPERATE ESCAPE] : blessures mortelles auto-infligées lors d'un
                         # Fall Back d'une unité engagée et battle-shocked. Tag différent de
@@ -2224,23 +2239,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             action_desc,
                         )
                         if _de_match:
-                            _de_mw = int(_de_match.group(1))
-                            if "[ALL FNP SAVED]" in action_desc:
-                                _de_mw = 0
-                            else:
-                                _de_fnp_m = re.search(r'\[FNP:(\d+)\]', action_desc)
-                                if _de_fnp_m:
-                                    _de_mw = max(0, _de_mw - int(_de_fnp_m.group(1)))
+                            _de_mw = net_mortal_wounds(int(_de_match.group(1)), action_desc)
                             _de_unit_id = _dmg_actor_id
                             if _de_unit_id is None:
-                                stats['parse_errors'].append({
-                                    'episode': state.current_episode_num,
-                                    'turn': turn,
-                                    'phase': phase,
-                                    'line': line.strip(),
-                                    'error': "ligne DESPERATE ESCAPE : ID unité introuvable "
-                                             "(attendu : 'Unit N(' en tête d'action)",
-                                })
+                                _parse_error(
+                                    "ligne DESPERATE ESCAPE : ID unité introuvable "
+                                    "(attendu : 'Unit N(' en tête d'action)"
+                                )
                             elif _de_mw > 0:
                                 _apply_damage_and_handle_death(
                                     _de_unit_id, _de_unit_id, _de_mw,
@@ -2257,14 +2262,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                     dead_model_ids_episode=state.dead_model_ids_episode,
                                 )
                         else:
-                            stats['parse_errors'].append({
-                                'episode': state.current_episode_num,
-                                'turn': turn,
-                                'phase': phase,
-                                'line': line.strip(),
-                                'error': "ligne DESPERATE ESCAPE : format inattendu (attendu : "
-                                         "'SUFFERS N Mortal Wounds [DESPERATE ESCAPE]')",
-                            })
+                            _parse_error(
+                                "ligne DESPERATE ESCAPE : format inattendu (attendu : "
+                                "'SUFFERS N Mortal Wounds [DESPERATE ESCAPE]')"
+                            )
                 elif " SUFFERS " in action_desc and (
                     _mwa_match := _MW_ABILITY_SUFFERS_RE.search(action_desc)
                 ) is not None:
@@ -2276,28 +2277,15 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # ADVERSAIRE, pas de l'unité elle-même — d'où `[FROM:<unité>]`, sans
                         # lequel la victime serait créditée de ses propres morts.
                         action_type = 'mortal_wounds_ability'
-                        _mwa_mw = int(_mwa_match.group(1))
-                        if "[ALL FNP SAVED]" in action_desc:
-                            _mwa_mw = 0
-                        else:
-                            # FNP partiels : [FNP:n] où n = blessures sauvées. Sans cette
-                            # soustraction l'analyzer applique le total pré-FNP et peut tuer
-                            # une unité que le moteur a laissée vivante.
-                            _mwa_fnp_m = re.search(r'\[FNP:(\d+)\]', action_desc)
-                            if _mwa_fnp_m:
-                                _mwa_mw = max(0, _mwa_mw - int(_mwa_fnp_m.group(1)))
+                        _mwa_mw = net_mortal_wounds(int(_mwa_match.group(1)), action_desc)
                         _mwa_unit_id = _dmg_actor_id
                         _mwa_src_match = re.search(r'\[FROM:([^\]]+)\]', action_desc)
                         if _mwa_unit_id is None or _mwa_src_match is None:
-                            stats['parse_errors'].append({
-                                'episode': state.current_episode_num,
-                                'turn': turn,
-                                'phase': phase,
-                                'line': line.strip(),
-                                'error': "ligne blessures mortelles de capacité : unité ou "
-                                         "source introuvable (attendu : 'Unit N(' en tête "
-                                         "d'action et '[FROM:<unité>]')",
-                            })
+                            _parse_error(
+                                "ligne blessures mortelles de capacité : unité ou source "
+                                "introuvable (attendu : 'Unit N(' en tête d'action et "
+                                "'[FROM:<unité>]')"
+                            )
                         else:
                             _mwa_rule = _MW_ABILITY_RULE_IDS[_mwa_match.group(2)]
                             _mwa_src = _mwa_src_match.group(1)
