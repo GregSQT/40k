@@ -66,6 +66,7 @@ class _DummyEngine(gym.Env):
         self.last_mask_and_eligible = None
         self.step_with_mask_calls = 0
         self.last_step_mask_and_eligible = None
+        self._terminal_info_calls = 0
         self.game_state = {
             "phase": "move",
             "debug_mode": False,
@@ -141,8 +142,24 @@ class _DummyEngine(gym.Env):
     def _check_game_over(self):
         return False
 
-    def _determine_winner_with_method(self):
-        return None, None
+    def _build_terminal_info(self):
+        """Bilan de fin d'episode, membre du contrat moteur (`ENGINE_CONTRACT_ATTRS`).
+
+        Les deux sorties terminales de `_ensure_actionable_controlled_turn` posent ce dict TEL
+        QUEL dans l'`info` rendu a SB3 : le double rend donc les cles que l'entrainement exige
+        (`ai/training_callbacks._handle_episode_end`, `ai/metrics_tracker.log_episode`), pas
+        seulement le vainqueur — c'est justement l'absence de ces cles-la qui tuait le run.
+        `_terminal_info_calls` compte les appels, pour que le test puisse prouver QUI a bati le
+        bilan.
+        """
+        self._terminal_info_calls += 1
+        return {
+            "winner": 1,
+            "win_method": "objectives",
+            "episode": {"r": 0.0, "l": 1, "t": 1},
+            "tactical_data": {"units_killed": 0},
+            "deployment_mode": None,
+        }
 
     def get_turn_step_limit(self) -> int:
         """Plafond anti-runaway d'un tour, comme `W40KEngine.get_turn_step_limit`.
@@ -1405,3 +1422,81 @@ def test_reload_snapshot_wraps_model_in_normalized_frozen_model(
         "Le modele charge doit etre un _NormalizedFrozenModel, pas un MaskablePPO nu"
     )
     assert wrapper._frozen_model._normalizer is dummy_normalizer
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Les DEUX sorties terminales de `_ensure_actionable_controlled_turn` rendent le bilan
+#
+# CE QUI A ETE MANQUE : ces sorties terminent l'episode SANS qu'aucun step moteur ne le fasse —
+# la premiere sort avant le step force, la seconde apres qu'il a leve. Leur `info` est rendu tel
+# quel a SB3, et il ne portait que `winner` / `win_method` : `_handle_episode_end` EXIGE
+# `tactical_data`, `metrics_tracker.log_episode` exige `deployment_mode`, et le run mourait.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_EPISODE_SUMMARY_KEYS = ("episode", "tactical_data", "deployment_mode", "win_method")
+
+
+def _mute_engine_over() -> _DummyEngine:
+    """Moteur double SANS action ouverte et dont la partie est FINIE."""
+    engine = _DummyEngine(decoder=_DummyActionDecoder(mask=[False] * 12, eligible=[]))
+    engine._check_game_over = lambda: True  # type: ignore[method-assign]
+    return engine
+
+
+def test_no_eligible_unit_and_game_over_reports_the_episode_summary() -> None:
+    engine = _mute_engine_over()
+    wrapper = BotControlledEnv(engine, bot=_DummyBot(), agent_seat_mode="p1")
+
+    _obs, terminated, truncated, info, _reward, _decision = wrapper._ensure_actionable_controlled_turn(
+        terminated=False, truncated=False, obs=None, info={},
+        debug_mode=False, accumulate_reward=False, cumulative_reward=0.0,
+    )
+
+    assert terminated and not truncated, "cette sortie doit terminer l'episode"
+    assert engine._terminal_info_calls == 1, (
+        "le bilan n'a pas ete demande au moteur : la sortie a de nouveau ecrit son `info` a la main"
+    )
+    missing = [key for key in _EPISODE_SUMMARY_KEYS if key not in info]
+    assert not missing, f"bilan d'episode perdu : {missing} absentes de l'`info` rendu a SB3"
+    assert info["phase_auto_advanced"] is True, "la cle propre a cette sortie a disparu"
+
+
+def test_advance_phase_failure_on_game_over_reports_the_episode_summary() -> None:
+    """Jumeau : le step force LEVE « advance_phase failed ... game_over »."""
+    engine = _DummyEngine(decoder=_DummyActionDecoder(mask=[False] * 12, eligible=[]))
+    wrapper = BotControlledEnv(engine, bot=_DummyBot(), agent_seat_mode="p1")
+
+    def _raise_game_over(action, decision=None):
+        _ = (action, decision)
+        raise RuntimeError("advance_phase failed: {'error': 'game_over'}")
+
+    wrapper._engine_step = _raise_game_over  # type: ignore[method-assign]
+
+    _obs, terminated, _truncated, info, _reward, _decision = wrapper._ensure_actionable_controlled_turn(
+        terminated=False, truncated=False, obs=None, info={},
+        debug_mode=False, accumulate_reward=False, cumulative_reward=0.0,
+    )
+
+    assert terminated
+    assert engine._terminal_info_calls == 1
+    missing = [key for key in _EPISODE_SUMMARY_KEYS if key not in info]
+    assert not missing, f"bilan d'episode perdu : {missing} absentes de l'`info` rendu a SB3"
+
+
+def test_engine_contract_requires_the_terminal_info_builder() -> None:
+    """Un moteur qui n'expose pas le batisseur de bilan doit etre refuse AU DEBALLAGE.
+
+    C'est la difference entre un echec a la construction et un run qui meurt apres des heures,
+    le jour ou un episode se termine sur l'une de ces deux sorties.
+    """
+    assert "_build_terminal_info" in ENGINE_CONTRACT_ATTRS
+
+    # Retire du DOUBLE lui-meme : l'attribut est porte par la classe, donc une sous-classe qui
+    # le masque ne le rend pas absent (`hasattr` remonte l'heritage).
+    saved = _DummyEngine._build_terminal_info
+    del _DummyEngine._build_terminal_info
+    try:
+        with pytest.raises(TypeError, match="_build_terminal_info"):
+            unwrap_engine(_DummyEngine(), owner="test_engine_contract")
+    finally:
+        _DummyEngine._build_terminal_info = saved

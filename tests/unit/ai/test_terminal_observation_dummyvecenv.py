@@ -123,8 +123,14 @@ class _ScratchEngine(gym.Env):
     def _check_game_over(self):
         return False
 
-    def _determine_winner_with_method(self):
-        return None, None
+    def _build_terminal_info(self):
+        """Membre du contrat moteur (`ENGINE_CONTRACT_ATTRS`) : le bilan de fin d'episode.
+
+        Ce double ne termine jamais (`_check_game_over` rend False), donc les sorties terminales
+        du wrapper ne l'appellent pas ; il doit l'EXPOSER quand meme, sinon `unwrap_engine`
+        refuse la pile a la construction.
+        """
+        return {"winner": None, "win_method": "draw"}
 
     def get_turn_step_limit(self) -> int:
         return 200

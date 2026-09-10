@@ -1214,10 +1214,14 @@ class MetricsCollectionCallback(BaseCallback):
         # donnees tactiques : log_tactical_metrics etait appele juste apres DE TOUTE FACON, avec
         # le dict de l'episode PRECEDENT, non reinitialise. Chaque courbe tactique aurait alors
         # recompte deux fois le meme episode sans que rien ne le signale.
-        # L'exigence est structurelle : W40KEngine.step pose info["episode"] et
-        # info["tactical_data"] dans le MEME bloc `if terminated:`, donc l'un ne peut pas
-        # arriver sans l'autre. Verifie sur le run complet : 50 000 episodes joues, 50 000
-        # points logues sur chaque courbe tactique.
+        # L'exigence est structurelle : `episode` et `tactical_data` sont poses ENSEMBLE par
+        # `W40KEngine._build_terminal_info`, donc l'un ne peut pas arriver sans l'autre. Verifie
+        # sur le run complet : 50 000 episodes joues, 50 000 points logues sur chaque courbe.
+        # ⚠️ Ce raisonnement etait FAUX tant qu'il nommait « le bloc `if terminated:` » : le
+        # moteur terminait aussi par deux sorties anticipees (limite de tours, pool vide ->
+        # advance_phase) et `BotControlledEnv` par deux autres, toutes quatre ecrivant leur `info`
+        # a la main sans bilan. Elles passent desormais par la meme construction ; c'est ELLE,
+        # et non ce bloc-ci, qui rend l'invariant vrai.
         # ⚠️ Ce raisonnement tenait a un fil : le `Monitor` de SB3 REECRIT info["episode"] sur
         # `terminated OR truncated`, donc une troncature entrait ici et levait sur
         # `tactical_data`. Ce qui protege desormais, c'est le discriminant de `_on_step` —

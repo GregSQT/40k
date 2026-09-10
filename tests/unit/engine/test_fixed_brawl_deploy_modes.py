@@ -83,3 +83,55 @@ def test_active_mode_runs_deployment_phase(tmp_path_factory, base_scenario):
     assert any(u["col"] < 0 for u in gs["units"]), (
         "mode active : aucune unité en attente de déploiement (sentinelle -1)"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Surcharge PAR JOUEUR : `deployment_type_P1` / `deployment_type_P2`
+#
+# CE QUI A ETE MANQUE. L'ouverture de la phase teste le mode PAR JOUEUR
+# (`any(effective_deployment_type_by_player[p] == "active")`), mais la synchronisation du joueur
+# courant testait `deployment_type`, le mode GLOBAL. Un scenario qui ne declare que
+# `deployment_type_P2: "active"` laisse ce champ a "fixed" : la phase de deploiement s'ouvrait
+# bien, le deployeur etait le joueur 2, et `current_player` restait a 1 — le masque de
+# deploiement etait donc construit pour un joueur qui n'a rien a poser.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _write_per_player_probe(tmp_path_factory, base, **overrides) -> str:
+    """Copie du scenario avec des surcharges de mode PAR JOUEUR (sans `deployment_type` global)."""
+    probe = dict(base)
+    probe.pop("deployment_type", None)
+    probe.update(overrides)
+    label = "_".join(f"{k}{v}" for k, v in sorted(overrides.items()))
+    path = tmp_path_factory.mktemp(f"brawl_{label}") / f"_probe_{label}.json"
+    path.write_text(json.dumps(probe), encoding="utf-8")
+    return str(path)
+
+
+def test_only_p2_active_makes_p2_the_current_player(tmp_path_factory, base_scenario):
+    """Seul P2 en `active` → phase 'deployment' ET c'est P2 qui joue."""
+    env = _build_env(_write_per_player_probe(tmp_path_factory, base_scenario, deployment_type_P2="active"))
+    gs = env.game_state
+
+    # Premisses : le mode GLOBAL n'est pas "active", et la phase s'ouvre quand meme.
+    assert gs["deployment_type"] != "active", (
+        "premisse cassee : le scenario declare un mode global 'active', le test ne vise plus la surcharge"
+    )
+    assert gs["phase"] == "deployment", f"phase attendue 'deployment', obtenue {gs['phase']!r}"
+    assert gs["deployment_state"]["current_deployer"] == 2, (
+        "premisse cassee : P2 n'est pas le deployeur, le test ne verifie pas la synchronisation"
+    )
+
+    assert gs["current_player"] == 2, (
+        "le joueur courant ne suit pas le deployeur : le masque de deploiement serait construit "
+        "pour le joueur 1, qui n'a rien a poser"
+    )
+
+
+def test_only_p1_active_keeps_p1_as_current_player(tmp_path_factory, base_scenario):
+    """Jumeau : seul P1 en `active` → le deployeur reste P1, et le joueur courant aussi."""
+    env = _build_env(_write_per_player_probe(tmp_path_factory, base_scenario, deployment_type_P1="active"))
+    gs = env.game_state
+
+    assert gs["phase"] == "deployment"
+    assert gs["deployment_state"]["current_deployer"] == 1
+    assert gs["current_player"] == 1
