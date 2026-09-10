@@ -87,17 +87,34 @@ def test_fight_move_log_stores_captured_models_segment() -> None:
         "[MODELS: LIVE]",
         "[MODELS: LIVE]",
     ),
+    # Le TYPE l'emporte sur les deux autres régimes : `agent_decision` n'observe aucune position,
+    # donc ni le segment pré-capturé ni le temps réel ne doivent l'atteindre. Le cas est monté
+    # avec les DEUX sources disponibles — un pré-capturé ET un bridge qui répond — sinon le vide
+    # attendu prouverait seulement qu'il n'y avait rien à écrire.
+    (
+        {"unitId": "7", "turn": 4, "type": "agent_decision",
+         "models_segment": "[MODELS: 7#0@(9,9)]"},
+        "[MODELS: LIVE]",
+        "",
+    ),
 ])
 def test_build_step_log_details_models_segment(
     raw_log: Dict[str, Any], bridge_return: str, expected: str
 ) -> None:
-    """raw_log['models_segment'] prime sur _models_segment_for_unit ; fallback sinon.
+    """Les TROIS régimes du segment, dans leur ordre de priorité.
 
-    Sans la branche `if 'models_segment' in raw_log`, le cas [0] échoue : _Bridge renvoie
-    LIVE_POST_CONSO mais le capturé (pré-consolidation) aurait dû être conservé.
+    Le type qui n'observe aucune position l'emporte sur tout ; sinon `raw_log['models_segment']`
+    prime sur `_models_segment_for_unit` ; sinon temps réel. Sans la branche
+    `if 'models_segment' in raw_log`, le cas [1] échoue : _Bridge renvoie LIVE_POST_CONSO mais le
+    capturé (pré-consolidation) aurait dû être conservé. Sans la branche de type, le cas [2]
+    ressort avec des positions que la ligne n'a jamais observées.
     """
 
     class _Bridge:
+        # RÉFÉRENCE à la table de production, jamais une copie : un inventaire recopié ici
+        # divergerait de celui que le point de traduction consulte réellement.
+        _TYPES_SANS_SEGMENT_MODELS = W40KEngine._TYPES_SANS_SEGMENT_MODELS
+
         def _models_segment_for_unit(self, unit_id: str) -> str:
             return bridge_return
 
