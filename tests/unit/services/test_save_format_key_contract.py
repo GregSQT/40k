@@ -14,11 +14,24 @@ et le 2026-08-31 (réserves stratégiques, ingress, suppression, `secured_object
 Ce test rend l'oubli BRUYANT : il épingle l'ensemble des clés mutables posées par un reset, par
 magic. Ajouter une clé au reset sans bumper la magic le fait passer au ROUGE.
 
+DEUX NIVEAUX, depuis le 2026-09-10. `MUTABLE_KEYS_BY_MAGIC` épingle les clés de PREMIER niveau ;
+`MUTABLE_SUBKEYS_BY_MAGIC` épingle les sous-clés des dicts que le reset publie. Le second niveau
+a été ajouté parce que le premier a laissé passer `reserves_declaration_queue` et
+`reserves_declaration_closed` (étape 20.01), posées SOUS `deployment_state` — une clé mutable
+déjà déclarée, donc un ensemble de premier niveau inchangé et un verrou VERT pendant toute la
+dérive. Le bump TL06 a dû être décidé à la main. Une row restaure le dict parent EN BLOC
+(`game_snapshots.rebuild_game_state` remplace la valeur mutable par celle de la row) : une
+sous-clé manquante survit donc au chargement exactement comme une clé de premier niveau.
+
 PORTÉE — ce que ce verrou NE couvre PAS, mesuré : il ne voit que les clés posées par le RESET.
 Le moteur écrit 162 clés distinctes dans le game_state, dont beaucoup naissent paresseusement en
 cours de partie ; une clé obligatoire créée hors reset lui échapperait. Il ne voit pas non plus
-une clé dont la FORME change à contenu de nom constant. Les neuf clés de la dérive observée sont
-toutes dans le périmètre couvert.
+une clé dont la FORME change à contenu de nom constant, ni les champs des dicts d'unité portés
+par la liste `units`. La profondeur est BORNÉE À 1 : mesuré sur le reset du scénario ci-dessous,
+les seuls dicts à schéma situés plus bas (`_deployment_scoring_cache[joueur]`,
+`_deployment_slot_candidates['candidates'][slot]`) vivent sous un niveau indexé par la donnée,
+qu'aucun chemin statique ne peut nommer. Les neuf clés de la dérive TL03→TL04 et les deux clés
+20.01 sont toutes dans le périmètre couvert.
 
 Corollaire pour l'auteur d'un changement : quand ce test devient rouge par une clé AJOUTÉE, la
 correction est d'ajouter une entrée sous une NOUVELLE magic et de bumper `_MAGIC` — pas d'élargir
@@ -159,13 +172,14 @@ _TL05_KEYS: FrozenSet[str] = frozenset({
 })
 
 #: TL06 = TL05 pour les clés de PREMIER NIVEAU : le bump du 2026-09-10 est motivé par deux
-#: clés que ce verrou NE VOIT PAS — `reserves_declaration_queue` et
+#: clés que cette table NE VOIT PAS — `reserves_declaration_queue` et
 #: `reserves_declaration_closed`, posées par le reset DANS `deployment_state`, donc au
 #: deuxième niveau, sous une clé mutable déjà déclarée ici. L'entrée est malgré tout écrite,
 #: en littéral et non dérivée : `test_the_current_magic_declares_its_key_set` l'exige, et une
 #: entrée dérivée de TL05 ferait remonter dans l'entrée courante toute clé glissée dans un
 #: format figé. Deux entrées identiques ne sont donc pas un doublon accidentel — c'est la
-#: mesure que la dérive s'est produite hors de la portée du verrou.
+#: mesure que la dérive s'est produite hors de la portée de la table de premier niveau. C'est
+#: `MUTABLE_SUBKEYS_BY_MAGIC`, plus bas, qui couvre désormais ce niveau.
 _TL06_KEYS: FrozenSet[str] = frozenset({
         '_best_weapon_cache', '_charge_declaration_current', '_charge_engage_memo',
         '_charge_initial_rolls', '_charge_plan_cache', '_deployment_scoring_cache',
@@ -214,10 +228,93 @@ MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
     b"W40KTL06": _TL06_KEYS,
 }
 
+#: --- DEUXIÈME NIVEAU : sous-clés des dicts mutables publiés par le reset ---------------------
+#: Même contrat que ci-dessus, un cran plus bas. Une row de save restaure le dict parent EN BLOC
+#: (`game_snapshots.rebuild_game_state`), donc une sous-clé OBLIGATOIRE ajoutée au reset manque
+#: exactement de la même façon dans une save écrite avant, et son premier lecteur lève au fond du
+#: moteur une fois la partie en cours déjà écrasée — c'est le scénario 20.01 de TL06.
+#:
+#: PROFONDEUR BORNÉE À 1, et c'est une mesure, pas une commodité : sous les quatre dicts à schéma
+#: ci-dessous, le seul niveau supplémentaire est indexé par la DONNÉE (`deployable_units` par
+#: joueur, `candidates` par slot), qu'aucun chemin statique ne peut nommer. Les dicts à schéma
+#: plus profonds (`_deployment_scoring_cache[joueur]`) vivent eux aussi sous un niveau de donnée.
+#:
+#: Une entrée décrit un format figé sur le disque des joueurs : elle ne s'élargit jamais après
+#: coup, on en ajoute une nouvelle sous une nouvelle magic — comme pour le premier niveau.
+_TL06_SUBKEYS: Dict[str, FrozenSet[str]] = {
+    # Comptabilité MUTABLE de la phase de déploiement. Les deux dernières sont les clés 20.01
+    # (`deployment_handlers.RESERVES_DECLARATION_QUEUE_KEY` / `_CLOSED_KEY`) dont l'ajout a
+    # motivé le bump TL06 sans qu'aucun test ne rougisse.
+    "deployment_state": frozenset({
+        "current_deployer", "deployable_units", "deployed_units", "deployment_complete",
+        "reserves_declaration_queue", "reserves_declaration_closed",
+    }),
+    "_deployment_slot_candidates": frozenset({"key", "candidates"}),
+    "_grid_static_hex_arrays": frozenset({"walls", "objectives", "cover", "obscuring"}),
+    "choice_timing_index": frozenset({
+        "phase_start", "on_deploy", "turn_start", "activation_start", "player_turn_start",
+    }),
+    # Dicts que le reset publie VIDES : le format n'y porte aucune sous-clé, et l'épingle à ∅ le
+    # dit. Le jour où le reset en publie une, la comparaison rougit et impose une décision —
+    # sous-clé NOMMÉE et obligatoire → bump ; sous-clés dérivées des entités (unités, joueurs,
+    # hexs) → déplacer la clé dans `_DATA_KEYED_MUTABLE_DICTS`, sans bump.
+    "_charge_declaration_current": frozenset(),
+    "_charge_initial_rolls": frozenset(),
+    "_charge_plan_cache": frozenset(),
+    "_edge_distance_cache": frozenset(),
+    "_squad_move_pool_cache": frozenset(),
+    "_zone_intent_declarations": frozenset(),
+    "advance_rolls": frozenset(),
+    "charge_range_rolls": frozenset(),
+    "destroyed_models": frozenset(),
+    "enemy_adjacent_counts_player_1": frozenset(),
+    "enemy_adjacent_counts_player_2": frozenset(),
+    "moved_distance_by_model": frozenset(),
+    "objective_controllers": frozenset(),
+    "occupation_map": frozenset(),
+    "pending_squad_fight_intents": frozenset(),
+    "pending_squad_shoot_intents": frozenset(),
+    "reactive_decision_payload": frozenset(),
+    "secured_objectives": frozenset(),
+    "suppressed_squads": frozenset(),
+    "unit_zone_assignments": frozenset(),
+}
+
+MUTABLE_SUBKEYS_BY_MAGIC: Dict[bytes, Dict[str, FrozenSet[str]]] = {
+    b"W40KTL06": _TL06_SUBKEYS,
+}
+
+#: Dicts mutables dont les sous-clés sont des DONNÉES de la partie — identifiants d'unité ou de
+#: figurine, numéro de joueur, coordonnées, clés de cache. Les épingler épinglerait le scénario
+#: de la fixture, pas le format de save : une unité de plus dans le roster ferait rougir un
+#: verrou qui n'a rien à dire sur le format. Ils sont donc déclarés ICI, explicitement, et non
+#: simplement omis — `test_every_mutable_dict_of_the_reset_is_classified` exige que tout dict
+#: mutable soit dans l'une ou l'autre table, ce qui force une décision sur chaque dict NOUVEAU
+#: au lieu de rouvrir silencieusement le trou que TL06 a payé.
+_DATA_KEYED_MUTABLE_DICTS: FrozenSet[str] = frozenset({
+    # par identifiant d'unité, d'escouade ou de figurine
+    "models_cache", "squad_cache", "squad_models", "unit_by_id", "units_cache", "units_cache_prev",
+    # par numéro de joueur
+    "_grid_deployment_zone_anchor", "_reserves_deployed", "_reserves_destroyed_turn3",
+    "_reserves_placed", "command_points", "deployment_type_by_player",
+    "model_count_at_start_by_player", "oath_target", "player_names", "player_types",
+    "value_at_start", "victory_points", "waaagh_active", "waaagh_called",
+    # par clé de cache (tuples d'entités, de profils ou d'hexs)
+    "_best_weapon_cache", "_deployment_scoring_cache", "_entity_types_cache",
+    "_obs_weapon_profiles_cache", "_socle_wall_blocked_cache",
+})
+
+
 
 def _fingerprint(keys: Iterable[str]) -> str:
     """Empreinte d'un ensemble de clés, indépendante de l'ordre d'écriture du littéral."""
     return hashlib.sha256("\n".join(sorted(keys)).encode("utf-8")).hexdigest()[:16]
+
+
+def _subkey_fingerprint(table: Dict[str, FrozenSet[str]]) -> str:
+    """Empreinte d'une table parent → sous-clés, indépendante de l'ordre d'écriture du littéral."""
+    lignes = [f"{parent}\t{'|'.join(sorted(sub))}" for parent, sub in sorted(table.items())]
+    return hashlib.sha256("\n".join(lignes).encode("utf-8")).hexdigest()[:16]
 
 
 #: Empreinte des entrées FIGÉES ci-dessus — toutes sauf celle de la magic courante. Écrire TL05
@@ -232,6 +329,12 @@ _FROZEN_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     b"W40KTL05": (131, "bc1d5f0c7f07dc36"),
 }
 
+#: Même épingle pour la table de SOUS-CLÉS. Vide aujourd'hui, et ce n'est pas un oubli : cette
+#: table naît sous TL06, qui est la magic COURANTE, donc aucune de ses entrées n'est encore un
+#: fait historique. `test_every_frozen_entry_is_pinned` la remplira d'office au prochain bump —
+#: il rougit sur toute entrée figée sans empreinte, dans l'une comme dans l'autre table.
+_FROZEN_SUBKEY_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {}
+
 #: Les neuf clés dont l'ajout n'a PAS été suivi d'un bump entre TL03 et TL04. Elles sont dans le
 #: périmètre du verrou : c'est ce qui prouve qu'il aurait attrapé la dérive au lieu de la subir.
 KEYS_ADDED_SINCE_TL03 = (
@@ -242,7 +345,8 @@ KEYS_ADDED_SINCE_TL03 = (
 
 
 @pytest.fixture(scope="module")
-def reset_mutable_keys() -> FrozenSet[str]:
+def reset_game_state() -> Dict[str, Any]:
+    """Un SEUL épisode réinitialisé pour tout le module : les deux vues ci-dessous en dérivent."""
     from ai.unit_registry import UnitRegistry
     from engine.w40k_core import W40KEngine
 
@@ -257,7 +361,22 @@ def reset_mutable_keys() -> FrozenSet[str]:
         training_n_envs=1,
     )
     eng.reset(seed=0)
-    return frozenset(k for k in eng.game_state if k not in _GS_STATIC_KEYS)
+    return eng.game_state
+
+
+@pytest.fixture(scope="module")
+def reset_mutable_keys(reset_game_state: Dict[str, Any]) -> FrozenSet[str]:
+    return frozenset(k for k in reset_game_state if k not in _GS_STATIC_KEYS)
+
+
+@pytest.fixture(scope="module")
+def reset_mutable_dicts(reset_game_state: Dict[str, Any]) -> Dict[str, FrozenSet[Any]]:
+    """Sous-clés de PREMIER niveau de chaque valeur mutable qui est un dict (profondeur bornée)."""
+    return {
+        k: frozenset(v.keys())
+        for k, v in reset_game_state.items()
+        if k not in _GS_STATIC_KEYS and isinstance(v, dict)
+    }
 
 
 def test_the_reset_really_publishes_mutable_keys(reset_mutable_keys: FrozenSet[str]) -> None:
@@ -287,6 +406,14 @@ def test_frozen_format_entries_are_untouched() -> None:
             f"pas, on ajoute une NOUVELLE entrée sous une nouvelle magic. Si la réécriture est "
             f"malgré tout voulue, c'est l'empreinte qu'il faut changer ICI, sciemment."
         )
+    for magic, (count, digest) in _FROZEN_SUBKEY_FINGERPRINTS.items():
+        table = MUTABLE_SUBKEYS_BY_MAGIC[magic]
+        assert (len(table), _subkey_fingerprint(table)) == (count, digest), (
+            f"l'entrée {magic.decode()} de MUTABLE_SUBKEYS_BY_MAGIC a changé "
+            f"({len(table)} dicts / {_subkey_fingerprint(table)} contre {count} / {digest} "
+            f"épinglés). Même règle qu'au premier niveau : une entrée figée décrit un format "
+            f"déjà écrit sur le disque des joueurs, on en ajoute une nouvelle."
+        )
 
 
 def test_every_frozen_entry_is_pinned() -> None:
@@ -295,13 +422,17 @@ def test_every_frozen_entry_is_pinned() -> None:
     Au prochain bump, TL06 deviendra un fait historique à son tour ; sans ce contrôle, elle
     resterait librement réécrivable et le défaut ci-dessus se rouvrirait sous un autre nom.
     """
-    figees = {m for m in MUTABLE_KEYS_BY_MAGIC if m != _MAGIC}
-    manquantes = sorted(m.decode() for m in figees - set(_FROZEN_FINGERPRINTS))
-    orphelines = sorted(m.decode() for m in set(_FROZEN_FINGERPRINTS) - figees)
-    assert figees == set(_FROZEN_FINGERPRINTS), (
-        f"entrées figées sans empreinte : {manquantes} ; empreintes sans entrée figée : "
-        f"{orphelines}. Épingle une entrée dans le même geste que le bump qui la fige."
-    )
+    for nom, table, epingles in (
+        ("MUTABLE_KEYS_BY_MAGIC", set(MUTABLE_KEYS_BY_MAGIC), _FROZEN_FINGERPRINTS),
+        ("MUTABLE_SUBKEYS_BY_MAGIC", set(MUTABLE_SUBKEYS_BY_MAGIC), _FROZEN_SUBKEY_FINGERPRINTS),
+    ):
+        figees = {m for m in table if m != _MAGIC}
+        manquantes = sorted(m.decode() for m in figees - set(epingles))
+        orphelines = sorted(m.decode() for m in set(epingles) - figees)
+        assert figees == set(epingles), (
+            f"{nom} — entrées figées sans empreinte : {manquantes} ; empreintes sans entrée "
+            f"figée : {orphelines}. Épingle une entrée dans le même geste que le bump qui la fige."
+        )
 
 
 def test_the_current_magic_declares_its_key_set() -> None:
@@ -309,6 +440,14 @@ def test_the_current_magic_declares_its_key_set() -> None:
     assert _MAGIC in MUTABLE_KEYS_BY_MAGIC, (
         f"format de save {_MAGIC.decode()} sans ensemble de clés déclaré dans "
         f"MUTABLE_KEYS_BY_MAGIC — ajoute l'entrée en même temps que le bump"
+    )
+
+
+def test_the_current_magic_declares_its_subkeys() -> None:
+    """Idem au deuxième niveau : un bump sans entrée de sous-clés rendrait ce verrou-là muet."""
+    assert _MAGIC in MUTABLE_SUBKEYS_BY_MAGIC, (
+        f"format de save {_MAGIC.decode()} sans table de sous-clés déclarée dans "
+        f"MUTABLE_SUBKEYS_BY_MAGIC — ajoute l'entrée en même temps que le bump"
     )
 
 
@@ -338,6 +477,108 @@ def test_reset_keys_match_the_current_save_format(reset_mutable_keys: FrozenSet[
         f"d'alors, avant que le code vivant ne la pose. Une clé qui rejoint _GS_STATIC_KEYS ne "
         f"bumpe PAS — game_snapshots.rebuild_game_state fait gagner la valeur vivante sur celle "
         f"de la row."
+    )
+
+
+def test_every_mutable_dict_of_the_reset_is_classified(
+    reset_mutable_dicts: Dict[str, FrozenSet[Any]]
+) -> None:
+    """Tout dict mutable du reset est soit épinglé sous-clé par sous-clé, soit déclaré indexé par
+    la donnée. Sans cette partition, un dict NOUVEAU n'entrerait dans aucune table et son contenu
+    dériverait en silence — exactement ce que `deployment_state` a fait sous TL05.
+    """
+    epingles = set(MUTABLE_SUBKEYS_BY_MAGIC[_MAGIC])
+    chevauchement = sorted(epingles & _DATA_KEYED_MUTABLE_DICTS)
+    assert not chevauchement, (
+        f"{chevauchement} sont à la fois épinglés et déclarés indexés par la donnée — un dict "
+        f"relève d'un seul régime, sinon l'épingle ne dit plus ce qu'elle vérifie"
+    )
+    observes = set(reset_mutable_dicts)
+    non_classes = sorted(observes - (epingles | _DATA_KEYED_MUTABLE_DICTS))
+    fantomes = sorted((epingles | _DATA_KEYED_MUTABLE_DICTS) - observes)
+    assert not non_classes and not fantomes, (
+        f"dicts mutables du reset non classés : {non_classes} ; classés mais absents du reset : "
+        f"{fantomes}.\nNON CLASSÉS : décide, pour chacun, si ses sous-clés sont un SCHÉMA (noms "
+        f"fixes, écrits en clair par le code) — alors épingle-les dans l'entrée de "
+        f"MUTABLE_SUBKEYS_BY_MAGIC de la magic courante — ou des DONNÉES de la partie (id "
+        f"d'unité, joueur, hex, clé de cache) — alors ajoute la clé à _DATA_KEYED_MUTABLE_DICTS. "
+        f"Une clé de premier niveau vraiment nouvelle fait de toute façon rougir "
+        f"test_reset_keys_match_the_current_save_format et impose un bump.\nABSENTS : la clé ne "
+        f"vient plus du reset, ou n'est plus un dict — retire-la de la table qui la déclare, en "
+        f"ajoutant une NOUVELLE entrée de magic si c'est l'entrée épinglée qui change."
+    )
+
+
+def test_data_keyed_dicts_really_carry_data(
+    reset_mutable_dicts: Dict[str, FrozenSet[Any]]
+) -> None:
+    """Un dict déclaré indexé par la donnée doit EN PORTER au reset — sinon rien ne l'excuse.
+
+    C'est ce qui empêche `_DATA_KEYED_MUTABLE_DICTS` de devenir la poubelle où l'on range ce
+    qu'on ne veut pas épingler : un dict vide au reset n'a aucune donnée à protéger du verrou,
+    sa place est dans la table épinglée avec un ensemble de sous-clés vide.
+    """
+    assert _DATA_KEYED_MUTABLE_DICTS, (
+        "VERT VACANT : aucune clé déclarée indexée par la donnée, la boucle ne prouverait rien"
+    )
+    vides = sorted(k for k in _DATA_KEYED_MUTABLE_DICTS & set(reset_mutable_dicts)
+                   if not reset_mutable_dicts[k])
+    assert not vides, (
+        f"{vides} sont déclarés indexés par la donnée mais le reset les publie VIDES — déplace-les "
+        f"dans l'entrée de MUTABLE_SUBKEYS_BY_MAGIC avec frozenset() comme jeu de sous-clés"
+    )
+
+
+def test_reset_subkeys_match_the_current_save_format(
+    reset_mutable_dicts: Dict[str, FrozenSet[Any]]
+) -> None:
+    """Les sous-clés publiées par le reset doivent décrire le format de save courant.
+
+    C'est le contrôle qui manquait le 2026-09-10 : les deux clés 20.01 posées dans
+    `deployment_state` ont imposé le bump TL06 sans qu'aucun test ne rougisse.
+    """
+    expected = MUTABLE_SUBKEYS_BY_MAGIC[_MAGIC]
+    ecarts = []
+    for parent in sorted(expected):
+        if parent not in reset_mutable_dicts:
+            continue  # parent disparu : rapporté par test_every_mutable_dict_of_the_reset_is_classified
+        observees = reset_mutable_dicts[parent]
+        ajoutees = sorted(repr(k) for k in observees - expected[parent])
+        retirees = sorted(repr(k) for k in expected[parent] - observees)
+        if ajoutees or retirees:
+            ecarts.append(f"{parent} (ajoutées: {ajoutees} ; retirées: {retirees})")
+    assert not ecarts, (
+        f"le reset d'épisode ne publie plus les mêmes SOUS-CLÉS que le format {_MAGIC.decode()} : "
+        f"{'; '.join(ecarts)}.\n"
+        f"AJOUTÉES : une save au format courant restitue le dict parent EN BLOC, donc amputé de "
+        f"ces sous-clés, et leur premier lecteur lèvera au fond du moteur — après que le "
+        f"chargement a déjà écrasé la partie en cours. Si la sous-clé est un nom FIXE écrit par "
+        f"le code : bumpe services/game_saves._MAGIC, ajoute l'ancienne magic à _LEGACY_MAGICS "
+        f"avec son motif dans _reject_legacy, et ajoute une NOUVELLE entrée dans "
+        f"MUTABLE_SUBKEYS_BY_MAGIC — n'élargis pas l'entrée existante. Si le dict s'est mis à "
+        f"porter des sous-clés dérivées des ENTITÉS (unité, joueur, hex), il ne relève plus de "
+        f"l'épingle : déplace-le dans _DATA_KEYED_MUTABLE_DICTS, sans bump.\n"
+        f"RETIRÉES : même arbitrage qu'au premier niveau — le refus protège d'un état AMPUTÉ, "
+        f"pas d'un état qui porte une sous-clé de trop. Ne bumpe que si un lecteur consulte "
+        f"encore la sous-clé."
+    )
+
+
+@pytest.mark.parametrize("subkey", ("reserves_declaration_queue", "reserves_declaration_closed"))
+def test_the_subkey_lock_covers_the_2001_keys(
+    subkey: str, reset_mutable_dicts: Dict[str, FrozenSet[Any]]
+) -> None:
+    """Les deux clés qui ont motivé ce deuxième niveau sont dans son périmètre.
+
+    Sans ce contrôle, l'épingle pourrait porter sur un jeu de dicts qui exclut justement celui
+    dont la dérive a coûté le bump TL06.
+    """
+    assert subkey in reset_mutable_dicts["deployment_state"], (
+        f"{subkey!r} n'est plus posée par le reset dans deployment_state — le verrou de sous-clés "
+        f"ne couvre plus le cas qui l'a motivé"
+    )
+    assert subkey in MUTABLE_SUBKEYS_BY_MAGIC[_MAGIC]["deployment_state"], (
+        f"{subkey!r} n'est plus épinglée pour le format {_MAGIC.decode()}"
     )
 
 
@@ -390,11 +631,12 @@ def test_a_previous_format_is_refused_at_load(tmp_path: Any) -> None:
 def test_the_2001_declaration_keys_are_named_in_the_refusal(tmp_path: Any) -> None:
     """Une save TL05 est refusée EN NOMMANT les deux clés 20.01 qui lui manquent.
 
-    Ce que le bump TL06 ferme ne se voit PAS dans le contrat de clés ci-dessus, et c'est tout
-    l'intérêt de ce test : `reserves_declaration_queue` et `reserves_declaration_closed` sont
-    posées par le reset DANS `deployment_state`, donc au deuxième niveau — invisibles pour
+    Ce que le bump TL06 ferme ne se voit PAS dans le contrat de clés de PREMIER niveau :
+    `reserves_declaration_queue` et `reserves_declaration_closed` sont posées par le reset DANS
+    `deployment_state`, donc au deuxième niveau — invisibles pour
     `test_reset_keys_match_the_current_save_format`, qui est resté VERT pendant toute la dérive.
-    Le seul contrôle possible porte donc sur le refus lui-même.
+    C'est `test_reset_subkeys_match_the_current_save_format` qui les épingle désormais ; ce
+    test-ci vérifie l'autre moitié, le REFUS que le bump rend possible.
 
     L'assertion vise le nom des clés et pas seulement « écrite avant … » : sans le motif, le
     message est indiscernable de celui des quatre autres formats périmés, et le joueur ne peut

@@ -523,6 +523,14 @@ et l'échec ne survit pas au changement d'unité.
   clé obligatoire au reset sans bumper `game_saves._MAGIC` rend ce test rouge. Il ne couvre que
   les clés posées par le reset : une clé obligatoire créée paresseusement en cours de partie, ou
   une clé dont la forme change à nom constant, lui échappent encore.
+- **Le verrou descend d'un niveau** (2026-09-10) : il ne comparait que les clés de PREMIER niveau,
+  et c'est ce qui a laissé passer les deux clés 20.01 posées dans `deployment_state` — bump TL06
+  décidé à la main, aucun test rouge. Une row restaure le dict parent EN BLOC, donc une sous-clé
+  manquante survit au chargement comme une clé de premier niveau. `MUTABLE_SUBKEYS_BY_MAGIC`
+  épingle désormais, par magic, les sous-clés que le reset publie dans ses dicts mutables
+  (profondeur 1), et une seconde table déclare les dicts indexés par la DONNÉE (id d'unité,
+  joueur, hex, clé de cache), qu'épingler reviendrait à épingler le scénario. Tout dict mutable du
+  reset doit être dans l'une ou l'autre : un dict nouveau ne peut plus dériver en silence.
 - **Les entrées des formats ANCIENS sont épinglées** (2026-09-09) : le verrou ci-dessus ne lit
   que l'entrée de la magic COURANTE, donc réécrire l'entrée d'un format déjà distribué ne lui
   faisait rien voir. Un second contrôle fige le compte et l'empreinte de chaque entrée qui

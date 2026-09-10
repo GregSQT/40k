@@ -62,16 +62,18 @@ _log = logging.getLogger(__name__)
 # privé de ces deux clés, et le premier lecteur — `next_reserves_declaration_entry`, atteint dès la
 # lecture d'état du front (`services/api_server._strategic_reserves_summary`) — lève
 # `ConfigurationError` au fond du moteur, après que le chargement a déjà écrasé la partie en cours.
-# ⚠️ CE BUMP EST LE PREMIER QUE LE VERROU N'A PAS VU. `test_save_format_key_contract` compare les
-# clés de PREMIER NIVEAU du game_state : une clé posée par le reset au deuxième niveau, sous une
-# clé mutable déjà déclarée, lui est invisible et l'a laissé VERT. La question à se poser à chaque
-# ajout reste donc manuelle : le reset publie-t-il une donnée obligatoire de plus, à quelque
-# profondeur que ce soit ?
+# ⚠️ CE BUMP EST LE PREMIER QUE LE VERROU N'A PAS VU. `test_save_format_key_contract` ne comparait
+# que les clés de PREMIER NIVEAU du game_state : une clé posée par le reset au deuxième niveau,
+# sous une clé mutable déjà déclarée, lui était invisible et l'a laissé VERT. Le verrou a été
+# étendu le jour même (`MUTABLE_SUBKEYS_BY_MAGIC`) : les sous-clés que le reset publie dans ses
+# dicts mutables sont épinglées à leur tour, profondeur 1. Reste manuelle la seule question
+# qu'aucune table ne tranche : une donnée obligatoire posée PLUS BAS ENCORE, ou hors du reset.
 # Les formats antérieurs (TL01, single-pickle) n'ont en plus aucune empreinte : leur état ne peut
 # pas être restauré sans risque de plateau incompatible → REFUSÉS aussi (cf. _reject_legacy).
 # AJOUTER UNE CLÉ OBLIGATOIRE AU RESET D'ÉPISODE OBLIGE À BUMPER CETTE MAGIC. Le verrou est
 # tests/unit/services/test_save_format_key_contract.py : il épingle l'empreinte des clés mutables
-# posées par le reset et reste ROUGE tant que la magic n'a pas suivi.
+# posées par le reset, ET les sous-clés de leurs dicts, et reste ROUGE tant que la magic n'a pas
+# suivi.
 #
 # ⚠️ LE RETRAIT D'UNE CLÉ CONDAMNÉE N'OBLIGE PAS À BUMPER. Le danger que cette magic écarte est un
 # état AMPUTÉ : une save écrite avant l'ajout d'une clé rend un game_state qui n'a pas cette clé,
