@@ -334,18 +334,18 @@ La ventilation `last_reward_breakdown` expose `base_actions`, `result_bonuses`, 
 
 **CLI override** :
 ```bash
-python ai/train.py --agent CoreAgent --scenario bot --new --param agent_seat_mode p2
-python ai/train.py --agent CoreAgent --scenario bot --new --param agent_seat_mode random
+python ai/train.py --agent ArmageddonAgent_x1 --training-config x1 --scenario bot --new --param agent_seat_mode p2
+python ai/train.py --agent ArmageddonAgent_x1 --training-config x1 --scenario bot --new --param agent_seat_mode random
 ```
 
 ### Évaluation cross-seat
 
 ```bash
 # Évaluer le modèle courant en tant que P1
-python ai/train.py --agent CoreAgent --eval --param agent_seat_mode p1 --test-episodes 100
+python ai/train.py --agent ArmageddonAgent_x1 --training-config x1 --eval --param agent_seat_mode p1 --test-episodes 100
 
 # Évaluer le même modèle en tant que P2
-python ai/train.py --agent CoreAgent --eval --param agent_seat_mode p2 --test-episodes 100
+python ai/train.py --agent ArmageddonAgent_x1 --training-config x1 --eval --param agent_seat_mode p2 --test-episodes 100
 ```
 
 **Protocole de validation cross-seat** : un drop symétrique (~10-15 pts) en P2 confirme le désavantage going-second.

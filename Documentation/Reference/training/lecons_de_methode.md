@@ -634,9 +634,10 @@ elle est **renseignée**, le roster agent devient **identique à tous les épiso
 neutralisé sans le moindre message.
 🔴 **Correction du 2026-08-02** : ce document affirmait que les scénarios holdout `bot-01..04`
 « la portent, pour la reproductibilité ». **C'est faux** : les quatre portent la clé **à `null`**,
-donc le tirage y est **ACTIF**. Le seul scénario du dépôt qui la renseigne réellement est
-`scenario_training_benchmark.json` (CoreAgent, `12345`). Les `scenario_training_armageddonN.json` ne
-la portent pas. **À contrôler avant de conclure quoi que ce soit sur une distribution de matchups** —
+donc le tirage y est **ACTIF**. Le seul scénario du dépôt qui la renseignait réellement était
+`scenario_training_benchmark.json` (CoreAgent, `12345`), supprimé le 2026-09-10 avec le reste de
+`config/agents/CoreAgent/` : **plus aucun scénario du dépôt ne renseigne cette clé**, le tirage est
+donc ACTIF partout. Les `scenario_training_armageddonN.json` ne la portent pas. **À contrôler avant de conclure quoi que ce soit sur une distribution de matchups** —
 et à ne pas déduire de la seule PRÉSENCE de la clé.
 
 **Une suite de tests est une mesure GLOBALE, donc un verrou GLOBAL (§0.19.1, 2026-07-20)**

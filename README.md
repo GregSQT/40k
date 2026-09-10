@@ -103,7 +103,7 @@ Seuils, exceptions justifiées et findings connus : [Documentation/Reference/inf
 ### Entraînement IA (exemple)
 
 ```bash
-python ai/train.py --agent CoreAgent --scenario bot --new
+python ai/train.py --agent ArmageddonAgent_x1 --training-config x1 --scenario bot --new
 ```
 
 ### Arborescence (vue synthétique)
@@ -181,7 +181,7 @@ Thresholds, written exceptions and known findings: [Documentation/Reference/infr
 ### AI training example
 
 ```bash
-python ai/train.py --agent CoreAgent --scenario bot --new
+python ai/train.py --agent ArmageddonAgent_x1 --training-config x1 --scenario bot --new
 ```
 
 ### Docs
