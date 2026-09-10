@@ -13,7 +13,7 @@ donc perdue, et step.log rendait `Save [NOT ALLOCATED]` sur une attaque qui avai
 Invariants verrouilles ici :
 - le crit RESTE dans `pending_wounds` et suit 05.03/05.04 (sauvegarde comprise) ;
 - `counts["wounds"]` n'est pas touche ;
-- un D6 est tire PAR crit et porte par le record (`holdStillMW`) ;
+- un D6 est tire PAR crit et accumule dans `pending_mortal_wounds["dice"]` ;
 - les blessures mortelles sont infligees APRES les degats normaux du lot (06.02) ;
 - mauvaise arme / cible VEHICLE / pas de crit → aucune blessure mortelle.
 """
@@ -190,13 +190,17 @@ def test_crit_reste_dans_pending_wounds(monkeypatch):
     )
 
 
-def test_crit_porte_son_d6_par_record(monkeypatch):
-    """Le D6 est tiré au crit et posé PAR RECORD — granularité du jet, pas de l'activation."""
+def test_crit_porte_son_d6(monkeypatch):
+    """Le D6 est tiré AU CRIT — granularité du jet, pas de l'activation.
+
+    `dice` est le seul porteur du jet : la clé jumelle `holdStillMW`, posée sur le record et
+    lue par personne en production, a été retirée. Ce que le jet vaut se vérifie donc là où il
+    voyage réellement, jusqu'à `mortalWoundDice` et au segment `MW:` du journal.
+    """
     _patch_fight_harness(monkeypatch, _crit_rolled())
     monkeypatch.setattr(random, "randint", lambda a, b: 4)
 
     result = fh._manual_roll_fight_intent(_gs(), _intent(), {})
-    assert result["shot_records"][0]["holdStillMW"] == 4
     assert result["pending_mortal_wounds"] == {
         "ability": HAZARD_CONTEXT_HOLD_STILL, "dice": [4],
     }
