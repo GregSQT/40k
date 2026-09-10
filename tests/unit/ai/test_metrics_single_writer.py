@@ -101,9 +101,9 @@ def test_no_point_is_emitted_before_the_window_is_full(tmp_path: Any) -> None:
       - moyenne de la fenetre (attendu)  : 0.0, 1/3, 2/3 — et RIEN sur les deux premiers
       - moyenne cumulative (le defaut)   : 0.0, 0.0, 0.0, 0.25, 0.4 — cinq points, tous faux
 
-    La sonde est `game_critical/win_rate` : c'est la seule courbe de performance que
-    `log_episode_end` fait encore passer par `_emit_windowed` depuis le retrait de
-    `00_critical/{d_win_rate,e_episode_reward_smooth}`.
+    La sonde est `game_critical/win_rate`, l'une des deux courbes de performance que
+    `log_episode_end` fait passer par `_emit_windowed` — sa jumelle `00_critical/d_win_rate`
+    porte les memes points, cf. `test_le_win_rate_dentrainement_a_sa_jumelle_00_critical`.
     """
     tracker, recording = _tracker(tmp_path, window=3)
     for winner in (0, 0, 0, 1, 1):
@@ -124,6 +124,45 @@ def test_no_point_is_emitted_before_the_window_is_full(tmp_path: Any) -> None:
     assert [value for value, _step in emitted] == [
         pytest.approx(0.0), pytest.approx(1 / 3), pytest.approx(2 / 3)
     ]
+
+
+def test_le_win_rate_dentrainement_a_sa_jumelle_00_critical(tmp_path: Any) -> None:
+    """`00_critical/d_win_rate` porte EXACTEMENT les memes points que `game_critical/win_rate`.
+
+    La courbe a ete retiree du namespace critique le 2026-09-08, puis remise le 2026-09-10 :
+    le tableau de bord `00_critical/` doit porter le taux de victoire d'entrainement a cote
+    des courbes de sante PPO.
+
+    CE QUE LE CAS DISCRIMINE. La courbe vivait avant le retrait dans `log_critical_dashboard`,
+    qui tourne a CHAQUE fin d'episode, alors que sa jumelle n'est emise que sous la garde
+    `winner is not None`. L'episode sans vainqueur du montage separe les deux implementations :
+    depuis le dashboard, il republierait la fenetre inchangee et `d_win_rate` porterait un
+    point de plus que `game_critical/win_rate`, aux abscisses decalees pour tout le reste du
+    run. Il n'y a alors plus de jumelle, mais deux courbes voisines qu'aucun oeil ne separe.
+    """
+    tracker, recording = _tracker(tmp_path, window=3)
+    for winner in (0, 0, 1, None, 1):
+        tracker.log_episode_end({
+            "total_reward": 10.0, "episode_length": 100, "winner": winner,
+            "controlled_player": 1, "deployment_mode": None,
+        })
+
+    critique = [
+        (value, step) for key, value, step in recording.scalars
+        if key == "00_critical/d_win_rate"
+    ]
+    jumelle = [
+        (value, step) for key, value, step in recording.scalars
+        if key == "game_critical/win_rate"
+    ]
+    # Fenetre de 3 sur quatre episodes decides (0, 0, 1, 1) : deux points seulement, aux
+    # steps 4 et 6 — le step 5 est l'episode sans vainqueur, qui n'alimente aucune des deux.
+    assert jumelle == [(pytest.approx(1 / 3), 4), (pytest.approx(2 / 3), 6)], (
+        "montage invalide : la sonde de reference n'a pas les points attendus"
+    )
+    assert critique == jumelle, (
+        "d_win_rate doit porter les memes valeurs aux memes abscisses que game_critical/win_rate"
+    )
 
 
 def test_each_perf_curve_is_doubled_by_a_reactive_window(tmp_path: Any) -> None:
