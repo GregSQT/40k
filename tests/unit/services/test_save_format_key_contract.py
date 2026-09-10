@@ -271,11 +271,58 @@ _TL07_KEYS: FrozenSet[str] = frozenset({
         'waaagh_called', 'winner', 'zone_intent_free_steps_remaining', 'zone_intents',
 })
 
+#: TL08 = TL07 à la clé de PREMIER niveau près : le bump vient d'une sous-clé de
+#: `deployment_state` (`reserves_declaration_started`), donc de la table du second niveau. Entrée
+#: réécrite en littéral comme les précédentes, jamais dérivée — un alias ferait muter l'entrée
+#: figée TL07 en même temps que la courante au prochain ajout de clé.
+_TL08_KEYS: FrozenSet[str] = frozenset({
+        '_best_weapon_cache', '_charge_declaration_current', '_charge_engage_memo',
+        '_charge_initial_rolls', '_charge_plan_cache', '_deployment_scoring_cache',
+        '_deployment_slot_candidates', '_edge_distance_cache', '_entity_types_cache',
+        '_grid_deployment_zone_anchor', '_grid_static_hex_arrays', '_ingress_arrived',
+        '_ingress_no_destination', '_ingress_offered', '_objective_control_last_boundary',
+        '_objective_hex_zones_cache', '_obs_objective_hex_arrays', '_obs_weapon_profiles_cache',
+        '_obscuring_area_sets_cache', '_pending_reserves_wasted', '_pending_zone_shaping',
+        '_pile_in_toCol', '_pile_in_toRow', '_reserves_deployed', '_reserves_destroyed_turn3',
+        '_reserves_placed', '_restored_model_counter', '_shoot_pass_cache',
+        '_socle_wall_blocked_cache', '_squad_move_pool_cache', '_unit_move_version',
+        '_wall_set_cache', '_zone_intent_declarations', 'action_log_seq', 'action_logs',
+        'active_movement_unit', 'active_rule_choice_prompt', 'advance_rolls',
+        'charge_activation_pool', 'charge_range_rolls', 'choice_timing_index',
+        'command_activation_pool', 'command_points', 'console_logs',
+        'controlled_objective_samples_scoring_turns', 'current_player', 'debug_mode',
+        'deployment_mode_schedule_mode', 'deployment_state', 'deployment_type',
+        'deployment_type_by_player', 'deployment_zone', 'destroyed_models',
+        'enemy_adjacent_counts_player_1', 'enemy_adjacent_counts_player_2',
+        'enemy_adjacent_hexes_player_1', 'enemy_adjacent_hexes_player_2', 'enemy_slot_mapping_p1',
+        'episode_number', 'episode_steps', 'fight_subphase', 'game_over', 'gym_distance_metric',
+        'gym_training_mode', 'last_move_cause', 'last_move_event_id', 'log_delta',
+        'macro_target_objective_id', 'macro_target_objective_index', 'model_count_at_start_by_player',
+        'models_cache', 'move_activation_pool', 'move_preview_footprint_span',
+        'moved_distance_by_model', 'oath_target', 'objective_controllers', 'occupation_map',
+        'opponent_objective_samples_scoring_turns', 'pending_agent_decision',
+        'pending_oath_selection', 'pending_rule_choice_queue', 'pending_shooting_phase_init',
+        'pending_squad_fight_intents', 'pending_squad_shoot_intents', 'phase', 'player_names',
+        'player_types', 'points_limit', 'preview_hexes', 'reaction_window_active',
+        'reactive_decision_mode', 'reactive_decision_payload', 'reactive_macro_order_current_window',
+        'reactive_mode', 'secured_objectives', 'shoot_activation_pool', 'squad_cache', 'squad_models',
+        'suppressed_squads', 'training_config_name', 'turn', 'turn_limit_reached',
+        'unit_activation_count', 'unit_by_id', 'unit_zone_assignments', 'units', 'units_advanced',
+        'units_ascent_declaration_resolved', 'units_cache', 'units_cache_prev',
+        'units_cannot_charge', 'units_charged', 'units_declared_ascent', 'units_fled',
+        'units_fly_declaration_resolved', 'units_fly_declaration_resolved_charge', 'units_moved',
+        'units_reacted_this_enemy_turn', 'units_shot', 'units_shot_previous_turn',
+        'units_took_to_skies', 'units_took_to_skies_charge', 'unlimited_turns',
+        'valid_move_destinations_pool', 'value_at_start', 'victory_points', 'waaagh_active',
+        'waaagh_called', 'winner', 'zone_intent_free_steps_remaining', 'zone_intents',
+})
+
 MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
     b"W40KTL04": _TL04_KEYS,
     b"W40KTL05": _TL05_KEYS,
     b"W40KTL06": _TL06_KEYS,
     b"W40KTL07": _TL07_KEYS,
+    b"W40KTL08": _TL08_KEYS,
 }
 
 #: --- DEUXIÈME NIVEAU : sous-clés des dicts mutables publiés par le reset ---------------------
@@ -372,9 +419,53 @@ _TL07_SUBKEYS: Dict[str, FrozenSet[str]] = {
     "unit_zone_assignments": frozenset(),
 }
 
+#: TL08 = TL07 + `reserves_declaration_started` dans `deployment_state` : le marqueur « une
+#: réponse 20.01 a été donnée », lu par `_execute_change_roster_action` pour refuser le
+#: remplacement d'armée une fois l'étape commencée. Une row TL07 restitue `deployment_state` en
+#: bloc, donc sans lui, et ce lecteur lève. Entrée réécrite en littéral, jamais dérivée.
+_TL08_SUBKEYS: Dict[str, FrozenSet[str]] = {
+    # Comptabilité MUTABLE de la phase de déploiement. Les trois dernières sont les clés 20.01
+    # (`deployment_handlers.RESERVES_DECLARATION_QUEUE_KEY` / `_CLOSED_KEY` / `_STARTED_KEY`).
+    "deployment_state": frozenset({
+        "current_deployer", "deployable_units", "deployed_units", "deployment_complete",
+        "reserves_declaration_queue", "reserves_declaration_closed",
+        "reserves_declaration_started",
+    }),
+    "_deployment_slot_candidates": frozenset({"key", "candidates"}),
+    "_grid_static_hex_arrays": frozenset({"walls", "objectives", "cover", "obscuring"}),
+    "choice_timing_index": frozenset({
+        "phase_start", "on_deploy", "turn_start", "activation_start", "player_turn_start",
+    }),
+    # Dicts que le reset publie VIDES : le format n'y porte aucune sous-clé, et l'épingle à ∅ le
+    # dit. Le jour où le reset en publie une, la comparaison rougit et impose une décision —
+    # sous-clé NOMMÉE et obligatoire → bump ; sous-clés dérivées des entités (unités, joueurs,
+    # hexs) → déplacer la clé dans `_DATA_KEYED_MUTABLE_DICTS`, sans bump.
+    "_charge_declaration_current": frozenset(),
+    "_charge_initial_rolls": frozenset(),
+    "_charge_plan_cache": frozenset(),
+    "_edge_distance_cache": frozenset(),
+    "_squad_move_pool_cache": frozenset(),
+    "_zone_intent_declarations": frozenset(),
+    "advance_rolls": frozenset(),
+    "charge_range_rolls": frozenset(),
+    "destroyed_models": frozenset(),
+    "enemy_adjacent_counts_player_1": frozenset(),
+    "enemy_adjacent_counts_player_2": frozenset(),
+    "moved_distance_by_model": frozenset(),
+    "objective_controllers": frozenset(),
+    "occupation_map": frozenset(),
+    "pending_squad_fight_intents": frozenset(),
+    "pending_squad_shoot_intents": frozenset(),
+    "reactive_decision_payload": frozenset(),
+    "secured_objectives": frozenset(),
+    "suppressed_squads": frozenset(),
+    "unit_zone_assignments": frozenset(),
+}
+
 MUTABLE_SUBKEYS_BY_MAGIC: Dict[bytes, Dict[str, FrozenSet[str]]] = {
     b"W40KTL06": _TL06_SUBKEYS,
     b"W40KTL07": _TL07_SUBKEYS,
+    b"W40KTL08": _TL08_SUBKEYS,
 }
 
 #: Dicts mutables dont les sous-clés sont des DONNÉES de la partie — identifiants d'unité ou de
@@ -423,6 +514,9 @@ _FROZEN_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     # Même empreinte que TL05 : le bump TL06 portait sur deux clés du DEUXIÈME niveau, hors de
     # portée de ce contrat. L'égalité est un fait mesuré, pas un copier-coller à corriger.
     b"W40KTL06": (131, "bc1d5f0c7f07dc36"),
+    # Même empreinte encore : TL07 ne brûlait qu'un numéro d'en-tête, et TL08 vient d'une
+    # sous-clé. Deux bumps de suite sans mouvement au premier niveau — fait mesuré.
+    b"W40KTL07": (131, "bc1d5f0c7f07dc36"),
 }
 
 #: Même épingle pour la table de SOUS-CLÉS. Elle est née sous TL06 et le bump TL07 — qui brûle un
@@ -431,6 +525,9 @@ _FROZEN_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
 #: l'une comme dans l'autre table.
 _FROZEN_SUBKEY_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     b"W40KTL06": (24, "f5d15abb41f83555"),
+    # TL07 n'ajoutait aucune sous-clé (numéro brûlé), d'où l'égalité avec TL06 ; TL08 en ajoute
+    # une et sort donc de cette table, où elle entrera au bump suivant.
+    b"W40KTL07": (24, "f5d15abb41f83555"),
 }
 
 #: Les neuf clés dont l'ajout n'a PAS été suivi d'un bump entre TL03 et TL04. Elles sont dans le
