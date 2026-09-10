@@ -21,10 +21,11 @@ CE QUE CE FICHIER VERROUILLE :
 """
 from __future__ import annotations
 
+import ast
 import re
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
 import pytest
 
@@ -234,4 +235,105 @@ def test_game_log_message_and_step_log_line_say_the_same_thing(tmp_path):
     assert len(lines) == 1
     assert lines[0].endswith(f"{message} [SUCCESS]"), (
         f"step.log dit {lines[0]!r}, le Game Log dit {message!r}"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NON-CONTOURNEMENT — le relevé est pris dans UN encadrement, à appelant unique
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: Racines où un chemin de production peut vivre. Le front n'applique aucune décision : il envoie
+#: une action, et c'est `_process_semantic_action` qui la route.
+_RACINES_PRODUCTION: Tuple[str, ...] = ("engine", "ai", "services")
+
+
+class _AppelsParFonction(ast.NodeVisitor):
+    """Relève chaque appel `<...>.<symbole>(...)` avec la fonction qui le contient.
+
+    `ast.walk` ne convient pas : il perd le contexte englobant, et c'est précisément le contexte
+    qui est contrôlé ici — savoir QUI appelle, pas combien de fois.
+    """
+
+    def __init__(self, symbole: str, chemin: str, trouves: Set[Tuple[str, str]]) -> None:
+        self._symbole = symbole
+        self._chemin = chemin
+        self._trouves = trouves
+        self._pile: List[str] = []
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._pile.append(node.name)
+        self.generic_visit(node)
+        self._pile.pop()
+
+    visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr == self._symbole:
+            self._trouves.add((self._chemin, self._pile[-1] if self._pile else "<module>"))
+        self.generic_visit(node)
+
+
+#: Arbres de production, parsés UNE fois : deux symboles sont contrôlés, et reparser `engine/`
+#: entier pour chacun coûtait 1,05 s par paramétrage, mesuré.
+_ARBRES: List[Tuple[str, ast.Module]] = []
+
+
+def _arbres_production() -> List[Tuple[str, ast.Module]]:
+    if not _ARBRES:
+        for racine in _RACINES_PRODUCTION:
+            for chemin in sorted((PROJECT_ROOT / racine).rglob("*.py")):
+                _ARBRES.append(
+                    (
+                        str(chemin.relative_to(PROJECT_ROOT)),
+                        ast.parse(chemin.read_text(encoding="utf-8"), filename=str(chemin)),
+                    )
+                )
+        assert _ARBRES, f"aucun fichier de production sous {_RACINES_PRODUCTION} — sonde muette"
+    return _ARBRES
+
+
+def _appelants(symbole: str) -> Set[Tuple[str, str]]:
+    """`{(chemin relatif, fonction englobante)}` de tous les appels du symbole en production."""
+    trouves: Set[Tuple[str, str]] = set()
+    for relatif, arbre in _arbres_production():
+        _AppelsParFonction(symbole, relatif, trouves).visit(arbre)
+    return trouves
+
+
+@pytest.mark.parametrize(
+    "symbole", ["_dispatch_agent_decision_action", "_record_agent_decision_action_log"]
+)
+def test_l_encadrement_du_releve_n_a_qu_un_appelant(symbole: str):
+    """L'application d'une décision et son relevé ne s'appellent que depuis LE MÊME encadrement.
+
+    CE QUE CE TEST VAUT, et pas plus : c'est du gardiennage contre un contournement, pas un
+    verrou de mesure. Le mode de panne « un type de plus qui n'est pas journalisé » n'existe pas
+    structurellement — la garde `NotImplementedError` de `_dispatch_agent_decision_action` force
+    toute branche nouvelle à vivre DANS le dispatch, donc sous l'encadrement qui relève, et
+    `ai/analyzer.py` compte les types par `defaultdict` sans en câbler aucun. Le douzième type
+    (`reactive_move`) l'a vérifié en pratique : il est arrivé journalisé sans qu'une ligne de
+    relevé ait été écrite pour lui. Ce qui reste possible, et que ce test barre, c'est un chemin
+    qui appellerait l'application SANS son encadrement, ou une branche qui écrirait son propre
+    relevé à côté — la divergence que le site unique existe pour empêcher.
+
+    ⚠️ EXCEPTION LÉGITIME, à ne pas confondre avec un contournement :
+    `_resolve_faction_decisions_for_ai_seats` applique `returned_models_profile`,
+    `returned_models_placement` et `waaagh_call` en appelant les `apply_*_decision` des handlers
+    DIRECTEMENT, sans relevé. Ce sont les sièges bot / PvE hors gym, dont les choix viennent des
+    heuristiques `_select_ai_*` et non de la politique : les journaliser comme des décisions
+    d'agent fausserait le taux mesuré. En gym, cette méthode sort immédiatement — les deux sièges
+    répondent par le masque, donc par l'encadrement contrôlé ici.
+
+    ⚠️ Pas de test paramétré sur les douze `AGENT_DECISION_TYPE_IDS` : les branches du dispatch
+    exigent un état riche (contexte de tir, plan de charge, file 20.01,
+    `_pending_exhortation_fight`, `pending_rule_choice_queue`, fenêtre réactive), et neutraliser
+    le dispatch pour les atteindre rendrait le test vert pour n'importe quel type, y compris un
+    type qui n'y serait pas branché.
+    """
+    attendu = {("engine/w40k_core.py", "_handle_agent_decision_action")}
+    assert _appelants(symbole) == attendu, (
+        f"'{symbole}' ne doit etre appele que par `_handle_agent_decision_action` : une "
+        f"application sans son releve, ou un releve ecrit hors du site unique, fait diverger le "
+        f"journal des decisions de ce que l'agent a reellement joue."
     )

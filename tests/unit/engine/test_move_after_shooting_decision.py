@@ -409,6 +409,32 @@ def test_le_dispatcher_de_decision_route_bien_le_type():
     assert read_pending_agent_decision(gs) is None
     assert _shooter_position(gs) == (expected["destCol"], expected["destRow"])
 
+    # DEUX entrées de journal pour UN step gym, et c'est l'invariant de COMPTAGE : la ligne
+    # d'EFFET (`move_after_shooting`, incrémentante) compte le step que `CHOICE_i` a consommé, le
+    # RELEVÉ (`agent_decision`, non incrémentant) le NOMME sans le recompter. C'est mot pour mot
+    # ce que le commentaire de `_STEP_LOG_NON_INCREMENTING_TYPES` affirme des types « qui
+    # produisent une ligne d'effet », et aucun test ne le couvrait : `reserves_declaration`, seul
+    # type journalisé de bout en bout (`test_step_log_agent_decision.py`), n'en produit AUCUNE —
+    # sur lui, les deux comptages sont indiscernables.
+    journalises = [str(entry["type"]) for entry in gs["action_logs"]]
+    assert journalises == ["move_after_shooting", "agent_decision"], journalises
+    assert "move_after_shooting" not in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES
+    assert "agent_decision" in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES
+    for _journalise in journalises:
+        assert _journalise in W40KEngine._STEP_LOG_TYPE_MAP, (
+            f"'{_journalise}' hors de la liste blanche : la ligne n'atteint jamais step.log"
+        )
+
+    releve = gs["action_logs"][-1]
+    assert releve["decision_type"] == "move_after_shooting"
+    assert releve["decision_option_index"] == 0
+    assert releve["decision_option_declines"] is False, "CHOICE_0 se déplace, il ne passe pas"
+    assert str(releve["unitId"]) == "1"
+    assert releve["message"], "le relevé doit nommer le candidat joué, pas une case vide"
+    # VIDE et non absent : `_build_step_log_details` lit la clé, et son absence le ferait aller
+    # chercher les positions LIVE par socle sur une ligne qui n'observe aucun déplacement.
+    assert releve["models_segment"] == ""
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. POURQUOI DES INTENTIONS, ET PAS LES HEX EUX-MÊMES
