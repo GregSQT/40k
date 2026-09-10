@@ -577,3 +577,193 @@ describe("useEngineAPI — changeRoster", () => {
     expect(result.current.error).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Canal de REFUS non fatal
+//
+// `error` est une PANNE : posé, il fait lever le hook (`API ERROR`) et, `BoardWithAPI` n'étant
+// enveloppé d'aucun garde de rendu, la page devient blanche. Un refus de règle — « cible hors de
+// portée », « unité pas dans le pool » — n'est pas une panne : il passe par `actionRefusal`, qui
+// laisse le plateau jouable et s'efface au geste suivant.
+// ---------------------------------------------------------------------------
+
+describe("useEngineAPI — canal de refus", () => {
+  /** Réponse de refus du moteur : HTTP 200, `success: false`, raison dans `result.error`. */
+  const refus = (code: string, etat: Record<string, unknown>) =>
+    HttpResponse.json({
+      success: false,
+      result: { error: code },
+      game_state: etat,
+      action_logs: [],
+      message: "Action failed",
+    });
+
+  it("refus d'un geste → message posé, plateau VIVANT (aucune panne)", async () => {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: makeGameState() })
+      ),
+      http.post("/api/game/action", () => refus("unit_not_in_pool", makeGameState()))
+    );
+
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+    await act(async () => {
+      await result.current.onSetAdvanceMode(10);
+    });
+
+    expect(result.current.actionRefusal).toContain("unit_not_in_pool");
+    expect(result.current.actionRefusal).toContain("Advance");
+    // LE PLATEAU RESTE JOUABLE : c'est tout l'objet du canal séparé.
+    expect(result.current.error).toBeNull();
+    // Et l'effet de bord du succès n'est PAS appliqué : le jet d'advance n'existe pas.
+    expect(result.current.advanceRoll).toBeNull();
+  });
+
+  it("le geste suivant efface le message", async () => {
+    let refuse = true;
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: makeGameState() })
+      ),
+      http.post("/api/game/action", () => {
+        if (refuse) return refus("unit_not_in_pool", makeGameState());
+        return HttpResponse.json({
+          success: true,
+          result: { advance_roll: 3 },
+          game_state: makeGameState(),
+          action_logs: [],
+        });
+      })
+    );
+
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+    await act(async () => {
+      await result.current.onSetAdvanceMode(10);
+    });
+    expect(result.current.actionRefusal).not.toBeNull();
+
+    refuse = false;
+    await act(async () => {
+      await result.current.onSetAdvanceMode(10);
+    });
+
+    expect(result.current.actionRefusal).toBeNull();
+    expect(result.current.advanceRoll).toBe(3);
+  });
+
+  it("succès → aucun message, et l'effet de bord est appliqué", async () => {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: makeGameState() })
+      ),
+      http.post("/api/game/action", () =>
+        HttpResponse.json({
+          success: true,
+          result: { advance_roll: 5 },
+          game_state: makeGameState(),
+          action_logs: [],
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+    await act(async () => {
+      await result.current.onSetAdvanceMode(10);
+    });
+
+    expect(result.current.actionRefusal).toBeNull();
+    expect(result.current.advanceRoll).toBe(5);
+  });
+
+  it("clearActionRefusal referme le message sans jouer", async () => {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: makeGameState() })
+      ),
+      http.post("/api/game/action", () => refus("unit_not_in_pool", makeGameState()))
+    );
+
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+    await act(async () => {
+      await result.current.onSetAdvanceMode(10);
+    });
+    expect(result.current.actionRefusal).not.toBeNull();
+
+    act(() => {
+      result.current.clearActionRefusal();
+    });
+
+    expect(result.current.actionRefusal).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Desperate Escape (09.07) — un refus REPOSE l'avertissement
+//
+// Le clic du joueur ferme le popup AVANT l'appel. Si le moteur refuse, le danger n'est pas
+// résolu, mais `ensureActivatedNoHazard` lit ce popup pour répondre « pas de danger en attente » :
+// laisser le popup fermé faisait partir l'unité en mouvement avec son hazard en suspens.
+// ---------------------------------------------------------------------------
+
+describe("useEngineAPI — refus de la confirmation de danger", () => {
+  /** Ouvre le popup hazard comme le moteur le fait : réponse `requires_hazard` à l'activation. */
+  async function ouvrePopupHazard() {
+    let premierAppel = true;
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: makeGameState() })
+      ),
+      http.post("/api/game/action", () => {
+        if (premierAppel) {
+          premierAppel = false;
+          return HttpResponse.json({
+            success: true,
+            result: { action: "requires_hazard", requires_hazard: true, unitId: "10" },
+            game_state: makeGameState(),
+            action_logs: [],
+          });
+        }
+        // Deuxième appel = la confirmation : REFUSÉE.
+        return HttpResponse.json({
+          success: false,
+          result: { error: "hazard_already_resolved" },
+          game_state: makeGameState(),
+          action_logs: [],
+          message: "Action failed",
+        });
+      })
+    );
+
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+    await act(async () => {
+      await result.current.onSelectUnit(10);
+    });
+    await waitFor(() => expect(result.current.hazardWarningPopup).not.toBeNull(), {
+      timeout: 5000,
+    });
+    return result;
+  }
+
+  it("confirmation refusée → l'avertissement est REPOSÉ, le message est lu", async () => {
+    const result = await ouvrePopupHazard();
+
+    await act(async () => {
+      await result.current.onConfirmHazardWarning();
+    });
+
+    expect(result.current.actionRefusal).toContain("hazard_already_resolved");
+    // REPOSÉ : sans lui, le prochain geste de mouvement croirait le danger réglé.
+    expect(result.current.hazardWarningPopup).toEqual({ unitId: 10 });
+    expect(result.current.error).toBeNull();
+  });
+});

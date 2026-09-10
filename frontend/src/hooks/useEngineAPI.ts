@@ -29,7 +29,7 @@ import {
   getFightAttackerAttackLeft,
   isFightAttackSelectionUiOpen,
 } from "../utils/activationClickTarget";
-import { readEngineActionOutcome } from "../utils/engineActionOutcome";
+import { type EngineActionOutcome, readEngineActionOutcome } from "../utils/engineActionOutcome";
 import { logFightClick } from "../utils/fightClickDebug";
 import { cubeDistance, cubeToOffset, offsetToCube } from "../utils/gameHelpers";
 import { toPlanArray, toPlanArrayWithOrientation } from "../utils/modelPlan";
@@ -561,6 +561,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const [endlessDutyState, setEndlessDutyState] = useState<EndlessDutyState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  /** REFUS DU MOTEUR — canal NON FATAL, à ne jamais confondre avec `error`.
+   *
+   *  `error` est une PANNE : posé, il fait lever le hook au rendu suivant (`API ERROR`, plus bas),
+   *  rien ne le remet à zéro, et `BoardWithAPI` n'est enveloppé d'aucun garde de rendu
+   *  (`Routes.tsx`) — la page devient blanche et seul un rechargement la ramène.
+   *
+   *  Un refus de règle n'est pas une panne : « cible hors de portée », « plafond de réserves
+   *  atteint », « unité pas dans le pool de pose » sont des RÉPONSES du moteur, attendues en
+   *  cours de partie. Huit sites les envoyaient dans `error` : un clic sur une cible interdite
+   *  fermait la partie affichée. Ils passent tous par ici.
+   *
+   *  Effacé au geste suivant, en tête d'`executeAction` : le message vaut pour le geste qui vient
+   *  d'être refusé, pas pour toute la partie. */
+  const [actionRefusal, setActionRefusal] = useState<string | null>(null);
   const [maxTurnsFromConfig, setMaxTurnsFromConfig] = useState<number | null>(null);
   const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
   const [mode, setMode] = useState<
@@ -1688,6 +1702,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // biome-ignore lint/correctness/useExhaustiveDependencies: handleStartChargeModelMove and readSquadModelPositions are declared later in the file — adding them to deps would cause noInvalidUseBeforeDeclaration
   const executeAction = useCallback(
     async (action: Record<string, unknown>) => {
+      // Le refus précédent ne vaut plus : le joueur fait un nouveau geste. POINT D'EFFACEMENT
+      // UNIQUE du canal de refus, et il est ici parce que tout geste passe par cette fonction —
+      // effacer dans chaque handler laisserait un message périmé sur ceux qui l'oublieraient.
+      setActionRefusal(null);
       // Aperçu (Select/Load/rewind view) actif : le board affiche un état ≠ moteur live.
       // On bloque l'action (pas d'appel backend, sinon désync : ex tirer avec une fig morte du live)
       // et on ouvre le popup de confirmation « tu vas modifier la partie en cours » (→ Resume).
@@ -2151,8 +2169,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             // Le verrou d'init reste posé jusqu'au retour du second appel (shooting_phase_start).
             phaseInitChainedRef.current = true;
             setPhaseInitPending(true);
-            setTimeout(() => {
-              void executeAction({ action: "advance_phase", from: "move" });
+            setTimeout(async () => {
+              // Un refus laisserait l'interface sur une phase que le moteur n'a pas quittée, et
+              // sans un mot : il n'y a plus aucun geste à faire dans un pool vide.
+              noteActionOutcome(
+                await executeAction({ action: "advance_phase", from: "move" }),
+                "Passage à la phase suivante"
+              );
             }, 0);
           }
 
@@ -2163,7 +2186,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             data.game_state.shoot_activation_pool.length === 0
           ) {
             setTimeout(async () => {
-              await executeAction({ action: "advance_phase", from: "shoot" });
+              noteActionOutcome(
+                await executeAction({ action: "advance_phase", from: "shoot" }),
+                "Passage à la phase suivante"
+              );
             }, 100);
           }
 
@@ -2185,7 +2211,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
             if (allPoolsEmpty && !fightActivePending) {
               setTimeout(async () => {
-                await executeAction({ action: "advance_phase", from: "fight" });
+                noteActionOutcome(
+                  await executeAction({ action: "advance_phase", from: "fight" }),
+                  "Passage à la phase suivante"
+                );
               }, 100);
             }
           }
@@ -3305,6 +3334,36 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     ]
   );
 
+  /** Lit l'issue d'un appel d'`executeAction`, AFFICHE le refus s'il y en a un, et la rend.
+   *
+   *  TROIS CAS NOMMÉS, JAMAIS UN BOOLÉEN (`readEngineActionOutcome`) : `ok` le moteur a agi,
+   *  `refused` il a répondu non, `noop` rien n'est parti. Ce qui est centralisé ici est le seul
+   *  geste commun aux soixante appels — poser le message —, pas la décision : c'est l'appelant
+   *  qui sait quels effets de bord il doit renoncer à appliquer, et lui seul.
+   *
+   *  `gesture` nomme le geste EN FRANÇAIS, comme le joueur l'a fait (« Tir », « Pose ») : le code
+   *  de refus du moteur (`unit_not_deployable`) ne dit pas au joueur ce qu'il vient de tenter.
+   *
+   *  Une NON-ACTION n'affiche rien : ses trois portes parlent déjà ailleurs — popup de
+   *  confirmation d'aperçu, bannière réseau, partie terminée. */
+  const noteActionOutcome = useCallback(
+    (
+      data: { success?: boolean; error?: unknown; result?: { error?: unknown } } | undefined,
+      gesture: string
+    ): EngineActionOutcome => {
+      const outcome = readEngineActionOutcome(data);
+      if (outcome.kind === "refused") {
+        setActionRefusal(`${gesture} refusé : ${outcome.message}`);
+      }
+      return outcome;
+    },
+    []
+  );
+
+  /** Referme le message de refus sur demande de l'UI (croix du bandeau). Le geste suivant
+   *  l'efface de toute façon ; ceci sert à s'en débarrasser sans jouer. */
+  const clearActionRefusal = useCallback(() => setActionRefusal(null), []);
+
   // Convert API units to frontend format
   const convertUnits = useCallback((apiUnits: APIGameState["units"]): Unit[] => {
     return apiUnits.map((unit) => {
@@ -3572,11 +3631,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleShootingPhaseClick = useCallback(
     async (unitId: number, clickType: "left" | "right") => {
       if (!gameState) return;
-      await executeAction(
-        buildActivationPointerPayload("shoot", unitId, clickType, gameState, selectedUnitId)
+      noteActionOutcome(
+        await executeAction(
+          buildActivationPointerPayload("shoot", unitId, clickType, gameState, selectedUnitId)
+        ),
+        "Clic de tir"
       );
     },
-    [gameState, selectedUnitId, executeAction]
+    [gameState, selectedUnitId, executeAction, noteActionOutcome]
   );
 
   const processQueuedFightTargetClicks = useCallback(async () => {
@@ -3627,6 +3689,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
               game_state?: APIGameState;
             }
           | undefined;
+        noteActionOutcome(response, "Clic de combat");
 
         const gsAfter = (response?.game_state ?? latestGameStateRef.current) as
           | APIGameState
@@ -3667,7 +3730,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     } finally {
       fightClickQueueProcessingRef.current = false;
     }
-  }, [gameState, selectedUnitId, enqueueFightRequest, executeAction, clearFightAttackActivationUi]);
+  }, [
+    gameState,
+    selectedUnitId,
+    enqueueFightRequest,
+    executeAction,
+    clearFightAttackActivationUi,
+    noteActionOutcome,
+  ]);
 
   /** Clics plateau en phase fight : même contrat API que le tir (``left_click`` / ``right_click``). */
   const handleFightPhaseClick = useCallback(
@@ -3727,8 +3797,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           ...gsNow,
           active_fight_unit: activeFightStr,
         } as ActivationPointerGameState;
-        await executeAction(
-          buildActivationPointerPayload("fight", unitId, clickType, gsForPayload, selectedUnitId)
+        noteActionOutcome(
+          await executeAction(
+            buildActivationPointerPayload("fight", unitId, clickType, gsForPayload, selectedUnitId)
+          ),
+          "Clic de combat"
         );
       });
     },
@@ -3739,6 +3812,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       enqueueFightRequest,
       clearFightAttackActivationUi,
       processQueuedFightTargetClicks,
+      noteActionOutcome,
     ]
   );
 
@@ -3839,12 +3913,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             if (!activeFightId) {
               return;
             }
-            await executeAction({
-              action: "right_click",
-              unitId: activeFightId.toString(),
-              targetId: selectedUnitId != null ? String(selectedUnitId) : activeFightId.toString(),
-              clickTarget: "active_unit",
-            });
+            noteActionOutcome(
+              await executeAction({
+                action: "right_click",
+                unitId: activeFightId.toString(),
+                targetId:
+                  selectedUnitId != null ? String(selectedUnitId) : activeFightId.toString(),
+                clickTarget: "active_unit",
+              }),
+              "Désactivation de l'unité"
+            );
           });
           setSelectedUnitId(null);
           setMode("select");
@@ -3861,13 +3939,23 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             setSelectedUnitId(numericUnitId);
             setActivationPendingUnitId(numericUnitId);
             try {
-              await executeAction({
-                action: "activate_unit",
-                unitId: numericUnitId.toString(),
-                // Étages (§13.06, miroir move) : niveau de VUE courant → l'activation pile-in/
-                // consolidation calcule l'éligibilité au niveau affiché, cohérent avec les refresh.
-                level: currentLevelRef?.current ?? 0,
-              });
+              // Un refus laisse l'unité NON activée : la suite pose un plan local par-figurine
+              // sur une escouade que le moteur n'a pas ouverte, et les clics de pose partiraient
+              // dans le vide.
+              if (
+                noteActionOutcome(
+                  await executeAction({
+                    action: "activate_unit",
+                    unitId: numericUnitId.toString(),
+                    // Étages (§13.06, miroir move) : niveau de VUE courant → l'activation
+                    // pile-in/consolidation calcule l'éligibilité au niveau affiché.
+                    level: currentLevelRef?.current ?? 0,
+                  }),
+                  "Activation de l'unité"
+                ).kind !== "ok"
+              ) {
+                return;
+              }
               // Flux manuel par arme/figurine : initialise le plan local UNIQUEMENT en étape FIGHT.
               // En pile_in / consolidate (move par-figurine), ne PAS poser squadFightPlan — sinon le
               // handler capture fight intercepterait les clics de pose. Figs lues depuis le cache.
@@ -3949,10 +4037,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           setSelectedUnitId(numericUnitId);
           setActivationPendingUnitId(numericUnitId);
           try {
-            await executeAction({
-              action: "activate_unit",
-              unitId: numericUnitId.toString(),
-            });
+            noteActionOutcome(
+              await executeAction({
+                action: "activate_unit",
+                unitId: numericUnitId.toString(),
+              }),
+              "Activation de l'unité"
+            );
           } finally {
             activationInProgressRef.current = false;
             setActivationPendingUnitId(null);
@@ -3964,11 +4055,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Normal unit selection for other phases
       // If deselecting in chargePreview mode, send postpone action to backend
       if (numericUnitId === null && mode === "chargePreview" && selectedUnitId !== null) {
-        await executeAction({
-          action: "left_click",
-          unitId: selectedUnitId.toString(),
-          clickTarget: "active_unit",
-        });
+        noteActionOutcome(
+          await executeAction({
+            action: "left_click",
+            unitId: selectedUnitId.toString(),
+            clickTarget: "active_unit",
+          }),
+          "Désactivation de la charge"
+        );
         setChargeDestinations([]);
         setChargePreviewOverlayHexes([]);
         setChargeReferenceHex(null);
@@ -3997,6 +4091,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       enqueueFightRequest,
       handleFightPhaseClick,
       currentLevelRef,
+      noteActionOutcome,
     ]
   );
 
@@ -4027,10 +4122,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           return;
         }
         try {
-          await executeAction({
-            action: "right_click",
-            unitId: uid,
-          });
+          const data = await executeAction({ action: "right_click", unitId: uid });
+          if (noteActionOutcome(data, "Report du mouvement").kind !== "ok") return;
           setSelectedUnitId(null);
           setMode("select");
           setMovePreview(null);
@@ -4048,7 +4141,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       };
 
       try {
-        await executeAction(action);
+        if (noteActionOutcome(await executeAction(action), "Passer l'unité").kind !== "ok") return;
         setSelectedUnitId(null);
         setMode("select");
       } catch (error) {
@@ -4056,7 +4149,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError(`Skip unit failed: ${formatApiConnectionError(error)}`);
       }
     },
-    [executeAction, gameState?.phase, gameState?.active_movement_unit]
+    [executeAction, gameState?.phase, gameState?.active_movement_unit, noteActionOutcome]
   );
 
   const handleEndPhase = useCallback(
@@ -4080,15 +4173,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         );
       }
 
-      await executeAction({
-        action: "end_phase",
-        player: player,
-      });
+      noteActionOutcome(
+        await executeAction({ action: "end_phase", player: player }),
+        "Fin de phase"
+      );
     },
-    [executeAction, gameState]
+    [executeAction, gameState, noteActionOutcome]
   );
 
   const handleSandboxSet = useCallback(
+    // SILENCE ASSUMÉ : interrupteur de bac à sable, pas un geste de jeu. Un refus n'a rien à
+    // dire au joueur — l'interrupteur reste sur sa position et le moteur n'a pas changé d'état.
     async (sandboxFreeMove: boolean) => {
       await executeAction({ action: "sandbox_set", sandbox_free_move: sandboxFreeMove });
     },
@@ -4096,6 +4191,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   );
 
   const handleJumpToPhase = useCallback(
+    // SILENCE ASSUMÉ : saut de phase de bac à sable, même raison que `handleSandboxSet`.
     async (targetPhase: string) => {
       await executeAction({ action: "sandbox_jump_to_phase", target_phase: targetPhase });
     },
@@ -4138,11 +4234,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // Sortie de move en vol : le backend est déjà en shoot, ne pas émettre d'activate_unit move.
       if (moveExitPendingRef.current) return false;
       if (String(latestGameStateRef.current?.active_movement_unit) !== sid) {
-        await executeAction({ action: "activate_unit", unitId: sid });
+        const data = await executeAction({ action: "activate_unit", unitId: sid });
+        // Rendre `true` sur un refus ferait croire à l'appelant que l'unité est activée sans
+        // danger en attente : il enchaînerait son geste de mouvement sur une unité fermée.
+        if (noteActionOutcome(data, "Activation de l'unité").kind !== "ok") return false;
       }
       return hazardWarningPopupRef.current === null;
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   const handleStartMovePreview = useCallback(
@@ -4570,7 +4669,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
 
       try {
-        await executeAction(action);
+        if (noteActionOutcome(await executeAction(action), "Mouvement").kind !== "ok") return;
         setMovePreview(null);
         setPendingPreviewAction(null);
         setSelectedUnitId(null);
@@ -4581,7 +4680,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError(`Move failed: ${formatApiConnectionError(error)}`);
       }
     },
-    [executeAction, validateOrientationStep]
+    [executeAction, validateOrientationStep, noteActionOutcome]
   );
 
   /** Bouton Validate : commit atomique du plan complet (commit_move_plan). */
@@ -4599,11 +4698,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // à l'étage n'est plus au sol, et le socle pivoté conserve son orientation. null = inchangée.
     const plan = toPlanArrayWithOrientation(squadMovePlan.models);
     try {
-      await executeAction({
+      const data = await executeAction({
         action: "commit_move_plan",
         unitId: String(squadMovePlan.unitId),
         plan,
       });
+      // Le plan est le TRAVAIL DU JOUEUR : sur un refus, on ne le détruit pas et on dit
+      // pourquoi. La purge ci-dessous ne vaut que pour un commit réellement passé.
+      if (noteActionOutcome(data, "Mouvement").kind !== "ok") return;
       squadMoveModelPoolRef.current = new Set();
       setSquadMovePlan(null);
       setMode("select");
@@ -4615,7 +4717,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       console.error("[SQUAD-MOVE] commit FAILED", e);
       setError(`Squad move failed: ${formatApiConnectionError(e)}`);
     }
-  }, [squadMovePlan, executeAction]);
+  }, [squadMovePlan, executeAction, noteActionOutcome]);
 
   /** Annule le plan provisoire (aucune ecriture backend). */
   const handleCancelSquadMove = useCallback(async () => {
@@ -4625,11 +4727,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // pool d'activation). Sinon le bloc de boutons reste affiché car gaté par active_movement_unit.
     const activeMu = latestGameStateRef.current?.active_movement_unit;
     if (activeMu != null && activeMu !== "") {
-      await executeAction({
-        action: "left_click",
-        unitId: String(activeMu),
-        clickTarget: "active_unit",
-      });
+      noteActionOutcome(
+        await executeAction({
+          action: "left_click",
+          unitId: String(activeMu),
+          clickTarget: "active_unit",
+        }),
+        "Désactivation de l'unité"
+      );
     }
     setSquadMovePlan(null);
     setMode("select");
@@ -4637,13 +4742,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setAdvancingUnitId(null);
     setAdvanceRoll(null);
     setActiveUnitEngaged(null);
-  }, [executeAction]);
+  }, [executeAction, noteActionOutcome]);
 
   /** Bouton Advance (phase move) : bascule l'activation squad en mode Advance (jet D6 backend). */
   const handleSetAdvanceMode = useCallback(
     async (unitId: number | string) => {
       const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
       const data = await executeAction({ action: "advance", unitId: String(uid) });
+      // AVANT le contrôle du jet : un refus n'a pas de jet, et tomber sur le `throw` ci-dessous
+      // transformait un refus de règle en exception non traitée au clic.
+      if (noteActionOutcome(data, "Advance").kind !== "ok") return;
       const roll = (data as { result?: { advance_roll?: number } })?.result?.advance_roll;
       if (roll === undefined || roll === null) {
         throw new Error(`[ADVANCE] réponse sans advance_roll pour unit=${uid}`);
@@ -4662,7 +4770,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
       }
     },
-    [executeAction, refreshSquadMovePlanValidity, handleSelectModelForMove]
+    [executeAction, refreshSquadMovePlanValidity, handleSelectModelForMove, noteActionOutcome]
   );
 
   // handleTakeToSkies est défini plus bas (après refreshChargePlanState dont il dépend en phase charge).
@@ -4679,15 +4787,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setAdvancingUnitId(null);
       setAdvanceRoll(null);
       setActiveUnitEngaged(null);
-      await executeAction({ action: "wait", unitId: String(uid) });
+      noteActionOutcome(await executeAction({ action: "wait", unitId: String(uid) }), "Stationary");
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   /** TEST/DEBUG : force un battle-shock roll (01.07) sur l'unité — pour tester le Desperate Escape. */
   const handleForceBattleShock = useCallback(
     async (unitId: number | string) => {
       const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      // SILENCE ASSUMÉ : outil de test, pas un geste de jeu (cf. `handleSandboxSet`).
       await executeAction({ action: "force_battle_shock", unitId: String(uid) });
     },
     [executeAction]
@@ -4702,6 +4811,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const handleForceCharged = useCallback(
     async (unitId: number | string) => {
       const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
+      // SILENCE ASSUMÉ : outil de test, pas un geste de jeu (cf. `handleSandboxSet`).
       await executeAction({ action: "force_charged", unitId: String(uid) });
     },
     [executeAction]
@@ -4940,7 +5050,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       try {
-        await executeAction({ action: "squad_shoot_activate", unitId: String(uid) });
+        const data = await executeAction({
+          action: "squad_shoot_activate",
+          unitId: String(uid),
+        });
+        // Un refus laisse l'escouade non activée : la suite exige `eligible_shooting_types` dans
+        // la réponse et poserait une erreur fatale sur un refus de règle.
+        if (noteActionOutcome(data, "Activation du tir").kind !== "ok") {
+          squadShootActivatingRef.current = false;
+          return;
+        }
       } catch (e) {
         console.error("[SQUAD-SHOOT] activate FAILED", e);
         setError(`Squad shoot activate failed: ${formatApiConnectionError(e)}`);
@@ -4978,7 +5097,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       await handleSquadShootLosOverview(uid);
       squadShootActivatingRef.current = false;
     },
-    [readSquadModelPositions, executeAction, selectShootModelForUnit, handleSquadShootLosOverview]
+    [
+      readSquadModelPositions,
+      executeAction,
+      selectShootModelForUnit,
+      handleSquadShootLosOverview,
+      noteActionOutcome,
+    ]
   );
 
   /**
@@ -4990,11 +5115,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const plan = squadShootPlanRef.current;
       if (!plan) return;
       try {
-        await executeAction({
+        const data = await executeAction({
           action: "squad_shoot_type_select",
           unitId: String(plan.unitId),
           shootingType,
         });
+        // Sans ce contrôle, le plan local affichait un type de tir que le moteur a refusé.
+        if (noteActionOutcome(data, "Choix du type de tir").kind !== "ok") return;
       } catch (e) {
         console.error("[SQUAD-SHOOT] type_select FAILED", e);
         setError(`Squad shoot type select failed: ${formatApiConnectionError(e)}`);
@@ -5003,7 +5130,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (viewActiveRef.current) return;
       setSquadShootPlan((prev) => (prev ? { ...prev, selectedShootingType: shootingType } : prev));
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   /** Sélectionne une fig (clic en mode actif) : délègue au coeur via l unité du plan. */
@@ -5033,15 +5160,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         });
       } catch (e) {
         console.error(`[SQUAD-SHOOT] qty weapon=${weaponCode} target=${targetUnitId} FAILED`, e);
-        setError(`Cible refusée: ${formatApiConnectionError(e)}`);
+        // PANNE, pas un refus : ce `catch` ne voit que les exceptions (réseau, parse). Le mot
+        // « refusée » y était trompeur depuis que les refus du moteur ont leur propre canal.
+        setError(`Échec technique de l'assignation : ${formatApiConnectionError(e)}`);
         return;
       }
       if (!result) return;
-      const outcome = readEngineActionOutcome(result);
-      if (outcome.kind === "refused") {
-        setError(outcome.message);
-        return;
-      }
+      const outcome = noteActionOutcome(result, "Assignation de tir");
+      if (outcome.kind !== "ok") return;
       const decls = (result.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
@@ -5060,7 +5186,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       );
       await handleSquadShootLosOverview(plan.unitId);
     },
-    [executeAction, handleSquadShootLosOverview]
+    [executeAction, handleSquadShootLosOverview, noteActionOutcome]
   );
 
   /** Double-clic sur une unité ennemie : TOUTES les figs libres du profil actif tirent dessus
@@ -5078,6 +5204,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           weaponCode,
           targetId: String(targetUnitId),
         });
+        if (noteActionOutcome(maxRes, "Assignation de tir").kind !== "ok") return;
         const qtyMax = Number(maxRes?.result?.qty_max ?? 0);
         if (qtyMax <= 0) {
           return;
@@ -5094,15 +5221,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           `[SQUAD-SHOOT][weapon] assign weapon=${weaponCode} target=${targetUnitId} FAILED`,
           e
         );
-        setError(`Cible refusée: ${formatApiConnectionError(e)}`);
+        // PANNE, pas un refus : ce `catch` ne voit que les exceptions (réseau, parse). Le mot
+        // « refusée » y était trompeur depuis que les refus du moteur ont leur propre canal.
+        setError(`Échec technique de l'assignation : ${formatApiConnectionError(e)}`);
         return;
       }
       if (!result) return;
-      const outcome = readEngineActionOutcome(result);
-      if (outcome.kind === "refused") {
-        setError(outcome.message);
-        return;
-      }
+      const outcome = noteActionOutcome(result, "Assignation de tir");
+      if (outcome.kind !== "ok") return;
       const decls = (result.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
@@ -5123,7 +5249,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       );
       await handleSquadShootLosOverview(plan.unitId);
     },
-    [executeAction, handleSquadShootLosOverview]
+    [executeAction, handleSquadShootLosOverview, noteActionOutcome]
   );
 
   /** Clic droit sur une fig assignée : retire toutes ses armes (squad_shoot_unassign). */
@@ -5143,11 +5269,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       if (!result) return;
-      const outcome = readEngineActionOutcome(result);
-      if (outcome.kind === "refused") {
-        setError(outcome.message);
-        return;
-      }
+      const outcome = noteActionOutcome(result, "Retrait d'une figurine du tir");
+      if (outcome.kind !== "ok") return;
       const decls = (result.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
@@ -5164,7 +5287,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           : prev
       );
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   /** Remplacement combi : retire la déclaration d'une arme donnée (squad_shoot_unassign_weapon). */
@@ -5184,11 +5307,8 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
       if (!result) return;
-      const outcome = readEngineActionOutcome(result);
-      if (outcome.kind === "refused") {
-        setError(outcome.message);
-        return;
-      }
+      const outcome = noteActionOutcome(result, "Retrait d'une arme du tir");
+      if (outcome.kind !== "ok") return;
       const decls = (result.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
@@ -5205,7 +5325,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           : prev
       );
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   /** Bouton Valider : lock + résolution simultanée (squad_shoot_validate). */
@@ -5216,7 +5336,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return;
     }
     try {
-      await executeAction({ action: "squad_shoot_validate", unitId: String(plan.unitId) });
+      const data = await executeAction({
+        action: "squad_shoot_validate",
+        unitId: String(plan.unitId),
+      });
+      // Le plan est le TRAVAIL DU JOUEUR : sur un refus, on ne le détruit pas et on dit
+      // pourquoi. La purge ci-dessous ne vaut que pour un commit réellement passé.
+      if (noteActionOutcome(data, "Tir").kind !== "ok") return;
     } catch (e) {
       console.error("[SQUAD-SHOOT] validate FAILED", e);
       setError(`Squad shoot failed: ${formatApiConnectionError(e)}`);
@@ -5230,7 +5356,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSquadShootPlan(null);
     setMode("select");
     setSelectedUnitId(null);
-  }, [executeAction]);
+  }, [executeAction, noteActionOutcome]);
 
   /** Annule le tir : nettoie l état backend (pending + active), garde l unité dans le pool. */
   const handleCancelSquadShoot = useCallback(async () => {
@@ -5238,7 +5364,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     squadShootSessionRef.current += 1;
     if (plan) {
       try {
-        await executeAction({ action: "squad_shoot_cancel", unitId: String(plan.unitId) });
+        const data = await executeAction({
+          action: "squad_shoot_cancel",
+          unitId: String(plan.unitId),
+        });
+        // Un refus laisse l'unité active côté moteur : purger l'écran ici rendrait la partie
+        // muette pour cette escouade, sans rien dire.
+        if (noteActionOutcome(data, "Annulation du tir").kind !== "ok") return;
       } catch (e) {
         console.error("[SQUAD-SHOOT] cancel FAILED", e);
       }
@@ -5250,7 +5382,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSquadShootPlan(null);
     setMode("select");
     setSelectedUnitId(null);
-  }, [executeAction]);
+  }, [executeAction, noteActionOutcome]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // COMBAT par-figurine (PvP manuel) — attribution par arme/figurine (calque tir).
@@ -5279,15 +5411,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         result = await executeAction(payload);
       } catch (e) {
         console.error(`[SQUAD-FIGHT] assign model=${modelId} target=${targetUnitId} FAILED`, e);
-        setError(`Cible refusée: ${formatApiConnectionError(e)}`);
+        // PANNE, pas un refus : ce `catch` ne voit que les exceptions (réseau, parse). Le mot
+        // « refusée » y était trompeur depuis que les refus du moteur ont leur propre canal.
+        setError(`Échec technique de l'assignation : ${formatApiConnectionError(e)}`);
         return;
       }
       if (!result) return;
-      const outcome = readEngineActionOutcome(result);
-      if (outcome.kind === "refused") {
-        setError(outcome.message);
-        return;
-      }
+      const outcome = noteActionOutcome(result, "Assignation de combat");
+      if (outcome.kind !== "ok") return;
       const decls = (result.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
@@ -5306,7 +5437,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           : prev
       );
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   /** Double-clic sur une unité ennemie : toutes les figs portant l'arme active l'attaquent
@@ -5329,15 +5460,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           `[SQUAD-FIGHT] assign weapon=${weaponIndex} target=${targetUnitId} FAILED`,
           e
         );
-        setError(`Cible refusée: ${formatApiConnectionError(e)}`);
+        // PANNE, pas un refus : ce `catch` ne voit que les exceptions (réseau, parse). Le mot
+        // « refusée » y était trompeur depuis que les refus du moteur ont leur propre canal.
+        setError(`Échec technique de l'assignation : ${formatApiConnectionError(e)}`);
         return;
       }
       if (!result) return;
-      const outcome = readEngineActionOutcome(result);
-      if (outcome.kind === "refused") {
-        setError(outcome.message);
-        return;
-      }
+      const outcome = noteActionOutcome(result, "Assignation d'arme de combat");
+      if (outcome.kind !== "ok") return;
       const decls = (result.result?.declarations ?? []) as Array<{
         model_id: string;
         weapon_index: number;
@@ -5355,7 +5485,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           : prev
       );
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   /** Bouton Valider : résout les attaques déclarées (squad_fight_validate → allocation des pertes). */
@@ -5363,14 +5493,20 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const plan = squadFightPlanRef.current;
     if (!plan?.canValidate) return;
     try {
-      await executeAction({ action: "squad_fight_validate", unitId: String(plan.unitId) });
+      const data = await executeAction({
+        action: "squad_fight_validate",
+        unitId: String(plan.unitId),
+      });
+      // Le plan est le TRAVAIL DU JOUEUR : sur un refus, on ne le détruit pas et on dit
+      // pourquoi. La purge ci-dessous ne vaut que pour un commit réellement passé.
+      if (noteActionOutcome(data, "Combat").kind !== "ok") return;
     } catch (e) {
       console.error("[SQUAD-FIGHT] validate FAILED", e);
       setError(`Combat échoué: ${formatApiConnectionError(e)}`);
       return;
     }
     setSquadFightPlan(null);
-  }, [executeAction]);
+  }, [executeAction, noteActionOutcome]);
 
   /** Annule l'attribution en cours (plan local). Les déclarations pending backend seront
    *  écrasées à la prochaine activation/assignation (declare_attack_* remplace par arme/fig). */
@@ -5388,27 +5524,36 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       try {
         if (alloc.kind === "hazard") {
           // Desperate Escape (06.02) : clic figurine pour attribuer une mortal wound du hazard.
-          await executeAction({
-            action: "squad_hazard_allocate_model",
-            unitId: String(alloc.target_unit_id),
-            modelId: String(modelId),
-          });
+          noteActionOutcome(
+            await executeAction({
+              action: "squad_hazard_allocate_model",
+              unitId: String(alloc.target_unit_id),
+              modelId: String(modelId),
+            }),
+            "Allocation de la blessure"
+          );
           return;
         }
         if (alloc.kind === "fight") {
           // Combat (05.04) : clic figurine pour allouer une perte de mêlée.
-          await executeAction({
-            action: "squad_fight_manual_alloc",
-            unitId: String(alloc.attacker_unit_id),
-            modelId: String(modelId),
-          });
+          noteActionOutcome(
+            await executeAction({
+              action: "squad_fight_manual_alloc",
+              unitId: String(alloc.attacker_unit_id),
+              modelId: String(modelId),
+            }),
+            "Allocation de la perte"
+          );
           return;
         }
-        await executeAction({
-          action: "squad_shoot_allocate_model",
-          unitId: String(alloc.attacker_unit_id),
-          modelId: String(modelId),
-        });
+        noteActionOutcome(
+          await executeAction({
+            action: "squad_shoot_allocate_model",
+            unitId: String(alloc.attacker_unit_id),
+            modelId: String(modelId),
+          }),
+          "Allocation de la perte"
+        );
       } catch (e) {
         console.error("[MANUAL-ALLOC] allocate FAILED", e);
         setError(`Allocation failed: ${formatApiConnectionError(e)}`);
@@ -5416,7 +5561,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         allocInFlightRef.current = false;
       }
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   /** Desperate Escape : le joueur confirme le popup hazard → roule le hazard avant de bouger. */
@@ -5426,12 +5571,24 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setHazardWarningPopup(null);
     hazardWarningPopupRef.current = null;
     try {
-      await executeAction({ action: "hazard_confirm", unitId: String(popup.unitId) });
+      const data = await executeAction({
+        action: "hazard_confirm",
+        unitId: String(popup.unitId),
+      });
+      if (noteActionOutcome(data, "Confirmation du danger").kind !== "ok") {
+        // LE POPUP EST DÉJÀ FERMÉ à ce point (le clic du joueur le ferme avant l'appel), donc
+        // un simple `return` ne protégeait rien : le danger restait NON RÉSOLU alors que
+        // `ensureActivatedNoHazard` lit ce popup pour répondre « pas de danger en attente », et
+        // le joueur partait en mouvement avec son Desperate Escape en suspens. On le REPOSE.
+        setHazardWarningPopup(popup);
+        hazardWarningPopupRef.current = popup;
+        return;
+      }
     } catch (e) {
       console.error("[HAZARD] confirm FAILED", e);
       setError(`Hazard confirm failed: ${formatApiConnectionError(e)}`);
     }
-  }, [hazardWarningPopup, executeAction]);
+  }, [hazardWarningPopup, executeAction, noteActionOutcome]);
 
   /** Desperate Escape : le joueur annule → l'unité reste sélectionnée mais non déplacée. */
   const handleCancelHazardWarning = useCallback(() => {
@@ -5446,22 +5603,25 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const req = manualOrderRequestRef.current;
       if (!req) return;
       try {
-        await executeAction({
-          action:
-            req.kind === "fight"
-              ? "squad_fight_declare_order"
-              : req.kind === "hazard"
-                ? "squad_hazard_declare_order"
-                : "squad_shoot_declare_order",
-          unitId: String(req.attacker_unit_id),
-          order,
-        });
+        noteActionOutcome(
+          await executeAction({
+            action:
+              req.kind === "fight"
+                ? "squad_fight_declare_order"
+                : req.kind === "hazard"
+                  ? "squad_hazard_declare_order"
+                  : "squad_shoot_declare_order",
+            unitId: String(req.attacker_unit_id),
+            order,
+          }),
+          "Ordre d'allocation"
+        );
       } catch (e) {
         console.error("[MANUAL-ALLOC] declare_order FAILED", e);
         setError(`Declare order failed: ${formatApiConnectionError(e)}`);
       }
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   const shouldShowRetreatAlert = useCallback((): boolean => {
@@ -5511,7 +5671,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         destRow: typeof row === "string" ? parseInt(row, 10) : row,
       };
       try {
-        await executeAction(action);
+        if (noteActionOutcome(await executeAction(action), "Pose").kind !== "ok") return;
         setSelectedUnitId(null);
         setMode("select");
       } catch (error) {
@@ -5519,7 +5679,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         setError(`Deploy failed: ${formatApiConnectionError(error)}`);
       }
     },
-    [executeAction, gameState]
+    [executeAction, gameState, noteActionOutcome]
   );
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -5849,10 +6009,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
           setDeployPlan(null);
           setMode("select");
           setSelectedUnitId(null);
-          setError("Deployment order changed — please select your unit again.");
+          setActionRefusal("L'ordre de déploiement a changé — resélectionne ton escouade.");
           return;
         }
-        setError(`${plan.ingress ? "Ingress" : "Deploy"} refused: ${outcome.message}`);
+        setActionRefusal(`${plan.ingress ? "Arrivée" : "Pose"} refusée : ${outcome.message}`);
         return;
       }
       deployPoolRef.current = new Set();
@@ -5930,7 +6090,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const outcome = readEngineActionOutcome(data);
       if (outcome.kind === "noop") return;
       if (outcome.kind === "refused") {
-        setError(`Strategic reserves refused: ${outcome.message}`);
+        setActionRefusal(`Mise en réserves refusée : ${outcome.message}`);
         return;
       }
       // Sortie de mode identique à un Annuler de déploiement : le dépôt CONSOMME le tour
@@ -6143,14 +6303,17 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
   const handleSelectRuleChoice = useCallback(
     async (prompt: RuleChoicePrompt, selectedDisplayRuleId: string) => {
-      await executeAction({
-        action: "select_rule_choice",
-        unitId: prompt.unit_id,
-        player: prompt.player,
-        selectedRuleId: selectedDisplayRuleId,
-      });
+      noteActionOutcome(
+        await executeAction({
+          action: "select_rule_choice",
+          unitId: prompt.unit_id,
+          player: prompt.player,
+          selectedRuleId: selectedDisplayRuleId,
+        }),
+        "Choix de règle"
+      );
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   // ── Capacités de faction (chantier 03) — 08.04 ────────────────────────────────────────────
@@ -6159,23 +6322,32 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   // une ESCOUADE par son id. Les fondre derrière une action commune reperdrait cette différence.
   const handleCallWaaagh = useCallback(
     async (optionIndex: number) => {
-      await executeAction({ action: "agent_decision", option_index: optionIndex });
+      noteActionOutcome(
+        await executeAction({ action: "agent_decision", option_index: optionIndex }),
+        "Waaagh!"
+      );
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   const handleSelectOathTarget = useCallback(
     async (targetUnitId: string | number) => {
-      await executeAction({ action: "select_oath_target", unitId: String(targetUnitId) });
+      noteActionOutcome(
+        await executeAction({ action: "select_oath_target", unitId: String(targetUnitId) }),
+        "Désignation d'Oath of Moment"
+      );
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   const handleSelectCoherencyRemoval = useCallback(
     async (modelId: string) => {
-      await executeAction({ action: "select_coherency_removal", model_id: modelId });
+      noteActionOutcome(
+        await executeAction({ action: "select_coherency_removal", model_id: modelId }),
+        "Retrait de figurine (cohérence)"
+      );
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   const confirmMoveInFlightRef = useRef(false);
@@ -6190,12 +6362,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
 
     try {
       if (pendingPreviewAction === "move_after_shooting") {
-        await executeAction({
+        const data = await executeAction({
           action: "move_after_shooting",
           unitId: movePreview.unitId.toString(),
           destCol: movePreview.destCol,
           destRow: movePreview.destRow,
         });
+        if (noteActionOutcome(data, "Mouvement après tir").kind !== "ok") return;
         setMovePreview(null);
         setPendingPreviewAction(null);
         setPostShootMoveDestinations([]);
@@ -6302,6 +6475,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     isFleeMovePreview,
     shouldShowRetreatAlert,
     refreshSquadMovePlanValidity,
+    noteActionOutcome,
   ]);
 
   const handleCancelMove = useCallback(async () => {
@@ -6321,11 +6495,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
             "Cannot skip move_after_shooting: missing active_shooting_unit and selectedUnitId"
           );
         }
-        await executeAction({
+        const data = await executeAction({
           action: "move_after_shooting",
           unitId: activeShooterId.toString(),
           skip_move_after_shooting: true,
         });
+        // ON PURGE MÊME SUR UN REFUS, contrairement aux commits de plan : ce geste est la
+        // SORTIE, et Cancel comme Skip y mènent. Garder l'aperçu peint sur un refus n'offrirait
+        // plus aucune porte avant la fin de phase ; le message dit ce que le moteur a répondu, et
+        // l'état de jeu de la réponse resynchronise le reste.
+        noteActionOutcome(data, "Renoncement au mouvement après tir");
         setPostShootMoveDestinations([]);
         setMovePreview(null);
         setPendingPreviewAction(null);
@@ -6338,7 +6517,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setMovePreview(null);
     setPendingPreviewAction(null);
     setMode("select");
-  }, [pendingPreviewAction, mode, gameState, selectedUnitId, executeAction]);
+  }, [pendingPreviewAction, mode, gameState, selectedUnitId, executeAction, noteActionOutcome]);
 
   const handleToggleFleeWarningDontRemind = useCallback((value: boolean) => {
     setFleeWarningPopup((prev) => {
@@ -6399,13 +6578,23 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (actionType === "wait") {
         await handleRightClick(typeof unitId === "string" ? parseInt(unitId, 10) : unitId);
       } else {
-        await executeAction({
-          action: "skip",
-          unitId: typeof unitId === "string" ? unitId : unitId.toString(),
-        });
+        noteActionOutcome(
+          await executeAction({
+            action: "skip",
+            unitId: typeof unitId === "string" ? unitId : unitId.toString(),
+          }),
+          "Passer le tir"
+        );
       }
     },
-    [handleRightClick, executeAction, gameState, pendingPreviewAction, handleCancelMove]
+    [
+      handleRightClick,
+      executeAction,
+      gameState,
+      pendingPreviewAction,
+      handleCancelMove,
+      noteActionOutcome,
+    ]
   );
 
   // Charge activation - sends left_click to trigger 2d6 roll and destination building
@@ -6418,26 +6607,26 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       // 1. Rolls 2d6 for charge_range
       // 2. Builds valid_charge_destinations_pool via BFS pathfinding
       // 3. Returns destinations for orange highlighting
-      await executeAction({
-        action: "left_click",
-        unitId: numericChargerId.toString(),
-      });
+      noteActionOutcome(
+        await executeAction({ action: "left_click", unitId: numericChargerId.toString() }),
+        "Activation de la charge"
+      );
     },
-    [executeAction]
+    [executeAction, noteActionOutcome]
   );
 
   // Bouton « Terminer le pile-in » : clôt l'étape pile-in groupée du joueur actif
   // (les unités non pilées sont passées) → le moteur enchaîne sur le groupe adverse
   // puis la sous-phase FIGHT.
   const handleEndPileIn = useCallback(async () => {
-    await executeAction({ action: "end_pile_in" });
-  }, [executeAction]);
+    noteActionOutcome(await executeAction({ action: "end_pile_in" }), "Fin du pile-in");
+  }, [executeAction, noteActionOutcome]);
 
   // Bouton « Skip » (sous-phase fight) : abandonne toutes les attaques restantes des 2
   // joueurs et passe directement à la consolidation.
   const handleSkipFight = useCallback(async () => {
-    await executeAction({ action: "skip_fight" });
-  }, [executeAction]);
+    noteActionOutcome(await executeAction({ action: "skip_fight" }), "Passer le combat");
+  }, [executeAction, noteActionOutcome]);
 
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Handle advance action
   const handleAdvance = useCallback(
@@ -6465,16 +6654,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         });
       } else {
         // Auto-confirm: execute advance directly (bypass popup)
-        await executeAction({
-          action: "advance",
-          unitId: unitId.toString(),
-        });
+        noteActionOutcome(
+          await executeAction({ action: "advance", unitId: unitId.toString() }),
+          "Advance"
+        );
       }
 
       // Backend will return valid_destinations and advance_roll
       // State will be updated in executeAction response handler (will set mode to advancePreview)
     },
-    [executeAction, targetPreview]
+    [executeAction, targetPreview, noteActionOutcome]
   );
 
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Cancel advance action
@@ -6498,11 +6687,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSelectedUnitId(null);
 
     // Send skip action to backend to remove unit from activation pool
-    await executeAction({
-      action: "skip",
-      unitId: unitIdToSkip.toString(),
-    });
-  }, [executeAction, advancingUnitId]);
+    noteActionOutcome(
+      await executeAction({ action: "skip", unitId: unitIdToSkip.toString() }),
+      "Annulation de l'advance"
+    );
+  }, [executeAction, advancingUnitId, noteActionOutcome]);
 
   // Handle advance warning popup confirmation
   const handleConfirmAdvanceWarning = useCallback(async () => {
@@ -6522,11 +6711,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setMode("select");
 
     // Send advance action to backend to trigger 1D6 roll and get destinations
-    await executeAction({
-      action: "advance",
-      unitId: unitId.toString(),
-    });
-  }, [advanceWarningPopup, executeAction, targetPreview]);
+    noteActionOutcome(
+      await executeAction({ action: "advance", unitId: unitId.toString() }),
+      "Advance"
+    );
+  }, [advanceWarningPopup, executeAction, targetPreview, noteActionOutcome]);
 
   // Handle advance warning popup cancellation
   const handleCancelAdvanceWarning = useCallback(() => {
@@ -6563,11 +6752,11 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSelectedUnitId(null);
 
     // Send skip action to backend to remove unit from activation pool
-    await executeAction({
-      action: "skip",
-      unitId: unitIdToSkip.toString(),
-    });
-  }, [advanceWarningPopup, executeAction]);
+    noteActionOutcome(
+      await executeAction({ action: "skip", unitId: unitIdToSkip.toString() }),
+      "Passer l'unité"
+    );
+  }, [advanceWarningPopup, executeAction, noteActionOutcome]);
 
   // ADVANCE_IMPLEMENTATION_PLAN.md Phase 5: Clic sur hex valide = envoi immédiat (comme handleDirectMove en phase move)
   const handleAdvanceMove = useCallback(
@@ -6591,18 +6780,27 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       }
 
       try {
-        await executeAction({
-          action: "advance",
-          unitId: numericUnitId.toString(),
-          destCol,
-          destRow,
-        });
+        noteActionOutcome(
+          await executeAction({
+            action: "advance",
+            unitId: numericUnitId.toString(),
+            destCol,
+            destRow,
+          }),
+          "Advance"
+        );
       } catch (error) {
         console.error("❌ ADVANCE MOVE FAILED:", error);
         throw error;
       }
     },
-    [executeAction, gameState, pendingPreviewAction, readEngineOrientationStepFromGameState]
+    [
+      executeAction,
+      gameState,
+      pendingPreviewAction,
+      readEngineOrientationStepFromGameState,
+      noteActionOutcome,
+    ]
   );
 
   /** Compat : anciens appels ``onCombatAttack`` → même flux que le tir (``left_click`` + ``clickTarget``). */
@@ -6652,13 +6850,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (chargePreviewTargetIds.length === 0) {
         return; // aucune cible déclarée : le bouton ne doit pas être actif
       }
-      await executeAction({
-        action: "charge",
-        unitId: numericChargerId.toString(),
-        targetIds: chargePreviewTargetIds.map((id) => id.toString()),
-      });
+      noteActionOutcome(
+        await executeAction({
+          action: "charge",
+          unitId: numericChargerId.toString(),
+          targetIds: chargePreviewTargetIds.map((id) => id.toString()),
+        }),
+        "Déclaration de charge"
+      );
     },
-    [executeAction, chargePreviewTargetIds]
+    [executeAction, chargePreviewTargetIds, noteActionOutcome]
   );
 
   // V11 RAW : le jet ayant déjà eu lieu à l'activation, annuler = résoudre la charge sans
@@ -6672,13 +6873,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return;
     }
     try {
-      await executeAction({ action: "skip", unitId: activeId.toString() });
+      noteActionOutcome(
+        await executeAction({ action: "skip", unitId: activeId.toString() }),
+        "Forfait de charge"
+      );
     } catch (error) {
       console.error("Cancel charge (skip) failed:", error);
     }
     setSelectedUnitId(null);
     setMode("select");
-  }, [executeAction, selectedUnitId]);
+  }, [executeAction, selectedUnitId, noteActionOutcome]);
 
   const handleMoveCharger = useCallback(
     async (chargerId: number | string, destCol: number, destRow: number) => {
@@ -6711,15 +6915,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         return;
       }
 
-      await executeAction({
-        action: "charge",
-        unitId: numericChargerId.toString(),
-        destCol,
-        destRow,
-        targetId: targetIdStr,
-      });
+      noteActionOutcome(
+        await executeAction({
+          action: "charge",
+          unitId: numericChargerId.toString(),
+          destCol,
+          destRow,
+          targetId: targetIdStr,
+        }),
+        "Charge"
+      );
     },
-    [executeAction, gameState, chargePreviewTargetId]
+    [executeAction, gameState, chargePreviewTargetId, noteActionOutcome]
   );
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -6838,6 +7045,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     async (unitId: number | string) => {
       const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
       const data = await executeAction({ action: "take_to_skies", unitId: String(uid) });
+      if (noteActionOutcome(data, "Take to skies").kind !== "ok") return;
       // Phase charge, plan par-fig actif (sécurité) : le toggle change budget (-2") + traversée → recalcul.
       const chargePlan = chargeMovePlanRef.current;
       if (chargePlan && chargePlan.unitId === uid) {
@@ -6865,7 +7073,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
         }
       }
     },
-    [executeAction, refreshSquadMovePlanValidity, handleSelectModelForMove, refreshChargePlanState]
+    [
+      executeAction,
+      refreshSquadMovePlanValidity,
+      handleSelectModelForMove,
+      refreshChargePlanState,
+      noteActionOutcome,
+    ]
   );
 
   /** Entrée en mode chargeModelMove (escouade chargeuse multi-fig). Plan provisoire vide au départ. */
@@ -7021,11 +7235,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     // 3b : le niveau de pose par fig est committé (une fig peut finir à l'étage), toujours envoyé.
     const planArr = toPlanArray(plan.models);
     try {
-      await executeAction({
+      const data = await executeAction({
         action: "commit_charge_plan",
         unitId: String(plan.unitId),
         plan: planArr,
       });
+      // Le plan est le TRAVAIL DU JOUEUR : sur un refus, on ne le détruit pas et on dit
+      // pourquoi. La purge ci-dessous ne vaut que pour un commit réellement passé.
+      if (noteActionOutcome(data, "Charge").kind !== "ok") return;
       chargeModelPoolRef.current = new Set();
       chargeModelMaskLoopsRef.current = null;
       setChargeFocusActive(false);
@@ -7039,7 +7256,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       console.error("[CHARGE-MOVE] commit FAILED", e);
       setError(`Charge move failed: ${formatApiConnectionError(e)}`);
     }
-  }, [executeAction]);
+  }, [executeAction, noteActionOutcome]);
 
   /** Bouton Cancel : forfait charge (skip, consomme l'unité), nettoie le plan local. */
   const handleCancelChargeModelMove = useCallback(async () => {
@@ -7057,13 +7274,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       return;
     }
     try {
-      await executeAction({ action: "skip", unitId: String(uid) });
+      noteActionOutcome(
+        await executeAction({ action: "skip", unitId: String(uid) }),
+        "Forfait de charge"
+      );
     } catch (e) {
       console.error("Cancel charge model move (skip) failed:", e);
     }
     setSelectedUnitId(null);
     setMode("select");
-  }, [executeAction, selectedUnitId]);
+  }, [executeAction, selectedUnitId, noteActionOutcome]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // PILE-IN PAR FIGURINE (V11 12.04, mode fin type charge) — contrat backend
@@ -7253,7 +7473,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const lvl = currentLevelRef?.current ?? 0;
     const planArr = toPlanArray(plan.models, lvl);
     try {
-      await executeAction({ action: "commit_pile_in_plan", plan: planArr, level: lvl });
+      const data = await executeAction({
+        action: "commit_pile_in_plan",
+        plan: planArr,
+        level: lvl,
+      });
+      // Le plan est le TRAVAIL DU JOUEUR : sur un refus, on ne le détruit pas et on dit
+      // pourquoi. La purge ci-dessous ne vaut que pour un commit réellement passé.
+      if (noteActionOutcome(data, "Pile-in").kind !== "ok") return;
       pileInModelPoolRef.current = new Set();
       pileInModelMaskLoopsRef.current = null;
       setPileInFocusMode(null);
@@ -7265,7 +7492,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       console.error("[PILE-IN] commit FAILED", e);
       setError(`Pile-in failed: ${formatApiConnectionError(e)}`);
     }
-  }, [executeAction, currentLevelRef]);
+  }, [executeAction, currentLevelRef, noteActionOutcome]);
 
   /** Bouton Annuler : renonce à piler l'unité active (skip, la consomme), nettoie le plan local. */
   const handleCancelPileInModelMove = useCallback(async () => {
@@ -7275,13 +7502,13 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setPileInFocusTargetId(null);
     setPileInMovePlan(null);
     try {
-      await executeAction({ action: "skip" });
+      noteActionOutcome(await executeAction({ action: "skip" }), "Forfait de pile-in");
     } catch (e) {
       console.error("Cancel pile-in model move (skip) failed:", e);
     }
     setSelectedUnitId(null);
     setMode("select");
-  }, [executeAction]);
+  }, [executeAction, noteActionOutcome]);
 
   // ──────────────────────────────────────────────────────────────────────────
   // CONSOLIDATION PAR-FIGURINE (V11 12.08, miroir pile-in). active_fight_unit posée
@@ -7526,7 +7753,14 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     const lvl = currentLevelRef?.current ?? 0;
     const planArr = toPlanArray(plan.models, lvl);
     try {
-      await executeAction({ action: "commit_consolidation_plan", plan: planArr, level: lvl });
+      const data = await executeAction({
+        action: "commit_consolidation_plan",
+        plan: planArr,
+        level: lvl,
+      });
+      // Le plan est le TRAVAIL DU JOUEUR : sur un refus, on ne le détruit pas et on dit
+      // pourquoi. La purge ci-dessous ne vaut que pour un commit réellement passé.
+      if (noteActionOutcome(data, "Consolidation").kind !== "ok") return;
       consolidationModelPoolRef.current = new Set();
       consolidationModelMaskLoopsRef.current = null;
       setConsolidationFocusMode(null);
@@ -7537,7 +7771,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       console.error("[CONSOLIDATION] commit FAILED", e);
       setError(`Consolidation failed: ${formatApiConnectionError(e)}`);
     }
-  }, [executeAction, currentLevelRef]);
+  }, [executeAction, currentLevelRef, noteActionOutcome]);
 
   /** Bouton Annuler : annule le plan de consolidation en cours SANS consommer l'unité — elle
    * redevient sélectionnable (cancel_consolidation côté moteur), nettoie le plan local. */
@@ -7547,13 +7781,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setConsolidationFocusMode(null);
     setConsolidationMovePlan(null);
     try {
-      await executeAction({ action: "cancel_consolidation" });
+      noteActionOutcome(
+        await executeAction({ action: "cancel_consolidation" }),
+        "Annulation de la consolidation"
+      );
     } catch (e) {
       console.error("Cancel consolidation model move failed:", e);
     }
     setSelectedUnitId(null);
     setMode("select");
-  }, [executeAction]);
+  }, [executeAction, noteActionOutcome]);
 
   /** Bouton « Terminer la consolidation » : marque le groupe traité (end_consolidation). */
   const handleEndConsolidation = useCallback(async () => {
@@ -7562,13 +7799,16 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setConsolidationFocusMode(null);
     setConsolidationMovePlan(null);
     try {
-      await executeAction({ action: "end_consolidation" });
+      noteActionOutcome(
+        await executeAction({ action: "end_consolidation" }),
+        "Fin de la consolidation"
+      );
     } catch (e) {
       console.error("End consolidation failed:", e);
     }
     setSelectedUnitId(null);
     setMode("select");
-  }, [executeAction]);
+  }, [executeAction, noteActionOutcome]);
 
   const handleStartTargetPreview = useCallback(
     async (shooterId: number | string, targetId: number | string) => {
@@ -7576,12 +7816,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       const numericTargetId = typeof targetId === "number" ? targetId : parseInt(targetId, 10);
 
       // Send backend action to trigger target selection and blinking response
-      await executeAction({
-        action: "left_click",
-        unitId: numericShooterId.toString(),
-        targetId: numericTargetId.toString(),
-        clickTarget: "enemy",
-      });
+      const refusCible = noteActionOutcome(
+        await executeAction({
+          action: "left_click",
+          unitId: numericShooterId.toString(),
+          targetId: numericTargetId.toString(),
+          clickTarget: "enemy",
+        }),
+        "Désignation de la cible"
+      );
+      // La suite EXIGE une arme de tir et lève sinon : sur un refus, ce `throw` deviendrait le
+      // panneau fatal que ce canal existe pour éviter.
+      if (refusCible.kind !== "ok") return;
 
       // Calculate actual probabilities using game units
       // Handle both string and number IDs
@@ -7642,7 +7888,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       setTargetPreview(preview);
       setMode("targetPreview");
     },
-    [gameState, executeAction]
+    [gameState, executeAction, noteActionOutcome]
   );
 
   // Cleanup interval when targetPreview changes or component unmounts
@@ -7943,6 +8189,9 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     return {
       loading: true,
       error: null,
+      // Aucun geste n'est possible tant que la partie charge : pas de refus à montrer.
+      actionRefusal: null,
+      clearActionRefusal: () => {},
       units: [],
       selectedUnitId: null,
       gameSessionKey: 0,
@@ -8394,6 +8643,10 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
   const returnObject = {
     loading: false,
     error: null,
+    // Refus du moteur, NON FATAL : le plateau reste jouable et le message s'efface au geste
+    // suivant. `error` reste ce qu'il était — une panne, qui fait lever le hook juste au-dessus.
+    actionRefusal,
+    clearActionRefusal,
     units: memoizedUnits,
     selectedUnitId,
     gameSessionKey,

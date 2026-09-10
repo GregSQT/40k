@@ -569,3 +569,69 @@ describe("BoardWithAPI — question 20.01 (Declare Battle Formations)", () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// T_BoardWithAPI_Refus — le refus du moteur s'affiche SANS fermer la partie
+//
+// Le canal fatal du hook (`error`) fait lever `API ERROR` au rendu suivant, et ce composant
+// n'est enveloppé d'aucun garde de rendu : un refus de règle qui y passerait ferait disparaître
+// l'écran. Le bandeau ci-dessous est la contre-mesure, et ce test vérifie les deux moitiés : le
+// message EST lu, et l'écran EST encore là.
+// ---------------------------------------------------------------------------
+
+describe("BoardWithAPI — bandeau de refus", () => {
+  it("réponse 20.01 refusée → message affiché, écran toujours vivant", async () => {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({
+          success: true,
+          game_state: makeDeclarationState({
+            pendingPlayer: 1,
+            pendingUnitId: "7",
+            seat2: "human",
+          }),
+        })
+      ),
+      http.post("/api/game/action", () =>
+        HttpResponse.json({
+          success: false,
+          result: { error: "reserves_cap_exceeded" },
+          game_state: makeDeclarationState({
+            pendingPlayer: 1,
+            pendingUnitId: "7",
+            seat2: "human",
+          }),
+          action_logs: [],
+          message: "Action failed",
+        })
+      )
+    );
+
+    renderBoard();
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("roster-row-select-7")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Start Deployment" }));
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("strategic-reserves-declare")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+
+    fireEvent.click(screen.getByTestId("strategic-reserves-declare"));
+
+    await waitFor(
+      () => {
+        expect(screen.getByText(/reserves_cap_exceeded/)).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    // LA PARTIE EST TOUJOURS LÀ : c'est ce que le canal séparé achète. Le panneau fatal aurait
+    // démonté jusqu'à la ligne de roster.
+    expect(screen.getByTestId("roster-row-select-7")).toBeTruthy();
+  });
+});
