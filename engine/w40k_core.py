@@ -136,6 +136,7 @@ from engine.game_utils import (
 from engine.observation_builder import ObservationBuilder
 from engine.action_decoder import (
     DEPLOY_SLOT_CANDIDATES_CACHE_KEY,
+    INGRESS_OPEN_SLOTS_KEY,
     INGRESS_SLOT_CANDIDATES_CACHE_KEY,
     PENDING_FIGHT_TARGET_KEY,
     PENDING_FIGHT_WEAPON_KEY,
@@ -1647,6 +1648,11 @@ class W40KEngine(gym.Env):
         # Jumeau pour l'ingress move (20.04) : même raisonnement, même risque — son tampon est
         # l'état des unités posées + le round, qui recommencent identiques à chaque épisode.
         self.game_state.pop(INGRESS_SLOT_CANDIDATES_CACHE_KEY, None)
+        # Escouade pour laquelle des slots d'ingress sont ouverts (posé par le masque, effacé au
+        # step suivant). Sans purge, une épisode se terminant en plein ingress laisserait ce
+        # marqueur actif : l'observation initiale du suivant décrirait des hexes d'ingress absents
+        # de la zone de déploiement.
+        self.game_state.pop(INGRESS_OPEN_SLOTS_KEY, None)
         # Cache de SCORING du deploiement (expositions LoS par hexe, allies par colonne). Il
         # n'etait purge NULLE PART : `reset_episode_caches` ne voit que les caches d'instance du
         # decodeur, pas ceux poses dans le game_state. Son garde-fou (« le jeu d'hexes valides

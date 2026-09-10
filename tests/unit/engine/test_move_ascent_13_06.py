@@ -451,12 +451,11 @@ def test_the_arming_bound_never_steals_a_legal_ascent(board_x1):
     minimum ou un arrondi au supérieur la rendraient trop serrée, et l'agent perdrait en silence
     un choix que 13.06 lui donne. C'est la seule façon dont ce resserrement peut nuire.
 
-    Le contrôle porte exactement sur l'écart entre les deux bornes : les activations où un plancher
-    tenable est à portée de la distance SEULE (l'ancienne borne) mais où la question n'est pas
-    posée. Pour chacune, on vérifie contre un ORACLE INDÉPENDANT de la borne — le pool d'ancre du
-    masque, en lecture seule, translaté en bloc — qu'aucune cellule n'aurait pu poser une figurine
-    sur un plancher. Le pool est un sur-ensemble de l'exécutable : s'il n'offre rien, rien n'était
-    perdu.
+    La borne utilise désormais le budget Advance maximum (jet = 6) comme borne haute. Le contrôle
+    porte sur les activations où la borne dit NON : pour chacune on vérifie contre un ORACLE
+    INDÉPENDANT — le pool d'ancre du masque, en lecture seule, au même budget — qu'aucune cellule
+    n'aurait pu poser une figurine sur un plancher. Le pool est un sur-ensemble de l'exécutable :
+    s'il n'offre rien, rien n'était perdu.
     """
     from engine.combat_utils import calculate_hex_distance
     from engine.hex_utils import cube_to_offset, offset_to_cube
@@ -464,10 +463,11 @@ def test_the_arming_bound_never_steals_a_legal_ascent(board_x1):
         _squad_has_reachable_floor_cell,
         movement_build_valid_destinations_pool,
         squad_floor_level_map,
-        squad_move_pool_budget_subhex,
     )
+    from engine.phase_handlers.shared_utils import get_squad_move_budget
 
-    inspected = 0
+    gates_fired = 0  # borne a dit OUI au moins une fois (test non-trivial)
+    inspected = 0    # borne a dit NON → oracle vérifié
     stolen = []
     for seed, scenario in SEEDS:
         engine = _engine(seed, scenario)
@@ -480,7 +480,9 @@ def test_the_arming_bound_never_steals_a_legal_ascent(board_x1):
                 squad_id, _cell_map = live
                 alive = [m for m in gs["squad_models"].get(squad_id, []) if m in gs["models_cache"]]
                 maps = {mid: squad_floor_level_map(gs, gs["models_cache"][mid]) for mid in alive}
-                budget = squad_move_pool_budget_subhex(gs, squad_id)
+                # Budget Advance max (jet=6) : même référence que la borne depuis la correction
+                # F5 (section 3bis du masque tire le jet en section 4, trop tard pour la borne).
+                budget = get_squad_move_budget(str(squad_id), gs, "advance", advance_roll=6)
                 near = any(
                     calculate_hex_distance(
                         int(gs["models_cache"][mid]["col"]),
@@ -489,12 +491,13 @@ def test_the_arming_bound_never_steals_a_legal_ascent(board_x1):
                     ) <= budget
                     for mid in alive for (fcol, frow) in maps[mid]
                 )
-                # L'écart entre l'ancienne borne (distance seule) et la nouvelle. On interroge
-                # LA BORNE et non `ascent_declaration_decision_is_due` : cette dernière refuse
-                # aussi pour des raisons étrangères au resserrement — question déjà posée ce tour,
-                # vol déclaré, mauvais joueur — et les compter ici noierait le signal (mesuré :
-                # 41 faux positifs, tous des escouades déjà interrogées).
-                if near and not _squad_has_reachable_floor_cell(gs, squad_id):
+                # On interroge LA BORNE et non `ascent_declaration_decision_is_due` : cette
+                # dernière refuse aussi pour des raisons étrangères au resserrement — question
+                # déjà posée ce tour, vol déclaré, mauvais joueur.
+                reachable = _squad_has_reachable_floor_cell(gs, squad_id)
+                if near and reachable:
+                    gates_fired += 1
+                if near and not reachable:
                     inspected += 1
                     costs = {}
                     # `read_only=True` : aucune écriture d'état, aucun cache de carte de cellules
@@ -536,13 +539,13 @@ def test_the_arming_bound_never_steals_a_legal_ascent(board_x1):
             if terminated or truncated:
                 break
 
-    assert inspected > 0, (
-        "aucune activation ne sépare l'ancienne borne de la nouvelle : le test n'exerce rien, "
-        "donc il ne prouve rien du resserrement"
+    assert gates_fired > 0, (
+        "la borne n'a jamais dit OUI sur un plancher proche : soit il n'y a aucun terrain en "
+        "hauteur dans les scénarios SEEDS, soit la borne bloque tout — le test n'exerce rien"
     )
     assert not stolen, (
         f"{len(stolen)}/{inspected} activations où la question n'est PAS posée alors que le pool "
-        f"offre une cellule posant une figurine sur un plancher — la borne est trop serrée et "
+        f"(budget Advance max) offre une cellule posant une figurine sur un plancher — la borne "
         f"retire une montée légale. 3 premières : {stolen[:3]}"
     )
 

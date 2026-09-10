@@ -118,7 +118,7 @@ def turn_state_invariants() -> Dict[str, Any]:
         "last_move_cause": "normal",
         "reactive_mode": "micro",
         "reactive_macro_order_current_window": [],
-        "reactive_decision_mode": "auto",
+        "reactive_decision_mode": "state",
         "reactive_decision_payload": {},
         # Capacites de faction (chantier 03), posees par `initial_faction_ability_state()` a
         # l'init ET au reset. Lues en `require_key` par l'observation (les 6 drapeaux de
