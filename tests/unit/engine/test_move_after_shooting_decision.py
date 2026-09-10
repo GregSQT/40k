@@ -431,9 +431,15 @@ def test_le_dispatcher_de_decision_route_bien_le_type():
     assert releve["decision_option_declines"] is False, "CHOICE_0 se déplace, il ne passe pas"
     assert str(releve["unitId"]) == "1"
     assert releve["message"], "le relevé doit nommer le candidat joué, pas une case vide"
-    # VIDE et non absent : `_build_step_log_details` lit la clé, et son absence le ferait aller
-    # chercher les positions LIVE par socle sur une ligne qui n'observe aucun déplacement.
-    assert releve["models_segment"] == ""
+    # AUCUN `models_segment` sur l'entrée, et c'est voulu : « un relevé de choix n'observe aucune
+    # position » est une propriété du TYPE, déclarée en `_TYPES_SANS_SEGMENT_MODELS` et appliquée
+    # au point de traduction unique. Un producteur qui la redirait ici en ferait un jumeau, et le
+    # verrou ne tiendrait que pour lui — les deux autres producteurs de types muets (08.04) ne
+    # posent rien non plus.
+    assert "models_segment" not in releve
+    assert "agent_decision" in W40KEngine._TYPES_SANS_SEGMENT_MODELS, (
+        "sans cette declaration, la ligne repart chercher les positions LIVE par socle"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
