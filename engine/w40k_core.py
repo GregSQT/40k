@@ -1699,6 +1699,11 @@ class W40KEngine(gym.Env):
         self.game_state.pop(self.EFFECTS_SNAPSHOT_LOGGED_KEY, None)
         # Curseur de drainage : indexe `action_logs`, remis a zero avec elle a chaque episode.
         self.game_state.pop(self.STEP_LOG_DRAINED_KEY, None)
+        # JUMEAU du curseur, et purge au MEME endroit : le compteur de decisions resolues se
+        # confronte a ce que le drainage transfere. Sans cette ligne, un episode qui se termine
+        # sur une decision non encore drainee ferait lever l'episode SUIVANT, pour une
+        # divergence qui ne lui appartient pas.
+        self.game_state.pop(self.AGENT_DECISION_RESOLVED_KEY, None)
         # POINT DE PURGE UNIQUE de toutes les etapes « resolues une fois par (tour, joueur) » :
         # scoring du primaire, recompense d'objectif, penalite de coherency, cp_gain_on_objective,
         # evenements de choix de regle (cf. `engine.game_utils.once_claim`). Leurs cles sont
@@ -4319,6 +4324,14 @@ class W40KEngine(gym.Env):
                 option_index=resolved_index,
                 option=pending_options[resolved_index],
             )
+            # APRES l'ecriture, jamais avant : une transition de phase declenche un drainage
+            # imbrique, et un compteur en avance sur le journal ferait lever ce drainage-la.
+            # Pose ICI et non dans `_record_agent_decision_action_log` : c'est ce qui fait
+            # diverger le compte quand une branche appelle le releve — ou son constructeur —
+            # sans passer par l'encadrement.
+            self.game_state[self.AGENT_DECISION_RESOLVED_KEY] = int(
+                self.game_state.get(self.AGENT_DECISION_RESOLVED_KEY, 0)  # get allowed
+            ) + 1
         return success, result
 
     def _dispatch_agent_decision_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
@@ -7366,10 +7379,35 @@ class W40KEngine(gym.Env):
                 f"sans que le curseur de drainage soit purgé (cf. reset)."
             )
         self.game_state[self.STEP_LOG_DRAINED_KEY] = len(action_logs)
+        sub_logs = action_logs[pre_action_logs_len:]
+        # VERROU DE COMPTAGE (V11 §9.3 P2) : autant d'entrees `agent_decision` transferees que
+        # de decisions REELLEMENT resolues depuis le dernier drainage. Une entree produite hors
+        # de l'encadrement fait diverger les deux nombres ICI, avant qu'`ai/analyzer.py` ne
+        # compte un choix que l'agent n'a jamais joue. C'est le seul controle qui atteigne les
+        # formes qu'aucune sonde statique ne peut nommer.
+        #
+        # L'invariant ne se formule PAS par type d'action :
+        # `_resolve_reactive_move_decision_for_ai_seats` appelle l'encadrement EN BOUCLE pendant
+        # une action de MOUVEMENT, donc « une action `agent_decision` egale une entree, toute
+        # autre action zero » est FAUX et ferait lever une fenetre reactive PvE legitime.
+        decisions_resolues = int(
+            self.game_state.get(self.AGENT_DECISION_RESOLVED_KEY, 0)  # get allowed
+        )
+        decisions_journalisees = sum(
+            1 for _dl in sub_logs
+            if isinstance(_dl, dict) and _dl.get("type") == "agent_decision"  # get allowed
+        )
+        if decisions_journalisees != decisions_resolues:
+            raise ValueError(
+                f"drainage step.log : {decisions_journalisees} entree(s) 'agent_decision' pour "
+                f"{decisions_resolues} decision(s) reellement resolue(s) — une entree ecrite "
+                f"hors de `_handle_agent_decision_action` fausserait le taux de decisions "
+                f"mesure par `ai/analyzer.py`."
+            )
+        self.game_state[self.AGENT_DECISION_RESOLVED_KEY] = 0
         # Position (index raw_log, index jet) du DERNIER jet visant chaque cible sur l'ensemble de
         # l'action : le segment [TARGET_MODELS:] n'est emis que la (retrait des socles en bloc apres
         # les attaques, cf. _build_shot_details). Le dernier ecrit gagne -> derniere arme, dernier jet.
-        sub_logs = action_logs[pre_action_logs_len:]
         last_target_jet: Dict[Any, Tuple[int, int]] = {}
         for _ri, _rl in enumerate(sub_logs):
             if not isinstance(_rl, dict):
@@ -9494,6 +9532,13 @@ class W40KEngine(gym.Env):
     #: `action_logs` pas encore écrite. Empêche qu'un drainage imbriqué (`advance_phase`) et le
     #: drainage englobant du step réécrivent les mêmes lignes.
     STEP_LOG_DRAINED_KEY = "_step_log_drained_upto"
+
+    #: Decisions d'agent REELLEMENT resolues depuis le dernier drainage, comptees par le seul
+    #: encadrement (`_handle_agent_decision_action`). Confronte au nombre d'entrees
+    #: `agent_decision` transferees, ce compteur rend le site unique verifiable a
+    #: l'EXECUTION — la ou une sonde statique ne voit plus rien : acces qualifie par module,
+    #: nom calcule (`getattr`), type pose par affectation.
+    AGENT_DECISION_RESOLVED_KEY = "_agent_decisions_resolved_since_drain"
 
     def _log_state_snapshot_if_turn_changed(self) -> None:
         """Écrit UNE ligne d'état par tour : socles vivants, positions, hauteurs, PV.
