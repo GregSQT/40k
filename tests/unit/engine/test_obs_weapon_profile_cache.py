@@ -73,6 +73,10 @@ def test_cache_hit_is_identical_to_cold_compute():
         hot = builder._encode_entity_weapons(gs, sid, models, alive)  # relit
         assert np.array_equal(hot[0], cold[sid][0]), f"{sid}: cont diverge"
         assert np.array_equal(hot[1], cold[sid][1]), f"{sid}: bin diverge"
+        # Le 3e tenseur (ids de regles ET marqueurs de groupe combi) etait le seul du n-uplet
+        # que ce test ne comparait pas : un cache qui aurait perdu les marqueurs d'exclusivite
+        # serait passe inapercu ici.
+        assert np.array_equal(hot[2], cold[sid][2]), f"{sid}: rule_ids diverge"
 
     assert gs[WEAPON_PROFILE_CACHE_KEY], "le cache doit etre peuple"
 
@@ -215,3 +219,56 @@ def test_observation_is_unchanged_by_the_cache():
 
     for key in with_cache:
         assert np.array_equal(with_cache[key], without_cache[key]), f"cle {key} diverge"
+
+
+def test_combi_group_markers_are_computed_inside_the_cache():
+    """Les marqueurs d'exclusivite de profils vivent DERRIERE ce cache, et pas ailleurs.
+
+    L'appartenance d'un profil a une arme physique (`COMBI_WEAPON`) ne depend que de la
+    composition de l'escouade — exactement la cle de ce cache. La poser hors cache, dans la passe
+    d'observation qui ecrit l'etat du point d'arret, la recalculerait pour les 28 entites a chaque
+    step pour un resultat constant.
+
+    Contre-epreuve du VERT VACANT : le scenario d'entrainement reel PORTE des armes a profils
+    exclusifs (plasma, lance-grenades, smite) — l'assertion `found` echoue s'il n'en porte plus,
+    au lieu de laisser passer un test qui ne verifie rien.
+    """
+    from engine.observation_weapon_profiles import COMBI_GROUP_MARKER_OBS_IDS
+
+    env = _make_env()
+    env.reset()
+    gs = env.game_state
+    builder = env.obs_builder
+    marker_ids = set(COMBI_GROUP_MARKER_OBS_IDS.values())
+
+    found = {}
+    for sid in list(gs["units_cache"].keys()):
+        alive = [m for m in gs["squad_models"][sid] if m in gs["models_cache"]]
+        models = [gs["models_cache"][m] for m in alive]
+        gs.pop(WEAPON_PROFILE_CACHE_KEY, None)
+        rule_ids = builder._encode_entity_weapons(gs, sid, models, alive)[2]
+        by_marker = {}
+        for slot, row in enumerate(rule_ids):
+            for value in row:
+                if int(value) in marker_ids:
+                    by_marker.setdefault(int(value), []).append(slot)
+        if by_marker:
+            found[sid] = by_marker
+
+    assert found, "aucune arme a profils exclusifs dans le scenario d'entrainement"
+    for sid, by_marker in found.items():
+        for marker, slots in by_marker.items():
+            assert len(slots) >= 2, (
+                f"escouade {sid} : marqueur {marker} sur un seul slot ({slots}) — un groupe a "
+                f"profil unique ne doit pas etre marque"
+            )
+
+    # L'entree est bien SERVIE depuis le cache, marqueurs compris.
+    sid = next(iter(found))
+    alive = [m for m in gs["squad_models"][sid] if m in gs["models_cache"]]
+    models = [gs["models_cache"][m] for m in alive]
+    gs.pop(WEAPON_PROFILE_CACHE_KEY, None)
+    cold = builder._encode_entity_weapons(gs, sid, models, alive)[2]
+    hot = builder._encode_entity_weapons(gs, sid, models, alive)[2]
+    assert np.array_equal(cold, hot)
+    assert marker_ids & {int(v) for row in hot for v in row}
