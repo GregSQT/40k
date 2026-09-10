@@ -2085,6 +2085,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             _hz_mw = int(_hz_match.group(1))
                             if "[ALL FNP SAVED]" in action_desc:
                                 _hz_mw = 0
+                            else:
+                                _hz_fnp_m = re.search(r'\[FNP:(\d+)\]', action_desc)
+                                if _hz_fnp_m:
+                                    _hz_mw = max(0, _hz_mw - int(_hz_fnp_m.group(1)))
                             # Cible = acteur : le préfixe "Unit N(" d'action_desc est la seule
                             # source fiable de l'ID de l'unité sur une ligne SUFFERS (action_unit_id
                             # retient le dernier ID de header, pas celui de la ligne courante).
@@ -2188,6 +2192,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             _de_mw = int(_de_match.group(1))
                             if "[ALL FNP SAVED]" in action_desc:
                                 _de_mw = 0
+                            else:
+                                _de_fnp_m = re.search(r'\[FNP:(\d+)\]', action_desc)
+                                if _de_fnp_m:
+                                    _de_mw = max(0, _de_mw - int(_de_fnp_m.group(1)))
                             _de_unit_id = _dmg_actor_id
                             if _de_unit_id is None:
                                 stats['parse_errors'].append({
