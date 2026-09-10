@@ -2234,8 +2234,18 @@ class W40KEngine(gym.Env):
                 deployment_pools=self.game_state.get("deployment_pools"),  # get allowed
             )
 
-        if self.game_state.get("deployment_type") == "active":
-            enter_phase(self.game_state, "deployment")
+        # Le joueur courant suit le DEPLOYEUR — quand la phase de deploiement est reellement
+        # ouverte. Le test portait sur `deployment_type`, le mode GLOBAL du scenario, alors que
+        # l'ouverture de la phase (plus haut) teste le mode PAR JOUEUR : un scenario qui declare
+        # seulement `deployment_type_P2: "active"` (surcharge acceptee par
+        # `game_state._resolve_deployment_type_by_player`) laisse `deployment_type` a "fixed", et
+        # le masque de deploiement etait alors construit pour le joueur 1, qui n'a rien a poser.
+        # LA PHASE N'EST PLUS REECRITE ICI : son ecrivain unique est `enter_phase`, appele par
+        # `deployment_handlers.deployment_phase_start`. Le forcage qui vivait ici rouvrait
+        # `deployment` meme quand `_complete_deployment_if_nothing_to_place` venait de la clore
+        # (les deux rosters entierement declares en reserves), ecrasant la phase de commandement
+        # que cette cloture venait d'ouvrir.
+        if require_key(self.game_state, "phase") == "deployment":
             deployment_state = self.game_state.get("deployment_state")
             if deployment_state is not None:
                 self.game_state["current_player"] = int(require_key(deployment_state, "current_deployer"))
@@ -2394,6 +2404,589 @@ class W40KEngine(gym.Env):
             self._forced_wait_depth -= 1
         return observation, reward, terminated, truncated, info, out_mask
 
+    def _build_terminal_info(self) -> Dict[str, Any]:
+        """Bilan de FIN D'EPISODE, construit ICI pour TOUTES les portes de terminaison.
+
+        POURQUOI CETTE METHODE EXISTE. `step_with_mask` termine un episode par TROIS sorties : la
+        garde « limite de tours atteinte » en tete, la sortie « pool vide -> advance_phase » et le
+        retour normal. Une seule des trois — la derniere — batissait ce bilan ; les deux autres
+        fabriquaient leur `info` a la main et n'y mettaient que `winner` / `win_method`. Or
+        `ai/training_callbacks._handle_episode_end` EXIGE (`require_key`) `tactical_data`, et
+        `ai/metrics_tracker.log_episode` exige `deployment_mode` : un episode termine par l'une des
+        deux autres portes tuait le run. Meme defaut chez les deux sorties jumelles de
+        `ai/env_wrappers.BotControlledEnv._ensure_actionable_controlled_turn`, qui terminent sans
+        passer par le moteur.
+
+        CE QUE LA MESURE DIT, et pourquoi la correction a quand meme ete faite : sur 54 episodes
+        complets du chemin d'entrainement (12 sous politique entrainee, 42 sous actions aleatoires
+        masquees, les deux modes de la rampe de deploiement), ces portes n'ont ete empruntees
+        ZERO fois — le defaut etait arme, pas actif. C'est exactement le profil du defaut qui
+        coute des heures de run le jour ou il s'ouvre, et la garde d'enumeration ci-dessous ne
+        pouvait pas le voir : elle ne s'applique qu'a ce dict, jamais aux `info` ecrits a la main.
+
+        IDEMPOTENCE : aucune. Deux steps moteur peuvent rendre `terminated` dans le meme episode
+        (mesure : 24 terminaisons moteur pour 12 episodes gym), et chacun rebatit son bilan —
+        comportement INCHANGE, c'est deja ce que faisait le bloc du retour normal.
+        """
+        terminal_info: Dict[str, Any] = {}
+
+        winner, win_method = self._determine_winner_with_method()
+
+        # CRITICAL: win_method should never be None when game is terminated
+        if win_method is None:
+            raise ValueError(
+                f"win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}"
+            )
+
+        terminal_info["winner"] = winner
+        terminal_info["win_method"] = win_method
+
+        # CRITICAL: Populate info["episode"] for Stable-Baselines3 MetricsCollectionCallback
+        terminal_info["episode"] = {
+            "r": float(self.episode_reward_accumulator),
+            "l": int(self.episode_length_accumulator),
+            "t": int(self.episode_length_accumulator),
+        }
+
+        # Calculate units killed/lost
+        # Controlled player is explicit in engine config (seat-aware).
+        controlled_player = int(require_key(self.config, "controlled_player"))
+
+        units_cache = require_key(self.game_state, "units_cache")
+        surviving_ally_units = sum(1 for _uid, entry in units_cache.items()
+                                  if entry["player"] == controlled_player)
+        surviving_enemy_units = sum(1 for _uid, entry in units_cache.items()
+                                   if entry["player"] != controlled_player)
+
+        total_ally_units = sum(1 for u in self.game_state["units"] 
+                              if u["player"] == controlled_player)
+        total_enemy_units = sum(1 for u in self.game_state["units"] 
+                               if u["player"] != controlled_player)
+
+        self.episode_tactical_data['units_lost'] = total_ally_units - surviving_ally_units
+        self.episode_tactical_data['units_killed'] = total_enemy_units - surviving_enemy_units
+        self.episode_tactical_data['total_enemy_units'] = total_enemy_units
+        self.episode_tactical_data['total_ally_units'] = total_ally_units
+
+        # Attrition en FIGURINES et en VALUE : une seule passe sur models_cache, dont les
+        # mortes sont retirees. Les references de depart (effectif, VALUE) sont les photos
+        # posees par build_units_cache au reset — rien ne les redonne ensuite.
+        #
+        # LES DEUX CAMPS SONT COMPTES DE LA MEME FACON, et le camp perdant comme le camp
+        # gagnant : c'est ce qui rend les courbes lisibles cote a cote. Le compte de kills
+        # du journal (shoot_kills + melee_kills) ne conviendrait PAS comme numerateur cote
+        # ennemi — il ignore les figurines retirees hors attaque (hazard 24.16, retrait de
+        # coherence 03.03) que la difference des survivants compte forcement cote allie.
+        # L'attribution des kills a l'agent, elle, reste lisible sur g_/h_.
+        models_cache = require_key(self.game_state, "models_cache")
+        models_at_start = require_key(self.game_state, "model_count_at_start_by_player")
+        value_at_start = require_key(self.game_state, "value_at_start")
+        opponent_player = 2 if controlled_player == 1 else 1
+
+        surviving_ally_models = 0
+        surviving_enemy_models = 0
+        surviving_ally_value = 0.0
+        surviving_enemy_value = 0.0
+        for model in models_cache.values():
+            model_value = float(require_key(model, "VALUE"))
+            if int(require_key(model, "player")) == controlled_player:
+                surviving_ally_models += 1
+                surviving_ally_value += model_value
+            else:
+                surviving_enemy_models += 1
+                surviving_enemy_value += model_value
+
+        initial_ally_models = int(require_key(models_at_start, controlled_player))
+        initial_enemy_models = int(require_key(models_at_start, opponent_player))
+        if surviving_ally_models > initial_ally_models or surviving_enemy_models > initial_enemy_models:
+            raise ValueError(
+                f"more surviving models than at start (ally {surviving_ally_models}/"
+                f"{initial_ally_models}, enemy {surviving_enemy_models}/{initial_enemy_models}): "
+                "model_count_at_start_by_player is not the reset snapshot"
+            )
+        self.episode_tactical_data['initial_ally_models'] = initial_ally_models
+        self.episode_tactical_data['initial_enemy_models'] = initial_enemy_models
+        self.episode_tactical_data['models_lost'] = initial_ally_models - surviving_ally_models
+        self.episode_tactical_data['models_killed'] = initial_enemy_models - surviving_enemy_models
+
+        action_logs = self.game_state["action_logs"]
+
+        # Abilities rule usage — Famille A (types action_log) + Famille B (shot_records).
+        # Un compteur par règle par camp, initialisé à 0 ; l'exposition sera calculée
+        # après la boucle depuis les unités du roster.
+        _ABILITIES_KEYS: Tuple[str, ...] = (
+            "reactive_move", "charge_impact",
+            "charge_after_advance", "charge_after_flee",
+            "move_after_shooting",
+            "hit_reroll", "wound_reroll", "oath_wound_bonus",
+        )
+        abilities_counts: Dict[str, int] = {
+            f"{k}_{s}": 0 for k in _ABILITIES_KEYS for s in ("agent", "opp")
+        }
+
+        # Volume de combat, kills et attrition, meme source action_logs (seat-aware).
+        #
+        # Ces quatre compteurs etaient DECLARES et jamais incrementes depuis le commit
+        # fe1df7d8 « metrics OK » (2025-10-25), qui a deplace episode_tactical_data du
+        # callback vers le moteur : le deplacement a reimplemente valid_actions /
+        # invalid_actions / units_lost / units_killed, mais pas ceux-ci, tout en supprimant
+        # leur calcul cote callback dans le meme diff. Quatre courbes muettes pendant neuf
+        # mois (damage_dealt, damage_received, accuracy, damage_efficiency), sans erreur
+        # pour le signaler : leurs consommateurs sont gardes par `> 0`, donc une courbe
+        # absente ne se distingue pas d'un agent qui ne se bat jamais.
+        #
+        # POURQUOI ICI, et pas au point ou chaque attaque se resout : les deux endroits de
+        # ce fichier qui construisent un dictionnaire par attaque (attack_details, pour le
+        # step.log) sont a l'interieur de
+        # `if (self.step_logger and self.step_logger.enabled)`. Y incrementer rendrait les
+        # compteurs dependants de --step : nuls a l'entrainement normal, non nuls en debug.
+        # Et `result["all_attack_results"]`, l'autre canal, ne remonte JAMAIS jusqu'a step()
+        # dans le pipeline squad V11 (mesure sur partie reelle : 0 step sur un episode
+        # complet). action_logs est la source que reward_calculator et shoot_kills/
+        # melee_kills utilisent deja, elle est remise a zero par reset() et jamais purgee
+        # en cours d'episode : une passe unique ici ne peut pas double-compter.
+        #
+        # DEFINITION : shots_fired / hits comptent le TIR seul (`type == "shoot"`), comme
+        # a l'origine et comme le vocabulaire 40K l'impose — accuracy = precision au tir
+        # (BS), que melanger avec la melee (WS) rendrait ininterpretable. Les deux viennent
+        # du meme filtre, donc hits <= shots_fired par construction. damage_dealt et
+        # damage_received, eux, couvrent tir ET melee : c'est l'attrition totale.
+        #
+        # KILLS — DEFINITION : une FIGURINE detruite = 1, dans les deux phases. Le compte se
+        # fait donc sur `shootDetails[i]["targetDied"]` (pose par attaque, sur celle qui
+        # acheve la figurine), et JAMAIS sur le `target_died` de l'entete, qui vaut
+        # `kills > 0` pour tout le groupe (arme, cible) : un groupe qui tue trois figurines
+        # ne compterait que pour un. Jusqu'au 2026-07-30 la melee lisait le seul
+        # `shootDetails[0]`, ce qui ne mesurait que « la premiere attaque du groupe a-t-elle
+        # tue ? » — une probabilite quasi constante (~0,15 mesure) independante de la
+        # competence de l'agent, d'ou une courbe 02_combat/h_melee_model_kills plate et bruitee pendant que
+        # g_shoot_model_kills, elle, progressait.
+        # `*_value_killed` somme la VALUE des figurines ainsi detruites : distinguer 20
+        # gretchins a 4 points d'un monstre a 120 est ce qui separe un agent qui grignote
+        # d'un agent qui frappe ce qui compte. Distinct de `enemy_value_destroyed`,
+        # calcule plus bas : les deux comptent par figurine, mais celui-la somme la VALUE
+        # perdue TOUTES CAUSES confondues et sans ventilation par phase, la ou ceux-ci
+        # n'attribuent que ce que l'agent a detruit au tir ou en melee.
+        shots_fired = 0
+        hits = 0
+        damage_dealt = 0
+        damage_received = 0
+        shoot_kills = 0
+        melee_kills = 0
+        shoot_value_killed = 0.0
+        melee_value_killed = 0.0
+        # CHARGES — comptees POUR LES DEUX CAMPS, seul bloc de cette passe a le faire.
+        # Le taux de reussite d'une charge (2D6 contre la distance a laquelle elle est
+        # declaree) ne se lit que rapporte a une reference : un agent qui reussit 40% de
+        # ses charges joue bien ou mal selon que l'adversaire en reussit 30% ou 70%. Sans
+        # la colonne d'en face, la courbe ne distingue pas la competence de la difficulte
+        # du scenario. Les compteurs `*_opponent` sont donc la mesure, pas un supplement.
+        #
+        # `charge` et `charge_fail` sont les deux SEULS types emis pour une tentative, et
+        # ils le sont par les DEUX chemins — pipeline squad V11 (ce fichier) et handlers
+        # legacy/PvP (charge_handlers ~L2914/4233/5409/5531/5689) — donc le comptage tient
+        # quel que soit le chemin qui a joue. `charge_impact` est exclu : c'est la
+        # consequence d'une charge deja reussie, pas une tentative.
+        charge_attempts = 0
+        charge_successes = 0
+        charge_attempts_opponent = 0
+        charge_successes_opponent = 0
+        # PARTICIPATION PAR PHASE — « quelle part des occasions l'agent a-t-il saisies ».
+        #
+        # Ces trois taux (deplacement, tir, fuite) ont ete emis par le callback jusqu'a ce
+        # que son unique appelant disparaisse : `log_phase_performance` n'avait plus AUCUN
+        # appel de production, donc `game_tactical/movement_efficiency`,
+        # `shooting_participation` et `game_detailed/flee_rate` n'existaient
+        # dans aucun run — verifie sur les 124 tags d'un run de 50 000 episodes. Meme
+        # defaut silencieux que les quatre compteurs plus haut : une courbe absente ne se
+        # distingue pas d'un agent qui n'agit jamais.
+        #
+        # Recomptes ICI et pas rebranches la-bas : le callback deduisait la phase et le camp
+        # de l'`info` d'un step gym, ou un step enchaine plusieurs steps moteur — c'est ce
+        # qui lui faisait ranger les actions du BOT sous le drapeau de l'agent. Dans
+        # `action_logs`, phase et camp sont des DONNEES de chaque ligne.
+        #
+        # PAS de taux de participation pour la CHARGE : son denominateur ne serait pas
+        # « les occasions de charger » mais « les fois ou le moteur a expose la phase »
+        # — quand le pool de charge est vide, aucun step n'est joue, donc aucun `wait` n'est
+        # journalise et le tour n'entre nulle part (mesure : sur un montage ou les deux camps
+        # arrivent au contact en se deplacant, la phase charge n'est jamais exposee). Le
+        # VOLUME de charges declarees (`charge_attempts`) repond a la question sans cette
+        # ambiguite, et la comparaison avec l'adversaire lui sert d'echelle.
+        #
+        # ACTIVATIONS, pas lignes de journal : le tir emet un log par groupe (arme, cible),
+        # donc une escouade qui tire trois armes produirait trois « participations ». Le
+        # couple (turn, shooterId) ramene le compte a ce qu'il pretend mesurer — combien de
+        # fois une escouade a choisi de tirer plutot que d'attendre. Le deplacement et la
+        # charge, eux, emettent une ligne par activation : rien a dedupliquer.
+        move_actions = 0
+        move_flees = 0
+        move_waits = 0
+        move_advances = 0
+        shoot_activations: Set[Tuple[int, str]] = set()
+        shoot_waits = 0
+        fight_activations: Set[Tuple[int, str]] = set()
+        for log in action_logs:
+            log_type = log.get("type")
+            if log_type == "move":
+                if int(require_key(log, "player")) == controlled_player:
+                    move_actions += 1
+                    if require_key(log, "was_flee"):
+                        move_flees += 1
+                    if require_key(log, "move_type") == "advance":
+                        move_advances += 1
+                continue
+            if log_type == "wait":
+                if int(require_key(log, "player")) == controlled_player:
+                    log_phase = require_key(log, "phase")
+                    if log_phase == "move":
+                        move_waits += 1
+                    elif log_phase == "shoot":
+                        shoot_waits += 1
+                continue
+            if log_type in ("charge", "charge_fail"):
+                _charge_ok = log_type == "charge"
+                _by_controlled = int(require_key(log, "player")) == controlled_player
+                if _by_controlled:
+                    charge_attempts += 1
+                    if _charge_ok:
+                        charge_successes += 1
+                else:
+                    charge_attempts_opponent += 1
+                    if _charge_ok:
+                        charge_successes_opponent += 1
+                # DISTANCES 11.04 — derivees ICI, de la ligne elle-meme, et pas d'un second
+                # accumulateur tenu en parallele dans `game_state` : c'est le meme evenement
+                # que `charge_attempts` juste au-dessus, sur le meme couple de types et le
+                # meme camp. Deux compteurs du meme evenement peuvent diverger — il suffit
+                # d'un futur chemin de fin de charge qui emette la ligne sans passer par
+                # l'autre — et rien sur les courbes ne le montrerait.
+                #
+                # `require_key` : les deux champs sont poses par `charge_record_outcome` sur
+                # les SEPT sites qui emettent ces lignes. Une ligne qui ne les porte pas est
+                # un site oublie, pas un cas de jeu — le motif jumeau que ce chantier a
+                # justement trouve (le chemin gym journalisait a part).
+                _cd = require_key(
+                    self.episode_tactical_data, 'charge_distance'
+                )['agent' if _by_controlled else 'opponent']
+                _near = require_key(log, "charge_nearest_enemy_inches")
+                if _near is not None:
+                    _cd['nearest_sum'] += float(_near)
+                    _cd['nearest_n'] += 1
+                _tgt = require_key(log, "charge_target_distance_inches")
+                if _tgt is not None:
+                    _cd['target_sum'] += float(_tgt)
+                    _cd['target_n'] += 1
+                    if float(_tgt) >= CHARGE_LONG_DECLARATION_INCHES:
+                        _cd['long'] += 1
+                    _cd['success_sum' if _charge_ok else 'fail_sum'] += float(_tgt)
+                    _cd['success_n' if _charge_ok else 'fail_n'] += 1
+                # Abilities — Famille A : charge_after_advance / charge_after_flee.
+                # Seules les charges RÉUSSIES comptent : un échec n'a pas utilisé de capacité.
+                if _charge_ok:
+                    _rule_eff = log.get("ability_rule_effect")  # get allowed : None si charge normale
+                    if _rule_eff in ("charge_after_advance", "charge_after_flee"):
+                        abilities_counts[
+                            f"{_rule_eff}_{'agent' if _by_controlled else 'opp'}"
+                        ] += 1
+                continue
+            # Abilities — Famille A : reactive_move, charge_impact, move_after_shooting.
+            # Ces trois types n'ont pas de branche dédiée dans la boucle existante (ils
+            # tombaient dans `if log_type not in ('shoot', 'combat'): continue`).
+            if log_type in ("reactive_move", "charge_impact", "move_after_shooting"):
+                abilities_counts[
+                    f"{log_type}_{'agent' if int(require_key(log, 'player')) == controlled_player else 'opp'}"
+                ] += 1
+                continue
+            if log_type not in ("shoot", "combat"):
+                continue
+            by_controlled = int(require_key(log, "player")) == controlled_player
+            # `damage` est la perte de PV reellement appliquee a la cible pour cette
+            # activation (verifie sur partie reelle : la somme par attaquant egale
+            # exactement les PV perdus par le camp d'en face).
+            log_damage = int(require_key(log, "damage"))
+            if by_controlled:
+                damage_dealt += log_damage
+            else:
+                damage_received += log_damage
+            # Abilities — Famille B : relances et bonus Oath sur les jets.
+            # Comptés pour LES DEUX CAMPS avant le filtre by_controlled des kills.
+            # hitAbility / woundAbility / woundBonusAbility posés par stamp_reroll_abilities
+            # et stamp_wound_bonus_ability (shared_utils) ; absence = pas de relance → get allowed.
+            _sfx_b = "_agent" if by_controlled else "_opp"
+            for _shot_b in require_key(log, "shootDetails"):
+                if _shot_b.get("hitAbility"):          # get allowed
+                    abilities_counts[f"hit_reroll{_sfx_b}"] += 1
+                if _shot_b.get("woundAbility"):        # get allowed
+                    abilities_counts[f"wound_reroll{_sfx_b}"] += 1
+                if _shot_b.get("woundBonusAbility"):   # get allowed
+                    abilities_counts[f"oath_wound_bonus{_sfx_b}"] += 1
+            if not by_controlled:
+                continue
+            # `type == "combat"` n'a qu'un seul emetteur (FIGHT_CTX, `phase_label="fight"`) :
+            # une autre phase serait un log de melee produit par un chemin inconnu, pas une
+            # ligne a ranger au tir en silence.
+            is_melee = log_type == "combat"
+            if not is_melee:
+                # Une ACTIVATION de tir = une escouade, un tour. Cf. le commentaire des
+                # compteurs de participation : le journal en emet une ligne par arme.
+                shoot_activations.add(
+                    (int(require_key(log, "turn")), str(require_key(log, "shooterId")))
+                )
+            else:
+                # Meme logique que le tir : une ligne par groupe d'armes, une activation
+                # par (tour, escouade). La deduplication isole le nombre d'unites ayant
+                # combattu, pas le nombre de groupes d'attaque.
+                fight_activations.add(
+                    (int(require_key(log, "turn")), str(require_key(log, "shooterId")))
+                )
+            if is_melee and log.get("phase") != "fight":
+                raise ValueError(
+                    f"action_log de type 'combat' hors phase fight (phase="
+                    f"{log.get('phase')!r}) — emetteur inattendu, kills non ventilables"
+                )
+            for shot in require_key(log, "shootDetails"):
+                if not is_melee:
+                    shots_fired += 1
+                    if require_key(shot, "hitResult") == "HIT":
+                        hits += 1
+                # `targetDied` n'est pose que sur les attaques qui ont applique des degats
+                # (une attaque ratee ou sauvegardee n'a pas de cible morte) : absence = False.
+                if not shot.get("targetDied", False):  # get allowed
+                    continue
+                model_value = float(require_key(shot, "targetValue"))
+                if is_melee:
+                    melee_kills += 1
+                    melee_value_killed += model_value
+                else:
+                    shoot_kills += 1
+                    shoot_value_killed += model_value
+        self.episode_tactical_data['shots_fired'] = shots_fired
+        self.episode_tactical_data['hits'] = hits
+        self.episode_tactical_data['damage_dealt'] = damage_dealt
+        self.episode_tactical_data['damage_received'] = damage_received
+        self.episode_tactical_data['shoot_kills'] = shoot_kills
+        self.episode_tactical_data['melee_kills'] = melee_kills
+        self.episode_tactical_data['shoot_value_killed'] = shoot_value_killed
+        self.episode_tactical_data['melee_value_killed'] = melee_value_killed
+        self.episode_tactical_data['charge_attempts'] = charge_attempts
+        self.episode_tactical_data['charge_successes'] = charge_successes
+        self.episode_tactical_data['charge_attempts_opponent'] = charge_attempts_opponent
+        self.episode_tactical_data['charge_successes_opponent'] = charge_successes_opponent
+        self.episode_tactical_data['move_actions'] = move_actions
+        self.episode_tactical_data['move_flees'] = move_flees
+        self.episode_tactical_data['move_waits'] = move_waits
+        self.episode_tactical_data['move_advances'] = move_advances
+        self.episode_tactical_data['shoot_activations'] = len(shoot_activations)
+        self.episode_tactical_data['shoot_waits'] = shoot_waits
+        self.episode_tactical_data['fight_activations'] = len(fight_activations)
+
+        # Issues du cache de scoring du deploiement, lues sur le decodeur qui les compte.
+        # COPIE (`deployment_cache_counts()` en rend une) : le compteur du decodeur est remis
+        # a zero au prochain `reset_episode_caches`, l'appelant lit celui-ci APRES.
+        self.episode_tactical_data['deployment_cache_counts'] = (
+            self.action_decoder.deployment_cache_counts()
+        )
+        # Réserves stratégiques : compteurs incrémentés par les handlers via game_state,
+        # indexés PAR JOUEUR. La projection sur agent/adversaire se fait ici et nulle part
+        # ailleurs — c'est le seul endroit qui connaisse le siège de l'agent sur CET épisode
+        # (`agent_seat_mode: random` : le joueur contrôlé est 1 ou 2 selon le tirage).
+        _controlled = get_controlled_player(self.game_state)
+        _opponent = 2 if _controlled == 1 else 1
+        for _key, _state_key in (
+            ('reserves_placed', '_reserves_placed'),
+            ('reserves_deployed', '_reserves_deployed'),
+            ('reserves_destroyed_turn3', '_reserves_destroyed_turn3'),
+        ):
+            _by_player = require_key(self.game_state, _state_key)
+            self.episode_tactical_data[f'{_key}_agent'] = int(_by_player[_controlled])
+            self.episode_tactical_data[f'{_key}_opponent'] = int(_by_player[_opponent])
+
+        # ARRIVÉES DÉCLINÉES vs SANS DESTINATION — deux causes que « détruite en réserve »
+        # confondait, et dont dépend toute pénalité juste : décliner est une DÉCISION, un
+        # pool vide n'en est pas une. Dérivé ici des trois ensembles de (joueur, escouade,
+        # tour) : décliné = une offre dont l'arrivée n'a pas suivi, LE MÊME TOUR.
+        _offered = require_key(self.game_state, "_ingress_offered")
+        _arrived = require_key(self.game_state, "_ingress_arrived")
+        _no_dest = require_key(self.game_state, "_ingress_no_destination")
+        _declined = _offered - _arrived
+        for _label, _player in (('agent', _controlled), ('opponent', _opponent)):
+            # `offers` est le DÉNOMINATEUR, et il n'est pas décoratif : sans lui, un
+            # `declined` à zéro ne distingue pas « toutes les occasions ont été saisies » de
+            # « aucune n'a été offerte » — les deux se lisent 0 sur la courbe.
+            self.episode_tactical_data[f'reserves_ingress_offers_{_label}'] = sum(
+                1 for _p, _sq, _t in _offered if _p == _player
+            )
+            self.episode_tactical_data[f'reserves_ingress_declined_{_label}'] = sum(
+                1 for _p, _sq, _t in _declined if _p == _player
+            )
+            self.episode_tactical_data[f'reserves_ingress_no_destination_{_label}'] = sum(
+                1 for _p, _sq, _t in _no_dest if _p == _player
+            )
+
+        # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
+        #
+        # PAR FIGURINE, des deux cotes (survivants accumules avec les effectifs plus haut).
+        # Ces deux quantites se comptaient a l'ESCOUADE : la valeur survivante etait
+        # `unit["VALUE"]` entiere tant qu'une seule figurine tenait, donc une escouade de
+        # 10 reduite a 1 pesait 0 de perte. Les courbes d'attrition en VALUE (combat/f_,
+        # combat/g_, 02_combat/a_, e_, f_) affichaient alors 0.0 la ou le compte de
+        # figurines montrait 0.9 — la mesure ne pouvait pas etre lue a cote de c_/d_.
+        total_ally_value = float(require_key(value_at_start, controlled_player))
+        total_enemy_value = float(require_key(value_at_start, opponent_player))
+        # Pas de `max(0.0, ...)` ici : depart et survivants sortent des memes figurines,
+        # rien n'ajoute de figurine en cours de partie. Un ecart negatif signifierait que
+        # la photo de depart n'en est pas une — a signaler, pas a ramener a zero.
+        if surviving_ally_value > total_ally_value or surviving_enemy_value > total_enemy_value:
+            raise ValueError(
+                f"surviving VALUE exceeds start VALUE (ally {surviving_ally_value}/"
+                f"{total_ally_value}, enemy {surviving_enemy_value}/{total_enemy_value}): "
+                "value_at_start is not the reset snapshot"
+            )
+        self.episode_tactical_data['ally_value_lost'] = total_ally_value - surviving_ally_value
+        self.episode_tactical_data['enemy_value_destroyed'] = total_enemy_value - surviving_enemy_value
+        self.episode_tactical_data['total_ally_value'] = total_ally_value
+        self.episode_tactical_data['total_enemy_value'] = total_enemy_value
+
+        # Store turn number for metrics filtering (e.g., objectives only on turn 5+)
+        self.episode_tactical_data['final_turn'] = self.game_state["turn"]
+
+        # Unit-rule forcing exposure metrics:
+        # Count units that have at least one configured UNIT_RULES entry.
+        units = require_key(self.game_state, "units")
+        forced_unit_counts_controlled: Dict[str, int] = {}
+        forced_unit_counts_all: Dict[str, int] = {}
+        for unit in units:
+            unit_rules = require_key(unit, "UNIT_RULES")
+            if not isinstance(unit_rules, list):
+                raise TypeError(
+                    f"UNIT_RULES must be list for unit {require_key(unit, 'id')} "
+                    f"(got {type(unit_rules).__name__})"
+                )
+            if len(unit_rules) == 0:
+                continue
+            unit_name = str(require_key(unit, "unitType"))
+            unit_player = require_key(unit, "player")
+            if unit_name not in forced_unit_counts_all:
+                forced_unit_counts_all[unit_name] = 0
+            forced_unit_counts_all[unit_name] += 1
+            if unit_player == controlled_player:
+                if unit_name not in forced_unit_counts_controlled:
+                    forced_unit_counts_controlled[unit_name] = 0
+                forced_unit_counts_controlled[unit_name] += 1
+
+        self.episode_tactical_data['forced_unit_episode_has_controlled'] = (
+            1 if len(forced_unit_counts_controlled) > 0 else 0
+        )
+        self.episode_tactical_data['forced_unit_episode_has_any'] = (
+            1 if len(forced_unit_counts_all) > 0 else 0
+        )
+        self.episode_tactical_data['forced_unit_instances_controlled'] = int(
+            sum(forced_unit_counts_controlled.values())
+        )
+        self.episode_tactical_data['forced_unit_instances_all'] = int(
+            sum(forced_unit_counts_all.values())
+        )
+        self.episode_tactical_data['forced_unit_counts_controlled'] = dict(
+            sorted(forced_unit_counts_controlled.items(), key=lambda item: item[0])
+        )
+        self.episode_tactical_data['forced_unit_counts_all'] = dict(
+            sorted(forced_unit_counts_all.items(), key=lambda item: item[0])
+        )
+
+        # Abilities — EXPOSITION par règle et par camp.
+        # Un épisode est « exposé » pour une règle si AU MOINS UNE unité du camp possédait
+        # cette règle dans le roster (vivante ou morte — toutes sont dans game_state["units"]).
+        # Sans cette courbe, un zéro sur abilities/ ne distingue pas « jamais déclenchée »
+        # de « jamais dans le roster ». Calculée depuis les unités du roster (pas les action_logs).
+        #
+        # Familles A et B (rerolls) : via unit_has_rule_effect.
+        # Oath wound bonus : proxy par les compteurs B — a tiré ≈ était active (Oath est une
+        # capacité de faction déclarée en command phase, pas une règle d'unité technique).
+        abilities_exposure: Dict[str, int] = {
+            f"{k}_{s}": 0 for k in _ABILITIES_KEYS for s in ("agent", "opp")
+        }
+        for _unit_exp in units:
+            _exp_sfx = "_agent" if int(_unit_exp["player"]) == controlled_player else "_opp"
+            for _eff in (
+                "reactive_move", "charge_impact",
+                "charge_after_advance", "charge_after_flee",
+                "move_after_shooting",
+            ):
+                if unit_has_rule_effect(_unit_exp, _eff):
+                    abilities_exposure[f"{_eff}{_exp_sfx}"] = 1
+            if unit_has_rule_effect(_unit_exp, "reroll_1_tohit_fight"):
+                abilities_exposure[f"hit_reroll{_exp_sfx}"] = 1
+            for _we in ("reroll_1_towound", "reroll_towound_target_on_objective"):
+                if unit_has_rule_effect(_unit_exp, _we):
+                    abilities_exposure[f"wound_reroll{_exp_sfx}"] = 1
+        # Oath et hit_reroll : proxy count — couvre les relances issues de capacités de faction
+        # (ex. Oath of Moment via cause='hit_any_fail') qui n'apparaissent pas dans UNIT_RULES
+        # et échappent donc à unit_has_rule_effect('reroll_1_tohit_fight').
+        for _px_sfx in ("agent", "opp"):
+            abilities_exposure[f"hit_reroll_{_px_sfx}"] = max(
+                abilities_exposure[f"hit_reroll_{_px_sfx}"],
+                1 if abilities_counts[f"hit_reroll_{_px_sfx}"] > 0 else 0,
+            )
+        abilities_exposure["oath_wound_bonus_agent"] = (
+            1 if abilities_counts["oath_wound_bonus_agent"] > 0 else 0
+        )
+        abilities_exposure["oath_wound_bonus_opp"] = (
+            1 if abilities_counts["oath_wound_bonus_opp"] > 0 else 0
+        )
+        self.episode_tactical_data["abilities_counts"] = abilities_counts
+        self.episode_tactical_data["abilities_exposure"] = abilities_exposure
+
+        victory_points = require_key(self.game_state, "victory_points")
+        controlled_vp = float(require_key(victory_points, controlled_player))
+        opponent_vp = float(require_key(victory_points, opponent_player))
+        self.episode_tactical_data['victory_points_cumulative_episode'] = controlled_vp
+        self.episode_tactical_data['victory_points_controlled_episode'] = controlled_vp
+        self.episode_tactical_data['victory_points_opponent_episode'] = opponent_vp
+        self.episode_tactical_data['victory_points_diff_controlled_minus_opponent'] = (
+            controlled_vp - opponent_vp
+        )
+        # Cles exigees : posees a l'init du game_state et au reset. Le `.get(...) if
+        # isinstance(...) else []` qui occupait cette place transformait leur absence en
+        # liste vide, et une liste vide desarme silencieusement les courbes qui la lisent
+        # (01_VP/e_objectives_held, d_objectives_held_diff) — exactement ce qui a masque
+        # pendant 50 000 episodes que personne ne remplissait ces listes.
+        self.episode_tactical_data['controlled_objective_samples'] = list(
+            require_key(self.game_state, "controlled_objective_samples_scoring_turns")
+        )
+        self.episode_tactical_data['opponent_objective_samples'] = list(
+            require_key(self.game_state, "opponent_objective_samples_scoring_turns")
+        )
+
+        # Add tactical data to info
+        terminal_info["tactical_data"] = self.episode_tactical_data.copy()
+
+        # Mode de déploiement de CET épisode ("active" | "auto" | None), pour que les
+        # courbes puissent être ventilées par mode. Sans cette ventilation, la rampe
+        # `deployment_mode_schedule` fait varier la population mesurée pendant tout le run :
+        # une métrique agrégée mélange alors deux tâches de difficulté différente dans des
+        # proportions qui changent à chaque épisode, et son plateau ne distingue plus un
+        # agent qui stagne d'un agent qui progresse sur une tâche qui durcit.
+        terminal_info["deployment_mode"] = self.game_state["deployment_mode_schedule_mode"]
+
+        # Log episode end with final stats and win method
+        if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
+            objective_control = self.state_manager.calculate_objective_control(self.game_state)
+            self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
+
+        # MEME GARDE que celle du point de sortie de `step_with_mask`, appliquee ici parce que
+        # c'est ici que les cles terminales sont ECRITES : les sorties anticipees ne traversent
+        # pas ce point de sortie, et une cle ajoutee plus tard leur echapperait.
+        unlisted = tuple(key for key in terminal_info if key not in TERMINAL_INFO_KEYS)
+        if unlisted:
+            raise RuntimeError(
+                f"Cles de fin d'episode absentes de TERMINAL_INFO_KEYS : {unlisted}. "
+                f"Les declarer, sinon `_drain_forced_waits` ne les remontera pas quand l'episode "
+                f"se termine pendant une chaine d'attentes forcees auto-jouees."
+            )
+        return terminal_info
+
+
     def step_with_mask(
         self,
         action: int,
@@ -2465,23 +3058,25 @@ class W40KEngine(gym.Env):
             self.game_state["game_over"] = True
             self.game_state["turn_limit_reached"] = True
             observation, out_mask = self._step_observation()
-            winner, win_method = self._determine_winner_with_method()
-            
-            # CRITICAL: win_method should never be None when game is terminated
-            if win_method is None:
-                raise ValueError(
-                    f"win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}"
-                )
-            
-            info = {"turn_limit_exceeded": True, "winner": winner, "win_method": win_method}
-            
-            # Log episode end if step_logger is enabled
-            if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-                objective_control = self.state_manager.calculate_objective_control(self.game_state)
-                self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
-            
-            reward = self.reward_calculator.calculate_reward(True, {"action": "turn_limit_reached"}, self.game_state)
+            # `reason` : ce payload est une REPONSE SYSTEME — la bataille s'arrete parce que la
+            # duree est ecoulee, aucune unite n'agit. Sans cette cle, `calculate_reward` le classe
+            # en action (son `action` n'est dans aucune des deux listes) et LEVE sur l'unite
+            # agissante absente : `ValueError: Action result missing acting unit ID`. La porte ne
+            # rendait donc jamais son episode — elle plantait une ligne avant. Invisible jusqu'ici
+            # parce que le seul test qui l'exerce (`test_forced_wait_not_penalised`, CR-3) mocke
+            # `calculate_reward`, et parce que le chemin n'est pas emprunte en entrainement.
+            reward = self.reward_calculator.calculate_reward(
+                True, {"action": "turn_limit_reached", "reason": "turn_limit_reached"}, self.game_state
+            )
             reward += self._drain_pending_reserves()
+            # BILAN COMPLET, comme le retour normal : cette porte ne posait que `winner` et
+            # `win_method`, et l'entrainement EXIGE aussi `episode`, `tactical_data` et
+            # `deployment_mode` (cf. `_build_terminal_info`, qui porte aussi la garde
+            # `win_method is None` et le journal de fin d'episode retires d'ici). Place APRES
+            # `calculate_reward` pour suivre l'ordre du retour normal ; ni le calcul de
+            # recompense ni le drain de reserves ne touchent ce que le bilan lit (`units_cache`,
+            # `victory_points`, `action_logs`), l'ordre est donc sans effet sur ses valeurs.
+            info = {"turn_limit_exceeded": True, **self._build_terminal_info()}
             return observation, reward, True, False, info, out_mask
 
         # Check for game termination before action
@@ -2554,22 +3149,12 @@ class W40KEngine(gym.Env):
             terminated = self.game_state["game_over"]
             info = {"phase_auto_advanced": True, "previous_phase": current_phase}
             if terminated:
-                winner, win_method = self._determine_winner_with_method()
-                
-                # CRITICAL: win_method should never be None when game is terminated
-                if win_method is None:
-                    raise ValueError(
-                        f"win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}"
-                    )
-                
-                info["winner"] = winner
-                info["win_method"] = win_method
-                
-                # Log episode end if step_logger is enabled
-                if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-                    objective_control = self.state_manager.calculate_objective_control(self.game_state)
-                    self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
-            
+                # MEME BILAN que le retour normal (cf. `_build_terminal_info`), qui porte aussi la
+                # garde `win_method is None` et le journal de fin d'episode ecrits ici a la main.
+                # La transition de phase ci-dessus peut franchir la limite de tours : l'episode se
+                # terminait alors ici, avec `winner` seul, et l'entrainement exige davantage.
+                info.update(self._build_terminal_info())
+
             # Sortie NON TERMINALE quand la transition de phase n'a pas fini la partie : elle doit
             # drainer les attentes forcees comme le retour final, sinon l'economie dependrait du
             # chemin emprunte. L'acteur de reference est celui d'AVANT la transition — la chaine ne
@@ -2886,549 +3471,10 @@ class W40KEngine(gym.Env):
 
         # Add winner info when game ends
         if terminated:
-            winner, win_method = self._determine_winner_with_method()
-            
-            # CRITICAL: win_method should never be None when game is terminated
-            if win_method is None:
-                raise ValueError(
-                    f"win_method is None but terminated=True. Winner={winner}, Turn={self.game_state.get('turn')}"
-                )
-            
-            terminal_info["winner"] = winner
-            terminal_info["win_method"] = win_method
-
-            # CRITICAL: Populate info["episode"] for Stable-Baselines3 MetricsCollectionCallback
-            terminal_info["episode"] = {
-                "r": float(self.episode_reward_accumulator),
-                "l": int(self.episode_length_accumulator),
-                "t": int(self.episode_length_accumulator),
-            }
-            
-            # Calculate units killed/lost
-            # Controlled player is explicit in engine config (seat-aware).
-            controlled_player = int(require_key(self.config, "controlled_player"))
-            
-            units_cache = require_key(self.game_state, "units_cache")
-            surviving_ally_units = sum(1 for _uid, entry in units_cache.items()
-                                      if entry["player"] == controlled_player)
-            surviving_enemy_units = sum(1 for _uid, entry in units_cache.items()
-                                       if entry["player"] != controlled_player)
-            
-            total_ally_units = sum(1 for u in self.game_state["units"] 
-                                  if u["player"] == controlled_player)
-            total_enemy_units = sum(1 for u in self.game_state["units"] 
-                                   if u["player"] != controlled_player)
-            
-            self.episode_tactical_data['units_lost'] = total_ally_units - surviving_ally_units
-            self.episode_tactical_data['units_killed'] = total_enemy_units - surviving_enemy_units
-            self.episode_tactical_data['total_enemy_units'] = total_enemy_units
-            self.episode_tactical_data['total_ally_units'] = total_ally_units
-
-            # Attrition en FIGURINES et en VALUE : une seule passe sur models_cache, dont les
-            # mortes sont retirees. Les references de depart (effectif, VALUE) sont les photos
-            # posees par build_units_cache au reset — rien ne les redonne ensuite.
-            #
-            # LES DEUX CAMPS SONT COMPTES DE LA MEME FACON, et le camp perdant comme le camp
-            # gagnant : c'est ce qui rend les courbes lisibles cote a cote. Le compte de kills
-            # du journal (shoot_kills + melee_kills) ne conviendrait PAS comme numerateur cote
-            # ennemi — il ignore les figurines retirees hors attaque (hazard 24.16, retrait de
-            # coherence 03.03) que la difference des survivants compte forcement cote allie.
-            # L'attribution des kills a l'agent, elle, reste lisible sur g_/h_.
-            models_cache = require_key(self.game_state, "models_cache")
-            models_at_start = require_key(self.game_state, "model_count_at_start_by_player")
-            value_at_start = require_key(self.game_state, "value_at_start")
-            opponent_player = 2 if controlled_player == 1 else 1
-
-            surviving_ally_models = 0
-            surviving_enemy_models = 0
-            surviving_ally_value = 0.0
-            surviving_enemy_value = 0.0
-            for model in models_cache.values():
-                model_value = float(require_key(model, "VALUE"))
-                if int(require_key(model, "player")) == controlled_player:
-                    surviving_ally_models += 1
-                    surviving_ally_value += model_value
-                else:
-                    surviving_enemy_models += 1
-                    surviving_enemy_value += model_value
-
-            initial_ally_models = int(require_key(models_at_start, controlled_player))
-            initial_enemy_models = int(require_key(models_at_start, opponent_player))
-            if surviving_ally_models > initial_ally_models or surviving_enemy_models > initial_enemy_models:
-                raise ValueError(
-                    f"more surviving models than at start (ally {surviving_ally_models}/"
-                    f"{initial_ally_models}, enemy {surviving_enemy_models}/{initial_enemy_models}): "
-                    "model_count_at_start_by_player is not the reset snapshot"
-                )
-            self.episode_tactical_data['initial_ally_models'] = initial_ally_models
-            self.episode_tactical_data['initial_enemy_models'] = initial_enemy_models
-            self.episode_tactical_data['models_lost'] = initial_ally_models - surviving_ally_models
-            self.episode_tactical_data['models_killed'] = initial_enemy_models - surviving_enemy_models
-
-            action_logs = self.game_state["action_logs"]
-
-            # Abilities rule usage — Famille A (types action_log) + Famille B (shot_records).
-            # Un compteur par règle par camp, initialisé à 0 ; l'exposition sera calculée
-            # après la boucle depuis les unités du roster.
-            _ABILITIES_KEYS: Tuple[str, ...] = (
-                "reactive_move", "charge_impact",
-                "charge_after_advance", "charge_after_flee",
-                "move_after_shooting",
-                "hit_reroll", "wound_reroll", "oath_wound_bonus",
-            )
-            abilities_counts: Dict[str, int] = {
-                f"{k}_{s}": 0 for k in _ABILITIES_KEYS for s in ("agent", "opp")
-            }
-
-            # Volume de combat, kills et attrition, meme source action_logs (seat-aware).
-            #
-            # Ces quatre compteurs etaient DECLARES et jamais incrementes depuis le commit
-            # fe1df7d8 « metrics OK » (2025-10-25), qui a deplace episode_tactical_data du
-            # callback vers le moteur : le deplacement a reimplemente valid_actions /
-            # invalid_actions / units_lost / units_killed, mais pas ceux-ci, tout en supprimant
-            # leur calcul cote callback dans le meme diff. Quatre courbes muettes pendant neuf
-            # mois (damage_dealt, damage_received, accuracy, damage_efficiency), sans erreur
-            # pour le signaler : leurs consommateurs sont gardes par `> 0`, donc une courbe
-            # absente ne se distingue pas d'un agent qui ne se bat jamais.
-            #
-            # POURQUOI ICI, et pas au point ou chaque attaque se resout : les deux endroits de
-            # ce fichier qui construisent un dictionnaire par attaque (attack_details, pour le
-            # step.log) sont a l'interieur de
-            # `if (self.step_logger and self.step_logger.enabled)`. Y incrementer rendrait les
-            # compteurs dependants de --step : nuls a l'entrainement normal, non nuls en debug.
-            # Et `result["all_attack_results"]`, l'autre canal, ne remonte JAMAIS jusqu'a step()
-            # dans le pipeline squad V11 (mesure sur partie reelle : 0 step sur un episode
-            # complet). action_logs est la source que reward_calculator et shoot_kills/
-            # melee_kills utilisent deja, elle est remise a zero par reset() et jamais purgee
-            # en cours d'episode : une passe unique ici ne peut pas double-compter.
-            #
-            # DEFINITION : shots_fired / hits comptent le TIR seul (`type == "shoot"`), comme
-            # a l'origine et comme le vocabulaire 40K l'impose — accuracy = precision au tir
-            # (BS), que melanger avec la melee (WS) rendrait ininterpretable. Les deux viennent
-            # du meme filtre, donc hits <= shots_fired par construction. damage_dealt et
-            # damage_received, eux, couvrent tir ET melee : c'est l'attrition totale.
-            #
-            # KILLS — DEFINITION : une FIGURINE detruite = 1, dans les deux phases. Le compte se
-            # fait donc sur `shootDetails[i]["targetDied"]` (pose par attaque, sur celle qui
-            # acheve la figurine), et JAMAIS sur le `target_died` de l'entete, qui vaut
-            # `kills > 0` pour tout le groupe (arme, cible) : un groupe qui tue trois figurines
-            # ne compterait que pour un. Jusqu'au 2026-07-30 la melee lisait le seul
-            # `shootDetails[0]`, ce qui ne mesurait que « la premiere attaque du groupe a-t-elle
-            # tue ? » — une probabilite quasi constante (~0,15 mesure) independante de la
-            # competence de l'agent, d'ou une courbe 02_combat/h_melee_model_kills plate et bruitee pendant que
-            # g_shoot_model_kills, elle, progressait.
-            # `*_value_killed` somme la VALUE des figurines ainsi detruites : distinguer 20
-            # gretchins a 4 points d'un monstre a 120 est ce qui separe un agent qui grignote
-            # d'un agent qui frappe ce qui compte. Distinct de `enemy_value_destroyed`,
-            # calcule plus bas : les deux comptent par figurine, mais celui-la somme la VALUE
-            # perdue TOUTES CAUSES confondues et sans ventilation par phase, la ou ceux-ci
-            # n'attribuent que ce que l'agent a detruit au tir ou en melee.
-            shots_fired = 0
-            hits = 0
-            damage_dealt = 0
-            damage_received = 0
-            shoot_kills = 0
-            melee_kills = 0
-            shoot_value_killed = 0.0
-            melee_value_killed = 0.0
-            # CHARGES — comptees POUR LES DEUX CAMPS, seul bloc de cette passe a le faire.
-            # Le taux de reussite d'une charge (2D6 contre la distance a laquelle elle est
-            # declaree) ne se lit que rapporte a une reference : un agent qui reussit 40% de
-            # ses charges joue bien ou mal selon que l'adversaire en reussit 30% ou 70%. Sans
-            # la colonne d'en face, la courbe ne distingue pas la competence de la difficulte
-            # du scenario. Les compteurs `*_opponent` sont donc la mesure, pas un supplement.
-            #
-            # `charge` et `charge_fail` sont les deux SEULS types emis pour une tentative, et
-            # ils le sont par les DEUX chemins — pipeline squad V11 (ce fichier) et handlers
-            # legacy/PvP (charge_handlers ~L2914/4233/5409/5531/5689) — donc le comptage tient
-            # quel que soit le chemin qui a joue. `charge_impact` est exclu : c'est la
-            # consequence d'une charge deja reussie, pas une tentative.
-            charge_attempts = 0
-            charge_successes = 0
-            charge_attempts_opponent = 0
-            charge_successes_opponent = 0
-            # PARTICIPATION PAR PHASE — « quelle part des occasions l'agent a-t-il saisies ».
-            #
-            # Ces trois taux (deplacement, tir, fuite) ont ete emis par le callback jusqu'a ce
-            # que son unique appelant disparaisse : `log_phase_performance` n'avait plus AUCUN
-            # appel de production, donc `game_tactical/movement_efficiency`,
-            # `shooting_participation` et `game_detailed/flee_rate` n'existaient
-            # dans aucun run — verifie sur les 124 tags d'un run de 50 000 episodes. Meme
-            # defaut silencieux que les quatre compteurs plus haut : une courbe absente ne se
-            # distingue pas d'un agent qui n'agit jamais.
-            #
-            # Recomptes ICI et pas rebranches la-bas : le callback deduisait la phase et le camp
-            # de l'`info` d'un step gym, ou un step enchaine plusieurs steps moteur — c'est ce
-            # qui lui faisait ranger les actions du BOT sous le drapeau de l'agent. Dans
-            # `action_logs`, phase et camp sont des DONNEES de chaque ligne.
-            #
-            # PAS de taux de participation pour la CHARGE : son denominateur ne serait pas
-            # « les occasions de charger » mais « les fois ou le moteur a expose la phase »
-            # — quand le pool de charge est vide, aucun step n'est joue, donc aucun `wait` n'est
-            # journalise et le tour n'entre nulle part (mesure : sur un montage ou les deux camps
-            # arrivent au contact en se deplacant, la phase charge n'est jamais exposee). Le
-            # VOLUME de charges declarees (`charge_attempts`) repond a la question sans cette
-            # ambiguite, et la comparaison avec l'adversaire lui sert d'echelle.
-            #
-            # ACTIVATIONS, pas lignes de journal : le tir emet un log par groupe (arme, cible),
-            # donc une escouade qui tire trois armes produirait trois « participations ». Le
-            # couple (turn, shooterId) ramene le compte a ce qu'il pretend mesurer — combien de
-            # fois une escouade a choisi de tirer plutot que d'attendre. Le deplacement et la
-            # charge, eux, emettent une ligne par activation : rien a dedupliquer.
-            move_actions = 0
-            move_flees = 0
-            move_waits = 0
-            move_advances = 0
-            shoot_activations: Set[Tuple[int, str]] = set()
-            shoot_waits = 0
-            fight_activations: Set[Tuple[int, str]] = set()
-            for log in action_logs:
-                log_type = log.get("type")
-                if log_type == "move":
-                    if int(require_key(log, "player")) == controlled_player:
-                        move_actions += 1
-                        if require_key(log, "was_flee"):
-                            move_flees += 1
-                        if require_key(log, "move_type") == "advance":
-                            move_advances += 1
-                    continue
-                if log_type == "wait":
-                    if int(require_key(log, "player")) == controlled_player:
-                        log_phase = require_key(log, "phase")
-                        if log_phase == "move":
-                            move_waits += 1
-                        elif log_phase == "shoot":
-                            shoot_waits += 1
-                    continue
-                if log_type in ("charge", "charge_fail"):
-                    _charge_ok = log_type == "charge"
-                    _by_controlled = int(require_key(log, "player")) == controlled_player
-                    if _by_controlled:
-                        charge_attempts += 1
-                        if _charge_ok:
-                            charge_successes += 1
-                    else:
-                        charge_attempts_opponent += 1
-                        if _charge_ok:
-                            charge_successes_opponent += 1
-                    # DISTANCES 11.04 — derivees ICI, de la ligne elle-meme, et pas d'un second
-                    # accumulateur tenu en parallele dans `game_state` : c'est le meme evenement
-                    # que `charge_attempts` juste au-dessus, sur le meme couple de types et le
-                    # meme camp. Deux compteurs du meme evenement peuvent diverger — il suffit
-                    # d'un futur chemin de fin de charge qui emette la ligne sans passer par
-                    # l'autre — et rien sur les courbes ne le montrerait.
-                    #
-                    # `require_key` : les deux champs sont poses par `charge_record_outcome` sur
-                    # les SEPT sites qui emettent ces lignes. Une ligne qui ne les porte pas est
-                    # un site oublie, pas un cas de jeu — le motif jumeau que ce chantier a
-                    # justement trouve (le chemin gym journalisait a part).
-                    _cd = require_key(
-                        self.episode_tactical_data, 'charge_distance'
-                    )['agent' if _by_controlled else 'opponent']
-                    _near = require_key(log, "charge_nearest_enemy_inches")
-                    if _near is not None:
-                        _cd['nearest_sum'] += float(_near)
-                        _cd['nearest_n'] += 1
-                    _tgt = require_key(log, "charge_target_distance_inches")
-                    if _tgt is not None:
-                        _cd['target_sum'] += float(_tgt)
-                        _cd['target_n'] += 1
-                        if float(_tgt) >= CHARGE_LONG_DECLARATION_INCHES:
-                            _cd['long'] += 1
-                        _cd['success_sum' if _charge_ok else 'fail_sum'] += float(_tgt)
-                        _cd['success_n' if _charge_ok else 'fail_n'] += 1
-                    # Abilities — Famille A : charge_after_advance / charge_after_flee.
-                    # Seules les charges RÉUSSIES comptent : un échec n'a pas utilisé de capacité.
-                    if _charge_ok:
-                        _rule_eff = log.get("ability_rule_effect")  # get allowed : None si charge normale
-                        if _rule_eff in ("charge_after_advance", "charge_after_flee"):
-                            abilities_counts[
-                                f"{_rule_eff}_{'agent' if _by_controlled else 'opp'}"
-                            ] += 1
-                    continue
-                # Abilities — Famille A : reactive_move, charge_impact, move_after_shooting.
-                # Ces trois types n'ont pas de branche dédiée dans la boucle existante (ils
-                # tombaient dans `if log_type not in ('shoot', 'combat'): continue`).
-                if log_type in ("reactive_move", "charge_impact", "move_after_shooting"):
-                    abilities_counts[
-                        f"{log_type}_{'agent' if int(require_key(log, 'player')) == controlled_player else 'opp'}"
-                    ] += 1
-                    continue
-                if log_type not in ("shoot", "combat"):
-                    continue
-                by_controlled = int(require_key(log, "player")) == controlled_player
-                # `damage` est la perte de PV reellement appliquee a la cible pour cette
-                # activation (verifie sur partie reelle : la somme par attaquant egale
-                # exactement les PV perdus par le camp d'en face).
-                log_damage = int(require_key(log, "damage"))
-                if by_controlled:
-                    damage_dealt += log_damage
-                else:
-                    damage_received += log_damage
-                # Abilities — Famille B : relances et bonus Oath sur les jets.
-                # Comptés pour LES DEUX CAMPS avant le filtre by_controlled des kills.
-                # hitAbility / woundAbility / woundBonusAbility posés par stamp_reroll_abilities
-                # et stamp_wound_bonus_ability (shared_utils) ; absence = pas de relance → get allowed.
-                _sfx_b = "_agent" if by_controlled else "_opp"
-                for _shot_b in require_key(log, "shootDetails"):
-                    if _shot_b.get("hitAbility"):          # get allowed
-                        abilities_counts[f"hit_reroll{_sfx_b}"] += 1
-                    if _shot_b.get("woundAbility"):        # get allowed
-                        abilities_counts[f"wound_reroll{_sfx_b}"] += 1
-                    if _shot_b.get("woundBonusAbility"):   # get allowed
-                        abilities_counts[f"oath_wound_bonus{_sfx_b}"] += 1
-                if not by_controlled:
-                    continue
-                # `type == "combat"` n'a qu'un seul emetteur (FIGHT_CTX, `phase_label="fight"`) :
-                # une autre phase serait un log de melee produit par un chemin inconnu, pas une
-                # ligne a ranger au tir en silence.
-                is_melee = log_type == "combat"
-                if not is_melee:
-                    # Une ACTIVATION de tir = une escouade, un tour. Cf. le commentaire des
-                    # compteurs de participation : le journal en emet une ligne par arme.
-                    shoot_activations.add(
-                        (int(require_key(log, "turn")), str(require_key(log, "shooterId")))
-                    )
-                else:
-                    # Meme logique que le tir : une ligne par groupe d'armes, une activation
-                    # par (tour, escouade). La deduplication isole le nombre d'unites ayant
-                    # combattu, pas le nombre de groupes d'attaque.
-                    fight_activations.add(
-                        (int(require_key(log, "turn")), str(require_key(log, "shooterId")))
-                    )
-                if is_melee and log.get("phase") != "fight":
-                    raise ValueError(
-                        f"action_log de type 'combat' hors phase fight (phase="
-                        f"{log.get('phase')!r}) — emetteur inattendu, kills non ventilables"
-                    )
-                for shot in require_key(log, "shootDetails"):
-                    if not is_melee:
-                        shots_fired += 1
-                        if require_key(shot, "hitResult") == "HIT":
-                            hits += 1
-                    # `targetDied` n'est pose que sur les attaques qui ont applique des degats
-                    # (une attaque ratee ou sauvegardee n'a pas de cible morte) : absence = False.
-                    if not shot.get("targetDied", False):  # get allowed
-                        continue
-                    model_value = float(require_key(shot, "targetValue"))
-                    if is_melee:
-                        melee_kills += 1
-                        melee_value_killed += model_value
-                    else:
-                        shoot_kills += 1
-                        shoot_value_killed += model_value
-            self.episode_tactical_data['shots_fired'] = shots_fired
-            self.episode_tactical_data['hits'] = hits
-            self.episode_tactical_data['damage_dealt'] = damage_dealt
-            self.episode_tactical_data['damage_received'] = damage_received
-            self.episode_tactical_data['shoot_kills'] = shoot_kills
-            self.episode_tactical_data['melee_kills'] = melee_kills
-            self.episode_tactical_data['shoot_value_killed'] = shoot_value_killed
-            self.episode_tactical_data['melee_value_killed'] = melee_value_killed
-            self.episode_tactical_data['charge_attempts'] = charge_attempts
-            self.episode_tactical_data['charge_successes'] = charge_successes
-            self.episode_tactical_data['charge_attempts_opponent'] = charge_attempts_opponent
-            self.episode_tactical_data['charge_successes_opponent'] = charge_successes_opponent
-            self.episode_tactical_data['move_actions'] = move_actions
-            self.episode_tactical_data['move_flees'] = move_flees
-            self.episode_tactical_data['move_waits'] = move_waits
-            self.episode_tactical_data['move_advances'] = move_advances
-            self.episode_tactical_data['shoot_activations'] = len(shoot_activations)
-            self.episode_tactical_data['shoot_waits'] = shoot_waits
-            self.episode_tactical_data['fight_activations'] = len(fight_activations)
-
-            # Issues du cache de scoring du deploiement, lues sur le decodeur qui les compte.
-            # COPIE (`deployment_cache_counts()` en rend une) : le compteur du decodeur est remis
-            # a zero au prochain `reset_episode_caches`, l'appelant lit celui-ci APRES.
-            self.episode_tactical_data['deployment_cache_counts'] = (
-                self.action_decoder.deployment_cache_counts()
-            )
-            # Réserves stratégiques : compteurs incrémentés par les handlers via game_state,
-            # indexés PAR JOUEUR. La projection sur agent/adversaire se fait ici et nulle part
-            # ailleurs — c'est le seul endroit qui connaisse le siège de l'agent sur CET épisode
-            # (`agent_seat_mode: random` : le joueur contrôlé est 1 ou 2 selon le tirage).
-            _controlled = get_controlled_player(self.game_state)
-            _opponent = 2 if _controlled == 1 else 1
-            for _key, _state_key in (
-                ('reserves_placed', '_reserves_placed'),
-                ('reserves_deployed', '_reserves_deployed'),
-                ('reserves_destroyed_turn3', '_reserves_destroyed_turn3'),
-            ):
-                _by_player = require_key(self.game_state, _state_key)
-                self.episode_tactical_data[f'{_key}_agent'] = int(_by_player[_controlled])
-                self.episode_tactical_data[f'{_key}_opponent'] = int(_by_player[_opponent])
-
-            # ARRIVÉES DÉCLINÉES vs SANS DESTINATION — deux causes que « détruite en réserve »
-            # confondait, et dont dépend toute pénalité juste : décliner est une DÉCISION, un
-            # pool vide n'en est pas une. Dérivé ici des trois ensembles de (joueur, escouade,
-            # tour) : décliné = une offre dont l'arrivée n'a pas suivi, LE MÊME TOUR.
-            _offered = require_key(self.game_state, "_ingress_offered")
-            _arrived = require_key(self.game_state, "_ingress_arrived")
-            _no_dest = require_key(self.game_state, "_ingress_no_destination")
-            _declined = _offered - _arrived
-            for _label, _player in (('agent', _controlled), ('opponent', _opponent)):
-                # `offers` est le DÉNOMINATEUR, et il n'est pas décoratif : sans lui, un
-                # `declined` à zéro ne distingue pas « toutes les occasions ont été saisies » de
-                # « aucune n'a été offerte » — les deux se lisent 0 sur la courbe.
-                self.episode_tactical_data[f'reserves_ingress_offers_{_label}'] = sum(
-                    1 for _p, _sq, _t in _offered if _p == _player
-                )
-                self.episode_tactical_data[f'reserves_ingress_declined_{_label}'] = sum(
-                    1 for _p, _sq, _t in _declined if _p == _player
-                )
-                self.episode_tactical_data[f'reserves_ingress_no_destination_{_label}'] = sum(
-                    1 for _p, _sq, _t in _no_dest if _p == _player
-                )
-
-            # VALUE attrition metrics (episode-level): destroyed enemy value and lost ally value.
-            #
-            # PAR FIGURINE, des deux cotes (survivants accumules avec les effectifs plus haut).
-            # Ces deux quantites se comptaient a l'ESCOUADE : la valeur survivante etait
-            # `unit["VALUE"]` entiere tant qu'une seule figurine tenait, donc une escouade de
-            # 10 reduite a 1 pesait 0 de perte. Les courbes d'attrition en VALUE (combat/f_,
-            # combat/g_, 02_combat/a_, e_, f_) affichaient alors 0.0 la ou le compte de
-            # figurines montrait 0.9 — la mesure ne pouvait pas etre lue a cote de c_/d_.
-            total_ally_value = float(require_key(value_at_start, controlled_player))
-            total_enemy_value = float(require_key(value_at_start, opponent_player))
-            # Pas de `max(0.0, ...)` ici : depart et survivants sortent des memes figurines,
-            # rien n'ajoute de figurine en cours de partie. Un ecart negatif signifierait que
-            # la photo de depart n'en est pas une — a signaler, pas a ramener a zero.
-            if surviving_ally_value > total_ally_value or surviving_enemy_value > total_enemy_value:
-                raise ValueError(
-                    f"surviving VALUE exceeds start VALUE (ally {surviving_ally_value}/"
-                    f"{total_ally_value}, enemy {surviving_enemy_value}/{total_enemy_value}): "
-                    "value_at_start is not the reset snapshot"
-                )
-            self.episode_tactical_data['ally_value_lost'] = total_ally_value - surviving_ally_value
-            self.episode_tactical_data['enemy_value_destroyed'] = total_enemy_value - surviving_enemy_value
-            self.episode_tactical_data['total_ally_value'] = total_ally_value
-            self.episode_tactical_data['total_enemy_value'] = total_enemy_value
-
-            # Store turn number for metrics filtering (e.g., objectives only on turn 5+)
-            self.episode_tactical_data['final_turn'] = self.game_state["turn"]
-
-            # Unit-rule forcing exposure metrics:
-            # Count units that have at least one configured UNIT_RULES entry.
-            units = require_key(self.game_state, "units")
-            forced_unit_counts_controlled: Dict[str, int] = {}
-            forced_unit_counts_all: Dict[str, int] = {}
-            for unit in units:
-                unit_rules = require_key(unit, "UNIT_RULES")
-                if not isinstance(unit_rules, list):
-                    raise TypeError(
-                        f"UNIT_RULES must be list for unit {require_key(unit, 'id')} "
-                        f"(got {type(unit_rules).__name__})"
-                    )
-                if len(unit_rules) == 0:
-                    continue
-                unit_name = str(require_key(unit, "unitType"))
-                unit_player = require_key(unit, "player")
-                if unit_name not in forced_unit_counts_all:
-                    forced_unit_counts_all[unit_name] = 0
-                forced_unit_counts_all[unit_name] += 1
-                if unit_player == controlled_player:
-                    if unit_name not in forced_unit_counts_controlled:
-                        forced_unit_counts_controlled[unit_name] = 0
-                    forced_unit_counts_controlled[unit_name] += 1
-
-            self.episode_tactical_data['forced_unit_episode_has_controlled'] = (
-                1 if len(forced_unit_counts_controlled) > 0 else 0
-            )
-            self.episode_tactical_data['forced_unit_episode_has_any'] = (
-                1 if len(forced_unit_counts_all) > 0 else 0
-            )
-            self.episode_tactical_data['forced_unit_instances_controlled'] = int(
-                sum(forced_unit_counts_controlled.values())
-            )
-            self.episode_tactical_data['forced_unit_instances_all'] = int(
-                sum(forced_unit_counts_all.values())
-            )
-            self.episode_tactical_data['forced_unit_counts_controlled'] = dict(
-                sorted(forced_unit_counts_controlled.items(), key=lambda item: item[0])
-            )
-            self.episode_tactical_data['forced_unit_counts_all'] = dict(
-                sorted(forced_unit_counts_all.items(), key=lambda item: item[0])
-            )
-
-            # Abilities — EXPOSITION par règle et par camp.
-            # Un épisode est « exposé » pour une règle si AU MOINS UNE unité du camp possédait
-            # cette règle dans le roster (vivante ou morte — toutes sont dans game_state["units"]).
-            # Sans cette courbe, un zéro sur abilities/ ne distingue pas « jamais déclenchée »
-            # de « jamais dans le roster ». Calculée depuis les unités du roster (pas les action_logs).
-            #
-            # Familles A et B (rerolls) : via unit_has_rule_effect.
-            # Oath wound bonus : proxy par les compteurs B — a tiré ≈ était active (Oath est une
-            # capacité de faction déclarée en command phase, pas une règle d'unité technique).
-            abilities_exposure: Dict[str, int] = {
-                f"{k}_{s}": 0 for k in _ABILITIES_KEYS for s in ("agent", "opp")
-            }
-            for _unit_exp in units:
-                _exp_sfx = "_agent" if int(_unit_exp["player"]) == controlled_player else "_opp"
-                for _eff in (
-                    "reactive_move", "charge_impact",
-                    "charge_after_advance", "charge_after_flee",
-                    "move_after_shooting",
-                ):
-                    if unit_has_rule_effect(_unit_exp, _eff):
-                        abilities_exposure[f"{_eff}{_exp_sfx}"] = 1
-                if unit_has_rule_effect(_unit_exp, "reroll_1_tohit_fight"):
-                    abilities_exposure[f"hit_reroll{_exp_sfx}"] = 1
-                for _we in ("reroll_1_towound", "reroll_towound_target_on_objective"):
-                    if unit_has_rule_effect(_unit_exp, _we):
-                        abilities_exposure[f"wound_reroll{_exp_sfx}"] = 1
-            # Oath et hit_reroll : proxy count — couvre les relances issues de capacités de faction
-            # (ex. Oath of Moment via cause='hit_any_fail') qui n'apparaissent pas dans UNIT_RULES
-            # et échappent donc à unit_has_rule_effect('reroll_1_tohit_fight').
-            for _px_sfx in ("agent", "opp"):
-                abilities_exposure[f"hit_reroll_{_px_sfx}"] = max(
-                    abilities_exposure[f"hit_reroll_{_px_sfx}"],
-                    1 if abilities_counts[f"hit_reroll_{_px_sfx}"] > 0 else 0,
-                )
-            abilities_exposure["oath_wound_bonus_agent"] = (
-                1 if abilities_counts["oath_wound_bonus_agent"] > 0 else 0
-            )
-            abilities_exposure["oath_wound_bonus_opp"] = (
-                1 if abilities_counts["oath_wound_bonus_opp"] > 0 else 0
-            )
-            self.episode_tactical_data["abilities_counts"] = abilities_counts
-            self.episode_tactical_data["abilities_exposure"] = abilities_exposure
-
-            victory_points = require_key(self.game_state, "victory_points")
-            controlled_vp = float(require_key(victory_points, controlled_player))
-            opponent_vp = float(require_key(victory_points, opponent_player))
-            self.episode_tactical_data['victory_points_cumulative_episode'] = controlled_vp
-            self.episode_tactical_data['victory_points_controlled_episode'] = controlled_vp
-            self.episode_tactical_data['victory_points_opponent_episode'] = opponent_vp
-            self.episode_tactical_data['victory_points_diff_controlled_minus_opponent'] = (
-                controlled_vp - opponent_vp
-            )
-            # Cles exigees : posees a l'init du game_state et au reset. Le `.get(...) if
-            # isinstance(...) else []` qui occupait cette place transformait leur absence en
-            # liste vide, et une liste vide desarme silencieusement les courbes qui la lisent
-            # (01_VP/e_objectives_held, d_objectives_held_diff) — exactement ce qui a masque
-            # pendant 50 000 episodes que personne ne remplissait ces listes.
-            self.episode_tactical_data['controlled_objective_samples'] = list(
-                require_key(self.game_state, "controlled_objective_samples_scoring_turns")
-            )
-            self.episode_tactical_data['opponent_objective_samples'] = list(
-                require_key(self.game_state, "opponent_objective_samples_scoring_turns")
-            )
-
-            # Add tactical data to info
-            terminal_info["tactical_data"] = self.episode_tactical_data.copy()
-
-            # Mode de déploiement de CET épisode ("active" | "auto" | None), pour que les
-            # courbes puissent être ventilées par mode. Sans cette ventilation, la rampe
-            # `deployment_mode_schedule` fait varier la population mesurée pendant tout le run :
-            # une métrique agrégée mélange alors deux tâches de difficulté différente dans des
-            # proportions qui changent à chaque épisode, et son plateau ne distingue plus un
-            # agent qui stagne d'un agent qui progresse sur une tâche qui durcit.
-            terminal_info["deployment_mode"] = self.game_state["deployment_mode_schedule_mode"]
-            
-            # Log episode end with final stats and win method
-            if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
-                objective_control = self.state_manager.calculate_objective_control(self.game_state)
-                self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
+            # Bilan bati par `_build_terminal_info`, PARTAGE avec les deux sorties anticipees
+            # de cette fonction et les deux sorties de `BotControlledEnv`. Il vivait ici, en
+            # ligne, et c'est pour ca que les autres portes de terminaison n'en avaient aucune.
+            terminal_info.update(self._build_terminal_info())
         else:
             info["winner"] = None
         
@@ -9388,7 +9434,16 @@ class W40KEngine(gym.Env):
             # jete dans `_action_mask` — le couple rendu serait alors incoherent (masque d'avant la
             # transition, pool d'apres), exactement le defaut que cette sortie doit empecher.
             action_mask, eligible_units = self.action_decoder.get_squad_action_mask_and_eligible_units(self.game_state)
-            if not eligible_units:  # get allowed
+            if not eligible_units and not action_mask.any():
+                # LES DEUX conditions, comme a l'entree de ce bloc. Le test portait sur le seul
+                # pool : la cascade d'`advance_phase` ci-dessus peut ouvrir une phase de
+                # commandement qui ARME un point d'arret exclusif (designation d'Oath : masque
+                # `OATH_SLOT_i` non vide, pool vide par construction), et l'agent recevait alors
+                # un tenseur entierement nul tout en devant designer une cible — le defaut §0.40
+                # point 1. Les branches juste en dessous existent pour ce cas exact
+                # (`armed_decision`, puis `_first_squad_on_board`) et rendent elles-memes
+                # l'observation nulle quand plus aucune escouade n'est sur la table, seul etat ou
+                # elle est la bonne reponse.
                 return _zero_obs(), (action_mask, eligible_units)
         # Active squad = 1er eligible (convention 1 unit = 1 squad).
         # Si eligible_units vide mais mask any (cas degenere),

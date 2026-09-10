@@ -245,7 +245,13 @@ ENGINE_CONTRACT_ATTRS = (
     "_build_observation",
     "defer_observation",
     "_check_game_over",
-    "_determine_winner_with_method",
+    # `_determine_winner_with_method` occupait cette place : les deux sorties terminales de
+    # `_ensure_actionable_controlled_turn` l'appelaient pour poser `winner`/`win_method` a la
+    # main. Elles construisent desormais le BILAN COMPLET (`_build_terminal_info`), qui appelle
+    # le vainqueur lui-meme — le membre exige par ce contrat est donc celui-la, et le declarer
+    # fait echouer au deballage un double de test qui ne l'expose pas, au lieu d'attendre qu'un
+    # episode se termine sur ce chemin.
+    "_build_terminal_info",
 )
 
 #: Cles de l'`info` moteur qui decrivent l'action de l'AGENT et doivent survivre au step gym.
@@ -892,11 +898,15 @@ class BotControlledEnv(gym.Wrapper):
                 if self.engine.game_state["game_over"]:
                     terminated = True
                     obs = self.engine._build_observation()
-                    winner, win_method = self.engine._determine_winner_with_method()
+                    # BILAN DE FIN D'EPISODE COMPLET : cet `info` est rendu tel quel a
+                    # `BotControlledEnv.step`, donc a SB3. Il ne portait que `winner` et
+                    # `win_method` — `ai/training_callbacks._handle_episode_end` EXIGE en plus
+                    # `tactical_data`, et `ai/metrics_tracker.log_episode` `deployment_mode`.
+                    # Aucun step moteur ne termine sur ce chemin (on sort AVANT le step force),
+                    # donc personne d'autre ne peut le batir : d'ou l'appel au moteur.
                     info = {
-                        "winner": winner,
-                        "win_method": win_method,
                         "phase_auto_advanced": True,
+                        **self.engine._build_terminal_info(),
                     }
                     break
 
@@ -923,11 +933,11 @@ class BotControlledEnv(gym.Wrapper):
                     self.engine.game_state["game_over"] = True
                     terminated = True
                     obs = self.engine._build_observation()
-                    winner, win_method = self.engine._determine_winner_with_method()
+                    # Jumeau exact de la sortie ci-dessus, et pour la meme raison : le step force
+                    # a LEVE, donc aucun bilan moteur n'existe pour cet episode.
                     info = {
-                        "winner": winner,
-                        "win_method": win_method,
                         "phase_auto_advanced": True,
+                        **self.engine._build_terminal_info(),
                     }
                     break
                 raise
