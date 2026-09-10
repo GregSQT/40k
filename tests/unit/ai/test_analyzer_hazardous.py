@@ -644,25 +644,23 @@ _DESPERATE_ESCAPE_3MW_FNP2 = (
 )
 
 
-def test_fnp_partiel_hazardous_soustrait_des_blessures(tmp_path, monkeypatch):
+@pytest.mark.parametrize("tag,ligne", [
+    ("HAZARDOUS", _HAZARDOUS_3MW_FNP2),
+    ("DESPERATE ESCAPE", _DESPERATE_ESCAPE_3MW_FNP2),
+])
+def test_fnp_partiel_soustrait_des_blessures(tag, ligne, tmp_path, monkeypatch):
     """ROUGE sans le fix : 3 BM totales appliquées → Unit 1 (HP=3) mourait.
-    VERT avec le fix : [FNP:2] soustrait 2 → 1 BM nette → Unit 1 survit."""
-    stats = _parse(tmp_path, monkeypatch, _HAZARDOUS_3MW_FNP2, weapons_cache={})
+    VERT avec le fix : [FNP:2] soustrait 2 → 1 BM nette → Unit 1 survit.
+
+    Les deux tags portent la MÊME règle 24.12 et passent par le même lecteur
+    (`net_mortal_wounds`) : les séparer en deux fonctions au corps identique laissait deux
+    copies à corriger, et c'est ainsi que `[FNP:n]` a vécu sur un tag et pas sur l'autre.
+    """
+    stats = _parse(tmp_path, monkeypatch, ligne, weapons_cache={})
     assert not stats["parse_errors"], f"aucune erreur attendue, got {stats['parse_errors']}"
     deaths = stats["current_episode_deaths"]
     assert not any(d[1] == "1" for d in deaths), (
-        f"Unit 1 (HP=3) doit survivre à 1 BM nette (3−2 FNP), got deaths={deaths}"
-    )
-
-
-def test_fnp_partiel_desperate_escape_soustrait_des_blessures(tmp_path, monkeypatch):
-    """ROUGE sans le fix : 3 BM totales appliquées → Unit 1 (HP=3) mourait.
-    VERT avec le fix : [FNP:2] soustrait 2 → 1 BM nette → Unit 1 survit."""
-    stats = _parse(tmp_path, monkeypatch, _DESPERATE_ESCAPE_3MW_FNP2, weapons_cache={})
-    assert not stats["parse_errors"], f"aucune erreur attendue, got {stats['parse_errors']}"
-    deaths = stats["current_episode_deaths"]
-    assert not any(d[1] == "1" for d in deaths), (
-        f"Unit 1 (HP=3) doit survivre à 1 BM nette (3−2 FNP), got deaths={deaths}"
+        f"[{tag}] Unit 1 (HP=3) doit survivre à 1 BM nette (3−2 FNP), got deaths={deaths}"
     )
 
 
@@ -696,3 +694,5 @@ def test_hazardous_sans_prefixe_unit_n_est_signalee_comme_journal_illisible(tmp_
     erreurs = [e for e in stats["parse_errors"] if "préfixe 'Unit N('" in e["error"]]
     assert len(erreurs) == 1, stats["parse_errors"]
     assert "HAZARDOUS" in erreurs[0]["line"]
+    # Une ligne d'ACTION est située : le rapport doit pouvoir dire OÙ elle est illisible.
+    assert (erreurs[0]["turn"], erreurs[0]["phase"]) == (1, "SHOOTING"), erreurs[0]

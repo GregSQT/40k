@@ -67,6 +67,9 @@ from engine.phase_handlers.geodesic_move import _euclidean_move_field, reachable
 # Bascule UNIQUE de la résolution (`inches_to_subhex <= 1` → géométrie hex). Alias court : ce
 # module la lit dans des boucles chaudes (pool d'ancre, éligibilité), pas seulement en préambule.
 from engine.spatial_relations import geometry_is_hex as _geometry_is_hex
+# `spatial_grid` ne dépend que de `hex_utils` → import direct sans cycle (même raison que dans
+# `shared_utils`). La constante y vit parce que la demi-étendue de la grille EST ce budget.
+from engine.spatial_grid import MAX_ADVANCE_ROLL_INCHES
 from engine.hex_union_boundary_polygon import (
     compute_move_preview_mask_loops_world,
     _board_hex_radius_margin,
@@ -710,7 +713,9 @@ def _squad_has_reachable_floor_cell(game_state: Dict[str, Any], squad_id: str) -
     # `squad_move_pool_budget_subhex` ne le trouve donc pas encore dans `advance_rolls` et
     # retomberait sur le budget normal — écartant silencieusement une montée que le § 13.06
     # autorise. Élargir ne vole aucun choix : le plan rigide confirme la légalité réelle.
-    budget = get_squad_move_budget(str(squad_id), game_state, "advance", advance_roll=6)
+    budget = get_squad_move_budget(
+        str(squad_id), game_state, "advance", advance_roll=MAX_ADVANCE_ROLL_INCHES
+    )
     for mid in squad_models.get(str(squad_id), []):  # get allowed (escouade sans figurine vivante)
         model = models_cache.get(mid)  # get allowed (figurine morte)
         if model is None:
