@@ -377,6 +377,10 @@ class StepLogger:
         self.episodes_written = 0
         self.current_bot_name: Optional[str] = None  # Set externally for bot-evaluation logging
         self._last_step_wall = None  # Wall-clock of last step end (for STEP_TIMING → analyzer "Step Durations")
+        # Horloge du debut d'episode, POSEE par `log_episode_start` et CONSOMMEE par
+        # `log_episode_end` : hors episode elle vaut None, ce qui rend une fin sans debut
+        # impossible a mesurer donc impossible a ecrire.
+        self._episode_start_wall: Optional[float] = None
         # PERFORMANCE: Buffer logs to reduce I/O (buffer_size from training_config step_log_buffer_size)
         # Obligatoire si enabled ; si disabled, buffer_size peut être None (non utilisé).
         if enabled and buffer_size is None:
@@ -1773,7 +1777,12 @@ class StepLogger:
         # `log_episode_start`, la soustraction rendait Duration=0.000s — une duree fabriquee,
         # indiscernable d'un episode instantane. L'en-tete d'episode manquant est un bug du
         # producteur, pas un etat metier (T1).
-        _start_wall = getattr(self, '_episode_start_wall', None)
+        #
+        # Le marqueur est CONSOMME (remis a None) en fin de methode : tester sa seule absence ne
+        # couvrait que le tout premier episode. Des l'episode 2 l'attribut survit au precedent,
+        # et un `log_episode_start` saute rendait alors une duree mesuree depuis l'episode
+        # d'AVANT — trop longue, plausible, donc invisible. Un start, un end.
+        _start_wall = self._episode_start_wall
         if _start_wall is None:
             raise ConfigurationError(
                 "log_episode_end appele sans log_episode_start prealable : `_episode_start_wall` "
@@ -1796,7 +1805,8 @@ class StepLogger:
                     )
                 f.write(f"[{timestamp}] OBJECTIVE CONTROL: {' | '.join(objective_entries)}\n")
             f.write("=" * 80 + "\n")
-    
+        self._episode_start_wall = None
+
     def __del__(self):
         """Ensure buffer is flushed when logger is destroyed"""
         try:

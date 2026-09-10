@@ -254,6 +254,32 @@ def test_log_episode_end_without_start_raises(tmp_path: Path) -> None:
         )
 
 
+def test_log_episode_end_consumes_its_start(tmp_path: Path) -> None:
+    """Un start, un end : le second end sans start LEVE au lieu de mesurer l'episode d'avant.
+
+    Tester la seule ABSENCE de `_episode_start_wall` ne couvrait que le premier episode ;
+    des l'episode 2 l'attribut survit au precedent, et un `log_episode_start` saute rendait
+    une duree mesuree depuis l'episode d'AVANT — trop longue, plausible, donc invisible.
+    """
+    output_file = tmp_path / "step.log"
+    logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=50)
+    logger.log_episode_start(
+        run_rules=_RUN_RULES,
+        units_data=[{**unit_invariants(), "id": 1, "col": 1, "row": 1, "player": 1, "HP_MAX": 1,
+          "unitType": "Intercessor", "BASE_SHAPE": "round", "BASE_SIZE": 1}],
+        board_config=_BOARD_CONFIG,
+    )
+    logger.log_episode_end(
+        total_episodes_steps=42, winner=1, win_method="objectives", objective_control={},
+    )
+    assert "EPISODE END: Winner=1" in _read_text(output_file)
+
+    with pytest.raises(ConfigurationError, match=r"log_episode_start"):
+        logger.log_episode_end(
+            total_episodes_steps=7, winner=0, win_method="elimination", objective_control={},
+        )
+
+
 def test_format_replay_style_message_reactive_move_and_validations() -> None:
     logger = StepLogger(enabled=False)
     msg = logger._format_replay_style_message(
