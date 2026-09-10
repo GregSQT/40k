@@ -6,7 +6,8 @@ Vérifie: épisode_steps, terminated, tuple de retour, turn_limit, phase advance
 
 from __future__ import annotations
 
-from typing import Any, Dict
+import copy
+from typing import Any, Dict, List
 from unittest.mock import patch, MagicMock
 
 import numpy as np
@@ -362,6 +363,160 @@ class TestTurnLimitGateAccounting:
         assert cd['target_n'] == 1.0, f"target_n doublé : {cd['target_n']}"
         assert cd['target_sum'] == pytest.approx(float(CHARGE_LONG_DECLARATION_INCHES))
         assert cd['long'] == 1.0, f"long doublé : {cd['long']}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — idempotence du bilan de fin d'épisode
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _move_log(player: int, *, was_flee: bool, move_type: str) -> Dict[str, Any]:
+    """Ligne `move` au contrat que la passe de comptage lit sans repli (`require_key`)."""
+    return {
+        "type": "move", "player": player, "turn": 1, "phase": "move",
+        "was_flee": was_flee, "move_type": move_type,
+    }
+
+
+def _wait_log(player: int, phase: str) -> Dict[str, Any]:
+    """Ligne `wait` : `phase` décide entre le compteur d'attente move et celui de tir."""
+    return {"type": "wait", "player": player, "turn": 1, "phase": phase}
+
+
+def _attack_log(
+    player: int, *, kind: str, turn: int, shooter: str, damage: int,
+    details: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Ligne `shoot` ou `combat`, au contrat de la passe de comptage.
+
+    `phase` vaut "fight" pour la mêlée, et ce n'est pas décoratif : w40k_core LÈVE sur un log
+    `combat` hors phase fight, pour ne pas ranger au tir les kills d'un émetteur inconnu.
+    """
+    if kind not in ("shoot", "combat"):
+        raise ValueError(f"_attack_log: kind must be 'shoot' or 'combat', got {kind!r}")
+    return {
+        "type": kind, "player": player, "turn": turn, "shooterId": shooter,
+        "phase": "fight" if kind == "combat" else "shoot",
+        "damage": damage, "shootDetails": details,
+    }
+
+
+class TestBuildTerminalInfoIdempotence:
+    """`_build_terminal_info` appelée deux fois laisse `episode_tactical_data` IDENTIQUE.
+
+    POURQUOI DEUX APPELS : deux steps moteur rendent `terminated` dans le même épisode (mesure
+    citée dans la docstring de la méthode : 24 terminaisons moteur pour 12 épisodes gym), donc
+    le bilan est rebâti. Il est un RECALCUL PUR à partir d'`action_logs` : tout compteur qui
+    accumulerait dans l'attribut au lieu d'une locale doublerait au second appel, et les courbes
+    (`ai/metrics_tracker`) montreraient un facteur 2 indiscernable d'un agent qui progresse.
+
+    CE TEST NE FERME PAS SEUL : il ne verrouille que les compteurs que le scénario ci-dessous
+    fait vivre. Le verrou qui porte sur TOUS les compteurs, y compris ceux qu'aucun scénario
+    n'exerce encore, est structurel —
+    `tests/unit/engine/test_terminal_info_counters_are_locals.py`.
+    """
+
+    #: Clés dont le scénario garantit une valeur NON NULLE. Sans cette garde, l'égalité des deux
+    #: appels porterait sur un dict de zéros : verte, et sans rien prouver.
+    _EXPECTED_NON_ZERO = (
+        "shots_fired", "hits", "damage_dealt", "damage_received",
+        "shoot_kills", "melee_kills", "shoot_value_killed", "melee_value_killed",
+        "charge_attempts", "charge_successes",
+        "charge_attempts_opponent", "charge_successes_opponent",
+        "move_actions", "move_flees", "move_advances", "move_waits",
+        "shoot_activations", "shoot_waits", "fight_activations",
+    )
+
+    #: Compteurs d'abilities alimentés par le scénario, une clé par branche de la boucle.
+    _EXPECTED_ABILITIES = (
+        "reactive_move_agent", "charge_impact_agent", "move_after_shooting_agent",
+        "charge_after_advance_agent", "hit_reroll_agent", "wound_reroll_agent",
+        "oath_wound_bonus_opp",
+    )
+
+    @staticmethod
+    def _scenario_logs() -> List[Dict[str, Any]]:
+        """Un `action_logs` qui emprunte CHAQUE branche de la passe de comptage, des deux camps."""
+        from engine.w40k_core import CHARGE_LONG_DECLARATION_INCHES
+
+        return [
+            _move_log(1, was_flee=True, move_type="normal"),
+            _move_log(1, was_flee=False, move_type="advance"),
+            # Camp adverse : filtré par la branche move, présent pour le prouver.
+            _move_log(2, was_flee=False, move_type="normal"),
+            _wait_log(1, "move"),
+            _wait_log(1, "shoot"),
+            charge_log_line(
+                1, "charge",
+                charge_target_distance_inches=float(CHARGE_LONG_DECLARATION_INCHES),
+                ability_rule_effect="charge_after_advance",
+            ),
+            # Échec APRÈS déclaration : il porte une distance, donc il alimente fail_sum/fail_n.
+            charge_log_line(1, "charge_fail", charge_target_distance_inches=11.0),
+            charge_log_line(2, "charge"),
+            charge_log_line(2, "charge_fail"),
+            {"type": "reactive_move", "player": 1, "turn": 1, "phase": "shoot"},
+            {"type": "charge_impact", "player": 1, "turn": 1, "phase": "charge"},
+            {"type": "move_after_shooting", "player": 1, "turn": 1, "phase": "shoot"},
+            _attack_log(
+                1, kind="shoot", turn=1, shooter="s1", damage=3,
+                details=[
+                    {"hitResult": "HIT", "targetDied": True, "targetValue": 100.0,
+                     "hitAbility": "Oath of Moment"},
+                    {"hitResult": "MISS", "woundAbility": "Lethal Hits"},
+                ],
+            ),
+            _attack_log(
+                2, kind="shoot", turn=1, shooter="s2", damage=2,
+                details=[{"hitResult": "HIT", "woundBonusAbility": "Oath of Moment"}],
+            ),
+            _attack_log(
+                1, kind="combat", turn=2, shooter="s1", damage=4,
+                details=[{"targetDied": True, "targetValue": 100.0}],
+            ),
+        ]
+
+    def test_second_call_leaves_every_counter_unchanged(self, monkeypatch):
+        """Le dict complet après le 2e appel est égal, clé à clé, à celui d'après le 1er."""
+        engine = _make_engine()
+        engine.reset()
+        monkeypatch.setattr(
+            engine, "_determine_winner_with_method", lambda: (1, "turn_limit"),
+        )
+        engine.game_state["action_logs"] = self._scenario_logs()
+
+        engine._build_terminal_info()
+        after_first = copy.deepcopy(engine.episode_tactical_data)
+
+        # Garde anti-VERT VACANT : le scénario a bien fait vivre chaque famille de compteurs.
+        zeroes = [k for k in self._EXPECTED_NON_ZERO if not after_first[k]]
+        assert not zeroes, f"scénario muet sur {zeroes} : l'égalité ne prouverait rien"
+        muted = [k for k in self._EXPECTED_ABILITIES if not after_first["abilities_counts"][k]]
+        assert not muted, f"scénario muet sur abilities_counts {muted}"
+        for camp in ("agent", "opponent"):
+            assert after_first["charge_distance"][camp]["nearest_n"], (
+                f"scénario muet sur charge_distance[{camp!r}]"
+            )
+        assert after_first["charge_distance"]["agent"]["fail_n"], (
+            "scénario muet sur les échecs de charge déclarés"
+        )
+
+        engine._build_terminal_info()
+        after_second = engine.episode_tactical_data
+
+        assert set(after_second) == set(after_first), (
+            "le second appel a ajouté ou retiré des clés : "
+            f"{set(after_second) ^ set(after_first)}"
+        )
+        doubled = {
+            key: (after_first[key], after_second[key])
+            for key in after_first
+            if after_second[key] != after_first[key]
+        }
+        assert not doubled, (
+            "compteurs modifiés par un second appel de _build_terminal_info "
+            f"(1er appel, 2e appel) : {doubled} — ces compteurs accumulent dans "
+            "self.episode_tactical_data au lieu d'une variable locale affectée après la boucle"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
