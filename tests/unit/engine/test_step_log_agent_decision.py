@@ -247,15 +247,18 @@ def test_game_log_message_and_step_log_line_say_the_same_thing(tmp_path):
 _RACINES_PRODUCTION: Tuple[str, ...] = ("engine", "ai", "services")
 
 
-class _AppelsParFonction(ast.NodeVisitor):
-    """Relève chaque appel `<...>.<symbole>(...)` avec la fonction qui le contient.
+#: Type porté par l'entrée d'`action_logs` du relevé, et par elle seule.
+_TYPE_JOURNAL = "agent_decision"
+
+
+class _ContexteParFonction(ast.NodeVisitor):
+    """Base des sondes : tient à jour la fonction englobant le nœud visité.
 
     `ast.walk` ne convient pas : il perd le contexte englobant, et c'est précisément le contexte
-    qui est contrôlé ici — savoir QUI appelle, pas combien de fois.
+    qui est contrôlé ici — savoir QUI appelle ou QUI écrit, pas combien de fois.
     """
 
-    def __init__(self, symbole: str, chemin: str, trouves: Set[Tuple[str, str]]) -> None:
-        self._symbole = symbole
+    def __init__(self, chemin: str, trouves: Set[Tuple[str, str]]) -> None:
         self._chemin = chemin
         self._trouves = trouves
         self._pile: List[str] = []
@@ -267,10 +270,44 @@ class _AppelsParFonction(ast.NodeVisitor):
 
     visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
 
-    def visit_Call(self, node: ast.Call) -> None:
-        func = node.func
-        if isinstance(func, ast.Attribute) and func.attr == self._symbole:
-            self._trouves.add((self._chemin, self._pile[-1] if self._pile else "<module>"))
+    def _releve(self) -> None:
+        self._trouves.add((self._chemin, self._pile[-1] if self._pile else "<module>"))
+
+
+class _ReferencesParFonction(_ContexteParFonction):
+    """Relève chaque référence `<...>.<symbole>`, APPELÉE OU NON, avec sa fonction englobante.
+
+    Le contrôle porte sur l'attribut et non sur `Call.func` : `applique =
+    self._dispatch_agent_decision_action` puis `applique(action)` applique une décision sans son
+    relevé et n'apparaît dans AUCUN `ast.Call` visant le symbole — mutation appliquée, la sonde
+    par appel restait verte. Une référence liée ici puis appelée ailleurs est exactement le
+    contournement que ce fichier barre.
+    """
+
+    def __init__(self, symbole: str, chemin: str, trouves: Set[Tuple[str, str]]) -> None:
+        super().__init__(chemin, trouves)
+        self._symbole = symbole
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if node.attr == self._symbole:
+            self._releve()
+        self.generic_visit(node)
+
+
+class _EntreesJournalParFonction(_ContexteParFonction):
+    """Relève chaque littéral `{..., "type": "agent_decision", ...}` avec sa fonction englobante.
+
+    Le littéral, et non l'appel à `append_action_log` : c'est le dictionnaire qui porte le type,
+    et il peut être construit à distance de l'appel qui le poste.
+    """
+
+    def visit_Dict(self, node: ast.Dict) -> None:
+        for cle, valeur in zip(node.keys, node.values):
+            if (
+                isinstance(cle, ast.Constant) and cle.value == "type"
+                and isinstance(valeur, ast.Constant) and valeur.value == _TYPE_JOURNAL
+            ):
+                self._releve()
         self.generic_visit(node)
 
 
@@ -293,11 +330,19 @@ def _arbres_production() -> List[Tuple[str, ast.Module]]:
     return _ARBRES
 
 
-def _appelants(symbole: str) -> Set[Tuple[str, str]]:
-    """`{(chemin relatif, fonction englobante)}` de tous les appels du symbole en production."""
+def _referents(symbole: str) -> Set[Tuple[str, str]]:
+    """`{(chemin relatif, fonction englobante)}` de toutes les références au symbole."""
     trouves: Set[Tuple[str, str]] = set()
     for relatif, arbre in _arbres_production():
-        _AppelsParFonction(symbole, relatif, trouves).visit(arbre)
+        _ReferencesParFonction(symbole, relatif, trouves).visit(arbre)
+    return trouves
+
+
+def _producteurs_d_entree_journal() -> Set[Tuple[str, str]]:
+    """`{(chemin relatif, fonction englobante)}` de tout littéral d'entrée `agent_decision`."""
+    trouves: Set[Tuple[str, str]] = set()
+    for relatif, arbre in _arbres_production():
+        _EntreesJournalParFonction(relatif, trouves).visit(arbre)
     return trouves
 
 
@@ -314,8 +359,10 @@ def test_l_encadrement_du_releve_n_a_qu_un_appelant(symbole: str):
     `ai/analyzer.py` compte les types par `defaultdict` sans en câbler aucun. Le douzième type
     (`reactive_move`) l'a vérifié en pratique : il est arrivé journalisé sans qu'une ligne de
     relevé ait été écrite pour lui. Ce qui reste possible, et que ce test barre, c'est un chemin
-    qui appellerait l'application SANS son encadrement, ou une branche qui écrirait son propre
-    relevé à côté — la divergence que le site unique existe pour empêcher.
+    qui appellerait l'application SANS son encadrement — la divergence que le site unique existe
+    pour empêcher. La branche qui écrirait son propre relevé À CÔTÉ, elle, n'appelle ni l'un ni
+    l'autre : elle passe ce test, et c'est
+    `test_aucune_entree_agent_decision_n_est_ecrite_hors_du_site_unique` qui la barre.
 
     ⚠️ EXCEPTION LÉGITIME, à ne pas confondre avec un contournement :
     `_resolve_faction_decisions_for_ai_seats` applique `returned_models_profile`,
@@ -332,8 +379,28 @@ def test_l_encadrement_du_releve_n_a_qu_un_appelant(symbole: str):
     type qui n'y serait pas branché.
     """
     attendu = {("engine/w40k_core.py", "_handle_agent_decision_action")}
-    assert _appelants(symbole) == attendu, (
-        f"'{symbole}' ne doit etre appele que par `_handle_agent_decision_action` : une "
-        f"application sans son releve, ou un releve ecrit hors du site unique, fait diverger le "
-        f"journal des decisions de ce que l'agent a reellement joue."
+    assert _referents(symbole) == attendu, (
+        f"'{symbole}' ne doit etre nomme que dans `_handle_agent_decision_action` : une "
+        f"application sans son releve fait diverger le journal des decisions de ce que l'agent a "
+        f"reellement joue. Une reference liee ailleurs compte comme un appel — c'en est un, "
+        f"differe."
+    )
+
+
+def test_aucune_entree_agent_decision_n_est_ecrite_hors_du_site_unique():
+    """Le relevé a un PRODUCTEUR unique : aucune branche n'écrit son entrée `agent_decision`.
+
+    Le verrou d'appelant ci-dessus ne barre pas ce chemin : une branche qui poste elle-même
+    `{"type": "agent_decision", ...}` n'appelle ni l'application ni le relevé, et passe les deux
+    paramétrages — mutation appliquée, vérifié vert. Ce qu'une telle entrée casserait :
+    `models_segment` est posé VIDE au site unique précisément pour que
+    `_build_step_log_details` n'aille pas chercher les positions LIVE par socle ; construite à la
+    main, la clé manque, et une décision 20.01 — jouée AVANT toute mise en place — sort avec ses
+    socles à (-1,-1).
+    """
+    attendu = {("engine/w40k_core.py", "_record_agent_decision_action_log")}
+    assert _producteurs_d_entree_journal() == attendu, (
+        "une entree d'action_log de type 'agent_decision' est construite hors de "
+        "`_record_agent_decision_action_log` : le site unique ne garantit plus ni le libelle "
+        "partage avec le Game Log, ni le segment [MODELS:] vide."
     )
