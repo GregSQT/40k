@@ -55,7 +55,10 @@ def _state(
         model_id = f"{squad_id}#0"
         squad_models[squad_id] = [model_id]
         models_cache[model_id] = {
+            # 14.02 additionne les OC des FIGURINES (02.02) : c'est ici que vit la
+            # caractéristique, `unit["OC"]` n'étant plus lu par le contrôle.
             "col": col, "row": row, "HP_CUR": 6, "BASE_SHAPE": shape, "BASE_SIZE": size,
+            "OC": oc,
         }
     return {
         "units": units,

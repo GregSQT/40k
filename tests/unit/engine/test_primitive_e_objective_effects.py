@@ -18,8 +18,9 @@ from engine.game_state import (
     GameStateManager,
     apply_secure_objective_on_control,
     objective_control_contributions,
-    unit_effective_oc,
+    unit_oc_bonus,
 )
+from tests.unit.engine._config_helpers import attached_scenario, load_engine_from_scenario
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -49,8 +50,9 @@ def _unit(
     }
 
 
-def _model(uid: str, col: int, row: int) -> Dict[str, Any]:
-    return {"col": col, "row": row, "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1}
+def _model(uid: str, col: int, row: int, oc: int) -> Dict[str, Any]:
+    """Figurine minimale. `OC` est PORTÉ PAR LA FIGURINE (02.02) : c'est ce que somme 14.02."""
+    return {"col": col, "row": row, "HP_CUR": 1, "BASE_SHAPE": "round", "BASE_SIZE": 1, "OC": oc}
 
 
 def _state(
@@ -84,9 +86,13 @@ def _state(
         col = u.get("col", LOIN_HEX[0])
         row = u.get("row", LOIN_HEX[1])
         units_cache[uid] = {"player": u["player"], "col": col, "row": row, "orientation": 0}
-        mid = f"{uid}#0"
-        squad_models[uid] = [mid]
-        models_cache[mid] = _model(uid, col, row)
+        # `model_ocs` : une escouade HÉTÉROGÈNE en OC (personnage attaché, 19.01). Par défaut,
+        # une figurine unique portant l'OC du profil de l'unité.
+        ocs = u.get("model_ocs", [u["OC"]])
+        mids = [f"{uid}#{i}" for i in range(len(ocs))]
+        squad_models[uid] = mids
+        for i, (mid, model_oc) in enumerate(zip(mids, ocs)):
+            models_cache[mid] = _model(uid, col + i, row, model_oc)
     gs: Dict[str, Any] = {
         "units": units,
         "units_cache": units_cache,
@@ -117,19 +123,19 @@ def _manager(gs: Dict[str, Any]) -> GameStateManager:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# oc_bonus — unit_effective_oc
+# oc_bonus — unit_oc_bonus
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_oc_effectif_sans_bonus_renvoie_oc_base() -> None:
+def test_oc_bonus_absent_vaut_zero() -> None:
     u = _unit("1", 1, 5, 5, oc=2)
-    assert unit_effective_oc(u) == 2
+    assert unit_oc_bonus(u) == 0
 
 
-def test_oc_effectif_avec_oc_bonus_ajoute_le_bonus() -> None:
+def test_oc_bonus_lit_la_valeur_de_la_regle() -> None:
     u = _unit("1", 1, 5, 5, oc=2, unit_rules=[
         {"ruleId": "oc_bonus", "displayName": "Relic Banner", "rule_args": {"oc_bonus": 1}},
     ])
-    assert unit_effective_oc(u) == 3
+    assert unit_oc_bonus(u) == 1
 
 
 def test_oc_bonus_absent_de_rule_args_leve() -> None:
@@ -137,7 +143,7 @@ def test_oc_bonus_absent_de_rule_args_leve() -> None:
         {"ruleId": "oc_bonus", "displayName": "Relic Banner", "rule_args": {}},
     ])
     with pytest.raises(ValueError, match="oc_bonus"):
-        unit_effective_oc(u)
+        unit_oc_bonus(u)
 
 
 def test_oc_bonus_dans_objective_control_contributions() -> None:
@@ -161,6 +167,101 @@ def test_oc_bonus_dans_objective_control_contributions() -> None:
     assert contrib_sans["1"][1] == [2]
     # OC 2 + 1 bonus → contribution 3
     assert contrib_avec["2"][1] == [3]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 14.02 par FIGURINE — escouade hétérogène en OC (personnage attaché, 19.01)
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: Zone couvrant les six hexes que `_state` occupe pour une escouade de six figurines.
+_ZONE_SIX = {(ZONE_HEX[0] + i, ZONE_HEX[1]) for i in range(6)}
+
+
+def test_controle_somme_l_oc_de_chaque_figurine_et_pas_un_oc_d_escouade() -> None:
+    """14.02 : « add together the OC characteristics of ALL THE MODELS ».
+
+    5 figurines OC 2 + 1 figurine OC 6 (BannerNob replié dans des Boyz, 19.01) = 16.
+    Le défaut multipliait l'OC de l'ESCOUADE (2) par le NOMBRE de figurines (6) → 12 : le
+    personnage attaché apportait l'OC du corps de l'escouade au lieu du sien.
+    """
+    u = _unit("1", 1, *ZONE_HEX, oc=2)
+    u["col"], u["row"] = ZONE_HEX
+    u["model_ocs"] = [2, 2, 2, 2, 2, 6]
+
+    contrib = objective_control_contributions(_state([u]), [_ZONE_SIX])
+
+    assert contrib["1"][1] == [16], "chaque figurine apporte SON OC (5x2 + 6)"
+
+
+def test_oc_bonus_s_ajoute_a_chaque_figurine_et_pas_une_seule_fois() -> None:
+    """« Relic Banner: This unit has +1 OC » porte sur l'UNITÉ, donc sur CHACUNE de ses figurines.
+
+    5 Intercessor OC 2 + 1 Ancient OC 1, +1 OC : (5x3) + 2 = 17. Le défaut rendait 18 —
+    (OC d'escouade 2 + bonus 1) x 6 figurines — donc à la fois un OC de personnage faux et un
+    bonus appliqué au mauvais niveau.
+    """
+    u = _unit("1", 1, *ZONE_HEX, oc=2, unit_rules=[
+        {"ruleId": "oc_bonus", "displayName": "Relic Banner", "rule_args": {"oc_bonus": 1}},
+    ])
+    u["col"], u["row"] = ZONE_HEX
+    u["model_ocs"] = [2, 2, 2, 2, 2, 1]
+
+    contrib = objective_control_contributions(_state([u]), [_ZONE_SIX])
+
+    assert contrib["1"][1] == [17], "le bonus d'unité s'applique par figurine (5x3 + 1x2)"
+
+
+def test_une_figurine_sans_oc_n_apporte_rien_mais_ses_soeurs_si() -> None:
+    """02.02 : une figurine d'OC '-' « is unable to control objectives at all ».
+
+    Le défaut écartait l'ESCOUADE ENTIÈRE dès que son OC de profil était nul ; par figurine,
+    seule la figurine concernée n'apporte rien.
+    """
+    u = _unit("1", 1, *ZONE_HEX, oc=0)
+    u["col"], u["row"] = ZONE_HEX
+    u["model_ocs"] = [0, 0, 3]
+
+    contrib = objective_control_contributions(_state([u]), [_ZONE_SIX])
+
+    assert contrib["1"][1] == [3], "les deux figurines d'OC 0 n'apportent rien, la troisième 3"
+
+
+def test_rosters_reels_bannernob_et_ancient_par_le_vrai_moteur() -> None:
+    """Le chemin de PRODUCTION, sur deux datasheets réelles des rosters d'entraînement.
+
+    BannerNob (OC 6, `Datasheets - Orks.pdf` p.3) attaché à 5 Boyz (OC 2) → 16.
+    Ancient (OC 1 + « Relic Banner: +1 OC », `Datasheets - Space Marines.pdf` p.4) attaché à
+    5 Intercessor (OC 2) → 17. Mesuré à 12 et 18 avant le correctif.
+
+    Un état minimal ne prouve pas que `build_model_specs` / `_build_enhanced_unit` posent bien
+    l'OC par figurine : ce test passe par le chargement réel du roster.
+    """
+    scenario = attached_scenario([
+        {"id": 101, "unit_type": "Boyz", "player": 1, "col": 5, "row": 5,
+         "models": [{"col": 5 + i, "row": 5} for i in range(5)]},
+        {"id": 102, "unit_type": "BannerNob", "player": 1,
+         "attached_squad": 101, "col": 10, "row": 5},
+        {"id": 201, "unit_type": "Intercessor", "player": 2, "col": 20, "row": 20,
+         "models": [{"col": 20 + i, "row": 20} for i in range(5)]},
+        {"id": 202, "unit_type": "Ancient", "player": 2,
+         "attached_squad": 201, "col": 25, "row": 20},
+    ])
+    scenario["army_faction"] = {"1": "ORKS", "2": "ADEPTUS ASTARTES"}
+    eng = load_engine_from_scenario(scenario, training_n_envs=1)
+    gs = eng.game_state
+
+    zone_orks = {(5 + i, 5) for i in range(6)}
+    zone_sm = {(20 + i, 20) for i in range(6)}
+    contrib = objective_control_contributions(gs, [zone_orks, zone_sm])
+
+    # Prémisse : les deux escouades sont bien HÉTÉROGÈNES en OC, sinon le test ne prouve rien.
+    ocs_orks = [int(gs["models_cache"][m]["OC"]) for m in gs["squad_models"]["101"]]
+    ocs_sm = [int(gs["models_cache"][m]["OC"]) for m in gs["squad_models"]["201"]]
+    assert sorted(ocs_orks) == [2, 2, 2, 2, 2, 6], f"OC par figurine ORKS inattendus : {ocs_orks}"
+    assert sorted(ocs_sm) == [1, 2, 2, 2, 2, 2], f"OC par figurine SM inattendus : {ocs_sm}"
+
+    assert contrib["101"] == (1, [16, 0]), "5 Boyz OC 2 + BannerNob OC 6 = 16, pas 6 x 2"
+    assert contrib["201"] == (2, [0, 17]), "5 Intercessor + Ancient sous Relic Banner = 17"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

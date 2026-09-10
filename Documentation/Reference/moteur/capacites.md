@@ -199,7 +199,7 @@ Trois effets, dont **un seul est applicable aujourd'hui** :
 
 | Effet | Applicable ? |
 |---|---|
-| OC → '-' | **oui** — le drapeau `battle_shocked` de l'unité est lu par le calcul d'OC (`def objective_control_contributions` / `def _sum_objective_control_oc`, `engine/game_state.py`) |
+| OC → '-' | **oui** — le drapeau `battle_shocked` de l'unité est lu par le calcul d'OC (`def objective_control_contributions`, `engine/game_state.py`) : la règle est portée par l'UNITÉ et écarte l'escouade entière, alors que l'OC lui-même se somme figurine par figurine (14.02) |
 | Pas ciblable par un stratagème | sans objet — pas de stratagèmes |
 | Inéligible aux actions | sans objet — pas de système d'actions (16) |
 
@@ -564,7 +564,7 @@ Le helper commun « infliger N blessures mortelles à une unité » existe : `de
 |---|---|---|
 | Get da Good Bitz | Boyz | `secure_objective_on_control` |
 | Objective Secured | Intercessor | `secure_objective_on_control` |
-| Relic Banner | Ancient | `oc_bonus` (+1 OC) |
+| Relic Banner | Ancient | `oc_bonus` (+1 OC **par figurine de l'unité**, `def unit_oc_bonus`) |
 
 **Les deux premières sont des jumeaux exacts** — textes identiques mot pour mot dans les deux PDF. Une seule règle générique, déclarée deux fois avec des `displayName` différents. Les coder séparément serait une duplication pure.
 
