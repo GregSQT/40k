@@ -34,9 +34,15 @@ _WEAPON: Dict[str, Any] = {
     "ATK": 4, "STR": 4, "AP": 0, "NB": 2, "DMG": 1,
     "WEAPON_RULES": [], "code": "test_blade", "display_name": "Blade",
 }
+# La cible est une VRAIE unité de l'état de jeu : depuis le 2026-09-10, `expected_damage`
+# relit T et InSv par les oracles de la résolution (19.02, `effective_invul_save`) dès qu'un
+# game_state est fourni, et non plus sur les champs bruts. Les valeurs effectives de cette
+# fixture (une figurine T4, aucune règle d'unité) sont identiques aux champs bruts : les
+# valeurs de référence de l'en-tête restent donc exactes.
 _TARGET: Dict[str, Any] = {
+    "id": "2", "player": 2,
     "T": 4, "ARMOR_SAVE": 5, "INVUL_SAVE": 7,
-    "UNIT_KEYWORDS": [], "FACTION_KEYWORDS": [],
+    "UNIT_KEYWORDS": [], "FACTION_KEYWORDS": [], "UNIT_RULES": [],
 }
 _BASE_ATTACKER: Dict[str, Any] = {
     "id": "1", "player": 1,
@@ -51,6 +57,11 @@ _BASE_GAME_STATE: Dict[str, Any] = {
     # si toutes les valeurs sont False, sortie anticipée sans lire army_faction ni "units".
     "waaagh_active": {1: False, 2: False},
     "config": {"game_rules": {"bonus_malus_cap": 0}},
+    # Exigé par `effective_defensive_profile` : la cible est retrouvée dans l'état de jeu,
+    # sa T effective est lue sur ses FIGURINES (19.02) et non sur le champ de l'escouade.
+    "unit_by_id": {"2": _TARGET},
+    "squad_models": {"2": ["2#0"]},
+    "models_cache": {"2#0": {"HP_CUR": 2, "T": 4, "role": "trooper", "squad_id": "2"}},
 }
 
 
