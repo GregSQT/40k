@@ -23,6 +23,7 @@ from engine.combat_utils import (
 )
 from shared.data_validation import require_key
 from ai.analyzer_perfig import position_is_on_battlefield
+from ai.analyzer_core import agent_decision_option_rate
 from ai.analyzer_rules import coverage_gaps, coverage_rows, load_rules_corpus, new_rule_usage_counters, note_rule_usage, SECTION_TO_BUCKET, VERDICT_NEVER_EXERCISED, VERDICT_UNDECIDABLE
 
 
@@ -2075,6 +2076,16 @@ def parse_step_log(filepath: str) -> Dict:
         ),  # (technical_rule_id, unit_type) -> status -> {1,2}
         'rule_choice_selection_usage': defaultdict(lambda: {1: 0, 2: 0}),  # (technical_rule_id, unit_type) -> {1,2}
         'rule_choice_selection_invalid': {1: 0, 2: 0},
+        # V11 §9.3 P2 — DECISIONS D'AGENT resolues, lues sur les lignes
+        # « ... DECISION [<type>] CHOICE_<i> [...] » (grammaire 8). Deux compteurs et non un
+        # seul : le total par type est le DENOMINATEUR d'un taux, le compte par candidat en est
+        # le numerateur. Les deriver l'un de l'autre supposerait de connaitre a l'avance le
+        # nombre de candidats de chaque type, ce que le journal ne porte pas.
+        # Cas d'usage premier : 20.01 `reserves_declaration`, ou `CHOICE_0` DECLARE l'unite en
+        # reserves et `CHOICE_1` la garde pour la mise en place — avant ces compteurs, rien ne
+        # disait si l'agent declarait ou declinait systematiquement.
+        'agent_decision_totals': defaultdict(lambda: {1: 0, 2: 0}),  # decision_type -> {1,2}
+        'agent_decision_options': defaultdict(lambda: {1: 0, 2: 0}),  # (decision_type, i) -> {1,2}
         'reactive_move_stats': {
             1: {'applied': 0, 'declined': 0, 'abnormal': 0},
             2: {'applied': 0, 'declined': 0, 'abnormal': 0},
@@ -3883,6 +3894,40 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             log_print(f"  First wrong choice usage P2 (Episode {first_err['episode']}): {first_err['line']}")
     else:
         log_print("  No rule-choice usage recorded.")
+
+    # DECISIONS D'AGENT (V11 §9.3 P2) — rendues ICI, dans la meme section que la conformite
+    # rule-choice, parce que `rule_choice` EST l'un des onze types de decision : deux sections
+    # separees auraient fait lire deux fois la meme famille de lignes a deux endroits.
+    log_print("\n  Agent decisions (resolved CHOICE_i, by type)")
+    log_print(f"  {'Decision type':<32} {'P1':>8} {'P2':>8} {'Total':>8}   Options")
+    _ad_totals = require_key(stats, 'agent_decision_totals')
+    _ad_options = require_key(stats, 'agent_decision_options')
+    if _ad_totals:
+        for _ad_type in sorted(_ad_totals):
+            _ad_per_player = _ad_totals[_ad_type]
+            _ad_total = int(_ad_per_player[1]) + int(_ad_per_player[2])
+            _ad_breakdown = " ".join(
+                f"CHOICE_{_idx}={int(_cnt[1]) + int(_cnt[2])}"
+                for (_typ, _idx), _cnt in sorted(_ad_options.items())
+                if _typ == _ad_type
+            )
+            log_print(
+                f"  {_ad_type:<32} {int(_ad_per_player[1]):8d} {int(_ad_per_player[2]):8d} "
+                f"{_ad_total:8d}   {_ad_breakdown}"
+            )
+        # 20.01 « Declare Battle Formations » — le taux qui a motive ce releve. `CHOICE_0`
+        # DECLARE l'unite en reserves, `CHOICE_1` la garde pour la mise en place. Sans cette
+        # ligne, rien ne distinguait « l'agent decline toujours » de « l'agent n'a jamais eu la
+        # question » : c'est exactement l'ambiguite que le journal ne savait pas lever.
+        _res_rate = agent_decision_option_rate(stats, "reserves_declaration", 0)
+        if _res_rate is not None:
+            _res_declared, _res_total, _res_ratio = _res_rate
+            log_print(
+                f"  20.01 strategic-reserves declaration rate: "
+                f"{_res_declared}/{_res_total} = {_res_ratio:.1%} (CHOICE_0 = declared)"
+            )
+    else:
+        log_print("  No agent decision recorded.")
 
     # WEAPONS RULES USAGE (by rule and weapon+unit)
     _switch_section("1.8")

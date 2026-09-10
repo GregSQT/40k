@@ -87,6 +87,32 @@ def models_segment_for_unit(
     )
 
 
+def format_agent_decision_message(
+    unit_label: str,
+    decision_type: str,
+    option_index: int,
+    option_label: str,
+    declines: bool,
+) -> str:
+    """Libelle d'une DECISION D'AGENT resolue (V11 §9.3 P2) — UNE seule implementation.
+
+    Deux consommateurs la partagent, et c'est la raison d'etre de cette fonction :
+    ``W40KEngine._record_agent_decision_action_log`` la pose dans ``action_logs`` (Game Log du
+    PvP) et ``StepLogger._format_replay_style_message`` la rend dans ``step.log`` (grammaire 8,
+    lue par ``ai/analyzer_core``). Deux formateurs separes auraient diverge au premier ajustement,
+    et l'analyzer ne lit QUE l'un des deux : la divergence serait passee inapercue.
+
+    ``[DECLINED]`` marque le candidat qui PASSE (``declines``). Sans lui, deux lignes ne se
+    distingueraient que par un index, dont le sens depend du type de decision.
+    """
+    message = (
+        f"{unit_label} DECISION [{decision_type}] CHOICE_{int(option_index)} [{option_label}]"
+    )
+    if declines:
+        message += " [DECLINED]"
+    return message
+
+
 def append_action_log(
     game_state: MutableMapping[str, Any],
     entry: Dict[str, Any],
