@@ -709,9 +709,10 @@ def test_a_combi_group_split_by_truncation_leaves_no_orphan_marker():
     sup = _combi("plasma", display_name="Plasma (Supercharge)", STR=8)
 
     def _marks_with(sup_carriers: int) -> Dict[int, str]:
-        # Porteurs DÉCROISSANTS et strictement séparés : le tri ne dépend que d'eux, jamais de
-        # l'ordre d'identité. `std` (3 porteurs) prend le slot 0 ; les k profils fillers en ont
-        # 2 chacun ; `sup` en a `sup_carriers`, ce qui décide seul de sa place.
+        # Le tri est « porteurs décroissants, puis identité ». `std` en a 3 et les k fillers 2,
+        # donc `sup_carriers` décide seul du CÔTÉ de la frontière où tombe `sup` : 1 le met
+        # derrière tous les fillers, 3 le met à égalité avec `std` dans les deux premiers slots
+        # (l'identité tranche alors leur ordre entre eux, ce dont les assertions ne dépendent pas).
         per_model: Dict[int, List[Dict[str, Any]]] = {}
         for _ in range(3):
             per_model[len(per_model)] = [std]
