@@ -6,7 +6,7 @@ clears ``action_logs`` after each response (entries are flushed to the client).
 It resets with a new episode (``w40k_core`` reset).
 """
 
-from typing import Any, Dict, Iterable, MutableMapping, Tuple
+from typing import Any, Dict, FrozenSet, Iterable, MutableMapping, Tuple
 
 from shared.data_validation import require_key
 
@@ -113,15 +113,27 @@ def format_agent_decision_message(
     return message
 
 
-def append_action_log(
+#: Types dont l'entree d'``action_logs`` a un CONSTRUCTEUR DEDIE, seul autorise a la produire.
+#: ``append_action_log`` les REFUSE : l'entree ne peut plus etre ecrite ailleurs, quelle que soit
+#: la syntaxe qui pose le type (litteral, ``entry["type"] = ...``, ``dict(type=...)``, valeur
+#: calculee). La sonde statique de `tests/unit/engine/test_step_log_agent_decision.py` ne voit,
+#: elle, que la forme LITTERALE — mesure : les trois autres formes lui rendaient 0 releve.
+_TYPES_A_CONSTRUCTEUR_DEDIE: FrozenSet[str] = frozenset({"agent_decision"})
+
+
+def _append_entry(
     game_state: MutableMapping[str, Any],
     entry: Dict[str, Any],
 ) -> None:
-    """
-    Append ``entry`` to ``game_state['action_logs']`` with the next ``logSeq``.
+    """Ecriture NUE dans ``action_logs`` (``logSeq`` compris), SANS controle de producteur.
 
-    Mutates ``entry`` in place (adds ``logSeq``) so callers that later update
-    the same dict (e.g. shooting reward fields) keep updating the row in the list.
+    Partagee par ``append_action_log`` et les constructeurs dedies : ceux-ci ne peuvent pas passer
+    par ``append_action_log``, dont la garde refuse precisement leur type. UN seul corps, donc un
+    seul compteur ``logSeq`` — le dupliquer aurait fait diverger la numerotation entre les deux
+    chemins d'ecriture.
+
+    ⚠️ REFERENCE INTERDITE hors de ce module : c'est le chemin qui contourne la garde. Verrouille
+    par `test_step_log_agent_decision.py`, qui l'exige absent d'`engine/`, `ai/` et `services/`.
 
     Raises:
         KeyError: If ``action_log_seq`` is missing.
@@ -145,3 +157,83 @@ def append_action_log(
     game_state["action_log_seq"] = next_seq
     entry["logSeq"] = next_seq
     logs.append(entry)
+
+
+def append_action_log(
+    game_state: MutableMapping[str, Any],
+    entry: Dict[str, Any],
+) -> None:
+    """
+    Append ``entry`` to ``game_state['action_logs']`` with the next ``logSeq``.
+
+    Mutates ``entry`` in place (adds ``logSeq``) so callers that later update
+    the same dict (e.g. shooting reward fields) keep updating the row in the list.
+
+    ⚠️ REFUSE les types d'``_TYPES_A_CONSTRUCTEUR_DEDIE`` : leur entree porte des champs qu'un
+    lecteur EXIGE (``StepLogger`` leve sur un ``agent_decision`` prive de ses quatre champs de
+    decision) et une seconde entree BIEN formee ferait compter a l'analyzer un choix que l'agent
+    n'a jamais joue. Le constructeur dedie est nomme dans le message d'erreur.
+
+    Raises:
+        ValueError: If ``entry`` carries a type that has a dedicated builder.
+        KeyError: If ``action_log_seq`` is missing.
+        TypeError: If ``action_logs`` is not a list or ``action_log_seq`` is not int.
+    """
+    type_declare = entry.get("type")  # get allowed : la plupart des entrees n'en portent pas
+    if isinstance(type_declare, str) and type_declare in _TYPES_A_CONSTRUCTEUR_DEDIE:
+        raise ValueError(
+            f"append_action_log: le type '{type_declare}' a un constructeur dedie "
+            f"(`append_{type_declare}_log`), seul autorise a produire son entree d'action_logs. "
+            f"Construire l'entree a la main fait diverger le journal des decisions de ce que "
+            f"l'agent a reellement joue."
+        )
+    _append_entry(game_state, entry)
+
+
+def append_agent_decision_log(
+    game_state: MutableMapping[str, Any],
+    *,
+    decision_type: str,
+    player: int,
+    unit_id: str,
+    option_index: int,
+    option_label: str,
+    declines: bool,
+) -> None:
+    """CONSTRUCTEUR DEDIE de l'entree ``agent_decision`` — le seul, et il est ici.
+
+    L'entree etait batie en clair dans ``W40KEngine._record_agent_decision_action_log``, et le
+    site unique ne tenait alors que par une SONDE statique qui ne reconnait le type que sous sa
+    forme LITTERALE. La construction vit desormais dans le module du goulot, et
+    ``append_action_log`` refuse le type : aucune autre syntaxe ne peut plus produire l'entree. Ce
+    qui reste a garder est un NOM de fonction — visible a l'import, alias compris — et non une
+    forme de dictionnaire.
+
+    ``turn`` et ``phase`` sont relus dans ``game_state`` plutot que recus en parametre : ce sont
+    les memes valeurs pour tout producteur, et les passer aurait rendu possible une ligne datee
+    d'un autre tour que celui ou la decision a ete jouee.
+
+    AUCUN ``models_segment`` : « un releve de choix n'observe aucune position » est une propriete
+    du TYPE (``W40KEngine._TYPES_SANS_SEGMENT_MODELS``), appliquee au point de traduction. La
+    poser aussi ici en ferait un jumeau, et le verrou ne tiendrait que pour ce producteur-la.
+    """
+    _append_entry(
+        game_state,
+        {
+            "type": "agent_decision",
+            # MEME libelle que la ligne de `step.log`, par le MEME constructeur : le Game Log du
+            # PvP et le journal d'entrainement disent le mot pour mot la meme chose.
+            "message": format_agent_decision_message(
+                f"Unit {unit_id}", decision_type, option_index, option_label, declines
+            ),
+            "unitId": unit_id,
+            "player": int(player),
+            "turn": require_key(game_state, "turn"),
+            "phase": str(require_key(game_state, "phase")),
+            "decision_type": decision_type,
+            "decision_option_index": int(option_index),
+            "decision_option_label": option_label,
+            "decision_option_declines": bool(declines),
+            "reward": 0.0,
+        },
+    )

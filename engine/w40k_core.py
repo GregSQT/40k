@@ -38,7 +38,7 @@ from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers, deployment_handlers
 
 # units_cache helpers (single source of truth for position/HP of living units)
-from engine.action_log_utils import append_action_log, format_agent_decision_message
+from engine.action_log_utils import append_action_log, append_agent_decision_log
 from engine.phase_handlers.shared_utils import (
     PENDING_REACTIVE_MOVE_KEY,
     drive_reactive_move_window,
@@ -4258,31 +4258,19 @@ class W40KEngine(gym.Env):
                 "game_state['action_logs'] doit etre une liste avant la journalisation d'une "
                 f"decision agent, recu {type(action_logs).__name__}"
             )
-        option_label = str(require_key(option, "label"))
-        option_declines = bool(require_key(option, "declines"))
-        append_action_log(
+        # L'ENTREE elle-meme est batie par `append_agent_decision_log` (`action_log_utils`), et non
+        # ici : `append_action_log` REFUSE desormais le type `agent_decision`, de sorte qu'aucune
+        # autre branche ne puisse en produire une — y compris en posant le type par affectation,
+        # forme qu'une sonde statique du dictionnaire ne voit pas. Ce niveau-ci garde ce qu'il est
+        # seul a savoir : lire le candidat joue.
+        append_agent_decision_log(
             self.game_state,
-            {
-                "type": "agent_decision",
-                # MEME libelle que la ligne de `step.log`, par le MEME constructeur : le Game Log
-                # du PvP et le journal d'entrainement disent le mot pour mot la meme chose.
-                "message": format_agent_decision_message(
-                    f"Unit {unit_id}", decision_type, option_index, option_label, option_declines
-                ),
-                "unitId": unit_id,
-                "player": int(player),
-                "turn": require_key(self.game_state, "turn"),
-                "phase": str(require_key(self.game_state, "phase")),
-                "decision_type": decision_type,
-                "decision_option_index": int(option_index),
-                "decision_option_label": option_label,
-                "decision_option_declines": option_declines,
-                # AUCUN `models_segment` ici : « un releve de choix n'observe aucune position »
-                # est une propriete du TYPE, declaree en `_TYPES_SANS_SEGMENT_MODELS` et
-                # appliquee au point de traduction. La poser aussi ici en ferait un jumeau, et le
-                # verrou ne tiendrait que pour ce producteur-la.
-                "reward": 0.0,
-            },
+            decision_type=decision_type,
+            player=player,
+            unit_id=unit_id,
+            option_index=option_index,
+            option_label=str(require_key(option, "label")),
+            declines=bool(require_key(option, "declines")),
         )
 
     def _handle_agent_decision_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
