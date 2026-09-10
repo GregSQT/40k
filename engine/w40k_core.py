@@ -7409,9 +7409,10 @@ class W40KEngine(gym.Env):
 
         Les cles du moteur (camelCase : toCol/targetCol/shootDetails) et celles du formateur
         (snake_case : col/target_coords) divergent — cette fonction est le seul point de
-        traduction. `current_turn` est le seul champ EXIGE par `log_action` (require_key).
-        Tous les autres sont optionnels cote formateur, qui degrade proprement
-        (« (dice data incomplete) ») : une entree pauvre produit une ligne valide, jamais un crash.
+        traduction. `current_turn` est le seul champ EXIGE par `log_action` lui-meme
+        (require_key) ; chaque branche du formateur exige ensuite les siens et LEVE si elles
+        manquent — le tir comme la melee. Une entree pauvre est donc un bug de producteur qui
+        se voit, pas une ligne degradee en silence (T1).
         """
         unit_id = raw_log.get("unitId")  # get allowed
         to_col = raw_log.get("toCol")  # get allowed

@@ -237,6 +237,23 @@ def test_log_episode_end_flushes_buffer_and_logs_objective_control(tmp_path: Pat
     assert "OBJECTIVE CONTROL: Obj1:P1_OC=3,P2_OC=0,Ctrl=1" in content
 
 
+def test_log_episode_end_without_start_raises(tmp_path: Path) -> None:
+    """Sans en-tete d'episode, la duree n'est pas mesurable : lever plutot que rendre 0.000s.
+
+    Le defaut de `getattr` valait `time.perf_counter()` EVALUE A L'APPEL, donc une duree
+    fabriquee de quelques microsecondes, indiscernable d'un episode instantane (T1).
+    """
+    output_file = tmp_path / "step.log"
+    logger = StepLogger(output_file=str(output_file), enabled=True, buffer_size=50)
+    with pytest.raises(ConfigurationError, match=r"log_episode_start"):
+        logger.log_episode_end(
+            total_episodes_steps=42,
+            winner=1,
+            win_method="objectives",
+            objective_control={},
+        )
+
+
 def test_format_replay_style_message_reactive_move_and_validations() -> None:
     logger = StepLogger(enabled=False)
     msg = logger._format_replay_style_message(
@@ -341,6 +358,47 @@ def test_format_replay_style_message_combat_emits_only_fight_subphase() -> None:
     assert "[FIGHT_SUBPHASE:fight]" in msg
     assert "FIGHT_ELIGIBLE" not in msg
     assert "CHARGING_POOL" not in msg
+
+
+def test_format_replay_style_message_combat_missing_target_id_raises() -> None:
+    """JUMEAU du tir : `target_id` absent LEVE, il ne degrade pas la ligne.
+
+    Le repli retire rendait « FOUGHT (no target data) », donc une ligne SANS
+    `[FIGHT_SUBPHASE:]` — que le parser de replay exige — et masquait le bug du producteur.
+    """
+    logger = StepLogger(enabled=False)
+    details = _combat_details()
+    del details["target_id"]
+    with pytest.raises(KeyError, match=r"Combat action missing required target_id"):
+        logger._format_replay_style_message(3, "combat", details)
+
+
+@pytest.mark.parametrize("missing_field", [
+    "hit_roll", "wound_roll", "save_roll", "damage_dealt", "hit_result",
+    "wound_result", "save_result", "hit_target", "wound_target", "save_target",
+])
+def test_format_replay_style_message_combat_missing_dice_field_raises(missing_field: str) -> None:
+    """Chacun des 10 champs de des LEVE, comme dans la branche tir jumelle."""
+    logger = StepLogger(enabled=False)
+    details = _combat_details()
+    del details[missing_field]
+    with pytest.raises(KeyError, match=rf"Combat action missing required {missing_field}"):
+        logger._format_replay_style_message(3, "combat", details)
+
+
+@pytest.mark.parametrize("removed_type", ["shoot_summary", "combat_summary"])
+def test_summary_action_types_no_longer_formatted(removed_type: str) -> None:
+    """Aucun producteur ni consommateur dans le depot : les deux branches sont supprimees.
+
+    Elles formataient `hits`/`wounds`/`failed_saves` via `.get()` sans defaut, donc
+    « None hits, None wounds » quand le producteur les omettait.
+    """
+    logger = StepLogger(enabled=False)
+    with pytest.raises(ValueError, match=r"Unknown action_type"):
+        logger._format_replay_style_message(
+            1, removed_type,
+            {"target_id": 2, "total_shots": 3, "total_attacks": 3, "total_damage": 4},
+        )
 
 
 def test_unknown_action_type_raises_and_phase_transition_logs(tmp_path: Path) -> None:
