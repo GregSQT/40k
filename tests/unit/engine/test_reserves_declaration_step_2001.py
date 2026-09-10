@@ -36,6 +36,7 @@ from engine.phase_handlers.deployment_handlers import (
     build_reserves_declaration_queue,
     deployment_commit_plan,
     next_reserves_declaration_entry,
+    reserves_declaration_step_has_started,
     reserves_declaration_step_is_open,
 )
 from tests.unit.engine._config_helpers import both_terrains
@@ -373,3 +374,80 @@ def test_a_partial_declaration_does_not_close_the_phase():
     assert "phase_complete" not in result
     assert gs["deployment_state"]["deployment_complete"] is False
     assert any(gs["deployment_state"]["deployable_units"][p] for p in (1, 2))
+
+
+# ===========================================================================
+# « L'ÉTAPE A COMMENCÉ » — le marqueur qui gèle les listes d'armée
+# ===========================================================================
+
+
+def test_no_answer_means_the_step_has_not_started():
+    """Au reset, aucune réponse n'a été donnée : les listes sont encore modifiables.
+
+    C'est l'état qui autorise `change_roster` (`services/api_server._execute_change_roster_action`).
+    Un marqueur posé à True dès le reset fermerait le choix d'armée avant qu'il ait servi.
+    """
+    eng = _engine()
+    assert reserves_declaration_step_has_started(eng.game_state["deployment_state"]) is False
+
+
+@pytest.mark.parametrize("declare", [True, False])
+def test_the_model_seat_marks_the_step_started(declare: bool):
+    """Répondre — DANS LES DEUX SENS — commence l'étape pour le siège piloté par le modèle.
+
+    « Garder pour le déploiement » est un candidat de la question, pas une absence de réponse :
+    il consomme la question, donc il commence l'étape au même titre que la mise en réserves.
+    """
+    eng = _engine()
+    gs = eng.game_state
+    eng.get_action_mask()
+    assert read_pending_agent_decision(gs) is not None, "aucune question posée"
+
+    eng.step(int(CHOICE_DECLARE if declare else CHOICE_KEEP))
+
+    assert reserves_declaration_step_has_started(gs["deployment_state"]) is True
+
+
+@pytest.mark.parametrize("declare", [True, False])
+def test_the_human_seat_marks_the_step_started(declare: bool):
+    """JUMEAU du siège modèle : la même réponse par la route PvP marque le même état.
+
+    Les deux sièges passent par `consume_reserves_declaration_entry` ; s'ils divergeaient, le
+    verrou du changement d'armée dépendrait de qui joue.
+    """
+    from engine.phase_handlers.deployment_handlers import (
+        deployment_place_in_strategic_reserves,
+    )
+
+    eng = _engine()
+    gs = eng.game_state
+    entry = next_reserves_declaration_entry(gs)
+    assert entry is not None
+
+    ok, result = deployment_place_in_strategic_reserves(
+        gs, {"unitId": entry[1], "declare": declare}
+    )
+
+    assert ok, result
+    assert reserves_declaration_step_has_started(gs["deployment_state"]) is True
+
+
+def test_an_unaskable_entry_dropped_from_the_queue_does_not_start_the_step():
+    """Une question qui ne sera JAMAIS posée n'est pas une réponse.
+
+    `next_reserves_declaration_entry` ampute la file des unités qui ne peuvent pas aller en
+    réserves (ici : plafond de 50 % nul, donc plus aucune unité éligible). Déduire « l'étape a
+    commencé » de la longueur de la file confondrait cette amputation avec une réponse, et
+    refuserait un changement d'armée que rien n'interdit.
+    """
+    eng = _engine()
+    gs = eng.game_state
+    assert gs["deployment_state"][RESERVES_DECLARATION_QUEUE_KEY], "file vide : rien à amputer"
+    # Plafond nul : plus aucune unité ne peut partir en réserves, la file se vide sans réponse.
+    gs["points_limit"] = 0
+
+    assert next_reserves_declaration_entry(gs) is None
+    assert not gs["deployment_state"][RESERVES_DECLARATION_QUEUE_KEY], (
+        "la file n'a pas été amputée : le test n'observe pas le cas visé"
+    )
+    assert reserves_declaration_step_has_started(gs["deployment_state"]) is False

@@ -2174,6 +2174,9 @@ class W40KEngine(gym.Env):
                 deployment_handlers.RESERVES_DECLARATION_QUEUE_KEY:
                     deployment_handlers.build_reserves_declaration_queue(deployable_units),
                 deployment_handlers.RESERVES_DECLARATION_CLOSED_KEY: False,
+                # Aucune reponse 20.01 n'a encore ete donnee : c'est ce marqueur qui autorise
+                # encore le remplacement d'armee, et qui le refusera des la premiere.
+                deployment_handlers.RESERVES_DECLARATION_STARTED_KEY: False,
             }
             if not deployable_units[1] and deployable_units[2]:
                 self.game_state["deployment_state"]["current_deployer"] = 2

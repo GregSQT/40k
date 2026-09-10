@@ -66,18 +66,27 @@ export function isReservesDeclarationStepOpen(o: {
 }
 
 /**
- * 20.01 — la question en attente porte-t-elle sur CETTE unité ?
+ * 20.01 — la question en attente porte-t-elle sur CETTE unité, MAINTENANT ?
  *
  * Le client n'a aucune liste de candidats à filtrer : le moteur interroge une unité à la fois,
  * dans un ordre figé au reset, et publie laquelle. Reconstruire ici « quelles unités pourraient
  * partir en réserves » rouvrirait la sélection libre — donc la possibilité de déclarer après
  * avoir vu le déploiement adverse, le défaut que ce contrat ferme.
+ *
+ * `deploymentStarted` SÉPARE LA PRÉPARATION DE LA PARTIE. Tant que l'écran de préparation est
+ * ouvert, le joueur choisit encore son armée ; 20.01 place la déclaration après que les listes
+ * sont arrêtées, et le moteur refuse désormais le changement d'armée dès la première réponse
+ * (`change_roster_locked_after_reserves_declaration`). Poser la question avant le démarrage
+ * mettait les deux gestes dans la MÊME fenêtre : répondre y coûtait le droit de changer d'armée,
+ * dans le seul écran où ce droit existe.
  */
 export function isReservesDeclarationPendingFor(o: {
   phase: string | undefined;
   unitId: number | string;
   pending: StrategicReservesPendingDeclaration | null | undefined;
+  deploymentStarted: boolean;
 }): boolean {
+  if (!o.deploymentStarted) return false;
   if (!isReservesDeclarationStepOpen({ phase: o.phase, pending: o.pending })) return false;
   return o.pending!.unitId === String(o.unitId);
 }

@@ -4627,6 +4627,20 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
     current_player_unit_ids = {str(require_key(unit, "id")) for unit in current_player_units}
     if current_player_unit_ids & deployed_set:
         return False, {"error": "change_roster_locked_after_first_deploy", "current_deployer": target_deployer}
+    # 20.01 — LE DÉPLOIEMENT A COMMENCÉ DÈS LA PREMIÈRE RÉPONSE, et on ne change plus d'armée.
+    # La règle situe la déclaration « Before the battle, in the Declare Battle Formations step »,
+    # donc après que les listes sont arrêtées. Le verrou est GLOBAL, pas par joueur : remplacer
+    # une armée réécrit l'état de l'ADVERSAIRE — la file est rebâtie sur les deux camps (question
+    # reposée à qui avait déjà répondu) et le pool de pose est reconstruit depuis les unités non
+    # posées, ce qui y ramène les escouades que 20.01 avait mises de côté (« instead of setting up
+    # these units on the battlefield »). Refuser ici est ce qui rend ces deux réécritures
+    # impossibles ; côté client le bouton disparaît au démarrage du déploiement, ce refus vaut
+    # pour celui qui l'ignorerait.
+    if deployment_handlers.reserves_declaration_step_has_started(deployment_state):
+        return False, {
+            "error": "change_roster_locked_after_reserves_declaration",
+            "current_deployer": target_deployer,
+        }
 
     army_file = require_key(action, "army_file")
     army_cfg = _load_army_file(army_file)
@@ -4715,8 +4729,8 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
     # review : `KeyError: unit_can_be_placed_in_strategic_reserves: unit 101 introuvable`, levé
     # depuis `_strategic_reserves_summary` — donc à CHAQUE sérialisation d'état — et, quand les
     # tailles de roster coïncident, pas de crash mais une question posée sur l'unité d'un autre
-    # joueur. Le changement de roster est nominal pendant l'étape de déclaration (`canChangeRoster`
-    # y reste vrai), ce n'est donc pas un cas de bord.
+    # joueur. Le changement de roster est nominal AVANT la première réponse 20.01 — c'est la seule
+    # fenêtre qui reste depuis le verrou posé plus haut — donc ce n'est pas un cas de bord.
     #
     # Reconstruite par LE constructeur du moteur, jamais recopiée ici : l'ordre alterné des
     # questions est une règle, pas une donnée de l'API.

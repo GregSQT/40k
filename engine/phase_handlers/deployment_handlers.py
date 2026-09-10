@@ -1891,6 +1891,21 @@ RESERVES_DECLARATION_QUEUE_KEY = "reserves_declaration_queue"
 #: déploiement.
 RESERVES_DECLARATION_CLOSED_KEY = "reserves_declaration_closed"
 
+#: Clé de `deployment_state` marquant qu'une RÉPONSE 20.01 a été donnée, par l'un ou l'autre camp.
+#:
+#: POURQUOI ELLE NE SE DÉDUIT PAS DE LA FILE. `change_roster` doit être refusé dès que l'étape
+#: Declare Battle Formations a commencé : 20.01 place la déclaration après que les listes sont
+#: arrêtées, et une armée remplacée en cours d'étape réécrit l'état de l'ADVERSAIRE — question
+#: reposée à qui avait déjà répondu, et unité mise de côté remise dans le pool de pose alors que
+#: la règle dit « instead of setting up these units on the battlefield ». Comparer la file à celle
+#: qu'un reset produirait ne le dit PAS : `next_reserves_declaration_entry` ampute la file des
+#: unités qui ne peuvent pas partir en réserves (FORTIFICATION, plafond de 50 % atteint) sans
+#: qu'aucune réponse ait été donnée, et une déclaration acceptée retire l'unité de la file ET du
+#: pool, donc laisse les deux comparables identiques. Le marqueur est explicite pour cette raison.
+#:
+#: Une réponse ne se reprend pas : le drapeau ne redevient jamais faux dans une partie.
+RESERVES_DECLARATION_STARTED_KEY = "reserves_declaration_started"
+
 
 def build_reserves_declaration_queue(
     deployable_units: Dict[Any, Any]
@@ -1977,6 +1992,32 @@ def next_reserves_declaration_entry(
             return player, squad_id
         queue.pop(0)
     return None
+
+
+def consume_reserves_declaration_entry(deployment_state: Dict[str, Any]) -> None:
+    """Retire la tête de file 20.01 PARCE QU'ON Y A RÉPONDU, et marque l'étape commencée.
+
+    ÉCRIVAIN UNIQUE des deux gestes, pour les deux sièges : le siège piloté par le modèle y arrive
+    par `apply_reserves_declaration_decision`, le siège humain par
+    `deployment_place_in_strategic_reserves`. Séparés, l'un des deux oublierait le marqueur et le
+    verrou de `change_roster` dépendrait de qui joue.
+
+    À NE PAS CONFONDRE avec le `pop` de `next_reserves_declaration_entry` : celui-là retire une
+    question qui ne sera JAMAIS posée (unité inéligible aux réserves), aucune réponse n'a été
+    donnée, et l'étape n'est donc pas commencée pour autant.
+    """
+    require_key(deployment_state, RESERVES_DECLARATION_QUEUE_KEY).pop(0)
+    deployment_state[RESERVES_DECLARATION_STARTED_KEY] = True
+
+
+def reserves_declaration_step_has_started(deployment_state: Dict[str, Any]) -> bool:
+    """Une réponse 20.01 a-t-elle déjà été donnée dans cette partie ?
+
+    Lecture unique du marqueur, en `require_key` : une partie en phase de déploiement dont
+    `deployment_state` n'aurait pas la clé vient d'un état qui n'est pas passé par le reset, et
+    répondre « non » y autoriserait le remplacement d'armée que ce prédicat existe pour refuser.
+    """
+    return bool(require_key(deployment_state, RESERVES_DECLARATION_STARTED_KEY))
 
 
 def reserves_declaration_decline_slot(
@@ -2138,7 +2179,7 @@ def apply_reserves_declaration_decision(
         player=int(require_key(game_state, "current_player")),
         unit_id=str(squad_id),
     )
-    queue.pop(0)
+    consume_reserves_declaration_entry(deployment_state)
     if declared:
         commit_strategic_reserves(game_state, str(squad_id))
     close_reserves_declaration_step_if_done(game_state)
@@ -2220,7 +2261,7 @@ def deployment_place_in_strategic_reserves(
             "expectedUnitId": expected_squad_id,
         }
 
-    require_key(deployment_state, RESERVES_DECLARATION_QUEUE_KEY).pop(0)
+    consume_reserves_declaration_entry(deployment_state)
     if declare:
         commit_strategic_reserves(game_state, squad_id)
     close_reserves_declaration_step_if_done(game_state)

@@ -2090,6 +2090,7 @@ export const BoardWithAPI: React.FC = () => {
                       phase: apiProps.gameState?.phase,
                       unitId: unit.id,
                       pending: reservesPendingDeclaration,
+                      deploymentStarted: testDeploymentStarted,
                     });
                     return (
                       <UnitRosterRow

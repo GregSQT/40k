@@ -549,9 +549,13 @@ class TestDeclareBattleFormations:
     def test_change_roster_rebuilds_the_question_queue(self, declaration_game):
         """`change_roster` remplace les unités ET compacte leurs ids : la file doit suivre.
 
-        Le changement de roster est NOMINAL pendant l'étape de déclaration (le bouton reste actif
-        tant que le joueur n'a rien posé). Une file laissée telle qu'au reset garde des ids qui
-        n'existent plus : `_strategic_reserves_summary` tourne à chaque sérialisation d'état et
+        Le changement de roster est NOMINAL tant qu'aucune réponse 20.01 n'a été donnée — la
+        première le refuse désormais
+        (`test_change_roster_is_refused_once_a_declaration_has_been_answered`), et c'est ce test-ci
+        qui prouve que ce refus n'est pas devenu inconditionnel.
+
+        Une file laissée telle qu'au reset garde des ids qui n'existent plus :
+        `_strategic_reserves_summary` tourne à chaque sérialisation d'état et
         levait `unit_can_be_placed_in_strategic_reserves: unit ... introuvable` — et, à tailles de
         roster égales, posait la question sur l'unité d'un autre joueur sans rien lever.
         """
@@ -577,6 +581,40 @@ class TestDeclareBattleFormations:
         )
         # VERT VACANT : une file VIDE passerait les deux contrôles ci-dessus.
         assert queue, "file 20.01 vide après changement de roster"
+
+    def test_change_roster_is_refused_once_a_declaration_has_been_answered(
+        self, declaration_game
+    ):
+        """20.01 se déclare sur des listes ARRÊTÉES : la première réponse gèle les deux rosters.
+
+        Le verrou est GLOBAL, pas par joueur. Sans lui, mesuré sur ce scénario : le joueur 2
+        déclare une escouade en réserves, le joueur 1 change d'armée, et l'escouade du joueur 2
+        revient dans `deployable_units` tout en gardant `in_strategic_reserves` — « instead of
+        setting up these units on the battlefield » (20.01) violé, et la question 20.01 reposée à
+        un joueur qui y avait déjà répondu.
+
+        VERT VACANT : un refus inconditionnel passerait ce test mais mettrait
+        `test_change_roster_rebuilds_the_question_queue` au rouge — c'est lui qui prouve que le
+        changement d'armée reste possible AVANT toute réponse.
+        """
+        pending = _pending_declaration(declaration_game)
+        assert pending, "aucune question 20.01 publiée : le test n'a rien à répondre"
+        answering_player = int(pending["player"])
+        declaration_game.act(
+            "deploy_strategic_reserves", unitId=str(pending["unitId"]), declare=False
+        )
+
+        for player in (1, 2):
+            accepted, body = declaration_game.try_act(
+                "change_roster", player=player, army_file="armageddon_space_marines.json"
+            )
+            assert not accepted, (
+                f"joueur {player} a pu changer d'armée après une réponse du joueur "
+                f"{answering_player}"
+            )
+            assert (
+                body["result"]["error"] == "change_roster_locked_after_reserves_declaration"
+            ), body["result"]
 
     def test_the_step_closes_and_deployment_resumes_with_player_one(self, declaration_game):
         """Une fois toutes les questions réglées, la mise en place reprend, joueur 1 d'abord."""
