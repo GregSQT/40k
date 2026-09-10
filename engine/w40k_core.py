@@ -2591,6 +2591,11 @@ class W40KEngine(gym.Env):
         charge_successes = 0
         charge_attempts_opponent = 0
         charge_successes_opponent = 0
+        # LOCAL (finding 3) : comme tous les autres compteurs de cette boucle, accumule en
+        # variable locale et affecte a episode_tactical_data UNE SEULE FOIS apres la boucle.
+        # L'ancienne version faisait += directement sur self.episode_tactical_data['charge_distance'],
+        # ce qui double-comptait si _build_terminal_info est appelee deux fois dans le meme episode.
+        charge_distance_local = _empty_charge_distance_data()
         # PARTICIPATION PAR PHASE — « quelle part des occasions l'agent a-t-il saisies ».
         #
         # Ces trois taux (deplacement, tir, fuite) ont ete emis par le callback jusqu'a ce
@@ -2666,9 +2671,7 @@ class W40KEngine(gym.Env):
                 # les SEPT sites qui emettent ces lignes. Une ligne qui ne les porte pas est
                 # un site oublie, pas un cas de jeu — le motif jumeau que ce chantier a
                 # justement trouve (le chemin gym journalisait a part).
-                _cd = require_key(
-                    self.episode_tactical_data, 'charge_distance'
-                )['agent' if _by_controlled else 'opponent']
+                _cd = charge_distance_local['agent' if _by_controlled else 'opponent']
                 _near = require_key(log, "charge_nearest_enemy_inches")
                 if _near is not None:
                     _cd['nearest_sum'] += float(_near)
@@ -2780,6 +2783,7 @@ class W40KEngine(gym.Env):
         self.episode_tactical_data['shoot_activations'] = len(shoot_activations)
         self.episode_tactical_data['shoot_waits'] = shoot_waits
         self.episode_tactical_data['fight_activations'] = len(fight_activations)
+        self.episode_tactical_data['charge_distance'] = charge_distance_local
 
         # Issues du cache de scoring du deploiement, lues sur le decodeur qui les compte.
         # COPIE (`deployment_cache_counts()` en rend une) : le compteur du decodeur est remis
@@ -3068,14 +3072,29 @@ class W40KEngine(gym.Env):
             reward = self.reward_calculator.calculate_reward(
                 True, {"action": "turn_limit_reached", "reason": "turn_limit_reached"}, self.game_state
             )
-            reward += self._drain_pending_reserves()
-            # BILAN COMPLET, comme le retour normal : cette porte ne posait que `winner` et
-            # `win_method`, et l'entrainement EXIGE aussi `episode`, `tactical_data` et
-            # `deployment_mode` (cf. `_build_terminal_info`, qui porte aussi la garde
-            # `win_method is None` et le journal de fin d'episode retires d'ici). Place APRES
-            # `calculate_reward` pour suivre l'ordre du retour normal ; ni le calcul de
-            # recompense ni le drain de reserves ne touchent ce que le bilan lit (`units_cache`,
-            # `victory_points`, `action_logs`), l'ordre est donc sans effet sur ses valeurs.
+            _reserves = self._drain_pending_reserves()
+            reward += _reserves
+            # COMPTABILITE IDENTIQUE AU CHEMIN NORMAL (lignes ~3405-3460) : accumulateurs,
+            # ventilation de la recompense et penalite de reserves AVANT que _build_terminal_info
+            # ne les lise. Le commentaire precedent affirmait que "l'ordre est sans effet sur ses
+            # valeurs" — faux : _build_terminal_info lit episode_reward_accumulator pour remplir
+            # info["episode"]["r"], et les accumulateurs ne sont mis a jour qu'en 3405-3406 sur
+            # le chemin normal, donc APRES ce return. Sans cette correction, info["episode"]
+            # vaut {'r': 0.0, 'l': 0} (finding 1), et last_reward_breakdown reste dans
+            # game_state apres reset() (finding 2).
+            self.episode_reward_accumulator += reward
+            self.episode_length_accumulator += 1
+            if "last_reward_breakdown" in self.game_state:
+                step_breakdown = self.game_state["last_reward_breakdown"]
+                del self.game_state["last_reward_breakdown"]
+                totals = self.episode_tactical_data['reward_breakdown']
+                for key in REWARD_BREAKDOWN_COMPONENTS:
+                    value = float(require_key(step_breakdown, key))
+                    totals[key] += value
+                    if key in DENSE_REWARD_BREAKDOWN_COMPONENTS:
+                        totals[f'{key}_positive'] += max(0.0, value)
+            if _reserves != 0.0:
+                self.episode_tactical_data['reward_breakdown']['penalties'] += _reserves
             info = {"turn_limit_exceeded": True, **self._build_terminal_info()}
             return observation, reward, True, False, info, out_mask
 
