@@ -19,7 +19,12 @@ CE QUE CE FICHIER VERROUILLE :
   - `agent_decision` n'incrémente PAS le compteur de steps du StepLogger : le step gym consommé
     par `CHOICE_i` est déjà compté par la ligne d'effet quand le type en produit une ;
   - la ligne ne porte AUCUNE position par socle : un relevé de choix n'observe rien, et c'est le
-    TYPE qui le déclare (`W40KEngine._TYPES_SANS_SEGMENT_MODELS`), au point de traduction unique.
+    TYPE qui le déclare (`W40KEngine._TYPES_SANS_SEGMENT_MODELS`), au point de traduction unique ;
+  - l'entrée d'`action_logs` ne peut être produite QUE par son constructeur dédié
+    (`action_log_utils.append_agent_decision_log`) : le goulot `append_action_log` refuse le type,
+    et les deux fonctions d'écriture sont gardées par NOM — import sous alias compris. La sonde
+    statique par dictionnaire est conservée à côté, parce qu'elle seule voit une branche jamais
+    exécutée, que la garde d'exécution ne peut pas atteindre.
 """
 from __future__ import annotations
 
@@ -354,12 +359,33 @@ _SYMBOLES_GARDES: Tuple[str, str] = (
 )
 
 
+#: Les deux fonctions MODULE-LEVEL d'écriture, et le seul endroit d'où chacune peut être nommée.
+#: `append_agent_decision_log` est le constructeur dédié — `append_action_log` refuse le type, donc
+#: c'est le SEUL chemin restant vers une entrée `agent_decision` ; `_append_entry` est l'écriture
+#: nue qui contourne cette garde, partagée par les deux façades. Un nom se garde, alors qu'une
+#: forme de dictionnaire ne se garde pas : c'est tout l'objet du déplacement.
+#:
+#: L'entrée `<module>` est la ligne d'`import` : elle est relevée exprès, de sorte qu'un fichier
+#: qui importerait le symbole — fût-ce sous un alias, que l'appel rendrait invisible à un relevé
+#: par nom — rougisse sur son import.
+_SITES_D_ECRITURE: Dict[str, Set[Tuple[str, str]]] = {
+    "append_agent_decision_log": {
+        ("engine/w40k_core.py", "<module>"),
+        ("engine/w40k_core.py", "_record_agent_decision_action_log"),
+    },
+    "_append_entry": {
+        ("engine/action_log_utils.py", "append_action_log"),
+        ("engine/action_log_utils.py", "append_agent_decision_log"),
+    },
+}
+
+
 class _SondeParFonction(ast.NodeVisitor):
     """Relève EN UN PASSAGE qui NOMME les symboles gardés et qui ÉCRIT l'entrée de journal.
 
-    Trois questions, un seul parcours : trois sondes séparées redescendaient les mêmes 664 875
-    nœuds pour trois prédicats indépendants — 1,04 s au total, mesuré, contre 0,34 s en un
-    passage, à résultat strictement identique.
+    Quatre prédicats, un seul parcours : des sondes séparées redescendraient les mêmes 664 875
+    nœuds pour des prédicats indépendants — trois d'entre elles coûtaient déjà 1,04 s, mesuré,
+    contre 0,34 s en un passage, à résultat strictement identique.
 
     `ast.walk` ne convient pas : il perd le contexte englobant, et c'est précisément le contexte
     qui est contrôlé ici — savoir QUI nomme et QUI écrit, pas combien de fois.
@@ -391,6 +417,29 @@ class _SondeParFonction(ast.NodeVisitor):
             self._releve(node.attr)
         self.generic_visit(node)
 
+    def visit_Name(self, node: ast.Name) -> None:
+        """Les fonctions d'écriture sont MODULE-LEVEL : elles se nomment par `Name`, pas `Attribute`.
+
+        Sans ce visiteur, déplacer la construction de l'entrée dans `action_log_utils` n'aurait
+        rien fermé : `append_agent_decision_log(gs, ...)` appelé depuis n'importe quelle branche
+        rendait 0 relevé, mesuré sur la sonde d'avant.
+        """
+        if node.id in _SITES_D_ECRITURE:
+            self._releve(node.id)
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        """L'IMPORT du symbole, alias compris — un alias rend l'appel invisible, pas l'import.
+
+        `from engine.action_log_utils import append_agent_decision_log as f` puis `f(gs, ...)` :
+        aucun `Name` ne porte le nom gardé, mais l'import, lui, le nomme toujours. C'est le seul
+        contrôle qui tienne quel que soit le nom local.
+        """
+        for alias in node.names:
+            if alias.name in _SITES_D_ECRITURE:
+                self._releve(alias.name)
+        self.generic_visit(node)
+
     def visit_Dict(self, node: ast.Dict) -> None:
         """Le LITTÉRAL, et non l'appel à `append_action_log` : le dict porte le type.
 
@@ -418,7 +467,7 @@ def _releves_production() -> Dict[str, Set[Tuple[str, str]]]:
     """`{clé -> {(chemin relatif, fonction englobante)}}` pour les deux symboles et le type."""
     if not _RELEVES:
         releves: Dict[str, Set[Tuple[str, str]]] = {
-            cle: set() for cle in (*_SYMBOLES_GARDES, _TYPE_JOURNAL)
+            cle: set() for cle in (*_SYMBOLES_GARDES, *_SITES_D_ECRITURE, _TYPE_JOURNAL)
         }
         fichiers = 0
         for racine in _RACINES_PRODUCTION:
@@ -432,8 +481,10 @@ def _releves_production() -> Dict[str, Set[Tuple[str, str]]]:
 
 
 def _referents(symbole: str) -> Set[Tuple[str, str]]:
-    """Toutes les fonctions qui NOMMENT le symbole, appel ou simple référence."""
-    assert symbole in _SYMBOLES_GARDES, f"{symbole!r} n'est pas relevé par la sonde"
+    """Toutes les fonctions qui NOMMENT le symbole, appel, import ou simple référence."""
+    assert symbole in _SYMBOLES_GARDES or symbole in _SITES_D_ECRITURE, (
+        f"{symbole!r} n'est pas relevé par la sonde"
+    )
     return _releves_production()[symbole]
 
 
@@ -482,7 +533,7 @@ def test_l_encadrement_du_releve_n_a_qu_un_appelant(symbole: str):
 
 
 def test_aucune_entree_agent_decision_n_est_ecrite_hors_du_site_unique():
-    """Un seul producteur construit l'entrée `agent_decision` — sous sa forme LITTÉRALE.
+    """Un seul producteur construit l'entrée `agent_decision`, et c'est le constructeur dédié.
 
     Le verrou d'appelant ci-dessus ne barre pas ce chemin : une branche qui poste elle-même
     `{"type": "agent_decision", ...}` n'appelle ni l'application ni le relevé, et passe les deux
@@ -493,16 +544,107 @@ def test_aucune_entree_agent_decision_n_est_ecrite_hors_du_site_unique():
     formateur ; si elle les porte, l'analyzer compte un choix que l'agent n'a jamais joué, et le
     taux de déclaration 20.01 devient faux sans qu'aucune ligne ne paraisse anormale.
 
-    ⚠️ CE QUE CE TEST NE VOIT PAS, dit ici plutôt que sous-entendu : le type doit être un
-    LITTÉRAL au point de construction du dict (cf. `_SondeParFonction.visit_Dict`). Une entrée
-    dont le type est posé par affectation, par `dict(type=...)` ou par une valeur calculée passe.
-    Fermer ces formes-là ne se fait pas en énumérant des motifs : le seul goulot réel est
-    `append_action_log` (`engine/action_log_utils.py`), unique chemin vers `action_logs` en
-    production — vérifié, aucun `action_logs.append` direct hors des tests.
+    ⚠️ CE QUE CETTE SONDE-CI NE VOIT PAS, et qui n'est plus laissé ouvert pour autant : le type
+    doit être un LITTÉRAL au point de construction (cf. `_SondeParFonction.visit_Dict`), donc une
+    entrée dont le type est posé par affectation, par `dict(type=...)` ou par une valeur calculée
+    lui échappe. Ces formes-là ne se ferment pas en énumérant des motifs — elles se ferment au
+    GOULOT : `append_action_log` refuse désormais le type (`_TYPES_A_CONSTRUCTEUR_DEDIE`), et
+    `_append_entry`, seul chemin qui contourne ce refus, est gardé par nom. La sonde par
+    dictionnaire est conservée parce qu'elle voit ce qu'une garde d'exécution ne voit pas : une
+    branche jamais atteinte, celle des mutations `if False:`.
     """
-    attendu = {("engine/w40k_core.py", "_record_agent_decision_action_log")}
+    attendu = {("engine/action_log_utils.py", "append_agent_decision_log")}
     assert _producteurs_d_entree_journal() == attendu, (
         "une entree d'action_log de type 'agent_decision' est construite hors de "
-        "`_record_agent_decision_action_log` : le site unique ne garantit plus ni le libelle "
-        "partage avec le Game Log, ni le segment [MODELS:] vide."
+        "`append_agent_decision_log` : le site unique ne garantit plus ni le libelle partage avec "
+        "le Game Log, ni le segment [MODELS:] vide."
+    )
+
+
+@pytest.mark.parametrize("symbole", sorted(_SITES_D_ECRITURE))
+def test_les_fonctions_d_ecriture_ne_sont_nommees_qu_a_leur_site(symbole: str):
+    """Le constructeur dédié et l'écriture nue ne se nomment QUE là où c'est prévu.
+
+    C'est ce qui rend le déplacement de la construction utile plutôt que cosmétique. Sans ce
+    test, `append_agent_decision_log` serait appelable depuis n'importe quelle branche : elle
+    produirait une entrée BIEN formée — donc invisible à tous les contrôles de champs — que
+    l'analyzer compterait comme un choix joué. Mesuré sur la sonde d'avant : un appel par `Name`
+    et un import sous alias rendaient tous deux 0 relevé, comme la pose du type par affectation.
+
+    `_append_entry` est gardée pour la même raison en sens inverse : c'est le chemin qui
+    CONTOURNE la garde d'`append_action_log`, et une façade de plus l'ouvrirait à tout le monde.
+    """
+    assert _referents(symbole) == _SITES_D_ECRITURE[symbole], (
+        f"'{symbole}' est nomme hors de son site : l'entree 'agent_decision' redeviendrait "
+        f"productible ailleurs, et le taux de decisions mesure par l'analyzer compterait un "
+        f"choix que l'agent n'a jamais joue. Un import, meme sous alias, compte comme un usage."
+    )
+
+
+def test_le_goulot_refuse_une_entree_de_decision_construite_a_la_main(tmp_path):
+    """La garde d'exécution voit ce que la sonde par dictionnaire ne voit pas : le type calculé.
+
+    Le dictionnaire est monté ici comme le monterait un contournement — clé posée par
+    AFFECTATION, forme précisément invisible à `visit_Dict`. Sans la garde, cet appel écrit une
+    seconde entrée sans que rien ne le signale.
+    """
+    from engine.action_log_utils import append_action_log
+
+    eng = _engine(tmp_path)
+    avant = len(eng.game_state["action_logs"])
+    entree: Dict[str, Any] = {"message": "Unit 1 DECISION [x] CHOICE_0 [y]"}
+    entree["type"] = _TYPE_JOURNAL
+    with pytest.raises(ValueError, match="constructeur dedie"):
+        append_action_log(eng.game_state, entree)
+    assert len(eng.game_state["action_logs"]) == avant, (
+        "l'entree refusee a quand meme ete ecrite : la garde doit lever AVANT l'append"
+    )
+
+    # Contre-épreuve : le goulot accepte tout autre type, sinon le refus ci-dessus serait celui
+    # d'un goulot cassé et non celui d'un type réservé.
+    temoin: Dict[str, Any] = {"type": "wait", "message": "Unit 1 WAIT"}
+    append_action_log(eng.game_state, temoin)
+    assert eng.game_state["action_logs"][-1] is temoin
+    assert temoin["logSeq"] > 0, "l'entree acceptee doit recevoir son logSeq"
+
+
+def test_le_constructeur_dedie_pose_exactement_les_clefs_attendues(tmp_path):
+    """Les clés de l'entrée, verrouillées une par une — `reward` et `logSeq` compris.
+
+    Ces deux-là sont lues avec un DÉFAUT (`w40k_core._build_step_log_details` : `raw_log.get(
+    "reward", 0.0)`) : les perdre ne casse rien de visible, ni ligne manquante ni exception, et
+    aucun autre test du dépôt ne les nomme. Le déplacement de la construction hors de
+    `w40k_core` est exactement le geste qui pouvait les laisser tomber en silence.
+    """
+    from engine.action_log_utils import append_agent_decision_log
+
+    eng = _engine(tmp_path)
+    eng.get_action_mask()
+    unit_id = require_pending_unit(eng)
+    eng.game_state["action_logs"].clear()
+
+    append_agent_decision_log(
+        eng.game_state,
+        decision_type="reserves_declaration",
+        player=1,
+        unit_id=unit_id,
+        option_index=1,
+        option_label="Garder pour la mise en place",
+        declines=True,
+    )
+    entree = eng.game_state["action_logs"][-1]
+    assert set(entree) == {
+        "type", "message", "unitId", "player", "turn", "phase", "decision_type",
+        "decision_option_index", "decision_option_label", "decision_option_declines",
+        "reward", "logSeq",
+    }, f"clefs de l'entree 'agent_decision' modifiees : {sorted(entree)}"
+    assert entree["type"] == _TYPE_JOURNAL
+    assert entree["reward"] == 0.0
+    assert entree["decision_option_declines"] is True
+    assert entree["turn"] == eng.game_state["turn"]
+    assert entree["phase"] == str(eng.game_state["phase"])
+    assert entree["message"].endswith("DECISION [reserves_declaration] CHOICE_1 "
+                                      "[Garder pour la mise en place] [DECLINED]")
+    assert "models_segment" not in entree, (
+        "le segment de socles est une propriete du TYPE : le poser ici en ferait un jumeau"
     )
