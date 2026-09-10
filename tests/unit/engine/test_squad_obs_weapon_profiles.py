@@ -689,3 +689,58 @@ def test_combi_markers_cost_no_observation_scalar():
     assert max(COMBI_GROUP_MARKER_OBS_IDS.values()) <= OBS_ID_MAX, (
         "un marqueur au-delà du vocabulaire ferait, LUI, grossir les tables d'embedding"
     )
+
+
+def test_a_combi_group_split_by_truncation_leaves_no_orphan_marker():
+    """Un marqueur dont le PARTENAIRE est tronqué n'est pas émis.
+
+    L'ordre de `collect_weapon_profiles` est celui des porteurs décroissants : il ne garde pas
+    ensemble les deux profils d'une même arme physique, donc la troncature peut couper un groupe
+    en deux. Le slot survivant affirmait alors « je suis exclusif » avec un partenaire absent de
+    l'observation — un groupe à profil unique déguisé, que
+    `test_a_combi_group_with_a_single_profile_is_not_marked` interdit par ailleurs.
+
+    Contre-épreuve intégrée : la MÊME escouade, MÊME troncature, mais le second profil du groupe
+    porté par assez de figurines pour rester dans les slots — les deux sont marqués. Sans elle,
+    une escouade muette pour une autre raison rendrait le cas tronqué vert pour rien.
+    """
+    k = ObservationBuilder.K_WEAPONS_RANGED
+    std = _combi("plasma", display_name="Plasma (Standard)", STR=7)
+    sup = _combi("plasma", display_name="Plasma (Supercharge)", STR=8)
+
+    def _marks_with(sup_carriers: int) -> Dict[int, str]:
+        # Porteurs DÉCROISSANTS et strictement séparés : le tri ne dépend que d'eux, jamais de
+        # l'ordre d'identité. `std` (3 porteurs) prend le slot 0 ; les k profils fillers en ont
+        # 2 chacun ; `sup` en a `sup_carriers`, ce qui décide seul de sa place.
+        per_model: Dict[int, List[Dict[str, Any]]] = {}
+        for _ in range(3):
+            per_model[len(per_model)] = [std]
+        for i in range(k):
+            for _ in range(2):
+                per_model[len(per_model)] = [_weapon(display_name=f"F{i}", STR=3, AP=-i)]
+        for _ in range(sup_carriers):
+            per_model[len(per_model)] = [sup]
+        eng = _make_engine([
+            _unit_cfg(1, 1, [(20 + i, 20) for i in range(len(per_model))],
+                      rng_weapons=[std], per_model_rng=per_model),
+            _unit_cfg(2, 2, [(60, 20)]),
+        ])
+        captured: List[str] = []
+        with patch("engine.game_utils.add_debug_file_log",
+                   side_effect=lambda gs, msg: captured.append(msg)):
+            marks = _markers(eng)
+        assert [m for m in captured if "profils RNG_WEAPONS" in m], (
+            "fixture SANS troncature : le cas testé ne serait pas mis en scène"
+        )
+        return marks
+
+    paired = _marks_with(3)
+    assert sorted(paired) == [0, 1] and paired[0] == paired[1], (
+        f"contre-épreuve : les deux profils du groupe sont observés, ils doivent partager un "
+        f"marqueur — obtenu {paired}"
+    )
+    orphan = _marks_with(1)
+    assert orphan == {}, (
+        f"marqueur orphelin émis : {orphan} — son partenaire est tronqué, donc rien dans "
+        "l'observation ne dit avec QUI ce slot est exclusif"
+    )
