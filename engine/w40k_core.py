@@ -2404,6 +2404,30 @@ class W40KEngine(gym.Env):
             self._forced_wait_depth -= 1
         return observation, reward, terminated, truncated, info, out_mask
 
+    def _drain_step_reward_breakdown(self) -> None:
+        """Verse la ventilation du step courant dans le cumul d'episode, et la retire de l'etat.
+
+        DEUX APPELANTS, et le contrat est qu'ils comptent IDENTIQUEMENT : la porte « limite de
+        tours atteinte » de `step_with_mask` et son retour normal. Les neuf lignes vivaient en
+        double, recopiees a l'identique, alors que la porte porte en commentaire « comptabilite
+        identique au chemin normal » — une exigence d'identite tenue par une recopie ne survit pas
+        au premier ajout de composante. Un seul site desormais.
+
+        `*_positive` : le flux POSITIF des composantes denses, qui ne se lit qu'AU PAS (une action,
+        un signe) — une fois l'episode somme, les +0,3 de chaque tir et les -0,1 de chaque attente
+        ne sont plus separables, et c'est ce flux-la que la part d'objectif prend au denominateur.
+        """
+        if "last_reward_breakdown" not in self.game_state:
+            return
+        step_breakdown = self.game_state["last_reward_breakdown"]
+        del self.game_state["last_reward_breakdown"]
+        totals = self.episode_tactical_data['reward_breakdown']
+        for key in REWARD_BREAKDOWN_COMPONENTS:
+            value = float(require_key(step_breakdown, key))
+            totals[key] += value
+            if key in DENSE_REWARD_BREAKDOWN_COMPONENTS:
+                totals[f'{key}_positive'] += max(0.0, value)
+
     def _build_terminal_info(self) -> Dict[str, Any]:
         """Bilan de FIN D'EPISODE, construit ICI pour TOUTES les portes de terminaison.
 
@@ -3089,25 +3113,18 @@ class W40KEngine(gym.Env):
             )
             _reserves = self._drain_pending_reserves()
             reward += _reserves
-            # COMPTABILITE IDENTIQUE AU CHEMIN NORMAL (lignes ~3405-3460) : accumulateurs,
-            # ventilation de la recompense et penalite de reserves AVANT que _build_terminal_info
-            # ne les lise. Le commentaire precedent affirmait que "l'ordre est sans effet sur ses
-            # valeurs" — faux : _build_terminal_info lit episode_reward_accumulator pour remplir
-            # info["episode"]["r"], et les accumulateurs ne sont mis a jour qu'en 3405-3406 sur
-            # le chemin normal, donc APRES ce return. Sans cette correction, info["episode"]
-            # vaut {'r': 0.0, 'l': 0} (finding 1), et last_reward_breakdown reste dans
-            # game_state apres reset() (finding 2).
+            # COMPTABILITE IDENTIQUE AU RETOUR NORMAL (cf. `_drain_step_reward_breakdown`, dont
+            # cette porte est le second appelant) : accumulateurs, ventilation de la recompense et
+            # penalite de reserves AVANT que _build_terminal_info ne les lise. Le commentaire
+            # precedent affirmait que "l'ordre est sans effet sur ses valeurs" — faux :
+            # _build_terminal_info lit episode_reward_accumulator pour remplir
+            # info["episode"]["r"], et le retour normal ne met les accumulateurs a jour qu'APRES
+            # ce return. Sans cette correction, info["episode"] vaut {'r': 0.0, 'l': 0}
+            # (finding 1), et last_reward_breakdown reste dans game_state apres reset()
+            # (finding 2).
             self.episode_reward_accumulator += reward
             self.episode_length_accumulator += 1
-            if "last_reward_breakdown" in self.game_state:
-                step_breakdown = self.game_state["last_reward_breakdown"]
-                del self.game_state["last_reward_breakdown"]
-                totals = self.episode_tactical_data['reward_breakdown']
-                for key in REWARD_BREAKDOWN_COMPONENTS:
-                    value = float(require_key(step_breakdown, key))
-                    totals[key] += value
-                    if key in DENSE_REWARD_BREAKDOWN_COMPONENTS:
-                        totals[f'{key}_positive'] += max(0.0, value)
+            self._drain_step_reward_breakdown()
             if _reserves != 0.0:
                 self.episode_tactical_data['reward_breakdown']['penalties'] += _reserves
             info = {"turn_limit_exceeded": True, **self._build_terminal_info()}
@@ -3472,20 +3489,7 @@ class W40KEngine(gym.Env):
         # celle du bot — la ventilation de l'action de l'agent etait donc jetee, et rien du tout
         # n'etait accumule quand le bot ne jouait pas. Cumulee ici, elle traverse : elle voyage
         # dans `episode_tactical_data`, que le bloc de terminaison ci-dessous copie dans info.
-        #
-        # `*_positive` : le flux POSITIF des composantes denses. Le signe ne se lit qu'AU PAS
-        # (une action, un signe) — une fois l'episode somme, les +0,3 de chaque tir et les -0,1
-        # de chaque attente ne sont plus separables, et c'est ce flux-la que la part d'objectif
-        # (reward/objective_share) doit prendre au denominateur.
-        if "last_reward_breakdown" in self.game_state:
-            step_breakdown = self.game_state["last_reward_breakdown"]
-            del self.game_state["last_reward_breakdown"]
-            totals = self.episode_tactical_data['reward_breakdown']
-            for key in REWARD_BREAKDOWN_COMPONENTS:
-                value = float(require_key(step_breakdown, key))
-                totals[key] += value
-                if key in DENSE_REWARD_BREAKDOWN_COMPONENTS:
-                    totals[f'{key}_positive'] += max(0.0, value)
+        self._drain_step_reward_breakdown()
 
         if reserves_penalty_paid != 0.0:
             # Categorie `penalties`, comme tout ce qui coute sans etre le resultat d'une action
