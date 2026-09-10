@@ -36,6 +36,9 @@ SCENARIO = (
     / "reserves_20_fixture1.json"
 )
 
+#: Type porté par l'entrée d'`action_logs` du relevé, et par elle seule.
+_TYPE_JOURNAL = "agent_decision"
+
 #: `[hh:mm:ss] E<ep> T<turn> P<player> <PHASE> : Unit <id> DECISION [<type>] CHOICE_<i> [<label>]`
 _LINE_RE = re.compile(
     r"^\[\d\d:\d\d:\d\d\] E(\d+) T(\d+) P(\d+) ([A-Z_]+) : "
@@ -190,10 +193,10 @@ def test_agent_decision_does_not_double_count_a_gym_step(tmp_path):
     from engine.macro_intents import CHOICE_SLOTS
     from engine.w40k_core import W40KEngine
 
-    assert "agent_decision" in W40KEngine._STEP_LOG_TYPE_MAP, (
+    assert _TYPE_JOURNAL in W40KEngine._STEP_LOG_TYPE_MAP, (
         "sans cette entrée, la ligne n'atteint jamais step.log (liste blanche)"
     )
-    assert "agent_decision" in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES
+    assert _TYPE_JOURNAL in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES
 
     eng = _engine(tmp_path)
     logger = eng.step_logger
@@ -225,7 +228,7 @@ def test_game_log_message_and_step_log_line_say_the_same_thing(tmp_path):
 
     entries = [
         entry for entry in eng.game_state["action_logs"]
-        if entry.get("type") == "agent_decision"
+        if entry.get("type") == _TYPE_JOURNAL
     ]
     assert len(entries) == 1, f"attendu UNE entree action_log, trouve {len(entries)}"
     message = entries[0]["message"]
@@ -247,20 +250,27 @@ def test_game_log_message_and_step_log_line_say_the_same_thing(tmp_path):
 _RACINES_PRODUCTION: Tuple[str, ...] = ("engine", "ai", "services")
 
 
-#: Type porté par l'entrée d'`action_logs` du relevé, et par elle seule.
-_TYPE_JOURNAL = "agent_decision"
+#: Les DEUX symboles de l'encadrement, gardés ensemble : l'application n'a de valeur mesurable
+#: que suivie de son relevé, et le relevé n'a de sens que collé à l'application.
+_SYMBOLES_GARDES: Tuple[str, str] = (
+    "_dispatch_agent_decision_action", "_record_agent_decision_action_log"
+)
 
 
-class _ContexteParFonction(ast.NodeVisitor):
-    """Base des sondes : tient à jour la fonction englobant le nœud visité.
+class _SondeParFonction(ast.NodeVisitor):
+    """Relève EN UN PASSAGE qui NOMME les symboles gardés et qui ÉCRIT l'entrée de journal.
+
+    Trois questions, un seul parcours : trois sondes séparées redescendaient les mêmes 664 875
+    nœuds pour trois prédicats indépendants — 1,04 s au total, mesuré, contre 0,34 s en un
+    passage, à résultat strictement identique.
 
     `ast.walk` ne convient pas : il perd le contexte englobant, et c'est précisément le contexte
-    qui est contrôlé ici — savoir QUI appelle ou QUI écrit, pas combien de fois.
+    qui est contrôlé ici — savoir QUI nomme et QUI écrit, pas combien de fois.
     """
 
-    def __init__(self, chemin: str, trouves: Set[Tuple[str, str]]) -> None:
+    def __init__(self, chemin: str, releves: Dict[str, Set[Tuple[str, str]]]) -> None:
         self._chemin = chemin
-        self._trouves = trouves
+        self._releves = releves
         self._pile: List[str] = []
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -270,85 +280,72 @@ class _ContexteParFonction(ast.NodeVisitor):
 
     visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
 
-    def _releve(self) -> None:
-        self._trouves.add((self._chemin, self._pile[-1] if self._pile else "<module>"))
-
-
-class _ReferencesParFonction(_ContexteParFonction):
-    """Relève chaque référence `<...>.<symbole>`, APPELÉE OU NON, avec sa fonction englobante.
-
-    Le contrôle porte sur l'attribut et non sur `Call.func` : `applique =
-    self._dispatch_agent_decision_action` puis `applique(action)` applique une décision sans son
-    relevé et n'apparaît dans AUCUN `ast.Call` visant le symbole — mutation appliquée, la sonde
-    par appel restait verte. Une référence liée ici puis appelée ailleurs est exactement le
-    contournement que ce fichier barre.
-    """
-
-    def __init__(self, symbole: str, chemin: str, trouves: Set[Tuple[str, str]]) -> None:
-        super().__init__(chemin, trouves)
-        self._symbole = symbole
+    def _releve(self, cle: str) -> None:
+        self._releves[cle].add((self._chemin, self._pile[-1] if self._pile else "<module>"))
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
-        if node.attr == self._symbole:
-            self._releve()
+        """L'ATTRIBUT, et non `Call.func` : une référence liée est un appel différé.
+
+        `applique = self._dispatch_agent_decision_action` puis `applique(action)` applique une
+        décision sans son relevé et n'apparaît dans AUCUN `ast.Call` visant le symbole — mutation
+        appliquée, la sonde par appel restait VERTE.
+        """
+        if node.attr in _SYMBOLES_GARDES:
+            self._releve(node.attr)
         self.generic_visit(node)
-
-
-class _EntreesJournalParFonction(_ContexteParFonction):
-    """Relève chaque littéral `{..., "type": "agent_decision", ...}` avec sa fonction englobante.
-
-    Le littéral, et non l'appel à `append_action_log` : c'est le dictionnaire qui porte le type,
-    et il peut être construit à distance de l'appel qui le poste.
-    """
 
     def visit_Dict(self, node: ast.Dict) -> None:
-        for cle, valeur in zip(node.keys, node.values):
-            if (
-                isinstance(cle, ast.Constant) and cle.value == "type"
-                and isinstance(valeur, ast.Constant) and valeur.value == _TYPE_JOURNAL
-            ):
-                self._releve()
+        """Le LITTÉRAL, et non l'appel à `append_action_log` : le dict porte le type.
+
+        Un dict littéral relié à une variable avant d'être posté est relevé quand même — c'est la
+        forme qu'emploient déjà quatre appelants de production. Ce qui ÉCHAPPE à ce contrôle, et
+        qui n'est donc pas couvert : un type qui n'est pas un littéral au point de construction
+        (`entree["type"] = ...` par affectation, `dict(type=...)`, valeur calculée).
+        """
+        if any(
+            isinstance(cle, ast.Constant) and cle.value == "type"
+            and isinstance(valeur, ast.Constant) and valeur.value == _TYPE_JOURNAL
+            for cle, valeur in zip(node.keys, node.values)
+        ):
+            self._releve(_TYPE_JOURNAL)
         self.generic_visit(node)
 
 
-#: Arbres de production, parsés UNE fois : deux symboles sont contrôlés, et reparser `engine/`
-#: entier pour chacun coûtait 1,05 s par paramétrage, mesuré.
-_ARBRES: List[Tuple[str, ast.Module]] = []
+#: Relevés de production, calculés UNE fois. Les ARBRES, eux, ne sont pas retenus : les garder
+#: coûtait 171,8 MiB et 984 000 objets suivis par le GC pour la vie du worker pytest — un
+#: `gc.collect(2)` y passait de 0,48 ms à 254,9 ms, mesuré. Un passage unique n'en a plus besoin.
+_RELEVES: Dict[str, Set[Tuple[str, str]]] = {}
 
 
-def _arbres_production() -> List[Tuple[str, ast.Module]]:
-    if not _ARBRES:
+def _releves_production() -> Dict[str, Set[Tuple[str, str]]]:
+    """`{clé -> {(chemin relatif, fonction englobante)}}` pour les deux symboles et le type."""
+    if not _RELEVES:
+        releves: Dict[str, Set[Tuple[str, str]]] = {
+            cle: set() for cle in (*_SYMBOLES_GARDES, _TYPE_JOURNAL)
+        }
+        fichiers = 0
         for racine in _RACINES_PRODUCTION:
             for chemin in sorted((PROJECT_ROOT / racine).rglob("*.py")):
-                _ARBRES.append(
-                    (
-                        str(chemin.relative_to(PROJECT_ROOT)),
-                        ast.parse(chemin.read_text(encoding="utf-8"), filename=str(chemin)),
-                    )
-                )
-        assert _ARBRES, f"aucun fichier de production sous {_RACINES_PRODUCTION} — sonde muette"
-    return _ARBRES
+                arbre = ast.parse(chemin.read_text(encoding="utf-8"), filename=str(chemin))
+                _SondeParFonction(str(chemin.relative_to(PROJECT_ROOT)), releves).visit(arbre)
+                fichiers += 1
+        assert fichiers, f"aucun fichier de production sous {_RACINES_PRODUCTION} — sonde muette"
+        _RELEVES.update(releves)
+    return _RELEVES
 
 
 def _referents(symbole: str) -> Set[Tuple[str, str]]:
-    """`{(chemin relatif, fonction englobante)}` de toutes les références au symbole."""
-    trouves: Set[Tuple[str, str]] = set()
-    for relatif, arbre in _arbres_production():
-        _ReferencesParFonction(symbole, relatif, trouves).visit(arbre)
-    return trouves
+    """Toutes les fonctions qui NOMMENT le symbole, appel ou simple référence."""
+    assert symbole in _SYMBOLES_GARDES, f"{symbole!r} n'est pas relevé par la sonde"
+    return _releves_production()[symbole]
 
 
 def _producteurs_d_entree_journal() -> Set[Tuple[str, str]]:
-    """`{(chemin relatif, fonction englobante)}` de tout littéral d'entrée `agent_decision`."""
-    trouves: Set[Tuple[str, str]] = set()
-    for relatif, arbre in _arbres_production():
-        _EntreesJournalParFonction(relatif, trouves).visit(arbre)
-    return trouves
+    """Toutes les fonctions qui construisent un littéral d'entrée `agent_decision`."""
+    return _releves_production()[_TYPE_JOURNAL]
 
 
-@pytest.mark.parametrize(
-    "symbole", ["_dispatch_agent_decision_action", "_record_agent_decision_action_log"]
-)
+@pytest.mark.parametrize("symbole", _SYMBOLES_GARDES)
 def test_l_encadrement_du_releve_n_a_qu_un_appelant(symbole: str):
     """L'application d'une décision et son relevé ne s'appellent que depuis LE MÊME encadrement.
 
@@ -388,7 +385,7 @@ def test_l_encadrement_du_releve_n_a_qu_un_appelant(symbole: str):
 
 
 def test_aucune_entree_agent_decision_n_est_ecrite_hors_du_site_unique():
-    """Le relevé a un PRODUCTEUR unique : aucune branche n'écrit son entrée `agent_decision`.
+    """Un seul producteur construit l'entrée `agent_decision` — sous sa forme LITTÉRALE.
 
     Le verrou d'appelant ci-dessus ne barre pas ce chemin : une branche qui poste elle-même
     `{"type": "agent_decision", ...}` n'appelle ni l'application ni le relevé, et passe les deux
@@ -397,6 +394,13 @@ def test_aucune_entree_agent_decision_n_est_ecrite_hors_du_site_unique():
     `_build_step_log_details` n'aille pas chercher les positions LIVE par socle ; construite à la
     main, la clé manque, et une décision 20.01 — jouée AVANT toute mise en place — sort avec ses
     socles à (-1,-1).
+
+    ⚠️ CE QUE CE TEST NE VOIT PAS, dit ici plutôt que sous-entendu : le type doit être un
+    LITTÉRAL au point de construction du dict (cf. `_SondeParFonction.visit_Dict`). Une entrée
+    dont le type est posé par affectation, par `dict(type=...)` ou par une valeur calculée passe.
+    Fermer ces formes-là ne se fait pas en énumérant des motifs : le seul goulot réel est
+    `append_action_log` (`engine/action_log_utils.py`), unique chemin vers `action_logs` en
+    production — vérifié, aucun `action_logs.append` direct hors des tests.
     """
     attendu = {("engine/w40k_core.py", "_record_agent_decision_action_log")}
     assert _producteurs_d_entree_journal() == attendu, (
