@@ -416,6 +416,7 @@ Le log capture : marqueurs début/fin d'épisode, positions de départ, moves, t
 [HH:MM:SS] T1 P0 FIGHT : Unit 2(9, 6) FOUGHT unit 8 - Hit:3+:5(HIT) Wound:4+:4(SUCCESS) Save:4+:6(SAVED) Dmg:0HP [SUCCESS] [STEP: YES]
 [HH:MM:SS] EPISODE END: Winner=0, Actions=68, Steps=68, Total=138
 ```
+> `Actions` = lignes d'action écrites · `Steps` = lignes incrémentantes (un par jet de tir ou de mêlée, `engine/w40k_core.py:7134`) · `Total` = `game_state['episode_steps']` : actions/activations par figurine de l'épisode (deux sites : step gym `w40k_core.py:3328` + fin d'activation `generic_handlers.py:110`)
 
 | Action | Format |
 |--------|--------|

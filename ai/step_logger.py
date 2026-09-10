@@ -1784,7 +1784,11 @@ class StepLogger:
         """Log episode completion summary using replay-style format
 
         Args:
-            total_episodes_steps: Total steps across all episodes
+            total_episodes_steps: game_state['episode_steps'] pour CET épisode (remis à 0 au
+                reset par l'appelant unique engine/w40k_core.py:2982). Deux sites incrémentent
+                cette valeur : engine/w40k_core.py:3328 (par step gym réussi) et
+                engine/phase_handlers/generic_handlers.py:110 (en fin d'activation, arg2==1).
+                Vaut donc environ deux fois le nombre de steps gym sur un épisode typique.
             winner: 0, 1, or -1 (draw)
             win_method: "elimination", "objectives", "value_tiebreaker", or "draw"
             objective_control: Dict of objective_id -> control data (OC totals + controller)
@@ -1799,6 +1803,7 @@ class StepLogger:
         with open(self.output_file, 'a') as f:
             timestamp = time.strftime("%H:%M:%S", time.localtime())
             method_str = f", Method={win_method}" if win_method else ""
+            # Actions=lignes écrites ; Steps=lignes incrémentantes (un par jet) ; Total=episode_steps (deux sites, cf. docstring)
             f.write(f"[{timestamp}] EPISODE END: Winner={winner}{method_str}, Actions={self.episode_action_count}, Steps={self.episode_step_count}, Total={total_episodes_steps}, Duration={duration_s:.3f}s\n")
             if objective_control:
                 objective_entries = []
