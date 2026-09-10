@@ -55,6 +55,18 @@ _log = logging.getLogger(__name__)
 # le reset, pas sur la sévérité du lecteur courant — un lecteur qui passe à `require_key` ne
 # réécrirait pas ce format, et la row restaurée lèverait alors au fond du moteur, après que le
 # chargement a déjà écrasé la partie en cours.
+# TL06 = TL05 + les deux clés de l'étape Declare Battle Formations 20.01, posées au reset DANS
+# `game_state["deployment_state"]` : `reserves_declaration_queue` et `reserves_declaration_closed`
+# (`engine/phase_handlers/deployment_handlers.py`). `deployment_state` est une clé MUTABLE, donc
+# capturée telle quelle : une row TL05 d'une partie à déploiement actif rend un `deployment_state`
+# privé de ces deux clés, et le premier lecteur — `next_reserves_declaration_entry`, atteint dès la
+# lecture d'état du front (`services/api_server._strategic_reserves_summary`) — lève
+# `ConfigurationError` au fond du moteur, après que le chargement a déjà écrasé la partie en cours.
+# ⚠️ CE BUMP EST LE PREMIER QUE LE VERROU N'A PAS VU. `test_save_format_key_contract` compare les
+# clés de PREMIER NIVEAU du game_state : une clé posée par le reset au deuxième niveau, sous une
+# clé mutable déjà déclarée, lui est invisible et l'a laissé VERT. La question à se poser à chaque
+# ajout reste donc manuelle : le reset publie-t-il une donnée obligatoire de plus, à quelque
+# profondeur que ce soit ?
 # Les formats antérieurs (TL01, single-pickle) n'ont en plus aucune empreinte : leur état ne peut
 # pas être restauré sans risque de plateau incompatible → REFUSÉS aussi (cf. _reject_legacy).
 # AJOUTER UNE CLÉ OBLIGATOIRE AU RESET D'ÉPISODE OBLIGE À BUMPER CETTE MAGIC. Le verrou est
@@ -66,9 +78,11 @@ _log = logging.getLogger(__name__)
 # et le premier lecteur lève au fond du moteur, après que le chargement a déjà écrasé la partie en
 # cours. Une clé retirée parce que PLUS AUCUN CODE NE LA LIT produit l'inverse — une row rend une
 # clé en trop, que personne ne consulte. La fermeture des intentions de zone (2026-09-09) a été
-# bumpée en TL06 par réflexe : le refus ne protégeait de rien et rendait illisibles les parties
-# enregistrées. Retour à TL05, et les cinq clés restent publiées par le reset (`W40KEngine`, deux
-# dicts) plutôt que d'être retirées du format.
+# bumpée par réflexe : le refus ne protégeait de rien et rendait illisibles les parties
+# enregistrées. Le bump a été ANNULÉ le jour même — retour à TL05, et les cinq clés restent
+# publiées par le reset (`W40KEngine`, deux dicts) plutôt que d'être retirées du format. Le TL06
+# ci-dessus est un AUTRE bump, motivé par un AJOUT et frappé le 2026-09-10 : le numéro annulé a
+# été repris, aucune save n'ayant jamais été écrite sous le premier.
 #
 # ⚠️⚠️ CETTE EXCEPTION NE COUVRE QUE LA CLÉ MORTE, et UN retrait en sort — il BUMPE :
 #   • la clé qui quitte le reset mais reste CRÉÉE PARESSEUSEMENT et lue en cours de partie. La row
@@ -86,8 +100,8 @@ _log = logging.getLogger(__name__)
 # ne fait que les purger), donc hors de sa portée. La règle est désormais DANS le code : une clé
 # statique vient toujours de l'engine vivant, la row ne peut plus la remettre. Verrou :
 # tests/unit/services/test_game_snapshots_static_keys.py.
-_MAGIC = b"W40KTL05"
-_LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04"})
+_MAGIC = b"W40KTL06"
+_LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04", b"W40KTL05"})
 _LEN = struct.Struct(">Q")  # préfixe de longueur : entier 64 bits big-endian
 
 # Rows exclues du menu Select (trop nombreuses) mais présentes dans le playback ⏮⏭.
@@ -188,7 +202,11 @@ def _reject_legacy(name: str, head: bytes) -> None:
             f"illisible (TL01 : sans empreinte de scénario ; TL02 : sans les points de "
             f"commandement de la règle 08.02 ; TL03 : sans les clés de réserves stratégiques, "
             f"d'ingress, de suppression, ni `secured_objectives` ; TL04 : sans la déclaration de "
-            f"montée 13.06 ni le mémo de charge). Supprime-la ou rejoue la partie."
+            f"montée 13.06 ni le mémo de charge ; TL05 : sans les clés de l'étape Declare Battle "
+            f"Formations 20.01 dans `deployment_state` — `reserves_declaration_queue` et "
+            f"`reserves_declaration_closed` —, dont l'absence fait lever le premier lecteur de la "
+            f"file de déclaration une fois la partie en cours déjà écrasée). Supprime-la ou "
+            f"rejoue la partie."
         )
     raise ValueError(f"partie {name!r} : format de fichier inconnu (en-tête {head!r})")
 

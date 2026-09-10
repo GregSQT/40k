@@ -317,7 +317,7 @@ La ventilation `last_reward_breakdown` expose `base_actions`, `result_bonuses`, 
 
 6. **Pénalité de réserve gaspillée** (`RewardCalculator.wasted_reserve_penalty`, **−25.0 par escouade**) : facturée quand une escouade du joueur contrôlé est détruite par 20.04 **après avoir refusé au moins une arrivée possible**. Une escouade sans destination légale (pool d'ingress vide) n'est PAS facturée.
 
-7. **Zone-intent — SUPPRIMÉ** (2026-09-09). Le barème était débranché depuis le 2026-08-11 (mesuré anti-corrélé au comportement gagnant) ; la famille d'actions elle-même est partie, avec son bloc de configuration, ses neuf courbes et les cinq clés de `game_state` qu'elle publiait au reset — d'où le bump du format de save TL05 → TL06.
+7. **Zone-intent — SUPPRIMÉ** (2026-09-09). Le barème était débranché depuis le 2026-08-11 (mesuré anti-corrélé au comportement gagnant) ; la famille d'actions elle-même est partie, avec son bloc de configuration, ses neuf courbes. Les cinq clés de `game_state` qu'elle publiait au reset, elles, RESTENT publiées, inertes : le bump de format déclenché par leur retrait a été annulé le jour même — la magic protège d'un état amputé, pas d'un état qui porte une clé de trop (`services/game_saves._MAGIC`).
 
 ### Configuration (seat)
 
