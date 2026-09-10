@@ -416,14 +416,10 @@ def test_every_weapon_rule_with_obs_id_is_in_the_vocabulary():
 
     registry = get_config_loader().load_weapon_rules_config()
     with_obs_id = {rule_id for rule_id, entry in registry.items() if "obs_id" in entry}
-    assert len(with_obs_id) >= len(WEAPON_RULE_OBS_VOCABULARY)
-    orphelins = sorted(with_obs_id - set(WEAPON_RULE_OBS_VOCABULARY))
-    # VERT VACANT : un registre sans aucun obs_id laisserait `orphelins` vide et cette
-    # assertion passerait sans rien verifier — la garde `>=` ci-dessus l'empeche.
-    assert not orphelins, (
-        f"regles d'armes portant un obs_id sans etre observees : {orphelins} — "
-        f"soit elles entrent dans WEAPON_RULE_OBS_VOCABULARY (cout : zero scalaire), "
-        f"soit leur obs_id doit disparaitre de config/weapon_rules.json"
+    assert with_obs_id == set(WEAPON_RULE_OBS_VOCABULARY), (
+        f"mismatch obs_id config/weapon_rules.json vs WEAPON_RULE_OBS_VOCABULARY : "
+        f"orphelins={sorted(with_obs_id - set(WEAPON_RULE_OBS_VOCABULARY))}, "
+        f"absents={sorted(set(WEAPON_RULE_OBS_VOCABULARY) - with_obs_id)}"
     )
 
 
@@ -494,9 +490,12 @@ def test_profile_truncation_is_logged_never_silent():
 # ------------------------------------------------- exclusivité des profils COMBI
 
 
-def _markers(engine: W40KEngine, key: str = "allies_wpn_rule_ids", row: int = 0) -> Dict[int, str]:
+def _markers(
+    engine: W40KEngine, key: str = "allies_wpn_rule_ids", row: int = 0, *, obs: Any = None
+) -> Dict[int, str]:
     """{slot de profil -> nom du marqueur combi}, pour les seuls slots qui en portent un."""
-    obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
+    if obs is None:
+        obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
     by_id = {obs_id: name for name, obs_id in COMBI_GROUP_MARKER_OBS_IDS.items()}
     out: Dict[int, str] = {}
     for slot, ids_row in enumerate(obs[key][row]):
@@ -543,11 +542,11 @@ def test_two_combi_groups_of_one_squad_get_distinct_markers():
         ]}),
         _unit_cfg(2, 2, [(60, 20)]),
     ])
-    marks = _markers(eng)
+    obs = eng.obs_builder.build_squad_observation(eng.game_state, "1")
+    marks = _markers(eng, obs=obs)
     assert len(marks) == 4, f"quatre profils exclusifs attendus : {marks}"
     assert len(set(marks.values())) == 2, f"deux groupes = deux marqueurs : {marks}"
     # Les slots d'un même marqueur sont exactement les deux profils du même groupe physique.
-    obs = eng.obs_builder.build_squad_observation(eng.game_state, "1")
     for marker in set(marks.values()):
         slots = [s for s, m in marks.items() if m == marker]
         assert len(slots) == 2, f"{marker} porté par {len(slots)} slots"

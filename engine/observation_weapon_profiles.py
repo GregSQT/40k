@@ -37,6 +37,7 @@ Principes (décidés dans `V11_audit_observation.md` §9.3/§9.4/§11, appliqué
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from shared.data_validation import require_key
@@ -204,6 +205,7 @@ PROFILE_BIN_FIELDS: Tuple[str, ...] = (
 PROFILE_BIN_SIZE = len(PROFILE_BIN_FIELDS)
 
 _PROFILE_BIN_INDEX: Dict[str, int] = {name: i for i, name in enumerate(PROFILE_BIN_FIELDS)}
+_BIN_IDX_PRESENT: int = _PROFILE_BIN_INDEX["present"]
 
 
 def profile_bin_index(field: str) -> int:
@@ -360,17 +362,14 @@ def assign_combi_group_markers(
     `_fill_id_slots` : un marqueur silencieusement omis remettrait deux profils exclusifs sous
     l'apparence de deux armes indépendantes.
     """
-    occurrences: Dict[str, int] = {}
-    keys: List[Optional[str]] = []
-    for weapon, _carriers in profiles:
+    groups: Dict[str, List[int]] = defaultdict(list)
+    for i, (weapon, _) in enumerate(profiles):
         key = combi_group_key(weapon)
-        keys.append(key)
         if key is not None:
-            occurrences[key] = occurrences.get(key, 0) + 1  # get allowed : accumulateur
-    out: List[Optional[str]] = []
-    for key in keys:
-        if key is None or occurrences[key] < 2:
-            out.append(None)
+            groups[key].append(i)
+    out: List[Optional[str]] = [None] * len(profiles)
+    for key, indices in groups.items():
+        if len(indices) < 2:
             continue
         marker = marker_by_group.get(key)  # get allowed : absence = groupe pas encore numéroté
         if marker is None:
@@ -385,7 +384,8 @@ def assign_combi_group_markers(
                 )
             marker = COMBI_GROUP_MARKER_NAMES[len(marker_by_group)]
             marker_by_group[key] = marker
-        out.append(marker)
+        for i in indices:
+            out[i] = marker
     return out
 
 
@@ -443,7 +443,7 @@ def encode_weapon_profile(
     # point d'arrêt courant et NON de la composition de l'escouade — il est posé par
     # `ObservationBuilder`, hors du cache de profils (cf. `PROFILE_BIN_FIELDS`).
     slot_bin = [0.0] * PROFILE_BIN_SIZE
-    slot_bin[profile_bin_index("present")] = 1.0  # slot occupé
+    slot_bin[_BIN_IDX_PRESENT] = 1.0  # slot occupé
     binv.extend(slot_bin)
 
     names = [rule_id for rule_id in WEAPON_RULE_BITS if weapon_has_rule(weapon, rule_id)]
