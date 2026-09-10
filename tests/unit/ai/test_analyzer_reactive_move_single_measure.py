@@ -107,3 +107,37 @@ def test_a_reactive_move_outside_MOVE_or_SHOOT_is_still_abnormal(tmp_path):
     stats = _stats(tmp_path, _reactive(LEGAL_DEST, phase="CHARGE"))
     assert stats["reactive_move_stats"][1]["abnormal"] == 1
     assert stats["reactive_move_checks"]["distance_over_roll"][1] == 0
+
+
+def _reactive_sans_roll(dest) -> str:
+    """Même ligne, segment `[Roll: N]` en moins — le motif de lecture le rend optionnel."""
+    return (
+        f"[10:00:02] E1 T2 P1 SHOOT : Unit 1({START[0]},{START[1]}) REACTIVE MOVED [FALL BACK] "
+        f"from ({START[0]},{START[1]}) to ({dest[0]},{dest[1]}) "
+        f"- trigger: Unit 101->(30,30) [R:+0.0] [MODELS: 1#0@({dest[0]},{dest[1]},z0)] [SUCCESS]\n"
+    )
+
+
+def test_a_reactive_move_without_a_roll_is_not_charged_as_a_distance_fault(tmp_path):
+    """Sans `[Roll: N]`, AUCUN budget n'est lisible : rien ne peut être jugé trop long.
+
+    Le compteur `distance_over_roll` était pourtant incrémenté à chaque ligne réactive privée
+    de son jet — y compris, comme ici, pour un déplacement de deux cases que tout budget
+    plausible autorise. Le rapport imputait alors à l'agent une faute de move que le journal
+    seul avait produite, dans le total « 1.1 Erreurs en phase de move ».
+    """
+    stats = _stats(tmp_path, _reactive_sans_roll(LEGAL_DEST))
+    assert stats["reactive_move_stats"][1]["applied"] == 1, (
+        "la ligne sans jet n'est plus reconnue comme réactive : le test ne juge plus rien"
+    )
+    assert stats["reactive_move_checks"]["distance_over_roll"][1] == 0, (
+        "une ligne sans jet est comptée comme dépassement de distance"
+    )
+
+
+def test_a_reactive_move_without_a_roll_is_reported_as_an_unreadable_log(tmp_path):
+    """Le jet manquant ne disparaît pas pour autant : il est signalé comme journal illisible."""
+    stats = _stats(tmp_path, _reactive_sans_roll(LEGAL_DEST))
+    erreurs = [e for e in stats["parse_errors"] if "[Roll: N]" in e["error"]]
+    assert len(erreurs) == 1, stats["parse_errors"]
+    assert "REACTIVE MOVED" in erreurs[0]["line"]

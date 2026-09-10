@@ -543,6 +543,14 @@ def test_the_arming_bound_never_steals_a_legal_ascent(board_x1):
         "la borne n'a jamais dit OUI sur un plancher proche : soit il n'y a aucun terrain en "
         "hauteur dans les scénarios SEEDS, soit la borne bloque tout — le test n'exerce rien"
     )
+    # DEUX sentinelles, et la seconde est celle qui garde l'oracle. `stolen` ne se remplit que
+    # dans la branche « la borne dit NON » : si elle ne s'exécute jamais, `assert not stolen`
+    # passe sans avoir rien interrogé. `gates_fired` compte l'exact contraire (la borne dit OUI)
+    # et ne dit donc rien de cette branche-là. Mesuré sur les SEEDS : 210 OUI, 37 NON.
+    assert inspected > 0, (
+        "la borne n'a jamais dit NON sur un plancher proche : l'oracle anti-vol n'a pas tourné "
+        "une seule fois, et l'absence de vol constatée plus bas ne prouve rien"
+    )
     assert not stolen, (
         f"{len(stolen)}/{inspected} activations où la question n'est PAS posée alors que le pool "
         f"(budget Advance max) offre une cellule posant une figurine sur un plancher — la borne "

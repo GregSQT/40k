@@ -314,7 +314,7 @@ Oath : le TOKEN `[OATH OF MOMENT]` gate l'application, la CLÉ `oath_wound` en f
 | 6 | `reactive_move_stats.abnormal` | `analyzer_core.py` | phase ∉ {MOVE,SHOOT} **ou** `calculate_hex_distance` ANCRE > jet×échelle |
 | 7 | `reactive_move_checks.to_adjacent_enemy` | `analyzer_core.py` | engagement, sujet mesuré à l'ANCRE (pas de `[MODELS:]` réactif, cf. commentaire `:1302-1308`) |
 | 8 | `reactive_move_checks.into_wall` | `analyzer_core.py` | ancre ∈ `wall_hexes` |
-| 9 | `reactive_move_checks.distance_over_roll` | `analyzer_core.py` | `_per_model_move_violation`, budget jet×échelle |
+| 9 | `reactive_move_checks.distance_over_roll` | `analyzer_core.py` | `_per_model_move_violation`, budget jet×échelle. Ligne sans `[Roll: N]` → **`parse_errors`, aucun contrôle** : sans budget, rien n'est mesurable, et l'incrémenter imputait à l'agent un défaut de journal (corrigé le 2026-09-10) |
 | 65 | `move_distance_over_limit['flee']` | `move_handler.py` (bloc `_check_fall_back_move`, `:81`) | **09.07 « MAXIMUM DISTANCE: your unit's M »** — BFS par socle, budget `M` (−2" si `[FLY]`), figurines ennemies TRAVERSABLES (cf. ci-dessous) |
 | 66 | `flee_from_unengaged` | `move_handler.py` | **09.07 « ELIGIBLE IF: your unit is engaged »** — engagement per-fig aux socles de DÉPART. Négatif exact de #3 : l'un punit le move normal parti engagé, l'autre le fall-back parti libre |
 | 67 | `flee_still_engaged` | `move_handler.py` | **09.07 « AFTER MOVING: your unit must be unengaged »** — engagement per-fig aux socles et hauteurs d'ARRIVÉE |
