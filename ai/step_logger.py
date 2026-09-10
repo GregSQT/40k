@@ -50,9 +50,18 @@ __all__ = ['StepLogger', 'LOG_GRAMMAR_VERSION', 'assert_step_log_written']
 #:       d arme RAPID_FIRE ou MELTA signifie que la cible n etait PAS a demi-portee — jamais
 #:       que le journal ne sait pas le dire. Verrou : test_step_log_half_range.py.
 #:
+#:   8 — toute DECISION D AGENT resolue (V11 §9.3 P2, les onze types
+#:       d `AGENT_DECISION_TYPE_IDS`) laisse une ligne
+#:       « Unit N DECISION [<type>] CHOICE_<i> [<label>] » eventuellement suivie de
+#:       « [DECLINED] ». Sur un journal log_grammar>=8, l absence de ligne DECISION pour un type
+#:       signifie que l agent n a jamais eu cette decision a prendre — jamais que le journal ne
+#:       sait pas le dire. C est ce qui rend mesurable le TAUX de declaration 20.01
+#:       (`reserves_declaration`), pour lequel aucune trace n existait. Verrou :
+#:       test_step_log_agent_decision.py et test_analyzer_agent_decision.py.
+#:
 #: N incrementer que pour une garantie NOUVELLE, jamais pour un changement cosmetique : un
 #: lecteur qui refuse une version qu il ne connait pas doit avoir une raison de le faire.
-LOG_GRAMMAR_VERSION = 7
+LOG_GRAMMAR_VERSION = 8
 
 
 #: Regles qui AJOUTENT des des au pool d attaques et dont l effet depend de la CIBLE :
@@ -1671,6 +1680,25 @@ class StepLogger:
             # L25 — 08.04 : désignation Oath of Moment par le joueur SM.
             target_id = require_key(details, "target_id")
             return f"{unit_id} COMMAND [OATH OF MOMENT] → Unit {target_id}"
+
+        elif action_type == "agent_decision":
+            # V11 §9.3 P2 — RELEVE d'une decision agent resolue, MEME grammaire pour les onze
+            # types d'`AGENT_DECISION_TYPE_IDS` : c'est ce qui permet de compter un taux de choix
+            # par type sans un lecteur par type.
+            # Format : « Unit N DECISION [<type>] CHOICE_<i> [<label>] » + « [DECLINED] » quand le
+            # candidat joue est celui qui PASSE.
+            # Les quatre champs sont EXIGES (`require_key`) : une ligne de decision sans le
+            # candidat joue ne dit rien de ce qu'on lui demande, et un lecteur ne pourrait pas
+            # distinguer « champ absent » de « CHOICE_0 ».
+            from engine.action_log_utils import format_agent_decision_message
+
+            return format_agent_decision_message(
+                unit_label,
+                require_key(details, "decision_type"),
+                require_key(details, "decision_option_index"),
+                require_key(details, "decision_option_label"),
+                bool(require_key(details, "decision_option_declines")),
+            )
 
         elif action_type == "wait":
             return f"{unit_label} WAIT"

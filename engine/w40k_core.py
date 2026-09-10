@@ -36,7 +36,7 @@ from engine.utils.weapon_helpers import melee_weapons, ranged_weapons
 from engine.phase_handlers import movement_handlers, shooting_handlers, charge_handlers, fight_handlers, command_handlers, deployment_handlers
 
 # units_cache helpers (single source of truth for position/HP of living units)
-from engine.action_log_utils import append_action_log
+from engine.action_log_utils import append_action_log, format_agent_decision_message
 from engine.phase_handlers.shared_utils import (
     build_units_cache,
     destroy_model,
@@ -4094,7 +4094,110 @@ class W40KEngine(gym.Env):
             "player": int(require_key(prompt, "player")),
         }
 
+    def _record_agent_decision_action_log(
+        self,
+        *,
+        decision_type: str,
+        player: int,
+        unit_id: str,
+        option_index: int,
+        option: Dict[str, Any],
+    ) -> None:
+        """SITE UNIQUE de journalisation d'une décision d'agent RÉSOLUE (V11 §9.3 P2).
+
+        UN seul appel pour les onze types d'`AGENT_DECISION_TYPE_IDS`, et non un appel recopié
+        dans chaque branche de `_dispatch_agent_decision_action` : onze copies auraient divergé
+        exactement comme les gardes d'`apply_*_decision` avaient divergé avant que
+        `consume_pending_agent_decision` ne les mutualise. Le prix de ce site unique est qu'il ne
+        peut porter QUE ce que tout type possède — le type, le candidat joué, l'unité, le joueur,
+        le tour et l'épisode — ce qui suffit à compter les décisions et à mesurer un taux de
+        choix par type.
+
+        ⚠️ `reserves_declaration` (20.01) : `CHOICE_0` déclare l'unité en réserves, `CHOICE_1` la
+        garde pour la mise en place (cf. `deployment_handlers.arm_reserves_declaration_decision`).
+        C'est `option_index` — et le drapeau `declines` recopié ici — qui rendent ce taux
+        mesurable ; avant cette ligne, AUCUNE trace ne disait si l'agent déclarait ou déclinait.
+
+        ⚠️ Le `rule_choice` garde SA ligne (`_record_rule_choice_action_log`) : elle nomme la
+        RÈGLE choisie, que ce site ne peut pas connaître, et elle est écrite par trois chemins
+        (gym, prompt humain PvP, `pve_controller`) dont deux ne passent jamais par une décision
+        agent. L'absorber ici aurait fait disparaître la trace des deux autres et cassé la lecture
+        `rule_choice_selection_usage` de l'analyzer. Les deux lignes répondent à deux questions
+        différentes : « quelle règle a été retenue » et « quel candidat l'agent a joué ».
+
+        AUCUN try/except : ce site n'a rien à avaler. Une clé manquante ici est une rupture
+        d'état, pas un défaut de journal — le dépôt a déjà payé un diagnostic entier pour un
+        `log_action` qui avalait ses exceptions.
+        """
+        action_logs = self.game_state.get("action_logs")  # get allowed : absent hors partie
+        if not isinstance(action_logs, list):
+            raise TypeError(
+                "game_state['action_logs'] doit etre une liste avant la journalisation d'une "
+                f"decision agent, recu {type(action_logs).__name__}"
+            )
+        option_label = str(require_key(option, "label"))
+        option_declines = bool(require_key(option, "declines"))
+        append_action_log(
+            self.game_state,
+            {
+                "type": "agent_decision",
+                # MEME libelle que la ligne de `step.log`, par le MEME constructeur : le Game Log
+                # du PvP et le journal d'entrainement disent le mot pour mot la meme chose.
+                "message": format_agent_decision_message(
+                    f"Unit {unit_id}", decision_type, option_index, option_label, option_declines
+                ),
+                "unitId": unit_id,
+                "player": int(player),
+                "turn": require_key(self.game_state, "turn"),
+                "phase": str(require_key(self.game_state, "phase")),
+                "decision_type": decision_type,
+                "decision_option_index": int(option_index),
+                "decision_option_label": option_label,
+                "decision_option_declines": option_declines,
+                # Segment `[MODELS:]` VOLONTAIREMENT VIDE (et non omis : `_build_step_log_details`
+                # lit la cle et, absente, va chercher les positions LIVE). Un releve de choix
+                # n'est pas un evenement de jeu — il ne deplace rien — et y coller les positions
+                # par socle donnerait a l'analyzer une seconde source de positions sur une ligne
+                # qui n'en observe aucune. Cas le plus parlant : 20.01 se joue AVANT toute mise
+                # en place, la ligne aurait porte six socles a (-1,-1).
+                "models_segment": "",
+                "reward": 0.0,
+            },
+        )
+
     def _handle_agent_decision_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """Applique le candidat choisi par l'agent, puis JOURNALISE la décision résolue.
+
+        L'application vit dans `_dispatch_agent_decision_action` ; ce niveau-ci ne fait que
+        l'encadrer, parce que la décision est EFFACÉE par son application (écrivain unique,
+        `consume_pending_agent_decision`) : ce qu'il faut journaliser n'existe plus au retour.
+        Le relevé est donc pris AVANT, et écrit APRÈS, uniquement si l'application a réussi —
+        une décision refusée n'a rien décidé.
+        """
+        decision = read_pending_agent_decision(self.game_state)
+        if decision is None:
+            return False, {"error": "no_pending_agent_decision"}
+        pending_type = str(require_key(decision, "type"))
+        pending_player = int(require_key(decision, "player"))
+        pending_unit_id = str(require_key(decision, "unit_id"))
+        pending_options = list(require_key(decision, "options"))
+
+        success, result = self._dispatch_agent_decision_action(action)
+        if success:
+            # `option_index` est relu dans l'ACTION et non dans `result` : toutes les branches ne
+            # le reportent pas, et le dispatch a deja refuse un index hors bornes — il est donc
+            # valide des lors que l'application a reussi.
+            resolved_index = int(require_key(action, "option_index"))
+            self._record_agent_decision_action_log(
+                decision_type=pending_type,
+                player=pending_player,
+                unit_id=pending_unit_id,
+                option_index=resolved_index,
+                option=pending_options[resolved_index],
+            )
+        return success, result
+
+    def _dispatch_agent_decision_action(self, action: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Applique le candidat choisi par l'agent (action `CHOICE_i`), puis reprend le moteur."""
         decision = read_pending_agent_decision(self.game_state)
         if decision is None:
@@ -6459,6 +6562,15 @@ class W40KEngine(gym.Env):
         "waaagh_call", "oath_selection",
         # Mort par-figurine : pas une action d'agent, pas un step gym.
         "dead",
+        # V11 §9.3 P2 — RELEVE d'une decision agent resolue (`_record_agent_decision_action_log`).
+        # Non-incrementant, et ce n'est PAS un choix par defaut : le step gym consomme par
+        # `CHOICE_i` est deja compte par la ligne d'EFFET du meme step quand le type en produit
+        # une (`charge` pour charge_placement, `shoot`/`combat` pour allocation_model,
+        # `move_after_shooting`, et la ligne `chose [...]` de rule_choice). L'y compter aussi
+        # doublerait `episode_step_count` face a `episode_steps` du moteur pour ces types-la.
+        # Les types SANS ligne d'effet (waaagh_call, reserves_declaration, fly/ascent_declaration)
+        # etaient deja non-incrementants AVANT ce releve : il ne change rien pour eux.
+        "agent_decision",
     })
 
     _STEP_LOG_TYPE_MAP: Dict[str, str] = {
@@ -6488,6 +6600,9 @@ class W40KEngine(gym.Env):
         # par un step, donc par le flush, et le rendait systématique. Mesuré : 16 erreurs avalées
         # pour 16 choix. Corriger le mapping aurait produit un DOUBLON de chaque ligne.
         "move_after_shooting": "move_after_shooting",
+        # V11 §9.3 P2 — releve d'une decision agent resolue, TOUS types confondus. Un seul
+        # producteur (`_record_agent_decision_action_log`), donc une seule entree ici.
+        "agent_decision": "agent_decision",
         "deploy_unit": "deploy_unit",
         # L24 — skip auto-moteur : unité sans destination valide (move/charge) ou sans cible
         # (shoot). Le formateur existe dans StepLogger depuis l'origine ; seule l'entrée ici
@@ -7188,6 +7303,13 @@ class W40KEngine(gym.Env):
             ("engaged_models_total", "engaged_models_total"),
             ("advance_roll", "advance_range"),
             ("selected_rule_name", "selected_rule_name"),
+            # V11 §9.3 P2 — decision agent resolue. Les quatre champs sont EXIGES par son
+            # formateur : sans cette traduction la ligne leverait, et depuis que `log_action`
+            # n'avale plus rien c'est l'episode entier qui tomberait.
+            ("decision_type", "decision_type"),
+            ("decision_option_index", "decision_option_index"),
+            ("decision_option_label", "decision_option_label"),
+            ("decision_option_declines", "decision_option_declines"),
             # 03.03 : les figurines retirees en fin de tour, nommement. Le segment `[MODELS:]`
             # dit qui RESTE ; cette liste dit qui PART, ce qu'aucun lecteur ne peut deduire d'un
             # segment (il ne verrait qu'un effectif plus court, sans savoir lequel).

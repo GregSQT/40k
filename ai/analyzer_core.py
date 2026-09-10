@@ -5,7 +5,7 @@ Utilise AnalyzerState (state) et AnalyzerConfig (config) pour tout état mutable
 
 import re
 from functools import lru_cache
-from typing import Dict, Optional, cast
+from typing import Any, Dict, Optional, Tuple, cast
 
 from engine.constants import DRAW_WINNER
 from shared.data_validation import require_key, require_present
@@ -183,6 +183,41 @@ _EFFECTS_PLAYER_RE = re.compile(r'P(\d+)\s+([^|]*)')
 _RT_UNIT_ID_RE = re.compile(r'Unit\s+(\d+)')
 _HAZARDOUS_TAG_RE = re.compile(r'\[HAZARDOUS(?::\d+)?\]')
 _HAZARDOUS_SUFFERS_RE = re.compile(r'SUFFERS\s+(\d+)\s+Mortal\s+Wounds\s+\[HAZARDOUS(?::\d+)?\]')
+#: V11 §9.3 P2 — releve d'une decision d'agent resolue (step.log grammaire >= 8) :
+#: « Unit <id> DECISION [<decision_type>] CHOICE_<i> [<libelle>] », suivi de « [DECLINED] »
+#: quand le candidat joue est celui qui PASSE. Le libelle n'est pas capture : c'est du texte
+#: libre venu du moteur, et le TYPE + l'INDEX suffisent a compter un taux de choix.
+_AGENT_DECISION_RE = re.compile(r'DECISION\s+\[([A-Za-z0-9_]+)\]\s+CHOICE_(\d+)')
+
+
+def agent_decision_option_rate(
+    stats: Dict[str, Any], decision_type: str, option_index: int
+) -> Optional[Tuple[int, int, float]]:
+    """Taux de choix d'un candidat pour un type de decision : ``(numerateur, total, taux)``.
+
+    ``None`` quand le journal ne porte AUCUNE decision de ce type — ce n'est pas un repli
+    anti-erreur mais le seul resultat honnete : un taux sur zero decision n'existe pas, et
+    rendre 0.0 le ferait passer pour « l'agent ne choisit jamais ce candidat ».
+
+    Les deux joueurs sont additionnes : c'est le comportement de la POLITIQUE qu'on mesure, et
+    les deux sieges sont pilotes par des politiques (agent ou bot). L'appelant qui veut la
+    ventilation lit directement ``agent_decision_totals`` / ``agent_decision_options``.
+
+    Cas d'usage premier — 20.01 : ``agent_decision_option_rate(stats, "reserves_declaration", 0)``
+    rend le TAUX DE DECLARATION en reserves, ``CHOICE_0`` etant le candidat qui declare
+    (cf. ``deployment_handlers.arm_reserves_declaration_decision``).
+    """
+    totals = require_key(stats, 'agent_decision_totals')
+    options = require_key(stats, 'agent_decision_options')
+    per_player = totals.get(decision_type)  # get allowed : type jamais rencontre
+    if not per_player:
+        return None
+    total = int(per_player[1]) + int(per_player[2])
+    if total == 0:
+        return None
+    chosen_per_player = options.get((decision_type, int(option_index)))  # get allowed
+    chosen = 0 if not chosen_per_player else int(chosen_per_player[1]) + int(chosen_per_player[2])
+    return chosen, total, chosen / total
 
 
 def _parse_effects_snapshot(payload: str) -> "Dict[int, Dict[str, str]]":
@@ -1091,6 +1126,11 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     action_desc,
                     re.IGNORECASE,
                 )
+                # V11 §9.3 P2 — releve d'une decision d'agent resolue. Calcule ICI, au meme
+                # rang que `rule_choice_line_match` : la chaine de branches plus bas s'en sert
+                # comme condition, et le refaire dans le corps de la branche donnerait deux
+                # appels pour un seul besoin.
+                agent_decision_match = _AGENT_DECISION_RE.search(action_desc)
                 # Attaquant de la ligne (préfixe "Unit N(...)") : sert à attribuer la
                 # destruction d'une cible pour distinguer les attaques restantes de la MÊME
                 # activation (excess lost) d'un vrai cadavre attaqué par une unité tierce.
@@ -1901,6 +1941,17 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                 ):
                         action_type = 'shoot'
                         handle_shoot(state, config, line, action_desc, action_unit_id, player, turn, phase, step_marker_present, step_inc)
+                elif agent_decision_match:
+                        # V11 §9.3 P2 — RELEVE d'une decision d'agent resolue (grammaire 8).
+                        # PREMIERE branche de la chaine, et ce n'est pas cosmetique : le libelle
+                        # du candidat est du texte LIBRE venu du moteur, et un libelle qui
+                        # contiendrait « WAIT », « SKIP » ou un verbe de mouvement ferait tomber
+                        # la ligne dans une branche qui la lirait comme une action de jeu.
+                        action_type = 'agent_decision'
+                        _ad_type = agent_decision_match.group(1)
+                        _ad_option = int(agent_decision_match.group(2))
+                        stats['agent_decision_totals'][_ad_type][player] += 1
+                        stats['agent_decision_options'][(_ad_type, _ad_option)][player] += 1
                 elif " WAIT" in action_desc:
                         action_type = 'wait'
                         if handle_wait(state, config, line, action_desc, action_unit_id, player, turn, phase):
