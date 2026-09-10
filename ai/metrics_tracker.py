@@ -613,6 +613,17 @@ class W40KMetricsTracker:
             # GAME CRITICAL: Rolling win rate - PRIMARY METRIC
             self._emit_windowed('game_critical/win_rate', self.all_episode_wins)
 
+            # 00_critical: MEME mesure, sous le nom qu'elle portait dans le tableau de bord
+            # critique. Retiree du namespace le 2026-09-08 pour liberer la lettre `d`, remise
+            # le 2026-09-10 : le taux de victoire d'entrainement se lit a cote des courbes de
+            # sante PPO, sans changer de namespace en cours de diagnostic. Emise ICI et non
+            # depuis `log_critical_dashboard` — ou elle vivait avant le retrait — pour rester
+            # la jumelle EXACTE de la ligne au-dessus : meme garde `winner is not None`, donc
+            # les deux courbes portent les memes points aux memes abscisses. Depuis le
+            # dashboard, un episode sans vainqueur republierait la fenetre inchangee et les
+            # deux series divergeraient en nombre de points.
+            self._emit_windowed('00_critical/d_win_rate', self.all_episode_wins)
+
             # SEAT-AWARE: cumulative win rates by controlled seat + global
             if controlled_player == 1:
                 self.seat_aware['episodes_agent_p1'] += 1
@@ -1654,6 +1665,10 @@ class W40KMetricsTracker:
         l'avait deja acte pour la collision de prefixe entre ces deux `o_`.
 
         ECRIT AILLEURS, volontairement -- inventaire complet du namespace :
+        - `log_episode_end`, sous la garde `winner is not None`, juste apres sa jumelle
+          `game_critical/win_rate` : d_win_rate. Les deux sortent du meme `all_episode_wins`
+          par le meme `_emit_windowed`. Ecrite d'ici, elle prendrait un point sur les episodes
+          sans vainqueur, que sa jumelle n'a pas.
         - `log_bot_evaluations`, au moment de l'evaluation (attendre l'episode suivant
           publierait une valeur perimee) : 0_gap_sm-ork, a_bot_eval_combined,
           b_worst_bot_score, c_holdout_hard_mean.
@@ -1678,10 +1693,10 @@ class W40KMetricsTracker:
 
         NOTE: position_score a ete supprime (voir la trace dans __init__), pas deplace.
         `k_gradient_norm` a ete retire du dashboard (redondant avec h + i, cf. plus bas).
-        Les lettres `d` et `e` ont porte win_rate et episode_reward_smooth, retirees du
-        namespace critique. `game_critical/win_rate` est la jumelle EXACTE de d (meme source,
-        meme fenetre) ; le lissage de e n'a pas de jumelle, `game_critical/episode_reward`
-        portant la valeur brute de chaque episode.
+        La lettre `d` a ete rendue au win_rate le 2026-09-10, apres deux jours de retrait :
+        elle est ecrite depuis `log_episode_end` (cf. inventaire ci-dessus). `e` reste libre —
+        le lissage de episode_reward n'a pas ete remis, `game_critical/episode_reward` portant
+        la valeur brute de chaque episode.
         """
         
         # Minimum data requirement (lowered to 1 for immediate feedback)
