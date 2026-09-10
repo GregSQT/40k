@@ -4055,11 +4055,27 @@ class W40KEngine(gym.Env):
 
         `consumes_gym_step` : True quand le choix a été joué par une ACTION GYM (`CHOICE_i` du
         mécanisme de décision, V11 §9.3 P2). Ce cas consomme un `step()` complet, donc un step du
-        moteur : sans ce drapeau, la ligne `Steps=` de fin d'épisode (compteur du StepLogger)
-        serait inférieure à `Total=` (compteur moteur) d'exactement le nombre de décisions, et
-        l'écart passerait pour le symptôme de §T6-c (« actions non journalisées »).
+        moteur : sans ce drapeau, la ligne `Steps=` de fin d'épisode compterait une décision de
+        moins qu'il n'y a eu d'appels à `step()`.
         Les autres chemins — prompt humain PvP, résolution PvE par `pve_controller` — ne
         consomment aucun step gym : le drapeau y reste False.
+
+        ⚠️ CE DRAPEAU NE REND PAS `Steps=` ÉGAL À `Total=`, et le croire coûte une investigation
+        entière — mesuré le 2026-09-10 sur un épisode complet du scénario `reserves_20_fixture1`
+        joué en actions aléatoires : `Steps=207` contre `Total=285`, soit 78 d'écart pour 189
+        appels à `step()`. Les deux nombres ne comptent pas la même chose et ne peuvent pas
+        coïncider :
+          - `Total=` est `game_state["episode_steps"]`, incrémenté par DEUX sites (le step gym
+            réussi et la fin d'activation, cf. la docstring de `StepLogger.log_episode_end`) ;
+          - `Steps=` compte les lignes de `step.log` marquées incrémentantes, et le terme
+            DOMINANT de l'écart n'est pas les décisions mais l'ACTIVATION d'unité
+            (`ACTIVATE_SLOTS`) : +80 sur cette mesure, là où les décisions sans ligne d'effet
+            n'en pèsent que 35 et où l'allocation par figurine contribue NÉGATIVEMENT (une
+            allocation écrit plusieurs lignes pour un seul step). Une activation consomme un step
+            et ne journalise rien — rien ne s'est encore passé, l'unité est sélectionnée.
+        Un écart entre ces deux nombres n'est donc PAS le symptôme de §T6-c. Ce que §T6-c
+        décrivait est une action RÉSOLUE qui ne laisse aucune ligne, ce qui ne se lit pas sur
+        cette soustraction.
         """
         unit_id = str(require_key(prompt, "unit_id"))
         prompt_player = int(require_key(prompt, "player"))
@@ -4665,7 +4681,9 @@ class W40KEngine(gym.Env):
             require_key(selected_option, "payload"), "display_rule_id"
         )
         # L'action `CHOICE_i` a consommé un step gym complet : la ligne de step.log doit
-        # l'incrémenter, sinon `Steps=` et `Total=` divergent en fin d'épisode.
+        # l'incrémenter, sinon elle compte un appel à `step()` de moins qu'il n'y en a eu.
+        # Ce n'est PAS ce qui ferait coïncider `Steps=` et `Total=` — ils comptent deux choses
+        # différentes et divergent par construction, cf. `_record_rule_choice_action_log`.
         self._apply_rule_choice_selection(
             prompt, selected_display_rule_id, consumes_gym_step=True
         )
