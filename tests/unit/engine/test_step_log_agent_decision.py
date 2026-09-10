@@ -17,7 +17,9 @@ CE QUE CE FICHIER VERROUILLE :
     déclaration comptable ;
   - la ligne porte le type, l'index du candidat, l'unité, le joueur, le tour et l'épisode ;
   - `agent_decision` n'incrémente PAS le compteur de steps du StepLogger : le step gym consommé
-    par `CHOICE_i` est déjà compté par la ligne d'effet quand le type en produit une.
+    par `CHOICE_i` est déjà compté par la ligne d'effet quand le type en produit une ;
+  - la ligne ne porte AUCUNE position par socle : un relevé de choix n'observe rien, et c'est le
+    TYPE qui le déclare (`W40KEngine._TYPES_SANS_SEGMENT_MODELS`), au point de traduction unique.
 """
 from __future__ import annotations
 
@@ -104,6 +106,16 @@ def _drive_deployment(eng, *, declare_first: bool) -> str:
         steps += 1
     assert gs.get("phase") != "deployment", "déploiement non terminé"
     return declared
+
+
+def require_pending_unit(eng) -> str:
+    """Id de l'unité dont la décision 20.01 est POSÉE — lève si aucune ne l'est."""
+    from engine.agent_decision import read_pending_agent_decision
+
+    pending = read_pending_agent_decision(eng.game_state)
+    if pending is None:
+        raise AssertionError("aucune decision agent en attente : le scenario ne prouve rien")
+    return str(pending["unit_id"])
 
 
 def _decision_lines(eng) -> List[Tuple[Dict[str, Any], str]]:
@@ -209,6 +221,91 @@ def test_agent_decision_does_not_double_count_a_gym_step(tmp_path):
     assert int(eng.game_state["episode_steps"]) == steps_before + 1
     assert int(logger.episode_step_count) == logged_before, (
         "la ligne de relevé ne doit pas incrémenter le compteur de steps du StepLogger"
+    )
+
+
+def test_la_ligne_de_decision_ne_porte_aucune_position_par_socle(tmp_path):
+    """20.01 se joue AVANT toute mise en place : la ligne de décision ne porte AUCUN socle.
+
+    VERT VACANT écarté par la mesure, et c'est tout l'objet du test : au moment où la décision
+    est jouée, les positions LIVE de l'unité interrogée EXISTENT — six socles à (-1,-1), hors
+    plateau. Un segment vide ne prouverait donc rien si on ne vérifiait pas d'abord que le repli
+    avait quelque chose à mettre à la place ; les deux assertions de tête paient ce prix.
+
+    L'enjeu n'est pas cosmétique : `analyzer_core` applique le segment de CHAQUE ligne à
+    `positions_by_model` sans filtrer par type, donc ces six socles deviendraient l'état de
+    positions du lecteur jusqu'à la ligne de déploiement de l'unité.
+    """
+    from engine.agent_decision import read_pending_agent_decision
+    from engine.macro_intents import CHOICE_SLOTS
+
+    eng = _engine(tmp_path)
+    eng.get_action_mask()
+    pending = read_pending_agent_decision(eng.game_state)
+    assert pending is not None
+    unit_id = str(pending["unit_id"])
+
+    live = eng._models_segment_for_unit(unit_id)
+    assert live.startswith("[MODELS:"), (
+        f"positions LIVE absentes du cache : un segment vide ne prouverait plus rien ({live!r})"
+    )
+    assert "(-1,-1" in live, (
+        f"unité déjà posée : le scénario ne joue plus 20.01 avant la mise en place ({live!r})"
+    )
+
+    eng.step(int(CHOICE_SLOTS.start + 0))
+    lignes = [raw for _, raw in _decision_lines(eng)]
+    assert len(lignes) == 1
+    assert "[MODELS:" not in lignes[0], (
+        f"la ligne de décision porte des positions par socle : {lignes[0]!r}"
+    )
+
+
+def test_le_type_tranche_le_segment_meme_quand_le_repli_aurait_de_quoi_ecrire(tmp_path):
+    """C'est le TYPE qui décide du segment vide, pas l'absence de données à mettre dedans.
+
+    `waaagh_call` et `oath_selection` (08.04) portent un `unitId` de la forme `P<n>` : en
+    production leur segment est déjà vide, mais par ACCIDENT — `P1` est absent d'`units_cache`.
+    Ce test leur passe donc un `unitId` d'unité RÉELLE, cas qu'aucun producteur ne produit :
+    c'est le seul montage où l'accident et l'intention donnent des résultats différents, donc le
+    seul qui prouve que la déclaration porte quelque chose.
+
+    ⚠️ Les trois types sont écrits ICI, en clair, et NON lus depuis le frozenset de production.
+    Les lire là-bas rendait le test vert-vacant, mesuré : retirer `waaagh_call` de la déclaration
+    retirait du même geste le contrôle qui l'aurait vu partir, et les neuf tests restaient verts.
+    L'égalité stricte ci-dessous force alors toute évolution de l'inventaire à être écrite des
+    deux côtés — c'est-à-dire décidée, pas subie.
+    """
+    from engine.w40k_core import W40KEngine
+
+    attendus = ("agent_decision", "oath_selection", "waaagh_call")
+    assert tuple(sorted(W40KEngine._TYPES_SANS_SEGMENT_MODELS)) == attendus, (
+        "l'inventaire des types qui n'observent aucune position a change : le mettre a jour ici "
+        "aussi, apres avoir verifie que le nouveau type ne rend PAS compte d'un acte d'une unite "
+        "posee (cf. `strategic_reserves_timeout`, volontairement absent)."
+    )
+
+    eng = _engine(tmp_path)
+    eng.get_action_mask()
+    unit_id = str(require_pending_unit(eng))
+    assert eng._models_segment_for_unit(unit_id).startswith("[MODELS:"), (
+        "le repli n'a rien à écrire : le test ne distinguerait pas le type de l'accident"
+    )
+
+    for type_declare in attendus:
+        details = eng._build_step_log_details(
+            {"type": type_declare, "unitId": unit_id, "turn": 1}, 1
+        )
+        assert details["models_segment"] == "", (
+            f"le type {type_declare!r} est déclaré sans position, mais le point de traduction "
+            f"lui a écrit {details['models_segment']!r}"
+        )
+
+    # Contre-épreuve : un type NON déclaré passe bien par le repli, sinon l'assertion ci-dessus
+    # serait vraie pour n'importe quel type et ne dirait rien de la déclaration.
+    temoin = eng._build_step_log_details({"type": "wait", "unitId": unit_id, "turn": 1}, 1)
+    assert temoin["models_segment"].startswith("[MODELS:"), (
+        f"le repli ne s'applique plus aux types non déclarés : {temoin['models_segment']!r}"
     )
 
 
@@ -389,11 +486,12 @@ def test_aucune_entree_agent_decision_n_est_ecrite_hors_du_site_unique():
 
     Le verrou d'appelant ci-dessus ne barre pas ce chemin : une branche qui poste elle-même
     `{"type": "agent_decision", ...}` n'appelle ni l'application ni le relevé, et passe les deux
-    paramétrages — mutation appliquée, vérifié vert. Ce qu'une telle entrée casserait :
-    `models_segment` est posé VIDE au site unique précisément pour que
-    `_build_step_log_details` n'aille pas chercher les positions LIVE par socle ; construite à la
-    main, la clé manque, et une décision 20.01 — jouée AVANT toute mise en place — sort avec ses
-    socles à (-1,-1).
+    paramétrages — mutation appliquée, vérifié vert. Ce qu'une telle entrée casserait, depuis que
+    le segment de socles est une propriété du TYPE (`_TYPES_SANS_SEGMENT_MODELS`) et non plus une
+    clé posée par ce producteur : plus les positions — elles sont hors d'atteinte d'un producteur
+    — mais la MESURE. Une seconde entrée porte les quatre champs de décision ou elle fait lever le
+    formateur ; si elle les porte, l'analyzer compte un choix que l'agent n'a jamais joué, et le
+    taux de déclaration 20.01 devient faux sans qu'aucune ligne ne paraisse anormale.
 
     ⚠️ CE QUE CE TEST NE VOIT PAS, dit ici plutôt que sous-entendu : le type doit être un
     LITTÉRAL au point de construction du dict (cf. `_SondeParFonction.visit_Dict`). Une entrée

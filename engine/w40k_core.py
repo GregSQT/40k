@@ -4275,13 +4275,10 @@ class W40KEngine(gym.Env):
                 "decision_option_index": int(option_index),
                 "decision_option_label": option_label,
                 "decision_option_declines": option_declines,
-                # Segment `[MODELS:]` VOLONTAIREMENT VIDE (et non omis : `_build_step_log_details`
-                # lit la cle et, absente, va chercher les positions LIVE). Un releve de choix
-                # n'est pas un evenement de jeu — il ne deplace rien — et y coller les positions
-                # par socle donnerait a l'analyzer une seconde source de positions sur une ligne
-                # qui n'en observe aucune. Cas le plus parlant : 20.01 se joue AVANT toute mise
-                # en place, la ligne aurait porte six socles a (-1,-1).
-                "models_segment": "",
+                # AUCUN `models_segment` ici : « un releve de choix n'observe aucune position »
+                # est une propriete du TYPE, declaree en `_TYPES_SANS_SEGMENT_MODELS` et
+                # appliquee au point de traduction. La poser aussi ici en ferait un jumeau, et le
+                # verrou ne tiendrait que pour ce producteur-la.
                 "reward": 0.0,
             },
         )
@@ -6844,6 +6841,27 @@ class W40KEngine(gym.Env):
         "agent_decision",
     })
 
+    #: Types dont la ligne n'OBSERVE aucune position : leur segment `[MODELS:]` est vide, et
+    #: c'est ce site — le point de traduction unique — qui le decide, pas leurs producteurs.
+    #:
+    #: Sans cette declaration, une entree qui n'apporte pas son segment tombe sur le repli
+    #: `_models_segment_for_unit`, qui lit les positions du moment. Pour une ligne qui rend
+    #: compte d'un CHOIX et non d'un acte, ces positions ne sont pas les siennes : mesure du
+    #: 2026-09-10 sur `reserves_20_fixture1`, l'unite interrogee en 20.01 avant tout deploiement
+    #: rend `[MODELS: 1#0@(-1,-1,z0) ... 1#5@(-1,-1,z0)]` — six socles hors plateau que
+    #: `analyzer_core` applique a `positions_by_model` sans filtrer par type.
+    #:
+    #: `waaagh_call` et `oath_selection` (08.04) portent un `unitId` de la forme `P<n>` : leur
+    #: segment est deja vide, mais par ACCIDENT — `P1` est absent d'`units_cache`, et le repli
+    #: rend "" faute de trouver l'entree. Les declarer ici dit la meme chose par intention.
+    #:
+    #: N'y entre PAS un type dont la ligne observe une unite reellement posee, meme quand son
+    #: segment ressort vide : `strategic_reserves_timeout` (20.04) detruit toute l'escouade, et
+    #: le vide y est une OBSERVATION juste (« l'escouade disparait »), pas une absence d'objet.
+    _TYPES_SANS_SEGMENT_MODELS: frozenset = frozenset({
+        "agent_decision", "waaagh_call", "oath_selection",
+    })
+
     _STEP_LOG_TYPE_MAP: Dict[str, str] = {
         "shoot": "shoot",
         "combat": "combat",
@@ -7635,15 +7653,20 @@ class W40KEngine(gym.Env):
                         "charge_roll_bonus",
                     )
                 )
-        # Préférer le segment pré-capturé (pile-in/consolidation gym) au segment lu en temps
-        # réel. Cf. `_gym_commit_fight_move` : le segment est capturé juste après commit_move
-        # pour éviter qu'un flush tardif (après enchaînement pile-in+consolidation dans le même
-        # `_fight_v11_gym_settle`) ne lise des positions post-consolidation pour une ligne
-        # pile-in.
-        details["models_segment"] = (
-            raw_log["models_segment"] if "models_segment" in raw_log
-            else self._models_segment_for_unit(unit_id)
-        )
+        # Trois regimes, lus ICI et nulle part ailleurs : le type qui n'observe rien l'emporte
+        # sur tout (`_TYPES_SANS_SEGMENT_MODELS` — un producteur qui apporterait un segment sur
+        # une ligne de choix se contredirait) ; sinon le segment PRE-CAPTURE l'emporte sur le
+        # temps reel. Cf. `_gym_commit_fight_move` : le segment est capturé juste après
+        # commit_move pour éviter qu'un flush tardif (après enchaînement pile-in+consolidation
+        # dans le même `_fight_v11_gym_settle`) ne lise des positions post-consolidation pour une
+        # ligne pile-in.
+        if str(raw_log.get("type") or "") in self._TYPES_SANS_SEGMENT_MODELS:  # get allowed
+            details["models_segment"] = ""
+        else:
+            details["models_segment"] = (
+                raw_log["models_segment"] if "models_segment" in raw_log
+                else self._models_segment_for_unit(unit_id)
+            )
         return details
 
     def _gym_commit_fight_move(
