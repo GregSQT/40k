@@ -62,7 +62,7 @@ from typing import Any, Dict, FrozenSet, Iterable, Tuple
 
 import pytest
 
-from services.game_saves import _MAGIC
+from services.game_saves import _MAGIC, SaveStore, _pack_record
 from services.game_snapshots import _GS_STATIC_KEYS
 
 PROJECT_ROOT = os.path.dirname(
@@ -489,7 +489,6 @@ _DATA_KEYED_MUTABLE_DICTS: FrozenSet[str] = frozenset({
 })
 
 
-
 def _fingerprint(keys: Iterable[str]) -> str:
     """Empreinte d'un ensemble de clés, indépendante de l'ordre d'écriture du littéral."""
     return hashlib.sha256("\n".join(sorted(keys)).encode("utf-8")).hexdigest()[:16]
@@ -497,8 +496,7 @@ def _fingerprint(keys: Iterable[str]) -> str:
 
 def _subkey_fingerprint(table: Dict[str, FrozenSet[str]]) -> str:
     """Empreinte d'une table parent → sous-clés, indépendante de l'ordre d'écriture du littéral."""
-    lignes = [f"{parent}\t{'|'.join(sorted(sub))}" for parent, sub in sorted(table.items())]
-    return hashlib.sha256("\n".join(lignes).encode("utf-8")).hexdigest()[:16]
+    return _fingerprint(f"{parent}\t{'|'.join(sorted(sub))}" for parent, sub in table.items())
 
 
 #: Empreinte des entrées FIGÉES ci-dessus — toutes sauf celle de la magic courante. Écrire TL05
@@ -791,6 +789,28 @@ def test_the_lock_covers_the_keys_that_slipped_through(
     )
 
 
+def _ecrire_save_sous_magic(tmp_path: Any, magic: bytes) -> SaveStore:
+    """Écrit une partie d'un seul enregistrement sous `magic`, et rend le store qui la porte.
+
+    Le cadre binaire vient de `_pack_record`, la fonction de PRODUCTION : un test qui le
+    réécrirait à la main resterait vert le jour où le cadre change, sur un fichier que le serveur
+    n'écrit plus. Seul l'en-tête est posé ici — c'est lui, et lui seul, que les refus ci-dessous
+    mettent à l'épreuve.
+    """
+    store = SaveStore(str(tmp_path / "parties"))
+    os.makedirs(store._dir, exist_ok=True)
+    nom = f"partie_{magic.decode().lower()}"
+    row = {
+        "meta": {"id": "20260101-000000", "kind": "manual", "turn": 1},
+        "state": {"game_state": {}, "engine_attrs": {}},
+    }
+    with open(os.path.join(store._dir, f"{nom}.pkl"), "wb") as f:
+        f.write(magic)
+        f.write(_pack_record(row))
+    store.set_current(nom)
+    return store
+
+
 def test_a_previous_format_is_refused_at_load(tmp_path: Any) -> None:
     """Une save au format précédent est refusée AVANT d'écraser la partie en cours.
 
@@ -800,24 +820,8 @@ def test_a_previous_format_is_refused_at_load(tmp_path: Any) -> None:
     TL03 dans `_LEGACY_MAGICS`, le refus dégénère en « format de fichier inconnu », indiscernable
     d'un fichier corrompu, et l'ancienne assertion passait quand même.
     """
-    import struct
-
-    from services.game_saves import SaveStore
-
-    store = SaveStore(str(tmp_path / "parties"))
-    os.makedirs(store._dir, exist_ok=True)
     # Fichier structurellement valide, mais écrit sous la magic précédente : seul l'en-tête décide.
-    meta = {"id": "20260101-000000", "kind": "manual", "turn": 1}
-    import pickle
-
-    meta_bytes = pickle.dumps(meta)
-    state_bytes = pickle.dumps({"game_state": {}, "engine_attrs": {}})
-    length = struct.Struct(">Q")
-    with open(os.path.join(store._dir, "partie_tl03.pkl"), "wb") as f:
-        f.write(b"W40KTL03")
-        f.write(length.pack(len(meta_bytes)) + meta_bytes)
-        f.write(length.pack(len(state_bytes)) + state_bytes)
-    store.set_current("partie_tl03")
+    store = _ecrire_save_sous_magic(tmp_path, b"W40KTL03")
 
     with pytest.raises(ValueError, match=f"écrite avant {_MAGIC.decode()}"):
         store.point("20260101-000000")
@@ -837,22 +841,7 @@ def test_the_2001_declaration_keys_are_named_in_the_refusal(tmp_path: Any) -> No
     message est indiscernable de celui des cinq autres formats périmés, et le joueur ne peut
     pas savoir ce qui manque à son fichier.
     """
-    import pickle
-    import struct
-
-    from services.game_saves import SaveStore
-
-    store = SaveStore(str(tmp_path / "parties"))
-    os.makedirs(store._dir, exist_ok=True)
-    meta = {"id": "20260101-000000", "kind": "manual", "turn": 1}
-    meta_bytes = pickle.dumps(meta)
-    state_bytes = pickle.dumps({"game_state": {}, "engine_attrs": {}})
-    length = struct.Struct(">Q")
-    with open(os.path.join(store._dir, "partie_tl05.pkl"), "wb") as f:
-        f.write(b"W40KTL05")
-        f.write(length.pack(len(meta_bytes)) + meta_bytes)
-        f.write(length.pack(len(state_bytes)) + state_bytes)
-    store.set_current("partie_tl05")
+    store = _ecrire_save_sous_magic(tmp_path, b"W40KTL05")
 
     with pytest.raises(ValueError) as excinfo:
         store.point("20260101-000000")
@@ -875,22 +864,7 @@ def test_the_burned_tl06_header_is_refused(tmp_path: Any) -> None:
     cas le fichier est accepté, dans le second le refus dégénère en « format de fichier inconnu »,
     indiscernable d'une corruption, et n'explique plus au joueur ce qui s'est passé.
     """
-    import pickle
-    import struct
-
-    from services.game_saves import SaveStore
-
-    store = SaveStore(str(tmp_path / "parties"))
-    os.makedirs(store._dir, exist_ok=True)
-    meta = {"id": "20260101-000000", "kind": "manual", "turn": 1}
-    meta_bytes = pickle.dumps(meta)
-    state_bytes = pickle.dumps({"game_state": {}, "engine_attrs": {}})
-    length = struct.Struct(">Q")
-    with open(os.path.join(store._dir, "partie_tl06.pkl"), "wb") as f:
-        f.write(b"W40KTL06")
-        f.write(length.pack(len(meta_bytes)) + meta_bytes)
-        f.write(length.pack(len(state_bytes)) + state_bytes)
-    store.set_current("partie_tl06")
+    store = _ecrire_save_sous_magic(tmp_path, b"W40KTL06")
 
     with pytest.raises(ValueError) as excinfo:
         store.point("20260101-000000")
