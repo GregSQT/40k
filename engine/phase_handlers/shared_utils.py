@@ -3491,6 +3491,16 @@ def drive_reactive_move_window(game_state: Dict[str, Any]) -> Dict[str, Any]:
             _new_occupied = set(
                 require_key(game_state["units_cache"][reactive_unit_id], "occupied_hexes")
             )
+            # SUR CE CHEMIN SEULEMENT — le refus n'inscrit rien. Lecture retenue du « Once per
+            # turn » de la datasheet (`config/unit_rules.json`) : la limite porte sur le mouvement
+            # ACCOMPLI, pas sur la proposition, donc une unité qui refuse reste éligible et la
+            # question revient au déclencheur suivant du même tour. ⚠️ Le corpus ne tranche PAS :
+            # « once per » n'apparaît que deux fois dans les 27 PDF de `Documentation/40k_rules/`
+            # — « once per battle » (15 Stratagems) et « USE LIMIT: Once per turn » (16 Actions,
+            # limite portant sur l'accomplissement). C'est une lecture ASSUMÉE, tranchée le
+            # 2026-09-10 ; son verrou est
+            # `test_le_refus_ne_consomme_pas_la_capacite_du_tour`. Déplacer cet appel avant le
+            # branchement refus/mouvement inverserait la règle du jeu sans qu'aucun nom ne change.
             reacted_set.add(reactive_unit_id)
             game_state["last_move_cause"] = "reactive_move"
             ability_display_name = _get_source_unit_rule_display_name_for_effect(

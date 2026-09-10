@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from engine.agent_decision import read_pending_agent_decision
+from engine.agent_decision import consume_pending_agent_decision, read_pending_agent_decision
 from engine.phase_handlers.shared_utils import (
     PENDING_REACTIVE_MOVE_KEY,
     _select_reactive_unit_order,
@@ -1112,3 +1112,66 @@ class TestReactiveMovePveSeats:
         assert decision["type"] == "reactive_move"
         assert int(decision["player"]) == 2
         assert (gs["unit_by_id"]["3"]["col"], gs["unit_by_id"]["3"]["row"]) == (10, 24)
+
+
+class TestRefusEtCapaciteDuTour:
+    """Le refus consomme-t-il le « Once per turn » de la datasheet ? NON — lecture assumée."""
+
+    def test_le_refus_ne_consomme_pas_la_capacite_du_tour(self, monkeypatch):
+        """Refuser n'est pas UTILISER : la question revient au déclencheur suivant du même tour.
+
+        LECTURE RETENUE (décision utilisateur du 2026-09-10) du « Once per turn » de
+        `config/unit_rules.json` : la limite porte sur le mouvement ACCOMPLI, pas sur la
+        proposition. Une unité qui refuse n'a rien utilisé, donc elle reste éligible.
+
+        ⚠️ Le corpus de règles ne tranche PAS cette lecture : recherche « once per » sur les
+        27 PDF de `Documentation/40k_rules/` — deux occurrences, « once per battle »
+        (15 Stratagems) et « USE LIMIT: Once per turn » (16 Actions, où la limite porte sur
+        l'accomplissement de l'action), aucune définition générale. La lecture est donc PORTÉE
+        PAR CE TEST et par le commentaire de `reacted_set.add` : sans lui, la seule trace du
+        choix serait l'endroit où une ligne est appelée, et l'inverse passerait pour un fix.
+
+        Conséquence de jeu verrouillée ici : tant que le joueur refuse, la question revient à
+        chaque mouvement ennemi qui finit à portée dans le même tour.
+        """
+        monkeypatch.setattr("random.randint", lambda a, b: 3)
+        mover = _unit(1, 1, 5, 10)
+        second_mover = _unit(3, 1, 3, 10)
+        reactive = _unit_with_reactive(2, 2, 7, 10)
+        gs = _make_game_state([mover, second_mover, reactive])
+        gs["reactive_decision_mode"] = "state"
+
+        first = maybe_resolve_reactive_move(gs, "1", 4, 10, 5, 10, "move", "normal")
+        assert first["waiting_for_player"] is True
+
+        # ORDRE DE PRODUCTION, celui de `W40KEngine._handle_agent_decision_action` : consommer la
+        # décision, écrire la réponse dans le canal que la fenêtre lit, reprendre la fenêtre.
+        # Sauter le premier pas laisse la décision armée, et `set_pending_agent_decision` REFUSE
+        # d'en empiler une seconde au déclencheur suivant — le test mesurerait ce refus au lieu
+        # de la capacité du tour.
+        consume_pending_agent_decision(
+            gs, decision_type="reactive_move", player=2, unit_id="2"
+        )
+        gs["reactive_decision_payload"]["2"] = {"action": "decline_reactive_move"}
+        declined = drive_reactive_move_window(gs)
+        assert declined["reactive_moves_declined"] == 1
+        # La réponse est CONSOMMÉE par la fenêtre. Sans cette vérification, le second
+        # déclencheur pourrait rejouer le refus resté en place au lieu de reposer la question,
+        # et l'assertion finale serait verte pour la mauvaise raison.
+        assert "2" not in gs["reactive_decision_payload"]
+        # Le refus n'inscrit rien au compteur du tour : c'est TOUTE la lecture retenue.
+        assert "2" not in gs["units_reacted_this_enemy_turn"]
+
+        # Second déclencheur, MÊME tour (`turn` inchangé) : une AUTRE unité ennemie finit son
+        # mouvement à portée, hors zone d'engagement de l'unité réactive.
+        again = maybe_resolve_reactive_move(gs, "3", 2, 10, 3, 10, "move", "normal")
+
+        assert again["waiting_for_player"] is True, (
+            "la question ne revient pas : le refus a consommé la capacité du tour"
+        )
+        decision = read_pending_agent_decision(gs)
+        assert decision is not None
+        assert str(decision["unit_id"]) == "2"
+        assert int(decision["player"]) == 2
+        # Elle n'a toujours pas bougé : deux questions, aucun mouvement.
+        assert (reactive["col"], reactive["row"]) == (7, 10)
