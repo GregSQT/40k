@@ -2178,6 +2178,22 @@ export const BoardWithAPI: React.FC = () => {
     const pending = apiProps.gameState?.pending_agent_decision ?? null;
     return pending && pending.type === "returned_models_profile" ? pending : null;
   })();
+  // Mouvement réactif (datasheet « Skulking Horrors ») — la SEULE décision posée pendant le tour
+  // de l'ADVERSAIRE : c'est le joueur qui réagit qui répond, pas celui qui vient de bouger. Sans
+  // ce panneau la partie se bloquerait, le moteur ayant rendu la main sur une question que
+  // personne n'afficherait. `player` est celui de la décision, jamais `current_player`.
+  const reactiveMoveDecision = (() => {
+    const pending = apiProps.gameState?.pending_agent_decision ?? null;
+    if (!pending || pending.type !== "reactive_move") {
+      return null;
+    }
+    // Le siège qui décide est celui de la DÉCISION, et lui seul voit ce panneau. En PvE le
+    // moteur tranche la sienne sur-le-champ (`_resolve_reactive_move_decision_for_ai_seats`) :
+    // sans ce filtre, l'humain se verrait poser la question du bot le temps d'un aller-retour
+    // d'état, et y répondrait à sa place.
+    const decidingSeat = apiProps.gameState?.player_types?.[String(pending.player)];
+    return decidingSeat === "ai" ? null : pending;
+  })();
   const oathSelectionPlayer = apiProps.gameState?.pending_oath_selection ?? null;
   const oathTargets =
     oathSelectionPlayer === null
@@ -4296,6 +4312,40 @@ export const BoardWithAPI: React.FC = () => {
           des candidats est contractuel. Le libellé affiche la valeur en points et l'effectif
           disponible, sans quoi le choix serait illisible : « Boyz » ou « Warboss » ne dit pas au
           joueur ce qu'il récupère. */}
+      {/* Mouvement réactif : posé pendant le tour de l'adversaire. Un bouton par candidat rendu
+          par le moteur, `declines` compris — refuser est un choix de la RÈGLE (« it CAN make a
+          Normal move »), pas un bouton d'annulation. `onCallWaaagh` est le verbe générique
+          `agent_decision` + `option_index` ; l'ordre des candidats est contractuel. */}
+      {reactiveMoveDecision && (
+        <div className="rule-choice-overlay">
+          <div className="deployment-panel__picker deployment-panel__picker--oath deployment-panel__picker--reactive-move">
+            <div className="deployment-panel__picker-title">
+              {`Reactive move — unit ${reactiveMoveDecision.unit_id} — player ${reactiveMoveDecision.player}`}
+            </div>
+            <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
+              <div className="deployment-panel__picker-tooltip">
+                {
+                  'An enemy unit ended a Normal, Advance or Fall Back move within 9" of this unit, and this unit is not within Engagement Range of any enemy. It CAN make a Normal move of up to D6" — it does not have to.\n\nChoose an intention, or decline and stay in place.'
+                }
+              </div>
+            </div>
+            <div className="deployment-panel__picker-actions deployment-panel__picker-actions--oath">
+              {reactiveMoveDecision.options.map((option, index) => (
+                <button
+                  key={option.label}
+                  type="button"
+                  className="deployment-panel__picker-close deployment-panel__picker-close--validate"
+                  onClick={() => {
+                    void apiProps.onCallWaaagh(index);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {returnedProfileDecision && (
         <div className="rule-choice-overlay">
           <div className="deployment-panel__picker deployment-panel__picker--oath">

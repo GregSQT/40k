@@ -30,6 +30,7 @@ from .shared_utils import (
     get_unit_position, require_unit_position, require_unit_from_cache,
     update_enemy_adjacent_caches_after_unit_move,
     maybe_resolve_reactive_move,
+    objective_distances_for_cells,
     unit_has_rule_effect as shared_unit_has_rule_effect,
     get_source_unit_rule_id_for_effect as shared_get_source_unit_rule_id_for_effect,
     get_source_unit_rule_display_name_for_effect as shared_get_source_unit_rule_display_name_for_effect,
@@ -5089,32 +5090,6 @@ def _move_after_shooting_enemy_distances(
     }
 
 
-def _move_after_shooting_objective_distances(
-    game_state: Dict[str, Any],
-    destinations: List[Tuple[int, int]],
-) -> Optional[Dict[Tuple[int, int], float]]:
-    """Distance de chaque destination à l'AIRE d'objectif la plus proche (14.02), ou ``None``.
-
-    ``None`` quand le plateau ne porte aucun objectif : l'intention correspondante est retirée.
-
-    Par les cartes de `objective_distance`, pas par une double boucle destinations × hexes : les
-    aires d'un scénario 500 pts en comptent plusieurs milliers, et un armement paie autant de
-    destinations qu'un D6" en ouvre. Mesuré à 0,494 s par armement avec la double boucle, contre
-    une lecture de tableau ici — et la carte, elle, est cachée par contenu d'un épisode à l'autre.
-    """
-    from engine.objective_distance import objective_distance_maps
-
-    distance_maps = objective_distance_maps(game_state)
-    if not distance_maps:
-        return None
-    return {
-        (int(col), int(row)): float(
-            min(int(distance_map[int(col), int(row)]) for distance_map in distance_maps)
-        )
-        for (col, row) in destinations
-    }
-
-
 def arm_move_after_shooting_decision(
     game_state: Dict[str, Any],
     unit: Dict[str, Any],
@@ -5145,7 +5120,7 @@ def arm_move_after_shooting_decision(
     unit_position = require_unit_position(unit, game_state)
     scored_cells = [*destinations, unit_position]
     enemy_distances = _move_after_shooting_enemy_distances(game_state, unit, scored_cells)
-    objective_distances = _move_after_shooting_objective_distances(game_state, scored_cells)
+    objective_distances = objective_distances_for_cells(game_state, scored_cells)
 
     intent_destinations: List[Tuple[int, Tuple[int, int]]] = []
     if enemy_distances is not None:
@@ -5290,7 +5265,11 @@ def _apply_move_after_shooting(
     # _touch_unit_los (choke-point a′). build_unit_los_cache reconstruit le los_cache local ensuite.
     build_unit_los_cache(game_state, unit_id_str)
     _invalidate_all_destination_pools_after_movement(game_state)
-    maybe_resolve_reactive_move(
+    # Le retour n'est plus jetable : depuis que le refus est une décision de joueur, cette fenêtre
+    # peut SUSPENDRE le moteur en attendant l'adversaire. Le jumeau `movement_handlers` propage
+    # déjà `waiting_for_player` ; ne pas le faire ici laisserait l'activation se terminer sous une
+    # décision armée, et la phase avancerait fenêtre ouverte.
+    reactive_result = maybe_resolve_reactive_move(
         game_state=game_state,
         moved_unit_id=unit_id_str,
         from_col=orig_col,
@@ -5340,6 +5319,7 @@ def _apply_move_after_shooting(
         "move_distance": move_distance,
         "ability_display_name": source_rule_display_name.strip(),
         "source_rule_id": source_rule_id.strip(),
+        "reactive_waiting_for_player": bool(reactive_result["waiting_for_player"]),
     }
 
 def _handle_shooting_end_activation(game_state: Dict[str, Any], unit: Dict[str, Any],

@@ -5290,7 +5290,11 @@ def movement_destination_selection_handler(game_state: Dict[str, Any], unit_id: 
         "reactive_moves_declined": reactive_result["reactive_moves_declined"],
         "is_fly_move": is_fly_move,
         "activation_complete": True,
-        "waiting_for_player": False,  # Movement is complete, no waiting needed
+        # Le mouvement de CETTE unité est fini, mais la fenêtre réactive qu'il vient d'ouvrir peut
+        # attendre une décision de l'ADVERSAIRE (datasheet `reactive_move`, capacité optionnelle).
+        # Ce champ valait `False` sans condition : le siège qui doit répondre n'était jamais
+        # prévenu, et la question restait posée sans que personne ne la voie.
+        "waiting_for_player": bool(reactive_result["waiting_for_player"]),
         "reset_mode": "select",
         "clear_selected_unit": True
     })
