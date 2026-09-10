@@ -105,8 +105,9 @@ def test_build_step_log_details_models_segment(
 
     Le type qui n'observe aucune position l'emporte sur tout ; sinon `raw_log['models_segment']`
     prime sur `_models_segment_for_unit` ; sinon temps réel. Sans la branche
-    `if 'models_segment' in raw_log`, le cas [1] échoue : _Bridge renvoie LIVE_POST_CONSO mais le
-    capturé (pré-consolidation) aurait dû être conservé. Sans la branche de type, le cas [2]
+    `if 'models_segment' in raw_log`, le cas [0] échoue : _Bridge renvoie LIVE_POST_CONSO mais le
+    capturé (pré-consolidation) aurait dû être conservé — c'est le cas [0] qui porte les deux
+    sources, [1] n'a que le repli et resterait vert. Sans la branche de type, le cas [2]
     ressort avec des positions que la ligne n'a jamais observées.
     """
 
