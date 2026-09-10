@@ -4268,12 +4268,6 @@ class W40KEngine(gym.Env):
         d'état, pas un défaut de journal — le dépôt a déjà payé un diagnostic entier pour un
         `log_action` qui avalait ses exceptions.
         """
-        action_logs = self.game_state.get("action_logs")  # get allowed : absent hors partie
-        if not isinstance(action_logs, list):
-            raise TypeError(
-                "game_state['action_logs'] doit etre une liste avant la journalisation d'une "
-                f"decision agent, recu {type(action_logs).__name__}"
-            )
         # L'ENTREE elle-meme est batie par `append_agent_decision_log` (`action_log_utils`), et non
         # ici : `append_action_log` REFUSE desormais le type `agent_decision`, de sorte qu'aucune
         # autre branche ne puisse en produire une — y compris en posant le type par affectation,

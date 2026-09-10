@@ -426,7 +426,6 @@ class _SondeParFonction(ast.NodeVisitor):
         """
         if node.id in _SITES_D_ECRITURE:
             self._releve(node.id)
-        self.generic_visit(node)
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         """L'IMPORT du symbole, alias compris — un alias rend l'appel invisible, pas l'import.
@@ -438,7 +437,6 @@ class _SondeParFonction(ast.NodeVisitor):
         for alias in node.names:
             if alias.name in _SITES_D_ECRITURE:
                 self._releve(alias.name)
-        self.generic_visit(node)
 
     def visit_Dict(self, node: ast.Dict) -> None:
         """Le LITTÉRAL, et non l'appel à `append_action_log` : le dict porte le type.
