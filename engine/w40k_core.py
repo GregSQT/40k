@@ -20,6 +20,8 @@ from shared.data_validation import (
     require_non_negative_int,
     require_positive_int,
     require_present,
+    HAZARD_CONTEXT_EXHORTATION,
+    HAZARD_CONTEXT_TAGS,
 )
 from engine.constants import (
     DRAW_WINNER,
@@ -6543,22 +6545,37 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers.shared_utils import allocate_mortal_wounds
         from engine.action_log_utils import append_action_log
         units_cache = require_key(self.game_state, "units_cache")
-        player = int(require_key(units_cache[squad_id], "player"))
         _exhort_details: List[Dict[str, Any]] = []
         suffix = " [auto: cible unique]" if auto else ""
+        # MEME type et MEME forme de ligne que Hold Still (`_apply_batch_mortal_wounds`) : deux
+        # capacites qui infligent des blessures mortelles (06.02) ne peuvent pas se journaliser
+        # differemment. Le type `exhortation_de_rage` qui vivait ici n'etait dans aucune entree
+        # de `_STEP_LOG_TYPE_MAP` : la ligne etait ecartee du journal en silence, et les
+        # blessures ne laissaient derriere elles qu'un event `dead` sans cause.
+        _tgt_col, _tgt_row = require_unit_position(str(target_eid), self.game_state)
         append_action_log(self.game_state, {
-            "type": "exhortation_de_rage",
+            "type": "mortal_wounds_ability",
             "message": (
-                f"[EXHORTATION DE RAGE] {squad_id} -> {target_eid}: "
-                f"{mw_count} MW (D6={d6}){suffix}"
+                f"Unit {target_eid}({_tgt_col},{_tgt_row}) SUFFERS {mw_count} Mortal Wounds "
+                f"{HAZARD_CONTEXT_TAGS[HAZARD_CONTEXT_EXHORTATION]} [FROM:{squad_id}]"
+                f" (D6={d6}){suffix}"
             ),
             "turn": self.game_state.get("turn", 0),  # get allowed
             "phase": "fight",
-            "unitId": squad_id,
-            "targetId": target_eid,
-            "player": player,
-            "exhortationMortalWounds": mw_count,
-            "exhortationDetails": _exhort_details,
+            # L'unite de la ligne est celle QUI ENCAISSE, comme sur toute ligne SUFFERS :
+            # `_build_step_log_details` en tire `unit_with_coords`, et l'analyzer y lit la
+            # cible a qui retirer les points de vie. L'attaquant garde sa cle a part.
+            "unitId": target_eid,
+            "attackerId": squad_id,
+            "player": int(require_key(
+                require_key(self.game_state, "units_cache")[str(target_eid)], "player")),
+            "col": _tgt_col,
+            "row": _tgt_row,
+            "hazardousMortalWounds": mw_count,
+            "mortalWoundSourceId": str(squad_id),
+            "hazardContext": HAZARD_CONTEXT_EXHORTATION,
+            "hazardDetails": _exhort_details,
+            "result": f"{mw_count} MW",
         })
         allocate_mortal_wounds(self.game_state, target_eid, mw_count, True, _exhort_details)
         # §24.08 Deadly Demise : la cascade peut tuer l'attaquant lui-même (engagé à ≤6").
@@ -6780,6 +6797,13 @@ class W40KEngine(gym.Env):
         "shoot": "shoot",
         "combat": "combat",
         "hazard": "hazardous",
+        # Blessures mortelles infligees par une CAPACITE (06.02) : Hold Still and Say Aargh,
+        # Exhortation de Rage. Meme formateur que 24.15 — la ligne `SUFFERS N Mortal Wounds`
+        # est deja celle de toutes les blessures mortelles — mais un tag distinct, pose depuis
+        # `hazardContext`. Sans cette entree, les deux capacites tombaient sur le `continue`
+        # « type sans formateur » : leurs blessures n'apparaissaient NULLE PART dans step.log,
+        # seuls des events `dead` sans cause en temoignaient.
+        "mortal_wounds_ability": "hazardous",
         "charge": "charge",
         "charge_fail": "charge_fail",
         "charge_impact": "charge_impact",
@@ -7469,6 +7493,15 @@ class W40KEngine(gym.Env):
         _hazard_dice = raw_log.get("hazardousDiceRolls")  # get allowed
         if _hazard_dice is not None:
             details["hazardous_dice_rolls"] = _hazard_dice
+        # 06.02 : D6 ayant produit le nombre de blessures mortelles d'une capacite (un par
+        # blessure critique pour Hold Still). Sans cette traduction, le journal donne le total
+        # sans jamais dire de combien de jets il vient — donc sans permettre de le controler.
+        _mw_dice = raw_log.get("mortalWoundDice")  # get allowed : absent hors capacites 06.02
+        if _mw_dice is not None:
+            details["mortal_wound_dice"] = _mw_dice
+        _mw_src = raw_log.get("mortalWoundSourceId")  # get allowed : absent hors capacites 06.02
+        if _mw_src is not None:
+            details["mortal_wound_source_id"] = _mw_src
         target_col = raw_log.get("targetCol")  # get allowed
         target_row = raw_log.get("targetRow")  # get allowed
         if target_col is not None and target_row is not None:

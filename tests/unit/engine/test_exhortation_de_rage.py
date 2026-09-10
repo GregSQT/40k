@@ -58,11 +58,17 @@ _MW_MODELS = {
 
 def _gs():
     chap_unit = {"player": 1, "HP_CUR": 4}
+    # col/row sur chaque unite : la ligne `SUFFERS N Mortal Wounds` nomme la VICTIME et ses
+    # coordonnees, comme toute ligne de blessures mortelles. `_fight_build_valid_target_pool`
+    # ne rend que des unites du cache, donc une cible sans position est un etat que la
+    # production ne produit pas — la fixture doit le refleter.
     return {
         "units_cache": {
             "CHAP": chap_unit,
-            "ENEMY1": {"player": 0, "HP_CUR": 4},
-            "ENEMY2": {"player": 0, "HP_CUR": 1},
+            "ENEMY1": {"player": 0, "HP_CUR": 4, "col": 5, "row": 5},
+            "ENEMY2": {"player": 0, "HP_CUR": 1, "col": 7, "row": 5},
+            "ENEMY": {"player": 0, "HP_CUR": 4, "col": 5, "row": 5},
+            "ONLY_ENEMY": {"player": 0, "HP_CUR": 4, "col": 5, "row": 5},
         },
         "models_cache": {k: dict(v) for k, v in _MW_MODELS.items()},
         "squad_models": {"ENEMY1": ["e1a", "e1b"], "ENEMY2": ["e2a"]},

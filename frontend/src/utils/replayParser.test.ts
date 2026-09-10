@@ -685,6 +685,43 @@ describe("replayParser", () => {
     expect(Object.keys(unit1!.occupied_hexes_by_model ?? {}).sort()).toEqual(["1#0", "1#1"]);
   });
 
+  // 24.10 en MÊLÉE : `relic_greataxe` et `thunder_hammer_terminator` portent DEVASTATING
+  // WOUNDS. La branche FOUGHT n'avait pas la reconnaissance que la branche SHOT possède, donc
+  // `saveMatch` restait nul et la blessure — pourtant réussie, et dont les dégâts étaient
+  // appliqués juste au-dessus — repartait marquée FAIL.
+  it("ne marque pas FAIL une blessure de mêlée dont la sauvegarde est sautée", () => {
+    const text = [
+      "=== EPISODE 1 START ===",
+      "Scenario: demo",
+      "Bot: RandomBot",
+      `Rules: ${VALID_RULES_JSON}`,
+      "[12:00:00] Board: cols=10 rows=10 inches_to_subhex=1 hex_radius=2.78 margin=1",
+      "Unit 1 (Intercessor) P1: Starting position (0, 0), HP_MAX=5",
+      "Unit 2 (Termagant) P2: Starting position (2, 0), HP_MAX=4",
+      "[12:00:00] T1 P1 DEPLOYMENT : Unit 1(-1,-1) DEPLOYED from (-1,-1) to (0,0)",
+      "[12:00:01] T1 P2 DEPLOYMENT : Unit 2(-1,-1) DEPLOYED from (-1,-1) to (1,0)",
+      "[12:00:02] T1 P1 FIGHT : Unit 1(0,0) FOUGHT Unit 2(1,0) with [Thunder Hammer]" +
+        " - Hit 4(3+) - Wound 6(4+)" +
+        " - Save [DEVASTATING WOUNDS] - Dmg:2HP [FIGHT_SUBPHASE:fight] [SUCCESS]",
+      "EPISODE END: Winner=1, Method=elimination",
+    ].join("\n");
+
+    const fight = parse_log_file_from_text(text).episodes[0].actions.find(
+      (a) => (a as { type?: string }).type === "fight"
+    ) as {
+      wound_result?: string;
+      save_skipped?: boolean;
+      save_skip_reason?: string;
+      devastating_wounds_applied?: boolean;
+      damage?: number;
+    };
+    expect(fight.wound_result).toBe("WOUND");
+    expect(fight.save_skipped).toBe(true);
+    expect(fight.save_skip_reason).toBe("DEVASTATING_WOUNDS");
+    expect(fight.devastating_wounds_applied).toBe(true);
+    expect(fight.damage).toBe(2);
+  });
+
   it("lève sur une zone OBJECTIVE CONTROL malformée", () => {
     const text = [
       ...CONTROL_LOG_HEAD,

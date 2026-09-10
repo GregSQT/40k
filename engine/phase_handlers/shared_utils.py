@@ -14,7 +14,9 @@ if TYPE_CHECKING:
     from engine.hex_utils import Socle
     from engine.phase_handlers.attack_sequence import WeaponAttackProfile
 
-from shared.data_validation import ConfigurationError, require_key, HAZARD_CONTEXT_DESPERATE_ESCAPE
+from shared.data_validation import (
+    ConfigurationError, require_key, HAZARD_CONTEXT_DESPERATE_ESCAPE, HAZARD_CONTEXT_TAGS,
+)
 from engine.utils.weapon_helpers import (
     melee_weapons,
     ranged_weapons,
@@ -11649,6 +11651,11 @@ def _manual_roll_intent(
         # Waaagh! de la CIBLE, lui, joue aussi au tir : la sauvegarde invulnerable 5+ octroyee
         # s oppose a toutes les attaques, pas seulement a la melee.
         "waaagh_target_invul": _waaagh_target_invul,
+        # Blessures mortelles dues par l intent (06.02), agregees par lot et infligees APRES
+        # les degats normaux. Aucune regle de TIR n en produit dans ce depot : la cle est
+        # ecrite `None` par le producteur plutot qu omise, meme regime que `waaagh_melee_bonus`
+        # ci-dessus — l affirmation vient du site qui sait, pas d une cle absente.
+        "pending_mortal_wounds": None,
         "shot_records": rolled["shot_records"], "pending_wounds": rolled["pending_wounds"],
         "counts": rolled["counts"],
     }
@@ -12074,12 +12081,14 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
         advanced_batch = False
         while True:
             if batch["pool_index"] >= len(batch["pool"]):
+                _apply_batch_mortal_wounds(game_state, alloc, batch)
                 alloc["current_batch_index"] += 1
                 advanced_batch = True
                 break
             grp = _current_live_group(game_state, batch)
             if grp is None:
                 _mark_manual_overkill_wasted(batch)  # cible wipe : tirs restants perdus
+                _apply_batch_mortal_wounds(game_state, alloc, batch)
                 alloc["current_batch_index"] += 1
                 advanced_batch = True
                 break
@@ -12118,6 +12127,85 @@ def _manual_allocation_step(game_state: Dict[str, Any], ctx: ManualAllocCtx) -> 
         if not advanced_batch:
             break
     return _finalize_manual_allocation(game_state, ctx)
+
+
+def _apply_batch_mortal_wounds(
+    game_state: Dict[str, Any], alloc: Dict[str, Any], batch: Dict[str, Any]
+) -> None:
+    """Inflige les blessures mortelles DUES par le lot, une fois ses degats normaux resolus.
+
+    06.02, « MORTAL WOUNDS AND NORMAL DAMAGE » : « When resolving attack dice, if those attacks
+    inflict a mixture of both mortal wounds and normal damage, resolve all of the normal damage
+    first, then resolve all of the mortal wounds. » Les capacites qui en produisent (Hold Still
+    and Say Aargh) les posaient jusqu ici a l instant du JET, donc avant la construction meme
+    des lots : la cible pouvait mourir des blessures mortelles avant qu une seule sauvegarde
+    n ait ete jetee, ce qui perdait les attaques normales du meme lot en « excess attacks ».
+
+    Appelee aux DEUX sorties de lot (pool epuise, ou cible entierement detruite) et idempotente :
+    la cle est remise a None des le premier passage, si bien qu une reprise d allocation (le
+    defenseur humain rend la main plusieurs fois) ne peut pas les infliger deux fois.
+
+    Cible deja detruite : rien a infliger, donc aucune ligne — `allocate_mortal_wounds` s arrete
+    de toute facon sur `select_eligible_models` vide (06.02, « until … that unit is destroyed »).
+    """
+    pending = batch["pending_mortal_wounds"]
+    if pending is None:
+        return
+    batch["pending_mortal_wounds"] = None
+    target_sid = str(batch["target_sid"])
+    if not is_unit_alive(target_sid, game_state):
+        return
+    dice = [int(d) for d in require_key(pending, "dice")]
+    total = sum(dice)
+    ability = str(require_key(pending, "ability"))
+    if ability not in HAZARD_CONTEXT_TAGS:
+        raise ValueError(
+            f"capacite de blessures mortelles sans tag de journal : {ability!r} — "
+            f"attendu l un de {sorted(HAZARD_CONTEXT_TAGS)}"
+        )
+    col, row = require_unit_position(target_sid, game_state)
+    details: List[Dict[str, Any]] = []
+    # Ligne emise AVANT l attribution, comme le jet [HAZARDOUS] : `append_action_log` mute
+    # l entree en place, donc `details` vient completer CETTE ligne pendant l attribution
+    # (figurine allouee, FNP) au lieu d en creer une seconde.
+    append_action_log(game_state, {
+        "type": "mortal_wounds_ability",
+        # [FROM:<unite>] : ces blessures mortelles viennent d'un ADVERSAIRE, la ou [HAZARDOUS]
+        # et [DESPERATE ESCAPE] sont auto-infligees. Sans ce token, l'analyzer crediterait la
+        # victime de ses propres morts et le tableau des kills serait faux.
+        "message": (
+            f"Unit {target_sid}({col},{row}) SUFFERS {total} Mortal Wounds "
+            f"{HAZARD_CONTEXT_TAGS[ability]} [FROM:{alloc['attacker_squad_id']}]"
+        ),
+        "turn": require_key(game_state, "turn"),
+        "phase": require_key(game_state, "phase"),
+        "unitId": target_sid,
+        "player": int(require_key(
+            require_key(game_state, "units_cache")[target_sid], "player")),
+        "col": col,
+        "row": row,
+        "hazardousMortalWounds": total,
+        # Cle DISTINCTE de `hazardousDiceRolls` : la, `Roll:` designe les des de HASARD de
+        # 24.15 (1-2 = echec), ici les D6 qui donnent le NOMBRE de blessures mortelles. Deux
+        # sens sous une meme cle auraient fait sommer les seconds par le controle de validite
+        # que l'analyzer applique aux premiers.
+        "mortalWoundDice": dice,
+        # Unite SOURCE, rendue `[FROM:<id>]` par le formateur : ces blessures mortelles viennent
+        # d'un ADVERSAIRE, la ou [HAZARDOUS] 24.15 et [DESPERATE ESCAPE] 09.07 sont
+        # auto-infligees. Sans elle, l'analyzer crediterait la victime de ses propres morts.
+        "mortalWoundSourceId": str(alloc["attacker_squad_id"]),
+        "hazardContext": ability,
+        "hazardDetails": details,
+        "result": f"{total} MW",
+    })
+    allocate_mortal_wounds(game_state, target_sid, total, True, details)
+    summary = alloc["summary"]
+    for _d in details:
+        if _d.get("fnpSaved"):  # get allowed : absent = blessure non sauvee
+            continue
+        summary["damage_total"] += 1
+        if _d["died"]:
+            summary["models_killed"] += 1
 
 
 def _count_selected_hazardous_weapons(
@@ -12202,6 +12290,7 @@ def _build_manual_allocation(
     weapon_groups: List[Dict[str, Any]] = []
     group_index_by_key: Dict[tuple, int] = {}
     batch_pool_by_gidx: Dict[int, List[Dict[str, Any]]] = {}
+    mw_pending_by_gidx: Dict[int, Dict[str, Any]] = {}
 
     for intent in intents:
         r = roll_intent_fn(game_state, intent, targets_meta)
@@ -12360,6 +12449,24 @@ def _build_manual_allocation(
         if attacker_mid not in g["shooter_mids"]:
             g["shooter_mids"].append(attacker_mid)
 
+        # Blessures MORTELLES dues par cet intent (06.02), accumulees sur le meme profil que
+        # les blessures normales : elles seront infligees APRES elles, a la fermeture du lot
+        # (« resolve all of the normal damage first, then resolve all of the mortal wounds »).
+        # `require_key` et non `.get` : les deux rollers ecrivent la cle, un producteur qui
+        # l oublierait leve au lieu de valoir « aucune blessure mortelle ».
+        _mw_intent = require_key(r, "pending_mortal_wounds")
+        if _mw_intent is not None:
+            _mw_group = mw_pending_by_gidx.setdefault(
+                gidx, {"ability": require_key(_mw_intent, "ability"), "dice": []}
+            )
+            if _mw_group["ability"] != _mw_intent["ability"]:
+                raise ValueError(
+                    "deux capacites de blessures mortelles differentes sur le meme profil "
+                    f"d arme (gidx={gidx}) : {_mw_group['ability']!r} et "
+                    f"{_mw_intent['ability']!r} — la ligne de journal ne peut en nommer qu une"
+                )
+            _mw_group["dice"].extend(require_key(_mw_intent, "dice"))
+
         # Blessures accumulees PAR PROFIL d arme (gidx) : chaque profil = un lot resolu
         # independamment (regle 04.03). Triees save croissant a la construction du lot.
         if gidx not in batch_pool_by_gidx:
@@ -12393,6 +12500,9 @@ def _build_manual_allocation(
             pool = batch_pool_by_gidx.get(gidx, [])  # get allowed
             if not pool:
                 continue  # ce profil n a inflige aucune blessure -> aucun lot a resoudre
+            # 06.02 : les blessures mortelles du profil voyagent AVEC son lot. Un crit est
+            # toujours une blessure, donc un profil qui en produit a forcement un pool non
+            # vide — aucune blessure mortelle ne peut se perdre sur le `continue` ci-dessus.
             # Regle 05.04 (INFLICT DAMAGE) : du save_roll le plus bas au plus haut (tri
             # stable, l ordre d attaque departage les egalites). DEVASTATING_WOUNDS (24.10) :
             # les blessures MORTELLES (crit sans save) sont infligees « after resolving any
@@ -12406,6 +12516,9 @@ def _build_manual_allocation(
                 "alloc_groups": None,  # cree au debut du lot (etat courant de la cible)
                 "declared_order": None, "current_group_index": 0,
                 "current_model_id": None, "pool": pool_sorted, "pool_index": 0,
+                # 06.02 : infligees a la FERMETURE du lot, apres tous ses degats normaux.
+                # `None` quand aucune capacite n en produit sur ce profil.
+                "pending_mortal_wounds": mw_pending_by_gidx.get(gidx),  # get allowed
             })
 
     summary["targets_meta"] = targets_meta
