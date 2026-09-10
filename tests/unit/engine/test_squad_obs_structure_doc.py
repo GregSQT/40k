@@ -132,6 +132,15 @@ def test_weapon_profile_rules_are_documented():
     assert not missing, "regles d'armes absentes de la doc : " + ", ".join(missing)
 
 
+def test_combi_group_markers_are_documented():
+    """Les slots `*_wpn_rule_ids` portent DEUX vocabulaires : les regles d'arme et les marqueurs
+    de groupe combi. Le second est un symbole que rien d'autre n'explique — un lecteur de la doc
+    qui rencontre l'id 64 dans un slot de regles doit y trouver ce qu'il designe."""
+    text = _doc()
+    for token in ("COMBI_WEAPON", "COMBI_GROUP_MARKER_NAMES", "COMBI_GROUP_MARKER_COUNT"):
+        assert token in text, f"{token} absent d'observation_et_actions.md"
+
+
 def _structure_overview() -> str:
     """Le seul bloc « Vue d'ensemble », isole.
 
