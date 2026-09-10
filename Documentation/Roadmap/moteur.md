@@ -168,7 +168,9 @@ chaque réponse ; la route humaine REFUSE une question posée à un siège pilot
 siège humain, par la même lecture de `player_types` que l'avertissement 20.04.
 
 Le recalage au reset n'est pas décoratif : la tête de file n'est pas toujours le joueur 1, ses
-unités inéligibles (FORTIFICATION, plafond de 50 %) étant retirées sans réponse.
+unités inéligibles (FORTIFICATION, plafond de 50 %) étant retirées sans réponse. Même raison au
+`change_roster`, TROISIÈME site où la file est (re)bâtie : elle y repart d'un autre roster alors
+que le déployeur d'avant le remplacement est restauré tel quel.
 
 **Aucune clé de save nouvelle**, donc aucun bump de format : seuls `current_deployer` et
 `current_player` — déjà sauvegardés — changent de valeur.
