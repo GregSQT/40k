@@ -148,12 +148,26 @@ def bot_action_for_pending_choice(
     « Objectif ». Ce n'est pas une divergence de baseline : l'heuristique supprimée rendait dans
     ce cas `destinations[0]`, la première case du pool BFS, un départage arbitraire que rien n'a
     jamais mesuré. Ce qui compte ici est que la réponse reste DÉTERMINISTE, et elle l'est.
+
+    `reactive_move` relève de la MÊME exception, et pour la même raison : le moteur le calculait
+    pour le bot (`_select_reactive_destination`, la case du pool la plus proche de l'ennemi qui
+    vient de bouger) jusqu'à ce que le refus devienne une décision de joueur le 2026-09-09. Son
+    `CHOICE_0` porte « Pression », défini sur ce même ennemi déclencheur, donc exactement
+    l'ancienne destination. La différence avec le tir : ici les deux intentions orientées sur
+    l'ennemi sont TOUJOURS constructibles, puisque le déclencheur est par définition sur la table
+    — `CHOICE_0` ne peut pas glisser sur « Objectif ». Ce que le tirage aurait coûté est mesurable
+    et non théorique : l'adversaire de référence aurait tantôt chargé, tantôt fui, tantôt refusé
+    de réagir, et deux runs successifs n'auraient plus mesuré la même baseline.
     """
     decision = read_pending_agent_decision(game_state)
-    if decision is not None and require_key(decision, "type") == "move_after_shooting":
+    if decision is not None and require_key(decision, "type") in (
+        "move_after_shooting",
+        "reactive_move",
+    ):
         if not bool(action_mask[mi.CHOICE_BASE]):
             raise RuntimeError(
-                f"{wrapper}: decision move_after_shooting en attente sans CHOICE_0 ouvert."
+                f"{wrapper}: decision {require_key(decision, 'type')} en attente sans "
+                "CHOICE_0 ouvert."
             )
         return int(mi.CHOICE_BASE)
     # SECONDE exception, et pour un motif de REGLE, pas de baseline : « 20.01 est une decision de

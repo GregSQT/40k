@@ -6,9 +6,12 @@ from typing import Any, Dict, List
 
 import pytest
 
+from engine.agent_decision import consume_pending_agent_decision, read_pending_agent_decision
 from engine.phase_handlers.shared_utils import (
+    PENDING_REACTIVE_MOVE_KEY,
     _select_reactive_unit_order,
     build_units_cache,
+    drive_reactive_move_window,
     maybe_resolve_reactive_move,
 )
 from tests._state_invariants import turn_state_invariants, unit_invariants
@@ -70,6 +73,10 @@ def _make_game_state(units: List[Dict[str, Any]], current_player: int = 1) -> Di
         # (`W40KEngine.reset`, `terrain_areas or []`), donc un `game_state` qui l'omet décrit un
         # état impossible en production. Vide = plateau sans terrain, ce que ces tests veulent.
         "terrain_areas": [],
+        # Même statut que `terrain_areas` : le moteur pose TOUJOURS `objectives`, donc un
+        # game_state qui l'omet décrit un état impossible en production. Vide = plateau sans
+        # objectif, ce qui retire simplement l'intention « Objectif » des candidats réactifs.
+        "objectives": [],
         "units": units,
         "unit_by_id": {str(u["id"]): u for u in units},
         "console_logs": [],
@@ -608,3 +615,563 @@ class TestReactivePoolCoherency:
         )
 
         assert dests, "pool vide : la capacité est éteinte par un état antérieur au mouvement"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mode `state` — le refus est rendu au joueur (datasheet : « it CAN make a Normal move »)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _suspended_window(monkeypatch, roll: int = 3):
+    """Ouvre une fenêtre réactive en mode `state` et la laisse SUSPENDUE sur sa question.
+
+    Rend `(gs, unite_reactive, resultat)`. L'unité 2 (joueur 2) porte la règle et réagit au
+    mouvement de l'unité 1 (joueur 1), qui finit en (5,10) à 2 hexes d'elle.
+    """
+    monkeypatch.setattr("random.randint", lambda a, b: roll)
+    units = [_unit(1, 1, 5, 10), _unit_with_reactive(2, 2, 7, 10)]
+    gs = _make_game_state(units)
+    gs["reactive_decision_mode"] = "state"
+    result = maybe_resolve_reactive_move(gs, "1", 4, 10, 5, 10, "move", "normal")
+    return gs, units[1], result
+
+
+class TestReactiveMoveStateDecision:
+
+    def test_state_mode_poses_the_question_and_keeps_the_window_open(self, monkeypatch):
+        """La capacité étant optionnelle, le moteur POSE la question au lieu de trancher."""
+        gs, reactive, result = _suspended_window(monkeypatch)
+
+        assert result["waiting_for_player"] is True
+        assert result["reactive_moves_applied"] == 0
+        # VERT VACANT : sans ces deux-là, un retour « en attente » pourrait accompagner une
+        # fenêtre déjà refermée, et la reprise n'aurait plus rien à reprendre.
+        assert gs["reaction_window_active"] is True
+        assert gs[PENDING_REACTIVE_MOVE_KEY]["queue"] == ["2"]
+
+        decision = read_pending_agent_decision(gs)
+        assert decision is not None
+        assert decision["type"] == "reactive_move"
+        # La décision appartient au joueur qui RÉAGIT, pas à celui dont c'est le tour.
+        assert int(decision["player"]) == 2
+        assert int(decision["player"]) != int(gs["current_player"])
+        assert str(decision["unit_id"]) == "2"
+        # Tant que personne n'a répondu, l'unité n'a pas bougé.
+        assert (reactive["col"], reactive["row"]) == (7, 10)
+
+    def test_exactly_one_candidate_declines(self, monkeypatch):
+        """`declines` est ce qui rend « ne pas réagir » discernable pour l'agent."""
+        gs, _reactive, _result = _suspended_window(monkeypatch)
+        options = read_pending_agent_decision(gs)["options"]
+
+        declining = [option for option in options if option["declines"]]
+        assert len(declining) == 1
+        assert declining[0]["payload"]["action"] == "decline_reactive_move"
+        # Un choix à candidat unique n'est pas un choix : les intentions doivent exister aussi.
+        assert len(options) >= 2
+
+    def test_le_premier_candidat_est_la_destination_de_pression(self, monkeypatch):
+        """`CHOICE_0` DOIT rester la case la plus proche de l'ennemi déclencheur.
+
+        Contrat dont dépend `ai/env_wrappers.bot_action_for_pending_choice` : le bot répond
+        `CHOICE_0` pour retrouver EXACTEMENT l'ancienne heuristique déterministe
+        (`_select_reactive_destination`). Si l'ordre des intentions changeait, l'adversaire de
+        référence se mettrait à fuir ou à refuser, et deux runs ne mesureraient plus la même
+        baseline — sans qu'aucun autre test ne le voie.
+        """
+        from engine.combat_utils import calculate_hex_distance
+
+        gs, _reactive, _result = _suspended_window(monkeypatch)
+        options = read_pending_agent_decision(gs)["options"]
+
+        assert options[0]["label"].startswith("Pression")
+        assert options[0]["declines"] is False
+        first = options[0]["payload"]["destination"]
+        # L'ennemi déclencheur a fini son mouvement en (5,10).
+        best = min(
+            (
+                option["payload"]["destination"]
+                for option in options
+                if not option["declines"]
+            ),
+            key=lambda dest: calculate_hex_distance(dest["col"], dest["row"], 5, 10),
+        )
+        assert (first["col"], first["row"]) == (best["col"], best["row"])
+
+    def test_declining_leaves_the_unit_in_place_and_closes_the_window(self, monkeypatch):
+        """Refuser est un résultat de la règle, pas une erreur : l'unité reste, la fenêtre ferme."""
+        gs, reactive, _result = _suspended_window(monkeypatch)
+        gs["reactive_decision_payload"]["2"] = {"action": "decline_reactive_move"}
+
+        result = drive_reactive_move_window(gs)
+
+        assert result["waiting_for_player"] is False
+        assert result["reactive_moves_declined"] == 1
+        assert result["reactive_moves_applied"] == 0
+        assert (reactive["col"], reactive["row"]) == (7, 10)
+        assert gs["reaction_window_active"] is False
+        assert PENDING_REACTIVE_MOVE_KEY not in gs
+
+    def test_choosing_an_intention_moves_the_unit_to_that_cell(self, monkeypatch):
+        """Le candidat choisi désigne une case, et c'est CELLE-LÀ que l'unité rejoint."""
+        gs, reactive, _result = _suspended_window(monkeypatch)
+        chosen = next(
+            option
+            for option in read_pending_agent_decision(gs)["options"]
+            if not option["declines"]
+        )
+        destination = chosen["payload"]["destination"]
+        gs["reactive_decision_payload"]["2"] = chosen["payload"]
+
+        result = drive_reactive_move_window(gs)
+
+        assert result["reactive_moves_applied"] == 1
+        assert (reactive["col"], reactive["row"]) == (destination["col"], destination["row"])
+        assert "2" in gs["units_reacted_this_enemy_turn"]
+        assert PENDING_REACTIVE_MOVE_KEY not in gs
+
+    def test_the_roll_survives_the_suspension(self, monkeypatch):
+        """Le D6 montré au joueur est celui qui s'applique — il n'est pas re-tiré à la reprise.
+
+        Sans persistance, la portée changerait entre la question et la réponse : le joueur
+        choisirait une destination calculée sur un jet qui n'existe plus.
+        """
+        gs, _reactive, _result = _suspended_window(monkeypatch, roll=3)
+        assert gs[PENDING_REACTIVE_MOVE_KEY]["roll"] == 3
+
+        # Le dé change ENTRE la question et la réponse : seul un jet persisté résiste.
+        monkeypatch.setattr("random.randint", lambda a, b: 6)
+        chosen = next(
+            option
+            for option in read_pending_agent_decision(gs)["options"]
+            if not option["declines"]
+        )
+        gs["reactive_decision_payload"]["2"] = chosen["payload"]
+        drive_reactive_move_window(gs)
+
+        applied = [entry for entry in gs["action_logs"] if entry.get("type") == "reactive_move"]
+        assert len(applied) == 1
+        assert applied[0]["range_roll"] == 3
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# La phase n'avance pas sous une fenêtre réactive SUSPENDUE (moteur entier)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _engine_with_reactive_enemy(shoot_pool: List[str]) -> Any:
+    """Moteur PvP : un tireur `move_after_shooting` (J1) et un réactif (J2) à 5 hexes de sa case.
+
+    `shoot_pool` décide de la seule chose qui compte ici : le tireur est-il la DERNIÈRE
+    activation de la phase (`["1"]`) ou non (`["1", "2"]`). C'est cette position, et elle seule,
+    qui fait rendre `phase_complete` par la fin d'activation, donc qui expose la cascade.
+    """
+    from unittest.mock import patch
+
+    from engine.w40k_core import W40KEngine
+    from engine.phase_handlers.shooting_handlers import (
+        ACTION,
+        SHOOTING,
+        _handle_shooting_end_activation,
+    )
+    from tests.unit.engine._config_helpers import (
+        _fall_back_base_config,
+        _fall_back_unit_cfg,
+        build_engine_config,
+    )
+
+    shooter = _fall_back_unit_cfg("1", 1, 10, 20)
+    shooter["UNIT_RULES"] = [
+        {
+            "ruleId": "move_after_shooting",
+            "displayName": "Purgation Run (test)",
+            # Distance FIXE plutôt que le D6 de la datasheet : le pool — donc les destinations
+            # offertes — doit être le même à chaque exécution.
+            "rule_args": {"distance": 3},
+        }
+    ]
+    reactive = _fall_back_unit_cfg("3", 2, 10, 28)
+    reactive["UNIT_RULES"] = [{"ruleId": "reactive_move", "displayName": "SKULKING HORRORS"}]
+    units = [shooter, _fall_back_unit_cfg("2", 1, 40, 40), reactive]
+
+    config = build_engine_config(_fall_back_base_config(units))
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), patch.object(
+        W40KEngine, "_build_reward_configs_for_current_units", return_value={}
+    ):
+        engine = W40KEngine(config=config, gym_training_mode=False)
+    engine.reset()
+
+    gs = engine.game_state
+    gs["phase"] = "shoot"
+    gs["current_player"] = 1
+    gs["shoot_activation_pool"] = list(shoot_pool)
+    # La phase de tir est déjà ouverte : sans ce drapeau `_process_shooting_phase` rejouerait
+    # `shooting_phase_start` et reconstruirait le pool que le test vient de poser.
+    engine._shooting_phase_initialized = True
+    gs["_shooting_phase_initialized"] = True
+    shooter_unit = gs["unit_by_id"]["1"]
+    shooter_unit["SHOOT_LEFT"] = 0
+    # Chemin de production : c'est la fin d'activation du tir qui pose le popup PvP
+    # `move_after_shooting` et ses destinations.
+    success, armed = _handle_shooting_end_activation(
+        gs, shooter_unit, ACTION, 1, SHOOTING, SHOOTING, 1
+    )
+    assert success is True
+    assert armed["action"] == "move_after_shooting_select_destination"
+    return engine
+
+
+class TestPhaseNAvancePasSousFenetreReactive:
+
+    def test_derniere_activation_du_pool_la_phase_reste_ouverte(self):
+        """Déclencheur en DERNIÈRE activation : la cascade ne doit pas traverser les phases.
+
+        Sans la garde, cette seule action emmène la partie de `shoot` à `move` (shoot → charge →
+        fight → tour suivant → command → move) : `command_phase_start` purge
+        `units_reacted_this_enemy_turn`, `reactive_decision_payload` et `reaction_window_active`
+        alors que la décision `reactive_move` est TOUJOURS posée.
+        """
+        engine = _engine_with_reactive_enemy(["1"])
+        gs = engine.game_state
+
+        success, result = engine.execute_semantic_action(
+            {"action": "move_after_shooting", "unitId": "1", "destCol": 10, "destRow": 23}
+        )
+
+        assert success is True
+        decision = read_pending_agent_decision(gs)
+        assert decision is not None
+        assert decision["type"] == "reactive_move"
+        assert int(decision["player"]) == 2
+        # VERT VACANT : sans ces trois-là, « la phase n'a pas bougé » pourrait décrire une
+        # fenêtre qui ne s'est jamais ouverte.
+        assert gs["phase"] == "shoot"
+        assert gs["reaction_window_active"] is True
+        assert PENDING_REACTIVE_MOVE_KEY in gs
+        # Le client ne doit pas non plus se voir annoncer une transition qui n'a pas eu lieu.
+        assert "next_phase" not in result
+
+    def test_le_meme_declencheur_au_milieu_du_pool_ne_montre_rien(self):
+        """Contrôle : au MILIEU du pool, le défaut est invisible — ce test resterait vert.
+
+        La fin d'activation ne rend `phase_complete` que sur un pool vidé. Un test qui place le
+        déclencheur ailleurs qu'en dernière activation n'atteint donc jamais la cascade et passe
+        avec ou sans la garde : c'est la raison pour laquelle le test ci-dessus existe.
+        """
+        engine = _engine_with_reactive_enemy(["1", "2"])
+        gs = engine.game_state
+
+        success, result = engine.execute_semantic_action(
+            {"action": "move_after_shooting", "unitId": "1", "destCol": 10, "destRow": 23}
+        )
+
+        assert success is True
+        assert result.get("phase_complete") is None
+        assert gs["shoot_activation_pool"] == ["2"]
+        assert gs["phase"] == "shoot"
+        assert read_pending_agent_decision(gs)["type"] == "reactive_move"
+
+    def test_advance_phase_envoye_apres_l_armement_n_avance_pas_non_plus(self):
+        """La reproduction du PvP humain : le mouvement déclencheur vide le pool de mouvement.
+
+        En PvP, `_process_movement_phase` retire `next_phase` du résultat du dernier mouvement —
+        la cascade ne part donc PAS de l'action elle-même : c'est le client qui envoie ensuite
+        `advance_phase`, et c'est CE verbe qui traversait les phases sous la décision posée.
+        Aucun champ du payload de `advance_phase` ne parle du mouvement réactif : seule la
+        lecture de l'état l'arrête.
+        """
+        from unittest.mock import patch
+
+        from engine.w40k_core import W40KEngine
+        from tests.unit.engine._config_helpers import (
+            _fall_back_base_config,
+            _fall_back_unit_cfg,
+            build_engine_config,
+        )
+
+        reactive = _fall_back_unit_cfg("3", 2, 10, 24)
+        reactive["UNIT_RULES"] = [{"ruleId": "reactive_move", "displayName": "SKULKING HORRORS"}]
+        units = [
+            _fall_back_unit_cfg("1", 1, 10, 10),
+            _fall_back_unit_cfg("2", 1, 10, 12),
+            reactive,
+        ]
+        config = build_engine_config(_fall_back_base_config(units))
+        with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), patch.object(
+            W40KEngine, "_build_reward_configs_for_current_units", return_value={}
+        ):
+            engine = W40KEngine(config=config, gym_training_mode=False)
+        engine.reset()
+        gs = engine.game_state
+
+        # Premier mouvement : loin du réactif, aucune réaction — le pool n'est pas encore vide.
+        engine.execute_semantic_action(
+            {"action": "move", "unitId": "1", "destCol": 5, "destRow": 10}
+        )
+        assert read_pending_agent_decision(gs) is None
+        # DERNIÈRE activation du pool, et elle déclenche la réaction.
+        engine.execute_semantic_action(
+            {"action": "move", "unitId": "2", "destCol": 10, "destRow": 16}
+        )
+        assert gs["move_activation_pool"] == []
+        assert read_pending_agent_decision(gs)["type"] == "reactive_move"
+
+        engine.execute_semantic_action({"action": "advance_phase", "from": "move"})
+
+        assert gs["phase"] == "move"
+        assert gs["reaction_window_active"] is True
+        assert read_pending_agent_decision(gs)["type"] == "reactive_move"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Aucune autre action ne passe pendant qu'une décision réactive est armée
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _pvp_engine_with_reactive_enemy() -> Any:
+    """Moteur PvP humain/humain : deux unités J1 dans le pool de mouvement, un réactif J2.
+
+    Bouger « 2 » vers (10,16) le place à 8 hexes du réactif : la fenêtre s'ouvre et suspend.
+    « 1 » reste dans le pool, donc un second mouvement est possible — c'est le clic qu'on refuse.
+    """
+    from unittest.mock import patch
+
+    from engine.w40k_core import W40KEngine
+    from tests.unit.engine._config_helpers import (
+        _fall_back_base_config,
+        _fall_back_unit_cfg,
+        build_engine_config,
+    )
+
+    reactive = _fall_back_unit_cfg("3", 2, 10, 24)
+    reactive["UNIT_RULES"] = [{"ruleId": "reactive_move", "displayName": "SKULKING HORRORS"}]
+    units = [
+        _fall_back_unit_cfg("1", 1, 10, 10),
+        _fall_back_unit_cfg("2", 1, 10, 12),
+        reactive,
+    ]
+    config = build_engine_config(_fall_back_base_config(units))
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), patch.object(
+        W40KEngine, "_build_reward_configs_for_current_units", return_value={}
+    ):
+        engine = W40KEngine(config=config, gym_training_mode=False)
+    engine.reset()
+    return engine
+
+
+class TestRefusPendantUneDecisionReactive:
+
+    def test_un_second_mouvement_pendant_l_attente_est_refuse(self):
+        """Le clic banal qui faisait lever le moteur : bouger une autre unité sans avoir répondu.
+
+        Sans le refus, `maybe_resolve_reactive_move` retrouve `reaction_window_active` déjà vrai
+        et lève `RuntimeError[reactive_move.reentrance]`.
+        """
+        engine = _pvp_engine_with_reactive_enemy()
+        gs = engine.game_state
+
+        engine.execute_semantic_action(
+            {"action": "move", "unitId": "2", "destCol": 10, "destRow": 16}
+        )
+        assert read_pending_agent_decision(gs)["type"] == "reactive_move"
+        assert gs["move_activation_pool"] == ["1"]
+
+        success, result = engine.execute_semantic_action(
+            {"action": "move", "unitId": "1", "destCol": 11, "destRow": 10}
+        )
+
+        assert success is True
+        assert result["action"] == "waiting_for_reactive_move"
+        assert result["waiting_for_player"] is True
+        assert result["decision_type"] == "reactive_move"
+        assert result["rejected_action"] == "move"
+        assert str(result["unitId"]) == "3"
+        assert int(result["player"]) == 2
+        # Refus INERTE : ni l'unité refusée ni le pool n'ont bougé.
+        mover = gs["unit_by_id"]["1"]
+        assert (mover["col"], mover["row"]) == (10, 10)
+        assert gs["move_activation_pool"] == ["1"]
+
+    def test_la_reponse_passe_et_debloque_les_actions_suivantes(self):
+        """Le refus vise TOUT sauf la réponse : `agent_decision` traverse, et rend la main.
+
+        VERT VACANT évité : un refus qui barrerait aussi la réponse bloquerait la partie pour de
+        bon, et le test précédent seul ne le verrait pas.
+        """
+        engine = _pvp_engine_with_reactive_enemy()
+        gs = engine.game_state
+        engine.execute_semantic_action(
+            {"action": "move", "unitId": "2", "destCol": 10, "destRow": 16}
+        )
+
+        success, result = engine.execute_semantic_action(
+            {"action": "agent_decision", "option_index": 0}
+        )
+
+        assert success is True
+        assert result["decision_type"] == "reactive_move"
+        assert result["reactive_moves_applied"] == 1
+        assert read_pending_agent_decision(gs) is None
+        assert gs["reaction_window_active"] is False
+
+        success, result = engine.execute_semantic_action(
+            {"action": "move", "unitId": "1", "destCol": 11, "destRow": 10}
+        )
+        assert success is True
+        assert result["action"] == "move"
+        assert (gs["unit_by_id"]["1"]["col"], gs["unit_by_id"]["1"]["row"]) == (11, 10)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PvE — le siège sans canal de réponse tranche immédiatement
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _pve_engine(player_types: Dict[str, str]) -> Any:
+    """Moteur en mode PvE, `player_types` DÉCLARÉ (jamais déduit).
+
+    `execute_ai_turn` avale ses exceptions et les rend en `ai_decision_failed` : piloter par
+    l'absence d'erreur laisserait un blocage PvE vert. Ces tests pilotent donc par les sièges.
+    Le chargement du modèle est neutralisé — c'est la résolution de siège qui est mesurée, pas
+    l'inférence.
+    """
+    from unittest.mock import patch
+
+    from engine.pve_controller import PvEController
+    from engine.w40k_core import W40KEngine
+    from tests.unit.engine._config_helpers import (
+        _fall_back_base_config,
+        _fall_back_unit_cfg,
+        build_engine_config,
+    )
+
+    reactive = _fall_back_unit_cfg("3", 2, 10, 24)
+    reactive["UNIT_RULES"] = [{"ruleId": "reactive_move", "displayName": "SKULKING HORRORS"}]
+    units = [
+        _fall_back_unit_cfg("1", 1, 10, 10),
+        _fall_back_unit_cfg("2", 1, 10, 12),
+        reactive,
+    ]
+    config = build_engine_config(_fall_back_base_config(units))
+    config["pve_mode"] = True
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), patch.object(
+        W40KEngine, "_build_reward_configs_for_current_units", return_value={}
+    ), patch.object(PvEController, "load_ai_model_for_pve", lambda self, gs, engine: None):
+        engine = W40KEngine(config=config, gym_training_mode=False)
+        engine.reset()
+    engine.game_state["player_types"] = dict(player_types)
+    return engine
+
+
+class TestReactiveMovePveSeats:
+
+    def test_le_siege_ia_tranche_sans_bloquer_la_partie(self):
+        """PvE : le bot réagit au mouvement du joueur, et personne n'a à répondre à sa place.
+
+        `execute_ai_turn` refuse hors tour IA et 08.04 ne couvre que la phase de commandement :
+        sans résolution ici, la décision restait posée pour toujours.
+        """
+        from engine.combat_utils import calculate_hex_distance
+
+        engine = _pve_engine({"1": "human", "2": "ai"})
+        gs = engine.game_state
+
+        success, _result = engine.execute_semantic_action(
+            {"action": "move", "unitId": "2", "destCol": 10, "destRow": 16}
+        )
+
+        assert success is True
+        assert read_pending_agent_decision(gs) is None
+        assert gs["reaction_window_active"] is False
+        assert PENDING_REACTIVE_MOVE_KEY not in gs
+        # VERT VACANT : « aucune décision en attente » décrirait aussi une fenêtre qui ne s'est
+        # jamais ouverte. La réaction a bien EU LIEU, et vers l'ennemi déclencheur (`CHOICE_0`,
+        # « Pression » — la destination que rendait l'ancienne heuristique déterministe).
+        assert "3" in gs["units_reacted_this_enemy_turn"]
+        reactive = gs["unit_by_id"]["3"]
+        assert (reactive["col"], reactive["row"]) != (10, 24)
+        assert calculate_hex_distance(
+            int(reactive["col"]), int(reactive["row"]), 10, 16
+        ) < calculate_hex_distance(10, 24, 10, 16)
+
+    def test_le_siege_humain_garde_sa_question(self):
+        """Contrôle : un siège humain, lui, conserve la décision — c'est l'UI qui y répond.
+
+        Sans ce test, une résolution qui tomberait sur TOUS les sièges volerait la question au
+        joueur sans qu'aucune assertion ne bouge.
+        """
+        engine = _pve_engine({"1": "human", "2": "human"})
+        gs = engine.game_state
+
+        engine.execute_semantic_action(
+            {"action": "move", "unitId": "2", "destCol": 10, "destRow": 16}
+        )
+
+        decision = read_pending_agent_decision(gs)
+        assert decision is not None
+        assert decision["type"] == "reactive_move"
+        assert int(decision["player"]) == 2
+        assert (gs["unit_by_id"]["3"]["col"], gs["unit_by_id"]["3"]["row"]) == (10, 24)
+
+
+class TestRefusEtCapaciteDuTour:
+    """Le refus consomme-t-il le « Once per turn » de la datasheet ? NON — lecture assumée."""
+
+    def test_le_refus_ne_consomme_pas_la_capacite_du_tour(self, monkeypatch):
+        """Refuser n'est pas UTILISER : la question revient au déclencheur suivant du même tour.
+
+        LECTURE RETENUE (décision utilisateur du 2026-09-10) du « Once per turn » de
+        `config/unit_rules.json` : la limite porte sur le mouvement ACCOMPLI, pas sur la
+        proposition. Une unité qui refuse n'a rien utilisé, donc elle reste éligible.
+
+        ⚠️ Le corpus de règles ne tranche PAS cette lecture : recherche « once per » sur les
+        27 PDF de `Documentation/40k_rules/` — deux occurrences, « once per battle »
+        (15 Stratagems) et « USE LIMIT: Once per turn » (16 Actions, où la limite porte sur
+        l'accomplissement de l'action), aucune définition générale. La lecture est donc PORTÉE
+        PAR CE TEST et par le commentaire de `reacted_set.add` : sans lui, la seule trace du
+        choix serait l'endroit où une ligne est appelée, et l'inverse passerait pour un fix.
+
+        Conséquence de jeu verrouillée ici : tant que le joueur refuse, la question revient à
+        chaque mouvement ennemi qui finit à portée dans le même tour.
+        """
+        monkeypatch.setattr("random.randint", lambda a, b: 3)
+        mover = _unit(1, 1, 5, 10)
+        second_mover = _unit(3, 1, 3, 10)
+        reactive = _unit_with_reactive(2, 2, 7, 10)
+        gs = _make_game_state([mover, second_mover, reactive])
+        gs["reactive_decision_mode"] = "state"
+
+        first = maybe_resolve_reactive_move(gs, "1", 4, 10, 5, 10, "move", "normal")
+        assert first["waiting_for_player"] is True
+
+        # ORDRE DE PRODUCTION, celui de `W40KEngine._handle_agent_decision_action` : consommer la
+        # décision, écrire la réponse dans le canal que la fenêtre lit, reprendre la fenêtre.
+        # Sauter le premier pas laisse la décision armée, et `set_pending_agent_decision` REFUSE
+        # d'en empiler une seconde au déclencheur suivant — le test mesurerait ce refus au lieu
+        # de la capacité du tour.
+        consume_pending_agent_decision(
+            gs, decision_type="reactive_move", player=2, unit_id="2"
+        )
+        gs["reactive_decision_payload"]["2"] = {"action": "decline_reactive_move"}
+        declined = drive_reactive_move_window(gs)
+        assert declined["reactive_moves_declined"] == 1
+        # La réponse est CONSOMMÉE par la fenêtre. Sans cette vérification, le second
+        # déclencheur pourrait rejouer le refus resté en place au lieu de reposer la question,
+        # et l'assertion finale serait verte pour la mauvaise raison.
+        assert "2" not in gs["reactive_decision_payload"]
+        # Le refus n'inscrit rien au compteur du tour : c'est TOUTE la lecture retenue.
+        assert "2" not in gs["units_reacted_this_enemy_turn"]
+
+        # Second déclencheur, MÊME tour (`turn` inchangé) : une AUTRE unité ennemie finit son
+        # mouvement à portée, hors zone d'engagement de l'unité réactive.
+        again = maybe_resolve_reactive_move(gs, "3", 2, 10, 3, 10, "move", "normal")
+
+        assert again["waiting_for_player"] is True, (
+            "la question ne revient pas : le refus a consommé la capacité du tour"
+        )
+        decision = read_pending_agent_decision(gs)
+        assert decision is not None
+        assert str(decision["unit_id"]) == "2"
+        assert int(decision["player"]) == 2
+        # Elle n'a toujours pas bougé : deux questions, aucun mouvement.
+        assert (reactive["col"], reactive["row"]) == (7, 10)

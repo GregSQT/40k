@@ -1381,6 +1381,15 @@ body {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
+/* `.rule-choice-overlay` est en `pointer-events: none` pour laisser le plateau cliquable sous
+   les panneaux non modaux. Le panneau de mouvement réactif, lui, EST modal : la partie ne repart
+   pas tant que le joueur n'a pas répondu, donc ses boutons doivent recevoir les clics. Sans cette
+   règle, seul `--draggable` rétablit les événements et la question resterait sans réponse
+   possible — le blocage même que ce panneau supprime. */
+.deployment-panel__picker--reactive-move {
+  pointer-events: auto;
+}
+
 .deployment-panel__picker--draggable {
   position: fixed;
   width: min(860px, 94vw);

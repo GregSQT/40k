@@ -824,7 +824,12 @@ def self_model_bin_index(field: str) -> int:
 #: l'ouvre et le plafond de 50 % qui la borne. C'est `declines` qui sépare les deux lignes —
 #: `CHOICE_1` garde l'unité pour le déploiement, et ne rien déclarer est précisément « ne rien
 #: faire ».
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting", "reserves_declaration")
+#:
+#: ⚠️ `reactive_move` est le seul type POSÉ PENDANT LE TOUR DE L'ADVERSAIRE (datasheet « Skulking
+#: Horrors » ; 01.03 : « each time a unit is selected to move, that unit's controlling player is
+#: the active player until that move ends »). Il est ajouté EN FIN de tuple, jamais inséré : un
+#: type déclaré garde son index, et le décaler réécrirait la colonne d'un type déjà vivant.
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting", "reserves_declaration", "reactive_move")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots

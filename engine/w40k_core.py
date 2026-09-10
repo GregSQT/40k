@@ -38,6 +38,8 @@ from engine.phase_handlers import movement_handlers, shooting_handlers, charge_h
 # units_cache helpers (single source of truth for position/HP of living units)
 from engine.action_log_utils import append_action_log, format_agent_decision_message
 from engine.phase_handlers.shared_utils import (
+    PENDING_REACTIVE_MOVE_KEY,
+    drive_reactive_move_window,
     build_units_cache,
     destroy_model,
     rebuild_choice_timing_index,
@@ -974,7 +976,10 @@ class W40KEngine(gym.Env):
             "last_move_cause": "normal",
             "reactive_mode": "micro",
             "reactive_macro_order_current_window": [],
-            "reactive_decision_mode": "auto",
+            # "state" : le mouvement reactif est une capacite OPTIONNELLE (datasheet — « it CAN
+            # make a Normal move »), donc accepter/refuser et la destination sont des decisions
+            # de joueur. En "auto" le moteur les tranchait pour lui et ne declinait JAMAIS.
+            "reactive_decision_mode": "state",
             "reactive_decision_payload": {},
             
             # Phase management
@@ -1660,6 +1665,13 @@ class W40KEngine(gym.Env):
         # ce qui provoque un ConfigurationError dans _build_manual_allocation (units_cache[attacker]).
         # Même famille de marqueur que ONCE_CLAIMS_KEY : purge obligatoire à chaque reset.
         self.game_state.pop(PENDING_FIGHT_WEAPON_KEY, None)
+
+        # Curseur de la fenêtre réactive : même famille encore. Si l'épisode se termine pendant
+        # qu'un joueur décide de son mouvement réactif, la clé survivrait au `update()` du reset
+        # et l'épisode suivant reprendrait une fenêtre dont l'unité et le déclencheur n'existent
+        # plus. Purgée ici, elle reste absente d'un `game_state` juste après reset — ce qui la
+        # garde hors du contrat de format de save.
+        self.game_state.pop(PENDING_REACTIVE_MOVE_KEY, None)
         self.game_state.pop(PENDING_FIGHT_TARGET_KEY, None)
         self.game_state.pop(PENDING_SHOOT_WEAPON_SEL_KEY, None)
         # Allocations manuelles en attente (tir, combat, hazardous) : même danger que les clés ci-
@@ -1782,7 +1794,10 @@ class W40KEngine(gym.Env):
             "last_move_cause": "normal",
             "reactive_mode": "micro",
             "reactive_macro_order_current_window": [],
-            "reactive_decision_mode": "auto",
+            # "state" : le mouvement reactif est une capacite OPTIONNELLE (datasheet — « it CAN
+            # make a Normal move »), donc accepter/refuser et la destination sont des decisions
+            # de joueur. En "auto" le moteur les tranchait pour lui et ne declinait JAMAIS.
+            "reactive_decision_mode": "state",
             "reactive_decision_payload": {},
             "command_activation_pool": [],
             "move_activation_pool": [],
@@ -4507,6 +4522,37 @@ class W40KEngine(gym.Env):
                 "option_index": option_index,
             }
 
+        if decision_type == "reactive_move":
+            # Mouvement réactif : la seule décision qui n'appartient PAS au joueur courant. Elle
+            # se prend pendant le tour de l'adversaire, et 01.03 le dit — « each time a unit is
+            # selected to move, that unit's controlling player is the active player until that
+            # move ends ». La source INDÉPENDANTE du joueur est donc le propriétaire de l'unité
+            # qui réagit, lu dans l'état ; prendre `current_player` ici désignerait le joueur qui
+            # vient de bouger, soit exactement l'autre.
+            decision_squad_id = str(require_key(decision, "unit_id"))
+            reactive_unit = require_unit_by_id(self.game_state, decision_squad_id)
+            decision_player = int(require_key(reactive_unit, "player"))
+            payload = require_key(selected_option, "payload")
+            consume_pending_agent_decision(
+                self.game_state,
+                decision_type="reactive_move",
+                player=decision_player,
+                unit_id=decision_squad_id,
+            )
+            # La réponse rejoint le canal que la fenêtre lit déjà (`reactive_decision_payload`,
+            # mode "state") : un seul consommateur pour le siège agent et pour le siège humain.
+            require_key(self.game_state, "reactive_decision_payload")[decision_squad_id] = payload
+            result = drive_reactive_move_window(self.game_state)
+            return True, {
+                **result,
+                "action": "agent_decision",
+                "decision_type": decision_type,
+                "unitId": decision_squad_id,
+                "player": decision_player,
+                "option_index": option_index,
+                "success": True,
+            }
+
         if decision_type == "mortal_wounds_target":
             # Exhortation de Rage (chantier 06 Passe 4) : l agent choisit l ennemi engage cible
             # des blessures mortelles, puis le combat normal reprend.
@@ -4718,6 +4764,113 @@ class W40KEngine(gym.Env):
             "08.04 : plus de decisions de capacite de faction enchainees qu'il n'existe de "
             "mecanismes pour un meme joueur — l'etat de decision ne se vide pas."
         )
+
+    def _resolve_reactive_move_decision_for_ai_seats(self) -> None:
+        """Tranche le mouvement réactif d'un siège qui n'a AUCUN canal de réponse.
+
+        Le mouvement réactif est la seule décision posée pendant le tour de l'ADVERSAIRE. En PvE,
+        elle échoit donc au bot alors que ce n'est pas son tour : `execute_ai_turn` refuse
+        (`not_ai_player_turn`) et `_resolve_faction_decisions_for_ai_seats` ne connaît que la
+        phase de commandement. Personne ne répondait, et la partie s'arrêtait là.
+
+        Trois sièges, comme partout ailleurs dans ce fichier :
+          - gym            → les DEUX répondent par le masque, rien à trancher (sortie immédiate) ;
+          - humain (PvP)   → la décision reste posée, l'UI la montre et y répond ;
+          - IA hors gym    → tranchée ICI, immédiatement.
+
+        `CHOICE_0` et pas une politique de plus : c'est le candidat « Pression », la case du pool
+        la plus proche de l'ennemi qui vient de bouger — EXACTEMENT ce que rendait
+        `_select_reactive_destination`, l'heuristique déterministe qui servait ce siège avant que
+        le refus ne devienne une décision de joueur. Le siège IA garde donc le comportement qu'il
+        avait, et l'adversaire de référence reste reproductible d'un run à l'autre.
+
+        Le propriétaire vient de l'ÉTAT (le joueur de l'unité qui réagit), jamais de
+        `current_player` : celui-ci désigne le joueur qui vient de bouger, soit exactement l'autre.
+
+        Boucle : une fenêtre peut enchaîner plusieurs unités, et chacune repose la question. Bornée
+        par le nombre d'unités — au-delà, la file ne se vide pas et c'est un état incohérent.
+        """
+        if self.gym_training_mode:
+            return
+        for _ in range(len(require_key(self.game_state, "units")) + 1):
+            decision = read_pending_agent_decision(self.game_state)
+            if decision is None or str(require_key(decision, "type")) != "reactive_move":
+                return
+            reactive_unit = require_unit_by_id(
+                self.game_state, str(require_key(decision, "unit_id"))
+            )
+            if self._is_player_human(int(require_key(reactive_unit, "player"))):
+                return
+            # MÊME chemin que la réponse humaine ou agent : une seule implémentation de la reprise
+            # de fenêtre, sinon le siège IA dériverait de ce que les deux autres exécutent.
+            self._handle_agent_decision_action({"action": "agent_decision", "option_index": 0})
+        raise RuntimeError(
+            "reactive_move : plus de decisions enchainees qu'il n'existe d'unites — la file de "
+            "la fenetre reactive ne se vide pas."
+        )
+
+    def _reject_action_while_reactive_move_pending(
+        self, action: Dict[str, Any]
+    ) -> Optional[Tuple[bool, Dict[str, Any]]]:
+        """Refuse toute action tant qu'un mouvement réactif attend la réponse de son siège.
+
+        Depuis que `reactive_decision_mode` vaut "state", le moteur rend la main au milieu de la
+        fenêtre réactive et attend un `agent_decision`. Rien ne le protégeait : un second
+        mouvement pendant l'attente rouvre `maybe_resolve_reactive_move`, qui trouve
+        `reaction_window_active` déjà vrai et lève `RuntimeError[reactive_move.reentrance]` —
+        une exception de moteur pour un clic de joueur parfaitement banal.
+
+        Forme de `manual_allocation_waiting_payload` et du garde `active_rule_choice_prompt` de
+        cette même méthode : un succès INERTE (aucune mutation) qui RE-SIGNALE l'attente, et non
+        une erreur. C'est ce que le client doit recevoir — il lui faut de quoi ré-afficher la
+        question, pas un message d'échec sur une action qui n'avait rien de fautif.
+
+        Placée APRÈS le routage de `agent_decision` : seule la réponse à la décision passe.
+        """
+        decision = read_pending_agent_decision(self.game_state)
+        if decision is None or str(require_key(decision, "type")) != "reactive_move":
+            return None
+        return True, {
+            "action": "waiting_for_reactive_move",
+            "waiting_for_player": True,
+            "decision_type": "reactive_move",
+            "rejected_action": action.get("action"),
+            "phase": require_key(self.game_state, "phase"),
+            "unitId": require_key(decision, "unit_id"),
+            "player": int(require_key(decision, "player")),
+        }
+
+    def _defer_phase_advance_while_reacting(self, result: Dict[str, Any]) -> None:
+        """Interdit la transition de phase tant qu'une fenêtre réactive est SUSPENDUE.
+
+        `maybe_resolve_reactive_move` rend désormais la main au milieu de sa file quand le siège
+        qui réagit doit décider lui-même (`reactive_decision_mode` = "state"), et laisse son
+        curseur dans `game_state` — c'est `PENDING_REACTIVE_MOVE_KEY` qui dit « fenêtre ouverte,
+        décision posée ». Or le mouvement réactif se joue PENDANT le mouvement adverse (01.03) :
+        la phase ne peut pas se terminer sous une question encore posée.
+
+        Mesuré sans cette garde, sur le chemin de production `move_after_shooting` du PvP humain
+        (`_handle_move_after_shooting_action`) quand le tir déclencheur est la DERNIÈRE activation
+        du pool : la cascade traverse shoot → charge → fight → tour suivant → command → move en
+        une seule action, `command_phase_start` purge `units_reacted_this_enemy_turn`,
+        `reactive_decision_payload` et `reaction_window_active`, et la décision reste posée sur
+        une fenêtre refermée. Le même mouvement AU MILIEU du pool ne complète pas la phase et ne
+        montre donc rien.
+
+        L'ÉTAT et non le payload de l'action : la suspension peut venir du mouvement
+        (`movement_destination_selection_handler`), du repositionnement post-tir, ou d'un
+        `advance_phase` envoyé par le client APRÈS l'armement — trois payloads différents, une
+        seule fenêtre. Lire un champ de `result` obligerait chaque handler à le propager, ce qui
+        est exactement l'oubli qu'on corrige.
+
+        `next_phase` est RETIRÉ plutôt que la boucle court-circuitée : c'est la forme que
+        `_process_movement_phase` emploie déjà pour différer l'init de la phase de tir en PvP, et
+        elle évite d'annoncer au client une transition qui n'a pas eu lieu.
+        """
+        if PENDING_REACTIVE_MOVE_KEY not in self.game_state:
+            return
+        result["phase_transition"] = False
+        result.pop("next_phase", None)
 
     def _reject_action_while_faction_decision_pending(
         self, action: Dict[str, Any]
@@ -5295,7 +5448,11 @@ class W40KEngine(gym.Env):
         # `command_phase_end()` : le clic sautait à la phase de mouvement sans rien appliquer, et
         # la désignation restait posée — donc l'overlay bloquait le plateau pour de bon.
         if action.get("action") == "agent_decision":
-            return self._handle_agent_decision_action(action)
+            # La réponse peut relancer la fenêtre réactive sur l'unité SUIVANTE de la file, qui
+            # peut appartenir à un siège sans canal de réponse : la résolution suit la reprise.
+            decision_success, decision_result = self._handle_agent_decision_action(action)
+            self._resolve_reactive_move_decision_for_ai_seats()
+            return decision_success, decision_result
         if action.get("action") == "select_oath_target":
             return self._handle_select_oath_target_action(action)
         # Choix de l'escouade à activer (V11 §0.48 L2) : MÊME rang — le moteur est arrêté sur un
@@ -5310,6 +5467,11 @@ class W40KEngine(gym.Env):
         blocked = self._reject_action_while_faction_decision_pending(action)
         if blocked is not None:
             return blocked
+
+
+        reacting = self._reject_action_while_reactive_move_pending(action)
+        if reacting is not None:
+            return reacting
 
         # TEST/DEBUG : force un battle-shock roll (01.07) sur une unité, hors séquence de jeu.
         # Permet de tester le Desperate Escape (09.07) en rendant une unité battle-shocked à la demande.
@@ -5531,6 +5693,9 @@ class W40KEngine(gym.Env):
                     f"action={action.get('action')!r} handlers_and_prerun_s={_t_after_handlers - _t_entry:.6f} "
                     f"step_logger_block_s={_t_pre_cascade - _t_after_handlers:.6f}"
                 )
+
+        self._resolve_reactive_move_decision_for_ai_seats()
+        self._defer_phase_advance_while_reacting(result)
 
         # Auto-advance to next phase when current phase completes
         # Loop to handle cascading empty phases (e.g., charge -> fight -> move if all empty)
@@ -7631,7 +7796,11 @@ class W40KEngine(gym.Env):
         # et avant toute action de phase — c'est la seule action légale tant qu'une décision est
         # en attente, et c'est elle qui débloque le moteur.
         if semantic.get("action") == "agent_decision":
-            return self._handle_agent_decision_action(semantic)
+            # Jumeau du chemin PvP : la reprise de fenêtre peut reposer la question à un siège
+            # sans canal de réponse (bot PvE).
+            decision_success, decision_result = self._handle_agent_decision_action(semantic)
+            self._resolve_reactive_move_decision_for_ai_seats()
+            return decision_success, decision_result
 
         # Désignation d'Oath of Moment (chantier 03) : même rang que les deux ci-dessus — la
         # phase de commandement est arrêtée dessus, aucune action de phase n'a de sens tant
@@ -8671,6 +8840,9 @@ class W40KEngine(gym.Env):
 
         else:
             return False, {"error": "unknown_squad_action", "action": action_name}
+
+        self._resolve_reactive_move_decision_for_ai_seats()
+        self._defer_phase_advance_while_reacting(result)
 
         # ── cascade : auto-avance les phases vides ────────────────────────────
         max_cascade = 10

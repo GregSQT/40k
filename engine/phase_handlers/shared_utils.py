@@ -2658,6 +2658,123 @@ def _get_deadly_demise_value(unit: Dict[str, Any]) -> Optional[Any]:
 #: Rayon de declenchement de `reactive_move`, EN POUCES (cf. config/unit_rules.json).
 _REACTIVE_TRIGGER_RANGE_INCHES = 9
 
+#: Curseur de la fenetre reactive EN COURS. Posee paresseusement a l'ouverture, effacee a la
+#: fermeture, purgee au reset (`W40KEngine.reset`) — donc jamais presente dans un `game_state`
+#: juste apres reset, et hors du contrat de format de save. Meme famille que
+#: `pending_fight_weapon_select` (`engine/action_decoder.py`).
+PENDING_REACTIVE_MOVE_KEY = "pending_reactive_move"
+
+#: Intentions offertes au joueur, dans l'ORDRE CONTRACTUEL (§9.6) : `options[i]` est decrit par le
+#: slot `i` de l'observation et designe par l'action `CHOICE_i`. Les deux premieres se scorent sur
+#: l'ennemi DECLENCHEUR — c'est lui que la datasheet nomme, et c'est deja la grandeur que suit
+#: `_select_reactive_destination`.
+_REACTIVE_INTENT_LABELS: Tuple[str, ...] = (
+    "Pression (au plus pres de l'ennemi declencheur)",
+    "Retrait (au plus loin de l'ennemi declencheur)",
+    "Objectif (au plus pres d'un marqueur)",
+)
+
+
+def _arm_reactive_move_decision(
+    game_state: Dict[str, Any],
+    reactive_unit: Dict[str, Any],
+    valid_destinations: List[Tuple[int, int]],
+    moved_to_col: int,
+    moved_to_row: int,
+) -> Dict[str, Any]:
+    """Pose le point de choix du mouvement reactif pour UNE unite.
+
+    Jumeau de `shooting_handlers.arm_move_after_shooting_decision` : meme forme d'intentions
+    scoree, meme deduplication, meme candidat `declines`. Le pool d'un D6" depasse
+    `MAX_DECISION_OPTIONS`, donc les destinations ne sont pas offertes brutes — un top-K
+    silencieux exclurait l'optimum sans que rien ne le signale.
+    """
+    from engine.agent_decision import set_pending_agent_decision
+    from engine.observation_entities import decision_option_cont_row
+
+    unit_position = require_unit_position(reactive_unit, game_state)
+    scored_cells = [*valid_destinations, unit_position]
+    trigger_distances = {
+        (int(col), int(row)): float(
+            calculate_hex_distance(int(col), int(row), moved_to_col, moved_to_row)
+        )
+        for (col, row) in scored_cells
+    }
+    objective_distances = objective_distances_for_cells(game_state, scored_cells)
+
+    intent_destinations: List[Tuple[int, Tuple[int, int]]] = [
+        (0, min(valid_destinations, key=lambda dest: trigger_distances[dest])),
+        (1, max(valid_destinations, key=lambda dest: trigger_distances[dest])),
+    ]
+    if objective_distances is not None:
+        intent_destinations.append(
+            (2, min(valid_destinations, key=lambda dest: objective_distances[dest]))
+        )
+
+    # Deux intentions peuvent designer la MEME case (fuir l'ennemi EST rejoindre l'objectif quand
+    # il est derriere). Les garder toutes deux poserait deux candidats aux `options_cont`
+    # identiques, donc aux logits egaux et aux gradients egaux — la symetrie incassable qui
+    # rendait `waaagh_call` inapprenable. La premiere intention de l'ordre contractuel garde la case.
+    seen: Set[Tuple[int, int]] = set()
+    retained: List[Tuple[int, Tuple[int, int]]] = []
+    for intent_index, destination in intent_destinations:
+        if destination in seen:
+            continue
+        seen.add(destination)
+        retained.append((intent_index, destination))
+
+    board_diagonal = max(
+        int(require_key(game_state, "board_cols")) + int(require_key(game_state, "board_rows")),
+        1,
+    )
+
+    def cont_row(cell: Tuple[int, int]) -> List[float]:
+        cont_values: Dict[str, float] = {
+            "dist_enemy_norm": min(trigger_distances[cell] / board_diagonal, 1.0)
+        }
+        if objective_distances is not None:
+            cont_values["obj_dist_norm"] = min(objective_distances[cell] / board_diagonal, 1.0)
+        return decision_option_cont_row(cont_values)
+
+    options: List[Dict[str, Any]] = []
+    options_cont: List[List[float]] = []
+    for intent_index, destination in retained:
+        options.append(
+            {
+                "label": _REACTIVE_INTENT_LABELS[intent_index],
+                "effect_ids": (),
+                "declines": False,
+                "payload": {
+                    "action": "reactive_move",
+                    "destination": {"col": int(destination[0]), "row": int(destination[1])},
+                },
+            }
+        )
+        options_cont.append(cont_row(destination))
+
+    # Ne pas reagir est un choix de la REGLE (« it CAN make a Normal move »), pas un repli :
+    # `declines` est ce qui le rend discernable pour l'agent. Ses grandeurs sont celles de la
+    # position ACTUELLE, la seule qui decrive « rester » — les laisser a zero decrirait une case
+    # collee a l'ennemi et a l'objectif.
+    options.append(
+        {
+            "label": "Ne pas reagir (rester sur place)",
+            "effect_ids": (),
+            "declines": True,
+            "payload": {"action": "decline_reactive_move"},
+        }
+    )
+    options_cont.append(cont_row(unit_position))
+
+    return set_pending_agent_decision(
+        game_state,
+        decision_type="reactive_move",
+        player=int(require_key(reactive_unit, "player")),
+        unit_id=str(require_key(reactive_unit, "id")),
+        options=options,
+        options_cont=options_cont,
+    )
+
 #: Sentinelle pour `_charge_plan_cache` — distingue un cache miss de None (plan invalide).
 _CBVP_MISS: object = object()
 
@@ -2812,6 +2929,37 @@ def _select_reactive_unit_order(
     eligible_by_id = {str(require_key(unit, "id")): unit for unit in eligible_units}
     ordered = [eligible_by_id[uid] for uid in dict.fromkeys(macro_order) if uid in eligible_by_id]
     return ordered
+
+
+def objective_distances_for_cells(
+    game_state: Dict[str, Any],
+    cells: Sequence[Tuple[int, int]],
+) -> Optional[Dict[Tuple[int, int], float]]:
+    """Distance de chaque case à l'AIRE d'objectif la plus proche (14.02), ou ``None``.
+
+    ``None`` quand le plateau ne porte aucun objectif : l'intention correspondante est retirée
+    des candidats plutôt que scorée sur une distance inventée.
+
+    Par les cartes de `objective_distance`, pas par une double boucle cases × hexes : les aires
+    d'un scénario 500 pts en comptent plusieurs milliers, et un armement paie autant de cases
+    qu'un D6" en ouvre. Mesuré à 0,494 s par armement avec la double boucle, contre une lecture
+    de tableau ici — et la carte, elle, est cachée par contenu d'un épisode à l'autre.
+
+    Vient de `shooting_handlers._move_after_shooting_objective_distances`, déplacée ici le
+    2026-09-09 : le mouvement réactif score ses intentions sur la même grandeur, et le nom
+    d'origine décrivait son premier appelant plutôt que ce qu'elle calcule.
+    """
+    from engine.objective_distance import objective_distance_maps
+
+    distance_maps = objective_distance_maps(game_state)
+    if not distance_maps:
+        return None
+    return {
+        (int(col), int(row)): float(
+            min(int(distance_map[int(col), int(row)]) for distance_map in distance_maps)
+        )
+        for (col, row) in cells
+    }
 
 
 def _select_reactive_destination(
@@ -3062,7 +3210,7 @@ def maybe_resolve_reactive_move(
         raise ValueError(f"Unsupported move_cause for reactive_move: {move_cause}")
 
     if move_cause == "reactive_move":
-        return {"reactive_moves_applied": 0, "reactive_moves_declined": 0, "triggered": False}
+        return {"reactive_moves_applied": 0, "reactive_moves_declined": 0, "triggered": False, "waiting_for_player": False}
 
     if require_key(game_state, "reaction_window_active"):
         episode = game_state.get("episode_number", "?")
@@ -3132,13 +3280,61 @@ def maybe_resolve_reactive_move(
         eligible_units.append(unit)
 
     if not eligible_units:
-        return {"reactive_moves_applied": 0, "reactive_moves_declined": 0, "triggered": False}
+        return {"reactive_moves_applied": 0, "reactive_moves_declined": 0, "triggered": False, "waiting_for_player": False}
 
     ordered_units = _select_reactive_unit_order(game_state, eligible_units)
     if not ordered_units:
-        return {"reactive_moves_applied": 0, "reactive_moves_declined": 0, "triggered": False}
+        return {"reactive_moves_applied": 0, "reactive_moves_declined": 0, "triggered": False, "waiting_for_player": False}
 
-    # Build adjacency structures only when at least one non-reacted unit is eligible.
+    game_state["reaction_window_active"] = True
+    game_state["last_move_event_id"] = int(require_key(game_state, "last_move_event_id")) + 1
+    # La fenêtre devient REPRENABLE : son curseur vit dans `game_state` et non plus dans des
+    # variables locales, parce que chaque unité peut désormais rendre la main au joueur. Motif de
+    # `pending_fight_weapon_select` (`action_decoder`) — clé posée paresseusement et purgée au
+    # reset, donc absente de `game_state` juste après `reset` et hors du contrat de format de
+    # save (`test_save_format_key_contract`), qui n'énumère que les clés publiées par le reset.
+    game_state[PENDING_REACTIVE_MOVE_KEY] = {
+        "trigger": {
+            "moved_unit_id": moved_unit_id_str,
+            "from_col": from_col_int,
+            "from_row": from_row_int,
+            "to_col": to_col_int,
+            "to_row": to_row_int,
+            "move_kind": move_kind,
+            "move_cause": move_cause,
+        },
+        "queue": [str(require_key(unit, "id")) for unit in ordered_units],
+        "applied": 0,
+        "declined": 0,
+        # Jet de la capacité pour l'unité en TÊTE de file. Persisté parce qu'une suspension entre
+        # le jet et le choix de destination le re-tirerait, et le joueur choisirait alors sur une
+        # portée qui n'est plus celle qu'on lui a montrée.
+        "roll": None,
+    }
+    return drive_reactive_move_window(game_state)
+
+
+def drive_reactive_move_window(game_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Déroule la fenêtre réactive ouverte, depuis son curseur persisté.
+
+    Appelée par `maybe_resolve_reactive_move` à l'ouverture, et de nouveau après chaque décision
+    de joueur. Tout ce dont elle a besoin est relu dans `game_state` : elle ne suppose aucune
+    continuité de pile, puisqu'un step gym ou une requête PvP la sépare de son appel précédent.
+
+    L'instantané d'adjacence est RECONSTRUIT à chaque entrée plutôt que persisté : entre deux
+    décisions, une unité a pu se déplacer, et un instantané sérialisé décrirait un plateau périmé.
+    """
+    window = require_key(game_state, PENDING_REACTIVE_MOVE_KEY)
+    trigger = require_key(window, "trigger")
+    moved_unit_id_str = str(require_key(trigger, "moved_unit_id"))
+    from_col_int = int(require_key(trigger, "from_col"))
+    from_row_int = int(require_key(trigger, "from_row"))
+    to_col_int = int(require_key(trigger, "to_col"))
+    to_row_int = int(require_key(trigger, "to_row"))
+    move_kind = str(require_key(trigger, "move_kind"))
+    move_cause = str(require_key(trigger, "move_cause"))
+
+    reacted_set = require_key(game_state, "units_reacted_this_enemy_turn")
     players_present = _get_players_present_from_units_cache(game_state)
     reactive_adjacent_counts_by_player, reactive_adjacent_sets_by_player = (
         _build_enemy_adjacent_structures_from_units_cache(game_state, players_present)
@@ -3156,13 +3352,19 @@ def maybe_resolve_reactive_move(
     for _p_int, _p_counts in reactive_adjacent_counts_by_player.items():
         game_state[f"enemy_adjacent_counts_player_{_p_int}"] = dict(_p_counts)
 
-    game_state["reaction_window_active"] = True
-    game_state["last_move_event_id"] = int(require_key(game_state, "last_move_event_id")) + 1
-    applied_count = 0
-    declined_count = 0
+    applied_count = int(require_key(window, "applied"))
+    declined_count = int(require_key(window, "declined"))
     try:
-        for reactive_unit in ordered_units:
-            reactive_unit_id = str(require_key(reactive_unit, "id"))
+        while window["queue"]:
+            reactive_unit_id = str(window["queue"][0])
+            # Une unité peut mourir entre deux décisions de la même fenêtre : elle sort de la file
+            # au lieu de faire lever `require_unit_by_id`. Même règle que l'ordre macro, qui saute
+            # déjà une unité tuée en cours de réaction.
+            if not is_unit_alive(reactive_unit_id, game_state):
+                window["queue"].pop(0)
+                window["roll"] = None
+                continue
+            reactive_unit = require_unit_by_id(game_state, reactive_unit_id)
             reactive_player_raw = require_key(reactive_unit, "player")
             try:
                 reactive_player_int = int(reactive_player_raw)
@@ -3194,10 +3396,19 @@ def maybe_resolve_reactive_move(
                         "event_toRow": to_row_int,
                     },
                 )
+                window["queue"].pop(0)
+                window["roll"] = None
                 continue
 
-            # Each reacting unit gets its own D6 range roll.
-            move_range = resolve_dice_value("D6", "reactive_move_distance")
+            # Each reacting unit gets its own D6 range roll — re-lu s'il a survécu à une
+            # suspension, sinon le joueur choisirait une destination sur une portée qui n'est plus
+            # celle affichée quand la question lui a été posée.
+            move_range = (
+                int(window["roll"])
+                if window["roll"] is not None
+                else resolve_dice_value("D6", "reactive_move_distance")
+            )
+            window["roll"] = int(move_range)
             valid_destinations = _build_reactive_move_destinations_pool(
                 game_state,
                 reactive_unit,
@@ -3205,7 +3416,29 @@ def maybe_resolve_reactive_move(
                 enemy_adjacent_hexes_override=reactive_adjacent_sets_by_player[reactive_player_int],
             )
             if not valid_destinations:
+                window["queue"].pop(0)
+                window["roll"] = None
                 continue
+
+            # Point de choix du joueur : quand le siège décide lui-même (`state`) et qu'aucune
+            # réponse n'attend pour cette unité, le moteur POSE la question et rend la main, comme
+            # il la rendrait à un humain. La fenêtre reste OUVERTE — c'est tout l'objet du curseur
+            # persisté — et `drive_reactive_move_window` reprend ici même à la réponse.
+            if (
+                require_key(game_state, "reactive_decision_mode") == "state"
+                and reactive_unit_id not in require_key(game_state, "reactive_decision_payload")
+            ):
+                window["applied"] = applied_count
+                window["declined"] = declined_count
+                _arm_reactive_move_decision(
+                    game_state, reactive_unit, valid_destinations, to_col_int, to_row_int
+                )
+                return {
+                    "reactive_moves_applied": applied_count,
+                    "reactive_moves_declined": declined_count,
+                    "triggered": applied_count > 0 or declined_count > 0,
+                    "waiting_for_player": True,
+                }
 
             decision_action, selected_dest = _resolve_reactive_decision(
                 game_state,
@@ -3233,6 +3466,8 @@ def maybe_resolve_reactive_move(
                         "event_toRow": to_row_int,
                     },
                 )
+                window["queue"].pop(0)
+                window["roll"] = None
                 continue
 
             if selected_dest is None:
@@ -3256,6 +3491,16 @@ def maybe_resolve_reactive_move(
             _new_occupied = set(
                 require_key(game_state["units_cache"][reactive_unit_id], "occupied_hexes")
             )
+            # SUR CE CHEMIN SEULEMENT — le refus n'inscrit rien. Lecture retenue du « Once per
+            # turn » de la datasheet (`config/unit_rules.json`) : la limite porte sur le mouvement
+            # ACCOMPLI, pas sur la proposition, donc une unité qui refuse reste éligible et la
+            # question revient au déclencheur suivant du même tour. ⚠️ Le corpus ne tranche PAS :
+            # « once per » n'apparaît que deux fois dans les 27 PDF de `Documentation/40k_rules/`
+            # — « once per battle » (15 Stratagems) et « USE LIMIT: Once per turn » (16 Actions,
+            # limite portant sur l'accomplissement). C'est une lecture ASSUMÉE, tranchée le
+            # 2026-09-10 ; son verrou est
+            # `test_le_refus_ne_consomme_pas_la_capacite_du_tour`. Déplacer cet appel avant le
+            # branchement refus/mouvement inverserait la règle du jeu sans qu'aucun nom ne change.
             reacted_set.add(reactive_unit_id)
             game_state["last_move_cause"] = "reactive_move"
             ability_display_name = _get_source_unit_rule_display_name_for_effect(
@@ -3324,14 +3569,29 @@ def maybe_resolve_reactive_move(
                 reactive_move_new_row=dest_row,
             )
             applied_count += 1
-    finally:
-        game_state["reaction_window_active"] = False
+            window["queue"].pop(0)
+            window["roll"] = None
+    except Exception:
+        # La fenêtre ne se referme plus dans un `finally` : une SUSPENSION est aussi une sortie de
+        # ce bloc, et la refermer là rendrait la garde de ré-entrance muette pendant que le joueur
+        # réfléchit. Elle se referme donc sur les deux vraies fins — l'erreur ici, l'épuisement de
+        # la file ci-dessous.
+        _close_reactive_move_window(game_state)
+        raise
 
+    _close_reactive_move_window(game_state)
     return {
         "reactive_moves_applied": applied_count,
         "reactive_moves_declined": declined_count,
         "triggered": applied_count > 0 or declined_count > 0,
+        "waiting_for_player": False,
     }
+
+
+def _close_reactive_move_window(game_state: Dict[str, Any]) -> None:
+    """Ferme la fenêtre réactive et efface son curseur — UN seul endroit, deux appelants."""
+    game_state["reaction_window_active"] = False
+    game_state.pop(PENDING_REACTIVE_MOVE_KEY, None)
 
 
 # ============================================================================
