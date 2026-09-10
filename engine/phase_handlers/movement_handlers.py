@@ -705,7 +705,12 @@ def _squad_has_reachable_floor_cell(game_state: Dict[str, Any], squad_id: str) -
     squad_models = require_key(game_state, "squad_models")
     terrain_areas = game_state.get("terrain_areas", [])  # get allowed (scénario sans terrain)
     inches_to_subhex = int(require_key(game_state, "inches_to_subhex"))
-    budget = squad_move_pool_budget_subhex(game_state, str(squad_id))
+    # Pré-porte NÉCESSAIRE (jamais suffisante) : utiliser le budget Advance maximum (jet=6)
+    # comme borne. Le jet d'Advance est tiré en section 4 du masque, APRÈS cette section 3bis ;
+    # `squad_move_pool_budget_subhex` ne le trouve donc pas encore dans `advance_rolls` et
+    # retomberait sur le budget normal — écartant silencieusement une montée que le § 13.06
+    # autorise. Élargir ne vole aucun choix : le plan rigide confirme la légalité réelle.
+    budget = get_squad_move_budget(str(squad_id), game_state, "advance", advance_roll=6)
     for mid in squad_models.get(str(squad_id), []):  # get allowed (escouade sans figurine vivante)
         model = models_cache.get(mid)  # get allowed (figurine morte)
         if model is None:

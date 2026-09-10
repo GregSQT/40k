@@ -106,3 +106,43 @@ def test_ligne_sans_source_est_une_erreur_de_format(tmp_path, monkeypatch):
     assert not any(d[1] == "101" for d in stats["current_episode_deaths"]), (
         "aucun dégât ne doit être appliqué depuis une ligne mal formée"
     )
+
+
+# ── FNP partiels ─────────────────────────────────────────────────────────────
+# Grunt (HP_MAX=5) subit 5 BM mais sauve 2 via FNP → 3 BM nettes → survit.
+# ROUGE sans le fix : l'analyzer appliquait le total pré-FNP (5) → mort fausse.
+_FNP_PARTIEL_5MW_2SAVES = (
+    "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 5 Mortal Wounds "
+    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [FNP:2] [ALLOC_MODEL: 101_m0] "
+    "[R:+0.0] [SUCCESS]\n"
+)
+# Grunt (HP_MAX=5) subit 5 BM mais toutes sauvées par FNP → 0 BM nettes → survit.
+# ROUGE sans le fix : l'analyzer appliquait 5 BM → mort fausse.
+_FNP_TOTAL_5MW_ALL_SAVED = (
+    "[10:00:02] E1 T1 P1 FIGHT : Unit 101(21,21) SUFFERS 5 Mortal Wounds "
+    "[HOLD STILL AND SAY AARGH] MW:2,3 [FROM:1] [ALL FNP SAVED] "
+    "[R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_fnp_partiel_soustrait_des_blessures(tmp_path, monkeypatch):
+    """ROUGE sans le fix : le total pré-FNP (5) était appliqué ; Grunt (HP=5) mourait alors
+    que le moteur lui avait laissé 2 PV. VERT avec le fix : [FNP:2] soustrait 2 → 3 BM nettes
+    → Grunt (HP=5) survit."""
+    stats = _parse(tmp_path, monkeypatch, _FNP_PARTIEL_5MW_2SAVES)
+    assert not stats["parse_errors"], f"aucune erreur attendue, got {stats['parse_errors']}"
+    deaths = stats["current_episode_deaths"]
+    assert not any(d[1] == "101" for d in deaths), (
+        f"Grunt (HP=5) doit survivre à 3 BM nettes (5−2 FNP), got deaths={deaths}"
+    )
+
+
+def test_fnp_total_annule_toutes_les_blessures(tmp_path, monkeypatch):
+    """ROUGE sans le fix : [ALL FNP SAVED] ignoré ; 5 BM appliquées → Grunt mourait.
+    VERT avec le fix : 0 BM nettes → Grunt (HP=5) survit."""
+    stats = _parse(tmp_path, monkeypatch, _FNP_TOTAL_5MW_ALL_SAVED)
+    assert not stats["parse_errors"], f"aucune erreur attendue, got {stats['parse_errors']}"
+    deaths = stats["current_episode_deaths"]
+    assert not any(d[1] == "101" for d in deaths), (
+        f"Grunt (HP=5) doit survivre à 0 BM nettes ([ALL FNP SAVED]), got deaths={deaths}"
+    )

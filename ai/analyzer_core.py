@@ -2236,6 +2236,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         _mwa_mw = int(_mwa_match.group(1))
                         if "[ALL FNP SAVED]" in action_desc:
                             _mwa_mw = 0
+                        else:
+                            # FNP partiels : [FNP:n] où n = blessures sauvées. Sans cette
+                            # soustraction l'analyzer applique le total pré-FNP et peut tuer
+                            # une unité que le moteur a laissée vivante.
+                            _mwa_fnp_m = re.search(r'\[FNP:(\d+)\]', action_desc)
+                            if _mwa_fnp_m:
+                                _mwa_mw = max(0, _mwa_mw - int(_mwa_fnp_m.group(1)))
                         _mwa_unit_id = _dmg_actor_id
                         _mwa_src_match = re.search(r'\[FROM:([^\]]+)\]', action_desc)
                         if _mwa_unit_id is None or _mwa_src_match is None:
