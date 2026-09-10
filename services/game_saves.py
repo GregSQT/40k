@@ -101,6 +101,14 @@ _log = logging.getLogger(__name__)
 # magic existe pour refuser. D'où TL07 : le numéro brûlé part en legacy, et le format courant se
 # lit à un numéro qui n'a jamais désigné autre chose.
 #
+# TL08 = TL07 + `reserves_declaration_started` dans `deployment_state` — le marqueur « une réponse
+# 20.01 a été donnée », qui refuse le remplacement d'armée une fois l'étape commencée
+# (`services/api_server._execute_change_roster_action`). MÊME classe que les deux clés 20.01 de
+# TL06 : une row TL07 restitue `deployment_state` EN BLOC, donc amputé de ce marqueur, et
+# `reserves_declaration_step_has_started` lève au premier clic sur « Change Roster » — après que
+# le chargement a déjà écrasé la partie en cours. Répondre « non » à la place serait pire : ce
+# serait autoriser le remplacement d'armée que ce marqueur existe pour refuser.
+#
 # ⚠️⚠️ CETTE EXCEPTION NE COUVRE QUE LA CLÉ MORTE, et UN retrait en sort — il BUMPE :
 #   • la clé qui quitte le reset mais reste CRÉÉE PARESSEUSEMENT et lue en cours de partie. La row
 #     la réinjecte avec sa valeur d'alors, avant que le code vivant ne la pose.
@@ -117,9 +125,10 @@ _log = logging.getLogger(__name__)
 # ne fait que les purger), donc hors de sa portée. La règle est désormais DANS le code : une clé
 # statique vient toujours de l'engine vivant, la row ne peut plus la remettre. Verrou :
 # tests/unit/services/test_game_snapshots_static_keys.py.
-_MAGIC = b"W40KTL07"
+_MAGIC = b"W40KTL08"
 _LEGACY_MAGICS = frozenset(
-    {b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04", b"W40KTL05", b"W40KTL06"}
+    {b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04", b"W40KTL05", b"W40KTL06",
+     b"W40KTL07"}
 )
 _LEN = struct.Struct(">Q")  # préfixe de longueur : entier 64 bits big-endian
 
@@ -227,7 +236,10 @@ def _reject_legacy(name: str, head: bytes) -> None:
             f"file de déclaration une fois la partie en cours déjà écrasée ; TL06 : en-tête "
             f"AMBIGUË, portée à la fois par les saves du 2026-09-10 et par celles du bump annulé "
             f"du 2026-09-09, qui n'ont pas ces mêmes clés 20.01 — l'en-tête ne dit pas laquelle "
-            f"des deux vous tenez, donc les deux sont refusées). Supprime-la ou rejoue la partie."
+            f"des deux vous tenez, donc les deux sont refusées ; TL07 : sans "
+            f"`reserves_declaration_started` dans `deployment_state`, le marqueur qui dit si "
+            f"l'étape Declare Battle Formations 20.01 a commencé — sans lui le changement "
+            f"d'armée lève au lieu d'être refusé). Supprime-la ou rejoue la partie."
         )
     raise ValueError(f"partie {name!r} : format de fichier inconnu (en-tête {head!r})")
 
