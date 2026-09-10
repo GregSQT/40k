@@ -7,6 +7,9 @@ from services.replay_parser import (
 )
 from tests._state_invariants import unit_invariants
 
+# Ce module ne parle pas à l'API : la fixture d'auth du conftest serait du travail jeté.
+from tests.unit.services._auth_neutre import authenticated_api_client  # noqa: F401
+
 
 def _write_log(tmp_path: Path, content: str) -> str:
     log_path = tmp_path / "train_step.log"

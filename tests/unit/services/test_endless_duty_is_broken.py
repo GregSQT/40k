@@ -23,6 +23,9 @@ import pytest
 from ai.unit_registry import UnitRegistry
 from services.endless_duty_runtime import ED_SCENARIO_DEFAULT, _apply_slot_picks_to_unit, _build_unit_from_registry
 
+# Ce module ne parle pas à l'API : la fixture d'auth du conftest serait du travail jeté.
+from tests.unit.services._auth_neutre import authenticated_api_client  # noqa: F401
+
 pytestmark = pytest.mark.anomaly
 
 _DOC = "Documentation/Chantiers/backlog/endless_duty.md"
