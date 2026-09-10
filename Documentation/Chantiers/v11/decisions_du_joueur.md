@@ -1008,9 +1008,10 @@ Ordre par valeur tactique :
    Consolidation* obligatoire. Le gym ne consolide donc **jamais** vers un objectif, alors que les
    objectifs décident la partie. Le flux PvP (fight_handlers) a la cascade complète. À combler
    quand cette tranche s'ouvre : c'est une règle manquante, pas une divergence d'interface.
-6. 🟡 **Move-after-shooting LIVRÉ le 2026-09-09, reactive_move NON.** NB : les deux sont des
-   **capacités d'unité** (`config/unit_rules.json`), pas des règles de base — leur valeur dépend
-   du roster.
+6. ✅ **Move-after-shooting LIVRÉ le 2026-09-09, reactive_move LIVRÉ le 2026-09-10.** NB : les
+   deux sont des **capacités d'unité** (`config/unit_rules.json`), pas des règles de base — leur
+   valeur dépend du roster, et celle de `reactive_move` est nulle sur le régime d'entraînement
+   actif (mesuré, cf. plus bas).
 
    🔴 **Le « constaté implémenté le 2026-08-19 » de cette ligne était FAUX pour les deux, et l'est
    resté trois semaines.** Ce qui avait été constaté — effets présents dans `UNIT_RULE_EFFECT_IDS`,
@@ -1047,19 +1048,58 @@ Ordre par valeur tactique :
    **Leçon générale** : rendre une décision à l'agent oblige à se demander qui répond pour
    l'adversaire, faute de quoi la référence de mesure change en même temps que le sujet mesuré.
 
-   🔴 **reactive_move — TOUJOURS HEURISTIQUE.** `reactive_decision_mode` vaut `"auto"` en dur
-   (`w40k_core.py`, deux sites) et n'est mis à `"state"` nulle part hors tests : le mode auto ne
-   décline JAMAIS — alors que `decline_reactive_move` est formalisé et sans producteur — et prend
-   la case la plus proche de l'ennemi qui vient de bouger (`_select_reactive_destination`,
-   shared_utils). Écarté de la livraison du 2026-09-09 **sur mesure, pas par manque de temps** :
-   son SEUL porteur est `Termagant`, qui n'apparaît que dans les rosters 150 pts de `CoreAgent` et
-   `_p2_rosters/150pts`, alors que le régime d'entraînement actif est `ArmageddonAgent_x1` en
-   500 pts. Le brancher aujourd'hui coûterait un type de décision et ses tests pour zéro gradient.
-   À rouvrir si un roster d'entraînement le porte. *(Rectifié le 2026-09-09, suite 40 : le
-   `FenrisianWolf` était compté comme second porteur à tort — l'utilisateur confirme que l'unité
-   n'a pas cette règle, et `reactive_move` lui a été retiré. Le coût réel du branchement a par
-   ailleurs été chiffré depuis : une modale PvP est à créer, aucune UI réactive n'existant hors
-   replay.)*
+   🟢 **reactive_move — LIVRÉ le 2026-09-10** (worktree `refus-du-move-reactif`). Type
+   `reactive_move` dans `AGENT_DECISION_TYPE_IDS`, ajouté EN FIN de tuple pour ne pas décaler la
+   colonne d'un type déjà déclaré ; 12 types pour 16 colonnes réservées, `obs_size` inchangé
+   (18269). `reactive_decision_mode` vaut `"state"` aux deux sites de `w40k_core.py` : le refus
+   `decline_reactive_move`, formalisé et sans producteur depuis l'origine, a enfin le sien.
+   Candidats = 3 intentions scorées (Pression = comportement historique en `CHOICE_0`, Retrait,
+   Objectif) plus `declines` = rester, dédupliquées par destination — MÊME forme que
+   `arm_move_after_shooting_decision`, son jumeau.
+
+   **Ce que la bascule a coûté hors de la fenêtre**, et qui n'était pas dans le chiffrage
+   initial : la fenêtre réactive devait devenir REPRENABLE, son curseur vivant dans
+   `game_state` (`PENDING_REACTIVE_MOVE_KEY`, `drive_reactive_move_window`) au lieu de variables
+   locales, et le jet de D6 persisté — une suspension entre le jet et le choix le re-tirerait, et
+   le joueur choisirait sur une portée qui n'est plus celle affichée. Puis trois conséquences que
+   rien ne portait : la phase ne peut plus se terminer sous une décision armée
+   (`_defer_phase_advance_while_reacting`, posé avant les DEUX boucles de cascade ; mesuré sur
+   `move_after_shooting` en dernière activation du pool, où la cascade traversait shoot → charge →
+   fight → tour suivant → command → move en une action et purgeait la fenêtre sous la question),
+   toute autre action est barrée pendant l'attente par un succès INERTE
+   (`_reject_action_while_reactive_move_pending`, au lieu de laisser un second mouvement lever
+   `RuntimeError[reactive_move.reentrance]` sur un clic banal), et le siège PvE est tranché
+   sur-le-champ (`_resolve_reactive_move_decision_for_ai_seats`), sans quoi la partie se bloquait —
+   `execute_ai_turn` refuse `not_ai_player_turn`, la décision étant posée pendant le tour de
+   l'adversaire. Le bot répond `CHOICE_0` par `env_wrappers.bot_action_for_pending_choice`, MÊME
+   exception que `move_after_shooting` et pour la même raison : `CHOICE_0` EST l'ancienne
+   destination de `_select_reactive_destination`, donc l'adversaire de référence ne bouge pas.
+
+   **Le refus ne consomme PAS la capacité du tour** : `units_reacted_this_enemy_turn` n'est
+   alimenté que sur le chemin du mouvement appliqué, donc la question revient à chaque mouvement
+   ennemi qui finit à portée dans le même tour. ⚠️ Lecture ASSUMÉE, tranchée par l'utilisateur le
+   2026-09-10 : le corpus ne définit pas le « Once per turn » de la datasheet — « once per »
+   n'apparaît que deux fois dans les 27 PDF de `Documentation/40k_rules/`, « once per battle »
+   (15 Stratagems) et « USE LIMIT: Once per turn » (16 Actions, limite portant sur
+   l'accomplissement). Le verrou est `test_le_refus_ne_consomme_pas_la_capacite_du_tour`.
+
+   Front : le panneau n'est posé qu'à un siège HUMAIN (`BoardWithAPI.tsx`, filtre sur
+   `player_types`), l'overlay rétablissant les clics pour ses seuls boutons ; deux cas montés dans
+   `BoardWithAPI.test.tsx`, le cas humain servant de contre-épreuve au cas IA. 45 tests
+   (`tests/unit/engine/test_reactive_move.py`) plus 4 vitest.
+
+   **Exposition entraînement : NULLE, mesuré.** Le seul porteur reste `Termagant` (1 datasheet sur
+   179), absent des rosters d'`ArmageddonAgent_x1` (23 types d'unités) ; le seul scénario
+   d'entraînement qui le porte appartient à `CoreAgent`, dont le training config a été supprimé le
+   2026-07-19 (`retrait de la banque CoreAgent`) — `load_agent_training_config('CoreAgent')` lève
+   `FileNotFoundError` et la découverte de scénarios, un glob NON récursif, ne trouverait rien dans
+   `scenarios/training/` de toute façon. La règle est donc jouable et décidable, sans gradient à
+   attendre : ⚠️ **aucun gain de win-rate n'est revendiqué**.
+
+   ⚠️ **NON VALIDÉ EN NAVIGATEUR** : le merge a été demandé avant l'essai PvP (les services
+   tournent depuis `main`, pas depuis un worktree). Ce qui reste à voir en partie : le panneau chez
+   le bon joueur, la phase qui n'avance pas sous la question, et la question qui revient après un
+   refus.
 7. ✅ **LIVRÉ le 2026-08-07** (élément `L6` du lot, worktree `L6-fly-decision` — détail →
    [§0.67](index_v11.md#s0.67)). **FLY / Take to the skies (21.03) est une DÉCISION
    D'AGENT** : le type `fly_declaration` est déclaré dans `AGENT_DECISION_TYPE_IDS`
