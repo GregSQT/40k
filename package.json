@@ -4,9 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate:unit-agent-matrix": "python scripts/unit_matrix_generate.py",
     "check:roster-static-labels": "python scripts/check_roster_static_labels.py",
-    "check:unit-agent-matrix": "python scripts/unit_matrix_check.py",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "lint": "biome lint .",
