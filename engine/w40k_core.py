@@ -971,13 +971,13 @@ class W40KEngine(gym.Env):
             # shaping et le peuplement des affectations sont partis le meme jour.
             #
             # ELLES RESTENT PUBLIEES PAR LE RESET, et ce n'est pas un oubli : elles
-            # APPARTIENNENT AU FORMAT DE SAUVEGARDE `W40KTL05`. Les retirer rend
+            # APPARTIENNENT AU FORMAT DE SAUVEGARDE COURANT, `W40KTL06`. Les retirer rend
             # `tests/unit/services/test_save_format_key_contract.py` rouge, et sa correction
             # prescrite est un bump de magic qui REFUSE toutes les parties deja enregistrees
             # (`services/game_saves._reject_legacy`). Or la doctrine du bump vise l'AJOUT d'une
             # cle — une save privee d'une cle que le moteur lira ensuite. Sur un RETRAIT, une row
-            # TL05 restauree rend simplement cinq cles en trop, que personne ne lit : le refus ne
-            # protege de rien et coute les sauvegardes des joueurs.
+            # du format courant restauree rend simplement cinq cles en trop, que personne ne lit :
+            # le refus ne protege de rien et coute les sauvegardes des joueurs.
             #
             # Meme arbitrage que pour les 15 ids d'action reserves de `engine.macro_intents` :
             # on condamne, on ne supprime pas, pour ne pas invalider ce qui est deja ecrit
@@ -1792,13 +1792,13 @@ class W40KEngine(gym.Env):
             # shaping et le peuplement des affectations sont partis le meme jour.
             #
             # ELLES RESTENT PUBLIEES PAR LE RESET, et ce n'est pas un oubli : elles
-            # APPARTIENNENT AU FORMAT DE SAUVEGARDE `W40KTL05`. Les retirer rend
+            # APPARTIENNENT AU FORMAT DE SAUVEGARDE COURANT, `W40KTL06`. Les retirer rend
             # `tests/unit/services/test_save_format_key_contract.py` rouge, et sa correction
             # prescrite est un bump de magic qui REFUSE toutes les parties deja enregistrees
             # (`services/game_saves._reject_legacy`). Or la doctrine du bump vise l'AJOUT d'une
             # cle — une save privee d'une cle que le moteur lira ensuite. Sur un RETRAIT, une row
-            # TL05 restauree rend simplement cinq cles en trop, que personne ne lit : le refus ne
-            # protege de rien et coute les sauvegardes des joueurs.
+            # du format courant restauree rend simplement cinq cles en trop, que personne ne lit :
+            # le refus ne protege de rien et coute les sauvegardes des joueurs.
             #
             # Meme arbitrage que pour les 15 ids d'action reserves de `engine.macro_intents` :
             # on condamne, on ne supprime pas, pour ne pas invalider ce qui est deja ecrit

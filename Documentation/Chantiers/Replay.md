@@ -506,11 +506,13 @@ et l'échec ne survit pas au changement d'unité.
   Construit **uniquement** par `SnapshotRewind.saveDisplayName`, depuis `turn`/`player`/`phase`/
   `episode_steps`. Le backend ne renvoie plus de champ `label` : il en existait un, transmis et
   typé côté front, que rien n'affichait (retiré le 2026-08-04).
-- **Format de fichier** : en-tête magique `W40KTL05`. `TL01` (sans empreinte de scénario),
+- **Format de fichier** : en-tête magique `W40KTL06`. `TL01` (sans empreinte de scénario),
   `TL02` (sans les points de commandement de la règle 08.02), `TL03` (sans les neuf clés
   ajoutées au reset d'épisode entre le 2026-08-04 et le 2026-08-31 : réserves stratégiques,
-  ingress, suppression, `secured_objectives`) et `TL04` (sans le couple de déclaration de montée
+  ingress, suppression, `secured_objectives`), `TL04` (sans le couple de déclaration de montée
   13.06 `units_declared_ascent` / `units_ascent_declaration_resolved`, ni `_charge_engage_memo`)
+  et `TL05` (sans les deux clés de l'étape Declare Battle Formations 20.01 posées au reset dans
+  `deployment_state` : `reserves_declaration_queue` et `reserves_declaration_closed`)
   sont **refusés explicitement** au chargement :
   leur état ne peut pas être restauré dans le moteur courant — un état ne capture que le
   mutable, donc une row d'un format antérieur rendrait un `game_state` privé de ces clés, et le
