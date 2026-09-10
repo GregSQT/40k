@@ -203,7 +203,10 @@ def parse_moves_from_step(step_log: str, episode_map: Dict[int, int]) -> List[Di
     # OPTIONNEL par nature et ne peut pas être présumé. Sans l'accepter, ces déplacements ne sont
     # pas parsés du tout, donc comptés « faits mais NON LOGUÉS » : un roster à jump packs
     # faisait sortir ce script en erreur sur des mouvements parfaitement journalisés.
-    _TOKEN = r'(?:\s+\[[^\]]+\])?'
+    # `*` et non `?` : le verbe peut porter PLUSIEURS tokens, et la même grammaire écrite avec
+    # `?` chez un seul de ses lecteurs suffit à faire disparaître la ligne de celui-là — c'est
+    # le défaut décrit juste au-dessus, à un token près. `CHARGED` est déjà passé par là.
+    _TOKEN = r'(?:\s+\[[^\]]+\])*'
     # Pattern for MOVED with episode: [timestamp] E{episode} T{turn} P{player} MOVE : ...
     moved_pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) MOVED' + _TOKEN + r' from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     # Pattern for MOVED without episode (old format): [timestamp] T{turn} P{player} MOVE : ...
@@ -330,10 +333,16 @@ def parse_advances_from_step(step_log: str, episode_map: Dict[int, int]) -> List
     Now supports both old format (without E{episode}) and new format (with E{episode})
     """
     advances = []
+    # Phase `MOVE`, et tokens acceptés comme sur `MOVED`/`FLED`/`CHARGED`. Ce lecteur exigeait
+    # `SHOOT :` et refusait tout token : l'Advance est journalisée par le MÊME site que les deux
+    # autres moves (`movement_handlers`, `"phase": "move"` en dur) et porte `[FLY]` dès qu'une
+    # escouade a déclaré « take to the skies » — aucune ligne réelle ne pouvait donc être lue
+    # ici, et chaque Advance était comptée « faite mais NON LOGUÉE ».
+    _TOKEN = r'(?:\s+\[[^\]]+\])*'
     # Pattern with episode (new format)
-    pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ADVANCED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    pattern_with_ep = r'\[([^\]]+)\] E(\d+) T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) ADVANCED' + _TOKEN + r' from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     # Pattern without episode (old format)
-    pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) SHOOT : Unit (\d+)\((\d+),(\d+)\) ADVANCED from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
+    pattern_old = r'\[([^\]]+)\] T(\d+) P(\d+) MOVE : Unit (\d+)\((\d+),(\d+)\) ADVANCED' + _TOKEN + r' from \((\d+),(\d+)\) to \((\d+),(\d+)\)'
     
     for line_num, line in enumerate(step_log.split('\n'), 1):
         # Try with episode first (new format)

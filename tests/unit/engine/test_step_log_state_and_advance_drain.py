@@ -318,3 +318,32 @@ def test_la_ligne_avec_waaagh_reste_lue_par_les_quatre_consommateurs() -> None:
         "l'application des degats est revenue a un test par sous-chaine"
     )
     assert _re.search(r"attack_line_re", core_src) is not None
+
+
+def test_la_ligne_de_move_a_deux_tokens_est_lue_par_ses_deux_lecteurs() -> None:
+    """JUMEAU du precedent, cote MOVE — meme defaut, autre grammaire.
+
+    Une ligne de move est lue DEUX fois : `move_verb_present` l'aiguille vers son handler, puis
+    `move_line_re` en extrait les positions. Le constructeur a ete unifie pour accepter une
+    SUITE de tokens entre le verbe et `from` (`ACTION_ABILITY_TOKENS`, `*`), mais l'aiguillage
+    en gardait une copie ecrite a la main qui n'en tolerait qu'UN (`?`). Les deux lecteurs de la
+    meme ligne repondaient donc differemment des le deuxieme token : la ligne n'etait branchee
+    nulle part, la position de l'unite restait figee, et toutes les adjacences mesurees ensuite
+    l'etaient contre un fantome — sans qu'aucune erreur ne soit levee.
+    """
+    from ai.analyzer_core import move_line_re, move_verb_present
+
+    for verbe, ligne in (
+        ("ADVANCED", "Unit 3(5,48) ADVANCED [FLY] [WAAAGH!] from (3,58) to (5,48) [Roll: 4]"),
+        ("FLED", "Unit 3(5,48) FLED [FLY] [WAAAGH!] from (3,58) to (5,48)"),
+        ("MOVED", "Unit 3(5,48) MOVED [FLY] [WAAAGH!] from (3,58) to (5,48)"),
+    ):
+        # 1. aiguillage
+        assert move_verb_present(verbe, ligne), ligne
+        # 2. grammaire complete : meme ligne, memes positions
+        m = move_line_re(verbe).search(ligne)
+        assert m is not None and (m.group(1), m.group(4), m.group(6)) == ("3", "3", "5"), ligne
+
+    # Un seul token, et zero token, restent lus des deux cotes.
+    assert move_verb_present("MOVED", "Unit 3(5,48) MOVED [FLY] from (3,58) to (5,48)")
+    assert move_verb_present("MOVED", "Unit 3(5,48) MOVED from (3,58) to (5,48)")

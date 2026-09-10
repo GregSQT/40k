@@ -42,7 +42,7 @@ def test_parse_moves_charges_advances_attacks_from_step() -> None:
 [t] E1 T1 P1 MOVE : Unit 1(1,1) MOVED from (1,1) to (2,1)
 [t] E1 T1 P1 MOVE : Unit 2(2,2) FLED from (2,2) to (3,2)
 [t] E1 T1 P1 CHARGE : Unit 3(3,3) CHARGED Unit 9(4,4) from (3,3) to (4,3)
-[t] E1 T1 P1 SHOOT : Unit 4(4,4) ADVANCED from (4,4) to (5,4)
+[t] E1 T1 P1 MOVE : Unit 4(4,4) ADVANCED [FLY] from (4,4) to (5,4)
 [t] E1 T1 P1 SHOOT : Unit 4(5,4) SHOT Unit 8(6,4)
 [t] E1 T1 P1 FIGHT : Unit 5(5,5) FOUGHT Unit 6(6,5)
 """
@@ -131,7 +131,7 @@ def test_parse_old_step_log_formats_use_episode_context() -> None:
 [t] T7 P1 MOVE : Unit 1(1,1) MOVED from (1,1) to (2,1)
 [t] T7 P1 MOVE : Unit 1(2,1) FLED from (2,1) to (3,1)
 [t] T7 P1 CHARGE : Unit 2(2,2) CHARGED Unit 9(4,4) from (2,2) to (3,2)
-[t] T7 P1 SHOOT : Unit 3(3,3) ADVANCED from (3,3) to (4,3)
+[t] T7 P1 MOVE : Unit 3(3,3) ADVANCED from (3,3) to (4,3)
 [t] T7 P1 SHOOT : Unit 3(4,3) SHOT [R:1.0] Unit 8(6,4)
 [t] T7 P1 FIGHT : Unit 4(5,5) FOUGHT Unit 6(6,5)
 """
@@ -163,6 +163,40 @@ def test_check_unlogged_attacks_previous_turn_and_deduplication() -> None:
     unlogged = haf.check_unlogged_attacks(debug_attacks, [])
     assert len(unlogged) == 1
     assert unlogged[0]["attacker"] == "7"
+
+
+def test_les_advances_reelles_sont_lues_quels_que_soient_leurs_tokens() -> None:
+    """VERROU : l'Advance est journalisee en phase MOVE, et elle porte des tokens.
+
+    Ce lecteur exigeait `SHOOT :` et n'acceptait aucun token entre le verbe et `from`. Or
+    `movement_handlers` ecrit les trois types de move depuis le MEME site, avec `"phase": "move"`
+    en dur, et y insere `[FLY]` des qu'une escouade a declare « take to the skies » (21.03).
+    Aucune ligne reelle n'etait donc lue ici : chaque Advance etait comptee « faite mais NON
+    LOGUEE », et l'unite gardait sa position de depart pour toute la suite de l'analyse.
+    """
+    step_log = (
+        "\n[t] E1 T1 P1 MOVE : Unit 1(1,1) ADVANCED from (1,1) to (2,1) [Roll: 3]"
+        "\n[t] E1 T1 P1 MOVE : Unit 2(2,2) ADVANCED [FLY] from (2,2) to (3,2) [Roll: 4]"
+        "\n[t] E1 T1 P1 MOVE : Unit 3(3,3) ADVANCED [FLY] [WAAAGH!] from (3,3) to (4,3) [Roll: 5]\n"
+    )
+    episode_map = {i: 1 for i, _ in enumerate(step_log.split("\n"), 1)}
+    advances = haf.parse_advances_from_step(step_log, episode_map)
+
+    assert len(advances) == 3, advances
+    assert [a["to"] for a in advances] == [(2, 1), (3, 2), (4, 3)], advances
+
+
+def test_les_moves_a_plusieurs_tokens_sont_lus() -> None:
+    """Meme grammaire, memes tokens : `MOVED` et `FLED` ne s'arretent pas au premier."""
+    step_log = (
+        "\n[t] E1 T1 P1 MOVE : Unit 1(1,1) MOVED [FLY] [WAAAGH!] from (1,1) to (2,1)"
+        "\n[t] E1 T1 P1 MOVE : Unit 2(2,2) FLED [FLY] [WAAAGH!] from (2,2) to (3,2)\n"
+    )
+    episode_map = {i: 1 for i, _ in enumerate(step_log.split("\n"), 1)}
+    moves = haf.parse_moves_from_step(step_log, episode_map)
+
+    assert {m["type"] for m in moves} == {"MOVED", "FLED"}, moves
+    assert [m["to"] for m in moves] == [(2, 1), (3, 2)], moves
 
 
 def test_check_missing_fight_attacks_skips_when_target_was_attacked() -> None:

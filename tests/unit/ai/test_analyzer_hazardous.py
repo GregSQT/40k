@@ -665,3 +665,34 @@ def test_fnp_partiel_desperate_escape_soustrait_des_blessures(tmp_path, monkeypa
         f"Unit 1 (HP=3) doit survivre à 1 BM nette (3−2 FNP), got deaths={deaths}"
     )
 
+
+
+# VERROU : ligne HAZARDOUS PRIVÉE de son préfixe `Unit N(`.
+# Le dernier header vu est Unit 2 (NoHazUnit, HP_MAX=3). La ligne ne nomme aucune unité : rien
+# ne dit qui subit les blessures mortelles. Le repli sur `action_unit_id` les appliquait à
+# Unit 2 — l'unité du header, jamais celle de la ligne — c'est-à-dire exactement l'attribution
+# fausse que la lecture par préfixe avait fermée, rouverte sur le chemin de la ligne malformée.
+_HAZARDOUS_SANS_PREFIXE_UNIT = (
+    "[10:00:02] E1 T1 P1 SHOOTING : Unit 1 SUFFERS 3 Mortal Wounds [HAZARDOUS] "
+    "[R:+0.0] [SUCCESS]\n"
+)
+
+
+def test_hazardous_sans_prefixe_unit_n_applique_aucun_degat(tmp_path, monkeypatch):
+    """Une victime non identifiable ne devient pas la dernière unité vue."""
+    stats = _parse_two(tmp_path, monkeypatch, _HAZARDOUS_SANS_PREFIXE_UNIT)
+    assert stats["hazardous_mortal_wounds"][1] == 0, (
+        "3 BM comptées pour une ligne qui ne nomme aucune unité : elles sont attribuées au "
+        "dernier header, pas à la victime"
+    )
+    assert not [d for d in stats["current_episode_deaths"] if d[1] == "2"], (
+        "Unit 2 (dernier header) meurt des blessures mortelles d'une ligne qui ne la nomme pas"
+    )
+
+
+def test_hazardous_sans_prefixe_unit_n_est_signalee_comme_journal_illisible(tmp_path, monkeypatch):
+    """La ligne n'est pas ignorée en silence : elle rejoint les erreurs de format du rapport."""
+    stats = _parse_two(tmp_path, monkeypatch, _HAZARDOUS_SANS_PREFIXE_UNIT)
+    erreurs = [e for e in stats["parse_errors"] if "préfixe 'Unit N('" in e["error"]]
+    assert len(erreurs) == 1, stats["parse_errors"]
+    assert "HAZARDOUS" in erreurs[0]["line"]

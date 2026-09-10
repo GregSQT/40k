@@ -136,8 +136,14 @@ def attack_verb_present(action_desc: str, verbs: str = r"ATTACKED|FOUGHT") -> bo
 
 def move_verb_present(verb: str, action_desc: str) -> bool:
     """Le verbe de mouvement `verb` introduit-il un `from` sur cette ligne ?
-    Aiguillage : même grammaire que `move_line_re`, sans les positions."""
-    return re.search(r'\b' + verb + r'(?:\s+\[[^\]]+\])?\s+from', action_desc) is not None
+    Aiguillage : même grammaire que `move_line_re`, sans les positions.
+
+    `ACTION_ABILITY_TOKENS` et non une copie : ce site écrivait `?` (UN token au plus) là où
+    `move_line_re` écrit `*`. L'aiguillage et le raffinage lisaient donc deux grammaires
+    différentes, et une ligne de move portant deux tokens n'aurait été branchée nulle part —
+    en silence, exactement le défaut que l'unification du constructeur venait de fermer.
+    """
+    return re.search(r'\b' + verb + ACTION_ABILITY_TOKENS + r'\s+from', action_desc) is not None
 
 
 _STATE_UNIT_RE = re.compile(r'(\d+)\[([^\]]*)\]')
@@ -1040,8 +1046,21 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     if win_method:
                         if winner in stats['win_methods'] and win_method in stats['win_methods'][winner]:
                             stats['win_methods'][winner][win_method] += 1
-                        elif winner == DRAW_WINNER:
-                            stats['win_methods'][DRAW_WINNER]['draw'] += 1
+                        else:
+                            # Le repli `elif winner == DRAW_WINNER` comptait 'draw' QUELLE QUE
+                            # SOIT la méthode lue : une méthode hors barème devenait un nul
+                            # ordinaire, indiscernable dans le rapport. Le moteur en pose déjà
+                            # une que ce barème ignore — `step_limit`, sur la troncature — et
+                            # elle ne rejoint le journal qu'à la première fin d'épisode qui la
+                            # portera. Le désaccord moteur/analyzer se voit au lieu de se ranger.
+                            stats['parse_errors'].append({
+                                'episode': state.current_episode_num,
+                                'turn': None,
+                                'phase': None,
+                                'line': line.strip(),
+                                'error': f"EPISODE END : Method={win_method} inconnu du barème de "
+                                         f"Winner={winner} — méthode de victoire non comptée",
+                            })
                     else:
                         stats['episodes_without_method'].append({
                             'winner': winner,
@@ -1885,12 +1904,20 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                             'line': line.strip()
                                         }
                             else:
-                                reactive_checks['distance_over_roll'][reactive_player] += 1
-                                if first_errors['reactive_move_distance_over_roll'][reactive_player] is None:
-                                    first_errors['reactive_move_distance_over_roll'][reactive_player] = {
-                                        'episode': state.current_episode_num,
-                                        'line': line.strip()
-                                    }
+                                # Sans `[Roll: N]` il n'y a AUCUN budget à comparer : incrémenter
+                                # ici imputait à l'agent un défaut de journal, dans le compteur
+                                # d'une règle que rien n'avait jugée — une faute de move inventée
+                                # à chaque ligne réactive de grammaire incomplète. Le journal
+                                # illisible est signalé pour ce qu'il est.
+                                stats['parse_errors'].append({
+                                    'episode': state.current_episode_num,
+                                    'turn': turn,
+                                    'phase': phase,
+                                    'line': line.strip(),
+                                    'error': "ligne REACTIVE MOVED sans segment '[Roll: N]' : le "
+                                             "budget du move réactif est illisible, aucun contrôle "
+                                             "de distance n'a pu être fait",
+                                })
 
                             positions_for_adjacency_check = dict(positions_at_reactive)
                             positions_for_adjacency_check[reactive_unit_id] = (to_col, to_row)
@@ -2081,7 +2108,12 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                         # exactement comme pour les attaques régulières (cf. step_logger.py §569).
                         action_type = 'hazardous'
                         _hz_match = _HAZARDOUS_SUFFERS_RE.search(action_desc)
-                        if _hz_match:
+                        # `_dmg_actor_id is not None` appartient à la GRAMMAIRE de la ligne : sans
+                        # le préfixe `Unit N(`, l'unité qui subit les BM n'est pas identifiable, et
+                        # le repli sur `action_unit_id` (dernier ID de HEADER, pas de la ligne)
+                        # appliquait les dégâts à une AUTRE unité — l'attribution fausse que ce
+                        # site venait de fermer, rouverte sur le chemin de la ligne malformée.
+                        if _hz_match and _dmg_actor_id is not None:
                             _hz_mw = int(_hz_match.group(1))
                             if "[ALL FNP SAVED]" in action_desc:
                                 _hz_mw = 0
@@ -2089,10 +2121,8 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 _hz_fnp_m = re.search(r'\[FNP:(\d+)\]', action_desc)
                                 if _hz_fnp_m:
                                     _hz_mw = max(0, _hz_mw - int(_hz_fnp_m.group(1)))
-                            # Cible = acteur : le préfixe "Unit N(" d'action_desc est la seule
-                            # source fiable de l'ID de l'unité sur une ligne SUFFERS (action_unit_id
-                            # retient le dernier ID de header, pas celui de la ligne courante).
-                            _hz_unit_id = _dmg_actor_id or action_unit_id
+                            # Cible = acteur, nommé par le préfixe de la ligne (cf. garde ci-dessus).
+                            _hz_unit_id = _dmg_actor_id
                             # Vérifier que l'unité porte effectivement une arme HAZARDOUS.
                             # `state.unit_model_hp` ne contient que les socles VIVANTS : si la MW
                             # tue le porteur de l'arme HAZARDOUS (ex. VanguardVeteranSquadJumpPackPlasma)
@@ -2175,8 +2205,13 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                                 'turn': turn,
                                 'phase': phase,
                                 'line': line.strip(),
-                                'error': "ligne HAZARDOUS : format inattendu (attendu : "
-                                         "'SUFFERS N Mortal Wounds [HAZARDOUS]' ou '[HAZARDOUS:K]')",
+                                'error': (
+                                    "ligne HAZARDOUS : préfixe 'Unit N(' absent, l'unité qui subit "
+                                    "les blessures mortelles n'est pas identifiable"
+                                    if _hz_match else
+                                    "ligne HAZARDOUS : format inattendu (attendu : "
+                                    "'SUFFERS N Mortal Wounds [HAZARDOUS]' ou '[HAZARDOUS:K]')"
+                                ),
                             })
                 elif " SUFFERS " in action_desc and "[DESPERATE ESCAPE]" in action_desc:
                         # 09.07 [DESPERATE ESCAPE] : blessures mortelles auto-infligées lors d'un
