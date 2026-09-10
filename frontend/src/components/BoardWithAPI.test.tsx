@@ -266,6 +266,149 @@ describe("BoardWithAPI — panneau de mouvement réactif", () => {
 });
 
 // ---------------------------------------------------------------------------
+// T_BoardWithAPI_AutoRoster — l'échec d'application d'un roster enregistré DIT POURQUOI
+//
+// L'écran de préparation applique les rosters mémorisés dans localStorage. Son message d'échec
+// était écrit en dur (« Roster enregistré introuvable ») : depuis que `changeRoster` fait
+// remonter les refus du moteur, ce libellé aurait accusé le fichier alors que le moteur refuse
+// le GESTE (`change_roster_locked_after_first_deploy` après une première pose, par exemple —
+// atteignable, l'écran de préparation se rouvrant à chaque rechargement de page en déploiement).
+// ---------------------------------------------------------------------------
+
+describe("BoardWithAPI — auto-application des rosters enregistrés", () => {
+  /** Déploiement ACTIF : le seul état où l'écran de préparation s'ouvre. */
+  const deploiementActif = (over: Record<string, unknown> = {}) =>
+    makeGameState({
+      phase: "deployment",
+      deployment_type: "active",
+      deployment_state: {
+        current_deployer: 1,
+        deployable_units: { "1": [], "2": [] },
+        deployed_units: [],
+        deployment_complete: false,
+      },
+      ...over,
+    });
+
+  it("refus du moteur → le message nomme le fichier ET la raison", async () => {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: deploiementActif() })
+      ),
+      http.post("/api/game/action", () =>
+        HttpResponse.json({
+          success: false,
+          result: { error: "change_roster_locked_after_first_deploy", current_deployer: 1 },
+          game_state: deploiementActif(),
+          action_logs: [],
+          message: "Action failed",
+        })
+      )
+    );
+    localStorage.setItem("gameprep_roster_p1", "armageddon_space_marines.json");
+
+    renderBoard();
+
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Game preparation/)).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(
+            /armageddon_space_marines\.json.*change_roster_locked_after_first_deploy/
+          )
+        ).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+  });
+
+  it("un roster accepté, l'autre refusé → seul le refusé porte un message", async () => {
+    // CONTRE-ÉPREUVE NON VACANTE. Asserter « aucun message » juste après l'ouverture de l'écran
+    // laissait passer un refus : l'assertion négative s'exécutait avant que le POST ait résolu
+    // (mesuré — le test restait vert en refusant tout). Ici les deux rosters sont appliqués
+    // SÉQUENTIELLEMENT par l'écran (p1 attendu, puis p2) : voir le message de p2 prouve donc que
+    // l'application de p1 est terminée, et c'est ce qui rend son absence de message concluante.
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: deploiementActif() })
+      ),
+      http.post("/api/game/action", async ({ request }) => {
+        const body = (await request.json()) as { player?: number };
+        if (body.player === 2) {
+          return HttpResponse.json({
+            success: false,
+            result: { error: "change_roster_locked_after_first_deploy", current_deployer: 2 },
+            game_state: deploiementActif(),
+            action_logs: [],
+            message: "Action failed",
+          });
+        }
+        return HttpResponse.json({
+          success: true,
+          result: { action: "change_roster", updated_player: 1 },
+          game_state: deploiementActif(),
+          action_logs: [],
+          message: "Action executed successfully",
+        });
+      })
+    );
+    localStorage.setItem("gameprep_roster_p1", "armageddon_space_marines.json");
+    localStorage.setItem("gameprep_roster_p2", "armageddon_orks.json");
+
+    renderBoard();
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(/armageddon_orks\.json.*change_roster_locked_after_first_deploy/)
+        ).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    expect(screen.queryByText(/armageddon_space_marines\.json/)).toBeNull();
+  });
+
+  it("non-action → l'armée n'est PAS annoncée comme appliquée", async () => {
+    // TROISIÈME ISSUE d'`executeAction` : il n'envoie rien et rend `undefined`, SANS poser
+    // d'erreur — ici parce que la partie est terminée (mêmes portes : aperçu d'un point de
+    // sauvegarde actif, partie non démarrée). La traiter comme un succès ferait mémoriser un
+    // roster que le moteur n'a jamais appliqué. Le cas de l'échec réseau, lui, n'a pas besoin de
+    // ce garde-fou : `executeAction` y appelle `setError`, et le hook lève alors `API ERROR`,
+    // donc l'écran entier est remplacé — rien à afficher à côté d'un bouton qui n'existe plus.
+    let actionAppelee = false;
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: deploiementActif({ game_over: true }) })
+      ),
+      http.post("/api/game/action", () => {
+        actionAppelee = true;
+        return HttpResponse.json({ success: true, game_state: deploiementActif() });
+      })
+    );
+    localStorage.setItem("gameprep_roster_p1", "armageddon_space_marines.json");
+
+    renderBoard();
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(/armageddon_space_marines\.json.*aucune action exécutée/)
+        ).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+    // VERT NON VACANT dans l'autre sens : le message vient bien d'une NON-ACTION, pas d'un appel
+    // parti puis refusé — aucune requête n'a quitté le client.
+    expect(actionAppelee).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // T_BoardWithAPI_ReservesDeclaration — 20.01, la question et le siège
 // ---------------------------------------------------------------------------
 

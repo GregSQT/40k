@@ -14,10 +14,11 @@ import struct
 
 import pytest
 
-from services.game_saves import _MAGIC, SaveStore, _pack_record, _safe_loads
+from services.game_saves import _MAGIC, SaveStore, _safe_loads
 
 # Ce module ne parle pas à l'API : la fixture d'auth du conftest serait du travail jeté.
 from tests.unit.services._auth_neutre import authenticated_api_client  # noqa: F401
+from tests.unit.services._save_files import ecrire_save_sous_magic
 
 
 class _RceGadget:
@@ -124,16 +125,13 @@ class TestStoreReadPathIsGuarded:
 
     def test_a_normal_party_file_still_reads(self, tmp_path):
         """Contre-épreuve : le fichier écrit par le jeu lui-même se relit sans erreur."""
-        store = SaveStore(str(tmp_path / "parties"))
-        os.makedirs(store._dir, exist_ok=True)
+        # Row au CONTENU signifiant — une clé de dict en tuple, que seul le dépickle restitue —
+        # écrite par le cadre binaire de production, via le helper partagé avec le test de format.
         row = {
             "meta": {"id": "20260101-000000", "kind": "manual", "turn": 1},
             "state": {"game_state": {"occupation_map": {(1, 2): "u1"}}, "engine_attrs": {}},
         }
-        with open(os.path.join(store._dir, "partie_saine.pkl"), "wb") as f:
-            f.write(_MAGIC)
-            f.write(_pack_record(row))
-        store.set_current("partie_saine")
+        store = ecrire_save_sous_magic(tmp_path, _MAGIC, row)
 
         loaded = store.point("20260101-000000")
         assert loaded["meta"]["id"] == "20260101-000000"

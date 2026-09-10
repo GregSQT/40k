@@ -887,21 +887,28 @@ export const BoardWithAPI: React.FC = () => {
 
     const changeRoster = apiProps.changeRoster;
 
+    // Le message DIT POURQUOI, il ne devine pas. « Roster enregistré introuvable » était écrit en
+    // dur pour tout échec : depuis que `changeRoster` fait remonter les refus du moteur
+    // (`change_roster_locked_after_first_deploy`, `..._after_reserves_declaration`), ce libellé
+    // aurait accusé le fichier alors que le moteur refuse le GESTE.
+    const echecRoster = (fichier: string, err: unknown): string =>
+      `Roster « ${fichier} » non appliqué : ${err instanceof Error ? err.message : String(err)}`;
+
     const applyAll = async () => {
       if (savedP1) {
         try {
           await changeRoster(savedP1, 1);
           setCurrentRosterFile((prev) => ({ ...prev, p1: savedP1 }));
-        } catch {
-          setRosterNotFoundError((prev) => ({ ...prev, p1: "Roster enregistré introuvable" }));
+        } catch (err) {
+          setRosterNotFoundError((prev) => ({ ...prev, p1: echecRoster(savedP1, err) }));
         }
       }
       if (savedP2) {
         try {
           await changeRoster(savedP2, 2);
           setCurrentRosterFile((prev) => ({ ...prev, p2: savedP2 }));
-        } catch {
-          setRosterNotFoundError((prev) => ({ ...prev, p2: "Roster enregistré introuvable" }));
+        } catch (err) {
+          setRosterNotFoundError((prev) => ({ ...prev, p2: echecRoster(savedP2, err) }));
         }
       }
     };

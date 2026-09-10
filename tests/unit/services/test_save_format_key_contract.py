@@ -67,11 +67,12 @@ from typing import Any, Dict, FrozenSet, Iterable, Tuple
 
 import pytest
 
-from services.game_saves import _LEGACY_MAGICS, _MAGIC, SaveStore, _pack_record
+from services.game_saves import _LEGACY_MAGICS, _MAGIC
 from services.game_snapshots import _GS_STATIC_KEYS
 
 # Ce module ne parle pas à l'API : la fixture d'auth du conftest serait du travail jeté.
 from tests.unit.services._auth_neutre import authenticated_api_client  # noqa: F401
+from tests.unit.services._save_files import ROW_MINIMALE, ecrire_save_sous_magic
 
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -553,28 +554,6 @@ def test_the_lock_covers_the_keys_that_slipped_through(
     )
 
 
-def _ecrire_save_sous_magic(tmp_path: Any, magic: bytes) -> SaveStore:
-    """Écrit une partie d'un seul enregistrement sous `magic`, et rend le store qui la porte.
-
-    Le cadre binaire vient de `_pack_record`, la fonction de PRODUCTION : un test qui le
-    réécrirait à la main resterait vert le jour où le cadre change, sur un fichier que le serveur
-    n'écrit plus. Seul l'en-tête est posé ici — c'est lui, et lui seul, que les refus ci-dessous
-    mettent à l'épreuve.
-    """
-    store = SaveStore(str(tmp_path / "parties"))
-    os.makedirs(store._dir, exist_ok=True)
-    nom = f"partie_{magic.decode().lower()}"
-    row = {
-        "meta": {"id": "20260101-000000", "kind": "manual", "turn": 1},
-        "state": {"game_state": {}, "engine_attrs": {}},
-    }
-    with open(os.path.join(store._dir, f"{nom}.pkl"), "wb") as f:
-        f.write(magic)
-        f.write(_pack_record(row))
-    store.set_current(nom)
-    return store
-
-
 def _message_de_refus(tmp_path: Any, magic: bytes) -> str:
     """Charge une save écrite sous `magic`, exige le refus, et rend son message.
 
@@ -589,7 +568,7 @@ def _message_de_refus(tmp_path: Any, magic: bytes) -> str:
         fichier tombé de `_LEGACY_MAGICS`.
     Chaque test n'ajoute donc que ce qui lui est propre : les clauses que SON format doit nommer.
     """
-    store = _ecrire_save_sous_magic(tmp_path, magic)
+    store = ecrire_save_sous_magic(tmp_path, magic, ROW_MINIMALE)
 
     with pytest.raises(ValueError) as excinfo:
         store.point("20260101-000000")
