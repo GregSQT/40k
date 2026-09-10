@@ -2,15 +2,15 @@
 """
 Profile env.step latency on the 360x312 scenario map.
 
-Usage (from repo root):
-  ./.venv/bin/python scripts/profile_env_step_360x312.py
-  ./.venv/bin/python scripts/profile_env_step_360x312.py --measured-steps 500 --warmup-steps 100
-  ./.venv/bin/python scripts/profile_env_step_360x312.py --per-step --top-slow 0
-  ./.venv/bin/python scripts/profile_env_step_360x312.py --no-progress   # JSON only (no bar on stderr)
-  ./.venv/bin/python scripts/profile_env_step_360x312.py --profile-goulots  # + cProfile replay (2e passe, barre tqdm "cprofile-replay")
+Usage (from repo root) — `--agent-key` est obligatoire (rewards_config / controlled_agent) :
+  ./.venv/bin/python scripts/profile_env_step_360x312.py --agent-key ArmageddonAgent_x1
+  ./.venv/bin/python scripts/profile_env_step_360x312.py --agent-key ArmageddonAgent_x1 --measured-steps 500 --warmup-steps 100
+  ./.venv/bin/python scripts/profile_env_step_360x312.py --agent-key ArmageddonAgent_x1 --per-step --top-slow 0
+  ./.venv/bin/python scripts/profile_env_step_360x312.py --agent-key ArmageddonAgent_x1 --no-progress   # JSON only (no bar on stderr)
+  ./.venv/bin/python scripts/profile_env_step_360x312.py --agent-key ArmageddonAgent_x1 --profile-goulots  # + cProfile replay (2e passe, barre tqdm "cprofile-replay")
 
   # JSON dans un fichier tout en gardant les barres tqdm dans le terminal (bash) :
-  #   ./.venv/bin/python scripts/profile_env_step_360x312.py ... > profile_result.json 2> >(tee profile_stderr.txt >&2)
+  #   ./.venv/bin/python scripts/profile_env_step_360x312.py --agent-key ArmageddonAgent_x1 ... > profile_result.json 2> >(tee profile_stderr.txt >&2)
   # Sans tee : rediriger 2> fichier envoie tqdm dans le fichier seulement (tail -f profile_stderr.txt dans un autre terminal).
 
 Progress bar (tqdm) goes to stderr; JSON result stays on stdout for piping.
@@ -75,7 +75,12 @@ def parse_args() -> argparse.Namespace:
         default="config/scenario_pvp_test.json",
         help="Scenario JSON file path",
     )
-    parser.add_argument("--agent-key", type=str, default="CoreAgent", help="Agent key for configs")
+    parser.add_argument(
+        "--agent-key",
+        type=str,
+        required=True,
+        help="Agent key for configs (rewards_config / controlled_agent)",
+    )
     parser.add_argument(
         "--per-step",
         action="store_true",

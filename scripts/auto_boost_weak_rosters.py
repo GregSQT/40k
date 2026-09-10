@@ -188,7 +188,9 @@ def _candidate_files_by_type(candidate_dir: Path) -> Dict[str, List[Path]]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Auto boost weak opponent rosters (B3->B7)")
     parser.add_argument("--weak-ids-file", required=True, help="Path to weak roster IDs (one per line)")
-    parser.add_argument("--agent", default="CoreAgent")
+    # Pas de `--agent` : les pools de rosters adverses vivent sous `config/agents/_p2_rosters/`,
+    # commun a tous les agents. L'option existait, n'etait lue nulle part, et portait le nom d'un
+    # agent supprime du depot.
     parser.add_argument("--scale", default="150pts")
     parser.add_argument("--split", default="holdout_hard")
     parser.add_argument("--round-label", default="r1")

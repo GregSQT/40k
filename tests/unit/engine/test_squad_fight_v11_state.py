@@ -28,7 +28,7 @@ from pathlib import Path
 
 import pytest
 
-from smoke_t5_bare import MELEE_SCENARIO
+from tests.unit.engine._melee_scenario import MELEE_SCENARIO
 
 
 @pytest.fixture()

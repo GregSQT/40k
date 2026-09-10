@@ -32,7 +32,7 @@ from engine.action_decoder import (
 )
 from engine.phase_handlers.fight_handlers import build_manual_fight_allocation
 from shared.data_validation import ConfigurationError
-from smoke_t5_bare import MELEE_SCENARIO
+from tests.unit.engine._melee_scenario import MELEE_SCENARIO
 from tests._state_invariants import turn_state_invariants
 from tests.unit.engine._config_helpers import build_game_rules
 from tests.unit.engine._state_builders import units_cache_entry as _uc

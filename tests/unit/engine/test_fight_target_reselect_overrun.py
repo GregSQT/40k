@@ -29,7 +29,7 @@ import engine.w40k_core as wcore
 from engine.action_decoder import PENDING_FIGHT_TARGET_KEY, PENDING_FIGHT_WEAPON_KEY
 from engine.phase_handlers.shared_utils import SQUAD_ACTION_FIGHT_SLOT_BASE
 
-from smoke_t5_bare import MELEE_SCENARIO
+from tests.unit.engine._melee_scenario import MELEE_SCENARIO
 
 
 _SQUAD = "101"

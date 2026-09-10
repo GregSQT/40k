@@ -1,16 +1,20 @@
-"""V11 T4 — Migration de banque de scénarios (script) + hygiène de la banque ArmageddonAgent.
+"""V11 T4 — Hygiène de la banque de scénarios ArmageddonAgent (héritage de la migration).
 
 Couvre :
-- l'idempotence de la transformation `_migrate_scenario` (2e passage = même résultat) ;
-- la normalisation des refs de roster « nom nu » héritées ;
-- l'invariant statique sur les 61 scénarios migrés (zéro clé legacy, board_ref + terrain_ref) ;
+- l'invariant statique sur les scénarios de la banque (zéro clé legacy, board_ref + terrain_ref
+  dans les terrains autorisés pour leur dossier) ;
 - le chargement moteur + reset sur un échantillon couvrant chaque voie de déploiement
   (active / random / P1-P2 / benchmark / matchup) : >= 1 objectif, deployment_pools joueurs {1,2}.
 
 Le balayage EXHAUSTIF des 61 (W40KEngine + reset) était fourni par `scripts/sweep_scenario_bank_v11.py`,
 trop lourd pour la suite unitaire et **supprimé le 2026-07-26** (critère T4 clos, balayage 61/61 déjà
-consigné dans `index_v11.md §3495`) ; ce test couvre l'invariant statique sur les 61 + un
-échantillon représentatif chargé de bout en bout.
+consigné dans `index_v11.md §3495`) ; ce test couvre l'invariant statique + un échantillon
+représentatif chargé de bout en bout.
+
+Les tests de la TRANSFORMATION elle-même (`_migrate_scenario`, `_normalize_roster_ref`) sont
+partis le 2026-09-10 avec `scripts/migrate_scenario_bank_v11.py` : migration one-shot déjà passée,
+sur une banque (`config/agents/CoreAgent/`) supprimée du dépôt. Ce qui reste ici est ce qui a une
+valeur permanente : l'état de la banque VIVANTE, indépendant de l'outil qui l'a produite.
 """
 from __future__ import annotations
 
@@ -19,16 +23,14 @@ from pathlib import Path
 
 import pytest
 
-from tests._chargeur_script import charger_script
-
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCEN_ROOT = PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent_x1" / "scenarios"
 ACTIVE_DIRS = ["training", "holdout_regular", "holdout_hard"]
 LEGACY_KEYS = ("objectives", "objectives_ref", "objective_hexes", "deployment_zone", "wall_ref")
 # Décision utilisateur 2026-07-19 : `terrain-train-01/02/03` sont OBSOLÈTES, la banque tourne sur
 # les terrains `terrain-mcN.json`. Les terrains d'entraînement étaient les versions APLATIES de mc1
-# générées par `migrate_scenario_bank_v11.py` (Phase A « pas d'étages ») ; la banque porte donc
-# désormais les étages de mc1/mc2.
+# produites par la migration T4 (Phase A « pas d'étages ») ; la banque porte donc désormais les
+# étages de mc1/mc2.
 #
 # Décision utilisateur 2026-08-08 : **l'entraînement tourne sur DEUX terrains**, mc1 et mc2 — le
 # commit `6a1c8181` dédouble le scénario d'entraînement en `armageddon1`/`armageddon2`, qui ne
@@ -44,16 +46,11 @@ TERRAINS_PAR_DOSSIER = {
     "holdout_regular": {"terrain-mc1.json"},
     "holdout_hard": {"terrain-mc1.json"},
 }
-# ⚠️ Ce script de migration T4 cycle encore sur les 3 terrains plats : le RELANCER repointerait
-# la banque dessus et casserait ce test — il est one-shot et déjà passé.
 #: Terrains d'entrainement declares par la banque. `terrain-mc2` est entre le 2026-08-08
 #: avec `scenario_training_armageddon2.json` : un scenario de training tire son roster au
 #: sort, donc TOUT terrain listé ici doit accepter les positions fixes des rosters
 #: (`scripts/gen_roster_positions.py` calcule leur union de murs).
 TRAIN_TERRAINS = {"terrain-mc1.json", "terrain-mc2.json"}
-
-
-MIG = charger_script("scripts/migrate_scenario_bank_v11.py")
 
 
 def _bank_scenarios() -> list[Path]:
@@ -74,55 +71,7 @@ def _bank_scenarios() -> list[Path]:
     ]
 
 
-# ── Transformation : idempotence + strip legacy ─────────────────────────────────
-
-def test_migrate_scenario_strips_legacy_and_adds_refs():
-    src = {
-        "deployment_zone": "hammer",
-        "deployment_type": "active",
-        "scale": "150pts",
-        "agent_roster_ref": "training_random",
-        "opponent_roster_ref": "training_random",
-        "wall_ref": "random",
-        "objectives_ref": "objectives-51.json",
-        "primary_objectives": ["objectives_control"],
-    }
-    out = MIG._migrate_scenario(src, "terrain-mc1.json")
-    assert not any(k in out for k in LEGACY_KEYS)
-    assert out["board_ref"] == "44x60x5"
-    assert out["terrain_ref"] == "terrain-mc1.json"
-    assert out["deployment_type"] == "active"  # clé non-legacy préservée
-
-
-def test_migrate_scenario_is_idempotent():
-    src = {
-        "deployment_zone": "hammer",
-        "deployment_type": "random",
-        "scale": "150pts",
-        "agent_roster_ref": "training_random",
-        "opponent_roster_ref": "training_random",
-        "wall_ref": "walls-11.json",
-        "objectives_ref": "objectives-51.json",
-        "primary_objectives": ["objectives_control"],
-    }
-    once = MIG._migrate_scenario(src, "terrain-mc1.json")
-    twice = MIG._migrate_scenario(once, "terrain-mc1.json")
-    assert once == twice
-
-
-def test_normalize_roster_ref_keeps_keyword_and_explicit():
-    assert MIG._normalize_roster_ref("training_random", "agent", "150pts") == "training_random"
-    assert (
-        MIG._normalize_roster_ref("training/foo.json", "agent", "150pts") == "training/foo.json"
-    )
-
-
-def test_normalize_roster_ref_fixes_bare_benchmark_name():
-    ref = MIG._normalize_roster_ref("agent_training_roster_benchmark_classic", "agent", "150pts")
-    assert "/" in ref and ref.endswith(".json")
-
-
-# ── Invariant statique sur les 61 scénarios migrés ──────────────────────────────
+# ── Invariant statique sur les scénarios de la banque ───────────────────────────
 
 def test_bank_has_expected_count():
     # Banque ArmageddonAgent : 2 scenarios training (armageddon1/2, mc1 et mc2) + 4

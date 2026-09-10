@@ -26,7 +26,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pytest
 
-from smoke_t5_bare import MELEE_SCENARIO
+from tests.unit.engine._melee_scenario import MELEE_SCENARIO
 
 from engine.macro_intents import ACTION_WAIT, CHARGE_SLOT_BASE
 from engine.phase_handlers.shared_utils import (

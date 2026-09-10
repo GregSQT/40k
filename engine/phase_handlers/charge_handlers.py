@@ -3310,7 +3310,7 @@ def _has_valid_charge_target(game_state: Dict[str, Any], unit: Dict[str, Any],
     # le chemin hex/gym — celui de l'entraînement — n'avait pour éligibilité que le BFS ci-dessous,
     # c'est-à-dire « existe-t-il une destination dans un budget de 12" d'où je finis engagé ? ».
     # Une escouade dont l'ennemi le plus proche est à plus de 12" y était donc déclarée éligible
-    # (mesuré : ennemi à 12,13" et à 12,89", scénario mêlée de `smoke_t5_bare`), activait, et
+    # (mesuré : ennemi à 12,13" et à 12,89", scénario mêlée de `tests.unit.engine._melee_scenario`), activait, et
     # `charge_record_declaration` — qui borne sa mesure à la portée de DÉCLARATION — figeait un
     # `nearest_subhex` à None. La ligne `charge_fail` `roll_too_short` du chemin gym portait alors
     # `charge_nearest_enemy_inches: None` : une charge déclarée sans qu'aucun ennemi ne soit

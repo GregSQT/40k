@@ -29,7 +29,7 @@ from typing import List, Optional
 import numpy as np
 import pytest
 
-from smoke_t5_bare import MELEE_SCENARIO  # noqa: E402
+from tests.unit.engine._melee_scenario import MELEE_SCENARIO  # noqa: E402
 
 from engine.macro_intents import ACTION_FIGHT_NO_TARGET  # noqa: E402
 

@@ -9,9 +9,9 @@ quelque chose : sans elle, un chemin faux ne rougit pas ici mais plus loin, sur 
 dit pas d'où il vient.
 
 POURQUOI UN MODULE ORDINAIRE PLUTÔT QU'UNE FIXTURE DE `conftest.py`. Deux raisons, dans cet
-ordre. D'abord, trois des sept appelants chargent leur script au niveau MODULE
-(`test_check_doc_references.py`, `test_check_roadmap_declared.py`,
-`test_scenario_bank_migration_v11.py`) : une fixture ne s'y consomme pas, il faudrait la
+ordre. D'abord, certains appelants chargent leur script au niveau MODULE
+(`test_check_doc_references.py`, `test_check_roadmap_declared.py`) : une fixture ne s'y consomme
+pas, il faudrait la
 demander en paramètre dans les 117 fonctions de test concernées, sans qu'aucune ne s'en serve
 autrement que par le nom de module qu'elle a déjà. Ensuite, c'est la forme que ce dépôt a déjà
 retenue pour ses helpers de test partagés (`tests/_state_invariants.py`,
@@ -19,7 +19,7 @@ retenue pour ses helpers de test partagés (`tests/_state_invariants.py`,
 deux exemplaires (cf. la docstring de `_fabriques`), ce qu'un module ordinaire ne fait pas.
 
 Un appelant qui veut malgré tout une fixture l'écrit chez lui en une ligne : elle appelle
-`charger_script`. C'est le cas des quatre autres, qui gardent leur fixture.
+`charger_script`. C'est le cas des autres, qui gardent leur fixture.
 """
 
 from __future__ import annotations
