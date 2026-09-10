@@ -269,6 +269,100 @@ class TestStepTurnLimit:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Tests — turn_limit gate accounting (findings 1, 2, 3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestTurnLimitGateAccounting:
+
+    def test_turn_limit_episode_r_includes_final_step_reward(self, monkeypatch):
+        """F1 : info['episode']['r'] inclut la récompense du step turn_limit.
+
+        Sans le fix, _build_terminal_info lit episode_reward_accumulator AVANT
+        que le step ne l'incrémente → info['episode']['r'] manque la récompense finale.
+        """
+        from engine.reward_calculator import RewardCalculator
+        monkeypatch.setattr(RewardCalculator, "calculate_reward", lambda self, *a, **kw: 7.5)
+        engine = _make_engine()
+        engine.reset()
+        engine.game_state["turn"] = 4
+
+        _, reward, terminated, _, info = engine.step(_legal_action(engine))
+
+        assert terminated is True
+        assert reward == pytest.approx(7.5)
+        assert info["episode"]["r"] == pytest.approx(7.5)
+
+    def test_turn_limit_episode_l_includes_final_step(self):
+        """F1 : info['episode']['l'] compte le step turn_limit lui-même."""
+        engine = _make_engine()
+        engine.reset()
+        engine.game_state["turn"] = 4
+
+        _, _, terminated, _, info = engine.step(_legal_action(engine))
+
+        assert terminated is True
+        assert info["episode"]["l"] == 1
+
+    def test_turn_limit_reward_breakdown_populated(self, monkeypatch):
+        """F2 : last_reward_breakdown drainé vers tactical_data['reward_breakdown'] et retiré de game_state.
+
+        Sans le fix, last_reward_breakdown reste dans game_state après reset() et
+        la ventilation dans tactical_data vaut 0.0 sur toutes les composantes.
+        """
+        from engine.reward_calculator import RewardCalculator
+        from engine.w40k_core import REWARD_BREAKDOWN_COMPONENTS
+
+        KNOWN = {k: 0.0 for k in REWARD_BREAKDOWN_COMPONENTS}
+        KNOWN['situational'] = 3.0
+
+        def fake_reward(self_rc, success, result, game_state):
+            game_state["last_reward_breakdown"] = KNOWN.copy()
+            return 3.0
+
+        monkeypatch.setattr(RewardCalculator, "calculate_reward", fake_reward)
+        engine = _make_engine()
+        engine.reset()
+        engine.game_state["turn"] = 4
+
+        _, _, terminated, _, info = engine.step(_legal_action(engine))
+
+        assert terminated is True
+        assert "last_reward_breakdown" not in engine.game_state
+        assert info["tactical_data"]["reward_breakdown"]["situational"] == pytest.approx(3.0)
+
+    def test_build_terminal_info_charge_distance_not_doubled(self, monkeypatch):
+        """F3 : charge_distance n'est pas doublé si _build_terminal_info est appelée deux fois.
+
+        Sans le fix, la boucle action_logs accumule via += directement dans
+        episode_tactical_data['charge_distance'] ; un second appel double les compteurs.
+        """
+        from engine.w40k_core import CHARGE_LONG_DECLARATION_INCHES
+
+        engine = _make_engine()
+        engine.reset()
+
+        monkeypatch.setattr(
+            engine, "_determine_winner_with_method",
+            lambda: (1, "turn_limit"),
+        )
+        charge_log = {
+            "type": "charge",
+            "player": 1,
+            "charge_nearest_enemy_inches": 5.0,
+            "charge_target_distance_inches": float(CHARGE_LONG_DECLARATION_INCHES),
+        }
+        engine.game_state["action_logs"] = [charge_log]
+
+        engine._build_terminal_info()
+        engine._build_terminal_info()
+
+        cd = engine.episode_tactical_data['charge_distance']['agent']
+        assert cd['target_n'] == 1.0, f"target_n doublé : {cd['target_n']}"
+        assert cd['target_sum'] == pytest.approx(float(CHARGE_LONG_DECLARATION_INCHES))
+        assert cd['long'] == 1.0, f"long doublé : {cd['long']}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Tests — game over check
 # ─────────────────────────────────────────────────────────────────────────────
 
