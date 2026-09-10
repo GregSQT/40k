@@ -26,6 +26,13 @@ import pytest
 from engine.weapon_damage_cache import squad_expected_damage
 
 
+#: Profil défensif de la cible « 101 » du fichier : T4, Sv3+, aucune invulnérable.
+#: C'est la clé que `squad_expected_damage` recalcule À LA LECTURE via
+#: `effective_defensive_profile` ; les sous-tables fabriquées ci-dessous n'indexent QU'ELLE,
+#: si bien qu'une clé mal recalculée rend 0.0 au lieu de la valeur attendue.
+_DEF_KEY = (4, 3, 7)
+
+
 def _state(ranged_damage: Sequence[float], *, alive: int | None = None) -> Dict[str, Any]:
     """État minimal : une escouade « 1 » dont la figurine `i` inflige `ranged_damage[i]`.
 
@@ -34,17 +41,30 @@ def _state(ranged_damage: Sequence[float], *, alive: int | None = None) -> Dict[
     Les figurines au-delà de `alive` sont absentes de `models_cache` : c'est exactement ainsi
     que le moteur représente les pertes (les morts en sont retirés), et c'est ce que la somme
     doit lire — pas `squad_models`, qui garde l'effectif initial.
+
+    La CIBLE est un vrai état d'unité (`unit_by_id` + une figurine vivante dans `models_cache`),
+    parce que le profil défensif n'est plus figé dans le cache : il est relu à chaque appel.
     """
     model_ids = [f"1#{i}" for i in range(len(ranged_damage))]
     living = model_ids if alive is None else model_ids[:alive]
     cache: Dict[Any, Any] = {}
     for mid, dmg in zip(model_ids, ranged_damage):
-        cache[(mid, 1, "101")] = (0, dmg)
-        cache[(mid, 0, "101")] = (0, dmg / 2.0)
+        cache[(mid, 1)] = ({_DEF_KEY: dmg},)
+        cache[(mid, 0)] = ({_DEF_KEY: dmg / 2.0},)
+    target = {
+        "id": "101", "player": 2, "T": 4, "ARMOR_SAVE": 3, "INVUL_SAVE": 7,
+        "UNIT_RULES": [], "FACTION_KEYWORDS": [],
+    }
+    models_cache: Dict[str, Any] = {mid: {"HP_CUR": 2} for mid in living}
+    models_cache["101#0"] = {"HP_CUR": 2, "T": 4, "role": "trooper", "squad_id": "101"}
     return {
         "_best_weapon_cache": cache,
         "squad_models": {"1": model_ids, "101": ["101#0"]},
-        "models_cache": {mid: {"HP_CUR": 2} for mid in living},
+        "models_cache": models_cache,
+        "unit_by_id": {"101": target},
+        # `waaagh_applies_to_unit` sort dès que plus aucun Waaagh! n'est actif : pas besoin
+        # de déclarer une armée pour que `effective_invul_save` réponde.
+        "waaagh_active": {1: False, 2: False},
     }
 
 

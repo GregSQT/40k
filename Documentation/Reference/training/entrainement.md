@@ -416,6 +416,7 @@ Le log capture : marqueurs début/fin d'épisode, positions de départ, moves, t
 [HH:MM:SS] T1 P0 FIGHT : Unit 2(9, 6) FOUGHT unit 8 - Hit:3+:5(HIT) Wound:4+:4(SUCCESS) Save:4+:6(SAVED) Dmg:0HP [SUCCESS] [STEP: YES]
 [HH:MM:SS] EPISODE END: Winner=0, Actions=68, Steps=68, Total=138
 ```
+> `Actions` = lignes d'action écrites · `Steps` = lignes incrémentantes (un par jet de tir ou de mêlée, `engine/w40k_core.py:7134`) · `Total` = `game_state['episode_steps']` : actions/activations par figurine de l'épisode (deux sites : step gym `w40k_core.py:3328` + fin d'activation `generic_handlers.py:110`)
 
 | Action | Format |
 |--------|--------|
@@ -739,7 +740,9 @@ tensorboard --logdir=./tensorboard/
 
 **Primary Metrics to Check Daily:**
 - `00_critical/a_bot_eval_combined` — **objectif principal** (compétence vs tous les bots)
-- `game_critical/win_rate_<perf_window_fast>ep` — tendance récente (doublon réactif du tag nu, lissé sur `perf_window_fast`) ; le namespace `00_critical/` ne porte plus de win-rate d'entraînement
+- `00_critical/d_win_rate` — win rate d'entraînement lissé sur `perf_window`, et sa jumelle `game_critical/win_rate` : mêmes points, deux namespaces
+- `00_critical/e_episode_reward_smooth` — reward d'épisode lissée sur `perf_window` ; `game_critical/episode_reward` n'en porte que la valeur brute, illisible sans lissage
+- `game_critical/win_rate_<perf_window_fast>ep` — tendance récente (doublon réactif du tag nu, lissé sur `perf_window_fast`)
 - `00_critical/j_approx_kl` — stabilité de la politique (<0.02 = sain)
 - `00_critical/l_approx_kl_max` — KL **maximale** de l'update : au-dessus de 0.0225, PPO a coupé ses epochs
 - `00_critical/k_entropy_loss` — niveau d'exploration (doit décroître progressivement)

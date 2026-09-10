@@ -24,8 +24,8 @@ import type { GamePhase, GameState, PlayerId, Unit } from "../types";
 import type { DeploymentState, UnitId } from "../types/game";
 import { filterOathTargets } from "../utils/oathTargetSelection";
 import {
-  canDropUnitIntoReserves,
   canSelectReserveUnitForIngress,
+  isReservesDeclarationPendingFor,
   selectReserveUnits,
 } from "../utils/strategicReservesUi";
 import {
@@ -51,8 +51,8 @@ import { SettingsMenu } from "./SettingsMenu";
 import SharedLayout from "./SharedLayout";
 import SnapshotRewind, { type SnapshotJump } from "./SnapshotRewind";
 import {
+  ReservesDeclarationPrompt,
   ResetPlacementButton,
-  StrategicReserveButton,
   StrategicReservesContainer,
 } from "./StrategicReservesContainer";
 import TooltipWrapper from "./TooltipWrapper";
@@ -2005,9 +2005,14 @@ export const BoardWithAPI: React.FC = () => {
           const canChangeRoster = isTestDeploymentMode
             ? !testDeploymentStarted
             : isCurrentDeployer && !hasDeployedByPlayer;
-          const canInteractDeployment = isCurrentDeployer && !isTestSetupLocked;
-          // 20.01 — résumé MOTEUR des réserves de CE joueur (ratio affiché + dépôts acceptés).
-          const reservesSummary = apiProps.gameState?.strategic_reserves?.[`${player}`];
+          // 20.01 — QUESTION en attente de l'étape Declare Battle Formations, lue du moteur. Tant
+          // qu'elle existe, aucune pose n'est possible pour PERSONNE (l'étape précède le
+          // déploiement, et le moteur refuse `deploy_commit`) : la liste devient donc inerte,
+          // sauf la ligne interrogée qui porte les deux réponses.
+          const reservesPendingDeclaration =
+            apiProps.gameState?.strategic_reserves?.pending_declaration ?? null;
+          const canInteractDeployment =
+            isCurrentDeployer && !isTestSetupLocked && reservesPendingDeclaration === null;
 
           return (
             <div
@@ -2077,15 +2082,15 @@ export const BoardWithAPI: React.FC = () => {
                       de réserves (`UnitRosterRow`). */}
                   {deployableSorted.map((unit) => {
                     const isSelected = apiProps.selectedUnitId === unit.id;
-                    // 20.01 — le dépôt n'est proposé que sur l'escouade SÉLECTIONNÉE : c'est
-                    // l'alternative à la poser, elle ne se décide qu'une fois l'escouade en main.
-                    const canDrop =
-                      canInteractDeployment &&
-                      canDropUnitIntoReserves({
-                        phase: apiProps.gameState?.phase,
-                        selectedUnitId: apiProps.selectedUnitId ?? null,
-                        summary: reservesSummary,
-                      });
+                    // 20.01 — la question de l'étape Declare Battle Formations, s'il y en a une
+                    // et si elle porte sur CETTE escouade. Elle ne dépend PAS de la sélection :
+                    // c'est le moteur qui désigne l'escouade interrogée, et l'étape précède toute
+                    // mise en place, donc rien n'est encore « en main ».
+                    const isPendingDeclaration = isReservesDeclarationPendingFor({
+                      phase: apiProps.gameState?.phase,
+                      unitId: unit.id,
+                      pending: reservesPendingDeclaration,
+                    });
                     return (
                       <UnitRosterRow
                         key={`deploy-unit-${player}-${unit.id}`}
@@ -2107,13 +2112,28 @@ export const BoardWithAPI: React.FC = () => {
                         borderColor={rosterRowBorderColor(player)}
                         haloGlow={HALO_GLOW}
                         trailing={(() => {
+                          // 20.01 PASSE AVANT LA SÉLECTION : tant que le moteur interroge cette
+                          // escouade, aucune pose n'est possible (il refuse `deploy_commit`), donc
+                          // la seule chose à offrir ici est la réponse — sélectionnée ou non.
+                          if (isPendingDeclaration) {
+                            return (
+                              <ReservesDeclarationPrompt
+                                onDeclare={() => {
+                                  // Une réponse DÉMONTE cette ligne ou la question : aucun
+                                  // `mouseleave` ne sera émis, donc le tooltip resterait figé à
+                                  // l'écran. On le ferme avec la ligne.
+                                  setDeploymentTooltip(null);
+                                  apiProps.onDeployToStrategicReserves(unit.id, true);
+                                }}
+                                onKeep={() => {
+                                  setDeploymentTooltip(null);
+                                  apiProps.onDeployToStrategicReserves(unit.id, false);
+                                }}
+                              />
+                            );
+                          }
                           if (!isSelected) return undefined;
-                          // Escouade posée EN PROVISOIRE : l'emplacement passe au `Reset`. Le
-                          // moteur, lui, accepterait toujours la mise en réserves (le plan est
-                          // purement client, l'escouade est encore dans `deployable_units`) — le
-                          // dépôt n'est donc pas devenu illégal, il devient inatteignable sans
-                          // repasser par Reset. Choix d'interface assumé : UN seul bouton à cet
-                          // endroit, celui du geste le plus probable une fois l'escouade posée.
+                          // Escouade posée EN PROVISOIRE : l'emplacement passe au `Reset`.
                           if (apiProps.deployPlan?.placed) {
                             return (
                               <ResetPlacementButton
@@ -2124,18 +2144,7 @@ export const BoardWithAPI: React.FC = () => {
                               />
                             );
                           }
-                          return (
-                            <StrategicReserveButton
-                              canDrop={canDrop}
-                              onDrop={() => {
-                                // Le dépôt DÉMONTE cette ligne (l'escouade sort de
-                                // `deployable_units`) : aucun `mouseleave` ne sera émis, donc le
-                                // tooltip resterait figé à l'écran. On le ferme avec la ligne.
-                                setDeploymentTooltip(null);
-                                apiProps.onDeployToStrategicReserves(unit.id);
-                              }}
-                            />
-                          );
+                          return undefined;
                         })()}
                       />
                     );

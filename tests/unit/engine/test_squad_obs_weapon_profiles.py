@@ -25,8 +25,15 @@ from unittest.mock import patch
 
 import pytest
 
-from engine.observation_builder import ObservationBuilder, weapon_rule_obs_ids
+from engine.observation_builder import (
+    ObservationBuilder,
+    weapon_profile_obs_ids,
+    weapon_rule_obs_ids,
+)
 from engine.observation_weapon_profiles import (
+    COMBI_GROUP_MARKER_COUNT,
+    COMBI_GROUP_MARKER_NAMES,
+    COMBI_GROUP_MARKER_OBS_IDS,
     PROFILE_BIN_SIZE,
     PROFILE_CONT_SIZE,
     PROFILE_STAT_CONT,
@@ -34,6 +41,7 @@ from engine.observation_weapon_profiles import (
     WEAPON_RULE_ID_SLOTS,
     WEAPON_RULE_OBS_VOCABULARY,
     WEAPON_RULE_PARAMS,
+    assign_combi_group_markers,
     collect_weapon_profiles,
     profile_identity,
 )
@@ -52,8 +60,13 @@ def _param_index(rule_id: str) -> int:
 
 
 def _rule_names(ids_row: Any) -> set:
-    """Noms des règles écrites dans les slots d'ids d'un profil (0 = slot vide)."""
-    by_id = {obs_id: name for name, obs_id in weapon_rule_obs_ids().items()}
+    """Symboles écrits dans les slots d'ids d'un profil (0 = slot vide).
+
+    Registre COMPLET (règles d'arme + marqueurs de groupe combi) : ces slots portent les deux
+    vocabulaires, et un helper qui n'en connaîtrait qu'un lèverait un `KeyError` opaque sur le
+    premier profil combi au lieu de dire ce qu'il a lu.
+    """
+    by_id = {obs_id: name for name, obs_id in weapon_profile_obs_ids().items()}
     return {by_id[int(v)] for v in ids_row if int(v) != 0}
 
 
@@ -403,14 +416,10 @@ def test_every_weapon_rule_with_obs_id_is_in_the_vocabulary():
 
     registry = get_config_loader().load_weapon_rules_config()
     with_obs_id = {rule_id for rule_id, entry in registry.items() if "obs_id" in entry}
-    assert len(with_obs_id) >= len(WEAPON_RULE_OBS_VOCABULARY)
-    orphelins = sorted(with_obs_id - set(WEAPON_RULE_OBS_VOCABULARY))
-    # VERT VACANT : un registre sans aucun obs_id laisserait `orphelins` vide et cette
-    # assertion passerait sans rien verifier — la garde `>=` ci-dessus l'empeche.
-    assert not orphelins, (
-        f"regles d'armes portant un obs_id sans etre observees : {orphelins} — "
-        f"soit elles entrent dans WEAPON_RULE_OBS_VOCABULARY (cout : zero scalaire), "
-        f"soit leur obs_id doit disparaitre de config/weapon_rules.json"
+    assert with_obs_id == set(WEAPON_RULE_OBS_VOCABULARY), (
+        f"mismatch obs_id config/weapon_rules.json vs WEAPON_RULE_OBS_VOCABULARY : "
+        f"orphelins={sorted(with_obs_id - set(WEAPON_RULE_OBS_VOCABULARY))}, "
+        f"absents={sorted(set(WEAPON_RULE_OBS_VOCABULARY) - with_obs_id)}"
     )
 
 
@@ -476,3 +485,262 @@ def test_profile_truncation_is_logged_never_silent():
     assert over, "troncature du bloc profils NON loguee"
     assert "ne sont pas observes" in over[0]
     assert not _log_of(k), "log de troncature emis alors qu'aucun profil n'est tronque"
+
+
+# ------------------------------------------------- exclusivité des profils COMBI
+
+
+def _markers(
+    engine: W40KEngine, key: str = "allies_wpn_rule_ids", row: int = 0, *, obs: Any = None
+) -> Dict[int, str]:
+    """{slot de profil -> nom du marqueur combi}, pour les seuls slots qui en portent un."""
+    if obs is None:
+        obs = engine.obs_builder.build_squad_observation(engine.game_state, "1")
+    by_id = {obs_id: name for name, obs_id in COMBI_GROUP_MARKER_OBS_IDS.items()}
+    out: Dict[int, str] = {}
+    for slot, ids_row in enumerate(obs[key][row]):
+        found = [by_id[int(v)] for v in ids_row if int(v) in by_id]
+        assert len(found) <= 1, f"slot {slot} porte {len(found)} marqueurs combi : {found}"
+        if found:
+            out[slot] = found[0]
+    return out
+
+
+def _combi(group: str, **over: Any) -> Dict[str, Any]:
+    """Une arme de tir déclarant son groupe d'arme PHYSIQUE (`COMBI_WEAPON`)."""
+    return _weapon(COMBI_WEAPON=group, **over)
+
+
+def test_two_profiles_of_one_combi_weapon_share_the_same_marker():
+    """Le défaut fermé : deux profils d'UNE arme physique se lisaient comme deux armes.
+
+    Le moteur, lui, n'en joue qu'un par figurine (`_pick_one_profile_per_weapon_group`, renvoi
+    « Multiple Weapon Profiles » de 04.01) — l'observation le dit maintenant, par un id commun
+    aux deux slots.
+    """
+    eng = _make_engine([
+        _unit_cfg(1, 1, [(20, 20)], rng_weapons=[
+            _combi("plasma", display_name="Plasma (Standard)", STR=7),
+            _combi("plasma", display_name="Plasma (Supercharge)", STR=8),
+        ]),
+        _unit_cfg(2, 2, [(60, 20)]),
+    ])
+    marks = _markers(eng)
+    assert sorted(marks) == [0, 1], f"les deux slots de tir doivent être marqués : {marks}"
+    assert marks[0] == marks[1], "deux profils de la MÊME arme physique doivent partager leur id"
+
+
+def test_two_combi_groups_of_one_squad_get_distinct_markers():
+    """Un bit « je suis exclusif » ne dirait pas AVEC QUI : deux groupes, deux ids."""
+    eng = _make_engine([
+        _unit_cfg(1, 1, [(20, 20), (21, 20)], rng_weapons=[
+            _combi("plasma", display_name="Plasma (Standard)", STR=7),
+            _combi("plasma", display_name="Plasma (Supercharge)", STR=8),
+        ], per_model_rng={1: [
+            _combi("missile", display_name="Missile (Frag)", NB=1, STR=4, DMG=1),
+            _combi("missile", display_name="Missile (Krak)", NB=1, STR=9, DMG="D6"),
+        ]}),
+        _unit_cfg(2, 2, [(60, 20)]),
+    ])
+    obs = eng.obs_builder.build_squad_observation(eng.game_state, "1")
+    marks = _markers(eng, obs=obs)
+    assert len(marks) == 4, f"quatre profils exclusifs attendus : {marks}"
+    assert len(set(marks.values())) == 2, f"deux groupes = deux marqueurs : {marks}"
+    # Les slots d'un même marqueur sont exactement les deux profils du même groupe physique.
+    for marker in set(marks.values()):
+        slots = [s for s, m in marks.items() if m == marker]
+        assert len(slots) == 2, f"{marker} porté par {len(slots)} slots"
+        strengths = {float(obs["allies_wpn_cont"][0][s][P_STR]) for s in slots}
+        assert strengths in ({7.0, 8.0}, {4.0, 9.0}), strengths
+
+
+def test_two_independent_weapons_carry_no_marker():
+    """LE CAS DISCRIMINANT : bolt_rifle + bolt_pistol tirent TOUS LES DEUX (04.01, « one or more
+    ranged weapons that model has ») et se présentaient exactement comme un combi à deux profils.
+
+    Sans marqueur, ces deux slots restent nus — c'est ce qui rend le marqueur informatif.
+    """
+    eng = _make_engine([
+        _unit_cfg(1, 1, [(20, 20)], rng_weapons=[
+            _weapon(display_name="Bolt Rifle", STR=4, RNG=24),
+            _weapon(display_name="Bolt Pistol", STR=4, RNG=12),
+        ]),
+        _unit_cfg(2, 2, [(60, 20)]),
+    ])
+    assert _markers(eng) == {}
+
+
+def test_a_combi_group_with_a_single_profile_is_not_marked():
+    """Un groupe qui n'occupe qu'un slot n'exclut rien : lui donner un id serait du bruit."""
+    eng = _make_engine([
+        _unit_cfg(1, 1, [(20, 20)], rng_weapons=[
+            _combi("plasma", display_name="Plasma (Standard)", STR=7),
+            _weapon(display_name="Bolt Pistol", STR=4, RNG=12),
+        ]),
+        _unit_cfg(2, 2, [(60, 20)]),
+    ])
+    assert _markers(eng) == {}
+
+
+def test_markers_do_not_collide_between_ranged_and_melee():
+    """La numérotation est PAR ESCOUADE, registres confondus : un marqueur ne peut pas désigner
+    une arme au tir et une autre en mêlée."""
+    eng = _make_engine([
+        _unit_cfg(1, 1, [(20, 20)], rng_weapons=[
+            _combi("plasma", display_name="Plasma (Standard)", STR=7),
+            _combi("plasma", display_name="Plasma (Supercharge)", STR=8),
+        ], cc_weapons=[
+            _melee(display_name="Fist (Strike)", COMBI_WEAPON="fist", STR=8),
+            _melee(display_name="Fist (Sweep)", COMBI_WEAPON="fist", STR=5, NB=6),
+        ]),
+        _unit_cfg(2, 2, [(60, 20)]),
+    ])
+    marks = _markers(eng)
+    ranged = {s: m for s, m in marks.items() if s < ObservationBuilder.K_WEAPONS_RANGED}
+    melee = {s: m for s, m in marks.items() if s >= ObservationBuilder.K_WEAPONS_RANGED}
+    assert len(ranged) == 2 and len(melee) == 2, marks
+    assert set(ranged.values()).isdisjoint(set(melee.values())), (
+        f"le même marqueur désigne deux armes physiques différentes : {marks}"
+    )
+
+
+def test_enemy_slots_expose_the_same_markers():
+    """Symétrie §3.3 : jauger une menace exige de savoir que deux profils ennemis s'excluent."""
+    eng = _make_engine([
+        _unit_cfg(1, 1, [(20, 20)]),
+        _unit_cfg(2, 2, [(60, 20)], rng_weapons=[
+            _combi("plasma", display_name="Plasma (Standard)", STR=7),
+            _combi("plasma", display_name="Plasma (Supercharge)", STR=8),
+        ]),
+    ])
+    marks = _markers(eng, key="enemies_wpn_rule_ids")
+    assert sorted(marks) == [0, 1] and marks[0] == marks[1], marks
+
+
+def test_marker_is_stable_while_the_composition_does_not_change():
+    """À composition constante, aucun profil ne change de marqueur d'un step à l'autre."""
+    eng = _make_engine([
+        _unit_cfg(1, 1, [(20, 20), (21, 20)], rng_weapons=[
+            _combi("plasma", display_name="Plasma (Standard)", STR=7),
+            _combi("plasma", display_name="Plasma (Supercharge)", STR=8),
+        ]),
+        _unit_cfg(2, 2, [(60, 20)]),
+    ])
+    first = _markers(eng)
+    assert first, "VERT VACANT : aucun marqueur écrit, la stabilité ne vérifierait rien"
+    assert _markers(eng) == first
+    assert _markers(eng) == first
+
+
+def test_marker_survives_a_loss_and_still_pairs_the_two_profiles():
+    """Une perte change les porteurs (donc la clé de cache) : l'exclusivité doit rester dite."""
+    from engine.phase_handlers.shared_utils import destroy_model
+
+    eng = _make_engine([
+        _unit_cfg(1, 1, [(20, 20), (21, 20)], rng_weapons=[
+            _combi("plasma", display_name="Plasma (Standard)", STR=7),
+            _combi("plasma", display_name="Plasma (Supercharge)", STR=8),
+        ]),
+        _unit_cfg(2, 2, [(60, 20)]),
+    ])
+    assert _self_profile(eng, 0)[0][P_CARRIERS] == pytest.approx(2.0)
+    destroy_model(eng.game_state, "1#1", reason="combat")
+    assert _self_profile(eng, 0)[0][P_CARRIERS] == pytest.approx(1.0)
+    marks = _markers(eng)
+    assert sorted(marks) == [0, 1] and marks[0] == marks[1], marks
+
+
+def test_more_combi_groups_than_markers_raises_never_truncates():
+    """Débordement de la plage réservée = ERREUR. Un marqueur silencieusement omis remettrait
+    deux profils exclusifs sous l'apparence de deux armes indépendantes."""
+    profiles = []
+    for i in range(COMBI_GROUP_MARKER_COUNT + 1):
+        for variant in (0, 1):
+            profiles.append((_combi(f"g{i}", display_name=f"W{i}_{variant}", STR=4 + variant), 1))
+    with pytest.raises(ValueError, match="groupes combi exclusifs"):
+        assign_combi_group_markers(profiles, {})
+
+
+def test_marker_ids_are_disjoint_from_weapon_rule_ids():
+    """Les deux vocabulaires partagent les MÊMES slots : un id commun ferait lire une règle là
+    où l'observation écrit une exclusivité de profils."""
+    rules = weapon_rule_obs_ids()
+    assert set(rules).isdisjoint(set(COMBI_GROUP_MARKER_OBS_IDS))
+    assert set(rules.values()).isdisjoint(set(COMBI_GROUP_MARKER_OBS_IDS.values()))
+    merged = weapon_profile_obs_ids()
+    assert len(set(merged.values())) == len(merged) == len(rules) + COMBI_GROUP_MARKER_COUNT
+    assert set(COMBI_GROUP_MARKER_NAMES) <= set(merged)
+
+
+def test_combi_markers_cost_no_observation_scalar():
+    """VERROU du coût annoncé : le marqueur se pose dans les slots d'ids DÉJÀ réservés, et le
+    vocabulaire d'embedding est pré-dimensionné. `obs_size` ne bouge pas — donc aucun retrain
+    n'est imposé par la FORME de l'observation.
+
+    18269 est la valeur acquittée par `test_deployment_observation_contract`
+    (`_ACKNOWLEDGED_OBS_SIZE`) : ce test la reprend ici pour que le chantier des marqueurs ait
+    son propre verrou, au même endroit que le code qu'il ajoute.
+    """
+    from engine.observation_entities import OBS_ID_MAX, OBS_ID_VOCAB_SIZE
+
+    assert ObservationBuilder.SQUAD_OBS_SIZE_TARGET == 18269
+    assert OBS_ID_VOCAB_SIZE == OBS_ID_MAX + 1
+    assert max(COMBI_GROUP_MARKER_OBS_IDS.values()) <= OBS_ID_MAX, (
+        "un marqueur au-delà du vocabulaire ferait, LUI, grossir les tables d'embedding"
+    )
+
+
+def test_a_combi_group_split_by_truncation_leaves_no_orphan_marker():
+    """Un marqueur dont le PARTENAIRE est tronqué n'est pas émis.
+
+    L'ordre de `collect_weapon_profiles` est celui des porteurs décroissants : il ne garde pas
+    ensemble les deux profils d'une même arme physique, donc la troncature peut couper un groupe
+    en deux. Le slot survivant affirmait alors « je suis exclusif » avec un partenaire absent de
+    l'observation — un groupe à profil unique déguisé, que
+    `test_a_combi_group_with_a_single_profile_is_not_marked` interdit par ailleurs.
+
+    Contre-épreuve intégrée : la MÊME escouade, MÊME troncature, mais le second profil du groupe
+    porté par assez de figurines pour rester dans les slots — les deux sont marqués. Sans elle,
+    une escouade muette pour une autre raison rendrait le cas tronqué vert pour rien.
+    """
+    k = ObservationBuilder.K_WEAPONS_RANGED
+    std = _combi("plasma", display_name="Plasma (Standard)", STR=7)
+    sup = _combi("plasma", display_name="Plasma (Supercharge)", STR=8)
+
+    def _marks_with(sup_carriers: int) -> Dict[int, str]:
+        # Le tri est « porteurs décroissants, puis identité ». `std` en a 3 et les k fillers 2,
+        # donc `sup_carriers` décide seul du CÔTÉ de la frontière où tombe `sup` : 1 le met
+        # derrière tous les fillers, 3 le met à égalité avec `std` dans les deux premiers slots
+        # (l'identité tranche alors leur ordre entre eux, ce dont les assertions ne dépendent pas).
+        per_model: Dict[int, List[Dict[str, Any]]] = {}
+        for _ in range(3):
+            per_model[len(per_model)] = [std]
+        for i in range(k):
+            for _ in range(2):
+                per_model[len(per_model)] = [_weapon(display_name=f"F{i}", STR=3, AP=-i)]
+        for _ in range(sup_carriers):
+            per_model[len(per_model)] = [sup]
+        eng = _make_engine([
+            _unit_cfg(1, 1, [(20 + i, 20) for i in range(len(per_model))],
+                      rng_weapons=[std], per_model_rng=per_model),
+            _unit_cfg(2, 2, [(60, 20)]),
+        ])
+        captured: List[str] = []
+        with patch("engine.game_utils.add_debug_file_log",
+                   side_effect=lambda gs, msg: captured.append(msg)):
+            marks = _markers(eng)
+        assert [m for m in captured if "profils RNG_WEAPONS" in m], (
+            "fixture SANS troncature : le cas testé ne serait pas mis en scène"
+        )
+        return marks
+
+    paired = _marks_with(3)
+    assert sorted(paired) == [0, 1] and paired[0] == paired[1], (
+        f"contre-épreuve : les deux profils du groupe sont observés, ils doivent partager un "
+        f"marqueur — obtenu {paired}"
+    )
+    orphan = _marks_with(1)
+    assert orphan == {}, (
+        f"marqueur orphelin émis : {orphan} — son partenaire est tronqué, donc rien dans "
+        "l'observation ne dit avec QUI ce slot est exclusif"
+    )

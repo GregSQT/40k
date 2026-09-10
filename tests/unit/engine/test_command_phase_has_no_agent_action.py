@@ -81,11 +81,13 @@ def test_the_command_phase_no_longer_holds_the_agent_on_its_own_turn(monkeypatch
 
 
 def test_the_resume_no_longer_publishes_any_free_step_counter() -> None:
-    """Le compteur de free steps ne doit pas RENAITRE dans le game_state.
+    """Le compteur de free steps ne doit pas RENAITRE dans la reprise de phase.
 
-    Il est sorti du format de save (TL05 -> TL06) : une reapparition ici le remettrait dans les
-    cles publiees par le reset, et `test_save_format_key_contract` deviendrait rouge — mais
-    seulement au prochain reset complet, loin d'ici. Ce test le prend sur place.
+    Les cinq cles restent publiees par le RESET — elles appartiennent au format de save `TL05` et
+    y sont laissees inertes plutot que retirees (cf. `services/game_saves._MAGIC`). C'est
+    justement ce qui rend ce test necessaire : leur presence dans un game_state ne prouve plus
+    rien, seul compte le fait que la REPRISE n'en repose aucune. Une reecriture ici rouvrirait le
+    robinet sans qu'aucun contrat de format ne rougisse.
     """
     gs = _resume_state()
     command_handlers.command_phase_resume(gs)
@@ -106,7 +108,7 @@ def test_the_command_phase_mask_opens_wait_and_nothing_else() -> None:
     from tests.unit.engine.test_action_decoder import _build_gs, _make_decoder, _unit
 
     decoder = _make_decoder()
-    gs = _build_gs([_unit("1", 1, 5, 5), _unit("2", 2, 20, 15)], "command")
+    gs = _build_gs([_unit(1, 1, 5, 5), _unit(2, 2, 20, 15)], "command")
 
     mask, _eligible = decoder.get_squad_action_mask_and_eligible_units(gs)
 
@@ -121,7 +123,7 @@ def test_no_reserved_id_is_ever_opened_by_the_command_mask() -> None:
     from tests.unit.engine.test_action_decoder import _build_gs, _make_decoder, _unit
 
     decoder = _make_decoder()
-    gs = _build_gs([_unit("1", 1, 5, 5), _unit("2", 2, 20, 15)], "command")
+    gs = _build_gs([_unit(1, 1, 5, 5), _unit(2, 2, 20, 15)], "command")
 
     mask, _eligible = decoder.get_squad_action_mask_and_eligible_units(gs)
 

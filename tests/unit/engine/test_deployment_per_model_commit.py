@@ -30,7 +30,7 @@ from pathlib import Path
 import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-from tests.unit.engine._config_helpers import both_terrains
+from tests.unit.engine._config_helpers import both_terrains, settle_reserves_declarations
 
 SCENARIO = (
     PROJECT_ROOT / "config" / "agents" / "ArmageddonAgent_x1" / "scenarios" / "training"
@@ -71,9 +71,14 @@ def _load(seed: int = 0):
 
 
 def _drive_deployment(eng):
-    """Déroule la phase de déploiement en prenant la 1re action de déploiement du masque."""
+    """Déroule la phase de déploiement en prenant la 1re action de déploiement du masque.
+
+    L'étape Declare Battle Formations (20.01) la précède : ses questions sont déclinées d'abord,
+    sans quoi le premier masque ne porte que des `CHOICE_*` et aucune pose.
+    """
     gs = eng.game_state
     steps = 0
+    settle_reserves_declarations(eng)
     while gs.get("phase") == "deployment" and steps < 1000:
         mask = eng.get_action_mask()
         deploy_actions = [a for a in range(4, 9) if mask[a]]

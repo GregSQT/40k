@@ -17,6 +17,7 @@ from engine.phase_handlers.shared_utils import (
     wound_threshold,
     save_threshold,
     resolve_hit_roll_modifiers,
+    effective_defensive_profile,
 )
 
 
@@ -32,17 +33,26 @@ def expected_damage(
 
     Champs requis :
       weapon      — ATK (BS ou WS selon phase), STR, AP, NB, DMG, WEAPON_RULES
-      target_unit — T, ARMOR_SAVE, INVUL_SAVE (7 = aucune invul)
+      target_unit — T, ARMOR_SAVE, INVUL_SAVE (7 = aucune invul) ; `id` en plus dès que
+                    game_state est fourni, pour retrouver la cible dans l'état de jeu.
 
     Quand attacker_unit ET game_state sont fournis, les modificateurs de la Primitive A
     (Might Is Right, suppression) sont appliqués au seuil de touche via resolve_hit_roll_modifiers.
     Si is_melee=True, le bonus Waaagh! (+1 STR, +1 NB) est également appliqué.
+
+    LES DEUX CÔTÉS, TOUJOURS. Avec un game_state, les caractéristiques défensives sont relues
+    par `effective_defensive_profile` — T de 19.02 et invulnérable effective — et non prises
+    sur les champs bruts de `target_unit`. Ces champs portent le profil du soldat de base : ils
+    ignorent le bodyguard le plus résistant et toute invulnérable conférée en cours de partie.
+    Appliquer le Waaagh! de l'ATTAQUANT sans relire la DÉFENSE était l'asymétrie d'origine —
+    mesurée à 25,0 % de surestimation contre {5 Boyz + BannerNob}, dès le tour 1.
 
     Contrat game_state quand game_state is not None :
       - game_state["suppressed_squads"]               (get autorisé — absence == aucune suppression)
       - game_state["waaagh_active"]                   (require_key — exigé seulement si is_melee=True)
       - game_state["config"]["game_rules"]["bonus_malus_cap"] (require_key — TOUJOURS présent dans
         un état de jeu réel, posé par la config ; transmis à resolve_hit_roll_modifiers)
+      - game_state["unit_by_id"], ["models_cache"], ["squad_models"] (effective_defensive_profile)
 
     V1 : règles agissant sur le POOL ([BLAST], [RAPID FIRE], [CLEAVE], [EXTRA ATTACKS])
     non intégrées — elles multiplient le nombre d'attaques, pas la valeur par attaque.
@@ -58,6 +68,9 @@ def expected_damage(
     invul_sv = int(require_key(target_unit, "INVUL_SAVE"))
 
     if game_state is not None:
+        toughness, armor_sv, invul_sv = effective_defensive_profile(
+            game_state, str(require_key(target_unit, "id"))
+        )
         hit_target, _, _ = resolve_hit_roll_modifiers(
             game_state, attacker_unit, hit_target, is_melee=is_melee
         )

@@ -35,7 +35,7 @@ import numpy as np
 from collections import Counter, defaultdict, deque
 from torch.utils.tensorboard.writer import SummaryWriter
 import os
-from typing import Any, Deque, Dict, List, Optional, Protocol, Sequence, Tuple, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Sequence
 from shared.data_validation import require_key
 # SOURCE UNIQUE des noms de bots (cf. l'en-tete de `ai/bot_registry.py`) : ce module portait la
 # QUATRIEME table du depot, ecrite a la main et restee sur le panel d'origine.
@@ -592,6 +592,15 @@ class W40KMetricsTracker:
         self.all_episode_rewards.append(total_reward)
         self._emit_deploy_split('reward', total_reward)
 
+        # 00_critical: la MEME reward, lissee sur `perf_window`. `game_critical/episode_reward`
+        # ci-dessus porte la valeur BRUTE d'un episode — a la variance d'une partie de 40k, elle
+        # ne se lit pas sans lissage, et c'est cette courbe-la qui repond a « l'apprentissage
+        # progresse-t-il ». Retiree le 2026-09-08 avec `d_win_rate`, remise le 2026-09-10 : elle
+        # n'a AUCUNE jumelle ailleurs, contrairement a `d`, donc son retrait avait supprime la
+        # mesure et pas seulement un nom. Emise ici et non depuis `log_critical_dashboard` — ou
+        # elle vivait avant — pour la tenir au meme endroit que l'append qui l'alimente.
+        self._emit_windowed('00_critical/e_episode_reward_smooth', self.all_episode_rewards)
+
         # GAME CRITICAL: Win rate - Cumulative win rate (FULL DURATION)
         if winner is not None:
             agent_won = 1.0 if winner == controlled_player else 0.0
@@ -612,6 +621,17 @@ class W40KMetricsTracker:
             
             # GAME CRITICAL: Rolling win rate - PRIMARY METRIC
             self._emit_windowed('game_critical/win_rate', self.all_episode_wins)
+
+            # 00_critical: MEME mesure, sous le nom qu'elle portait dans le tableau de bord
+            # critique. Retiree du namespace le 2026-09-08 pour liberer la lettre `d`, remise
+            # le 2026-09-10 : le taux de victoire d'entrainement se lit a cote des courbes de
+            # sante PPO, sans changer de namespace en cours de diagnostic. Emise ICI et non
+            # depuis `log_critical_dashboard` — ou elle vivait avant le retrait — pour rester
+            # la jumelle EXACTE de la ligne au-dessus : meme garde `winner is not None`, donc
+            # les deux courbes portent les memes points aux memes abscisses. Depuis le
+            # dashboard, un episode sans vainqueur republierait la fenetre inchangee et les
+            # deux series divergeraient en nombre de points.
+            self._emit_windowed('00_critical/d_win_rate', self.all_episode_wins)
 
             # SEAT-AWARE: cumulative win rates by controlled seat + global
             if controlled_player == 1:
@@ -1654,6 +1674,13 @@ class W40KMetricsTracker:
         l'avait deja acte pour la collision de prefixe entre ces deux `o_`.
 
         ECRIT AILLEURS, volontairement -- inventaire complet du namespace :
+        - `log_episode_end`, sous la garde `winner is not None`, juste apres sa jumelle
+          `game_critical/win_rate` : d_win_rate. Les deux sortent du meme `all_episode_wins`
+          par le meme `_emit_windowed`. Ecrite d'ici, elle prendrait un point sur les episodes
+          sans vainqueur, que sa jumelle n'a pas.
+        - `log_episode_end`, juste apres l'append de `all_episode_rewards` :
+          e_episode_reward_smooth, le lissage sur `perf_window` de la reward d'episode dont
+          `game_critical/episode_reward` porte la valeur brute.
         - `log_bot_evaluations`, au moment de l'evaluation (attendre l'episode suivant
           publierait une valeur perimee) : 0_gap_sm-ork, a_bot_eval_combined,
           b_worst_bot_score, c_holdout_hard_mean.
@@ -1678,10 +1705,10 @@ class W40KMetricsTracker:
 
         NOTE: position_score a ete supprime (voir la trace dans __init__), pas deplace.
         `k_gradient_norm` a ete retire du dashboard (redondant avec h + i, cf. plus bas).
-        Les lettres `d` et `e` ont porte win_rate et episode_reward_smooth, retirees du
-        namespace critique. `game_critical/win_rate` est la jumelle EXACTE de d (meme source,
-        meme fenetre) ; le lissage de e n'a pas de jumelle, `game_critical/episode_reward`
-        portant la valeur brute de chaque episode.
+        Les lettres `d` et `e` ont ete rendues le 2026-09-10, apres deux jours de retrait :
+        toutes deux ecrites depuis `log_episode_end` (cf. inventaire ci-dessus). Elles n'etaient
+        pas de meme nature — `d` avait une jumelle exacte dans `game_critical/`, `e` n'en avait
+        aucune, donc son retrait avait supprime la MESURE et pas seulement un nom.
         """
         
         # Minimum data requirement (lowered to 1 for immediate feedback)

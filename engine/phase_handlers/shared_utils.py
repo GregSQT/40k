@@ -6945,6 +6945,12 @@ def charge_target_within_max_distance(
     cette borne : le pool gym (`charge_build_valid_plan`), l'offre PvP
     (`charge_build_valid_targets`), la declaration PvP et la validation du plan la lisent ici.
 
+    LA BORNE EST UN PARAMETRE, pas le jet : `_has_valid_charge_target` appelle la meme primitive
+    avec `charge_max_distance` pour le gate d'ELIGIBILITE 11.02.1 (« within 12" of one or more
+    enemy units »), qui precede le jet. Meme question — « la cible est-elle a portee ? » — mesuree
+    de la meme facon ; seule la borne change. Une seconde implementation pour 11.02.1 aurait pu
+    diverger de celle qui chiffre la distance journalisee (`charge_target_edge_distance_subhex`).
+
     C'est une question de PORTEE, pas d'engagement : mesure bord-a-bord par `ranged_in_range`,
     la primitive du tir, et NON `unit_entries_within_engagement_zone`. Les deux rendent le meme
     verdict horizontal (le facteur 1,5 de la norme est le meme des deux cotes), mais la primitive
@@ -8094,7 +8100,18 @@ def squad_declare_shoot(
         # cible : compter deux profils du meme combi comme deux armes y fausserait le comptage.
         # Un groupe combi HETEROGENE en [CLOSE-QUARTERS] rendrait les deux ordres fautifs (le
         # groupage pourrait retenir le profil qui perd ensuite l arbitrage de famille) ; aucun
-        # n existe — mesure du 2026-09-07 : 14 groupes combi, 0 heterogene, 0 en melee.
+        # n existe — re-mesure du 2026-09-10 sur les 6 armureries (231 armes) : 14 groupes
+        # combi a >= 2 profils, 0 heterogene en [CLOSE-QUARTERS], 0 en melee.
+        # PORTEE DE CETTE MESURE : [CLOSE-QUARTERS] SEUL, et non toutes les regles qui gatent
+        # l eligibilite. `_shoot_engagement_blocks_target` est appele avec [CLOSE-QUARTERS] ET
+        # [BLAST], et [BLAST] est HETEROGENE sur 2 des 14 groupes (meme re-mesure du
+        # 2026-09-10) : `ballistus_missile_launcher` et `cyclone_missile_launcher`, dont le
+        # profil Frag porte [BLAST] la ou le Krak ne le porte pas. Les deux profils d un combi
+        # ne sont donc PAS toujours egalement eligibles : contre une cible engagee, le Frag est
+        # refuse la ou le Krak passe. Sans effet sur le groupage ci-dessous, qui ne voit que
+        # `usable` — deja filtre arme par arme et cible par cible par ce meme gate, donc un
+        # profil [BLAST] refuse n y entre jamais — mais toute regle ajoutee a ce gate devra
+        # etre re-mesuree pour elle-meme, l homogeneite [CLOSE-QUARTERS] ne la couvrant pas.
         usable = _pick_one_profile_per_weapon_group(weapons, usable, _profile_score)
 
         # 24.07 (SIDEARMS, PDF 04) : hors MONSTER/VEHICLE, une figurine choisit SOIT ses armes
@@ -8883,6 +8900,13 @@ def _ranged_profile_expected_damage(
     # models_cache, cf. `_auto_select_cc_weapon_for_fig`).
     t_sample = models_cache[alive[0]]
     target_unit = require_unit_by_id(game_state, str(target_squad_id))
+    # T de la BLESSURE : 19.02, jamais celle de la figurine echantillon. Elles different des
+    # que l unite cible porte `toughness_bonus_while_waaagh` (BannerNob, +1 T a toute l unite
+    # attachee via 19.04) ou qu un leader plus resistant y est replie. Le seuil note doit etre
+    # celui que `_manual_roll_intent` appliquera, sinon le profil de combi est choisi contre une
+    # cible imaginaire — mesure du 2026-09-10 sur {5 Boyz + BannerNob}, Waaagh! actif : T5 lue
+    # ici contre T6 resolue.
+    target_toughness = _target_highest_bodyguard_toughness(game_state, str(target_squad_id))
 
     n_attacks = float(expected_dice_value(require_key(weapon, "NB"), "pick_combi_profile_nb"))
     blast_x = _blast_extra_dice_per_five(weapon)
@@ -8908,9 +8932,7 @@ def _ranged_profile_expected_damage(
     return n_attacks * expected_damage_per_attack(
         profile,
         hit_target=hit_target,
-        wound_target=wound_threshold(
-            int(require_key(weapon, "STR")), int(require_key(t_sample, "T"))
-        ),
+        wound_target=wound_threshold(int(require_key(weapon, "STR")), target_toughness),
         save_threshold_value=save_th,
         damage=dmg,
     )
@@ -10698,6 +10720,41 @@ def _target_highest_bodyguard_toughness(game_state: Dict[str, Any], target_sid: 
         if waaagh_applies_to_unit(game_state, target_unit):
             return base_t + int(bonus_args)
     return base_t
+
+
+def effective_defensive_profile(game_state: Dict[str, Any], target_sid: str) -> Tuple[int, int, int]:
+    """(T, Sv, InSv) EFFECTIFS de l unite ciblee — ceux que la resolution appliquera.
+
+    SOURCE UNIQUE des caracteristiques defensives pour toute ESTIMATION de degats
+    (`engine/utils/expected_damage.py` pour le reward, `weapon_damage_cache` pour les bots).
+    Elle n existe que pour empecher une seconde lecture des champs BRUTS de l unite : ceux-ci
+    portent le profil du soldat de base tel qu il sort de la datasheet, et ignorent aussi bien
+    19.02 (T du bodyguard le plus resistant) que les invulnerables conferees en cours de partie
+    (Waaagh! 08.04, `invul_save_override` 19.04). Mesure du 2026-09-10 sur {5 Boyz + BannerNob} :
+    le champ brut annonce (T5, Sv5, InSv7) la ou la resolution joue (T5, Sv5, InSv5) hors Waaagh!
+    et (T6, Sv5, InSv5) Waaagh! actif — soit 0,3704 degat espere annonce contre 0,2963 reel pour
+    un bolt rifle, 25,0 % de surestimation, des le tour 1.
+
+    T   : `_target_highest_bodyguard_toughness` (19.02 + `toughness_bonus_while_waaagh`), le
+          MEME oracle que le jet de blessure du moteur.
+    Sv  : la sauvegarde d armure de l unite. 05.03/05.04 la font vivre par GROUPE D ALLOCATION,
+          et aucun effet du depot ne la modifie en cours de partie : il n y a donc pas d oracle
+          a consulter, et en inventer un ferait diverger l estimation de la resolution.
+    InSv: `effective_invul_save`, le MEME oracle que `_resolve_one_manual_wound`.
+
+    Leve si la cible n a plus de figurine vivante (via `_target_highest_bodyguard_toughness`) :
+    estimer les degats contre une escouade morte est une divergence d invariant, pas un zero.
+    """
+    from engine.game_state import effective_invul_save  # cycle : cf. plus haut
+
+    sid = str(target_sid)
+    target_unit = require_unit_by_id(game_state, sid)
+    toughness = _target_highest_bodyguard_toughness(game_state, sid)
+    armor_sv = int(require_key(target_unit, "ARMOR_SAVE"))
+    invul_sv = effective_invul_save(
+        game_state, target_unit, int(require_key(target_unit, "INVUL_SAVE"))
+    )
+    return (toughness, armor_sv, invul_sv)
 
 
 def _build_alloc_groups(game_state: Dict[str, Any], target_sid: str) -> List[Dict[str, Any]]:
@@ -13347,11 +13404,15 @@ def squad_declare_fight(
     from engine.game_state import effective_invul_save, waaagh_melee_bonus  # cycle : cf. plus haut
 
     target_unit_for_select = require_unit_by_id(game_state, str(target_squad_id))
-    target_t = int(require_key(t_sample, "T"))
+    # JUMEAU du tir (`_ranged_profile_expected_damage`) : la T qui sert au score est celle de
+    # 19.02, la MEME que `_manual_roll_fight_intent` resoudra — pas celle de la figurine
+    # echantillon, qui ignore `toughness_bonus_while_waaagh` et le repli d un leader.
+    target_t = _target_highest_bodyguard_toughness(game_state, str(target_squad_id))
     target_sv = int(require_key(t_sample, "ARMOR_SAVE"))
     # PV de la figurine cible : plafond du degat utile (`_useful_expected_damage`). Lu sur la
-    # MEME figurine echantillon que T / Sv / InSv, jamais sur l entree d escouade — un profil de
+    # MEME figurine echantillon que Sv / InSv, jamais sur l entree d escouade — un profil de
     # figurine peut surcharger le HP_MAX de l unite (cf. `spec_hp_max` a la construction).
+    # La T, elle, ne vient PAS de l echantillon : 19.02 la prend sur les bodyguards (ci-dessus).
     target_hp_max = int(require_key(t_sample, "HP_MAX"))
     # Waaagh! de la CIBLE : elle peut avoir une invulnerable 5+ absente de sa datasheet. Le
     # choix d arme se fait donc contre la sauvegarde REELLE — sinon l heuristique prefererait

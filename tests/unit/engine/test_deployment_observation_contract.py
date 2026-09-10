@@ -40,7 +40,9 @@ import numpy as np
 import pytest
 
 from engine.observation_entities import K_ALLY_SLOTS
-from tests.unit.engine._config_helpers import both_terrains, assert_deployment_phase, pin_active_deployment
+from tests.unit.engine._config_helpers import (
+    both_terrains, assert_deployment_phase, pin_active_deployment, settle_reserves_declarations,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCENARIO = (
@@ -71,6 +73,12 @@ def _load(seed: int = 0):
     pin_active_deployment(eng)
     eng.reset(seed=seed)
     assert_deployment_phase(eng)  # sinon ce fichier ne teste rien
+    # L'étape Declare Battle Formations (20.01) précède la mise en place depuis qu'elle a été
+    # sortie du tour de déploiement. Ce fichier vérifie l'observation de la POSE : les questions
+    # de réserves sont donc réglées ici, en déclinant, pour que les tests reprennent à l'état
+    # qu'ils décrivent — un plateau vide et un pool de pose complet.
+    settle_reserves_declarations(eng)
+    assert_deployment_phase(eng)
     return eng
 
 

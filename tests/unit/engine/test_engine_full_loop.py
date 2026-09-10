@@ -7,10 +7,15 @@ on force game_state["turn"] = max_turns+1 pour déclencher le retour anticipé
 "turn_limit_exceeded" dans step(). Ceci est le seul chemin de terminaison
 garanti sans peupler les pools d'activation ni mocker convert_gym_action.
 
-Comportement réel de step() quand turn > max_turns (ligne 1260 w40k_core.py) :
-  - game_state["turn_limit_reached"] = True
-  - retourne terminated=True, info={"turn_limit_exceeded": True, "winner": ..., "win_method": ...}
-  - game_state["game_over"] n'est PAS set dans ce chemin (retour anticipé avant ligne 1283)
+Comportement réel de step() quand turn > max_turns (garde en tête de `step_with_mask`) :
+  - game_state["turn_limit_reached"] = True ET game_state["game_over"] = True — les deux sont
+    posés par la garde elle-même ;
+  - retourne terminated=True et un info qui porte `turn_limit_exceeded` PLUS le bilan complet de
+    fin d'épisode (`winner`, `win_method`, `episode`, `tactical_data`, `deployment_mode`), bâti
+    par `W40KEngine._build_terminal_info` comme sur toutes les autres portes de terminaison.
+
+Ce qui est vérifié ICI reste `winner` / `win_method` : le bilan complet, lui, est verrouillé
+porte par porte dans `test_terminal_info_all_paths.py`.
 """
 
 from __future__ import annotations

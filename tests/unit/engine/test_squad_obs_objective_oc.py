@@ -117,6 +117,35 @@ def test_my_oc_live_on_objective(engine):
     assert obs["global_cont"][global_cont_index("objective_enemy_oc_0")] == pytest.approx(0.0)
 
 
+def test_my_oc_live_sums_each_model_oc_on_a_heterogeneous_squad():
+    """Escouade HÉTÉROGÈNE en OC (personnage attaché, 19.01) : l'OC live somme PAR FIGURINE.
+
+    4 figurines OC 2 + 1 figurine OC 6 (profil d'un BannerNob replié, `Datasheets - Orks.pdf`
+    p.3) sur l'objectif 0 → 14. Le défaut multipliait l'OC de l'ESCOUADE par le NOMBRE de
+    figurines et rendait 10 : l'agent voyait un contrôle qui n'est pas celui du moteur.
+    """
+    cfg = _config()
+    # `build_model_specs` lit `OC` sur la FIGURINE quand elle en porte un — c'est exactement ce
+    # que `_build_enhanced_unit` écrit pour un personnage attaché.
+    cfg["units"][0]["models"][4]["OC"] = 6
+    with patch("engine.w40k_core.load_weapon_damage_table", return_value={}), \
+         patch.object(W40KEngine, "_build_reward_configs_for_current_units", return_value={}):
+        eng = W40KEngine(config=build_engine_config(cfg))
+    eng.reset()
+    eng.game_state["objectives"] = [
+        {"id": 1, "hexes": _OBJ_HEXES_0},
+        {"id": 2, "hexes": _OBJ_HEXES_1},
+    ]
+    eng.game_state["objective_controllers"] = {"1": None, "2": None}
+
+    ocs = [int(eng.game_state["models_cache"][m]["OC"])
+           for m in eng.game_state["squad_models"]["1"]]
+    assert sorted(ocs) == [2, 2, 2, 2, 6], f"prémisse : escouade hétérogène attendue, vu {ocs}"
+
+    obs = _obs(eng, "1")
+    assert obs["global_cont"][global_cont_index("objective_my_oc_0")] == pytest.approx(14.0)
+
+
 def test_enemy_oc_live_on_objective(engine):
     """1 figurine OC=3 ennemie sur l'objectif 1 → enemy_oc_1 = 3, my_oc_1 = 0."""
     obs = _obs(engine, "1")

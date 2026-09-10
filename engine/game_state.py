@@ -3498,7 +3498,27 @@ def sum_objective_control_oc(
 def iter_living_model_footprints(
     game_state: Dict[str, Any], unit_id: Any
 ) -> Iterator[Set[Tuple[int, int]]]:
-    """Empreintes de socle des figurines VIVANTES de ``unit_id`` (lecture PAR FIGURINE, 14.02).
+    """Empreintes de socle seules — adaptateur de ``iter_living_models_with_footprints``.
+
+    Pour les lecteurs qui jugent une PRESENCE (``unit_is_within_objective``, comptage de
+    figurines du journal d API) et n ont donc rien a faire de l identifiant. Le controle 14.02,
+    lui, a besoin de la figurine pour lire SA caracteristique OC : il consomme le generateur
+    complet. Une seule implementation, deux facons de la lire.
+    """
+    for _mid, footprint in iter_living_models_with_footprints(game_state, unit_id):
+        yield footprint
+
+
+def iter_living_models_with_footprints(
+    game_state: Dict[str, Any], unit_id: Any
+) -> Iterator[Tuple[str, Set[Tuple[int, int]]]]:
+    """``(id de figurine, empreinte de socle)`` des figurines VIVANTES de ``unit_id`` (14.02).
+
+    L IDENTIFIANT EST RENDU AVEC L EMPREINTE parce que la regle 14.02 additionne « the OC
+    characteristics of all the models », et que l OC est une caracteristique de FIGURINE (02.02,
+    ``models_cache[mid]["OC"]``) : une escouade attachee (19.01) porte plusieurs profils d OC, et
+    un lecteur qui ne recoit que des empreintes ne peut que COMPTER des figurines puis multiplier
+    par un OC d escouade — ce qu il ne faut pas faire.
 
     Source unique de la question « ou est reellement posee cette escouade » : ``models_cache``
     (position par figurine) + ``compute_occupied_hexes`` (empreinte du socle), et NON l ancre
@@ -3557,10 +3577,10 @@ def iter_living_model_footprints(
         # une forme volontairement differente a `deployment_handlers.py:240`. Toute 5e occurrence
         # doit etre relue avec ces quatre-la sous les yeux.
         if socle_is_single_hex(base_shape, base_size):
-            yield {(col, row)}
+            yield mid, {(col, row)}
             continue
         orientation = int(model.get("orientation", squad_orientation))
-        yield compute_occupied_hexes(col, row, base_shape, base_size, orientation)
+        yield mid, compute_occupied_hexes(col, row, base_shape, base_size, orientation)
 
 
 #: Cle du cache des zones d'objectif (cf. `objective_hex_zones`). Valeur : le TRIPLET
@@ -3850,18 +3870,20 @@ def _resolve_objective_controller(
     return new_controller, should_clear
 
 
-def unit_effective_oc(unit: Dict[str, Any]) -> int:
-    """OC effectif de l'unite, incluant oc_bonus (Relic Banner, Primitive E chantier 06).
+def unit_oc_bonus(unit: Dict[str, Any]) -> int:
+    """Bonus d'OC porte par l'UNITE (`oc_bonus`, Relic Banner — Primitive E chantier 06).
 
-    Regle 14.02 : chaque figurine de l'unite apporte sa caracteristique OC. La regle `oc_bonus`
-    ajoute un bonus fixe a cet OC par figurine. Somme sur toutes les entrees `oc_bonus` de
+    « Relic Banner: This unit has +1 OC » (Ancient, Datasheets - Space Marines p.4). Le bonus est
+    une propriete de l'UNITE et s'ajoute a la caracteristique OC de CHACUNE de ses figurines : la
+    regle 14.02 additionne « the OC characteristics of all the models », donc une escouade de six
+    figurines sous Relic Banner gagne +6, pas +1. Somme sur toutes les entrees `oc_bonus` de
     UNIT_RULES (une seule declaree en pratique ; la somme generalise sans casse supplementaire).
 
-    Source unique du OC effectif : `objective_control_contributions` l'appelle en lieu et place
-    de `require_key(unit, "OC")`. Aucun autre site ne lit l'OC pour le controle : la modifier
-    ici couvre tout le systeme d'objectif.
+    Ce qui reste au niveau de l'UNITE est ce bonus, et lui seul : l'OC de base se lit sur la
+    FIGURINE (02.02, `models_cache[mid]["OC"]`), jamais sur `unit["OC"]`, qui ne porte que le
+    profil du corps de l'escouade et ignore les personnages attaches (19.01).
     """
-    base_oc = int(require_key(unit, "OC"))
+    bonus = 0
     for rule_entry in require_key(unit, "UNIT_RULES"):
         if rule_entry.get("ruleId") == "oc_bonus":
             rule_args = rule_entry.get("rule_args")
@@ -3870,8 +3892,8 @@ def unit_effective_oc(unit: Dict[str, Any]) -> int:
                     f"Rule 'oc_bonus' on unit {unit.get('id')} "
                     "must define rule_args.oc_bonus"
                 )
-            base_oc += int(rule_args["oc_bonus"])
-    return base_oc
+            bonus += int(rule_args["oc_bonus"])
+    return bonus
 
 
 def apply_secure_objective_on_control(game_state: Dict[str, Any]) -> List[int]:
@@ -3992,6 +4014,10 @@ def objective_control_contributions(
     perdrait du controle en silence — le defaut meme que le second pre-filtre s est vu refuser.
     """
     units_cache = require_key(game_state, "units_cache")
+    # Caracteristique OC PAR FIGURINE (02.02) : `require_key` et pas `.get` — une figurine sans
+    # OC dans `models_cache` est un cache corrompu (`build_model_specs` la pose toujours), pas
+    # une figurine sans controle d'objectif.
+    models_cache = require_key(game_state, "models_cache")
     unit_by_id = {str(u["id"]): u for u in game_state["units"]}
     cached_zones = game_state.get(_OBJECTIVE_ZONES_CACHE_KEY)  # get allowed : absence = 1er appel
     zones_union: Optional[FrozenSet[Tuple[int, int]]] = None
@@ -4015,21 +4041,32 @@ def objective_control_contributions(
         # construction de chaque unite ; son absence est un etat corrompu, pas un defaut.
         if bool(require_key(unit, "battle_shocked")):
             continue
-        oc = unit_effective_oc(unit)
-        if oc <= 0:
-            continue
+        # 14.02 : « add together the OC CHARACTERISTICS OF ALL THE MODELS in that player's army
+        # that are within range of that objective ». L'OC est une caracteristique de FIGURINE
+        # (02.02), pas d'escouade : chaque figurine presente apporte LE SIEN. Multiplier un OC
+        # d'escouade par un NOMBRE de figurines — ce que faisait ce code — n'est juste que sur une
+        # escouade homogene ; des qu'un personnage est attache (19.01), les deux profils d'OC
+        # coexistent dans la meme unite et le produit est faux dans les deux sens (BannerNob OC 6
+        # sur 5 Boyz OC 2 : 12 rendu contre 16 attendus, Ancient OC 1 sur 5 Intercessor OC 2 : 18 contre 17).
+        oc_bonus = unit_oc_bonus(unit)
         unit_player = int(require_key(unit, "player"))
         if unit_player not in (1, 2):
             raise ValueError(f"Unexpected unit player id: {unit_player}")
-        models_in_area = [0] * len(hex_sets)
-        for footprint in iter_living_model_footprints(game_state, unit_id):
+        oc_in_area = [0] * len(hex_sets)
+        for model_id, footprint in iter_living_models_with_footprints(game_state, unit_id):
             if zones_union is not None and footprint.isdisjoint(zones_union):
+                continue
+            # OC de CETTE figurine + le bonus d'unite, qui s'applique a chacune d'elles.
+            # `<= 0` : 02.02, « if a model has an OC characteristic of '-' it is unable to control
+            # objectives at all » — elle n'apporte rien, comme le faisait la garde d'escouade.
+            model_oc = int(require_key(models_cache[model_id], "OC")) + oc_bonus
+            if model_oc <= 0:
                 continue
             for i, zone in enumerate(hex_sets):
                 if not footprint.isdisjoint(zone):
-                    models_in_area[i] += 1
-        if any(models_in_area):
-            contributions[uid] = (unit_player, [oc * n for n in models_in_area])
+                    oc_in_area[i] += model_oc
+        if any(oc_in_area):
+            contributions[uid] = (unit_player, oc_in_area)
     return contributions
 
 

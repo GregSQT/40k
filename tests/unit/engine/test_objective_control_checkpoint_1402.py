@@ -190,7 +190,8 @@ def _manager_et_etat_avec_un_objectif_tenu_par_p1():
         "squad_models": {"1": ["1#0"]},
         "models_cache": {
             "1#0": {
-                "col": 0, "row": 0, "HP_CUR": 1, "orientation": 0,
+                # OC PAR FIGURINE (02.02) : c'est la caractéristique que 14.02 additionne.
+                "col": 0, "row": 0, "HP_CUR": 1, "orientation": 0, "OC": 2,
                 "BASE_SHAPE": "round", "BASE_SIZE": 1,
             }
         },

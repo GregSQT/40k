@@ -174,6 +174,38 @@ Sections disponibles : `1.1`, `1.2`, `1.3`, `1.4`, `1.5`, `1.6`, `1.7`, `2.1`, `
 | **2.7** | CORE ISSUES |
 | **2.8** | ÉTAT RECONSTRUIT vs ÉTAT MOTEUR |
 
+### Décisions d'agent (`CHOICE_i`) et taux de déclaration 20.01
+
+Toute décision d'agent résolue (V11 §9.3 P2 — les onze types d'`AGENT_DECISION_TYPE_IDS`) laisse
+une ligne dans `step.log`, **grammaire de journal 8** :
+
+```
+[10:00:01] E1 T1 P1 DEPLOYMENT : Unit 1 DECISION [reserves_declaration] CHOICE_0 [Place in strategic reserves] [SUCCESS]
+[10:00:01] E1 T1 P2 DEPLOYMENT : Unit 101 DECISION [reserves_declaration] CHOICE_1 [Deploy normally] [DECLINED] [SUCCESS]
+```
+
+Elle porte le **type** de décision, l'**index du candidat joué**, le **libellé** de ce candidat,
+l'unité, le joueur, le tour et l'épisode ; `[DECLINED]` marque le candidat qui PASSE (`declines`).
+Un seul producteur — `W40KEngine._record_agent_decision_action_log` — pour tous les types : le
+`rule_choice` garde en plus sa propre ligne `chose [<RÈGLE>]`, qui nomme la règle retenue et que
+les chemins PvP et PvE écrivent aussi, sans passer par une décision agent.
+
+La ligne **n'incrémente pas** le compteur de steps : quand le type produit une ligne d'effet
+(`charge`, `shoot`/`combat`, `move_after_shooting`, `chose [...]`), c'est elle qui compte le step
+gym consommé par `CHOICE_i`.
+
+L'analyzer en tire, dans la section **1.7 SPECIAL RULES USAGE**, le compte par type et par
+candidat, puis le **taux de déclaration en réserves stratégiques (20.01)** :
+`CHOICE_0` déclare l'unité en réserves, `CHOICE_1` la garde pour la mise en place.
+
+```
+20.01 strategic-reserves declaration rate: 1/4 = 25.0% (CHOICE_0 = declared)
+```
+
+Le taux est ABSENT (et non nul) quand le journal ne porte aucune décision de ce type — sans quoi
+« l'agent décline systématiquement » et « l'agent n'a jamais eu la question » se liraient pareil.
+Lecture programmatique : `ai.analyzer_core.agent_decision_option_rate(stats, type, index)`.
+
 ### Comment un contrôle de déplacement est écrit
 
 Les quatre déplacements contrôlés — **move**, **advance**, **charge**, **pile-in/consolidation** —

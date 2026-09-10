@@ -265,7 +265,7 @@ entière** : un token qui n'atteint pas `step.log` ne rend pas la règle invisib
 | `[ts] T<n> OBJECTIVE CONTROL: VP1= VP2= CP1= CP2= ZONES=<nom>:Ctrl=…` | `log_objective_control_snapshot` (`step_logger.py`) | Oui — VP uniquement |
 | `[ts] T<n> STATE: <uid>[<mid>@(c,r,z<h>):<pv> …] …` | `log_state_snapshot` (`step_logger.py`) | **Oui** — `_apply_state_snapshot` (`analyzer_core.py`) : compte l'écart, PUIS recale |
 | `[ts] T<n> EFFECTS: P1 <clé>=<val> … \| P2 none` | `log_effects_snapshot` (`step_logger.py`) | Partiellement — `_parse_effects_snapshot` (`analyzer_core.py`) lit tout ; **quatre des six** clés sont consommées depuis le 2026-08-10 (cf. §5, V15) |
-| `[ts] EPISODE END: Winner=, Method=, Actions=, Steps=, Total=, Duration=…s` | `log_episode_end` | Oui |
+| `[ts] EPISODE END: Winner=, Method=, Actions=, Steps=, Total=, Duration=…s` — `Actions` = lignes écrites · `Steps` = incrémentantes (jet tir/mêlée) · `Total` = `episode_steps` (step gym + fin activation) | `log_episode_end` | Oui |
 | `[ts] OBJECTIVE CONTROL: Obj<id>:P1_OC=,P2_OC=,Ctrl=` (récap de fin) | `log_episode_end` | Non (motif distinct, non matché) |
 
 Clés émises par `T{tour} EFFECTS:` (`w40k_core._log_effects_snapshot_if_changed:7217`, valeurs

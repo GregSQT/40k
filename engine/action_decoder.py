@@ -648,6 +648,31 @@ class ActionDecoder:
         current_phase = game_state["phase"]
 
         if current_phase == "deployment":
+            # ─── DECLARE BATTLE FORMATIONS (20.01) — AVANT toute mise en place ───
+            # 20.01 : « Before the battle, in the Declare Battle Formations step, you can select
+            # one or more friendly units […] Instead of setting up these units on the battlefield
+            # during deployment ». L'étape PRÉCÈDE le déploiement (`25 Rules appendix.pdf` :
+            # Declare Battle Formations, puis Pre-battle Abilities, puis Begin the Battle).
+            #
+            # ⚠️ Ce bloc était un `mask[SQUAD_ACTION_WAIT] = True` posé DANS le tour de
+            # déploiement de l'unité, donc au fil de l'alternance. Mesuré sur
+            # `scenario_training_armageddon1.json` en déploiement actif : le joueur 2 gardait le
+            # slot ouvert avec 1, 2, 3 puis 4 unités adverses DÉJÀ POSÉES — il déclarait ses
+            # réserves en voyant le déploiement adverse, information que 20.01 ne lui donne pas.
+            # La politique apprenait une décision qui n'est pas jouable dans une partie légale.
+            #
+            # La question passe par le mécanisme générique « décision agent » (§9.3 P2) et NON
+            # par un slot d'action : le type s'ajoute dans les colonnes pré-dimensionnées
+            # d'`AGENT_DECISION_TYPE_SLOTS`, donc à coût nul en `obs_size` et sans dimension
+            # d'action nouvelle — là où un slot dédié aurait imposé un retrain `--new`.
+            from engine.phase_handlers.deployment_handlers import (
+                arm_reserves_declaration_decision,
+            )
+
+            armed_reserves = arm_reserves_declaration_decision(game_state)
+            if armed_reserves is not None:
+                return self._agent_decision_mask(armed_reserves), []
+
             if eligible_units:
                 current_deployer = self._get_current_deployer(game_state)
                 active_unit = eligible_units[0]
@@ -662,21 +687,6 @@ class ActionDecoder:
                     )
                 for i in range(open_deploy_slot_count(num_hexes)):
                     mask[DEPLOY_SLOT_BASE + i] = True
-                # 20.01 — « you can select one or more friendly units to place in strategic
-                # reserves » : la mise en réserve est une DÉCISION DE JOUEUR, prise à la place
-                # du déploiement de cette unité. Elle emprunte `SQUAD_ACTION_WAIT`, id inutilisé
-                # en phase de déploiement (les slots 4-8 y portent les stratégies de pose) :
-                # aucune dimension d'action n'est ajoutée. Le slot est FERMÉ dès que l'unité ne
-                # tiendrait plus sous le plafond de 50 % — l'agent ne peut pas produire une
-                # liste illégale, exactement comme il ne peut pas poser hors zone.
-                from engine.phase_handlers.deployment_handlers import (
-                    unit_can_be_placed_in_strategic_reserves,
-                )
-
-                if unit_can_be_placed_in_strategic_reserves(
-                    game_state, str(require_key(active_unit, "id"))
-                ):
-                    mask[SQUAD_ACTION_WAIT] = True
             return mask, eligible_units
 
         if current_phase == "command":
@@ -1491,9 +1501,13 @@ class ActionDecoder:
                     "convert_squad_action: aucune unité eligible en phase deployment"
                 )
             selected_unit_id = eligible_units[0]["id"]
-            # 20.01 — mise en réserves au lieu du déploiement (cf. masque).
-            if action_int == SQUAD_ACTION_WAIT:
-                return {"action": "deploy_strategic_reserves", "unitId": selected_unit_id}
+            # 20.01 n'est PLUS ici. `SQUAD_ACTION_WAIT` traduisait « mets cette unite en
+            # reserves » au moment de la deployer, donc apres les poses adverses deja faites —
+            # ce que la regle interdit (elle situe la declaration a l'etape Declare Battle
+            # Formations, avant tout deploiement). La question est desormais posee par le
+            # mecanisme « decision agent » avant la premiere pose et repondue par `CHOICE_i` ;
+            # `SQUAD_ACTION_WAIT` n'a plus aucun sens en phase de deploiement et le masque ne
+            # l'ouvre plus. Y arriver signale une rupture masque/decodeur, pas un choix.
             if action_int not in DEPLOY_SLOTS:
                 raise ValueError(
                     f"convert_squad_action: action {action_int} invalide en phase deployment"

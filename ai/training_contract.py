@@ -116,13 +116,48 @@ def agent_reward_table(rewards_config: Mapping[str, Any], agent_key: str) -> Map
     2. `load_agent_rewards_config` AJOUTE une cle alias a la racine en mode inter-faction
        (config_loader.py:645). Une empreinte prise a la racine changerait donc avec le MODE, sans
        qu'aucune recompense n'ait bouge — et un garde-fou qui crie a tort finit contourne.
+
+    La sous-table doit etre un objet portant une section `base_actions` NON VIDE, et non pas
+    seulement un objet non vide. C'est la SEULE section que la production exige nommement, a chaque action d'unite
+    (`RewardCalculator._get_unit_reward_config`, engine/reward_calculator.py:820) : une table qui
+    ne l'a pas est une table sur laquelle aucun run ne peut tourner. Le cas frequent n'est pas la
+    table vide, c'est le RETRAIT d'une cle — 7 commits sur 90 jours en retirent au moins une. Une
+    sous-table non vide amputee de `base_actions` donnait donc un contrat ecrit sans un mot, puis
+    un run qui meurt en cours d'episode, loin du fichier fautif. On leve au moment ou la donnee
+    fautive est encore sous la main.
+
+    Ce refus est aussi le pendant ECRITURE de `_exige_sections`, qui refuse en LECTURE un
+    `reward_keys` vide : une sous-table vide ou scalaire donnait `reward_keys: []`, declare
+    « fichier abime » au run SUIVANT — un message qui accuse le contrat alors que le coupable est
+    `config/agents/<agent>/*_rewards_config.json`.
     """
     if agent_key not in rewards_config:
         raise ValueError(
             f"Table de recompense sans entree pour l'agent '{agent_key}' : "
             f"cles disponibles {sorted(rewards_config)}. Le contrat ne peut pas etre etabli."
         )
-    return rewards_config[agent_key]
+    table = rewards_config[agent_key]
+    if not isinstance(table, Mapping) or "base_actions" not in table:
+        detail = (
+            f"cles presentes {sorted(table)}"
+            if isinstance(table, Mapping)
+            else f"type inattendu {type(table).__name__}"
+        )
+        raise ValueError(
+            f"Table de recompense de l'agent '{agent_key}' sans section `base_actions` "
+            f"({detail}) : `RewardCalculator` l'exige a chaque action d'unite "
+            f"(engine/reward_calculator.py:820), le contrat ne peut pas etre etabli sur une table "
+            f"que la production ne sait pas lire."
+        )
+    base_actions = table["base_actions"]
+    if not isinstance(base_actions, Mapping) or not base_actions:
+        raise ValueError(
+            f"Table de recompense de l'agent '{agent_key}' : section `base_actions` vide ou d'un "
+            f"type inattendu ({type(base_actions).__name__}), objet non vide attendu. "
+            f"`ai/reward_mapper.py:80` y lit `ranged_attack` des le premier tir : une section "
+            f"creuse tue le run au premier episode, le contrat ne s'ecrit donc pas dessus."
+        )
+    return table
 
 
 def build_contract(rewards_config: Mapping[str, Any], agent_key: str) -> Dict[str, Any]:
@@ -197,9 +232,13 @@ def _exige_sections(contrat: Mapping[str, Any], origine: str) -> None:
 
     Une section PRESENTE mais VIDE produit exactement le meme faux diff, et `build_contract` ne
     peut pas en ecrire une : les trois premieres sont lues du code (introspection des registres,
-    canaux de grille, familles d'actions) et la quatrieme d'une table de recompense dont
-    `RewardCalculator` exige deja la section `base_actions` (reward_calculator.py:826). Vide,
-    c'est donc un fichier abime, jamais un etat metier.
+    canaux de grille, familles d'actions), et la quatrieme d'une sous-table de recompense
+    qu'`agent_reward_table` refuse sans une section `base_actions` non vide — d'ou au moins un
+    chemin de cle. Cette
+    garantie a longtemps ete ARGUMENTEE ici (« `RewardCalculator` exige deja `base_actions` ») sans
+    etre TENUE par le code : une sous-table amputee de cette section passait a l'ecriture, et le
+    defaut ne se voyait qu'en cours d'episode, un run plus tard. Elle est desormais verifiee a la
+    source. Vide, c'est donc un fichier abime, jamais un etat metier.
     """
     for section, attendu in SECTIONS_ATTENDUES.items():
         if section not in contrat:

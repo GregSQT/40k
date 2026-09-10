@@ -60,8 +60,34 @@ _log = logging.getLogger(__name__)
 # AJOUTER UNE CLÉ OBLIGATOIRE AU RESET D'ÉPISODE OBLIGE À BUMPER CETTE MAGIC. Le verrou est
 # tests/unit/services/test_save_format_key_contract.py : il épingle l'empreinte des clés mutables
 # posées par le reset et reste ROUGE tant que la magic n'a pas suivi.
-_MAGIC = b"W40KTL06"
-_LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04", b"W40KTL05"})
+#
+# ⚠️ LE RETRAIT D'UNE CLÉ CONDAMNÉE N'OBLIGE PAS À BUMPER. Le danger que cette magic écarte est un
+# état AMPUTÉ : une save écrite avant l'ajout d'une clé rend un game_state qui n'a pas cette clé,
+# et le premier lecteur lève au fond du moteur, après que le chargement a déjà écrasé la partie en
+# cours. Une clé retirée parce que PLUS AUCUN CODE NE LA LIT produit l'inverse — une row rend une
+# clé en trop, que personne ne consulte. La fermeture des intentions de zone (2026-09-09) a été
+# bumpée en TL06 par réflexe : le refus ne protégeait de rien et rendait illisibles les parties
+# enregistrées. Retour à TL05, et les cinq clés restent publiées par le reset (`W40KEngine`, deux
+# dicts) plutôt que d'être retirées du format.
+#
+# ⚠️⚠️ CETTE EXCEPTION NE COUVRE QUE LA CLÉ MORTE, et UN retrait en sort — il BUMPE :
+#   • la clé qui quitte le reset mais reste CRÉÉE PARESSEUSEMENT et lue en cours de partie. La row
+#     la réinjecte avec sa valeur d'alors, avant que le code vivant ne la pose.
+# La question à se poser n'est donc pas « ajout ou retrait ? » mais « un lecteur consulte-t-il
+# encore cette clé, sous quelque forme que ce soit ? ». Si oui : bump.
+#
+# LA CLÉ QUI DEVIENT STATIQUE NE BUMPE PLUS (2026-09-09). Elle le devait tant que
+# `game_snapshots.rebuild_game_state` ré-attachait les statiques du live PUIS faisait
+# `update(captured["game_state"])` : la valeur PÉRIMÉE de la row écrasait la valeur vivante, et le
+# lecteur ne levait pas, il lisait une valeur d'une autre partie. Ce geste manuel n'était garanti
+# par rien — le seul contrôle qui voyait la migration, `test_save_format_key_contract`, ne couvre
+# que les clés posées par le RESET, et une clé peut devenir statique sans jamais y être passée :
+# `_deploy_pool_set_cache` et `_los_blocking_grids_cache` naissent paresseusement (`W40KEngine`
+# ne fait que les purger), donc hors de sa portée. La règle est désormais DANS le code : une clé
+# statique vient toujours de l'engine vivant, la row ne peut plus la remettre. Verrou :
+# tests/unit/services/test_game_snapshots_static_keys.py.
+_MAGIC = b"W40KTL05"
+_LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04"})
 _LEN = struct.Struct(">Q")  # préfixe de longueur : entier 64 bits big-endian
 
 # Rows exclues du menu Select (trop nombreuses) mais présentes dans le playback ⏮⏭.
@@ -162,9 +188,7 @@ def _reject_legacy(name: str, head: bytes) -> None:
             f"illisible (TL01 : sans empreinte de scénario ; TL02 : sans les points de "
             f"commandement de la règle 08.02 ; TL03 : sans les clés de réserves stratégiques, "
             f"d'ingress, de suppression, ni `secured_objectives` ; TL04 : sans la déclaration de "
-            f"montée 13.06 ni le mémo de charge ; TL05 : AVEC les cinq clés des intentions de "
-            f"zone, retirées du moteur le 2026-09-09 — une save TL05 restaurerait un état que "
-            f"plus aucun lecteur n'attend). Supprime-la ou rejoue la partie."
+            f"montée 13.06 ni le mémo de charge). Supprime-la ou rejoue la partie."
         )
     raise ValueError(f"partie {name!r} : format de fichier inconnu (en-tête {head!r})")
 

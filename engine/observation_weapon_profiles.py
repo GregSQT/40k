@@ -37,6 +37,7 @@ Principes (décidés dans `V11_audit_observation.md` §9.3/§9.4/§11, appliqué
 
 from __future__ import annotations
 
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from shared.data_validation import require_key
@@ -102,9 +103,72 @@ WEAPON_RULE_OBS_VOCABULARY: Tuple[str, ...] = WEAPON_RULE_BITS + ANTI_RULE_IDS
 # MESURÉ sur les 4 armureries (161 datasheets, 231 armes) : au
 # plus 4 règles déclarées par arme, paramétrées comprises — donc au plus 4 ids. 6 laisse la même
 # marge que les 8 slots de capacités d'unité face à leur maximum mesuré.
+# ⚠️ Ces slots portent AUSSI le marqueur de groupe combi (cf. `COMBI_GROUP_MARKER_NAMES`), qui
+# n'est pas une règle d'arme. Re-mesuré marqueur compris sur les 159 armes distinctes des 6
+# armureries : le pire cas reste `Plasma Exterminator (Supercharge)`, 4 règles, et il EST un
+# profil combi — donc 5 ids sur 6. La marge est d'un slot, et le débordement lève.
 # ⚠️ Débordement = ERREUR (`observation_builder._fill_id_slots`), jamais troncature : une règle
 # tronquée serait une règle que l'agent subit sans la percevoir.
 WEAPON_RULE_ID_SLOTS = 6
+
+# ---------------------------------------------------------------------------
+# Marqueurs de GROUPE COMBI — l'exclusivité des profils d'une même arme physique
+# ---------------------------------------------------------------------------
+#
+# LE DÉFAUT QU'ILS FERMENT. Deux profils d'une même arme physique (champ `COMBI_WEAPON`, ex.
+# Plasma Incinerator Standard/Supercharge) sont deux entrées de la liste d'armes, donc deux
+# profils DISTINCTS pour `collect_weapon_profiles` (§9.4), donc deux slots de l'observation. Rien
+# ne disait qu'ils sont EXCLUSIFS : en tirer un consomme l'arme entière (renvoi « Multiple Weapon
+# Profiles » de 04.01, appliqué par `shared_utils._pick_one_profile_per_weapon_group` et par le
+# masque de `_open_shoot_weapon_sel_slots`). L'agent lisait donc DEUX armes là où il en joue une.
+#
+# MESURÉ sur `build_armageddon_engine(seed=0)` : sur les 20 couples escouade × registre, 6
+# sur-comptent le volume de tir EN DÉS D'ATTAQUE (somme des profils observés contre volume
+# exclusif réel, un profil par arme physique et par figurine) de +5,3 % à +28,6 % — et jamais
+# en mêlée, où aucune arme du dépôt ne porte de `COMBI_WEAPON` (0 groupe sur les 6 armureries,
+# contre 12 au tir).
+#
+# CE QUE L'INFORMATION N'EST PAS. Elle n'est PAS dérivable du reste de l'observation :
+# `profile_identity` n'inclut pas `COMBI_WEAPON`, et aucun registre ne relie un profil à une
+# figurine — un Intercessor portant bolt_rifle + bolt_pistol (deux armes physiques qui tirent
+# TOUTES LES DEUX, 04.01 « You can select one or more ranged weapons that model has ») se
+# présentait exactement comme un combi à deux profils.
+#
+# POURQUOI UN `obs_id` ET PAS UN BIT. Un bit « je suis exclusif » ne dirait pas AVEC QUI : une
+# escouade porte jusqu'à 2 groupes combi distincts (MESURÉ sur tous les rosters de
+# `config/agents/`, pire cas `Intercessor` + `Librarian` = grenade_launcher_intercessor et
+# smite), et l'agent doit pouvoir apparier les profils deux à deux. Un id le fait pour ZÉRO
+# scalaire d'observation et ZÉRO paramètre : il se pose dans les `WEAPON_RULE_ID_SLOTS` déjà
+# réservés, et `OBS_ID_VOCAB_SIZE` (128) est pré-dimensionné.
+#
+# POURQUOI UN REGISTRE PYTHON. Les `obs_id` de règles viennent de `config/weapon_rules.json` et
+# occupent 1..18 ; un marqueur n'est PAS une règle d'arme et n'a rien à faire dans ce fichier.
+# La plage réservée ci-dessous en est DISJOINTE, et `observation_builder.weapon_profile_obs_ids`
+# lève si les deux se recouvrent un jour.
+COMBI_GROUP_OBS_ID_BASE = 64
+#: Nombre de groupes combi distincts marquables dans UNE escouade. Un groupe marqué occupe au
+#: moins 2 slots de profils (un groupe à profil unique n'a personne avec qui être exclusif, cf.
+#: `assign_combi_group_markers`), donc `K_WEAPONS // 2 = 10` est la borne STRUCTURELLE — au-delà
+#: il n'y a plus de slot de profil pour porter le groupe. Maximum MESURÉ : 2.
+#: Débordement = ERREUR, jamais silence : un marqueur manquant redonnerait à l'agent le défaut
+#: que ce bloc ferme, sans que rien ne le dise.
+#: ⚠️ `encode_squad_weapon_profiles` numérote sur les profils OBSERVÉS : au plus `k_slots // 2`
+#: groupes marqués par registre, donc au plus 10 pour les deux — la borne ci-dessus est
+#: désormais tenue par construction et l'erreur est inatteignable depuis ce chemin. Elle reste
+#: le contrat de `assign_combi_group_markers` pour tout appelant direct, et n'est pas retirée :
+#: c'est ce contrat qui interdit de marquer moins de groupes que la réalité.
+COMBI_GROUP_MARKER_COUNT = 10
+#: Les marqueurs sont ANONYMES et locaux à l'escouade : `COMBI_GROUP_0` ne désigne pas
+#: `plasma_pistol`, il désigne « le premier groupe exclusif de cette escouade, dans l'ordre
+#: déterministe de `collect_weapon_profiles` ». C'est le seul sens utile — l'agent a besoin de
+#: savoir QUELS SLOTS s'excluent, pas de reconnaître un nom d'arme (les caractéristiques du
+#: profil le disent déjà, et un id par arme du dépôt serait un vocabulaire à maintenir).
+COMBI_GROUP_MARKER_NAMES: Tuple[str, ...] = tuple(
+    f"COMBI_GROUP_{i}" for i in range(COMBI_GROUP_MARKER_COUNT)
+)
+COMBI_GROUP_MARKER_OBS_IDS: Dict[str, int] = {
+    name: COMBI_GROUP_OBS_ID_BASE + i for i, name in enumerate(COMBI_GROUP_MARKER_NAMES)
+}
 
 # Layout d'UN profil (l'ordre ci-dessous EST l'ordre d'émission).
 #   cont     : NB, ATK, STR, AP, DMG, portée, porteurs vivants, puis les paramètres de règles,
@@ -141,6 +205,7 @@ PROFILE_BIN_FIELDS: Tuple[str, ...] = (
 PROFILE_BIN_SIZE = len(PROFILE_BIN_FIELDS)
 
 _PROFILE_BIN_INDEX: Dict[str, int] = {name: i for i, name in enumerate(PROFILE_BIN_FIELDS)}
+_BIN_IDX_PRESENT: int = _PROFILE_BIN_INDEX["present"]
 
 
 def profile_bin_index(field: str) -> int:
@@ -245,12 +310,92 @@ def collect_weapon_profiles(
     return [(sample[key], count) for key, count in ordered]
 
 
+def combi_group_key(weapon: Dict[str, Any]) -> Optional[str]:
+    """Clé de l'arme PHYSIQUE portée par ce profil (`COMBI_WEAPON`), ou None.
+
+    JUMEAU de `shared_utils._weapon_group_key`, qui décide de l'exclusivité au masque et à la
+    résolution : MÊME champ, MÊME lecture. La différence est le domaine, et elle est voulue — le
+    moteur groupe des INDEX d'armes d'UNE figurine et invente donc une clé `__solo_<i>` pour les
+    armes sans combi ; l'observation groupe des PROFILS d'escouade, où « pas de combi » n'a pas
+    de partenaire possible et se lit None. Écrire ici un second `__solo_` aurait créé des groupes
+    d'un seul membre indexés par un numéro de slot, qui n'ont aucun sens à l'échelle de
+    l'escouade.
+
+    Le profil reçu est le REPRÉSENTANT rendu par `collect_weapon_profiles` — c'est déjà sur lui
+    que `shared_utils._open_shoot_weapon_sel_slots` lit `COMBI_WEAPON` pour n'ouvrir qu'un slot
+    par arme physique.
+    """
+    # get allowed : une arme sans profil exclusif est une ABSENCE, pas une erreur.
+    key = weapon.get("COMBI_WEAPON")
+    return str(key) if key else None
+
+
+def assign_combi_group_markers(
+    profiles: Sequence[Tuple[Dict[str, Any], int]],
+    marker_by_group: Dict[str, str],
+) -> List[Optional[str]]:
+    """Marqueur de groupe combi de chaque profil, aligné sur `profiles` (None = aucun).
+
+    `marker_by_group` est l'état de numérotation de L'ESCOUADE, porté par l'appelant et partagé
+    entre les deux registres : un marqueur donné ne désigne donc jamais deux armes physiques
+    différentes dans la même escouade, tir et mêlée confondus. Le partager est ce qui rend
+    l'affirmation « même marqueur ⇒ même arme » vraie sans restriction de registre.
+
+    UN GROUPE À PROFIL UNIQUE N'EST PAS MARQUÉ. Le marqueur dit « ces slots sont des alternatives
+    de la même arme » ; un groupe qui n'occupe qu'un slot dans cette escouade n'exclut rien et se
+    joue exactement comme une arme solo (c'est aussi ce que fait le masque : `opened_combi`
+    n'écarte un slot que s'il en a déjà ouvert un du même groupe). Lui donner un id serait un
+    symbole que l'agent doit apprendre à ignorer.
+
+    `profiles` est donc la liste des profils RÉELLEMENT ÉMIS, pas celle que porte l'escouade :
+    `encode_squad_weapon_profiles` tronque avant d'appeler, sans quoi un groupe coupé par la
+    troncature laisserait un marqueur sans partenaire dans l'observation — un « groupe à profil
+    unique » déguisé, exactement ce que la règle ci-dessus refuse d'écrire.
+
+    Le grain est l'ESCOUADE, comme tout ce module. L'exclusivité, elle, est PAR FIGURINE (04.01
+    parle des armes « that model has ») : deux porteurs du même combi choisissent chacun le leur.
+    Le marqueur est donc lu « chaque porteur de ces slots en joue UN », ce qui est exactement le
+    volume que `_pick_one_profile_per_weapon_group` déclarera — et non « l'escouade n'en tire
+    qu'un seul ». Le compteur de porteurs de chaque slot porte l'autre moitié de l'information.
+
+    Débordement de la plage réservée = ERREUR, jamais troncature — même doctrine que
+    `_fill_id_slots` : un marqueur silencieusement omis remettrait deux profils exclusifs sous
+    l'apparence de deux armes indépendantes.
+    """
+    groups: Dict[str, List[int]] = defaultdict(list)
+    for i, (weapon, _) in enumerate(profiles):
+        key = combi_group_key(weapon)
+        if key is not None:
+            groups[key].append(i)
+    out: List[Optional[str]] = [None] * len(profiles)
+    for key, indices in groups.items():
+        if len(indices) < 2:
+            continue
+        marker = marker_by_group.get(key)  # get allowed : absence = groupe pas encore numéroté
+        if marker is None:
+            if len(marker_by_group) >= COMBI_GROUP_MARKER_COUNT:
+                raise ValueError(
+                    f"{len(marker_by_group) + 1} groupes combi exclusifs dans une seule escouade "
+                    f"pour {COMBI_GROUP_MARKER_COUNT} marqueurs reserves "
+                    f"(observation_weapon_profiles.COMBI_GROUP_MARKER_COUNT). Groupes deja "
+                    f"numerotes : {sorted(marker_by_group)}, en exces : {key!r}. Marquer moins "
+                    f"que la realite rendrait deux profils exclusifs indiscernables de deux armes "
+                    f"independantes — le defaut que ces marqueurs ferment."
+                )
+            marker = COMBI_GROUP_MARKER_NAMES[len(marker_by_group)]
+            marker_by_group[key] = marker
+        for i in indices:
+            out[i] = marker
+    return out
+
+
 def encode_weapon_profile(
     cont: List[float],
     binv: List[float],
     rule_names: List[List[str]],
     weapon: Optional[Dict[str, Any]],
     carriers: int,
+    combi_marker: Optional[str],
 ) -> None:
     """Émet UN profil (ou un slot vide, tout à zéro avec mask=0) dans les trois vecteurs.
 
@@ -261,6 +406,11 @@ def encode_weapon_profile(
     traduction en `obs_id` et le remplissage des slots appartiennent à `observation_builder`
     (`_fill_id_slots`), seul écrivain d'ensembles d'ids — c'est lui qui porte le tri, le padding
     et les gardes de domaine et de débordement, pour les capacités comme pour les armes.
+
+    `combi_marker` (None = aucun) entre dans cette MÊME liste de noms : c'est un `obs_id` de plus
+    dans les slots déjà réservés, et il en hérite donc les quatre propriétés d'un coup. Il est
+    EXPLICITE et sans valeur par défaut — un appelant qui l'oublierait rendrait muette
+    l'exclusivité des profils sans qu'aucune erreur ne le dise.
     """
     if weapon is None:
         cont.extend([0.0] * PROFILE_CONT_SIZE)
@@ -293,10 +443,12 @@ def encode_weapon_profile(
     # point d'arrêt courant et NON de la composition de l'escouade — il est posé par
     # `ObservationBuilder`, hors du cache de profils (cf. `PROFILE_BIN_FIELDS`).
     slot_bin = [0.0] * PROFILE_BIN_SIZE
-    slot_bin[profile_bin_index("present")] = 1.0  # slot occupé
+    slot_bin[_BIN_IDX_PRESENT] = 1.0  # slot occupé
     binv.extend(slot_bin)
 
     names = [rule_id for rule_id in WEAPON_RULE_BITS if weapon_has_rule(weapon, rule_id)]
+    if combi_marker is not None:
+        names.append(combi_marker)
     if anti_keyword is not None:
         # 24.02 : plusieurs [ANTI] ne se cumulent pas — `anti_rule_of` a déjà retenu le MEILLEUR
         # seuil, et c'est cette règle-là, une seule, dont l'identité est observée.
@@ -372,13 +524,28 @@ def encode_squad_weapon_profiles(
     `on_truncation(registre, nb_profils, k)` est appelé quand l'escouade porte plus de profils
     que de slots — la troncature doit être VISIBLE (§11 « troncature loguée, jamais silencieuse »).
     """
+    # Numérotation des groupes combi PARTAGÉE par les deux registres (cf.
+    # `assign_combi_group_markers`) : un marqueur ne peut pas désigner une arme au tir et une
+    # autre en mêlée dans la même escouade.
+    marker_by_group: Dict[str, str] = {}
     for weapons_key, k_slots in ((RANGED_KEY, k_ranged), (MELEE_KEY, k_melee)):
         profiles = collect_weapon_profiles(models, weapons_key)
         if len(profiles) > k_slots and on_truncation is not None:
             on_truncation(weapons_key, len(profiles), k_slots)
+        # Les marqueurs sont numérotés sur les profils RÉELLEMENT OBSERVÉS, jamais sur la liste
+        # complète. L'ordre de `collect_weapon_profiles` est celui des porteurs décroissants, il
+        # ne garde donc pas les deux profils d'une même arme physique ensemble : la troncature
+        # peut couper un groupe en deux (MESURÉ : 12 profils de tir, groupe porté par 3 figurines
+        # au slot 0 et par 1 au rang 11). Marquer avant de tronquer laissait le slot survivant
+        # affirmer « je suis exclusif » avec un partenaire absent de l'observation — le symbole
+        # muet que `assign_combi_group_markers` refuse d'écrire pour un groupe à profil unique.
+        # Sur la tranche observée, c'est cette même règle (« moins de 2 occurrences, pas de
+        # marqueur ») qui retire l'orphelin, sans cas particulier.
+        observed = profiles[:k_slots]
+        markers = assign_combi_group_markers(observed, marker_by_group)
         for slot in range(k_slots):
-            if slot >= len(profiles):
-                encode_weapon_profile(cont, binv, rule_names, None, 0)
+            if slot >= len(observed):
+                encode_weapon_profile(cont, binv, rule_names, None, 0, None)
                 continue
-            weapon, carriers = profiles[slot]
-            encode_weapon_profile(cont, binv, rule_names, weapon, carriers)
+            weapon, carriers = observed[slot]
+            encode_weapon_profile(cont, binv, rule_names, weapon, carriers, markers[slot])

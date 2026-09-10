@@ -77,6 +77,25 @@ def _tvd(p: np.ndarray, q: np.ndarray) -> float:
     return float(0.5 * np.abs(p - q).sum())
 
 
+def _action_probs(dist: Any) -> np.ndarray:
+    """Le vecteur de probabilités INDEXÉ PAR ID D'ACTION que porte `dist`.
+
+    C'est la forme d'une distribution catégorielle masquée, celle qu'exige déjà
+    `PointerMaskablePolicy` (ai/pointer_policy.py). Une distribution multi-catégorielle porte à la
+    place une LISTE de facteurs : les probabilités par action n'en sortent pas telles quelles, et
+    un TVD calculé dessus mesurerait autre chose que le choix d'action. La sonde le dit plutôt que
+    de rendre un nombre qui ne répond pas à sa question.
+    """
+    from sb3_contrib.common.maskable.distributions import MaskableCategoricalDistribution
+
+    if not isinstance(dist, MaskableCategoricalDistribution):
+        raise TypeError(
+            "La sonde compare des probabilités par action et exige donc une "
+            f"distribution catégorielle masquée (reçue : {type(dist).__name__})."
+        )
+    return dist.distribution.probs.cpu().numpy()[0].astype(np.float64)
+
+
 class _Policy:
     """La politique interrogée : un modèle entraîné, ou une politique NON entraînée.
 
@@ -146,8 +165,7 @@ class _Policy:
             dist = self.model.policy.get_distribution(
                 batch, action_masks=mask[None, :].copy()
             )
-            probs = dist.distribution.probs
-        return probs.cpu().numpy()[0].astype(np.float64)
+            return _action_probs(dist)
 
 
 def _other_eligible_target(game_state: Dict[str, Any], squad_id: str, weapon_slot: int,

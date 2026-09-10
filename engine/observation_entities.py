@@ -227,8 +227,10 @@ UNIT_RULE_EFFECT_IDS: Tuple[str, ...] = (
     #   secure_objective_on_control               `game_state.apply_secure_objective_on_control`
     #                                             (14.03, fin de phase de commandement) — Boyz,
     #                                             Intercessor
-    #   oc_bonus                                  `game_state.unit_effective_oc`, source UNIQUE de
-    #                                             l'OC pour le contrôle (14.02) — Ancient
+    #   oc_bonus                                  `game_state.unit_oc_bonus`, ajouté à l'OC de
+    #                                             CHAQUE figurine par
+    #                                             `objective_control_contributions` (14.02)
+    #                                             — Ancient
     #
     # Restent DEHORS, sans `obs_id`, pour la même raison qu'avant : les capacités SOURCES
     # (`adaptable_predators`, `cunning_hunters`, `target_priority`, `targeted_intercession`,
@@ -816,7 +818,18 @@ def self_model_bin_index(field: str) -> int:
 #: aucune datasheet — c'est le mot-clé FLY qui l'ouvre et 21.03 qui en fixe le prix —, donc ses
 #: deux candidats portent eux aussi un `effect_ids` VIDE. C'est `declines` qui les sépare :
 #: `CHOICE_1` renonce au vol, et le renoncement est précisément « ne rien faire ».
-AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting", "reactive_move")
+#: ⚠️ `reserves_declaration` (20.01) est le TROISIÈME type dont les deux candidats portent un
+#: `effect_ids` vide, pour la même raison que les deux précédents : « place in strategic
+#: reserves » n'est accordé par aucune datasheet, c'est l'étape Declare Battle Formations qui
+#: l'ouvre et le plafond de 50 % qui la borne. C'est `declines` qui sépare les deux lignes —
+#: `CHOICE_1` garde l'unité pour le déploiement, et ne rien déclarer est précisément « ne rien
+#: faire ».
+#:
+#: ⚠️ `reactive_move` est le seul type POSÉ PENDANT LE TOUR DE L'ADVERSAIRE (datasheet « Skulking
+#: Horrors » ; 01.03 : « each time a unit is selected to move, that unit's controlling player is
+#: the active player until that move ends »). Il est ajouté EN FIN de tuple, jamais inséré : un
+#: type déclaré garde son index, et le décaler réécrirait la colonne d'un type déjà vivant.
+AGENT_DECISION_TYPE_IDS: Tuple[str, ...] = ("rule_choice", "waaagh_call", "fly_declaration", "allocation_model", "charge_placement", "mortal_wounds_target", "returned_models_placement", "returned_models_profile", "ascent_declaration", "move_after_shooting", "reserves_declaration", "reactive_move")
 
 #: Nombre MAXIMAL de candidats exposés à l'agent — le K de `CHOICE_0..K-1`
 #: (`macro_intents.CHOICE_SLOTS`). Il vaut 6, l'alignement retenu par §9.3 sur les 6 slots

@@ -634,7 +634,8 @@ de la lire comme une suite de paliers et non comme un signal bruité.
 
 Les courbes de jeu (`game_critical/win_rate`, `game_critical/episode_reward`, `03_selfplay/*`) ne
 passent pas par ce chemin et n'ont jamais été touchées. Elles portaient alors aussi les tags
-`00_critical/{d_win_rate,e_episode_reward_smooth}`, depuis retirés du namespace critique.
+`00_critical/{d_win_rate,e_episode_reward_smooth}`, toutes deux revenues le 2026-09-10 et
+écrites depuis `log_episode_end`.
 
 Le run P1 en cours au 2026-09-04 a chargé le code avant le correctif : ses courbes restent
 fausses jusqu'à sa fin. Verrou : `tests/unit/ai/test_metrics_dump_wrapper_idempotent.py`.

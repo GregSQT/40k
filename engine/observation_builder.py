@@ -32,6 +32,7 @@ from engine.phase_handlers.shared_utils import (
     charge_build_valid_plan,
 )
 from engine.observation_weapon_profiles import (
+    COMBI_GROUP_MARKER_OBS_IDS,
     PROFILE_BIN_SIZE,
     PROFILE_CONT_SIZE,
     WEAPON_RULE_ID_SLOTS,
@@ -206,6 +207,49 @@ def weapon_rule_obs_ids() -> Dict[str, int]:
 _ABILITY_OBS_IDS: Optional[Dict[str, int]] = None
 _STATUS_OBS_IDS: Optional[Dict[str, int]] = None
 _WEAPON_RULE_OBS_IDS: Optional[Dict[str, int]] = None
+_WEAPON_PROFILE_OBS_IDS: Optional[Dict[str, int]] = None
+
+
+def weapon_profile_obs_ids() -> Dict[str, int]:
+    """`{symbole ecrit dans un slot d'ids de PROFIL -> obs_id}` : regles d'arme + marqueurs combi.
+
+    Les slots `*_wpn_rule_ids` portent DEUX vocabulaires, et un seul les traduit : les regles
+    d'arme observees (`config/weapon_rules.json`, ids 1..18) et les marqueurs de groupe combi
+    (`observation_weapon_profiles.COMBI_GROUP_MARKER_OBS_IDS`, plage reservee en Python). C'est
+    donc ce registre-ci que `_fill_id_slots` recoit — un registre partiel produirait un message
+    d'erreur qui nomme `'?'` a la place du symbole fautif, exactement quand il faut le nommer.
+
+    POURQUOI LES MARQUEURS NE SONT PAS DANS LE JSON. Un marqueur n'est pas une regle d'arme :
+    aucune datasheet ne le declare, il est CALCULE par escouade. L'y ecrire ferait echouer
+    `test_every_weapon_rule_with_obs_id_is_in_the_vocabulary` (obs_id orphelin) et melangerait un
+    symbole derive a un registre de donnees.
+
+    GARDE DE DISJONCTION. Les deux plages doivent rester separees : un marqueur qui vaudrait
+    l'id de [MELTA] ferait lire une regle la ou il y a une exclusivite, sans qu'aucune borne ne
+    s'en apercoive (les deux sont dans [OBS_ID_MIN, OBS_ID_MAX]). Le recouvrement leve ICI, au
+    premier appel, et non a l'entrainement.
+    """
+    global _WEAPON_PROFILE_OBS_IDS
+    if _WEAPON_PROFILE_OBS_IDS is None:
+        rules = weapon_rule_obs_ids()
+        collisions_nom = sorted(set(rules) & set(COMBI_GROUP_MARKER_OBS_IDS))
+        if collisions_nom:
+            raise ValueError(
+                f"Marqueurs de groupe combi portant un nom de regle d'arme : {collisions_nom}. "
+                f"Les deux vocabulaires partagent les memes slots d'ids : un nom commun rendrait "
+                f"la traduction ambigue."
+            )
+        collisions_id = sorted(set(rules.values()) & set(COMBI_GROUP_MARKER_OBS_IDS.values()))
+        if collisions_id:
+            raise ValueError(
+                f"obs_id partages entre les regles d'arme (config/weapon_rules.json) et les "
+                f"marqueurs de groupe combi "
+                f"(observation_weapon_profiles.COMBI_GROUP_OBS_ID_BASE) : {collisions_id}. "
+                f"Un id commun ferait lire une regle la ou l'observation ecrit une exclusivite "
+                f"de profils."
+            )
+        _WEAPON_PROFILE_OBS_IDS = {**rules, **COMBI_GROUP_MARKER_OBS_IDS}
+    return _WEAPON_PROFILE_OBS_IDS
 
 
 def _unit_statuses_in_effect(unit: Dict[str, Any], ctx: Dict[str, Any]) -> List[int]:
@@ -1268,7 +1312,12 @@ class ObservationBuilder:
                 self.K_WEAPONS_MELEE,
                 on_truncation=lambda key, n, k: truncations.append((key, n, k)),
             )
-            registry = weapon_rule_obs_ids()
+            # Registre COMPLET des symboles de ces slots : les regles d'arme ET les marqueurs de
+            # groupe combi poses par `encode_squad_weapon_profiles`. Le calcul du marqueur est
+            # DERRIERE CE CACHE parce que l'appartenance a un groupe ne depend que de la
+            # composition de l'escouade — exactement la cle de ce cache — et non du point
+            # d'arret courant (celui-la se pose hors cache, cf. `shoot_weapon_selected`).
+            registry = weapon_profile_obs_ids()
             rule_ids = np.zeros((self.K_WEAPONS, WEAPON_RULE_ID_SLOTS), dtype=np.float32)
             for slot, names in enumerate(rule_names):
                 if not names:
@@ -1277,7 +1326,7 @@ class ObservationBuilder:
                     [require_key(registry, name) for name in names],
                     WEAPON_RULE_ID_SLOTS,
                     registry=registry,
-                    kind="regles d'arme",
+                    kind="regles d'arme et marqueurs combi",
                     slots_constant="observation_weapon_profiles.WEAPON_RULE_ID_SLOTS",
                     squad_id=squad_id,
                 )

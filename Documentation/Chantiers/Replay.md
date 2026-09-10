@@ -525,6 +525,14 @@ et l'échec ne survit pas au changement d'unité.
   que l'entrée de la magic COURANTE, donc réécrire l'entrée d'un format déjà distribué ne lui
   faisait rien voir. Un second contrôle fige le compte et l'empreinte de chaque entrée qui
   n'est plus la magic courante, et exige qu'un bump épingle celle qu'il fige.
+- **Une clé qui devient STATIQUE ne bumpe pas** (2026-09-09) : `game_snapshots.rebuild_game_state`
+  ré-attachait les clés statiques du moteur vivant **puis** appliquait la partie capturée, donc une
+  row écrite quand la clé était encore mutable réinjectait sa valeur — d'une autre partie —
+  par-dessus la valeur vivante, sans que rien ne lève. Le bump était le seul rempart, et il ne
+  couvrait pas les clés statiques nées paresseusement, hors de portée du verrou de format. La règle
+  est maintenant dans le code : une clé statique vient **toujours** du moteur vivant, la row ne peut
+  plus la remettre. Verrou : `tests/unit/services/test_game_snapshots_static_keys.py`. Le bump reste
+  obligatoire pour une clé qui quitte le reset tout en restant créée paresseusement **et lue**.
 
 ## 4. Registre d'état des chantiers replay
 

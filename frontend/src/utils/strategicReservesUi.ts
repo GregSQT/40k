@@ -1,13 +1,16 @@
-import type { StrategicReservesPlayerSummary } from "../types/game";
+import type {
+  StrategicReservesPendingDeclaration,
+  StrategicReservesPlayerSummary,
+} from "../types/game";
 
 /**
  * Décisions d'interface des réserves stratégiques (20.01 / 20.04).
  *
  * Ces fonctions ne CALCULENT aucune règle : elles combinent la phase, le joueur, et ce que le
- * moteur a déjà tranché (`strategic_reserves` de l'API). En particulier `placeable_unit_ids` porte
- * à lui seul les trois conditions de 20.01 (plafond de 50 %, pas FORTIFICATION, encore à poser) —
- * les rejouer ici donnerait deux formules pour une même règle, et l'UI proposerait des dépôts que
- * le moteur refuse (ou refuserait des dépôts qu'il accepte).
+ * moteur a déjà tranché (`strategic_reserves` de l'API). En particulier `pending_declaration`
+ * porte à lui seul les trois conditions de 20.01 (plafond de 50 %, pas FORTIFICATION, encore à
+ * poser) ET le moment où la question se pose — les rejouer ici donnerait deux formules pour une
+ * même règle, et l'UI proposerait des dépôts que le moteur refuse.
  */
 
 /** Forme minimale d'une unité pour les sélecteurs ci-dessous — le hook manipule les unités BRUTES
@@ -47,25 +50,36 @@ export function formatStrategicReservesRatio(
 }
 
 /**
- * 20.01 — le conteneur accepte-t-il l'unité sélectionnée ?
+ * 20.01 — l'étape Declare Battle Formations est-elle encore ouverte ?
  *
- * Phase de déploiement UNIQUEMENT, unité de CE joueur, et présente dans la liste que le moteur
- * accepterait. Hors déploiement la réponse est non, quel que soit le reste : le moteur ferme aussi
- * (cf. `test_strategic_reserves_deposit_is_refused_outside_the_deployment_phase`), l'UI ne fait
- * que ne pas proposer un geste voué au refus.
+ * TANT QU'ELLE L'EST, AUCUNE POSE N'EST POSSIBLE : la règle situe la déclaration avant le
+ * déploiement, et le moteur refuse `deploy_commit` (`reserves_declaration_still_open`). L'UI ne
+ * fait que ne pas proposer un geste voué au refus — elle ne rejoue pas la règle, elle lit la
+ * question que le moteur a posée.
  */
-export function canDropUnitIntoReserves(o: {
+export function isReservesDeclarationStepOpen(o: {
   phase: string | undefined;
-  selectedUnitId: number | null;
-  summary: StrategicReservesPlayerSummary | null | undefined;
+  pending: StrategicReservesPendingDeclaration | null | undefined;
 }): boolean {
   if (o.phase !== "deployment") return false;
-  if (o.selectedUnitId === null) return false;
-  // Pas de contrôle d'appartenance au joueur ici : `placeable_unit_ids` est déjà construit à
-  // partir de `deployable_units[player]` côté moteur, et le conteneur reçoit le résumé de SON
-  // joueur. Le refaire côté client serait une seconde notion d'appartenance, qui ne peut que
-  // diverger de celle qui décide vraiment.
-  return (o.summary?.placeable_unit_ids ?? []).includes(String(o.selectedUnitId));
+  return o.pending != null;
+}
+
+/**
+ * 20.01 — la question en attente porte-t-elle sur CETTE unité ?
+ *
+ * Le client n'a aucune liste de candidats à filtrer : le moteur interroge une unité à la fois,
+ * dans un ordre figé au reset, et publie laquelle. Reconstruire ici « quelles unités pourraient
+ * partir en réserves » rouvrirait la sélection libre — donc la possibilité de déclarer après
+ * avoir vu le déploiement adverse, le défaut que ce contrat ferme.
+ */
+export function isReservesDeclarationPendingFor(o: {
+  phase: string | undefined;
+  unitId: number | string;
+  pending: StrategicReservesPendingDeclaration | null | undefined;
+}): boolean {
+  if (!isReservesDeclarationStepOpen({ phase: o.phase, pending: o.pending })) return false;
+  return o.pending!.unitId === String(o.unitId);
 }
 
 /**

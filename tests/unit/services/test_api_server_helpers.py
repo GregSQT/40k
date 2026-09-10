@@ -529,12 +529,18 @@ def test_strategic_reserves_summary_reports_points_per_player() -> None:
     assert summary["last_round"] == movement_handlers.STRATEGIC_RESERVES_LAST_ROUND
 
 
-def test_strategic_reserves_summary_only_offers_units_the_engine_would_accept() -> None:
-    """`placeable_unit_ids` = ce que `deployment_place_in_strategic_reserves` accepterait.
+def test_strategic_reserves_summary_asks_only_about_a_unit_the_engine_would_accept() -> None:
+    """`pending_declaration` = la question 20.01 que le moteur pose RÉELLEMENT.
+
+    Ce n'est plus une LISTE de candidats : 20.01 situe la déclaration à l'étape Declare Battle
+    Formations, avant tout déploiement, et le moteur interroge une unité à la fois dans un ordre
+    figé au reset. L'UI affiche cette question, elle n'en propose pas une autre.
 
     BORNE du plafond (20.01) : avec 120 pts déjà engagés sur un plafond de 250, une unité de
     130 pts tient encore (130 <= 130) et une de 131 ne tient plus. Une FORTIFICATION ne tient
     JAMAIS, quelle que soit la place restante — c'est ce test-là que le client ne peut pas faire.
+    La file commence donc sur l'unité de 131 pts et sur la FORTIFICATION, toutes deux SAUTÉES :
+    poser une question à candidat unique n'est pas poser une question.
     """
     game_state = {
         "points_limit": 500,
@@ -557,19 +563,24 @@ def test_strategic_reserves_summary_only_offers_units_the_engine_would_accept() 
                 "UNIT_KEYWORDS": [{"keywordId": "Fortification"}],
             },
         ],
-        "deployment_state": {"deployable_units": {1: ["2", "3", "4"], 2: []}},
+        "phase": "deployment",
+        "deployment_state": {
+            "deployable_units": {1: ["2", "3", "4"], 2: []},
+            # Ordre VOLONTAIREMENT défavorable : les deux entrées que la règle refuse sont en
+            # tête. Le résumé doit rendre la première REELLEMENT interrogeable, pas la première.
+            "reserves_declaration_queue": [[1, "3"], [1, "4"], [1, "2"]],
+            "reserves_declaration_closed": False,
+        },
     }
     game_state["unit_by_id"] = {u["id"]: u for u in game_state["units"]}
     summary = api_server._strategic_reserves_summary(game_state)
-    assert summary["1"]["placeable_unit_ids"] == ["2"]
-    assert summary["2"]["placeable_unit_ids"] == []
+    assert summary["pending_declaration"] == {"player": 1, "unitId": "2"}
 
 
-def test_strategic_reserves_summary_offers_nothing_once_deployment_is_over() -> None:
-    """Hors déploiement il n'y a plus rien à mettre en réserves : la liste est vide, pas absente."""
+def test_strategic_reserves_summary_asks_nothing_once_deployment_is_over() -> None:
+    """Hors déploiement il n'y a plus aucune question 20.01 : `null`, pas une clé absente."""
     summary = api_server._strategic_reserves_summary({"points_limit": 500, "units": []})
-    assert summary["1"]["placeable_unit_ids"] == []
-    assert summary["2"]["placeable_unit_ids"] == []
+    assert summary["pending_declaration"] is None
 
 
 def test_strategic_reserves_summary_closes_the_rule_without_battle_size() -> None:
@@ -607,11 +618,11 @@ def test_every_pvp_scenario_declares_a_battle_size() -> None:
         assert battle_points_limit(data["scale"], path.name) > 0
 
 
-def test_pvp_deployment_scenario_offers_units_to_the_reserves_container() -> None:
-    """Le scenario du mode PvP (deploiement ACTIF) rend le depot 20.01 REELLEMENT atteignable.
+def test_pvp_deployment_scenario_asks_the_reserves_question() -> None:
+    """Le scenario du mode PvP (deploiement ACTIF) rend la question 20.01 REELLEMENT atteignable.
 
-    La chaine complete : `scale` du scenario -> `points_limit` -> plafond de 50 % -> unites
-    acceptees. C'est le maillon qui manquait : plafond 0, donc `placeable_unit_ids` vide, donc
+    La chaine complete : `scale` du scenario -> `points_limit` -> plafond de 50 % -> une unite
+    interrogeable. C'est le maillon qui manquait : plafond 0, donc aucune question, donc
     conteneur inerte quoi que fasse le joueur.
     """
     from pathlib import Path
@@ -634,25 +645,34 @@ def test_pvp_deployment_scenario_offers_units_to_the_reserves_container() -> Non
     assert points_limit is not None, "scenario_pvp.json ne declare pas de 'scale' (20.01)"
 
     units = loaded["units"]
+    from engine.phase_handlers.deployment_handlers import build_reserves_declaration_queue
+
+    deployable_units = {
+        player: [str(u["id"]) for u in units if int(u["player"]) == player]
+        for player in (1, 2)
+    }
     game_state: Dict[str, Any] = {
         "points_limit": points_limit,
+        "phase": "deployment",
         "units": units,
         "deployment_state": {
-            "deployable_units": {
-                player: [str(u["id"]) for u in units if int(u["player"]) == player]
-                for player in (1, 2)
-            }
+            "deployable_units": deployable_units,
+            # La file est bâtie par LE constructeur du moteur, pas recopiée à la main : c'est son
+            # ordre alterné qui décide de la première question, et un ordre inventé ici testerait
+            # autre chose que ce que le joueur verra.
+            "reserves_declaration_queue": build_reserves_declaration_queue(deployable_units),
+            "reserves_declaration_closed": False,
         },
         "unit_by_id": {str(u["id"]): u for u in units},
     }
     summary = api_server._strategic_reserves_summary(game_state)
     for player in ("1", "2"):
         # VERT VACANT : sans ceci, un pool de deployables vide ferait passer le test.
-        assert game_state["deployment_state"]["deployable_units"][int(player)], player
+        assert deployable_units[int(player)], player
         assert summary[player]["cap_points"] > 0, player
-        assert summary[player]["placeable_unit_ids"], (
-            f"joueur {player} : aucune unite acceptable en reserves"
-        )
+    assert summary["pending_declaration"] is not None, (
+        "aucune question 20.01 posee sur le scenario PvP : le conteneur resterait inerte"
+    )
 
 
 def test_maybe_precompute_ingress_pools_is_a_noop_outside_move_phase() -> None:

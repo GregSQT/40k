@@ -669,10 +669,11 @@ _UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "level", "HP_CUR", "player", "orient
 
 # Clés moteur internes par unité / par arme, non consommées par l'UI web (le grep frontend est vide).
 # Filtrées de la réponse JSON (allège chaque POST /action : roster complet × armes), conservées côté moteur.
-_UNIT_EXCLUDE_KEYS_FOR_API = frozenset({"_wdc_def_key", "_precheck_cache"})
+_UNIT_EXCLUDE_KEYS_FOR_API = frozenset({"_precheck_cache"})
 # 2026-07-29 — ``_parsed_rules`` a été RETIRÉ de cette liste : le parseur d'armurerie ne l'écrit
-# plus (cache du défunt ``WeaponRulesApplier``, sans lecteur). ``_wdc_off_key`` reste, lui : il est
-# vif, écrit et relu par ``engine/weapon_damage_cache.py``.
+# plus (cache du défunt ``WeaponRulesApplier``, sans lecteur). 2026-09-10 — ``_wdc_def_key`` l'a
+# été à son tour : ``stamp_weapon_keys`` ne le pose plus (la clé défensive est calculée à la
+# lecture). ``_wdc_off_key`` reste, lui : il est toujours écrit sur chaque arme.
 _WEAPON_EXCLUDE_KEYS_FOR_API = frozenset({"_wdc_off_key"})
 
 
@@ -686,7 +687,7 @@ def _slim_weapon_for_api(weapon: Any) -> Any:
 def _slim_unit_for_api(unit: Any) -> Any:
     """Copie d'une unité pour la réponse API.
 
-    Retire les caches/clés moteur de l'unité (``_wdc_def_key``, ``_precheck_cache``) et des armes
+    Retire les caches/clés moteur de l'unité (``_precheck_cache``) et des armes
     (``RNG_WEAPONS`` / ``CC_WEAPONS``, y compris par modèle dans ``models``). Copies superficielles
     ciblées : ne mute jamais l'unité du moteur (le moteur garde ``_precheck_cache`` / clés WDC).
     """
@@ -1240,11 +1241,13 @@ def _strategic_reserves_summary(game_state: Dict[str, Any]) -> Dict[str, Any]:
 
     Deux grandeurs de plus, pour la MÊME raison — l'UI PvP ne doit rejouer aucune règle en TS :
 
-      - ``placeable_unit_ids`` : les unités que `deployment_place_in_strategic_reserves` accepte
-        RÉELLEMENT en l'état, c'est-à-dire l'intersection de ses deux préconditions (être encore à
-        poser, et passer `unit_can_be_placed_in_strategic_reserves` — plafond ET FORTIFICATION).
-        Le client ne propose le dépôt que pour ces ids ; il n'a ni le plafond restant ni les
-        mots-clés à réinterpréter.
+      - ``pending_declaration`` : la question 20.01 EN ATTENTE — ``{"unitId", "player"}`` — ou
+        ``null``. Elle a remplacé ``placeable_unit_ids``, et ce n'est pas un renommage : 20.01
+        situe la déclaration à l'étape Declare Battle Formations, AVANT tout déploiement, donc
+        l'UI ne propose plus une sélection libre parmi les unités encore à poser. Le moteur
+        interroge une unité à la fois, dans un ordre figé au reset, et le client ne fait
+        qu'afficher CETTE question. Publier de nouveau une liste de candidats libres rouvrirait
+        exactement le défaut corrigé : déclarer après avoir vu le déploiement adverse.
       - ``last_round`` : le round au bout duquel les réserves non arrivées sont détruites (20.04),
         lu sur la constante moteur. Le popup d'avertissement du client s'y accroche au lieu de
         coder « 3 » en dur.
@@ -1252,35 +1255,32 @@ def _strategic_reserves_summary(game_state: Dict[str, Any]) -> Dict[str, Any]:
     if "points_limit" not in game_state:  # état non initialisé (pas de partie en cours)
         return {}
     from engine.phase_handlers.deployment_handlers import (
-        _get_deployable_remaining,
+        next_reserves_declaration_entry,
         strategic_reserves_usage,
-        unit_can_be_placed_in_strategic_reserves,
     )
     from engine.phase_handlers.movement_handlers import STRATEGIC_RESERVES_LAST_ROUND
 
-    # Hors phase de déploiement il n'y a plus rien à mettre en réserves : `deployment_state` peut
-    # être absent (moteur nu, partie chargée en cours) et la liste est alors vide, ce qui est la
-    # vérité — pas un repli masquant. Quand il est là, c'est `_get_deployable_remaining` qui lit,
-    # avec sa résolution de clé int-ou-str : la convention de clés de `deployable_units` n'a pas à
-    # être réaffirmée ici (5e copie) pour diverger le jour où elle sera normalisée.
+    # Hors phase de déploiement il n'y a plus aucune question 20.01 : `deployment_state` peut être
+    # absent (moteur nu, partie chargée en cours) et il n'y a alors rien à demander, ce qui est la
+    # vérité — pas un repli masquant.
     deployment_state = game_state.get("deployment_state")  # get allowed (phase déjà terminée)
-    summary: Dict[str, Any] = {"last_round": int(STRATEGIC_RESERVES_LAST_ROUND)}
+    pending_entry = (
+        next_reserves_declaration_entry(game_state)
+        if isinstance(deployment_state, dict)
+        and str(game_state.get("phase")) == "deployment"  # get allowed (état non initialisé)
+        else None
+    )
+    summary: Dict[str, Any] = {
+        "last_round": int(STRATEGIC_RESERVES_LAST_ROUND),
+        "pending_declaration": (
+            None
+            if pending_entry is None
+            else {"player": int(pending_entry[0]), "unitId": str(pending_entry[1])}
+        ),
+    }
     for player in (1, 2):
         used, cap = strategic_reserves_usage(game_state, player)
-        pending = (
-            _get_deployable_remaining(deployment_state, player)
-            if isinstance(deployment_state, dict)
-            else []
-        )
-        summary[str(player)] = {
-            "used_points": used,
-            "cap_points": cap,
-            "placeable_unit_ids": [
-                str(uid)
-                for uid in pending
-                if unit_can_be_placed_in_strategic_reserves(game_state, str(uid))
-            ],
-        }
+        summary[str(player)] = {"used_points": used, "cap_points": cap}
     return summary
 
 
@@ -4710,6 +4710,20 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
         if unit_id not in new_deployed_set:
             rebuilt_deployable_units[unit_player].append(unit_id)
     deployment_state["deployable_units"] = rebuilt_deployable_units
+    # 20.01 — LA FILE SUIT LE POOL, sans exception. `change_roster` remplace les unités ET compacte
+    # leurs identifiants : une file bâtie au reset y garde des ids qui n'existent plus. Mesuré à la
+    # review : `KeyError: unit_can_be_placed_in_strategic_reserves: unit 101 introuvable`, levé
+    # depuis `_strategic_reserves_summary` — donc à CHAQUE sérialisation d'état — et, quand les
+    # tailles de roster coïncident, pas de crash mais une question posée sur l'unité d'un autre
+    # joueur. Le changement de roster est nominal pendant l'étape de déclaration (`canChangeRoster`
+    # y reste vrai), ce n'est donc pas un cas de bord.
+    #
+    # Reconstruite par LE constructeur du moteur, jamais recopiée ici : l'ordre alterné des
+    # questions est une règle, pas une donnée de l'API.
+    deployment_state[deployment_handlers.RESERVES_DECLARATION_QUEUE_KEY] = (
+        deployment_handlers.build_reserves_declaration_queue(rebuilt_deployable_units)
+    )
+    deployment_state[deployment_handlers.RESERVES_DECLARATION_CLOSED_KEY] = False
 
     deployment_state["current_deployer"] = current_deployer
     game_state["current_player"] = current_deployer

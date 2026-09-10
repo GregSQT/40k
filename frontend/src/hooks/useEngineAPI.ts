@@ -5911,14 +5911,18 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
     setSelectedUnitId(null);
   }, []);
 
-  /** 20.01 — dépose l'unité SÉLECTIONNÉE en réserves au lieu de la déployer. Consomme le tour
-   *  d'alternance, exactement comme une pose (c'est le moteur qui fait passer la main). */
+  /** 20.01 — RÉPOND à la question de l'étape Declare Battle Formations posée par le moteur.
+   *
+   *  `declare` est OBLIGATOIRE et porte les deux réponses : `true` met l'unité en réserves,
+   *  `false` la garde pour le déploiement. « Garder » n'est pas l'absence de réponse — la file du
+   *  moteur n'avance que sur une réponse explicite, sinon la même question se reposerait. */
   const handleDeployToStrategicReserves = useCallback(
-    async (unitId: number | string) => {
+    async (unitId: number | string, declare: boolean) => {
       const uid = typeof unitId === "string" ? parseInt(unitId, 10) : unitId;
       const data = await executeAction({
         action: "deploy_strategic_reserves",
         unitId: String(uid),
+        declare,
       });
       // Trois issues, pas deux (cf. `readEngineActionOutcome`). Sur une NON-ACTION on ne tombe
       // PAS dans le `handleCancelDeploy` ci-dessous, qui détruirait le plan provisoire du joueur
@@ -7992,7 +7996,7 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       reservesLastRoundWarning: null as null | { player: number; unitIds: number[] },
       onDismissIngressBlocked: () => {},
       onDismissReservesLastRoundWarning: () => {},
-      onDeployToStrategicReserves: async (_unitId: number | string) => {},
+      onDeployToStrategicReserves: async (_unitId: number | string, _declare: boolean) => {},
       onSelectReserveUnitForIngress: async (_unitId: number | string) => {},
       onIngressPlace: async (_col: number, _row: number) => {},
       onCancelIngress: () => {},

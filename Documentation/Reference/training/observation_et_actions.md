@@ -26,7 +26,7 @@ lecture, jamais une copie de chiffres qui dériverait.
 | `global_cont` / `global_bin` | (23,) / (95,) | ce qui n'appartient à aucune unité : tour, pas d'épisode, points de mission des deux camps, **points de commandement des deux camps (08.02)**, force d'usure, **distance à chacun des 5 objectifs**, **OC live et statut secured (14.02/14.03) par objectif** ; mon tour, **si j'ouvre le battle round (`i_play_first`)**, **phase en one-hot de 6 bits**, contrôle + présence des 5 objectifs, **direction (cos/sin) vers chacun d'eux**, **capacités de faction des deux camps (Waaagh! disponible/actif, désignation Oath en vigueur, clause du +1 Wound d'Oath ouverte — chantier 03)**. Ces distances/directions — comme les `col_rel`/`row_rel` des entités — sont mesurées depuis le **centroïde de l'escouade active**, ou depuis l'**ancre de sa zone de déploiement** tant qu'elle n'est pas posée (même repère que la grille, V11 §0.40 point 4). Une entité pas encore posée n'a **aucune** position relative ni **aucune relation géométrique** : `col_rel`/`row_rel`, `edge_distance`, `engaged`, `los_can_see`, `cover_vs_observer`, `hidden`, `n_fight_eligible`, `n_in_enemy_ez`, `n_models_engaging` sont nuls — règle 03.04, l'engagement range est une aire **du champ de bataille** (V11 §0.40 point 5) — et le bit `deploy_not_on_board` le dit. `coherent` fait exception : 03.03 ne teste la cohérence que « if that unit is on the battlefield » |
 | `allies_cont` / `allies_bin` | (12, 22) / (12, 39) | **ligne 0 = l'unité ACTIVE**, lignes suivantes = mes autres escouades. Les drapeaux incluent les **mots-clés de catégorie** (`kw_infantry`, `kw_vehicle`, `kw_monster`, `kw_fly`, `kw_psyker`), portés par TOUTE entité, et — pour les ennemis seulement — `los_can_see`, `cover_vs_observer`, `charge_reachable_max_roll` et les dix `split_assigned_w<i>` |
 | `allies_ability_ids` / `allies_status_ids` | (12, 8) / (12, 4) | **capacités et statuts EN VIGUEUR (19.04), en IDENTIFIANTS ENTIERS et non en bits** : `obs_id` des registres [`config/unit_rules.json`](../../../config/unit_rules.json) et [`config/unit_statuses.json`](../../../config/unit_statuses.json), **triés croissants**, paddés à `0`. Deux `nn.EmbeddingBag(128, 16, mode="sum", padding_idx=0)` en font une **lecture de ligne** : aucun one-hot n'est matérialisé, donc la longueur du vecteur est **indépendante du nombre de capacités existantes** — ajouter une capacité, un statut ou une faction entière ne change ni `obs_size`, ni le nombre de paramètres du réseau, donc n'impose **aucun retrain**. Débordement (> 8 capacités) → **erreur**, jamais troncature |
-| `allies_wpn_cont` / `_bin` / `_rule_ids` | (12, 20, 13) / (12, 20, 2) / (12, 20, 6) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants, params de règles, et les règles booléennes en **ids** (3ᵉ `EmbeddingBag`, cf. `*_wpn_rule_ids`) |
+| `allies_wpn_cont` / `_bin` / `_rule_ids` | (12, 20, 13) / (12, 20, 2) / (12, 20, 6) | profils d'armes par unité — **10 de tir puis 10 de mêlée**, avec porteurs vivants, params de règles, et les règles booléennes en **ids** (3ᵉ `EmbeddingBag`, cf. `*_wpn_rule_ids`), **plus le marqueur de groupe COMBI** qui apparie les profils exclusifs d'une même arme physique |
 | `allies_types_cont` / `_bin` | (12, 6, 5) / (12, 6, 5) | types de figurines : profil défensif, rôle d'allocation (règle 19), effectif du type |
 | `enemies_*` | idem avec **20 slots** | **ordre CONTRACTUEL = slots d'action de tir** (`get_enemy_slot_mapping`) |
 | `self_models_cont` / `_bin` | (20, 3) / (20, 9) | ce qui est irréductiblement individuel : position relative, **PV courants (`hp_ratio` + bit `wounded`)**, **rôle d'allocation en one-hot (règle 19)**, éligibilité au combat, engagement, hauteur, **bit de présence**. Les PV et le rôle y sont revenus avec P3-0 : `COHERENCY_SLOT_i` désigne la LIGNE `i` de ce bloc et la tête pointeur la score sur son seul embedding, sans biais de slot — sans eux, un personnage attaché et une figurine de base sortaient des logits égaux |
@@ -489,12 +489,56 @@ MEILLEUR seuil, 24.02). Son seuil Y+ reste continu (`*_wpn_cont[s][w][12]`) : c'
 une categorie. Les regles PARAMETREES (`RAPID_FIRE`, `SUSTAINED_HITS`, `MELTA`, `CLEAVE`, `BLAST`)
 n'ont pas d'id — leur presence se lit sur leur dimension continue.
 
+**Second vocabulaire dans les MEMES slots : le marqueur de groupe COMBI.** Deux profils d'une meme
+arme PHYSIQUE (champ `COMBI_WEAPON` de la datasheet, ex. Plasma Incinerator Standard/Supercharge)
+sont deux entrees de la liste d'armes, donc deux profils distincts, donc deux slots. Ils sont
+pourtant EXCLUSIFS : en tirer un consomme l'arme entiere (renvoi « Multiple Weapon Profiles » de
+04.01, applique par `shared_utils._pick_one_profile_per_weapon_group` et par le masque). Sans
+marqueur, l'agent lisait DEUX armes la ou il en joue une — mesure sur `build_armageddon_engine`
+(seed 0) : 6 couples escouade x registre sur 20 sur-comptaient le volume de tir (des d'attaque), de
++5,3 % a +28,6 %, et jamais en melee (aucune arme du depot n'y porte de `COMBI_WEAPON`).
+
+L'information n'etait derivable de rien d'autre : `profile_identity` n'inclut pas `COMBI_WEAPON`,
+et aucun registre ne relie un profil a une figurine — un Intercessor portant bolt_rifle +
+bolt_pistol (deux armes physiques qui tirent TOUTES LES DEUX, 04.01 « You can select one or more
+ranged weapons that model has ») se presentait exactement comme un combi a deux profils.
+
+Convention du marqueur (`observation_weapon_profiles.COMBI_GROUP_MARKER_NAMES`, ids reserves
+64..73, DISJOINTS des ids de regles 1..18 ; garde de recouvrement dans
+`observation_builder.weapon_profile_obs_ids`) :
+
+- **meme id sur tous les slots d'un meme groupe**, ids **differents** entre deux groupes d'une
+  meme escouade (un simple bit « je suis exclusif » ne dirait pas AVEC QUI) ;
+- **anonyme et local a l'escouade** : `COMBI_GROUP_0` ne designe pas `plasma_pistol`, il designe
+  « le premier groupe exclusif de cette escouade », dans l'ordre deterministe de
+  `collect_weapon_profiles` — a composition constante, aucun profil ne change de marqueur ;
+- **numerotation partagee par les deux registres** : un marqueur ne peut pas designer une arme au
+  tir et une autre en melee ;
+- **un groupe a profil unique n'est PAS marque** : il n'exclut rien et se joue comme une arme solo ;
+- **la numerotation porte sur les profils OBSERVES, pas sur ceux que l'escouade porte** : l'ordre
+  de `collect_weapon_profiles` est celui des porteurs decroissants, il ne garde donc pas ensemble
+  les deux profils d'une meme arme physique et la troncature peut couper un groupe en deux. Le
+  slot survivant retombe alors sous la regle precedente et n'est PAS marque — sans quoi il
+  affirmerait etre exclusif avec un partenaire absent de l'observation ;
+- lu « chaque PORTEUR de ces slots en joue UN » (04.01 parle des armes « that model has ») et non
+  « l'escouade n'en tire qu'un seul » — le compteur de porteurs de chaque slot porte l'autre moitie ;
+- 10 marqueurs reserves (`COMBI_GROUP_MARKER_COUNT`), soit la borne structurelle `K_WEAPONS // 2`
+  puisqu'un groupe marque occupe au moins 2 slots de profils ; maximum MESURE sur tous les rosters
+  de `config/agents/` : **2**. Debordement → **erreur**, jamais troncature. Numeroter sur les
+  profils observes tient cette borne par construction (au plus `k_slots // 2` groupes par
+  registre) : l'erreur est inatteignable depuis `encode_squad_weapon_profiles` et reste le contrat
+  de `assign_combi_group_markers` pour un appelant direct.
+
+Cout : **zero scalaire d'observation et zero parametre** — le marqueur se pose dans les
+`WEAPON_RULE_ID_SLOTS` deja reserves, et `OBS_ID_VOCAB_SIZE` (128) est pre-dimensionne. `obs_size`
+reste **18269**.
+
 Pourquoi des ids ici (V11 §0.48, arbitrage 2) : un drapeau positionnel coutait **560 scalaires**
 (28 entites x 20 profils), et une regle de plus en coutait 560 de plus — la conformite aux regles
 et l'objectif « un seul retrain » se contredisaient. Le vocabulaire est PRE-DIMENSIONNE
 (`OBS_ID_VOCAB_SIZE = 128`) : rendre `[INDIRECT FIRE]` vivante se fera en lui donnant un `obs_id`,
 sans toucher `obs_size` ni les poids du reseau. Debordement (> 6 regles sur une arme) → **erreur**,
-jamais troncature ; maximum MESURE sur les 4 armureries = 4.
+jamais troncature ; maximum MESURE sur les 4 armureries = 4 regles, et **5 ids marqueur combi compris** (pire cas `Plasma Exterminator (Supercharge)`, qui EST un profil combi).
 
 #### `*_types_cont[s][t]` — un type de figurine, 5 continues  ·  EntityRunningNorm
 
@@ -574,17 +618,18 @@ decision_ctx_bin[6]      = decision_type_mortal_wounds_target      # 0.0 / 1.0 �
 decision_ctx_bin[7]      = decision_type_returned_models_placement # 0.0 / 1.0 — placement des figurines rendues (Grot Orderly)
 decision_ctx_bin[8]      = decision_type_returned_models_profile   # 0.0 / 1.0 — profil des figurines rendues (Grot Orderly)
 decision_ctx_bin[9]      = decision_type_ascent_declaration        # 0.0 / 1.0 — « finir le move en hauteur » 13.06
+decision_ctx_bin[10]     = decision_type_move_after_shooting        # 0.0 / 1.0 — repositionnement post-tir
+decision_ctx_bin[11]     = decision_type_reserves_declaration       # 0.0 / 1.0 — Declare Battle Formations 20.01
 # RÉSERVÉ J4 — AGENT_DECISION_TYPE_SLOTS 8→16 ; slots restants nuls jusqu'à implémentation.
 # Candidats prévus : decision_type_fire_overwatch (§15.08), decision_type_heroic_intervention
-# (§15.11), decision_type_da_jump_target (Da Jump WeirdBoy). 4 slots de marge supplémentaires
-# (un des huit réservés a été consommé par `ascent_declaration`, 13.06).
-decision_ctx_bin[10]     = decision_type_reserved_0    # réservé J4 (ex. fire_overwatch §15.08)
-decision_ctx_bin[11]     = decision_type_reserved_1    # réservé J4 (ex. heroic_intervention §15.11)
-decision_ctx_bin[12]     = decision_type_reserved_2    # réservé J4 (ex. da_jump_target)
-decision_ctx_bin[13]     = decision_type_reserved_3    # réservé J4
-decision_ctx_bin[14]     = decision_type_reserved_4    # réservé J4
-decision_ctx_bin[15]     = decision_type_reserved_5    # réservé J4
-decision_ctx_bin[16]     = decision_type_reserved_6    # réservé J4
+# (§15.11), decision_type_da_jump_target (Da Jump WeirdBoy). 2 slots de marge supplémentaires
+# (trois des huit réservés ont été consommés par `ascent_declaration` 13.06,
+# `move_after_shooting` et `reserves_declaration` 20.01).
+decision_ctx_bin[12]     = decision_type_reserved_0    # réservé J4 (ex. fire_overwatch §15.08)
+decision_ctx_bin[13]     = decision_type_reserved_1    # réservé J4 (ex. heroic_intervention §15.11)
+decision_ctx_bin[14]     = decision_type_reserved_2    # réservé J4 (ex. da_jump_target)
+decision_ctx_bin[15]     = decision_type_reserved_3    # réservé J4
+decision_ctx_bin[16]     = decision_type_reserved_4    # réservé J4
 
 # UNE COLONNE = UNE GRANDEUR, jamais « la première valeur de ce type-là ». Deux types qui décrivent
 # la MÊME grandeur partagent la colonne ; les colonnes qu'un type ne remplit pas restent à zéro, et

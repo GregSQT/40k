@@ -156,6 +156,7 @@ def test_the_armed_pose_is_the_one_executed():
     le défaut corrigé, déplacé d'un cran.
     """
     from engine.macro_intents import open_placement_slots
+    from tests.unit.engine._config_helpers import settle_reserves_declarations
 
     engine = _make_engine(0.0)
     engine.reset(seed=5)
@@ -163,11 +164,19 @@ def test_the_armed_pose_is_the_one_executed():
     assert gs["deployment_mode_schedule_mode"] == "auto"
     assert str(gs["phase"]) == "deployment"
 
+    # L'étape Declare Battle Formations (20.01) précède la mise en place : les premiers steps du
+    # déploiement sont des questions, pas des poses. Elles sont réglées ici — ce que ce test
+    # verrouille est l'armement de la POSE, et le poseur automatique décline les déclarations
+    # (`reserves_declaration_decline_slot`), ce que vérifie
+    # `test_reserves_declaration_step_2001.py`.
+    settle_reserves_declarations(engine)
+    assert str(gs["phase"]) == "deployment", "l'étape 20.01 a consommé tout le déploiement"
+
     mask = np.asarray(engine.get_action_mask())
     armed = engine.auto_deployment_action(mask)
     assert armed is not None, "état de déploiement `auto` : le moteur doit posséder la pose"
     assert armed in open_placement_slots([int(i) for i in np.flatnonzero(mask)]), (
-        "la pose armée n'est pas un slot de POSE : ACTION_WAIT met l'unité en réserves (20.01)"
+        f"la pose armée {armed} n'est pas un slot de POSE"
     )
 
     engine.auto_deployment_action(mask)  # ré-arme : la pose précédente est périmée

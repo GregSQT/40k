@@ -24,6 +24,15 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
+# ADVERSAIRE OBLIGATOIRE. Une bataille a DEUX armées : l'observation construite par `reset()`
+# expose `my_value_ratio` ET `enemy_value_ratio`, donc exige `value_at_start[joueur]` non nul pour
+# les deux camps (`engine/observation_builder.py`, « une armee de valeur nulle rend la force
+# d usure indefinie (donnee de roster invalide) »). Un scénario mono-joueur est une donnée
+# invalide, pas un cas que le moteur doit absorber — c'est l'obstacle 4 documenté du scénario
+# Endless Duty (`tests/unit/services/test_endless_duty_is_broken.py`). Id dans [1..] : la plage
+# du joueur 1 (`engine/game_state.py`, « player 1 units in [1..] / player 2 units in [101..] »).
+_OPPONENT = {"id": 1, "unit_type": "Intercessor", "player": 1, "col": 3, "row": 3}
+
 
 def _scenario(units: list) -> dict:
     return {
@@ -39,7 +48,7 @@ def _scenario(units: list) -> dict:
         # Corollaire OBLIGATOIRE d'une armée ADEPTUS ASTARTES : la clause du +1 Wound d'Oath
         # en dépend, et l'observation la lit à chaque construction.
         "uses_codex_detachment": {"1": True, "2": True},
-        "units": units,
+        "units": [dict(_OPPONENT)] + units,
     }
 
 
