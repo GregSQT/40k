@@ -48,10 +48,11 @@ STATIQUE faisait un troisième cas jusqu'au 2026-09-09 ; elle n'en fait plus un,
 laissant désormais le live gagner (tests/unit/services/test_game_snapshots_static_keys.py).
 
 Cet interdit était une CONSIGNE et il est désormais un CONTRÔLE : `_FROZEN_FINGERPRINTS` épingle
-le compte et l'empreinte de chaque entrée qui n'est plus la magic courante. Écrire les entrées en
-littéral, sans objet partagé, empêche qu'une clé déposée dans l'entrée figée remonte dans la
-courante ; l'empreinte, elle, refuse en plus que cette réécriture passe INAPERÇUE — la
-comparaison au reset ne lit que l'entrée courante et ne verra jamais rien de l'autre.
+le compte et l'empreinte de chaque entrée qui n'est plus la magic courante, et refuse donc qu'une
+réécriture d'entrée figée passe INAPERÇUE — la comparaison au reset, elle, ne lit que l'entrée
+courante et ne verra jamais rien de l'autre. C'est l'empreinte, et non la recopie du littéral, qui
+tient cet interdit : les formats qui n'ont rien bougé au premier niveau partagent l'objet du
+précédent, et éditer ce littéral partagé fait rougir toutes leurs empreintes d'un coup.
 """
 
 from __future__ import annotations
@@ -76,9 +77,9 @@ SCENARIO = os.path.join(
 
 #: Clés mutables publiées par le reset, PAR FORMAT DE SAVE. Une entrée décrit un format figé sur
 #: le disque des joueurs : elle ne s'élargit jamais après coup, on en ajoute une nouvelle.
-#: Les deux entrées sont écrites en LITTÉRAL et ne partagent aucun objet — une entrée dérivée
-#: de la précédente aurait fait remonter dans l'entrée courante toute clé glissée dans une entrée
-#: figée.
+#: Un littéral par jeu de clés RÉELLEMENT distinct, les formats qui n'ont rien bougé au premier
+#: niveau étant des alias du précédent — la raison, qui est un verrou et non une économie, est
+#: écrite au-dessus de `_TL06_KEYS`.
 #: TL05 = TL04 + le couple de déclaration de montée 13.06 (`ascent_declaration_reset_state`,
 #: `engine/phase_handlers/movement_handlers.py`) et le mémo de charge, tous trois posés par le
 #: dict de reset de `W40KEngine.reset`.
@@ -173,149 +174,26 @@ _TL05_KEYS: FrozenSet[str] = frozenset({
         'waaagh_called', 'winner', 'zone_intent_free_steps_remaining', 'zone_intents',
 })
 
-#: TL06 = TL05 pour les clés de PREMIER NIVEAU : le bump du 2026-09-10 est motivé par deux
-#: clés que cette table NE VOIT PAS — `reserves_declaration_queue` et
-#: `reserves_declaration_closed`, posées par le reset DANS `deployment_state`, donc au
-#: deuxième niveau, sous une clé mutable déjà déclarée ici. L'entrée est malgré tout écrite,
-#: en littéral et non dérivée : `test_the_current_magic_declares_its_key_set` l'exigeait tant que
-#: TL06 était la magic courante — depuis TL07 elle est FIGÉE et gardée par `_FROZEN_FINGERPRINTS`
-#: —, et une entrée dérivée de TL05 ferait remonter dans l'entrée courante toute clé glissée dans
-#: un format figé. Trois entrées identiques ne sont donc pas un doublon accidentel — c'est la
-#: mesure que la dérive s'est produite hors de la portée de la table de premier niveau. C'est
-#: `MUTABLE_SUBKEYS_BY_MAGIC`, plus bas, qui couvre désormais ce niveau.
-_TL06_KEYS: FrozenSet[str] = frozenset({
-        '_best_weapon_cache', '_charge_declaration_current', '_charge_engage_memo',
-        '_charge_initial_rolls', '_charge_plan_cache', '_deployment_scoring_cache',
-        '_deployment_slot_candidates', '_edge_distance_cache', '_entity_types_cache',
-        '_grid_deployment_zone_anchor', '_grid_static_hex_arrays', '_ingress_arrived',
-        '_ingress_no_destination', '_ingress_offered', '_objective_control_last_boundary',
-        '_objective_hex_zones_cache', '_obs_objective_hex_arrays', '_obs_weapon_profiles_cache',
-        '_obscuring_area_sets_cache', '_pending_reserves_wasted', '_pending_zone_shaping',
-        '_pile_in_toCol', '_pile_in_toRow', '_reserves_deployed', '_reserves_destroyed_turn3',
-        '_reserves_placed', '_restored_model_counter', '_shoot_pass_cache',
-        '_socle_wall_blocked_cache', '_squad_move_pool_cache', '_unit_move_version',
-        '_wall_set_cache', '_zone_intent_declarations', 'action_log_seq', 'action_logs',
-        'active_movement_unit', 'active_rule_choice_prompt', 'advance_rolls',
-        'charge_activation_pool', 'charge_range_rolls', 'choice_timing_index',
-        'command_activation_pool', 'command_points', 'console_logs',
-        'controlled_objective_samples_scoring_turns', 'current_player', 'debug_mode',
-        'deployment_mode_schedule_mode', 'deployment_state', 'deployment_type',
-        'deployment_type_by_player', 'deployment_zone', 'destroyed_models',
-        'enemy_adjacent_counts_player_1', 'enemy_adjacent_counts_player_2',
-        'enemy_adjacent_hexes_player_1', 'enemy_adjacent_hexes_player_2', 'enemy_slot_mapping_p1',
-        'episode_number', 'episode_steps', 'fight_subphase', 'game_over', 'gym_distance_metric',
-        'gym_training_mode', 'last_move_cause', 'last_move_event_id', 'log_delta',
-        'macro_target_objective_id', 'macro_target_objective_index', 'model_count_at_start_by_player',
-        'models_cache', 'move_activation_pool', 'move_preview_footprint_span',
-        'moved_distance_by_model', 'oath_target', 'objective_controllers', 'occupation_map',
-        'opponent_objective_samples_scoring_turns', 'pending_agent_decision',
-        'pending_oath_selection', 'pending_rule_choice_queue', 'pending_shooting_phase_init',
-        'pending_squad_fight_intents', 'pending_squad_shoot_intents', 'phase', 'player_names',
-        'player_types', 'points_limit', 'preview_hexes', 'reaction_window_active',
-        'reactive_decision_mode', 'reactive_decision_payload', 'reactive_macro_order_current_window',
-        'reactive_mode', 'secured_objectives', 'shoot_activation_pool', 'squad_cache', 'squad_models',
-        'suppressed_squads', 'training_config_name', 'turn', 'turn_limit_reached',
-        'unit_activation_count', 'unit_by_id', 'unit_zone_assignments', 'units', 'units_advanced',
-        'units_ascent_declaration_resolved', 'units_cache', 'units_cache_prev',
-        'units_cannot_charge', 'units_charged', 'units_declared_ascent', 'units_fled',
-        'units_fly_declaration_resolved', 'units_fly_declaration_resolved_charge', 'units_moved',
-        'units_reacted_this_enemy_turn', 'units_shot', 'units_shot_previous_turn',
-        'units_took_to_skies', 'units_took_to_skies_charge', 'unlimited_turns',
-        'valid_move_destinations_pool', 'value_at_start', 'victory_points', 'waaagh_active',
-        'waaagh_called', 'winner', 'zone_intent_free_steps_remaining', 'zone_intents',
-})
-
-#: TL07 = TL06 à la clé près : ce bump ne corrige aucun jeu de clés, il retire au format
-#: courant un numéro AMBIGU (`W40KTL06` a désigné deux formats — cf. `game_saves._MAGIC`).
-#: L'entrée est réécrite en littéral comme les précédentes, jamais dérivée : un alias ferait
-#: muter l'entrée figée TL06 en même temps que la courante au prochain ajout de clé.
-_TL07_KEYS: FrozenSet[str] = frozenset({
-        '_best_weapon_cache', '_charge_declaration_current', '_charge_engage_memo',
-        '_charge_initial_rolls', '_charge_plan_cache', '_deployment_scoring_cache',
-        '_deployment_slot_candidates', '_edge_distance_cache', '_entity_types_cache',
-        '_grid_deployment_zone_anchor', '_grid_static_hex_arrays', '_ingress_arrived',
-        '_ingress_no_destination', '_ingress_offered', '_objective_control_last_boundary',
-        '_objective_hex_zones_cache', '_obs_objective_hex_arrays', '_obs_weapon_profiles_cache',
-        '_obscuring_area_sets_cache', '_pending_reserves_wasted', '_pending_zone_shaping',
-        '_pile_in_toCol', '_pile_in_toRow', '_reserves_deployed', '_reserves_destroyed_turn3',
-        '_reserves_placed', '_restored_model_counter', '_shoot_pass_cache',
-        '_socle_wall_blocked_cache', '_squad_move_pool_cache', '_unit_move_version',
-        '_wall_set_cache', '_zone_intent_declarations', 'action_log_seq', 'action_logs',
-        'active_movement_unit', 'active_rule_choice_prompt', 'advance_rolls',
-        'charge_activation_pool', 'charge_range_rolls', 'choice_timing_index',
-        'command_activation_pool', 'command_points', 'console_logs',
-        'controlled_objective_samples_scoring_turns', 'current_player', 'debug_mode',
-        'deployment_mode_schedule_mode', 'deployment_state', 'deployment_type',
-        'deployment_type_by_player', 'deployment_zone', 'destroyed_models',
-        'enemy_adjacent_counts_player_1', 'enemy_adjacent_counts_player_2',
-        'enemy_adjacent_hexes_player_1', 'enemy_adjacent_hexes_player_2', 'enemy_slot_mapping_p1',
-        'episode_number', 'episode_steps', 'fight_subphase', 'game_over', 'gym_distance_metric',
-        'gym_training_mode', 'last_move_cause', 'last_move_event_id', 'log_delta',
-        'macro_target_objective_id', 'macro_target_objective_index', 'model_count_at_start_by_player',
-        'models_cache', 'move_activation_pool', 'move_preview_footprint_span',
-        'moved_distance_by_model', 'oath_target', 'objective_controllers', 'occupation_map',
-        'opponent_objective_samples_scoring_turns', 'pending_agent_decision',
-        'pending_oath_selection', 'pending_rule_choice_queue', 'pending_shooting_phase_init',
-        'pending_squad_fight_intents', 'pending_squad_shoot_intents', 'phase', 'player_names',
-        'player_types', 'points_limit', 'preview_hexes', 'reaction_window_active',
-        'reactive_decision_mode', 'reactive_decision_payload', 'reactive_macro_order_current_window',
-        'reactive_mode', 'secured_objectives', 'shoot_activation_pool', 'squad_cache', 'squad_models',
-        'suppressed_squads', 'training_config_name', 'turn', 'turn_limit_reached',
-        'unit_activation_count', 'unit_by_id', 'unit_zone_assignments', 'units', 'units_advanced',
-        'units_ascent_declaration_resolved', 'units_cache', 'units_cache_prev',
-        'units_cannot_charge', 'units_charged', 'units_declared_ascent', 'units_fled',
-        'units_fly_declaration_resolved', 'units_fly_declaration_resolved_charge', 'units_moved',
-        'units_reacted_this_enemy_turn', 'units_shot', 'units_shot_previous_turn',
-        'units_took_to_skies', 'units_took_to_skies_charge', 'unlimited_turns',
-        'valid_move_destinations_pool', 'value_at_start', 'victory_points', 'waaagh_active',
-        'waaagh_called', 'winner', 'zone_intent_free_steps_remaining', 'zone_intents',
-})
-
-#: TL08 = TL07 à la clé de PREMIER niveau près : le bump vient d'une sous-clé de
-#: `deployment_state` (`reserves_declaration_started`), donc de la table du second niveau. Entrée
-#: réécrite en littéral comme les précédentes, jamais dérivée — un alias ferait muter l'entrée
-#: figée TL07 en même temps que la courante au prochain ajout de clé.
-_TL08_KEYS: FrozenSet[str] = frozenset({
-        '_best_weapon_cache', '_charge_declaration_current', '_charge_engage_memo',
-        '_charge_initial_rolls', '_charge_plan_cache', '_deployment_scoring_cache',
-        '_deployment_slot_candidates', '_edge_distance_cache', '_entity_types_cache',
-        '_grid_deployment_zone_anchor', '_grid_static_hex_arrays', '_ingress_arrived',
-        '_ingress_no_destination', '_ingress_offered', '_objective_control_last_boundary',
-        '_objective_hex_zones_cache', '_obs_objective_hex_arrays', '_obs_weapon_profiles_cache',
-        '_obscuring_area_sets_cache', '_pending_reserves_wasted', '_pending_zone_shaping',
-        '_pile_in_toCol', '_pile_in_toRow', '_reserves_deployed', '_reserves_destroyed_turn3',
-        '_reserves_placed', '_restored_model_counter', '_shoot_pass_cache',
-        '_socle_wall_blocked_cache', '_squad_move_pool_cache', '_unit_move_version',
-        '_wall_set_cache', '_zone_intent_declarations', 'action_log_seq', 'action_logs',
-        'active_movement_unit', 'active_rule_choice_prompt', 'advance_rolls',
-        'charge_activation_pool', 'charge_range_rolls', 'choice_timing_index',
-        'command_activation_pool', 'command_points', 'console_logs',
-        'controlled_objective_samples_scoring_turns', 'current_player', 'debug_mode',
-        'deployment_mode_schedule_mode', 'deployment_state', 'deployment_type',
-        'deployment_type_by_player', 'deployment_zone', 'destroyed_models',
-        'enemy_adjacent_counts_player_1', 'enemy_adjacent_counts_player_2',
-        'enemy_adjacent_hexes_player_1', 'enemy_adjacent_hexes_player_2', 'enemy_slot_mapping_p1',
-        'episode_number', 'episode_steps', 'fight_subphase', 'game_over', 'gym_distance_metric',
-        'gym_training_mode', 'last_move_cause', 'last_move_event_id', 'log_delta',
-        'macro_target_objective_id', 'macro_target_objective_index', 'model_count_at_start_by_player',
-        'models_cache', 'move_activation_pool', 'move_preview_footprint_span',
-        'moved_distance_by_model', 'oath_target', 'objective_controllers', 'occupation_map',
-        'opponent_objective_samples_scoring_turns', 'pending_agent_decision',
-        'pending_oath_selection', 'pending_rule_choice_queue', 'pending_shooting_phase_init',
-        'pending_squad_fight_intents', 'pending_squad_shoot_intents', 'phase', 'player_names',
-        'player_types', 'points_limit', 'preview_hexes', 'reaction_window_active',
-        'reactive_decision_mode', 'reactive_decision_payload', 'reactive_macro_order_current_window',
-        'reactive_mode', 'secured_objectives', 'shoot_activation_pool', 'squad_cache', 'squad_models',
-        'suppressed_squads', 'training_config_name', 'turn', 'turn_limit_reached',
-        'unit_activation_count', 'unit_by_id', 'unit_zone_assignments', 'units', 'units_advanced',
-        'units_ascent_declaration_resolved', 'units_cache', 'units_cache_prev',
-        'units_cannot_charge', 'units_charged', 'units_declared_ascent', 'units_fled',
-        'units_fly_declaration_resolved', 'units_fly_declaration_resolved_charge', 'units_moved',
-        'units_reacted_this_enemy_turn', 'units_shot', 'units_shot_previous_turn',
-        'units_took_to_skies', 'units_took_to_skies_charge', 'unlimited_turns',
-        'valid_move_destinations_pool', 'value_at_start', 'victory_points', 'waaagh_active',
-        'waaagh_called', 'winner', 'zone_intent_free_steps_remaining', 'zone_intents',
-})
+#: TL06, TL07 et TL08 = TL05 pour les clés de PREMIER NIVEAU, et c'est MESURÉ, pas supposé :
+#: `_FROZEN_FINGERPRINTS` donne la même paire (131 clés, `bc1d5f0c7f07dc36`) aux trois entrées
+#: figées. Les trois bumps sont motivés par des clés que cette table NE VOIT PAS — TL06 :
+#: `reserves_declaration_queue` et `reserves_declaration_closed`, posées par le reset DANS
+#: `deployment_state`, donc au deuxième niveau ; TL07 : un NUMÉRO ambigu à brûler (`W40KTL06` a
+#: désigné deux formats, cf. `game_saves._MAGIC`) ; TL08 : `reserves_declaration_started`, encore
+#: une sous-clé. C'est `MUTABLE_SUBKEYS_BY_MAGIC`, plus bas, qui couvre ce niveau-là.
+#:
+#: ALIAS, ET NON QUATRE LITTÉRAUX. La crainte écrite contre l'alias — « il ferait muter l'entrée
+#: figée en même temps que la courante au prochain ajout de clé » — ne tient pas : un `frozenset`
+#: ne mute pas, un ajout de clé s'écrit sous un nouveau nom avec sa magic
+#: (`_TL09_KEYS = _TL08_KEYS | {...}`), et quiconque éditerait le littéral PARTAGÉ ferait rougir
+#: TROIS empreintes figées d'un coup. Ce que l'alias NE FAIT PAS, et il ne faut pas le lui
+#: prêter : empêcher d'élargir l'entrée COURANTE sans bump — la seule que `_FROZEN_FINGERPRINTS`
+#: n'épingle pas, hier en éditant son littéral, aujourd'hui en écrivant `_TL05_KEYS | {...}`.
+#: C'est `test_reset_keys_match_the_current_save_format`, et le commentaire de tête, qui tiennent
+#: cet interdit-là.
+_TL06_KEYS: FrozenSet[str] = _TL05_KEYS
+_TL07_KEYS: FrozenSet[str] = _TL05_KEYS
+_TL08_KEYS: FrozenSet[str] = _TL05_KEYS
 
 MUTABLE_KEYS_BY_MAGIC: Dict[bytes, FrozenSet[str]] = {
     b"W40KTL04": _TL04_KEYS,
@@ -378,88 +256,22 @@ _TL06_SUBKEYS: Dict[str, FrozenSet[str]] = {
 }
 
 #: TL07 = TL06 à la sous-clé près : le bump ne touche à aucun jeu de clés, il brûle un NUMÉRO
-#: ambigu (`game_saves._MAGIC`). Entrée réécrite en littéral comme la précédente, jamais
-#: dérivée — un alias ferait muter l'entrée figée TL06 avec la courante au prochain ajout.
-_TL07_SUBKEYS: Dict[str, FrozenSet[str]] = {
-    # Comptabilité MUTABLE de la phase de déploiement. Les deux dernières sont les clés 20.01
-    # (`deployment_handlers.RESERVES_DECLARATION_QUEUE_KEY` / `_CLOSED_KEY`) dont l'ajout a
-    # motivé le bump TL06 sans qu'aucun test ne rougisse.
-    "deployment_state": frozenset({
-        "current_deployer", "deployable_units", "deployed_units", "deployment_complete",
-        "reserves_declaration_queue", "reserves_declaration_closed",
-    }),
-    "_deployment_slot_candidates": frozenset({"key", "candidates"}),
-    "_grid_static_hex_arrays": frozenset({"walls", "objectives", "cover", "obscuring"}),
-    "choice_timing_index": frozenset({
-        "phase_start", "on_deploy", "turn_start", "activation_start", "player_turn_start",
-    }),
-    # Dicts que le reset publie VIDES : le format n'y porte aucune sous-clé, et l'épingle à ∅ le
-    # dit. Le jour où le reset en publie une, la comparaison rougit et impose une décision —
-    # sous-clé NOMMÉE et obligatoire → bump ; sous-clés dérivées des entités (unités, joueurs,
-    # hexs) → déplacer la clé dans `_DATA_KEYED_MUTABLE_DICTS`, sans bump.
-    "_charge_declaration_current": frozenset(),
-    "_charge_initial_rolls": frozenset(),
-    "_charge_plan_cache": frozenset(),
-    "_edge_distance_cache": frozenset(),
-    "_squad_move_pool_cache": frozenset(),
-    "_zone_intent_declarations": frozenset(),
-    "advance_rolls": frozenset(),
-    "charge_range_rolls": frozenset(),
-    "destroyed_models": frozenset(),
-    "enemy_adjacent_counts_player_1": frozenset(),
-    "enemy_adjacent_counts_player_2": frozenset(),
-    "moved_distance_by_model": frozenset(),
-    "objective_controllers": frozenset(),
-    "occupation_map": frozenset(),
-    "pending_squad_fight_intents": frozenset(),
-    "pending_squad_shoot_intents": frozenset(),
-    "reactive_decision_payload": frozenset(),
-    "secured_objectives": frozenset(),
-    "suppressed_squads": frozenset(),
-    "unit_zone_assignments": frozenset(),
-}
+#: ambigu (`game_saves._MAGIC`). L'égalité est MESURÉE et épinglée — `_FROZEN_SUBKEY_FINGERPRINTS`
+#: donne la même paire (24 dicts, `f5d15abb41f83555`) aux deux entrées —, donc alias : voir au
+#: premier niveau pourquoi l'alias verrouille plus qu'un second littéral.
+_TL07_SUBKEYS: Dict[str, FrozenSet[str]] = _TL06_SUBKEYS
 
 #: TL08 = TL07 + `reserves_declaration_started` dans `deployment_state` : le marqueur « une
 #: réponse 20.01 a été donnée », lu par `_execute_change_roster_action` pour refuser le
 #: remplacement d'armée une fois l'étape commencée. Une row TL07 restitue `deployment_state` en
-#: bloc, donc sans lui, et ce lecteur lève. Entrée réécrite en littéral, jamais dérivée.
+#: bloc, donc sans lui, et ce lecteur lève.
+#: LE DELTA EST CALCULÉ, pas recopié : la phrase ci-dessus était la seule trace de « une sous-clé
+#: de plus, dans ce parent-là », et rien ne rougissait le jour où elle devenait fausse. La
+#: sous-clé est écrite en LITTÉRAL et non prise sur la constante du moteur : ce fichier est un
+#: contrat de format, un renommage côté moteur doit y être ROUGE, pas suivi en silence.
 _TL08_SUBKEYS: Dict[str, FrozenSet[str]] = {
-    # Comptabilité MUTABLE de la phase de déploiement. Les trois dernières sont les clés 20.01
-    # (`deployment_handlers.RESERVES_DECLARATION_QUEUE_KEY` / `_CLOSED_KEY` / `_STARTED_KEY`).
-    "deployment_state": frozenset({
-        "current_deployer", "deployable_units", "deployed_units", "deployment_complete",
-        "reserves_declaration_queue", "reserves_declaration_closed",
-        "reserves_declaration_started",
-    }),
-    "_deployment_slot_candidates": frozenset({"key", "candidates"}),
-    "_grid_static_hex_arrays": frozenset({"walls", "objectives", "cover", "obscuring"}),
-    "choice_timing_index": frozenset({
-        "phase_start", "on_deploy", "turn_start", "activation_start", "player_turn_start",
-    }),
-    # Dicts que le reset publie VIDES : le format n'y porte aucune sous-clé, et l'épingle à ∅ le
-    # dit. Le jour où le reset en publie une, la comparaison rougit et impose une décision —
-    # sous-clé NOMMÉE et obligatoire → bump ; sous-clés dérivées des entités (unités, joueurs,
-    # hexs) → déplacer la clé dans `_DATA_KEYED_MUTABLE_DICTS`, sans bump.
-    "_charge_declaration_current": frozenset(),
-    "_charge_initial_rolls": frozenset(),
-    "_charge_plan_cache": frozenset(),
-    "_edge_distance_cache": frozenset(),
-    "_squad_move_pool_cache": frozenset(),
-    "_zone_intent_declarations": frozenset(),
-    "advance_rolls": frozenset(),
-    "charge_range_rolls": frozenset(),
-    "destroyed_models": frozenset(),
-    "enemy_adjacent_counts_player_1": frozenset(),
-    "enemy_adjacent_counts_player_2": frozenset(),
-    "moved_distance_by_model": frozenset(),
-    "objective_controllers": frozenset(),
-    "occupation_map": frozenset(),
-    "pending_squad_fight_intents": frozenset(),
-    "pending_squad_shoot_intents": frozenset(),
-    "reactive_decision_payload": frozenset(),
-    "secured_objectives": frozenset(),
-    "suppressed_squads": frozenset(),
-    "unit_zone_assignments": frozenset(),
+    **_TL06_SUBKEYS,
+    "deployment_state": _TL06_SUBKEYS["deployment_state"] | {"reserves_declaration_started"},
 }
 
 MUTABLE_SUBKEYS_BY_MAGIC: Dict[bytes, Dict[str, FrozenSet[str]]] = {
@@ -510,10 +322,10 @@ _FROZEN_FINGERPRINTS: Dict[bytes, Tuple[int, str]] = {
     b"W40KTL04": (128, "4f1bc5601c046cb5"),
     b"W40KTL05": (131, "bc1d5f0c7f07dc36"),
     # Même empreinte que TL05 : le bump TL06 portait sur deux clés du DEUXIÈME niveau, hors de
-    # portée de ce contrat. L'égalité est un fait mesuré, pas un copier-coller à corriger.
+    # portée de ce contrat — d'où l'alias, et non un littéral à corriger.
     b"W40KTL06": (131, "bc1d5f0c7f07dc36"),
     # Même empreinte encore : TL07 ne brûlait qu'un numéro d'en-tête, et TL08 vient d'une
-    # sous-clé. Deux bumps de suite sans mouvement au premier niveau — fait mesuré.
+    # sous-clé. Deux bumps de suite sans mouvement au premier niveau — trois entrées, un objet.
     b"W40KTL07": (131, "bc1d5f0c7f07dc36"),
 }
 
@@ -660,7 +472,7 @@ def test_reset_keys_match_the_current_save_format(reset_mutable_keys: FrozenSet[
         f"AJOUTÉES : une save au format courant rendrait un game_state AMPUTÉ de ces clés, et "
         f"leur premier lecteur lèverait au fond du moteur — après que le chargement a déjà écrasé "
         f"la partie en cours. Bumpe services/game_saves._MAGIC, ajoute l'ancienne magic à "
-        f"_LEGACY_MAGICS avec son motif dans _reject_legacy, et ajoute une NOUVELLE entrée dans "
+        f"_LEGACY_LOSSES avec ce qui lui manque, et ajoute une NOUVELLE entrée dans "
         f"MUTABLE_KEYS_BY_MAGIC — n'élargis pas l'entrée existante.\n"
         f"RETIRÉES : NE BUMPE PAS par réflexe. Si plus aucun lecteur ne consulte la clé, laisse-la "
         f"publiée par le reset, inerte et commentée comme telle : une row qui porte une clé de "
@@ -746,8 +558,8 @@ def test_reset_subkeys_match_the_current_save_format(
         f"AJOUTÉES : une save au format courant restitue le dict parent EN BLOC, donc amputé de "
         f"ces sous-clés, et leur premier lecteur lèvera au fond du moteur — après que le "
         f"chargement a déjà écrasé la partie en cours. Si la sous-clé est un nom FIXE écrit par "
-        f"le code : bumpe services/game_saves._MAGIC, ajoute l'ancienne magic à _LEGACY_MAGICS "
-        f"avec son motif dans _reject_legacy, et ajoute une NOUVELLE entrée dans "
+        f"le code : bumpe services/game_saves._MAGIC, ajoute l'ancienne magic à _LEGACY_LOSSES "
+        f"avec ce qui lui manque, et ajoute une NOUVELLE entrée dans "
         f"MUTABLE_SUBKEYS_BY_MAGIC — n'élargis pas l'entrée existante. Si le dict s'est mis à "
         f"porter des sous-clés dérivées des ENTITÉS (unité, joueur, hex), il ne relève plus de "
         f"l'épingle : déplace-le dans _DATA_KEYED_MUTABLE_DICTS, sans bump.\n"
@@ -811,20 +623,42 @@ def _ecrire_save_sous_magic(tmp_path: Any, magic: bytes) -> SaveStore:
     return store
 
 
+def _message_de_refus(tmp_path: Any, magic: bytes) -> str:
+    """Charge une save écrite sous `magic`, exige le refus, et rend son message.
+
+    LES DEUX ASSERTIONS COMMUNES SONT ICI, et c'est ce qui les rend inoubliables : recopiées par
+    test, chaque nouvel en-tête périmé les réécrivait à la main.
+      - « au format <magic> » : l'en-tête RELU, interpolé en tête de message, est la SEULE chose
+        qui sépare un format périmé d'un autre — `_reject_legacy` énumère toutes ses clauses quel
+        que soit le fichier, donc chercher un motif de clause ne prouve pas quel format a été
+        refusé (mesuré : le refus d'un TL03 contient « TL06 » et « AMBIGU »).
+      - « écrite avant … » : sépare la branche « format périmé » de la branche « format inconnu »,
+        qui interpole elle aussi l'en-tête lu et rendrait la première assertion vraie sur un
+        fichier tombé de `_LEGACY_MAGICS`.
+    Chaque test n'ajoute donc que ce qui lui est propre : les clauses que SON format doit nommer.
+    """
+    store = _ecrire_save_sous_magic(tmp_path, magic)
+
+    with pytest.raises(ValueError) as excinfo:
+        store.point("20260101-000000")
+    message = str(excinfo.value)
+    assert f"au format {magic.decode()}" in message, message
+    assert f"écrite avant {_MAGIC.decode()}" in message, message
+    return message
+
+
 def test_a_previous_format_is_refused_at_load(tmp_path: Any) -> None:
     """Une save au format précédent est refusée AVANT d'écraser la partie en cours.
 
-    L'assertion porte sur « écrite avant … », pas sur le nom du format : `_reject_legacy` a DEUX
-    branches, et celle du format inconnu interpole l'en-tête lu, donc elle contient elle aussi
-    `W40KTL03`. Chercher ce seul nom rendait le verrou vert quoi qu'il arrive — vérifié : sans
-    TL03 dans `_LEGACY_MAGICS`, le refus dégénère en « format de fichier inconnu », indiscernable
-    d'un fichier corrompu, et l'ancienne assertion passait quand même.
+    Aucune clause propre à asserter : ce format-là n'a rien de nommé à vérifier dans le message,
+    seul son refus compte. Les deux assertions du helper suffisent — dont « écrite avant … », qui
+    est celle qui sépare les DEUX branches de `_reject_legacy` : celle du format inconnu interpole
+    l'en-tête lu, donc elle contient elle aussi `W40KTL03`. Vérifié : sans TL03 dans
+    `_LEGACY_MAGICS`, le refus dégénère en « format de fichier inconnu », indiscernable d'un
+    fichier corrompu.
     """
     # Fichier structurellement valide, mais écrit sous la magic précédente : seul l'en-tête décide.
-    store = _ecrire_save_sous_magic(tmp_path, b"W40KTL03")
-
-    with pytest.raises(ValueError, match=f"écrite avant {_MAGIC.decode()}"):
-        store.point("20260101-000000")
+    _message_de_refus(tmp_path, b"W40KTL03")
 
 
 def test_the_2001_declaration_keys_are_named_in_the_refusal(tmp_path: Any) -> None:
@@ -837,20 +671,14 @@ def test_the_2001_declaration_keys_are_named_in_the_refusal(tmp_path: Any) -> No
     C'est `test_reset_subkeys_match_the_current_save_format` qui les épingle désormais ; ce
     test-ci vérifie l'autre moitié, le REFUS que le bump rend possible.
 
-    DEUX assertions de natures différentes, et les confondre rendrait ce test à moitié vacant.
-    `_reject_legacy` construit UN message qui énumère TOUTES les clauses, quel que soit l'en-tête
-    lu — mesuré : la clause 20.01 est présente aussi dans le refus d'un fichier TL03. Nommer les
-    deux clés vérifie donc le CONTENU du message (le joueur doit lire ce qui manque à son
-    fichier), jamais que c'est bien TL05 qui a été refusé. Seul l'en-tête relu, interpolé en tête
-    de message, sépare un format périmé d'un autre — d'où la première assertion.
+    Nommer les deux clés vérifie le CONTENU du message — le joueur doit lire ce qui manque à son
+    fichier —, jamais que c'est bien TL05 qui a été refusé : `_reject_legacy` énumère toutes ses
+    clauses quel que soit l'en-tête lu (mesuré : la clause 20.01 est aussi dans le refus d'un
+    TL03). Ce qui discrimine est dans `_message_de_refus`, et les confondre rendrait ce test à
+    moitié vacant.
     """
-    store = _ecrire_save_sous_magic(tmp_path, b"W40KTL05")
+    message = _message_de_refus(tmp_path, b"W40KTL05")
 
-    with pytest.raises(ValueError) as excinfo:
-        store.point("20260101-000000")
-    message = str(excinfo.value)
-    assert "au format W40KTL05" in message, message
-    assert f"écrite avant {_MAGIC.decode()}" in message, message
     assert "reserves_declaration_queue" in message, message
     assert "reserves_declaration_closed" in message, message
 
@@ -868,17 +696,13 @@ def test_the_burned_tl06_header_is_refused(tmp_path: Any) -> None:
     cas le fichier est accepté, dans le second le refus dégénère en « format de fichier inconnu »,
     indiscernable d'une corruption, et n'explique plus au joueur ce qui s'est passé.
 
-    L'assertion porte sur l'en-tête RELU (`au format W40KTL06`) et non sur le mot « AMBIGUË » :
-    le message énumère toutes les clauses quel que soit le fichier, donc chercher le motif
-    passerait aussi sur un refus de TL03 — mesuré.
+    Ce qui prouve que c'est bien TL06 qui a été refusé est l'en-tête RELU, dans
+    `_message_de_refus`, et non le mot « AMBIGUË » asserté ici : le message énumère toutes les
+    clauses quel que soit le fichier, donc ce motif passerait aussi sur un refus de TL03 —
+    mesuré. Il vérifie le contenu lu par le joueur, pas l'identité du format.
     """
-    store = _ecrire_save_sous_magic(tmp_path, b"W40KTL06")
+    message = _message_de_refus(tmp_path, b"W40KTL06")
 
-    with pytest.raises(ValueError) as excinfo:
-        store.point("20260101-000000")
-    message = str(excinfo.value)
-    assert "au format W40KTL06" in message, message
-    assert f"écrite avant {_MAGIC.decode()}" in message, message
     assert "AMBIGU" in message, message
 
 
@@ -894,11 +718,6 @@ def test_the_tl07_header_is_refused(tmp_path: Any) -> None:
     ROUGE si `W40KTL07` sort de `_LEGACY_MAGICS` : le refus dégénère alors en « format de fichier
     inconnu », indiscernable d'une corruption.
     """
-    store = _ecrire_save_sous_magic(tmp_path, b"W40KTL07")
+    message = _message_de_refus(tmp_path, b"W40KTL07")
 
-    with pytest.raises(ValueError) as excinfo:
-        store.point("20260101-000000")
-    message = str(excinfo.value)
-    assert "au format W40KTL07" in message, message
-    assert f"écrite avant {_MAGIC.decode()}" in message, message
     assert "reserves_declaration_started" in message, message

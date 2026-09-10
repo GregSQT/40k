@@ -4732,12 +4732,14 @@ def _execute_change_roster_action(engine_instance: W40KEngine, action: Dict[str,
     # joueur. Le changement de roster est nominal AVANT la première réponse 20.01 — c'est la seule
     # fenêtre qui reste depuis le verrou posé plus haut — donc ce n'est pas un cas de bord.
     #
-    # Reconstruite par LE constructeur du moteur, jamais recopiée ici : l'ordre alterné des
-    # questions est une règle, pas une donnée de l'API.
-    deployment_state[deployment_handlers.RESERVES_DECLARATION_QUEUE_KEY] = (
-        deployment_handlers.build_reserves_declaration_queue(rebuilt_deployable_units)
+    # Remise à zéro par L'ÉCRIVAIN UNIQUE du moteur, jamais clé par clé ici : celui du reset
+    # d'épisode, donc l'étape repart d'un état identique des deux côtés. Écrites à la main, les
+    # trois clés avaient déjà divergé — `reserves_declaration_started` n'était posée qu'au reset,
+    # et rien ne le voyait. Elle est ici toujours fausse (le verrou plus haut refuse le
+    # remplacement dès la première réponse), donc la remettre à faux ne change aucun état.
+    deployment_handlers.reset_reserves_declaration_state(
+        deployment_state, rebuilt_deployable_units
     )
-    deployment_state[deployment_handlers.RESERVES_DECLARATION_CLOSED_KEY] = False
 
     deployment_state["current_deployer"] = current_deployer
     game_state["current_player"] = current_deployer

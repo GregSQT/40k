@@ -126,10 +126,39 @@ _log = logging.getLogger(__name__)
 # statique vient toujours de l'engine vivant, la row ne peut plus la remettre. Verrou :
 # tests/unit/services/test_game_snapshots_static_keys.py.
 _MAGIC = b"W40KTL08"
-_LEGACY_MAGICS = frozenset(
-    {b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04", b"W40KTL05", b"W40KTL06",
-     b"W40KTL07"}
-)
+#: Formats PÉRIMÉS, et ce que chacun n'a PAS. UNE table pour les deux moitiés, parce qu'elles
+#: doivent tomber ensemble : la magic qui fait refuser le fichier, et la clause qui l'explique au
+#: joueur. Écrites séparément — un `frozenset` ici, une f-string de quinze lignes dans
+#: `_reject_legacy` —, un bump pouvait ajouter la magic sans sa clause, et le refus nommait alors
+#: les motifs des six autres formats sans un mot sur celui que le joueur tient.
+#: L'ORDRE EST CELUI DU MESSAGE (chronologique), et le préfixe « TLxx » est pris sur la clé :
+#: écrit à la main, il pouvait désigner un autre format que celui de la ligne.
+_LEGACY_LOSSES: Dict[bytes, str] = {
+    b"W40KTL01": "sans empreinte de scénario",
+    b"W40KTL02": "sans les points de commandement de la règle 08.02",
+    b"W40KTL03": (
+        "sans les clés de réserves stratégiques, d'ingress, de suppression, ni "
+        "`secured_objectives`"
+    ),
+    b"W40KTL04": "sans la déclaration de montée 13.06 ni le mémo de charge",
+    b"W40KTL05": (
+        "sans les clés de l'étape Declare Battle Formations 20.01 dans `deployment_state` — "
+        "`reserves_declaration_queue` et `reserves_declaration_closed` —, dont l'absence fait "
+        "lever le premier lecteur de la file de déclaration une fois la partie en cours déjà "
+        "écrasée"
+    ),
+    b"W40KTL06": (
+        "en-tête AMBIGUË, portée à la fois par les saves du 2026-09-10 et par celles du bump "
+        "annulé du 2026-09-09, qui n'ont pas ces mêmes clés 20.01 — l'en-tête ne dit pas "
+        "laquelle des deux vous tenez, donc les deux sont refusées"
+    ),
+    b"W40KTL07": (
+        "sans `reserves_declaration_started` dans `deployment_state`, le marqueur qui dit si "
+        "l'étape Declare Battle Formations 20.01 a commencé — sans lui le changement d'armée "
+        "lève au lieu d'être refusé"
+    ),
+}
+_LEGACY_MAGICS = frozenset(_LEGACY_LOSSES)
 _LEN = struct.Struct(">Q")  # préfixe de longueur : entier 64 bits big-endian
 
 # Rows exclues du menu Select (trop nombreuses) mais présentes dans le playback ⏮⏭.
@@ -225,21 +254,15 @@ def _reject_legacy(name: str, head: bytes) -> None:
     """Lève sur un fichier qui n'est pas au format courant (aucun fallback : une save sans empreinte
     de scénario n'est pas restaurable sûrement)."""
     if head in _LEGACY_MAGICS:
+        # TOUTES les clauses, quel que soit l'en-tête lu : le joueur peut tenir plusieurs fichiers
+        # de formats différents, et c'est l'en-tête RELU en tête de message qui dit lequel a été
+        # refusé. Les clauses viennent de `_LEGACY_LOSSES`, la même table que le refus lui-même.
+        clauses = " ; ".join(
+            f"{magic.decode()[4:]} : {perte}" for magic, perte in _LEGACY_LOSSES.items()
+        )
         raise ValueError(
             f"partie {name!r} au format {head.decode()} : écrite avant {_MAGIC.decode()}, donc "
-            f"illisible (TL01 : sans empreinte de scénario ; TL02 : sans les points de "
-            f"commandement de la règle 08.02 ; TL03 : sans les clés de réserves stratégiques, "
-            f"d'ingress, de suppression, ni `secured_objectives` ; TL04 : sans la déclaration de "
-            f"montée 13.06 ni le mémo de charge ; TL05 : sans les clés de l'étape Declare Battle "
-            f"Formations 20.01 dans `deployment_state` — `reserves_declaration_queue` et "
-            f"`reserves_declaration_closed` —, dont l'absence fait lever le premier lecteur de la "
-            f"file de déclaration une fois la partie en cours déjà écrasée ; TL06 : en-tête "
-            f"AMBIGUË, portée à la fois par les saves du 2026-09-10 et par celles du bump annulé "
-            f"du 2026-09-09, qui n'ont pas ces mêmes clés 20.01 — l'en-tête ne dit pas laquelle "
-            f"des deux vous tenez, donc les deux sont refusées ; TL07 : sans "
-            f"`reserves_declaration_started` dans `deployment_state`, le marqueur qui dit si "
-            f"l'étape Declare Battle Formations 20.01 a commencé — sans lui le changement "
-            f"d'armée lève au lieu d'être refusé). Supprime-la ou rejoue la partie."
+            f"illisible ({clauses}). Supprime-la ou rejoue la partie."
         )
     raise ValueError(f"partie {name!r} : format de fichier inconnu (en-tête {head!r})")
 

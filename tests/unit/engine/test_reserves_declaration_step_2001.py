@@ -35,6 +35,7 @@ from engine.phase_handlers.deployment_handlers import (
     RESERVES_DECLARATION_QUEUE_KEY,
     build_reserves_declaration_queue,
     deployment_commit_plan,
+    deployment_place_in_strategic_reserves,
     next_reserves_declaration_entry,
     reserves_declaration_step_has_started,
     reserves_declaration_step_is_open,
@@ -319,10 +320,6 @@ def test_the_human_seat_closes_the_phase_when_nothing_is_left_to_place():
     `W40KEngine._complete_deployment_if_nothing_to_place`, le siège humain restait bloqué avec
     deux pools vides et `deployment_complete` à False.
     """
-    from engine.phase_handlers.deployment_handlers import (
-        deployment_place_in_strategic_reserves,
-    )
-
     eng = _engine()
     gs = eng.game_state
     # Toute l'armée tient sous le plafond : c'est la CONDITION du cas, pas un contournement.
@@ -357,10 +354,6 @@ def test_a_partial_declaration_does_not_close_the_phase():
     Sans ce pendant, un `phase_complete` posé inconditionnellement passerait le test précédent
     tout en terminant le déploiement dès la première déclaration.
     """
-    from engine.phase_handlers.deployment_handlers import (
-        deployment_place_in_strategic_reserves,
-    )
-
     eng = _engine()
     gs = eng.game_state
     entry = next_reserves_declaration_entry(gs)
@@ -415,10 +408,6 @@ def test_the_human_seat_marks_the_step_started(declare: bool):
     Les deux sièges passent par `consume_reserves_declaration_entry` ; s'ils divergeaient, le
     verrou du changement d'armée dépendrait de qui joue.
     """
-    from engine.phase_handlers.deployment_handlers import (
-        deployment_place_in_strategic_reserves,
-    )
-
     eng = _engine()
     gs = eng.game_state
     entry = next_reserves_declaration_entry(gs)
