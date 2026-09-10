@@ -534,10 +534,14 @@ et l'échec ne survit pas au changement d'unité.
   (profondeur 1), et une seconde table déclare les dicts indexés par la DONNÉE (id d'unité,
   joueur, hex, clé de cache), qu'épingler reviendrait à épingler le scénario. Tout dict mutable du
   reset doit être dans l'une ou l'autre : un dict nouveau ne peut plus dériver en silence.
-- **Les entrées des formats ANCIENS sont épinglées** (2026-09-09) : le verrou ci-dessus ne lit
-  que l'entrée de la magic COURANTE, donc réécrire l'entrée d'un format déjà distribué ne lui
-  faisait rien voir. Un second contrôle fige le compte et l'empreinte de chaque entrée qui
-  n'est plus la magic courante, et exige qu'un bump épingle celle qu'il fige.
+- **Un seul jeu de clés en littéral, celui du format COURANT** (2026-09-10) : le fichier de test
+  a porté jusqu'à cinq jeux de 131 clés, un par format, dont quatre identiques. Aucun code de
+  production ne les lisait — le refus de `game_saves._reject_legacy` énumère ses clauses en prose
+  littérale — et le seul contrôle qui les lisait servait à empêcher leur réécriture. Les formats
+  passés sont réduits à une ligne (compte, empreinte) dans un registre, confrontée à son littéral
+  tant que sa magic était courante, et le registre est comparé à `_LEGACY_MAGICS`, la liste de
+  production des formats refusés : un bump qui oublie d'y inscrire le format sortant rougit.
+  Ce que ça coûte : le contenu d'un format ancien ne se lit plus dans le fichier.
 - **Une clé qui devient STATIQUE ne bumpe pas** (2026-09-09) : `game_snapshots.rebuild_game_state`
   ré-attachait les clés statiques du moteur vivant **puis** appliquait la partie capturée, donc une
   row écrite quand la clé était encore mutable réinjectait sa valeur — d'une autre partie —
