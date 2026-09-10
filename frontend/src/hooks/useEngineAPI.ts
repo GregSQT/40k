@@ -6107,7 +6107,34 @@ export const useEngineAPI = (options?: UseEngineAPIOptions) => {
       if (player !== undefined) {
         actionPayload.player = player;
       }
-      await executeAction(actionPayload);
+      const data = await executeAction(actionPayload);
+      // TROIS ISSUES, PAS DEUX (`readEngineActionOutcome`), et `executeAction` NE LÈVE JAMAIS :
+      // son `throw` sur statut HTTP est reçu par son propre `catch`, qui pose le diagnostic
+      // réseau et rend `undefined`. Un refus moteur, lui, revient en HTTP 200 (`success: false`,
+      // raison dans `result.error`) et ses deux seuls tests de `success` sont gardés par
+      // `isFightCombatClientTrace`, donc muets ici. Sans ce qui suit, le clic « Change Roster »
+      // était AVALÉ — armée inchangée, rien à l'écran, et le `catch` des deux appelants ne
+      // pouvait jamais se déclencher.
+      //
+      // ON LÈVE DANS LES DEUX CAS QUI NE SONT PAS UN SUCCÈS, refus comme non-action : les deux
+      // appelants marquent l'armée comme appliquée dès que l'appel résout — le sélecteur ferme
+      // sa fenêtre, l'auto-application mémorise le fichier —, donc résoudre sur une action qui
+      // n'a pas eu lieu (500 réseau, partie non démarrée, `game_over`, aperçu d'un point de
+      // sauvegarde) afficherait un roster courant que le moteur n'a pas.
+      //
+      // On LÈVE au lieu d'appeler `setError` : les deux appelants affichent le message à côté du
+      // bouton, là où `setError` remplace tout le plateau par le panneau d'erreur fatal. C'est
+      // aussi ce que fait déjà la garde de phase en tête de cette fonction.
+      const outcome = readEngineActionOutcome(data);
+      if (outcome.kind === "refused") {
+        throw new Error(`change_roster refusé : ${outcome.message}`);
+      }
+      if (outcome.kind === "noop") {
+        throw new Error(
+          "change_roster : aucune action exécutée (partie non démarrée, terminée, aperçu actif, " +
+            "ou échec réseau déjà signalé)"
+        );
+      }
       setSelectedUnitId(null);
       setMode("select");
     },

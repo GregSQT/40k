@@ -500,3 +500,80 @@ describe("useEngineAPI — terrain_ref envoyé au démarrage", () => {
     expect(captured.value?.terrain_ref).toBe("mc1");
   });
 });
+
+// ---------------------------------------------------------------------------
+// changeRoster — le REFUS du moteur doit remonter à l'appelant
+//
+// Un refus revient en HTTP 200 avec `success: false` et la raison dans `result.error` :
+// `executeAction` ne lève que sur un statut HTTP, donc un appelant qui ignore l'enveloppe
+// avale le refus. Les deux appelants de `changeRoster` (sélecteur de roster, auto-application
+// des rosters enregistrés) n'affichent leur message que dans un `catch`.
+// ---------------------------------------------------------------------------
+
+describe("useEngineAPI — changeRoster", () => {
+  /** Partie en phase de déploiement ACTIF : le seul état où `change_roster` est acceptable. */
+  const deploiementActif = () =>
+    makeGameState({
+      phase: "deployment",
+      deployment_type: "active",
+      move_activation_pool: [],
+      deployment_state: {
+        current_deployer: 1,
+        deployable_units: { "1": ["1"], "2": ["2"] },
+        deployed_units: [],
+        deployment_complete: false,
+      },
+    });
+
+  it("refus moteur (HTTP 200, success:false) → changeRoster rejette en nommant la raison", async () => {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: deploiementActif() })
+      ),
+      http.post("/api/game/action", () =>
+        HttpResponse.json({
+          success: false,
+          result: { error: "change_roster_locked_after_first_deploy", current_deployer: 1 },
+          game_state: deploiementActif(),
+          action_logs: [],
+          message: "Action failed",
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+    await expect(result.current.changeRoster("armageddon_space_marines.json", 1)).rejects.toThrow(
+      "change_roster_locked_after_first_deploy"
+    );
+    // Le refus ne doit PAS dégénérer en panneau d'erreur fatal : le plateau reste jouable et le
+    // message s'affiche à côté du bouton, dans le `catch` de l'appelant.
+    expect(result.current.error).toBeNull();
+  });
+
+  it("succès → changeRoster résout, sans erreur posée", async () => {
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({ success: true, game_state: deploiementActif() })
+      ),
+      http.post("/api/game/action", () =>
+        HttpResponse.json({
+          success: true,
+          result: { action: "change_roster", updated_player: 1 },
+          game_state: deploiementActif(),
+          action_logs: [],
+          message: "Action executed successfully",
+        })
+      )
+    );
+
+    const { result } = renderHook(() => useEngineAPI({ terrainList: TEST_TERRAIN_LIST }));
+    await waitFor(() => expect(result.current.loading).toBe(false), { timeout: 5000 });
+
+    await expect(
+      result.current.changeRoster("armageddon_space_marines.json", 1)
+    ).resolves.toBeUndefined();
+    expect(result.current.error).toBeNull();
+  });
+});
