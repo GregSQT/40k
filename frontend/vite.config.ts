@@ -49,5 +49,14 @@ export default defineConfig({
     // `include` ne les réactive pas : cette ligne les nomme pour que la règle reste lisible sans
     // avoir à connaître les défauts du runner, et y ajoute `tests/` — le domaine de Playwright.
     exclude: ["node_modules/**", "dist/**", "tests/**"],
+    // 15 s AU LIEU DES 5 s PAR DÉFAUT, et c'est une mesure, pas une précaution. Les tests qui
+    // MONTENT `BoardWithAPI` (jsdom + msw + un cycle de démarrage de partie complet) tiennent
+    // 80 à 400 ms chacun à froid, mais plusieurs montages dans le même worker en font parfois
+    // dépasser un : constaté deux fois, sur deux tests différents de
+    // `src/components/BoardWithAPI.test.tsx`, avec un « Test timed out in 5000ms » qui repasse
+    // au vert à la relance suivante. Un test qui échoue une fois sur dix ne verrouille rien —
+    // il apprend à relancer. Le budget est global parce que le défaut ne vise pas un test en
+    // particulier : c'est le coût du montage, et tout nouveau test de composant le paiera.
+    testTimeout: 15000,
   },
 });

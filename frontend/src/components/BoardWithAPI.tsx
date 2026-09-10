@@ -4605,6 +4605,29 @@ export const BoardWithAPI: React.FC = () => {
         />
       )}
 
+      {/* REFUS DU MOTEUR — bandeau NON FATAL, à ne pas confondre avec le panneau d'erreur.
+          Le moteur a répondu non à un geste : le plateau reste jouable et le message s'efface au
+          geste suivant (`useEngineAPI`, point d'effacement en tête d'`executeAction`). Avant ce
+          bandeau, huit gestes envoyaient leur refus dans le canal fatal — un clic sur une cible
+          interdite fermait la partie affichée — et une soixantaine d'autres l'avalaient. */}
+      {apiProps.actionRefusal && (
+        <div className="bg-amber-900 border border-amber-700 rounded p-3 mb-2">
+          <div className="flex items-center justify-between">
+            <div className="text-amber-100 text-sm" role="status">
+              <strong>⛔ Refusé :</strong> {apiProps.actionRefusal}
+            </div>
+            <button
+              type="button"
+              onClick={apiProps.clearActionRefusal}
+              className="text-amber-300 hover:text-amber-100 ml-2"
+              aria-label="Fermer le message de refus"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* AI Error Display */}
       {aiError && (
         <div className="bg-red-900 border border-red-700 rounded p-3 mb-2">
