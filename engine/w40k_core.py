@@ -261,7 +261,8 @@ def _reserves_game_state_defaults() -> Dict[str, Any]:
     INDEXÉS PAR NUMÉRO DE JOUEUR, jamais par « agent / adversaire » : `agent_seat_mode` vaut
     `random`, donc le joueur contrôlé est 1 ou 2 selon l'épisode, et les handlers qui écrivent
     ici ne connaissent que `unit["player"]`. La projection sur agent/adversaire se fait au SEUL
-    endroit qui a la réponse, à la terminaison (`get_controlled_player`).
+    endroit qui a la réponse, à la terminaison (`_build_terminal_info`, via
+    `config["controlled_player"]`).
 
     Les trois ensembles d'ingress portent des (joueur, escouade, tour) UNIQUES : le masque
     d'action est reconstruit à chaque step tant que l'escouade en réserves est active, donc un
@@ -1150,6 +1151,18 @@ class W40KEngine(gym.Env):
         # NOTE: last_unit_positions removed - now using game_state["units_cache_prev"] for movement_direction
         
         # Episode-level metrics accumulation for MetricsCollectionCallback
+        #
+        # TROIS COMPTEURS DE STEP, trois regles — les confondre est un piege recurrent :
+        #   `episode_steps` (game_state)      : actions REUSSIES, incremente sous `if success`.
+        #   `episode_length_accumulator`      : steps moteur qui ont joue une action ; alimente
+        #                                       `info["episode"]["l"]` (cf. `_build_terminal_info`).
+        #                                       La sortie « pool vide » n'en joue aucune et ne
+        #                                       compte donc pas, terminale ou non.
+        #   `_episode_step_calls`             : TOUT appel de `step`, garde anti-runaway.
+        # Ce que `info["episode"]` devient ensuite : le `Monitor` de SB3 enveloppe chaque env
+        # (ai/train.py, ai/training_utils.py) et REECRIT la cle avec ses propres `r`/`l` (steps
+        # GYM) sur `terminated or truncated`. Les valeurs posees ici sont donc le contrat interne
+        # du moteur, jamais ce que lit `ai/training_callbacks._handle_episode_end`.
         self.episode_reward_accumulator = 0.0
         self.episode_length_accumulator = 0
         self.episode_number = int(training_episode_start_index)  # compteur d'episodes de CET env (offset de reprise inclus)
@@ -2147,7 +2160,7 @@ class W40KEngine(gym.Env):
         self.game_state["_reserves_placed"] = placed_by_player
 
         # Log episode start with all unit positions, walls, and objectives
-        if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
+        if self.step_logger and self.step_logger.enabled:
             # Extract scenario name: prefer config "name", otherwise use filename pattern
             scenario_name = self.config.get("name")
             if not scenario_name or scenario_name == "Unknown Scenario":
@@ -2419,29 +2432,44 @@ class W40KEngine(gym.Env):
             self._forced_wait_depth -= 1
         return observation, reward, terminated, truncated, info, out_mask
 
-    def _drain_step_reward_breakdown(self) -> None:
-        """Verse la ventilation du step courant dans le cumul d'episode, et la retire de l'etat.
+    def _account_step_metrics(self, reward: float, reserves_penalty: float) -> None:
+        """COMPTABILITE D'UN STEP MOTEUR : accumulateurs, ventilation, penalite de reserves.
 
         DEUX APPELANTS, et le contrat est qu'ils comptent IDENTIQUEMENT : la porte « limite de
-        tours atteinte » de `step_with_mask` et son retour normal. Les neuf lignes vivaient en
-        double, recopiees a l'identique, alors que la porte porte en commentaire « comptabilite
-        identique au chemin normal » — une exigence d'identite tenue par une recopie ne survit pas
-        au premier ajout de composante. Un seul site desormais.
+        tours atteinte » de `step_with_mask` et son retour normal. Les quatre gestes sont
+        solidaires — `_build_terminal_info` les LIT juste apres, `episode_reward_accumulator`
+        remplissant `info["episode"]["r"]` — et la porte est nee sans aucun des quatre. Une
+        exigence d'identite tenue par une recopie ne survit pas au premier geste ajoute : un seul
+        corps, appele des deux endroits.
+
+        VENTILATION cumulee ICI, pas cote callback. Chaque step moteur pose la sienne dans
+        `last_reward_breakdown` et l'ecrase au suivant. Le callback d'entrainement ne voit, lui,
+        qu'UN info par step GYM, et cet info est celui du DERNIER step moteur : les wrappers
+        d'adversaire (BotControlledEnv, SelfPlayWrapper) rejouent le bot apres l'action de l'agent
+        et remplacent l'info par celle du bot — la ventilation de l'action de l'agent etait donc
+        jetee, et rien du tout n'etait accumule quand le bot ne jouait pas. Cumulee ici, elle
+        voyage dans `episode_tactical_data`, que la terminaison copie dans info.
 
         `*_positive` : le flux POSITIF des composantes denses, qui ne se lit qu'AU PAS (une action,
         un signe) — une fois l'episode somme, les +0,3 de chaque tir et les -0,1 de chaque attente
         ne sont plus separables, et c'est ce flux-la que la part d'objectif prend au denominateur.
+
+        `reserves_penalty` va en `penalties`, comme tout ce qui coute sans etre le resultat d'une
+        action jouee : son versement peut tomber sur un step ou `calculate_reward` n'a pas ete
+        appele, donc il ne peut pas passer par `last_reward_breakdown`.
         """
-        if "last_reward_breakdown" not in self.game_state:
-            return
-        step_breakdown = self.game_state["last_reward_breakdown"]
-        del self.game_state["last_reward_breakdown"]
+        self.episode_reward_accumulator += reward
+        self.episode_length_accumulator += 1
         totals = self.episode_tactical_data['reward_breakdown']
-        for key in REWARD_BREAKDOWN_COMPONENTS:
-            value = float(require_key(step_breakdown, key))
-            totals[key] += value
-            if key in DENSE_REWARD_BREAKDOWN_COMPONENTS:
-                totals[f'{key}_positive'] += max(0.0, value)
+        if "last_reward_breakdown" in self.game_state:
+            step_breakdown = self.game_state["last_reward_breakdown"]
+            del self.game_state["last_reward_breakdown"]
+            for key in REWARD_BREAKDOWN_COMPONENTS:
+                value = float(require_key(step_breakdown, key))
+                totals[key] += value
+                if key in DENSE_REWARD_BREAKDOWN_COMPONENTS:
+                    totals[f'{key}_positive'] += max(0.0, value)
+        totals['penalties'] += reserves_penalty
 
     def _build_terminal_info(self) -> Dict[str, Any]:
         """Bilan de FIN D'EPISODE, construit ICI pour TOUTES les portes de terminaison.
@@ -2463,9 +2491,12 @@ class W40KEngine(gym.Env):
         coute des heures de run le jour ou il s'ouvre, et la garde d'enumeration ci-dessous ne
         pouvait pas le voir : elle ne s'applique qu'a ce dict, jamais aux `info` ecrits a la main.
 
-        IDEMPOTENCE : aucune. Deux steps moteur peuvent rendre `terminated` dans le meme episode
-        (mesure : 24 terminaisons moteur pour 12 episodes gym), et chacun rebatit son bilan —
-        comportement INCHANGE, c'est deja ce que faisait le bloc du retour normal.
+        RECALCUL PUR, et ce n'est pas optionnel : deux steps moteur rendent `terminated` dans le
+        meme episode (mesure : 24 terminaisons moteur pour 12 episodes gym), donc ce bilan est
+        rebati deux fois. Il se deduit entierement de `action_logs` + `game_state` : AUCUN `+=` sur
+        `self.episode_tactical_data` dans la boucle ci-dessous — tous les compteurs sont des
+        locaux, affectes une seule fois APRES la boucle. Un compteur ajoute en `+=` direct
+        doublerait silencieusement.
         """
         terminal_info: Dict[str, Any] = {}
 
@@ -2630,8 +2661,8 @@ class W40KEngine(gym.Env):
         charge_successes = 0
         charge_attempts_opponent = 0
         charge_successes_opponent = 0
-        # LOCAL (finding 3) : comme tous les autres compteurs de cette boucle, accumule en
-        # variable locale et affecte a episode_tactical_data UNE SEULE FOIS apres la boucle.
+        # LOCAL : comme tous les autres compteurs de cette boucle, accumule en variable locale
+        # et affecte a episode_tactical_data UNE SEULE FOIS apres la boucle (cf. docstring).
         # L'ancienne version faisait += directement sur self.episode_tactical_data['charge_distance'],
         # ce qui double-comptait si _build_terminal_info est appelee deux fois dans le meme episode.
         charge_distance_local = _empty_charge_distance_data()
@@ -3128,20 +3159,12 @@ class W40KEngine(gym.Env):
             )
             _reserves = self._drain_pending_reserves()
             reward += _reserves
-            # COMPTABILITE IDENTIQUE AU RETOUR NORMAL (cf. `_drain_step_reward_breakdown`, dont
-            # cette porte est le second appelant) : accumulateurs, ventilation de la recompense et
-            # penalite de reserves AVANT que _build_terminal_info ne les lise. Le commentaire
-            # precedent affirmait que "l'ordre est sans effet sur ses valeurs" — faux :
-            # _build_terminal_info lit episode_reward_accumulator pour remplir
-            # info["episode"]["r"], et le retour normal ne met les accumulateurs a jour qu'APRES
-            # ce return. Sans cette correction, info["episode"] vaut {'r': 0.0, 'l': 0}
-            # (finding 1), et last_reward_breakdown reste dans game_state apres reset()
-            # (finding 2).
-            self.episode_reward_accumulator += reward
-            self.episode_length_accumulator += 1
-            self._drain_step_reward_breakdown()
-            if _reserves != 0.0:
-                self.episode_tactical_data['reward_breakdown']['penalties'] += _reserves
+            # COMPTABILITE AVANT le bilan, comme au retour normal (cf. `_account_step_metrics`,
+            # dont cette porte est le second appelant) : `_build_terminal_info` LIT les
+            # accumulateurs et la ventilation. La porte doit les poser elle-meme — le retour
+            # normal ne les met a jour qu'APRES ce return, donc sans cet appel `info["episode"]`
+            # vaut {'r': 0.0, 'l': 0} et `last_reward_breakdown` survit au reset().
+            self._account_step_metrics(reward, _reserves)
             info = {"turn_limit_exceeded": True, **self._build_terminal_info()}
             return observation, reward, True, False, info, out_mask
 
@@ -3467,9 +3490,9 @@ class W40KEngine(gym.Env):
         if isinstance(result, dict) and result.get("turn_limit_reached", False):
             self.game_state["turn_limit_reached"] = True
         
-        # Accumulate episode-level metrics
-        self.episode_reward_accumulator += reward
-        self.episode_length_accumulator += 1
+        # Comptabilite du step — accumulateurs, ventilation, reserves gaspillees. Point UNIQUE,
+        # partage avec la porte « limite de tours » (cf. `_account_step_metrics`).
+        self._account_step_metrics(reward, reserves_penalty_paid)
         
         # Track action metrics for controlled agent only (seat-aware).
         if is_controlled_action:
@@ -3494,23 +3517,6 @@ class W40KEngine(gym.Env):
                 setting_up=isinstance(result, dict) and result.get("action") == "ingress_move",
             )
             self.episode_tactical_data['action_family_counts'][family] += 1
-
-        # VENTILATION DE LA RECOMPENSE — cumulee ICI, pas cote callback.
-        #
-        # Chaque step moteur pose sa ventilation dans `last_reward_breakdown` et l'ecrase au
-        # suivant. Le callback d'entrainement ne voit, lui, qu'UN info par step GYM, et cet info
-        # est celui du DERNIER step moteur : les wrappers d'adversaire (BotControlledEnv,
-        # SelfPlayWrapper) rejouent le bot apres l'action de l'agent et remplacent l'info par
-        # celle du bot — la ventilation de l'action de l'agent etait donc jetee, et rien du tout
-        # n'etait accumule quand le bot ne jouait pas. Cumulee ici, elle traverse : elle voyage
-        # dans `episode_tactical_data`, que le bloc de terminaison ci-dessous copie dans info.
-        self._drain_step_reward_breakdown()
-
-        if reserves_penalty_paid != 0.0:
-            # Categorie `penalties`, comme tout ce qui coute sans etre le resultat d'une action
-            # jouee. Meme raison qu'au-dessus de ne pas passer par `last_reward_breakdown` : le
-            # versement peut tomber sur un step ou `calculate_reward` n'a pas ete appele.
-            self.episode_tactical_data['reward_breakdown']['penalties'] += reserves_penalty_paid
 
         # Cles de FIN D'EPISODE, tenues a part de l'`info` d'action. Deux raisons, et la seconde
         # est celle qui a coute : (1) elles sont les seules que `_drain_forced_waits` reprend du
@@ -9301,7 +9307,7 @@ class W40KEngine(gym.Env):
         victoire bougent DANS les handlers (`apply_primary_objective_scoring`, phases command et
         fight). Un declencheur unique manquerait l'un ou l'autre.
         """
-        step_logger = getattr(self, "step_logger", None)
+        step_logger = self.step_logger
         if step_logger is None or not step_logger.enabled:
             return
         objectives = self.game_state.get("objectives")  # get allowed : scenario sans objectif
@@ -9378,7 +9384,7 @@ class W40KEngine(gym.Env):
         Déclenchement au CHANGEMENT DE TOUR et non à chaque frontière de phase : une ligne par
         tour suffit à borner la dérive, et coûte ~3 000 lignes sur un run de 600 épisodes.
         """
-        step_logger = getattr(self, "step_logger", None)
+        step_logger = self.step_logger
         if step_logger is None or not step_logger.enabled:
             return
         turn = require_key(self.game_state, "turn")
@@ -9425,7 +9431,7 @@ class W40KEngine(gym.Env):
         redécrit pas. Un lecteur qui coderait « waaagh ⇒ +1 » en dur ferait vivre une seconde
         définition de la règle, qui divergerait en silence le jour où la première bouge.
         """
-        step_logger = getattr(self, "step_logger", None)
+        step_logger = self.step_logger
         if step_logger is None or not step_logger.enabled:
             return
         from engine.game_state import (
