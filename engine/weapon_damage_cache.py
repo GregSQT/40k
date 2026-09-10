@@ -24,11 +24,12 @@ from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, List
 
 from engine.combat_utils import expected_dice_value
+from engine.utils.weapon_helpers import weapon_has_rule
 from shared.data_validation import require_key
 
 NestedTable = Dict[Tuple, Dict[Tuple, float]]
 #: Sous-tables offensives d une figurine pour un mode d attaque, dans l ordre de ses armes.
-#: `None` = profil d arme absent de la table (aucun degat possible a resoudre).
+#: `None` = profil d arme absent de la table, donc TROU DE DONNEE : `lookup_best_weapon` leve.
 WeaponSubtables = Tuple[Optional[Dict[Tuple, float]], ...]
 BestWeaponCache = Dict[Tuple[str, int], WeaponSubtables]
 
@@ -56,22 +57,38 @@ def load_weapon_damage_table(path: Optional[Path] = None) -> NestedTable:
     with open(table_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    if data.get("version") != 1:
+    if data.get("version") != 2:
         raise ValueError(
-            f"Unsupported weapon_damage_table version: {data.get('version')}"
+            f"Unsupported weapon_damage_table version: {data.get('version')}. "
+            "Run: python3 scripts/weapon_damage_builder.py"
         )
 
-    table: NestedTable = {}
+    # `offensive_profiles` DECLARE le domaine de la table, `entries` ne porte que les valeurs
+    # NON NULLES. Sans la declaration, un profil dont l esperance est nulle contre toutes les
+    # cibles serait indistinguable d un profil oublie — et c est ce trou-la qui faisait valoir
+    # zero degat au tir a toute escouade orke.
+    table: NestedTable = {
+        _off_key_from_list(off_list): {}
+        for off_list in require_key(data, "offensive_profiles")
+    }
     for off_list, def_list, dmg in data["entries"]:
-        off_key = (int(off_list[0]), int(off_list[1]),
-                   float(off_list[2]), float(off_list[3]), int(off_list[4]))
-        def_key = (int(def_list[0]), int(def_list[1]), int(def_list[2]))
+        off_key = _off_key_from_list(off_list)
         if off_key not in table:
-            table[off_key] = {}
+            raise ValueError(
+                f"weapon_damage_table corrompue : l entree {off_key} n est pas declaree dans "
+                "offensive_profiles. Run: python3 scripts/weapon_damage_builder.py"
+            )
+        def_key = (int(def_list[0]), int(def_list[1]), int(def_list[2]))
         table[off_key][def_key] = float(dmg)
 
     _GLOBAL_TABLE = table
     return table
+
+
+def _off_key_from_list(off_list: List[Any]) -> Tuple:
+    """Cle offensive depuis sa forme JSON. Meme forme que `weapon_off_key`, meme ordre."""
+    return (int(off_list[0]), int(off_list[1]), float(off_list[2]), float(off_list[3]),
+            int(off_list[4]), int(off_list[5]))
 
 
 def weapon_off_key(weapon: Dict[str, Any]) -> Tuple:
@@ -81,6 +98,13 @@ def weapon_off_key(weapon: Dict[str, Any]) -> Tuple:
     `stamp_weapon_keys` ; `build_best_weapon_cache` en a maintenant besoin pour les armes des
     FIGURINES, qui ne passent pas par le tamponnage (cf. sa docstring). Une quatrieme copie
     aurait diverge de la table au premier champ ajoute.
+
+    [TORRENT] 24.37 EN FAIT PARTIE, et c est la correction du 2026-09-10. La cle etait purement
+    numerique, or les armes a touche automatique portent ATK 7 dans les armureries : le
+    constructeur de table calculait (7 - 7) / 6 = 0 chance de toucher, n ecrivait donc aucune
+    entree, et les douze armes concernees (`flamer`, `d_scythe`, `balefire_pike`...) etaient
+    absentes de la table. Sans ce sixieme champ, `heavy_flamer` (ATK 7, sans TORRENT) et
+    `heavy_flamer_vehicle` (ATK 7, TORRENT) partageraient en outre une seule valeur.
     """
     return (
         int(weapon["ATK"]),
@@ -88,6 +112,7 @@ def weapon_off_key(weapon: Dict[str, Any]) -> Tuple:
         expected_dice_value(weapon["NB"], "stamp_nb"),
         expected_dice_value(weapon["DMG"], "stamp_dmg"),
         int(weapon["AP"]),
+        1 if weapon_has_rule(weapon, "TORRENT") else 0,
     )
 
 
@@ -192,17 +217,20 @@ def lookup_best_weapon(
 
     Une entree absente POUR CE PROFIL DEFENSIF vaut zero degat, et c est un RESULTAT : la table
     n ecrit pas les entrees nulles (cf. `weapon_damage_builder`), donc « absente » y veut dire
-    « cette arme ne peut pas blesser cette cible ».
+    « cette arme ne peut pas blesser cette cible ». Un profil CONNU mais nul partout existe
+    quand meme dans la table, avec une sous-table vide : `offensive_profiles` le declare.
 
-    ⚠️ Un PROFIL D ARME absent de la table (`off_subtable is None`) est une TOUT AUTRE chose, et
-    il est traite comme zero par defaut de mieux — c est un trou de DONNEE, pas un resultat.
-    `scripts/weapon_damage_builder.py` ne balaie que `spaceMarine, tyranid, aeldari,
-    adeptusCustodes, chaos` : mesure du 2026-09-10, **18 des 21 armes de l armurerie `ork` sont
-    absentes de la table**, dont `shoota` et `slugga`. Consequence mesuree sur 5 Boyz contre 5
-    Intercessors : `squad_expected_damage` rend **0,0 au tir** (2,5 en melee, ou `choppa_a3`
-    coincide par hasard avec un profil deja construit) — tous les bots tiennent une escouade
-    orke pour incapable de tirer. Defaut ANTERIEUR a la correction du 2026-09-10 et non traite
-    ici : le corriger exige de regenerer `config/weapon_damage_table.json`.
+    ⚠️ UN PROFIL D ARME ABSENT DE LA TABLE LEVE, et c est la correction du 2026-09-10. Il etait
+    traite comme zero degat, donc un trou de DONNEE passait pour un resultat. Mesure du jour :
+    **57 des 231 armes des six armureries** n avaient aucune entree — dont les 18 de l armurerie
+    `ork`, absente de la liste de factions du constructeur. Consequence, sur 5 Boyz contre 5
+    Intercessors : `squad_expected_damage` rendait **0,0 au tir**, et tous les bots tenaient
+    toute escouade orke pour incapable de tirer.
+    La levee est ICI, au point de CONSOMMATION, et non a la construction du cache : celle-ci
+    prend la table que son appelant lui donne, alors que c est lire la valeur qui la transforme
+    en decision. `scripts/weapon_damage_builder.py` + le balayage de
+    `tests/unit/engine/test_weapon_damage_table_completeness.py` garantissent qu elle ne se
+    declenche plus sur la donnee du depot.
 
     Returns (-1, 0.0) if the model is not in the cache (dead, or no weapon of that kind).
     """
@@ -213,7 +241,12 @@ def lookup_best_weapon(
     best_dmg = 0.0
     for idx, off_subtable in enumerate(subtables):
         if off_subtable is None:
-            continue
+            raise KeyError(
+                f"lookup_best_weapon: figurine {attacker_model_id}, arme #{idx} "
+                f"({'tir' if is_ranged else 'melee'}) : profil offensif absent de "
+                "config/weapon_damage_table.json. C est un trou de donnee, pas un zero degat. "
+                "Run: python3 scripts/weapon_damage_builder.py"
+            )
         exp_dmg = off_subtable.get(def_key, 0.0)
         if exp_dmg > best_dmg:
             best_dmg = exp_dmg
