@@ -740,6 +740,7 @@ tensorboard --logdir=./tensorboard/
 **Primary Metrics to Check Daily:**
 - `00_critical/a_bot_eval_combined` — **objectif principal** (compétence vs tous les bots)
 - `00_critical/d_win_rate` — win rate d'entraînement lissé sur `perf_window`, et sa jumelle `game_critical/win_rate` : mêmes points, deux namespaces
+- `00_critical/e_episode_reward_smooth` — reward d'épisode lissée sur `perf_window` ; `game_critical/episode_reward` n'en porte que la valeur brute, illisible sans lissage
 - `game_critical/win_rate_<perf_window_fast>ep` — tendance récente (doublon réactif du tag nu, lissé sur `perf_window_fast`)
 - `00_critical/j_approx_kl` — stabilité de la politique (<0.02 = sain)
 - `00_critical/l_approx_kl_max` — KL **maximale** de l'update : au-dessus de 0.0225, PPO a coupé ses epochs
