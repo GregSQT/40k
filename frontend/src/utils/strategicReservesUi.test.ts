@@ -32,7 +32,11 @@ describe("formatStrategicReservesRatio", () => {
 });
 
 describe("isReservesDeclarationPendingFor — 20.01", () => {
-  const base = { phase: "deployment" as string | undefined, pending: PENDING_ON_7 };
+  const base = {
+    phase: "deployment" as string | undefined,
+    pending: PENDING_ON_7,
+    deploymentStarted: true,
+  };
 
   it("la question porte sur UNE escouade, celle que le moteur désigne", () => {
     // L'éligibilité (plafond de 50 %, FORTIFICATION) est tranchée côté moteur
@@ -60,6 +64,20 @@ describe("isReservesDeclarationPendingFor — 20.01", () => {
       expect(isReservesDeclarationStepOpen({ phase: "deployment", pending })).toBe(false);
       expect(isReservesDeclarationPendingFor({ ...base, pending, unitId: 7 })).toBe(false);
     }
+  });
+
+  it("aucune question tant que le déploiement n'a pas démarré", () => {
+    // L'écran de préparation est la SEULE fenêtre où le joueur peut encore changer d'armée, et
+    // le moteur refuse ce changement dès la première réponse 20.01
+    // (`change_roster_locked_after_reserves_declaration`). Poser la question là ferait payer le
+    // droit de changer d'armée pour un geste que le joueur n'a pas demandé à faire maintenant.
+    expect(isReservesDeclarationPendingFor({ ...base, deploymentStarted: false, unitId: 7 })).toBe(
+      false
+    );
+    // VERT VACANT : la même question, déploiement démarré, est bien posée.
+    expect(isReservesDeclarationPendingFor({ ...base, deploymentStarted: true, unitId: 7 })).toBe(
+      true
+    );
   });
 
   it("étape ouverte dès qu'une question existe, quelle que soit l'escouade visée", () => {
