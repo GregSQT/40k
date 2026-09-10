@@ -515,11 +515,19 @@ Convention du marqueur (`observation_weapon_profiles.COMBI_GROUP_MARKER_NAMES`, 
 - **numerotation partagee par les deux registres** : un marqueur ne peut pas designer une arme au
   tir et une autre en melee ;
 - **un groupe a profil unique n'est PAS marque** : il n'exclut rien et se joue comme une arme solo ;
+- **la numerotation porte sur les profils OBSERVES, pas sur ceux que l'escouade porte** : l'ordre
+  de `collect_weapon_profiles` est celui des porteurs decroissants, il ne garde donc pas ensemble
+  les deux profils d'une meme arme physique et la troncature peut couper un groupe en deux. Le
+  slot survivant retombe alors sous la regle precedente et n'est PAS marque — sans quoi il
+  affirmerait etre exclusif avec un partenaire absent de l'observation ;
 - lu « chaque PORTEUR de ces slots en joue UN » (04.01 parle des armes « that model has ») et non
   « l'escouade n'en tire qu'un seul » — le compteur de porteurs de chaque slot porte l'autre moitie ;
 - 10 marqueurs reserves (`COMBI_GROUP_MARKER_COUNT`), soit la borne structurelle `K_WEAPONS // 2`
   puisqu'un groupe marque occupe au moins 2 slots de profils ; maximum MESURE sur tous les rosters
-  de `config/agents/` : **2**. Debordement → **erreur**, jamais troncature.
+  de `config/agents/` : **2**. Debordement → **erreur**, jamais troncature. Numeroter sur les
+  profils observes tient cette borne par construction (au plus `k_slots // 2` groupes par
+  registre) : l'erreur est inatteignable depuis `encode_squad_weapon_profiles` et reste le contrat
+  de `assign_combi_group_markers` pour un appelant direct.
 
 Cout : **zero scalaire d'observation et zero parametre** — le marqueur se pose dans les
 `WEAPON_RULE_ID_SLOTS` deja reserves, et `OBS_ID_VOCAB_SIZE` (128) est pre-dimensionne. `obs_size`
