@@ -9,6 +9,13 @@
  *
  * Cas 1 — terrain-list 500 : "Impossible de charger..." affiché, pas l'écran de chargement.
  * Cas 2 — nominal : liste servie, partie démarrée, plateau rendu (BoardPvp mock visible).
+ *
+ * T_BoardWithAPI_ReactiveMove — le panneau de mouvement réactif n'est POSÉ QU'À UN SIÈGE HUMAIN.
+ * C'est la seule décision posée pendant le tour de l'adversaire, et en PvE le moteur tranche
+ * celle du bot sur-le-champ (`_resolve_reactive_move_decision_for_ai_seats`) : sans le filtre de
+ * `reactiveMoveDecision`, l'humain se verrait poser la question du bot le temps d'un aller-retour
+ * d'état et y répondrait à sa place. Les deux cas sont testés ensemble — le cas humain est ce qui
+ * empêche un panneau muet pour une autre raison de rendre le cas IA vert pour rien.
  */
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
@@ -45,6 +52,19 @@ const FAKE_SESSION = JSON.stringify({
   default_redirect_mode: "pvp",
 } satisfies AuthSession);
 
+/** Session PvE : `useEngineAPI` REFUSE un `player_types["2"] === "ai"` sous un mode_code PvP
+ *  (« Game mode mismatch »), et c'est le bon comportement — un siège IA n'existe qu'en PvE. Le
+ *  cas IA du panneau réactif se joue donc en PvE, sinon le composant lève avant d'avoir rendu
+ *  quoi que ce soit. */
+const FAKE_SESSION_PVE = JSON.stringify({
+  user: { id: 1, login: "test_user", profile: "player" },
+  permissions: {
+    game_modes: ["pvp", "pve"],
+    options: { show_advance_warning: false, auto_weapon_selection: false },
+  },
+  default_redirect_mode: "pve",
+} satisfies AuthSession);
+
 const BOARD_CONFIG = {
   cols: 20,
   rows: 20,
@@ -67,7 +87,7 @@ const BOARD_CONFIG = {
   },
 };
 
-function makeGameState() {
+function makeGameState(over: Record<string, unknown> = {}) {
   return {
     phase: "move",
     current_player: 1,
@@ -101,8 +121,22 @@ function makeGameState() {
     fight_step: null,
     fight_selector: null,
     active_fight_unit: null,
+    ...over,
   };
 }
+
+/** Forme rendue par `_arm_reactive_move_decision` (engine/phase_handlers/shared_utils.py) :
+ *  deux intentions scorées puis le candidat qui DÉCLINE — refuser est un choix de la règle. */
+const REACTIVE_MOVE_DECISION = {
+  type: "reactive_move",
+  player: 2,
+  unit_id: "4",
+  options: [
+    { label: "Pression" },
+    { label: "Distance" },
+    { label: "Ne pas reagir (rester sur place)" },
+  ],
+};
 
 // ---------------------------------------------------------------------------
 // msw server
@@ -122,6 +156,9 @@ afterEach(() => {
   server.resetHandlers();
   cleanup();
   localStorage.clear();
+  // `useEngineAPI` lit le mode dans `window.location.search`, hors du MemoryRouter : sans cette
+  // remise à zéro, le mode PvE d'un test fuiterait dans les suivants.
+  window.history.replaceState({}, "", "/");
 });
 afterAll(() => server.close());
 
@@ -129,9 +166,9 @@ beforeEach(() => {
   localStorage.setItem("w40k_auth_session_v2", FAKE_SESSION);
 });
 
-function renderBoard() {
+function renderBoard(initialEntry = "/") {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <BoardWithAPI />
     </MemoryRouter>
   );
@@ -169,5 +206,61 @@ describe("BoardWithAPI — écrans de garde", () => {
 
     expect(screen.queryByText(/Starting W40K Engine Game/)).toBeNull();
     expect(screen.queryByText(/Impossible de charger/)).toBeNull();
+  });
+});
+
+describe("BoardWithAPI — panneau de mouvement réactif", () => {
+  /** Démarre une partie dont l'état porte la décision réactive du joueur 2.
+   *
+   *  Le mode est posé DEUX FOIS parce que deux lecteurs le résolvent séparément : le composant
+   *  par `useLocation` (MemoryRouter), `useEngineAPI` par `window.location.search`. */
+  function renderWithReactiveDecision(mode: "pvp" | "pve", seat2: "human" | "ai") {
+    if (mode === "pve") {
+      localStorage.setItem("w40k_auth_session_v2", FAKE_SESSION_PVE);
+      window.history.replaceState({}, "", "/game?mode=pve");
+    }
+    server.use(
+      http.post("/api/game/start", () =>
+        HttpResponse.json({
+          success: true,
+          game_state: makeGameState({
+            player_types: { "1": "human", "2": seat2 },
+            pending_agent_decision: REACTIVE_MOVE_DECISION,
+          }),
+        })
+      )
+    );
+    renderBoard(mode === "pve" ? "/game?mode=pve" : "/");
+  }
+
+  it("siège IA → le panneau n'est PAS rendu (le moteur a déjà tranché pour le bot)", async () => {
+    renderWithReactiveDecision("pve", "ai");
+
+    // On attend le plateau AVANT de conclure à l'absence : sans ce point d'ancrage, l'assertion
+    // serait vraie simplement parce que rien n'est encore monté.
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("board-pvp")).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+
+    expect(screen.queryByText(/Reactive move — unit 4/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pression" })).toBeNull();
+  });
+
+  it("siège humain → le panneau est rendu, un bouton par candidat du moteur", async () => {
+    renderWithReactiveDecision("pvp", "human");
+
+    await waitFor(
+      () => {
+        expect(screen.getByText(/Reactive move — unit 4 — player 2/)).toBeTruthy();
+      },
+      { timeout: 5000 }
+    );
+
+    for (const option of REACTIVE_MOVE_DECISION.options) {
+      expect(screen.getByRole("button", { name: option.label })).toBeTruthy();
+    }
   });
 });
