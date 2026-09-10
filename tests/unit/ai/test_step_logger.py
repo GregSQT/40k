@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from ai.step_logger import StepLogger
+from ai.step_logger import StepLogger, _ROLL_REQUIRED_FIELDS
 from shared.data_validation import ConfigurationError
 from tests._state_invariants import unit_invariants
 
@@ -386,30 +386,56 @@ def test_format_replay_style_message_combat_emits_only_fight_subphase() -> None:
     assert "CHARGING_POOL" not in msg
 
 
-def test_format_replay_style_message_combat_missing_target_id_raises() -> None:
-    """JUMEAU du tir : `target_id` absent LEVE, il ne degrade pas la ligne.
+def _shoot_details() -> dict:
+    """Meme dict que la melee moins `fight_subphase`, qui n'existe qu'au combat."""
+    details = _combat_details()
+    del details["fight_subphase"]
+    return details
 
-    Le repli retire rendait « FOUGHT (no target data) », donc une ligne SANS
-    `[FIGHT_SUBPHASE:]` — que le parser de replay exige — et masquait le bug du producteur.
+
+def test_roll_required_fields_contract_is_the_eleven_keys() -> None:
+    """Le CONTENU de la liste est verrouille ici, pas seulement son parcours.
+
+    Les cas parametres ci-dessous derivent leur parametrisation de `_ROLL_REQUIRED_FIELDS` :
+    retirer un champ de la constante leur retire aussi le cas correspondant, et ils restent
+    verts. Seule cette assertion litterale voit le contrat retrecir.
+    """
+    assert _ROLL_REQUIRED_FIELDS == (
+        "target_id", "hit_roll", "wound_roll", "save_roll", "damage_dealt",
+        "hit_result", "wound_result", "save_result", "hit_target", "wound_target", "save_target",
+    )
+
+
+@pytest.mark.parametrize("action_type,label", [("shoot", "Shoot"), ("combat", "Combat")])
+def test_roll_required_fields_complete_dict_formats(action_type: str, label: str) -> None:
+    """Garde anti-vert-vacant : le dict COMPLET produit bien une ligne sur les deux jumeaux.
+
+    Sans elle, les cas parametres ci-dessous leveraient peut-etre pour une autre raison que le
+    champ retire.
     """
     logger = StepLogger(enabled=False)
-    details = _combat_details()
-    del details["target_id"]
-    with pytest.raises(KeyError, match=r"Combat action missing required target_id"):
-        logger._format_replay_style_message(3, "combat", details)
+    details = _combat_details() if action_type == "combat" else _shoot_details()
+    msg = logger._format_replay_style_message(3, action_type, details)
+    assert "Unit 8" in msg
 
 
-@pytest.mark.parametrize("missing_field", [
-    "hit_roll", "wound_roll", "save_roll", "damage_dealt", "hit_result",
-    "wound_result", "save_result", "hit_target", "wound_target", "save_target",
-])
-def test_format_replay_style_message_combat_missing_dice_field_raises(missing_field: str) -> None:
-    """Chacun des 10 champs de des LEVE, comme dans la branche tir jumelle."""
+@pytest.mark.parametrize("action_type,label", [("shoot", "Shoot"), ("combat", "Combat")])
+@pytest.mark.parametrize("missing_field", list(_ROLL_REQUIRED_FIELDS))
+def test_roll_required_fields_raise_on_both_twins(
+    action_type: str, label: str, missing_field: str
+) -> None:
+    """Les DEUX jumeaux lisent la MEME liste : un champ retire leve des deux cotes.
+
+    Chaque branche portait la sienne, dans deux formes differentes (11 `if` d'un cote, une
+    boucle de l'autre) ; un douzieme champ ajoute d'un cote serait reste muet de l'autre.
+    Cote melee, le repli retire rendait « FOUGHT (no target data) », donc une ligne SANS
+    `[FIGHT_SUBPHASE:]` — que le parser de replay exige.
+    """
     logger = StepLogger(enabled=False)
-    details = _combat_details()
+    details = _combat_details() if action_type == "combat" else _shoot_details()
     del details[missing_field]
-    with pytest.raises(KeyError, match=rf"Combat action missing required {missing_field}"):
-        logger._format_replay_style_message(3, "combat", details)
+    with pytest.raises(KeyError, match=rf"{label} action missing required {missing_field}"):
+        logger._format_replay_style_message(3, action_type, details)
 
 
 @pytest.mark.parametrize("removed_type", ["shoot_summary", "combat_summary"])

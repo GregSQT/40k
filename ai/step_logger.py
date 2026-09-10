@@ -182,6 +182,29 @@ def _anti_rule_token(details) -> str:
     return f" [ANTI-{anti_keyword}:{anti_threshold}+]"
 
 
+#: Cles par-jet EXIGEES par les DEUX formateurs jumeaux (SHOT et FOUGHT). Leur producteur unique
+#: les pose d un bloc, en bouclant sur `engine/w40k_core._SHOT_RECORD_FIELD_MAP` : une seule
+#: absente est un contrat rompu, jamais un cas metier. Une SEULE liste pour les deux jumeaux —
+#: chaque branche portait la sienne, dans deux formes differentes, et un douzieme champ ajoute
+#: d un cote serait reste muet de l autre.
+_ROLL_REQUIRED_FIELDS: Tuple[str, ...] = (
+    "target_id", "hit_roll", "wound_roll", "save_roll", "damage_dealt",
+    "hit_result", "wound_result", "save_result", "hit_target", "wound_target", "save_target",
+)
+
+
+def _require_roll_fields(details: Dict[str, Any], action_label: str) -> None:
+    """Leve des qu une cle par-jet manque, en la NOMMANT.
+
+    `require_key` ne convient pas ici : il rend un `ConfigurationError` generique
+    (« Required key 'x' is missing from mapping. ») qui ne dit pas de QUELLE action il parle,
+    alors que le producteur du tir et celui de la melee sont deux chemins distincts.
+    """
+    for field in _ROLL_REQUIRED_FIELDS:
+        if field not in details:
+            raise KeyError(f"{action_label} action missing required {field}")
+
+
 def _save_segments(
     details, *, damage, save_result, ap_ability_token: str = "", alloc_model_id=None,
     fnp_saves=None, fnp_attempts=None, fnp_threshold=None,
@@ -1132,29 +1155,8 @@ class StepLogger:
             return f"Unit {unit_id} DEAD model={model_id} reason={reason}"
 
         elif action_type == "shoot":
-            if "target_id" not in details:
-                raise KeyError("Shoot action missing required target_id")
-            if "hit_roll" not in details:
-                raise KeyError("Shoot action missing required hit_roll")
-            if "wound_roll" not in details:
-                raise KeyError("Shoot action missing required wound_roll")
-            if "save_roll" not in details:
-                raise KeyError("Shoot action missing required save_roll")
-            if "damage_dealt" not in details:
-                raise KeyError("Shoot action missing required damage_dealt")
-            if "hit_result" not in details:
-                raise KeyError("Shoot action missing required hit_result")
-            if "wound_result" not in details:
-                raise KeyError("Shoot action missing required wound_result")
-            if "save_result" not in details:
-                raise KeyError("Shoot action missing required save_result")
-            if "hit_target" not in details:
-                raise KeyError("Shoot action missing required hit_target")
-            if "wound_target" not in details:
-                raise KeyError("Shoot action missing required wound_target")
-            if "save_target" not in details:
-                raise KeyError("Shoot action missing required save_target")
-            
+            _require_roll_fields(details, "Shoot")
+
             target_id = details["target_id"]
             hit_roll = details["hit_roll"]
             wound_roll = details["wound_roll"]
@@ -1521,16 +1523,11 @@ class StepLogger:
             return base_msg
 
         elif action_type == "combat":
-            # JUMEAU EXACT du tir : meme contrat de cles, donc meme reaction a leur absence.
-            # Les deux replis qui vivaient ici (« FOUGHT (no target data) » et « (dice data
-            # incomplete) ») rendaient une ligne SANS `[FIGHT_SUBPHASE:]`, que le replay exige,
-            # et masquaient le bug du producteur — T1.
-            if "target_id" not in details:
-                raise KeyError("Combat action missing required target_id")
-            required_fields = ["hit_roll", "wound_roll", "save_roll", "damage_dealt", "hit_result", "wound_result", "save_result", "hit_target", "wound_target", "save_target"]
-            for _field in required_fields:
-                if _field not in details:
-                    raise KeyError(f"Combat action missing required {_field}")
+            # JUMEAU EXACT du tir : meme contrat de cles, donc meme appel, donc meme reaction a
+            # leur absence. Les deux replis qui vivaient ici (« FOUGHT (no target data) » et
+            # « (dice data incomplete) ») rendaient une ligne SANS `[FIGHT_SUBPHASE:]`, que le
+            # replay exige, et masquaient le bug du producteur — T1.
+            _require_roll_fields(details, "Combat")
 
             target_id = details["target_id"]
             # All dice data present - format detailed message
