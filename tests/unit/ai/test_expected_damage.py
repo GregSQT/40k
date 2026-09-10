@@ -28,6 +28,32 @@ def _target(t: int, sv: int, invul: int = 7) -> dict:
     return {"T": t, "ARMOR_SAVE": sv, "INVUL_SAVE": invul}
 
 
+def _game_state_for(target: dict) -> dict:
+    """État de jeu minimal où `target` est une escouade d'UNE figurine.
+
+    Depuis le 2026-09-10, `expected_damage` relit T et InSv par les oracles de la résolution
+    (19.02 et `effective_invul_save`) dès qu'un game_state lui est passé : la cible doit donc
+    exister DANS l'état, avec ses figurines. Les valeurs effectives de cette fixture sont
+    identiques aux champs bruts de `target`, si bien que les espérances attendues des tests
+    ci-dessous restent inchangées.
+    """
+    target["player"] = 2
+    target.setdefault("UNIT_RULES", [])
+    target.setdefault("FACTION_KEYWORDS", [])
+    sid = str(target["id"])
+    return {
+        "suppressed_squads": {},
+        # Aucun Waaagh! nulle part : waaagh_applies_to_unit sort avant de lire army_faction.
+        "waaagh_active": {1: False, 2: False},
+        "config": {"game_rules": {"bonus_malus_cap": 0}},
+        "unit_by_id": {sid: target},
+        "squad_models": {sid: [f"{sid}#0"]},
+        "models_cache": {
+            f"{sid}#0": {"HP_CUR": 2, "T": target["T"], "role": "trooper", "squad_id": sid}
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Test 1 : Bolter (S4, AP0, BS3+) contre Marine (T4, Sv3+)
 # ---------------------------------------------------------------------------
@@ -152,8 +178,10 @@ def test_can_kill_uses_probabilistic_damage(monkeypatch: pytest.MonkeyPatch) -> 
         "selectedCcWeaponIndex": 0,
     }
 
+    game_state = _game_state_for(target)
+
     def can_kill() -> bool:
-        return mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state={"config": {"game_rules": {"bonus_malus_cap": 0}}})
+        return mapper._can_unit_kill_target_in_one_phase(unit, target, is_ranged=True, game_state=game_state)
 
     hp = 2
     monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: hp)
@@ -189,7 +217,7 @@ def test_can_kill_melee_path_uses_expected_damage(monkeypatch: pytest.MonkeyPatc
     target = _target(t=4, sv=3)
     target["id"] = "t1"
     # is_melee=True → expected_damage lit waaagh_active ; {1:False,2:False} = sortie anticipée
-    game_state: dict = {"suppressed_squads": {}, "waaagh_active": {1: False, 2: False}, "config": {"game_rules": {"bonus_malus_cap": 0}}}
+    game_state: dict = _game_state_for(target)
 
     hp = 2
     monkeypatch.setattr(rmod, "get_hp_from_cache", lambda uid, gs: hp)

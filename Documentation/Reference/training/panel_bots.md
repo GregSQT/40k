@@ -60,7 +60,15 @@ scripts du panel : `scripts/bot_panel_reference.py` (via `print_panel_reference(
 
 **Modèle de dégâts :** `engine/weapon_damage_cache.py` + `squad_expected_damage()`.
 La table donne un dégât **par figurine** ; `squad_expected_damage` agrège sur les figurines
-**vivantes** lues dans `models_cache`. Aucun repli : cache absent ou escouade inconnue lèvent.
+**vivantes** lues dans `models_cache`. Aucun repli : cache absent, escouade attaquante inconnue
+ou cible sans figurine vivante lèvent.
+
+Le cache d'épisode ne porte que le côté **offensif** (une sous-table par arme de chaque
+figurine). Le profil **défensif** de la cible — `(T, Sv, InSv)` — est recalculé À CHAQUE
+LECTURE par `effective_defensive_profile`, c'est-à-dire par les mêmes oracles que la résolution
+(19.02 pour la T, `effective_invul_save` pour l'invulnérable). Il était figé au reset jusqu'au
+2026-09-10, ce qui rendait invisibles aux bots toutes les invulnérables conférées en cours de
+partie : mesuré sur {5 Boyz + BannerNob}, 25,0 % de surestimation dès le tour 1.
 
 **Accès moteur :** les bots reçoivent `game_state` et `enemies`. Le cache de contributions OC
 (`_contributions_cache_key` / `_contributions_cache_val`) évite de recalculer

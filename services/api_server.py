@@ -669,10 +669,11 @@ _UNITS_CACHE_FRONTEND_KEYS = ("col", "row", "level", "HP_CUR", "player", "orient
 
 # Clés moteur internes par unité / par arme, non consommées par l'UI web (le grep frontend est vide).
 # Filtrées de la réponse JSON (allège chaque POST /action : roster complet × armes), conservées côté moteur.
-_UNIT_EXCLUDE_KEYS_FOR_API = frozenset({"_wdc_def_key", "_precheck_cache"})
+_UNIT_EXCLUDE_KEYS_FOR_API = frozenset({"_precheck_cache"})
 # 2026-07-29 — ``_parsed_rules`` a été RETIRÉ de cette liste : le parseur d'armurerie ne l'écrit
-# plus (cache du défunt ``WeaponRulesApplier``, sans lecteur). ``_wdc_off_key`` reste, lui : il est
-# vif, écrit et relu par ``engine/weapon_damage_cache.py``.
+# plus (cache du défunt ``WeaponRulesApplier``, sans lecteur). 2026-09-10 — ``_wdc_def_key`` l'a
+# été à son tour : ``stamp_weapon_keys`` ne le pose plus (la clé défensive est calculée à la
+# lecture). ``_wdc_off_key`` reste, lui : il est toujours écrit sur chaque arme.
 _WEAPON_EXCLUDE_KEYS_FOR_API = frozenset({"_wdc_off_key"})
 
 
@@ -686,7 +687,7 @@ def _slim_weapon_for_api(weapon: Any) -> Any:
 def _slim_unit_for_api(unit: Any) -> Any:
     """Copie d'une unité pour la réponse API.
 
-    Retire les caches/clés moteur de l'unité (``_wdc_def_key``, ``_precheck_cache``) et des armes
+    Retire les caches/clés moteur de l'unité (``_precheck_cache``) et des armes
     (``RNG_WEAPONS`` / ``CC_WEAPONS``, y compris par modèle dans ``models``). Copies superficielles
     ciblées : ne mute jamais l'unité du moteur (le moteur garde ``_precheck_cache`` / clés WDC).
     """
