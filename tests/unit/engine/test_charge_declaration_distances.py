@@ -23,7 +23,7 @@ TROIS choses se verrouillent ici, et elles echouent de trois façons differentes
    tentative de charge. La compter diluerait la part de declarations lointaines — d'autant plus
    que l'agent renonce souvent.
 
-Meme harnais que `test_episode_charge_counters` (scenario melee de `scripts/smoke_t5_bare`, le
+Meme harnais que `test_episode_charge_counters` (scenario melee de `tests.unit.engine._melee_scenario`, le
 seul montage du depot ou une charge soit reellement declarable) et meme doctrine : ce qui doit
 etre vrai est CONSTRUIT, jamais espere d'une graine.
 """
@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import pytest
 
-from smoke_t5_bare import MELEE_SCENARIO
+from tests.unit.engine._melee_scenario import MELEE_SCENARIO
 
 from ai.metrics_tracker import W40KMetricsTracker  # noqa: E402
 from ai.step_logger import _charge_distance_segment  # noqa: E402

@@ -14,7 +14,8 @@ from tests._chargeur_script import charger_script
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 # Cles refusees/mortes, telles que listees par LEGACY_KEYS dans
-# scripts/migrate_scenario_bank_v11.py
+# tests/unit/ai/test_scenario_bank_migration_v11.py (le script de migration qui portait
+# l'original a ete supprime le 2026-09-10, sa liste vit desormais dans ce verrou de banque)
 LEGACY_KEYS = ("objectives", "objectives_ref", "objective_hexes", "deployment_zone", "wall_ref")
 
 

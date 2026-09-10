@@ -1,8 +1,8 @@
 """T6 (index_v11.md) — contrat wall_ref du sampler de scénarios.
 
-Contexte : la migration T4 a rendu la banque de scénarios TERRAIN-ONLY (le script
-`migrate_scenario_bank_v11.py` supprime la clé legacy `wall_ref` ; les murs viennent
-désormais du `terrain_ref`, de façon additive côté moteur — game_state.py). Le sampler
+Contexte : la migration T4 a rendu la banque de scénarios TERRAIN-ONLY (elle a supprimé la
+clé legacy `wall_ref` de chaque scénario ; les murs viennent désormais du `terrain_ref`, de
+façon additive côté moteur — game_state.py). Le sampler
 `_apply_wall_ref_weighting` de train.py, lui, exigeait encore un `wall_ref` par scénario
 via `require_key` → `ConfigurationError: Required key 'wall_ref' is missing` au lancement
 de `train.py --scenario bot` (rupture T6, reliquat de T4).

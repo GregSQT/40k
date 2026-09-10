@@ -100,9 +100,13 @@ def test_les_fichiers_d_armee_declarent_leur_faction() -> None:
         )
 
 
-@pytest.mark.parametrize("relative", ("shared/rule_checker_scenarios.py", "scripts/smoke_t5_bare.py"))
+@pytest.mark.parametrize(
+    "relative",
+    ("shared/rule_checker_scenarios.py", "tests/unit/engine/_melee_scenario.py"),
+)
 def test_les_generateurs_de_scenarios_a_unites_declarent_la_faction(relative: str) -> None:
-    """Les deux générateurs qui écrivent des scénarios à `units`.
+    """Les deux sources de scénarios à `units` : le générateur rule-checker et le scénario de
+    mêlée des tests, écrit en tmp par dix fichiers qui jouent de vrais épisodes.
 
     Les deux autres (`roster_matchup_stats`, `build_holdout_benchmark`) écrivent des scénarios à
     rosters : leur faction vient du roster tiré, et c'est le test des rosters qui la couvre.

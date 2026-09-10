@@ -13,7 +13,7 @@ depuis les ``info`` d'un step gym cote callback. Deux defauts, un seul remplacan
    dans le moteur, sur ``action_logs``, la meme source que shoot_kills / melee_kills, ou le
    camp de chaque ligne est une donnee du journal et non une deduction sur l'ordre des steps.
 
-CE FICHIER JOUE DE VRAIS EPISODES, sur le scenario melee de ``scripts/smoke_t5_bare`` — le
+CE FICHIER JOUE DE VRAIS EPISODES, sur le scenario melee de ``tests.unit.engine._melee_scenario`` — le
 seul montage du depot ou une charge est reellement declarable (il place un Carnifex a portee
 de charge, ce dont ``test_squad_charge_target_parity`` fait deja son critere). La ventilation
 seat-aware, elle, se verrouille dans ``test_episode_combat_counters`` : son harnais en memoire
@@ -31,7 +31,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from smoke_t5_bare import MELEE_SCENARIO
+from tests.unit.engine._melee_scenario import MELEE_SCENARIO
 
 from ai.metrics_tracker import W40KMetricsTracker
 from ai.unit_registry import UnitRegistry

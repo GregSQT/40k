@@ -344,7 +344,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Rebalance holdout_hard scenarios by reassigning opponent roster refs."
     )
-    parser.add_argument("--agent", default="CoreAgent")
+    parser.add_argument(
+        "--agent",
+        required=True,
+        help="Cle d'agent : compose config/agents/<agent>/scenarios/holdout_hard et rosters/<scale>/matchups",
+    )
     parser.add_argument("--scale", default="150pts")
     parser.add_argument(
         "--eval-mode",

@@ -24,13 +24,15 @@ from tests._chargeur_script import charger_script
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-#: Les scripts qui ECRIVENT des scenarios. `primary_objectives` est le marqueur d'un payload de
-#: scenario : il est present dans les trois, et absent de tout autre dict de ces fichiers.
+#: Les sources qui portent un payload de scenario litteral — trois generateurs, plus le scenario
+#: de melee des tests, ecrit en tmp par dix fichiers de test et soumis a la meme regle qu'un
+#: scenario genere (il fait tourner de VRAIS episodes). `primary_objectives` est le marqueur d'un
+#: payload de scenario : il est present dans chacune, et absent de tout autre dict de ces fichiers.
 SCENARIO_WRITERS = (
     "scripts/roster_matchup_stats.py",
     "shared/rule_checker_scenarios.py",
     "scripts/build_holdout_benchmark.py",
-    "scripts/smoke_t5_bare.py",
+    "tests/unit/engine/_melee_scenario.py",
 )
 
 

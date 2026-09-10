@@ -194,7 +194,11 @@ def main() -> None:
             "and optional hard-opponent roster generation with budget modifier."
         )
     )
-    parser.add_argument("--agent", default="CoreAgent")
+    parser.add_argument(
+        "--agent",
+        required=True,
+        help="Cle d'agent : compose config/agents/<agent>/ (rosters, scenarios, training config)",
+    )
     parser.add_argument("--profile", default="default", help="Training profile key in training config JSON")
     parser.add_argument("--training-config-path", default=None, help="Path to agent training config JSON")
     parser.add_argument("--scale", default="150pts", help="Scale folder (e.g. 150pts)")
