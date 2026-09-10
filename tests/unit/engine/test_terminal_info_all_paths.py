@@ -250,6 +250,48 @@ def test_pool_empty_gate_keeps_its_own_keys():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Les TROIS portes passent par la garde d'enumeration
+#
+# `_assert_terminal_keys_declared` vivait au seul retour normal : une cle terminale posee par une
+# des deux sorties anticipees echappait au controle, et `_drain_forced_waits` ne l'aurait pas
+# remontee quand l'episode se termine dans une chaine d'attentes forcees. Depuis la sortie unique
+# de `step_with_mask`, la garde voit les trois. Le bilan est mocke ICI parce que
+# `_build_terminal_info` appelle la garde lui-meme : sans mock, le test ne pourrait pas distinguer
+# la garde de la sortie de celle de la construction.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_UNDECLARED = "cle_terminale_non_declaree"
+
+
+def _terminal_info_with_an_undeclared_key(engine: W40KEngine):
+    real = engine._build_terminal_info
+
+    def build():
+        info = real()
+        info[_UNDECLARED] = True
+        return info
+
+    return build
+
+
+def test_turn_limit_gate_goes_through_the_enumeration_guard():
+    engine = _make_engine()
+    engine.game_state["turn"] = _past_turn_limit(engine)
+
+    with patch.object(engine, "_build_terminal_info", _terminal_info_with_an_undeclared_key(engine)):
+        with pytest.raises(RuntimeError, match=_UNDECLARED):
+            engine.step(_legal_action(engine))
+
+
+def test_pool_empty_gate_goes_through_the_enumeration_guard():
+    engine = _make_engine()
+
+    with patch.object(engine, "_build_terminal_info", _terminal_info_with_an_undeclared_key(engine)):
+        with pytest.raises(RuntimeError, match=_UNDECLARED):
+            _step_through_empty_entry_mask(engine)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Porte 3 — le retour normal, NON-REGRESSION
 #
 # C'est la seule porte qui batissait deja le bilan. Elle doit continuer, sinon l'extraction en

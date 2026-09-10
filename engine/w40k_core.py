@@ -12,7 +12,7 @@ import json
 import random
 import gymnasium as gym
 import numpy as np
-from typing import Dict, List, Literal, Tuple, Set, Optional, Any, overload
+from typing import Dict, List, Literal, NamedTuple, Tuple, Set, Optional, Any, overload
 
 # Import shared utilities
 from shared.data_validation import (
@@ -92,8 +92,8 @@ TERMINAL_INFO_KEYS = (
     # `episode_tactical_data` (compteurs de combat, VP, reserves, ventilation de recompense) ;
     # `deployment_mode` ventile les courbes par mode de la rampe de deploiement.
     "tactical_data", "deployment_mode",
-    # Pose par la sortie anticipee « limite de tours atteinte », qui construit son `info` a la
-    # main et ne passe donc pas par le garde de `terminal_info`.
+    # Pose par la sortie anticipee « limite de tours atteinte ». Elle la range dans son
+    # `terminal_info`, donc la garde d'enumeration la voit comme les autres cles terminales.
     "turn_limit_exceeded",
     # Troncature : posees ENSEMBLE avec `truncated = True`. Les omettre rendrait un `truncated`
     # sans son motif des que la troncature tombe pendant une chaine auto-jouee, et
@@ -448,6 +448,33 @@ def destroy_unarrived_strategic_reserves(game_state: Dict[str, Any]) -> List[Dic
             },
         )
     return destroyed
+
+
+class _StepOutcome(NamedTuple):
+    """Sortie BRUTE d'un step moteur, avant l'epilogue commun de ``step_with_mask``.
+
+    Existe pour qu'il n'y ait qu'UN point de sortie. Le corps (``_step_core``) rend l'episode par
+    trois chemins — porte « limite de tours », transition de phase sur pool vide, retour normal —
+    et chacun devait auparavant se souvenir d'appliquer la garde d'enumeration, la fusion des cles
+    terminales et l'auto-jeu des attentes forcees. Deux des trois en oubliaient : la porte ne
+    passait ni par la garde ni par le drain, la transition de phase pas par la garde.
+
+    ``info`` porte les cles d'ACTION, ``terminal_info`` les cles de FIN D'EPISODE (vide si
+    l'episode continue) : la frontiere entre les deux est ce que ``TERMINAL_INFO_KEYS`` enumere,
+    et la garde ne peut la verifier que si elle reste materialisee jusqu'a la sortie.
+
+    ``actor`` : le joueur dont l'action vient d'etre jouee — il BORNE la chaine d'attentes forcees
+    (cf. ``_drain_forced_waits``), qui ne doit jamais se poursuivre pour l'adversaire.
+    """
+
+    observation: Optional[Dict[str, np.ndarray]]
+    reward: float
+    terminated: bool
+    truncated: bool
+    info: Dict[str, Any]
+    terminal_info: Dict[str, Any]
+    out_mask: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]]
+    actor: int
 
 
 class W40KEngine(gym.Env):
@@ -845,6 +872,10 @@ class W40KEngine(gym.Env):
         self.quiet = quiet
         self.unit_registry = unit_registry
         self.step_logger: Optional["StepLogger"] = None  # Will be set by training system if enabled
+        # Garde anti-runaway de `step`, remise a zero par `reset`. Declaree ICI et lue nue :
+        # un `getattr(self, '_episode_step_calls', 0)` de complaisance rendait un `step`
+        # appele avant `reset` indistinguable d'un episode neuf, au lieu de le faire lever.
+        self._episode_step_calls = 0
         self.is_evaluation_mode: bool = False  # Set by training system during evaluation
         self._force_evaluation_mode: bool = False  # Set by training system during evaluation
         
@@ -2356,10 +2387,11 @@ class W40KEngine(gym.Env):
         question a une seule reponse : un aller-retour complet moteur <-> politique (forward du
         reseau compris) pour zero information. Volume mesure : cf. `RewardCalculator._wait_reward`.
 
-        APPELEE AUX DEUX SORTIES NON TERMINALES de `step_with_mask` — le retour final ET celui de
-        la transition de phase automatique (pool vide). Accrochee a une seule, l'economie se serait
-        appliquee « selon le chemin emprunte », ce qui est pire qu'une economie absente : le nombre
-        de steps d'un episode dependrait d'un detail d'implementation.
+        APPELEE A LA SORTIE UNIQUE de `step_with_mask`, donc pour les trois chemins du corps.
+        Accrochee a certains d'entre eux seulement, l'economie se serait appliquee « selon le
+        chemin emprunte », ce qui est pire qu'une economie absente : le nombre de steps d'un
+        episode dependrait d'un detail d'implementation. Sur un episode termine elle sort
+        immediatement, donc la porte « limite de tours » la traverse sans effet.
 
         RE-ENTRANTE PAR CONCEPTION : on rejoue par `step_with_mask` lui-meme, jamais par un chemin
         d'execution parallele. Le log (`_flush_squad_action_logs_to_step_logger`), les compteurs
@@ -3062,10 +3094,10 @@ class W40KEngine(gym.Env):
         """LEVE si `terminal_info` porte une cle absente de `TERMINAL_INFO_KEYS`.
 
         DEUX APPELANTS, et c'est sa raison d'etre : `_build_terminal_info` (qui ecrit le bilan
-        d'episode) et le point de sortie de `step_with_mask` (qui y ajoute les cles de
-        TRONCATURE, absentes du bilan). Ecrit deux fois, ce controle aurait porte deux messages a
-        garder en phase — et c'est exactement l'oubli d'enumeration que `TERMINAL_INFO_KEYS`
-        existe pour rendre impossible.
+        d'episode) et le point de sortie unique de `step_with_mask` (qui voit AUSSI les cles de
+        TRONCATURE, absentes du bilan, et celles des deux sorties anticipees). Ecrit deux fois, ce
+        controle aurait porte deux messages a garder en phase — et c'est exactement l'oubli
+        d'enumeration que `TERMINAL_INFO_KEYS` existe pour rendre impossible.
         """
         unlisted = tuple(key for key in terminal_info if key not in TERMINAL_INFO_KEYS)
         if unlisted:
@@ -3088,8 +3120,19 @@ class W40KEngine(gym.Env):
         Dict[str, Any],
         Optional[Tuple[np.ndarray, List[Dict[str, Any]]]],
     ]:
-        """
-        Execute gym action with built-in step counting - gym.Env interface.
+        """POINT DE SORTIE UNIQUE du moteur — le travail est fait par ``_step_core``.
+
+        Ce qui se joue ici et NULLE PART AILLEURS : la garde d'enumeration des cles terminales, la
+        fusion de ces cles dans l'``info`` d'action, et l'auto-jeu des attentes forcees. Les trois
+        etaient auparavant recopies sur les sorties du corps, qui en oubliaient : la porte « limite
+        de tours » ne passait ni par la garde ni par le drain, la transition de phase sur pool vide
+        pas par la garde. Une cle terminale ajoutee a l'une d'elles echappait donc au controle que
+        ``TERMINAL_INFO_KEYS`` existe pour rendre impossible.
+
+        Ce qui n'est PAS ici, et deliberement : la comptabilite du step (``_account_step_metrics``).
+        Elle appartient aux sorties qui ont joue une action — la transition de phase sur pool vide
+        n'en joue aucune et ne compte pas, terminale ou non (cf. la regle des trois compteurs, a
+        l'initialisation de ``episode_length_accumulator``).
 
         L'observation vaut ``None`` — et seulement dans ce cas — quand l'appelant a arme
         ``defer_observation`` : il s'est alors engage a construire l'observation finale lui-meme
@@ -3107,19 +3150,52 @@ class W40KEngine(gym.Env):
         6e ELEMENT RENDU — le couple ``(masque, pool)`` de l'etat de SORTIE, ou ``None`` quand
         aucune construction n'a eu lieu sur le chemin emprunte. L'appelant y reprend le masque au
         lieu de le reconstruire pour reposer la question « a qui est la decision maintenant ? »
-        (96,5 reconstructions identiques par episode). Sa validite jusqu'au ``return`` a ete
-        auditee : entre la derniere construction et la sortie ne tournent que ``calculate_reward``,
-        des compteurs et la fabrication d'``info``, et RIEN de ce que ``calculate_reward`` ecrit
-        dans ``game_state`` (``last_reward_breakdown``, ``_pile_in_toCol/Row``, et les familles
-        ``objective_rewarded_turns`` / ``coherency_penalized_turns`` du registre
-        ``_once_claims``) n'est lu par la construction du masque — verifie par grep sur
-        ``action_decoder``, ``phase_handlers`` et ``spatial_grid``. ``_pending_reserves_wasted`` est vide ici, pas par le calcul de recompense.
+        (96,5 reconstructions identiques par episode).
 
-        ATTENTES FORCEES — les deux sorties non terminales passent par ``_drain_forced_waits`` : un
-        etat qui n'ouvre que ``wait`` est joue par le moteur au lieu d'etre rendu a l'agent. Un step
-        d'agent peut donc recouvrir plusieurs steps de moteur ; ``reward`` les cumule, et ``info``
-        reste celui de l'action de l'APPELANT (seules les cles de ``TERMINAL_INFO_KEYS`` viennent du
-        dernier step de la chaine).
+        ATTENTES FORCEES — un etat qui n'ouvre que ``wait`` est joue par le moteur au lieu d'etre
+        rendu a l'agent. Un step d'agent peut donc recouvrir plusieurs steps de moteur ; ``reward``
+        les cumule, et ``info`` reste celui de l'action de l'APPELANT (seules les cles de
+        ``TERMINAL_INFO_KEYS`` viennent du dernier step de la chaine).
+        """
+        outcome = self._step_core(action, mask_and_eligible)
+        info = outcome.info
+
+        # GARDE D'ENUMERATION — la frontiere « cle d'action / cle terminale » a UNE source, et
+        # c'est la construction faite par le corps, pas la liste. Une cle de fin d'episode ajoutee
+        # sans etre declaree ferait perdre cette cle a tout episode qui se termine pendant une
+        # chaine d'attentes forcees, chez le seul appelant qui l'exige (`ai/training_callbacks`) et
+        # seulement une fois sur N episodes : elle echoue ici, immediatement et pour les TROIS
+        # sorties du corps.
+        self._assert_terminal_keys_declared(outcome.terminal_info)
+        info.update(outcome.terminal_info)
+
+        # Auto-jeu des attentes forcees : cf. `_drain_forced_waits`, qui sort immediatement sur un
+        # episode termine — la porte « limite de tours » peut donc le traverser sans rien changer.
+        return self._drain_forced_waits(
+            outcome.observation, outcome.reward, outcome.terminated, outcome.truncated,
+            info, outcome.out_mask, outcome.actor,
+        )
+
+    def _step_core(
+        self,
+        action: int,
+        mask_and_eligible: Optional[Tuple[np.ndarray, List[Dict[str, Any]]]] = None,
+    ) -> _StepOutcome:
+        """Corps d'un step moteur — rend son etat brut a `step_with_mask`, qui seul conclut.
+
+        TROIS SORTIES, et c'est leur raison d'etre : l'episode peut finir avant toute action
+        (limite de tours), la phase peut s'avancer toute seule sur un pool vide, ou l'action est
+        jouee. Chacune rend un `_StepOutcome` ; aucune ne conclut — la garde d'enumeration, la
+        fusion des cles terminales et le drain des attentes forcees sont l'affaire de l'enveloppe.
+
+        VALIDITE DU MASQUE DE SORTIE jusqu'au `return` : auditee. Entre la derniere construction et
+        la sortie ne tournent que ``calculate_reward``, des compteurs et la fabrication d'``info``,
+        et RIEN de ce que ``calculate_reward`` ecrit dans ``game_state``
+        (``last_reward_breakdown``, ``_pile_in_toCol/Row``, et les familles
+        ``objective_rewarded_turns`` / ``coherency_penalized_turns`` du registre ``_once_claims``)
+        n'est lu par la construction du masque — verifie par grep sur ``action_decoder``,
+        ``phase_handlers`` et ``spatial_grid``. ``_pending_reserves_wasted`` est vide ici, pas par
+        le calcul de recompense.
         """
         # Reste None sur tout chemin qui ne construit aucune observation : l'appelant reconstruit
         # alors le masque lui-meme. Jamais un couple perime — c'est l'inverse du defaut a eviter.
@@ -3138,7 +3214,7 @@ class W40KEngine(gym.Env):
                 action,
             )
         # Safety: count step() calls per episode to truncate runaways (e.g. stuck in eval)
-        self._episode_step_calls = getattr(self, '_episode_step_calls', 0) + 1
+        self._episode_step_calls += 1
 
         # CRITICAL: Check turn limit BEFORE processing any action
         if turn_limit_reached(self.game_state):
@@ -3165,8 +3241,11 @@ class W40KEngine(gym.Env):
             # normal ne les met a jour qu'APRES ce return, donc sans cet appel `info["episode"]`
             # vaut {'r': 0.0, 'l': 0} et `last_reward_breakdown` survit au reset().
             self._account_step_metrics(reward, _reserves)
-            info = {"turn_limit_exceeded": True, **self._build_terminal_info()}
-            return observation, reward, True, False, info, out_mask
+            return _StepOutcome(
+                observation, reward, True, False, {},
+                {"turn_limit_exceeded": True, **self._build_terminal_info()},
+                out_mask, int(require_key(self.game_state, "current_player")),
+            )
 
         # Check for game termination before action
         self.game_state["game_over"] = self._check_game_over()
@@ -3236,20 +3315,19 @@ class W40KEngine(gym.Env):
                 self.game_state["turn_limit_reached"] = True
             
             terminated = self.game_state["game_over"]
-            info = {"phase_auto_advanced": True, "previous_phase": current_phase}
-            if terminated:
-                # MEME BILAN que le retour normal (cf. `_build_terminal_info`), qui porte aussi la
-                # garde `win_method is None` et le journal de fin d'episode ecrits ici a la main.
-                # La transition de phase ci-dessus peut franchir la limite de tours : l'episode se
-                # terminait alors ici, avec `winner` seul, et l'entrainement exige davantage.
-                info.update(self._build_terminal_info())
-
-            # Sortie NON TERMINALE quand la transition de phase n'a pas fini la partie : elle doit
-            # drainer les attentes forcees comme le retour final, sinon l'economie dependrait du
-            # chemin emprunte. L'acteur de reference est celui d'AVANT la transition — la chaine ne
-            # doit pas se poursuivre pour l'adversaire si la phase a change de joueur.
-            return self._drain_forced_waits(
-                observation, 0.0, terminated, False, info, out_mask, player_before_advance
+            # MEME BILAN que le retour normal (cf. `_build_terminal_info`), qui porte aussi la
+            # garde `win_method is None` et le journal de fin d'episode : la transition de phase
+            # ci-dessus peut franchir la limite de tours, et l'episode se terminait alors ici avec
+            # `winner` seul, ce qui ne suffit pas a l'entrainement.
+            #
+            # RECOMPENSE 0.0 et AUCUNE COMPTABILITE : aucune action n'a ete jouee sur ce chemin.
+            # L'acteur rendu est celui d'AVANT la transition — la chaine d'attentes forcees ne doit
+            # pas se poursuivre pour l'adversaire si la phase a change de joueur.
+            return _StepOutcome(
+                observation, 0.0, terminated, False,
+                {"phase_auto_advanced": True, "previous_phase": current_phase},
+                self._build_terminal_info() if terminated else {},
+                out_mask, player_before_advance,
             )
 
         # Épisode `auto` : le moteur pose à la place du joueur courant, quel que soit le camp
@@ -3556,7 +3634,7 @@ class W40KEngine(gym.Env):
         # Safety: truncate runaways (e.g. stuck in eval, phase transition bug).
         # Plafond derive de game_rules (max_steps_per_turn * marge * max_turns) : il suit
         # la taille des rosters au lieu d'etre une constante a re-regler a chaque escouade.
-        _calls = getattr(self, '_episode_step_calls', 0)
+        _calls = self._episode_step_calls
         _episode_limit = self._get_episode_step_limit()
         if not terminated and _episode_limit is not None and _calls > _episode_limit:
             episode = self.game_state.get("episode_number", "?")
@@ -3677,20 +3755,10 @@ class W40KEngine(gym.Env):
             terminal_info["winner"] = DRAW_WINNER
             terminal_info["win_method"] = "step_limit"
 
-        # GARDE D'ENUMERATION — la frontiere « cle d'action / cle terminale » a UNE source, et
-        # c'est la construction ci-dessus, pas la liste. Une cle de fin d'episode ajoutee sans
-        # etre declaree ferait perdre cette cle a tout episode qui se termine pendant une chaine
-        # d'attentes forcees, chez le seul appelant qui l'exige (`ai/training_callbacks`) et
-        # seulement une fois sur N episodes : elle echoue ici, immediatement et partout.
-        self._assert_terminal_keys_declared(terminal_info)
-        info.update(terminal_info)
-
-        # Auto-jeu des attentes forcees : cf. `_drain_forced_waits`. Applique AUX DEUX sorties
-        # non terminales de cette fonction, sinon il s'appliquerait « selon le chemin emprunte ».
-        (observation, reward, terminated, truncated, info, out_mask) = self._drain_forced_waits(
-            observation, reward, terminated, truncated, info, out_mask, pre_action_player
+        return _StepOutcome(
+            observation, reward, terminated, truncated, info, terminal_info, out_mask,
+            pre_action_player,
         )
-        return observation, reward, terminated, truncated, info, out_mask
     
     
     # ============================================================================

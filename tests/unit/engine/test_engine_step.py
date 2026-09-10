@@ -335,7 +335,55 @@ class TestTurnLimitGateAccounting:
         assert "last_reward_breakdown" not in engine.game_state
         assert info["tactical_data"]["reward_breakdown"]["situational"] == pytest.approx(3.0)
 
-    def test_build_terminal_info_charge_distance_not_doubled(self, monkeypatch):
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tests — _build_terminal_info est un recalcul pur
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _mixed_action_logs() -> list:
+    """Journal couvrant TOUTES les branches de la boucle de `_build_terminal_info`.
+
+    Un compteur par branche : deplacement, attente, charge (agent et adversaire), capacite hors
+    branche dediee, tir avec mort, melee avec mort. Le contrat de chaque ligne est celui que la
+    boucle lit en `require_key` — une ligne pauvre ferait lever, pas passer en silence.
+    """
+    from engine.w40k_core import CHARGE_LONG_DECLARATION_INCHES
+
+    return [
+        {"type": "move", "player": 1, "was_flee": True, "move_type": "advance"},
+        {"type": "wait", "player": 1, "phase": "move"},
+        {"type": "wait", "player": 1, "phase": "shoot"},
+        charge_log_line(
+            1, "charge",
+            charge_nearest_enemy_inches=5.0,
+            charge_target_distance_inches=float(CHARGE_LONG_DECLARATION_INCHES),
+            ability_rule_effect="charge_after_advance",
+        ),
+        charge_log_line(2, "charge_fail", charge_nearest_enemy_inches=7.0),
+        {"type": "reactive_move", "player": 2},
+        {
+            "type": "shoot", "player": 1, "turn": 1, "shooterId": "u1", "damage": 3,
+            "shootDetails": [
+                {"hitResult": "HIT", "targetDied": True, "targetValue": 12.0,
+                 "hitAbility": "reroll", "woundAbility": "reroll"},
+                {"hitResult": "MISS"},
+            ],
+        },
+        {
+            "type": "combat", "player": 1, "phase": "fight", "turn": 2, "shooterId": "u2",
+            "damage": 4,
+            "shootDetails": [
+                {"hitResult": "HIT", "targetDied": True, "targetValue": 8.0,
+                 "woundBonusAbility": "oath"},
+            ],
+        },
+    ]
+
+
+class TestBuildTerminalInfoIsPure:
+
+    def test_charge_distance_not_doubled(self, monkeypatch):
         """charge_distance n'est pas doublé si _build_terminal_info est appelée deux fois.
 
         Sans le fix, la boucle action_logs accumule via += directement dans
@@ -363,6 +411,56 @@ class TestTurnLimitGateAccounting:
         assert cd['target_n'] == 1.0, f"target_n doublé : {cd['target_n']}"
         assert cd['target_sum'] == pytest.approx(float(CHARGE_LONG_DECLARATION_INCHES))
         assert cd['long'] == 1.0, f"long doublé : {cd['long']}"
+
+    def test_second_call_reproduces_the_first_on_every_counter(self, monkeypatch):
+        """TOUS les compteurs, pas seulement charge_distance : deux appels, un seul résultat.
+
+        La docstring de `_build_terminal_info` promet un RECALCUL PUR — aucun `+=` sur
+        `self.episode_tactical_data`. Le seul verrou existant ne couvrait qu'un champ ; un
+        compteur ajouté demain en `+=` direct doublerait sans rougir. Ici la comparaison porte
+        sur le dict entier, donc sur les compteurs présents ET futurs.
+        """
+        import copy
+
+        engine = _make_engine()
+        engine.reset()
+
+        monkeypatch.setattr(
+            engine, "_determine_winner_with_method",
+            lambda: (1, "turn_limit"),
+        )
+        engine.game_state["action_logs"] = _mixed_action_logs()
+
+        engine._build_terminal_info()
+        first = copy.deepcopy(engine.episode_tactical_data)
+        engine._build_terminal_info()
+        second = copy.deepcopy(engine.episode_tactical_data)
+
+        # ANTI-VACANCE : un journal qui n'alimenterait rien rendrait l'égalité triviale.
+        assert first['move_actions'] == 1
+        assert first['move_flees'] == 1
+        assert first['move_advances'] == 1
+        assert first['move_waits'] == 1
+        assert first['shoot_waits'] == 1
+        assert first['charge_attempts'] == 1
+        assert first['charge_attempts_opponent'] == 1
+        assert first['shots_fired'] == 2
+        assert first['hits'] == 1
+        assert first['shoot_kills'] == 1
+        assert first['melee_kills'] == 1
+        assert first['damage_dealt'] == 7
+        assert first['shoot_activations'] == 1
+        assert first['fight_activations'] == 1
+        assert first['charge_distance']['agent']['target_n'] == 1.0
+        assert first['abilities_counts']['charge_after_advance_agent'] == 1
+        assert first['abilities_counts']['reactive_move_opp'] == 1
+        assert first['abilities_counts']['hit_reroll_agent'] == 1
+
+        assert second == first, (
+            "un compteur de la boucle action_logs accumule sur self.episode_tactical_data "
+            "au lieu d'une variable locale : "
+            f"{[k for k in first if first[k] != second[k]]}"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
