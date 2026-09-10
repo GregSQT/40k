@@ -528,8 +528,7 @@ def main() -> None:
     parser.add_argument(
         "--matchup-dir",
         type=Path,
-        default=PROJECT_ROOT
-        / "config/agents/CoreAgent/rosters/150pts/matchups",
+        required=True,
         help="Répertoire contenant les JSON holdout_hard_matchups_<bot>.json de RANKING_BOTS",
     )
     parser.add_argument(

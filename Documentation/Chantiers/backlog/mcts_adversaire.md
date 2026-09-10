@@ -606,7 +606,7 @@ Le **micro-MCTS** sur masque complet reste **option expérimentale** (souvent P4
 | [Documentation/Reference/training/entrainement.md](../../Reference/training/entrainement.md) | Pipeline PPO, `opponent_mix`, seat-aware, eval, callbacks. |
 | [Documentation/Reference/moteur/tour_de_jeu.md](../../Reference/moteur/tour_de_jeu.md) | Phases légales — quand placer les points de décision. |
 | [Documentation/Reference/moteur/architecture_moteur.md](../../Reference/moteur/architecture_moteur.md) | Handlers — effets de bord des transitions. |
-| `config/agents/CoreAgent/CoreAgent_training_config.json` | Config effective agents. |
+| `config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json` | Config effective agents. |
 | `ai/train.py` | Chargement `opponent_mix`, construction env. |
 
 ---
