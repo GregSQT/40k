@@ -4722,9 +4722,7 @@ def _manual_roll_fight_intent(
                     # excepte aucun. Aucune arme de l armurerie ne porte les deux regles, donc
                     # ce cas reste theorique — mais l ecrire ainsi est ce que dit le texte.
                     if _hs_rec.get("criticalWound"):  # get allowed
-                        _hs_mw = random.randint(1, 6)
-                        _hs_rec["holdStillMW"] = _hs_mw
-                        _hs_dice.append(_hs_mw)
+                        _hs_dice.append(random.randint(1, 6))
                 if _hs_dice:
                     _hs_pending = {
                         "ability": HAZARD_CONTEXT_HOLD_STILL,

@@ -230,9 +230,11 @@ def net_mortal_wounds(brut: int, action_desc: str) -> int:
     if saved:
         return max(0, brut - int(saved.group(1)))
     return brut
-#: 06.02 par CAPACITÉ de datasheet. Le tag vient de `HAZARD_CONTEXT_TAGS`, table partagée avec
-#: l'émetteur : ajouter une capacité au moteur l'ajoute ici sans qu'on puisse l'oublier, et une
-#: ligne portant un tag que cette table ne connaît pas ne peut pas être prise pour une autre.
+#: 06.02 par CAPACITÉ de datasheet. Les CLÉS viennent de `HAZARD_CONTEXT_TAGS`, table partagée
+#: avec l'émetteur, si bien qu'un tag ne peut pas être orthographié différemment des deux côtés.
+#: L'INVENTAIRE, lui, est écrit ici à la main : ajouter une capacité 06.02 au moteur ne l'ajoute
+#: PAS à cette table. L'oublier est silencieux — sa ligne ne matche plus `_MW_ABILITY_SUFFERS_RE`,
+#: tombe dans la branche `other` et ses blessures ne sont jamais retirées des points de vie suivis.
 _MW_ABILITY_RULE_IDS = {
     HAZARD_CONTEXT_TAGS[HAZARD_CONTEXT_HOLD_STILL]: "mortal_wounds_on_critical_wound",
     HAZARD_CONTEXT_TAGS[HAZARD_CONTEXT_EXHORTATION]: "mortal_wounds_on_fight_activation",

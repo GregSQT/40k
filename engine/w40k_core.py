@@ -6661,8 +6661,7 @@ class W40KEngine(gym.Env):
             # cible a qui retirer les points de vie. L'attaquant garde sa cle a part.
             "unitId": target_eid,
             "attackerId": squad_id,
-            "player": int(require_key(
-                require_key(self.game_state, "units_cache")[str(target_eid)], "player")),
+            "player": int(require_key(units_cache[str(target_eid)], "player")),
             "col": _tgt_col,
             "row": _tgt_row,
             "hazardousMortalWounds": mw_count,
