@@ -424,7 +424,7 @@ def test_reset_keys_match_the_current_save_format(reset_mutable_keys: FrozenSet[
         f"AJOUTÉES : une save au format courant rendrait un game_state AMPUTÉ de ces clés, et "
         f"leur premier lecteur lèverait au fond du moteur — après que le chargement a déjà écrasé "
         f"la partie en cours. Bumpe services/game_saves._MAGIC, ajoute l'ancienne magic à "
-        f"_LEGACY_MAGICS avec son motif dans _reject_legacy, et ajoute une NOUVELLE entrée dans "
+        f"_LEGACY_LOSSES avec ce qui lui manque, et ajoute une NOUVELLE entrée dans "
         f"MUTABLE_KEYS_BY_MAGIC — n'élargis pas l'entrée existante.\n"
         f"RETIRÉES : NE BUMPE PAS par réflexe. Si plus aucun lecteur ne consulte la clé, laisse-la "
         f"publiée par le reset, inerte et commentée comme telle : une row qui porte une clé de "
@@ -510,8 +510,8 @@ def test_reset_subkeys_match_the_current_save_format(
         f"AJOUTÉES : une save au format courant restitue le dict parent EN BLOC, donc amputé de "
         f"ces sous-clés, et leur premier lecteur lèvera au fond du moteur — après que le "
         f"chargement a déjà écrasé la partie en cours. Si la sous-clé est un nom FIXE écrit par "
-        f"le code : bumpe services/game_saves._MAGIC, ajoute l'ancienne magic à _LEGACY_MAGICS "
-        f"avec son motif dans _reject_legacy, et ajoute une NOUVELLE entrée dans "
+        f"le code : bumpe services/game_saves._MAGIC, ajoute l'ancienne magic à _LEGACY_LOSSES "
+        f"avec ce qui lui manque, et ajoute une NOUVELLE entrée dans "
         f"MUTABLE_SUBKEYS_BY_MAGIC — n'élargis pas l'entrée existante. Si le dict s'est mis à "
         f"porter des sous-clés dérivées des ENTITÉS (unité, joueur, hex), il ne relève plus de "
         f"l'épingle : déplace-le dans _DATA_KEYED_MUTABLE_DICTS, sans bump.\n"
@@ -575,20 +575,42 @@ def _ecrire_save_sous_magic(tmp_path: Any, magic: bytes) -> SaveStore:
     return store
 
 
+def _message_de_refus(tmp_path: Any, magic: bytes) -> str:
+    """Charge une save écrite sous `magic`, exige le refus, et rend son message.
+
+    LES DEUX ASSERTIONS COMMUNES SONT ICI, et c'est ce qui les rend inoubliables : recopiées par
+    test, chaque nouvel en-tête périmé les réécrivait à la main.
+      - « au format <magic> » : l'en-tête RELU, interpolé en tête de message, est la SEULE chose
+        qui sépare un format périmé d'un autre — `_reject_legacy` énumère toutes ses clauses quel
+        que soit le fichier, donc chercher un motif de clause ne prouve pas quel format a été
+        refusé (mesuré : le refus d'un TL03 contient « TL06 » et « AMBIGU »).
+      - « écrite avant … » : sépare la branche « format périmé » de la branche « format inconnu »,
+        qui interpole elle aussi l'en-tête lu et rendrait la première assertion vraie sur un
+        fichier tombé de `_LEGACY_MAGICS`.
+    Chaque test n'ajoute donc que ce qui lui est propre : les clauses que SON format doit nommer.
+    """
+    store = _ecrire_save_sous_magic(tmp_path, magic)
+
+    with pytest.raises(ValueError) as excinfo:
+        store.point("20260101-000000")
+    message = str(excinfo.value)
+    assert f"au format {magic.decode()}" in message, message
+    assert f"écrite avant {_MAGIC.decode()}" in message, message
+    return message
+
+
 def test_a_previous_format_is_refused_at_load(tmp_path: Any) -> None:
     """Une save au format précédent est refusée AVANT d'écraser la partie en cours.
 
-    L'assertion porte sur « écrite avant … », pas sur le nom du format : `_reject_legacy` a DEUX
-    branches, et celle du format inconnu interpole l'en-tête lu, donc elle contient elle aussi
-    `W40KTL03`. Chercher ce seul nom rendait le verrou vert quoi qu'il arrive — vérifié : sans
-    TL03 dans `_LEGACY_MAGICS`, le refus dégénère en « format de fichier inconnu », indiscernable
-    d'un fichier corrompu, et l'ancienne assertion passait quand même.
+    Aucune clause propre à asserter : ce format-là n'a rien de nommé à vérifier dans le message,
+    seul son refus compte. Les deux assertions du helper suffisent — dont « écrite avant … », qui
+    est celle qui sépare les DEUX branches de `_reject_legacy` : celle du format inconnu interpole
+    l'en-tête lu, donc elle contient elle aussi `W40KTL03`. Vérifié : sans TL03 dans
+    `_LEGACY_MAGICS`, le refus dégénère en « format de fichier inconnu », indiscernable d'un
+    fichier corrompu.
     """
     # Fichier structurellement valide, mais écrit sous la magic précédente : seul l'en-tête décide.
-    store = _ecrire_save_sous_magic(tmp_path, b"W40KTL03")
-
-    with pytest.raises(ValueError, match=f"écrite avant {_MAGIC.decode()}"):
-        store.point("20260101-000000")
+    _message_de_refus(tmp_path, b"W40KTL03")
 
 
 def test_the_2001_declaration_keys_are_named_in_the_refusal(tmp_path: Any) -> None:
@@ -601,20 +623,14 @@ def test_the_2001_declaration_keys_are_named_in_the_refusal(tmp_path: Any) -> No
     C'est `test_reset_subkeys_match_the_current_save_format` qui les épingle désormais ; ce
     test-ci vérifie l'autre moitié, le REFUS que le bump rend possible.
 
-    DEUX assertions de natures différentes, et les confondre rendrait ce test à moitié vacant.
-    `_reject_legacy` construit UN message qui énumère TOUTES les clauses, quel que soit l'en-tête
-    lu — mesuré : la clause 20.01 est présente aussi dans le refus d'un fichier TL03. Nommer les
-    deux clés vérifie donc le CONTENU du message (le joueur doit lire ce qui manque à son
-    fichier), jamais que c'est bien TL05 qui a été refusé. Seul l'en-tête relu, interpolé en tête
-    de message, sépare un format périmé d'un autre — d'où la première assertion.
+    Nommer les deux clés vérifie le CONTENU du message — le joueur doit lire ce qui manque à son
+    fichier —, jamais que c'est bien TL05 qui a été refusé : `_reject_legacy` énumère toutes ses
+    clauses quel que soit l'en-tête lu (mesuré : la clause 20.01 est aussi dans le refus d'un
+    TL03). Ce qui discrimine est dans `_message_de_refus`, et les confondre rendrait ce test à
+    moitié vacant.
     """
-    store = _ecrire_save_sous_magic(tmp_path, b"W40KTL05")
+    message = _message_de_refus(tmp_path, b"W40KTL05")
 
-    with pytest.raises(ValueError) as excinfo:
-        store.point("20260101-000000")
-    message = str(excinfo.value)
-    assert "au format W40KTL05" in message, message
-    assert f"écrite avant {_MAGIC.decode()}" in message, message
     assert "reserves_declaration_queue" in message, message
     assert "reserves_declaration_closed" in message, message
 
@@ -632,17 +648,13 @@ def test_the_burned_tl06_header_is_refused(tmp_path: Any) -> None:
     cas le fichier est accepté, dans le second le refus dégénère en « format de fichier inconnu »,
     indiscernable d'une corruption, et n'explique plus au joueur ce qui s'est passé.
 
-    L'assertion porte sur l'en-tête RELU (`au format W40KTL06`) et non sur le mot « AMBIGUË » :
-    le message énumère toutes les clauses quel que soit le fichier, donc chercher le motif
-    passerait aussi sur un refus de TL03 — mesuré.
+    Ce qui prouve que c'est bien TL06 qui a été refusé est l'en-tête RELU, dans
+    `_message_de_refus`, et non le mot « AMBIGUË » asserté ici : le message énumère toutes les
+    clauses quel que soit le fichier, donc ce motif passerait aussi sur un refus de TL03 —
+    mesuré. Il vérifie le contenu lu par le joueur, pas l'identité du format.
     """
-    store = _ecrire_save_sous_magic(tmp_path, b"W40KTL06")
+    message = _message_de_refus(tmp_path, b"W40KTL06")
 
-    with pytest.raises(ValueError) as excinfo:
-        store.point("20260101-000000")
-    message = str(excinfo.value)
-    assert "au format W40KTL06" in message, message
-    assert f"écrite avant {_MAGIC.decode()}" in message, message
     assert "AMBIGU" in message, message
 
 
@@ -658,11 +670,6 @@ def test_the_tl07_header_is_refused(tmp_path: Any) -> None:
     ROUGE si `W40KTL07` sort de `_LEGACY_MAGICS` : le refus dégénère alors en « format de fichier
     inconnu », indiscernable d'une corruption.
     """
-    store = _ecrire_save_sous_magic(tmp_path, b"W40KTL07")
+    message = _message_de_refus(tmp_path, b"W40KTL07")
 
-    with pytest.raises(ValueError) as excinfo:
-        store.point("20260101-000000")
-    message = str(excinfo.value)
-    assert "au format W40KTL07" in message, message
-    assert f"écrite avant {_MAGIC.decode()}" in message, message
     assert "reserves_declaration_started" in message, message

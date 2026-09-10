@@ -1941,6 +1941,25 @@ def build_reserves_declaration_queue(
     return queue
 
 
+def reset_reserves_declaration_state(
+    deployment_state: Dict[str, Any], deployable_units: Dict[Any, Any]
+) -> None:
+    """Pose l'état de DÉPART de l'étape 20.01 : file d'interrogation, `closed`, `started`.
+
+    ÉCRIVAIN UNIQUE des trois clés, pour les DEUX sites qui remettent l'étape à zéro — le reset
+    d'épisode (`W40KEngine.reset`) et le remplacement d'armée
+    (`services/api_server._execute_change_roster_action`), qui rebâtit le pool de pose donc la
+    file. Écrites à la main de chaque côté, la troisième n'est allée que dans le premier, et rien
+    ne le voyait : le verrou de format de save ne lit que le reset. Symétrique de
+    `consume_reserves_declaration_entry`, écrivain unique du couple pop + marqueur.
+    """
+    deployment_state[RESERVES_DECLARATION_QUEUE_KEY] = build_reserves_declaration_queue(
+        deployable_units
+    )
+    deployment_state[RESERVES_DECLARATION_CLOSED_KEY] = False
+    deployment_state[RESERVES_DECLARATION_STARTED_KEY] = False
+
+
 def reserves_declaration_step_is_open(game_state: Dict[str, Any]) -> bool:
     """True tant que l'étape Declare Battle Formations n'est pas épuisée.
 

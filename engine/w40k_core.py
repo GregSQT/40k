@@ -2172,17 +2172,15 @@ class W40KEngine(gym.Env):
                 "deployable_units": deployable_units,
                 "deployed_units": set(),
                 "deployment_complete": False,
-                # 20.01 — l'etape Declare Battle Formations PRECEDE le deploiement : la file des
-                # questions est figee ICI, avant qu'une seule figurine ne soit posee. La batir
-                # plus tard reviendrait a la batir sur un plateau deja partiellement deploye,
-                # c'est-a-dire a rendre au declarant l'information que la regle lui refuse.
-                deployment_handlers.RESERVES_DECLARATION_QUEUE_KEY:
-                    deployment_handlers.build_reserves_declaration_queue(deployable_units),
-                deployment_handlers.RESERVES_DECLARATION_CLOSED_KEY: False,
-                # Aucune reponse 20.01 n'a encore ete donnee : c'est ce marqueur qui autorise
-                # encore le remplacement d'armee, et qui le refusera des la premiere.
-                deployment_handlers.RESERVES_DECLARATION_STARTED_KEY: False,
             }
+            # 20.01 — l'etape Declare Battle Formations PRECEDE le deploiement : la file des
+            # questions est figee ICI, avant qu'une seule figurine ne soit posee. La batir plus
+            # tard reviendrait a la batir sur un plateau deja partiellement deploye, c'est-a-dire
+            # a rendre au declarant l'information que la regle lui refuse. Les trois cles passent
+            # par l'ecrivain unique du module, partage avec `change_roster`.
+            deployment_handlers.reset_reserves_declaration_state(
+                self.game_state["deployment_state"], deployable_units
+            )
             if not deployable_units[1] and deployable_units[2]:
                 self.game_state["deployment_state"]["current_deployer"] = 2
             if not self._complete_deployment_if_nothing_to_place():
