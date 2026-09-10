@@ -21,6 +21,9 @@ import os
 
 import pytest
 
+# Ce module ne parle pas à l'API : la fixture d'auth du conftest serait du travail jeté.
+from tests.unit.services._auth_neutre import authenticated_api_client  # noqa: F401
+
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 )

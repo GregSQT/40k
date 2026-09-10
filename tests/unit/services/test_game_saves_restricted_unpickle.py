@@ -16,6 +16,9 @@ import pytest
 
 from services.game_saves import _MAGIC, SaveStore, _pack_record, _safe_loads
 
+# Ce module ne parle pas à l'API : la fixture d'auth du conftest serait du travail jeté.
+from tests.unit.services._auth_neutre import authenticated_api_client  # noqa: F401
+
 
 class _RceGadget:
     """Objet dont le dépickle exécuterait une commande — c'est le payload d'un attaquant."""
