@@ -123,7 +123,7 @@ def _mask_only_opens_wait(mask: Any) -> bool:
 # Import shared utilities FIRST (no circular dependencies)
 from engine.episode_schedule import episodes_per_env
 from engine.game_utils import (
-    ONCE_CLAIMS_KEY, add_console_log, enter_phase, get_controlled_player, get_unit_by_id,
+    ONCE_CLAIMS_KEY, add_console_log, enter_phase, get_unit_by_id,
     once_claim, once_claimed, turn_limit_reached, get_effective_turn_limit,
     require_unit_by_id,
 )
@@ -2795,16 +2795,19 @@ class W40KEngine(gym.Env):
         # indexés PAR JOUEUR. La projection sur agent/adversaire se fait ici et nulle part
         # ailleurs — c'est le seul endroit qui connaisse le siège de l'agent sur CET épisode
         # (`agent_seat_mode: random` : le joueur contrôlé est 1 ou 2 selon le tirage).
-        _controlled = get_controlled_player(self.game_state)
-        _opponent = 2 if _controlled == 1 else 1
+        # `controlled_player` / `opponent_player` sont ceux etablis en tete de cette methode :
+        # `get_controlled_player(game_state)` lit `game_state["config"]["controlled_player"]`,
+        # et `game_state["config"]` EST `self.config` (pose par reference au chargement du
+        # scenario), donc les deux routes rendaient la meme valeur. Deux noms de plus pour deux
+        # valeurs deja en main obligeaient a prouver leur egalite avant de toucher a ce bloc.
         for _key, _state_key in (
             ('reserves_placed', '_reserves_placed'),
             ('reserves_deployed', '_reserves_deployed'),
             ('reserves_destroyed_turn3', '_reserves_destroyed_turn3'),
         ):
             _by_player = require_key(self.game_state, _state_key)
-            self.episode_tactical_data[f'{_key}_agent'] = int(_by_player[_controlled])
-            self.episode_tactical_data[f'{_key}_opponent'] = int(_by_player[_opponent])
+            self.episode_tactical_data[f'{_key}_agent'] = int(_by_player[controlled_player])
+            self.episode_tactical_data[f'{_key}_opponent'] = int(_by_player[opponent_player])
 
         # ARRIVÉES DÉCLINÉES vs SANS DESTINATION — deux causes que « détruite en réserve »
         # confondait, et dont dépend toute pénalité juste : décliner est une DÉCISION, un
@@ -2814,7 +2817,7 @@ class W40KEngine(gym.Env):
         _arrived = require_key(self.game_state, "_ingress_arrived")
         _no_dest = require_key(self.game_state, "_ingress_no_destination")
         _declined = _offered - _arrived
-        for _label, _player in (('agent', _controlled), ('opponent', _opponent)):
+        for _label, _player in (('agent', controlled_player), ('opponent', opponent_player)):
             # `offers` est le DÉNOMINATEUR, et il n'est pas décoratif : sans lui, un
             # `declined` à zéro ne distingue pas « toutes les occasions ont été saisies » de
             # « aucune n'a été offerte » — les deux se lisent 0 sur la courbe.
@@ -2974,13 +2977,26 @@ class W40KEngine(gym.Env):
         terminal_info["deployment_mode"] = self.game_state["deployment_mode_schedule_mode"]
 
         # Log episode end with final stats and win method
-        if hasattr(self, 'step_logger') and self.step_logger and self.step_logger.enabled:
+        if self.step_logger and self.step_logger.enabled:
             objective_control = self.state_manager.calculate_objective_control(self.game_state)
             self.step_logger.log_episode_end(self.game_state["episode_steps"], winner, win_method, objective_control)
 
         # MEME GARDE que celle du point de sortie de `step_with_mask`, appliquee ici parce que
         # c'est ici que les cles terminales sont ECRITES : les sorties anticipees ne traversent
         # pas ce point de sortie, et une cle ajoutee plus tard leur echapperait.
+        self._assert_terminal_keys_declared(terminal_info)
+        return terminal_info
+
+    @staticmethod
+    def _assert_terminal_keys_declared(terminal_info: Dict[str, Any]) -> None:
+        """LEVE si `terminal_info` porte une cle absente de `TERMINAL_INFO_KEYS`.
+
+        DEUX APPELANTS, et c'est sa raison d'etre : `_build_terminal_info` (qui ecrit le bilan
+        d'episode) et le point de sortie de `step_with_mask` (qui y ajoute les cles de
+        TRONCATURE, absentes du bilan). Ecrit deux fois, ce controle aurait porte deux messages a
+        garder en phase — et c'est exactement l'oubli d'enumeration que `TERMINAL_INFO_KEYS`
+        existe pour rendre impossible.
+        """
         unlisted = tuple(key for key in terminal_info if key not in TERMINAL_INFO_KEYS)
         if unlisted:
             raise RuntimeError(
@@ -2988,7 +3004,6 @@ class W40KEngine(gym.Env):
                 f"Les declarer, sinon `_drain_forced_waits` ne les remontera pas quand l'episode "
                 f"se termine pendant une chaine d'attentes forcees auto-jouees."
             )
-        return terminal_info
 
 
     def step_with_mask(
@@ -3642,13 +3657,7 @@ class W40KEngine(gym.Env):
         # etre declaree ferait perdre cette cle a tout episode qui se termine pendant une chaine
         # d'attentes forcees, chez le seul appelant qui l'exige (`ai/training_callbacks`) et
         # seulement une fois sur N episodes : elle echoue ici, immediatement et partout.
-        unlisted = tuple(key for key in terminal_info if key not in TERMINAL_INFO_KEYS)
-        if unlisted:
-            raise RuntimeError(
-                f"Cles de fin d'episode absentes de TERMINAL_INFO_KEYS : {unlisted}. "
-                f"Les declarer, sinon `_drain_forced_waits` ne les remontera pas quand l'episode "
-                f"se termine pendant une chaine d'attentes forcees auto-jouees."
-            )
+        self._assert_terminal_keys_declared(terminal_info)
         info.update(terminal_info)
 
         # Auto-jeu des attentes forcees : cf. `_drain_forced_waits`. Applique AUX DEUX sorties
