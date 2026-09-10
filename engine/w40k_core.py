@@ -4446,7 +4446,10 @@ class W40KEngine(gym.Env):
             declared = bool(require_key(require_key(selected_option, "payload"), "declare"))
             decision_squad_id = str(require_key(decision, "unit_id"))
             # `apply_reserves_declaration_decision` efface la decision elle-meme (ecrivain unique)
-            # et ferme l'etape des que la file est epuisee.
+            # puis enchaine sur la suite commune aux deux sieges
+            # (`resolve_reserves_declaration_answer`) : file amputee, mise en reserves, et siege
+            # place sur la question SUIVANTE — sans quoi le client relance un tour IA sur un siege
+            # perime et le modele repond a la question de l'humain.
             deployment_handlers.apply_reserves_declaration_decision(
                 self.game_state, decision_squad_id, declared
             )

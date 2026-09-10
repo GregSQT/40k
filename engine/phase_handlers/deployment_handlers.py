@@ -2016,10 +2016,9 @@ def next_reserves_declaration_entry(
 def consume_reserves_declaration_entry(deployment_state: Dict[str, Any]) -> None:
     """Retire la tête de file 20.01 PARCE QU'ON Y A RÉPONDU, et marque l'étape commencée.
 
-    ÉCRIVAIN UNIQUE des deux gestes, pour les deux sièges : le siège piloté par le modèle y arrive
-    par `apply_reserves_declaration_decision`, le siège humain par
-    `deployment_place_in_strategic_reserves`. Séparés, l'un des deux oublierait le marqueur et le
-    verrou de `change_roster` dépendrait de qui joue.
+    ÉCRIVAIN UNIQUE des deux gestes, pour les deux sièges, qui y arrivent par la suite commune
+    d'une réponse (`resolve_reserves_declaration_answer`). Séparés, l'un des deux oublierait le
+    marqueur et le verrou de `change_roster` dépendrait de qui joue.
 
     À NE PAS CONFONDRE avec le `pop` de `next_reserves_declaration_entry` : celui-là retire une
     question qui ne sera JAMAIS posée (unité inéligible aux réserves), aucune réponse n'a été
@@ -2080,9 +2079,9 @@ def reserves_declaration_decline_slot(
 def close_reserves_declaration_step_if_done(game_state: Dict[str, Any]) -> bool:
     """Ferme l'étape Declare Battle Formations si plus aucune question 20.01 n'est due.
 
-    Rend ``True`` seulement au passage ouvert -> fermé. POINT DE FERMETURE UNIQUE des deux
-    sièges : le siège piloté par le modèle y arrive par `arm_reserves_declaration_decision`, le
-    siège humain par `deployment_place_in_strategic_reserves`. Deux fermetures séparées feraient
+    Rend ``True`` seulement au passage ouvert -> fermé. POINT DE FERMETURE UNIQUE : la suite
+    commune d'une réponse (`resolve_reserves_declaration_answer`, les deux sièges) et le build de
+    masque (`arm_reserves_declaration_decision`) y passent. Deux fermetures séparées feraient
     dépendre du siège l'ordre dans lequel la mise en place reprend.
     """
     deployment_state = require_key(game_state, "deployment_state")
@@ -2117,12 +2116,15 @@ def move_seat_to_pending_reserves_declaration(
 ) -> Optional[Tuple[int, str]]:
     """Place le siège courant sur le joueur que 20.01 interroge — ``(joueur, escouade)`` ou ``None``.
 
-    ÉCRIVAIN UNIQUE du siège pendant l'étape Declare Battle Formations, pour les deux routes : le
-    masque gym y arrive par `arm_reserves_declaration_decision`, la route de jeu par
-    `deployment_place_in_strategic_reserves`. Seul le gym le faisait, et le siège restait donc
-    figé sur le joueur 1 en partie servie par l'API : en PvE, la question du bot était rendue au
-    client sans que le tour IA ne parte jamais — le déclencheur du client lit `current_deployer`
-    (`BoardWithAPI`) et `execute_ai_turn` refuse hors `current_player == 2`. 20.01 dit « **you**
+    ÉCRIVAIN UNIQUE du siège pendant l'étape Declare Battle Formations, pour ses quatre
+    appelants : le masque gym (`arm_reserves_declaration_decision`), les deux sièges de jeu par la
+    suite commune d'une réponse (`resolve_reserves_declaration_answer`), et les deux sites qui
+    (re)bâtissent la file — le reset d'épisode (`W40KEngine.reset`) et le remplacement d'armée
+    (`services/api_server._execute_change_roster_action`). Seul le gym le faisait,
+    et le siège restait donc figé sur le joueur 1 en partie servie par l'API : en PvE, la question
+    du bot était rendue au client sans que le tour IA ne parte jamais — le déclencheur lit
+    `current_deployer` (`BoardWithAPI`) et `execute_ai_turn` refuse hors `current_player == 2`,
+    garde qu'il lit AVANT de construire le masque. 20.01 dit « **you**
     can select one or more friendly units », donc la question d'un camp se répond depuis son
     siège, pas depuis celui d'en face.
 
@@ -2193,6 +2195,36 @@ def arm_reserves_declaration_decision(
     )
 
 
+def resolve_reserves_declaration_answer(
+    game_state: Dict[str, Any], squad_id: str, declared: bool
+) -> None:
+    """Suite d'UNE réponse 20.01 : file amputée, mutation, puis siège de la question suivante.
+
+    ÉCRIVAIN UNIQUE de cette séquence pour les deux routes — `apply_reserves_declaration_decision`
+    (siège piloté par le modèle) et `deployment_place_in_strategic_reserves` (siège humain).
+    Écrite deux fois, elle a divergé sur sa DERNIÈRE ligne : la route du modèle fermait l'étape
+    sans jamais faire suivre le siège. Mesuré sur `reserves_20_fixture1.json`, partie servie par
+    l'API — le modèle répond à la question du joueur 2, le siège RESTE à 2, le client relance donc
+    un tour IA, `execute_ai_turn` passe son garde `current_player == 2`, et c'est la construction
+    du masque — POSTÉRIEURE au garde — qui recale le siège sur le joueur 1 : le modèle a mis en
+    réserves l'unité 2 du joueur 1.
+
+    Le siège suit la question suivante, sinon il reste sur le répondant et le tour IA du client ne
+    partirait jamais pour la question du bot (`BoardWithAPI` lit `current_deployer`). La file
+    épuisée appartient à la clôture, qui rend la main au premier déployeur — d'où le `if not`, et
+    non deux appels : les deux écriraient le siège, dans cet ordre le second gagnerait.
+
+    C'est la forme des poses de déploiement (`deployment_commit_plan`), et pour la même raison :
+    le siège doit être à jour DANS le résultat de l'action, pas au prochain build de masque.
+    """
+    deployment_state = require_key(game_state, "deployment_state")
+    consume_reserves_declaration_entry(deployment_state)
+    if declared:
+        commit_strategic_reserves(game_state, str(squad_id))
+    if not close_reserves_declaration_step_if_done(game_state):
+        move_seat_to_pending_reserves_declaration(game_state)
+
+
 def apply_reserves_declaration_decision(
     game_state: Dict[str, Any], squad_id: str, declared: bool
 ) -> None:
@@ -2223,10 +2255,7 @@ def apply_reserves_declaration_decision(
         player=int(require_key(game_state, "current_player")),
         unit_id=str(squad_id),
     )
-    consume_reserves_declaration_entry(deployment_state)
-    if declared:
-        commit_strategic_reserves(game_state, str(squad_id))
-    close_reserves_declaration_step_if_done(game_state)
+    resolve_reserves_declaration_answer(game_state, str(squad_id), declared)
 
 
 def commit_strategic_reserves(game_state: Dict[str, Any], squad_id: str) -> None:
@@ -2321,14 +2350,7 @@ def deployment_place_in_strategic_reserves(
             "seat": seat,
         }
 
-    consume_reserves_declaration_entry(deployment_state)
-    if declare:
-        commit_strategic_reserves(game_state, squad_id)
-    # Le siège SUIT la question suivante, sinon il resterait sur le répondant : le tour IA du
-    # client ne partirait jamais pour la question du bot (`BoardWithAPI` lit `current_deployer`).
-    # La file épuisée est le domaine de la clôture, qui rend la main au premier déployeur.
-    if not close_reserves_declaration_step_if_done(game_state):
-        move_seat_to_pending_reserves_declaration(game_state)
+    resolve_reserves_declaration_answer(game_state, squad_id, declare)
 
     result: Dict[str, Any] = {
         "action": "deploy_strategic_reserves",

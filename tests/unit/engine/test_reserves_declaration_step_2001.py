@@ -553,3 +553,62 @@ def test_the_human_route_refuses_a_question_asked_to_a_model_seat():
     assert result["player"] == 2
     # La question n'a pas été consommée : elle attend toujours son siège.
     assert next_reserves_declaration_entry(gs) == model_entry
+
+
+def test_the_seat_follows_the_next_question_after_a_model_answer():
+    """JUMEAU du siège humain : la réponse du MODÈLE déplace le siège de la même façon.
+
+    Le chemin emprunté ici est celui de l'API — `_process_squad_action`, ce qu'appelle
+    `execute_ai_turn` —, et non `eng.step` : le step gym reconstruit le masque avant de rendre la
+    main, et ce build recale le siège de lui-même. Passer par lui rendrait ce test vert quel que
+    soit le code, alors que le tour IA du client, lui, lit l'état SANS build de masque
+    intermédiaire.
+
+    Défaut mesuré avant écriture, sur cette fixture, en suivant le chemin de l'API ::
+
+        modele repond Q2 -> True | current_player=2 current_deployer=2 | question due: (1, '2')
+        tour IA 2 : masque arme joueur 1 unite 2 | current_player=1 current_deployer=1
+        => unite 2 du joueur 1 in_strategic_reserves = True
+
+    Le siège restait sur 2 après la réponse du bot, le client relançait un tour IA, le garde
+    `current_player == 2` d'`execute_ai_turn` passait — il est lu AVANT le build de masque —, et
+    c'est ce build qui armait la question du JOUEUR 1 pour le modèle. Le modèle déclarait les
+    réserves de l'humain.
+    """
+    eng = _engine()
+    gs = eng.game_state
+    gs["player_types"]["2"] = "ai"
+    # `execute_ai_turn` sort sur `not_pve_mode` avant tout le reste : sans ce drapeau, l'assertion
+    # finale serait verte pour la mauvaise raison.
+    eng.is_pve_mode = True
+
+    first = next_reserves_declaration_entry(gs)
+    assert first is not None and first[0] == 1, (
+        "la première question n'est pas celle du joueur 1 : l'enchaînement visé n'est pas observé"
+    )
+    ok, result = deployment_place_in_strategic_reserves(
+        gs, {"unitId": first[1], "declare": False}
+    )
+    assert ok, result
+    assert gs["current_player"] == 2, "le siège n'est pas passé au modèle : rien à observer"
+
+    # Tour IA du client : c'est la construction du masque qui arme la question du bot.
+    eng.get_action_mask()
+    pending = read_pending_agent_decision(gs)
+    assert pending is not None and int(pending["player"]) == 2, pending
+
+    ok, result = eng._process_squad_action({"action": "agent_decision", "option_index": 1})
+    assert ok, result
+
+    third = next_reserves_declaration_entry(gs)
+    assert third is not None and third[0] == 1, (
+        "la question suivante n'appartient pas au joueur 1 : le test ne distingue pas un siège "
+        "qui suit d'un siège figé sur le répondant"
+    )
+    assert gs["deployment_state"]["current_deployer"] == 1
+    assert gs["current_player"] == 1
+
+    # LE CHEMIN DE PRODUCTION : le tour IA suivant du client doit être REFUSÉ. C'est ce refus, et
+    # lui seul, qui empêche le modèle de répondre à la question de l'humain.
+    ai_ok, ai_result = eng.execute_ai_turn()
+    assert ai_ok is False and ai_result["error"] == "not_ai_player_turn", ai_result

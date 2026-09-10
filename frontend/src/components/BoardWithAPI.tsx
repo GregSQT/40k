@@ -871,6 +871,12 @@ export const BoardWithAPI: React.FC = () => {
     [endlessDutyDefaultPicks]
   );
 
+  // ÉCRAN DE PRÉPARATION OUVERT — la partie n'a pas commencé. Lu par l'auto-application des
+  // rosters ET par l'orchestration du tour IA : tant que ce voile est là, PERSONNE ne joue, ni
+  // l'humain (le moteur ne lui pose la question 20.01 qu'après « Start Deployment », cf.
+  // `isReservesDeclarationPendingFor`) ni le bot. Les trois conditions de phase comptent : sans
+  // elles, une partie PvE à déploiement `fixed` — où l'écran ne s'ouvre jamais et
+  // `testDeploymentStarted` reste faux — gèlerait le bot pour toujours.
   const isPopupVisible =
     isRosterSetupMode &&
     apiProps.gameState?.phase === "deployment" &&
@@ -1606,6 +1612,21 @@ export const BoardWithAPI: React.FC = () => {
 
   // Track AI processing with ref to avoid re-render loops
   const isAIProcessingRef = useRef(false);
+  // Départ différé du tour IA. Annulé au DÉMONTAGE seulement, jamais au re-rendu : `apiProps` est
+  // un objet neuf à chaque rendu, donc l'effet qui l'arme se rejoue en continu — une annulation
+  // par changement de dépendances repousserait le départ à l'infini. Sans cette annulation, le
+  // timer survit à la sortie de la partie et lance un tour IA sur un composant démonté (mesuré :
+  // un `POST /api/game/ai-turn` d'un test comptabilisé pendant le suivant).
+  const aiTurnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (aiTurnTimeoutRef.current !== null) {
+        clearTimeout(aiTurnTimeoutRef.current);
+        aiTurnTimeoutRef.current = null;
+      }
+    },
+    []
+  );
   const [aiError, setAiError] = useState<string | null>(null);
   const [lastProcessedTurn, setLastProcessedTurn] = useState<string>("");
 
@@ -1736,8 +1757,21 @@ export const BoardWithAPI: React.FC = () => {
     // Allow multiple AI activations in same phase if there are still eligible units
     // Don't use lastProcessedTurn to block - rely on isAIProcessingRef and hasEligibleAIUnits
     // lastProcessedTurn is only used to detect turn/phase changes for reset
+    // `!isPopupVisible` : l'écran de préparation est le SEUL moment où le joueur peut encore
+    // changer d'armée, et le moteur refuse ce changement dès la première réponse 20.01
+    // (`change_roster_locked_after_reserves_declaration`). Le siège suivant la question depuis le
+    // reset (`move_seat_to_pending_reserves_declaration`), `current_player` vaut 2 dès que la
+    // première question due est celle du bot — file amputée des unités du joueur 1 inéligibles
+    // (FORTIFICATION, plafond de 50 %). Sans ce garde, le bot répondait à 20.01 pendant que
+    // l'écran de préparation était encore affiché, et le bouton « Change Roster » de l'humain
+    // partait en refus. Miroir exact du filtre humain (`isReservesDeclarationPendingFor`).
     const shouldTriggerAI =
-      isAiEnabled && isAITurn && !isAIProcessingRef.current && gameNotOver && hasEligibleAIUnits;
+      isAiEnabled &&
+      isAITurn &&
+      !isAIProcessingRef.current &&
+      gameNotOver &&
+      hasEligibleAIUnits &&
+      !isPopupVisible;
 
     // Only log when values actually change (prevents console flooding during animations)
     const currentAICheck = {
@@ -1766,7 +1800,8 @@ export const BoardWithAPI: React.FC = () => {
       // Don't set lastProcessedTurn here - wait until AI completes successfully
 
       // Small delay to ensure UI updates are complete
-      setTimeout(async () => {
+      aiTurnTimeoutRef.current = setTimeout(async () => {
+        aiTurnTimeoutRef.current = null;
         try {
           const latestState = latestGameStateRef.current;
           if (!latestState) {
@@ -1815,7 +1850,7 @@ export const BoardWithAPI: React.FC = () => {
     } else if (isAiEnabled && isAITurn && !hasEligibleAIUnits) {
       // AI turn skipped - no eligible units
     }
-  }, [isAiMode, apiProps, lastProcessedTurn]);
+  }, [isAiMode, apiProps, lastProcessedTurn, isPopupVisible]);
 
   // Update lastProcessedTurn when phase/turn changes (to track phase transitions)
   useEffect(() => {
