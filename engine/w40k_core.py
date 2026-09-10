@@ -971,7 +971,7 @@ class W40KEngine(gym.Env):
             # shaping et le peuplement des affectations sont partis le meme jour.
             #
             # ELLES RESTENT PUBLIEES PAR LE RESET, et ce n'est pas un oubli : elles
-            # APPARTIENNENT AU FORMAT DE SAUVEGARDE COURANT, `W40KTL06`. Les retirer rend
+            # APPARTIENNENT AU FORMAT DE SAUVEGARDE COURANT, `W40KTL07`. Les retirer rend
             # `tests/unit/services/test_save_format_key_contract.py` rouge, et sa correction
             # prescrite est un bump de magic qui REFUSE toutes les parties deja enregistrees
             # (`services/game_saves._reject_legacy`). Or la doctrine du bump vise l'AJOUT d'une
@@ -1797,7 +1797,7 @@ class W40KEngine(gym.Env):
             # shaping et le peuplement des affectations sont partis le meme jour.
             #
             # ELLES RESTENT PUBLIEES PAR LE RESET, et ce n'est pas un oubli : elles
-            # APPARTIENNENT AU FORMAT DE SAUVEGARDE COURANT, `W40KTL06`. Les retirer rend
+            # APPARTIENNENT AU FORMAT DE SAUVEGARDE COURANT, `W40KTL07`. Les retirer rend
             # `tests/unit/services/test_save_format_key_contract.py` rouge, et sa correction
             # prescrite est un bump de magic qui REFUSE toutes les parties deja enregistrees
             # (`services/game_saves._reject_legacy`). Or la doctrine du bump vise l'AJOUT d'une

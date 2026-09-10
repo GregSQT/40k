@@ -68,6 +68,13 @@ _log = logging.getLogger(__name__)
 # étendu le jour même (`MUTABLE_SUBKEYS_BY_MAGIC`) : les sous-clés que le reset publie dans ses
 # dicts mutables sont épinglées à leur tour, profondeur 1. Reste manuelle la seule question
 # qu'aucune table ne tranche : une donnée obligatoire posée PLUS BAS ENCORE, ou hors du reset.
+# TL07 = TL06 SANS le moindre changement de clés : le seul défaut fermé est une AMBIGUÏTÉ
+# D'EN-TÊTE. Deux formats DIFFÉRENTS ont porté `W40KTL06` (voir l'encadré des numéros brûlés plus
+# bas), et l'EN-TÊTE — la seule chose que ce contrôle lit — ne les sépare pas : TL06 est donc
+# refusé en bloc. Les séparer supposerait de renifler le contenu (une row porte-t-elle les clés
+# 20.01 dans `deployment_state` ?), or une save prise hors déploiement n'a pas la moindre de ces
+# clés à montrer — le reniflage rendrait « ancien » pour un fichier parfaitement courant. C'est
+# un fallback anti-erreur, interdit ici : on refuse le numéro, pas le contenu.
 # Les formats antérieurs (TL01, single-pickle) n'ont en plus aucune empreinte : leur état ne peut
 # pas être restauré sans risque de plateau incompatible → REFUSÉS aussi (cf. _reject_legacy).
 # AJOUTER UNE CLÉ OBLIGATOIRE AU RESET D'ÉPISODE OBLIGE À BUMPER CETTE MAGIC. Le verrou est
@@ -82,9 +89,17 @@ _log = logging.getLogger(__name__)
 # clé en trop, que personne ne consulte. La fermeture des intentions de zone (2026-09-09) a été
 # bumpée par réflexe : le refus ne protégeait de rien et rendait illisibles les parties
 # enregistrées. Le bump a été ANNULÉ le jour même — retour à TL05, et les cinq clés restent
-# publiées par le reset (`W40KEngine`, deux dicts) plutôt que d'être retirées du format. Le TL06
-# ci-dessus est un AUTRE bump, motivé par un AJOUT et frappé le 2026-09-10 : le numéro annulé a
-# été repris, aucune save n'ayant jamais été écrite sous le premier.
+# publiées par le reset (`W40KEngine`, deux dicts) plutôt que d'être retirées du format.
+#
+# ⚠️ UN NUMÉRO ÉMIS NE SE REPREND PAS, MÊME ANNULÉ. Le bump du 2026-09-10 (ajout des deux clés
+# 20.01) a d'abord réutilisé `W40KTL06`, au motif qu'aucune save n'avait jamais été écrite sous
+# le premier — vrai sur ce disque, INVÉRIFIABLE ailleurs (`W40K_PERSIST_DIR` peut pointer hors
+# dépôt, et le déploiement Synology a son propre volume). Or entre 20:58 et 22:40 le 2026-09-09,
+# le serveur écrivait bien l'en-tête `W40KTL06` sur des states SANS les clés 20.01 : un tel
+# fichier passe le contrôle d'en-tête au lieu d'atteindre `_reject_legacy`, écrase la partie en
+# cours, puis fait lever `next_reserves_declaration_entry` — exactement l'état amputé que cette
+# magic existe pour refuser. D'où TL07 : le numéro brûlé part en legacy, et le format courant se
+# lit à un numéro qui n'a jamais désigné autre chose.
 #
 # ⚠️⚠️ CETTE EXCEPTION NE COUVRE QUE LA CLÉ MORTE, et UN retrait en sort — il BUMPE :
 #   • la clé qui quitte le reset mais reste CRÉÉE PARESSEUSEMENT et lue en cours de partie. La row
@@ -102,8 +117,10 @@ _log = logging.getLogger(__name__)
 # ne fait que les purger), donc hors de sa portée. La règle est désormais DANS le code : une clé
 # statique vient toujours de l'engine vivant, la row ne peut plus la remettre. Verrou :
 # tests/unit/services/test_game_snapshots_static_keys.py.
-_MAGIC = b"W40KTL06"
-_LEGACY_MAGICS = frozenset({b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04", b"W40KTL05"})
+_MAGIC = b"W40KTL07"
+_LEGACY_MAGICS = frozenset(
+    {b"W40KTL01", b"W40KTL02", b"W40KTL03", b"W40KTL04", b"W40KTL05", b"W40KTL06"}
+)
 _LEN = struct.Struct(">Q")  # préfixe de longueur : entier 64 bits big-endian
 
 # Rows exclues du menu Select (trop nombreuses) mais présentes dans le playback ⏮⏭.
@@ -207,8 +224,10 @@ def _reject_legacy(name: str, head: bytes) -> None:
             f"montée 13.06 ni le mémo de charge ; TL05 : sans les clés de l'étape Declare Battle "
             f"Formations 20.01 dans `deployment_state` — `reserves_declaration_queue` et "
             f"`reserves_declaration_closed` —, dont l'absence fait lever le premier lecteur de la "
-            f"file de déclaration une fois la partie en cours déjà écrasée). Supprime-la ou "
-            f"rejoue la partie."
+            f"file de déclaration une fois la partie en cours déjà écrasée ; TL06 : en-tête "
+            f"AMBIGUË, portée à la fois par les saves du 2026-09-10 et par celles du bump annulé "
+            f"du 2026-09-09, qui n'ont pas ces mêmes clés 20.01 — l'en-tête ne dit pas laquelle "
+            f"des deux vous tenez, donc les deux sont refusées). Supprime-la ou rejoue la partie."
         )
     raise ValueError(f"partie {name!r} : format de fichier inconnu (en-tête {head!r})")
 
