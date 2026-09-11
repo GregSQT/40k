@@ -2123,6 +2123,9 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
     (get_engagement_zone = engagement_zone inches × inches_to_subhex), cohérent avec
     l'éligibilité fight/pile-in et le blocage mouvement. NB: avant, ce cache dilatait de
     inches_to_subhex (1") en supposant engagement_zone == 1" ; faux dès engagement_zone ≠ 1".
+
+    Les cases OCCUPÉES par l'ennemi font partie de la zone (distance 0 ≤ engagement_zone) : cf.
+    l'union explicite plus bas, et la raison pour laquelle elle a dû être écrite.
     """
     units_cache = require_key(game_state, "units_cache")
     board_cols = require_key(game_state, "board_cols")
@@ -2146,7 +2149,28 @@ def _compute_enemy_adjacent_cache_for_player_from_units_cache(
         per_unit_occupied.append(unit_cells)
 
     from engine.hex_utils import dilate_hex_set
+    # ⚠️ `dilate_hex_set` EXCLUT PAR CONTRAT ses cases sources (« The input hexes themselves are
+    # NOT included in the result »). La zone d'engagement, elle, les CONTIENT : 03.04 place dans
+    # l'engagement range d'une figurine tout ce qui est « within 2" horizontally », distance 0
+    # comprise. L'union les rend, et la docstring de cette fonction redevient vraie.
+    #
+    # L'écart était inoffensif tant que l'occupation ennemie était un veto 2D : une case tenue
+    # par un ennemi n'était de toute façon pas une destination. Elle ne l'est plus depuis que
+    # l'occupation se filtre PAR NIVEAU (`build_enemy_occupied_positions_set(..., level=)`,
+    # superposition inter-étage 13.06) : la case AU SOL sous une figurine ennemie posée à l'étage
+    # n'était vetée ni par l'occupation (autre niveau) ni par la zone (case source retirée).
+    # Mesuré sur le run holdout du 2026-09-11, deux fois : `E10 T4 P1 MOVE : Unit 5(4,52) MOVED
+    # from (10,48) to (4,52) [MOVE_TYPE:normal]`, avec `102#1@(4,52,z3)`. Le moteur se
+    # contredisait dans le même tour — 09.05 « AFTER MOVING: Your unit must be unengaged » d'un
+    # côté, et quatre lignes plus bas l'unité 5 pile puis frappe l'unité 102 sans avoir chargé,
+    # donc par la seule branche « It is engaged » (12.03).
+    #
+    # Le sens de l'écart compte : cette union ne peut que RESTREINDRE la zone offerte au move,
+    # jamais l'élargir. Elle ne touche pas le volet vertical, que cet ensemble n'a jamais porté
+    # (cf. `move_enemy_ez_forbidden_cells`) — l'EZ du move reste 2D, donc plus restrictive que
+    # celle du combat à étages, écart préexistant et documenté.
     zone_hexes = dilate_hex_set(all_enemy_occupied, ez_dilation, board_cols, board_rows)
+    zone_hexes |= all_enemy_occupied
 
     counts: Dict[Tuple[int, int], int] = {h: 1 for h in zone_hexes}
 
