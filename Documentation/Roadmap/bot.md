@@ -126,20 +126,29 @@ et remplacé par le plancher de 0,55 contre le champion le plus récent : encadr
 ## ✅ R0b — Échelle de checkpoints figés en éval {#r0b-echelle} — livré 2026-08-21
 
 Étalon de force non saturable : win-rate du modèle courant contre les archives `robust_*`
-chargeables (1 compatible au 2026-08-22 — les 5 archives pré-`charge_pair_net` lèvent
-`RuntimeError Missing key(s)` au chargement et sont skippées §12.15), publié en
+jouables (4 compatibles sur 16 au 2026-09-11 — les 12 archives antérieures à la refonte
+d'observation du 2026-09-08 sont écartées §12.15), publié en
 `bot_eval/vs_ckpt_<score>` + agrégats `00_critical/ckpt_min` et `ckpt_mean`. Hors sélection
 et hors gate.
 
-**Livrables** : `ai/bot_evaluation.py` (`discover_checkpoint_archives`, `evaluate_against_checkpoints`,
-`_NormalizedFrozenModel`) + `ai/bot_registry.py` (`CHECKPOINT_OPPONENT_FAMILY`) +
-`ai/metrics_tracker.py` (`log_checkpoint_evaluations`) + hook `--test-only` dans `ai/train.py` +
-8 tests unitaires dans `tests/unit/ai/test_checkpoint_evaluation.py`.
+**Livrables** : `ai/bot_evaluation.py` (`discover_checkpoint_archives`,
+`filter_compatible_archives`, `evaluate_against_checkpoints`, `_NormalizedFrozenModel`) +
+`ai/bot_registry.py` (`CHECKPOINT_OPPONENT_FAMILY`) + `ai/metrics_tracker.py`
+(`log_checkpoint_evaluations`) + hook `--test-only` dans `ai/train.py` + tests unitaires dans
+`tests/unit/ai/test_checkpoint_evaluation.py` et `tests/unit/ai/test_checkpoint_eval_parallel.py`.
 
-**Critère rempli** : `--test-only` découvre les barreaux compatibles (1 au 2026-08-22) et publie
-`vs_ckpt_<score>` pour chacun. Archives pré-`charge_pair_net` (commit d5ddffb5) : skip explicite
-par tentative de chargement — `RuntimeError Missing key(s)` → message INFO §12.15 ; pkl absent
+**Critère rempli** : `--test-only` annonce les barreaux compatibles (4 sur 16 au 2026-09-11) et publie
+`vs_ckpt_<score>` pour chacun. Archive d'architecture périmée : skip explicite par
+`filter_compatible_archives` — comparaison de l'`observation_space`, de l'`action_space` et de la
+signature du state_dict au modèle courant, tracée par `tqdm.write` §12.15 ; pkl absent
 = second motif de skip.
+
+**Correction 2026-09-11** : le critère portait sur le TEXTE d'une exception (`RuntimeError
+Missing key`). Les ruptures de grille des 2026-09-08 (`9e2bd730`) et 2026-09-09 (`c4dd34ac`)
+cassent plus tôt, dans `SpatialCombinedExtractor`, avec un `ValueError` — l'évaluation entière
+crashait au lieu de skipper. Le critère est désormais structurel, et la trace passe par
+`tqdm.write` : les `logging.info` de skip n'étaient émis nulle part, le dépôt ne configurant
+aucun handler.
 
 **Amélioration 2026-08-21** : `evaluate_against_checkpoints` publie désormais `{label}_wins`,
 `{label}_losses`, `{label}_draws` en plus du ratio. `log_checkpoint_evaluations` publie tous

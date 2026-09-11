@@ -5684,9 +5684,10 @@ def _score_stage_against_pool(
     Ils sont CONSERVES parce qu'ils ne coutent presque rien, pas parce qu'ils apportent quelque
     chose — un etat a ne pas confondre avec une justification.
 
-    CE QU'ILS COUTENT, exactement : `evaluate_against_checkpoints` sonde la compatibilite de
-    chaque archive par un `MaskablePPO.load` cote PARENT, une fois par appel. Trois appels font
-    donc deux chargements de trop par membre du pool — quatre sur P2, vingt-six sur P10. Et rien
+    CE QU'ILS COUTENT, exactement : `evaluate_against_checkpoints` trie la compatibilite de
+    chaque archive cote PARENT, une fois par appel — une lecture de zip par archive, sans
+    construction de policy depuis `filter_compatible_archives`. Trois appels font donc deux
+    lectures de trop par membre du pool — quatre sur P2, vingt-six sur P10. Et rien
     d'autre sur les quatre profils d'entrainement reels (`x1`, `x1_long`, `x5_new`, `x5_long`),
     qui portent `bot_eval_n_workers_gate` = 1 : `use_subprocess and n_workers > 1` y est FAUX et
     le gate s'execute SEQUENTIELLEMENT dans le parent — aucun pool de workers n'est monte, aucune
@@ -6652,12 +6653,23 @@ def _run_main():
                 ckpt_ratio_items,
                 discover_checkpoint_archives,
                 evaluate_against_checkpoints,
+                filter_compatible_archives,
                 write_ckpt_scalars,
             )
+            # Le compte ANNONCÉ doit être celui des barreaux qui vont jouer. `discover_*` ne
+            # filtre que la présence du pkl compagnon ; les archives d'architecture périmée sont
+            # écartées par `filter_compatible_archives` (§12.15). Annoncer le compte brut
+            # promettait « 16 barreaux » pour 4 réellement joués.
             ckpt_archives = discover_checkpoint_archives(models_root, args.agent)
+            n_ckpt_discovered = len(ckpt_archives)
+            if ckpt_archives:
+                ckpt_archives, _ = filter_compatible_archives(model_path, ckpt_archives)
             if ckpt_archives:
                 n_ckpt_episodes = max(1, (args.test_episodes or require_key(training_config, "eval_episodes")) // 2)
-                print(f"🏆 CHECKPOINT EVAL : {len(ckpt_archives)} barreau(x) × {n_ckpt_episodes} ép.")
+                print(
+                    f"🏆 CHECKPOINT EVAL : {len(ckpt_archives)} barreau(x) compatible(s) "
+                    f"sur {n_ckpt_discovered} découvert(s) — {n_ckpt_episodes} ép. chacun"
+                )
                 ckpt_results = evaluate_against_checkpoints(
                     model_path=model_path,
                     checkpoint_archives=ckpt_archives,
