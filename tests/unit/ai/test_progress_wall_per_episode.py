@@ -683,3 +683,43 @@ def test_sentinel_cross_traj_exclu_des_stats(monkeypatch):
         f"min doit valoir la seule vraie durée ({expected:.3f}), got {minimum:.3f}"
     )
     assert maximum == pytest.approx(expected, abs=5e-4)
+
+
+def test_le_temps_bloque_avant_le_premier_affichage_ne_mange_pas_l_ema(monkeypatch):
+    """Une sonde qui bloque AVANT le premier rafraichissement ne doit pas tuer l'ETA du second.
+
+    Les trois ancres d'affichage (instant, compteur d'episodes, cumul d'eval bloquante) decrivent
+    le meme point ; le cumul etait pourtant pose DANS la branche qui exige un affichage
+    precedent, donc jamais au premier. Tout ce qui avait bloque avant lui etait alors impute au
+    second : `delta_time` passait sous zero et l'EMA — donc l'ETA — n'etait pas initialisee, sans
+    un mot.
+
+    Le cas etait inatteignable tant que rien ne bloquait avant le premier affichage. La sonde de
+    BASELINE du pool le rend reel : `PoolEarlyStoppingCallback._on_training_start` l'execute avant
+    tout `_on_step`, elle est desormais chronometree, et elle coute plusieurs centaines de
+    secondes (mesure du 2026-09-11 : 285 a 632 s par sonde).
+
+    Deux tours exactement, donc deux affichages : sans le correctif l'EMA reste None.
+    """
+    n_envs, steps_per_episode, episodes_per_slot = 10, 2, 2
+    gate_state: Dict[str, Any] = {"blocking_eval_seconds": 300.0}
+    clock, callback, printed = _install(
+        monkeypatch, n_envs, steps_per_episode, episodes_per_slot,
+        gate_display_state=gate_state,
+    )
+
+    not_done = [False] * n_envs
+    all_done = [True] * n_envs
+    for _round in range(episodes_per_slot):
+        for step_index in range(steps_per_episode):
+            clock.advance(1.0)
+            callback.locals = {
+                "dones": all_done if step_index == steps_per_episode - 1 else not_done
+            }
+            callback._on_step()
+
+    assert len(printed) >= 2, "il faut deux affichages pour que l'EMA ait une mesure a prendre"
+    assert callback.ema_episode_time == pytest.approx(0.2), (
+        "le second affichage doit mesurer ses 2 s pour 10 episodes, pas se voir soustraire "
+        "les 300 s bloquees avant le premier"
+    )

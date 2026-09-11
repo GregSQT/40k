@@ -9,6 +9,13 @@ durees d'episode NEGATIVES (detail et mesure dans `_add_blocking_eval_seconds`).
 Les tests verrouillent la separation : l'eval elle-meme n'accumule RIEN, seuls les appelants
 situes sur le thread d'entrainement accumulent, et seulement ce qu'ils ont attendu.
 
+Ils verrouillent aussi le PERIMETRE des alimenteurs. Le compteur n'a longtemps vecu que dans
+`BotEvaluationCallback`, alors que les deux callbacks a SONDES de curriculum bloquent la meme
+boucle : leur temps etait compte comme de l'entrainement, et `moy` cessait d'etre comparable
+entre une etape a pool et une etape sans. Mesure du 2026-09-11 sur les trois etapes d'un meme
+run, part du temps bloquant reellement retranchee : 87 % en P0 (sans pool) contre 53 % en P1 et
+57 % en P2.
+
 L'horloge est factice (meme convention que test_progress_wall_per_episode.py) : les durees
 mesurees sont alors EXACTES, la ou des `sleep` reels imposeraient des seuils flous et
 allongeraient la suite.
@@ -24,7 +31,13 @@ import pytest
 from types import SimpleNamespace
 
 import ai.bot_evaluation
-from ai.training_callbacks import BotEvaluationCallback
+import ai.vec_normalize_utils
+from ai.train import GATE_DISPLAY_STATE_KEY, bind_curriculum_probe_callbacks
+from ai.training_callbacks import (
+    BotEvaluationCallback,
+    ExploiterProbeCallback,
+    PoolEarlyStoppingCallback,
+)
 
 
 class _FakeClock:
@@ -234,3 +247,143 @@ def test_sans_gate_display_state_le_cumul_est_sans_effet():
     """`gate_display_state` est optionnel (runs sans affichage de gate) : pas de crash."""
     callback = _bare_callback(None)
     callback._add_blocking_eval_seconds(1.0)
+
+
+class _SlowSavingModel:
+    """Modele factice dont la sauvegarde COUTE du temps d'horloge.
+
+    Zipper le modele fige la boucle autant que l'evaluation qui suit : les deux doivent tomber
+    dans le meme chronometre. Un modele a sauvegarde instantanee laisserait passer une
+    instrumentation posee sur la seule evaluation.
+    """
+
+    def __init__(self, clock: _FakeClock, save_seconds: float) -> None:
+        self._clock = clock
+        self._save_seconds = save_seconds
+
+    def save(self, path: str) -> None:
+        self._clock.advance(self._save_seconds)
+
+    def get_env(self):
+        return None
+
+
+def _neutralise_les_dependances_de_sonde(monkeypatch, clock, eval_seconds, results):
+    """Coupe tout ce qu'une sonde touche hors du chronometre, et fait couter l'evaluation."""
+
+    def _slow_eval(**_kwargs):
+        clock.advance(eval_seconds)
+        return dict(results)
+
+    monkeypatch.setattr(ai.bot_evaluation, "evaluate_against_checkpoints", _slow_eval)
+    monkeypatch.setattr(ai.vec_normalize_utils, "save_vec_normalize", lambda env, path: False)
+
+
+def test_la_sonde_de_pool_compte_son_temps_bloque(monkeypatch):
+    """`PoolEarlyStoppingCallback._probe` est synchrone : elle arrete la boucle, donc elle cumule.
+
+    C'est le defaut que ce test verrouille : le compteur vivait chez `BotEvaluationCallback`
+    seul, cette sonde n'avait aucun moyen de l'alimenter, et ses minutes etaient lues comme du
+    temps d'entrainement dans la colonne `moy`. La sauvegarde du modele (2 s) est comptee au
+    meme titre que l'evaluation (40 s) : les deux figent les slots.
+    """
+    clock = _install_clock(monkeypatch)
+    gate_state: Dict[str, Any] = {}
+    callback = PoolEarlyStoppingCallback.__new__(PoolEarlyStoppingCallback)
+    callback.gate_display_state = gate_state
+    callback.pool_archives = [("/tmp/P0.zip", "P0")]
+    callback.champion_label = "P0"
+    callback.training_config_name = "x1_lineage"
+    callback.rewards_config_name = "ArmageddonAgent_x1"
+    callback.n_eval_episodes = 300
+    callback._eval_n_workers = None
+    callback._eval_pool = None
+    callback.model = cast(Any, _SlowSavingModel(clock, 2.0))
+    monkeypatch.setattr(callback, "_ensure_eval_pool", lambda: None)
+    _neutralise_les_dependances_de_sonde(monkeypatch, clock, 40.0, {"P0": 0.55})
+
+    assert callback._probe() == {"P0": pytest.approx(0.55)}
+    assert gate_state["blocking_eval_seconds"] == pytest.approx(42.0), (
+        "sauvegarde + evaluation : toute la sonde est du temps ou aucun episode ne progresse"
+    )
+
+
+def test_la_sonde_exploiteur_compte_son_temps_bloque(monkeypatch):
+    """Jumeau exact chez l'exploiteur : meme convention synchrone, meme dette si on l'oublie."""
+    clock = _install_clock(monkeypatch)
+    gate_state: Dict[str, Any] = {}
+    callback = ExploiterProbeCallback.__new__(ExploiterProbeCallback)
+    callback.gate_display_state = gate_state
+    callback.target_archive_path = "/tmp/P3.zip"
+    callback.training_config_name = "x1_lineage"
+    callback.rewards_config_name = "ArmageddonAgent_x1"
+    callback._eval_n_workers = None
+    callback._eval_pool = None
+    callback._episode_origin = 0
+    callback.metrics_tracker = None
+    callback.log_fn = lambda _message: None
+    callback.model = cast(Any, _SlowSavingModel(clock, 3.0))
+    monkeypatch.setattr(callback, "_ensure_eval_pool", lambda: None)
+    _neutralise_les_dependances_de_sonde(monkeypatch, clock, 25.0, {"target": 0.62})
+
+    assert callback._probe(100, "bon-marche") == pytest.approx(0.62)
+    assert gate_state["blocking_eval_seconds"] == pytest.approx(28.0)
+
+
+def test_une_sonde_non_liee_ne_fait_pas_tomber_le_run(monkeypatch):
+    """Callback construit mais jamais lie au dict d'affichage : le cumul doit rester inerte.
+
+    Les deux callbacks a sondes sont construits dans `_run_main`, AVANT que `setup_callbacks`
+    ne cree `gate_display_state` ; la liaison est faite ensuite, dans la boucle
+    `if extra_callbacks:`. Un chemin qui l'oublierait ne doit pas lever au milieu d'une sonde,
+    a des heures de run du demarrage — d'ou le defaut de CLASSE a None, pose une fois dans
+    `_BlockingEvalClockMixin` plutot que dans chaque `__init__`.
+    """
+    assert PoolEarlyStoppingCallback.gate_display_state is None
+    assert ExploiterProbeCallback.gate_display_state is None
+    callback = PoolEarlyStoppingCallback.__new__(PoolEarlyStoppingCallback)
+    callback._add_blocking_eval_seconds(5.0)
+
+
+def test_la_liaison_de_run_pose_le_dict_de_temps_bloque_sur_les_sondes():
+    """Le câblage dont dépend la correction, et qu'aucun test ne couvrait.
+
+    Les deux tests de sonde ci-dessus posent `gate_display_state` A LA MAIN : ils prouvent que
+    le chronomètre cumule, pas que le run le branche. Or les sondes sont construites dans
+    `_run_main`, avant que `setup_callbacks` ne crée le dict — sans cette liaison, le
+    chronomètre écrirait dans un `None` et le défaut survivrait en silence, sa seule trace
+    étant une colonne `moy` fausse des heures plus tard.
+
+    `BotEvaluationCallback` ne doit PAS être touché ici : il reçoit le sien à la construction,
+    et deux écrivains pour un même attribut est exactement ce qui les désynchronise.
+    """
+    gate_state: Dict[str, Any] = {"label": "Gate 🧱"}
+    training_config = {GATE_DISPLAY_STATE_KEY: gate_state}
+    pool = PoolEarlyStoppingCallback.__new__(PoolEarlyStoppingCallback)
+    exploiteur = ExploiterProbeCallback.__new__(ExploiterProbeCallback)
+    bot_eval = BotEvaluationCallback.__new__(BotEvaluationCallback)
+    tracker = cast(Any, object())
+
+    bind_curriculum_probe_callbacks([pool, exploiteur, bot_eval], tracker, training_config)
+
+    assert pool.gate_display_state is gate_state
+    assert exploiteur.gate_display_state is gate_state
+    assert pool.metrics_tracker is tracker
+    assert exploiteur.metrics_tracker is tracker
+    assert "gate_display_state" not in bot_eval.__dict__, (
+        "le callback d'eval bot recoit son dict a la construction : un second ecrivain le "
+        "desynchroniserait"
+    )
+
+
+def test_un_profil_sans_barre_de_progression_lie_None_sans_lever():
+    """`total_episodes` absent : `setup_callbacks` ne crée aucun dict, il n'y a rien à corriger.
+
+    `.get` et non `require_key` : l'absence de barre est un état de run VALIDE (profils sans
+    budget en épisodes), pas une panne. Le cumul devient alors inerte, cas déjà traité par
+    `_add_blocking_eval_seconds`.
+    """
+    pool = PoolEarlyStoppingCallback.__new__(PoolEarlyStoppingCallback)
+    bind_curriculum_probe_callbacks([pool], cast(Any, None), {})
+    assert pool.gate_display_state is None
+    pool._add_blocking_eval_seconds(4.0)

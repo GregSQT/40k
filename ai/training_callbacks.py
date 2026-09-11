@@ -461,8 +461,9 @@ class EpisodeTerminationCallback(BaseCallback):
         # a 121,80 s contre 1,20 s de duree reelle, ce qui rend la colonne `min/max` aveugle a ce
         # qu'elle sert a reperer — une dispersion d'origine MOTEUR.
         # Ce compteur ne contient PAS la duree des evals async (le mode par defaut), qui ne
-        # bloquent rien : cf. BotEvaluationCallback._add_blocking_eval_seconds, seul point
-        # d'alimentation, pour le detail et la mesure.
+        # bloquent rien : cf. `_BlockingEvalClockMixin._add_blocking_eval_seconds`, porte par les
+        # TROIS callbacks qui peuvent figer la boucle — eval bot, sonde exploiteur, sonde de
+        # pool —, pour le detail et la mesure.
         blocking_eval_seconds = (
             self.gate_display_state.get("blocking_eval_seconds", 0.0)
             if self.gate_display_state else 0.0
@@ -557,7 +558,6 @@ class EpisodeTerminationCallback(BaseCallback):
                 ):
                     eval_delta = blocking_eval_seconds - self.blocking_eval_seconds_at_last_display
                     delta_time = current_time - self.last_display_time - eval_delta
-                    self.blocking_eval_seconds_at_last_display = blocking_eval_seconds
                     delta_episodes = display_episode_count - self.last_display_episode_count
                     if delta_time > 0 and delta_episodes > 0:
                         avg_time_per_episode = delta_time / delta_episodes
@@ -572,6 +572,16 @@ class EpisodeTerminationCallback(BaseCallback):
                             )
                 self.last_display_time = current_time
                 self.last_display_episode_count = display_episode_count
+                # Les TROIS ancres decrivent le meme instant, elles se posent donc ensemble et
+                # HORS de la branche ci-dessus. Le cumul d'eval y etait pose a l'interieur, donc
+                # jamais au PREMIER affichage : tout ce qui avait bloque avant lui etait impute
+                # au second, dont le `delta_time` passait sous zero et sautait en silence
+                # l'initialisation de l'EMA — donc l'ETA. Inatteignable tant que rien ne bloquait
+                # avant le premier affichage ; la sonde de BASELINE du pool, desormais
+                # chronometree (`PoolEarlyStoppingCallback._probe`, appelee par
+                # `_on_training_start`, soit avant tout `_on_step`), y met plusieurs centaines de
+                # secondes.
+                self.blocking_eval_seconds_at_last_display = blocking_eval_seconds
 
                 # Calculate ETA using EMA; use overall average when EMA not yet available (early episodes)
                 remaining_episodes = display_total_episodes - display_episode_count
@@ -1310,7 +1320,69 @@ class MetricsCollectionCallback(BaseCallback):
             return 1.0 / (1.0 - gamma)
 
 
-class BotEvaluationCallback(BaseCallback):
+class _BlockingEvalClockMixin:
+    """Compteur PARTAGE du temps ou la boucle d'entrainement est REELLEMENT arretee.
+
+    Les trois callbacks qui peuvent figer cette boucle l'alimentent : `BotEvaluationCallback`
+    (eval synchrone, attente de future, sauvegardes de modele) et les deux callbacks a SONDES,
+    `ExploiterProbeCallback` et `PoolEarlyStoppingCallback`, synchrones par construction. Le
+    compteur vivait dans le premier SEUL, donc le temps des sondes etait compte comme de
+    l'ENTRAINEMENT. MESURE qui l'impose, 2026-09-11, part du temps bloquant reellement
+    retranchee sur les trois etapes d'un meme run de lignee : 87 % en P0 — etape sans pool,
+    donc sans sonde — contre 53 % en P1 et 57 % en P2. Une etape a pool ne retranchait que la
+    moitie de ce qui figeait sa boucle, et `moy` n'etait plus comparable d'une etape a l'autre
+    — ce que cette colonne existe precisement pour permettre, et ce dont `read_steady_rate`
+    (scripts/ab_bench.py) tire le regime etabli d'un banc.
+
+    Le defaut de CLASSE `None` n'est pas un repli anti-erreur : un callback construit hors run
+    (tests, appel direct) n'a aucun dict a alimenter, cas que `_add_blocking_eval_seconds`
+    traite deja comme une absence d'affichage de gate. En run, la liaison se fait avec celle du
+    `metrics_tracker`, juste apres le `setup_callbacks` qui cree le dict (ai/train.py, bloc
+    `if extra_callbacks:`).
+
+    Aucun hook SB3 ici, meme raison que `_EvalPoolOwnerMixin` : les porteurs heritent APRES
+    `BaseCallback`, dont les stubs gagneraient dans le MRO.
+    """
+
+    gate_display_state: Optional[Dict[str, Any]] = None
+
+    def _add_blocking_eval_seconds(self, seconds: float) -> None:
+        """Cumule le temps ou la boucle d'entrainement est REELLEMENT arretee par une eval.
+
+        Ce compteur (`gate_display_state["blocking_eval_seconds"]`) est retranche des durees
+        d'episode et des quatre chiffres `s/ep` de la barre (EpisodeTerminationCallback._on_step,
+        ~ligne 417 et ~ligne 523). Il ne doit donc contenir QUE du wall-clock pendant lequel
+        aucun episode n'a pu progresser. La duree d'une eval async ne convient pas : elle
+        s'ecoule sur un thread worker (`_async_eval_executor`) PENDANT que la boucle continue
+        de produire des episodes. La retrancher rendait des durees d'episode negatives —
+        mesure du 2026-08-02, run x1_long a n_envs=48 : `min` affiche a -4,791 s/ep, soit
+        -230 s bruts, une eval concurrente entiere soustraite d'un episode de ~10 s.
+        Les seuls temps reellement bloquants sont donc cumules ici : l'eval synchrone,
+        l'attente explicite du future (`force_wait`), toute sauvegarde de modele
+        (`_save_model_with_vecnormalize` : snapshot d'eval, best_model, best_robust) et les
+        SONDES de curriculum (`ExploiterProbeCallback._probe`, `PoolEarlyStoppingCallback._probe`),
+        synchrones par construction. Tous ces appels ont lieu sur le thread d'entrainement,
+        ce qui fait aussi de ce dict une donnee mono-ecrivain.
+        """
+        if self.gate_display_state is None:
+            return
+        if seconds < 0:
+            raise ValueError(f"Blocking eval duration must be >= 0 (got {seconds})")
+        self.gate_display_state["blocking_eval_seconds"] = (
+            self.gate_display_state.get("blocking_eval_seconds", 0.0) + seconds
+        )
+
+    @contextlib.contextmanager
+    def _blocking_eval_timer(self):
+        """Impute au temps bloque le wall-clock passe dans le bloc encadre."""
+        start = time.perf_counter()
+        try:
+            yield
+        finally:
+            self._add_blocking_eval_seconds(time.perf_counter() - start)
+
+
+class BotEvaluationCallback(BaseCallback, _BlockingEvalClockMixin):
     """Callback to test agent against evaluation bots with best model saving.
 
     `scenario_pool` est en tete et SANS defaut : il dit sur quel split l'agent est note, donc
@@ -2257,40 +2329,6 @@ class BotEvaluationCallback(BaseCallback):
             remove_model_with_companions(self._pending_eval_snapshot_path)
             self._pending_eval_snapshot_path = None
 
-    def _add_blocking_eval_seconds(self, seconds: float) -> None:
-        """Cumule le temps ou la boucle d'entrainement est REELLEMENT arretee par une eval.
-
-        Ce compteur (`gate_display_state["blocking_eval_seconds"]`) est retranche des durees
-        d'episode et des quatre chiffres `s/ep` de la barre (EpisodeTerminationCallback._on_step,
-        ~ligne 417 et ~ligne 523). Il ne doit donc contenir QUE du wall-clock pendant lequel
-        aucun episode n'a pu progresser. La duree d'une eval async ne convient pas : elle
-        s'ecoule sur un thread worker (`_async_eval_executor`) PENDANT que la boucle continue
-        de produire des episodes. La retrancher rendait des durees d'episode negatives —
-        mesure du 2026-08-02, run x1_long a n_envs=48 : `min` affiche a -4,791 s/ep, soit
-        -230 s bruts, une eval concurrente entiere soustraite d'un episode de ~10 s.
-        Les seuls temps reellement bloquants sont donc cumules ici : l'eval synchrone,
-        l'attente explicite du future (`force_wait`), et toute sauvegarde de modele
-        (`_save_model_with_vecnormalize` : snapshot d'eval, best_model, best_robust). Tous ces
-        appels ont lieu sur le thread d'entrainement, ce qui fait aussi de ce dict une donnee
-        mono-ecrivain.
-        """
-        if self.gate_display_state is None:
-            return
-        if seconds < 0:
-            raise ValueError(f"Blocking eval duration must be >= 0 (got {seconds})")
-        self.gate_display_state["blocking_eval_seconds"] = (
-            self.gate_display_state.get("blocking_eval_seconds", 0.0) + seconds
-        )
-
-    @contextlib.contextmanager
-    def _blocking_eval_timer(self):
-        """Impute au temps bloque le wall-clock passe dans le bloc encadre."""
-        start = time.perf_counter()
-        try:
-            yield
-        finally:
-            self._add_blocking_eval_seconds(time.perf_counter() - start)
-
     def _consume_async_eval_if_ready(self, force_wait: bool = False) -> None:
         """Consume completed async evaluation result and apply it."""
         if self._pending_eval_future is None:
@@ -2803,7 +2841,7 @@ def shutdown_probe_eval_pools(callbacks: Iterable[Any]) -> None:
                 )
 
 
-class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
+class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin, _BlockingEvalClockMixin):
     """Sonde synchrone du win-rate de l'exploiteur contre sa cible figee.
 
     Protocole en deux temps :
@@ -2884,53 +2922,58 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
         Synchrone : bloque le thread d'entrainement le temps de l'evaluation. Aucun Future,
         aucune sonde ne peut etre abandonnee en silence.
         """
-        from ai.bot_evaluation import evaluate_against_checkpoints
-        from ai.vec_normalize_utils import save_vec_normalize
+        # Chronometre sur la METHODE et non aux deux call-sites de `_on_step` : meme regle
+        # que `_save_model_with_vecnormalize`, ou l'instrumenter aux call-sites avait laisse
+        # deux sauvegardes sur trois gonfler les durees affichees. Couvre la sauvegarde du
+        # modele autant que l'evaluation : les deux figent la boucle.
+        with self._blocking_eval_timer():
+            from ai.bot_evaluation import evaluate_against_checkpoints
+            from ai.vec_normalize_utils import save_vec_normalize
 
-        fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-        os.close(fd)
-        try:
-            self.model.save(tmp_path)
-            save_vec_normalize(self.model.get_env(), tmp_path)
-            self._ensure_eval_pool()
+            fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+            os.close(fd)
             try:
-                results = evaluate_against_checkpoints(
-                    model_path=tmp_path,
-                    checkpoint_archives=[(self.target_archive_path, "target")],
-                    training_config_name=self.training_config_name,
-                    rewards_config_name=self.rewards_config_name,
-                    n_episodes=n_episodes,
-                    controlled_agent=self.rewards_config_name,
-                    scenario_pool="holdout",
-                    device="cpu",
-                    # Le compte RÉSOLU par `_ensure_eval_pool`, jamais `intermediate_n_workers` :
-                    # c'est celui qui a dimensionné le pool juste au-dessus, et il devient ici
-                    # `max_in_flight`.
-                    n_workers_override=self._eval_n_workers,
-                    pool=self._eval_pool,
+                self.model.save(tmp_path)
+                save_vec_normalize(self.model.get_env(), tmp_path)
+                self._ensure_eval_pool()
+                try:
+                    results = evaluate_against_checkpoints(
+                        model_path=tmp_path,
+                        checkpoint_archives=[(self.target_archive_path, "target")],
+                        training_config_name=self.training_config_name,
+                        rewards_config_name=self.rewards_config_name,
+                        n_episodes=n_episodes,
+                        controlled_agent=self.rewards_config_name,
+                        scenario_pool="holdout",
+                        device="cpu",
+                        # Le compte RÉSOLU par `_ensure_eval_pool`, jamais `intermediate_n_workers` :
+                        # c'est celui qui a dimensionné le pool juste au-dessus, et il devient ici
+                        # `max_in_flight`.
+                        n_workers_override=self._eval_n_workers,
+                        pool=self._eval_pool,
+                    )
+                except Exception:
+                    # Ferme ICI plutôt que d'attendre le `finally` de la boucle `learn()` : le pool
+                    # peut être cassé (workers SIGTERM → `_broken=True`) et une sonde ultérieure y
+                    # lèverait BrokenProcessPool, ou intact mais inutile pendant que l'exception
+                    # traverse `close_all_training_envs`, que 30 s par VecEnv retardent — un SIGTERM
+                    # dans cette fenêtre rendrait ses workers orphelins (PPID=1).
+                    self._shutdown_eval_pool()
+                    raise
+            finally:
+                remove_model_with_companions(tmp_path)
+            if not results:
+                raise RuntimeError(
+                    "ExploiterProbeCallback._probe : evaluate_against_checkpoints a rendu un dict "
+                    "vide — aucun scenario holdout trouve pour cet agent. "
+                    "Verifier la configuration du scenario_pool."
                 )
-            except Exception:
-                # Ferme ICI plutôt que d'attendre le `finally` de la boucle `learn()` : le pool
-                # peut être cassé (workers SIGTERM → `_broken=True`) et une sonde ultérieure y
-                # lèverait BrokenProcessPool, ou intact mais inutile pendant que l'exception
-                # traverse `close_all_training_envs`, que 30 s par VecEnv retardent — un SIGTERM
-                # dans cette fenêtre rendrait ses workers orphelins (PPID=1).
-                self._shutdown_eval_pool()
-                raise
-        finally:
-            remove_model_with_companions(tmp_path)
-        if not results:
-            raise RuntimeError(
-                "ExploiterProbeCallback._probe : evaluate_against_checkpoints a rendu un dict "
-                "vide — aucun scenario holdout trouve pour cet agent. "
-                "Verifier la configuration du scenario_pool."
+            win_rate = float(results["target"])
+            self.log_fn(
+                f"🔬 Sonde exploiteur {label} @ep{self._stage_episode()} "
+                f"(cumul {self._current_episode()}, n={n_episodes}) : win-rate={win_rate:.3f}"
             )
-        win_rate = float(results["target"])
-        self.log_fn(
-            f"🔬 Sonde exploiteur {label} @ep{self._stage_episode()} "
-            f"(cumul {self._current_episode()}, n={n_episodes}) : win-rate={win_rate:.3f}"
-        )
-        return win_rate
+            return win_rate
 
     def _on_step(self) -> bool:
         # Épisodes DE L'ÉTAPE : `budget`, `budget_cap` et la courbe sont des grandeurs d'étape
@@ -2978,7 +3021,7 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin):
         return True
 
 
-class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
+class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin, _BlockingEvalClockMixin):
     """Sonde le pool, arrête le run sur PROMOTION ou sur DESTRUCTION.
 
     DEUX CADENCES, décidées le 2026-09-07. Le champion est mesuré à CHAQUE sonde
@@ -3029,7 +3072,9 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
 
     Synchrone (même convention que ExploiterProbeCallback) : bloque le thread d'entraînement
     le temps de l'évaluation. Ne pas utiliser avec async_eval_enabled=True côté bot-eval
-    si la latence est un problème — les deux callbacks se font en série.
+    si la latence est un problème — les deux callbacks se font en série. Ce temps-là est
+    du temps BLOQUÉ, cumulé comme tel (`_BlockingEvalClockMixin`) : il n'appartient pas à
+    l'entraînement et la colonne `moy` de la barre le retranche.
     """
 
     def __init__(
@@ -3135,37 +3180,42 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin):
 
     def _probe(self, full_pool: bool = True) -> Dict[str, float]:
         """Sauvegarde le modèle courant et l'évalue contre les archives du tour."""
-        from ai.bot_evaluation import evaluate_against_checkpoints
-        from ai.vec_normalize_utils import save_vec_normalize
+        # Chronometre sur la METHODE, meme regle que chez `ExploiterProbeCallback._probe`.
+        # La sonde de BASELINE (`_on_training_start`) y entre aussi, et c'est correct :
+        # l'horloge de la barre est `global_start_time` (ai/train.py), pose AVANT `learn()`,
+        # donc avant elle — le temps retranche ne peut pas passer sous zero.
+        with self._blocking_eval_timer():
+            from ai.bot_evaluation import evaluate_against_checkpoints
+            from ai.vec_normalize_utils import save_vec_normalize
 
-        archives = self._archives_for(full_pool)
-        fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-        os.close(fd)
-        try:
-            self.model.save(tmp_path)
-            save_vec_normalize(self.model.get_env(), tmp_path)
-            self._ensure_eval_pool()
+            archives = self._archives_for(full_pool)
+            fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+            os.close(fd)
             try:
-                results = evaluate_against_checkpoints(
-                    model_path=tmp_path,
-                    checkpoint_archives=archives,
-                    training_config_name=self.training_config_name,
-                    rewards_config_name=self.rewards_config_name,
-                    n_episodes=self.n_eval_episodes,
-                    controlled_agent=self.rewards_config_name,
-                    scenario_pool="holdout",
-                    device="cpu",
-                    # Jumeau de `ExploiterProbeCallback._probe` : cf. son commentaire.
-                    n_workers_override=self._eval_n_workers,
-                    pool=self._eval_pool,
-                )
-            except Exception:
-                # Jumeau du `except` d'`ExploiterProbeCallback._probe` : voir son commentaire.
-                self._shutdown_eval_pool()
-                raise
-        finally:
-            remove_model_with_companions(tmp_path)
-        return {label: float(results[label]) for _, label in archives if label in results}
+                self.model.save(tmp_path)
+                save_vec_normalize(self.model.get_env(), tmp_path)
+                self._ensure_eval_pool()
+                try:
+                    results = evaluate_against_checkpoints(
+                        model_path=tmp_path,
+                        checkpoint_archives=archives,
+                        training_config_name=self.training_config_name,
+                        rewards_config_name=self.rewards_config_name,
+                        n_episodes=self.n_eval_episodes,
+                        controlled_agent=self.rewards_config_name,
+                        scenario_pool="holdout",
+                        device="cpu",
+                        # Jumeau de `ExploiterProbeCallback._probe` : cf. son commentaire.
+                        n_workers_override=self._eval_n_workers,
+                        pool=self._eval_pool,
+                    )
+                except Exception:
+                    # Jumeau du `except` d'`ExploiterProbeCallback._probe` : voir son commentaire.
+                    self._shutdown_eval_pool()
+                    raise
+            finally:
+                remove_model_with_companions(tmp_path)
+            return {label: float(results[label]) for _, label in archives if label in results}
 
     def _on_training_start(self) -> None:
         # Sonde de référence à l'épisode 0 de l'étape, uniquement en warm start.
