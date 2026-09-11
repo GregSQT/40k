@@ -1,7 +1,6 @@
 """Tests unitaires pour R0b — discover_checkpoint_archives, _NormalizedFrozenModel,
 et log_checkpoint_evaluations (compteurs W/L/D)."""
 
-import logging
 import os
 from typing import Any, Dict, List, Tuple
 
@@ -13,6 +12,13 @@ from ai.metrics_tracker import W40KMetricsTracker
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+
+def _arch_neutre():
+    """Triplet `_archive_architecture` unique : modele et archive le partagent, donc conformes."""
+    import gymnasium as gym
+
+    return (gym.spaces.Discrete(2), gym.spaces.Discrete(3), {"action_net.weight": (3, 8)})
 
 
 class _DummyWriter:
@@ -67,7 +73,7 @@ def test_discover_finds_compatible_archives(tmp_path):
 def test_discover_includes_all_pkl_paired_archives(tmp_path):
     """discover retourne toutes les archives ayant un .pkl, quelle que soit leur architecture.
 
-    La vérification §12.15 (RuntimeError Missing key) a été déplacée dans
+    La vérification §12.15 (divergence d'architecture) a été déplacée dans
     evaluate_against_checkpoints pour éviter un double chargement du modèle.
     """
     agent_dir = tmp_path / "MyAgent"
@@ -85,8 +91,14 @@ def test_discover_includes_all_pkl_paired_archives(tmp_path):
     assert labels == {"0.7185", "0.9999"}
 
 
-def test_discover_skips_incompatible_no_pkl(tmp_path, caplog):
-    """Archive sans .pkl → skippée avec message INFO nommant le commit de rupture."""
+def test_discover_skips_incompatible_no_pkl(tmp_path, capsys):
+    """Archive sans .pkl → skippée avec un message VISIBLE nommant le commit de rupture.
+
+    Assertion sur la SORTIE, pas sur `caplog` : `caplog.at_level(INFO)` installe un handler que
+    la production n'a pas — le test voyait donc une trace que le run n'émettait nulle part
+    (aucun `logging.basicConfig` dans le dépôt). Le skip passe par `tqdm.write` depuis
+    le 2026-09-11.
+    """
     agent_dir = tmp_path / "MyAgent"
     agent_dir.mkdir()
 
@@ -96,15 +108,14 @@ def test_discover_skips_incompatible_no_pkl(tmp_path, caplog):
     # Incompatible : pas de pkl
     (agent_dir / "MyAgent_12345_robust_0.7000.zip").write_bytes(b"dummy")
 
-    with caplog.at_level(logging.INFO):
-        result = discover_checkpoint_archives(str(tmp_path), "MyAgent")
+    result = discover_checkpoint_archives(str(tmp_path), "MyAgent")
 
     assert len(result) == 1
     assert result[0][1] == "0.8000"
-    # Le message de skip mentionne le commit de rupture
-    messages = [r.getMessage() for r in caplog.records]
-    assert any("d5ddffb5" in m for m in messages)
-    assert any("MyAgent_12345_robust_0.7000.zip" in m for m in messages)
+    # Le message de skip est affiché et mentionne le commit de rupture
+    trace = capsys.readouterr().out
+    assert "d5ddffb5" in trace
+    assert "MyAgent_12345_robust_0.7000.zip" in trace
 
 
 def test_discover_skips_non_matching_filenames(tmp_path):
@@ -459,7 +470,7 @@ def test_evaluate_against_checkpoints_respects_n_episodes_budget(tmp_path):
             "ai.training_utils.get_scenario_list_for_phase",
             return_value=scenario_files,
         ),
-        patch("sb3_contrib.MaskablePPO.load", return_value=MagicMock()),
+        patch("ai.bot_evaluation._archive_architecture", return_value=_arch_neutre()),
         patch("ai.bot_evaluation._eval_worker_init"),
         patch("ai.bot_evaluation._eval_worker_task", side_effect=_record_task),
     ):

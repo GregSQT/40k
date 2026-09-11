@@ -43,6 +43,7 @@ __all__ = [
     'evaluate_against_bots',
     'validate_bot_eval_worker_params',
     'discover_checkpoint_archives',
+    'filter_compatible_archives',
     'evaluate_against_checkpoints',
     'create_checkpoint_eval_pool',
 ]
@@ -2113,6 +2114,15 @@ def evaluate_against_bots(model, training_config_name, rewards_config_name, n_ep
 # ── R0b — CHECKPOINT ÉTALONS ───────────────────────────────────────────────
 
 _CHECKPOINT_INCOMPATIBLE_COMMIT = "d5ddffb5"  # rupture charge_pair_net (§12.15)
+
+#: Ruptures d'architecture connues qui rendent une archive injouable dans le moteur courant.
+#: `filter_compatible_archives` NE LES CONSULTE PAS — il compare la donnee sauvegardee ; elles ne
+#: servent qu'a nommer la cause dans la trace de skip, et a rappeler qu'il y en a eu trois.
+_CHECKPOINT_RUPTURES = (
+    "d5ddffb5 charge_pair_net (2026-08-21)",
+    "9e2bd730 grille 9 -> 11 canaux (2026-09-08)",
+    "c4dd34ac grille 11 -> 12 canaux (2026-09-09)",
+)
 CKPT_COUNTER_SUFFIXES: tuple[str, ...] = ("_wins", "_losses", "_draws", "_timeouts")
 
 
@@ -2137,9 +2147,9 @@ def discover_checkpoint_archives(
     """(zip_path, score_label) pour chaque archive *_robust_*.zip avec pkl compagnon.
 
     Filtre uniquement la présence du _vec_normalize.pkl (post-charge_pair_net).
-    Incompatible (pas de pkl) → log INFO nommant le commit de rupture §12.15, jamais un crash.
-    La compatibilité architecturale (RuntimeError Missing key §12.15) est vérifiée
-    par evaluate_against_checkpoints au moment du chargement réel du modèle.
+    Incompatible (pas de pkl) → trace AFFICHÉE nommant le commit de rupture §12.15, jamais un crash.
+    La compatibilité architecturale est tranchée par `filter_compatible_archives` (§12.15),
+    sur les espaces et la signature du state_dict sauvegardés — jamais sur un texte d'exception.
     Retourne les archives triées par score croissant (plus faible → plus fort).
     """
     from ai.vec_normalize_utils import get_vec_normalize_path
@@ -2159,16 +2169,144 @@ def discover_checkpoint_archives(
         zip_path = os.path.join(agent_dir, fname)
         pkl_path = get_vec_normalize_path(zip_path)
         if not os.path.exists(pkl_path):
-            logging.info(
-                "CHECKPOINT_SKIP %s : pas de _vec_normalize.pkl "
-                "(archive pre-charge_pair_net, rupture %s) — ignoree.",
-                fname, _CHECKPOINT_INCOMPATIBLE_COMMIT,
+            # `tqdm.write` et non `logging.info`, pour la meme raison que l'autre motif de skip :
+            # sans handler configure, la trace n'etait emise nulle part.
+            tqdm.write(
+                f"CHECKPOINT_SKIP {fname} : pas de _vec_normalize.pkl "
+                f"(archive pre-charge_pair_net, rupture {_CHECKPOINT_INCOMPATIBLE_COMMIT}) — ignoree."
             )
             continue
         compatible.append((zip_path, score_label))
 
     compatible.sort(key=lambda t: float(t[1]))
     return compatible
+
+
+def _archive_architecture(
+    zip_path: str, device: str
+) -> Tuple[Any, Any, Dict[str, Tuple[int, ...]]]:
+    """(observation_space, action_space, {parametre: forme}) d'une archive, SANS construire de policy.
+
+    `load_from_zip_file` lit les donnees et les tenseurs sauvegardes ; il n'instancie ni policy ni
+    extracteur. C'est ce qui permet de trancher la compatibilite AVANT le `MaskablePPO.load` qui,
+    lui, construit la policy contre les constantes du code courant et leve la ou on veut un skip.
+    """
+    from stable_baselines3.common.save_util import load_from_zip_file
+
+    data, params, _ = load_from_zip_file(
+        zip_path, load_data=True, device=device, print_system_info=False
+    )
+    if not data or "observation_space" not in data or "action_space" not in data:
+        raise KeyError(
+            f"{os.path.basename(zip_path)} : archive sans observation_space/action_space sauvegardes"
+        )
+    if not params or "policy" not in params:
+        raise KeyError(f"{os.path.basename(zip_path)} : archive sans state_dict 'policy'")
+    signature = {
+        str(name): tuple(int(d) for d in tensor.shape)
+        for name, tensor in params["policy"].items()
+    }
+    return data["observation_space"], data["action_space"], signature
+
+
+def _architecture_divergence(
+    reference: Tuple[Any, Any, Dict[str, Tuple[int, ...]]],
+    candidate: Tuple[Any, Any, Dict[str, Tuple[int, ...]]],
+) -> Optional[str]:
+    """Premiere divergence d'architecture entre deux triplets `_archive_architecture`, ou None.
+
+    LES TROIS AXES SONT NECESSAIRES. Les archives pre-2026-09-08 de ce depot divergent
+    SIMULTANEMENT par l'espace d'observation (grille 9 canaux contre 12), par 8 cles absentes du
+    state_dict et par 29 formes de tenseurs. Une rupture ne touchant que les formes leverait
+    `RuntimeError: size mismatch`, une rupture ne touchant que les cles `RuntimeError: Missing
+    key(s)`, une rupture d'observation un `ValueError` de `SpatialCombinedExtractor` : trier sur
+    le texte d'une seule de ces exceptions laissait crasher les deux autres.
+    """
+    ref_obs, ref_act, ref_sig = reference
+    obs, act, sig = candidate
+
+    if obs != ref_obs:
+        ref_spaces = getattr(ref_obs, "spaces", None)
+        obs_spaces = getattr(obs, "spaces", None)
+        if ref_spaces is None or obs_spaces is None:
+            return f"observation_space {obs} != {ref_obs}"
+        if set(ref_spaces) != set(obs_spaces):
+            return (
+                f"observation_space : cles manquantes {sorted(set(ref_spaces) - set(obs_spaces))}, "
+                f"en trop {sorted(set(obs_spaces) - set(ref_spaces))}"
+            )
+        divergentes = [
+            f"{key} {obs_spaces[key].shape} != {ref_spaces[key].shape}"
+            for key in sorted(ref_spaces)
+            if obs_spaces[key] != ref_spaces[key]
+        ]
+        # TRONQUE A TROIS. Une refonte d'observation fait diverger douze cles a la fois (parc du
+        # 2026-09-11) : la liste complete, repetee par archive ecartee, noie la sortie du run.
+        tete = ", ".join(divergentes[:3])
+        suite = f" (+{len(divergentes) - 3} autres)" if len(divergentes) > 3 else ""
+        return f"observation_space : {tete}{suite}"
+
+    if act != ref_act:
+        return f"action_space {act} != {ref_act}"
+
+    manquantes = sorted(set(ref_sig) - set(sig))
+    surplus = sorted(set(sig) - set(ref_sig))
+    formes = sorted(key for key in set(ref_sig) & set(sig) if sig[key] != ref_sig[key])
+    if manquantes or surplus or formes:
+        return (
+            f"state_dict : {len(manquantes)} cle(s) manquante(s) {manquantes[:3]}, "
+            f"{len(surplus)} en trop {surplus[:3]}, "
+            f"{len(formes)} forme(s) divergente(s) {formes[:3]}"
+        )
+    return None
+
+
+def filter_compatible_archives(
+    model_path: str,
+    checkpoint_archives: List[Tuple[str, str]],
+    device: str = "cpu",
+) -> Tuple[List[Tuple[str, str]], List[Tuple[str, str]]]:
+    """Partitionne les archives en (jouables, ecartees §12.15) face au modele courant.
+
+    CRITERE STRUCTUREL, sur la DONNEE sauvegardee : espace d'observation, espace d'action et
+    signature du state_dict (cles + formes). Le critere precedent enveloppait `MaskablePPO.load`
+    et ne reconnaissait qu'un texte d'exception, « Missing key » ; depuis les ruptures de grille
+    des 2026-09-08 et 2026-09-09 (`GRID_CHANNELS` 9 -> 11 -> 12), une vieille archive casse AVANT
+    le chargement des poids, dans `SpatialCombinedExtractor`, avec un `ValueError` — le skip
+    §12.15 devenait le crash de l'evaluation entiere (12 archives sur 16 au 2026-09-11).
+
+    Une fois le tri fait ici, AUCUNE exception de `MaskablePPO.load` n'est plus rattrapee nulle
+    part : elle signale alors un vrai defaut, pas une archive perimee.
+
+    REFERENCE = le modele courant, pas les constantes du code : c'est lui que l'archive doit
+    affronter, et c'est lui qui joue dans le meme env. S'il etait lui-meme perime, le worker
+    mourrait sur son propre chargement — bruyamment, ce qui est le comportement voulu.
+
+    TRACE PAR `tqdm.write` : le depot ne configure aucun handler de logging, donc un
+    `logging.info` n'est jamais emis (meme constat qu'a `resolve_checkpoint_eval_seed`). Ecarter
+    douze barreaux sur seize sans une ligne a l'ecran serait un silence, pas un skip.
+    """
+    reference = _archive_architecture(model_path, device)
+    kept: List[Tuple[str, str]] = []
+    skipped: List[Tuple[str, str]] = []
+    for zip_path, score_label in checkpoint_archives:
+        divergence = _architecture_divergence(
+            reference, _archive_architecture(zip_path, device)
+        )
+        if divergence is None:
+            kept.append((zip_path, score_label))
+            continue
+        skipped.append((zip_path, score_label))
+        tqdm.write(
+            f"CHECKPOINT_SKIP {os.path.basename(zip_path)} : architecture incompatible "
+            f"(§12.15) — {divergence}"
+        )
+    if skipped:
+        tqdm.write(
+            f"CHECKPOINT_SKIP : {len(skipped)}/{len(checkpoint_archives)} archive(s) ecartee(s) "
+            f"— ruptures connues : {', '.join(_CHECKPOINT_RUPTURES)}"
+        )
+    return kept, skipped
 
 
 def _resolve_seat_seed(training_cfg: dict) -> int:
@@ -2282,7 +2420,6 @@ def evaluate_against_checkpoints(
     if not checkpoint_archives:
         return {}
 
-    from sb3_contrib import MaskablePPO
     from config_loader import get_config_loader, get_max_turns
     from ai.training_utils import get_scenario_list_for_phase
 
@@ -2319,24 +2456,12 @@ def evaluate_against_checkpoints(
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Modèle principal absent : {model_path}")
 
-    # SONDE DE COMPATIBILITÉ, dans le PARENT et avant toute construction de tâche. Le chargement
+    # TRI DE COMPATIBILITÉ, dans le PARENT et avant toute construction de tâche. Le chargement
     # réel a lieu dans le worker (`_worker_checkpoint_opponent`), or une archive d'architecture
     # incompatible y lèverait au fond d'un process séparé : le skip documenté §12.15 deviendrait
     # un crash de tâche opaque, puis un `_score_stage_against_pool` en erreur sur label manquant.
-    # Le coût est un `load` jeté par archive, payé une fois — négligeable devant l'évaluation.
-    compatible_archives: List[Tuple[str, str]] = []
-    for zip_path, score_label in checkpoint_archives:
-        try:
-            MaskablePPO.load(zip_path, device=device)
-        except RuntimeError as exc:
-            if "Missing key" in str(exc):
-                logging.info(
-                    "CHECKPOINT_SKIP %s : architecture incompatible (§12.15, rupture %s) — %s",
-                    os.path.basename(zip_path), _CHECKPOINT_INCOMPATIBLE_COMMIT, exc,
-                )
-                continue
-            raise
-        compatible_archives.append((zip_path, score_label))
+    # Le coût est une lecture de zip par archive, sans construction de policy.
+    compatible_archives, _ = filter_compatible_archives(model_path, checkpoint_archives, device)
     if not compatible_archives:
         return {}
 

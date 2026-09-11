@@ -222,10 +222,13 @@ But : l'étalon de force non saturable — win-rate du modèle courant contre se
 - Adversaire = policy chargée depuis une archive `*_robust_*.zip` + **SON**
   `_vec_normalize.pkl` (jamais celui du modèle courant) ; réutiliser le chemin adverse
   self-play (`env_wrappers`, `self_play_snapshot_*`) côté `bot_evaluation`.
-- Archive d'architecture incompatible (pré-`charge_pair_net`, commit `d5ddffb5`) → ignorée
-  avec message explicite nommant la rupture (§12.15) ; jamais un crash ni un silence.
-  1/28 archives chargeables au 2026-08-22 (5 pré-`charge_pair_net` lèvent `RuntimeError Missing
-  key(s)` au chargement et sont skippées §12.15) ; l'échelle se peuple à chaque run.
+- Archive d'architecture incompatible → ignorée avec message explicite nommant la rupture
+  (§12.15) ; jamais un crash ni un silence. Critère STRUCTUREL depuis le 2026-09-11
+  (`filter_compatible_archives`) : `observation_space`, `action_space` et signature du state_dict
+  comparés au modèle courant, jamais un texte d'exception — les trois ruptures connues
+  (`d5ddffb5` charge_pair_net, `9e2bd730` et `c4dd34ac` grille 9 → 11 → 12) lèvent trois
+  exceptions différentes. 4/16 archives jouables au 2026-09-11 ; l'échelle se repeuple à chaque
+  run, et se vide à chaque rupture d'architecture.
 - Publication : `bot_eval/vs_ckpt_<score>` par barreau + agrégat `00_critical/` (min, moyenne).
 - **Hors sélection et hors gate au départ** : nouvelle famille dans `bot_registry`
   (`CHECKPOINT_OPPONENT_KEYS` ou équivalent), exclue de `SELECTION_BOT_KEYS` et de

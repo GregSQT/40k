@@ -307,7 +307,7 @@ l'entraînement, elle hérite du `bot_eval_n_workers` déjà calibré contre la 
 | B1 | Adversaire polymorphe : `checkpoint_zip` / `checkpoint_label` / `device` optionnels ; sans eux, comportement inchangé bit-à-bit | `bot_evaluation.py` (`_create_eval_env`) |
 | B2 | Cache checkpoint par worker (`MaskablePPO.load` + normalizer + `_NormalizedFrozenModel` mémoïsés par `zip_path`) — sans lui, un worker recharge le zip à chaque tranche | `bot_evaluation.py` (`_eval_worker_init`, `_eval_worker_task`) |
 | B3 | `ep_offset` dans la boucle d'épisode ; défaut 0 ⇒ chemin bot intact | `bot_evaluation.py` (`_eval_worker_task`) |
-| B4 | Probe-load des archives dans le parent avant construction des tâches (préserve le skip §12.15, qui deviendrait sinon un crash de tâche opaque) | `bot_evaluation.py` (`evaluate_against_checkpoints`) |
+| B4 | Tri des archives dans le parent avant construction des tâches (préserve le skip §12.15, qui deviendrait sinon un crash de tâche opaque) | `bot_evaluation.py` (`filter_compatible_archives`) |
 | B5 | Réécriture en constructeur de tâches (archive × scénario × tranche), `bot_name = score_label` | `bot_evaluation.py` (`evaluate_against_checkpoints`) |
 | B6 | Agrégation vers la forme de retour existante ; ventilations droppées ; docstring périmée de `_eval_worker_task` corrigée (annonce un `shoot_stats` qui n'existe pas au retour) | `bot_evaluation.py` |
 | B7 | Sonde exploiteur câblée sur `bot_eval_n_workers_intermediate` : elle évalue **pendant** l'entraînement, et la parallélisation la ferait sinon concourir à 16 workers contre les 24 de collecte (régime documenté : 47 Go de RSS, éval 42 % plus lente qu'à 4) | `training_callbacks.py` (`ExploiterProbeCallback`), `train.py` |
@@ -367,8 +367,9 @@ conservé en le dérivant des troncatures `eval_loop_cap` pour que l'affichage R
    worker, jamais une instance rechargée (invariant 1).
 4. Murs : une tâche checkpoint consomme le fichier de scénario brut (invariant 2).
 5. `episode_start_index` : la tranche le reçoit égal à `ep_offset` (invariant 5).
-6. Archive incompatible → skip journalisé §12.15, pas de crash de tâche ; une `RuntimeError`
-   autre que « Missing key » remonte.
+6. Archive incompatible → skip tracé §12.15 sur la sortie, pas de crash de tâche ; le critère
+   est structurel (`observation_space`, `action_space`, signature du state_dict) depuis le
+   2026-09-11, et toute erreur de lecture d'archive remonte.
 7. Épisode plafonné → nul + entrée `eval_loop_cap`, ratio inchangé.
 8. Épisodes non joués (timeout de tâche) → lève, jamais un win-rate sur dénominateur tronqué.
 9. Non-régression du chemin bot : `ep_offset` absent ⇒ démarrage à 0.
