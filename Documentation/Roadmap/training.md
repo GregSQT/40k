@@ -688,6 +688,62 @@ Les runs antérieurs au 2026-09-06 gardent l'escalier, à lire comme une suite d
 
 ---
 
+## Win-rate HOLDOUT de la lignée du 2026-09-11 {#holdout-2026-09-11}
+
+**Point de départ d'une nouvelle lignée, PAS une comparaison.** Quatre correctifs mergés le
+2026-09-10 changent l'issue des parties ou le reward — contrôle d'objectif sommé par figurine
+(suite 49 de `ROADMAP_INDEX.md`), caractéristiques défensives effectives dans `expected_damage`
+(suite 50), table de dégâts complétée (suite 51 : 57 armes sur 231 valaient zéro, dont tout le tir
+ork), exclusivité des profils combi exposée dans l'observation (suite 48). Les win-rates antérieurs
+ne sont donc pas des points de référence valides pour celui-ci, et aucun « avant/après » n'est
+présenté ici.
+
+Mesure : `python3 ai/train.py --agent ArmageddonAgent_x1 --training-config x1 --resolution 1
+--test-only --step` sur `model_ArmageddonAgent_x1.zip` (2026-09-11 13:09), 300 épisodes,
+6 bots × 50, deux rosters holdout, siège alterné (132 épisodes en P1, 168 en P2). Dépouillement
+`ai/analyzer.py`.
+
+**WIN-RATE HOLDOUT : 270/300 = 90,0 %**, aucun nul. 259 victoires aux objectifs, 11 au départage
+de valeur, **zéro par élimination**.
+
+| dimension | résultat |
+|---|---|
+| EndgameBot | 48/50 = 96,0 % |
+| AlphaStrikeBot / DecapitationBot | 47/50 = 94,0 % |
+| RacerBot | 44/50 = 88,0 % |
+| AttritionBot | 43/50 = 86,0 % |
+| ScorerBot | 41/50 = 82,0 % |
+| roster Space Marines | 149/156 = 95,5 % |
+| roster Orks | 121/144 = 84,0 % |
+| siège P1 (joue premier) | 126/132 = 95,5 % |
+| siège P2 | 144/168 = 85,7 % |
+
+⚠️ **L'écart de siège n'est pas refermé.** Le bit `i_play_first` (cf. [siège premier /
+second](#siege-premier-joueur-obs)) a réduit l'écart mesuré le 2026-08-12 — 0,707 contre 0,586,
+soit 12,1 points — à **9,8 points** ici. Il a donc aidé sans suffire ; l'asymétrie reste le plus
+gros écart structurel de cette lignée, devant l'écart de roster (11,5 points).
+
+**Décisions d'agent, mesurées pour la première fois** — la journalisation des décisions (suite 53)
+les rend comptables, ce qui était impossible avant :
+
+- **déclaration de réserves 20.01 : 444/1944 = 22,8 %** de `CHOICE_0`. La question ouverte depuis
+  le déplacement de l'étape 20.01 avant le déploiement est tranchée : l'agent **n'élude pas** la
+  réserve et ne la déclare pas systématiquement non plus — il la joue dans un peu moins d'un quart
+  des cas ;
+- `fly_declaration` : 2 103/2 931 = 71,8 % de montées ;
+- `waaagh_call` : 290/421 = 68,9 % d'appels.
+
+**Constats analyzer non traités**, rapportés sans être qualifiés :
+
+- 1.1 « moves to adjacent enemy » : **2 occurrences sur 9 737 mouvements** (0,02 %), toutes en P1,
+  exemple épisode 248. À vérifier avant d'appeler ça un défaut — ce dépôt a un historique de faux
+  positifs analyzer sur ce motif précis (métrique hex contre euclidienne) ;
+- 1.7 « special rules usage » : `mortal_wounds_on_critical_wound` / Boyz 1 invalide sur 4, et
+  `mortal_wounds_on_fight_activation` / VanguardVeteranSquadJumpPack **59 invalides sur 90** — ce
+  second chiffre est trop élevé pour être ignoré.
+
+---
+
 ## Sonde win-rate scénarios d'entraînement {#training-probe}
 
 **Livré 2026-09-06.** `training_probe_every_n_evals` dans `BotEvaluationCallback` publie
