@@ -563,8 +563,11 @@ def _fall_back_weapon_cfg() -> Dict[str, Any]:
 
 
 def _fall_back_unit_cfg(uid: int, player: int, col: int, row: int) -> Dict[str, Any]:
+    """Unité prête pour `config["units"]`, au contrat de production : le scénario porte un `id`
+    entier et `_build_enhanced_unit` l'écrit en `str` — `create_unit` ne le convertit pas, et le
+    moteur adresse `unit_by_id` par chaîne (`require_unit_by_id`)."""
     return {
-        "id": uid, "player": player, "col": col, "row": row,
+        "id": str(uid), "player": player, "col": col, "row": row,
         "unitType": "TestUnit", "DISPLAY_NAME": f"Unit {uid}",
         "HP_CUR": 5, "HP_MAX": 5, "MOVE": 6, "T": 4,
         "ARMOR_SAVE": 4, "INVUL_SAVE": 0,

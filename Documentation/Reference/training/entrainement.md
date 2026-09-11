@@ -641,12 +641,14 @@ Ce que `x1_lineage` redéclare, et ce que cela remplace (vingt rampes `decay_fra
 | Clé | Régime de lignée | Profil `x1_long` (P0 seul) |
 |-----|------------------|----------------------------|
 | `learning_rate` | **0.001** scalaire | 0.002 → 0.0005, `decay_fraction` 0.9 |
-| `ent_coef` | **0.03** scalaire | 0.1 → 0.01, `decay_fraction` 0.4 |
-| `n_steps` | **32640** | 8160 |
-| `vf_coef` | **0.15** | 0.5 |
+| `ent_coef` | **0.01** scalaire | 0.1 → 0.01, `decay_fraction` 0.4 |
+| `n_steps` | **8160** | 8160 |
+| `vf_coef` | **0.17** | 0.5 |
 | `agent_seat_p2_ratio` | **0.7** (0.6 jusqu'au 2026-09-11) | 0.75 |
 | `batch_size` | *hérité* — 1020 | 1020 |
 | `max_grad_norm` | *hérité* — 0.5 | 0.5 |
+
+Valeurs du 2026-09-07 révisées depuis, chacune datée et motivée dans le `_doc` du profil (`config/agents/ArmageddonAgent_x1/ArmageddonAgent_x1_training_config.json`) : `ent_coef` 0.03 → 0.01, `n_steps` 32640 → 8160 et `vf_coef` 0.15 → 0.17 le 2026-09-08. Le tableau porte les valeurs COURANTES ; les paragraphes qui suivent racontent les mesures du 2026-09-07 qui ont fondé le régime. Verrou : `tests/unit/ai/test_training_config_par_etape.py::test_the_lineage_profile_pins_the_values_of_the_regime`.
 
 `vf_coef` 0.15 est le réglage **mesuré** : il porte la part du gradient revenant à la politique de 0,235 à 0,62, `explained_variance` intacte. À 0.5, les trois quarts de la capacité d'apprentissage allaient au critic — dont `explained_variance` valait déjà 0,87 — pendant que la politique, seule à jouer les parties, n'en recevait qu'un quart (décomposition sur 44 updates, `run_20260906-225839` : value 1.035 / policy 0.323 / entropy 0.018). L'écrêtage n'y changeait rien : il divise les trois termes par le **même** facteur, donc il réduit la taille du pas sans corriger sa direction. `n_steps` × 4 attaque l'autre moitié du problème — la variance d'un épisode de self-play à parité est maximale par construction. Lecture : `00_critical/g_grad_share_policy_mb0`.
 

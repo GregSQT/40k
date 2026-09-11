@@ -22,6 +22,7 @@ import numpy as np
 import re
 from tqdm import tqdm
 from collections import Counter, defaultdict, deque
+from collections.abc import Mapping
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED
 from typing import Callable, Optional, Dict, List, Any, Tuple, TYPE_CHECKING
 
@@ -2202,9 +2203,17 @@ def _archive_architecture(
         )
     if not params or "policy" not in params:
         raise KeyError(f"{os.path.basename(zip_path)} : archive sans state_dict 'policy'")
+    # SB3 type `params` en `dict[str, Tensor]`, mais l entree 'policy' est le state_dict de la
+    # policy (un mapping nom -> tenseur) : une archive qui y mettrait autre chose est corrompue.
+    policy_state = params["policy"]
+    if not isinstance(policy_state, Mapping):
+        raise TypeError(
+            f"{os.path.basename(zip_path)} : 'policy' n'est pas un state_dict "
+            f"({type(policy_state).__name__})"
+        )
     signature = {
         str(name): tuple(int(d) for d in tensor.shape)
-        for name, tensor in params["policy"].items()
+        for name, tensor in policy_state.items()
     }
     return data["observation_space"], data["action_space"], signature
 
