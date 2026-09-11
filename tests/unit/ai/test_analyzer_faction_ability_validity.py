@@ -46,13 +46,25 @@ def _faction_keywords(cfg, unit_type):
 
 
 def test_a_waaagh_charge_is_not_counted_invalid():
-    """Le critère exact de `special_rules_invalid` (analyzer.py) appliqué à un relevé réel.
+    """Le prédicat DE PRODUCTION (`special_rule_usage_is_valid`) appliqué à un relevé réel.
 
     Sans le complément de faction, `("waaagh", <unité orke>)` satisfait le prédicat d'invalidité
     et la ligne 1.7 affiche `INVALID` sur une charge légale.
+
+    Le prédicat est APPELÉ, jamais recopié : une version recopiée du critère reste verte quand la
+    production change d'avis — mesuré, elle l'est restée quand le verdict §1.7 est passé du
+    post-traitement au relevé (19.04).
     """
+    from ai.analyzer_rules import special_rule_usage_is_valid
+
     cfg = _config()
     ork_unit = next(iter(sorted(cfg.rule_to_units["waaagh"])))
-    rid, ut = "waaagh", ork_unit
-    invalid = (rid not in cfg.rule_to_units) or (ut not in cfg.rule_to_units[rid])
-    assert not invalid, f"usage légal du Waaagh! par {ut} compté comme faute"
+    assert special_rule_usage_is_valid(
+        "waaagh", ork_unit, {ork_unit}, cfg.rule_to_units
+    ), f"usage légal du Waaagh! par {ork_unit} compté comme faute"
+    # Escouade dont AUCUNE figurine vivante ne porte la capacité de faction : la faute reste une
+    # faute, le complément de faction ne blanchit pas tout le plateau.
+    non_ork = sorted(set(cfg.unit_rules_by_type) - cfg.rule_to_units["waaagh"])[0]
+    assert not special_rule_usage_is_valid(
+        "waaagh", non_ork, {non_ork}, cfg.rule_to_units
+    ), f"{non_ork} ne porte pas Waaagh! : son usage doit rester INVALID"

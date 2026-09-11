@@ -73,6 +73,131 @@ def note_rule_usage(stats: Dict[str, Any], rule_id: str, player: int) -> None:
     usage[rule_id][int(player)] += 1
 
 
+def special_rule_usage_is_valid(
+    rule_id: str,
+    unit_type: str,
+    datasheets_present: Set[str],
+    rule_to_units: Dict[str, Set[str]],
+) -> bool:
+    """L'usage relevé est-il porté par une figurine VIVANTE de l'escouade ? (19.04)
+
+    `rule_to_units` est bâti sur les datasheets : il répond pour une escouade HOMOGÈNE. Il ne
+    répond pas pour une escouade ATTACHÉE, et c'est le cas courant de ce roster — le journal
+    nomme l'escouade de bloc (`VanguardVeteranSquadJumpPack`, `Boyz`) là où la capacité est
+    déclarée par le character replié dedans (`ChaplainJumpPack`, `PainBoy`).
+
+    Documentation/40k_rules/19 Attached units.pdf §19.04 : « abilities/rules that affect a unit
+    (or models in it) apply to every model in an attached unit, UNTIL THE SOURCE of that
+    ability/rule is destroyed » — le tableau du PDF donne les trois sources (leader/support,
+    bodyguard, figurine précise) et la même échéance pour toutes : la mort du dernier socle.
+    Le moteur l'applique par `compute_unit_rules_in_effect`
+    (engine/phase_handlers/shared_utils.py), qui prend `native_alive` et
+    `alive_attached_sources` : la propagation y est une fonction du VIVANT, pas de la liste de
+    déploiement. `datasheets_present` est le pendant de ces deux paramètres côté analyzer.
+
+    `datasheets_present` = datasheets des socles VIVANTS de CETTE escouade à l'instant du
+    relevé, ou `{unit_type}` quand le journal ne déclare aucune composition (grammaire
+    antérieure à `[MODEL_TYPES:]`) : le verdict retombe alors sur la seule datasheet
+    d'escouade, comme avant l'existence de ce prédicat. Aucun contrôle relâché : une règle que
+    ne porte AUCUNE datasheet vivante de l'escouade reste INVALID.
+
+    La composition vient du JOURNAL (`[MODEL_TYPES:]`), pas de `CAN_LEAD` : ce dernier décrit
+    les attachements LÉGAUX, donc un sur-ensemble qui blanchirait un usage réellement invalide.
+
+    CE QUI N'EST PAS JUGÉ, et pourquoi : la règle déclarée par la datasheet de l'escouade
+    elle-même reste toujours valide. Son échéance 19.04 est la mort du dernier socle du BLOC
+    bodyguard, et le journal ne dit pas quel socle est natif — le moteur, lui, le sait
+    (`native_alive`, engine/phase_handlers/shared_utils.py). Exiger `unit_type` parmi les
+    datasheets vivantes serait PLUS STRICT que la règle : une escouade réduite à son sergent ou
+    à sa variante d'arme spéciale (datasheets distinctes du type d'escouade, natives malgré
+    tout) verrait ses propres capacités comptées INVALID. Ce prédicat ne tranche donc que la
+    source ATTACHÉE, la seule que le journal permette de suivre.
+
+    Marqueurs de RÔLE exclus de la propagation, exactement comme `strip_role_rules` les retire
+    des règles de figurine avant l'union du moteur : ils qualifient la figurine (ordre
+    d'allocation 05.04, T bodyguard 19.02), jamais l'escouade. La table lue est celle du
+    moteur — un rôle ajouté là-bas ne peut pas diverger ici.
+    """
+    from engine.phase_handlers.shared_utils import ROLE_TIER
+
+    carriers = rule_to_units.get(rule_id, set())  # get allowed : règle absente du registre
+    if rule_id in ROLE_TIER:
+        # Un rôle ne se propage à personne : seule la datasheet de l'escouade elle-même compte.
+        return unit_type in carriers
+    if unit_type in carriers:
+        return True  # cf. « CE QUI N'EST PAS JUGÉ » ci-dessus
+    return bool(carriers & datasheets_present)
+
+
+def living_datasheets(
+    state: Any, stats: Dict[str, Any], unit_id: str, unit_type: str
+) -> Optional[Set[str]]:
+    """Datasheets des socles VIVANTS de `unit_id`, ou `None` si la composition ne tranche pas.
+
+    `unit_model_hp[unit_id]` est l'effectif par socle tenu par `_resync_living_models` : un socle
+    mort en sort, donc la datasheet qu'il portait disparaît d'ici avec lui — c'est l'échéance
+    exacte de 19.04. `model_types` donne la datasheet de chaque socle, écrite une fois à l'entête.
+
+    `None` = ABSTENTION, jamais une faute inventée. Deux cas :
+      - un socle VIVANT dont la datasheet n'est pas déclarée. C'est le cas des figurines RENDUES
+        (`apply_returned_models_placement`, engine/phase_handlers/command_handlers.py), qui
+        reçoivent un id neuf `<escouade>#r<n>` qu'aucune entête ne porte — mesuré sur le step.log
+        du 2026-09-11 : 6 ids `#r`, 0 déclaré. Or 19.04 les réhabilite explicitement (« Should
+        those models later be revived, those abilities will once more apply ») : les écarter
+        aurait compté INVALID un usage parfaitement légal, et aurait tout compté comme faute
+        pour une escouade dont tous les survivants sont des socles rendus ;
+      - aucun socle vivant connu alors que l'entête a déclaré une composition.
+
+    `{unit_type}` quand l'entête ne déclare AUCUNE composition (grammaire antérieure à
+    `[MODEL_TYPES:]`) : le verdict retombe sur la seule datasheet d'escouade, comme avant ce
+    prédicat — le journal ne connaît alors aucun attachement.
+
+    LIMITE CONNUE, qui ne peut que SOUS-compter les fautes : une ligne `DEAD model=` sans
+    segment `[MODELS:]` ne fait pas sortir le socle avant la prochaine ligne qui en porte un.
+    """
+    declared = require_key(stats, 'model_types_by_unit_id').get(unit_id)  # get allowed : entête sans [MODEL_TYPES:]
+    if not declared:
+        return {unit_type}
+    model_types = state.model_types
+    vivants = state.unit_model_hp.get(unit_id, {})  # get allowed : unité jamais vue
+    if any(mid not in model_types for mid in vivants):
+        return None
+    present = {model_types[mid] for mid in vivants}
+    return present or None
+
+
+def note_special_rule_usage(
+    stats: Dict[str, Any],
+    state: Any,
+    config: Any,
+    rule_id: str,
+    unit_id: str,
+    unit_type: str,
+    player: int,
+) -> None:
+    """Relève un usage de règle §1.7 ET tranche sa validité 19.04 À CET INSTANT.
+
+    SITE UNIQUE d'écriture de `special_rule_usage`. Le verdict ne peut pas se rendre a
+    posteriori sur la clé `(règle, type d'escouade)` : cette clé ignore QUELLE escouade a
+    utilisé la règle et QUAND. Deux escouades du même type n'ont pas la même composition
+    (mesuré sur le run du 2026-09-11 : `Unit 4 (Intercessor)` porte un `Librarian`, `Unit 5
+    (Intercessor)` un `CaptainRelicShield` et un `Ancient`), et une escouade n'a pas la même
+    composition au tour 5 qu'au déploiement — 19.04 s'arrête à la mort de la source.
+
+    LIMITE CONNUE : la dernière clause de 19.04 (« if that last model was destroyed as the
+    result of an attack, the ability applies until the attacking unit has resolved all of its
+    attacks ») n'est pas modélisée ici — l'analyzer ne suit pas les allocations d'attaque en
+    cours. Un usage relevé dans cette fenêtre de sursis serait compté INVALID à tort. Mesuré
+    sur le run du 2026-09-11 : 0 relevé sur 94 tombe après la mort de son porteur.
+    """
+    require_key(stats, 'special_rule_usage')[(rule_id, unit_type)][int(player)] += 1
+    present = living_datasheets(state, stats, unit_id, unit_type)
+    if present is None:
+        return  # composition non concluante : on s'abstient plutôt que d'inventer une faute
+    if not special_rule_usage_is_valid(rule_id, unit_type, present, config.rule_to_units):
+        require_key(stats, 'special_rule_usage_invalid')[(rule_id, unit_type)][int(player)] += 1
+
+
 def new_rule_usage_counters() -> Dict[str, Dict[int, int]]:
     """Structure `rule_usage` DÉCLARÉE d'avance, une entrée par règle du corpus.
 

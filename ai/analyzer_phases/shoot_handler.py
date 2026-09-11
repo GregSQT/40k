@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any, Dict, NamedTuple, Optional, Tuple
 
 from shared.data_validation import require_key
-from ai.analyzer_rules import note_rule_usage, check_anti_x_threshold
+from ai.analyzer_rules import note_rule_usage, note_special_rule_usage, check_anti_x_threshold
 from ai.analyzer_phases import PHASE_ORDER
 from engine.combat_utils import calculate_hex_distance, ranged_edge_distance, get_distance_metric
 from ai.analyzer_perfig import (
@@ -274,8 +274,10 @@ def handle_shoot(
         shooter_unit_type_for_flee = require_key(state.unit_types, shooter_id)
         shooter_unit_rules_for_flee = require_key(config.unit_rules_by_type, shooter_unit_type_for_flee)
         if "shoot_after_flee" in shooter_unit_rules_for_flee:
-            key = ("shoot_after_flee", shooter_unit_type_for_flee)
-            stats['special_rule_usage'][key][player] += 1
+            note_special_rule_usage(
+                stats, state, config, "shoot_after_flee",
+                str(shooter_id), shooter_unit_type_for_flee, player,
+            )
         else:
             stats['shoot_after_flee'][player] += 1
             if stats['first_error_lines']['shoot_after_flee'][player] is None:
@@ -289,10 +291,14 @@ def handle_shoot(
     # (V11 §0hist.38). Espace ou underscore acceptes, le nom venant de la config.
     shooter_unit_type_for_reroll = require_key(state.unit_types, shooter_id)
     if re.search(r'\[TARGETED[ _]INTERCESSION\]', action_desc, re.IGNORECASE):
-        key = ("reroll_1_towound", shooter_unit_type_for_reroll)
-        stats['special_rule_usage'][key][player] += 1
-        key = ("reroll_towound_target_on_objective", shooter_unit_type_for_reroll)
-        stats['special_rule_usage'][key][player] += 1
+        note_special_rule_usage(
+            stats, state, config, "reroll_1_towound",
+            str(shooter_id), shooter_unit_type_for_reroll, player,
+        )
+        note_special_rule_usage(
+            stats, state, config, "reroll_towound_target_on_objective",
+            str(shooter_id), shooter_unit_type_for_reroll, player,
+        )
 
     # RULE: Shoot at friendly
     shooter_actual_player = require_key(state.unit_player, shooter_id)
@@ -1061,8 +1067,10 @@ def handle_shoot(
                 "ASSAULT" not in weapon_rules_list
                 and "shoot_after_advance" in shooter_unit_rules_for_advance
             ):
-                key = ("shoot_after_advance", shooter_unit_type_for_advance)
-                stats['special_rule_usage'][key][player] += 1
+                note_special_rule_usage(
+                    stats, state, config, "shoot_after_advance",
+                    str(shooter_id), shooter_unit_type_for_advance, player,
+                )
 
     # Track weapon rule usage
     if weapon_found and weapon_info_matched and weapon_display_name is not None:
