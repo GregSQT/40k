@@ -600,7 +600,7 @@ sur le rapport entre les points de `03_selfplay/<membre>` et ceux de `actions/sh
 > `training_detailed/` et huit tags de `training_diagnostic/` n'existent plus : elles recopiaient
 > valeur pour valeur les `train/*` et `diag/*` de SB3, sur l'axe des **pas** alors que le tracker
 > date tout le reste en **épisodes**. Sur un run postérieur, ces séries se lisent sous `train/*`
-> et `diag/*` (cf. `Reference/training/metriques.md`, « Une abscisse par écrivain »). Les noms de
+> et `diag/*` (cf. [../Reference/training/metriques.md](../Reference/training/metriques.md), « Une abscisse par écrivain »). Les noms de
 > tags ci-dessous sont conservés tels quels : ce sont ceux que portent réellement les fichiers
 > `events` des runs dont cette section parle.
 
