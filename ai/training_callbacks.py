@@ -558,7 +558,6 @@ class EpisodeTerminationCallback(BaseCallback):
                 ):
                     eval_delta = blocking_eval_seconds - self.blocking_eval_seconds_at_last_display
                     delta_time = current_time - self.last_display_time - eval_delta
-                    self.blocking_eval_seconds_at_last_display = blocking_eval_seconds
                     delta_episodes = display_episode_count - self.last_display_episode_count
                     if delta_time > 0 and delta_episodes > 0:
                         avg_time_per_episode = delta_time / delta_episodes
@@ -573,6 +572,16 @@ class EpisodeTerminationCallback(BaseCallback):
                             )
                 self.last_display_time = current_time
                 self.last_display_episode_count = display_episode_count
+                # Les TROIS ancres decrivent le meme instant, elles se posent donc ensemble et
+                # HORS de la branche ci-dessus. Le cumul d'eval y etait pose a l'interieur, donc
+                # jamais au PREMIER affichage : tout ce qui avait bloque avant lui etait impute
+                # au second, dont le `delta_time` passait sous zero et sautait en silence
+                # l'initialisation de l'EMA — donc l'ETA. Inatteignable tant que rien ne bloquait
+                # avant le premier affichage ; la sonde de BASELINE du pool, desormais
+                # chronometree (`PoolEarlyStoppingCallback._probe`, appelee par
+                # `_on_training_start`, soit avant tout `_on_step`), y met plusieurs centaines de
+                # secondes.
+                self.blocking_eval_seconds_at_last_display = blocking_eval_seconds
 
                 # Calculate ETA using EMA; use overall average when EMA not yet available (early episodes)
                 remaining_episodes = display_total_episodes - display_episode_count
