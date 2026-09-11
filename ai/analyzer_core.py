@@ -970,6 +970,14 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # d'un sergent ou d'un personnage rattaché (règle 19) n'était ni
                             # attendue ni comptée — donc invisible des deux côtés à la fois.
                             require_key(stats, 'unit_types_seen').add(_mtype)
+                            # Composition PAR TYPE D'ESCOUADE, pour le verdict de validité §1.7.
+                            # `unit_types_seen` est un ensemble PLAT : il dit qu'un Painboy est
+                            # sur la table, pas DANS QUELLE escouade — or c'est exactement la
+                            # question que pose 19.04. Union sur tout le run : §1.7 agrège lui
+                            # aussi par type, il n'existe pas de grain plus fin à y rendre.
+                            require_key(stats, 'model_types_by_unit_type').setdefault(
+                                unit_type, set()
+                            ).add(_mtype)
                 # PV PAR SOCLE (cf. `unit_model_hp`). Posés ICI et pas plus haut : ils ont besoin
                 # de `[MODEL_TYPES:]`, que la même ligne d'entête vient seulement de fournir.
                 # À l'entête, aucune figurine n'est entamée : PV pleins par datasheet.
