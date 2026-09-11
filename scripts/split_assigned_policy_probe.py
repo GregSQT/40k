@@ -5,12 +5,16 @@
 le moteur remplit-il le canal (volet A), le réseau le lit-il au sens du gradient (volet B). Un
 gradient non nul ne prouve QUE le câblage : la dérivée d'une couche linéaire par rapport à une
 entrée vaut son poids, elle est non nulle même pour une entrée toujours à zéro. La question qui
-reste — le CHOIX DE CIBLE change-t-il quand l'arme déjà engagée change de cible — se mesure sur la
-distribution d'actions, et seulement sur un modèle ENTRAÎNÉ.
+reste — la DÉCISION change-t-elle quand l'arme déjà engagée change de cible — se mesure sur la
+distribution d'actions, et seulement sur un modèle ENTRAÎNÉ. Elle se pose aux DEUX sous-états du
+tir fractionné, et la sonde les mesure SÉPARÉMENT : au sous-état ARME (« laquelle j'engage
+ensuite »), au sous-état CIBLE (« sur qui je la pointe »). Ne mesurer que le second rendrait un
+verdict portant sur la moitié du mécanisme — c'est ce que faisait cette sonde avant le
+2026-09-11, et le verdict « pas exploités » qu'elle a servi ce jour-là ne valait que pour CIBLE.
 
 MÉTHODE. Sur de vrais états de jeu (scénarios d'entraînement, actions masquées aléatoires), on
-s'arrête à chaque point d'arrêt de CIBLE du tir fractionné portant déjà au moins un couple
-arme→cible. Là, on construit un CONTREFACTUEL : le même état, à ceci près que le couple déjà
+s'arrête à chaque point d'arrêt du tir fractionné — ARME comme CIBLE — portant déjà au moins un
+couple arme→cible. Là, on construit un CONTREFACTUEL : le même état, à ceci près que le couple déjà
 commité vise une AUTRE escouade ennemie éligible. Les deux observations ne diffèrent alors que par
 les bits `split_assigned_w<i>` — c'est mesuré ici, pas supposé (`--strict` lève si une autre clé
 bouge). On compare les distributions d'actions de la politique sur ces deux observations, en
@@ -33,8 +37,12 @@ LECTURE DU VERDICT :
   TVD_split de l'ordre de TVD_référence     -> exploités.
   entre les deux                            -> à rapporter tel quel, avec les trois nombres.
 
+Le nombre d'ACTIONS LÉGALES des points mesurés est rapporté avec eux : une TVD faible sur un
+masque large peut venir de la dilution sur des actions sans rapport, et non de l'indifférence de
+la politique.
+
 La sonde n'écrit rien : ni config, ni modèle, ni state. Elle ne juge pas non plus « bon » ou
-« mauvais » — elle rend trois nombres et leur écart-type.
+« mauvais » — elle rend des nombres, par sous-état puis réunis.
 
 Usage :
     python3 scripts/split_assigned_policy_probe.py --model ai/models/<agent>/model_<agent>.zip
@@ -228,13 +236,13 @@ def _bits_only(a: Dict[str, np.ndarray], b: Dict[str, np.ndarray]) -> bool:
     return bool(np.array_equal(x, y))
 
 
-def collect(eng: Any, policy: _Policy, seed: int, strict: bool) -> List[Dict[str, float]]:
+def collect(eng: Any, policy: _Policy, seed: int, strict: bool) -> List[Dict[str, Any]]:
     """Un épisode : un enregistrement par point d'arrêt de CIBLE portant déjà un couple."""
     from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
 
     obs, _info = eng.reset(seed=seed)
     rng = np.random.default_rng(seed * 7919 + 13)
-    out: List[Dict[str, float]] = []
+    out: List[Dict[str, Any]] = []
     steps = 0
     while steps < MAX_STEPS_PER_EPISODE:
         gs = eng.game_state
@@ -244,14 +252,17 @@ def collect(eng: Any, policy: _Policy, seed: int, strict: bool) -> List[Dict[str
         if not mask.any():
             break
 
+        # LES DEUX SOUS-ÉTATS. Les bits sont posés dans l'un comme dans l'autre, et l'usage le
+        # plus direct de l'information est celui que le filtre d'origine excluait : au sous-état
+        # ARME, « quelle arme j'engage ensuite sachant ce qui est déjà parti et sur qui ». Ne
+        # mesurer que la CIBLE rendait un verdict portant sur la moitié du mécanisme.
         pending = gs.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
-        if (
-            pending is not None
-            and pending.get("pending_weapon") is not None  # get allowed : sous-état CIBLE
-            and pending.get("assignments")  # get allowed : au moins un couple commité
-        ):
+        if pending is not None and pending.get("assignments"):  # get allowed : couple commité
+            # get allowed : `pending_weapon` armé = sous-état CIBLE, absent = sous-état ARME.
+            sous_etat = "CIBLE" if pending.get("pending_weapon") is not None else "ARME"
             rec = _measure(eng, policy, pending, mask, strict)
             if rec is not None:
+                rec["sous_etat"] = sous_etat
                 out.append(rec)
 
         obs, _r, term, trunc, _i = eng.step(int(rng.choice(np.flatnonzero(mask))))
@@ -262,7 +273,7 @@ def collect(eng: Any, policy: _Policy, seed: int, strict: bool) -> List[Dict[str
 
 
 def _measure(eng: Any, policy: _Policy, pending: Dict[str, Any], mask: np.ndarray,
-             strict: bool) -> Optional[Dict[str, float]]:
+             strict: bool) -> Optional[Dict[str, Any]]:
     """Les trois TVD sur UN point d'arrêt. `None` si l'état ne s'y prête pas."""
     from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
 
@@ -350,6 +361,10 @@ def _measure(eng: Any, policy: _Policy, pending: Dict[str, Any], mask: np.ndarra
     p_ref = policy.distribution(obs_ref, mask)
     p_sat = policy.distribution(obs_sat, mask)
     return {
+        # Nombre d'actions LÉGALES : sans lui, une TVD faible se lit mal — elle peut venir d'un
+        # masque large qui dilue la mesure sur des actions sans rapport avec le choix, et non de
+        # l'indifférence de la politique.
+        "n_actions_legales": float(np.count_nonzero(mask)),
         "tvd_split": _tvd(p_a, p_b),
         "tvd_plancher": _tvd(p_a, p_a2),
         "tvd_reference": _tvd(p_a, p_ref),
@@ -366,7 +381,7 @@ def main() -> int:
                     help="lève si une contrefactuelle fait bouger autre chose que les dix bits")
     args = ap.parse_args()
 
-    records: List[Dict[str, float]] = []
+    records: List[Dict[str, Any]] = []
     policy: Optional[_Policy] = None
     for scenario in SCENARIOS:
         eng = make_engine(scenario)
@@ -387,20 +402,44 @@ def main() -> int:
     mesures = [r for r in records if not any(k in r for k, _ in motifs)]
     print(f"points d'arrêt rencontrés : {len(records)}")
     for key, why in motifs:
-        print(f"   écartés — {why:62s} : {len(ecartes[key])}")
+        detail = "  ".join(
+            f"{se}={sum(1 for r in ecartes[key] if r.get('sous_etat') == se)}"  # get allowed
+            for se in ("ARME", "CIBLE")
+        )
+        print(f"   écartés — {why:62s} : {len(ecartes[key]):3d}  ({detail})")
     print(f"points d'arrêt mesurés    : {len(mesures)}")
     records = mesures
     if not records:
         print("AUCUN point d'arrêt informatif — rien à conclure.")
         return 1
+
+    labels = (("tvd_plancher", "PLANCHER   (obs contre elle-même)"),
+              ("tvd_split", "SPLIT      (cible déjà assignée changée)"),
+              ("tvd_reference", "RÉFÉRENCE  (les deux cibles échangent leurs caractéristiques)"),
+              ("tvd_saturation", "SATURATION (bloc ennemi continu à zéro)"))
+
+    # PAR SOUS-ÉTAT, et pas seulement en bloc : les bits servent à deux décisions différentes —
+    # quelle arme engager ensuite (ARME), sur qui la pointer (CIBLE). Une moyenne commune peut
+    # noyer un effet présent dans l'un sous l'indifférence de l'autre.
+    for sous_etat in ("ARME", "CIBLE"):
+        lot = [r for r in records if r.get("sous_etat") == sous_etat]  # get allowed
+        if not lot:
+            print(f"\n── sous-état {sous_etat} : AUCUN point mesuré ──")
+            continue
+        na = np.array([r["n_actions_legales"] for r in lot])
+        print(f"\n── sous-état {sous_etat} — {len(lot)} points, "
+              f"actions légales : méd={np.median(na):.0f} max={na.max():.0f} ──")
+        for key, label in labels:
+            vals = np.array([r[key] for r in lot])
+            print(f"  {label:60s} moy={vals.mean():.6f}  med={np.median(vals):.6f}  "
+                  f"max={vals.max():.6f}")
+
+    print("\n── les deux sous-états réunis ──")
     stat: Dict[str, np.ndarray] = {}
-    for key, label in (("tvd_plancher", "PLANCHER   (obs contre elle-même)"),
-                       ("tvd_split", "SPLIT      (cible déjà assignée changée)"),
-                       ("tvd_reference", "RÉFÉRENCE  (les deux cibles échangent leurs caractéristiques)"),
-                       ("tvd_saturation", "SATURATION (bloc ennemi continu à zéro)")):
+    for key, label in labels:
         vals = np.array([r[key] for r in records])
         stat[key] = vals
-        print(f"  {label:42s} moy={vals.mean():.6f}  med={np.median(vals):.6f}  "
+        print(f"  {label:60s} moy={vals.mean():.6f}  med={np.median(vals):.6f}  "
               f"max={vals.max():.6f}  écart-type={vals.std():.6f}")
 
     if float(stat["tvd_plancher"].max()) != 0.0:

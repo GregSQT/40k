@@ -252,30 +252,40 @@ prise reste éligible pour l'arme suivante.
   que **deux slots assignés différents donnent deux embeddings différents** — sans quoi le bloc de
   bits ne vaudrait pas mieux qu'un comptage.
 
-**MESURÉ le 2026-09-11 — les bits sont CÂBLÉS mais PAS EXPLOITÉS.**
-`scripts/split_assigned_policy_probe.py` sur le modèle promu à 110 000 épisodes (P2, obs 18269),
-12 graines des scénarios d'entraînement, distance de variation totale sur la distribution
-d'actions restreinte aux actions légales :
+**MESURÉ le 2026-09-11 — non exploités au choix de CIBLE ; au choix d'ARME, la mesure ne tranche
+pas.** `scripts/split_assigned_policy_probe.py` sur le modèle promu à 110 000 épisodes (P2,
+obs 18269), 12 graines des scénarios d'entraînement, distance de variation totale sur la
+distribution d'actions restreinte aux actions légales. Les DEUX sous-états, mesurés séparément :
 
-| Perturbation | moyenne | médiane |
+| Perturbation | ARME (6 pts) | CIBLE (10 pts) |
 |---|---|---|
 | PLANCHER — la même observation contre elle-même | 0,000000 | 0,000000 |
-| SPLIT — la cible déjà assignée change | **0,000969** | **0,000007** |
-| RÉFÉRENCE — les deux cibles échangent leurs caractéristiques | 0,620877 | 0,711034 |
+| SPLIT — la cible déjà assignée change | 0,000473 | **0,000969** |
+| RÉFÉRENCE — les deux cibles échangent leurs caractéristiques | 0,001147 | **0,620877** |
+| SATURATION — bloc ennemi continu à zéro | 0,037428 | 0,543887 |
 
-Changer QUELLE cible porte déjà une arme ne déplace pratiquement pas le choix de la politique :
-la médiane, 7 × 10⁻⁶, est au niveau du plancher numérique, alors qu'un changement de
-caractéristiques la déplace de 0,71. Les deux perturbations ne sont pas de même ampleur en entrée
-— dix bits contre deux lignes entières — donc le RAPPORT ne se lit pas comme un facteur exact ;
-ce qui se lit, c'est que les bits pèsent à peine plus que rien dans cette décision.
+Moyennes ; médianes de SPLIT : 0,000187 (ARME) et 0,000007 (CIBLE).
 
-**Deuxième mesure, qui borne le gain possible :** sur 78 points d'arrêt de cible rencontrés,
-**66 n'ont qu'UNE action légale** — une seule cible éligible pour l'arme en attente. Même
-exploités parfaitement, les bits ne pourraient peser que sur le cinquième restant.
+**Au choix de CIBLE, les bits ne pèsent pratiquement rien** : la médiane, 7 × 10⁻⁶, est au niveau
+du plancher numérique, alors qu'un échange de caractéristiques déplace la décision de 0,71. Les
+deux perturbations ne sont pas de même ampleur en entrée — dix bits contre deux lignes entières —
+donc le RAPPORT ne se lit pas comme un facteur exact ; ce qui se lit, c'est l'écart d'ordre de
+grandeur.
 
-Le bras témoin (même run sans les bits, pour comparer les win-rates) n'a **pas** été lancé, et
-c'est la conséquence directe de ce qui précède : à ce niveau d'écart, aucun décalage de win-rate
-n'est attribuable aux bits, et les heures de GPU du témoin n'achèteraient rien.
+**Au choix d'ARME, l'étalon lui-même est muet** : la RÉFÉRENCE n'y vaut que 0,001, soit six cents
+fois moins qu'au choix de cible. À ce stade la politique est presque insensible au bloc ennemi
+TOUT ENTIER, pas seulement aux dix bits — que SPLIT y soit du même ordre que la RÉFÉRENCE ne dit
+donc pas que les bits servent, mais que rien de ce bloc ne sert à cette décision-là. Sur 6 points
+mesurés, cette moitié n'est pas tranchée.
+
+**Ce qui borne le gain possible :** sur 156 points d'arrêt rencontrés, **109 n'ont qu'UNE action
+légale** et 31 de plus n'offrent aucune autre cible éligible pour l'arme déjà assignée — 16 sont
+mesurables, soit 10 %. Le masque des points mesurés est étroit (médiane 2 actions légales,
+maximum 5), donc les TVD ne sont pas diluées par des actions sans rapport.
+
+Le bras témoin (même run sans les bits, pour comparer les win-rates) n'a **pas** été lancé : à
+l'écart constaté au choix de cible, et faute d'étalon lisible au choix d'arme, aucun décalage de
+win-rate ne serait attribuable aux bits.
 
 **Ce qui reste non tranché :** que les bits soient inutiles POUR TOUJOURS. La mesure porte sur une
 étape de lignée à 110 000 épisodes et sur deux rosters ; elle ne dit pas ce qu'il en serait à un
