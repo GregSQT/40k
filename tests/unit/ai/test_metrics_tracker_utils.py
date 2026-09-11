@@ -45,6 +45,9 @@ def test_every_training_profile_carries_its_smoothing_windows() -> None:
     courbes `_250ep` doublant les dashboards sans etre lues), puis REACTIVE a 100 le 2026-09-07 :
     la seule courbe reactive qui restait, `game_critical/win_rate_100ep`, etait ecrite en dur par
     le callback, hors du reglage et sur l'axe des pas. La reactivation la rend au tracker.
+    DESACTIVE de nouveau le 2026-09-11, par le meme reglage et pour la meme raison : aucun tag
+    `_100ep` n'existait sans son jumeau de fond, donc chaque dashboard portait deux fois la
+    meme mesure.
     Le test ne fige aucune des deux valeurs — c'est un reglage de run — seulement leur coherence.
     """
     # L'énumération doit couvrir le fichier, sinon ce test affiche « tout va bien » sur un

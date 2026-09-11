@@ -139,10 +139,15 @@ class W40KMetricsTracker:
     Streamlined to 20 critical metrics, removing redundant calculations.
     """
 
-    #: Fenetres de lissage des courbes de PERFORMANCE. Deux fenetres par mesure, jamais une :
+    #: Fenetres de lissage des courbes de PERFORMANCE, au plus deux par mesure :
     #:   - PERF_WINDOW      : la fenetre de fond, celle qui tranche une tendance ;
-    #:   - PERF_WINDOW_FAST : le doublon reactif, tag suffixe `_100ep`, qui montre l'evolution
-    #:                        recente et repond des le centieme episode.
+    #:   - PERF_WINDOW_FAST : le doublon reactif, tag suffixe `_<PERF_WINDOW_FAST>ep`, qui
+    #:                        montre l'evolution recente et repond plus tot.
+    #: Le doublon est ETEINT depuis le 2026-09-11 par `perf_window_fast == perf_window` dans
+    #: config/agents/_training_common.json : il n'existait AUCUN tag reactif sans son jumeau de
+    #: fond (mesure sur les evenements de P1 : 51 tags `_100ep`, 0 orphelin), donc
+    #: chaque dashboard portait deux fois la meme mesure. L'extinction est le reglage prevu,
+    #: pas une suppression du mecanisme (cf. `validate_perf_windows`).
     #: AUCUN point n'est emis tant que la fenetre n'est pas PLEINE. La version precedente
     #: retournait la moyenne de TOUT l'historique sous la fenetre : les 500 premiers points de
     #: chaque courbe etaient une moyenne cumulative, qui converge en DESCENDANT depuis son
