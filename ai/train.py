@@ -3810,7 +3810,6 @@ def train_with_scenario_rotation(config, agent_key, training_config_name, reward
         agent_key,
         model_tensorboard_dir,
         initial_episode_count=episode_offset,
-        initial_step_count=int(getattr(model, "num_timesteps", 0)),
         show_banner=not silent_chunk,
         perf_window=_perf_window,
         perf_window_fast=_perf_window_fast,

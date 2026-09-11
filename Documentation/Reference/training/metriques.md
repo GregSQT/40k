@@ -224,7 +224,7 @@ politique. Miroir lissé dans le dashboard : `00_critical/g_grad_share_policy_mb
 
 Mesuré par trois `backward` séparés sur le minibatch 0 de chaque update (`ai/patched_ppo.py`),
 avec `clip_grad_norm_(max_norm=inf)` qui retourne la norme **sans écrêter**. Comme
-`training_diagnostic/gradient_norm`, ces courbes montrent donc le gradient **brut** ; elles s'en
+`train/gradient_norm`, ces courbes montrent donc le gradient **brut** ; elles s'en
 distinguent par la **décomposition** en trois termes, que le tag global ne donne pas.
 
 **Instrument permanent, et non mesure temporaire** : c'est lui qui a réglé `vf_coef`, et toute
@@ -259,7 +259,7 @@ terme tire sur les poids. Deux runs ont été perdus en réglant `max_grad_norm`
 
 ---
 
-#### `training_diagnostic/gradient_norm` (+ `training_diagnostic/grad_clip_fraction`)
+#### `train/gradient_norm` (+ `train/grad_clip_fraction`)
 **Ce que c'est :** Norme L2 du gradient de la loss complète, **mesurée AVANT écrêtage** et
 moyennée sur les minibatches de l'update, plus la **part de ces minibatches où l'écrêtage a
 mordu**. Les deux sont publiées par `ai/patched_ppo.py` à partir de la valeur retournée par
@@ -635,6 +635,8 @@ Pour distinguer : vérifier que `explained_variance` s'améliore (Scenario A) ou
 1. Ouvrir TensorBoard : `tensorboard --logdir ./tensorboard/` → http://localhost:6006
 
 **Une entrée par agent et par run**, depuis le 2026-09-07. Le run écrit tous ses événements dans `./tensorboard/<config>_<agent>/run_<horodatage>/<agent>/` : les courbes du tracker (axe des **épisodes**) et celles de PPO — `train/*`, `diag/*` — (axe des **pas**) y cohabitent, ce qui permet de superposer les deux familles sans changer d'entrée. Avant cette date, l'agent produisait **deux** entrées, PPO écrivant dans un sous-dossier `<config>_<agent>_1` que Stable-Baselines3 se dérivait lui-même ; sur un run antérieur, les deux moitiés du tableau de bord se sélectionnent donc séparément. Cette scission masquait aussi vingt courbes écrites en double (quatre courbes de jeu de `game_critical/`, les cinq de `seat_aware/`, celles de `bot_split/` et les onze de `diag/`) : elles ne portent plus qu'une série, celle de l'écrivain de leur axe. Sur un run antérieur au 2026-09-07, la version publiée dans l'entrée PPO de ces vingt courbes porte l'axe des pas et non celui des épisodes.
+
+**Une abscisse par écrivain**, depuis le 2026-09-11. Le tracker date désormais **tous** ses scalaires en épisodes ; l'axe des pas appartient au seul écrivain de Stable-Baselines3. Jusque-là, le tracker recopiait douze courbes de PPO sous ses propres noms — la famille `training_critical/`, `training_detailed/loss` et dix tags de `training_diagnostic/` — en les datant en **pas**, ce qui plaçait deux abscisses incompatibles dans un même fichier d'événements : sur `run_20260911-062637`, 331 tags couvraient 80 066 → 90 827 (épisodes) et 15 tags couvraient 8 866 752 → 10 025 472 (pas). Ces douze courbes étaient la recopie exacte de `train/*` et `diag/*` — vérifié valeur par valeur sur les 144 points communs, zéro écart — et ont été supprimées. **Sur un run antérieur au 2026-09-11, les lire dans `training_critical/` ou `training_detailed/` reste possible ; sur un run postérieur, elles se lisent sous `train/*` et `diag/*`.** Deux tags survivent dans `training_diagnostic/`, parce que SB3 ne les publie pas : `entropy_coef` (injecté par le callback dans une copie de `name_to_value`) et `n_updates` (enregistré par SB3 avec `exclude="tensorboard"`) ; les deux sont maintenant sur l'axe des épisodes, comme `00_critical/l_approx_kl_max` et `00_critical/m_explained_var`, qui rejoignent ainsi l'abscisse de leurs jumelles lissées `j_approx_kl` et `h_explained_variance`.
 
 2. Vérifier **`00_critical/`** — toutes les métriques en tendance correcte ?
 3. Vérifier `bot_eval/combined` — objectif primaire.

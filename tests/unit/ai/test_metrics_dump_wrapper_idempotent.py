@@ -51,18 +51,30 @@ class _FakeModel:
 
 
 class _CountingTracker:
-    """Tracker double : retient chaque capture avec l'abscisse en vigueur au moment de l'ecriture."""
+    """Tracker double : retient chaque capture, et REFUSE toute ecriture d'attribut.
+
+    L'enveloppe posait `tracker.step_count = model.num_timesteps` avant chaque capture, ce qui
+    donnait au tracker une seconde abscisse — en pas — a cote de celle des episodes sur laquelle
+    il date tout le reste. Le refus d'ecriture est le verrou : un futur appelant qui reposerait
+    une abscisse sur le tracker depuis les callbacks fera rouge ici.
+    """
 
     writer = None
+    # Annotation de CLASSE : `__init__` pose l'attribut par `object.__setattr__` pour contourner
+    # le refus ci-dessous, ce qui le rend invisible a l'inference de type.
+    calls: List[Dict[str, Any]]
 
     def __init__(self) -> None:
-        self.calls: List[Dict[str, Any]] = []
-        self.steps_at_write: List[int] = []
-        self.step_count = 0
+        object.__setattr__(self, "calls", [])
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise AssertionError(
+            f"l'enveloppe de dump ecrit {name}={value!r} sur le tracker : l'abscisse du tracker "
+            "est `episode_count`, posee par le tracker lui-meme"
+        )
 
     def log_training_metrics(self, model_stats: Dict[str, Any]) -> None:
         self.calls.append(dict(model_stats))
-        self.steps_at_write.append(self.step_count)
 
 
 def _callback(model: _FakeModel, tracker: _CountingTracker) -> Any:
@@ -221,12 +233,13 @@ def test_the_predicate_is_the_marker_and_not_the_health_metrics() -> None:
     assert model.logger.original_dump_calls == 1, "le dump d'origine doit rester joignable"
 
 
-def test_ppo_scalars_are_written_at_the_timestep_of_their_own_update() -> None:
-    """L'abscisse en vigueur pendant l'ecriture est celle de l'update courant, pas du precedent.
+def test_l_enveloppe_ne_pose_aucune_abscisse_sur_le_tracker() -> None:
+    """L'enveloppe capture l'update et RIEN d'autre : elle n'ecrit pas sur le tracker.
 
-    `log_training_metrics` ecrit chacun de ses scalaires a `tracker.step_count` : pose apres
-    l'appel, l'update partait au pas du dump precedent et toutes les courbes
-    `training_critical/*` etaient decalees d'un dump.
+    Elle y posait `step_count = num_timesteps`, ce qui datait en PAS les courbes du tracker
+    alimentees par la capture, quand tout le reste de ses scalaires est date en EPISODES — deux
+    abscisses incompatibles dans un meme fichier d'evenements. Le double refuse desormais toute
+    affectation d'attribut ; ce test echouerait si l'enveloppe en reposait une.
     """
     model = _FakeModel()
     tracker = _CountingTracker()
@@ -238,8 +251,8 @@ def test_ppo_scalars_are_written_at_the_timestep_of_their_own_update() -> None:
         _dump(model, _PPO_DUMP)
     callback._on_training_end()
 
-    assert tracker.steps_at_write == [8_160, 16_320, 24_480], (
-        f"abscisses {tracker.steps_at_write} : les scalaires sont decales."
+    assert len(tracker.calls) == 3, (
+        f"{len(tracker.calls)} captures pour 3 updates PPO : l'enveloppe a change de cadence."
     )
 
 
