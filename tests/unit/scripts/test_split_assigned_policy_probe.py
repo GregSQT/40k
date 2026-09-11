@@ -62,6 +62,33 @@ def test_contrefactuelle_impure_refusee_sur_une_autre_cle():
     assert _bits_only(_obs(a_bin, cont_a), _obs(b_bin, cont_b)) is False
 
 
+def test_arme_quand_aucune_arme_n_est_armee():
+    """`pending_weapon` absent = l'agent doit choisir l'arme suivante.
+
+    Les deux colonnes publiées du rapport (ARME, CIBLE) ne valent que si chaque point d'arrêt
+    tombe dans la bonne. Inverser ce classement échangerait les deux colonnes sans qu'aucun autre
+    verrou ne tombe : le verdict se lirait à l'envers.
+    """
+    from scripts.split_assigned_policy_probe import sous_etat_de
+
+    assert sous_etat_de({"pending_weapon": None, "assignments": {"a": {}}}) == "ARME"
+
+
+def test_cible_quand_une_arme_est_armee():
+    """`pending_weapon` armé = l'arme est fixée, la cible reste à choisir."""
+    from scripts.split_assigned_policy_probe import sous_etat_de
+
+    assert sous_etat_de({"pending_weapon": "bolter", "assignments": {"a": {}}}) == "CIBLE"
+
+
+def test_aucun_troisieme_sous_etat():
+    """Les colonnes du rapport sont closes sur ces deux valeurs, jamais une troisième."""
+    from scripts.split_assigned_policy_probe import sous_etat_de
+
+    for pw in (None, "bolter"):
+        assert sous_etat_de({"pending_weapon": pw, "assignments": {"a": {}}}) in ("ARME", "CIBLE")
+
+
 def test_les_dix_bits_sont_lus_du_registre():
     """Les colonnes viennent du registre, jamais d'un index recopié qui se périmerait."""
     from engine.observation_entities import (

@@ -252,31 +252,35 @@ prise reste éligible pour l'arme suivante.
   que **deux slots assignés différents donnent deux embeddings différents** — sans quoi le bloc de
   bits ne vaudrait pas mieux qu'un comptage.
 
-**MESURÉ le 2026-09-11 — non exploités au choix de CIBLE ; au choix d'ARME, la mesure ne tranche
-pas.** `scripts/split_assigned_policy_probe.py` sur le modèle promu à 110 000 épisodes (P2,
-obs 18269), 12 graines des scénarios d'entraînement, distance de variation totale sur la
-distribution d'actions restreinte aux actions légales. Les DEUX sous-états, mesurés séparément :
+**MESURÉ le 2026-09-11 — les bits sont CÂBLÉS mais PAS EXPLOITÉS, aux DEUX sous-états.**
+`scripts/split_assigned_policy_probe.py` sur le modèle promu à 110 000 épisodes (P2, obs 18269),
+12 graines des scénarios d'entraînement, distance de variation totale sur la distribution
+d'actions restreinte aux actions légales. Moyennes :
 
 | Perturbation | ARME (6 pts) | CIBLE (10 pts) |
 |---|---|---|
 | PLANCHER — la même observation contre elle-même | 0,000000 | 0,000000 |
-| SPLIT — la cible déjà assignée change | 0,000473 | **0,000969** |
-| RÉFÉRENCE — les deux cibles échangent leurs caractéristiques | 0,001147 | **0,620877** |
+| SPLIT — la cible déjà assignée change | **0,000473** | **0,000969** |
+| RÉFÉRENCE — étalon propre au sous-état | 0,040231 | 0,620877 |
 | SATURATION — bloc ennemi continu à zéro | 0,037428 | 0,543887 |
 
-Moyennes ; médianes de SPLIT : 0,000187 (ARME) et 0,000007 (CIBLE).
+Médianes de SPLIT : 0,000187 (ARME) et 0,000007 (CIBLE).
 
-**Au choix de CIBLE, les bits ne pèsent pratiquement rien** : la médiane, 7 × 10⁻⁶, est au niveau
-du plancher numérique, alors qu'un échange de caractéristiques déplace la décision de 0,71. Les
-deux perturbations ne sont pas de même ampleur en entrée — dix bits contre deux lignes entières —
-donc le RAPPORT ne se lit pas comme un facteur exact ; ce qui se lit, c'est l'écart d'ordre de
-grandeur.
+**L'étalon est PROPRE À CHAQUE SOUS-ÉTAT, et c'est ce qui rend le tableau lisible.** Au choix de
+cible, les actions légales désignent des escouades ennemies : la RÉFÉRENCE y fait échanger leurs
+caractéristiques aux deux cibles. Au choix d'arme, elles désignent des slots de profil
+(`SHOOT_WEAPON_SEL_SLOT_j`), qui ne portent aucune identité de cible : la RÉFÉRENCE y fait
+échanger deux profils de tir de l'escouade observatrice. Une première version de cette mesure
+appliquait l'étalon de CIBLE aux deux sous-états ; il y tombait à 0,001 et faisait conclure à tort
+que « la politique est insensible au bloc ennemi tout entier » — c'était l'étalon qui était muet,
+pas la politique, et la SATURATION à 0,037 le montrait déjà.
 
-**Au choix d'ARME, l'étalon lui-même est muet** : la RÉFÉRENCE n'y vaut que 0,001, soit six cents
-fois moins qu'au choix de cible. À ce stade la politique est presque insensible au bloc ennemi
-TOUT ENTIER, pas seulement aux dix bits — que SPLIT y soit du même ordre que la RÉFÉRENCE ne dit
-donc pas que les bits servent, mais que rien de ce bloc ne sert à cette décision-là. Sur 6 points
-mesurés, cette moitié n'est pas tranchée.
+**Des deux côtés, les bits pèsent un à deux ordres de grandeur sous un champ dont la décision
+dépend** : 85 fois moins que la référence au choix d'arme, 640 fois moins au choix de cible, avec
+une médiane à 7 × 10⁻⁶ qui est le plancher numérique. Les perturbations ne sont pas de même
+ampleur en entrée — dix bits contre des lignes entières — donc ces rapports ne se lisent pas comme
+des facteurs exacts ; ce qui se lit, c'est l'écart d'ordre de grandeur, identique dans les deux
+décisions.
 
 **Ce qui borne le gain possible :** sur 156 points d'arrêt rencontrés, **109 n'ont qu'UNE action
 légale** et 31 de plus n'offrent aucune autre cible éligible pour l'arme déjà assignée — 16 sont

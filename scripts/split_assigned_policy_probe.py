@@ -85,6 +85,18 @@ def _tvd(p: np.ndarray, q: np.ndarray) -> float:
     return float(0.5 * np.abs(p - q).sum())
 
 
+def sous_etat_de(pending: Dict[str, Any]) -> str:
+    """« ARME » ou « CIBLE » — le sous-état du split-fire en cours.
+
+    PUBLIQUE et nommée, plutôt qu'un ternaire dans la boucle : les deux colonnes du rapport en
+    dépendent, et une inversion y échangerait les deux verdicts sans qu'aucun autre contrôle ne
+    tombe. Le test qui la verrouille l'importe d'ici au lieu de la réécrire.
+    """
+    # get allowed : `pending_weapon` armé = une arme attend sa cible, absent = l'arme suivante
+    # reste à choisir.
+    return "CIBLE" if pending.get("pending_weapon") is not None else "ARME"
+
+
 def _action_probs(dist: Any) -> np.ndarray:
     """Le vecteur de probabilités INDEXÉ PAR ID D'ACTION que porte `dist`.
 
@@ -237,7 +249,10 @@ def _bits_only(a: Dict[str, np.ndarray], b: Dict[str, np.ndarray]) -> bool:
 
 
 def collect(eng: Any, policy: _Policy, seed: int, strict: bool) -> List[Dict[str, Any]]:
-    """Un épisode : un enregistrement par point d'arrêt de CIBLE portant déjà un couple."""
+    """Un épisode : un enregistrement par point d'arrêt du split-fire portant déjà un couple.
+
+    Les DEUX sous-états sont visités — ARME et CIBLE — et chaque enregistrement porte le sien.
+    """
     from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
 
     obs, _info = eng.reset(seed=seed)
@@ -258,9 +273,8 @@ def collect(eng: Any, policy: _Policy, seed: int, strict: bool) -> List[Dict[str
         # mesurer que la CIBLE rendait un verdict portant sur la moitié du mécanisme.
         pending = gs.get(PENDING_SHOOT_WEAPON_SEL_KEY)  # get allowed : None = aucun split-fire
         if pending is not None and pending.get("assignments"):  # get allowed : couple commité
-            # get allowed : `pending_weapon` armé = sous-état CIBLE, absent = sous-état ARME.
-            sous_etat = "CIBLE" if pending.get("pending_weapon") is not None else "ARME"
-            rec = _measure(eng, policy, pending, mask, strict)
+            sous_etat = sous_etat_de(pending)
+            rec = _measure(eng, policy, pending, mask, strict, sous_etat)
             if rec is not None:
                 rec["sous_etat"] = sous_etat
                 out.append(rec)
@@ -273,7 +287,7 @@ def collect(eng: Any, policy: _Policy, seed: int, strict: bool) -> List[Dict[str
 
 
 def _measure(eng: Any, policy: _Policy, pending: Dict[str, Any], mask: np.ndarray,
-             strict: bool) -> Optional[Dict[str, Any]]:
+             strict: bool, sous_etat: str) -> Optional[Dict[str, Any]]:
     """Les trois TVD sur UN point d'arrêt. `None` si l'état ne s'y prête pas."""
     from engine.phase_handlers.shared_utils import get_enemy_slot_mapping
 
@@ -320,33 +334,63 @@ def _measure(eng: Any, policy: _Policy, pending: Dict[str, Any], mask: np.ndarra
             )
         return {"impure": 1.0}
 
-    # RÉFÉRENCE : les deux escouades ennemies ÉCHANGENT leurs caractéristiques — toute la ligne
-    # continue ET la ligne de drapeaux, les dix bits exceptés. Un échange, et non une valeur
-    # forcée : mettre `hp_total` à 0 en laissant `alive_models`, `hp_max` et `present` intacts
-    # fabriquerait une escouade contradictoire, que le réseau n'a jamais vue à l'entraînement —
-    # l'étalon sortirait gonflé et ferait passer les bits pour inertes par comparaison. Ici les
-    # deux lignes restent des unités RÉELLES du même état, seule leur place change.
+    # RÉFÉRENCE — PROPRE AU SOUS-ÉTAT, et c'est la condition pour qu'elle veuille dire quelque
+    # chose. Un étalon doit perturber ce dont la décision EN COURS dépend :
+    #
+    #   CIBLE — les actions légales désignent des escouades ennemies. On fait ÉCHANGER leurs
+    #           caractéristiques aux deux cibles concernées, toute la ligne continue et la ligne
+    #           de drapeaux, les dix bits exceptés.
+    #   ARME  — les actions légales désignent des SLOTS DE PROFIL D'ARME
+    #           (`SHOOT_WEAPON_SEL_SLOT_j`), qui ne portent aucune identité de cible. Échanger
+    #           deux lignes ennemies n'y perturbe donc rien de ce que la décision regarde :
+    #           MESURÉ le 2026-09-11, cet étalon-là y tombait à 0,001 alors que la SATURATION y
+    #           valait 0,037, trente fois plus — l'étalon était muet, pas la politique, et la
+    #           conclusion qu'on en tirait était fausse. On échange donc deux PROFILS D'ARME de
+    #           l'escouade observatrice, ce dont le choix d'arme dépend par construction.
+    #
+    # Un échange, et non une valeur forcée : mettre `hp_total` à 0 en laissant `alive_models`,
+    # `hp_max` et `present` intacts fabriquerait une entité contradictoire, que le réseau n'a
+    # jamais vue à l'entraînement, et l'étalon sortirait gonflé.
     obs_ref = {k: np.array(v, copy=True) for k, v in obs_a.items()}
-    row = next(
-        (i for i, tsid in enumerate(enemy_slots) if tsid is not None and str(tsid) == assigned),
-        None,
-    )
-    row_other = next(
-        (i for i, tsid in enumerate(enemy_slots) if tsid is not None and str(tsid) == other),
-        None,
-    )
-    if row is None or row_other is None:
-        raise RuntimeError(
-            f"cible {assigned!r} ou {other!r} absente du mapping de slots ennemis de "
-            f"{squad_id!r} — l'observation ne pourrait pas porter son bit"
+    if sous_etat == "CIBLE":
+        row = next(
+            (i for i, tsid in enumerate(enemy_slots) if tsid is not None and str(tsid) == assigned),
+            None,
         )
-    keep = [c for c in range(obs_ref["enemies_bin"].shape[1]) if c not in set(SPLIT_BIT_IDX)]
-    for key, cols in (("enemies_cont", None), ("enemies_bin", keep)):
-        block = obs_ref[key]
-        sel = slice(None) if cols is None else cols
-        a_row = block[row, sel].copy()
-        block[row, sel] = block[row_other, sel]
-        block[row_other, sel] = a_row
+        row_other = next(
+            (i for i, tsid in enumerate(enemy_slots) if tsid is not None and str(tsid) == other),
+            None,
+        )
+        if row is None or row_other is None:
+            raise RuntimeError(
+                f"cible {assigned!r} ou {other!r} absente du mapping de slots ennemis de "
+                f"{squad_id!r} — l'observation ne pourrait pas porter son bit"
+            )
+        keep = [c for c in range(obs_ref["enemies_bin"].shape[1]) if c not in set(SPLIT_BIT_IDX)]
+        blocks: Tuple[Tuple[str, Any], ...] = (("enemies_cont", None), ("enemies_bin", keep))
+        for key, cols in blocks:
+            block = obs_ref[key]
+            sel = slice(None) if cols is None else cols
+            a_row = block[row, sel].copy()
+            block[row, sel] = block[row_other, sel]
+            block[row_other, sel] = a_row
+    else:
+        # Ligne 0 du bloc allié = l'escouade ACTIVE (contrat de l'observation), et les dix
+        # premiers emplacements d'arme sont les profils de TIR — ceux que `SHOOT_WEAPON_SEL_SLOT_j`
+        # désigne, invariant D1.
+        slot_a = int(require_key(assign, "weapon_slot"))
+        slot_b = next(
+            (j for j in range(K_WEAPONS_RANGED)
+             if j != slot_a and float(obs_a["allies_wpn_bin"][0, j, -1]) == 1.0),
+            None,
+        )
+        if slot_b is None:
+            return {"sans_second_profil": 1.0}
+        for key in ("allies_wpn_cont", "allies_wpn_bin", "allies_wpn_rule_ids"):
+            block = obs_ref[key]
+            a_row = block[0, slot_a].copy()
+            block[0, slot_a] = block[0, slot_b]
+            block[0, slot_b] = a_row
 
     # SATURATION : tout le bloc continu ennemi mis à zéro. Aucune signification tactique — c'est
     # un contrôle d'INSTRUMENT. Si même cette perturbation-là ne bouge pas la distribution, la
@@ -397,6 +441,7 @@ def main() -> int:
         ("degenere", "une seule action légale — aucune perturbation ne peut rien y changer"),
         ("sans_autre_cible", "aucune AUTRE cible éligible pour l'arme déjà assignée"),
         ("impure", "contrefactuelle impure (une autre clé bouge) — relancer avec --strict"),
+        ("sans_second_profil", "un seul profil de tir — pas d'étalon d'arme possible [ARME]"),
     )
     ecartes = {k: [r for r in records if k in r] for k, _ in motifs}
     mesures = [r for r in records if not any(k in r for k, _ in motifs)]
@@ -415,8 +460,27 @@ def main() -> int:
 
     labels = (("tvd_plancher", "PLANCHER   (obs contre elle-même)"),
               ("tvd_split", "SPLIT      (cible déjà assignée changée)"),
-              ("tvd_reference", "RÉFÉRENCE  (les deux cibles échangent leurs caractéristiques)"),
+              ("tvd_reference", "RÉFÉRENCE  (étalon propre au sous-état)"),
               ("tvd_saturation", "SATURATION (bloc ennemi continu à zéro)"))
+
+    # GARDE-FOUS PAR SOUS-ÉTAT, et AVANT le moindre tableau. Les évaluer sur les deux lots réunis
+    # laisserait un sous-état muet passer sous le maximum de l'autre : un lot ARME entièrement à
+    # `tvd_saturation == 0` resterait invisible derrière le 0,54 du lot CIBLE, et sa colonne se
+    # lirait « inexploités » alors que la sonde n'y voit rien. Les imprimer après les tableaux
+    # laisserait aussi un lecteur s'arrêter aux chiffres avant l'avertissement.
+    for sous_etat in ("ARME", "CIBLE"):
+        lot = [r for r in records if r.get("sous_etat") == sous_etat]  # get allowed
+        if not lot:
+            continue
+        if max(float(r["tvd_plancher"]) for r in lot) != 0.0:
+            print(f"\n❌ sous-état {sous_etat} — PLANCHER non nul : la sonde n'y est pas "
+                  f"déterministe, aucun de ses nombres n'est lisible.")
+            return 2
+        if max(float(r["tvd_saturation"]) for r in lot) <= 0.0:
+            print(f"\n❌ sous-état {sous_etat} — SONDE MUETTE : même le bloc ennemi entier mis à "
+                  f"zéro n'y bouge pas la distribution. Un « SPLIT nul » n'y signifierait pas "
+                  f"« inexploité » — ne rien conclure de sa colonne.")
+            return 2
 
     # PAR SOUS-ÉTAT, et pas seulement en bloc : les bits servent à deux décisions différentes —
     # quelle arme engager ensuite (ARME), sur qui la pointer (CIBLE). Une moyenne commune peut
