@@ -19,9 +19,8 @@ DUAL TIER SYSTEM (41 Total Metrics):
        aiturn_compliance (3+)
 
 ⚙️ TRAINING HEALTH SYSTEM
-  🔍 training_diagnostic/ (2) - ce que le writer de SB3 ne publie pas
-     - entropy_coef (injecte dans une COPIE de name_to_value),
-       n_updates (enregistre par SB3 avec exclude="tensorboard")
+  🔍 training_diagnostic/ (1) - ce que le writer de SB3 ne publie pas
+     - entropy_coef (injecte dans une COPIE de name_to_value)
 
   La sante PPO se lit sinon sur 00_critical/{f,g,h,i,j,k,l,m} (axe des episodes, lissee sauf
   l et m) et sur les train/* et diag/* que SB3 ecrit lui-meme dans le MEME dossier de run
@@ -1525,8 +1524,6 @@ class W40KMetricsTracker:
         - training_diagnostic/entropy_coef : `train/ent_coef` est INJECTE par
           `training_callbacks` dans une COPIE de `name_to_value`, donc le dump de SB3 ne le voit
           pas et ne l'ecrit pas.
-        - training_diagnostic/n_updates : SB3 enregistre `train/n_updates` avec
-          `exclude="tensorboard"`, il n'atteint jamais son propre writer.
         - 00_critical/l_approx_kl_max et 00_critical/m_explained_var : valeurs BRUTES doublant
           `train/approx_kl_max` et `train/explained_variance`, gardees parce que leur raison
           d'etre est d'etre DANS le tableau de bord 00_critical, a cote de leurs jumelles
@@ -1535,6 +1532,13 @@ class W40KMetricsTracker:
         `training_critical/fps` a ete retire avec les autres : sa cle source `time/fps` n'est
         pas presente dans `name_to_value` au dump d'update — aucun point emis sur ce tag dans
         le fichier d'evenements du run — et SB3 publie `time/fps` lui-meme.
+
+        `training_diagnostic/n_updates` a ete retire le 2026-09-11, pour une raison DIFFERENTE
+        des douze : il n'etait pas une recopie — ce tracker en etait bien le seul ecrivain
+        possible, SB3 excluant `train/n_updates` de son propre tensorboard. Il n'avait
+        simplement AUCUN lecteur : rien dans `scripts/`, rien dans `ai/analyzer.py`, et aucune
+        entree dans le layout `add_custom_scalars`. Un tag sans ecrivain concurrent reste
+        inutile s'il n'a pas de lecteur.
 
         Les `hyperparameter_tracking[...]` accumules ici restent : ils alimentent les courbes
         lissees `00_critical/{f,g,h,i,j,k}` et le resume de fin de run.
@@ -1609,12 +1613,13 @@ class W40KMetricsTracker:
                 '00_critical/m_explained_var', explained_var, self.episode_count
             )
 
-        # Nombre total d'updates : exclu du tensorboard par SB3, cf. docstring.
-        if 'train/n_updates' in model_stats:
-            self.writer.add_scalar(
-                'training_diagnostic/n_updates', model_stats['train/n_updates'],
-                self.episode_count,
-            )
+        # `training_diagnostic/n_updates` occupait cette place. SB3 l'exclut de son propre
+        # tensorboard (`exclude="tensorboard"`, ai/patched_ppo.py:330), ce tracker le republiait
+        # donc en tant que seul ecrivain possible — mais AUCUN lecteur n'existait : ni
+        # `scripts/`, ni `ai/analyzer.py`, ni le layout `add_custom_scalars`. Un point par update
+        # ecrit pour personne. `train/n_updates` reste LU ici comme ailleurs : c'est le marqueur
+        # sur lequel l'enveloppe de dump reconnait un update PPO (`_PPO_UPDATE_KEY`,
+        # ai/training_callbacks.py) ; seule sa RECOPIE en scalaire disparait.
 
         # Norme BRUTE publiee par `ai/patched_ppo.py` — retour de `clip_grad_norm_`, mesure avant
         # ecretage — donc NON bornee par `max_grad_norm`. Conservee pour le rapport de fin de

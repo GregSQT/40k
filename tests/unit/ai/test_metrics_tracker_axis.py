@@ -70,9 +70,9 @@ def test_aucune_jumelle_declaree_ne_s_ecrit_sur_deux_abscisses(tmp_path: Path) -
 def test_le_chemin_d_update_ppo_date_tout_en_episodes(tmp_path: Path) -> None:
     """VERROU 2 : pas un seul scalaire du chemin d'update ne repart sur l'axe des pas.
 
-    Verrou plus large que le precedent : il couvre aussi les tags qui n'ont pas de jumelle
-    (`training_diagnostic/entropy_coef`, `training_diagnostic/n_updates`) et les huit lignes
-    `thresholds/*`, qui n'ont de sens que superposees aux courbes qu'elles annotent.
+    Verrou plus large que le precedent : il couvre aussi le tag qui n'a pas de jumelle
+    (`training_diagnostic/entropy_coef`) et les huit lignes `thresholds/*`, qui n'ont de sens
+    que superposees aux courbes qu'elles annotent.
     """
     t, writer = _tracker(tmp_path)
 

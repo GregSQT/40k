@@ -632,21 +632,23 @@ def test_log_training_metrics_ne_recopie_plus_les_courbes_de_sb3() -> None:
     abscisses incompatibles dans un meme fichier d'evenements. Verifie sur les 144 points
     communs de run_20260911-062637 : zero ecart entre chaque recopie et son original.
 
-    Ne restent que les deux tags que SB3 ne publie pas : `entropy_coef` (injecte dans une COPIE
-    de `name_to_value`, donc invisible au dump de SB3) et `n_updates` (enregistre par SB3 avec
-    `exclude="tensorboard"`).
+    Ne reste qu'`entropy_coef`, que SB3 ne publie pas : `train/ent_coef` est injecte dans une
+    COPIE de `name_to_value`, donc invisible au dump de SB3. `n_updates` tenait cette liste
+    jusqu'au 2026-09-11 — ce tracker en etait bien le seul ecrivain possible, mais le tag
+    n'avait aucun lecteur dans le depot, et un tag sans lecteur ne vaut pas d'etre ecrit.
 
-    L'assertion porte sur l'ENSEMBLE des tags `training_*` emis, et non sur une liste des douze
-    noms supprimes : une recopie reintroduite sous un nom neuf (`training_diagnostic/loss`,
+    L'assertion porte sur l'ENSEMBLE des tags `training_*` emis, et non sur une liste des noms
+    supprimes : une recopie reintroduite sous un nom neuf (`training_diagnostic/loss`,
     `training_detailed/fps`) passerait une liste noire en vert, et cette liste devrait etre
-    tenue en miroir de `log_training_metrics`.
+    tenue en miroir de `log_training_metrics`. C'est aussi ce qui fait que ce test verrouille
+    la DISPARITION de `n_updates` sans qu'on ait a la nommer.
     """
     t = _tracker_stub()
     t.log_training_metrics(ppo_update_stats())
     emis = {k for k, _, _ in _dw(t).scalars if k.startswith("training_")}
-    assert emis == {"training_diagnostic/entropy_coef", "training_diagnostic/n_updates"}, (
-        "le tracker doit n'ecrire que les deux tags dont il est le seul ecrivain ; obtenu : "
-        + ", ".join(sorted(emis))
+    assert emis == {"training_diagnostic/entropy_coef"}, (
+        "le tracker doit n'ecrire que le seul tag dont il est l'unique ecrivain ET qui a un "
+        "lecteur ; obtenu : " + ", ".join(sorted(emis))
     )
 
 
