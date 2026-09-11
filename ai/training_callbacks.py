@@ -803,7 +803,9 @@ class MetricsCollectionCallback(BaseCallback):
 
         Mesure du run du 2026-09-03 (etape P1, reprise depuis P00) : 41 756 points sur
         `training_critical/clip_fraction` pour 575 updates reels, contre 1 063 points pour 1 063
-        updates sur un run neuf comparable. La fenetre de vingt valeurs de
+        updates sur un run neuf comparable. Ce tag n'existe plus (recopie de `train/clip_fraction`,
+        supprimee le 2026-09-11) ; la mesure reste celle qui a etabli le defaut, et
+        `hyperparameter_tracking` continue de l'exposer via `00_critical/i_clip_fraction`. La fenetre de vingt valeurs de
         `W40KMetricsTracker._calculate_smoothed_metric` ne couvrait alors plus vingt updates mais
         vingt copies du dernier : les quatre courbes de sante PPO de `00_critical` n'etaient plus
         lissees, et paraissaient quatre a quatorze fois plus bruitees qu'un run neuf.
@@ -848,11 +850,9 @@ class MetricsCollectionCallback(BaseCallback):
                     else:
                         ent_coef_value = float(ent_coef_value)
                     model_stats['train/ent_coef'] = ent_coef_value
-                # AVANT `log_training_metrics`, qui ecrit chacun de ses scalaires a
-                # `_tracker.step_count` : pose apres, l'update courant partait a l'abscisse du
-                # dump PRECEDENT, et toutes les courbes `training_critical/*` et
-                # `training_diagnostic/*` etaient decalees d'un dump sur l'axe des pas.
-                _tracker.step_count = cast(Any, _model).num_timesteps
+                # `_tracker.step_count = _model.num_timesteps` occupait cette place. Le tracker
+                # n'a plus d'abscisse en pas : ses scalaires sont dates en episodes, et l'axe
+                # des pas est celui du writer de SB3, qui ecrit dans le meme dossier de run.
                 _tracker.log_training_metrics(model_stats)
                 # La recopie des cles `diag/` vers le writer du tracker a ete retiree ici. Elle
                 # se justifiait par « _original_dump may have no TF writer » : le logger du
@@ -1120,28 +1120,13 @@ class MetricsCollectionCallback(BaseCallback):
         # dans ce projet — un actor-critic, sans q_net. Le commentaire qui l'accompagnait
         # l'admettait deja. self.q_value_history / max_q_value_history partent avec lui.
 
-        # Log training step data
-        step_data = {}
-        if hasattr(self.model, 'learning_rate'):
-            # learning_rate may be a callable schedule function - evaluate it
-            lr = self.model.learning_rate
-            if callable(lr):
-                # Call with current progress (1.0 at start, 0.0 at end)
-                step_data['learning_rate'] = lr(self.model._current_progress_remaining if hasattr(self.model, '_current_progress_remaining') else 1.0)
-            else:
-                step_data['learning_rate'] = lr
-        if hasattr(self.model, 'logger') and hasattr(self.model.logger, 'name_to_value'):
-            if 'train/loss' in self.model.logger.name_to_value:
-                step_data['loss'] = self.model.logger.name_to_value['train/loss']
-        # `if hasattr(self.model, 'exploration_rate'): step_data['exploration_rate'] = ...`
-        # occupait cette place. exploration_rate est l'epsilon d'une politique epsilon-greedy
-        # (DQN) : MaskablePPO explore par l'entropie de sa politique, il n'a pas cet attribut.
-        # La cle n'etait donc jamais posee, et la courbe training_diagnostic/exploration_rate
-        # cote metrics_tracker n'a jamais rien recu.
+        # La construction de `step_data` et l'appel `metrics_tracker.log_training_step`
+        # occupaient cette place, a CHAQUE step gym. Leurs deux courbes recopiaient
+        # `train/learning_rate` et `train/loss` que le logger SB3 publie deja dans le meme
+        # dossier de run, sur l'axe des pas — et les recopiaient sur une abscisse batarde
+        # (`step_count` remis a `num_timesteps` a chaque fin d'episode puis incremente de 1 par
+        # step, quand `num_timesteps` avance de `n_envs`).
 
-        if step_data:
-            cast(Any, self.metrics_tracker).log_training_step(step_data)
-        
         # NOTE: PPO training metrics are captured in _on_rollout_start()
         # SB3 only populates model.logger.name_to_value during train() which happens BETWEEN rollouts
         
@@ -1164,10 +1149,6 @@ class MetricsCollectionCallback(BaseCallback):
     def _handle_episode_end(self, info):
         """Handle episode completion and log metrics."""
         self.episode_count += 1
-
-        # CRITICAL: Update step_count BEFORE logging episode metrics
-        # This ensures 00_critical/ metrics use timesteps (not episodes) as x-axis
-        self.metrics_tracker.step_count = self.model.num_timesteps
 
         # Extract episode data (we are only called when 'episode' in info; engine sets info["episode"] = {"r","l","t"})
         ep = info['episode']

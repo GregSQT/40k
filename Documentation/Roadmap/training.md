@@ -596,6 +596,14 @@ sur le rapport entre les points de `03_selfplay/<membre>` et ceux de `actions/sh
 
 ## ⚠️ Courbes de santé PPO — historique des défauts {#courbes-ppo-reprise}
 
+> **Runs antérieurs au 2026-09-11 uniquement.** Les familles `training_critical/`,
+> `training_detailed/` et huit tags de `training_diagnostic/` n'existent plus : elles recopiaient
+> valeur pour valeur les `train/*` et `diag/*` de SB3, sur l'axe des **pas** alors que le tracker
+> date tout le reste en **épisodes**. Sur un run postérieur, ces séries se lisent sous `train/*`
+> et `diag/*` (cf. [../Reference/training/metriques.md](../Reference/training/metriques.md), « Une abscisse par écrivain »). Les noms de
+> tags ci-dessous sont conservés tels quels : ce sont ceux que portent réellement les fichiers
+> `events` des runs dont cette section parle.
+
 Trois défauts vivaient sur la capture des métriques PPO
 (`MetricsCollectionCallback._on_training_start`), corrigés le 2026-09-04. Ce qu'ils rendent
 illisible sur les runs antérieurs :
