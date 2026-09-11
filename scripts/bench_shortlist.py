@@ -124,7 +124,7 @@ def _make_state(
     models_cache: Dict[str, Any] = {
         f"{ally_id}#0": {
             "col": unit_col, "row": unit_row,
-            "HP_CUR": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1,
+            "HP_CUR": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1, "OC": 2,
         }
     }
     # model_count_at_start=1 → _strength_measure lit HP_CUR/HP_MAX (unité mono-figurine)
@@ -139,7 +139,7 @@ def _make_state(
         squad_models[eid] = [f"{eid}#0"]
         models_cache[f"{eid}#0"] = {
             "col": ec, "row": er,
-            "HP_CUR": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1,
+            "HP_CUR": 2, "BASE_SHAPE": "round", "BASE_SIZE": 1, "OC": 2,
         }
         squad_cache[eid] = {"model_count_at_start": 1, "model_count": 1}
 

@@ -252,3 +252,34 @@ def test_hazard_details_manuel_levent_sans_position():
         _resolve_one_hazard_wound(gs, alloc, batch, HAZARD_CTX)
 
     assert "row" in str(exc.value)
+
+
+def test_allocation_manuelle_hazard_va_au_bout_du_lot(monkeypatch):
+    """Défenseur HUMAIN : le choix de la figurine rendu, le lot se ferme et la MW est infligée.
+
+    La fermeture d'un lot passe par `_apply_batch_mortal_wounds` (06.02), qui LIT
+    `pending_mortal_wounds` sur le lot. Le lot construit par `build_manual_hazard_allocation`
+    doit donc porter la clé — à `None`, comme le lot de tir : aucune capacité ne produit de
+    blessure mortelle supplémentaire pendant un jet de hasard. Sans elle, le chemin PvP du
+    Desperate Escape et du [HAZARDOUS] levait `KeyError` à la première fermeture de lot —
+    exactement après que le joueur a désigné sa figurine.
+    """
+    from engine.phase_handlers.shared_utils import (
+        HAZARD_CTX, apply_manual_shoot_allocation, roll_hazard_for_unit,
+    )
+
+    gs = _game_state(["HAZARDOUS"])
+    gs["gym_training_mode"] = False
+    gs["player_types"] = {"1": "human", "2": "human"}
+    monkeypatch.setattr(random, "randint", lambda a, b: 1)
+
+    total = roll_hazard_for_unit("1", gs, False, n_rolls=1, context_label="Hazardous")
+    assert total == 1
+    assert PENDING_HAZARD_ALLOCATION_KEY in gs, "le défenseur humain doit désigner la figurine"
+
+    # Même entrée que l'action `squad_hazard_manual_alloc` du moteur (W40KEngine).
+    result = apply_manual_shoot_allocation(gs, "A0", HAZARD_CTX)
+
+    assert not result.get("waiting_for_player"), result
+    assert gs["models_cache"]["A0"]["HP_CUR"] == 1, "la blessure mortelle atteint le tireur"
+    assert PENDING_HAZARD_ALLOCATION_KEY not in gs, "lot fermé : plus d'allocation en attente"

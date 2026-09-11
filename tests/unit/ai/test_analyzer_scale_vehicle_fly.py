@@ -216,6 +216,7 @@ def test_le_moteur_transmet_le_drapeau_de_vol_au_formateur():
 
     class _Bridge:
         """Le segment per-figurine n'est pas le sujet ici : seul le mapping du drapeau l'est."""
+        _TYPES_SANS_SEGMENT_MODELS = W40KEngine._TYPES_SANS_SEGMENT_MODELS
         def _models_segment_for_unit(self, unit_id):
             return ""
 

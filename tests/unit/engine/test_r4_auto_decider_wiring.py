@@ -172,6 +172,7 @@ def _alloc_ctx_state(auto: bool, monkeypatch, n_groups: int = 2) -> Dict[str, An
             "current_group_index": 0,
             "pool": [],
             "pool_index": 0,
+            "pending_mortal_wounds": None,
         }],
     }
     return gs
@@ -235,6 +236,7 @@ def _model_choice_state(auto: bool, monkeypatch) -> Dict[str, Any]:
             "current_model_id": None,
             "pool": ["w1"],
             "pool_index": 0,
+            "pending_mortal_wounds": None,
         }],
     }
     return gs

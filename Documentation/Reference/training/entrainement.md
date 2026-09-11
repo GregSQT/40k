@@ -644,7 +644,7 @@ Ce que `x1_lineage` redéclare, et ce que cela remplace (vingt rampes `decay_fra
 | `ent_coef` | **0.03** scalaire | 0.1 → 0.01, `decay_fraction` 0.4 |
 | `n_steps` | **32640** | 8160 |
 | `vf_coef` | **0.15** | 0.5 |
-| `agent_seat_p2_ratio` | **0.6** | 0.75 |
+| `agent_seat_p2_ratio` | **0.7** (0.6 jusqu'au 2026-09-11) | 0.75 |
 | `batch_size` | *hérité* — 1020 | 1020 |
 | `max_grad_norm` | *hérité* — 0.5 | 0.5 |
 

@@ -699,7 +699,7 @@ figurine**, l'érosion du masque le résout à la case d'arrivée et le coût ve
 figurine qui monte. Sans déclaration le plan rend toujours le sol, donc le régime courant est
 inchangé. La **charge**, le **pile-in** et la **consolidation** gardent le niveau 0 : la constante
 reste leur réponse entière, et c'est désormais la seule portée qu'elle a.
-Voir `Documentation/Roadmap/moteur.md#verticalite-move-gym`.
+Voir `Documentation/Roadmap/archives/moteur.md#verticalite-move-gym` (chantier livré, archivé le 2026-09-11).
 
 <a id="s0.61"></a>
 ### 0.61 Le garde ANTI-RUNAWAY était muet, et son compteur d'épisodes divergeait — ✅ CORRIGÉ (2026-08-03)
