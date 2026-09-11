@@ -228,6 +228,7 @@ def test_le_move_reactif_est_journalise_sans_consommer_de_step():
     assert "reactive_move" in W40KEngine._STEP_LOG_NON_INCREMENTING_TYPES
 
     class _Bridge:
+        _TYPES_SANS_SEGMENT_MODELS = W40KEngine._TYPES_SANS_SEGMENT_MODELS
         def _models_segment_for_unit(self, unit_id):
             return ""
 
@@ -273,6 +274,7 @@ def test_le_marqueur_fly_de_charge_atteint_bien_step_log():
 
     class _Bridge:
         game_state = {"unit_by_id": {"3": {"UNIT_RULES": []}}}
+        _TYPES_SANS_SEGMENT_MODELS = W40KEngine._TYPES_SANS_SEGMENT_MODELS
         def _models_segment_for_unit(self, unit_id):
             return ""
 

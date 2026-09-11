@@ -12697,6 +12697,9 @@ def build_manual_hazard_allocation(
         "current_model_id": None,
         # Items minimaux : "rec" present pour _mark_manual_overkill_wasted (overkill MW perdues).
         "pool": [{"rec": {}} for _ in range(int(n_wounds))], "pool_index": 0,
+        # 06.02 : lu a la fermeture du lot par `_apply_batch_mortal_wounds`. Un jet de hasard
+        # n en produit aucune en plus des siennes : ecrit `None`, meme regime que le lot de tir.
+        "pending_mortal_wounds": None,
     }
     game_state[HAZARD_CTX.alloc_key] = {
         "attacker_squad_id": sid,

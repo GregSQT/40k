@@ -283,9 +283,13 @@ def test_the_profiles_do_not_silently_diverge_on_the_seat_ratio() -> None:
 
 
 def test_a_lineage_profile_pins_its_own_seat_ratio() -> None:
-    """La valeur du régime de lignée est épinglée, sinon l'exemption ci-dessus la laisserait libre."""
+    """La valeur du régime de lignée est épinglée, sinon l'exemption ci-dessus la laisserait libre.
+
+    0.70 depuis le 2026-09-11 (0.6 du 2026-09-07 au 2026-09-11) : réglage posé dans le profil par
+    l'utilisateur, le verrou suit la config et non l'inverse.
+    """
     assert LINEAGE_PROFILES == {"x1_lineage"}, sorted(LINEAGE_PROFILES)
-    assert RESOLVED["x1_lineage"]["agent_seat_p2_ratio"] == pytest.approx(0.6)
+    assert RESOLVED["x1_lineage"]["agent_seat_p2_ratio"] == pytest.approx(0.7)
 
 
 @pytest.mark.parametrize("fixed_mode", ["p1", "p2"])
