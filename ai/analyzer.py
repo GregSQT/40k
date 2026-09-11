@@ -107,6 +107,50 @@ def _pair_is_conditional(
     return False
 
 
+def _special_rule_pair_is_valid(
+    rule_id: str,
+    unit_type: str,
+    rule_to_units: Dict[str, Set[str]],
+    model_types_by_unit_type: Dict[str, Set[str]],
+) -> bool:
+    """La paire (règle, type d'escouade) relevée est-elle portée par cette escouade ? (19.04)
+
+    `rule_to_units` est bâti sur les datasheets : il répond pour une escouade HOMOGÈNE. Il ne
+    répond pas pour une escouade ATTACHÉE, et c'est le cas courant de ce roster — le journal
+    nomme l'escouade de bloc (`VanguardVeteranSquadJumpPack`, `Boyz`) là où la capacité est
+    déclarée par le character replié dedans (`ChaplainJumpPack`, `PainBoy`).
+
+    Documentation/40k_rules/19 Attached units.pdf §19.04 : « abilities/rules that affect a unit
+    (or models in it) apply to every model in an attached unit, until the source of that
+    ability/rule is destroyed ». Le moteur l'applique par `compute_unit_rules_in_effect`
+    (engine/phase_handlers/shared_utils.py) : mesuré sur le scénario bot-04 du run du
+    2026-09-11, l'unité 1 (Boyz) porte bien `mortal_wounds_on_critical_wound`, venue du groupe
+    `_ATTACHED_RULE_GROUPS['_inline_1_11']` (PainBoy). Sans ce prédicat, §1.7 comptait ces
+    usages `INVALID` — 90 pour la seule Exhortation de Rage — et accusait le moteur d'une faute
+    que la règle lui ORDONNE.
+
+    La composition vient du JOURNAL (`[MODEL_TYPES:]`), pas de `CAN_LEAD` : ce dernier décrit
+    les attachements LÉGAUX, donc un sur-ensemble qui blanchirait un usage réellement invalide.
+    Aucun contrôle relâché : une règle que ne porte AUCUNE datasheet présente dans l'escouade
+    reste INVALID.
+
+    Marqueurs de RÔLE exclus de la propagation, exactement comme `strip_role_rules` les retire
+    des règles de figurine avant l'union du moteur : ils qualifient la figurine (ordre
+    d'allocation 05.04, T bodyguard 19.02), jamais l'escouade. La table lue est celle du
+    moteur — un rôle ajouté là-bas ne peut pas diverger ici.
+    """
+    from engine.phase_handlers.shared_utils import ROLE_TIER
+
+    carriers = rule_to_units.get(rule_id, set())  # get allowed : règle absente du registre
+    if unit_type in carriers:
+        return True
+    if rule_id in ROLE_TIER:
+        return False
+    # get allowed : journal antérieur à `[MODEL_TYPES:]` — aucune composition déclarée, le
+    # verdict reste alors celui de la seule datasheet d'escouade, comme avant ce prédicat.
+    return bool(carriers & set(model_types_by_unit_type.get(unit_type, set())))
+
+
 def _compute_weapon_rule_not_used_warnings(stats: Dict[str, Any]) -> int:
     """Nombre de paires (règle d'arme, arme) attendues mais jamais observées, hors INTERACTION_ONLY."""
     weapon_rule_to_weapons: Dict[str, Any] = require_key(stats, 'weapon_rule_to_weapons')
@@ -1671,7 +1715,11 @@ def error_totals(stats: Dict[str, Any]) -> Dict[str, int]:
         # §1.7 / §1.8 — « invalide » = une paire observée que le registre ne déclare pas.
         'special_rules_invalid': sum(
             1 for (rule_id, unit_type) in require_key(stats, 'special_rule_usage')
-            if rule_id not in stats['rule_to_units'] or unit_type not in stats['rule_to_units'][rule_id]
+            if not _special_rule_pair_is_valid(
+                rule_id, unit_type,
+                require_key(stats, 'rule_to_units'),
+                require_key(stats, 'model_types_by_unit_type'),
+            )
         ),
         'weapon_rules_invalid': sum(
             1 for (rule_name, weapon_key) in require_key(stats, 'weapon_rule_usage')
@@ -1837,6 +1885,11 @@ def parse_step_log(filepath: str) -> Dict:
     # Statistics structure
     stats = {
         'rule_to_units': rule_to_units,  # rule_id -> set of unit_types (for validity)
+        # Composition OBSERVÉE par type d'escouade : {type d'escouade -> datasheets de ses
+        # figurines}, lue dans `[MODEL_TYPES:]` de l'entête d'épisode. C'est elle qui permet à
+        # §1.7 de juger une escouade ATTACHÉE (19.04) sans inventer d'attachement — cf.
+        # `_special_rule_pair_is_valid`.
+        'model_types_by_unit_type': defaultdict(set),  # unit_type -> set of model datasheets
         'squadmates_by_type': _cfg.squadmates_by_type,  # leader_type -> set of led unit_types
         'weapon_rule_to_weapons': weapon_rule_to_weapons,  # rule -> set of "weapon (unit)"
         # rule -> {"ranged"|"melee" -> set of unit_types} : l'applicabilité des règles d'ARMES,
@@ -3835,6 +3888,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
     log_print("-" * 80)
     special_rule_usage = stats.get('special_rule_usage', defaultdict(lambda: {1: 0, 2: 0}))
     rule_to_units = stats.get('rule_to_units', {})  # get allowed: optional stats
+    # MÊME prédicat que le compteur `special_rules_invalid` d'`error_totals` : deux verdicts
+    # bâtis chacun de leur côté ont déjà divergé en silence dans ce rapport (V16).
+    _model_types_by_unit_type = stats.get('model_types_by_unit_type', {})  # get allowed: optional stats
     expected_keys = set()
     for rule_id, unit_types in rule_to_units.items():
         for unit_type in unit_types:
@@ -3845,7 +3901,9 @@ def print_statistics(stats: Dict, output_f=None, step_timings: Optional[List[Tup
             counts = special_rule_usage.get((rule_id, unit_type), {1: 0, 2: 0})
             p1 = counts.get(1, 0)  # get allowed: optional player counts
             p2 = counts.get(2, 0)  # get allowed: optional player counts
-            has_rule = unit_type in rule_to_units.get(rule_id, set())
+            has_rule = _special_rule_pair_is_valid(
+                rule_id, unit_type, rule_to_units, _model_types_by_unit_type
+            )
             validite = "OK" if has_rule else "INVALID"
             log_print(f"{rule_id:<40} {unit_type:<55} {p1:10d} {p2:10d} {validite:>10}")
     else:

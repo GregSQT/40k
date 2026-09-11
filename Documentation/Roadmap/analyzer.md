@@ -128,6 +128,19 @@ Nouveau `unit_ability_attack_cap` (`analyzer_perfig.py`), jumeau INVERSE de `per
 
 Verrous : `test_analyzer_unit_ability_attached_19_04.py`, `test_analyzer_hail_of_bolts.py`.
 
+**✅ LIVRÉ (2026-09-11) — §1.7, MÊME cause 19.04, autre registre : 2 `INVALID` → 0.** Le registre
+de validité `rule_to_units` (`analyzer_config.py`) est bâti sur les datasheets d'ESCOUADE : il ne
+voyait pas la capacité du personnage replié dedans. Sur le run holdout du 2026-09-11,
+`mortal_wounds_on_fight_activation` (Chaplain dans un Vanguard, 90 usages) et
+`mortal_wounds_on_critical_wound` (PainBoy dans des Boyz, 4 usages) sortaient donc `INVALID`,
+soit **4 des 4 erreurs du run**. Le moteur, lui, applique 19.04 — vérifié en reconstruisant le
+scénario : `unit 1 (Boyz)` porte bien la règle via `_ATTACHED_RULE_GROUPS['_inline_1_11']`.
+Nouveau `_special_rule_pair_is_valid` (`analyzer.py`), qui juge sur la composition OBSERVÉE
+(`[MODEL_TYPES:]`) et non sur `CAN_LEAD` — ce dernier décrit les attachements LÉGAUX, un
+sur-ensemble qui blanchirait un usage réellement invalide. Prédicat partagé avec le compteur
+`special_rules_invalid` d'`error_totals`. Verrou : `test_analyzer_attached_rule_validity.py`
+(4 verts, 2 mutations rouge→vert).
+
 **✅ LIVRÉ (2026-09-02) — 1935 → 0 `surcharge_atk` restants** : deux capacités Primitive B absentes de `max_allowed_shots` :
 
 3. **`weapon_attacks_bonus_vs_keyword` (Dakkablitz / BigMekDakkarig)** — +6 A au Blitzcannon si cible hors MONSTER/VEHICLE. `excluded_keywords` absent du registre JSON (tableau TS silencieusement ignoré par le parseur). Fix : `unit_registry.py` parse désormais les tableaux de chaînes dans `rule_args`. Nouveau `unit_ability_atk_bonus_vs_keyword_cap` dans `analyzer_perfig.py`.
