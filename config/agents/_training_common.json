@@ -22,6 +22,6 @@
   "model_gating_min_worst_scenario_combined": 0.45,
   "metrics_smoothing": {
     "perf_window": 500,
-    "perf_window_fast": 100
+    "perf_window_fast": 500
   }
 }
