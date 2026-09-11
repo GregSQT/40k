@@ -12,7 +12,7 @@ from shared.data_validation import (
     require_key, require_present,
     HAZARD_CONTEXT_EXHORTATION, HAZARD_CONTEXT_HOLD_STILL, HAZARD_CONTEXT_TAGS,
 )
-from ai.analyzer_rules import note_rule_usage
+from ai.analyzer_rules import note_rule_usage, note_special_rule_usage
 
 from ai.analyzer_perfig import MODEL_TOKEN_PATTERN, position_is_on_battlefield
 from ai.analyzer_state import AnalyzerState
@@ -970,13 +970,16 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             # d'un sergent ou d'un personnage rattaché (règle 19) n'était ni
                             # attendue ni comptée — donc invisible des deux côtés à la fois.
                             require_key(stats, 'unit_types_seen').add(_mtype)
-                            # Composition PAR TYPE D'ESCOUADE, pour le verdict de validité §1.7.
-                            # `unit_types_seen` est un ensemble PLAT : il dit qu'un Painboy est
-                            # sur la table, pas DANS QUELLE escouade — or c'est exactement la
-                            # question que pose 19.04. Union sur tout le run : §1.7 agrège lui
-                            # aussi par type, il n'existe pas de grain plus fin à y rendre.
-                            require_key(stats, 'model_types_by_unit_type').setdefault(
-                                unit_type, set()
+                            # Composition DÉCLARÉE PAR ESCOUADE, pour le verdict §1.7 (19.04).
+                            # Indexée par `unit_id` et NON par type : deux escouades du même
+                            # type n'ont pas la même composition (`Unit 4 (Intercessor)` mène un
+                            # `Librarian`, `Unit 5 (Intercessor)` un `CaptainRelicShield`), et
+                            # une union par type blanchissait la règle d'un character pour
+                            # toutes ses homonymes, les deux camps confondus. Sert de témoin
+                            # « composition déclarée » ; le VIVANT, lui, se lit dans
+                            # `unit_model_hp` au moment du relevé (`living_datasheets`).
+                            require_key(stats, 'model_types_by_unit_id').setdefault(
+                                unit_id, set()
                             ).add(_mtype)
                 # PV PAR SOCLE (cf. `unit_model_hp`). Posés ICI et pas plus haut : ils ont besoin
                 # de `[MODEL_TYPES:]`, que la même ligne d'entête vient seulement de fournir.
@@ -1838,8 +1841,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                     reactive_stats = require_key(stats, 'reactive_move_stats')
                     reactive_stats[reactive_player]['applied'] += 1
                     reactive_unit_type = require_key(state.unit_types, reactive_unit_id)
-                    key = ("reactive_move", reactive_unit_type)
-                    stats['special_rule_usage'][key][reactive_player] += 1
+                    note_special_rule_usage(
+                        stats, state, config, "reactive_move",
+                        reactive_unit_id, reactive_unit_type, reactive_player,
+                    )
                     reactive_key = (state.current_episode_num, turn, reactive_player)
                     if reactive_key in state.reactive_activation_counts:
                         reactive_counts = state.reactive_activation_counts[reactive_key]
@@ -2306,8 +2311,10 @@ def run(state: AnalyzerState, config: AnalyzerConfig, filepath: str) -> None:
                             _mwa_src_type = state.unit_types.get(_mwa_src)  # get allowed
                             _mwa_player = state.unit_player.get(_mwa_src)  # get allowed
                             if _mwa_src_type and _mwa_player is not None:
-                                stats['special_rule_usage'][
-                                    (_mwa_rule, _mwa_src_type)][int(_mwa_player)] += 1
+                                note_special_rule_usage(
+                                    stats, state, config, _mwa_rule,
+                                    _mwa_src, _mwa_src_type, int(_mwa_player),
+                                )
                             if _mwa_mw > 0:
                                 _apply_damage_and_handle_death(
                                     _mwa_unit_id, _mwa_src, _mwa_mw,

@@ -5,7 +5,7 @@ charge_handler.py — gestion des actions CHARGE dans parse_step_log.
 import re
 from typing import TYPE_CHECKING
 
-from ai.analyzer_rules import note_rule_usage
+from ai.analyzer_rules import note_rule_usage, note_special_rule_usage
 from ai.analyzer_phases import died_before_phase
 from shared.data_validation import require_key
 
@@ -148,11 +148,14 @@ def handle_charge(
             # coup parfaitement légal.
             _waaagh_charge = re.search(r'\[WAAAGH!\]', action_desc, re.IGNORECASE) is not None
             if _waaagh_charge:
-                key = ("waaagh", charge_unit_type)
-                stats['special_rule_usage'][key][player] += 1
+                note_special_rule_usage(
+                    stats, state, config, "waaagh", charge_unit_id, charge_unit_type, player
+                )
             elif "charge_after_advance" in unit_rules:
-                key = ("charge_after_advance", charge_unit_type)
-                stats['special_rule_usage'][key][player] += 1
+                note_special_rule_usage(
+                    stats, state, config, "charge_after_advance",
+                    charge_unit_id, charge_unit_type, player,
+                )
             else:
                 stats['charge_invalid'][player]['advanced'] += 1
                 if stats['first_error_lines']['charge_invalid'][player] is None:
@@ -290,8 +293,10 @@ def handle_charge(
             charge_unit_type_for_flee = require_key(state.unit_types, charge_unit_id)
             charge_unit_rules_for_flee = require_key(config.unit_rules_by_type, charge_unit_type_for_flee)
             if "charge_after_flee" in charge_unit_rules_for_flee:
-                key = ("charge_after_flee", charge_unit_type_for_flee)
-                stats['special_rule_usage'][key][player] += 1
+                note_special_rule_usage(
+                    stats, state, config, "charge_after_flee",
+                    charge_unit_id, charge_unit_type_for_flee, player,
+                )
             else:
                 stats['charge_after_flee'][player] += 1
                 if stats['first_error_lines']['charge_after_flee'][player] is None:

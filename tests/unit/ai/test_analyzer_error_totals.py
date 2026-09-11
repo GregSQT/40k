@@ -271,7 +271,9 @@ def test_aucune_creation_paresseuse_de_compteur():
 SCALAR_BUCKETS = {
     'wrong_phase':          lambda st: st['action_phase_accuracy']['move'].update({'wrong': 1}),
     'double_activation':    lambda st: st['double_activation_by_phase'].update({'MOVE': 1}),
-    'special_rules_invalid': lambda st: st['special_rule_usage'].__setitem__(('regle_inconnue', 'Type'), {1: 1, 2: 0}),
+    # Le verdict §1.7 est rendu au RELEVÉ (19.04, cf. `note_special_rule_usage`) : ce bucket
+    # somme les relevés déjà jugés fautifs, il n'en rejuge aucun.
+    'special_rules_invalid': lambda st: st['special_rule_usage_invalid'].__setitem__(('regle_inconnue', 'Type'), {1: 1, 2: 0}),
     'weapon_rules_invalid': lambda st: st['weapon_rule_usage'].__setitem__(('REGLE_INCONNUE', 'Arme (Type)'), {1: 1, 2: 0}),
     'episodes_ending':      lambda st: st['episodes_without_end'].append(1),
     'core_issues':          lambda st: st['parse_errors'].append({'error': 'x'}),
