@@ -252,9 +252,34 @@ prise reste éligible pour l'arme suivante.
   que **deux slots assignés différents donnent deux embeddings différents** — sans quoi le bloc de
   bits ne vaudrait pas mieux qu'un comptage.
 
-**Ce qui n'est PAS prouvé :** que la politique s'en serve mieux. L'information existe, elle n'est
-nulle part ailleurs, et le comptage en perdait l'appariement — mais le gain d'apprentissage se
-mesure sur un run, pas ici.
+**MESURÉ le 2026-09-11 — les bits sont CÂBLÉS mais PAS EXPLOITÉS.**
+`scripts/split_assigned_policy_probe.py` sur le modèle promu à 110 000 épisodes (P2, obs 18269),
+12 graines des scénarios d'entraînement, distance de variation totale sur la distribution
+d'actions restreinte aux actions légales :
+
+| Perturbation | moyenne | médiane |
+|---|---|---|
+| PLANCHER — la même observation contre elle-même | 0,000000 | 0,000000 |
+| SPLIT — la cible déjà assignée change | **0,000969** | **0,000007** |
+| RÉFÉRENCE — les deux cibles échangent leurs caractéristiques | 0,620877 | 0,711034 |
+
+Changer QUELLE cible porte déjà une arme ne déplace pratiquement pas le choix de la politique :
+la médiane, 7 × 10⁻⁶, est au niveau du plancher numérique, alors qu'un changement de
+caractéristiques la déplace de 0,71. Les deux perturbations ne sont pas de même ampleur en entrée
+— dix bits contre deux lignes entières — donc le RAPPORT ne se lit pas comme un facteur exact ;
+ce qui se lit, c'est que les bits pèsent à peine plus que rien dans cette décision.
+
+**Deuxième mesure, qui borne le gain possible :** sur 78 points d'arrêt de cible rencontrés,
+**66 n'ont qu'UNE action légale** — une seule cible éligible pour l'arme en attente. Même
+exploités parfaitement, les bits ne pourraient peser que sur le cinquième restant.
+
+Le bras témoin (même run sans les bits, pour comparer les win-rates) n'a **pas** été lancé, et
+c'est la conséquence directe de ce qui précède : à ce niveau d'écart, aucun décalage de win-rate
+n'est attribuable aux bits, et les heures de GPU du témoin n'achèteraient rien.
+
+**Ce qui reste non tranché :** que les bits soient inutiles POUR TOUJOURS. La mesure porte sur une
+étape de lignée à 110 000 épisodes et sur deux rosters ; elle ne dit pas ce qu'il en serait à un
+horizon plus long, ni sur un roster où le tir fractionné offrirait plus souvent un vrai choix.
 
 ---
 
