@@ -32,9 +32,14 @@ from types import SimpleNamespace
 
 import ai.bot_evaluation
 import ai.vec_normalize_utils
-from ai.train import GATE_DISPLAY_STATE_KEY, bind_curriculum_probe_callbacks
+from ai.train import (
+    GATE_DISPLAY_STATE_KEY,
+    bind_curriculum_probe_callbacks,
+    setup_callbacks,
+)
 from ai.training_callbacks import (
     BotEvaluationCallback,
+    EpisodeTerminationCallback,
     ExploiterProbeCallback,
     PoolEarlyStoppingCallback,
 )
@@ -387,3 +392,106 @@ def test_un_profil_sans_barre_de_progression_lie_None_sans_lever():
     bind_curriculum_probe_callbacks([pool], cast(Any, None), {})
     assert pool.gate_display_state is None
     pool._add_blocking_eval_seconds(4.0)
+
+
+class _ConfigJamaisLue:
+    """Loader de configuration qui REFUSE d'être lu.
+
+    Mesure du 2026-09-11 : `setup_callbacks` ne touche aucun attribut du loader sur ce chemin —
+    tout ce qu'il lui faut vient du profil d'entraînement. Un stub permissif masquerait le jour
+    où ce n'est plus vrai ; celui-ci nomme l'attribut demandé, ce qui dit quoi fournir.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(
+            f"setup_callbacks a lu config.{name} : le profil minimal de ce test ne suffit plus"
+        )
+
+
+def _profil_minimal_de_run(total_episodes: int = 20) -> Dict[str, Any]:
+    """Le plus petit profil d'entraînement que `setup_callbacks` accepte, valeurs indifférentes.
+
+    Aucune de ces clés ne décrit le sujet du fichier : ce sont les champs OBLIGATOIRES que la
+    fonction exige avant de construire quoi que ce soit (chaque absence lève en nommant la clé,
+    jamais un défaut silencieux — c'est la règle du dépôt). Seuls comptent ici `total_episodes`,
+    qui déclenche la barre de progression donc la création du dict, et `_turn_step_limit`, dont
+    elle dérive son budget de pas.
+    """
+    return {
+        "total_episodes": total_episodes,
+        "_turn_step_limit": 5,
+        "callback_params": {
+            "checkpoint_save_freq": 1000,
+            "checkpoint_name_prefix": "factice",
+            "bot_eval_use_episodes": False,
+            "eval_deterministic": True,
+            "bot_eval_use_subprocess": False,
+            "bot_eval_task_timeout_seconds": 60,
+            "bot_eval_n_workers": 1,
+            "model_gating_min_vs_control": 0.0,
+            "robust_penalty_bot": 0.0,
+            "robust_penalty_hard": 0.0,
+            "early_stopping_patience": 1,
+            "save_best_min_episodes": 1,
+        },
+    }
+
+
+def _seul(callbacks: Any, classe: type) -> Any:
+    """Rend l'unique callback de ce type, et échoue s'il y en a zéro ou plusieurs."""
+    trouves = [callback for callback in callbacks if isinstance(callback, classe)]
+    assert len(trouves) == 1, (
+        f"attendu UN {classe.__name__} parmi {[c.__class__.__name__ for c in callbacks]}"
+    )
+    return trouves[0]
+
+
+def test_le_dict_de_temps_bloque_est_une_source_unique_pour_tout_le_run(tmp_path):
+    """Le dict que la BARRE lit est celui que la liaison distribue aux sondes — le MÊME objet.
+
+    Les quatre tests ci-dessus tiennent chacun un maillon, mais posent tous leur
+    `gate_display_state` A LA MAIN : aucun ne prouve que le run n'en a qu'UN. Or la correction
+    ne tient que par cette identité — `setup_callbacks` crée le dict, le dépose dans le profil
+    du run, le passe à la barre et à l'éval bot, et `bind_curriculum_probe_callbacks` le relit
+    là pour les sondes. Déposer une COPIE au lieu de la référence laisserait les quatre autres
+    tests verts pendant que les sondes cumuleraient dans un dict que personne ne lit : seule
+    trace, une colonne `moy` fausse des heures plus tard.
+
+    C'est le seul test du fichier qui appelle la vraie construction des callbacks. Elle est
+    inoffensive, mesuré le 2026-09-11 : ni thread, ni processus fils, ni fichier créé, et pas
+    une lecture du loader de configuration (cf. `_ConfigJamaisLue`).
+
+    Ce test ne couvre PAS le cas d'une sonde construite hors du chemin qui passe par la
+    liaison : aucun test ne le peut, seul le site de construction unique (`_run_main`) le tient.
+    """
+    training_config = _profil_minimal_de_run()
+
+    callbacks = setup_callbacks(
+        config=_ConfigJamaisLue(),
+        model_path=str(tmp_path / "modele.zip"),
+        training_config=training_config,
+        training_config_name="x1_factice",
+        agent="AgentFactice",
+        rewards_config_name="AgentFactice",
+    )
+
+    gate_state = training_config[GATE_DISPLAY_STATE_KEY]
+    barre = _seul(callbacks, EpisodeTerminationCallback)
+    eval_bot = _seul(callbacks, BotEvaluationCallback)
+    assert barre.gate_display_state is gate_state, (
+        "la barre retranche un AUTRE dict que celui depose dans le profil du run"
+    )
+    assert eval_bot.gate_display_state is gate_state, (
+        "l'eval bot cumulerait dans un dict que la barre ne lit pas"
+    )
+
+    sonde = PoolEarlyStoppingCallback.__new__(PoolEarlyStoppingCallback)
+    bind_curriculum_probe_callbacks([sonde], cast(Any, None), training_config)
+    assert sonde.gate_display_state is gate_state
+
+    # L'identité rendue OBSERVABLE : ce que la sonde cumule, la barre le lit. C'est la chaîne
+    # complète du sujet — sonde synchrone -> compteur partagé -> temps retranché de `moy`.
+    sonde._add_blocking_eval_seconds(40.0)
+    assert barre.gate_display_state["blocking_eval_seconds"] == pytest.approx(40.0), (
+        "les 40 s bloquées par la sonde doivent être visibles par la barre qui les retranche"
+    )
