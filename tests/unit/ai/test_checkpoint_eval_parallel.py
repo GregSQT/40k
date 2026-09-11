@@ -639,6 +639,47 @@ def test_pool_early_stopping_closes_its_pool_when_the_evaluation_raises(tmp_path
     _assert_probe_closed_its_pool(probe, pool, created)
 
 
+def test_les_deux_sondes_effacent_leur_zip_temporaire_sur_le_chemin_NOMINAL(tmp_path):
+    """VERROU : le .zip temporaire est efface aussi quand l'evaluation REUSSIT.
+
+    Jumeau des deux tests ci-dessus, qui ne couvraient que le chemin d'exception. Le corps commun
+    `_EvalPoolOwnerMixin._run_checkpoint_probe` rend le dict d'evaluation par un `return` place
+    DANS le `try`, donc c'est le `finally` — et lui seul — qui efface le fichier sur le chemin
+    nominal. Sans ce verrou, un `return` remonte d'un cran hors du `try` laisserait un .zip de
+    45 Mo par sonde dans le dossier temporaire, invisible jusqu'a saturation du disque : une
+    etape a pool sonde toutes les quelques milliers d'episodes pendant des heures.
+
+    Les deux sondes sont exercees dans le MEME test parce qu'elles partagent desormais ce corps :
+    les separer donnerait deux tests dont l'un seul suffit a faire rougir la regression.
+    """
+    archive = tmp_path / "champion.zip"
+    archive.touch()
+
+    for probe, appel in (
+        (exploiter_probe_callback(archive), lambda p: p._probe(n_episodes=10, label="cheap")),
+        (pool_early_stopping_callback(archive), lambda p: p._probe()),
+    ):
+        probe._eval_pool = MagicMock()
+        created: List[str] = []
+        with (
+            patch(
+                "ai.bot_evaluation.evaluate_against_checkpoints",
+                return_value={"target": 0.6, "champion": 0.6},
+            ),
+            patch("ai.vec_normalize_utils.save_vec_normalize"),
+            patch("tempfile.mkstemp", side_effect=_mkstemp_spy(created)),
+        ):
+            appel(probe)
+
+        nom = type(probe).__name__
+        assert len(created) == 1, f"{nom} : la sonde cree exactement un .zip temporaire"
+        assert not os.path.exists(created[0]), (
+            f"{nom} : le .zip temporaire doit etre efface aussi quand l'evaluation reussit"
+        )
+        assert probe._eval_pool is not None, (
+            f"{nom} : une evaluation REUSSIE ne doit pas fermer le pool — il sert a la suivante"
+        )
+
 # ── Helpers ─────────────────────────────────────────────────────────────────────────────────
 
 
