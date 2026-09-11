@@ -227,8 +227,9 @@ But : l'étalon de force non saturable — win-rate du modèle courant contre se
   (`filter_compatible_archives`) : `observation_space`, `action_space` et signature du state_dict
   comparés au modèle courant, jamais un texte d'exception — les trois ruptures connues
   (`d5ddffb5` charge_pair_net, `9e2bd730` et `c4dd34ac` grille 9 → 11 → 12) lèvent trois
-  exceptions différentes. 4/16 archives jouables au 2026-09-11 ; l'échelle se repeuple à chaque
-  run, et se vide à chaque rupture d'architecture.
+  exceptions différentes. 4 archives jouables au 2026-09-11, les 12 périmées sorties dans
+  `ai/models/ArmageddonAgent_x1/OLD/` le même jour ; l'échelle se repeuple à chaque run, et se
+  vide à chaque rupture d'architecture.
 - Publication : `bot_eval/vs_ckpt_<score>` par barreau + agrégat `00_critical/` (min, moyenne).
 - **Hors sélection et hors gate au départ** : nouvelle famille dans `bot_registry`
   (`CHECKPOINT_OPPONENT_KEYS` ou équivalent), exclue de `SELECTION_BOT_KEYS` et de

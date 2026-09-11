@@ -126,8 +126,9 @@ et remplacé par le plancher de 0,55 contre le champion le plus récent : encadr
 ## ✅ R0b — Échelle de checkpoints figés en éval {#r0b-echelle} — livré 2026-08-21
 
 Étalon de force non saturable : win-rate du modèle courant contre les archives `robust_*`
-jouables (4 compatibles sur 16 au 2026-09-11 — les 12 archives antérieures à la refonte
-d'observation du 2026-09-08 sont écartées §12.15), publié en
+jouables (4 au 2026-09-11 — les 12 archives antérieures à la refonte d'observation du
+2026-09-08 ont été sorties dans `ai/models/ArmageddonAgent_x1/OLD/`, elles n'étaient plus
+jouables §12.15), publié en
 `bot_eval/vs_ckpt_<score>` + agrégats `00_critical/ckpt_min` et `ckpt_mean`. Hors sélection
 et hors gate.
 
@@ -137,7 +138,8 @@ et hors gate.
 (`log_checkpoint_evaluations`) + hook `--test-only` dans `ai/train.py` + tests unitaires dans
 `tests/unit/ai/test_checkpoint_evaluation.py` et `tests/unit/ai/test_checkpoint_eval_parallel.py`.
 
-**Critère rempli** : `--test-only` annonce les barreaux compatibles (4 sur 16 au 2026-09-11) et publie
+**Critère rempli** : `--test-only` annonce les barreaux compatibles (4 sur 4 découverts depuis la
+sortie des archives périmées, 2026-09-11) et publie
 `vs_ckpt_<score>` pour chacun. Archive d'architecture périmée : skip explicite par
 `filter_compatible_archives` — comparaison de l'`observation_space`, de l'`action_space` et de la
 signature du state_dict au modèle courant, tracée par `tqdm.write` §12.15 ; pkl absent
