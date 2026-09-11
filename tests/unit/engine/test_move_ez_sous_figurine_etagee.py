@@ -166,6 +166,51 @@ def test_aucune_case_engagee_n_est_offerte_au_move():
     )
 
 
+def test_les_trois_producteurs_rendent_la_meme_zone():
+    """`enemy_adjacent_hexes_player_N` a TROIS producteurs — recalcul complet, instantané
+    réactif, delta incrémental. Corriger le premier seul laissait le trou ouvert dans le
+    deuxième : la fenêtre réactive republie la clé sous le même nom (`drive_reactive_move_window`),
+    et rien ne la recalcule ensuite pour le joueur qui bouge. Un déplacement réactif pouvait donc
+    re-finir sous la figurine à l'étage."""
+    from engine.phase_handlers.shared_utils import (
+        _build_enemy_adjacent_structures_from_units_cache,
+        _get_players_present_from_units_cache,
+    )
+
+    gs = _state(DEPART)
+    complet = build_enemy_adjacent_hexes(gs, 1)
+    _, sets_by_player = _build_enemy_adjacent_structures_from_units_cache(
+        gs, _get_players_present_from_units_cache(gs)
+    )
+    assert set(sets_by_player[1]) == set(complet), (
+        "l'instantané réactif doit rendre exactement la zone du recalcul complet"
+    )
+    assert DESTINATION in sets_by_player[1]
+
+
+def test_le_delta_incremental_accepte_les_cases_sources():
+    """Le delta retire la zone `old` des compteurs posés par les deux autres producteurs : une
+    zone `old` plus étroite lève `KeyError: Delta update missing old zone hex`. C'est le piège
+    qui rend les trois sites indissociables."""
+    from engine.phase_handlers.shared_utils import (
+        _apply_enemy_adjacent_delta_for_moved_unit,
+        _build_enemy_adjacent_structures_from_units_cache,
+        _get_players_present_from_units_cache,
+    )
+
+    gs = _state(DEPART)
+    players = _get_players_present_from_units_cache(gs)
+    counters, sets_ = _build_enemy_adjacent_structures_from_units_cache(gs, players)
+    ancienne = {(c, r) for c, r, _ in ENEMY_MODELS}
+    nouvelle = {(c, r + 2) for c, r in ancienne}
+    _apply_enemy_adjacent_delta_for_moved_unit(
+        counters_by_player=counters, sets_by_player=sets_, players_present=players,
+        moved_unit_player=2, old_occupied=ancienne, new_occupied=nouvelle,
+        board_cols=BOARD[0], board_rows=BOARD[1], engagement_zone=EZ, game_state=gs,
+    )
+    assert nouvelle <= sets_[1], "les nouvelles cases occupées entrent dans la zone"
+
+
 def test_la_zone_ne_s_elargit_pas_hors_portee():
     """Garde-fou de sens : le correctif RESTREINT, il n'invente pas de zone. Aucune case au-delà
     de `engagement_zone` d'une figurine ennemie ne doit entrer dans l'ensemble."""
