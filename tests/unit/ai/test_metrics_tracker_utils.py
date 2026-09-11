@@ -16,7 +16,7 @@ from ai.metrics_tracker import (
 )
 from ai.truncation_log import TruncationLog
 from config_loader import get_config_loader
-from tests.unit.ai._fabriques import tactical_data
+from tests.unit.ai._fabriques import ppo_update_stats, tactical_data
 
 # Agent de reference de ces tests : il porte le training config lu ci-dessous ET la config de
 # rewards que `__init__` charge dans le verrou `test_stub_matches_the_attributes_of_a_real_tracker`.
@@ -622,8 +622,9 @@ def test_log_training_metrics_ne_recopie_plus_les_courbes_de_sb3() -> None:
     """VERROU : le tracker ne republie AUCUN `train/*` ni `diag/*` que SB3 ecrit deja.
 
     Le logger SB3 et ce tracker ecrivent dans le MEME dossier de run (`attach_run_logger`).
-    Douze tags — `training_critical/*`, `training_detailed/loss`, et dix de
-    `training_diagnostic/` — y recopiaient valeur pour valeur les `train/*` et `diag/*` de SB3,
+    Douze tags — les sept de `training_critical/`, `training_detailed/loss`, et quatre de
+    `training_diagnostic/` (`learning_rate`, `entropy_loss`, `gradient_norm`,
+    `grad_clip_fraction`) — y recopiaient valeur pour valeur les `train/*` et `diag/*` de SB3,
     en les datant en PAS alors que tout le reste du tracker est date en EPISODES : deux
     abscisses incompatibles dans un meme fichier d'evenements. Verifie sur les 144 points
     communs de run_20260911-062637 : zero ecart entre chaque recopie et son original.
@@ -631,37 +632,19 @@ def test_log_training_metrics_ne_recopie_plus_les_courbes_de_sb3() -> None:
     Ne restent que les deux tags que SB3 ne publie pas : `entropy_coef` (injecte dans une COPIE
     de `name_to_value`, donc invisible au dump de SB3) et `n_updates` (enregistre par SB3 avec
     `exclude="tensorboard"`).
+
+    L'assertion porte sur l'ENSEMBLE des tags `training_*` emis, et non sur une liste des douze
+    noms supprimes : une recopie reintroduite sous un nom neuf (`training_diagnostic/loss`,
+    `training_detailed/fps`) passerait une liste noire en vert, et cette liste devrait etre
+    tenue en miroir de `log_training_metrics`.
     """
     t = _tracker_stub()
-    t.log_training_metrics(
-        {
-            "train/learning_rate": 3e-4,
-            "train/policy_gradient_loss": -0.2,
-            "train/value_loss": 0.3,
-            "train/entropy_loss": 0.05,
-            "train/ent_coef": 0.01,
-            "train/clip_fraction": 0.2,
-            "train/approx_kl": 0.01,
-            "train/explained_variance": 0.4,
-            "train/n_updates": 10,
-            "train/gradient_norm": 0.8,
-            "train/grad_clip_fraction": 0.15,
-            "diag/grad_share_policy_mb0": 0.235,
-            "time/fps": 100,
-        }
+    t.log_training_metrics(ppo_update_stats())
+    emis = {k for k, _, _ in _dw(t).scalars if k.startswith("training_")}
+    assert emis == {"training_diagnostic/entropy_coef", "training_diagnostic/n_updates"}, (
+        "le tracker doit n'ecrire que les deux tags dont il est le seul ecrivain ; obtenu : "
+        + ", ".join(sorted(emis))
     )
-    keys = [k for k, _, _ in _dw(t).scalars]
-    recopies = [
-        k for k in keys
-        if k.startswith(("training_critical/", "training_detailed/"))
-        or k in ("training_diagnostic/learning_rate", "training_diagnostic/entropy_loss",
-                 "training_diagnostic/gradient_norm", "training_diagnostic/grad_clip_fraction")
-    ]
-    assert recopies == [], (
-        "recopie d'une courbe que SB3 publie deja dans le meme run : " + ", ".join(recopies)
-    )
-    assert "training_diagnostic/entropy_coef" in keys, "entropy_coef n'a pas d'autre ecrivain"
-    assert "training_diagnostic/n_updates" in keys, "n_updates est exclu du tensorboard de SB3"
 
 
 def test_les_deux_courbes_ppo_brutes_de_00_critical_sont_emises() -> None:
@@ -700,20 +683,18 @@ def test_l_approx_kl_max_reste_muette_sans_ppo_patche() -> None:
 
 
 def test_gradient_norm_nan_est_ecarte() -> None:
-    """VERROU : un NaN dans `train/gradient_norm` ou `train/grad_clip_fraction` (early-stop KL)
-    ne pollue ni TensorBoard ni `latest_gradient_norm`.
+    """VERROU : un NaN dans `train/gradient_norm` (early-stop KL) n'ecrase pas
+    `latest_gradient_norm`, lu par le rapport de fin de run.
 
     `_grad_norm_stats` retourne (nan, nan) quand la liste de normes est vide — ce qui arrive si
-    PPO coupe les epochs avant le premier `loss.backward()`. Les deux NaN doivent etre filtres,
-    comme `diag/grad_share_policy_mb0`.
+    PPO coupe les epochs avant le premier `loss.backward()`. Le NaN doit etre filtre, comme
+    `diag/grad_share_policy_mb0`. Le volet TensorBoard a disparu avec la courbe
+    `training_diagnostic/gradient_norm` : c'est SB3 qui publie `train/gradient_norm`.
     """
     import math as _math
     t = _tracker_stub()
     t.latest_gradient_norm = 1.2  # valeur finie precedente
-    t.log_training_metrics({
-        "train/gradient_norm": float("nan"),
-        "train/grad_clip_fraction": float("nan"),
-    })
+    t.log_training_metrics({"train/gradient_norm": float("nan")})
     assert _math.isfinite(t.latest_gradient_norm), (
         f"latest_gradient_norm ecrase par NaN : {t.latest_gradient_norm}"
     )
@@ -728,16 +709,6 @@ _PPO_CURVE_TAGS: tuple[str, ...] = (
     "00_critical/k_entropy_loss",
 )
 
-_UPDATE_STATS: Dict[str, float] = {
-    "train/learning_rate": 3e-4,
-    "train/policy_gradient_loss": -0.2,
-    "train/value_loss": 0.3,
-    "train/entropy_loss": 0.05,
-    "train/clip_fraction": 0.2,
-    "train/approx_kl": 0.01,
-    "train/explained_variance": 0.4,
-    "diag/grad_share_policy_mb0": 0.235,
-}
 
 
 def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
@@ -788,13 +759,13 @@ def test_les_courbes_de_sante_ppo_suivent_la_cadence_de_l_update() -> None:
     assert _counts() == {tag: 1 for tag in curve_tags} | {tag: 0 for tag in threshold_tags}
 
     # Deuxieme cycle : apres le premier update PPO (count=1), seuils et courbes s'emettent.
-    t.log_training_metrics(dict(_UPDATE_STATS))
+    t.log_training_metrics(ppo_update_stats())
     for _ in range(20):
         t.log_critical_dashboard()
     assert _counts() == {tag: 2 for tag in curve_tags} | {tag: 1 for tag in threshold_tags}
 
     # Troisieme cycle : second update PPO.
-    t.log_training_metrics(dict(_UPDATE_STATS))
+    t.log_training_metrics(ppo_update_stats())
     for _ in range(20):
         t.log_critical_dashboard()
     assert _counts() == {tag: 3 for tag in curve_tags} | {tag: 2 for tag in threshold_tags}

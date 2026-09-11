@@ -13,6 +13,7 @@ Extracted from ai/train.py during refactoring (2025-01-21)
 """
 
 import contextlib
+import functools
 import json
 import os
 import time
@@ -26,7 +27,10 @@ from concurrent.futures import Future, ThreadPoolExecutor
 import numpy as np
 import torch
 import gymnasium as gym
-from typing import Dict, Iterable, Optional, Any, List, Set, Tuple, cast
+from typing import (
+    Any, Callable, Concatenate, Dict, Iterable, List, Optional, ParamSpec, Set, Tuple, TypeVar,
+    cast,
+)
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList
 from stable_baselines3.common.utils import ConstantSchedule
 
@@ -1131,11 +1135,9 @@ class MetricsCollectionCallback(BaseCallback):
         # l'admettait deja. self.q_value_history / max_q_value_history partent avec lui.
 
         # La construction de `step_data` et l'appel `metrics_tracker.log_training_step`
-        # occupaient cette place, a CHAQUE step gym. Leurs deux courbes recopiaient
-        # `train/learning_rate` et `train/loss` que le logger SB3 publie deja dans le meme
-        # dossier de run, sur l'axe des pas — et les recopiaient sur une abscisse batarde
-        # (`step_count` remis a `num_timesteps` a chaque fin d'episode puis incremente de 1 par
-        # step, quand `num_timesteps` avance de `n_envs`).
+        # occupaient cette place, a CHAQUE step gym. Supprimes le 2026-09-11 avec la methode
+        # appelee : la raison est portee par la pierre tombale de `log_training_step`
+        # (ai/metrics_tracker.py), pour n'avoir qu'un seul recit a tenir a jour.
 
         # NOTE: PPO training metrics are captured in _on_rollout_start()
         # SB3 only populates model.logger.name_to_value during train() which happens BETWEEN rollouts
@@ -1380,6 +1382,34 @@ class _BlockingEvalClockMixin:
             yield
         finally:
             self._add_blocking_eval_seconds(time.perf_counter() - start)
+
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+#: BORNE au mixin, et non le mixin lui-meme : le decorateur doit rendre une methode de la MEME
+#: classe que celle qu'il recoit. Annoter le parametre `_BlockingEvalClockMixin` en dur le ferait
+#: rendre une methode du mixin, que pyright refuse d'affecter a `ExploiterProbeCallback._probe`.
+_S = TypeVar("_S", bound=_BlockingEvalClockMixin)
+
+
+def _temps_bloque(
+    methode: Callable[Concatenate[_S, _P], _R],
+) -> Callable[Concatenate[_S, _P], _R]:
+    """Impute au temps bloque TOUT le corps de la methode decoree.
+
+    Sur la METHODE et non aux call-sites : instrumenter les call-sites avait deja laisse deux
+    sauvegardes de modele sur trois hors du compte (`_save_model_with_vecnormalize`). Le porteur
+    d'une methode entierement bloquante le declare donc a sa signature, ou un futur appelant le
+    lit — un `with` autour du corps le dirait aussi, mais au prix d'un niveau d'indentation sur
+    des corps qui en comptent deja trois (`try` / `try` / `except`).
+    """
+
+    @functools.wraps(methode)
+    def enveloppe(self: _S, *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        with self._blocking_eval_timer():
+            return methode(self, *args, **kwargs)
+
+    return enveloppe
 
 
 class BotEvaluationCallback(BaseCallback, _BlockingEvalClockMixin):
@@ -2916,64 +2946,62 @@ class ExploiterProbeCallback(BaseCallback, _EvalPoolOwnerMixin, _BlockingEvalClo
         # et `_set_stage_origin` pour l'origine de l'étape (toutes les grandeurs ci-dessus — cadence,
         # plafond, budget — se comptent en épisodes DE L'ÉTAPE, cf. `_stage_episode`).
 
+    @_temps_bloque
     def _probe(self, n_episodes: int, label: str) -> float:
         """Sauvegarde le modele courant dans un fichier temporaire et evalue contre la cible.
 
         Synchrone : bloque le thread d'entrainement le temps de l'evaluation. Aucun Future,
-        aucune sonde ne peut etre abandonnee en silence.
+        aucune sonde ne peut etre abandonnee en silence. Le decorateur impute donc TOUT ce
+        corps au temps bloque — la sauvegarde du modele autant que l'evaluation — plutot que
+        les deux call-sites de `_on_step` (cf. `_temps_bloque`).
         """
-        # Chronometre sur la METHODE et non aux deux call-sites de `_on_step` : meme regle
-        # que `_save_model_with_vecnormalize`, ou l'instrumenter aux call-sites avait laisse
-        # deux sauvegardes sur trois gonfler les durees affichees. Couvre la sauvegarde du
-        # modele autant que l'evaluation : les deux figent la boucle.
-        with self._blocking_eval_timer():
-            from ai.bot_evaluation import evaluate_against_checkpoints
-            from ai.vec_normalize_utils import save_vec_normalize
+        from ai.bot_evaluation import evaluate_against_checkpoints
+        from ai.vec_normalize_utils import save_vec_normalize
 
-            fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-            os.close(fd)
+        fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        try:
+            self.model.save(tmp_path)
+            save_vec_normalize(self.model.get_env(), tmp_path)
+            self._ensure_eval_pool()
             try:
-                self.model.save(tmp_path)
-                save_vec_normalize(self.model.get_env(), tmp_path)
-                self._ensure_eval_pool()
-                try:
-                    results = evaluate_against_checkpoints(
-                        model_path=tmp_path,
-                        checkpoint_archives=[(self.target_archive_path, "target")],
-                        training_config_name=self.training_config_name,
-                        rewards_config_name=self.rewards_config_name,
-                        n_episodes=n_episodes,
-                        controlled_agent=self.rewards_config_name,
-                        scenario_pool="holdout",
-                        device="cpu",
-                        # Le compte RÉSOLU par `_ensure_eval_pool`, jamais `intermediate_n_workers` :
-                        # c'est celui qui a dimensionné le pool juste au-dessus, et il devient ici
-                        # `max_in_flight`.
-                        n_workers_override=self._eval_n_workers,
-                        pool=self._eval_pool,
-                    )
-                except Exception:
-                    # Ferme ICI plutôt que d'attendre le `finally` de la boucle `learn()` : le pool
-                    # peut être cassé (workers SIGTERM → `_broken=True`) et une sonde ultérieure y
-                    # lèverait BrokenProcessPool, ou intact mais inutile pendant que l'exception
-                    # traverse `close_all_training_envs`, que 30 s par VecEnv retardent — un SIGTERM
-                    # dans cette fenêtre rendrait ses workers orphelins (PPID=1).
-                    self._shutdown_eval_pool()
-                    raise
-            finally:
-                remove_model_with_companions(tmp_path)
-            if not results:
-                raise RuntimeError(
-                    "ExploiterProbeCallback._probe : evaluate_against_checkpoints a rendu un dict "
-                    "vide — aucun scenario holdout trouve pour cet agent. "
-                    "Verifier la configuration du scenario_pool."
+                results = evaluate_against_checkpoints(
+                    model_path=tmp_path,
+                    checkpoint_archives=[(self.target_archive_path, "target")],
+                    training_config_name=self.training_config_name,
+                    rewards_config_name=self.rewards_config_name,
+                    n_episodes=n_episodes,
+                    controlled_agent=self.rewards_config_name,
+                    scenario_pool="holdout",
+                    device="cpu",
+                    # Le compte RÉSOLU par `_ensure_eval_pool`, jamais `intermediate_n_workers` :
+                    # c'est celui qui a dimensionné le pool juste au-dessus, et il devient ici
+                    # `max_in_flight`.
+                    n_workers_override=self._eval_n_workers,
+                    pool=self._eval_pool,
                 )
-            win_rate = float(results["target"])
-            self.log_fn(
-                f"🔬 Sonde exploiteur {label} @ep{self._stage_episode()} "
-                f"(cumul {self._current_episode()}, n={n_episodes}) : win-rate={win_rate:.3f}"
+            except Exception:
+                # Ferme ICI plutôt que d'attendre le `finally` de la boucle `learn()` : le pool
+                # peut être cassé (workers SIGTERM → `_broken=True`) et une sonde ultérieure y
+                # lèverait BrokenProcessPool, ou intact mais inutile pendant que l'exception
+                # traverse `close_all_training_envs`, que 30 s par VecEnv retardent — un SIGTERM
+                # dans cette fenêtre rendrait ses workers orphelins (PPID=1).
+                self._shutdown_eval_pool()
+                raise
+        finally:
+            remove_model_with_companions(tmp_path)
+        if not results:
+            raise RuntimeError(
+                "ExploiterProbeCallback._probe : evaluate_against_checkpoints a rendu un dict "
+                "vide — aucun scenario holdout trouve pour cet agent. "
+                "Verifier la configuration du scenario_pool."
             )
-            return win_rate
+        win_rate = float(results["target"])
+        self.log_fn(
+            f"🔬 Sonde exploiteur {label} @ep{self._stage_episode()} "
+            f"(cumul {self._current_episode()}, n={n_episodes}) : win-rate={win_rate:.3f}"
+        )
+        return win_rate
 
     def _on_step(self) -> bool:
         # Épisodes DE L'ÉTAPE : `budget`, `budget_cap` et la courbe sont des grandeurs d'étape
@@ -3178,44 +3206,46 @@ class PoolEarlyStoppingCallback(BaseCallback, _EvalPoolOwnerMixin, _BlockingEval
             return self.pool_archives
         return [(path, label) for path, label in self.pool_archives if label == self.champion_label]
 
+    @_temps_bloque
     def _probe(self, full_pool: bool = True) -> Dict[str, float]:
-        """Sauvegarde le modèle courant et l'évalue contre les archives du tour."""
-        # Chronometre sur la METHODE, meme regle que chez `ExploiterProbeCallback._probe`.
-        # La sonde de BASELINE (`_on_training_start`) y entre aussi, et c'est correct :
-        # l'horloge de la barre est `global_start_time` (ai/train.py), pose AVANT `learn()`,
-        # donc avant elle — le temps retranche ne peut pas passer sous zero.
-        with self._blocking_eval_timer():
-            from ai.bot_evaluation import evaluate_against_checkpoints
-            from ai.vec_normalize_utils import save_vec_normalize
+        """Sauvegarde le modèle courant et l'évalue contre les archives du tour.
 
-            archives = self._archives_for(full_pool)
-            fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-            os.close(fd)
+        Décoré comme `ExploiterProbeCallback._probe`. La sonde de BASELINE
+        (`_on_training_start`) entre elle aussi dans le temps bloqué, et c'est correct :
+        l'horloge de la barre est `global_start_time` (ai/train.py), posé AVANT `learn()`, donc
+        avant elle — le temps retranché ne peut pas passer sous zéro.
+        """
+        from ai.bot_evaluation import evaluate_against_checkpoints
+        from ai.vec_normalize_utils import save_vec_normalize
+
+        archives = self._archives_for(full_pool)
+        fd, tmp_path = tempfile.mkstemp(suffix=".zip")
+        os.close(fd)
+        try:
+            self.model.save(tmp_path)
+            save_vec_normalize(self.model.get_env(), tmp_path)
+            self._ensure_eval_pool()
             try:
-                self.model.save(tmp_path)
-                save_vec_normalize(self.model.get_env(), tmp_path)
-                self._ensure_eval_pool()
-                try:
-                    results = evaluate_against_checkpoints(
-                        model_path=tmp_path,
-                        checkpoint_archives=archives,
-                        training_config_name=self.training_config_name,
-                        rewards_config_name=self.rewards_config_name,
-                        n_episodes=self.n_eval_episodes,
-                        controlled_agent=self.rewards_config_name,
-                        scenario_pool="holdout",
-                        device="cpu",
-                        # Jumeau de `ExploiterProbeCallback._probe` : cf. son commentaire.
-                        n_workers_override=self._eval_n_workers,
-                        pool=self._eval_pool,
-                    )
-                except Exception:
-                    # Jumeau du `except` d'`ExploiterProbeCallback._probe` : voir son commentaire.
-                    self._shutdown_eval_pool()
-                    raise
-            finally:
-                remove_model_with_companions(tmp_path)
-            return {label: float(results[label]) for _, label in archives if label in results}
+                results = evaluate_against_checkpoints(
+                    model_path=tmp_path,
+                    checkpoint_archives=archives,
+                    training_config_name=self.training_config_name,
+                    rewards_config_name=self.rewards_config_name,
+                    n_episodes=self.n_eval_episodes,
+                    controlled_agent=self.rewards_config_name,
+                    scenario_pool="holdout",
+                    device="cpu",
+                    # Jumeau de `ExploiterProbeCallback._probe` : cf. son commentaire.
+                    n_workers_override=self._eval_n_workers,
+                    pool=self._eval_pool,
+                )
+            except Exception:
+                # Jumeau du `except` d'`ExploiterProbeCallback._probe` : voir son commentaire.
+                self._shutdown_eval_pool()
+                raise
+        finally:
+            remove_model_with_companions(tmp_path)
+        return {label: float(results[label]) for _, label in archives if label in results}
 
     def _on_training_start(self) -> None:
         # Sonde de référence à l'épisode 0 de l'étape, uniquement en warm start.

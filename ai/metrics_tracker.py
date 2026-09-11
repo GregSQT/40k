@@ -25,10 +25,9 @@ DUAL TIER SYSTEM (41 Total Metrics):
 
   La sante PPO se lit sinon sur 00_critical/{f,g,h,i,j,k,l,m} (axe des episodes, lissee sauf
   l et m) et sur les train/* et diag/* que SB3 ecrit lui-meme dans le MEME dossier de run
-  (axe des pas). Les familles training_critical/ et training_detailed/, plus dix tags de
-  training_diagnostic/, ont ete supprimees le 2026-09-11 : elles recopiaient valeur pour
-  valeur ces train/* et diag/*, et le faisaient sur l'axe des PAS, ce qui donnait deux
-  abscisses incompatibles dans le fichier d'evenements du tracker.
+  (axe des pas). Douze tags recopiaient ces train/* et diag/* et ont ete supprimes le
+  2026-09-11 — le POURQUOI est dans la docstring de `log_training_metrics`, seul endroit ou
+  il est tenu a jour.
 
 ABSCISSE : ce tracker date TOUS ses scalaires en episodes. L'axe des pas appartient au seul
 writer de SB3.
@@ -1504,10 +1503,13 @@ class W40KMetricsTracker:
         """
         Accumule les stats PPO de stable-baselines3 et publie ce que SB3 ne publie PAS.
 
-        ABSCISSE : `episode_count`, comme tout ce que ce tracker ecrit. Les familles
-        `training_critical/`, `training_diagnostic/` et `training_detailed/` portaient ici
-        douze courbes datees en PAS, ce qui donnait DEUX abscisses incompatibles dans un meme
-        fichier d'evenements — facteur ~110 entre les deux sur run_20260911-062637. Ces douze
+        ABSCISSE : `episode_count`, comme tout ce que ce tracker ecrit. Douze courbes datees en
+        PAS ont ete supprimees le 2026-09-11 : les sept de `training_critical/`, quatre de
+        `training_diagnostic/` (`learning_rate`, `entropy_loss`, `gradient_norm`,
+        `grad_clip_fraction`) — onze emises ici — et `training_detailed/loss`, emise par la
+        `log_training_step` supprimee avec elles. Elles donnaient DEUX abscisses incompatibles
+        dans un meme fichier d'evenements — facteur ~110 entre les deux sur
+        run_20260911-062637. Ces douze
         courbes etaient de surcroit la recopie EXACTE des `train/*` et `diag/*` que le logger
         SB3 ecrit deja dans le MEME dossier de run (`attach_run_logger`), verifie valeur par
         valeur sur les 144 points communs de ce run : zero ecart. Elles sont donc supprimees,
