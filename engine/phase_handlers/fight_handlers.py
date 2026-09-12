@@ -3507,6 +3507,18 @@ def pile_in_autoplace_plan(
         # les arêtes ILP conservent exactement les engagements que le dry-run exigera.
         return _fight_model_start_engaged_entries(game_state, squad_id, models_cache[mid])
 
+    def _keeps_start_engagements(
+        mid: str, c: int, r: int, start_eng: List[Dict[str, Any]]
+    ) -> bool:
+        """AFTER 12.03 : la figurine posée en (c, r) reste engagée avec CHAQUE ennemi de
+        ``start_eng`` — même mesure que ``kept_engagements`` du dry-run."""
+        synth = _synth_model_entry(
+            game_state, squad_id, models_cache[mid], c, r, level=_slot_level(mid, c, r)
+        )
+        return all(
+            unit_entries_within_engagement_zone(synth, ce, ez, metric=metric) for ce in start_eng
+        )
+
     # --- Arêtes ILP : (fig f, slot s) légales. edges_by_slot[s] = liste d'indices d'arête. ---
     edges: List[Tuple[str, int, int]] = []  # (mid, slot_index, pathdist)
     for mid in movable:
@@ -3607,7 +3619,10 @@ def pile_in_autoplace_plan(
     #      figurine — `_fight_model_destination_feasible`, même prédicat que le validateur), la
     #      figurine en prend une ; départage = mode (offensif → au plus près du focus, défensif →
     #      au plus loin) ;
-    #   2. sinon rapprochement au max : strictement plus proche du palier, au plus près du focus.
+    #   2. sinon rapprochement au max : strictement plus proche du palier, au plus près du focus,
+    #      parmi les cases où la figurine CONSERVE ses engagements de départ (12.03 AFTER « must
+    #      still be engaged with that enemy unit ») ; aucune → elle reste sur place (une figurine
+    #      non déplacée n'est soumise ni au WHILE ni à une perte d'engagement).
     # Obstacles = ennemis, autres unités, figées, et CHAQUE autre figurine de l'escouade à sa position
     # COURANTE (posée par l'ILP, déjà repliée, ou encore à son départ). Une figurine restée à son
     # départ occupe donc bien sa case — c'était le crash « chevauchement de socles ».
@@ -3655,6 +3670,8 @@ def pile_in_autoplace_plan(
             d_tier = _fp_min_to_tier(set(soc.fp))
             if d_tier >= sm:
                 continue  # WHILE
+            if start_eng and not _keeps_start_engagements(mid, cc, rr, start_eng):
+                continue  # AFTER : un engagement de départ serait perdu (le dry-run le refuse)
             d_focus = min_distance_between_sets(set(soc.fp), focus_fp)
             if best_closer_score is None or d_focus < best_closer_score:
                 best_closer_score = d_focus
