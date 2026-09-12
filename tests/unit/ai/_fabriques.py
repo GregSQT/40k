@@ -530,6 +530,7 @@ _PPO_UPDATE_STATS: Dict[str, float] = {
     "train/clip_fraction": 0.2,
     "train/approx_kl": 0.01,
     "train/approx_kl_max": 0.034,
+    "train/n_minibatches_done": 9,
     "train/explained_variance": 0.42,
     "train/n_updates": 10,
     "train/gradient_norm": 0.8,

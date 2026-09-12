@@ -479,6 +479,9 @@ class W40KMetricsTracker:
                 "n_immediate_reward_ratio_mean": ["Multiline", [
                     "00_critical/n_immediate_reward_ratio_mean",
                 ]],
+                "v_n_minibatches_done": ["Multiline", [
+                    "00_critical/v_n_minibatches_done",
+                ]],
             }
         }
         self.writer.add_custom_scalars(layout)
@@ -1528,6 +1531,9 @@ class W40KMetricsTracker:
           `train/approx_kl_max` et `train/explained_variance`, gardees parce que leur raison
           d'etre est d'etre DANS le tableau de bord 00_critical, a cote de leurs jumelles
           lissees `j_approx_kl` et `h_explained_variance` et sur la MEME abscisse qu'elles.
+        - 00_critical/v_n_minibatches_done : valeur BRUTE doublant `train/n_minibatches_done`,
+          pour la meme raison — elle se lit a cote de `l_approx_kl_max`, qui dit SI l'update a
+          ete coupee par l'early-stop KL quand celle-ci dit OU.
 
         `training_critical/fps` a ete retire avec les autres : sa cle source `time/fps` n'est
         pas presente dans `name_to_value` au dump d'update — aucun point emis sur ce tag dans
@@ -1588,6 +1594,17 @@ class W40KMetricsTracker:
             self.writer.add_scalar(
                 '00_critical/l_approx_kl_max',
                 float(model_stats['train/approx_kl_max']),
+                self.episode_count,
+            )
+
+        # 00_critical: pas de gradient REELLEMENT executes par l'update, publies par
+        # `ai/patched_ppo.py` (incrementes apres chaque `optimizer.step()`). Compte entier, brut :
+        # c'est le complement de `l_approx_kl_max` — elle dit si l'early-stop a coupe l'update,
+        # celui-ci dit apres combien de pas. Absent si le modele n'est pas le PPO patche.
+        if 'train/n_minibatches_done' in model_stats:
+            self.writer.add_scalar(
+                '00_critical/v_n_minibatches_done',
+                int(model_stats['train/n_minibatches_done']),
                 self.episode_count,
             )
 

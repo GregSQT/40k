@@ -163,6 +163,14 @@ class PatchedMaskablePPO(MaskablePPO):
         # floats si target_kl présent (early-stopping nécessite la valeur scalaire).
         approx_kl_divs_t: list[th.Tensor] = []
         approx_kl_divs: list[float] = []
+        # Pas de gradient REELLEMENT executes dans l'update : incremente apres chaque
+        # `optimizer.step()`, donc jamais par le mini-lot qui declenche l'early-stop KL (il fait
+        # `break` avant son backward). Vaut n_epochs x ceil(n_steps x n_envs / batch_size) quand
+        # les epochs vont au bout, strictement moins des qu'une coupure a eu lieu. Publie parce
+        # que `train/approx_kl_max` dit SI l'update a ete coupee, jamais OU : sur
+        # run_20260912-065925, 761/761 updates coupees et `train/time_update` entre 1,46 et
+        # 5,61 s — la fraction d'epochs reellement apprise n'etait qu'une deduction.
+        n_minibatches_done = 0
         # Diagnostic divergence GPU/CPU — à retirer après identification de la cause.
         # Capture uniquement le minibatch 0 d'epoch 0 : seul point vraiment pré-update.
         _diag_drift_norm_mb0: th.Tensor | None = None
@@ -285,6 +293,7 @@ class PatchedMaskablePPO(MaskablePPO):
                     th.nn.utils.clip_grad_norm_(self.policy.parameters(), self.max_grad_norm)
                 )
                 self.policy.optimizer.step()
+                n_minibatches_done += 1
 
             if not continue_training:
                 break
@@ -320,6 +329,7 @@ class PatchedMaskablePPO(MaskablePPO):
         if approx_kl_max is not None:
             self.logger.record("train/approx_kl_max", approx_kl_max)
         self.logger.record("train/clip_fraction", clip_frac_mean)
+        self.logger.record("train/n_minibatches_done", n_minibatches_done)
         # Norme BRUTE, moyennee sur les minibatches de l'update, et part de ces minibatches ou
         # elle depassait `max_grad_norm`. La norme APRES ecretage n'est pas republiee : elle vaut
         # min(brute, max_grad_norm), donc elle se deduit de ces deux scalaires et de la config.
