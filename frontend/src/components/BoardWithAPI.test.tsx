@@ -145,15 +145,12 @@ const REACTIVE_MOVE_DECISION = {
 };
 
 /** Forme posée par `_check_and_trigger_exhortation_de_rage` (engine/w40k_core.py) : un candidat
- *  par unité ennemie ENGAGÉE, `payload.target_eid` = son id, aucun candidat `declines`. */
+ *  par unité ennemie ENGAGÉE, `label` = son id, aucun candidat `declines`. */
 const MORTAL_WOUNDS_TARGET_DECISION = {
   type: "mortal_wounds_target",
   player: 1,
   unit_id: "1",
-  options: [
-    { label: "2", payload: { target_eid: "2" } },
-    { label: "3", payload: { target_eid: "3" } },
-  ],
+  options: [{ label: "2" }, { label: "3" }],
 };
 
 /** Les deux cibles, pour que le panneau puisse les NOMMER. `makeUnit` (déclaré plus bas, hissé)

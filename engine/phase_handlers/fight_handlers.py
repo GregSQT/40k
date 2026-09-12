@@ -13,7 +13,7 @@ de SHOOTING même si l'unité est adjacente à une unité ennemie (exception au 
 import sys
 import time
 from collections import deque
-from typing import Dict, List, Tuple, Set, Optional, Any, Mapping
+from typing import Dict, List, Tuple, Set, Optional, Any, Mapping, Literal, get_args
 from .generic_handlers import end_activation
 from shared.data_validation import require_key, HAZARD_CONTEXT_HOLD_STILL
 from engine.utils.weapon_helpers import melee_weapons, get_max_melee_damage
@@ -29,10 +29,20 @@ FIGHT_SELECTION_EXHORTATION_KEY = "_fight_selection_exhortation"
 #: Régimes de REPRISE du combat après le jet — trois flux d'activation, trois reprises :
 #: gym (`_continue_squad_fight_after_selection`), manuel PvP (`_fight_v11_manual_state`, le
 #: joueur déclare ses attaques contre les survivants), auto PvE (`_fight_v11_auto_resolve_selected`).
-EXHORTATION_REGIME_GYM = "gym"
-EXHORTATION_REGIME_MANUAL = "manual"
-EXHORTATION_REGIME_AUTO = "auto"
-EXHORTATION_REGIMES = frozenset({EXHORTATION_REGIME_GYM, EXHORTATION_REGIME_MANUAL, EXHORTATION_REGIME_AUTO})
+#: Type littéral : pyright contrôle chaque site qui passe une constante ; la seule valeur qui entre
+#: par les données (`game_state`, relue) passe par `exhortation_regime_of`.
+ExhortationRegime = Literal["gym", "manual", "auto"]
+EXHORTATION_REGIME_GYM: ExhortationRegime = "gym"
+EXHORTATION_REGIME_MANUAL: ExhortationRegime = "manual"
+EXHORTATION_REGIME_AUTO: ExhortationRegime = "auto"
+
+
+def exhortation_regime_of(value: Any, site: str) -> ExhortationRegime:
+    """Relit un régime depuis `game_state` (`_pending_exhortation_*`, armement) — T1 : une valeur
+    hors des trois régimes est une erreur explicite au point d'entrée, pas plus loin."""
+    if value not in get_args(ExhortationRegime):
+        raise ValueError(f"{site}: régime d'Exhortation inconnu {value!r}")
+    return value
 from engine.game_utils import add_console_log, safe_print, enter_phase
 from engine.combat_utils import (
     normalize_coordinates,
@@ -1715,29 +1725,34 @@ def fight_v11_advance_selection(game_state: Dict[str, Any]) -> Optional[str]:
 # Portées en pouces converties via inches_to_subhex.
 
 
+def fight_exhortation_engaged_targets(game_state: Dict[str, Any], unit: Dict[str, Any]) -> List[str]:
+    """Cibles de l'Exhortation of Rage (`mortal_wounds_on_fight_activation`) : les escouades
+    ennemies ENGAGÉES avec l'unité, vide si elle n'a pas la règle ou n'est engagée avec personne
+    (un overrun 12.06 la fait combattre sans cible à la sélection). Prédicat UNIQUE de l'armement
+    (handler) et du jet (`W40KEngine._check_and_trigger_exhortation_de_rage`)."""
+    if not _unit_has_rule(unit, "mortal_wounds_on_fight_activation"):
+        return []
+    return [str(t) for t in _fight_build_valid_target_pool(game_state, unit)]
+
+
 def _fight_v11_arm_selection_exhortation(
-    game_state: Dict[str, Any], uid: str, regime: str
+    game_state: Dict[str, Any], uid: str, regime: ExhortationRegime
 ) -> bool:
     """Arme l'Exhortation of Rage (`mortal_wounds_on_fight_activation`) à la sélection 12.04.
 
     Datasheet (`Datasheets - Space Marines.pdf`, Chaplain with Jump Pack) : « In the Fight phase,
     when this unit is selected to fight, you can select one enemy unit it is engaged with and
-    roll one D6 ». Rien à armer si l'unité n'a pas la règle, si elle n'est engagée avec personne
-    (un overrun 12.06 la fait combattre sans cible à la sélection) ou si son jet a déjà eu lieu
-    cette phase (`fight_exhortation_done` : une ré-activation du même clic ne rejoue pas le dé).
+    roll one D6 ». Rien à armer sans cible (`fight_exhortation_engaged_targets`) ou si son jet a
+    déjà eu lieu cette phase (`fight_exhortation_done` : une ré-activation du même clic ne rejoue
+    pas le dé).
 
     Le jet lui-même appartient au moteur (`W40KEngine._check_and_trigger_exhortation_de_rage`),
     qui lit `FIGHT_SELECTION_EXHORTATION_KEY` au retour du handler. Retourne True si armée.
     """
-    if regime not in EXHORTATION_REGIMES:
-        raise ValueError(f"_fight_v11_arm_selection_exhortation: régime inconnu {regime!r}")
     uid = str(uid)
-    unit = require_unit_by_id(game_state, uid)
-    if not _unit_has_rule(unit, "mortal_wounds_on_fight_activation"):
-        return False
     if uid in require_key(game_state, "fight_exhortation_done"):
         return False
-    if not _fight_build_valid_target_pool(game_state, unit):
+    if not fight_exhortation_engaged_targets(game_state, require_unit_by_id(game_state, uid)):
         return False
     game_state["fight_exhortation_done"].add(uid)
     game_state[FIGHT_SELECTION_EXHORTATION_KEY] = {"squad_id": uid, "regime": regime}
@@ -1745,17 +1760,44 @@ def _fight_v11_arm_selection_exhortation(
     return True
 
 
-def _fight_v11_activation_locked_by_exhortation(game_state: Dict[str, Any], active: Optional[str]) -> bool:
+def _fight_v11_activation_locked_by_exhortation(
+    game_state: Dict[str, Any], active: Optional[str], uid: str
+) -> bool:
     """Flux manuel : une unité dont l'Exhortation a été jouée à l'activation EST sélectionnée
-    (12.04, « selected to fight ») — le joueur ne peut plus lui préférer une autre unité tant
-    qu'elle n'a pas combattu (validate / clic-cible / passe sans cible). Sans ce verrou, le dé
-    serait joué puis l'ordre des combats réarrangé, ce que la règle interdit."""
-    if active is None:
+    (12.04, « selected to fight ») — le joueur ne peut plus lui préférer une autre unité (`uid`)
+    tant qu'elle n'a pas combattu (validate / clic-cible / passe sans cible). Sans ce verrou, le
+    dé serait joué puis l'ordre des combats réarrangé, ce que la règle interdit."""
+    if active is None or uid == active:
         return False
     return (
         active in require_key(game_state, "fight_exhortation_done")
         and active not in require_key(game_state, "units_selected_to_fight")
     )
+
+
+def _fight_v11_manual_activate(
+    game_state: Dict[str, Any], uid: str, active: Optional[str], site: str
+) -> Tuple[bool, Dict[str, Any]]:
+    """`activate_unit` d'un flux manuel (FIGHT 12.04 et New Foes to Face) : refus si une autre
+    unité a joué son Exhortation sans combattre, sinon activation puis armement de l'Exhortation
+    (l'activation EST la sélection — le dé tombe AVANT toute déclaration d'attaque, le joueur
+    déclare contre les survivants).
+
+    Armée : le plateau rendu ici est REMPLACÉ par `W40KEngine._process_fight_phase` (jet puis
+    reprise par `_fight_v11_manual_state`) — un stub suffit, comme dans `_fight_v11_auto_step`,
+    plutôt qu'un état complet calculé pour être jeté."""
+    if _fight_v11_activation_locked_by_exhortation(game_state, active, uid):
+        _fight_v11_log(
+            game_state,
+            f"{site} activate {uid} REFUSÉ : {active} a joué son Exhortation, elle doit combattre",
+        )
+        return _fight_v11_manual_state(game_state)
+    game_state["active_fight_unit"] = uid
+    _fight_v11_log(game_state, f"{site} unit {uid} ACTIVÉE par le joueur")
+    if _fight_v11_arm_selection_exhortation(game_state, uid, EXHORTATION_REGIME_MANUAL):
+        return True, {"action": "fight_selection", "phase": "fight", "unitId": uid,
+                      "fight_subphase": "fight", "waiting_for_player": True}
+    return _fight_v11_manual_state(game_state)
 
 
 def _fight_v11_enemies_within_range(
@@ -2240,6 +2282,14 @@ def _fight_v11_auto_resolve_selected(
         if _ov_plan is not None:
             commit_move(_ov_plan, game_state, "pile_in")
     results, primary_tid = _fight_v11_resolve_attacks(game_state, u, config)
+    return fight_v11_combat_result(uid, results, primary_tid, overrun)
+
+
+def fight_v11_combat_result(
+    uid: str, results: List[Any], primary_tid: Optional[str], overrun: bool
+) -> Dict[str, Any]:
+    """Résultat `combat` d'une activation résolue en AUTO — forme unique, partagée avec la reprise
+    du moteur quand l'attaquant est mort avant ses attaques (`_continue_fight_after_exhortation`)."""
     return {"action": "combat", "phase": "fight", "unitId": uid,
             "fight_subphase": "fight", "all_attack_results": results,
             "targetId": primary_tid,
@@ -4339,15 +4389,7 @@ def _fight_v11_consolidation_new_foes_step(
     # L'adversaire choisit l'ordre : sélection d'un New Foe à faire combattre.
     if atype == "activate_unit":
         if uid is not None and uid in remaining:
-            if _fight_v11_activation_locked_by_exhortation(game_state, active) and uid != active:
-                _fight_v11_log(
-                    game_state,
-                    f"NEW FOE activate {uid} REFUSÉ : {active} a joué son Exhortation, elle doit combattre",
-                )
-                return _fight_v11_manual_state(game_state)
-            game_state["active_fight_unit"] = uid
-            _fight_v11_log(game_state, f"NEW FOE {uid} ACTIVÉ (sélecteur adverse)")
-            _fight_v11_arm_selection_exhortation(game_state, uid, EXHORTATION_REGIME_MANUAL)
+            return _fight_v11_manual_activate(game_state, uid, active, "NEW FOE")
         return _fight_v11_manual_state(game_state)
 
     if active is None or active not in remaining:
@@ -5276,20 +5318,8 @@ def _fight_v11_manual_step(
         # ÉTAPE 1 — le joueur choisit librement une de SES unités éligibles (12.04).
         if atype == "activate_unit":
             if uid is not None and uid in pool:
-                if _fight_v11_activation_locked_by_exhortation(game_state, active) and uid != active:
-                    _fight_v11_log(
-                        game_state,
-                        f"FIGHT activate {uid} REFUSÉ : {active} a joué son Exhortation, elle doit combattre",
-                    )
-                    return _fight_v11_manual_state(game_state)
-                game_state["active_fight_unit"] = uid
-                _fight_v11_log(game_state, f"FIGHT unit {uid} ACTIVÉE par le joueur")
-                # Exhortation of Rage (datasheet Chaplain JP) : « when this unit is selected to
-                # fight » — l'activation EST la sélection, AVANT toute déclaration d'attaque :
-                # le joueur déclare ensuite contre les survivants des blessures mortelles.
-                _fight_v11_arm_selection_exhortation(game_state, uid, EXHORTATION_REGIME_MANUAL)
-            else:
-                _fight_v11_log(game_state, f"FIGHT activate ignoré : {uid} hors pool {pool}")
+                return _fight_v11_manual_activate(game_state, uid, active, "FIGHT")
+            _fight_v11_log(game_state, f"FIGHT activate ignoré : {uid} hors pool {pool}")
             return _fight_v11_manual_state(game_state)
 
         # ÉTAPE 2 (flux manuel par arme/figurine, calque du tir) — declarations

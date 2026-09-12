@@ -338,10 +338,7 @@ export type PendingAgentDecision = {
    *  valeur en points et l'effectif détruit du profil : « Warboss » seul ne dit pas au joueur s'il
    *  récupère 85 points ou 8. Optionnel — la plupart des décisions n'ont rien à y mettre, et c'est
    *  l'INDEX du candidat qui est joué, jamais son contenu. */
-  options: Array<{
-    label: string;
-    payload?: { value?: number; count?: number; target_eid?: string };
-  }>;
+  options: Array<{ label: string; payload?: { value?: number; count?: number } }>;
 };
 
 /** Cache dernier payload ``move_preview_footprint_mask_loops`` + hash pour omission JSON (POST /action). */

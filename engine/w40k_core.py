@@ -40,9 +40,12 @@ from engine.phase_handlers.fight_handlers import (
     EXHORTATION_REGIME_AUTO,
     EXHORTATION_REGIME_GYM,
     EXHORTATION_REGIME_MANUAL,
-    EXHORTATION_REGIMES,
     FIGHT_CTX,
     FIGHT_SELECTION_EXHORTATION_KEY,
+    ExhortationRegime,
+    exhortation_regime_of,
+    fight_exhortation_engaged_targets,
+    fight_v11_combat_result,
 )
 
 # units_cache helpers (single source of truth for position/HP of living units)
@@ -4699,7 +4702,9 @@ class W40KEngine(gym.Env):
             # Le D6 se lance MAINTENANT, cible connue : « select one enemy unit … and roll one D6 ».
             return self._apply_exhortation_de_rage(
                 exhort_squad_id, target_eid, target_slot_stored,
-                regime=str(require_key(pending_exhort, "regime")),
+                regime=exhortation_regime_of(
+                    require_key(pending_exhort, "regime"), "agent_decision mortal_wounds_target"
+                ),
             )
 
         if decision_type != "rule_choice":
@@ -5053,7 +5058,8 @@ class W40KEngine(gym.Env):
         avec une unité sélectionnée dont le dé n'a pas été joué. Le gym n'en a pas besoin : son
         masque est exclusif. Refus INERTE, même forme que `faction_decision_pending`.
         """
-        if self.game_state.get("_pending_exhortation_fight") is None:  # get allowed : absence = rien en attente
+        decision = read_pending_agent_decision(self.game_state)
+        if decision is None or str(require_key(decision, "type")) != "mortal_wounds_target":
             return None
         return False, {
             "error": "mortal_wounds_target_pending",
@@ -5536,7 +5542,9 @@ class W40KEngine(gym.Env):
             return self._continue_fight_after_exhortation(
                 str(require_key(pending_exhort, "squad_id")),
                 pending_exhort.get("target_slot"),  # get allowed : None = combat a vide
-                regime=str(require_key(pending_exhort, "regime")),
+                regime=exhortation_regime_of(
+                    require_key(pending_exhort, "regime"), "_resume_after_hazard"
+                ),
             )
         if hazard_origin in ("shoot", "fight"):
             return True, {
@@ -6701,8 +6709,7 @@ class W40KEngine(gym.Env):
 
     def _apply_exhortation_de_rage(
         self, squad_id: str, target_eid: str,
-        target_slot: Optional[int], auto: bool = False,
-        *, regime: str,
+        target_slot: Optional[int], *, regime: ExhortationRegime, auto: bool = False,
     ) -> Tuple[bool, Dict[str, Any]]:
         """Jet D6 d'Exhortation of Rage sur la cible DEJA choisie, puis reprise du combat.
 
@@ -6711,8 +6718,9 @@ class W40KEngine(gym.Env):
         déclare ses attaques) ou auto PvE (résolution automatique) — cf.
         `_continue_fight_after_exhortation`. Sans défaut : la reprise manuelle ou auto peut
         survenir dans une requête ultérieure, et un appelant qui hériterait du régime gym en
-        silence rendrait la main sur le mauvais dispatcher. Validé à l'entrée
-        (`_check_and_trigger_exhortation_de_rage`) ; ici il est relu d'un état posé après.
+        silence rendrait la main sur le mauvais dispatcher ; la valeur relue d'un état posé
+        passe par `exhortation_regime_of`. `auto` : la cible n'est pas venue d'un choix de
+        joueur (cible unique, ou sélecteur du siège machine) — suffixe du Game Log seulement.
 
         Datasheet (`Datasheets - Space Marines.pdf`, Chaplain with Jump Pack) : « you can select
         one enemy unit it is engaged with and roll one D6, and on a result of: 4-5: That enemy
@@ -6741,7 +6749,7 @@ class W40KEngine(gym.Env):
             d3 = random.randint(1, 3)
             mw_count = d3
         _exhort_details: List[Dict[str, Any]] = []
-        suffix = " [auto: cible unique]" if auto else ""
+        suffix = " [auto: sans choix de joueur]" if auto else ""
         # MEME type et MEME forme de ligne que Hold Still (`_apply_batch_mortal_wounds`) : deux
         # capacites qui infligent des blessures mortelles (06.02) ne peuvent pas se journaliser
         # differemment. Le type `exhortation_de_rage` qui vivait ici n'etait dans aucune entree
@@ -6813,7 +6821,7 @@ class W40KEngine(gym.Env):
         return self._continue_fight_after_exhortation(squad_id, target_slot, regime=regime)
 
     def _continue_fight_after_exhortation(
-        self, squad_id: str, target_slot: Optional[int], *, regime: str
+        self, squad_id: str, target_slot: Optional[int], *, regime: ExhortationRegime
     ) -> Tuple[bool, Dict[str, Any]]:
         """Reprise du combat de l attaquant une fois les blessures mortelles d Exhortation
         attribuees — tout de suite (regime AUTO, figurines forcees) ou apres le dernier clic du
@@ -6830,34 +6838,33 @@ class W40KEngine(gym.Env):
         from engine.phase_handlers.fight_handlers import (
             _fight_v11_auto_resolve_selected, _fight_v11_manual_state,
         )
-        units_cache = require_key(self.game_state, "units_cache")
         if regime == EXHORTATION_REGIME_MANUAL:
             # Attaquant tué par la cascade (24.08) : plus dans le pool, `_fight_v11_manual_state`
             # rend la main sur le choix d'une autre unité.
             return _fight_v11_manual_state(self.game_state)
         # §24.08 Deadly Demise : la cascade peut tuer l'attaquant lui-même (engagé à ≤6").
         # Si squad_id a disparu de units_cache, son combat ne peut pas se poursuivre.
-        if squad_id not in units_cache:
-            if regime == EXHORTATION_REGIME_AUTO:
-                return True, {"action": "combat", "phase": "fight", "unitId": squad_id,
-                              "fight_subphase": "fight", "all_attack_results": [],
-                              "targetId": None, "fight_type": "normal",
-                              "waiting_for_player": False}
-            self._fight_v11_gym_settle()
-            return True, {
-                "action": "squad_fight",
-                "unitId": squad_id,
-                "squad_id": squad_id,
-                "target_squad_id": None,
-                "fight_result": {"targets_meta": {}, "events": [], "squads_wiped": []},
-            }
+        attacker_alive = squad_id in require_key(self.game_state, "units_cache")
         if regime == EXHORTATION_REGIME_AUTO:
+            if not attacker_alive:
+                return True, fight_v11_combat_result(squad_id, [], None, overrun=False)
             return True, _fight_v11_auto_resolve_selected(self.game_state, squad_id, self.config)
-        return self._continue_squad_fight_after_selection(squad_id, target_slot, skip_pool_check=True)
+        if regime == EXHORTATION_REGIME_GYM:
+            if not attacker_alive:
+                self._fight_v11_gym_settle()
+                return True, {
+                    "action": "squad_fight",
+                    "unitId": squad_id,
+                    "squad_id": squad_id,
+                    "target_squad_id": None,
+                    "fight_result": {"targets_meta": {}, "events": [], "squads_wiped": []},
+                }
+            return self._continue_squad_fight_after_selection(squad_id, target_slot, skip_pool_check=True)
+        raise ValueError(f"_continue_fight_after_exhortation: régime inconnu {regime!r}")
 
     def _check_and_trigger_exhortation_de_rage(
         self, squad_id: str, unit: Dict[str, Any], target_slot: Optional[int],
-        *, regime: str,
+        *, regime: ExhortationRegime,
     ) -> Optional[Tuple[bool, Dict[str, Any]]]:
         """Vérifie et déclenche l'Exhortation de Rage (mortal_wounds_on_fight_activation).
 
@@ -6872,19 +6879,18 @@ class W40KEngine(gym.Env):
         joueur, cible de mêlée comprise (`_fight_v11_resolve_attacks`) : la cible des blessures
         mortelles y suit le même sélecteur (`_ai_select_fight_target`), jamais une décision que
         personne ne répondrait pour une unité résolue hors politique.
+
+        Siège sans canal de réponse — régime auto, OU siège IA hors gym en régime gym (Chaplain
+        du bot en PvE : `_fight_v11_register_selection` a déjà passé la main à l'humain, donc
+        `execute_ai_turn` refuserait `not_ai_player_turn` et personne ne répondrait) : la cible
+        est tranchée ICI par le sélecteur du siège machine, sans décision posée, comme les choix
+        de faction de `_resolve_faction_decisions_for_ai_seats` (heuristique, pas relevée).
         """
-        from engine.phase_handlers.fight_handlers import (
-            _unit_has_rule, _fight_build_valid_target_pool, _ai_select_fight_target,
-            _fight_v11_manual_state,
-        )
+        from engine.phase_handlers.fight_handlers import _ai_select_fight_target, _fight_v11_manual_state
         from engine.observation_entities import (
             MAX_DECISION_OPTIONS, decision_option_cont_row,
         )
-        if regime not in EXHORTATION_REGIMES:
-            raise ValueError(f"_check_and_trigger_exhortation_de_rage: régime inconnu {regime!r}")
-        if not _unit_has_rule(unit, "mortal_wounds_on_fight_activation"):
-            return None
-        engaged = [str(t) for t in _fight_build_valid_target_pool(self.game_state, unit)]
+        engaged = fight_exhortation_engaged_targets(self.game_state, unit)
         if not engaged:
             return None
         if len(engaged) == 1:
@@ -6892,7 +6898,10 @@ class W40KEngine(gym.Env):
             return self._apply_exhortation_de_rage(
                 squad_id, engaged[0], target_slot, auto=True, regime=regime
             )
-        if regime == EXHORTATION_REGIME_AUTO:
+        player = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
+        if regime == EXHORTATION_REGIME_AUTO or (
+            not self.gym_training_mode and not self._is_player_human(player)
+        ):
             return self._apply_exhortation_de_rage(
                 squad_id, _ai_select_fight_target(self.game_state, squad_id, engaged),
                 target_slot, auto=True, regime=regime,
@@ -6902,7 +6911,6 @@ class W40KEngine(gym.Env):
             "target_slot": target_slot,
             "regime": regime,
         }
-        player = int(require_key(require_key(self.game_state, "units_cache")[squad_id], "player"))
         _offered = engaged[:MAX_DECISION_OPTIONS]
         options = [
             {"label": eid, "effect_ids": (), "declines": False, "payload": {"target_eid": eid}}
@@ -6944,19 +6952,6 @@ class W40KEngine(gym.Env):
                 "waiting_for_agent_decision": True,
                 "decision_type": "mortal_wounds_target",
             }
-        if not self.gym_training_mode and not self._is_player_human(player):
-            # Siège IA HORS gym (PvE) : personne ne répondrait. `_fight_v11_register_selection` a
-            # déjà passé la main à l'adversaire, donc `execute_ai_turn` refuse (`not_ai_player_turn`,
-            # pool du joueur humain) et le front ne relance pas le bot ; la décision resterait
-            # posée, le combat du Chaplain perdu, et toute action humaine refusée par
-            # `_reject_action_while_exhortation_pending`. Même règle que le mouvement réactif
-            # (`_resolve_reactive_move_decision_for_ai_seats`) : tranchée ICI, immédiatement, par
-            # le MÊME chemin que la réponse humaine ou agent, avec le sélecteur de cible que le
-            # régime auto applique déjà à ce siège.
-            chosen = _ai_select_fight_target(self.game_state, squad_id, _offered)
-            return self._handle_agent_decision_action(
-                {"action": "agent_decision", "option_index": _offered.index(chosen)}
-            )
         return True, {
             "action": "squad_fight",
             "squad_id": squad_id,
@@ -9603,7 +9598,7 @@ class W40KEngine(gym.Env):
             armed_squad_id,
             require_unit_by_id(self.game_state, armed_squad_id),
             None,
-            regime=str(require_key(armed, "regime")),
+            regime=exhortation_regime_of(require_key(armed, "regime"), "_process_fight_phase"),
         )
         if exhort is None:
             raise RuntimeError(

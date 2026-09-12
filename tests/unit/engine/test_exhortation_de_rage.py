@@ -112,7 +112,7 @@ def test_sans_regle_retourne_none(monkeypatch):
     """ROUGE sans le fix : le code plante ou retourne un résultat inattendu."""
     monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY"])
     engine = _FakeEngine(_gs())
-    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_without_rule(), None, regime=wcore.EXHORTATION_REGIME_GYM)
+    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_without_rule(), None, regime=fh.EXHORTATION_REGIME_GYM)
     assert result is None, f"attendu None sans règle, got {result}"
 
 
@@ -124,7 +124,7 @@ def test_pas_d_ennemis_engages_retourne_none(monkeypatch):
     """ROUGE sans le fix : IndexError ou résultat inattendu sur liste vide."""
     monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: [])
     engine = _FakeEngine(_gs())
-    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None, regime=wcore.EXHORTATION_REGIME_GYM)
+    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None, regime=fh.EXHORTATION_REGIME_GYM)
     assert result is None, f"attendu None sans ennemis engagés, got {result}"
 
 
@@ -149,7 +149,7 @@ def test_deux_cibles_posent_la_decision_sans_aucun_jet(monkeypatch):
         lambda gs, **kw: decisions_posed.append(kw),
     )
     engine = _FakeEngine(_gs())
-    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None, regime=wcore.EXHORTATION_REGIME_GYM)
+    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None, regime=fh.EXHORTATION_REGIME_GYM)
 
     assert result is not None, "deux cibles engagées : la décision doit être posée"
     ok, payload = result
@@ -202,7 +202,7 @@ def _apply_with_rolls(monkeypatch, rolls, *, target="ONLY_ENEMY"):
             continue_called.append(squad_id) or (True, {"action": "squad_fight", "squad_id": squad_id})
         )
     )
-    result = engine._apply_exhortation_de_rage("CHAP", target, None, auto=True, regime=wcore.EXHORTATION_REGIME_GYM)
+    result = engine._apply_exhortation_de_rage("CHAP", target, None, auto=True, regime=fh.EXHORTATION_REGIME_GYM)
     logs = [e for e in engine.game_state["action_logs"] if e["type"] == "mortal_wounds_ability"]
     assert len(logs) == 1, f"une ligne par jet, got {len(logs)}"
     return result, logs[0], mw_applied, continue_called
@@ -301,7 +301,7 @@ def test_single_target_auto_applique_sans_decision(monkeypatch):
     engine._continue_squad_fight_after_selection = (
         lambda squad_id, target_slot, **_kw: _fake_continue(engine, squad_id, target_slot)
     )
-    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None, regime=wcore.EXHORTATION_REGIME_GYM)
+    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None, regime=fh.EXHORTATION_REGIME_GYM)
 
     assert len(decisions_posed) == 0, "cible unique : aucune décision ne doit être posée"
     assert len(mw_applied) == 1, "les BM doivent être appliquées"
@@ -342,7 +342,7 @@ def test_attaquant_detruit_par_deadly_demise_pas_de_crash(monkeypatch):
     monkeypatch.setattr(random, "randint", lambda a, b: next(rolls))
     monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY"])
 
-    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None, regime=wcore.EXHORTATION_REGIME_GYM)
+    result = engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None, regime=fh.EXHORTATION_REGIME_GYM)
 
     assert result is not None, "doit retourner un résultat, pas None"
     ok, payload = result
@@ -370,7 +370,7 @@ def test_candidats_mw_portent_des_traits_distincts(monkeypatch):
     monkeypatch.setattr(fh, "_fight_build_valid_target_pool", lambda gs, u: ["ENEMY1", "ENEMY2"])
     monkeypatch.setattr(wcore, "set_pending_agent_decision", lambda gs, **kw: posed.append(kw))
     engine = _FakeEngine(_gs())
-    engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None, regime=wcore.EXHORTATION_REGIME_GYM)
+    engine._check_and_trigger_exhortation_de_rage("CHAP", _unit_with_rule(), None, regime=fh.EXHORTATION_REGIME_GYM)
 
     cont = posed[0].get("options_cont")
     assert cont is not None, "les candidats MW doivent porter des traits continus"
@@ -385,3 +385,17 @@ def test_candidats_mw_portent_des_traits_distincts(monkeypatch):
     # VALUE vivante : 20 pour ENEMY1, 30 pour ENEMY2 -> la plus chère vaut 1.0.
     assert cont[0][val_i] == pytest.approx(20.0 / 30.0)
     assert cont[1][val_i] == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------------------------
+# Régime relu depuis `game_state` (armement, `_pending_exhortation_*`) : T1 au point d'entrée —
+# une valeur hors des trois régimes est une erreur explicite, jamais une reprise gym par défaut.
+# ---------------------------------------------------------------------------
+
+def test_regime_relu_hors_des_trois_valeurs_est_une_erreur():
+    for value in ("gym", "manual", "auto"):
+        assert fh.exhortation_regime_of(value, "site") == value
+    with pytest.raises(ValueError, match="site: régime d'Exhortation inconnu 'pvp'"):
+        fh.exhortation_regime_of("pvp", "site")
+    with pytest.raises(ValueError):
+        fh.exhortation_regime_of(None, "site")

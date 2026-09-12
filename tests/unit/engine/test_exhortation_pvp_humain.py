@@ -31,6 +31,7 @@ from engine.phase_handlers.fight_handlers import (
     fight_v11_enter_fight_step,
     fight_v11_start,
 )
+from engine.game_utils import require_unit_by_id
 from engine.w40k_core import W40KEngine
 from tests.unit.engine._config_helpers import (
     _fall_back_base_config as _base_config,
@@ -277,7 +278,9 @@ def test_pve_siege_ia_la_decision_est_tranchee_sur_le_champ(monkeypatch):
         or (True, {"action": "squad_fight", "squad_id": squad_id})
     )
 
-    result = eng._check_and_trigger_exhortation_de_rage("5", eng._get_unit_by_id("5"), 1, regime=EXHORTATION_REGIME_GYM)
+    result = eng._check_and_trigger_exhortation_de_rage(
+        "5", require_unit_by_id(gs, "5"), 1, regime=EXHORTATION_REGIME_GYM
+    )
     assert result is not None
     ok, out = result
     assert ok is True, out
