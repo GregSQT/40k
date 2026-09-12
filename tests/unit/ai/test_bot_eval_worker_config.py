@@ -43,12 +43,28 @@ CALLBACK_SCOPED_KEYS = (
 
 
 def _phase_sections() -> Iterator[Tuple[str, str, Dict[str, Any]]]:
-    """(nom de fichier, nom de phase, section) pour toutes les configs d'entrainement."""
+    """(nom de fichier, nom de phase, section RESOLUE) pour toutes les configs d'entrainement.
+
+    Resolue par le loader de production : un profil qui herite (`extends`) ne redeclare qu'une
+    partie de `callback_params`, et le brut le faisait passer pour une section ou les cles
+    manquent (`x1_40k` de ArmageddonAgent_x1_entnorm ne surcharge que `bot_eval_intermediate`).
+    Le placement, lui, reste verifie : une cle ecrite au niveau superieur y resterait apres
+    resolution.
+    """
+    from config_loader import get_config_loader
+
+    loader = get_config_loader()
     for path in sorted(AGENTS_DIR.glob("*/*_training_config.json")):
+        agent = path.parent.name
+        if path.name != f"{agent}_training_config.json":
+            continue  # sauvegardes (BEST_*, *_save_avant_*) : chargees par aucun chemin
         raw = json.loads(path.read_text(encoding="utf-8-sig"))
         for phase, section in raw.items():
-            if isinstance(section, dict) and "callback_params" in section:
-                yield path.name, phase, section
+            if not isinstance(section, dict) or str(phase).startswith("_"):
+                continue
+            resolved = loader.load_agent_training_config(agent, phase)
+            if "callback_params" in resolved:
+                yield path.name, phase, resolved
 
 
 def test_phase_sections_exist() -> None:
