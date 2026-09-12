@@ -21,6 +21,7 @@ l'autre : un ralentissement observe ne prouve alors rien. Les compteurs, eux, di
 USAGE — comparaison A/B
 -----------------------
     python3 scripts/refactor_fingerprint.py                 # etat courant
+    python3 scripts/refactor_fingerprint.py --board board/44x60x5 --gym-metric euclidean
     git stash push <fichiers modifies>
     python3 scripts/refactor_fingerprint.py                 # etat de reference
     git stash pop
@@ -68,9 +69,13 @@ import json
 import os
 import random
 import sys
+from typing import Optional
 
 # Resolution du plateau AVANT tout import moteur : elle conditionne la geometrie (cf.
 # `geometry_is_hex`). La poser apres laisserait le config-loader memoiser l'autre plateau.
+# La valeur venue du SHELL est retenue avant le defaut : `--board` doit pouvoir la contredire
+# explicitement (erreur) plutot que la recouvrir en silence.
+_BOARD_FROM_SHELL = os.environ.get("W40K_BOARD_PATH")
 os.environ.setdefault("W40K_BOARD_PATH", "board/44x60x1")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -124,13 +129,36 @@ def _install_work_counters() -> dict:
     return counters
 
 
-def _build_env(agent: str, training_config: str):
+def _impose_gym_metric(gym_metric: str) -> None:
+    """Impose `gym_distance_metric` au training config EN MEMOIRE, pour ce processus seulement.
+
+    Aucun profil ne porte la cle (`config/agents/*/…_training_config.json`) et aucun JSON n'est
+    ecrit : le loader est decore, comme `ai/train.py::_pin_deployment_ramp_for_warm_start` le
+    fait pour la rampe de deploiement. Ce banc est MONO-PROCESSUS, donc la reserve documentee
+    dans `W40KEngine.__init__` (un worker forkserver rappelle le loader NON decore) ne s'applique
+    pas : le moteur est construit ici, par ce loader-ci. La valeur n'est pas validee ici — c'est
+    `gym_distance_metric_override` (`engine/combat_utils.py`) qui la refuse, source unique.
+    """
+    from config_loader import ConfigLoader
+    from engine.combat_utils import GYM_DISTANCE_METRIC_KEY
+
+    _load = ConfigLoader.load_agent_training_config
+
+    def _with_metric(self, agent_key, phase=None):
+        return {**_load(self, agent_key, phase), GYM_DISTANCE_METRIC_KEY: gym_metric}
+
+    ConfigLoader.load_agent_training_config = _with_metric
+
+
+def _build_env(agent: str, training_config: str, gym_metric: Optional[str] = None):
     """Un environnement identique a un worker d'entrainement (memes bots, memes scenarios)."""
     from ai.training_utils import make_training_env
     from ai.unit_registry import UnitRegistry
     import ai.train as train
     from config_loader import get_config_loader
 
+    if gym_metric is not None:
+        _impose_gym_metric(gym_metric)
     config = get_config_loader()
     cfg = config.load_agent_training_config(agent, training_config)
     scenarios = train.get_scenario_list_for_phase(config, agent, training_config, scenario_type="bot")
@@ -229,10 +257,27 @@ def main() -> int:
     parser.add_argument("--training-config", default="x1_debug")
     parser.add_argument("--episodes", type=int, default=8)
     parser.add_argument("--seed-base", type=int, default=1000)
+    parser.add_argument(
+        "--board", default=None,
+        help="plateau mesure (ex. board/44x60x5) ; pose W40K_BOARD_PATH pour ce processus seulement",
+    )
+    parser.add_argument(
+        "--gym-metric", default=None,
+        help="impose gym_distance_metric (hex|euclidean) au training config EN MEMOIRE, jamais dans un JSON",
+    )
     args = parser.parse_args()
 
+    # Avant tout import moteur (cf. en-tete) : `_install_work_counters` importe le moteur.
+    if args.board is not None:
+        if _BOARD_FROM_SHELL is not None and _BOARD_FROM_SHELL != args.board:
+            raise SystemExit(
+                f"--board {args.board} contredit W40K_BOARD_PATH={_BOARD_FROM_SHELL} du shell : "
+                "un seul des deux doit designer le plateau (unset la variable, ou retirer --board)."
+            )
+        os.environ["W40K_BOARD_PATH"] = args.board
+
     counters = _install_work_counters()
-    env = _build_env(args.agent, args.training_config)
+    env = _build_env(args.agent, args.training_config, args.gym_metric)
     fingerprint = _play(env, args.episodes, args.seed_base, counters)
 
     # VACUITE : un compteur a zero ne veut pas dire « aucun travail », il veut dire que
@@ -250,7 +295,8 @@ def main() -> int:
     print(f"WORK        {json.dumps(counters, sort_keys=True)}")
     print(
         f"(agent={args.agent} config={args.training_config} "
-        f"episodes={args.episodes} seed_base={args.seed_base} board={os.environ['W40K_BOARD_PATH']})"
+        f"episodes={args.episodes} seed_base={args.seed_base} board={os.environ['W40K_BOARD_PATH']} "
+        f"gym_metric={args.gym_metric})"
     )
     return 0
 

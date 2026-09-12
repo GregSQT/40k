@@ -5619,31 +5619,94 @@ def ascent_field_for_model(
     from engine.phase_handlers.movement_handlers import _model_multilevel_reachable_field
 
     budget = int(budget)
-    fields = _move_spatial_cache(game_state)["climb"]
+    start_level = int(require_key(model, "level"))
+    _spatial = _move_spatial_cache(game_state)
+    fields = _spatial["climb"]
     # Cle par ORIGINE + GEOMETRIE + niveaux, jamais par identite de figurine : le champ ne depend
     # que de cela, et `models_cache` ne porte pas d'`id` (l'identifiant est la CLE du dict, pas un
     # champ de l'entree). Deux figurines de meme socle partant de la meme case partagent donc leur
     # champ — c'est le cas courant d'une escouade homogene.
     fkey = (
         str(squad_id), int(player),
-        int(model["col"]), int(model["row"]), int(require_key(model, "level")),
+        int(model["col"]), int(model["row"]), start_level,
         move_geom_key(model), int(level),
     )
     cached = fields.get(fkey)  # get allowed (figurine pas encore interrogee)
     if cached is not None and cached[0] >= budget:
         return cached[1]
     unit = require_unit_by_id(game_state, str(squad_id))
+    start = (int(model["col"]), int(model["row"]))
+    # PASSE DE NIVEAU 0 DEJA PAYEE. En metrique euclidienne, l'erosion construit le champ de
+    # plain-pied de la figurine (`_euclidean_move_field_for_model`, memoise sous `eucl`) AVANT
+    # son champ de montee ; or la premiere passe du champ multi-niveaux, depuis le sol, est
+    # exactement ce Dijkstra : memes obstacles (`build_move_transit_blocked` niveau 0, case de
+    # depart retiree), meme socle, meme budget — `geodesic_field` et
+    # `geodesic_field_multi_source` rendent le meme champ pour une source unique (verrou
+    # `test_ascent_field_reuses_euclidean_field.py`). Il est donc injecte en
+    # `precomputed_start_field`, et SEULEMENT s'il est deja en cache : le calculer ici court-
+    # circuiterait le pre-check de portee de `_model_multilevel_reachable_field`, qui rend un
+    # champ vide sans aucun Dijkstra aux figurines loin de tout etage. Mesure (1 episode x5
+    # euclidien, `refactor_fingerprint.py`) : champ en cache pour 93 appels sur 93, passe de
+    # niveau 0 = 9,4 % du temps de l'episode. Depart en hauteur : le champ de plain-pied ne
+    # decrit pas ce trajet (descente facturee), pas de reutilisation. Vol declare : jamais ici
+    # (cf. HORS VOL DECLARE ci-dessus), et le champ `eucl` d'une unite qui vole n'a pas
+    # d'obstacle — il ne serait pas substituable.
+    _ground_field = None
+    if start_level == 0 and move_plan_distance_mode(game_state, str(squad_id)) == "euclidean":
+        _ground_field = _spatial["eucl"].get(  # get allowed (lecture sans calcul : absent = passe calculee)
+            _euclidean_move_field_cache_key(str(squad_id), int(player), start, 0, budget, model)
+        )
     # Obstacles de SOL = la definition PARTAGEE du trajet legal, la meme que celle du champ
-    # geodesique de plain-pied : les deux doivent contourner exactement les memes cases.
+    # geodesique de plain-pied : les deux doivent contourner exactement les memes cases. La case
+    # de DEPART en est retiree comme partout ailleurs (`_euclidean_move_field_for_model`, pool
+    # par-figurine) : le Dijkstra multi-source IGNORE une source qui est un obstacle, donc une
+    # figurine dont la case est dans la bande d'engagement ennemie (bande infranchissable par
+    # config) n'avait aucun champ de montee alors que son champ de plain-pied sortait de sa case.
     _pairs, _bm = move_transit_blocked_forms(game_state, str(squad_id), int(player), 0)
+    _ground = set(_pairs)
+    _ground.discard(start)
     field = _model_multilevel_reachable_field(
         game_state, unit, str(squad_id), model,
-        (int(model["col"]), int(model["row"])), budget, {int(level)},
-        set(_pairs), game_state.get("terrain_areas", []),  # get allowed (scenario sans terrain)
-        start_level=int(require_key(model, "level")),
+        start, budget, {int(level)},
+        _ground, game_state.get("terrain_areas", []),  # get allowed (scenario sans terrain)
+        start_level=start_level,
+        precomputed_start_field=_ground_field,
     ).get(int(level), {})  # get allowed (niveau inatteignable = aucune case)
     fields[fkey] = (budget, field)
     return field
+
+
+def _euclidean_move_field_cache_key(
+    squad_id: str,
+    player: int,
+    start: Tuple[int, int],
+    level: int,
+    bound: int,
+    model: Dict[str, Any],
+) -> Tuple[Any, ...]:
+    """Cle du champ euclidien par-figurine dans `_move_spatial_cache(...)["eucl"]` — UN constructeur.
+
+    Deux lecteurs : `_euclidean_move_field_for_model`, qui ecrit le champ sous cette cle, et
+    `ascent_field_for_model`, qui le RELIT sans jamais le calculer. Deux epellations de la cle
+    feraient rater la relecture en silence (aucune erreur, juste le Dijkstra de niveau 0 refait).
+
+    Un socle ROND n'a pas d'empreinte orientee : `_euclidean_move_field` le traite en clairance
+    continue et JETTE les offsets (cf. sa docstring). Garder l'orientation dans la cle ferait
+    reconstruire un Dijkstra any-angle complet — des centaines de ms sur un budget de move — a
+    chaque cran de pivot molette, pour un champ bit a bit identique. Meme idiome que le pool
+    (`movement_build_model_destinations_pool`), qui saute deja `precompute_footprint_offsets`.
+    Socle oval -> BASE_SIZE est une liste, donc non hachable : `base_size_cache_key` est la
+    source unique de cette normalisation (cf. sa docstring).
+    """
+    from engine.hex_utils import base_size_cache_key
+
+    base_shape = str(require_key(model, "BASE_SHAPE"))
+    orientation = 0 if base_shape == "round" else int(model.get("orientation", 0))  # get allowed (defaut face nord, cf. pool)
+    return (
+        str(squad_id), int(player), start, int(level), int(bound), base_shape,
+        base_size_cache_key(require_key(model, "BASE_SIZE")),
+        orientation,
+    )
 
 
 def _euclidean_move_field_for_model(
@@ -5667,7 +5730,7 @@ def _euclidean_move_field_for_model(
     redonne exactement la ligne droite — pas besoin d'un cas particulier.
     """
     from engine.hex_utils import (
-        ENGAGEMENT_NORM_HEX_WIDTH, base_size_cache_key, precompute_footprint_offsets,
+        ENGAGEMENT_NORM_HEX_WIDTH, precompute_footprint_offsets,
     )
     from engine.phase_handlers.geodesic_move import _euclidean_move_field
     from engine.phase_handlers.movement_handlers import _fly_traversal_active
@@ -5678,25 +5741,17 @@ def _euclidean_move_field_for_model(
     # chaque construction d'observation en phase de charge — reconstruisait un Dijkstra any-angle
     # par figurine et par appel. Meme fingerprint d'etat, donc meme fraicheur.
     _cache = _move_spatial_cache(game_state)["eucl"]
-    base_shape = str(require_key(model, "BASE_SHAPE"))
-    base_size = require_key(model, "BASE_SIZE")
-    # Un socle ROND n'a pas d'empreinte orientee : `_euclidean_move_field` le traite en clairance
-    # continue et JETTE les offsets (cf. sa docstring). Garder l'orientation dans la cle ferait
-    # reconstruire un Dijkstra any-angle complet — des centaines de ms sur un budget de move — a
-    # chaque cran de pivot molette, pour un champ bit a bit identique. Meme idiome que le pool
-    # (`movement_build_model_destinations_pool`), qui saute deja `precompute_footprint_offsets`.
-    _is_round = base_shape == "round"
-    orientation = 0 if _is_round else int(model.get("orientation", 0))  # get allowed (defaut face nord, cf. pool)
-    _ckey = (
-        str(squad_id), int(player), start, int(level), int(bound), base_shape,
-        # Socle oval -> BASE_SIZE est une liste, donc non hachable : `base_size_cache_key` est la
-        # source unique de cette normalisation (cf. sa docstring).
-        base_size_cache_key(base_size),
-        orientation,
+    _ckey = _euclidean_move_field_cache_key(
+        str(squad_id), int(player), start, int(level), int(bound), model
     )
     _hit = _cache.get(_ckey)
     if _hit is not None:
         return _hit
+    base_shape = str(require_key(model, "BASE_SHAPE"))
+    base_size = require_key(model, "BASE_SIZE")
+    _is_round = base_shape == "round"
+    # L'orientation est celle de la CLE (rond = 0), jamais relue ici : une seule regle.
+    orientation = int(_ckey[-1])
     unit = get_unit_by_id(game_state, str(squad_id))
     obstacles: Set[Tuple[int, int]] = set()
     if not (unit is not None and _fly_traversal_active(game_state, unit, str(squad_id))):
