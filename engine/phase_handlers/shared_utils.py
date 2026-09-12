@@ -2458,44 +2458,68 @@ def _get_source_unit_rule_display_name_for_effect(unit: Dict[str, Any], effect_r
     raise KeyError(f"Rule '{source_rule_id}' missing from UNIT_RULES for unit {require_key(unit, 'id')}")
 
 
-_unit_rules_registry_cache: Optional[Dict[str, Dict[str, Any]]] = None
+# (registre, table rule_id -> id technique). Un seul objet : remettre le cache a None
+# invalide les deux d'un coup, la table ne peut pas survivre a un registre rechargé.
+_unit_rules_registry_cache: Optional[Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]] = None
 
 
-def _get_unit_rules_registry() -> Dict[str, Dict[str, Any]]:
-    """Load and cache rule registry from config/unit_rules.json."""
+def _build_unit_rules_technical_ids(registry: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
+    """Résoudre une fois chaque rule id vers son id technique en suivant la chaîne d'alias.
+
+    Lève ValueError sur un alias invalide ou cyclique, KeyError sur un alias vers un id absent.
+    """
+    technical_ids: Dict[str, str] = {}
+    for rule_id in registry:
+        visited: Set[str] = set()
+        current_rule_id = rule_id
+        while True:
+            if current_rule_id in visited:
+                raise ValueError(f"Rule alias cycle detected while resolving '{rule_id}'")
+            visited.add(current_rule_id)
+            rule_config = registry.get(current_rule_id)
+            if rule_config is None:
+                raise KeyError(
+                    f"Rule '{rule_id}' aliases unknown rule id '{current_rule_id}' in config/unit_rules.json"
+                )
+            alias_value = rule_config.get("alias")
+            if alias_value is None:
+                break
+            if not isinstance(alias_value, str) or not alias_value.strip():
+                raise ValueError(
+                    f"Rule '{current_rule_id}' has invalid alias in config/unit_rules.json: {alias_value!r}"
+                )
+            current_rule_id = alias_value.strip()
+        technical_ids[rule_id] = current_rule_id
+    return technical_ids
+
+
+def _get_unit_rules_caches() -> Tuple[Dict[str, Dict[str, Any]], Dict[str, str]]:
+    """Load once config/unit_rules.json and its rule_id -> technical id table."""
     global _unit_rules_registry_cache
     if _unit_rules_registry_cache is not None:
         return _unit_rules_registry_cache
     from config_loader import get_config_loader
     registry = get_config_loader().load_unit_rules_config()
-    _unit_rules_registry_cache = registry
-    return registry
+    _unit_rules_registry_cache = (registry, _build_unit_rules_technical_ids(registry))
+    return _unit_rules_registry_cache
 
 
-def _resolve_effect_rule_id_to_technical(rule_id: str, visited: Optional[Set[str]] = None) -> str:
-    """Resolve a rule id to technical effect id by following optional alias chain."""
-    if not isinstance(rule_id, str) or not rule_id.strip():
+def _get_unit_rules_registry() -> Dict[str, Dict[str, Any]]:
+    """Load and cache rule registry from config/unit_rules.json."""
+    return _get_unit_rules_caches()[0]
+
+
+def _resolve_effect_rule_id_to_technical(rule_id: str) -> str:
+    """Resolve a rule id to technical effect id (alias chain pre-resolved at registry load)."""
+    if not isinstance(rule_id, str):
         raise ValueError(f"rule_id must be a non-empty string, got {rule_id!r}")
     normalized_rule_id = rule_id.strip()
-    registry = _get_unit_rules_registry()
-    if normalized_rule_id not in registry:
+    if not normalized_rule_id:
+        raise ValueError(f"rule_id must be a non-empty string, got {rule_id!r}")
+    technical_rule_id = _get_unit_rules_caches()[1].get(normalized_rule_id)
+    if technical_rule_id is None:
         raise KeyError(f"Unknown rule id '{normalized_rule_id}' in config/unit_rules.json")
-
-    if visited is None:
-        visited = set()
-    if normalized_rule_id in visited:
-        raise ValueError(f"Rule alias cycle detected while resolving '{normalized_rule_id}'")
-    visited.add(normalized_rule_id)
-
-    rule_config = registry[normalized_rule_id]
-    alias_value = rule_config.get("alias")
-    if alias_value is None:
-        return normalized_rule_id
-    if not isinstance(alias_value, str) or not alias_value.strip():
-        raise ValueError(
-            f"Rule '{normalized_rule_id}' has invalid alias in config/unit_rules.json: {alias_value!r}"
-        )
-    return _resolve_effect_rule_id_to_technical(alias_value.strip(), visited)
+    return technical_rule_id
 
 
 def _resolve_unit_rule_entry_effect_rule_ids(rule_entry: Dict[str, Any]) -> Set[str]:
