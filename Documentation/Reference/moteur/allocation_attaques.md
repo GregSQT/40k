@@ -36,6 +36,24 @@ Le moteur d'allocation sert aussi les blessures mortelles **[HAZARDOUS] 24.15**
 (champs `mortal` / `hazard_origin` du ctx, `def _resolve_one_hazard_wound`) : pas d'arme,
 pas de save, allocation par figurine identique.
 
+**Blessures mortelles de CAPACITÉ (06.02), défenseur humain — un seul régime depuis le
+2026-09-12.** « its controlling player must resolve the following sequence … you must select
+one of those models » : le choix appartient au défenseur, pour les cinq sources de blessures
+mortelles. Deux mécanismes selon le MOMENT :
+- **pendant un lot d'attaques** (Hold Still and Say Aargh, dette `pending_mortal_wounds` du
+  lot) : `def _apply_batch_mortal_wounds` insère un **lot mortel** juste après le lot courant
+  (`mortal_ability`, pool de N items sans `rec`), résolu par la même couche manuelle
+  (`def _resolve_one_ability_mortal_wound` : 1 PV, pas de save, FNP mortal) — une seule
+  allocation vit dans `game_state`, donc pas de `HAZARD_CTX` emboîté ; le payload porte
+  `damage_type: "mortal"` ;
+- **hors lot** (Exhortation of Rage, infligée à la SÉLECTION de l'attaquant) :
+  `build_manual_hazard_allocation` (`HAZARD_CTX`), origine `hazard_origin = "exhortation"`,
+  reprise du combat de l'attaquant par `def _resume_after_hazard` →
+  `def _continue_fight_after_exhortation` (`engine/w40k_core.py`).
+Défenseur piloté par la machine : `allocate_mortal_wounds` AUTO (`eligibles[0]`), régime
+d'entraînement inchangé. Garde : `def _process_squad_action` refuse toute action de politique
+tant qu'une allocation humaine est en attente (jumeau des gardes du chemin API).
+
 ---
 
 ## 2. Décision fondatrice — mutualiser l'allocation, pas la résolution (§O)
