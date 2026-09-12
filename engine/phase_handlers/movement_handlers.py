@@ -3998,6 +3998,7 @@ def _model_multilevel_reachable_field(
     ground_obstacles: Set[Tuple[int, int]],
     terrain_areas: List[Dict[str, Any]],
     start_level: int = 0,
+    precomputed_start_field: Optional[Dict[Tuple[int, int], float]] = None,
 ) -> Dict[int, Dict[Tuple[int, int], int]]:
     """Cases atteignables AVEC LEUR COÛT, avec le coût de montée/descente §13.06, pour CHAQUE niveau
     de ``target_levels`` (0 = sol/descente inclus). Le champ géodésique multi-niveaux
@@ -4013,6 +4014,11 @@ def _model_multilevel_reachable_field(
     ``start_level`` : niveau EFFECTIF de départ du mover (0 = sol). Une fig déjà en hauteur qui finit
     au sol paie la descente ; qui reste sur son étage ne repaie pas de montée (§13.06).
     À n'appeler que pour une unité capable de finir en hauteur, métrique euclidienne, hors FLY.
+
+    ``precomputed_start_field`` : champ any-angle du niveau de départ DÉJÀ calculé par l'appelant
+    — mêmes obstacles que ``ground_obstacles``, même socle, même budget — transmis tel quel à
+    ``reachable_multilevel_field`` qui l'amorce au lieu de relancer la passe de départ. Le pré-check
+    de portée ci-dessous s'applique AVANT : un champ fourni n'oblige à aucun calcul.
     """
     from engine.terrain_utils import (
         floor_hexes_at_level, floor_levels_present, validate_floor_placement,
@@ -4071,6 +4077,7 @@ def _model_multilevel_reachable_field(
         start_pos, start_level, shape, base, off_even, off_odd,
         board_cols, board_rows, obstacles_by_level, floor_hexes_by_level, height_by_level,
         budget * ENGAGEMENT_NORM_HEX_WIDTH, allow_vertical=True, ignore_vertical_cost=False,
+        precomputed_start_field=precomputed_start_field,
     )
 
     stub = {
