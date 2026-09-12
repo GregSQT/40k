@@ -106,6 +106,23 @@ def test_character_sain_avant_character_blesse_refuse():
     assert gs[SHOOT_CTX.alloc_key]["batches"][0]["declared_order"] is None
 
 
+def test_double_declaration_refuse(monkeypatch):
+    """Garde de re-declaration : un ordre deja enregistre pour le lot ne peut pas etre redeclare,
+    et l ordre initial reste intact (l allocation n est pas relancee une seconde fois)."""
+    gs = _gs()
+    stepped: List[Any] = []
+    monkeypatch.setattr(su, "_manual_allocation_step", lambda g, ctx: stepped.append((g, ctx)) or {"ok": True})
+    _declare(gs, [NW, NH, CW, CH])
+
+    with pytest.raises(ValueError, match="deja declare"):
+        _declare(gs, [NW, NH, CW, CH])
+
+    batch = gs[SHOOT_CTX.alloc_key]["batches"][0]
+    assert batch["declared_order"] == [NW, NH, CW, CH]
+    assert batch["current_group_index"] == 0
+    assert stepped == [(gs, SHOOT_CTX)]
+
+
 # ── Defenseur programmatique : _auto_declared_order ───────────────────────────
 
 
