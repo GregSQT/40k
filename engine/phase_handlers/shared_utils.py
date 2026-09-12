@@ -5598,6 +5598,12 @@ def ascent_field_for_model(
     La DESCENTE n'y passe pas : elle est facturee par `squad_descent_penalty_subhex` sur le budget
     et chemine au sol, comportement anterieur et teste. Ce champ ne traite QUE la montee.
 
+    HORS VOL DECLARE (21.03), garanti par les DEUX appelants et non par ce champ : le predicat
+    saute la voie montee quand `_fly_traversal_active` (le vol ignore la distance verticale et
+    traverse le terrain — ce champ facture les deux) ; l'erosion n'y entre que sous `_ascent`, et
+    la declaration de montee n'est jamais armee pour une unite qui vole
+    (`_ascent_declaration_due_unit`).
+
     GEOMETRIE — a savoir, pas a decouvrir : `reachable_multilevel_field` developpe chaque niveau
     par le champ ANY-ANGLE, quand le move de plain-pied du gym est mesure en PAS d'hexagone. Le
     pas any-angle vaut 1,0 sous-hexe vers l'est mais ~1,155 vers le sud, donc la montee est mesuree
@@ -5768,7 +5774,19 @@ def model_reach_predicate(
     # « quelle metrique » mais « quel espace » : c'est un changement de niveau, pas de mesure.
     # La descente ne passe pas ici (elle chemine au sol, budget deja ampute) : seul le strictement
     # superieur bascule, donc tout ce qui existait avant garde son chemin exact.
-    if int(level) > int(require_key(model, "level")):
+    # VOL DECLARE (21.03) : « Ignore all vertical distance », « move horizontally and vertically
+    # through all categories of terrain feature » — la montee n'est plus un changement d'espace,
+    # le trajet est la geometrie du mode (ligne d'hexes en `cube`, disque any-angle sans obstacle
+    # en `euclidean`, cf. `_euclidean_move_field_for_model`). C'est exactement le champ que le pool
+    # par-figurine offre a l'etage quand il vole (`movement_build_model_destinations_pool`, bloc
+    # `has_fly`) : borner ici par le champ de montee refusait ces cases — murs et cout vertical
+    # factures a une figurine qui ne les paie pas (masque ⊄ executable en PvP).
+    from engine.phase_handlers.movement_handlers import _fly_traversal_active
+
+    _flying = mode == "cube" or _fly_traversal_active(
+        game_state, require_unit_by_id(game_state, str(squad_id)), str(squad_id)
+    )
+    if int(level) > int(require_key(model, "level")) and not _flying:
         _climb = ascent_field_for_model(
             game_state, str(squad_id), int(player), model, int(level), budget
         )
