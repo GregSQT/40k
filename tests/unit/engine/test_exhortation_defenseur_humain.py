@@ -19,6 +19,7 @@ import random
 from typing import Any, Dict
 
 from engine.constants import PENDING_HAZARD_ALLOCATION_KEY
+from engine.phase_handlers.fight_handlers import EXHORTATION_REGIME_GYM
 from engine.w40k_core import W40KEngine
 from tests.unit.engine._config_helpers import (
     _fall_back_base_config as _base_config,
@@ -74,7 +75,7 @@ def test_le_defenseur_humain_choisit_puis_le_combat_reprend(monkeypatch):
     rolls = iter([4, 2])
     monkeypatch.setattr(random, "randint", lambda a, b: next(rolls))
 
-    ok, result = eng._apply_exhortation_de_rage("1", "2", 3, auto=True)
+    ok, result = eng._apply_exhortation_de_rage("1", "2", 3, auto=True, regime=EXHORTATION_REGIME_GYM)
     assert ok is True
     assert result.get("waiting_for_player") is True, result
     assert result["action"] == "squad_hazard_manual_alloc", result
@@ -120,7 +121,7 @@ def test_le_defenseur_machine_garde_le_regime_auto(monkeypatch):
     rolls = iter([4, 2])
     monkeypatch.setattr(random, "randint", lambda a, b: next(rolls))
 
-    ok, result = eng._apply_exhortation_de_rage("1", "2", None, auto=True)
+    ok, result = eng._apply_exhortation_de_rage("1", "2", None, auto=True, regime=EXHORTATION_REGIME_GYM)
     assert ok is True and result.get("resumed") is True, result
     assert calls == [("1", None, "gym")]
     assert PENDING_HAZARD_ALLOCATION_KEY not in gs
@@ -135,7 +136,7 @@ def test_un_jet_rate_ne_rend_pas_la_main(monkeypatch):
     calls: list = []
     _spy_continue(eng, calls)
     monkeypatch.setattr(random, "randint", lambda a, b: 2)
-    ok, result = eng._apply_exhortation_de_rage("1", "2", None, auto=True)
+    ok, result = eng._apply_exhortation_de_rage("1", "2", None, auto=True, regime=EXHORTATION_REGIME_GYM)
     assert ok is True and result.get("resumed") is True, result
     assert PENDING_HAZARD_ALLOCATION_KEY not in eng.game_state
 
@@ -151,7 +152,7 @@ def test_le_reset_purge_l_etat_de_reprise_en_attente(monkeypatch):
     real_randint = random.randint
     # D6 puis D3 forcés ; le reset qui suit tire ses propres dés, rendus au vrai `randint`.
     monkeypatch.setattr(random, "randint", lambda a, b: next(rolls, None) or real_randint(a, b))
-    ok, result = eng._apply_exhortation_de_rage("1", "2", None, auto=True)
+    ok, result = eng._apply_exhortation_de_rage("1", "2", None, auto=True, regime=EXHORTATION_REGIME_GYM)
     assert ok and result.get("waiting_for_player") is True
     assert gs["hazard_origin"] == "exhortation" and "_pending_exhortation_resume" in gs
 

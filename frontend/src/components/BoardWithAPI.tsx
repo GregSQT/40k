@@ -14,6 +14,7 @@ import { type RawObjective, useNormalizedObjectives } from "../hooks/useBoardHex
 import {
   type ManualOrderGroup,
   type ManualOrderRequest,
+  type PendingAgentDecision,
   type UseEngineAPIBlinkBoardProps,
   useEngineAPI,
 } from "../hooks/useEngineAPI";
@@ -472,6 +473,53 @@ function buildDefaultPicksByProfile(
     });
   }
   return defaults;
+}
+
+/** Panneau d'une décision d'agent à candidats (`pending_agent_decision`) : la règle, puis un
+ *  bouton par candidat rendu par le moteur. `onChoose` joue le verbe générique `agent_decision` +
+ *  `option_index` — l'ORDRE des candidats est contractuel, c'est l'index qui est joué, jamais le
+ *  libellé. `labelOf` habille le candidat quand son `label` seul ne dit rien au joueur. */
+function AgentDecisionPicker({
+  decision,
+  title,
+  tooltip,
+  onChoose,
+  labelOf = (option) => option.label,
+  pickerClassName = "",
+}: {
+  decision: PendingAgentDecision;
+  title: string;
+  tooltip: string;
+  onChoose: (index: number) => void;
+  labelOf?: (option: PendingAgentDecision["options"][number]) => string;
+  pickerClassName?: string;
+}) {
+  return (
+    <div className="rule-choice-overlay">
+      <div
+        className={`deployment-panel__picker deployment-panel__picker--oath ${pickerClassName}`.trim()}
+      >
+        <div className="deployment-panel__picker-title">{title}</div>
+        <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
+          <div className="deployment-panel__picker-tooltip">{tooltip}</div>
+        </div>
+        <div className="deployment-panel__picker-actions deployment-panel__picker-actions--oath">
+          {decision.options.map((option, index) => (
+            <button
+              key={option.label}
+              type="button"
+              className="deployment-panel__picker-close deployment-panel__picker-close--validate"
+              onClick={() => {
+                onChoose(index);
+              }}
+            >
+              {labelOf(option)}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 const RETREAT_ALERT_STORAGE_KEY = "retreatAlertEnabled";
@@ -2259,32 +2307,25 @@ export const BoardWithAPI: React.FC = () => {
   // de l'ADVERSAIRE : c'est le joueur qui réagit qui répond, pas celui qui vient de bouger. Sans
   // ce panneau la partie se bloquerait, le moteur ayant rendu la main sur une question que
   // personne n'afficherait. `player` est celui de la décision, jamais `current_player`.
-  const reactiveMoveDecision = (() => {
+  // Le siège qui décide est celui de la DÉCISION, et lui seul voit le panneau. En PvE le moteur
+  // tranche celle du bot sur-le-champ (`_resolve_reactive_move_decision_for_ai_seats`, sélecteur
+  // machine de `_check_and_trigger_exhortation_de_rage`) : sans ce filtre, l'humain se verrait
+  // poser la question du bot le temps d'un aller-retour d'état, et y répondrait à sa place.
+  const pendingDecisionForHumanSeat = (type: string): PendingAgentDecision | null => {
     const pending = apiProps.gameState?.pending_agent_decision ?? null;
-    if (!pending || pending.type !== "reactive_move") {
+    if (!pending || pending.type !== type) {
       return null;
     }
-    // Le siège qui décide est celui de la DÉCISION, et lui seul voit ce panneau. En PvE le
-    // moteur tranche la sienne sur-le-champ (`_resolve_reactive_move_decision_for_ai_seats`) :
-    // sans ce filtre, l'humain se verrait poser la question du bot le temps d'un aller-retour
-    // d'état, et y répondrait à sa place.
     const decidingSeat = apiProps.gameState?.player_types?.[String(pending.player)];
     return decidingSeat === "ai" ? null : pending;
-  })();
+  };
+  const reactiveMoveDecision = pendingDecisionForHumanSeat("reactive_move");
   // Exhortation of Rage (datasheet Chaplain JP) — « when this unit is selected to fight, you can
   // select one enemy unit it is engaged with and roll one D6 ». Le moteur ARRÊTE le combat sur ce
   // choix à l'activation de l'unité (plusieurs ennemis engagés) et refuse toute autre action tant
   // qu'il n'est pas fait (`mortal_wounds_target_pending`) : sans ce panneau, la partie PvP se
-  // figerait. La cible PRÉCÈDE le dé — aucun résultat n'est connu quand le joueur choisit. Même
-  // filtre de siège que le mouvement réactif : la décision d'un bot est tranchée par sa politique.
-  const mortalWoundsTargetDecision = (() => {
-    const pending = apiProps.gameState?.pending_agent_decision ?? null;
-    if (!pending || pending.type !== "mortal_wounds_target") {
-      return null;
-    }
-    const decidingSeat = apiProps.gameState?.player_types?.[String(pending.player)];
-    return decidingSeat === "ai" ? null : pending;
-  })();
+  // figerait. La cible PRÉCÈDE le dé — aucun résultat n'est connu quand le joueur choisit.
+  const mortalWoundsTargetDecision = pendingDecisionForHumanSeat("mortal_wounds_target");
   const oathSelectionPlayer = apiProps.gameState?.pending_oath_selection ?? null;
   const oathTargets =
     oathSelectionPlayer === null
@@ -4412,138 +4453,68 @@ export const BoardWithAPI: React.FC = () => {
           Normal move »), pas un bouton d'annulation. `onCallWaaagh` est le verbe générique
           `agent_decision` + `option_index` ; l'ordre des candidats est contractuel. */}
       {reactiveMoveDecision && (
-        <div className="rule-choice-overlay">
-          <div className="deployment-panel__picker deployment-panel__picker--oath deployment-panel__picker--reactive-move">
-            <div className="deployment-panel__picker-title">
-              {`Reactive move — unit ${reactiveMoveDecision.unit_id} — player ${reactiveMoveDecision.player}`}
-            </div>
-            <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
-              <div className="deployment-panel__picker-tooltip">
-                {
-                  'An enemy unit ended a Normal, Advance or Fall Back move within 9" of this unit, and this unit is not within Engagement Range of any enemy. It CAN make a Normal move of up to D6" — it does not have to.\n\nChoose an intention, or decline and stay in place.'
-                }
-              </div>
-            </div>
-            <div className="deployment-panel__picker-actions deployment-panel__picker-actions--oath">
-              {reactiveMoveDecision.options.map((option, index) => (
-                <button
-                  key={option.label}
-                  type="button"
-                  className="deployment-panel__picker-close deployment-panel__picker-close--validate"
-                  onClick={() => {
-                    void apiProps.onCallWaaagh(index);
-                  }}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <AgentDecisionPicker
+          decision={reactiveMoveDecision}
+          title={`Reactive move — unit ${reactiveMoveDecision.unit_id} — player ${reactiveMoveDecision.player}`}
+          tooltip={
+            'An enemy unit ended a Normal, Advance or Fall Back move within 9" of this unit, and this unit is not within Engagement Range of any enemy. It CAN make a Normal move of up to D6" — it does not have to.\n\nChoose an intention, or decline and stay in place.'
+          }
+          onChoose={(index) => {
+            void apiProps.onCallWaaagh(index);
+          }}
+          pickerClassName="deployment-panel__picker--reactive-move"
+        />
       )}
       {/* Exhortation of Rage : un bouton par unité ennemie engagée, rendue par le moteur ; le
-          libellé nomme l'unité (le moteur n'envoie que son id). `onCallWaaagh` est le verbe
-          générique `agent_decision` + `option_index` ; l'ordre des candidats est contractuel. */}
+          libellé nomme l'unité — le moteur n'envoie que son id, qui EST le `label`. */}
       {mortalWoundsTargetDecision && (
-        <div className="rule-choice-overlay">
-          <div className="deployment-panel__picker deployment-panel__picker--oath">
-            <div className="deployment-panel__picker-title">
-              {`Exhortation of Rage — unit ${mortalWoundsTargetDecision.unit_id} — player ${mortalWoundsTargetDecision.player}`}
-            </div>
-            <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
-              <div className="deployment-panel__picker-tooltip">
-                {
-                  "This unit has been selected to fight. Select one enemy unit it is engaged with, then roll one D6: on a 4-5 that unit suffers D3 mortal wounds, on a 6 it suffers 3 mortal wounds.\n\nThe target is chosen BEFORE the dice is rolled."
-                }
-              </div>
-            </div>
-            <div className="deployment-panel__picker-actions deployment-panel__picker-actions--oath">
-              {mortalWoundsTargetDecision.options.map((option, index) => {
-                const targetId = option.payload?.target_eid ?? option.label;
-                const target = unitsById.get(String(targetId));
-                const label = target?.DISPLAY_NAME
-                  ? `${target.DISPLAY_NAME} #${target.id}`
-                  : `Unit #${targetId}`;
-                return (
-                  <button
-                    key={option.label}
-                    type="button"
-                    className="deployment-panel__picker-close deployment-panel__picker-close--validate"
-                    onClick={() => {
-                      void apiProps.onCallWaaagh(index);
-                    }}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+        <AgentDecisionPicker
+          decision={mortalWoundsTargetDecision}
+          title={`Exhortation of Rage — unit ${mortalWoundsTargetDecision.unit_id} — player ${mortalWoundsTargetDecision.player}`}
+          tooltip={
+            "This unit has been selected to fight. Select one enemy unit it is engaged with, then roll one D6: on a 4-5 that unit suffers D3 mortal wounds, on a 6 it suffers 3 mortal wounds.\n\nThe target is chosen BEFORE the dice is rolled."
+          }
+          onChoose={(index) => {
+            void apiProps.onCallWaaagh(index);
+          }}
+          labelOf={(option) => {
+            const target = unitsById.get(option.label);
+            return target?.DISPLAY_NAME
+              ? `${target.DISPLAY_NAME} #${target.id}`
+              : `Unit #${option.label}`;
+          }}
+        />
       )}
       {returnedProfileDecision && (
-        <div className="rule-choice-overlay">
-          <div className="deployment-panel__picker deployment-panel__picker--oath">
-            <div className="deployment-panel__picker-title">
-              {`Returned models — which ones? — player ${returnedProfileDecision.player}`}
-            </div>
-            <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
-              <div className="deployment-panel__picker-tooltip">
-                {
-                  "Destroyed models are returned to this unit, with the wargear they started the battle with. The rule sets how MANY come back, not which ones.\n\nChoose the profile to bring back first. If fewer models of that profile were destroyed than the roll allows, the remaining slots are filled in order of destruction."
-                }
-              </div>
-            </div>
-            <div className="deployment-panel__picker-actions deployment-panel__picker-actions--oath">
-              {returnedProfileDecision.options.map((option, index) => (
-                <button
-                  key={option.label}
-                  type="button"
-                  className="deployment-panel__picker-close deployment-panel__picker-close--validate"
-                  onClick={() => {
-                    void apiProps.onCallWaaagh(index);
-                  }}
-                >
-                  {`${option.label} — ${option.payload?.value ?? "?"} pts × ${option.payload?.count ?? "?"}`}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <AgentDecisionPicker
+          decision={returnedProfileDecision}
+          title={`Returned models — which ones? — player ${returnedProfileDecision.player}`}
+          tooltip={
+            "Destroyed models are returned to this unit, with the wargear they started the battle with. The rule sets how MANY come back, not which ones.\n\nChoose the profile to bring back first. If fewer models of that profile were destroyed than the roll allows, the remaining slots are filled in order of destruction."
+          }
+          onChoose={(index) => {
+            void apiProps.onCallWaaagh(index);
+          }}
+          labelOf={(option) =>
+            `${option.label} — ${option.payload?.value ?? "?"} pts × ${option.payload?.count ?? "?"}`
+          }
+        />
       )}
       {/* Grot Orderly, temps 2 : où poser les figurines rendues. Un bouton par intention offerte
           par le moteur ; `onCallWaaagh` est le verbe GÉNÉRIQUE `agent_decision` + `option_index`
           (son nom vient de son premier usage), c'est la même route que le Waaagh! et l'ordre des
           candidats est contractuel. */}
       {returnedPlacementDecision && (
-        <div className="rule-choice-overlay">
-          <div className="deployment-panel__picker deployment-panel__picker--oath">
-            <div className="deployment-panel__picker-title">
-              {`Returned models — player ${returnedPlacementDecision.player}`}
-            </div>
-            <div className="deployment-panel__picker-content deployment-panel__picker-content--oath">
-              <div className="deployment-panel__picker-tooltip">
-                {
-                  "Destroyed models are returned to this unit. They must be set up in coherency with the models that started this phase on the battlefield, and can only end up engaged with enemy units already engaged with this unit.\n\nChoose where they are placed:\n\n- toward_enemy: as close as possible to the nearest enemy.\n- toward_objective: as close as possible to the nearest objective.\n- away_from_enemy: as far as possible from the nearest enemy."
-                }
-              </div>
-            </div>
-            <div className="deployment-panel__picker-actions deployment-panel__picker-actions--oath">
-              {returnedPlacementDecision.options.map((option, index) => (
-                <button
-                  key={option.label}
-                  type="button"
-                  className="deployment-panel__picker-close deployment-panel__picker-close--validate"
-                  onClick={() => {
-                    void apiProps.onCallWaaagh(index);
-                  }}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <AgentDecisionPicker
+          decision={returnedPlacementDecision}
+          title={`Returned models — player ${returnedPlacementDecision.player}`}
+          tooltip={
+            "Destroyed models are returned to this unit. They must be set up in coherency with the models that started this phase on the battlefield, and can only end up engaged with enemy units already engaged with this unit.\n\nChoose where they are placed:\n\n- toward_enemy: as close as possible to the nearest enemy.\n- toward_objective: as close as possible to the nearest objective.\n- away_from_enemy: as far as possible from the nearest enemy."
+          }
+          onChoose={(index) => {
+            void apiProps.onCallWaaagh(index);
+          }}
+        />
       )}
       {/* Oath of Moment, temps 1 : la règle, puis OK. Tant que ce popup est là, la désignation
           n'est pas armée — aucun clic plateau ne désigne. */}
