@@ -5,6 +5,7 @@ charge_handler.py — gestion des actions CHARGE dans parse_step_log.
 import re
 from typing import TYPE_CHECKING
 
+from ai.analyzer_perfig import unit_effect_in_force
 from ai.analyzer_rules import note_rule_usage, note_special_rule_usage
 from ai.analyzer_phases import died_before_phase
 from shared.data_validation import require_key
@@ -43,8 +44,6 @@ def _check_charge_roll_range(
     Ne se prononce pas quand les socles vivants du chargeur sont inconnus (`None`) : on ne devine
     pas quelle figurine porte encore la capacité.
     """
-    from ai.analyzer_perfig import unit_effect_in_force
-
     roll_match = re.search(r'\[Roll:\s*(\d+)\]', action_desc)
     if roll_match is None:
         return
@@ -107,8 +106,6 @@ def _charge_after_advance_source(
     ce qui laissait la moitié des jets de charge après Advance sans verdict (mesuré sur le run
     du 2026-09-11 : 114 unités avancées puis en FAILED CHARGE, 0 jugée).
     """
-    from ai.analyzer_perfig import unit_effect_in_force
-
     in_force = unit_effect_in_force(state, config, charge_unit_id, "charge_after_advance")
     if in_force is None:
         # Socles inconnus (journal sans `[MODELS:]`, escouade jamais vue) : la datasheet de

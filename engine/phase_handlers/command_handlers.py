@@ -16,6 +16,7 @@ from engine.action_log_utils import append_action_log
 from .shared_utils import (
     _build_enemy_adjacent_hexes_all_players, _enemy_squad_ids, _squad_mode_level,
     _get_source_unit_rule_display_name_for_effect, deployed_friendly_squad_ids,
+    model_datasheet_name,
 )
 from engine.game_state import (
     CORE_CP_GAIN_PER_COMMAND_PHASE, GameStateManager, gain_command_points,
@@ -1036,7 +1037,7 @@ def apply_returned_models_placement(
     from engine.phase_handlers.shared_utils import (
         _recompute_squad_cache, _recompute_squad_occupied_hexes, _recompute_squad_hp_total,
     )
-    from engine.game_utils import add_debug_file_log
+    from engine.game_utils import add_debug_file_log, require_unit_by_id
 
     models_cache = require_key(game_state, "models_cache")
     squad_models = require_key(game_state, "squad_models")
@@ -1107,14 +1108,12 @@ def apply_returned_models_placement(
     # escouade qui compte un socle rendu (mesure sur le step.log du 2026-09-11 : 6 ids `#r`,
     # 0 declare, 2 escouades sur 10 sans verdict). Or 19.04 dit « Should those models later be
     # revived, those abilities will once more apply » : le socle rendu est exactement celui dont
-    # la datasheet compte. Meme lecture que `_model_types_segment_for_unit` (w40k_core) :
-    # `unitType` de la figurine, sinon celui de l'escouade.
-    from engine.game_utils import require_unit_by_id
+    # la datasheet compte. Meme lecture que l'entete (`model_datasheet_name`) : `unitType` de la
+    # figurine, sinon celui de l'escouade.
     squad_unit = require_unit_by_id(game_state, squad_id)
     squad_unit_type = str(require_key(squad_unit, "unitType"))
     restored_model_types = {
-        mid: str(models_cache[mid].get("unitType") or squad_unit_type)  # get allowed
-        for mid in restored_mids
+        mid: model_datasheet_name(models_cache[mid], squad_unit_type) for mid in restored_mids
     }
     ability_display_name = _get_source_unit_rule_display_name_for_effect(
         squad_unit, "return_destroyed_models"

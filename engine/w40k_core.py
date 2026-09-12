@@ -40,6 +40,7 @@ from engine.phase_handlers.fight_handlers import (
     EXHORTATION_REGIME_AUTO,
     EXHORTATION_REGIME_GYM,
     EXHORTATION_REGIME_MANUAL,
+    FIGHT_CTX,
     FIGHT_SELECTION_EXHORTATION_KEY,
     ExhortationRegime,
     exhortation_regime_of,
@@ -51,6 +52,10 @@ from engine.phase_handlers.fight_handlers import (
 from engine.action_log_utils import append_action_log, append_agent_decision_log
 from engine.phase_handlers.shared_utils import (
     PENDING_REACTIVE_MOVE_KEY,
+    HAZARD_CTX,
+    SHOOT_CTX,
+    manual_allocation_waiting_payload,
+    model_datasheet_name,
     drive_reactive_move_window,
     build_units_cache,
     destroy_model,
@@ -75,6 +80,12 @@ from engine.phase_handlers.shared_utils import (
     FIGHT,
     FLED,
 )
+
+#: Les trois allocations manuelles de pertes qui suspendent le moteur sur un DEFENSEUR HUMAIN
+#: (05.03/05.04, 06.02). Une seule vit a la fois dans `game_state` (`ctx.alloc_key`) ; tant qu'elle
+#: y est, aucune action de politique ne passe (`_process_squad_action`). Tuple de module : le garde
+#: est sur le chemin chaud du gym, il ne le reconstruit pas a chaque step.
+_PENDING_ALLOC_CTXS = (HAZARD_CTX, SHOOT_CTX, FIGHT_CTX)
 
 #: Borne de la chaine d'attentes forcees auto-jouees d'affilee (cf. `step_with_mask`). Ce n'est PAS
 #: un reglage de jeu : la chaine se draine seule, chaque attente retirant une escouade de son pool.
@@ -5462,7 +5473,6 @@ class W40KEngine(gym.Env):
         # Un choix d'attribution joueur est-il en attente ? → prompt (declaration d'ordre des
         # groupes puis/ou clic figurine), calque sur l'allocation des pertes au tir.
         if self.game_state.get(PENDING_HAZARD_ALLOCATION_KEY) is not None:
-            from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload, HAZARD_CTX
             return True, manual_allocation_waiting_payload(self.game_state, HAZARD_CTX)
 
         # Attribution terminée (auto / pas de choix) → reprise du flux move.
@@ -5681,7 +5691,6 @@ class W40KEngine(gym.Env):
             self.game_state.get(PENDING_HAZARD_ALLOCATION_KEY) is not None
             and action.get("action") not in ("squad_hazard_allocate_model", "squad_hazard_declare_order")
         ):
-            from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload, HAZARD_CTX
             return True, manual_allocation_waiting_payload(self.game_state, HAZARD_CTX)
 
         # Desperate Escape (09.07) : le joueur a validé le popup hazard affiché à l'activation.
@@ -5715,7 +5724,6 @@ class W40KEngine(gym.Env):
             self.game_state.get(PENDING_SHOOT_ALLOCATION_KEY) is not None
             and action.get("action") not in ("squad_shoot_allocate_model", "squad_shoot_declare_order")
         ):
-            from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload, SHOOT_CTX
             return True, manual_allocation_waiting_payload(self.game_state, SHOOT_CTX)
 
         # Idem combat (defenseur humain) : pendant l'allocation des pertes, seules les
@@ -5724,8 +5732,6 @@ class W40KEngine(gym.Env):
             self.game_state.get(PENDING_FIGHT_ALLOCATION_KEY) is not None
             and action.get("action") not in ("squad_fight_manual_alloc", "squad_fight_declare_order", "squad_fight_cancel")
         ):
-            from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload
-            from engine.phase_handlers.fight_handlers import FIGHT_CTX
             return True, manual_allocation_waiting_payload(self.game_state, FIGHT_CTX)
 
         current_phase = self.game_state["phase"]
@@ -6710,7 +6716,10 @@ class W40KEngine(gym.Env):
         `regime` (`EXHORTATION_REGIME_*`, fight_handlers) dit COMMENT le combat reprend une fois
         les blessures attribuées : gym (slots/armes de la politique), manuel PvP (le joueur
         déclare ses attaques) ou auto PvE (résolution automatique) — cf.
-        `_continue_fight_after_exhortation`. `auto` : la cible n'est pas venue d'un choix de
+        `_continue_fight_after_exhortation`. Sans défaut : la reprise manuelle ou auto peut
+        survenir dans une requête ultérieure, et un appelant qui hériterait du régime gym en
+        silence rendrait la main sur le mauvais dispatcher ; la valeur relue d'un état posé
+        passe par `exhortation_regime_of`. `auto` : la cible n'est pas venue d'un choix de
         joueur (cible unique, ou sélecteur du siège machine) — suffixe du Game Log seulement.
 
         Datasheet (`Datasheets - Space Marines.pdf`, Chaplain with Jump Pack) : « you can select
@@ -6728,17 +6737,17 @@ class W40KEngine(gym.Env):
         contre les des au lieu de le croire.
         """
         from engine.phase_handlers.shared_utils import allocate_mortal_wounds, is_programmatic_defender
-        from engine.action_log_utils import append_action_log
         units_cache = require_key(self.game_state, "units_cache")
         d6 = random.randint(1, 6)
-        mw_dice: Optional[List[int]] = None
+        # D3 jete seulement sur 4-5 ; sur 6 le compte est fixe (3), sur 1-3 nul.
+        d3: Optional[int] = None
         if d6 <= 3:
             mw_count = 0
         elif d6 == 6:
             mw_count = 3
         else:
-            mw_dice = [random.randint(1, 3)]
-            mw_count = mw_dice[0]
+            d3 = random.randint(1, 3)
+            mw_count = d3
         _exhort_details: List[Dict[str, Any]] = []
         suffix = " [auto: sans choix de joueur]" if auto else ""
         # MEME type et MEME forme de ligne que Hold Still (`_apply_batch_mortal_wounds`) : deux
@@ -6747,7 +6756,7 @@ class W40KEngine(gym.Env):
         # de `_STEP_LOG_TYPE_MAP` : la ligne etait ecartee du journal en silence, et les
         # blessures ne laissaient derriere elles qu'un event `dead` sans cause.
         _tgt_col, _tgt_row = require_unit_position(str(target_eid), self.game_state)
-        _mw_seg = f" MW:{mw_dice[0]}" if mw_dice is not None else ""
+        _mw_seg = f" MW:{d3}" if d3 is not None else ""
         log_entry: Dict[str, Any] = {
             "type": "mortal_wounds_ability",
             # Meme texte que la ligne step.log (`Trigger:` puis `MW:`), pour que le Game Log et
@@ -6779,8 +6788,9 @@ class W40KEngine(gym.Env):
             "hazardDetails": _exhort_details,
             "result": f"{mw_count} MW",
         }
-        if mw_dice is not None:
-            log_entry["mortalWoundDice"] = mw_dice
+        if d3 is not None:
+            # Liste : contrat de `mortalWoundDice` partage avec Hold Still (des qui se SOMMENT).
+            log_entry["mortalWoundDice"] = [d3]
         append_action_log(self.game_state, log_entry)
         if mw_count > 0:
             if is_programmatic_defender(self.game_state, target_eid):
@@ -7335,20 +7345,19 @@ class W40KEngine(gym.Env):
         Écrit dans l'entête d'épisode pour la composition de DÉPART (une figurine meurt, elle ne
         change pas de datasheet) ; une figurine RENDUE en cours de partie (Grot Orderly) reçoit un
         id neuf et sa datasheet est déclarée par la ligne `RETURNED` qui l'introduit
-        (`apply_returned_models_placement`, même lecture `unitType`-sinon-escouade). Les figurines
-        sans type propre portent celui de l'escouade — explicitement, plutôt que par une règle
+        (`apply_returned_models_placement`). La datasheet d'un socle se lit par
+        `model_datasheet_name` (shared_utils), LECTURE UNIQUE des deux émetteurs : `unitType`
+        de la figurine, sinon celui de l'escouade — explicitement, plutôt que par une règle
         implicite que chaque lecteur devrait redécouvrir.
 
-        ⚠️ CLÉ `unitType`, camelCase — c'est celle que `models_cache` écrit
-        (`shared_utils._build_models_cache_entry`, « "unitType": spec.get("unit_type") or … » :
-        le SPEC de scénario est en snake_case, le CACHE en camelCase). Ce site lisait
-        `unit_type` : la clé n'existait pas, le repli sur le type d'escouade s'appliquait donc à
-        TOUTES les figurines, et le segment rendait exactement l'information qu'il existe pour
-        remplacer. Mesuré sur le journal du 2026-08-09 : `5#0..5#6=Intercessor` sur une escouade
-        dont deux socles frappent au Master-crafted Power Weapon et au Power Fist — deux armes
-        qu'aucun Intercessor ne porte. Le plafond « par figurine » de l'analyzer restait donc un
-        plafond par escouade sous un autre nom. Tous les autres lecteurs de `models_cache` lisent
-        déjà `unitType` ; celui-ci était le seul à diverger.
+        ⚠️ CLÉ `unitType`, camelCase — c'est celle que `models_cache` écrit (le SPEC de scénario
+        est en snake_case, le CACHE en camelCase). Ce site lisait `unit_type` : la clé n'existait
+        pas, le repli sur le type d'escouade s'appliquait donc à TOUTES les figurines, et le
+        segment rendait exactement l'information qu'il existe pour remplacer. Mesuré sur le
+        journal du 2026-08-09 : `5#0..5#6=Intercessor` sur une escouade dont deux socles frappent
+        au Master-crafted Power Weapon et au Power Fist — deux armes qu'aucun Intercessor ne
+        porte. Le plafond « par figurine » de l'analyzer restait donc un plafond par escouade
+        sous un autre nom.
         """
         if unit_id is None:
             return ""
@@ -7364,7 +7373,7 @@ class W40KEngine(gym.Env):
             model = models_cache.get(str(mid))  # get allowed : figurine déjà retirée
             if model is None:
                 continue
-            parts.append(f"{mid}={model.get('unitType') or squad_unit_type}")  # get allowed
+            parts.append(f"{mid}={model_datasheet_name(model, squad_unit_type)}")
         if not parts:
             return ""
         return "[MODEL_TYPES: " + " ".join(parts) + "]"
@@ -7849,13 +7858,12 @@ class W40KEngine(gym.Env):
         _trigger = raw_log.get("abilityTriggerRoll")  # get allowed : absent hors capacites a seuil
         if _trigger is not None:
             details["ability_trigger_roll"] = _trigger
-        # Figurines RENDUES : datasheet par socle rendu, nombre, capacite. Le formateur exige
-        # les trois (`require_key`) — un socle rendu sans datasheet est exactement le trou que
-        # cette ligne existe pour fermer.
+        # Figurines RENDUES : datasheet par socle rendu (leur nombre en decoule), capacite, D3.
+        # Le formateur exige les trois (`require_key`) — un socle rendu sans datasheet est
+        # exactement le trou que cette ligne existe pour fermer.
         _restored_types = raw_log.get("restoredModelTypes")  # get allowed : absent hors restitution
         if _restored_types is not None:
             details["restored_model_types"] = _restored_types
-            details["restored_count"] = require_key(raw_log, "restored")
             details["ability_display_name"] = require_key(raw_log, "abilityDisplayName")
             details["d3_roll"] = require_key(raw_log, "d3Roll")
         target_col = raw_log.get("targetCol")  # get allowed
@@ -8238,9 +8246,7 @@ class W40KEngine(gym.Env):
         # l allocation en cours (une seule vit dans `game_state`) : le defenseur cliquait dans
         # une allocation qui n existait plus. Atteignable des l Exhortation sur un defenseur
         # humain, qui suspend le tour IA au milieu d une selection de combat.
-        from engine.phase_handlers.shared_utils import manual_allocation_waiting_payload, HAZARD_CTX, SHOOT_CTX
-        from engine.phase_handlers.fight_handlers import FIGHT_CTX
-        for _pending_ctx in (HAZARD_CTX, SHOOT_CTX, FIGHT_CTX):
+        for _pending_ctx in _PENDING_ALLOC_CTXS:
             if self.game_state.get(_pending_ctx.alloc_key) is not None:
                 return True, manual_allocation_waiting_payload(self.game_state, _pending_ctx)
 

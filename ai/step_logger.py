@@ -1170,17 +1170,17 @@ class StepLogger:
             # ceux de depart sont deja declares par l entete, et l analyzer fusionne (grammaire
             # 10). Le verbe `RETURNED` n est porte par aucune autre ligne ; les aiguillages de
             # l analyzer le testent entoure d espaces, comme ` MOVED ` ou ` FLED `.
+            # Le NOMBRE annonce est celui des datasheets declarees — une seule source, pas
+            # deux valeurs a tenir egales ; c est l analyzer, autre processus, qui les recompte.
             restored = require_key(details, "restored_model_types")
-            count = int(require_key(details, "restored_count"))
             ability = str(require_key(details, "ability_display_name")).upper()
             d3 = int(require_key(details, "d3_roll"))
-            if not isinstance(restored, dict) or len(restored) != count or count <= 0:
+            if not isinstance(restored, dict) or not restored:
                 raise ValueError(
-                    f"returned_models: {count} figurine(s) annoncee(s) pour "
-                    f"{len(restored) if isinstance(restored, dict) else '?'} datasheet(s) declaree(s)"
+                    f"returned_models: aucune datasheet declaree pour les socles rendus ({restored!r})"
                 )
             types_seg = " ".join(f"{mid}={mtype}" for mid, mtype in restored.items())
-            return f"{unit_label} RETURNED {count} models [{ability}] (D3={d3}) [MODEL_TYPES: {types_seg}]"
+            return f"{unit_label} RETURNED {len(restored)} models [{ability}] (D3={d3}) [MODEL_TYPES: {types_seg}]"
 
         elif action_type == "strategic_reserves_timeout":
             # 20.04 — destruction fin de 3e round. L'escouade est ENTIEREMENT detruite : le
